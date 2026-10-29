@@ -13,8 +13,8 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 | Arquitetura | 100% serverless: Cloud Run (front, API e jobs), Workflows, Firestore, Cloud Storage, Eventarc, Pub/Sub |
 | API | REST assíncrona: cria o job, consulta o status, baixa o JSON completo; webhook opcional |
 | Segurança | Produção acessível só pela rede da RedeTV; chave de API por sistema; login pelo Identity Platform; Cloud Armor e VPC Service Controls |
-| Duplicidade | `Idempotency-Key` por requisição; SHA-256 conferido depois do upload evita processar o mesmo arquivo duas vezes, sem dar acesso ao resultado de outro sistema |
-| Vídeos longos | Blocos de 5 min em paralelo; qualquer duração, uma resposta única |
+| Duplicidade | `Idempotency-Key` por requisição; SHA-256 conferido depois do upload evita processar o mesmo arquivo duas vezes, sem dar acesso à decupagem de outro sistema |
+| Vídeos longos | Janelas de análise de 5 min em paralelo; qualquer duração, uma resposta única |
 | Fora do escopo | Video Intelligence, Cloud Vision, galeria facial, transcrição separada |
 | Busca | Vídeos e momentos por pessoa, objeto, cena, frase ou imagem: Agent Retrieval híbrido com reordenação |
 | Stack | Python (FastAPI, Pydantic) no back, React com TypeScript no front, Terraform na infraestrutura |
@@ -42,7 +42,7 @@ O Gemini 3.5 Flash-Lite é o melhor custo para decupar o vídeo inteiro: custa c
 | Gemini 3.8 Flash | 0,75 / 3,75 (metade até 31/12/2026) | \~0,57 | 87,1% ([model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/)) | Escalonamento e referência do piloto |
 | Gemini 4 Argon | Sem Flex; Batch 2,00 / 10,00 (a partir de 01/12/2026) | \~1,53 | 91,7% | Não usar no volume |
 
-Premissas do custo por hora: preços Flex do endpoint global ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre blocos; \~60 mil tokens de saída por hora, já com transcrição e raciocínio baixo. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
+Premissas do custo por hora: preços Flex do endpoint global ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com transcrição e raciocínio baixo. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
 
 Não há benchmark público de vídeo longo para o 3.5 Flash-Lite. Por isso a escolha é confirmada no piloto da E1: cinco programas completos e variados, processados inteiros pelos dois modelos, sem depender das dúvidas do primeiro, e comparados com anotação humana. As metas por categoria (ver Qualidade em produção) são fixadas antes do teste. Se o Flash-Lite ficar aquém só em famosos, apenas a detecção de pessoas sobe para o 3.8 Flash.
 
@@ -94,7 +94,7 @@ Guardar tudo indefinidamente custa pouco no dia a dia; o acervo de 25 anos é qu
 | Cópia 480p para o player | \~0,45 GB por hora de vídeo; \~3,3 TB por ano no ritmo de 20 h/dia | O Autoclass desce o que fica sem acesso para classes mais frias; o Archive (\~US$ 0,0012 por GB/mês) só vale se configurado como classe final e após 365 dias sem acesso, e uma leitura volta o objeto ao Standard ([preços](https://cloud.google.com/storage/pricing)); \~US$ 25/mês ao fim do 1º ano |
 | Quadros-chave, JSON e transcrição | \~20 MB por hora | Desprezível |
 | Índice de busca | \~50 GB por ano de vídeo | Agent Retrieval cobrado por uso (armazenamento, leituras, gravações) ([visão geral](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/vector-search-2/overview)); \~US$ 15/mês ao fim do 1º ano e \~US$ 45 no 3º |
-| Cópia limpa 720p e proxy de análise | — | Apagados por regra de ciclo de vida 30 dias após o processamento |
+| Proxy de escalonamento 720p e proxy de análise | — | Apagados por regra de ciclo de vida 30 dias após o processamento |
 
 O acervo vai para o Batch, com o 3.5 Flash-Lite e sem escalonamento, a \~US$ 0,28 por hora de vídeo (modelo, Cloud Run e indexação). O Workflows submete cada lote e consulta o andamento de tempos em tempos, sem nenhum contêiner parado esperando. Se cada ano tiver o volume de hoje (\~7.300 h, a confirmar), são \~182 mil horas e \~US$ 51 mil de processamento. O armazenamento é à parte e cresce com o acervo: \~82 TB de proxies (\~US$ 90–100/mês mesmo no Archive) e \~1 TB de índice (\~US$ 300/mês ao preço atual, ou cerca de um terço com vetores de 256 dimensões).
 
@@ -114,7 +114,7 @@ A arquitetura é toda serverless e gerenciada: nada fica ligado sem vídeo para 
 
 &#91;embedded content: arquitetura serverless · 11 componentes gerenciados\]
 
-O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cloud Storage; o Eventarc dispara o Workflows, que roda preparação, análise por bloco e consolidação em sequência; o resultado vai ao Storage e o cliente é avisado por webhook.
+O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cloud Storage; o Eventarc dispara o Workflows, que roda preparação, análise por janela e consolidação em sequência; a decupagem vai ao Storage e o cliente é avisado por webhook.
 
 | Serviço | Papel | Por que este |
 | --- | --- | --- |
@@ -122,12 +122,12 @@ O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cl
 | Cloud Run Jobs | Validação com decodificação completa, derivados e consolidação | Trabalho pesado de CPU com ffmpeg em contêiner isolado; até 168 h por tarefa |
 | Workflows | Orquestração do job | Passos com espera, tentativas e paralelismo; cobra por passo executado |
 | Firestore | Estado dos jobs, chaves de idempotência, índice de hashes | Transações e expiração automática (TTL) |
-| Cloud Storage | Originais, blocos temporários, resultados | Montado via FUSE nos jobs, sem copiar o original; blocos apagados por regra de ciclo de vida |
+| Cloud Storage | Originais, janelas temporárias, decupagens | Montado via FUSE nos jobs, sem copiar o original; janelas apagadas por regra de ciclo de vida |
 | Eventarc e Pub/Sub | Disparo do job e eventos de webhook | Desacopla API e processamento |
 | Agent Platform | Gemini em Flex e Batch, rótulos de custo, avaliação | Desconto de 50% e custo por vídeo |
 | Identity Platform | Login de usuários, contas locais, MFA | Gerenciado; gratuito até 49.999 usuários ativos por mês |
 | BigQuery | Eventos de uso, painel da diretoria, relatórios | Consulta barata sobre todo o histórico |
-| Cloud Run (serviço de análise) | Uma chamada ao Gemini por bloco, inclusive o escalonamento | Até 80 chamadas por instância: a espera do Flex é dividida e custa centavos |
+| Cloud Run (serviço de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Até 80 chamadas por instância: a espera do Flex é dividida e custa centavos |
 
 O Agent Engine do Agent Platform, feito para agentes conversacionais, não é necessário para a decupagem, que é um pipeline determinístico. Ele entra numa segunda fase, num assistente de busca no acervo que usa o modo agêntico de vídeo.
 
@@ -139,8 +139,10 @@ A API é REST assíncrona: o cliente registra o vídeo, recebe um id de job e bu
 | --- | --- | --- |
 | `POST /v1/jobs` | Registra o vídeo (SHA-256, nome, tamanho) e devolve a URL de upload | 202 job novo, aguardando upload (mesmo se o arquivo já foi processado) · 200 mesma chave de idempotência · 409 mesma chave com corpo diferente · 429 com `Retry-After` |
 | `PUT` na URL assinada | Envio do MP4 para o bucket de quarentena; a URL só aceita video/mp4 no tamanho declarado. PUT simples para os sistemas legados, upload retomável no front | 200 |
-| `GET /v1/jobs/{id}` | Status, progresso (blocos prontos/total), erros, `ETag` | 200 · 304 sem mudança |
-| `GET /v1/jobs/{id}/resultado` | JSON completo, em streaming com gzip | 200 · 409 ainda processando |
+| `GET /v1/jobs` | Lista dos jobs visíveis para quem chama, com status (Biblioteca) | 200 |
+| `GET /v1/jobs/{id}` | Status, progresso (janelas prontas/total), erros, `ETag` | 200 · 304 sem mudança |
+| `GET /v1/jobs/{id}/decupagem` | JSON completo, em streaming com gzip | 200 · 409 ainda processando |
+| `GET /v1/jobs/{id}/reproducao` | Link assinado do proxy de reprodução, válido por minutos | 200 · 409 ainda processando |
 | `DELETE /v1/jobs/{id}` | Cancela o job | 202 |
 | Webhook `POST` no callback (opcional) | Eventos `job.concluido` e `job.falhou`, assinados com HMAC-SHA256 | — |
 
@@ -148,7 +150,7 @@ Controles de segurança:
 
 - **Chave de API por sistema.** Os sistemas da RedeTV não suportam OAuth nem certificado, então cada sistema recebe uma chave de API longa e aleatória (256 bits, com prefixo que identifica o sistema), mostrada uma única vez e enviada no cabeçalho `X-API-Key`, sempre por HTTPS.
 - **Chave guardada só como hash.** O Firestore guarda apenas o HMAC da chave, calculado com uma chave MAC do Cloud KMS ([MAC no KMS](https://docs.cloud.google.com/kms/docs/create-validate-mac-signatures)). Um vazamento do banco não revela chaves nem permite testá-las fora do KMS.
-- **Escopos e isolamento.** Cada chave tem escopos (criar, ler, cancelar) e só enxerga os jobs do próprio sistema; conhecer o hash de um arquivo não dá acesso ao resultado de outro sistema.
+- **Escopos e isolamento.** Cada chave tem escopos (criar, ler, cancelar) e só enxerga os jobs do próprio sistema; conhecer o hash de um arquivo não dá acesso à decupagem de outro sistema.
 - **Rotação e revogação.** Até duas chaves ativas por sistema, para trocar sem parada; revogar vale na hora.
 - **Assinatura opcional.** Se o sistema conseguir calcular HMAC-SHA256, assina cada requisição com data e hash do corpo, o que impede reaproveitar uma requisição capturada.
 - **Status em vez de webhook.** Sistemas legados raramente recebem chamadas de fora; o padrão é consultar o status com `ETag`. O webhook assinado fica opcional.
@@ -246,7 +248,7 @@ O que acontece num `POST /v1/jobs`:
 2. Se a chave já existe com o mesmo corpo, a API devolve a resposta original sem criar nada; com corpo diferente, responde 409. As chaves expiram em 48 h por política de TTL do Firestore.
 3. O hash declarado não dá acesso a nada: a API cria o job do cliente aguardando upload, mesmo que aquele SHA-256 já seja conhecido.
 4. Depois do upload, a validação recalcula o SHA-256 lendo o arquivo. Se divergir do declarado, o job falha com `hash_divergente`, sem gastar modelo.
-5. Com o hash conferido, a chave de conteúdo = SHA-256 + versão do pipeline + opções que mudam o resultado (como a versão do esquema de saída). Numa transação, a API procura `videos/{chave}`: se já foi processado ou está em processamento, o job do cliente é ligado a esse processamento, sem chamar o modelo de novo; se não, o processamento começa. Dois sistemas que enviam o mesmo arquivo pagam um processamento só, e cada um continua vendo apenas os próprios jobs.
+5. Com o hash conferido, a chave de conteúdo = SHA-256 + versão do pipeline + opções que mudam a decupagem (como a versão do esquema de saída). Numa transação, a API procura `videos/{chave}`: se já foi processado ou está em processamento, o job do cliente é ligado a esse processamento, sem chamar o modelo de novo; se não, o processamento começa. Dois sistemas que enviam o mesmo arquivo pagam um processamento só, e cada um continua vendo apenas os próprios jobs.
 6. Reprocessar de propósito exige `forcar_reprocessamento: true` ou uma nova versão do pipeline.
 
 Controle de carga em cada camada:
@@ -257,25 +259,25 @@ Controle de carga em cada camada:
 | Borda | Cloud Armor limita requisições por cliente e responde 429 antes de chegar ao Cloud Run |
 | API | Cloud Run com teto de instâncias; cada chamada só lê e grava no Firestore e volta em milissegundos; fila acima do limite → 429 com `Retry-After` |
 | Orquestração | Execuções do Workflows acima da cota ficam em espera e rodam quando há vaga ([notas do Workflows](https://cloud.google.com/workflows/docs/release-notes)) |
-| Processamento | Paralelismo máximo de blocos por job e de jobs simultâneos; 429 ou 5xx do Gemini → nova tentativa com backoff e jitter dentro da tarefa; bloco concluído nunca é refeito; bloco que falha tem tentativas próprias, até um limite |
-| Falha definitiva | Esgotadas as tentativas, o job fica `falhou` com o bloco e o erro; nunca um resultado parcial apresentado como completo |
+| Processamento | Paralelismo máximo de janelas por job e de jobs simultâneos; 429 ou 5xx do Gemini → nova tentativa com backoff e jitter dentro da tarefa; janela concluída nunca é refeita; janela que falha tem tentativas próprias, até um limite |
+| Falha definitiva | Esgotadas as tentativas, o job fica `falhou` com a janela e o erro; nunca uma decupagem parcial apresentada como completa |
 | Webhook | Reentrega com backoff e jitter; cada evento tem id único para o cliente deduplicar |
 
 ## Vídeos longos e JSON completo
 
-A duração do vídeo não tem limite prático: o vídeo vira blocos de 5 min (+10 s de contexto em cada borda) processados em paralelo, e um vídeo de 3 h são só 36 blocos. O limite de \~45 min por chamada do Gemini ([ficha do modelo](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-8-flash)) nunca é atingido.
+A duração do vídeo não tem limite prático: o vídeo vira janelas de análise de 5 min (+10 s de contexto em cada borda) processadas em paralelo, e um vídeo de 3 h são só 36 janelas. O limite de \~45 min por chamada do Gemini ([ficha do modelo](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-8-flash)) nunca é atingido.
 
-1. **Validação e derivados.** Na quarentena, um Cloud Run Job decodifica o arquivo inteiro uma vez. Essa passada valida o vídeo, calcula o SHA-256, detecta os cortes de plano e gera três derivados: a cópia limpa 720p (para o escalonamento), o proxy de análise 480p com timecode queimado (para a passada de volume) e o proxy de reprodução 480p sem timecode (para o player).
-2. **Plano de blocos.** A duração é dividida em blocos de 300 s com 10 s de contexto. Nenhum bloco é cortado em arquivo: cada chamada aponta para o proxy de análise no Cloud Storage com início e fim (`start_offset` e `end_offset`).
-3. **Uma chamada por bloco.** O Workflows dispara os blocos em paralelo, com limite, para um serviço do Cloud Run que chama o Gemini em Flex (o limite de 20 MB do Flex vale para o corpo da chamada, não para o vídeo). Cada instância atende até 80 chamadas ao mesmo tempo, então a espera de 1 a 15 min do Flex é dividida entre elas e custa centavos; num Job, cada bloco pagaria CPU parada. A resposta é validada contra o esquema e gravada em `blocos/NNN.json`.
-4. **Escalonamento.** Trechos com dúvida, e também uma amostra aleatória de blocos, voltam ao mesmo serviço com o 3.8 Flash, a cópia limpa 720p, resolução alta e até 2 quadros por segundo. A amostra mede o que a primeira passada deixou de ver, inclusive o que ela nem marcou como dúvida.
-5. **Estado por bloco.** Bloco concluído fica gravado e nunca é refeito; bloco que falha tem novas tentativas próprias, até um limite ([limites do Cloud Run](https://cloud.google.com/run/quotas)). Se o serviço cair entre a resposta do Gemini e a gravação, aquela chamada pode ser cobrada duas vezes; essas repetições entram na conta de custo.
-6. **Consolidação.** Lê os blocos em ordem, une as duplicatas das bordas, aplica a regra de tempos (ver Conteúdo do JSON), liga pautas entre blocos e roda a passada narrativa (só texto). Grava `resultado.json.gz` e o hash do resultado.
-7. **Entrega.** `GET /v1/jobs/{id}/resultado` devolve o documento inteiro em streaming com gzip; o teto de 32 MiB do Cloud Run vale só para respostas sem streaming. O `ETag` é o hash do resultado.
+1. **Validação e derivados.** Na quarentena, um Cloud Run Job decodifica o arquivo inteiro uma vez. Essa passada valida o vídeo, calcula o SHA-256, detecta os cortes de plano e gera três derivados: o proxy de escalonamento 720p, o proxy de análise 480p com timecode queimado (para a passada de volume) e o proxy de reprodução 480p sem timecode (para o player).
+2. **Plano de janelas.** A duração é dividida em janelas de análise de 300 s com 10 s de contexto. Nenhuma janela é cortada em arquivo: cada chamada aponta para o proxy de análise no Cloud Storage com início e fim (`start_offset` e `end_offset`).
+3. **Uma chamada por janela.** O Workflows dispara as janelas em paralelo, com limite, para um serviço do Cloud Run que chama o Gemini em Flex (o limite de 20 MB do Flex vale para o corpo da chamada, não para o vídeo). Cada instância atende até 80 chamadas ao mesmo tempo, então a espera de 1 a 15 min do Flex é dividida entre elas e custa centavos; num Job, cada janela pagaria CPU parada. A resposta é validada contra o esquema e gravada em `janelas/NNN.json`.
+4. **Escalonamento.** Trechos com dúvida, e também uma amostra aleatória de janelas, voltam ao mesmo serviço com o 3.8 Flash, o proxy de escalonamento 720p, resolução alta e até 2 quadros por segundo. A amostra mede o que a primeira passada deixou de ver, inclusive o que ela nem marcou como dúvida.
+5. **Estado por janela.** Janela concluída fica gravada e nunca é refeita; janela que falha tem novas tentativas próprias, até um limite ([limites do Cloud Run](https://cloud.google.com/run/quotas)). Se o serviço cair entre a resposta do Gemini e a gravação, aquela chamada pode ser cobrada duas vezes; essas repetições entram na conta de custo.
+6. **Consolidação.** Lê as janelas em ordem, une as duplicatas das bordas, aplica a regra de tempos (ver Conteúdo do JSON), liga pautas entre janelas e roda a passada narrativa (só texto). Grava `decupagem.json.gz` e o hash da decupagem.
+7. **Entrega.** `GET /v1/jobs/{id}/decupagem` devolve o documento inteiro em streaming com gzip; o teto de 32 MiB do Cloud Run vale só para respostas sem streaming. O `ETag` é o hash da decupagem.
 
-O JSON tem a mesma estrutura para 10 min ou 4 h: muda só o número de itens. Enquanto processa, `GET /v1/jobs/{id}` mostra blocos prontos/total.
+O JSON tem a mesma estrutura para 10 min ou 4 h: muda só o número de itens. Enquanto processa, `GET /v1/jobs/{id}` mostra janelas prontas/total.
 
-Prazo esperado: o Flex responde em 1–15 min por chamada ([otimização do Gemini](https://ai.google.dev/gemini-api/docs/optimization)); com 8 blocos em paralelo, 1 h de vídeo fica pronta em \~15–40 min (estimativa a medir no piloto). Jobs urgentes podem pedir `prioridade: alta`, que usa o modo Standard: mais rápido, pelo dobro do preço.
+Prazo esperado: o Flex responde em 1–15 min por chamada ([otimização do Gemini](https://ai.google.dev/gemini-api/docs/optimization)); com 8 janelas em paralelo, 1 h de vídeo fica pronta em \~15–40 min (estimativa a medir no piloto). Jobs urgentes podem pedir `prioridade: alta`, que usa o modo Standard: mais rápido, pelo dobro do preço.
 
 ## Conteúdo do JSON
 
@@ -342,12 +344,12 @@ Correções humanas reindexam o momento, com estado visível (ver Revisão e edi
 
 ## Interface
 
-A interface segue o modelo do Video Indexer: player à esquerda, painel de insights à direita, tudo ligado ao tempo do vídeo. A diferença é que cada item mostra a evidência que o sustenta e, para quem tem permissão, pode ser corrigido ali mesmo.
+A interface segue o modelo do Video Indexer: player à esquerda, painel da decupagem à direita, tudo ligado ao tempo do vídeo. A diferença é que cada item mostra a evidência que o sustenta e, para quem tem permissão, pode ser corrigido ali mesmo.
 
 | Tela | O que tem | Quem acessa |
 | --- | --- | --- |
 | Biblioteca | Lista de vídeos com status de processamento, filtros por programa e data, upload de MP4 | Consulta e Operador |
-| Vídeo · Insights | Player com painel lateral: pessoas com o quadro de evidência, separando quem aparece de quem é citado, pautas, objetos e cenários com miniaturas, comerciais e marcas, palavras-chave. Cada item tem a barra de ocorrências e os botões "anterior" e "próxima" para pular entre aparições | Consulta |
+| Vídeo · Decupagem | Player com painel lateral: pessoas com o quadro de evidência, separando quem aparece de quem é citado, pautas, objetos e cenários com miniaturas, comerciais e marcas, palavras-chave. Cada item tem a barra de ocorrências e os botões "anterior" e "próxima" para pular entre aparições | Consulta |
 | Vídeo · Linha do tempo | Transcrição sincronizada com o player, planos com miniatura, faixas por tipo de ocorrência | Consulta |
 | Busca | Barra de busca por texto ou imagem; resultados agrupados por vídeo, com os momentos e o motivo | Consulta |
 | Revisão e edição | Correção na própria linha do tempo (próxima seção) | Editor e Curador |
@@ -372,7 +374,7 @@ A área de revisão corrige o que o modelo errou e acrescenta o que ele não viu
 
 Regras:
 
-- **Correção ancorada.** Cada correção guarda a versão do resultado em que foi feita, o intervalo de tempo e a identidade do item (pessoa, marca, pauta), e não só o número do item.
+- **Correção ancorada.** Cada correção guarda a versão da decupagem em que foi feita, o intervalo de tempo e a identidade do item (pessoa, marca, pauta), e não só o número do item.
 - **Reprocessar não apaga nem aplica às cegas.** A nova saída do modelo entra por baixo. Correções inequívocas são reconciliadas sozinhas; as que não casam mais (uma pauta que virou duas, uma aparição que sumiu) ficam guardadas e vão para uma fila de revisão, em vez de cair no item errado.
 - **Estado visível.** A correção passa por salva, indexando e na busca. Falha de indexação tem novas tentativas e aparece na tela.
 - **Aprovação opcional.** Por tipo de correção, a mudança de um Editor pode exigir aprovação de um Curador.
@@ -402,10 +404,10 @@ Como funciona: cada ação (login, envio, fim de processamento, busca, correçã
 A qualidade é provada no piloto e vigiada todo dia por sinais automáticos e uma amostra humana pequena. Os trechos do piloto com anotação humana completa viram o conjunto de regressão: nenhuma troca de modelo ou prompt entra sem passar por eles. Parte desses trechos fica reservada só para a avaliação final e nunca é usada para ajustar o prompt.
 
 - **Amostra humana.** O documentalista confere um vídeo por dia, escolhido ao acaso: nomes errados, comerciais perdidos e erro de tempo.
-- **Sinais automáticos.** Percentual de blocos escalados para o 3.8 Flash, de pessoas "não identificadas", de respostas fora do esquema e eventos por hora fora da média do programa. Alertas no Cloud Monitoring.
+- **Sinais automáticos.** Percentual de janelas escaladas para o 3.8 Flash, de pessoas "não identificadas", de respostas fora do esquema e eventos por hora fora da média do programa. Alertas no Cloud Monitoring.
 - **Avaliação automática.** O [serviço de avaliação do Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/evaluation-overview) roda métricas por rubrica sobre a amostra, para detectar queda antes que o usuário perceba.
 - **Versões fixas.** Modelo e prompt fixados por versão no `versao_pipeline`; uma versão nova permite reprocessar o acervo de propósito.
-- **Amostra de controle.** Uma fração aleatória de blocos passa também pelo 3.8 Flash; a diferença entre as duas passadas mede, ao longo do tempo, o que a primeira deixa de ver.
+- **Amostra de controle.** Uma fração aleatória de janelas passa também pelo 3.8 Flash; a diferença entre as duas passadas mede, ao longo do tempo, o que a primeira deixa de ver.
 
 ### Metas do piloto
 
@@ -415,7 +417,7 @@ O gabarito cobre trechos definidos de cada programa do piloto, com todas as cate
 | --- | --- | --- |
 | Famosos na imagem | Precisão dos nomes, cobertura das aparições reais, falsos reconhecimentos, "não identificado" correto | Precisão ≥ 95%; cobertura ≥ 80% |
 | Menções a pessoas | Precisão e cobertura, separadas das aparições | Precisão ≥ 90%; cobertura ≥ 80% |
-| Pautas | Limites e pessoas certos, resumo fiel, continuidade entre blocos | Nenhum resumo com afirmação falsa; limites a até 5 s |
+| Pautas | Limites e pessoas certos, resumo fiel, continuidade entre janelas | Nenhum resumo com afirmação falsa; limites a até 5 s |
 | B-roll | Pertinência dos 5 primeiros resultados; classificação de plano limpo | ≥ 80% em 20 consultas; plano limpo certo em ≥ 90% |
 | Comerciais | Cobertura por tipo; confusão com marca incidental ou menção editorial | Precisão ≥ 90%; cobertura ≥ 90% |
 | Timecode | Inícios e fins dentro de 2 s, distribuição do erro, piores casos | ≥ 95% dentro de 2 s |
@@ -433,7 +435,7 @@ React com TypeScript no front e Python no back, com as bibliotecas e os serviço
 | Front | React, TypeScript, Vite, TanStack Query | Tipos do cliente HTTP gerados do OpenAPI: o contrato tem uma fonte só, e uma mudança na API quebra o build do front, não a produção |
 | Hospedagem do front | Cloud Run servindo o build estático (NGINX), atrás do mesmo balanceador | Escala a zero, mesmo domínio e mesmo Cloud Armor da API; o pacote do front não contém dados, que só vêm da API com sessão válida |
 | Login dos usuários | Identity Platform: contas locais e, quando existir, login pela API do sistema legado | Senhas, MFA e sessões gerenciados pelo Google; nenhuma senha no nosso banco |
-| Testes | pytest e Hypothesis no back; Vitest, Testing Library, MSW e Playwright no front | Hypothesis gera casos para a matemática de tempo e blocos; MSW simula a API a partir do OpenAPI |
+| Testes | pytest e Hypothesis no back; Vitest, Testing Library, MSW e Playwright no front | Hypothesis gera casos para a matemática de tempo e janelas; MSW simula a API a partir do OpenAPI |
 | Infraestrutura | Terraform para todo recurso GCP | Ambientes idênticos e efêmeros; nada criado à mão no console |
 | Repositório | Monorepo: `api/`, `workers/`, `shared/` (esquemas), `web/`, `infra/`, `workflows/`, `evals/` | Uma mudança vertical (front + API + job) cabe num único PR |
 
@@ -443,7 +445,7 @@ Quase tudo é testado sem o GCP; só a integração final precisa da nuvem. O ca
 
 | Nível | O que testa | Onde roda | Quando |
 | --- | --- | --- | --- |
-| 1. Unitário (TDD) | Domínio puro: plano de blocos, matemática de tempo e ajuste aos cortes, chave de conteúdo e idempotência, junção de blocos, backoff com jitter, validação do esquema, leitura da resposta do Gemini | Notebook e CI, sem rede | A cada commit, em segundos |
+| 1. Unitário (TDD) | Domínio puro: plano de janelas, matemática de tempo e ajuste aos cortes, chave de conteúdo e idempotência, junção de janelas, backoff com jitter, validação do esquema, leitura da resposta do Gemini | Notebook e CI, sem rede | A cada commit, em segundos |
 | 2. Integração local | Adaptadores contra emuladores do Firestore e do Pub/Sub (oficiais do gcloud), Storage (fake-gcs-server), ffmpeg real em clipes de 30 s, YAML do Workflows ([workflows-emulator](https://pypi.org/project/workflows-emulator/), comunitário) | Docker Compose no notebook e no CI | A cada PR |
 | 3. Contrato com o Gemini | Respostas gravadas (cassetes) nos testes rápidos; chamada real em 5 clipes-ouro de 1–2 min, com versão do modelo fixada. Verifica esquema e invariantes, nunca texto exato | CI, projeto de dev | Cassetes a cada PR; chamada real a cada mudança de prompt ou modelo e toda noite |
 | 4. Ponta a ponta efêmero | Fluxo inteiro, do front ao JSON, com IAM, Eventarc e Workflows reais | Ambiente do PR no projeto de dev: revisões do Cloud Run com tag e sem tráfego ([revision tags](https://codelabs.developers.google.com/codelabs/cloud-run/revisions-cloud-run-traffic-splitting-gradual-rollout-rollbacks)), workflow e prefixos de bucket e coleção com o número do PR | A cada PR que muda back ou infra; destruído ao fechar o PR |
@@ -496,20 +498,44 @@ Cada entrega atravessa todas as camadas (front, API, processamento, dados e test
 
 | Entrega | O que dá para testar ao final | O que atravessa | Aceite |
 | --- | --- | --- | --- |
-| **E0 · POC** | Entrar com uma conta local, enviar um vídeo de até 10 min e ver a decupagem no player com o painel de insights | Identity Platform com conta local e MFA; front com upload, player e painel; API mínima; validação de MP4 em quarentena; uma chamada ao 3.5 Flash-Lite em Flex; JSON no Storage. Fundação: monorepo, Terraform do `dev`, CI | 5 clipes reais decupados; o clique cai no momento certo; nenhum segredo no repositório |
-| **E1 · Piloto de qualidade** | Cinco programas completos decupados com os cinco tipos de resultado, no player e em JSON exportável | Blocos em paralelo, consolidação, regra de tempos, aparição separada de menção, escalonamento com amostra de controle, A/B com o 3.8 Flash, gabarito humano, medição de custo e de tempo de revisão | Metas do piloto atingidas (definidas antes); custo real por hora medido; decisão de modelo registrada |
+| **E0 · POC** | Entrar com uma conta local, enviar um vídeo de até 10 min e ver a decupagem no player com o painel da decupagem | Identity Platform com conta local e MFA; front com upload, player e painel; API mínima; validação de MP4 em quarentena; uma chamada ao 3.5 Flash-Lite em Flex; JSON no Storage. Fundação: monorepo, Terraform do `dev`, CI | 5 clipes reais decupados; o clique cai no momento certo; nenhum segredo no repositório |
+| **E1 · Piloto de qualidade** | Cinco programas completos decupados com os cinco requisitos, no player e em JSON exportável | Janelas de análise em paralelo, consolidação, regra de tempos, aparição separada de menção, escalonamento com amostra de controle, A/B com o 3.8 Flash, gabarito humano, medição de custo e de tempo de revisão | Metas do piloto atingidas (definidas antes); custo real por hora medido; decisão de modelo registrada |
 | **E2 · Busca** | Buscar por assunto, frase dita ou nome e saltar para os momentos | Índice no Agent Retrieval, entendimento da consulta, proteção contra injeção, página de resultados | Em 20 consultas editoriais, ≥80% dos 5 primeiros resultados pertinentes |
 | **E3 · Revisão e edição** | Corrigir pessoas, pautas, objetos, comerciais e tempos e ver a correção chegar à busca | Área de revisão, papéis Editor e Curador, correções ancoradas e reconciliadas, estado de indexação, histórico, catálogo de pessoas | Um editor corrige um programa inteiro; reprocessar o programa mantém as correções certas e manda o resto para a fila |
 | **E4 · Famosos com evidência** | Ver o painel de pessoas com o quadro que justifica cada nome, separando aparições de menções, e filtrar por pessoa | Evidências, uso do catálogo, relatório de tempo de tela | Relatório de tempo de tela de um programa conferido, contando só aparições |
 | **E5 · Comerciais e merchandising** | Filtrar e tirar relatório por marca e por tipo de inserção | Taxonomia comercial e relatório | Um dia de programação conferido por um revisor |
 | **E6 · B-roll e busca visual** | Buscar "plano limpo de trânsito à noite" ou enviar uma foto e achar planos parecidos | Flag de plano limpo, vetores multimodais, busca por imagem | Consultas visuais aprovadas pelos editores |
-| **E7 · API para sistemas legados** | O sistema da RedeTV envia vídeos e consulta o resultado | Chave de API, idempotência, deduplicação autorizada, consulta de status | Teste de caos sem job duplicado; dois sistemas com o mesmo arquivo não veem os jobs um do outro |
+| **E7 · API para sistemas legados** | O sistema da RedeTV envia vídeos e consulta a decupagem | Chave de API, idempotência, deduplicação autorizada, consulta de status | Teste de caos sem job duplicado; dois sistemas com o mesmo arquivo não veem os jobs um do outro |
 | **E8 · Login RedeTV e permissões completas** | Usuários entram com o login da RedeTV; o administrador gere papéis e escopos por programa | Adaptador para a API do legado, todos os papéis, auditoria; Administrador só em conta local com MFA | Login pelo legado em `staging`; a conta local continua funcionando. Entra quando a API do legado existir |
 | **E9 · Painel da diretoria** | A diretoria acompanha acessos, vídeos e buscas por usuário e no total | Eventos no BigQuery, telas do painel, papel Diretoria | Os números de uma semana batem com os registros |
 | **E10 · Produção** | Operação diária de 20 h com alertas, acessível só pela rede da RedeTV | Balanceador, Cloud Armor com os IPs da emissora, VPC-SC com nível de acesso para upload e player, observabilidade, teste de carga | Upload e player funcionam de uma máquina da RedeTV e são bloqueados de fora; uma semana em paralelo ao processo atual sem incidente bloqueante |
 | **E11 · Acervo histórico** | Programas antigos aparecendo na busca | Lote-piloto por época com as metas da E1; depois Batch com fila por prioridade e teto mensal | Lote-piloto dentro das metas e do teto |
 
 A segurança de base (IAM, buckets privados, nenhum segredo) vale desde a E0; o VPC-SC entra em modo de teste a partir da E4 e é aplicado na E10. Cada entrega vira um conjunto de tickets verticais pequenos no `/to-tickets`.
+
+### Recorte da E0 (grill de 29/10/2026)
+
+A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decupagem, player. A qualidade só precisa parecer plausível; ela é medida com números na E1.
+
+| Tema | Decisão na E0 |
+| --- | --- |
+| Projeto GCP | Projeto `dev` novo na organização da RedeTV, com billing da RedeTV e alerta de orçamento; `staging` e `prod` ficam fora |
+| Região | Tudo em `southamerica-east1`; o Gemini usa o endpoint global (o Flex só existe nele), coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
+| Hospedagem | Um único serviço Cloud Run: o FastAPI serve a API e o build do React. Sem balanceador nem Cloud Armor; o front ganha serviço próprio quando o balanceador entrar (E10) |
+| Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → serviço de análise → decupagem no Storage |
+| Login | Só contas locais no Identity Platform, com MFA TOTP obrigatório, criadas por script, inclusive os 2 administradores de emergência com alerta a cada login. Sem papéis: toda conta autenticada envia e vê todos os vídeos |
+| Contas iniciais | Administradores: Bruno e uma pessoa da TI da RedeTV. Usuários: Bruno e o documentalista |
+| Clipes | 5 clipes reais de programas variados, com 1 a 10 min, escolhidos pelo documentalista; são também os clipes-ouro do teste de contrato. Ficam só num bucket do `dev`, nunca no git, e o envio ao Gemini é autorizado por escrito |
+| Upload | O front confere extensão, tipo, tamanho e `ftyp`; `POST /v1/jobs` devolve URL assinada de upload retomável para a quarentena. Sem SHA-256 no navegador, sem `Idempotency-Key` e sem deduplicação (E7) |
+| Quarentena | As 7 camadas de Entradas hostis; duração máxima de 10 min |
+| Derivados | Só o proxy de reprodução (480p H.264 com faststart), que serve ao player e ao Gemini: o modelo vê o mesmo arquivo e o mesmo tempo que o clique usa, e a documentação da Vertex não garante H.265. O proxy de análise com timecode queimado fica para o A/B da E1, se os tempos ficarem ruins |
+| Análise | Uma chamada ao 3.5 Flash-Lite, só em Flex. Ela pede o esquema 1.1 inteiro, com tempos crus do modelo: sem detecção de cortes, sem regra de tempos e com `quadro` vazio |
+| Falhas | 429 ou 5xx do Gemini: até 5 tentativas com backoff e jitter. Resposta fora do esquema: refeita até 2 vezes. Esgotadas as tentativas, `falhou` com `analise_falhou`, nunca uma decupagem parcial. Rótulo de custo com o id do job |
+| Estados do job | `aguardando_upload` → `validando` → `analisando` → `concluido` ou `falhou`, com código (`formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida`, `upload_expirado`, `analise_falhou`). Sem upload completo em 24 h, vai a `falhou` com `upload_expirado` |
+| API | `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{id}`, `GET /v1/jobs/{id}/decupagem` e `GET /v1/jobs/{id}/reproducao`, todas com o token do Identity Platform. Sem `DELETE`, webhook, `ETag` nem chave de API |
+| Telas | Login com cadastro do MFA; Biblioteca com lista, status por consulta periódica e upload; Vídeo com player e painel da decupagem por categoria, em que o clique num item salta o player |
+| CI e testes | GitHub Actions com lint, tipos, testes unitários e gitleaks; contrato com o Gemini por cassetes e chamada real sob demanda nos 5 clipes-ouro; Terraform num único `dev`. Ambientes efêmeros por PR, Cloud Deploy e emuladores ficam para a E1 |
+| Aceite | Os 5 clipes decupados; um teste Playwright prova que clicar em cada item leva o player ao `inicio_ms`; o documentalista registra a impressão dos tempos, sem meta numérica, como insumo para as metas da E1; nenhum segredo no repositório |
 
 ## Decisões e perguntas em aberto
 
@@ -524,7 +550,7 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 | Python único no back, TypeScript no front | Duas linguagens no back | SDK oficial e esquemas compartilhados |
 | API assíncrona com webhook | API síncrona | Vídeos de horas |
 | Agent Retrieval para a busca | BigQuery vector search, Elasticsearch | Busca híbrida, filtros e reordenação gerenciados |
-| Blocos de 5 min em paralelo | Vídeo inteiro ou blocos de 15 min | Limite do modelo, cobertura e falhas contidas |
+| Janelas de análise de 5 min em paralelo | Vídeo inteiro ou janelas de 15 min | Limite do modelo, cobertura e falhas contidas |
 | Nenhum segredo em arquivo | `.env` com chaves | Chaves no Cloud KMS; chaves de API só como hash; senhas no Identity Platform |
 | Entregas verticais, POC primeiro | Camadas horizontais | Cada entrega é testável por um usuário |
 | Tudo no GCP; front no Cloud Run | Servidores próprios | A RedeTV não tem servidores para hospedar a aplicação |
@@ -536,8 +562,8 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 | Acervo em Batch com teto mensal | Processar tudo de uma vez | Custo previsível e prioridade pelo uso |
 | Ajuste a cortes só para planos e eventos visuais a até 1 s | Ajustar tudo ao corte mais próximo | Falas e menções não começam em cortes |
 | Aparição separada de menção | Uma lista só de aparições | Ouvir um nome não prova que a pessoa está na imagem |
-| Reaproveitamento só depois do upload com hash conferido | Devolver o resultado pelo hash declarado | Um sistema não lê o resultado de outro |
-| Chamada ao Gemini num serviço com concorrência | Uma tarefa de Job por bloco | O Job pagaria CPU parada esperando o Flex |
+| Reaproveitamento só depois do upload com hash conferido | Devolver a decupagem pelo hash declarado | Um sistema não lê a decupagem de outro |
+| Chamada ao Gemini num serviço com concorrência | Uma tarefa de Job por janela | O Job pagaria CPU parada esperando o Flex |
 | Amostra de controle no 3.8 Flash | Escalonar só por dúvida | Mede o que o modelo nem percebeu |
 | Piloto completo na E1, com metas definidas antes | A/B depois da busca e da edição | Prova o valor da IA antes de investir no produto |
 | Produção só pelos IPs da RedeTV; dev e staging abertos, com MFA | Restringir também o desenvolvimento | Permite trabalho remoto sem abrir a produção |
@@ -564,28 +590,4 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 - [ ] Quantas horas tem, de fato, cada ano do acervo.
 - [ ] Aprovar as metas do piloto (em Qualidade em produção) antes do A/B.
 
-**Glossário inicial** (semente do `GLOSSARY.md`)
-
-| Termo | Definição |
-| --- | --- |
-| Job | Um pedido de decupagem de um vídeo, do registro ao JSON final |
-| Bloco | Trecho de 5 min (+10 s de contexto) analisado numa chamada ao Gemini |
-| Plano | Trecho entre dois cortes de câmera |
-| Momento | Unidade de busca: um plano ou um evento com início e fim |
-| Ocorrência | Algo detectado num momento: pessoa, marca, objeto, pauta |
-| Evidência | O que sustenta uma ocorrência: rosto, GC, fala, quadro |
-| Plano limpo | Plano sem GC e sem ninguém falando para a câmera, reaproveitável como B-roll |
-| Chave de conteúdo | SHA-256 do arquivo + versão do pipeline + opções; identifica um resultado |
-| Chave de idempotência | Identificador de uma intenção de envio do cliente, reutilizado nas repetições |
-| Escalonamento | Reanalisar um trecho com o 3.8 Flash em resolução alta |
-| Chave de API | Credencial de um sistema consumidor, aceita só dos IPs da RedeTV e guardada só como hash |
-| Quarentena | Bucket onde o upload espera a validação; nada é processado a partir dele |
-| Cópia limpa | MP4 regravado só com as faixas de vídeo e áudio, sem metadados; é o que o processamento usa |
-| Correção | Alteração humana sobre a saída do modelo, guardada como camada separada, com autor e data |
-| Catálogo de pessoas | Nomes confirmados nas correções, com apelidos; usado pelo Gemini e pela busca |
-| Papel | Pacote de permissões dado a um usuário, opcionalmente limitado a programas |
-| Conta local | Usuário criado no Identity Platform, independente do sistema legado |
-| Administrador de emergência | Conta local com acesso total, MFA obrigatório e alerta a cada login |
-| Aparição | Pessoa visível na imagem; é o que conta como tempo de tela |
-| Menção | Nome dito na fala ou escrito na tela, sem prova de que a pessoa aparece |
-| Amostra de controle | Blocos sorteados que também passam pelo 3.8 Flash, para medir o que a primeira passada não viu |
+**Glossário**: os termos do projeto ficam no [`GLOSSARY.md`](../GLOSSARY.md), na raiz.
