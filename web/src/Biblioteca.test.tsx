@@ -152,3 +152,36 @@ test('um 401 na lista avisa que a sessão expirou', async () => {
 
   await waitFor(() => expect(aoSessaoExpirada).toHaveBeenCalled())
 })
+
+test('uma falha da lista aparece como aviso, e some quando a lista volta', async () => {
+  statusDaLista = 503
+  await abrir({ intervaloMs: 20 })
+
+  expect((await screen.findByRole('alert')).textContent).toContain('lista')
+
+  statusDaLista = 200
+  expect(await screen.findByText('Nenhum vídeo enviado ainda.')).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test('durante um envio não dá para escolher outro arquivo', async () => {
+  let liberar = () => {}
+  servidor.use(
+    http.put(SESSAO, async () => {
+      await new Promise<void>((resolve) => (liberar = resolve))
+      return new HttpResponse(null, { status: 200 })
+    }),
+  )
+  const usuario = userEvent.setup()
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+  const campo = screen.getByLabelText('Enviar vídeo') as HTMLInputElement
+
+  await usuario.upload(campo, mp4())
+  await screen.findByLabelText('Progresso do envio')
+
+  expect(campo.disabled).toBe(true)
+  liberar()
+  await screen.findByText('Envio concluído.')
+  expect(campo.disabled).toBe(false)
+})

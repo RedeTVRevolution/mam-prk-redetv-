@@ -11,11 +11,13 @@ const SESSAO = 'https://storage.exemplo/sessao/abc'
 let recebido = 0
 let inicios = 0
 let falhasPendentes = 0
+let sessaoPerdida = false
 const faixas: string[] = []
 
 function responderPedaco(request: Request) {
   const faixa = request.headers.get('Content-Range') ?? ''
   faixas.push(faixa)
+  if (sessaoPerdida) return new HttpResponse(null, { status: 404 })
   const consulta = /^bytes \*\/(\d+)$/.exec(faixa)
   if (consulta) {
     return recebido === 0
@@ -37,6 +39,7 @@ function responderPedaco(request: Request) {
 const servidor = setupServer(
   http.post(URL_ASSINADA, ({ request }) => {
     expect(request.headers.get('x-goog-resumable')).toBe('start')
+    expect(request.headers.get('x-upload-content-length')).toBe(String(arquivo.size))
     inicios += 1
     return new HttpResponse(null, { status: 201, headers: { Location: SESSAO } })
   }),
@@ -48,6 +51,7 @@ afterEach(() => {
   recebido = 0
   inicios = 0
   falhasPendentes = 0
+  sessaoPerdida = false
   faixas.length = 0
 })
 afterAll(() => servidor.close())
@@ -89,4 +93,13 @@ test('desiste depois de falhas seguidas demais', async () => {
       espera: async () => {},
     }),
   ).rejects.toThrow()
+})
+
+test('desiste logo quando o Storage não reconhece mais a sessão', async () => {
+  sessaoPerdida = true
+
+  await expect(
+    enviarRetomavel(URL_ASSINADA, arquivo, { tamanhoDoPedaco: PEDACO, espera: async () => {} }),
+  ).rejects.toThrow()
+  expect(faixas).toHaveLength(1)
 })

@@ -15,6 +15,13 @@ export interface OpcoesDoUpload {
 
 export class UploadFalhou extends Error {}
 
+/** Erro 4xx definitivo (sessão expirada ou cancelada, pedido recusado): tentar de novo não adianta. */
+class SessaoPerdida extends UploadFalhou {}
+
+function definitivo(status: number) {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429
+}
+
 function dormir(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
@@ -34,7 +41,12 @@ export async function enviarRetomavel(
 
   const abertura = await fetch(urlAssinada, {
     method: 'POST',
-    headers: { 'x-goog-resumable': 'start', 'Content-Type': arquivo.type },
+    headers: {
+      'x-goog-resumable': 'start',
+      'Content-Type': arquivo.type,
+      // Tamanho declarado: a URL assinada pode prender a sessão a ele.
+      'x-upload-content-length': String(total),
+    },
   })
   const sessao = abertura.headers.get('Location')
   if (!abertura.ok || !sessao) throw new UploadFalhou('Não foi possível abrir o upload')
@@ -51,10 +63,12 @@ export async function enviarRetomavel(
       })
       if (resposta.status === 308) enviado = bytesRecebidos(resposta)
       else if (resposta.ok) enviado = total
+      else if (definitivo(resposta.status)) throw new SessaoPerdida(`Falha ${resposta.status} no upload`)
       else throw new UploadFalhou(`Falha ${resposta.status} no upload`)
       falhas = 0
       aoProgresso?.(enviado / total)
-    } catch {
+    } catch (erro) {
+      if (erro instanceof SessaoPerdida) throw erro
       falhas += 1
       if (falhas >= tentativas) throw new UploadFalhou('O upload foi interrompido')
       await espera(500 * 2 ** (falhas - 1))
@@ -63,16 +77,19 @@ export async function enviarRetomavel(
   }
 }
 
-/** Sem resposta do Storage, segue do ponto que já se conhecia. */
+/** Sem resposta útil do Storage, segue do ponto que já se conhecia. */
 async function perguntarOndeParou(sessao: string, total: number, conhecido: number): Promise<number> {
+  let resposta: Response
   try {
-    const resposta = await fetch(sessao, {
+    resposta = await fetch(sessao, {
       method: 'PUT',
       headers: { 'Content-Range': `bytes */${total}` },
     })
-    if (resposta.ok) return total
-    return bytesRecebidos(resposta)
   } catch {
     return conhecido
   }
+  if (resposta.ok) return total
+  if (resposta.status === 308) return bytesRecebidos(resposta)
+  if (definitivo(resposta.status)) throw new SessaoPerdida(`Falha ${resposta.status} no upload`)
+  return conhecido
 }

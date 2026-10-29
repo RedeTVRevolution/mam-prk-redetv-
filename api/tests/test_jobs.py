@@ -97,6 +97,15 @@ def test_tipo_diferente_de_mp4_recebe_415_e_nada_e_criado() -> None:
     assert ambiente.armazenamento.pedidos == []
 
 
+def test_tipo_errado_recebe_415_mesmo_com_nome_ou_tamanho_invalidos() -> None:
+    ambiente = Ambiente()
+
+    resposta = ambiente.criar(nome="clipe.mov", tipo="video/quicktime", tamanho_bytes=0)
+
+    assert resposta.status_code == 415
+    assert ambiente.armazenamento.pedidos == []
+
+
 def test_tamanho_acima_do_maximo_configurado_recebe_422() -> None:
     ambiente = Ambiente(tamanho_maximo=5000)
 

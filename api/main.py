@@ -19,6 +19,7 @@ from api.jobs import (
     RepositorioDeJobs,
     RepositorioIndisponivel,
     ServicoIndisponivel,
+    TipoNaoSuportado,
     agora_utc,
     criar_rotas,
 )
@@ -43,6 +44,10 @@ def criar_app(
     @app.exception_handler(ServicoIndisponivel)
     def _indisponivel(_request: Request, _erro: ServicoIndisponivel) -> JSONResponse:
         return JSONResponse({"detail": "Serviço indisponível"}, status_code=503)
+
+    @app.exception_handler(TipoNaoSuportado)
+    def _tipo_errado(_request: Request, _erro: TipoNaoSuportado) -> JSONResponse:
+        return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
 
     app.state.verificador = verificador or _SemVerificador()
     app.middleware("http")(exigir_token)

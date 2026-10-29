@@ -33,6 +33,7 @@ export default function Biblioteca({
 }) {
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [envio, setEnvio] = useState<Envio>({ tipo: 'parado' })
+  const [listaFalhou, setListaFalhou] = useState(false)
 
   const tratar = useCallback(
     (erro: unknown) => {
@@ -44,8 +45,10 @@ export default function Biblioteca({
   const atualizar = useCallback(async () => {
     try {
       setJobs(await chamarApi<Job[]>(autenticador, '/v1/jobs'))
+      setListaFalhou(false)
     } catch (erro) {
       tratar(erro)
+      setListaFalhou(true)
     }
   }, [autenticador, tratar])
 
@@ -88,13 +91,21 @@ export default function Biblioteca({
     <section>
       <label>
         Enviar vídeo
-        <input type="file" accept=".mp4,video/mp4" onChange={(e) => void escolher(e)} />
+        <input
+          type="file"
+          accept=".mp4,video/mp4"
+          disabled={envio.tipo === 'enviando'}
+          onChange={(e) => void escolher(e)}
+        />
       </label>
       {envio.tipo === 'enviando' && (
         <progress aria-label="Progresso do envio" value={envio.fracao} max={1} />
       )}
       {envio.tipo === 'concluido' && <p>Envio concluído.</p>}
       {envio.tipo === 'erro' && <p role="alert">{envio.mensagem}</p>}
+      {listaFalhou && (
+        <p role="alert">Não foi possível atualizar a lista; tentando de novo.</p>
+      )}
       {jobs?.length === 0 && <p>Nenhum vídeo enviado ainda.</p>}
       {jobs && jobs.length > 0 && (
         <table>

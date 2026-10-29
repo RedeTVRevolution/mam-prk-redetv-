@@ -3,10 +3,19 @@
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+from api.auth import UsuarioAutenticado
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
@@ -56,12 +65,29 @@ class JobCriado(JobPublico):
     url_de_upload: str
 
 
+class TipoNaoSuportado(Exception):
+    """Corpo com tipo diferente de video/mp4: vira 415, antes de qualquer 422."""
+
+
 class NovoJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nome: Annotated[str, StringConstraints(min_length=1, max_length=255)]
     tamanho_bytes: Annotated[int, Field(strict=True)]
-    tipo: str
+    tipo: Literal["video/mp4"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tipo_antes_do_resto(cls, corpo: Any) -> Any:
+        # Exceção fora de ValueError atravessa o Pydantic, e o 415 não vira 422
+        # quando o nome ou o tamanho também estão errados (um .mov, por exemplo).
+        if (
+            isinstance(corpo, dict)
+            and "tipo" in corpo
+            and corpo["tipo"] != TIPO_DO_VIDEO
+        ):
+            raise TipoNaoSuportado
+        return corpo
 
     @field_validator("nome")
     @classmethod
@@ -166,14 +192,10 @@ def criar_rotas(
     tamanho_maximo_bytes: int,
     relogio: Callable[[], datetime],
 ) -> APIRouter:
-    from api.auth import UsuarioAutenticado
-
     rotas = APIRouter(prefix="/jobs")
 
     @rotas.post("", status_code=202)
     def criar(novo: NovoJob, usuario: UsuarioAutenticado) -> JobCriado:
-        if novo.tipo != TIPO_DO_VIDEO:
-            raise HTTPException(415, "Só video/mp4")
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
         agora = relogio()
@@ -186,8 +208,8 @@ def criar_rotas(
             criado_em=agora,
             atualizado_em=agora,
         )
-        url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         repositorio.salvar(job)
+        url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
     @rotas.get("")
