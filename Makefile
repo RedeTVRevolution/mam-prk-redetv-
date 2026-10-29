@@ -1,4 +1,4 @@
-.PHONY: instalar verificar
+.PHONY: instalar verificar testar-afk
 
 instalar:
 	uv sync --locked
@@ -14,3 +14,7 @@ verificar:
 	npm run --prefix web typecheck
 	npm run --prefix web test
 	npm run --prefix web build
+
+testar-afk:
+	shellcheck scripts/afk/*.sh
+	scripts/afk/testes.sh

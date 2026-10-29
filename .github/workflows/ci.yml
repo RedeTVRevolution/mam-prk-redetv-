@@ -21,6 +21,12 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: make instalar verificar
 
+  loop-afk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: make testar-afk
+
   gitleaks:
     runs-on: ubuntu-latest
     steps:
