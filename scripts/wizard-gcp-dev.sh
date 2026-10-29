@@ -202,22 +202,21 @@ run_wizard() {
 
 TOTAL_STAGES=7
 
-# Ticket #2. Reusa o projeto que já existe sem tocar na PoC do outro dev
-# (poc-vertex-sa, as chaves dela e o owner pessoal). Tudo o que criamos leva o
-# prefixo mam- e, quando o recurso aceita, o rótulo app=mam.
+# Ticket #2. Projeto dev próprio do MAM, fora de organização, com o Bruno como
+# Owner. Tudo o que criamos leva o prefixo mam- e, quando o recurso aceita, o
+# rótulo app=mam.
 REPO="RedeTVRevolution/mam-prk-redetv-"
-P="${GCP_PROJECT_ID:-project-85bcb00f-378f-4f12-813}"
+P="${GCP_PROJECT_ID:-mam-redetv-dev-01}"
 ACC="${GCP_ACCOUNT:-bruno.mosconi@gmail.com}"
 REGION="southamerica-east1"
 SA_EMAIL="mam-terraform@${P}.iam.gserviceaccount.com"
-# Seus papéis (etapa 2): IAM do projeto, criar a mam-terraform e testar o Gemini.
-MY_ROLES=(roles/resourcemanager.projectIamAdmin roles/iam.serviceAccountAdmin roles/aiplatform.user)
+BILLING_EXPECTED="015E16-E95BE6-00E37D"
 GEMINI_RESULT="não testado"
-ORG_STATUS="não confirmado"
 BUDGET_STATUS="não criado"
 # Pendências que vão para o comentário da #2 e para o resumo final.
-SKIPPED+=("Ativar a política iam.disableServiceAccountKeyCreation quando houver projeto próprio; hoje ela atrapalharia a PoC da poc-vertex-sa")
-SKIPPED+=("Pedir à RedeTV um projeto dev próprio ligado à conta de faturamento dela, ou o papel Billing Account User para $ACC")
+# Sem organização, o dev não aceita política de organização nem VPC-SC.
+SKIPPED+=("Produção: ativar a política iam.disableServiceAccountKeyCreation (exige organização; o dev não tem)")
+SKIPPED+=("Produção: criar o perímetro VPC Service Controls (exige organização; o dev não tem)")
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -245,47 +244,31 @@ note "Para usar a mesma config no terminal: gcloud config configurations activat
 pause "Enter para continuar"
 
 # ── 2 ────────────────────────────────────────────────────────────────────
-stage "Seus papéis no projeto"
-say "Como Organization Administrator, você se dá só os papéis que o wizard usa,"
-say "sem virar owner: IAM do projeto, contas de serviço e o teste do Gemini."
-for role in "${MY_ROLES[@]}"; do step "$role"; done
-confirm "Adicionar esses papéis a $ACC no projeto $P?" || { warn "Nada foi alterado."; exit 1; }
-for role in "${MY_ROLES[@]}"; do
-  if ! err=$(gcloud projects add-iam-policy-binding "$P" --member="user:$ACC" \
-               --role="$role" --condition=None 2>&1 >/dev/null); then
-    warn "Não deu para adicionar $role:"
-    printf '%s\n' "$err" | head -n 3
-    if grep -qiE 'permission|denied|403' <<<"$err"; then
-      say "Peça ao owner atual do projeto que reenvie o convite de owner para"
-      say "$ACC, aceite pelo e-mail e rode o wizard de novo."
-    fi
-    exit 1
-  fi
-done
-missing=""
-for role in "${MY_ROLES[@]}"; do
-  [[ -n "$(gcloud projects get-iam-policy "$P" --flatten='bindings[].members' \
-    --filter="bindings.role=$role AND bindings.members=user:$ACC" \
-    --format='value(bindings.role)' 2>/dev/null)" ]] || missing+=" $role"
-done
-[[ -z "$missing" ]] || { warn "Faltam papéis:$missing. Rode o wizard de novo."; exit 1; }
-printf '  %s✓%s %s tem os %s papéis no projeto\n' "$GREEN" "$RESET" "$ACC" "${#MY_ROLES[@]}"
+stage "Owner do projeto"
+say "Confiro que $ACC é Owner de $P."
+if [[ -z "$(gcloud projects get-iam-policy "$P" --flatten='bindings[].members' \
+      --filter="bindings.role=roles/owner AND bindings.members=user:$ACC" \
+      --format='value(bindings.role)' 2>/dev/null)" ]]; then
+  warn "$ACC não aparece como Owner de $P. Confira o projeto e a conta e rode de novo."
+  open_url "https://console.cloud.google.com/iam-admin/iam?project=$P"
+  exit 1
+fi
+printf '  %s✓%s %s é Owner de %s\n' "$GREEN" "$RESET" "$ACC" "$P"
 pause "Enter para continuar"
 
 # ── 3 ────────────────────────────────────────────────────────────────────
 stage "Conta de serviço do Terraform e impersonação"
 say "Vou criar $SA_EMAIL, dar a ela os papéis que o Terraform usa"
 say "(sem owner) e dar a você o direito de impersoná-la. Nenhuma chave é criada."
-note "A poc-vertex-sa e o owner pessoal não são tocados."
 confirm "Aplicar essas mudanças no IAM do projeto?" || { warn "Nada foi alterado."; exit 1; }
 gcloud services enable iam.googleapis.com iamcredentials.googleapis.com aiplatform.googleapis.com --project "$P"
 if ! gcloud iam service-accounts describe "$SA_EMAIL" --project "$P" >/dev/null 2>&1; then
   gcloud iam service-accounts create mam-terraform --project "$P" \
     --display-name="MAM Terraform" --description="Aplica o Terraform do MAM (app=mam). Usada só por impersonação."
 fi
-# Sem owner: o projeto é dividido com a PoC de outro dev. projectIamAdmin entra
-# porque Gemini, Firestore, logs e Eventarc só têm papéis no nível do projeto; o
-# Terraform só usa google_project_iam_member (ADR 0002). Papel novo: some aqui.
+# Sem owner, só o que o Terraform usa. projectIamAdmin entra porque Gemini,
+# Firestore, logs e Eventarc só têm papéis no nível do projeto; o Terraform só
+# usa google_project_iam_member (ADR 0002). Papel novo: some aqui.
 for role in roles/resourcemanager.projectIamAdmin roles/serviceusage.serviceUsageAdmin \
     roles/iam.serviceAccountAdmin roles/iam.serviceAccountUser roles/run.admin \
     roles/storage.admin roles/artifactregistry.admin roles/datastore.owner \
@@ -352,24 +335,19 @@ write_env GEMINI_LOCATION "global"
 pause "Enter para continuar"
 
 # ── 5 ────────────────────────────────────────────────────────────────────
-stage "Organização e faturamento da RedeTV"
-ORG_ID=$(gcloud projects describe "$P" --format='value(parent.id)')
+stage "Faturamento"
 BILLING=$(gcloud billing projects describe "$P" --format='value(billingAccountName)')
 BILLING="${BILLING#billingAccounts/}"
-write_env GCP_ORG_ID "$ORG_ID"
+BILLING_ON=$(gcloud billing projects describe "$P" --format='value(billingEnabled)')
 write_env GCP_BILLING_ACCOUNT "$BILLING"
-say "Sua conta não enxerga a organização nem a conta de faturamento. Envie ao"
-say "responsável da RedeTV e peça que confirme que as duas são da RedeTV:"
-step "Organização:           $ORG_ID"
-step "Conta de faturamento:  $BILLING"
-step "Projeto:               $P"
-say "Na mesma mensagem, peça um projeto dev próprio ligado à conta de"
-say "faturamento da RedeTV, ou o papel Billing Account User para $ACC."
-if confirm "A RedeTV já confirmou que organização e faturamento são dela?"; then
-  ORG_STATUS="confirmado pela RedeTV"
+if [[ "$BILLING" == "$BILLING_EXPECTED" && "$BILLING_ON" == True ]]; then
+  printf '  %s✓%s faturamento ativo na conta %s\n' "$GREEN" "$RESET" "$BILLING"
 else
-  SKIPPED+=("Confirmar com a RedeTV que a org $ORG_ID e o faturamento $BILLING são dela")
+  warn "Faturamento: conta '${BILLING:-nenhuma}', ativo=${BILLING_ON:-?}; esperado $BILLING_EXPECTED ativo."
+  open_url "https://console.cloud.google.com/billing/linkedaccount?project=$P"
+  SKIPPED+=("Ligar $P à conta de faturamento $BILLING_EXPECTED")
 fi
+pause "Enter para continuar"
 
 # ── 6 ────────────────────────────────────────────────────────────────────
 stage "Alerta de orçamento do projeto"
@@ -382,7 +360,7 @@ step "Valor: especificado, mensal, no valor combinado"
 step "Ações: limites em 50%, 90% e 100% do valor"
 step "Notificações: e-mail aos administradores de faturamento e, se quiser outro"
 step "destinatário, vincule um canal de e-mail do Cloud Monitoring → Concluir"
-note "O orçamento soma o projeto inteiro, inclusive a PoC do outro dev."
+note "O orçamento soma o projeto inteiro."
 ask BUDGET_AMOUNT "Valor mensal do orçamento (ex.: US\$ 100):" || true
 ask BUDGET_RECIPIENT "Destinatário(s) do alerta (e-mail):" || true
 write_env BUDGET_AMOUNT "${BUDGET_AMOUNT:-}"
@@ -398,9 +376,8 @@ stage "Registrar na issue #2"
 body=$(mktemp)
 {
   printf '## Projeto GCP dev (registrado pelo wizard)\n\n'
-  printf -- '- Projeto: `%s` (reusado; a PoC da `poc-vertex-sa` não foi alterada)\n' "$P"
-  printf -- '- Organização: `%s`. Faturamento: `%s` (%s)\n' "$ORG_ID" "$BILLING" "$ORG_STATUS"
-  printf -- '- `%s` recebeu só %s, sem owner\n' "$ACC" "${MY_ROLES[*]}"
+  printf -- '- Projeto: `%s`, fora de organização, com `%s` como Owner\n' "$P" "$ACC"
+  printf -- '- Faturamento: `%s`\n' "$BILLING"
   printf -- '- Terraform por impersonação de `%s`, sem chave em arquivo e sem owner (ADR 0002)\n' "$SA_EMAIL"
   printf -- '- Gemini: %s\n' "$GEMINI_RESULT"
   printf -- '- Orçamento: %s\n' "$BUDGET_STATUS"
