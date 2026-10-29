@@ -189,3 +189,27 @@ def test_recusa_devolve_so_o_codigo(tmp_path: Path) -> None:
 
     assert str(erro.value) == "arquivo_corrompido"
     assert erro.value.__cause__ is None
+
+
+def test_video_em_retrato_1080p_e_aceito(tmp_path: Path) -> None:
+    entrada = _gerar(tmp_path / "video.mp4", tamanho="1080x1920", duracao=1)
+
+    assert validar(entrada, tmp_path / "saida").copia_limpa.exists()
+
+
+def test_video_sem_audio_e_aceito(tmp_path: Path) -> None:
+    entrada = _gerar(tmp_path / "video.mp4", audio=None)
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert [f["codec_type"] for f in _probe(aceito.copia_limpa)["streams"]] == ["video"]
+
+
+def test_corrupcao_no_meio_do_arquivo_e_recusada(tmp_path: Path) -> None:
+    entrada = _gerar(tmp_path / "video.mp4", duracao=5, tamanho="640x480")
+    dados = bytearray(entrada.read_bytes())
+    meio = len(dados) // 2
+    dados[meio : meio + 400] = b"\xff" * 400
+    entrada.write_bytes(bytes(dados))
+
+    assert _recusa(entrada, tmp_path) == "arquivo_corrompido"

@@ -13,7 +13,8 @@ from typing import Any
 
 MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
 CODECS_VIDEO = {"h264", "hevc"}
-ALTURA_MAXIMA = 1080
+LADO_CURTO_MAXIMO = 1080  # 1080p, também em retrato
+LADO_LONGO_MAXIMO = 1920
 DURACAO_MINIMA_S = 1.0
 DURACAO_MAXIMA_S = 600.0
 TEMPO_LIMITE_S = 900
@@ -49,8 +50,8 @@ def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
 def _sha256(arquivo: Path) -> str:
     resumo = hashlib.sha256()
     with arquivo.open("rb") as f:
-        while bloco := f.read(1 << 20):
-            resumo.update(bloco)
+        while leitura := f.read(1 << 20):
+            resumo.update(leitura)
     return resumo.hexdigest()
 
 
@@ -100,10 +101,11 @@ def _conferir_faixas(sondagem: dict[str, Any]) -> None:
         raise Recusa("codec_nao_suportado")
     if videos[0].get("codec_name") not in CODECS_VIDEO:
         raise Recusa("codec_nao_suportado")
-    if (
-        int(videos[0].get("height", 0)) > ALTURA_MAXIMA
-        or int(videos[0].get("width", 0)) > 1920
-    ):
+    try:
+        lados = sorted((int(videos[0]["width"]), int(videos[0]["height"])))
+    except (KeyError, ValueError, TypeError):
+        raise Recusa("arquivo_corrompido") from None
+    if lados[0] > LADO_CURTO_MAXIMO or lados[1] > LADO_LONGO_MAXIMO:
         raise Recusa("codec_nao_suportado")
     if audios and audios[0].get("codec_name") != "aac":
         raise Recusa("codec_nao_suportado")
