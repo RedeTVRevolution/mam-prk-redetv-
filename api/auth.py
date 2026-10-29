@@ -3,6 +3,7 @@ from typing import Annotated, Any, Protocol
 
 import jwt
 from fastapi import Depends, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -68,14 +69,15 @@ class VerificadorIdentityPlatform:
         return Usuario(uid=claims["sub"], email=claims.get("email", ""))
 
 
-def _autenticar(request: Request) -> Usuario | None:
+async def _autenticar(request: Request) -> Usuario | None:
     esquema, _, token = request.headers.get("Authorization", "").partition(" ")
     token = token.strip()
     if esquema.lower() != "bearer" or not token:
         return None
     verificador: VerificadorDeToken = request.app.state.verificador
     try:
-        return verificador.verificar(token)
+        # Numa thread: buscar as chaves do Google é HTTP síncrono e travaria o event loop.
+        return await run_in_threadpool(verificador.verificar, token)
     except TokenInvalido:
         return None
 
@@ -94,7 +96,7 @@ async def exigir_token(
     a quem não se autenticou."""
     if not _protegido(request.url.path):
         return await seguinte(request)
-    usuario = _autenticar(request)
+    usuario = await _autenticar(request)
     if usuario is None:
         return JSONResponse(
             {"detail": "Not authenticated"},
