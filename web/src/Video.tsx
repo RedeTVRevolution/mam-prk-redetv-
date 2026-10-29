@@ -142,6 +142,31 @@ export default function Video({
     }
   }, [autenticador, job.id, concluido])
 
+  const retomarEm = useRef<number | null>(null)
+  // O link assinado expira em minutos: se o player falhar depois disso, pede outro e
+  // continua do mesmo ponto.
+  const renovarLink = useCallback(() => {
+    if (carga.tipo !== 'pronta') return
+    if (Date.parse(carga.reproducao.expira_em) > Date.now()) return
+    const instante = player.current?.currentTime ?? 0
+    chamarApi<Reproducao>(autenticador, `/v1/jobs/${job.id}/reproducao`).then(
+      (reproducao) => {
+        retomarEm.current = instante
+        setCarga((atual) => (atual.tipo === 'pronta' ? { ...atual, reproducao } : atual))
+      },
+      (erro: unknown) => {
+        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
+        else setCarga({ tipo: 'erro' })
+      },
+    )
+  }, [autenticador, carga, job.id])
+  const retomar = useCallback(() => {
+    if (player.current && retomarEm.current !== null) {
+      player.current.currentTime = retomarEm.current
+      retomarEm.current = null
+    }
+  }, [])
+
   const saltar = useCallback((inicioMs: number) => {
     if (player.current) player.current.currentTime = inicioMs / 1000
   }, [])
@@ -169,6 +194,8 @@ export default function Video({
             ref={player}
             src={carga.reproducao.url}
             controls
+            onError={renovarLink}
+            onLoadedMetadata={retomar}
             aria-label="Player"
             style={{ flex: 1, minWidth: 0 }}
           />
@@ -205,7 +232,8 @@ function BaixarJson({ nome, decupagem }: { nome: string; decupagem: Decupagem })
     ancora.href = url
     ancora.download = `${nome.replace(/\.mp4$/i, '')}.decupagem.json`
     ancora.click()
-    URL.revokeObjectURL(url)
+    // Revogar na hora pode cancelar o download em alguns navegadores.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
   return (
     <button type="button" onClick={baixar}>

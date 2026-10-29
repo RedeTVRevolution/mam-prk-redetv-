@@ -6,7 +6,13 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
-from api.jobs import Job, RepositorioEmMemoria, expirar_uploads
+from api.jobs import (
+    Estado,
+    Job,
+    RepositorioEmMemoria,
+    ServicoIndisponivel,
+    expirar_uploads,
+)
 from api.main import criar_app
 
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
@@ -27,6 +33,7 @@ class ArmazenamentoFalso:
         self.pedidos: list[dict[str, Any]] = []
         self.cancelados: list[str] = []
         self.decupagens: dict[str, list[bytes]] = {}
+        self.decupagens_indisponiveis = False
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
         self.pedidos.append(
@@ -41,6 +48,9 @@ class ArmazenamentoFalso:
         return f"https://storage.exemplo/proxy/{job_id}?validade={int(validade.total_seconds())}"
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        # Gerador, como seria o adaptador real: a falha só aparece no primeiro pedaço.
+        if self.decupagens_indisponiveis:
+            raise ServicoIndisponivel
         yield from self.decupagens[job_id]
 
 
@@ -226,7 +236,7 @@ def test_expiracao_nao_mexe_em_job_que_ja_passou_do_upload() -> None:
     )
 
 
-def _job_com_estado(ambiente: Ambiente, estado: Any) -> str:
+def _job_com_estado(ambiente: Ambiente, estado: Estado) -> str:
     job = Job(
         id="j1",
         nome="clipe.mp4",
@@ -258,7 +268,8 @@ def test_reproducao_devolve_link_assinado_e_quando_expira() -> None:
 
 def test_reproducao_e_decupagem_dao_409_antes_de_concluido_e_404_sem_job() -> None:
     ambiente = Ambiente()
-    for estado in ("aguardando_upload", "validando", "analisando", "falhou"):
+    estados: list[Estado] = ["aguardando_upload", "validando", "analisando", "falhou"]
+    for estado in estados:
         job_id = _job_com_estado(ambiente, estado)
         for rota in ("reproducao", "decupagem"):
             resposta = ambiente.cliente.get(
@@ -309,3 +320,27 @@ def test_reproducao_e_decupagem_exigem_token() -> None:
     job_id = _job_com_estado(ambiente, "concluido")
     for rota in ("reproducao", "decupagem"):
         assert ambiente.cliente.get(f"/v1/jobs/{job_id}/{rota}").status_code == 401
+
+
+def test_decupagem_com_gzip_recusado_vem_em_texto_puro() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    ambiente.armazenamento.decupagens[job_id] = [b'{"a": 1}']
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/decupagem",
+        headers={**AUTORIZACAO, "Accept-Encoding": "gzip;q=0, identity"},
+    )
+
+    assert "content-encoding" not in resposta.headers
+    assert resposta.json() == {"a": 1}
+
+
+def test_decupagem_indisponivel_da_503_antes_de_comecar_o_stream() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    ambiente.armazenamento.decupagens_indisponiveis = True
+
+    resposta = ambiente.cliente.get(f"/v1/jobs/{job_id}/decupagem", headers=AUTORIZACAO)
+
+    assert resposta.status_code == 503

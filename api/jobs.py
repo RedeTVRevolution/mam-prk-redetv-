@@ -1,5 +1,6 @@
 """Jobs da E0: modelo, portas (Firestore e Storage) e rotas `/v1/jobs`."""
 
+import itertools
 import uuid
 import zlib
 from collections.abc import Callable, Iterator
@@ -208,6 +209,23 @@ def agora_utc() -> datetime:
     return datetime.now(UTC)
 
 
+def _aceita_gzip(accept_encoding: str) -> bool:
+    """`gzip` (ou `*`) no `Accept-Encoding`, sem `q=0`."""
+    for opcao in accept_encoding.split(","):
+        nome, *parametros = (parte.strip() for parte in opcao.split(";"))
+        if nome.lower() not in ("gzip", "*"):
+            continue
+        for parametro in parametros:
+            chave, _, valor = parametro.partition("=")
+            if chave.strip().lower() == "q":
+                try:
+                    return float(valor) > 0
+                except ValueError:
+                    return False
+        return True
+    return False
+
+
 def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
     compressor = zlib.compressobj(wbits=31)
     for pedaco in pedacos:
@@ -253,26 +271,28 @@ def criar_rotas(
             raise HTTPException(404, "Job não encontrado")
         return JobPublico.de(job)
 
-    def concluido(job_id: str) -> Job:
+    def obter_concluido(job_id: str) -> Job:
         job = repositorio.obter(job_id)
         if job is None:
             raise HTTPException(404, "Job não encontrado")
         if job.estado != "concluido":
-            raise HTTPException(409, "Job ainda não concluído")
+            raise HTTPException(409, f"Job em {job.estado}, não concluido")
         return job
 
     @rotas.get("/{job_id}/reproducao")
     def reproducao(job_id: str) -> Reproducao:
-        job = concluido(job_id)
+        job = obter_concluido(job_id)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
     @rotas.get("/{job_id}/decupagem")
     def decupagem(job_id: str, request: Request) -> StreamingResponse:
-        job = concluido(job_id)
-        pedacos = armazenamento.abrir_decupagem(job.id)
+        job = obter_concluido(job_id)
+        pedacos = iter(armazenamento.abrir_decupagem(job.id))
+        # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
+        pedacos = itertools.chain([next(pedacos, b"")], pedacos)
         cabecalhos = {"Vary": "Accept-Encoding"}
-        if "gzip" in request.headers.get("accept-encoding", ""):
+        if _aceita_gzip(request.headers.get("accept-encoding", "")):
             cabecalhos["Content-Encoding"] = "gzip"
             pedacos = _comprimir(pedacos)
         return StreamingResponse(
