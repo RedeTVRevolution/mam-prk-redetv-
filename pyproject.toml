@@ -1,0 +1,29 @@
+[project]
+name = "mam-redetv"
+version = "0.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["fastapi"]
+
+[dependency-groups]
+dev = [
+ "httpx2>=2.16.0",
+ "mypy",
+ "pytest",
+ "ruff",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B"]
+
+[tool.mypy]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["api"]
+pythonpath = ["."]
