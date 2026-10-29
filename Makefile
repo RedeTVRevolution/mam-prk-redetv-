@@ -1,4 +1,4 @@
-.PHONY: instalar verificar comparar testar-afk mesclar-afk deploy-dev
+.PHONY: instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas
 
 instalar:
 	uv sync --locked
@@ -29,3 +29,7 @@ mesclar-afk:
 # Aplicação no ar no dev (#8): Terraform e imagem, pela conta mam-terraform.
 deploy-dev:
 	scripts/deploy-dev.sh
+
+# Contas locais do dev (#11), depois do deploy-dev: cria e manda o link da senha.
+criar-contas:
+	scripts/criar-contas.sh

@@ -24,6 +24,11 @@ variable "regiao" {
   type = string
 }
 
+variable "admins_emergencia" {
+  description = "E-mails dos administradores de emergência, separados por vírgula"
+  type        = string
+}
+
 variable "imagem" {
   description = "Imagem do serviço, de preferência pelo digest"
   type        = string
@@ -40,6 +45,8 @@ resource "google_project_service" "apis" {
     "artifactregistry.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "firestore.googleapis.com",
+    "identitytoolkit.googleapis.com",
+    "monitoring.googleapis.com",
     # Ligadas antes pelo wizard; aqui para que o Terraform as declare.
     "aiplatform.googleapis.com",
     "iam.googleapis.com",
@@ -147,6 +154,11 @@ resource "google_cloud_run_v2_service" "web" {
     }
     containers {
       image = var.imagem
+      # Liga o verificador de token do Identity Platform na API (api/main.py).
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.projeto
+      }
     }
   }
   depends_on = [google_project_service.apis]
@@ -158,6 +170,133 @@ resource "google_cloud_run_v2_service_iam_member" "publico" {
   location = google_cloud_run_v2_service.web.location
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# Login das pessoas (#11): só contas locais, criadas por `make criar-contas`.
+# O MFA fica ENABLED, e não MANDATORY, porque o MANDATORY pode barrar o primeiro
+# login de quem ainda não cadastrou o autenticador, e o cadastro precisa dele. O
+# MFA continua obrigatório: a API recusa todo token sem o segundo fator TOTP
+# (api/auth.py). O bloqueio após tentativas erradas é nativo do Identity
+# Platform e não tem configuração.
+resource "google_identity_platform_config" "mam" {
+  autodelete_anonymous_users = true
+  sign_in {
+    email {
+      enabled           = true
+      password_required = true
+    }
+  }
+  # A chave web vai no front e é pública: sem isto, qualquer um criaria uma conta.
+  client {
+    permissions {
+      disabled_user_signup   = true
+      disabled_user_deletion = true
+    }
+  }
+  mfa {
+    state = "ENABLED"
+    provider_configs {
+      state = "ENABLED"
+      totp_provider_config {
+        # Aceita o código anterior e o seguinte, para relógio de celular adiantado ou atrasado.
+        adjacent_intervals = 1
+      }
+    }
+  }
+  # Os logs de requisição alimentam o alerta de login dos administradores de emergência.
+  monitoring {
+    request_logging {
+      enabled = true
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+# O provider não tem a política de senha (passwordPolicyConfig), então ela vai
+# pela API REST, de novo a cada mudança. Roda na máquina do `make deploy-dev`,
+# como a mam-terraform.
+locals {
+  politica_de_senha = jsonencode({
+    passwordPolicyConfig = {
+      passwordPolicyEnforcementState = "ENFORCE"
+      forceUpgradeOnSignin           = true
+      passwordPolicyVersions = [{
+        customStrengthOptions = {
+          minPasswordLength                = 12
+          containsLowercaseCharacter       = true
+          containsUppercaseCharacter       = true
+          containsNumericCharacter         = true
+          containsNonAlphanumericCharacter = true
+        }
+      }]
+    }
+  })
+}
+
+resource "terraform_data" "politica_de_senha" {
+  triggers_replace = [local.politica_de_senha]
+  provisioner "local-exec" {
+    command = <<-EOT
+      curl -sSf -o /dev/null -X PATCH \
+        "https://identitytoolkit.googleapis.com/admin/v2/projects/${var.projeto}/config?updateMask=passwordPolicyConfig" \
+        -H "Authorization: Bearer $(gcloud auth print-access-token --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")" \
+        -H "x-goog-user-project: ${var.projeto}" \
+        -H "Content-Type: application/json" \
+        -d '${local.politica_de_senha}'
+    EOT
+  }
+  depends_on = [google_identity_platform_config.mam]
+}
+
+# Alerta a cada login de administrador de emergência, para os próprios
+# administradores: cada um vê também os logins do outro. Casa o passo da senha,
+# o único que traz o e-mail no log, então também avisa de senha errada. O e-mail
+# é buscado no texto do log, e não num campo, para o alerta não ficar mudo se o
+# formato do log mudar.
+locals {
+  admins_emergencia = [for email in split(",", var.admins_emergencia) : trimspace(email)]
+}
+
+resource "google_monitoring_notification_channel" "admin_emergencia" {
+  for_each     = toset(local.admins_emergencia)
+  display_name = "Administrador de emergência ${each.key}"
+  type         = "email"
+  labels       = { email_address = each.key }
+  depends_on   = [google_project_service.apis]
+}
+
+resource "google_monitoring_alert_policy" "login_admin_emergencia" {
+  display_name = "Login de administrador de emergência"
+  combiner     = "OR"
+  conditions {
+    display_name = "Login de administrador de emergência"
+    condition_matched_log {
+      filter = join("\n", [
+        "resource.type=\"identitytoolkit_project\"",
+        "jsonPayload.methodName:\"SignInWithPassword\"",
+        "(${join(" OR ", [for email in local.admins_emergencia : "\"${email}\""])})",
+      ])
+    }
+  }
+  # Alerta de log exige limite: no máximo um aviso a cada 5 min.
+  alert_strategy {
+    notification_rate_limit {
+      period = "300s"
+    }
+    auto_close = "1800s"
+  }
+  notification_channels = [for canal in google_monitoring_notification_channel.admin_emergencia : canal.id]
+  documentation {
+    content = "Uma conta de administrador de emergência tentou entrar no MAM. Se não foi você nem o outro administrador, troque a senha e o autenticador da conta."
+  }
+  depends_on = [google_identity_platform_config.mam]
+}
+
+# Chave web do login, que vai no build do front. O provider a marca como
+# sensível, mas ela é pública por natureza: o cadastro bloqueado acima é o que protege.
+output "identity_api_key" {
+  value     = google_identity_platform_config.mam.client[0].api_key
+  sensitive = true
 }
 
 output "url" {

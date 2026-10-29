@@ -4,6 +4,8 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+# Chave web do Identity Platform, pública, vinda do Terraform; sem ela o login fica indisponível.
+ARG VITE_IDENTITY_API_KEY=""
 RUN npm run build
 
 FROM python:3.12-slim

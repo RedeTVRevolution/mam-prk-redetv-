@@ -1,6 +1,7 @@
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Protocol
+from typing import Annotated, Any, Protocol
 
+import jwt
 from fastapi import Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -25,6 +26,46 @@ class VerificadorDeToken(Protocol):
     """Porta para o Identity Platform; os testes usam uma versão falsa."""
 
     def verificar(self, token: str) -> Usuario: ...
+
+
+# Chaves públicas que assinam os tokens do Identity Platform.
+URL_DAS_CHAVES = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
+
+
+class VerificadorIdentityPlatform:
+    """Confere o token de sessão do Identity Platform. O MFA é obrigatório aqui,
+    e não só no Identity Platform: um token sem o segundo fator TOTP é recusado."""
+
+    def __init__(
+        self, projeto: str, chave_publica: Callable[[str], Any] | None = None
+    ) -> None:
+        self._projeto = projeto
+        if chave_publica is None:
+            # O PyJWKClient guarda as chaves e só busca de novo se aparecer uma desconhecida.
+            cliente = jwt.PyJWKClient(URL_DAS_CHAVES)
+            chave_publica = lambda token: cliente.get_signing_key_from_jwt(token).key
+        self._chave_publica = chave_publica
+
+    def verificar(self, token: str) -> Usuario:
+        try:
+            claims = jwt.decode(
+                token,
+                self._chave_publica(token),
+                algorithms=["RS256"],
+                audience=self._projeto,
+                issuer=f"https://securetoken.google.com/{self._projeto}",
+                options={"require": ["exp", "iat", "sub"]},
+            )
+        except jwt.PyJWKClientConnectionError:
+            raise  # Google fora do ar não é token inválido: vira 500, não 401.
+        except jwt.PyJWTError:
+            raise TokenInvalido from None
+        if (
+            not claims["sub"]
+            or claims.get("firebase", {}).get("sign_in_second_factor") != "totp"
+        ):
+            raise TokenInvalido
+        return Usuario(uid=claims["sub"], email=claims.get("email", ""))
 
 
 def _autenticar(request: Request) -> Usuario | None:
