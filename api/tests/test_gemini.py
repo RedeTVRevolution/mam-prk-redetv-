@@ -3,16 +3,18 @@ from typing import Any
 
 import pytest
 
+from api.decupagem import Video
 from api.gemini import (
     AnaliseFalhou,
+    Chamada,
     ErroHttp,
-    Pedido,
     analisar,
 )
 from api.tests.test_decupagem import DURACAO_MS, decupagem_valida
 
 JOB = "job-123"
 VIDEO = "gs://quarentena/proxy.mp4"
+VIDEO_CONFIAVEL = Video(sha256="b" * 64, duracao_ms=DURACAO_MS)
 
 
 class TransporteFalso:
@@ -20,10 +22,10 @@ class TransporteFalso:
 
     def __init__(self, *respostas: str | Exception) -> None:
         self.respostas = list(respostas)
-        self.pedidos: list[Pedido] = []
+        self.chamadas: list[Chamada] = []
 
-    def gerar(self, pedido: Pedido) -> str:
-        self.pedidos.append(pedido)
+    def gerar(self, chamada: Chamada) -> str:
+        self.chamadas.append(chamada)
         r = self.respostas.pop(0)
         if isinstance(r, Exception):
             raise r
@@ -44,37 +46,56 @@ def _rodar(transporte: TransporteFalso, relogio: Relogio | None = None) -> Any:
         transporte,
         video_uri=VIDEO,
         job_id=JOB,
-        duracao_ms=DURACAO_MS,
+        video=VIDEO_CONFIAVEL,
         dormir=relogio.dormir,
         sortear=lambda teto: teto,  # pior caso: jitter no teto
     )
 
 
-BOA = json.dumps(decupagem_valida())
+def resposta_do_modelo() -> dict[str, Any]:
+    """O modelo não devolve o bloco `video`: ele vem da quarentena."""
+    dados = decupagem_valida()
+    del dados["video"]
+    return dados
+
+
+BOA = json.dumps(resposta_do_modelo())
 
 
 def test_devolve_decupagem_valida() -> None:
     t = TransporteFalso(BOA)
     d = _rodar(t)
     assert d.programa.resumo == "Jornal da noite"
-    assert len(t.pedidos) == 1
+    assert len(t.chamadas) == 1
 
 
-def test_pedido_leva_job_como_rotulo_e_nenhuma_ferramenta() -> None:
+def test_chamada_leva_job_como_rotulo_e_nenhuma_ferramenta() -> None:
     t = TransporteFalso(BOA)
     _rodar(t)
-    p = t.pedidos[0]
-    assert p.rotulos == {"job_id": JOB}
-    assert p.ferramentas == ()
-    assert p.video_uri == VIDEO
-    assert p.esquema["additionalProperties"] is False
+    c = t.chamadas[0]
+    assert c.rotulos == {"job_id": JOB}
+    assert c.ferramentas == ()
+    assert c.video_uri == VIDEO
+    assert c.esquema["additionalProperties"] is False
+    assert "video" not in c.esquema["properties"]
+
+
+def test_bloco_video_vem_da_quarentena_e_nao_do_modelo() -> None:
+    d = _rodar(TransporteFalso(BOA))
+    assert d.video == VIDEO_CONFIAVEL
+
+
+def test_resposta_com_bloco_video_e_refeita() -> None:
+    t = TransporteFalso(json.dumps(decupagem_valida()), BOA)
+    _rodar(t)
+    assert len(t.chamadas) == 2
 
 
 def test_resposta_fora_do_esquema_e_refeita_ate_2_vezes() -> None:
     t = TransporteFalso("não é json", '{"x": 1}', BOA)
     d = _rodar(t)
     assert d.video.duracao_ms == DURACAO_MS
-    assert len(t.pedidos) == 3
+    assert len(t.chamadas) == 3
 
 
 def test_terceira_resposta_ruim_vira_analise_falhou() -> None:
@@ -82,15 +103,15 @@ def test_terceira_resposta_ruim_vira_analise_falhou() -> None:
     with pytest.raises(AnaliseFalhou) as e:
         _rodar(t)
     assert e.value.codigo == "analise_falhou"
-    assert len(t.pedidos) == 3
+    assert len(t.chamadas) == 3
 
 
 def test_tempo_fora_da_duracao_conta_como_resposta_invalida() -> None:
-    ruim = decupagem_valida()
+    ruim = resposta_do_modelo()
     ruim["planos"][0]["fim_ms"] = DURACAO_MS + 1
     t = TransporteFalso(json.dumps(ruim), BOA)
     _rodar(t)
-    assert len(t.pedidos) == 2
+    assert len(t.chamadas) == 2
 
 
 @pytest.mark.parametrize("status", [429, 500, 503])
@@ -98,7 +119,7 @@ def test_429_e_5xx_tentam_de_novo_com_backoff_exponencial(status: int) -> None:
     relogio = Relogio()
     t = TransporteFalso(ErroHttp(status), ErroHttp(status), ErroHttp(status), BOA)
     _rodar(t, relogio)
-    assert len(t.pedidos) == 4
+    assert len(t.chamadas) == 4
     assert relogio.esperas == [1.0, 2.0, 4.0]
 
 
@@ -114,7 +135,7 @@ def test_jitter_total_sorteia_entre_zero_e_o_teto() -> None:
         t,
         video_uri=VIDEO,
         job_id=JOB,
-        duracao_ms=DURACAO_MS,
+        video=VIDEO_CONFIAVEL,
         dormir=lambda s: None,
         sortear=sortear,
     )
@@ -126,17 +147,17 @@ def test_cinco_novas_tentativas_e_depois_analise_falhou() -> None:
     with pytest.raises(AnaliseFalhou) as e:
         _rodar(t)
     assert e.value.codigo == "analise_falhou"
-    assert len(t.pedidos) == 6  # 1 chamada + 5 novas
+    assert len(t.chamadas) == 6  # 1 chamada + 5 novas
 
 
 def test_erro_4xx_diferente_de_429_nao_tenta_de_novo() -> None:
     t = TransporteFalso(ErroHttp(400), BOA)
     with pytest.raises(AnaliseFalhou):
         _rodar(t)
-    assert len(t.pedidos) == 1
+    assert len(t.chamadas) == 1
 
 
 def test_os_dois_orcamentos_de_tentativas_sao_independentes() -> None:
     t = TransporteFalso(ErroHttp(429), "lixo", ErroHttp(500), "lixo", BOA)
     _rodar(t)
-    assert len(t.pedidos) == 5
+    assert len(t.chamadas) == 5

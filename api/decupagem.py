@@ -1,12 +1,12 @@
 """Esquema 1.1 da decupagem.
 
 Um modelo só: dele saem a saída estruturada pedida ao Gemini
-(`Decupagem.model_json_schema()`), a validação da resposta e o tipo do OpenAPI.
+(`esquema_do_modelo()`), a validação da resposta e o tipo do OpenAPI.
 """
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]
@@ -57,11 +57,11 @@ class Aparicao(_Intervalo):
     quadro: str | None = None  # vazio na E0
 
 
-class CitacaoNaFala(_Intervalo):
+class MencaoNaFala(_Intervalo):
     pass
 
 
-class CitacaoNoTexto(_Intervalo):
+class MencaoNoTexto(_Intervalo):
     texto: Texto
 
 
@@ -70,8 +70,8 @@ class Pessoa(_Estrito):
     nome: Rotulo  # "não identificado" quando o modelo não reconhece
     origem: Literal["modelo", "revisao"] = "modelo"
     na_imagem: list[Aparicao]
-    citada_na_fala: list[CitacaoNaFala]
-    citada_no_texto: list[CitacaoNoTexto]
+    citada_na_fala: list[MencaoNaFala]
+    citada_no_texto: list[MencaoNoTexto]
 
 
 class Plano(_Intervalo):
@@ -121,12 +121,19 @@ class Decupagem(_Estrito):
         return [*achados, *self.planos, *self.comerciais, *self.transcricao]
 
     @model_validator(mode="after")
-    def _tempos_dentro_da_duracao(self, info: ValidationInfo) -> Self:
-        """Vale a duração do contexto (confiável); a do modelo é só o plano B."""
-        contexto = info.context or {}
-        duracao = contexto.get("duracao_ms", self.video.duracao_ms)
-        if self.video.duracao_ms != duracao:
-            raise ValueError("duração declarada difere da duração do vídeo")
-        if any(i.fim_ms > duracao for i in self._intervalos()):
+    def _tempos_dentro_da_duracao(self) -> Self:
+        if any(i.fim_ms > self.video.duracao_ms for i in self._intervalos()):
             raise ValueError("tempo além da duração do vídeo")
         return self
+
+
+def esquema_do_modelo() -> dict[str, Any]:
+    """Saída estruturada pedida ao Gemini: a decupagem sem o bloco `video`.
+
+    O SHA-256 e a duração vêm da quarentena; o modelo não tem como sabê-los.
+    """
+    esquema = Decupagem.model_json_schema()
+    del esquema["properties"]["video"]
+    esquema["required"].remove("video")
+    del esquema["$defs"]["Video"]
+    return esquema

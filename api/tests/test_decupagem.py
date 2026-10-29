@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from api.decupagem import Decupagem
+from api.decupagem import Decupagem, esquema_do_modelo
 
 DURACAO_MS = 60_000
 
@@ -125,13 +125,17 @@ def test_recusa_tempo_alem_da_duracao_em_qualquer_lista(
         Decupagem.model_validate(d)
 
 
-def test_duracao_confiavel_do_contexto_vale_mais_que_a_declarada_pelo_modelo() -> None:
-    d = decupagem_valida()
-    d["video"]["duracao_ms"] = 10_000_000  # o modelo "alarga" o vídeo
-    with pytest.raises(ValidationError):
-        Decupagem.model_validate(d, context={"duracao_ms": DURACAO_MS})
-
-
 def test_json_schema_e_estrito() -> None:
     esquema = Decupagem.model_json_schema()
     assert esquema["additionalProperties"] is False
+
+
+def test_esquema_do_modelo_omite_o_bloco_video() -> None:
+    esquema = esquema_do_modelo()
+    assert "video" not in esquema["properties"]
+    assert "video" not in esquema["required"]
+    assert "Video" not in esquema["$defs"]
+    assert esquema["additionalProperties"] is False
+    assert (
+        "video" in Decupagem.model_json_schema()["properties"]
+    )  # sem efeito colateral
