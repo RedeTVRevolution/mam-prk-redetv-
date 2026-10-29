@@ -40,6 +40,10 @@ resource "google_project_service" "apis" {
     "artifactregistry.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "firestore.googleapis.com",
+    # Ligadas antes pelo wizard; aqui para que o Terraform as declare.
+    "aiplatform.googleapis.com",
+    "iam.googleapis.com",
+    "iamcredentials.googleapis.com",
     "run.googleapis.com",
     "storage.googleapis.com",
   ])
@@ -68,7 +72,18 @@ resource "google_storage_bucket" "mam" {
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
-  depends_on                  = [google_project_service.apis]
+  # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
+  # e só das URLs da aplicação.
+  dynamic "cors" {
+    for_each = each.key == "quarentena" ? [1] : []
+    content {
+      origin          = google_cloud_run_v2_service.web.urls
+      method          = ["POST", "PUT"]
+      response_header = ["Content-Type", "Content-Range", "x-goog-resumable", "x-upload-content-length", "Location", "Range"]
+      max_age_seconds = 3600
+    }
+  }
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_service_account" "mam" {
