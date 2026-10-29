@@ -6,6 +6,8 @@ dependencies = ["fastapi"]
 
 [dependency-groups]
 dev = [
+ # Não é typosquat: fork do httpx mantido pelo Pydantic, exigido pelo
+ # TestClient do Starlette. https://github.com/pydantic/httpx2
  "httpx2>=2.16.0",
  "mypy",
  "pytest",
