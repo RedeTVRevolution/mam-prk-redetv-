@@ -1,0 +1,10 @@
+# Só entra na imagem o que está liberado abaixo: segredos locais nunca entram.
+*
+!api/
+!web/
+!pyproject.toml
+!uv.lock
+api/tests/
+web/node_modules/
+web/dist/
+**/__pycache__/

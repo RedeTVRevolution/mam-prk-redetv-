@@ -22,6 +22,29 @@ make verificar  # lint, tipos, testes unitários e build; nenhuma chamada à nuv
 
 O hook de pre-commit recusa o commit se o gitleaks achar um segredo nos arquivos preparados ou se o gitleaks não estiver instalado. O CI roda `make verificar` e o gitleaks em todo PR.
 
+## Deploy no dev
+
+A E0 roda num serviço Cloud Run único, `mam-web`, em que o FastAPI serve a API e o build do React. O Terraform em `infra/` cria tudo: Artifact Registry, Firestore, os buckets privados (quarentena, aceitos e decupagens), uma conta de serviço por componente e o serviço. Antes, rode uma vez o `scripts/wizard-gcp-dev.sh`, que cria o projeto, a conta `mam-terraform` e o `.env`. Precisa também do [Terraform](https://developer.hashicorp.com/terraform/install) e do Docker Desktop aberto:
+
+```sh
+brew tap hashicorp/tap && brew install hashicorp/tap/terraform
+```
+
+Depois, na raiz do repositório:
+
+```sh
+make deploy-dev
+```
+
+Ele impersona a `mam-terraform` (ADR 0002), sem chave em arquivo, e:
+
+1. cria o bucket do estado do Terraform, `<projeto>-tfstate`, se não existir: privado, com acesso uniforme e versionamento;
+2. aplica só o Artifact Registry, constrói a imagem para `linux/amd64` e a envia;
+3. aplica o resto pelo digest da imagem, então cada deploy gera uma revisão nova;
+4. confere que `/v1/health` responde 200 e mostra a URL.
+
+Cada `terraform apply` mostra o plano e pede confirmação.
+
 ## Loop AFK
 
 `scripts/afk/rodar.sh` implementa os tickets `ready-for-agent` sozinho, sem perguntas, um ticket por iteração. Cada iteração roda dois `claude -p` novos, cada um com o contexto vazio: um implementa o ticket e o outro revisa o que foi commitado. Tudo roda num contêiner Docker sem credencial de nuvem e num clone separado (`../mam-prk-redetv-afk`), para a pasta principal continuar livre. O estado entre as iterações fica em `.afk/` dentro do clone. Só o clone entra no contêiner: o repositório principal fica de fora, e os commits voltam para ele por um `git bundle`, que o `git fetch` confere objeto por objeto. No fim, o script faz um push só, no branch `afk/<data-hora>`, e abre um PR em rascunho com `Closes #N` de cada ticket feito. Se o agente mudou qualquer arquivo fora de `api/` e `web/src/` (por exemplo `.github/workflows/`, `.githooks/`, `Makefile`, lockfiles, configs do `web/`, `AGENTS.md` ou `docs/`), o corpo do PR abre com um aviso em destaque listando esses arquivos. O CI do PR roda o `ci.yml` e o `make verificar` do próprio branch, os hooks de `.githooks/` rodam no Mac e `AGENTS.md` e afins guiam os próximos agentes, então revise antes do merge. O merge sai com `make mesclar-afk` e nunca com o CI vermelho.

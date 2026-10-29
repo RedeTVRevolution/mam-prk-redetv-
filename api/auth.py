@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 PREFIXO_PROTEGIDO = "/v1"
+# Única rota de /v1 sem token: a checagem de saúde do Cloud Run e do deploy.
+CAMINHO_HEALTH = "/v1/health"
 
 
 class Usuario(BaseModel):
@@ -38,14 +40,16 @@ def _autenticar(request: Request) -> Usuario | None:
 
 
 def _protegido(caminho: str) -> bool:
+    if caminho == CAMINHO_HEALTH:
+        return False
     return caminho == PREFIXO_PROTEGIDO or caminho.startswith(PREFIXO_PROTEGIDO + "/")
 
 
 async def exigir_token(
     request: Request, seguinte: Callable[[Request], Awaitable[Response]]
 ) -> Response:
-    """Middleware: todo `/v1`, com qualquer método e caminho, passa pelo token
-    antes do roteamento, para que 404, 405 ou redirecionamento não respondam
+    """Middleware: todo `/v1`, com qualquer método e caminho, menos
+    `/v1/health`, passa pelo token antes do roteamento, para que 404, 405 ou redirecionamento não respondam
     a quem não se autenticou."""
     if not _protegido(request.url.path):
         return await seguinte(request)
