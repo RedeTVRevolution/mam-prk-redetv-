@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
+import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
 
 interface Usuario {
@@ -71,6 +72,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
       <button type="button" onClick={() => void sair()}>
         Sair
       </button>
+      <Biblioteca autenticador={autenticador} aoSessaoExpirada={() => void sair()} />
     </main>
   )
 }

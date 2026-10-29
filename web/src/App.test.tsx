@@ -18,6 +18,7 @@ const servidor = setupServer(
     }
     return HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br' })
   }),
+  http.get('/v1/jobs', () => HttpResponse.json([])),
 )
 
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
