@@ -6,7 +6,7 @@ set -euo pipefail
 
 max_iteracoes=${1:?uso: loop.sh <máximo de iterações>}
 aqui=$(cd "$(dirname "$0")" && pwd)
-export AFK_AVISO_TOKENS=${AFK_AVISO_TOKENS:-120000}
+aviso=${AFK_AVISO_TOKENS:-120000}
 corte=${AFK_CORTE_TOKENS:-140000}
 max_turnos=${AFK_MAX_TURNOS:-300}
 max_falhas=${AFK_MAX_FALHAS:-3}
@@ -56,6 +56,43 @@ proximo_ticket() {
     | sort_by(.number) | first | .number // empty'
 }
 
+# Roda um claude -p novo em segundo plano e o mata se o contexto passar do corte. Define $cortado.
+# O aviso vai para o hook de contexto; vazio, o hook não faz nada.
+roda_claude() { # <log> <prompt> <modelo ou vazio> <aviso ou vazio>
+  local args=(-p "$2" --output-format stream-json --verbose --dangerously-skip-permissions --max-turns "$max_turnos")
+  if [ -n "$3" ]; then args+=(--model "$3"); fi
+  if [ -n "${AFK_PLUGIN_DIR:-}" ]; then args+=(--plugin-dir "$AFK_PLUGIN_DIR"); fi
+
+  # Grupo de processos próprio, para o corte matar também o que o agente abriu.
+  set -m
+  AFK_AVISO_TOKENS=$4 claude "${args[@]}" > "$1" 2> "$1.err" < /dev/null &
+  local pid=$!
+  set +m
+
+  cortado=0
+  while kill -0 "$pid" 2> /dev/null; do
+    sleep "$intervalo"
+    tokens=$(contexto "$1")
+    if [ "${tokens:-0}" -gt "$corte" ]; then
+      kill -TERM -- "-$pid" 2> /dev/null || true
+      sleep 1
+      kill -KILL -- "-$pid" 2> /dev/null || true
+      cortado=1
+      anota "#$ticket: corte duro com $tokens tokens; o que não foi commitado é descartado"
+      break
+    fi
+  done
+  wait "$pid" 2> /dev/null || true
+}
+
+resposta() { jq -Rr 'fromjson? | select(.type == "result") | .result // empty' "$1"; }
+
+# Só o que foi commitado segue adiante.
+descarta() {
+  git reset -q --hard
+  git clean -fdq
+}
+
 contexto() {
   jq -R 'fromjson? | select(.type == "assistant" and .parent_tool_use_id == null)
     | .message.usage | .input_tokens + .cache_read_input_tokens + .cache_creation_input_tokens' "$1" | tail -n 1
@@ -101,40 +138,18 @@ for ((i = 1; i <= max_iteracoes; i++)); do
     parciais=0
   fi
   inicio=$(git rev-parse HEAD)
-  log=$logs/iteracao-$i.jsonl
+  log=$logs/iteracao-$i
+  motivo=""
   anota "iteração $i: #$ticket"
 
-  prompt=$(cat "${AFK_PROMPT:-$aqui/prompt.md}")
-  prompt+=$'\n\n## Esta iteração\n\n'"- Ticket: #$ticket"$'\n'"- Ponto fixo da revisão (commit de antes do ticket): $base"
+  esta=$'\n\n## Esta iteração\n\n'"- Ticket: #$ticket"$'\n'"- Commit de antes do ticket: $base"
+  prompt=$(cat "${AFK_PROMPT:-$aqui/prompt.md}")$esta
   if [ "$base" != "$inicio" ]; then
     prompt+=$'\n'"- Continuação: o ticket já tem commits. Leia \`git log $base..HEAD\` e as notas de .afk/progresso.md."
   fi
-  args=(-p "$prompt" --output-format stream-json --verbose --dangerously-skip-permissions --max-turns "$max_turnos")
-  if [ -n "${AFK_MODELO:-}" ]; then args+=(--model "$AFK_MODELO"); fi
-  if [ -n "${AFK_PLUGIN_DIR:-}" ]; then args+=(--plugin-dir "$AFK_PLUGIN_DIR"); fi
+  roda_claude "$log.jsonl" "$prompt" "${AFK_MODELO:-}" "$aviso"
 
-  # Grupo de processos próprio, para o corte matar também o que o agente abriu.
-  set -m
-  claude "${args[@]}" > "$log" 2> "$log.err" < /dev/null &
-  pid=$!
-  set +m
-
-  cortado=0
-  while kill -0 "$pid" 2> /dev/null; do
-    sleep "$intervalo"
-    tokens=$(contexto "$log")
-    if [ "${tokens:-0}" -gt "$corte" ]; then
-      kill -TERM -- "-$pid" 2> /dev/null || true
-      sleep 1
-      kill -KILL -- "-$pid" 2> /dev/null || true
-      cortado=1
-      anota "#$ticket: corte duro com $tokens tokens; o que não foi commitado é descartado"
-      break
-    fi
-  done
-  wait "$pid" 2> /dev/null || true
-
-  resposta=$(jq -Rr 'fromjson? | select(.type == "result") | .result // empty' "$log")
+  resposta=$(resposta "$log.jsonl")
   sinal=$(sed -n 's:.*<ticket>#*\([0-9]*\)</ticket>.*:\1:p' <<< "$resposta" | tail -n 1)
   status=$(sed -n 's:.*<status>\([a-z_]*\)</status>.*:\1:p' <<< "$resposta" | tail -n 1)
   if [ "$cortado" = 1 ]; then
@@ -142,10 +157,23 @@ for ((i = 1; i <= max_iteracoes; i++)); do
   elif [ "$sinal" != "$ticket" ]; then
     status=""
   fi
+  descarta
 
-  # Portão: descarta o que não foi commitado e confere o que foi.
-  git reset -q --hard
-  git clean -fdq
+  # Revisão: outro claude -p, com contexto novo e outro modelo, sobre o ticket inteiro (base..HEAD).
+  # Sem aviso de contexto, que manda terminar como parcial: o revisor só tem o corte duro.
+  if [ "$status" = feito ] && [ "$(git rev-parse HEAD)" != "$base" ]; then
+    roda_claude "$log-revisao.jsonl" "$(cat "${AFK_PROMPT_REVISAO:-$aqui/revisao.md}")$esta" "${AFK_MODELO_REVISOR:-opus}" ""
+    revisao=$(resposta "$log-revisao.jsonl" | sed -n 's:.*<revisao>\([a-z]*\)</revisao>.*:\1:p' | tail -n 1)
+    descarta
+    if [ "$cortado" = 0 ] && [ "$revisao" = erro ]; then
+      status=erro
+    elif [ "$cortado" = 1 ] || [ "$revisao" != feita ]; then
+      status=""
+      motivo="a revisão não terminou com <revisao>feita</revisao> ($log-revisao.jsonl)"
+    fi
+  fi
+
+  # Portão, depois da revisão: confere o que foi commitado.
   verde=1
   if [ "$(git rev-parse HEAD)" != "$inicio" ] && ! bash -c "$verificar" > "$log.verificar" 2>&1; then
     git reset -q --hard "$inicio"
@@ -153,7 +181,8 @@ for ((i = 1; i <= max_iteracoes; i++)); do
   fi
 
   if [ "$status" = erro ]; then
-    anota "#$ticket: erro de ambiente informado pelo agente; o loop para (veja as notas acima e $log)"
+    anota "#$ticket: erro de ambiente informado pelo agente; o loop para (veja as notas acima e $log*)"
+    echo "$ticket $base $parciais" > "$estado" # o trabalho do ticket sai do branch do PR, lá embaixo
     saida=2
     break
   elif [ "$status" = bloqueado ]; then
@@ -163,7 +192,7 @@ for ((i = 1; i <= max_iteracoes; i++)); do
     if [ "$verde" = 0 ]; then
       anota "#$ticket: make verificar falhou depois da iteração; commits da iteração desfeitos ($log.verificar)"
     else
-      anota "#$ticket: iteração terminou sem <ticket>$ticket</ticket> e <status> válidos ($log)"
+      anota "#$ticket: ${motivo:-iteração terminou sem <ticket>$ticket</ticket> e <status> válidos ($log.jsonl)}"
     fi
     echo "$ticket $base $parciais" > "$estado"
     if [ "$falhas" -ge "$max_falhas" ]; then

@@ -1,5 +1,9 @@
 # MAM RedeTV — PoC de decupagem automática com IA
 
+## Idioma
+
+- O agente responde sempre em português.
+
 ## Repositório
 
 - GitHub: https://github.com/RedeTVRevolution/mam-prk-redetv-.git

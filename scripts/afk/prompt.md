@@ -10,13 +10,13 @@ Você trabalha sozinho, sem ninguém olhando, e ninguém responde perguntas dura
 
 ## Passos
 
-Chame as skills pela ferramenta Skill, sempre com o nome completo. Se uma delas não estiver disponível, não use outra no lugar (nem o `/code-review` embutido): anote em `.afk/progresso.md` qual skill faltou e termine com o status `erro`.
+Chame a skill pela ferramenta Skill, com o nome completo. Se ela não estiver disponível, não use outra no lugar: anote em `.afk/progresso.md` que a skill faltou e termine com o status `erro`.
 
 1. Implemente com a skill `mattpocock-skills:tdd`, nos pontos de teste combinados no ticket e na spec.
 2. Rode `make verificar` até passar.
 3. Faça commit. A mensagem começa com `#<N>: `.
-4. Revise com a skill `mattpocock-skills:code-review`, passando como ponto fixo o commit indicado em **Esta iteração**. A revisão vem depois do commit; antes dele, ela não enxerga nada.
-5. Corrija o que a revisão apontar, rode `make verificar` de novo e faça um commit novo. Se decidir não corrigir algum ponto, anote em `.afk/progresso.md` o ponto e o motivo.
+
+Não revise o próprio trabalho: quando você termina com `feito`, o script abre outro agente, com contexto novo, que revisa o ticket inteiro e commita as correções.
 
 ## Quando precisar de uma decisão humana
 
@@ -36,7 +36,7 @@ Se um hook avisar que o contexto passou do limite, siga o aviso na hora: comite 
 - Não feche issues e não ponha a label `afk-feito`: o script faz isso depois de conferir `make verificar`.
 - Não edite `scripts/afk/` nem `.claude/`.
 - Não há credencial de nuvem aqui. Nada de `gcloud`, `terraform apply` ou chamadas reais ao Gemini: os testes usam versões falsas.
-- No fim da iteração, o script descarta o que não estiver commitado e roda `make verificar`. Se falhar, ele desfaz todos os commits da iteração.
+- No fim da iteração, o script descarta o que não estiver commitado, roda a revisão (se você terminou com `feito`) e depois `make verificar`. Se falhar, ele desfaz todos os commits da iteração.
 
 ## Notas para a próxima iteração
 
@@ -51,7 +51,7 @@ Termine a resposta com estas duas linhas:
 <status>feito|parcial|bloqueado|erro</status>
 ```
 
-- `feito`: ticket completo e revisado, correções commitadas, `make verificar` verde.
+- `feito`: ticket completo e commitado, `make verificar` verde. A revisão vem em seguida, com outro agente.
 - `parcial`: falta trabalho, e o que está commitado passa no `make verificar`. A próxima iteração continua.
 - `bloqueado`: você comentou a pergunta no ticket e trocou a label.
 - `erro`: problema do ambiente (skill ausente, ferramenta quebrada), não do ticket. O loop para.
