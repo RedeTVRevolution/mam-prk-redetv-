@@ -215,8 +215,8 @@ GEMINI_RESULT="não testado"
 BUDGET_STATUS="não criado"
 # Pendências que vão para o comentário da #2 e para o resumo final.
 # Sem organização, o dev não aceita política de organização nem VPC-SC.
-SKIPPED+=("Produção: ativar a política iam.disableServiceAccountKeyCreation (exige organização; o dev não tem)")
-SKIPPED+=("Produção: criar o perímetro VPC Service Controls (exige organização; o dev não tem)")
+SKIPPED+=("E10 · Produção: ativar a política iam.disableServiceAccountKeyCreation (exige organização; o dev não tem)")
+SKIPPED+=("E10 · Produção: criar o perímetro VPC Service Controls (exige organização; o dev não tem)")
 
 cd "$(git rev-parse --show-toplevel)"
 
