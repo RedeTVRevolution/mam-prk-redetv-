@@ -515,7 +515,7 @@ A segurança de base (IAM, buckets privados, nenhum segredo) vale desde a E0; o 
 
 ### Recorte da E0 (grill de 29/10/2026)
 
-A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decupagem, player. A qualidade só precisa parecer plausível; ela é medida com números na E1.
+A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decupagem, player. Da qualidade, só os tempos são medidos, contra um gabarito; o resto é medido com números na E1.
 
 | Tema | Decisão na E0 |
 | --- | --- |
@@ -527,7 +527,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Contas iniciais | Administradores: Bruno e uma pessoa da TI da RedeTV. Usuários: Bruno e o documentalista |
 | Clipes | 5 clipes reais de programas variados, com 1 a 10 min, escolhidos pelo documentalista; são também os clipes-ouro do teste de contrato. Ficam só num bucket do `dev`, nunca no git, e o envio ao Gemini é autorizado por escrito |
 | Upload | O front confere extensão, tipo, tamanho e `ftyp`; `POST /v1/jobs` devolve URL assinada de upload retomável para a quarentena. Sem SHA-256 no navegador, sem `Idempotency-Key` e sem deduplicação (E7) |
-| Quarentena | As 7 camadas de Entradas hostis; duração máxima de 10 min |
+| Quarentena | As 7 camadas de Entradas hostis; duração entre 1 s e 10 min, e fora disso `duracao_excedida` |
 | Derivados | Só o proxy de reprodução (480p H.264 com faststart), que serve ao player e ao Gemini: o modelo vê o mesmo arquivo e o mesmo tempo que o clique usa, e a documentação da Vertex não garante H.265. O proxy de análise com timecode queimado fica para o A/B da E1, se os tempos ficarem ruins |
 | Análise | Uma chamada ao 3.5 Flash-Lite, só em Flex. Ela pede o esquema 1.1 inteiro, com tempos crus do modelo: sem detecção de cortes, sem regra de tempos e com `quadro` vazio |
 | Falhas | 429 ou 5xx do Gemini: até 5 tentativas com backoff e jitter. Resposta fora do esquema: refeita até 2 vezes. Esgotadas as tentativas, `falhou` com `analise_falhou`, nunca uma decupagem parcial. Rótulo de custo com o id do job |
@@ -535,7 +535,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | API | `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{id}`, `GET /v1/jobs/{id}/decupagem` e `GET /v1/jobs/{id}/reproducao`, todas com o token do Identity Platform. Sem `DELETE`, webhook, `ETag` nem chave de API |
 | Telas | Login com cadastro do MFA; Biblioteca com lista, status por consulta periódica e upload; Vídeo com player e painel da decupagem por categoria, em que o clique num item salta o player |
 | CI e testes | GitHub Actions com lint, tipos, testes unitários e gitleaks; contrato com o Gemini por cassetes e chamada real sob demanda nos 5 clipes-ouro; Terraform num único `dev`. Ambientes efêmeros por PR, Cloud Deploy e emuladores ficam para a E1 |
-| Aceite | Os 5 clipes decupados; um teste Playwright prova que clicar em cada item leva o player ao `inicio_ms`; o documentalista registra a impressão dos tempos, sem meta numérica, como insumo para as metas da E1; nenhum segredo no repositório |
+| Aceite | Os 5 clipes decupados; um teste Playwright prova que clicar em cada item leva o player ao `inicio_ms`; pelo menos 95% dos itens pareados com o gabarito têm início e fim a até 2 s, como na E1, e o relatório lista os piores casos; nenhum segredo no repositório. O documentalista anota o gabarito (aparições, menções, pautas e comerciais) em `evals/gabarito/`, um CSV por clipe-ouro; a cobertura é informada, mas só vira meta na E1 |
 
 ## Decisões e perguntas em aberto
 
