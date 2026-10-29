@@ -1,7 +1,11 @@
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Protocol
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
+
+PREFIXO_PROTEGIDO = "/v1"
 
 
 class Usuario(BaseModel):
@@ -21,17 +25,44 @@ class VerificadorDeToken(Protocol):
     def verificar(self, token: str) -> Usuario: ...
 
 
-def usuario_autenticado(request: Request) -> Usuario:
+def _autenticar(request: Request) -> Usuario | None:
     esquema, _, token = request.headers.get("Authorization", "").partition(" ")
+    token = token.strip()
     if esquema.lower() != "bearer" or not token:
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Bearer"})
+        return None
     verificador: VerificadorDeToken = request.app.state.verificador
     try:
         return verificador.verificar(token)
     except TokenInvalido:
-        raise HTTPException(
-            status_code=401, headers={"WWW-Authenticate": "Bearer"}
-        ) from None
+        return None
+
+
+def _protegido(caminho: str) -> bool:
+    return caminho == PREFIXO_PROTEGIDO or caminho.startswith(PREFIXO_PROTEGIDO + "/")
+
+
+async def exigir_token(
+    request: Request, seguinte: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Middleware: todo `/v1`, com qualquer método e caminho, passa pelo token
+    antes do roteamento, para que 404, 405 ou redirecionamento não respondam
+    a quem não se autenticou."""
+    if not _protegido(request.url.path):
+        return await seguinte(request)
+    usuario = _autenticar(request)
+    if usuario is None:
+        return JSONResponse(
+            {"detail": "Not authenticated"},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    request.state.usuario = usuario
+    return await seguinte(request)
+
+
+def usuario_autenticado(request: Request) -> Usuario:
+    usuario: Usuario = request.state.usuario
+    return usuario
 
 
 UsuarioAutenticado = Annotated[Usuario, Depends(usuario_autenticado)]

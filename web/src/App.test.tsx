@@ -43,6 +43,18 @@ async function preencherSenha(
   await usuario.click(screen.getByRole('button', { name: 'Entrar' }))
 }
 
+async function confirmarCodigo(usuario: ReturnType<typeof userEvent.setup>) {
+  await usuario.type(await screen.findByLabelText('Código do autenticador'), CODIGO_TOTP_FALSO)
+  await usuario.click(screen.getByRole('button', { name: 'Confirmar' }))
+}
+
+async function autenticadorComSessao() {
+  const auth = autenticador()
+  await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
+  await auth.confirmarTotp(CODIGO_TOTP_FALSO)
+  return auth
+}
+
 test('sem sessão, mostra só o login e não chama a API', async () => {
   render(<App autenticador={autenticador()} />)
 
@@ -56,12 +68,10 @@ test('login com senha e código TOTP abre a Biblioteca com o token na API', asyn
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
 
-  await usuario.type(await screen.findByLabelText('E-mail'), 'ana@redetv.com.br')
-  await usuario.type(screen.getByLabelText('Senha'), 'senha-forte-1')
-  await usuario.click(screen.getByRole('button', { name: 'Entrar' }))
+  await screen.findByLabelText('E-mail')
+  await preencherSenha(usuario)
   expect(screen.queryByText('Biblioteca')).toBeNull()
-  await usuario.type(await screen.findByLabelText('Código do autenticador'), CODIGO_TOTP_FALSO)
-  await usuario.click(screen.getByRole('button', { name: 'Confirmar' }))
+  await confirmarCodigo(usuario)
 
   expect(await screen.findByText('Biblioteca')).toBeTruthy()
   expect(screen.getByText('ana@redetv.com.br')).toBeTruthy()
@@ -99,8 +109,10 @@ test('primeiro acesso mostra o cadastro do autenticador e entra ao confirmar o c
   await preencherSenha(usuario)
 
   expect(await screen.findByText('SEGREDOFALSO')).toBeTruthy()
-  await usuario.type(screen.getByLabelText('Código do autenticador'), CODIGO_TOTP_FALSO)
-  await usuario.click(screen.getByRole('button', { name: 'Confirmar' }))
+  expect(
+    screen.getByRole('link', { name: 'Abrir no aplicativo autenticador' }).getAttribute('href'),
+  ).toBe('otpauth://totp/MAM')
+  await confirmarCodigo(usuario)
 
   expect(await screen.findByText('Biblioteca')).toBeTruthy()
 })
@@ -111,8 +123,7 @@ test('o botão sair volta ao login e apaga a sessão', async () => {
   render(<App autenticador={auth} />)
   await screen.findByLabelText('E-mail')
   await preencherSenha(usuario)
-  await usuario.type(await screen.findByLabelText('Código do autenticador'), CODIGO_TOTP_FALSO)
-  await usuario.click(screen.getByRole('button', { name: 'Confirmar' }))
+  await confirmarCodigo(usuario)
   await usuario.click(await screen.findByRole('button', { name: 'Sair' }))
 
   expect(await screen.findByLabelText('E-mail')).toBeTruthy()
@@ -121,22 +132,44 @@ test('o botão sair volta ao login e apaga a sessão', async () => {
 })
 
 test('sessão já existente abre direto na Biblioteca', async () => {
-  const auth = autenticador()
-  await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
-  await auth.confirmarTotp(CODIGO_TOTP_FALSO)
+  const auth = await autenticadorComSessao()
   render(<App autenticador={auth} />)
 
   expect(await screen.findByText('Biblioteca')).toBeTruthy()
 })
 
 test('401 da API derruba a sessão e leva ao login', async () => {
-  const auth = autenticador()
-  await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
-  await auth.confirmarTotp(CODIGO_TOTP_FALSO)
+  const auth = await autenticadorComSessao()
   servidor.use(http.get('/v1/eu', () => new HttpResponse(null, { status: 401 })))
   render(<App autenticador={auth} />)
 
   expect(await screen.findByLabelText('E-mail')).toBeTruthy()
   await waitFor(async () => expect(await auth.token()).toBeNull())
   expect(screen.queryByText('Biblioteca')).toBeNull()
+})
+
+test('API recusando o token logo depois do login volta ao início do login', async () => {
+  servidor.use(http.get('/v1/eu', () => new HttpResponse(null, { status: 401 })))
+  const usuario = userEvent.setup()
+  render(<App autenticador={autenticador()} />)
+  await screen.findByLabelText('E-mail')
+  await preencherSenha(usuario)
+  await confirmarCodigo(usuario)
+
+  expect(await screen.findByLabelText('E-mail')).toBeTruthy()
+  expect(screen.queryByLabelText('Código do autenticador')).toBeNull()
+})
+
+test('API fora do ar mostra aviso sem dados, e tentar de novo entra', async () => {
+  const usuario = userEvent.setup()
+  const auth = await autenticadorComSessao()
+  servidor.use(http.get('/v1/eu', () => new HttpResponse(null, { status: 500 })))
+  render(<App autenticador={auth} />)
+
+  expect((await screen.findByRole('alert')).textContent).toContain('API')
+  expect(screen.queryByText('Biblioteca')).toBeNull()
+
+  servidor.resetHandlers()
+  await usuario.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+  expect(await screen.findByText('Biblioteca')).toBeTruthy()
 })

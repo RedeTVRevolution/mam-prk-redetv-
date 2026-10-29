@@ -69,6 +69,9 @@ export default function Login({
                   digite o código que ele mostrar.
                 </p>
                 <code>{etapa.segredo}</code>
+                <p>
+                  <a href={etapa.uri}>Abrir no aplicativo autenticador</a>
+                </p>
               </section>
             )}
             <label>

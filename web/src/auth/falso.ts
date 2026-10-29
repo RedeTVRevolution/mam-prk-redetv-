@@ -38,19 +38,23 @@ export class AutenticadorFalso implements Autenticador {
   }
 
   async confirmarTotp(codigo: string): Promise<void> {
-    this.concluir(codigo)
+    this.concluir(codigo, true)
   }
 
   async cadastrarTotp(codigo: string): Promise<void> {
-    this.concluir(codigo)
+    this.concluir(codigo, false)
   }
 
   async sair(): Promise<void> {
     this.sessao = null
   }
 
-  private concluir(codigo: string): void {
-    if (!this.pendente || codigo !== CODIGO_TOTP_FALSO) throw new CredencialInvalida()
+  // Como o SDK, confirmar exige um autenticador já cadastrado e cadastrar exige que não haja.
+  private concluir(codigo: string, jaCadastrado: boolean): void {
+    if (!this.pendente || this.pendente.totpCadastrado !== jaCadastrado) {
+      throw new Error('etapa de TOTP fora de ordem')
+    }
+    if (codigo !== CODIGO_TOTP_FALSO) throw new CredencialInvalida()
     this.pendente.totpCadastrado = true
     this.sessao = `token-de-${this.pendente.email}`
     this.pendente = null
