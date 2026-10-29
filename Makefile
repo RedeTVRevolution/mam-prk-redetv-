@@ -1,4 +1,4 @@
-.PHONY: instalar verificar testar-afk
+.PHONY: instalar verificar testar-afk mesclar-afk
 
 instalar:
 	uv sync --locked
@@ -18,3 +18,6 @@ verificar:
 testar-afk:
 	shellcheck scripts/afk/*.sh
 	scripts/afk/testes.sh
+
+mesclar-afk:
+	scripts/afk/mesclar.sh $(BRANCH)

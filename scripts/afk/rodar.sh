@@ -2,6 +2,7 @@
 # Roda o loop AFK no contêiner, num clone separado, e no fim abre um PR em rascunho.
 # Os tokens vêm do Keychain do macOS na hora; veja "Loop AFK" no README.
 # Uso: scripts/afk/rodar.sh <máximo de iterações>
+# Com AFK_AUTO_MERGE=1, roda make mesclar-afk no fim, salvo se o agente mudou .github/workflows/.
 set -euo pipefail
 
 iteracoes=${1:?uso: scripts/afk/rodar.sh <máximo de iterações>}
@@ -49,7 +50,7 @@ CLAUDE_CODE_OAUTH_TOKEN=$claude_token GH_TOKEN=$gh_agente docker run --rm --init
   -w "$clone" \
   -e CLAUDE_CODE_OAUTH_TOKEN -e GH_TOKEN \
   -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL \
-  -e AFK_AVISO_TOKENS -e AFK_CORTE_TOKENS -e AFK_MAX_TURNOS -e AFK_MAX_FALHAS -e AFK_MAX_PARCIAIS -e AFK_MODELO \
+  -e AFK_AVISO_TOKENS -e AFK_CORTE_TOKENS -e AFK_MAX_TURNOS -e AFK_MAX_FALHAS -e AFK_MAX_PARCIAIS -e AFK_MODELO -e AFK_MODELO_REVISOR \
   -e AFK_PLUGIN_DIR=/opt/plugins/mattpocock-skills \
   mam-afk bash -c 'make instalar > /dev/null && /opt/afk/loop.sh "$1"; s=$?
     git bundle create -q .afk/afk.bundle --branches="afk/*"; exit $s' _ "$iteracoes"
@@ -73,14 +74,33 @@ fi
 feitos=$(grep -xE '[0-9]+' "$clone/.afk/feitos" | paste -sd ' ' - || true)
 # shellcheck disable=SC2086 # um número por palavra
 fecha=$(printf 'Closes #%s\n' $feitos)
+# O CI do PR roda o ci.yml do próprio branch: mudança do agente ali pede olho humano.
+# Nomes vêm dos commits do agente: caractere fora do padrão vira "?".
+workflows=$(git diff --name-only "origin/main...$branch" -- .github/workflows/ | sed -E 's#[^A-Za-z0-9._/-]#?#g')
+aviso=
+if [ -n "$workflows" ]; then
+  aviso="> [!WARNING]
+> O agente mudou o CI. Revise estes arquivos antes do merge:
+$(sed -E "s/.*/> - \`&\`/" <<< "$workflows")
+
+"
+fi
 git_script push -q -u origin "$branch"
 GH_TOKEN=$gh_script gh pr create --draft --base main --head "$branch" \
   --title "Loop AFK $(date +%F): #${feitos// / #}" \
-  --body "Tickets feitos pelo loop AFK (\`scripts/afk\`).
+  --body "${aviso}Tickets feitos pelo loop AFK (\`scripts/afk\`).
 
 $fecha
 
 As notas das iterações estão em \`$notas\`, na pasta principal.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+if [ "${AFK_AUTO_MERGE:-0}" = 1 ]; then
+  if [ -n "$workflows" ]; then
+    echo "O agente mudou .github/workflows/; sem merge automático. Revise o PR e rode make mesclar-afk." >&2
+  else
+    make mesclar-afk BRANCH="$branch"
+  fi
+fi
 exit "$saida"
