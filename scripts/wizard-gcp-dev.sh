@@ -274,7 +274,7 @@ for role in roles/resourcemanager.projectIamAdmin roles/serviceusage.serviceUsag
     roles/iam.serviceAccountAdmin roles/iam.serviceAccountUser roles/run.admin \
     roles/storage.admin roles/artifactregistry.admin roles/datastore.owner \
     roles/eventarc.admin roles/workflows.admin roles/identityplatform.admin \
-    roles/monitoring.editor; do
+    roles/monitoring.editor roles/logging.configWriter; do
   gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA_EMAIL" \
     --role="$role" --condition=None >/dev/null
   printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$role"
