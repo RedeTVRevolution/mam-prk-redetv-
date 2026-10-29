@@ -14,6 +14,7 @@ from api.comparador import (
     normalizar,
     parear,
     passou,
+    se_sobrepoem,
     sobreposicao_ms,
     tempo_ms,
 )
@@ -41,18 +42,32 @@ def test_todo_item_do_gabarito_tem_par_ou_vai_para_nao_encontrados(
 def test_par_tem_mesmo_tipo_e_sobreposicao(g: list[Item], m: list[Item]) -> None:
     for p in parear(g, m)[0]:
         assert p.gabarito.tipo == p.modelo.tipo
-        assert min(p.gabarito.fim_ms, p.modelo.fim_ms) > max(
-            p.gabarito.inicio_ms, p.modelo.inicio_ms
-        )
+        assert se_sobrepoem(p.gabarito, p.modelo)
+
+
+@given(tempos, tempos, tempos, tipos)
+def test_item_pontual_pareia_com_o_que_o_contem(
+    t: int, a: int, b: int, tipo: str
+) -> None:
+    ini, fim = sorted((a, b))
+    g = Item(tipo, "Ana", t, t)  # type: ignore[arg-type]
+    m = Item(tipo, "ana", ini, fim)  # type: ignore[arg-type]
+    assert bool(parear([g], [m])[0]) == (ini <= t <= fim)
+    assert bool(parear([m], [g])[0]) == (ini <= t <= fim)
+
+
+@given(tempos, st.integers(1, 10_000), st.integers(0, 10_000))
+def test_intervalos_que_so_se_tocam_nao_pareiam(ini: int, dur: int, dur2: int) -> None:
+    g = Item("pauta", "x", ini, ini + dur)
+    m = Item("pauta", "x", ini + dur, ini + dur + dur2 + 1)
+    assert parear([g], [m])[0] == []
 
 
 @given(itens(st.sampled_from(["aparicao", "mencao", "comercial"])), nomes)
 def test_identidade_diferente_nao_pareia(g: Item, outro: str) -> None:
     m = Item(g.tipo, outro, g.inicio_ms, g.fim_ms)
     pareados, _ = parear([g], [m])
-    assert bool(pareados) == (normalizar(outro) == normalizar(g.identidade)) or (
-        g.inicio_ms == g.fim_ms and not pareados
-    )
+    assert bool(pareados) == (normalizar(outro) == normalizar(g.identidade))
 
 
 def test_identidade_ignora_maiusculas_e_acentos() -> None:
@@ -64,12 +79,7 @@ def test_identidade_ignora_maiusculas_e_acentos() -> None:
 @given(itens(st.just("pauta")), nomes)
 def test_pauta_vale_so_pela_sobreposicao(g: Item, titulo: str) -> None:
     m = Item("pauta", titulo, g.inicio_ms, g.fim_ms + 1)
-    assert len(parear([g], [m])[0]) == (
-        g.fim_ms > g.inicio_ms
-        or g.fim_ms + 1 > g.inicio_ms
-        and g.inicio_ms < g.fim_ms + 1
-        and min(g.fim_ms, m.fim_ms) > g.inicio_ms
-    )
+    assert len(parear([g], [m])[0]) == 1
 
 
 @given(
@@ -93,6 +103,16 @@ def test_tolerancia_de_2s_no_inicio_e_no_fim(a: int, b: int, di: int, df: int) -
         p.erro_inicio_ms <= TOLERANCIA_MS and p.erro_fim_ms <= TOLERANCIA_MS
     )
     assert p.erro_inicio_ms == abs(m.inicio_ms - ini)
+
+
+@pytest.mark.parametrize(("desvio", "dentro"), [(2000, True), (2001, False)])
+def test_limite_exato_da_tolerancia(desvio: int, dentro: bool) -> None:
+    g = Item("pauta", "x", 10_000, 20_000)
+    for m in (
+        Item("pauta", "x", 10_000 + desvio, 20_000),
+        Item("pauta", "x", 10_000, 20_000 + desvio),
+    ):
+        assert parear([g], [m])[0][0].dentro is dentro
 
 
 def _res(pareados_dentro: int, fora: int, sem_par: int) -> ResultadoDoClipe:
@@ -173,7 +193,7 @@ def test_comando_passou(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     assert main([str(g), str(d)]) == 0
     saida = capsys.readouterr().out
     assert "PASSOU" in saida and "Marca" in saida  # não encontrado listado
-    assert "1.0s / 1.0s" in saida
+    assert "1.000s / 1.000s" in saida
 
 
 def test_comando_falhou(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -181,7 +201,7 @@ def test_comando_falhou(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     assert main([str(g), str(d)]) == 1
     saida = capsys.readouterr().out
     assert "FALHOU" in saida and "[FORA] pauta Chuva" in saida
-    assert saida.index("piores casos") < saida.index("pauta Chuva: 5.0s")
+    assert saida.index("piores casos") < saida.index("pauta Chuva: 5.000s")
 
 
 def test_entrada_invalida_da_codigo_2(tmp_path: Path) -> None:
@@ -189,3 +209,20 @@ def test_entrada_invalida_da_codigo_2(tmp_path: Path) -> None:
     (g / "clipe1.csv").write_text("tipo,identidade,inicio,fim\n")
     assert main([str(g), str(d)]) == 2
     assert main([]) == 2
+
+
+def test_csv_com_bom_e_sha_em_maiusculas(tmp_path: Path) -> None:
+    g, d = _pasta(tmp_path, 21_000)
+    csv = g / "clipe1.csv"
+    texto = csv.read_text(encoding="utf-8").replace(SHA, SHA.upper())
+    csv.write_text("\ufeff" + texto, encoding="utf-8")
+    assert main([str(g), str(d)]) == 0
+
+
+def test_sha_repetido_da_codigo_2(tmp_path: Path) -> None:
+    g, d = _pasta(tmp_path, 21_000)
+    (d / "copia.json").write_bytes((d / "clipe1.json").read_bytes())
+    assert main([str(g), str(d)]) == 2
+    (d / "copia.json").unlink()
+    (g / "copia.csv").write_bytes((g / "clipe1.csv").read_bytes())
+    assert main([str(g), str(d)]) == 2

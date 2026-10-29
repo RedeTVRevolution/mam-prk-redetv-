@@ -20,7 +20,9 @@ from api.decupagem import Decupagem
 
 Tipo = Literal["aparicao", "mencao", "pauta", "comercial"]
 TIPOS: tuple[Tipo, ...] = ("aparicao", "mencao", "pauta", "comercial")
-TIPOS_COM_IDENTIDADE = {"aparicao", "mencao", "comercial"}  # pauta: só tempo
+TIPOS_COM_IDENTIDADE: frozenset[Tipo] = frozenset(
+    {"aparicao", "mencao", "comercial"}
+)  # pauta: só tempo
 TOLERANCIA_MS = 2000
 META = 0.95
 
@@ -82,13 +84,19 @@ def sobreposicao_ms(a: Item, b: Item) -> int:
     return min(a.fim_ms, b.fim_ms) - max(a.inicio_ms, b.inicio_ms)
 
 
+def se_sobrepoem(a: Item, b: Item) -> bool:
+    """Têm trecho em comum; um item pontual (início = fim) vale se cair no outro."""
+    s = sobreposicao_ms(a, b)
+    return s > 0 or (s == 0 and (a.inicio_ms == a.fim_ms or b.inicio_ms == b.fim_ms))
+
+
 def parear(
     gabarito: Iterable[Item], modelo: list[Item]
 ) -> tuple[list[Pareado], list[Item]]:
     """Pareia cada item do gabarito com o do modelo de maior sobreposição.
 
     Mesmo tipo; aparição, menção e comercial exigem também a mesma identidade.
-    Sem sobreposição (nem ponto em comum), não há par.
+    Sem trecho em comum, não há par; item pontual pareia com o que o contém.
     """
     pareados: list[Pareado] = []
     sem_par: list[Item] = []
@@ -101,7 +109,7 @@ def parear(
                 g.tipo not in TIPOS_COM_IDENTIDADE
                 or normalizar(m.identidade) == normalizar(g.identidade)
             )
-            and sobreposicao_ms(g, m) > 0
+            and se_sobrepoem(g, m)
         ]
         if not candidatos:
             sem_par.append(g)
@@ -139,9 +147,9 @@ def tempo_ms(texto: str) -> int:
 
 def ler_gabarito(caminho: Path) -> tuple[str, list[Item]]:
     """Devolve o SHA-256 do clipe e os itens do CSV."""
-    linhas = caminho.read_text(encoding="utf-8").splitlines()
+    linhas = caminho.read_text(encoding="utf-8-sig").splitlines()
     achou = (
-        re.fullmatch(r"#\s*sha256:\s*([0-9a-f]{64})", linhas[0].strip())
+        re.fullmatch(r"#\s*sha256:\s*([0-9a-fA-F]{64})", linhas[0].strip())
         if linhas
         else None
     )
@@ -164,7 +172,7 @@ def ler_gabarito(caminho: Path) -> tuple[str, list[Item]]:
             itens.append(Item(tipo, linha["identidade"].strip(), inicio, fim))
         except (ValueError, AttributeError, TypeError) as e:
             raise ValueError(f"{caminho.name}, linha {n}: {e}") from e
-    return achou[1], itens
+    return achou[1].lower(), itens
 
 
 def comparar_clipe(nome: str, gabarito: list[Item], d: Decupagem) -> ResultadoDoClipe:
@@ -172,49 +180,62 @@ def comparar_clipe(nome: str, gabarito: list[Item], d: Decupagem) -> ResultadoDo
     return ResultadoDoClipe(nome, pareados, sem_par)
 
 
+def _totais(resultados: list[ResultadoDoClipe]) -> tuple[int, int]:
+    """Itens pareados e, entre eles, os dentro da tolerância, somando os clipes."""
+    return sum(len(r.pareados) for r in resultados), sum(r.dentro for r in resultados)
+
+
 def passou(resultados: list[ResultadoDoClipe]) -> bool:
-    pareados = sum(len(r.pareados) for r in resultados)
-    dentro = sum(r.dentro for r in resultados)
+    pareados, dentro = _totais(resultados)
     return pareados > 0 and dentro / pareados >= META
 
 
-def _s(ms: int) -> str:
-    return f"{ms / 1000:.1f}s"
+def _segundos(ms: int) -> str:
+    return f"{ms / 1000:.3f}s"
+
+
+def _porcentagem(parte: int, total: int) -> str:
+    return f"{100 * parte / total:.1f}%" if total else "n/d"
+
+
+_DENTRO = f"dentro de {TOLERANCIA_MS / 1000:g} s"
 
 
 def relatorio(resultados: list[ResultadoDoClipe]) -> str:
     saida: list[str] = []
     for r in resultados:
         total = len(r.pareados)
-        pct = f"{100 * r.dentro / total:.1f}%" if total else "n/d"
         saida.append(f"== {r.nome}")
-        saida.append(f"pareados: {total}, dentro de 2 s: {r.dentro} ({pct})")
+        saida.append(
+            f"pareados: {total}, {_DENTRO}: {r.dentro} ({_porcentagem(r.dentro, total)})"
+        )
         saida.append("itens (erro de início / erro de fim):")
         for p in r.pareados:
             marca = "ok" if p.dentro else "FORA"
             g = p.gabarito
             saida.append(
                 f"  [{marca}] {g.tipo} {g.identidade}: "
-                f"{_s(p.erro_inicio_ms)} / {_s(p.erro_fim_ms)}"
+                f"{_segundos(p.erro_inicio_ms)} / {_segundos(p.erro_fim_ms)}"
             )
         saida.append("piores casos (maior erro primeiro):")
-        for p in r.piores[:5]:
+        for p in r.piores:
             saida.append(
-                f"  {p.gabarito.tipo} {p.gabarito.identidade}: {_s(p.erro_ms)}"
+                f"  {p.gabarito.tipo} {p.gabarito.identidade}: {_segundos(p.erro_ms)}"
             )
         saida.append(
             f"não encontrados (falha de cobertura, fora do critério): {len(r.nao_encontrados)}"
         )
         for g in r.nao_encontrados:
             saida.append(
-                f"  {g.tipo} {g.identidade} ({_s(g.inicio_ms)}–{_s(g.fim_ms)})"
+                f"  {g.tipo} {g.identidade} ({_segundos(g.inicio_ms)}–{_segundos(g.fim_ms)})"
             )
         saida.append("")
-    pareados = sum(len(r.pareados) for r in resultados)
-    dentro = sum(r.dentro for r in resultados)
-    pct = f"{100 * dentro / pareados:.1f}%" if pareados else "n/d"
+    pareados, dentro = _totais(resultados)
     nao = sum(len(r.nao_encontrados) for r in resultados)
-    saida.append(f"TOTAL: {dentro}/{pareados} dentro de 2 s ({pct}); meta {META:.0%}")
+    saida.append(
+        f"TOTAL: {dentro}/{pareados} {_DENTRO} ({_porcentagem(dentro, pareados)});"
+        f" meta {META:.0%}"
+    )
     saida.append(f"cobertura: {nao} itens do gabarito sem par")
     saida.append("PASSOU" if passou(resultados) else "FALHOU")
     return "\n".join(saida)
@@ -224,13 +245,20 @@ def executar(gabarito_dir: Path, decupagens_dir: Path) -> tuple[str, bool]:
     decupagens: dict[str, Decupagem] = {}
     for arq in sorted(decupagens_dir.glob("*.json")):
         d = Decupagem.model_validate_json(arq.read_bytes())
-        decupagens[d.video.sha256] = d
+        sha = d.video.sha256
+        if sha in decupagens:
+            raise ValueError(f"{arq.name}: outra decupagem já tem o sha256 {sha}")
+        decupagens[sha] = d
     resultados: list[ResultadoDoClipe] = []
     csvs = sorted(gabarito_dir.glob("*.csv"))
     if not csvs:
         raise ValueError(f"nenhum CSV em {gabarito_dir}")
+    vistos: set[str] = set()
     for arq in csvs:
         sha, itens = ler_gabarito(arq)
+        if sha in vistos:
+            raise ValueError(f"{arq.name}: outro CSV já tem o sha256 {sha}")
+        vistos.add(sha)
         if sha not in decupagens:
             raise ValueError(f"{arq.name}: nenhuma decupagem com sha256 {sha}")
         resultados.append(comparar_clipe(arq.stem, itens, decupagens[sha]))
