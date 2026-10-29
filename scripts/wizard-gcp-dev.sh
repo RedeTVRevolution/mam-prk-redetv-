@@ -210,6 +210,8 @@ P="${GCP_PROJECT_ID:-project-85bcb00f-378f-4f12-813}"
 ACC="${GCP_ACCOUNT:-bruno.mosconi@gmail.com}"
 REGION="southamerica-east1"
 SA_EMAIL="mam-terraform@${P}.iam.gserviceaccount.com"
+# Seus papéis (etapa 2): IAM do projeto, criar a mam-terraform e testar o Gemini.
+MY_ROLES=(roles/resourcemanager.projectIamAdmin roles/iam.serviceAccountAdmin roles/aiplatform.user)
 GEMINI_RESULT="não testado"
 ORG_STATUS="não confirmado"
 BUDGET_STATUS="não criado"
@@ -243,20 +245,31 @@ note "Para usar a mesma config no terminal: gcloud config configurations activat
 pause "Enter para continuar"
 
 # ── 2 ────────────────────────────────────────────────────────────────────
-stage "Aceitar o convite de owner"
-say "Você tem um convite de owner pendente no projeto. Sem aceitá-lo, não dá"
-say "para criar a conta de serviço do Terraform."
-step "Procure no e-mail de $ACC o convite do Google Cloud para o projeto"
-step "\"MAM-PRK-RedeTV!\" e clique em aceitar."
-note "Se não achar o e-mail, peça ao owner atual do projeto que reenvie o convite."
-open_url "https://console.cloud.google.com/iam-admin/iam?project=$P"
-until gcloud projects get-iam-policy "$P" --flatten='bindings[].members' \
-        --filter="bindings.role=roles/owner AND bindings.members=user:$ACC" \
-        --format='value(bindings.role)' 2>/dev/null | grep -q owner; do
-  warn "Ainda não vejo $ACC como owner."
-  confirm "Já aceitou e quer conferir de novo?" || { warn "Rode o wizard de novo depois de aceitar."; exit 1; }
+stage "Seus papéis no projeto"
+say "Como Organization Administrator, você se dá só os papéis que o wizard usa,"
+say "sem virar owner: IAM do projeto, contas de serviço e o teste do Gemini."
+for role in "${MY_ROLES[@]}"; do step "$role"; done
+confirm "Adicionar esses papéis a $ACC no projeto $P?" || { warn "Nada foi alterado."; exit 1; }
+for role in "${MY_ROLES[@]}"; do
+  if ! err=$(gcloud projects add-iam-policy-binding "$P" --member="user:$ACC" \
+               --role="$role" --condition=None 2>&1 >/dev/null); then
+    warn "Não deu para adicionar $role:"
+    printf '%s\n' "$err" | head -n 3
+    if grep -qiE 'permission|denied|403' <<<"$err"; then
+      say "Peça ao owner atual do projeto que reenvie o convite de owner para"
+      say "$ACC, aceite pelo e-mail e rode o wizard de novo."
+    fi
+    exit 1
+  fi
 done
-printf '  %s✓%s %s é owner de %s\n' "$GREEN" "$RESET" "$ACC" "$P"
+missing=""
+for role in "${MY_ROLES[@]}"; do
+  [[ -n "$(gcloud projects get-iam-policy "$P" --flatten='bindings[].members' \
+    --filter="bindings.role=$role AND bindings.members=user:$ACC" \
+    --format='value(bindings.role)' 2>/dev/null)" ]] || missing+=" $role"
+done
+[[ -z "$missing" ]] || { warn "Faltam papéis:$missing. Rode o wizard de novo."; exit 1; }
+printf '  %s✓%s %s tem os %s papéis no projeto\n' "$GREEN" "$RESET" "$ACC" "${#MY_ROLES[@]}"
 pause "Enter para continuar"
 
 # ── 3 ────────────────────────────────────────────────────────────────────
@@ -387,6 +400,7 @@ body=$(mktemp)
   printf '## Projeto GCP dev (registrado pelo wizard)\n\n'
   printf -- '- Projeto: `%s` (reusado; a PoC da `poc-vertex-sa` não foi alterada)\n' "$P"
   printf -- '- Organização: `%s`. Faturamento: `%s` (%s)\n' "$ORG_ID" "$BILLING" "$ORG_STATUS"
+  printf -- '- `%s` recebeu só %s, sem owner\n' "$ACC" "${MY_ROLES[*]}"
   printf -- '- Terraform por impersonação de `%s`, sem chave em arquivo e sem owner (ADR 0002)\n' "$SA_EMAIL"
   printf -- '- Gemini: %s\n' "$GEMINI_RESULT"
   printf -- '- Orçamento: %s\n' "$BUDGET_STATUS"
