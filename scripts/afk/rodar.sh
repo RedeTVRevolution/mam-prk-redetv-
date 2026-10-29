@@ -2,7 +2,7 @@
 # Roda o loop AFK no contêiner, num clone separado, e no fim abre um PR em rascunho.
 # Os tokens vêm do Keychain do macOS na hora; veja "Loop AFK" no README.
 # Uso: scripts/afk/rodar.sh <máximo de iterações>
-# Com AFK_AUTO_MERGE=1, roda make mesclar-afk no fim, salvo se o agente mudou .github/workflows/.
+# Com AFK_AUTO_MERGE=1, roda make mesclar-afk no fim, salvo se o agente mudou CI, build ou hooks.
 set -euo pipefail
 
 iteracoes=${1:?uso: scripts/afk/rodar.sh <máximo de iterações>}
@@ -74,14 +74,16 @@ fi
 feitos=$(grep -xE '[0-9]+' "$clone/.afk/feitos" | paste -sd ' ' - || true)
 # shellcheck disable=SC2086 # um número por palavra
 fecha=$(printf 'Closes #%s\n' $feitos)
-# O CI do PR roda o ci.yml do próprio branch: mudança do agente ali pede olho humano.
+# O CI do PR roda o ci.yml e o make verificar do próprio branch, e os hooks em .githooks rodam no Mac:
+# mudança do agente nesses arquivos pede olho humano.
 # Nomes vêm dos commits do agente: caractere fora do padrão vira "?".
-workflows=$(git diff --name-only "origin/main...$branch" -- .github/workflows/ | sed -E 's#[^A-Za-z0-9._/-]#?#g')
+sensiveis=$(git diff --name-only "origin/main...$branch" -- .github .githooks .claude scripts Makefile \
+  pyproject.toml uv.lock 'web/package*.json' 'web/*.config.*' 'web/tsconfig*' | sed -E 's#[^A-Za-z0-9._/-]#?#g')
 aviso=
-if [ -n "$workflows" ]; then
+if [ -n "$sensiveis" ]; then
   aviso="> [!WARNING]
-> O agente mudou o CI. Revise estes arquivos antes do merge:
-$(sed -E "s/.*/> - \`&\`/" <<< "$workflows")
+> O agente mudou arquivos de CI, build ou hooks. Revise estes arquivos antes do merge:
+$(sed -E "s/.*/> - \`&\`/" <<< "$sensiveis")
 
 "
 fi
@@ -97,8 +99,8 @@ As notas das iterações estão em \`$notas\`, na pasta principal.
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
 if [ "${AFK_AUTO_MERGE:-0}" = 1 ]; then
-  if [ -n "$workflows" ]; then
-    echo "O agente mudou .github/workflows/; sem merge automático. Revise o PR e rode make mesclar-afk." >&2
+  if [ -n "$sensiveis" ]; then
+    echo "O agente mudou arquivos de CI, build ou hooks; sem merge automático. Revise o PR e rode make mesclar-afk." >&2
   else
     make mesclar-afk BRANCH="$branch"
   fi
