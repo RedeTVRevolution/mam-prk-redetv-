@@ -24,7 +24,7 @@ O hook de pre-commit recusa o commit se o gitleaks achar um segredo nos arquivos
 
 ## Loop AFK
 
-`scripts/afk/rodar.sh` implementa os tickets `ready-for-agent` sozinho, sem perguntas, um ticket por iteração. Cada iteração roda dois `claude -p` novos, cada um com o contexto vazio: um implementa o ticket e o outro revisa o que foi commitado. Tudo roda num contêiner Docker sem credencial de nuvem e num clone separado (`../mam-prk-redetv-afk`), para a pasta principal continuar livre. O estado entre as iterações fica em `.afk/` dentro do clone. Só o clone entra no contêiner: o repositório principal fica de fora, e os commits voltam para ele por um `git bundle`, que o `git fetch` confere objeto por objeto. No fim, o script faz um push só, no branch `afk/<data-hora>`, e abre um PR em rascunho com `Closes #N` de cada ticket feito. Se o agente mudou algo em `.github/workflows/`, o corpo do PR abre com um aviso em destaque listando esses arquivos: o CI do PR roda o `ci.yml` do próprio branch, então revise antes do merge. O merge sai com `make mesclar-afk` e nunca com o CI vermelho.
+`scripts/afk/rodar.sh` implementa os tickets `ready-for-agent` sozinho, sem perguntas, um ticket por iteração. Cada iteração roda dois `claude -p` novos, cada um com o contexto vazio: um implementa o ticket e o outro revisa o que foi commitado. Tudo roda num contêiner Docker sem credencial de nuvem e num clone separado (`../mam-prk-redetv-afk`), para a pasta principal continuar livre. O estado entre as iterações fica em `.afk/` dentro do clone. Só o clone entra no contêiner: o repositório principal fica de fora, e os commits voltam para ele por um `git bundle`, que o `git fetch` confere objeto por objeto. No fim, o script faz um push só, no branch `afk/<data-hora>`, e abre um PR em rascunho com `Closes #N` de cada ticket feito. Se o agente mudou qualquer arquivo fora de `api/` e `web/src/` (por exemplo `.github/workflows/`, `.githooks/`, `Makefile`, lockfiles, configs do `web/`, `AGENTS.md` ou `docs/`), o corpo do PR abre com um aviso em destaque listando esses arquivos. O CI do PR roda o `ci.yml` e o `make verificar` do próprio branch, os hooks de `.githooks/` rodam no Mac e `AGENTS.md` e afins guiam os próximos agentes, então revise antes do merge. O merge sai com `make mesclar-afk` e nunca com o CI vermelho.
 
 Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente implementador recebe; edite à vontade), `revisao.md` (o do revisor), `loop.sh` (o loop, dentro do contêiner), `rodar.sh` (o Mac: Keychain, clone, Docker, bundle, push e PR), `mesclar.sh` (o `make mesclar-afk`), `hook-contexto.sh` (o aviso de contexto, ligado em `.claude/settings.json` e inerte fora do loop), `Dockerfile` e `testes.sh`.
 
@@ -70,7 +70,7 @@ Para mesclar o lote:
 make mesclar-afk
 ```
 
-Ele pega o PR aberto mais recente de um branch `afk/*` deste repositório (PR de fork não entra; com `BRANCH=afk/...`, o daquele branch, que é o que o `rodar.sh` passa), espera o CI terminar e, só se todas as checagens passarem, tira o PR do rascunho, faz o merge com squash e apaga o branch no GitHub e no Mac. Depois atualiza a `main` e apaga os branches locais `afk/*` cuja ponta é a de um PR mesclado; os `-bloqueado-N` e `-parcial-N` ficam. Se o CI falhar, ele para sem mesclar e mostra o log do job que falhou. Usa o login do `gh` e do `git` deste Mac, não os tokens do Keychain.
+Ele pega o PR aberto mais recente de um branch `afk/*` deste repositório, aberto pelo seu login (PR de fork não entra; com `BRANCH=afk/...`, o daquele branch, que é o que o `rodar.sh` passa). Se o branch existe na pasta principal, o PR tem de apontar para a mesma ponta. Depois espera o CI terminar e, só se todas as checagens passarem, tira o PR do rascunho, faz o merge com squash e apaga o branch no GitHub e no Mac. Depois atualiza a `main` e apaga os branches locais `afk/*` cuja ponta é a de um PR mesclado; os `-bloqueado-N` e `-parcial-N` ficam. Se o CI falhar, ele para sem mesclar e mostra o log do job que falhou. Usa o login do `gh` e do `git` deste Mac, não os tokens do Keychain. Os comandos `git` dele rodam com os hooks desligados, porque depois do merge `.githooks/` pode ter código do agente.
 
 Cada iteração:
 
@@ -97,7 +97,7 @@ O loop para sozinho quando a fila esvazia, depois do número de iterações pedi
 | `AFK_MAX_PARCIAIS` | 3 | Parciais seguidas de um ticket antes de devolvê-lo para humano |
 | `AFK_MODELO` | padrão do Claude Code | `--model` do implementador |
 | `AFK_MODELO_REVISOR` | opus | `--model` do revisor |
-| `AFK_AUTO_MERGE` | 0 | Com 1, o `rodar.sh` roda `make mesclar-afk` depois de abrir o PR, menos quando o agente mudou `.github/workflows/`: aí o merge fica para você |
+| `AFK_AUTO_MERGE` | 0 | Com 1, o `rodar.sh` roda `make mesclar-afk` depois de abrir o PR, só quando o agente mudou apenas `api/` e `web/src/`; com qualquer outro arquivo (a lista do aviso no PR), o merge fica para você |
 
 O tamanho do contexto é a soma de `input_tokens`, `cache_read_input_tokens` e `cache_creation_input_tokens` da última resposta da conversa principal (sem subagentes).
 
