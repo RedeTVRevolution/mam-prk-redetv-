@@ -59,7 +59,7 @@ def test_qualquer_metodo_e_caminho_em_v1_sem_token_recebe_401(
 
 
 def test_rota_inexistente_em_v1_com_token_valido_recebe_404() -> None:
-    resposta = _cliente().get("/v1/jobs", headers={"Authorization": "Bearer token-bom"})
+    resposta = _cliente().get("/v1/nada", headers={"Authorization": "Bearer token-bom"})
 
     assert resposta.status_code == 404
 
