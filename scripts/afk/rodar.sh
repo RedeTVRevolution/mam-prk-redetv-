@@ -2,7 +2,7 @@
 # Roda o loop AFK no contêiner, num clone separado, e no fim abre um PR em rascunho.
 # Os tokens vêm do Keychain do macOS na hora; veja "Loop AFK" no README.
 # Uso: scripts/afk/rodar.sh <máximo de iterações>
-# Com AFK_AUTO_MERGE=1, roda make mesclar-afk no fim, salvo se o agente mudou CI, build ou hooks.
+# Com AFK_AUTO_MERGE=1, roda make mesclar-afk no fim, salvo se o agente mudou algo fora de api/ e web/src/.
 set -euo pipefail
 
 iteracoes=${1:?uso: scripts/afk/rodar.sh <máximo de iterações>}
@@ -74,15 +74,15 @@ fi
 feitos=$(grep -xE '[0-9]+' "$clone/.afk/feitos" | paste -sd ' ' - || true)
 # shellcheck disable=SC2086 # um número por palavra
 fecha=$(printf 'Closes #%s\n' $feitos)
-# O CI do PR roda o ci.yml e o make verificar do próprio branch, e os hooks em .githooks rodam no Mac:
-# mudança do agente nesses arquivos pede olho humano.
+# O CI do PR roda o ci.yml e o make verificar do próprio branch, os hooks em .githooks rodam no Mac e
+# AGENTS.md e afins guiam os próximos agentes: fora do código da aplicação, mudança do agente pede olho humano.
 # Nomes vêm dos commits do agente: caractere fora do padrão vira "?".
-sensiveis=$(git diff --name-only "origin/main...$branch" -- .github .githooks .claude scripts Makefile \
-  pyproject.toml uv.lock 'web/package*.json' 'web/*.config.*' 'web/tsconfig*' | sed -E 's#[^A-Za-z0-9._/-]#?#g')
+sensiveis=$(git diff --name-only "origin/main...$branch" -- . ':(exclude)api/' ':(exclude)web/src/' |
+  sed -E 's#[^A-Za-z0-9._/-]#?#g')
 aviso=
 if [ -n "$sensiveis" ]; then
   aviso="> [!WARNING]
-> O agente mudou arquivos de CI, build ou hooks. Revise estes arquivos antes do merge:
+> O agente mudou arquivos fora de \`api/\` e \`web/src/\` (CI, build, hooks, docs). Revise estes arquivos antes do merge:
 $(sed -E "s/.*/> - \`&\`/" <<< "$sensiveis")
 
 "
@@ -100,7 +100,7 @@ As notas das iterações estão em \`$notas\`, na pasta principal.
 
 if [ "${AFK_AUTO_MERGE:-0}" = 1 ]; then
   if [ -n "$sensiveis" ]; then
-    echo "O agente mudou arquivos de CI, build ou hooks; sem merge automático. Revise o PR e rode make mesclar-afk." >&2
+    echo "O agente mudou arquivos fora de api/ e web/src/; sem merge automático. Revise o PR e rode make mesclar-afk." >&2
   else
     make mesclar-afk BRANCH="$branch"
   fi
