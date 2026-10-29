@@ -4,6 +4,7 @@
 
 - GitHub: https://github.com/RedeTVRevolution/mam-prk-redetv-.git
 - O plano da PoC está em `docs/`.
+- Nunca faça merge de PR com o CI vermelho ou ainda rodando. A `main` não tem branch protection (repositório privado no plano Free), então o GitHub não impede: a regra vale por disciplina.
 
 ## Agent skills
 
