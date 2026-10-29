@@ -212,7 +212,7 @@ REGION="southamerica-east1"
 SA_EMAIL="mam-terraform@${P}.iam.gserviceaccount.com"
 BILLING_EXPECTED="015E16-E95BE6-00E37D"
 GEMINI_RESULT="não testado"
-BUDGET_STATUS="não criado"
+BUDGET_STATUS="não conferido"
 # Pendências que vão para o comentário da #2 e para o resumo final.
 # Sem organização, o dev não aceita política de organização nem VPC-SC.
 SKIPPED+=("E10 · Produção: ativar a política iam.disableServiceAccountKeyCreation (exige organização; o dev não tem)")
@@ -261,7 +261,8 @@ stage "Conta de serviço do Terraform e impersonação"
 say "Vou criar $SA_EMAIL, dar a ela os papéis que o Terraform usa"
 say "(sem owner) e dar a você o direito de impersoná-la. Nenhuma chave é criada."
 confirm "Aplicar essas mudanças no IAM do projeto?" || { warn "Nada foi alterado."; exit 1; }
-gcloud services enable iam.googleapis.com iamcredentials.googleapis.com aiplatform.googleapis.com --project "$P"
+gcloud services enable iam.googleapis.com iamcredentials.googleapis.com aiplatform.googleapis.com \
+  billingbudgets.googleapis.com --project "$P"
 if ! gcloud iam service-accounts describe "$SA_EMAIL" --project "$P" >/dev/null 2>&1; then
   gcloud iam service-accounts create mam-terraform --project "$P" \
     --display-name="MAM Terraform" --description="Aplica o Terraform do MAM (app=mam). Usada só por impersonação."
@@ -365,10 +366,17 @@ ask BUDGET_AMOUNT "Valor mensal do orçamento (ex.: US\$ 100):" || true
 ask BUDGET_RECIPIENT "Destinatário(s) do alerta (e-mail):" || true
 write_env BUDGET_AMOUNT "${BUDGET_AMOUNT:-}"
 write_env BUDGET_RECIPIENT "${BUDGET_RECIPIENT:-}"
-if confirm "O orçamento mam-dev foi criado para o projeto $P?"; then
-  BUDGET_STATUS="criado: $BUDGET_AMOUNT/mês para o projeto inteiro, alerta para $BUDGET_RECIPIENT"
+# Só conta como criado se o gcloud enxergar o orçamento. Sem acesso à conta de
+# faturamento a consulta falha, e o orçamento fica como pendência.
+pause "Enter quando o orçamento estiver criado (ou para deixar pendente)"
+if [[ -n "$(gcloud billing budgets list --billing-account="$BILLING" \
+      --filter='displayName=mam-dev' --format='value(name)' 2>/dev/null)" ]]; then
+  BUDGET_STATUS="criado: ${BUDGET_AMOUNT:-?}/mês para o projeto inteiro, alerta para ${BUDGET_RECIPIENT:-?}"
+  printf '  %s✓%s orçamento mam-dev encontrado na conta %s\n' "$GREEN" "$RESET" "$BILLING"
 else
-  SKIPPED+=("Criar o orçamento mam-dev do projeto $P no faturamento $BILLING")
+  BUDGET_STATUS="pendente (não confirmado pelo gcloud)"
+  warn "Não consegui ver o orçamento mam-dev na conta $BILLING; fica como pendência."
+  SKIPPED+=("Criar o orçamento mam-dev de ${BUDGET_AMOUNT:-valor a combinar}/mês, só para o projeto $P, na conta de faturamento $BILLING (precisa de quem administra essa conta)")
 fi
 
 # ── 7 ────────────────────────────────────────────────────────────────────
