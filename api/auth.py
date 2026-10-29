@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 PREFIXO_PROTEGIDO = "/v1"
+# Única rota de /v1 sem token: a checagem de saúde do Cloud Run e do deploy.
+CAMINHO_HEALTH = "/v1/health"
 
 
 class Usuario(BaseModel):
@@ -38,6 +40,8 @@ def _autenticar(request: Request) -> Usuario | None:
 
 
 def _protegido(caminho: str) -> bool:
+    if caminho == CAMINHO_HEALTH:
+        return False
     return caminho == PREFIXO_PROTEGIDO or caminho.startswith(PREFIXO_PROTEGIDO + "/")
 
 

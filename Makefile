@@ -1,4 +1,4 @@
-.PHONY: instalar verificar comparar testar-afk mesclar-afk
+.PHONY: instalar verificar comparar testar-afk mesclar-afk deploy-dev
 
 instalar:
 	uv sync --locked
@@ -25,3 +25,7 @@ testar-afk:
 
 mesclar-afk:
 	scripts/afk/mesclar.sh $(BRANCH)
+
+# Aplicação no ar no dev (#8): Terraform e imagem, pela conta mam-terraform.
+deploy-dev:
+	scripts/deploy-dev.sh

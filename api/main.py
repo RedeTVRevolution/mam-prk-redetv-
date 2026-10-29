@@ -1,10 +1,13 @@
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.auth import (
+    CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
     TokenInvalido,
     Usuario,
@@ -24,6 +27,9 @@ from api.jobs import (
     criar_rotas,
 )
 
+# Build do front (`npm run build`). Sem ele, só a API sobe.
+PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
+
 
 class _SemVerificador:
     """Padrão até o verificador real do Identity Platform existir: nega tudo."""
@@ -38,6 +44,7 @@ def criar_app(
     armazenamento: Armazenamento | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
+    pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV")
 
@@ -51,6 +58,10 @@ def criar_app(
 
     app.state.verificador = verificador or _SemVerificador()
     app.middleware("http")(exigir_token)
+
+    @app.get(CAMINHO_HEALTH)
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
 
     v1 = APIRouter(prefix=PREFIXO_PROTEGIDO)
 
@@ -67,6 +78,8 @@ def criar_app(
         )
     )
     app.include_router(v1)
+    if pasta_web.is_dir():
+        app.mount("/", StaticFiles(directory=pasta_web, html=True))
     return app
 
 
