@@ -24,9 +24,9 @@ O hook de pre-commit recusa o commit se o gitleaks achar um segredo nos arquivos
 
 ## Loop AFK
 
-`scripts/afk/rodar.sh` implementa os tickets `ready-for-agent` sozinho, sem perguntas, um ticket por iteração. Cada iteração é um `claude -p` novo, com o contexto vazio, rodando num contêiner Docker sem credencial de nuvem e num worktree separado (`../mam-prk-redetv-afk`), para a pasta principal continuar livre. O estado entre as iterações fica em `.afk/` dentro do worktree. O `.git` principal entra no contêiner só leitura, com escrita apenas em objetos, reflogs, `refs/heads/afk` e na pasta do worktree: o agente não alcança `config` nem `hooks`, que rodam no Mac. No fim, o script faz um push só, no branch `afk/<data-hora>`, e abre um PR em rascunho com `Closes #N` de cada ticket feito. O merge é seu, e nunca com o CI vermelho.
+`scripts/afk/rodar.sh` implementa os tickets `ready-for-agent` sozinho, sem perguntas, um ticket por iteração. Cada iteração é um `claude -p` novo, com o contexto vazio, rodando num contêiner Docker sem credencial de nuvem e num clone separado (`../mam-prk-redetv-afk`), para a pasta principal continuar livre. O estado entre as iterações fica em `.afk/` dentro do clone. Só o clone entra no contêiner: o repositório principal fica de fora, e os commits voltam para ele por um `git bundle`, que o `git fetch` confere objeto por objeto. No fim, o script faz um push só, no branch `afk/<data-hora>`, e abre um PR em rascunho com `Closes #N` de cada ticket feito. O merge é seu, e nunca com o CI vermelho.
 
-Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente recebe; edite à vontade), `loop.sh` (o loop, dentro do contêiner), `rodar.sh` (o Mac: Keychain, worktree, Docker, push e PR), `hook-contexto.sh` (o aviso de contexto, ligado em `.claude/settings.json` e inerte fora do loop), `Dockerfile` e `testes.sh`.
+Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente recebe; edite à vontade), `loop.sh` (o loop, dentro do contêiner), `rodar.sh` (o Mac: Keychain, clone, Docker, bundle, push e PR), `hook-contexto.sh` (o aviso de contexto, ligado em `.claude/settings.json` e inerte fora do loop), `Dockerfile` e `testes.sh`.
 
 ### Configuração, uma vez só
 
@@ -56,13 +56,13 @@ Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente recebe; edite à v
 
 ### Como rodar
 
-O worktree sai da `origin/main`, então este loop só funciona depois do merge dele na `main`. Comece com uma iteração e confira o resultado:
+O clone sai da `origin/main`, então este loop só funciona depois do merge dele na `main`. Comece com uma iteração e confira o resultado:
 
 ```sh
 scripts/afk/rodar.sh 1
 ```
 
-Veja as notas em `.afk/progresso-afk-<data-hora>.md`, uma cópia na pasta principal, o `git log afk/<data-hora>` e o PR. Inspecione sempre pela pasta principal e não rode `git` dentro do worktree do agente: os arquivos dele, inclusive o ponteiro `.git`, ficaram sob controle do agente. A execução seguinte apaga e recria o worktree. Depois, aumente o número de iterações, por exemplo `scripts/afk/rodar.sh 10`.
+Veja as notas em `.afk/progresso-afk-<data-hora>.md`, uma cópia na pasta principal, o `git log afk/<data-hora>` e o PR. Inspecione pela pasta principal e não rode `git` dentro do clone do agente: o `.git` dele, inclusive `config` e hooks, ficou sob controle do agente. A execução seguinte apaga e recria o clone. Depois, aumente o número de iterações, por exemplo `scripts/afk/rodar.sh 10`.
 
 Cada iteração:
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Loop AFK: um ticket por iteração, cada iteração num `claude -p` novo.
-# Roda na raiz do worktree: dentro do contêiner (via rodar.sh) ou direto, nos testes.
+# Roda na raiz do clone: dentro do contêiner (via rodar.sh) ou direto, nos testes.
 # Uso: loop.sh <máximo de iterações>
 set -euo pipefail
 
