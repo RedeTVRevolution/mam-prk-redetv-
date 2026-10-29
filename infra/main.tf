@@ -178,6 +178,15 @@ resource "google_cloud_run_v2_service_iam_member" "publico" {
 # MFA continua obrigatório: a API recusa todo token sem o segundo fator TOTP
 # (api/auth.py). O bloqueio após tentativas erradas é nativo do Identity
 # Platform e não tem configuração.
+#
+# Criar a config inicializa o Identity Platform, o que exige firebase.projects.update,
+# que a mam-terraform não tem. Quem inicializa é o Owner, uma vez, na etapa 7 do
+# scripts/wizard-gcp-dev.sh; aqui a config é importada e só atualizada.
+import {
+  to = google_identity_platform_config.mam
+  id = "projects/${var.projeto}/config"
+}
+
 resource "google_identity_platform_config" "mam" {
   autodelete_anonymous_users = true
   sign_in {
