@@ -19,8 +19,8 @@ export TF_VAR_projeto="$GCP_PROJECT_ID" TF_VAR_regiao="$GCP_REGION"
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 tf() { terraform -chdir=infra "$@"; }
 
-# O estado precisa existir antes do `terraform init`. Bucket privado: só o
-# Owner do projeto e a mam-terraform têm papéis que o alcançam.
+# O estado precisa existir antes do `terraform init`. Bucket privado, sem acesso
+# público: só papéis do projeto o alcançam, e no dev são o Owner e a mam-terraform.
 ESTADO="$GCP_PROJECT_ID-tfstate"
 if ! gc storage buckets describe "gs://$ESTADO" >/dev/null 2>&1; then
   gc storage buckets create "gs://$ESTADO" --location "$GCP_REGION" \
@@ -29,7 +29,8 @@ if ! gc storage buckets describe "gs://$ESTADO" >/dev/null 2>&1; then
 fi
 tf init -input=false -backend-config="bucket=$ESTADO"
 
-# A imagem precisa do repositório, e o serviço precisa da imagem.
+# A imagem precisa do repositório, e o serviço precisa da imagem. Este apply só
+# cria o repositório, então a imagem ainda não importa.
 tf apply -input=false -target=google_artifact_registry_repository.mam -var imagem=pendente
 REGISTRO="$GCP_REGION-docker.pkg.dev"
 REPO="$REGISTRO/$GCP_PROJECT_ID/mam/web"
@@ -38,7 +39,7 @@ gc auth print-access-token | docker login -u oauth2accesstoken --password-stdin 
 docker build --platform linux/amd64 -t "$TAG" .
 docker push "$TAG"
 # Pelo digest, para que um rebuild com o mesmo commit também gere revisão nova.
-IMAGEM=$(docker inspect --format '{{index .RepoDigests 0}}' "$TAG")
+IMAGEM=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$TAG" | grep -m1 "^$REPO@")
 tf apply -input=false -var "imagem=$IMAGEM"
 
 URL=$(tf output -raw url)

@@ -48,8 +48,8 @@ def _protegido(caminho: str) -> bool:
 async def exigir_token(
     request: Request, seguinte: Callable[[Request], Awaitable[Response]]
 ) -> Response:
-    """Middleware: todo `/v1`, com qualquer método e caminho, passa pelo token
-    antes do roteamento, para que 404, 405 ou redirecionamento não respondam
+    """Middleware: todo `/v1`, com qualquer método e caminho, menos
+    `/v1/health`, passa pelo token antes do roteamento, para que 404, 405 ou redirecionamento não respondam
     a quem não se autenticou."""
     if not _protegido(request.url.path):
         return await seguinte(request)

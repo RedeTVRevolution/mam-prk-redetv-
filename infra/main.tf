@@ -87,11 +87,11 @@ locals {
     analise   = ["roles/datastore.user", "roles/aiplatform.user"]
   }
   papeis_nos_buckets = {
-    # A API assina as URLs de envio para a quarentena e lê o proxy e a decupagem.
+    # A API assina as URLs de envio para a quarentena e lê o proxy de reprodução e a decupagem.
     web = { quarentena = "roles/storage.objectCreator", aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectViewer" }
-    # Lê e apaga o original da quarentena; grava a cópia limpa e o proxy.
+    # Lê e apaga o original da quarentena; grava a cópia limpa e o proxy de reprodução.
     validacao = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectCreator" }
-    # O Gemini lê o proxy; a decupagem vai para o bucket dela.
+    # O Gemini lê o proxy de reprodução; a decupagem vai para o bucket dela.
     analise = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectCreator" }
   }
 }
