@@ -1,11 +1,13 @@
 """Jobs da E0: modelo, portas (Firestore e Storage) e rotas `/v1/jobs`."""
 
 import uuid
-from collections.abc import Callable
+import zlib
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -20,6 +22,7 @@ from api.auth import UsuarioAutenticado
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
+VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
 
 Estado = Literal["aguardando_upload", "validando", "analisando", "concluido", "falhou"]
 CodigoDeFalha = Literal[
@@ -63,6 +66,11 @@ class JobPublico(BaseModel):
 
 class JobCriado(JobPublico):
     url_de_upload: str
+
+
+class Reproducao(BaseModel):
+    url: str
+    expira_em: datetime
 
 
 class TipoNaoSuportado(Exception):
@@ -124,6 +132,14 @@ class Armazenamento(Protocol):
 
     def cancelar_upload(self, job_id: str) -> None: ...
 
+    def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
+        """URL assinada de leitura do proxy de reprodução, válida por `validade`."""
+        ...
+
+    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        """O JSON da decupagem, em pedaços."""
+        ...
+
 
 class RepositorioEmMemoria:
     def __init__(self) -> None:
@@ -157,6 +173,12 @@ class ArmazenamentoIndisponivel:
     def cancelar_upload(self, job_id: str) -> None:
         raise ServicoIndisponivel
 
+    def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
+        raise ServicoIndisponivel
+
+    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        raise ServicoIndisponivel
+
 
 def expirar_uploads(
     repositorio: RepositorioDeJobs, armazenamento: Armazenamento, agora: datetime
@@ -184,6 +206,14 @@ def expirar_uploads(
 
 def agora_utc() -> datetime:
     return datetime.now(UTC)
+
+
+def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
+    compressor = zlib.compressobj(wbits=31)
+    for pedaco in pedacos:
+        if dados := compressor.compress(pedaco):
+            yield dados
+    yield compressor.flush()
 
 
 def criar_rotas(
@@ -222,5 +252,31 @@ def criar_rotas(
         if job is None:
             raise HTTPException(404, "Job não encontrado")
         return JobPublico.de(job)
+
+    def concluido(job_id: str) -> Job:
+        job = repositorio.obter(job_id)
+        if job is None:
+            raise HTTPException(404, "Job não encontrado")
+        if job.estado != "concluido":
+            raise HTTPException(409, "Job ainda não concluído")
+        return job
+
+    @rotas.get("/{job_id}/reproducao")
+    def reproducao(job_id: str) -> Reproducao:
+        job = concluido(job_id)
+        url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
+        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
+
+    @rotas.get("/{job_id}/decupagem")
+    def decupagem(job_id: str, request: Request) -> StreamingResponse:
+        job = concluido(job_id)
+        pedacos = armazenamento.abrir_decupagem(job.id)
+        cabecalhos = {"Vary": "Accept-Encoding"}
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            cabecalhos["Content-Encoding"] = "gzip"
+            pedacos = _comprimir(pedacos)
+        return StreamingResponse(
+            pedacos, media_type="application/json", headers=cabecalhos
+        )
 
     return rotas

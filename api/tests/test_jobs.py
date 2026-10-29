@@ -1,3 +1,5 @@
+import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -24,6 +26,7 @@ class ArmazenamentoFalso:
     def __init__(self) -> None:
         self.pedidos: list[dict[str, Any]] = []
         self.cancelados: list[str] = []
+        self.decupagens: dict[str, list[bytes]] = {}
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
         self.pedidos.append(
@@ -33,6 +36,12 @@ class ArmazenamentoFalso:
 
     def cancelar_upload(self, job_id: str) -> None:
         self.cancelados.append(job_id)
+
+    def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
+        return f"https://storage.exemplo/proxy/{job_id}?validade={int(validade.total_seconds())}"
+
+    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        yield from self.decupagens[job_id]
 
 
 class Relogio:
@@ -215,3 +224,88 @@ def test_expiracao_nao_mexe_em_job_que_ja_passou_do_upload() -> None:
         )
         == []
     )
+
+
+def _job_com_estado(ambiente: Ambiente, estado: Any) -> str:
+    job = Job(
+        id="j1",
+        nome="clipe.mp4",
+        tamanho_bytes=10,
+        estado=estado,
+        codigo_falha="analise_falhou" if estado == "falhou" else None,
+        criado_por="u1",
+        criado_em=INICIO,
+        atualizado_em=INICIO,
+    )
+    ambiente.repositorio.salvar(job)
+    return job.id
+
+
+def test_reproducao_devolve_link_assinado_e_quando_expira() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/reproducao", headers=AUTORIZACAO
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.json() == {
+        "url": "https://storage.exemplo/proxy/j1?validade=600",
+        "expira_em": "2026-10-29T12:10:00Z",
+    }
+
+
+def test_reproducao_e_decupagem_dao_409_antes_de_concluido_e_404_sem_job() -> None:
+    ambiente = Ambiente()
+    for estado in ("aguardando_upload", "validando", "analisando", "falhou"):
+        job_id = _job_com_estado(ambiente, estado)
+        for rota in ("reproducao", "decupagem"):
+            resposta = ambiente.cliente.get(
+                f"/v1/jobs/{job_id}/{rota}", headers=AUTORIZACAO
+            )
+            assert resposta.status_code == 409, (estado, rota)
+    for rota in ("reproducao", "decupagem"):
+        resposta = ambiente.cliente.get(
+            f"/v1/jobs/nao-existe/{rota}", headers=AUTORIZACAO
+        )
+        assert resposta.status_code == 404
+
+
+def test_decupagem_chega_em_gzip_e_inteira() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    documento = {"versao_esquema": "1.1", "pessoas": ["Ana"] * 200}
+    texto = json.dumps(documento).encode()
+    ambiente.armazenamento.decupagens[job_id] = [texto[:50], texto[50:]]
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/decupagem",
+        headers={**AUTORIZACAO, "Accept-Encoding": "gzip"},
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.headers["content-encoding"] == "gzip"
+    assert resposta.headers["content-type"] == "application/json"
+    assert resposta.json() == documento  # o cliente já descomprimiu
+
+
+def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    ambiente.armazenamento.decupagens[job_id] = [b'{"a": 1}']
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/decupagem",
+        headers={**AUTORIZACAO, "Accept-Encoding": "identity"},
+    )
+
+    assert "content-encoding" not in resposta.headers
+    assert resposta.json() == {"a": 1}
+
+
+def test_reproducao_e_decupagem_exigem_token() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    for rota in ("reproducao", "decupagem"):
+        assert ambiente.cliente.get(f"/v1/jobs/{job_id}/{rota}").status_code == 401

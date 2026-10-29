@@ -185,3 +185,20 @@ test('durante um envio não dá para escolher outro arquivo', async () => {
   await screen.findByText('Envio concluído.')
   expect(campo.disabled).toBe(false)
 })
+
+test('abrir um vídeo concluído ou falhado chama aoAbrir; os demais não são clicáveis', async () => {
+  const usuario = userEvent.setup()
+  jobs = [
+    job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' }),
+    job({ id: 'b', nome: 'andando.mp4', estado: 'analisando' }),
+  ]
+  const aoAbrir = vi.fn()
+  render(
+    <Biblioteca autenticador={await comSessao()} aoSessaoExpirada={() => {}} aoAbrir={aoAbrir} />,
+  )
+
+  await usuario.click(await screen.findByRole('button', { name: 'pronto.mp4' }))
+
+  expect(aoAbrir).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
+  expect(screen.queryByRole('button', { name: 'andando.mp4' })).toBeNull()
+})

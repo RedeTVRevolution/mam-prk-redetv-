@@ -3,6 +3,7 @@ import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import { validarArquivo } from './envio/arquivo.ts'
 import { enviarRetomavel } from './envio/upload.ts'
+import type { JobAberto } from './Video.tsx'
 
 interface Job {
   id: string
@@ -25,10 +26,12 @@ type Envio =
 export default function Biblioteca({
   autenticador,
   aoSessaoExpirada,
+  aoAbrir,
   intervaloMs = 5000,
 }: {
   autenticador: Autenticador
   aoSessaoExpirada: () => void
+  aoAbrir?: (job: JobAberto) => void
   intervaloMs?: number
 }) {
   const [jobs, setJobs] = useState<Job[] | null>(null)
@@ -120,7 +123,15 @@ export default function Biblioteca({
           <tbody>
             {jobs.map((job) => (
               <tr key={job.id}>
-                <td>{job.nome}</td>
+                <td>
+                  {aoAbrir && (job.estado === 'concluido' || job.estado === 'falhou') ? (
+                    <button type="button" onClick={() => aoAbrir(job)}>
+                      {job.nome}
+                    </button>
+                  ) : (
+                    job.nome
+                  )}
+                </td>
                 <td>{new Date(job.criado_em).toLocaleString('pt-BR')}</td>
                 <td>{job.estado}</td>
                 <td>{job.codigo_falha}</td>

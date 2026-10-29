@@ -3,6 +3,7 @@ import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
+import Video, { type JobAberto } from './Video.tsx'
 
 interface Usuario {
   uid: string
@@ -20,11 +21,13 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
   const [sessao, setSessao] = useState<Sessao>({ tipo: 'verificando' })
   // Muda a cada saída, para o login recomeçar do zero (inclusive após um 401 logo depois do TOTP).
   const [saidas, setSaidas] = useState(0)
+  const [aberto, setAberto] = useState<JobAberto | null>(null)
 
   const sair = useCallback(async () => {
     await autenticador.sair()
     setSessao({ tipo: 'sem_sessao' })
     setSaidas((n) => n + 1)
+    setAberto(null)
   }, [autenticador])
 
   const verificar = useCallback(async () => {
@@ -67,12 +70,25 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
   }
   return (
     <main>
-      <h1>Biblioteca</h1>
+      <h1>{aberto ? 'Vídeo' : 'Biblioteca'}</h1>
       <p>{sessao.usuario.email}</p>
       <button type="button" onClick={() => void sair()}>
         Sair
       </button>
-      <Biblioteca autenticador={autenticador} aoSessaoExpirada={() => void sair()} />
+      {aberto ? (
+        <Video
+          autenticador={autenticador}
+          job={aberto}
+          aoVoltar={() => setAberto(null)}
+          aoSessaoExpirada={() => void sair()}
+        />
+      ) : (
+        <Biblioteca
+          autenticador={autenticador}
+          aoSessaoExpirada={() => void sair()}
+          aoAbrir={setAberto}
+        />
+      )}
     </main>
   )
 }
