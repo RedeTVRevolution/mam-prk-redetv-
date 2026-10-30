@@ -167,11 +167,8 @@ def test_job_fora_de_aguardando_upload_nao_muda(
     assert not ambiente.aceitos.blob("j3/proxy.mp4").exists()
 
 
-def test_cancelado_durante_a_validacao_continua_cancelado(
-    ambiente: Ambiente, tmp_path: Path
-) -> None:
-    """O cancelamento chega depois de o worker marcar `validando`."""
-    ambiente.enviar("j4", _mp4(tmp_path / "v.mp4"))
+def _cancelar_ao_validar(ambiente: Ambiente) -> None:
+    """O cancelamento chega logo depois de o worker marcar `validando`."""
     repositorio = ambiente.repositorio
     salvar = repositorio.salvar
 
@@ -181,6 +178,13 @@ def test_cancelado_durante_a_validacao_continua_cancelado(
             salvar(job.model_copy(update={"estado": "cancelado"}))
 
     repositorio.salvar = salvar_e_cancelar  # type: ignore[method-assign]
+
+
+def test_cancelado_durante_a_validacao_continua_cancelado(
+    ambiente: Ambiente, tmp_path: Path
+) -> None:
+    ambiente.enviar("j4", _mp4(tmp_path / "v.mp4"))
+    _cancelar_ao_validar(ambiente)
 
     ambiente.executar("j4")
 
@@ -191,15 +195,7 @@ def test_cancelado_durante_a_validacao_nao_vira_falhou_se_o_arquivo_for_recusado
     ambiente: Ambiente,
 ) -> None:
     ambiente.enviar("j5", b"isto nao e um mp4, mas tem mais de doze bytes")
-    repositorio = ambiente.repositorio
-    salvar = repositorio.salvar
-
-    def salvar_e_cancelar(job: Job) -> None:
-        salvar(job)
-        if job.estado == "validando":
-            salvar(job.model_copy(update={"estado": "cancelado"}))
-
-    repositorio.salvar = salvar_e_cancelar  # type: ignore[method-assign]
+    _cancelar_ao_validar(ambiente)
 
     ambiente.executar("j5")
 

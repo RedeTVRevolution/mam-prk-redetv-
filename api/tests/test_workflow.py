@@ -23,8 +23,6 @@ def test_falha_da_execucao_grava_falhou_com_arquivo_corrompido() -> None:
     assert "try:" in texto and "except:" in texto
     # O `raise` repassa o erro da execução: sem `as: e`, a variável não existe.
     assert "as: e" in texto and "raise: $${e}" in texto
-    # Um objeto sem Job correspondente não cria documento.
-    assert "exists: true" in texto
     assert "googleapis.firestore.v1.projects.databases.documents.patch" in texto
     assert "arquivo_corrompido" in texto
     assert "falhou" in texto
@@ -73,3 +71,17 @@ def test_objeto_sem_job_nao_derruba_a_leitura() -> None:
 
     leitura = texto[texto.index("le_o_job:") : texto.index("so_se_analisando:")]
     assert "e.code == 404" in leitura and "next: fim" in leitura
+
+
+def test_falha_da_execucao_nao_sobrescreve_job_cancelado() -> None:
+    texto = _texto()
+
+    excecao = texto[texto.index("le_antes_de_marcar:") : texto.index("le_o_job:")]
+    releitura = excecao.index("documents.get")
+    condicao = excecao.index('estado.stringValue == "cancelado"')
+    patch = excecao.index("documents.patch")
+    assert releitura < condicao < patch
+    # O patch só vale se o documento não mudou desde a releitura.
+    assert "updateTime: $${antes.updateTime}" in excecao
+    # Um objeto sem Job correspondente não cria documento: a releitura dá 404.
+    assert "erro_da_leitura.code == 404" in excecao

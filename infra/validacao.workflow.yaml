@@ -1,6 +1,7 @@
 # Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
 # quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
-# falhou. Depois chama o serviço de análise, só se o Job ficou em `analisando`.
+# falhou, salvo se estiver cancelado. Depois chama o serviço de análise, só se o
+# Job ficou em `analisando`.
 # Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao}, ${url_da_analise}.
 main:
   params: [evento]
@@ -24,13 +25,34 @@ main:
           as: e
           # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
           steps:
+            - le_antes_de_marcar:
+                try:
+                  call: googleapis.firestore.v1.projects.databases.documents.get
+                  args:
+                    name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  result: antes
+                except:
+                  as: erro_da_leitura
+                  steps:
+                    # Um objeto sem Job correspondente não cria documento.
+                    - sem_job_para_marcar:
+                        switch:
+                          - condition: $${erro_da_leitura.code == 404}
+                            next: encerra_com_falha
+                    - repassa_o_erro_da_releitura:
+                        raise: $${erro_da_leitura}
+            # Um Job cancelado continua cancelado (#51).
+            - nao_sobrescreve_cancelado:
+                switch:
+                  - condition: $${antes.fields.estado.stringValue == "cancelado"}
+                    next: encerra_com_falha
             - marca_como_falhou:
                 call: googleapis.firestore.v1.projects.databases.documents.patch
                 args:
                   name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
-                  # Um objeto sem Job correspondente não cria documento.
+                  # Só vale se o Job não mudou desde a leitura (um cancelamento no meio).
                   currentDocument:
-                    exists: true
+                    updateTime: $${antes.updateTime}
                   updateMask:
                     fieldPaths: [estado, codigo_falha, atualizado_em]
                   body:
