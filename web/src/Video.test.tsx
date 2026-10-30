@@ -1584,3 +1584,135 @@ test('planos e falas não têm alças, e a Consulta não vê as alças', async (
   expect(screen.queryByRole('slider', { name: 'Início da ocorrência' })).toBeNull()
   expect(screen.queryByRole('slider', { name: 'Fim da ocorrência' })).toBeNull()
 })
+
+async function salvarCampo(usuario: ReturnType<typeof userEvent.setup>, motivo: string) {
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Motivo'), motivo)
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+}
+
+test('o Editor corrige o tom da pauta pelo modal', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir tom da pauta Eleição' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Tom'))
+  await usuario.type(modal.getByLabelText('Tom'), 'tenso')
+  await salvarCampo(usuario, 'tom errado')
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcaoRecebida).toEqual({
+    tipo: 'pauta.tom',
+    item_id: 'pa1',
+    valor: 'tenso',
+    motivo: 'tom errado',
+    versao: 'v1',
+  })
+})
+
+test('o Editor troca as fontes do nome, inclusive para nenhuma', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir fontes do nome de Ana Souza' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.click(modal.getByLabelText('fala'))
+  await usuario.click(modal.getByLabelText('rosto'))
+  await usuario.click(modal.getByLabelText('GC'))
+  await salvarCampo(usuario, 'só pela fala')
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcaoRecebida).toEqual({
+    tipo: 'pessoa.fontes_do_nome',
+    item_id: 'p1',
+    valor: '["fala"]',
+    motivo: 'só pela fala',
+    versao: 'v1',
+  })
+})
+
+test('o Editor corrige papel e visual de uma aparição; vazio vira null', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir papel e visual de Ana Souza 00:05' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Papel'))
+  await usuario.clear(modal.getByLabelText('Visual'))
+  await usuario.type(modal.getByLabelText('Papel'), 'repórter')
+  await salvarCampo(usuario, 'papel errado')
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcaoRecebida).toEqual({
+    tipo: 'aparicao.papel_visual',
+    item_id: 'p1',
+    ocorrencia: OCORRENCIA_NA_IMAGEM,
+    valor: '{"papel":"repórter","visual":null}',
+    motivo: 'papel errado',
+    versao: 'v1',
+  })
+})
+
+test('o Editor corrige o tipo e o texto de um texto na tela', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Texto na tela'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir texto na tela Ana Souza, apresentadora' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.click(modal.getByLabelText('Tipo'))
+  await usuario.click(await screen.findByText('tarja'))
+  await usuario.clear(modal.getByLabelText('Texto'))
+  await usuario.type(modal.getByLabelText('Texto'), 'Ana Souza, repórter')
+  await salvarCampo(usuario, 'leitura errada')
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcaoRecebida).toEqual({
+    tipo: 'texto_na_tela.texto',
+    item_id: 'txt000',
+    valor: '{"tipo":"tarja","texto":"Ana Souza, repórter"}',
+    motivo: 'leitura errada',
+    versao: 'v1',
+  })
+})
+
+test('o Editor acrescenta um texto na tela com tempos, tipo e texto', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Texto na tela'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Acrescentar texto na tela' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.click(modal.getByLabelText('Tipo'))
+  await usuario.click(await screen.findByText('placar'))
+  await usuario.type(modal.getByLabelText('Texto'), 'BRA 2 x 1 ARG')
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '01:00')
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '01:10')
+  await salvarCampo(usuario, 'não foi lido')
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcaoRecebida).toEqual({
+    tipo: 'texto_na_tela.acrescentar',
+    item_id: '',
+    valor: '{"inicio_ms":60000,"fim_ms":70000,"tipo":"placar","texto":"BRA 2 x 1 ARG"}',
+    motivo: 'não foi lido',
+    versao: 'v1',
+  })
+})
+
+test('na decupagem 1.1 e sem edição não há botões dos campos novos', async () => {
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(decupagem11)))
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+
+  expect(painel.queryByRole('button', { name: /Corrigir fontes do nome/ })).toBeNull()
+  expect(painel.queryByRole('button', { name: /Corrigir papel e visual/ })).toBeNull()
+  await usuario.click(aba('Pautas'))
+  expect(painel.queryByRole('button', { name: /Corrigir tom/ })).toBeNull()
+})
