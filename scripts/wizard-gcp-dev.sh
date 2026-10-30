@@ -240,6 +240,8 @@ gcloud config set project "$P" >/dev/null 2>&1
 gcloud config set compute/region "$REGION" >/dev/null 2>&1
 write_env GCP_PROJECT_ID "$P"
 write_env GCP_REGION "$REGION"
+# O estado do Terraform existe antes dele, então o nome nasce aqui, no .env.
+write_env BUCKET_ESTADO_TF "$P-tfstate"
 note "Para usar a mesma config no terminal: gcloud config configurations activate mam-dev"
 pause "Enter para continuar"
 
@@ -274,7 +276,7 @@ for role in roles/resourcemanager.projectIamAdmin roles/serviceusage.serviceUsag
     roles/iam.serviceAccountAdmin roles/iam.serviceAccountUser roles/run.admin \
     roles/storage.admin roles/artifactregistry.admin roles/datastore.owner \
     roles/eventarc.admin roles/workflows.admin roles/identityplatform.admin \
-    roles/monitoring.editor roles/logging.configWriter; do
+    roles/monitoring.editor roles/logging.configWriter roles/compute.networkAdmin; do
   gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA_EMAIL" \
     --role="$role" --condition=None >/dev/null
   printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$role"

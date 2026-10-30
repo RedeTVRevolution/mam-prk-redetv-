@@ -82,11 +82,20 @@ resource "google_firestore_database" "mam" {
   depends_on              = [google_project_service.apis]
 }
 
-# clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git.
+# O único lugar que monta os nomes dos buckets. O código os recebe por variável
+# de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
+# web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).
+locals {
+  sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro"]
+  buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
+}
+
+# clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git,
+# e o clipe sintético do cassete (cassetes/).
 # Sem papel de conta de serviço: por ora só o Owner e a mam-terraform os alcançam.
 resource "google_storage_bucket" "mam" {
-  for_each                    = toset(["quarentena", "aceitos", "decupagens", "clipes-ouro"])
-  name                        = "${var.projeto}-${each.key}"
+  for_each                    = local.buckets
+  name                        = each.value
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
@@ -116,13 +125,16 @@ resource "google_service_account" "mam" {
 # Job (ADR 0002), e o de chamar o serviço de análise, no próprio serviço. Quem lê o
 # proxy por gs:// na Vertex é a conta que chama (mam-analise, com objectViewer em
 # aceitos), segundo a doc do generateContent; o agente de serviço da Vertex não
-# precisa de papel no bucket.
+# precisa de papel no bucket. O run.viewer da orquestração fica no projeto porque o
+# conector do Workflows acompanha a execução do Job pela operação, que é do projeto e
+# não do Job; sem ele, o passo `valida` falharia depois de o Job rodar e marcaria um
+# vídeo bom como arquivo_corrompido.
 locals {
   papeis_no_projeto = {
     web          = ["roles/datastore.user"]
     validacao    = ["roles/datastore.user"]
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
-    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker"]
+    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
   }
   papeis_nos_buckets = {
     # A API assina as URLs de envio para a quarentena e lê o proxy de reprodução e a decupagem.
@@ -175,6 +187,20 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
       }
+      # Pelo local e não pelo recurso: o CORS da quarentena aponta para este
+      # serviço, e a referência ao recurso fecharia um ciclo.
+      env {
+        name  = "BUCKET_QUARENTENA"
+        value = local.buckets["quarentena"]
+      }
+      env {
+        name  = "BUCKET_ACEITOS"
+        value = local.buckets["aceitos"]
+      }
+      env {
+        name  = "BUCKET_DECUPAGENS"
+        value = local.buckets["decupagens"]
+      }
     }
   }
   depends_on = [google_project_service.apis]
@@ -224,6 +250,14 @@ resource "google_cloud_run_v2_job" "validacao" {
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
+        }
+        env {
+          name  = "BUCKET_QUARENTENA"
+          value = local.buckets["quarentena"]
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
         }
         # A única pasta gravável: o ffmpeg e o validador escrevem aqui.
         env {
@@ -299,6 +333,14 @@ resource "google_cloud_run_v2_service" "analise" {
       env {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
+      }
+      env {
+        name  = "BUCKET_ACEITOS"
+        value = local.buckets["aceitos"]
+      }
+      env {
+        name  = "BUCKET_DECUPAGENS"
+        value = local.buckets["decupagens"]
       }
     }
   }
@@ -502,4 +544,14 @@ output "identity_api_key" {
 
 output "url" {
   value = google_cloud_run_v2_service.web.uri
+}
+
+# Para as ferramentas locais: o deploy-dev envia as imagens a este repositório, e o
+# make gravar-cassetes sobe o clipe sintético no bucket de clipes-ouro.
+output "repositorio" {
+  value = "${var.regiao}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam.repository_id}"
+}
+
+output "bucket_clipes_ouro" {
+  value = local.buckets["clipes-ouro"]
 }

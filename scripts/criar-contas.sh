@@ -13,7 +13,7 @@ set +a
 : "${GCP_PROJECT_ID:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${ADMINS_EMERGENCIA:?ponha no .env os e-mails dos 2 administradores de emergência, separados por vírgula}"
-: "${USUARIOS:?ponha no .env os e-mails dos usuários (Bruno e o documentalista), separados por vírgula}"
+: "${USUARIOS:?ponha no .env os e-mails dos usuários (Bruno), separados por vírgula}"
 export CLOUDSDK_ACTIVE_CONFIG_NAME=mam-dev
 
 TOKEN=$(gcloud auth print-access-token --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")

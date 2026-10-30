@@ -77,8 +77,8 @@ def main() -> None:
     executar(
         os.environ["JOB_ID"],
         RepositorioFirestore(firestore.Client(project=projeto)),
-        storage.bucket(f"{projeto}-quarentena"),
-        storage.bucket(f"{projeto}-aceitos"),
+        storage.bucket(os.environ["BUCKET_QUARENTENA"]),
+        storage.bucket(os.environ["BUCKET_ACEITOS"]),
         Path(os.environ.get("QUARENTENA_MONTADA", "/quarentena")),
         Path(os.environ["TMPDIR"]),
     )

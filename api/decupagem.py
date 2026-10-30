@@ -8,6 +8,9 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+VersaoEsquema = Literal["1.1"]
+VERSAO_ESQUEMA: VersaoEsquema = "1.1"  # o mypy cobra se o tipo mudar sozinho
+
 Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]
 Id = Annotated[str, Field(max_length=40)]
@@ -108,7 +111,7 @@ class Fala(_Intervalo):
 
 
 class Decupagem(_Estrito):
-    versao_esquema: Literal["1.1"]
+    versao_esquema: VersaoEsquema
     video: Video
     programa: Programa
     pautas: list[Pauta]
@@ -130,18 +133,32 @@ class Decupagem(_Estrito):
         return self
 
 
-def esquema_do_modelo() -> dict[str, Any]:
-    """Saída estruturada pedida ao Gemini: a decupagem sem o bloco `video`.
+# Campos que o servidor preenche; o modelo não tem como sabê-los. A versão é
+# nossa; o SHA-256 e a duração (`video`) vêm da quarentena; os tempos originais
+# são escritos pela regra de tempos; `origem` só muda na revisão; `quadro` é a
+# imagem que nós extraímos. Vale pelo nome da chave em qualquer nível: um campo
+# do modelo com um desses nomes sumiria do esquema e toda resposta seria recusada.
+CAMPOS_DO_SERVIDOR = frozenset(
+    {
+        "versao_esquema",
+        "video",
+        "inicio_modelo_ms",
+        "fim_modelo_ms",
+        "origem",
+        "quadro",
+    }
+)
 
-    O SHA-256 e a duração vêm da quarentena; o modelo não tem como sabê-los.
-    Os tempos originais (`inicio_modelo_ms`, `fim_modelo_ms`) são escritos pela
-    regra de tempos, então o modelo também não os preenche.
-    """
+
+def esquema_do_modelo() -> dict[str, Any]:
+    """Saída estruturada pedida ao Gemini: a decupagem sem `CAMPOS_DO_SERVIDOR`."""
     esquema = Decupagem.model_json_schema()
-    del esquema["properties"]["video"]
-    esquema["required"].remove("video")
     del esquema["$defs"]["Video"]
-    for definicao in esquema["$defs"].values():
-        for campo in ("inicio_modelo_ms", "fim_modelo_ms"):
+    for definicao in [esquema, *esquema["$defs"].values()]:
+        for campo in CAMPOS_DO_SERVIDOR:
             definicao.get("properties", {}).pop(campo, None)
+        if "required" in definicao:
+            definicao["required"] = [
+                c for c in definicao["required"] if c not in CAMPOS_DO_SERVIDOR
+            ]
     return esquema

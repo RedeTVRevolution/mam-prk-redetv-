@@ -9,6 +9,7 @@
 - GitHub: https://github.com/RedeTVRevolution/mam-prk-redetv-.git
 - O plano da PoC está em `docs/`.
 - Nunca faça merge de PR com o CI vermelho ou ainda rodando. A `main` não tem branch protection (repositório privado no plano Free), então o GitHub não impede: a regra vale por disciplina.
+- Nomes de recursos da nuvem (projeto, região, buckets, repositórios, serviços) nunca vão escritos no código; sempre vêm da configuração. O `infra/main.tf` é o único lugar que monta esses nomes e os entrega por variável de ambiente (`GCP_PROJECT_ID`, `BUCKET_*`) ou por `output`; só o bucket do estado do Terraform, que existe antes dele, nasce no `.env` pelo wizard. O `make verificar` falha se o ID do projeto ou um nome de bucket aparecer em `api/` ou `web/src/`, fora dos testes.
 
 ## Agent skills
 

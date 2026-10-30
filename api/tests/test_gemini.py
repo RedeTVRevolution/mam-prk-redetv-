@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -63,9 +64,11 @@ def _rodar(transporte: TransporteFalso, relogio: Relogio | None = None) -> Any:
 
 
 def resposta_do_modelo() -> dict[str, Any]:
-    """O modelo não devolve o bloco `video`: ele vem da quarentena."""
+    """O modelo não devolve os campos do servidor: `video` vem da quarentena."""
     dados = decupagem_valida()
-    del dados["video"]
+    del dados["versao_esquema"], dados["video"]
+    for pessoa in dados["pessoas"]:
+        del pessoa["origem"]
     return dados
 
 
@@ -95,8 +98,29 @@ def test_bloco_video_vem_da_quarentena_e_nao_do_modelo() -> None:
     assert d.video == VIDEO_CONFIAVEL
 
 
-def test_resposta_com_bloco_video_e_refeita() -> None:
-    t = TransporteFalso(json.dumps(decupagem_valida()), BOA)
+def test_versao_e_origem_vem_do_servidor() -> None:
+    d = _rodar(TransporteFalso(BOA))
+    assert d.versao_esquema == "1.1"
+    assert d.pessoas[0].origem == "modelo"
+
+
+@pytest.mark.parametrize(
+    "estragar",
+    [
+        lambda d: d.update(video=decupagem_valida()["video"]),
+        lambda d: d.update(versao_esquema="1.1"),
+        lambda d: d["pessoas"][0].update(origem="revisao"),
+        lambda d: d["pessoas"][0]["na_imagem"][0].update(quadro="gs://x/y.jpg"),
+        lambda d: d["pessoas"][0]["na_imagem"][0].update(inicio_modelo_ms=0),
+    ],
+    ids=["video", "versao_esquema", "origem", "quadro", "inicio_modelo_ms"],
+)
+def test_resposta_com_campo_do_servidor_e_refeita(
+    estragar: Callable[[dict[str, Any]], None],
+) -> None:
+    ruim = resposta_do_modelo()
+    estragar(ruim)
+    t = TransporteFalso(json.dumps(ruim), BOA)
     _rodar(t)
     assert len(t.chamadas) == 2
 
@@ -257,6 +281,15 @@ def test_transporte_vertex_monta_a_chamada_global_com_video_esquema_e_rotulo() -
     # Flex: só ele, sem Provisioned Throughput antes.
     assert pedido["headers"]["X-Vertex-AI-LLM-Shared-Request-Type"] == "flex"
     assert pedido["headers"]["X-Vertex-AI-LLM-Request-Type"] == "shared"
+
+
+def test_transporte_vertex_guarda_a_versao_que_a_vertex_informa() -> None:
+    corpo = {"candidates": [], "modelVersion": "gemini-3.5-flash-lite-001"}
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo)))
+
+    transporte.gerar(_chamada())
+
+    assert transporte.versao_do_modelo == "gemini-3.5-flash-lite-001"
 
 
 @pytest.mark.parametrize("status", [429, 500, 503])

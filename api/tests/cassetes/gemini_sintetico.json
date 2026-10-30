@@ -1,0 +1,9 @@
+{
+  "modelo": "gemini-3.5-flash-lite",
+  "versao_do_modelo": "gemini-3.5-flash-lite",
+  "video": {
+    "sha256": "b015904a607ea7604cc7b2d1d84f279e018ec9c810657a3d3d578a0bfd2ce083",
+    "duracao_ms": 30000
+  },
+  "texto": "{\n  \"programa\": {\n    \"resumo\": \"Video de teste com barras coloridas e bip sonoro continuo.\",\n    \"blocos\": [\n      {\n        \"inicio_ms\": 0,\n        \"fim_ms\": 29740,\n        \"titulo\": \"Teste de video e audio\"\n      }\n    ]\n  },\n  \"pautas\": [\n    {\n      \"inicio_ms\": 0,\n      \"fim_ms\": 29740,\n      \"id\": \"p1\",\n      \"titulo\": \"Barras de Teste\",\n      \"resumo\": \"Exibicao de barras de cor com sinal sonoro de teste.\"\n    }\n  ],\n  \"pessoas\": [],\n  \"planos\": [\n    {\n      \"inicio_ms\": 0,\n      \"fim_ms\": 29740,\n      \"id\": \"pl1\",\n      \"ambiente\": \"Estudio\",\n      \"plano_limpo\": true,\n      \"acao\": \"Barras de cores estaticas com graficos piscando\",\n      \"enquadramento\": \"Geral\",\n      \"externa\": false,\n      \"movimento_camera\": \"Fixo\",\n      \"objetos\": [],\n      \"periodo\": \"dia\"\n    }\n  ],\n  \"comerciais\": [],\n  \"transcricao\": [\n    {\n      \"inicio_ms\": 0,\n      \"fim_ms\": 29740,\n      \"locutor\": \"Sistema\",\n      \"texto\": \"Som de bip continuo de teste\"\n    }\n  ]\n}"
+}
