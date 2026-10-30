@@ -77,8 +77,7 @@ async function abrir(job: { estado: string; codigo_falha?: string | null }) {
 }
 
 async function jogador() {
-  const player = (await screen.findByLabelText('Player')) as HTMLVideoElement
-  return player
+  return (await screen.findByLabelText('Player')) as HTMLVideoElement
 }
 
 function irPara(player: HTMLVideoElement, segundos: number) {
@@ -210,6 +209,52 @@ test('clicar numa ocorrência da linha do tempo leva o player ao início dela', 
   expect(player.currentTime).toBe(1)
 })
 
+test('ocorrências sobrepostas ficam no seu tempo, sem empurrar as seguintes', async () => {
+  const pessoa = decupagem.pessoas[0]
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      HttpResponse.json({
+        ...decupagem,
+        pessoas: [
+          {
+            ...pessoa,
+            na_imagem: [
+              { inicio_ms: 5_000, fim_ms: 20_000, evidencia: 'rosto' },
+              { inicio_ms: 10_000, fim_ms: 15_000, evidencia: 'rosto' },
+              { inicio_ms: 18_000, fim_ms: 25_000, evidencia: 'rosto' },
+              { inicio_ms: 30_000, fim_ms: 40_000, evidencia: 'rosto' },
+            ],
+          },
+        ],
+      }),
+    ),
+  )
+  await abrir({ estado: 'concluido' })
+  await jogador()
+
+  // Duração de 150 s (maior fim_ms): cada segundo vale 1/1,5 %.
+  const valor = (secao: Element | null) => Number(secao?.getAttribute('aria-valuenow'))
+  const largura = (rotulo: string) => valor(screen.getByLabelText(rotulo))
+  const vaoAntes = (rotulo: string) => valor(screen.getByLabelText(rotulo).previousElementSibling)
+  expect(largura('Aparições 00:05')).toBeCloseTo(15 / 1.5)
+  // A de 10–15 s fica coberta pela de 5–20 s; a de 18–25 s só desenha o que sobra.
+  expect(screen.queryByLabelText('Aparições 00:10')).toBeNull()
+  expect(largura('Aparições 00:18')).toBeCloseTo(5 / 1.5)
+  expect(vaoAntes('Aparições 00:30')).toBeCloseTo(5 / 1.5)
+  expect(largura('Aparições 00:30')).toBeCloseTo(10 / 1.5)
+})
+
+test('sem duração no player, a linha do tempo segue a da decupagem', async () => {
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+
+  Object.defineProperty(player, 'duration', { value: Infinity, configurable: true })
+  fireEvent.loadedMetadata(player)
+
+  expect(screen.getByText('00:00 / 02:30')).toBeTruthy()
+  expect(screen.getByRole('slider').getAttribute('aria-valuemax')).toBe('150000')
+})
+
 test('arrastar a cabeça de leitura move o player', async () => {
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' })
@@ -236,7 +281,7 @@ test('link expirado: o player pede outro e volta ao mesmo ponto', async () => {
   ]
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' })
-  const player = (await screen.findByLabelText('Player')) as HTMLVideoElement
+  const player = await jogador()
   await usuario.click(screen.getByLabelText('Pautas 00:30'))
 
   fireEvent.error(player)
@@ -253,7 +298,7 @@ test('erro do player com link ainda válido não pede outro link', async () => {
     if (request.url.endsWith('/reproducao')) pedidos++
   })
   await abrir({ estado: 'concluido' })
-  const player = await screen.findByLabelText('Player')
+  const player = await jogador()
 
   fireEvent.error(player)
   await new Promise((r) => setTimeout(r, 20))
@@ -280,7 +325,7 @@ test('o botão baixa a decupagem em JSON', async () => {
   URL.revokeObjectURL = () => {}
   const clique = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
   await abrir({ estado: 'concluido' })
-  await screen.findByLabelText('Player')
+  await jogador()
 
   await usuario.click(screen.getByLabelText('Baixar decupagem (JSON)'))
 

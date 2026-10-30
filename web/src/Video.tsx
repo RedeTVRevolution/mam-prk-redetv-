@@ -3,6 +3,7 @@ import {
   Alert,
   AspectRatio,
   Badge,
+  Box,
   Center,
   Grid,
   Group,
@@ -119,10 +120,14 @@ function FaixaDoTempo({
 }) {
   const ordenadas = [...faixa.ocorrencias].sort((a, b) => a.inicio_ms - b.inicio_ms)
   const secoes = []
+  // Uma faixa é uma fileira só: o trecho que se sobrepõe ao anterior não é desenhado de
+  // novo. Cada ocorrência fica no seu tempo, sem empurrar as seguintes.
   let cursor = 0
   for (const o of ordenadas) {
-    const inicio = Math.max(o.inicio_ms, cursor)
-    const largura = Math.max(o.fim_ms - o.inicio_ms, LARGURA_MINIMA_MS)
+    // A largura mínima cresce para a esquerda quando a ocorrência encosta no fim.
+    const fim = Math.min(Math.max(o.fim_ms, o.inicio_ms + LARGURA_MINIMA_MS), duracaoMs)
+    const inicio = Math.max(cursor, Math.min(o.inicio_ms, fim - LARGURA_MINIMA_MS))
+    if (fim <= inicio) continue
     if (inicio > cursor) {
       secoes.push(
         <Progress.Section
@@ -135,7 +140,7 @@ function FaixaDoTempo({
     secoes.push(
       <Progress.Section
         key={o.chave}
-        value={(largura / duracaoMs) * 100}
+        value={((fim - inicio) / duracaoMs) * 100}
         color={faixa.cor}
         role="button"
         tabIndex={0}
@@ -143,11 +148,13 @@ function FaixaDoTempo({
         style={{ cursor: 'pointer' }}
         onClick={() => saltar(o.inicio_ms)}
         onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
-          if (e.key === 'Enter' || e.key === ' ') saltar(o.inicio_ms)
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          saltar(o.inicio_ms)
         }}
       />,
     )
-    cursor = inicio + largura
+    cursor = fim
   }
   return (
     <Group gap="sm" wrap="nowrap">
@@ -292,7 +299,9 @@ export default function Video({
               onError={renovarLink}
               onLoadedMetadata={(e) => {
                 retomar()
-                setDuracaoDoPlayerMs(e.currentTarget.duration * 1000)
+                // Sem duração conhecida (NaN, ou Infinity num stream), fica a da decupagem.
+                const duracao = e.currentTarget.duration
+                setDuracaoDoPlayerMs(Number.isFinite(duracao) ? duracao * 1000 : null)
               }}
               onTimeUpdate={(e) => setAtualMs(e.currentTarget.currentTime * 1000)}
               aria-label="Player"
@@ -302,7 +311,7 @@ export default function Video({
           <Paper p="sm" withBorder>
             <Stack gap={6}>
               <Group gap="sm" wrap="nowrap">
-                <div style={{ width: LARGURA_DO_ROTULO, flexShrink: 0 }} />
+                <Box w={LARGURA_DO_ROTULO} />
                 <Slider
                   flex={1}
                   min={0}
