@@ -10,3 +10,4 @@ node_modules/
 dist/
 .terraform/
 *.tfstate*
+*.mp4
