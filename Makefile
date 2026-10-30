@@ -1,4 +1,4 @@
-.PHONY: instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas
+.PHONY: emitir-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas
 
 instalar:
 	uv sync --locked
@@ -33,3 +33,7 @@ deploy-dev:
 # Contas locais do dev (#11), depois do deploy-dev: cria e manda o link da senha.
 criar-contas:
 	scripts/criar-contas.sh
+
+# Chave de API de um sistema da RedeTV (E7): make emitir-chave SISTEMA="Nome do sistema"
+emitir-chave:
+	uv run --locked python -m api.emitir_chave "$(SISTEMA)"

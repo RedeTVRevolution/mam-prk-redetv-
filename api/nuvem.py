@@ -10,6 +10,7 @@ from google.api_core.exceptions import NotFound
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api.chaves import RegistroDeChave
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     ArmazenamentoIndisponivel,
@@ -18,6 +19,7 @@ from api.jobs import (
 )
 
 COLECAO_DE_JOBS = "jobs"
+COLECAO_DE_CHAVES = "chaves_de_api"
 TAMANHO_DO_PEDACO = 256 * 1024
 
 
@@ -47,6 +49,20 @@ class RepositorioFirestore:
             "criado_em", direction=firestore.Query.DESCENDING
         ).stream()
         return [Job(**(doc.to_dict() or {})) for doc in docs]
+
+
+class RepositorioDeChavesFirestore:
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_CHAVES
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def salvar(self, registro: RegistroDeChave) -> None:
+        self._colecao.document(registro.id).set(registro.model_dump())
+
+    def obter(self, chave_id: str) -> RegistroDeChave | None:
+        doc = self._colecao.document(chave_id).get()
+        return RegistroDeChave(**(doc.to_dict() or {})) if doc.exists else None
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:

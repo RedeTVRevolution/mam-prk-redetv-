@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from api.auth import UsuarioAutenticado
+from api.auth import ChamadorAutenticado, Sistema
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
@@ -45,6 +45,7 @@ class Job(BaseModel):
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
+    sistema: str | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -243,7 +244,7 @@ def criar_rotas(
     rotas = APIRouter(prefix="/jobs")
 
     @rotas.post("", status_code=202)
-    def criar(novo: NovoJob, usuario: UsuarioAutenticado) -> JobCriado:
+    def criar(novo: NovoJob, chamador: ChamadorAutenticado) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
         agora = relogio()
@@ -252,7 +253,12 @@ def criar_rotas(
             nome=novo.nome,
             tamanho_bytes=novo.tamanho_bytes,
             estado="aguardando_upload",
-            criado_por=usuario.uid,
+            criado_por=(
+                f"sistema:{chamador.sistema}"
+                if isinstance(chamador, Sistema)
+                else chamador.uid
+            ),
+            sistema=chamador.sistema if isinstance(chamador, Sistema) else None,
             criado_em=agora,
             atualizado_em=agora,
         )

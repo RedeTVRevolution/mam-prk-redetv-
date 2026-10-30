@@ -12,12 +12,16 @@ from google.cloud.storage import Client as ClienteStorage
 from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
+    Chamador,
+    ChamadorAutenticado,
+    ChaveInvalida,
+    Sistema,
     TokenInvalido,
     Usuario,
-    UsuarioAutenticado,
+    VerificadorDeChave,
     VerificadorDeToken,
     VerificadorIdentityPlatform,
-    exigir_token,
+    exigir_autenticacao,
 )
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
@@ -43,10 +47,18 @@ class _SemVerificador:
         raise TokenInvalido
 
 
+class _SemChaves:
+    """Sem adaptador de chaves de API: recusa toda chave."""
+
+    def verificar(self, chave: str) -> Sistema:
+        raise ChaveInvalida
+
+
 def criar_app(
     verificador: VerificadorDeToken | None = None,
     repositorio: RepositorioDeJobs | None = None,
     armazenamento: Armazenamento | None = None,
+    chaves: VerificadorDeChave | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -62,7 +74,8 @@ def criar_app(
         return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
 
     app.state.verificador = verificador or _SemVerificador()
-    app.middleware("http")(exigir_token)
+    app.state.chaves = chaves or _SemChaves()
+    app.middleware("http")(exigir_autenticacao)
 
     @app.get(CAMINHO_HEALTH)
     def health() -> dict[str, str]:
@@ -71,8 +84,8 @@ def criar_app(
     v1 = APIRouter(prefix=PREFIXO_PROTEGIDO)
 
     @v1.get("/eu")
-    def eu(usuario: UsuarioAutenticado) -> Usuario:
-        return usuario
+    def eu(chamador: ChamadorAutenticado) -> Chamador:
+        return chamador
 
     v1.include_router(
         criar_rotas(

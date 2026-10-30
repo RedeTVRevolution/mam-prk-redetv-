@@ -19,8 +19,13 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
+from api.chaves import RegistroDeChave
 from api.jobs import Job, ServicoIndisponivel
-from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
+from api.nuvem import (
+    ArmazenamentoStorage,
+    RepositorioDeChavesFirestore,
+    RepositorioFirestore,
+)
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
 EMULADOR_STORAGE = os.environ.get("STORAGE_EMULATOR_HOST")
@@ -212,3 +217,29 @@ def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
 
     with pytest.raises(ServicoIndisponivel):
         next(armazenamento.abrir_decupagem("nao-existe"))
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeChavesFirestore:
+    @pytest.fixture
+    def chaves(self) -> RepositorioDeChavesFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeChavesFirestore(
+            cliente, colecao=f"chaves-{uuid.uuid4().hex}"
+        )
+
+    def test_salva_e_obtem_o_registro(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        registro = RegistroDeChave(
+            id="abc", sistema="Legado", hmac="ff" * 32, versao_mac=2, criada_em=BASE
+        )
+
+        chaves.salvar(registro)
+
+        assert chaves.obter("abc") == registro
+
+    def test_obter_devolve_none_se_nao_existe(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        assert chaves.obter("nao-existe") is None
