@@ -35,6 +35,8 @@ const decupagem = {
 
 const TOKEN = 'Bearer token-de-ana@redetv.com.br'
 let statusDecupagem = 200
+let corrigida = false
+let correcaoRecebida: unknown = null
 let links: { url: string; expira_em: string }[] = []
 const servidor = setupServer(
   http.get('/v1/jobs/j1/reproducao', ({ request }) => {
@@ -45,9 +47,17 @@ const servidor = setupServer(
   }),
   http.get('/v1/jobs/j1/decupagem', ({ request }) => {
     if (request.headers.get('Authorization') !== TOKEN) return new HttpResponse(null, { status: 401 })
+    const entregue = corrigida
+      ? { ...decupagem, versao_decupagem: 'v2', pessoas: [{ ...decupagem.pessoas[0], nome: 'Ana Souza Lima', origem: 'revisao' }] }
+      : { ...decupagem, versao_decupagem: 'v1' }
     return statusDecupagem === 200
-      ? HttpResponse.json(decupagem)
+      ? HttpResponse.json(entregue)
       : new HttpResponse(null, { status: statusDecupagem })
+  }),
+  http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
+    correcaoRecebida = await request.json()
+    corrigida = true
+    return HttpResponse.json({ id: 'c1', versao_decupagem: 'v1' }, { status: 201 })
   }),
 )
 
@@ -55,13 +65,15 @@ beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => {
   servidor.resetHandlers()
   statusDecupagem = 200
+  corrigida = false
+  correcaoRecebida = null
   links = []
   cleanup()
   vi.restoreAllMocks()
 })
 afterAll(() => servidor.close())
 
-async function abrir(job: { estado: string; codigo_falha?: string | null }) {
+async function abrir(job: { estado: string; codigo_falha?: string | null }, podeEditar = false) {
   const auth = new AutenticadorFalso([
     { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
   ])
@@ -72,6 +84,7 @@ async function abrir(job: { estado: string; codigo_falha?: string | null }) {
       autenticador={auth}
       job={{ id: 'j1', nome: 'clipe.mp4', codigo_falha: null, ...job }}
       aoSessaoExpirada={() => {}}
+      podeEditar={podeEditar}
     />,
   )
 }
@@ -330,7 +343,7 @@ test('o botão baixa a decupagem em JSON', async () => {
   await usuario.click(screen.getByLabelText('Baixar decupagem (JSON)'))
 
   expect(clique).toHaveBeenCalledOnce()
-  expect(JSON.parse(await blobs[0]!.text())).toEqual(decupagem)
+  expect(JSON.parse(await blobs[0]!.text())).toEqual({ ...decupagem, versao_decupagem: 'v1' })
 })
 
 test('falha ao carregar mostra aviso', async () => {
@@ -338,4 +351,35 @@ test('falha ao carregar mostra aviso', async () => {
   await abrir({ estado: 'concluido' })
 
   expect((await screen.findByRole('alert')).textContent).toContain('Não foi possível')
+})
+
+test('o Editor corrige o nome da pessoa pelo modal e vê o selo de revisão', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+
+  await usuario.click((await painel.findAllByRole('button', { name: 'Corrigir Ana Souza' }))[0]!)
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Nome'))
+  await usuario.type(modal.getByLabelText('Nome'), 'Ana Souza Lima')
+  await usuario.type(modal.getByLabelText('Motivo'), 'sobrenome completo')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  expect((await painel.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
+  expect(painel.getAllByText('revisado').length).toBeGreaterThan(0)
+  expect(correcaoRecebida).toEqual({
+    tipo: 'pessoa.renomear',
+    item_id: 'p1',
+    valor: 'Ana Souza Lima',
+    motivo: 'sobrenome completo',
+    versao: 'v1',
+  })
+})
+
+test('quem não tem decupagem.editar não vê o botão de corrigir', async () => {
+  await abrir({ estado: 'concluido' }, false)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+
+  expect(await painel.findAllByText('Ana Souza')).not.toHaveLength(0)
+  expect(painel.queryByRole('button', { name: /Corrigir/ })).toBeNull()
 })

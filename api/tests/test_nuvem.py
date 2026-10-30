@@ -15,6 +15,7 @@ import pytest
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from google.api_core.exceptions import AlreadyExists
 from google.auth import credentials as google_credentials
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
@@ -22,10 +23,12 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.correcoes import Ancora, Correcao
 from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
     RepositorioDeChavesFirestore,
+    RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
@@ -408,3 +411,51 @@ class TestRepositorioDePapeisFirestore:
         papeis.salvar("u1", ["consulta"])
 
         assert papeis.obter("u1") == ["consulta"]
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeCorrecoesFirestore:
+    @pytest.fixture
+    def correcoes(self) -> RepositorioDeCorrecoesFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeCorrecoesFirestore(
+            cliente, colecao=f"correcoes-{uuid.uuid4().hex}"
+        )
+
+    def _correcao(self, id: str, job_id: str, minutos: int) -> Correcao:
+        return Correcao(
+            id=id,
+            job_id=job_id,
+            autor_uid="u1",
+            autor_email="a@b.c",
+            criada_em=BASE + timedelta(minutes=minutos),
+            motivo="grafia",
+            tipo="pessoa.renomear",
+            antes="Ana",
+            depois="Anna",
+            ancora=Ancora(
+                versao="v" * 64,
+                tipo_do_item="pessoa",
+                identidade="ana",
+                inicio_ms=0,
+                fim_ms=10,
+            ),
+        )
+
+    def test_acrescenta_e_lista_por_job_na_ordem_do_tempo(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        correcoes.acrescentar(self._correcao("c2", "j1", 5))
+        correcoes.acrescentar(self._correcao("c1", "j1", 1))
+        correcoes.acrescentar(self._correcao("c3", "j2", 2))
+
+        assert [c.id for c in correcoes.listar("j1")] == ["c1", "c2"]
+        assert correcoes.listar("j1")[0].ancora.identidade == "ana"
+
+    def test_nao_sobrescreve_uma_correcao_existente(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        correcoes.acrescentar(self._correcao("c1", "j1", 1))
+
+        with pytest.raises(AlreadyExists):
+            correcoes.acrescentar(self._correcao("c1", "j1", 2))

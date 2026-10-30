@@ -7,7 +7,9 @@ import {
   Center,
   Grid,
   Group,
+  Button,
   Loader,
+  Modal,
   NavLink,
   Paper,
   Progress,
@@ -16,11 +18,13 @@ import {
   Slider,
   Stack,
   Text,
+  TextInput,
+  Textarea,
   Tooltip,
   UnstyledButton,
   type MantineColor,
 } from '@mantine/core'
-import { IconDownload } from '@tabler/icons-react'
+import { IconDownload, IconPencil } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
@@ -41,12 +45,14 @@ interface Intervalo {
 interface Pessoa {
   id: string
   nome: string
+  origem?: 'modelo' | 'revisao'
   na_imagem: (Intervalo & { evidencia: string })[]
   citada_na_fala: Intervalo[]
   citada_no_texto: (Intervalo & { texto: string })[]
 }
 
 export interface Decupagem {
+  versao_decupagem?: string
   pautas: (Intervalo & { titulo: string })[]
   pessoas: Pessoa[]
   planos: (Intervalo & { id: string; ambiente: string; acao?: string | null })[]
@@ -182,14 +188,19 @@ export default function Video({
   autenticador,
   job,
   aoSessaoExpirada,
+  podeEditar = false,
 }: {
   autenticador: Autenticador
   job: JobAberto
   aoSessaoExpirada: () => void
+  podeEditar?: boolean
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const concluido = job.estado === 'concluido'
+  // Cada correção salva recarrega o painel: o contador refaz a carga.
+  const [recargas, setRecargas] = useState(0)
+  const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
   // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
   const sessaoExpirada = useRef(aoSessaoExpirada)
   useEffect(() => {
@@ -215,7 +226,7 @@ export default function Video({
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, concluido])
+  }, [autenticador, job.id, concluido, recargas])
 
   const retomarEm = useRef<number | null>(null)
   // O link assinado expira em minutos: se o player falhar depois disso, pede outro e
@@ -345,7 +356,12 @@ export default function Video({
             </Group>
             <ScrollArea flex={1}>
               {aba === 'Pessoas' && (
-                <AbaPessoas decupagem={decupagem} quadro={quadro} saltar={saltar} />
+                <AbaPessoas
+                  decupagem={decupagem}
+                  quadro={quadro}
+                  saltar={saltar}
+                  aoCorrigir={podeEditar ? setCorrigindo : undefined}
+                />
               )}
               {aba === 'Pautas' &&
                 decupagem.pautas.map((p, i) => (
@@ -390,7 +406,143 @@ export default function Video({
           </Stack>
         </Paper>
       </Grid.Col>
+      <CorrigirPessoa
+        key={corrigindo?.id ?? 'fechado'}
+        pessoa={corrigindo}
+        versao={decupagem.versao_decupagem ?? ''}
+        autenticador={autenticador}
+        jobId={job.id}
+        aoFechar={() => setCorrigindo(null)}
+        aoSalvar={() => {
+          setCorrigindo(null)
+          setRecargas((n) => n + 1)
+        }}
+        aoSessaoExpirada={() => sessaoExpirada.current()}
+      />
     </Grid>
+  )
+}
+
+/** Nome da pessoa, com o selo de revisão e, para quem edita, o botão de corrigir. */
+function NomeDaPessoa({
+  pessoa,
+  fw,
+  aoCorrigir,
+}: {
+  pessoa: Pessoa
+  fw?: number
+  aoCorrigir?: (p: Pessoa) => void
+}) {
+  return (
+    <Group gap={6} wrap="nowrap">
+      <Text size="sm" fw={fw}>
+        {pessoa.nome}
+      </Text>
+      {pessoa.origem === 'revisao' && (
+        <Badge size="xs" color="teal" variant="light">
+          revisado
+        </Badge>
+      )}
+      {aoCorrigir && (
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          aria-label={`Corrigir ${pessoa.nome}`}
+          onClick={() => aoCorrigir(pessoa)}
+        >
+          <IconPencil size={14} />
+        </ActionIcon>
+      )}
+    </Group>
+  )
+}
+
+/** Modal da Ilha de edição: novo nome e motivo; a API confere a permissão e a versão. */
+function CorrigirPessoa({
+  pessoa,
+  versao,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoSalvar,
+  aoSessaoExpirada,
+}: {
+  pessoa: Pessoa | null
+  versao: string
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const [nome, setNome] = useState(pessoa?.nome ?? '')
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+
+  async function salvar() {
+    if (!pessoa) return
+    setSalvando(true)
+    setErro(null)
+    try {
+      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
+        metodo: 'POST',
+        corpo: {
+          tipo: 'pessoa.renomear',
+          item_id: pessoa.id,
+          valor: nome,
+          motivo,
+          versao,
+        },
+      })
+      aoSalvar()
+    } catch (e) {
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409'))
+        setErro('A decupagem mudou. Feche e abra a correção de novo.')
+      else setErro('Não foi possível salvar a correção.')
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <Modal opened={pessoa !== null} onClose={aoFechar} title="Corrigir pessoa" centered>
+      <Stack gap="sm">
+        <TextInput
+          label="Nome"
+          value={nome}
+          maxLength={200}
+          onChange={(e) => setNome(e.currentTarget.value)}
+        />
+        <Textarea
+          label="Motivo"
+          value={motivo}
+          maxLength={500}
+          rows={3}
+          onChange={(e) => setMotivo(e.currentTarget.value)}
+        />
+        {erro && (
+          <Alert color="red" variant="light" role="alert">
+            {erro}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button type="button" variant="default" onClick={aoFechar}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            color="red"
+            loading={salvando}
+            disabled={!nome.trim() || !motivo.trim()}
+            onClick={() => void salvar()}
+          >
+            Salvar
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   )
 }
 
@@ -399,10 +551,12 @@ function AbaPessoas({
   decupagem,
   quadro,
   saltar,
+  aoCorrigir,
 }: {
   decupagem: Decupagem
   quadro: (i: Intervalo) => string
   saltar: (ms: number) => void
+  aoCorrigir?: (p: Pessoa) => void
 }) {
   const aparecem = decupagem.pessoas.filter((p) => p.na_imagem.length > 0)
   const citadas = decupagem.pessoas.filter(
@@ -416,9 +570,7 @@ function AbaPessoas({
         </Text>
         {aparecem.map((p) => (
           <Stack key={p.id} gap={4}>
-            <Text size="sm" fw={600}>
-              {p.nome}
-            </Text>
+            <NomeDaPessoa pessoa={p} fw={600} aoCorrigir={aoCorrigir} />
             <ScrollArea type="never">
               <Group gap={6} wrap="nowrap">
                 {p.na_imagem.map((a, i) => (
@@ -451,7 +603,7 @@ function AbaPessoas({
         </Text>
         {citadas.map((p) => (
           <Stack key={p.id} gap={4}>
-            <Text size="sm">{p.nome}</Text>
+            <NomeDaPessoa pessoa={p} aoCorrigir={aoCorrigir} />
             <Group gap={6}>
               {p.citada_na_fala.map((m, i) => (
                 <Badge

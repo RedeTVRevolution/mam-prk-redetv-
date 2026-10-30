@@ -6,6 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
+from api.correcoes import versao_do_modelo
 from api.jobs import (
     Estado,
     Job,
@@ -298,7 +299,9 @@ def test_decupagem_chega_em_gzip_e_inteira() -> None:
     assert resposta.status_code == 200
     assert resposta.headers["content-encoding"] == "gzip"
     assert resposta.headers["content-type"] == "application/json"
-    assert resposta.json() == documento  # o cliente já descomprimiu
+    entregue = resposta.json()  # o cliente já descomprimiu
+    assert entregue.pop("versao_decupagem") == versao_do_modelo(texto)
+    assert entregue == documento
 
 
 def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
@@ -312,7 +315,10 @@ def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
     )
 
     assert "content-encoding" not in resposta.headers
-    assert resposta.json() == {"a": 1}
+    assert resposta.json() == {
+        "a": 1,
+        "versao_decupagem": versao_do_modelo(b'{"a": 1}'),
+    }
 
 
 def test_reproducao_e_decupagem_exigem_token() -> None:
@@ -333,7 +339,10 @@ def test_decupagem_com_gzip_recusado_vem_em_texto_puro() -> None:
     )
 
     assert "content-encoding" not in resposta.headers
-    assert resposta.json() == {"a": 1}
+    assert resposta.json() == {
+        "a": 1,
+        "versao_decupagem": versao_do_modelo(b'{"a": 1}'),
+    }
 
 
 def test_decupagem_indisponivel_da_503_antes_de_comecar_o_stream() -> None:

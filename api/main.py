@@ -22,6 +22,7 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
+from api.correcoes import RepositorioDeCorrecoes, RepositorioDeCorrecoesEmMemoria
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
     Armazenamento,
@@ -35,6 +36,7 @@ from api.jobs import (
 )
 from api.nuvem import (
     ArmazenamentoStorage,
+    RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
     RepositorioFirestore,
 )
@@ -76,6 +78,7 @@ def criar_app(
     armazenamento: Armazenamento | None = None,
     chaves: VerificadorDeChave | None = None,
     papeis: RepositorioDePapeis | None = None,
+    correcoes: RepositorioDeCorrecoes | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -121,6 +124,7 @@ def criar_app(
             armazenamento or ArmazenamentoIndisponivel(),
             tamanho_maximo_bytes,
             relogio,
+            correcoes or RepositorioDeCorrecoesEmMemoria(),
         )
     )
     app.include_router(v1)
@@ -142,6 +146,7 @@ if _projeto:
             f"{_projeto}-decupagens",
         ),
         papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
+        correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
     )
 else:
     app = criar_app()

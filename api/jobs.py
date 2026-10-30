@@ -2,6 +2,7 @@
 
 import hashlib
 import itertools
+import json
 import uuid
 import zlib
 from collections.abc import Callable, Iterator
@@ -24,6 +25,16 @@ from api.auth import (
     ChamadorAutenticado,
     Escopo,
     Sistema,
+    Usuario,
+)
+from api.correcoes import (
+    ItemInexistente,
+    NovaCorrecao,
+    RepositorioDeCorrecoes,
+    aplicar,
+    montar_correcao,
+    nome_atual,
+    versao_do_modelo,
 )
 from api.papeis import Permissao, RepositorioDePapeis, papeis_efetivos, permissoes_de
 
@@ -297,6 +308,17 @@ def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
     return verificar
 
 
+def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
+    """Dependência: só pessoa com `decupagem.editar`; chave de sistema não corrige."""
+    if not isinstance(chamador, Usuario):
+        raise HTTPException(403, "Chave de sistema não corrige a decupagem")
+    papeis: RepositorioDePapeis = request.app.state.papeis
+    permissoes = permissoes_de(papeis_efetivos(papeis.obter(chamador.uid)))
+    if "decupagem.editar" not in permissoes:
+        raise HTTPException(403, "Sem a permissão decupagem.editar")
+    return chamador
+
+
 def _enxerga(chamador: Chamador, job: Job | None) -> Job:
     """O job, ou 404 se não existe ou é de outro sistema (ou de uma pessoa), para uma chave."""
     if job is None or (
@@ -311,6 +333,7 @@ def criar_rotas(
     armazenamento: Armazenamento,
     tamanho_maximo_bytes: int,
     relogio: Callable[[], datetime],
+    correcoes: RepositorioDeCorrecoes,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -391,22 +414,66 @@ def criar_rotas(
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
+    def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
+        cabecalhos = {"Vary": "Accept-Encoding"}
+        if _aceita_gzip(request.headers.get("accept-encoding", "")):
+            cabecalhos["Content-Encoding"] = "gzip"
+            corpo = _comprimir(corpo)
+        return StreamingResponse(
+            corpo, media_type="application/json", headers=cabecalhos
+        )
+
+    def _ler_modelo(job_id: str) -> tuple[dict[str, Any], str]:
+        """O JSON do modelo e a versão (SHA-256 dos bytes guardados)."""
+        conteudo = b"".join(armazenamento.abrir_decupagem(job_id))
+        return json.loads(conteudo), versao_do_modelo(conteudo)
+
     @rotas.get("/{job_id}/decupagem")
     def decupagem(
         job_id: str,
         request: Request,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        versao: Literal["modelo"] | None = None,
     ) -> StreamingResponse:
         job = obter_concluido(job_id, chamador)
-        pedacos = iter(armazenamento.abrir_decupagem(job.id))
-        # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
-        pedacos = itertools.chain([next(pedacos, b"")], pedacos)
-        cabecalhos = {"Vary": "Accept-Encoding"}
-        if _aceita_gzip(request.headers.get("accept-encoding", "")):
-            cabecalhos["Content-Encoding"] = "gzip"
-            pedacos = _comprimir(pedacos)
-        return StreamingResponse(
-            pedacos, media_type="application/json", headers=cabecalhos
-        )
+        if versao == "modelo":
+            pedacos = iter(armazenamento.abrir_decupagem(job.id))
+            # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
+            pedacos = itertools.chain([next(pedacos, b"")], pedacos)
+            return _resposta(pedacos, request)
+        modelo, versao_atual = _ler_modelo(job.id)
+        entregue = aplicar(modelo, versao_atual, correcoes.listar(job.id))
+        entregue["versao_decupagem"] = versao_atual
+        return _resposta(iter([json.dumps(entregue).encode()]), request)
+
+    @rotas.post("/{job_id}/correcoes", status_code=201)
+    def corrigir(
+        job_id: str,
+        novo: NovaCorrecao,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        job = obter_concluido(job_id, autor)
+        modelo, versao_atual = _ler_modelo(job.id)
+        if novo.versao != versao_atual:
+            raise HTTPException(409, "A decupagem mudou: recarregue e corrija de novo")
+        try:
+            antes = nome_atual(
+                modelo, versao_atual, correcoes.listar(job.id), novo.item_id
+            )
+            correcao = montar_correcao(
+                modelo,
+                versao_atual,
+                novo,
+                antes,
+                id=uuid.uuid4().hex,
+                job_id=job.id,
+                autor_uid=autor.uid,
+                autor_email=autor.email,
+                criada_em=relogio(),
+            )
+        except ItemInexistente:
+            raise HTTPException(422, "Item inexistente") from None
+        correcoes.acrescentar(correcao)
+        return {"id": correcao.id, "versao_decupagem": versao_atual}
 
     return rotas

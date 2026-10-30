@@ -12,6 +12,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.correcoes import Correcao
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     ArmazenamentoIndisponivel,
@@ -25,6 +26,7 @@ COLECAO_DE_JOBS = "jobs"
 COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
+COLECAO_DE_CORRECOES = "correcoes"
 TAMANHO_DO_PEDACO = 256 * 1024
 
 
@@ -143,6 +145,23 @@ class RepositorioDePapeisFirestore:
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         self._colecao.document(uid).set({"papeis": papeis})
+
+
+class RepositorioDeCorrecoesFirestore:
+    """Só acrescenta: `create` falha se o id já existe, então nada é sobrescrito."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_CORRECOES
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def acrescentar(self, correcao: Correcao) -> None:
+        self._colecao.document(correcao.id).create(correcao.model_dump())
+
+    def listar(self, job_id: str) -> list[Correcao]:
+        docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
+        achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
+        return sorted(achadas, key=lambda c: c.criada_em)
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:
