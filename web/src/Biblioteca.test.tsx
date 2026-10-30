@@ -114,7 +114,7 @@ test('lista nome, data e estado de cada Job, e o código de quem falhou', async 
   expect(falhou.getByText('codec_nao_suportado')).toBeTruthy()
   const validando = within(screen.getByText('novo.mp4').closest('.mantine-Card-root') as HTMLElement)
   expect(validando.getByText('Em quarentena')).toBeTruthy()
-  expect(validando.getByText(/29\/10\/2026/)).toBeTruthy()
+  expect(validando.getByText(/29\/10\/2026.*12:00/)).toBeTruthy()
 })
 
 test('a lista acompanha o estado por consulta periódica', async () => {
