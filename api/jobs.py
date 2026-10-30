@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -19,7 +19,12 @@ from pydantic import (
     model_validator,
 )
 
-from api.auth import ChamadorAutenticado, Sistema
+from api.auth import (
+    Chamador,
+    ChamadorAutenticado,
+    Escopo,
+    Sistema,
+)
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
@@ -145,6 +150,10 @@ class RepositorioDeJobs(Protocol):
         """Do mais recente para o mais antigo."""
         ...
 
+    def listar_por_sistema(self, sistema: str) -> list[Job]:
+        """Só os jobs do sistema, do mais recente para o mais antigo."""
+        ...
+
 
 class Armazenamento(Protocol):
     """Porta para o Cloud Storage; os testes usam uma versão falsa."""
@@ -177,6 +186,9 @@ class RepositorioEmMemoria:
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
+    def listar_por_sistema(self, sistema: str) -> list[Job]:
+        return [j for j in self.listar() if j.sistema == sistema]
+
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
@@ -186,6 +198,9 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def listar(self) -> list[Job]:
+        raise ServicoIndisponivel
+
+    def listar_por_sistema(self, sistema: str) -> list[Job]:
         raise ServicoIndisponivel
 
 
@@ -256,6 +271,26 @@ def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
     yield compressor.flush()
 
 
+def _exige(escopo: Escopo) -> Callable[[Chamador], Chamador]:
+    """Dependência: chave sem o escopo recebe 403. Pessoa não tem escopos e passa (até os papéis da E8)."""
+
+    def verificar(chamador: ChamadorAutenticado) -> Chamador:
+        if isinstance(chamador, Sistema) and escopo not in chamador.escopos:
+            raise HTTPException(403, f"Chave sem o escopo {escopo}")
+        return chamador
+
+    return verificar
+
+
+def _enxerga(chamador: Chamador, job: Job | None) -> Job:
+    """O job, ou 404 se não existe ou é de outro sistema (ou de uma pessoa), para uma chave."""
+    if job is None or (
+        isinstance(chamador, Sistema) and job.sistema != chamador.sistema
+    ):
+        raise HTTPException(404, "Job não encontrado")
+    return job
+
+
 def criar_rotas(
     repositorio: RepositorioDeJobs,
     armazenamento: Armazenamento,
@@ -265,7 +300,9 @@ def criar_rotas(
     rotas = APIRouter(prefix="/jobs")
 
     @rotas.post("", status_code=202)
-    def criar(novo: NovoJob, chamador: ChamadorAutenticado) -> JobCriado:
+    def criar(
+        novo: NovoJob, chamador: Annotated[Chamador, Depends(_exige("criar"))]
+    ) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
         if isinstance(chamador, Sistema):
@@ -288,14 +325,22 @@ def criar_rotas(
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
     @rotas.get("")
-    def listar() -> list[JobPublico]:
-        return [JobPublico.de(j) for j in repositorio.listar()]
+    def listar(
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> list[JobPublico]:
+        if isinstance(chamador, Sistema):
+            jobs = repositorio.listar_por_sistema(chamador.sistema)
+        else:
+            jobs = repositorio.listar()
+        return [JobPublico.de(j) for j in jobs]
 
     @rotas.get("/{job_id}", response_model=JobPublico)
-    def ler(job_id: str, request: Request) -> Response:
-        job = repositorio.obter(job_id)
-        if job is None:
-            raise HTTPException(404, "Job não encontrado")
+    def ler(
+        job_id: str,
+        request: Request,
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> Response:
+        job = _enxerga(chamador, repositorio.obter(job_id))
         publico = JobPublico.de(job)
         etag = _etag(publico)
         cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"}
@@ -303,19 +348,17 @@ def criar_rotas(
             return Response(status_code=304, headers=cabecalhos)
         return JSONResponse(publico.model_dump(mode="json"), headers=cabecalhos)
 
-    def obter_concluido(job_id: str) -> Job:
-        job = repositorio.obter(job_id)
-        if job is None:
-            raise HTTPException(404, "Job não encontrado")
+    def obter_concluido(job_id: str, chamador: Chamador) -> Job:
+        job = _enxerga(chamador, repositorio.obter(job_id))
         if job.estado != "concluido":
             raise HTTPException(409, f"Job em {job.estado}, não concluido")
         return job
 
     @rotas.delete("/{job_id}", status_code=202)
-    def cancelar(job_id: str) -> JobPublico:
-        job = repositorio.obter(job_id)
-        if job is None:
-            raise HTTPException(404, "Job não encontrado")
+    def cancelar(
+        job_id: str, chamador: Annotated[Chamador, Depends(_exige("cancelar"))]
+    ) -> JobPublico:
+        job = _enxerga(chamador, repositorio.obter(job_id))
         if job.estado in ("concluido", "falhou"):
             raise HTTPException(409, f"Job em {job.estado}, não cancelável")
         if job.estado != "cancelado":
@@ -326,14 +369,20 @@ def criar_rotas(
         return JobPublico.de(job)
 
     @rotas.get("/{job_id}/reproducao")
-    def reproducao(job_id: str) -> Reproducao:
-        job = obter_concluido(job_id)
+    def reproducao(
+        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+    ) -> Reproducao:
+        job = obter_concluido(job_id, chamador)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
     @rotas.get("/{job_id}/decupagem")
-    def decupagem(job_id: str, request: Request) -> StreamingResponse:
-        job = obter_concluido(job_id)
+    def decupagem(
+        job_id: str,
+        request: Request,
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> StreamingResponse:
+        job = obter_concluido(job_id, chamador)
         pedacos = iter(armazenamento.abrir_decupagem(job.id))
         # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
         pedacos = itertools.chain([next(pedacos, b"")], pedacos)

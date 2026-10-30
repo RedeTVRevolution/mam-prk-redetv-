@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 import jwt
 from fastapi import Depends, Request, Response
@@ -19,12 +19,17 @@ class Usuario(BaseModel):
     email: str
 
 
+Escopo = Literal["criar", "ler", "cancelar"]
+ESCOPOS: tuple[Escopo, ...] = ("cancelar", "criar", "ler")
+
+
 class Sistema(BaseModel):
     """Sistema da RedeTV que chama `/v1` com chave de API."""
 
     model_config = ConfigDict(frozen=True)
 
     sistema: str
+    escopos: list[Escopo]
 
 
 Chamador = Usuario | Sistema

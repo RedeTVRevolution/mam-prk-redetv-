@@ -91,6 +91,26 @@ class TestRepositorioFirestore:
 
         assert [j.id for j in repositorio.listar()] == ["novo", "meio", "velho"]
 
+    def test_lista_por_sistema_so_traz_os_jobs_do_sistema(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        for id, minutos, sistema in [
+            ("a-velho", 0, "A"),
+            ("b", 5, "B"),
+            ("pessoa", 7, None),
+            ("a-novo", 10, "A"),
+        ]:
+            repositorio.salvar(
+                _job(id, BASE + timedelta(minutes=minutos)).model_copy(
+                    update={"sistema": sistema}
+                )
+            )
+
+        assert [j.id for j in repositorio.listar_por_sistema("A")] == [
+            "a-novo",
+            "a-velho",
+        ]
+
 
 def _credencial_local() -> google_credentials.Signing:
     chave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -232,7 +252,12 @@ class TestRepositorioDeChavesFirestore:
         self, chaves: RepositorioDeChavesFirestore
     ) -> None:
         registro = RegistroDeChave(
-            id="abc", sistema="Legado", hmac="ff" * 32, versao_mac=2, criada_em=BASE
+            id="abc",
+            sistema="Legado",
+            escopos=["ler"],
+            hmac="ff" * 32,
+            versao_mac=2,
+            criada_em=BASE,
         )
 
         chaves.salvar(registro)

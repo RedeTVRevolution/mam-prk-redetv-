@@ -7,14 +7,14 @@ HMAC dela, calculado pela porta `Mac` (no plano, uma chave MAC do Cloud KMS).
 import hmac
 import re
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from hashlib import sha256
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from api.auth import ChaveInvalida, Sistema
+from api.auth import ESCOPOS, ChaveInvalida, Escopo, Sistema
 from api.jobs import agora_utc
 
 
@@ -47,6 +47,8 @@ class RegistroDeChave(BaseModel):
 
     id: str
     sistema: str
+    # Registro sem escopos (anterior à E7 isolada) não pode nada.
+    escopos: list[Escopo] = []
     hmac: str
     versao_mac: int
     criada_em: datetime
@@ -88,17 +90,23 @@ def _prefixo(sistema: str) -> str:
 
 def emitir_chave(
     sistema: str,
+    escopos: Iterable[Escopo],
     mac: Mac,
     repositorio: RepositorioDeChaves,
     criada_em: datetime,
 ) -> ChaveEmitida:
-    """Gera a chave (256 bits aleatórios) e grava só o HMAC. A chave sai só daqui."""
+    """Gera a chave (256 bits aleatórios) e grava só o HMAC. A chave sai só daqui.
+    Exige ao menos um escopo: nada é dado por padrão."""
+    escopos = sorted(set(escopos))
+    if not escopos:
+        raise ValueError("informe ao menos um escopo")
     id_publico = secrets.token_hex(8)
     chave = f"{_prefixo(sistema)}.{id_publico}.{secrets.token_urlsafe(32)}"
     versao = mac.versao_atual
     registro = RegistroDeChave(
         id=id_publico,
         sistema=sistema,
+        escopos=escopos,
         hmac=mac.calcular(versao, chave.encode()).hex(),
         versao_mac=versao,
         criada_em=criada_em,
@@ -136,7 +144,7 @@ class VerificadorDeChaveDeApi:
                     }
                 )
             )
-        return Sistema(sistema=registro.sistema)
+        return Sistema(sistema=registro.sistema, escopos=registro.escopos)
 
 
 def main(
@@ -146,15 +154,32 @@ def main(
     imprimir: Callable[[str], None] = print,
     relogio: Callable[[], datetime] = agora_utc,
 ) -> int:
-    if len(argv) != 1:
-        imprimir("uso: make emitir-chave SISTEMA=<nome do sistema>")
+    uso = (
+        "uso: make emitir-chave SISTEMA=<nome do sistema> ESCOPOS=<criar,ler,cancelar>"
+    )
+    if len(argv) != 2:
+        imprimir(uso)
+        return 2
+    pedidos = [e.strip() for e in argv[1].split(",") if e.strip()]
+    desconhecidos = [e for e in pedidos if e not in ESCOPOS]
+    if desconhecidos:
+        imprimir(f"escopo desconhecido: {', '.join(desconhecidos)}. {uso}")
         return 2
     try:
-        emitida = emitir_chave(argv[0], mac, repositorio, relogio())
+        emitida = emitir_chave(
+            argv[0],
+            [e for e in ESCOPOS if e in pedidos],
+            mac,
+            repositorio,
+            relogio(),
+        )
     except ValueError as erro:
-        imprimir(str(erro))
+        imprimir(f"{erro}. {uso}")
         return 2
-    imprimir(f"Sistema: {argv[0]} · id: {emitida.registro.id}")
+    imprimir(
+        f"Sistema: {argv[0]} · escopos: {', '.join(emitida.registro.escopos)}"
+        f" · id: {emitida.registro.id}"
+    )
     imprimir("Guarde a chave agora: ela não será mostrada de novo.")
     imprimir(emitida.chave)
     return 0

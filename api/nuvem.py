@@ -8,6 +8,7 @@ import google.auth
 import google.auth.transport.requests
 from google.api_core.exceptions import NotFound
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
 from api.chaves import RegistroDeChave
@@ -48,6 +49,16 @@ class RepositorioFirestore:
         docs = self._colecao.order_by(
             "criado_em", direction=firestore.Query.DESCENDING
         ).stream()
+        return [Job(**(doc.to_dict() or {})) for doc in docs]
+
+    def listar_por_sistema(self, sistema: str) -> list[Job]:
+        # Consulta filtrada no Firestore; em produção exige o índice composto
+        # (sistema + criado_em), que o emulador dispensa.
+        docs = (
+            self._colecao.where(filter=FieldFilter("sistema", "==", sistema))
+            .order_by("criado_em", direction=firestore.Query.DESCENDING)
+            .stream()
+        )
         return [Job(**(doc.to_dict() or {})) for doc in docs]
 
 

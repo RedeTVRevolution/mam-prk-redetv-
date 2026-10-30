@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from api.auth import Usuario
+from api.auth import Escopo, Usuario
 from api.chaves import (
     MacSimulado,
     RepositorioDeChavesEmMemoria,
@@ -20,12 +20,13 @@ from api.tests.test_jobs import ArmazenamentoFalso
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 MAC_V1 = MacSimulado({1: b"k1"}, versao_atual=1)
 MAC_V2 = MacSimulado({1: b"k1", 2: b"k2"}, versao_atual=2)
+TODOS: list[Escopo] = ["cancelar", "criar", "ler"]
 NOVO_JOB = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
 
 
 def _ambiente(mac: MacSimulado = MAC_V1) -> tuple[RepositorioDeChavesEmMemoria, str]:
     chaves = RepositorioDeChavesEmMemoria()
-    return chaves, emitir_chave("Sistema Legado", mac, chaves, BASE).chave
+    return chaves, emitir_chave("Sistema Legado", TODOS, mac, chaves, BASE).chave
 
 
 def _cliente(
@@ -56,7 +57,7 @@ def test_eu_responde_o_sistema() -> None:
 
     resposta = _cliente(chaves).get("/v1/eu", headers={"X-API-Key": chave})
 
-    assert resposta.json() == {"sistema": "Sistema Legado"}
+    assert resposta.json() == {"sistema": "Sistema Legado", "escopos": TODOS}
 
 
 def test_chave_tem_prefixo_do_sistema_e_256_bits() -> None:
@@ -181,7 +182,7 @@ def test_comando_imprime_a_chave_uma_unica_vez_e_grava_so_o_hash() -> None:
     chaves = RepositorioDeChavesEmMemoria()
     saida: list[str] = []
 
-    codigo = main(["Sistema Legado"], MAC_V1, chaves, saida.append, lambda: BASE)
+    codigo = main(["Sistema Legado", "ler"], MAC_V1, chaves, saida.append, lambda: BASE)
 
     assert codigo == 0
     (registro,) = chaves.todas()
@@ -195,6 +196,7 @@ def test_comando_sem_nome_do_sistema_nao_emite() -> None:
     chaves = RepositorioDeChavesEmMemoria()
 
     assert main([], MAC_V1, chaves, lambda _: None) == 2
+    assert main(["", "ler"], MAC_V1, chaves, lambda _: None) == 2
     assert chaves.todas() == []
 
 

@@ -34,6 +34,6 @@ deploy-dev:
 criar-contas:
 	scripts/criar-contas.sh
 
-# Chave de API de um sistema da RedeTV (E7): make emitir-chave SISTEMA="Nome do sistema"
+# Chave de API de um sistema da RedeTV (E7): make emitir-chave SISTEMA="Nome do sistema" ESCOPOS=criar,ler,cancelar
 emitir-chave:
-	uv run --locked python -m api.emitir_chave "$(SISTEMA)"
+	uv run --locked python -m api.emitir_chave "$(SISTEMA)" "$(ESCOPOS)"
