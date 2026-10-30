@@ -104,7 +104,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Main bg="dark.7">
+      <AppShell.Main bg="dark.7" pt={aberto ? undefined : 0}>
         {aberto ? (
           <Video
             autenticador={autenticador}
