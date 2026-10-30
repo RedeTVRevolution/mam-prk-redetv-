@@ -7,6 +7,7 @@ correções aplicadas por cima, em memória.
 
 import hashlib
 import json
+import unicodedata
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol
 
@@ -20,10 +21,22 @@ LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
 
 
-def _sem_controle(texto: str) -> str:
-    if any(ord(c) < 32 or ord(c) == 127 for c in texto):
+# Controles (C0, C1), formatação invisível (largura zero, direção do texto) e
+# separadores de linha e parágrafo do Unicode.
+_PROIBIDAS = {"Cc", "Cf", "Zl", "Zp"}
+
+
+def _sem_controle(texto: str, permitidos: str = "") -> str:
+    if any(
+        unicodedata.category(c) in _PROIBIDAS and c not in permitidos for c in texto
+    ):
         raise ValueError("caractere de controle")
     return texto
+
+
+def _sem_controle_salvo_quebra(texto: str) -> str:
+    """O motivo vem de um campo de várias linhas: aceita só a quebra de linha."""
+    return _sem_controle(texto.replace("\r\n", "\n"), permitidos="\n")
 
 
 class Ancora(BaseModel):
@@ -67,7 +80,7 @@ class NovaCorrecao(BaseModel):
     versao: Annotated[str, StringConstraints(min_length=1, max_length=64)]
 
     _valor_sem_controle = field_validator("valor")(_sem_controle)
-    _motivo_sem_controle = field_validator("motivo")(_sem_controle)
+    _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
 
 
 class ItemInexistente(Exception):
@@ -100,8 +113,10 @@ def versao_do_modelo(conteudo: bytes) -> str:
     return hashlib.sha256(conteudo).hexdigest()
 
 
-def _intervalo_da_pessoa(pessoa: dict[str, Any]) -> tuple[int, int]:
-    ocorrencias = [o for lista in LISTAS for o in pessoa.get(lista, [])]
+def _intervalo_da_pessoa(
+    pessoa: dict[str, Any], listas: tuple[str, ...] = LISTAS
+) -> tuple[int, int]:
+    ocorrencias = [o for lista in listas for o in pessoa.get(lista, [])]
     if not ocorrencias:
         return 0, 0
     return (
@@ -114,11 +129,11 @@ def identidade_da_pessoa(pessoa: dict[str, Any]) -> str:
     """O nome normalizado como na união de pessoas entre janelas (#42).
 
     "Não identificado" não distingue ninguém: a identidade vira o intervalo
-    das ocorrências.
+    das aparições (só elas mostram quem é).
     """
     nome = str(pessoa["nome"])
     if nao_identificado(nome):
-        inicio, fim = _intervalo_da_pessoa(pessoa)
+        inicio, fim = _intervalo_da_pessoa(pessoa, ("na_imagem",))
         return f"{normalizar(nome)}@{inicio}-{fim}"
     return normalizar(nome)
 

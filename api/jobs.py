@@ -291,6 +291,13 @@ PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {
 }
 
 
+def _confere_permissao(request: Request, uid: str, permissao: Permissao) -> None:
+    """403 se a pessoa não tem a permissão por nenhum dos seus papéis."""
+    papeis: RepositorioDePapeis = request.app.state.papeis
+    if permissao not in permissoes_de(papeis_efetivos(papeis.obter(uid))):
+        raise HTTPException(403, f"Sem a permissão {permissao}")
+
+
 def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
     """Dependência: chave sem o escopo, ou pessoa sem a permissão, recebe 403."""
 
@@ -299,10 +306,7 @@ def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
             if escopo not in chamador.escopos:
                 raise HTTPException(403, f"Chave sem o escopo {escopo}")
             return chamador
-        papeis: RepositorioDePapeis = request.app.state.papeis
-        permissoes = permissoes_de(papeis_efetivos(papeis.obter(chamador.uid)))
-        if PERMISSAO_DO_ESCOPO[escopo] not in permissoes:
-            raise HTTPException(403, f"Sem a permissão {PERMISSAO_DO_ESCOPO[escopo]}")
+        _confere_permissao(request, chamador.uid, PERMISSAO_DO_ESCOPO[escopo])
         return chamador
 
     return verificar
@@ -312,10 +316,7 @@ def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `decupagem.editar`; chave de sistema não corrige."""
     if not isinstance(chamador, Usuario):
         raise HTTPException(403, "Chave de sistema não corrige a decupagem")
-    papeis: RepositorioDePapeis = request.app.state.papeis
-    permissoes = permissoes_de(papeis_efetivos(papeis.obter(chamador.uid)))
-    if "decupagem.editar" not in permissoes:
-        raise HTTPException(403, "Sem a permissão decupagem.editar")
+    _confere_permissao(request, chamador.uid, "decupagem.editar")
     return chamador
 
 

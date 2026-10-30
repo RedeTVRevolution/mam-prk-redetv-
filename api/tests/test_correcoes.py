@@ -109,7 +109,7 @@ def test_identidade_da_pessoa_e_o_nome_normalizado_ou_o_intervalo_se_nao_identif
     assert identidade_da_pessoa(_pessoa("a", "  ANA  Sôuza", 1, 2)) == "ana souza"
     assert (
         identidade_da_pessoa(_pessoa("b", "Não identificado", 7000, 9000))
-        == "nao identificado@7000-9009"
+        == "nao identificado@7000-9000"
     )
 
 
@@ -187,7 +187,7 @@ def test_renomear_pessoa_nao_identificada_casa_pelo_intervalo() -> None:
 
     [c] = mundo.correcoes.listar("j1")
     assert (c.ancora.identidade, c.ancora.inicio_ms, c.ancora.fim_ms) == (
-        "nao identificado@7000-9009",
+        "nao identificado@7000-9000",
         7000,
         9009,
     )
@@ -240,6 +240,11 @@ def test_item_inexistente_da_422() -> None:
         {"motivo": ""},
         {"motivo": "x" * 501},
         {"motivo": "a\x1bb"},
+        {"valor": "A\x85na"},
+        {"valor": "Ana\u202eazuoS"},
+        {"valor": "A\u200bna"},
+        {"motivo": "a\u2028b"},
+        {"motivo": "a\rb"},
         {"tipo": "pessoa.apagar"},
     ],
 )
@@ -248,6 +253,20 @@ def test_entrada_hostil_da_422(campos: dict[str, Any]) -> None:
 
     assert mundo.corrigir(**campos).status_code == 422
     assert mundo.correcoes.listar("j1") == []
+
+
+def test_motivo_aceita_quebra_de_linha() -> None:
+    mundo = Mundo(["editor"])
+
+    assert mundo.corrigir(motivo="sobrenome\r\ncompleto").status_code == 201
+    assert mundo.correcoes.listar("j1")[0].motivo == "sobrenome\ncompleto"
+
+
+def test_identidade_do_nao_identificado_ignora_as_mencoes() -> None:
+    pessoa = _pessoa("b", "não identificado", 7000, 9000)
+    pessoa["citada_na_fala"] = [{"inicio_ms": 100, "fim_ms": 20000}]
+
+    assert identidade_da_pessoa(pessoa) == "nao identificado@7000-9000"
 
 
 def test_correcao_de_outra_versao_do_modelo_nao_e_aplicada() -> None:

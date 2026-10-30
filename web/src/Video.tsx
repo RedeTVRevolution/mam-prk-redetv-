@@ -198,8 +198,6 @@ export default function Video({
   const player = useRef<HTMLVideoElement>(null)
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const concluido = job.estado === 'concluido'
-  // Cada correção salva recarrega o painel: o contador refaz a carga.
-  const [recargas, setRecargas] = useState(0)
   const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
   // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
   const sessaoExpirada = useRef(aoSessaoExpirada)
@@ -226,7 +224,18 @@ export default function Video({
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, concluido, recargas])
+  }, [autenticador, job.id, concluido])
+
+  // Depois de uma correção, só o painel recarrega: o player segue no mesmo link e ponto.
+  const recarregarDecupagem = useCallback(() => {
+    chamarApi<Decupagem>(autenticador, `/v1/jobs/${job.id}/decupagem`).then(
+      (decupagem) => setCarga((c) => (c.tipo === 'pronta' ? { ...c, decupagem } : c)),
+      (erro: unknown) => {
+        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
+        else setCarga({ tipo: 'erro' })
+      },
+    )
+  }, [autenticador, job.id])
 
   const retomarEm = useRef<number | null>(null)
   // O link assinado expira em minutos: se o player falhar depois disso, pede outro e
@@ -415,8 +424,9 @@ export default function Video({
         aoFechar={() => setCorrigindo(null)}
         aoSalvar={() => {
           setCorrigindo(null)
-          setRecargas((n) => n + 1)
+          recarregarDecupagem()
         }}
+        aoVersaoDesatualizada={recarregarDecupagem}
         aoSessaoExpirada={() => sessaoExpirada.current()}
       />
     </Grid>
@@ -466,6 +476,7 @@ function CorrigirPessoa({
   jobId,
   aoFechar,
   aoSalvar,
+  aoVersaoDesatualizada,
   aoSessaoExpirada,
 }: {
   pessoa: Pessoa | null
@@ -474,6 +485,7 @@ function CorrigirPessoa({
   jobId: string
   aoFechar: () => void
   aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
   const [nome, setNome] = useState(pessoa?.nome ?? '')
@@ -499,9 +511,11 @@ function CorrigirPessoa({
       aoSalvar()
     } catch (e) {
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409'))
-        setErro('A decupagem mudou. Feche e abra a correção de novo.')
-      else setErro('Não foi possível salvar a correção.')
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        // Recarrega o painel: a versão nova chega ao modal e o Editor pode salvar de novo.
+        aoVersaoDesatualizada()
+        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
+      } else setErro('Não foi possível salvar a correção.')
       setSalvando(false)
     }
   }

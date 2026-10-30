@@ -37,10 +37,14 @@ const TOKEN = 'Bearer token-de-ana@redetv.com.br'
 let statusDecupagem = 200
 let corrigida = false
 let correcaoRecebida: unknown = null
+// A versão é o SHA-256 do JSON do modelo: correção não a muda, reprocessar sim.
+let versaoAtual = 'v1'
+let pedidosDeReproducao = 0
 let links: { url: string; expira_em: string }[] = []
 const servidor = setupServer(
   http.get('/v1/jobs/j1/reproducao', ({ request }) => {
     if (request.headers.get('Authorization') !== TOKEN) return new HttpResponse(null, { status: 401 })
+    pedidosDeReproducao += 1
     return HttpResponse.json(
       links.shift() ?? { url: 'https://storage.exemplo/proxy/j1', expira_em: '2999-01-01T00:00:00Z' },
     )
@@ -48,16 +52,18 @@ const servidor = setupServer(
   http.get('/v1/jobs/j1/decupagem', ({ request }) => {
     if (request.headers.get('Authorization') !== TOKEN) return new HttpResponse(null, { status: 401 })
     const entregue = corrigida
-      ? { ...decupagem, versao_decupagem: 'v2', pessoas: [{ ...decupagem.pessoas[0], nome: 'Ana Souza Lima', origem: 'revisao' }] }
-      : { ...decupagem, versao_decupagem: 'v1' }
+      ? { ...decupagem, versao_decupagem: versaoAtual, pessoas: [{ ...decupagem.pessoas[0], nome: 'Ana Souza Lima', origem: 'revisao' }] }
+      : { ...decupagem, versao_decupagem: versaoAtual }
     return statusDecupagem === 200
       ? HttpResponse.json(entregue)
       : new HttpResponse(null, { status: statusDecupagem })
   }),
   http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
     correcaoRecebida = await request.json()
+    if ((correcaoRecebida as { versao: string }).versao !== versaoAtual)
+      return new HttpResponse(null, { status: 409 })
     corrigida = true
-    return HttpResponse.json({ id: 'c1', versao_decupagem: 'v1' }, { status: 201 })
+    return HttpResponse.json({ id: 'c1', versao_decupagem: versaoAtual }, { status: 201 })
   }),
 )
 
@@ -67,6 +73,8 @@ afterEach(() => {
   statusDecupagem = 200
   corrigida = false
   correcaoRecebida = null
+  versaoAtual = 'v1'
+  pedidosDeReproducao = 0
   links = []
   cleanup()
   vi.restoreAllMocks()
@@ -367,6 +375,8 @@ test('o Editor corrige o nome da pessoa pelo modal e vê o selo de revisão', as
 
   expect((await painel.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
   expect(painel.getAllByText('revisado').length).toBeGreaterThan(0)
+  // Só o painel recarrega: o player não pede outro link nem volta ao início.
+  expect(pedidosDeReproducao).toBe(1)
   expect(correcaoRecebida).toEqual({
     tipo: 'pessoa.renomear',
     item_id: 'p1',
@@ -382,4 +392,27 @@ test('quem não tem decupagem.editar não vê o botão de corrigir', async () =>
 
   expect(await painel.findAllByText('Ana Souza')).not.toHaveLength(0)
   expect(painel.queryByRole('button', { name: /Corrigir/ })).toBeNull()
+})
+
+test('correção sobre versão desatualizada recarrega o painel e salva na segunda tentativa', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  versaoAtual = 'v2'
+
+  await usuario.click((await painel.findAllByRole('button', { name: 'Corrigir Ana Souza' }))[0]!)
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Nome'))
+  await usuario.type(modal.getByLabelText('Nome'), 'Ana Souza Lima')
+  await usuario.type(modal.getByLabelText('Motivo'), 'sobrenome completo')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  expect((await modal.findByRole('alert')).textContent).toContain('foi recarregada')
+  await waitFor(() =>
+    expect((modal.getByRole('button', { name: 'Salvar' }) as HTMLButtonElement).disabled).toBe(false),
+  )
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  expect((await painel.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
+  expect(correcaoRecebida).toMatchObject({ versao: 'v2' })
 })
