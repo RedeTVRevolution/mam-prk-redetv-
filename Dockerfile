@@ -13,10 +13,11 @@ RUN npm run build
 # o volume em memória que o Cloud Run monta em /saida, a única pasta gravável.
 FROM python:3.12-slim-bookworm AS validacao
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
-# O mesmo ffmpeg do scripts/afk/Dockerfile: o loop AFK testa o validador com ele.
+# O mesmo ffmpeg do scripts/afk/Dockerfile (o make verificar confere): o loop AFK testa o validador com ele.
+ARG FFMPEG=7:5.1.9-0+deb12u1
 RUN apt-get update \
-    && (apt-get install -y --no-install-recommends ffmpeg=7:5.1.9-0+deb12u1 \
-        || { echo "A instalação do ffmpeg 7:5.1.9-0+deb12u1 falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque-a pela mesma versão nova no Dockerfile (alvo validacao) e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
+    && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG \
+        || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile (alvo validacao) e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY pyproject.toml uv.lock ./

@@ -6,6 +6,8 @@ ARG CLAUDE_CODE_VERSION=2.1.312
 ARG GH_VERSION=2.101.0
 ARG GITLEAKS_VERSION=8.30.1
 ARG TERRAFORM_VERSION=1.17.1
+# O mesmo ffmpeg do Job de validação (Dockerfile, alvo validacao; o make verificar confere).
+ARG FFMPEG=7:5.1.9-0+deb12u1
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /uvx /usr/local/bin/
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/
@@ -13,10 +15,10 @@ COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/nod
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# O ffmpeg é o mesmo do Job de validação (Dockerfile, alvo validacao): o make verificar daqui testa o validador.
+# O make verificar daqui testa o validador com este ffmpeg; por isso ele é o da produção.
 RUN apt-get update \
- && (apt-get install -y --no-install-recommends ca-certificates curl ffmpeg=7:5.1.9-0+deb12u1 git jq make unzip \
-     || { echo "A instalação do ffmpeg 7:5.1.9-0+deb12u1 falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque-a pela mesma versão nova no Dockerfile (alvo validacao) e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
+ && (apt-get install -y --no-install-recommends ca-certificates curl ffmpeg=$FFMPEG git jq make unzip \
+     || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile (alvo validacao) e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
  && rm -rf /var/lib/apt/lists/*
 
 RUN case "$TARGETARCH" in \

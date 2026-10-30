@@ -22,7 +22,7 @@ make verificar  # lint, tipos, testes unitários e build; nenhuma chamada à nuv
 
 O hook de pre-commit recusa o commit se o gitleaks achar um segredo nos arquivos preparados ou se o gitleaks não estiver instalado. O CI roda `make verificar` e o gitleaks em todo PR.
 
-Os testes do validador usam o ffmpeg de verdade. Sem ffmpeg na máquina, o `make verificar` os pula; `make testar-na-imagem` (pede o Docker) os roda dentro da imagem do Job de validação, com o ffmpeg da produção, e é assim que o CI os roda. O contêiner do loop AFK tem a mesma versão fixada, então o `make verificar` de lá também os roda com ela.
+Os testes do validador usam o ffmpeg de verdade. Sem ffmpeg na máquina, o `make verificar` os pula; `make testar-na-imagem` (pede o Docker) os roda dentro da imagem do Job de validação, com o ffmpeg da produção, e é assim que o CI os roda. O contêiner do loop AFK fixa a mesma versão, no `ARG FFMPEG` do `scripts/afk/Dockerfile`, então o `make verificar` de lá também os roda com ela. O próprio `make verificar` falha se as duas versões forem diferentes (`scripts/checar-ffmpeg.sh`).
 
 ## Deploy no dev
 

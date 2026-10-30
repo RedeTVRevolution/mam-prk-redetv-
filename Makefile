@@ -7,6 +7,7 @@ instalar:
 
 verificar:
 	scripts/checar-nomes-da-nuvem.sh
+	scripts/checar-ffmpeg.sh
 	uv run --locked ruff check
 	uv run --locked ruff format --check
 	uv run --locked mypy api
