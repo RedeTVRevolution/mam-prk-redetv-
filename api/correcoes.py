@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol, Self, get_args
@@ -18,12 +19,13 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
 
 from api.comparador import normalizar
-from api.decupagem import Comercial, EvidenciaDoComercial
+from api.decupagem import Comercial, EvidenciaDoComercial, FonteDoNome, TextoNaTela
 from api.pessoas import LISTAS, nao_identificado
 
 TipoNovo = Literal[
@@ -41,9 +43,14 @@ TipoNovo = Literal[
     "plano.descricao",
     "plano.limpo",
     "fala.texto",
+    "pauta.tom",
+    "pessoa.fontes_do_nome",
+    "aparicao.papel_visual",
+    "texto_na_tela.texto",
+    "texto_na_tela.acrescentar",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
-TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala"]
+TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela"]
 CORRIGIVEIS = get_args(TipoNovo)
 Lista = Literal["na_imagem", "citada_na_fala", "citada_no_texto"]
 MENCOES = ("citada_na_fala", "citada_no_texto")
@@ -52,7 +59,10 @@ DE_OCORRENCIA = (
     "pessoa.nao_e",
     "pessoa.aparicao_para_mencao",
     "pessoa.mencao_para_aparicao",
+    "aparicao.papel_visual",
 )
+# Corrigem a pessoa inteira, não uma ocorrência.
+DE_PESSOA = ("pessoa.renomear", "pessoa.fontes_do_nome")
 ACRESCENTAR_APARICAO = "pessoa.acrescentar_aparicao"
 # Prefixo do id da pessoa ou do comercial que a revisão cria.
 PREFIXO_ACRESCENTADO = "acr-"
@@ -71,6 +81,11 @@ LIMITE_DE_OBJETOS = 50
 # Os planos seguem os cortes: o plano da versão nova está a até 1 s dos ancorados.
 TOLERANCIA_DO_PLANO_MS = 1000
 DE_PLANO_OU_FALA = ("plano.descricao", "plano.limpo", "fala.texto")
+ACRESCENTAR_TEXTO = "texto_na_tela.acrescentar"
+# Valores em JSON, que podem passar do limite do texto simples.
+DE_JSON_LONGO = (*DE_PLANO_OU_FALA, "texto_na_tela.texto", ACRESCENTAR_TEXTO)
+TIPOS_DE_TEXTO_NA_TELA = get_args(TextoNaTela.model_fields["tipo"].annotation)
+FONTES_DO_NOME = get_args(FonteDoNome)
 _TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 
 
@@ -307,6 +322,96 @@ class NovoTexto(BaseModel):
         return _sem_controle(valor)
 
 
+class NovoPapelVisual(BaseModel):
+    """O valor de um `aparicao.papel_visual`: os dois campos, cada um texto ou null."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    papel: (
+        Annotated[
+            str,
+            StringConstraints(
+                strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+            ),
+        ]
+        | None
+    )
+    visual: (
+        Annotated[
+            str,
+            StringConstraints(
+                strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+            ),
+        ]
+        | None
+    )
+
+    @field_validator("papel", "visual")
+    @classmethod
+    def _sem_controle_nos_rotulos(cls, valor: str | None) -> str | None:
+        return None if valor is None else _sem_controle(valor)
+
+
+class NovoTextoNaTela(BaseModel):
+    """O valor de um `texto_na_tela.texto`: o tipo e o texto; os tempos não mudam."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: str
+    texto: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_TEXTO
+        ),
+    ]
+
+    @field_validator("texto")
+    @classmethod
+    def _texto(cls, valor: str) -> str:
+        return _sem_controle_salvo_quebra(valor)
+
+    @field_validator("tipo")
+    @classmethod
+    def _tipo(cls, valor: str) -> str:
+        if valor not in TIPOS_DE_TEXTO_NA_TELA:
+            raise ValueError("tipo de texto na tela desconhecido")
+        return valor
+
+
+class NovoTextoAcrescentado(NovoTextoNaTela):
+    """O texto na tela de um `texto_na_tela.acrescentar`: tempos, tipo e texto."""
+
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        return self
+
+
+_FONTES = TypeAdapter(list[FonteDoNome])
+
+
+def _json_das_fontes(fontes: Sequence[str]) -> str:
+    """A lista na ordem do esquema, para que a mesma lista tenha um só valor."""
+    return json.dumps([f for f in FONTES_DO_NOME if f in fontes])
+
+
+def _valor_das_fontes(valor: str) -> str:
+    fontes = _FONTES.validate_json(valor)
+    if len(set(fontes)) != len(fontes):
+        raise ValueError("fonte repetida")
+    return _json_das_fontes(fontes)
+
+
+def _json_do_papel_visual(ocorrencia: dict[str, Any]) -> str:
+    return _json_canonico(
+        {"papel": ocorrencia.get("papel"), "visual": ocorrencia.get("visual")}
+    )
+
+
 def _json_canonico(valor: dict[str, Any]) -> str:
     return json.dumps(valor, sort_keys=True, ensure_ascii=False)
 
@@ -350,7 +455,7 @@ class NovaCorrecao(BaseModel):
 
     tipo: TipoNovo
     # Só o `item.tempos` precisa: vale para pauta (o padrão) e para comercial.
-    tipo_do_item: Literal["pauta", "comercial", "pessoa"] | None = None
+    tipo_do_item: Literal["pauta", "comercial", "pessoa", "texto_na_tela"] | None = None
     # Nas correções de aparição e menção (e no `item.tempos` de pessoa).
     ocorrencia: Ocorrencia | None = None
     # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
@@ -360,7 +465,11 @@ class NovaCorrecao(BaseModel):
     # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
     # `pessoa.mencao_para_aparicao`: a evidência; `pessoa.acrescentar_aparicao`:
     # o JSON da aparição; `plano.descricao`: o JSON {ambiente, acao, objetos};
-    # `plano.limpo`: "true" ou "false"; `fala.texto`: o JSON {texto, locutor}.
+    # `plano.limpo`: "true" ou "false"; `fala.texto`: o JSON {texto, locutor};
+    # `pauta.tom`: o tom; `pessoa.fontes_do_nome`: a lista JSON das fontes;
+    # `aparicao.papel_visual`: o JSON {papel, visual}; `texto_na_tela.texto`: o
+    # JSON {tipo, texto}; `texto_na_tela.acrescentar`: o JSON {inicio_ms,
+    # fim_ms, tipo, texto}.
     valor: Annotated[
         str,
         StringConstraints(
@@ -377,6 +486,7 @@ class NovaCorrecao(BaseModel):
         if not self.item_id and self.tipo not in (
             "comercial.acrescentar",
             ACRESCENTAR_APARICAO,
+            ACRESCENTAR_TEXTO,
         ):
             raise ValueError("item_id obrigatório")
         if self.tipo_do_item is not None and self.tipo != "item.tempos":
@@ -384,7 +494,7 @@ class NovaCorrecao(BaseModel):
         de_pessoa = self.tipo in DE_OCORRENCIA or self.tipo_do_item == "pessoa"
         if de_pessoa != (self.ocorrencia is not None):
             raise ValueError("ocorrencia vale só para aparição e menção de pessoa")
-        if self.tipo not in DE_PLANO_OU_FALA and len(self.valor) > LIMITE_DO_TEXTO:
+        if self.tipo not in DE_JSON_LONGO and len(self.valor) > LIMITE_DO_TEXTO:
             raise ValueError("valor longo demais")
         if self.tipo == "item.tempos":
             tempos_de(self.valor)
@@ -406,6 +516,16 @@ class NovaCorrecao(BaseModel):
             )
         elif self.tipo == "pauta.resumo":
             self.valor = _sem_controle_salvo_quebra(self.valor)
+        elif self.tipo == "pessoa.fontes_do_nome":
+            self.valor = _valor_das_fontes(self.valor)
+        elif self.tipo == "texto_na_tela.texto":
+            self.valor = _json_canonico(
+                NovoTextoNaTela.model_validate_json(self.valor).model_dump()
+            )
+        elif self.tipo == ACRESCENTAR_TEXTO:
+            self.valor = _json_canonico(
+                NovoTextoAcrescentado.model_validate_json(self.valor).model_dump()
+            )
         else:
             _sem_controle(self.valor)
             if len(self.valor) > LIMITE_DO_NOME:
@@ -423,6 +543,12 @@ class NovaCorrecao(BaseModel):
             if lista != "na_imagem" or self.valor not in MENCOES:
                 raise ValueError("de aparição para citada_na_fala ou citada_no_texto")
             return self.valor
+        if self.tipo == "aparicao.papel_visual":
+            if lista != "na_imagem":
+                raise ValueError("papel e visual são só da aparição")
+            return _json_canonico(
+                NovoPapelVisual.model_validate_json(self.valor).model_dump()
+            )
         if lista == "na_imagem":
             raise ValueError("a ocorrência já é uma aparição")
         _sem_controle(self.valor)
@@ -570,9 +696,20 @@ def _comerciais(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _textos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    """Os textos na tela não têm id no esquema: o id é a posição (`txt000`)."""
+    return [
+        {"id": f"txt{n:03d}", **t}
+        for n, t in enumerate(modelo.get("textos_na_tela", []))
+        if isinstance(t, dict)
+    ]
+
+
 def _tipo_do_item(tipo: str, escolhido: str | None = None) -> TipoDoItem:
-    if tipo.startswith("pessoa.") or escolhido == "pessoa":
+    if tipo.startswith(("pessoa.", "aparicao.")) or escolhido == "pessoa":
         return "pessoa"
+    if tipo.startswith("texto_na_tela.") or escolhido == "texto_na_tela":
+        return "texto_na_tela"
     if tipo.startswith("comercial.") or escolhido == "comercial":
         return "comercial"
     if tipo.startswith("plano."):
@@ -604,6 +741,8 @@ def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
         return _planos(modelo)
     if tipo_do_item == "fala":
         return _falas(modelo)
+    if tipo_do_item == "texto_na_tela":
+        return _textos(modelo)
     return _pautas(modelo)
 
 
@@ -630,6 +769,8 @@ def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
         return str(item["ambiente"])
     if tipo_do_item == "fala":
         return f"{item['locutor']}: {str(item['texto'])[:60]}"
+    if tipo_do_item == "texto_na_tela":
+        return f"{item['tipo']}: {str(item['texto'])[:60]}"
     return str(item["nome" if tipo_do_item == "pessoa" else "titulo"])
 
 
@@ -659,6 +800,12 @@ def _valor_do_item(item: dict[str, Any], tipo: str) -> str:
         return "true" if item["plano_limpo"] else "false"
     if tipo == "fala.texto":
         return _json_canonico({"texto": item["texto"], "locutor": item["locutor"]})
+    if tipo == "pauta.tom":
+        return str(item.get("tom") or "")
+    if tipo == "pessoa.fontes_do_nome":
+        return _json_das_fontes(item.get("fontes_do_nome", []))
+    if tipo == "texto_na_tela.texto":
+        return _json_canonico({"tipo": item["tipo"], "texto": item["texto"]})
     inicio, fim = _intervalo_da_pauta(item)
     return f"{inicio}-{fim}"
 
@@ -715,6 +862,8 @@ def _valor_da_ocorrencia(
     if achada is None:
         return ""
     lista, o = achada
+    if tipo == "aparicao.papel_visual":
+        return _json_do_papel_visual(o)
     tempos = f"{o['inicio_ms']}-{o['fim_ms']}"
     return tempos if tipo == "item.tempos" else f"{lista} {tempos}"
 
@@ -728,7 +877,7 @@ def _confere_duracao(modelo: dict[str, Any], tipo: str, valor: str) -> None:
     acrescentado passam da duração."""
     if tipo == "item.tempos":
         fim = tempos_de(valor)[1]
-    elif tipo in ("comercial.acrescentar", ACRESCENTAR_APARICAO):
+    elif tipo in ("comercial.acrescentar", ACRESCENTAR_APARICAO, ACRESCENTAR_TEXTO):
         fim = int(json.loads(valor)["fim_ms"])
     else:
         return
@@ -767,6 +916,17 @@ def montar_correcao(
                 inicio_ms=aparicao["inicio_ms"],
                 fim_ms=aparicao["fim_ms"],
             ),
+            **registro,
+        )
+    if novo.tipo == ACRESCENTAR_TEXTO:
+        texto = json.loads(novo.valor)
+        return Correcao(
+            tipo=novo.tipo,
+            item_id=f"{PREFIXO_ACRESCENTADO}{registro['id']}",
+            motivo=novo.motivo,
+            antes="",
+            depois=novo.valor,
+            ancora=_ancora_do_item(texto, "texto_na_tela", versao),
             **registro,
         )
     if novo.tipo == "comercial.acrescentar":
@@ -814,6 +974,8 @@ def _ancora_do_item(item: dict[str, Any], tipo_do_item: str, versao: str) -> Anc
         identidade = identidade_do_comercial(item)
     elif tipo_do_item in ("plano", "fala"):
         identidade = tipo_do_item
+    elif tipo_do_item == "texto_na_tela":
+        identidade = normalizar(str(item["texto"]))
     else:
         identidade = normalizar(str(item["titulo"]))
     return Ancora(
@@ -1013,17 +1175,46 @@ def valor_atual(
     correção, de onde sai o intervalo da aparição acrescentada.
     """
     tipo_do_item = _tipo_do_item(tipo, tipo_do_item)
-    for item in _itens(aplicar(modelo, versao, correcoes), tipo_do_item):
+    entregue = aplicar(modelo, versao, correcoes)
+    _confere_campo_do_esquema(entregue, tipo)
+    for item in _itens(entregue, tipo_do_item):
         if item.get("id") != item_id:
             continue
-        if tipo_do_item == "pessoa" and tipo != "pessoa.renomear":
+        if tipo_do_item == "pessoa" and tipo not in DE_PESSOA:
             return _valor_da_ocorrencia(item, tipo, ocorrencia, depois)
         return _valor_do_item(item, tipo)
-    if tipo == "comercial.acrescentar" or (
-        tipo_do_item == "pessoa" and tipo != "pessoa.renomear"
+    if tipo in ("comercial.acrescentar", ACRESCENTAR_TEXTO) or (
+        tipo_do_item == "pessoa" and tipo not in DE_PESSOA
     ):
         return ""
     raise ItemInexistente(item_id)
+
+
+def _confere_campo_do_esquema(entregue: dict[str, Any], tipo: str) -> None:
+    """`ItemInexistente` se a decupagem não traz o campo que o `tipo` corrige.
+
+    Uma decupagem anterior ao esquema 1.2 não tem tom, fontes do nome, papel e
+    visual, nem a lista de textos na tela: a correção seria sobre o que não
+    existe. O campo conta como presente se algum item o traz (o item criado
+    pela revisão não o tem).
+    """
+    pessoas = _pessoas(entregue)
+    if tipo.startswith("texto_na_tela."):
+        traz = "textos_na_tela" in entregue
+    elif tipo == "pauta.tom":
+        traz = any("tom" in p for p in _pautas(entregue))
+    elif tipo == "pessoa.fontes_do_nome":
+        traz = any("fontes_do_nome" in p for p in pessoas)
+    elif tipo == "aparicao.papel_visual":
+        traz = any(
+            "papel" in a or "visual" in a
+            for p in pessoas
+            for a in p.get("na_imagem", [])
+        )
+    else:
+        return
+    if not traz:
+        raise ItemInexistente(tipo)
 
 
 @dataclass(frozen=True)
@@ -1089,6 +1280,16 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             for f in _falas(modelo)
             if _sobrepoe_de_verdade(ancora, _intervalo_da_pauta(f))
         ]
+    if c.ancora.tipo_do_item == "texto_na_tela":
+        identidades = {c.ancora.identidade}
+        if c.tipo == "texto_na_tela.texto":
+            identidades.add(normalizar(json.loads(c.depois)["texto"]))
+        return [
+            t
+            for t in _textos(modelo)
+            if normalizar(str(t["texto"])) in identidades
+            and _sobrepoe_de_verdade(ancora, _intervalo_da_pauta(t))
+        ]
     if c.ancora.tipo_do_item == "comercial":
         identidades = {c.ancora.identidade, _identidade_com_o_depois(c)}
         return [
@@ -1133,8 +1334,13 @@ def _ja_traz_o_depois(c: Correcao, item: dict[str, Any]) -> bool:
         return normalizar(str(item["marca"])) == normalizar(c.depois)
     if c.tipo == "comercial.tipo":
         return str(item["tipo"]) == c.depois
-    if c.tipo in DE_PLANO_OU_FALA:
+    if c.tipo in (*DE_PLANO_OU_FALA, "texto_na_tela.texto", "pessoa.fontes_do_nome"):
         return _valor_do_item(item, c.tipo) == c.depois
+    if c.tipo == "aparicao.papel_visual":
+        assert c.ocorrencia is not None
+        o = c.ocorrencia
+        achada = _acha_ocorrencia(item, o.inicio_ms, o.fim_ms, (o.lista,))
+        return achada is not None and _json_do_papel_visual(achada[1]) == c.depois
     return False
 
 
@@ -1184,11 +1390,16 @@ def reconciliar(
         if c.ancora.versao == versao or c.tipo not in CORRIGIVEIS or c.id in fora:
             continue
         candidatos = _candidatos(modelo, c)
-        if c.tipo == "comercial.acrescentar" or _pessoa_acrescentada(c):
+        if c.tipo in ("comercial.acrescentar", ACRESCENTAR_TEXTO) or (
+            _pessoa_acrescentada(c)
+        ):
             # Não corrige item nenhum: não vai para a fila. Se o modelo já traz
-            # o comercial (ou a aparição), a correção é atendida e não duplica.
+            # o comercial (a aparição, o texto), a correção é atendida e não duplica.
             if _pessoa_acrescentada(c):
                 candidatos = [i for i in candidatos if _ja_traz_o_depois(c, i)]
+            elif c.tipo == ACRESCENTAR_TEXTO:
+                tipo = json.loads(c.depois)["tipo"]
+                candidatos = [i for i in candidatos if i["tipo"] == tipo]
             nova = c.model_copy(
                 update={"ancora": c.ancora.model_copy(update={"versao": versao})}
             )
@@ -1217,12 +1428,14 @@ _CHAVE_DO_ITEM = {
     "comercial": "comerciais",
     "plano": "planos",
     "fala": "transcricao",
+    "texto_na_tela": "textos_na_tela",
 }
 _CAMPO_DO_TIPO = {
     "pauta.titulo": "titulo",
     "pauta.resumo": "resumo",
     "comercial.marca": "marca",
     "comercial.tipo": "tipo",
+    "pauta.tom": "tom",
 }
 
 
@@ -1245,7 +1458,7 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
                 item["acao"] = descricao["acao"]
         elif c.tipo == "plano.limpo":
             item["plano_limpo"] = c.depois == "true"
-        elif c.tipo == "fala.texto":
+        elif c.tipo in ("fala.texto", "texto_na_tela.texto"):
             item.update(json.loads(c.depois))
         elif c.tipo == "item.tempos":
             item["inicio_ms"], item["fim_ms"] = tempos_de(c.depois)
@@ -1256,6 +1469,17 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
 
 def _acrescentar_comercial(resultado: dict[str, Any], c: Correcao) -> None:
     resultado.setdefault("comerciais", []).append(
+        {
+            **json.loads(c.depois),
+            "id": c.item_id,
+            "origem": "revisao",
+            "acrescentado": True,
+        }
+    )
+
+
+def _acrescentar_texto_na_tela(resultado: dict[str, Any], c: Correcao) -> None:
+    resultado.setdefault("textos_na_tela", []).append(
         {
             **json.loads(c.depois),
             "id": c.item_id,
@@ -1289,6 +1513,9 @@ def _aplicar_na_pessoa(
     if c.tipo == "item.tempos":
         ocorrencia["inicio_ms"], ocorrencia["fim_ms"] = tempos_de(c.depois)
         _por_inicio(pessoa[o.lista])
+        return
+    if c.tipo == "aparicao.papel_visual":
+        ocorrencia.update(json.loads(c.depois))
         return
     pessoa[o.lista].remove(ocorrencia)
     if c.tipo == "pessoa.nao_e":
@@ -1379,12 +1606,18 @@ def aplicar(
         if isinstance(fala, dict):
             fala["id"] = f"fal{n:03d}"
             falas.append(fala)
+    textos = []
+    for n, texto in enumerate(resultado.get("textos_na_tela", [])):
+        if isinstance(texto, dict):
+            texto["id"] = f"txt{n:03d}"
+            textos.append(texto)
     for item in [
         *pessoas,
         *_pautas(resultado),
         *comerciais,
         *_planos(resultado),
         *falas,
+        *textos,
     ]:
         item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
@@ -1417,6 +1650,10 @@ def aplicar(
             if c.id not in atendidas:
                 _acrescentar_comercial(resultado, c)
             continue
+        if c.tipo == ACRESCENTAR_TEXTO:
+            if c.id not in atendidas:
+                _acrescentar_texto_na_tela(resultado, c)
+            continue
         if _pessoa_acrescentada(c):
             if c.id not in atendidas:
                 _acrescentar_pessoa(resultado, c)
@@ -1430,7 +1667,11 @@ def aplicar(
         ):
             if not casa(c, pessoa, identidade):
                 continue
-            if c.tipo != "pessoa.renomear":
+            if c.tipo == "pessoa.fontes_do_nome":
+                if c.id not in atendidas:
+                    pessoa["fontes_do_nome"] = json.loads(c.depois)
+                    pessoa["origem"] = "revisao"
+            elif c.tipo != "pessoa.renomear":
                 if c.id not in atendidas:
                     _aplicar_na_pessoa(resultado, pessoa, c)
                     if c.tipo == "pessoa.nao_e":
@@ -1449,6 +1690,8 @@ def aplicar(
         for pauta in _pautas(resultado):
             if "pessoas" in pauta:
                 pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
+    if "textos_na_tela" in resultado:
+        resultado["textos_na_tela"].sort(key=lambda t: (t["inicio_ms"], t["fim_ms"]))
     if "comerciais" in resultado:
         resultado["comerciais"].sort(key=lambda m: (m["inicio_ms"], m["fim_ms"]))
     return resultado
@@ -1481,7 +1724,9 @@ def fila(
             intervalo = _intervalo_do_item(item, tipo_do_item)
             # Plano e fala que só encostam no ancorado não são o mesmo trecho.
             sobrepoe = (
-                _sobrepoe_de_verdade if tipo_do_item in ("plano", "fala") else _sobrepoe
+                _sobrepoe_de_verdade
+                if tipo_do_item in ("plano", "fala", "texto_na_tela")
+                else _sobrepoe
             )
             # Reaplicar numa pessoa sem a aparição ou menção não mudaria nada.
             if sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, item):
