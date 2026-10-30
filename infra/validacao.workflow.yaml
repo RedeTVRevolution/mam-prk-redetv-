@@ -1,0 +1,39 @@
+# Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
+# quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
+# falhou. O passo de análise entra no ticket seguinte.
+# Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao}.
+main:
+  params: [evento]
+  steps:
+    - tira_o_id:
+        assign:
+          # O objeto na quarentena tem o nome do id do Job.
+          - job_id: $${evento.data.name}
+    - valida:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_validacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+        except:
+          # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
+          steps:
+            - marca_como_falhou:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: arquivo_corrompido
+            - encerra_com_falha:
+                raise: $${e}
