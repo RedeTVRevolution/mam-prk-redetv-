@@ -13,8 +13,10 @@ COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/nod
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
+# O ffmpeg é o mesmo do Job de validação (Dockerfile, alvo validacao): o make verificar daqui testa o validador.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg git jq make unzip \
+ && (apt-get install -y --no-install-recommends ca-certificates curl ffmpeg=7:5.1.9-0+deb12u1 git jq make unzip \
+     || { echo "A instalação do ffmpeg 7:5.1.9-0+deb12u1 falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque-a pela mesma versão nova no Dockerfile (alvo validacao) e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
  && rm -rf /var/lib/apt/lists/*
 
 RUN case "$TARGETARCH" in \

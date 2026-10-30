@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,9 @@ from typing import Any
 import pytest
 
 from api.validador import Recusa, validar
+
+# Sem ffmpeg na máquina (o CI), os testes rodam na imagem do Job: make testar-na-imagem.
+pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
 
 
 def _ffmpeg(*args: str) -> None:

@@ -19,8 +19,6 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Instala o ffmpeg (os testes do validador usam o real)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Sobe os emuladores do Firestore e do Storage (testes de api/tests/test_nuvem.py)
         run: |
           # Sem -public-host, o fake-gcs só atende URL assinada com Host storage.googleapis.com.
@@ -33,7 +31,9 @@ jobs:
             sleep 2
           done
           echo "Emuladores não subiram em 2 minutos" && docker logs fake-gcs; docker logs firestore; exit 1
-      - run: make instalar verificar
+      # Sem ffmpeg na máquina, o verificar pula os testes do validador; o testar-na-imagem
+      # os roda com o ffmpeg da produção.
+      - run: make instalar verificar testar-na-imagem
         env:
           FIRESTORE_EMULATOR_HOST: localhost:8686
           STORAGE_EMULATOR_HOST: http://localhost:4443

@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis definir-aprovacao gravar-cassetes
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis definir-aprovacao gravar-cassetes testar-na-imagem
 
 instalar:
 	uv sync --locked
@@ -15,6 +15,16 @@ verificar:
 	npm run --prefix web typecheck
 	npm run --prefix web test
 	npm run --prefix web build
+
+# Testes do validador com o ffmpeg da produção: dentro da imagem do Job de validação,
+# com os testes montados só para leitura (o .dockerignore os deixa fora da imagem).
+# Os do Job pedem os emuladores; sem FIRESTORE/STORAGE_EMULATOR_HOST, são pulados.
+testar-na-imagem:
+	docker build -q --target validacao -t mam-validacao:teste .
+	docker run --rm --network host --user root -e TMPDIR=/tmp -e UV_LINK_MODE=copy \
+		-e FIRESTORE_EMULATOR_HOST -e STORAGE_EMULATOR_HOST \
+		-v "$(CURDIR)/api/tests:/app/api/tests:ro" mam-validacao:teste \
+		uv run --locked pytest -q -rs -p no:cacheprovider api/tests/test_validador.py api/tests/test_validacao_job.py
 
 # Aceite de tempos da E0: make comparar GABARITO=evals/gabarito DECUPAGENS=<pasta de JSONs>
 comparar:

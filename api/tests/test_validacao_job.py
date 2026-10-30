@@ -5,6 +5,7 @@ no CI os emuladores sobem antes do pytest.
 """
 
 import os
+import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -25,9 +26,13 @@ EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
 EMULADOR_STORAGE = os.environ.get("STORAGE_EMULATOR_HOST")
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 
-pytestmark = pytest.mark.skipif(
-    not (EMULADOR_FIRESTORE and EMULADOR_STORAGE), reason="sem emuladores"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not (EMULADOR_FIRESTORE and EMULADOR_STORAGE), reason="sem emuladores"
+    ),
+    # Sem ffmpeg na máquina (o CI), os testes rodam na imagem do Job: make testar-na-imagem.
+    pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg"),
+]
 
 
 @dataclass
