@@ -114,6 +114,7 @@ test('lista nome, data e estado de cada Job, e o código de quem falhou', async 
   expect(falhou.getByText('codec_nao_suportado')).toBeTruthy()
   const validando = within(screen.getByText('novo.mp4').closest('.mantine-Card-root') as HTMLElement)
   expect(validando.getByText('Em quarentena')).toBeTruthy()
+  // 15:00Z é 12:00 em São Paulo, o fuso fixado em vite.config.ts.
   expect(validando.getByText(/29\/10\/2026.*12:00/)).toBeTruthy()
 })
 
