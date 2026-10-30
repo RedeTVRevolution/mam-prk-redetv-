@@ -1,7 +1,6 @@
 """Adaptadores de nuvem da E0: Firestore (Jobs) e Cloud Storage (upload)."""
 
-from collections.abc import Callable, Iterator
-from datetime import timedelta
+from collections.abc import Callable
 from typing import Any
 
 import google.auth
@@ -9,10 +8,9 @@ import google.auth.transport.requests
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
-from api.jobs import Job, ServicoIndisponivel
+from api.jobs import PRAZO_DO_UPLOAD, ArmazenamentoIndisponivel, Job
 
 COLECAO_DE_JOBS = "jobs"
-VALIDADE_DA_URL_DE_UPLOAD = timedelta(hours=24)
 
 
 class RepositorioFirestore:
@@ -48,7 +46,7 @@ def assinatura_pelo_iam() -> dict[str, Any]:
     }
 
 
-class ArmazenamentoStorage:
+class ArmazenamentoStorage(ArmazenamentoIndisponivel):
     """Só a URL de upload é real; o resto segue indisponível até os tickets seguintes."""
 
     def __init__(
@@ -65,7 +63,7 @@ class ArmazenamentoStorage:
         blob = self._cliente.bucket(self._bucket).blob(job_id)
         url: str = blob.generate_signed_url(
             version="v4",
-            expiration=VALIDADE_DA_URL_DE_UPLOAD,
+            expiration=PRAZO_DO_UPLOAD,
             method="POST",
             content_type=tipo,
             headers={
@@ -75,12 +73,3 @@ class ArmazenamentoStorage:
             **self._assinatura(),
         )
         return url
-
-    def cancelar_upload(self, job_id: str) -> None:
-        raise ServicoIndisponivel
-
-    def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
-        raise ServicoIndisponivel
-
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
-        raise ServicoIndisponivel

@@ -6,7 +6,6 @@ são pulados; no CI os emuladores sobem antes do pytest.
 
 import os
 import uuid
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -106,7 +105,7 @@ def _credencial_local() -> google_credentials.Signing:
 
 
 @pytest.fixture
-def armazenamento() -> Iterator[ArmazenamentoStorage]:
+def armazenamento() -> ArmazenamentoStorage:
     endpoint = EMULADOR_STORAGE or "http://localhost:4443"
     cliente = ClienteStorage(
         project="teste",
@@ -114,9 +113,9 @@ def armazenamento() -> Iterator[ArmazenamentoStorage]:
         client_options={"api_endpoint": endpoint},
     )
     credencial = _credencial_local()
-    yield ArmazenamentoStorage(
+    return ArmazenamentoStorage(
         cliente,
-        "teste-quarentena",
+        f"teste-quarentena-{uuid.uuid4().hex[:8]}",
         assinatura=lambda: {"credentials": credencial},
     )
 
@@ -150,8 +149,8 @@ def test_outras_operacoes_do_armazenamento_seguem_indisponiveis(
 def test_url_de_upload_inicia_upload_retomavel_no_emulador(
     armazenamento: ArmazenamentoStorage,
 ) -> None:
-    cliente = armazenamento._cliente  # só para criar o bucket do emulador
-    cliente.create_bucket("teste-quarentena")
+    # Só para criar o bucket do emulador; o nome é único a cada teste.
+    armazenamento._cliente.create_bucket(armazenamento._bucket)
     url = armazenamento.url_de_upload("job1", 5, "video/mp4")
 
     resposta = requests.post(
