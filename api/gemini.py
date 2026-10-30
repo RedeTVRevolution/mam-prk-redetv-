@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 import requests
 
-from api.decupagem import Decupagem, Video, esquema_do_modelo
+from api.decupagem import CAMPOS_DO_SERVIDOR, Decupagem, Video, esquema_do_modelo
 
 MODELO = "gemini-3.5-flash-lite"
 TENTATIVAS_REDE = 5  # novas tentativas após 429/5xx
@@ -134,12 +134,20 @@ def _repetivel(status: int) -> bool:
     return status == 429 or status >= 500
 
 
+def _chaves(dados: Any) -> set[str]:
+    if isinstance(dados, dict):
+        return set(dados).union(*map(_chaves, dados.values()))
+    if isinstance(dados, list):
+        return set().union(*map(_chaves, dados))
+    return set()
+
+
 def _validar(texto: str, video: Video) -> Decupagem:
     """Levanta `ValueError` (JSON quebrado ou fora do esquema)."""
     dados = json.loads(texto)
-    if not isinstance(dados, dict) or "video" in dados:
+    if not isinstance(dados, dict) or _chaves(dados) & CAMPOS_DO_SERVIDOR:
         raise ValueError("resposta fora do esquema")
-    return Decupagem.model_validate({**dados, "video": video})
+    return Decupagem.model_validate({**dados, "versao_esquema": "1.1", "video": video})
 
 
 def analisar(
