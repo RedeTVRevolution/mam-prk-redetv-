@@ -101,10 +101,16 @@ function lerTempo(texto: string): number | null {
   return achado ? (Number(achado[1]) * 60 + Number(achado[2])) * 1000 : null
 }
 
-/** O valor de uma correção de tempos ("inicio_ms-fim_ms") vira "mm:ss–mm:ss"; o resto fica como está. */
-function valorLegivel(valor: string): string {
-  const achado = /^(\d+)-(\d+)$/.exec(valor)
+/** O valor de uma correção de tempos ("inicio_ms-fim_ms") vira "mm:ss–mm:ss"; os outros tipos ficam como estão. */
+function valorLegivel(tipo: string | undefined, valor: string): string {
+  const achado = tipo === 'item.tempos' ? /^(\d+)-(\d+)$/.exec(valor) : null
   return achado ? `${tempo(Number(achado[1]))}–${tempo(Number(achado[2]))}` : valor
+}
+
+/** O campo em mm:ss, em ms: o valor original, com os milissegundos, se o Editor não o mudou. */
+function tempoDoCampo(texto: string, originalMs: number): number | null {
+  const ms = lerTempo(texto)
+  return ms !== null && ms === lerTempo(tempo(originalMs)) ? originalMs : ms
 }
 
 function faixasDe(d: Decupagem): Faixa[] {
@@ -715,32 +721,39 @@ function CorrigirPauta({
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
+  const [gravadas, setGravadas] = useState<Record<string, string>>({})
 
-  const inicioMs = lerTempo(inicio)
-  const fimMs = lerTempo(fim)
+  const inicioMs = pauta ? tempoDoCampo(inicio, pauta.inicio_ms) : null
+  const fimMs = pauta ? tempoDoCampo(fim, pauta.fim_ms) : null
   const temposValidos = inicioMs !== null && fimMs !== null && inicioMs <= fimMs
   const temposMudaram =
-    pauta !== null && (inicio !== tempo(pauta.inicio_ms) || fim !== tempo(pauta.fim_ms))
-  const mudancas: { tipo: string; valor: string }[] = []
-  if (pauta && titulo.trim() !== pauta.titulo) mudancas.push({ tipo: 'pauta.titulo', valor: titulo })
-  if (pauta && resumo.trim() !== (pauta.resumo ?? ''))
-    mudancas.push({ tipo: 'pauta.resumo', valor: resumo })
+    pauta !== null && (inicioMs !== pauta.inicio_ms || fimMs !== pauta.fim_ms)
+  const resumoApagado = !resumo.trim() && !!pauta?.resumo
+  const candidatas: { tipo: ItemDoHistorico['tipo']; valor: string }[] = []
+  if (pauta && titulo.trim() !== pauta.titulo) candidatas.push({ tipo: 'pauta.titulo', valor: titulo })
+  if (pauta && !resumoApagado && resumo.trim() !== (pauta.resumo ?? ''))
+    candidatas.push({ tipo: 'pauta.resumo', valor: resumo })
   if (temposMudaram && temposValidos)
-    mudancas.push({ tipo: 'item.tempos', valor: `${inicioMs}-${fimMs}` })
+    candidatas.push({ tipo: 'item.tempos', valor: `${inicioMs}-${fimMs}` })
+  const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
 
   async function salvar() {
     if (!pauta) return
     setSalvando(true)
     setErro(null)
+    const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
         await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
           metodo: 'POST',
           corpo: { ...m, item_id: pauta.id, motivo, versao },
         })
+        feitas[m.tipo] = m.valor
       }
       aoSalvar()
     } catch (e) {
+      setGravadas(feitas)
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
       else if (e instanceof Error && e.message.startsWith('Falha 409')) {
         aoVersaoDesatualizada()
@@ -752,8 +765,14 @@ function CorrigirPauta({
     }
   }
 
+  // Fechar depois de gravar parte dos campos recarrega a decupagem, como o salvar.
+  function fechar() {
+    if (Object.keys(gravadas).length > 0) aoSalvar()
+    else aoFechar()
+  }
+
   return (
-    <Modal opened={pauta !== null} onClose={aoFechar} title="Corrigir pauta" centered>
+    <Modal opened={pauta !== null} onClose={fechar} title="Corrigir pauta" centered>
       <Stack gap="sm">
         <TextInput
           label="Título"
@@ -766,6 +785,7 @@ function CorrigirPauta({
           value={resumo}
           maxLength={2000}
           rows={4}
+          error={resumoApagado ? 'O resumo não pode ficar vazio' : undefined}
           onChange={(e) => setResumo(e.currentTarget.value)}
         />
         <Group grow align="flex-start">
@@ -800,7 +820,7 @@ function CorrigirPauta({
           </Alert>
         )}
         <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={aoFechar}>
+          <Button type="button" variant="default" onClick={fechar}>
             Cancelar
           </Button>
           <Button
@@ -811,6 +831,7 @@ function CorrigirPauta({
               !titulo.trim() ||
               !motivo.trim() ||
               (temposMudaram && !temposValidos) ||
+              resumoApagado ||
               mudancas.length === 0
             }
             onClick={() => void salvar()}
@@ -833,6 +854,7 @@ interface ItemDoHistorico {
   depois: string
   estado: 'ativa' | 'desfeita' | 'reaplicada' | 'descartada'
   reaplica?: string | null
+  desfaz?: string | null
 }
 
 const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
@@ -843,6 +865,10 @@ const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   desfazer: 'Desfazer',
   descartar: 'Descartar da fila',
 }
+
+/** O tipo do valor do item: o desfazer mostra o valor do tipo que ele reverte. */
+const tipoDoValor = (itens: ItemDoHistorico[], item: ItemDoHistorico) =>
+  item.tipo === 'desfazer' ? itens.find((o) => o.id === item.desfaz)?.tipo : item.tipo
 
 /** Data da correção que a reaplicação refaz, para ligar uma à outra na gaveta. */
 const quandoDaOriginal = (itens: ItemDoHistorico[], id: string) => {
@@ -967,14 +993,14 @@ function HistoricoDeCorrecoes({
                   <Text size="xs" c="dimmed">
                     Antes:
                   </Text>
-                  <Text size="sm">{valorLegivel(i.antes)}</Text>
+                  <Text size="sm">{valorLegivel(tipoDoValor(itens, i), i.antes)}</Text>
                 </Group>
                 <Group gap={4} wrap="nowrap">
                   <Text size="xs" c="dimmed">
                     Depois:
                   </Text>
                   <Text size="sm" fw={600}>
-                    {valorLegivel(i.depois)}
+                    {valorLegivel(tipoDoValor(itens, i), i.depois)}
                   </Text>
                 </Group>
                 <Text size="sm">{i.motivo}</Text>
@@ -1031,6 +1057,7 @@ function HistoricoDeCorrecoes({
 
 interface ItemDaFila {
   id: string
+  tipo: ItemDoHistorico['tipo']
   autor_email: string
   criada_em: string
   motivo: string
@@ -1145,14 +1172,14 @@ function ItemDaFilaDeRevisao({
           <Text size="xs" c="dimmed">
             Antes:
           </Text>
-          <Text size="sm">{valorLegivel(item.antes)}</Text>
+          <Text size="sm">{valorLegivel(item.tipo, item.antes)}</Text>
         </Group>
         <Group gap={4} wrap="nowrap">
           <Text size="xs" c="dimmed">
             Depois:
           </Text>
           <Text size="sm" fw={600}>
-            {valorLegivel(item.depois)}
+            {valorLegivel(item.tipo, item.depois)}
           </Text>
         </Group>
         <Text size="sm">{item.motivo}</Text>

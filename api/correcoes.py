@@ -125,7 +125,7 @@ class NovaCorrecao(BaseModel):
         if self.tipo == "item.tempos":
             tempos_de(self.valor)
         elif self.tipo == "pauta.resumo":
-            _sem_controle_salvo_quebra(self.valor)
+            self.valor = _sem_controle_salvo_quebra(self.valor)
         else:
             _sem_controle(self.valor)
             if len(self.valor) > LIMITE_DO_NOME:
@@ -273,6 +273,15 @@ class TemposInvalidos(Exception):
     """Os tempos passam da duração do vídeo."""
 
 
+def _confere_duracao(modelo: dict[str, Any], tipo: str, valor: str) -> None:
+    """`TemposInvalidos` se os tempos de um `item.tempos` passam da duração."""
+    if tipo != "item.tempos":
+        return
+    duracao = int(modelo.get("video", {}).get("duracao_ms", 0))
+    if tempos_de(valor)[1] > duracao:
+        raise TemposInvalidos(valor)
+
+
 def montar_correcao(
     modelo: dict[str, Any],
     versao: str,
@@ -287,10 +296,7 @@ def montar_correcao(
     )
     if item is None:
         raise ItemInexistente(novo.item_id)
-    if novo.tipo == "item.tempos":
-        duracao = int(modelo.get("video", {}).get("duracao_ms", 0))
-        if tempos_de(novo.valor)[1] > duracao:
-            raise TemposInvalidos(novo.valor)
+    _confere_duracao(modelo, novo.tipo, novo.valor)
     return Correcao(
         tipo=novo.tipo,
         item_id=novo.item_id,
@@ -462,10 +468,13 @@ def _sobrepoe(a: tuple[int, int], b: tuple[int, int]) -> bool:
 
 
 def _sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
-    """A sobreposição cobre pelo menos metade do menor dos dois intervalos."""
+    """A sobreposição cobre pelo menos metade do menor dos dois intervalos.
+
+    Um intervalo de duração zero (um instante) conta se cai dentro do outro.
+    """
     sobreposicao = min(a[1], b[1]) - max(a[0], b[0])
     menor = min(a[1] - a[0], b[1] - b[0])
-    return sobreposicao > 0 and sobreposicao * 2 >= menor
+    return sobreposicao >= 0 and sobreposicao * 2 >= menor
 
 
 def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
@@ -670,6 +679,8 @@ def montar_reaplicacao(
         raise NaoCandidato(item_id)
     tipo_do_item = alvo.ancora.tipo_do_item
     novo = next(i for i in _itens(modelo, tipo_do_item) if i.get("id") == item_id)
+    # O vídeo reprocessado pode ser mais curto que o da correção original.
+    _confere_duracao(modelo, alvo.tipo, alvo.depois)
     return Correcao(
         tipo=alvo.tipo,
         reaplica=alvo.id,

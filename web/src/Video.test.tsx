@@ -563,6 +563,95 @@ test('tempos recusados pela API (422) mostram o aviso no modal da pauta', async 
   expect((await modal.findByRole('alert')).textContent).toContain('duração do vídeo')
 })
 
+test('mudar só o início da pauta mantém os milissegundos do fim', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      HttpResponse.json({
+        ...decupagem,
+        versao_decupagem: 'v1',
+        pautas: [{ ...decupagem.pautas[0], inicio_ms: 30_250, fim_ms: 60_500 }],
+      }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir pauta Eleição' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Início (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:31')
+  await usuario.type(modal.getByLabelText('Motivo'), 'ajuste')
+
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toMatchObject({ tipo: 'item.tempos', valor: '31000-60500' })
+})
+
+test('depois de uma falha no meio, salvar de novo não reenvia o que já foi gravado', async () => {
+  servidor.use(
+    http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
+      const corpo = (await request.json()) as { tipo: string; valor: string }
+      correcoesRecebidas.push(corpo)
+      if (corpo.tipo === 'item.tempos' && corpo.valor.endsWith('-5940000'))
+        return new HttpResponse(null, { status: 422 })
+      pautaCorrigida = true
+      return HttpResponse.json({ id: 'c1', versao_decupagem: 'v1' }, { status: 201 })
+    }),
+  )
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir pauta Eleição' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Título'))
+  await usuario.type(modal.getByLabelText('Título'), 'Eleição 2026')
+  await usuario.clear(modal.getByLabelText('Fim (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '99:00')
+  await usuario.type(modal.getByLabelText('Motivo'), 'ajuste')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+  expect((await modal.findByRole('alert')).textContent).toContain('duração do vídeo')
+
+  await usuario.clear(modal.getByLabelText('Fim (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '01:10')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  expect(await painel.findByText('Eleição 2026')).toBeTruthy()
+  expect(correcoesRecebidas.map((c) => c.tipo)).toEqual(['pauta.titulo', 'item.tempos', 'item.tempos'])
+})
+
+test('apagar o resumo da pauta não deixa salvar', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir pauta Eleição' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Resumo'))
+  await usuario.type(modal.getByLabelText('Motivo'), 'ajuste')
+
+  expect(modal.getByText('O resumo não pode ficar vazio')).toBeTruthy()
+  expect((modal.getByRole('button', { name: 'Salvar' }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+test('o histórico mostra um título com hífen como texto, e os tempos como mm:ss', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/correcoes', () =>
+      HttpResponse.json([
+        item({ id: 'c2', tipo: 'pauta.titulo', item_id: 'pa1', antes: 'Eleição', depois: '2018-2022' }),
+        item({ id: 'c3', tipo: 'item.tempos', item_id: 'pa1', antes: '30000-60000', depois: '32000-60000' }),
+      ]),
+    ),
+  )
+  const usuario = userEvent.setup()
+  const gaveta = await abrirHistorico(usuario)
+
+  expect(await gaveta.findByText('2018-2022')).toBeTruthy()
+  expect(gaveta.getByText('00:32–01:00')).toBeTruthy()
+})
+
 test('quem não tem decupagem.editar não vê o botão de corrigir a pauta', async () => {
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' }, false)

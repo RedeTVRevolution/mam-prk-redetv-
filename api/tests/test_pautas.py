@@ -6,6 +6,7 @@ import pytest
 
 from api.correcoes import (
     Correcao,
+    TemposInvalidos,
     aplicar,
     fila,
     montar_reaplicacao,
@@ -108,6 +109,13 @@ def test_texto_de_pauta_hostil_da_422(tipo: str, valor: str) -> None:
 
 def test_resumo_aceita_ate_2000_caracteres() -> None:
     assert _corrigir(Mundo(["editor"]), "pauta.resumo", "x" * 2000).status_code == 201
+
+
+def test_resumo_guarda_a_quebra_de_linha_sem_o_retorno_de_carro() -> None:
+    mundo = Mundo(["editor"])
+
+    assert _corrigir(mundo, "pauta.resumo", "um\r\ndois").status_code == 201
+    assert _pauta_entregue(mundo)["resumo"] == "um\ndois"
 
 
 def test_pauta_inexistente_da_422() -> None:
@@ -262,6 +270,33 @@ def test_pauta_curta_dentro_da_ancorada_casa_pela_metade_do_menor() -> None:
     novo = _modelo(_pauta("n1", "Curta", 2000, 8000))  # 6s dentro: 100% do menor
 
     assert [c.item_id for c in reconciliar(novo, "nova", [_antiga()]).casadas] == ["n1"]
+
+
+def test_pauta_de_um_instante_casa_com_a_que_a_contem() -> None:
+    antiga = _antiga("item.tempos", "5000-5000")
+    antiga = antiga.model_copy(
+        update={
+            "ancora": antiga.ancora.model_copy(
+                update={"inicio_ms": 5000, "fim_ms": 5000}
+            )
+        }
+    )
+    novo = _modelo(_pauta("n1", "Economia", 3000, 9000))
+
+    assert [c.item_id for c in reconciliar(novo, "nova", [antiga]).casadas] == ["n1"]
+
+
+def test_reaplicar_tempos_alem_da_duracao_do_video_novo_e_recusado() -> None:
+    novo = {
+        **_modelo(_pauta("n1", "A", 0, 10000), _pauta("n2", "B", 10000, 20000)),
+        "video": {"duracao_ms": 20000},
+    }
+    original = _antiga("item.tempos", "0-30000")
+
+    with pytest.raises(TemposInvalidos):
+        montar_reaplicacao(
+            novo, "nova", original, [original], "n2", "é B", **_registro()
+        )
 
 
 def test_reaplicar_pauta_na_fila_escolhe_um_candidato() -> None:

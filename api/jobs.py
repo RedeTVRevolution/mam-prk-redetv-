@@ -576,6 +576,8 @@ def criar_rotas(
             correcoes.acrescentar(resolucao)
         except NaoCandidato:
             raise HTTPException(422, "O item não é candidato desta correção") from None
+        except TemposInvalidos:
+            raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
         return {"id": resolucao.id}
