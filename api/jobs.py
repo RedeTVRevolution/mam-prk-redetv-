@@ -316,8 +316,7 @@ PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {
 
 def _confere_permissao(request: Request, uid: str, permissao: Permissao) -> None:
     """403 se a pessoa não tem a permissão por nenhum dos seus papéis."""
-    papeis: RepositorioDePapeis = request.app.state.papeis
-    if permissao not in permissoes_de(papeis_efetivos(papeis.obter(uid))):
+    if not _tem_permissao(request, uid, permissao):
         raise HTTPException(403, f"Sem a permissão {permissao}")
 
 
@@ -351,9 +350,9 @@ def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     return chamador
 
 
-def _pode_aprovar(request: Request, uid: str) -> bool:
+def _tem_permissao(request: Request, uid: str, permissao: Permissao) -> bool:
     papeis: RepositorioDePapeis = request.app.state.papeis
-    return "correcao.aprovar" in permissoes_de(papeis_efetivos(papeis.obter(uid)))
+    return permissao in permissoes_de(papeis_efetivos(papeis.obter(uid)))
 
 
 def _enxerga(chamador: Chamador, job: Job | None) -> Job:
@@ -484,9 +483,11 @@ def criar_rotas(
         entregue["versao_decupagem"] = versao_atual
         return _resposta(iter([json.dumps(entregue).encode()]), request)
 
-    def _exige_aprovacao(request: Request, autor: Usuario, tipo: str) -> bool:
+    def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
         """Só a correção de quem não é Curador, num tipo da lista, espera decisão."""
-        return tipo in aprovacao.tipos() and not _pode_aprovar(request, autor.uid)
+        return tipo in aprovacao.tipos() and not _tem_permissao(
+            request, autor.uid, "correcao.aprovar"
+        )
 
     @rotas.post("/{job_id}/correcoes", status_code=201)
     def corrigir(
@@ -522,7 +523,7 @@ def criar_rotas(
                 autor_uid=autor.uid,
                 autor_email=autor.email,
                 criada_em=relogio(),
-                exige_aprovacao=_exige_aprovacao(request, autor, novo.tipo),
+                exige_aprovacao=_espera_curador(request, autor, novo.tipo),
             )
         except ItemInexistente:
             raise HTTPException(422, "Item inexistente") from None
@@ -619,24 +620,18 @@ def criar_rotas(
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
     def reaplicar_correcao(
         job_id: str,
-        request: Request,
         correcao_id: str,
         corpo: NovaReaplicacao,
         autor: Annotated[Usuario, Depends(_exige_editar)],
     ) -> dict[str, str]:
+        # Não espera o Curador: só reaponta uma correção que já valia (pendente
+        # não vai para a fila), e a original sai da fila quando ela nasce.
         return _resolver(
             job_id,
             correcao_id,
             autor,
             lambda modelo, versao, alvo, todas, **registro: montar_reaplicacao(
-                modelo,
-                versao,
-                alvo,
-                todas,
-                corpo.item_id,
-                corpo.motivo,
-                exige_aprovacao=_exige_aprovacao(request, autor, alvo.tipo),
-                **registro,
+                modelo, versao, alvo, todas, corpo.item_id, corpo.motivo, **registro
             ),
         )
 

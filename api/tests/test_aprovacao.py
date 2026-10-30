@@ -213,7 +213,57 @@ def test_pendente_de_versao_antiga_nao_entra_na_fila() -> None:
     assert fila == []
 
 
-def test_reaplicacao_do_editor_tambem_espera_aprovacao() -> None:
+def _aprovada_que_foi_para_a_fila() -> tuple[Mundo, str]:
+    """Correção do Editor aprovada e, depois de um reprocessamento, sem casar."""
+    mundo = _mundo_com_aprovacao("pessoa.renomear")
+    original = mundo.corrigir().json()["id"]
+    mundo.avancar()
+    assert _aprovar(mundo, original).status_code == 201
+    mundo.reprocessar(
+        {
+            **MODELO,
+            "pessoas": [
+                {**MODELO["pessoas"][0], "nome": "Anna S.", "id": "pes07"},
+                *MODELO["pessoas"][1:],
+            ],
+        }
+    )
+    mundo.avancar()
+    return mundo, original
+
+
+def test_reaplicar_a_aprovada_nao_pede_nova_aprovacao() -> None:
+    mundo, original = _aprovada_que_foi_para_a_fila()
+
+    resposta = mundo.cliente.post(
+        f"/v1/jobs/j1/fila/{original}/reaplicar",
+        json={"item_id": "pes07", "motivo": "é a mesma"},
+        headers=AUTORIZACAO,
+    )
+
+    assert resposta.status_code == 201
+    estados = _estados(mundo)
+    assert estados[resposta.json()["id"]] == "ativa"
+    assert mundo.decupagem()["pessoas"][0]["nome"] == "Ana Souza Lima"
+    # A aprovada que saiu da fila não mostra mais "aprovada" nem oferece desfazer.
+    assert estados[original] == "reaplicada"
+
+
+def test_descartar_a_aprovada_mostra_descartada() -> None:
+    mundo, original = _aprovada_que_foi_para_a_fila()
+
+    assert (
+        mundo.cliente.post(
+            f"/v1/jobs/j1/fila/{original}/descartar",
+            json={"motivo": "não vale mais"},
+            headers=AUTORIZACAO,
+        ).status_code
+        == 201
+    )
+    assert _estados(mundo)[original] == "descartada"
+
+
+def test_reaplicacao_do_editor_nao_espera_aprovacao() -> None:
     mundo = Mundo(["editor"])
     original = mundo.corrigir().json()["id"]
     sem_ana = {
@@ -234,8 +284,8 @@ def test_reaplicacao_do_editor_tambem_espera_aprovacao() -> None:
     )
 
     assert resposta.status_code == 201
-    assert mundo.decupagem()["pessoas"][0]["nome"] == "Anna S."
-    assert _estados(mundo)[resposta.json()["id"]] == "pendente"
+    assert mundo.decupagem()["pessoas"][0]["nome"] == "Ana Souza Lima"
+    assert _estados(mundo)[resposta.json()["id"]] == "ativa"
 
 
 def test_aplicar_puro_ignora_pendente_e_recusada() -> None:
@@ -278,3 +328,29 @@ def test_comando_sem_argumento_mostra_o_uso() -> None:
         definir_aprovacao_main([], RepositorioDeAprovacaoEmMemoria(), saida.append) == 2
     )
     assert "make definir-aprovacao" in saida[0]
+
+
+def test_aprovada_vale_a_partir_da_aprovacao_sobre_a_feita_enquanto_esperava() -> None:
+    mundo = _mundo_com_aprovacao("pessoa.renomear")
+    pendente = mundo.corrigir().json()["id"]
+    mundo.avancar()
+    assert (
+        mundo.cliente.post(
+            "/v1/jobs/j1/correcoes",
+            json={
+                "tipo": "pessoa.renomear",
+                "item_id": "pes01",
+                "valor": "Ana S.",
+                "motivo": "abreviar",
+                "versao": VERSAO,
+            },
+            headers=CURADOR,
+        ).status_code
+        == 201
+    )
+    assert mundo.nome_da_ana() == "Ana S."
+    mundo.avancar()
+
+    assert _aprovar(mundo, pendente).status_code == 201
+
+    assert mundo.nome_da_ana() == "Ana Souza Lima"

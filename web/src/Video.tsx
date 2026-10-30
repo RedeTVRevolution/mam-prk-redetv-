@@ -532,7 +532,7 @@ export default function Video({
   const [filaAberta, setFilaAberta] = useState(false)
   const [fila, setFila] = useState<ItemDaFila[]>([])
   const [recargaDaFila, setRecargaDaFila] = useState(0)
-  // Itens com correção pendente de aprovação (`tipo_do_item:item_id`), da decupagem aberta.
+  // Itens com correção pendente de aprovação (`chaveDoItem`), da decupagem aberta.
   const [pendentes, setPendentes] = useState<Set<string>>(new Set())
   // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
   const sessaoExpirada = useRef(aoSessaoExpirada)
@@ -594,7 +594,7 @@ export default function Video({
                 (i) =>
                   i.estado === 'pendente' && i.ancora.versao === decupagemAtual.versao_decupagem,
               )
-              .map((i) => `${i.ancora.tipo_do_item}:${i.item_id}`),
+              .map((i) => chaveDoItem(i.ancora.tipo_do_item, i.item_id)),
           ),
         )
       },
@@ -851,7 +851,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
-                          {pendentes.has(`pauta:${p.id}`) && <SeloAguardando />}
+                          {pendentes.has(chaveDoItem('pauta', p.id)) && <SeloAguardando />}
                         </Group>
                       }
                       description={`${tempo(p.inicio_ms)}–${tempo(p.fim_ms)}`}
@@ -895,7 +895,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
-                          {pendentes.has(`comercial:${c.id}`) && <SeloAguardando />}
+                          {pendentes.has(chaveDoItem('comercial', c.id)) && <SeloAguardando />}
                         </Group>
                       }
                       description={`${c.tipo} · ${tempo(c.inicio_ms)}`}
@@ -932,7 +932,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
-                          {pendentes.has(`plano:${p.id}`) && <SeloAguardando />}
+                          {pendentes.has(chaveDoItem('plano', p.id)) && <SeloAguardando />}
                         </Group>
                       }
                       description={`${p.ambiente} · ${tempo(p.inicio_ms)}`}
@@ -965,7 +965,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
-                          {pendentes.has(`fala:${f.id}`) && <SeloAguardando />}
+                          {pendentes.has(chaveDoItem('fala', f.id)) && <SeloAguardando />}
                         </Group>
                         <Text size="sm">{f.texto}</Text>
                       </Paper>
@@ -1114,6 +1114,9 @@ export default function Video({
     </Grid>
   )
 }
+
+/** Chave dos itens com correção pendente: o item é achado pelo tipo e pelo id. */
+const chaveDoItem = (tipoDoItem: string, id?: string) => `${tipoDoItem}:${id ?? ''}`
 
 /** O item tem correção de Editor esperando o Curador: ela ainda não está na decupagem. */
 function SeloAguardando() {
@@ -2685,7 +2688,7 @@ function AbaPessoas({
             <NomeDaPessoa
               pessoa={p}
               fw={600}
-              aguardando={pendentes.has(`pessoa:${p.id}`)}
+              aguardando={pendentes.has(chaveDoItem('pessoa', p.id))}
               aoCorrigir={aoCorrigir}
             />
             {aoOcorrencia && pessoaDoModelo(p) && (
@@ -2743,7 +2746,7 @@ function AbaPessoas({
           <Stack key={p.id} gap={4}>
             <NomeDaPessoa
               pessoa={p}
-              aguardando={pendentes.has(`pessoa:${p.id}`)}
+              aguardando={pendentes.has(chaveDoItem('pessoa', p.id))}
               aoCorrigir={aoCorrigir}
             />
             {aoOcorrencia && pessoaDoModelo(p) && p.na_imagem.length === 0 && (

@@ -859,6 +859,15 @@ def _fora_da_entrega(correcoes: list[Correcao]) -> set[str]:
     return {c.id for c in correcoes if c.exige_aprovacao} - _aprovadas(correcoes)
 
 
+def _em_ordem_de_vigencia(
+    alvos: list[Correcao], correcoes: list[Correcao]
+) -> list[Correcao]:
+    """Como `em_ordem`, mas a aprovada entra na data da aprovação: uma correção
+    feita enquanto ela esperava o Curador não a encobre depois de aprovada."""
+    aprovada_em = {c.aprova: c.criada_em for c in correcoes if c.aprova}
+    return sorted(alvos, key=lambda c: (aprovada_em.get(c.id, c.criada_em), c.id))
+
+
 def _decididas(correcoes: list[Correcao]) -> set[str]:
     return _aprovadas(correcoes) | _recusadas(correcoes)
 
@@ -965,12 +974,13 @@ def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
             return "desfeita"
         if c.id in recusadas:
             return "recusada"
-        if c.exige_aprovacao:
-            return "aprovada" if c.id in aprovadas else "pendente"
+        # A aprovada que depois saiu da fila mostra o que lhe aconteceu por último.
         if c.id in reaplicadas:
             return "reaplicada"
         if c.id in descartadas:
             return "descartada"
+        if c.exige_aprovacao:
+            return "aprovada" if c.id in aprovadas else "pendente"
         return "ativa"
 
     return [
@@ -1393,7 +1403,8 @@ def aplicar(
         return identidade == c.ancora.identidade
 
     # Em ordem de data: a mais nova vence, e desfazer uma antiga não a derruba.
-    for c in em_ordem(da_versao + reconciliadas.casadas):
+    # A aprovada vale a partir da aprovação, não de quando o Editor a fez.
+    for c in _em_ordem_de_vigencia(da_versao + reconciliadas.casadas, correcoes):
         if c.id in desfeitas:
             continue
         if c.tipo == "comercial.acrescentar":
