@@ -517,7 +517,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Tema | Decisão na E0 |
 | --- | --- |
 | Projeto GCP | Projeto `dev` novo na organização da RedeTV, com billing da RedeTV e alerta de orçamento; `staging` e `prod` ficam fora |
-| Região | Tudo em `southamerica-east1`; o Gemini usa o endpoint global (o Flex só existe nele), coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
+| Região | Tudo em `southamerica-east1`; o Gemini usa o endpoint global, coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
 | Hospedagem | Um único serviço Cloud Run: o FastAPI serve a API e o build do React. Sem balanceador nem Cloud Armor; o front ganha serviço próprio quando o balanceador entrar (E10) |
 | Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → serviço de análise → decupagem no Storage |
 | Login | Só contas locais no Identity Platform, com MFA TOTP obrigatório, criadas por script, inclusive os 2 administradores de emergência com alerta a cada login. Sem papéis: toda conta autenticada envia e vê todos os vídeos |
@@ -526,7 +526,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Upload | O front confere extensão, tipo, tamanho e `ftyp`; `POST /v1/jobs` devolve URL assinada de upload retomável para a quarentena. Sem SHA-256 no navegador, sem `Idempotency-Key` e sem deduplicação (E7) |
 | Quarentena | As 7 camadas de Entradas hostis; duração entre 1 s e 10 min, e fora disso `duracao_excedida` |
 | Derivados | Só o proxy de reprodução (480p H.264 com faststart), que serve ao player e ao Gemini: o modelo vê o mesmo arquivo e o mesmo tempo que o clique usa, e a documentação da Vertex não garante H.265. O proxy de análise com timecode queimado fica para o A/B da E1, se os tempos ficarem ruins |
-| Análise | Uma chamada ao 3.5 Flash-Lite, só em Flex. Ela pede o esquema inteiro (1.2), com tempos crus do modelo em MM:SS (ADR 0003): sem detecção de cortes, sem regra de tempos e com `quadro` vazio |
+| Análise | Uma chamada ao 3.5 Flash-Lite, em Standard ([ADR 0004](adr/0004-gemini-em-standard.md)): o Flex deixou o clipe2 quase 7 min esperando. Ela pede o esquema inteiro (1.2), com tempos crus do modelo em MM:SS (ADR 0003): sem detecção de cortes, sem regra de tempos e com `quadro` vazio |
 | Falhas | 429 ou 5xx do Gemini: até 5 tentativas com backoff e jitter. Resposta fora do esquema: refeita até 2 vezes. Esgotadas as tentativas, `falhou` com `analise_falhou`, nunca uma decupagem parcial. Rótulo de custo com o id do job |
 | Estados do job | `aguardando_upload` → `validando` → `analisando` → `concluido` ou `falhou`, com código (`formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida`, `upload_expirado`, `analise_falhou`). Sem upload completo em 24 h, vai a `falhou` com `upload_expirado` |
 | API | `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{id}`, `GET /v1/jobs/{id}/decupagem` e `GET /v1/jobs/{id}/reproducao`, todas com o token do Identity Platform. Sem `DELETE`, webhook, `ETag` nem chave de API |
@@ -581,7 +581,7 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 - [ ] IPs de saída da RedeTV, para liberar no Cloud Armor; e se o legado aceita chamadas do IP fixo do GCP.
 - [ ] Quem recebe cada papel no início (administradores, editores, diretoria).
 - [ ] O sistema legado consegue receber webhook, ou só consulta status?
-- [ ] Prazo aceitável entre o fim da gravação e a decupagem pronta; decide Flex ou Standard.
+- [x] Prazo aceitável entre o fim da gravação e a decupagem pronta; decide Flex ou Standard. Standard, pela [ADR 0004](adr/0004-gemini-em-standard.md).
 - [ ] Banda de internet disponível para enviar os vídeos, no dia a dia e no acervo.
 - [ ] Teto mensal para o acervo e ordem de prioridade dos programas.
 - [ ] Quantas horas tem, de fato, cada ano do acervo.

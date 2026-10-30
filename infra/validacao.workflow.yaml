@@ -97,7 +97,7 @@ main:
             body:
               job_id: $${job_id}
             # ponytail: 1800 s é o teto da chamada HTTP do Workflows; a análise
-            # em Flex tem de caber nele (o serviço também tem timeout de 1800 s).
+            # tem de caber nele (o serviço também tem timeout de 1800 s).
             timeout: 1800
         except:
           as: e
