@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   verificar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
@@ -39,22 +39,22 @@ jobs:
           STORAGE_EMULATOR_HOST: http://localhost:4443
 
   terraform:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
       - run: terraform -chdir=infra init -backend=false -input=false
       - run: terraform -chdir=infra fmt -check
       - run: terraform -chdir=infra validate
 
   loop-afk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - run: make testar-afk
 
   gitleaks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -73,7 +73,7 @@ jobs:
     # Sem as variáveis (configuração única do README), o job é pulado, e não falha.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.WORKLOAD_IDENTITY_PROVIDER != ''
     needs: [verificar, terraform, loop-afk, gitleaks]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Um deploy por vez: o estado do Terraform e a tag do commit não se disputam. A
     # fila não garante a ordem, então o passo `ponta` garante que nunca se volta atrás.
     concurrency:
@@ -112,7 +112,7 @@ jobs:
           project_id: ${{ vars.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
       - if: steps.ponta.outputs.publica
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           # O wrapper suja a saída de `terraform output -raw`, que o script lê.
           terraform_wrapper: false
