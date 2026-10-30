@@ -20,6 +20,9 @@ class _Estrito(BaseModel):
 class _Intervalo(_Estrito):
     inicio_ms: int = Field(ge=0)
     fim_ms: int = Field(ge=0)
+    # Tempos do modelo, guardados só quando a regra de tempos os mudou.
+    inicio_modelo_ms: int | None = Field(default=None, ge=0)
+    fim_modelo_ms: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _inicio_antes_do_fim(self) -> Self:
@@ -131,9 +134,14 @@ def esquema_do_modelo() -> dict[str, Any]:
     """Saída estruturada pedida ao Gemini: a decupagem sem o bloco `video`.
 
     O SHA-256 e a duração vêm da quarentena; o modelo não tem como sabê-los.
+    Os tempos originais (`inicio_modelo_ms`, `fim_modelo_ms`) são escritos pela
+    regra de tempos, então o modelo também não os preenche.
     """
     esquema = Decupagem.model_json_schema()
     del esquema["properties"]["video"]
     esquema["required"].remove("video")
     del esquema["$defs"]["Video"]
+    for definicao in esquema["$defs"].values():
+        for campo in ("inicio_modelo_ms", "fim_modelo_ms"):
+            definicao.get("properties", {}).pop(campo, None)
     return esquema
