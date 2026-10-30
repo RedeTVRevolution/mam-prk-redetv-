@@ -85,17 +85,20 @@ class RepositorioDeChavesFirestore:
 
     def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
         # A contagem roda dentro da transação: dois comandos simultâneos
-        # conflitam e o Firestore repete o perdedor.
+        # conflitam e o Firestore repete o perdedor. Filtra as ativas aqui, e
+        # não com `revogada_em == None` na consulta: chaves gravadas antes do
+        # campo existir não o têm, e o Firestore não as casaria com null.
         @firestore.transactional
         def gravar(transacao: Any) -> None:
-            docs = (
-                self._colecao.where(
-                    filter=FieldFilter("sistema", "==", registro.sistema)
-                )
-                .where(filter=FieldFilter("revogada_em", "==", None))
-                .stream(transaction=transacao)
-            )
-            if len(list(docs)) >= maximo_ativas:
+            docs = self._colecao.where(
+                filter=FieldFilter("sistema", "==", registro.sistema)
+            ).stream(transaction=transacao)
+            ativas = [
+                r
+                for r in (RegistroDeChave(**(d.to_dict() or {})) for d in docs)
+                if r.ativa
+            ]
+            if len(ativas) >= maximo_ativas:
                 raise LimiteDeChavesAtivas(registro.sistema)
             transacao.set(self._colecao.document(registro.id), registro.model_dump())
 

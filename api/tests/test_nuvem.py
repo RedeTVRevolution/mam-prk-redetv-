@@ -4,7 +4,9 @@ Sem `FIRESTORE_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`, os testes de integraç�
 são pulados; no CI os emuladores sobem antes do pytest.
 """
 
+import contextlib
 import os
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
@@ -240,6 +242,17 @@ def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+def _registro_de_chave(id: str) -> RegistroDeChave:
+    return RegistroDeChave(
+        id=id,
+        sistema="Legado",
+        escopos=["ler"],
+        hmac="ff",
+        versao_mac=1,
+        criada_em=BASE,
+    )
+
+
 class TestRepositorioDeChavesFirestore:
     @pytest.fixture
     def chaves(self) -> RepositorioDeChavesFirestore:
@@ -272,15 +285,7 @@ class TestRepositorioDeChavesFirestore:
     def test_transacao_impede_a_terceira_chave_ativa(
         self, chaves: RepositorioDeChavesFirestore
     ) -> None:
-        def registro(id: str) -> RegistroDeChave:
-            return RegistroDeChave(
-                id=id,
-                sistema="Legado",
-                escopos=["ler"],
-                hmac="ff",
-                versao_mac=1,
-                criada_em=BASE,
-            )
+        registro = _registro_de_chave
 
         chaves.salvar_nova(registro("a"), 2)
         chaves.salvar_nova(registro("b"), 2)
@@ -292,3 +297,40 @@ class TestRepositorioDeChavesFirestore:
         chaves.salvar_nova(registro("c"), 2)
 
         assert [r.id for r in chaves.listar_por_sistema("Legado")] == ["a", "b", "c"]
+
+    def test_dois_comandos_simultaneos_nao_criam_a_terceira(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        chaves.salvar_nova(_registro_de_chave("a"), 2)
+        largada = threading.Barrier(2)
+        gravadas: list[str] = []
+
+        def emitir(id: str) -> None:
+            largada.wait()
+            # Perder a disputa é recusa (limite) ou transação abortada pelo
+            # Firestore depois das tentativas: nos dois casos nada é gravado.
+            with contextlib.suppress(ValueError):
+                chaves.salvar_nova(_registro_de_chave(id), 2)
+                gravadas.append(id)
+
+        corridas = [threading.Thread(target=emitir, args=(i,)) for i in ("b", "c")]
+        for corrida in corridas:
+            corrida.start()
+        for corrida in corridas:
+            corrida.join()
+
+        assert len(gravadas) <= 1
+        ids = [r.id for r in chaves.listar_por_sistema("Legado")]
+        assert sorted(ids) == sorted(["a", *gravadas])
+
+    def test_chave_gravada_sem_o_campo_de_revogacao_conta_como_ativa(self) -> None:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        colecao = f"chaves-{uuid.uuid4().hex}"
+        chaves = RepositorioDeChavesFirestore(cliente, colecao=colecao)
+        for id in ("antiga-1", "antiga-2"):
+            # Como as chaves emitidas antes da revogação existir: sem `revogada_em`.
+            antiga = _registro_de_chave(id).model_dump(exclude={"revogada_em"})
+            cliente.collection(colecao).document(id).set(antiga)
+
+        with pytest.raises(LimiteDeChavesAtivas):
+            chaves.salvar_nova(_registro_de_chave("nova"), 2)

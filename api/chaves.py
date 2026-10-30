@@ -55,6 +55,10 @@ class RegistroDeChave(BaseModel):
     # Revogada não é apagada: o registro fica para auditoria.
     revogada_em: datetime | None = None
 
+    @property
+    def ativa(self) -> bool:
+        return self.revogada_em is None
+
 
 MAXIMO_DE_CHAVES_ATIVAS = 2
 
@@ -99,9 +103,7 @@ class RepositorioDeChavesEmMemoria:
         )
 
     def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
-        ativas = [
-            r for r in self.listar_por_sistema(registro.sistema) if not r.revogada_em
-        ]
+        ativas = [r for r in self.listar_por_sistema(registro.sistema) if r.ativa]
         if len(ativas) >= maximo_ativas:
             raise LimiteDeChavesAtivas(registro.sistema)
         self.salvar(registro)
@@ -160,7 +162,7 @@ class VerificadorDeChaveDeApi:
             raise ChaveInvalida
         # Procura pelo id público: nunca compara com todos os hashes.
         registro = self._repositorio.obter(partes[1])
-        if registro is None or registro.revogada_em is not None:
+        if registro is None or not registro.ativa:
             raise ChaveInvalida
         try:
             esperado = self._mac.calcular(registro.versao_mac, chave.encode())
@@ -188,7 +190,7 @@ def revogar_chave(
     registro = repositorio.obter(chave_id)
     if registro is None:
         raise ValueError(f"a chave {chave_id} não existe")
-    if registro.revogada_em is None:
+    if registro.ativa:
         repositorio.salvar(registro.model_copy(update={"revogada_em": revogada_em}))
 
 
