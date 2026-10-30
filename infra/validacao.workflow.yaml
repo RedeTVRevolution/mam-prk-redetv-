@@ -1,7 +1,7 @@
 # Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
 # quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
-# falhou. O passo de análise entra no ticket seguinte.
-# Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao}.
+# falhou. Depois chama o serviço de análise, só se o Job ficou em `analisando`.
+# Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao}, ${url_da_analise}.
 main:
   params: [evento]
   steps:
@@ -43,3 +43,49 @@ main:
                         timestampValue: $${time.format(sys.now())}
             - encerra_com_falha:
                 raise: $${e}
+    - le_o_job:
+        call: googleapis.firestore.v1.projects.databases.documents.get
+        args:
+          name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+        result: documento
+    - so_se_analisando:
+        switch:
+          - condition: $${documento.fields.estado.stringValue == "analisando"}
+            next: analisa
+        next: fim
+    - analisa:
+        try:
+          call: http.post
+          args:
+            url: ${url_da_analise}/analisar
+            auth:
+              type: OIDC
+              audience: ${url_da_analise}
+            body:
+              job_id: $${job_id}
+            # ponytail: 1800 s é o teto da chamada HTTP do Workflows; a análise
+            # em Flex tem de caber nele (o serviço também tem timeout de 1800 s).
+            timeout: 1800
+        except:
+          as: e
+          steps:
+            - marca_analise_como_falha:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  currentDocument:
+                    exists: true
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: analise_falhou
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
+            - encerra_a_analise_com_falha:
+                raise: $${e}
+    - fim:
+        return: $${job_id}

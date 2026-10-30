@@ -95,7 +95,10 @@ if _projeto:
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(firestore.Client(project=_projeto)),
         ArmazenamentoStorage(
-            ClienteStorage(project=_projeto), f"{_projeto}-quarentena"
+            ClienteStorage(project=_projeto),
+            f"{_projeto}-quarentena",
+            f"{_projeto}-aceitos",
+            f"{_projeto}-decupagens",
         ),
     )
 else:

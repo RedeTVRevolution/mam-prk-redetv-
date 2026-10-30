@@ -2,12 +2,14 @@ import json
 from typing import Any
 
 import pytest
+import requests
 
 from api.decupagem import Video
 from api.gemini import (
     AnaliseFalhou,
     Chamada,
     ErroHttp,
+    TransporteVertex,
     analisar,
 )
 from api.tests.test_decupagem import DURACAO_MS, decupagem_valida
@@ -161,3 +163,115 @@ def test_os_dois_orcamentos_de_tentativas_sao_independentes() -> None:
     t = TransporteFalso(ErroHttp(429), "lixo", ErroHttp(500), "lixo", BOA)
     _rodar(t)
     assert len(t.chamadas) == 5
+
+
+class SessaoFalsa:
+    """Imita `AuthorizedSession.post`: devolve respostas ou levanta, em ordem."""
+
+    def __init__(self, *respostas: "RespostaFalsa | Exception") -> None:
+        self.respostas = list(respostas)
+        self.pedidos: list[dict[str, Any]] = []
+
+    def post(self, url: str, **kwargs: Any) -> "RespostaFalsa":
+        self.pedidos.append({"url": url, **kwargs})
+        r = self.respostas.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+class RespostaFalsa:
+    def __init__(self, status: int, corpo: dict[str, Any] | None = None) -> None:
+        self.status_code = status
+        self._corpo = corpo or {}
+
+    def json(self) -> dict[str, Any]:
+        return self._corpo
+
+
+def _chamada() -> Chamada:
+    return Chamada(
+        modelo="gemini-3.5-flash-lite",
+        video_uri=VIDEO,
+        esquema={"type": "OBJECT", "additionalProperties": False},
+        rotulos={"job_id": JOB},
+    )
+
+
+def _ok(texto: str) -> RespostaFalsa:
+    return RespostaFalsa(
+        200, {"candidates": [{"content": {"parts": [{"text": texto}]}}]}
+    )
+
+
+def test_transporte_vertex_monta_a_chamada_global_com_video_esquema_e_rotulo() -> None:
+    sessao = SessaoFalsa(_ok("{}"))
+
+    texto = TransporteVertex("projeto-x", sessao).gerar(_chamada())
+
+    assert texto == "{}"
+    pedido = sessao.pedidos[0]
+    assert pedido["url"] == (
+        "https://aiplatform.googleapis.com/v1/projects/projeto-x/locations/global"
+        "/publishers/google/models/gemini-3.5-flash-lite:generateContent"
+    )
+    corpo = pedido["json"]
+    arquivo = corpo["contents"][0]["parts"][0]
+    assert arquivo["fileData"] == {"mimeType": "video/mp4", "fileUri": VIDEO}
+    assert arquivo["videoMetadata"] == {"fps": 1}
+    assert corpo["generationConfig"]["responseMimeType"] == "application/json"
+    assert corpo["generationConfig"]["responseJsonSchema"] == _chamada().esquema
+    assert "mediaResolution" not in corpo["generationConfig"]
+    assert corpo["labels"] == {"job_id": JOB}
+    assert "tools" not in corpo
+    assert "systemInstruction" in corpo
+    # Flex: só ele, sem Provisioned Throughput antes.
+    assert pedido["headers"]["X-Vertex-AI-LLM-Shared-Request-Type"] == "flex"
+    assert pedido["headers"]["X-Vertex-AI-LLM-Request-Type"] == "shared"
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_transporte_vertex_converte_status_diferente_de_200_em_erro_http(
+    status: int,
+) -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(status)))
+
+    with pytest.raises(ErroHttp) as erro:
+        transporte.gerar(_chamada())
+
+    assert erro.value.status == status
+
+
+@pytest.mark.parametrize(
+    "falha", [requests.Timeout(), requests.ConnectionError(), ConnectionResetError()]
+)
+def test_transporte_vertex_converte_timeout_e_queda_em_503(falha: Exception) -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(falha))
+
+    with pytest.raises(ErroHttp) as erro:
+        transporte.gerar(_chamada())
+
+    assert erro.value.status == 503
+
+
+def test_erros_do_transporte_entram_nas_tentativas() -> None:
+    sessao = SessaoFalsa(RespostaFalsa(429), RespostaFalsa(500), _ok(BOA))
+    relogio = Relogio()
+
+    d = analisar(
+        TransporteVertex("p", sessao),
+        video_uri=VIDEO,
+        job_id=JOB,
+        video=VIDEO_CONFIAVEL,
+        dormir=relogio.dormir,
+    )
+
+    assert d.programa.resumo == "Jornal da noite"
+    assert len(sessao.pedidos) == 3
+    assert len(relogio.esperas) == 2
+
+
+def test_resposta_sem_texto_vira_texto_vazio_para_a_validacao_repetir() -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, {})))
+
+    assert transporte.gerar(_chamada()) == ""

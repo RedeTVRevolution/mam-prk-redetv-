@@ -28,3 +28,30 @@ def test_falha_da_execucao_grava_falhou_com_arquivo_corrompido() -> None:
     assert "googleapis.firestore.v1.projects.databases.documents.patch" in texto
     assert "arquivo_corrompido" in texto
     assert "falhou" in texto
+
+
+def test_chama_a_analise_so_se_o_job_esta_em_analisando() -> None:
+    texto = _texto()
+
+    leitura = texto.index("documents.get")
+    condicao = texto.index('estado.stringValue == "analisando"')
+    chamada = texto.index("call: http.post")
+    assert leitura < condicao < chamada
+    assert "${url_da_analise}/analisar" in texto
+    assert "type: OIDC" in texto
+    assert "audience: ${url_da_analise}" in texto
+    # Fora de `analisando` o fluxo pula a chamada.
+    assert "next: fim" in texto
+    # O teto da chamada HTTP do Workflows está registrado.
+    assert "timeout: 1800" in texto and "ponytail:" in texto
+
+
+def test_falha_da_chamada_de_analise_grava_analise_falhou() -> None:
+    texto = _texto()
+
+    depois_da_chamada = texto[texto.index("call: http.post") :]
+    assert "except:" in depois_da_chamada and "as: e" in depois_da_chamada
+    assert "stringValue: analise_falhou" in depois_da_chamada
+    assert "stringValue: falhou" in depois_da_chamada
+    assert "exists: true" in depois_da_chamada
+    assert "raise: $${e}" in depois_da_chamada

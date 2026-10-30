@@ -113,9 +113,12 @@ def armazenamento() -> ArmazenamentoStorage:
         client_options={"api_endpoint": endpoint},
     )
     credencial = _credencial_local()
+    sufixo = uuid.uuid4().hex[:8]
     return ArmazenamentoStorage(
         cliente,
-        f"teste-quarentena-{uuid.uuid4().hex[:8]}",
+        f"teste-quarentena-{sufixo}",
+        f"teste-aceitos-{sufixo}",
+        f"teste-decupagens-{sufixo}",
         assinatura=lambda: {"credentials": credencial},
     )
 
@@ -134,15 +137,11 @@ def test_url_de_upload_prende_tipo_e_tamanho_declarados(
     assert "teste-quarentena" in url
 
 
-def test_outras_operacoes_do_armazenamento_seguem_indisponiveis(
+def test_cancelar_upload_segue_indisponivel(
     armazenamento: ArmazenamentoStorage,
 ) -> None:
     with pytest.raises(ServicoIndisponivel):
         armazenamento.cancelar_upload("job1")
-    with pytest.raises(ServicoIndisponivel):
-        armazenamento.url_de_reproducao("job1", timedelta(minutes=10))
-    with pytest.raises(ServicoIndisponivel):
-        armazenamento.abrir_decupagem("job1")
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
@@ -164,3 +163,52 @@ def test_url_de_upload_inicia_upload_retomavel_no_emulador(
 
     assert resposta.status_code in (200, 201)
     assert "upload_id" in resposta.headers["Location"]
+
+
+def _com_buckets(armazenamento: ArmazenamentoStorage) -> ArmazenamentoStorage:
+    for nome in (armazenamento._aceitos, armazenamento._decupagens):
+        armazenamento._cliente.create_bucket(nome)
+    return armazenamento
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_url_de_reproducao_devolve_o_proxy_por_get(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    armazenamento._cliente.bucket(armazenamento._aceitos).blob(
+        "job1/proxy.mp4"
+    ).upload_from_string(b"proxy-bytes", content_type="video/mp4")
+
+    url = armazenamento.url_de_reproducao("job1", timedelta(minutes=10))
+
+    consulta = parse_qs(urlparse(url).query)
+    assert consulta["X-Goog-Expires"] == ["600"]
+    assert "teste-aceitos" in url and "job1/proxy.mp4" in url
+    # O emulador responde no próprio endereço; só o host da URL assinada muda.
+    partes = urlparse(url)
+    resposta = requests.get(f"{EMULADOR_STORAGE}{partes.path}?{partes.query}")
+    assert resposta.status_code == 200
+    assert resposta.content == b"proxy-bytes"
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_abrir_decupagem_le_o_json_em_pedacos(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    armazenamento._cliente.bucket(armazenamento._decupagens).blob(
+        "job1.json"
+    ).upload_from_string(b'{"a": 1}', content_type="application/json")
+
+    assert b"".join(armazenamento.abrir_decupagem("job1")) == b'{"a": 1}'
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+
+    with pytest.raises(ServicoIndisponivel):
+        next(armazenamento.abrir_decupagem("nao-existe"))

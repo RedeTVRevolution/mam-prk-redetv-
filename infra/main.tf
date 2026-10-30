@@ -113,7 +113,10 @@ resource "google_service_account" "mam" {
 # Papéis de cada componente. A orquestração grava a falha da validação no
 # Firestore, recebe o evento do Eventarc e invoca o Workflows (o provider não tem
 # papel no próprio Workflows); o papel de rodar o Job fica mais abaixo, no próprio
-# Job (ADR 0002). O passo de análise e os papéis dele entram no ticket seguinte.
+# Job (ADR 0002), e o de chamar o serviço de análise, no próprio serviço. Quem lê o
+# proxy por gs:// na Vertex é a conta que chama (mam-analise, com objectViewer em
+# aceitos), segundo a doc do generateContent; o agente de serviço da Vertex não
+# precisa de papel no bucket.
 locals {
   papeis_no_projeto = {
     web          = ["roles/datastore.user"]
@@ -273,8 +276,44 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
-# Quarentena -> Eventarc -> Workflows -> Job de validação. O passo de análise
-# entra no ticket seguinte.
+# Serviço de análise (#39): a mesma imagem do web, com outro comando. Entrada só
+# interna (sem allUsers): o Workflows o chama por OIDC, e a chamada de dentro do
+# Google Cloud passa pelo ingress interno. O timeout acompanha o teto de 1800 s da
+# chamada HTTP do Workflows.
+resource "google_cloud_run_v2_service" "analise" {
+  name                = "mam-analise"
+  location            = var.regiao
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  deletion_protection = false
+  template {
+    service_account                  = google_service_account.mam["analise"].email
+    timeout                          = "1800s"
+    max_instance_request_concurrency = 8
+    scaling {
+      max_instance_count = 5
+    }
+    containers {
+      image   = var.imagem
+      command = ["uvicorn"]
+      args    = ["api.analise:app", "--host", "0.0.0.0", "--port", "8080"]
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.projeto
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração chama o serviço de análise.
+resource "google_cloud_run_v2_service_iam_member" "orquestracao_chama_analise" {
+  name     = google_cloud_run_v2_service.analise.name
+  location = google_cloud_run_v2_service.analise.location
+  role     = "roles/run.invoker"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> serviço de análise.
 resource "google_workflows_workflow" "validacao" {
   name            = "mam-validacao"
   region          = var.regiao
@@ -283,6 +322,7 @@ resource "google_workflows_workflow" "validacao" {
     projeto          = var.projeto
     regiao           = var.regiao
     job_de_validacao = google_cloud_run_v2_job.validacao.name
+    url_da_analise   = google_cloud_run_v2_service.analise.uri
   })
   depends_on = [google_project_service.apis]
 }
