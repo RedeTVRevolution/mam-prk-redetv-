@@ -26,6 +26,7 @@ from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
     RepositorioDeChavesFirestore,
+    RepositorioDePapeisFirestore,
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
 )
@@ -369,3 +370,34 @@ class TestRepositorioDeWebhooksFirestore:
         self, webhooks: RepositorioDeWebhooksFirestore
     ) -> None:
         assert webhooks.obter("Nenhum") is None
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDePapeisFirestore:
+    @pytest.fixture
+    def papeis(self) -> RepositorioDePapeisFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDePapeisFirestore(
+            cliente, colecao=f"papeis-{uuid.uuid4().hex}"
+        )
+
+    def test_uid_sem_documento_devolve_none(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        assert papeis.obter("u1") is None
+
+    def test_grava_e_le_os_papeis_do_uid(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        papeis.salvar("u1", ["curador", "operador"])
+
+        assert papeis.obter("u1") == ["curador", "operador"]
+        assert papeis.obter("u2") is None
+
+    def test_salvar_de_novo_troca_os_papeis(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        papeis.salvar("u1", ["curador"])
+        papeis.salvar("u1", ["consulta"])
+
+        assert papeis.obter("u1") == ["consulta"]

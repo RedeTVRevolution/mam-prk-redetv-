@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis
 
 instalar:
 	uv sync --locked
@@ -44,3 +44,7 @@ listar-chaves:
 
 revogar-chave:
 	uv run --locked python -m api.gerir_chaves revogar "$(ID)"
+
+# Papéis de uma conta (E3): make atribuir-papeis EMAIL=ana@redetv.com.br PAPEIS=editor,curador
+atribuir-papeis:
+	uv run --locked python -m api.atribuir_papeis "$(EMAIL)" "$(PAPEIS)"

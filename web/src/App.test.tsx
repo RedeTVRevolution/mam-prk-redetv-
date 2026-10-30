@@ -18,7 +18,12 @@ const servidor = setupServer(
     if (autorizacao !== 'Bearer token-de-ana@redetv.com.br') {
       return new HttpResponse(null, { status: 401 })
     }
-    return HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br' })
+    return HttpResponse.json({
+      uid: 'u1',
+      email: 'ana@redetv.com.br',
+      papeis: ['consulta', 'operador'],
+      permissoes: ['decupagem.ver', 'video.enviar'],
+    })
   }),
   http.get('/v1/jobs', () => HttpResponse.json([])),
 )
@@ -260,4 +265,35 @@ test('verificando a sessão mostra um indicador de carregamento', async () => {
 
   expect(screen.getByRole('status', { name: 'Verificando a sessão' })).toBeTruthy()
   await screen.findByText('Biblioteca')
+})
+
+test('quem só tem Consulta não vê o upload na Biblioteca', async () => {
+  servidor.use(
+    http.get('/v1/eu', () =>
+      HttpResponse.json({
+        uid: 'u1',
+        email: 'ana@redetv.com.br',
+        papeis: ['consulta'],
+        permissoes: ['decupagem.ver'],
+      }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  render(<App autenticador={autenticador()} />)
+  await screen.findByLabelText(/^E-mail/)
+  await preencherSenha(usuario)
+  await confirmarCodigo(usuario)
+
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+  expect(screen.queryByRole('button', { name: 'Enviar MP4' })).toBeNull()
+})
+
+test('quem tem video.enviar vê o upload na Biblioteca', async () => {
+  const usuario = userEvent.setup()
+  render(<App autenticador={autenticador()} />)
+  await screen.findByLabelText(/^E-mail/)
+  await preencherSenha(usuario)
+  await confirmarCodigo(usuario)
+
+  expect(await screen.findByRole('button', { name: 'Enviar MP4' })).toBeTruthy()
 })

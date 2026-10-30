@@ -90,13 +90,16 @@ function noShell(tela: ReactNode) {
   return <AppShell navbar={NAVBAR_DA_BIBLIOTECA}>{tela}</AppShell>
 }
 
-async function abrir(opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void } = {}) {
+async function abrir(
+  opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void; podeEnviar?: boolean } = {},
+) {
   render(
     noShell(
       <Biblioteca
         autenticador={await comSessao()}
         aoSessaoExpirada={opcoes.aoSessaoExpirada ?? (() => {})}
         intervaloMs={opcoes.intervaloMs}
+        podeEnviar={opcoes.podeEnviar ?? true}
       />,
     ),
   )
@@ -216,7 +219,12 @@ test('abrir um vídeo concluído ou falhado chama aoAbrir; os demais não são c
   const aoAbrir = vi.fn()
   render(
     noShell(
-      <Biblioteca autenticador={await comSessao()} aoSessaoExpirada={() => {}} aoAbrir={aoAbrir} />,
+      <Biblioteca
+        autenticador={await comSessao()}
+        aoSessaoExpirada={() => {}}
+        aoAbrir={aoAbrir}
+        podeEnviar
+      />,
     ),
   )
 
@@ -269,4 +277,19 @@ test('um estado fora do mapa continua visível, qualquer que seja o filtro', asy
   for (const caixa of screen.getAllByRole('checkbox')) await usuario.click(caixa)
 
   expect(screen.getByText('estranho.mp4')).toBeTruthy()
+})
+
+test('sem a permissão de enviar, a Biblioteca não mostra o upload mas lista os vídeos', async () => {
+  jobs = [job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' })]
+  await abrir({ podeEnviar: false })
+
+  expect(await screen.findByText('pronto.mp4')).toBeTruthy()
+  expect(screen.queryByLabelText('Enviar vídeo')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Enviar MP4' })).toBeNull()
+})
+
+test('com a permissão de enviar, a Biblioteca mostra o upload', async () => {
+  await abrir({ podeEnviar: true })
+
+  expect(await screen.findByRole('button', { name: 'Enviar MP4' })).toBeTruthy()
 })

@@ -25,6 +25,7 @@ from api.auth import (
     Escopo,
     Sistema,
 )
+from api.papeis import Permissao, RepositorioDePapeis, papeis_efetivos, permissoes_de
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
@@ -271,12 +272,26 @@ def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
     yield compressor.flush()
 
 
-def _exige(escopo: Escopo) -> Callable[[Chamador], Chamador]:
-    """Dependência: chave sem o escopo recebe 403. Pessoa não tem escopos e passa (até os papéis da E8)."""
+# Permissão que a pessoa precisa para cada escopo de chave. Cancelar exige a de enviar.
+PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {
+    "criar": "video.enviar",
+    "ler": "decupagem.ver",
+    "cancelar": "video.enviar",
+}
 
-    def verificar(chamador: ChamadorAutenticado) -> Chamador:
-        if isinstance(chamador, Sistema) and escopo not in chamador.escopos:
-            raise HTTPException(403, f"Chave sem o escopo {escopo}")
+
+def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
+    """Dependência: chave sem o escopo, ou pessoa sem a permissão, recebe 403."""
+
+    def verificar(request: Request, chamador: ChamadorAutenticado) -> Chamador:
+        if isinstance(chamador, Sistema):
+            if escopo not in chamador.escopos:
+                raise HTTPException(403, f"Chave sem o escopo {escopo}")
+            return chamador
+        papeis: RepositorioDePapeis = request.app.state.papeis
+        permissoes = permissoes_de(papeis_efetivos(papeis.obter(chamador.uid)))
+        if PERMISSAO_DO_ESCOPO[escopo] not in permissoes:
+            raise HTTPException(403, f"Sem a permissão {PERMISSAO_DO_ESCOPO[escopo]}")
         return chamador
 
     return verificar

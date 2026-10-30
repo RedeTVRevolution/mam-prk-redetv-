@@ -83,11 +83,13 @@ export default function Biblioteca({
   autenticador,
   aoSessaoExpirada,
   aoAbrir,
+  podeEnviar,
   intervaloMs = 5000,
 }: {
   autenticador: Autenticador
   aoSessaoExpirada: () => void
   aoAbrir?: (job: JobAberto) => void
+  podeEnviar: boolean
   intervaloMs?: number
 }) {
   const [jobs, setJobs] = useState<Job[] | null>(null)
@@ -157,39 +159,41 @@ export default function Biblioteca({
     <>
       <AppShell.Navbar p="sm">
         <Stack gap="lg">
-          <Stack gap="xs">
-            <FileButton
-              accept=".mp4,video/mp4"
-              onChange={(arquivo) => void escolher(arquivo)}
-              resetRef={limparSeletor}
-              disabled={enviando}
-              inputProps={{ 'aria-label': 'Enviar vídeo', disabled: enviando }}
-            >
-              {(props) => (
-                <Button
-                  {...props}
-                  fullWidth
-                  leftSection={<IconUpload size={16} />}
-                  disabled={enviando}
-                >
-                  Enviar MP4
-                </Button>
+          {podeEnviar && (
+            <Stack gap="xs">
+              <FileButton
+                accept=".mp4,video/mp4"
+                onChange={(arquivo) => void escolher(arquivo)}
+                resetRef={limparSeletor}
+                disabled={enviando}
+                inputProps={{ 'aria-label': 'Enviar vídeo', disabled: enviando }}
+              >
+                {(props) => (
+                  <Button
+                    {...props}
+                    fullWidth
+                    leftSection={<IconUpload size={16} />}
+                    disabled={enviando}
+                  >
+                    Enviar MP4
+                  </Button>
+                )}
+              </FileButton>
+              {envio.tipo === 'enviando' && (
+                <Progress color="red" aria-label="Progresso do envio" value={envio.fracao * 100} />
               )}
-            </FileButton>
-            {envio.tipo === 'enviando' && (
-              <Progress color="red" aria-label="Progresso do envio" value={envio.fracao * 100} />
-            )}
-            {envio.tipo === 'concluido' && (
-              <Text size="xs" c="green">
-                Envio concluído.
-              </Text>
-            )}
-            {envio.tipo === 'erro' && (
-              <Alert color="red" variant="light" role="alert">
-                {envio.mensagem}
-              </Alert>
-            )}
-          </Stack>
+              {envio.tipo === 'concluido' && (
+                <Text size="xs" c="green">
+                  Envio concluído.
+                </Text>
+              )}
+              {envio.tipo === 'erro' && (
+                <Alert color="red" variant="light" role="alert">
+                  {envio.mensagem}
+                </Alert>
+              )}
+            </Stack>
+          )}
           <Checkbox.Group label="Estado" value={estados} onChange={setEstados}>
             <Stack gap="xs" mt="xs">
               {ESTADOS.map((estado) => (

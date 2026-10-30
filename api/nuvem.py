@@ -18,11 +18,13 @@ from api.jobs import (
     Job,
     ServicoIndisponivel,
 )
+from api.papeis import Papel
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
 COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
+COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 TAMANHO_DO_PEDACO = 256 * 1024
 
 
@@ -121,6 +123,22 @@ class RepositorioDeWebhooksFirestore:
     def obter(self, sistema: str) -> RegistroDeWebhook | None:
         doc = self._colecao.document(sistema).get()
         return RegistroDeWebhook(**(doc.to_dict() or {})) if doc.exists else None
+
+
+class RepositorioDePapeisFirestore:
+    """Um documento por uid do Identity Platform, com a lista de papéis."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_PAPEIS
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def obter(self, uid: str) -> list[Papel] | None:
+        doc = self._colecao.document(uid).get()
+        return list((doc.to_dict() or {}).get("papeis", [])) if doc.exists else None
+
+    def salvar(self, uid: str, papeis: list[Papel]) -> None:
+        self._colecao.document(uid).set({"papeis": papeis})
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:

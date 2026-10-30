@@ -12,7 +12,6 @@ from google.cloud.storage import Client as ClienteStorage
 from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
-    Chamador,
     ChamadorAutenticado,
     ChaveInvalida,
     Sistema,
@@ -34,7 +33,19 @@ from api.jobs import (
     agora_utc,
     criar_rotas,
 )
-from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
+from api.nuvem import (
+    ArmazenamentoStorage,
+    RepositorioDePapeisFirestore,
+    RepositorioFirestore,
+)
+from api.papeis import (
+    Papel,
+    Permissao,
+    RepositorioDePapeis,
+    RepositorioDePapeisEmMemoria,
+    papeis_efetivos,
+    permissoes_de,
+)
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -54,11 +65,17 @@ class _SemChaves:
         raise ChaveInvalida
 
 
+class UsuarioComPapeis(Usuario):
+    papeis: list[Papel]
+    permissoes: list[Permissao]
+
+
 def criar_app(
     verificador: VerificadorDeToken | None = None,
     repositorio: RepositorioDeJobs | None = None,
     armazenamento: Armazenamento | None = None,
     chaves: VerificadorDeChave | None = None,
+    papeis: RepositorioDePapeis | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -75,6 +92,7 @@ def criar_app(
 
     app.state.verificador = verificador or _SemVerificador()
     app.state.chaves = chaves or _SemChaves()
+    app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
     app.middleware("http")(exigir_autenticacao)
 
     @app.get(CAMINHO_HEALTH)
@@ -84,8 +102,18 @@ def criar_app(
     v1 = APIRouter(prefix=PREFIXO_PROTEGIDO)
 
     @v1.get("/eu")
-    def eu(chamador: ChamadorAutenticado) -> Chamador:
-        return chamador
+    def eu(
+        request: Request, chamador: ChamadorAutenticado
+    ) -> UsuarioComPapeis | Sistema:
+        if isinstance(chamador, Sistema):
+            return chamador
+        repositorio_de_papeis: RepositorioDePapeis = request.app.state.papeis
+        efetivos = papeis_efetivos(repositorio_de_papeis.obter(chamador.uid))
+        return UsuarioComPapeis(
+            **chamador.model_dump(),
+            papeis=efetivos,
+            permissoes=sorted(permissoes_de(efetivos)),
+        )
 
     v1.include_router(
         criar_rotas(
@@ -113,6 +141,7 @@ if _projeto:
             f"{_projeto}-aceitos",
             f"{_projeto}-decupagens",
         ),
+        papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
     )
 else:
     app = criar_app()
