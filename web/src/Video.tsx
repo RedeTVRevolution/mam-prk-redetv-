@@ -60,12 +60,31 @@ interface Pauta extends Intervalo {
   origem?: 'modelo' | 'revisao'
 }
 
+interface Comercial extends Intervalo {
+  id?: string
+  marca: string
+  tipo: string
+  evidencia?: string
+  origem?: 'modelo' | 'revisao'
+  acrescentado?: boolean
+}
+
+// Os tipos do esquema 1.1 (api/decupagem.py).
+const TIPOS_DE_COMERCIAL = [
+  'intervalo',
+  'merchan_apresentador',
+  'patrocinio_vinheta',
+  'sobreposicao_grafica',
+  'marca_incidental',
+  'mencao_editorial',
+]
+
 export interface Decupagem {
   versao_decupagem?: string
   pautas: Pauta[]
   pessoas: Pessoa[]
   planos: (Intervalo & { id: string; ambiente: string; acao?: string | null })[]
-  comerciais: (Intervalo & { marca: string; tipo: string })[]
+  comerciais: Comercial[]
   transcricao: (Intervalo & { locutor: string; texto: string })[]
 }
 
@@ -103,6 +122,14 @@ function lerTempo(texto: string): number | null {
 
 /** O valor de uma correção de tempos ("inicio_ms-fim_ms") vira "mm:ss–mm:ss"; os outros tipos ficam como estão. */
 function valorLegivel(tipo: string | undefined, valor: string): string {
+  if (tipo === 'comercial.acrescentar') {
+    try {
+      const c = JSON.parse(valor) as Comercial
+      return `${c.marca} (${c.tipo}) ${tempo(c.inicio_ms)}–${tempo(c.fim_ms)}`
+    } catch {
+      return valor
+    }
+  }
   const achado = tipo === 'item.tempos' ? /^(\d+)-(\d+)$/.exec(valor) : null
   return achado ? `${tempo(Number(achado[1]))}–${tempo(Number(achado[2]))}` : valor
 }
@@ -227,6 +254,7 @@ export default function Video({
   const concluido = job.estado === 'concluido'
   const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
   const [corrigindoPauta, setCorrigindoPauta] = useState<Pauta | null>(null)
+  const [comercialAberto, setComercialAberto] = useState<Comercial | 'novo' | null>(null)
   const [historicoAberto, setHistoricoAberto] = useState(false)
   const [filaAberta, setFilaAberta] = useState(false)
   const [fila, setFila] = useState<ItemDaFila[]>([])
@@ -478,14 +506,47 @@ export default function Video({
                     )}
                   </Group>
                 ))}
+              {aba === 'Marcas' && podeEditar && (
+                <Button
+                  type="button"
+                  variant="light"
+                  size="xs"
+                  mb={4}
+                  onClick={() => setComercialAberto('novo')}
+                >
+                  Acrescentar comercial
+                </Button>
+              )}
               {aba === 'Marcas' &&
                 decupagem.comerciais.map((c, i) => (
-                  <NavLink
-                    key={`com-${i}`}
-                    label={c.marca}
-                    description={`${c.tipo} · ${tempo(c.inicio_ms)}`}
-                    onClick={() => saltar(c.inicio_ms)}
-                  />
+                  <Group key={`com-${i}`} gap={4} wrap="nowrap">
+                    <NavLink
+                      flex={1}
+                      label={
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm">{c.marca}</Text>
+                          {c.origem === 'revisao' && (
+                            <Badge size="xs" color="teal" variant="light">
+                              revisado
+                            </Badge>
+                          )}
+                        </Group>
+                      }
+                      description={`${c.tipo} · ${tempo(c.inicio_ms)}`}
+                      onClick={() => saltar(c.inicio_ms)}
+                    />
+                    {podeEditar && c.id && !c.acrescentado && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        aria-label={`Corrigir comercial ${c.marca}`}
+                        onClick={() => setComercialAberto(c)}
+                      >
+                        <IconPencil size={14} />
+                      </ActionIcon>
+                    )}
+                  </Group>
                 ))}
               {aba === 'Planos' &&
                 decupagem.planos.map((p) => (
@@ -558,6 +619,20 @@ export default function Video({
         aoFechar={() => setCorrigindoPauta(null)}
         aoSalvar={() => {
           setCorrigindoPauta(null)
+          recarregarDecupagem()
+        }}
+        aoVersaoDesatualizada={recarregarDecupagem}
+        aoSessaoExpirada={() => sessaoExpirada.current()}
+      />
+      <CorrigirComercial
+        key={comercialAberto === 'novo' ? 'novo' : (comercialAberto?.id ?? 'fechado')}
+        comercial={comercialAberto}
+        versao={decupagem.versao_decupagem ?? ''}
+        autenticador={autenticador}
+        jobId={job.id}
+        aoFechar={() => setComercialAberto(null)}
+        aoSalvar={() => {
+          setComercialAberto(null)
           recarregarDecupagem()
         }}
         aoVersaoDesatualizada={recarregarDecupagem}
@@ -844,9 +919,196 @@ function CorrigirPauta({
   )
 }
 
+/** Modal do comercial: corrige marca, tipo e tempos de um comercial ou acrescenta um novo (`'novo'`). */
+function CorrigirComercial({
+  comercial,
+  versao,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoSalvar,
+  aoVersaoDesatualizada,
+  aoSessaoExpirada,
+}: {
+  comercial: Comercial | 'novo' | null
+  versao: string
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const novo = comercial === 'novo'
+  const atual = comercial !== null && !novo ? comercial : null
+  const [marca, setMarca] = useState(atual?.marca ?? '')
+  const [tipo, setTipo] = useState<string | null>(atual?.tipo ?? null)
+  const [inicio, setInicio] = useState(atual ? tempo(atual.inicio_ms) : '')
+  const [fim, setFim] = useState(atual ? tempo(atual.fim_ms) : '')
+  const [evidencia, setEvidencia] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
+  const [gravadas, setGravadas] = useState<Record<string, string>>({})
+
+  const inicioMs = atual ? tempoDoCampo(inicio, atual.inicio_ms) : lerTempo(inicio)
+  const fimMs = atual ? tempoDoCampo(fim, atual.fim_ms) : lerTempo(fim)
+  const temposValidos = inicioMs !== null && fimMs !== null && inicioMs <= fimMs
+  const candidatas: { tipo: ItemDoHistorico['tipo']; valor: string; tipo_do_item?: string }[] = []
+  if (atual) {
+    if (marca.trim() !== atual.marca) candidatas.push({ tipo: 'comercial.marca', valor: marca })
+    if (tipo && tipo !== atual.tipo) candidatas.push({ tipo: 'comercial.tipo', valor: tipo })
+    if (temposValidos && (inicioMs !== atual.inicio_ms || fimMs !== atual.fim_ms))
+      candidatas.push({
+        tipo: 'item.tempos',
+        tipo_do_item: 'comercial',
+        valor: `${inicioMs}-${fimMs}`,
+      })
+  } else if (novo && marca.trim() && tipo && evidencia.trim() && temposValidos) {
+    candidatas.push({
+      tipo: 'comercial.acrescentar',
+      valor: JSON.stringify({
+        marca: marca.trim(),
+        tipo,
+        inicio_ms: inicioMs,
+        fim_ms: fimMs,
+        evidencia: evidencia.trim(),
+      }),
+    })
+  }
+  const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
+  const temposMudaram =
+    atual !== null && (inicioMs !== atual.inicio_ms || fimMs !== atual.fim_ms)
+
+  async function salvar() {
+    setSalvando(true)
+    setErro(null)
+    const feitas = { ...gravadas }
+    try {
+      for (const m of mudancas) {
+        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
+          metodo: 'POST',
+          corpo: { ...m, item_id: atual?.id ?? '', motivo, versao },
+        })
+        feitas[m.tipo] = m.valor
+      }
+      aoSalvar()
+    } catch (e) {
+      setGravadas(feitas)
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        aoVersaoDesatualizada()
+        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
+      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
+      } else setErro('Não foi possível salvar a correção.')
+      setSalvando(false)
+    }
+  }
+
+  // Fechar depois de gravar parte dos campos recarrega a decupagem, como o salvar.
+  function fechar() {
+    if (Object.keys(gravadas).length > 0) aoSalvar()
+    else aoFechar()
+  }
+
+  return (
+    <Modal
+      opened={comercial !== null}
+      onClose={fechar}
+      title={novo ? 'Acrescentar comercial' : 'Corrigir comercial'}
+      centered
+    >
+      <Stack gap="sm">
+        <TextInput
+          label="Marca"
+          value={marca}
+          maxLength={200}
+          onChange={(e) => setMarca(e.currentTarget.value)}
+        />
+        <Select
+          label="Tipo"
+          data={TIPOS_DE_COMERCIAL}
+          value={tipo}
+          allowDeselect={false}
+          onChange={setTipo}
+        />
+        <Group grow align="flex-start">
+          <TextInput
+            label="Início (mm:ss)"
+            value={inicio}
+            error={lerTempo(inicio) === null && inicio !== '' ? 'Use mm:ss' : undefined}
+            onChange={(e) => setInicio(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Fim (mm:ss)"
+            value={fim}
+            error={lerTempo(fim) === null && fim !== '' ? 'Use mm:ss' : undefined}
+            onChange={(e) => setFim(e.currentTarget.value)}
+          />
+        </Group>
+        {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
+          <Text size="xs" c="red">
+            O início não pode vir depois do fim.
+          </Text>
+        )}
+        {novo && (
+          <TextInput
+            label="Evidência"
+            value={evidencia}
+            maxLength={200}
+            onChange={(e) => setEvidencia(e.currentTarget.value)}
+          />
+        )}
+        <Textarea
+          label="Motivo"
+          value={motivo}
+          maxLength={500}
+          rows={3}
+          onChange={(e) => setMotivo(e.currentTarget.value)}
+        />
+        {erro && (
+          <Alert color="red" variant="light" role="alert">
+            {erro}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button type="button" variant="default" onClick={fechar}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            color="red"
+            loading={salvando}
+            disabled={
+              !marca.trim() ||
+              !motivo.trim() ||
+              (temposMudaram && !temposValidos) ||
+              mudancas.length === 0
+            }
+            onClick={() => void salvar()}
+          >
+            Salvar
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  )
+}
+
 interface ItemDoHistorico {
   id: string
-  tipo: 'pessoa.renomear' | 'pauta.titulo' | 'pauta.resumo' | 'item.tempos' | 'desfazer' | 'descartar'
+  tipo:
+    | 'pessoa.renomear'
+    | 'pauta.titulo'
+    | 'pauta.resumo'
+    | 'item.tempos'
+    | 'comercial.marca'
+    | 'comercial.tipo'
+    | 'comercial.acrescentar'
+    | 'desfazer'
+    | 'descartar'
   autor_email: string
   criada_em: string
   motivo: string
@@ -862,6 +1124,9 @@ const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   'pauta.titulo': 'Título da pauta',
   'pauta.resumo': 'Resumo da pauta',
   'item.tempos': 'Tempos',
+  'comercial.marca': 'Marca do comercial',
+  'comercial.tipo': 'Tipo do comercial',
+  'comercial.acrescentar': 'Comercial acrescentado',
   desfazer: 'Desfazer',
   descartar: 'Descartar da fila',
 }

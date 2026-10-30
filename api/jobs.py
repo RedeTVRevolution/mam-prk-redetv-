@@ -477,7 +477,12 @@ def criar_rotas(
             raise HTTPException(409, "A decupagem mudou: recarregue e corrija de novo")
         try:
             antes = valor_atual(
-                modelo, versao_atual, correcoes.listar(job.id), novo.tipo, novo.item_id
+                modelo,
+                versao_atual,
+                correcoes.listar(job.id),
+                novo.tipo,
+                novo.item_id,
+                novo.tipo_do_item,
             )
             correcao = montar_correcao(
                 modelo,

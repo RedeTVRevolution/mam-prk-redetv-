@@ -11,17 +11,36 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, Literal, Protocol, Self
+from typing import Annotated, Any, Literal, Protocol, Self, get_args
 
-from pydantic import BaseModel, StringConstraints, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from api.comparador import normalizar
+from api.decupagem import Comercial
 from api.pessoas import LISTAS, nao_identificado
 
-TipoNovo = Literal["pessoa.renomear", "pauta.titulo", "pauta.resumo", "item.tempos"]
+TipoNovo = Literal[
+    "pessoa.renomear",
+    "pauta.titulo",
+    "pauta.resumo",
+    "item.tempos",
+    "comercial.marca",
+    "comercial.tipo",
+    "comercial.acrescentar",
+]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar"]
-TIPOS_DE_PAUTA = ("pauta.titulo", "pauta.resumo", "item.tempos")
-CORRIGIVEIS = ("pessoa.renomear", *TIPOS_DE_PAUTA)
+TipoDoItem = Literal["pessoa", "pauta", "comercial"]
+CORRIGIVEIS = get_args(TipoNovo)
+# Os tipos do esquema 1.1, a mesma lista que o Gemini recebe.
+TIPOS_DE_COMERCIAL = get_args(Comercial.model_fields["tipo"].annotation)
+CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencia")
 LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
 LIMITE_DO_TEXTO = 2000  # o mesmo de `Texto` na decupagem
@@ -48,7 +67,7 @@ def _sem_controle_salvo_quebra(texto: str) -> str:
 
 class Ancora(BaseModel):
     versao: str  # SHA-256 do JSON do modelo no Storage
-    tipo_do_item: Literal["pessoa", "pauta"]
+    tipo_do_item: TipoDoItem
     identidade: str
     inicio_ms: int
     fim_ms: int
@@ -103,12 +122,52 @@ class NovoDesfazer(BaseModel):
     _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
 
 
+class NovoComercial(BaseModel):
+    """O comercial de um `comercial.acrescentar`, com os campos do esquema 1.1."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    marca: Annotated[str, StringConstraints(min_length=1, max_length=LIMITE_DO_NOME)]
+    tipo: str
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+    evidencia: Annotated[
+        str, StringConstraints(min_length=1, max_length=LIMITE_DO_NOME)
+    ]
+
+    @field_validator("marca", "evidencia")
+    @classmethod
+    def _texto_sem_controle(cls, valor: str) -> str:
+        return _sem_controle(valor)
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if self.tipo not in TIPOS_DE_COMERCIAL:
+            raise ValueError("tipo de comercial desconhecido")
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        return self
+
+
+def _json_do_comercial(comercial: dict[str, Any]) -> str:
+    """A forma única em que o comercial acrescentado é guardado."""
+    return json.dumps(
+        {k: comercial[k] for k in CAMPOS_DO_COMERCIAL},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
 class NovaCorrecao(BaseModel):
     """Corpo de `POST /v1/jobs/{id}/correcoes`."""
 
     tipo: TipoNovo
-    item_id: Annotated[str, StringConstraints(min_length=1, max_length=40)]
-    # `item.tempos`: "<inicio_ms>-<fim_ms>".
+    # Só o `item.tempos` precisa: vale para pauta (o padrão) e para comercial.
+    tipo_do_item: Literal["pauta", "comercial"] | None = None
+    # Vazio só no `comercial.acrescentar`, que não corrige item nenhum.
+    item_id: Annotated[str, StringConstraints(max_length=40)] = ""
+    # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
+    # esquema; `comercial.acrescentar`: o JSON do comercial.
     valor: Annotated[
         str,
         StringConstraints(
@@ -122,8 +181,17 @@ class NovaCorrecao(BaseModel):
 
     @model_validator(mode="after")
     def _valor_do_tipo(self) -> Self:
+        if not self.item_id and self.tipo != "comercial.acrescentar":
+            raise ValueError("item_id obrigatório")
         if self.tipo == "item.tempos":
             tempos_de(self.valor)
+        elif self.tipo == "comercial.tipo":
+            if self.valor not in TIPOS_DE_COMERCIAL:
+                raise ValueError("tipo de comercial desconhecido")
+        elif self.tipo == "comercial.acrescentar":
+            self.valor = _json_do_comercial(
+                NovoComercial.model_validate_json(self.valor).model_dump()
+            )
         elif self.tipo == "pauta.resumo":
             self.valor = _sem_controle_salvo_quebra(self.valor)
         else:
@@ -235,16 +303,42 @@ def _pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pautas", []) if isinstance(p, dict)]
 
 
-def _tipo_do_item(tipo: str) -> Literal["pessoa", "pauta"]:
-    return "pessoa" if tipo == "pessoa.renomear" else "pauta"
+def _comerciais(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    """Os comerciais não têm id no esquema: o id é a posição no JSON do modelo.
+
+    São cópias; o que já traz id (decupagem entregue) o mantém.
+    """
+    return [
+        {"id": f"com{n:03d}", **c}
+        for n, c in enumerate(modelo.get("comerciais", []))
+        if isinstance(c, dict)
+    ]
+
+
+def _tipo_do_item(tipo: str, escolhido: str | None = None) -> TipoDoItem:
+    if tipo == "pessoa.renomear":
+        return "pessoa"
+    if tipo.startswith("comercial.") or escolhido == "comercial":
+        return "comercial"
+    return "pauta"
 
 
 def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
-    return _pessoas(modelo) if tipo_do_item == "pessoa" else _pautas(modelo)
+    if tipo_do_item == "pessoa":
+        return _pessoas(modelo)
+    if tipo_do_item == "comercial":
+        return _comerciais(modelo)
+    return _pautas(modelo)
 
 
 def _intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
+    """Pauta e comercial: o item tem o próprio intervalo."""
     return int(pauta["inicio_ms"]), int(pauta["fim_ms"])
+
+
+def identidade_do_comercial(comercial: dict[str, Any]) -> str:
+    """Marca normalizada e tipo, como a emenda da consolidação (#45)."""
+    return f"{normalizar(str(comercial['marca']))}|{comercial['tipo']}"
 
 
 def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, int]:
@@ -254,6 +348,8 @@ def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, in
 
 
 def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
+    if tipo_do_item == "comercial":
+        return f"{item['marca']} ({item['tipo']})"
     return str(item["nome" if tipo_do_item == "pessoa" else "titulo"])
 
 
@@ -265,6 +361,12 @@ def _valor_do_item(item: dict[str, Any], tipo: str) -> str:
         return str(item["titulo"])
     if tipo == "pauta.resumo":
         return str(item["resumo"])
+    if tipo == "comercial.marca":
+        return str(item["marca"])
+    if tipo == "comercial.tipo":
+        return str(item["tipo"])
+    if tipo == "comercial.acrescentar":
+        return _json_do_comercial(item)
     inicio, fim = _intervalo_da_pauta(item)
     return f"{inicio}-{fim}"
 
@@ -274,11 +376,15 @@ class TemposInvalidos(Exception):
 
 
 def _confere_duracao(modelo: dict[str, Any], tipo: str, valor: str) -> None:
-    """`TemposInvalidos` se os tempos de um `item.tempos` passam da duração."""
-    if tipo != "item.tempos":
+    """`TemposInvalidos` se os tempos de um `item.tempos` ou de um comercial
+    acrescentado passam da duração."""
+    if tipo == "item.tempos":
+        fim = tempos_de(valor)[1]
+    elif tipo == "comercial.acrescentar":
+        fim = int(json.loads(valor)["fim_ms"])
+    else:
         return
-    duracao = int(modelo.get("video", {}).get("duracao_ms", 0))
-    if tempos_de(valor)[1] > duracao:
+    if fim > int(modelo.get("video", {}).get("duracao_ms", 0)):
         raise TemposInvalidos(valor)
 
 
@@ -290,13 +396,24 @@ def montar_correcao(
     **registro: Any,
 ) -> Correcao:
     """A correção de `novo` sobre o item do JSON do modelo, com a âncora pronta."""
-    tipo_do_item = _tipo_do_item(novo.tipo)
+    tipo_do_item = _tipo_do_item(novo.tipo, novo.tipo_do_item)
+    _confere_duracao(modelo, novo.tipo, novo.valor)
+    if novo.tipo == "comercial.acrescentar":
+        comercial = json.loads(novo.valor)
+        return Correcao(
+            tipo=novo.tipo,
+            item_id=f"acr-{registro['id']}",
+            motivo=novo.motivo,
+            antes="",
+            depois=novo.valor,
+            ancora=_ancora_do_item(comercial, "comercial", versao),
+            **registro,
+        )
     item = next(
         (i for i in _itens(modelo, tipo_do_item) if i.get("id") == novo.item_id), None
     )
     if item is None:
         raise ItemInexistente(novo.item_id)
-    _confere_duracao(modelo, novo.tipo, novo.valor)
     return Correcao(
         tipo=novo.tipo,
         item_id=novo.item_id,
@@ -314,8 +431,12 @@ def _ancora_do_item(item: dict[str, Any], tipo_do_item: str, versao: str) -> Anc
     inicio, fim = _intervalo_da_pauta(item)
     return Ancora(
         versao=versao,
-        tipo_do_item="pauta",
-        identidade=normalizar(str(item["titulo"])),
+        tipo_do_item="comercial" if tipo_do_item == "comercial" else "pauta",
+        identidade=(
+            identidade_do_comercial(item)
+            if tipo_do_item == "comercial"
+            else normalizar(str(item["titulo"]))
+        ),
         inicio_ms=inicio,
         fim_ms=fim,
     )
@@ -359,7 +480,14 @@ def _valor_do_alvo(
     """O valor entregue hoje no item do alvo (casa como `aplicar`): a pessoa
     pela identidade da âncora; a pauta pelo id, que na mesma versão é estável."""
     if alvo.tipo != "pessoa.renomear":
-        return valor_atual(modelo, versao, correcoes, alvo.tipo, alvo.item_id)
+        return valor_atual(
+            modelo,
+            versao,
+            correcoes,
+            alvo.tipo,
+            alvo.item_id,
+            alvo.ancora.tipo_do_item,
+        )
     entregue = _pessoas(aplicar(modelo, versao, correcoes))
     for original, pessoa in zip(_pessoas(modelo), entregue, strict=True):
         if identidade_da_pessoa(original) == alvo.ancora.identidade:
@@ -399,11 +527,12 @@ def montar_desfazer(
             raise NaoDesfazivel(alvo.id)
         alvo_atual = reapontada
         # A reapontada vale pelo id do item novo, como em `aplicar`.
+        tipo_do_item = alvo_atual.ancora.tipo_do_item
         antes = valor_atual(
-            modelo, versao, correcoes, alvo_atual.tipo, alvo_atual.item_id
+            modelo, versao, correcoes, alvo_atual.tipo, alvo_atual.item_id, tipo_do_item
         )
         depois = valor_atual(
-            modelo, versao, restantes, alvo_atual.tipo, alvo_atual.item_id
+            modelo, versao, restantes, alvo_atual.tipo, alvo_atual.item_id, tipo_do_item
         )
     return Correcao(
         tipo="desfazer",
@@ -445,11 +574,19 @@ def valor_atual(
     correcoes: list[Correcao],
     tipo: str,
     item_id: str,
+    tipo_do_item: str | None = None,
 ) -> str:
-    """O valor que o Editor vê hoje no campo do `tipo` do item `item_id`."""
-    for item in _itens(aplicar(modelo, versao, correcoes), _tipo_do_item(tipo)):
+    """O valor que o Editor vê hoje no campo do `tipo` do item `item_id`.
+
+    Vazio para o comercial acrescentado que não está na decupagem (ainda não
+    existe, foi desfeito ou o modelo já o traz).
+    """
+    tipo_do_item = _tipo_do_item(tipo, tipo_do_item)
+    for item in _itens(aplicar(modelo, versao, correcoes), tipo_do_item):
         if item.get("id") == item_id:
             return _valor_do_item(item, tipo)
+    if tipo == "comercial.acrescentar":
+        return ""
     raise ItemInexistente(item_id)
 
 
@@ -481,7 +618,8 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
     """Itens da versão nova que a correção pode estar apontando.
 
     Pauta: a que sobrepõe o intervalo ancorado em pelo menos metade do menor
-    dos dois. Pessoa: a com a identidade da âncora (ou já com o "depois").
+    dos dois. Comercial: o de mesma marca normalizada e tipo, com intervalo
+    sobreposto. Pessoa: a com a identidade da âncora (ou já com o "depois").
     """
     ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
     if c.ancora.tipo_do_item == "pauta":
@@ -489,6 +627,13 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             p
             for p in _pautas(modelo)
             if _sobrepoe_metade(ancora, _intervalo_da_pauta(p))
+        ]
+    if c.ancora.tipo_do_item == "comercial":
+        return [
+            m
+            for m in _comerciais(modelo)
+            if identidade_do_comercial(m) == c.ancora.identidade
+            and _sobrepoe(ancora, _intervalo_da_pauta(m))
         ]
     return _candidatos_pessoa(modelo, c)
 
@@ -528,35 +673,69 @@ def reconciliar(
         if c.ancora.versao == versao or c.tipo not in CORRIGIVEIS or c.id in fora:
             continue
         candidatos = _candidatos(modelo, c)
+        if c.tipo == "comercial.acrescentar":
+            # Não corrige item nenhum: não vai para a fila. Se o modelo já traz
+            # o comercial, a correção é atendida e não duplica.
+            nova = c.model_copy(
+                update={"ancora": c.ancora.model_copy(update={"versao": versao})}
+            )
+            resultado.casadas.append(nova)
+            if candidatos:
+                resultado.atendidas.append(nova)
+            continue
         if len(candidatos) != 1:
             resultado.sem_casar.append(c)
             continue
-        pessoa = candidatos[0]
+        item = candidatos[0]
         nova = c.model_copy(
             update={
-                "item_id": str(pessoa.get("id", "")),
-                "ancora": _ancora_do_item(pessoa, c.ancora.tipo_do_item, versao),
+                "item_id": str(item.get("id", "")),
+                "ancora": _ancora_do_item(item, c.ancora.tipo_do_item, versao),
             }
         )
         resultado.casadas.append(nova)
-        if c.tipo == "pessoa.renomear" and normalizar(str(pessoa["nome"])) == (
+        if c.tipo == "pessoa.renomear" and normalizar(str(item["nome"])) == (
             normalizar(c.depois)
         ):
             resultado.atendidas.append(nova)
     return resultado
 
 
-def _aplicar_na_pauta(resultado: dict[str, Any], c: Correcao) -> None:
-    """A pauta é achada pelo id: na versão atual o id do item é estável, e a
-    reapontada já traz o id novo."""
-    for pauta in _pautas(resultado):
-        if pauta.get("id") != c.item_id:
+_CAMPO_DO_TIPO = {
+    "pauta.titulo": "titulo",
+    "pauta.resumo": "resumo",
+    "comercial.marca": "marca",
+    "comercial.tipo": "tipo",
+}
+
+
+def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
+    """Pauta ou comercial é achado pelo id: na versão atual o id do item é
+    estável, e a reapontada já traz o id novo."""
+    itens = (
+        _pautas(resultado)
+        if c.ancora.tipo_do_item == "pauta"
+        else ([i for i in resultado.get("comerciais", []) if isinstance(i, dict)])
+    )
+    for item in itens:
+        if item.get("id") != c.item_id:
             continue
         if c.tipo == "item.tempos":
-            pauta["inicio_ms"], pauta["fim_ms"] = tempos_de(c.depois)
+            item["inicio_ms"], item["fim_ms"] = tempos_de(c.depois)
         else:
-            pauta["titulo" if c.tipo == "pauta.titulo" else "resumo"] = c.depois
-        pauta["origem"] = "revisao"
+            item[_CAMPO_DO_TIPO[c.tipo]] = c.depois
+        item["origem"] = "revisao"
+
+
+def _acrescentar_comercial(resultado: dict[str, Any], c: Correcao) -> None:
+    resultado.setdefault("comerciais", []).append(
+        {
+            **json.loads(c.depois),
+            "id": c.item_id,
+            "origem": "revisao",
+            "acrescentado": True,
+        }
+    )
 
 
 def aplicar(
@@ -574,7 +753,10 @@ def aplicar(
     """
     resultado: dict[str, Any] = json.loads(json.dumps(modelo))
     pessoas = _pessoas(resultado)
-    for item in [*pessoas, *_pautas(resultado)]:
+    comerciais = [c for c in resultado.get("comerciais", []) if isinstance(c, dict)]
+    for n, comercial in enumerate(comerciais):
+        comercial["id"] = f"com{n:03d}"
+    for item in [*pessoas, *_pautas(resultado), *comerciais]:
         item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
@@ -600,8 +782,12 @@ def aplicar(
     for c in em_ordem(da_versao + reconciliadas.casadas):
         if c.id in desfeitas:
             continue
-        if c.tipo in TIPOS_DE_PAUTA:
-            _aplicar_na_pauta(resultado, c)
+        if c.tipo == "comercial.acrescentar":
+            if c.id not in atendidas:
+                _acrescentar_comercial(resultado, c)
+            continue
+        if c.ancora.tipo_do_item != "pessoa":
+            _aplicar_no_item(resultado, c)
             continue
         for pessoa, identidade, nome in zip(
             pessoas, identidades, nomes_do_modelo, strict=True
@@ -612,6 +798,8 @@ def aplicar(
                 pessoa["nome"], pessoa["origem"] = nome, "modelo"
             else:
                 pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
+    if "comerciais" in resultado:
+        resultado["comerciais"].sort(key=lambda m: (m["inicio_ms"], m["fim_ms"]))
     return resultado
 
 
@@ -686,7 +874,7 @@ def montar_reaplicacao(
         reaplica=alvo.id,
         item_id=item_id,
         motivo=motivo,
-        antes=valor_atual(modelo, versao, correcoes, alvo.tipo, item_id),
+        antes=valor_atual(modelo, versao, correcoes, alvo.tipo, item_id, tipo_do_item),
         depois=alvo.depois,
         ancora=_ancora_do_item(novo, tipo_do_item, versao),
         **registro,

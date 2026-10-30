@@ -28,7 +28,7 @@ const decupagem = {
     { id: 'pl2', ambiente: 'rua', plano_limpo: true, acao: 'carro passa', inicio_ms: 140_000, fim_ms: 150_000 },
   ],
   comerciais: [
-    { marca: 'Marca X', tipo: 'intervalo', evidencia: 'logo', inicio_ms: 90_000, fim_ms: 120_000 },
+    { id: 'com000', marca: 'Marca X', tipo: 'intervalo', evidencia: 'logo', inicio_ms: 90_000, fim_ms: 120_000 },
   ],
   transcricao: [{ locutor: 'Locutor', texto: 'Boa noite', inicio_ms: 1_000, fim_ms: 3_000 }],
 }
@@ -860,4 +860,76 @@ test('resolver que dá 409 avisa e recarrega a fila', async () => {
 
   expect((await painel.findByRole('alert')).textContent).toContain('não está mais na fila')
   expect(await painel.findByText('Nada na fila.')).toBeTruthy()
+})
+
+test('o Editor corrige marca, tipo e tempos do comercial pelo modal', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Marcas'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir comercial Marca X' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Marca'))
+  await usuario.type(modal.getByLabelText('Marca'), 'Marca Y')
+  await usuario.click(modal.getByLabelText('Tipo'))
+  await usuario.click(await screen.findByText('marca_incidental'))
+  await usuario.clear(modal.getByLabelText('Início (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '01:35')
+  await usuario.type(modal.getByLabelText('Motivo'), 'ajuste')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(3))
+  expect(correcoesRecebidas).toEqual([
+    { tipo: 'comercial.marca', valor: 'Marca Y', item_id: 'com000', motivo: 'ajuste', versao: 'v1' },
+    { tipo: 'comercial.tipo', valor: 'marca_incidental', item_id: 'com000', motivo: 'ajuste', versao: 'v1' },
+    {
+      tipo: 'item.tempos',
+      tipo_do_item: 'comercial',
+      valor: '95000-120000',
+      item_id: 'com000',
+      motivo: 'ajuste',
+      versao: 'v1',
+    },
+  ])
+})
+
+test('o Editor acrescenta um comercial pelo modal', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Marcas'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Acrescentar comercial' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Marca'), 'Loja Sol')
+  await usuario.click(modal.getByLabelText('Tipo'))
+  await usuario.click(await screen.findByText('merchan_apresentador'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:20')
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '00:22')
+  await usuario.type(modal.getByLabelText('Evidência'), 'cita a loja')
+  await usuario.type(modal.getByLabelText('Motivo'), 'faltou')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  const [enviada] = correcoesRecebidas as unknown as { tipo: string; valor: string; item_id: string }[]
+  expect(enviada.tipo).toBe('comercial.acrescentar')
+  expect(enviada.item_id).toBe('')
+  expect(JSON.parse(enviada.valor)).toEqual({
+    marca: 'Loja Sol',
+    tipo: 'merchan_apresentador',
+    inicio_ms: 20_000,
+    fim_ms: 22_000,
+    evidencia: 'cita a loja',
+  })
+})
+
+test('quem não edita não vê os botões de comercial', async () => {
+  await abrir({ estado: 'concluido' }, false)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await userEvent.setup().click(aba('Marcas'))
+
+  expect(await painel.findByText('Marca X')).toBeTruthy()
+  expect(painel.queryByRole('button', { name: 'Acrescentar comercial' })).toBeNull()
+  expect(painel.queryByRole('button', { name: /Corrigir comercial/ })).toBeNull()
 })

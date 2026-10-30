@@ -1,4 +1,4 @@
-// O jsdom não tem estas duas APIs, que o Mantine usa.
+// O jsdom não tem estas APIs, que o Mantine usa.
 window.matchMedia ??= (consulta: string) =>
   ({
     matches: false,
@@ -16,3 +16,6 @@ globalThis.ResizeObserver ??= class {
   unobserve() {}
   disconnect() {}
 }
+
+// O Select do Mantine rola até a opção ativa.
+window.HTMLElement.prototype.scrollIntoView ??= () => {}
