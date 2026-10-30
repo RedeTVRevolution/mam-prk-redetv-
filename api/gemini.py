@@ -1,7 +1,8 @@
 """Cliente do Gemini 3.5 Flash-Lite (Flex, endpoint global) para a decupagem.
 
 A rede fica atrás de `Transporte`: aqui moram a chamada, a validação e as
-tentativas. Esgotadas, levanta `AnaliseFalhou`, nunca devolve decupagem parcial.
+tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levanta
+`AnaliseFalhou`, nunca devolve decupagem parcial.
 """
 
 import json
@@ -22,6 +23,9 @@ BACKOFF_BASE_S = 1.0
 BACKOFF_TETO_S = 60.0
 TIMEOUT_DO_FLEX_S = 600  # o Flex pode demorar; o servidor também desiste aos 600 s
 TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
+# O Workflows e o Cloud Run desistem aos 1800 s: uma tentativa só começa se cabe
+# inteira neste prazo, com folga para gravar a decupagem e o Job.
+PRAZO_DA_ANALISE_S = 1500
 
 INSTRUCAO = (
     "Você decupa vídeos de TV. Descreva o vídeo inteiro no esquema JSON dado: "
@@ -116,10 +120,12 @@ class TransporteVertex:
             raise ErroHttp(503) from e
         if resposta.status_code != 200:
             raise ErroHttp(resposta.status_code)
+        try:
+            dados = resposta.json()
+        except ValueError as e:  # 200 com corpo que não é JSON: falha do servidor
+            raise ErroHttp(502) from e
         partes = (
-            (resposta.json().get("candidates") or [{}])[0]
-            .get("content", {})
-            .get("parts", [])
+            (dados.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         )
         return "".join(p.get("text", "") for p in partes)
 
@@ -144,6 +150,7 @@ def analisar(
     video: Video,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = lambda teto: random.uniform(0, teto),
+    relogio: Callable[[], float] = time.monotonic,
 ) -> Decupagem:
     chamada = Chamada(
         modelo=MODELO,
@@ -153,7 +160,10 @@ def analisar(
     )
     falhas_rede = 0
     falhas_esquema = 0
+    inicio = relogio()
     while True:
+        if relogio() - inicio + TIMEOUT_DA_REDE_S > PRAZO_DA_ANALISE_S:
+            raise AnaliseFalhou()
         try:
             texto = transporte.gerar(chamada)
         except ErroHttp as e:

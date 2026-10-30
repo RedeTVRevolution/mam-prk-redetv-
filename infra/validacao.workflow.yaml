@@ -44,10 +44,21 @@ main:
             - encerra_com_falha:
                 raise: $${e}
     - le_o_job:
-        call: googleapis.firestore.v1.projects.databases.documents.get
-        args:
-          name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
-        result: documento
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: documento
+        except:
+          as: e
+          steps:
+            # Um objeto sem Job correspondente não tem o que analisar.
+            - sem_job:
+                switch:
+                  - condition: $${e.code == 404}
+                    next: fim
+            - repassa_o_erro_da_leitura:
+                raise: $${e}
     - so_se_analisando:
         switch:
           - condition: $${documento.fields.estado.stringValue == "analisando"}
@@ -69,12 +80,23 @@ main:
         except:
           as: e
           steps:
+            # O serviço pode ter concluído depois de o Workflows desistir: só marca
+            # a falha se o Job segue em `analisando` e não mudou desde a leitura.
+            - rele_o_job:
+                call: googleapis.firestore.v1.projects.databases.documents.get
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                result: atual
+            - so_se_ainda_analisando:
+                switch:
+                  - condition: $${atual.fields.estado.stringValue != "analisando"}
+                    next: encerra_a_analise_com_falha
             - marca_analise_como_falha:
                 call: googleapis.firestore.v1.projects.databases.documents.patch
                 args:
                   name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
                   currentDocument:
-                    exists: true
+                    updateTime: $${atual.updateTime}
                   updateMask:
                     fieldPaths: [estado, codigo_falha, atualizado_em]
                   body:

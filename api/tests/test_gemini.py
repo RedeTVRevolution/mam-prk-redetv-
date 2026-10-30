@@ -6,6 +6,8 @@ import requests
 
 from api.decupagem import Video
 from api.gemini import (
+    PRAZO_DA_ANALISE_S,
+    TIMEOUT_DA_REDE_S,
     AnaliseFalhou,
     Chamada,
     ErroHttp,
@@ -37,9 +39,14 @@ class TransporteFalso:
 class Relogio:
     def __init__(self) -> None:
         self.esperas: list[float] = []
+        self.agora = 0.0
 
     def dormir(self, s: float) -> None:
         self.esperas.append(s)
+        self.agora += s
+
+    def ler(self) -> float:
+        return self.agora
 
 
 def _rodar(transporte: TransporteFalso, relogio: Relogio | None = None) -> Any:
@@ -51,6 +58,7 @@ def _rodar(transporte: TransporteFalso, relogio: Relogio | None = None) -> Any:
         video=VIDEO_CONFIAVEL,
         dormir=relogio.dormir,
         sortear=lambda teto: teto,  # pior caso: jitter no teto
+        relogio=relogio.ler,
     )
 
 
@@ -152,6 +160,22 @@ def test_cinco_novas_tentativas_e_depois_analise_falhou() -> None:
     assert len(t.chamadas) == 6  # 1 chamada + 5 novas
 
 
+def test_tentativa_que_nao_cabe_no_prazo_nao_comeca() -> None:
+    """Cada tentativa pode gastar o timeout inteiro; a soma fica abaixo de 1800 s."""
+    relogio = Relogio()
+
+    class TransporteLento(TransporteFalso):
+        def gerar(self, chamada: Chamada) -> str:
+            relogio.agora += TIMEOUT_DA_REDE_S
+            return super().gerar(chamada)
+
+    t = TransporteLento(*[ErroHttp(503)] * 6, BOA)
+    with pytest.raises(AnaliseFalhou):
+        _rodar(t, relogio)
+    assert len(t.chamadas) == 2
+    assert relogio.agora <= PRAZO_DA_ANALISE_S < 1800
+
+
 def test_erro_4xx_diferente_de_429_nao_tenta_de_novo() -> None:
     t = TransporteFalso(ErroHttp(400), BOA)
     with pytest.raises(AnaliseFalhou):
@@ -187,6 +211,11 @@ class RespostaFalsa:
 
     def json(self) -> dict[str, Any]:
         return self._corpo
+
+
+class RespostaSemJson(RespostaFalsa):
+    def json(self) -> dict[str, Any]:
+        raise requests.JSONDecodeError("corpo vazio", "", 0)
 
 
 def _chamada() -> Chamada:
@@ -275,3 +304,11 @@ def test_resposta_sem_texto_vira_texto_vazio_para_a_validacao_repetir() -> None:
     transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, {})))
 
     assert transporte.gerar(_chamada()) == ""
+
+
+def test_resposta_200_que_nao_e_json_vira_erro_repetivel() -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaSemJson(200)))
+
+    with pytest.raises(ErroHttp) as e:
+        transporte.gerar(_chamada())
+    assert e.value.status == 502

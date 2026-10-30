@@ -53,5 +53,23 @@ def test_falha_da_chamada_de_analise_grava_analise_falhou() -> None:
     assert "except:" in depois_da_chamada and "as: e" in depois_da_chamada
     assert "stringValue: analise_falhou" in depois_da_chamada
     assert "stringValue: falhou" in depois_da_chamada
-    assert "exists: true" in depois_da_chamada
     assert "raise: $${e}" in depois_da_chamada
+
+
+def test_falha_da_chamada_nao_sobrescreve_job_que_ja_saiu_de_analisando() -> None:
+    texto = _texto()
+
+    depois_da_chamada = texto[texto.index("call: http.post") :]
+    releitura = depois_da_chamada.index("documents.get")
+    condicao = depois_da_chamada.index('estado.stringValue != "analisando"')
+    patch = depois_da_chamada.index("documents.patch")
+    assert releitura < condicao < patch
+    # O patch só vale se o documento não mudou desde a releitura.
+    assert "updateTime: $${atual.updateTime}" in depois_da_chamada
+
+
+def test_objeto_sem_job_nao_derruba_a_leitura() -> None:
+    texto = _texto()
+
+    leitura = texto[texto.index("le_o_job:") : texto.index("so_se_analisando:")]
+    assert "e.code == 404" in leitura and "next: fim" in leitura
