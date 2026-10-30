@@ -15,6 +15,7 @@ from typing import Any, Protocol
 import requests
 
 from api.decupagem import Decupagem, Video, esquema_do_modelo
+from api.espera import espera_com_jitter
 
 MODELO = "gemini-3.5-flash-lite"
 TENTATIVAS_REDE = 5  # novas tentativas após 429/5xx
@@ -169,8 +170,9 @@ def analisar(
         except ErroHttp as e:
             if not _repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
                 raise AnaliseFalhou() from e
-            teto = min(BACKOFF_TETO_S, BACKOFF_BASE_S * 2**falhas_rede)
-            dormir(sortear(teto))
+            dormir(
+                espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)
+            )
             falhas_rede += 1
             continue
         try:

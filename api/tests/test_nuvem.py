@@ -26,8 +26,10 @@ from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
     RepositorioDeChavesFirestore,
+    RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
 )
+from api.webhook import RegistroDeWebhook
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
 EMULADOR_STORAGE = os.environ.get("STORAGE_EMULATOR_HOST")
@@ -334,3 +336,36 @@ class TestRepositorioDeChavesFirestore:
 
         with pytest.raises(LimiteDeChavesAtivas):
             chaves.salvar_nova(_registro_de_chave("nova"), 2)
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeWebhooksFirestore:
+    @pytest.fixture
+    def webhooks(self) -> RepositorioDeWebhooksFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeWebhooksFirestore(
+            cliente, colecao=f"webhooks-{uuid.uuid4().hex}"
+        )
+
+    def test_salva_e_obtem_o_registro(
+        self, webhooks: RepositorioDeWebhooksFirestore
+    ) -> None:
+        registro = RegistroDeWebhook(sistema="Legado", url="https://a.example/cb")
+
+        webhooks.salvar(registro)
+
+        assert webhooks.obter("Legado") == registro
+
+    def test_salvar_de_novo_troca_a_url(
+        self, webhooks: RepositorioDeWebhooksFirestore
+    ) -> None:
+        webhooks.salvar(RegistroDeWebhook(sistema="Legado", url="https://a.example/1"))
+        webhooks.salvar(RegistroDeWebhook(sistema="Legado", url="https://a.example/2"))
+
+        registro = webhooks.obter("Legado")
+        assert registro is not None and registro.url == "https://a.example/2"
+
+    def test_obter_devolve_none_se_nao_existe(
+        self, webhooks: RepositorioDeWebhooksFirestore
+    ) -> None:
+        assert webhooks.obter("Nenhum") is None

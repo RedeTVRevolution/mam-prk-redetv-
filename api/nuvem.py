@@ -18,9 +18,11 @@ from api.jobs import (
     Job,
     ServicoIndisponivel,
 )
+from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
 COLECAO_DE_CHAVES = "chaves_de_api"
+COLECAO_DE_WEBHOOKS = "webhooks"
 TAMANHO_DO_PEDACO = 256 * 1024
 
 
@@ -103,6 +105,22 @@ class RepositorioDeChavesFirestore:
             transacao.set(self._colecao.document(registro.id), registro.model_dump())
 
         gravar(self._cliente.transaction())
+
+
+class RepositorioDeWebhooksFirestore:
+    """Um documento por sistema, com o nome do sistema como id."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_WEBHOOKS
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def salvar(self, registro: RegistroDeWebhook) -> None:
+        self._colecao.document(registro.sistema).set(registro.model_dump())
+
+    def obter(self, sistema: str) -> RegistroDeWebhook | None:
+        doc = self._colecao.document(sistema).get()
+        return RegistroDeWebhook(**(doc.to_dict() or {})) if doc.exists else None
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:
