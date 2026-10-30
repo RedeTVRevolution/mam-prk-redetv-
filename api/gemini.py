@@ -61,7 +61,7 @@ REGRAS GERAIS
 
 2. PAUTAS E NARRATIVA
 - Divida o vídeo em pautas: cada assunto, reportagem ou quadro, com início e fim.
-- Para cada pauta: título curto, resumo jornalístico fiel ao que foi mostrado e dito, pessoas envolvidas e tom (ex.: informativo, polêmico, descontraído, exclusivo, homenagem, análise).
+- Para cada pauta: título curto, resumo jornalístico fiel ao que foi mostrado e dito, pessoas envolvidas e tom, só um destes valores, sem acento: informativo, polemico, descontraido, exclusivo, homenagem, analise, comercial (use comercial para a pauta que é ação comercial ou merchandising, não reportagem; o comercial continua registrado em comerciais).
 - Exemplos de pauta: entrevista coletiva do governador, chuva forte na cidade, gols da rodada, separação de celebridade, quadro de prêmios do auditório.
 
 3. TRANSCRIÇÃO
@@ -70,6 +70,8 @@ REGRAS GERAIS
 
 4. TEXTO NA TELA
 - Registre GCs, tarjas, legendas, placares e chamadas, com o texto lido, início e fim.
+- Cada vez que um texto fica visível é um item, com o início e o fim em que ele está na tela. Um GC que sai e volta são dois itens.
+- Nunca estenda o texto até o fim do bloco ou do plano: um GC fixo no rodapé do bloco todo só vale se ficou visível o tempo todo.
 
 5. LOCAIS, OBJETOS E IMAGENS DE APOIO
 - Registre locais (estúdio, aeroporto, estádio, rua, restaurante, palco), objetos de destaque (carro de luxo, joia, troféu, produto em cena) e cenas reaproveitáveis.
