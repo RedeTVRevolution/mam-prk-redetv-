@@ -45,10 +45,17 @@ _Evitar_: citação como sinônimo de aparição
 O que sustenta uma ocorrência: rosto, GC, fala ou quadro.
 
 **Fonte do nome**:
-O que sustenta o nome de uma pessoa: rosto, GC, fala ou contexto. Rosto sozinho erra; o nome confiável cruza fontes.
+A prova que confirma o nome de uma pessoa, conferida pelo código: GC, fala ou referência de rosto. Estar no perfil ou no catálogo torna a pessoa candidata, mas não confirma o nome; o modelo nunca identifica pela memória.
+
+**Referência de rosto**:
+Foto de uma pessoa nomeada, guardada para comparar com o rosto da tela: 3 fotos diferentes por nome, buscadas na web, com a página de origem.
+_Evitar_: galeria facial
+
+**Palpite**:
+Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
 
 **Catálogo de pessoas**:
-Nomes confirmados por correções humanas, com apelidos. Não guarda rostos.
+Nomes, papéis e apelidos das pessoas frequentes da emissora, em todos os programas. Começa à mão e cresce com as correções e sugestões aprovadas. Não guarda rostos: as fotos são as referências de rosto.
 _Evitar_: base de famosos
 
 ### Busca
