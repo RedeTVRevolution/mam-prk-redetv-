@@ -38,6 +38,10 @@ class _Intervalo(_Estrito):
             raise ValueError("início depois do fim")
         return self
 
+    @property
+    def duracao_ms(self) -> int:
+        return self.fim_ms - self.inicio_ms
+
 
 class Video(_Estrito):
     sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -162,12 +166,16 @@ class Fala(_Intervalo):
     texto: Texto
 
 
-# Texto na tela com a duração de um bloco ou pauta inteira, acima disto, é suspeito.
+# Um texto na tela é suspeito quando passa deste piso e dura o mesmo que um bloco
+# ou uma pauta, com esta folga: o modelo arredonda os tempos ao segundo.
 LIMITE_DO_TEXTO_LONGO_MS = 30_000
+FOLGA_DA_DURACAO_MS = 1_000
 
 
 class TextoNaTela(_Intervalo):
-    """Cada aparição de um texto é um item, com o início e o fim em que ele está visível; um GC que sai e volta são dois itens. Nunca estenda o texto até o fim do bloco ou do plano."""
+    """Cada vez que um texto fica visível é um item, com o início e o fim em que
+    ele está na tela; um GC que sai e volta são dois itens. Nunca estenda o texto
+    até o fim do bloco ou do plano."""
 
     tipo: Literal[
         "gc", "tarja", "legenda", "placar", "chamada", "logo", "qr_code", "outro"
@@ -188,19 +196,24 @@ class Decupagem(_Estrito):
     )
     textos_na_tela: list[TextoNaTela] = Field(
         default=[],
-        description="GCs, tarjas, legendas, placares, chamadas, logos e QR codes. Cada aparição de um texto é um item, com o início e o fim em que ele está visível; um GC que sai e volta são dois itens. Nunca estenda o texto até o fim do bloco ou do plano.",
+        description="GCs, tarjas, legendas, placares, chamadas, logos e QR codes. "
+        "Cada vez que um texto fica visível é um item, com o início e o fim em que "
+        "ele está na tela; um GC que sai e volta são dois itens. Nunca estenda o "
+        "texto até o fim do bloco ou do plano.",
     )
 
-    def textos_com_a_duracao_de_um_trecho(self) -> list[TextoNaTela]:
-        """Textos com mais de 30 s e a mesma duração de um bloco ou de uma pauta."""
-        duracoes = {
-            t.fim_ms - t.inicio_ms for t in [*self.programa.blocos, *self.pautas]
-        }
+    def textos_com_a_duracao_de_bloco_ou_pauta(self) -> list[TextoNaTela]:
+        """Textos longos com a duração de um bloco ou de uma pauta inteira.
+
+        Compara só a duração, não a posição: o modelo erra onde o texto começa,
+        não o tamanho do trecho que ele copia.
+        """
+        trechos = [i.duracao_ms for i in [*self.programa.blocos, *self.pautas]]
         return [
-            t
-            for t in self.textos_na_tela
-            if t.fim_ms - t.inicio_ms > LIMITE_DO_TEXTO_LONGO_MS
-            and t.fim_ms - t.inicio_ms in duracoes
+            texto
+            for texto in self.textos_na_tela
+            if texto.duracao_ms > LIMITE_DO_TEXTO_LONGO_MS
+            and any(abs(texto.duracao_ms - d) <= FOLGA_DA_DURACAO_MS for d in trechos)
         ]
 
     def _intervalos(self) -> list[_Intervalo]:

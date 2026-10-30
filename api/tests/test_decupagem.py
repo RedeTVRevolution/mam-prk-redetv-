@@ -201,6 +201,7 @@ def test_esquema_do_modelo_tem_descricao_nos_campos_novos() -> None:
 def test_esquema_do_modelo_traz_a_regra_de_texto_na_tela_por_aparicao() -> None:
     esquema = esquema_do_modelo()
     regra = esquema["properties"]["textos_na_tela"]["description"]
-    assert "Cada aparição" in regra
+    assert "Cada vez que um texto fica visível é um item" in regra
+    assert "sai e volta são dois itens" in regra
     assert "bloco" in regra
-    assert "Cada aparição" in esquema["$defs"]["TextoNaTela"]["description"]
+    assert "sai e volta" in esquema["$defs"]["TextoNaTela"]["description"]

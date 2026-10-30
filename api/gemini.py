@@ -70,7 +70,7 @@ REGRAS GERAIS
 
 4. TEXTO NA TELA
 - Registre GCs, tarjas, legendas, placares e chamadas, com o texto lido, início e fim.
-- Cada aparição de um texto é um item, com o início e o fim em que ele está visível. Um GC que sai e volta são dois itens.
+- Cada vez que um texto fica visível é um item, com o início e o fim em que ele está na tela. Um GC que sai e volta são dois itens.
 - Nunca estenda o texto até o fim do bloco ou do plano: um GC fixo no rodapé do bloco todo só vale se ficou visível o tempo todo.
 
 5. LOCAIS, OBJETOS E IMAGENS DE APOIO

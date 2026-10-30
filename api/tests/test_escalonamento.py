@@ -125,7 +125,8 @@ def texto(fim_ms: int) -> dict[str, object]:
     return {"inicio_ms": 0, "fim_ms": fim_ms, "tipo": "gc", "texto": "OFERTA"}
 
 
-def decupagem_com_bloco_de_90s(fim_do_texto_ms: int) -> Decupagem:
+def decupagem_com_bloco_de_84s(fim_do_texto_ms: int) -> Decupagem:
+    # o texto entra depois de aumentar o vídeo: a base tem menos de 84 s
     dados = decupagem(("Ana", True)).model_dump()
     dados["video"]["duracao_ms"] = 90_000
     dados["textos_na_tela"] = [texto(fim_do_texto_ms)]
@@ -134,7 +135,13 @@ def decupagem_com_bloco_de_90s(fim_do_texto_ms: int) -> Decupagem:
 
 
 def test_texto_na_tela_com_a_duracao_do_bloco_inteiro_e_duvida() -> None:
-    resultados = {0: decupagem_com_bloco_de_90s(84_000)}
+    resultados = {0: decupagem_com_bloco_de_84s(84_000)}
+
+    assert janelas_a_escalonar("abc:v1", resultados, 0) == {0: {"duvida"}}
+
+
+def test_texto_na_tela_um_segundo_mais_curto_que_o_bloco_e_duvida() -> None:
+    resultados = {0: decupagem_com_bloco_de_84s(83_000)}
 
     assert janelas_a_escalonar("abc:v1", resultados, 0) == {0: {"duvida"}}
 
@@ -157,12 +164,12 @@ def test_texto_na_tela_com_a_duracao_da_pauta_inteira_e_duvida() -> None:
 
 
 def test_gc_curto_nao_e_duvida() -> None:
-    resultados = {0: decupagem_com_bloco_de_90s(2_000)}
+    resultados = {0: decupagem_com_bloco_de_84s(2_000)}
 
     assert janelas_a_escalonar("abc:v1", resultados, 0) == {}
 
 
 def test_texto_longo_que_nao_e_o_bloco_nao_e_duvida() -> None:
-    resultados = {0: decupagem_com_bloco_de_90s(40_000)}
+    resultados = {0: decupagem_com_bloco_de_84s(40_000)}
 
     assert janelas_a_escalonar("abc:v1", resultados, 0) == {}

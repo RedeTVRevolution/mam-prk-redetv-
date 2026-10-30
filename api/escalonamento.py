@@ -1,9 +1,9 @@
 """Escalonamento: decide quais janelas de análise são reanalisadas e por quê.
 
-Dois motivos: `duvida` (a primeira passada deixou alguém aparecendo sem nome, ou um texto na tela
-com a duração de um bloco ou pauta inteira)
-e `amostra` (sorteio determinístico, para medir o que a primeira passada nem
-marcou como dúvida).
+Dois motivos: `duvida` (a primeira passada deixou alguém aparecendo sem nome,
+ou um texto na tela com a duração de um bloco ou pauta inteira) e `amostra`
+(sorteio determinístico, para medir o que a primeira passada nem marcou como
+dúvida).
 """
 
 import hashlib
@@ -51,6 +51,6 @@ def _na_amostra(chave_de_conteudo: str, indice: int, fracao: float) -> bool:
 
 
 def _tem_duvida(decupagem: Decupagem) -> bool:
-    return bool(decupagem.textos_com_a_duracao_de_um_trecho()) or any(
+    return bool(decupagem.textos_com_a_duracao_de_bloco_ou_pauta()) or any(
         p.na_imagem and nao_identificado(p.nome) for p in decupagem.pessoas
     )
