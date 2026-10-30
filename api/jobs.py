@@ -25,7 +25,14 @@ TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
 
-Estado = Literal["aguardando_upload", "validando", "analisando", "concluido", "falhou"]
+Estado = Literal[
+    "aguardando_upload",
+    "validando",
+    "analisando",
+    "concluido",
+    "falhou",
+    "cancelado",
+]
 CodigoDeFalha = Literal[
     "formato_invalido",
     "arquivo_corrompido",
@@ -284,6 +291,20 @@ def criar_rotas(
         if job.estado != "concluido":
             raise HTTPException(409, f"Job em {job.estado}, não concluido")
         return job
+
+    @rotas.delete("/{job_id}", status_code=202)
+    def cancelar(job_id: str) -> JobPublico:
+        job = repositorio.obter(job_id)
+        if job is None:
+            raise HTTPException(404, "Job não encontrado")
+        if job.estado in ("concluido", "falhou"):
+            raise HTTPException(409, f"Job em {job.estado}, não cancelável")
+        if job.estado != "cancelado":
+            job = job.model_copy(
+                update={"estado": "cancelado", "atualizado_em": relogio()}
+            )
+            repositorio.salvar(job)
+        return JobPublico.de(job)
 
     @rotas.get("/{job_id}/reproducao")
     def reproducao(job_id: str) -> Reproducao:

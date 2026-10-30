@@ -26,6 +26,12 @@ def _atualizar(repositorio: RepositorioDeJobs, job: Job, **campos: object) -> Jo
     return atualizado
 
 
+def _cancelado(repositorio: RepositorioDeJobs, job_id: str) -> bool:
+    """Relê o Job: o cancelamento pode ter chegado durante o trabalho."""
+    atual = repositorio.obter(job_id)
+    return atual is not None and atual.estado == "cancelado"
+
+
 def executar(
     job_id: str,
     repositorio: RepositorioDeJobs,
@@ -42,14 +48,20 @@ def executar(
     try:
         aceito = validar(entrada / job_id, saida / job_id)
     except Recusa as recusa:
+        if _cancelado(repositorio, job_id):
+            return
         _atualizar(repositorio, job, estado="falhou", codigo_falha=recusa.codigo)
         quarentena.blob(job_id).delete()
+        return
+    if _cancelado(repositorio, job_id):
         return
     for arquivo in (aceito.copia_limpa, aceito.proxy):
         aceitos.blob(f"{job_id}/{arquivo.name}").upload_from_filename(
             str(arquivo), content_type=TIPO_DO_VIDEO
         )
     quarentena.blob(job_id).delete()
+    if _cancelado(repositorio, job_id):
+        return
     _atualizar(
         repositorio,
         job,

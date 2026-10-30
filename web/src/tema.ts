@@ -15,6 +15,7 @@ export const ESTADOS_DO_JOB = {
   analisando: { cor: 'blue', rotulo: 'Decupando' },
   concluido: { cor: 'green', rotulo: 'Concluído' },
   falhou: { cor: 'red', rotulo: 'Falhou' },
+  cancelado: { cor: 'gray', rotulo: 'Cancelado' },
 } satisfies Record<string, { cor: MantineColor; rotulo: string }>
 
 export type EstadoDoJob = keyof typeof ESTADOS_DO_JOB

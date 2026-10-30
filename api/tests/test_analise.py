@@ -20,7 +20,7 @@ from google.cloud.storage import Client as ClienteStorage
 from api.analise import criar_app
 from api.auth import Usuario
 from api.decupagem import Decupagem
-from api.gemini import ErroHttp
+from api.gemini import Chamada, ErroHttp
 from api.jobs import Job
 from api.main import criar_app as criar_app_web
 from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
@@ -129,7 +129,7 @@ def test_analise_falhou_grava_falhou_sem_decupagem() -> None:
 
 
 @pytest.mark.parametrize(
-    "estado", ["aguardando_upload", "validando", "concluido", "falhou"]
+    "estado", ["aguardando_upload", "validando", "concluido", "falhou", "cancelado"]
 )
 def test_job_fora_de_analisando_nao_muda(estado: str) -> None:
     ambiente = _ambiente()
@@ -183,3 +183,38 @@ def test_decupagem_gravada_e_servida_pela_api_web() -> None:
     assert resposta.status_code == 200
     assert resposta.json()["programa"]["resumo"] == "Jornal da noite"
     assert json.loads(resposta.content)["video"]["sha256"] == SHA
+
+
+def _cancelar_durante_a_chamada(ambiente: Ambiente, job_id: str) -> None:
+    """O cancelamento chega enquanto o Gemini ainda responde."""
+    chamar = ambiente.transporte.gerar
+
+    def chamar_e_cancelar(chamada: Chamada) -> str:
+        ambiente.repositorio.salvar(
+            ambiente.job(job_id).model_copy(update={"estado": "cancelado"})
+        )
+        return chamar(chamada)
+
+    ambiente.transporte.gerar = chamar_e_cancelar  # type: ignore[method-assign]
+
+
+def test_cancelado_durante_a_analise_continua_cancelado_e_sem_decupagem() -> None:
+    ambiente = _ambiente(BOA)
+    ambiente.registrar("j6")
+    _cancelar_durante_a_chamada(ambiente, "j6")
+
+    assert _analisar(ambiente, "j6") == 200
+
+    assert ambiente.job("j6").estado == "cancelado"
+    assert not ambiente.decupagens.blob("j6.json").exists()
+
+
+def test_cancelado_durante_a_analise_nao_vira_falhou_se_o_gemini_falhar() -> None:
+    ambiente = _ambiente(ErroHttp(400))
+    ambiente.registrar("j7")
+    _cancelar_durante_a_chamada(ambiente, "j7")
+
+    assert _analisar(ambiente, "j7") == 200
+
+    job = ambiente.job("j7")
+    assert (job.estado, job.codigo_falha) == ("cancelado", None)

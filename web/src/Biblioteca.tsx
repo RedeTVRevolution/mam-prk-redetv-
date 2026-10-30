@@ -16,7 +16,7 @@ import {
   Text,
   ThemeIcon,
 } from '@mantine/core'
-import { IconAlertTriangle, IconPlayerPlay, IconUpload } from '@tabler/icons-react'
+import { IconAlertTriangle, IconBan, IconPlayerPlay, IconUpload } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
@@ -65,6 +65,13 @@ function QuadroDoEstado({ estado }: { estado: string }) {
     return (
       <ThemeIcon size="xl" variant="light" color="red">
         <IconAlertTriangle />
+      </ThemeIcon>
+    )
+  }
+  if (estado === 'cancelado') {
+    return (
+      <ThemeIcon size="xl" variant="light" color="gray">
+        <IconBan />
       </ThemeIcon>
     )
   }

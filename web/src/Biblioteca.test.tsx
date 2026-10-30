@@ -118,6 +118,14 @@ test('lista nome, data e estado de cada Job, e o código de quem falhou', async 
   expect(validando.getByText(/29\/10\/2026.*12:00/)).toBeTruthy()
 })
 
+test('mostra o estado Cancelado de um Job cancelado', async () => {
+  jobs = [job({ id: 'c', nome: 'desistiu.mp4', estado: 'cancelado' })]
+  await abrir()
+
+  const cancelado = within((await screen.findByText('desistiu.mp4')).closest('.mantine-Card-root') as HTMLElement)
+  expect(cancelado.getByText('Cancelado')).toBeTruthy()
+})
+
 test('a lista acompanha o estado por consulta periódica', async () => {
   jobs = [job({ estado: 'validando' })]
   await abrir({ intervaloMs: 20 })

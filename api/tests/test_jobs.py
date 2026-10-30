@@ -344,3 +344,74 @@ def test_decupagem_indisponivel_da_503_antes_de_comecar_o_stream() -> None:
     resposta = ambiente.cliente.get(f"/v1/jobs/{job_id}/decupagem", headers=AUTORIZACAO)
 
     assert resposta.status_code == 503
+
+
+def _cancelar(ambiente: Ambiente, job_id: str) -> Any:
+    return ambiente.cliente.delete(f"/v1/jobs/{job_id}", headers=AUTORIZACAO)
+
+
+def test_delete_cancela_job_em_andamento_e_responde_202_com_o_job() -> None:
+    ambiente = Ambiente()
+    estados: list[Estado] = ["aguardando_upload", "validando", "analisando"]
+    for estado in estados:
+        job_id = _job_com_estado(ambiente, estado)
+        ambiente.relogio.agora += timedelta(minutes=1)
+
+        resposta = _cancelar(ambiente, job_id)
+
+        assert resposta.status_code == 202, estado
+        assert resposta.json()["estado"] == "cancelado"
+        assert resposta.json()["atualizado_em"] == "2026-10-29T12:01:00Z"
+        job = ambiente.repositorio.obter(job_id)
+        assert job is not None and job.estado == "cancelado"
+        ambiente.relogio.agora = INICIO
+
+
+def test_delete_repetido_em_job_cancelado_responde_202_sem_mudar_nada() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "cancelado")
+
+    resposta = _cancelar(ambiente, job_id)
+
+    assert resposta.status_code == 202
+    assert resposta.json()["estado"] == "cancelado"
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None and job.atualizado_em == INICIO
+
+
+def test_delete_em_concluido_ou_falhou_recebe_409_e_nao_muda_o_job() -> None:
+    ambiente = Ambiente()
+    for estado in ("concluido", "falhou"):
+        job_id = _job_com_estado(ambiente, estado)
+
+        assert _cancelar(ambiente, job_id).status_code == 409
+        job = ambiente.repositorio.obter(job_id)
+        assert job is not None and job.estado == estado
+
+
+def test_delete_de_job_inexistente_recebe_404() -> None:
+    assert _cancelar(Ambiente(), "nao-existe").status_code == 404
+
+
+def test_delete_exige_token() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+
+    assert ambiente.cliente.delete(f"/v1/jobs/{job_id}").status_code == 401
+
+
+def test_expiracao_ignora_job_cancelado() -> None:
+    ambiente = Ambiente()
+    job_id = ambiente.criar().json()["id"]
+    assert _cancelar(ambiente, job_id).status_code == 202
+    ambiente.relogio.agora += timedelta(days=3)
+
+    assert (
+        expirar_uploads(
+            ambiente.repositorio, ambiente.armazenamento, ambiente.relogio()
+        )
+        == []
+    )
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None and job.estado == "cancelado"
+    assert ambiente.armazenamento.cancelados == []
