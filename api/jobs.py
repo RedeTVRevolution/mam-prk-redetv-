@@ -1,5 +1,6 @@
 """Jobs da E0: modelo, portas (Firestore e Storage) e rotas `/v1/jobs`."""
 
+import hashlib
 import itertools
 import uuid
 import zlib
@@ -8,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -71,6 +72,19 @@ class JobPublico(BaseModel):
     @classmethod
     def de(cls, job: Job) -> "JobPublico":
         return cls(**job.model_dump(include=set(cls.model_fields)))
+
+
+def _etag(publico: JobPublico) -> str:
+    conteudo = publico.model_dump_json().encode()
+    return f'"{hashlib.sha256(conteudo).hexdigest()[:32]}"'
+
+
+def _casa_etag(if_none_match: str | None, etag: str) -> bool:
+    """Comparação fraca do RFC 9110 §13.1.2: lista por vírgulas, `W/` ignorado, `*` casa."""
+    if if_none_match is None:
+        return False
+    candidatos = [c.strip().removeprefix("W/") for c in if_none_match.split(",")]
+    return "*" in candidatos or etag in candidatos
 
 
 class JobCriado(JobPublico):
@@ -277,12 +291,17 @@ def criar_rotas(
     def listar() -> list[JobPublico]:
         return [JobPublico.de(j) for j in repositorio.listar()]
 
-    @rotas.get("/{job_id}")
-    def ler(job_id: str) -> JobPublico:
+    @rotas.get("/{job_id}", response_model=JobPublico)
+    def ler(job_id: str, request: Request) -> Response:
         job = repositorio.obter(job_id)
         if job is None:
             raise HTTPException(404, "Job não encontrado")
-        return JobPublico.de(job)
+        publico = JobPublico.de(job)
+        etag = _etag(publico)
+        cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"}
+        if _casa_etag(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=cabecalhos)
+        return JSONResponse(publico.model_dump(mode="json"), headers=cabecalhos)
 
     def obter_concluido(job_id: str) -> Job:
         job = repositorio.obter(job_id)

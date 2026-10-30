@@ -415,3 +415,102 @@ def test_expiracao_ignora_job_cancelado() -> None:
     job = ambiente.repositorio.obter(job_id)
     assert job is not None and job.estado == "cancelado"
     assert ambiente.armazenamento.cancelados == []
+
+
+def _status(ambiente: Ambiente, job_id: str, **cabecalhos: str) -> Any:
+    return ambiente.cliente.get(
+        f"/v1/jobs/{job_id}", headers={**AUTORIZACAO, **cabecalhos}
+    )
+
+
+def test_status_devolve_etag_e_cache_control_privado() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+
+    resposta = _status(ambiente, job_id)
+
+    assert resposta.status_code == 200
+    assert resposta.headers["ETag"].startswith('"')
+    assert resposta.headers["Cache-Control"] == "private, no-cache"
+    assert resposta.json()["estado"] == "analisando"
+
+
+def test_if_none_match_igual_ao_atual_responde_304_sem_corpo() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    etag = _status(ambiente, job_id).headers["ETag"]
+
+    resposta = _status(ambiente, job_id, **{"If-None-Match": etag})
+
+    assert resposta.status_code == 304
+    assert resposta.content == b""
+    assert resposta.headers["ETag"] == etag
+    assert resposta.headers["Cache-Control"] == "private, no-cache"
+
+
+def test_mudanca_de_estado_muda_o_etag_e_o_mesmo_if_none_match_da_200() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    antigo = _status(ambiente, job_id).headers["ETag"]
+    ambiente.relogio.agora += timedelta(minutes=1)
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None
+    ambiente.repositorio.salvar(
+        job.model_copy(
+            update={"estado": "concluido", "atualizado_em": ambiente.relogio()}
+        )
+    )
+
+    resposta = _status(ambiente, job_id, **{"If-None-Match": antigo})
+
+    assert resposta.status_code == 200
+    assert resposta.headers["ETag"] != antigo
+    assert resposta.json()["estado"] == "concluido"
+
+
+def test_etag_muda_com_codigo_de_falha_ou_duracao_ou_atualizado_em() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None
+    etags = set()
+    mudancas: list[dict[str, Any]] = [
+        {},
+        {"codigo_falha": "analise_falhou"},
+        {"duracao_s": 30.0},
+        {"atualizado_em": INICIO + timedelta(seconds=1)},
+    ]
+    for mudanca in mudancas:
+        ambiente.repositorio.salvar(job.model_copy(update=mudanca))
+        etags.add(_status(ambiente, job_id).headers["ETag"])
+
+    assert len(etags) == 4
+
+
+def test_if_none_match_aceita_lista_de_etags_e_etag_fraca() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    etag = _status(ambiente, job_id).headers["ETag"]
+
+    em_lista = _status(ambiente, job_id, **{"If-None-Match": f'"outro", {etag}'})
+    fraca = _status(ambiente, job_id, **{"If-None-Match": f"W/{etag}"})
+    outro = _status(ambiente, job_id, **{"If-None-Match": '"outro"'})
+    todos = _status(ambiente, job_id, **{"If-None-Match": "*"})
+
+    assert em_lista.status_code == 304
+    assert fraca.status_code == 304
+    assert outro.status_code == 200
+    assert todos.status_code == 304
+
+
+def test_status_com_etag_exige_autenticacao_e_404_segue_404() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    etag = _status(ambiente, job_id).headers["ETag"]
+
+    sem_chave = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}", headers={"If-None-Match": etag}
+    )
+
+    assert sem_chave.status_code == 401
+    assert _status(ambiente, "nao-existe", **{"If-None-Match": etag}).status_code == 404
