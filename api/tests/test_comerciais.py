@@ -393,3 +393,38 @@ def test_reaplicar_tempos_de_comercial_da_fila() -> None:
     c = mundo.decupagem()["comerciais"][1]
     assert (c["inicio_ms"], c["fim_ms"]) == (11000, 14000)
     assert c["origem"] == "revisao"
+
+
+def test_acrescentado_antes_do_esquema_1_2_ainda_se_desfaz() -> None:
+    """O JSON guardado traz `evidencia` (texto), não `evidencias`."""
+    mundo = _mundo()
+    legado = json.dumps(
+        {
+            "marca": "Loja Sol",
+            "tipo": "merchan_apresentador",
+            "inicio_ms": 20000,
+            "fim_ms": 22000,
+            "evidencia": "apresentador cita a loja",
+        }
+    )
+    mundo.correcoes.acrescentar(
+        _antiga(
+            "comercial.acrescentar",
+            legado,
+            item_id="acr-c1",
+            antes="",
+            ancora={
+                "versao": VERSAO_COM,
+                "tipo_do_item": "comercial",
+                "identidade": "loja sol|merchan_apresentador",
+                "inicio_ms": 20000,
+                "fim_ms": 22000,
+            },
+        )
+    )
+
+    assert mundo.desfazer("c1").status_code == 201
+    assert [c["marca"] for c in mundo.decupagem()["comerciais"]] == [
+        "Banco Azul",
+        "Refri Cola",
+    ]

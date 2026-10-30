@@ -303,6 +303,31 @@ test('aba Pessoas mostra as fontes do nome e o papel e o visual de cada apariç�
   expect(painel.getByText('apresentadora · terno azul')).toBeTruthy()
 })
 
+test('quem só é citado também mostra as fontes do nome', async () => {
+  const citada = {
+    id: 'p2',
+    nome: 'Andréa Corazza',
+    origem: 'modelo',
+    fontes_do_nome: ['fala'],
+    na_imagem: [],
+    citada_na_fala: [{ inicio_ms: 100_000, fim_ms: 102_000 }],
+    citada_no_texto: [],
+  }
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      HttpResponse.json({ ...decupagem, pessoas: [...decupagem.pessoas, citada] }),
+    ),
+  )
+  await abrir({ estado: 'concluido' })
+  await jogador()
+
+  const painel = within(screen.getByLabelText('Decupagem'))
+  const fontes = within(painel.getByLabelText('Fontes do nome de Andréa Corazza'))
+  expect(fontes.getByText('fala')).toBeTruthy()
+  // Quem aparece e também é citado mostra as fontes uma vez só.
+  expect(painel.getAllByLabelText('Fontes do nome de Ana Souza')).toHaveLength(1)
+})
+
 test('aba Texto na tela lista tempo, tipo e texto, e salta', async () => {
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' })

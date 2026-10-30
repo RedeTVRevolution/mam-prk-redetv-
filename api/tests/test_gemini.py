@@ -130,6 +130,11 @@ def test_fim_arredondado_para_o_segundo_seguinte_fica_na_duracao() -> None:
         _validar(_com_fala("01:59", "02:02"), video)
 
 
+def test_fim_exatamente_1_s_alem_da_duracao_fica_na_duracao() -> None:
+    video = Video(sha256="b" * 64, duracao_ms=60_000)
+    assert _validar(_com_fala("00:59", "01:01"), video).transcricao[0].fim_ms == 60_000
+
+
 def test_clipe3_tempo_em_ms_escrito_pelo_modelo_e_recusado() -> None:
     """clipe3: pedido em `fim_ms`, o modelo escreveu 01:24 como 124 e toda a
     decupagem de um vídeo de 120 s caiu em 00:00. O modelo não escreve mais ms."""
@@ -225,7 +230,7 @@ def test_terceira_resposta_ruim_vira_analise_falhou() -> None:
 
 def test_tempo_fora_da_duracao_conta_como_resposta_invalida() -> None:
     ruim = resposta_em_mm_ss()
-    ruim["planos"][0]["fim"] = _mm_ss(DURACAO_MS + 1000)
+    ruim["planos"][0]["fim"] = _mm_ss(DURACAO_MS + 2000)
     t = TransporteFalso(json.dumps(ruim), BOA)
     _rodar(t)
     assert len(t.chamadas) == 2

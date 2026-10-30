@@ -87,6 +87,12 @@ def test_nao_identificado_na_imagem_e_duvida() -> None:
     assert janelas_a_escalonar("abc:v1", resultados, 0) == {1: {"duvida"}}
 
 
+def test_nao_identificado_com_descricao_na_imagem_e_duvida() -> None:
+    resultados = {0: decupagem(("não identificado, repórter de cabelo curto", True))}
+
+    assert janelas_a_escalonar("abc:v1", resultados, 0) == {0: {"duvida"}}
+
+
 def test_nao_identificado_so_mencionado_nao_e_duvida() -> None:
     resultados = {0: decupagem(("não identificado", False))}
 

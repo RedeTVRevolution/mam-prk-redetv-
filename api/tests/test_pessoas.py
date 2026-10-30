@@ -161,3 +161,16 @@ def test_mesma_pessoa_junta_as_fontes_do_nome_sem_repetir() -> None:
     unidas, _ = unir_pessoas([[a], [b]])
 
     assert unidas[0].fontes_do_nome == ["rosto", "gc", "fala"]
+
+
+def test_nao_identificado_com_descricao_nunca_une_janelas() -> None:
+    """A instrução pede "não identificado" com uma descrição curta."""
+    nome = "Não identificado, repórter de cabelo curto"
+    unidas, _ = unir_pessoas(
+        [
+            [pessoa("a1", nome, imagem=[(0, 1000)])],
+            [pessoa("b1", nome, imagem=[(300_000, 301_000)])],
+        ]
+    )
+
+    assert len(unidas) == 2

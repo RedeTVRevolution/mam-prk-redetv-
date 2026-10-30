@@ -329,9 +329,17 @@ def _json_da_aparicao(aparicao: NovaAparicao) -> str:
 
 
 def _json_do_comercial(comercial: dict[str, Any]) -> str:
-    """A forma única em que o comercial acrescentado é guardado."""
+    """A forma única em que o comercial acrescentado é guardado.
+
+    Um acrescentado antes do esquema 1.2 traz `evidencia` (texto) no lugar de
+    `evidencias`, e continua desfazível.
+    """
     return json.dumps(
-        {k: comercial[k] for k in CAMPOS_DO_COMERCIAL},
+        {
+            k: comercial[k]
+            for k in (*CAMPOS_DO_COMERCIAL, "evidencia")
+            if k in comercial
+        },
         sort_keys=True,
         ensure_ascii=False,
     )

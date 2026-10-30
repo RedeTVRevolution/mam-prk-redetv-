@@ -2708,6 +2708,19 @@ function ItemDaFilaDeRevisao({
   )
 }
 
+function FontesDoNome({ pessoa }: { pessoa: Pessoa }) {
+  if (!pessoa.fontes_do_nome?.length) return null
+  return (
+    <Group gap={4} aria-label={`Fontes do nome de ${pessoa.nome}`}>
+      {pessoa.fontes_do_nome.map((f) => (
+        <Badge key={f} size="xs" color="blue" variant="outline">
+          {FONTES_DO_NOME[f] ?? f}
+        </Badge>
+      ))}
+    </Group>
+  )
+}
+
 /** Separa quem aparece de quem só é citado (menção não é aparição). */
 function AbaPessoas({
   decupagem,
@@ -2754,15 +2767,7 @@ function AbaPessoas({
               aguardando={pendentes.has(chaveDoItem('pessoa', p.id))}
               aoCorrigir={aoCorrigir}
             />
-            {p.fontes_do_nome && p.fontes_do_nome.length > 0 && (
-              <Group gap={4} aria-label={`Fontes do nome de ${p.nome}`}>
-                {p.fontes_do_nome.map((f) => (
-                  <Badge key={f} size="xs" color="blue" variant="outline">
-                    {FONTES_DO_NOME[f] ?? f}
-                  </Badge>
-                ))}
-              </Group>
-            )}
+            <FontesDoNome pessoa={p} />
             {aoOcorrencia && pessoaDoModelo(p) && (
               <Button
                 size="compact-xs"
@@ -2826,6 +2831,7 @@ function AbaPessoas({
               aguardando={pendentes.has(chaveDoItem('pessoa', p.id))}
               aoCorrigir={aoCorrigir}
             />
+            {p.na_imagem.length === 0 && <FontesDoNome pessoa={p} />}
             {aoOcorrencia && pessoaDoModelo(p) && p.na_imagem.length === 0 && (
               <Button
                 size="compact-xs"

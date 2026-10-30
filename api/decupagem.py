@@ -241,7 +241,7 @@ def _ms(tempo: Any, duracao_ms: int) -> int:
     minutos, segundos = tempo.split(":")
     ms = (int(minutos) * 60 + int(segundos)) * 1000
     # O modelo só escreve segundos: até 1 s além do fim é o fim do vídeo.
-    return duracao_ms if duracao_ms < ms < duracao_ms + 1000 else ms
+    return duracao_ms if duracao_ms < ms <= duracao_ms + 1000 else ms
 
 
 def tempos_em_ms(dados: Any, duracao_ms: int) -> Any:
