@@ -154,9 +154,6 @@ const TIPOS_DE_TEXTO_NA_TELA = [
   'outro',
 ] as const
 
-/** O id do texto na tela é a posição, como nas falas (api/correcoes.py). */
-const idDoTexto = (t: TextoNaTela, i: number) => t.id ?? `txt${String(i).padStart(3, '0')}`
-
 /** O campo do esquema 1.2 que o Editor corrige no modal `CorrigirCampo`. */
 type CampoAberto =
   | { modo: 'tom'; pauta: Pauta }
@@ -280,7 +277,7 @@ function valorLegivel(tipo: string | undefined, valor: string): string {
   if (tipo === 'aparicao.papel_visual') {
     try {
       const d = JSON.parse(valor) as { papel: string | null; visual: string | null }
-      return [d.papel, d.visual].filter(Boolean).join(' · ') || 'sem papel e visual'
+      return [d.papel, d.visual].filter(Boolean).join(' · ') || 'sem papel na cena e visual'
     } catch {
       return valor
     }
@@ -1113,7 +1110,8 @@ export default function Video({
               )}
               {aba === 'Texto na tela' &&
                 (decupagem.textos_na_tela ?? []).map((t, i) => {
-                  const id = idDoTexto(t, i)
+                  // O id (`txt000`) é a posição no modelo e vem da API; o acrescentado não tem.
+                  const id = t.id
                   return (
                     <Group key={`texto-${i}`} gap={4} wrap="nowrap">
                       <NavLink
@@ -1126,14 +1124,16 @@ export default function Video({
                                 revisado
                               </Badge>
                             )}
-                            {pendentes.has(chaveDoItem('texto_na_tela', id)) && <SeloAguardando />}
+                            {id && pendentes.has(chaveDoItem('texto_na_tela', id)) && (
+                              <SeloAguardando />
+                            )}
                           </Group>
                         }
                         description={`${tempo(t.inicio_ms)} · ${t.tipo}`}
                         active={dentro(atualMs, t)}
                         onClick={() => saltar(t.inicio_ms)}
                       />
-                      {podeEditar && !t.acrescentado && (
+                      {podeEditar && id && !t.acrescentado && (
                         <ActionIcon
                           variant="subtle"
                           color="gray"
@@ -1971,7 +1971,7 @@ function CorrigirPauta({
 const TITULOS_DO_CAMPO = {
   tom: 'Corrigir tom da pauta',
   fontes: 'Corrigir fontes do nome',
-  papel: 'Corrigir papel e visual',
+  papel: 'Corrigir papel na cena e visual',
   texto: 'Corrigir texto na tela',
   novo_texto: 'Acrescentar texto na tela',
 } as const
@@ -2140,7 +2140,7 @@ function CorrigirCampo({
         {campo?.modo === 'papel' && (
           <>
             <TextInput
-              label="Papel"
+              label="Papel na cena"
               value={papel}
               maxLength={200}
               onChange={(e) => setPapel(e.currentTarget.value)}
@@ -2635,7 +2635,7 @@ const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   'fala.texto': 'Texto da fala',
   'pauta.tom': 'Tom da pauta',
   'pessoa.fontes_do_nome': 'Fontes do nome',
-  'aparicao.papel_visual': 'Papel e visual',
+  'aparicao.papel_visual': 'Papel na cena e visual',
   'texto_na_tela.texto': 'Texto na tela',
   'texto_na_tela.acrescentar': 'Texto na tela acrescentado',
   desfazer: 'Desfazer',
@@ -3207,7 +3207,7 @@ function AbaPessoas({
                         variant="subtle"
                         color="gray"
                         size="sm"
-                        aria-label={`Corrigir papel e visual de ${p.nome} ${tempo(a.inicio_ms)}`}
+                        aria-label={`Corrigir papel na cena e visual de ${p.nome} ${tempo(a.inicio_ms)}`}
                         onClick={() => aoCampo({ modo: 'papel', pessoa: p, aparicao: a })}
                       >
                         <IconPencil size={14} />

@@ -86,6 +86,11 @@ def test_fontes_do_nome_trocam_a_lista_e_aceitam_vazia() -> None:
     assert resposta.status_code == 201
     ana = mundo.decupagem()["pessoas"][0]
     assert (ana["fontes_do_nome"], ana["origem"]) == (["rosto", "fala"], "revisao")
+    [item] = mundo.historico().json()
+    assert (json.loads(item["antes"]), json.loads(item["depois"])) == (
+        ["gc"],
+        ["rosto", "fala"],
+    )
     mundo.avancar()
     assert (
         _corrigir(mundo, "pessoa.fontes_do_nome", "[]", item_id="pes01").status_code
@@ -236,6 +241,11 @@ def test_acrescentar_texto_na_tela_e_desfazer() -> None:
         t["texto"] == "Ao vivo"
         for t in mundo.decupagem("?versao=modelo")["textos_na_tela"]
     )
+    [item] = mundo.historico().json()
+    assert (item["tipo"], json.loads(item["depois"])["texto"]) == (
+        "texto_na_tela.acrescentar",
+        "Ao vivo",
+    )
     mundo.avancar()
     assert mundo.desfazer(resposta.json()["id"]).status_code == 201
     assert [t["texto"] for t in mundo.decupagem()["textos_na_tela"]] == [
@@ -292,6 +302,11 @@ def test_decupagem_sem_os_campos_novos_da_422_nunca_500() -> None:
             {"item_id": "txt000"},
         ),
         ("texto_na_tela.acrescentar", json.dumps(_texto(0, 10, "x")), {}),
+        (
+            "item.tempos",
+            "0-10",
+            {"item_id": "txt000", "tipo_do_item": "texto_na_tela"},
+        ),
     ]
     for tipo, valor, campos in pedidos:
         r = _corrigir(mundo, tipo, valor, versao=versao, **campos)
@@ -400,7 +415,7 @@ def test_fontes_e_papel_visual_sobrevivem_a_nova_versao() -> None:
     assert ana["na_imagem"][0]["papel"] == "apresentador"
 
 
-def test_aplicar_directo_nao_altera_o_modelo() -> None:
+def test_aplicar_direto_nao_altera_o_modelo() -> None:
     mundo = _mundo()
     _corrigir(mundo, "pauta.tom", "polêmico", item_id="pau01")
 

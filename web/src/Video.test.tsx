@@ -34,7 +34,7 @@ const decupagem = {
     { id: 'com000', marca: 'Marca X', tipo: 'intervalo', evidencias: ['logo', 'fala'], inicio_ms: 90_000, fim_ms: 120_000 },
   ],
   transcricao: [{ id: 'fal000', locutor: 'Locutor', texto: 'Boa noite', inicio_ms: 1_000, fim_ms: 3_000 }],
-  textos_na_tela: [{ inicio_ms: 125_000, fim_ms: 130_000, tipo: 'gc', texto: 'Ana Souza, apresentadora' }],
+  textos_na_tela: [{ id: 'txt000', inicio_ms: 125_000, fim_ms: 130_000, tipo: 'gc', texto: 'Ana Souza, apresentadora' }],
 }
 
 // A mesma decupagem no esquema 1.1: sem os campos novos e com a evidência do comercial em texto.
@@ -1638,11 +1638,11 @@ test('o Editor corrige papel e visual de uma aparição; vazio vira null', async
   const usuario = userEvent.setup()
   const painel = await abrirPessoas(usuario)
 
-  await usuario.click(await painel.findByRole('button', { name: 'Corrigir papel e visual de Ana Souza 00:05' }))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir papel na cena e visual de Ana Souza 00:05' }))
   const modal = within(await screen.findByRole('dialog'))
-  await usuario.clear(modal.getByLabelText('Papel'))
+  await usuario.clear(modal.getByLabelText('Papel na cena'))
   await usuario.clear(modal.getByLabelText('Visual'))
-  await usuario.type(modal.getByLabelText('Papel'), 'repórter')
+  await usuario.type(modal.getByLabelText('Papel na cena'), 'repórter')
   await salvarCampo(usuario, 'papel errado')
 
   await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
@@ -1712,7 +1712,7 @@ test('na decupagem 1.1 e sem edição não há botões dos campos novos', async 
   const painel = within(await screen.findByLabelText('Decupagem'))
 
   expect(painel.queryByRole('button', { name: /Corrigir fontes do nome/ })).toBeNull()
-  expect(painel.queryByRole('button', { name: /Corrigir papel e visual/ })).toBeNull()
+  expect(painel.queryByRole('button', { name: /Corrigir papel na cena e visual/ })).toBeNull()
   await usuario.click(aba('Pautas'))
   expect(painel.queryByRole('button', { name: /Corrigir tom/ })).toBeNull()
 })
