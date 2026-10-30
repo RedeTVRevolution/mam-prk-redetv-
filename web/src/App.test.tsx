@@ -204,6 +204,6 @@ test('com sessão, o cabeçalho mostra a marca, a tela atual e o e-mail', async 
 test('verificando a sessão mostra um indicador de carregamento', async () => {
   render(<App autenticador={await autenticadorComSessao()} />)
 
-  expect(document.querySelector('.mantine-Loader-root')).toBeTruthy()
+  expect(screen.getByRole('status', { name: 'Verificando a sessão' })).toBeTruthy()
   await screen.findByText('Biblioteca')
 })
