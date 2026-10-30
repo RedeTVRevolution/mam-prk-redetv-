@@ -150,7 +150,7 @@ def _decupagem(
     pessoas: list[dict[str, object]], pautas: list[dict[str, object]]
 ) -> dict[str, object]:
     return {
-        "versao_esquema": "1.1",
+        "versao_esquema": "1.2",
         "video": {"sha256": SHA, "duracao_ms": 600_000},
         "programa": {"resumo": "r", "blocos": []},
         "pautas": pautas,

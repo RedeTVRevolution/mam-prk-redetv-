@@ -66,7 +66,7 @@ def _pauta(id: str, titulo: str, inicio: int, fim: int) -> dict[str, Any]:
 
 
 MODELO: dict[str, Any] = {
-    "versao_esquema": "1.1",
+    "versao_esquema": "1.2",
     "video": {"duracao_ms": 60000},
     "pautas": [
         _pauta("pau01", "Economia", 0, 20000),
@@ -576,7 +576,7 @@ def _correcao_antiga(
 
 
 def _modelo_com(*pessoas: dict[str, Any]) -> dict[str, Any]:
-    return {"versao_esquema": "1.1", "pessoas": list(pessoas)}
+    return {"versao_esquema": "1.2", "pessoas": list(pessoas)}
 
 
 def test_reconciliar_casa_com_um_candidato_e_aponta_para_o_item_novo() -> None:

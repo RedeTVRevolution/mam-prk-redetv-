@@ -13,8 +13,10 @@ LISTAS = ("na_imagem", "citada_na_fala", "citada_no_texto")
 
 
 def nao_identificado(nome: str) -> bool:
-    """O nome é o "não identificado" que o modelo usa para quem não reconhece."""
-    return normalizar(nome) == _NAO_IDENTIFICADO
+    """O nome é o "não identificado" que o modelo usa para quem não reconhece,
+    com ou sem a descrição curta que a instrução pede ("não identificado,
+    repórter de cabelo curto")."""
+    return normalizar(nome).startswith(_NAO_IDENTIFICADO)
 
 
 def unir_pessoas(
@@ -35,11 +37,12 @@ def unir_pessoas(
             if p.id in mapa[janela]:
                 raise ValueError(f"id de pessoa repetido na janela {janela}: {p.id}")
             chave = normalizar(p.nome)
-            posicao = None if chave == _NAO_IDENTIFICADO else por_nome.get(chave)
+            sem_nome = nao_identificado(p.nome)
+            posicao = None if sem_nome else por_nome.get(chave)
             if posicao is None:
                 posicao = len(unidas)
                 unidas.append(p.model_copy(update={"id": f"pes{posicao + 1:02d}"}))
-                if chave != _NAO_IDENTIFICADO:
+                if not sem_nome:
                     por_nome[chave] = posicao
             else:
                 unidas[posicao] = _juntar(unidas[posicao], p)
@@ -56,6 +59,9 @@ def _juntar(base: Pessoa, outra: Pessoa) -> Pessoa:
     return base.model_copy(
         update={
             "origem": "revisao" if revisao else "modelo",
+            "fontes_do_nome": list(
+                dict.fromkeys([*base.fontes_do_nome, *outra.fontes_do_nome])
+            ),
             **{c: [*getattr(base, c), *getattr(outra, c)] for c in LISTAS},
         }
     )

@@ -27,7 +27,7 @@ def decupagem(
     }
     return Decupagem.model_validate(
         {
-            "versao_esquema": "1.1",
+            "versao_esquema": "1.2",
             "video": {"sha256": "a" * 64, "duracao_ms": DURACAO_MS},
             "programa": {
                 "resumo": "r",
@@ -59,7 +59,7 @@ def decupagem(
                     "tipo": t,
                     "inicio_ms": i,
                     "fim_ms": f,
-                    "evidencia": "logo",
+                    "evidencias": ["logo"],
                 }
                 for t, i, f in comerciais or []
             ],

@@ -79,6 +79,7 @@ def criar_app(
                 transporte,
                 video_uri=f"gs://{bucket_de_aceitos}/{objeto_do_proxy(job.id)}",
                 job_id=job.id,
+                programa=job.programa,
                 video=Video(sha256=job.sha256, duracao_ms=round(job.duracao_s * 1000)),
                 dormir=dormir,
             )

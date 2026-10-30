@@ -22,7 +22,7 @@ def _comercial(
         "tipo": tipo,
         "inicio_ms": inicio,
         "fim_ms": fim,
-        "evidencia": "logo no canto",
+        "evidencias": ["logo"],
     }
 
 
@@ -53,7 +53,7 @@ def _novo_comercial(**campos: Any) -> str:
             "tipo": "merchan_apresentador",
             "inicio_ms": 20000,
             "fim_ms": 22000,
-            "evidencia": "apresentador cita a loja",
+            "evidencias": ["fala"],
             **campos,
         }
     )
@@ -181,10 +181,10 @@ def test_acrescentar_poe_o_comercial_na_decupagem_em_ordem_de_inicio() -> None:
     comerciais = mundo.decupagem()["comerciais"]
     assert [c["marca"] for c in comerciais] == ["Banco Azul", "Loja Sol", "Refri Cola"]
     novo = comerciais[1]
-    assert (novo["origem"], novo["tipo"], novo["evidencia"]) == (
+    assert (novo["origem"], novo["tipo"], novo["evidencias"]) == (
         "revisao",
         "merchan_apresentador",
-        "apresentador cita a loja",
+        ["fala"],
     )
     assert novo["acrescentado"] is True
     assert (novo["inicio_ms"], novo["fim_ms"]) == (20000, 22000)
@@ -198,7 +198,9 @@ def test_acrescentar_poe_o_comercial_na_decupagem_em_ordem_de_inicio() -> None:
         {"marca": "a\nb"},
         {"inicio_ms": 22001},
         {"fim_ms": 60001},
-        {"evidencia": "x" * 201},
+        {"evidencias": []},
+        {"evidencias": ["boato"]},
+        {"evidencia": "texto livre do esquema 1.1"},
     ],
 )
 def test_acrescentar_invalido_da_422(campos: dict[str, Any]) -> None:
@@ -391,3 +393,38 @@ def test_reaplicar_tempos_de_comercial_da_fila() -> None:
     c = mundo.decupagem()["comerciais"][1]
     assert (c["inicio_ms"], c["fim_ms"]) == (11000, 14000)
     assert c["origem"] == "revisao"
+
+
+def test_acrescentado_antes_do_esquema_1_2_ainda_se_desfaz() -> None:
+    """O JSON guardado traz `evidencia` (texto), não `evidencias`."""
+    mundo = _mundo()
+    legado = json.dumps(
+        {
+            "marca": "Loja Sol",
+            "tipo": "merchan_apresentador",
+            "inicio_ms": 20000,
+            "fim_ms": 22000,
+            "evidencia": "apresentador cita a loja",
+        }
+    )
+    mundo.correcoes.acrescentar(
+        _antiga(
+            "comercial.acrescentar",
+            legado,
+            item_id="acr-c1",
+            antes="",
+            ancora={
+                "versao": VERSAO_COM,
+                "tipo_do_item": "comercial",
+                "identidade": "loja sol|merchan_apresentador",
+                "inicio_ms": 20000,
+                "fim_ms": 22000,
+            },
+        )
+    )
+
+    assert mundo.desfazer("c1").status_code == 201
+    assert [c["marca"] for c in mundo.decupagem()["comerciais"]] == [
+        "Banco Azul",
+        "Refri Cola",
+    ]

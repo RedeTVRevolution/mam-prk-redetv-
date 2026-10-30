@@ -16,6 +16,7 @@ interface JobApi {
   estado: string
   codigo_falha: string | null
   duracao_s: number | null
+  programa: string | null
   criado_em: string
   atualizado_em: string
 }
@@ -27,6 +28,7 @@ function job(extra: Partial<JobApi>): JobApi {
     estado: 'aguardando_upload',
     codigo_falha: null,
     duracao_s: null,
+    programa: null,
     criado_em: '2026-10-29T15:00:00Z',
     atualizado_em: '2026-10-29T15:00:00Z',
     ...extra,
@@ -35,6 +37,7 @@ function job(extra: Partial<JobApi>): JobApi {
 
 let jobs: JobApi[] = []
 let statusDaLista = 200
+let programas: string[] | null = ['TV Fama']
 const criacoes: unknown[] = []
 const pedacosEnviados: number[] = []
 const URL_UPLOAD = 'https://storage.exemplo/quarentena/novo?assinatura=x'
@@ -45,6 +48,9 @@ const servidor = setupServer(
     statusDaLista === 200
       ? HttpResponse.json(jobs)
       : new HttpResponse(null, { status: statusDaLista }),
+  ),
+  http.get('/v1/programas', () =>
+    programas ? HttpResponse.json(programas) : new HttpResponse(null, { status: 500 }),
   ),
   http.post('/v1/jobs', async ({ request }) => {
     criacoes.push(await request.json())
@@ -64,6 +70,7 @@ afterEach(() => {
   servidor.resetHandlers()
   jobs = []
   statusDaLista = 200
+  programas = ['TV Fama']
   criacoes.length = 0
   pedacosEnviados.length = 0
   cleanup()
@@ -157,6 +164,8 @@ test('envia o MP4: cria o Job, sobe o arquivo e mostra o Job aguardando upload',
   const usuario = userEvent.setup()
   await abrir()
   await screen.findByText('Nenhum vídeo enviado ainda.')
+  // Com a lista de programas carregada e nada escolhido, o corpo não leva `programa`.
+  await screen.findByRole('combobox', { name: 'Programa' })
 
   await usuario.upload(screen.getByLabelText('Enviar vídeo'), mp4())
 
@@ -292,4 +301,39 @@ test('com a permissão de enviar, a Biblioteca mostra o upload', async () => {
   await abrir({ podeEnviar: true })
 
   expect(await screen.findByRole('button', { name: 'Enviar MP4' })).toBeTruthy()
+})
+
+test('o programa escolhido vai no corpo da criação do Job', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+
+  await usuario.click(await screen.findByRole('combobox', { name: 'Programa' }))
+  await usuario.click(await screen.findByText('TV Fama'))
+  await usuario.upload(screen.getByLabelText('Enviar vídeo'), mp4())
+
+  expect(await screen.findByText('Envio concluído.')).toBeTruthy()
+  expect(criacoes).toEqual([
+    { nome: 'enviado.mp4', tamanho_bytes: 64, tipo: 'video/mp4', programa: 'TV Fama' },
+  ])
+})
+
+test('sem a lista de programas, o envio segue sem programa', async () => {
+  programas = null
+  const usuario = userEvent.setup()
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+
+  expect(screen.queryByRole('combobox', { name: 'Programa' })).toBeNull()
+  await usuario.upload(screen.getByLabelText('Enviar vídeo'), mp4())
+
+  expect(await screen.findByText('Envio concluído.')).toBeTruthy()
+  expect(criacoes).toEqual([{ nome: 'enviado.mp4', tamanho_bytes: 64, tipo: 'video/mp4' }])
+})
+
+test('o cartão mostra o programa do Job', async () => {
+  jobs = [job({ estado: 'concluido', programa: 'TV Fama' })]
+  await abrir()
+
+  expect(await screen.findByText(/· TV Fama/)).toBeTruthy()
 })

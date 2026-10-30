@@ -214,7 +214,7 @@ def _antiga(
 
 def _modelo(*pautas: dict[str, Any]) -> dict[str, Any]:
     return {
-        "versao_esquema": "1.1",
+        "versao_esquema": "1.2",
         "video": {"duracao_ms": 60000},
         "pautas": list(pautas),
         "pessoas": [],

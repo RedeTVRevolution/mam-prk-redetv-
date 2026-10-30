@@ -24,6 +24,7 @@ from api.gemini import Chamada, ErroHttp
 from api.jobs import Job
 from api.main import criar_app as criar_app_web
 from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
+from api.programas import PERFIS
 from api.tests.test_gemini import BOA, TransporteFalso
 from api.tests.test_nuvem import _credencial_local
 
@@ -45,7 +46,9 @@ class Ambiente:
     transporte: TransporteFalso
     cliente: TestClient
 
-    def registrar(self, job_id: str, estado: str = "analisando") -> Job:
+    def registrar(
+        self, job_id: str, estado: str = "analisando", programa: str | None = None
+    ) -> Job:
         job = Job(
             id=job_id,
             nome=f"{job_id}.mp4",
@@ -54,6 +57,7 @@ class Ambiente:
             duracao_s=60.0,
             estado=estado,  # type: ignore[arg-type]
             criado_por="uid-1",
+            programa=programa,
             criado_em=BASE,
             atualizado_em=BASE,
         )
@@ -115,6 +119,15 @@ def test_sucesso_grava_a_decupagem_e_leva_o_job_a_concluido() -> None:
     assert chamada.video_uri.startswith("gs://teste-aceitos-")
     assert chamada.video_uri.endswith("/j1/proxy.mp4")
     assert chamada.rotulos == {"job_id": "j1"}
+
+
+def test_programa_do_job_leva_o_perfil_a_instrucao() -> None:
+    ambiente = _ambiente(BOA)
+    ambiente.registrar("j8", programa="TV Fama")
+
+    _analisar(ambiente, "j8")
+
+    assert PERFIS["TV Fama"] in ambiente.transporte.chamadas[0].instrucao
 
 
 def test_analise_falhou_grava_falhou_sem_decupagem() -> None:

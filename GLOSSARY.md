@@ -25,6 +25,13 @@ _Evitar_: cena, take
 **Plano limpo**:
 Plano sem GC e sem ninguém falando para a câmera, reaproveitável como B-roll.
 
+**Texto na tela**:
+GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os tempos.
+_Evitar_: lettering
+
+**Perfil do programa**:
+Contexto fixo de um programa (apresentadores, repórteres, merchandising frequente), em `api/programas.toml`, que a instrução do modelo recebe quando o Job informa o programa.
+
 ### Pessoas e evidência
 
 **Aparição**:
@@ -36,6 +43,9 @@ _Evitar_: citação como sinônimo de aparição
 
 **Evidência**:
 O que sustenta uma ocorrência: rosto, GC, fala ou quadro.
+
+**Fonte do nome**:
+O que sustenta o nome de uma pessoa: rosto, GC, fala ou contexto. Rosto sozinho erra; o nome confiável cruza fontes.
 
 **Catálogo de pessoas**:
 Nomes confirmados por correções humanas, com apelidos. Não guarda rostos.
