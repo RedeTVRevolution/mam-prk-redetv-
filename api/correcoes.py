@@ -64,7 +64,9 @@ CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencia")
 LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
 LIMITE_DO_TEXTO = 2000  # o mesmo de `Texto` na decupagem
-LIMITE_DO_JSON = 12000  # a descrição de plano e o texto de fala vão em JSON
+# A descrição de plano e o texto de fala vão em JSON: cabe a maior descrição
+# válida (200 + 2000 + 50 × 200 caracteres) com folga para aspas e escapes.
+LIMITE_DO_JSON = 16000
 LIMITE_DE_OBJETOS = 50
 # Os planos seguem os cortes: o plano da versão nova está a até 1 s dos ancorados.
 TOLERANCIA_DO_PLANO_MS = 1000
@@ -563,7 +565,7 @@ def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
 
 
 def _intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
-    """Pauta e comercial: o item tem o próprio intervalo."""
+    """Pauta, comercial, plano e fala: o item tem o próprio intervalo."""
     return int(pauta["inicio_ms"]), int(pauta["fim_ms"])
 
 
@@ -987,7 +989,8 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
     Pauta: a que sobrepõe o intervalo ancorado em pelo menos metade do menor
     dos dois. Comercial: o de mesma marca normalizada e tipo, com intervalo
     sobreposto (ou já com o "depois"). Pessoa: a com a identidade da âncora
-    (ou já com o "depois").
+    (ou já com o "depois"). Plano: o de início e fim a até 1 s dos ancorados.
+    Fala: a que sobrepõe o intervalo ancorado (encostar na borda não conta).
     """
     ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
     if c.ancora.tipo_do_item == "pauta":
@@ -1146,8 +1149,8 @@ _CAMPO_DO_TIPO = {
 
 
 def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
-    """Pauta ou comercial é achado pelo id: na versão atual o id do item é
-    estável, e a reapontada já traz o id novo."""
+    """Pauta, comercial, plano ou fala é achado pelo id: na versão atual o id
+    do item é estável, e a reapontada já traz o id novo."""
     chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
     for item in resultado.get(chave, []):
         if not isinstance(item, dict) or item.get("id") != c.item_id:
@@ -1278,7 +1281,8 @@ def aplicar(
 ) -> dict[str, Any]:
     """Cópia do modelo com as correções da versão atual por cima.
 
-    Pessoa ou pauta corrigida vem com `origem: "revisao"`; as demais, com
+    Item corrigido (pessoa, pauta, comercial, plano ou fala) vem com
+    `origem: "revisao"`; os demais, com
     `"modelo"`.
     A atendida (o modelo já traz o "depois") deixa o nome como o modelo o
     escreveu, com `origem: "modelo"`.
@@ -1395,8 +1399,12 @@ def fila(
         candidatos = []
         for item in _itens(modelo, tipo_do_item):
             intervalo = _intervalo_do_item(item, tipo_do_item)
+            # Plano e fala que só encostam no ancorado não são o mesmo trecho.
+            sobrepoe = (
+                _sobrepoe_de_verdade if tipo_do_item in ("plano", "fala") else _sobrepoe
+            )
             # Reaplicar numa pessoa sem a aparição ou menção não mudaria nada.
-            if _sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, item):
+            if sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, item):
                 candidatos.append(
                     Candidato(
                         item_id=str(item.get("id", "")),

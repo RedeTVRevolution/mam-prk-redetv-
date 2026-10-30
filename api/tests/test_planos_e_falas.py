@@ -173,6 +173,21 @@ def test_fala_de_2000_caracteres_cabe() -> None:
     )
 
 
+def test_a_maior_descricao_valida_cabe() -> None:
+    descricao = {
+        "ambiente": "a" * 200,
+        "acao": '"' * 2000,
+        "objetos": [f"{n:02d}" + "o" * 198 for n in range(50)],
+    }
+
+    assert (
+        _corrigir(
+            _mundo(), "plano.descricao", "pla01", json.dumps(descricao)
+        ).status_code
+        == 201
+    )
+
+
 def test_ocorrencia_nao_vale_para_plano() -> None:
     corpo: dict[str, Any] = {
         "tipo": "plano.limpo",
@@ -268,10 +283,11 @@ def test_fala_casa_com_a_unica_sobreposta() -> None:
     r = reconciliar(modelo, "nova", [antiga])
 
     assert [c.item_id for c in r.casadas] == ["fal000"]
-    assert (
-        aplicar(modelo, "nova", [antiga])["transcricao"][0]["texto"]
-        == "bom dia, Brasil"
-        or True
+    fala = aplicar(modelo, "nova", [antiga])["transcricao"][0]
+    assert (fala["texto"], fala["inicio_ms"], fala["fim_ms"]) == (
+        "corrigido",
+        100,
+        4200,
     )
 
 
@@ -290,6 +306,32 @@ def test_fala_que_so_encosta_na_borda_nao_conta() -> None:
 
     assert [c.item_id for c in reconciliar(modelo, "nova", [antiga]).casadas] == [
         "fal000"
+    ]
+
+
+def test_fila_nao_oferece_trecho_que_so_encosta_na_borda() -> None:
+    plano = _antiga("plano.limpo", "x", "plano", 10000, 20000, "true")
+    fala = _antiga("fala.texto", "fal001", "fala", 4000, 9000, _texto("corrigido"))
+    modelo = {
+        **PLF,
+        "planos": [
+            _plano("antes", 0, 10000),
+            _plano("a", 10000, 14000),
+            _plano("b", 14000, 20000),
+        ],
+        "transcricao": [
+            _fala(0, 4000, "antes"),
+            _fala(4000, 6000, "a"),
+            _fala(6000, 9000, "b"),
+            _fala(9000, 12000, "depois"),
+        ],
+    }
+
+    itens = fila(modelo, "nova", [plano, fala])
+
+    assert [[c.item_id for c in i.candidatos] for i in itens] == [
+        ["a", "b"],
+        ["fal001", "fal002"],
     ]
 
 
