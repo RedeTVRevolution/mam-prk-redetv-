@@ -496,7 +496,12 @@ def _acha_ocorrencia(
             sobreposicao = min(fim_ms, ocorrencia["fim_ms"]) - max(
                 inicio_ms, ocorrencia["inicio_ms"]
             )
-            if sobreposicao < 0:
+            instante = inicio_ms == fim_ms or (
+                ocorrencia["inicio_ms"] == ocorrencia["fim_ms"]
+            )
+            # Só encostar na borda não é a mesma ocorrência; um instante conta
+            # se cai dentro (ou na borda) do outro intervalo.
+            if sobreposicao < 0 or (sobreposicao == 0 and not instante):
                 continue
             exata = (ocorrencia["inicio_ms"], ocorrencia["fim_ms"]) == (
                 inicio_ms,
@@ -1157,16 +1162,16 @@ def aplicar(
                 pessoa["nome"], pessoa["origem"] = nome, "modelo"
             else:
                 pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
-    # A pessoa que ficou sem nenhuma ocorrência some da decupagem.
-    if esvaziadas:
+    # A pessoa que ficou sem nenhuma ocorrência some da decupagem, e das pautas.
+    sumidas = [e for e in esvaziadas if not any(e[lista] for lista in LISTAS)]
+    if sumidas:
         resultado["pessoas"] = [
-            p
-            for p in _pessoas(resultado)
-            if not (
-                any(p is e for e in esvaziadas)
-                and not any(p[lista] for lista in LISTAS)
-            )
+            p for p in _pessoas(resultado) if not any(p is e for e in sumidas)
         ]
+        ids = {e.get("id") for e in sumidas}
+        for pauta in _pautas(resultado):
+            if "pessoas" in pauta:
+                pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
     if "comerciais" in resultado:
         resultado["comerciais"].sort(key=lambda m: (m["inicio_ms"], m["fim_ms"]))
     return resultado
@@ -1197,7 +1202,8 @@ def fila(
         candidatos = []
         for item in _itens(modelo, tipo_do_item):
             intervalo = _intervalo_do_item(item, tipo_do_item)
-            if _sobrepoe(ancora, intervalo):
+            # Reaplicar numa pessoa sem a aparição ou menção não mudaria nada.
+            if _sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, item):
                 candidatos.append(
                     Candidato(
                         item_id=str(item.get("id", "")),

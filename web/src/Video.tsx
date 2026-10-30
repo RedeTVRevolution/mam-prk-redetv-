@@ -992,7 +992,7 @@ function CorrigirOcorrencia({
             }
           : null
       case 'tempos':
-        return temposValidos
+        return temposValidos && (inicioMs !== acao.inicio_ms || fimMs !== acao.fim_ms)
           ? {
               ...base,
               tipo: 'item.tempos',
@@ -1021,7 +1021,11 @@ function CorrigirOcorrencia({
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
       } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
+        setErro(
+          acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos'
+            ? 'Confira os campos: os tempos ficam dentro da duração do vídeo.'
+            : 'A ocorrência não foi encontrada. Recarregue a página e confira.',
+        )
       } else setErro('Não foi possível salvar a correção.')
       setSalvando(false)
     }
@@ -1970,6 +1974,17 @@ function AbaPessoas({
         {citadas.map((p) => (
           <Stack key={p.id} gap={4}>
             <NomeDaPessoa pessoa={p} aoCorrigir={aoCorrigir} />
+            {aoOcorrencia && pessoaDoModelo(p) && p.na_imagem.length === 0 && (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                w="fit-content"
+                aria-label={`Acrescentar aparição de ${p.nome}`}
+                onClick={() => aoOcorrencia({ tipo: 'acrescentar', pessoa: p })}
+              >
+                Acrescentar aparição
+              </Button>
+            )}
             <Group gap={6}>
               {p.citada_na_fala.map((m, i) => (
                 <Group key={`fala-${i}`} gap={2} wrap="nowrap">

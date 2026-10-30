@@ -1068,3 +1068,41 @@ test('quem não edita não vê o menu das ocorrências', async () => {
   expect(painel.queryByRole('button', { name: /Ações de/ })).toBeNull()
   expect(painel.queryByRole('button', { name: /Acrescentar aparição/ })).toBeNull()
 })
+
+test('quem só é citada também tem o botão de acrescentar aparição', async () => {
+  const beto = {
+    id: 'p2',
+    nome: 'Beto Lima',
+    origem: 'modelo',
+    na_imagem: [],
+    citada_na_fala: [{ inicio_ms: 80_000, fim_ms: 81_000 }],
+    citada_no_texto: [],
+  }
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      HttpResponse.json({ ...decupagem, pessoas: [...decupagem.pessoas, beto], versao_decupagem: 'v1' }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+  await usuario.click(await painel.findByRole('button', { name: 'Acrescentar aparição de Beto Lima' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '01:20')
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '01:21')
+  await usuario.type(modal.getByLabelText('Evidência'), 'rosto')
+  await usuario.type(modal.getByLabelText('Motivo'), 'aparece também')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect((correcoesRecebidas[0] as unknown as { item_id: string }).item_id).toBe('p2')
+  expect(painel.getAllByRole('button', { name: 'Acrescentar aparição de Ana Souza' })).toHaveLength(1)
+})
+
+test('corrigir tempos sem mudar nada não salva', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+  const modal = await escolherNoMenu(usuario, painel, 'Ações de Ana Souza em 00:05', 'Corrigir tempos')
+  await usuario.type(modal.getByLabelText('Motivo'), 'conferi')
+
+  expect(modal.getByRole('button', { name: 'Salvar' }).hasAttribute('disabled')).toBe(true)
+})

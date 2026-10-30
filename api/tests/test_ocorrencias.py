@@ -1,7 +1,9 @@
 """Correção de pessoas (#63): aparição e menção."""
 
+import json
 from typing import Any
 
+from api.correcoes import versao_do_modelo
 from api.decupagem import Pessoa
 from api.pessoas import tempo_de_tela_ms
 from api.tests.test_correcoes import MODELO, Mundo
@@ -59,6 +61,24 @@ def test_pessoa_sem_nenhuma_ocorrencia_some_da_decupagem() -> None:
     )
 
     assert _pessoa(mundo, "Ana Souza") is None
+
+
+def test_pessoa_que_some_sai_tambem_das_pautas() -> None:
+    mundo = Mundo(["editor"])
+    pautas = [{**MODELO["pautas"][0], "pessoas": ["pes01", "pes02"]}]
+    modelo = {**MODELO, "pautas": [*pautas, MODELO["pautas"][1]]}
+    mundo.reprocessar(modelo)
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    _nao_e(mundo, versao=versao)
+    mundo.corrigir(
+        tipo="pessoa.nao_e",
+        item_id="pes01",
+        valor="Não identificado",
+        ocorrencia=_ocorrencia("citada_na_fala", 5005, 5009),
+        versao=versao,
+    )
+
+    assert mundo.decupagem()["pautas"][0]["pessoas"] == ["pes02"]
 
 
 def test_aparicao_para_mencao_tira_o_trecho_do_tempo_de_tela() -> None:
@@ -162,6 +182,19 @@ def test_ocorrencia_que_nao_existe_da_422() -> None:
     assert resposta.status_code == 422
 
 
+def test_ocorrencia_que_so_encosta_na_borda_nao_e_a_mesma() -> None:
+    mundo = Mundo(["editor"])
+
+    resposta = mundo.corrigir(
+        tipo="pessoa.nao_e",
+        item_id="pes01",
+        valor="Não identificado",
+        ocorrencia=_ocorrencia("na_imagem", 5000, 6000),
+    )
+
+    assert resposta.status_code == 422
+
+
 def test_tempos_da_ocorrencia() -> None:
     mundo = Mundo(["editor"])
 
@@ -234,6 +267,8 @@ def test_reconciliacao_manda_para_a_fila_quando_a_aparicao_sumiu() -> None:
         "/v1/jobs/j1/fila", headers={"Authorization": "Bearer token-bom"}
     )
     assert [i["id"] for i in resposta.json()] == [cid]
+    # A Ana nova não tem a aparição: reaplicar nela não mudaria nada.
+    assert resposta.json()[0]["candidatos"] == []
 
 
 def test_aparicao_acrescentada_que_o_modelo_passa_a_trazer_nao_duplica() -> None:
