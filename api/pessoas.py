@@ -9,7 +9,7 @@ from api.comparador import normalizar
 from api.decupagem import Pessoa, _Intervalo
 
 _NAO_IDENTIFICADO = normalizar("não identificado")
-_LISTAS = ("na_imagem", "citada_na_fala", "citada_no_texto")
+LISTAS = ("na_imagem", "citada_na_fala", "citada_no_texto")
 
 
 def nao_identificado(nome: str) -> bool:
@@ -46,7 +46,7 @@ def unir_pessoas(
             mapa[janela][p.id] = unidas[posicao].id
     for i, p in enumerate(unidas):
         unidas[i] = p.model_copy(
-            update={campo: _em_ordem(getattr(p, campo)) for campo in _LISTAS}
+            update={campo: _em_ordem(getattr(p, campo)) for campo in LISTAS}
         )
     return unidas, mapa
 
@@ -56,7 +56,7 @@ def _juntar(base: Pessoa, outra: Pessoa) -> Pessoa:
     return base.model_copy(
         update={
             "origem": "revisao" if revisao else "modelo",
-            **{c: [*getattr(base, c), *getattr(outra, c)] for c in _LISTAS},
+            **{c: [*getattr(base, c), *getattr(outra, c)] for c in LISTAS},
         }
     )
 

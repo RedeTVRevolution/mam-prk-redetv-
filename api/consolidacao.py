@@ -21,7 +21,7 @@ from api.decupagem import (
     _Intervalo,
 )
 from api.janelas import Janela
-from api.pessoas import _LISTAS, unir_pessoas
+from api.pessoas import LISTAS, unir_pessoas
 from api.tempos import aplicar_regra_de_tempos
 
 _LIMITE_DO_RESUMO = 2000  # tamanho máximo de `Texto` no esquema
@@ -41,8 +41,17 @@ def _dono[T: _Intervalo](itens: Sequence[T], janela: Janela, ultima: bool) -> li
     ]
 
 
+def _antes_do_nucleo[T: _Intervalo](itens: Sequence[T], janela: Janela) -> list[T]:
+    """Itens que a janela descarta por começarem no contexto, antes do núcleo."""
+    return [i for i in itens if i.inicio_ms < janela.inicio_ms]
+
+
 def _emendar[T: _Intervalo](item: T, pares: Sequence[_Intervalo]) -> T:
-    """Estende o fim até o maior fim dos pares da janela seguinte que se sobrepõem."""
+    """Estende o fim até o maior fim dos pares da janela seguinte que se sobrepõem.
+
+    Os pares são só os itens que a janela seguinte descarta: o que ela mantém é
+    outro item, e emendar nele daria dois itens com o mesmo fim.
+    """
     fim = max([item.fim_ms, *(p.fim_ms for p in pares if _sobrepoe(item, p))])
     return item if fim == item.fim_ms else item.model_copy(update={"fim_ms": fim})
 
@@ -58,26 +67,23 @@ def _sem_repetir(itens: Sequence[str]) -> list[str]:
 def _agrupar_por_sobreposicao[T: _Intervalo](
     janelas: Sequence[Sequence[T]],
 ) -> list[list[T]]:
-    """Agrupa o item da janela N com o da N+1 que se sobrepõe, em cadeia.
+    """Agrupa os itens da janela N e da N+1 que se sobrepõem, em cadeia.
 
-    Um grupo só recebe itens da janela seguinte àquela em que entrou por último.
+    Um item novo entra em todo grupo que tem um item da janela anterior
+    sobreposto a ele, e esses grupos viram um só.
     """
-    grupos: list[tuple[int, list[T]]] = []
+    grupos: list[list[tuple[int, T]]] = []
     for k, itens in enumerate(janelas):
         for novo in itens:
-            alvo = next(
-                (
-                    g
-                    for g, (ultima, partes) in enumerate(grupos)
-                    if ultima == k - 1 and _sobrepoe(partes[-1], novo)
-                ),
-                None,
-            )
-            if alvo is None:
-                grupos.append((k, [novo]))
-            else:
-                grupos[alvo] = (k, [*grupos[alvo][1], novo])
-    return [partes for _, partes in grupos]
+            alvos = [
+                g
+                for g in grupos
+                if any(j == k - 1 and _sobrepoe(i, novo) for j, i in g)
+            ]
+            unido = [par for g in alvos for par in g] + [(k, novo)]
+            grupos = [g for g in grupos if not any(g is a for a in alvos)]
+            grupos.append(unido)
+    return [[i for _, i in g] for g in grupos]
 
 
 def _duracao(i: _Intervalo) -> int:
@@ -99,7 +105,7 @@ def consolidar(
     for k, d in enumerate(decupagens):
         por_chave: dict[tuple[str, str], list[_Intervalo]] = {}
         for p in d.pessoas:
-            for lista in _LISTAS:
+            for lista in LISTAS:
                 por_chave.setdefault((mapa[k][p.id], lista), []).extend(
                     getattr(p, lista)
                 )
@@ -107,19 +113,41 @@ def consolidar(
     mantidas: dict[tuple[str, str], list[_Intervalo]] = {}
     for k, (janela, _) in enumerate(resultados):
         proximas = brutas[k + 1] if k < ultimo else {}
-        for chave, doc in brutas[k].items():
-            mantidas.setdefault(chave, []).extend(
-                _emendar(i, proximas.get(chave, []))
-                for i in _dono(doc, janela, k == ultimo)
+        for chave, itens in brutas[k].items():
+            pares = (
+                _antes_do_nucleo(proximas.get(chave, []), resultados[k + 1][0])
+                if k < ultimo
+                else []
             )
+            mantidas.setdefault(chave, []).extend(
+                _emendar(i, pares) for i in _dono(itens, janela, k == ultimo)
+            )
+    # Some a pessoa que só tinha itens descartados e nenhuma pauta cita (o
+    # mesmo "não identificado" no contexto de duas janelas, por exemplo); as
+    # outras são renumeradas.
+    citadas = {
+        mapa[k][i]
+        for k, d in enumerate(decupagens)
+        for pa in d.pautas
+        for i in pa.pessoas
+    }
     pessoas = [
         p.model_copy(
             update={
-                lista: _em_ordem(mantidas.get((p.id, lista), [])) for lista in _LISTAS
+                lista: _em_ordem(mantidas.get((p.id, lista), [])) for lista in LISTAS
             }
         )
         for p in pessoas
+        if p.id in citadas
+        or not any(getattr(p, lista) for lista in LISTAS)
+        or any(mantidas.get((p.id, lista)) for lista in LISTAS)
     ]
+    renumeracao = {p.id: f"pes{n:02d}" for n, p in enumerate(pessoas, 1)}
+    pessoas = [p.model_copy(update={"id": renumeracao[p.id]}) for p in pessoas]
+    mapa = {
+        k: {a: renumeracao[n] for a, n in m.items() if n in renumeracao}
+        for k, m in mapa.items()
+    }
 
     def pauta_da_janela(k: int, p: Pauta) -> Pauta:
         return p.model_copy(
@@ -135,10 +163,12 @@ def consolidar(
             "titulo": maior.titulo,
         }
         if isinstance(maior, Pauta):
-            pautas_ = [p for p in partes if isinstance(p, Pauta)]
+            so_pautas = [p for p in partes if isinstance(p, Pauta)]
             mudancas["resumo"] = maior.resumo
-            mudancas["pessoas"] = _sem_repetir([i for p in pautas_ for i in p.pessoas])
-            mudancas["locais"] = _sem_repetir([i for p in pautas_ for i in p.locais])
+            mudancas["pessoas"] = _sem_repetir(
+                [i for p in so_pautas for i in p.pessoas]
+            )
+            mudancas["locais"] = _sem_repetir([i for p in so_pautas for i in p.locais])
         return cast(T, maior.model_copy(update=mudancas))
 
     pautas = _em_ordem(
@@ -169,9 +199,15 @@ def consolidar(
         ultima = k == ultimo
         planos += _dono(d.planos, janela, ultima)
         # ponytail: planos e falas não emendam; uma fala que passa mais de 10 s
-        # da borda sai cortada no fim do contexto.
+        # da borda sai cortada no fim do contexto. A emenda só olha a janela
+        # seguinte: uma aparição ou comercial que atravessa a janela inteira
+        # sai cortado no fim do contexto dela.
         transcricao += _dono(d.transcricao, janela, ultima)
-        proximos = decupagens[k + 1].comerciais if k < ultimo else []
+        proximos = (
+            _antes_do_nucleo(decupagens[k + 1].comerciais, resultados[k + 1][0])
+            if k < ultimo
+            else []
+        )
         for c in _dono(d.comerciais, janela, ultima):
             pares = [
                 s
@@ -197,4 +233,7 @@ def consolidar(
         comerciais=_em_ordem(comerciais),
         transcricao=_em_ordem(transcricao),
     )
-    return aplicar_regra_de_tempos(consolidada, cortes)
+    # `model_copy` não valida: valida de novo depois da regra de tempos.
+    return Decupagem.model_validate(
+        aplicar_regra_de_tempos(consolidada, cortes).model_dump()
+    )

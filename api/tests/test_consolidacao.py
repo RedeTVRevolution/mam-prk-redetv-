@@ -226,3 +226,83 @@ def test_regra_de_tempos_e_aplicada_no_fim() -> None:
 
     assert (d.planos[0].inicio_ms, d.planos[0].fim_ms) == (1200, 8800)
     assert d.planos[0].inicio_modelo_ms == 1000
+
+
+def test_emenda_nao_duplica_o_item_que_a_janela_seguinte_mantem() -> None:
+    # 302–340 s começa no núcleo da janela 1: é outro item, não o par do 295–310.
+    r0 = decupagem(
+        pessoas=[pessoa("a", "Ana", [(295_000, 310_000)])],
+        comerciais=[comercial("X", 295_000, 310_000)],
+    )
+    r1 = decupagem(
+        pessoas=[pessoa("a", "Ana", [(302_000, 340_000)])],
+        comerciais=[comercial("X", 302_000, 340_000)],
+    )
+
+    d = consolidar(VIDEO, [(J0, r0), (J1, r1)], [])
+
+    assert [(a.inicio_ms, a.fim_ms) for a in d.pessoas[0].na_imagem] == [
+        (295_000, 310_000),
+        (302_000, 340_000),
+    ]
+    assert [(c.inicio_ms, c.fim_ms) for c in d.comerciais] == [
+        (295_000, 310_000),
+        (302_000, 340_000),
+    ]
+
+
+def test_pauta_sobreposta_a_duas_da_janela_seguinte_vira_uma_so() -> None:
+    r0 = decupagem(pautas=[pauta("a", 100_000, 310_000, "A", [])])
+    r1 = decupagem(
+        pautas=[
+            pauta("b", 295_000, 305_000, "B", []),
+            pauta("c", 305_000, 400_000, "C", []),
+        ]
+    )
+
+    d = consolidar(VIDEO, [(J0, r0), (J1, r1)], [])
+
+    assert [(p.inicio_ms, p.fim_ms, p.titulo) for p in d.pautas] == [
+        (100_000, 400_000, "A")
+    ]
+
+
+def test_duas_pautas_sobrepostas_a_uma_da_janela_seguinte_viram_uma_so() -> None:
+    r0 = decupagem(
+        pautas=[
+            pauta("a", 100_000, 295_000, "A", []),
+            pauta("b", 295_000, 310_000, "B", []),
+        ]
+    )
+    r1 = decupagem(pautas=[pauta("c", 290_000, 400_000, "C", [])])
+
+    d = consolidar(VIDEO, [(J0, r0), (J1, r1)], [])
+
+    assert [(p.inicio_ms, p.fim_ms) for p in d.pautas] == [(100_000, 400_000)]
+
+
+def test_pessoa_so_com_itens_descartados_some() -> None:
+    r0 = decupagem(pessoas=[pessoa("n", "não identificado", [(295_000, 305_000)])])
+    r1 = decupagem(
+        pessoas=[
+            pessoa("n", "não identificado", [(295_000, 305_000)]),
+            pessoa("a", "Ana", [(400_000, 401_000)]),
+        ]
+    )
+
+    d = consolidar(VIDEO, [(J0, r0), (J1, r1)], [])
+
+    assert [(p.id, p.nome, len(p.na_imagem)) for p in d.pessoas] == [
+        ("pes01", "não identificado", 1),
+        ("pes02", "Ana", 1),
+    ]
+
+
+def test_regra_de_tempos_vem_depois_da_emenda() -> None:
+    r0 = decupagem(pessoas=[pessoa("a", "Ana", [(295_000, 310_000)])])
+    r1 = decupagem(pessoas=[pessoa("a", "Ana", [(295_000, 339_500)])])
+
+    d = consolidar(VIDEO, [(J0, r0), (J1, r1)], [340_000])
+
+    a = d.pessoas[0].na_imagem[0]
+    assert (a.inicio_ms, a.fim_ms, a.fim_modelo_ms) == (295_000, 340_000, 339_500)
