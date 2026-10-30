@@ -21,6 +21,10 @@ def test_falha_da_execucao_grava_falhou_com_arquivo_corrompido() -> None:
     texto = _texto()
 
     assert "try:" in texto and "except:" in texto
+    # O `raise` repassa o erro da execução: sem `as: e`, a variável não existe.
+    assert "as: e" in texto and "raise: $${e}" in texto
+    # Um objeto sem Job correspondente não cria documento.
+    assert "exists: true" in texto
     assert "googleapis.firestore.v1.projects.databases.documents.patch" in texto
     assert "arquivo_corrompido" in texto
     assert "falhou" in texto

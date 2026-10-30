@@ -111,9 +111,9 @@ resource "google_service_account" "mam" {
 }
 
 # Papéis de cada componente. A orquestração grava a falha da validação no
-# Firestore e recebe o evento do Eventarc; os papéis de invocar o Workflows e de
-# rodar o Job ficam mais abaixo, nos próprios recursos. O passo de análise e os
-# papéis dele entram no ticket seguinte.
+# Firestore, recebe o evento do Eventarc e invoca o Workflows (o provider não tem
+# papel no próprio Workflows); o papel de rodar o Job fica mais abaixo, no próprio
+# Job (ADR 0002). O passo de análise e os papéis dele entram no ticket seguinte.
 locals {
   papeis_no_projeto = {
     web          = ["roles/datastore.user"]
@@ -296,9 +296,11 @@ resource "google_project_iam_member" "storage_publica_eventos" {
   member  = "serviceAccount:${data.google_storage_project_service_account.storage.email_address}"
 }
 
+# Na região da quarentena: var.regiao, porque o location do bucket volta em
+# maiúsculas do provider, e o Eventarc quer a região em minúsculas.
 resource "google_eventarc_trigger" "quarentena" {
   name            = "mam-quarentena-finalizada"
-  location        = google_storage_bucket.mam["quarentena"].location
+  location        = var.regiao
   service_account = google_service_account.mam["orquestracao"].email
   matching_criteria {
     attribute = "type"

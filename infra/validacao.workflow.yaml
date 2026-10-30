@@ -21,19 +21,25 @@ main:
                       - name: JOB_ID
                         value: $${job_id}
         except:
+          as: e
           # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
           steps:
             - marca_como_falhou:
                 call: googleapis.firestore.v1.projects.databases.documents.patch
                 args:
                   name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  # Um objeto sem Job correspondente não cria documento.
+                  currentDocument:
+                    exists: true
                   updateMask:
-                    fieldPaths: [estado, codigo_falha]
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
                   body:
                     fields:
                       estado:
                         stringValue: falhou
                       codigo_falha:
                         stringValue: arquivo_corrompido
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
             - encerra_com_falha:
                 raise: $${e}
