@@ -10,6 +10,7 @@ from typing import cast
 
 from api.comparador import normalizar
 from api.decupagem import (
+    VERSAO_ESQUEMA,
     Bloco,
     Comercial,
     Decupagem,
@@ -224,7 +225,7 @@ def consolidar(
     # ponytail: o resumo provisório é cortado em 2000 caracteres; a passada
     # narrativa o reescreve.
     consolidada = Decupagem(
-        versao_esquema="1.1",
+        versao_esquema=VERSAO_ESQUEMA,
         video=video,
         programa=Programa(resumo=resumo[:_LIMITE_DO_RESUMO], blocos=blocos),
         pautas=pautas,

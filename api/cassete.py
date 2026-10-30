@@ -4,7 +4,7 @@ Uso: `make gravar-cassetes` (chama `python -m api.cassete` com o `.env`). Gera u
 clipe sintético, passa pelo validador como um envio real, sobe o proxy no bucket
 de aceitos do dev e faz a chamada real. O cassete guarda só o modelo, o vídeo e
 o texto da resposta: nenhum cabeçalho, nenhuma credencial. Regrave sempre que
-mudar o modelo ou o esquema.
+mudar o modelo, o esquema ou a instrução.
 """
 
 import json

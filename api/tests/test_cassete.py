@@ -55,7 +55,7 @@ def test_grava_so_a_resposta_que_passou_no_esquema(tmp_path: Path) -> None:
 
     cassete = json.loads(destino.read_text())
     assert cassete == {
-        "modelo": "gemini-3.5-flash-lite",
+        "modelo": MODELO,
         "video": {"sha256": "b" * 64, "duracao_ms": VIDEO_CONFIAVEL.duracao_ms},
         "texto": BOA,
     }

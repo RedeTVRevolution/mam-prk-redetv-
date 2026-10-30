@@ -14,7 +14,13 @@ from typing import Any, Protocol
 
 import requests
 
-from api.decupagem import CAMPOS_DO_SERVIDOR, Decupagem, Video, esquema_do_modelo
+from api.decupagem import (
+    CAMPOS_DO_SERVIDOR,
+    VERSAO_ESQUEMA,
+    Decupagem,
+    Video,
+    esquema_do_modelo,
+)
 
 MODELO = "gemini-3.5-flash-lite"
 TENTATIVAS_REDE = 5  # novas tentativas após 429/5xx
@@ -147,7 +153,9 @@ def _validar(texto: str, video: Video) -> Decupagem:
     dados = json.loads(texto)
     if not isinstance(dados, dict) or _chaves(dados) & CAMPOS_DO_SERVIDOR:
         raise ValueError("resposta fora do esquema")
-    return Decupagem.model_validate({**dados, "versao_esquema": "1.1", "video": video})
+    return Decupagem.model_validate(
+        {**dados, "versao_esquema": VERSAO_ESQUEMA, "video": video}
+    )
 
 
 def analisar(
