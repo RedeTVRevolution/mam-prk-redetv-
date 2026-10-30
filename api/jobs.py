@@ -247,18 +247,18 @@ def criar_rotas(
     def criar(novo: NovoJob, chamador: ChamadorAutenticado) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
+        if isinstance(chamador, Sistema):
+            criado_por, sistema = f"sistema:{chamador.sistema}", chamador.sistema
+        else:
+            criado_por, sistema = chamador.uid, None
         agora = relogio()
         job = Job(
             id=uuid.uuid4().hex,
             nome=novo.nome,
             tamanho_bytes=novo.tamanho_bytes,
             estado="aguardando_upload",
-            criado_por=(
-                f"sistema:{chamador.sistema}"
-                if isinstance(chamador, Sistema)
-                else chamador.uid
-            ),
-            sistema=chamador.sistema if isinstance(chamador, Sistema) else None,
+            criado_por=criado_por,
+            sistema=sistema,
             criado_em=agora,
             atualizado_em=agora,
         )

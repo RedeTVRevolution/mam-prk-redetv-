@@ -15,7 +15,7 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict
 
 from api.auth import ChaveInvalida, Sistema
-from api.jobs import ServicoIndisponivel, agora_utc
+from api.jobs import agora_utc
 
 
 class Mac(Protocol):
@@ -38,13 +38,6 @@ class MacSimulado:
 
     def calcular(self, versao: int, mensagem: bytes) -> bytes:
         return hmac.digest(self._chaves[versao], mensagem, sha256)
-
-
-class MacIndisponivel:
-    versao_atual = 0
-
-    def calcular(self, versao: int, mensagem: bytes) -> bytes:
-        raise ServicoIndisponivel
 
 
 class RegistroDeChave(BaseModel):
@@ -154,7 +147,7 @@ def main(
     relogio: Callable[[], datetime] = agora_utc,
 ) -> int:
     if len(argv) != 1:
-        imprimir("uso: python -m api.chaves <nome do sistema>")
+        imprimir("uso: make emitir-chave SISTEMA=<nome do sistema>")
         return 2
     try:
         emitida = emitir_chave(argv[0], mac, repositorio, relogio())
