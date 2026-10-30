@@ -240,6 +240,8 @@ gcloud config set project "$P" >/dev/null 2>&1
 gcloud config set compute/region "$REGION" >/dev/null 2>&1
 write_env GCP_PROJECT_ID "$P"
 write_env GCP_REGION "$REGION"
+# O estado do Terraform existe antes dele, então o nome nasce aqui, no .env.
+write_env BUCKET_ESTADO_TF "$P-tfstate"
 note "Para usar a mesma config no terminal: gcloud config configurations activate mam-dev"
 pause "Enter para continuar"
 

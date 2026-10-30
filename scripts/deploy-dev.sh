@@ -12,6 +12,7 @@ set -a
 set +a
 : "${GCP_PROJECT_ID:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${GCP_REGION:?rode antes o scripts/wizard-gcp-dev.sh}"
+: "${BUCKET_ESTADO_TF:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${ADMINS_EMERGENCIA:?ponha no .env os e-mails dos administradores de emergência, separados por vírgula}"
 # A config gcloud do MAM, criada pelo wizard, sem mexer na config ativa.
@@ -23,7 +24,7 @@ tf() { terraform -chdir=infra "$@"; }
 
 # O estado precisa existir antes do `terraform init`. Bucket privado, sem acesso
 # público: só papéis do projeto o alcançam, e no dev são o Owner e a mam-terraform.
-ESTADO="$GCP_PROJECT_ID-tfstate"
+ESTADO="$BUCKET_ESTADO_TF"
 if ! gc storage buckets describe "gs://$ESTADO" >/dev/null 2>&1; then
   gc storage buckets create "gs://$ESTADO" --location "$GCP_REGION" \
     --uniform-bucket-level-access --public-access-prevention
@@ -35,8 +36,10 @@ tf init -input=false -backend-config="bucket=$ESTADO"
 # serviço precisa da imagem. Este apply só cria os dois, então a imagem ainda não importa.
 tf apply -input=false -target=google_artifact_registry_repository.mam \
   -target=google_identity_platform_config.mam -var imagem=pendente -var imagem_validacao=pendente
-REGISTRO="$GCP_REGION-docker.pkg.dev"
-REPO="$REGISTRO/$GCP_PROJECT_ID/mam/web"
+# O nome do repositório vem do Terraform, o único lugar que monta os nomes.
+REPOSITORIO=$(tf output -raw repositorio)
+REGISTRO="${REPOSITORIO%%/*}"
+REPO="$REPOSITORIO/web"
 TAG="$REPO:$(git rev-parse --short HEAD)"
 gc auth print-access-token | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRO"
 docker build --platform linux/amd64 -t "$TAG" \
@@ -45,7 +48,7 @@ docker push "$TAG"
 # Pelo digest, para que um rebuild com o mesmo commit também gere revisão nova.
 IMAGEM=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$TAG" | grep -m1 "^$REPO@")
 # A imagem do Job de validação (#38), também pelo digest.
-REPO_VALIDACAO="$REGISTRO/$GCP_PROJECT_ID/mam/validacao"
+REPO_VALIDACAO="$REPOSITORIO/validacao"
 TAG_VALIDACAO="$REPO_VALIDACAO:$(git rev-parse --short HEAD)"
 docker build --platform linux/amd64 --target validacao -t "$TAG_VALIDACAO" .
 docker push "$TAG_VALIDACAO"

@@ -82,11 +82,20 @@ resource "google_firestore_database" "mam" {
   depends_on              = [google_project_service.apis]
 }
 
-# clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git.
+# O único lugar que monta os nomes dos buckets. O código os recebe por variável
+# de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
+# web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).
+locals {
+  sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro"]
+  buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
+}
+
+# clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git,
+# e o clipe sintético do cassete (cassetes/).
 # Sem papel de conta de serviço: por ora só o Owner e a mam-terraform os alcançam.
 resource "google_storage_bucket" "mam" {
-  for_each                    = toset(["quarentena", "aceitos", "decupagens", "clipes-ouro"])
-  name                        = "${var.projeto}-${each.key}"
+  for_each                    = local.buckets
+  name                        = each.value
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
@@ -178,6 +187,20 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
       }
+      # Pelo local e não pelo recurso: o CORS da quarentena aponta para este
+      # serviço, e a referência ao recurso fecharia um ciclo.
+      env {
+        name  = "BUCKET_QUARENTENA"
+        value = local.buckets["quarentena"]
+      }
+      env {
+        name  = "BUCKET_ACEITOS"
+        value = local.buckets["aceitos"]
+      }
+      env {
+        name  = "BUCKET_DECUPAGENS"
+        value = local.buckets["decupagens"]
+      }
     }
   }
   depends_on = [google_project_service.apis]
@@ -227,6 +250,14 @@ resource "google_cloud_run_v2_job" "validacao" {
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
+        }
+        env {
+          name  = "BUCKET_QUARENTENA"
+          value = local.buckets["quarentena"]
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
         }
         # A única pasta gravável: o ffmpeg e o validador escrevem aqui.
         env {
@@ -302,6 +333,14 @@ resource "google_cloud_run_v2_service" "analise" {
       env {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
+      }
+      env {
+        name  = "BUCKET_ACEITOS"
+        value = local.buckets["aceitos"]
+      }
+      env {
+        name  = "BUCKET_DECUPAGENS"
+        value = local.buckets["decupagens"]
       }
     }
   }
@@ -505,4 +544,14 @@ output "identity_api_key" {
 
 output "url" {
   value = google_cloud_run_v2_service.web.uri
+}
+
+# Para as ferramentas locais: o deploy-dev envia as imagens a este repositório, e o
+# make gravar-cassetes sobe o clipe sintético no bucket de clipes-ouro.
+output "repositorio" {
+  value = "${var.regiao}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam.repository_id}"
+}
+
+output "bucket_clipes_ouro" {
+  value = local.buckets["clipes-ouro"]
 }
