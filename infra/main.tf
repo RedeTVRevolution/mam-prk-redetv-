@@ -73,8 +73,10 @@ resource "google_firestore_database" "mam" {
   depends_on              = [google_project_service.apis]
 }
 
+# clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git.
+# Sem papel de conta de serviço: por ora só o Owner e a mam-terraform os alcançam.
 resource "google_storage_bucket" "mam" {
-  for_each                    = toset(["quarentena", "aceitos", "decupagens"])
+  for_each                    = toset(["quarentena", "aceitos", "decupagens", "clipes-ouro"])
   name                        = "${var.projeto}-${each.key}"
   location                    = var.regiao
   uniform_bucket_level_access = true
