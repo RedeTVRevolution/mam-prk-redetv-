@@ -4,7 +4,7 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
-from api.auth import Escopo, Usuario
+from api.auth import ESCOPOS, Escopo, Usuario
 from api.chaves import (
     MacSimulado,
     RepositorioDeChavesEmMemoria,
@@ -75,7 +75,7 @@ def test_rota_sem_o_escopo_recebe_403_e_com_ele_passa(
 ) -> None:
     mundo = Mundo()
     mundo.job("j1", "Legado", estado="validando" if metodo == "DELETE" else "concluido")
-    outros = {"criar", "ler", "cancelar"} - {escopo}
+    outros = set(ESCOPOS) - {escopo}
 
     sem = mundo.cliente.request(
         metodo,
@@ -108,8 +108,7 @@ def test_pessoa_continua_podendo_tudo(
 
 def test_dois_sistemas_com_arquivo_igual_nao_enxergam_o_job_um_do_outro() -> None:
     mundo = Mundo()
-    todos: tuple[Escopo, ...] = ("criar", "ler", "cancelar")
-    a, b = mundo.chave("A", *todos), mundo.chave("B", *todos)
+    a, b = mundo.chave("A", *ESCOPOS), mundo.chave("B", *ESCOPOS)
     id_a = mundo.cliente.post("/v1/jobs", json=NOVO_JOB, headers=a).json()["id"]
     id_b = mundo.cliente.post("/v1/jobs", json=NOVO_JOB, headers=b).json()["id"]
     for job_id in (id_a, id_b):
@@ -124,6 +123,12 @@ def test_dois_sistemas_com_arquivo_igual_nao_enxergam_o_job_um_do_outro() -> Non
                 f"/v1/jobs/{alheio}{sufixo}", headers=cabecalho
             )
             assert resposta.status_code == 404
+        # Nem um If-None-Match com o ETag certo revela o job alheio com um 304.
+        etag = mundo.cliente.get(f"/v1/jobs/{alheio}", headers=PESSOA).headers["ETag"]
+        resposta = mundo.cliente.get(
+            f"/v1/jobs/{alheio}", headers={**cabecalho, "If-None-Match": etag}
+        )
+        assert resposta.status_code == 404
         assert (
             mundo.cliente.delete(f"/v1/jobs/{alheio}", headers=cabecalho).status_code
             == 404

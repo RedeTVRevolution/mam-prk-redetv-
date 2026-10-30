@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, get_args
 
 import jwt
 from fastapi import Depends, Request, Response
@@ -20,7 +20,7 @@ class Usuario(BaseModel):
 
 
 Escopo = Literal["criar", "ler", "cancelar"]
-ESCOPOS: tuple[Escopo, ...] = ("cancelar", "criar", "ler")
+ESCOPOS: tuple[Escopo, ...] = get_args(Escopo)
 
 
 class Sistema(BaseModel):

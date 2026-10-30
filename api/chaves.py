@@ -10,7 +10,7 @@ import secrets
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from hashlib import sha256
-from typing import Protocol
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -168,7 +168,7 @@ def main(
     try:
         emitida = emitir_chave(
             argv[0],
-            [e for e in ESCOPOS if e in pedidos],
+            cast(list[Escopo], pedidos),
             mac,
             repositorio,
             relogio(),
