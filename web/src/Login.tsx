@@ -17,7 +17,7 @@ import {
   Title,
 } from '@mantine/core'
 import { IconShieldLock } from '@tabler/icons-react'
-import { useState, type SubmitEvent } from 'react'
+import { useRef, useState, type SubmitEvent } from 'react'
 import {
   ContaBloqueada,
   CredencialInvalida,
@@ -26,6 +26,16 @@ import {
 } from './auth/autenticador.ts'
 
 type Etapa = Exclude<ResultadoDaSenha, { tipo: 'logado' }> | { tipo: 'senha' }
+
+const DIGITOS_DO_CODIGO = 6
+
+function mensagemDeErro(falha: unknown) {
+  return falha instanceof CredencialInvalida
+    ? 'Credenciais inválidas. Confira os dados e tente de novo.'
+    : falha instanceof ContaBloqueada
+      ? 'Muitas tentativas erradas. Espere alguns minutos e tente de novo.'
+      : 'Login indisponível no momento.'
+}
 
 export default function Login({
   autenticador,
@@ -37,19 +47,14 @@ export default function Login({
   const [etapa, setEtapa] = useState<Etapa>({ tipo: 'senha' })
   const [erro, setErro] = useState<string | null>(null)
   const [codigo, setCodigo] = useState('')
+  const formularioDeSenha = useRef<HTMLFormElement>(null)
+  const noModal = etapa.tipo !== 'senha'
 
   function voltarAoInicio() {
+    formularioDeSenha.current?.reset()
     setEtapa({ tipo: 'senha' })
     setCodigo('')
     setErro(null)
-  }
-
-  function mensagemDeErro(erro: unknown) {
-    return erro instanceof CredencialInvalida
-      ? 'Credenciais inválidas. Confira os dados e tente de novo.'
-      : erro instanceof ContaBloqueada
-        ? 'Muitas tentativas erradas. Espere alguns minutos e tente de novo.'
-        : 'Login indisponível no momento.'
   }
 
   async function enviarSenha(evento: SubmitEvent<HTMLFormElement>) {
@@ -70,7 +75,7 @@ export default function Login({
 
   async function enviarCodigo(evento: SubmitEvent<HTMLFormElement>) {
     evento.preventDefault()
-    if (etapa.tipo === 'senha') return
+    if (etapa.tipo === 'senha' || codigo.length < DIGITOS_DO_CODIGO) return
     setErro(null)
     try {
       if (etapa.tipo === 'precisa_totp') await autenticador.confirmarTotp(codigo)
@@ -111,7 +116,7 @@ export default function Login({
         </Stack>
       </Box>
       <Center p="xl">
-        <form onSubmit={enviarSenha}>
+        <form ref={formularioDeSenha} onSubmit={enviarSenha}>
           <Stack w={360}>
             <Title order={2}>Entrar</Title>
             <Text c="dimmed" size="sm">
@@ -136,12 +141,12 @@ export default function Login({
             <Button type="submit" size="md" fullWidth>
               Entrar
             </Button>
-            {etapa.tipo === 'senha' && alerta}
+            {!noModal && alerta}
           </Stack>
         </form>
       </Center>
       <Modal
-        opened={etapa.tipo !== 'senha'}
+        opened={noModal}
         onClose={voltarAoInicio}
         title="Verificação em duas etapas"
         centered
@@ -164,10 +169,10 @@ export default function Login({
               </>
             )}
             <Text size="sm" ta="center">
-              Digite o código de 6 dígitos do seu aplicativo autenticador.
+              Digite o código de {DIGITOS_DO_CODIGO} dígitos do seu aplicativo autenticador.
             </Text>
             <PinInput
-              length={6}
+              length={DIGITOS_DO_CODIGO}
               type="number"
               size="lg"
               oneTimeCode
@@ -176,10 +181,10 @@ export default function Login({
               value={codigo}
               onChange={setCodigo}
             />
-            <Button type="submit" fullWidth>
+            <Button type="submit" fullWidth disabled={codigo.length < DIGITOS_DO_CODIGO}>
               Confirmar
             </Button>
-            {etapa.tipo !== 'senha' && alerta}
+            {noModal && alerta}
           </Stack>
         </form>
       </Modal>

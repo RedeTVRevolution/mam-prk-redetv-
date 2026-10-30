@@ -113,6 +113,39 @@ test('conta bloqueada por tentativas erradas pede para esperar', async () => {
   expect((await screen.findByRole('alert')).textContent).toContain('Muitas tentativas')
 })
 
+test('falha inesperada no login mostra login indisponível', async () => {
+  const usuario = userEvent.setup()
+  const auth = autenticador()
+  auth.entrar = async () => {
+    throw new Error('rede fora')
+  }
+  render(<App autenticador={auth} />)
+  await screen.findByLabelText(/^E-mail/)
+
+  await preencherSenha(usuario)
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Login indisponível')
+})
+
+test('código incompleto não pode ser confirmado', async () => {
+  const usuario = userEvent.setup()
+  const auth = autenticador()
+  let tentativas = 0
+  auth.confirmarTotp = async () => {
+    tentativas++
+  }
+  render(<App autenticador={auth} />)
+  await screen.findByLabelText(/^E-mail/)
+  await preencherSenha(usuario)
+
+  await digitarCodigo(usuario, '123')
+
+  const confirmar = screen.getByRole('button', { name: 'Confirmar' })
+  expect(confirmar.hasAttribute('disabled')).toBe(true)
+  await usuario.click(confirmar)
+  expect(tentativas).toBe(0)
+})
+
 test('código TOTP errado mostra erro e não entra', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
@@ -151,7 +184,8 @@ test('fechar o modal do autenticador volta ao início do login', async () => {
   await usuario.click(screen.getByRole('button', { name: 'Fechar' }))
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  expect(screen.getByLabelText(/^E-mail/)).toBeTruthy()
+  expect((screen.getByLabelText(/^E-mail/) as HTMLInputElement).value).toBe('')
+  expect((screen.getByLabelText(/^Senha/) as HTMLInputElement).value).toBe('')
 })
 
 test('o botão sair volta ao login e apaga a sessão', async () => {
