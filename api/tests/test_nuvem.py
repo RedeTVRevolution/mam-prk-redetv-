@@ -244,7 +244,6 @@ def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
         next(armazenamento.abrir_decupagem("nao-existe"))
 
 
-@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 def _registro_de_chave(id: str) -> RegistroDeChave:
     return RegistroDeChave(
         id=id,
@@ -256,6 +255,7 @@ def _registro_de_chave(id: str) -> RegistroDeChave:
     )
 
 
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestRepositorioDeChavesFirestore:
     @pytest.fixture
     def chaves(self) -> RepositorioDeChavesFirestore:
@@ -391,8 +391,15 @@ class TestRepositorioDePapeisFirestore:
     ) -> None:
         papeis.salvar("u1", ["curador", "operador"])
 
-        assert papeis.obter("u1") == ["curador", "operador"]
+        assert papeis.obter("u1") == ["operador", "curador"]
         assert papeis.obter("u2") is None
+
+    def test_papel_desconhecido_no_documento_e_ignorado(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        papeis._colecao.document("u1").set({"papeis": ["diretoria", "editor"]})
+
+        assert papeis.obter("u1") == ["editor"]
 
     def test_salvar_de_novo_troca_os_papeis(
         self, papeis: RepositorioDePapeisFirestore

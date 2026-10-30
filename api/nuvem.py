@@ -18,7 +18,7 @@ from api.jobs import (
     Job,
     ServicoIndisponivel,
 )
-from api.papeis import Papel
+from api.papeis import PAPEIS, Papel
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
@@ -135,7 +135,11 @@ class RepositorioDePapeisFirestore:
 
     def obter(self, uid: str) -> list[Papel] | None:
         doc = self._colecao.document(uid).get()
-        return list((doc.to_dict() or {}).get("papeis", [])) if doc.exists else None
+        if not doc.exists:
+            return None
+        # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
+        guardados = (doc.to_dict() or {}).get("papeis", [])
+        return [p for p in PAPEIS if p in guardados]
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         self._colecao.document(uid).set({"papeis": papeis})
