@@ -1269,7 +1269,11 @@ test('as setas movem a alça 100 ms, Shift move 1 s, e Enter grava item.tempos',
     versao: 'v1',
   })
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  expect(screen.queryByRole('slider', { name: 'Início da ocorrência' })).toBeNull()
+  // Com a decupagem recarregada (o mock devolve a pauta corrigida em 00:32), a seleção antiga
+  // deixa de valer, as alças somem e selecionar de novo parte do intervalo novo.
+  await waitFor(() => expect(screen.queryByRole('slider', { name: 'Início da ocorrência' })).toBeNull())
+  await usuario.click(await screen.findByLabelText('Pautas 00:32'))
+  expect(alca('Início').getAttribute('aria-valuenow')).toBe('32000')
 })
 
 test('cancelar o modal devolve a ocorrência ao intervalo anterior', async () => {
@@ -1294,7 +1298,7 @@ test('as alças não passam uma da outra nem saem do vídeo', async () => {
   for (let i = 0; i < 31; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowRight', shiftKey: true })
   expect(alca('Início').getAttribute('aria-valuenow')).toBe('60000')
   for (let i = 0; i < 91; i++) fireEvent.keyDown(alca('Fim'), { key: 'ArrowRight', shiftKey: true })
-  // Sem metadata, a duração é o maior fim da decupagem (02:30).
+  // Sem metadata, a linha do tempo vai até o maior fim da decupagem (02:30).
   expect(alca('Fim').getAttribute('aria-valuenow')).toBe('150000')
   for (let i = 0; i < 61; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowLeft', shiftKey: true })
   expect(alca('Início').getAttribute('aria-valuenow')).toBe('0')
@@ -1318,6 +1322,27 @@ test('arrastar a alça leva o player ao tempo dela e soltar abre o modal', async
 
   const modal = within(await screen.findByRole('dialog'))
   expect(modal.getByText('Depois: 00:45.000–01:00.000')).toBeTruthy()
+})
+
+test('o gesto cancelado encerra o arraste: a alça não segue o ponteiro sem botão', async () => {
+  const usuario = userEvent.setup()
+  const player = await selecionarNaLinha(usuario, 'Pautas 00:30')
+
+  const inicio = alca('Início')
+  vi.spyOn(inicio.parentElement as HTMLElement, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    width: 1500,
+  } as DOMRect)
+  fireEvent.pointerDown(inicio, { pointerId: 1, clientX: 300 })
+  fireEvent.pointerMove(inicio, { pointerId: 1, clientX: 400 })
+  fireEvent.pointerCancel(inicio, { pointerId: 1 })
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.click(modal.getByRole('button', { name: 'Cancelar' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+  fireEvent.pointerMove(alca('Início'), { pointerId: 1, clientX: 500 })
+  expect(alca('Início').getAttribute('aria-valuenow')).toBe('30000')
+  expect(player.currentTime).toBe(40)
 })
 
 test('a alça de uma aparição grava item.tempos com a ocorrência da pessoa', async () => {

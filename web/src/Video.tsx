@@ -132,6 +132,7 @@ const TIPOS_DE_COMERCIAL = [
 
 export interface Decupagem {
   versao_decupagem?: string
+  video?: { duracao_ms: number }
   pautas: Pauta[]
   pessoas: Pessoa[]
   planos: Plano[]
@@ -158,6 +159,8 @@ interface Ocorrencia extends Intervalo {
 
 /** A ocorrência selecionada na linha do tempo, com o intervalo de antes da correção. */
 interface Selecao {
+  /** A decupagem em que a ocorrência foi selecionada: a chave é um índice e só vale nela. */
+  decupagem: Decupagem
   chave: string
   alvo: Alvo
   original: Intervalo
@@ -305,11 +308,15 @@ function maiorFim(faixas: Faixa[]): number {
   return Math.max(0, ...faixas.flatMap((f) => f.ocorrencias.map((o) => o.fim_ms)))
 }
 
-/** Os comandos da edição por alças na linha do tempo; só existem para quem tem `decupagem.editar`. */
-interface EdicaoDaLinha {
+type Borda = 'inicio' | 'fim'
+
+/** Os comandos das alças da linha do tempo; só existem para quem tem `decupagem.editar`. */
+interface AlcasDaLinha {
   selecionada: string | null
+  /** Até onde a alça de fim vai: a duração do vídeo na decupagem, que é o que a API confere. */
+  limiteMs: number
   aoSelecionar: (o: Ocorrencia) => void
-  aoMover: (borda: 'inicio' | 'fim', ms: number) => void
+  aoMover: (borda: Borda, ms: number) => void
   aoSoltar: () => void
 }
 
@@ -321,19 +328,26 @@ function AlcaDoTempo({
   maxMs,
   duracaoMs,
   trilha,
-  edicao,
+  alcas,
 }: {
-  borda: 'inicio' | 'fim'
+  borda: Borda
   ms: number
   minMs: number
   maxMs: number
   duracaoMs: number
   trilha: RefObject<HTMLDivElement | null>
-  edicao: EdicaoDaLinha
+  alcas: AlcasDaLinha
 }) {
   const arrastando = useRef(false)
   const limitar = (valor: number) => Math.round(Math.min(maxMs, Math.max(minMs, valor)))
-  const mover = (valor: number) => edicao.aoMover(borda, limitar(valor))
+  const mover = (valor: number) => alcas.aoMover(borda, limitar(valor))
+  // Soltar, cancelar o gesto ou perder a captura encerram o arraste: sem isso, a alça
+  // seguiria o ponteiro sem botão pressionado.
+  const soltar = () => {
+    if (!arrastando.current) return
+    arrastando.current = false
+    alcas.aoSoltar()
+  }
   return (
     <Box
       role="slider"
@@ -365,15 +379,13 @@ function AlcaDoTempo({
         if (!arrastando.current || !caixa || caixa.width === 0) return
         mover(((e.clientX - caixa.left) / caixa.width) * duracaoMs)
       }}
-      onPointerUp={() => {
-        if (!arrastando.current) return
-        arrastando.current = false
-        edicao.aoSoltar()
-      }}
+      onPointerUp={soltar}
+      onPointerCancel={soltar}
+      onLostPointerCapture={soltar}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
         if (e.key === 'Enter') {
           e.preventDefault()
-          edicao.aoSoltar()
+          alcas.aoSoltar()
           return
         }
         const sentido = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
@@ -390,15 +402,15 @@ function FaixaDoTempo({
   faixa,
   duracaoMs,
   saltar,
-  edicao,
+  alcas,
 }: {
   faixa: Faixa
   duracaoMs: number
   saltar: (ms: number) => void
-  edicao?: EdicaoDaLinha
+  alcas?: AlcasDaLinha
 }) {
   const trilha = useRef<HTMLDivElement>(null)
-  const selecionada = faixa.ocorrencias.find((o) => o.chave === edicao?.selecionada)
+  const selecionada = faixa.ocorrencias.find((o) => o.chave === alcas?.selecionada)
   const ordenadas = [...faixa.ocorrencias].sort((a, b) => a.inicio_ms - b.inicio_ms)
   const secoes = []
   // Uma faixa é uma fileira só: o trecho que se sobrepõe ao anterior não é desenhado de
@@ -426,20 +438,20 @@ function FaixaDoTempo({
         role="button"
         tabIndex={0}
         aria-label={`${faixa.nome} ${tempo(o.inicio_ms)}`}
-        aria-pressed={edicao && o.alvo ? o.chave === edicao.selecionada : undefined}
+        aria-pressed={alcas && o.alvo ? o.chave === alcas.selecionada : undefined}
         style={{
           cursor: 'pointer',
-          outline: o.chave === edicao?.selecionada ? '2px solid white' : undefined,
+          outline: o.chave === alcas?.selecionada ? '2px solid white' : undefined,
         }}
         onClick={() => {
           saltar(o.inicio_ms)
-          if (o.alvo) edicao?.aoSelecionar(o)
+          if (o.alvo) alcas?.aoSelecionar(o)
         }}
         onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
           if (e.key !== 'Enter' && e.key !== ' ') return
           e.preventDefault()
           saltar(o.inicio_ms)
-          if (o.alvo) edicao?.aoSelecionar(o)
+          if (o.alvo) alcas?.aoSelecionar(o)
         }}
       />,
     )
@@ -454,7 +466,7 @@ function FaixaDoTempo({
         <Progress.Root size={14} radius="xs" bg="dark.6">
           {secoes}
         </Progress.Root>
-        {edicao && selecionada && (
+        {alcas && selecionada && (
           <>
             <AlcaDoTempo
               borda="inicio"
@@ -463,16 +475,16 @@ function FaixaDoTempo({
               maxMs={selecionada.fim_ms}
               duracaoMs={duracaoMs}
               trilha={trilha}
-              edicao={edicao}
+              alcas={alcas}
             />
             <AlcaDoTempo
               borda="fim"
               ms={selecionada.fim_ms}
               minMs={selecionada.inicio_ms}
-              maxMs={duracaoMs}
+              maxMs={Math.min(duracaoMs, alcas.limiteMs)}
               duracaoMs={duracaoMs}
               trilha={trilha}
-              edicao={edicao}
+              alcas={alcas}
             />
           </>
         )}
@@ -604,7 +616,7 @@ export default function Video({
   // Alças da linha do tempo: a ocorrência selecionada, o intervalo arrastado (`null` = sem
   // mudança) e se o modal de confirmação está aberto.
   const [selecao, setSelecao] = useState<Selecao | null>(null)
-  const [ajuste, setAjuste] = useState<Intervalo | null>(null)
+  const [arrastado, setArrastado] = useState<Intervalo | null>(null)
   const [confirmandoTempos, setConfirmandoTempos] = useState(false)
 
   if (!concluido) {
@@ -634,40 +646,46 @@ export default function Video({
   }
 
   const { decupagem, reproducao } = carga
+  // Depois de recarregar a decupagem, a seleção antiga não vale mais (os índices podem ter
+  // mudado). O modal aberto segue com ela, para mostrar o antes e depois que enviou.
+  const selecaoAtual = selecao?.decupagem === decupagem ? selecao : null
   const faixas = faixasDe(decupagem).map((f) =>
-    selecao && ajuste
+    selecaoAtual && arrastado
       ? {
           ...f,
-          ocorrencias: f.ocorrencias.map((o) => (o.chave === selecao.chave ? { ...o, ...ajuste } : o)),
+          ocorrencias: f.ocorrencias.map((o) => (o.chave === selecaoAtual.chave ? { ...o, ...arrastado } : o)),
         }
       : f,
   )
-  const edicao: EdicaoDaLinha | undefined = podeEditar
+  const alcas: AlcasDaLinha | undefined = podeEditar
     ? {
-        selecionada: selecao?.chave ?? null,
+        selecionada: selecaoAtual?.chave ?? null,
+        limiteMs: decupagem.video?.duracao_ms ?? Infinity,
         aoSelecionar: (o) => {
-          if (!o.alvo || o.chave === selecao?.chave) return
-          setAjuste(null)
+          if (!o.alvo || o.chave === selecaoAtual?.chave) return
+          setArrastado(null)
           setSelecao({
+            decupagem,
             chave: o.chave,
             alvo: o.alvo,
             original: { inicio_ms: o.inicio_ms, fim_ms: o.fim_ms },
           })
         },
         aoMover: (borda, ms) => {
-          if (!selecao) return
-          setAjuste({ ...(ajuste ?? selecao.original), [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms })
+          if (!selecaoAtual) return
+          const { original } = selecaoAtual
+          setArrastado((a) => ({ ...(a ?? original), [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms }))
           saltar(ms)
         },
         aoSoltar: () => {
-          if (!selecao) return
+          if (!selecaoAtual) return
           if (
-            ajuste &&
-            (ajuste.inicio_ms !== selecao.original.inicio_ms ||
-              ajuste.fim_ms !== selecao.original.fim_ms)
+            arrastado &&
+            (arrastado.inicio_ms !== selecaoAtual.original.inicio_ms ||
+              arrastado.fim_ms !== selecaoAtual.original.fim_ms)
           )
             setConfirmandoTempos(true)
-          else setAjuste(null)
+          else setArrastado(null)
         },
       }
     : undefined
@@ -723,7 +741,7 @@ export default function Video({
                   faixa={faixa}
                   duracaoMs={duracaoMs}
                   saltar={saltar}
-                  edicao={edicao}
+                  alcas={alcas}
                 />
               ))}
             </Stack>
@@ -993,19 +1011,19 @@ export default function Video({
       <CorrigirTempos
         key={confirmandoTempos ? 'tempos-aberto' : 'tempos-fechado'}
         selecao={confirmandoTempos ? selecao : null}
-        depois={ajuste}
+        depois={arrastado}
         versao={decupagem.versao_decupagem ?? ''}
         autenticador={autenticador}
         jobId={job.id}
         aoFechar={() => {
           // Cancelar devolve a ocorrência ao intervalo anterior.
           setConfirmandoTempos(false)
-          setAjuste(null)
+          setArrastado(null)
         }}
         aoSalvar={() => {
+          // O intervalo arrastado fica na linha do tempo até a decupagem recarregada chegar;
+          // aí a seleção antiga deixa de valer e as alças somem.
           setConfirmandoTempos(false)
-          setAjuste(null)
-          setSelecao(null)
           recarregarDecupagem()
         }}
         aoVersaoDesatualizada={recarregarDecupagem}
