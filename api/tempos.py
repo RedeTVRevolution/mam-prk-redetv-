@@ -31,14 +31,12 @@ def _ajustar[T: _Intervalo](item: T, cortes: Sequence[int], limite_ms: int | Non
     inicio, fim = ponta(item.inicio_ms), ponta(item.fim_ms)
     if inicio >= fim or (inicio, fim) == (item.inicio_ms, item.fim_ms):
         return item
-    return item.model_copy(
-        update={
-            "inicio_ms": inicio,
-            "fim_ms": fim,
-            "inicio_modelo_ms": item.inicio_ms,
-            "fim_modelo_ms": item.fim_ms,
-        }
-    )
+    # Numa segunda passada, os tempos do modelo já guardados ficam.
+    if item.inicio_modelo_ms is None:
+        modelo = {"inicio_modelo_ms": item.inicio_ms, "fim_modelo_ms": item.fim_ms}
+    else:
+        modelo = {}
+    return item.model_copy(update={"inicio_ms": inicio, "fim_ms": fim, **modelo})
 
 
 def aplicar_regra_de_tempos(

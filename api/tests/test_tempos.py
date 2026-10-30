@@ -179,3 +179,24 @@ def test_resultado_continua_valido() -> None:
     d = decupagem(planos=[(4_800, 10_300)], aparicoes=[(5_000, 9_000)])
     r = aplicar_regra_de_tempos(d, [5_000, 10_000])
     assert Decupagem.model_validate(r.model_dump()) == r
+
+
+def test_aparicao_e_comercial_ajustados_guardam_os_tempos_do_modelo() -> None:
+    d = decupagem(
+        aparicoes=[(5_000, 9_000)],
+        comerciais=[("merchan_apresentador", 40_000, 50_000)],
+    )
+    r = aplicar_regra_de_tempos(d, [5_500, 8_200, 40_500, 49_900])
+    a = r.pessoas[0].na_imagem[0]
+    assert (a.inicio_modelo_ms, a.fim_modelo_ms) == (5_000, 9_000)
+    c = r.comerciais[0]
+    assert (c.inicio_modelo_ms, c.fim_modelo_ms) == (40_000, 50_000)
+
+
+def test_segunda_passada_mantem_os_tempos_do_modelo() -> None:
+    d = decupagem(planos=[(0, 10_300)])
+    r = aplicar_regra_de_tempos(d, [10_000])
+    r = aplicar_regra_de_tempos(r, [9_000])
+    p = r.planos[0]
+    assert (p.inicio_ms, p.fim_ms) == (0, 9_000)
+    assert (p.inicio_modelo_ms, p.fim_modelo_ms) == (0, 10_300)
