@@ -38,9 +38,12 @@ TipoNovo = Literal[
     "pessoa.aparicao_para_mencao",
     "pessoa.mencao_para_aparicao",
     "pessoa.acrescentar_aparicao",
+    "plano.descricao",
+    "plano.limpo",
+    "fala.texto",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar"]
-TipoDoItem = Literal["pessoa", "pauta", "comercial"]
+TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala"]
 CORRIGIVEIS = get_args(TipoNovo)
 Lista = Literal["na_imagem", "citada_na_fala", "citada_no_texto"]
 MENCOES = ("citada_na_fala", "citada_no_texto")
@@ -61,6 +64,11 @@ CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencia")
 LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
 LIMITE_DO_TEXTO = 2000  # o mesmo de `Texto` na decupagem
+LIMITE_DO_JSON = 12000  # a descrição de plano e o texto de fala vão em JSON
+LIMITE_DE_OBJETOS = 50
+# Os planos seguem os cortes: o plano da versão nova está a até 1 s dos ancorados.
+TOLERANCIA_DO_PLANO_MS = 1000
+DE_PLANO_OU_FALA = ("plano.descricao", "plano.limpo", "fala.texto")
 _TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 
 
@@ -214,6 +222,94 @@ class NovaAparicao(BaseModel):
         return self
 
 
+class NovaDescricao(BaseModel):
+    """O valor de um `plano.descricao`: ambiente, ação e objetos."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ambiente: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+        ),
+    ]
+    acao: (
+        Annotated[
+            str, StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_TEXTO)
+        ]
+        | None
+    ) = None
+    objetos: Annotated[
+        list[
+            Annotated[
+                str,
+                StringConstraints(
+                    strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+                ),
+            ]
+        ],
+        Field(max_length=LIMITE_DE_OBJETOS),
+    ] = []
+
+    @field_validator("ambiente", "objetos")
+    @classmethod
+    def _sem_controle_nos_rotulos(cls, valor: str | list[str]) -> str | list[str]:
+        for texto in [valor] if isinstance(valor, str) else valor:
+            _sem_controle(texto)
+        return valor
+
+    @field_validator("acao")
+    @classmethod
+    def _acao(cls, valor: str | None) -> str | None:
+        if not valor:
+            return None
+        return _sem_controle_salvo_quebra(valor)
+
+
+class NovoTexto(BaseModel):
+    """O valor de um `fala.texto`: o texto e o locutor; os tempos não mudam."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    texto: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_TEXTO
+        ),
+    ]
+    locutor: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+        ),
+    ]
+
+    @field_validator("texto")
+    @classmethod
+    def _texto(cls, valor: str) -> str:
+        return _sem_controle_salvo_quebra(valor)
+
+    @field_validator("locutor")
+    @classmethod
+    def _locutor(cls, valor: str) -> str:
+        return _sem_controle(valor)
+
+
+def _json_canonico(valor: dict[str, Any]) -> str:
+    return json.dumps(valor, sort_keys=True, ensure_ascii=False)
+
+
+def _valor_de_plano_ou_fala(tipo: str, valor: str) -> str:
+    """A forma única em que a correção de plano ou fala é guardada."""
+    if tipo == "plano.limpo":
+        if valor not in ("true", "false"):
+            raise ValueError("o valor de plano.limpo é true ou false")
+        return valor
+    if tipo == "plano.descricao":
+        return _json_canonico(NovaDescricao.model_validate_json(valor).model_dump())
+    return _json_canonico(NovoTexto.model_validate_json(valor).model_dump())
+
+
 def _json_da_aparicao(aparicao: NovaAparicao) -> str:
     return json.dumps(
         aparicao.model_dump(exclude_none=True), sort_keys=True, ensure_ascii=False
@@ -243,11 +339,12 @@ class NovaCorrecao(BaseModel):
     # esquema; `comercial.acrescentar`: o JSON do comercial; `pessoa.nao_e`:
     # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
     # `pessoa.mencao_para_aparicao`: a evidência; `pessoa.acrescentar_aparicao`:
-    # o JSON da aparição.
+    # o JSON da aparição; `plano.descricao`: o JSON {ambiente, acao, objetos};
+    # `plano.limpo`: "true" ou "false"; `fala.texto`: o JSON {texto, locutor}.
     valor: Annotated[
         str,
         StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_TEXTO
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_JSON
         ),
     ]
     motivo: Motivo
@@ -267,8 +364,12 @@ class NovaCorrecao(BaseModel):
         de_pessoa = self.tipo in DE_OCORRENCIA or self.tipo_do_item == "pessoa"
         if de_pessoa != (self.ocorrencia is not None):
             raise ValueError("ocorrencia vale só para aparição e menção de pessoa")
+        if self.tipo not in DE_PLANO_OU_FALA and len(self.valor) > LIMITE_DO_TEXTO:
+            raise ValueError("valor longo demais")
         if self.tipo == "item.tempos":
             tempos_de(self.valor)
+        elif self.tipo in DE_PLANO_OU_FALA:
+            self.valor = _valor_de_plano_ou_fala(self.tipo, self.valor)
         elif self.tipo in DE_OCORRENCIA:
             self.valor = self._valor_da_ocorrencia()
         elif self.tipo == ACRESCENTAR_APARICAO:
@@ -429,7 +530,24 @@ def _tipo_do_item(tipo: str, escolhido: str | None = None) -> TipoDoItem:
         return "pessoa"
     if tipo.startswith("comercial.") or escolhido == "comercial":
         return "comercial"
+    if tipo.startswith("plano."):
+        return "plano"
+    if tipo.startswith("fala."):
+        return "fala"
     return "pauta"
+
+
+def _planos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    return [p for p in modelo.get("planos", []) if isinstance(p, dict)]
+
+
+def _falas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    """As falas não têm id no esquema: o id é a posição, como nos comerciais."""
+    return [
+        {"id": f"fal{n:03d}", **f}
+        for n, f in enumerate(modelo.get("transcricao", []))
+        if isinstance(f, dict)
+    ]
 
 
 def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
@@ -437,6 +555,10 @@ def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
         return _pessoas(modelo)
     if tipo_do_item == "comercial":
         return _comerciais(modelo)
+    if tipo_do_item == "plano":
+        return _planos(modelo)
+    if tipo_do_item == "fala":
+        return _falas(modelo)
     return _pautas(modelo)
 
 
@@ -459,6 +581,10 @@ def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, in
 def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
     if tipo_do_item == "comercial":
         return f"{item['marca']} ({item['tipo']})"
+    if tipo_do_item == "plano":
+        return str(item["ambiente"])
+    if tipo_do_item == "fala":
+        return f"{item['locutor']}: {str(item['texto'])[:60]}"
     return str(item["nome" if tipo_do_item == "pessoa" else "titulo"])
 
 
@@ -476,6 +602,18 @@ def _valor_do_item(item: dict[str, Any], tipo: str) -> str:
         return str(item["tipo"])
     if tipo == "comercial.acrescentar":
         return _json_do_comercial(item)
+    if tipo == "plano.descricao":
+        return _json_canonico(
+            {
+                "ambiente": item["ambiente"],
+                "acao": item.get("acao") or None,
+                "objetos": item.get("objetos", []),
+            }
+        )
+    if tipo == "plano.limpo":
+        return "true" if item["plano_limpo"] else "false"
+    if tipo == "fala.texto":
+        return _json_canonico({"texto": item["texto"], "locutor": item["locutor"]})
     inicio, fim = _intervalo_da_pauta(item)
     return f"{inicio}-{fim}"
 
@@ -626,14 +764,17 @@ def _ancora_do_item(item: dict[str, Any], tipo_do_item: str, versao: str) -> Anc
     if tipo_do_item == "pessoa":
         return _ancora_da_pessoa(item, versao)
     inicio, fim = _intervalo_da_pauta(item)
+    # Plano e fala se casam pelo intervalo: a identidade é só o tipo.
+    if tipo_do_item == "comercial":
+        identidade = identidade_do_comercial(item)
+    elif tipo_do_item in ("plano", "fala"):
+        identidade = tipo_do_item
+    else:
+        identidade = normalizar(str(item["titulo"]))
     return Ancora(
         versao=versao,
-        tipo_do_item="comercial" if tipo_do_item == "comercial" else "pauta",
-        identidade=(
-            identidade_do_comercial(item)
-            if tipo_do_item == "comercial"
-            else normalizar(str(item["titulo"]))
-        ),
+        tipo_do_item=_tipo_do_item(f"{tipo_do_item}."),
+        identidade=identidade,
         inicio_ms=inicio,
         fim_ms=fim,
     )
@@ -830,6 +971,16 @@ def _sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return sobreposicao >= 0 and sobreposicao * 2 >= menor
 
 
+def _sobrepoe_de_verdade(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """Sobreposição positiva: trechos que só se encostam não são o mesmo.
+
+    Um instante (duração zero) conta se cai dentro do outro intervalo.
+    """
+    sobreposicao = min(a[1], b[1]) - max(a[0], b[0])
+    instante = a[0] == a[1] or b[0] == b[1]
+    return sobreposicao > 0 or (sobreposicao == 0 and instante)
+
+
 def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
     """Itens da versão nova que a correção pode estar apontando.
 
@@ -844,6 +995,19 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             p
             for p in _pautas(modelo)
             if _sobrepoe_metade(ancora, _intervalo_da_pauta(p))
+        ]
+    if c.ancora.tipo_do_item == "plano":
+        return [
+            p
+            for p in _planos(modelo)
+            if abs(p["inicio_ms"] - ancora[0]) <= TOLERANCIA_DO_PLANO_MS
+            and abs(p["fim_ms"] - ancora[1]) <= TOLERANCIA_DO_PLANO_MS
+        ]
+    if c.ancora.tipo_do_item == "fala":
+        return [
+            f
+            for f in _falas(modelo)
+            if _sobrepoe_de_verdade(ancora, _intervalo_da_pauta(f))
         ]
     if c.ancora.tipo_do_item == "comercial":
         identidades = {c.ancora.identidade, _identidade_com_o_depois(c)}
@@ -889,6 +1053,8 @@ def _ja_traz_o_depois(c: Correcao, item: dict[str, Any]) -> bool:
         return normalizar(str(item["marca"])) == normalizar(c.depois)
     if c.tipo == "comercial.tipo":
         return str(item["tipo"]) == c.depois
+    if c.tipo in DE_PLANO_OU_FALA:
+        return _valor_do_item(item, c.tipo) == c.depois
     return False
 
 
@@ -965,6 +1131,12 @@ def reconciliar(
     return resultado
 
 
+_CHAVE_DO_ITEM = {
+    "pauta": "pautas",
+    "comercial": "comerciais",
+    "plano": "planos",
+    "fala": "transcricao",
+}
 _CAMPO_DO_TIPO = {
     "pauta.titulo": "titulo",
     "pauta.resumo": "resumo",
@@ -976,15 +1148,25 @@ _CAMPO_DO_TIPO = {
 def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
     """Pauta ou comercial é achado pelo id: na versão atual o id do item é
     estável, e a reapontada já traz o id novo."""
-    itens = (
-        _pautas(resultado)
-        if c.ancora.tipo_do_item == "pauta"
-        else ([i for i in resultado.get("comerciais", []) if isinstance(i, dict)])
-    )
-    for item in itens:
-        if item.get("id") != c.item_id:
+    chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
+    for item in resultado.get(chave, []):
+        if not isinstance(item, dict) or item.get("id") != c.item_id:
             continue
-        if c.tipo == "item.tempos":
+        if c.tipo == "plano.descricao":
+            descricao = json.loads(c.depois)
+            item["ambiente"], item["objetos"] = (
+                descricao["ambiente"],
+                descricao["objetos"],
+            )
+            if descricao["acao"] is None:
+                item.pop("acao", None)
+            else:
+                item["acao"] = descricao["acao"]
+        elif c.tipo == "plano.limpo":
+            item["plano_limpo"] = c.depois == "true"
+        elif c.tipo == "fala.texto":
+            item.update(json.loads(c.depois))
+        elif c.tipo == "item.tempos":
             item["inicio_ms"], item["fim_ms"] = tempos_de(c.depois)
         else:
             item[_CAMPO_DO_TIPO[c.tipo]] = c.depois
@@ -1109,7 +1291,18 @@ def aplicar(
     comerciais = [c for c in resultado.get("comerciais", []) if isinstance(c, dict)]
     for n, comercial in enumerate(comerciais):
         comercial["id"] = f"com{n:03d}"
-    for item in [*pessoas, *_pautas(resultado), *comerciais]:
+    falas = []
+    for n, fala in enumerate(resultado.get("transcricao", [])):
+        if isinstance(fala, dict):
+            fala["id"] = f"fal{n:03d}"
+            falas.append(fala)
+    for item in [
+        *pessoas,
+        *_pautas(resultado),
+        *comerciais,
+        *_planos(resultado),
+        *falas,
+    ]:
         item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]

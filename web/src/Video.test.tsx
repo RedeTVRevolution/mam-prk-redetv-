@@ -30,7 +30,7 @@ const decupagem = {
   comerciais: [
     { id: 'com000', marca: 'Marca X', tipo: 'intervalo', evidencia: 'logo', inicio_ms: 90_000, fim_ms: 120_000 },
   ],
-  transcricao: [{ locutor: 'Locutor', texto: 'Boa noite', inicio_ms: 1_000, fim_ms: 3_000 }],
+  transcricao: [{ id: 'fal000', locutor: 'Locutor', texto: 'Boa noite', inicio_ms: 1_000, fim_ms: 3_000 }],
 }
 
 const TOKEN = 'Bearer token-de-ana@redetv.com.br'
@@ -296,7 +296,7 @@ test('aba Planos usa a ação, ou o ambiente se não houver, e salta', async () 
   const player = await jogador()
   await usuario.click(aba('Planos'))
 
-  expect(screen.getByText('estúdio', { selector: 'span' })).toBeTruthy()
+  expect(screen.getByText('estúdio', { selector: 'p' })).toBeTruthy()
   expect(screen.getByText('rua · 02:20')).toBeTruthy()
   await usuario.click(screen.getByText('carro passa'))
   expect(player.currentTime).toBe(140)
@@ -1105,4 +1105,125 @@ test('corrigir tempos sem mudar nada não salva', async () => {
   await usuario.type(modal.getByLabelText('Motivo'), 'conferi')
 
   expect(modal.getByRole('button', { name: 'Salvar' }).hasAttribute('disabled')).toBe(true)
+})
+
+test('o Editor corrige descrição e plano limpo do plano em um modal', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Planos'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir plano estúdio 00:00' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Ambiente'))
+  await usuario.type(modal.getByLabelText('Ambiente'), 'redação')
+  await usuario.type(modal.getByLabelText('Ação'), 'repórter ao vivo')
+  await usuario.type(modal.getByLabelText('Objetos (separados por vírgula)'), 'mesa, câmera')
+  await usuario.click(modal.getByLabelText('Plano limpo'))
+  await usuario.type(modal.getByLabelText('Motivo'), 'plano errado')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(2))
+  expect(correcoesRecebidas).toEqual([
+    {
+      tipo: 'plano.descricao',
+      valor: JSON.stringify({
+        ambiente: 'redação',
+        acao: 'repórter ao vivo',
+        objetos: ['mesa', 'câmera'],
+      }),
+      item_id: 'pl1',
+      motivo: 'plano errado',
+      versao: 'v1',
+    },
+    { tipo: 'plano.limpo', valor: 'true', item_id: 'pl1', motivo: 'plano errado', versao: 'v1' },
+  ])
+})
+
+test('o modal do plano só envia o que mudou e exige o motivo', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Planos'))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir plano rua 02:20' }))
+  const modal = within(await screen.findByRole('dialog'))
+  const salvar = modal.getByRole('button', { name: 'Salvar' }) as HTMLButtonElement
+  expect(salvar.disabled).toBe(true)
+
+  await usuario.click(modal.getByLabelText('Plano limpo'))
+  expect(salvar.disabled).toBe(true)
+  await usuario.type(modal.getByLabelText('Motivo'), 'não era limpo')
+  await usuario.click(salvar)
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toMatchObject({
+    tipo: 'plano.limpo',
+    valor: 'false',
+    item_id: 'pl2',
+  })
+})
+
+test('o Editor corrige o texto e o locutor da fala', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Fala'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir fala 00:01' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Texto'))
+  await usuario.type(modal.getByLabelText('Texto'), 'Boa noite, Brasil')
+  await usuario.clear(modal.getByLabelText('Locutor'))
+  await usuario.type(modal.getByLabelText('Locutor'), 'Maria')
+  await usuario.type(modal.getByLabelText('Motivo'), 'ouvi de novo')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toEqual({
+    tipo: 'fala.texto',
+    valor: JSON.stringify({ texto: 'Boa noite, Brasil', locutor: 'Maria' }),
+    item_id: 'fal000',
+    motivo: 'ouvi de novo',
+    versao: 'v1',
+  })
+})
+
+test('plano e fala revisados ganham o selo e sem permissão não há botão de corrigir', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      HttpResponse.json({
+        ...decupagem,
+        versao_decupagem: 'v1',
+        planos: [{ ...decupagem.planos[0], origem: 'revisao', plano_limpo: true }],
+        transcricao: [{ ...decupagem.transcricao[0], origem: 'revisao' }],
+      }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const painel = within(await screen.findByLabelText('Decupagem'))
+
+  await usuario.click(aba('Planos'))
+  expect(await painel.findByText('revisado')).toBeTruthy()
+  expect(painel.getByText('limpo')).toBeTruthy()
+  expect(painel.queryByRole('button', { name: /Corrigir plano/ })).toBeNull()
+  await usuario.click(aba('Fala'))
+  expect(await painel.findByText('revisado')).toBeTruthy()
+  expect(painel.queryByRole('button', { name: /Corrigir fala/ })).toBeNull()
+})
+
+test('422 no plano mostra o aviso no modal', async () => {
+  statusDoPost = 422
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Planos'))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir plano estúdio 00:00' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.click(modal.getByLabelText('Plano limpo'))
+  await usuario.type(modal.getByLabelText('Motivo'), 'm')
+
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  expect((await modal.findByRole('alert')).textContent).toContain('não foi encontrado')
 })

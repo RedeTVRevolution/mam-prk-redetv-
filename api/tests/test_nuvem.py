@@ -556,6 +556,33 @@ class TestRepositorioDeCorrecoesFirestore:
             lista="na_imagem", inicio_ms=1000, fim_ms=5000
         )
 
+    def test_guarda_a_correcao_de_plano_e_de_fala(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        base = self._correcao("p1", "j1", 1)
+        for cid, tipo, tipo_do_item, depois in [
+            ("p1", "plano.limpo", "plano", "true"),
+            ("p2", "fala.texto", "fala", '{"locutor": "Ana", "texto": "oi"}'),
+        ]:
+            correcoes.acrescentar(
+                base.model_copy(
+                    update={
+                        "id": cid,
+                        "tipo": tipo,
+                        "depois": depois,
+                        "ancora": base.ancora.model_copy(
+                            update={"tipo_do_item": tipo_do_item}
+                        ),
+                    }
+                )
+            )
+
+        lidas = correcoes.listar("j1")
+        assert [(c.tipo, c.ancora.tipo_do_item, c.depois) for c in lidas] == [
+            ("plano.limpo", "plano", "true"),
+            ("fala.texto", "fala", '{"locutor": "Ana", "texto": "oi"}'),
+        ]
+
     def test_nao_sobrescreve_uma_correcao_existente(
         self, correcoes: RepositorioDeCorrecoesFirestore
     ) -> None:

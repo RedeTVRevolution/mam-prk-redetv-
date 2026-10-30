@@ -20,6 +20,7 @@ import {
   SegmentedControl,
   Slider,
   Stack,
+  Switch,
   Text,
   TextInput,
   Textarea,
@@ -83,6 +84,25 @@ interface Pauta extends Intervalo {
   origem?: 'modelo' | 'revisao'
 }
 
+interface Plano extends Intervalo {
+  id: string
+  ambiente: string
+  acao?: string | null
+  objetos?: string[]
+  plano_limpo?: boolean
+  origem?: 'modelo' | 'revisao'
+}
+
+interface Fala extends Intervalo {
+  id?: string
+  locutor: string
+  texto: string
+  origem?: 'modelo' | 'revisao'
+}
+
+/** O trecho (plano ou fala) que o Editor está corrigindo. */
+type Trecho = { tipo: 'plano'; plano: Plano } | { tipo: 'fala'; fala: Fala }
+
 interface Comercial extends Intervalo {
   id?: string
   marca: string
@@ -106,13 +126,9 @@ export interface Decupagem {
   versao_decupagem?: string
   pautas: Pauta[]
   pessoas: Pessoa[]
-  planos: (Intervalo & {
-    id: string
-    ambiente: string
-    acao?: string | null
-  })[]
+  planos: Plano[]
   comerciais: Comercial[]
-  transcricao: (Intervalo & { locutor: string; texto: string })[]
+  transcricao: Fala[]
 }
 
 interface Reproducao {
@@ -164,6 +180,23 @@ function valorLegivel(tipo: string | undefined, valor: string): string {
         nome?: string
       }
       return `${a.nome ? `${a.nome} ` : ''}${tempo(a.inicio_ms)}–${tempo(a.fim_ms)} (${a.evidencia})`
+    } catch {
+      return valor
+    }
+  }
+  if (tipo === 'plano.limpo') return valor === 'true' ? 'plano limpo' : 'plano não limpo'
+  if (tipo === 'plano.descricao') {
+    try {
+      const d = JSON.parse(valor) as { ambiente: string; acao: string | null; objetos: string[] }
+      return [d.ambiente, d.acao, d.objetos.join(', ')].filter(Boolean).join(' · ')
+    } catch {
+      return valor
+    }
+  }
+  if (tipo === 'fala.texto') {
+    try {
+      const f = JSON.parse(valor) as { locutor: string; texto: string }
+      return `${f.locutor}: ${f.texto}`
     } catch {
       return valor
     }
@@ -325,6 +358,7 @@ export default function Video({
   const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
   const [ocorrenciaAberta, setOcorrenciaAberta] = useState<AcaoDeOcorrencia | null>(null)
   const [corrigindoPauta, setCorrigindoPauta] = useState<Pauta | null>(null)
+  const [trechoAberto, setTrechoAberto] = useState<Trecho | null>(null)
   const [comercialAberto, setComercialAberto] = useState<Comercial | 'novo' | null>(null)
   const [historicoAberto, setHistoricoAberto] = useState(false)
   const [filaAberta, setFilaAberta] = useState(false)
@@ -627,23 +661,71 @@ export default function Video({
                 ))}
               {aba === 'Planos' &&
                 decupagem.planos.map((p) => (
-                  <NavLink
-                    key={p.id}
-                    label={p.acao ?? p.ambiente}
-                    description={`${p.ambiente} · ${tempo(p.inicio_ms)}`}
-                    onClick={() => saltar(p.inicio_ms)}
-                  />
+                  <Group key={p.id} gap={4} wrap="nowrap">
+                    <NavLink
+                      flex={1}
+                      label={
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm">{p.acao ?? p.ambiente}</Text>
+                          {p.plano_limpo && (
+                            <Badge size="xs" color="gray" variant="light">
+                              limpo
+                            </Badge>
+                          )}
+                          {p.origem === 'revisao' && (
+                            <Badge size="xs" color="teal" variant="light">
+                              revisado
+                            </Badge>
+                          )}
+                        </Group>
+                      }
+                      description={`${p.ambiente} · ${tempo(p.inicio_ms)}`}
+                      onClick={() => saltar(p.inicio_ms)}
+                    />
+                    {podeEditar && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        aria-label={`Corrigir plano ${p.ambiente} ${tempo(p.inicio_ms)}`}
+                        onClick={() => setTrechoAberto({ tipo: 'plano', plano: p })}
+                      >
+                        <IconPencil size={14} />
+                      </ActionIcon>
+                    )}
+                  </Group>
                 ))}
               {aba === 'Fala' &&
                 decupagem.transcricao.map((f, i) => (
-                  <UnstyledButton key={`fala-${i}`} w="100%" onClick={() => saltar(f.inicio_ms)}>
-                    <Paper p={6} bg={dentro(atualMs, f) ? 'red.9' : 'transparent'}>
-                      <Text size="xs" ff="monospace" c="dimmed">
-                        {`${tempo(f.inicio_ms)} ${f.locutor.toUpperCase()}`}
-                      </Text>
-                      <Text size="sm">{f.texto}</Text>
-                    </Paper>
-                  </UnstyledButton>
+                  <Group key={`fala-${i}`} gap={4} wrap="nowrap" align="flex-start">
+                    <UnstyledButton flex={1} onClick={() => saltar(f.inicio_ms)}>
+                      <Paper p={6} bg={dentro(atualMs, f) ? 'red.9' : 'transparent'}>
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="xs" ff="monospace" c="dimmed">
+                            {`${tempo(f.inicio_ms)} ${f.locutor.toUpperCase()}`}
+                          </Text>
+                          {f.origem === 'revisao' && (
+                            <Badge size="xs" color="teal" variant="light">
+                              revisado
+                            </Badge>
+                          )}
+                        </Group>
+                        <Text size="sm">{f.texto}</Text>
+                      </Paper>
+                    </UnstyledButton>
+                    {podeEditar && f.id && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        mt={6}
+                        aria-label={`Corrigir fala ${tempo(f.inicio_ms)}`}
+                        onClick={() => setTrechoAberto({ tipo: 'fala', fala: f })}
+                      >
+                        <IconPencil size={14} />
+                      </ActionIcon>
+                    )}
+                  </Group>
                 ))}
             </ScrollArea>
           </Stack>
@@ -711,6 +793,26 @@ export default function Video({
         aoFechar={() => setCorrigindoPauta(null)}
         aoSalvar={() => {
           setCorrigindoPauta(null)
+          recarregarDecupagem()
+        }}
+        aoVersaoDesatualizada={recarregarDecupagem}
+        aoSessaoExpirada={() => sessaoExpirada.current()}
+      />
+      <CorrigirTrecho
+        key={
+          trechoAberto
+            ? trechoAberto.tipo === 'plano'
+              ? trechoAberto.plano.id
+              : trechoAberto.fala.id
+            : 'fechado'
+        }
+        trecho={trechoAberto}
+        versao={decupagem.versao_decupagem ?? ''}
+        autenticador={autenticador}
+        jobId={job.id}
+        aoFechar={() => setTrechoAberto(null)}
+        aoSalvar={() => {
+          setTrechoAberto(null)
           recarregarDecupagem()
         }}
         aoVersaoDesatualizada={recarregarDecupagem}
@@ -1287,6 +1389,183 @@ function CorrigirPauta({
   )
 }
 
+/** Modal do plano (descrição e plano limpo) ou da fala (texto e locutor): os tempos não mudam. */
+function CorrigirTrecho({
+  trecho,
+  versao,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoSalvar,
+  aoVersaoDesatualizada,
+  aoSessaoExpirada,
+}: {
+  trecho: Trecho | null
+  versao: string
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const plano = trecho?.tipo === 'plano' ? trecho.plano : null
+  const fala = trecho?.tipo === 'fala' ? trecho.fala : null
+  const [ambiente, setAmbiente] = useState(plano?.ambiente ?? '')
+  const [acao, setAcao] = useState(plano?.acao ?? '')
+  const [objetos, setObjetos] = useState((plano?.objetos ?? []).join(', '))
+  const [limpo, setLimpo] = useState(plano?.plano_limpo ?? false)
+  const [texto, setTexto] = useState(fala?.texto ?? '')
+  const [locutor, setLocutor] = useState(fala?.locutor ?? '')
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
+  const [gravadas, setGravadas] = useState<Record<string, string>>({})
+
+  const listaDeObjetos = objetos
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean)
+  const candidatas: { tipo: ItemDoHistorico['tipo']; valor: string }[] = []
+  if (plano) {
+    const mudouDescricao =
+      ambiente.trim() !== plano.ambiente ||
+      acao.trim() !== (plano.acao ?? '') ||
+      listaDeObjetos.join('\n') !== (plano.objetos ?? []).join('\n')
+    if (mudouDescricao)
+      candidatas.push({
+        tipo: 'plano.descricao',
+        valor: JSON.stringify({ ambiente, acao: acao.trim() || null, objetos: listaDeObjetos }),
+      })
+    if (limpo !== (plano.plano_limpo ?? false))
+      candidatas.push({ tipo: 'plano.limpo', valor: String(limpo) })
+  }
+  if (fala && (texto.trim() !== fala.texto || locutor.trim() !== fala.locutor))
+    candidatas.push({ tipo: 'fala.texto', valor: JSON.stringify({ texto, locutor }) })
+  const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
+  const itemId = plano?.id ?? fala?.id ?? ''
+
+  async function salvar() {
+    setSalvando(true)
+    setErro(null)
+    const feitas = { ...gravadas }
+    try {
+      for (const m of mudancas) {
+        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
+          metodo: 'POST',
+          corpo: { ...m, item_id: itemId, motivo, versao },
+        })
+        feitas[m.tipo] = m.valor
+      }
+      aoSalvar()
+    } catch (e) {
+      setGravadas(feitas)
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        aoVersaoDesatualizada()
+        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
+      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+        setErro('Confira os campos: o trecho não foi encontrado ou há valor inválido.')
+      } else setErro('Não foi possível salvar a correção.')
+      setSalvando(false)
+    }
+  }
+
+  // Fechar depois de gravar parte dos campos recarrega a decupagem, como o salvar.
+  function fechar() {
+    if (Object.keys(gravadas).length > 0) aoSalvar()
+    else aoFechar()
+  }
+
+  return (
+    <Modal
+      opened={trecho !== null}
+      onClose={fechar}
+      title={plano ? 'Corrigir plano' : 'Corrigir fala'}
+      centered
+    >
+      <Stack gap="sm">
+        {plano && (
+          <>
+            <TextInput
+              label="Ambiente"
+              value={ambiente}
+              maxLength={200}
+              onChange={(e) => setAmbiente(e.currentTarget.value)}
+            />
+            <Textarea
+              label="Ação"
+              value={acao}
+              maxLength={2000}
+              rows={3}
+              onChange={(e) => setAcao(e.currentTarget.value)}
+            />
+            <TextInput
+              label="Objetos (separados por vírgula)"
+              value={objetos}
+              onChange={(e) => setObjetos(e.currentTarget.value)}
+            />
+            <Switch
+              label="Plano limpo"
+              checked={limpo}
+              onChange={(e) => setLimpo(e.currentTarget.checked)}
+            />
+          </>
+        )}
+        {fala && (
+          <>
+            <TextInput
+              label="Locutor"
+              value={locutor}
+              maxLength={200}
+              onChange={(e) => setLocutor(e.currentTarget.value)}
+            />
+            <Textarea
+              label="Texto"
+              value={texto}
+              maxLength={2000}
+              rows={4}
+              onChange={(e) => setTexto(e.currentTarget.value)}
+            />
+          </>
+        )}
+        <Textarea
+          label="Motivo"
+          value={motivo}
+          maxLength={500}
+          rows={3}
+          onChange={(e) => setMotivo(e.currentTarget.value)}
+        />
+        {erro && (
+          <Alert color="red" variant="light" role="alert">
+            {erro}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button type="button" variant="default" onClick={fechar}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            color="red"
+            loading={salvando}
+            disabled={
+              !motivo.trim() ||
+              (plano !== null && !ambiente.trim()) ||
+              (fala !== null && (!texto.trim() || !locutor.trim())) ||
+              mudancas.length === 0
+            }
+            onClick={() => void salvar()}
+          >
+            Salvar
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  )
+}
+
 /** Modal do comercial: corrige marca, tipo e tempos de um comercial ou acrescenta um novo (`'novo'`). */
 function CorrigirComercial({
   comercial,
@@ -1482,6 +1761,9 @@ interface ItemDoHistorico {
     | 'pessoa.aparicao_para_mencao'
     | 'pessoa.mencao_para_aparicao'
     | 'pessoa.acrescentar_aparicao'
+    | 'plano.descricao'
+    | 'plano.limpo'
+    | 'fala.texto'
     | 'desfazer'
     | 'descartar'
   autor_email: string
@@ -1506,6 +1788,9 @@ const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   'pessoa.aparicao_para_mencao': 'Aparição para menção',
   'pessoa.mencao_para_aparicao': 'Menção para aparição',
   'pessoa.acrescentar_aparicao': 'Aparição acrescentada',
+  'plano.descricao': 'Descrição do plano',
+  'plano.limpo': 'Plano limpo',
+  'fala.texto': 'Texto da fala',
   desfazer: 'Desfazer',
   descartar: 'Descartar da fila',
 }
