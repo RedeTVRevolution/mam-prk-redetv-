@@ -9,6 +9,7 @@ from api.comparador import normalizar
 from api.decupagem import Pessoa, _Intervalo
 
 _NAO_IDENTIFICADO = normalizar("não identificado")
+_LISTAS = ("na_imagem", "citada_na_fala", "citada_no_texto")
 
 
 def unir_pessoas(
@@ -17,7 +18,8 @@ def unir_pessoas(
     """Une as pessoas de cada janela, em ordem.
 
     Devolve as pessoas com ids `pes01`, `pes02`… (ordem da primeira ocorrência)
-    e, por índice de janela, o mapa do id antigo para o novo.
+    e, por índice de janela, o mapa do id antigo para o novo. Um id repetido
+    na mesma janela é erro: o mapa não teria como apontar para as duas.
     """
     unidas: list[Pessoa] = []
     por_nome: dict[str, int] = {}
@@ -25,6 +27,8 @@ def unir_pessoas(
     for janela, pessoas in enumerate(grupos):
         mapa[janela] = {}
         for p in pessoas:
+            if p.id in mapa[janela]:
+                raise ValueError(f"id de pessoa repetido na janela {janela}: {p.id}")
             chave = normalizar(p.nome)
             posicao = None if chave == _NAO_IDENTIFICADO else por_nome.get(chave)
             if posicao is None:
@@ -37,11 +41,7 @@ def unir_pessoas(
             mapa[janela][p.id] = unidas[posicao].id
     for i, p in enumerate(unidas):
         unidas[i] = p.model_copy(
-            update={
-                "na_imagem": _em_ordem(p.na_imagem),
-                "citada_na_fala": _em_ordem(p.citada_na_fala),
-                "citada_no_texto": _em_ordem(p.citada_no_texto),
-            }
+            update={campo: _em_ordem(getattr(p, campo)) for campo in _LISTAS}
         )
     return unidas, mapa
 
@@ -51,9 +51,7 @@ def _juntar(base: Pessoa, outra: Pessoa) -> Pessoa:
     return base.model_copy(
         update={
             "origem": "revisao" if revisao else "modelo",
-            "na_imagem": [*base.na_imagem, *outra.na_imagem],
-            "citada_na_fala": [*base.citada_na_fala, *outra.citada_na_fala],
-            "citada_no_texto": [*base.citada_no_texto, *outra.citada_no_texto],
+            **{c: [*getattr(base, c), *getattr(outra, c)] for c in _LISTAS},
         }
     )
 

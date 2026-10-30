@@ -1,5 +1,7 @@
 from collections.abc import Sequence
 
+import pytest
+
 from api.decupagem import Pessoa
 from api.pessoas import tempo_de_tela_ms, unir_pessoas
 
@@ -109,6 +111,18 @@ def test_origem_revisao_se_alguma_parte_veio_de_revisao() -> None:
     )
 
     assert unidas[0].origem == "revisao"
+
+
+def test_id_repetido_na_mesma_janela_e_erro() -> None:
+    with pytest.raises(ValueError, match="repetido"):
+        unir_pessoas([[pessoa("a", "não identificado"), pessoa("a", "Ana")]])
+
+
+def test_mesmo_id_em_janelas_diferentes_nao_e_erro() -> None:
+    unidas, mapa = unir_pessoas([[pessoa("a", "Ana")], [pessoa("a", "Bia")]])
+
+    assert [p.nome for p in unidas] == ["Ana", "Bia"]
+    assert mapa == {0: {"a": "pes01"}, 1: {"a": "pes02"}}
 
 
 def test_sem_janelas_nao_ha_pessoas() -> None:
