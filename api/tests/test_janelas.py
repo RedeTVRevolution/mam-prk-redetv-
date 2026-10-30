@@ -1,5 +1,6 @@
 import dataclasses
 import itertools
+from collections.abc import Callable
 
 import pytest
 from hypothesis import given
@@ -181,6 +182,24 @@ def test_reinicio_alem_do_limite_vai_a_falhou() -> None:
     assert estado.erro
 
 
+def test_concluir_apos_falha_limpa_o_erro() -> None:
+    estado = concluir(iniciar(falhar(iniciar(pendente()), "timeout")))
+    assert estado == EstadoJanela(0, "concluida", 2, None)
+
+
+@pytest.mark.parametrize("transicao", [concluir, lambda e: falhar(e, "x")])
+def test_concluir_ou_falhar_sem_iniciar_e_erro(
+    transicao: Callable[[EstadoJanela], EstadoJanela],
+) -> None:
+    with pytest.raises(ValueError, match="não foi iniciada"):
+        transicao(pendente())
+
+
+def test_iniciar_janela_pendente_com_limite_esgotado_vai_a_falhou() -> None:
+    estado = EstadoJanela(0, "pendente", LIMITE_DE_TENTATIVAS, "x")
+    assert iniciar(estado).situacao == "falhou"
+
+
 def test_progresso_parcial() -> None:
     situacao = situacao_do_job([concluida(0), iniciar(pendente(1)), pendente(2)])
     assert (situacao.prontas, situacao.total) == (1, 3)
@@ -189,7 +208,7 @@ def test_progresso_parcial() -> None:
 
 
 def test_job_falho_aponta_a_primeira_janela_falha() -> None:
-    estados = [concluida(0), falhou(1, "erro 1"), pendente(2), falhou(3, "erro 3")]
+    estados = [concluida(0), falhou(3, "erro 3"), pendente(2), falhou(1, "erro 1")]
     situacao = situacao_do_job(estados)
     assert situacao.falha is not None
     assert (situacao.falha.indice, situacao.falha.erro) == (1, "erro 1")

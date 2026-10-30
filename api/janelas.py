@@ -76,18 +76,24 @@ def _terminal(estado: EstadoJanela) -> bool:
 
 def iniciar(estado: EstadoJanela, limite: int = LIMITE_DE_TENTATIVAS) -> EstadoJanela:
     """Começa uma tentativa. Reiniciar uma janela em andamento (o serviço caiu)
-    também conta; se isso já esgotou o limite, a janela falha."""
+    também conta; se as tentativas já esgotaram o limite, a janela falha."""
     if _terminal(estado):
         return estado
-    if estado.situacao == "em_andamento" and estado.tentativas >= limite:
+    if estado.tentativas >= limite:
         return replace(estado, situacao="falhou", erro="limite de tentativas esgotado")
     return replace(estado, situacao="em_andamento", tentativas=estado.tentativas + 1)
+
+
+def _exigir_em_andamento(estado: EstadoJanela) -> None:
+    if estado.situacao == "pendente":
+        raise ValueError(f"janela {estado.indice} ainda não foi iniciada")
 
 
 def concluir(estado: EstadoJanela) -> EstadoJanela:
     if _terminal(estado):
         return estado
-    return replace(estado, situacao="concluida")
+    _exigir_em_andamento(estado)
+    return replace(estado, situacao="concluida", erro=None)
 
 
 def falhar(
@@ -96,15 +102,16 @@ def falhar(
     """Volta a pendente se ainda há tentativas; senão vai a falhou com o erro."""
     if _terminal(estado):
         return estado
+    _exigir_em_andamento(estado)
     situacao: Situacao = "falhou" if estado.tentativas >= limite else "pendente"
     return replace(estado, situacao=situacao, erro=erro)
 
 
 def situacao_do_job(estados: Sequence[EstadoJanela]) -> SituacaoDoJob:
     """Progresso do job. Uma janela falha derruba o job: nunca há decupagem parcial."""
-    falha = next(
-        (Falha(e.indice, e.erro) for e in estados if e.situacao == "falhou"), None
-    )
+    falhas = [e for e in estados if e.situacao == "falhou"]
+    primeira = min(falhas, key=lambda e: e.indice, default=None)
+    falha = Falha(primeira.indice, primeira.erro) if primeira else None
     prontas = sum(e.situacao == "concluida" for e in estados)
     return SituacaoDoJob(
         prontas=prontas,
