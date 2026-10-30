@@ -21,7 +21,19 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Instala o ffmpeg (os testes do validador usam o real)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Sobe os emuladores do Firestore e do Storage (testes de api/tests/test_nuvem.py)
+        run: |
+          docker run -d --name fake-gcs -p 4443:4443 fsouza/fake-gcs-server:1.52.2 -scheme http -port 4443
+          docker run -d --name firestore -p 8686:8686 google/cloud-sdk:emulators \
+            gcloud emulators firestore start --host-port=0.0.0.0:8686
+          for i in $(seq 60); do
+            curl -sf localhost:4443/storage/v1/b && curl -s localhost:8686 && break
+            sleep 2
+          done
       - run: make instalar verificar
+        env:
+          FIRESTORE_EMULATOR_HOST: localhost:8686
+          STORAGE_EMULATOR_HOST: http://localhost:4443
 
   loop-afk:
     runs-on: ubuntu-latest

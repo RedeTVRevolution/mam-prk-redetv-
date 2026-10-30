@@ -4,6 +4,8 @@ version = "0.0.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi",
+    "google-cloud-firestore>=2.34.1",
+    "google-cloud-storage>=3.17.1",
     "pyjwt[crypto]>=2.15.1",
     "uvicorn>=0.54.0",
 ]
@@ -34,3 +36,7 @@ strict = true
 [tool.pytest.ini_options]
 testpaths = ["api"]
 pythonpath = ["."]
+
+[[tool.mypy.overrides]]
+module = ["google.cloud.storage", "google.cloud.storage.*"]
+ignore_missing_imports = true
