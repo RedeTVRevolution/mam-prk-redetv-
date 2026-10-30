@@ -14,9 +14,18 @@ from typing import Any, Protocol
 
 import requests
 
-from api.decupagem import Decupagem, Video, esquema_do_modelo
+from api.decupagem import (
+    CAMPOS_DO_SERVIDOR,
+    VERSAO_ESQUEMA,
+    Decupagem,
+    Video,
+    esquema_do_modelo,
+)
 
 MODELO = "gemini-3.5-flash-lite"
+# A versão exata que a Vertex informou (`modelVersion`) quando o cassete foi
+# gravado. Se o Google trocar a versão por baixo de `MODELO`, o contrato acusa.
+VERSAO_DO_MODELO = "gemini-3.5-flash-lite"
 TENTATIVAS_REDE = 5  # novas tentativas após 429/5xx
 TENTATIVAS_ESQUEMA = 2  # novas tentativas após resposta fora do esquema
 BACKOFF_BASE_S = 1.0
@@ -77,6 +86,7 @@ class TransporteVertex:
     def __init__(self, projeto: str, sessao: SessaoHttp) -> None:
         self._projeto = projeto
         self._sessao = sessao
+        self.versao_do_modelo = ""  # a da última resposta; só o cassete a lê
 
     def gerar(self, chamada: Chamada) -> str:
         url = (
@@ -124,6 +134,7 @@ class TransporteVertex:
             dados = resposta.json()
         except ValueError as e:  # 200 com corpo que não é JSON: falha do servidor
             raise ErroHttp(502) from e
+        self.versao_do_modelo = dados.get("modelVersion", "")
         partes = (
             (dados.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         )
@@ -134,12 +145,22 @@ def _repetivel(status: int) -> bool:
     return status == 429 or status >= 500
 
 
+def _chaves(dados: Any) -> set[str]:
+    if isinstance(dados, dict):
+        return set(dados).union(*map(_chaves, dados.values()))
+    if isinstance(dados, list):
+        return set().union(*map(_chaves, dados))
+    return set()
+
+
 def _validar(texto: str, video: Video) -> Decupagem:
     """Levanta `ValueError` (JSON quebrado ou fora do esquema)."""
     dados = json.loads(texto)
-    if not isinstance(dados, dict) or "video" in dados:
+    if not isinstance(dados, dict) or _chaves(dados) & CAMPOS_DO_SERVIDOR:
         raise ValueError("resposta fora do esquema")
-    return Decupagem.model_validate({**dados, "video": video})
+    return Decupagem.model_validate(
+        {**dados, "versao_esquema": VERSAO_ESQUEMA, "video": video}
+    )
 
 
 def analisar(

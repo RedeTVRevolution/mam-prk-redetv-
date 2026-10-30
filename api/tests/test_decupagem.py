@@ -1,4 +1,5 @@
 import copy
+import json
 from typing import Any
 
 import pytest
@@ -146,3 +147,16 @@ def test_esquema_do_modelo_omite_os_tempos_do_modelo() -> None:
     assert "inicio_modelo_ms" not in texto
     assert "fim_modelo_ms" not in texto
     assert "inicio_modelo_ms" in str(Decupagem.model_json_schema())
+
+
+def test_esquema_do_modelo_omite_os_campos_do_servidor() -> None:
+    esquema = esquema_do_modelo()
+    assert "versao_esquema" not in esquema["properties"]
+    assert "versao_esquema" not in esquema["required"]
+    assert "origem" not in esquema["$defs"]["Pessoa"]["properties"]
+    assert "quadro" not in esquema["$defs"]["Aparicao"]["properties"]
+
+
+def test_esquema_do_modelo_nao_usa_const() -> None:
+    """A Vertex ignora `const`: um Literal de valor único volta com outro valor."""
+    assert '"const"' not in json.dumps(esquema_do_modelo())

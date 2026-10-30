@@ -102,9 +102,9 @@ def _app_da_nuvem(projeto: str) -> FastAPI:
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
     return criar_app(
         RepositorioFirestore(firestore.Client(project=projeto)),
-        ClienteStorage(project=projeto).bucket(f"{projeto}-decupagens"),
+        ClienteStorage(project=projeto).bucket(os.environ["BUCKET_DECUPAGENS"]),
         TransporteVertex(projeto, sessao),
-        f"{projeto}-aceitos",
+        os.environ["BUCKET_ACEITOS"],
     )
 
 
