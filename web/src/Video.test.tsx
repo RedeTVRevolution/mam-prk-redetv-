@@ -785,6 +785,14 @@ test('desfazer que dá 409 avisa e recarrega histórico e decupagem', async () =
   await waitFor(() => expect(painel.queryByText('Ana Souza Lima')).toBeNull())
 })
 
+test('o item com correção pendente mostra o selo', async () => {
+  aguardandoCurador = true
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+
+  expect((await painel.findAllByText('aguardando Curador')).length).toBeGreaterThan(0)
+})
+
 test('a pendente de outra versão da decupagem não põe o selo', async () => {
   aguardandoCurador = true
   versaoAtual = 'v2'
