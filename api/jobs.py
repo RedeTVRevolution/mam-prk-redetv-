@@ -28,11 +28,16 @@ from api.auth import (
     Usuario,
 )
 from api.correcoes import (
+    ItemDoHistorico,
     ItemInexistente,
+    NaoDesfazivel,
     NovaCorrecao,
+    NovoDesfazer,
     RepositorioDeCorrecoes,
     aplicar,
+    historico,
     montar_correcao,
+    montar_desfazer,
     nome_atual,
     versao_do_modelo,
 )
@@ -476,5 +481,42 @@ def criar_rotas(
             raise HTTPException(422, "Item inexistente") from None
         correcoes.acrescentar(correcao)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
+
+    @rotas.get("/{job_id}/correcoes")
+    def historico_de_correcoes(
+        job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
+    ) -> list[ItemDoHistorico]:
+        job = obter_concluido(job_id, autor)
+        return historico(correcoes.listar(job.id))
+
+    @rotas.post("/{job_id}/correcoes/{correcao_id}/desfazer", status_code=201)
+    def desfazer_correcao(
+        job_id: str,
+        correcao_id: str,
+        corpo: NovoDesfazer,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        job = obter_concluido(job_id, autor)
+        todas = correcoes.listar(job.id)
+        alvo = next((c for c in todas if c.id == correcao_id), None)
+        if alvo is None:
+            raise HTTPException(404, "Correção não encontrada")
+        try:
+            desfazer = montar_desfazer(
+                alvo,
+                todas,
+                corpo.motivo,
+                id=uuid.uuid4().hex,
+                job_id=job.id,
+                autor_uid=autor.uid,
+                autor_email=autor.email,
+                criada_em=relogio(),
+            )
+        except NaoDesfazivel:
+            raise HTTPException(
+                409, "Correção já desfeita, ou já é um desfazer"
+            ) from None
+        correcoes.acrescentar(desfazer)
+        return {"id": desfazer.id}
 
     return rotas

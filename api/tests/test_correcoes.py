@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -77,6 +77,7 @@ class Mundo:
         self.armazenamento = ArmazenamentoFalso()
         self.armazenamento.decupagens["j1"] = [BYTES[:40], BYTES[40:]]
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
+        self.agora = BASE
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(
@@ -86,7 +87,7 @@ class Mundo:
                 self.armazenamento,
                 papeis=repo_papeis,
                 correcoes=self.correcoes,
-                relogio=lambda: BASE,
+                relogio=lambda: self.agora,
             )
         )
 
@@ -94,6 +95,22 @@ class Mundo:
         return self.cliente.post(
             "/v1/jobs/j1/correcoes", json=_novo(**campos), headers=AUTORIZACAO
         )
+
+    def avancar(self, minutos: int = 1) -> None:
+        self.agora += timedelta(minutes=minutos)
+
+    def desfazer(self, cid: str, motivo: str = "enganei-me") -> Any:
+        return self.cliente.post(
+            f"/v1/jobs/j1/correcoes/{cid}/desfazer",
+            json={"motivo": motivo},
+            headers=AUTORIZACAO,
+        )
+
+    def historico(self) -> Any:
+        return self.cliente.get("/v1/jobs/j1/correcoes", headers=AUTORIZACAO)
+
+    def nome_da_ana(self) -> str:
+        return str(self.decupagem()["pessoas"][0]["nome"])
 
     def decupagem(self, params: str = "") -> dict[str, Any]:
         resposta = self.cliente.get(
@@ -276,3 +293,126 @@ def test_correcao_de_outra_versao_do_modelo_nao_e_aplicada() -> None:
     mundo.armazenamento.decupagens["j1"] = [json.dumps(nova).encode()]
 
     assert mundo.decupagem()["pessoas"][0]["nome"] == "Ana Souza"
+
+
+def _corrigir_duas_vezes(mundo: "Mundo") -> tuple[str, str]:
+    primeira = mundo.corrigir(valor="Ana S.").json()["id"]
+    mundo.avancar()
+    segunda = mundo.corrigir(valor="Ana Souza Lima").json()["id"]
+    mundo.avancar()
+    return str(primeira), str(segunda)
+
+
+def test_historico_lista_da_mais_recente_para_a_mais_antiga_com_antes_depois_e_motivo() -> (
+    None
+):
+    mundo = Mundo(["editor"])
+    primeira, segunda = _corrigir_duas_vezes(mundo)
+
+    resposta = mundo.historico()
+
+    assert resposta.status_code == 200
+    itens = resposta.json()
+    assert [i["id"] for i in itens] == [segunda, primeira]
+    assert (itens[0]["antes"], itens[0]["depois"]) == ("Ana S.", "Ana Souza Lima")
+    assert (itens[1]["antes"], itens[1]["depois"]) == ("Ana Souza", "Ana S.")
+    assert itens[0]["motivo"] == "sobrenome completo"
+    assert itens[0]["autor_email"] == "ana@redetv.com.br"
+    assert itens[0]["tipo"] == "pessoa.renomear"
+    assert itens[0]["item_id"] == "pes01"
+    assert itens[0]["estado"] == "ativa"
+    assert itens[0]["criada_em"].startswith("2026-10-30T12:01")
+
+
+def test_historico_sem_decupagem_editar_da_403() -> None:
+    assert Mundo(["consulta"]).historico().status_code == 403
+
+
+def test_desfazer_devolve_o_nome_anterior_e_as_duas_entradas_ficam_no_historico() -> (
+    None
+):
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    mundo.avancar()
+
+    resposta = mundo.desfazer(cid, "erro meu")
+
+    assert resposta.status_code == 201
+    assert mundo.nome_da_ana() == "Ana Souza"
+    assert mundo.decupagem()["pessoas"][0]["origem"] == "modelo"
+    itens = mundo.historico().json()
+    assert [i["tipo"] for i in itens] == ["desfazer", "pessoa.renomear"]
+    assert itens[0]["motivo"] == "erro meu"
+    assert itens[0]["desfaz"] == cid
+    assert (itens[0]["antes"], itens[0]["depois"]) == ("Ana Souza Lima", "Ana Souza")
+    assert itens[1]["estado"] == "desfeita"
+    assert itens[0]["estado"] == "ativa"
+
+
+def test_desfazer_a_correcao_antiga_mantem_a_mais_nova() -> None:
+    mundo = Mundo(["editor"])
+    primeira, _ = _corrigir_duas_vezes(mundo)
+
+    assert mundo.desfazer(primeira).status_code == 201
+
+    assert mundo.nome_da_ana() == "Ana Souza Lima"
+
+
+def test_desfazer_a_mais_nova_volta_para_a_antiga() -> None:
+    mundo = Mundo(["editor"])
+    _, segunda = _corrigir_duas_vezes(mundo)
+
+    mundo.desfazer(segunda)
+
+    assert mundo.nome_da_ana() == "Ana S."
+
+
+def test_nova_correcao_depois_do_desfazer_guarda_o_nome_visivel_como_antes() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    mundo.avancar()
+    mundo.desfazer(cid)
+    mundo.avancar()
+
+    mundo.corrigir(valor="Ana Maria")
+
+    assert mundo.historico().json()[0]["antes"] == "Ana Souza"
+
+
+def test_desfazer_um_desfazer_da_409() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    mundo.desfazer(cid)
+    [desfazer] = [c for c in mundo.correcoes.listar("j1") if c.tipo == "desfazer"]
+
+    assert mundo.desfazer(desfazer.id).status_code == 409
+
+
+def test_desfazer_duas_vezes_a_mesma_correcao_da_409() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    mundo.desfazer(cid)
+
+    assert mundo.desfazer(cid).status_code == 409
+    assert len(mundo.correcoes.listar("j1")) == 2
+
+
+def test_desfazer_correcao_inexistente_da_404() -> None:
+    assert Mundo(["editor"]).desfazer("nao-existe").status_code == 404
+
+
+def test_desfazer_sem_decupagem_editar_da_403() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    sem_permissao = Mundo(["consulta"])
+    sem_permissao.correcoes.acrescentar(mundo.correcoes.listar("j1")[0])
+
+    assert sem_permissao.desfazer(cid).status_code == 403
+
+
+@pytest.mark.parametrize("motivo", ["", "   ", "a" * 501, "x\u202ey"])
+def test_desfazer_com_motivo_invalido_da_422(motivo: str) -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+
+    assert mundo.desfazer(cid, motivo).status_code == 422

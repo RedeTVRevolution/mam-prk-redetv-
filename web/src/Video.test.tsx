@@ -41,7 +41,53 @@ let correcaoRecebida: unknown = null
 let versaoAtual = 'v1'
 let pedidosDeReproducao = 0
 let links: { url: string; expira_em: string }[] = []
+
+const item = (campos: Record<string, unknown>) => ({
+  id: 'c1',
+  job_id: 'j1',
+  tipo: 'pessoa.renomear',
+  item_id: 'p1',
+  autor_email: 'bia@redetv.com.br',
+  criada_em: '2026-10-30T12:00:00Z',
+  motivo: 'sobrenome completo',
+  antes: 'Ana Souza',
+  depois: 'Ana Souza Lima',
+  desfaz: null,
+  estado: 'ativa',
+  ...campos,
+})
+let desfeita = false
+let desfazerRecebido: unknown = null
+let pedidosDeHistorico = 0
+const handlersDoHistorico = [
+  http.get('/v1/jobs/j1/correcoes', () => {
+    pedidosDeHistorico += 1
+    return HttpResponse.json(
+      desfeita
+        ? [
+            item({
+              id: 'd1',
+              tipo: 'desfazer',
+              desfaz: 'c1',
+              antes: 'Ana Souza Lima',
+              depois: 'Ana Souza',
+              motivo: 'erro meu',
+              criada_em: '2026-10-30T13:00:00Z',
+            }),
+            item({ estado: 'desfeita' }),
+          ]
+        : [item({})],
+    )
+  }),
+  http.post('/v1/jobs/j1/correcoes/c1/desfazer', async ({ request }) => {
+    desfazerRecebido = await request.json()
+    desfeita = true
+    return HttpResponse.json({ id: 'd1' }, { status: 201 })
+  }),
+]
+
 const servidor = setupServer(
+  ...handlersDoHistorico,
   http.get('/v1/jobs/j1/reproducao', ({ request }) => {
     if (request.headers.get('Authorization') !== TOKEN) return new HttpResponse(null, { status: 401 })
     pedidosDeReproducao += 1
@@ -75,6 +121,9 @@ afterEach(() => {
   correcaoRecebida = null
   versaoAtual = 'v1'
   pedidosDeReproducao = 0
+  desfeita = false
+  desfazerRecebido = null
+  pedidosDeHistorico = 0
   links = []
   cleanup()
   vi.restoreAllMocks()
@@ -415,4 +464,49 @@ test('correção sobre versão desatualizada recarrega o painel e salva na segun
 
   expect((await painel.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
   expect(correcaoRecebida).toMatchObject({ versao: 'v2' })
+})
+
+async function abrirHistorico(usuario: ReturnType<typeof userEvent.setup>) {
+  await abrir({ estado: 'concluido' }, true)
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  return within(await screen.findByRole('dialog', { name: 'Histórico' }))
+}
+
+test('a gaveta de histórico lista quem, quando, antes, depois e motivo', async () => {
+  const usuario = userEvent.setup()
+  const gaveta = await abrirHistorico(usuario)
+
+  expect(await gaveta.findByText('bia@redetv.com.br')).toBeTruthy()
+  expect(gaveta.getByText('Ana Souza')).toBeTruthy()
+  expect(gaveta.getByText('Ana Souza Lima')).toBeTruthy()
+  expect(gaveta.getByText('sobrenome completo')).toBeTruthy()
+  expect(gaveta.getByText(/30\/10\/2026/)).toBeTruthy()
+  expect(gaveta.getByRole('button', { name: 'Desfazer' })).toBeTruthy()
+})
+
+test('desfazer pede o motivo, grava e recarrega histórico e decupagem', async () => {
+  const usuario = userEvent.setup()
+  const gaveta = await abrirHistorico(usuario)
+
+  await usuario.click(await gaveta.findByRole('button', { name: 'Desfazer' }))
+  const modal = within(await screen.findByRole('dialog', { name: 'Desfazer correção' }))
+  const confirmar = modal.getByRole('button', { name: 'Confirmar' }) as HTMLButtonElement
+  expect(confirmar.disabled).toBe(true)
+  await usuario.type(modal.getByLabelText('Motivo'), 'erro meu')
+  await usuario.click(confirmar)
+
+  await waitFor(() => expect(desfazerRecebido).toEqual({ motivo: 'erro meu' }))
+  expect(await gaveta.findByText('desfeita')).toBeTruthy()
+  expect(gaveta.getByText('erro meu')).toBeTruthy()
+  // A correção desfeita e o próprio desfazer não oferecem "Desfazer".
+  expect(gaveta.queryByRole('button', { name: 'Desfazer' })).toBeNull()
+})
+
+test('quem não tem decupagem.editar não vê o botão Histórico nem pede o histórico', async () => {
+  pedidosDeHistorico = 0
+  await abrir({ estado: 'concluido' }, false)
+  await screen.findByLabelText('Decupagem')
+
+  expect(screen.queryByRole('button', { name: 'Histórico' })).toBeNull()
+  expect(pedidosDeHistorico).toBe(0)
 })

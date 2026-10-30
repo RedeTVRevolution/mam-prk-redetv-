@@ -452,6 +452,17 @@ class TestRepositorioDeCorrecoesFirestore:
         assert [c.id for c in correcoes.listar("j1")] == ["c1", "c2"]
         assert correcoes.listar("j1")[0].ancora.identidade == "ana"
 
+    def test_guarda_o_desfazer_com_o_item_e_a_correcao_revertida(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        desfazer = self._correcao("d1", "j1", 3).model_copy(
+            update={"tipo": "desfazer", "desfaz": "c1", "item_id": "pes01"}
+        )
+        correcoes.acrescentar(desfazer)
+
+        [lido] = correcoes.listar("j1")
+        assert (lido.tipo, lido.desfaz, lido.item_id) == ("desfazer", "c1", "pes01")
+
     def test_nao_sobrescreve_uma_correcao_existente(
         self, correcoes: RepositorioDeCorrecoesFirestore
     ) -> None:

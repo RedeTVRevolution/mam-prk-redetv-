@@ -16,7 +16,7 @@ from pydantic import BaseModel, StringConstraints, field_validator
 from api.comparador import normalizar
 from api.pessoas import LISTAS, nao_identificado
 
-TipoDeCorrecao = Literal["pessoa.renomear"]
+TipoDeCorrecao = Literal["pessoa.renomear", "desfazer"]
 LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
 
@@ -55,9 +55,29 @@ class Correcao(BaseModel):
     criada_em: datetime
     motivo: str
     tipo: TipoDeCorrecao
+    item_id: str = ""  # id da pessoa no JSON do modelo
+    desfaz: str | None = None  # só no tipo "desfazer": o id da correção revertida
     antes: str
     depois: str
     ancora: Ancora
+
+
+Motivo = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_MOTIVO),
+]
+
+
+class ItemDoHistorico(Correcao):
+    estado: Literal["ativa", "desfeita"]
+
+
+class NovoDesfazer(BaseModel):
+    """Corpo de `POST /v1/jobs/{id}/correcoes/{cid}/desfazer`."""
+
+    motivo: Motivo
+
+    _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
 
 
 class NovaCorrecao(BaseModel):
@@ -71,12 +91,7 @@ class NovaCorrecao(BaseModel):
             strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
         ),
     ]
-    motivo: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_MOTIVO
-        ),
-    ]
+    motivo: Motivo
     versao: Annotated[str, StringConstraints(min_length=1, max_length=64)]
 
     _valor_sem_controle = field_validator("valor")(_sem_controle)
@@ -156,6 +171,7 @@ def montar_correcao(
     inicio, fim = _intervalo_da_pessoa(pessoa)
     return Correcao(
         tipo=novo.tipo,
+        item_id=novo.item_id,
         motivo=novo.motivo,
         antes=antes,
         depois=novo.valor,
@@ -168,6 +184,44 @@ def montar_correcao(
         ),
         **registro,
     )
+
+
+class NaoDesfazivel(Exception):
+    """A correção já foi desfeita, ou é ela mesma um desfazer."""
+
+
+def _desfeitas(correcoes: list[Correcao]) -> set[str]:
+    return {c.desfaz for c in correcoes if c.tipo == "desfazer" and c.desfaz}
+
+
+def montar_desfazer(
+    alvo: Correcao, correcoes: list[Correcao], motivo: str, **registro: Any
+) -> Correcao:
+    """O registro que reverte `alvo`; nada é apagado. Um desfazer não se desfaz."""
+    if alvo.tipo == "desfazer" or alvo.id in _desfeitas(correcoes):
+        raise NaoDesfazivel(alvo.id)
+    return Correcao(
+        tipo="desfazer",
+        desfaz=alvo.id,
+        item_id=alvo.item_id,
+        motivo=motivo,
+        antes=alvo.depois,
+        depois=alvo.antes,
+        ancora=alvo.ancora,
+        **registro,
+    )
+
+
+def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
+    """Da mais recente para a mais antiga, cada uma ativa ou desfeita."""
+    desfeitas = _desfeitas(correcoes)
+    ordenadas = sorted(correcoes, key=lambda c: c.criada_em, reverse=True)
+    return [
+        ItemDoHistorico(
+            **c.model_dump(), estado="desfeita" if c.id in desfeitas else "ativa"
+        )
+        for c in ordenadas
+    ]
 
 
 def nome_atual(
@@ -186,6 +240,7 @@ def aplicar(
     """Cópia do modelo com as correções da versão atual por cima.
 
     Pessoa corrigida vem com `origem: "revisao"`; as demais, com `"modelo"`.
+    Correção desfeita não conta: o item volta ao valor que teria sem ela.
     Correção de outra versão do JSON fica de fora: reconciliar é outro ticket.
     """
     resultado: dict[str, Any] = json.loads(json.dumps(modelo))
@@ -194,8 +249,14 @@ def aplicar(
         pessoa["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
-    for c in correcoes:
-        if c.ancora.versao != versao or c.tipo != "pessoa.renomear":
+    desfeitas = _desfeitas(correcoes)
+    # Em ordem de data: a mais nova vence, e desfazer uma antiga não a derruba.
+    for c in sorted(correcoes, key=lambda c: c.criada_em):
+        if (
+            c.ancora.versao != versao
+            or c.tipo != "pessoa.renomear"
+            or c.id in desfeitas
+        ):
             continue
         for pessoa, identidade in zip(pessoas, identidades, strict=True):
             if identidade == c.ancora.identidade:

@@ -5,6 +5,7 @@ import {
   Badge,
   Box,
   Center,
+  Drawer,
   Grid,
   Group,
   Button,
@@ -24,7 +25,7 @@ import {
   UnstyledButton,
   type MantineColor,
 } from '@mantine/core'
-import { IconDownload, IconPencil } from '@tabler/icons-react'
+import { IconDownload, IconHistory, IconPencil } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
@@ -199,6 +200,7 @@ export default function Video({
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const concluido = job.estado === 'concluido'
   const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
+  const [historicoAberto, setHistoricoAberto] = useState(false)
   // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
   const sessaoExpirada = useRef(aoSessaoExpirada)
   useEffect(() => {
@@ -361,7 +363,20 @@ export default function Video({
                 value={aba}
                 onChange={(v) => setAba(v as Aba)}
               />
-              <BaixarJson nome={job.nome} decupagem={decupagem} />
+              <Group gap="xs">
+                {podeEditar && (
+                  <Tooltip label="Histórico de correções">
+                    <ActionIcon
+                      variant="default"
+                      aria-label="Histórico"
+                      onClick={() => setHistoricoAberto(true)}
+                    >
+                      <IconHistory />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+                <BaixarJson nome={job.nome} decupagem={decupagem} />
+              </Group>
             </Group>
             <ScrollArea flex={1}>
               {aba === 'Pessoas' && (
@@ -415,6 +430,16 @@ export default function Video({
           </Stack>
         </Paper>
       </Grid.Col>
+      {podeEditar && (
+        <HistoricoDeCorrecoes
+          aberto={historicoAberto}
+          autenticador={autenticador}
+          jobId={job.id}
+          aoFechar={() => setHistoricoAberto(false)}
+          aoDesfazer={recarregarDecupagem}
+          aoSessaoExpirada={() => sessaoExpirada.current()}
+        />
+      )}
       <CorrigirPessoa
         key={corrigindo?.id ?? 'fechado'}
         pessoa={corrigindo}
@@ -557,6 +582,184 @@ function CorrigirPessoa({
         </Group>
       </Stack>
     </Modal>
+  )
+}
+
+interface ItemDoHistorico {
+  id: string
+  tipo: 'pessoa.renomear' | 'desfazer'
+  autor_email: string
+  criada_em: string
+  motivo: string
+  antes: string
+  depois: string
+  estado: 'ativa' | 'desfeita'
+}
+
+const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
+  'pessoa.renomear': 'Renomear pessoa',
+  desfazer: 'Desfazer',
+}
+
+const quando = (iso: string) =>
+  new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+
+/** Gaveta com as correções da mais recente à mais antiga; desfazer acrescenta, nada se apaga. */
+function HistoricoDeCorrecoes({
+  aberto,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoDesfazer,
+  aoSessaoExpirada,
+}: {
+  aberto: boolean
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoDesfazer: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const [itens, setItens] = useState<ItemDoHistorico[] | null>(null)
+  const [falhou, setFalhou] = useState(false)
+  const [desfazendo, setDesfazendo] = useState<ItemDoHistorico | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [enviando, setEnviando] = useState(false)
+
+  const [recarga, setRecarga] = useState(0)
+  const sessaoExpirada = useRef(aoSessaoExpirada)
+  useEffect(() => {
+    sessaoExpirada.current = aoSessaoExpirada
+  })
+
+  useEffect(() => {
+    if (!aberto) return
+    let ativo = true
+    chamarApi<ItemDoHistorico[]>(autenticador, `/v1/jobs/${jobId}/correcoes`).then(
+      (lista) => {
+        if (!ativo) return
+        setItens(lista)
+        setFalhou(false)
+      },
+      (e: unknown) => {
+        if (!ativo) return
+        if (e instanceof SessaoExpirada) sessaoExpirada.current()
+        else setFalhou(true)
+      },
+    )
+    return () => {
+      ativo = false
+    }
+  }, [aberto, autenticador, jobId, recarga])
+
+  const carregar = () => setRecarga((n) => n + 1)
+
+  function fecharModal() {
+    setDesfazendo(null)
+    setMotivo('')
+    setErro(null)
+  }
+
+  async function confirmar() {
+    if (!desfazendo) return
+    setEnviando(true)
+    setErro(null)
+    try {
+      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes/${desfazendo.id}/desfazer`, {
+        metodo: 'POST',
+        corpo: { motivo },
+      })
+      fecharModal()
+      carregar()
+      aoDesfazer()
+    } catch (e) {
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        setErro('Essa correção já foi desfeita. O histórico foi recarregado.')
+        carregar()
+      } else setErro('Não foi possível desfazer a correção.')
+    }
+    setEnviando(false)
+  }
+
+  return (
+    <>
+      <Drawer opened={aberto} onClose={aoFechar} position="right" title="Histórico">
+        <Stack gap="sm">
+          {falhou && (
+            <Alert color="red" variant="light" role="alert">
+              Não foi possível carregar o histórico.
+            </Alert>
+          )}
+          {itens?.length === 0 && <Text size="sm">Nenhuma correção ainda.</Text>}
+          {itens?.map((i) => (
+            <Paper key={i.id} withBorder p="sm">
+              <Stack gap={4}>
+                <Group justify="space-between">
+                  <Text size="xs" fw={700}>
+                    {TIPOS_DE_CORRECAO[i.tipo]}
+                  </Text>
+                  {i.estado === 'desfeita' && (
+                    <Badge size="xs" color="gray" variant="light">
+                      desfeita
+                    </Badge>
+                  )}
+                </Group>
+                <Text size="xs" c="dimmed">
+                  {i.autor_email}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {quando(i.criada_em)}
+                </Text>
+                <Text size="sm">{i.antes}</Text>
+                <Text size="sm" fw={600}>
+                  {i.depois}
+                </Text>
+                <Text size="sm">{i.motivo}</Text>
+                {i.estado === 'ativa' && i.tipo !== 'desfazer' && (
+                  <Group justify="flex-end">
+                    <Button size="xs" variant="default" onClick={() => setDesfazendo(i)}>
+                      Desfazer
+                    </Button>
+                  </Group>
+                )}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      </Drawer>
+      <Modal opened={desfazendo !== null} onClose={fecharModal} title="Desfazer correção" centered>
+        <Stack gap="sm">
+          <Textarea
+            label="Motivo"
+            value={motivo}
+            maxLength={500}
+            rows={3}
+            onChange={(e) => setMotivo(e.currentTarget.value)}
+          />
+          {erro && (
+            <Alert color="red" variant="light" role="alert">
+              {erro}
+            </Alert>
+          )}
+          <Group justify="flex-end">
+            <Button type="button" variant="default" onClick={fecharModal}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              color="red"
+              loading={enviando}
+              disabled={!motivo.trim()}
+              onClick={() => void confirmar()}
+            >
+              Confirmar
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
   )
 }
 
