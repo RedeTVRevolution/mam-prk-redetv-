@@ -83,7 +83,7 @@ Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente implementador rece
    gh label create afk-feito --color 0E8A16 --description "Feito pelo loop AFK, aguardando merge"
    ```
 
-4. **Docker Desktop** aberto. A imagem `mam-afk` é construída na primeira execução.
+4. **Docker Desktop** aberto. A imagem `mam-afk` é construída na primeira execução. O `rodar.sh` também sobe os emuladores do Firestore e do Storage, nas versões do `ci.yml`, e o contêiner do agente entra na rede deles. Assim o `make verificar` do loop roda os testes de nuvem em vez de pulá-los. O `loop.sh` se recusa a começar sem `FIRESTORE_EMULATOR_HOST` e `STORAGE_EMULATOR_HOST`.
 5. **Plugin `mattpocock-skills`** instalado no Claude Code do Mac. O script monta a pasta dele no contêiner, só leitura.
 
 ### Como rodar
@@ -139,4 +139,4 @@ O tamanho do contexto é a soma de `input_tokens`, `cache_read_input_tokens` e `
 make testar-afk
 ```
 
-Roda o `shellcheck` e o `testes.sh`, que exercita o loop com `claude` e `gh` falsos, sem Docker e sem rede: ticket feito e revisado num `claude -p` à parte, estouro de contexto, ticket bloqueado, verificação falhando depois do commit, revisão que quebra a verificação, revisão sem sinal, revisão com erro, parciais seguidas, fila sem tickets elegíveis, PR anterior sem merge e o hook abaixo e acima do aviso. O CI roda o mesmo alvo.
+Roda o `shellcheck` e o `testes.sh`, que exercita o loop com `claude` e `gh` falsos, sem Docker e sem rede: ticket feito e revisado num `claude -p` à parte, estouro de contexto, ticket bloqueado, verificação falhando depois do commit, revisão que quebra a verificação, revisão sem sinal, revisão com erro, parciais seguidas, fila sem tickets elegíveis, PR anterior sem merge, loop sem as variáveis dos emuladores e o hook abaixo e acima do aviso. O CI roda o mesmo alvo.
