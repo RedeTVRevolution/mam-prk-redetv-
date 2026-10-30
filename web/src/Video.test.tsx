@@ -60,9 +60,15 @@ let desfeita = false
 let desfazerDa409 = false
 let desfazerRecebido: unknown = null
 let pedidosDeHistorico = 0
+let reaplicada = false
 const handlersDoHistorico = [
   http.get('/v1/jobs/j1/correcoes', () => {
     pedidosDeHistorico += 1
+    if (reaplicada)
+      return HttpResponse.json([
+        item({ id: 'c1-resolvida', reaplica: 'c1', criada_em: '2026-10-30T13:00:00Z' }),
+        item({ estado: 'reaplicada' }),
+      ])
     return HttpResponse.json(
       desfeita
         ? [
@@ -156,6 +162,7 @@ afterEach(() => {
   desfazerDa409 = false
   desfazerRecebido = null
   pedidosDeHistorico = 0
+  reaplicada = false
   fila = []
   pedidosDaFila = 0
   resolucaoRecebida = null
@@ -507,6 +514,16 @@ async function abrirHistorico(usuario: ReturnType<typeof userEvent.setup>) {
   await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
   return within(await screen.findByRole('dialog', { name: 'Histórico' }))
 }
+
+test('o histórico liga a reaplicação à original, que fica reaplicada e sem desfazer', async () => {
+  reaplicada = true
+  const usuario = userEvent.setup()
+  const gaveta = await abrirHistorico(usuario)
+
+  expect(await gaveta.findByText(/^Reaplica a correção de /)).toBeTruthy()
+  expect(gaveta.getByText('reaplicada')).toBeTruthy()
+  expect(gaveta.getAllByRole('button', { name: 'Desfazer' })).toHaveLength(1)
+})
 
 test('a gaveta de histórico lista quem, quando, antes, depois e motivo', async () => {
   const usuario = userEvent.setup()

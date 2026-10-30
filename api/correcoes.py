@@ -71,8 +71,11 @@ Motivo = Annotated[
 ]
 
 
+EstadoNoHistorico = Literal["ativa", "desfeita", "reaplicada", "descartada"]
+
+
 class ItemDoHistorico(Correcao):
-    estado: Literal["ativa", "desfeita", "reaplicada", "descartada"]
+    estado: EstadoNoHistorico
 
 
 class NovoDesfazer(BaseModel):
@@ -243,7 +246,9 @@ def _desfeitas(correcoes: list[Correcao]) -> set[str]:
 
 def _resolvidas(correcoes: list[Correcao]) -> set[str]:
     """As que saíram da fila: reaplicadas ou descartadas."""
-    return {c.reaplica or c.descarta for c in correcoes if c.reaplica or c.descarta}  # type: ignore[misc]
+    return {c.reaplica for c in correcoes if c.reaplica} | {
+        c.descarta for c in correcoes if c.descarta
+    }
 
 
 def id_do_desfazer(alvo_id: str) -> str:
@@ -309,12 +314,13 @@ def montar_desfazer(
 
 
 def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
-    """Da mais recente para a mais antiga, cada uma ativa ou desfeita."""
+    """Da mais recente para a mais antiga, cada uma ativa, desfeita ou fora da
+    fila (reaplicada ou descartada)."""
     desfeitas = _desfeitas(correcoes)
     reaplicadas = {c.reaplica for c in correcoes if c.reaplica}
     descartadas = {c.descarta for c in correcoes if c.descarta}
 
-    def estado(c: Correcao) -> Literal["ativa", "desfeita", "reaplicada", "descartada"]:
+    def estado(c: Correcao) -> EstadoNoHistorico:
         if c.id in desfeitas:
             return "desfeita"
         if c.id in reaplicadas:
@@ -463,6 +469,10 @@ class NaoNaFila(Exception):
     """A correção não está na fila de revisão (casou, saiu da fila ou é de outro tipo)."""
 
 
+class NaoCandidato(Exception):
+    """O item escolhido para reaplicar não é candidato do item da fila."""
+
+
 def id_da_resolucao(alvo_id: str) -> str:
     """Fixo por alvo: reaplicar e descartar simultâneos colidem no repositório."""
     return f"{alvo_id}-resolvida"
@@ -492,11 +502,13 @@ def fila(
     return itens
 
 
-def _exige_na_fila(
+def _na_fila(
     modelo: dict[str, Any], versao: str, alvo: Correcao, correcoes: list[Correcao]
-) -> None:
-    if alvo.id not in {i.id for i in fila(modelo, versao, correcoes)}:
+) -> ItemDaFila:
+    item = next((i for i in fila(modelo, versao, correcoes) if i.id == alvo.id), None)
+    if item is None:
         raise NaoNaFila(alvo.id)
+    return item
 
 
 def montar_reaplicacao(
@@ -509,11 +521,12 @@ def montar_reaplicacao(
     **registro: Any,
 ) -> Correcao:
     """A correção nova, ancorada na versão atual no item escolhido e ligada à
-    original (`reaplica`). A original sai da fila e continua no histórico."""
-    _exige_na_fila(modelo, versao, alvo, correcoes)
-    pessoa = next((p for p in _pessoas(modelo) if p.get("id") == item_id), None)
-    if pessoa is None:
-        raise ItemInexistente(item_id)
+    original (`reaplica`). A original sai da fila e continua no histórico.
+    O item tem de ser um dos candidatos que a fila oferece."""
+    item = _na_fila(modelo, versao, alvo, correcoes)
+    if item_id not in {c.item_id for c in item.candidatos}:
+        raise NaoCandidato(item_id)
+    pessoa = next(p for p in _pessoas(modelo) if p.get("id") == item_id)
     return Correcao(
         tipo="pessoa.renomear",
         reaplica=alvo.id,
@@ -535,7 +548,7 @@ def montar_descarte(
     **registro: Any,
 ) -> Correcao:
     """O registro que tira `alvo` da fila; ela não se aplica mais."""
-    _exige_na_fila(modelo, versao, alvo, correcoes)
+    _na_fila(modelo, versao, alvo, correcoes)
     return Correcao(
         tipo="descartar",
         descarta=alvo.id,

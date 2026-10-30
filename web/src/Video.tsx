@@ -641,6 +641,7 @@ interface ItemDoHistorico {
   antes: string
   depois: string
   estado: 'ativa' | 'desfeita' | 'reaplicada' | 'descartada'
+  reaplica?: string | null
 }
 
 const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
@@ -649,10 +650,10 @@ const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   descartar: 'Descartar da fila',
 }
 
-const ESTADOS_DE_CORRECAO = {
-  desfeita: 'desfeita',
-  reaplicada: 'reaplicada',
-  descartada: 'descartada',
+/** Data da correção que a reaplicação refaz, para ligar uma à outra na gaveta. */
+const quandoDaOriginal = (itens: ItemDoHistorico[], id: string) => {
+  const original = itens.find((o) => o.id === id)
+  return original ? quando(original.criada_em) : id
 }
 
 const quando = (iso: string) =>
@@ -731,7 +732,7 @@ function HistoricoDeCorrecoes({
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
       else if (e instanceof Error && e.message.startsWith('Falha 409')) {
         // Outro Editor pode ter desfeito antes: a decupagem também mudou.
-        setErro('Essa correção já foi desfeita ou não casa com a versão atual. O histórico foi recarregado.')
+        setErro('Essa correção já foi desfeita, saiu da fila ou não casa com a versão atual. O histórico foi recarregado.')
         carregar()
         aoDesfazer()
       } else setErro('Não foi possível desfazer a correção.')
@@ -758,7 +759,7 @@ function HistoricoDeCorrecoes({
                   </Text>
                   {i.estado !== 'ativa' && (
                     <Badge size="xs" color="gray" variant="light">
-                      {ESTADOS_DE_CORRECAO[i.estado]}
+                      {i.estado}
                     </Badge>
                   )}
                 </Group>
@@ -783,6 +784,11 @@ function HistoricoDeCorrecoes({
                   </Text>
                 </Group>
                 <Text size="sm">{i.motivo}</Text>
+                {i.reaplica && (
+                  <Text size="xs" c="dimmed">
+                    {`Reaplica a correção de ${quandoDaOriginal(itens, i.reaplica)}`}
+                  </Text>
+                )}
                 {i.estado === 'ativa' && i.tipo === 'pessoa.renomear' && (
                   <Group justify="flex-end">
                     <Button size="xs" variant="default" onClick={() => setDesfazendo(i)}>
@@ -857,9 +863,24 @@ function FilaDeRevisao({
   aoResolver: () => void
   aoSessaoExpirada: () => void
 }) {
+  // Fica no painel: o item resolvido some da lista ao recarregar a fila.
+  const [aviso, setAviso] = useState<string | null>(null)
   return (
-    <Drawer opened={aberta} onClose={aoFechar} position="right" title="Fila de revisão">
+    <Drawer
+      opened={aberta}
+      onClose={() => {
+        setAviso(null)
+        aoFechar()
+      }}
+      position="right"
+      title="Fila de revisão"
+    >
       <Stack gap="sm">
+        {aviso && (
+          <Alert color="yellow" variant="light" role="alert">
+            {aviso}
+          </Alert>
+        )}
         {itens.length === 0 && <Text size="sm">Nada na fila.</Text>}
         {itens.map((i) => (
           <ItemDaFilaDeRevisao
@@ -867,7 +888,10 @@ function FilaDeRevisao({
             item={i}
             autenticador={autenticador}
             jobId={jobId}
-            aoResolver={aoResolver}
+            aoResolver={(mensagem) => {
+              setAviso(mensagem ?? null)
+              aoResolver()
+            }}
             aoSessaoExpirada={aoSessaoExpirada}
           />
         ))}
@@ -886,7 +910,8 @@ function ItemDaFilaDeRevisao({
   item: ItemDaFila
   autenticador: Autenticador
   jobId: string
-  aoResolver: () => void
+  /** `aviso`, se houver, sobrevive à recarga da fila. */
+  aoResolver: (aviso?: string) => void
   aoSessaoExpirada: () => void
 }) {
   const [candidato, setCandidato] = useState<string | null>(null)
@@ -907,8 +932,7 @@ function ItemDaFilaDeRevisao({
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
       else if (e instanceof Error && e.message.startsWith('Falha 409')) {
         // Outro Editor resolveu antes: a fila e a decupagem mudaram.
-        setErro('Essa correção não está mais na fila. A fila foi recarregada.')
-        aoResolver()
+        aoResolver('Essa correção não está mais na fila. A fila foi recarregada.')
       } else setErro('Não foi possível resolver a correção.')
     }
     setEnviando(false)

@@ -33,6 +33,7 @@ from api.correcoes import (
     ItemDaFila,
     ItemDoHistorico,
     ItemInexistente,
+    NaoCandidato,
     NaoDesfazivel,
     NaoNaFila,
     NovaCorrecao,
@@ -530,7 +531,8 @@ def criar_rotas(
         except (NaoDesfazivel, CorrecaoJaExiste):
             raise HTTPException(
                 409,
-                "Correção já desfeita, já é um desfazer ou não casa com a versão atual",
+                "Correção já desfeita, saiu da fila, não é uma renomeação"
+                " ou não casa com a versão atual",
             ) from None
         return {"id": desfazer.id}
 
@@ -546,8 +548,10 @@ def criar_rotas(
         job_id: str,
         correcao_id: str,
         autor: Usuario,
-        montar: Callable[[dict[str, Any], str, Correcao, list[Correcao]], Correcao],
+        montar: Callable[..., Correcao],
     ) -> dict[str, str]:
+        """`montar(modelo, versao, alvo, todas, **registro)` faz o registro que
+        tira a correção da fila (reaplicação ou descarte)."""
         job = obter_concluido(job_id, autor)
         todas = correcoes.listar(job.id)
         alvo = next((c for c in todas if c.id == correcao_id), None)
@@ -555,10 +559,20 @@ def criar_rotas(
             raise HTTPException(404, "Correção não encontrada")
         modelo, versao_atual = _ler_modelo(job.id)
         try:
-            resolucao = montar(modelo, versao_atual, alvo, todas)
+            resolucao = montar(
+                modelo,
+                versao_atual,
+                alvo,
+                todas,
+                id=id_da_resolucao(alvo.id),
+                job_id=job.id,
+                autor_uid=autor.uid,
+                autor_email=autor.email,
+                criada_em=relogio(),
+            )
             correcoes.acrescentar(resolucao)
-        except ItemInexistente:
-            raise HTTPException(422, "Item inexistente") from None
+        except NaoCandidato:
+            raise HTTPException(422, "O item não é candidato desta correção") from None
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
         return {"id": resolucao.id}
@@ -574,18 +588,8 @@ def criar_rotas(
             job_id,
             correcao_id,
             autor,
-            lambda modelo, versao, alvo, todas: montar_reaplicacao(
-                modelo,
-                versao,
-                alvo,
-                todas,
-                corpo.item_id,
-                corpo.motivo,
-                id=id_da_resolucao(alvo.id),
-                job_id=job_id,
-                autor_uid=autor.uid,
-                autor_email=autor.email,
-                criada_em=relogio(),
+            lambda modelo, versao, alvo, todas, **registro: montar_reaplicacao(
+                modelo, versao, alvo, todas, corpo.item_id, corpo.motivo, **registro
             ),
         )
 
@@ -600,17 +604,8 @@ def criar_rotas(
             job_id,
             correcao_id,
             autor,
-            lambda modelo, versao, alvo, todas: montar_descarte(
-                modelo,
-                versao,
-                alvo,
-                todas,
-                corpo.motivo,
-                id=id_da_resolucao(alvo.id),
-                job_id=job_id,
-                autor_uid=autor.uid,
-                autor_email=autor.email,
-                criada_em=relogio(),
+            lambda modelo, versao, alvo, todas, **registro: montar_descarte(
+                modelo, versao, alvo, todas, corpo.motivo, **registro
             ),
         )
 

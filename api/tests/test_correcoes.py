@@ -16,6 +16,7 @@ from api.correcoes import (
     Correcao,
     CorrecaoJaExiste,
     ItemInexistente,
+    NaoCandidato,
     NaoNaFila,
     NovaCorrecao,
     RepositorioDeCorrecoesEmMemoria,
@@ -759,13 +760,17 @@ def test_reaplicar_cria_correcao_na_versao_atual_ligada_a_original() -> None:
     assert fila(novo, "nova", [original, nova]) == []
 
 
-def test_reaplicar_item_inexistente_levanta() -> None:
-    novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
+@pytest.mark.parametrize("item_id", ["zzz", "p2"])
+def test_reaplicar_em_quem_nao_e_candidato_levanta(item_id: str) -> None:
+    novo = _modelo_com(
+        _pessoa("p1", "Carla Dias", 1000, 5000),
+        _pessoa("p2", "Davi Lima", 9000, 9500),  # existe, mas fora do intervalo
+    )
     original = _correcao_antiga()
 
-    with pytest.raises(ItemInexistente):
+    with pytest.raises(NaoCandidato):
         montar_reaplicacao(
-            novo, "nova", original, [original], "zzz", "x", **_registro()
+            novo, "nova", original, [original], item_id, "x", **_registro()
         )
 
 

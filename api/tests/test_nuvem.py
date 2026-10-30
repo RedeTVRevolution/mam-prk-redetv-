@@ -462,6 +462,24 @@ class TestRepositorioDeCorrecoesFirestore:
         [lido] = correcoes.listar("j1")
         assert (lido.tipo, lido.desfaz, lido.item_id) == ("desfazer", "c1", "pes01")
 
+    def test_guarda_a_reaplicacao_e_o_descarte_com_a_original(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        reaplicacao = self._correcao("r1", "j1", 3).model_copy(
+            update={"reaplica": "c1"}
+        )
+        descarte = self._correcao("d1", "j1", 4).model_copy(
+            update={"tipo": "descartar", "descarta": "c2"}
+        )
+        correcoes.acrescentar(reaplicacao)
+        correcoes.acrescentar(descarte)
+
+        lidos = correcoes.listar("j1")
+        assert [(c.tipo, c.reaplica, c.descarta) for c in lidos] == [
+            ("pessoa.renomear", "c1", None),
+            ("descartar", None, "c2"),
+        ]
+
     def test_nao_sobrescreve_uma_correcao_existente(
         self, correcoes: RepositorioDeCorrecoesFirestore
     ) -> None:
