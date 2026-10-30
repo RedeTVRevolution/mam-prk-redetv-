@@ -767,6 +767,19 @@ test('o histórico mostra um título com hífen como texto, e os tempos como mm:
   expect(gaveta.getByText('00:32–01:00')).toBeTruthy()
 })
 
+test('o histórico mostra o tom com acento e o tom livre antigo como veio', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/correcoes', () =>
+      HttpResponse.json([item({ id: 'c2', tipo: 'pauta.tom', item_id: 'pa1', antes: 'tenso', depois: 'analise' })]),
+    ),
+  )
+  const usuario = userEvent.setup()
+  const gaveta = await abrirHistorico(usuario)
+
+  expect(await gaveta.findByText('análise')).toBeTruthy()
+  expect(gaveta.getByText('tenso')).toBeTruthy()
+})
+
 test('quem não tem decupagem.editar não vê o botão de corrigir a pauta', async () => {
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' }, false)

@@ -251,8 +251,16 @@ def test_tom_fora_da_lista_e_recusado_e_refeito() -> None:
 
 def test_esquema_do_modelo_traz_o_enum_do_tom_e_o_comercial() -> None:
     tom = esquema_do_modelo()["$defs"]["Pauta"]["properties"]["tom"]
-    assert "comercial" in str(tom)
-    assert "polemico" in str(tom)
+    [enum] = [t["enum"] for t in tom["anyOf"] if "enum" in t]
+    assert set(enum) == {
+        "informativo",
+        "polemico",
+        "descontraido",
+        "exclusivo",
+        "homenagem",
+        "analise",
+        "comercial",
+    }
     assert "merchandising" in tom["description"]
 
 

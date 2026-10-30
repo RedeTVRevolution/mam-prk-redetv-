@@ -172,9 +172,13 @@ const TONS_DA_PAUTA = {
   comercial: 'comercial',
 } as const
 
+function ehTomDaLista(tom: string): tom is keyof typeof TONS_DA_PAUTA {
+  return Object.hasOwn(TONS_DA_PAUTA, tom)
+}
+
 // Decupagem 1.2 gravada antes da lista fechada pode trazer outro texto: sai como veio.
 function rotuloDoTom(tom: string): string {
-  return Object.hasOwn(TONS_DA_PAUTA, tom) ? TONS_DA_PAUTA[tom as keyof typeof TONS_DA_PAUTA] : tom
+  return ehTomDaLista(tom) ? TONS_DA_PAUTA[tom] : tom
 }
 
 const FONTES_DO_NOME = { rosto: 'rosto', gc: 'GC', fala: 'fala', contexto: 'contexto' } as const
@@ -305,6 +309,7 @@ function valorLegivel(tipo: string | undefined, valor: string): string {
       return valor
     }
   }
+  if (tipo === 'pauta.tom') return rotuloDoTom(valor)
   if (tipo === 'plano.limpo') return valor === 'true' ? 'plano limpo' : 'plano não limpo'
   if (tipo === 'plano.descricao') {
     try {
@@ -2012,7 +2017,7 @@ function CorrigirCampo({
   aoSessaoExpirada: () => void
 }) {
   const [tom, setTom] = useState<string | null>(
-    campo?.modo === 'tom' && campo.pauta.tom && Object.hasOwn(TONS_DA_PAUTA, campo.pauta.tom)
+    campo?.modo === 'tom' && campo.pauta.tom && ehTomDaLista(campo.pauta.tom)
       ? campo.pauta.tom
       : null,
   )
