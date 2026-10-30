@@ -22,7 +22,7 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
-from api.correcoes import Ancora, Correcao, CorrecaoJaExiste
+from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
@@ -535,6 +535,26 @@ class TestRepositorioDeCorrecoesFirestore:
             "comercial",
         )
         assert lida.ancora.identidade == "loja sol|merchan_apresentador"
+
+    def test_guarda_a_ocorrencia_da_pessoa(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        correcoes.acrescentar(
+            self._correcao("o1", "j1", 1).model_copy(
+                update={
+                    "tipo": "pessoa.nao_e",
+                    "depois": "Não identificado",
+                    "ocorrencia": Ocorrencia(
+                        lista="na_imagem", inicio_ms=1000, fim_ms=5000
+                    ),
+                }
+            )
+        )
+
+        [lida] = correcoes.listar("j1")
+        assert lida.ocorrencia == Ocorrencia(
+            lista="na_imagem", inicio_ms=1000, fim_ms=5000
+        )
 
     def test_nao_sobrescreve_uma_correcao_existente(
         self, correcoes: RepositorioDeCorrecoesFirestore

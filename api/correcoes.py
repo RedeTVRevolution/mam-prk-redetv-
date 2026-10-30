@@ -34,10 +34,27 @@ TipoNovo = Literal[
     "comercial.marca",
     "comercial.tipo",
     "comercial.acrescentar",
+    "pessoa.nao_e",
+    "pessoa.aparicao_para_mencao",
+    "pessoa.mencao_para_aparicao",
+    "pessoa.acrescentar_aparicao",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar"]
 TipoDoItem = Literal["pessoa", "pauta", "comercial"]
 CORRIGIVEIS = get_args(TipoNovo)
+Lista = Literal["na_imagem", "citada_na_fala", "citada_no_texto"]
+MENCOES = ("citada_na_fala", "citada_no_texto")
+# Corrigem uma ocorrência (aparição ou menção) que o pedido identifica.
+DE_OCORRENCIA = (
+    "pessoa.nao_e",
+    "pessoa.aparicao_para_mencao",
+    "pessoa.mencao_para_aparicao",
+)
+ACRESCENTAR_APARICAO = "pessoa.acrescentar_aparicao"
+# Prefixo do id da pessoa ou do comercial que a revisão cria.
+PREFIXO_ACRESCENTADO = "acr-"
+PREFIXO_NAO_IDENTIFICADO = "nid-"
+NOME_NAO_IDENTIFICADO = "Não identificado"
 # Os tipos do esquema 1.1, a mesma lista que o Gemini recebe.
 TIPOS_DE_COMERCIAL = get_args(Comercial.model_fields["tipo"].annotation)
 CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencia")
@@ -73,6 +90,24 @@ class Ancora(BaseModel):
     fim_ms: int
 
 
+class Ocorrencia(BaseModel):
+    """Uma aparição ou menção da pessoa: a lista e o intervalo que a identificam.
+
+    No pedido o intervalo é o da ocorrência na decupagem entregue; ela é achada
+    pela sobreposição de intervalo na mesma lista.
+    """
+
+    lista: Lista
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        return self
+
+
 class Correcao(BaseModel):
     id: str
     job_id: str
@@ -85,6 +120,7 @@ class Correcao(BaseModel):
     desfaz: str | None = None  # só no tipo "desfazer": o id da correção revertida
     descarta: str | None = None  # só no tipo "descartar": o id da que saiu da fila
     reaplica: str | None = None  # na reaplicação: o id da original que ela refaz
+    ocorrencia: Ocorrencia | None = None  # nas correções de aparição e menção
     antes: str
     depois: str
     ancora: Ancora
@@ -149,6 +185,41 @@ class NovoComercial(BaseModel):
         return self
 
 
+class NovaAparicao(BaseModel):
+    """A aparição de um `pessoa.acrescentar_aparicao`; `nome` só para pessoa nova."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+    evidencia: Annotated[
+        str, StringConstraints(min_length=1, max_length=LIMITE_DO_NOME)
+    ]
+    nome: (
+        Annotated[str, StringConstraints(min_length=1, max_length=LIMITE_DO_NOME)]
+        | None
+    ) = None
+
+    @field_validator("nome", "evidencia")
+    @classmethod
+    def _texto_sem_controle(cls, valor: str | None) -> str | None:
+        return None if valor is None else _sem_controle(valor)
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        if self.nome is not None and nao_identificado(self.nome):
+            raise ValueError("nome de pessoa nova não pode ser não identificado")
+        return self
+
+
+def _json_da_aparicao(aparicao: NovaAparicao) -> str:
+    return json.dumps(
+        aparicao.model_dump(exclude_none=True), sort_keys=True, ensure_ascii=False
+    )
+
+
 def _json_do_comercial(comercial: dict[str, Any]) -> str:
     """A forma única em que o comercial acrescentado é guardado."""
     return json.dumps(
@@ -163,11 +234,16 @@ class NovaCorrecao(BaseModel):
 
     tipo: TipoNovo
     # Só o `item.tempos` precisa: vale para pauta (o padrão) e para comercial.
-    tipo_do_item: Literal["pauta", "comercial"] | None = None
-    # Vazio só no `comercial.acrescentar`, que não corrige item nenhum.
+    tipo_do_item: Literal["pauta", "comercial", "pessoa"] | None = None
+    # Nas correções de aparição e menção (e no `item.tempos` de pessoa).
+    ocorrencia: Ocorrencia | None = None
+    # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
     item_id: Annotated[str, StringConstraints(max_length=40)] = ""
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
-    # esquema; `comercial.acrescentar`: o JSON do comercial.
+    # esquema; `comercial.acrescentar`: o JSON do comercial; `pessoa.nao_e`:
+    # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
+    # `pessoa.mencao_para_aparicao`: a evidência; `pessoa.acrescentar_aparicao`:
+    # o JSON da aparição.
     valor: Annotated[
         str,
         StringConstraints(
@@ -181,12 +257,25 @@ class NovaCorrecao(BaseModel):
 
     @model_validator(mode="after")
     def _valor_do_tipo(self) -> Self:
-        if not self.item_id and self.tipo != "comercial.acrescentar":
+        if not self.item_id and self.tipo not in (
+            "comercial.acrescentar",
+            ACRESCENTAR_APARICAO,
+        ):
             raise ValueError("item_id obrigatório")
         if self.tipo_do_item is not None and self.tipo != "item.tempos":
             raise ValueError("tipo_do_item só vale no item.tempos")
+        de_pessoa = self.tipo in DE_OCORRENCIA or self.tipo_do_item == "pessoa"
+        if de_pessoa != (self.ocorrencia is not None):
+            raise ValueError("ocorrencia vale só para aparição e menção de pessoa")
         if self.tipo == "item.tempos":
             tempos_de(self.valor)
+        elif self.tipo in DE_OCORRENCIA:
+            self.valor = self._valor_da_ocorrencia()
+        elif self.tipo == ACRESCENTAR_APARICAO:
+            aparicao = NovaAparicao.model_validate_json(self.valor)
+            if bool(self.item_id) == (aparicao.nome is not None):
+                raise ValueError("informe item_id ou nome, não os dois nem nenhum")
+            self.valor = _json_da_aparicao(aparicao)
         elif self.tipo == "comercial.tipo":
             if self.valor not in TIPOS_DE_COMERCIAL:
                 raise ValueError("tipo de comercial desconhecido")
@@ -201,6 +290,24 @@ class NovaCorrecao(BaseModel):
             if len(self.valor) > LIMITE_DO_NOME:
                 raise ValueError("valor longo demais")
         return self
+
+    def _valor_da_ocorrencia(self) -> str:
+        assert self.ocorrencia is not None
+        lista = self.ocorrencia.lista
+        if self.tipo == "pessoa.nao_e":
+            if not nao_identificado(self.valor):
+                raise ValueError("o valor de pessoa.nao_e é Não identificado")
+            return NOME_NAO_IDENTIFICADO
+        if self.tipo == "pessoa.aparicao_para_mencao":
+            if lista != "na_imagem" or self.valor not in MENCOES:
+                raise ValueError("de aparição para citada_na_fala ou citada_no_texto")
+            return self.valor
+        if lista == "na_imagem":
+            raise ValueError("a ocorrência já é uma aparição")
+        _sem_controle(self.valor)
+        if len(self.valor) > LIMITE_DO_NOME:
+            raise ValueError("evidência longa demais")
+        return self.valor
 
 
 class Candidato(BaseModel):
@@ -318,7 +425,7 @@ def _comerciais(modelo: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _tipo_do_item(tipo: str, escolhido: str | None = None) -> TipoDoItem:
-    if tipo == "pessoa.renomear":
+    if tipo.startswith("pessoa.") or escolhido == "pessoa":
         return "pessoa"
     if tipo.startswith("comercial.") or escolhido == "comercial":
         return "comercial"
@@ -373,6 +480,57 @@ def _valor_do_item(item: dict[str, Any], tipo: str) -> str:
     return f"{inicio}-{fim}"
 
 
+def _acha_ocorrencia(
+    pessoa: dict[str, Any],
+    inicio_ms: int,
+    fim_ms: int,
+    listas: tuple[str, ...] = LISTAS,
+) -> tuple[str, dict[str, Any]] | None:
+    """A ocorrência da pessoa que sobrepõe o intervalo, na lista (ou listas).
+
+    Com várias, vence a de intervalo idêntico, depois a de maior sobreposição.
+    """
+    melhor = None
+    for n, lista in enumerate(listas):
+        for ocorrencia in pessoa.get(lista, []):
+            sobreposicao = min(fim_ms, ocorrencia["fim_ms"]) - max(
+                inicio_ms, ocorrencia["inicio_ms"]
+            )
+            if sobreposicao < 0:
+                continue
+            exata = (ocorrencia["inicio_ms"], ocorrencia["fim_ms"]) == (
+                inicio_ms,
+                fim_ms,
+            )
+            chave = (exata, sobreposicao, -n)
+            if melhor is None or chave > melhor[0]:
+                melhor = (chave, lista, ocorrencia)
+    return None if melhor is None else (melhor[1], melhor[2])
+
+
+def _valor_da_ocorrencia(
+    pessoa: dict[str, Any], tipo: str, ocorrencia: Ocorrencia | None, depois: str
+) -> str:
+    """Onde está hoje a ocorrência: "<lista> <inicio>-<fim>", ou só os tempos no
+    `item.tempos`; vazio se a pessoa não a tem."""
+    if tipo == ACRESCENTAR_APARICAO:
+        alvo = json.loads(depois)
+        achada = _acha_ocorrencia(
+            pessoa, alvo["inicio_ms"], alvo["fim_ms"], ("na_imagem",)
+        )
+    else:
+        assert ocorrencia is not None
+        listas = (ocorrencia.lista,) if tipo == "item.tempos" else LISTAS
+        achada = _acha_ocorrencia(
+            pessoa, ocorrencia.inicio_ms, ocorrencia.fim_ms, listas
+        )
+    if achada is None:
+        return ""
+    lista, o = achada
+    tempos = f"{o['inicio_ms']}-{o['fim_ms']}"
+    return tempos if tipo == "item.tempos" else f"{lista} {tempos}"
+
+
 class TemposInvalidos(Exception):
     """Os tempos passam da duração do vídeo."""
 
@@ -382,7 +540,7 @@ def _confere_duracao(modelo: dict[str, Any], tipo: str, valor: str) -> None:
     acrescentado passam da duração."""
     if tipo == "item.tempos":
         fim = tempos_de(valor)[1]
-    elif tipo == "comercial.acrescentar":
+    elif tipo in ("comercial.acrescentar", ACRESCENTAR_APARICAO):
         fim = int(json.loads(valor)["fim_ms"])
     else:
         return
@@ -395,11 +553,34 @@ def montar_correcao(
     versao: str,
     novo: NovaCorrecao,
     antes: str,
+    *,
+    anteriores: list[Correcao] | None = None,
     **registro: Any,
 ) -> Correcao:
-    """A correção de `novo` sobre o item do JSON do modelo, com a âncora pronta."""
+    """A correção de `novo` sobre o item do JSON do modelo, com a âncora pronta.
+
+    `anteriores` são as correções já gravadas: a ocorrência de uma pessoa tem de
+    existir na decupagem entregue, que já as traz.
+    """
     tipo_do_item = _tipo_do_item(novo.tipo, novo.tipo_do_item)
     _confere_duracao(modelo, novo.tipo, novo.valor)
+    if novo.tipo == ACRESCENTAR_APARICAO and not novo.item_id:
+        aparicao = json.loads(novo.valor)
+        return Correcao(
+            tipo=novo.tipo,
+            item_id=f"{PREFIXO_ACRESCENTADO}{registro['id']}",
+            motivo=novo.motivo,
+            antes="",
+            depois=novo.valor,
+            ancora=Ancora(
+                versao=versao,
+                tipo_do_item="pessoa",
+                identidade=normalizar(aparicao["nome"]),
+                inicio_ms=aparicao["inicio_ms"],
+                fim_ms=aparicao["fim_ms"],
+            ),
+            **registro,
+        )
     if novo.tipo == "comercial.acrescentar":
         comercial = json.loads(novo.valor)
         return Correcao(
@@ -416,12 +597,21 @@ def montar_correcao(
     )
     if item is None:
         raise ItemInexistente(novo.item_id)
+    if novo.ocorrencia is not None:
+        entregue = _itens(aplicar(modelo, versao, anteriores or []), "pessoa")
+        pessoa = next((p for p in entregue if p.get("id") == novo.item_id), None)
+        o = novo.ocorrencia
+        if pessoa is None or not _acha_ocorrencia(
+            pessoa, o.inicio_ms, o.fim_ms, (o.lista,)
+        ):
+            raise ItemInexistente(f"{novo.item_id} {o.lista}")
     return Correcao(
         tipo=novo.tipo,
         item_id=novo.item_id,
         motivo=novo.motivo,
         antes=antes,
         depois=novo.valor,
+        ocorrencia=novo.ocorrencia,
         ancora=_ancora_do_item(item, tipo_do_item, versao),
         **registro,
     )
@@ -489,6 +679,8 @@ def _valor_do_alvo(
             alvo.tipo,
             alvo.item_id,
             alvo.ancora.tipo_do_item,
+            alvo.ocorrencia,
+            alvo.depois,
         )
     entregue = _pessoas(aplicar(modelo, versao, correcoes))
     for original, pessoa in zip(_pessoas(modelo), entregue, strict=True):
@@ -530,16 +722,24 @@ def montar_desfazer(
         alvo_atual = reapontada
         # A reapontada vale pelo id do item novo, como em `aplicar`.
         tipo_do_item = alvo_atual.ancora.tipo_do_item
-        antes = valor_atual(
-            modelo, versao, correcoes, alvo_atual.tipo, alvo_atual.item_id, tipo_do_item
-        )
-        depois = valor_atual(
-            modelo, versao, restantes, alvo_atual.tipo, alvo_atual.item_id, tipo_do_item
+        antes, depois = (
+            valor_atual(
+                modelo,
+                versao,
+                lista,
+                alvo_atual.tipo,
+                alvo_atual.item_id,
+                tipo_do_item,
+                alvo_atual.ocorrencia,
+                alvo_atual.depois,
+            )
+            for lista in (correcoes, restantes)
         )
     return Correcao(
         tipo="desfazer",
         desfaz=alvo.id,
         item_id=alvo_atual.item_id,
+        ocorrencia=alvo_atual.ocorrencia,
         motivo=motivo,
         antes=antes,
         depois=depois,
@@ -577,17 +777,26 @@ def valor_atual(
     tipo: str,
     item_id: str,
     tipo_do_item: str | None = None,
+    ocorrencia: Ocorrencia | None = None,
+    depois: str = "",
 ) -> str:
     """O valor que o Editor vê hoje no campo do `tipo` do item `item_id`.
 
     Vazio para o comercial acrescentado que não está na decupagem (ainda não
-    existe, foi desfeito ou o modelo já o traz).
+    existe, foi desfeito ou o modelo já o traz) e para a ocorrência de pessoa
+    que a decupagem não tem (ou cuja pessoa saiu dela). `depois` é o valor da
+    correção, de onde sai o intervalo da aparição acrescentada.
     """
     tipo_do_item = _tipo_do_item(tipo, tipo_do_item)
     for item in _itens(aplicar(modelo, versao, correcoes), tipo_do_item):
-        if item.get("id") == item_id:
-            return _valor_do_item(item, tipo)
-    if tipo == "comercial.acrescentar":
+        if item.get("id") != item_id:
+            continue
+        if tipo_do_item == "pessoa" and tipo != "pessoa.renomear":
+            return _valor_da_ocorrencia(item, tipo, ocorrencia, depois)
+        return _valor_do_item(item, tipo)
+    if tipo == "comercial.acrescentar" or (
+        tipo_do_item == "pessoa" and tipo != "pessoa.renomear"
+    ):
         return ""
     raise ItemInexistente(item_id)
 
@@ -653,7 +862,22 @@ def _identidade_com_o_depois(c: Correcao) -> str:
     return f"{marca}|{tipo}"
 
 
+def _aparicao_acrescentada(c: Correcao) -> tuple[int, int]:
+    alvo = json.loads(c.depois)
+    return alvo["inicio_ms"], alvo["fim_ms"]
+
+
+def _pessoa_acrescentada(c: Correcao) -> bool:
+    """Aparição de pessoa nova: não corrige item nenhum."""
+    return c.tipo == ACRESCENTAR_APARICAO and c.item_id.startswith(PREFIXO_ACRESCENTADO)
+
+
 def _ja_traz_o_depois(c: Correcao, item: dict[str, Any]) -> bool:
+    if c.tipo == ACRESCENTAR_APARICAO:
+        return (
+            _acha_ocorrencia(item, *_aparicao_acrescentada(c), ("na_imagem",))
+            is not None
+        )
     if c.tipo == "pessoa.renomear":
         return normalizar(str(item["nome"])) == normalizar(c.depois)
     if c.tipo == "comercial.marca":
@@ -672,15 +896,25 @@ def _candidatos_pessoa(modelo: dict[str, Any], c: Correcao) -> list[dict[str, An
         if sem_nome and nao_identificado(nome):
             # Só as aparições mostram quem é.
             intervalo = _intervalo_da_pessoa(pessoa, ("na_imagem",))
-        elif normalizar(nome) == normalizar(c.depois) or (
-            not sem_nome and normalizar(nome) == c.ancora.identidade
-        ):
+        elif (
+            c.tipo == "pessoa.renomear" and normalizar(nome) == normalizar(c.depois)
+        ) or (not sem_nome and normalizar(nome) == c.ancora.identidade):
             intervalo = _intervalo_da_pessoa(pessoa)
         else:
             continue
-        if _sobrepoe(ancora, intervalo):
+        # A aparição acrescentada pode estar longe do que a pessoa já tem.
+        longe_ok = c.tipo == ACRESCENTAR_APARICAO and not sem_nome
+        if longe_ok or (_sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, pessoa)):
             achados.append(pessoa)
     return achados
+
+
+def _tem_a_ocorrencia(c: Correcao, pessoa: dict[str, Any]) -> bool:
+    """A pessoa ainda tem a aparição ou menção que a correção aponta."""
+    o = c.ocorrencia
+    if o is None:
+        return True
+    return _acha_ocorrencia(pessoa, o.inicio_ms, o.fim_ms, (o.lista,)) is not None
 
 
 def reconciliar(
@@ -698,9 +932,11 @@ def reconciliar(
         if c.ancora.versao == versao or c.tipo not in CORRIGIVEIS or c.id in fora:
             continue
         candidatos = _candidatos(modelo, c)
-        if c.tipo == "comercial.acrescentar":
+        if c.tipo == "comercial.acrescentar" or _pessoa_acrescentada(c):
             # Não corrige item nenhum: não vai para a fila. Se o modelo já traz
-            # o comercial, a correção é atendida e não duplica.
+            # o comercial (ou a aparição), a correção é atendida e não duplica.
+            if _pessoa_acrescentada(c):
+                candidatos = [i for i in candidatos if _ja_traz_o_depois(c, i)]
             nova = c.model_copy(
                 update={"ancora": c.ancora.model_copy(update={"versao": versao})}
             )
@@ -761,6 +997,95 @@ def _acrescentar_comercial(resultado: dict[str, Any], c: Correcao) -> None:
     )
 
 
+def _por_inicio(ocorrencias: list[dict[str, Any]]) -> None:
+    ocorrencias.sort(key=lambda o: (o["inicio_ms"], o["fim_ms"]))
+
+
+def _aplicar_na_pessoa(
+    resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
+) -> None:
+    """Uma correção de aparição ou menção sobre a pessoa que ela casou.
+
+    A ocorrência é achada na lista dela pela sobreposição; se sumiu, nada muda.
+    """
+    if c.tipo == ACRESCENTAR_APARICAO:
+        _acrescentar_aparicao(pessoa, json.loads(c.depois))
+        return
+    o = c.ocorrencia
+    assert o is not None
+    achada = _acha_ocorrencia(pessoa, o.inicio_ms, o.fim_ms, (o.lista,))
+    if achada is None:
+        return
+    ocorrencia = achada[1]
+    pessoa["origem"] = "revisao"
+    if c.tipo == "item.tempos":
+        ocorrencia["inicio_ms"], ocorrencia["fim_ms"] = tempos_de(c.depois)
+        _por_inicio(pessoa[o.lista])
+        return
+    pessoa[o.lista].remove(ocorrencia)
+    if c.tipo == "pessoa.nao_e":
+        resultado.setdefault("pessoas", []).append(
+            {
+                "id": f"{PREFIXO_NAO_IDENTIFICADO}{c.id}",
+                "nome": NOME_NAO_IDENTIFICADO,
+                "origem": "revisao",
+                **{lista: [] for lista in LISTAS},
+                o.lista: [ocorrencia],
+            }
+        )
+    elif c.tipo == "pessoa.aparicao_para_mencao":
+        mencao = {"inicio_ms": ocorrencia["inicio_ms"], "fim_ms": ocorrencia["fim_ms"]}
+        if c.depois == "citada_no_texto":
+            mencao["texto"] = ocorrencia["evidencia"]
+        pessoa[c.depois].append(mencao)
+        _por_inicio(pessoa[c.depois])
+    else:
+        pessoa["na_imagem"].append(
+            {
+                "inicio_ms": ocorrencia["inicio_ms"],
+                "fim_ms": ocorrencia["fim_ms"],
+                "evidencia": c.depois,
+            }
+        )
+        _por_inicio(pessoa["na_imagem"])
+
+
+def _acrescentar_aparicao(pessoa: dict[str, Any], aparicao: dict[str, Any]) -> None:
+    pessoa["origem"] = "revisao"
+    pessoa["na_imagem"].append(
+        {
+            "inicio_ms": aparicao["inicio_ms"],
+            "fim_ms": aparicao["fim_ms"],
+            "evidencia": aparicao["evidencia"],
+        }
+    )
+    _por_inicio(pessoa["na_imagem"])
+
+
+def _acrescentar_pessoa(resultado: dict[str, Any], c: Correcao) -> None:
+    """Aparição de pessoa nova; se já há uma pessoa com o nome, entra nela."""
+    aparicao = json.loads(c.depois)
+    existente = next(
+        (
+            p
+            for p in _pessoas(resultado)
+            if normalizar(str(p["nome"])) == c.ancora.identidade
+        ),
+        None,
+    )
+    if existente is not None:
+        _acrescentar_aparicao(existente, aparicao)
+        return
+    nova = {
+        "id": c.item_id,
+        "nome": aparicao["nome"],
+        "origem": "revisao",
+        **{lista: [] for lista in LISTAS},
+    }
+    resultado.setdefault("pessoas", []).append(nova)
+    _acrescentar_aparicao(nova, aparicao)
+
+
 def aplicar(
     modelo: dict[str, Any], versao: str, correcoes: list[Correcao]
 ) -> dict[str, Any]:
@@ -789,6 +1114,7 @@ def aplicar(
     # correção antiga (custo pequeno hoje); guardar o resultado quando houver
     # reprocessamentos frequentes ou muitas correções por vídeo.
     reconciliadas = reconciliar(modelo, versao, correcoes)
+    esvaziadas: list[dict[str, Any]] = []
     atendidas = {c.id for c in reconciliadas.atendidas}
     reapontadas = {c.id for c in reconciliadas.casadas}
     da_versao = [
@@ -809,6 +1135,10 @@ def aplicar(
             if c.id not in atendidas:
                 _acrescentar_comercial(resultado, c)
             continue
+        if _pessoa_acrescentada(c):
+            if c.id not in atendidas:
+                _acrescentar_pessoa(resultado, c)
+            continue
         if c.ancora.tipo_do_item != "pessoa":
             if c.id not in atendidas:
                 _aplicar_no_item(resultado, c)
@@ -818,10 +1148,25 @@ def aplicar(
         ):
             if not casa(c, pessoa, identidade):
                 continue
-            if c.id in atendidas:
+            if c.tipo != "pessoa.renomear":
+                if c.id not in atendidas:
+                    _aplicar_na_pessoa(resultado, pessoa, c)
+                    if c.tipo == "pessoa.nao_e":
+                        esvaziadas.append(pessoa)
+            elif c.id in atendidas:
                 pessoa["nome"], pessoa["origem"] = nome, "modelo"
             else:
                 pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
+    # A pessoa que ficou sem nenhuma ocorrência some da decupagem.
+    if esvaziadas:
+        resultado["pessoas"] = [
+            p
+            for p in _pessoas(resultado)
+            if not (
+                any(p is e for e in esvaziadas)
+                and not any(p[lista] for lista in LISTAS)
+            )
+        ]
     if "comerciais" in resultado:
         resultado["comerciais"].sort(key=lambda m: (m["inicio_ms"], m["fim_ms"]))
     return resultado
@@ -898,7 +1243,17 @@ def montar_reaplicacao(
         reaplica=alvo.id,
         item_id=item_id,
         motivo=motivo,
-        antes=valor_atual(modelo, versao, correcoes, alvo.tipo, item_id, tipo_do_item),
+        ocorrencia=alvo.ocorrencia,
+        antes=valor_atual(
+            modelo,
+            versao,
+            correcoes,
+            alvo.tipo,
+            item_id,
+            tipo_do_item,
+            alvo.ocorrencia,
+            alvo.depois,
+        ),
         depois=alvo.depois,
         ancora=_ancora_do_item(novo, tipo_do_item, versao),
         **registro,
@@ -919,6 +1274,7 @@ def montar_descarte(
         tipo="descartar",
         descarta=alvo.id,
         item_id=alvo.item_id,
+        ocorrencia=alvo.ocorrencia,
         motivo=motivo,
         antes=alvo.antes,
         depois=alvo.depois,

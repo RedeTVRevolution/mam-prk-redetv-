@@ -10,6 +10,7 @@ import {
   Group,
   Button,
   Loader,
+  Menu,
   Modal,
   NavLink,
   Paper,
@@ -26,7 +27,13 @@ import {
   UnstyledButton,
   type MantineColor,
 } from '@mantine/core'
-import { IconDownload, IconHistory, IconPencil } from '@tabler/icons-react'
+import {
+  IconDotsVertical,
+  IconDownload,
+  IconHistory,
+  IconPencil,
+  IconPlus,
+} from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
@@ -52,6 +59,22 @@ interface Pessoa {
   citada_na_fala: Intervalo[]
   citada_no_texto: (Intervalo & { texto: string })[]
 }
+
+type ListaDePessoa = 'na_imagem' | 'citada_na_fala' | 'citada_no_texto'
+
+/** O que o Editor pede sobre uma aparição ou menção (ou acrescentar uma aparição). */
+type AcaoDeOcorrencia =
+  | {
+      tipo: 'nao_e' | 'aparicao_para_mencao' | 'mencao_para_aparicao' | 'tempos'
+      pessoa: Pessoa
+      lista: ListaDePessoa
+      inicio_ms: number
+      fim_ms: number
+    }
+  | { tipo: 'acrescentar'; pessoa: Pessoa | null }
+
+// As pessoas que a revisão cria não existem no JSON do modelo: só se desfazem.
+const pessoaDoModelo = (p: Pessoa) => !/^(nid|acr)-/.test(p.id)
 
 interface Pauta extends Intervalo {
   id: string
@@ -83,7 +106,11 @@ export interface Decupagem {
   versao_decupagem?: string
   pautas: Pauta[]
   pessoas: Pessoa[]
-  planos: (Intervalo & { id: string; ambiente: string; acao?: string | null })[]
+  planos: (Intervalo & {
+    id: string
+    ambiente: string
+    acao?: string | null
+  })[]
   comerciais: Comercial[]
   transcricao: (Intervalo & { locutor: string; texto: string })[]
 }
@@ -130,6 +157,26 @@ function valorLegivel(tipo: string | undefined, valor: string): string {
       return valor
     }
   }
+  if (tipo === 'pessoa.acrescentar_aparicao') {
+    try {
+      const a = JSON.parse(valor) as Intervalo & {
+        evidencia: string
+        nome?: string
+      }
+      return `${a.nome ? `${a.nome} ` : ''}${tempo(a.inicio_ms)}–${tempo(a.fim_ms)} (${a.evidencia})`
+    } catch {
+      return valor
+    }
+  }
+  const ocorrencia = /^(na_imagem|citada_na_fala|citada_no_texto) (\d+)-(\d+)$/.exec(valor)
+  if (ocorrencia && tipo?.startsWith('pessoa.')) {
+    const nome = {
+      na_imagem: 'aparição',
+      citada_na_fala: 'citada na fala',
+      citada_no_texto: 'citada no texto',
+    }[ocorrencia[1] as ListaDePessoa]
+    return `${nome} ${tempo(Number(ocorrencia[2]))}–${tempo(Number(ocorrencia[3]))}`
+  }
   const achado = tipo === 'item.tempos' ? /^(\d+)-(\d+)$/.exec(valor) : null
   return achado ? `${tempo(Number(achado[1]))}–${tempo(Number(achado[2]))}` : valor
 }
@@ -142,13 +189,24 @@ function tempoDoCampo(texto: string, originalMs: number): number | null {
 
 function faixasDe(d: Decupagem): Faixa[] {
   const de = <T extends Intervalo>(prefixo: string, lista: T[]): Ocorrencia[] =>
-    lista.map((x, i) => ({ chave: `${prefixo}-${i}`, inicio_ms: x.inicio_ms, fim_ms: x.fim_ms }))
+    lista.map((x, i) => ({
+      chave: `${prefixo}-${i}`,
+      inicio_ms: x.inicio_ms,
+      fim_ms: x.fim_ms,
+    }))
   return [
-    { nome: 'Pautas', cor: CORES_DE_OCORRENCIA.pautas, ocorrencias: de('pauta', d.pautas) },
+    {
+      nome: 'Pautas',
+      cor: CORES_DE_OCORRENCIA.pautas,
+      ocorrencias: de('pauta', d.pautas),
+    },
     {
       nome: 'Aparições',
       cor: CORES_DE_OCORRENCIA.aparicoes,
-      ocorrencias: de('img', d.pessoas.flatMap((p) => p.na_imagem)),
+      ocorrencias: de(
+        'img',
+        d.pessoas.flatMap((p) => p.na_imagem),
+      ),
     },
     {
       nome: 'Menções',
@@ -158,9 +216,21 @@ function faixasDe(d: Decupagem): Faixa[] {
         d.pessoas.flatMap((p) => [...p.citada_na_fala, ...p.citada_no_texto]),
       ),
     },
-    { nome: 'Comerciais', cor: CORES_DE_OCORRENCIA.comerciais, ocorrencias: de('com', d.comerciais) },
-    { nome: 'Planos', cor: CORES_DE_OCORRENCIA.planos, ocorrencias: de('plano', d.planos) },
-    { nome: 'Fala', cor: CORES_DE_OCORRENCIA.fala, ocorrencias: de('fala', d.transcricao) },
+    {
+      nome: 'Comerciais',
+      cor: CORES_DE_OCORRENCIA.comerciais,
+      ocorrencias: de('com', d.comerciais),
+    },
+    {
+      nome: 'Planos',
+      cor: CORES_DE_OCORRENCIA.planos,
+      ocorrencias: de('plano', d.planos),
+    },
+    {
+      nome: 'Fala',
+      cor: CORES_DE_OCORRENCIA.fala,
+      ocorrencias: de('fala', d.transcricao),
+    },
   ]
 }
 
@@ -253,6 +323,7 @@ export default function Video({
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const concluido = job.estado === 'concluido'
   const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
+  const [ocorrenciaAberta, setOcorrenciaAberta] = useState<AcaoDeOcorrencia | null>(null)
   const [corrigindoPauta, setCorrigindoPauta] = useState<Pauta | null>(null)
   const [comercialAberto, setComercialAberto] = useState<Comercial | 'novo' | null>(null)
   const [historicoAberto, setHistoricoAberto] = useState(false)
@@ -422,7 +493,12 @@ export default function Video({
                 />
               </Group>
               {faixas.map((faixa) => (
-                <FaixaDoTempo key={faixa.nome} faixa={faixa} duracaoMs={duracaoMs} saltar={saltar} />
+                <FaixaDoTempo
+                  key={faixa.nome}
+                  faixa={faixa}
+                  duracaoMs={duracaoMs}
+                  saltar={saltar}
+                />
               ))}
             </Stack>
           </Paper>
@@ -472,6 +548,7 @@ export default function Video({
                   quadro={quadro}
                   saltar={saltar}
                   aoCorrigir={podeEditar ? setCorrigindo : undefined}
+                  aoOcorrencia={podeEditar ? setOcorrenciaAberta : undefined}
                 />
               )}
               {aba === 'Pautas' &&
@@ -605,6 +682,21 @@ export default function Video({
         aoFechar={() => setCorrigindo(null)}
         aoSalvar={() => {
           setCorrigindo(null)
+          recarregarDecupagem()
+        }}
+        aoVersaoDesatualizada={recarregarDecupagem}
+        aoSessaoExpirada={() => sessaoExpirada.current()}
+      />
+      <CorrigirOcorrencia
+        key={ocorrenciaAberta ? JSON.stringify(ocorrenciaAberta) : 'fechada'}
+        acao={ocorrenciaAberta}
+        pessoas={decupagem.pessoas.filter(pessoaDoModelo)}
+        versao={decupagem.versao_decupagem ?? ''}
+        autenticador={autenticador}
+        jobId={job.id}
+        aoFechar={() => setOcorrenciaAberta(null)}
+        aoSalvar={() => {
+          setOcorrenciaAberta(null)
           recarregarDecupagem()
         }}
         aoVersaoDesatualizada={recarregarDecupagem}
@@ -769,6 +861,278 @@ function CorrigirPessoa({
   )
 }
 
+/** Menu das ações de uma aparição ou menção da pessoa. */
+function MenuDaOcorrencia({
+  pessoa,
+  lista,
+  ocorrencia,
+  aoEscolher,
+}: {
+  pessoa: Pessoa
+  lista: ListaDePessoa
+  ocorrencia: Intervalo
+  aoEscolher: (a: AcaoDeOcorrencia) => void
+}) {
+  const escolher = (tipo: 'nao_e' | 'aparicao_para_mencao' | 'mencao_para_aparicao' | 'tempos') =>
+    aoEscolher({
+      tipo,
+      pessoa,
+      lista,
+      inicio_ms: ocorrencia.inicio_ms,
+      fim_ms: ocorrencia.fim_ms,
+    })
+  return (
+    <Menu withinPortal position="bottom-end">
+      <Menu.Target>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="xs"
+          aria-label={`Ações de ${pessoa.nome} em ${tempo(ocorrencia.inicio_ms)}`}
+        >
+          <IconDotsVertical size={12} />
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Item onClick={() => escolher('nao_e')}>Não é esta pessoa</Menu.Item>
+        {lista === 'na_imagem' ? (
+          <Menu.Item onClick={() => escolher('aparicao_para_mencao')}>
+            Só é citada (não aparece)
+          </Menu.Item>
+        ) : (
+          <Menu.Item onClick={() => escolher('mencao_para_aparicao')}>Aparece na imagem</Menu.Item>
+        )}
+        <Menu.Item onClick={() => escolher('tempos')}>Corrigir tempos</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  )
+}
+
+const NOVA_PESSOA = '__nova__'
+
+/** Modal das correções de aparição e menção: cada ação pede só o que a API exige, mais o motivo. */
+function CorrigirOcorrencia({
+  acao,
+  pessoas,
+  versao,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoSalvar,
+  aoVersaoDesatualizada,
+  aoSessaoExpirada,
+}: {
+  acao: AcaoDeOcorrencia | null
+  pessoas: Pessoa[]
+  versao: string
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const [destino, setDestino] = useState<string>('citada_na_fala')
+  const [evidencia, setEvidencia] = useState('')
+  const [pessoaId, setPessoaId] = useState(
+    acao?.tipo === 'acrescentar' ? (acao.pessoa?.id ?? NOVA_PESSOA) : '',
+  )
+  const [nome, setNome] = useState('')
+  const [inicio, setInicio] = useState(acao && acao.tipo === 'tempos' ? tempo(acao.inicio_ms) : '')
+  const [fim, setFim] = useState(acao && acao.tipo === 'tempos' ? tempo(acao.fim_ms) : '')
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+
+  const inicioMs = acao?.tipo === 'tempos' ? tempoDoCampo(inicio, acao.inicio_ms) : lerTempo(inicio)
+  const fimMs = acao?.tipo === 'tempos' ? tempoDoCampo(fim, acao.fim_ms) : lerTempo(fim)
+  const temposValidos = inicioMs !== null && fimMs !== null && inicioMs <= fimMs
+  const pessoaNova = pessoaId === NOVA_PESSOA
+
+  const TITULOS = {
+    nao_e: 'Não é esta pessoa',
+    aparicao_para_mencao: 'Só é citada',
+    mencao_para_aparicao: 'Aparece na imagem',
+    tempos: 'Corrigir tempos',
+    acrescentar: 'Acrescentar aparição',
+  } as const
+
+  function pedido(): Record<string, unknown> | null {
+    if (!acao) return null
+    if (acao.tipo === 'acrescentar') {
+      if (!temposValidos || !evidencia.trim() || (pessoaNova && !nome.trim())) return null
+      return {
+        tipo: 'pessoa.acrescentar_aparicao',
+        item_id: pessoaNova ? '' : pessoaId,
+        valor: JSON.stringify({
+          inicio_ms: inicioMs,
+          fim_ms: fimMs,
+          evidencia: evidencia.trim(),
+          ...(pessoaNova ? { nome: nome.trim() } : {}),
+        }),
+      }
+    }
+    const ocorrencia = {
+      lista: acao.lista,
+      inicio_ms: acao.inicio_ms,
+      fim_ms: acao.fim_ms,
+    }
+    const base = { item_id: acao.pessoa.id, ocorrencia }
+    switch (acao.tipo) {
+      case 'nao_e':
+        return { ...base, tipo: 'pessoa.nao_e', valor: 'Não identificado' }
+      case 'aparicao_para_mencao':
+        return { ...base, tipo: 'pessoa.aparicao_para_mencao', valor: destino }
+      case 'mencao_para_aparicao':
+        return evidencia.trim()
+          ? {
+              ...base,
+              tipo: 'pessoa.mencao_para_aparicao',
+              valor: evidencia.trim(),
+            }
+          : null
+      case 'tempos':
+        return temposValidos
+          ? {
+              ...base,
+              tipo: 'item.tempos',
+              tipo_do_item: 'pessoa',
+              valor: `${inicioMs}-${fimMs}`,
+            }
+          : null
+    }
+  }
+
+  const corpo = pedido()
+
+  async function salvar() {
+    if (!corpo) return
+    setSalvando(true)
+    setErro(null)
+    try {
+      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
+        metodo: 'POST',
+        corpo: { ...corpo, motivo, versao },
+      })
+      aoSalvar()
+    } catch (e) {
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        aoVersaoDesatualizada()
+        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
+      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
+      } else setErro('Não foi possível salvar a correção.')
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <Modal
+      opened={acao !== null}
+      onClose={aoFechar}
+      title={acao ? TITULOS[acao.tipo] : ''}
+      centered
+    >
+      <Stack gap="sm">
+        {acao && acao.tipo !== 'acrescentar' && (
+          <Text size="sm">
+            {`${acao.pessoa.nome}, ${tempo(acao.inicio_ms)}–${tempo(acao.fim_ms)}`}
+          </Text>
+        )}
+        {acao?.tipo === 'nao_e' && (
+          <Text size="sm" c="dimmed">
+            O trecho passa para uma pessoa “não identificado”.
+          </Text>
+        )}
+        {acao?.tipo === 'aparicao_para_mencao' && (
+          <Select
+            label="Citada"
+            allowDeselect={false}
+            data={[
+              { value: 'citada_na_fala', label: 'Na fala' },
+              { value: 'citada_no_texto', label: 'No texto' },
+            ]}
+            value={destino}
+            onChange={(v) => setDestino(v ?? 'citada_na_fala')}
+          />
+        )}
+        {acao?.tipo === 'acrescentar' && (
+          <Select
+            label="Pessoa"
+            allowDeselect={false}
+            data={[
+              { value: NOVA_PESSOA, label: 'Nova pessoa' },
+              ...pessoas.map((p) => ({ value: p.id, label: p.nome })),
+            ]}
+            value={pessoaId}
+            onChange={(v) => setPessoaId(v ?? NOVA_PESSOA)}
+          />
+        )}
+        {acao?.tipo === 'acrescentar' && pessoaNova && (
+          <TextInput
+            label="Nome"
+            value={nome}
+            maxLength={200}
+            onChange={(e) => setNome(e.currentTarget.value)}
+          />
+        )}
+        {(acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos') && (
+          <Group grow align="flex-start">
+            <TextInput
+              label="Início (mm:ss)"
+              value={inicio}
+              error={inicio && lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
+              onChange={(e) => setInicio(e.currentTarget.value)}
+            />
+            <TextInput
+              label="Fim (mm:ss)"
+              value={fim}
+              error={fim && lerTempo(fim) === null ? 'Use mm:ss' : undefined}
+              onChange={(e) => setFim(e.currentTarget.value)}
+            />
+          </Group>
+        )}
+        {(acao?.tipo === 'acrescentar' || acao?.tipo === 'mencao_para_aparicao') && (
+          <TextInput
+            label="Evidência"
+            description="O que mostra a pessoa na imagem"
+            value={evidencia}
+            maxLength={200}
+            onChange={(e) => setEvidencia(e.currentTarget.value)}
+          />
+        )}
+        <Textarea
+          label="Motivo"
+          value={motivo}
+          maxLength={500}
+          rows={3}
+          onChange={(e) => setMotivo(e.currentTarget.value)}
+        />
+        {erro && (
+          <Alert color="red" variant="light" role="alert">
+            {erro}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button type="button" variant="default" onClick={aoFechar}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            color="red"
+            loading={salvando}
+            disabled={!corpo || !motivo.trim()}
+            onClick={() => void salvar()}
+          >
+            Salvar
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  )
+}
+
 /** Modal da pauta: título, resumo, início e fim (mm:ss) e motivo. Cada campo mudado vira uma correção. */
 function CorrigirPauta({
   pauta,
@@ -802,11 +1166,11 @@ function CorrigirPauta({
   const inicioMs = pauta ? tempoDoCampo(inicio, pauta.inicio_ms) : null
   const fimMs = pauta ? tempoDoCampo(fim, pauta.fim_ms) : null
   const temposValidos = inicioMs !== null && fimMs !== null && inicioMs <= fimMs
-  const temposMudaram =
-    pauta !== null && (inicioMs !== pauta.inicio_ms || fimMs !== pauta.fim_ms)
+  const temposMudaram = pauta !== null && (inicioMs !== pauta.inicio_ms || fimMs !== pauta.fim_ms)
   const resumoApagado = !resumo.trim() && !!pauta?.resumo
   const candidatas: { tipo: ItemDoHistorico['tipo']; valor: string }[] = []
-  if (pauta && titulo.trim() !== pauta.titulo) candidatas.push({ tipo: 'pauta.titulo', valor: titulo })
+  if (pauta && titulo.trim() !== pauta.titulo)
+    candidatas.push({ tipo: 'pauta.titulo', valor: titulo })
   if (pauta && !resumoApagado && resumo.trim() !== (pauta.resumo ?? ''))
     candidatas.push({ tipo: 'pauta.resumo', valor: resumo })
   if (temposMudaram && temposValidos)
@@ -955,7 +1319,11 @@ function CorrigirComercial({
   const inicioMs = atual ? tempoDoCampo(inicio, atual.inicio_ms) : lerTempo(inicio)
   const fimMs = atual ? tempoDoCampo(fim, atual.fim_ms) : lerTempo(fim)
   const temposValidos = inicioMs !== null && fimMs !== null && inicioMs <= fimMs
-  const candidatas: { tipo: ItemDoHistorico['tipo']; valor: string; tipo_do_item?: string }[] = []
+  const candidatas: {
+    tipo: ItemDoHistorico['tipo']
+    valor: string
+    tipo_do_item?: string
+  }[] = []
   if (atual) {
     if (marca.trim() !== atual.marca) candidatas.push({ tipo: 'comercial.marca', valor: marca })
     if (tipo && tipo !== atual.tipo) candidatas.push({ tipo: 'comercial.tipo', valor: tipo })
@@ -978,8 +1346,7 @@ function CorrigirComercial({
     })
   }
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
-  const temposMudaram =
-    atual !== null && (inicioMs !== atual.inicio_ms || fimMs !== atual.fim_ms)
+  const temposMudaram = atual !== null && (inicioMs !== atual.inicio_ms || fimMs !== atual.fim_ms)
 
   async function salvar() {
     setSalvando(true)
@@ -1107,6 +1474,10 @@ interface ItemDoHistorico {
     | 'comercial.marca'
     | 'comercial.tipo'
     | 'comercial.acrescentar'
+    | 'pessoa.nao_e'
+    | 'pessoa.aparicao_para_mencao'
+    | 'pessoa.mencao_para_aparicao'
+    | 'pessoa.acrescentar_aparicao'
     | 'desfazer'
     | 'descartar'
   autor_email: string
@@ -1127,6 +1498,10 @@ const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   'comercial.marca': 'Marca do comercial',
   'comercial.tipo': 'Tipo do comercial',
   'comercial.acrescentar': 'Comercial acrescentado',
+  'pessoa.nao_e': 'Não é esta pessoa',
+  'pessoa.aparicao_para_mencao': 'Aparição para menção',
+  'pessoa.mencao_para_aparicao': 'Menção para aparição',
+  'pessoa.acrescentar_aparicao': 'Aparição acrescentada',
   desfazer: 'Desfazer',
   descartar: 'Descartar da fila',
 }
@@ -1217,7 +1592,9 @@ function HistoricoDeCorrecoes({
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
       else if (e instanceof Error && e.message.startsWith('Falha 409')) {
         // Outro Editor pode ter desfeito antes: a decupagem também mudou.
-        setErro('Essa correção já foi desfeita, saiu da fila ou não casa com a versão atual. O histórico foi recarregado.')
+        setErro(
+          'Essa correção já foi desfeita, saiu da fila ou não casa com a versão atual. O histórico foi recarregado.',
+        )
         carregar()
         aoDesfazer()
       } else setErro('Não foi possível desfazer a correção.')
@@ -1328,7 +1705,12 @@ interface ItemDaFila {
   motivo: string
   antes: string
   depois: string
-  candidatos: { item_id: string; nome: string; inicio_ms: number; fim_ms: number }[]
+  candidatos: {
+    item_id: string
+    nome: string
+    inicio_ms: number
+    fim_ms: number
+  }[]
 }
 
 /** Gaveta das correções que não casaram após um reprocessamento: reaplicar num candidato ou descartar. */
@@ -1501,11 +1883,13 @@ function AbaPessoas({
   quadro,
   saltar,
   aoCorrigir,
+  aoOcorrencia,
 }: {
   decupagem: Decupagem
   quadro: (i: Intervalo) => string
   saltar: (ms: number) => void
   aoCorrigir?: (p: Pessoa) => void
+  aoOcorrencia?: (a: AcaoDeOcorrencia) => void
 }) {
   const aparecem = decupagem.pessoas.filter((p) => p.na_imagem.length > 0)
   const citadas = decupagem.pessoas.filter(
@@ -1514,32 +1898,65 @@ function AbaPessoas({
   return (
     <Stack gap="md">
       <Stack gap="xs">
-        <Text size="xs" fw={700} tt="uppercase" c="blue.4">
-          Aparecem na imagem
-        </Text>
+        <Group justify="space-between">
+          <Text size="xs" fw={700} tt="uppercase" c="blue.4">
+            Aparecem na imagem
+          </Text>
+          {aoOcorrencia && (
+            <Button
+              size="compact-xs"
+              variant="default"
+              leftSection={<IconPlus size={12} />}
+              onClick={() => aoOcorrencia({ tipo: 'acrescentar', pessoa: null })}
+            >
+              Acrescentar aparição
+            </Button>
+          )}
+        </Group>
         {aparecem.map((p) => (
           <Stack key={p.id} gap={4}>
             <NomeDaPessoa pessoa={p} fw={600} aoCorrigir={aoCorrigir} />
+            {aoOcorrencia && pessoaDoModelo(p) && (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                w="fit-content"
+                aria-label={`Acrescentar aparição de ${p.nome}`}
+                onClick={() => aoOcorrencia({ tipo: 'acrescentar', pessoa: p })}
+              >
+                Acrescentar aparição
+              </Button>
+            )}
             <ScrollArea type="never">
               <Group gap={6} wrap="nowrap">
                 {p.na_imagem.map((a, i) => (
-                  <UnstyledButton key={i} onClick={() => saltar(a.inicio_ms)}>
-                    <video
-                      src={quadro(a)}
-                      muted
-                      preload="metadata"
-                      style={{
-                        width: 92,
-                        aspectRatio: '16 / 9',
-                        objectFit: 'cover',
-                        borderRadius: 4,
-                        display: 'block',
-                      }}
-                    />
-                    <Text size="10px" c="dimmed">
-                      {`${tempo(a.inicio_ms)} · ${a.evidencia}`}
-                    </Text>
-                  </UnstyledButton>
+                  <Box key={i}>
+                    <UnstyledButton onClick={() => saltar(a.inicio_ms)}>
+                      <video
+                        src={quadro(a)}
+                        muted
+                        preload="metadata"
+                        style={{
+                          width: 92,
+                          aspectRatio: '16 / 9',
+                          objectFit: 'cover',
+                          borderRadius: 4,
+                          display: 'block',
+                        }}
+                      />
+                      <Text size="10px" c="dimmed">
+                        {`${tempo(a.inicio_ms)} · ${a.evidencia}`}
+                      </Text>
+                    </UnstyledButton>
+                    {aoOcorrencia && pessoaDoModelo(p) && (
+                      <MenuDaOcorrencia
+                        pessoa={p}
+                        lista="na_imagem"
+                        ocorrencia={a}
+                        aoEscolher={aoOcorrencia}
+                      />
+                    )}
+                  </Box>
                 ))}
               </Group>
             </ScrollArea>
@@ -1555,31 +1972,50 @@ function AbaPessoas({
             <NomeDaPessoa pessoa={p} aoCorrigir={aoCorrigir} />
             <Group gap={6}>
               {p.citada_na_fala.map((m, i) => (
-                <Badge
-                  key={`fala-${i}`}
-                  component="button"
-                  type="button"
-                  variant="light"
-                  color="orange"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => saltar(m.inicio_ms)}
-                >
-                  {`fala ${tempo(m.inicio_ms)}`}
-                </Badge>
-              ))}
-              {p.citada_no_texto.map((m, i) => (
-                <Tooltip key={`texto-${i}`} label={m.texto}>
+                <Group key={`fala-${i}`} gap={2} wrap="nowrap">
                   <Badge
                     component="button"
                     type="button"
-                    variant="outline"
+                    variant="light"
                     color="orange"
                     style={{ cursor: 'pointer' }}
                     onClick={() => saltar(m.inicio_ms)}
                   >
-                    {`texto ${tempo(m.inicio_ms)}`}
+                    {`fala ${tempo(m.inicio_ms)}`}
                   </Badge>
-                </Tooltip>
+                  {aoOcorrencia && pessoaDoModelo(p) && (
+                    <MenuDaOcorrencia
+                      pessoa={p}
+                      lista="citada_na_fala"
+                      ocorrencia={m}
+                      aoEscolher={aoOcorrencia}
+                    />
+                  )}
+                </Group>
+              ))}
+              {p.citada_no_texto.map((m, i) => (
+                <Group key={`texto-${i}`} gap={2} wrap="nowrap">
+                  <Tooltip label={m.texto}>
+                    <Badge
+                      component="button"
+                      type="button"
+                      variant="outline"
+                      color="orange"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => saltar(m.inicio_ms)}
+                    >
+                      {`texto ${tempo(m.inicio_ms)}`}
+                    </Badge>
+                  </Tooltip>
+                  {aoOcorrencia && pessoaDoModelo(p) && (
+                    <MenuDaOcorrencia
+                      pessoa={p}
+                      lista="citada_no_texto"
+                      ocorrencia={m}
+                      aoEscolher={aoOcorrencia}
+                    />
+                  )}
+                </Group>
               ))}
             </Group>
           </Stack>
