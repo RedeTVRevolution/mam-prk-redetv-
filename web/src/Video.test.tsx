@@ -933,3 +933,138 @@ test('quem não edita não vê os botões de comercial', async () => {
   expect(painel.queryByRole('button', { name: 'Acrescentar comercial' })).toBeNull()
   expect(painel.queryByRole('button', { name: /Corrigir comercial/ })).toBeNull()
 })
+
+async function abrirPessoas(usuario: ReturnType<typeof userEvent.setup>) {
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pessoas'))
+  return painel
+}
+
+async function escolherNoMenu(
+  usuario: ReturnType<typeof userEvent.setup>,
+  painel: ReturnType<typeof within>,
+  rotulo: string,
+  item: string,
+) {
+  await usuario.click(await painel.findByRole('button', { name: rotulo }))
+  await usuario.click(await screen.findByRole('menuitem', { name: item }))
+  return within(await screen.findByRole('dialog'))
+}
+
+const OCORRENCIA_NA_IMAGEM = { lista: 'na_imagem', inicio_ms: 5_000, fim_ms: 20_000 }
+
+test('o Editor marca "não é esta pessoa" numa aparição', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+  const modal = await escolherNoMenu(usuario, painel, 'Ações de Ana Souza em 00:05', 'Não é esta pessoa')
+  await usuario.type(modal.getByLabelText('Motivo'), 'outra pessoa')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toEqual({
+    tipo: 'pessoa.nao_e',
+    item_id: 'p1',
+    ocorrencia: OCORRENCIA_NA_IMAGEM,
+    valor: 'Não identificado',
+    motivo: 'outra pessoa',
+    versao: 'v1',
+  })
+})
+
+test('o Editor troca aparição por menção', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+  const modal = await escolherNoMenu(
+    usuario,
+    painel,
+    'Ações de Ana Souza em 00:05',
+    'Só é citada (não aparece)',
+  )
+  await usuario.type(modal.getByLabelText('Motivo'), 'só falaram dela')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toEqual({
+    tipo: 'pessoa.aparicao_para_mencao',
+    item_id: 'p1',
+    ocorrencia: OCORRENCIA_NA_IMAGEM,
+    valor: 'citada_na_fala',
+    motivo: 'só falaram dela',
+    versao: 'v1',
+  })
+})
+
+test('virar aparição exige evidência', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+  const modal = await escolherNoMenu(
+    usuario,
+    painel,
+    'Ações de Ana Souza em 01:05',
+    'Aparece na imagem',
+  )
+  await usuario.type(modal.getByLabelText('Motivo'), 'aparece')
+  expect(modal.getByRole('button', { name: 'Salvar' }).hasAttribute('disabled')).toBe(true)
+  await usuario.type(modal.getByLabelText('Evidência'), 'rosto no canto')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toEqual({
+    tipo: 'pessoa.mencao_para_aparicao',
+    item_id: 'p1',
+    ocorrencia: { lista: 'citada_na_fala', inicio_ms: 65_000, fim_ms: 66_000 },
+    valor: 'rosto no canto',
+    motivo: 'aparece',
+    versao: 'v1',
+  })
+})
+
+test('o Editor acrescenta aparição numa pessoa nova', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+  await usuario.click(painel.getAllByRole('button', { name: 'Acrescentar aparição' })[0])
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Nome'), 'Davi Lima')
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:30')
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '00:40')
+  await usuario.type(modal.getByLabelText('Evidência'), 'de terno')
+  await usuario.type(modal.getByLabelText('Motivo'), 'faltou')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  const [enviada] = correcoesRecebidas as unknown as { tipo: string; valor: string; item_id: string }[]
+  expect(enviada.tipo).toBe('pessoa.acrescentar_aparicao')
+  expect(enviada.item_id).toBe('')
+  expect(JSON.parse(enviada.valor)).toEqual({
+    inicio_ms: 30_000,
+    fim_ms: 40_000,
+    evidencia: 'de terno',
+    nome: 'Davi Lima',
+  })
+})
+
+test('o Editor acrescenta aparição numa pessoa existente', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirPessoas(usuario)
+  await usuario.click(await painel.findByRole('button', { name: 'Acrescentar aparição de Ana Souza' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:30')
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '00:40')
+  await usuario.type(modal.getByLabelText('Evidência'), 'de terno')
+  await usuario.type(modal.getByLabelText('Motivo'), 'faltou')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect((correcoesRecebidas[0] as unknown as { item_id: string }).item_id).toBe('p1')
+})
+
+test('quem não edita não vê o menu das ocorrências', async () => {
+  await abrir({ estado: 'concluido' }, false)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await userEvent.setup().click(aba('Pessoas'))
+
+  expect((await painel.findAllByText('Ana Souza')).length).toBeGreaterThan(0)
+  expect(painel.queryByRole('button', { name: /Ações de/ })).toBeNull()
+  expect(painel.queryByRole('button', { name: /Acrescentar aparição/ })).toBeNull()
+})
