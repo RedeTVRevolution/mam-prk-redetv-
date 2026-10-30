@@ -36,6 +36,20 @@ echo "Clone $clone no branch $branch."
 
 docker build -q -t mam-afk "$raiz/scripts/afk" > /dev/null
 
+# Emuladores do Firestore e do Storage, nas versões do ci.yml, para o make verificar não pular
+# os testes de nuvem. O agente entra na rede do fake-gcs e os acha em localhost, como no CI.
+emuladores=mam-afk-emuladores
+docker rm -f "$emuladores-firestore" "$emuladores" > /dev/null 2>&1 || true
+trap 'docker rm -f "$emuladores-firestore" "$emuladores" > /dev/null 2>&1 || true' EXIT
+docker run -d --name "$emuladores" fsouza/fake-gcs-server:1.52.2 \
+  -scheme http -port 4443 -public-host localhost:4443 > /dev/null
+docker run -d --name "$emuladores-firestore" --network "container:$emuladores" --platform linux/amd64 \
+  google/cloud-sdk:591.0.0-emulators gcloud emulators firestore start --host-port=0.0.0.0:8686 > /dev/null
+# shellcheck disable=SC2016 # roda no contêiner
+docker run --rm --network "container:$emuladores" mam-afk bash -c 'for _ in $(seq 60); do
+    curl -sf localhost:4443/storage/v1/b > /dev/null && curl -sf localhost:8686 > /dev/null && exit 0; sleep 2
+  done; exit 1' || { echo "Emuladores não subiram em 2 minutos." >&2; exit 1; }
+
 GIT_AUTHOR_NAME=$(git config user.name)
 GIT_AUTHOR_EMAIL=$(git config user.email)
 export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME=$GIT_AUTHOR_NAME GIT_COMMITTER_EMAIL=$GIT_AUTHOR_EMAIL
@@ -44,11 +58,13 @@ export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME=$GIT_AUTHOR_NAME GIT_
 # vêm da pasta principal, só leitura. No fim, os branches afk/* saem num bundle.
 set +e
 CLAUDE_CODE_OAUTH_TOKEN=$claude_token GH_TOKEN=$gh_agente docker run --rm --init \
+  --network "container:$emuladores" \
   --mount "type=bind,src=$clone,dst=$clone" \
   --mount "type=bind,src=$raiz/scripts/afk,dst=/opt/afk,readonly" \
   --mount "type=bind,src=$plugin,dst=/opt/plugins/mattpocock-skills,readonly" \
   -w "$clone" \
   -e CLAUDE_CODE_OAUTH_TOKEN -e GH_TOKEN \
+  -e FIRESTORE_EMULATOR_HOST=localhost:8686 -e STORAGE_EMULATOR_HOST=http://localhost:4443 \
   -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL \
   -e AFK_AVISO_TOKENS -e AFK_CORTE_TOKENS -e AFK_MAX_TURNOS -e AFK_MAX_FALHAS -e AFK_MAX_PARCIAIS -e AFK_MODELO -e AFK_MODELO_REVISOR \
   -e AFK_PLUGIN_DIR=/opt/plugins/mattpocock-skills \

@@ -113,6 +113,7 @@ roda() { # <máx. iterações> <passos do roteiro...>
 caso=0
 export GIT_AUTHOR_NAME=teste GIT_AUTHOR_EMAIL=teste@exemplo GIT_COMMITTER_NAME=teste GIT_COMMITTER_EMAIL=teste@exemplo
 export AFK_VERIFICAR='test ! -e quebrado' AFK_INTERVALO=0.1
+export FIRESTORE_EMULATOR_HOST=localhost:8686 STORAGE_EMULATOR_HOST=http://localhost:4443
 no_head() { git -C "$repo" cat-file -e "HEAD:$1" 2> /dev/null; }
 feitos() { [ "$(tr '\n' ' ' < "$repo/.afk/feitos")" = "$1" ]; }
 chamadas() { [ "$(wc -l < "$FAKE/claude.log" | tr -d ' ')" = "$1" ]; }
@@ -210,6 +211,12 @@ fila=$(issue 1 OPEN ready-for-agent,afk-feito "")
 roda 5
 checa "não começa" chamadas 0
 checa "sai com 3" [ "$saida" = 3 ]
+
+echo "Sem os emuladores"
+fila=$(issue 1 OPEN ready-for-agent "")
+STORAGE_EMULATOR_HOST='' roda 5 "feito 1" "revisa 1"
+checa "não começa" chamadas 0
+checa "sai com 2" [ "$saida" = 2 ]
 
 echo "Hook de contexto"
 transcricao=$tmp/transcricao.jsonl

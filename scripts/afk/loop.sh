@@ -14,6 +14,12 @@ max_parciais=${AFK_MAX_PARCIAIS:-3}
 verificar=${AFK_VERIFICAR:-make verificar}
 intervalo=${AFK_INTERVALO:-2}
 
+# Sem os emuladores, o pytest pula os testes de nuvem em silêncio e o portão passa sem eles.
+if [ -z "${FIRESTORE_EMULATOR_HOST:-}" ] || [ -z "${STORAGE_EMULATOR_HOST:-}" ]; then
+  echo "FIRESTORE_EMULATOR_HOST e STORAGE_EMULATOR_HOST são obrigatórias; o rodar.sh sobe os emuladores." >&2
+  exit 2
+fi
+
 branch=$(git branch --show-current)
 logs=.afk/logs/$(date +%Y%m%d-%H%M%S)
 progresso=.afk/progresso.md
