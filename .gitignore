@@ -14,3 +14,5 @@ dist/
 .codex/
 # Gravada pelo google-github-actions/auth no CD (#71).
 gha-creds-*.json
+docs/design/referencia/
+.playwright-mcp/
