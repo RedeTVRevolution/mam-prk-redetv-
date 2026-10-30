@@ -676,8 +676,10 @@ function HistoricoDeCorrecoes({
     } catch (e) {
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
       else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        setErro('Essa correção já foi desfeita. O histórico foi recarregado.')
+        // Outro Editor pode ter desfeito antes: a decupagem também mudou.
+        setErro('Essa correção já foi desfeita ou é de outra versão. O histórico foi recarregado.')
         carregar()
+        aoDesfazer()
       } else setErro('Não foi possível desfazer a correção.')
     }
     setEnviando(false)
@@ -712,10 +714,20 @@ function HistoricoDeCorrecoes({
                 <Text size="xs" c="dimmed">
                   {quando(i.criada_em)}
                 </Text>
-                <Text size="sm">{i.antes}</Text>
-                <Text size="sm" fw={600}>
-                  {i.depois}
-                </Text>
+                <Group gap={4} wrap="nowrap">
+                  <Text size="xs" c="dimmed">
+                    Antes:
+                  </Text>
+                  <Text size="sm">{i.antes}</Text>
+                </Group>
+                <Group gap={4} wrap="nowrap">
+                  <Text size="xs" c="dimmed">
+                    Depois:
+                  </Text>
+                  <Text size="sm" fw={600}>
+                    {i.depois}
+                  </Text>
+                </Group>
                 <Text size="sm">{i.motivo}</Text>
                 {i.estado === 'ativa' && i.tipo !== 'desfazer' && (
                   <Group justify="flex-end">

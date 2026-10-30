@@ -28,6 +28,7 @@ from api.auth import (
     Usuario,
 )
 from api.correcoes import (
+    CorrecaoJaExiste,
     ItemDoHistorico,
     ItemInexistente,
     NaoDesfazivel,
@@ -36,6 +37,7 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     aplicar,
     historico,
+    id_do_desfazer,
     montar_correcao,
     montar_desfazer,
     nome_atual,
@@ -501,22 +503,26 @@ def criar_rotas(
         alvo = next((c for c in todas if c.id == correcao_id), None)
         if alvo is None:
             raise HTTPException(404, "Correção não encontrada")
+        modelo, versao_atual = _ler_modelo(job.id)
         try:
             desfazer = montar_desfazer(
+                modelo,
+                versao_atual,
                 alvo,
                 todas,
                 corpo.motivo,
-                id=uuid.uuid4().hex,
+                id=id_do_desfazer(alvo.id),
                 job_id=job.id,
                 autor_uid=autor.uid,
                 autor_email=autor.email,
                 criada_em=relogio(),
             )
-        except NaoDesfazivel:
+            correcoes.acrescentar(desfazer)
+        except (NaoDesfazivel, CorrecaoJaExiste):
             raise HTTPException(
-                409, "Correção já desfeita, ou já é um desfazer"
+                409,
+                "Correção já desfeita, já é um desfazer ou é de outra versão",
             ) from None
-        correcoes.acrescentar(desfazer)
         return {"id": desfazer.id}
 
     return rotas

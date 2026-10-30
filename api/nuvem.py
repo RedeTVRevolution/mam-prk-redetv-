@@ -6,13 +6,13 @@ from typing import Any
 
 import google.auth
 import google.auth.transport.requests
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import AlreadyExists, NotFound
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
-from api.correcoes import Correcao
+from api.correcoes import Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     ArmazenamentoIndisponivel,
@@ -156,12 +156,15 @@ class RepositorioDeCorrecoesFirestore:
         self._colecao = cliente.collection(colecao)
 
     def acrescentar(self, correcao: Correcao) -> None:
-        self._colecao.document(correcao.id).create(correcao.model_dump())
+        try:
+            self._colecao.document(correcao.id).create(correcao.model_dump())
+        except AlreadyExists:
+            raise CorrecaoJaExiste(correcao.id) from None
 
     def listar(self, job_id: str) -> list[Correcao]:
         docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
         achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
-        return sorted(achadas, key=lambda c: c.criada_em)
+        return em_ordem(achadas)
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:

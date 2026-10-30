@@ -6,7 +6,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
+from api.chaves import (
+    MacSimulado,
+    RepositorioDeChavesEmMemoria,
+    VerificadorDeChaveDeApi,
+    emitir_chave,
+)
 from api.correcoes import (
+    Correcao,
+    CorrecaoJaExiste,
     ItemInexistente,
     NovaCorrecao,
     RepositorioDeCorrecoesEmMemoria,
@@ -23,6 +31,7 @@ from api.tests.test_jobs import ArmazenamentoFalso
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
+MAC = MacSimulado({1: b"k1"}, versao_atual=1)
 
 
 def _pessoa(id: str, nome: str, inicio: int, fim: int) -> dict[str, Any]:
@@ -77,6 +86,7 @@ class Mundo:
         self.armazenamento = ArmazenamentoFalso()
         self.armazenamento.decupagens["j1"] = [BYTES[:40], BYTES[40:]]
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
+        self.chaves = RepositorioDeChavesEmMemoria()
         self.agora = BASE
         self.cliente = TestClient(
             criar_app(
@@ -87,9 +97,16 @@ class Mundo:
                 self.armazenamento,
                 papeis=repo_papeis,
                 correcoes=self.correcoes,
+                chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
                 relogio=lambda: self.agora,
             )
         )
+
+    def chave_com_todos_os_escopos(self) -> dict[str, str]:
+        emitida = emitir_chave(
+            "A", frozenset({"criar", "ler", "cancelar"}), MAC, self.chaves, BASE
+        )
+        return {"X-API-Key": emitida.chave}
 
     def corrigir(self, **campos: Any) -> Any:
         return self.cliente.post(
@@ -356,6 +373,27 @@ def test_desfazer_a_correcao_antiga_mantem_a_mais_nova() -> None:
     assert mundo.desfazer(primeira).status_code == 201
 
     assert mundo.nome_da_ana() == "Ana Souza Lima"
+    [desfazer, *_] = mundo.historico().json()
+    # A mais nova continua por cima: o nome entregue não muda.
+    assert (desfazer["antes"], desfazer["depois"]) == (
+        "Ana Souza Lima",
+        "Ana Souza Lima",
+    )
+
+
+def test_desfazer_a_antiga_e_depois_a_nova_volta_ao_modelo_e_o_historico_conta_isso() -> (
+    None
+):
+    mundo = Mundo(["editor"])
+    primeira, segunda = _corrigir_duas_vezes(mundo)
+    mundo.desfazer(primeira)
+    mundo.avancar()
+
+    mundo.desfazer(segunda)
+
+    assert mundo.nome_da_ana() == "Ana Souza"
+    ultimo = mundo.historico().json()[0]
+    assert (ultimo["antes"], ultimo["depois"]) == ("Ana Souza Lima", "Ana Souza")
 
 
 def test_desfazer_a_mais_nova_volta_para_a_antiga() -> None:
@@ -395,6 +433,69 @@ def test_desfazer_duas_vezes_a_mesma_correcao_da_409() -> None:
 
     assert mundo.desfazer(cid).status_code == 409
     assert len(mundo.correcoes.listar("j1")) == 2
+
+
+def test_dois_desfazer_simultaneos_gravam_um_so() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    antes_do_primeiro = mundo.correcoes.listar("j1")
+    # O segundo pedido leu a lista antes de o primeiro gravar.
+    mundo.correcoes.listar = lambda job_id: antes_do_primeiro  # type: ignore[method-assign]
+    mundo.desfazer(cid)
+
+    assert mundo.desfazer(cid).status_code == 409
+    assert len(mundo.correcoes._correcoes) == 2
+
+
+def test_repositorio_em_memoria_nao_sobrescreve() -> None:
+    repo = RepositorioDeCorrecoesEmMemoria()
+    mundo = Mundo(["editor"])
+    mundo.corrigir()
+    [correcao] = mundo.correcoes.listar("j1")
+    repo.acrescentar(correcao)
+
+    with pytest.raises(CorrecaoJaExiste):
+        repo.acrescentar(correcao.model_copy(update={"depois": "Outro"}))
+
+
+def test_desfazer_correcao_de_outra_versao_do_modelo_da_409() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    nova = {**MODELO, "programa": {"resumo": "reprocessado"}}
+    mundo.armazenamento.decupagens["j1"] = [json.dumps(nova).encode()]
+
+    assert mundo.desfazer(cid).status_code == 409
+    assert [c.tipo for c in mundo.correcoes.listar("j1")] == ["pessoa.renomear"]
+
+
+def test_correcoes_com_a_mesma_data_seguem_a_ordem_do_id() -> None:
+    mundo = Mundo(["editor"])
+    mundo.corrigir()
+    [base] = mundo.correcoes.listar("j1")
+    repo = RepositorioDeCorrecoesEmMemoria()
+    empatadas: list[Correcao] = [
+        base.model_copy(update={"id": "b", "depois": "Ana B"}),
+        base.model_copy(update={"id": "a", "depois": "Ana A"}),
+    ]
+    for c in empatadas:
+        repo.acrescentar(c)
+
+    assert [c.id for c in repo.listar("j1")] == ["a", "b"]
+    entregue = aplicar(MODELO, VERSAO, list(reversed(repo.listar("j1"))))
+    assert entregue["pessoas"][0]["nome"] == "Ana B"
+
+
+def test_chave_de_sistema_nao_ve_o_historico_nem_desfaz() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    chave = mundo.chave_com_todos_os_escopos()
+
+    historico = mundo.cliente.get("/v1/jobs/j1/correcoes", headers=chave)
+    desfazer = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{cid}/desfazer", json={"motivo": "x"}, headers=chave
+    )
+
+    assert (historico.status_code, desfazer.status_code) == (403, 403)
 
 
 def test_desfazer_correcao_inexistente_da_404() -> None:

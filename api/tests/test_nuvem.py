@@ -15,7 +15,6 @@ import pytest
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.api_core.exceptions import AlreadyExists
 from google.auth import credentials as google_credentials
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
@@ -23,7 +22,7 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
-from api.correcoes import Ancora, Correcao
+from api.correcoes import Ancora, Correcao, CorrecaoJaExiste
 from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
@@ -468,5 +467,5 @@ class TestRepositorioDeCorrecoesFirestore:
     ) -> None:
         correcoes.acrescentar(self._correcao("c1", "j1", 1))
 
-        with pytest.raises(AlreadyExists):
+        with pytest.raises(CorrecaoJaExiste):
             correcoes.acrescentar(self._correcao("c1", "j1", 2))

@@ -102,10 +102,16 @@ class ItemInexistente(Exception):
     """O item da correção não existe no JSON do modelo."""
 
 
+class CorrecaoJaExiste(Exception):
+    """Já há um registro com esse id: o repositório nunca sobrescreve."""
+
+
 class RepositorioDeCorrecoes(Protocol):
     """Porta para o Firestore; só acrescenta, nunca altera nem apaga."""
 
-    def acrescentar(self, correcao: Correcao) -> None: ...
+    def acrescentar(self, correcao: Correcao) -> None:
+        """`CorrecaoJaExiste` se o id já foi gravado."""
+        ...
 
     def listar(self, job_id: str) -> list[Correcao]:
         """Da mais antiga para a mais recente."""
@@ -117,11 +123,17 @@ class RepositorioDeCorrecoesEmMemoria:
         self._correcoes: list[Correcao] = []
 
     def acrescentar(self, correcao: Correcao) -> None:
+        if any(c.id == correcao.id for c in self._correcoes):
+            raise CorrecaoJaExiste(correcao.id)
         self._correcoes.append(correcao)
 
     def listar(self, job_id: str) -> list[Correcao]:
-        achadas = [c for c in self._correcoes if c.job_id == job_id]
-        return sorted(achadas, key=lambda c: c.criada_em)
+        return em_ordem([c for c in self._correcoes if c.job_id == job_id])
+
+
+def em_ordem(correcoes: list[Correcao]) -> list[Correcao]:
+    """Por data; o id desempata, para a ordem não depender de quem listou."""
+    return sorted(correcoes, key=lambda c: (c.criada_em, c.id))
 
 
 def versao_do_modelo(conteudo: bytes) -> str:
@@ -187,26 +199,56 @@ def montar_correcao(
 
 
 class NaoDesfazivel(Exception):
-    """A correção já foi desfeita, ou é ela mesma um desfazer."""
+    """A correção já foi desfeita, é ela mesma um desfazer ou é de outra versão."""
 
 
 def _desfeitas(correcoes: list[Correcao]) -> set[str]:
     return {c.desfaz for c in correcoes if c.tipo == "desfazer" and c.desfaz}
 
 
+def id_do_desfazer(alvo_id: str) -> str:
+    """Fixo por alvo: dois desfazer simultâneos colidem no repositório."""
+    return f"{alvo_id}-desfeita"
+
+
+def _nome_pela_ancora(
+    modelo: dict[str, Any], versao: str, correcoes: list[Correcao], ancora: Ancora
+) -> str:
+    """O nome entregue hoje na pessoa da âncora (casa como `aplicar`)."""
+    entregue = _pessoas(aplicar(modelo, versao, correcoes))
+    for original, pessoa in zip(_pessoas(modelo), entregue, strict=True):
+        if identidade_da_pessoa(original) == ancora.identidade:
+            return str(pessoa["nome"])
+    raise ItemInexistente(ancora.identidade)
+
+
 def montar_desfazer(
-    alvo: Correcao, correcoes: list[Correcao], motivo: str, **registro: Any
+    modelo: dict[str, Any],
+    versao: str,
+    alvo: Correcao,
+    correcoes: list[Correcao],
+    motivo: str,
+    **registro: Any,
 ) -> Correcao:
-    """O registro que reverte `alvo`; nada é apagado. Um desfazer não se desfaz."""
-    if alvo.tipo == "desfazer" or alvo.id in _desfeitas(correcoes):
+    """O registro que reverte `alvo`; nada é apagado. Um desfazer não se desfaz.
+
+    Antes e depois são o nome entregue sem e com o desfazer: com uma correção
+    mais nova no mesmo item, desfazer a antiga não muda o que se vê.
+    """
+    if (
+        alvo.tipo == "desfazer"
+        or alvo.id in _desfeitas(correcoes)
+        or alvo.ancora.versao != versao
+    ):
         raise NaoDesfazivel(alvo.id)
+    restantes = [c for c in correcoes if c.id != alvo.id]
     return Correcao(
         tipo="desfazer",
         desfaz=alvo.id,
         item_id=alvo.item_id,
         motivo=motivo,
-        antes=alvo.depois,
-        depois=alvo.antes,
+        antes=_nome_pela_ancora(modelo, versao, correcoes, alvo.ancora),
+        depois=_nome_pela_ancora(modelo, versao, restantes, alvo.ancora),
         ancora=alvo.ancora,
         **registro,
     )
@@ -215,7 +257,7 @@ def montar_desfazer(
 def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
     """Da mais recente para a mais antiga, cada uma ativa ou desfeita."""
     desfeitas = _desfeitas(correcoes)
-    ordenadas = sorted(correcoes, key=lambda c: c.criada_em, reverse=True)
+    ordenadas = list(reversed(em_ordem(correcoes)))
     return [
         ItemDoHistorico(
             **c.model_dump(), estado="desfeita" if c.id in desfeitas else "ativa"
@@ -251,7 +293,7 @@ def aplicar(
     identidades = [identidade_da_pessoa(p) for p in pessoas]
     desfeitas = _desfeitas(correcoes)
     # Em ordem de data: a mais nova vence, e desfazer uma antiga não a derruba.
-    for c in sorted(correcoes, key=lambda c: c.criada_em):
+    for c in em_ordem(correcoes):
         if (
             c.ancora.versao != versao
             or c.tipo != "pessoa.renomear"

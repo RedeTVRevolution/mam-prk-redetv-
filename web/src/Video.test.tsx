@@ -57,6 +57,7 @@ const item = (campos: Record<string, unknown>) => ({
   ...campos,
 })
 let desfeita = false
+let desfazerDa409 = false
 let desfazerRecebido: unknown = null
 let pedidosDeHistorico = 0
 const handlersDoHistorico = [
@@ -81,7 +82,10 @@ const handlersDoHistorico = [
   }),
   http.post('/v1/jobs/j1/correcoes/c1/desfazer', async ({ request }) => {
     desfazerRecebido = await request.json()
+    // Simula outro Editor que desfez antes: o servidor já tem o desfazer.
     desfeita = true
+    corrigida = false
+    if (desfazerDa409) return new HttpResponse(null, { status: 409 })
     return HttpResponse.json({ id: 'd1' }, { status: 201 })
   }),
 ]
@@ -122,6 +126,7 @@ afterEach(() => {
   versaoAtual = 'v1'
   pedidosDeReproducao = 0
   desfeita = false
+  desfazerDa409 = false
   desfazerRecebido = null
   pedidosDeHistorico = 0
   links = []
@@ -485,8 +490,11 @@ test('a gaveta de histórico lista quem, quando, antes, depois e motivo', async 
 })
 
 test('desfazer pede o motivo, grava e recarrega histórico e decupagem', async () => {
+  corrigida = true
   const usuario = userEvent.setup()
   const gaveta = await abrirHistorico(usuario)
+  const painel = within(screen.getByLabelText('Decupagem'))
+  expect((await painel.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
 
   await usuario.click(await gaveta.findByRole('button', { name: 'Desfazer' }))
   const modal = within(await screen.findByRole('dialog', { name: 'Desfazer correção' }))
@@ -500,6 +508,25 @@ test('desfazer pede o motivo, grava e recarrega histórico e decupagem', async (
   expect(gaveta.getByText('erro meu')).toBeTruthy()
   // A correção desfeita e o próprio desfazer não oferecem "Desfazer".
   expect(gaveta.queryByRole('button', { name: 'Desfazer' })).toBeNull()
+  await waitFor(() => expect(painel.queryByText('Ana Souza Lima')).toBeNull())
+  expect(painel.getAllByText('Ana Souza').length).toBeGreaterThan(0)
+})
+
+test('desfazer que dá 409 avisa e recarrega histórico e decupagem', async () => {
+  corrigida = true
+  desfazerDa409 = true
+  const usuario = userEvent.setup()
+  const gaveta = await abrirHistorico(usuario)
+  const painel = within(screen.getByLabelText('Decupagem'))
+
+  await usuario.click(await gaveta.findByRole('button', { name: 'Desfazer' }))
+  const modal = within(await screen.findByRole('dialog', { name: 'Desfazer correção' }))
+  await usuario.type(modal.getByLabelText('Motivo'), 'erro meu')
+  await usuario.click(modal.getByRole('button', { name: 'Confirmar' }))
+
+  expect(await modal.findByRole('alert')).toBeTruthy()
+  expect(await gaveta.findByText('desfeita')).toBeTruthy()
+  await waitFor(() => expect(painel.queryByText('Ana Souza Lima')).toBeNull())
 })
 
 test('quem não tem decupagem.editar não vê o botão Histórico nem pede o histórico', async () => {
