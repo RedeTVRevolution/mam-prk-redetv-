@@ -44,6 +44,12 @@ def _atualizar(
     repositorio.salvar(job.model_copy(update={**campos, "atualizado_em": agora}))
 
 
+def _cancelado(repositorio: RepositorioDeJobs, job_id: str) -> bool:
+    """Relê o Job: o cancelamento pode ter chegado durante a chamada ao Gemini."""
+    atual = repositorio.obter(job_id)
+    return atual is not None and atual.estado == "cancelado"
+
+
 def criar_app(
     repositorio: RepositorioDeJobs,
     decupagens: Bucket,
@@ -77,6 +83,8 @@ def criar_app(
                 dormir=dormir,
             )
         except AnaliseFalhou:
+            if _cancelado(repositorio, job.id):
+                return {"status": "cancelado"}
             _atualizar(
                 repositorio,
                 job,
@@ -85,6 +93,8 @@ def criar_app(
                 codigo_falha="analise_falhou",
             )
             return {"status": "falhou"}
+        if _cancelado(repositorio, job.id):
+            return {"status": "cancelado"}
         decupagens.blob(objeto_da_decupagem(job.id)).upload_from_string(
             decupagem.model_dump_json(), content_type="application/json"
         )

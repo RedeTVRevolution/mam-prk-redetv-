@@ -6,18 +6,29 @@ from typing import Any
 
 import google.auth
 import google.auth.transport.requests
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import AlreadyExists, NotFound
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
+from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     ArmazenamentoIndisponivel,
     Job,
     ServicoIndisponivel,
 )
+from api.papeis import PAPEIS, Papel
+from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
+COLECAO_DE_CHAVES = "chaves_de_api"
+COLECAO_DE_WEBHOOKS = "webhooks"
+COLECAO_DE_PAPEIS = "papeis_de_usuarios"
+COLECAO_DE_CORRECOES = "correcoes"
+COLECAO_DE_CONFIGURACAO = "configuracao"
+DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 
 
@@ -47,6 +58,135 @@ class RepositorioFirestore:
             "criado_em", direction=firestore.Query.DESCENDING
         ).stream()
         return [Job(**(doc.to_dict() or {})) for doc in docs]
+
+    def listar_por_sistema(self, sistema: str) -> list[Job]:
+        # Consulta filtrada no Firestore; em produção exige o índice composto
+        # (sistema + criado_em), que o emulador dispensa.
+        docs = (
+            self._colecao.where(filter=FieldFilter("sistema", "==", sistema))
+            .order_by("criado_em", direction=firestore.Query.DESCENDING)
+            .stream()
+        )
+        return [Job(**(doc.to_dict() or {})) for doc in docs]
+
+
+class RepositorioDeChavesFirestore:
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_CHAVES
+    ) -> None:
+        self._cliente = cliente
+        self._colecao = cliente.collection(colecao)
+
+    def salvar(self, registro: RegistroDeChave) -> None:
+        self._colecao.document(registro.id).set(registro.model_dump())
+
+    def obter(self, chave_id: str) -> RegistroDeChave | None:
+        doc = self._colecao.document(chave_id).get()
+        return RegistroDeChave(**(doc.to_dict() or {})) if doc.exists else None
+
+    def listar_por_sistema(self, sistema: str) -> list[RegistroDeChave]:
+        docs = self._colecao.where(
+            filter=FieldFilter("sistema", "==", sistema)
+        ).stream()
+        registros = [RegistroDeChave(**(doc.to_dict() or {})) for doc in docs]
+        return sorted(registros, key=lambda r: r.criada_em)
+
+    def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
+        # A contagem roda dentro da transação: dois comandos simultâneos
+        # conflitam e o Firestore repete o perdedor. Filtra as ativas aqui, e
+        # não com `revogada_em == None` na consulta: chaves gravadas antes do
+        # campo existir não o têm, e o Firestore não as casaria com null.
+        @firestore.transactional
+        def gravar(transacao: Any) -> None:
+            docs = self._colecao.where(
+                filter=FieldFilter("sistema", "==", registro.sistema)
+            ).stream(transaction=transacao)
+            ativas = [
+                r
+                for r in (RegistroDeChave(**(d.to_dict() or {})) for d in docs)
+                if r.ativa
+            ]
+            if len(ativas) >= maximo_ativas:
+                raise LimiteDeChavesAtivas(registro.sistema)
+            transacao.set(self._colecao.document(registro.id), registro.model_dump())
+
+        gravar(self._cliente.transaction())
+
+
+class RepositorioDeWebhooksFirestore:
+    """Um documento por sistema, com o nome do sistema como id."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_WEBHOOKS
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def salvar(self, registro: RegistroDeWebhook) -> None:
+        self._colecao.document(registro.sistema).set(registro.model_dump())
+
+    def obter(self, sistema: str) -> RegistroDeWebhook | None:
+        doc = self._colecao.document(sistema).get()
+        return RegistroDeWebhook(**(doc.to_dict() or {})) if doc.exists else None
+
+
+class RepositorioDePapeisFirestore:
+    """Um documento por uid do Identity Platform, com a lista de papéis."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_PAPEIS
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def obter(self, uid: str) -> list[Papel] | None:
+        doc = self._colecao.document(uid).get()
+        if not doc.exists:
+            return None
+        # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
+        guardados = (doc.to_dict() or {}).get("papeis", [])
+        return [p for p in PAPEIS if p in guardados]
+
+    def salvar(self, uid: str, papeis: list[Papel]) -> None:
+        self._colecao.document(uid).set({"papeis": papeis})
+
+
+class RepositorioDeCorrecoesFirestore:
+    """Só acrescenta: `create` falha se o id já existe, então nada é sobrescrito."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_CORRECOES
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def acrescentar(self, correcao: Correcao) -> None:
+        try:
+            self._colecao.document(correcao.id).create(correcao.model_dump())
+        except AlreadyExists:
+            raise CorrecaoJaExiste(correcao.id) from None
+
+    def listar(self, job_id: str) -> list[Correcao]:
+        docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
+        achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
+        return em_ordem(achadas)
+
+
+class RepositorioDeAprovacaoFirestore:
+    """Um documento com a lista de tipos de correção que exigem aprovação."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_CONFIGURACAO
+    ) -> None:
+        self._documento = cliente.collection(colecao).document(DOCUMENTO_DA_APROVACAO)
+
+    def tipos(self) -> frozenset[str]:
+        doc = self._documento.get()
+        if not doc.exists:
+            return frozenset()
+        # Tipo desconhecido (digitado à mão) não exige nada.
+        guardados = (doc.to_dict() or {}).get("tipos", [])
+        return frozenset(t for t in CORRIGIVEIS if t in guardados)
+
+    def definir(self, tipos: frozenset[str]) -> None:
+        self._documento.set({"tipos": sorted(tipos)})
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:

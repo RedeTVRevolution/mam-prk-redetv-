@@ -86,6 +86,9 @@ Identificador de uma intenção de envio do cliente, reutilizado em todas as rep
 Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada.
 _Evitar_: edição, ajuste
 
+**Correção pendente**:
+Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale).
+
 ### Acesso
 
 **Conta local**:

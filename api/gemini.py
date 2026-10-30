@@ -6,7 +6,6 @@ tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levant
 """
 
 import json
-import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from api.decupagem import (
     Video,
     esquema_do_modelo,
 )
+from api.espera import espera_com_jitter, sorteio_uniforme
 
 MODELO = "gemini-3.5-flash-lite"
 # A versão exata que a Vertex informou (`modelVersion`) quando o cassete foi
@@ -170,7 +170,7 @@ def analisar(
     job_id: str,
     video: Video,
     dormir: Callable[[float], None] = time.sleep,
-    sortear: Callable[[float], float] = lambda teto: random.uniform(0, teto),
+    sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
 ) -> Decupagem:
     chamada = Chamada(
@@ -190,8 +190,9 @@ def analisar(
         except ErroHttp as e:
             if not _repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
                 raise AnaliseFalhou() from e
-            teto = min(BACKOFF_TETO_S, BACKOFF_BASE_S * 2**falhas_rede)
-            dormir(sortear(teto))
+            dormir(
+                espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)
+            )
             falhas_rede += 1
             continue
         try:

@@ -45,7 +45,8 @@ def test_v1_com_token_valido_devolve_o_usuario() -> None:
     resposta = _cliente().get("/v1/eu", headers={"Authorization": "Bearer token-bom"})
 
     assert resposta.status_code == 200
-    assert resposta.json() == {"uid": "u1", "email": "ana@redetv.com.br"}
+    assert resposta.json()["uid"] == "u1"
+    assert resposta.json()["email"] == "ana@redetv.com.br"
 
 
 @pytest.mark.parametrize("metodo", ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"])

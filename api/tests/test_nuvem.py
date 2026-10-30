@@ -4,7 +4,9 @@ Sem `FIRESTORE_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`, os testes de integraç�
 são pulados; no CI os emuladores sobem antes do pytest.
 """
 
+import contextlib
 import os
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
@@ -19,8 +21,19 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
+from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.jobs import Job, ServicoIndisponivel
-from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
+from api.nuvem import (
+    ArmazenamentoStorage,
+    RepositorioDeAprovacaoFirestore,
+    RepositorioDeChavesFirestore,
+    RepositorioDeCorrecoesFirestore,
+    RepositorioDePapeisFirestore,
+    RepositorioDeWebhooksFirestore,
+    RepositorioFirestore,
+)
+from api.webhook import RegistroDeWebhook
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
 EMULADOR_STORAGE = os.environ.get("STORAGE_EMULATOR_HOST")
@@ -85,6 +98,26 @@ class TestRepositorioFirestore:
             repositorio.salvar(_job(id, BASE + timedelta(minutes=minutos)))
 
         assert [j.id for j in repositorio.listar()] == ["novo", "meio", "velho"]
+
+    def test_lista_por_sistema_so_traz_os_jobs_do_sistema(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        for id, minutos, sistema in [
+            ("a-velho", 0, "A"),
+            ("b", 5, "B"),
+            ("pessoa", 7, None),
+            ("a-novo", 10, "A"),
+        ]:
+            repositorio.salvar(
+                _job(id, BASE + timedelta(minutes=minutos)).model_copy(
+                    update={"sistema": sistema}
+                )
+            )
+
+        assert [j.id for j in repositorio.listar_por_sistema("A")] == [
+            "a-novo",
+            "a-velho",
+        ]
 
 
 def _credencial_local() -> google_credentials.Signing:
@@ -212,3 +245,400 @@ def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
 
     with pytest.raises(ServicoIndisponivel):
         next(armazenamento.abrir_decupagem("nao-existe"))
+
+
+def _registro_de_chave(id: str) -> RegistroDeChave:
+    return RegistroDeChave(
+        id=id,
+        sistema="Legado",
+        escopos=["ler"],
+        hmac="ff",
+        versao_mac=1,
+        criada_em=BASE,
+    )
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeChavesFirestore:
+    @pytest.fixture
+    def chaves(self) -> RepositorioDeChavesFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeChavesFirestore(
+            cliente, colecao=f"chaves-{uuid.uuid4().hex}"
+        )
+
+    def test_salva_e_obtem_o_registro(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        registro = RegistroDeChave(
+            id="abc",
+            sistema="Legado",
+            escopos=["ler"],
+            hmac="ff" * 32,
+            versao_mac=2,
+            criada_em=BASE,
+        )
+
+        chaves.salvar(registro)
+
+        assert chaves.obter("abc") == registro
+
+    def test_obter_devolve_none_se_nao_existe(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        assert chaves.obter("nao-existe") is None
+
+    def test_transacao_impede_a_terceira_chave_ativa(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        registro = _registro_de_chave
+
+        chaves.salvar_nova(registro("a"), 2)
+        chaves.salvar_nova(registro("b"), 2)
+        with pytest.raises(LimiteDeChavesAtivas):
+            chaves.salvar_nova(registro("c"), 2)
+        assert chaves.obter("c") is None
+
+        chaves.salvar(registro("a").model_copy(update={"revogada_em": BASE}))
+        chaves.salvar_nova(registro("c"), 2)
+
+        assert [r.id for r in chaves.listar_por_sistema("Legado")] == ["a", "b", "c"]
+
+    def test_dois_comandos_simultaneos_nao_criam_a_terceira(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        chaves.salvar_nova(_registro_de_chave("a"), 2)
+        largada = threading.Barrier(2)
+        gravadas: list[str] = []
+
+        def emitir(id: str) -> None:
+            largada.wait()
+            # Perder a disputa é recusa (limite) ou transação abortada pelo
+            # Firestore depois das tentativas: nos dois casos nada é gravado.
+            with contextlib.suppress(ValueError):
+                chaves.salvar_nova(_registro_de_chave(id), 2)
+                gravadas.append(id)
+
+        corridas = [threading.Thread(target=emitir, args=(i,)) for i in ("b", "c")]
+        for corrida in corridas:
+            corrida.start()
+        for corrida in corridas:
+            corrida.join()
+
+        assert len(gravadas) <= 1
+        ids = [r.id for r in chaves.listar_por_sistema("Legado")]
+        assert sorted(ids) == sorted(["a", *gravadas])
+
+    def test_chave_gravada_sem_o_campo_de_revogacao_conta_como_ativa(self) -> None:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        colecao = f"chaves-{uuid.uuid4().hex}"
+        chaves = RepositorioDeChavesFirestore(cliente, colecao=colecao)
+        for id in ("antiga-1", "antiga-2"):
+            # Como as chaves emitidas antes da revogação existir: sem `revogada_em`.
+            antiga = _registro_de_chave(id).model_dump(exclude={"revogada_em"})
+            cliente.collection(colecao).document(id).set(antiga)
+
+        with pytest.raises(LimiteDeChavesAtivas):
+            chaves.salvar_nova(_registro_de_chave("nova"), 2)
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeWebhooksFirestore:
+    @pytest.fixture
+    def webhooks(self) -> RepositorioDeWebhooksFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeWebhooksFirestore(
+            cliente, colecao=f"webhooks-{uuid.uuid4().hex}"
+        )
+
+    def test_salva_e_obtem_o_registro(
+        self, webhooks: RepositorioDeWebhooksFirestore
+    ) -> None:
+        registro = RegistroDeWebhook(sistema="Legado", url="https://a.example/cb")
+
+        webhooks.salvar(registro)
+
+        assert webhooks.obter("Legado") == registro
+
+    def test_salvar_de_novo_troca_a_url(
+        self, webhooks: RepositorioDeWebhooksFirestore
+    ) -> None:
+        webhooks.salvar(RegistroDeWebhook(sistema="Legado", url="https://a.example/1"))
+        webhooks.salvar(RegistroDeWebhook(sistema="Legado", url="https://a.example/2"))
+
+        registro = webhooks.obter("Legado")
+        assert registro is not None and registro.url == "https://a.example/2"
+
+    def test_obter_devolve_none_se_nao_existe(
+        self, webhooks: RepositorioDeWebhooksFirestore
+    ) -> None:
+        assert webhooks.obter("Nenhum") is None
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDePapeisFirestore:
+    @pytest.fixture
+    def papeis(self) -> RepositorioDePapeisFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDePapeisFirestore(
+            cliente, colecao=f"papeis-{uuid.uuid4().hex}"
+        )
+
+    def test_uid_sem_documento_devolve_none(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        assert papeis.obter("u1") is None
+
+    def test_grava_e_le_os_papeis_do_uid(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        papeis.salvar("u1", ["curador", "operador"])
+
+        assert papeis.obter("u1") == ["operador", "curador"]
+        assert papeis.obter("u2") is None
+
+    def test_papel_desconhecido_no_documento_e_ignorado(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        papeis._colecao.document("u1").set({"papeis": ["diretoria", "editor"]})
+
+        assert papeis.obter("u1") == ["editor"]
+
+    def test_salvar_de_novo_troca_os_papeis(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        papeis.salvar("u1", ["curador"])
+        papeis.salvar("u1", ["consulta"])
+
+        assert papeis.obter("u1") == ["consulta"]
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeAprovacaoFirestore:
+    @pytest.fixture
+    def aprovacao(self) -> RepositorioDeAprovacaoFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeAprovacaoFirestore(
+            cliente, colecao=f"configuracao-{uuid.uuid4().hex}"
+        )
+
+    def test_sem_documento_nada_exige_aprovacao(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        assert aprovacao.tipos() == frozenset()
+
+    def test_grava_e_le_os_tipos_e_a_lista_vazia_limpa(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        aprovacao.definir(frozenset({"pauta.titulo", "pessoa.renomear"}))
+        assert aprovacao.tipos() == {"pauta.titulo", "pessoa.renomear"}
+
+        aprovacao.definir(frozenset())
+        assert aprovacao.tipos() == frozenset()
+
+    def test_tipo_desconhecido_no_documento_e_ignorado(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        aprovacao._documento.set({"tipos": ["pauta.foo", "pauta.titulo"]})
+
+        assert aprovacao.tipos() == {"pauta.titulo"}
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeCorrecoesFirestore:
+    def test_guarda_a_pendente_e_a_decisao_com_a_original(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        pendente = self._correcao("c1", "j1", 1).model_copy(
+            update={"exige_aprovacao": True}
+        )
+        aprovacao = self._correcao("c1-decidida", "j1", 2).model_copy(
+            update={"tipo": "aprovar", "aprova": "c1"}
+        )
+        recusa = self._correcao("c2-decidida", "j1", 3).model_copy(
+            update={"tipo": "recusar", "recusa": "c2"}
+        )
+        for c in (pendente, aprovacao, recusa):
+            correcoes.acrescentar(c)
+
+        lidos = {c.id: c for c in correcoes.listar("j1")}
+        assert lidos["c1"].exige_aprovacao
+        assert lidos["c1-decidida"].aprova == "c1"
+        assert lidos["c2-decidida"].recusa == "c2"
+
+    @pytest.fixture
+    def correcoes(self) -> RepositorioDeCorrecoesFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeCorrecoesFirestore(
+            cliente, colecao=f"correcoes-{uuid.uuid4().hex}"
+        )
+
+    def _correcao(self, id: str, job_id: str, minutos: int) -> Correcao:
+        return Correcao(
+            id=id,
+            job_id=job_id,
+            autor_uid="u1",
+            autor_email="a@b.c",
+            criada_em=BASE + timedelta(minutes=minutos),
+            motivo="grafia",
+            tipo="pessoa.renomear",
+            antes="Ana",
+            depois="Anna",
+            ancora=Ancora(
+                versao="v" * 64,
+                tipo_do_item="pessoa",
+                identidade="ana",
+                inicio_ms=0,
+                fim_ms=10,
+            ),
+        )
+
+    def test_acrescenta_e_lista_por_job_na_ordem_do_tempo(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        correcoes.acrescentar(self._correcao("c2", "j1", 5))
+        correcoes.acrescentar(self._correcao("c1", "j1", 1))
+        correcoes.acrescentar(self._correcao("c3", "j2", 2))
+
+        assert [c.id for c in correcoes.listar("j1")] == ["c1", "c2"]
+        assert correcoes.listar("j1")[0].ancora.identidade == "ana"
+
+    def test_guarda_o_desfazer_com_o_item_e_a_correcao_revertida(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        desfazer = self._correcao("d1", "j1", 3).model_copy(
+            update={"tipo": "desfazer", "desfaz": "c1", "item_id": "pes01"}
+        )
+        correcoes.acrescentar(desfazer)
+
+        [lido] = correcoes.listar("j1")
+        assert (lido.tipo, lido.desfaz, lido.item_id) == ("desfazer", "c1", "pes01")
+
+    def test_guarda_a_reaplicacao_e_o_descarte_com_a_original(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        reaplicacao = self._correcao("r1", "j1", 3).model_copy(
+            update={"reaplica": "c1"}
+        )
+        descarte = self._correcao("d1", "j1", 4).model_copy(
+            update={"tipo": "descartar", "descarta": "c2"}
+        )
+        correcoes.acrescentar(reaplicacao)
+        correcoes.acrescentar(descarte)
+
+        lidos = correcoes.listar("j1")
+        assert [(c.tipo, c.reaplica, c.descarta) for c in lidos] == [
+            ("pessoa.renomear", "c1", None),
+            ("descartar", None, "c2"),
+        ]
+
+    def test_guarda_a_correcao_de_pauta_com_a_ancora_da_pauta(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        base = self._correcao("p1", "j1", 1)
+        correcoes.acrescentar(
+            base.model_copy(
+                update={
+                    "tipo": "item.tempos",
+                    "item_id": "pau01",
+                    "antes": "0-20000",
+                    "depois": "2000-18000",
+                    "ancora": base.ancora.model_copy(update={"tipo_do_item": "pauta"}),
+                }
+            )
+        )
+
+        [lida] = correcoes.listar("j1")
+        assert (lida.tipo, lida.depois, lida.ancora.tipo_do_item) == (
+            "item.tempos",
+            "2000-18000",
+            "pauta",
+        )
+
+    def test_guarda_o_comercial_acrescentado_com_a_ancora_do_comercial(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        base = self._correcao("a1", "j1", 1)
+        comercial = (
+            '{"evidencia": "logo", "fim_ms": 22000, "inicio_ms": 20000, '
+            '"marca": "Loja Sol", "tipo": "merchan_apresentador"}'
+        )
+        correcoes.acrescentar(
+            base.model_copy(
+                update={
+                    "tipo": "comercial.acrescentar",
+                    "item_id": "acr-a1",
+                    "antes": "",
+                    "depois": comercial,
+                    "ancora": base.ancora.model_copy(
+                        update={
+                            "tipo_do_item": "comercial",
+                            "identidade": "loja sol|merchan_apresentador",
+                        }
+                    ),
+                }
+            )
+        )
+
+        [lida] = correcoes.listar("j1")
+        assert (lida.tipo, lida.depois, lida.ancora.tipo_do_item) == (
+            "comercial.acrescentar",
+            comercial,
+            "comercial",
+        )
+        assert lida.ancora.identidade == "loja sol|merchan_apresentador"
+
+    def test_guarda_a_ocorrencia_da_pessoa(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        correcoes.acrescentar(
+            self._correcao("o1", "j1", 1).model_copy(
+                update={
+                    "tipo": "pessoa.nao_e",
+                    "depois": "Não identificado",
+                    "ocorrencia": Ocorrencia(
+                        lista="na_imagem", inicio_ms=1000, fim_ms=5000
+                    ),
+                }
+            )
+        )
+
+        [lida] = correcoes.listar("j1")
+        assert lida.ocorrencia == Ocorrencia(
+            lista="na_imagem", inicio_ms=1000, fim_ms=5000
+        )
+
+    def test_guarda_a_correcao_de_plano_e_de_fala(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        base = self._correcao("p1", "j1", 1)
+        for cid, tipo, tipo_do_item, depois in [
+            ("p1", "plano.limpo", "plano", "true"),
+            ("p2", "fala.texto", "fala", '{"locutor": "Ana", "texto": "oi"}'),
+        ]:
+            correcoes.acrescentar(
+                base.model_copy(
+                    update={
+                        "id": cid,
+                        "tipo": tipo,
+                        "depois": depois,
+                        "ancora": base.ancora.model_copy(
+                            update={"tipo_do_item": tipo_do_item}
+                        ),
+                    }
+                )
+            )
+
+        lidas = correcoes.listar("j1")
+        assert [(c.tipo, c.ancora.tipo_do_item, c.depois) for c in lidas] == [
+            ("plano.limpo", "plano", "true"),
+            ("fala.texto", "fala", '{"locutor": "Ana", "texto": "oi"}'),
+        ]
+
+    def test_nao_sobrescreve_uma_correcao_existente(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        correcoes.acrescentar(self._correcao("c1", "j1", 1))
+
+        with pytest.raises(CorrecaoJaExiste):
+            correcoes.acrescentar(self._correcao("c1", "j1", 2))

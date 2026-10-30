@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Any, Literal, Protocol, get_args
 
 import jwt
 from fastapi import Depends, Request, Response
@@ -19,6 +19,26 @@ class Usuario(BaseModel):
     email: str
 
 
+Escopo = Literal["criar", "ler", "cancelar"]
+ESCOPOS: tuple[Escopo, ...] = get_args(Escopo)
+
+
+class Sistema(BaseModel):
+    """Sistema da RedeTV que chama `/v1` com chave de API."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sistema: str
+    escopos: list[Escopo]
+
+
+Chamador = Usuario | Sistema
+
+
+class ChaveInvalida(Exception):
+    """A chave de API é desconhecida, foi adulterada ou tem o segredo errado."""
+
+
 class TokenInvalido(Exception):
     """O token não foi emitido pelo Identity Platform, expirou ou está adulterado."""
 
@@ -27,6 +47,12 @@ class VerificadorDeToken(Protocol):
     """Porta para o Identity Platform; os testes usam uma versão falsa."""
 
     def verificar(self, token: str) -> Usuario: ...
+
+
+class VerificadorDeChave(Protocol):
+    """Porta para as chaves de API (`api.chaves`); os testes usam uma versão falsa."""
+
+    def verificar(self, chave: str) -> Sistema: ...
 
 
 # Chaves públicas que assinam os tokens do Identity Platform.
@@ -69,14 +95,24 @@ class VerificadorIdentityPlatform:
         return Usuario(uid=claims["sub"], email=claims.get("email", ""))
 
 
-async def _autenticar(request: Request) -> Usuario | None:
-    esquema, _, token = request.headers.get("Authorization", "").partition(" ")
+async def _autenticar(request: Request) -> Chamador | None:
+    autorizacao = request.headers.get("Authorization", "")
+    chave = request.headers.get("X-API-Key", "")
+    if autorizacao and chave:
+        return None  # Os dois juntos: ambíguo.
+    # Numa thread: buscar as chaves do Google e o Firestore são E/S síncrona.
+    if chave:
+        chaves: VerificadorDeChave = request.app.state.chaves
+        try:
+            return await run_in_threadpool(chaves.verificar, chave)
+        except ChaveInvalida:
+            return None
+    esquema, _, token = autorizacao.partition(" ")
     token = token.strip()
     if esquema.lower() != "bearer" or not token:
         return None
     verificador: VerificadorDeToken = request.app.state.verificador
     try:
-        # Numa thread: buscar as chaves do Google é HTTP síncrono e travaria o event loop.
         return await run_in_threadpool(verificador.verificar, token)
     except TokenInvalido:
         return None
@@ -88,28 +124,28 @@ def _protegido(caminho: str) -> bool:
     return caminho == PREFIXO_PROTEGIDO or caminho.startswith(PREFIXO_PROTEGIDO + "/")
 
 
-async def exigir_token(
+async def exigir_autenticacao(
     request: Request, seguinte: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     """Middleware: todo `/v1`, com qualquer método e caminho, menos
-    `/v1/health`, passa pelo token antes do roteamento, para que 404, 405 ou redirecionamento não respondam
+    `/v1/health`, passa pela autenticação (Bearer de pessoa ou `X-API-Key` de sistema, nunca os dois) antes do roteamento, para que 404, 405 ou redirecionamento não respondam
     a quem não se autenticou."""
     if not _protegido(request.url.path):
         return await seguinte(request)
-    usuario = await _autenticar(request)
-    if usuario is None:
+    chamador = await _autenticar(request)
+    if chamador is None:
         return JSONResponse(
             {"detail": "Not authenticated"},
             status_code=401,
             headers={"WWW-Authenticate": "Bearer"},
         )
-    request.state.usuario = usuario
+    request.state.chamador = chamador
     return await seguinte(request)
 
 
-def usuario_autenticado(request: Request) -> Usuario:
-    usuario: Usuario = request.state.usuario
-    return usuario
+def chamador_autenticado(request: Request) -> Chamador:
+    chamador: Chamador = request.state.chamador
+    return chamador
 
 
-UsuarioAutenticado = Annotated[Usuario, Depends(usuario_autenticado)]
+ChamadorAutenticado = Annotated[Chamador, Depends(chamador_autenticado)]

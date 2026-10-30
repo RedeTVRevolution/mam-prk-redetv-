@@ -151,7 +151,9 @@ def test_job_inexistente_nao_faz_nada(ambiente: Ambiente) -> None:
     assert ambiente.quarentena.blob("fantasma").exists()
 
 
-@pytest.mark.parametrize("estado", ["validando", "analisando", "concluido", "falhou"])
+@pytest.mark.parametrize(
+    "estado", ["validando", "analisando", "concluido", "falhou", "cancelado"]
+)
 def test_job_fora_de_aguardando_upload_nao_muda(
     ambiente: Ambiente, tmp_path: Path, estado: str
 ) -> None:
@@ -163,3 +165,39 @@ def test_job_fora_de_aguardando_upload_nao_muda(
     assert ambiente.job("j3") == antes
     assert ambiente.quarentena.blob("j3").exists()
     assert not ambiente.aceitos.blob("j3/proxy.mp4").exists()
+
+
+def _cancelar_ao_validar(ambiente: Ambiente) -> None:
+    """O cancelamento chega logo depois de o worker marcar `validando`."""
+    repositorio = ambiente.repositorio
+    salvar = repositorio.salvar
+
+    def salvar_e_cancelar(job: Job) -> None:
+        salvar(job)
+        if job.estado == "validando":
+            salvar(job.model_copy(update={"estado": "cancelado"}))
+
+    repositorio.salvar = salvar_e_cancelar  # type: ignore[method-assign]
+
+
+def test_cancelado_durante_a_validacao_continua_cancelado(
+    ambiente: Ambiente, tmp_path: Path
+) -> None:
+    ambiente.enviar("j4", _mp4(tmp_path / "v.mp4"))
+    _cancelar_ao_validar(ambiente)
+
+    ambiente.executar("j4")
+
+    assert ambiente.job("j4").estado == "cancelado"
+
+
+def test_cancelado_durante_a_validacao_nao_vira_falhou_se_o_arquivo_for_recusado(
+    ambiente: Ambiente,
+) -> None:
+    ambiente.enviar("j5", b"isto nao e um mp4, mas tem mais de doze bytes")
+    _cancelar_ao_validar(ambiente)
+
+    ambiente.executar("j5")
+
+    job = ambiente.job("j5")
+    assert (job.estado, job.codigo_falha) == ("cancelado", None)

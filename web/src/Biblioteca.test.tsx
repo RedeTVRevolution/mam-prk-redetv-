@@ -90,13 +90,16 @@ function noShell(tela: ReactNode) {
   return <AppShell navbar={NAVBAR_DA_BIBLIOTECA}>{tela}</AppShell>
 }
 
-async function abrir(opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void } = {}) {
+async function abrir(
+  opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void; podeEnviar?: boolean } = {},
+) {
   render(
     noShell(
       <Biblioteca
         autenticador={await comSessao()}
         aoSessaoExpirada={opcoes.aoSessaoExpirada ?? (() => {})}
         intervaloMs={opcoes.intervaloMs}
+        podeEnviar={opcoes.podeEnviar ?? true}
       />,
     ),
   )
@@ -114,7 +117,16 @@ test('lista nome, data e estado de cada Job, e o código de quem falhou', async 
   expect(falhou.getByText('codec_nao_suportado')).toBeTruthy()
   const validando = within(screen.getByText('novo.mp4').closest('.mantine-Card-root') as HTMLElement)
   expect(validando.getByText('Em quarentena')).toBeTruthy()
-  expect(validando.getByText(/29\/10\/2026/)).toBeTruthy()
+  // 15:00Z é 12:00 em São Paulo, o fuso fixado em vite.config.ts.
+  expect(validando.getByText(/29\/10\/2026.*12:00/)).toBeTruthy()
+})
+
+test('mostra o estado Cancelado de um Job cancelado', async () => {
+  jobs = [job({ id: 'c', nome: 'desistiu.mp4', estado: 'cancelado' })]
+  await abrir()
+
+  const cancelado = within((await screen.findByText('desistiu.mp4')).closest('.mantine-Card-root') as HTMLElement)
+  expect(cancelado.getByText('Cancelado')).toBeTruthy()
 })
 
 test('a lista acompanha o estado por consulta periódica', async () => {
@@ -207,7 +219,12 @@ test('abrir um vídeo concluído ou falhado chama aoAbrir; os demais não são c
   const aoAbrir = vi.fn()
   render(
     noShell(
-      <Biblioteca autenticador={await comSessao()} aoSessaoExpirada={() => {}} aoAbrir={aoAbrir} />,
+      <Biblioteca
+        autenticador={await comSessao()}
+        aoSessaoExpirada={() => {}}
+        aoAbrir={aoAbrir}
+        podeEnviar
+      />,
     ),
   )
 
@@ -260,4 +277,19 @@ test('um estado fora do mapa continua visível, qualquer que seja o filtro', asy
   for (const caixa of screen.getAllByRole('checkbox')) await usuario.click(caixa)
 
   expect(screen.getByText('estranho.mp4')).toBeTruthy()
+})
+
+test('sem a permissão de enviar, a Biblioteca não mostra o upload mas lista os vídeos', async () => {
+  jobs = [job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' })]
+  await abrir({ podeEnviar: false })
+
+  expect(await screen.findByText('pronto.mp4')).toBeTruthy()
+  expect(screen.queryByLabelText('Enviar vídeo')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Enviar MP4' })).toBeNull()
+})
+
+test('com a permissão de enviar, a Biblioteca mostra o upload', async () => {
+  await abrir({ podeEnviar: true })
+
+  expect(await screen.findByRole('button', { name: 'Enviar MP4' })).toBeTruthy()
 })

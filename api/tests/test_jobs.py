@@ -6,6 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
+from api.correcoes import versao_do_modelo
 from api.jobs import (
     Estado,
     Job,
@@ -298,7 +299,9 @@ def test_decupagem_chega_em_gzip_e_inteira() -> None:
     assert resposta.status_code == 200
     assert resposta.headers["content-encoding"] == "gzip"
     assert resposta.headers["content-type"] == "application/json"
-    assert resposta.json() == documento  # o cliente já descomprimiu
+    entregue = resposta.json()  # o cliente já descomprimiu
+    assert entregue.pop("versao_decupagem") == versao_do_modelo(texto)
+    assert entregue == documento
 
 
 def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
@@ -312,7 +315,10 @@ def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
     )
 
     assert "content-encoding" not in resposta.headers
-    assert resposta.json() == {"a": 1}
+    assert resposta.json() == {
+        "a": 1,
+        "versao_decupagem": versao_do_modelo(b'{"a": 1}'),
+    }
 
 
 def test_reproducao_e_decupagem_exigem_token() -> None:
@@ -333,7 +339,10 @@ def test_decupagem_com_gzip_recusado_vem_em_texto_puro() -> None:
     )
 
     assert "content-encoding" not in resposta.headers
-    assert resposta.json() == {"a": 1}
+    assert resposta.json() == {
+        "a": 1,
+        "versao_decupagem": versao_do_modelo(b'{"a": 1}'),
+    }
 
 
 def test_decupagem_indisponivel_da_503_antes_de_comecar_o_stream() -> None:
@@ -344,3 +353,175 @@ def test_decupagem_indisponivel_da_503_antes_de_comecar_o_stream() -> None:
     resposta = ambiente.cliente.get(f"/v1/jobs/{job_id}/decupagem", headers=AUTORIZACAO)
 
     assert resposta.status_code == 503
+
+
+def _cancelar(ambiente: Ambiente, job_id: str) -> Any:
+    return ambiente.cliente.delete(f"/v1/jobs/{job_id}", headers=AUTORIZACAO)
+
+
+def test_delete_cancela_job_em_andamento_e_responde_202_com_o_job() -> None:
+    ambiente = Ambiente()
+    estados: list[Estado] = ["aguardando_upload", "validando", "analisando"]
+    for estado in estados:
+        job_id = _job_com_estado(ambiente, estado)
+        ambiente.relogio.agora += timedelta(minutes=1)
+
+        resposta = _cancelar(ambiente, job_id)
+
+        assert resposta.status_code == 202, estado
+        assert resposta.json()["estado"] == "cancelado"
+        assert resposta.json()["atualizado_em"] == "2026-10-29T12:01:00Z"
+        job = ambiente.repositorio.obter(job_id)
+        assert job is not None and job.estado == "cancelado"
+        ambiente.relogio.agora = INICIO
+
+
+def test_delete_repetido_em_job_cancelado_responde_202_sem_mudar_nada() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "cancelado")
+
+    resposta = _cancelar(ambiente, job_id)
+
+    assert resposta.status_code == 202
+    assert resposta.json()["estado"] == "cancelado"
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None and job.atualizado_em == INICIO
+
+
+def test_delete_em_concluido_ou_falhou_recebe_409_e_nao_muda_o_job() -> None:
+    ambiente = Ambiente()
+    for estado in ("concluido", "falhou"):
+        job_id = _job_com_estado(ambiente, estado)
+
+        assert _cancelar(ambiente, job_id).status_code == 409
+        job = ambiente.repositorio.obter(job_id)
+        assert job is not None and job.estado == estado
+
+
+def test_delete_de_job_inexistente_recebe_404() -> None:
+    assert _cancelar(Ambiente(), "nao-existe").status_code == 404
+
+
+def test_delete_exige_token() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+
+    assert ambiente.cliente.delete(f"/v1/jobs/{job_id}").status_code == 401
+
+
+def test_expiracao_ignora_job_cancelado() -> None:
+    ambiente = Ambiente()
+    job_id = ambiente.criar().json()["id"]
+    assert _cancelar(ambiente, job_id).status_code == 202
+    ambiente.relogio.agora += timedelta(days=3)
+
+    assert (
+        expirar_uploads(
+            ambiente.repositorio, ambiente.armazenamento, ambiente.relogio()
+        )
+        == []
+    )
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None and job.estado == "cancelado"
+    assert ambiente.armazenamento.cancelados == []
+
+
+def _consultar(ambiente: Ambiente, job_id: str, **cabecalhos: str) -> Any:
+    return ambiente.cliente.get(
+        f"/v1/jobs/{job_id}", headers={**AUTORIZACAO, **cabecalhos}
+    )
+
+
+def test_status_devolve_etag_e_cache_control_privado() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+
+    resposta = _consultar(ambiente, job_id)
+
+    assert resposta.status_code == 200
+    assert resposta.headers["ETag"].startswith('"')
+    assert resposta.headers["Cache-Control"] == "private, no-cache"
+    assert resposta.json()["estado"] == "analisando"
+
+
+def test_if_none_match_igual_ao_atual_responde_304_sem_corpo() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    etag = _consultar(ambiente, job_id).headers["ETag"]
+
+    resposta = _consultar(ambiente, job_id, **{"If-None-Match": etag})
+
+    assert resposta.status_code == 304
+    assert resposta.content == b""
+    assert resposta.headers["ETag"] == etag
+    assert resposta.headers["Cache-Control"] == "private, no-cache"
+
+
+def test_mudanca_de_estado_muda_o_etag_e_o_mesmo_if_none_match_da_200() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    antigo = _consultar(ambiente, job_id).headers["ETag"]
+    ambiente.relogio.agora += timedelta(minutes=1)
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None
+    ambiente.repositorio.salvar(
+        job.model_copy(
+            update={"estado": "concluido", "atualizado_em": ambiente.relogio()}
+        )
+    )
+
+    resposta = _consultar(ambiente, job_id, **{"If-None-Match": antigo})
+
+    assert resposta.status_code == 200
+    assert resposta.headers["ETag"] != antigo
+    assert resposta.json()["estado"] == "concluido"
+
+
+def test_etag_muda_com_codigo_de_falha_ou_duracao_ou_atualizado_em() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None
+    etags = set()
+    mudancas: list[dict[str, Any]] = [
+        {},
+        {"codigo_falha": "analise_falhou"},
+        {"duracao_s": 30.0},
+        {"atualizado_em": INICIO + timedelta(seconds=1)},
+    ]
+    for mudanca in mudancas:
+        ambiente.repositorio.salvar(job.model_copy(update=mudanca))
+        etags.add(_consultar(ambiente, job_id).headers["ETag"])
+
+    assert len(etags) == 4
+
+
+def test_if_none_match_aceita_lista_de_etags_e_etag_fraca() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    etag = _consultar(ambiente, job_id).headers["ETag"]
+
+    em_lista = _consultar(ambiente, job_id, **{"If-None-Match": f'"outro", {etag}'})
+    fraca = _consultar(ambiente, job_id, **{"If-None-Match": f"W/{etag}"})
+    outro = _consultar(ambiente, job_id, **{"If-None-Match": '"outro"'})
+    todos = _consultar(ambiente, job_id, **{"If-None-Match": "*"})
+
+    assert em_lista.status_code == 304
+    assert fraca.status_code == 304
+    assert outro.status_code == 200
+    assert todos.status_code == 304
+
+
+def test_status_com_etag_exige_autenticacao_e_404_segue_404() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    etag = _consultar(ambiente, job_id).headers["ETag"]
+
+    sem_chave = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}", headers={"If-None-Match": etag}
+    )
+
+    assert sem_chave.status_code == 401
+    assert (
+        _consultar(ambiente, "nao-existe", **{"If-None-Match": etag}).status_code == 404
+    )

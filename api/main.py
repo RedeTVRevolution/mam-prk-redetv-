@@ -12,12 +12,21 @@ from google.cloud.storage import Client as ClienteStorage
 from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
+    ChamadorAutenticado,
+    ChaveInvalida,
+    Sistema,
     TokenInvalido,
     Usuario,
-    UsuarioAutenticado,
+    VerificadorDeChave,
     VerificadorDeToken,
     VerificadorIdentityPlatform,
-    exigir_token,
+    exigir_autenticacao,
+)
+from api.correcoes import (
+    RepositorioDeAprovacao,
+    RepositorioDeAprovacaoEmMemoria,
+    RepositorioDeCorrecoes,
+    RepositorioDeCorrecoesEmMemoria,
 )
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
@@ -30,7 +39,21 @@ from api.jobs import (
     agora_utc,
     criar_rotas,
 )
-from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
+from api.nuvem import (
+    ArmazenamentoStorage,
+    RepositorioDeAprovacaoFirestore,
+    RepositorioDeCorrecoesFirestore,
+    RepositorioDePapeisFirestore,
+    RepositorioFirestore,
+)
+from api.papeis import (
+    Papel,
+    Permissao,
+    RepositorioDePapeis,
+    RepositorioDePapeisEmMemoria,
+    papeis_efetivos,
+    permissoes_de,
+)
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -43,10 +66,26 @@ class _SemVerificador:
         raise TokenInvalido
 
 
+class _SemChaves:
+    """Sem adaptador de chaves de API: recusa toda chave."""
+
+    def verificar(self, chave: str) -> Sistema:
+        raise ChaveInvalida
+
+
+class UsuarioComPapeis(Usuario):
+    papeis: list[Papel]
+    permissoes: list[Permissao]
+
+
 def criar_app(
     verificador: VerificadorDeToken | None = None,
     repositorio: RepositorioDeJobs | None = None,
     armazenamento: Armazenamento | None = None,
+    chaves: VerificadorDeChave | None = None,
+    papeis: RepositorioDePapeis | None = None,
+    correcoes: RepositorioDeCorrecoes | None = None,
+    aprovacao: RepositorioDeAprovacao | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -62,7 +101,9 @@ def criar_app(
         return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
 
     app.state.verificador = verificador or _SemVerificador()
-    app.middleware("http")(exigir_token)
+    app.state.chaves = chaves or _SemChaves()
+    app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
+    app.middleware("http")(exigir_autenticacao)
 
     @app.get(CAMINHO_HEALTH)
     def health() -> dict[str, str]:
@@ -71,8 +112,18 @@ def criar_app(
     v1 = APIRouter(prefix=PREFIXO_PROTEGIDO)
 
     @v1.get("/eu")
-    def eu(usuario: UsuarioAutenticado) -> Usuario:
-        return usuario
+    def eu(
+        request: Request, chamador: ChamadorAutenticado
+    ) -> UsuarioComPapeis | Sistema:
+        if isinstance(chamador, Sistema):
+            return chamador
+        repositorio_de_papeis: RepositorioDePapeis = request.app.state.papeis
+        efetivos = papeis_efetivos(repositorio_de_papeis.obter(chamador.uid))
+        return UsuarioComPapeis(
+            **chamador.model_dump(),
+            papeis=efetivos,
+            permissoes=sorted(permissoes_de(efetivos)),
+        )
 
     v1.include_router(
         criar_rotas(
@@ -80,6 +131,8 @@ def criar_app(
             armazenamento or ArmazenamentoIndisponivel(),
             tamanho_maximo_bytes,
             relogio,
+            correcoes or RepositorioDeCorrecoesEmMemoria(),
+            aprovacao or RepositorioDeAprovacaoEmMemoria(),
         )
     )
     app.include_router(v1)
@@ -100,6 +153,9 @@ if _projeto:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
+        papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
+        correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
+        aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
     )
 else:
     app = criar_app()

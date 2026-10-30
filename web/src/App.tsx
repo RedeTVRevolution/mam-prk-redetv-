@@ -11,6 +11,7 @@ import Video, { type JobAberto } from './Video.tsx'
 interface Usuario {
   uid: string
   email: string
+  permissoes: string[]
 }
 
 // Sem sessão não renderiza nada além do login e não chama a API.
@@ -124,6 +125,8 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
             autenticador={autenticador}
             job={aberto}
             aoSessaoExpirada={() => void sair()}
+            podeEditar={sessao.usuario.permissoes.includes('decupagem.editar')}
+            podeAprovar={sessao.usuario.permissoes.includes('correcao.aprovar')}
           />
         </AppShell.Main>
       ) : (
@@ -132,6 +135,8 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
           autenticador={autenticador}
           aoSessaoExpirada={() => void sair()}
           aoAbrir={setAberto}
+          // O front só esconde; quem barra é a API.
+          podeEnviar={sessao.usuario.permissoes.includes('video.enviar')}
         />
       )}
     </AppShell>
