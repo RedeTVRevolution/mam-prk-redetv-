@@ -1,4 +1,4 @@
-.PHONY: instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas
+.PHONY: instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas gravar-cassetes
 
 instalar:
 	uv sync --locked
@@ -33,3 +33,8 @@ deploy-dev:
 # Contas locais do dev (#11), depois do deploy-dev: cria e manda o link da senha.
 criar-contas:
 	scripts/criar-contas.sh
+
+# Cassete do Gemini (#10): chamada real no dev sobre um clipe sintético, com as
+# credenciais ADC de quem roda. Regrave a cada troca de modelo, esquema ou instrução.
+gravar-cassetes:
+	set -a && . ./.env && set +a && uv run --locked python -m api.cassete
