@@ -1,4 +1,5 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, screen, waitFor } from '@testing-library/react'
+import { render } from './render-teste.tsx'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -188,4 +189,21 @@ test('API fora do ar mostra aviso sem dados, e tentar de novo entra', async () =
   servidor.resetHandlers()
   await usuario.click(screen.getByRole('button', { name: 'Tentar de novo' }))
   expect(await screen.findByText('Biblioteca')).toBeTruthy()
+})
+
+test('com sessão, o cabeçalho mostra a marca, a tela atual e o e-mail', async () => {
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  expect(await screen.findByText('MAM')).toBeTruthy()
+  expect(screen.getByText('RedeTV')).toBeTruthy()
+  expect(screen.getByRole('banner').textContent).toContain('Biblioteca')
+  expect(screen.getByRole('banner').textContent).toContain('ana@redetv.com.br')
+  expect(screen.getByRole('button', { name: 'Sair' })).toBeTruthy()
+})
+
+test('verificando a sessão mostra um indicador de carregamento', async () => {
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  expect(document.querySelector('.mantine-Loader-root')).toBeTruthy()
+  await screen.findByText('Biblioteca')
 })
