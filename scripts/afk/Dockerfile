@@ -5,6 +5,7 @@ ARG TARGETARCH
 ARG CLAUDE_CODE_VERSION=2.1.312
 ARG GH_VERSION=2.101.0
 ARG GITLEAKS_VERSION=8.30.1
+ARG TERRAFORM_VERSION=1.17.1
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /uvx /usr/local/bin/
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/
@@ -13,7 +14,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg git jq make \
+ && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg git jq make unzip \
  && rm -rf /var/lib/apt/lists/*
 
 RUN case "$TARGETARCH" in \
@@ -26,6 +27,15 @@ RUN case "$TARGETARCH" in \
  && curl -sSfL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH:-amd64}.tar.gz" \
     | tar xz -C /usr/local --strip-components=1 \
  && rm /tmp/gitleaks.tar.gz \
+ && case "$TARGETARCH" in \
+      arm64) tf_sha=988e950a1c23058093b0e66ab2d5fb53fc18345ecfbd5871acf51dbac9325edd ;; \
+      *) tf_sha=4638628058e71a55212b1c563712eac03b902128f40740f3dc8174df12135061 ;; \
+    esac \
+ && curl -sSfLo /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH:-amd64}.zip" \
+ && echo "$tf_sha  /tmp/terraform.zip" | sha256sum -c - \
+ && unzip -q /tmp/terraform.zip terraform -d /usr/local/bin \
+ && rm /tmp/terraform.zip \
+ && terraform version \
  && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && git config --system safe.directory '*'
 
