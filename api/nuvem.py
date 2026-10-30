@@ -11,7 +11,7 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
-from api.chaves import RegistroDeChave
+from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     ArmazenamentoIndisponivel,
@@ -66,6 +66,7 @@ class RepositorioDeChavesFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_CHAVES
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def salvar(self, registro: RegistroDeChave) -> None:
@@ -74,6 +75,31 @@ class RepositorioDeChavesFirestore:
     def obter(self, chave_id: str) -> RegistroDeChave | None:
         doc = self._colecao.document(chave_id).get()
         return RegistroDeChave(**(doc.to_dict() or {})) if doc.exists else None
+
+    def listar_por_sistema(self, sistema: str) -> list[RegistroDeChave]:
+        docs = self._colecao.where(
+            filter=FieldFilter("sistema", "==", sistema)
+        ).stream()
+        registros = [RegistroDeChave(**(doc.to_dict() or {})) for doc in docs]
+        return sorted(registros, key=lambda r: r.criada_em)
+
+    def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
+        # A contagem roda dentro da transação: dois comandos simultâneos
+        # conflitam e o Firestore repete o perdedor.
+        @firestore.transactional
+        def gravar(transacao: Any) -> None:
+            docs = (
+                self._colecao.where(
+                    filter=FieldFilter("sistema", "==", registro.sistema)
+                )
+                .where(filter=FieldFilter("revogada_em", "==", None))
+                .stream(transaction=transacao)
+            )
+            if len(list(docs)) >= maximo_ativas:
+                raise LimiteDeChavesAtivas(registro.sistema)
+            transacao.set(self._colecao.document(registro.id), registro.model_dump())
+
+        gravar(self._cliente.transaction())
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:

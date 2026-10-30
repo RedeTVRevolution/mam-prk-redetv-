@@ -52,6 +52,19 @@ class RegistroDeChave(BaseModel):
     hmac: str
     versao_mac: int
     criada_em: datetime
+    # Revogada não é apagada: o registro fica para auditoria.
+    revogada_em: datetime | None = None
+
+
+MAXIMO_DE_CHAVES_ATIVAS = 2
+
+
+class LimiteDeChavesAtivas(ValueError):
+    def __init__(self, sistema: str) -> None:
+        super().__init__(
+            f"o sistema {sistema} já tem {MAXIMO_DE_CHAVES_ATIVAS} chaves ativas: "
+            "revogue uma antes de emitir outra"
+        )
 
 
 class RepositorioDeChaves(Protocol):
@@ -60,6 +73,13 @@ class RepositorioDeChaves(Protocol):
     def salvar(self, registro: RegistroDeChave) -> None: ...
 
     def obter(self, chave_id: str) -> RegistroDeChave | None: ...
+
+    def listar_por_sistema(self, sistema: str) -> list[RegistroDeChave]: ...
+
+    def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
+        """Grava a chave nova se o sistema tiver menos de `maximo_ativas` ativas.
+        Contagem e gravação são atômicas. `LimiteDeChavesAtivas` se estourar."""
+        ...
 
 
 class RepositorioDeChavesEmMemoria:
@@ -71,6 +91,20 @@ class RepositorioDeChavesEmMemoria:
 
     def obter(self, chave_id: str) -> RegistroDeChave | None:
         return self._registros.get(chave_id)
+
+    def listar_por_sistema(self, sistema: str) -> list[RegistroDeChave]:
+        return sorted(
+            (r for r in self._registros.values() if r.sistema == sistema),
+            key=lambda r: r.criada_em,
+        )
+
+    def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
+        ativas = [
+            r for r in self.listar_por_sistema(registro.sistema) if not r.revogada_em
+        ]
+        if len(ativas) >= maximo_ativas:
+            raise LimiteDeChavesAtivas(registro.sistema)
+        self.salvar(registro)
 
     def todas(self) -> list[RegistroDeChave]:
         return list(self._registros.values())
@@ -96,7 +130,7 @@ def emitir_chave(
     criada_em: datetime,
 ) -> ChaveEmitida:
     """Gera a chave (256 bits aleatórios) e grava só o HMAC. A chave sai só daqui.
-    Exige ao menos um escopo: nada é dado por padrão."""
+    Exige ao menos um escopo: nada é dado por padrão. No máximo duas ativas por sistema."""
     escopos = sorted(set(escopos))
     if not escopos:
         raise ValueError("informe ao menos um escopo")
@@ -111,7 +145,7 @@ def emitir_chave(
         versao_mac=versao,
         criada_em=criada_em,
     )
-    repositorio.salvar(registro)
+    repositorio.salvar_nova(registro, MAXIMO_DE_CHAVES_ATIVAS)
     return ChaveEmitida(chave=chave, registro=registro)
 
 
@@ -126,7 +160,7 @@ class VerificadorDeChaveDeApi:
             raise ChaveInvalida
         # Procura pelo id público: nunca compara com todos os hashes.
         registro = self._repositorio.obter(partes[1])
-        if registro is None:
+        if registro is None or registro.revogada_em is not None:
             raise ChaveInvalida
         try:
             esperado = self._mac.calcular(registro.versao_mac, chave.encode())
@@ -145,6 +179,52 @@ class VerificadorDeChaveDeApi:
                 )
             )
         return Sistema(sistema=registro.sistema, escopos=registro.escopos)
+
+
+def revogar_chave(
+    chave_id: str, repositorio: RepositorioDeChaves, revogada_em: datetime
+) -> None:
+    """Vale na hora: a API lê o registro a cada requisição. Repetir não muda a data."""
+    registro = repositorio.obter(chave_id)
+    if registro is None:
+        raise ValueError(f"a chave {chave_id} não existe")
+    if registro.revogada_em is None:
+        repositorio.salvar(registro.model_copy(update={"revogada_em": revogada_em}))
+
+
+def listar_chaves_main(
+    argv: list[str],
+    repositorio: RepositorioDeChaves,
+    imprimir: Callable[[str], None] = print,
+) -> int:
+    if len(argv) != 1 or not argv[0]:
+        imprimir("uso: make listar-chaves SISTEMA=<nome do sistema>")
+        return 2
+    for r in repositorio.listar_por_sistema(argv[0]):
+        revogada = r.revogada_em.isoformat() if r.revogada_em else "-"
+        imprimir(
+            f"id: {r.id} · escopos: {', '.join(r.escopos)}"
+            f" · criada em: {r.criada_em.isoformat()} · revogada em: {revogada}"
+        )
+    return 0
+
+
+def revogar_chave_main(
+    argv: list[str],
+    repositorio: RepositorioDeChaves,
+    imprimir: Callable[[str], None] = print,
+    relogio: Callable[[], datetime] = agora_utc,
+) -> int:
+    if len(argv) != 1 or not argv[0]:
+        imprimir("uso: make revogar-chave ID=<id da chave>")
+        return 2
+    try:
+        revogar_chave(argv[0], repositorio, relogio())
+    except ValueError as erro:
+        imprimir(str(erro))
+        return 2
+    imprimir(f"Chave {argv[0]} revogada.")
+    return 0
 
 
 def main(

@@ -19,7 +19,7 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
-from api.chaves import RegistroDeChave
+from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
@@ -268,3 +268,27 @@ class TestRepositorioDeChavesFirestore:
         self, chaves: RepositorioDeChavesFirestore
     ) -> None:
         assert chaves.obter("nao-existe") is None
+
+    def test_transacao_impede_a_terceira_chave_ativa(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        def registro(id: str) -> RegistroDeChave:
+            return RegistroDeChave(
+                id=id,
+                sistema="Legado",
+                escopos=["ler"],
+                hmac="ff",
+                versao_mac=1,
+                criada_em=BASE,
+            )
+
+        chaves.salvar_nova(registro("a"), 2)
+        chaves.salvar_nova(registro("b"), 2)
+        with pytest.raises(LimiteDeChavesAtivas):
+            chaves.salvar_nova(registro("c"), 2)
+        assert chaves.obter("c") is None
+
+        chaves.salvar(registro("a").model_copy(update={"revogada_em": BASE}))
+        chaves.salvar_nova(registro("c"), 2)
+
+        assert [r.id for r in chaves.listar_por_sistema("Legado")] == ["a", "b", "c"]

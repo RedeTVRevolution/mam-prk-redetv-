@@ -1,4 +1,4 @@
-.PHONY: emitir-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas
 
 instalar:
 	uv sync --locked
@@ -37,3 +37,10 @@ criar-contas:
 # Chave de API de um sistema da RedeTV (E7): make emitir-chave SISTEMA="Nome do sistema" ESCOPOS=criar,ler,cancelar
 emitir-chave:
 	uv run --locked python -m api.emitir_chave "$(SISTEMA)" "$(ESCOPOS)"
+
+# Rotação de chaves (E7): no máximo duas ativas por sistema.
+listar-chaves:
+	uv run --locked python -m api.gerir_chaves listar "$(SISTEMA)"
+
+revogar-chave:
+	uv run --locked python -m api.gerir_chaves revogar "$(ID)"
