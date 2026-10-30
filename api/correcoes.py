@@ -8,6 +8,7 @@ correções aplicadas por cima, em memória.
 import hashlib
 import json
 import unicodedata
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol
 
@@ -276,6 +277,82 @@ def nome_atual(
     raise ItemInexistente(item_id)
 
 
+@dataclass
+class Reconciliacao:
+    casadas: list[Correcao] = field(default_factory=list)  # já apontam para o item novo
+    atendidas: list[Correcao] = field(
+        default_factory=list
+    )  # casadas cujo "depois" o modelo já traz
+    sem_casar: list[Correcao] = field(default_factory=list)
+
+
+def _sobrepoe(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    return a[0] <= b[1] and b[0] <= a[1]
+
+
+def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
+    """Pessoas da versão nova com a identidade da âncora (ou já com o "depois")."""
+    ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    sem_nome = nao_identificado(c.ancora.identidade.split("@")[0])
+    achados = []
+    for pessoa in _pessoas(modelo):
+        nome = str(pessoa.get("nome", ""))
+        if sem_nome and nao_identificado(nome):
+            # Só as aparições mostram quem é.
+            intervalo = _intervalo_da_pessoa(pessoa, ("na_imagem",))
+        elif normalizar(nome) == normalizar(c.depois) or (
+            not sem_nome and normalizar(nome) == c.ancora.identidade
+        ):
+            intervalo = _intervalo_da_pessoa(pessoa)
+        else:
+            continue
+        if _sobrepoe(ancora, intervalo):
+            achados.append(pessoa)
+    return achados
+
+
+def reconciliar(
+    modelo: dict[str, Any], versao: str, correcoes: list[Correcao]
+) -> Reconciliacao:
+    """Casa as correções de versões antigas com a decupagem atual do modelo.
+
+    Casa só com exatamente um item de mesma identidade e intervalo sobreposto;
+    zero ou vários candidatos não casam. Ignora as da versão atual, as
+    desfeitas e os próprios desfazer.
+    """
+    desfeitas = _desfeitas(correcoes)
+    resultado = Reconciliacao()
+    for c in em_ordem(correcoes):
+        if (
+            c.ancora.versao == versao
+            or c.tipo != "pessoa.renomear"
+            or c.id in desfeitas
+        ):
+            continue
+        candidatos = _candidatos(modelo, c)
+        if len(candidatos) != 1:
+            resultado.sem_casar.append(c)
+            continue
+        pessoa = candidatos[0]
+        inicio, fim = _intervalo_da_pessoa(pessoa)
+        nova = c.model_copy(
+            update={
+                "item_id": str(pessoa.get("id", "")),
+                "ancora": Ancora(
+                    versao=versao,
+                    tipo_do_item="pessoa",
+                    identidade=identidade_da_pessoa(pessoa),
+                    inicio_ms=inicio,
+                    fim_ms=fim,
+                ),
+            }
+        )
+        resultado.casadas.append(nova)
+        if normalizar(str(pessoa["nome"])) == normalizar(c.depois):
+            resultado.atendidas.append(nova)
+    return resultado
+
+
 def aplicar(
     modelo: dict[str, Any], versao: str, correcoes: list[Correcao]
 ) -> dict[str, Any]:
@@ -283,7 +360,8 @@ def aplicar(
 
     Pessoa corrigida vem com `origem: "revisao"`; as demais, com `"modelo"`.
     Correção desfeita não conta: o item volta ao valor que teria sem ela.
-    Correção de outra versão do JSON fica de fora: reconciliar é outro ticket.
+    Correção de outra versão do JSON só vale se `reconciliar` a casar com um
+    item único; as que não casam não se aplicam (e seguem no histórico).
     """
     resultado: dict[str, Any] = json.loads(json.dumps(modelo))
     pessoas = _pessoas(resultado)
@@ -292,16 +370,30 @@ def aplicar(
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
     desfeitas = _desfeitas(correcoes)
+    # ponytail: reconciliar a cada leitura relê as pessoas do modelo por
+    # correção antiga (custo pequeno hoje); guardar o resultado quando houver
+    # reprocessamentos frequentes ou muitas correções por vídeo.
+    reconciliadas = reconciliar(modelo, versao, correcoes)
+    atendidas = {c.id for c in reconciliadas.atendidas}
+    aplicaveis = [
+        (c, False)
+        for c in correcoes
+        if c.ancora.versao == versao and c.tipo == "pessoa.renomear"
+    ] + [(c, True) for c in reconciliadas.casadas]
     # Em ordem de data: a mais nova vence, e desfazer uma antiga não a derruba.
-    for c in em_ordem(correcoes):
-        if (
-            c.ancora.versao != versao
-            or c.tipo != "pessoa.renomear"
-            or c.id in desfeitas
-        ):
+    for c, reapontada in sorted(
+        aplicaveis, key=lambda par: (par[0].criada_em, par[0].id)
+    ):
+        if c.id in desfeitas:
             continue
         for pessoa, identidade in zip(pessoas, identidades, strict=True):
-            if identidade == c.ancora.identidade:
+            # A reapontada vai só ao item que casou, pelo id novo.
+            if (
+                (pessoa.get("id") == c.item_id)
+                if reapontada
+                else (identidade == c.ancora.identidade)
+            ):
                 pessoa["nome"] = c.depois
-                pessoa["origem"] = "revisao"
+                if c.id not in atendidas:
+                    pessoa["origem"] = "revisao"
     return resultado
