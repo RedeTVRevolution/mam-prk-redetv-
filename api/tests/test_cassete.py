@@ -6,8 +6,12 @@ import pytest
 
 from api.cassete import CASSETE, gravar
 from api.decupagem import Video
-from api.gemini import MODELO, analisar
+from api.gemini import MODELO, VERSAO_DO_MODELO, analisar
 from api.tests.test_gemini import BOA, VIDEO, VIDEO_CONFIAVEL, TransporteFalso
+
+
+class TransporteComVersaoFalso(TransporteFalso):
+    versao_do_modelo = VERSAO_DO_MODELO
 
 
 def _cassete() -> dict[str, Any]:
@@ -22,8 +26,17 @@ def test_cassete_foi_gravado_com_o_modelo_em_uso() -> None:
     assert _cassete()["modelo"] == MODELO
 
 
-def test_cassete_guarda_so_modelo_video_e_texto_sem_cabecalhos() -> None:
-    assert set(_cassete()) == {"modelo", "video", "texto"}
+def test_cassete_foi_gravado_com_a_versao_fixada() -> None:
+    """`MODELO` pode ser um apelido que o Google atualiza por baixo."""
+    gravada = _cassete()["versao_do_modelo"]
+    assert gravada == VERSAO_DO_MODELO, (
+        f"a Vertex respondeu com {gravada!r}, e o fixado é {VERSAO_DO_MODELO!r}: "
+        "a versão do modelo mudou. Confira a resposta e atualize VERSAO_DO_MODELO."
+    )
+
+
+def test_cassete_guarda_so_modelo_versao_video_e_texto_sem_cabecalhos() -> None:
+    assert set(_cassete()) == {"modelo", "versao_do_modelo", "video", "texto"}
 
 
 def test_resposta_gravada_passa_no_esquema_e_nos_invariantes_de_primeira() -> None:
@@ -47,7 +60,7 @@ def test_grava_so_a_resposta_que_passou_no_esquema(tmp_path: Path) -> None:
     destino = tmp_path / "cassete.json"
 
     gravar(
-        TransporteFalso("lixo", BOA),
+        TransporteComVersaoFalso("lixo", BOA),
         video_uri=VIDEO,
         video=VIDEO_CONFIAVEL,
         destino=destino,
@@ -56,6 +69,18 @@ def test_grava_so_a_resposta_que_passou_no_esquema(tmp_path: Path) -> None:
     cassete = json.loads(destino.read_text())
     assert cassete == {
         "modelo": MODELO,
+        "versao_do_modelo": VERSAO_DO_MODELO,
         "video": {"sha256": "b" * 64, "duracao_ms": VIDEO_CONFIAVEL.duracao_ms},
         "texto": BOA,
     }
+
+
+def test_nao_grava_sem_a_versao_do_modelo(tmp_path: Path) -> None:
+    transporte = TransporteComVersaoFalso(BOA)
+    transporte.versao_do_modelo = ""
+    destino = tmp_path / "cassete.json"
+
+    with pytest.raises(RuntimeError, match="versão do modelo"):
+        gravar(transporte, video_uri=VIDEO, video=VIDEO_CONFIAVEL, destino=destino)
+
+    assert not destino.exists()

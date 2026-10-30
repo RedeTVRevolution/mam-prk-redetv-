@@ -283,6 +283,15 @@ def test_transporte_vertex_monta_a_chamada_global_com_video_esquema_e_rotulo() -
     assert pedido["headers"]["X-Vertex-AI-LLM-Request-Type"] == "shared"
 
 
+def test_transporte_vertex_guarda_a_versao_que_a_vertex_informa() -> None:
+    corpo = {"candidates": [], "modelVersion": "gemini-3.5-flash-lite-001"}
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo)))
+
+    transporte.gerar(_chamada())
+
+    assert transporte.versao_do_modelo == "gemini-3.5-flash-lite-001"
+
+
 @pytest.mark.parametrize("status", [429, 500, 503])
 def test_transporte_vertex_converte_status_diferente_de_200_em_erro_http(
     status: int,

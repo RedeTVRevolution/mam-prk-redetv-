@@ -23,6 +23,9 @@ from api.decupagem import (
 )
 
 MODELO = "gemini-3.5-flash-lite"
+# A versão exata que a Vertex informou (`modelVersion`) quando o cassete foi
+# gravado. Se o Google trocar a versão por baixo de `MODELO`, o contrato acusa.
+VERSAO_DO_MODELO = "gemini-3.5-flash-lite"
 TENTATIVAS_REDE = 5  # novas tentativas após 429/5xx
 TENTATIVAS_ESQUEMA = 2  # novas tentativas após resposta fora do esquema
 BACKOFF_BASE_S = 1.0
@@ -83,6 +86,7 @@ class TransporteVertex:
     def __init__(self, projeto: str, sessao: SessaoHttp) -> None:
         self._projeto = projeto
         self._sessao = sessao
+        self.versao_do_modelo = ""  # a da última resposta; só o cassete a lê
 
     def gerar(self, chamada: Chamada) -> str:
         url = (
@@ -130,6 +134,7 @@ class TransporteVertex:
             dados = resposta.json()
         except ValueError as e:  # 200 com corpo que não é JSON: falha do servidor
             raise ErroHttp(502) from e
+        self.versao_do_modelo = dados.get("modelVersion", "")
         partes = (
             (dados.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         )

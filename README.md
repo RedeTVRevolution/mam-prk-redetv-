@@ -45,7 +45,7 @@ make deploy-dev
 
 Ele impersona a `mam-terraform` (ADR 0002), sem chave em arquivo, e:
 
-1. cria o bucket do estado do Terraform, `<projeto>-tfstate`, se não existir: privado, com acesso uniforme e versionamento;
+1. cria o bucket do estado do Terraform, o `BUCKET_ESTADO_TF` que o wizard põe no `.env`, se não existir: privado, com acesso uniforme e versionamento;
 2. aplica só o Artifact Registry e o Identity Platform, constrói a imagem para `linux/amd64` com a chave web do login e a envia;
 3. aplica o resto pelo digest da imagem, então cada deploy gera uma revisão nova;
 4. confere que `/v1/health` responde 200 e mostra a URL.
@@ -56,7 +56,7 @@ Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda 
 
 ## Cassete do Gemini
 
-O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema 1.1 e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, o bloco `video` e o texto da resposta, sem cabeçalhos nem credenciais.
+O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema 1.1 e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video` e o texto da resposta, sem cabeçalhos nem credenciais. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.
 
 Para regravar (a cada troca de modelo, de esquema ou de instrução), com o dev no ar e as credenciais ADC de uma conta com acesso ao projeto (`gcloud auth application-default login`):
 
@@ -64,7 +64,7 @@ Para regravar (a cada troca de modelo, de esquema ou de instrução), com o dev 
 make gravar-cassetes
 ```
 
-Ele gera com o ffmpeg um clipe sintético de 30 s (nunca um clipe-ouro), passa pelo validador, sobe o proxy em `gs://<projeto>-aceitos/cassetes/sintetico.mp4` e faz a chamada real ao modelo fixado em `MODELO`, no `api/gemini.py`. Se o teste do modelo falhar depois de trocar `MODELO`, é este o comando.
+Ele gera com o ffmpeg um clipe sintético de 30 s, passa pelo validador, sobe o proxy no bucket de clipes-ouro, sob `cassetes/sintetico.mp4`, e faz a chamada real ao modelo fixado em `MODELO`, no `api/gemini.py`. O clipe continua sintético, nunca um dos clipes-ouro: só mora no mesmo bucket, fora do bucket de aceitos, onde só o Job de validação grava. O nome do bucket vem do `output` `bucket_clipes_ouro` do Terraform (ou de `BUCKET_CLIPES_OURO` no ambiente). Se o teste do modelo falhar depois de trocar `MODELO`, é este o comando.
 
 ## Loop AFK
 
