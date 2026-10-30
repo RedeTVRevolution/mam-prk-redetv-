@@ -35,7 +35,15 @@ import {
   IconPencil,
   IconPlus,
 } from '@tabler/icons-react'
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+  type RefObject,
+} from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import { CORES_DE_OCORRENCIA } from './tema.ts'
@@ -136,9 +144,28 @@ interface Reproducao {
   expira_em: string
 }
 
+/** O que a correção `item.tempos` precisa para achar a ocorrência no servidor. */
+type Alvo =
+  | { tipo: 'pauta'; id: string }
+  | { tipo: 'comercial'; id: string }
+  | { tipo: 'pessoa'; id: string; lista: ListaDePessoa }
+
 interface Ocorrencia extends Intervalo {
   chave: string
+  /** Só as ocorrências de tipos com correção de tempo têm alvo. */
+  alvo?: Alvo
 }
+
+/** A ocorrência selecionada na linha do tempo, com o intervalo de antes da correção. */
+interface Selecao {
+  chave: string
+  alvo: Alvo
+  original: Intervalo
+}
+
+/** Quanto as setas movem uma alça: 100 ms, ou 1 s com Shift. */
+const PASSO_DA_ALCA_MS = 100
+const PASSO_GRANDE_DA_ALCA_MS = 1000
 
 interface Faixa {
   nome: string
@@ -221,38 +248,45 @@ function tempoDoCampo(texto: string, originalMs: number): number | null {
 }
 
 function faixasDe(d: Decupagem): Faixa[] {
-  const de = <T extends Intervalo>(prefixo: string, lista: T[]): Ocorrencia[] =>
+  const de = <T extends Intervalo>(
+    prefixo: string,
+    lista: T[],
+    alvo?: (x: T) => Alvo | undefined,
+  ): Ocorrencia[] =>
     lista.map((x, i) => ({
       chave: `${prefixo}-${i}`,
       inicio_ms: x.inicio_ms,
       fim_ms: x.fim_ms,
+      alvo: alvo?.(x),
     }))
+  const daPessoa = (lista: ListaDePessoa) =>
+    d.pessoas.flatMap((p) =>
+      p[lista].map((x) => ({ ...x, alvo: pessoaDoModelo(p) ? { pessoa: p.id, lista } : null })),
+    )
+  const alvoDaPessoa = (x: { alvo: { pessoa: string; lista: ListaDePessoa } | null }) =>
+    x.alvo ? ({ tipo: 'pessoa', id: x.alvo.pessoa, lista: x.alvo.lista } as const) : undefined
   return [
     {
       nome: 'Pautas',
       cor: CORES_DE_OCORRENCIA.pautas,
-      ocorrencias: de('pauta', d.pautas),
+      ocorrencias: de('pauta', d.pautas, (p) => ({ tipo: 'pauta', id: p.id })),
     },
     {
       nome: 'Aparições',
       cor: CORES_DE_OCORRENCIA.aparicoes,
-      ocorrencias: de(
-        'img',
-        d.pessoas.flatMap((p) => p.na_imagem),
-      ),
+      ocorrencias: de('img', daPessoa('na_imagem'), alvoDaPessoa),
     },
     {
       nome: 'Menções',
       cor: CORES_DE_OCORRENCIA.mencoes,
-      ocorrencias: de(
-        'mencao',
-        d.pessoas.flatMap((p) => [...p.citada_na_fala, ...p.citada_no_texto]),
-      ),
+      ocorrencias: de('mencao', [...daPessoa('citada_na_fala'), ...daPessoa('citada_no_texto')], alvoDaPessoa),
     },
     {
       nome: 'Comerciais',
       cor: CORES_DE_OCORRENCIA.comerciais,
-      ocorrencias: de('com', d.comerciais),
+      ocorrencias: de('com', d.comerciais, (c) =>
+        c.id && !c.acrescentado ? { tipo: 'comercial', id: c.id } : undefined,
+      ),
     },
     {
       nome: 'Planos',
@@ -271,16 +305,100 @@ function maiorFim(faixas: Faixa[]): number {
   return Math.max(0, ...faixas.flatMap((f) => f.ocorrencias.map((o) => o.fim_ms)))
 }
 
+/** Os comandos da edição por alças na linha do tempo; só existem para quem tem `decupagem.editar`. */
+interface EdicaoDaLinha {
+  selecionada: string | null
+  aoSelecionar: (o: Ocorrencia) => void
+  aoMover: (borda: 'inicio' | 'fim', ms: number) => void
+  aoSoltar: () => void
+}
+
+/** Alça de início ou de fim da ocorrência selecionada: arrasta com o ponteiro ou move com as setas. */
+function AlcaDoTempo({
+  borda,
+  ms,
+  minMs,
+  maxMs,
+  duracaoMs,
+  trilha,
+  edicao,
+}: {
+  borda: 'inicio' | 'fim'
+  ms: number
+  minMs: number
+  maxMs: number
+  duracaoMs: number
+  trilha: RefObject<HTMLDivElement | null>
+  edicao: EdicaoDaLinha
+}) {
+  const arrastando = useRef(false)
+  const limitar = (valor: number) => Math.round(Math.min(maxMs, Math.max(minMs, valor)))
+  const mover = (valor: number) => edicao.aoMover(borda, limitar(valor))
+  return (
+    <Box
+      role="slider"
+      tabIndex={0}
+      aria-label={borda === 'inicio' ? 'Início da ocorrência' : 'Fim da ocorrência'}
+      aria-valuemin={minMs}
+      aria-valuemax={maxMs}
+      aria-valuenow={ms}
+      aria-valuetext={tempo(ms)}
+      pos="absolute"
+      top={-3}
+      w={8}
+      h={20}
+      bg="white"
+      style={{
+        left: `${(ms / duracaoMs) * 100}%`,
+        transform: 'translateX(-50%)',
+        borderRadius: 2,
+        cursor: 'ew-resize',
+        touchAction: 'none',
+        zIndex: 2,
+      }}
+      onPointerDown={(e: PointerEvent<HTMLDivElement>) => {
+        arrastando.current = true
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+      }}
+      onPointerMove={(e: PointerEvent<HTMLDivElement>) => {
+        const caixa = trilha.current?.getBoundingClientRect()
+        if (!arrastando.current || !caixa || caixa.width === 0) return
+        mover(((e.clientX - caixa.left) / caixa.width) * duracaoMs)
+      }}
+      onPointerUp={() => {
+        if (!arrastando.current) return
+        arrastando.current = false
+        edicao.aoSoltar()
+      }}
+      onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          edicao.aoSoltar()
+          return
+        }
+        const sentido = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+        if (sentido === 0) return
+        e.preventDefault()
+        mover(ms + sentido * (e.shiftKey ? PASSO_GRANDE_DA_ALCA_MS : PASSO_DA_ALCA_MS))
+      }}
+    />
+  )
+}
+
 /** Uma faixa da linha do tempo: ocorrências na cor da faixa e vãos transparentes. */
 function FaixaDoTempo({
   faixa,
   duracaoMs,
   saltar,
+  edicao,
 }: {
   faixa: Faixa
   duracaoMs: number
   saltar: (ms: number) => void
+  edicao?: EdicaoDaLinha
 }) {
+  const trilha = useRef<HTMLDivElement>(null)
+  const selecionada = faixa.ocorrencias.find((o) => o.chave === edicao?.selecionada)
   const ordenadas = [...faixa.ocorrencias].sort((a, b) => a.inicio_ms - b.inicio_ms)
   const secoes = []
   // Uma faixa é uma fileira só: o trecho que se sobrepõe ao anterior não é desenhado de
@@ -308,12 +426,20 @@ function FaixaDoTempo({
         role="button"
         tabIndex={0}
         aria-label={`${faixa.nome} ${tempo(o.inicio_ms)}`}
-        style={{ cursor: 'pointer' }}
-        onClick={() => saltar(o.inicio_ms)}
+        aria-pressed={edicao && o.alvo ? o.chave === edicao.selecionada : undefined}
+        style={{
+          cursor: 'pointer',
+          outline: o.chave === edicao?.selecionada ? '2px solid white' : undefined,
+        }}
+        onClick={() => {
+          saltar(o.inicio_ms)
+          if (o.alvo) edicao?.aoSelecionar(o)
+        }}
         onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
           if (e.key !== 'Enter' && e.key !== ' ') return
           e.preventDefault()
           saltar(o.inicio_ms)
+          if (o.alvo) edicao?.aoSelecionar(o)
         }}
       />,
     )
@@ -324,9 +450,33 @@ function FaixaDoTempo({
       <Text size="xs" w={LARGURA_DO_ROTULO} ta="right" c="dimmed">
         {faixa.nome}
       </Text>
-      <Progress.Root size={14} radius="xs" bg="dark.6" flex={1}>
-        {secoes}
-      </Progress.Root>
+      <Box ref={trilha} pos="relative" flex={1}>
+        <Progress.Root size={14} radius="xs" bg="dark.6">
+          {secoes}
+        </Progress.Root>
+        {edicao && selecionada && (
+          <>
+            <AlcaDoTempo
+              borda="inicio"
+              ms={selecionada.inicio_ms}
+              minMs={0}
+              maxMs={selecionada.fim_ms}
+              duracaoMs={duracaoMs}
+              trilha={trilha}
+              edicao={edicao}
+            />
+            <AlcaDoTempo
+              borda="fim"
+              ms={selecionada.fim_ms}
+              minMs={selecionada.inicio_ms}
+              maxMs={duracaoMs}
+              duracaoMs={duracaoMs}
+              trilha={trilha}
+              edicao={edicao}
+            />
+          </>
+        )}
+      </Box>
     </Group>
   )
 }
@@ -451,6 +601,11 @@ export default function Video({
   const [atualMs, setAtualMs] = useState(0)
   const [duracaoDoPlayerMs, setDuracaoDoPlayerMs] = useState<number | null>(null)
   const [aba, setAba] = useState<Aba>('Pessoas')
+  // Alças da linha do tempo: a ocorrência selecionada, o intervalo arrastado (`null` = sem
+  // mudança) e se o modal de confirmação está aberto.
+  const [selecao, setSelecao] = useState<Selecao | null>(null)
+  const [ajuste, setAjuste] = useState<Intervalo | null>(null)
+  const [confirmandoTempos, setConfirmandoTempos] = useState(false)
 
   if (!concluido) {
     return job.estado === 'falhou' ? (
@@ -479,7 +634,43 @@ export default function Video({
   }
 
   const { decupagem, reproducao } = carga
-  const faixas = faixasDe(decupagem)
+  const faixas = faixasDe(decupagem).map((f) =>
+    selecao && ajuste
+      ? {
+          ...f,
+          ocorrencias: f.ocorrencias.map((o) => (o.chave === selecao.chave ? { ...o, ...ajuste } : o)),
+        }
+      : f,
+  )
+  const edicao: EdicaoDaLinha | undefined = podeEditar
+    ? {
+        selecionada: selecao?.chave ?? null,
+        aoSelecionar: (o) => {
+          if (!o.alvo || o.chave === selecao?.chave) return
+          setAjuste(null)
+          setSelecao({
+            chave: o.chave,
+            alvo: o.alvo,
+            original: { inicio_ms: o.inicio_ms, fim_ms: o.fim_ms },
+          })
+        },
+        aoMover: (borda, ms) => {
+          if (!selecao) return
+          setAjuste({ ...(ajuste ?? selecao.original), [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms })
+          saltar(ms)
+        },
+        aoSoltar: () => {
+          if (!selecao) return
+          if (
+            ajuste &&
+            (ajuste.inicio_ms !== selecao.original.inicio_ms ||
+              ajuste.fim_ms !== selecao.original.fim_ms)
+          )
+            setConfirmandoTempos(true)
+          else setAjuste(null)
+        },
+      }
+    : undefined
   const duracaoMs = Math.max(duracaoDoPlayerMs ?? maiorFim(faixas), 1)
   const quadro = (i: Intervalo) => `${reproducao.url}#t=${i.inicio_ms / 1000 + 1}`
 
@@ -532,6 +723,7 @@ export default function Video({
                   faixa={faixa}
                   duracaoMs={duracaoMs}
                   saltar={saltar}
+                  edicao={edicao}
                 />
               ))}
             </Stack>
@@ -793,6 +985,27 @@ export default function Video({
         aoFechar={() => setCorrigindoPauta(null)}
         aoSalvar={() => {
           setCorrigindoPauta(null)
+          recarregarDecupagem()
+        }}
+        aoVersaoDesatualizada={recarregarDecupagem}
+        aoSessaoExpirada={() => sessaoExpirada.current()}
+      />
+      <CorrigirTempos
+        key={confirmandoTempos ? 'tempos-aberto' : 'tempos-fechado'}
+        selecao={confirmandoTempos ? selecao : null}
+        depois={ajuste}
+        versao={decupagem.versao_decupagem ?? ''}
+        autenticador={autenticador}
+        jobId={job.id}
+        aoFechar={() => {
+          // Cancelar devolve a ocorrência ao intervalo anterior.
+          setConfirmandoTempos(false)
+          setAjuste(null)
+        }}
+        aoSalvar={() => {
+          setConfirmandoTempos(false)
+          setAjuste(null)
+          setSelecao(null)
           recarregarDecupagem()
         }}
         aoVersaoDesatualizada={recarregarDecupagem}
@@ -1235,6 +1448,112 @@ function CorrigirOcorrencia({
           </Button>
         </Group>
       </Stack>
+    </Modal>
+  )
+}
+
+/** "mm:ss.mmm": o modal dos tempos arrastados mostra os milissegundos. */
+function tempoPreciso(ms: number): string {
+  return `${tempo(ms)}.${String(ms % 1000).padStart(3, '0')}`
+}
+
+/** Modal das alças: mostra antes e depois e pede o motivo; salvar grava um `item.tempos`. */
+function CorrigirTempos({
+  selecao,
+  depois,
+  versao,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoSalvar,
+  aoVersaoDesatualizada,
+  aoSessaoExpirada,
+}: {
+  selecao: Selecao | null
+  depois: Intervalo | null
+  versao: string
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+
+  const aberto = selecao !== null && depois !== null
+
+  async function salvar() {
+    if (!selecao || !depois) return
+    const { alvo, original } = selecao
+    const base = { tipo: 'item.tempos', item_id: alvo.id, motivo, versao }
+    const valor = `${depois.inicio_ms}-${depois.fim_ms}`
+    const corpo =
+      alvo.tipo === 'pessoa'
+        ? {
+            ...base,
+            tipo_do_item: 'pessoa',
+            ocorrencia: { lista: alvo.lista, ...original },
+            valor,
+          }
+        : alvo.tipo === 'comercial'
+          ? { ...base, tipo_do_item: 'comercial', valor }
+          : { ...base, valor }
+    setSalvando(true)
+    setErro(null)
+    try {
+      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, { metodo: 'POST', corpo })
+      aoSalvar()
+    } catch (e) {
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        aoVersaoDesatualizada()
+        setErro('A decupagem mudou e foi recarregada. Cancele e arraste de novo.')
+      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+        setErro('Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir.')
+      } else setErro('Não foi possível salvar a correção.')
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <Modal opened={aberto} onClose={aoFechar} title="Corrigir tempos" centered>
+      {selecao && depois && (
+        <Stack gap="sm">
+          <Text size="sm">{`Antes: ${tempoPreciso(selecao.original.inicio_ms)}–${tempoPreciso(selecao.original.fim_ms)}`}</Text>
+          <Text size="sm" fw={700}>
+            {`Depois: ${tempoPreciso(depois.inicio_ms)}–${tempoPreciso(depois.fim_ms)}`}
+          </Text>
+          <Textarea
+            label="Motivo"
+            value={motivo}
+            maxLength={500}
+            rows={3}
+            onChange={(e) => setMotivo(e.currentTarget.value)}
+          />
+          {erro && (
+            <Alert color="red" variant="light" role="alert">
+              {erro}
+            </Alert>
+          )}
+          <Group justify="flex-end">
+            <Button type="button" variant="default" onClick={aoFechar}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              color="red"
+              loading={salvando}
+              disabled={!motivo.trim()}
+              onClick={() => void salvar()}
+            >
+              Salvar
+            </Button>
+          </Group>
+        </Stack>
+      )}
     </Modal>
   )
 }

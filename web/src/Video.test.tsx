@@ -1227,3 +1227,147 @@ test('422 no plano mostra o aviso no modal', async () => {
 
   expect((await modal.findByRole('alert')).textContent).toContain('não foi encontrado')
 })
+
+async function selecionarNaLinha(
+  usuario: ReturnType<typeof userEvent.setup>,
+  rotulo: string,
+  podeEditar = true,
+) {
+  await abrir({ estado: 'concluido' }, podeEditar)
+  const player = await jogador()
+  await usuario.click(await screen.findByLabelText(rotulo))
+  return player
+}
+
+const alca = (borda: 'Início' | 'Fim') => screen.getByRole('slider', { name: `${borda} da ocorrência` })
+
+test('as setas movem a alça 100 ms, Shift move 1 s, e Enter grava item.tempos', async () => {
+  const usuario = userEvent.setup()
+  const player = await selecionarNaLinha(usuario, 'Pautas 00:30')
+
+  const inicio = alca('Início')
+  inicio.focus()
+  fireEvent.keyDown(inicio, { key: 'ArrowRight' })
+  fireEvent.keyDown(inicio, { key: 'ArrowRight', shiftKey: true })
+  expect(inicio.getAttribute('aria-valuenow')).toBe('31100')
+  expect(player.currentTime).toBe(31.1)
+  fireEvent.keyDown(alca('Início'), { key: 'Enter' })
+
+  const modal = within(await screen.findByRole('dialog'))
+  expect(modal.getByText('Antes: 00:30.000–01:00.000')).toBeTruthy()
+  expect(modal.getByText('Depois: 00:31.100–01:00.000')).toBeTruthy()
+  expect(modal.getByRole('button', { name: 'Salvar' }).hasAttribute('disabled')).toBe(true)
+  await usuario.type(modal.getByLabelText('Motivo'), 'corte tardio')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toEqual({
+    tipo: 'item.tempos',
+    item_id: 'pa1',
+    valor: '31100-60000',
+    motivo: 'corte tardio',
+    versao: 'v1',
+  })
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(screen.queryByRole('slider', { name: 'Início da ocorrência' })).toBeNull()
+})
+
+test('cancelar o modal devolve a ocorrência ao intervalo anterior', async () => {
+  const usuario = userEvent.setup()
+  await selecionarNaLinha(usuario, 'Pautas 00:30')
+
+  fireEvent.keyDown(alca('Fim'), { key: 'ArrowLeft', shiftKey: true })
+  expect(alca('Fim').getAttribute('aria-valuenow')).toBe('59000')
+  fireEvent.keyDown(alca('Fim'), { key: 'Enter' })
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.click(modal.getByRole('button', { name: 'Cancelar' }))
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(alca('Fim').getAttribute('aria-valuenow')).toBe('60000')
+  expect(correcoesRecebidas).toHaveLength(0)
+})
+
+test('as alças não passam uma da outra nem saem do vídeo', async () => {
+  const usuario = userEvent.setup()
+  await selecionarNaLinha(usuario, 'Pautas 00:30')
+
+  for (let i = 0; i < 31; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowRight', shiftKey: true })
+  expect(alca('Início').getAttribute('aria-valuenow')).toBe('60000')
+  for (let i = 0; i < 91; i++) fireEvent.keyDown(alca('Fim'), { key: 'ArrowRight', shiftKey: true })
+  // Sem metadata, a duração é o maior fim da decupagem (02:30).
+  expect(alca('Fim').getAttribute('aria-valuenow')).toBe('150000')
+  for (let i = 0; i < 61; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowLeft', shiftKey: true })
+  expect(alca('Início').getAttribute('aria-valuenow')).toBe('0')
+}, 30_000)
+
+test('arrastar a alça leva o player ao tempo dela e soltar abre o modal', async () => {
+  const usuario = userEvent.setup()
+  const player = await selecionarNaLinha(usuario, 'Pautas 00:30')
+
+  const inicio = alca('Início')
+  // 150 s de linha do tempo em 1500 px: 10 px por segundo.
+  vi.spyOn(inicio.parentElement as HTMLElement, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    width: 1500,
+  } as DOMRect)
+  fireEvent.pointerDown(inicio, { pointerId: 1, clientX: 300 })
+  fireEvent.pointerMove(inicio, { pointerId: 1, clientX: 450 })
+  expect(player.currentTime).toBe(45)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  fireEvent.pointerUp(inicio, { pointerId: 1, clientX: 450 })
+
+  const modal = within(await screen.findByRole('dialog'))
+  expect(modal.getByText('Depois: 00:45.000–01:00.000')).toBeTruthy()
+})
+
+test('a alça de uma aparição grava item.tempos com a ocorrência da pessoa', async () => {
+  const usuario = userEvent.setup()
+  await selecionarNaLinha(usuario, 'Aparições 00:05')
+
+  fireEvent.keyDown(alca('Fim'), { key: 'ArrowRight', shiftKey: true })
+  fireEvent.keyDown(alca('Fim'), { key: 'Enter' })
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Motivo'), 'saiu depois')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toEqual({
+    tipo: 'item.tempos',
+    tipo_do_item: 'pessoa',
+    item_id: 'p1',
+    ocorrencia: OCORRENCIA_NA_IMAGEM,
+    valor: '5000-21000',
+    motivo: 'saiu depois',
+    versao: 'v1',
+  })
+})
+
+test('a alça de um comercial grava item.tempos do comercial', async () => {
+  const usuario = userEvent.setup()
+  await selecionarNaLinha(usuario, 'Comerciais 01:30')
+
+  fireEvent.keyDown(alca('Início'), { key: 'ArrowLeft' })
+  fireEvent.keyDown(alca('Início'), { key: 'Enter' })
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Motivo'), 'começou antes')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toMatchObject({
+    tipo: 'item.tempos',
+    tipo_do_item: 'comercial',
+    item_id: 'com000',
+    valor: '89900-120000',
+  })
+})
+
+test('planos e falas não têm alças, e a Consulta não vê as alças', async () => {
+  const usuario = userEvent.setup()
+  await selecionarNaLinha(usuario, 'Planos 00:00')
+  expect(screen.queryByRole('slider', { name: 'Início da ocorrência' })).toBeNull()
+  cleanup()
+
+  await selecionarNaLinha(usuario, 'Pautas 00:30', false)
+  expect(screen.queryByRole('slider', { name: 'Início da ocorrência' })).toBeNull()
+  expect(screen.queryByRole('slider', { name: 'Fim da ocorrência' })).toBeNull()
+})
