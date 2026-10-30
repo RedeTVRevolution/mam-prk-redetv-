@@ -65,6 +65,7 @@ REGRAS GERAIS
 
 3. TRANSCRIÇÃO
 - Transcreva as falas em trechos curtos, um por frase ou troca de quem fala, com início e fim de cada trecho e quem fala (nome ou papel).
+- Transcreva todas as falas do arquivo inteiro, inclusive em comerciais, merchandising e chamadas; não resuma nem pule trechos.
 
 4. TEXTO NA TELA
 - Registre GCs, tarjas, legendas, placares e chamadas, com o texto lido, início e fim.
