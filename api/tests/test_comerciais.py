@@ -118,6 +118,20 @@ def test_item_tempos_de_comercial_precisa_dizer_o_tipo_do_item() -> None:
     assert (sem.status_code, com.status_code) == (422, 201)
 
 
+def test_tipo_do_item_fora_do_item_tempos_da_422() -> None:
+    mundo = _mundo()
+
+    r = mundo.corrigir(
+        tipo="pauta.titulo",
+        tipo_do_item="comercial",
+        item_id="com000",
+        valor="Outro",
+        versao=VERSAO_COM,
+    )
+
+    assert r.status_code == 422
+
+
 def test_tipo_de_comercial_fora_da_lista_da_422() -> None:
     mundo = _mundo()
 
@@ -273,6 +287,30 @@ def test_dois_candidatos_vao_para_a_fila() -> None:
     [item] = fila(novo, "nova", [c])
     assert [x.item_id for x in item.candidatos] == ["com000", "com001"]
     assert aplicar(novo, "nova", [c])["comerciais"][0]["marca"] == "BANCO  azul"
+
+
+@pytest.mark.parametrize(
+    ("tipo", "depois", "comercial"),
+    [
+        ("comercial.marca", "Banco Verde", _comercial("BANCO verde", 11000, 14000)),
+        (
+            "comercial.tipo",
+            "intervalo",
+            _comercial("Banco Azul", 11000, 14000, "intervalo"),
+        ),
+    ],
+)
+def test_modelo_que_ja_traz_o_depois_atende_a_correcao(
+    tipo: str, depois: str, comercial: dict[str, Any]
+) -> None:
+    novo = {**COM, "comerciais": [comercial]}
+    c = _antiga(tipo, depois)
+
+    r = reconciliar(novo, "nova", [c])
+
+    assert ([x.id for x in r.atendidas], r.sem_casar) == (["c1"], [])
+    [entregue] = aplicar(novo, "nova", [c])["comerciais"]
+    assert (entregue["marca"], entregue["origem"]) == (comercial["marca"], "modelo")
 
 
 def test_sem_intervalo_sobreposto_vai_para_a_fila() -> None:

@@ -183,6 +183,8 @@ class NovaCorrecao(BaseModel):
     def _valor_do_tipo(self) -> Self:
         if not self.item_id and self.tipo != "comercial.acrescentar":
             raise ValueError("item_id obrigatório")
+        if self.tipo_do_item is not None and self.tipo != "item.tempos":
+            raise ValueError("tipo_do_item só vale no item.tempos")
         if self.tipo == "item.tempos":
             tempos_de(self.valor)
         elif self.tipo == "comercial.tipo":
@@ -619,7 +621,8 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
 
     Pauta: a que sobrepõe o intervalo ancorado em pelo menos metade do menor
     dos dois. Comercial: o de mesma marca normalizada e tipo, com intervalo
-    sobreposto. Pessoa: a com a identidade da âncora (ou já com o "depois").
+    sobreposto (ou já com o "depois"). Pessoa: a com a identidade da âncora
+    (ou já com o "depois").
     """
     ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
     if c.ancora.tipo_do_item == "pauta":
@@ -629,13 +632,35 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             if _sobrepoe_metade(ancora, _intervalo_da_pauta(p))
         ]
     if c.ancora.tipo_do_item == "comercial":
+        identidades = {c.ancora.identidade, _identidade_com_o_depois(c)}
         return [
             m
             for m in _comerciais(modelo)
-            if identidade_do_comercial(m) == c.ancora.identidade
+            if identidade_do_comercial(m) in identidades
             and _sobrepoe(ancora, _intervalo_da_pauta(m))
         ]
     return _candidatos_pessoa(modelo, c)
+
+
+def _identidade_com_o_depois(c: Correcao) -> str:
+    """A identidade do comercial já com a marca ou o tipo corrigidos: o modelo
+    pode passar a trazer o "depois"."""
+    marca, tipo = c.ancora.identidade.rsplit("|", 1)
+    if c.tipo == "comercial.marca":
+        marca = normalizar(c.depois)
+    elif c.tipo == "comercial.tipo":
+        tipo = c.depois
+    return f"{marca}|{tipo}"
+
+
+def _ja_traz_o_depois(c: Correcao, item: dict[str, Any]) -> bool:
+    if c.tipo == "pessoa.renomear":
+        return normalizar(str(item["nome"])) == normalizar(c.depois)
+    if c.tipo == "comercial.marca":
+        return normalizar(str(item["marca"])) == normalizar(c.depois)
+    if c.tipo == "comercial.tipo":
+        return str(item["tipo"]) == c.depois
+    return False
 
 
 def _candidatos_pessoa(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
@@ -694,9 +719,7 @@ def reconciliar(
             }
         )
         resultado.casadas.append(nova)
-        if c.tipo == "pessoa.renomear" and normalizar(str(item["nome"])) == (
-            normalizar(c.depois)
-        ):
+        if _ja_traz_o_depois(c, item):
             resultado.atendidas.append(nova)
     return resultado
 
@@ -787,7 +810,8 @@ def aplicar(
                 _acrescentar_comercial(resultado, c)
             continue
         if c.ancora.tipo_do_item != "pessoa":
-            _aplicar_no_item(resultado, c)
+            if c.id not in atendidas:
+                _aplicar_no_item(resultado, c)
             continue
         for pessoa, identidade, nome in zip(
             pessoas, identidades, nomes_do_modelo, strict=True

@@ -503,6 +503,39 @@ class TestRepositorioDeCorrecoesFirestore:
             "pauta",
         )
 
+    def test_guarda_o_comercial_acrescentado_com_a_ancora_do_comercial(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        base = self._correcao("a1", "j1", 1)
+        comercial = (
+            '{"evidencia": "logo", "fim_ms": 22000, "inicio_ms": 20000, '
+            '"marca": "Loja Sol", "tipo": "merchan_apresentador"}'
+        )
+        correcoes.acrescentar(
+            base.model_copy(
+                update={
+                    "tipo": "comercial.acrescentar",
+                    "item_id": "acr-a1",
+                    "antes": "",
+                    "depois": comercial,
+                    "ancora": base.ancora.model_copy(
+                        update={
+                            "tipo_do_item": "comercial",
+                            "identidade": "loja sol|merchan_apresentador",
+                        }
+                    ),
+                }
+            )
+        )
+
+        [lida] = correcoes.listar("j1")
+        assert (lida.tipo, lida.depois, lida.ancora.tipo_do_item) == (
+            "comercial.acrescentar",
+            comercial,
+            "comercial",
+        )
+        assert lida.ancora.identidade == "loja sol|merchan_apresentador"
+
     def test_nao_sobrescreve_uma_correcao_existente(
         self, correcoes: RepositorioDeCorrecoesFirestore
     ) -> None:
