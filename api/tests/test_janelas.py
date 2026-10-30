@@ -5,7 +5,18 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from api.janelas import CONTEXTO_MS, DURACAO_DA_JANELA_MS, Janela, planejar_janelas
+from api.janelas import (
+    CONTEXTO_MS,
+    DURACAO_DA_JANELA_MS,
+    LIMITE_DE_TENTATIVAS,
+    EstadoJanela,
+    Janela,
+    concluir,
+    falhar,
+    iniciar,
+    planejar_janelas,
+    situacao_do_job,
+)
 
 HORA_MS = 3_600_000
 
@@ -95,3 +106,102 @@ def test_janelas_cobrem_qualquer_duracao_sem_buraco(duracao: int) -> None:
 def test_janela_e_imutavel() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         planejar_janelas(1_000)[0].indice = 1  # type: ignore[misc]
+
+
+def pendente(indice: int = 0) -> EstadoJanela:
+    return EstadoJanela(indice=indice, situacao="pendente", tentativas=0, erro=None)
+
+
+def concluida(indice: int = 0) -> EstadoJanela:
+    return concluir(iniciar(pendente(indice)))
+
+
+def falhou(indice: int = 0, erro: str = "boom") -> EstadoJanela:
+    estado = pendente(indice)
+    for _ in range(LIMITE_DE_TENTATIVAS):
+        estado = falhar(iniciar(estado), erro)
+    return estado
+
+
+def test_limite_padrao_de_tentativas_e_tres() -> None:
+    assert LIMITE_DE_TENTATIVAS == 3
+
+
+def test_caminho_feliz() -> None:
+    em_andamento = iniciar(pendente(2))
+    assert em_andamento == EstadoJanela(2, "em_andamento", 1, None)
+    assert concluir(em_andamento) == EstadoJanela(2, "concluida", 1, None)
+
+
+def test_transicoes_nao_alteram_o_estado_original() -> None:
+    original = pendente()
+    iniciar(original)
+    assert original == pendente()
+
+
+@pytest.mark.parametrize("estado", [concluida(), falhou()])
+def test_janela_terminal_nunca_e_refeita(estado: EstadoJanela) -> None:
+    assert iniciar(estado) == estado
+    assert concluir(estado) == estado
+    assert falhar(estado, "outro erro") == estado
+
+
+def test_falha_antes_do_limite_volta_a_pendente_mantendo_tentativas() -> None:
+    estado = falhar(iniciar(pendente()), "timeout")
+    assert estado == EstadoJanela(0, "pendente", 1, "timeout")
+
+
+def test_falha_que_esgota_o_limite_vai_a_falhou_com_o_erro() -> None:
+    estado = pendente()
+    for _ in range(LIMITE_DE_TENTATIVAS - 1):
+        estado = falhar(iniciar(estado), "x")
+        assert estado.situacao == "pendente"
+    estado = falhar(iniciar(estado), "último erro")
+    assert estado == EstadoJanela(0, "falhou", LIMITE_DE_TENTATIVAS, "último erro")
+
+
+def test_limite_e_parametro() -> None:
+    estado = falhar(iniciar(pendente()), "x", limite=1)
+    assert estado.situacao == "falhou"
+
+
+def test_reiniciar_janela_em_andamento_conta_tentativa() -> None:
+    estado = iniciar(iniciar(pendente()))
+    assert estado == EstadoJanela(0, "em_andamento", 2, None)
+
+
+def test_reinicio_alem_do_limite_vai_a_falhou() -> None:
+    estado = pendente()
+    for _ in range(LIMITE_DE_TENTATIVAS):
+        estado = iniciar(estado)
+    assert estado.situacao == "em_andamento"
+    estado = iniciar(estado)
+    assert estado.situacao == "falhou"
+    assert estado.tentativas == LIMITE_DE_TENTATIVAS
+    assert estado.erro
+
+
+def test_progresso_parcial() -> None:
+    situacao = situacao_do_job([concluida(0), iniciar(pendente(1)), pendente(2)])
+    assert (situacao.prontas, situacao.total) == (1, 3)
+    assert situacao.falha is None
+    assert not situacao.pode_consolidar
+
+
+def test_job_falho_aponta_a_primeira_janela_falha() -> None:
+    estados = [concluida(0), falhou(1, "erro 1"), pendente(2), falhou(3, "erro 3")]
+    situacao = situacao_do_job(estados)
+    assert situacao.falha is not None
+    assert (situacao.falha.indice, situacao.falha.erro) == (1, "erro 1")
+    assert not situacao.pode_consolidar
+
+
+def test_job_com_tudo_concluido_pode_consolidar() -> None:
+    situacao = situacao_do_job([concluida(0), concluida(1)])
+    assert (situacao.prontas, situacao.total) == (2, 2)
+    assert situacao.falha is None
+    assert situacao.pode_consolidar
+
+
+def test_job_sem_janelas_nao_consolida() -> None:
+    assert not situacao_do_job([]).pode_consolidar
