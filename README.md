@@ -28,7 +28,7 @@ A E0 roda num serviço Cloud Run único, `mam-web`, em que o FastAPI serve a API
 
 ```sh
 ADMINS_EMERGENCIA='bruno.admin@exemplo.com,ti@exemplo.com'
-USUARIOS='bruno@exemplo.com,documentalista@exemplo.com'
+USUARIOS='bruno@exemplo.com'
 ```
 
 Precisa também do [Terraform](https://developer.hashicorp.com/terraform/install) e do Docker Desktop aberto:

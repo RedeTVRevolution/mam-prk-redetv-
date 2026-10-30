@@ -8,7 +8,7 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 
 | Decisão | Escolha |
 | --- | --- |
-| Modelo | Gemini 3.5 Flash-Lite em todo o vídeo; Gemini 3.8 Flash em resolução alta onde houver dúvida e numa amostra aleatória de controle. Confirmar no piloto A/B da E1, com metas definidas antes |
+| Modelo | Gemini 3.5 Flash-Lite em todo o vídeo; Gemini 3.8 Flash em resolução alta onde houver dúvida e numa amostra aleatória de controle. Confirmar no piloto A/B da E1, por comparação visual lado a lado |
 | Consumo | Flex PayGo (síncrono, 50% de desconto); Batch para o acervo histórico |
 | Arquitetura | 100% serverless: Cloud Run (front, API e jobs), Workflows, Firestore, Cloud Storage, Eventarc, Pub/Sub |
 | API | REST assíncrona: cria o job, consulta o status, baixa o JSON completo; webhook opcional |
@@ -20,7 +20,7 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 | Stack | Python (FastAPI, Pydantic) no back, React com TypeScript no front, Terraform na infraestrutura |
 | Testes | TDD com testes unitários sem nuvem, emuladores locais e um ambiente efêmero por PR no GCP |
 | Credenciais | Nenhuma chave em arquivo: chaves no Cloud KMS, chaves de API só como hash, segredos de terceiros no Secret Manager |
-| Entregas | Fatias verticais testáveis de ponta a ponta, começando por uma POC com vídeos curtos e, logo depois, um piloto com cinco programas completos e metas definidas antes |
+| Entregas | Fatias verticais testáveis de ponta a ponta, começando por uma POC com vídeos curtos e, logo depois, um piloto com cinco programas completos comparados lado a lado entre os modelos |
 | Entradas | Só MP4 válido, conferido em quarentena e regravado; toda entrada tratada como hostil; busca protegida contra injeção |
 | Usuários | Identity Platform: contas locais com administrador de emergência desde a E0; login pela API do legado quando ela existir; papéis com permissões granulares |
 | Revisão | Área restrita para corrigir e completar a decupagem, com histórico; o catálogo de pessoas nasce das correções |
@@ -44,7 +44,7 @@ O Gemini 3.5 Flash-Lite é o melhor custo para decupar o vídeo inteiro: custa c
 
 Premissas do custo por hora: preços Flex do endpoint global ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com transcrição e raciocínio baixo. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
 
-Não há benchmark público de vídeo longo para o 3.5 Flash-Lite. Por isso a escolha é confirmada no piloto da E1: cinco programas completos e variados, processados inteiros pelos dois modelos, sem depender das dúvidas do primeiro, e comparados com anotação humana. As metas por categoria (ver Qualidade em produção) são fixadas antes do teste. Se o Flash-Lite ficar aquém só em famosos, apenas a detecção de pessoas sobe para o 3.8 Flash.
+Não há benchmark público de vídeo longo para o 3.5 Flash-Lite. Por isso a escolha é confirmada no piloto da E1: cinco programas completos e variados, processados inteiros pelos dois modelos, sem depender das dúvidas do primeiro, e comparados visualmente lado a lado no player (ver Qualidade em produção). Se o Flash-Lite ficar aquém só em famosos, apenas a detecção de pessoas sobe para o 3.8 Flash.
 
 O modo agêntico corta até 88% dos tokens em perguntas pontuais sobre vídeos longos, mas a decupagem precisa varrer o vídeo inteiro: fica no processamento estático. O agêntico serve depois, para a busca no acervo.
 
@@ -98,7 +98,7 @@ Guardar tudo indefinidamente custa pouco no dia a dia; o acervo de 25 anos é qu
 
 O acervo vai para o Batch, com o 3.5 Flash-Lite e sem escalonamento, a \~US$ 0,28 por hora de vídeo (modelo, Cloud Run e indexação). O Workflows submete cada lote e consulta o andamento de tempos em tempos, sem nenhum contêiner parado esperando. Se cada ano tiver o volume de hoje (\~7.300 h, a confirmar), são \~182 mil horas e \~US$ 51 mil de processamento. O armazenamento é à parte e cresce com o acervo: \~82 TB de proxies (\~US$ 90–100/mês mesmo no Archive) e \~1 TB de índice (\~US$ 300/mês ao preço atual, ou cerca de um terço com vetores de 256 dimensões).
 
-Antes de expandir, um lote-piloto com programas de cada época passa pelas mesmas metas do piloto da E1, porque programas antigos têm outra imagem, outros formatos e outras pessoas. Se o acervo precisar de escalonamento para atingir as metas, o custo sobe para \~US$ 0,40/h, ou a qualidade menor fica declarada para esse acervo. O teto mensal cobre só o processamento:
+Antes de expandir, um lote-piloto com programas de cada época passa pela mesma comparação visual do piloto da E1, porque programas antigos têm outra imagem, outros formatos e outras pessoas. Se o acervo precisar de escalonamento para ficar no nível do piloto, o custo sobe para \~US$ 0,40/h, ou a qualidade menor fica declarada para esse acervo. O teto mensal cobre só o processamento:
 
 | Teto mensal (processamento) | Horas por mês | Acervo completo em |
 | --- | --- | --- |
@@ -401,29 +401,26 @@ Como funciona: cada ação (login, envio, fim de processamento, busca, correçã
 
 ## Qualidade em produção
 
-A qualidade é provada no piloto e vigiada todo dia por sinais automáticos e uma amostra humana pequena. Os trechos do piloto com anotação humana completa viram o conjunto de regressão: nenhuma troca de modelo ou prompt entra sem passar por eles. Parte desses trechos fica reservada só para a avaliação final e nunca é usada para ajustar o prompt.
+A qualidade é provada no piloto, por conferência visual do Bruno no player, e vigiada todo dia por sinais automáticos. Os programas do piloto viram o conjunto de regressão: nenhuma troca de modelo ou prompt entra sem que a decupagem nova seja comparada lado a lado com a aprovada no piloto.
 
-- **Amostra humana.** O documentalista confere um vídeo por dia, escolhido ao acaso: nomes errados, comerciais perdidos e erro de tempo.
 - **Sinais automáticos.** Percentual de janelas escaladas para o 3.8 Flash, de pessoas "não identificadas", de respostas fora do esquema e eventos por hora fora da média do programa. Alertas no Cloud Monitoring.
-- **Avaliação automática.** O [serviço de avaliação do Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/evaluation-overview) roda métricas por rubrica sobre a amostra, para detectar queda antes que o usuário perceba.
+- **Avaliação automática.** O [serviço de avaliação do Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/evaluation-overview) roda métricas por rubrica sobre a amostra de controle, para detectar queda antes que o usuário perceba.
 - **Versões fixas.** Modelo e prompt fixados por versão no `versao_pipeline`; uma versão nova permite reprocessar o acervo de propósito.
-- **Amostra de controle.** Uma fração aleatória de janelas passa também pelo 3.8 Flash; a diferença entre as duas passadas mede, ao longo do tempo, o que a primeira deixa de ver.
+- **Amostra de controle.** Sinal automático de qualidade: uma fração aleatória de janelas passa também pelo 3.8 Flash; a diferença entre as duas passadas mede, ao longo do tempo, o que a primeira deixa de ver.
 
-### Metas do piloto
+### Comparação do piloto
 
-O gabarito cobre trechos definidos de cada programa do piloto, com todas as categorias anotadas, inclusive os casos difíceis. As metas abaixo partem do plano original e precisam ser aprovadas pela RedeTV antes do A/B.
+Cada programa do piloto é aberto no player com as decupagens do 3.5 Flash-Lite e do 3.8 Flash lado a lado. O Bruno clica nos itens de cada categoria, confere se o vídeo cai no momento certo e registra, por requisito, o que cada modelo acertou, errou ou deixou de ver. Não há gabarito: a referência é o próprio vídeo.
 
-| Requisito | O que se mede | Meta para aprovar |
-| --- | --- | --- |
-| Famosos na imagem | Precisão dos nomes, cobertura das aparições reais, falsos reconhecimentos, "não identificado" correto | Precisão ≥ 95%; cobertura ≥ 80% |
-| Menções a pessoas | Precisão e cobertura, separadas das aparições | Precisão ≥ 90%; cobertura ≥ 80% |
-| Pautas | Limites e pessoas certos, resumo fiel, continuidade entre janelas | Nenhum resumo com afirmação falsa; limites a até 5 s |
-| B-roll | Pertinência dos 5 primeiros resultados; classificação de plano limpo | ≥ 80% em 20 consultas; plano limpo certo em ≥ 90% |
-| Comerciais | Cobertura por tipo; confusão com marca incidental ou menção editorial | Precisão ≥ 90%; cobertura ≥ 90% |
-| Timecode | Inícios e fins dentro de 2 s, distribuição do erro, piores casos | ≥ 95% dentro de 2 s |
-| Utilidade | Minutos para localizar e corrigir material, comparados ao processo atual | Menor que o processo atual |
-
-Item que o modelo não encontrou conta como falha de cobertura e nunca entra na média de erro de tempo: uma média baixa não compensa uma inserção perdida.
+| Requisito | O que se compara entre os modelos |
+| --- | --- |
+| Famosos na imagem | Nomes certos, aparições perdidas, falsos reconhecimentos, "não identificado" correto |
+| Menções a pessoas | Menções certas e perdidas, separadas das aparições |
+| Pautas | Limites e pessoas certos, resumo fiel, continuidade entre janelas |
+| B-roll | Pertinência dos 5 primeiros resultados em 20 consultas; classificação de plano limpo |
+| Comerciais | Inserções perdidas por tipo; confusão com marca incidental ou menção editorial |
+| Timecode | Clique que cai fora do momento e os piores casos |
+| Utilidade | Minutos para localizar e corrigir material, comparados ao processo atual |
 
 ## Stack e linguagens
 
@@ -449,7 +446,7 @@ Quase tudo é testado sem o GCP; só a integração final precisa da nuvem. O ca
 | 2. Integração local | Adaptadores contra emuladores do Firestore e do Pub/Sub (oficiais do gcloud), Storage (fake-gcs-server), ffmpeg real em clipes de 30 s, YAML do Workflows ([workflows-emulator](https://pypi.org/project/workflows-emulator/), comunitário) | Docker Compose no notebook e no CI | A cada PR |
 | 3. Contrato com o Gemini | Respostas gravadas (cassetes) nos testes rápidos; chamada real em 5 clipes-ouro de 1–2 min, com versão do modelo fixada. Verifica esquema e invariantes, nunca texto exato | CI, projeto de dev | Cassetes a cada PR; chamada real a cada mudança de prompt ou modelo e toda noite |
 | 4. Ponta a ponta efêmero | Fluxo inteiro, do front ao JSON, com IAM, Eventarc e Workflows reais | Ambiente do PR no projeto de dev: revisões do Cloud Run com tag e sem tráfego ([revision tags](https://codelabs.developers.google.com/codelabs/cloud-run/revisions-cloud-run-traffic-splitting-gradual-rollout-rollbacks)), workflow e prefixos de bucket e coleção com o número do PR | A cada PR que muda back ou infra; destruído ao fechar o PR |
-| 5. Avaliação de qualidade | Conjunto de regressão (trechos anotados do piloto) com métricas de nomes, comerciais e erro de tempo | Projeto de dev, em Batch (50% mais barato) | Antes de cada release e a cada troca de prompt ou modelo |
+| 5. Avaliação de qualidade | Conjunto de regressão (programas do piloto): decupagem nova comparada lado a lado com a aprovada, mais a diferença da amostra de controle | Projeto de dev, em Batch (50% mais barato) | Antes de cada release e a cada troca de prompt ou modelo |
 | 6. Segurança | MP4 malformados e disfarçados (fuzzing do validador), cargas de injeção OWASP e de prompt injection contra API, busca e front | CI e ambiente do PR | A cada PR; o corpus de ataques cresce a cada falha encontrada |
 
 O ciclo TDD (vermelho, verde, refatorar) vale integralmente para o domínio e os adaptadores. Para as partes que dependem do Gemini, o teste escrito primeiro é um invariante ou uma métrica: "todo evento cai dentro da duração", "o clipe-ouro 3 tem a apresentadora entre 00:42 e 01:10". O prompt muda até o teste passar.
@@ -499,7 +496,7 @@ Cada entrega atravessa todas as camadas (front, API, processamento, dados e test
 | Entrega | O que dá para testar ao final | O que atravessa | Aceite |
 | --- | --- | --- | --- |
 | **E0 · POC** | Entrar com uma conta local, enviar um vídeo de até 10 min e ver a decupagem no player com o painel da decupagem | Identity Platform com conta local e MFA; front com upload, player e painel; API mínima; validação de MP4 em quarentena; uma chamada ao 3.5 Flash-Lite em Flex; JSON no Storage. Fundação: monorepo, Terraform do `dev`, CI | 5 clipes reais decupados; o clique cai no momento certo; nenhum segredo no repositório |
-| **E1 · Piloto de qualidade** | Cinco programas completos decupados com os cinco requisitos, no player e em JSON exportável | Janelas de análise em paralelo, consolidação, regra de tempos, aparição separada de menção, escalonamento com amostra de controle, A/B com o 3.8 Flash, gabarito humano, medição de custo e de tempo de revisão | Metas do piloto atingidas (definidas antes); custo real por hora medido; decisão de modelo registrada |
+| **E1 · Piloto de qualidade** | Cinco programas completos decupados com os cinco requisitos, no player e em JSON exportável | Janelas de análise em paralelo, consolidação, regra de tempos, aparição separada de menção, escalonamento com amostra de controle, A/B com o 3.8 Flash, comparação visual lado a lado, medição de custo e de tempo de revisão | Comparação visual dos dois modelos registrada por requisito; custo real por hora medido; decisão de modelo registrada |
 | **E2 · Busca** | Buscar por assunto, frase dita ou nome e saltar para os momentos | Índice no Agent Retrieval, entendimento da consulta, proteção contra injeção, página de resultados | Em 20 consultas editoriais, ≥80% dos 5 primeiros resultados pertinentes |
 | **E3 · Revisão e edição** | Corrigir pessoas, pautas, objetos, comerciais e tempos e ver a correção chegar à busca | Área de revisão, papéis Editor e Curador, correções ancoradas e reconciliadas, estado de indexação, histórico, catálogo de pessoas | Um editor corrige um programa inteiro; reprocessar o programa mantém as correções certas e manda o resto para a fila |
 | **E4 · Famosos com evidência** | Ver o painel de pessoas com o quadro que justifica cada nome, separando aparições de menções, e filtrar por pessoa | Evidências, uso do catálogo, relatório de tempo de tela | Relatório de tempo de tela de um programa conferido, contando só aparições |
@@ -509,13 +506,13 @@ Cada entrega atravessa todas as camadas (front, API, processamento, dados e test
 | **E8 · Login RedeTV e permissões completas** | Usuários entram com o login da RedeTV; o administrador gere papéis e escopos por programa | Adaptador para a API do legado, todos os papéis, auditoria; Administrador só em conta local com MFA | Login pelo legado em `staging`; a conta local continua funcionando. Entra quando a API do legado existir |
 | **E9 · Painel da diretoria** | A diretoria acompanha acessos, vídeos e buscas por usuário e no total | Eventos no BigQuery, telas do painel, papel Diretoria | Os números de uma semana batem com os registros |
 | **E10 · Produção** | Operação diária de 20 h com alertas, acessível só pela rede da RedeTV | Balanceador, Cloud Armor com os IPs da emissora, VPC-SC com nível de acesso para upload e player, observabilidade, teste de carga | Upload e player funcionam de uma máquina da RedeTV e são bloqueados de fora; uma semana em paralelo ao processo atual sem incidente bloqueante |
-| **E11 · Acervo histórico** | Programas antigos aparecendo na busca | Lote-piloto por época com as metas da E1; depois Batch com fila por prioridade e teto mensal | Lote-piloto dentro das metas e do teto |
+| **E11 · Acervo histórico** | Programas antigos aparecendo na busca | Lote-piloto por época com a comparação visual da E1; depois Batch com fila por prioridade e teto mensal | Lote-piloto aprovado na comparação visual e dentro do teto |
 
 A segurança de base (IAM, buckets privados, nenhum segredo) vale desde a E0; o VPC-SC entra em modo de teste a partir da E4 e é aplicado na E10. Cada entrega vira um conjunto de tickets verticais pequenos no `/to-tickets`.
 
 ### Recorte da E0 (grill de 29/10/2026)
 
-A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decupagem, player. Da qualidade, só os tempos são medidos, contra um gabarito; o resto é medido com números na E1.
+A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decupagem, player. Da qualidade, só os tempos são conferidos, visualmente no player; o resto é comparado na E1.
 
 | Tema | Decisão na E0 |
 | --- | --- |
@@ -524,8 +521,8 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Hospedagem | Um único serviço Cloud Run: o FastAPI serve a API e o build do React. Sem balanceador nem Cloud Armor; o front ganha serviço próprio quando o balanceador entrar (E10) |
 | Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → serviço de análise → decupagem no Storage |
 | Login | Só contas locais no Identity Platform, com MFA TOTP obrigatório, criadas por script, inclusive os 2 administradores de emergência com alerta a cada login. Sem papéis: toda conta autenticada envia e vê todos os vídeos |
-| Contas iniciais | Administradores: Bruno e uma pessoa da TI da RedeTV. Usuários: Bruno e o documentalista |
-| Clipes | 5 clipes reais de programas variados, com 1 a 10 min, escolhidos pelo documentalista; são também os clipes-ouro do teste de contrato. Ficam só num bucket do `dev`, nunca no git, e o envio ao Gemini é autorizado por escrito |
+| Contas iniciais | Administradores: Bruno e uma pessoa da TI da RedeTV. Usuários: Bruno |
+| Clipes | 5 clipes reais de programas variados, com 1 a 10 min; são também os clipes-ouro do teste de contrato. Ficam só num bucket do `dev`, nunca no git, e o envio ao Gemini é autorizado por escrito |
 | Upload | O front confere extensão, tipo, tamanho e `ftyp`; `POST /v1/jobs` devolve URL assinada de upload retomável para a quarentena. Sem SHA-256 no navegador, sem `Idempotency-Key` e sem deduplicação (E7) |
 | Quarentena | As 7 camadas de Entradas hostis; duração entre 1 s e 10 min, e fora disso `duracao_excedida` |
 | Derivados | Só o proxy de reprodução (480p H.264 com faststart), que serve ao player e ao Gemini: o modelo vê o mesmo arquivo e o mesmo tempo que o clique usa, e a documentação da Vertex não garante H.265. O proxy de análise com timecode queimado fica para o A/B da E1, se os tempos ficarem ruins |
@@ -535,7 +532,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | API | `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{id}`, `GET /v1/jobs/{id}/decupagem` e `GET /v1/jobs/{id}/reproducao`, todas com o token do Identity Platform. Sem `DELETE`, webhook, `ETag` nem chave de API |
 | Telas | Login com cadastro do MFA; Biblioteca com lista, status por consulta periódica e upload; Vídeo com player e painel da decupagem por categoria, em que o clique num item salta o player |
 | CI e testes | GitHub Actions com lint, tipos, testes unitários e gitleaks; contrato com o Gemini por cassetes e chamada real sob demanda nos 5 clipes-ouro; Terraform num único `dev`. Ambientes efêmeros por PR, Cloud Deploy e emuladores ficam para a E1 |
-| Aceite | Os 5 clipes decupados; um teste Playwright prova que clicar em cada item leva o player ao `inicio_ms`; pelo menos 95% dos itens pareados com o gabarito têm início e fim a até 2 s, como na E1, e o relatório lista os piores casos; nenhum segredo no repositório. O documentalista anota o gabarito (aparições, menções, pautas e comerciais) em `evals/gabarito/`, um CSV por clipe-ouro; a cobertura é informada, mas só vira meta na E1 |
+| Aceite | Os 5 clipes decupados; um teste Playwright prova que clicar em cada item leva o player ao `inicio_ms`; o Bruno abre a decupagem de cada clipe-ouro no player, clica nos itens e confirma que o vídeo cai no momento certo; nenhum segredo no repositório. Sem gabarito nem documentalista: a validação de qualidade é visual |
 
 ## Decisões e perguntas em aberto
 
@@ -565,7 +562,7 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 | Reaproveitamento só depois do upload com hash conferido | Devolver a decupagem pelo hash declarado | Um sistema não lê a decupagem de outro |
 | Chamada ao Gemini num serviço com concorrência | Uma tarefa de Job por janela | O Job pagaria CPU parada esperando o Flex |
 | Amostra de controle no 3.8 Flash | Escalonar só por dúvida | Mede o que o modelo nem percebeu |
-| Piloto completo na E1, com metas definidas antes | A/B depois da busca e da edição | Prova o valor da IA antes de investir no produto |
+| Piloto completo na E1, com comparação visual lado a lado | A/B depois da busca e da edição | Prova o valor da IA antes de investir no produto |
 | Produção só pelos IPs da RedeTV; dev e staging abertos, com MFA | Restringir também o desenvolvimento | Permite trabalho remoto sem abrir a produção |
 | Login RedeTV sem MFA, compensado pelo IP; Administrador só em conta local com MFA | Criar um segundo fator próprio para o login legado | Simples e seguro; o token próprio não aceita o MFA nativo |
 
@@ -588,6 +585,5 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 - [ ] Banda de internet disponível para enviar os vídeos, no dia a dia e no acervo.
 - [ ] Teto mensal para o acervo e ordem de prioridade dos programas.
 - [ ] Quantas horas tem, de fato, cada ano do acervo.
-- [ ] Aprovar as metas do piloto (em Qualidade em produção) antes do A/B.
 
 **Glossário**: os termos do projeto ficam no [`GLOSSARY.md`](../GLOSSARY.md), na raiz.
