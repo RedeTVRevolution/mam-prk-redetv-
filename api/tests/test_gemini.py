@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 import requests
 
-from api.decupagem import Video
+from api.decupagem import Video, esquema_do_modelo
 from api.gemini import (
     PRAZO_DA_ANALISE_S,
     TIMEOUT_DA_REDE_S,
@@ -239,6 +239,21 @@ def test_tempo_fora_da_duracao_conta_como_resposta_invalida() -> None:
     t = TransporteFalso(json.dumps(ruim), BOA)
     _rodar(t)
     assert len(t.chamadas) == 2
+
+
+def test_tom_fora_da_lista_e_recusado_e_refeito() -> None:
+    ruim = resposta_em_mm_ss()
+    ruim["pautas"][0]["tom"] = "sério"
+    t = TransporteFalso(json.dumps(ruim), BOA)
+    _rodar(t)
+    assert len(t.chamadas) == 2
+
+
+def test_esquema_do_modelo_traz_o_enum_do_tom_e_o_comercial() -> None:
+    tom = esquema_do_modelo()["$defs"]["Pauta"]["properties"]["tom"]
+    assert "comercial" in str(tom)
+    assert "polemico" in str(tom)
+    assert "merchandising" in tom["description"]
 
 
 @pytest.mark.parametrize("status", [429, 500, 503])

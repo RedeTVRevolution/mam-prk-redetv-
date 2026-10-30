@@ -1599,18 +1599,40 @@ test('o Editor corrige o tom da pauta pelo modal', async () => {
 
   await usuario.click(await painel.findByRole('button', { name: 'Corrigir tom da pauta Eleição' }))
   const modal = within(await screen.findByRole('dialog'))
-  await usuario.clear(modal.getByLabelText('Tom'))
-  await usuario.type(modal.getByLabelText('Tom'), 'tenso')
+  await usuario.click(modal.getByLabelText('Tom'))
+  await usuario.click(await screen.findByText('polêmico'))
   await salvarCampo(usuario, 'tom errado')
 
   await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
   expect(correcaoRecebida).toEqual({
     tipo: 'pauta.tom',
     item_id: 'pa1',
-    valor: 'tenso',
+    valor: 'polemico',
     motivo: 'tom errado',
     versao: 'v1',
   })
+})
+
+test('a aba Pautas mostra o tom com acento e o tom livre de decupagem antiga como veio', async () => {
+  const usuario = userEvent.setup()
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      HttpResponse.json({
+        ...decupagem,
+        versao_decupagem: 'v1',
+        pautas: [
+          ...decupagem.pautas,
+          { id: 'pa2', titulo: 'Debate', resumo: 'x', tom: 'descontraido', inicio_ms: 0, fim_ms: 1000 },
+        ],
+      }),
+    ),
+  )
+  await abrir({ estado: 'concluido' })
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+
+  expect(await painel.findByText('descontraído')).toBeTruthy()
+  expect(painel.getByText('sério')).toBeTruthy()
 })
 
 test('o Editor troca as fontes do nome, inclusive para nenhuma', async () => {

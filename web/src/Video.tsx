@@ -162,6 +162,21 @@ type CampoAberto =
   | { modo: 'texto'; texto: TextoNaTela; id: string }
   | { modo: 'novo_texto' }
 
+const TONS_DA_PAUTA = {
+  informativo: 'informativo',
+  polemico: 'polêmico',
+  descontraido: 'descontraído',
+  exclusivo: 'exclusivo',
+  homenagem: 'homenagem',
+  analise: 'análise',
+  comercial: 'comercial',
+} as const
+
+// Decupagem 1.2 gravada antes da lista fechada pode trazer outro texto: sai como veio.
+function rotuloDoTom(tom: string): string {
+  return Object.hasOwn(TONS_DA_PAUTA, tom) ? TONS_DA_PAUTA[tom as keyof typeof TONS_DA_PAUTA] : tom
+}
+
 const FONTES_DO_NOME = { rosto: 'rosto', gc: 'GC', fala: 'fala', contexto: 'contexto' } as const
 
 interface TextoNaTela extends Intervalo {
@@ -931,7 +946,7 @@ export default function Video({
                           <Text size="sm">{p.titulo}</Text>
                           {p.tom && (
                             <Badge size="xs" color="gray" variant="outline">
-                              {p.tom}
+                              {rotuloDoTom(p.tom)}
                             </Badge>
                           )}
                           {p.origem === 'revisao' && (
@@ -1996,7 +2011,11 @@ function CorrigirCampo({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
-  const [tom, setTom] = useState(campo?.modo === 'tom' ? (campo.pauta.tom ?? '') : '')
+  const [tom, setTom] = useState<string | null>(
+    campo?.modo === 'tom' && campo.pauta.tom && Object.hasOwn(TONS_DA_PAUTA, campo.pauta.tom)
+      ? campo.pauta.tom
+      : null,
+  )
   const [fontes, setFontes] = useState<string[]>(
     campo?.modo === 'fontes' ? (campo.pessoa.fontes_do_nome ?? []) : [],
   )
@@ -2018,7 +2037,7 @@ function CorrigirCampo({
   function pedido(): Record<string, unknown> | null {
     switch (campo?.modo) {
       case 'tom':
-        return tom.trim() ? { tipo: 'pauta.tom', item_id: campo.pauta.id, valor: tom.trim() } : null
+        return tom ? { tipo: 'pauta.tom', item_id: campo.pauta.id, valor: tom } : null
       case 'fontes':
         return {
           tipo: 'pessoa.fontes_do_nome',
@@ -2114,11 +2133,12 @@ function CorrigirCampo({
     >
       <Stack gap="sm">
         {campo?.modo === 'tom' && (
-          <TextInput
+          <Select
             label="Tom"
+            data={Object.entries(TONS_DA_PAUTA).map(([value, label]) => ({ value, label }))}
             value={tom}
-            maxLength={200}
-            onChange={(e) => setTom(e.currentTarget.value)}
+            allowDeselect={false}
+            onChange={setTom}
           />
         )}
         {campo?.modo === 'fontes' && (

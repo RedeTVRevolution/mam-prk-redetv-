@@ -25,7 +25,13 @@ from pydantic import (
 )
 
 from api.comparador import normalizar
-from api.decupagem import Comercial, EvidenciaDoComercial, FonteDoNome, TextoNaTela
+from api.decupagem import (
+    Comercial,
+    EvidenciaDoComercial,
+    FonteDoNome,
+    TextoNaTela,
+    TomDaPauta,
+)
 from api.pessoas import LISTAS, nao_identificado
 
 TipoNovo = Literal[
@@ -86,6 +92,7 @@ ACRESCENTAR_TEXTO = "texto_na_tela.acrescentar"
 DE_JSON_LONGO = (*DE_PLANO_OU_FALA, "texto_na_tela.texto", ACRESCENTAR_TEXTO)
 TIPOS_DE_TEXTO_NA_TELA = get_args(TextoNaTela.model_fields["tipo"].annotation)
 FONTES_DO_NOME = get_args(FonteDoNome)
+TONS_DA_PAUTA = get_args(TomDaPauta)
 _TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 
 
@@ -516,6 +523,9 @@ class NovaCorrecao(BaseModel):
             )
         elif self.tipo == "pauta.resumo":
             self.valor = _sem_controle_salvo_quebra(self.valor)
+        elif self.tipo == "pauta.tom":
+            if self.valor not in TONS_DA_PAUTA:
+                raise ValueError("tom desconhecido")
         elif self.tipo == "pessoa.fontes_do_nome":
             self.valor = _valor_das_fontes(self.valor)
         elif self.tipo == "texto_na_tela.texto":

@@ -53,20 +53,29 @@ OCORRENCIA = {"lista": "na_imagem", "inicio_ms": 1000, "fim_ms": 5000}
 def test_tom_da_pauta_vem_com_origem_revisao_e_desfaz() -> None:
     mundo = _mundo()
 
-    cid = _corrigir(mundo, "pauta.tom", "polêmico", item_id="pau01").json()["id"]
+    cid = _corrigir(mundo, "pauta.tom", "polemico", item_id="pau01").json()["id"]
 
     p1, p2 = mundo.decupagem()["pautas"]
-    assert (p1["tom"], p1["origem"]) == ("polêmico", "revisao")
+    assert (p1["tom"], p1["origem"]) == ("polemico", "revisao")
     assert (p2["tom"], p2["origem"]) == ("informativo", "modelo")
     [item] = mundo.historico().json()
     assert (item["antes"], item["depois"], item["estado"]) == (
         "informativo",
-        "polêmico",
+        "polemico",
         "ativa",
     )
     mundo.avancar()
     assert mundo.desfazer(cid).status_code == 201
     assert mundo.decupagem()["pautas"][0]["tom"] == "informativo"
+
+
+def test_tom_fora_da_lista_e_422() -> None:
+    mundo = _mundo()
+
+    assert _corrigir(mundo, "pauta.tom", "polêmico", item_id="pau01").status_code == 422
+    assert (
+        _corrigir(mundo, "pauta.tom", "comercial", item_id="pau01").status_code == 201
+    )
 
 
 def test_tom_longo_ou_com_controle_e_422() -> None:
@@ -417,11 +426,11 @@ def test_fontes_e_papel_visual_sobrevivem_a_nova_versao() -> None:
 
 def test_aplicar_direto_nao_altera_o_modelo() -> None:
     mundo = _mundo()
-    _corrigir(mundo, "pauta.tom", "polêmico", item_id="pau01")
+    _corrigir(mundo, "pauta.tom", "polemico", item_id="pau01")
 
     entregue = aplicar(M12, V12, mundo.correcoes.listar("j1"))
 
-    assert entregue["pautas"][0]["tom"] == "polêmico"
+    assert entregue["pautas"][0]["tom"] == "polemico"
     assert M12["pautas"][0]["tom"] == "informativo"
 
 

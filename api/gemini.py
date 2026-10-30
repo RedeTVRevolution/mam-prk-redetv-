@@ -61,7 +61,7 @@ REGRAS GERAIS
 
 2. PAUTAS E NARRATIVA
 - Divida o vídeo em pautas: cada assunto, reportagem ou quadro, com início e fim.
-- Para cada pauta: título curto, resumo jornalístico fiel ao que foi mostrado e dito, pessoas envolvidas e tom (ex.: informativo, polêmico, descontraído, exclusivo, homenagem, análise).
+- Para cada pauta: título curto, resumo jornalístico fiel ao que foi mostrado e dito, pessoas envolvidas e tom, só um destes valores, sem acento: informativo, polemico, descontraido, exclusivo, homenagem, analise, comercial (use comercial para a pauta que é ação comercial ou merchandising, não reportagem; o comercial continua registrado em comerciais).
 - Exemplos de pauta: entrevista coletiva do governador, chuva forte na cidade, gols da rodada, separação de celebridade, quadro de prêmios do auditório.
 
 3. TRANSCRIÇÃO

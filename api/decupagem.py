@@ -20,6 +20,16 @@ Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]
 Id = Annotated[str, Field(max_length=40)]
 
+TomDaPauta = Literal[
+    "informativo",
+    "polemico",
+    "descontraido",
+    "exclusivo",
+    "homenagem",
+    "analise",
+    "comercial",
+]
+
 
 class _Estrito(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -65,10 +75,10 @@ class Pauta(_Intervalo):
     resumo: Texto = Field(description="Resumo jornalístico fiel ao mostrado e dito.")
     pessoas: list[Id] = Field(default=[], description="Ids das pessoas envolvidas.")
     locais: list[Rotulo] = []
-    tom: Rotulo | None = Field(
+    tom: TomDaPauta | None = Field(
         default=None,
-        description="Informativo, polêmico, descontraído, exclusivo, homenagem, "
-        "análise…",
+        description="Tom da pauta. `comercial` é a pauta que é ação comercial ou "
+        "merchandising, não reportagem.",
     )
 
 
