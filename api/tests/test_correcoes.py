@@ -16,11 +16,16 @@ from api.correcoes import (
     Correcao,
     CorrecaoJaExiste,
     ItemInexistente,
+    NaoNaFila,
     NovaCorrecao,
     RepositorioDeCorrecoesEmMemoria,
     aplicar,
+    fila,
+    historico,
     identidade_da_pessoa,
     montar_correcao,
+    montar_descarte,
+    montar_reaplicacao,
     reconciliar,
     versao_do_modelo,
 )
@@ -696,3 +701,228 @@ def test_desfazer_correcao_reconciliada_volta_ao_nome_do_modelo_novo() -> None:
         "Ana Souza Lima",
         "Ana Souza",
     )
+
+
+# --- Fila de revisão (#60) ---
+
+
+def _registro(**campos: Any) -> dict[str, Any]:
+    return {
+        "id": "n1",
+        "job_id": "j1",
+        "autor_uid": "u2",
+        "autor_email": "bia@redetv.com.br",
+        "criada_em": BASE + timedelta(hours=1),
+        **campos,
+    }
+
+
+def test_fila_lista_a_que_nao_casou_com_os_candidatos_que_sobrepoem_o_intervalo() -> (
+    None
+):
+    novo = _modelo_com(
+        _pessoa("p1", "Carla Dias", 1000, 5000),
+        _pessoa("p2", "Davi Lima", 9000, 9500),
+    )
+
+    itens = fila(novo, "nova", [_correcao_antiga()])
+
+    assert [i.id for i in itens] == ["c1"]
+    assert [(c.item_id, c.nome) for c in itens[0].candidatos] == [("p1", "Carla Dias")]
+
+
+def test_fila_nao_traz_a_que_casou_nem_a_da_versao_atual() -> None:
+    novo = _modelo_com(_pessoa("p9", "Ana Souza", 1200, 4800))
+    atual = _correcao_antiga(
+        id="c2", ancora=_correcao_antiga().ancora.model_copy(update={"versao": "nova"})
+    )
+
+    assert fila(novo, "nova", [_correcao_antiga(), atual]) == []
+
+
+def test_reaplicar_cria_correcao_na_versao_atual_ligada_a_original() -> None:
+    novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
+    original = _correcao_antiga()
+
+    nova = montar_reaplicacao(
+        novo, "nova", original, [original], "p1", "é a mesma", **_registro()
+    )
+
+    assert (nova.tipo, nova.reaplica, nova.item_id) == ("pessoa.renomear", "c1", "p1")
+    assert (nova.antes, nova.depois) == ("Carla Dias", "Ana Souza Lima")
+    assert nova.ancora.versao == "nova"
+    assert nova.ancora.identidade == "carla dias"
+    assert (
+        aplicar(novo, "nova", [original, nova])["pessoas"][0]["nome"]
+        == "Ana Souza Lima"
+    )
+    assert fila(novo, "nova", [original, nova]) == []
+
+
+def test_reaplicar_item_inexistente_levanta() -> None:
+    novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
+    original = _correcao_antiga()
+
+    with pytest.raises(ItemInexistente):
+        montar_reaplicacao(
+            novo, "nova", original, [original], "zzz", "x", **_registro()
+        )
+
+
+def test_reaplicar_quem_nao_esta_na_fila_levanta() -> None:
+    novo = _modelo_com(_pessoa("p9", "Ana Souza", 1200, 4800))
+    original = _correcao_antiga()  # casa, logo não está na fila
+
+    with pytest.raises(NaoNaFila):
+        montar_reaplicacao(novo, "nova", original, [original], "p9", "x", **_registro())
+
+
+def test_descartar_tira_da_fila_e_o_historico_marca_descartada() -> None:
+    novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
+    original = _correcao_antiga()
+
+    descarte = montar_descarte(
+        novo, "nova", original, [original], "não vale", **_registro()
+    )
+
+    assert (descarte.tipo, descarte.descarta) == ("descartar", "c1")
+    assert fila(novo, "nova", [original, descarte]) == []
+    assert [(i.id, i.estado) for i in historico([original, descarte])] == [
+        ("n1", "ativa"),
+        ("c1", "descartada"),
+    ]
+    assert (
+        aplicar(novo, "nova", [original, descarte])["pessoas"][0]["nome"]
+        == "Carla Dias"
+    )
+
+
+def test_descartar_duas_vezes_levanta() -> None:
+    novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
+    original = _correcao_antiga()
+    descarte = montar_descarte(novo, "nova", original, [original], "x", **_registro())
+
+    with pytest.raises(NaoNaFila):
+        montar_descarte(
+            novo, "nova", original, [original, descarte], "x", **_registro()
+        )
+
+
+def test_historico_marca_a_original_reaplicada() -> None:
+    novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
+    original = _correcao_antiga()
+    nova = montar_reaplicacao(
+        novo, "nova", original, [original], "p1", "x", **_registro()
+    )
+
+    estados = {i.id: i.estado for i in historico([original, nova])}
+
+    assert estados == {"c1": "reaplicada", "n1": "ativa"}
+
+
+def _mundo_com_fila() -> tuple["Mundo", str]:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    mundo.avancar()
+    mundo.reprocessar({**MODELO, "pessoas": [_pessoa("p1", "Carla Dias", 1000, 5000)]})
+    return mundo, cid
+
+
+def _fila(mundo: "Mundo", headers: dict[str, str] = AUTORIZACAO) -> Any:
+    return mundo.cliente.get("/v1/jobs/j1/fila", headers=headers)
+
+
+def _resolver(mundo: "Mundo", cid: str, acao: str, **corpo: Any) -> Any:
+    return mundo.cliente.post(
+        f"/v1/jobs/j1/fila/{cid}/{acao}",
+        json={"motivo": "revisei", **corpo},
+        headers=AUTORIZACAO,
+    )
+
+
+def test_fila_da_api_traz_a_que_nao_casou_com_candidatos() -> None:
+    mundo, cid = _mundo_com_fila()
+
+    itens = _fila(mundo).json()
+
+    assert [i["id"] for i in itens] == [cid]
+    item = itens[0]
+    assert (item["autor_email"], item["motivo"]) == (
+        "ana@redetv.com.br",
+        "sobrenome completo",
+    )
+    assert (item["antes"], item["depois"]) == ("Ana Souza", "Ana Souza Lima")
+    assert item["ancora"]["identidade"] == "ana souza"
+    assert [c["nome"] for c in item["candidatos"]] == ["Carla Dias"]
+
+
+def test_fila_vazia_sem_reprocessamento() -> None:
+    mundo = Mundo(["editor"])
+    mundo.corrigir()
+
+    assert _fila(mundo).json() == []
+
+
+def test_reaplicar_aplica_na_decupagem_tira_da_fila_e_liga_a_original() -> None:
+    mundo, cid = _mundo_com_fila()
+
+    resposta = _resolver(mundo, cid, "reaplicar", item_id="p1")
+
+    assert resposta.status_code == 201
+    assert mundo.nome_da_ana() == "Ana Souza Lima"
+    assert _fila(mundo).json() == []
+    itens = mundo.historico().json()
+    assert {i["id"]: i["estado"] for i in itens}[cid] == "reaplicada"
+    nova = next(i for i in itens if i["id"] == resposta.json()["id"])
+    assert (nova["reaplica"], nova["estado"]) == (cid, "ativa")
+
+
+def test_reaplicar_pode_ser_desfeita() -> None:
+    mundo, cid = _mundo_com_fila()
+    nova = _resolver(mundo, cid, "reaplicar", item_id="p1").json()["id"]
+
+    assert mundo.desfazer(nova).status_code == 201
+    assert mundo.nome_da_ana() == "Carla Dias"
+
+
+def test_descartar_tira_da_fila_e_mantem_no_historico_como_descartada() -> None:
+    mundo, cid = _mundo_com_fila()
+
+    assert _resolver(mundo, cid, "descartar").status_code == 201
+
+    assert _fila(mundo).json() == []
+    assert mundo.nome_da_ana() == "Carla Dias"
+    estados = {i["id"]: i["estado"] for i in mundo.historico().json()}
+    assert estados[cid] == "descartada"
+
+
+def test_resolver_duas_vezes_da_409() -> None:
+    mundo, cid = _mundo_com_fila()
+    _resolver(mundo, cid, "descartar")
+
+    assert _resolver(mundo, cid, "descartar").status_code == 409
+    assert _resolver(mundo, cid, "reaplicar", item_id="p1").status_code == 409
+
+
+def test_reaplicar_item_inexistente_da_422_e_correcao_inexistente_da_404() -> None:
+    mundo, cid = _mundo_com_fila()
+
+    assert _resolver(mundo, cid, "reaplicar", item_id="zzz").status_code == 422
+    assert _resolver(mundo, "nao-existe", "descartar").status_code == 404
+    assert _resolver(mundo, cid, "reaplicar").status_code == 422
+
+
+def test_descartada_nao_se_desfaz() -> None:
+    mundo, cid = _mundo_com_fila()
+    descarte = _resolver(mundo, cid, "descartar").json()["id"]
+
+    assert mundo.desfazer(descarte).status_code == 409
+    assert mundo.desfazer(cid).status_code == 409
+
+
+def test_fila_sem_decupagem_editar_da_403_e_chave_de_sistema_tambem() -> None:
+    mundo = Mundo(["consulta"])
+
+    assert _fila(mundo).status_code == 403
+    assert _resolver(mundo, "c", "descartar").status_code == 403
+    assert _fila(mundo, mundo.chave_com_todos_os_escopos()).status_code == 403

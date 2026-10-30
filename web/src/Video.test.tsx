@@ -90,8 +90,35 @@ const handlersDoHistorico = [
   }),
 ]
 
+const itemDaFila = {
+  ...item({ id: 'c1' }),
+  ancora: { identidade: 'ana souza', inicio_ms: 5_000, fim_ms: 20_000 },
+  candidatos: [
+    { item_id: 'p7', nome: 'Carla Dias', inicio_ms: 4_000, fim_ms: 18_000 },
+    { item_id: 'p8', nome: 'Davi Lima', inicio_ms: 10_000, fim_ms: 12_000 },
+  ],
+}
+let fila: (typeof itemDaFila)[] = []
+let pedidosDaFila = 0
+let resolucaoRecebida: { acao: string; corpo: unknown } | null = null
+let resolucaoDa409 = false
+const handlersDaFila = [
+  http.get('/v1/jobs/j1/fila', () => {
+    pedidosDaFila += 1
+    return HttpResponse.json(fila)
+  }),
+  http.post('/v1/jobs/j1/fila/c1/:acao', async ({ request, params }) => {
+    resolucaoRecebida = { acao: String(params.acao), corpo: await request.json() }
+    fila = []
+    if (resolucaoDa409) return new HttpResponse(null, { status: 409 })
+    if (params.acao === 'reaplicar') corrigida = true
+    return HttpResponse.json({ id: 'c1-resolvida' }, { status: 201 })
+  }),
+]
+
 const servidor = setupServer(
   ...handlersDoHistorico,
+  ...handlersDaFila,
   http.get('/v1/jobs/j1/reproducao', ({ request }) => {
     if (request.headers.get('Authorization') !== TOKEN) return new HttpResponse(null, { status: 401 })
     pedidosDeReproducao += 1
@@ -129,6 +156,10 @@ afterEach(() => {
   desfazerDa409 = false
   desfazerRecebido = null
   pedidosDeHistorico = 0
+  fila = []
+  pedidosDaFila = 0
+  resolucaoRecebida = null
+  resolucaoDa409 = false
   links = []
   cleanup()
   vi.restoreAllMocks()
@@ -536,4 +567,96 @@ test('quem não tem decupagem.editar não vê o botão Histórico nem pede o his
 
   expect(screen.queryByRole('button', { name: 'Histórico' })).toBeNull()
   expect(pedidosDeHistorico).toBe(0)
+})
+
+
+test('selo "N na fila" abre o painel com antes, depois e candidatos', async () => {
+  fila = [itemDaFila]
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+
+  await usuario.click(await screen.findByRole('button', { name: '1 na fila' }))
+  const painel = within(await screen.findByRole('dialog', { name: 'Fila de revisão' }))
+
+  expect(painel.getByText('Ana Souza')).toBeTruthy()
+  expect(painel.getByText('Ana Souza Lima')).toBeTruthy()
+  expect(painel.getByText('sobrenome completo')).toBeTruthy()
+  expect(painel.getByText('bia@redetv.com.br')).toBeTruthy()
+  await usuario.click(painel.getByLabelText('Candidato'))
+  expect(await screen.findByText(/Carla Dias/)).toBeTruthy()
+  expect(screen.getByText(/Davi Lima/)).toBeTruthy()
+})
+
+test('sem fila não há selo', async () => {
+  await abrir({ estado: 'concluido' }, true)
+  await screen.findByLabelText('Decupagem')
+  await waitFor(() => expect(pedidosDaFila).toBeGreaterThan(0))
+
+  expect(screen.queryByRole('button', { name: /na fila/ })).toBeNull()
+})
+
+test('quem não tem decupagem.editar não vê o selo nem pede a fila', async () => {
+  fila = [itemDaFila]
+  await abrir({ estado: 'concluido' }, false)
+  await screen.findByLabelText('Decupagem')
+
+  expect(screen.queryByRole('button', { name: /na fila/ })).toBeNull()
+  expect(pedidosDaFila).toBe(0)
+})
+
+async function abrirFila(usuario: ReturnType<typeof userEvent.setup>) {
+  fila = [itemDaFila]
+  await abrir({ estado: 'concluido' }, true)
+  await usuario.click(await screen.findByRole('button', { name: '1 na fila' }))
+  return within(await screen.findByRole('dialog', { name: 'Fila de revisão' }))
+}
+
+test('reaplicar no candidato escolhido pede o motivo, tira da fila e recarrega a decupagem', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirFila(usuario)
+  const decupagemNaTela = within(screen.getByLabelText('Decupagem'))
+
+  const reaplicar = painel.getByRole('button', { name: 'Reaplicar' }) as HTMLButtonElement
+  expect(reaplicar.disabled).toBe(true)
+  await usuario.click(painel.getByLabelText('Candidato'))
+  await usuario.click(await screen.findByText(/Carla Dias/))
+  await usuario.type(painel.getByLabelText('Motivo'), 'é a mesma pessoa')
+  await usuario.click(reaplicar)
+
+  await waitFor(() =>
+    expect(resolucaoRecebida).toEqual({
+      acao: 'reaplicar',
+      corpo: { item_id: 'p7', motivo: 'é a mesma pessoa' },
+    }),
+  )
+  expect(await painel.findByText('Nada na fila.')).toBeTruthy()
+  expect((await decupagemNaTela.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
+  expect(screen.queryByRole('button', { name: /na fila/ })).toBeNull()
+})
+
+test('descartar pede o motivo e tira da fila', async () => {
+  const usuario = userEvent.setup()
+  const painel = await abrirFila(usuario)
+
+  const descartar = painel.getByRole('button', { name: 'Descartar' }) as HTMLButtonElement
+  expect(descartar.disabled).toBe(true)
+  await usuario.type(painel.getByLabelText('Motivo'), 'não vale mais')
+  await usuario.click(descartar)
+
+  await waitFor(() =>
+    expect(resolucaoRecebida).toEqual({ acao: 'descartar', corpo: { motivo: 'não vale mais' } }),
+  )
+  expect(await painel.findByText('Nada na fila.')).toBeTruthy()
+})
+
+test('resolver que dá 409 avisa e recarrega a fila', async () => {
+  resolucaoDa409 = true
+  const usuario = userEvent.setup()
+  const painel = await abrirFila(usuario)
+
+  await usuario.type(painel.getByLabelText('Motivo'), 'não vale mais')
+  await usuario.click(painel.getByRole('button', { name: 'Descartar' }))
+
+  expect((await painel.findByRole('alert')).textContent).toContain('não está mais na fila')
+  expect(await painel.findByText('Nada na fila.')).toBeTruthy()
 })

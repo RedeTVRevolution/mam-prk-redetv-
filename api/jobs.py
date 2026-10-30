@@ -28,18 +28,27 @@ from api.auth import (
     Usuario,
 )
 from api.correcoes import (
+    Correcao,
     CorrecaoJaExiste,
+    ItemDaFila,
     ItemDoHistorico,
     ItemInexistente,
     NaoDesfazivel,
+    NaoNaFila,
     NovaCorrecao,
+    NovaReaplicacao,
+    NovaResolucao,
     NovoDesfazer,
     RepositorioDeCorrecoes,
     aplicar,
+    fila,
     historico,
+    id_da_resolucao,
     id_do_desfazer,
     montar_correcao,
+    montar_descarte,
     montar_desfazer,
+    montar_reaplicacao,
     nome_atual,
     versao_do_modelo,
 )
@@ -524,5 +533,85 @@ def criar_rotas(
                 "Correção já desfeita, já é um desfazer ou não casa com a versão atual",
             ) from None
         return {"id": desfazer.id}
+
+    @rotas.get("/{job_id}/fila")
+    def fila_de_revisao(
+        job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
+    ) -> list[ItemDaFila]:
+        job = obter_concluido(job_id, autor)
+        modelo, versao_atual = _ler_modelo(job.id)
+        return fila(modelo, versao_atual, correcoes.listar(job.id))
+
+    def _resolver(
+        job_id: str,
+        correcao_id: str,
+        autor: Usuario,
+        montar: Callable[[dict[str, Any], str, Correcao, list[Correcao]], Correcao],
+    ) -> dict[str, str]:
+        job = obter_concluido(job_id, autor)
+        todas = correcoes.listar(job.id)
+        alvo = next((c for c in todas if c.id == correcao_id), None)
+        if alvo is None:
+            raise HTTPException(404, "Correção não encontrada")
+        modelo, versao_atual = _ler_modelo(job.id)
+        try:
+            resolucao = montar(modelo, versao_atual, alvo, todas)
+            correcoes.acrescentar(resolucao)
+        except ItemInexistente:
+            raise HTTPException(422, "Item inexistente") from None
+        except (NaoNaFila, CorrecaoJaExiste):
+            raise HTTPException(409, "A correção não está mais na fila") from None
+        return {"id": resolucao.id}
+
+    @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
+    def reaplicar_correcao(
+        job_id: str,
+        correcao_id: str,
+        corpo: NovaReaplicacao,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        return _resolver(
+            job_id,
+            correcao_id,
+            autor,
+            lambda modelo, versao, alvo, todas: montar_reaplicacao(
+                modelo,
+                versao,
+                alvo,
+                todas,
+                corpo.item_id,
+                corpo.motivo,
+                id=id_da_resolucao(alvo.id),
+                job_id=job_id,
+                autor_uid=autor.uid,
+                autor_email=autor.email,
+                criada_em=relogio(),
+            ),
+        )
+
+    @rotas.post("/{job_id}/fila/{correcao_id}/descartar", status_code=201)
+    def descartar_correcao(
+        job_id: str,
+        correcao_id: str,
+        corpo: NovaResolucao,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        return _resolver(
+            job_id,
+            correcao_id,
+            autor,
+            lambda modelo, versao, alvo, todas: montar_descarte(
+                modelo,
+                versao,
+                alvo,
+                todas,
+                corpo.motivo,
+                id=id_da_resolucao(alvo.id),
+                job_id=job_id,
+                autor_uid=autor.uid,
+                autor_email=autor.email,
+                criada_em=relogio(),
+            ),
+        )
 
     return rotas

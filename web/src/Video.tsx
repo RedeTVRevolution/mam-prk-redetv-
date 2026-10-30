@@ -14,6 +14,7 @@ import {
   NavLink,
   Paper,
   Progress,
+  Select,
   ScrollArea,
   SegmentedControl,
   Slider,
@@ -201,6 +202,9 @@ export default function Video({
   const concluido = job.estado === 'concluido'
   const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
   const [historicoAberto, setHistoricoAberto] = useState(false)
+  const [filaAberta, setFilaAberta] = useState(false)
+  const [fila, setFila] = useState<ItemDaFila[]>([])
+  const [recargaDaFila, setRecargaDaFila] = useState(0)
   // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
   const sessaoExpirada = useRef(aoSessaoExpirada)
   useEffect(() => {
@@ -227,6 +231,23 @@ export default function Video({
       ativo = false
     }
   }, [autenticador, job.id, concluido])
+
+  // A fila de revisão só existe para quem edita; falhar aqui não derruba a tela.
+  useEffect(() => {
+    if (!concluido || !podeEditar) return
+    let ativo = true
+    chamarApi<ItemDaFila[]>(autenticador, `/v1/jobs/${job.id}/fila`).then(
+      (itens) => {
+        if (ativo) setFila(itens)
+      },
+      (erro: unknown) => {
+        if (ativo && erro instanceof SessaoExpirada) sessaoExpirada.current()
+      },
+    )
+    return () => {
+      ativo = false
+    }
+  }, [autenticador, job.id, concluido, podeEditar, recargaDaFila])
 
   // Depois de uma correção, só o painel recarrega: o player segue no mesmo link e ponto.
   const recarregarDecupagem = useCallback(() => {
@@ -364,6 +385,18 @@ export default function Video({
                 onChange={(v) => setAba(v as Aba)}
               />
               <Group gap="xs">
+                {podeEditar && fila.length > 0 && (
+                  <Badge
+                    component="button"
+                    type="button"
+                    color="orange"
+                    variant="light"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setFilaAberta(true)}
+                  >
+                    {`${fila.length} na fila`}
+                  </Badge>
+                )}
                 {podeEditar && (
                   <Tooltip label="Histórico de correções">
                     <ActionIcon
@@ -430,6 +463,20 @@ export default function Video({
           </Stack>
         </Paper>
       </Grid.Col>
+      {podeEditar && (
+        <FilaDeRevisao
+          aberta={filaAberta}
+          itens={fila}
+          autenticador={autenticador}
+          jobId={job.id}
+          aoFechar={() => setFilaAberta(false)}
+          aoResolver={() => {
+            setRecargaDaFila((n) => n + 1)
+            recarregarDecupagem()
+          }}
+          aoSessaoExpirada={() => sessaoExpirada.current()}
+        />
+      )}
       {podeEditar && (
         <HistoricoDeCorrecoes
           aberto={historicoAberto}
@@ -587,18 +634,25 @@ function CorrigirPessoa({
 
 interface ItemDoHistorico {
   id: string
-  tipo: 'pessoa.renomear' | 'desfazer'
+  tipo: 'pessoa.renomear' | 'desfazer' | 'descartar'
   autor_email: string
   criada_em: string
   motivo: string
   antes: string
   depois: string
-  estado: 'ativa' | 'desfeita'
+  estado: 'ativa' | 'desfeita' | 'reaplicada' | 'descartada'
 }
 
 const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   'pessoa.renomear': 'Renomear pessoa',
   desfazer: 'Desfazer',
+  descartar: 'Descartar da fila',
+}
+
+const ESTADOS_DE_CORRECAO = {
+  desfeita: 'desfeita',
+  reaplicada: 'reaplicada',
+  descartada: 'descartada',
 }
 
 const quando = (iso: string) =>
@@ -702,9 +756,9 @@ function HistoricoDeCorrecoes({
                   <Text size="xs" fw={700}>
                     {TIPOS_DE_CORRECAO[i.tipo]}
                   </Text>
-                  {i.estado === 'desfeita' && (
+                  {i.estado !== 'ativa' && (
                     <Badge size="xs" color="gray" variant="light">
-                      desfeita
+                      {ESTADOS_DE_CORRECAO[i.estado]}
                     </Badge>
                   )}
                 </Group>
@@ -729,7 +783,7 @@ function HistoricoDeCorrecoes({
                   </Text>
                 </Group>
                 <Text size="sm">{i.motivo}</Text>
-                {i.estado === 'ativa' && i.tipo !== 'desfazer' && (
+                {i.estado === 'ativa' && i.tipo === 'pessoa.renomear' && (
                   <Group justify="flex-end">
                     <Button size="xs" variant="default" onClick={() => setDesfazendo(i)}>
                       Desfazer
@@ -772,6 +826,162 @@ function HistoricoDeCorrecoes({
         </Stack>
       </Modal>
     </>
+  )
+}
+
+interface ItemDaFila {
+  id: string
+  autor_email: string
+  criada_em: string
+  motivo: string
+  antes: string
+  depois: string
+  candidatos: { item_id: string; nome: string; inicio_ms: number; fim_ms: number }[]
+}
+
+/** Gaveta das correções que não casaram após um reprocessamento: reaplicar num candidato ou descartar. */
+function FilaDeRevisao({
+  aberta,
+  itens,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoResolver,
+  aoSessaoExpirada,
+}: {
+  aberta: boolean
+  itens: ItemDaFila[]
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoResolver: () => void
+  aoSessaoExpirada: () => void
+}) {
+  return (
+    <Drawer opened={aberta} onClose={aoFechar} position="right" title="Fila de revisão">
+      <Stack gap="sm">
+        {itens.length === 0 && <Text size="sm">Nada na fila.</Text>}
+        {itens.map((i) => (
+          <ItemDaFilaDeRevisao
+            key={i.id}
+            item={i}
+            autenticador={autenticador}
+            jobId={jobId}
+            aoResolver={aoResolver}
+            aoSessaoExpirada={aoSessaoExpirada}
+          />
+        ))}
+      </Stack>
+    </Drawer>
+  )
+}
+
+function ItemDaFilaDeRevisao({
+  item,
+  autenticador,
+  jobId,
+  aoResolver,
+  aoSessaoExpirada,
+}: {
+  item: ItemDaFila
+  autenticador: Autenticador
+  jobId: string
+  aoResolver: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const [candidato, setCandidato] = useState<string | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [enviando, setEnviando] = useState(false)
+
+  async function resolver(acao: 'reaplicar' | 'descartar') {
+    setEnviando(true)
+    setErro(null)
+    try {
+      await chamarApi(autenticador, `/v1/jobs/${jobId}/fila/${item.id}/${acao}`, {
+        metodo: 'POST',
+        corpo: acao === 'reaplicar' ? { item_id: candidato, motivo } : { motivo },
+      })
+      aoResolver()
+    } catch (e) {
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        // Outro Editor resolveu antes: a fila e a decupagem mudaram.
+        setErro('Essa correção não está mais na fila. A fila foi recarregada.')
+        aoResolver()
+      } else setErro('Não foi possível resolver a correção.')
+    }
+    setEnviando(false)
+  }
+
+  return (
+    <Paper withBorder p="sm">
+      <Stack gap={4}>
+        <Text size="xs" c="dimmed">
+          {item.autor_email}
+        </Text>
+        <Text size="xs" c="dimmed">
+          {quando(item.criada_em)}
+        </Text>
+        <Group gap={4} wrap="nowrap">
+          <Text size="xs" c="dimmed">
+            Antes:
+          </Text>
+          <Text size="sm">{item.antes}</Text>
+        </Group>
+        <Group gap={4} wrap="nowrap">
+          <Text size="xs" c="dimmed">
+            Depois:
+          </Text>
+          <Text size="sm" fw={600}>
+            {item.depois}
+          </Text>
+        </Group>
+        <Text size="sm">{item.motivo}</Text>
+        <Select
+          label="Candidato"
+          placeholder={item.candidatos.length ? 'Escolha a pessoa' : 'Sem candidatos'}
+          data={item.candidatos.map((c) => ({
+            value: c.item_id,
+            label: `${c.nome} (${tempo(c.inicio_ms)}–${tempo(c.fim_ms)})`,
+          }))}
+          value={candidato}
+          onChange={setCandidato}
+        />
+        <Textarea
+          label="Motivo"
+          value={motivo}
+          maxLength={500}
+          rows={2}
+          onChange={(e) => setMotivo(e.currentTarget.value)}
+        />
+        {erro && (
+          <Alert color="red" variant="light" role="alert">
+            {erro}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button
+            size="xs"
+            variant="default"
+            loading={enviando}
+            disabled={!motivo.trim()}
+            onClick={() => void resolver('descartar')}
+          >
+            Descartar
+          </Button>
+          <Button
+            size="xs"
+            color="red"
+            loading={enviando}
+            disabled={!motivo.trim() || !candidato}
+            onClick={() => void resolver('reaplicar')}
+          >
+            Reaplicar
+          </Button>
+        </Group>
+      </Stack>
+    </Paper>
   )
 }
 

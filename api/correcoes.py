@@ -17,7 +17,7 @@ from pydantic import BaseModel, StringConstraints, field_validator
 from api.comparador import normalizar
 from api.pessoas import LISTAS, nao_identificado
 
-TipoDeCorrecao = Literal["pessoa.renomear", "desfazer"]
+TipoDeCorrecao = Literal["pessoa.renomear", "desfazer", "descartar"]
 LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
 
@@ -58,6 +58,8 @@ class Correcao(BaseModel):
     tipo: TipoDeCorrecao
     item_id: str = ""  # id da pessoa no JSON do modelo
     desfaz: str | None = None  # só no tipo "desfazer": o id da correção revertida
+    descarta: str | None = None  # só no tipo "descartar": o id da que saiu da fila
+    reaplica: str | None = None  # na reaplicação: o id da original que ela refaz
     antes: str
     depois: str
     ancora: Ancora
@@ -70,7 +72,7 @@ Motivo = Annotated[
 
 
 class ItemDoHistorico(Correcao):
-    estado: Literal["ativa", "desfeita"]
+    estado: Literal["ativa", "desfeita", "reaplicada", "descartada"]
 
 
 class NovoDesfazer(BaseModel):
@@ -97,6 +99,33 @@ class NovaCorrecao(BaseModel):
 
     _valor_sem_controle = field_validator("valor")(_sem_controle)
     _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
+
+
+class Candidato(BaseModel):
+    """Pessoa da versão atual que sobrepõe o intervalo ancorado."""
+
+    item_id: str
+    nome: str
+    inicio_ms: int
+    fim_ms: int
+
+
+class ItemDaFila(Correcao):
+    candidatos: list[Candidato]
+
+
+class NovaResolucao(BaseModel):
+    """Corpo de `POST /v1/jobs/{id}/fila/{cid}/descartar`."""
+
+    motivo: Motivo
+
+    _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
+
+
+class NovaReaplicacao(NovaResolucao):
+    """Corpo de `POST /v1/jobs/{id}/fila/{cid}/reaplicar`."""
+
+    item_id: Annotated[str, StringConstraints(min_length=1, max_length=40)]
 
 
 class ItemInexistente(Exception):
@@ -212,6 +241,11 @@ def _desfeitas(correcoes: list[Correcao]) -> set[str]:
     return {c.desfaz for c in correcoes if c.tipo == "desfazer" and c.desfaz}
 
 
+def _resolvidas(correcoes: list[Correcao]) -> set[str]:
+    """As que saíram da fila: reaplicadas ou descartadas."""
+    return {c.reaplica or c.descarta for c in correcoes if c.reaplica or c.descarta}  # type: ignore[misc]
+
+
 def id_do_desfazer(alvo_id: str) -> str:
     """Fixo por alvo: dois desfazer simultâneos colidem no repositório."""
     return f"{alvo_id}-desfeita"
@@ -242,7 +276,11 @@ def montar_desfazer(
     mais nova no mesmo item, desfazer a antiga não muda o que se vê. A de outra
     versão só se desfaz se `reconciliar` a casar; o registro aponta o item novo.
     """
-    if alvo.tipo == "desfazer" or alvo.id in _desfeitas(correcoes):
+    if (
+        alvo.tipo != "pessoa.renomear"
+        or alvo.id in _desfeitas(correcoes)
+        or alvo.id in _resolvidas(correcoes)
+    ):
         raise NaoDesfazivel(alvo.id)
     restantes = [c for c in correcoes if c.id != alvo.id]
     if alvo.ancora.versao == versao:
@@ -273,12 +311,21 @@ def montar_desfazer(
 def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
     """Da mais recente para a mais antiga, cada uma ativa ou desfeita."""
     desfeitas = _desfeitas(correcoes)
-    ordenadas = list(reversed(em_ordem(correcoes)))
+    reaplicadas = {c.reaplica for c in correcoes if c.reaplica}
+    descartadas = {c.descarta for c in correcoes if c.descarta}
+
+    def estado(c: Correcao) -> Literal["ativa", "desfeita", "reaplicada", "descartada"]:
+        if c.id in desfeitas:
+            return "desfeita"
+        if c.id in reaplicadas:
+            return "reaplicada"
+        if c.id in descartadas:
+            return "descartada"
+        return "ativa"
+
     return [
-        ItemDoHistorico(
-            **c.model_dump(), estado="desfeita" if c.id in desfeitas else "ativa"
-        )
-        for c in ordenadas
+        ItemDoHistorico(**c.model_dump(), estado=estado(c))
+        for c in reversed(em_ordem(correcoes))
     ]
 
 
@@ -334,16 +381,12 @@ def reconciliar(
 
     Casa só com exatamente um item de mesma identidade e intervalo sobreposto;
     zero ou vários candidatos não casam. Ignora as da versão atual, as
-    desfeitas e os próprios desfazer.
+    desfeitas, as que saíram da fila e os registros que não são renomeações.
     """
-    desfeitas = _desfeitas(correcoes)
+    fora = _desfeitas(correcoes) | _resolvidas(correcoes)
     resultado = Reconciliacao(casadas=[], atendidas=[], sem_casar=[])
     for c in em_ordem(correcoes):
-        if (
-            c.ancora.versao == versao
-            or c.tipo != "pessoa.renomear"
-            or c.id in desfeitas
-        ):
+        if c.ancora.versao == versao or c.tipo != "pessoa.renomear" or c.id in fora:
             continue
         candidatos = _candidatos(modelo, c)
         if len(candidatos) != 1:
@@ -414,3 +457,92 @@ def aplicar(
             else:
                 pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
     return resultado
+
+
+class NaoNaFila(Exception):
+    """A correção não está na fila de revisão (casou, saiu da fila ou é de outro tipo)."""
+
+
+def id_da_resolucao(alvo_id: str) -> str:
+    """Fixo por alvo: reaplicar e descartar simultâneos colidem no repositório."""
+    return f"{alvo_id}-resolvida"
+
+
+def fila(
+    modelo: dict[str, Any], versao: str, correcoes: list[Correcao]
+) -> list[ItemDaFila]:
+    """As correções que não casaram, da mais antiga para a mais nova, cada uma
+    com as pessoas da versão atual que sobrepõem o intervalo ancorado."""
+    itens = []
+    for c in reconciliar(modelo, versao, correcoes).sem_casar:
+        ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
+        candidatos = []
+        for pessoa in _pessoas(modelo):
+            intervalo = _intervalo_da_pessoa(pessoa)
+            if _sobrepoe(ancora, intervalo):
+                candidatos.append(
+                    Candidato(
+                        item_id=str(pessoa.get("id", "")),
+                        nome=str(pessoa["nome"]),
+                        inicio_ms=intervalo[0],
+                        fim_ms=intervalo[1],
+                    )
+                )
+        itens.append(ItemDaFila(**c.model_dump(), candidatos=candidatos))
+    return itens
+
+
+def _exige_na_fila(
+    modelo: dict[str, Any], versao: str, alvo: Correcao, correcoes: list[Correcao]
+) -> None:
+    if alvo.id not in {i.id for i in fila(modelo, versao, correcoes)}:
+        raise NaoNaFila(alvo.id)
+
+
+def montar_reaplicacao(
+    modelo: dict[str, Any],
+    versao: str,
+    alvo: Correcao,
+    correcoes: list[Correcao],
+    item_id: str,
+    motivo: str,
+    **registro: Any,
+) -> Correcao:
+    """A correção nova, ancorada na versão atual no item escolhido e ligada à
+    original (`reaplica`). A original sai da fila e continua no histórico."""
+    _exige_na_fila(modelo, versao, alvo, correcoes)
+    pessoa = next((p for p in _pessoas(modelo) if p.get("id") == item_id), None)
+    if pessoa is None:
+        raise ItemInexistente(item_id)
+    return Correcao(
+        tipo="pessoa.renomear",
+        reaplica=alvo.id,
+        item_id=item_id,
+        motivo=motivo,
+        antes=nome_atual(modelo, versao, correcoes, item_id),
+        depois=alvo.depois,
+        ancora=_ancora_da_pessoa(pessoa, versao),
+        **registro,
+    )
+
+
+def montar_descarte(
+    modelo: dict[str, Any],
+    versao: str,
+    alvo: Correcao,
+    correcoes: list[Correcao],
+    motivo: str,
+    **registro: Any,
+) -> Correcao:
+    """O registro que tira `alvo` da fila; ela não se aplica mais."""
+    _exige_na_fila(modelo, versao, alvo, correcoes)
+    return Correcao(
+        tipo="descartar",
+        descarta=alvo.id,
+        item_id=alvo.item_id,
+        motivo=motivo,
+        antes=alvo.antes,
+        depois=alvo.depois,
+        ancora=alvo.ancora,
+        **registro,
+    )
