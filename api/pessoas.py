@@ -12,6 +12,11 @@ _NAO_IDENTIFICADO = normalizar("não identificado")
 _LISTAS = ("na_imagem", "citada_na_fala", "citada_no_texto")
 
 
+def nao_identificado(nome: str) -> bool:
+    """O nome é o "não identificado" que o modelo usa para quem não reconhece."""
+    return normalizar(nome) == _NAO_IDENTIFICADO
+
+
 def unir_pessoas(
     grupos: list[list[Pessoa]],
 ) -> tuple[list[Pessoa], dict[int, dict[str, str]]]:

@@ -6,29 +6,33 @@ marcou como dúvida).
 """
 
 import hashlib
+from typing import Literal
 
-from api.comparador import normalizar
 from api.decupagem import Decupagem
+from api.pessoas import nao_identificado
 
 # ponytail: 10% é um chute; o valor real sai do piloto.
 FRACAO_PADRAO = 0.1
 
-_NAO_IDENTIFICADO = normalizar("não identificado")
+Motivo = Literal["duvida", "amostra"]
 
 
 def janelas_a_escalonar(
     chave_de_conteudo: str,
     resultados: dict[int, Decupagem],
     fracao: float,
-) -> dict[int, set[str]]:
-    """Janelas escaladas (índice → motivos `"duvida"` e/ou `"amostra"`).
+) -> dict[int, set[Motivo]]:
+    """Janelas escalonadas (índice → motivos `"duvida"` e/ou `"amostra"`).
 
-    O sorteio depende só da chave e do índice, nunca do resultado: uma nova
-    tentativa do mesmo job sorteia as mesmas janelas.
+    O sorteio depende só da chave e do índice, nunca da decupagem da janela:
+    uma nova tentativa do mesmo job sorteia as mesmas janelas. `fracao` fora
+    de [0, 1] é erro.
     """
-    escalonadas: dict[int, set[str]] = {}
+    if not 0 <= fracao <= 1:
+        raise ValueError(f"fração da amostra fora de [0, 1]: {fracao}")
+    escalonadas: dict[int, set[Motivo]] = {}
     for indice, decupagem in resultados.items():
-        motivos: set[str] = set()
+        motivos: set[Motivo] = set()
         if _tem_duvida(decupagem):
             motivos.add("duvida")
         if _na_amostra(chave_de_conteudo, indice, fracao):
@@ -40,11 +44,10 @@ def janelas_a_escalonar(
 
 def _na_amostra(chave_de_conteudo: str, indice: int, fracao: float) -> bool:
     digest = hashlib.sha256(f"{chave_de_conteudo}:{indice}".encode()).digest()
-    return int.from_bytes(digest, "big") / 2**256 < fracao
+    # Compara inteiro com `fracao * 2**256` (exato): dividir o hash por 2**256
+    # arredonda para 1.0 perto do máximo, e `fracao` 1 deixaria janelas de fora.
+    return int.from_bytes(digest, "big") < fracao * 2**256
 
 
 def _tem_duvida(decupagem: Decupagem) -> bool:
-    return any(
-        p.na_imagem and normalizar(p.nome) == _NAO_IDENTIFICADO
-        for p in decupagem.pessoas
-    )
+    return any(p.na_imagem and nao_identificado(p.nome) for p in decupagem.pessoas)

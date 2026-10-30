@@ -1,3 +1,5 @@
+import pytest
+
 from api.decupagem import Decupagem
 from api.escalonamento import FRACAO_PADRAO, janelas_a_escalonar
 
@@ -59,6 +61,12 @@ def test_fracao_zero_nao_sorteia_nenhuma() -> None:
 
 def test_fracao_um_sorteia_todas() -> None:
     assert amostra("abc:v1", 500, 1) == set(range(500))
+
+
+@pytest.mark.parametrize("fracao", [-0.1, 1.1, float("nan")])
+def test_fracao_fora_de_zero_a_um_e_erro(fracao: float) -> None:
+    with pytest.raises(ValueError, match="fração"):
+        janelas_a_escalonar("abc:v1", {0: LIMPA}, fracao)
 
 
 def test_fracao_sorteada_fica_perto_da_pedida() -> None:
