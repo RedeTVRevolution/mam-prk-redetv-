@@ -200,7 +200,7 @@ finish() {
 
 run_wizard() {
 
-TOTAL_STAGES=7
+TOTAL_STAGES=8
 
 # Ticket #2. Projeto dev próprio do MAM, fora de organização, com o Bruno como
 # Owner. Tudo o que criamos leva o prefixo mam- e, quando o recurso aceita, o
@@ -274,7 +274,7 @@ for role in roles/resourcemanager.projectIamAdmin roles/serviceusage.serviceUsag
     roles/iam.serviceAccountAdmin roles/iam.serviceAccountUser roles/run.admin \
     roles/storage.admin roles/artifactregistry.admin roles/datastore.owner \
     roles/eventarc.admin roles/workflows.admin roles/identityplatform.admin \
-    roles/monitoring.editor; do
+    roles/monitoring.editor roles/logging.configWriter; do
   gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA_EMAIL" \
     --role="$role" --condition=None >/dev/null
   printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$role"
@@ -380,6 +380,27 @@ else
 fi
 
 # ── 7 ────────────────────────────────────────────────────────────────────
+stage "Identity Platform"
+# Inicializar o Identity Platform exige firebase.projects.update, que nenhum papel
+# do Identity Platform dá à mam-terraform. Então você, como Owner, inicializa uma
+# vez (só cria a config vazia), e o Terraform importa a config e cuida do resto (#11).
+gcloud services enable identitytoolkit.googleapis.com --project "$P"
+IDP_TOKEN=$(gcloud auth print-access-token)
+idp() {
+  curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $IDP_TOKEN" \
+    -H "x-goog-user-project: $P" "$@" || true
+}
+if [[ "$(idp "https://identitytoolkit.googleapis.com/admin/v2/projects/$P/config")" == 200 ]]; then
+  printf '  %s✓%s Identity Platform já inicializado em %s\n' "$GREEN" "$RESET" "$P"
+elif [[ "$(idp -X POST -d '' "https://identitytoolkit.googleapis.com/v2/projects/$P/identityPlatform:initializeAuth")" == 200 ]]; then
+  printf '  %s✓%s Identity Platform inicializado em %s\n' "$GREEN" "$RESET" "$P"
+else
+  warn "Não consegui inicializar o Identity Platform em $P."
+  SKIPPED+=("Inicializar o Identity Platform em $P como Owner (etapa 7 do wizard), antes do make deploy-dev")
+fi
+pause "Enter para continuar"
+
+# ── 8 ────────────────────────────────────────────────────────────────────
 stage "Registrar na issue #2"
 body=$(mktemp)
 {

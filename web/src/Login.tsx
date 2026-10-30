@@ -1,5 +1,6 @@
 import { useState, type SubmitEvent } from 'react'
 import {
+  ContaBloqueada,
   CredencialInvalida,
   type Autenticador,
   type ResultadoDaSenha,
@@ -39,7 +40,9 @@ export default function Login({
       setErro(
         erro instanceof CredencialInvalida
           ? 'Credenciais inválidas. Confira os dados e tente de novo.'
-          : 'Login indisponível no momento.',
+          : erro instanceof ContaBloqueada
+            ? 'Muitas tentativas erradas. Espere alguns minutos e tente de novo.'
+            : 'Login indisponível no momento.',
       )
     }
   }

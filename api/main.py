@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from api.auth import (
     Usuario,
     UsuarioAutenticado,
     VerificadorDeToken,
+    VerificadorIdentityPlatform,
     exigir_token,
 )
 from api.jobs import (
@@ -32,7 +34,7 @@ PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
 class _SemVerificador:
-    """Padrão até o verificador real do Identity Platform existir: nega tudo."""
+    """Sem projeto do Identity Platform (testes e máquina local): nega tudo."""
 
     def verificar(self, token: str) -> Usuario:
         raise TokenInvalido
@@ -83,4 +85,6 @@ def criar_app(
     return app
 
 
-app = criar_app()
+# No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
+_projeto = os.environ.get("GCP_PROJECT_ID")
+app = criar_app(VerificadorIdentityPlatform(_projeto) if _projeto else None)

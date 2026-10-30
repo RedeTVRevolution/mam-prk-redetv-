@@ -24,7 +24,14 @@ O hook de pre-commit recusa o commit se o gitleaks achar um segredo nos arquivos
 
 ## Deploy no dev
 
-A E0 roda num serviço Cloud Run único, `mam-web`, em que o FastAPI serve a API e o build do React. O Terraform em `infra/` cria tudo: Artifact Registry, Firestore, os buckets privados (quarentena, aceitos e decupagens), uma conta de serviço por componente e o serviço. Antes, rode uma vez o `scripts/wizard-gcp-dev.sh`, que cria o projeto, a conta `mam-terraform` e o `.env`. Precisa também do [Terraform](https://developer.hashicorp.com/terraform/install) e do Docker Desktop aberto:
+A E0 roda num serviço Cloud Run único, `mam-web`, em que o FastAPI serve a API e o build do React. O Terraform em `infra/` cria tudo: Artifact Registry, Firestore, os buckets privados (quarentena, aceitos e decupagens), uma conta de serviço por componente, o serviço, o Identity Platform (login com MFA TOTP e política de senha) e o alerta de login dos administradores de emergência. Antes, rode uma vez o `scripts/wizard-gcp-dev.sh`, que cria o projeto, a conta `mam-terraform` e o `.env` e inicializa o Identity Platform com a sua conta de Owner. Esse último passo é único por projeto (vale também para `staging` e `prod`): ele exige `firebase.projects.update`, que a `mam-terraform` não tem, e depois o Terraform importa a config e cuida do resto. Acrescente também ao `.env` os e-mails das contas, separados por vírgula:
+
+```sh
+ADMINS_EMERGENCIA='bruno.admin@exemplo.com,ti@exemplo.com'
+USUARIOS='bruno@exemplo.com,documentalista@exemplo.com'
+```
+
+Precisa também do [Terraform](https://developer.hashicorp.com/terraform/install) e do Docker Desktop aberto:
 
 ```sh
 brew tap hashicorp/tap && brew install hashicorp/tap/terraform
@@ -39,11 +46,13 @@ make deploy-dev
 Ele impersona a `mam-terraform` (ADR 0002), sem chave em arquivo, e:
 
 1. cria o bucket do estado do Terraform, `<projeto>-tfstate`, se não existir: privado, com acesso uniforme e versionamento;
-2. aplica só o Artifact Registry, constrói a imagem para `linux/amd64` e a envia;
+2. aplica só o Artifact Registry e o Identity Platform, constrói a imagem para `linux/amd64` com a chave web do login e a envia;
 3. aplica o resto pelo digest da imagem, então cada deploy gera uma revisão nova;
 4. confere que `/v1/health` responde 200 e mostra a URL.
 
 Cada `terraform apply` mostra o plano e pede confirmação.
+
+Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda a cada pessoa o link para definir a senha; no primeiro login, a pessoa cadastra o aplicativo autenticador. Rodar de novo só reenvia o link. A API recusa todo token sem o segundo fator TOTP, e o Identity Platform bloqueia a conta por um tempo após tentativas erradas.
 
 ## Loop AFK
 

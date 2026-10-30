@@ -7,6 +7,9 @@ export type ResultadoDaSenha =
 
 export class CredencialInvalida extends Error {}
 
+/** Tentativas erradas demais: o Identity Platform bloqueia a conta por um tempo. */
+export class ContaBloqueada extends Error {}
+
 export interface Autenticador {
   /** Token da sessão atual, ou null sem sessão. */
   token(): Promise<string | null>

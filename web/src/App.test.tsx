@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import App from './App.tsx'
+import { ContaBloqueada } from './auth/autenticador.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 
 const chamadas: { url: string; autorizacao: string | null }[] = []
@@ -88,6 +89,20 @@ test('senha errada mostra erro e continua no login', async () => {
 
   expect((await screen.findByRole('alert')).textContent).toContain('inválid')
   expect(screen.queryByLabelText('Código do autenticador')).toBeNull()
+})
+
+test('conta bloqueada por tentativas erradas pede para esperar', async () => {
+  const usuario = userEvent.setup()
+  const auth = autenticador()
+  auth.entrar = async () => {
+    throw new ContaBloqueada()
+  }
+  render(<App autenticador={auth} />)
+  await screen.findByLabelText('E-mail')
+
+  await preencherSenha(usuario)
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Muitas tentativas')
 })
 
 test('código TOTP errado mostra erro e não entra', async () => {
