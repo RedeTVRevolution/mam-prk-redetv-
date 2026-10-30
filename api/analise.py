@@ -9,7 +9,7 @@ a `falhou` e a resposta continua 200, para o Workflows não repetir a chamada.
 import os
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, cast
 
 import google.auth
@@ -28,7 +28,7 @@ from api.gemini import (
     TransporteVertex,
     analisar,
 )
-from api.jobs import Job, RepositorioDeJobs
+from api.jobs import Job, RepositorioDeJobs, agora_utc
 from api.nuvem import RepositorioFirestore, objeto_da_decupagem, objeto_do_proxy
 
 
@@ -38,10 +38,10 @@ class NovaAnalise(BaseModel):
     job_id: str
 
 
-def _atualizar(repositorio: RepositorioDeJobs, job: Job, **campos: object) -> None:
-    repositorio.salvar(
-        job.model_copy(update={**campos, "atualizado_em": datetime.now(UTC)})
-    )
+def _atualizar(
+    repositorio: RepositorioDeJobs, job: Job, agora: datetime, **campos: object
+) -> None:
+    repositorio.salvar(job.model_copy(update={**campos, "atualizado_em": agora}))
 
 
 def criar_app(
@@ -50,6 +50,7 @@ def criar_app(
     transporte: Transporte,
     bucket_de_aceitos: str,
     dormir: Callable[[float], None] = time.sleep,
+    relogio: Callable[[], datetime] = agora_utc,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV — análise")
 
@@ -59,7 +60,13 @@ def criar_app(
         if job is None or job.estado != "analisando":
             return {"status": "ignorado"}
         if job.sha256 is None or job.duracao_s is None:
-            _atualizar(repositorio, job, estado="falhou", codigo_falha="analise_falhou")
+            _atualizar(
+                repositorio,
+                job,
+                relogio(),
+                estado="falhou",
+                codigo_falha="analise_falhou",
+            )
             return {"status": "falhou"}
         try:
             decupagem = analisar(
@@ -70,12 +77,18 @@ def criar_app(
                 dormir=dormir,
             )
         except AnaliseFalhou:
-            _atualizar(repositorio, job, estado="falhou", codigo_falha="analise_falhou")
+            _atualizar(
+                repositorio,
+                job,
+                relogio(),
+                estado="falhou",
+                codigo_falha="analise_falhou",
+            )
             return {"status": "falhou"}
         decupagens.blob(objeto_da_decupagem(job.id)).upload_from_string(
             decupagem.model_dump_json(), content_type="application/json"
         )
-        _atualizar(repositorio, job, estado="concluido")
+        _atualizar(repositorio, job, relogio(), estado="concluido")
         return {"status": "concluido"}
 
     return app

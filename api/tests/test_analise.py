@@ -8,7 +8,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,6 +30,7 @@ from api.tests.test_nuvem import _credencial_local
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
 EMULADOR_STORAGE = os.environ.get("STORAGE_EMULATOR_HOST")
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
+DEPOIS = BASE + timedelta(minutes=5)
 SHA = "a" * 64
 
 pytestmark = pytest.mark.skipif(
@@ -87,6 +88,7 @@ def _ambiente(*respostas: str | Exception) -> Ambiente:
         transporte,
         bucket_de_aceitos=f"teste-aceitos-{sufixo}",
         dormir=lambda _s: None,
+        relogio=lambda: DEPOIS,
     )
     return Ambiente(repositorio, decupagens, transporte, TestClient(app))
 
@@ -103,7 +105,7 @@ def test_sucesso_grava_a_decupagem_e_leva_o_job_a_concluido() -> None:
 
     job = ambiente.job("j1")
     assert (job.estado, job.codigo_falha) == ("concluido", None)
-    assert job.atualizado_em > BASE
+    assert job.atualizado_em == DEPOIS
     gravada = Decupagem.model_validate_json(
         ambiente.decupagens.blob("j1.json").download_as_bytes()
     )
