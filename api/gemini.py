@@ -1,4 +1,4 @@
-"""Cliente do Gemini 3.5 Flash-Lite (Flex, endpoint global) para a decupagem.
+"""Cliente do Gemini 3.5 Flash-Lite (Standard, endpoint global) para a decupagem.
 
 A rede fica atrás de `Transporte`: aqui moram a chamada, a validação e as
 tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levanta
@@ -32,8 +32,7 @@ TENTATIVAS_REDE = 5  # novas tentativas após 429/5xx
 TENTATIVAS_ESQUEMA = 2  # novas tentativas após resposta fora do esquema
 BACKOFF_BASE_S = 1.0
 BACKOFF_TETO_S = 60.0
-TIMEOUT_DO_FLEX_S = 600  # o Flex pode demorar; o servidor também desiste aos 600 s
-TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
+TIMEOUT_DA_REDE_S = 600
 # O Workflows e o Cloud Run desistem aos 1800 s: uma tentativa só começa se cabe
 # inteira neste prazo, com folga para gravar a decupagem e o Job.
 PRAZO_DA_ANALISE_S = 1500
@@ -128,7 +127,7 @@ class SessaoHttp(Protocol):
 
 
 class TransporteVertex:
-    """REST na Vertex AI, endpoint global (ADR 0001), no modo Flex."""
+    """REST na Vertex AI, endpoint global (ADR 0001), no modo Standard (ADR 0004)."""
 
     def __init__(self, projeto: str, sessao: SessaoHttp) -> None:
         self._projeto = projeto
@@ -163,16 +162,8 @@ class TransporteVertex:
             },
             "labels": chamada.rotulos,
         }
-        # Só Flex, sem Provisioned Throughput antes (doc "Flex PayGo" da Vertex).
-        cabecalhos = {
-            "X-Vertex-AI-LLM-Request-Type": "shared",
-            "X-Vertex-AI-LLM-Shared-Request-Type": "flex",
-            "X-Server-Timeout": str(TIMEOUT_DO_FLEX_S),
-        }
         try:
-            resposta = self._sessao.post(
-                url, json=corpo, headers=cabecalhos, timeout=TIMEOUT_DA_REDE_S
-            )
+            resposta = self._sessao.post(url, json=corpo, timeout=TIMEOUT_DA_REDE_S)
         except (requests.RequestException, OSError) as e:
             raise ErroHttp(503) from e
         if resposta.status_code != 200:

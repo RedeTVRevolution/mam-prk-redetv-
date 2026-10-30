@@ -269,8 +269,9 @@ resource "google_cloud_run_v2_job" "validacao" {
           # limpa tem o tamanho do original (até 4 GiB) e o proxy de 480p é bem menor
           # (dezenas de MiB). O volume em memória conta na memória do contêiner:
           # 4 GiB da cópia + 1 GiB do proxy e do ffmpeg, e 3 GiB de folga = 8 GiB.
+          # 4 vCPU: o proxy do clipe2 caiu 26% de 2 para 4 threads, e 8 não ganharam nada.
           limits = {
-            cpu    = "2"
+            cpu    = "4"
             memory = "8Gi"
           }
         }

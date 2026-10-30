@@ -367,9 +367,9 @@ def test_transporte_vertex_monta_a_chamada_global_com_video_esquema_e_rotulo() -
     assert corpo["labels"] == {"job_id": JOB}
     assert "tools" not in corpo
     assert corpo["systemInstruction"] == {"parts": [{"text": "Decupe."}]}
-    # Flex: só ele, sem Provisioned Throughput antes.
-    assert pedido["headers"]["X-Vertex-AI-LLM-Shared-Request-Type"] == "flex"
-    assert pedido["headers"]["X-Vertex-AI-LLM-Request-Type"] == "shared"
+    # Standard (ADR 0004): nenhum cabeçalho de Flex.
+    assert not any(c.startswith("X-Vertex-AI-LLM") for c in pedido.get("headers", {}))
+    assert "X-Server-Timeout" not in pedido.get("headers", {})
 
 
 def test_transporte_vertex_guarda_a_versao_que_a_vertex_informa() -> None:

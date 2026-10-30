@@ -137,7 +137,9 @@ def validar(entrada: Path, saida: Path) -> Aceito:
         [
             *comum, "-xerror", "-err_detect", "explode", "-i", str(entrada),
             "-map", "0:v", "-map", "0:a?",
-            "-vf", "scale=-2:480", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            # veryfast: no clipe2, 41% mais rápido que o medium e SSIM de 0,986 contra 0,990.
+            "-vf", "scale=-2:480", "-c:v", "libx264", "-preset", "veryfast",
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-map_metadata", "-1", "-map_chapters", "-1",
             "-movflags", "+faststart", str(proxy),
         ]
