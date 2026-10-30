@@ -116,13 +116,16 @@ resource "google_service_account" "mam" {
 # Job (ADR 0002), e o de chamar o serviço de análise, no próprio serviço. Quem lê o
 # proxy por gs:// na Vertex é a conta que chama (mam-analise, com objectViewer em
 # aceitos), segundo a doc do generateContent; o agente de serviço da Vertex não
-# precisa de papel no bucket.
+# precisa de papel no bucket. O run.viewer da orquestração fica no projeto porque o
+# conector do Workflows acompanha a execução do Job pela operação, que é do projeto e
+# não do Job; sem ele, o passo `valida` falharia depois de o Job rodar e marcaria um
+# vídeo bom como arquivo_corrompido.
 locals {
   papeis_no_projeto = {
     web          = ["roles/datastore.user"]
     validacao    = ["roles/datastore.user"]
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
-    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker"]
+    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
   }
   papeis_nos_buckets = {
     # A API assina as URLs de envio para a quarentena e lê o proxy de reprodução e a decupagem.
