@@ -1,9 +1,13 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { render } from './render-teste.tsx'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { AppShell } from '@mantine/core'
+import type { ReactNode } from 'react'
 import Biblioteca from './Biblioteca.tsx'
+import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 
 interface JobApi {
@@ -81,13 +85,20 @@ function mp4(nome = 'enviado.mp4') {
   return new File([bytes], nome, { type: 'video/mp4' })
 }
 
+// No app, a Biblioteca fica dentro do AppShell do App.
+function noShell(tela: ReactNode) {
+  return <AppShell navbar={NAVBAR_DA_BIBLIOTECA}>{tela}</AppShell>
+}
+
 async function abrir(opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void } = {}) {
   render(
-    <Biblioteca
-      autenticador={await comSessao()}
-      aoSessaoExpirada={opcoes.aoSessaoExpirada ?? (() => {})}
-      intervaloMs={opcoes.intervaloMs}
-    />,
+    noShell(
+      <Biblioteca
+        autenticador={await comSessao()}
+        aoSessaoExpirada={opcoes.aoSessaoExpirada ?? (() => {})}
+        intervaloMs={opcoes.intervaloMs}
+      />,
+    ),
   )
 }
 
@@ -98,25 +109,25 @@ test('lista nome, data e estado de cada Job, e o código de quem falhou', async 
   ]
   await abrir()
 
-  const linhas = await screen.findAllByRole('row')
-  const falhou = within(linhas[1]!)
-  expect(falhou.getByText('quebrado.mp4')).toBeTruthy()
-  expect(falhou.getByText('falhou')).toBeTruthy()
+  const falhou = within((await screen.findByText('quebrado.mp4')).closest('.mantine-Card-root') as HTMLElement)
+  expect(falhou.getByText('Falhou')).toBeTruthy()
   expect(falhou.getByText('codec_nao_suportado')).toBeTruthy()
-  const validando = within(linhas[2]!)
-  expect(validando.getByText('validando')).toBeTruthy()
+  const validando = within(screen.getByText('novo.mp4').closest('.mantine-Card-root') as HTMLElement)
+  expect(validando.getByText('Em quarentena')).toBeTruthy()
   expect(validando.getByText(/29\/10\/2026/)).toBeTruthy()
 })
 
 test('a lista acompanha o estado por consulta periódica', async () => {
   jobs = [job({ estado: 'validando' })]
   await abrir({ intervaloMs: 20 })
-  await screen.findByText('validando')
+  const cartao = () => (screen.getByText('clipe.mp4').closest('.mantine-Card-root') as HTMLElement)
+  await screen.findByText('clipe.mp4')
+  expect(within(cartao()).getByText('Em quarentena')).toBeTruthy()
 
   jobs = [job({ estado: 'concluido' })]
 
-  expect(await screen.findByText('concluido')).toBeTruthy()
-  expect(screen.queryByText('validando')).toBeNull()
+  await waitFor(() => expect(within(cartao()).getByText('Concluído')).toBeTruthy())
+  expect(within(cartao()).queryByText('Em quarentena')).toBeNull()
 })
 
 test('recusa na hora o arquivo que não é MP4, sem chamar a API', async () => {
@@ -141,7 +152,8 @@ test('envia o MP4: cria o Job, sobe o arquivo e mostra o Job aguardando upload',
   expect(criacoes).toEqual([{ nome: 'enviado.mp4', tamanho_bytes: 64, tipo: 'video/mp4' }])
   expect(pedacosEnviados).toEqual([64])
   expect(await screen.findByText('enviado.mp4')).toBeTruthy()
-  expect(screen.getByText('aguardando_upload')).toBeTruthy()
+  const card = (screen.getByText('enviado.mp4').closest('.mantine-Card-root') as HTMLElement)
+  expect(within(card).getByText('Aguardando envio')).toBeTruthy()
 })
 
 test('um 401 na lista avisa que a sessão expirou', async () => {
@@ -194,11 +206,58 @@ test('abrir um vídeo concluído ou falhado chama aoAbrir; os demais não são c
   ]
   const aoAbrir = vi.fn()
   render(
-    <Biblioteca autenticador={await comSessao()} aoSessaoExpirada={() => {}} aoAbrir={aoAbrir} />,
+    noShell(
+      <Biblioteca autenticador={await comSessao()} aoSessaoExpirada={() => {}} aoAbrir={aoAbrir} />,
+    ),
   )
 
   await usuario.click(await screen.findByRole('button', { name: 'pronto.mp4' }))
 
   expect(aoAbrir).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
   expect(screen.queryByRole('button', { name: 'andando.mp4' })).toBeNull()
+})
+
+test('mostra a duração em mm:ss quando a API traz', async () => {
+  jobs = [job({ estado: 'concluido', duracao_s: 125 })]
+  await abrir()
+
+  expect(await screen.findByText(/· 02:05/)).toBeTruthy()
+})
+
+test('desmarcar um estado esconde os cards daquele estado', async () => {
+  const usuario = userEvent.setup()
+  jobs = [
+    job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' }),
+    job({ id: 'b', nome: 'andando.mp4', estado: 'analisando' }),
+  ]
+  await abrir()
+  await screen.findByText('andando.mp4')
+
+  await usuario.click(screen.getByRole('checkbox', { name: 'Decupando' }))
+
+  expect(screen.queryByText('andando.mp4')).toBeNull()
+  expect(screen.getByText('pronto.mp4')).toBeTruthy()
+})
+
+test('depois de escolher um arquivo, o seletor fica livre para a mesma escolha de novo', async () => {
+  const usuario = userEvent.setup({ applyAccept: false })
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+  const campo = screen.getByLabelText('Enviar vídeo') as HTMLInputElement
+
+  await usuario.upload(campo, mp4('filme.mov'))
+
+  await screen.findByRole('alert')
+  expect(campo.value).toBe('')
+})
+
+test('um estado fora do mapa continua visível, qualquer que seja o filtro', async () => {
+  const usuario = userEvent.setup()
+  jobs = [job({ nome: 'estranho.mp4', estado: 'arquivado' })]
+  await abrir()
+  await screen.findByText('estranho.mp4')
+
+  for (const caixa of screen.getAllByRole('checkbox')) await usuario.click(caixa)
+
+  expect(screen.getByText('estranho.mp4')).toBeTruthy()
 })

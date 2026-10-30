@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { render } from './render-teste.tsx'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -70,51 +71,207 @@ async function abrir(job: { estado: string; codigo_falha?: string | null }) {
     <Video
       autenticador={auth}
       job={{ id: 'j1', nome: 'clipe.mp4', codigo_falha: null, ...job }}
-      aoVoltar={() => {}}
       aoSessaoExpirada={() => {}}
     />,
   )
 }
 
-test('mostra o player com o link assinado e o painel agrupado por categoria', async () => {
+async function jogador() {
+  return (await screen.findByLabelText('Player')) as HTMLVideoElement
+}
+
+function irPara(player: HTMLVideoElement, segundos: number) {
+  player.currentTime = segundos
+  fireEvent.timeUpdate(player)
+}
+
+const aba = (nome: string) => screen.getByRole('radio', { name: nome })
+
+test('mostra o player com o link assinado e o timecode atual / duração', async () => {
   await abrir({ estado: 'concluido' })
 
-  const player = await screen.findByLabelText('Player')
+  const player = await jogador()
   expect(player.getAttribute('src')).toBe('https://storage.exemplo/proxy/j1')
-  const imagem = within(screen.getByRole('region', { name: 'Pessoas na imagem' }))
-  expect(imagem.getByText('00:05 Ana Souza')).toBeTruthy()
-  const fala = within(screen.getByRole('region', { name: 'Citadas na fala' }))
-  expect(fala.getByText('01:05 Ana Souza')).toBeTruthy()
-  const texto = within(screen.getByRole('region', { name: 'Citadas no texto' }))
-  expect(texto.getByText('01:10 Ana Souza — <b>Ana</b> no GC')).toBeTruthy()
-  expect(within(screen.getByRole('region', { name: 'Pautas' })).getByText('00:30 Eleição')).toBeTruthy()
-  const planos = within(screen.getByRole('region', { name: 'Planos' }))
-  expect(planos.getByText('00:00 estúdio')).toBeTruthy()
-  expect(planos.getByText('02:20 carro passa')).toBeTruthy()
-  expect(within(screen.getByRole('region', { name: 'Comerciais' })).getByText('01:30 Marca X (intervalo)')).toBeTruthy()
-  expect(within(screen.getByRole('region', { name: 'Transcrição' })).getByText('00:01 Locutor: Boa noite')).toBeTruthy()
+  // Antes do metadata, a duração é o maior fim_ms da decupagem.
+  expect(screen.getByText('00:00 / 02:30')).toBeTruthy()
+  Object.defineProperty(player, 'duration', { value: 180, configurable: true })
+  fireEvent.loadedMetadata(player)
+  irPara(player, 75)
+  expect(screen.getByText('01:15 / 03:00')).toBeTruthy()
 })
 
-test('texto da decupagem aparece escapado, nunca como HTML', async () => {
-  await abrir({ estado: 'concluido' })
-  await screen.findByLabelText('Player')
-
-  expect(document.querySelector('aside b')).toBeNull()
-})
-
-test('clicar num item leva o currentTime do player ao inicio_ms', async () => {
+test('aba Pessoas separa quem aparece de quem só é citado', async () => {
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' })
-  const player = (await screen.findByLabelText('Player')) as HTMLVideoElement
+  const player = await jogador()
 
-  await usuario.click(screen.getByText('00:30 Eleição'))
-  expect(player.currentTime).toBe(30)
-
-  await usuario.click(screen.getByText('00:05 Ana Souza'))
+  const painel = within(screen.getByLabelText('Decupagem'))
+  expect(painel.getByText('Aparecem na imagem')).toBeTruthy()
+  expect(painel.getByText('Só citadas (não contam como tempo de tela)')).toBeTruthy()
+  const quadro = painel.getByRole('button', { name: '00:05 · rosto' })
+  expect(quadro.querySelector('video')?.getAttribute('src')).toBe(
+    'https://storage.exemplo/proxy/j1#t=6',
+  )
+  await usuario.click(quadro)
   expect(player.currentTime).toBe(5)
 
-  await usuario.click(screen.getByText('02:20 carro passa'))
+  await usuario.click(painel.getByRole('button', { name: 'fala 01:05' }))
+  expect(player.currentTime).toBe(65)
+  await usuario.click(painel.getByRole('button', { name: 'texto 01:10' }))
+  expect(player.currentTime).toBe(70)
+})
+
+test('o texto da tela aparece escapado, nunca como HTML', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  await jogador()
+
+  await usuario.hover(screen.getByRole('button', { name: 'texto 01:10' }))
+
+  expect(await screen.findByText('<b>Ana</b> no GC')).toBeTruthy()
+  expect(document.querySelector('b')).toBeNull()
+})
+
+test('aba Pautas salta o player e destaca a pauta em curso', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+  await usuario.click(aba('Pautas'))
+
+  const pauta = screen.getByText('Eleição').closest('a, button') as HTMLElement
+  expect(screen.getByText('00:30–01:00')).toBeTruthy()
+  expect(pauta.hasAttribute('data-active')).toBe(false)
+  await usuario.click(pauta)
+  expect(player.currentTime).toBe(30)
+  irPara(player, 40)
+  expect(pauta.hasAttribute('data-active')).toBe(true)
+  irPara(player, 61)
+  expect(pauta.hasAttribute('data-active')).toBe(false)
+})
+
+test('aba Marcas lista os comerciais e salta', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+  await usuario.click(aba('Marcas'))
+
+  expect(screen.getByText('intervalo · 01:30')).toBeTruthy()
+  await usuario.click(screen.getByText('Marca X'))
+  expect(player.currentTime).toBe(90)
+})
+
+test('aba Planos usa a ação, ou o ambiente se não houver, e salta', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+  await usuario.click(aba('Planos'))
+
+  expect(screen.getByText('estúdio', { selector: 'span' })).toBeTruthy()
+  expect(screen.getByText('rua · 02:20')).toBeTruthy()
+  await usuario.click(screen.getByText('carro passa'))
   expect(player.currentTime).toBe(140)
+})
+
+test('aba Fala destaca a fala em curso e salta', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+  await usuario.click(aba('Fala'))
+
+  expect(screen.getByText('00:01 LOCUTOR')).toBeTruthy()
+  const fala = screen.getByText('Boa noite').closest('button') as HTMLElement
+  const fundo = () => fala.querySelector('.mantine-Paper-root')?.getAttribute('style') ?? ''
+  expect(fundo()).not.toContain('red-9')
+  await usuario.click(fala)
+  expect(player.currentTime).toBe(1)
+  irPara(player, 2)
+  expect(fundo()).toContain('red-9')
+})
+
+test('clicar numa ocorrência da linha do tempo leva o player ao início dela', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+
+  await usuario.click(screen.getByLabelText('Pautas 00:30'))
+  expect(player.currentTime).toBe(30)
+  await usuario.click(screen.getByLabelText('Aparições 00:05'))
+  expect(player.currentTime).toBe(5)
+  await usuario.click(screen.getByLabelText('Menções 01:05'))
+  expect(player.currentTime).toBe(65)
+  await usuario.click(screen.getByLabelText('Menções 01:10'))
+  expect(player.currentTime).toBe(70)
+  await usuario.click(screen.getByLabelText('Comerciais 01:30'))
+  expect(player.currentTime).toBe(90)
+  await usuario.click(screen.getByLabelText('Planos 02:20'))
+  expect(player.currentTime).toBe(140)
+  await usuario.click(screen.getByLabelText('Fala 00:01'))
+  expect(player.currentTime).toBe(1)
+})
+
+test('ocorrências sobrepostas ficam no seu tempo, sem empurrar as seguintes', async () => {
+  const pessoa = decupagem.pessoas[0]
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      HttpResponse.json({
+        ...decupagem,
+        pessoas: [
+          {
+            ...pessoa,
+            na_imagem: [
+              { inicio_ms: 5_000, fim_ms: 20_000, evidencia: 'rosto' },
+              { inicio_ms: 10_000, fim_ms: 15_000, evidencia: 'rosto' },
+              { inicio_ms: 18_000, fim_ms: 25_000, evidencia: 'rosto' },
+              { inicio_ms: 30_000, fim_ms: 40_000, evidencia: 'rosto' },
+            ],
+          },
+        ],
+      }),
+    ),
+  )
+  await abrir({ estado: 'concluido' })
+  await jogador()
+
+  // Duração de 150 s (maior fim_ms): cada segundo vale 1/1,5 %.
+  const valor = (secao: Element | null) => Number(secao?.getAttribute('aria-valuenow'))
+  const largura = (rotulo: string) => valor(screen.getByLabelText(rotulo))
+  const vaoAntes = (rotulo: string) => valor(screen.getByLabelText(rotulo).previousElementSibling)
+  expect(largura('Aparições 00:05')).toBeCloseTo(15 / 1.5)
+  // A de 10–15 s fica coberta pela de 5–20 s; a de 18–25 s só desenha o que sobra.
+  expect(screen.queryByLabelText('Aparições 00:10')).toBeNull()
+  expect(largura('Aparições 00:18')).toBeCloseTo(5 / 1.5)
+  expect(vaoAntes('Aparições 00:30')).toBeCloseTo(5 / 1.5)
+  expect(largura('Aparições 00:30')).toBeCloseTo(10 / 1.5)
+})
+
+test('sem duração no player, a linha do tempo segue a da decupagem', async () => {
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+
+  Object.defineProperty(player, 'duration', { value: Infinity, configurable: true })
+  fireEvent.loadedMetadata(player)
+
+  expect(screen.getByText('00:00 / 02:30')).toBeTruthy()
+  expect(screen.getByRole('slider').getAttribute('aria-valuemax')).toBe('150000')
+})
+
+test('arrastar a cabeça de leitura move o player', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+
+  screen.getByRole('slider').focus()
+  await usuario.keyboard('{ArrowRight}')
+
+  expect(player.currentTime).toBe(1)
+})
+
+test('o painel traz o botão de baixar e nenhum botão de voltar próprio', async () => {
+  await abrir({ estado: 'concluido' })
+  await jogador()
+
+  expect(screen.queryByText('Voltar à Biblioteca')).toBeNull()
+  expect(screen.getByLabelText('Baixar decupagem (JSON)')).toBeTruthy()
 })
 
 test('link expirado: o player pede outro e volta ao mesmo ponto', async () => {
@@ -124,8 +281,8 @@ test('link expirado: o player pede outro e volta ao mesmo ponto', async () => {
   ]
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' })
-  const player = (await screen.findByLabelText('Player')) as HTMLVideoElement
-  await usuario.click(screen.getByText('00:30 Eleição'))
+  const player = await jogador()
+  await usuario.click(screen.getByLabelText('Pautas 00:30'))
 
   fireEvent.error(player)
 
@@ -141,7 +298,7 @@ test('erro do player com link ainda válido não pede outro link', async () => {
     if (request.url.endsWith('/reproducao')) pedidos++
   })
   await abrir({ estado: 'concluido' })
-  const player = await screen.findByLabelText('Player')
+  const player = await jogador()
 
   fireEvent.error(player)
   await new Promise((r) => setTimeout(r, 20))
@@ -168,9 +325,9 @@ test('o botão baixa a decupagem em JSON', async () => {
   URL.revokeObjectURL = () => {}
   const clique = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
   await abrir({ estado: 'concluido' })
-  await screen.findByLabelText('Player')
+  await jogador()
 
-  await usuario.click(screen.getByText('Baixar decupagem (JSON)'))
+  await usuario.click(screen.getByLabelText('Baixar decupagem (JSON)'))
 
   expect(clique).toHaveBeenCalledOnce()
   expect(JSON.parse(await blobs[0]!.text())).toEqual(decupagem)

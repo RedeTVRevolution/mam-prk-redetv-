@@ -2,12 +2,16 @@ import json
 from typing import Any
 
 import pytest
+import requests
 
 from api.decupagem import Video
 from api.gemini import (
+    PRAZO_DA_ANALISE_S,
+    TIMEOUT_DA_REDE_S,
     AnaliseFalhou,
     Chamada,
     ErroHttp,
+    TransporteVertex,
     analisar,
 )
 from api.tests.test_decupagem import DURACAO_MS, decupagem_valida
@@ -35,9 +39,14 @@ class TransporteFalso:
 class Relogio:
     def __init__(self) -> None:
         self.esperas: list[float] = []
+        self.agora = 0.0
 
     def dormir(self, s: float) -> None:
         self.esperas.append(s)
+        self.agora += s
+
+    def ler(self) -> float:
+        return self.agora
 
 
 def _rodar(transporte: TransporteFalso, relogio: Relogio | None = None) -> Any:
@@ -49,6 +58,7 @@ def _rodar(transporte: TransporteFalso, relogio: Relogio | None = None) -> Any:
         video=VIDEO_CONFIAVEL,
         dormir=relogio.dormir,
         sortear=lambda teto: teto,  # pior caso: jitter no teto
+        relogio=relogio.ler,
     )
 
 
@@ -150,6 +160,22 @@ def test_cinco_novas_tentativas_e_depois_analise_falhou() -> None:
     assert len(t.chamadas) == 6  # 1 chamada + 5 novas
 
 
+def test_tentativa_que_nao_cabe_no_prazo_nao_comeca() -> None:
+    """Cada tentativa pode gastar o timeout inteiro; a soma fica abaixo de 1800 s."""
+    relogio = Relogio()
+
+    class TransporteLento(TransporteFalso):
+        def gerar(self, chamada: Chamada) -> str:
+            relogio.agora += TIMEOUT_DA_REDE_S
+            return super().gerar(chamada)
+
+    t = TransporteLento(*[ErroHttp(503)] * 6, BOA)
+    with pytest.raises(AnaliseFalhou):
+        _rodar(t, relogio)
+    assert len(t.chamadas) == 2
+    assert relogio.agora <= PRAZO_DA_ANALISE_S < 1800
+
+
 def test_erro_4xx_diferente_de_429_nao_tenta_de_novo() -> None:
     t = TransporteFalso(ErroHttp(400), BOA)
     with pytest.raises(AnaliseFalhou):
@@ -161,3 +187,128 @@ def test_os_dois_orcamentos_de_tentativas_sao_independentes() -> None:
     t = TransporteFalso(ErroHttp(429), "lixo", ErroHttp(500), "lixo", BOA)
     _rodar(t)
     assert len(t.chamadas) == 5
+
+
+class SessaoFalsa:
+    """Imita `AuthorizedSession.post`: devolve respostas ou levanta, em ordem."""
+
+    def __init__(self, *respostas: "RespostaFalsa | Exception") -> None:
+        self.respostas = list(respostas)
+        self.pedidos: list[dict[str, Any]] = []
+
+    def post(self, url: str, **kwargs: Any) -> "RespostaFalsa":
+        self.pedidos.append({"url": url, **kwargs})
+        r = self.respostas.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+class RespostaFalsa:
+    def __init__(self, status: int, corpo: dict[str, Any] | None = None) -> None:
+        self.status_code = status
+        self._corpo = corpo or {}
+
+    def json(self) -> dict[str, Any]:
+        return self._corpo
+
+
+class RespostaSemJson(RespostaFalsa):
+    def json(self) -> dict[str, Any]:
+        raise requests.JSONDecodeError("corpo vazio", "", 0)
+
+
+def _chamada() -> Chamada:
+    return Chamada(
+        modelo="gemini-3.5-flash-lite",
+        video_uri=VIDEO,
+        esquema={"type": "OBJECT", "additionalProperties": False},
+        rotulos={"job_id": JOB},
+    )
+
+
+def _ok(texto: str) -> RespostaFalsa:
+    return RespostaFalsa(
+        200, {"candidates": [{"content": {"parts": [{"text": texto}]}}]}
+    )
+
+
+def test_transporte_vertex_monta_a_chamada_global_com_video_esquema_e_rotulo() -> None:
+    sessao = SessaoFalsa(_ok("{}"))
+
+    texto = TransporteVertex("projeto-x", sessao).gerar(_chamada())
+
+    assert texto == "{}"
+    pedido = sessao.pedidos[0]
+    assert pedido["url"] == (
+        "https://aiplatform.googleapis.com/v1/projects/projeto-x/locations/global"
+        "/publishers/google/models/gemini-3.5-flash-lite:generateContent"
+    )
+    corpo = pedido["json"]
+    arquivo = corpo["contents"][0]["parts"][0]
+    assert arquivo["fileData"] == {"mimeType": "video/mp4", "fileUri": VIDEO}
+    assert arquivo["videoMetadata"] == {"fps": 1}
+    assert corpo["generationConfig"]["responseMimeType"] == "application/json"
+    assert corpo["generationConfig"]["responseJsonSchema"] == _chamada().esquema
+    assert "mediaResolution" not in corpo["generationConfig"]
+    assert corpo["labels"] == {"job_id": JOB}
+    assert "tools" not in corpo
+    assert "systemInstruction" in corpo
+    # Flex: só ele, sem Provisioned Throughput antes.
+    assert pedido["headers"]["X-Vertex-AI-LLM-Shared-Request-Type"] == "flex"
+    assert pedido["headers"]["X-Vertex-AI-LLM-Request-Type"] == "shared"
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_transporte_vertex_converte_status_diferente_de_200_em_erro_http(
+    status: int,
+) -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(status)))
+
+    with pytest.raises(ErroHttp) as erro:
+        transporte.gerar(_chamada())
+
+    assert erro.value.status == status
+
+
+@pytest.mark.parametrize(
+    "falha", [requests.Timeout(), requests.ConnectionError(), ConnectionResetError()]
+)
+def test_transporte_vertex_converte_timeout_e_queda_em_503(falha: Exception) -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(falha))
+
+    with pytest.raises(ErroHttp) as erro:
+        transporte.gerar(_chamada())
+
+    assert erro.value.status == 503
+
+
+def test_erros_do_transporte_entram_nas_tentativas() -> None:
+    sessao = SessaoFalsa(RespostaFalsa(429), RespostaFalsa(500), _ok(BOA))
+    relogio = Relogio()
+
+    d = analisar(
+        TransporteVertex("p", sessao),
+        video_uri=VIDEO,
+        job_id=JOB,
+        video=VIDEO_CONFIAVEL,
+        dormir=relogio.dormir,
+    )
+
+    assert d.programa.resumo == "Jornal da noite"
+    assert len(sessao.pedidos) == 3
+    assert len(relogio.esperas) == 2
+
+
+def test_resposta_sem_texto_vira_texto_vazio_para_a_validacao_repetir() -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, {})))
+
+    assert transporte.gerar(_chamada()) == ""
+
+
+def test_resposta_200_que_nao_e_json_vira_erro_repetivel() -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaSemJson(200)))
+
+    with pytest.raises(ErroHttp) as e:
+        transporte.gerar(_chamada())
+    assert e.value.status == 502

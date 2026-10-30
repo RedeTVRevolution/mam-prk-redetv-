@@ -139,3 +139,10 @@ def test_esquema_do_modelo_omite_o_bloco_video() -> None:
     assert (
         "video" in Decupagem.model_json_schema()["properties"]
     )  # sem efeito colateral
+
+
+def test_esquema_do_modelo_omite_os_tempos_do_modelo() -> None:
+    texto = str(esquema_do_modelo())
+    assert "inicio_modelo_ms" not in texto
+    assert "fim_modelo_ms" not in texto
+    assert "inicio_modelo_ms" in str(Decupagem.model_json_schema())

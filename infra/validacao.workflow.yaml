@@ -1,0 +1,113 @@
+# Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
+# quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
+# falhou. Depois chama o serviço de análise, só se o Job ficou em `analisando`.
+# Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao}, ${url_da_analise}.
+main:
+  params: [evento]
+  steps:
+    - tira_o_id:
+        assign:
+          # O objeto na quarentena tem o nome do id do Job.
+          - job_id: $${evento.data.name}
+    - valida:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_validacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+        except:
+          as: e
+          # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
+          steps:
+            - marca_como_falhou:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  # Um objeto sem Job correspondente não cria documento.
+                  currentDocument:
+                    exists: true
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: arquivo_corrompido
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
+            - encerra_com_falha:
+                raise: $${e}
+    - le_o_job:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: documento
+        except:
+          as: e
+          steps:
+            # Um objeto sem Job correspondente não tem o que analisar.
+            - sem_job:
+                switch:
+                  - condition: $${e.code == 404}
+                    next: fim
+            - repassa_o_erro_da_leitura:
+                raise: $${e}
+    - so_se_analisando:
+        switch:
+          - condition: $${documento.fields.estado.stringValue == "analisando"}
+            next: analisa
+        next: fim
+    - analisa:
+        try:
+          call: http.post
+          args:
+            url: ${url_da_analise}/analisar
+            auth:
+              type: OIDC
+              audience: ${url_da_analise}
+            body:
+              job_id: $${job_id}
+            # ponytail: 1800 s é o teto da chamada HTTP do Workflows; a análise
+            # em Flex tem de caber nele (o serviço também tem timeout de 1800 s).
+            timeout: 1800
+        except:
+          as: e
+          steps:
+            # O serviço pode ter concluído depois de o Workflows desistir: só marca
+            # a falha se o Job segue em `analisando` e não mudou desde a leitura.
+            - rele_o_job:
+                call: googleapis.firestore.v1.projects.databases.documents.get
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                result: atual
+            - so_se_ainda_analisando:
+                switch:
+                  - condition: $${atual.fields.estado.stringValue != "analisando"}
+                    next: encerra_a_analise_com_falha
+            - marca_analise_como_falha:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  currentDocument:
+                    updateTime: $${atual.updateTime}
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: analise_falhou
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
+            - encerra_a_analise_com_falha:
+                raise: $${e}
+    - fim:
+        return: $${job_id}

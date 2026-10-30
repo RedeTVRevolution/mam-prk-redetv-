@@ -34,6 +34,11 @@ variable "imagem" {
   type        = string
 }
 
+variable "imagem_validacao" {
+  description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
+  type        = string
+}
+
 provider "google" {
   project        = var.projeto
   region         = var.regiao
@@ -44,9 +49,13 @@ resource "google_project_service" "apis" {
   for_each = toset([
     "artifactregistry.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
+    "eventarc.googleapis.com",
     "firestore.googleapis.com",
     "identitytoolkit.googleapis.com",
     "monitoring.googleapis.com",
+    "pubsub.googleapis.com",
+    "workflows.googleapis.com",
     # Ligadas antes pelo wizard; aqui para que o Terraform as declare.
     "aiplatform.googleapis.com",
     "iam.googleapis.com",
@@ -101,14 +110,19 @@ resource "google_service_account" "mam" {
   display_name = "MAM ${each.key}"
 }
 
-# Papéis de cada componente. A orquestração ainda não tem nenhum: os dela
-# ficam no Job de validação, no serviço de análise e no Workflows, que nascem
-# na #14 e na #16.
+# Papéis de cada componente. A orquestração grava a falha da validação no
+# Firestore, recebe o evento do Eventarc e invoca o Workflows (o provider não tem
+# papel no próprio Workflows); o papel de rodar o Job fica mais abaixo, no próprio
+# Job (ADR 0002), e o de chamar o serviço de análise, no próprio serviço. Quem lê o
+# proxy por gs:// na Vertex é a conta que chama (mam-analise, com objectViewer em
+# aceitos), segundo a doc do generateContent; o agente de serviço da Vertex não
+# precisa de papel no bucket.
 locals {
   papeis_no_projeto = {
-    web       = ["roles/datastore.user"]
-    validacao = ["roles/datastore.user"]
-    analise   = ["roles/datastore.user", "roles/aiplatform.user"]
+    web          = ["roles/datastore.user"]
+    validacao    = ["roles/datastore.user"]
+    analise      = ["roles/datastore.user", "roles/aiplatform.user"]
+    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker"]
   }
   papeis_nos_buckets = {
     # A API assina as URLs de envio para a quarentena e lê o proxy de reprodução e a decupagem.
@@ -164,6 +178,182 @@ resource "google_cloud_run_v2_service" "web" {
     }
   }
   depends_on = [google_project_service.apis]
+}
+
+# Rede só para o Job de validação: sem IP externo e sem Cloud NAT, o arquivo
+# hostil não alcança a internet, só o Storage e o Firestore (pelo acesso privado do Google).
+resource "google_compute_network" "validacao" {
+  name                    = "mam-validacao"
+  auto_create_subnetworks = false
+  depends_on              = [google_project_service.apis]
+}
+
+resource "google_compute_subnetwork" "validacao" {
+  name                     = "mam-validacao"
+  region                   = var.regiao
+  network                  = google_compute_network.validacao.id
+  ip_cidr_range            = "10.10.0.0/24"
+  private_ip_google_access = true
+}
+
+# O google_cloud_run_v2_job (provider 7.46) não tem sistema de arquivos só de
+# leitura: isso vem da imagem, com usuário sem privilégios e só o volume em
+# memória gravável (TMPDIR).
+resource "google_cloud_run_v2_job" "validacao" {
+  name                = "mam-validacao"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    # Um arquivo por execução.
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["validacao"].email
+      # Nunca roda de novo um arquivo hostil.
+      max_retries = 0
+      timeout     = "1800s"
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao.id
+        }
+      }
+      containers {
+        image = var.imagem_validacao
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        # A única pasta gravável: o ffmpeg e o validador escrevem aqui.
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        resources {
+          # ponytail: teto de 4 GiB por arquivo (TAMANHO_MAXIMO_PADRAO_BYTES). A cópia
+          # limpa tem o tamanho do original (até 4 GiB) e o proxy de 480p é bem menor
+          # (dezenas de MiB). O volume em memória conta na memória do contêiner:
+          # 4 GiB da cópia + 1 GiB do proxy e do ffmpeg, e 3 GiB de folga = 8 GiB.
+          limits = {
+            cpu    = "2"
+            memory = "8Gi"
+          }
+        }
+        volume_mounts {
+          name       = "quarentena"
+          mount_path = "/quarentena"
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "quarentena"
+        gcs {
+          bucket    = google_storage_bucket.mam["quarentena"].name
+          read_only = true
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "5Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração roda o Job com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda" {
+  name     = google_cloud_run_v2_job.validacao.name
+  location = google_cloud_run_v2_job.validacao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# Serviço de análise (#39): a mesma imagem do web, com outro comando. Entrada só
+# interna (sem allUsers): o Workflows o chama por OIDC, e a chamada de dentro do
+# Google Cloud passa pelo ingress interno. O timeout acompanha o teto de 1800 s da
+# chamada HTTP do Workflows.
+resource "google_cloud_run_v2_service" "analise" {
+  name                = "mam-analise"
+  location            = var.regiao
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  deletion_protection = false
+  template {
+    service_account                  = google_service_account.mam["analise"].email
+    timeout                          = "1800s"
+    max_instance_request_concurrency = 8
+    scaling {
+      max_instance_count = 5
+    }
+    containers {
+      image   = var.imagem
+      command = ["uvicorn"]
+      args    = ["api.analise:app", "--host", "0.0.0.0", "--port", "8080"]
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.projeto
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração chama o serviço de análise.
+resource "google_cloud_run_v2_service_iam_member" "orquestracao_chama_analise" {
+  name     = google_cloud_run_v2_service.analise.name
+  location = google_cloud_run_v2_service.analise.location
+  role     = "roles/run.invoker"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> serviço de análise.
+resource "google_workflows_workflow" "validacao" {
+  name            = "mam-validacao"
+  region          = var.regiao
+  service_account = google_service_account.mam["orquestracao"].id
+  source_contents = templatefile("${path.module}/validacao.workflow.yaml", {
+    projeto          = var.projeto
+    regiao           = var.regiao
+    job_de_validacao = google_cloud_run_v2_job.validacao.name
+    url_da_analise   = google_cloud_run_v2_service.analise.uri
+  })
+  depends_on = [google_project_service.apis]
+}
+
+# O agente de serviço do Storage publica o evento no Pub/Sub, que o Eventarc usa.
+data "google_storage_project_service_account" "storage" {}
+
+resource "google_project_iam_member" "storage_publica_eventos" {
+  project = var.projeto
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${data.google_storage_project_service_account.storage.email_address}"
+}
+
+# Na região da quarentena: var.regiao, porque o location do bucket volta em
+# maiúsculas do provider, e o Eventarc quer a região em minúsculas.
+resource "google_eventarc_trigger" "quarentena" {
+  name            = "mam-quarentena-finalizada"
+  location        = var.regiao
+  service_account = google_service_account.mam["orquestracao"].email
+  matching_criteria {
+    attribute = "type"
+    value     = "google.cloud.storage.object.v1.finalized"
+  }
+  matching_criteria {
+    attribute = "bucket"
+    value     = google_storage_bucket.mam["quarentena"].name
+  }
+  destination {
+    workflow = google_workflows_workflow.validacao.id
+  }
+  depends_on = [google_project_iam_member.storage_publica_eventos, google_project_iam_member.mam]
 }
 
 # URL pública: sem balanceador na E0, e a API exige o token do Identity Platform.

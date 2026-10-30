@@ -1,8 +1,11 @@
+import { ActionIcon, Alert, AppShell, Badge, Button, Center, Group, Loader, Stack, Text } from '@mantine/core'
+import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
+import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import Video, { type JobAberto } from './Video.tsx'
 
 interface Usuario {
@@ -51,44 +54,86 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
     void verificar()
   }
 
-  if (sessao.tipo === 'verificando') return null
+  if (sessao.tipo === 'verificando') {
+    return (
+      <Center h="100vh">
+        <Loader color="red" role="status" aria-label="Verificando a sessão" />
+      </Center>
+    )
+  }
   if (sessao.tipo === 'sem_sessao') {
     return <Login key={saidas} autenticador={autenticador} aoEntrar={reverificar} />
   }
   if (sessao.tipo === 'api_indisponivel') {
     return (
-      <main>
-        <p role="alert">Não foi possível falar com a API.</p>
-        <button type="button" onClick={reverificar}>
-          Tentar de novo
-        </button>
-        <button type="button" onClick={() => void sair()}>
-          Sair
-        </button>
-      </main>
+      <Center h="100vh">
+        <Stack w={360}>
+          <Alert color="red" variant="light" icon={<IconAlertTriangle />} role="alert">
+            Não foi possível falar com a API.
+          </Alert>
+          <Group>
+            <Button type="button" onClick={reverificar}>
+              Tentar de novo
+            </Button>
+            <Button type="button" variant="default" onClick={() => void sair()}>
+              Sair
+            </Button>
+          </Group>
+        </Stack>
+      </Center>
     )
   }
   return (
-    <main>
-      <h1>{aberto ? 'Vídeo' : 'Biblioteca'}</h1>
-      <p>{sessao.usuario.email}</p>
-      <button type="button" onClick={() => void sair()}>
-        Sair
-      </button>
+    <AppShell
+      header={{ height: 52 }}
+      navbar={aberto ? undefined : NAVBAR_DA_BIBLIOTECA}
+      padding={aberto ? 'sm' : 'lg'}
+    >
+      <AppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Group gap="xs">
+            {aberto && (
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label="Voltar à Biblioteca"
+                onClick={() => setAberto(null)}
+              >
+                <IconArrowLeft />
+              </ActionIcon>
+            )}
+            <Badge color="red" variant="filled" radius="sm">
+              MAM
+            </Badge>
+            <Text fw={700}>RedeTV</Text>
+            <Text c="dimmed">{aberto ? 'Vídeo' : 'Biblioteca'}</Text>
+          </Group>
+          <Group gap="xs">
+            <Text size="xs" c="dimmed">
+              {sessao.usuario.email}
+            </Text>
+            <Button type="button" variant="subtle" size="xs" color="gray" onClick={() => void sair()}>
+              Sair
+            </Button>
+          </Group>
+        </Group>
+      </AppShell.Header>
       {aberto ? (
-        <Video
-          autenticador={autenticador}
-          job={aberto}
-          aoVoltar={() => setAberto(null)}
-          aoSessaoExpirada={() => void sair()}
-        />
+        <AppShell.Main bg="dark.7">
+          <Video
+            autenticador={autenticador}
+            job={aberto}
+            aoSessaoExpirada={() => void sair()}
+          />
+        </AppShell.Main>
       ) : (
+        // A Biblioteca traz a própria barra lateral e a área principal.
         <Biblioteca
           autenticador={autenticador}
           aoSessaoExpirada={() => void sair()}
           aoAbrir={setAberto}
         />
       )}
-    </main>
+    </AppShell>
   )
 }

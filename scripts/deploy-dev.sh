@@ -34,7 +34,7 @@ tf init -input=false -backend-config="bucket=$ESTADO"
 # A imagem precisa do repositório e da chave web do Identity Platform, e o
 # serviço precisa da imagem. Este apply só cria os dois, então a imagem ainda não importa.
 tf apply -input=false -target=google_artifact_registry_repository.mam \
-  -target=google_identity_platform_config.mam -var imagem=pendente
+  -target=google_identity_platform_config.mam -var imagem=pendente -var imagem_validacao=pendente
 REGISTRO="$GCP_REGION-docker.pkg.dev"
 REPO="$REGISTRO/$GCP_PROJECT_ID/mam/web"
 TAG="$REPO:$(git rev-parse --short HEAD)"
@@ -44,7 +44,13 @@ docker build --platform linux/amd64 -t "$TAG" \
 docker push "$TAG"
 # Pelo digest, para que um rebuild com o mesmo commit também gere revisão nova.
 IMAGEM=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$TAG" | grep -m1 "^$REPO@")
-tf apply -input=false -var "imagem=$IMAGEM"
+# A imagem do Job de validação (#38), também pelo digest.
+REPO_VALIDACAO="$REGISTRO/$GCP_PROJECT_ID/mam/validacao"
+TAG_VALIDACAO="$REPO_VALIDACAO:$(git rev-parse --short HEAD)"
+docker build --platform linux/amd64 --target validacao -t "$TAG_VALIDACAO" .
+docker push "$TAG_VALIDACAO"
+IMAGEM_VALIDACAO=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$TAG_VALIDACAO" | grep -m1 "^$REPO_VALIDACAO@")
+tf apply -input=false -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO"
 
 URL=$(tf output -raw url)
 curl -sSf "$URL/v1/health" >/dev/null
