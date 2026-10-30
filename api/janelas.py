@@ -20,15 +20,23 @@ class Janela:
 
 
 def planejar_janelas(duracao_ms: int) -> list[Janela]:
-    return [
-        Janela(
-            indice=indice,
-            inicio_ms=inicio,
-            fim_ms=min(inicio + DURACAO_DA_JANELA_MS, duracao_ms),
-            inicio_contexto_ms=max(inicio - CONTEXTO_MS, 0),
-            fim_contexto_ms=min(
-                inicio + DURACAO_DA_JANELA_MS + CONTEXTO_MS, duracao_ms
-            ),
+    """Núcleos contíguos de 300 s que cobrem o vídeo; o último pode ser mais curto.
+
+    Duração zero não tem o que decupar e devolve lista vazia; duração negativa
+    é erro de quem chamou.
+    """
+    if duracao_ms < 0:
+        raise ValueError(f"duração negativa: {duracao_ms} ms")
+    janelas = []
+    for indice, inicio in enumerate(range(0, duracao_ms, DURACAO_DA_JANELA_MS)):
+        fim = min(inicio + DURACAO_DA_JANELA_MS, duracao_ms)
+        janelas.append(
+            Janela(
+                indice=indice,
+                inicio_ms=inicio,
+                fim_ms=fim,
+                inicio_contexto_ms=max(inicio - CONTEXTO_MS, 0),
+                fim_contexto_ms=min(fim + CONTEXTO_MS, duracao_ms),
+            )
         )
-        for indice, inicio in enumerate(range(0, duracao_ms, DURACAO_DA_JANELA_MS))
-    ]
+    return janelas

@@ -2,6 +2,8 @@ import dataclasses
 import itertools
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from api.janelas import CONTEXTO_MS, DURACAO_DA_JANELA_MS, Janela, planejar_janelas
 
@@ -14,7 +16,23 @@ def test_constantes_do_plano() -> None:
 
 
 def test_tres_horas_dao_36_janelas() -> None:
-    assert len(planejar_janelas(3 * HORA_MS)) == 36
+    janelas = planejar_janelas(3 * HORA_MS)
+    assert len(janelas) == 36
+    assert janelas[-1].fim_ms == 3 * HORA_MS
+
+
+def test_primeira_janela_de_varias_tem_contexto_limitado_no_comeco() -> None:
+    primeira = planejar_janelas(900_000)[0]
+    assert (primeira.inicio_contexto_ms, primeira.fim_contexto_ms) == (0, 310_000)
+
+
+def test_duracao_zero_nao_tem_janela() -> None:
+    assert planejar_janelas(0) == []
+
+
+def test_duracao_negativa_e_erro() -> None:
+    with pytest.raises(ValueError):
+        planejar_janelas(-1)
 
 
 def test_video_de_1_s_tem_uma_janela_com_contexto_limitado_nos_dois_lados() -> None:
@@ -58,6 +76,20 @@ def test_nucleos_contiguos_somam_a_duracao() -> None:
         assert anterior.fim_ms == seguinte.inicio_ms
     assert sum(j.fim_ms - j.inicio_ms for j in janelas) == duracao
     assert all(j.fim_ms > j.inicio_ms for j in janelas)
+
+
+@given(st.integers(min_value=1, max_value=12 * HORA_MS))
+def test_janelas_cobrem_qualquer_duracao_sem_buraco(duracao: int) -> None:
+    janelas = planejar_janelas(duracao)
+    assert janelas[0].inicio_ms == 0
+    assert janelas[-1].fim_ms == duracao
+    assert [j.indice for j in janelas] == list(range(len(janelas)))
+    for anterior, seguinte in itertools.pairwise(janelas):
+        assert anterior.fim_ms == seguinte.inicio_ms
+    for j in janelas:
+        assert 0 < j.fim_ms - j.inicio_ms <= DURACAO_DA_JANELA_MS
+        assert j.inicio_contexto_ms == max(j.inicio_ms - CONTEXTO_MS, 0)
+        assert j.fim_contexto_ms == min(j.fim_ms + CONTEXTO_MS, duracao)
 
 
 def test_janela_e_imutavel() -> None:
