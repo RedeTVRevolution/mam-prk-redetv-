@@ -458,7 +458,7 @@ O ciclo TDD (vermelho, verde, refatorar) vale integralmente para o domínio e os
 1. Lint, tipos e testes unitários, sem GCP.
 2. Build das imagens no Artifact Registry e testes de integração com emuladores.
 3. Terraform cria o ambiente efêmero do PR e roda os testes ponta a ponta e os de contrato.
-4. Merge na `main` publica em `staging`; aprovação no Cloud Deploy leva a `prod` com tráfego gradual entre revisões.
+4. Merge na `main` publica em `staging`; aprovação no Cloud Deploy leva a `prod` com tráfego gradual entre revisões. Até a E10, o merge na `main` publica no `dev`: o Cloud Build constrói as imagens, e o Terraform as publica pelo digest (#71).
 
 **Limites do GitHub Free.** Em repositório privado, o plano Free dá 2.000 minutos de Actions por mês e não tem ambientes com aprovação nem proteção de branch aplicada ([GitHub](https://docs.github.com/actions/reference/environments)). Por isso o Actions roda só lint e testes unitários; build de imagens, integração e ponta a ponta rodam no Cloud Build, disparado pelo GitHub, com 2.500 minutos grátis por mês ([preços](https://cloud.google.com/build/pricing)); a aprovação para produção fica no Cloud Deploy. O próprio pipeline garante que nada sem testes verdes chega a `staging` ou `prod`.
 

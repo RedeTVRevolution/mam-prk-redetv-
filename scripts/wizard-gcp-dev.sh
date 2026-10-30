@@ -271,12 +271,14 @@ if ! gcloud iam service-accounts describe "$SA_EMAIL" --project "$P" >/dev/null 
 fi
 # Sem owner, só o que o Terraform usa. projectIamAdmin entra porque Gemini,
 # Firestore, logs e Eventarc só têm papéis no nível do projeto; o Terraform só
-# usa google_project_iam_member (ADR 0002). Papel novo: some aqui.
+# usa google_project_iam_member (ADR 0002). Papel novo: some aqui. Os dois
+# últimos são do CD (#71): a federação com o GitHub e o envio ao Cloud Build.
 for role in roles/resourcemanager.projectIamAdmin roles/serviceusage.serviceUsageAdmin \
     roles/iam.serviceAccountAdmin roles/iam.serviceAccountUser roles/run.admin \
     roles/storage.admin roles/artifactregistry.admin roles/datastore.owner \
     roles/eventarc.admin roles/workflows.admin roles/identityplatform.admin \
-    roles/monitoring.editor roles/logging.configWriter roles/compute.networkAdmin; do
+    roles/monitoring.editor roles/logging.configWriter roles/compute.networkAdmin \
+    roles/iam.workloadIdentityPoolAdmin roles/cloudbuild.builds.editor; do
   gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA_EMAIL" \
     --role="$role" --condition=None >/dev/null
   printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$role"
