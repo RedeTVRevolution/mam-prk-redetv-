@@ -162,7 +162,13 @@ class Fala(_Intervalo):
     texto: Texto
 
 
+# Texto na tela com a duração de um bloco ou pauta inteira, acima disto, é suspeito.
+LIMITE_DO_TEXTO_LONGO_MS = 30_000
+
+
 class TextoNaTela(_Intervalo):
+    """Cada aparição de um texto é um item, com o início e o fim em que ele está visível; um GC que sai e volta são dois itens. Nunca estenda o texto até o fim do bloco ou do plano."""
+
     tipo: Literal[
         "gc", "tarja", "legenda", "placar", "chamada", "logo", "qr_code", "outro"
     ]
@@ -182,8 +188,20 @@ class Decupagem(_Estrito):
     )
     textos_na_tela: list[TextoNaTela] = Field(
         default=[],
-        description="GCs, tarjas, legendas, placares, chamadas, logos e QR codes.",
+        description="GCs, tarjas, legendas, placares, chamadas, logos e QR codes. Cada aparição de um texto é um item, com o início e o fim em que ele está visível; um GC que sai e volta são dois itens. Nunca estenda o texto até o fim do bloco ou do plano.",
     )
+
+    def textos_com_a_duracao_de_um_trecho(self) -> list[TextoNaTela]:
+        """Textos com mais de 30 s e a mesma duração de um bloco ou de uma pauta."""
+        duracoes = {
+            t.fim_ms - t.inicio_ms for t in [*self.programa.blocos, *self.pautas]
+        }
+        return [
+            t
+            for t in self.textos_na_tela
+            if t.fim_ms - t.inicio_ms > LIMITE_DO_TEXTO_LONGO_MS
+            and t.fim_ms - t.inicio_ms in duracoes
+        ]
 
     def _intervalos(self) -> list[_Intervalo]:
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]

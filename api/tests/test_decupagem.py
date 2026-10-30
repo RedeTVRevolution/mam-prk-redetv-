@@ -196,3 +196,11 @@ def test_esquema_do_modelo_tem_descricao_nos_campos_novos() -> None:
         ("Plano", "objetos"),
     ]:
         assert d[definicao]["properties"][campo]["description"], (definicao, campo)
+
+
+def test_esquema_do_modelo_traz_a_regra_de_texto_na_tela_por_aparicao() -> None:
+    esquema = esquema_do_modelo()
+    regra = esquema["properties"]["textos_na_tela"]["description"]
+    assert "Cada aparição" in regra
+    assert "bloco" in regra
+    assert "Cada aparição" in esquema["$defs"]["TextoNaTela"]["description"]
