@@ -26,6 +26,7 @@ const servidor = setupServer(
     })
   }),
   http.get('/v1/jobs', () => HttpResponse.json([])),
+  http.get('/v1/programas', () => HttpResponse.json([])),
 )
 
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))

@@ -23,7 +23,7 @@ from pydantic import (
 )
 
 from api.comparador import normalizar
-from api.decupagem import Comercial
+from api.decupagem import Comercial, EvidenciaDoComercial
 from api.pessoas import LISTAS, nao_identificado
 
 TipoNovo = Literal[
@@ -58,9 +58,9 @@ ACRESCENTAR_APARICAO = "pessoa.acrescentar_aparicao"
 PREFIXO_ACRESCENTADO = "acr-"
 PREFIXO_NAO_IDENTIFICADO = "nid-"
 NOME_NAO_IDENTIFICADO = "Não identificado"
-# Os tipos do esquema 1.1, a mesma lista que o Gemini recebe.
+# Os tipos do esquema 1.2, a mesma lista que o Gemini recebe.
 TIPOS_DE_COMERCIAL = get_args(Comercial.model_fields["tipo"].annotation)
-CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencia")
+CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencias")
 LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
 LIMITE_DO_TEXTO = 2000  # o mesmo de `Texto` na decupagem
@@ -181,7 +181,7 @@ class NovoDesfazer(BaseModel):
 
 
 class NovoComercial(BaseModel):
-    """O comercial de um `comercial.acrescentar`, com os campos do esquema 1.1."""
+    """O comercial de um `comercial.acrescentar`, com os campos do esquema 1.2."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -189,11 +189,9 @@ class NovoComercial(BaseModel):
     tipo: str
     inicio_ms: Annotated[int, Field(ge=0)]
     fim_ms: Annotated[int, Field(ge=0)]
-    evidencia: Annotated[
-        str, StringConstraints(min_length=1, max_length=LIMITE_DO_NOME)
-    ]
+    evidencias: Annotated[list[EvidenciaDoComercial], Field(min_length=1)]
 
-    @field_validator("marca", "evidencia")
+    @field_validator("marca")
     @classmethod
     def _texto_sem_controle(cls, valor: str) -> str:
         return _sem_controle(valor)

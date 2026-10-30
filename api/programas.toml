@@ -1,0 +1,11 @@
+# Perfis de programa: contexto que a instrução do Gemini recebe quando o Job
+# informa o programa. A chave é o nome mostrado no envio; o perfil é texto livre.
+# Nunca ponha aqui nada que o modelo não deva tomar como verdade sobre o programa.
+
+["TV Fama"]
+perfil = """
+Revista diária de notícias de celebridades e entretenimento da RedeTV!.
+Apresentadores e comentaristas frequentes: Flávia Noronha e Leão Lobo.
+Repórter frequente: Andréa Corazza.
+Merchandising frequente: Ultrafarma, feito pelo apresentador no estúdio, com GC e QR code.
+"""

@@ -177,6 +177,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
     assert set(lista[0]) == {
         "id",
         "nome",
+        "programa",
         "estado",
         "codigo_falha",
         "duracao_s",
@@ -287,7 +288,7 @@ def test_reproducao_e_decupagem_dao_409_antes_de_concluido_e_404_sem_job() -> No
 def test_decupagem_chega_em_gzip_e_inteira() -> None:
     ambiente = Ambiente()
     job_id = _job_com_estado(ambiente, "concluido")
-    documento = {"versao_esquema": "1.1", "pessoas": ["Ana"] * 200}
+    documento = {"versao_esquema": "1.2", "pessoas": ["Ana"] * 200}
     texto = json.dumps(documento).encode()
     ambiente.armazenamento.decupagens[job_id] = [texto[:50], texto[50:]]
 
@@ -525,3 +526,29 @@ def test_status_com_etag_exige_autenticacao_e_404_segue_404() -> None:
     assert (
         _consultar(ambiente, "nao-existe", **{"If-None-Match": etag}).status_code == 404
     )
+
+
+def test_programa_com_perfil_fica_no_job_e_aparece_na_api() -> None:
+    ambiente = Ambiente()
+
+    resposta = ambiente.criar(programa="TV Fama")
+
+    assert resposta.status_code == 202
+    assert resposta.json()["programa"] == "TV Fama"
+    job = ambiente.repositorio.obter(resposta.json()["id"])
+    assert job is not None and job.programa == "TV Fama"
+
+
+def test_programa_sem_perfil_da_422() -> None:
+    assert Ambiente().criar(programa="Programa Inventado").status_code == 422
+
+
+def test_get_programas_lista_os_perfis() -> None:
+    resposta = Ambiente().cliente.get("/v1/programas", headers=AUTORIZACAO)
+
+    assert resposta.status_code == 200
+    assert resposta.json() == ["TV Fama"]
+
+
+def test_get_programas_exige_login() -> None:
+    assert Ambiente().cliente.get("/v1/programas").status_code == 401

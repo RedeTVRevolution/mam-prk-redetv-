@@ -51,7 +51,7 @@ def test_resposta_gravada_passa_no_esquema_e_nos_invariantes_de_primeira() -> No
         video=Video(**cassete["video"]),
     )
 
-    assert d.versao_esquema == "1.1"
+    assert d.versao_esquema == "1.2"
     assert d.programa.resumo
     assert len(transporte.chamadas) == 1
 

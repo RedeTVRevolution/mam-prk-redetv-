@@ -7,30 +7,47 @@ import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 import Video from './Video.tsx'
 
-// Segue o esquema 1.1 (api/decupagem.py).
+// Segue o esquema 1.2 (api/decupagem.py).
 const decupagem = {
-  versao_esquema: '1.1',
+  versao_esquema: '1.2',
   video: { sha256: 'a'.repeat(64), duracao_ms: 180_000 },
   programa: { resumo: 'Jornal', blocos: [] },
-  pautas: [{ id: 'pa1', titulo: 'Eleição', resumo: 'Debate', inicio_ms: 30_000, fim_ms: 60_000 }],
+  pautas: [{ id: 'pa1', titulo: 'Eleição', resumo: 'Debate', tom: 'sério', inicio_ms: 30_000, fim_ms: 60_000 }],
   pessoas: [
     {
       id: 'p1',
       nome: 'Ana Souza',
       origem: 'modelo',
-      na_imagem: [{ inicio_ms: 5_000, fim_ms: 20_000, evidencia: 'rosto' }],
+      fontes_do_nome: ['rosto', 'gc'],
+      na_imagem: [
+        { inicio_ms: 5_000, fim_ms: 20_000, evidencia: 'rosto', papel: 'apresentadora', visual: 'terno azul' },
+      ],
       citada_na_fala: [{ inicio_ms: 65_000, fim_ms: 66_000 }],
       citada_no_texto: [{ inicio_ms: 70_000, fim_ms: 72_000, texto: '<b>Ana</b> no GC' }],
     },
   ],
   planos: [
     { id: 'pl1', ambiente: 'estúdio', plano_limpo: false, acao: null, inicio_ms: 0, fim_ms: 4_000 },
-    { id: 'pl2', ambiente: 'rua', plano_limpo: true, acao: 'carro passa', inicio_ms: 140_000, fim_ms: 150_000 },
+    { id: 'pl2', ambiente: 'rua', plano_limpo: true, acao: 'carro passa', objetos: ['carro', 'poste'], inicio_ms: 140_000, fim_ms: 150_000 },
   ],
   comerciais: [
-    { id: 'com000', marca: 'Marca X', tipo: 'intervalo', evidencia: 'logo', inicio_ms: 90_000, fim_ms: 120_000 },
+    { id: 'com000', marca: 'Marca X', tipo: 'intervalo', evidencias: ['logo', 'fala'], inicio_ms: 90_000, fim_ms: 120_000 },
   ],
   transcricao: [{ id: 'fal000', locutor: 'Locutor', texto: 'Boa noite', inicio_ms: 1_000, fim_ms: 3_000 }],
+  textos_na_tela: [{ inicio_ms: 125_000, fim_ms: 130_000, tipo: 'gc', texto: 'Ana Souza, apresentadora' }],
+}
+
+// A mesma decupagem no esquema 1.1: sem os campos novos e com a evidência do comercial em texto.
+const decupagem11 = {
+  ...decupagem,
+  versao_esquema: '1.1',
+  pautas: decupagem.pautas.map(({ tom: _tom, ...p }) => p),
+  pessoas: decupagem.pessoas.map(({ fontes_do_nome: _f, ...p }) => ({
+    ...p,
+    na_imagem: p.na_imagem.map(({ papel: _p, visual: _v, ...a }) => a),
+  })),
+  comerciais: decupagem.comerciais.map(({ evidencias: _e, ...c }) => ({ ...c, evidencia: 'logo na tela' })),
+  textos_na_tela: undefined,
 }
 
 const TOKEN = 'Bearer token-de-ana@redetv.com.br'
@@ -275,6 +292,48 @@ test('aba Pessoas separa quem aparece de quem só é citado', async () => {
   expect(player.currentTime).toBe(70)
 })
 
+test('aba Pessoas mostra as fontes do nome e o papel e o visual de cada aparição', async () => {
+  await abrir({ estado: 'concluido' })
+  await jogador()
+
+  const painel = within(screen.getByLabelText('Decupagem'))
+  const fontes = within(painel.getByLabelText('Fontes do nome de Ana Souza'))
+  expect(fontes.getByText('rosto')).toBeTruthy()
+  expect(fontes.getByText('GC')).toBeTruthy()
+  expect(painel.getByText('apresentadora · terno azul')).toBeTruthy()
+})
+
+test('aba Texto na tela lista tempo, tipo e texto, e salta', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  const player = await jogador()
+  await usuario.click(aba('Texto na tela'))
+
+  const painel = within(screen.getByLabelText('Decupagem'))
+  expect(painel.getByText('02:05 · gc')).toBeTruthy()
+  await usuario.click(painel.getByText('Ana Souza, apresentadora'))
+  expect(player.currentTime).toBe(125)
+})
+
+test('decupagem 1.1, sem os campos novos, abre e mostra a evidência em texto', async () => {
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(decupagem11)))
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' })
+  await jogador()
+  const painel = within(screen.getByLabelText('Decupagem'))
+
+  expect(painel.getByRole('button', { name: '00:05 · rosto' })).toBeTruthy()
+  expect(painel.queryByLabelText('Fontes do nome de Ana Souza')).toBeNull()
+  expect(screen.queryByLabelText(/^Texto na tela /)).toBeNull()
+  await usuario.click(aba('Marcas'))
+  expect(painel.getByText('logo na tela')).toBeTruthy()
+  await usuario.click(aba('Pautas'))
+  expect(painel.getByText('Eleição')).toBeTruthy()
+  expect(painel.queryByText('sério')).toBeNull()
+  await usuario.click(aba('Texto na tela'))
+  expect(painel.queryByText('Ana Souza, apresentadora')).toBeNull()
+})
+
 test('o texto da tela aparece escapado, nunca como HTML', async () => {
   const usuario = userEvent.setup()
   await abrir({ estado: 'concluido' })
@@ -294,6 +353,7 @@ test('aba Pautas salta o player e destaca a pauta em curso', async () => {
 
   const pauta = screen.getByText('Eleição').closest('a, button') as HTMLElement
   expect(screen.getByText('00:30–01:00')).toBeTruthy()
+  expect(within(pauta).getByText('sério')).toBeTruthy()
   expect(pauta.hasAttribute('data-active')).toBe(false)
   await usuario.click(pauta)
   expect(player.currentTime).toBe(30)
@@ -310,6 +370,9 @@ test('aba Marcas lista os comerciais e salta', async () => {
   await usuario.click(aba('Marcas'))
 
   expect(screen.getByText('intervalo · 01:30')).toBeTruthy()
+  const marca = screen.getByText('Marca X').closest('a, button') as HTMLElement
+  expect(within(marca).getByText('logo')).toBeTruthy()
+  expect(within(marca).getByText('fala')).toBeTruthy()
   await usuario.click(screen.getByText('Marca X'))
   expect(player.currentTime).toBe(90)
 })
@@ -322,6 +385,7 @@ test('aba Planos usa a ação, ou o ambiente se não houver, e salta', async () 
 
   expect(screen.getByText('estúdio', { selector: 'p' })).toBeTruthy()
   expect(screen.getByText('rua · 02:20')).toBeTruthy()
+  expect(screen.getByText('carro, poste')).toBeTruthy()
   await usuario.click(screen.getByText('carro passa'))
   expect(player.currentTime).toBe(140)
 })
@@ -361,6 +425,8 @@ test('clicar numa ocorrência da linha do tempo leva o player ao início dela', 
   expect(player.currentTime).toBe(140)
   await usuario.click(screen.getByLabelText('Fala 00:01'))
   expect(player.currentTime).toBe(1)
+  await usuario.click(screen.getByLabelText('Texto na tela 02:05'))
+  expect(player.currentTime).toBe(125)
 })
 
 test('ocorrências sobrepostas ficam no seu tempo, sem empurrar as seguintes', async () => {
@@ -1001,8 +1067,11 @@ test('o Editor acrescenta um comercial pelo modal', async () => {
   await usuario.click(await screen.findByText('merchan_apresentador'))
   await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:20')
   await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '00:22')
-  await usuario.type(modal.getByLabelText('Evidência'), 'cita a loja')
   await usuario.type(modal.getByLabelText('Motivo'), 'faltou')
+  // Sem evidência marcada, não salva.
+  expect(modal.getByRole('button', { name: 'Salvar' }).hasAttribute('disabled')).toBe(true)
+  await usuario.click(modal.getByLabelText('produto'))
+  await usuario.click(modal.getByLabelText('fala'))
   await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
 
   await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
@@ -1014,7 +1083,7 @@ test('o Editor acrescenta um comercial pelo modal', async () => {
     tipo: 'merchan_apresentador',
     inicio_ms: 20_000,
     fim_ms: 22_000,
-    evidencia: 'cita a loja',
+    evidencias: ['fala', 'produto'],
   })
 })
 

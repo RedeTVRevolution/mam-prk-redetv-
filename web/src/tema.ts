@@ -27,4 +27,5 @@ export const CORES_DE_OCORRENCIA = {
   comerciais: 'yellow',
   planos: 'lime',
   fala: 'gray',
+  textos_na_tela: 'violet',
 } as const satisfies Record<string, MantineColor>

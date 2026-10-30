@@ -148,3 +148,16 @@ def test_tempo_de_tela_nao_conta_mencoes() -> None:
 
     assert tempo_de_tela_ms(ana) == 1000
     assert tempo_de_tela_ms(pessoa("b", "Bia", fala=[(0, 5000)])) == 0
+
+
+def test_mesma_pessoa_junta_as_fontes_do_nome_sem_repetir() -> None:
+    a = pessoa("a1", "Ana", imagem=[(0, 1000)]).model_copy(
+        update={"fontes_do_nome": ["rosto", "gc"]}
+    )
+    b = pessoa("b1", "Ana", imagem=[(300_000, 301_000)]).model_copy(
+        update={"fontes_do_nome": ["fala", "rosto"]}
+    )
+
+    unidas, _ = unir_pessoas([[a], [b]])
+
+    assert unidas[0].fontes_do_nome == ["rosto", "gc", "fala"]

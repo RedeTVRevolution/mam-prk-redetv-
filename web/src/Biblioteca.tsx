@@ -11,6 +11,7 @@ import {
   Group,
   Loader,
   Progress,
+  Select,
   SimpleGrid,
   Stack,
   Text,
@@ -31,6 +32,7 @@ interface Job {
   estado: string
   codigo_falha: string | null
   duracao_s?: number | null
+  programa?: string | null
   criado_em: string
 }
 
@@ -96,6 +98,9 @@ export default function Biblioteca({
   const [envio, setEnvio] = useState<Envio>({ tipo: 'parado' })
   const [listaFalhou, setListaFalhou] = useState(false)
   const [estados, setEstados] = useState<string[]>(ESTADOS)
+  // Programas com perfil: sem a lista (falha ao carregar), o envio segue sem programa.
+  const [programas, setProgramas] = useState<string[]>([])
+  const [programa, setPrograma] = useState<string | null>(null)
   const limparSeletor = useRef<() => void>(null)
   const enviando = envio.tipo === 'enviando'
 
@@ -124,6 +129,22 @@ export default function Biblioteca({
     return () => clearInterval(relogio)
   }, [atualizar, intervaloMs])
 
+  useEffect(() => {
+    if (!podeEnviar) return
+    let ativo = true
+    chamarApi<string[]>(autenticador, '/v1/programas').then(
+      (lista) => {
+        if (ativo) setProgramas(lista)
+      },
+      (erro: unknown) => {
+        if (ativo) tratar(erro)
+      },
+    )
+    return () => {
+      ativo = false
+    }
+  }, [autenticador, podeEnviar, tratar])
+
   async function escolher(arquivo: File | null) {
     if (!arquivo) return
     // Sem isso, escolher de novo o mesmo arquivo não dispara a troca.
@@ -137,7 +158,12 @@ export default function Biblioteca({
     try {
       const criado = await chamarApi<JobCriado>(autenticador, '/v1/jobs', {
         metodo: 'POST',
-        corpo: { nome: arquivo.name, tamanho_bytes: arquivo.size, tipo: arquivo.type },
+        corpo: {
+          nome: arquivo.name,
+          tamanho_bytes: arquivo.size,
+          tipo: arquivo.type,
+          ...(programa ? { programa } : {}),
+        },
       })
       void atualizar()
       await enviarRetomavel(criado.url_de_upload, arquivo, {
@@ -161,6 +187,18 @@ export default function Biblioteca({
         <Stack gap="lg">
           {podeEnviar && (
             <Stack gap="xs">
+              {programas.length > 0 && (
+                <Select
+                  label="Programa"
+                  placeholder="Sem programa"
+                  size="xs"
+                  clearable
+                  data={programas}
+                  value={programa}
+                  onChange={setPrograma}
+                  disabled={enviando}
+                />
+              )}
               <FileButton
                 accept=".mp4,video/mp4"
                 onChange={(arquivo) => void escolher(arquivo)}
@@ -257,6 +295,7 @@ export default function Biblioteca({
                   <Text size="xs" c="dimmed">
                     {new Date(job.criado_em).toLocaleString('pt-BR')}
                     {job.duracao_s != null && ` · ${formatarDuracao(job.duracao_s)}`}
+                    {job.programa && ` · ${job.programa}`}
                   </Text>
                   {job.codigo_falha && (
                     <Text size="xs" c="red" ff="monospace">

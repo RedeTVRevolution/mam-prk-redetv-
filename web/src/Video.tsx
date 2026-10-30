@@ -5,6 +5,7 @@ import {
   Badge,
   Box,
   Center,
+  Chip,
   Drawer,
   Grid,
   Group,
@@ -64,7 +65,9 @@ interface Pessoa {
   id: string
   nome: string
   origem?: 'modelo' | 'revisao'
-  na_imagem: (Intervalo & { evidencia: string })[]
+  /** 1.2: de onde veio o nome; falta em 1.1 e em pessoa acrescentada pela revisão. */
+  fontes_do_nome?: ('rosto' | 'gc' | 'fala' | 'contexto')[]
+  na_imagem: (Intervalo & { evidencia: string; papel?: string; visual?: string | null })[]
   citada_na_fala: Intervalo[]
   citada_no_texto: (Intervalo & { texto: string })[]
 }
@@ -89,6 +92,7 @@ interface Pauta extends Intervalo {
   id: string
   titulo: string
   resumo?: string
+  tom?: string
   origem?: 'modelo' | 'revisao'
 }
 
@@ -115,12 +119,14 @@ interface Comercial extends Intervalo {
   id?: string
   marca: string
   tipo: string
+  /** 1.2; decupagens 1.1 trazem só `evidencia` (texto). */
+  evidencias?: Evidencia[]
   evidencia?: string
   origem?: 'modelo' | 'revisao'
   acrescentado?: boolean
 }
 
-// Os tipos do esquema 1.1 (api/decupagem.py).
+// Os tipos do esquema 1.2 (api/decupagem.py).
 const TIPOS_DE_COMERCIAL = [
   'intervalo',
   'merchan_apresentador',
@@ -128,7 +134,19 @@ const TIPOS_DE_COMERCIAL = [
   'sobreposicao_grafica',
   'marca_incidental',
   'mencao_editorial',
+  'testemunhal',
+  'produto_em_cena',
 ]
+
+const EVIDENCIAS = ['fala', 'logo', 'texto_na_tela', 'produto'] as const
+type Evidencia = (typeof EVIDENCIAS)[number]
+
+const FONTES_DO_NOME = { rosto: 'rosto', gc: 'GC', fala: 'fala', contexto: 'contexto' } as const
+
+interface TextoNaTela extends Intervalo {
+  tipo: 'gc' | 'tarja' | 'legenda' | 'placar' | 'chamada' | 'logo' | 'qr_code' | 'outro'
+  texto: string
+}
 
 export interface Decupagem {
   versao_decupagem?: string
@@ -138,6 +156,8 @@ export interface Decupagem {
   planos: Plano[]
   comerciais: Comercial[]
   transcricao: Fala[]
+  /** 1.2; falta nas decupagens 1.1. */
+  textos_na_tela?: TextoNaTela[]
 }
 
 interface Reproducao {
@@ -304,6 +324,11 @@ function faixasDe(d: Decupagem): Faixa[] {
       nome: 'Fala',
       cor: CORES_DE_OCORRENCIA.fala,
       ocorrencias: de('fala', d.transcricao),
+    },
+    {
+      nome: 'Texto na tela',
+      cor: CORES_DE_OCORRENCIA.textos_na_tela,
+      ocorrencias: de('texto', d.textos_na_tela ?? []),
     },
   ]
 }
@@ -497,7 +522,7 @@ function FaixaDoTempo({
   )
 }
 
-const ABAS = ['Pessoas', 'Pautas', 'Marcas', 'Planos', 'Fala'] as const
+const ABAS = ['Pessoas', 'Pautas', 'Marcas', 'Planos', 'Fala', 'Texto na tela'] as const
 type Aba = (typeof ABAS)[number]
 
 const dentro = (atualMs: number, i: Intervalo) => atualMs >= i.inicio_ms && atualMs < i.fim_ms
@@ -846,6 +871,11 @@ export default function Video({
                       label={
                         <Group gap={6} wrap="nowrap">
                           <Text size="sm">{p.titulo}</Text>
+                          {p.tom && (
+                            <Badge size="xs" color="gray" variant="outline">
+                              {p.tom}
+                            </Badge>
+                          )}
                           {p.origem === 'revisao' && (
                             <Badge size="xs" color="teal" variant="light">
                               revisado
@@ -890,6 +920,11 @@ export default function Video({
                       label={
                         <Group gap={6} wrap="nowrap">
                           <Text size="sm">{c.marca}</Text>
+                          {(c.evidencias ?? (c.evidencia ? [c.evidencia] : [])).map((e) => (
+                            <Badge key={e} size="xs" color="gray" variant="outline">
+                              {e}
+                            </Badge>
+                          ))}
                           {c.origem === 'revisao' && (
                             <Badge size="xs" color="teal" variant="light">
                               revisado
@@ -935,7 +970,16 @@ export default function Video({
                           {pendentes.has(chaveDoItem('plano', p.id)) && <SeloAguardando />}
                         </Group>
                       }
-                      description={`${p.ambiente} · ${tempo(p.inicio_ms)}`}
+                      description={
+                        <>
+                          {`${p.ambiente} · ${tempo(p.inicio_ms)}`}
+                          {p.objetos && p.objetos.length > 0 && (
+                            <Text span size="xs" display="block">
+                              {p.objetos.join(', ')}
+                            </Text>
+                          )}
+                        </>
+                      }
                       onClick={() => saltar(p.inicio_ms)}
                     />
                     {podeEditar && (
@@ -983,6 +1027,16 @@ export default function Video({
                       </ActionIcon>
                     )}
                   </Group>
+                ))}
+              {aba === 'Texto na tela' &&
+                (decupagem.textos_na_tela ?? []).map((t, i) => (
+                  <NavLink
+                    key={`texto-${i}`}
+                    label={<Text size="sm">{t.texto}</Text>}
+                    description={`${tempo(t.inicio_ms)} · ${t.tipo}`}
+                    active={dentro(atualMs, t)}
+                    onClick={() => saltar(t.inicio_ms)}
+                  />
                 ))}
             </ScrollArea>
           </Stack>
@@ -1994,7 +2048,7 @@ function CorrigirComercial({
   const [tipo, setTipo] = useState<string | null>(atual?.tipo ?? null)
   const [inicio, setInicio] = useState(atual ? tempo(atual.inicio_ms) : '')
   const [fim, setFim] = useState(atual ? tempo(atual.fim_ms) : '')
-  const [evidencia, setEvidencia] = useState('')
+  const [evidencias, setEvidencias] = useState<string[]>([])
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
@@ -2018,7 +2072,7 @@ function CorrigirComercial({
         tipo_do_item: 'comercial',
         valor: `${inicioMs}-${fimMs}`,
       })
-  } else if (novo && marca.trim() && tipo && evidencia.trim() && temposValidos) {
+  } else if (novo && marca.trim() && tipo && evidencias.length > 0 && temposValidos) {
     candidatas.push({
       tipo: 'comercial.acrescentar',
       valor: JSON.stringify({
@@ -2026,7 +2080,8 @@ function CorrigirComercial({
         tipo,
         inicio_ms: inicioMs,
         fim_ms: fimMs,
-        evidencia: evidencia.trim(),
+        // Na ordem do esquema, não na ordem dos cliques.
+        evidencias: EVIDENCIAS.filter((e) => evidencias.includes(e)),
       }),
     })
   }
@@ -2106,12 +2161,20 @@ function CorrigirComercial({
           </Text>
         )}
         {novo && (
-          <TextInput
-            label="Evidência"
-            value={evidencia}
-            maxLength={200}
-            onChange={(e) => setEvidencia(e.currentTarget.value)}
-          />
+          <Stack gap={4}>
+            <Text size="sm" fw={500}>
+              Evidências
+            </Text>
+            <Chip.Group multiple value={evidencias} onChange={setEvidencias}>
+              <Group gap={6}>
+                {EVIDENCIAS.map((e) => (
+                  <Chip key={e} value={e} size="xs">
+                    {e}
+                  </Chip>
+                ))}
+              </Group>
+            </Chip.Group>
+          </Stack>
         )}
         <Textarea
           label="Motivo"
@@ -2691,6 +2754,15 @@ function AbaPessoas({
               aguardando={pendentes.has(chaveDoItem('pessoa', p.id))}
               aoCorrigir={aoCorrigir}
             />
+            {p.fontes_do_nome && p.fontes_do_nome.length > 0 && (
+              <Group gap={4} aria-label={`Fontes do nome de ${p.nome}`}>
+                {p.fontes_do_nome.map((f) => (
+                  <Badge key={f} size="xs" color="blue" variant="outline">
+                    {FONTES_DO_NOME[f] ?? f}
+                  </Badge>
+                ))}
+              </Group>
+            )}
             {aoOcorrencia && pessoaDoModelo(p) && (
               <Button
                 size="compact-xs"
@@ -2723,6 +2795,11 @@ function AbaPessoas({
                         {`${tempo(a.inicio_ms)} · ${a.evidencia}`}
                       </Text>
                     </UnstyledButton>
+                    {(a.papel || a.visual) && (
+                      <Text size="10px" c="dimmed">
+                        {[a.papel, a.visual].filter(Boolean).join(' · ')}
+                      </Text>
+                    )}
                     {aoOcorrencia && pessoaDoModelo(p) && (
                       <MenuDaOcorrencia
                         pessoa={p}

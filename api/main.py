@@ -54,6 +54,7 @@ from api.papeis import (
     papeis_efetivos,
     permissoes_de,
 )
+from api.programas import PERFIS
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -124,6 +125,11 @@ def criar_app(
             papeis=efetivos,
             permissoes=sorted(permissoes_de(efetivos)),
         )
+
+    @v1.get("/programas")
+    def programas(_chamador: ChamadorAutenticado) -> list[str]:
+        """Os programas com perfil, para o envio escolher."""
+        return sorted(PERFIS)
 
     v1.include_router(
         criar_rotas(

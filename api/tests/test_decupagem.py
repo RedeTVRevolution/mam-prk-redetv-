@@ -12,7 +12,7 @@ DURACAO_MS = 60_000
 
 def decupagem_valida() -> dict[str, Any]:
     return {
-        "versao_esquema": "1.1",
+        "versao_esquema": "1.2",
         "video": {"sha256": "a" * 64, "duracao_ms": DURACAO_MS},
         "programa": {
             "resumo": "Jornal da noite",
@@ -57,7 +57,7 @@ def decupagem_valida() -> dict[str, Any]:
                 "tipo": "merchan_apresentador",
                 "inicio_ms": 40_000,
                 "fim_ms": 50_000,
-                "evidencia": "fala+logo",
+                "evidencias": ["fala", "logo"],
             }
         ],
         "transcricao": [
@@ -160,3 +160,39 @@ def test_esquema_do_modelo_omite_os_campos_do_servidor() -> None:
 def test_esquema_do_modelo_nao_usa_const() -> None:
     """A Vertex ignora `const`: um Literal de valor único volta com outro valor."""
     assert '"const"' not in json.dumps(esquema_do_modelo())
+
+
+def test_esquema_do_modelo_pede_tempos_em_mm_ss_e_nenhum_ms() -> None:
+    """clipe3: pedido em ms, o modelo escreveu 01:24 como 124."""
+    esquema = esquema_do_modelo()
+    texto = json.dumps(esquema)
+    assert "inicio_ms" not in texto
+    assert "fim_ms" not in texto
+    for nome in ("Bloco", "Pauta", "Aparicao", "Comercial", "Fala", "TextoNaTela"):
+        definicao = esquema["$defs"][nome]
+        assert definicao["properties"]["inicio"]["pattern"] == r"^\d{2,}:[0-5]\d$"
+        assert {"inicio", "fim"} <= set(definicao["required"])
+
+
+def test_esquema_do_modelo_exige_todo_campo() -> None:
+    """O Gemini pula campo opcional: o opcional vem como null ou lista vazia."""
+    esquema = esquema_do_modelo()
+    for definicao in [esquema, *esquema["$defs"].values()]:
+        assert definicao["required"] == list(definicao["properties"])
+    pessoa = esquema["$defs"]["Pessoa"]["required"]
+    assert "fontes_do_nome" in pessoa
+    assert "textos_na_tela" in esquema["required"]
+
+
+def test_esquema_do_modelo_tem_descricao_nos_campos_novos() -> None:
+    d = esquema_do_modelo()["$defs"]
+    for definicao, campo in [
+        ("Pessoa", "fontes_do_nome"),
+        ("Aparicao", "papel"),
+        ("Aparicao", "visual"),
+        ("Pauta", "tom"),
+        ("Comercial", "evidencias"),
+        ("Plano", "plano_limpo"),
+        ("Plano", "objetos"),
+    ]:
+        assert d[definicao]["properties"][campo]["description"], (definicao, campo)

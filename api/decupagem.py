@@ -1,15 +1,20 @@
-"""Esquema 1.1 da decupagem.
+"""Esquema 1.2 da decupagem.
 
 Um modelo só: dele saem a saída estruturada pedida ao Gemini
 (`esquema_do_modelo()`), a validação da resposta e o tipo do OpenAPI.
+
+O modelo escreve os tempos em MM:SS (`inicio`/`fim`), o formato em que ele pensa;
+`tempos_em_ms()` os converte nos `inicio_ms`/`fim_ms` guardados. Pedidos em ms,
+os tempos saíam como 124 para 01:24 (clipe3).
 """
 
+import re
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-VersaoEsquema = Literal["1.1"]
-VERSAO_ESQUEMA: VersaoEsquema = "1.1"  # o mypy cobra se o tipo mudar sozinho
+VersaoEsquema = Literal["1.2"]
+VERSAO_ESQUEMA: VersaoEsquema = "1.2"  # o mypy cobra se o tipo mudar sozinho
 
 Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]
@@ -53,13 +58,27 @@ class Programa(_Estrito):
 class Pauta(_Intervalo):
     id: Id
     titulo: Rotulo
-    resumo: Texto
-    pessoas: list[Id] = []
+    resumo: Texto = Field(description="Resumo jornalístico fiel ao mostrado e dito.")
+    pessoas: list[Id] = Field(default=[], description="Ids das pessoas envolvidas.")
     locais: list[Rotulo] = []
+    tom: Rotulo | None = Field(
+        default=None,
+        description="Informativo, polêmico, descontraído, exclusivo, homenagem, "
+        "análise…",
+    )
 
 
 class Aparicao(_Intervalo):
-    evidencia: Rotulo
+    evidencia: Rotulo = Field(description="O que mostra que é essa pessoa.")
+    papel: Rotulo | None = Field(
+        default=None,
+        description="Papel no trecho: apresentador, repórter, entrevistado, "
+        "assunto da pauta ou flagrante.",
+    )
+    visual: Rotulo | None = Field(
+        default=None,
+        description="Visual de destaque, se relevante (ex.: vestido de gala vermelho).",
+    )
     quadro: str | None = None  # vazio na E0
 
 
@@ -68,23 +87,46 @@ class MencaoNaFala(_Intervalo):
 
 
 class MencaoNoTexto(_Intervalo):
-    texto: Texto
+    texto: Texto = Field(description="O texto na tela que cita a pessoa.")
+
+
+FonteDoNome = Literal["rosto", "gc", "fala", "contexto"]
 
 
 class Pessoa(_Estrito):
     id: Id
-    nome: Rotulo  # "não identificado" quando o modelo não reconhece
+    nome: Rotulo = Field(
+        description='Nome próprio; "não identificado" com uma descrição curta '
+        "quando não há segurança."
+    )
+    fontes_do_nome: list[FonteDoNome] = Field(
+        default=[],
+        description="O que sustenta o nome: rosto, GC ou tarja, fala, contexto. "
+        'Vazia para "não identificado".',
+    )
     origem: Literal["modelo", "revisao"] = "modelo"
-    na_imagem: list[Aparicao]
-    citada_na_fala: list[MencaoNaFala]
-    citada_no_texto: list[MencaoNoTexto]
+    na_imagem: list[Aparicao] = Field(
+        description="Aparições: a pessoa visível na imagem. Foto num gráfico, logo "
+        "ou QR code não é aparição."
+    )
+    citada_na_fala: list[MencaoNaFala] = Field(
+        description="Nome dito na fala sem a pessoa aparecer."
+    )
+    citada_no_texto: list[MencaoNoTexto] = Field(
+        description="Nome em texto na tela sem a pessoa aparecer."
+    )
 
 
 class Plano(_Intervalo):
     id: Id
-    ambiente: Rotulo
-    plano_limpo: bool
-    objetos: list[Rotulo] = []
+    ambiente: Rotulo = Field(description="Local: estúdio, aeroporto, estádio, rua…")
+    plano_limpo: bool = Field(
+        description="Sem texto na tela e sem ninguém falando para a câmera."
+    )
+    objetos: list[Rotulo] = Field(
+        default=[],
+        description="Objetos de destaque: carro de luxo, joia, troféu, produto…",
+    )
     acao: Texto | None = None
     enquadramento: Rotulo | None = None
     movimento_camera: Rotulo | None = None
@@ -92,22 +134,39 @@ class Plano(_Intervalo):
     periodo: Literal["dia", "noite"] | None = None
 
 
+EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
+
+
 class Comercial(_Intervalo):
     marca: Rotulo
     tipo: Literal[
         "intervalo",
         "merchan_apresentador",
+        "testemunhal",
+        "produto_em_cena",
         "patrocinio_vinheta",
         "sobreposicao_grafica",
         "marca_incidental",
         "mencao_editorial",
-    ]
-    evidencia: Rotulo
+    ] = Field(
+        description="Banner, bug, QR code e chamada de site são "
+        "sobreposicao_grafica; mencao_editorial é a marca citada sem ação comercial."
+    )
+    evidencias: list[EvidenciaDoComercial] = Field(
+        min_length=1, description="O que mostra a ação comercial."
+    )
 
 
 class Fala(_Intervalo):
-    locutor: Rotulo
+    locutor: Rotulo = Field(description="Quem fala: nome ou papel.")
     texto: Texto
+
+
+class TextoNaTela(_Intervalo):
+    tipo: Literal[
+        "gc", "tarja", "legenda", "placar", "chamada", "logo", "qr_code", "outro"
+    ]
+    texto: Texto = Field(description="O texto lido, como aparece.")
 
 
 class Decupagem(_Estrito):
@@ -118,13 +177,25 @@ class Decupagem(_Estrito):
     pessoas: list[Pessoa]
     planos: list[Plano]
     comerciais: list[Comercial]
-    transcricao: list[Fala]
+    transcricao: list[Fala] = Field(
+        description="As falas em trechos curtos, um por frase ou troca de quem fala."
+    )
+    textos_na_tela: list[TextoNaTela] = Field(
+        default=[],
+        description="GCs, tarjas, legendas, placares, chamadas, logos e QR codes.",
+    )
 
     def _intervalos(self) -> list[_Intervalo]:
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
         for p in self.pessoas:
             achados += [*p.na_imagem, *p.citada_na_fala, *p.citada_no_texto]
-        return [*achados, *self.planos, *self.comerciais, *self.transcricao]
+        return [
+            *achados,
+            *self.planos,
+            *self.comerciais,
+            *self.transcricao,
+            *self.textos_na_tela,
+        ]
 
     @model_validator(mode="after")
     def _tempos_dentro_da_duracao(self) -> Self:
@@ -136,12 +207,15 @@ class Decupagem(_Estrito):
 # Campos que o servidor preenche; o modelo não tem como sabê-los. A versão é
 # nossa; o SHA-256 e a duração (`video`) vêm da quarentena; os tempos originais
 # são escritos pela regra de tempos; `origem` só muda na revisão; `quadro` é a
-# imagem que nós extraímos. Vale pelo nome da chave em qualquer nível: um campo
-# do modelo com um desses nomes sumiria do esquema e toda resposta seria recusada.
+# imagem que nós extraímos; os ms saem dos tempos em MM:SS. Vale pelo nome da
+# chave em qualquer nível: um campo do modelo com um desses nomes sumiria do
+# esquema e toda resposta seria recusada.
 CAMPOS_DO_SERVIDOR = frozenset(
     {
         "versao_esquema",
         "video",
+        "inicio_ms",
+        "fim_ms",
         "inicio_modelo_ms",
         "fim_modelo_ms",
         "origem",
@@ -149,16 +223,60 @@ CAMPOS_DO_SERVIDOR = frozenset(
     }
 )
 
+# Minutos passam de 59 e nunca há horas: é o formato estável do modelo depois de
+# 1 h (`62:30`); pedido em HH:MM:SS, o 3.5 Flash-Lite perdia a hora (`00:02:30`).
+FORMATO_DO_TEMPO = r"^\d{2,}:[0-5]\d$"
+_TEMPO = re.compile(FORMATO_DO_TEMPO)
+TEMPO_DO_MODELO = {
+    "type": "string",
+    "pattern": FORMATO_DO_TEMPO,
+    "description": "MM:SS contado do início do arquivo de vídeo, mesmo num trecho. "
+    "Minutos passam de 59 (1 h 2 min 30 s = 62:30); nunca use horas.",
+}
+
+
+def _ms(tempo: Any, duracao_ms: int) -> int:
+    if not isinstance(tempo, str) or not _TEMPO.match(tempo):
+        raise ValueError(f"tempo fora de MM:SS: {tempo!r}")
+    minutos, segundos = tempo.split(":")
+    ms = (int(minutos) * 60 + int(segundos)) * 1000
+    # O modelo só escreve segundos: até 1 s além do fim é o fim do vídeo.
+    return duracao_ms if duracao_ms < ms < duracao_ms + 1000 else ms
+
+
+def tempos_em_ms(dados: Any, duracao_ms: int) -> Any:
+    """Troca, em qualquer nível, `inicio`/`fim` em MM:SS por `inicio_ms`/`fim_ms`.
+
+    Levanta `ValueError` se um tempo não estiver em MM:SS.
+    """
+    if isinstance(dados, list):
+        return [tempos_em_ms(d, duracao_ms) for d in dados]
+    if not isinstance(dados, dict):
+        return dados
+    convertido = {k: tempos_em_ms(v, duracao_ms) for k, v in dados.items()}
+    if "inicio" in convertido or "fim" in convertido:
+        convertido["inicio_ms"] = _ms(convertido.pop("inicio", None), duracao_ms)
+        convertido["fim_ms"] = _ms(convertido.pop("fim", None), duracao_ms)
+    return convertido
+
 
 def esquema_do_modelo() -> dict[str, Any]:
-    """Saída estruturada pedida ao Gemini: a decupagem sem `CAMPOS_DO_SERVIDOR`."""
+    """Saída estruturada pedida ao Gemini: a decupagem sem `CAMPOS_DO_SERVIDOR`,
+    com tempos em MM:SS e todo campo obrigatório (o opcional vem como null ou
+    lista vazia), para o modelo não pular nenhum."""
     esquema = Decupagem.model_json_schema()
     del esquema["$defs"]["Video"]
     for definicao in [esquema, *esquema["$defs"].values()]:
+        propriedades = definicao.get("properties", {})
+        intervalo = "inicio_ms" in propriedades
         for campo in CAMPOS_DO_SERVIDOR:
-            definicao.get("properties", {}).pop(campo, None)
-        if "required" in definicao:
-            definicao["required"] = [
-                c for c in definicao["required"] if c not in CAMPOS_DO_SERVIDOR
-            ]
+            propriedades.pop(campo, None)
+        if intervalo:
+            definicao["properties"] = {
+                "inicio": TEMPO_DO_MODELO,
+                "fim": TEMPO_DO_MODELO,
+                **propriedades,
+            }
+        if "properties" in definicao:
+            definicao["required"] = list(definicao["properties"])
     return esquema

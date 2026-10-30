@@ -8,7 +8,7 @@ def decupagem(*pessoas: tuple[str, bool]) -> Decupagem:
     """Pessoas como (nome, aparece): `aparece` False deixa só uma menção na fala."""
     return Decupagem.model_validate(
         {
-            "versao_esquema": "1.1",
+            "versao_esquema": "1.2",
             "video": {"sha256": "a" * 64, "duracao_ms": 60_000},
             "programa": {"resumo": "r", "blocos": []},
             "pautas": [],

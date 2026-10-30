@@ -23,7 +23,7 @@ J0, J1, J2 = (
 
 def decupagem(**partes: Any) -> Decupagem:
     base: dict[str, Any] = {
-        "versao_esquema": "1.1",
+        "versao_esquema": "1.2",
         "video": VIDEO.model_dump(),
         "programa": {"resumo": "", "blocos": []},
         "pautas": [],
@@ -63,7 +63,7 @@ def comercial(
     return {
         "marca": marca,
         "tipo": tipo,
-        "evidencia": "logo",
+        "evidencias": ["logo"],
         "inicio_ms": inicio,
         "fim_ms": fim,
     }
@@ -306,3 +306,18 @@ def test_regra_de_tempos_vem_depois_da_emenda() -> None:
 
     a = d.pessoas[0].na_imagem[0]
     assert (a.inicio_ms, a.fim_ms, a.fim_modelo_ms) == (295_000, 340_000, 339_500)
+
+
+def test_texto_na_tela_fica_com_a_janela_em_cujo_nucleo_comeca() -> None:
+    def gc(inicio: int, fim: int) -> dict[str, Any]:
+        return {"inicio_ms": inicio, "fim_ms": fim, "tipo": "gc", "texto": "FULANA"}
+
+    r0 = decupagem(textos_na_tela=[gc(290_000, 295_000)])
+    r1 = decupagem(textos_na_tela=[gc(290_000, 295_000), gc(305_000, 306_000)])
+
+    d = consolidar(VIDEO, [(J0, r0), (J1, r1)], [])
+
+    assert [(t.inicio_ms, t.fim_ms) for t in d.textos_na_tela] == [
+        (290_000, 295_000),
+        (305_000, 306_000),
+    ]

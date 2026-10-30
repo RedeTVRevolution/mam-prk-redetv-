@@ -56,6 +56,9 @@ def _juntar(base: Pessoa, outra: Pessoa) -> Pessoa:
     return base.model_copy(
         update={
             "origem": "revisao" if revisao else "modelo",
+            "fontes_do_nome": list(
+                dict.fromkeys([*base.fontes_do_nome, *outra.fontes_do_nome])
+            ),
             **{c: [*getattr(base, c), *getattr(outra, c)] for c in LISTAS},
         }
     )

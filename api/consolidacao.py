@@ -18,6 +18,7 @@ from api.decupagem import (
     Pauta,
     Plano,
     Programa,
+    TextoNaTela,
     Video,
     _Intervalo,
 )
@@ -196,6 +197,7 @@ def consolidar(
     planos: list[Plano] = []
     comerciais: list[Comercial] = []
     transcricao: list[Fala] = []
+    textos_na_tela: list[TextoNaTela] = []
     for k, (janela, d) in enumerate(resultados):
         ultima = k == ultimo
         planos += _dono(d.planos, janela, ultima)
@@ -204,6 +206,7 @@ def consolidar(
         # seguinte: uma aparição ou comercial que atravessa a janela inteira
         # sai cortado no fim do contexto dela.
         transcricao += _dono(d.transcricao, janela, ultima)
+        textos_na_tela += _dono(d.textos_na_tela, janela, ultima)
         proximos = (
             _antes_do_nucleo(decupagens[k + 1].comerciais, resultados[k + 1][0])
             if k < ultimo
@@ -233,6 +236,7 @@ def consolidar(
         planos=planos,
         comerciais=_em_ordem(comerciais),
         transcricao=_em_ordem(transcricao),
+        textos_na_tela=_em_ordem(textos_na_tela),
     )
     # `model_copy` não valida: valida de novo depois da regra de tempos.
     return Decupagem.model_validate(

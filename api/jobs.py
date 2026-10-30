@@ -60,6 +60,7 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.papeis import Permissao, RepositorioDePapeis, papeis_efetivos, permissoes_de
+from api.programas import PERFIS
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
@@ -94,6 +95,7 @@ class Job(BaseModel):
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
     sistema: str | None = None
+    programa: str | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -106,6 +108,7 @@ class JobPublico(BaseModel):
     estado: Estado
     codigo_falha: CodigoDeFalha | None
     duracao_s: float | None
+    programa: str | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -146,6 +149,7 @@ class NovoJob(BaseModel):
     nome: Annotated[str, StringConstraints(min_length=1, max_length=255)]
     tamanho_bytes: Annotated[int, Field(strict=True)]
     tipo: Literal["video/mp4"]
+    programa: str | None = None  # um nome de `programas.toml`
 
     @model_validator(mode="before")
     @classmethod
@@ -168,6 +172,13 @@ class NovoJob(BaseModel):
         if not nome.lower().endswith(".mp4"):
             raise ValueError("nome sem extensão .mp4")
         return nome
+
+    @field_validator("programa")
+    @classmethod
+    def _programa_com_perfil(cls, programa: str | None) -> str | None:
+        if programa is not None and programa not in PERFIS:
+            raise ValueError("programa sem perfil")
+        return programa
 
 
 class ServicoIndisponivel(Exception):
@@ -392,6 +403,7 @@ def criar_rotas(
             estado="aguardando_upload",
             criado_por=criado_por,
             sistema=sistema,
+            programa=novo.programa,
             criado_em=agora,
             atualizado_em=agora,
         )

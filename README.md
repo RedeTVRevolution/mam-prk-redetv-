@@ -56,7 +56,7 @@ Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda 
 
 ## Cassete do Gemini
 
-O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema 1.1 e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video` e o texto da resposta, sem cabeçalhos nem credenciais. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.
+O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema da decupagem e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video` e o texto da resposta, sem cabeçalhos nem credenciais. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.
 
 Para regravar (a cada troca de modelo, de esquema ou de instrução), com o dev no ar e as credenciais ADC de uma conta com acesso ao projeto (`gcloud auth application-default login`):
 
