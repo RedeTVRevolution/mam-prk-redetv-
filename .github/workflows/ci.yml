@@ -73,7 +73,8 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [verificar, terraform, loop-afk, gitleaks]
     runs-on: ubuntu-latest
-    # Um deploy por vez, na ordem dos merges: o estado do Terraform e a tag do commit não se disputam.
+    # Um deploy por vez: o estado do Terraform e a tag do commit não se disputam. A
+    # fila não garante a ordem, então o passo `ponta` garante que nunca se volta atrás.
     concurrency:
       group: publicar-dev
       cancel-in-progress: false
@@ -92,14 +93,27 @@ jobs:
       TF_CLI_ARGS_apply: -auto-approve
     steps:
       - uses: actions/checkout@v7
+      # Só publica a ponta da main: um commit já superado, cujo CI terminou depois
+      # do seguinte, publicaria código antigo por cima. O run da ponta publica.
+      - id: ponta
+        run: |
+          git fetch -q origin main
+          if [ "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA" ]; then
+            echo publica=1 >> "$GITHUB_OUTPUT"
+          else
+            echo "Superado por $(git rev-parse --short FETCH_HEAD) na main; não publica."
+          fi
       # Sem service_account: o token federado só serve para impersonar a mam-terraform.
       # Este job publica, então as actions de terceiros vão pelo SHA, não pela tag.
-      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+      - if: steps.ponta.outputs.publica
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           project_id: ${{ vars.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      - if: steps.ponta.outputs.publica
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           # O wrapper suja a saída de `terraform output -raw`, que o script lê.
           terraform_wrapper: false
-      - run: make deploy-dev
+      - if: steps.ponta.outputs.publica
+        run: make deploy-dev
