@@ -1,5 +1,5 @@
-import { Alert, AppShell, Badge, Button, Center, Group, Loader, Stack, Text } from '@mantine/core'
-import { IconAlertTriangle } from '@tabler/icons-react'
+import { ActionIcon, Alert, AppShell, Badge, Button, Center, Group, Loader, Stack, Text } from '@mantine/core'
+import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
@@ -87,12 +87,21 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
     <AppShell
       header={{ height: 52 }}
       navbar={aberto ? undefined : NAVBAR_DA_BIBLIOTECA}
-      padding={aberto ? undefined : 'lg'}
+      padding={aberto ? 'sm' : 'lg'}
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
           <Group gap="xs">
-            {/* Espaço do botão de voltar, preenchido pela tela Vídeo. */}
+            {aberto && (
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label="Voltar à Biblioteca"
+                onClick={() => setAberto(null)}
+              >
+                <IconArrowLeft />
+              </ActionIcon>
+            )}
             <Badge color="red" variant="filled" radius="sm">
               MAM
             </Badge>
@@ -114,7 +123,6 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
           <Video
             autenticador={autenticador}
             job={aberto}
-            aoVoltar={() => setAberto(null)}
             aoSessaoExpirada={() => void sair()}
           />
         </AppShell.Main>

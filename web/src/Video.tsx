@@ -1,6 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  ActionIcon,
+  Alert,
+  AspectRatio,
+  Badge,
+  Center,
+  Grid,
+  Group,
+  Loader,
+  NavLink,
+  Paper,
+  Progress,
+  ScrollArea,
+  SegmentedControl,
+  Slider,
+  Stack,
+  Text,
+  Tooltip,
+  UnstyledButton,
+  type MantineColor,
+} from '@mantine/core'
+import { IconDownload } from '@tabler/icons-react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
+import { CORES_DE_OCORRENCIA } from './tema.ts'
 
 export interface JobAberto {
   id: string
@@ -35,16 +58,19 @@ interface Reproducao {
   expira_em: string
 }
 
-interface Item {
+interface Ocorrencia extends Intervalo {
   chave: string
-  inicio_ms: number
-  rotulo: string
 }
 
-interface Grupo {
-  titulo: string
-  itens: Item[]
+interface Faixa {
+  nome: string
+  cor: MantineColor
+  ocorrencias: Ocorrencia[]
 }
+
+// Menor largura de uma ocorrência na linha do tempo, para não sumir.
+const LARGURA_MINIMA_MS = 1500
+const LARGURA_DO_ROTULO = 120
 
 function tempo(ms: number): string {
   const total = Math.floor(ms / 1000)
@@ -53,48 +79,92 @@ function tempo(ms: number): string {
   return `${mm}:${ss}`
 }
 
-/** Separa pessoas na imagem, citadas na fala e citadas no texto (menção não é aparição). */
-function agrupar(d: Decupagem): Grupo[] {
-  const itens = <T extends Intervalo>(
-    prefixo: string,
-    lista: T[],
-    rotulo: (x: T) => string,
-  ): Item[] =>
-    lista.map((x, i) => ({
-      chave: `${prefixo}-${i}`,
-      inicio_ms: x.inicio_ms,
-      rotulo: rotulo(x),
-    }))
-  const dePessoas = <T extends Intervalo>(
-    prefixo: string,
-    escolher: (p: Pessoa) => T[],
-    detalhe: (x: T) => string = () => '',
-  ): Item[] =>
-    d.pessoas.flatMap((p) =>
-      itens(`${prefixo}-${p.id}`, escolher(p), (x) => p.nome + detalhe(x)),
-    )
+function faixasDe(d: Decupagem): Faixa[] {
+  const de = <T extends Intervalo>(prefixo: string, lista: T[]): Ocorrencia[] =>
+    lista.map((x, i) => ({ chave: `${prefixo}-${i}`, inicio_ms: x.inicio_ms, fim_ms: x.fim_ms }))
   return [
-    { titulo: 'Pessoas na imagem', itens: dePessoas('img', (p) => p.na_imagem) },
-    { titulo: 'Citadas na fala', itens: dePessoas('fala', (p) => p.citada_na_fala) },
+    { nome: 'Pautas', cor: CORES_DE_OCORRENCIA.pautas, ocorrencias: de('pauta', d.pautas) },
     {
-      titulo: 'Citadas no texto',
-      itens: dePessoas('texto', (p) => p.citada_no_texto, (x) => ` — ${x.texto}`),
-    },
-    { titulo: 'Pautas', itens: itens('pauta', d.pautas, (x) => x.titulo) },
-    {
-      titulo: 'Planos',
-      itens: itens('plano', d.planos, (x) => x.acao ?? x.ambiente),
+      nome: 'Aparições',
+      cor: CORES_DE_OCORRENCIA.aparicoes,
+      ocorrencias: de('img', d.pessoas.flatMap((p) => p.na_imagem)),
     },
     {
-      titulo: 'Comerciais',
-      itens: itens('com', d.comerciais, (x) => `${x.marca} (${x.tipo})`),
+      nome: 'Menções',
+      cor: CORES_DE_OCORRENCIA.mencoes,
+      ocorrencias: de(
+        'mencao',
+        d.pessoas.flatMap((p) => [...p.citada_na_fala, ...p.citada_no_texto]),
+      ),
     },
-    {
-      titulo: 'Transcrição',
-      itens: itens('fala', d.transcricao, (x) => `${x.locutor}: ${x.texto}`),
-    },
-  ].filter((g) => g.itens.length > 0)
+    { nome: 'Comerciais', cor: CORES_DE_OCORRENCIA.comerciais, ocorrencias: de('com', d.comerciais) },
+    { nome: 'Planos', cor: CORES_DE_OCORRENCIA.planos, ocorrencias: de('plano', d.planos) },
+    { nome: 'Fala', cor: CORES_DE_OCORRENCIA.fala, ocorrencias: de('fala', d.transcricao) },
+  ]
 }
+
+function maiorFim(faixas: Faixa[]): number {
+  return Math.max(0, ...faixas.flatMap((f) => f.ocorrencias.map((o) => o.fim_ms)))
+}
+
+/** Uma faixa da linha do tempo: ocorrências na cor da faixa e vãos transparentes. */
+function FaixaDoTempo({
+  faixa,
+  duracaoMs,
+  saltar,
+}: {
+  faixa: Faixa
+  duracaoMs: number
+  saltar: (ms: number) => void
+}) {
+  const ordenadas = [...faixa.ocorrencias].sort((a, b) => a.inicio_ms - b.inicio_ms)
+  const secoes = []
+  let cursor = 0
+  for (const o of ordenadas) {
+    const inicio = Math.max(o.inicio_ms, cursor)
+    const largura = Math.max(o.fim_ms - o.inicio_ms, LARGURA_MINIMA_MS)
+    if (inicio > cursor) {
+      secoes.push(
+        <Progress.Section
+          key={`vao-${o.chave}`}
+          value={((inicio - cursor) / duracaoMs) * 100}
+          color="transparent"
+        />,
+      )
+    }
+    secoes.push(
+      <Progress.Section
+        key={o.chave}
+        value={(largura / duracaoMs) * 100}
+        color={faixa.cor}
+        role="button"
+        tabIndex={0}
+        aria-label={`${faixa.nome} ${tempo(o.inicio_ms)}`}
+        style={{ cursor: 'pointer' }}
+        onClick={() => saltar(o.inicio_ms)}
+        onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+          if (e.key === 'Enter' || e.key === ' ') saltar(o.inicio_ms)
+        }}
+      />,
+    )
+    cursor = inicio + largura
+  }
+  return (
+    <Group gap="sm" wrap="nowrap">
+      <Text size="xs" w={LARGURA_DO_ROTULO} ta="right" c="dimmed">
+        {faixa.nome}
+      </Text>
+      <Progress.Root size={14} radius="xs" bg="dark.6" flex={1}>
+        {secoes}
+      </Progress.Root>
+    </Group>
+  )
+}
+
+const ABAS = ['Pessoas', 'Pautas', 'Marcas', 'Planos', 'Fala'] as const
+type Aba = (typeof ABAS)[number]
+
+const dentro = (atualMs: number, i: Intervalo) => atualMs >= i.inicio_ms && atualMs < i.fim_ms
 
 type Carga =
   | { tipo: 'carregando' }
@@ -104,12 +174,10 @@ type Carga =
 export default function Video({
   autenticador,
   job,
-  aoVoltar,
   aoSessaoExpirada,
 }: {
   autenticador: Autenticador
   job: JobAberto
-  aoVoltar: () => void
   aoSessaoExpirada: () => void
 }) {
   const player = useRef<HTMLVideoElement>(null)
@@ -171,54 +239,243 @@ export default function Video({
     if (player.current) player.current.currentTime = inicioMs / 1000
   }, [])
 
+  const [atualMs, setAtualMs] = useState(0)
+  const [duracaoDoPlayerMs, setDuracaoDoPlayerMs] = useState<number | null>(null)
+  const [aba, setAba] = useState<Aba>('Pessoas')
+
+  if (!concluido) {
+    return job.estado === 'falhou' ? (
+      <Alert color="red" variant="light" role="alert">
+        {`O vídeo falhou: ${job.codigo_falha ?? 'sem código'}`}
+      </Alert>
+    ) : (
+      <Alert color="gray" variant="light" role="alert">
+        O vídeo ainda não foi decupado.
+      </Alert>
+    )
+  }
+  if (carga.tipo === 'carregando') {
+    return (
+      <Center h="50vh">
+        <Loader color="red" role="status" aria-label="Carregando o vídeo" />
+      </Center>
+    )
+  }
+  if (carga.tipo === 'erro') {
+    return (
+      <Alert color="red" variant="light" role="alert">
+        Não foi possível carregar o vídeo.
+      </Alert>
+    )
+  }
+
+  const { decupagem, reproducao } = carga
+  const faixas = faixasDe(decupagem)
+  const duracaoMs = Math.max(duracaoDoPlayerMs ?? maiorFim(faixas), 1)
+  const quadro = (i: Intervalo) => `${reproducao.url}#t=${i.inicio_ms / 1000 + 1}`
+
   return (
-    <section>
-      <button type="button" onClick={aoVoltar}>
-        Voltar à Biblioteca
-      </button>
-      <h2>{job.nome}</h2>
-      {!concluido && (
-        <p role="alert">
-          {job.estado === 'falhou'
-            ? `O vídeo falhou: ${job.codigo_falha ?? 'sem código'}`
-            : 'O vídeo ainda não foi decupado.'}
-        </p>
-      )}
-      {concluido && carga.tipo === 'carregando' && <p>Carregando…</p>}
-      {concluido && carga.tipo === 'erro' && (
-        <p role="alert">Não foi possível carregar o vídeo.</p>
-      )}
-      {carga.tipo === 'pronta' && concluido && (
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <video
-            ref={player}
-            src={carga.reproducao.url}
-            controls
-            onError={renovarLink}
-            onLoadedMetadata={retomar}
-            aria-label="Player"
-            style={{ flex: 1, minWidth: 0 }}
-          />
-          <aside style={{ flex: 1, minWidth: 0 }} aria-label="Decupagem">
-            <BaixarJson nome={job.nome} decupagem={carga.decupagem} />
-            {agrupar(carga.decupagem).map((grupo) => (
-              <section key={grupo.titulo} aria-label={grupo.titulo}>
-                <h3>{grupo.titulo}</h3>
-                <ul>
-                  {grupo.itens.map((item) => (
-                    <li key={item.chave}>
-                      <button type="button" onClick={() => saltar(item.inicio_ms)}>
-                        {tempo(item.inicio_ms)} {item.rotulo}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-          </aside>
-        </div>
-      )}
-    </section>
+    <Grid gap="sm">
+      <Grid.Col span={{ base: 12, lg: 8 }}>
+        <Stack gap="sm">
+          <Group justify="space-between">
+            <Text fw={700}>{job.nome}</Text>
+            <Text ff="monospace" size="xl" c="red.5">
+              {`${tempo(atualMs)} / ${tempo(duracaoMs)}`}
+            </Text>
+          </Group>
+          <AspectRatio ratio={16 / 9}>
+            <video
+              ref={player}
+              src={reproducao.url}
+              controls
+              onError={renovarLink}
+              onLoadedMetadata={(e) => {
+                retomar()
+                setDuracaoDoPlayerMs(e.currentTarget.duration * 1000)
+              }}
+              onTimeUpdate={(e) => setAtualMs(e.currentTarget.currentTime * 1000)}
+              aria-label="Player"
+              style={{ background: '#000' }}
+            />
+          </AspectRatio>
+          <Paper p="sm" withBorder>
+            <Stack gap={6}>
+              <Group gap="sm" wrap="nowrap">
+                <div style={{ width: LARGURA_DO_ROTULO, flexShrink: 0 }} />
+                <Slider
+                  flex={1}
+                  min={0}
+                  max={duracaoMs}
+                  step={1000}
+                  value={atualMs}
+                  onChange={saltar}
+                  size="xs"
+                  color="red"
+                  label={tempo}
+                />
+              </Group>
+              {faixas.map((faixa) => (
+                <FaixaDoTempo key={faixa.nome} faixa={faixa} duracaoMs={duracaoMs} saltar={saltar} />
+              ))}
+            </Stack>
+          </Paper>
+        </Stack>
+      </Grid.Col>
+      <Grid.Col span={{ base: 12, lg: 4 }}>
+        <Paper withBorder p="sm" h="calc(100vh - 76px)" aria-label="Decupagem">
+          <Stack h="100%" gap="sm">
+            <Group justify="space-between">
+              <SegmentedControl
+                size="xs"
+                data={[...ABAS]}
+                value={aba}
+                onChange={(v) => setAba(v as Aba)}
+              />
+              <BaixarJson nome={job.nome} decupagem={decupagem} />
+            </Group>
+            <ScrollArea flex={1}>
+              {aba === 'Pessoas' && (
+                <AbaPessoas decupagem={decupagem} quadro={quadro} saltar={saltar} />
+              )}
+              {aba === 'Pautas' &&
+                decupagem.pautas.map((p, i) => (
+                  <NavLink
+                    key={`pauta-${i}`}
+                    label={p.titulo}
+                    description={`${tempo(p.inicio_ms)}–${tempo(p.fim_ms)}`}
+                    active={dentro(atualMs, p)}
+                    onClick={() => saltar(p.inicio_ms)}
+                  />
+                ))}
+              {aba === 'Marcas' &&
+                decupagem.comerciais.map((c, i) => (
+                  <NavLink
+                    key={`com-${i}`}
+                    label={c.marca}
+                    description={`${c.tipo} · ${tempo(c.inicio_ms)}`}
+                    onClick={() => saltar(c.inicio_ms)}
+                  />
+                ))}
+              {aba === 'Planos' &&
+                decupagem.planos.map((p) => (
+                  <NavLink
+                    key={p.id}
+                    label={p.acao ?? p.ambiente}
+                    description={`${p.ambiente} · ${tempo(p.inicio_ms)}`}
+                    onClick={() => saltar(p.inicio_ms)}
+                  />
+                ))}
+              {aba === 'Fala' &&
+                decupagem.transcricao.map((f, i) => (
+                  <UnstyledButton key={`fala-${i}`} w="100%" onClick={() => saltar(f.inicio_ms)}>
+                    <Paper p={6} bg={dentro(atualMs, f) ? 'red.9' : 'transparent'}>
+                      <Text size="xs" ff="monospace" c="dimmed">
+                        {`${tempo(f.inicio_ms)} ${f.locutor.toUpperCase()}`}
+                      </Text>
+                      <Text size="sm">{f.texto}</Text>
+                    </Paper>
+                  </UnstyledButton>
+                ))}
+            </ScrollArea>
+          </Stack>
+        </Paper>
+      </Grid.Col>
+    </Grid>
+  )
+}
+
+/** Separa quem aparece de quem só é citado (menção não é aparição). */
+function AbaPessoas({
+  decupagem,
+  quadro,
+  saltar,
+}: {
+  decupagem: Decupagem
+  quadro: (i: Intervalo) => string
+  saltar: (ms: number) => void
+}) {
+  const aparecem = decupagem.pessoas.filter((p) => p.na_imagem.length > 0)
+  const citadas = decupagem.pessoas.filter(
+    (p) => p.citada_na_fala.length > 0 || p.citada_no_texto.length > 0,
+  )
+  return (
+    <Stack gap="md">
+      <Stack gap="xs">
+        <Text size="xs" fw={700} tt="uppercase" c="blue.4">
+          Aparecem na imagem
+        </Text>
+        {aparecem.map((p) => (
+          <Stack key={p.id} gap={4}>
+            <Text size="sm" fw={600}>
+              {p.nome}
+            </Text>
+            <ScrollArea type="never">
+              <Group gap={6} wrap="nowrap">
+                {p.na_imagem.map((a, i) => (
+                  <UnstyledButton key={i} onClick={() => saltar(a.inicio_ms)}>
+                    <video
+                      src={quadro(a)}
+                      muted
+                      preload="metadata"
+                      style={{
+                        width: 92,
+                        aspectRatio: '16 / 9',
+                        objectFit: 'cover',
+                        borderRadius: 4,
+                        display: 'block',
+                      }}
+                    />
+                    <Text size="10px" c="dimmed">
+                      {`${tempo(a.inicio_ms)} · ${a.evidencia}`}
+                    </Text>
+                  </UnstyledButton>
+                ))}
+              </Group>
+            </ScrollArea>
+          </Stack>
+        ))}
+      </Stack>
+      <Stack gap="xs">
+        <Text size="xs" fw={700} tt="uppercase" c="orange.4">
+          Só citadas (não contam como tempo de tela)
+        </Text>
+        {citadas.map((p) => (
+          <Stack key={p.id} gap={4}>
+            <Text size="sm">{p.nome}</Text>
+            <Group gap={6}>
+              {p.citada_na_fala.map((m, i) => (
+                <Badge
+                  key={`fala-${i}`}
+                  component="button"
+                  type="button"
+                  variant="light"
+                  color="orange"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => saltar(m.inicio_ms)}
+                >
+                  {`fala ${tempo(m.inicio_ms)}`}
+                </Badge>
+              ))}
+              {p.citada_no_texto.map((m, i) => (
+                <Tooltip key={`texto-${i}`} label={m.texto}>
+                  <Badge
+                    component="button"
+                    type="button"
+                    variant="outline"
+                    color="orange"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => saltar(m.inicio_ms)}
+                  >
+                    {`texto ${tempo(m.inicio_ms)}`}
+                  </Badge>
+                </Tooltip>
+              ))}
+            </Group>
+          </Stack>
+        ))}
+      </Stack>
+    </Stack>
   )
 }
 
@@ -236,8 +493,10 @@ function BaixarJson({ nome, decupagem }: { nome: string; decupagem: Decupagem })
     setTimeout(() => URL.revokeObjectURL(url), 0)
   }
   return (
-    <button type="button" onClick={baixar}>
-      Baixar decupagem (JSON)
-    </button>
+    <Tooltip label="Baixar decupagem (JSON)">
+      <ActionIcon variant="default" aria-label="Baixar decupagem (JSON)" onClick={baixar}>
+        <IconDownload />
+      </ActionIcon>
+    </Tooltip>
   )
 }
