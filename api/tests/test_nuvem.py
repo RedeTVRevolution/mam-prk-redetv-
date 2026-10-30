@@ -1,0 +1,166 @@
+"""Adaptadores de nuvem. Firestore e Storage rodam contra os emuladores.
+
+Sem `FIRESTORE_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`, os testes de integração
+são pulados; no CI os emuladores sobem antes do pytest.
+"""
+
+import os
+import uuid
+from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlparse
+
+import pytest
+import requests
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from google.auth import credentials as google_credentials
+from google.auth.credentials import AnonymousCredentials
+from google.cloud import firestore
+from google.cloud.storage import Client as ClienteStorage
+from google.oauth2 import service_account
+
+from api.jobs import Job, ServicoIndisponivel
+from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
+
+EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
+EMULADOR_STORAGE = os.environ.get("STORAGE_EMULATOR_HOST")
+BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
+
+
+def _anonima() -> AnonymousCredentials:
+    return AnonymousCredentials()  # type: ignore[no-untyped-call]
+
+
+def _job(id: str, criado_em: datetime, **extra: object) -> Job:
+    return Job(
+        id=id,
+        nome=f"{id}.mp4",
+        tamanho_bytes=1000,
+        estado="aguardando_upload",
+        criado_por="uid-1",
+        criado_em=criado_em,
+        atualizado_em=criado_em,
+        **extra,  # type: ignore[arg-type]
+    )
+
+
+@pytest.fixture
+def repositorio() -> RepositorioFirestore:
+    cliente = firestore.Client(project="teste", credentials=_anonima())
+    return RepositorioFirestore(cliente, colecao=f"jobs-{uuid.uuid4().hex}")
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioFirestore:
+    def test_salva_e_obtem_o_job(self, repositorio: RepositorioFirestore) -> None:
+        job = _job("a", BASE, sha256="ab" * 32, duracao_s=12.5)
+
+        repositorio.salvar(job)
+
+        assert repositorio.obter("a") == job
+
+    def test_obter_devolve_none_se_nao_existe(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        assert repositorio.obter("nao-existe") is None
+
+    def test_salvar_de_novo_atualiza_o_job(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        repositorio.salvar(_job("a", BASE))
+        repositorio.salvar(
+            _job("a", BASE, codigo_falha="upload_expirado").model_copy(
+                update={"estado": "falhou"}
+            )
+        )
+
+        job = repositorio.obter("a")
+        assert job is not None
+        assert (job.estado, job.codigo_falha) == ("falhou", "upload_expirado")
+
+    def test_lista_do_mais_recente_para_o_mais_antigo(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        for id, minutos in [("velho", 0), ("novo", 20), ("meio", 10)]:
+            repositorio.salvar(_job(id, BASE + timedelta(minutes=minutos)))
+
+        assert [j.id for j in repositorio.listar()] == ["novo", "meio", "velho"]
+
+
+def _credencial_local() -> google_credentials.Signing:
+    chave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = chave.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    return service_account.Credentials.from_service_account_info(  # type: ignore[no-untyped-call, no-any-return]
+        {
+            "type": "service_account",
+            "client_email": "mam-web@teste.iam.gserviceaccount.com",
+            "private_key": pem,
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    )
+
+
+@pytest.fixture
+def armazenamento() -> ArmazenamentoStorage:
+    endpoint = EMULADOR_STORAGE or "http://localhost:4443"
+    cliente = ClienteStorage(
+        project="teste",
+        credentials=_anonima(),
+        client_options={"api_endpoint": endpoint},
+    )
+    credencial = _credencial_local()
+    return ArmazenamentoStorage(
+        cliente,
+        f"teste-quarentena-{uuid.uuid4().hex[:8]}",
+        assinatura=lambda: {"credentials": credencial},
+    )
+
+
+def test_url_de_upload_prende_tipo_e_tamanho_declarados(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    url = armazenamento.url_de_upload("job1", 123456, "video/mp4")
+
+    consulta = parse_qs(urlparse(url).query)
+    assinados = consulta["X-Goog-SignedHeaders"][0].split(";")
+    assert {"content-type", "x-upload-content-length", "x-goog-resumable"} <= set(
+        assinados
+    )
+    assert "job1" in urlparse(url).path
+    assert "teste-quarentena" in url
+
+
+def test_outras_operacoes_do_armazenamento_seguem_indisponiveis(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    with pytest.raises(ServicoIndisponivel):
+        armazenamento.cancelar_upload("job1")
+    with pytest.raises(ServicoIndisponivel):
+        armazenamento.url_de_reproducao("job1", timedelta(minutes=10))
+    with pytest.raises(ServicoIndisponivel):
+        armazenamento.abrir_decupagem("job1")
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_url_de_upload_inicia_upload_retomavel_no_emulador(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    # Só para criar o bucket do emulador; o nome é único a cada teste.
+    armazenamento._cliente.create_bucket(armazenamento._bucket)
+    url = armazenamento.url_de_upload("job1", 5, "video/mp4")
+
+    resposta = requests.post(
+        url,
+        headers={
+            "Content-Type": "video/mp4",
+            "x-goog-resumable": "start",
+            "x-upload-content-length": "5",
+        },
+    )
+
+    assert resposta.status_code in (200, 201)
+    assert "upload_id" in resposta.headers["Location"]

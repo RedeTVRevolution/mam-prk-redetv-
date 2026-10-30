@@ -6,6 +6,8 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from google.cloud import firestore
+from google.cloud.storage import Client as ClienteStorage
 
 from api.auth import (
     CAMINHO_HEALTH,
@@ -28,6 +30,7 @@ from api.jobs import (
     agora_utc,
     criar_rotas,
 )
+from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -87,4 +90,13 @@ def criar_app(
 
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
-app = criar_app(VerificadorIdentityPlatform(_projeto) if _projeto else None)
+if _projeto:
+    app = criar_app(
+        VerificadorIdentityPlatform(_projeto),
+        RepositorioFirestore(firestore.Client(project=_projeto)),
+        ArmazenamentoStorage(
+            ClienteStorage(project=_projeto), f"{_projeto}-quarentena"
+        ),
+    )
+else:
+    app = criar_app()
