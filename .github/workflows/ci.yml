@@ -70,7 +70,8 @@ jobs:
   # deploy-dev` de quem publica à mão. Sem chave: o GitHub entra por federação e
   # impersona a mam-terraform. Os nomes vêm das variáveis do repositório (README).
   publicar:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Sem as variáveis (configuração única do README), o job é pulado, e não falha.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.WORKLOAD_IDENTITY_PROVIDER != ''
     needs: [verificar, terraform, loop-afk, gitleaks]
     runs-on: ubuntu-latest
     # Um deploy por vez: o estado do Terraform e a tag do commit não se disputam. A

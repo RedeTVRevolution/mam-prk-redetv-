@@ -75,7 +75,7 @@ gh variable set ADMINS_EMERGENCIA --body "$ADMINS_EMERGENCIA"
 gh variable set WORKLOAD_IDENTITY_PROVIDER --body "$(terraform -chdir=infra output -raw provedor_github)"
 ```
 
-Antes disso, o job `publicar` falha na autenticação.
+Sem a `WORKLOAD_IDENTITY_PROVIDER`, o job `publicar` não roda.
 
 Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda a cada pessoa o link para definir a senha; no primeiro login, a pessoa cadastra o aplicativo autenticador. Rodar de novo só reenvia o link. A API recusa todo token sem o segundo fator TOTP, e o Identity Platform bloqueia a conta por um tempo após tentativas erradas.
 
