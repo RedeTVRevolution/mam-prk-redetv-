@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { render } from './render-teste.tsx'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -41,13 +41,20 @@ async function preencherSenha(
   usuario: ReturnType<typeof userEvent.setup>,
   senha = 'senha-forte-1',
 ) {
-  await usuario.type(screen.getByLabelText('E-mail'), 'ana@redetv.com.br')
-  await usuario.type(screen.getByLabelText('Senha'), senha)
+  await usuario.type(screen.getByLabelText(/^E-mail/), 'ana@redetv.com.br')
+  await usuario.type(screen.getByLabelText(/^Senha/), senha)
   await usuario.click(screen.getByRole('button', { name: 'Entrar' }))
 }
 
+async function digitarCodigo(usuario: ReturnType<typeof userEvent.setup>, codigo: string) {
+  const grupo = await screen.findByLabelText('Código do autenticador')
+  const campos = within(grupo).getAllByRole('textbox')
+  expect(campos).toHaveLength(6)
+  await usuario.type(campos[0], codigo)
+}
+
 async function confirmarCodigo(usuario: ReturnType<typeof userEvent.setup>) {
-  await usuario.type(await screen.findByLabelText('Código do autenticador'), CODIGO_TOTP_FALSO)
+  await digitarCodigo(usuario, CODIGO_TOTP_FALSO)
   await usuario.click(screen.getByRole('button', { name: 'Confirmar' }))
 }
 
@@ -61,7 +68,7 @@ async function autenticadorComSessao() {
 test('sem sessão, mostra só o login e não chama a API', async () => {
   render(<App autenticador={autenticador()} />)
 
-  expect(await screen.findByLabelText('E-mail')).toBeTruthy()
+  expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Sair' })).toBeNull()
   expect(screen.queryByText('Biblioteca')).toBeNull()
   expect(chamadas).toEqual([])
@@ -71,7 +78,7 @@ test('login com senha e código TOTP abre a Biblioteca com o token na API', asyn
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
 
-  await screen.findByLabelText('E-mail')
+  await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
   expect(screen.queryByText('Biblioteca')).toBeNull()
   await confirmarCodigo(usuario)
@@ -84,12 +91,12 @@ test('login com senha e código TOTP abre a Biblioteca com o token na API', asyn
 test('senha errada mostra erro e continua no login', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
-  await screen.findByLabelText('E-mail')
+  await screen.findByLabelText(/^E-mail/)
 
   await preencherSenha(usuario, 'errada')
 
   expect((await screen.findByRole('alert')).textContent).toContain('inválid')
-  expect(screen.queryByLabelText('Código do autenticador')).toBeNull()
+  expect(screen.queryByRole('dialog')).toBeNull()
 })
 
 test('conta bloqueada por tentativas erradas pede para esperar', async () => {
@@ -99,7 +106,7 @@ test('conta bloqueada por tentativas erradas pede para esperar', async () => {
     throw new ContaBloqueada()
   }
   render(<App autenticador={auth} />)
-  await screen.findByLabelText('E-mail')
+  await screen.findByLabelText(/^E-mail/)
 
   await preencherSenha(usuario)
 
@@ -109,10 +116,10 @@ test('conta bloqueada por tentativas erradas pede para esperar', async () => {
 test('código TOTP errado mostra erro e não entra', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
-  await screen.findByLabelText('E-mail')
+  await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
 
-  await usuario.type(await screen.findByLabelText('Código do autenticador'), '000000')
+  await digitarCodigo(usuario, '000000')
   await usuario.click(screen.getByRole('button', { name: 'Confirmar' }))
 
   expect((await screen.findByRole('alert')).textContent).toContain('inválid')
@@ -122,7 +129,7 @@ test('código TOTP errado mostra erro e não entra', async () => {
 test('primeiro acesso mostra o cadastro do autenticador e entra ao confirmar o código', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador(false)} />)
-  await screen.findByLabelText('E-mail')
+  await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
 
   expect(await screen.findByText('SEGREDOFALSO')).toBeTruthy()
@@ -134,16 +141,29 @@ test('primeiro acesso mostra o cadastro do autenticador e entra ao confirmar o c
   expect(await screen.findByText('Biblioteca')).toBeTruthy()
 })
 
+test('fechar o modal do autenticador volta ao início do login', async () => {
+  const usuario = userEvent.setup()
+  render(<App autenticador={autenticador()} />)
+  await screen.findByLabelText(/^E-mail/)
+  await preencherSenha(usuario)
+  await screen.findByRole('dialog', { name: 'Verificação em duas etapas' })
+
+  await usuario.click(screen.getByRole('button', { name: 'Fechar' }))
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(screen.getByLabelText(/^E-mail/)).toBeTruthy()
+})
+
 test('o botão sair volta ao login e apaga a sessão', async () => {
   const usuario = userEvent.setup()
   const auth = autenticador()
   render(<App autenticador={auth} />)
-  await screen.findByLabelText('E-mail')
+  await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
   await confirmarCodigo(usuario)
   await usuario.click(await screen.findByRole('button', { name: 'Sair' }))
 
-  expect(await screen.findByLabelText('E-mail')).toBeTruthy()
+  expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   expect(screen.queryByText('Biblioteca')).toBeNull()
   expect(await auth.token()).toBeNull()
 })
@@ -160,7 +180,7 @@ test('401 da API derruba a sessão e leva ao login', async () => {
   servidor.use(http.get('/v1/eu', () => new HttpResponse(null, { status: 401 })))
   render(<App autenticador={auth} />)
 
-  expect(await screen.findByLabelText('E-mail')).toBeTruthy()
+  expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   await waitFor(async () => expect(await auth.token()).toBeNull())
   expect(screen.queryByText('Biblioteca')).toBeNull()
 })
@@ -169,12 +189,12 @@ test('API recusando o token logo depois do login volta ao início do login', asy
   servidor.use(http.get('/v1/eu', () => new HttpResponse(null, { status: 401 })))
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
-  await screen.findByLabelText('E-mail')
+  await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
   await confirmarCodigo(usuario)
 
-  expect(await screen.findByLabelText('E-mail')).toBeTruthy()
-  expect(screen.queryByLabelText('Código do autenticador')).toBeNull()
+  expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
+  expect(screen.queryByRole('dialog')).toBeNull()
 })
 
 test('API fora do ar mostra aviso sem dados, e tentar de novo entra', async () => {
