@@ -2,9 +2,26 @@
 
 import tomllib
 from pathlib import Path
+from typing import Any
+
+
+def _perfil(dados: dict[str, Any]) -> str:
+    """O texto livre do perfil, seguido das pessoas frequentes com papel e apelidos."""
+    linhas = [dados["perfil"].strip()]
+    if dados.get("pessoas"):
+        linhas.append("Pessoas frequentes:")
+    for p in dados.get("pessoas", []):
+        apelidos = ", ".join(f'"{a}"' for a in p["apelidos"])
+        linhas.append(
+            f"- {p['nome']}, {p['papel']}"
+            + (f"; também chamado de {apelidos}" if apelidos else "")
+            + "."
+        )
+    return "\n".join(linhas)
+
 
 PERFIS: dict[str, str] = {
-    nome: dados["perfil"].strip()
+    nome: _perfil(dados)
     for nome, dados in tomllib.loads(
         (Path(__file__).parent / "programas.toml").read_text()
     ).items()
