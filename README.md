@@ -31,7 +31,7 @@ ADMINS_EMERGENCIA='bruno.admin@exemplo.com,ti@exemplo.com'
 USUARIOS='bruno@exemplo.com'
 ```
 
-Precisa também do [Terraform](https://developer.hashicorp.com/terraform/install) e do Docker Desktop aberto:
+Precisa também do [Terraform](https://developer.hashicorp.com/terraform/install); o Docker não, porque as imagens são construídas no Cloud Build:
 
 ```sh
 brew tap hashicorp/tap && brew install hashicorp/tap/terraform
@@ -46,11 +46,36 @@ make deploy-dev
 Ele impersona a `mam-terraform` (ADR 0002), sem chave em arquivo, e:
 
 1. cria o bucket do estado do Terraform, o `BUCKET_ESTADO_TF` que o wizard põe no `.env`, se não existir: privado, com acesso uniforme e versionamento;
-2. aplica só o Artifact Registry e o Identity Platform, constrói a imagem para `linux/amd64` com a chave web do login e a envia;
-3. aplica o resto pelo digest da imagem, então cada deploy gera uma revisão nova;
-4. confere que `/v1/health` responde 200 e mostra a URL.
+2. aplica só o Artifact Registry, o Identity Platform e o que o Cloud Build usa (a conta `mam-build` e o bucket de fontes);
+3. sobe o código para o Cloud Build, que constrói as duas imagens (`cloudbuild.yaml`: a do serviço, com a chave web do login, e a do Job de validação) e as envia ao Artifact Registry. O `.gcloudignore` deixa de fora tudo o que o git ignora, inclusive o `.env`;
+4. aplica o resto pelos digests que o Cloud Build enviou, sem recompilar, então cada deploy gera uma revisão nova;
+5. confere que `/v1/health` responde 200 e mostra a URL.
 
-Cada `terraform apply` mostra o plano e pede confirmação.
+À mão, cada `terraform apply` mostra o plano e pede confirmação.
+
+### Publicação automática (CD)
+
+Cada merge na `main` publica no `dev` sozinho: depois que os jobs do CI passam naquele commit, o job `publicar` do `.github/workflows/ci.yml` roda o mesmo `make deploy-dev`, com os applies aprovados automaticamente. Um merge com o CI vermelho não publica. O GitHub entra no GCP por federação de identidade de cargas de trabalho, sem chave: o provedor só aceita tokens deste repositório (pelo id) na `main`, e só esse repositório pode impersonar a `mam-terraform`. Os merges publicam um de cada vez, na ordem.
+
+Para acompanhar uma publicação: na aba Actions do GitHub, abra a execução do CI do commit e o job `publicar`. O log mostra o link do build no console do Cloud Build, o plano do Terraform e, no fim, a URL com o `/v1/health` respondendo. O staging e a produção, com aprovação no Cloud Deploy, ficam para a E10.
+
+Configuração, uma vez, por quem é Owner do `dev`:
+
+1. rode de novo o `scripts/wizard-gcp-dev.sh`, que dá à `mam-terraform` os papéis do CD (`roles/iam.workloadIdentityPoolAdmin` e `roles/cloudbuild.builds.editor`);
+2. rode `make deploy-dev`, que cria a federação com o GitHub e a conta `mam-build`;
+3. grave as variáveis do repositório que o job lê (no zsh ou no bash, na raiz):
+
+```sh
+set -a && . ./.env && set +a
+gh variable set GCP_PROJECT_ID --body "$GCP_PROJECT_ID"
+gh variable set GCP_REGION --body "$GCP_REGION"
+gh variable set BUCKET_ESTADO_TF --body "$BUCKET_ESTADO_TF"
+gh variable set GOOGLE_IMPERSONATE_SERVICE_ACCOUNT --body "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT"
+gh variable set ADMINS_EMERGENCIA --body "$ADMINS_EMERGENCIA"
+gh variable set WORKLOAD_IDENTITY_PROVIDER --body "$(terraform -chdir=infra output -raw provedor_github)"
+```
+
+Antes disso, o job `publicar` falha na autenticação.
 
 Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda a cada pessoa o link para definir a senha; no primeiro login, a pessoa cadastra o aplicativo autenticador. Rodar de novo só reenvia o link. A API recusa todo token sem o segundo fator TOTP, e o Identity Platform bloqueia a conta por um tempo após tentativas erradas.
 

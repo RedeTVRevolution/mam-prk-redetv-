@@ -1,5 +1,5 @@
-# Infraestrutura do dev da E0 (#8). Aplicada por `make deploy-dev`, que
-# impersona a conta mam-terraform. No IAM do projeto, só
+# Infraestrutura do dev da E0 (#8). Aplicada por `make deploy-dev`, à mão ou no
+# CD (#71), que impersona a conta mam-terraform. No IAM do projeto, só
 # google_project_iam_member, que é aditivo (ADR 0002).
 
 terraform {
@@ -48,6 +48,7 @@ provider "google" {
 resource "google_project_service" "apis" {
   for_each = toset([
     "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "eventarc.googleapis.com",
@@ -55,6 +56,7 @@ resource "google_project_service" "apis" {
     "identitytoolkit.googleapis.com",
     "monitoring.googleapis.com",
     "pubsub.googleapis.com",
+    "sts.googleapis.com",
     "workflows.googleapis.com",
     # Ligadas antes pelo wizard; aqui para que o Terraform as declare.
     "aiplatform.googleapis.com",
@@ -114,7 +116,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "analise", "orquestracao"])
+  for_each     = toset(["web", "validacao", "analise", "orquestracao", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -135,6 +137,8 @@ locals {
     validacao    = ["roles/datastore.user"]
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
+    # O Cloud Build com conta própria só grava log no Cloud Logging.
+    build = ["roles/logging.logWriter"]
   }
   papeis_nos_buckets = {
     # A API assina as URLs de envio para a quarentena e lê o proxy de reprodução e a decupagem.
@@ -169,6 +173,64 @@ resource "google_service_account_iam_member" "web_assina" {
   service_account_id = google_service_account.mam["web"].name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = google_service_account.mam["web"].member
+}
+
+# Build das imagens (#71): o `make deploy-dev`, à mão ou no CD, sobe o código para
+# o bucket de fontes e o Cloud Build constrói como mam-build, que só lê as fontes e
+# envia ao repositório. Bucket fora do mapa acima porque aquele depende do serviço,
+# e o build vem antes dele. O scripts/checar-nomes-da-nuvem.sh conhece o sufixo.
+resource "google_storage_bucket" "fontes" {
+  name                        = "${var.projeto}-fontes"
+  location                    = var.regiao
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  depends_on                  = [google_project_service.apis]
+}
+
+resource "google_storage_bucket_iam_member" "build_le_fontes" {
+  bucket = google_storage_bucket.fontes.name
+  role   = "roles/storage.objectViewer"
+  member = google_service_account.mam["build"].member
+}
+
+resource "google_artifact_registry_repository_iam_member" "build_envia" {
+  repository = google_artifact_registry_repository.mam.name
+  location   = google_artifact_registry_repository.mam.location
+  role       = "roles/artifactregistry.writer"
+  member     = google_service_account.mam["build"].member
+}
+
+# CD (#71): o GitHub Actions entra sem chave, por federação (ADR 0002), e só a
+# main deste repositório impersona a mam-terraform. Pelo id do repositório, e não
+# pelo nome, para que outro repositório criado com o mesmo nome não herde a confiança.
+locals {
+  repositorio_github_id = "1436546057" # RedeTVRevolution/mam-prk-redetv-
+}
+
+resource "google_iam_workload_identity_pool" "github" {
+  workload_identity_pool_id = "mam-github"
+  display_name              = "MAM GitHub"
+  depends_on                = [google_project_service.apis]
+}
+
+resource "google_iam_workload_identity_pool_provider" "github" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  attribute_mapping = {
+    "google.subject"          = "assertion.sub"
+    "attribute.repository_id" = "assertion.repository_id"
+  }
+  attribute_condition = "assertion.repository_id == '${local.repositorio_github_id}' && assertion.ref == 'refs/heads/main'"
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+# A mam-terraform nasce no wizard, fora do Terraform; aqui só ganha quem a impersona.
+resource "google_service_account_iam_member" "github_impersona_terraform" {
+  service_account_id = "projects/${var.projeto}/serviceAccounts/mam-terraform@${var.projeto}.iam.gserviceaccount.com"
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repositorio_github_id}"
 }
 
 resource "google_cloud_run_v2_service" "web" {
@@ -555,4 +617,17 @@ output "repositorio" {
 
 output "bucket_clipes_ouro" {
   value = local.buckets["clipes-ouro"]
+}
+
+# Para o build no Cloud Build e para a variável do CD no GitHub (README).
+output "conta_build" {
+  value = google_service_account.mam["build"].id
+}
+
+output "bucket_fontes" {
+  value = google_storage_bucket.fontes.name
+}
+
+output "provedor_github" {
+  value = google_iam_workload_identity_pool_provider.github.name
 }

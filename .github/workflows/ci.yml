@@ -65,3 +65,40 @@ jobs:
           echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c
           tar xzf gitleaks.tar.gz gitleaks
       - run: ./gitleaks git --redact --no-banner
+
+  # CD (#71): com o CI verde num push na main, publica no dev pelo mesmo `make
+  # deploy-dev` de quem publica à mão. Sem chave: o GitHub entra por federação e
+  # impersona a mam-terraform. Os nomes vêm das variáveis do repositório (README).
+  publicar:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [verificar, terraform, loop-afk, gitleaks]
+    runs-on: ubuntu-latest
+    # Um deploy por vez, na ordem dos merges: o estado do Terraform e a tag do commit não se disputam.
+    concurrency:
+      group: publicar-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      BUCKET_ESTADO_TF: ${{ vars.BUCKET_ESTADO_TF }}
+      GOOGLE_IMPERSONATE_SERVICE_ACCOUNT: ${{ vars.GOOGLE_IMPERSONATE_SERVICE_ACCOUNT }}
+      ADMINS_EMERGENCIA: ${{ vars.ADMINS_EMERGENCIA }}
+      CLOUDSDK_ACTIVE_CONFIG_NAME: default
+      TF_IN_AUTOMATION: "1"
+      # À mão, cada apply pede confirmação; aqui o CI verde é a aprovação.
+      TF_CLI_ARGS_apply: -auto-approve
+    steps:
+      - uses: actions/checkout@v7
+      # Sem service_account: o token federado só serve para impersonar a mam-terraform.
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          # O wrapper suja a saída de `terraform output -raw`, que o script lê.
+          terraform_wrapper: false
+      - run: make deploy-dev

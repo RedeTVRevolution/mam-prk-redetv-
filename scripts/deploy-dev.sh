@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 # `make deploy-dev`: põe a aplicação no ar no dev (#8). Tudo roda como a conta
-# mam-terraform, por impersonação e sem chave em arquivo (ADR 0002). Os valores
-# vêm do .env que o scripts/wizard-gcp-dev.sh escreveu, e ADMINS_EMERGENCIA (#11)
-# se põe à mão.
+# mam-terraform, por impersonação e sem chave em arquivo (ADR 0002). À mão, os
+# valores vêm do .env que o scripts/wizard-gcp-dev.sh escreveu, e ADMINS_EMERGENCIA
+# (#11) se põe à mão; no CD (#71), das variáveis do repositório no GitHub.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-set -a
-# shellcheck disable=SC1091
-. ./.env
-set +a
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
 : "${GCP_PROJECT_ID:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${GCP_REGION:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${BUCKET_ESTADO_TF:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?rode antes o scripts/wizard-gcp-dev.sh}"
 : "${ADMINS_EMERGENCIA:?ponha no .env os e-mails dos administradores de emergência, separados por vírgula}"
-# A config gcloud do MAM, criada pelo wizard, sem mexer na config ativa.
-export CLOUDSDK_ACTIVE_CONFIG_NAME=mam-dev
+# A config gcloud do MAM, criada pelo wizard, sem mexer na config ativa. O CD usa a default.
+export CLOUDSDK_ACTIVE_CONFIG_NAME="${CLOUDSDK_ACTIVE_CONFIG_NAME:-mam-dev}"
 export TF_VAR_projeto="$GCP_PROJECT_ID" TF_VAR_regiao="$GCP_REGION" TF_VAR_admins_emergencia="$ADMINS_EMERGENCIA"
 
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
@@ -32,27 +34,30 @@ if ! gc storage buckets describe "gs://$ESTADO" >/dev/null 2>&1; then
 fi
 tf init -input=false -backend-config="bucket=$ESTADO"
 
-# A imagem precisa do repositório e da chave web do Identity Platform, e o
-# serviço precisa da imagem. Este apply só cria os dois, então a imagem ainda não importa.
+# A imagem precisa do repositório, da chave web do Identity Platform e do que o
+# Cloud Build usa (#71), e o serviço precisa da imagem. Este apply só cria esses,
+# então a imagem ainda não importa.
 tf apply -input=false -target=google_artifact_registry_repository.mam \
-  -target=google_identity_platform_config.mam -var imagem=pendente -var imagem_validacao=pendente
+  -target=google_identity_platform_config.mam -target=google_project_iam_member.mam \
+  -target=google_storage_bucket_iam_member.build_le_fontes \
+  -target=google_artifact_registry_repository_iam_member.build_envia \
+  -var imagem=pendente -var imagem_validacao=pendente
 # O nome do repositório vem do Terraform, o único lugar que monta os nomes.
 REPOSITORIO=$(tf output -raw repositorio)
-REGISTRO="${REPOSITORIO%%/*}"
-REPO="$REPOSITORIO/web"
-TAG="$REPO:$(git rev-parse --short HEAD)"
-gc auth print-access-token | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRO"
-docker build --platform linux/amd64 -t "$TAG" \
-  --build-arg VITE_IDENTITY_API_KEY="$(tf output -raw identity_api_key)" .
-docker push "$TAG"
-# Pelo digest, para que um rebuild com o mesmo commit também gere revisão nova.
-IMAGEM=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$TAG" | grep -m1 "^$REPO@")
-# A imagem do Job de validação (#38), também pelo digest.
-REPO_VALIDACAO="$REPOSITORIO/validacao"
-TAG_VALIDACAO="$REPO_VALIDACAO:$(git rev-parse --short HEAD)"
-docker build --platform linux/amd64 --target validacao -t "$TAG_VALIDACAO" .
-docker push "$TAG_VALIDACAO"
-IMAGEM_VALIDACAO=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$TAG_VALIDACAO" | grep -m1 "^$REPO_VALIDACAO@")
+COMMIT=$(git rev-parse --short HEAD)
+WEB="$REPOSITORIO/web:$COMMIT"
+# A imagem do Job de validação (#38).
+VALIDACAO="$REPOSITORIO/validacao:$COMMIT"
+# O Cloud Build constrói e envia as duas imagens (cloudbuild.yaml), como a mam-build.
+gc builds submit . --region "$GCP_REGION" --suppress-logs \
+  --service-account "$(tf output -raw conta_build)" \
+  --gcs-source-staging-dir "gs://$(tf output -raw bucket_fontes)/fontes" \
+  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
+# Pelo digest que o Cloud Build enviou, para que um rebuild com o mesmo commit
+# também gere revisão nova. Daqui em diante nada é recompilado.
+digest() { echo "${1%:*}@$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)')"; }
+IMAGEM=$(digest "$WEB")
+IMAGEM_VALIDACAO=$(digest "$VALIDACAO")
 tf apply -input=false -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO"
 
 URL=$(tf output -raw url)

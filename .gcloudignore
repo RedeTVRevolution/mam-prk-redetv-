@@ -1,0 +1,5 @@
+# O que o `gcloud builds submit` não sobe para o Cloud Build (#71): tudo o que o
+# git ignora, inclusive os segredos locais e o arquivo do auth do CD. O
+# .dockerignore sobe, porque o docker build roda lá.
+.git
+#!include:.gitignore
