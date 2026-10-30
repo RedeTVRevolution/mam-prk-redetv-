@@ -19,6 +19,7 @@ from api.correcoes import (
     NaoCandidato,
     NaoNaFila,
     NovaCorrecao,
+    RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoesEmMemoria,
     aplicar,
     fila,
@@ -95,6 +96,7 @@ class Mundo:
     def __init__(self, papeis: list[Papel], estado: str = "concluido") -> None:
         repo_papeis = RepositorioDePapeisEmMemoria()
         repo_papeis.salvar("u1", papeis)
+        repo_papeis.salvar("u2", ["curador"])
         jobs = RepositorioEmMemoria()
         jobs.salvar(
             Job(
@@ -110,17 +112,22 @@ class Mundo:
         self.armazenamento = ArmazenamentoFalso()
         self.armazenamento.decupagens["j1"] = [BYTES[:40], BYTES[40:]]
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
+        self.aprovacao = RepositorioDeAprovacaoEmMemoria()
         self.chaves = RepositorioDeChavesEmMemoria()
         self.agora = BASE
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(
-                    {"token-bom": Usuario(uid="u1", email="ana@redetv.com.br")}
+                    {
+                        "token-bom": Usuario(uid="u1", email="ana@redetv.com.br"),
+                        "token-curador": Usuario(uid="u2", email="cura@redetv.com.br"),
+                    }
                 ),
                 jobs,
                 self.armazenamento,
                 papeis=repo_papeis,
                 correcoes=self.correcoes,
+                aprovacao=self.aprovacao,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
                 relogio=lambda: self.agora,
             )

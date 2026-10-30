@@ -282,7 +282,11 @@ function faixasDe(d: Decupagem): Faixa[] {
     {
       nome: 'Menções',
       cor: CORES_DE_OCORRENCIA.mencoes,
-      ocorrencias: de('mencao', [...daPessoa('citada_na_fala'), ...daPessoa('citada_no_texto')], alvoDaPessoa),
+      ocorrencias: de(
+        'mencao',
+        [...daPessoa('citada_na_fala'), ...daPessoa('citada_no_texto')],
+        alvoDaPessoa,
+      ),
     },
     {
       nome: 'Comerciais',
@@ -508,11 +512,13 @@ export default function Video({
   job,
   aoSessaoExpirada,
   podeEditar = false,
+  podeAprovar = false,
 }: {
   autenticador: Autenticador
   job: JobAberto
   aoSessaoExpirada: () => void
   podeEditar?: boolean
+  podeAprovar?: boolean
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
@@ -526,6 +532,8 @@ export default function Video({
   const [filaAberta, setFilaAberta] = useState(false)
   const [fila, setFila] = useState<ItemDaFila[]>([])
   const [recargaDaFila, setRecargaDaFila] = useState(0)
+  // Itens com correção pendente de aprovação (`tipo_do_item:item_id`), da decupagem aberta.
+  const [pendentes, setPendentes] = useState<Set<string>>(new Set())
   // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
   const sessaoExpirada = useRef(aoSessaoExpirada)
   useEffect(() => {
@@ -569,6 +577,35 @@ export default function Video({
       ativo = false
     }
   }, [autenticador, job.id, concluido, podeEditar, recargaDaFila])
+
+  // As pendentes saem da decupagem entregue: o selo vem do histórico, que é recarregado a
+  // cada nova decupagem (toda correção, aprovação ou recusa recarrega o painel).
+  const decupagemAtual = carga.tipo === 'pronta' ? carga.decupagem : null
+  useEffect(() => {
+    if (!podeEditar || !decupagemAtual) return
+    let ativo = true
+    chamarApi<ItemDoHistorico[]>(autenticador, `/v1/jobs/${job.id}/correcoes`).then(
+      (itens) => {
+        if (!ativo) return
+        setPendentes(
+          new Set(
+            itens
+              .filter(
+                (i) =>
+                  i.estado === 'pendente' && i.ancora.versao === decupagemAtual.versao_decupagem,
+              )
+              .map((i) => `${i.ancora.tipo_do_item}:${i.item_id}`),
+          ),
+        )
+      },
+      (erro: unknown) => {
+        if (ativo && erro instanceof SessaoExpirada) sessaoExpirada.current()
+      },
+    )
+    return () => {
+      ativo = false
+    }
+  }, [autenticador, job.id, podeEditar, decupagemAtual])
 
   // Depois de uma correção, só o painel recarrega: o player segue no mesmo link e ponto.
   const recarregarDecupagem = useCallback(() => {
@@ -653,7 +690,9 @@ export default function Video({
     selecaoAtual && arrastado
       ? {
           ...f,
-          ocorrencias: f.ocorrencias.map((o) => (o.chave === selecaoAtual.chave ? { ...o, ...arrastado } : o)),
+          ocorrencias: f.ocorrencias.map((o) =>
+            o.chave === selecaoAtual.chave ? { ...o, ...arrastado } : o,
+          ),
         }
       : f,
   )
@@ -674,7 +713,10 @@ export default function Video({
         aoMover: (borda, ms) => {
           if (!selecaoAtual) return
           const { original } = selecaoAtual
-          setArrastado((a) => ({ ...(a ?? original), [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms }))
+          setArrastado((a) => ({
+            ...(a ?? original),
+            [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms,
+          }))
           saltar(ms)
         },
         aoSoltar: () => {
@@ -791,6 +833,7 @@ export default function Video({
                   decupagem={decupagem}
                   quadro={quadro}
                   saltar={saltar}
+                  pendentes={pendentes}
                   aoCorrigir={podeEditar ? setCorrigindo : undefined}
                   aoOcorrencia={podeEditar ? setOcorrenciaAberta : undefined}
                 />
@@ -808,6 +851,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
+                          {pendentes.has(`pauta:${p.id}`) && <SeloAguardando />}
                         </Group>
                       }
                       description={`${tempo(p.inicio_ms)}–${tempo(p.fim_ms)}`}
@@ -851,6 +895,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
+                          {pendentes.has(`comercial:${c.id}`) && <SeloAguardando />}
                         </Group>
                       }
                       description={`${c.tipo} · ${tempo(c.inicio_ms)}`}
@@ -887,6 +932,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
+                          {pendentes.has(`plano:${p.id}`) && <SeloAguardando />}
                         </Group>
                       }
                       description={`${p.ambiente} · ${tempo(p.inicio_ms)}`}
@@ -919,6 +965,7 @@ export default function Video({
                               revisado
                             </Badge>
                           )}
+                          {pendentes.has(`fala:${f.id}`) && <SeloAguardando />}
                         </Group>
                         <Text size="sm">{f.texto}</Text>
                       </Paper>
@@ -961,7 +1008,8 @@ export default function Video({
           autenticador={autenticador}
           jobId={job.id}
           aoFechar={() => setHistoricoAberto(false)}
-          aoDesfazer={recarregarDecupagem}
+          podeAprovar={podeAprovar}
+          aoMudar={recarregarDecupagem}
           aoSessaoExpirada={() => sessaoExpirada.current()}
         />
       )}
@@ -1067,14 +1115,25 @@ export default function Video({
   )
 }
 
+/** O item tem correção de Editor esperando o Curador: ela ainda não está na decupagem. */
+function SeloAguardando() {
+  return (
+    <Badge size="xs" color="yellow" variant="light">
+      aguardando Curador
+    </Badge>
+  )
+}
+
 /** Nome da pessoa, com o selo de revisão e, para quem edita, o botão de corrigir. */
 function NomeDaPessoa({
   pessoa,
   fw,
+  aguardando,
   aoCorrigir,
 }: {
   pessoa: Pessoa
   fw?: number
+  aguardando?: boolean
   aoCorrigir?: (p: Pessoa) => void
 }) {
   return (
@@ -1087,6 +1146,7 @@ function NomeDaPessoa({
           revisado
         </Badge>
       )}
+      {aguardando && <SeloAguardando />}
       {aoCorrigir && (
         <ActionIcon
           variant="subtle"
@@ -1530,7 +1590,9 @@ function CorrigirTempos({
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Cancele e arraste de novo.')
       } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro('Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir.')
+        setErro(
+          'Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir.',
+        )
       } else setErro('Não foi possível salvar a correção.')
       setSalvando(false)
     }
@@ -2103,14 +2165,20 @@ interface ItemDoHistorico {
     | 'fala.texto'
     | 'desfazer'
     | 'descartar'
+    | 'aprovar'
+    | 'recusar'
+  item_id: string
+  ancora: { versao: string; tipo_do_item: string }
   autor_email: string
   criada_em: string
   motivo: string
   antes: string
   depois: string
-  estado: 'ativa' | 'desfeita' | 'reaplicada' | 'descartada'
+  estado: 'ativa' | 'desfeita' | 'reaplicada' | 'descartada' | 'pendente' | 'aprovada' | 'recusada'
   reaplica?: string | null
   desfaz?: string | null
+  aprova?: string | null
+  recusa?: string | null
 }
 
 const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
@@ -2130,11 +2198,15 @@ const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   'fala.texto': 'Texto da fala',
   desfazer: 'Desfazer',
   descartar: 'Descartar da fila',
+  aprovar: 'Aprovação',
+  recusar: 'Recusa',
 }
 
-/** O tipo do valor do item: o desfazer mostra o valor do tipo que ele reverte. */
-const tipoDoValor = (itens: ItemDoHistorico[], item: ItemDoHistorico) =>
-  item.tipo === 'desfazer' ? itens.find((o) => o.id === item.desfaz)?.tipo : item.tipo
+/** O tipo do valor do item: desfazer, aprovação e recusa mostram o valor do tipo que decidem. */
+const tipoDoValor = (itens: ItemDoHistorico[], item: ItemDoHistorico) => {
+  const alvo = item.desfaz ?? item.aprova ?? item.recusa
+  return alvo ? itens.find((o) => o.id === alvo)?.tipo : item.tipo
+}
 
 /** Data da correção que a reaplicação refaz, para ligar uma à outra na gaveta. */
 const quandoDaOriginal = (itens: ItemDoHistorico[], id: string) => {
@@ -2145,25 +2217,33 @@ const quandoDaOriginal = (itens: ItemDoHistorico[], id: string) => {
 const quando = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
-/** Gaveta com as correções da mais recente à mais antiga; desfazer acrescenta, nada se apaga. */
+/** Gaveta com as correções da mais recente à mais antiga; desfazer, aprovar e recusar acrescentam, nada se apaga. */
 function HistoricoDeCorrecoes({
   aberto,
   autenticador,
   jobId,
   aoFechar,
-  aoDesfazer,
+  podeAprovar,
+  aoMudar,
   aoSessaoExpirada,
 }: {
   aberto: boolean
   autenticador: Autenticador
   jobId: string
   aoFechar: () => void
-  aoDesfazer: () => void
+  podeAprovar: boolean
+  aoMudar: () => void
   aoSessaoExpirada: () => void
 }) {
   const [itens, setItens] = useState<ItemDoHistorico[] | null>(null)
   const [falhou, setFalhou] = useState(false)
-  const [desfazendo, setDesfazendo] = useState<ItemDoHistorico | null>(null)
+  // O que o modal de motivo está pedindo: desfazer uma correção ou recusar uma pendente.
+  const [decidindo, setDecidindo] = useState<{
+    acao: 'desfazer' | 'recusar'
+    item: ItemDoHistorico
+  } | null>(null)
+  const [aprovando, setAprovando] = useState<string | null>(null)
+  const [erroDaLista, setErroDaLista] = useState<string | null>(null)
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
@@ -2197,35 +2277,65 @@ function HistoricoDeCorrecoes({
   const carregar = () => setRecarga((n) => n + 1)
 
   function fecharModal() {
-    setDesfazendo(null)
+    setDecidindo(null)
     setMotivo('')
     setErro(null)
   }
 
   async function confirmar() {
-    if (!desfazendo) return
+    if (!decidindo) return
+    const { acao, item } = decidindo
     setEnviando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes/${desfazendo.id}/desfazer`, {
-        metodo: 'POST',
-        corpo: { motivo },
-      })
+      await chamarApi(
+        autenticador,
+        `/v1/jobs/${jobId}/correcoes/${item.id}/${acao === 'desfazer' ? 'desfazer' : 'recusar'}`,
+        {
+          metodo: 'POST',
+          corpo: { motivo },
+        },
+      )
       fecharModal()
       carregar()
-      aoDesfazer()
+      aoMudar()
     } catch (e) {
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
       else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        // Outro Editor pode ter desfeito antes: a decupagem também mudou.
+        // Outra pessoa pode ter decidido antes: a decupagem também mudou.
         setErro(
-          'Essa correção já foi desfeita, saiu da fila ou não casa com a versão atual. O histórico foi recarregado.',
+          acao === 'desfazer'
+            ? 'Essa correção já foi desfeita, saiu da fila ou não casa com a versão atual. O histórico foi recarregado.'
+            : 'Essa correção não está mais pendente. O histórico foi recarregado.',
         )
         carregar()
-        aoDesfazer()
-      } else setErro('Não foi possível desfazer a correção.')
+        aoMudar()
+      } else
+        setErro(
+          acao === 'desfazer'
+            ? 'Não foi possível desfazer a correção.'
+            : 'Não foi possível recusar a correção.',
+        )
     }
     setEnviando(false)
+  }
+
+  async function aprovar(item: ItemDoHistorico) {
+    setAprovando(item.id)
+    setErroDaLista(null)
+    try {
+      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes/${item.id}/aprovar`, {
+        metodo: 'POST',
+      })
+    } catch (e) {
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409'))
+        setErroDaLista('Essa correção não está mais pendente. O histórico foi recarregado.')
+      else setErroDaLista('Não foi possível aprovar a correção.')
+    }
+    carregar()
+    aoMudar()
+    setAprovando(null)
   }
 
   return (
@@ -2235,6 +2345,11 @@ function HistoricoDeCorrecoes({
           {falhou && (
             <Alert color="red" variant="light" role="alert">
               Não foi possível carregar o histórico.
+            </Alert>
+          )}
+          {erroDaLista && (
+            <Alert color="red" variant="light" role="alert">
+              {erroDaLista}
             </Alert>
           )}
           {itens?.length === 0 && <Text size="sm">Nenhuma correção ainda.</Text>}
@@ -2277,10 +2392,29 @@ function HistoricoDeCorrecoes({
                     {`Reaplica a correção de ${quandoDaOriginal(itens, i.reaplica)}`}
                   </Text>
                 )}
-                {i.estado === 'ativa' && i.tipo !== 'desfazer' && i.tipo !== 'descartar' && (
+                {(i.estado === 'ativa' || i.estado === 'aprovada') &&
+                  !['desfazer', 'descartar', 'aprovar', 'recusar'].includes(i.tipo) && (
+                    <Group justify="flex-end">
+                      <Button
+                        size="xs"
+                        variant="default"
+                        onClick={() => setDecidindo({ acao: 'desfazer', item: i })}
+                      >
+                        Desfazer
+                      </Button>
+                    </Group>
+                  )}
+                {i.estado === 'pendente' && podeAprovar && (
                   <Group justify="flex-end">
-                    <Button size="xs" variant="default" onClick={() => setDesfazendo(i)}>
-                      Desfazer
+                    <Button
+                      size="xs"
+                      variant="default"
+                      onClick={() => setDecidindo({ acao: 'recusar', item: i })}
+                    >
+                      Recusar
+                    </Button>
+                    <Button size="xs" loading={aprovando === i.id} onClick={() => void aprovar(i)}>
+                      Aprovar
                     </Button>
                   </Group>
                 )}
@@ -2289,7 +2423,12 @@ function HistoricoDeCorrecoes({
           ))}
         </Stack>
       </Drawer>
-      <Modal opened={desfazendo !== null} onClose={fecharModal} title="Desfazer correção" centered>
+      <Modal
+        opened={decidindo !== null}
+        onClose={fecharModal}
+        title={decidindo?.acao === 'recusar' ? 'Recusar correção' : 'Desfazer correção'}
+        centered
+      >
         <Stack gap="sm">
           <Textarea
             label="Motivo"
@@ -2508,12 +2647,14 @@ function AbaPessoas({
   decupagem,
   quadro,
   saltar,
+  pendentes,
   aoCorrigir,
   aoOcorrencia,
 }: {
   decupagem: Decupagem
   quadro: (i: Intervalo) => string
   saltar: (ms: number) => void
+  pendentes: Set<string>
   aoCorrigir?: (p: Pessoa) => void
   aoOcorrencia?: (a: AcaoDeOcorrencia) => void
 }) {
@@ -2541,7 +2682,12 @@ function AbaPessoas({
         </Group>
         {aparecem.map((p) => (
           <Stack key={p.id} gap={4}>
-            <NomeDaPessoa pessoa={p} fw={600} aoCorrigir={aoCorrigir} />
+            <NomeDaPessoa
+              pessoa={p}
+              fw={600}
+              aguardando={pendentes.has(`pessoa:${p.id}`)}
+              aoCorrigir={aoCorrigir}
+            />
             {aoOcorrencia && pessoaDoModelo(p) && (
               <Button
                 size="compact-xs"
@@ -2595,7 +2741,11 @@ function AbaPessoas({
         </Text>
         {citadas.map((p) => (
           <Stack key={p.id} gap={4}>
-            <NomeDaPessoa pessoa={p} aoCorrigir={aoCorrigir} />
+            <NomeDaPessoa
+              pessoa={p}
+              aguardando={pendentes.has(`pessoa:${p.id}`)}
+              aoCorrigir={aoCorrigir}
+            />
             {aoOcorrencia && pessoaDoModelo(p) && p.na_imagem.length === 0 && (
               <Button
                 size="compact-xs"

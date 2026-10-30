@@ -50,6 +50,7 @@ const item = (campos: Record<string, unknown>) => ({
   job_id: 'j1',
   tipo: 'pessoa.renomear',
   item_id: 'p1',
+  ancora: { versao: 'v1', tipo_do_item: 'pessoa' },
   autor_email: 'bia@redetv.com.br',
   criada_em: '2026-10-30T12:00:00Z',
   motivo: 'sobrenome completo',
@@ -64,9 +65,16 @@ let desfazerDa409 = false
 let desfazerRecebido: unknown = null
 let pedidosDeHistorico = 0
 let reaplicada = false
+// Correção de Editor que espera o Curador; depois da decisão, segue aprovada ou recusada.
+let aguardandoCurador = false
+let decisaoDoCurador: { acao: string; corpo: unknown } | null = null
 const handlersDoHistorico = [
   http.get('/v1/jobs/j1/correcoes', () => {
     pedidosDeHistorico += 1
+    if (aguardandoCurador) {
+      const estado = decisaoDoCurador === null ? 'pendente' : decisaoDoCurador.acao === 'aprovar' ? 'aprovada' : 'recusada'
+      return HttpResponse.json([item({ estado, exige_aprovacao: true })])
+    }
     if (reaplicada)
       return HttpResponse.json([
         item({ id: 'c1-resolvida', reaplica: 'c1', criada_em: '2026-10-30T13:00:00Z' }),
@@ -88,6 +96,15 @@ const handlersDoHistorico = [
           ]
         : [item({})],
     )
+  }),
+  http.post('/v1/jobs/j1/correcoes/c1/:acao', async ({ request, params }) => {
+    if (params.acao === 'desfazer') return undefined
+    decisaoDoCurador = {
+      acao: String(params.acao),
+      corpo: params.acao === 'recusar' ? await request.json() : null,
+    }
+    if (params.acao === 'aprovar') corrigida = true
+    return HttpResponse.json({ id: 'c1-decidida' }, { status: 201 })
   }),
   http.post('/v1/jobs/j1/correcoes/c1/desfazer', async ({ request }) => {
     desfazerRecebido = await request.json()
@@ -180,6 +197,8 @@ afterEach(() => {
   desfazerRecebido = null
   pedidosDeHistorico = 0
   reaplicada = false
+  aguardandoCurador = false
+  decisaoDoCurador = null
   fila = []
   pedidosDaFila = 0
   resolucaoRecebida = null
@@ -190,7 +209,11 @@ afterEach(() => {
 })
 afterAll(() => servidor.close())
 
-async function abrir(job: { estado: string; codigo_falha?: string | null }, podeEditar = false) {
+async function abrir(
+  job: { estado: string; codigo_falha?: string | null },
+  podeEditar = false,
+  podeAprovar = false,
+) {
   const auth = new AutenticadorFalso([
     { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
   ])
@@ -202,6 +225,7 @@ async function abrir(job: { estado: string; codigo_falha?: string | null }, pode
       job={{ id: 'j1', nome: 'clipe.mp4', codigo_falha: null, ...job }}
       aoSessaoExpirada={() => {}}
       podeEditar={podeEditar}
+      podeAprovar={podeAprovar}
     />,
   )
 }
@@ -759,6 +783,68 @@ test('desfazer que dá 409 avisa e recarrega histórico e decupagem', async () =
   expect(await modal.findByRole('alert')).toBeTruthy()
   expect(await gaveta.findByText('desfeita')).toBeTruthy()
   await waitFor(() => expect(painel.queryByText('Ana Souza Lima')).toBeNull())
+})
+
+test('a pendente de outra versão da decupagem não põe o selo', async () => {
+  aguardandoCurador = true
+  versaoAtual = 'v2'
+  await abrir({ estado: 'concluido' }, true)
+  await screen.findByLabelText('Decupagem')
+  await waitFor(() => expect(pedidosDeHistorico).toBeGreaterThan(0))
+
+  expect(screen.queryByText('aguardando Curador')).toBeNull()
+})
+
+test('o Curador aprova na gaveta e a correção entra na decupagem', async () => {
+  aguardandoCurador = true
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true, true)
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  const gaveta = within(await screen.findByRole('dialog', { name: 'Histórico' }))
+  const painel = within(screen.getByLabelText('Decupagem'))
+
+  expect(await gaveta.findByText('pendente')).toBeTruthy()
+  expect(gaveta.queryByRole('button', { name: 'Desfazer' })).toBeNull()
+  await usuario.click(gaveta.getByRole('button', { name: 'Aprovar' }))
+
+  await waitFor(() => expect(decisaoDoCurador?.acao).toBe('aprovar'))
+  expect(await gaveta.findByText('aprovada')).toBeTruthy()
+  expect((await painel.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
+  expect(painel.queryByText('aguardando Curador')).toBeNull()
+  // A aprovada é uma correção como as outras: dá para desfazer.
+  expect(gaveta.getByRole('button', { name: 'Desfazer' })).toBeTruthy()
+})
+
+test('o Curador recusa pedindo o motivo, e a correção segue fora da decupagem', async () => {
+  aguardandoCurador = true
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true, true)
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  const gaveta = within(await screen.findByRole('dialog', { name: 'Histórico' }))
+
+  await usuario.click(await gaveta.findByRole('button', { name: 'Recusar' }))
+  const modal = within(await screen.findByRole('dialog', { name: 'Recusar correção' }))
+  const confirmar = modal.getByRole('button', { name: 'Confirmar' }) as HTMLButtonElement
+  expect(confirmar.disabled).toBe(true)
+  await usuario.type(modal.getByLabelText('Motivo'), 'não confere')
+  await usuario.click(confirmar)
+
+  await waitFor(() => expect(decisaoDoCurador).toEqual({ acao: 'recusar', corpo: { motivo: 'não confere' } }))
+  expect(await gaveta.findByText('recusada')).toBeTruthy()
+  expect(gaveta.queryByRole('button', { name: 'Aprovar' })).toBeNull()
+  expect(
+    within(screen.getByLabelText('Decupagem')).queryByText('Ana Souza Lima'),
+  ).toBeNull()
+})
+
+test('o Editor vê a pendente na gaveta, sem Aprovar nem Recusar', async () => {
+  aguardandoCurador = true
+  const usuario = userEvent.setup()
+  const gaveta = await abrirHistorico(usuario)
+
+  expect(await gaveta.findByText('pendente')).toBeTruthy()
+  expect(gaveta.queryByRole('button', { name: 'Aprovar' })).toBeNull()
+  expect(gaveta.queryByRole('button', { name: 'Recusar' })).toBeNull()
 })
 
 test('quem não tem decupagem.editar não vê o botão Histórico nem pede o histórico', async () => {

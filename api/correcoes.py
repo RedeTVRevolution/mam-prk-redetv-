@@ -42,7 +42,7 @@ TipoNovo = Literal[
     "plano.limpo",
     "fala.texto",
 ]
-TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar"]
+TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
 TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala"]
 CORRIGIVEIS = get_args(TipoNovo)
 Lista = Literal["na_imagem", "citada_na_fala", "citada_no_texto"]
@@ -130,6 +130,10 @@ class Correcao(BaseModel):
     desfaz: str | None = None  # só no tipo "desfazer": o id da correção revertida
     descarta: str | None = None  # só no tipo "descartar": o id da que saiu da fila
     reaplica: str | None = None  # na reaplicação: o id da original que ela refaz
+    # Nasce pendente: só entra na decupagem entregue depois de aprovada.
+    exige_aprovacao: bool = False
+    aprova: str | None = None  # só no tipo "aprovar": o id da correção aprovada
+    recusa: str | None = None  # só no tipo "recusar": o id da correção recusada
     ocorrencia: Ocorrencia | None = None  # nas correções de aparição e menção
     antes: str
     depois: str
@@ -142,7 +146,15 @@ Motivo = Annotated[
 ]
 
 
-EstadoNoHistorico = Literal["ativa", "desfeita", "reaplicada", "descartada"]
+EstadoNoHistorico = Literal[
+    "ativa",
+    "desfeita",
+    "reaplicada",
+    "descartada",
+    "pendente",
+    "aprovada",
+    "recusada",
+]
 
 
 class ItemDoHistorico(Correcao):
@@ -434,10 +446,35 @@ class NovaResolucao(BaseModel):
     _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
 
 
+class NovaRecusa(NovaResolucao):
+    """Corpo de `POST /v1/jobs/{id}/correcoes/{cid}/recusar`."""
+
+
 class NovaReaplicacao(NovaResolucao):
     """Corpo de `POST /v1/jobs/{id}/fila/{cid}/reaplicar`."""
 
     item_id: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+
+
+class RepositorioDeAprovacao(Protocol):
+    """Porta para o documento do Firestore com os tipos que exigem aprovação."""
+
+    def tipos(self) -> frozenset[str]:
+        """Vazio por padrão: nada exige aprovação."""
+        ...
+
+    def definir(self, tipos: frozenset[str]) -> None: ...
+
+
+class RepositorioDeAprovacaoEmMemoria:
+    def __init__(self, tipos: frozenset[str] = frozenset()) -> None:
+        self._tipos = tipos
+
+    def tipos(self) -> frozenset[str]:
+        return self._tipos
+
+    def definir(self, tipos: frozenset[str]) -> None:
+        self._tipos = tipos
 
 
 class ItemInexistente(Exception):
@@ -809,6 +846,23 @@ def _resolvidas(correcoes: list[Correcao]) -> set[str]:
     }
 
 
+def _aprovadas(correcoes: list[Correcao]) -> set[str]:
+    return {c.aprova for c in correcoes if c.aprova}
+
+
+def _recusadas(correcoes: list[Correcao]) -> set[str]:
+    return {c.recusa for c in correcoes if c.recusa}
+
+
+def _fora_da_entrega(correcoes: list[Correcao]) -> set[str]:
+    """As que exigem aprovação e ainda não a têm: pendentes ou recusadas."""
+    return {c.id for c in correcoes if c.exige_aprovacao} - _aprovadas(correcoes)
+
+
+def _decididas(correcoes: list[Correcao]) -> set[str]:
+    return _aprovadas(correcoes) | _recusadas(correcoes)
+
+
 def id_do_desfazer(alvo_id: str) -> str:
     """Fixo por alvo: dois desfazer simultâneos colidem no repositório."""
     return f"{alvo_id}-desfeita"
@@ -855,6 +909,7 @@ def montar_desfazer(
         alvo.tipo not in CORRIGIVEIS
         or alvo.id in _desfeitas(correcoes)
         or alvo.id in _resolvidas(correcoes)
+        or alvo.id in _fora_da_entrega(correcoes)
     ):
         raise NaoDesfazivel(alvo.id)
     restantes = [c for c in correcoes if c.id != alvo.id]
@@ -897,15 +952,21 @@ def montar_desfazer(
 
 
 def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
-    """Da mais recente para a mais antiga, cada uma ativa, desfeita ou fora da
-    fila (reaplicada ou descartada)."""
+    """Da mais recente para a mais antiga, cada uma ativa, desfeita, fora da
+    fila (reaplicada ou descartada) ou, se exige aprovação, pendente, aprovada
+    ou recusada."""
     desfeitas = _desfeitas(correcoes)
     reaplicadas = {c.reaplica for c in correcoes if c.reaplica}
     descartadas = {c.descarta for c in correcoes if c.descarta}
+    aprovadas, recusadas = _aprovadas(correcoes), _recusadas(correcoes)
 
     def estado(c: Correcao) -> EstadoNoHistorico:
         if c.id in desfeitas:
             return "desfeita"
+        if c.id in recusadas:
+            return "recusada"
+        if c.exige_aprovacao:
+            return "aprovada" if c.id in aprovadas else "pendente"
         if c.id in reaplicadas:
             return "reaplicada"
         if c.id in descartadas:
@@ -1098,9 +1159,10 @@ def reconciliar(
 
     Casa só com exatamente um item de mesma identidade e intervalo sobreposto;
     zero ou vários candidatos não casam. Ignora as da versão atual, as
-    desfeitas, as que saíram da fila e os registros que não corrigem um item.
+    desfeitas, as que saíram da fila, as que esperam aprovação ou foram
+    recusadas e os registros que não corrigem um item.
     """
-    fora = _desfeitas(correcoes) | _resolvidas(correcoes)
+    fora = _desfeitas(correcoes) | _resolvidas(correcoes) | _fora_da_entrega(correcoes)
     resultado = Reconciliacao(casadas=[], atendidas=[], sem_casar=[])
     for c in em_ordem(correcoes):
         if c.ancora.versao == versao or c.tipo not in CORRIGIVEIS or c.id in fora:
@@ -1287,6 +1349,7 @@ def aplicar(
     A atendida (o modelo já traz o "depois") deixa o nome como o modelo o
     escreveu, com `origem: "modelo"`.
     Correção desfeita não conta: o item volta ao valor que teria sem ela.
+    A que exige aprovação só conta depois de aprovada.
     Correção de outra versão do JSON só vale se `reconciliar` a casar com um
     item único; as que não casam não se aplicam (e seguem no histórico).
     """
@@ -1311,7 +1374,7 @@ def aplicar(
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
     nomes_do_modelo = [p["nome"] for p in pessoas]
-    desfeitas = _desfeitas(correcoes)
+    desfeitas = _desfeitas(correcoes) | _fora_da_entrega(correcoes)
     # ponytail: reconciliar a cada leitura relê as pessoas do modelo por
     # correção antiga (custo pequeno hoje); guardar o resultado quando houver
     # reprocessamentos frequentes ou muitas correções por vídeo.
@@ -1480,6 +1543,40 @@ def montar_descarte(
     return Correcao(
         tipo="descartar",
         descarta=alvo.id,
+        item_id=alvo.item_id,
+        ocorrencia=alvo.ocorrencia,
+        motivo=motivo,
+        antes=alvo.antes,
+        depois=alvo.depois,
+        ancora=alvo.ancora,
+        **registro,
+    )
+
+
+class NaoPendente(Exception):
+    """A correção não espera decisão: não exige aprovação ou já foi decidida."""
+
+
+def id_da_decisao(alvo_id: str) -> str:
+    """Fixo por alvo: aprovar e recusar simultâneos colidem no repositório."""
+    return f"{alvo_id}-decidida"
+
+
+def montar_decisao(
+    alvo: Correcao,
+    correcoes: list[Correcao],
+    aprovada: bool,
+    motivo: str = "",
+    **registro: Any,
+) -> Correcao:
+    """O registro em que um Curador aprova (autor e data, os do registro) ou
+    recusa `alvo`, que tem de estar pendente. A recusa traz o motivo."""
+    if not alvo.exige_aprovacao or alvo.id in _decididas(correcoes):
+        raise NaoPendente(alvo.id)
+    return Correcao(
+        tipo="aprovar" if aprovada else "recusar",
+        aprova=alvo.id if aprovada else None,
+        recusa=None if aprovada else alvo.id,
         item_id=alvo.item_id,
         ocorrencia=alvo.ocorrencia,
         motivo=motivo,

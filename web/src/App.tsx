@@ -126,6 +126,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
             job={aberto}
             aoSessaoExpirada={() => void sair()}
             podeEditar={sessao.usuario.permissoes.includes('decupagem.editar')}
+            podeAprovar={sessao.usuario.permissoes.includes('correcao.aprovar')}
           />
         </AppShell.Main>
       ) : (

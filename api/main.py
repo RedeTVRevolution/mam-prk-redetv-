@@ -22,7 +22,12 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
-from api.correcoes import RepositorioDeCorrecoes, RepositorioDeCorrecoesEmMemoria
+from api.correcoes import (
+    RepositorioDeAprovacao,
+    RepositorioDeAprovacaoEmMemoria,
+    RepositorioDeCorrecoes,
+    RepositorioDeCorrecoesEmMemoria,
+)
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
     Armazenamento,
@@ -36,6 +41,7 @@ from api.jobs import (
 )
 from api.nuvem import (
     ArmazenamentoStorage,
+    RepositorioDeAprovacaoFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
     RepositorioFirestore,
@@ -79,6 +85,7 @@ def criar_app(
     chaves: VerificadorDeChave | None = None,
     papeis: RepositorioDePapeis | None = None,
     correcoes: RepositorioDeCorrecoes | None = None,
+    aprovacao: RepositorioDeAprovacao | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -125,6 +132,7 @@ def criar_app(
             tamanho_maximo_bytes,
             relogio,
             correcoes or RepositorioDeCorrecoesEmMemoria(),
+            aprovacao or RepositorioDeAprovacaoEmMemoria(),
         )
     )
     app.include_router(v1)
@@ -147,6 +155,7 @@ if _projeto:
         ),
         papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
+        aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
     )
 else:
     app = criar_app()

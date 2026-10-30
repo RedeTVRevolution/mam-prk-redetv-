@@ -26,6 +26,7 @@ from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
+    RepositorioDeAprovacaoFirestore,
     RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
@@ -413,7 +414,58 @@ class TestRepositorioDePapeisFirestore:
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeAprovacaoFirestore:
+    @pytest.fixture
+    def aprovacao(self) -> RepositorioDeAprovacaoFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeAprovacaoFirestore(
+            cliente, colecao=f"configuracao-{uuid.uuid4().hex}"
+        )
+
+    def test_sem_documento_nada_exige_aprovacao(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        assert aprovacao.tipos() == frozenset()
+
+    def test_grava_e_le_os_tipos_e_a_lista_vazia_limpa(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        aprovacao.definir(frozenset({"pauta.titulo", "pessoa.renomear"}))
+        assert aprovacao.tipos() == {"pauta.titulo", "pessoa.renomear"}
+
+        aprovacao.definir(frozenset())
+        assert aprovacao.tipos() == frozenset()
+
+    def test_tipo_desconhecido_no_documento_e_ignorado(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        aprovacao._documento.set({"tipos": ["pauta.foo", "pauta.titulo"]})
+
+        assert aprovacao.tipos() == {"pauta.titulo"}
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestRepositorioDeCorrecoesFirestore:
+    def test_guarda_a_pendente_e_a_decisao_com_a_original(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        pendente = self._correcao("c1", "j1", 1).model_copy(
+            update={"exige_aprovacao": True}
+        )
+        aprovacao = self._correcao("c1-decidida", "j1", 2).model_copy(
+            update={"tipo": "aprovar", "aprova": "c1"}
+        )
+        recusa = self._correcao("c2-decidida", "j1", 3).model_copy(
+            update={"tipo": "recusar", "recusa": "c2"}
+        )
+        for c in (pendente, aprovacao, recusa):
+            correcoes.acrescentar(c)
+
+        lidos = {c.id: c for c in correcoes.listar("j1")}
+        assert lidos["c1"].exige_aprovacao
+        assert lidos["c1-decidida"].aprova == "c1"
+        assert lidos["c2-decidida"].recusa == "c2"
+
     @pytest.fixture
     def correcoes(self) -> RepositorioDeCorrecoesFirestore:
         cliente = firestore.Client(project="teste", credentials=_anonima())

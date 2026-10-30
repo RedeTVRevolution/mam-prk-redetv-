@@ -12,7 +12,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
-from api.correcoes import Correcao, CorrecaoJaExiste, em_ordem
+from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     ArmazenamentoIndisponivel,
@@ -27,6 +27,8 @@ COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
+COLECAO_DE_CONFIGURACAO = "configuracao"
+DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 
 
@@ -165,6 +167,26 @@ class RepositorioDeCorrecoesFirestore:
         docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
         achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
         return em_ordem(achadas)
+
+
+class RepositorioDeAprovacaoFirestore:
+    """Um documento com a lista de tipos de correção que exigem aprovação."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_CONFIGURACAO
+    ) -> None:
+        self._documento = cliente.collection(colecao).document(DOCUMENTO_DA_APROVACAO)
+
+    def tipos(self) -> frozenset[str]:
+        doc = self._documento.get()
+        if not doc.exists:
+            return frozenset()
+        # Tipo desconhecido (digitado à mão) não exige nada.
+        guardados = (doc.to_dict() or {}).get("tipos", [])
+        return frozenset(t for t in CORRIGIVEIS if t in guardados)
+
+    def definir(self, tipos: frozenset[str]) -> None:
+        self._documento.set({"tipos": sorted(tipos)})
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:

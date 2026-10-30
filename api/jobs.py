@@ -36,18 +36,23 @@ from api.correcoes import (
     NaoCandidato,
     NaoDesfazivel,
     NaoNaFila,
+    NaoPendente,
     NovaCorrecao,
     NovaReaplicacao,
+    NovaRecusa,
     NovaResolucao,
     NovoDesfazer,
+    RepositorioDeAprovacao,
     RepositorioDeCorrecoes,
     TemposInvalidos,
     aplicar,
     fila,
     historico,
+    id_da_decisao,
     id_da_resolucao,
     id_do_desfazer,
     montar_correcao,
+    montar_decisao,
     montar_descarte,
     montar_desfazer,
     montar_reaplicacao,
@@ -338,6 +343,19 @@ def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     return chamador
 
 
+def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
+    """Dependência: só pessoa com `correcao.aprovar` (o Curador)."""
+    if not isinstance(chamador, Usuario):
+        raise HTTPException(403, "Chave de sistema não aprova correções")
+    _confere_permissao(request, chamador.uid, "correcao.aprovar")
+    return chamador
+
+
+def _pode_aprovar(request: Request, uid: str) -> bool:
+    papeis: RepositorioDePapeis = request.app.state.papeis
+    return "correcao.aprovar" in permissoes_de(papeis_efetivos(papeis.obter(uid)))
+
+
 def _enxerga(chamador: Chamador, job: Job | None) -> Job:
     """O job, ou 404 se não existe ou é de outro sistema (ou de uma pessoa), para uma chave."""
     if job is None or (
@@ -353,6 +371,7 @@ def criar_rotas(
     tamanho_maximo_bytes: int,
     relogio: Callable[[], datetime],
     correcoes: RepositorioDeCorrecoes,
+    aprovacao: RepositorioDeAprovacao,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -465,9 +484,14 @@ def criar_rotas(
         entregue["versao_decupagem"] = versao_atual
         return _resposta(iter([json.dumps(entregue).encode()]), request)
 
+    def _exige_aprovacao(request: Request, autor: Usuario, tipo: str) -> bool:
+        """Só a correção de quem não é Curador, num tipo da lista, espera decisão."""
+        return tipo in aprovacao.tipos() and not _pode_aprovar(request, autor.uid)
+
     @rotas.post("/{job_id}/correcoes", status_code=201)
     def corrigir(
         job_id: str,
+        request: Request,
         novo: NovaCorrecao,
         autor: Annotated[Usuario, Depends(_exige_editar)],
     ) -> dict[str, str]:
@@ -498,6 +522,7 @@ def criar_rotas(
                 autor_uid=autor.uid,
                 autor_email=autor.email,
                 criada_em=relogio(),
+                exige_aprovacao=_exige_aprovacao(request, autor, novo.tipo),
             )
         except ItemInexistente:
             raise HTTPException(422, "Item inexistente") from None
@@ -594,6 +619,7 @@ def criar_rotas(
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
     def reaplicar_correcao(
         job_id: str,
+        request: Request,
         correcao_id: str,
         corpo: NovaReaplicacao,
         autor: Annotated[Usuario, Depends(_exige_editar)],
@@ -603,7 +629,14 @@ def criar_rotas(
             correcao_id,
             autor,
             lambda modelo, versao, alvo, todas, **registro: montar_reaplicacao(
-                modelo, versao, alvo, todas, corpo.item_id, corpo.motivo, **registro
+                modelo,
+                versao,
+                alvo,
+                todas,
+                corpo.item_id,
+                corpo.motivo,
+                exige_aprovacao=_exige_aprovacao(request, autor, alvo.tipo),
+                **registro,
             ),
         )
 
@@ -622,5 +655,51 @@ def criar_rotas(
                 modelo, versao, alvo, todas, corpo.motivo, **registro
             ),
         )
+
+    def _decidir(
+        job_id: str,
+        correcao_id: str,
+        autor: Usuario,
+        aprovada: bool,
+        motivo: str = "",
+    ) -> dict[str, str]:
+        job = obter_concluido(job_id, autor)
+        todas = correcoes.listar(job.id)
+        alvo = next((c for c in todas if c.id == correcao_id), None)
+        if alvo is None:
+            raise HTTPException(404, "Correção não encontrada")
+        try:
+            decisao = montar_decisao(
+                alvo,
+                todas,
+                aprovada,
+                motivo,
+                id=id_da_decisao(alvo.id),
+                job_id=job.id,
+                autor_uid=autor.uid,
+                autor_email=autor.email,
+                criada_em=relogio(),
+            )
+            correcoes.acrescentar(decisao)
+        except (NaoPendente, CorrecaoJaExiste):
+            raise HTTPException(409, "A correção não está pendente") from None
+        return {"id": decisao.id}
+
+    @rotas.post("/{job_id}/correcoes/{correcao_id}/aprovar", status_code=201)
+    def aprovar_correcao(
+        job_id: str,
+        correcao_id: str,
+        autor: Annotated[Usuario, Depends(_exige_aprovar)],
+    ) -> dict[str, str]:
+        return _decidir(job_id, correcao_id, autor, True)
+
+    @rotas.post("/{job_id}/correcoes/{correcao_id}/recusar", status_code=201)
+    def recusar_correcao(
+        job_id: str,
+        correcao_id: str,
+        corpo: NovaRecusa,
+        autor: Annotated[Usuario, Depends(_exige_aprovar)],
+    ) -> dict[str, str]:
+        return _decidir(job_id, correcao_id, autor, False, corpo.motivo)
 
     return rotas
