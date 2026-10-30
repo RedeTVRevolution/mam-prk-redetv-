@@ -8,7 +8,7 @@ correções aplicadas por cima, em memória.
 import hashlib
 import json
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol
 
@@ -181,26 +181,31 @@ def montar_correcao(
     pessoa = next((p for p in _pessoas(modelo) if p.get("id") == novo.item_id), None)
     if pessoa is None:
         raise ItemInexistente(novo.item_id)
-    inicio, fim = _intervalo_da_pessoa(pessoa)
     return Correcao(
         tipo=novo.tipo,
         item_id=novo.item_id,
         motivo=novo.motivo,
         antes=antes,
         depois=novo.valor,
-        ancora=Ancora(
-            versao=versao,
-            tipo_do_item="pessoa",
-            identidade=identidade_da_pessoa(pessoa),
-            inicio_ms=inicio,
-            fim_ms=fim,
-        ),
+        ancora=_ancora_da_pessoa(pessoa, versao),
         **registro,
     )
 
 
+def _ancora_da_pessoa(pessoa: dict[str, Any], versao: str) -> Ancora:
+    inicio, fim = _intervalo_da_pessoa(pessoa)
+    return Ancora(
+        versao=versao,
+        tipo_do_item="pessoa",
+        identidade=identidade_da_pessoa(pessoa),
+        inicio_ms=inicio,
+        fim_ms=fim,
+    )
+
+
 class NaoDesfazivel(Exception):
-    """A correção já foi desfeita, é ela mesma um desfazer ou é de outra versão."""
+    """A correção já foi desfeita, é ela mesma um desfazer ou, sendo de outra
+    versão, não casa com a decupagem atual (não está aplicada)."""
 
 
 def _desfeitas(correcoes: list[Correcao]) -> set[str]:
@@ -234,23 +239,33 @@ def montar_desfazer(
     """O registro que reverte `alvo`; nada é apagado. Um desfazer não se desfaz.
 
     Antes e depois são o nome entregue sem e com o desfazer: com uma correção
-    mais nova no mesmo item, desfazer a antiga não muda o que se vê.
+    mais nova no mesmo item, desfazer a antiga não muda o que se vê. A de outra
+    versão só se desfaz se `reconciliar` a casar; o registro aponta o item novo.
     """
-    if (
-        alvo.tipo == "desfazer"
-        or alvo.id in _desfeitas(correcoes)
-        or alvo.ancora.versao != versao
-    ):
+    if alvo.tipo == "desfazer" or alvo.id in _desfeitas(correcoes):
         raise NaoDesfazivel(alvo.id)
     restantes = [c for c in correcoes if c.id != alvo.id]
+    if alvo.ancora.versao == versao:
+        alvo_atual = alvo
+        antes = _nome_pela_ancora(modelo, versao, correcoes, alvo.ancora)
+        depois = _nome_pela_ancora(modelo, versao, restantes, alvo.ancora)
+    else:
+        casadas = reconciliar(modelo, versao, correcoes).casadas
+        reapontada = next((c for c in casadas if c.id == alvo.id), None)
+        if reapontada is None:
+            raise NaoDesfazivel(alvo.id)
+        alvo_atual = reapontada
+        # A reapontada vale pelo id do item novo, como em `aplicar`.
+        antes = nome_atual(modelo, versao, correcoes, alvo_atual.item_id)
+        depois = nome_atual(modelo, versao, restantes, alvo_atual.item_id)
     return Correcao(
         tipo="desfazer",
         desfaz=alvo.id,
-        item_id=alvo.item_id,
+        item_id=alvo_atual.item_id,
         motivo=motivo,
-        antes=_nome_pela_ancora(modelo, versao, correcoes, alvo.ancora),
-        depois=_nome_pela_ancora(modelo, versao, restantes, alvo.ancora),
-        ancora=alvo.ancora,
+        antes=antes,
+        depois=depois,
+        ancora=alvo_atual.ancora,
         **registro,
     )
 
@@ -277,13 +292,14 @@ def nome_atual(
     raise ItemInexistente(item_id)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Reconciliacao:
-    casadas: list[Correcao] = field(default_factory=list)  # já apontam para o item novo
-    atendidas: list[Correcao] = field(
-        default_factory=list
-    )  # casadas cujo "depois" o modelo já traz
-    sem_casar: list[Correcao] = field(default_factory=list)
+    """`casadas` já apontam para o item novo; `atendidas` são as casadas cujo
+    "depois" o modelo já traz; `sem_casar` não se aplicam, mas não se perdem."""
+
+    casadas: list[Correcao]
+    atendidas: list[Correcao]
+    sem_casar: list[Correcao]
 
 
 def _sobrepoe(a: tuple[int, int], b: tuple[int, int]) -> bool:
@@ -296,7 +312,7 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
     sem_nome = nao_identificado(c.ancora.identidade.split("@")[0])
     achados = []
     for pessoa in _pessoas(modelo):
-        nome = str(pessoa.get("nome", ""))
+        nome = str(pessoa["nome"])
         if sem_nome and nao_identificado(nome):
             # Só as aparições mostram quem é.
             intervalo = _intervalo_da_pessoa(pessoa, ("na_imagem",))
@@ -321,7 +337,7 @@ def reconciliar(
     desfeitas e os próprios desfazer.
     """
     desfeitas = _desfeitas(correcoes)
-    resultado = Reconciliacao()
+    resultado = Reconciliacao(casadas=[], atendidas=[], sem_casar=[])
     for c in em_ordem(correcoes):
         if (
             c.ancora.versao == versao
@@ -334,17 +350,10 @@ def reconciliar(
             resultado.sem_casar.append(c)
             continue
         pessoa = candidatos[0]
-        inicio, fim = _intervalo_da_pessoa(pessoa)
         nova = c.model_copy(
             update={
                 "item_id": str(pessoa.get("id", "")),
-                "ancora": Ancora(
-                    versao=versao,
-                    tipo_do_item="pessoa",
-                    identidade=identidade_da_pessoa(pessoa),
-                    inicio_ms=inicio,
-                    fim_ms=fim,
-                ),
+                "ancora": _ancora_da_pessoa(pessoa, versao),
             }
         )
         resultado.casadas.append(nova)
@@ -359,6 +368,8 @@ def aplicar(
     """Cópia do modelo com as correções da versão atual por cima.
 
     Pessoa corrigida vem com `origem: "revisao"`; as demais, com `"modelo"`.
+    A atendida (o modelo já traz o "depois") deixa o nome como o modelo o
+    escreveu, com `origem: "modelo"`.
     Correção desfeita não conta: o item volta ao valor que teria sem ela.
     Correção de outra versão do JSON só vale se `reconciliar` a casar com um
     item único; as que não casam não se aplicam (e seguem no histórico).
@@ -369,31 +380,37 @@ def aplicar(
         pessoa["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
+    nomes_do_modelo = [p["nome"] for p in pessoas]
     desfeitas = _desfeitas(correcoes)
     # ponytail: reconciliar a cada leitura relê as pessoas do modelo por
     # correção antiga (custo pequeno hoje); guardar o resultado quando houver
     # reprocessamentos frequentes ou muitas correções por vídeo.
     reconciliadas = reconciliar(modelo, versao, correcoes)
     atendidas = {c.id for c in reconciliadas.atendidas}
-    aplicaveis = [
-        (c, False)
+    reapontadas = {c.id for c in reconciliadas.casadas}
+    da_versao = [
+        c
         for c in correcoes
         if c.ancora.versao == versao and c.tipo == "pessoa.renomear"
-    ] + [(c, True) for c in reconciliadas.casadas]
+    ]
+
+    def casa(c: Correcao, pessoa: dict[str, Any], identidade: str) -> bool:
+        # A reapontada vai só ao item que casou, pelo id novo.
+        if c.id in reapontadas:
+            return pessoa.get("id") == c.item_id
+        return identidade == c.ancora.identidade
+
     # Em ordem de data: a mais nova vence, e desfazer uma antiga não a derruba.
-    for c, reapontada in sorted(
-        aplicaveis, key=lambda par: (par[0].criada_em, par[0].id)
-    ):
+    for c in em_ordem(da_versao + reconciliadas.casadas):
         if c.id in desfeitas:
             continue
-        for pessoa, identidade in zip(pessoas, identidades, strict=True):
-            # A reapontada vai só ao item que casou, pelo id novo.
-            if (
-                (pessoa.get("id") == c.item_id)
-                if reapontada
-                else (identidade == c.ancora.identidade)
-            ):
-                pessoa["nome"] = c.depois
-                if c.id not in atendidas:
-                    pessoa["origem"] = "revisao"
+        for pessoa, identidade, nome in zip(
+            pessoas, identidades, nomes_do_modelo, strict=True
+        ):
+            if not casa(c, pessoa, identidade):
+                continue
+            if c.id in atendidas:
+                pessoa["nome"], pessoa["origem"] = nome, "modelo"
+            else:
+                pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
     return resultado

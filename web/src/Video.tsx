@@ -677,7 +677,7 @@ function HistoricoDeCorrecoes({
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
       else if (e instanceof Error && e.message.startsWith('Falha 409')) {
         // Outro Editor pode ter desfeito antes: a decupagem também mudou.
-        setErro('Essa correção já foi desfeita ou é de outra versão. O histórico foi recarregado.')
+        setErro('Essa correção já foi desfeita ou não casa com a versão atual. O histórico foi recarregado.')
         carregar()
         aoDesfazer()
       } else setErro('Não foi possível desfazer a correção.')

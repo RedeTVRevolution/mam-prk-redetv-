@@ -114,6 +114,10 @@ class Mundo:
             "/v1/jobs/j1/correcoes", json=_novo(**campos), headers=AUTORIZACAO
         )
 
+    def reprocessar(self, modelo: dict[str, Any]) -> None:
+        """Simula o reprocessamento: um novo JSON do modelo no armazenamento."""
+        self.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
+
     def avancar(self, minutos: int = 1) -> None:
         self.agora += timedelta(minutes=minutos)
 
@@ -305,15 +309,6 @@ def test_identidade_do_nao_identificado_ignora_as_mencoes() -> None:
     assert identidade_da_pessoa(pessoa) == "nao identificado@7000-9000"
 
 
-def test_correcao_de_outra_versao_do_modelo_nao_e_aplicada() -> None:
-    mundo = Mundo(["editor"])
-    mundo.corrigir()
-    nova = {**MODELO, "pessoas": [_pessoa("pes01", "Carla Dias", 1000, 5000)]}
-    mundo.armazenamento.decupagens["j1"] = [json.dumps(nova).encode()]
-
-    assert mundo.decupagem()["pessoas"][0]["nome"] == "Carla Dias"
-
-
 def _corrigir_duas_vezes(mundo: "Mundo") -> tuple[str, str]:
     primeira = mundo.corrigir(valor="Ana S.").json()["id"]
     mundo.avancar()
@@ -460,11 +455,12 @@ def test_repositorio_em_memoria_nao_sobrescreve() -> None:
         repo.acrescentar(correcao.model_copy(update={"depois": "Outro"}))
 
 
-def test_desfazer_correcao_de_outra_versao_do_modelo_da_409() -> None:
+def test_desfazer_correcao_de_outra_versao_que_nao_casa_da_409() -> None:
     mundo = Mundo(["editor"])
     cid = mundo.corrigir().json()["id"]
-    nova = {**MODELO, "programa": {"resumo": "reprocessado"}}
-    mundo.armazenamento.decupagens["j1"] = [json.dumps(nova).encode()]
+    mundo.reprocessar(
+        {**MODELO, "pessoas": [_pessoa("pes01", "Carla Dias", 1000, 5000)]}
+    )
 
     assert mundo.desfazer(cid).status_code == 409
     assert [c.tipo for c in mundo.correcoes.listar("j1")] == ["pessoa.renomear"]
@@ -646,7 +642,7 @@ def test_renomear_troca_o_json_do_modelo_e_o_nome_corrigido_continua() -> None:
     mundo = Mundo(["editor"])
     mundo.corrigir()
     nova = {**MODELO, "programa": {"resumo": "reprocessado"}}
-    mundo.armazenamento.decupagens["j1"] = [json.dumps(nova).encode()]
+    mundo.reprocessar(nova)
 
     decupagem = mundo.decupagem()
 
@@ -659,7 +655,7 @@ def test_correcao_que_nao_casa_nao_aparece_e_continua_ativa_no_historico() -> No
     mundo = Mundo(["editor"])
     mundo.corrigir()
     nova = {**MODELO, "pessoas": [_pessoa("pes01", "Carla Dias", 1000, 5000)]}
-    mundo.armazenamento.decupagens["j1"] = [json.dumps(nova).encode()]
+    mundo.reprocessar(nova)
 
     assert mundo.nome_da_ana() == "Carla Dias"
     itens = mundo.historico().json()
@@ -670,6 +666,33 @@ def test_versao_modelo_entrega_o_json_novo_cru() -> None:
     mundo = Mundo(["editor"])
     mundo.corrigir()
     nova = {**MODELO, "programa": {"resumo": "reprocessado"}}
-    mundo.armazenamento.decupagens["j1"] = [json.dumps(nova).encode()]
+    mundo.reprocessar(nova)
 
     assert mundo.decupagem("?versao=modelo") == nova
+
+
+def test_correcao_atendida_entrega_o_nome_como_o_modelo_escreveu() -> None:
+    mundo = Mundo(["editor"])
+    mundo.corrigir()
+    mundo.reprocessar(
+        {**MODELO, "pessoas": [_pessoa("p9", "ANA SOUZA LIMA", 1200, 4800)]}
+    )
+
+    pessoa = mundo.decupagem()["pessoas"][0]
+
+    assert (pessoa["nome"], pessoa["origem"]) == ("ANA SOUZA LIMA", "modelo")
+
+
+def test_desfazer_correcao_reconciliada_volta_ao_nome_do_modelo_novo() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+    mundo.reprocessar({**MODELO, "pessoas": [_pessoa("p9", "Ana Souza", 1200, 4800)]})
+
+    assert mundo.desfazer(cid).status_code == 201
+    assert mundo.nome_da_ana() == "Ana Souza"
+    desfazer = mundo.correcoes.listar("j1")[-1]
+    assert (desfazer.item_id, desfazer.antes, desfazer.depois) == (
+        "p9",
+        "Ana Souza Lima",
+        "Ana Souza",
+    )

@@ -521,7 +521,7 @@ def criar_rotas(
         except (NaoDesfazivel, CorrecaoJaExiste):
             raise HTTPException(
                 409,
-                "Correção já desfeita, já é um desfazer ou é de outra versão",
+                "Correção já desfeita, já é um desfazer ou não casa com a versão atual",
             ) from None
         return {"id": desfazer.id}
 
