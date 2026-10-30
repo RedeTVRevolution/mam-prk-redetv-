@@ -480,6 +480,29 @@ class TestRepositorioDeCorrecoesFirestore:
             ("descartar", None, "c2"),
         ]
 
+    def test_guarda_a_correcao_de_pauta_com_a_ancora_da_pauta(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        base = self._correcao("p1", "j1", 1)
+        correcoes.acrescentar(
+            base.model_copy(
+                update={
+                    "tipo": "item.tempos",
+                    "item_id": "pau01",
+                    "antes": "0-20000",
+                    "depois": "2000-18000",
+                    "ancora": base.ancora.model_copy(update={"tipo_do_item": "pauta"}),
+                }
+            )
+        )
+
+        [lida] = correcoes.listar("j1")
+        assert (lida.tipo, lida.depois, lida.ancora.tipo_do_item) == (
+            "item.tempos",
+            "2000-18000",
+            "pauta",
+        )
+
     def test_nao_sobrescreve_uma_correcao_existente(
         self, correcoes: RepositorioDeCorrecoesFirestore
     ) -> None:

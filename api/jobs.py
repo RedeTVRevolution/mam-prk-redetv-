@@ -41,6 +41,7 @@ from api.correcoes import (
     NovaResolucao,
     NovoDesfazer,
     RepositorioDeCorrecoes,
+    TemposInvalidos,
     aplicar,
     fila,
     historico,
@@ -50,7 +51,7 @@ from api.correcoes import (
     montar_descarte,
     montar_desfazer,
     montar_reaplicacao,
-    nome_atual,
+    valor_atual,
     versao_do_modelo,
 )
 from api.papeis import Permissao, RepositorioDePapeis, papeis_efetivos, permissoes_de
@@ -475,8 +476,8 @@ def criar_rotas(
         if novo.versao != versao_atual:
             raise HTTPException(409, "A decupagem mudou: recarregue e corrija de novo")
         try:
-            antes = nome_atual(
-                modelo, versao_atual, correcoes.listar(job.id), novo.item_id
+            antes = valor_atual(
+                modelo, versao_atual, correcoes.listar(job.id), novo.tipo, novo.item_id
             )
             correcao = montar_correcao(
                 modelo,
@@ -491,6 +492,8 @@ def criar_rotas(
             )
         except ItemInexistente:
             raise HTTPException(422, "Item inexistente") from None
+        except TemposInvalidos:
+            raise HTTPException(422, "Tempos além da duração do vídeo") from None
         correcoes.acrescentar(correcao)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
 

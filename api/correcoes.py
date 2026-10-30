@@ -7,19 +7,25 @@ correções aplicadas por cima, em memória.
 
 import hashlib
 import json
+import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, StringConstraints, field_validator
+from pydantic import BaseModel, StringConstraints, field_validator, model_validator
 
 from api.comparador import normalizar
 from api.pessoas import LISTAS, nao_identificado
 
-TipoDeCorrecao = Literal["pessoa.renomear", "desfazer", "descartar"]
+TipoNovo = Literal["pessoa.renomear", "pauta.titulo", "pauta.resumo", "item.tempos"]
+TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar"]
+TIPOS_DE_PAUTA = ("pauta.titulo", "pauta.resumo", "item.tempos")
+CORRIGIVEIS = ("pessoa.renomear", *TIPOS_DE_PAUTA)
 LIMITE_DO_MOTIVO = 500
 LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
+LIMITE_DO_TEXTO = 2000  # o mesmo de `Texto` na decupagem
+_TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 
 
 # Controles (C0, C1), formatação invisível (largura zero, direção do texto) e
@@ -42,7 +48,7 @@ def _sem_controle_salvo_quebra(texto: str) -> str:
 
 class Ancora(BaseModel):
     versao: str  # SHA-256 do JSON do modelo no Storage
-    tipo_do_item: Literal["pessoa"]
+    tipo_do_item: Literal["pessoa", "pauta"]
     identidade: str
     inicio_ms: int
     fim_ms: int
@@ -78,6 +84,17 @@ class ItemDoHistorico(Correcao):
     estado: EstadoNoHistorico
 
 
+def tempos_de(valor: str) -> tuple[int, int]:
+    """Lê "<inicio_ms>-<fim_ms>"; `ValueError` se não for isso ou se o início passar do fim."""
+    achado = _TEMPOS.match(valor)
+    if achado is None:
+        raise ValueError("tempos fora do formato inicio_ms-fim_ms")
+    inicio, fim = int(achado[1]), int(achado[2])
+    if inicio > fim:
+        raise ValueError("início depois do fim")
+    return inicio, fim
+
+
 class NovoDesfazer(BaseModel):
     """Corpo de `POST /v1/jobs/{id}/correcoes/{cid}/desfazer`."""
 
@@ -89,23 +106,35 @@ class NovoDesfazer(BaseModel):
 class NovaCorrecao(BaseModel):
     """Corpo de `POST /v1/jobs/{id}/correcoes`."""
 
-    tipo: TipoDeCorrecao
+    tipo: TipoNovo
     item_id: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+    # `item.tempos`: "<inicio_ms>-<fim_ms>".
     valor: Annotated[
         str,
         StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_TEXTO
         ),
     ]
     motivo: Motivo
     versao: Annotated[str, StringConstraints(min_length=1, max_length=64)]
 
-    _valor_sem_controle = field_validator("valor")(_sem_controle)
     _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
+
+    @model_validator(mode="after")
+    def _valor_do_tipo(self) -> Self:
+        if self.tipo == "item.tempos":
+            tempos_de(self.valor)
+        elif self.tipo == "pauta.resumo":
+            _sem_controle_salvo_quebra(self.valor)
+        else:
+            _sem_controle(self.valor)
+            if len(self.valor) > LIMITE_DO_NOME:
+                raise ValueError("valor longo demais")
+        return self
 
 
 class Candidato(BaseModel):
-    """Pessoa da versão atual que sobrepõe o intervalo ancorado."""
+    """Item (pessoa ou pauta) da versão atual que sobrepõe o intervalo ancorado."""
 
     item_id: str
     nome: str
@@ -202,6 +231,48 @@ def _pessoas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pessoas", []) if isinstance(p, dict)]
 
 
+def _pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    return [p for p in modelo.get("pautas", []) if isinstance(p, dict)]
+
+
+def _tipo_do_item(tipo: str) -> Literal["pessoa", "pauta"]:
+    return "pessoa" if tipo == "pessoa.renomear" else "pauta"
+
+
+def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
+    return _pessoas(modelo) if tipo_do_item == "pessoa" else _pautas(modelo)
+
+
+def _intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
+    return int(pauta["inicio_ms"]), int(pauta["fim_ms"])
+
+
+def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, int]:
+    if tipo_do_item == "pessoa":
+        return _intervalo_da_pessoa(item)
+    return _intervalo_da_pauta(item)
+
+
+def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
+    return str(item["nome" if tipo_do_item == "pessoa" else "titulo"])
+
+
+def _valor_do_item(item: dict[str, Any], tipo: str) -> str:
+    """O valor que a correção do `tipo` troca neste item."""
+    if tipo == "pessoa.renomear":
+        return str(item["nome"])
+    if tipo == "pauta.titulo":
+        return str(item["titulo"])
+    if tipo == "pauta.resumo":
+        return str(item["resumo"])
+    inicio, fim = _intervalo_da_pauta(item)
+    return f"{inicio}-{fim}"
+
+
+class TemposInvalidos(Exception):
+    """Os tempos passam da duração do vídeo."""
+
+
 def montar_correcao(
     modelo: dict[str, Any],
     versao: str,
@@ -210,17 +281,37 @@ def montar_correcao(
     **registro: Any,
 ) -> Correcao:
     """A correção de `novo` sobre o item do JSON do modelo, com a âncora pronta."""
-    pessoa = next((p for p in _pessoas(modelo) if p.get("id") == novo.item_id), None)
-    if pessoa is None:
+    tipo_do_item = _tipo_do_item(novo.tipo)
+    item = next(
+        (i for i in _itens(modelo, tipo_do_item) if i.get("id") == novo.item_id), None
+    )
+    if item is None:
         raise ItemInexistente(novo.item_id)
+    if novo.tipo == "item.tempos":
+        duracao = int(modelo.get("video", {}).get("duracao_ms", 0))
+        if tempos_de(novo.valor)[1] > duracao:
+            raise TemposInvalidos(novo.valor)
     return Correcao(
         tipo=novo.tipo,
         item_id=novo.item_id,
         motivo=novo.motivo,
         antes=antes,
         depois=novo.valor,
-        ancora=_ancora_da_pessoa(pessoa, versao),
+        ancora=_ancora_do_item(item, tipo_do_item, versao),
         **registro,
+    )
+
+
+def _ancora_do_item(item: dict[str, Any], tipo_do_item: str, versao: str) -> Ancora:
+    if tipo_do_item == "pessoa":
+        return _ancora_da_pessoa(item, versao)
+    inicio, fim = _intervalo_da_pauta(item)
+    return Ancora(
+        versao=versao,
+        tipo_do_item="pauta",
+        identidade=normalizar(str(item["titulo"])),
+        inicio_ms=inicio,
+        fim_ms=fim,
     )
 
 
@@ -256,15 +347,18 @@ def id_do_desfazer(alvo_id: str) -> str:
     return f"{alvo_id}-desfeita"
 
 
-def _nome_pela_ancora(
-    modelo: dict[str, Any], versao: str, correcoes: list[Correcao], ancora: Ancora
+def _valor_do_alvo(
+    modelo: dict[str, Any], versao: str, correcoes: list[Correcao], alvo: Correcao
 ) -> str:
-    """O nome entregue hoje na pessoa da âncora (casa como `aplicar`)."""
+    """O valor entregue hoje no item do alvo (casa como `aplicar`): a pessoa
+    pela identidade da âncora; a pauta pelo id, que na mesma versão é estável."""
+    if alvo.tipo != "pessoa.renomear":
+        return valor_atual(modelo, versao, correcoes, alvo.tipo, alvo.item_id)
     entregue = _pessoas(aplicar(modelo, versao, correcoes))
     for original, pessoa in zip(_pessoas(modelo), entregue, strict=True):
-        if identidade_da_pessoa(original) == ancora.identidade:
+        if identidade_da_pessoa(original) == alvo.ancora.identidade:
             return str(pessoa["nome"])
-    raise ItemInexistente(ancora.identidade)
+    raise ItemInexistente(alvo.ancora.identidade)
 
 
 def montar_desfazer(
@@ -278,11 +372,11 @@ def montar_desfazer(
     """O registro que reverte `alvo`; nada é apagado. Um desfazer não se desfaz.
 
     Antes e depois são o nome entregue sem e com o desfazer: com uma correção
-    mais nova no mesmo item, desfazer a antiga não muda o que se vê. A de outra
+    mais nova no mesmo campo, desfazer a antiga não muda o que se vê. A de outra
     versão só se desfaz se `reconciliar` a casar; o registro aponta o item novo.
     """
     if (
-        alvo.tipo != "pessoa.renomear"
+        alvo.tipo not in CORRIGIVEIS
         or alvo.id in _desfeitas(correcoes)
         or alvo.id in _resolvidas(correcoes)
     ):
@@ -290,8 +384,8 @@ def montar_desfazer(
     restantes = [c for c in correcoes if c.id != alvo.id]
     if alvo.ancora.versao == versao:
         alvo_atual = alvo
-        antes = _nome_pela_ancora(modelo, versao, correcoes, alvo.ancora)
-        depois = _nome_pela_ancora(modelo, versao, restantes, alvo.ancora)
+        antes = _valor_do_alvo(modelo, versao, correcoes, alvo)
+        depois = _valor_do_alvo(modelo, versao, restantes, alvo)
     else:
         casadas = reconciliar(modelo, versao, correcoes).casadas
         reapontada = next((c for c in casadas if c.id == alvo.id), None)
@@ -299,8 +393,12 @@ def montar_desfazer(
             raise NaoDesfazivel(alvo.id)
         alvo_atual = reapontada
         # A reapontada vale pelo id do item novo, como em `aplicar`.
-        antes = nome_atual(modelo, versao, correcoes, alvo_atual.item_id)
-        depois = nome_atual(modelo, versao, restantes, alvo_atual.item_id)
+        antes = valor_atual(
+            modelo, versao, correcoes, alvo_atual.tipo, alvo_atual.item_id
+        )
+        depois = valor_atual(
+            modelo, versao, restantes, alvo_atual.tipo, alvo_atual.item_id
+        )
     return Correcao(
         tipo="desfazer",
         desfaz=alvo.id,
@@ -335,13 +433,17 @@ def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
     ]
 
 
-def nome_atual(
-    modelo: dict[str, Any], versao: str, correcoes: list[Correcao], item_id: str
+def valor_atual(
+    modelo: dict[str, Any],
+    versao: str,
+    correcoes: list[Correcao],
+    tipo: str,
+    item_id: str,
 ) -> str:
-    """O nome que o Editor vê hoje na pessoa `item_id`."""
-    for pessoa in _pessoas(aplicar(modelo, versao, correcoes)):
-        if pessoa.get("id") == item_id:
-            return str(pessoa["nome"])
+    """O valor que o Editor vê hoje no campo do `tipo` do item `item_id`."""
+    for item in _itens(aplicar(modelo, versao, correcoes), _tipo_do_item(tipo)):
+        if item.get("id") == item_id:
+            return _valor_do_item(item, tipo)
     raise ItemInexistente(item_id)
 
 
@@ -359,8 +461,30 @@ def _sobrepoe(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return a[0] <= b[1] and b[0] <= a[1]
 
 
+def _sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """A sobreposição cobre pelo menos metade do menor dos dois intervalos."""
+    sobreposicao = min(a[1], b[1]) - max(a[0], b[0])
+    menor = min(a[1] - a[0], b[1] - b[0])
+    return sobreposicao > 0 and sobreposicao * 2 >= menor
+
+
 def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
-    """Pessoas da versão nova com a identidade da âncora (ou já com o "depois")."""
+    """Itens da versão nova que a correção pode estar apontando.
+
+    Pauta: a que sobrepõe o intervalo ancorado em pelo menos metade do menor
+    dos dois. Pessoa: a com a identidade da âncora (ou já com o "depois").
+    """
+    ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    if c.ancora.tipo_do_item == "pauta":
+        return [
+            p
+            for p in _pautas(modelo)
+            if _sobrepoe_metade(ancora, _intervalo_da_pauta(p))
+        ]
+    return _candidatos_pessoa(modelo, c)
+
+
+def _candidatos_pessoa(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
     ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
     sem_nome = nao_identificado(c.ancora.identidade.split("@")[0])
     achados = []
@@ -387,12 +511,12 @@ def reconciliar(
 
     Casa só com exatamente um item de mesma identidade e intervalo sobreposto;
     zero ou vários candidatos não casam. Ignora as da versão atual, as
-    desfeitas, as que saíram da fila e os registros que não são renomeações.
+    desfeitas, as que saíram da fila e os registros que não corrigem um item.
     """
     fora = _desfeitas(correcoes) | _resolvidas(correcoes)
     resultado = Reconciliacao(casadas=[], atendidas=[], sem_casar=[])
     for c in em_ordem(correcoes):
-        if c.ancora.versao == versao or c.tipo != "pessoa.renomear" or c.id in fora:
+        if c.ancora.versao == versao or c.tipo not in CORRIGIVEIS or c.id in fora:
             continue
         candidatos = _candidatos(modelo, c)
         if len(candidatos) != 1:
@@ -402,13 +526,28 @@ def reconciliar(
         nova = c.model_copy(
             update={
                 "item_id": str(pessoa.get("id", "")),
-                "ancora": _ancora_da_pessoa(pessoa, versao),
+                "ancora": _ancora_do_item(pessoa, c.ancora.tipo_do_item, versao),
             }
         )
         resultado.casadas.append(nova)
-        if normalizar(str(pessoa["nome"])) == normalizar(c.depois):
+        if c.tipo == "pessoa.renomear" and normalizar(str(pessoa["nome"])) == (
+            normalizar(c.depois)
+        ):
             resultado.atendidas.append(nova)
     return resultado
+
+
+def _aplicar_na_pauta(resultado: dict[str, Any], c: Correcao) -> None:
+    """A pauta é achada pelo id: na versão atual o id do item é estável, e a
+    reapontada já traz o id novo."""
+    for pauta in _pautas(resultado):
+        if pauta.get("id") != c.item_id:
+            continue
+        if c.tipo == "item.tempos":
+            pauta["inicio_ms"], pauta["fim_ms"] = tempos_de(c.depois)
+        else:
+            pauta["titulo" if c.tipo == "pauta.titulo" else "resumo"] = c.depois
+        pauta["origem"] = "revisao"
 
 
 def aplicar(
@@ -416,7 +555,8 @@ def aplicar(
 ) -> dict[str, Any]:
     """Cópia do modelo com as correções da versão atual por cima.
 
-    Pessoa corrigida vem com `origem: "revisao"`; as demais, com `"modelo"`.
+    Pessoa ou pauta corrigida vem com `origem: "revisao"`; as demais, com
+    `"modelo"`.
     A atendida (o modelo já traz o "depois") deixa o nome como o modelo o
     escreveu, com `origem: "modelo"`.
     Correção desfeita não conta: o item volta ao valor que teria sem ela.
@@ -425,8 +565,8 @@ def aplicar(
     """
     resultado: dict[str, Any] = json.loads(json.dumps(modelo))
     pessoas = _pessoas(resultado)
-    for pessoa in pessoas:
-        pessoa["origem"] = "modelo"
+    for item in [*pessoas, *_pautas(resultado)]:
+        item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
     nomes_do_modelo = [p["nome"] for p in pessoas]
@@ -438,9 +578,7 @@ def aplicar(
     atendidas = {c.id for c in reconciliadas.atendidas}
     reapontadas = {c.id for c in reconciliadas.casadas}
     da_versao = [
-        c
-        for c in correcoes
-        if c.ancora.versao == versao and c.tipo == "pessoa.renomear"
+        c for c in correcoes if c.ancora.versao == versao and c.tipo in CORRIGIVEIS
     ]
 
     def casa(c: Correcao, pessoa: dict[str, Any], identidade: str) -> bool:
@@ -452,6 +590,9 @@ def aplicar(
     # Em ordem de data: a mais nova vence, e desfazer uma antiga não a derruba.
     for c in em_ordem(da_versao + reconciliadas.casadas):
         if c.id in desfeitas:
+            continue
+        if c.tipo in TIPOS_DE_PAUTA:
+            _aplicar_na_pauta(resultado, c)
             continue
         for pessoa, identidade, nome in zip(
             pessoas, identidades, nomes_do_modelo, strict=True
@@ -486,14 +627,15 @@ def fila(
     itens = []
     for c in reconciliar(modelo, versao, correcoes).sem_casar:
         ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
+        tipo_do_item = c.ancora.tipo_do_item
         candidatos = []
-        for pessoa in _pessoas(modelo):
-            intervalo = _intervalo_da_pessoa(pessoa)
+        for item in _itens(modelo, tipo_do_item):
+            intervalo = _intervalo_do_item(item, tipo_do_item)
             if _sobrepoe(ancora, intervalo):
                 candidatos.append(
                     Candidato(
-                        item_id=str(pessoa.get("id", "")),
-                        nome=str(pessoa["nome"]),
+                        item_id=str(item.get("id", "")),
+                        nome=_rotulo_do_item(item, tipo_do_item),
                         inicio_ms=intervalo[0],
                         fim_ms=intervalo[1],
                     )
@@ -526,15 +668,16 @@ def montar_reaplicacao(
     item = _na_fila(modelo, versao, alvo, correcoes)
     if item_id not in {c.item_id for c in item.candidatos}:
         raise NaoCandidato(item_id)
-    pessoa = next(p for p in _pessoas(modelo) if p.get("id") == item_id)
+    tipo_do_item = alvo.ancora.tipo_do_item
+    novo = next(i for i in _itens(modelo, tipo_do_item) if i.get("id") == item_id)
     return Correcao(
-        tipo="pessoa.renomear",
+        tipo=alvo.tipo,
         reaplica=alvo.id,
         item_id=item_id,
         motivo=motivo,
-        antes=nome_atual(modelo, versao, correcoes, item_id),
+        antes=valor_atual(modelo, versao, correcoes, alvo.tipo, item_id),
         depois=alvo.depois,
-        ancora=_ancora_da_pessoa(pessoa, versao),
+        ancora=_ancora_do_item(novo, tipo_do_item, versao),
         **registro,
     )
 

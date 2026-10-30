@@ -37,6 +37,9 @@ const TOKEN = 'Bearer token-de-ana@redetv.com.br'
 let statusDecupagem = 200
 let corrigida = false
 let correcaoRecebida: unknown = null
+let correcoesRecebidas: { tipo: string }[] = []
+let pautaCorrigida = false
+let statusDoPost = 201
 // A versão é o SHA-256 do JSON do modelo: correção não a muda, reprocessar sim.
 let versaoAtual = 'v1'
 let pedidosDeReproducao = 0
@@ -134,18 +137,29 @@ const servidor = setupServer(
   }),
   http.get('/v1/jobs/j1/decupagem', ({ request }) => {
     if (request.headers.get('Authorization') !== TOKEN) return new HttpResponse(null, { status: 401 })
+    const base = pautaCorrigida
+      ? {
+          ...decupagem,
+          pautas: [
+            { ...decupagem.pautas[0], titulo: 'Eleição 2026', inicio_ms: 32_000, origem: 'revisao' },
+          ],
+        }
+      : decupagem
     const entregue = corrigida
-      ? { ...decupagem, versao_decupagem: versaoAtual, pessoas: [{ ...decupagem.pessoas[0], nome: 'Ana Souza Lima', origem: 'revisao' }] }
-      : { ...decupagem, versao_decupagem: versaoAtual }
+      ? { ...base, versao_decupagem: versaoAtual, pessoas: [{ ...decupagem.pessoas[0], nome: 'Ana Souza Lima', origem: 'revisao' }] }
+      : { ...base, versao_decupagem: versaoAtual }
     return statusDecupagem === 200
       ? HttpResponse.json(entregue)
       : new HttpResponse(null, { status: statusDecupagem })
   }),
   http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
     correcaoRecebida = await request.json()
+    correcoesRecebidas.push(correcaoRecebida as { tipo: string })
+    if (statusDoPost !== 201) return new HttpResponse(null, { status: statusDoPost })
     if ((correcaoRecebida as { versao: string }).versao !== versaoAtual)
       return new HttpResponse(null, { status: 409 })
-    corrigida = true
+    if ((correcaoRecebida as { tipo: string }).tipo === 'pessoa.renomear') corrigida = true
+    else pautaCorrigida = true
     return HttpResponse.json({ id: 'c1', versao_decupagem: versaoAtual }, { status: 201 })
   }),
 )
@@ -156,6 +170,9 @@ afterEach(() => {
   statusDecupagem = 200
   corrigida = false
   correcaoRecebida = null
+  correcoesRecebidas = []
+  pautaCorrigida = false
+  statusDoPost = 201
   versaoAtual = 'v1'
   pedidosDeReproducao = 0
   desfeita = false
@@ -476,6 +493,84 @@ test('o Editor corrige o nome da pessoa pelo modal e vê o selo de revisão', as
     motivo: 'sobrenome completo',
     versao: 'v1',
   })
+})
+
+test('o Editor corrige título, resumo e tempos da pauta pelo modal e vê o selo', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir pauta Eleição' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Título'))
+  await usuario.type(modal.getByLabelText('Título'), 'Eleição 2026')
+  await usuario.clear(modal.getByLabelText('Resumo'))
+  await usuario.type(modal.getByLabelText('Resumo'), 'Debate completo')
+  await usuario.clear(modal.getByLabelText('Início (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:32')
+  await usuario.type(modal.getByLabelText('Motivo'), 'ajuste da pauta')
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  expect(await painel.findByText('Eleição 2026')).toBeTruthy()
+  expect(painel.getByText('revisado')).toBeTruthy()
+  expect(painel.getByText('00:32–01:00')).toBeTruthy()
+  expect(correcoesRecebidas).toEqual([
+    { tipo: 'pauta.titulo', valor: 'Eleição 2026', item_id: 'pa1', motivo: 'ajuste da pauta', versao: 'v1' },
+    { tipo: 'pauta.resumo', valor: 'Debate completo', item_id: 'pa1', motivo: 'ajuste da pauta', versao: 'v1' },
+    { tipo: 'item.tempos', valor: '32000-60000', item_id: 'pa1', motivo: 'ajuste da pauta', versao: 'v1' },
+  ])
+})
+
+test('o modal da pauta só envia o que mudou e não salva início depois do fim', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir pauta Eleição' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.type(modal.getByLabelText('Motivo'), 'ajuste')
+  const salvar = modal.getByRole('button', { name: 'Salvar' }) as HTMLButtonElement
+  expect(salvar.disabled).toBe(true)
+
+  await usuario.clear(modal.getByLabelText('Início (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '02:00')
+
+  expect(modal.getByText('O início não pode vir depois do fim.')).toBeTruthy()
+  expect(salvar.disabled).toBe(true)
+  await usuario.clear(modal.getByLabelText('Início (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:31')
+  expect(salvar.disabled).toBe(false)
+  await usuario.click(salvar)
+  await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
+  expect(correcoesRecebidas[0]).toMatchObject({ tipo: 'item.tempos', valor: '31000-60000' })
+})
+
+test('tempos recusados pela API (422) mostram o aviso no modal da pauta', async () => {
+  statusDoPost = 422
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, true)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+  await usuario.click(await painel.findByRole('button', { name: 'Corrigir pauta Eleição' }))
+  const modal = within(await screen.findByRole('dialog'))
+  await usuario.clear(modal.getByLabelText('Fim (mm:ss)'))
+  await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '99:00')
+  await usuario.type(modal.getByLabelText('Motivo'), 'ajuste')
+
+  await usuario.click(modal.getByRole('button', { name: 'Salvar' }))
+
+  expect((await modal.findByRole('alert')).textContent).toContain('duração do vídeo')
+})
+
+test('quem não tem decupagem.editar não vê o botão de corrigir a pauta', async () => {
+  const usuario = userEvent.setup()
+  await abrir({ estado: 'concluido' }, false)
+  const painel = within(await screen.findByLabelText('Decupagem'))
+  await usuario.click(aba('Pautas'))
+
+  expect(await painel.findByText('Eleição')).toBeTruthy()
+  expect(painel.queryByRole('button', { name: /Corrigir/ })).toBeNull()
 })
 
 test('quem não tem decupagem.editar não vê o botão de corrigir', async () => {

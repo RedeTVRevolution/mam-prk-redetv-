@@ -53,9 +53,16 @@ interface Pessoa {
   citada_no_texto: (Intervalo & { texto: string })[]
 }
 
+interface Pauta extends Intervalo {
+  id: string
+  titulo: string
+  resumo?: string
+  origem?: 'modelo' | 'revisao'
+}
+
 export interface Decupagem {
   versao_decupagem?: string
-  pautas: (Intervalo & { titulo: string })[]
+  pautas: Pauta[]
   pessoas: Pessoa[]
   planos: (Intervalo & { id: string; ambiente: string; acao?: string | null })[]
   comerciais: (Intervalo & { marca: string; tipo: string })[]
@@ -86,6 +93,18 @@ function tempo(ms: number): string {
   const mm = String(Math.floor(total / 60)).padStart(2, '0')
   const ss = String(total % 60).padStart(2, '0')
   return `${mm}:${ss}`
+}
+
+/** "mm:ss" em milissegundos; `null` se não for um tempo. */
+function lerTempo(texto: string): number | null {
+  const achado = /^(\d{1,3}):([0-5]\d)$/.exec(texto.trim())
+  return achado ? (Number(achado[1]) * 60 + Number(achado[2])) * 1000 : null
+}
+
+/** O valor de uma correção de tempos ("inicio_ms-fim_ms") vira "mm:ss–mm:ss"; o resto fica como está. */
+function valorLegivel(valor: string): string {
+  const achado = /^(\d+)-(\d+)$/.exec(valor)
+  return achado ? `${tempo(Number(achado[1]))}–${tempo(Number(achado[2]))}` : valor
 }
 
 function faixasDe(d: Decupagem): Faixa[] {
@@ -201,6 +220,7 @@ export default function Video({
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const concluido = job.estado === 'concluido'
   const [corrigindo, setCorrigindo] = useState<Pessoa | null>(null)
+  const [corrigindoPauta, setCorrigindoPauta] = useState<Pauta | null>(null)
   const [historicoAberto, setHistoricoAberto] = useState(false)
   const [filaAberta, setFilaAberta] = useState(false)
   const [fila, setFila] = useState<ItemDaFila[]>([])
@@ -422,13 +442,35 @@ export default function Video({
               )}
               {aba === 'Pautas' &&
                 decupagem.pautas.map((p, i) => (
-                  <NavLink
-                    key={`pauta-${i}`}
-                    label={p.titulo}
-                    description={`${tempo(p.inicio_ms)}–${tempo(p.fim_ms)}`}
-                    active={dentro(atualMs, p)}
-                    onClick={() => saltar(p.inicio_ms)}
-                  />
+                  <Group key={`pauta-${i}`} gap={4} wrap="nowrap">
+                    <NavLink
+                      flex={1}
+                      label={
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm">{p.titulo}</Text>
+                          {p.origem === 'revisao' && (
+                            <Badge size="xs" color="teal" variant="light">
+                              revisado
+                            </Badge>
+                          )}
+                        </Group>
+                      }
+                      description={`${tempo(p.inicio_ms)}–${tempo(p.fim_ms)}`}
+                      active={dentro(atualMs, p)}
+                      onClick={() => saltar(p.inicio_ms)}
+                    />
+                    {podeEditar && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        aria-label={`Corrigir pauta ${p.titulo}`}
+                        onClick={() => setCorrigindoPauta(p)}
+                      >
+                        <IconPencil size={14} />
+                      </ActionIcon>
+                    )}
+                  </Group>
                 ))}
               {aba === 'Marcas' &&
                 decupagem.comerciais.map((c, i) => (
@@ -496,6 +538,20 @@ export default function Video({
         aoFechar={() => setCorrigindo(null)}
         aoSalvar={() => {
           setCorrigindo(null)
+          recarregarDecupagem()
+        }}
+        aoVersaoDesatualizada={recarregarDecupagem}
+        aoSessaoExpirada={() => sessaoExpirada.current()}
+      />
+      <CorrigirPauta
+        key={corrigindoPauta?.id ?? 'fechada'}
+        pauta={corrigindoPauta}
+        versao={decupagem.versao_decupagem ?? ''}
+        autenticador={autenticador}
+        jobId={job.id}
+        aoFechar={() => setCorrigindoPauta(null)}
+        aoSalvar={() => {
+          setCorrigindoPauta(null)
           recarregarDecupagem()
         }}
         aoVersaoDesatualizada={recarregarDecupagem}
@@ -632,9 +688,144 @@ function CorrigirPessoa({
   )
 }
 
+/** Modal da pauta: título, resumo, início e fim (mm:ss) e motivo. Cada campo mudado vira uma correção. */
+function CorrigirPauta({
+  pauta,
+  versao,
+  autenticador,
+  jobId,
+  aoFechar,
+  aoSalvar,
+  aoVersaoDesatualizada,
+  aoSessaoExpirada,
+}: {
+  pauta: Pauta | null
+  versao: string
+  autenticador: Autenticador
+  jobId: string
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
+  aoSessaoExpirada: () => void
+}) {
+  const [titulo, setTitulo] = useState(pauta?.titulo ?? '')
+  const [resumo, setResumo] = useState(pauta?.resumo ?? '')
+  const [inicio, setInicio] = useState(pauta ? tempo(pauta.inicio_ms) : '')
+  const [fim, setFim] = useState(pauta ? tempo(pauta.fim_ms) : '')
+  const [motivo, setMotivo] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+
+  const inicioMs = lerTempo(inicio)
+  const fimMs = lerTempo(fim)
+  const temposValidos = inicioMs !== null && fimMs !== null && inicioMs <= fimMs
+  const temposMudaram =
+    pauta !== null && (inicio !== tempo(pauta.inicio_ms) || fim !== tempo(pauta.fim_ms))
+  const mudancas: { tipo: string; valor: string }[] = []
+  if (pauta && titulo.trim() !== pauta.titulo) mudancas.push({ tipo: 'pauta.titulo', valor: titulo })
+  if (pauta && resumo.trim() !== (pauta.resumo ?? ''))
+    mudancas.push({ tipo: 'pauta.resumo', valor: resumo })
+  if (temposMudaram && temposValidos)
+    mudancas.push({ tipo: 'item.tempos', valor: `${inicioMs}-${fimMs}` })
+
+  async function salvar() {
+    if (!pauta) return
+    setSalvando(true)
+    setErro(null)
+    try {
+      for (const m of mudancas) {
+        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
+          metodo: 'POST',
+          corpo: { ...m, item_id: pauta.id, motivo, versao },
+        })
+      }
+      aoSalvar()
+    } catch (e) {
+      if (e instanceof SessaoExpirada) aoSessaoExpirada()
+      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+        aoVersaoDesatualizada()
+        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
+      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
+      } else setErro('Não foi possível salvar a correção.')
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <Modal opened={pauta !== null} onClose={aoFechar} title="Corrigir pauta" centered>
+      <Stack gap="sm">
+        <TextInput
+          label="Título"
+          value={titulo}
+          maxLength={200}
+          onChange={(e) => setTitulo(e.currentTarget.value)}
+        />
+        <Textarea
+          label="Resumo"
+          value={resumo}
+          maxLength={2000}
+          rows={4}
+          onChange={(e) => setResumo(e.currentTarget.value)}
+        />
+        <Group grow align="flex-start">
+          <TextInput
+            label="Início (mm:ss)"
+            value={inicio}
+            error={lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setInicio(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Fim (mm:ss)"
+            value={fim}
+            error={lerTempo(fim) === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setFim(e.currentTarget.value)}
+          />
+        </Group>
+        {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
+          <Text size="xs" c="red">
+            O início não pode vir depois do fim.
+          </Text>
+        )}
+        <Textarea
+          label="Motivo"
+          value={motivo}
+          maxLength={500}
+          rows={3}
+          onChange={(e) => setMotivo(e.currentTarget.value)}
+        />
+        {erro && (
+          <Alert color="red" variant="light" role="alert">
+            {erro}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button type="button" variant="default" onClick={aoFechar}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            color="red"
+            loading={salvando}
+            disabled={
+              !titulo.trim() ||
+              !motivo.trim() ||
+              (temposMudaram && !temposValidos) ||
+              mudancas.length === 0
+            }
+            onClick={() => void salvar()}
+          >
+            Salvar
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  )
+}
+
 interface ItemDoHistorico {
   id: string
-  tipo: 'pessoa.renomear' | 'desfazer' | 'descartar'
+  tipo: 'pessoa.renomear' | 'pauta.titulo' | 'pauta.resumo' | 'item.tempos' | 'desfazer' | 'descartar'
   autor_email: string
   criada_em: string
   motivo: string
@@ -646,6 +837,9 @@ interface ItemDoHistorico {
 
 const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
   'pessoa.renomear': 'Renomear pessoa',
+  'pauta.titulo': 'Título da pauta',
+  'pauta.resumo': 'Resumo da pauta',
+  'item.tempos': 'Tempos',
   desfazer: 'Desfazer',
   descartar: 'Descartar da fila',
 }
@@ -773,14 +967,14 @@ function HistoricoDeCorrecoes({
                   <Text size="xs" c="dimmed">
                     Antes:
                   </Text>
-                  <Text size="sm">{i.antes}</Text>
+                  <Text size="sm">{valorLegivel(i.antes)}</Text>
                 </Group>
                 <Group gap={4} wrap="nowrap">
                   <Text size="xs" c="dimmed">
                     Depois:
                   </Text>
                   <Text size="sm" fw={600}>
-                    {i.depois}
+                    {valorLegivel(i.depois)}
                   </Text>
                 </Group>
                 <Text size="sm">{i.motivo}</Text>
@@ -789,7 +983,7 @@ function HistoricoDeCorrecoes({
                     {`Reaplica a correção de ${quandoDaOriginal(itens, i.reaplica)}`}
                   </Text>
                 )}
-                {i.estado === 'ativa' && i.tipo === 'pessoa.renomear' && (
+                {i.estado === 'ativa' && i.tipo !== 'desfazer' && i.tipo !== 'descartar' && (
                   <Group justify="flex-end">
                     <Button size="xs" variant="default" onClick={() => setDesfazendo(i)}>
                       Desfazer
@@ -951,20 +1145,20 @@ function ItemDaFilaDeRevisao({
           <Text size="xs" c="dimmed">
             Antes:
           </Text>
-          <Text size="sm">{item.antes}</Text>
+          <Text size="sm">{valorLegivel(item.antes)}</Text>
         </Group>
         <Group gap={4} wrap="nowrap">
           <Text size="xs" c="dimmed">
             Depois:
           </Text>
           <Text size="sm" fw={600}>
-            {item.depois}
+            {valorLegivel(item.depois)}
           </Text>
         </Group>
         <Text size="sm">{item.motivo}</Text>
         <Select
           label="Candidato"
-          placeholder={item.candidatos.length ? 'Escolha a pessoa' : 'Sem candidatos'}
+          placeholder={item.candidatos.length ? 'Escolha o item' : 'Sem candidatos'}
           data={item.candidatos.map((c) => ({
             value: c.item_id,
             label: `${c.nome} (${tempo(c.inicio_ms)}–${tempo(c.fim_ms)})`,

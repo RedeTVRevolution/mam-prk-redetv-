@@ -52,8 +52,25 @@ def _pessoa(id: str, nome: str, inicio: int, fim: int) -> dict[str, Any]:
     }
 
 
+def _pauta(id: str, titulo: str, inicio: int, fim: int) -> dict[str, Any]:
+    return {
+        "id": id,
+        "titulo": titulo,
+        "resumo": f"Resumo de {titulo}",
+        "inicio_ms": inicio,
+        "fim_ms": fim,
+        "pessoas": [],
+        "locais": [],
+    }
+
+
 MODELO: dict[str, Any] = {
     "versao_esquema": "1.1",
+    "video": {"duracao_ms": 60000},
+    "pautas": [
+        _pauta("pau01", "Economia", 0, 20000),
+        _pauta("pau02", "Esporte", 20000, 50000),
+    ],
     "pessoas": [
         _pessoa("pes01", "Ana Souza", 1000, 5000),
         _pessoa("pes02", "não identificado", 7000, 9000),
