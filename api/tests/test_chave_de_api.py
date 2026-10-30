@@ -196,3 +196,20 @@ def test_comando_sem_nome_do_sistema_nao_emite() -> None:
 
     assert main([], MAC_V1, chaves, lambda _: None) == 2
     assert chaves.todas() == []
+
+
+def test_sistema_consulta_status_com_etag_e_recebe_304() -> None:
+    chaves, chave = _ambiente()
+    cliente = _cliente(chaves)
+    job_id = cliente.post(
+        "/v1/jobs", json=NOVO_JOB, headers={"X-API-Key": chave}
+    ).json()["id"]
+    etag = cliente.get(f"/v1/jobs/{job_id}", headers={"X-API-Key": chave}).headers[
+        "ETag"
+    ]
+
+    resposta = cliente.get(
+        f"/v1/jobs/{job_id}", headers={"X-API-Key": chave, "If-None-Match": etag}
+    )
+
+    assert resposta.status_code == 304
