@@ -1,9 +1,13 @@
-import { createTheme, type MantineColor } from '@mantine/core'
+import { createTheme, type AppShellNavbarConfiguration, type MantineColor } from '@mantine/core'
 
 export const tema = createTheme({
   primaryColor: 'red',
   defaultRadius: 'md',
 })
+
+// A barra lateral é da Biblioteca, mas o AppShell é um só (o do App): dois AppShells
+// aninhados disputam as mesmas variáveis de layout no :root.
+export const NAVBAR_DA_BIBLIOTECA: AppShellNavbarConfiguration = { width: 240, breakpoint: 'sm' }
 
 export const ESTADOS_DO_JOB = {
   aguardando_upload: { cor: 'gray', rotulo: 'Aguardando envio' },

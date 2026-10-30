@@ -5,6 +5,7 @@ import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
+import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import Video, { type JobAberto } from './Video.tsx'
 
 interface Usuario {
@@ -83,7 +84,11 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
     )
   }
   return (
-    <AppShell header={{ height: 52 }}>
+    <AppShell
+      header={{ height: 52 }}
+      navbar={aberto ? undefined : NAVBAR_DA_BIBLIOTECA}
+      padding={aberto ? undefined : 'lg'}
+    >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
           <Group gap="xs">
@@ -104,22 +109,23 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Main bg="dark.7" pt={aberto ? undefined : 0}>
-        {aberto ? (
+      {aberto ? (
+        <AppShell.Main bg="dark.7">
           <Video
             autenticador={autenticador}
             job={aberto}
             aoVoltar={() => setAberto(null)}
             aoSessaoExpirada={() => void sair()}
           />
-        ) : (
-          <Biblioteca
-            autenticador={autenticador}
-            aoSessaoExpirada={() => void sair()}
-            aoAbrir={setAberto}
-          />
-        )}
-      </AppShell.Main>
+        </AppShell.Main>
+      ) : (
+        // A Biblioteca traz a própria barra lateral e a área principal.
+        <Biblioteca
+          autenticador={autenticador}
+          aoSessaoExpirada={() => void sair()}
+          aoAbrir={setAberto}
+        />
+      )}
     </AppShell>
   )
 }

@@ -17,7 +17,7 @@ import {
   ThemeIcon,
 } from '@mantine/core'
 import { IconAlertTriangle, IconPlayerPlay, IconUpload } from '@tabler/icons-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import { validarArquivo } from './envio/arquivo.ts'
@@ -46,7 +46,7 @@ type Envio =
 
 const ESTADOS = Object.keys(ESTADOS_DO_JOB) as EstadoDoJob[]
 
-function duracao(segundos: number) {
+function formatarDuracao(segundos: number) {
   const total = Math.round(segundos)
   const mm = String(Math.floor(total / 60)).padStart(2, '0')
   const ss = String(total % 60).padStart(2, '0')
@@ -87,6 +87,8 @@ export default function Biblioteca({
   const [envio, setEnvio] = useState<Envio>({ tipo: 'parado' })
   const [listaFalhou, setListaFalhou] = useState(false)
   const [estados, setEstados] = useState<string[]>(ESTADOS)
+  const limparSeletor = useRef<() => void>(null)
+  const enviando = envio.tipo === 'enviando'
 
   const tratar = useCallback(
     (erro: unknown) => {
@@ -115,6 +117,8 @@ export default function Biblioteca({
 
   async function escolher(arquivo: File | null) {
     if (!arquivo) return
+    // Sem isso, escolher de novo o mesmo arquivo não dispara a troca.
+    limparSeletor.current?.()
     const motivo = await validarArquivo(arquivo)
     if (motivo) {
       setEnvio({ tipo: 'erro', mensagem: motivo })
@@ -137,25 +141,29 @@ export default function Biblioteca({
     }
   }
 
-  const visiveis = jobs?.filter((job) => estados.includes(job.estado))
+  // Estado fora do mapa não tem caixa no filtro, então nunca some.
+  const visiveis = jobs?.filter(
+    (job) => !Object.hasOwn(ESTADOS_DO_JOB, job.estado) || estados.includes(job.estado),
+  )
 
   return (
-    <AppShell navbar={{ width: 240, breakpoint: 'sm' }} padding="lg">
+    <>
       <AppShell.Navbar p="sm">
         <Stack gap="lg">
           <Stack gap="xs">
             <FileButton
               accept=".mp4,video/mp4"
               onChange={(arquivo) => void escolher(arquivo)}
-              disabled={envio.tipo === 'enviando'}
-              inputProps={{ 'aria-label': 'Enviar vídeo', disabled: envio.tipo === 'enviando' }}
+              resetRef={limparSeletor}
+              disabled={enviando}
+              inputProps={{ 'aria-label': 'Enviar vídeo', disabled: enviando }}
             >
               {(props) => (
                 <Button
                   {...props}
                   fullWidth
                   leftSection={<IconUpload size={16} />}
-                  disabled={envio.tipo === 'enviando'}
+                  disabled={enviando}
                 >
                   Enviar MP4
                 </Button>
@@ -189,7 +197,7 @@ export default function Biblioteca({
           </Checkbox.Group>
         </Stack>
       </AppShell.Navbar>
-      <AppShell.Main>
+      <AppShell.Main bg="dark.7">
         {listaFalhou && (
           <Alert color="yellow" variant="light" role="alert" mb="md">
             Não foi possível atualizar a lista; tentando de novo.
@@ -237,7 +245,7 @@ export default function Biblioteca({
                   </Group>
                   <Text size="xs" c="dimmed">
                     {new Date(job.criado_em).toLocaleString('pt-BR')}
-                    {job.duracao_s != null && ` · ${duracao(job.duracao_s)}`}
+                    {job.duracao_s != null && ` · ${formatarDuracao(job.duracao_s)}`}
                   </Text>
                   {job.codigo_falha && (
                     <Text size="xs" c="red" ff="monospace">
@@ -250,6 +258,6 @@ export default function Biblioteca({
           </SimpleGrid>
         )}
       </AppShell.Main>
-    </AppShell>
+    </>
   )
 }

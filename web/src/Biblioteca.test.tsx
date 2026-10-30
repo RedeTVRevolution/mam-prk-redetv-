@@ -4,7 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { AppShell } from '@mantine/core'
+import type { ReactNode } from 'react'
 import Biblioteca from './Biblioteca.tsx'
+import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 
 interface JobApi {
@@ -82,13 +85,20 @@ function mp4(nome = 'enviado.mp4') {
   return new File([bytes], nome, { type: 'video/mp4' })
 }
 
+// No app, a Biblioteca fica dentro do AppShell do App.
+function noShell(tela: ReactNode) {
+  return <AppShell navbar={NAVBAR_DA_BIBLIOTECA}>{tela}</AppShell>
+}
+
 async function abrir(opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void } = {}) {
   render(
-    <Biblioteca
-      autenticador={await comSessao()}
-      aoSessaoExpirada={opcoes.aoSessaoExpirada ?? (() => {})}
-      intervaloMs={opcoes.intervaloMs}
-    />,
+    noShell(
+      <Biblioteca
+        autenticador={await comSessao()}
+        aoSessaoExpirada={opcoes.aoSessaoExpirada ?? (() => {})}
+        intervaloMs={opcoes.intervaloMs}
+      />,
+    ),
   )
 }
 
@@ -196,7 +206,9 @@ test('abrir um vídeo concluído ou falhado chama aoAbrir; os demais não são c
   ]
   const aoAbrir = vi.fn()
   render(
-    <Biblioteca autenticador={await comSessao()} aoSessaoExpirada={() => {}} aoAbrir={aoAbrir} />,
+    noShell(
+      <Biblioteca autenticador={await comSessao()} aoSessaoExpirada={() => {}} aoAbrir={aoAbrir} />,
+    ),
   )
 
   await usuario.click(await screen.findByRole('button', { name: 'pronto.mp4' }))
@@ -225,4 +237,27 @@ test('desmarcar um estado esconde os cards daquele estado', async () => {
 
   expect(screen.queryByText('andando.mp4')).toBeNull()
   expect(screen.getByText('pronto.mp4')).toBeTruthy()
+})
+
+test('depois de escolher um arquivo, o seletor fica livre para a mesma escolha de novo', async () => {
+  const usuario = userEvent.setup({ applyAccept: false })
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+  const campo = screen.getByLabelText('Enviar vídeo') as HTMLInputElement
+
+  await usuario.upload(campo, mp4('filme.mov'))
+
+  await screen.findByRole('alert')
+  expect(campo.value).toBe('')
+})
+
+test('um estado fora do mapa continua visível, qualquer que seja o filtro', async () => {
+  const usuario = userEvent.setup()
+  jobs = [job({ nome: 'estranho.mp4', estado: 'arquivado' })]
+  await abrir()
+  await screen.findByText('estranho.mp4')
+
+  for (const caixa of screen.getAllByRole('checkbox')) await usuario.click(caixa)
+
+  expect(screen.getByText('estranho.mp4')).toBeTruthy()
 })
