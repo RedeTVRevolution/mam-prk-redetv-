@@ -6,7 +6,6 @@ tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levant
 """
 
 import json
-import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -15,7 +14,7 @@ from typing import Any, Protocol
 import requests
 
 from api.decupagem import Decupagem, Video, esquema_do_modelo
-from api.espera import espera_com_jitter
+from api.espera import espera_com_jitter, sorteio_uniforme
 
 MODELO = "gemini-3.5-flash-lite"
 TENTATIVAS_REDE = 5  # novas tentativas após 429/5xx
@@ -150,7 +149,7 @@ def analisar(
     job_id: str,
     video: Video,
     dormir: Callable[[float], None] = time.sleep,
-    sortear: Callable[[float], float] = lambda teto: random.uniform(0, teto),
+    sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
 ) -> Decupagem:
     chamada = Chamada(

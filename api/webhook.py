@@ -8,7 +8,6 @@ sobre os IPs resolvidos. A rede, o DNS e o segredo ficam atrás de portas.
 import hmac
 import ipaddress
 import json
-import random
 import secrets
 import socket
 import time
@@ -21,7 +20,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
-from api.espera import espera_com_jitter
+from api.espera import espera_com_jitter, sorteio_uniforme
 from api.jobs import CodigoDeFalha, Job
 
 REENTREGAS = 8  # novas tentativas depois da primeira
@@ -29,11 +28,14 @@ ESPERA_BASE_S = 5.0
 ESPERA_TETO_S = 3600.0
 # Um evento assinado há mais que isto é tratado pelo cliente como repetido.
 TOLERANCIA_DA_DATA = timedelta(minutes=5)
-TIMEOUT_DA_ENTREGA_S = 10
 
 
 class UrlInvalida(ValueError):
     pass
+
+
+class HostNaoResolve(UrlInvalida):
+    """O DNS não respondeu: no registro recusa, na entrega é falha passageira."""
 
 
 Resolvedor = Callable[[str], list[str]]
@@ -48,27 +50,26 @@ def resolver_dns(host: str) -> list[str]:
 def _ip_interno(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
+    # `is_global` também barra faixas que `is_private` deixa passar, como o CGNAT
+    # (100.64.0.0/10); multicast pode ser global, mas não é destino de POST.
+    return not ip.is_global or ip.is_multicast
 
 
 def _resolvidos(
     host: str, resolver: Resolvedor
 ) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     try:
-        return [ipaddress.ip_address(ip) for ip in resolver(host)]
-    except (OSError, ValueError):
-        return []
+        enderecos = [ipaddress.ip_address(ip) for ip in resolver(host)]
+    except (OSError, ValueError) as e:
+        raise HostNaoResolve("o host da URL do webhook não resolve") from e
+    if not enderecos:
+        raise HostNaoResolve("o host da URL do webhook não resolve")
+    return enderecos
 
 
-def validar_url(url: str, resolver: Resolvedor = resolver_dns) -> None:
-    """Levanta `UrlInvalida` se a URL não serve de callback."""
+def validar_url(url: str, resolver: Resolvedor = resolver_dns) -> list[str]:
+    """Devolve os IPs do host, todos públicos; levanta `UrlInvalida` se a URL não
+    serve de callback."""
     try:
         partes = urlsplit(url)
         host = (partes.hostname or "").rstrip(".").lower()
@@ -87,10 +88,9 @@ def validar_url(url: str, resolver: Resolvedor = resolver_dns) -> None:
         enderecos = [ipaddress.ip_address(host)]
     except ValueError:
         enderecos = _resolvidos(host, resolver)
-    if not enderecos:
-        raise UrlInvalida("o host da URL do webhook não resolve")
     if any(_ip_interno(ip) for ip in enderecos):
         raise UrlInvalida("a URL do webhook aponta para um endereço interno")
+    return [str(ip) for ip in enderecos]
 
 
 class Cofre(Protocol):
@@ -210,13 +210,42 @@ def montar_evento(
 
 
 class PortaHttp(Protocol):
-    def enviar(self, url: str, corpo: bytes, cabecalhos: dict[str, str]) -> int:
-        """POST; devolve o status. Falha de rede levanta `OSError`."""
+    def enviar(
+        self, url: str, ips: list[str], corpo: bytes, cabecalhos: dict[str, str]
+    ) -> int:
+        """POST; devolve o status. Falha de rede levanta `OSError`.
+
+        Conecta num dos `ips`, já validados, sem resolver o host de novo (senão o DNS
+        pode trocar de resposta entre a checagem e a conexão), com o host da URL no
+        SNI e no `Host`. Não segue redirecionamento: um 3xx volta como status."""
         ...
 
 
 def _repetivel(status: int) -> bool:
     return status in (408, 429) or status >= 500
+
+
+def _tentar(
+    evento: Evento,
+    registro: RegistroDeWebhook,
+    segredo: str,
+    corpo: bytes,
+    http: PortaHttp,
+    resolver: Resolvedor,
+    relogio: Callable[[], datetime],
+) -> int:
+    ips = validar_url(registro.url, resolver)
+    data = relogio().isoformat()
+    cabecalhos = {
+        "Content-Type": "application/json",
+        "X-Webhook-Id": evento.id,
+        "X-Webhook-Data": data,
+        "X-Webhook-Assinatura": assinar(segredo, data, corpo),
+    }
+    try:
+        return http.enviar(registro.url, ips, corpo, cabecalhos)
+    except OSError:
+        return 503
 
 
 def entregar(
@@ -227,12 +256,12 @@ def entregar(
     *,
     resolver: Resolvedor = resolver_dns,
     dormir: Callable[[float], None] = time.sleep,
-    sortear: Callable[[float], float] = lambda teto: random.uniform(0, teto),
+    sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], datetime],
 ) -> bool:
     """Entrega o evento; `True` se algum POST teve 2xx. Reentregas levam o mesmo id
     de evento e uma data e assinatura novas. A URL é conferida de novo, sobre o IP
-    resolvido, antes de cada tentativa."""
+    resolvido, antes de cada tentativa; DNS fora do ar conta como falha passageira."""
     segredo = cofre.obter(registro.sistema)
     if segredo is None:
         return False
@@ -242,20 +271,11 @@ def entregar(
     falhas = 0
     while True:
         try:
-            validar_url(registro.url, resolver)
+            status = _tentar(evento, registro, segredo, corpo, http, resolver, relogio)
+        except HostNaoResolve:
+            status = 503
         except UrlInvalida:
             return False
-        data = relogio().isoformat()
-        cabecalhos = {
-            "Content-Type": "application/json",
-            "X-Webhook-Id": evento.id,
-            "X-Webhook-Data": data,
-            "X-Webhook-Assinatura": assinar(segredo, data, corpo),
-        }
-        try:
-            status = http.enviar(registro.url, corpo, cabecalhos)
-        except OSError:
-            status = 503
         if 200 <= status < 300:
             return True
         if not _repetivel(status) or falhas >= REENTREGAS:

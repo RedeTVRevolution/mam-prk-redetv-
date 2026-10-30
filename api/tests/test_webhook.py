@@ -101,6 +101,8 @@ def test_evento_antigo_e_recusado_como_repetido() -> None:
         "https://192.168.0.1/cb",
         "https://[::1]/cb",
         "https://[::ffff:10.0.0.1]/cb",
+        "https://100.64.0.1/cb",
+        "https://0.0.0.0/cb",
         "https://usuario:senha@legado.redetv.example/cb",
         "https://usuario@legado.redetv.example/cb",
         "https:///cb",
@@ -184,9 +186,13 @@ class HttpFalso:
     def __init__(self, *respostas: int | Exception) -> None:
         self.respostas = list(respostas)
         self.chamadas: list[tuple[str, bytes, dict[str, str]]] = []
+        self.ips: list[list[str]] = []
 
-    def enviar(self, url: str, corpo: bytes, cabecalhos: dict[str, str]) -> int:
+    def enviar(
+        self, url: str, ips: list[str], corpo: bytes, cabecalhos: dict[str, str]
+    ) -> int:
         self.chamadas.append((url, corpo, cabecalhos))
+        self.ips.append(ips)
         r = self.respostas.pop(0) if self.respostas else 200
         if isinstance(r, Exception):
             raise r
@@ -224,6 +230,7 @@ def test_entrega_assinada_como_o_cliente_confere() -> None:
 
     url, corpo, cab = http.chamadas[0]
     assert url == URL
+    assert http.ips == [["93.184.216.34"]]
     assert verificar_assinatura(
         a.segredo, cab["X-Webhook-Data"], corpo, cab["X-Webhook-Assinatura"], AGORA
     )
@@ -277,6 +284,22 @@ def test_desiste_no_limite_com_esperas_crescentes_dentro_do_teto() -> None:
     assert len(http.chamadas) == REENTREGAS + 1
     assert esperas == sorted(esperas) and esperas[0] < esperas[-1]
     assert max(esperas) <= ESPERA_TETO_S
+
+
+def test_dns_fora_do_ar_na_entrega_repete() -> None:
+    respostas: list[list[str] | OSError] = [socket.gaierror(), ["93.184.216.34"]]
+
+    def resolver(host: str) -> list[str]:
+        r = respostas.pop(0)
+        if isinstance(r, OSError):
+            raise r
+        return r
+
+    http = HttpFalso(200)
+    esperas: list[float] = []
+
+    assert _entregar(Ambiente(), http, esperas, resolver)
+    assert len(http.chamadas) == 1 and len(esperas) == 1
 
 
 def test_host_que_passa_a_resolver_para_ip_privado_nao_e_chamado() -> None:
