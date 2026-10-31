@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from api.cassete import CASSETE, gravar
-from api.decupagem import Video
+from api.decupagem import VERSAO_ESQUEMA, Video
 from api.gemini import MODELO, VERSAO_DO_MODELO, analisar
 from api.tests.test_gemini import BOA, VIDEO, VIDEO_CONFIAVEL, TransporteFalso
 
@@ -51,7 +51,7 @@ def test_resposta_gravada_passa_no_esquema_e_nos_invariantes_de_primeira() -> No
         video=Video(**cassete["video"]),
     )
 
-    assert d.versao_esquema == "1.2"
+    assert d.versao_esquema == VERSAO_ESQUEMA
     assert d.programa.resumo
     assert len(transporte.chamadas) == 1
 

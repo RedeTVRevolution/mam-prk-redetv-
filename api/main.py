@@ -22,6 +22,9 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
+from api.catalogo import Catalogo, CatalogoEmMemoria
+from api.catalogo_de_correcoes import CatalogoDeCorrecoes
+from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.correcoes import (
     RepositorioDeAprovacao,
     RepositorioDeAprovacaoEmMemoria,
@@ -42,6 +45,7 @@ from api.jobs import (
 )
 from api.nuvem import (
     ArmazenamentoStorage,
+    CatalogoFirestore,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
@@ -89,6 +93,7 @@ def criar_app(
     admins_emergencia: str | None = None,
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
+    catalogo: Catalogo | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -133,6 +138,11 @@ def criar_app(
         """Os programas com perfil, para o envio escolher."""
         return sorted(PERFIS)
 
+    @v1.get("/correcoes/catalogo")
+    def tipos_de_correcao(_chamador: ChamadorAutenticado) -> CatalogoDeCorrecoes:
+        """Os tipos de Correção e os vocabulários que o front mostra."""
+        return catalogo_de_correcoes()
+
     v1.include_router(
         criar_rotas(
             repositorio or RepositorioIndisponivel(),
@@ -141,6 +151,7 @@ def criar_app(
             relogio,
             correcoes or RepositorioDeCorrecoesEmMemoria(),
             aprovacao or RepositorioDeAprovacaoEmMemoria(),
+            catalogo or CatalogoEmMemoria(),
         )
     )
     app.include_router(v1)
@@ -165,6 +176,7 @@ if _projeto:
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
+        catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
     )
 else:
     app = criar_app()

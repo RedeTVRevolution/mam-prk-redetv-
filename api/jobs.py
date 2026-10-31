@@ -28,10 +28,13 @@ from api.auth import (
     Sistema,
     Usuario,
 )
+from api.catalogo import Catalogo
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
+    Autoria,
     Correcao,
+    CorrecaoInexistente,
     CorrecaoJaExiste,
     ItemDaFila,
     ItemDoHistorico,
@@ -48,18 +51,15 @@ from api.correcoes import (
     RepositorioDeAprovacao,
     RepositorioDeCorrecoes,
     TemposInvalidos,
-    aplicar,
+    VersaoDesatualizada,
+    corrigir,
+    decidir,
+    decupagem_entregue,
+    descartar,
+    desfazer,
     fila,
     historico,
-    id_da_decisao,
-    id_da_resolucao,
-    id_do_desfazer,
-    montar_correcao,
-    montar_decisao,
-    montar_descarte,
-    montar_desfazer,
-    montar_reaplicacao,
-    valor_atual,
+    reaplicar,
     versao_do_modelo,
 )
 from api.papeis import (
@@ -106,6 +106,9 @@ class Job(BaseModel):
     duracao_s: float | None = None
     # Cortes de câmera da validação, em ms; `None` em Job anterior à detecção.
     cortes_ms: list[int] | None = None
+    # Timecode inicial da faixa `tmcd` do arquivo; `None` sem a faixa, fora do
+    # formato ou em Job anterior ao campo.
+    timecode_origem: str | None = None
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
@@ -447,6 +450,7 @@ def criar_rotas(
     relogio: Callable[[], datetime],
     correcoes: RepositorioDeCorrecoes,
     aprovacao: RepositorioDeAprovacao,
+    catalogo: Catalogo,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -547,6 +551,9 @@ def criar_rotas(
         conteudo = b"".join(armazenamento.abrir_decupagem(job_id))
         return json.loads(conteudo), versao_do_modelo(conteudo)
 
+    def _ler_correcoes(job_id: str) -> list[Correcao]:
+        return correcoes.listar(job_id)
+
     @rotas.get("/{job_id}/decupagem")
     def decupagem(
         job_id: str,
@@ -561,8 +568,7 @@ def criar_rotas(
             pedacos = itertools.chain([next(pedacos, b"")], pedacos)
             return _resposta(pedacos, request)
         modelo, versao_atual = _ler_modelo(job.id)
-        entregue = aplicar(modelo, versao_atual, correcoes.listar(job.id))
-        entregue["versao_decupagem"] = versao_atual
+        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
         return _resposta(iter([json.dumps(entregue).encode()]), request)
 
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
@@ -571,8 +577,11 @@ def criar_rotas(
             request, autor, "correcao.aprovar"
         )
 
+    def _autoria(autor: Usuario) -> Autoria:
+        return Autoria(autor.uid, autor.email, relogio())
+
     @rotas.post("/{job_id}/correcoes", status_code=201)
-    def corrigir(
+    def corrigir_decupagem(
         job_id: str,
         request: Request,
         novo: NovaCorrecao,
@@ -580,33 +589,21 @@ def criar_rotas(
     ) -> dict[str, str]:
         job = obter_concluido(job_id, autor)
         modelo, versao_atual = _ler_modelo(job.id)
-        if novo.versao != versao_atual:
-            raise HTTPException(409, "A decupagem mudou: recarregue e corrija de novo")
         try:
-            anteriores = correcoes.listar(job.id)
-            antes = valor_atual(
+            correcao = corrigir(
                 modelo,
                 versao_atual,
-                anteriores,
-                novo.tipo,
-                novo.item_id,
-                novo.tipo_do_item,
-                novo.ocorrencia,
-                novo.valor,
-            )
-            correcao = montar_correcao(
-                modelo,
-                versao_atual,
+                _ler_correcoes(job.id),
                 novo,
-                antes,
-                anteriores=anteriores,
-                id=uuid.uuid4().hex,
-                job_id=job.id,
-                autor_uid=autor.uid,
-                autor_email=autor.email,
-                criada_em=relogio(),
+                job.id,
+                _autoria(autor),
                 exige_aprovacao=_espera_curador(request, autor, novo.tipo),
+                catalogo=catalogo,
             )
+        except VersaoDesatualizada:
+            raise HTTPException(
+                409, "A decupagem mudou: recarregue e corrija de novo"
+            ) from None
         except ItemInexistente:
             raise HTTPException(422, "Item inexistente") from None
         except TemposInvalidos:
@@ -619,7 +616,7 @@ def criar_rotas(
         job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
     ) -> list[ItemDoHistorico]:
         job = obter_concluido(job_id, autor)
-        return historico(correcoes.listar(job.id))
+        return historico(_ler_correcoes(job.id))
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/desfazer", status_code=201)
     def desfazer_correcao(
@@ -629,32 +626,27 @@ def criar_rotas(
         autor: Annotated[Usuario, Depends(_exige_editar)],
     ) -> dict[str, str]:
         job = obter_concluido(job_id, autor)
-        todas = correcoes.listar(job.id)
-        alvo = next((c for c in todas if c.id == correcao_id), None)
-        if alvo is None:
-            raise HTTPException(404, "Correção não encontrada")
         modelo, versao_atual = _ler_modelo(job.id)
         try:
-            desfazer = montar_desfazer(
+            registro = desfazer(
                 modelo,
                 versao_atual,
-                alvo,
-                todas,
+                _ler_correcoes(job.id),
+                correcao_id,
                 corpo.motivo,
-                id=id_do_desfazer(alvo.id),
-                job_id=job.id,
-                autor_uid=autor.uid,
-                autor_email=autor.email,
-                criada_em=relogio(),
+                job.id,
+                _autoria(autor),
             )
-            correcoes.acrescentar(desfazer)
+            correcoes.acrescentar(registro)
+        except CorrecaoInexistente:
+            raise HTTPException(404, "Correção não encontrada") from None
         except (NaoDesfazivel, CorrecaoJaExiste):
             raise HTTPException(
                 409,
                 "Correção já desfeita, saiu da fila, não é uma renomeação"
                 " ou não casa com a versão atual",
             ) from None
-        return {"id": desfazer.id}
+        return {"id": registro.id}
 
     @rotas.get("/{job_id}/fila")
     def fila_de_revisao(
@@ -662,42 +654,33 @@ def criar_rotas(
     ) -> list[ItemDaFila]:
         job = obter_concluido(job_id, autor)
         modelo, versao_atual = _ler_modelo(job.id)
-        return fila(modelo, versao_atual, correcoes.listar(job.id))
+        return fila(modelo, versao_atual, _ler_correcoes(job.id))
 
-    def _resolver(
+    def _tirar_da_fila(
         job_id: str,
-        correcao_id: str,
         autor: Usuario,
-        montar: Callable[..., Correcao],
+        resolver: Callable[
+            [dict[str, Any], str, list[Correcao], str, Autoria], Correcao
+        ],
     ) -> dict[str, str]:
-        """`montar(modelo, versao, alvo, todas, **registro)` faz o registro que
-        tira a correção da fila (reaplicação ou descarte)."""
+        """`resolver` é `reaplicar` ou `descartar` já com o pedido da rota; recebe
+        o modelo, a versão, as Correções, o Job e a autoria."""
         job = obter_concluido(job_id, autor)
-        todas = correcoes.listar(job.id)
-        alvo = next((c for c in todas if c.id == correcao_id), None)
-        if alvo is None:
-            raise HTTPException(404, "Correção não encontrada")
         modelo, versao_atual = _ler_modelo(job.id)
         try:
-            resolucao = montar(
-                modelo,
-                versao_atual,
-                alvo,
-                todas,
-                id=id_da_resolucao(alvo.id),
-                job_id=job.id,
-                autor_uid=autor.uid,
-                autor_email=autor.email,
-                criada_em=relogio(),
+            registro = resolver(
+                modelo, versao_atual, _ler_correcoes(job.id), job.id, _autoria(autor)
             )
-            correcoes.acrescentar(resolucao)
+            correcoes.acrescentar(registro)
+        except CorrecaoInexistente:
+            raise HTTPException(404, "Correção não encontrada") from None
         except NaoCandidato:
             raise HTTPException(422, "O item não é candidato desta correção") from None
         except TemposInvalidos:
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
-        return {"id": resolucao.id}
+        return {"id": registro.id}
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
     def reaplicar_correcao(
@@ -708,12 +691,18 @@ def criar_rotas(
     ) -> dict[str, str]:
         # Não espera o Curador: só reaponta uma correção que já valia (pendente
         # não vai para a fila), e a original sai da fila quando ela nasce.
-        return _resolver(
+        return _tirar_da_fila(
             job_id,
-            correcao_id,
             autor,
-            lambda modelo, versao, alvo, todas, **registro: montar_reaplicacao(
-                modelo, versao, alvo, todas, corpo.item_id, corpo.motivo, **registro
+            lambda modelo, versao, todas, job, autoria: reaplicar(
+                modelo,
+                versao,
+                todas,
+                correcao_id,
+                corpo.item_id,
+                corpo.motivo,
+                job,
+                autoria,
             ),
         )
 
@@ -724,12 +713,11 @@ def criar_rotas(
         corpo: NovaResolucao,
         autor: Annotated[Usuario, Depends(_exige_editar)],
     ) -> dict[str, str]:
-        return _resolver(
+        return _tirar_da_fila(
             job_id,
-            correcao_id,
             autor,
-            lambda modelo, versao, alvo, todas, **registro: montar_descarte(
-                modelo, versao, alvo, todas, corpo.motivo, **registro
+            lambda modelo, versao, todas, job, autoria: descartar(
+                modelo, versao, todas, correcao_id, corpo.motivo, job, autoria
             ),
         )
 
@@ -741,26 +729,21 @@ def criar_rotas(
         motivo: str = "",
     ) -> dict[str, str]:
         job = obter_concluido(job_id, autor)
-        todas = correcoes.listar(job.id)
-        alvo = next((c for c in todas if c.id == correcao_id), None)
-        if alvo is None:
-            raise HTTPException(404, "Correção não encontrada")
         try:
-            decisao = montar_decisao(
-                alvo,
-                todas,
+            registro = decidir(
+                _ler_correcoes(job.id),
+                correcao_id,
                 aprovada,
                 motivo,
-                id=id_da_decisao(alvo.id),
-                job_id=job.id,
-                autor_uid=autor.uid,
-                autor_email=autor.email,
-                criada_em=relogio(),
+                job.id,
+                _autoria(autor),
             )
-            correcoes.acrescentar(decisao)
+            correcoes.acrescentar(registro)
+        except CorrecaoInexistente:
+            raise HTTPException(404, "Correção não encontrada") from None
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
-        return {"id": decisao.id}
+        return {"id": registro.id}
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/aprovar", status_code=201)
     def aprovar_correcao(

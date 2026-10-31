@@ -74,6 +74,7 @@ def executar(
         sha256=aceito.sha256,
         duracao_s=aceito.duracao_s,
         cortes_ms=aceito.cortes_ms,
+        timecode_origem=aceito.timecode_origem,
     )
 
 

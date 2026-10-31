@@ -21,11 +21,13 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
+from api.catalogo import PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.jobs import Job, ServicoIndisponivel
 from api.nuvem import (
     ArmazenamentoStorage,
+    CatalogoFirestore,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
@@ -684,3 +686,43 @@ class TestRepositorioDeCorrecoesFirestore:
 
         with pytest.raises(CorrecaoJaExiste):
             correcoes.acrescentar(self._correcao("c1", "j1", 2))
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestCatalogoFirestore:
+    @pytest.fixture
+    def catalogo(self) -> CatalogoFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return CatalogoFirestore(cliente, colecao=f"catalogo-{uuid.uuid4().hex}")
+
+    def test_acrescenta_obtem_e_acha_por_nome_ou_apelido(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        leao = catalogo.acrescentar("Leão Lobo", "apresentador", ["Leãozinho"])
+
+        assert catalogo.obter(leao.id) == leao
+        assert catalogo.achar("LEAO lobo") == [leao]
+        assert catalogo.achar("leaozinho") == [leao]
+        assert catalogo.achar("Outro") == []
+        assert catalogo.obter("inexistente") is None
+        assert catalogo.todas() == [leao]
+
+    def test_corrige_e_a_busca_acompanha(self, catalogo: CatalogoFirestore) -> None:
+        p = catalogo.acrescentar("Ana", "repórter", ["Aninha"])
+
+        nova = catalogo.corrigir(p.id, nome="Ana Souza", apelidos=[])
+
+        assert catalogo.obter(p.id) == nova
+        assert catalogo.achar("ana souza") == [nova]
+        assert catalogo.achar("Aninha") == []
+
+    def test_apaga_e_inexistente_falha(self, catalogo: CatalogoFirestore) -> None:
+        p = catalogo.acrescentar("Ana", "repórter", [])
+
+        catalogo.apagar(p.id)
+
+        assert catalogo.obter(p.id) is None
+        with pytest.raises(PessoaInexistente):
+            catalogo.apagar(p.id)
+        with pytest.raises(PessoaInexistente):
+            catalogo.corrigir(p.id, nome="X")

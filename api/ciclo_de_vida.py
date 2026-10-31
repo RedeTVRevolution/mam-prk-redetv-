@@ -51,6 +51,7 @@ def transitar(
     sha256: str | None = None,
     duracao_s: float | None = None,
     cortes_ms: Sequence[int] | None = None,
+    timecode_origem: str | None = None,
 ) -> Job | None:
     """O Job já em `para`, ou `None` se ele não estava mais em `de`."""
     if para not in TRANSICOES[de]:
@@ -64,6 +65,8 @@ def transitar(
         mudancas["duracao_s"] = duracao_s
     if cortes_ms is not None:
         mudancas["cortes_ms"] = list(cortes_ms)
+    if timecode_origem is not None:
+        mudancas["timecode_origem"] = timecode_origem
     return repositorio.transitar(job_id, de, mudancas)
 
 

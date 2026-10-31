@@ -19,7 +19,7 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api.analise import executar
 from api.auth import Usuario
-from api.decupagem import Decupagem
+from api.decupagem import Decupagem, Video
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Job, RepositorioDeJobs, RepositorioEmMemoria
 from api.main import criar_app as criar_app_web
@@ -60,6 +60,7 @@ class Ambiente:
         estado: str = "analisando",
         programa: str | None = None,
         cortes_ms: list[int] | None = None,
+        timecode_origem: str | None = None,
     ) -> Job:
         job = Job(
             id=job_id,
@@ -71,6 +72,7 @@ class Ambiente:
             criado_por="uid-1",
             programa=programa,
             cortes_ms=cortes_ms,
+            timecode_origem=timecode_origem,
             criado_em=BASE,
             atualizado_em=BASE,
         )
@@ -123,6 +125,21 @@ def test_sucesso_grava_a_decupagem_e_leva_o_job_a_concluido() -> None:
     chamada = ambiente.transporte.chamadas[0]
     assert chamada.video_uri == "gs://teste-aceitos/j1/proxy.mp4"
     assert chamada.rotulos == {"job_id": "j1"}
+
+
+def test_timecode_de_origem_do_job_vai_ao_bloco_video() -> None:
+    ambiente = _ambiente(BOA, BOA)
+    ambiente.registrar("j11", timecode_origem="01:00:00;00")
+    ambiente.registrar("j12")
+
+    _analisar(ambiente, "j11")
+    _analisar(ambiente, "j12")
+
+    def video(job_id: str) -> Video:
+        return Decupagem.model_validate_json(ambiente.decupagens.gravadas[job_id]).video
+
+    assert video("j11").timecode_origem == "01:00:00;00"
+    assert video("j12").timecode_origem is None
 
 
 def test_cortes_do_job_viram_os_planos_da_decupagem() -> None:

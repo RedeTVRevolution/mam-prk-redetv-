@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
+import catalogo from './catalogo.fixture.json'
 import Video from './Video.tsx'
 
 // Segue o esquema 1.2 (api/decupagem.py).
@@ -73,6 +74,8 @@ const item = (campos: Record<string, unknown>) => ({
   motivo: 'sobrenome completo',
   antes: 'Ana Souza',
   depois: 'Ana Souza Lima',
+  antes_legivel: 'Ana Souza',
+  depois_legivel: 'Ana Souza Lima',
   desfaz: null,
   estado: 'ativa',
   ...campos,
@@ -106,6 +109,8 @@ const handlersDoHistorico = [
               desfaz: 'c1',
               antes: 'Ana Souza Lima',
               depois: 'Ana Souza',
+              antes_legivel: 'Ana Souza Lima',
+              depois_legivel: 'Ana Souza',
               motivo: 'erro meu',
               criada_em: '2026-10-30T13:00:00Z',
             }),
@@ -160,6 +165,7 @@ const handlersDaFila = [
 ]
 
 const servidor = setupServer(
+  http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   ...handlersDoHistorico,
   ...handlersDaFila,
   http.get('/v1/jobs/j1/reproducao', ({ request }) => {
@@ -577,6 +583,13 @@ test('o botão baixa a decupagem em JSON', async () => {
   expect(JSON.parse(await blobs[0]!.text())).toEqual({ ...decupagem, versao_decupagem: 'v1' })
 })
 
+test('falha ao carregar o catálogo de correções mostra aviso', async () => {
+  servidor.use(http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 503 })))
+  await abrir({ estado: 'concluido' })
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Não foi possível')
+})
+
 test('falha ao carregar mostra aviso', async () => {
   statusDecupagem = 503
   await abrir({ estado: 'concluido' })
@@ -754,8 +767,8 @@ test('o histórico mostra um título com hífen como texto, e os tempos como mm:
   servidor.use(
     http.get('/v1/jobs/j1/correcoes', () =>
       HttpResponse.json([
-        item({ id: 'c2', tipo: 'pauta.titulo', item_id: 'pa1', antes: 'Eleição', depois: '2018-2022' }),
-        item({ id: 'c3', tipo: 'item.tempos', item_id: 'pa1', antes: '30000-60000', depois: '32000-60000' }),
+        item({ id: 'c2', tipo: 'pauta.titulo', item_id: 'pa1', antes: 'Eleição', depois: '2018-2022', antes_legivel: 'Eleição', depois_legivel: '2018-2022' }),
+        item({ id: 'c3', tipo: 'item.tempos', item_id: 'pa1', antes: '30000-60000', depois: '32000-60000', antes_legivel: '00:30–01:00', depois_legivel: '00:32–01:00' }),
       ]),
     ),
   )
@@ -769,7 +782,7 @@ test('o histórico mostra um título com hífen como texto, e os tempos como mm:
 test('o histórico mostra o tom com acento e o tom livre antigo como veio', async () => {
   servidor.use(
     http.get('/v1/jobs/j1/correcoes', () =>
-      HttpResponse.json([item({ id: 'c2', tipo: 'pauta.tom', item_id: 'pa1', antes: 'tenso', depois: 'analise' })]),
+      HttpResponse.json([item({ id: 'c2', tipo: 'pauta.tom', item_id: 'pa1', antes: 'tenso', depois: 'analise', antes_legivel: 'tenso', depois_legivel: 'análise' })]),
     ),
   )
   const usuario = userEvent.setup()

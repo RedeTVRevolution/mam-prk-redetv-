@@ -6,6 +6,7 @@ com um código. A saída das ferramentas nunca sai daqui.
 
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,10 +20,12 @@ CODECS_VIDEO = {"h264", "hevc"}
 LADO_CURTO_MAXIMO = 1080  # 1080p, também em retrato
 LADO_LONGO_MAXIMO = 1920
 DURACAO_MINIMA_S = 1.0
-DURACAO_MAXIMA_S = 600.0
-TEMPO_LIMITE_S = 900
+DURACAO_MAXIMA_S = 4 * 3600.0
+TEMPO_LIMITE_S = 7200
 NOME_DO_AUDIO = "audio.wav"
 TAXA_DO_AUDIO_HZ = 16_000
+# HH:MM:SS:FF, ou HH:MM:SS;FF no drop-frame.
+FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2}")
 
 
 class Recusa(Exception):
@@ -39,6 +42,7 @@ class Aceito:
     duracao_s: float
     audio: Path | None = None
     cortes_ms: tuple[int, ...] = ()
+    timecode_origem: str | None = None
 
 
 def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -104,7 +108,13 @@ def _conferir_faixas(sondagem: dict[str, Any]) -> None:
     faixas = sondagem.get("streams", [])
     videos = [f for f in faixas if f.get("codec_type") == "video"]
     audios = [f for f in faixas if f.get("codec_type") == "audio"]
-    if len(videos) != 1 or len(audios) > 1 or len(videos) + len(audios) != len(faixas):
+    # Faixas de dados (timecode, metadados) passam: não são decodificadas nem copiadas.
+    dados = [f for f in faixas if f.get("codec_type") == "data"]
+    if (
+        len(videos) != 1
+        or len(audios) > 1
+        or len(videos) + len(audios) + len(dados) != len(faixas)
+    ):
         raise Recusa("codec_nao_suportado")
     if videos[0].get("codec_name") not in CODECS_VIDEO:
         raise Recusa("codec_nao_suportado")
@@ -116,6 +126,20 @@ def _conferir_faixas(sondagem: dict[str, Any]) -> None:
         raise Recusa("codec_nao_suportado")
     if audios and audios[0].get("codec_name") != "aac":
         raise Recusa("codec_nao_suportado")
+
+
+def ler_timecode_origem(sondagem: dict[str, Any]) -> str | None:
+    """O timecode inicial da faixa `tmcd`; `None` sem a faixa ou fora do formato."""
+    for faixa in sondagem.get("streams", []):
+        if faixa.get("codec_type") != "data":
+            continue
+        if faixa.get("codec_tag_string") != "tmcd":
+            continue
+        tags = faixa.get("tags")
+        valor = tags.get("timecode") if isinstance(tags, dict) else None
+        if isinstance(valor, str) and FORMATO_DO_TIMECODE.fullmatch(valor):
+            return valor
+    return None
 
 
 def validar(
@@ -165,7 +189,15 @@ def validar(
         cortes = detectar_cortes(copia, limiar_de_cortes)
     except DeteccaoFalhou:
         raise _corrompido(copia, proxy, audio) from None
-    return Aceito(copia, proxy, _sha256(entrada), duracao, audio, tuple(cortes))
+    return Aceito(
+        copia_limpa=copia,
+        proxy=proxy,
+        sha256=_sha256(entrada),
+        duracao_s=duracao,
+        audio=audio,
+        cortes_ms=tuple(cortes),
+        timecode_origem=ler_timecode_origem(sondagem),
+    )
 
 
 def _corrompido(*gerados: Path | None) -> Recusa:

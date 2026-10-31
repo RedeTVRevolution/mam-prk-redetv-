@@ -41,6 +41,24 @@ variable "janelas_em_paralelo" {
   default = 4
 }
 
+variable "tolerancia_da_fala_ms" {
+  description = "Folga, em ms, entre o nome dito no Whisper e a pessoa na imagem para a fala provar o nome"
+  type        = number
+  default     = 2000
+}
+
+variable "validade_das_referencias_dias" {
+  description = "Dias em que uma foto de referência da web vale, a contar de quando foi obtida; depois disso é buscada de novo"
+  type        = number
+  default     = 180
+}
+
+variable "referencias_do_acervo" {
+  description = "\"ligado\" liga o uso das referências de rosto do acervo (caminho pronto, desligado por padrão)"
+  type        = string
+  default     = "desligado"
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -80,6 +98,7 @@ resource "google_project_service" "apis" {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "run.googleapis.com",
+    "secretmanager.googleapis.com",
     "storage.googleapis.com",
   ])
   service            = each.key
@@ -105,7 +124,7 @@ resource "google_firestore_database" "mam" {
 # de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
 # web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).
 locals {
-  sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro"]
+  sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro", "referencias"]
   buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
 }
 
@@ -133,7 +152,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "orquestracao", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "referencias", "orquestracao", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -148,6 +167,7 @@ resource "google_service_account" "mam" {
 # conector do Workflows acompanha a execução do Job pela operação, que é do projeto e
 # não do Job; sem ele, o passo `valida` falharia depois de o Job rodar e marcaria um
 # vídeo bom como arquivo_corrompido.
+# A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
   papeis_no_projeto = {
     web          = ["roles/datastore.user"]
@@ -155,6 +175,7 @@ locals {
     transcricao  = ["roles/datastore.user"]
     ocr          = ["roles/datastore.user"]
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
+    referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
     build = ["roles/logging.logWriter"]
@@ -172,6 +193,8 @@ locals {
     # (objectUser, porque cada janela sobrescreve o próprio objeto); a decupagem vai para o
     # bucket dela.
     analise = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectCreator" }
+    # Grava as fotos de referência.
+    referencias = { referencias = "roles/storage.objectUser" }
   }
 }
 
@@ -329,7 +352,13 @@ resource "google_cloud_run_v2_job" "validacao" {
       service_account = google_service_account.mam["validacao"].email
       # Nunca roda de novo um arquivo hostil.
       max_retries = 0
-      timeout     = "1800s"
+      # Medido (#135) com 120 s de vídeo sintético (854x480, H.264 a 2,3 Mbit/s e AAC,
+      # com ruído e movimento) em 8 vCPU: a validação inteira levou 7,6 s, 0,063 s por
+      # segundo de vídeo, ou ~910 s para 4 h. Na nuvem, com 4 vCPU, conto 3x: ~2730 s.
+      # 10800 s dá 4x de folga sobre essa conta (12x sobre a medida). O teto de 7200 s de
+      # cada chamada ao ffmpeg só pega um ffmpeg travado; as chamadas são em sequência, e
+      # quem limita o total é este timeout.
+      timeout = "10800s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -357,14 +386,17 @@ resource "google_cloud_run_v2_job" "validacao" {
           value = "/saida"
         }
         resources {
-          # ponytail: teto de 4 GiB por arquivo (TAMANHO_MAXIMO_PADRAO_BYTES). A cópia
-          # limpa tem o tamanho do original (até 4 GiB) e o proxy de 480p é bem menor
-          # (dezenas de MiB). O volume em memória conta na memória do contêiner:
-          # 4 GiB da cópia + 1 GiB do proxy e do ffmpeg, e 3 GiB de folga = 8 GiB.
+          # ponytail: teto de 4 GiB por arquivo (TAMANHO_MAXIMO_PADRAO_BYTES), 4 h.
+          # Medido (#135) em 120 s de vídeo: o proxy ficou em 51 MB (3,4 Mbit/s, com ruído,
+          # então pessimista) = 5,75 GiB para 4 h; o WAV, 3,8 MB = 0,43 GiB para 4 h; o pico
+          # de memória do ffmpeg, 164 MiB. O volume guarda 4 GiB da cópia limpa (o tamanho
+          # do original), 5,75 do proxy e 0,43 do áudio = 10,2 GiB: volume de 12 GiB
+          # (folga de 1,8). O volume em memória conta na memória do contêiner: 12 GiB mais
+          # ~1 GiB do ffmpeg e do Python, e a folga até 16 GiB, o teto de 4 vCPU.
           # 4 vCPU: o proxy do clipe2 caiu 26% de 2 para 4 threads, e 8 não ganharam nada.
           limits = {
             cpu    = "4"
-            memory = "8Gi"
+            memory = "16Gi"
           }
         }
         volume_mounts {
@@ -387,7 +419,7 @@ resource "google_cloud_run_v2_job" "validacao" {
         name = "saida"
         empty_dir {
           medium     = "MEMORY"
-          size_limit = "5Gi"
+          size_limit = "12Gi"
         }
       }
     }
@@ -409,7 +441,12 @@ resource "google_cloud_run_v2_job" "transcricao" {
     template {
       service_account = google_service_account.mam["transcricao"].email
       max_retries     = 0
-      timeout         = "3600s"
+      # NÃO medido (#135): o faster-whisper e o modelo só existem na imagem, e não há
+      # imagem nem rede onde este ticket foi feito. Estimativa: o large-v3-turbo em int8,
+      # em 8 vCPU, roda entre 0,5x e 1x o tempo real; 4 h de áudio levam de 2 h a 4 h.
+      # 21600 s (6 h) dá 1,5x de folga sobre o pior caso. Meça no dev com um programa
+      # de 4 h e ajuste (o conector do passo `transcreve` acompanha: 300 s a mais).
+      timeout = "21600s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -433,8 +470,9 @@ resource "google_cloud_run_v2_job" "transcricao" {
           value = "/saida"
         }
         resources {
-          # O modelo large-v3-turbo em int8 cabe em poucos GiB; o áudio de até 10 min
-          # em WAV mono de 16 kHz tem ~19 MiB.
+          # O modelo large-v3-turbo em int8 cabe em poucos GiB. O áudio de 4 h em WAV mono
+          # de 16 kHz tem 0,43 GiB (medido: 3,8 MB por 120 s) e o faster-whisper o carrega
+          # inteiro em float32, ~0,9 GiB: 16 GiB sobram.
           limits = {
             cpu    = "8"
             memory = "16Gi"
@@ -449,7 +487,7 @@ resource "google_cloud_run_v2_job" "transcricao" {
         name = "saida"
         empty_dir {
           medium     = "MEMORY"
-          size_limit = "1Gi"
+          size_limit = "2Gi"
         }
       }
     }
@@ -471,7 +509,12 @@ resource "google_cloud_run_v2_job" "ocr" {
     template {
       service_account = google_service_account.mam["ocr"].email
       max_retries     = 0
-      timeout         = "3600s"
+      # NÃO medido (#135): o PaddleOCR e os modelos só existem na imagem. Estimativa: o
+      # detector server em CPU de 8 vCPU lê um quadro de 480p em 0,3 s a 1,5 s; 4 h são
+      # 14.400 quadros, de 1,2 h a 6 h. 28800 s (8 h) dá 1,3x de folga sobre o pior caso.
+      # A extração dos quadros pelo ffmpeg é desprezível (120 s de vídeo em 2 s). Meça no
+      # dev com um programa de 4 h (o conector do passo `le_a_tela` acompanha).
+      timeout = "28800s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -489,14 +532,18 @@ resource "google_cloud_run_v2_job" "ocr" {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }
-        # O proxy baixado e os quadros vão para o volume em memória; o Paddle grava o cache no HOME (/saida).
+        # O proxy baixado e os quadros de um trecho vão para o volume em memória; o Paddle grava o cache no HOME (/saida).
         env {
           name  = "TMPDIR"
           value = "/saida"
         }
         resources {
-          # Os modelos do PaddleOCR em CPU; os quadros de 480p de até 10 min em PNG
-          # (~600 arquivos) cabem no volume.
+          # Os modelos do PaddleOCR em CPU. No volume: o proxy de 4 h, 5,75 GiB (medido, com
+          # ruído: pessimista), e os quadros de um trecho de 600 s, que se apagam antes do
+          # trecho seguinte (api/quadros.py): 600 PNG de 367 KB (medidos, 854x480 com
+          # ruído) = 0,21 GiB. Com o cache do Paddle, ~6,5 GiB: volume de 8 GiB. Os 14.400
+          # quadros juntos seriam 5 GiB a mais e não caberiam. Memória: os 8 GiB do volume
+          # mais ~4 GiB do Paddle e do Python, e a folga até 16 GiB.
           limits = {
             cpu    = "8"
             memory = "16Gi"
@@ -511,7 +558,7 @@ resource "google_cloud_run_v2_job" "ocr" {
         name = "saida"
         empty_dir {
           medium     = "MEMORY"
-          size_limit = "2Gi"
+          size_limit = "8Gi"
         }
       }
     }
@@ -544,7 +591,7 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda" {
 }
 
 # Job de análise (#127): a mesma imagem do web, com outro comando. Um Job, e não um
-# serviço chamado por HTTP, porque a análise de um programa de 2–3 h passa do teto de
+# serviço chamado por HTTP, porque a análise de um programa de até 4 h passa do teto de
 # 1800 s da chamada HTTP do Workflows; o conector do Workflows espera o Job terminar. As
 # janelas rodam até `janelas_em_paralelo` ao mesmo tempo e o progresso fica gravado no
 # bucket de aceitos: sem nova tentativa do Cloud Run, uma nova execução do mesmo Job retoma.
@@ -558,11 +605,27 @@ resource "google_cloud_run_v2_job" "analise" {
     template {
       service_account = google_service_account.mam["analise"].email
       max_retries     = 0
-      timeout         = "14400s"
+      # 4 h são 48 janelas de 5 min; com `janelas_em_paralelo` = 4, 12 rodadas. Cada janela
+      # desiste em 1500 s (PRAZO_DA_ANALISE_S): o pior caso é 12 x 1500 = 18000 s. 21600 s
+      # (6 h) cobre o pior caso com 1,2x de folga; o caso comum, de 1 a 3 min por janela,
+      # leva de 12 a 36 min. Com um paralelismo menor o pior caso sobe: refaça a conta.
+      timeout = "21600s"
       containers {
         image   = var.imagem
         command = ["python"]
         args    = ["-m", "api.analise"]
+        resources {
+          # Sem volume: o proxy vai ao Gemini pela URI do bucket, sem baixar. Na memória
+          # ficam a transcrição e a leitura da tela de 4 h (14.400 quadros), as janelas
+          # concluídas e a decupagem: dezenas de MiB em JSON, algumas centenas em objetos
+          # Python, mais ~300 MiB do Python e dos clientes do Google. NÃO medido (#135):
+          # 2 GiB dá ~3x de folga sobre essa conta; o padrão do Cloud Run, 512 MiB, não.
+          # 1 vCPU: o trabalho é esperar o Gemini.
+          limits = {
+            cpu    = "1"
+            memory = "2Gi"
+          }
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -579,6 +642,10 @@ resource "google_cloud_run_v2_job" "analise" {
           name  = "JANELAS_EM_PARALELO"
           value = tostring(var.janelas_em_paralelo)
         }
+        env {
+          name  = "TOLERANCIA_DA_FALA_MS"
+          value = tostring(var.tolerancia_da_fala_ms)
+        }
       }
     }
   }
@@ -591,6 +658,73 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_analise" {
   location = google_cloud_run_v2_job.analise.location
   role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
+}
+
+# Job de referências de rosto (#111, ADR 0005): o único com internet (sem vpc_access),
+# por isso só recebe nomes (NOMES, em JSON, e PROGRAMA) e nunca quadros do vídeo. Busca
+# fotos pelo SerpAPI, o Gemini as confere e as guarda no bucket de referências.
+# A chave do SerpAPI fica no Secret Manager: o Terraform cria o segredo vazio (aditivo,
+# ADR 0002) e a versão com a chave é posta à mão; só este Job a lê.
+resource "google_secret_manager_secret" "serpapi" {
+  secret_id = "mam-serpapi"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_iam_member" "referencias_le_serpapi" {
+  secret_id = google_secret_manager_secret.serpapi.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.mam["referencias"].member
+}
+
+resource "google_cloud_run_v2_job" "referencias" {
+  name                = "mam-referencias"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["referencias"].email
+      max_retries     = 0
+      # Poucos nomes por execução: cada um é uma busca, dez miniaturas no máximo e uma chamada ao Gemini.
+      timeout = "1800s"
+      containers {
+        image   = var.imagem
+        command = ["python"]
+        args    = ["-m", "api.referencias_job"]
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "1Gi"
+          }
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_REFERENCIAS"
+          value = local.buckets["referencias"]
+        }
+        env {
+          name  = "SEGREDO_DO_SERPAPI"
+          value = google_secret_manager_secret.serpapi.id
+        }
+        env {
+          name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
+          value = tostring(var.validade_das_referencias_dias)
+        }
+        env {
+          name  = "REFERENCIAS_DO_ACERVO"
+          value = var.referencias_do_acervo
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
 # Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise.

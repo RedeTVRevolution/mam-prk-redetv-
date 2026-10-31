@@ -22,12 +22,15 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.analise_por_janelas import analisar_video
+from api.catalogo import Catalogo
 from api.ciclo_de_vida import transitar
 from api.decupagem import Video
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
+from api.identificacao import TOLERANCIA_DA_FALA_MS
 from api.jobs import RepositorioDeJobs, agora_utc
 from api.leitura_da_tela import LeituraDaTela
 from api.nuvem import (
+    CatalogoFirestore,
     DecupagensStorage,
     JanelasStorage,
     LeiturasStorage,
@@ -67,6 +70,8 @@ def executar(
     leituras: LeiturasDaAnalise | None = None,
     janelas_do_job: JanelasDoJob | None = None,
     max_paralelas: int = 1,
+    catalogo: Catalogo | None = None,
+    tolerancia_da_fala_ms: int = TOLERANCIA_DA_FALA_MS,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
 ) -> str:
@@ -95,11 +100,17 @@ def executar(
             job_id=job.id,
             programa=job.programa,
             cortes_ms=job.cortes_ms or (),
-            video=Video(sha256=job.sha256, duracao_ms=round(job.duracao_s * 1000)),
+            video=Video(
+                sha256=job.sha256,
+                duracao_ms=round(job.duracao_s * 1000),
+                timecode_origem=job.timecode_origem,
+            ),
             transcricao=transcricoes.ler_transcricao(job.id) if transcricoes else None,
             leitura=leituras.ler_leitura(job.id) if leituras else None,
             max_paralelas=max_paralelas,
             janelas_do_job=janelas_do_job,
+            catalogo=catalogo,
+            tolerancia_da_fala_ms=tolerancia_da_fala_ms,
             dormir=dormir,
         )
     except AnaliseFalhou:
@@ -131,6 +142,10 @@ def main() -> None:
         LeiturasStorage(ClienteStorage(project=projeto), aceitos),
         JanelasStorage(ClienteStorage(project=projeto), aceitos),
         max_paralelas=int(os.environ["JANELAS_EM_PARALELO"]),
+        catalogo=CatalogoFirestore(firestore.Client(project=projeto)),
+        tolerancia_da_fala_ms=int(
+            os.environ.get("TOLERANCIA_DA_FALA_MS", TOLERANCIA_DA_FALA_MS)
+        ),
     )
 
 

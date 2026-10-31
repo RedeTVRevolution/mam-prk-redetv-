@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from api import ocr_job
 from api.jobs import Estado, Job, RepositorioEmMemoria
 from api.leitura_da_tela import (
     Caixa,
@@ -19,7 +20,7 @@ from api.leitura_da_tela import (
 )
 from api.ocr_job import executar
 from api.paddle import DETECTOR, RECONHECEDOR, LeitorPaddle
-from api.quadros import FalhaNosQuadros, tirar_quadros
+from api.quadros import FalhaNosQuadros, quadros_por_trecho, tirar_quadros
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 sem_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
@@ -145,6 +146,101 @@ def test_o_quadro_do_segundo_e_o_do_instante_exato(tmp_path: Path) -> None:
         for q in quadros
     ]
     assert [round(b / 7) for b in brilhos] == [0, 10, 20, 30]
+
+
+def _brilho(quadro: Path) -> int:
+    return round(
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(quadro),
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "gray",
+                "-",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout[100]
+        / 3
+    )
+
+
+def _video_de_brilho_por_quadro(destino: Path, segundos: float) -> None:
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+            "-i", "color=black:s=16x16:r=10,format=gray,geq=lum='N*3'",
+            "-t", str(segundos), "-c:v", "libx264", "-qp", "0",
+            "-pix_fmt", "yuv420p", str(destino),
+        ],
+        check=True,
+    )  # fmt: skip
+
+
+@sem_ffmpeg
+def test_trechos_dao_os_mesmos_quadros_do_video_inteiro(tmp_path: Path) -> None:
+    video = tmp_path / "v.mp4"
+    _video_de_brilho_por_quadro(video, 7.4)
+
+    por_trecho = [
+        (inicio + i, _brilho(q))
+        for inicio, quadros in quadros_por_trecho(video, tmp_path / "q", trecho_s=3)
+        for i, q in enumerate(quadros)
+    ]
+
+    inteiro = [_brilho(q) for q in tirar_quadros(video, tmp_path / "inteiro")]
+    assert [s for s, _ in por_trecho] == list(range(8))
+    assert [b for _, b in por_trecho] == inteiro
+    assert inteiro == sorted(set(inteiro))  # cada segundo é um quadro diferente
+
+
+@sem_ffmpeg
+def test_os_quadros_nao_se_acumulam_alem_de_um_trecho(tmp_path: Path) -> None:
+    video = tmp_path / "v.mp4"
+    _video_de_brilho_por_quadro(video, 9.4)
+    pasta = tmp_path / "q"
+
+    no_volume = []
+    for _, quadros in quadros_por_trecho(video, pasta, trecho_s=3):
+        no_volume.append(len(list(pasta.glob("*.png"))))
+        assert len(quadros) <= 3
+
+    assert no_volume == [3, 3, 3, 1]
+    assert not pasta.exists()
+
+
+@sem_ffmpeg
+def test_video_multiplo_do_trecho_nao_deixa_trecho_vazio(tmp_path: Path) -> None:
+    video = tmp_path / "v.mp4"
+    _video_de_brilho_por_quadro(video, 5.9)
+
+    trechos = list(quadros_por_trecho(video, tmp_path / "q", trecho_s=3))
+
+    assert [(inicio, len(q)) for inicio, q in trechos] == [(0, 3), (3, 3)]
+
+
+@sem_ffmpeg
+def test_job_lê_o_segundo_certo_com_mais_de_um_trecho(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        ocr_job, "quadros_por_trecho", lambda v, p: quadros_por_trecho(v, p, trecho_s=2)
+    )
+    repositorio = _repositorio()
+    porta = LeiturasEmMemoria({"j1": _video(tmp_path / "origem.mp4", 4.4)})
+    pasta = tmp_path / "saida"
+    pasta.mkdir()
+
+    executar("j1", repositorio, porta, LeitorFalso(), pasta)
+
+    leitura = porta.ler_leitura("j1")
+    assert leitura is not None
+    assert [q.segundo for q in leitura.quadros] == [0, 1, 2, 3, 4]
 
 
 @sem_ffmpeg

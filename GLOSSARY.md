@@ -34,6 +34,17 @@ Contexto fixo de um programa (apresentadores, repórteres, merchandising frequen
 
 ### Pessoas e evidência
 
+**Catálogo de pessoas**:
+Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel, apelidos e as referências de rosto ligadas a ela (origem `web` ou `acervo`). Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
+_Evitar_: base de famosos
+
+**Nome confirmado / palpite**:
+`Pessoa.estado_do_nome`. Confirmado é o nome com uma prova que o código conferiu (`api/identificacao.py`): um GC ou tarja com o nome ou apelido, ou o nome ou apelido dito no texto original do Whisper, enquanto a pessoa está na imagem e sem outra pessoa sem nome na imagem no mesmo intervalo. O nome que o modelo deu sem prova conferida é palpite. Estar no perfil ou no catálogo torna a pessoa candidata e não confirma nome; `contexto` não é prova. A correção da revisora (`origem` `revisao`) vale mais e nenhum reprocessamento a sobrescreve.
+_Evitar_: aceitar `fontes_do_nome` como declarada pelo modelo
+
+**Modelo forte**:
+O 3.8 Flash (`api/modelo_forte.py`), que olha cada pessoa "não identificado" depois da análise: as de mesma descrição são uma pessoa só, uma chamada cada (até um limite por vídeo, as de mais tempo na imagem primeiro), com 2 ou 3 quadros das aparições mais longas da cópia limpa e todas as pistas do vídeo. O nome que ele dá passa pela conferência de provas: com prova é `confirmado` (origem `modelo_forte`), sem prova é `palpite`. Nunca identifica pela memória.
+
 **Aparição**:
 Pessoa visível na imagem; só ela conta como tempo de tela.
 
@@ -49,14 +60,11 @@ A prova que confirma o nome de uma pessoa, conferida pelo código: GC, fala ou r
 
 **Referência de rosto**:
 Foto de uma pessoa nomeada, guardada para comparar com o rosto da tela: 3 fotos diferentes por nome, buscadas na web, com a página de origem.
+Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet: recebe só nomes (`NOMES`, `PROGRAMA`), lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo (nome fora do catálogo ou ambíguo não busca). O `make carregar-catalogo` não apaga os rostos já guardados.
 _Evitar_: galeria facial
 
 **Palpite**:
 Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
-
-**Catálogo de pessoas**:
-Nomes, papéis e apelidos das pessoas frequentes da emissora, em todos os programas. Começa à mão e cresce com as correções e sugestões aprovadas. Não guarda rostos: as fotos são as referências de rosto.
-_Evitar_: base de famosos
 
 ### Busca
 
@@ -72,8 +80,12 @@ Algo detectado num momento: pessoa, marca, objeto ou pauta.
 Lugar onde um vídeo enviado espera a validação; nada é processado a partir dela.
 
 **Cópia limpa**:
-O MP4 aceito pela quarentena, regravado só com as faixas de vídeo e áudio, sem metadados e sem recodificar. É dele que todo o processamento parte.
+O MP4 aceito pela quarentena, regravado só com as faixas de vídeo e áudio (as faixas de dados, como a de timecode, ficam de fora), sem metadados e sem recodificar. É dele que todo o processamento parte.
 _Evitar_: cópia limpa 720p, original tratado
+
+**Timecode de origem**:
+O timecode inicial lido da faixa de timecode do arquivo enviado, guardado no Job e levado ao bloco `video` da Decupagem. Ausente quando o arquivo não tem a faixa.
+_Evitar_: timecode inventado, 00:00:00:00 por padrão
 
 **Proxy de escalonamento**:
 Cópia do vídeo em resolução maior, usada só para reanalisar trechos no escalonamento.

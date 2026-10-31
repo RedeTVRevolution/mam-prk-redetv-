@@ -5,6 +5,7 @@ tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levant
 `AnaliseFalhou`, nunca devolve decupagem parcial.
 """
 
+import base64
 import json
 import time
 from collections.abc import Callable
@@ -36,8 +37,8 @@ BACKOFF_BASE_S = 1.0
 BACKOFF_TETO_S = 60.0
 TIMEOUT_DO_FLEX_S = 600  # o Flex pode demorar; o servidor também desiste aos 600 s
 TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
-# O Workflows e o Cloud Run desistem aos 1800 s: uma tentativa só começa se cabe
-# inteira neste prazo, com folga para gravar a decupagem e o Job.
+# Prazo de cada janela: uma tentativa só começa se cabe inteira nele. O `timeout` do
+# Job de análise (infra/main.tf) é dimensionado por ele; se mudar, refaça aquela conta.
 PRAZO_DA_ANALISE_S = 1500
 
 # Texto aprovado no diagnóstico do clipe3. `{programa}` e `{perfil_do_programa}`
@@ -127,6 +128,12 @@ class Chamada:
     # Trecho do vídeo (`videoMetadata.startOffset`/`endOffset`), em ms do início
     # do arquivo; sem ele, o vídeo inteiro. O modelo conta os tempos do arquivo.
     trecho_ms: tuple[int, int] | None = None
+    # JPEGs que seguem no lugar do vídeo (identificação pelo modelo forte, `video_uri`
+    # vazio); essa chamada é Standard, sem o Flex da análise por janelas.
+    imagens: tuple[bytes, ...] = ()
+    # Texto no lugar do vídeo (extração de nomes do Job de referências, `video_uri`
+    # vazio); também Standard. Com `imagens`, o texto segue as imagens.
+    texto: str = ""
 
 
 def _duracao(ms: int) -> str:
@@ -174,25 +181,40 @@ class TransporteVertex:
             f"{self._projeto}/locations/global/publishers/google/models/"
             f"{chamada.modelo}:generateContent"
         )
-        metadados: dict[str, Any] = {"fps": 1}
-        if chamada.trecho_ms is not None:
-            inicio_ms, fim_ms = chamada.trecho_ms
-            metadados["startOffset"] = _duracao(inicio_ms)
-            metadados["endOffset"] = _duracao(fim_ms)
+        partes_do_pedido: list[dict[str, Any]]
+        if chamada.imagens or chamada.texto:
+            partes_do_pedido = [
+                {
+                    "inlineData": {
+                        "mimeType": "image/jpeg",
+                        "data": base64.b64encode(imagem).decode(),
+                    }
+                }
+                for imagem in chamada.imagens
+            ]
+            if chamada.texto:
+                partes_do_pedido.append({"text": chamada.texto})
+        else:
+            metadados: dict[str, Any] = {"fps": 1}
+            if chamada.trecho_ms is not None:
+                inicio_ms, fim_ms = chamada.trecho_ms
+                metadados["startOffset"] = _duracao(inicio_ms)
+                metadados["endOffset"] = _duracao(fim_ms)
+            partes_do_pedido = [
+                {
+                    "fileData": {
+                        "mimeType": "video/mp4",
+                        "fileUri": chamada.video_uri,
+                    },
+                    "videoMetadata": metadados,
+                }
+            ]
         corpo = {
             "systemInstruction": {"parts": [{"text": chamada.instrucao}]},
             "contents": [
                 {
                     "role": "user",
-                    "parts": [
-                        {
-                            "fileData": {
-                                "mimeType": "video/mp4",
-                                "fileUri": chamada.video_uri,
-                            },
-                            "videoMetadata": metadados,
-                        }
-                    ],
+                    "parts": partes_do_pedido,
                 }
             ],
             "generationConfig": {
@@ -202,11 +224,15 @@ class TransporteVertex:
             "labels": chamada.rotulos,
         }
         # Só Flex, sem Provisioned Throughput antes (doc "Flex PayGo" da Vertex).
-        cabecalhos = {
-            "X-Vertex-AI-LLM-Request-Type": "shared",
-            "X-Vertex-AI-LLM-Shared-Request-Type": "flex",
-            "X-Server-Timeout": str(TIMEOUT_DO_FLEX_S),
-        }
+        cabecalhos = (
+            {}
+            if chamada.imagens or chamada.texto
+            else {
+                "X-Vertex-AI-LLM-Request-Type": "shared",
+                "X-Vertex-AI-LLM-Shared-Request-Type": "flex",
+                "X-Server-Timeout": str(TIMEOUT_DO_FLEX_S),
+            }
+        )
         try:
             resposta = self._sessao.post(
                 url, json=corpo, headers=cabecalhos, timeout=TIMEOUT_DA_REDE_S
@@ -252,6 +278,41 @@ def _validar(texto: str, video: Video) -> Decupagem:
     )
 
 
+def gerar_validado[T](
+    transporte: Transporte,
+    chamada: Chamada,
+    validar: Callable[[str], T],
+    *,
+    dormir: Callable[[float], None] = time.sleep,
+    sortear: Callable[[float], float] = sorteio_uniforme,
+    relogio: Callable[[], float] = time.monotonic,
+) -> T:
+    """Chama o transporte e valida a resposta com `validar` (que levanta `ValueError`),
+    com as tentativas de rede e de esquema, dentro do prazo. Esgotados, `AnaliseFalhou`."""
+    falhas_rede = 0
+    falhas_esquema = 0
+    inicio = relogio()
+    while True:
+        if relogio() - inicio + TIMEOUT_DA_REDE_S > PRAZO_DA_ANALISE_S:
+            raise AnaliseFalhou()
+        try:
+            texto = transporte.gerar(chamada)
+        except ErroHttp as e:
+            if not _repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
+                raise AnaliseFalhou() from e
+            dormir(
+                espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)
+            )
+            falhas_rede += 1
+            continue
+        try:
+            return validar(texto)
+        except ValueError as e:
+            if falhas_esquema >= TENTATIVAS_ESQUEMA:
+                raise AnaliseFalhou() from e
+            falhas_esquema += 1
+
+
 def analisar(
     transporte: Transporte,
     *,
@@ -274,27 +335,12 @@ def analisar(
         rotulos={"job_id": job_id},
         trecho_ms=trecho_ms,
     )
-    falhas_rede = 0
-    falhas_esquema = 0
-    inicio = relogio()
-    while True:
-        if relogio() - inicio + TIMEOUT_DA_REDE_S > PRAZO_DA_ANALISE_S:
-            raise AnaliseFalhou()
-        try:
-            texto = transporte.gerar(chamada)
-        except ErroHttp as e:
-            if not _repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
-                raise AnaliseFalhou() from e
-            dormir(
-                espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)
-            )
-            falhas_rede += 1
-            continue
-        try:
-            decupagem = _validar(texto, video)
-        except ValueError as e:
-            if falhas_esquema >= TENTATIVAS_ESQUEMA:
-                raise AnaliseFalhou() from e
-            falhas_esquema += 1
-            continue
-        return aplicar_transcricao(decupagem, transcricao, limiar_de_semelhanca)
+    decupagem = gerar_validado(
+        transporte,
+        chamada,
+        lambda texto: _validar(texto, video),
+        dormir=dormir,
+        sortear=sortear,
+        relogio=relogio,
+    )
+    return aplicar_transcricao(decupagem, transcricao, limiar_de_semelhanca)

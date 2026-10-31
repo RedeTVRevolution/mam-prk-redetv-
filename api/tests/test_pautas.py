@@ -9,17 +9,17 @@ from api.correcoes import (
     TemposInvalidos,
     aplicar,
     fila,
-    montar_reaplicacao,
+    reaplicar,
     reconciliar,
 )
 from api.tests.test_correcoes import (
+    _AUTORIA,
     AUTORIZACAO,
     BASE,
     MODELO,
     VERSAO,
     Mundo,
     _pauta,
-    _registro,
 )
 
 
@@ -294,9 +294,7 @@ def test_reaplicar_tempos_alem_da_duracao_do_video_novo_e_recusado() -> None:
     original = _antiga("item.tempos", "0-30000")
 
     with pytest.raises(TemposInvalidos):
-        montar_reaplicacao(
-            novo, "nova", original, [original], "n2", "é B", **_registro()
-        )
+        reaplicar(novo, "nova", [original], original.id, "n2", "é B", "j1", _AUTORIA)
 
 
 def test_reaplicar_pauta_na_fila_escolhe_um_candidato() -> None:
@@ -305,9 +303,7 @@ def test_reaplicar_pauta_na_fila_escolhe_um_candidato() -> None:
     )
     original = _antiga()
 
-    nova = montar_reaplicacao(
-        novo, "nova", original, [original], "n2", "é B", **_registro()
-    )
+    nova = reaplicar(novo, "nova", [original], original.id, "n2", "é B", "j1", _AUTORIA)
 
     assert (nova.tipo, nova.reaplica, nova.item_id) == ("pauta.titulo", "c1", "n2")
     assert (nova.antes, nova.depois) == ("Economia B", "Economia hoje")

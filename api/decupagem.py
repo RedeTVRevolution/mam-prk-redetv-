@@ -1,4 +1,4 @@
-"""Esquema 1.2 da decupagem.
+"""Esquema 1.3 da decupagem (aceita as anteriores: 1.2 continua válido).
 
 Um modelo só: dele saem a saída estruturada pedida ao Gemini
 (`esquema_do_modelo()`), a validação da resposta e o tipo do OpenAPI.
@@ -11,10 +11,10 @@ os tempos saíam como 124 para 01:24 (clipe3).
 import re
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-VersaoEsquema = Literal["1.2"]
-VERSAO_ESQUEMA: VersaoEsquema = "1.2"  # o mypy cobra se o tipo mudar sozinho
+VersaoEsquema = Literal["1.2", "1.3"]
+VERSAO_ESQUEMA: VersaoEsquema = "1.3"  # o mypy cobra se o tipo mudar sozinho
 
 Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]
@@ -104,7 +104,11 @@ class MencaoNoTexto(_Intervalo):
     texto: Texto = Field(description="O texto na tela que cita a pessoa.")
 
 
-FonteDoNome = Literal["rosto", "gc", "fala", "contexto"]
+# `contexto` não é prova (ADR 0005): as versões anteriores a gravaram, e o
+# validador de `Pessoa` a descarta ao ler.
+FonteDoNome = Literal["rosto", "gc", "fala", "referencia"]
+FONTES_ANTIGAS = frozenset({"contexto"})
+EstadoDoNome = Literal["confirmado", "palpite"]
 
 
 class Pessoa(_Estrito):
@@ -115,10 +119,15 @@ class Pessoa(_Estrito):
     )
     fontes_do_nome: list[FonteDoNome] = Field(
         default=[],
-        description="O que sustenta o nome: rosto, GC ou tarja, fala, contexto. "
+        description="O que sustenta o nome: rosto, GC ou tarja, fala, referência. "
         'Vazia para "não identificado".',
     )
-    origem: Literal["modelo", "revisao"] = "modelo"
+    origem: Literal["modelo", "modelo_forte", "revisao"] = "modelo"
+    # O servidor grava: `confirmado` com a prova conferida pelo código, `palpite`
+    # sem ela. Vazio onde a identificação não rodou.
+    estado_do_nome: EstadoDoNome | None = None
+    # A pessoa do catálogo (#108); o servidor grava, o modelo não conhece.
+    catalogo_id: Id | None = None
     na_imagem: list[Aparicao] = Field(
         description="Aparições: a pessoa visível na imagem. Foto num gráfico, logo "
         "ou QR code não é aparição."
@@ -129,6 +138,13 @@ class Pessoa(_Estrito):
     citada_no_texto: list[MencaoNoTexto] = Field(
         description="Nome em texto na tela sem a pessoa aparecer."
     )
+
+    @field_validator("fontes_do_nome", mode="before")
+    @classmethod
+    def _sem_fontes_antigas(cls, fontes: Any) -> Any:
+        if isinstance(fontes, list):
+            return [f for f in fontes if f not in FONTES_ANTIGAS]
+        return fontes
 
 
 class Plano(_Intervalo):
@@ -279,6 +295,8 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "inicio_modelo_ms",
         "fim_modelo_ms",
         "origem",
+        "estado_do_nome",
+        "catalogo_id",
         "quadro",
         "texto_original",
         "medido",

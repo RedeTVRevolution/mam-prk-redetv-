@@ -20,9 +20,7 @@ def _perfil(dados: dict[str, Any]) -> str:
     return "\n".join(linhas)
 
 
-PERFIS: dict[str, str] = {
-    nome: _perfil(dados)
-    for nome, dados in tomllib.loads(
-        (Path(__file__).parent / "programas.toml").read_text()
-    ).items()
-}
+DADOS: dict[str, dict[str, Any]] = tomllib.loads(
+    (Path(__file__).parent / "programas.toml").read_text()
+)
+PERFIS: dict[str, str] = {nome: _perfil(dados) for nome, dados in DADOS.items()}
