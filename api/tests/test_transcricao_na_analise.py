@@ -5,6 +5,7 @@ respostas em MM:SS como a Vertex.
 """
 
 import json
+import re
 from typing import Any
 
 from api.analise_por_janelas import analisar_video
@@ -264,6 +265,65 @@ def test_cada_janela_recebe_so_o_trecho_da_transcricao_que_cabe_nela() -> None:
     for chamada in modelo.chamadas:
         assert chamada.trecho_ms is not None
         k = chamada.trecho_ms[0] // 300_000 + (1 if chamada.trecho_ms[0] else 0)
-        assert f"palavra{k}" in chamada.instrucao
-        outras = [f"palavra{n} " for n in range(30) if n != k]
-        assert not any(o in chamada.instrucao + " " for o in outras)
+        assert set(re.findall(r"palavra\d+", chamada.instrucao)) == {f"palavra{k}"}
+
+
+def test_correcao_mantem_a_pontuacao_que_o_whisper_cola_na_palavra() -> None:
+    trans = transcricao(
+        ("A", 10.0, 10.2), ("Corassa,", 10.3, 10.9), ("sim", 11.0, 11.4)
+    )
+    d = decupar(
+        modelo_responde(
+            textos_na_tela=[gc("Andréa Corazza", 8, 20)],
+            correcoes_da_transcricao=[correcao("Corassa", "Corazza", "Andréa Corazza")],
+        ),
+        trans,
+    )
+
+    [c] = d.correcoes_da_transcricao
+    assert c.original == "Corassa,"
+    assert d.transcricao[0].texto == "A Corazza, sim"
+    assert d.transcricao[0].texto_original == "A Corassa, sim"
+
+
+def test_palavra_logo_depois_do_fim_em_segundos_fica_com_o_trecho() -> None:
+    trans = transcricao(("A", 10.0, 10.2), ("sim", 12.1, 12.5))
+    d = decupar(
+        modelo_responde(
+            transcricao=[{"locutor": "Ana", "texto": "", **t(10, 12)}],
+        ),
+        trans,
+    )
+
+    [fala] = d.transcricao
+    assert (fala.locutor, fala.texto) == ("Ana", "A sim")
+
+
+def test_cada_palavra_vai_para_o_trecho_mais_perto() -> None:
+    trans = transcricao(("um", 10.0, 10.4), ("dois", 11.6, 12.0))
+    d = decupar(
+        modelo_responde(
+            transcricao=[
+                {"locutor": "Ana", "texto": "", **t(10, 11)},
+                {"locutor": "Beto", "texto": "", **t(12, 13)},
+            ],
+        ),
+        trans,
+    )
+
+    assert [(f.locutor, f.texto) for f in d.transcricao] == [
+        ("Ana", "um"),
+        ("Beto", "dois"),
+    ]
+
+
+def test_fala_longa_demais_vira_mais_de_uma() -> None:
+    trans = transcricao(*[("palavra", k * 0.1, k * 0.1 + 0.05) for k in range(400)])
+    d = decupar(
+        modelo_responde(transcricao=[{"locutor": "Ana", "texto": "", **t(0, 40)}]),
+        trans,
+    )
+
+    assert len(d.transcricao) == 2
+    assert all(f.locutor == "Ana" and len(f.texto) <= 2000 for f in d.transcricao)
+    assert sum(len(f.texto.split()) for f in d.transcricao) == 400

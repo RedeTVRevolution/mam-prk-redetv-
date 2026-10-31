@@ -7,7 +7,7 @@ registrado naquele momento, que a contém); as outras são descartadas e
 registradas. O texto original do Whisper fica ao lado do corrigido.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from difflib import SequenceMatcher
 
 from api.comparador import normalizar
@@ -26,21 +26,35 @@ LIMIAR_DE_SEMELHANCA = 0.7
 FOLGA_MS = 1_000  # o modelo escreve os tempos em segundos inteiros
 _TAMANHO_MINIMO_DO_NOME = 3
 NAO_IDENTIFICADO = "não identificado"
+_PONTUACAO = ".,;:!?…\"'()"
+_CARACTERES_POR_FALA = 2000  # o limite de `Texto` em decupagem.py
 
 
 def _ms(segundos: float) -> int:
     return round(segundos * 1000)
 
 
+def _meio_ms(p: Palavra) -> float:
+    return (_ms(p.inicio_s) + _ms(p.fim_s)) / 2
+
+
+def _nucleo(texto: str) -> str:
+    """A palavra normalizada, sem a pontuação que o Whisper cola nela."""
+    return normalizar(texto).strip(_PONTUACAO)
+
+
+def _trocar(palavra: str, corrigida: str) -> str:
+    """Troca a palavra e mantém a pontuação em volta ("Corassa," → "Corazza,")."""
+    inicio = len(palavra) - len(palavra.lstrip(_PONTUACAO))
+    fim = len(palavra.rstrip(_PONTUACAO))
+    return palavra[:inicio] + corrigida.strip(_PONTUACAO) + palavra[fim:]
+
+
 def _palavras_em(
     palavras: Sequence[Palavra], inicio_ms: int, fim_ms: int
 ) -> list[Palavra]:
     return [
-        p
-        for p in palavras
-        if inicio_ms - FOLGA_MS
-        <= (_ms(p.inicio_s) + _ms(p.fim_s)) / 2
-        <= fim_ms + FOLGA_MS
+        p for p in palavras if inicio_ms - FOLGA_MS <= _meio_ms(p) <= fim_ms + FOLGA_MS
     ]
 
 
@@ -51,18 +65,18 @@ def _conferir(
     limiar: float,
 ) -> tuple[Palavra | None, MotivoDaRecusa | None]:
     """A palavra do Whisper que a correção troca e, se recusada, o motivo."""
-    original = normalizar(c.original)
+    original = _nucleo(c.original)
     achada = next(
         (
             p
             for p in _palavras_em(transcricao.palavras, c.inicio_ms, c.fim_ms)
-            if normalizar(p.texto) == original
+            if _nucleo(p.texto) == original
         ),
         None,
     )
     if achada is None:
         return None, "original_ausente"
-    corrigida = normalizar(c.corrigida)
+    corrigida = _nucleo(c.corrigida)
     prova = normalizar(c.prova)
     provas = [
         normalizar(t.texto)
@@ -80,49 +94,68 @@ def _falas(
     decupagem: Decupagem, palavras: list[Palavra], troca: dict[int, str]
 ) -> list[Fala]:
     """Uma fala por trecho do Gemini, com o texto do Whisper; o que sobra vira
-    fala de quem não foi identificado."""
+    fala de quem não foi identificado.
 
-    def texto(ps: list[Palavra], corrigido: bool) -> str:
-        return " ".join(troca.get(id(p), p.texto) if corrigido else p.texto for p in ps)
-
-    falas: list[Fala] = []
-    usadas: set[int] = set()
-    for f in decupagem.transcricao:
-        do_trecho = [
-            p
-            for p in palavras
-            if id(p) not in usadas
-            and f.inicio_ms <= (_ms(p.inicio_s) + _ms(p.fim_s)) / 2 <= f.fim_ms
+    Cada palavra vai para o trecho mais perto do seu meio, com a folga dos
+    segundos inteiros que o modelo escreve.
+    """
+    trechos = decupagem.transcricao
+    do_trecho: list[list[Palavra]] = [[] for _ in trechos]
+    sobra: list[Palavra] = []
+    for p in palavras:
+        meio = _meio_ms(p)
+        distancias = [
+            (max(f.inicio_ms - meio, meio - f.fim_ms, 0), i)
+            for i, f in enumerate(trechos)
         ]
-        if not do_trecho:
-            continue  # o modelo não transcreve: fala sem palavras é invenção
-        usadas |= {id(p) for p in do_trecho}
-        falas.append(_fala(f.locutor, do_trecho, texto, decupagem))
-    sobra = [p for p in palavras if id(p) not in usadas]
+        perto = min(distancias, default=None)
+        if perto is None or perto[0] > FOLGA_MS:
+            sobra.append(p)
+        else:
+            do_trecho[perto[1]].append(p)
+    limite = decupagem.video.duracao_ms
+    falas: list[Fala] = []
+    for f, ps in zip(trechos, do_trecho, strict=True):
+        # trecho sem palavras fica de fora: o modelo não transcreve
+        falas += _falas_do_grupo(f.locutor, ps, troca, limite)
     grupo: list[Palavra] = []
     for p in sobra:
         if grupo and p.inicio_s - grupo[-1].fim_s > 1:
-            falas.append(_fala(NAO_IDENTIFICADO, grupo, texto, decupagem))
+            falas += _falas_do_grupo(NAO_IDENTIFICADO, grupo, troca, limite)
             grupo = []
         grupo.append(p)
-    if grupo:
-        falas.append(_fala(NAO_IDENTIFICADO, grupo, texto, decupagem))
+    falas += _falas_do_grupo(NAO_IDENTIFICADO, grupo, troca, limite)
     return sorted(falas, key=lambda f: (f.inicio_ms, f.fim_ms))
 
 
+def _falas_do_grupo(
+    locutor: str, ps: list[Palavra], troca: dict[int, str], limite_ms: int
+) -> list[Fala]:
+    """As palavras de um locutor; um grupo longo demais vira mais de uma fala."""
+    falas: list[Fala] = []
+    atual: list[Palavra] = []
+    tamanho = 0
+    for p in ps:
+        mais = len(troca.get(id(p), p.texto)) + 1
+        if atual and tamanho + mais > _CARACTERES_POR_FALA:
+            falas.append(_fala(locutor, atual, troca, limite_ms))
+            atual, tamanho = [], 0
+        atual.append(p)
+        tamanho += mais
+    if atual:
+        falas.append(_fala(locutor, atual, troca, limite_ms))
+    return falas
+
+
 def _fala(
-    locutor: str,
-    ps: list[Palavra],
-    texto: Callable[[list[Palavra], bool], str],
-    decupagem: Decupagem,
+    locutor: str, ps: list[Palavra], troca: dict[int, str], limite_ms: int
 ) -> Fala:
-    limite = decupagem.video.duracao_ms
     return Fala(
         locutor=locutor,
-        texto=texto(ps, True),
-        texto_original=texto(ps, False),
-        inicio_ms=min(_ms(ps[0].inicio_s), limite),
-        fim_ms=min(_ms(ps[-1].fim_s), limite),
+        texto=" ".join(troca.get(id(p), p.texto) for p in ps),
+        texto_original=" ".join(p.texto for p in ps),
+        inicio_ms=min(_ms(ps[0].inicio_s), limite_ms),
+        fim_ms=min(_ms(ps[-1].fim_s), limite_ms),
     )
 
 
@@ -131,14 +164,14 @@ def _mencao(
 ) -> MencaoNaFala:
     """Aperta a menção às palavras do nome, com o tempo exato do Whisper."""
     partes = {
-        normalizar(parte)
+        _nucleo(parte)
         for parte in nome.split()
         if len(parte) >= _TAMANHO_MINIMO_DO_NOME
     }
     achadas = [
         p
         for p in _palavras_em(palavras, m.inicio_ms, m.fim_ms)
-        if normalizar(troca.get(id(p), p.texto)).strip(".,;:!?") in partes
+        if _nucleo(troca.get(id(p), p.texto)) in partes
     ]
     if not achadas:
         return m
@@ -181,13 +214,14 @@ def aplicar_transcricao(
                 )
             )
             continue
-        troca[id(palavra)] = c.corrigida
+        troca[id(palavra)] = _trocar(palavra.texto, c.corrigida)
+        limite = decupagem.video.duracao_ms
         aceitas.append(
             c.model_copy(
                 update={
                     "original": palavra.texto,
-                    "inicio_ms": _ms(palavra.inicio_s),
-                    "fim_ms": min(_ms(palavra.fim_s), decupagem.video.duracao_ms),
+                    "inicio_ms": min(_ms(palavra.inicio_s), limite),
+                    "fim_ms": min(_ms(palavra.fim_s), limite),
                 }
             )
         )
