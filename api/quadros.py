@@ -12,7 +12,11 @@ class FalhaNosQuadros(Exception):
 
 
 def tirar_quadros(video: Path, pasta: Path) -> list[Path]:
-    """Os quadros de 0 s, 1 s, 2 s…, em ordem: o do índice `i` é o do segundo `i`."""
+    """Os quadros de 0 s, 1 s, 2 s…, em ordem: o do índice `i` é o do segundo `i`.
+
+    O `round=up` pega o quadro do instante exato de cada segundo; o padrão do `fps`
+    (`near`) pegaria o de perto do meio do segundo.
+    """
     pasta.mkdir(parents=True, exist_ok=True)
     try:
         resultado = subprocess.run(
@@ -28,7 +32,7 @@ def tirar_quadros(video: Path, pasta: Path) -> list[Path]:
                 str(video),
                 "-an",
                 "-vf",
-                "fps=1",
+                "fps=1:round=up",
                 str(pasta / PADRAO),
             ],
             check=False,

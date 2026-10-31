@@ -18,7 +18,7 @@ from api.leitura_da_tela import (
     QuadroLido,
 )
 from api.ocr_job import executar
-from api.paddle import LeitorPaddle
+from api.paddle import DETECTOR, RECONHECEDOR, LeitorPaddle
 from api.quadros import FalhaNosQuadros, tirar_quadros
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
@@ -88,17 +88,67 @@ def test_um_quadro_por_segundo_do_video_sintetico(tmp_path: Path) -> None:
 
     quadros = tirar_quadros(video, tmp_path / "q")
 
-    assert len(quadros) == 3
     assert [q.name for q in quadros] == [
         "quadro_00001.png",
         "quadro_00002.png",
         "quadro_00003.png",
+        "quadro_00004.png",
     ]
 
 
+@sem_ffmpeg
+def test_o_quadro_do_segundo_e_o_do_instante_exato(tmp_path: Path) -> None:
+    # 10 quadros por segundo, e o brilho de cada um é 7 vezes o número do quadro.
+    video = tmp_path / "v.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=16x16:r=10,format=gray,geq=lum='N*7'",
+            "-t",
+            "3.4",
+            "-c:v",
+            "libx264",
+            "-qp",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+            str(video),
+        ],
+        check=True,
+    )
+
+    quadros = tirar_quadros(video, tmp_path / "q")
+
+    brilhos = [
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(q),
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "gray",
+                "-",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout[100]
+        for q in quadros
+    ]
+    assert [round(b / 7) for b in brilhos] == [0, 10, 20, 30]
+
+
+@sem_ffmpeg
 def test_video_ilegivel_nao_gera_quadros(tmp_path: Path) -> None:
-    if shutil.which("ffmpeg") is None:
-        pytest.skip("sem ffmpeg")
     lixo = tmp_path / "v.mp4"
     lixo.write_bytes(b"nao e um video")
 
@@ -116,13 +166,19 @@ def test_job_le_cada_quadro_e_grava_o_resultado_por_segundo(tmp_path: Path) -> N
 
     executar("j1", repositorio, porta, leitor, pasta)
 
-    assert len(leitor.quadros) == 3
+    assert [q.name for q in leitor.quadros] == [
+        "quadro_00001.png",
+        "quadro_00002.png",
+        "quadro_00003.png",
+        "quadro_00004.png",
+    ]
     leitura = porta.ler_leitura("j1")
     assert leitura is not None
     assert [(q.segundo, q.linhas[0].texto) for q in leitura.quadros] == [
         (0, "quadro 0"),
         (1, "quadro 1"),
         (2, "quadro 2"),
+        (3, "quadro 3"),
     ]
     assert repositorio.obter("j1").estado == "analisando"  # type: ignore[union-attr]
 
@@ -161,9 +217,8 @@ def test_falha_do_ocr_derruba_o_job_com_codigo_proprio(tmp_path: Path) -> None:
     assert porta.ler_leitura("j1") is None
 
 
+@sem_ffmpeg
 def test_proxy_que_nao_e_video_derruba_o_job(tmp_path: Path) -> None:
-    if shutil.which("ffmpeg") is None:
-        pytest.skip("sem ffmpeg")
     repositorio = _repositorio()
     porta = LeiturasEmMemoria({"j1": b"lixo"})
 
@@ -227,3 +282,12 @@ def test_modelos_do_dockerfile_estao_fixados_por_revisao_e_hash() -> None:
     assert "sha256sum -c" in alvo
     assert "--group ocr" in alvo
     assert "ffmpeg=$FFMPEG" in alvo
+    assert f"ARG DETECTOR={DETECTOR}\n" in alvo
+    assert f"ARG RECONHECEDOR={RECONHECEDOR}\n" in alvo
+
+
+def test_versao_do_ffmpeg_vale_para_todos_os_estagios() -> None:
+    # Um ARG depois de um FROM só vale naquele estágio; o `ARG FFMPEG` dos alvos chegaria vazio.
+    dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
+
+    assert dockerfile.index("\nARG FFMPEG=") < dockerfile.index("\nFROM ")

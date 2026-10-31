@@ -1,3 +1,7 @@
+# O ffmpeg dos alvos validacao e ocr, o mesmo do scripts/afk/Dockerfile (o make verificar confere).
+# Antes do primeiro FROM, para valer em todos os estágios que o declaram com `ARG FFMPEG`.
+ARG FFMPEG=7:5.1.9-0+deb12u1
+
 # Serviço único da E0: o FastAPI serve a API e o build do React.
 FROM node:22-slim AS web
 WORKDIR /web
@@ -7,9 +11,6 @@ COPY web/ ./
 # Chave web do Identity Platform, pública, vinda do Terraform; sem ela o login fica indisponível.
 ARG VITE_IDENTITY_API_KEY=""
 RUN npm run build
-
-# O ffmpeg dos alvos validacao e ocr, o mesmo do scripts/afk/Dockerfile (o make verificar confere).
-ARG FFMPEG=7:5.1.9-0+deb12u1
 
 # Job de validação (#38): `docker build --target validacao`. Sem o build do front.
 # Usuário sem privilégios e nenhuma pasta da imagem gravável: o TMPDIR aponta para
@@ -63,7 +64,8 @@ ARG RECONHECEDOR_REVISAO=ab2cd5cc5fa6309be2e5acdfe66eca2c2c127d57
 ARG RECONHECEDOR_SHA256=53cdc8b481a7394bb108f96d0fb3432b0a8f392e22c7d18f06dbb2d42b8b25f9
 # As bibliotecas do OpenCV (libgl1, libglib2.0-0) e do Paddle (libgomp1).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
+    && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
+        || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY pyproject.toml uv.lock ./

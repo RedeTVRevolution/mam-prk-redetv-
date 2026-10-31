@@ -9,9 +9,9 @@ from typing import Any
 
 from api.leitura_da_tela import Caixa, LinhaLida
 
-NOME_DO_MODELO = "PP-OCRv5_server_det+latin_PP-OCRv5_mobile_rec"
 DETECTOR = "PP-OCRv5_server_det"
 RECONHECEDOR = "latin_PP-OCRv5_mobile_rec"
+NOME_DO_MODELO = f"{DETECTOR}+{RECONHECEDOR}"
 
 
 def _carregar(pasta_dos_modelos: str) -> Any:
