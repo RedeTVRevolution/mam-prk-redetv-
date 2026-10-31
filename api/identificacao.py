@@ -14,7 +14,7 @@ os apelidos; não confirma nada. O nome sem prova vira palpite.
 """
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -98,10 +98,15 @@ def _ocorrencias(palavras: Sequence[str], nome: Sequence[str]) -> list[tuple[int
 
 
 def _livre_de_outro_sem_nome(
-    decupagem: Decupagem, pessoa: Pessoa, inicio_ms: int, fim_ms: int, folga_ms: int
+    decupagem: Decupagem,
+    pessoa: Pessoa,
+    inicio_ms: int,
+    fim_ms: int,
+    folga_ms: int,
+    sem_nome: Collection[str],
 ) -> bool:
     return not any(
-        nao_identificado(o.nome)
+        (nao_identificado(o.nome) or o.id in sem_nome)
         and any(_sobrepoe(a, inicio_ms, fim_ms, folga_ms) for a in o.na_imagem)
         for o in decupagem.pessoas
         if o.id != pessoa.id
@@ -109,7 +114,10 @@ def _livre_de_outro_sem_nome(
 
 
 def _prova_de_gc(
-    decupagem: Decupagem, pessoa: Pessoa, nomes: Sequence[Sequence[str]]
+    decupagem: Decupagem,
+    pessoa: Pessoa,
+    nomes: Sequence[Sequence[str]],
+    sem_nome: Collection[str],
 ) -> bool:
     for t in decupagem.textos_na_tela:
         if t.tipo not in TIPOS_DE_GC:
@@ -118,7 +126,9 @@ def _prova_de_gc(
         if not any(_ocorrencias(palavras, n) for n in nomes):
             continue
         if any(_sobrepoe(a, t.inicio_ms, t.fim_ms) for a in pessoa.na_imagem) and (
-            _livre_de_outro_sem_nome(decupagem, pessoa, t.inicio_ms, t.fim_ms, 0)
+            _livre_de_outro_sem_nome(
+                decupagem, pessoa, t.inicio_ms, t.fim_ms, 0, sem_nome
+            )
         ):
             return True
     return False
@@ -130,6 +140,7 @@ def _prova_de_fala(
     nomes: Sequence[Sequence[str]],
     transcricao: Transcricao | None,
     tolerancia_ms: int,
+    sem_nome: Collection[str],
 ) -> bool:
     if transcricao is None:
         return False
@@ -146,7 +157,7 @@ def _prova_de_fala(
             if any(
                 _sobrepoe(a, inicio_ms, fim_ms, tolerancia_ms) for a in pessoa.na_imagem
             ) and _livre_de_outro_sem_nome(
-                decupagem, pessoa, inicio_ms, fim_ms, tolerancia_ms
+                decupagem, pessoa, inicio_ms, fim_ms, tolerancia_ms, sem_nome
             ):
                 return True
     return False
@@ -171,10 +182,14 @@ def identificar(
     transcricao: Transcricao | None = None,
     catalogo: Catalogo | None = None,
     tolerancia_ms: int = TOLERANCIA_DA_FALA_MS,
+    sem_nome: Collection[str] = (),
 ) -> Decupagem:
     """Confere o nome de cada pessoa. Com prova, o nome é `confirmado` (origem
     `modelo_forte`, só as fontes conferidas) e vai para o catálogo; sem prova, é
-    `palpite`, sem fontes. A pessoa da revisora e o "não identificado" ficam como estão."""
+    `palpite`, sem fontes. A pessoa da revisora e o "não identificado" ficam como estão.
+
+    `sem_nome` são ids de pessoas que, para a regra "outra pessoa sem nome na imagem",
+    contam como sem nome mesmo com um nome (o do modelo forte, ainda sem prova)."""
     pessoas: list[Pessoa] = []
     for p in decupagem.pessoas:
         if p.origem == "revisao" or nao_identificado(p.nome):
@@ -182,9 +197,9 @@ def identificar(
             continue
         nomes = _nomes_da_pessoa(p, candidatos)
         fontes: list[FonteDoNome] = []
-        if _prova_de_gc(decupagem, p, nomes):
+        if _prova_de_gc(decupagem, p, nomes, sem_nome):
             fontes.append("gc")
-        if _prova_de_fala(decupagem, p, nomes, transcricao, tolerancia_ms):
+        if _prova_de_fala(decupagem, p, nomes, transcricao, tolerancia_ms, sem_nome):
             fontes.append("fala")
         if not fontes:
             pessoas.append(

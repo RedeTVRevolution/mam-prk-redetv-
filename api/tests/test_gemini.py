@@ -478,3 +478,19 @@ def test_resposta_200_que_nao_e_json_vira_erro_repetivel() -> None:
     with pytest.raises(ErroHttp) as e:
         transporte.gerar(_chamada())
     assert e.value.status == 502
+
+
+def test_transporte_vertex_manda_imagens_no_lugar_do_video_e_sem_flex() -> None:
+    sessao = SessaoFalsa(_ok("{}"))
+
+    TransporteVertex("p", sessao).gerar(
+        replace(_chamada(), video_uri="", imagens=(b"\xff\xd8abc", b"\xff\xd8def"))
+    )
+
+    pedido = sessao.pedidos[0]
+    partes = pedido["json"]["contents"][0]["parts"]
+    assert partes == [
+        {"inlineData": {"mimeType": "image/jpeg", "data": "/9hhYmM="}},
+        {"inlineData": {"mimeType": "image/jpeg", "data": "/9hkZWY="}},
+    ]
+    assert pedido["headers"] == {}
