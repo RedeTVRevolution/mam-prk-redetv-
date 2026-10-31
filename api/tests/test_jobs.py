@@ -188,6 +188,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "estado",
         "codigo_falha",
         "duracao_s",
+        "cortes_ms",
         "timecode_origem",
         "taxa_de_quadros",
         "criado_em",
@@ -212,6 +213,18 @@ def test_get_job_traz_timecode_de_origem_e_taxa_de_quadros() -> None:
     assert corpo["taxa_de_quadros"] == pytest.approx(29.97, abs=0.001)
 
 
+def test_get_job_traz_os_cortes_de_camera() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None
+    ambiente.repositorio.salvar(job.model_copy(update={"cortes_ms": [1200, 5400]}))
+
+    corpo = ambiente.cliente.get(f"/v1/jobs/{job_id}", headers=AUTORIZACAO).json()
+
+    assert corpo["cortes_ms"] == [1200, 5400]
+
+
 def test_get_job_sem_timecode_traz_null() -> None:
     ambiente = Ambiente()
     job_id = _job_com_estado(ambiente, "analisando")
@@ -220,6 +233,7 @@ def test_get_job_sem_timecode_traz_null() -> None:
 
     assert corpo["timecode_origem"] is None
     assert corpo["taxa_de_quadros"] is None
+    assert corpo["cortes_ms"] is None
 
 
 def test_get_job_inexistente_recebe_404() -> None:

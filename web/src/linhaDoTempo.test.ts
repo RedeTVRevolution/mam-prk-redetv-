@@ -3,11 +3,17 @@ import catalogo from './catalogo.fixture.json'
 import {
   faixasComArrasto,
   faixasDe,
+  faixasDoVisualizador,
   LINHA_LIVRE,
   lerTempo,
   limitarAlca,
   limitesDasAlcas,
   maiorFim,
+  marcasDaRegua,
+  posicaoDoBloco,
+  riscosDeCorte,
+  trechosSemPauta,
+  vizinhoNaFaixa,
   reduzirLinha,
   secoesDaFaixa,
   selecaoValida,
@@ -221,4 +227,122 @@ test('as faixas mostram a ocorrência selecionada no intervalo arrastado', () =>
   expect(faixas[0].ocorrencias[0]).toMatchObject({ inicio_ms: 40_000, fim_ms: 60_000 })
   const sem = faixasDe(decupagem, catalogo)
   expect(faixasComArrasto(sem, e.selecao, null)).toBe(sem)
+})
+
+const noVisualizador: Decupagem = {
+  pautas: [
+    { id: 'pa2', titulo: 'Segunda', inicio_ms: 1_000_000, fim_ms: 2_000_000 },
+    { id: 'pa1', titulo: 'Bastidores do Miss Bumbum', inicio_ms: 724_000, fim_ms: 900_000 },
+  ],
+  pessoas: [
+    {
+      id: 'p1',
+      nome: 'Leão Lobo',
+      na_imagem: [{ inicio_ms: 211_000, fim_ms: 261_000, evidencia: 'rosto' }],
+      citada_na_fala: [{ inicio_ms: 10_000, fim_ms: 12_000 }],
+      citada_no_texto: [{ inicio_ms: 20_000, fim_ms: 22_000, texto: 'Leão' }],
+    },
+  ],
+  planos: [{ id: 'pl1', ambiente: 'estúdio', inicio_ms: 0, fim_ms: 5_000 }],
+  comerciais: [{ marca: 'Marca X', tipo: 'merchan', inicio_ms: 3_700_000, fim_ms: 3_760_000 }],
+  transcricao: [{ locutor: 'Ana', texto: 'Boa noite', inicio_ms: 0, fim_ms: 3_000 }],
+  textos_na_tela: [{ tipo: 'gc', texto: 'AO VIVO', inicio_ms: 5_000, fim_ms: 8_000 }],
+}
+
+test('o Visualizador tem seis faixas com contagem e sem planos', () => {
+  const faixas = faixasDoVisualizador(noVisualizador)
+
+  expect(faixas.map((f) => [f.rotulo, f.blocos.length])).toEqual([
+    ['Pautas', 2],
+    ['Pessoas', 1],
+    ['Menções', 2],
+    ['Comerciais', 1],
+    ['Textos', 1],
+    ['Falas', 1],
+  ])
+})
+
+test('o nome do bloco diz quem ou o quê e os tempos; os blocos vão em ordem de início', () => {
+  const faixas = faixasDoVisualizador(noVisualizador)
+  const nomes = (r: string) => faixas.find((f) => f.rotulo === r)?.blocos.map((b) => b.nome)
+
+  expect(nomes('Pautas')).toEqual([
+    'Pauta: Bastidores do Miss Bumbum, 12:04 a 15:00',
+    'Pauta: Segunda, 16:40 a 33:20',
+  ])
+  expect(nomes('Pessoas')).toEqual(['Aparição de Leão Lobo, 03:31 a 04:21'])
+  expect(nomes('Menções')).toEqual([
+    'Menção a Leão Lobo na fala, 00:10 a 00:12',
+    'Menção a Leão Lobo no texto, 00:20 a 00:22',
+  ])
+  expect(nomes('Comerciais')).toEqual(['Comercial: Marca X, 1:01:40 a 1:02:40'])
+  expect(nomes('Textos')).toEqual(['Texto na tela: AO VIVO, 00:05 a 00:08'])
+  expect(nomes('Falas')).toEqual(['Fala de Ana: Boa noite, 00:00 a 00:03'])
+})
+
+test('as chaves dos blocos são únicas entre as faixas', () => {
+  const chaves = faixasDoVisualizador(noVisualizador).flatMap((f) => f.blocos.map((b) => b.chave))
+
+  expect(new Set(chaves).size).toBe(chaves.length)
+})
+
+test('a régua marca de 1, 5 ou 10 em 10 minutos conforme a duração', () => {
+  expect(marcasDaRegua(8 * 60_000).map((m) => m.rotulo)).toEqual([
+    '00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00', '07:00', '08:00',
+  ])
+  expect(marcasDaRegua(20 * 60_000).map((m) => m.rotulo)).toEqual([
+    '00:00', '05:00', '10:00', '15:00', '20:00',
+  ])
+  const longa = marcasDaRegua(2_959_000)
+  expect(longa.map((m) => m.rotulo)).toEqual(['00:00', '10:00', '20:00', '30:00', '40:00'])
+  expect(longa[1].percentual).toBeCloseTo((600_000 / 2_959_000) * 100, 6)
+  expect(marcasDaRegua(0)).toEqual([])
+})
+
+test('os riscos de corte ficam em percentual e ignoram o que está fora do vídeo', () => {
+  expect(riscosDeCorte([0, 25_000, 50_000, 100_000, 200_000], 100_000)).toEqual([25, 50])
+  expect(riscosDeCorte(null, 100_000)).toEqual([])
+})
+
+test('o trecho sem pauta vai do fim da última pauta ao fim do vídeo', () => {
+  const pautas = [
+    { inicio_ms: 0, fim_ms: 1_000_000 },
+    { inicio_ms: 900_000, fim_ms: 2_660_000 },
+  ]
+
+  expect(trechosSemPauta(pautas, 2_959_000)).toEqual([{ inicio_ms: 2_660_000, fim_ms: 2_959_000 }])
+})
+
+test('o trecho sem pauta também aparece no começo e no meio; vão menor que 1 s some', () => {
+  const pautas = [
+    { inicio_ms: 10_000, fim_ms: 20_000 },
+    { inicio_ms: 20_500, fim_ms: 30_000 },
+    { inicio_ms: 40_000, fim_ms: 60_000 },
+  ]
+
+  expect(trechosSemPauta(pautas, 60_000)).toEqual([
+    { inicio_ms: 0, fim_ms: 10_000 },
+    { inicio_ms: 30_000, fim_ms: 40_000 },
+  ])
+  expect(trechosSemPauta([], 60_000)).toEqual([{ inicio_ms: 0, fim_ms: 60_000 }])
+})
+
+test('o bloco ocupa seu trecho em percentual, sem passar do fim', () => {
+  expect(posicaoDoBloco({ inicio_ms: 25_000, fim_ms: 50_000 }, 100_000)).toEqual({
+    esquerda: 25,
+    largura: 25,
+  })
+  expect(posicaoDoBloco({ inicio_ms: 90_000, fim_ms: 130_000 }, 100_000)).toEqual({
+    esquerda: 90,
+    largura: 10,
+  })
+})
+
+test('← e → passam de bloco em bloco e param nas pontas', () => {
+  const blocos = [{ chave: 'a' }, { chave: 'b' }, { chave: 'c' }]
+
+  expect(vizinhoNaFaixa(blocos, 'a', 1)).toBe('b')
+  expect(vizinhoNaFaixa(blocos, 'b', -1)).toBe('a')
+  expect(vizinhoNaFaixa(blocos, 'c', 1)).toBe('c')
+  expect(vizinhoNaFaixa(blocos, 'a', -1)).toBe('a')
 })

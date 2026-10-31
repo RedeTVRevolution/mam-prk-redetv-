@@ -306,3 +306,152 @@ export function faixasComArrasto(
     ocorrencias: f.ocorrencias.map((o) => (o.chave === selecao.chave ? { ...o, ...arrastado } : o)),
   }))
 }
+
+/** Um bloco de uma faixa do Visualizador; `nome` é o nome acessível e a dica. */
+export interface BlocoDaFaixa extends Intervalo {
+  chave: string
+  nome: string
+}
+
+export interface FaixaDoVisualizador {
+  chave: string
+  rotulo: string
+  cor: string
+  /** Em ordem de início. */
+  blocos: BlocoDaFaixa[]
+}
+
+const TAMANHO_DO_TRECHO = 60
+
+const resumo = (texto: string): string =>
+  texto.length > TAMANHO_DO_TRECHO ? `${texto.slice(0, TAMANHO_DO_TRECHO).trimEnd()}…` : texto
+
+/**
+ * As seis faixas do Visualizador: pautas, pessoas na imagem, menções, comerciais, textos na tela
+ * e falas. Os planos não são faixa; os cortes viram riscos da régua.
+ */
+export function faixasDoVisualizador(d: Decupagem): FaixaDoVisualizador[] {
+  const faixa = (
+    chave: string,
+    rotulo: string,
+    cor: string,
+    itens: (Intervalo & { nome: string })[],
+  ): FaixaDoVisualizador => ({
+    chave,
+    rotulo,
+    cor,
+    blocos: itens
+      .map((x, i) => ({
+        chave: `${chave}-${i}`,
+        inicio_ms: x.inicio_ms,
+        fim_ms: x.fim_ms,
+        nome: `${x.nome}, ${relogio(x.inicio_ms)} a ${relogio(x.fim_ms)}`,
+      }))
+      .sort((a, b) => a.inicio_ms - b.inicio_ms || a.fim_ms - b.fim_ms),
+  })
+  const daPessoa = (
+    lista: ListaDePessoa,
+    nome: (pessoa: string) => string,
+  ): (Intervalo & { nome: string })[] =>
+    d.pessoas.flatMap((p) => p[lista].map((x) => ({ ...x, nome: nome(p.nome) })))
+  return [
+    faixa(
+      'pauta',
+      'Pautas',
+      CORES_DE_OCORRENCIA.pauta.cor,
+      d.pautas.map((p) => ({ ...p, nome: `Pauta: ${p.titulo}` })),
+    ),
+    faixa(
+      'aparicao',
+      'Pessoas',
+      CORES_DE_OCORRENCIA.aparicao.cor,
+      daPessoa('na_imagem', (n) => `Aparição de ${n}`),
+    ),
+    faixa('mencao', 'Menções', CORES_DE_OCORRENCIA.mencao.cor, [
+      ...daPessoa('citada_na_fala', (n) => `Menção a ${n} na fala`),
+      ...daPessoa('citada_no_texto', (n) => `Menção a ${n} no texto`),
+    ]),
+    faixa(
+      'comercial',
+      'Comerciais',
+      CORES_DE_OCORRENCIA.comercial.cor,
+      d.comerciais.map((c) => ({ ...c, nome: `Comercial: ${c.marca}` })),
+    ),
+    faixa(
+      'texto',
+      'Textos',
+      CORES_DE_OCORRENCIA.texto_na_tela.cor,
+      (d.textos_na_tela ?? []).map((t) => ({ ...t, nome: `Texto na tela: ${resumo(t.texto)}` })),
+    ),
+    faixa(
+      'fala',
+      'Falas',
+      CORES_DE_OCORRENCIA.fala.cor,
+      d.transcricao.map((f) => ({ ...f, nome: `Fala de ${f.locutor}: ${resumo(f.texto)}` })),
+    ),
+  ]
+}
+
+export interface MarcaDaRegua {
+  ms: number
+  percentual: number
+  rotulo: string
+}
+
+/** As marcas da régua: a cada 1 minuto até 10, a cada 5 até 30 e a cada 10 acima disso. */
+export function marcasDaRegua(duracaoMs: number): MarcaDaRegua[] {
+  if (duracaoMs <= 0) return []
+  const minutos = duracaoMs / 60_000
+  const passoMs = (minutos <= 10 ? 1 : minutos <= 30 ? 5 : 10) * 60_000
+  const marcas: MarcaDaRegua[] = []
+  for (let ms = 0; ms <= duracaoMs; ms += passoMs) {
+    marcas.push({ ms, percentual: percentualDoTempo(ms, duracaoMs), rotulo: relogio(ms) })
+  }
+  return marcas
+}
+
+/** Os cortes de câmera dentro do vídeo, em % da largura. */
+export function riscosDeCorte(cortesMs: number[] | null | undefined, duracaoMs: number): number[] {
+  return (cortesMs ?? [])
+    .filter((ms) => ms > 0 && ms < duracaoMs)
+    .map((ms) => percentualDoTempo(ms, duracaoMs))
+}
+
+/** Menor vão sem pauta que vale mostrar. */
+const VAO_MINIMO_MS = 1000
+
+/** Os trechos do vídeo que nenhuma pauta cobre. */
+export function trechosSemPauta(pautas: Intervalo[], duracaoMs: number): Intervalo[] {
+  const trechos: Intervalo[] = []
+  let coberto = 0
+  const soma = (inicio_ms: number, fim_ms: number) => {
+    if (fim_ms - inicio_ms >= VAO_MINIMO_MS) trechos.push({ inicio_ms, fim_ms })
+  }
+  for (const p of [...pautas].sort((a, b) => a.inicio_ms - b.inicio_ms)) {
+    soma(coberto, Math.min(p.inicio_ms, duracaoMs))
+    coberto = Math.max(coberto, p.fim_ms)
+  }
+  soma(coberto, duracaoMs)
+  return trechos
+}
+
+/** Onde o bloco começa e quanto ocupa, em % da largura, sem passar do fim. */
+export function posicaoDoBloco(
+  b: Intervalo,
+  duracaoMs: number,
+): { esquerda: number; largura: number } {
+  const esquerda = Math.min(percentualDoTempo(b.inicio_ms, duracaoMs), 100)
+  const fim = Math.min(percentualDoTempo(b.fim_ms, duracaoMs), 100)
+  return { esquerda, largura: Math.max(fim - esquerda, 0) }
+}
+
+/** O bloco ao lado de `chave` (−1 anterior, 1 seguinte); nas pontas, o próprio. */
+export function vizinhoNaFaixa(
+  blocos: { chave: string }[],
+  chave: string,
+  sentido: -1 | 1,
+): string {
+  const i = blocos.findIndex((b) => b.chave === chave)
+  if (i < 0) return chave
+  return blocos[Math.min(Math.max(i + sentido, 0), blocos.length - 1)].chave
+}

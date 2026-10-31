@@ -8,6 +8,8 @@ export interface Job {
   estado: string
   codigo_falha: string | null
   duracao_s?: number | null
+  /** Cortes de câmera, em ms. */
+  cortes_ms?: number[] | null
   /** Timecode do primeiro quadro do arquivo (`HH:MM:SS:FF`, ou `;FF` no drop-frame). */
   timecode_origem?: string | null
   taxa_de_quadros?: number | null

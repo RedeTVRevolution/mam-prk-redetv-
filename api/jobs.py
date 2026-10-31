@@ -174,6 +174,8 @@ class JobPublico(BaseModel):
     estado: Estado
     codigo_falha: CodigoDeFalha | None
     duracao_s: float | None
+    # Cortes de câmera, em ms: os riscos da régua do Visualizador.
+    cortes_ms: list[int] | None = None
     timecode_origem: str | None = None
     taxa_de_quadros: float | None = None
     programa: str | None = None

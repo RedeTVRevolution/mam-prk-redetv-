@@ -10,7 +10,32 @@ import type { Job } from './jobs.ts'
 import { render } from './render-teste.tsx'
 import Visualizador from './Visualizador.tsx'
 
+const DECUPAGEM = {
+  pautas: [
+    { id: 'pa1', titulo: 'Bastidores do Miss Bumbum', inicio_ms: 724_000, fim_ms: 940_000 },
+    { id: 'pa2', titulo: 'Eleição', inicio_ms: 0, fim_ms: 724_000 },
+    { id: 'pa3', titulo: 'Final', inicio_ms: 940_000, fim_ms: 2_660_000 },
+  ],
+  pessoas: [
+    {
+      id: 'p1',
+      nome: 'Leão Lobo',
+      na_imagem: [
+        { inicio_ms: 211_000, fim_ms: 261_000, evidencia: 'rosto' },
+        { inicio_ms: 300_000, fim_ms: 320_000, evidencia: 'rosto' },
+      ],
+      citada_na_fala: [{ inicio_ms: 10_000, fim_ms: 12_000 }],
+      citada_no_texto: [],
+    },
+  ],
+  planos: [{ id: 'pl1', ambiente: 'estúdio', inicio_ms: 0, fim_ms: 5_000 }],
+  comerciais: [],
+  transcricao: [{ locutor: 'Ana', texto: 'Boa noite', inicio_ms: 0, fim_ms: 3_000 }],
+  textos_na_tela: [],
+}
+
 const servidor = setupServer(
+  http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(DECUPAGEM)),
   http.get('/v1/jobs/j1/reproducao', () =>
     HttpResponse.json({ url: 'https://exemplo.test/v.mp4', expira_em: '2999-01-01T00:00:00Z' }),
   ),
@@ -27,6 +52,7 @@ const JOB: Job = {
   data_exibicao: '2026-10-21',
   timecode_origem: '01:00:00:00',
   taxa_de_quadros: 30,
+  cortes_ms: [60_000, 120_000],
   criado_em: '2026-10-21T10:00:00Z',
 }
 
@@ -370,8 +396,14 @@ test('com o link vencido, a falha do arquivo pede outro link e volta ao mesmo po
 
 test('falha ao baixar a decupagem mostra o código para o suporte', async () => {
   const usuario = userEvent.setup()
-  servidor.use(http.get('/v1/jobs/j1/decupagem', () => new HttpResponse(null, { status: 409 })))
-  await abrir()
+  // A primeira leitura é a da linha do tempo; a do botão é a segunda.
+  let leituras = 0
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      ++leituras === 1 ? HttpResponse.json(DECUPAGEM) : new HttpResponse(null, { status: 409 }),
+    ),
+  )
+  await abrirComFaixas()
 
   await usuario.click(screen.getByRole('button', { name: 'Baixar decupagem (JSON)' }))
 
@@ -384,3 +416,123 @@ test('sem a decupagem pronta, não há botão de baixar o JSON', async () => {
 
   expect(screen.queryByRole('button', { name: 'Baixar decupagem (JSON)' })).toBeNull()
 })
+
+test('as seis faixas aparecem com a contagem, sem a faixa de planos, e os cortes na régua', async () => {
+  const { container } = await abrirComFaixas()
+
+  for (const nome of ['Pautas 3', 'Pessoas 2', 'Menções 1', 'Comerciais 0', 'Textos 0', 'Falas 1']) {
+    expect(screen.getByRole('group', { name: nome })).toBeTruthy()
+  }
+  expect(screen.queryByRole('group', { name: /Planos/ })).toBeNull()
+  expect(container.querySelectorAll('[data-corte]').length).toBe(2)
+})
+
+test('o trecho sem pauta aparece hachurado com a dica', async () => {
+  await abrirComFaixas()
+
+  expect(screen.getByRole('img', { name: 'Sem decupagem, 44:20–49:19' })).toBeTruthy()
+})
+
+test('os blocos têm nome acessível com quem ou o quê e os tempos', async () => {
+  await abrirComFaixas()
+
+  expect(screen.getByRole('button', { name: 'Aparição de Leão Lobo, 03:31 a 04:21' })).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Pauta: Bastidores do Miss Bumbum, 12:04 a 15:40' }),
+  ).toBeTruthy()
+})
+
+test('clicar num bloco salta o player ao início e o seleciona', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrirComFaixas()
+
+  const bloco = screen.getByRole('button', { name: 'Pauta: Bastidores do Miss Bumbum, 12:04 a 15:40' })
+  await usuario.click(bloco)
+
+  expect(player.currentTime).toBe(724)
+  expect(bloco.getAttribute('aria-pressed')).toBe('true')
+})
+
+test('com o foco numa faixa, ← e → passam de bloco e Enter salta; o player não anda', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrirComFaixas()
+  irPara(player, 20)
+
+  await usuario.tab()
+  // Os atalhos do cabeçalho e do player vêm antes: caminha até a faixa das pessoas.
+  const primeiro = screen.getByRole('button', { name: 'Aparição de Leão Lobo, 03:31 a 04:21' })
+  primeiro.focus()
+  await usuario.keyboard('{ArrowRight}')
+
+  const segundo = screen.getByRole('button', { name: 'Aparição de Leão Lobo, 05:00 a 05:20' })
+  expect(document.activeElement).toBe(segundo)
+  expect(player.currentTime).toBe(20)
+  await usuario.keyboard('{Enter}')
+  expect(player.currentTime).toBe(300)
+  await usuario.keyboard('{ArrowLeft}')
+  expect(document.activeElement).toBe(primeiro)
+})
+
+test('cada faixa tem uma parada de Tab só', async () => {
+  await abrirComFaixas()
+
+  const paradas = screen
+    .getByRole('group', { name: 'Pessoas 2' })
+    .querySelectorAll('button:not([tabindex="-1"])')
+  expect(paradas.length).toBe(1)
+})
+
+test('clicar na régua salta o player para o tempo do ponteiro', async () => {
+  const { container } = await abrirComFaixas()
+  const regua = container.querySelector('[data-corte]')?.parentElement as HTMLElement
+  regua.getBoundingClientRect = () => ({ left: 100, width: 1000 }) as DOMRect
+
+  fireEvent.pointerDown(regua, { clientX: 600, pointerId: 1 })
+
+  expect(player(container).currentTime).toBeCloseTo(2959 / 2, 1)
+})
+
+test('as teclas da faixa aparecem na lista do ?', async () => {
+  const usuario = userEvent.setup()
+  await abrirComFaixas()
+
+  await usuario.keyboard('?')
+
+  const dialogo = await screen.findByRole('dialog', { name: 'Atalhos' })
+  const tabela = dialogo.querySelector('table[aria-label="Linha do tempo"]') as HTMLElement
+  expect([...tabela.querySelectorAll('kbd')].map((k) => k.textContent)).toEqual(['← →', 'Enter'])
+})
+
+test('falha ao carregar a decupagem mostra o código e tenta de novo', async () => {
+  const usuario = userEvent.setup()
+  let falhar = true
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () =>
+      falhar ? new HttpResponse(null, { status: 503 }) : HttpResponse.json(DECUPAGEM),
+    ),
+  )
+  await abrir()
+
+  const aviso = await screen.findByRole('alert')
+  expect(aviso.textContent).toContain('http_503')
+  falhar = false
+  await usuario.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+
+  expect(await screen.findByRole('group', { name: 'Pautas 3' })).toBeTruthy()
+})
+
+test('sem a decupagem pronta, a linha do tempo não aparece', async () => {
+  await abrir({ estado: 'analisando' })
+
+  expect(screen.queryByRole('group', { name: /Pautas/ })).toBeNull()
+})
+
+function player(raiz: HTMLElement): HTMLVideoElement {
+  return raiz.querySelector('video') as HTMLVideoElement
+}
+
+async function abrirComFaixas() {
+  const p = await abrir()
+  await screen.findByRole('group', { name: 'Pautas 3' })
+  return Object.assign(p, { container: document.body })
+}

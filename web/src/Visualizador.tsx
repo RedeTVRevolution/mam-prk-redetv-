@@ -13,12 +13,13 @@ import { type ClienteDaApi, codigoDoErro, SessaoExpirada } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
 import { baixarDecupagem } from './baixar.ts'
 import { dataDeExibicao, type Job } from './jobs.ts'
+import { FaixasDoVideo } from './FaixasDoVideo.tsx'
 import { Link } from './Link.tsx'
-import { relogio } from './linhaDoTempo.ts'
+import { faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
 import { enderecoDaTelaAnterior, enderecoDoVideo } from './rotas.ts'
-import type { Reproducao } from './Video.tsx'
+import type { Decupagem, Reproducao } from './Video.tsx'
 
 const VELOCIDADES = [1, 2, 4]
 const SALTO_CURTO_S = 1
@@ -63,6 +64,10 @@ export default function Visualizador({
   const [mudo, setMudo] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const [falhaDoJson, setFalhaDoJson] = useState<string | null>(null)
+  const [decupagem, setDecupagem] = useState<Decupagem | null>(null)
+  const [falhaDaDecupagem, setFalhaDaDecupagem] = useState<string | null>(null)
+  const [cargasDaDecupagem, setCargasDaDecupagem] = useState(0)
+  const [selecionada, setSelecionada] = useState<string | null>(null)
   const avisoDoTc = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoTc.current), [])
 
@@ -84,6 +89,33 @@ export default function Visualizador({
       ativo = false
     }
   }, [api, job.id, tentativas])
+
+  const concluido = job.estado === 'concluido'
+  useEffect(() => {
+    if (!concluido) return
+    let ativo = true
+    api.job(job.id).decupagem().then(
+      (d) => {
+        if (!ativo) return
+        setFalhaDaDecupagem(null)
+        setDecupagem(d)
+      },
+      (e: unknown) => {
+        if (ativo && !(e instanceof SessaoExpirada)) setFalhaDaDecupagem(codigoDoErro(e))
+      },
+    )
+    return () => {
+      ativo = false
+    }
+  }, [api, job.id, concluido, cargasDaDecupagem])
+
+  const faixas = useMemo(() => (decupagem ? faixasDoVisualizador(decupagem) : null), [decupagem])
+  // A duração do player; sem ela, a do Job e, por fim, o fim do último bloco.
+  const duracaoDaLinhaMs = Math.max(
+    duracaoMs,
+    ...(faixas ?? []).flatMap((f) => f.blocos.map((b) => b.fim_ms)),
+    1,
+  )
 
   // Outro `?t=` no mesmo vídeo salta o player.
   const tAnterior = useRef(t)
@@ -182,6 +214,8 @@ export default function Visualizador({
       },
     },
     { tecla: 'F', acao: 'Tela cheia', grupo: GRUPO, casa: (e) => tecla(e, 'f'), executar: telaCheia },
+    { tecla: '← →', acao: 'Numa faixa: passar de bloco (o player não anda)', grupo: 'Linha do tempo' },
+    { tecla: 'Enter', acao: 'Numa faixa: saltar ao bloco', grupo: 'Linha do tempo' },
   ])
 
   const tc = useMemo(
@@ -382,6 +416,30 @@ export default function Visualizador({
                 </Group>
               </Paper>
             </Box>
+          )}
+          {falhaDaDecupagem && (
+            <AlertaDeErro
+              mensagem="Não foi possível carregar a linha do tempo. Tente de novo em instantes."
+              codigo={falhaDaDecupagem}
+              aoTentar={() => {
+                setFalhaDaDecupagem(null)
+                setCargasDaDecupagem((n) => n + 1)
+              }}
+            />
+          )}
+          {faixas && (
+            <FaixasDoVideo
+              faixas={faixas}
+              cortesMs={job.cortes_ms}
+              duracaoMs={duracaoDaLinhaMs}
+              atualMs={atualMs}
+              selecionada={selecionada}
+              aoSaltar={(ms) => saltarPara(ms / 1000)}
+              aoSelecionar={(chave, inicioMs) => {
+                setSelecionada(chave)
+                saltarPara(inicioMs / 1000)
+              }}
+            />
           )}
         </Stack>
         <Paper
