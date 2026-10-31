@@ -141,12 +141,15 @@ locals {
   buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
 }
 
-# A coleção de momentos da busca (#117) e o índice ANN dela nascem no `make
-# criar-colecao-da-busca` (idempotente), porque o provedor do Terraform ainda não tem o
-# recurso. Este é o único lugar que monta os nomes; o código os recebe por BUSCA_*.
+# A coleção de momentos da busca (#117) e os índices ANN dela (um por campo de vetor)
+# nascem no `make criar-colecao-da-busca` (idempotente), porque o provedor do Terraform
+# ainda não tem o recurso. Este é o único lugar que monta os nomes; o código os recebe
+# por BUSCA_*. A coleção de medida é a temporária do `make medir-busca`.
 locals {
-  colecao_da_busca = "momentos"
-  indice_da_busca  = "momentos-ann"
+  colecao_da_busca           = "momentos"
+  colecao_de_medida_da_busca = "momentos-medida"
+  indice_da_descricao        = "momentos-descricao-ann"
+  indice_do_quadro           = "momentos-quadro-ann"
 }
 
 # clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git,
@@ -344,8 +347,12 @@ resource "google_cloud_run_v2_service" "web" {
         value = local.colecao_da_busca
       }
       env {
-        name  = "BUSCA_INDICE"
-        value = local.indice_da_busca
+        name  = "BUSCA_INDICE_DESCRICAO"
+        value = local.indice_da_descricao
+      }
+      env {
+        name  = "BUSCA_INDICE_QUADRO"
+        value = local.indice_do_quadro
       }
       env {
         name  = "BUSCA_DIMENSAO"
@@ -1053,8 +1060,16 @@ output "busca_colecao" {
   value = local.colecao_da_busca
 }
 
-output "busca_indice" {
-  value = local.indice_da_busca
+output "busca_colecao_de_medida" {
+  value = local.colecao_de_medida_da_busca
+}
+
+output "busca_indice_descricao" {
+  value = local.indice_da_descricao
+}
+
+output "busca_indice_quadro" {
+  value = local.indice_do_quadro
 }
 
 output "busca_dimensao" {

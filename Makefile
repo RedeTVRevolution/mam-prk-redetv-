@@ -77,21 +77,19 @@ gravar-cassetes:
 	BUCKET_CLIPES_OURO="$${BUCKET_CLIPES_OURO:-$$(terraform -chdir=infra output -raw bucket_clipes_ouro)}" \
 	uv run --locked python -m api.cassete
 
-# Coleção de momentos e índice ANN da busca (#117), no Agent Retrieval; idempotente.
-# Os nomes vêm do Terraform (outputs busca_*), salvo se já vierem no ambiente.
-criar-colecao-da-busca:
-	set -a && . ./.env && set +a && \
+# Nomes da busca (#117): vêm do Terraform (outputs busca_*), salvo se já vierem no ambiente.
+AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
 	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
 	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
-	BUSCA_INDICE="$${BUSCA_INDICE:-$$(terraform -chdir=infra output -raw busca_indice)}" \
-	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}" \
-	uv run --locked python -m api.criar_colecao_da_busca
+	BUSCA_COLECAO_DE_MEDIDA="$${BUSCA_COLECAO_DE_MEDIDA:-$$(terraform -chdir=infra output -raw busca_colecao_de_medida)}" \
+	BUSCA_INDICE_DESCRICAO="$${BUSCA_INDICE_DESCRICAO:-$$(terraform -chdir=infra output -raw busca_indice_descricao)}" \
+	BUSCA_INDICE_QUADRO="$${BUSCA_INDICE_QUADRO:-$$(terraform -chdir=infra output -raw busca_indice_quadro)}" \
+	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}"
+
+# Coleção de momentos e índices ANN da busca, no Agent Retrieval; idempotente.
+criar-colecao-da-busca:
+	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.criar_colecao_da_busca
 
 # Medição da busca (#117): make medir-busca [CONSULTAS=30] [DIMENSOES="128 256"]; só com credenciais.
 medir-busca:
-	set -a && . ./.env && set +a && \
-	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
-	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
-	BUSCA_INDICE="$${BUSCA_INDICE:-$$(terraform -chdir=infra output -raw busca_indice)}" \
-	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}" \
-	uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)
+	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)

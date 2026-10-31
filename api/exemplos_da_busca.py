@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from api.decupagem import Decupagem
+from api.decupagem import VERSAO_ESQUEMA, Decupagem
 from api.indice_da_busca import Registro, registros_da_decupagem
 
 SABRINA = "cat-sabrina-sato"
@@ -61,7 +61,7 @@ def _decupagem(
 ) -> Decupagem:
     return Decupagem.model_validate(
         {
-            "versao_esquema": "1.3",
+            "versao_esquema": VERSAO_ESQUEMA,
             "video": {"sha256": "b" * 64, "duracao_ms": 8_000},
             "programa": {"resumo": "r", "blocos": []},
             "pautas": [],

@@ -30,6 +30,11 @@ def test_medicao_apaga_os_videos_de_exemplo_no_fim() -> None:
     assert indice.total() == 0
 
 
+def test_medir_sem_consultas_e_erro() -> None:
+    with pytest.raises(ValueError):
+        medir(IndiceEmMemoria(), dimensao=256, consultas=0, relogio=_zero)
+
+
 def _zero() -> float:
     return 0.0
 

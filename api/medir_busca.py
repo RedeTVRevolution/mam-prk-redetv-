@@ -4,8 +4,9 @@ e mede a latência da busca híbrida. Roda só com credenciais e fica fora do CI
     python -m api.medir_busca [CONSULTAS] [DIMENSAO ...]
 
 Cada dimensão pede uma coleção própria (a dimensão dos vetores é fixa na criação): a da
-configuração (`BUSCA_DIMENSAO`) é usada como está; as outras ganham uma coleção e um
-índice temporários, apagados no fim.
+configuração (`BUSCA_DIMENSAO`) é usada como está; cada uma das outras, uma de cada vez,
+ganha a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` (o nome vem do `infra/main.tf`) com
+os seus índices, apagada no fim.
 """
 
 import os
@@ -72,6 +73,8 @@ def medir(
     vetor: list[float] | None = None,
 ) -> Medicao:
     """Indexa os exemplos, mede `consultas` buscas e apaga os exemplos no fim."""
+    if consultas < 1:
+        raise ValueError("é preciso ao menos uma consulta para medir")
     try:
         for exemplo in EXEMPLOS:
             indice.gravar(exemplo.job_id, exemplo.registros())
@@ -106,17 +109,12 @@ def main(argumentos: list[str]) -> int:
     consultas = int(argumentos[0]) if argumentos else 30
     config = ConfigDaBusca.do_ambiente(os.environ)
     dimensoes = [int(d) for d in argumentos[1:]] or [config.dimensao]
+    medida = replace(config, colecao=os.environ["BUSCA_COLECAO_DE_MEDIDA"])
     transporte = transporte_http()
     medicoes: list[Medicao] = []
     for dimensao in dimensoes:
         temporaria = dimensao != config.dimensao
-        alvo = (
-            replace(
-                config, colecao=f"{config.colecao}-medida-{dimensao}", dimensao=dimensao
-            )
-            if temporaria
-            else config
-        )
+        alvo = replace(medida, dimensao=dimensao) if temporaria else config
         if temporaria:
             criar_colecao(alvo, transporte)
         try:

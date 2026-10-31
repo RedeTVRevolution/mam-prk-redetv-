@@ -1,18 +1,20 @@
 """Adaptador do índice da busca no Agent Retrieval (#117, ADR 0006).
 
-Projeto, região, coleção, índice e dimensão chegam por variável de ambiente (o
+Projeto, região, coleção, índices e dimensão chegam por variável de ambiente (o
 `infra/main.tf` as entrega); nada disso é escrito aqui. A rede fica atrás de
 `Transporte`: aqui moram a montagem dos pedidos e a leitura das respostas, testadas sem
-rede. A coleção nasce com o índice ANN implantado e todo pedido de busca leva o
-`searchHint.indexHint` dele, porque o KNN sem índice aceita no máximo 100 mil registros.
+rede. Cada vetor tem o seu índice ANN (um índice cobre um só campo de vetor), implantado
+junto com a coleção, e toda busca por vetor leva o `searchHint.indexHint` dele, porque o
+KNN sem índice aceita no máximo 100 mil registros.
 
 Os nomes dos campos do corpo REST seguem a documentação do Agent Retrieval de 30/10/2026;
 quem confirma os nomes no ar é o #122 (`make medir-busca`).
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
+from time import sleep
 from typing import Any, Protocol
 
 import google.auth
@@ -22,9 +24,12 @@ from api.indice_da_busca import Consulta, Filtros, Registro
 
 URL_BASE = "https://vectorsearch.googleapis.com/v1beta"
 RECALL_ALVO = 0.95
+REGISTROS_POR_LOTE = 200
 CAMPO_DO_VETOR_DA_DESCRICAO = "descricao_vetor"
 CAMPO_DO_VETOR_DO_QUADRO = "quadro_vetor"
-# Declarados no índice na criação: é ele que filtra junto com a busca.
+# Onde a busca por texto procura.
+CAMPOS_DE_TEXTO = ["texto", "descricao"]
+# Declarados nos índices na criação: são eles que filtram junto com a busca.
 CAMPOS_DE_FILTRO = [
     "tipo",
     "job_id",
@@ -52,7 +57,8 @@ class ConfigDaBusca:
     projeto: str
     regiao: str
     colecao: str
-    indice: str
+    indice_da_descricao: str
+    indice_do_quadro: str
     dimensao: int
 
     @classmethod
@@ -62,7 +68,8 @@ class ConfigDaBusca:
             projeto=ambiente["GCP_PROJECT_ID"],
             regiao=ambiente["BUSCA_REGIAO"],
             colecao=ambiente["BUSCA_COLECAO"],
-            indice=ambiente["BUSCA_INDICE"],
+            indice_da_descricao=ambiente["BUSCA_INDICE_DESCRICAO"],
+            indice_do_quadro=ambiente["BUSCA_INDICE_QUADRO"],
             dimensao=int(ambiente["BUSCA_DIMENSAO"]),
         )
 
@@ -75,8 +82,24 @@ class ConfigDaBusca:
         return f"{self.local}/collections/{self.colecao}"
 
     @property
-    def caminho_do_indice(self) -> str:
-        return f"{self.caminho_da_colecao}/indexes/{self.indice}"
+    def indices(self) -> dict[str, str]:
+        """O id do índice ANN de cada campo de vetor."""
+        return {
+            CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao,
+            CAMPO_DO_VETOR_DO_QUADRO: self.indice_do_quadro,
+        }
+
+    def caminho_do_indice(self, campo: str) -> str:
+        return f"{self.caminho_da_colecao}/indexes/{self.indices[campo]}"
+
+
+def _dia(d: date) -> int:
+    """A data como AAAAMMDD: os filtros de intervalo só valem para número."""
+    return d.year * 10_000 + d.month * 100 + d.day
+
+
+def _data(dia: int) -> date:
+    return date(dia // 10_000, dia // 100 % 100, dia % 100)
 
 
 def filtro_do_pedido(f: Filtros) -> dict[str, Any] | None:
@@ -91,42 +114,56 @@ def filtro_do_pedido(f: Filtros) -> dict[str, Any] | None:
     igual("programa", f.programa)
     igual("categoria", f.categoria)
     if f.cor_base is not None:
-        condicoes.append({"cor_base": {"$contains": f.cor_base}})
+        condicoes.append({"cor_base": {"$all": [f.cor_base]}})
     igual("dono", f.dono)
     if f.pessoa is not None:
-        condicoes.append({"pessoas": {"$contains": f.pessoa}})
+        condicoes.append({"pessoas": {"$all": [f.pessoa]}})
     igual("marca", f.marca)
     igual("relacao", f.relacao)
     if f.exibido_desde is not None:
-        condicoes.append({"data_de_exibicao": {"$gte": f.exibido_desde.isoformat()}})
+        condicoes.append({"data_de_exibicao": {"$gte": _dia(f.exibido_desde)}})
     if f.exibido_ate is not None:
-        condicoes.append({"data_de_exibicao": {"$lte": f.exibido_ate.isoformat()}})
+        condicoes.append({"data_de_exibicao": {"$lte": _dia(f.exibido_ate)}})
     return {"$and": condicoes} if condicoes else None
 
 
 def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]:
-    """O corpo do `batchSearch`: filtros, texto, significado e vetor, fundidos por RRF."""
+    """O corpo do `batchSearch`: filtros, texto, significado e vetor, fundidos por RRF.
+
+    As buscas por vetor (significado e quadro) levam o `indexHint` do índice ANN do seu
+    campo; a busca por texto não é KNN e não usa índice de vetor. Só filtros não é busca:
+    levanta `ValueError`.
+    """
     comum: dict[str, Any] = {
         "topK": consulta.limite,
-        "searchHint": {
-            "indexHint": {"name": config.caminho_do_indice},
-            "targetRecall": RECALL_ALVO,
-        },
+        "outputFields": {"dataFields": "*"},
     }
     filtro = filtro_do_pedido(consulta.filtros)
     if filtro is not None:
         comum["filter"] = filtro
 
+    def no_indice(campo: str) -> dict[str, Any]:
+        return {
+            **comum,
+            "searchField": campo,
+            "searchHint": {
+                "indexHint": {
+                    "name": config.caminho_do_indice(campo),
+                    "denseScannParams": {"targetRecall": RECALL_ALVO},
+                }
+            },
+        }
+
     buscas: list[dict[str, Any]] = []
     if consulta.texto:
-        buscas.append({"textSearch": {**comum, "searchText": consulta.texto}})
+        texto = {"text": consulta.texto, "fields": CAMPOS_DE_TEXTO}
+        buscas.append({"textSearch": {**comum, "structuredQuery": {"text": texto}}})
     if consulta.significado:
         buscas.append(
             {
                 "semanticSearch": {
-                    **comum,
+                    **no_indice(CAMPO_DO_VETOR_DA_DESCRICAO),
                     "searchText": consulta.significado,
-                    "searchField": CAMPO_DO_VETOR_DA_DESCRICAO,
                     "taskType": "RETRIEVAL_QUERY",
                 }
             }
@@ -135,15 +172,13 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
         buscas.append(
             {
                 "vectorSearch": {
-                    **comum,
-                    "searchField": CAMPO_DO_VETOR_DO_QUADRO,
+                    **no_indice(CAMPO_DO_VETOR_DO_QUADRO),
                     "vector": {"values": consulta.vetor_do_quadro},
                 }
             }
         )
     if not buscas:
-        # Só filtros: uma busca de texto vazia, para o pedido ainda usar o índice.
-        buscas.append({"textSearch": {**comum, "searchText": ""}})
+        raise ValueError("a busca precisa de texto, significado ou vetor do quadro")
     pedido: dict[str, Any] = {"searches": buscas}
     if len(buscas) > 1:
         pedido["combine"] = {"ranker": {"rrf": {"weights": [1.0] * len(buscas)}}}
@@ -151,7 +186,7 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
 
 
 def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
-    """O esquema dos dados, os vetores e o índice ANN (com os campos de filtro)."""
+    """O esquema dos dados e dos vetores da coleção."""
     texto = {"type": "string"}
     lista = {"type": "array", "items": {"type": "string"}}
     numero = {"type": "integer"}
@@ -160,7 +195,7 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
         "tipo": texto,
         "job_id": texto,
         "programa": texto,
-        "data_de_exibicao": texto,
+        "data_de_exibicao": numero,  # AAAAMMDD
         "inicio_ms": numero,
         "fim_ms": numero,
         "pessoas": lista,
@@ -186,13 +221,19 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
             },
             CAMPO_DO_VETOR_DO_QUADRO: {"denseVector": {"dimensions": config.dimensao}},
         },
-        "indice": {
+    }
+
+
+def indices_da_colecao(config: ConfigDaBusca) -> dict[str, dict[str, Any]]:
+    """O corpo de cada índice ANN, pelo id: um campo de vetor, os de filtro e os guardados."""
+    guardados = list(esquema_da_colecao(config)["dataSchema"]["properties"])
+    return {
+        indice: {
+            "indexField": campo,
             "filterFields": CAMPOS_DE_FILTRO,
-            "indexedVectorFields": [
-                CAMPO_DO_VETOR_DA_DESCRICAO,
-                CAMPO_DO_VETOR_DO_QUADRO,
-            ],
-        },
+            "storeFields": guardados,
+        }
+        for campo, indice in config.indices.items()
     }
 
 
@@ -200,28 +241,51 @@ class JaExiste(Exception):
     """O transporte levanta quando a coleção ou o índice já existe (HTTP 409)."""
 
 
-def criar_colecao(config: ConfigDaBusca, transporte: Transporte) -> None:
-    """Cria a coleção e o índice ANN dela; não faz nada no que já existe."""
-    esquema = esquema_da_colecao(config)
-    indice = {"filterFields": esquema["indice"]["filterFields"], "denseScann": {}} | {
-        "indexedVectorFields": esquema["indice"]["indexedVectorFields"]
-    }
-    colecao = {k: esquema[k] for k in ("dataSchema", "vectorSchema")}
-    for caminho, corpo in (
-        (f"{config.local}/collections?collectionId={config.colecao}", colecao),
+def esperar(
+    operacao: dict[str, Any],
+    transporte: Transporte,
+    dormir: Callable[[float], None] = sleep,
+    intervalo_s: float = 10.0,
+) -> None:
+    """Espera a operação de longa duração (criar ou apagar coleção e índice) terminar."""
+    while not operacao.get("done", True):
+        dormir(intervalo_s)
+        operacao = transporte("GET", operacao["name"], None)
+    if "error" in operacao:
+        raise RuntimeError(f"operação {operacao.get('name')}: {operacao['error']}")
+
+
+def criar_colecao(
+    config: ConfigDaBusca,
+    transporte: Transporte,
+    dormir: Callable[[float], None] = sleep,
+) -> None:
+    """Cria a coleção e os índices ANN dela, um depois do outro, esperando cada um
+    ficar pronto; não faz nada no que já existe."""
+    pedidos = [
         (
-            f"{config.caminho_da_colecao}/indexes?indexId={config.indice}",
-            indice,
-        ),
-    ):
+            f"{config.local}/collections?collectionId={config.colecao}",
+            esquema_da_colecao(config),
+        )
+    ] + [
+        (f"{config.caminho_da_colecao}/indexes?indexId={indice}", corpo)
+        for indice, corpo in indices_da_colecao(config).items()
+    ]
+    for caminho, corpo in pedidos:
         try:
-            transporte("POST", caminho, corpo)
+            operacao = transporte("POST", caminho, corpo)
         except JaExiste:
-            pass
+            continue
+        esperar(operacao, transporte, dormir)
 
 
-def apagar_colecao(config: ConfigDaBusca, transporte: Transporte) -> None:
-    transporte("DELETE", config.caminho_da_colecao, None)
+def apagar_colecao(
+    config: ConfigDaBusca,
+    transporte: Transporte,
+    dormir: Callable[[float], None] = sleep,
+) -> None:
+    """Apaga a coleção (e os índices dela) e espera a operação terminar."""
+    esperar(transporte("DELETE", config.caminho_da_colecao, None), transporte, dormir)
 
 
 def _dados(r: Registro) -> dict[str, Any]:
@@ -236,9 +300,7 @@ def _dados(r: Registro) -> dict[str, Any]:
     }
     opcionais = {
         "programa": r.programa,
-        "data_de_exibicao": r.data_de_exibicao.isoformat()
-        if r.data_de_exibicao
-        else None,
+        "data_de_exibicao": _dia(r.data_de_exibicao) if r.data_de_exibicao else None,
         "categoria": r.categoria,
         "tipo_do_objeto": r.tipo_do_objeto,
         "cor": r.cor,
@@ -261,7 +323,7 @@ def _registro(dados: dict[str, Any]) -> Registro:
         inicio_ms=dados["inicio_ms"],
         fim_ms=dados["fim_ms"],
         programa=dados.get("programa"),
-        data_de_exibicao=date.fromisoformat(data) if data else None,
+        data_de_exibicao=_data(int(data)) if data else None,
         pessoas=dados.get("pessoas", []),
         categoria=dados.get("categoria"),
         tipo_do_objeto=dados.get("tipo_do_objeto"),
@@ -301,8 +363,8 @@ class AgentRetrieval:
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
         self.apagar(job_id)
-        for i in range(0, len(registros), 200):
-            pedacos = registros[i : i + 200]
+        for i in range(0, len(registros), REGISTROS_POR_LOTE):
+            pedacos = registros[i : i + REGISTROS_POR_LOTE]
             self._chamar(
                 "dataObjects:batchCreate", {"requests": [_criacao(r) for r in pedacos]}
             )
@@ -314,8 +376,8 @@ class AgentRetrieval:
         return [_registro(r["dataObject"]["data"]) for r in resposta.get("results", [])]
 
     def total(self) -> int:
-        resposta = self._chamar("dataObjects:aggregate", {"aggregate": "COUNT"})
-        return int(resposta.get("count", 0))
+        resposta = self._chamar("dataObjects:aggregate", {"aggregate": "count"})
+        return sum(int(r.get("count", 0)) for r in resposta.get("aggregateResults", []))
 
 
 def transporte_http() -> Transporte:
