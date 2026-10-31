@@ -15,7 +15,8 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 | Segurança | Produção acessível só pela rede da RedeTV; chave de API por sistema; login pelo Identity Platform; Cloud Armor e VPC Service Controls |
 | Duplicidade | `Idempotency-Key` por requisição; SHA-256 conferido depois do upload evita processar o mesmo arquivo duas vezes, sem dar acesso à decupagem de outro sistema |
 | Vídeos longos | Janelas de análise de 5 min em paralelo; qualquer duração, uma resposta única |
-| Fora do escopo | Video Intelligence, Cloud Vision, transcrição separada |
+| Fora do escopo | Video Intelligence, Cloud Vision |
+| Transcrição | Whisper (faster-whisper, Job `transcricao`) transcreve o áudio com o tempo de cada palavra; o Gemini recebe o texto na instrução, diz quem fala e corrige nomes só com prova da tela |
 | Busca | Vídeos e momentos por pessoa, objeto, cena, frase ou imagem: Agent Retrieval híbrido com reordenação |
 | Stack | Python (FastAPI, Pydantic) no back, React com TypeScript no front, Terraform na infraestrutura |
 | Testes | TDD com testes unitários sem nuvem, emuladores locais e um ambiente efêmero por PR no GCP |
@@ -42,7 +43,7 @@ O Gemini 3.5 Flash-Lite é o melhor custo para decupar o vídeo inteiro: custa c
 | Gemini 3.8 Flash | 1,50 / 7,50 (metade até 31/12/2026) | \~1,14 | 87,1% ([model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/)) | Escalonamento e referência do piloto |
 | Gemini 4 Argon | Batch 2,00 / 10,00 (a partir de 01/12/2026) | \~1,53 (Batch) | 91,7% | Não usar no volume |
 
-Premissas do custo por hora: preços Standard do endpoint global, o dobro do Flex ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com transcrição e raciocínio baixo. No dev, em 30/10/2026, o clipe2 (5 min) custou \~US$ 0,02 no Flash-Lite em Standard, ou \~US$ 0,24 por hora, dentro da estimativa. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
+Premissas do custo por hora: preços Standard do endpoint global, o dobro do Flex ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com raciocínio baixo. No dev, em 30/10/2026, o clipe2 (5 min) custou \~US$ 0,02 no Flash-Lite em Standard, ou \~US$ 0,24 por hora, dentro da estimativa. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
 
 Não há benchmark público de vídeo longo para o 3.5 Flash-Lite. Por isso a escolha é confirmada no piloto da E1: cinco programas completos e variados, processados inteiros pelos dois modelos, sem depender das dúvidas do primeiro, e comparados visualmente lado a lado no player (ver Qualidade em produção). Se o Flash-Lite ficar aquém só em famosos, apenas a detecção de pessoas sobe para o 3.8 Flash.
 
@@ -78,7 +79,7 @@ De onde vem a economia:
 | --- | --- |
 | 3.5 Flash-Lite em vez de 3.8 Flash no volume | \~75% a menos por hora |
 | Resolução padrão (70 tokens por quadro) em vez de alta (280) | 75% a menos nos tokens de imagem |
-| Transcrição na mesma chamada do Gemini | Evita o Gemini 3.5 Transcribe, que sairia \~US$ 0,31/h, mais que a passada inteira |
+| Transcrição pelo Whisper no próprio projeto | Evita o Gemini 3.5 Transcribe (\~US$ 0,31/h, mais que a passada inteira); o custo do Job sai do piloto (#81) |
 | Escalonamento seletivo | O 3.8 Flash olha \~10–15% do tempo (dúvidas e amostra), não 100%; a taxa real sai do piloto |
 | SHA-256 do arquivo | Vídeo repetido custa zero |
 | [Batch](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/batch-inference) para o acervo histórico | 50% de desconto, sem disputar cota com o dia a dia |
@@ -127,7 +128,7 @@ O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cl
 | Agent Platform | Gemini em Standard e Batch, rótulos de custo, avaliação | Resposta em segundos no dia a dia, 50% de desconto no acervo e custo por vídeo |
 | Identity Platform | Login de usuários, contas locais, MFA | Gerenciado; gratuito até 49.999 usuários ativos por mês |
 | BigQuery | Eventos de uso, painel da diretoria, relatórios | Consulta barata sobre todo o histórico |
-| Cloud Run (serviço de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Até 80 chamadas por instância: a espera da resposta é dividida e custa centavos |
+| Cloud Run (Job de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Várias janelas ao mesmo tempo numa execução, sem o teto de 1800 s da chamada HTTP do Workflows |
 
 O Agent Engine do Agent Platform, feito para agentes conversacionais, não é necessário para a decupagem, que é um pipeline determinístico. Ele entra numa segunda fase, num assistente de busca no acervo que usa o modo agêntico de vídeo.
 
@@ -269,9 +270,9 @@ A duração do vídeo não tem limite prático: o vídeo vira janelas de anális
 
 1. **Validação e derivados.** Na quarentena, um Cloud Run Job decodifica o arquivo inteiro uma vez. Essa passada valida o vídeo, calcula o SHA-256, detecta os cortes de plano e gera três derivados: o proxy de escalonamento 720p, o proxy de análise 480p com timecode queimado (para a passada de volume) e o proxy de reprodução 480p sem timecode (para o player).
 2. **Plano de janelas.** A duração é dividida em janelas de análise de 300 s com 10 s de contexto. Nenhuma janela é cortada em arquivo: cada chamada aponta para o proxy de análise no Cloud Storage com início e fim (`start_offset` e `end_offset`).
-3. **Uma chamada por janela.** O Workflows dispara as janelas em paralelo, com limite, para um serviço do Cloud Run que chama o Gemini em Standard. Cada instância atende até 80 chamadas ao mesmo tempo, então a espera da resposta é dividida entre elas e custa centavos; num Job, cada janela pagaria CPU parada. A resposta é validada contra o esquema e gravada em `janelas/NNN.json`.
-4. **Escalonamento.** Trechos com dúvida, e também uma amostra aleatória de janelas, voltam ao mesmo serviço com o 3.8 Flash, o proxy de escalonamento 720p, resolução alta e até 2 quadros por segundo. A amostra mede o que a primeira passada deixou de ver, inclusive o que ela nem marcou como dúvida.
-5. **Estado por janela.** Janela concluída fica gravada e nunca é refeita; janela que falha tem novas tentativas próprias, até um limite ([limites do Cloud Run](https://cloud.google.com/run/quotas)). Se o serviço cair entre a resposta do Gemini e a gravação, aquela chamada pode ser cobrada duas vezes; essas repetições entram na conta de custo.
+3. **Uma chamada por janela.** O Workflows roda o Cloud Run Job de análise, que chama o Gemini em Standard para até N janelas ao mesmo tempo (N vem do `infra/main.tf`). É um Job, e não um serviço chamado por HTTP, porque a análise de um programa de 2–3 h passa do teto de 1800 s da chamada HTTP do Workflows (#127). A resposta é validada contra o esquema e gravada em `janelas/NNNN.json`.
+4. **Escalonamento.** Trechos com dúvida, e também uma amostra aleatória de janelas, voltam ao mesmo Job com o 3.8 Flash, o proxy de escalonamento 720p, resolução alta e até 2 quadros por segundo. A amostra mede o que a primeira passada deixou de ver, inclusive o que ela nem marcou como dúvida.
+5. **Estado por janela.** Janela concluída fica gravada e nunca é refeita; janela que falha tem novas tentativas próprias, até um limite ([limites do Cloud Run](https://cloud.google.com/run/quotas)). Se o Job cair entre a resposta do Gemini e a gravação, aquela chamada pode ser cobrada duas vezes; essas repetições entram na conta de custo.
 6. **Consolidação.** Lê as janelas em ordem, une as duplicatas das bordas, aplica a regra de tempos (ver Conteúdo do JSON), liga pautas entre janelas e roda a passada narrativa (só texto). Grava `decupagem.json.gz` e o hash da decupagem.
 7. **Entrega.** `GET /v1/jobs/{id}/decupagem` devolve o documento inteiro em streaming com gzip; o teto de 32 MiB do Cloud Run vale só para respostas sem streaming. O `ETag` é o hash da decupagem.
 
@@ -289,8 +290,8 @@ O JSON cobre os cinco requisitos e traz a transcrição como bônus; todo tempo 
 | Contexto e narrativa | Blocos do programa, pautas com título, resumo, pessoas e locais; resumo geral do vídeo |
 | Objetos, cenários e B-roll | Por plano: ambiente, objetos, ação, enquadramento, movimento de câmera, externa/estúdio, dia/noite e a flag "plano limpo" (sem GC nem ninguém falando para a câmera) |
 | Merchandising e inserções | Marca, tipo (intervalo, merchan com apresentador, patrocínio/vinheta, sobreposição gráfica, marca incidental, menção editorial), início/fim e evidência |
-| Timecode | Planos e B-roll usam os cortes exatos. Eventos visuais (aparição, produto em cena) só se ajustam a um corte que esteja a até 1 s. Falas e menções seguem as próprias palavras e nunca se ajustam a cortes. O tempo original do modelo fica guardado, e início e fim são medidos separadamente. Timecode de origem quando o arquivo tiver |
-| Transcrição | Falas com início/fim e locutor, geradas na mesma chamada do Gemini |
+| Timecode | Planos e B-roll usam os cortes exatos. Eventos visuais (aparição, produto em cena) só se ajustam a um corte que esteja a até 1 s. Falas e menções seguem as próprias palavras e nunca se ajustam a cortes. Textos na tela usam os tempos medidos nos quadros pelo OCR; o que o OCR não acha fica com o tempo do modelo e é dúvida. O tempo original do modelo fica guardado, e início e fim são medidos separadamente. Timecode de origem quando o arquivo tiver |
+| Transcrição | Falas com início/fim e locutor: o texto vem do Whisper, o locutor do Gemini. O texto original do Whisper fica guardado ao lado das correções do Gemini, cada uma com a prova (texto da tela) e a palavra original; as recusadas ficam registradas |
 
 Estrutura de topo, com valores fictícios:
 
@@ -520,7 +521,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Projeto GCP | Projeto `dev` novo na organização da RedeTV, com billing da RedeTV e alerta de orçamento; `staging` e `prod` ficam fora |
 | Região | Tudo em `southamerica-east1`; o Gemini usa o endpoint global, coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
 | Hospedagem | Um único serviço Cloud Run: o FastAPI serve a API e o build do React. Sem balanceador nem Cloud Armor; o front ganha serviço próprio quando o balanceador entrar (E10) |
-| Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → serviço de análise → decupagem no Storage |
+| Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → Job de análise → decupagem no Storage |
 | Login | Só contas locais no Identity Platform, com MFA TOTP obrigatório, criadas por script, inclusive os 2 administradores de emergência com alerta a cada login. Sem papéis: toda conta autenticada envia e vê todos os vídeos |
 | Contas iniciais | Administradores: Bruno e uma pessoa da TI da RedeTV. Usuários: Bruno |
 | Clipes | 5 clipes reais de programas variados, com 1 a 10 min; são também os clipes-ouro do teste de contrato. Ficam só num bucket do `dev`, nunca no git, e o envio ao Gemini é autorizado por escrito |
@@ -529,7 +530,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Derivados | Só o proxy de reprodução (480p H.264 com faststart), que serve ao player e ao Gemini: o modelo vê o mesmo arquivo e o mesmo tempo que o clique usa, e a documentação da Vertex não garante H.265. O proxy de análise com timecode queimado fica para o A/B da E1, se os tempos ficarem ruins |
 | Análise | Uma chamada ao 3.5 Flash-Lite, em Standard ([ADR 0004](adr/0004-gemini-em-standard.md)): o Flex deixou o clipe2 quase 7 min esperando. Ela pede o esquema inteiro (1.2), com tempos crus do modelo em MM:SS (ADR 0003): sem detecção de cortes, sem regra de tempos e com `quadro` vazio |
 | Falhas | 429 ou 5xx do Gemini: até 5 tentativas com backoff e jitter. Resposta fora do esquema: refeita até 2 vezes. Esgotadas as tentativas, `falhou` com `analise_falhou`, nunca uma decupagem parcial. Rótulo de custo com o id do job |
-| Estados do job | `aguardando_upload` → `validando` → `analisando` → `concluido` ou `falhou`, com código (`formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida`, `upload_expirado`, `analise_falhou`). Sem upload completo em 24 h, vai a `falhou` com `upload_expirado` |
+| Estados do job | `aguardando_upload` → `validando` → `analisando` → `concluido` ou `falhou`, com código (`formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida`, `upload_expirado`, `transcricao_falhou`, `ocr_falhou`, `analise_falhou`). Sem upload completo em 24 h, vai a `falhou` com `upload_expirado` |
 | API | `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{id}`, `GET /v1/jobs/{id}/decupagem` e `GET /v1/jobs/{id}/reproducao`, todas com o token do Identity Platform. Sem `DELETE`, webhook, `ETag` nem chave de API |
 | Telas | Login com cadastro do MFA; Biblioteca com lista, status por consulta periódica e upload; Vídeo com player e painel da decupagem por categoria, em que o clique num item salta o player |
 | CI e testes | GitHub Actions com lint, tipos, testes unitários e gitleaks; contrato com o Gemini por cassetes e chamada real sob demanda nos 5 clipes-ouro; Terraform num único `dev`. Ambientes efêmeros por PR, Cloud Deploy e emuladores ficam para a E1 |

@@ -26,7 +26,7 @@ _Evitar_: cena, take
 Plano sem GC e sem ninguém falando para a câmera, reaproveitável como B-roll.
 
 **Texto na tela**:
-GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os tempos.
+GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os tempos. O Gemini lê o texto; os tempos são medidos nos quadros pelo OCR (`medido`), e o texto que o OCR não acha fica com o tempo do Gemini e `medido=False`.
 _Evitar_: lettering
 
 **Perfil do programa**:
@@ -111,8 +111,11 @@ Correção de Editor, num tipo que exige aprovação, que espera a decisão de u
 **Conta local**:
 Usuário criado no próprio sistema de identidade, independente do login do sistema legado da RedeTV.
 
+**Administrador**:
+Papel com todas as permissões, dado automaticamente aos administradores de emergência.
+
 **Administrador de emergência**:
-Conta local com acesso total, segundo fator obrigatório e alerta a cada login; existe para não depender do login legado.
+Conta local que recebe o papel Administrador (acesso total), segundo fator obrigatório e alerta a cada login; existe para não depender do login legado.
 
 **Papel**:
 Pacote de permissões dado a um usuário, opcionalmente limitado a programas.

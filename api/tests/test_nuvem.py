@@ -91,6 +91,34 @@ class TestRepositorioFirestore:
         assert job is not None
         assert (job.estado, job.codigo_falha) == ("falhou", "upload_expirado")
 
+    def test_transitar_grava_quando_o_job_esta_na_origem(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        repositorio.salvar(_job("a", BASE))
+
+        novo = repositorio.transitar("a", "aguardando_upload", {"estado": "validando"})
+
+        assert novo is not None and novo.estado == "validando"
+        assert repositorio.obter("a") == novo
+
+    def test_transitar_de_estado_que_nao_e_mais_o_atual_nao_grava_nada(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        cancelado = _job("a", BASE).model_copy(update={"estado": "cancelado"})
+        repositorio.salvar(cancelado)
+
+        novo = repositorio.transitar(
+            "a", "aguardando_upload", {"estado": "validando", "sha256": "ab" * 32}
+        )
+
+        assert novo is None
+        assert repositorio.obter("a") == cancelado
+
+    def test_transitar_job_inexistente_devolve_none(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        assert repositorio.transitar("x", "aguardando_upload", {}) is None
+
     def test_lista_do_mais_recente_para_o_mais_antigo(
         self, repositorio: RepositorioFirestore
     ) -> None:
@@ -170,11 +198,25 @@ def test_url_de_upload_prende_tipo_e_tamanho_declarados(
     assert "teste-quarentena" in url
 
 
-def test_cancelar_upload_segue_indisponivel(
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_cancelar_upload_apaga_o_objeto_da_quarentena(
     armazenamento: ArmazenamentoStorage,
 ) -> None:
-    with pytest.raises(ServicoIndisponivel):
-        armazenamento.cancelar_upload("job1")
+    bucket = armazenamento._cliente.create_bucket(armazenamento._bucket)
+    bucket.blob("job1").upload_from_string(b"parcial")
+
+    armazenamento.cancelar_upload("job1")
+
+    assert not bucket.blob("job1").exists()
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_cancelar_upload_sem_objeto_nao_falha(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    armazenamento._cliente.create_bucket(armazenamento._bucket)
+
+    armazenamento.cancelar_upload("nunca-subiu")
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")

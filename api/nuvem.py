@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import google.auth
@@ -15,11 +16,14 @@ from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
-    ArmazenamentoIndisponivel,
+    Estado,
     Job,
     ServicoIndisponivel,
 )
+from api.leitura_da_tela import LeituraDaTela
 from api.papeis import PAPEIS, Papel
+from api.progresso_das_janelas import JanelaGravada
+from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
@@ -36,6 +40,26 @@ def objeto_do_proxy(job_id: str) -> str:
     return f"{job_id}/proxy.mp4"
 
 
+def objeto_do_audio(job_id: str) -> str:
+    return f"{job_id}/audio.wav"
+
+
+def objeto_da_transcricao(job_id: str) -> str:
+    return f"{job_id}/transcricao.json"
+
+
+def prefixo_das_janelas(job_id: str) -> str:
+    return f"{job_id}/janelas/"
+
+
+def objeto_da_janela(job_id: str, indice: int) -> str:
+    return f"{prefixo_das_janelas(job_id)}{indice:04d}.json"
+
+
+def objeto_da_leitura_da_tela(job_id: str) -> str:
+    return f"{job_id}/leitura_da_tela.json"
+
+
 def objeto_da_decupagem(job_id: str) -> str:
     return f"{job_id}.json"
 
@@ -44,10 +68,33 @@ class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def salvar(self, job: Job) -> None:
         self._colecao.document(job.id).set(job.model_dump())
+
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        # Lê, confere a origem e grava na mesma transação: um cancelamento que
+        # chegue no meio faz o Firestore repetir a transação, que então vê o novo estado.
+        referencia = self._colecao.document(job_id)
+
+        @firestore.transactional
+        def trocar(transacao: Any) -> Job | None:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                return None
+            job = Job(**(doc.to_dict() or {}))
+            if job.estado != de:
+                return None
+            novo = job.model_copy(update=mudancas)
+            transacao.set(referencia, novo.model_dump())
+            return novo
+
+        resultado: Job | None = trocar(self._cliente.transaction())
+        return resultado
 
     def obter(self, job_id: str) -> Job | None:
         doc = self._colecao.document(job_id).get()
@@ -202,8 +249,115 @@ def assinatura_pelo_iam() -> dict[str, Any]:
     }
 
 
-class ArmazenamentoStorage(ArmazenamentoIndisponivel):
-    """Upload, reprodução e decupagem; o cancelamento do upload segue indisponível."""
+class DecupagensStorage:
+    """A Decupagem no Cloud Storage e o proxy que o Gemini lê: o mesmo adaptador grava e lê."""
+
+    def __init__(
+        self, cliente: ClienteStorage, bucket_de_aceitos: str, bucket_de_decupagens: str
+    ) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+        self._decupagens = bucket_de_decupagens
+
+    def uri_do_proxy(self, job_id: str) -> str:
+        return f"gs://{self._aceitos}/{objeto_do_proxy(job_id)}"
+
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_da_decupagem(job_id)
+        ).upload_from_string(conteudo, content_type="application/json")
+
+    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
+        try:
+            with blob.open("rb") as arquivo:
+                while pedaco := arquivo.read(TAMANHO_DO_PEDACO):
+                    yield pedaco
+        except NotFound as e:
+            raise ServicoIndisponivel from e
+
+
+class TranscricoesStorage:
+    """O áudio e a transcrição, ao lado do proxy no bucket de aceitos."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_aceitos: str) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+
+    def baixar_audio(self, job_id: str, destino: Path) -> bool:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_do_audio(job_id))
+        try:
+            blob.download_to_filename(str(destino))
+        except NotFound:
+            return False
+        return True
+
+    def gravar_transcricao(self, job_id: str, transcricao: Transcricao) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_transcricao(job_id)
+        ).upload_from_string(
+            transcricao.model_dump_json(), content_type="application/json"
+        )
+
+    def ler_transcricao(self, job_id: str) -> Transcricao | None:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_transcricao(job_id))
+        try:
+            return Transcricao.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
+
+
+class JanelasStorage:
+    """O progresso das janelas de análise, um objeto por janela no bucket de aceitos."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_aceitos: str) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+
+    def ler(self, job_id: str) -> dict[int, JanelaGravada]:
+        gravadas = [
+            JanelaGravada.model_validate_json(blob.download_as_bytes())
+            for blob in self._cliente.list_blobs(
+                self._aceitos, prefix=prefixo_das_janelas(job_id)
+            )
+        ]
+        return {g.indice: g for g in gravadas}
+
+    def gravar(self, job_id: str, janela: JanelaGravada) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_janela(job_id, janela.indice)
+        ).upload_from_string(janela.model_dump_json(), content_type="application/json")
+
+
+class LeiturasStorage:
+    """O proxy que o OCR lê e a leitura da tela, no bucket de aceitos."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_aceitos: str) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+
+    def baixar_proxy(self, job_id: str, destino: Path) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_do_proxy(job_id)
+        ).download_to_filename(str(destino))
+
+    def gravar_leitura(self, job_id: str, leitura: LeituraDaTela) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_leitura_da_tela(job_id)
+        ).upload_from_string(leitura.model_dump_json(), content_type="application/json")
+
+    def ler_leitura(self, job_id: str) -> LeituraDaTela | None:
+        blob = self._cliente.bucket(self._aceitos).blob(
+            objeto_da_leitura_da_tela(job_id)
+        )
+        try:
+            return LeituraDaTela.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
+
+
+class ArmazenamentoStorage:
+    """Upload, cancelamento do upload, reprodução e leitura da decupagem."""
 
     def __init__(
         self,
@@ -217,6 +371,9 @@ class ArmazenamentoStorage(ArmazenamentoIndisponivel):
         self._bucket = bucket_de_quarentena
         self._aceitos = bucket_de_aceitos
         self._decupagens = bucket_de_decupagens
+        self._leitor = DecupagensStorage(
+            cliente, bucket_de_aceitos, bucket_de_decupagens
+        )
         self._assinatura = assinatura
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
@@ -234,6 +391,13 @@ class ArmazenamentoStorage(ArmazenamentoIndisponivel):
         )
         return url
 
+    def cancelar_upload(self, job_id: str) -> None:
+        """Apaga o objeto do Job da quarentena; o upload pode nem ter começado."""
+        try:
+            self._cliente.bucket(self._bucket).blob(job_id).delete()
+        except NotFound:
+            pass
+
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
         url: str = blob.generate_signed_url(
@@ -242,10 +406,4 @@ class ArmazenamentoStorage(ArmazenamentoIndisponivel):
         return url
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        try:
-            with blob.open("rb") as arquivo:
-                while pedaco := arquivo.read(TAMANHO_DO_PEDACO):
-                    yield pedaco
-        except NotFound as e:
-            raise ServicoIndisponivel from e
+        return self._leitor.abrir_decupagem(job_id)

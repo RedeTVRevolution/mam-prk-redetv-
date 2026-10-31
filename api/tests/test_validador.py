@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from api import validador
+from api.jobs import CodigoDeFalha
 from api.validador import Recusa, validar
 
 # Sem ffmpeg na máquina (o CI), os testes rodam na imagem do Job: make testar-na-imagem.
@@ -56,7 +58,7 @@ def _probe(arquivo: Path) -> dict[str, list[dict[str, Any]]]:
     return json.loads(saida)  # type: ignore[no-any-return]
 
 
-def _recusa(arquivo: Path, tmp_path: Path) -> str:
+def _recusa(arquivo: Path, tmp_path: Path) -> CodigoDeFalha:
     with pytest.raises(Recusa) as erro:
         validar(arquivo, tmp_path / "saida")
     return erro.value.codigo
@@ -78,6 +80,7 @@ def test_h264_valido_gera_copia_limpa_proxy_e_sha256(tmp_path: Path) -> None:
     aceito = validar(entrada, tmp_path / "saida")
 
     assert aceito.sha256 == hashlib.sha256(entrada.read_bytes()).hexdigest()
+    assert aceito.cortes_ms == ()  # um plano só
     tipos = [f["codec_type"] for f in _probe(aceito.copia_limpa)["streams"]]
     assert sorted(tipos) == ["audio", "video"]
     assert b"segredo" not in aceito.copia_limpa.read_bytes()
@@ -217,3 +220,35 @@ def test_corrupcao_no_meio_do_arquivo_e_recusada(tmp_path: Path) -> None:
     entrada.write_bytes(bytes(dados))
 
     assert _recusa(entrada, tmp_path) == "arquivo_corrompido"
+
+
+def test_audio_sai_da_copia_limpa_em_mono_16khz_ao_lado_dela(tmp_path: Path) -> None:
+    entrada = _gerar(tmp_path / "video.mp4", extra=("-ac", "2", "-ar", "44100"))
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert aceito.audio == aceito.copia_limpa.parent / "audio.wav"
+    (faixa,) = _probe(aceito.audio)["streams"]
+    assert faixa["codec_type"] == "audio"
+    assert faixa["channels"] == 1
+    assert faixa["sample_rate"] == "16000"
+    assert float(faixa["duration"]) == pytest.approx(2, abs=0.1)
+
+
+def test_video_sem_audio_nao_gera_arquivo_de_audio(tmp_path: Path) -> None:
+    entrada = _gerar(tmp_path / "video.mp4", audio=None)
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert aceito.audio is None
+    assert not (tmp_path / "saida" / "audio.wav").exists()
+
+
+def test_falha_ao_separar_o_audio_recusa_e_apaga_a_copia_e_o_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entrada = _gerar(tmp_path / "video.mp4")
+    monkeypatch.setattr(validador, "_separar_audio", lambda copia, saida: None)
+
+    assert _recusa(entrada, tmp_path) == "arquivo_corrompido"
+    assert list((tmp_path / "saida").iterdir()) == []

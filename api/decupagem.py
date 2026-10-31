@@ -174,12 +174,33 @@ class Comercial(_Intervalo):
 class Fala(_Intervalo):
     locutor: Rotulo = Field(description="Quem fala: nome ou papel.")
     texto: Texto
+    # O texto do Whisper, sem as correções do Gemini; só quando há transcrição.
+    texto_original: Texto | None = None
 
 
-# Um texto na tela é suspeito quando passa deste piso e dura o mesmo que um bloco
-# ou uma pauta, com esta folga: o modelo arredonda os tempos ao segundo.
-LIMITE_DO_TEXTO_LONGO_MS = 30_000
-FOLGA_DA_DURACAO_MS = 1_000
+class CorrecaoDaTranscricao(_Intervalo):
+    """Uma palavra do Whisper que o Gemini corrigiu, com a prova.
+
+    `inicio`/`fim` são o momento da palavra; `original` é o que o Whisper
+    escreveu e `prova` é um texto da tela, já registrado na análise naquele
+    momento, que contém a palavra corrigida.
+    """
+
+    original: Rotulo = Field(description="A palavra como a transcrição a escreveu.")
+    corrigida: Rotulo = Field(
+        description="A palavra corrigida, parecida com a original."
+    )
+    prova: Texto = Field(
+        description="Texto da tela (GC, tarja, logo, legenda) já registrado em "
+        "textos_na_tela naquele momento, que contém a palavra corrigida."
+    )
+
+
+MotivoDaRecusa = Literal["original_ausente", "sem_prova", "semelhanca_abaixo_do_limiar"]
+
+
+class CorrecaoDescartada(CorrecaoDaTranscricao):
+    motivo: MotivoDaRecusa
 
 
 class TextoNaTela(_Intervalo):
@@ -191,6 +212,9 @@ class TextoNaTela(_Intervalo):
         "gc", "tarja", "legenda", "placar", "chamada", "logo", "qr_code", "outro"
     ]
     texto: Texto = Field(description="O texto lido, como aparece.")
+    # Preenchido pelo servidor: `True` se os tempos foram medidos nos quadros,
+    # `False` se o OCR não achou o texto (ficam os tempos do modelo).
+    medido: bool | None = None
 
 
 class Decupagem(_Estrito):
@@ -211,20 +235,13 @@ class Decupagem(_Estrito):
         "ele está na tela; um GC que sai e volta são dois itens. Nunca estenda o "
         "texto até o fim do bloco ou do plano.",
     )
-
-    def textos_com_a_duracao_de_bloco_ou_pauta(self) -> list[TextoNaTela]:
-        """Textos longos com a duração de um bloco ou de uma pauta inteira.
-
-        Compara só a duração, não a posição: o modelo erra onde o texto começa,
-        não o tamanho do trecho que ele copia.
-        """
-        trechos = [i.duracao_ms for i in [*self.programa.blocos, *self.pautas]]
-        return [
-            texto
-            for texto in self.textos_na_tela
-            if texto.duracao_ms > LIMITE_DO_TEXTO_LONGO_MS
-            and any(abs(texto.duracao_ms - d) <= FOLGA_DA_DURACAO_MS for d in trechos)
-        ]
+    correcoes_da_transcricao: list[CorrecaoDaTranscricao] = Field(
+        default=[],
+        description="Só quando a instrução traz a transcrição: palavras dela que "
+        "você corrige, cada uma com a prova de um texto da tela. Sem prova, deixe "
+        "como está. Nunca troque uma palavra por outra de som diferente.",
+    )
+    correcoes_descartadas: list[CorrecaoDescartada] = []
 
     def _intervalos(self) -> list[_Intervalo]:
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
@@ -236,6 +253,8 @@ class Decupagem(_Estrito):
             *self.comerciais,
             *self.transcricao,
             *self.textos_na_tela,
+            *self.correcoes_da_transcricao,
+            *self.correcoes_descartadas,
         ]
 
     @model_validator(mode="after")
@@ -261,6 +280,10 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "fim_modelo_ms",
         "origem",
         "quadro",
+        "texto_original",
+        "medido",
+        "motivo",
+        "correcoes_descartadas",
     }
 )
 
@@ -306,7 +329,7 @@ def esquema_do_modelo() -> dict[str, Any]:
     com tempos em MM:SS e todo campo obrigatório (o opcional vem como null ou
     lista vazia), para o modelo não pular nenhum."""
     esquema = Decupagem.model_json_schema()
-    del esquema["$defs"]["Video"]
+    del esquema["$defs"]["Video"], esquema["$defs"]["CorrecaoDescartada"]
     for definicao in [esquema, *esquema["$defs"].values()]:
         propriedades = definicao.get("properties", {})
         intervalo = "inicio_ms" in propriedades

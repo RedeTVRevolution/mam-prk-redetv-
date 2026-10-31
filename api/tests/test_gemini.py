@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -398,6 +399,21 @@ def test_transporte_vertex_monta_a_chamada_global_com_video_esquema_e_rotulo() -
     # Flex: só ele, sem Provisioned Throughput antes.
     assert pedido["headers"]["X-Vertex-AI-LLM-Shared-Request-Type"] == "flex"
     assert pedido["headers"]["X-Vertex-AI-LLM-Request-Type"] == "shared"
+
+
+def test_transporte_vertex_pede_o_trecho_exato_no_milissegundo() -> None:
+    sessao = SessaoFalsa(_ok("{}"))
+
+    TransporteVertex("p", sessao).gerar(
+        replace(_chamada(), trecho_ms=(8_690_000, 9_000_123))
+    )
+
+    arquivo = sessao.pedidos[0]["json"]["contents"][0]["parts"][0]
+    assert arquivo["videoMetadata"] == {
+        "fps": 1,
+        "startOffset": "8690.000s",
+        "endOffset": "9000.123s",
+    }
 
 
 def test_transporte_vertex_guarda_a_versao_que_a_vertex_informa() -> None:

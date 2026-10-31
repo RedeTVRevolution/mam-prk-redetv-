@@ -5,18 +5,10 @@ listas separadas: uma menção nunca vira aparição. Só as aparições contam 
 tempo de tela.
 """
 
-from api.comparador import normalizar
 from api.decupagem import Pessoa, _Intervalo
+from api.identidade import identidade_do_nome
 
-_NAO_IDENTIFICADO = normalizar("não identificado")
 LISTAS = ("na_imagem", "citada_na_fala", "citada_no_texto")
-
-
-def nao_identificado(nome: str) -> bool:
-    """O nome é o "não identificado" que o modelo usa para quem não reconhece,
-    com ou sem a descrição curta que a instrução pede ("não identificado,
-    repórter de cabelo curto")."""
-    return normalizar(nome).startswith(_NAO_IDENTIFICADO)
 
 
 def unir_pessoas(
@@ -36,13 +28,12 @@ def unir_pessoas(
         for p in pessoas:
             if p.id in mapa[janela]:
                 raise ValueError(f"id de pessoa repetido na janela {janela}: {p.id}")
-            chave = normalizar(p.nome)
-            sem_nome = nao_identificado(p.nome)
-            posicao = None if sem_nome else por_nome.get(chave)
+            chave = identidade_do_nome(p.nome)
+            posicao = None if chave is None else por_nome.get(chave)
             if posicao is None:
                 posicao = len(unidas)
                 unidas.append(p.model_copy(update={"id": f"pes{posicao + 1:02d}"}))
-                if not sem_nome:
+                if chave is not None:
                     por_nome[chave] = posicao
             else:
                 unidas[posicao] = _juntar(unidas[posicao], p)

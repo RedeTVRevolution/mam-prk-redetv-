@@ -6,30 +6,21 @@ O Eventarc entrega pelo menos uma vez, então um evento repetido não faz nada.
 """
 
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 
 from google.cloud import firestore
 from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 
-from api.jobs import Job, RepositorioDeJobs
-from api.nuvem import RepositorioFirestore
+from api.ciclo_de_vida import transitar
+from api.cortes import LIMIAR_PADRAO
+from api.jobs import RepositorioDeJobs
+from api.jobs import agora_utc as agora
+from api.nuvem import RepositorioFirestore, objeto_do_audio
 from api.validador import Recusa, validar
 
 TIPO_DO_VIDEO = "video/mp4"
-
-
-def _atualizar(repositorio: RepositorioDeJobs, job: Job, **campos: object) -> Job:
-    atualizado = job.model_copy(update={**campos, "atualizado_em": datetime.now(UTC)})
-    repositorio.salvar(atualizado)
-    return atualizado
-
-
-def _cancelado(repositorio: RepositorioDeJobs, job_id: str) -> bool:
-    """Relê o Job: o cancelamento pode ter chegado durante o trabalho."""
-    atual = repositorio.obter(job_id)
-    return atual is not None and atual.estado == "cancelado"
+TIPO_DO_AUDIO = "audio/wav"
 
 
 def executar(
@@ -39,35 +30,50 @@ def executar(
     aceitos: Bucket,
     entrada: Path,
     saida: Path,
+    limiar_de_cortes: float = LIMIAR_PADRAO,
 ) -> None:
     """`entrada` é a pasta da quarentena montada; o objeto tem o nome do id."""
     job = repositorio.obter(job_id)
     if job is None or job.estado != "aguardando_upload":
         return
-    job = _atualizar(repositorio, job, estado="validando")
-    try:
-        aceito = validar(entrada / job_id, saida / job_id)
-    except Recusa as recusa:
-        if _cancelado(repositorio, job_id):
-            return
-        _atualizar(repositorio, job, estado="falhou", codigo_falha=recusa.codigo)
-        quarentena.blob(job_id).delete()
+    if not transitar(repositorio, job_id, "aguardando_upload", "validando", agora()):
         return
-    if _cancelado(repositorio, job_id):
+    try:
+        aceito = validar(entrada / job_id, saida / job_id, limiar_de_cortes)
+    except Recusa as recusa:
+        if transitar(
+            repositorio,
+            job_id,
+            "validando",
+            "falhou",
+            agora(),
+            codigo_falha=recusa.codigo,
+        ):
+            quarentena.blob(job_id).delete()
+        return
+    # Releitura só para não subir arquivos à toa; quem decide é a transição.
+    atual = repositorio.obter(job_id)
+    if atual is None or atual.estado != "validando":
         return
     for arquivo in (aceito.copia_limpa, aceito.proxy):
         aceitos.blob(f"{job_id}/{arquivo.name}").upload_from_filename(
             str(arquivo), content_type=TIPO_DO_VIDEO
         )
+    if aceito.audio is not None:
+        # A mesma chave que o Job de transcrição lê.
+        aceitos.blob(objeto_do_audio(job_id)).upload_from_filename(
+            str(aceito.audio), content_type=TIPO_DO_AUDIO
+        )
     quarentena.blob(job_id).delete()
-    if _cancelado(repositorio, job_id):
-        return
-    _atualizar(
+    transitar(
         repositorio,
-        job,
-        estado="analisando",
+        job_id,
+        "validando",
+        "analisando",
+        agora(),
         sha256=aceito.sha256,
         duracao_s=aceito.duracao_s,
+        cortes_ms=aceito.cortes_ms,
     )
 
 
@@ -81,6 +87,7 @@ def main() -> None:
         storage.bucket(os.environ["BUCKET_ACEITOS"]),
         Path(os.environ.get("QUARENTENA_MONTADA", "/quarentena")),
         Path(os.environ["TMPDIR"]),
+        float(os.environ.get("LIMIAR_DE_CORTES", LIMIAR_PADRAO)),
     )
 
 

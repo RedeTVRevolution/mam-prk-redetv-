@@ -6,7 +6,7 @@ import json
 import uuid
 import zlib
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -27,6 +28,8 @@ from api.auth import (
     Sistema,
     Usuario,
 )
+from api.ciclo_de_vida import JaTerminou, transitar
+from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
     Correcao,
     CorrecaoJaExiste,
@@ -59,13 +62,21 @@ from api.correcoes import (
     valor_atual,
     versao_do_modelo,
 )
-from api.papeis import Permissao, RepositorioDePapeis, papeis_efetivos, permissoes_de
+from api.papeis import (
+    Papel,
+    Permissao,
+    RepositorioDePapeis,
+    papeis_do_usuario,
+    permissoes_de,
+)
 from api.programas import PERFIS
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
+# O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
+FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
 Estado = Literal[
     "aguardando_upload",
@@ -82,6 +93,8 @@ CodigoDeFalha = Literal[
     "duracao_excedida",
     "upload_expirado",
     "analise_falhou",
+    "transcricao_falhou",
+    "ocr_falhou",
 ]
 
 
@@ -91,13 +104,22 @@ class Job(BaseModel):
     tamanho_bytes: int
     sha256: str | None = None
     duracao_s: float | None = None
+    # Cortes de câmera da validação, em ms; `None` em Job anterior à detecção.
+    cortes_ms: list[int] | None = None
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
     sistema: str | None = None
     programa: str | None = None
+    # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
+    data_exibicao: date | None = None
     criado_em: datetime
     atualizado_em: datetime
+
+    @field_serializer("data_exibicao")
+    def _data_como_texto(self, data: date | None) -> str | None:
+        # O Firestore não guarda `date`; o Pydantic a lê de volta do texto ISO.
+        return data.isoformat() if data else None
 
 
 class JobPublico(BaseModel):
@@ -109,6 +131,7 @@ class JobPublico(BaseModel):
     codigo_falha: CodigoDeFalha | None
     duracao_s: float | None
     programa: str | None = None
+    data_exibicao: date | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -150,6 +173,7 @@ class NovoJob(BaseModel):
     tamanho_bytes: Annotated[int, Field(strict=True)]
     tipo: Literal["video/mp4"]
     programa: str | None = None  # um nome de `programas.toml`
+    data_exibicao: date | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -173,6 +197,15 @@ class NovoJob(BaseModel):
             raise ValueError("nome sem extensão .mp4")
         return nome
 
+    @field_validator("data_exibicao", mode="before")
+    @classmethod
+    def _data_so_como_texto(cls, valor: Any) -> Any:
+        # O Pydantic leria um número como timestamp e aceitaria data com hora
+        # zerada; aqui só vale "AAAA-MM-DD".
+        if valor is not None and not (isinstance(valor, str) and len(valor) == 10):
+            raise ValueError("data_exibicao deve ser texto AAAA-MM-DD")
+        return valor
+
     @field_validator("programa")
     @classmethod
     def _programa_com_perfil(cls, programa: str | None) -> str | None:
@@ -191,6 +224,16 @@ class RepositorioDeJobs(Protocol):
     def salvar(self, job: Job) -> None: ...
 
     def obter(self, job_id: str) -> Job | None: ...
+
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        """Aplica `mudancas` só se o Job ainda estiver em `de`; atômica.
+
+        Devolve o Job gravado, ou `None` se ele não existe ou já saiu de `de`.
+        Quem decide as transições é `api.ciclo_de_vida`; use `transitar` de lá.
+        """
+        ...
 
     def listar(self) -> list[Job]:
         """Do mais recente para o mais antigo."""
@@ -229,6 +272,15 @@ class RepositorioEmMemoria:
     def obter(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        job = self._jobs.get(job_id)
+        if job is None or job.estado != de:
+            return None
+        self._jobs[job_id] = job.model_copy(update=mudancas)
+        return self._jobs[job_id]
+
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
@@ -241,6 +293,11 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def obter(self, job_id: str) -> Job | None:
+        raise ServicoIndisponivel
+
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
         raise ServicoIndisponivel
 
     def listar(self) -> list[Job]:
@@ -270,20 +327,18 @@ def expirar_uploads(
     """Falha os Jobs sem upload completo há 24 h ou mais e cancela a sessão de upload."""
     expirados: list[str] = []
     for job in repositorio.listar():
-        if (
-            job.estado == "aguardando_upload"
-            and agora - job.criado_em >= PRAZO_DO_UPLOAD
+        if job.estado != "aguardando_upload" or agora - job.criado_em < PRAZO_DO_UPLOAD:
+            continue
+        # Primeiro a transição: se o Job andou nesse meio-tempo, o upload é dele.
+        if transitar(
+            repositorio,
+            job.id,
+            "aguardando_upload",
+            "falhou",
+            agora,
+            codigo_falha="upload_expirado",
         ):
             armazenamento.cancelar_upload(job.id)
-            repositorio.salvar(
-                job.model_copy(
-                    update={
-                        "estado": "falhou",
-                        "codigo_falha": "upload_expirado",
-                        "atualizado_em": agora,
-                    }
-                )
-            )
             expirados.append(job.id)
     return expirados
 
@@ -325,9 +380,9 @@ PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {
 }
 
 
-def _confere_permissao(request: Request, uid: str, permissao: Permissao) -> None:
+def _confere_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> None:
     """403 se a pessoa não tem a permissão por nenhum dos seus papéis."""
-    if not _tem_permissao(request, uid, permissao):
+    if not _tem_permissao(request, pessoa, permissao):
         raise HTTPException(403, f"Sem a permissão {permissao}")
 
 
@@ -339,7 +394,7 @@ def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
             if escopo not in chamador.escopos:
                 raise HTTPException(403, f"Chave sem o escopo {escopo}")
             return chamador
-        _confere_permissao(request, chamador.uid, PERMISSAO_DO_ESCOPO[escopo])
+        _confere_permissao(request, chamador, PERMISSAO_DO_ESCOPO[escopo])
         return chamador
 
     return verificar
@@ -349,7 +404,7 @@ def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `decupagem.editar`; chave de sistema não corrige."""
     if not isinstance(chamador, Usuario):
         raise HTTPException(403, "Chave de sistema não corrige a decupagem")
-    _confere_permissao(request, chamador.uid, "decupagem.editar")
+    _confere_permissao(request, chamador, "decupagem.editar")
     return chamador
 
 
@@ -357,13 +412,23 @@ def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `correcao.aprovar` (o Curador)."""
     if not isinstance(chamador, Usuario):
         raise HTTPException(403, "Chave de sistema não aprova correções")
-    _confere_permissao(request, chamador.uid, "correcao.aprovar")
+    _confere_permissao(request, chamador, "correcao.aprovar")
     return chamador
 
 
-def _tem_permissao(request: Request, uid: str, permissao: Permissao) -> bool:
+def papeis_da_pessoa(request: Request, pessoa: Usuario) -> list[Papel]:
+    """Os papéis efetivos, num ponto só para o `/v1/eu` e as rotas nunca discordarem."""
     papeis: RepositorioDePapeis = request.app.state.papeis
-    return permissao in permissoes_de(papeis_efetivos(papeis.obter(uid)))
+    return papeis_do_usuario(
+        papeis.obter(pessoa.uid),
+        pessoa.email,
+        pessoa.email_verificado,
+        request.app.state.admins,
+    )
+
+
+def _tem_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> bool:
+    return permissao in permissoes_de(papeis_da_pessoa(request, pessoa))
 
 
 def _enxerga(chamador: Chamador, job: Job | None) -> Job:
@@ -396,6 +461,11 @@ def criar_rotas(
         else:
             criado_por, sistema = chamador.uid, None
         agora = relogio()
+        if (
+            novo.data_exibicao is not None
+            and novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date()
+        ):
+            raise HTTPException(422, "Data de exibição no futuro")
         job = Job(
             id=uuid.uuid4().hex,
             nome=novo.nome,
@@ -404,6 +474,7 @@ def criar_rotas(
             criado_por=criado_por,
             sistema=sistema,
             programa=novo.programa,
+            data_exibicao=novo.data_exibicao,
             criado_em=agora,
             atualizado_em=agora,
         )
@@ -445,15 +516,14 @@ def criar_rotas(
     def cancelar(
         job_id: str, chamador: Annotated[Chamador, Depends(_exige("cancelar"))]
     ) -> JobPublico:
-        job = _enxerga(chamador, repositorio.obter(job_id))
-        if job.estado in ("concluido", "falhou"):
-            raise HTTPException(409, f"Job em {job.estado}, não cancelável")
-        if job.estado != "cancelado":
-            job = job.model_copy(
-                update={"estado": "cancelado", "atualizado_em": relogio()}
-            )
-            repositorio.salvar(job)
-        return JobPublico.de(job)
+        _enxerga(chamador, repositorio.obter(job_id))
+        try:
+            job = cancelar_job(repositorio, job_id, relogio())
+        except JaTerminou as terminou:
+            raise HTTPException(
+                409, f"Job em {terminou.estado}, não cancelável"
+            ) from None
+        return JobPublico.de(_enxerga(chamador, job))
 
     @rotas.get("/{job_id}/reproducao")
     def reproducao(
@@ -498,7 +568,7 @@ def criar_rotas(
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
         """Só a correção de quem não é Curador, num tipo da lista, espera decisão."""
         return tipo in aprovacao.tipos() and not _tem_permissao(
-            request, autor.uid, "correcao.aprovar"
+            request, autor, "correcao.aprovar"
         )
 
     @rotas.post("/{job_id}/correcoes", status_code=201)

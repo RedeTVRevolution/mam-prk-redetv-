@@ -18,25 +18,37 @@ def _verificador() -> VerificadorIdentityPlatform:
     )
 
 
-def _token(chave: Any = _CHAVE, **mudancas: Any) -> str:
+def _token(chave: Any = _CHAVE, sem: tuple[str, ...] = (), **mudancas: Any) -> str:
     agora = int(time.time())
     claims: dict[str, Any] = {
         "iss": f"https://securetoken.google.com/{PROJETO}",
         "aud": PROJETO,
         "sub": "u1",
         "email": "ana@redetv.com.br",
+        "email_verified": True,
         "iat": agora,
         "exp": agora + 3600,
         "firebase": {"sign_in_provider": "password", "sign_in_second_factor": "totp"},
     }
     claims.update(mudancas)
+    for claim in sem:
+        del claims[claim]
     return jwt.encode(claims, chave, algorithm="RS256")
 
 
 def test_token_com_segundo_fator_vira_usuario() -> None:
     assert _verificador().verificar(_token()) == Usuario(
-        uid="u1", email="ana@redetv.com.br"
+        uid="u1", email="ana@redetv.com.br", email_verificado=True
     )
+
+
+@pytest.mark.parametrize(
+    "token",
+    [_token(email_verified=False), _token(sem=("email_verified",))],
+    ids=["falso", "ausente"],
+)
+def test_email_sem_verificacao_fica_nao_verificado(token: str) -> None:
+    assert _verificador().verificar(token).email_verificado is False
 
 
 @pytest.mark.parametrize(

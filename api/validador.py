@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from api.cortes import LIMIAR_PADRAO, DeteccaoFalhou, detectar_cortes
+from api.jobs import CodigoDeFalha
+
 MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
 CODECS_VIDEO = {"h264", "hevc"}
 LADO_CURTO_MAXIMO = 1080  # 1080p, também em retrato
@@ -18,10 +21,12 @@ LADO_LONGO_MAXIMO = 1920
 DURACAO_MINIMA_S = 1.0
 DURACAO_MAXIMA_S = 600.0
 TEMPO_LIMITE_S = 900
+NOME_DO_AUDIO = "audio.wav"
+TAXA_DO_AUDIO_HZ = 16_000
 
 
 class Recusa(Exception):
-    def __init__(self, codigo: str) -> None:
+    def __init__(self, codigo: CodigoDeFalha) -> None:
         super().__init__(codigo)
         self.codigo = codigo
 
@@ -32,6 +37,8 @@ class Aceito:
     proxy: Path
     sha256: str
     duracao_s: float
+    audio: Path | None = None
+    cortes_ms: tuple[int, ...] = ()
 
 
 def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -111,7 +118,9 @@ def _conferir_faixas(sondagem: dict[str, Any]) -> None:
         raise Recusa("codec_nao_suportado")
 
 
-def validar(entrada: Path, saida: Path) -> Aceito:
+def validar(
+    entrada: Path, saida: Path, limiar_de_cortes: float = LIMIAR_PADRAO
+) -> Aceito:
     _conferir_ftyp(entrada)
     sondagem = _sondar(entrada)
     _conferir_faixas(sondagem)
@@ -145,7 +154,40 @@ def validar(entrada: Path, saida: Path) -> Aceito:
         ]
     )  # fmt: skip
     if regravar.returncode != 0 or gerar_proxy.returncode != 0:
-        copia.unlink(missing_ok=True)
-        proxy.unlink(missing_ok=True)
-        raise Recusa("arquivo_corrompido")
-    return Aceito(copia, proxy, _sha256(entrada), duracao)
+        raise _corrompido(copia, proxy)
+    audio = None
+    # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
+    if any(f.get("codec_type") == "audio" for f in sondagem.get("streams", [])):
+        audio = _separar_audio(copia, saida)
+        if audio is None:
+            raise _corrompido(copia, proxy)
+    try:
+        cortes = detectar_cortes(copia, limiar_de_cortes)
+    except DeteccaoFalhou:
+        raise _corrompido(copia, proxy, audio) from None
+    return Aceito(copia, proxy, _sha256(entrada), duracao, audio, tuple(cortes))
+
+
+def _corrompido(*gerados: Path | None) -> Recusa:
+    """Apaga o que a validação já gravou e devolve a recusa."""
+    for arquivo in gerados:
+        if arquivo is not None:
+            arquivo.unlink(missing_ok=True)
+    return Recusa("arquivo_corrompido")
+
+
+def _separar_audio(copia: Path, saida: Path) -> Path | None:
+    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; `None` se o ffmpeg falha."""
+    audio = saida / NOME_DO_AUDIO
+    extrair = _executar(
+        [
+            "ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y",
+            "-i", str(copia), "-map", "0:a", "-vn",
+            "-ac", "1", "-ar", str(TAXA_DO_AUDIO_HZ), "-c:a", "pcm_s16le",
+            "-map_metadata", "-1", str(audio),
+        ]
+    )  # fmt: skip
+    if extrair.returncode != 0:
+        audio.unlink(missing_ok=True)
+        return None
+    return audio

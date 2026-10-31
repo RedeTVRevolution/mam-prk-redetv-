@@ -75,24 +75,6 @@ def test_limite_de_ajuste_e_um_segundo() -> None:
     assert LIMITE_DE_AJUSTE_MS == 1000
 
 
-def test_plano_vai_ao_corte_mais_proximo_dos_dois_lados() -> None:
-    d = decupagem(planos=[(4_800, 10_300)])
-    r = aplicar_regra_de_tempos(d, [5_000, 10_000])
-    assert (r.planos[0].inicio_ms, r.planos[0].fim_ms) == (5_000, 10_000)
-
-
-def test_plano_sem_limite_de_distancia() -> None:
-    d = decupagem(planos=[(20_000, 30_000)])
-    r = aplicar_regra_de_tempos(d, [5_000, 50_000])
-    assert (r.planos[0].inicio_ms, r.planos[0].fim_ms) == (5_000, 50_000)
-
-
-def test_plano_usa_inicio_e_duracao_como_cortes() -> None:
-    d = decupagem(planos=[(300, DURACAO_MS - 200)])
-    r = aplicar_regra_de_tempos(d, [30_000])
-    assert (r.planos[0].inicio_ms, r.planos[0].fim_ms) == (0, DURACAO_MS)
-
-
 def test_aparicao_com_corte_a_1000_ms_e_ajustada() -> None:
     d = decupagem(aparicoes=[(5_000, 9_000)])
     r = aplicar_regra_de_tempos(d, [6_000, 8_000])
@@ -146,23 +128,6 @@ def test_inicio_e_fim_pela_propria_distancia() -> None:
     assert (a.inicio_ms, a.fim_ms) == (5_000, 9_500)
 
 
-def test_item_que_colapsa_fica_com_os_tempos_do_modelo() -> None:
-    d = decupagem(planos=[(5_000, 5_400)], aparicoes=[(5_000, 5_400)])
-    r = aplicar_regra_de_tempos(d, [5_200])
-    p = r.planos[0]
-    assert (p.inicio_ms, p.fim_ms, p.inicio_modelo_ms) == (5_000, 5_400, None)
-    a = r.pessoas[0].na_imagem[0]
-    assert (a.inicio_ms, a.fim_ms, a.inicio_modelo_ms) == (5_000, 5_400, None)
-
-
-def test_tempos_originais_guardados_so_nos_itens_ajustados() -> None:
-    d = decupagem(planos=[(4_800, 10_300), (20_000, 30_000)])
-    r = aplicar_regra_de_tempos(d, [5_000, 10_000, 20_000, 30_000])
-    ajustado, igual = r.planos
-    assert (ajustado.inicio_modelo_ms, ajustado.fim_modelo_ms) == (4_800, 10_300)
-    assert (igual.inicio_modelo_ms, igual.fim_modelo_ms) == (None, None)
-
-
 def test_sem_cortes_nada_muda() -> None:
     d = decupagem(planos=[(300, 59_800)], aparicoes=[(5_000, 9_000)])
     assert aplicar_regra_de_tempos(d, []) == d
@@ -171,7 +136,7 @@ def test_sem_cortes_nada_muda() -> None:
 def test_nao_altera_a_decupagem_de_entrada() -> None:
     d = decupagem(planos=[(4_800, 10_300)])
     aplicar_regra_de_tempos(d, [5_000, 10_000])
-    assert d.planos[0].inicio_ms == 4_800
+    assert [(p.inicio_ms, p.fim_ms) for p in d.planos] == [(4_800, 10_300)]
     assert d.planos[0].inicio_modelo_ms is None
 
 
@@ -193,10 +158,85 @@ def test_aparicao_e_comercial_ajustados_guardam_os_tempos_do_modelo() -> None:
     assert (c.inicio_modelo_ms, c.fim_modelo_ms) == (40_000, 50_000)
 
 
+def _planos(r: Decupagem) -> list[tuple[int, int, int | None, int | None]]:
+    return [
+        (p.inicio_ms, p.fim_ms, p.inicio_modelo_ms, p.fim_modelo_ms) for p in r.planos
+    ]
+
+
+def test_plano_do_modelo_que_cobre_tres_cortes_vira_tres_planos() -> None:
+    d = decupagem(planos=[(0, 60_000)])
+    r = aplicar_regra_de_tempos(d, [10_000, 20_000])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [
+        (0, 10_000),
+        (10_000, 20_000),
+        (20_000, 60_000),
+    ]
+    assert {p.ambiente for p in r.planos} == {"estúdio"}
+    assert len({p.id for p in r.planos}) == 3
+    # Os tempos do modelo ficam guardados: o plano original, 0–60 s.
+    assert {(p.inicio_modelo_ms, p.fim_modelo_ms) for p in r.planos} == {(0, 60_000)}
+
+
+def test_plano_herda_a_descricao_do_plano_do_modelo_que_mais_se_sobrepoe() -> None:
+    d = decupagem(planos=[(0, 12_000), (12_000, 60_000)])
+    d = d.model_copy(
+        update={
+            "planos": [
+                d.planos[0].model_copy(update={"ambiente": "estúdio"}),
+                d.planos[1].model_copy(update={"ambiente": "rua"}),
+            ]
+        }
+    )
+    r = aplicar_regra_de_tempos(d, [10_000, 30_000])
+    assert [(p.inicio_ms, p.fim_ms, p.ambiente) for p in r.planos] == [
+        (0, 10_000, "estúdio"),
+        (10_000, 30_000, "rua"),  # 2 s com o estúdio, 18 s com a rua
+        (30_000, 60_000, "rua"),
+    ]
+    assert _planos(r)[0][2:] == (0, 12_000)
+    assert _planos(r)[1][2:] == (12_000, 60_000)
+
+
+def test_plano_que_ja_e_um_intervalo_entre_cortes_fica_como_esta() -> None:
+    d = decupagem(planos=[(0, 5_000), (5_000, 60_000)])
+    r = aplicar_regra_de_tempos(d, [5_000])
+    assert _planos(r) == [(0, 5_000, None, None), (5_000, 60_000, None, None)]
+
+
+def test_plano_do_modelo_fora_dos_cortes_vira_o_intervalo_dos_cortes() -> None:
+    d = decupagem(planos=[(4_800, 10_300)])
+    r = aplicar_regra_de_tempos(d, [5_000, 10_000])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [
+        (0, 5_000),
+        (5_000, 10_000),
+        (10_000, 60_000),
+    ]
+    assert r.planos[1].inicio_modelo_ms == 4_800
+
+
 def test_segunda_passada_mantem_os_tempos_do_modelo() -> None:
     d = decupagem(planos=[(0, 10_300)])
     r = aplicar_regra_de_tempos(d, [10_000])
-    r = aplicar_regra_de_tempos(r, [9_000])
-    p = r.planos[0]
-    assert (p.inicio_ms, p.fim_ms) == (0, 9_000)
-    assert (p.inicio_modelo_ms, p.fim_modelo_ms) == (0, 10_300)
+    r = aplicar_regra_de_tempos(r, [10_000])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [
+        (0, 10_000),
+        (10_000, 60_000),
+    ]
+    assert r.planos[0].inicio_modelo_ms == 0
+    assert r.planos[0].fim_modelo_ms == 10_300
+
+
+def test_sem_planos_do_modelo_os_cortes_nao_inventam_planos() -> None:
+    d = decupagem(aparicoes=[(5_000, 9_000)])
+    assert aplicar_regra_de_tempos(d, [10_000]).planos == []
+
+
+def test_intervalo_que_nenhum_plano_do_modelo_toca_fica_sem_plano() -> None:
+    d = decupagem(planos=[(0, 10_000), (30_000, 60_000)])
+    r = aplicar_regra_de_tempos(d, [10_000, 20_000, 30_000])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [
+        (0, 10_000),
+        (30_000, 60_000),
+    ]
+    assert [p.id for p in r.planos] == ["pla001", "pla002"]

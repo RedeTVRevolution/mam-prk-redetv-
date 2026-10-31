@@ -1,7 +1,7 @@
 """Escalonamento: decide quais janelas de análise são reanalisadas e por quê.
 
 Dois motivos: `duvida` (a primeira passada deixou alguém aparecendo sem nome,
-ou um texto na tela com a duração de um bloco ou pauta inteira) e `amostra`
+ou um texto na tela que o OCR não achou nos quadros, `medido=False`) e `amostra`
 (sorteio determinístico, para medir o que a primeira passada nem marcou como
 dúvida).
 """
@@ -10,7 +10,7 @@ import hashlib
 from typing import Literal
 
 from api.decupagem import Decupagem
-from api.pessoas import nao_identificado
+from api.identidade import nao_identificado
 
 # ponytail: 10% é um chute; o valor real sai do piloto.
 FRACAO_PADRAO = 0.1
@@ -51,6 +51,6 @@ def _na_amostra(chave_de_conteudo: str, indice: int, fracao: float) -> bool:
 
 
 def _tem_duvida(decupagem: Decupagem) -> bool:
-    return bool(decupagem.textos_com_a_duracao_de_bloco_ou_pauta()) or any(
+    return any(t.medido is False for t in decupagem.textos_na_tela) or any(
         p.na_imagem and nao_identificado(p.nome) for p in decupagem.pessoas
     )

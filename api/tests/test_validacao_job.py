@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from google.auth.credentials import AnonymousCredentials
@@ -18,7 +19,7 @@ from google.cloud import firestore
 from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 
-from api.jobs import Job
+from api.jobs import Estado, Job
 from api.nuvem import RepositorioFirestore
 from api.validacao_job import executar
 
@@ -126,12 +127,36 @@ def test_aceito_envia_copia_limpa_e_proxy_apaga_o_original_e_segue_para_analise(
 
     assert ambiente.aceitos.blob("j1/copia_limpa.mp4").exists()
     assert ambiente.aceitos.blob("j1/proxy.mp4").exists()
+    assert ambiente.aceitos.blob("j1/audio.wav").exists()
     assert not ambiente.quarentena.blob("j1").exists()
     job = ambiente.job("j1")
     assert job.estado == "analisando"
     assert job.codigo_falha is None
     assert job.sha256 is not None and len(job.sha256) == 64
     assert job.duracao_s == pytest.approx(2, abs=0.2)
+    assert job.cortes_ms == []
+
+
+def test_cortes_de_camera_ficam_no_job(ambiente: Ambiente, tmp_path: Path) -> None:
+    arquivo = tmp_path / "cortes.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=red:s=320x240:r=10:d=1.5",
+            "-f", "lavfi", "-i", "color=blue:s=320x240:r=10:d=1.5",
+            "-filter_complex", "[0][1]concat=n=2:v=1:a=0",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(arquivo),
+        ],
+        check=True,
+        capture_output=True,
+    )  # fmt: skip
+    ambiente.enviar("j-cortes", arquivo.read_bytes())
+
+    ambiente.executar("j-cortes")
+
+    cortes = ambiente.job("j-cortes").cortes_ms
+    assert cortes is not None and len(cortes) == 1
+    assert abs(cortes[0] - 1_500) <= 100
 
 
 def test_recusado_grava_falhou_com_o_codigo_e_apaga_o_original(
@@ -175,14 +200,17 @@ def test_job_fora_de_aguardando_upload_nao_muda(
 def _cancelar_ao_validar(ambiente: Ambiente) -> None:
     """O cancelamento chega logo depois de o worker marcar `validando`."""
     repositorio = ambiente.repositorio
-    salvar = repositorio.salvar
+    transitar = repositorio.transitar
 
-    def salvar_e_cancelar(job: Job) -> None:
-        salvar(job)
-        if job.estado == "validando":
-            salvar(job.model_copy(update={"estado": "cancelado"}))
+    def transitar_e_cancelar(
+        job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        novo = transitar(job_id, de, mudancas)
+        if novo is not None and novo.estado == "validando":
+            repositorio.salvar(novo.model_copy(update={"estado": "cancelado"}))
+        return novo
 
-    repositorio.salvar = salvar_e_cancelar  # type: ignore[method-assign]
+    repositorio.transitar = transitar_e_cancelar  # type: ignore[method-assign]
 
 
 def test_cancelado_durante_a_validacao_continua_cancelado(
@@ -206,3 +234,31 @@ def test_cancelado_durante_a_validacao_nao_vira_falhou_se_o_arquivo_for_recusado
 
     job = ambiente.job("j5")
     assert (job.estado, job.codigo_falha) == ("cancelado", None)
+
+
+class _CancelaDepoisDaUltimaLeitura(RepositorioFirestore):
+    """O cancelamento chega logo depois de cada leitura do Job em `validando`.
+
+    A leitura devolve o Job de antes do cancelamento, como se ele chegasse
+    entre a última releitura do worker e a gravação.
+    """
+
+    def obter(self, job_id: str) -> Job | None:
+        job = super().obter(job_id)
+        if job is not None and job.estado == "cancelado":
+            return job.model_copy(update={"estado": "validando"})
+        if job is not None and job.estado == "validando":
+            self.salvar(job.model_copy(update={"estado": "cancelado"}))
+        return job
+
+
+def test_cancelamento_depois_da_ultima_leitura_nao_e_sobrescrito(
+    ambiente: Ambiente, tmp_path: Path
+) -> None:
+    ambiente.enviar("j6", _mp4(tmp_path / "v.mp4"))
+    ambiente.repositorio.__class__ = _CancelaDepoisDaUltimaLeitura
+
+    ambiente.executar("j6")
+
+    ambiente.repositorio.__class__ = RepositorioFirestore
+    assert ambiente.job("j6").estado == "cancelado"

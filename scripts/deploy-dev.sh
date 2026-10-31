@@ -41,24 +41,31 @@ tf apply -input=false -target=google_artifact_registry_repository.mam \
   -target=google_identity_platform_config.mam -target=google_project_iam_member.mam \
   -target=google_storage_bucket_iam_member.build_le_fontes \
   -target=google_artifact_registry_repository_iam_member.build_envia \
-  -var imagem=pendente -var imagem_validacao=pendente
+  -var imagem=pendente -var imagem_validacao=pendente -var imagem_transcricao=pendente -var imagem_ocr=pendente
 # O nome do repositório vem do Terraform, o único lugar que monta os nomes.
 REPOSITORIO=$(tf output -raw repositorio)
 COMMIT=$(git rev-parse --short HEAD)
 WEB="$REPOSITORIO/web:$COMMIT"
 # A imagem do Job de validação (#38).
 VALIDACAO="$REPOSITORIO/validacao:$COMMIT"
-# O Cloud Build constrói e envia as duas imagens (cloudbuild.yaml), como a mam-build.
+# A imagem do Job de transcrição (#104), com o modelo do Whisper dentro.
+TRANSCRICAO="$REPOSITORIO/transcricao:$COMMIT"
+# A imagem do Job de OCR da tela (#106), com os modelos do PaddleOCR dentro.
+OCR="$REPOSITORIO/ocr:$COMMIT"
+# O Cloud Build constrói e envia as quatro imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
   --gcs-source-staging-dir "gs://$(tf output -raw bucket_fontes)/fontes" \
-  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
+  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_TRANSCRICAO=$TRANSCRICAO,_OCR=$OCR,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
 # Pelo digest que o Cloud Build enviou, para que um rebuild com o mesmo commit
 # também gere revisão nova. Daqui em diante nada é recompilado.
 digest() { echo "${1%:*}@$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)')"; }
 IMAGEM=$(digest "$WEB")
 IMAGEM_VALIDACAO=$(digest "$VALIDACAO")
-tf apply -input=false -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO"
+IMAGEM_TRANSCRICAO=$(digest "$TRANSCRICAO")
+IMAGEM_OCR=$(digest "$OCR")
+tf apply -input=false -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO" \
+  -var "imagem_transcricao=$IMAGEM_TRANSCRICAO" -var "imagem_ocr=$IMAGEM_OCR"
 
 URL=$(tf output -raw url)
 curl -sSf "$URL/v1/health" >/dev/null

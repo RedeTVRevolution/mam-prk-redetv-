@@ -79,6 +79,8 @@ gh variable set WORKLOAD_IDENTITY_PROVIDER --body "$(terraform -chdir=infra outp
 
 Sem a `WORKLOAD_IDENTITY_PROVIDER`, o job `publicar` não roda.
 
+As contas de `ADMINS_EMERGENCIA` são Administradoras: a API dá o papel `administrador` (todas as permissões) a quem tem um desses e-mails verificados, sem gravar nada no Firestore. Para tirar ou incluir alguém, atualize a variável do repositório com `gh variable set ADMINS_EMERGENCIA --body "a@x.com,b@x.com"` e também o `ADMINS_EMERGENCIA` do `.env`, para os deploys manuais; o próximo merge na `main` publica a mudança. A mesma lista define os destinatários do alerta de login.
+
 Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda a cada pessoa o link para definir a senha; no primeiro login, a pessoa cadastra o aplicativo autenticador. Rodar de novo só reenvia o link. A API recusa todo token sem o segundo fator TOTP, e o Identity Platform bloqueia a conta por um tempo após tentativas erradas.
 
 ## Cassete do Gemini
