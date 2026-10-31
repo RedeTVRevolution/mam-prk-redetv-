@@ -14,11 +14,11 @@ import { criarClienteDaApi, SessaoExpirada } from './api.ts'
 import { AtalhosProvider } from './AtalhosProvider.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
 import Barra from './Barra.tsx'
-import Biblioteca from './Biblioteca.tsx'
+import Acervo from './Acervo.tsx'
 import Login from './Login.tsx'
 import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
-import { ALTURA_DA_BARRA, NAVBAR_DA_BIBLIOTECA } from './tema.ts'
+import { ALTURA_DA_BARRA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
 
 // A amostra do sistema visual é grande e sem login: fica num pedaço à parte do bundle.
@@ -141,12 +141,10 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
   const podeEditar = sessao.usuario.permissoes.includes('decupagem.editar')
   const podeAprovar = sessao.usuario.permissoes.includes('correcao.aprovar')
   const podeEnviar = sessao.usuario.permissoes.includes('video.enviar')
-  const naBiblioteca = rota.tipo === 'acervo' || rota.tipo === 'raiz'
   return (
     <AppShell
       header={{ height: ALTURA_DA_BARRA }}
-      navbar={naBiblioteca ? NAVBAR_DA_BIBLIOTECA : undefined}
-      padding={naBiblioteca ? 'lg' : 'sm'}
+      padding="sm"
     >
       <Barra email={sessao.usuario.email} aoSair={() => void sair()} />
       {rota.tipo === 'video' ? (
@@ -159,10 +157,9 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
             podeAprovar={podeAprovar}
           />
         </AppShell.Main>
-      ) : naBiblioteca ? (
-        // A Biblioteca traz a própria barra lateral e a área principal.
-        // O front só esconde; quem barra é a API.
-        <Biblioteca api={api} podeEnviar={podeEnviar} />
+      ) : rota.tipo === 'acervo' ? (
+        // O front só esconde o envio; quem barra é a API.
+        <Acervo api={api} filtros={rota.filtros} podeEnviar={podeEnviar} />
       ) : (
         <AppShell.Main bg="dark.7">
           <Center h="60vh">

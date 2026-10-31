@@ -1,10 +1,11 @@
+import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
 import { useMemo, useSyncExternalStore, type MouseEvent } from 'react'
 
 // Rotas com endereço sobre a History API, sem biblioteca (princípio 9 de docs/design/principios.md).
 
 export type Rota =
   | { tipo: 'raiz' }
-  | { tipo: 'acervo' }
+  | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'video'; id: string; t: number | null }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
@@ -26,7 +27,7 @@ function instante(busca: string): number | null {
 export function lerRota(caminho: string, busca = ''): Rota {
   const partes = caminho.split('/').filter(Boolean)
   if (partes.length === 0) return { tipo: 'raiz' }
-  if (partes.length === 1 && partes[0] === 'acervo') return { tipo: 'acervo' }
+  if (partes.length === 1 && partes[0] === 'acervo') return { tipo: 'acervo', filtros: filtrosDaBusca(busca) }
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {

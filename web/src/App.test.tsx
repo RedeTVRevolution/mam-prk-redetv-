@@ -81,7 +81,7 @@ test('sem sessão, mostra só o login e não chama a API', async () => {
   expect(chamadas).toEqual([])
 })
 
-test('login com senha e código TOTP abre a Biblioteca com o token na API', async () => {
+test('login com senha e código TOTP abre o Acervo com o token na API', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
 
@@ -210,7 +210,7 @@ test('o botão sair volta ao login e apaga a sessão', async () => {
   expect(await auth.token()).toBeNull()
 })
 
-test('sessão já existente abre direto na Biblioteca', async () => {
+test('sessão já existente abre direto no Acervo', async () => {
   const auth = await autenticadorComSessao()
   render(<App autenticador={auth} />)
 
@@ -317,7 +317,7 @@ test('verificando a sessão mostra um indicador de carregamento', async () => {
   await screen.findByText('Nenhum vídeo enviado ainda.')
 })
 
-test('quem só tem Consulta não vê o upload na Biblioteca', async () => {
+test('quem só tem Consulta não vê o upload no Acervo', async () => {
   servidor.use(
     http.get('/v1/eu', () =>
       HttpResponse.json({
@@ -335,17 +335,17 @@ test('quem só tem Consulta não vê o upload na Biblioteca', async () => {
   await confirmarCodigo(usuario)
 
   await screen.findByText('Nenhum vídeo enviado ainda.')
-  expect(screen.queryByRole('button', { name: 'Enviar MP4' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Enviar vídeo' })).toBeNull()
 })
 
-test('quem tem video.enviar vê o upload na Biblioteca', async () => {
+test('quem tem video.enviar vê o upload no Acervo', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador()} />)
   await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
   await confirmarCodigo(usuario)
 
-  expect(await screen.findByRole('button', { name: 'Enviar MP4' })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: 'Enviar vídeo' })).toBeTruthy()
 })
 
 
@@ -527,7 +527,7 @@ test('voltar no navegador volta ao acervo', async () => {
 test('? abre os atalhos da tela, e com o foco num campo de texto vira texto', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={await autenticadorComSessao()} />)
-  await screen.findByRole('button', { name: 'Enviar MP4' })
+  await screen.findByRole('button', { name: 'Enviar vídeo' })
   const campo = document.createElement('input')
   document.body.append(campo)
 

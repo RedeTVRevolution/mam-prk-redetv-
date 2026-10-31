@@ -1,7 +1,7 @@
 import type { Usuario } from './App.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
-import type { Job, JobCriado } from './Biblioteca.tsx'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
+import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './Video.tsx'
 
 /** 401 ou sessão sem token. O cliente já avisou quem o criou; quem chama só não mostra erro. */
@@ -54,7 +54,8 @@ export interface ClienteDoJob {
 
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
-  jobs(): Promise<Job[]>
+  /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
+  acervo(filtros: FiltrosDoAcervo, cursor?: string | null): Promise<PaginaDoAcervo>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
   job(id: string): ClienteDoJob
@@ -69,10 +70,10 @@ export function criarClienteDaApi(
   autenticador: Autenticador,
   aoSessaoExpirada: () => void,
 ): ClienteDaApi {
-  async function chamar<T>(
+  async function pedir(
     caminho: string,
     opcoes: { post?: true; corpo?: object } = {},
-  ): Promise<T> {
+  ): Promise<Response> {
     const token = await autenticador.token()
     if (!token) {
       aoSessaoExpirada()
@@ -97,7 +98,14 @@ export function criarClienteDaApi(
       if (resposta.status === 404) throw new NaoEncontrado(await detalhe(resposta))
       throw new FalhaNaApi(resposta.status)
     }
-    return (await resposta.json()) as T
+    return resposta
+  }
+
+  async function chamar<T>(
+    caminho: string,
+    opcoes: { post?: true; corpo?: object } = {},
+  ): Promise<T> {
+    return (await (await pedir(caminho, opcoes)).json()) as T
   }
 
   function job(id: string): ClienteDoJob {
@@ -136,7 +144,13 @@ export function criarClienteDaApi(
 
   return {
     eu: () => chamar('/v1/eu'),
-    jobs: () => chamar('/v1/jobs'),
+    acervo: async (filtros, cursor = null) => {
+      const resposta = await pedir(`/v1/jobs?${filtrosParaApi(filtros, cursor)}`)
+      return {
+        jobs: (await resposta.json()) as Job[],
+        proximo: resposta.headers.get('X-Proximo-Cursor'),
+      }
+    },
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     job,

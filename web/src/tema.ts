@@ -7,7 +7,6 @@ import {
   Popover,
   Table,
   Tooltip,
-  type AppShellNavbarConfiguration,
   type CSSVariablesResolver,
   type MantineColorsTuple,
 } from '@mantine/core'
@@ -131,12 +130,8 @@ export const variaveis: CSSVariablesResolver = () => ({
   },
 })
 
-// A barra lateral é da Biblioteca, mas o AppShell é um só (o do App): dois AppShells
-// aninhados disputam as mesmas variáveis de layout no :root.
 /** A barra fixa do topo: no máximo 44 px. */
 export const ALTURA_DA_BARRA = 44
-
-export const NAVBAR_DA_BIBLIOTECA: AppShellNavbarConfiguration = { width: 240, breakpoint: 'sm' }
 
 // O selo usa a cor do estado como texto, sobre a mesma cor a 10% (variante light).
 export const ESTADOS_DO_JOB = {

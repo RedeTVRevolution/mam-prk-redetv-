@@ -10,6 +10,7 @@ import {
   SessaoExpirada,
 } from './api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
+import { SEM_FILTROS } from './jobs.ts'
 
 const servidor = setupServer()
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
@@ -50,7 +51,7 @@ test('401 vira SessaoExpirada e avisa uma vez', async () => {
   servidor.use(http.get('/v1/jobs', () => new HttpResponse(null, { status: 401 })))
   const { api, aoSessaoExpirada } = await cliente()
 
-  await expect(api.jobs()).rejects.toBeInstanceOf(SessaoExpirada)
+  await expect(api.acervo(SEM_FILTROS)).rejects.toBeInstanceOf(SessaoExpirada)
   expect(aoSessaoExpirada).toHaveBeenCalledTimes(1)
 })
 
@@ -65,7 +66,7 @@ test('sem token nem chama a API: SessaoExpirada', async () => {
   const aoSessaoExpirada = vi.fn()
   const api = criarClienteDaApi(new AutenticadorFalso([]), aoSessaoExpirada)
 
-  await expect(api.jobs()).rejects.toBeInstanceOf(SessaoExpirada)
+  await expect(api.acervo(SEM_FILTROS)).rejects.toBeInstanceOf(SessaoExpirada)
   expect(aoSessaoExpirada).toHaveBeenCalledTimes(1)
   expect(chamou).toBe(false)
 })
