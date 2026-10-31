@@ -15,7 +15,7 @@ from google.cloud.storage import Client as ClienteStorage
 from api.ciclo_de_vida import transitar
 from api.jobs import RepositorioDeJobs
 from api.jobs import agora_utc as agora
-from api.nuvem import RepositorioFirestore
+from api.nuvem import RepositorioFirestore, objeto_do_audio
 from api.validador import Recusa, validar
 
 TIPO_DO_VIDEO = "video/mp4"
@@ -58,7 +58,8 @@ def executar(
             str(arquivo), content_type=TIPO_DO_VIDEO
         )
     if aceito.audio is not None:
-        aceitos.blob(f"{job_id}/{aceito.audio.name}").upload_from_filename(
+        # A mesma chave que o Job de transcrição lê.
+        aceitos.blob(objeto_do_audio(job_id)).upload_from_filename(
             str(aceito.audio), content_type=TIPO_DO_AUDIO
         )
     quarentena.blob(job_id).delete()

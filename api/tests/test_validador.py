@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from api import validador
 from api.jobs import CodigoDeFalha
 from api.validador import Recusa, validar
 
@@ -240,3 +241,13 @@ def test_video_sem_audio_nao_gera_arquivo_de_audio(tmp_path: Path) -> None:
 
     assert aceito.audio is None
     assert not (tmp_path / "saida" / "audio.wav").exists()
+
+
+def test_falha_ao_separar_o_audio_recusa_e_apaga_a_copia_e_o_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entrada = _gerar(tmp_path / "video.mp4")
+    monkeypatch.setattr(validador, "_separar_audio", lambda copia, saida: None)
+
+    assert _recusa(entrada, tmp_path) == "arquivo_corrompido"
+    assert list((tmp_path / "saida").iterdir()) == []

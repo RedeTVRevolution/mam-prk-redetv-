@@ -98,6 +98,9 @@ main:
                   - env:
                       - name: JOB_ID
                         value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de transcrição tem até 3600 s.
+            connector_params:
+              timeout: 3900
         except:
           as: e
           steps:

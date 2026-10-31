@@ -153,15 +153,19 @@ def validar(entrada: Path, saida: Path) -> Aceito:
         copia.unlink(missing_ok=True)
         proxy.unlink(missing_ok=True)
         raise Recusa("arquivo_corrompido")
-    return Aceito(copia, proxy, _sha256(entrada), duracao, _separar_audio(copia, saida))
+    audio = None
+    # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
+    if any(f.get("codec_type") == "audio" for f in sondagem.get("streams", [])):
+        audio = _separar_audio(copia, saida)
+        if audio is None:
+            copia.unlink(missing_ok=True)
+            proxy.unlink(missing_ok=True)
+            raise Recusa("arquivo_corrompido")
+    return Aceito(copia, proxy, _sha256(entrada), duracao, audio)
 
 
 def _separar_audio(copia: Path, saida: Path) -> Path | None:
-    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; sem faixa de áudio, `None`."""
-    if not any(
-        f.get("codec_type") == "audio" for f in _sondar(copia).get("streams", [])
-    ):
-        return None
+    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; `None` se o ffmpeg falha."""
     audio = saida / NOME_DO_AUDIO
     extrair = _executar(
         [
@@ -173,5 +177,5 @@ def _separar_audio(copia: Path, saida: Path) -> Path | None:
     )  # fmt: skip
     if extrair.returncode != 0:
         audio.unlink(missing_ok=True)
-        raise Recusa("arquivo_corrompido")
+        return None
     return audio

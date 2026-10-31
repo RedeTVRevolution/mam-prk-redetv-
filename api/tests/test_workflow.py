@@ -107,6 +107,8 @@ def test_transcricao_roda_o_job_com_override_de_job_id() -> None:
     assert "googleapis.run.v2.projects.locations.jobs.run" in passo
     assert "jobs/${job_de_transcricao}" in passo
     assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
+    # O conector espera mais que o timeout de 3600 s do Job, não o padrão de 1800 s.
+    assert "timeout: 3900" in passo
 
 
 def test_falha_da_transcricao_grava_transcricao_falhou_sem_sobrescrever_outro_estado() -> (
