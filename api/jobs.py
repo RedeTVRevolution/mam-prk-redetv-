@@ -3,13 +3,16 @@
 import hashlib
 import itertools
 import json
+import re
+import unicodedata
 import uuid
 import zlib
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -123,8 +126,13 @@ class Job(BaseModel):
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
+    # E-mail de quem criou; `None` em Job de sistema e em Job anterior ao campo.
+    criado_por_email: str | None = None
     sistema: str | None = None
     programa: str | None = None
+    # Palavras normalizadas do nome do arquivo, para a busca por nome (o Firestore
+    # não busca por trecho); vazio em Job anterior ao campo.
+    palavras: list[str] = []
     # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
     data_exibicao: date | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
@@ -138,6 +146,21 @@ class Job(BaseModel):
         return data.isoformat() if data else None
 
 
+def palavras_do_nome(nome: str) -> list[str]:
+    """Palavras do nome do arquivo, sem maiúsculas nem acentos, quebradas em `_ - . espaço`."""
+    sem_acento = "".join(
+        c for c in unicodedata.normalize("NFKD", nome) if not unicodedata.combining(c)
+    )
+    palavras = [p for p in re.split(r"[\W_]+", sem_acento.casefold()) if p]
+    return list(dict.fromkeys(palavras))
+
+
+class EnviadoPor(BaseModel):
+    tipo: Literal["pessoa", "sistema"]
+    # O e-mail da pessoa (`None` em Job antigo) ou o nome do sistema.
+    nome: str | None
+
+
 class JobPublico(BaseModel):
     """O que a API mostra de um Job; o SHA-256 e o tamanho ficam no armazenamento."""
 
@@ -149,12 +172,19 @@ class JobPublico(BaseModel):
     programa: str | None = None
     data_exibicao: date | None = None
     indexacao: Indexacao | None = None
+    enviado_por: EnviadoPor
     criado_em: datetime
     atualizado_em: datetime
 
     @classmethod
     def de(cls, job: Job) -> "JobPublico":
-        return cls(**job.model_dump(include=set(cls.model_fields)))
+        campos = set(cls.model_fields) - {"enviado_por"}
+        enviado_por = (
+            EnviadoPor(tipo="sistema", nome=job.sistema)
+            if job.sistema is not None
+            else EnviadoPor(tipo="pessoa", nome=job.criado_por_email)
+        )
+        return cls(**job.model_dump(include=campos), enviado_por=enviado_por)
 
 
 def _etag(publico: JobPublico) -> str:
@@ -235,6 +265,61 @@ class ServicoIndisponivel(Exception):
     """Porta ainda sem adaptador real."""
 
 
+class CursorInvalido(Exception):
+    """O cursor não aponta para um Job que exista."""
+
+
+Ordem = Literal["enviado", "exibicao"]
+LIMITE_PADRAO = 50
+LIMITE_MAXIMO = 200
+
+
+@dataclass(frozen=True)
+class FiltroDeJobs:
+    """Os filtros do acervo; todos opcionais e combináveis."""
+
+    programa: str | None = None
+    estados: frozenset[str] = frozenset()
+    exibicao_de: date | None = None
+    exibicao_ate: date | None = None
+    palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
+    sistema: str | None = None
+    ordem: Ordem = "enviado"
+    limite: int | None = None  # `None`: a lista inteira, sem cursor
+    cursor: str | None = None  # id do último Job da página anterior
+
+
+@dataclass(frozen=True)
+class PaginaDeJobs:
+    jobs: list[Job]
+    proximo_cursor: str | None = None
+
+
+def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
+    """Todos os filtros menos ordem e paginação."""
+    if filtro.programa is not None and job.programa != filtro.programa:
+        return False
+    if filtro.sistema is not None and job.sistema != filtro.sistema:
+        return False
+    if filtro.estados and job.estado not in filtro.estados:
+        return False
+    if filtro.exibicao_de is not None or filtro.exibicao_ate is not None:
+        if job.data_exibicao is None:
+            return False
+        if filtro.exibicao_de and job.data_exibicao < filtro.exibicao_de:
+            return False
+        if filtro.exibicao_ate and job.data_exibicao > filtro.exibicao_ate:
+            return False
+    return all(p in job.palavras for p in filtro.palavras)
+
+
+def chave_de_ordem(job: Job, ordem: Ordem) -> tuple[Any, ...]:
+    """Maior primeiro. Na exibição, quem não tem data fica no fim; o id desempata."""
+    if ordem == "exibicao":
+        return (job.data_exibicao is not None, job.data_exibicao or date.min, job.id)
+    return (job.criado_em, job.id)
+
+
 class RepositorioDeJobs(Protocol):
     """Porta para o Firestore; os testes usam uma versão em memória."""
 
@@ -258,6 +343,10 @@ class RepositorioDeJobs(Protocol):
 
     def listar_por_sistema(self, sistema: str) -> list[Job]:
         """Só os jobs do sistema, do mais recente para o mais antigo."""
+        ...
+
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        """Filtra, ordena e pagina. Levanta `CursorInvalido` se o cursor não existe."""
         ...
 
 
@@ -308,6 +397,28 @@ class RepositorioEmMemoria:
     def listar_por_sistema(self, sistema: str) -> list[Job]:
         return [j for j in self.listar() if j.sistema == sistema]
 
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        corte = None
+        if filtro.cursor is not None:
+            ancora = self._jobs.get(filtro.cursor)
+            if ancora is None:
+                raise CursorInvalido
+            corte = chave_de_ordem(ancora, filtro.ordem)
+        jobs = sorted(
+            (
+                j
+                for j in self._jobs.values()
+                if casa_com_o_filtro(j, filtro)
+                and (corte is None or chave_de_ordem(j, filtro.ordem) < corte)
+            ),
+            key=lambda j: chave_de_ordem(j, filtro.ordem),
+            reverse=True,
+        )
+        if filtro.limite is None or len(jobs) <= filtro.limite:
+            return PaginaDeJobs(jobs)
+        pagina = jobs[: filtro.limite]
+        return PaginaDeJobs(pagina, pagina[-1].id)
+
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
@@ -325,6 +436,9 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def listar_por_sistema(self, sistema: str) -> list[Job]:
+        raise ServicoIndisponivel
+
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         raise ServicoIndisponivel
 
 
@@ -484,8 +598,9 @@ def criar_rotas(
             raise HTTPException(422, "Tamanho fora do limite")
         if isinstance(chamador, Sistema):
             criado_por, sistema = f"sistema:{chamador.sistema}", chamador.sistema
+            email = None
         else:
-            criado_por, sistema = chamador.uid, None
+            criado_por, sistema, email = chamador.uid, None, chamador.email
         agora = relogio()
         if (
             novo.data_exibicao is not None
@@ -498,7 +613,9 @@ def criar_rotas(
             tamanho_bytes=novo.tamanho_bytes,
             estado="aguardando_upload",
             criado_por=criado_por,
+            criado_por_email=email,
             sistema=sistema,
+            palavras=palavras_do_nome(novo.nome),
             programa=novo.programa,
             data_exibicao=novo.data_exibicao,
             criado_em=agora,
@@ -508,15 +625,44 @@ def criar_rotas(
         url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
-    @rotas.get("")
+    @rotas.get("", response_model=list[JobPublico])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-    ) -> list[JobPublico]:
+        programa: str | None = None,
+        estado: Annotated[list[Estado] | None, Query()] = None,
+        exibicao_de: date | None = None,
+        exibicao_ate: date | None = None,
+        q: str | None = None,
+        sistema: str | None = None,
+        ordem: Ordem = "enviado",
+        limite: Annotated[int | None, Query(ge=1, le=LIMITE_MAXIMO)] = None,
+        cursor: str | None = None,
+    ) -> Response:
         if isinstance(chamador, Sistema):
-            jobs = repositorio.listar_por_sistema(chamador.sistema)
-        else:
-            jobs = repositorio.listar()
-        return [JobPublico.de(j) for j in jobs]
+            # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
+            if sistema not in (None, chamador.sistema):
+                return JSONResponse([])
+            sistema = chamador.sistema
+        filtro = FiltroDeJobs(
+            programa=programa,
+            estados=frozenset(estado or ()),
+            exibicao_de=exibicao_de,
+            exibicao_ate=exibicao_ate,
+            palavras=tuple(palavras_do_nome(q or "")),
+            sistema=sistema,
+            ordem=ordem,
+            limite=limite,
+            cursor=cursor,
+        )
+        try:
+            pagina = repositorio.consultar(filtro)
+        except CursorInvalido:
+            raise HTTPException(422, "Cursor inválido") from None
+        corpo = [JobPublico.de(j).model_dump(mode="json") for j in pagina.jobs]
+        cabecalhos = (
+            {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
+        )
+        return JSONResponse(corpo, headers=cabecalhos)
 
     @rotas.get("/{job_id}", response_model=JobPublico)
     def ler(

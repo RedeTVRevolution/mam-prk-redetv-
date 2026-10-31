@@ -133,6 +133,44 @@ resource "google_firestore_database" "mam" {
   depends_on              = [google_project_service.apis]
 }
 
+# Índices compostos da lista de Jobs (GET /v1/jobs, #141): cada combinação não vazia de
+# programa, sistema, estado (`in`) e uma palavra do nome (`array-contains`), com a ordem
+# por envio (criado_em) ou por exibição (data_exibicao). O intervalo de datas só vai ao
+# Firestore na ordem por exibicao (ele fica no campo da ordem); na ordem por envio a
+# API o confere depois da leitura.
+locals {
+  campos_do_acervo = ["programa", "sistema", "estado", "palavras"]
+  indices_do_acervo = {
+    for par in setproduct(range(1, 16), ["criado_em", "data_exibicao"]) :
+    "${par[1]}-${par[0]}" => {
+      ordem = par[1]
+      campos = [
+        for j, campo in local.campos_do_acervo : campo
+        if floor(par[0] / pow(2, j)) % 2 == 1
+      ]
+    }
+  }
+}
+
+resource "google_firestore_index" "acervo" {
+  for_each   = local.indices_do_acervo
+  database   = google_firestore_database.mam.name
+  collection = "jobs"
+
+  dynamic "fields" {
+    for_each = each.value.campos
+    content {
+      field_path   = fields.value
+      order        = fields.value == "palavras" ? null : "ASCENDING"
+      array_config = fields.value == "palavras" ? "CONTAINS" : null
+    }
+  }
+  fields {
+    field_path = each.value.ordem
+    order      = "DESCENDING"
+  }
+}
+
 # O único lugar que monta os nomes dos buckets. O código os recebe por variável
 # de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
 # web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).

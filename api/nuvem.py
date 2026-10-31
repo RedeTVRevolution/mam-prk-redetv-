@@ -26,9 +26,13 @@ from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
+    CursorInvalido,
     Estado,
+    FiltroDeJobs,
     Job,
+    PaginaDeJobs,
     ServicoIndisponivel,
+    casa_com_o_filtro,
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.papeis import PAPEIS, Papel
@@ -136,6 +140,56 @@ class RepositorioFirestore:
             .stream()
         )
         return [Job(**(doc.to_dict() or {})) for doc in docs]
+
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
+        # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
+        # estar no campo da ordem). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
+        # Os índices estão no infra/main.tf.
+        consulta: Any = self._colecao
+        if filtro.programa is not None:
+            consulta = consulta.where(
+                filter=FieldFilter("programa", "==", filtro.programa)
+            )
+        if filtro.sistema is not None:
+            consulta = consulta.where(
+                filter=FieldFilter("sistema", "==", filtro.sistema)
+            )
+        if filtro.estados:
+            consulta = consulta.where(
+                filter=FieldFilter("estado", "in", sorted(filtro.estados))
+            )
+        if filtro.palavras:
+            consulta = consulta.where(
+                filter=FieldFilter("palavras", "array_contains", filtro.palavras[0])
+            )
+        campo = "criado_em" if filtro.ordem == "enviado" else "data_exibicao"
+        if filtro.ordem == "exibicao":
+            if filtro.exibicao_de is not None:
+                consulta = consulta.where(
+                    filter=FieldFilter(campo, ">=", filtro.exibicao_de.isoformat())
+                )
+            if filtro.exibicao_ate is not None:
+                consulta = consulta.where(
+                    filter=FieldFilter(campo, "<=", filtro.exibicao_ate.isoformat())
+                )
+        # O desempate implícito é o id do documento, na mesma direção da ordem.
+        consulta = consulta.order_by(campo, direction=firestore.Query.DESCENDING)
+        if filtro.cursor is not None:
+            ancora = self._colecao.document(filtro.cursor).get()
+            if not ancora.exists:
+                raise CursorInvalido
+            consulta = consulta.start_after(ancora)
+        jobs: list[Job] = []
+        for doc in consulta.stream():
+            job = Job(**(doc.to_dict() or {}))
+            if not casa_com_o_filtro(job, filtro):
+                continue
+            jobs.append(job)
+            if filtro.limite is not None and len(jobs) > filtro.limite:
+                pagina = jobs[: filtro.limite]
+                return PaginaDeJobs(pagina, pagina[-1].id)
+        return PaginaDeJobs(jobs)
 
 
 class RepositorioDeChavesFirestore:
