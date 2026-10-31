@@ -42,6 +42,10 @@ ARG MODELO_SHA256=e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group transcricao
+# Os testes usam um modelo falso: aqui o faster-whisper decodifica um WAV de verdade pelo
+# PyAV instalado, para a imagem não ser construída com versões que não conversam.
+RUN /app/.venv/bin/python -c "import wave; w = wave.open('/tmp/s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(32000)); w.close(); from faster_whisper.audio import decode_audio; assert len(decode_audio('/tmp/s.wav')) == 16000" \
+    && rm /tmp/s.wav
 RUN /app/.venv/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('$MODELO_REPOSITORIO', revision='$MODELO_REVISAO', local_dir='/modelo')" \
     && echo "$MODELO_SHA256  /modelo/model.bin" | sha256sum -c - \
     && rm -rf /modelo/.cache

@@ -22,6 +22,9 @@ dev = [
 ]
 transcricao = [
     "faster-whisper==1.2.1",
+    # O faster-whisper 1.2.1 pede av>=11, mas chama av.open(metadata_errors=...),
+    # que o PyAV 19 removeu.
+    "av==18.1.0",
 ]
 ocr = [
     "paddleocr==3.7.0",
