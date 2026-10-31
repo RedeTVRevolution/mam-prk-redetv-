@@ -1,7 +1,13 @@
 import { Box, Text, Tooltip } from '@mantine/core'
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react'
 import {
+  type Borda,
   type FaixaDoVisualizador,
+  type LimitesDaAlca,
+  limitesDasAlcas,
+  percentualDoTempo,
+  teclaDaAlca,
+  tempo,
   type Intervalo,
   marcasDaRegua,
   posicaoDoBloco,
@@ -19,6 +25,79 @@ const ALTURA_DA_FAIXA = 20
 const ALTURA_DA_REGUA = 20
 const VAO = 4
 
+/** As alças de tempo do item em correção: os tempos de agora e o que fazer quando se movem. */
+export interface AlcasDaCorrecao {
+  chave: string
+  inicio_ms: number
+  fim_ms: number
+  aoMover: (borda: Borda, ms: number) => void
+}
+
+/** Alça de início ou de fim: arrasta com o ponteiro ou move com as setas (0,1 s; com Shift, 1 s). */
+function AlcaDoTempo({
+  borda,
+  ms,
+  limites,
+  duracaoMs,
+  aoMover,
+}: {
+  borda: Borda
+  ms: number
+  limites: LimitesDaAlca
+  duracaoMs: number
+  aoMover: (borda: Borda, ms: number) => void
+}) {
+  const arrastando = useRef(false)
+  return (
+    <Box
+      role="slider"
+      tabIndex={0}
+      aria-label={borda === 'inicio' ? 'Início do item' : 'Fim do item'}
+      aria-valuemin={limites.minMs}
+      aria-valuemax={limites.maxMs}
+      aria-valuenow={ms}
+      aria-valuetext={tempo(ms)}
+      style={{
+        position: 'absolute',
+        top: -3,
+        width: 8,
+        height: ALTURA_DA_FAIXA + 6,
+        left: `${percentualDoTempo(ms, duracaoMs)}%`,
+        transform: 'translateX(-50%)',
+        background: CORES.texto,
+        borderRadius: 2,
+        cursor: 'ew-resize',
+        touchAction: 'none',
+        zIndex: 3,
+      }}
+      onPointerDown={(e: PointerEvent<HTMLElement>) => {
+        arrastando.current = true
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+      }}
+      onPointerMove={(e: PointerEvent<HTMLElement>) => {
+        const caixa = e.currentTarget.parentElement?.getBoundingClientRect()
+        if (!arrastando.current || !caixa) return
+        const novo = tempoDoPonteiro(e.clientX, { esquerda: caixa.left, largura: caixa.width }, duracaoMs, limites)
+        if (novo !== null) aoMover(borda, novo)
+      }}
+      onPointerUp={() => {
+        arrastando.current = false
+      }}
+      onPointerCancel={() => {
+        arrastando.current = false
+      }}
+      onKeyDown={(e: KeyboardEvent<HTMLElement>) => {
+        const novo = teclaDaAlca(e.key, e.shiftKey, ms, limites)
+        if (novo === null) return
+        e.preventDefault()
+        // As setas movem a alça, não o player nem o foco da faixa.
+        e.stopPropagation()
+        aoMover(borda, novo)
+      }}
+    />
+  )
+}
+
 /** A linha do tempo do Visualizador: régua com cortes, uma faixa por tipo e o cursor. */
 export function FaixasDoVideo({
   faixas,
@@ -28,6 +107,7 @@ export function FaixasDoVideo({
   selecionada,
   aoSaltar,
   aoSelecionar,
+  alcas,
 }: {
   faixas: FaixaDoVisualizador[]
   cortesMs: number[] | null | undefined
@@ -36,6 +116,8 @@ export function FaixasDoVideo({
   selecionada: string | null
   aoSaltar: (ms: number) => void
   aoSelecionar: (chave: string, inicioMs: number) => void
+  /** Com a correção de tempos aberta, as alças aparecem na faixa do item. */
+  alcas?: AlcasDaCorrecao | null
 }) {
   const trilha = useRef<HTMLDivElement>(null)
   const arrastando = useRef(false)
@@ -186,6 +268,15 @@ export function FaixasDoVideo({
                   {faixa.vazio}
                 </Text>
               )}
+              {alcas && faixa.blocos.some((b) => b.chave === alcas.chave) && (() => {
+                const limites = limitesDasAlcas(alcas, duracaoMs, duracaoMs)
+                return (
+                  <>
+                    <AlcaDoTempo borda="inicio" ms={alcas.inicio_ms} limites={limites.inicio} duracaoMs={duracaoMs} aoMover={alcas.aoMover} />
+                    <AlcaDoTempo borda="fim" ms={alcas.fim_ms} limites={limites.fim} duracaoMs={duracaoMs} aoMover={alcas.aoMover} />
+                  </>
+                )
+              })()}
               {faixa.blocos.map((b) => (
                 <Tooltip key={b.chave} label={b.nome}>
                   <Box

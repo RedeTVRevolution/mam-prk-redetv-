@@ -9,21 +9,30 @@ import {
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
-import { type ClienteDaApi, codigoDoErro, SessaoExpirada } from './api.ts'
+import { type ClienteDaApi, codigoDoErro, ConflitoNaApi, PedidoInvalido, SessaoExpirada } from './api.ts'
 import { type CatalogoDeCorrecoes, rotuloDe } from './catalogo.ts'
 import { useAtalhos } from './atalhos.ts'
 import { baixarDecupagem } from './baixar.ts'
+import {
+  editorDeNovaAparicao,
+  editorDoItem,
+  marcasDosItens,
+  type Pedido,
+  pedidoDeRemocao,
+  podeRemover,
+} from './catalogacao.ts'
+import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
 import { dataDeExibicao, type Job } from './jobs.ts'
-import { FaixasDoVideo } from './FaixasDoVideo.tsx'
+import { type AlcasDaCorrecao, FaixasDoVideo } from './FaixasDoVideo.tsx'
 import { Link } from './Link.tsx'
-import { Painel } from './Painel.tsx'
+import { type EdicaoNoPainel, Painel } from './Painel.tsx'
 import { criarCacheDeQuadros } from './quadros.ts'
-import { type Aba, abaDaChave } from './painel.ts'
-import { duracaoDaLinha, faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
+import { type Aba, abaDaChave, itensDoPainel } from './painel.ts'
+import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
 import { enderecoDaTelaAnterior, enderecoDoVideo } from './rotas.ts'
-import type { Decupagem, Reproducao } from './Video.tsx'
+import type { Decupagem, ItemDoHistorico, Reproducao } from './Video.tsx'
 
 const VELOCIDADES = [1, 2, 4]
 const SALTO_CURTO_S = 1
@@ -83,6 +92,10 @@ export default function Visualizador({
   const [catalogando, setCatalogando] = useState(false)
   const [catalogo, setCatalogo] = useState<CatalogoDeCorrecoes | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' } | null>(null)
+  // Os tempos que as alças da linha do tempo ajustaram na correção aberta.
+  const [temposDaAlca, setTemposDaAlca] = useState<Intervalo | null>(null)
+  const [historico, setHistorico] = useState<ItemDoHistorico[]>([])
   const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoDesfazer.current), [])
   // "Reproduzir trecho": onde o player para sozinho.
@@ -142,6 +155,90 @@ export default function Visualizador({
       ativo = false
     }
   }, [api, job.id, podeEditar])
+
+  // As marcas "corrigido" e "aguardando o Curador" vêm do histórico, recarregado a cada decupagem nova.
+  useEffect(() => {
+    if (!podeEditar || !decupagem) return
+    let ativo = true
+    api.job(job.id).historico().then(
+      (h) => {
+        if (ativo) setHistorico(h)
+      },
+      () => {},
+    )
+    return () => {
+      ativo = false
+    }
+  }, [api, job.id, podeEditar, decupagem])
+
+  const itens = useMemo(() => (decupagem ? itensDoPainel(decupagem) : []), [decupagem])
+  const marcas = useMemo(
+    () => (decupagem && podeEditar ? marcasDosItens(decupagem, itens, historico) : undefined),
+    [decupagem, itens, historico, podeEditar],
+  )
+
+  function fecharEdicao() {
+    setEmEdicao(null)
+    setTemposDaAlca(null)
+  }
+
+  /** Grava os pedidos em sequência com o motivo; devolve o erro que fica no formulário, ou `null`. */
+  async function gravar(pedidos: Pedido[], motivo: string): Promise<string | null> {
+    if (!decupagem) return null
+    let gravadas = 0
+    try {
+      for (const p of pedidos) {
+        await api.job(job.id).corrigir({ ...p, motivo, versao: decupagem.versao_decupagem })
+        gravadas += 1
+      }
+    } catch (e) {
+      if (e instanceof SessaoExpirada) return null
+      const mensagem =
+        e instanceof ConflitoNaApi || e instanceof PedidoInvalido
+          ? e.message
+          : 'Não foi possível gravar a correção. Tente de novo em instantes.'
+      // Com a decupagem mudada (ou parte já gravada), a tela recarrega e o formulário fecha.
+      if (e instanceof ConflitoNaApi || gravadas > 0) {
+        setCargasDaDecupagem((n) => n + 1)
+        fecharEdicao()
+        mostrarAviso(mensagem)
+        return null
+      }
+      return mensagem
+    }
+    setCargasDaDecupagem((n) => n + 1)
+    fecharEdicao()
+    return null
+  }
+
+  /** F2: a linha do item em foco vira o formulário dos campos do tipo. */
+  function corrigirEmFoco() {
+    if (!catalogando || !decupagem || !catalogo) return
+    const item = itens.find((i) => i.chave === selecionada)
+    if (!item || !editorDoItem(decupagem, item, catalogo)) {
+      mostrarAviso('Selecione no painel um item que possa ser corrigido (↑ ↓).')
+      return
+    }
+    setTemposDaAlca(null)
+    setEmEdicao({ chave: item.chave, modo: 'editar' })
+  }
+
+  /** Del: "não é isto" no item em foco, com a confirmação na mesma linha. */
+  function removerEmFoco() {
+    if (!catalogando || !decupagem) return
+    const item = itens.find((i) => i.chave === selecionada)
+    if (!item || !podeRemover(decupagem, item)) {
+      mostrarAviso('Não há "não é isto" para o item em foco.')
+      return
+    }
+    setTemposDaAlca(null)
+    setEmEdicao({ chave: item.chave, modo: 'remover' })
+  }
+
+  function selecionar(chave: string | null) {
+    if (chave !== selecionada) fecharEdicao()
+    setSelecionada(chave)
+  }
 
   function mostrarAviso(texto: string) {
     setAviso(texto)
@@ -317,9 +414,97 @@ export default function Visualizador({
             casa: (e: KeyboardEvent) => tecla(e, 'z'),
             executar: () => void desfazerUltima(),
           },
+          {
+            tecla: 'F2',
+            acao: 'Corrigir o item em foco',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => e.key === 'F2',
+            executar: corrigirEmFoco,
+          },
+          {
+            tecla: 'Del',
+            acao: 'Não é isto: remover a pessoa do item em foco',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => e.key === 'Delete',
+            executar: removerEmFoco,
+          },
         ]
       : []),
   ])
+
+  // O formulário (ou a confirmação) que toma o lugar da linha em foco, e as alças dos tempos.
+  const itemEmEdicao = emEdicao ? itens.find((i) => i.chave === emEdicao.chave) : undefined
+  let edicaoNoPainel: EdicaoNoPainel | null = null
+  let alcasDaCorrecao: AlcasDaCorrecao | null = null
+  if (catalogando && decupagem && catalogo && emEdicao) {
+    if (emEdicao.modo === 'acrescentar') {
+      const pessoa = decupagem.pessoas.find((p) => `acrescentar:${p.id}` === emEdicao.chave)
+      if (pessoa)
+        edicaoNoPainel = {
+          chave: emEdicao.chave,
+          conteudo: (
+            <FormularioDeCorrecao
+              editor={editorDeNovaAparicao(pessoa, atualMs, catalogo)}
+              rotulo={`Acrescentar aparição de ${pessoa.nome}`}
+              limiteDoMotivo={catalogo.limites.motivo}
+              aoSalvar={gravar}
+              aoCancelar={fecharEdicao}
+            />
+          ),
+        }
+    } else if (itemEmEdicao && emEdicao.modo === 'editar') {
+      const editor = editorDoItem(decupagem, itemEmEdicao, catalogo)
+      if (editor) {
+        edicaoNoPainel = {
+          chave: emEdicao.chave,
+          conteudo: (
+            <FormularioDeCorrecao
+              editor={editor}
+              rotulo={`Corrigir ${itemEmEdicao.titulo}`}
+              limiteDoMotivo={catalogo.limites.motivo}
+              tempos={temposDaAlca}
+              aoSalvar={gravar}
+              aoCancelar={fecharEdicao}
+            />
+          ),
+        }
+        if (editor.intervalo) {
+          const atual = temposDaAlca ?? editor.intervalo
+          alcasDaCorrecao = {
+            chave: emEdicao.chave,
+            inicio_ms: atual.inicio_ms,
+            fim_ms: atual.fim_ms,
+            aoMover: (borda: Borda, ms: number) =>
+              setTemposDaAlca({ ...atual, [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms }),
+          }
+        }
+      }
+    } else if (itemEmEdicao && emEdicao.modo === 'remover') {
+      const pedido = pedidoDeRemocao(decupagem, itemEmEdicao)
+      if (pedido) {
+        const alvo = itemEmEdicao.tipo === 'mencao' ? 'desta menção' : 'desta aparição'
+        edicaoNoPainel = {
+          chave: emEdicao.chave,
+          conteudo: (
+            <ConfirmacaoDeRemocao
+              texto={`Remover ${itemEmEdicao.titulo} ${alvo}?`}
+              aoConfirmar={() =>
+                void gravar([pedido], 'pessoa removida desta aparição pelo editor').then((falha) => {
+                  if (falha) mostrarAviso(falha)
+                })
+              }
+              aoCancelar={fecharEdicao}
+            />
+          ),
+        }
+      }
+    }
+  }
+
+  function acrescentarAparicao(pessoa: string) {
+    setTemposDaAlca(null)
+    setEmEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
+  }
 
   const tc = useMemo(
     () =>
@@ -538,8 +723,9 @@ export default function Visualizador({
               atualMs={atualMs}
               selecionada={selecionada}
               aoSaltar={(ms) => saltarPara(ms / 1000)}
+              alcas={alcasDaCorrecao}
               aoSelecionar={(chave, inicioMs) => {
-                setSelecionada(chave)
+                selecionar(chave)
                 const aberta = abaDaChave(chave)
                 if (aberta) setAba(aberta)
                 saltarPara(inicioMs / 1000)
@@ -582,7 +768,10 @@ export default function Visualizador({
                   return novas
                 })
               }
-              aoSelecionar={setSelecionada}
+              aoSelecionar={selecionar}
+              edicao={edicaoNoPainel}
+              marcas={marcas}
+              aoAcrescentar={catalogando && catalogo ? acrescentarAparicao : undefined}
               aoSaltar={(ms) => saltarPara(ms / 1000)}
               aoReproduzir={reproduzirTrecho}
               urlDoQuadro={urlDoQuadro}

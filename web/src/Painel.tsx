@@ -1,6 +1,7 @@
-import { Badge, Box, Group, Stack, Text, UnstyledButton, Button } from '@mantine/core'
+import { Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Button } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAtalhos } from './atalhos.ts'
+import type { Marca } from './catalogacao.ts'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
@@ -30,6 +31,12 @@ import type { Decupagem } from './Video.tsx'
 const PAUSA_DA_ROLAGEM_MS = 5000
 
 const GRUPO = 'Painel'
+
+/** O que toma o lugar da linha de um item (ou, com `acrescentar:<pessoa>`, abre sob a linha da pessoa). */
+export interface EdicaoNoPainel {
+  chave: string
+  conteudo: ReactNode
+}
 
 const COR_DO_TIPO: Record<TipoDoItem, string> = {
   pauta: CORES_DE_OCORRENCIA.pauta.cor,
@@ -200,6 +207,8 @@ function Item({
   aoIrParaDono,
   urlDoQuadro,
   compacto,
+  edicao,
+  marca,
 }: {
   item: ItemDoPainel
   atual: boolean
@@ -211,6 +220,9 @@ function Item({
   urlDoQuadro?: (caminho: string) => Promise<string>
   /** Objeto na lista das ocorrências: só o tipo e o tempo, o resto fica na linha do objeto. */
   compacto?: boolean
+  /** O formulário (ou a confirmação) que substitui a linha enquanto o item é corrigido. */
+  edicao?: ReactNode
+  marca?: Marca
 }) {
   const resumo = item.tipo === 'pauta' && item.detalhe
   return (
@@ -220,6 +232,10 @@ function Item({
       p="xs"
       style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
     >
+      {edicao ? (
+        edicao
+      ) : (
+        <>
       <UnstyledButton
         data-item
         aria-label={
@@ -293,17 +309,26 @@ function Item({
         )}
       </UnstyledButton>
       {item.objeto && !compacto && <DescricaoDoObjeto dados={item.objeto} aoIrParaDono={aoIrParaDono} />}
-      {(item.selos.length > 0 || selecionado) && (
+      {(item.selos.length > 0 || selecionado || marca) && (
         <Group gap="xs" mt={4} ml={16}>
           {item.selos.map((s) => (
             <SeloDaProva key={s.rotulo} selo={s} aoSaltar={aoSaltar} />
           ))}
+          {marca && (
+            <Tooltip label={marca.dica}>
+              <Badge size="sm" variant="light" tabIndex={0}>
+                {marca.pendente ? 'aguardando o Curador' : 'corrigido'}
+              </Badge>
+            </Tooltip>
+          )}
           {selecionado && (
             <Button size="compact-xs" variant="default" onClick={() => aoReproduzir(item)}>
               Reproduzir trecho
             </Button>
           )}
         </Group>
+      )}
+        </>
       )}
     </Box>
   )
@@ -336,6 +361,9 @@ export function Painel({
   aoSaltar,
   aoReproduzir,
   urlDoQuadro,
+  edicao = null,
+  marcas,
+  aoAcrescentar,
 }: {
   decupagem: Decupagem
   duracaoMs: number
@@ -352,6 +380,12 @@ export function Painel({
   aoReproduzir: (i: Intervalo) => void
   /** A URL assinada do quadro de um momento; sem ela as miniaturas ficam como retângulo. */
   urlDoQuadro?: (caminho: string) => Promise<string>
+  /** A correção em curso: o formulário toma o lugar da linha do item. */
+  edicao?: EdicaoNoPainel | null
+  /** "corrigido" e "aguardando o Curador", por chave de item. */
+  marcas?: Record<string, Marca>
+  /** Só no modo de catalogação: acrescentar uma aparição na linha da pessoa. */
+  aoAcrescentar?: (pessoa: string) => void
 }) {
   const itens = useMemo(() => itensDoPainel(decupagem), [decupagem])
   const pautas = useMemo(() => itensDaAba(itens, 'pautas'), [itens])
@@ -524,6 +558,8 @@ export function Painel({
         aoIrParaDono={irParaDono}
         urlDoQuadro={urlDoQuadro}
         compacto={compacto}
+        edicao={edicao?.chave === i.chave ? edicao.conteudo : undefined}
+        marca={marcas?.[i.chave]}
       />
     ))
 
@@ -582,6 +618,12 @@ export function Painel({
                         </Group>
                       </Group>
                     </UnstyledButton>
+                    {abrir && aoAcrescentar && edicao?.chave !== `acrescentar:${p.id}` && (
+                      <Button size="compact-xs" variant="default" ml="md" style={{ alignSelf: 'flex-start' }} onClick={() => aoAcrescentar(p.id)}>
+                        {`Acrescentar aparição de ${rotulo}`}
+                      </Button>
+                    )}
+                    {edicao?.chave === `acrescentar:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
                     {abrir && <Stack gap={2} ml="md">{lista(doId)}</Stack>}
                   </Stack>
                 )
