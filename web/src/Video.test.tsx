@@ -922,7 +922,8 @@ test('o Curador aprova na gaveta e a correção entra na decupagem', async () =>
   await waitFor(() => expect(decisaoDoCurador?.acao).toBe('aprovar'))
   expect(await gaveta.findByText('aprovada')).toBeTruthy()
   expect((await painel.findAllByText('Ana Souza Lima')).length).toBeGreaterThan(0)
-  expect(painel.queryByText('aguardando Curador')).toBeNull()
+  // O selo sai só quando o histórico, pedido depois da decupagem nova, chega.
+  await waitFor(() => expect(painel.queryAllByText('aguardando Curador')).toHaveLength(0))
   // A aprovada é uma correção como as outras: dá para desfazer.
   expect(gaveta.getByRole('button', { name: 'Desfazer' })).toBeTruthy()
 })
@@ -981,9 +982,9 @@ test('selo "N na fila" abre o painel com antes, depois e candidatos', async () =
   expect(painel.getByText('Ana Souza Lima')).toBeTruthy()
   expect(painel.getByText('sobrenome completo')).toBeTruthy()
   expect(painel.getByText('bia@redetv.com.br')).toBeTruthy()
-  await usuario.click(painel.getByLabelText('Candidato'))
-  expect(await screen.findByText(/Carla Dias/)).toBeTruthy()
-  expect(screen.getByText(/Davi Lima/)).toBeTruthy()
+  await usuario.click(painel.getByRole('combobox', { name: 'Candidato' }))
+  expect(await painel.findByRole('option', { name: /Carla Dias/ })).toBeTruthy()
+  expect(painel.getByRole('option', { name: /Davi Lima/ })).toBeTruthy()
 })
 
 test('sem fila não há selo', async () => {
@@ -1017,8 +1018,8 @@ test('reaplicar no candidato escolhido pede o motivo, tira da fila e recarrega a
 
   const reaplicar = painel.getByRole('button', { name: 'Reaplicar' }) as HTMLButtonElement
   expect(reaplicar.disabled).toBe(true)
-  await usuario.click(painel.getByLabelText('Candidato'))
-  await usuario.click(await screen.findByText(/Carla Dias/))
+  await usuario.click(painel.getByRole('combobox', { name: 'Candidato' }))
+  await usuario.click(await painel.findByRole('option', { name: /Carla Dias/ }))
   await usuario.type(painel.getByLabelText('Motivo'), 'é a mesma pessoa')
   await usuario.click(reaplicar)
 
@@ -1070,8 +1071,8 @@ test('o Editor corrige marca, tipo e tempos do comercial pelo modal', async () =
   const modal = within(await screen.findByRole('dialog'))
   await usuario.clear(modal.getByLabelText('Marca'))
   await usuario.type(modal.getByLabelText('Marca'), 'Marca Y')
-  await usuario.click(modal.getByLabelText('Tipo'))
-  await usuario.click(await screen.findByText('marca_incidental'))
+  await usuario.click(modal.getByRole('combobox', { name: 'Tipo' }))
+  await usuario.click(await modal.findByRole('option', { name: 'marca_incidental' }))
   await usuario.clear(modal.getByLabelText('Início (mm:ss)'))
   await usuario.type(modal.getByLabelText('Início (mm:ss)'), '01:35')
   await usuario.type(modal.getByLabelText('Motivo'), 'ajuste')
@@ -1101,8 +1102,8 @@ test('o Editor acrescenta um comercial pelo modal', async () => {
   await usuario.click(await painel.findByRole('button', { name: 'Acrescentar comercial' }))
   const modal = within(await screen.findByRole('dialog'))
   await usuario.type(modal.getByLabelText('Marca'), 'Loja Sol')
-  await usuario.click(modal.getByLabelText('Tipo'))
-  await usuario.click(await screen.findByText('merchan_apresentador'))
+  await usuario.click(modal.getByRole('combobox', { name: 'Tipo' }))
+  await usuario.click(await modal.findByRole('option', { name: 'merchan_apresentador' }))
   await usuario.type(modal.getByLabelText('Início (mm:ss)'), '00:20')
   await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '00:22')
   await usuario.type(modal.getByLabelText('Motivo'), 'faltou')
@@ -1149,7 +1150,7 @@ async function escolherNoMenu(
   item: string,
 ) {
   await usuario.click(await painel.findByRole('button', { name: rotulo }))
-  await usuario.click(await screen.findByRole('menuitem', { name: item }))
+  await usuario.click(await within(await screen.findByRole('menu')).findByRole('menuitem', { name: item }))
   return within(await screen.findByRole('dialog'))
 }
 
@@ -1612,8 +1613,8 @@ test('o Editor corrige o tom da pauta pelo modal', async () => {
 
   await usuario.click(await painel.findByRole('button', { name: 'Corrigir tom da pauta Eleição' }))
   const modal = within(await screen.findByRole('dialog'))
-  await usuario.click(modal.getByLabelText('Tom'))
-  await usuario.click(await screen.findByText('polêmico'))
+  await usuario.click(modal.getByRole('combobox', { name: 'Tom' }))
+  await usuario.click(await modal.findByRole('option', { name: 'polêmico' }))
   await salvarCampo(usuario, 'tom errado')
 
   await waitFor(() => expect(correcoesRecebidas).toHaveLength(1))
@@ -1699,8 +1700,8 @@ test('o Editor corrige o tipo e o texto de um texto na tela', async () => {
 
   await usuario.click(await painel.findByRole('button', { name: 'Corrigir texto na tela Ana Souza, apresentadora' }))
   const modal = within(await screen.findByRole('dialog'))
-  await usuario.click(modal.getByLabelText('Tipo'))
-  await usuario.click(await screen.findByText('tarja'))
+  await usuario.click(modal.getByRole('combobox', { name: 'Tipo' }))
+  await usuario.click(await modal.findByRole('option', { name: 'tarja' }))
   await usuario.clear(modal.getByLabelText('Texto'))
   await usuario.type(modal.getByLabelText('Texto'), 'Ana Souza, repórter')
   await salvarCampo(usuario, 'leitura errada')
@@ -1723,8 +1724,8 @@ test('o Editor acrescenta um texto na tela com tempos, tipo e texto', async () =
 
   await usuario.click(await painel.findByRole('button', { name: 'Acrescentar texto na tela' }))
   const modal = within(await screen.findByRole('dialog'))
-  await usuario.click(modal.getByLabelText('Tipo'))
-  await usuario.click(await screen.findByText('placar'))
+  await usuario.click(modal.getByRole('combobox', { name: 'Tipo' }))
+  await usuario.click(await modal.findByRole('option', { name: 'placar' }))
   await usuario.type(modal.getByLabelText('Texto'), 'BRA 2 x 1 ARG')
   await usuario.type(modal.getByLabelText('Início (mm:ss)'), '01:00')
   await usuario.type(modal.getByLabelText('Fim (mm:ss)'), '01:10')

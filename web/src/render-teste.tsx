@@ -3,9 +3,10 @@ import { render as renderizar } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { tema } from './tema.ts'
 
+// env="test": sem transições nem portais; gavetas e janelas fechadas saem da tela na hora.
 export function render(ui: ReactElement) {
   return renderizar(
-    <MantineProvider theme={tema} forceColorScheme="dark">
+    <MantineProvider theme={tema} forceColorScheme="dark" env="test">
       {ui}
     </MantineProvider>,
   )
