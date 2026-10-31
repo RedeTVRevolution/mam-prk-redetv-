@@ -107,14 +107,18 @@ def test_cada_janela_vai_ao_modelo_com_o_trecho_e_o_contexto() -> None:
 
 
 def test_tempos_depois_da_primeira_hora_saem_certos() -> None:
+    falas = [(3_750_000, 3_760_000), (8_950_000, 8_960_000)]  # 62:30 e 149:10
+
     def por_trecho(inicio: int, fim: int) -> str:
-        if inicio <= 3_750_000 < fim:  # 62:30, no núcleo da janela 12
-            return resposta(falas=[(3_750_000, 3_760_000, "depois de 1 h")])
-        return resposta()
+        return resposta(
+            falas=[
+                (i, f, "depois de 1 h") for i, f in falas if inicio + 10_000 <= i < fim
+            ]
+        )
 
     d = _decupar(ModeloFalso(por_trecho))
 
-    assert [(f.inicio_ms, f.fim_ms) for f in d.transcricao] == [(3_750_000, 3_760_000)]
+    assert [(f.inicio_ms, f.fim_ms) for f in d.transcricao] == falas
 
 
 def test_o_resultado_junta_as_janelas_em_ordem() -> None:
@@ -217,6 +221,32 @@ def test_com_escalonamento_a_janela_sorteada_e_decupada_de_novo() -> None:
     _decupar(modelo, fracao_escalonada=1.0)
 
     assert len(modelo.chamadas) == 60
+
+
+def test_sem_fracao_o_escalonamento_nao_roda_nem_por_duvida() -> None:
+    def por_trecho(inicio: int, fim: int) -> str:
+        r = json.loads(resposta())
+        r["pessoas"] = [
+            {
+                "id": "pes01",
+                "nome": "não identificado",
+                "na_imagem": [
+                    {
+                        "evidencia": "rosto",
+                        **intervalo(inicio + 10_000, inicio + 20_000),
+                    }
+                ],
+                "citada_na_fala": [],
+                "citada_no_texto": [],
+            }
+        ]
+        return json.dumps(r)
+
+    modelo = ModeloFalso(por_trecho)
+
+    _decupar(modelo)
+
+    assert len(modelo.chamadas) == 30
 
 
 def test_sem_cortes_a_regra_de_tempos_nao_roda() -> None:

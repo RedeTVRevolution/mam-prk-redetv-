@@ -107,6 +107,11 @@ class Chamada:
     trecho_ms: tuple[int, int] | None = None
 
 
+def _duracao(ms: int) -> str:
+    """Duração do protobuf (`"8999.123s"`), exata no milissegundo."""
+    return f"{ms // 1000}.{ms % 1000:03d}s"
+
+
 class ErroHttp(Exception):
     def __init__(self, status: int) -> None:
         super().__init__(f"HTTP {status}")
@@ -150,8 +155,8 @@ class TransporteVertex:
         metadados: dict[str, Any] = {"fps": 1}
         if chamada.trecho_ms is not None:
             inicio_ms, fim_ms = chamada.trecho_ms
-            metadados["startOffset"] = f"{inicio_ms / 1000:g}s"
-            metadados["endOffset"] = f"{fim_ms / 1000:g}s"
+            metadados["startOffset"] = _duracao(inicio_ms)
+            metadados["endOffset"] = _duracao(fim_ms)
         corpo = {
             "systemInstruction": {"parts": [{"text": chamada.instrucao}]},
             "contents": [

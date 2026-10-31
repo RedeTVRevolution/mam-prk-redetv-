@@ -29,9 +29,6 @@ from api.janelas import (
 )
 from api.tempos import aplicar_regra_de_tempos
 
-# O escalonamento fica desligado: a entrada existe, e o piloto escolhe a fração.
-FRACAO_ESCALONADA = 0.0
-
 
 def analisar_video(
     transporte: Transporte,
@@ -41,12 +38,16 @@ def analisar_video(
     video: Video,
     programa: str | None = None,
     cortes_ms: Sequence[int] = (),
-    fracao_escalonada: float = FRACAO_ESCALONADA,
+    fracao_escalonada: float | None = None,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
 ) -> Decupagem:
-    """Decupa o vídeo inteiro; levanta `AnaliseFalhou` se uma janela esgotar as tentativas."""
+    """Decupa o vídeo inteiro; levanta `AnaliseFalhou` se uma janela esgotar as tentativas.
+
+    `fracao_escalonada` `None` desliga o escalonamento inteiro (motivos `duvida`
+    e `amostra`); a entrada fica aqui, e o piloto escolhe a fração.
+    """
     janelas = planejar_janelas(video.duracao_ms)
 
     def passo(trecho_ms: tuple[int, int] | None) -> Decupagem:
@@ -69,8 +70,6 @@ def analisar_video(
         estado = EstadoJanela(janela.indice, "pendente", 0, None)
         while True:
             estado = iniciar(estado)
-            if estado.situacao == "falhou":
-                raise AnaliseFalhou()
             try:
                 decupagem = passo((janela.inicio_contexto_ms, janela.fim_contexto_ms))
             except AnaliseFalhou as e:
@@ -81,8 +80,9 @@ def analisar_video(
             return decupagem
 
     resultados = {j.indice: decupar(j) for j in janelas}
-    for indice in janelas_a_escalonar(job_id, resultados, fracao_escalonada):
-        resultados[indice] = decupar(janelas[indice])
+    if fracao_escalonada is not None:
+        for indice in janelas_a_escalonar(job_id, resultados, fracao_escalonada):
+            resultados[indice] = decupar(janelas[indice])
     return consolidar(
         video, [(j, resultados[j.indice]) for j in janelas], list(cortes_ms)
     )
