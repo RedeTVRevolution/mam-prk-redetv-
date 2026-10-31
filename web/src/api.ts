@@ -38,6 +38,7 @@ async function detalhe(resposta: Response): Promise<string> {
 
 /** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 export interface ClienteDoJob {
+  detalhe(): Promise<Job>
   reproducao(): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
   catalogo(): Promise<CatalogoDeCorrecoes>
@@ -102,6 +103,7 @@ export function criarClienteDaApi(
   function job(id: string): ClienteDoJob {
     const base = `/v1/jobs/${id}`
     return {
+      detalhe: () => chamar(base),
       reproducao: () => chamar(`${base}/reproducao`),
       decupagem: () => chamar(`${base}/decupagem`),
       catalogo: () => chamar('/v1/correcoes/catalogo'),

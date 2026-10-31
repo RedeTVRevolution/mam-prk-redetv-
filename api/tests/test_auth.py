@@ -66,4 +66,5 @@ def test_rota_inexistente_em_v1_com_token_valido_recebe_404() -> None:
 
 
 def test_caminho_que_so_comeca_com_v1_nao_e_protegido() -> None:
-    assert _cliente().get("/v1x").status_code == 404
+    # Fora de `/v1`, é endereço do front (index.html, se houver build) ou 404; nunca 401.
+    assert _cliente().get("/v1x").status_code in (200, 404)

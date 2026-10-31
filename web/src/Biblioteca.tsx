@@ -18,13 +18,13 @@ import {
   ThemeIcon,
 } from '@mantine/core'
 import { IconAlertTriangle, IconBan, IconPlayerPlay, IconUpload } from '@tabler/icons-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import type { ClienteDaApi } from './api.ts'
 import { validarArquivo } from './envio/arquivo.ts'
 import { enviarRetomavel } from './envio/upload.ts'
 import { tempo } from './linhaDoTempo.ts'
 import { ESTADOS_DO_JOB, type EstadoDoJob } from './tema.ts'
-import type { JobAberto } from './Video.tsx'
+import { enderecoDoVideo, seguir } from './rotas.ts'
 
 export interface Job {
   id: string
@@ -76,12 +76,10 @@ function QuadroDoEstado({ estado }: { estado: string }) {
 
 export default function Biblioteca({
   api,
-  aoAbrir,
   podeEnviar,
   intervaloMs = 5000,
 }: {
   api: ClienteDaApi
-  aoAbrir?: (job: JobAberto) => void
   podeEnviar: boolean
   intervaloMs?: number
 }) {
@@ -241,7 +239,7 @@ export default function Biblioteca({
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
             {visiveis.map((job) => {
               const estado = ESTADOS_DO_JOB[job.estado as EstadoDoJob]
-              const clicavel = aoAbrir && (job.estado === 'concluido' || job.estado === 'falhou')
+              const clicavel = (job.estado === 'concluido' || job.estado === 'falhou')
               return (
                 <Card
                   key={job.id}
@@ -249,11 +247,12 @@ export default function Biblioteca({
                   withBorder
                   {...(clicavel
                     ? {
-                        component: 'button',
-                        type: 'button',
+                        component: 'a',
+                        href: enderecoDoVideo(job.id),
                         'aria-label': job.nome,
-                        onClick: () => aoAbrir(job),
-                        style: { cursor: 'pointer', textAlign: 'left' },
+                        onClick: (e: MouseEvent<HTMLAnchorElement>) =>
+                          seguir(e, enderecoDoVideo(job.id)),
+                        style: { cursor: 'pointer', textAlign: 'left', color: 'inherit' },
                       }
                     : {})}
                 >

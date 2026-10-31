@@ -31,6 +31,7 @@ const servidor = setupServer(
 
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => {
+  history.replaceState(null, '', '/')
   servidor.resetHandlers()
   chamadas.length = 0
   cleanup()
@@ -76,7 +77,7 @@ test('sem sessão, mostra só o login e não chama a API', async () => {
 
   expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Sair' })).toBeNull()
-  expect(screen.queryByText('Biblioteca')).toBeNull()
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
   expect(chamadas).toEqual([])
 })
 
@@ -86,10 +87,10 @@ test('login com senha e código TOTP abre a Biblioteca com o token na API', asyn
 
   await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
-  expect(screen.queryByText('Biblioteca')).toBeNull()
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
   await confirmarCodigo(usuario)
 
-  expect(await screen.findByText('Biblioteca')).toBeTruthy()
+  expect(await screen.findByText('Nenhum vídeo enviado ainda.')).toBeTruthy()
   expect(screen.getByText('ana@redetv.com.br')).toBeTruthy()
   expect(chamadas.at(-1)?.autorizacao).toBe('Bearer token-de-ana@redetv.com.br')
 })
@@ -162,7 +163,7 @@ test('código TOTP errado mostra erro e não entra', async () => {
   await usuario.click(screen.getByRole('button', { name: 'Confirmar' }))
 
   expect((await screen.findByRole('alert')).textContent).toContain('inválid')
-  expect(screen.queryByText('Biblioteca')).toBeNull()
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
 })
 
 test('primeiro acesso mostra o cadastro do autenticador e entra ao confirmar o código', async () => {
@@ -177,7 +178,7 @@ test('primeiro acesso mostra o cadastro do autenticador e entra ao confirmar o c
   ).toBe('otpauth://totp/MAM')
   await confirmarCodigo(usuario)
 
-  expect(await screen.findByText('Biblioteca')).toBeTruthy()
+  expect(await screen.findByText('Nenhum vídeo enviado ainda.')).toBeTruthy()
 })
 
 test('fechar o modal do autenticador volta ao início do login', async () => {
@@ -201,10 +202,11 @@ test('o botão sair volta ao login e apaga a sessão', async () => {
   await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
   await confirmarCodigo(usuario)
-  await usuario.click(await screen.findByRole('button', { name: 'Sair' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Conta:/ }))
+  await usuario.click(await screen.findByRole('menuitem', { name: 'Sair' }))
 
   expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
-  expect(screen.queryByText('Biblioteca')).toBeNull()
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
   expect(await auth.token()).toBeNull()
 })
 
@@ -212,7 +214,7 @@ test('sessão já existente abre direto na Biblioteca', async () => {
   const auth = await autenticadorComSessao()
   render(<App autenticador={auth} />)
 
-  expect(await screen.findByText('Biblioteca')).toBeTruthy()
+  expect(await screen.findByText('Nenhum vídeo enviado ainda.')).toBeTruthy()
 })
 
 test('401 da API derruba a sessão e leva ao login', async () => {
@@ -222,7 +224,7 @@ test('401 da API derruba a sessão e leva ao login', async () => {
 
   expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   await waitFor(async () => expect(await auth.token()).toBeNull())
-  expect(screen.queryByText('Biblioteca')).toBeNull()
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
 })
 
 test('várias chamadas com 401 ao mesmo tempo derrubam a sessão uma vez só', async () => {
@@ -244,12 +246,24 @@ test('várias chamadas com 401 ao mesmo tempo derrubam a sessão uma vez só', a
         },
       ]),
     ),
+    http.get('/v1/jobs/j1', () =>
+      HttpResponse.json({
+        id: 'j1',
+        nome: 'pronto.mp4',
+        estado: 'concluido',
+        codigo_falha: null,
+        duracao_s: null,
+        programa: null,
+        criado_em: '2026-10-29T15:00:00Z',
+        atualizado_em: '2026-10-29T15:00:00Z',
+      }),
+    ),
     // A tela do vídeo pede reprodução, decupagem e catálogo juntos.
     http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 401 })),
     http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 401 })),
   )
   render(<App autenticador={auth} />)
-  await usuario.click(await screen.findByRole('button', { name: 'pronto.mp4' }))
+  await usuario.click(await screen.findByRole('link', { name: 'pronto.mp4' }))
 
   expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   expect(sair).toHaveBeenCalledTimes(1)
@@ -274,28 +288,33 @@ test('API fora do ar mostra aviso sem dados, e tentar de novo entra', async () =
   render(<App autenticador={auth} />)
 
   expect((await screen.findByRole('alert')).textContent).toContain('API')
-  expect(screen.queryByText('Biblioteca')).toBeNull()
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
 
   servidor.resetHandlers()
   await usuario.click(screen.getByRole('button', { name: 'Tentar de novo' }))
-  expect(await screen.findByText('Biblioteca')).toBeTruthy()
+  expect(await screen.findByText('Nenhum vídeo enviado ainda.')).toBeTruthy()
 })
 
-test('com sessão, o cabeçalho mostra a marca, a tela atual e o e-mail', async () => {
+test('com sessão, a barra mostra a marca, o link do acervo e a conta com o menu', async () => {
+  const usuario = userEvent.setup()
   render(<App autenticador={await autenticadorComSessao()} />)
 
   expect(await screen.findByText('MAM')).toBeTruthy()
   expect(screen.getByText('RedeTV')).toBeTruthy()
-  expect(screen.getByRole('banner').textContent).toContain('Biblioteca')
-  expect(screen.getByRole('banner').textContent).toContain('ana@redetv.com.br')
-  expect(screen.getByRole('button', { name: 'Sair' })).toBeTruthy()
+  const barra = screen.getByRole('banner')
+  expect(within(barra).getByRole('link', { name: 'Acervo' }).getAttribute('href')).toBe('/acervo')
+  expect(barra.textContent).toContain('ana@redetv.com.br')
+  expect(screen.queryByRole('menuitem', { name: 'Sair' })).toBeNull()
+  await usuario.click(within(barra).getByRole('button', { name: /^Conta:/ }))
+  expect(await screen.findByRole('menuitem', { name: 'Sair' })).toBeTruthy()
+  expect(screen.getByRole('menuitem', { name: 'Atalhos (?)' })).toBeTruthy()
 })
 
 test('verificando a sessão mostra um indicador de carregamento', async () => {
   render(<App autenticador={await autenticadorComSessao()} />)
 
   expect(screen.getByRole('status', { name: 'Verificando a sessão' })).toBeTruthy()
-  await screen.findByText('Biblioteca')
+  await screen.findByText('Nenhum vídeo enviado ainda.')
 })
 
 test('quem só tem Consulta não vê o upload na Biblioteca', async () => {
@@ -327,4 +346,128 @@ test('quem tem video.enviar vê o upload na Biblioteca', async () => {
   await confirmarCodigo(usuario)
 
   expect(await screen.findByRole('button', { name: 'Enviar MP4' })).toBeTruthy()
+})
+
+
+const VIDEO_J1 = {
+  id: 'j1',
+  nome: 'pronto.mp4',
+  estado: 'concluido',
+  codigo_falha: null,
+  duracao_s: null,
+  programa: null,
+  criado_em: '2026-10-29T15:00:00Z',
+  atualizado_em: '2026-10-29T15:00:00Z',
+}
+
+test('a raiz redireciona para o acervo', async () => {
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+  expect(location.pathname).toBe('/acervo')
+})
+
+test('abrir /video/{id}?t= com sessão abre o vídeo e posiciona o player no instante', async () => {
+  history.replaceState(null, '', '/video/j1?t=724')
+  servidor.use(
+    http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
+    http.get('/v1/jobs/j1/reproducao', () =>
+      HttpResponse.json({ url: 'https://exemplo.test/v.mp4', expira_em: '2999-01-01T00:00:00Z' }),
+    ),
+    http.get('/v1/jobs/j1/decupagem', () => new HttpResponse(null, { status: 500 })),
+    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 500 })),
+  )
+  const { container } = render(<App autenticador={await autenticadorComSessao()} />)
+
+  // A tela do vídeo só desenha o player depois da decupagem; aqui basta a rota certa.
+  await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  expect(location.pathname).toBe('/video/j1')
+  expect(container.textContent).not.toContain('Página não encontrada')
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
+})
+
+test('vídeo inexistente mostra o aviso e o link para o acervo', async () => {
+  history.replaceState(null, '', '/video/x')
+  servidor.use(
+    http.get('/v1/jobs/x', () => HttpResponse.json({ detail: 'Job não encontrado' }, { status: 404 })),
+  )
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Vídeo não encontrado')
+  expect(screen.getAllByRole('link', { name: 'Voltar ao acervo' })[0].getAttribute('href')).toBe(
+    '/acervo',
+  )
+})
+
+test('sem sessão, /video/x leva ao login e, depois dele, ao vídeo', async () => {
+  history.replaceState(null, '', '/video/x')
+  servidor.use(
+    http.get('/v1/jobs/x', () => HttpResponse.json({ ...VIDEO_J1, id: 'x', estado: 'falhou' })),
+  )
+  const usuario = userEvent.setup()
+  render(<App autenticador={autenticador()} />)
+  await screen.findByLabelText(/^E-mail/)
+  await preencherSenha(usuario)
+  await confirmarCodigo(usuario)
+
+  await waitFor(() => expect(screen.queryByLabelText(/^E-mail/)).toBeNull())
+  expect(location.pathname).toBe('/video/x')
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
+})
+
+test('endereço desconhecido mostra "Página não encontrada" com link para o acervo', async () => {
+  history.replaceState(null, '', '/nada/aqui')
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  expect(await screen.findByText('Página não encontrada.')).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Ir ao acervo' }).getAttribute('href')).toBe('/acervo')
+})
+
+test('/amostra abre a página de amostra sem login e sem chamar a API', async () => {
+  history.replaceState(null, '', '/amostra')
+  render(<App autenticador={autenticador()} />)
+
+  expect(await screen.findByRole('heading', { name: /Sistema visual/i }, { timeout: 5000 })).toBeTruthy()
+  expect(screen.queryByLabelText(/^E-mail/)).toBeNull()
+  expect(chamadas).toEqual([])
+})
+
+test('voltar no navegador volta ao acervo', async () => {
+  const usuario = userEvent.setup()
+  servidor.use(
+    http.get('/v1/jobs', () => HttpResponse.json([VIDEO_J1])),
+    http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
+    http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 500 })),
+    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 500 })),
+  )
+  render(<App autenticador={await autenticadorComSessao()} />)
+  await usuario.click(await screen.findByRole('link', { name: 'pronto.mp4' }))
+  await waitFor(() => expect(location.pathname).toBe('/video/j1'))
+
+  history.back()
+
+  expect(await screen.findByRole('link', { name: 'pronto.mp4' })).toBeTruthy()
+  expect(location.pathname).toBe('/acervo')
+})
+
+test('? abre os atalhos da tela, e com o foco num campo de texto vira texto', async () => {
+  const usuario = userEvent.setup()
+  render(<App autenticador={await autenticadorComSessao()} />)
+  await screen.findByRole('button', { name: 'Enviar MP4' })
+  const campo = document.createElement('input')
+  document.body.append(campo)
+
+  campo.focus()
+  await usuario.keyboard('?')
+  expect(campo.value).toBe('?')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  campo.remove()
+
+  await usuario.keyboard('?')
+  const dialogo = await screen.findByRole('dialog', { name: 'Atalhos' })
+  expect(within(dialogo).getByRole('table', { name: 'Geral' })).toBeTruthy()
+  expect(within(dialogo).getByText('Fechar o que estiver aberto')).toBeTruthy()
+
+  await usuario.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 })

@@ -1,8 +1,6 @@
 import {
-  ActionIcon,
   Alert,
   AppShell,
-  Badge,
   Button,
   Center,
   Group,
@@ -10,14 +8,21 @@ import {
   Stack,
   Text,
 } from '@mantine/core'
-import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { IconAlertTriangle } from '@tabler/icons-react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { criarClienteDaApi, SessaoExpirada } from './api.ts'
+import { AtalhosProvider } from './AtalhosProvider.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
+import Barra, { ALTURA_DA_BARRA } from './Barra.tsx'
 import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
-import { CORES, NAVBAR_DA_BIBLIOTECA } from './tema.ts'
-import Video, { type JobAberto } from './Video.tsx'
+import { Link } from './Link.tsx'
+import { ACERVO, navegar, useRota } from './rotas.ts'
+import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
+import TelaDoVideo from './TelaDoVideo.tsx'
+
+// A amostra do sistema visual é grande e sem login: fica num pedaço à parte do bundle.
+const Amostra = lazy(() => import('./Amostra.tsx'))
 
 export interface Usuario {
   uid: string
@@ -33,16 +38,23 @@ type Sessao =
   | { tipo: 'ativa'; usuario: Usuario }
 
 export default function App({ autenticador }: { autenticador: Autenticador }) {
+  return (
+    <AtalhosProvider>
+      <Telas autenticador={autenticador} />
+    </AtalhosProvider>
+  )
+}
+
+function Telas({ autenticador }: { autenticador: Autenticador }) {
   const [sessao, setSessao] = useState<Sessao>({ tipo: 'verificando' })
   // Muda a cada saída, para o login recomeçar do zero (inclusive após um 401 logo depois do TOTP).
   const [saidas, setSaidas] = useState(0)
-  const [aberto, setAberto] = useState<JobAberto | null>(null)
+  const rota = useRota()
 
   const sair = useCallback(async () => {
     await autenticador.sair()
     setSessao({ tipo: 'sem_sessao' })
     setSaidas((n) => n + 1)
-    setAberto(null)
   }, [autenticador])
 
   // O 401 de qualquer tela chega aqui, num lugar só. Chamadas em paralelo podem voltar 401
@@ -59,6 +71,12 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
     () => criarClienteDaApi(autenticador, aoSessaoExpirada),
     [autenticador, aoSessaoExpirada],
   )
+
+  // `/` vai ao acervo; o endereço pedido antes do login fica como está e abre depois dele.
+  const ativa = sessao.tipo === 'ativa'
+  useEffect(() => {
+    if (ativa && rota.tipo === 'raiz') navegar(ACERVO, { substituir: true })
+  }, [ativa, rota.tipo])
 
   const verificar = useCallback(async () => {
     try {
@@ -81,6 +99,13 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
     void verificar()
   }
 
+  if (rota.tipo === 'amostra') {
+    return (
+      <Suspense fallback={null}>
+        <Amostra />
+      </Suspense>
+    )
+  }
   if (sessao.tipo === 'verificando') {
     return (
       <Center h="100vh">
@@ -110,64 +135,39 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
       </Center>
     )
   }
+  const podeEditar = sessao.usuario.permissoes.includes('decupagem.editar')
+  const podeAprovar = sessao.usuario.permissoes.includes('correcao.aprovar')
+  const naBiblioteca = rota.tipo === 'acervo' || rota.tipo === 'raiz'
   return (
     <AppShell
-      header={{ height: 52 }}
-      navbar={aberto ? undefined : NAVBAR_DA_BIBLIOTECA}
-      padding={aberto ? 'sm' : 'lg'}
+      header={{ height: ALTURA_DA_BARRA }}
+      navbar={naBiblioteca ? NAVBAR_DA_BIBLIOTECA : undefined}
+      padding={naBiblioteca ? 'lg' : 'sm'}
     >
-      <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="xs">
-            {aberto && (
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                aria-label="Voltar à Biblioteca"
-                onClick={() => setAberto(null)}
-              >
-                <IconArrowLeft />
-              </ActionIcon>
-            )}
-            <Badge color={CORES.marca} variant="filled" radius="sm">
-              MAM
-            </Badge>
-            <Text fw={700}>RedeTV</Text>
-            <Text c="dimmed">{aberto ? 'Vídeo' : 'Biblioteca'}</Text>
-          </Group>
-          <Group gap="xs">
-            <Text size="xs" c="dimmed">
-              {sessao.usuario.email}
-            </Text>
-            <Button
-              type="button"
-              variant="subtle"
-              size="xs"
-              color="gray"
-              onClick={() => void sair()}
-            >
-              Sair
-            </Button>
-          </Group>
-        </Group>
-      </AppShell.Header>
-      {aberto ? (
+      <Barra email={sessao.usuario.email} aoSair={() => void sair()} />
+      {rota.tipo === 'video' ? (
         <AppShell.Main bg="dark.7">
-          <Video
+          <TelaDoVideo
             api={api}
-            job={aberto}
-            podeEditar={sessao.usuario.permissoes.includes('decupagem.editar')}
-            podeAprovar={sessao.usuario.permissoes.includes('correcao.aprovar')}
+            id={rota.id}
+            t={rota.t}
+            podeEditar={podeEditar}
+            podeAprovar={podeAprovar}
           />
         </AppShell.Main>
-      ) : (
+      ) : naBiblioteca ? (
         // A Biblioteca traz a própria barra lateral e a área principal.
-        <Biblioteca
-          api={api}
-          aoAbrir={setAberto}
-          // O front só esconde; quem barra é a API.
-          podeEnviar={sessao.usuario.permissoes.includes('video.enviar')}
-        />
+        // O front só esconde; quem barra é a API.
+        <Biblioteca api={api} podeEnviar={sessao.usuario.permissoes.includes('video.enviar')} />
+      ) : (
+        <AppShell.Main bg="dark.7">
+          <Center h="60vh">
+            <Stack align="center">
+              <Text>Página não encontrada.</Text>
+              <Link para={ACERVO}>Ir ao acervo</Link>
+            </Stack>
+          </Center>
+        </AppShell.Main>
       )}
     </AppShell>
   )

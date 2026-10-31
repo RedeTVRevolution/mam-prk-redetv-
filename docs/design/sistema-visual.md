@@ -1,6 +1,6 @@
 # Sistema visual
 
-A referência de toda tela do MAM. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9). Os valores moram em [`web/src/tema.ts`](../../web/src/tema.ts), que é a fonte; este documento explica o porquê. A página de amostra mostra tudo aplicado: no `npm run dev` ou no dev publicado, abra `/?amostra` (sem login, só com dados de exemplo).
+A referência de toda tela do MAM. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9). Os valores moram em [`web/src/tema.ts`](../../web/src/tema.ts), que é a fonte; este documento explica o porquê. A página de amostra mostra tudo aplicado: no `npm run dev` ou no dev publicado, abra `/amostra` (sem login, só com dados de exemplo).
 
 Os testes que guardam as regras:
 

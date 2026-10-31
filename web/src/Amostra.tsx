@@ -45,7 +45,7 @@ import {
   type TipoDeOcorrencia,
 } from './tema.ts'
 
-// A página de amostra do sistema visual (docs/design/sistema-visual.md): abre em /?amostra,
+// A página de amostra do sistema visual (docs/design/sistema-visual.md): abre em /amostra,
 // sem login, e só usa os dados fixos daqui. Não chama a API.
 
 type CampoProps = { error?: string; disabled?: boolean; styles?: { input: CSSProperties } }

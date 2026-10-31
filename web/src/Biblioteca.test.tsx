@@ -219,27 +219,28 @@ test('durante um envio não dá para escolher outro arquivo', async () => {
   expect(campo.disabled).toBe(false)
 })
 
-test('abrir um vídeo concluído ou falhado chama aoAbrir; os demais não são clicáveis', async () => {
+test('abrir um vídeo concluído ou falhado é um link para o endereço do vídeo; os demais não são clicáveis', async () => {
   const usuario = userEvent.setup()
   jobs = [
     job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' }),
     job({ id: 'b', nome: 'andando.mp4', estado: 'analisando' }),
   ]
-  const aoAbrir = vi.fn()
   render(
     noShell(
       <Biblioteca
         api={criarClienteDaApi(await comSessao(), () => {})}
-        aoAbrir={aoAbrir}
         podeEnviar
       />,
     ),
   )
 
-  await usuario.click(await screen.findByRole('button', { name: 'pronto.mp4' }))
+  const link = await screen.findByRole('link', { name: 'pronto.mp4' })
+  expect(link.getAttribute('href')).toBe('/video/a')
+  await usuario.click(link)
 
-  expect(aoAbrir).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
-  expect(screen.queryByRole('button', { name: 'andando.mp4' })).toBeNull()
+  expect(location.pathname).toBe('/video/a')
+  expect(screen.queryByRole('link', { name: 'andando.mp4' })).toBeNull()
+  history.replaceState(null, '', '/')
 })
 
 test('mostra a duração em mm:ss quando a API traz', async () => {

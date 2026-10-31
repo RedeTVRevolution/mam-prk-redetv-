@@ -8,6 +8,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
+from starlette.exceptions import HTTPException as ExcecaoHttp
+from starlette.responses import Response
+from starlette.types import Scope
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.auth import (
@@ -102,6 +105,22 @@ class _SemModelArmor:
 
     def acusa_injecao(self, texto: str) -> bool:
         raise RuntimeError("Model Armor não ligado")
+
+
+class _FrontComEnderecos(StaticFiles):
+    """O front tem endereço por tela (`/video/{id}`): fora de `/v1`, o que não é arquivo
+    do build devolve o `index.html`, e o roteador do front decide a tela."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except ExcecaoHttp as erro:
+            ultimo = path.rsplit("/", 1)[-1]
+            if erro.status_code != 404 or "." in ultimo:
+                raise
+            if path == "v1" or path.startswith("v1/"):
+                raise
+            return await super().get_response("index.html", scope)
 
 
 class UsuarioComPapeis(Usuario):
@@ -218,7 +237,7 @@ def criar_app(
     )
     app.include_router(v1)
     if pasta_web.is_dir():
-        app.mount("/", StaticFiles(directory=pasta_web, html=True))
+        app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
     return app
 
 

@@ -387,11 +387,14 @@ export default function Video({
   job,
   podeEditar = false,
   podeAprovar = false,
+  inicioEmS = null,
 }: {
   api: ClienteDaApi
   job: JobAberto
   podeEditar?: boolean
   podeAprovar?: boolean
+  /** Instante inicial, em segundos (o `?t=` do endereço). */
+  inicioEmS?: number | null
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
@@ -479,7 +482,7 @@ export default function Video({
     )
   }, [api])
 
-  const retomarEm = useRef<number | null>(null)
+  const retomarEm = useRef<number | null>(inicioEmS ?? null)
   // O link assinado expira em minutos: se o player falhar depois disso, pede outro e
   // continua do mesmo ponto.
   const renovarLink = useCallback(() => {
