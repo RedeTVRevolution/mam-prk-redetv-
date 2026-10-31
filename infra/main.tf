@@ -38,7 +38,7 @@ variable "janelas_em_paralelo" {
   description = "Quantas janelas de análise o Job de análise decupa ao mesmo tempo"
   type        = number
   # ponytail: 4 é um chute; o valor sai do piloto e da cota do Gemini.
-  default     = 4
+  default = 4
 }
 
 variable "imagem_validacao" {
@@ -140,8 +140,8 @@ resource "google_service_account" "mam" {
 
 # Papéis de cada componente. A orquestração grava a falha da validação no
 # Firestore, recebe o evento do Eventarc e invoca o Workflows (o provider não tem
-# papel no próprio Workflows); o papel de rodar o Job fica mais abaixo, no próprio
-# Job (ADR 0002), e o de chamar o serviço de análise, no próprio serviço. Quem lê o
+# papel no próprio Workflows); o papel de rodar cada Job, inclusive o de análise, fica
+# mais abaixo, no próprio Job (ADR 0002). Quem lê o
 # proxy por gs:// na Vertex é a conta que chama (mam-analise, com acesso a
 # aceitos), segundo a doc do generateContent; o agente de serviço da Vertex não
 # precisa de papel no bucket. O run.viewer da orquestração fica no projeto porque o

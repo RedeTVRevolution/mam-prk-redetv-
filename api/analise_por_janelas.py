@@ -144,59 +144,59 @@ def analisar_video(
         if janelas_do_job:
             janelas_do_job.gravar(job_id, JanelaGravada.de(estado, decupagem, refeita))
 
-    def decupar(janela: Janela, refazer: bool = False) -> Decupagem:
+    def decupar(janela: Janela, primeira: Decupagem | None = None) -> Decupagem:
+        """Sem `primeira`, a primeira passada; com ela, o escalonamento, que mantém a
+        Decupagem da primeira passada gravada até concluir: se o processo cair no meio,
+        a retomada não refaz a primeira passada."""
+        escalonando = primeira is not None
         guardada = gravadas.get(janela.indice)
-        if (
-            guardada
-            and guardada.situacao == "concluida"
-            and guardada.decupagem
-            and not refazer
-        ):
+        if not escalonando and guardada and guardada.decupagem:
             return guardada.decupagem
+        # A tentativa interrompida da mesma passada retoma a contagem; a passada que
+        # ainda não começou começa do zero.
+        retoma = (
+            guardada is not None
+            and guardada.situacao != "concluida"
+            and (guardada.decupagem is not None) == escalonando
+        )
         estado = (
             guardada.estado
-            if guardada and not refazer
+            if guardada and retoma
             else EstadoJanela(janela.indice, "pendente", 0, None)
         )
         while True:
             estado = iniciar(estado)
-            gravar(estado)
+            gravar(estado, primeira)
             if estado.situacao == "falhou":
                 raise AnaliseFalhou(estado.erro or "análise falhou")
             try:
                 decupagem = passo((janela.inicio_contexto_ms, janela.fim_contexto_ms))
             except AnaliseFalhou as e:
                 estado = falhar(estado, str(e) or "análise falhou")
-                gravar(estado)
+                gravar(estado, primeira)
                 if estado.situacao == "falhou":
                     raise
                 continue
-            gravar(concluir(estado), decupagem, refeita=refazer)
+            gravar(concluir(estado), decupagem, refeita=escalonando)
             return decupagem
 
-    resultados = dict(
-        zip(
-            (j.indice for j in janelas),
-            _em_paralelo([partial(decupar, j) for j in janelas], max_paralelas),
-            strict=True,
-        )
-    )
+    def decupar_em_paralelo(
+        indices: Sequence[int], escalonar: bool = False
+    ) -> dict[int, Decupagem]:
+        tarefas = [
+            partial(decupar, janelas[i], resultados[i] if escalonar else None)
+            for i in indices
+        ]
+        return dict(zip(indices, _em_paralelo(tarefas, max_paralelas), strict=True))
+
+    resultados = decupar_em_paralelo([j.indice for j in janelas])
     if fracao_escalonada is not None:
         a_refazer = [
             indice
             for indice in janelas_a_escalonar(job_id, resultados, fracao_escalonada)
             if not (indice in gravadas and gravadas[indice].refeita)
         ]
-        resultados.update(
-            zip(
-                a_refazer,
-                _em_paralelo(
-                    [partial(decupar, janelas[i], refazer=True) for i in a_refazer],
-                    max_paralelas,
-                ),
-                strict=True,
-            )
-        )
+        resultados.update(decupar_em_paralelo(a_refazer, escalonar=True))
     consolidada = consolidar(
         video, [(j, resultados[j.indice]) for j in janelas], list(cortes_ms)
     )

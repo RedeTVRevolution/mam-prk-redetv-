@@ -174,12 +174,8 @@ def test_janela_que_esgota_as_tentativas_derruba_a_analise() -> None:
     assert max(f for _, f in modelo.trechos()) == 610_000
 
 
-def test_job_com_janela_falha_vai_a_analise_falhou_sem_decupagem() -> None:
+def _repositorio_com_job_em_analise() -> RepositorioEmMemoria:
     repositorio = RepositorioEmMemoria()
-    decupagens = DecupagensEmMemoria("aceitos")
-    modelo = ModeloFalso(
-        lambda inicio, fim: ErroHttp(400) if inicio == 290_000 else resposta()
-    )
     agora = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
     repositorio.salvar(
         Job(
@@ -193,6 +189,15 @@ def test_job_com_janela_falha_vai_a_analise_falhou_sem_decupagem() -> None:
             criado_em=agora,
             atualizado_em=agora,
         )
+    )
+    return repositorio
+
+
+def test_job_com_janela_falha_vai_a_analise_falhou_sem_decupagem() -> None:
+    repositorio = _repositorio_com_job_em_analise()
+    decupagens = DecupagensEmMemoria("aceitos")
+    modelo = ModeloFalso(
+        lambda inicio, fim: ErroHttp(400) if inicio == 290_000 else resposta()
     )
 
     resultado = executar("j", repositorio, decupagens, modelo, dormir=lambda _s: None)
@@ -323,6 +328,29 @@ def test_max_paralelas_menor_que_um_e_erro_de_quem_chamou() -> None:
         _decupar(ModeloFalso(_fala_no_inicio_do_nucleo), max_paralelas=0)
 
 
+def test_job_de_analise_roda_as_janelas_em_paralelo_e_grava_o_progresso() -> None:
+    repositorio = _repositorio_com_job_em_analise()
+    decupagens = DecupagensEmMemoria("aceitos")
+    janelas = JanelasEmMemoria()
+    modelo = ModeloContador(_fala_no_inicio_do_nucleo)
+
+    resultado = executar(
+        "j",
+        repositorio,
+        decupagens,
+        modelo,
+        janelas_do_job=janelas,
+        max_paralelas=4,
+        dormir=lambda _s: None,
+    )
+
+    assert resultado == "concluido"
+    assert modelo.maximo == 4
+    gravadas = janelas.ler("j")
+    assert len(gravadas) == 30
+    assert all(g.situacao == "concluida" for g in gravadas.values())
+
+
 def test_retomada_nao_chama_o_gemini_para_janelas_concluidas() -> None:
     janelas = JanelasEmMemoria()
 
@@ -373,6 +401,42 @@ def test_retomada_nao_refaz_o_que_o_escalonamento_ja_refez() -> None:
     _decupar(modelo, janelas_do_job=janelas, fracao_escalonada=1.0)
 
     assert modelo.chamadas == []
+
+
+def test_queda_no_escalonamento_nao_refaz_a_primeira_passada_ao_retomar() -> None:
+    janelas = JanelasEmMemoria()
+    vistos: set[tuple[int, int]] = set()
+
+    def cai_no_escalonamento_da_janela_5(inicio: int, fim: int) -> str:
+        # A segunda chamada do mesmo trecho é a do escalonamento.
+        if inicio == 5 * 300_000 - 10_000 and (inicio, fim) in vistos:
+            raise RuntimeError("o processo caiu")
+        vistos.add((inicio, fim))
+        return _fala_no_inicio_do_nucleo(inicio, fim)
+
+    with pytest.raises(RuntimeError):
+        _decupar(
+            ModeloFalso(cai_no_escalonamento_da_janela_5),
+            janelas_do_job=janelas,
+            fracao_escalonada=1.0,
+        )
+    gravadas = janelas.ler("j")
+    # A janela que caiu no escalonamento guarda a Decupagem da primeira passada.
+    assert gravadas[5].situacao == "em_andamento"
+    assert gravadas[5].decupagem is not None and not gravadas[5].refeita
+    faltam = {i for i, g in gravadas.items() if not g.refeita}
+
+    segunda = ModeloFalso(_fala_no_inicio_do_nucleo)
+    d = _decupar(segunda, janelas_do_job=janelas, fracao_escalonada=1.0)
+
+    # Só o escalonamento que faltava, uma vez por janela.
+    assert sorted(segunda.trechos()) == sorted(
+        (j * 300_000 - 10_000 if j else 0, min(j * 300_000 + 310_000, DURACAO_MS))
+        for j in faltam
+    )
+    assert janelas.ler("j")[5].tentativas == 2
+    assert all(g.refeita for g in janelas.ler("j").values())
+    assert len(d.transcricao) == 30
 
 
 def test_janela_que_esgotou_as_tentativas_nao_gasta_mais_chamadas_ao_retomar() -> None:

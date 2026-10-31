@@ -128,7 +128,7 @@ O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cl
 | Agent Platform | Gemini em Standard e Batch, rótulos de custo, avaliação | Resposta em segundos no dia a dia, 50% de desconto no acervo e custo por vídeo |
 | Identity Platform | Login de usuários, contas locais, MFA | Gerenciado; gratuito até 49.999 usuários ativos por mês |
 | BigQuery | Eventos de uso, painel da diretoria, relatórios | Consulta barata sobre todo o histórico |
-| Cloud Run (Job de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Até 80 chamadas por instância: a espera da resposta é dividida e custa centavos |
+| Cloud Run (Job de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Várias janelas ao mesmo tempo numa execução, sem o teto de 1800 s da chamada HTTP do Workflows |
 
 O Agent Engine do Agent Platform, feito para agentes conversacionais, não é necessário para a decupagem, que é um pipeline determinístico. Ele entra numa segunda fase, num assistente de busca no acervo que usa o modo agêntico de vídeo.
 
@@ -270,9 +270,9 @@ A duração do vídeo não tem limite prático: o vídeo vira janelas de anális
 
 1. **Validação e derivados.** Na quarentena, um Cloud Run Job decodifica o arquivo inteiro uma vez. Essa passada valida o vídeo, calcula o SHA-256, detecta os cortes de plano e gera três derivados: o proxy de escalonamento 720p, o proxy de análise 480p com timecode queimado (para a passada de volume) e o proxy de reprodução 480p sem timecode (para o player).
 2. **Plano de janelas.** A duração é dividida em janelas de análise de 300 s com 10 s de contexto. Nenhuma janela é cortada em arquivo: cada chamada aponta para o proxy de análise no Cloud Storage com início e fim (`start_offset` e `end_offset`).
-3. **Uma chamada por janela.** O Workflows dispara as janelas em paralelo, com limite, para um serviço do Cloud Run que chama o Gemini em Standard. Cada instância atende até 80 chamadas ao mesmo tempo, então a espera da resposta é dividida entre elas e custa centavos; num Job, cada janela pagaria CPU parada. A resposta é validada contra o esquema e gravada em `janelas/NNN.json`.
-4. **Escalonamento.** Trechos com dúvida, e também uma amostra aleatória de janelas, voltam ao mesmo serviço com o 3.8 Flash, o proxy de escalonamento 720p, resolução alta e até 2 quadros por segundo. A amostra mede o que a primeira passada deixou de ver, inclusive o que ela nem marcou como dúvida.
-5. **Estado por janela.** Janela concluída fica gravada e nunca é refeita; janela que falha tem novas tentativas próprias, até um limite ([limites do Cloud Run](https://cloud.google.com/run/quotas)). Se o serviço cair entre a resposta do Gemini e a gravação, aquela chamada pode ser cobrada duas vezes; essas repetições entram na conta de custo.
+3. **Uma chamada por janela.** O Workflows roda o Cloud Run Job de análise, que chama o Gemini em Standard para até N janelas ao mesmo tempo (N vem do `infra/main.tf`). É um Job, e não um serviço chamado por HTTP, porque a análise de um programa de 2–3 h passa do teto de 1800 s da chamada HTTP do Workflows (#127). A resposta é validada contra o esquema e gravada em `janelas/NNNN.json`.
+4. **Escalonamento.** Trechos com dúvida, e também uma amostra aleatória de janelas, voltam ao mesmo Job com o 3.8 Flash, o proxy de escalonamento 720p, resolução alta e até 2 quadros por segundo. A amostra mede o que a primeira passada deixou de ver, inclusive o que ela nem marcou como dúvida.
+5. **Estado por janela.** Janela concluída fica gravada e nunca é refeita; janela que falha tem novas tentativas próprias, até um limite ([limites do Cloud Run](https://cloud.google.com/run/quotas)). Se o Job cair entre a resposta do Gemini e a gravação, aquela chamada pode ser cobrada duas vezes; essas repetições entram na conta de custo.
 6. **Consolidação.** Lê as janelas em ordem, une as duplicatas das bordas, aplica a regra de tempos (ver Conteúdo do JSON), liga pautas entre janelas e roda a passada narrativa (só texto). Grava `decupagem.json.gz` e o hash da decupagem.
 7. **Entrega.** `GET /v1/jobs/{id}/decupagem` devolve o documento inteiro em streaming com gzip; o teto de 32 MiB do Cloud Run vale só para respostas sem streaming. O `ETag` é o hash da decupagem.
 

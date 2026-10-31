@@ -1,9 +1,11 @@
 """O que a análise por janelas guarda para retomar: o estado de cada janela e o
 resultado das concluídas.
 
-Uma nova execução do mesmo Job lê isto e não chama o Gemini de novo para a janela
-`concluida`. O estado é o de `api/janelas.py`; o resultado é a Decupagem da janela, já
-medida pelo OCR. `refeita` marca a janela que o escalonamento já decupou de novo.
+Uma nova execução do mesmo Job lê isto e não chama o Gemini de novo para a janela que
+já tem Decupagem. O estado é o de `api/janelas.py`, da passada em curso; o resultado é a
+Decupagem da janela, já medida pelo OCR. Durante o escalonamento, o estado é o dele e a
+Decupagem continua a da primeira passada; `refeita` marca a janela que o escalonamento
+já decupou de novo.
 """
 
 from typing import Protocol
