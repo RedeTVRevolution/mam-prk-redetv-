@@ -25,6 +25,7 @@ from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.comparacao import FotoAusente
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
+from api.decupagem import Decupagem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     CursorInvalido,
@@ -88,6 +89,10 @@ def objeto_do_quadro(job_id: str, caminho: str) -> str:
 
 def objeto_da_copia_limpa(job_id: str) -> str:
     return f"{job_id}/copia_limpa.mp4"
+
+
+def objeto_da_comparacao(job_id: str) -> str:
+    return f"{job_id}.comparacao.json"
 
 
 class RepositorioFirestore:
@@ -447,6 +452,26 @@ class DecupagensStorage:
                     yield pedaco
         except NotFound as e:
             raise ServicoIndisponivel from e
+
+    def ler_decupagem(self, job_id: str) -> Decupagem | None:
+        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
+        try:
+            return Decupagem.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
+
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        try:
+            blob.download_to_filename(str(destino))
+        except NotFound:
+            return False
+        return True
+
+    def gravar_comparacao(self, job_id: str, conteudo: str) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_da_comparacao(job_id)
+        ).upload_from_string(conteudo, content_type="application/json")
 
 
 class TranscricoesStorage:
