@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Button, Group, Paper, Slider, Stack, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Box, Button, Group, Kbd, Paper, Slider, Stack, Text, Tooltip } from '@mantine/core'
 import {
   IconDownload,
   IconMaximize,
@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { type ClienteDaApi, codigoDoErro, SessaoExpirada } from './api.ts'
+import { type CatalogoDeCorrecoes, rotuloDe } from './catalogo.ts'
 import { useAtalhos } from './atalhos.ts'
 import { baixarDecupagem } from './baixar.ts'
 import { dataDeExibicao, type Job } from './jobs.ts'
@@ -31,6 +32,11 @@ const AVISO_DO_TC_MS = 1500
 
 const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
+const GRUPO_DA_CATALOGACAO = 'Catalogação'
+const AVISO_DO_DESFAZER_MS = 5000
+/** As correções que o Ctrl+Z desfaz: as que ainda valem (ou esperam aprovação). */
+const DESFAZIVEL = ['ativa', 'pendente']
+const DECISOES = ['desfazer', 'descartar', 'aprovar', 'recusar']
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 function tecla(e: KeyboardEvent, ...teclas: string[]): boolean {
@@ -74,6 +80,11 @@ export default function Visualizador({
   const [selecionada, setSelecionada] = useState<string | null>(null)
   const [aba, setAba] = useState<Aba>('agora')
   const [pessoasAbertas, setPessoasAbertas] = useState<ReadonlySet<string>>(new Set())
+  const [catalogando, setCatalogando] = useState(false)
+  const [catalogo, setCatalogo] = useState<CatalogoDeCorrecoes | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
+  const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(avisoDoDesfazer.current), [])
   // "Reproduzir trecho": onde o player para sozinho.
   const pararEm = useRef<number | null>(null)
   const avisoDoTc = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -116,6 +127,48 @@ export default function Visualizador({
       ativo = false
     }
   }, [api, job.id, concluido, cargasDaDecupagem])
+
+  // O catálogo de correções (rótulos e vocabulários) só serve a quem edita.
+  useEffect(() => {
+    if (!podeEditar) return
+    let ativo = true
+    api.job(job.id).catalogo().then(
+      (c) => {
+        if (ativo) setCatalogo(c)
+      },
+      () => {},
+    )
+    return () => {
+      ativo = false
+    }
+  }, [api, job.id, podeEditar])
+
+  function mostrarAviso(texto: string) {
+    setAviso(texto)
+    clearTimeout(avisoDoDesfazer.current)
+    avisoDoDesfazer.current = setTimeout(() => setAviso(null), AVISO_DO_DESFAZER_MS)
+  }
+
+  /** Ctrl+Z: desfaz a correção mais recente do próprio editor, que a API reverte com o motivo do gesto. */
+  async function desfazerUltima() {
+    if (!catalogando || !decupagem) return
+    try {
+      const [eu, historico] = await Promise.all([api.eu(), api.job(job.id).historico()])
+      const ultima = historico.find(
+        (c) => c.autor_email === eu.email && !DECISOES.includes(c.tipo) && DESFAZIVEL.includes(c.estado),
+      )
+      if (!ultima) {
+        mostrarAviso('Nada para desfazer neste vídeo.')
+        return
+      }
+      await api.job(job.id).desfazer(ultima.id, 'correção desfeita pelo editor')
+      setCargasDaDecupagem((n) => n + 1)
+      const rotulo = catalogo ? rotuloDe(catalogo.tipos, ultima.tipo) : ultima.tipo
+      mostrarAviso(`Desfeito: ${rotulo} (${ultima.depois_legivel} → ${ultima.antes_legivel})`)
+    } catch (e) {
+      if (!(e instanceof SessaoExpirada)) mostrarAviso('Não foi possível desfazer a correção.')
+    }
+  }
 
   // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
   const urlDoQuadro = useMemo(() => criarCacheDeQuadros((arquivo) => api.job(job.id).quadro(arquivo)), [api, job.id])
@@ -247,6 +300,25 @@ export default function Visualizador({
       grupo: GRUPO_DA_LINHA,
     },
     { tecla: 'Enter', acao: 'Numa faixa: saltar à ocorrência', grupo: GRUPO_DA_LINHA },
+    ...(podeEditar
+      ? [
+          {
+            tecla: 'E',
+            acao: 'Ligar e desligar o modo de catalogação',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'e'),
+            executar: () => setCatalogando((c) => !c),
+          },
+          {
+            tecla: 'Ctrl + Z',
+            acao: 'Desfazer a última correção sua neste vídeo',
+            grupo: GRUPO_DA_CATALOGACAO,
+            ctrl: true,
+            casa: (e: KeyboardEvent) => tecla(e, 'z'),
+            executar: () => void desfazerUltima(),
+          },
+        ]
+      : []),
   ])
 
   const tc = useMemo(
@@ -481,6 +553,19 @@ export default function Visualizador({
           aria-label="Painel"
           style={{ flex: '0 0 38%', minWidth: 380, minHeight: 0, display: 'flex', flexDirection: 'column' }}
         >
+          {catalogando && (
+            <Group gap="xs" mb="xs" wrap="nowrap">
+              <Text size="sm" fw={600}>
+                Catalogando
+              </Text>
+              <Kbd size="xs">E</Kbd>
+            </Group>
+          )}
+          {aviso && (
+            <Text size="sm" role="status" mb="xs">
+              {aviso}
+            </Text>
+          )}
           {decupagem ? (
             <Painel
               decupagem={decupagem}
