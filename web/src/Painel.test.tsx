@@ -50,6 +50,7 @@ const DECUPAGEM = {
   comerciais: [{ marca: 'Ultrafarma', tipo: 'merchandising', inicio_ms: 225_000, fim_ms: 240_000 }],
   transcricao: [
     { locutor: 'Ana', texto: 'Boa noite, o Leão Lobo está aqui', inicio_ms: 218_000, fim_ms: 224_000 },
+    { locutor: 'Leão', texto: 'Obrigado, Ana, é um prazer', inicio_ms: 224_000, fim_ms: 300_000 },
   ],
   textos_na_tela: [{ tipo: 'GC', texto: 'LEÃO LOBO · colunista', inicio_ms: 213_000, fim_ms: 235_000 }],
 }
@@ -128,7 +129,7 @@ const aba = (nome: string | RegExp) => screen.getByRole('tab', { name: nome })
 test('as abas trazem a contagem ao lado do nome', async () => {
   await abrir()
 
-  for (const nome of ['Agora', 'Pessoas 2', 'Pautas 3', 'Comerciais 1', 'Textos na tela 1', 'Planos 2']) {
+  for (const nome of ['Agora', 'Pessoas 2', 'Pautas 3', 'Comerciais 1', 'Textos na tela 1', 'Planos 2', 'Transcrição 2']) {
     expect(aba(nome)).toBeTruthy()
   }
   expect(aba('Agora').getAttribute('aria-selected')).toBe('true')
@@ -421,6 +422,7 @@ test('toda aba vazia diz que está vazia', async () => {
     ['Comerciais 0', 'Nenhum comercial neste vídeo.'],
     ['Textos na tela 0', 'Nenhum texto na tela neste vídeo.'],
     ['Planos 0', 'Nenhum plano neste vídeo.'],
+    ['Transcrição 0', 'Este vídeo não tem transcrição.'],
   ]
   for (const [nome, frase] of vazios) {
     await usuario.click(aba(nome))
@@ -437,4 +439,64 @@ test('os atalhos do painel aparecem na lista do ?', async () => {
   const tabela = await screen.findByRole('table', { name: 'Painel' })
   expect(within(tabela).getByText('No painel: mover a seleção na aba')).toBeTruthy()
   expect(within(tabela).getByText('No painel: trocar de aba')).toBeTruthy()
+})
+
+test('Transcrição: cada fala traz o início, o locutor e o texto inteiro', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+
+  await usuario.click(aba('Transcrição 2'))
+
+  const fala = within(painel()).getByRole('button', { name: /Boa noite, o Leão Lobo está aqui/ })
+  expect(within(fala).getByText('03:38')).toBeTruthy()
+  expect(within(fala).getByText('Ana')).toBeTruthy()
+  expect(within(fala).getByText('Boa noite, o Leão Lobo está aqui')).toBeTruthy()
+})
+
+test('Transcrição: a fala atual muda com o tempo, sem fundo vermelho', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  await usuario.click(aba('Transcrição 2'))
+  irPara(player, 220)
+
+  const atual = (nome: RegExp) => within(painel()).getByRole('button', { name: nome }).closest('[data-chave]') as HTMLElement
+  expect(atual(/Boa noite/).getAttribute('aria-current')).toBe('true')
+  expect(atual(/Obrigado/).getAttribute('aria-current')).toBeNull()
+  expect(atual(/Boa noite/).style.boxShadow).toContain('3px')
+
+  irPara(player, 230)
+
+  expect(atual(/Obrigado/).getAttribute('aria-current')).toBe('true')
+  expect(atual(/Boa noite/).getAttribute('aria-current')).toBeNull()
+  for (const el of [painel(), ...painel().querySelectorAll<HTMLElement>('*')]) {
+    expect(el.style.background.toLowerCase()).not.toMatch(/e03131|f4736a|red/)
+  }
+})
+
+test('Transcrição: clicar numa fala salta ao início e seleciona o bloco da faixa Falas, e vice-versa', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  await usuario.click(aba('Transcrição 2'))
+
+  await usuario.click(within(painel()).getByRole('button', { name: /Obrigado, Ana/ }))
+
+  expect(player.currentTime).toBe(224)
+  const bloco = screen.getAllByRole('button', { name: /^Fala/ }).find((b) => b.getAttribute('aria-pressed') === 'true')
+  expect(bloco).toBeTruthy()
+
+  await usuario.click(aba('Agora'))
+  await usuario.click(screen.getAllByRole('button', { name: /^Fala/ })[0])
+
+  expect(aba('Transcrição 2').getAttribute('aria-selected')).toBe('true')
+  expect(within(painel()).getByRole('button', { name: /Boa noite/ }).getAttribute('aria-pressed')).toBe('true')
+})
+
+test('Transcrição: ↓ e Enter funcionam como nas outras abas', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  await usuario.click(aba('Transcrição 2'))
+
+  await usuario.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+
+  expect(player.currentTime).toBe(224)
 })

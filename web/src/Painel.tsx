@@ -8,6 +8,7 @@ import {
   agora,
   contem,
   deltaDeRolagem,
+  deltaParaUmTerco,
   type ItemDoPainel,
   itensDaAba,
   itensDoPainel,
@@ -50,6 +51,7 @@ const VAZIO_DA_ABA: Record<Exclude<Aba, 'agora'>, string> = {
   comerciais: 'Nenhum comercial neste vídeo.',
   textos: 'Nenhum texto na tela neste vídeo.',
   planos: 'Nenhum plano neste vídeo.',
+  transcricao: 'Este vídeo não tem transcrição.',
 }
 
 // Item selecionado: o azul de foco a 16% (0x29). Item atual: a barra de 3 px e o fundo elevado.
@@ -123,6 +125,38 @@ function Item({
   aoReproduzir: (i: ItemDoPainel) => void
 }) {
   const resumo = item.tipo === 'pauta' && item.detalhe
+  if (item.tipo === 'fala') {
+    return (
+      <Box
+        data-chave={item.chave}
+        aria-current={atual ? 'true' : undefined}
+        p="xs"
+        style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
+      >
+        <UnstyledButton
+          data-item
+          aria-label={`${item.linhas[0] ? `${item.linhas[0]}: ` : ''}${item.titulo}, ${relogio(item.inicio_ms)}`}
+          aria-pressed={selecionado}
+          onClick={() => aoClicar(item)}
+          style={{ display: 'block', width: '100%', textAlign: 'left' }}
+        >
+          <Group gap="sm" wrap="nowrap" align="flex-start">
+            <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none', paddingTop: 2 }}>
+              {relogio(item.inicio_ms)}
+            </Text>
+            <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+              {item.linhas[0] && (
+                <Text size="xs" c="dimmed">
+                  {item.linhas[0]}
+                </Text>
+              )}
+              <Text size="sm">{item.titulo}</Text>
+            </Stack>
+          </Group>
+        </UnstyledButton>
+      </Box>
+    )
+  }
   return (
     <Box
       data-chave={item.chave}
@@ -263,6 +297,7 @@ export function Painel({
     comerciais: itensDaAba(itens, 'comerciais').length,
     textos: itensDaAba(itens, 'textos').length,
     planos: itensDaAba(itens, 'planos').length,
+    transcricao: itensDaAba(itens, 'transcricao').length,
   }
 
   // Os itens que as setas percorrem, na ordem em que aparecem na aba.
@@ -280,36 +315,41 @@ export function Painel({
 
   const chaveAtual = navegaveis.find((i) => contem(i, atualMs))?.chave
 
-  function mostrar(chave: string) {
+  function mostrar(chave: string, noTerco: boolean) {
     const area = rolagem.current
     const el = area?.querySelector<HTMLElement>(`[data-chave="${chave}"]`)
     if (!area || !el) return
     const a = area.getBoundingClientRect()
     const e = el.getBoundingClientRect()
-    area.scrollTop += deltaDeRolagem({ topo: a.top, base: a.bottom }, { topo: e.top, base: e.bottom })
+    const painel = { topo: a.top, base: a.bottom }
+    const item = { topo: e.top, base: e.bottom }
+    // Na transcrição a fala atual fica a um terço do topo; nas outras abas basta estar à vista.
+    area.scrollTop += noTerco ? deltaParaUmTerco(painel, item) : deltaDeRolagem(painel, item)
   }
 
   // O painel acompanha o item atual, menos quando a pessoa acabou de rolar; passada a pausa, volta a ele.
   const chaveAtualRef = useRef(chaveAtual)
+  const noTercoRef = useRef(aba === 'transcricao')
   useEffect(() => {
     chaveAtualRef.current = chaveAtual
-  }, [chaveAtual])
+    noTercoRef.current = aba === 'transcricao'
+  }, [chaveAtual, aba])
   const fimDaPausa = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(fimDaPausa.current), [])
   function rolouAMao() {
     ultimaRolagem.current = Date.now()
     clearTimeout(fimDaPausa.current)
     fimDaPausa.current = setTimeout(() => {
-      if (chaveAtualRef.current) mostrar(chaveAtualRef.current)
+      if (chaveAtualRef.current) mostrar(chaveAtualRef.current, noTercoRef.current)
     }, PAUSA_DA_ROLAGEM_MS)
   }
   useEffect(() => {
     if (!chaveAtual || Date.now() - ultimaRolagem.current < PAUSA_DA_ROLAGEM_MS) return
-    mostrar(chaveAtual)
+    mostrar(chaveAtual, aba === 'transcricao')
   }, [chaveAtual, aba])
 
   useEffect(() => {
-    if (selecionada) mostrar(selecionada)
+    if (selecionada) mostrar(selecionada, aba === 'transcricao')
   }, [selecionada, aba])
 
   const indiceDaAba = ABAS.findIndex((a) => a.chave === aba)

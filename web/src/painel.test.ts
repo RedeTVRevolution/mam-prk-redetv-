@@ -3,6 +3,7 @@ import {
   abaDaChave,
   agora,
   deltaDeRolagem,
+  deltaParaUmTerco,
   itensDoPainel,
   itensDaAba,
   semDecupagemEm,
@@ -104,14 +105,14 @@ test('agora: só o que contém o tempo, agrupado por tipo; fim do intervalo é a
   expect(agora(itens, 261_000).map((i) => i.chave)).toEqual([])
 })
 
-test('a aba do item: pessoas para aparição e menção, e nenhuma para fala', () => {
+test('a aba do item: pessoas para aparição e menção, e transcrição para fala', () => {
   expect(abaDaChave('aparicao-3')).toBe('pessoas')
   expect(abaDaChave('mencao-0')).toBe('pessoas')
   expect(abaDaChave('pauta-1')).toBe('pautas')
   expect(abaDaChave('comercial-0')).toBe('comerciais')
   expect(abaDaChave('texto-2')).toBe('textos')
   expect(abaDaChave('plano-2')).toBe('planos')
-  expect(abaDaChave('fala-2')).toBeNull()
+  expect(abaDaChave('fala-2')).toBe('transcricao')
 })
 
 test('itens da aba pautas ficam em ordem de início', () => {
@@ -137,4 +138,11 @@ test('rolagem: só o tanto para o item entrar na vista', () => {
   expect(deltaDeRolagem({ topo: 100, base: 300 }, { topo: 150, base: 200 })).toBe(0)
   expect(deltaDeRolagem({ topo: 100, base: 300 }, { topo: 80, base: 120 })).toBe(-20)
   expect(deltaDeRolagem({ topo: 100, base: 300 }, { topo: 280, base: 330 })).toBe(30)
+})
+
+test('a transcrição acompanha a fala a um terço do topo do painel', () => {
+  // Painel de 300 px de altura: um terço é 100 px abaixo do topo.
+  expect(deltaParaUmTerco({ topo: 0, base: 300 }, { topo: 400, base: 440 })).toBe(300)
+  expect(deltaParaUmTerco({ topo: 0, base: 300 }, { topo: 100, base: 140 })).toBe(0)
+  expect(deltaParaUmTerco({ topo: 50, base: 350 }, { topo: 60, base: 100 })).toBe(-90)
 })

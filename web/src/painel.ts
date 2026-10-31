@@ -2,7 +2,7 @@
 import { type Intervalo, relogio, trechosSemPauta } from './linhaDoTempo.ts'
 import type { Decupagem } from './Video.tsx'
 
-export type Aba = 'agora' | 'pessoas' | 'pautas' | 'comerciais' | 'textos' | 'planos'
+export type Aba = 'agora' | 'pessoas' | 'pautas' | 'comerciais' | 'textos' | 'planos' | 'transcricao'
 
 export const ABAS: { chave: Aba; rotulo: string }[] = [
   { chave: 'agora', rotulo: 'Agora' },
@@ -11,6 +11,7 @@ export const ABAS: { chave: Aba; rotulo: string }[] = [
   { chave: 'comerciais', rotulo: 'Comerciais' },
   { chave: 'textos', rotulo: 'Textos na tela' },
   { chave: 'planos', rotulo: 'Planos' },
+  { chave: 'transcricao', rotulo: 'Transcrição' },
 ]
 
 export type TipoDoItem = 'pauta' | 'aparicao' | 'mencao' | 'comercial' | 'texto' | 'plano' | 'fala'
@@ -44,10 +45,10 @@ const ABA_DO_TIPO: Record<TipoDoItem, Aba | null> = {
   comercial: 'comerciais',
   texto: 'textos',
   plano: 'planos',
-  fala: null,
+  fala: 'transcricao',
 }
 
-/** A aba do tipo do bloco (`fala` ainda não tem aba: é a Transcrição do #160). */
+/** A aba do tipo do bloco. */
 export function abaDaChave(chave: string): Aba | null {
   return ABA_DO_TIPO[chave.split('-')[0] as TipoDoItem] ?? null
 }
@@ -167,7 +168,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
       chave: `fala-${i}`,
       tipo: 'fala',
       titulo: f.texto,
-      linhas: [f.locutor],
+      linhas: f.locutor ? [f.locutor] : [],
       selos: [],
       inicio_ms: f.inicio_ms,
       fim_ms: f.fim_ms,
@@ -193,6 +194,7 @@ const TIPOS_DA_ABA: Record<Exclude<Aba, 'agora'>, TipoDoItem[]> = {
   comerciais: ['comercial'],
   textos: ['texto'],
   planos: ['plano'],
+  transcricao: ['fala'],
 }
 
 /** Os itens de uma aba, em ordem de início (pessoas: aparições, depois menções). */
@@ -225,4 +227,12 @@ export function deltaDeRolagem(
   if (item.topo < painel.topo) return item.topo - painel.topo
   if (item.base > painel.base) return item.base - painel.base
   return 0
+}
+
+/** Quanto rolar o painel para o item ficar a um terço do topo (a transcrição acompanha a fala assim). */
+export function deltaParaUmTerco(
+  painel: { topo: number; base: number },
+  item: { topo: number; base: number },
+): number {
+  return item.topo - (painel.topo + (painel.base - painel.topo) / 3)
 }
