@@ -26,7 +26,7 @@ _Evitar_: cena, take
 Plano sem GC e sem ninguém falando para a câmera, reaproveitável como B-roll.
 
 **Texto na tela**:
-GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os tempos.
+GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os tempos. O Gemini lê o texto; os tempos são medidos nos quadros pelo OCR (`medido`), e o texto que o OCR não acha fica com o tempo do Gemini e `medido=False`.
 _Evitar_: lettering
 
 **Perfil do programa**:

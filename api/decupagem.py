@@ -203,12 +203,6 @@ class CorrecaoDescartada(CorrecaoDaTranscricao):
     motivo: MotivoDaRecusa
 
 
-# Um texto na tela é suspeito quando passa deste piso e dura o mesmo que um bloco
-# ou uma pauta, com esta folga: o modelo arredonda os tempos ao segundo.
-LIMITE_DO_TEXTO_LONGO_MS = 30_000
-FOLGA_DA_DURACAO_MS = 1_000
-
-
 class TextoNaTela(_Intervalo):
     """Cada vez que um texto fica visível é um item, com o início e o fim em que
     ele está na tela; um GC que sai e volta são dois itens. Nunca estenda o texto
@@ -218,6 +212,9 @@ class TextoNaTela(_Intervalo):
         "gc", "tarja", "legenda", "placar", "chamada", "logo", "qr_code", "outro"
     ]
     texto: Texto = Field(description="O texto lido, como aparece.")
+    # Preenchido pelo servidor: `True` se os tempos foram medidos nos quadros,
+    # `False` se o OCR não achou o texto (ficam os tempos do modelo).
+    medido: bool | None = None
 
 
 class Decupagem(_Estrito):
@@ -245,20 +242,6 @@ class Decupagem(_Estrito):
         "como está. Nunca troque uma palavra por outra de som diferente.",
     )
     correcoes_descartadas: list[CorrecaoDescartada] = []
-
-    def textos_com_a_duracao_de_bloco_ou_pauta(self) -> list[TextoNaTela]:
-        """Textos longos com a duração de um bloco ou de uma pauta inteira.
-
-        Compara só a duração, não a posição: o modelo erra onde o texto começa,
-        não o tamanho do trecho que ele copia.
-        """
-        trechos = [i.duracao_ms for i in [*self.programa.blocos, *self.pautas]]
-        return [
-            texto
-            for texto in self.textos_na_tela
-            if texto.duracao_ms > LIMITE_DO_TEXTO_LONGO_MS
-            and any(abs(texto.duracao_ms - d) <= FOLGA_DA_DURACAO_MS for d in trechos)
-        ]
 
     def _intervalos(self) -> list[_Intervalo]:
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
@@ -298,6 +281,7 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "origem",
         "quadro",
         "texto_original",
+        "medido",
         "motivo",
         "correcoes_descartadas",
     }

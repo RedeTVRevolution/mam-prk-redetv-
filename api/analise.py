@@ -24,7 +24,13 @@ from api.ciclo_de_vida import transitar
 from api.decupagem import Video
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs, agora_utc
-from api.nuvem import DecupagensStorage, RepositorioFirestore, TranscricoesStorage
+from api.leitura_da_tela import LeituraDaTela
+from api.nuvem import (
+    DecupagensStorage,
+    LeiturasStorage,
+    RepositorioFirestore,
+    TranscricoesStorage,
+)
 from api.transcricao import Transcricao
 
 
@@ -48,11 +54,18 @@ class TranscricoesDaAnalise(Protocol):
     def ler_transcricao(self, job_id: str) -> Transcricao | None: ...
 
 
+class LeiturasDaAnalise(Protocol):
+    """Porta para ler a leitura da tela que o Job de OCR guardou."""
+
+    def ler_leitura(self, job_id: str) -> LeituraDaTela | None: ...
+
+
 def criar_app(
     repositorio: RepositorioDeJobs,
     decupagens: DecupagensDaAnalise,
     transporte: Transporte,
     transcricoes: TranscricoesDaAnalise | None = None,
+    leituras: LeiturasDaAnalise | None = None,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
 ) -> FastAPI:
@@ -87,6 +100,7 @@ def criar_app(
                 transcricao=transcricoes.ler_transcricao(job.id)
                 if transcricoes
                 else None,
+                leitura=leituras.ler_leitura(job.id) if leituras else None,
                 dormir=dormir,
             )
         except AnaliseFalhou:
@@ -118,6 +132,7 @@ def _app_da_nuvem(projeto: str) -> FastAPI:
         TranscricoesStorage(
             ClienteStorage(project=projeto), os.environ["BUCKET_ACEITOS"]
         ),
+        LeiturasStorage(ClienteStorage(project=projeto), os.environ["BUCKET_ACEITOS"]),
     )
 
 

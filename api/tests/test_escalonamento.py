@@ -121,55 +121,33 @@ def test_sorteio_nao_olha_o_resultado_da_janela() -> None:
     assert sorteadas == set(janelas_a_escalonar("abc:v1", sem_duvida, 0.3))
 
 
-def texto(fim_ms: int) -> dict[str, object]:
-    return {"inicio_ms": 0, "fim_ms": fim_ms, "tipo": "gc", "texto": "OFERTA"}
-
-
-def decupagem_com_bloco_de_84s(fim_do_texto_ms: int) -> Decupagem:
-    # o texto entra depois de aumentar o vídeo: a base tem menos de 84 s
+def com_texto(medido: bool | None) -> Decupagem:
     dados = decupagem(("Ana", True)).model_dump()
-    dados["video"]["duracao_ms"] = 90_000
-    dados["textos_na_tela"] = [texto(fim_do_texto_ms)]
-    dados["programa"]["blocos"] = [{"inicio_ms": 0, "fim_ms": 84_000, "titulo": "B"}]
+    dados["textos_na_tela"] = [
+        {
+            "inicio_ms": 0,
+            "fim_ms": 2_000,
+            "tipo": "gc",
+            "texto": "OFERTA",
+            "medido": medido,
+        }
+    ]
     return Decupagem.model_validate(dados)
 
 
-def test_texto_na_tela_com_a_duracao_do_bloco_inteiro_e_duvida() -> None:
-    resultados = {0: decupagem_com_bloco_de_84s(84_000)}
-
-    assert janelas_a_escalonar("abc:v1", resultados, 0) == {0: {"duvida"}}
+def test_texto_que_o_ocr_nao_achou_e_duvida() -> None:
+    assert janelas_a_escalonar("abc:v1", {0: com_texto(False)}, 0) == {0: {"duvida"}}
 
 
-def test_texto_na_tela_um_segundo_mais_curto_que_o_bloco_e_duvida() -> None:
-    resultados = {0: decupagem_com_bloco_de_84s(83_000)}
-
-    assert janelas_a_escalonar("abc:v1", resultados, 0) == {0: {"duvida"}}
-
-
-def test_texto_na_tela_com_a_duracao_da_pauta_inteira_e_duvida() -> None:
-    dados = decupagem(("Ana", True), textos=[texto(40_000)]).model_dump()
-    dados["pautas"] = [
-        {
-            "id": "p1",
-            "inicio_ms": 10_000,
-            "fim_ms": 50_000,
-            "titulo": "P",
-            "resumo": "r",
-        }
-    ]
-
-    resultados = {0: Decupagem.model_validate(dados)}
-
-    assert janelas_a_escalonar("abc:v1", resultados, 0) == {0: {"duvida"}}
+def test_texto_medido_ou_sem_medicao_nao_e_duvida() -> None:
+    assert janelas_a_escalonar("abc:v1", {0: com_texto(True)}, 0) == {}
+    assert janelas_a_escalonar("abc:v1", {0: com_texto(None)}, 0) == {}
 
 
-def test_gc_curto_nao_e_duvida() -> None:
-    resultados = {0: decupagem_com_bloco_de_84s(2_000)}
+def test_texto_longo_com_a_duracao_do_bloco_nao_e_mais_duvida() -> None:
+    dados = com_texto(None).model_dump()
+    dados["video"]["duracao_ms"] = 90_000
+    dados["textos_na_tela"][0]["fim_ms"] = 84_000
+    dados["programa"]["blocos"] = [{"inicio_ms": 0, "fim_ms": 84_000, "titulo": "B"}]
 
-    assert janelas_a_escalonar("abc:v1", resultados, 0) == {}
-
-
-def test_texto_longo_que_nao_e_o_bloco_nao_e_duvida() -> None:
-    resultados = {0: decupagem_com_bloco_de_84s(40_000)}
-
-    assert janelas_a_escalonar("abc:v1", resultados, 0) == {}
+    assert janelas_a_escalonar("abc:v1", {0: Decupagem.model_validate(dados)}, 0) == {}
