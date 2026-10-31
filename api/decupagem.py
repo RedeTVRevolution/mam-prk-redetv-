@@ -199,7 +199,7 @@ class Objeto(_Estrito):
         description="Como a pessoa se liga ao objeto; nulo sem `pessoa`.",
     )
     ocorrencias: list[_Intervalo] = Field(
-        description="Intervalos em que o objeto está visível."
+        min_length=1, description="Intervalos em que o objeto está visível."
     )
 
     @model_validator(mode="after")

@@ -223,3 +223,11 @@ def test_ocorrencia_do_objeto_nao_ajusta_alem_de_1_s() -> None:
     [o] = d.objetos[0].ocorrencias
     assert (o.inicio_ms, o.fim_ms) == (1_500, 4_200)
     assert o.inicio_modelo_ms is None
+
+
+def test_ocorrencia_do_objeto_ajusta_a_1_s_exato_e_nao_a_1_001() -> None:
+    # 2 000 está a 1 000 do corte 1 000; 4 000 está a 1 001 do corte 5 001.
+    d = aplicar_regra_de_tempos(_com_objeto_em(2_000, 4_000), [1_000, 5_001])
+
+    [o] = d.objetos[0].ocorrencias
+    assert (o.inicio_ms, o.fim_ms) == (1_000, 4_000)

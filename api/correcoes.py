@@ -620,6 +620,10 @@ def _pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pautas", []) if isinstance(p, dict)]
 
 
+def _objetos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    return [o for o in modelo.get("objetos", []) if isinstance(o, dict)]
+
+
 # Comerciais, falas e textos na tela não têm id no esquema: o id é a posição.
 _PREFIXO_POSICIONAL = {
     "comerciais": "com",
@@ -1371,15 +1375,40 @@ def _nao_e(resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao) -> No
         return
     o, ocorrencia = achada
     pessoa[o.lista].remove(ocorrencia)
+    novo_id = f"{PREFIXO_NAO_IDENTIFICADO}{c.id}"
+    if o.lista == "na_imagem":
+        _leva_os_objetos(resultado, pessoa, ocorrencia, novo_id)
     resultado.setdefault("pessoas", []).append(
         {
-            "id": f"{PREFIXO_NAO_IDENTIFICADO}{c.id}",
+            "id": novo_id,
             "nome": NOME_NAO_IDENTIFICADO,
             "origem": "revisao",
             **{lista: [] for lista in LISTAS},
             o.lista: [ocorrencia],
         }
     )
+
+
+def _leva_os_objetos(
+    resultado: dict[str, Any],
+    pessoa: dict[str, Any],
+    aparicao: dict[str, Any],
+    novo_id: str,
+) -> None:
+    """O objeto da pessoa visto só na aparição trocada passa à pessoa nova; o
+    visto também noutra aparição dela fica com ela."""
+    trocada = _intervalo_da_pauta(aparicao)
+    restantes = [_intervalo_da_pauta(a) for a in pessoa["na_imagem"]]
+    for objeto in _objetos(resultado):
+        if objeto.get("pessoa") != pessoa.get("id"):
+            continue
+        tempos = [_intervalo_da_pauta(t) for t in objeto.get("ocorrencias", [])]
+        if (
+            tempos
+            and all(_sobrepoe(t, trocada) for t in tempos)
+            and not any(_sobrepoe_de_verdade(t, r) for t in tempos for r in restantes)
+        ):
+            objeto["pessoa"] = novo_id
 
 
 def _aparicao_para_mencao(
@@ -1544,8 +1573,8 @@ def aplicar(
             if "pessoas" in pauta:
                 pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
         # O objeto de quem sumiu fica em cena: sem dono, sem relação.
-        for objeto in resultado.get("objetos", []):
-            if isinstance(objeto, dict) and objeto.get("pessoa") in ids:
+        for objeto in _objetos(resultado):
+            if objeto.get("pessoa") in ids:
                 objeto["pessoa"] = objeto["relacao"] = None
     if "textos_na_tela" in resultado:
         resultado["textos_na_tela"].sort(key=lambda t: (t["inicio_ms"], t["fim_ms"]))

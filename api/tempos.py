@@ -1,9 +1,9 @@
 """Regra de tempos: ajusta os tempos da decupagem aos cortes de câmera.
 
 Os planos são os intervalos entre cortes, cada um com a descrição do plano do
-modelo com que mais se sobrepõe; aparições, ocorrências de objeto e comerciais vão ao corte mais
-próximo só se ele estiver a até 1 s; menções, fala e `mencao_editorial`
-seguem as próprias palavras.
+modelo com que mais se sobrepõe; aparições, ocorrências de objeto e comerciais
+vão ao corte mais próximo só se ele estiver a até 1 s; menções, fala e
+`mencao_editorial` seguem as próprias palavras.
 Quando a regra muda um item, os tempos originais ficam em
 `inicio_modelo_ms` e `fim_modelo_ms`.
 """

@@ -81,20 +81,62 @@ def test_pessoa_que_some_sai_tambem_das_pautas() -> None:
     assert mundo.decupagem()["pautas"][0]["pessoas"] == ["pes02"]
 
 
-def test_pessoa_que_some_deixa_os_objetos_dela_em_cena() -> None:
-    mundo = Mundo(["editor"])
-    objeto = {
+def _sandalia(*tempos: tuple[int, int]) -> dict[str, Any]:
+    return {
         "id": "obj01",
         "categoria": "calcado",
         "tipo": "sandália",
         "cor_base": ["vermelho"],
         "pessoa": "pes01",
         "relacao": "calca",
-        "ocorrencias": [{"inicio_ms": 1000, "fim_ms": 5000}],
+        "ocorrencias": [{"inicio_ms": i, "fim_ms": f} for i, f in tempos],
     }
-    modelo = {**MODELO, "objetos": [objeto]}
+
+
+def _com_objeto(mundo: Mundo, objeto: dict[str, Any], **campos: Any) -> str:
+    modelo = {**MODELO, **campos, "objetos": [objeto]}
     mundo.reprocessar(modelo)
-    versao = versao_do_modelo(json.dumps(modelo).encode())
+    return versao_do_modelo(json.dumps(modelo).encode())
+
+
+def test_nao_e_leva_o_objeto_visto_so_na_aparicao_trocada() -> None:
+    mundo = Mundo(["editor"])
+    versao = _com_objeto(mundo, _sandalia((1000, 5000)))
+    _nao_e(mundo, versao=versao)
+    mundo.corrigir(
+        tipo="pessoa.nao_e",
+        item_id="pes01",
+        valor="Não identificado",
+        ocorrencia=_ocorrencia("citada_na_fala", 5005, 5009),
+        versao=versao,
+    )
+
+    [o] = mundo.decupagem()["objetos"]
+    assert o["pessoa"].startswith("nid-") and o["relacao"] == "calca"
+    ids = {p["id"] for p in mundo.decupagem()["pessoas"]}
+    assert o["pessoa"] in ids
+
+
+def test_nao_e_deixa_com_a_pessoa_o_objeto_visto_noutra_aparicao() -> None:
+    mundo = Mundo(["editor"])
+    ana = {
+        **MODELO["pessoas"][0],
+        "na_imagem": [
+            *MODELO["pessoas"][0]["na_imagem"],
+            {**MODELO["pessoas"][0]["na_imagem"][0], "inicio_ms": 6000, "fim_ms": 8000},
+        ],
+    }
+    pessoas = [ana, *MODELO["pessoas"][1:]]
+    versao = _com_objeto(mundo, _sandalia((1000, 5000), (6000, 8000)), pessoas=pessoas)
+    _nao_e(mundo, versao=versao)
+
+    [o] = mundo.decupagem()["objetos"]
+    assert (o["pessoa"], o["relacao"]) == ("pes01", "calca")
+
+
+def test_pessoa_que_some_deixa_os_objetos_dela_em_cena() -> None:
+    mundo = Mundo(["editor"])
+    versao = _com_objeto(mundo, _sandalia((5005, 5009)))
     _nao_e(mundo, versao=versao)
     mundo.corrigir(
         tipo="pessoa.nao_e",

@@ -197,7 +197,7 @@ def consolidar(
         p.model_copy(update={"id": f"pau{n:02d}"}) for n, p in enumerate(pautas, 1)
     ]
 
-    def objetos_da_janela(
+    def objeto_da_janela(
         k: int, o: Objeto, janela: Janela, ultima: bool
     ) -> Objeto | None:
         """O objeto com o dono pelo mapa das pessoas, só com as ocorrências que
@@ -206,11 +206,11 @@ def consolidar(
         if not ocorrencias:
             return None
         # Dono que não sobreviveu à consolidação: o objeto fica em cena.
-        dono = mapa[k].get(o.pessoa) if o.pessoa else None
+        pessoa = mapa[k].get(o.pessoa) if o.pessoa else None
         return o.model_copy(
             update={
-                "pessoa": dono,
-                "relacao": o.relacao if dono else None,
+                "pessoa": pessoa,
+                "relacao": o.relacao if pessoa else None,
                 "ocorrencias": _em_ordem(ocorrencias),
             }
         )
@@ -253,7 +253,7 @@ def consolidar(
     achados: list[Objeto] = []
     for k, (janela, d) in enumerate(resultados):
         for o in d.objetos:
-            novo = objetos_da_janela(k, o, janela, k == ultimo)
+            novo = objeto_da_janela(k, o, janela, k == ultimo)
             if novo is not None:
                 achados.append(novo)
     achados.sort(key=lambda o: (o.ocorrencias[0].inicio_ms, o.ocorrencias[0].fim_ms))
