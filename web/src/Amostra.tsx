@@ -47,6 +47,9 @@ import {
 // A página de amostra do sistema visual (docs/design/sistema-visual.md): abre em /?amostra,
 // sem login, e só usa os dados fixos daqui. Não chama a API.
 
+type CampoProps = { error?: string; disabled?: boolean; styles?: { input: CSSProperties } }
+type ChipProps = { defaultChecked?: boolean; disabled?: boolean; styles?: { label: CSSProperties } }
+
 const NUMEROS: CSSProperties = { fontVariantNumeric: 'tabular-nums' }
 // Hover e foco desenhados parados, para avaliar sem passar o mouse.
 const ANEL: CSSProperties = { outline: `2px solid ${CORES.foco}`, outlineOffset: 2 }
@@ -506,6 +509,43 @@ function Componentes() {
         ),
       ],
     ]
+  const campos: [string, (estado: CampoProps) => ReactNode][] = [
+    ['Campo de texto', (e) => <TextInput aria-label="Nome" defaultValue="Leão Lobo" {...e} />],
+    [
+      'Campo de busca',
+      (e) => (
+        <TextInput
+          aria-label="Buscar no acervo"
+          placeholder="Buscar no acervo…"
+          leftSection={<IconSearch size={16} />}
+          rightSection={<Kbd size="xs">/</Kbd>}
+          {...e}
+        />
+      ),
+    ],
+    [
+      'Select',
+      (e) => (
+        <Select
+          aria-label="Programa"
+          data={['TV Fama', 'Superpop', 'A Tarde é Sua']}
+          defaultValue="TV Fama"
+          {...e}
+        />
+      ),
+    ],
+  ]
+  const chips: [string, (estado: ChipProps) => ReactNode][] = [
+    ['Estado', (e) => <Chip {...e}>Concluído</Chip>],
+    [
+      'Tipo',
+      (e) => (
+        <Chip color={CORES_DE_OCORRENCIA.mencao.cor} variant="outline" {...e}>
+          Menções
+        </Chip>
+      ),
+    ],
+  ]
   return (
     <Secao titulo="Componentes">
       <Parte titulo="Botões">
@@ -553,35 +593,74 @@ function Componentes() {
       </Parte>
 
       <Parte titulo="Campos">
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-          <TextInput
-            aria-label="Buscar no acervo"
-            placeholder="Buscar no acervo…"
-            leftSection={<IconSearch size={16} />}
-            rightSection={<Kbd size="xs">/</Kbd>}
-          />
-          <TextInput label="Nome" defaultValue="Leão Lobo" />
-          <TextInput label="Motivo" error="Diga por que a correção é necessária." />
-          <TextInput label="Programa" defaultValue="TV Fama" disabled />
-          <Select
-            label="Programa"
-            data={['TV Fama', 'Superpop', 'A Tarde é Sua']}
-            defaultValue="TV Fama"
-          />
-          <TextInput label="Data de exibição" type="date" defaultValue="2026-10-30" />
-        </SimpleGrid>
+        <Table withTableBorder>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th />
+              <Table.Th>Normal</Table.Th>
+              <Table.Th>Foco</Table.Th>
+              <Table.Th>Erro</Table.Th>
+              <Table.Th>Desabilitado</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {campos.map(([nome, campo]) => (
+              <Table.Tr key={nome}>
+                <Table.Td>{nome}</Table.Td>
+                <Table.Td>{campo({})}</Table.Td>
+                <Table.Td>{campo({ styles: { input: { borderColor: CORES.foco } } })}</Table.Td>
+                <Table.Td>{campo({ error: 'Diga por que a correção é necessária.' })}</Table.Td>
+                <Table.Td>{campo({ disabled: true })}</Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+        <Text size="xs" c="dimmed">
+          Campo e select não mudam no hover: o cursor de texto basta. O rótulo fica acima do campo;
+          aqui ele vai no nome acessível, para caber na tabela.
+        </Text>
       </Parte>
 
       <Parte titulo="Chips de filtro">
+        <Table withTableBorder>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th />
+              <Table.Th>Desligado</Table.Th>
+              <Table.Th>Hover</Table.Th>
+              <Table.Th>Ligado</Table.Th>
+              <Table.Th>Foco</Table.Th>
+              <Table.Th>Desabilitado</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {chips.map(([nome, chip]) => (
+              <Table.Tr key={nome}>
+                <Table.Td>{nome}</Table.Td>
+                <Table.Td>{chip({})}</Table.Td>
+                <Table.Td>
+                  {chip({
+                    styles: { label: { background: 'var(--mantine-color-default-hover)' } },
+                  })}
+                </Table.Td>
+                <Table.Td>{chip({ defaultChecked: true })}</Table.Td>
+                <Table.Td>{chip({ defaultChecked: true, styles: { label: ANEL } })}</Table.Td>
+                <Table.Td>{chip({ disabled: true })}</Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
         <Group gap="xs">
-          <Chip defaultChecked>Concluído</Chip>
-          <Chip>Falhou</Chip>
           {Object.entries(CORES_DE_OCORRENCIA).map(([tipo, { rotulo, cor }], i) => (
             <Chip key={tipo} color={cor} variant="outline" defaultChecked={i % 2 === 0}>
               {rotulo}
             </Chip>
           ))}
         </Group>
+        <Text size="xs" c="dimmed">
+          Ligado, o chip de tipo leva a cor do tipo; a marca de seleção é a pista que não depende de
+          cor.
+        </Text>
       </Parte>
 
       <Parte titulo="Selos">

@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
-import { contraste, CORES, CORES_DE_OCORRENCIA, ESTADOS_DO_JOB, tema } from './tema.ts'
+import type { MantineTheme } from '@mantine/core'
+import { contraste, CORES, CORES_DE_OCORRENCIA, ESTADOS_DO_JOB, tema, variaveis } from './tema.ts'
 
 const FUNDOS = { fundo: CORES.fundo, superficie: CORES.superficie, elevada: CORES.elevada }
 
@@ -139,4 +140,14 @@ test('"Decupando" é âmbar, a cor de em andamento', () => {
   const matiz = (Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b) * 180) / Math.PI
   expect(matiz).toBeGreaterThan(30)
   expect(matiz).toBeLessThan(60)
+})
+
+test('o erro e o placeholder que o Mantine pinta nos campos passam no AA', () => {
+  const { dark } = variaveis(tema as MantineTheme)
+  // O campo tem fundo `superficie`; a mensagem de erro fica sobre a página ou a superfície.
+  for (const variavel of ['--mantine-color-error', '--mantine-color-placeholder'] as const) {
+    for (const fundo of [CORES.fundo, CORES.superficie]) {
+      expect(contraste(dark[variavel], fundo)).toBeGreaterThanOrEqual(4.5)
+    }
+  }
 })

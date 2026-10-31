@@ -20,13 +20,13 @@ A interface é cinza, e a cor só aparece quando diz alguma coisa (P3). Todo tok
 | `elevada` | `#25272C` | `dark.5` | Menu, diálogo, popover; hover do que está na superfície |
 | `borda` | `#34373D` | `dark.4` | Toda borda de 1 px, divisória de tabela |
 | `texto` | `#E4E6EA` | `dark.0` | Texto principal |
-| `textoSecundario` | `#A0A5AE` | `dark.2` (dimmed) | Metadado, rótulo de faixa, contagem |
-| `textoDesabilitado` | `#6E737C` | `dark.3` | Controle desabilitado, placeholder |
+| `textoSecundario` | `#A0A5AE` | `dark.2` (dimmed) | Metadado, rótulo de faixa, contagem, placeholder |
+| `textoDesabilitado` | `#6E737C` | `dark.3` | Controle desabilitado |
 
 - **Por que três degraus de fundo.** O fundo é o mais escuro, e cada camada acima clareia um pouco. Assim o painel se separa da página sem sombra nem borda grossa (P2), e o vídeo, que é o conteúdo, fica cercado de cinza escuro, como numa sala de edição (P9).
 - **Por que um cinza quase neutro.** Um leve frio (azul muito baixo) evita o cinza "sujo" do monitor, sem virar uma cor que dispute com as de função (P3).
 - **Por que a escala segue a ordem do Mantine.** O Mantine pinta os componentes pelo índice da escala `dark`: 0 é texto, 2 é dimmed, 4 é borda, 7 é body. Trocar a escala inteira faz todo componente, inclusive os das telas de hoje, usar os tokens sem configuração por componente.
-- **Contraste.** Todo texto passa no AA (4,5:1) sobre os três fundos, inclusive o secundário (P8). O desabilitado é isento pela WCAG (1.4.3, componente inativo), mas fica acima de 3:1 para continuar legível. O placeholder usa o mesmo tom: por isso ele nunca carrega informação que falte no rótulo.
+- **Contraste.** Todo texto passa no AA (4,5:1) sobre os três fundos, inclusive o secundário (P8). O desabilitado é isento pela WCAG (1.4.3, componente inativo), mas fica acima de 3:1 para continuar legível. O placeholder não tem essa isenção, porque o campo está ativo: ele usa o texto secundário, e não o tom 3 que o Mantine daria.
 
 | Texto | Valor | Sobre `fundo` | Sobre `superficie` | Sobre `elevada` |
 | --- | --- | --- | --- | --- |
@@ -105,6 +105,8 @@ Sete tons distinguíveis na deuteranopia, todos com AA sobre fundo escuro, sem v
 | `marca` | `#E03131` | Só no logotipo |
 
 Na TV, vermelho quer dizer "no ar" ou erro (P3). Ele não aparece em botão, destaque, faixa nem fundo. O vermelho de erro é outro token, `falhou`, e vale para tudo o que diz "deu ou vai dar errado": o selo "Falhou", o alerta de erro, a mensagem de campo inválido e o botão de perigo.
+
+**Duas variáveis fora da escala.** O Mantine pinta a mensagem de campo inválido com `--mantine-color-error`, que seria o `red.8` (3,7:1 sobre a superfície, abaixo do AA), e o placeholder com `--mantine-color-placeholder`, que seria o tom de desabilitado. O `variaveis` do `tema.ts` aponta a primeira para `falhou` e a segunda para `textoSecundario`. O teste confere o contraste dessas variáveis, que são as que o campo de fato usa.
 
 ## Tipografia
 

@@ -5,12 +5,12 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { AutenticadorIdentityPlatform } from './auth/identityPlatform.ts'
 import { AutenticadorIndisponivel } from './auth/indisponivel.ts'
-import { tema } from './tema.ts'
+import { tema, variaveis } from './tema.ts'
 
 function mostrar(tela: ReactNode) {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <MantineProvider theme={tema} forceColorScheme="dark">
+      <MantineProvider theme={tema} cssVariablesResolver={variaveis} forceColorScheme="dark">
         {tela}
       </MantineProvider>
     </StrictMode>,

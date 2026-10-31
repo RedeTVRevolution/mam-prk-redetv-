@@ -8,6 +8,7 @@ import {
   Table,
   Tooltip,
   type AppShellNavbarConfiguration,
+  type CSSVariablesResolver,
   type MantineColorsTuple,
 } from '@mantine/core'
 
@@ -115,6 +116,18 @@ export const tema = createTheme({
       styles: { content: { background: CORES.elevada }, header: { background: CORES.elevada } },
     }),
     Loader: Loader.extend({ defaultProps: { size: 'sm' } }),
+  },
+})
+
+// Duas cores que o Mantine não tira da escala: a mensagem de erro dos campos (que seria o
+// red.8, abaixo do AA) e o placeholder (que seria o tom de desabilitado, isento só no
+// controle inativo). Vale para o MantineProvider do app e o dos testes.
+export const variaveis: CSSVariablesResolver = () => ({
+  variables: {},
+  light: {},
+  dark: {
+    '--mantine-color-error': CORES.falhou,
+    '--mantine-color-placeholder': CORES.textoSecundario,
   },
 })
 
