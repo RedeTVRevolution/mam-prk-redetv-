@@ -142,6 +142,8 @@ class Chamada:
     # Texto no lugar do vídeo (extração de nomes do Job de referências, `video_uri`
     # vazio); também Standard. Com `imagens`, o texto segue as imagens.
     texto: str = ""
+    # Quanto o transporte espera a resposta; a busca, interativa, espera bem menos.
+    timeout_s: float = TIMEOUT_DA_REDE_S
 
 
 def _duracao(ms: int) -> str:
@@ -243,7 +245,7 @@ class TransporteVertex:
         )
         try:
             resposta = self._sessao.post(
-                url, json=corpo, headers=cabecalhos, timeout=TIMEOUT_DA_REDE_S
+                url, json=corpo, headers=cabecalhos, timeout=chamada.timeout_s
             )
         except (requests.RequestException, OSError) as e:
             raise ErroHttp(503) from e

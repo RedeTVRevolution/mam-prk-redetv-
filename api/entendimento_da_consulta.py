@@ -10,15 +10,16 @@ código desconfia de tudo o que volta. As barreiras da "Busca sem injeção" (pl
   são descartados; pessoa só entra se o código a resolve no catálogo (senão vira texto livre);
   a frase exata precisa estar na própria consulta.
 
-Se o modelo falhar, responder fora do esquema ou o Model Armor acusar, a consulta vira o
-texto saneado, sem filtros (`plano_b`): perde qualidade, nunca segurança.
+Se o modelo falhar, demorar, responder fora do esquema ou o Model Armor acusar, a consulta
+vira o texto saneado, sem filtros (`plano_b`): perde qualidade, nunca segurança. A busca é
+interativa: uma chamada só, sem novas tentativas, com `TEMPO_DA_CONSULTA_S` de teto.
 """
 
 import difflib
+import logging
 import re
-import time
 import unicodedata
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal, Protocol
@@ -28,19 +29,16 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from api.catalogo import Catalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import CATEGORIAS_DE_OBJETO, CORES_BASE
-from api.espera import sorteio_uniforme
-from api.gemini import (
-    AnaliseFalhou,
-    Chamada,
-    Transporte,
-    gerar_validado,
-)
+from api.gemini import Chamada, ErroHttp, Transporte
+
+log = logging.getLogger(__name__)
 
 MODELO_DA_CONSULTA = "gemini-3.5-flash-lite"
 ETAPA = "entendimento_da_consulta"  # o rótulo de custo de cada chamada
 MAXIMO_DE_CARACTERES = 300
 MAXIMO_DE_ITENS = 5  # pessoas, objetos, marcas
-MAXIMO_DO_TIPO = 40
+TEMPO_DA_CONSULTA_S = 10.0  # depois disso, o plano B
+MAXIMO_DO_NOME = 40  # tipo do objeto, nome de pessoa ou de marca
 MAXIMO_DA_FRASE = 120
 SEMELHANCA_DO_NOME = 0.85
 
@@ -68,20 +66,20 @@ class _Estrito(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class _ObjetoPedido(_Estrito):
+class _ObjetoDaResposta(_Estrito):
     categoria: str | None
     tipo: str | None
     cor_base: str | None
     pessoa: str | None
 
 
-class _Pedido(_Estrito):
+class _Resposta(_Estrito):
     """O que o modelo devolve. Categoria, cor, evidência e programa são `str` aqui, não
     `Literal`: um valor fora da lista é descartado pelo código, não derruba a resposta;
-    o esquema enviado ao modelo traz as listas (`esquema_do_pedido`)."""
+    o esquema enviado ao modelo traz as listas (`esquema_da_resposta`)."""
 
     pessoas: list[str]
-    objetos: list[_ObjetoPedido]
+    objetos: list[_ObjetoDaResposta]
     marcas: list[str]
     frase_exata: str | None
     evidencias: list[str]
@@ -146,14 +144,14 @@ def sanear(consulta: str, maximo: int = MAXIMO_DE_CARACTERES) -> str:
     return " ".join(texto.split())[:maximo].strip()
 
 
-def esquema_do_pedido(programas: Collection[str]) -> dict[str, Any]:
+def esquema_da_resposta(programas: Collection[str]) -> dict[str, Any]:
     """O esquema fechado enviado ao modelo: todo campo obrigatório e as listas como `enum`."""
 
     def da_lista(valores: Iterable[str]) -> dict[str, Any]:
         return {"anyOf": [{"type": "string", "enum": list(valores)}, {"type": "null"}]}
 
-    esquema = _Pedido.model_json_schema()
-    objeto = esquema["$defs"]["_ObjetoPedido"]
+    esquema = _Resposta.model_json_schema()
+    objeto = esquema["$defs"]["_ObjetoDaResposta"]
     objeto["properties"]["categoria"] = da_lista(CATEGORIAS_DE_OBJETO)
     objeto["properties"]["cor_base"] = da_lista(CORES_BASE)
     esquema["properties"]["evidencias"]["items"] = {
@@ -216,15 +214,15 @@ def _unicos(itens: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(itens))
 
 
-def _validar(texto: str) -> _Pedido:
+def _validar(texto: str) -> _Resposta:
     try:
-        return _Pedido.model_validate_json(texto)
+        return _Resposta.model_validate_json(texto)
     except ValidationError as e:  # é um ValueError, mas a mensagem some do traceback
         raise ValueError("resposta fora do esquema") from e
 
 
 def _montar(
-    pedido: _Pedido,
+    resposta: _Resposta,
     saneada: str,
     catalogo: Catalogo,
     programas: Collection[str],
@@ -233,17 +231,18 @@ def _montar(
     sobra: list[str] = []  # nomes que o catálogo não resolve: viram texto livre
 
     def dono_de(nome: str) -> str | None:
-        achado = resolver_nome(sanear(nome, MAXIMO_DO_TIPO), catalogo)
-        if achado is None and nome.strip():
-            sobra.append(sanear(nome, MAXIMO_DO_TIPO))
+        saneado = sanear(nome, MAXIMO_DO_NOME)
+        achado = resolver_nome(saneado, catalogo)
+        if achado is None and saneado:
+            sobra.append(saneado)
         return achado
 
-    pessoas = _unicos(
-        i for i in map(dono_de, pedido.pessoas[:MAXIMO_DE_ITENS]) if i is not None
-    )
+    pessoas = [
+        i for i in map(dono_de, resposta.pessoas[:MAXIMO_DE_ITENS]) if i is not None
+    ]
     objetos: list[ObjetoDaConsulta] = []
-    for o in pedido.objetos[:MAXIMO_DE_ITENS]:
-        tipo = sanear(o.tipo, MAXIMO_DO_TIPO) if o.tipo else None
+    for o in resposta.objetos[:MAXIMO_DE_ITENS]:
+        tipo = sanear(o.tipo, MAXIMO_DO_NOME).lower() if o.tipo else None
         objeto = ObjetoDaConsulta(
             categoria=o.categoria if o.categoria in CATEGORIAS_DE_OBJETO else None,
             tipo=tipo or None,
@@ -252,29 +251,34 @@ def _montar(
         )
         if objeto.categoria or objeto.tipo or objeto.cor_base:
             objetos.append(objeto)
+        elif objeto.dono:  # a peça não valeu, mas a pessoa que o modelo achou fica
+            pessoas.append(objeto.dono)
     conhecidas = {normalizar(m): m for m in marcas_conhecidas or ()}
     marcas: list[str] = []
-    for m in pedido.marcas[:MAXIMO_DE_ITENS]:
-        if (chave := normalizar(sanear(m, MAXIMO_DO_TIPO))) in conhecidas:
+    for m in resposta.marcas[:MAXIMO_DE_ITENS]:
+        saneada_m = sanear(m, MAXIMO_DO_NOME)
+        if (chave := normalizar(saneada_m)) in conhecidas:
             marcas.append(conhecidas[chave])
         elif chave:
-            sobra.append(chave)
-    frase = sanear(pedido.frase_exata, MAXIMO_DA_FRASE) if pedido.frase_exata else ""
+            sobra.append(saneada_m)
+    frase = (
+        sanear(resposta.frase_exata, MAXIMO_DA_FRASE) if resposta.frase_exata else ""
+    )
     if not frase or normalizar(frase) not in normalizar(saneada):
         frase = ""  # só vale o que o usuário escreveu
-    desde, ate = _data(pedido.exibido_desde), _data(pedido.exibido_ate)
+    desde, ate = _data(resposta.exibido_desde), _data(resposta.exibido_ate)
     if desde and ate and desde > ate:
         desde, ate = ate, desde
-    livre = sanear(" ".join([pedido.texto_livre or "", *sobra]))
+    livre = sanear(" ".join([resposta.texto_livre or "", *_unicos(sobra)]))
     return ConsultaEntendida(
         saneada=saneada,
-        pessoas=tuple(pessoas),
+        pessoas=tuple(_unicos(pessoas)),
         objetos=tuple(objetos),
         marcas=tuple(_unicos(marcas)),
         frase_exata=frase or None,
         texto_livre=livre,
-        evidencias=tuple(e for e in EVIDENCIAS if e in pedido.evidencias),
-        programa=pedido.programa if pedido.programa in programas else None,
+        evidencias=tuple(e for e in EVIDENCIAS if e in resposta.evidencias),
+        programa=resposta.programa if resposta.programa in programas else None,
         exibido_desde=desde,
         exibido_ate=ate,
     )
@@ -289,9 +293,6 @@ def entender(
     programas: Collection[str],
     marcas_conhecidas: Collection[str] | None = None,
     job_id: str = "busca",
-    dormir: Callable[[float], None] = time.sleep,
-    sortear: Callable[[float], float] = sorteio_uniforme,
-    relogio: Callable[[], float] = time.monotonic,
 ) -> ConsultaEntendida:
     """A consulta estruturada, ou o plano B (texto saneado, sem filtros).
 
@@ -305,25 +306,21 @@ def entender(
     try:
         if armor.acusa_injecao(saneada):
             return plano_b
-    except Exception:  # noqa: BLE001  # sem veredito do Model Armor, o modelo não é chamado
+    except Exception:  # sem veredito do Model Armor, o modelo não é chamado
+        log.exception("Model Armor sem veredito; a consulta vai pelo plano B")
         return plano_b
     chamada = Chamada(
         modelo=MODELO_DA_CONSULTA,
         instrucao=instrucao(programas),
         video_uri="",
-        esquema=esquema_do_pedido(programas),
+        esquema=esquema_da_resposta(programas),
         rotulos={"etapa": ETAPA, "job_id": job_id},
         texto=f"<consulta>{saneada}</consulta>",
+        timeout_s=TEMPO_DA_CONSULTA_S,
     )
     try:
-        pedido = gerar_validado(
-            transporte,
-            chamada,
-            _validar,
-            dormir=dormir,
-            sortear=sortear,
-            relogio=relogio,
-        )
-    except AnaliseFalhou:
+        resposta = _validar(transporte.gerar(chamada))
+    except (ErroHttp, ValueError) as e:
+        log.warning("entendimento da consulta falhou (%s); plano B", e)
         return plano_b
-    return _montar(pedido, saneada, catalogo, programas, marcas_conhecidas)
+    return _montar(resposta, saneada, catalogo, programas, marcas_conhecidas)
