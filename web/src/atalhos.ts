@@ -10,6 +10,8 @@ export interface Atalho {
   executar?: (e: KeyboardEvent) => void
   /** Quando a linha agrupa várias teclas (ou exige `Shift`), diz se o evento é dela. */
   casa?: (e: KeyboardEvent) => boolean
+  /** O atalho exige o Ctrl; sem isto, o Ctrl desliga o atalho (é o do navegador). */
+  ctrl?: boolean
 }
 
 export interface Registro {

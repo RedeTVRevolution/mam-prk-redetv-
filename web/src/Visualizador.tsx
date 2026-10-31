@@ -15,6 +15,8 @@ import { baixarDecupagem } from './baixar.ts'
 import { dataDeExibicao, type Job } from './jobs.ts'
 import { FaixasDoVideo } from './FaixasDoVideo.tsx'
 import { Link } from './Link.tsx'
+import { Painel } from './Painel.tsx'
+import { type Aba, abaDaChave } from './painel.ts'
 import { duracaoDaLinha, faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
@@ -69,6 +71,10 @@ export default function Visualizador({
   const [falhaDaDecupagem, setFalhaDaDecupagem] = useState<string | null>(null)
   const [cargasDaDecupagem, setCargasDaDecupagem] = useState(0)
   const [selecionada, setSelecionada] = useState<string | null>(null)
+  const [aba, setAba] = useState<Aba>('agora')
+  const [pessoasAbertas, setPessoasAbertas] = useState<ReadonlySet<string>>(new Set())
+  // "Reproduzir trecho": onde o player para sozinho.
+  const pararEm = useRef<number | null>(null)
   const avisoDoTc = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoTc.current), [])
 
@@ -132,6 +138,7 @@ export default function Visualizador({
   function saltarPara(segundos: number) {
     const el = player.current
     if (!el) return
+    pararEm.current = null
     const limite = Number.isFinite(el.duration) ? el.duration : Infinity
     el.currentTime = Math.min(Math.max(segundos, 0), limite)
     setAtualMs(el.currentTime * 1000)
@@ -146,6 +153,7 @@ export default function Visualizador({
   const alternar = useCallback(() => {
     const el = player.current
     if (!el) return
+    pararEm.current = null
     if (el.paused) tocar(el)
     else el.pause()
   }, [])
@@ -160,6 +168,20 @@ export default function Visualizador({
     }
     const seguinte = VELOCIDADES.find((v) => v > el.playbackRate) ?? VELOCIDADES[VELOCIDADES.length - 1]
     mudarVelocidade(seguinte)
+  }
+  function reproduzirTrecho(trecho: { inicio_ms: number; fim_ms: number }) {
+    const el = player.current
+    if (!el) return
+    saltarPara(trecho.inicio_ms / 1000)
+    pararEm.current = trecho.fim_ms
+    tocar(el)
+  }
+  function aoAtualizarOTempo(el: HTMLVideoElement) {
+    setAtualMs(el.currentTime * 1000)
+    if (pararEm.current !== null && el.currentTime * 1000 >= pararEm.current) {
+      pararEm.current = null
+      el.pause()
+    }
   }
   const telaCheia = () => {
     if (document.fullscreenElement) void document.exitFullscreen()
@@ -325,7 +347,7 @@ export default function Visualizador({
                     retomarEm.current = null
                   }
                 }}
-                onTimeUpdate={(e) => setAtualMs(e.currentTarget.currentTime * 1000)}
+                onTimeUpdate={(e) => aoAtualizarOTempo(e.currentTarget)}
                 onPlay={() => setTocando(true)}
                 onPause={() => {
                   setTocando(false)
@@ -437,6 +459,8 @@ export default function Visualizador({
               aoSaltar={(ms) => saltarPara(ms / 1000)}
               aoSelecionar={(chave, inicioMs) => {
                 setSelecionada(chave)
+                const aberta = abaDaChave(chave)
+                if (aberta) setAba(aberta)
                 saltarPara(inicioMs / 1000)
               }}
             />
@@ -446,8 +470,34 @@ export default function Visualizador({
           withBorder
           p="sm"
           aria-label="Painel"
-          style={{ flex: '0 0 38%', minWidth: 380, overflowY: 'auto' }}
-        />
+          style={{ flex: '0 0 38%', minWidth: 380, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+        >
+          {decupagem ? (
+            <Painel
+              decupagem={decupagem}
+              duracaoMs={duracaoDaLinhaMs}
+              atualMs={atualMs}
+              aba={aba}
+              aoTrocarAba={setAba}
+              selecionada={selecionada}
+              pessoasAbertas={pessoasAbertas}
+              aoAbrirPessoa={(id) =>
+                setPessoasAbertas((abertas) => {
+                  const novas = new Set(abertas)
+                  if (!novas.delete(id)) novas.add(id)
+                  return novas
+                })
+              }
+              aoSelecionar={setSelecionada}
+              aoSaltar={(ms) => saltarPara(ms / 1000)}
+              aoReproduzir={reproduzirTrecho}
+            />
+          ) : (
+            <Text size="sm" c="dimmed">
+              {concluido ? 'Carregando a decupagem…' : 'O painel aparece quando a decupagem estiver pronta.'}
+            </Text>
+          )}
+        </Paper>
       </Group>
     </Stack>
   )

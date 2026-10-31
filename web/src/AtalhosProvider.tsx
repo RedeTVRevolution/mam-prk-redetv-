@@ -43,14 +43,15 @@ export function AtalhosProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function aoTeclar(e: KeyboardEvent) {
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.defaultPrevented || e.metaKey || e.altKey) return
       if (emCampoDeTexto(e.target)) return
-      if (e.key === '?') {
+      if (e.key === '?' && !e.ctrlKey) {
         e.preventDefault()
         mostrarAtalhos()
         return
       }
       for (const a of juntar()) {
+        if (e.ctrlKey !== !!a.ctrl) continue
         if (a.executar && (a.casa ? a.casa(e) : a.tecla === e.key)) {
           e.preventDefault()
           a.executar(e)
