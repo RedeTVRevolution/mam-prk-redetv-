@@ -6,6 +6,7 @@ import {
   ocorrenciasDosObjetos,
   relogio,
   SEM_NOME,
+  tomDoObjeto,
   trechosSemPauta,
 } from './linhaDoTempo.ts'
 import type { CategoriaDeObjeto, CorBase, Decupagem, RelacaoDoObjeto } from './Video.tsx'
@@ -41,11 +42,13 @@ export interface DadosDoObjeto {
   coresBase: CorBase[]
   /** O tom em palavras; sem ele, a lista escreve as cores base. */
   tom: string
-  dono: { id: string; nome: string; relacao: string } | null
+  /**
+   * `relacao` é o verbo depois do nome ("Mel Breia calça"); `null` quando o esquema não diz.
+   * `naImagem`: o dono tem aparição, e o clique no nome leva a ela na aba Pessoas.
+   */
+  dono: { id: string; nome: string; relacao: string | null; naImagem: boolean } | null
   marca?: string
   detalhe?: string
-  /** Quantas vezes o objeto aparece. */
-  ocorrencias: number
 }
 
 export interface ItemDoPainel extends Intervalo {
@@ -114,13 +117,16 @@ const NOME_DA_CATEGORIA: Record<CategoriaDeObjeto, string> = {
   outro: 'outro',
 }
 
-/** A relação do dono com o objeto, para "calçada por Mel Breia". */
-const FRASE_DA_RELACAO: Record<RelacaoDoObjeto, string> = {
-  veste: 'vestido por',
-  calca: 'calçado por',
-  usa: 'usado por',
-  segura: 'na mão de',
+/** A relação do dono com o objeto, como verbo depois do nome ("Mel Breia calça"): não depende do gênero do tipo. */
+const VERBO_DA_RELACAO: Record<RelacaoDoObjeto, string> = {
+  veste: 'veste',
+  calca: 'calça',
+  usa: 'usa',
+  segura: 'segura',
 }
+
+/** Um `pessoa` que não está nas pessoas da decupagem: o objeto tem dono, só não se sabe quem. */
+const DONO_FORA_DA_DECUPAGEM = 'pessoa fora da decupagem'
 
 /** Todos os itens da decupagem, com as chaves que a linha do tempo usa. */
 export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
@@ -171,7 +177,6 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
   for (const p of d.pessoas) for (const x of p.citada_na_fala) mencao(p.nome, x, 'citado na fala')
   for (const p of d.pessoas)
     for (const x of p.citada_no_texto) mencao(p.nome, x, `citado no texto: ${x.texto}`)
-  const objetos = new Map((d.objetos ?? []).map((o) => [o.id, o]))
   const donos = new Map(d.pessoas.map((p) => [p.id, p]))
   ocorrenciasDosObjetos(d).forEach((o, i) => {
     const { objeto } = o
@@ -189,13 +194,17 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
         tipo: objeto.tipo,
         categoria: NOME_DA_CATEGORIA[objeto.categoria] ?? objeto.categoria,
         coresBase: objeto.cor_base,
-        tom: objeto.cor || objeto.cor_base.join(' e '),
-        dono: dono
-          ? { id: dono.id, nome: nomeExibido(dono.nome), relacao: objeto.relacao ? FRASE_DA_RELACAO[objeto.relacao] : 'com' }
+        tom: tomDoObjeto(objeto) ?? '',
+        dono: objeto.pessoa
+          ? {
+              id: objeto.pessoa,
+              nome: dono ? nomeExibido(dono.nome) : DONO_FORA_DA_DECUPAGEM,
+              relacao: objeto.relacao ? VERBO_DA_RELACAO[objeto.relacao] : null,
+              naImagem: (dono?.na_imagem.length ?? 0) > 0,
+            }
           : null,
         marca: objeto.marca || undefined,
         detalhe: objeto.detalhe || undefined,
-        ocorrencias: objetos.get(objeto.id)?.ocorrencias.length ?? 1,
       },
     })
   })

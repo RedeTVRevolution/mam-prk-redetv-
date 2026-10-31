@@ -528,15 +528,15 @@ test('o agora mostra os objetos visíveis com a cor em palavras, o dono e "em ce
   const secao = within(painel()).getByText('Objetos', { selector: 'p' }).parentElement as HTMLElement
   const sandalia = within(secao).getByRole('button', { name: /sandália/ }).parentElement as HTMLElement
   expect(within(sandalia).getByText('vermelho vivo')).toBeTruthy()
-  expect(within(sandalia).getByText(/^calçado ·/)).toBeTruthy()
-  expect(within(sandalia).getByText(/marca Arezzo/)).toBeTruthy()
+  expect(within(sandalia).getByText('calçado')).toBeTruthy()
+  expect(within(sandalia).getByText('marca Arezzo')).toBeTruthy()
   expect(within(sandalia).getByText('salto alto')).toBeTruthy()
-  expect(within(sandalia).getByText(/calçado por/)).toBeTruthy()
+  expect(within(sandalia).getByText((_, el) => el?.tagName === 'P' && el.textContent === 'Leão Lobo calça')).toBeTruthy()
   expect(within(sandalia).getByRole('button', { name: 'Leão Lobo' })).toBeTruthy()
   const trofeu = within(secao).getByRole('button', { name: /troféu/ }).parentElement as HTMLElement
   expect(within(trofeu).getByText('dourado e preto')).toBeTruthy()
-  // A categoria ("em cena") e o dono (sem dono: "em cena") dizem a mesma coisa em linhas próprias.
-  expect(within(trofeu).getAllByText('em cena').length).toBe(2)
+  // Sem dono, a categoria "em cena" não se repete na linha do dono.
+  expect(within(trofeu).getAllByText('em cena').length).toBe(1)
 })
 
 test('toda cor de objeto tem a palavra ao lado', async () => {
@@ -547,7 +547,8 @@ test('toda cor de objeto tem a palavra ao lado', async () => {
   expect(quadradinhos.length).toBe(3)
   for (const q of quadradinhos) {
     expect(q.getAttribute('aria-hidden')).toBe('true')
-    expect(q.parentElement?.textContent?.trim()).not.toBe('')
+    // A palavra ao lado nomeia a própria cor ("vermelho vivo" ao lado do vermelho).
+    expect(q.parentElement?.textContent).toContain(q.getAttribute('data-cor-base'))
   }
 })
 
@@ -593,4 +594,14 @@ test('uma Decupagem sem objetos mostra o aviso na faixa', async () => {
   await abrir()
 
   expect(await screen.findByText('Este vídeo não tem objetos decupados.')).toBeTruthy()
+})
+
+test('uma Decupagem sem objetos mostra o aviso na aba Objetos', async () => {
+  const { objetos: _, ...antiga } = DECUPAGEM
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(antiga)))
+  const usuario = userEvent.setup()
+  await abrir()
+
+  await usuario.click(aba('Objetos 0'))
+  expect(within(painel()).getByText('Este vídeo não tem objetos decupados.')).toBeTruthy()
 })

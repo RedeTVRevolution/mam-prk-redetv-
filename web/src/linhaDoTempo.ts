@@ -337,9 +337,14 @@ const resumo = (texto: string): string =>
 
 export const SEM_OBJETOS = 'Este vídeo não tem objetos decupados.'
 
+/** O tom em palavras ("vermelho vivo"); sem ele, as cores base ("dourado e preto"); `null` sem nenhum dos dois. */
+export function tomDoObjeto(o: Objeto): string | null {
+  return o.cor || (o.cor_base.length > 0 ? o.cor_base.join(' e ') : null)
+}
+
 /** "sandália (vermelho vivo) de Mel Breia": o tipo, o tom e o dono, quando houver. */
 export function descricaoDoObjeto(o: Objeto, dono: string | null): string {
-  const tom = o.cor ?? (o.cor_base.length > 0 ? o.cor_base.join(' e ') : null)
+  const tom = tomDoObjeto(o)
   return `${o.tipo}${tom ? ` (${tom})` : ''}${dono ? ` de ${dono}` : ''}`
 }
 

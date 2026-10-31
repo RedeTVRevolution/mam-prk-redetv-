@@ -133,12 +133,12 @@ function CorDoObjeto({ dados }: { dados: DadosDoObjeto }) {
           }}
         />
       ))}
-      <Text size="xs">{dados.tom}</Text>
+      {dados.tom && <Text size="xs">{dados.tom}</Text>}
     </Group>
   )
 }
 
-/** Cor, categoria, marca, detalhe e dono do objeto; o dono é um botão que leva à aba Pessoas. */
+/** Cor, categoria, marca, detalhe e dono do objeto; o dono na imagem é um botão que leva à aba Pessoas. */
 function DescricaoDoObjeto({
   dados,
   aoIrParaDono,
@@ -147,34 +147,44 @@ function DescricaoDoObjeto({
   aoIrParaDono: (pessoa: string) => void
 }) {
   const { dono } = dados
+  const nomeDoDono = dono?.naImagem ? (
+    <UnstyledButton
+      component="button"
+      type="button"
+      onClick={() => aoIrParaDono(dono.id)}
+      style={{ fontSize: 'inherit', color: CORES.focoTexto, textDecoration: 'underline' }}
+    >
+      {dono.nome}
+    </UnstyledButton>
+  ) : (
+    dono?.nome
+  )
   return (
     <Stack gap={0} ml={16}>
       <CorDoObjeto dados={dados} />
-      <Text size="xs" c="dimmed">
-        {[dados.categoria, dados.marca && `marca ${dados.marca}`].filter(Boolean).join(' · ')}
+      {/* Sem dono, a linha do dono já diz "em cena"; a categoria em cena não se repete. */}
+      {(dono || dados.categoria !== 'em cena') && (
+        <Text size="xs" c="dimmed">
+          {dados.categoria}
+        </Text>
+      )}
+      <Text size="xs">
+        {!dono ? (
+          'em cena'
+        ) : dono.relacao ? (
+          <>
+            {nomeDoDono} {dono.relacao}
+          </>
+        ) : (
+          <>de {nomeDoDono}</>
+        )}
       </Text>
+      {dados.marca && <Text size="xs">{`marca ${dados.marca}`}</Text>}
       {dados.detalhe && (
         <Text size="xs" c="dimmed">
           {dados.detalhe}
         </Text>
       )}
-      <Text size="xs">
-        {dono ? (
-          <>
-            {`${dono.relacao} `}
-            <UnstyledButton
-              component="button"
-              type="button"
-              onClick={() => aoIrParaDono(dono.id)}
-              style={{ fontSize: 'inherit', color: CORES.focoTexto, textDecoration: 'underline' }}
-            >
-              {dono.nome}
-            </UnstyledButton>
-          </>
-        ) : (
-          'em cena'
-        )}
-      </Text>
     </Stack>
   )
 }

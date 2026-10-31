@@ -175,12 +175,23 @@ test('o objeto traz tipo, cores, categoria, dono com a relação e marca; sem do
     categoria: 'calçado',
     coresBase: ['vermelho'],
     tom: 'vermelho vivo',
-    dono: { id: 'p2', nome: 'não identificado', relacao: 'calçado por' },
+    dono: { id: 'p2', nome: 'não identificado', relacao: 'calça', naImagem: true },
     marca: 'Arezzo',
     detalhe: undefined,
-    ocorrencias: 2,
   })
   expect(itens[2].objeto).toMatchObject({ tom: 'dourado e preto', dono: null, categoria: 'em cena' })
+})
+
+test('um dono fora das pessoas da decupagem não vira "em cena"', () => {
+  const [o1] = D.objetos ?? []
+  const d = { ...D, objetos: [{ ...o1, pessoa: 'p9', relacao: null }] }
+
+  expect(itensDoPainel(d).find((i) => i.tipo === 'objeto')?.objeto?.dono).toEqual({
+    id: 'p9',
+    nome: 'pessoa fora da decupagem',
+    relacao: null,
+    naImagem: false,
+  })
 })
 
 test('a aba Objetos lista cada objeto uma vez, em ordem de tempo, com as suas ocorrências', () => {

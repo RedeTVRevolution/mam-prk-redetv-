@@ -98,6 +98,14 @@ O limiar de percepção no Oklab fica perto de 0,02; 0,10 é uma diferença que 
 
 Sete tons distinguíveis na deuteranopia, todos com AA sobre fundo escuro, sem vermelho e sem o azul do foco: o espaço é apertado, e as cores saíram de uma busca numérica sob essas restrições, ajustada à mão depois. Quem trocar uma cor precisa rodar o teste.
 
+### Cor do objeto
+
+`CORES_DE_OBJETO`, no `tema.ts`, dá uma cor a cada valor de `cor_base` do Objeto (esquema 1.3): `vermelho`, `laranja`, `amarelo`, `verde`, `azul`, `roxo`, `rosa`, `marrom`, `bege`, `preto`, `branco`, `cinza`, `dourado`, `prateado` e `estampado`. É a única exceção à regra de nomear o token pela função e não pelo tom, porque aqui o tom é o dado: a chave é o valor do esquema e a cor representa a peça que aparece no vídeo, não a interface. Por isso, ela é diferente da cor do tipo de ocorrência `Objeto`.
+
+- **Só no quadradinho de 10 px** da lista de objetos, com borda de 1 px em `textoSecundario`, que separa o `preto` do fundo. Nunca vira texto, fundo nem faixa.
+- **Sempre com a palavra** (P3): o tom em palavras ("vermelho vivo") ou, sem ele, as cores base. O teste confere que a palavra ao lado nomeia a cor do quadradinho.
+- **`estampado` não tem uma cor só**: usa o cinza do `textoSecundario`, e a palavra diz o resto.
+
 ### Marca RedeTV
 
 | Token | Valor | Onde |
