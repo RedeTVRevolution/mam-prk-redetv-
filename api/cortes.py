@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 LIMIAR_PADRAO = 0.3
-TEMPO_LIMITE_S = 900
+TEMPO_LIMITE_S = 7200
 
 
 class DeteccaoFalhou(Exception):

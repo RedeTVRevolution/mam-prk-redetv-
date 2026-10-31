@@ -1,5 +1,6 @@
 """Definição do Workflows da validação: o comportamento real é conferido no #14."""
 
+import re
 from pathlib import Path
 
 DEFINICAO = Path(__file__).parents[2] / "infra" / "validacao.workflow.yaml"
@@ -41,8 +42,8 @@ def test_roda_o_job_de_analise_so_se_o_job_esta_em_analisando() -> None:
     assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
     # A análise não é mais uma chamada HTTP: o teto de 1800 s do Workflows não vale.
     assert "http.post" not in texto and "url_da_analise" not in texto
-    # O conector espera mais que o timeout de 14400 s do Job, não o padrão de 1800 s.
-    assert "timeout: 14700" in passo
+    # O conector espera mais que o timeout de 21600 s do Job, não o padrão de 1800 s.
+    assert "timeout: 21900" in passo
     # Fora de `analisando` o fluxo pula a análise.
     assert "next: fim" in texto
 
@@ -110,8 +111,8 @@ def test_transcricao_roda_o_job_com_override_de_job_id() -> None:
     assert "googleapis.run.v2.projects.locations.jobs.run" in passo
     assert "jobs/${job_de_transcricao}" in passo
     assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    # O conector espera mais que o timeout de 3600 s do Job, não o padrão de 1800 s.
-    assert "timeout: 3900" in passo
+    # O conector espera mais que o timeout de 21600 s do Job, não o padrão de 1800 s.
+    assert "timeout: 21900" in passo
 
 
 def test_falha_da_transcricao_grava_transcricao_falhou_sem_sobrescrever_outro_estado() -> (
@@ -140,7 +141,7 @@ def test_ocr_da_tela_roda_depois_da_transcricao_e_antes_da_analise() -> None:
     assert "googleapis.run.v2.projects.locations.jobs.run" in passo
     assert "jobs/${job_de_ocr}" in passo
     assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    assert "timeout: 3900" in passo
+    assert "timeout: 29100" in passo
 
 
 def test_falha_do_ocr_grava_ocr_falhou_sem_sobrescrever_outro_estado() -> None:
@@ -182,4 +183,33 @@ def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
     assert "job_de_analise     = google_cloud_run_v2_job.analise.name" in main
     assert "google_cloud_run_v2_service.analise" not in main
     # O Job de análise dura mais que o teto de 1800 s da chamada HTTP do Workflows.
-    assert 'timeout         = "14400s"' in job
+    assert 'timeout         = "21600s"' in job
+
+
+def _segundos(texto: str) -> int:
+    return int(texto.strip().removesuffix("s"))
+
+
+def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    texto = _texto()
+    passos = {
+        "valida": ("validacao", "- valida:", "- le_o_job:"),
+        "transcreve": ("transcricao", "- transcreve:", "- le_a_tela:"),
+        "le_a_tela": ("ocr", "- le_a_tela:", "- analisa:"),
+        "analisa": ("analise", "- analisa:", "- fim:"),
+    }
+    for nome, (job, de, ate) in passos.items():
+        recurso = main[main.index(f'resource "google_cloud_run_v2_job" "{job}"') :]
+        recurso = recurso[: recurso.index("\n}\n")]
+        job_s = _segundos(re.search(r'timeout\s*=\s*"(\d+s)"', recurso).group(1))  # type: ignore[union-attr]
+        passo = texto[texto.index(de) : texto.index(ate)]
+        conector = re.search(r"connector_params:\s+timeout: (\d+)", passo)
+        assert conector is not None, nome
+        assert int(conector.group(1)) > job_s, nome
+
+
+def test_nenhum_comentario_da_infra_fala_em_ate_10_min() -> None:
+    infra = Path(__file__).parents[2] / "infra"
+    for arquivo in (infra / "main.tf", DEFINICAO):
+        assert "até 10 min" not in arquivo.read_text()

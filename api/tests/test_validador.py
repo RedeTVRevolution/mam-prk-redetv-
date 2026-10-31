@@ -30,13 +30,15 @@ def _gerar(
     video: str = "libx264",
     audio: str | None = "aac",
     tamanho: str = "320x240",
+    quadros_por_s: int = 10,
+    fonte: str = "testsrc",
     extra: tuple[str, ...] = (),
 ) -> Path:
     entradas = [
         "-f",
         "lavfi",
         "-i",
-        f"testsrc=size={tamanho}:rate=10:duration={duracao}",
+        f"{fonte}=size={tamanho}:rate={quadros_por_s}:duration={duracao}",
     ]
     mapas = ["-map", "0:v"]
     codec_audio: list[str] = []
@@ -176,15 +178,33 @@ def test_menos_de_1s_e_recusado(tmp_path: Path) -> None:
     assert _recusa(entrada, tmp_path) == "duracao_excedida"
 
 
-def test_mais_de_10min_e_recusado(tmp_path: Path) -> None:
-    entrada = _gerar(
-        tmp_path / "video.mp4",
-        duracao=601,
+def _programa_longo(destino: Path, duracao: float) -> Path:
+    # Resolução mínima, 1 quadro por segundo e tela lisa e sem áudio: a duração é o que importa.
+    return _gerar(
+        destino,
+        fonte="color",
+        audio=None,
+        duracao=duracao,
         tamanho="64x64",
+        quadros_por_s=1,
         extra=("-g", "600", "-preset", "ultrafast"),
     )
 
+
+def test_programa_de_4h_e_aceito(tmp_path: Path) -> None:
+    entrada = _programa_longo(tmp_path / "video.mp4", validador.DURACAO_MAXIMA_S)
+
+    assert validar(entrada, tmp_path / "saida").duracao_s == pytest.approx(14400, abs=1)
+
+
+def test_mais_de_4h_e_recusado(tmp_path: Path) -> None:
+    entrada = _programa_longo(tmp_path / "video.mp4", validador.DURACAO_MAXIMA_S + 1)
+
     assert _recusa(entrada, tmp_path) == "duracao_excedida"
+
+
+def test_o_limite_e_de_4h() -> None:
+    assert validador.DURACAO_MAXIMA_S == 14_400
 
 
 def test_recusa_devolve_so_o_codigo(tmp_path: Path) -> None:

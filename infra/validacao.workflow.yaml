@@ -23,6 +23,9 @@ main:
                   - env:
                       - name: JOB_ID
                         value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de validação tem até 10800 s.
+            connector_params:
+              timeout: 11100
         except:
           as: e
           # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
@@ -99,9 +102,9 @@ main:
                   - env:
                       - name: JOB_ID
                         value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de transcrição tem até 3600 s.
+            # O conector desiste em 1800 s por padrão; o Job de transcrição tem até 21600 s.
             connector_params:
-              timeout: 3900
+              timeout: 21900
         except:
           as: e
           steps:
@@ -146,9 +149,9 @@ main:
                   - env:
                       - name: JOB_ID
                         value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de OCR tem até 3600 s.
+            # O conector desiste em 1800 s por padrão; o Job de OCR tem até 28800 s.
             connector_params:
-              timeout: 3900
+              timeout: 29100
         except:
           as: e
           steps:
@@ -193,10 +196,10 @@ main:
                   - env:
                       - name: JOB_ID
                         value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de análise tem até 14400 s
-            # (as janelas de um programa de 2–3 h, a Flex com até 15 min por chamada).
+            # O conector desiste em 1800 s por padrão; o Job de análise tem até 21600 s
+            # (as janelas de um programa de até 4 h, a Flex com 600 s por chamada).
             connector_params:
-              timeout: 14700
+              timeout: 21900
         except:
           as: e
           steps:

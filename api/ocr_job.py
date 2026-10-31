@@ -23,7 +23,7 @@ from api.leitura_da_tela import (
 )
 from api.nuvem import LeiturasStorage, RepositorioFirestore
 from api.paddle import NOME_DO_MODELO, LeitorPaddle
-from api.quadros import tirar_quadros
+from api.quadros import quadros_por_trecho
 
 
 def executar(
@@ -40,8 +40,9 @@ def executar(
         proxy = pasta / f"{job_id}.mp4"
         armazenamento.baixar_proxy(job_id, proxy)
         quadros = [
-            QuadroLido(segundo=segundo, linhas=leitor.ler(quadro))
-            for segundo, quadro in enumerate(tirar_quadros(proxy, pasta / "quadros"))
+            QuadroLido(segundo=inicio + i, linhas=leitor.ler(quadro))
+            for inicio, do_trecho in quadros_por_trecho(proxy, pasta / "quadros")
+            for i, quadro in enumerate(do_trecho)
         ]
         armazenamento.gravar_leitura(
             job_id, LeituraDaTela(modelo=NOME_DO_MODELO, quadros=quadros)
