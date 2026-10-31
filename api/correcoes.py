@@ -1094,8 +1094,8 @@ def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
     tipos = {c.id: c.tipo for c in correcoes}
 
     def legivel(c: Correcao, valor: str) -> str:
-        # Desfazer, aprovação e recusa mostram o valor do tipo que decidem.
-        alvo = c.desfaz or c.aprova or c.recusa
+        # Desfazer, descarte, aprovação e recusa mostram o valor do tipo que decidem.
+        alvo = c.desfaz or c.descarta or c.aprova or c.recusa
         return valor_legivel(tipos.get(alvo) if alvo else c.tipo, valor)
 
     return [
@@ -2427,11 +2427,13 @@ def rotulos_dos_tipos() -> list[textos.Opcao]:
 
 def valor_legivel(tipo: str | None, valor: str) -> str:
     """O valor de uma Correção para quem lê, pela entrada do tipo; o que não
-    for o formato esperado sai como veio."""
+    for o formato esperado sai como veio, sem derrubar o histórico nem a fila."""
     entrada = TIPOS.get(tipo or "")
     if entrada is None:
         return valor
     try:
         return entrada.legivel(valor)
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        # O valor gravado pode ter qualquer forma (registro antigo, JSON de
+        # outro tipo): `[]` dá AttributeError, aninhamento fundo, RecursionError.
         return valor

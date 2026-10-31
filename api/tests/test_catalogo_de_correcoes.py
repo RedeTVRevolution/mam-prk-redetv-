@@ -3,7 +3,12 @@ from typing import get_args
 
 import pytest
 
-from api.correcoes import TIPOS, TipoDeCorrecao, TipoNovo, valor_legivel
+from api.catalogo_de_correcoes import (
+    ROTULOS_DAS_FONTES,
+    ROTULOS_DAS_LISTAS,
+    ROTULOS_DOS_TONS,
+)
+from api.correcoes import TIPOS, Lista, TipoDeCorrecao, TipoNovo, valor_legivel
 from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta
 from api.tests.test_correcoes import AUTORIZACAO, Mundo
 
@@ -35,6 +40,12 @@ def test_rota_do_catalogo_lista_tipos_e_vocabularios() -> None:
     )
     assert corpo["limites"] == {"nome": 200, "texto": 2000, "motivo": 500}
     assert corpo["prefixos"] == {"acrescentado": "acr-", "nao_identificado": "nid-"}
+
+
+def test_rotulos_cobrem_os_vocabularios_do_esquema() -> None:
+    assert set(ROTULOS_DOS_TONS) == set(get_args(TomDaPauta))
+    assert set(ROTULOS_DAS_FONTES) == set(get_args(FonteDoNome))
+    assert set(ROTULOS_DAS_LISTAS) == set(get_args(Lista))
 
 
 def test_rota_do_catalogo_exige_login() -> None:
@@ -84,6 +95,7 @@ TEXTO = {"tipo": "gc", "texto": "Olá", "inicio_ms": 1000, "fim_ms": 2000}
         ),
         ("pessoa.fontes_do_nome", json.dumps(["gc", "fala"]), "GC, fala"),
         ("pessoa.fontes_do_nome", "[]", "nenhuma fonte"),
+        ("pessoa.fontes_do_nome", json.dumps(["referencia"]), "referência de rosto"),
         ("pauta.tom", "polemico", "polêmico"),
         ("pauta.tom", "outro texto", "outro texto"),
         ("plano.limpo", "true", "plano limpo"),
@@ -137,8 +149,14 @@ def test_valor_legivel_por_tipo(tipo: str, valor: str, esperado: str) -> None:
     ],
 )
 def test_valor_que_nao_e_o_json_esperado_sai_como_veio(tipo: str) -> None:
-    assert valor_legivel(tipo, "texto solto") == "texto solto"
-    assert valor_legivel(tipo, "{}") == "{}"
+    malformados = ["texto solto", "{}", "null", '"x"', "1", "[" * 100_000]
+    if tipo != "pessoa.fontes_do_nome":  # nele, a lista vazia é "nenhuma fonte"
+        malformados.append("[]")
+    for valor in malformados:
+        assert valor_legivel(tipo, valor) == valor
+    if tipo == "plano.descricao":
+        valor = json.dumps({"ambiente": "a", "acao": None, "objetos": "mesa"})
+        assert valor_legivel(tipo, valor) == valor
 
 
 def test_historico_e_fila_trazem_o_valor_legivel() -> None:
@@ -169,8 +187,22 @@ def test_historico_e_fila_trazem_o_valor_legivel() -> None:
 
     alvo = correcao("c1", "pauta.tom", "informativo", "polemico")
     desfazer = correcao("c2", "desfazer", "polemico", "informativo", desfaz="c1")
+    decisoes = [
+        correcao(f"d-{campo}", tipo, "informativo", "polemico", **{campo: "c1"})
+        for tipo, campo in (
+            ("descartar", "descarta"),
+            ("aprovar", "aprova"),
+            ("recusar", "recusa"),
+        )
+    ]
 
-    itens = {i.id: i for i in historico([alvo, desfazer])}
+    itens = {i.id: i for i in historico([alvo, desfazer, *decisoes])}
+
+    for decisao in decisoes:
+        assert (
+            itens[decisao.id].antes_legivel,
+            itens[decisao.id].depois_legivel,
+        ) == ("informativo", "polêmico")
 
     assert (itens["c1"].antes_legivel, itens["c1"].depois_legivel) == (
         "informativo",

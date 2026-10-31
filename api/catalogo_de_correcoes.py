@@ -28,7 +28,7 @@ ROTULOS_DAS_FONTES = {
     "rosto": "rosto",
     "gc": "GC",
     "fala": "fala",
-    "contexto": "contexto",
+    "referencia": "referência de rosto",
 }
 ROTULOS_DAS_LISTAS = {
     "na_imagem": "aparição",
@@ -36,7 +36,7 @@ ROTULOS_DAS_LISTAS = {
     "citada_no_texto": "citada no texto",
 }
 
-_OCORRENCIA = re.compile(r"^(na_imagem|citada_na_fala|citada_no_texto) (\d+)-(\d+)$")
+_OCORRENCIA = re.compile(rf"^({'|'.join(ROTULOS_DAS_LISTAS)}) (\d+)-(\d+)$")
 _TEMPOS = re.compile(r"^(\d+)-(\d+)$")
 
 
@@ -73,6 +73,8 @@ def _papel_visual(d: dict[str, Any]) -> str:
 
 
 def _plano(d: dict[str, Any]) -> str:
+    if not isinstance(d["objetos"], list):
+        raise TypeError("os objetos vêm numa lista")
     return " · ".join(
         x for x in (d["ambiente"], d["acao"], ", ".join(d["objetos"])) if x
     )
