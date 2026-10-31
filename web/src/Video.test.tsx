@@ -429,12 +429,11 @@ test('aba Fala destaca a fala em curso e salta', async () => {
 
   expect(screen.getByText('00:01 LOCUTOR')).toBeTruthy()
   const fala = screen.getByText('Boa noite').closest('button') as HTMLElement
-  const fundo = () => fala.querySelector('.mantine-Paper-root')?.getAttribute('style') ?? ''
-  expect(fundo()).not.toContain('red-9')
+  expect(fala.getAttribute('aria-current')).toBeNull()
   await usuario.click(fala)
   expect(player.currentTime).toBe(1)
   irPara(player, 2)
-  expect(fundo()).toContain('red-9')
+  expect(fala.getAttribute('aria-current')).toBe('true')
 })
 
 test('clicar numa ocorrência da linha do tempo leva o player ao início dela', async () => {

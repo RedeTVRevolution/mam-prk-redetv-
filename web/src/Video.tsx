@@ -55,7 +55,7 @@ import {
   useCatalogo,
   type CatalogoDeCorrecoes,
 } from './catalogo.ts'
-import { CORES_DE_OCORRENCIA } from './tema.ts'
+import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
 
 export interface JobAberto {
   id: string
@@ -251,17 +251,17 @@ function faixasDe(d: Decupagem, catalogo: CatalogoDeCorrecoes): Faixa[] {
   return [
     {
       nome: 'Pautas',
-      cor: CORES_DE_OCORRENCIA.pautas,
+      cor: CORES_DE_OCORRENCIA.pauta.cor,
       ocorrencias: de('pauta', d.pautas, (p) => ({ tipo: 'pauta', id: p.id })),
     },
     {
       nome: 'Aparições',
-      cor: CORES_DE_OCORRENCIA.aparicoes,
+      cor: CORES_DE_OCORRENCIA.aparicao.cor,
       ocorrencias: de('img', daPessoa('na_imagem'), alvoDaPessoa),
     },
     {
       nome: 'Menções',
-      cor: CORES_DE_OCORRENCIA.mencoes,
+      cor: CORES_DE_OCORRENCIA.mencao.cor,
       ocorrencias: de(
         'mencao',
         [...daPessoa('citada_na_fala'), ...daPessoa('citada_no_texto')],
@@ -270,24 +270,25 @@ function faixasDe(d: Decupagem, catalogo: CatalogoDeCorrecoes): Faixa[] {
     },
     {
       nome: 'Comerciais',
-      cor: CORES_DE_OCORRENCIA.comerciais,
+      cor: CORES_DE_OCORRENCIA.comercial.cor,
       ocorrencias: de('com', d.comerciais, (c) =>
         c.id && !c.acrescentado ? { tipo: 'comercial', id: c.id } : undefined,
       ),
     },
     {
       nome: 'Planos',
-      cor: CORES_DE_OCORRENCIA.planos,
+      // Fora do mapa de tipos: os planos saem da linha do tempo no redesenho do Visualizador.
+      cor: 'dark.3',
       ocorrencias: de('plano', d.planos),
     },
     {
       nome: 'Fala',
-      cor: CORES_DE_OCORRENCIA.fala,
+      cor: CORES_DE_OCORRENCIA.fala.cor,
       ocorrencias: de('fala', d.transcricao),
     },
     {
       nome: 'Texto na tela',
-      cor: CORES_DE_OCORRENCIA.textos_na_tela,
+      cor: CORES_DE_OCORRENCIA.texto_na_tela.cor,
       ocorrencias: de('texto', d.textos_na_tela ?? []),
     },
   ]
@@ -662,7 +663,7 @@ export default function Video({
   if (carga.tipo === 'carregando') {
     return (
       <Center h="50vh">
-        <Loader color="red" role="status" aria-label="Carregando o vídeo" />
+        <Loader role="status" aria-label="Carregando o vídeo" />
       </Center>
     )
   }
@@ -733,7 +734,7 @@ export default function Video({
           <Stack gap="sm">
             <Group justify="space-between">
               <Text fw={700}>{job.nome}</Text>
-              <Text ff="monospace" size="xl" c="red.5">
+              <Text ff="monospace" size="xl" style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {`${tempo(atualMs)} / ${tempo(duracaoMs)}`}
               </Text>
             </Group>
@@ -766,7 +767,6 @@ export default function Video({
                     value={atualMs}
                     onChange={saltar}
                     size="xs"
-                    color="red"
                     label={tempo}
                   />
                 </Group>
@@ -978,8 +978,19 @@ export default function Video({
                 {aba === 'Fala' &&
                   decupagem.transcricao.map((f, i) => (
                     <Group key={`fala-${i}`} gap={4} wrap="nowrap" align="flex-start">
-                      <UnstyledButton flex={1} onClick={() => saltar(f.inicio_ms)}>
-                        <Paper p={6} bg={dentro(atualMs, f) ? 'red.9' : 'transparent'}>
+                      <UnstyledButton
+                        flex={1}
+                        aria-current={dentro(atualMs, f) || undefined}
+                        onClick={() => saltar(f.inicio_ms)}
+                      >
+                        {/* Item atual: barra de 3 px na cor de foco e fundo um pouco mais claro. */}
+                        <Paper
+                          p={6}
+                          bg={dentro(atualMs, f) ? 'dark.5' : 'transparent'}
+                          style={{
+                            borderLeft: `3px solid ${dentro(atualMs, f) ? CORES.foco : 'transparent'}`,
+                          }}
+                        >
                           <Group gap={6} wrap="nowrap">
                             <Text size="xs" ff="monospace" c="dimmed">
                               {`${tempo(f.inicio_ms)} ${f.locutor.toUpperCase()}`}
@@ -1334,7 +1345,6 @@ function CorrigirPessoa({
           </Button>
           <Button
             type="button"
-            color="red"
             loading={salvando}
             disabled={!nome.trim() || !motivo.trim()}
             onClick={() => void salvar()}
@@ -1611,7 +1621,6 @@ function CorrigirOcorrencia({
           </Button>
           <Button
             type="button"
-            color="red"
             loading={salvando}
             disabled={!corpo || !motivo.trim()}
             onClick={() => void salvar()}
@@ -1722,7 +1731,6 @@ function CorrigirTempos({
             </Button>
             <Button
               type="button"
-              color="red"
               loading={salvando}
               disabled={!motivo.trim()}
               onClick={() => void salvar()}
@@ -1868,7 +1876,6 @@ function CorrigirPauta({
           </Button>
           <Button
             type="button"
-            color="red"
             loading={salvando}
             disabled={
               !titulo.trim() ||
@@ -2127,7 +2134,6 @@ function CorrigirCampo({
           </Button>
           <Button
             type="button"
-            color="red"
             loading={salvando}
             disabled={!corpo || !motivo.trim()}
             onClick={() => void salvar()}
@@ -2307,7 +2313,6 @@ function CorrigirTrecho({
           </Button>
           <Button
             type="button"
-            color="red"
             loading={salvando}
             disabled={
               !motivo.trim() ||
@@ -2498,7 +2503,6 @@ function CorrigirComercial({
           </Button>
           <Button
             type="button"
-            color="red"
             loading={salvando}
             disabled={
               !marca.trim() ||
@@ -2799,7 +2803,6 @@ function HistoricoDeCorrecoes({
             </Button>
             <Button
               type="button"
-              color="red"
               loading={enviando}
               disabled={!motivo.trim()}
               onClick={() => void confirmar()}
@@ -2983,7 +2986,6 @@ function ItemDaFilaDeRevisao({
           </Button>
           <Button
             size="xs"
-            color="red"
             loading={enviando}
             disabled={!motivo.trim() || !candidato}
             onClick={() => void resolver('reaplicar')}
