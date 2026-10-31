@@ -197,17 +197,19 @@ test('a linha com falha mostra a frase em português, e o código só na dica', 
   expect(await screen.findByText(/codec_nao_suportado/)).toBeTruthy()
 })
 
-test('só a linha concluída abre o vídeo, por clique ou Enter', async () => {
+test('só a linha concluída ou com falha abre o vídeo, por clique ou Enter', async () => {
   const usuario = userEvent.setup()
   jobs = [
     job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' }),
     job({ id: 'b', nome: 'andando.mp4', estado: 'analisando' }),
+    job({ id: 'c', nome: 'quebrado.mp4', estado: 'falhou', codigo_falha: 'analise_falhou' }),
   ]
   await abrir()
   await screen.findByText('pronto.mp4')
 
   expect(screen.getByRole('link', { name: 'pronto.mp4' }).getAttribute('href')).toBe('/video/a')
   expect(screen.queryByRole('link', { name: 'andando.mp4' })).toBeNull()
+  expect(screen.getByRole('link', { name: 'quebrado.mp4' }).getAttribute('href')).toBe('/video/c')
   await usuario.click(screen.getByText('andando.mp4'))
   expect(location.pathname).toBe('/acervo')
 
@@ -274,6 +276,27 @@ test('a busca por nome espera 300 ms, vai à API e à URL', async () => {
   await waitFor(() => expect(ultimaChamada().get('q')).toBe('fama'))
   // Uma chamada só, e não uma por letra.
   expect(chamadas.length).toBe(antes + 1)
+})
+
+test('o espaço digitado no fim da busca fica na caixa depois da espera', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+  const caixa = screen.getByLabelText('Buscar por nome') as HTMLInputElement
+
+  await usuario.type(caixa, 'clipe ')
+  await waitFor(() => expect(location.search).toBe('?q=clipe'))
+  await usuario.type(caixa, 'dois')
+
+  expect(caixa.value).toBe('clipe dois')
+  await waitFor(() => expect(location.search).toBe('?q=clipe+dois'))
+})
+
+test('estado desconhecido na URL sai do filtro', async () => {
+  await abrir({ endereco: '/acervo?estado=inventado&estado=falhou' })
+  await screen.findByText('Nenhum vídeo com esses filtros.')
+
+  expect(ultimaChamada().getAll('estado')).toEqual(['falhou'])
 })
 
 test('cada filtro muda a chamada à API e a URL', async () => {
@@ -436,6 +459,7 @@ test('se a lista não carrega, mostra o erro e deixa tentar de novo', async () =
   statusDaLista = 503
   await abrir()
   await screen.findByText('Não foi possível carregar o acervo.')
+  expect(screen.getByText('Código para o suporte: http_503')).toBeTruthy()
 
   statusDaLista = 200
   await usuario.click(screen.getByRole('button', { name: 'Tentar de novo' }))
@@ -544,4 +568,18 @@ test('uma falha ao criar o Job vira mensagem em português', async () => {
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect((await dialogo.findByRole('alert')).textContent).toContain('Não foi possível enviar o vídeo')
+})
+
+test('reabrir o diálogo começa um envio novo, sem o aviso do anterior', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  const dialogo = within(await abrirEnvio(usuario))
+  await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
+  await dialogo.findByText(/Envio concluído/)
+
+  await usuario.click(dialogo.getByRole('button', { name: 'Fechar' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const reaberto = within(await abrirEnvio(usuario))
+
+  expect(reaberto.queryByText(/Envio concluído/)).toBeNull()
 })

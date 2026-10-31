@@ -14,17 +14,18 @@ import {
   Text,
   TextInput,
   Tooltip,
+  VisuallyHidden,
 } from '@mantine/core'
 import {
+  IconAlertTriangle,
   IconArrowDown,
   IconFilterOff,
-  IconPlayerPlay,
   IconSearch,
   IconUpload,
   IconX,
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import type { ClienteDaApi } from './api.ts'
+import { FalhaNaApi, SessaoExpirada, type ClienteDaApi } from './api.ts'
 import { useAtalhos, type Atalho } from './atalhos.ts'
 import EnvioDeVideo from './EnvioDeVideo.tsx'
 import { fraseDaFalha } from './falhas.ts'
@@ -34,9 +35,12 @@ import { ACERVO, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, ESTADOS_DO_JOB, type EstadoDoJob } from './tema.ts'
 
 const ESTADOS = Object.keys(ESTADOS_DO_JOB) as EstadoDoJob[]
-const NAO_TERMINAIS = ['aguardando_upload', 'validando', 'analisando']
+const NAO_TERMINAIS: string[] = ESTADOS.filter((e) => e !== 'concluido' && e !== 'falhou')
 const TODOS = '__todos__'
 const ESPERA_DA_BUSCA_MS = 300
+const NUMEROS = { fontVariantNumeric: 'tabular-nums' } as const
+// Linha selecionada: o azul de foco a 16% (0x29) e a barra de 3 px à esquerda.
+const SELECIONADA = { background: `${CORES.foco}29`, boxShadow: `inset 3px 0 0 ${CORES.foco}` }
 
 const ATALHOS: Atalho[] = [
   { tecla: '↑ ↓', acao: 'Na tabela: mover a linha selecionada', grupo: 'Acervo' },
@@ -58,7 +62,38 @@ function dataEHora(iso: string): string {
 type Carga =
   | { tipo: 'carregando' }
   | { tipo: 'pronta'; jobs: Job[]; proximo: string | null }
-  | { tipo: 'erro' }
+  | { tipo: 'erro'; codigo: string }
+
+function codigoDoErro(erro: unknown): string {
+  return erro instanceof FalhaNaApi ? `http_${erro.status}` : 'api_inacessivel'
+}
+
+/** Alerta de erro do sistema visual: frase com a ação, código para o suporte e o botão. */
+function AlertaDeErro({
+  mensagem,
+  codigo,
+  aoTentar,
+}: {
+  mensagem: string
+  codigo: string
+  aoTentar?: () => void
+}) {
+  return (
+    <Alert color={CORES.falhou} variant="light" icon={<IconAlertTriangle />} role="alert">
+      <Group gap="sm">
+        <Text size="sm">{mensagem}</Text>
+        <Text size="xs" c={CORES.textoSecundario}>
+          Código para o suporte: {codigo}
+        </Text>
+        {aoTentar && (
+          <Button type="button" size="xs" variant="default" onClick={aoTentar}>
+            Tentar de novo
+          </Button>
+        )}
+      </Group>
+    </Alert>
+  )
+}
 
 function irPara(filtros: FiltrosDoAcervo, opcoes: { substituir?: boolean } = {}) {
   navegar(`${ACERVO}${filtrosParaBusca(filtros)}`, opcoes)
@@ -108,7 +143,8 @@ function Linha({
   aoSelecionar: (id: string) => void
 }) {
   const estado = ESTADOS_DO_JOB[job.estado as EstadoDoJob]
-  const abre = job.estado === 'concluido'
+  // A tela do vídeo também explica a falha, como na Biblioteca de antes.
+  const abre = job.estado === 'concluido' || job.estado === 'falhou'
   const endereco = enderecoDoVideo(job.id)
   const enviadoPor = job.enviado_por?.nome ?? '—'
 
@@ -142,7 +178,7 @@ function Linha({
         if (abre) navegar(endereco)
       }}
       onKeyDown={aoTeclar}
-      style={{ cursor: abre ? 'pointer' : undefined }}
+      style={{ cursor: abre ? 'pointer' : undefined, ...(selecionada ? SELECIONADA : {}) }}
     >
       <Table.Td p={0} w={72}>
         <Box
@@ -151,13 +187,10 @@ function Linha({
           h={36}
           ml="sm"
           bg="dark.5"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          {abre && <IconPlayerPlay size={14} color={CORES.textoDesabilitado} />}
-        </Box>
+        />
       </Table.Td>
       <Table.Td maw={360}>
-        <Tooltip label={job.nome} openDelay={300}>
+        <Tooltip label={job.nome}>
           {abre ? (
             <Text
               component="a"
@@ -179,7 +212,7 @@ function Linha({
           )}
         </Tooltip>
         {job.codigo_falha && (
-          <Tooltip label={`Código para o suporte: ${job.codigo_falha}`} openDelay={300}>
+          <Tooltip label={`Código para o suporte: ${job.codigo_falha}`}>
             <Text size="xs" c={CORES.falhou} truncate>
               {fraseDaFalha(job.codigo_falha)}
             </Text>
@@ -187,14 +220,14 @@ function Linha({
         )}
       </Table.Td>
       <Table.Td>{job.programa ?? '—'}</Table.Td>
-      <Table.Td style={{ fontVariantNumeric: 'tabular-nums' }}>
+      <Table.Td style={NUMEROS}>
         {dataDeExibicao(job.data_exibicao)}
       </Table.Td>
-      <Table.Td style={{ fontVariantNumeric: 'tabular-nums' }}>
+      <Table.Td style={NUMEROS}>
         {job.duracao_s != null ? tempo(job.duracao_s * 1000) : '—'}
       </Table.Td>
       <Table.Td>
-        <Badge color={estado?.cor} style={{ flexShrink: 0 }}>
+        <Badge color={estado?.cor}>
           {estado?.rotulo ?? job.estado}
         </Badge>
       </Table.Td>
@@ -203,7 +236,7 @@ function Linha({
           {enviadoPor}
         </Text>
       </Table.Td>
-      <Table.Td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+      <Table.Td style={{ ...NUMEROS, whiteSpace: 'nowrap' }}>
         {dataEHora(job.criado_em)}
       </Table.Td>
     </Table.Tr>
@@ -223,9 +256,9 @@ export default function Acervo({
   intervaloMs?: number
 }) {
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
-  const [maisFalhou, setMaisFalhou] = useState(false)
+  const [maisFalhou, setMaisFalhou] = useState<string | null>(null)
   const [carregandoMais, setCarregandoMais] = useState(false)
-  const [atualizacaoFalhou, setAtualizacaoFalhou] = useState(false)
+  const [atualizacaoFalhou, setAtualizacaoFalhou] = useState<string | null>(null)
   const [selecionada, setSelecionada] = useState<string | null>(null)
   const [programas, setProgramas] = useState<string[]>([])
   const [envioAberto, setEnvioAberto] = useState(false)
@@ -234,35 +267,38 @@ export default function Acervo({
   useAtalhos(ATALHOS)
 
   const chave = filtrosParaBusca(filtros)
-  // O que está na tela vale só para estes filtros; resposta de filtro antigo é descartada.
-  const vigente = useRef(chave)
-  const ultimos = useRef(filtros)
-  const carregada = useRef<string | null>(null)
+  // Cada carga da lista (outro filtro ou um envio) abre uma geração; resposta de "Carregar
+  // mais" ou da atualização pedida numa geração anterior é descartada.
+  const geracao = useRef(0)
+  const filtrosAtuais = useRef(filtros)
+  const chaveNaTela = useRef<string | null>(null)
   useEffect(() => {
-    vigente.current = chave
-    ultimos.current = filtros
+    filtrosAtuais.current = filtros
   })
 
   useEffect(() => {
     let ativo = true
+    geracao.current += 1
     // Recomeça a lista quando os filtros mudam ou um envio cria um Job.
     // Um envio recarrega a mesma lista sem piscar o carregamento; outro filtro, não.
-    if (carregada.current !== chave) {
+    if (chaveNaTela.current !== chave) {
       // oxlint-disable-next-line react/set-state-in-effect
       setCarga({ tipo: 'carregando' })
     }
     // oxlint-disable-next-line react/set-state-in-effect
-    setMaisFalhou(false)
-    api.acervo(ultimos.current).then(
+    setMaisFalhou(null)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setAtualizacaoFalhou(null)
+    api.acervo(filtrosAtuais.current).then(
       (pagina) => {
         if (!ativo) return
-        carregada.current = chave
+        chaveNaTela.current = chave
         setCarga({ tipo: 'pronta', ...pagina })
       },
-      () => {
-        if (!ativo) return
-        carregada.current = null
-        setCarga({ tipo: 'erro' })
+      (erro: unknown) => {
+        if (!ativo || erro instanceof SessaoExpirada) return
+        chaveNaTela.current = null
+        setCarga({ tipo: 'erro', codigo: codigoDoErro(erro) })
       },
     )
     return () => {
@@ -284,14 +320,15 @@ export default function Acervo({
   }, [api])
 
   // A caixa de busca espera 300 ms; mudança vinda da URL (Limpar, voltar) a sobrescreve.
+  // A URL leva o texto sem os espaços das pontas: o espaço que se acabou de digitar fica na caixa.
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
-    setBusca(filtros.q)
+    setBusca((atual) => (atual.trim() === filtros.q ? atual : filtros.q))
   }, [filtros.q])
   useEffect(() => {
-    if (busca === filtros.q) return
+    if (busca.trim() === filtros.q) return
     const relogio = setTimeout(
-      () => irPara({ ...ultimos.current, q: busca.trim() }, { substituir: true }),
+      () => irPara({ ...filtrosAtuais.current, q: busca.trim() }, { substituir: true }),
       ESPERA_DA_BUSCA_MS,
     )
     return () => clearTimeout(relogio)
@@ -300,21 +337,28 @@ export default function Acervo({
   // Só as linhas em andamento são consultadas de novo, e só com a aba à vista.
   const emAndamento = carga.tipo === 'pronta' ? carga.jobs.filter((j) => NAO_TERMINAIS.includes(j.estado)) : []
   const idsEmAndamento = emAndamento.map((j) => j.id).join(',')
+  // Com a API lenta, uma rodada não começa enquanto a anterior não volta.
+  const atualizando = useRef(false)
   const atualizar = useCallback(async () => {
     const ids = idsEmAndamento ? idsEmAndamento.split(',') : []
-    if (ids.length === 0 || document.visibilityState !== 'visible') return
-    const daVez = vigente.current
+    if (ids.length === 0 || document.visibilityState !== 'visible' || atualizando.current) return
+    const daVez = geracao.current
+    atualizando.current = true
     try {
       const novos = await Promise.all(ids.map((id) => api.job(id).detalhe()))
-      if (vigente.current !== daVez) return
-      setAtualizacaoFalhou(false)
+      if (geracao.current !== daVez) return
+      setAtualizacaoFalhou(null)
       setCarga((c) =>
         c.tipo === 'pronta'
           ? { ...c, jobs: c.jobs.map((j) => novos.find((n) => n.id === j.id) ?? j) }
           : c,
       )
-    } catch {
-      setAtualizacaoFalhou(true)
+    } catch (erro) {
+      if (geracao.current === daVez && !(erro instanceof SessaoExpirada)) {
+        setAtualizacaoFalhou(codigoDoErro(erro))
+      }
+    } finally {
+      atualizando.current = false
     }
   }, [api, idsEmAndamento])
   useEffect(() => {
@@ -329,24 +373,27 @@ export default function Acervo({
 
   async function carregarMais() {
     if (carga.tipo !== 'pronta' || !carga.proximo || carregandoMais) return
-    const daVez = vigente.current
+    const daVez = geracao.current
     setCarregandoMais(true)
-    setMaisFalhou(false)
+    setMaisFalhou(null)
     try {
       const pagina = await api.acervo(filtros, carga.proximo)
-      if (vigente.current !== daVez) return
+      if (geracao.current !== daVez) return
       setCarga((c) =>
         c.tipo === 'pronta'
           ? { tipo: 'pronta', jobs: [...c.jobs, ...pagina.jobs], proximo: pagina.proximo }
           : c,
       )
-    } catch {
-      if (vigente.current === daVez) setMaisFalhou(true)
+    } catch (erro) {
+      if (geracao.current === daVez && !(erro instanceof SessaoExpirada)) {
+        setMaisFalhou(codigoDoErro(erro))
+      }
     } finally {
       setCarregandoMais(false)
     }
   }
 
+  const limparFiltros = () => irPara(SEM_FILTROS)
   const mudar = (parte: Partial<FiltrosDoAcervo>) => irPara({ ...filtros, ...parte })
   const jobs = carga.tipo === 'pronta' ? carga.jobs : []
 
@@ -372,7 +419,7 @@ export default function Acervo({
             size="xs"
             w={180}
             allowDeselect={false}
-            data={[{ value: TODOS, label: 'Todos os programas' }, ...programas]}
+            data={[{ value: TODOS, label: 'Todos' }, ...programas]}
             value={filtros.programa || TODOS}
             onChange={(valor) => mudar({ programa: valor && valor !== TODOS ? valor : '' })}
           />
@@ -416,7 +463,7 @@ export default function Acervo({
               color="gray"
               size="compact-sm"
               leftSection={<IconX size={14} aria-hidden />}
-              onClick={() => irPara(SEM_FILTROS)}
+              onClick={limparFiltros}
             >
               Limpar filtros
             </Button>
@@ -434,12 +481,23 @@ export default function Acervo({
         )}
       </Group>
 
-      {(atualizacaoFalhou || maisFalhou) && (
-        <Alert color={CORES.andamento} variant="light" role="alert" mb="sm" py={4}>
-          {maisFalhou
-            ? 'Não foi possível carregar mais vídeos. Tente de novo.'
-            : 'Não foi possível atualizar a lista; tentando de novo.'}
-        </Alert>
+      {maisFalhou !== null ? (
+        <Box mb="sm">
+          <AlertaDeErro
+            mensagem="Não foi possível carregar mais vídeos."
+            codigo={maisFalhou}
+            aoTentar={() => void carregarMais()}
+          />
+        </Box>
+      ) : (
+        atualizacaoFalhou !== null && (
+          <Box mb="sm">
+            <AlertaDeErro
+              mensagem="Não foi possível atualizar a lista; tentando de novo."
+              codigo={atualizacaoFalhou}
+            />
+          </Box>
+        )
       )}
 
       {carga.tipo === 'carregando' && (
@@ -449,12 +507,11 @@ export default function Acervo({
       )}
       {carga.tipo === 'erro' && (
         <Center py="xl">
-          <Stack align="center" gap="xs">
-            <Text>Não foi possível carregar o acervo.</Text>
-            <Button type="button" size="xs" variant="default" onClick={() => setRecarga((n) => n + 1)}>
-              Tentar de novo
-            </Button>
-          </Stack>
+          <AlertaDeErro
+            mensagem="Não foi possível carregar o acervo."
+            codigo={carga.codigo}
+            aoTentar={() => setRecarga((n) => n + 1)}
+          />
         </Center>
       )}
       {carga.tipo === 'pronta' && jobs.length === 0 && (
@@ -468,7 +525,7 @@ export default function Acervo({
                   size="xs"
                   variant="default"
                   leftSection={<IconFilterOff size={14} aria-hidden />}
-                  onClick={() => irPara(SEM_FILTROS)}
+                  onClick={limparFiltros}
                 >
                   Limpar filtros
                 </Button>
@@ -486,7 +543,7 @@ export default function Acervo({
             <Table.Thead bg="dark.6">
               <Table.Tr>
                 <Table.Th w={72}>
-                  <span style={{ position: 'absolute', left: -9999 }}>Miniatura</span>
+                  <VisuallyHidden>Miniatura</VisuallyHidden>
                 </Table.Th>
                 <Table.Th>Nome do arquivo</Table.Th>
                 <Table.Th>Programa</Table.Th>

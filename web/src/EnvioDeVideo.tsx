@@ -1,5 +1,5 @@
 import { Alert, Button, FileButton, Modal, Progress, Select, Stack, Text, TextInput } from '@mantine/core'
-import { IconUpload } from '@tabler/icons-react'
+import { IconAlertTriangle, IconUpload } from '@tabler/icons-react'
 import { useRef, useState } from 'react'
 import { type ClienteDaApi, PedidoInvalido } from './api.ts'
 import { CORES } from './tema.ts'
@@ -45,6 +45,14 @@ export default function EnvioDeVideo({
   const limparSeletor = useRef<() => void>(null)
   const enviando = envio.tipo === 'enviando'
 
+  // Reabrir o diálogo começa um envio novo, sem o aviso nem os campos do anterior.
+  function fechar() {
+    setEnvio({ tipo: 'parado' })
+    setPrograma(null)
+    setData('')
+    aoFechar()
+  }
+
   async function escolher(arquivo: File | null) {
     if (!arquivo) return
     // Sem isso, escolher de novo o mesmo arquivo não dispara a troca.
@@ -76,7 +84,7 @@ export default function EnvioDeVideo({
   return (
     <Modal
       opened={aberto}
-      onClose={aoFechar}
+      onClose={fechar}
       title="Enviar vídeo"
       closeOnEscape={!enviando}
       closeOnClickOutside={!enviando}
@@ -124,7 +132,7 @@ export default function EnvioDeVideo({
           </Text>
         )}
         {envio.tipo === 'erro' && (
-          <Alert color="red" variant="light" role="alert">
+          <Alert color={CORES.falhou} variant="light" icon={<IconAlertTriangle />} role="alert">
             {envio.mensagem}
           </Alert>
         )}

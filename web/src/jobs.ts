@@ -1,3 +1,5 @@
+import { ESTADOS_DO_JOB } from './tema.ts'
+
 // O que a API mostra de um Job e os filtros do acervo, que viajam na URL e na chamada.
 
 export interface Job {
@@ -74,7 +76,8 @@ export function filtrosDaBusca(busca: string): FiltrosDoAcervo {
     programa: p.get('programa') ?? '',
     de: data('de'),
     ate: data('ate'),
-    estado: [...new Set(p.getAll('estado'))],
+    // Estado desconhecido num link editado à mão sai do filtro, em vez de fazer a API recusar.
+    estado: [...new Set(p.getAll('estado'))].filter((e) => Object.hasOwn(ESTADOS_DO_JOB, e)),
     ordem: p.get('ordem') === 'exibicao' ? 'exibicao' : 'enviado',
   }
 }
