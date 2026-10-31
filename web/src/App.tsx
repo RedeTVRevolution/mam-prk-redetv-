@@ -5,7 +5,7 @@ import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
-import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
+import { CORES, NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import Video, { type JobAberto } from './Video.tsx'
 
 interface Usuario {
@@ -58,7 +58,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
   if (sessao.tipo === 'verificando') {
     return (
       <Center h="100vh">
-        <Loader color="red" role="status" aria-label="Verificando a sessão" />
+        <Loader role="status" aria-label="Verificando a sessão" />
       </Center>
     )
   }
@@ -103,7 +103,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
                 <IconArrowLeft />
               </ActionIcon>
             )}
-            <Badge color="red" variant="filled" radius="sm">
+            <Badge color={CORES.marca} variant="filled" radius="sm">
               MAM
             </Badge>
             <Text fw={700}>RedeTV</Text>
