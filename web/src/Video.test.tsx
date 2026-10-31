@@ -62,6 +62,49 @@ let versaoAtual = 'v1'
 let pedidosDeReproducao = 0
 let links: { url: string; expira_em: string }[] = []
 
+// O mesmo que a API serve em `GET /v1/correcoes/catalogo`.
+const catalogo = {
+  tipos: [
+    { valor: 'pessoa.renomear', rotulo: 'Renomear pessoa' },
+    { valor: 'pauta.titulo', rotulo: 'Título da pauta' },
+    { valor: 'pauta.tom', rotulo: 'Tom da pauta' },
+    { valor: 'item.tempos', rotulo: 'Tempos' },
+    { valor: 'desfazer', rotulo: 'Desfazer' },
+    { valor: 'aprovar', rotulo: 'Aprovação' },
+    { valor: 'recusar', rotulo: 'Recusa' },
+  ],
+  tipos_de_comercial: [
+    { valor: 'intervalo', rotulo: 'intervalo' },
+    { valor: 'merchan_apresentador', rotulo: 'merchan_apresentador' },
+    { valor: 'patrocinio_vinheta', rotulo: 'patrocinio_vinheta' },
+    { valor: 'sobreposicao_grafica', rotulo: 'sobreposicao_grafica' },
+    { valor: 'marca_incidental', rotulo: 'marca_incidental' },
+    { valor: 'mencao_editorial', rotulo: 'mencao_editorial' },
+    { valor: 'testemunhal', rotulo: 'testemunhal' },
+    { valor: 'produto_em_cena', rotulo: 'produto_em_cena' },
+  ],
+  tipos_de_texto_na_tela: ['gc', 'tarja', 'legenda', 'placar', 'chamada', 'logo', 'qr_code', 'outro'].map(
+    (valor) => ({ valor, rotulo: valor }),
+  ),
+  tons_da_pauta: [
+    { valor: 'informativo', rotulo: 'informativo' },
+    { valor: 'polemico', rotulo: 'polêmico' },
+    { valor: 'descontraido', rotulo: 'descontraído' },
+    { valor: 'exclusivo', rotulo: 'exclusivo' },
+    { valor: 'homenagem', rotulo: 'homenagem' },
+    { valor: 'analise', rotulo: 'análise' },
+    { valor: 'comercial', rotulo: 'comercial' },
+  ],
+  fontes_do_nome: [
+    { valor: 'rosto', rotulo: 'rosto' },
+    { valor: 'gc', rotulo: 'GC' },
+    { valor: 'fala', rotulo: 'fala' },
+    { valor: 'referencia', rotulo: 'referência' },
+  ],
+  limites: { nome: 200, texto: 2000, motivo: 500 },
+  prefixos: { acrescentado: 'acr-', nao_identificado: 'nid-' },
+}
+
 const item = (campos: Record<string, unknown>) => ({
   id: 'c1',
   job_id: 'j1',
@@ -73,6 +116,8 @@ const item = (campos: Record<string, unknown>) => ({
   motivo: 'sobrenome completo',
   antes: 'Ana Souza',
   depois: 'Ana Souza Lima',
+  antes_legivel: 'Ana Souza',
+  depois_legivel: 'Ana Souza Lima',
   desfaz: null,
   estado: 'ativa',
   ...campos,
@@ -106,6 +151,8 @@ const handlersDoHistorico = [
               desfaz: 'c1',
               antes: 'Ana Souza Lima',
               depois: 'Ana Souza',
+              antes_legivel: 'Ana Souza Lima',
+              depois_legivel: 'Ana Souza',
               motivo: 'erro meu',
               criada_em: '2026-10-30T13:00:00Z',
             }),
@@ -160,6 +207,7 @@ const handlersDaFila = [
 ]
 
 const servidor = setupServer(
+  http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   ...handlersDoHistorico,
   ...handlersDaFila,
   http.get('/v1/jobs/j1/reproducao', ({ request }) => {
@@ -578,6 +626,13 @@ test('o botão baixa a decupagem em JSON', async () => {
   expect(JSON.parse(await blobs[0]!.text())).toEqual({ ...decupagem, versao_decupagem: 'v1' })
 })
 
+test('falha ao carregar o catálogo de correções mostra aviso', async () => {
+  servidor.use(http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 503 })))
+  await abrir({ estado: 'concluido' })
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Não foi possível')
+})
+
 test('falha ao carregar mostra aviso', async () => {
   statusDecupagem = 503
   await abrir({ estado: 'concluido' })
@@ -755,8 +810,8 @@ test('o histórico mostra um título com hífen como texto, e os tempos como mm:
   servidor.use(
     http.get('/v1/jobs/j1/correcoes', () =>
       HttpResponse.json([
-        item({ id: 'c2', tipo: 'pauta.titulo', item_id: 'pa1', antes: 'Eleição', depois: '2018-2022' }),
-        item({ id: 'c3', tipo: 'item.tempos', item_id: 'pa1', antes: '30000-60000', depois: '32000-60000' }),
+        item({ id: 'c2', tipo: 'pauta.titulo', item_id: 'pa1', antes: 'Eleição', depois: '2018-2022', antes_legivel: 'Eleição', depois_legivel: '2018-2022' }),
+        item({ id: 'c3', tipo: 'item.tempos', item_id: 'pa1', antes: '30000-60000', depois: '32000-60000', antes_legivel: '00:30–01:00', depois_legivel: '00:32–01:00' }),
       ]),
     ),
   )
@@ -770,7 +825,7 @@ test('o histórico mostra um título com hífen como texto, e os tempos como mm:
 test('o histórico mostra o tom com acento e o tom livre antigo como veio', async () => {
   servidor.use(
     http.get('/v1/jobs/j1/correcoes', () =>
-      HttpResponse.json([item({ id: 'c2', tipo: 'pauta.tom', item_id: 'pa1', antes: 'tenso', depois: 'analise' })]),
+      HttpResponse.json([item({ id: 'c2', tipo: 'pauta.tom', item_id: 'pa1', antes: 'tenso', depois: 'analise', antes_legivel: 'tenso', depois_legivel: 'análise' })]),
     ),
   )
   const usuario = userEvent.setup()

@@ -47,6 +47,14 @@ import {
 } from 'react'
 import { chamarApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
+import {
+  comoSelect,
+  ContextoDoCatalogo,
+  pessoaDoModelo,
+  rotuloDe,
+  useCatalogo,
+  type CatalogoDeCorrecoes,
+} from './catalogo.ts'
 import { CORES_DE_OCORRENCIA } from './tema.ts'
 
 export interface JobAberto {
@@ -61,7 +69,11 @@ interface Intervalo {
   fim_ms: number
 }
 
-type Aparicao = Intervalo & { evidencia: string; papel?: string | null; visual?: string | null }
+type Aparicao = Intervalo & {
+  evidencia: string
+  papel?: string | null
+  visual?: string | null
+}
 
 interface Pessoa {
   id: string
@@ -86,9 +98,6 @@ type AcaoDeOcorrencia =
       fim_ms: number
     }
   | { tipo: 'acrescentar'; pessoa: Pessoa | null }
-
-// As pessoas que a revisão cria não existem no JSON do modelo: só se desfazem.
-const pessoaDoModelo = (p: Pessoa) => !/^(nid|acr)-/.test(p.id)
 
 interface Pauta extends Intervalo {
   id: string
@@ -128,31 +137,8 @@ interface Comercial extends Intervalo {
   acrescentado?: boolean
 }
 
-// Os tipos do esquema 1.2 (api/decupagem.py).
-const TIPOS_DE_COMERCIAL = [
-  'intervalo',
-  'merchan_apresentador',
-  'patrocinio_vinheta',
-  'sobreposicao_grafica',
-  'marca_incidental',
-  'mencao_editorial',
-  'testemunhal',
-  'produto_em_cena',
-]
-
 const EVIDENCIAS = ['fala', 'logo', 'texto_na_tela', 'produto'] as const
 type Evidencia = (typeof EVIDENCIAS)[number]
-
-const TIPOS_DE_TEXTO_NA_TELA = [
-  'gc',
-  'tarja',
-  'legenda',
-  'placar',
-  'chamada',
-  'logo',
-  'qr_code',
-  'outro',
-] as const
 
 /** O campo do esquema 1.2 que o Editor corrige no modal `CorrigirCampo`. */
 type CampoAberto =
@@ -162,32 +148,11 @@ type CampoAberto =
   | { modo: 'texto'; texto: TextoNaTela; id: string }
   | { modo: 'novo_texto' }
 
-const TONS_DA_PAUTA = {
-  informativo: 'informativo',
-  polemico: 'polêmico',
-  descontraido: 'descontraído',
-  exclusivo: 'exclusivo',
-  homenagem: 'homenagem',
-  analise: 'análise',
-  comercial: 'comercial',
-} as const
-
-function ehTomDaLista(tom: string): tom is keyof typeof TONS_DA_PAUTA {
-  return Object.hasOwn(TONS_DA_PAUTA, tom)
-}
-
-// Decupagem 1.2 gravada antes da lista fechada pode trazer outro texto: sai como veio.
-function rotuloDoTom(tom: string): string {
-  return ehTomDaLista(tom) ? TONS_DA_PAUTA[tom] : tom
-}
-
-const FONTES_DO_NOME = { rosto: 'rosto', gc: 'GC', fala: 'fala', contexto: 'contexto' } as const
-
 interface TextoNaTela extends Intervalo {
   id?: string
   origem?: 'modelo' | 'revisao'
   acrescentado?: boolean
-  tipo: 'gc' | 'tarja' | 'legenda' | 'placar' | 'chamada' | 'logo' | 'qr_code' | 'outro'
+  tipo: string
   texto: string
 }
 
@@ -256,97 +221,13 @@ function lerTempo(texto: string): number | null {
   return achado ? (Number(achado[1]) * 60 + Number(achado[2])) * 1000 : null
 }
 
-/** O valor de uma correção de tempos ("inicio_ms-fim_ms") vira "mm:ss–mm:ss"; os outros tipos ficam como estão. */
-function valorLegivel(tipo: string | undefined, valor: string): string {
-  if (tipo === 'comercial.acrescentar') {
-    try {
-      const c = JSON.parse(valor) as Comercial
-      return `${c.marca} (${c.tipo}) ${tempo(c.inicio_ms)}–${tempo(c.fim_ms)}`
-    } catch {
-      return valor
-    }
-  }
-  if (tipo === 'pessoa.acrescentar_aparicao') {
-    try {
-      const a = JSON.parse(valor) as Intervalo & {
-        evidencia: string
-        nome?: string
-      }
-      return `${a.nome ? `${a.nome} ` : ''}${tempo(a.inicio_ms)}–${tempo(a.fim_ms)} (${a.evidencia})`
-    } catch {
-      return valor
-    }
-  }
-  if (tipo === 'texto_na_tela.texto') {
-    try {
-      const t = JSON.parse(valor) as { tipo: string; texto: string }
-      return `${t.tipo}: ${t.texto}`
-    } catch {
-      return valor
-    }
-  }
-  if (tipo === 'texto_na_tela.acrescentar') {
-    try {
-      const t = JSON.parse(valor) as Intervalo & { tipo: string; texto: string }
-      return `${t.tipo}: ${t.texto} ${tempo(t.inicio_ms)}–${tempo(t.fim_ms)}`
-    } catch {
-      return valor
-    }
-  }
-  if (tipo === 'aparicao.papel_visual') {
-    try {
-      const d = JSON.parse(valor) as { papel: string | null; visual: string | null }
-      return [d.papel, d.visual].filter(Boolean).join(' · ') || 'sem papel na cena e visual'
-    } catch {
-      return valor
-    }
-  }
-  if (tipo === 'pessoa.fontes_do_nome') {
-    try {
-      const f = JSON.parse(valor) as (keyof typeof FONTES_DO_NOME)[]
-      return f.map((x) => FONTES_DO_NOME[x] ?? x).join(', ') || 'nenhuma fonte'
-    } catch {
-      return valor
-    }
-  }
-  if (tipo === 'pauta.tom') return rotuloDoTom(valor)
-  if (tipo === 'plano.limpo') return valor === 'true' ? 'plano limpo' : 'plano não limpo'
-  if (tipo === 'plano.descricao') {
-    try {
-      const d = JSON.parse(valor) as { ambiente: string; acao: string | null; objetos: string[] }
-      return [d.ambiente, d.acao, d.objetos.join(', ')].filter(Boolean).join(' · ')
-    } catch {
-      return valor
-    }
-  }
-  if (tipo === 'fala.texto') {
-    try {
-      const f = JSON.parse(valor) as { locutor: string; texto: string }
-      return `${f.locutor}: ${f.texto}`
-    } catch {
-      return valor
-    }
-  }
-  const ocorrencia = /^(na_imagem|citada_na_fala|citada_no_texto) (\d+)-(\d+)$/.exec(valor)
-  if (ocorrencia && tipo?.startsWith('pessoa.')) {
-    const nome = {
-      na_imagem: 'aparição',
-      citada_na_fala: 'citada na fala',
-      citada_no_texto: 'citada no texto',
-    }[ocorrencia[1] as ListaDePessoa]
-    return `${nome} ${tempo(Number(ocorrencia[2]))}–${tempo(Number(ocorrencia[3]))}`
-  }
-  const achado = tipo === 'item.tempos' ? /^(\d+)-(\d+)$/.exec(valor) : null
-  return achado ? `${tempo(Number(achado[1]))}–${tempo(Number(achado[2]))}` : valor
-}
-
 /** O campo em mm:ss, em ms: o valor original, com os milissegundos, se o Editor não o mudou. */
 function tempoDoCampo(texto: string, originalMs: number): number | null {
   const ms = lerTempo(texto)
   return ms !== null && ms === lerTempo(tempo(originalMs)) ? originalMs : ms
 }
 
-function faixasDe(d: Decupagem): Faixa[] {
+function faixasDe(d: Decupagem, catalogo: CatalogoDeCorrecoes): Faixa[] {
   const de = <T extends Intervalo>(
     prefixo: string,
     lista: T[],
@@ -360,7 +241,10 @@ function faixasDe(d: Decupagem): Faixa[] {
     }))
   const daPessoa = (lista: ListaDePessoa) =>
     d.pessoas.flatMap((p) =>
-      p[lista].map((x) => ({ ...x, alvo: pessoaDoModelo(p) ? { pessoa: p.id, lista } : null })),
+      p[lista].map((x) => ({
+        ...x,
+        alvo: pessoaDoModelo(catalogo, p) ? { pessoa: p.id, lista } : null,
+      })),
     )
   const alvoDaPessoa = (x: { alvo: { pessoa: string; lista: ListaDePessoa } | null }) =>
     x.alvo ? ({ tipo: 'pessoa', id: x.alvo.pessoa, lista: x.alvo.lista } as const) : undefined
@@ -606,7 +490,12 @@ const dentro = (atualMs: number, i: Intervalo) => atualMs >= i.inicio_ms && atua
 type Carga =
   | { tipo: 'carregando' }
   | { tipo: 'erro' }
-  | { tipo: 'pronta'; reproducao: Reproducao; decupagem: Decupagem }
+  | {
+      tipo: 'pronta'
+      reproducao: Reproducao
+      decupagem: Decupagem
+      catalogo: CatalogoDeCorrecoes
+    }
 
 export default function Video({
   autenticador,
@@ -648,9 +537,10 @@ export default function Video({
     Promise.all([
       chamarApi<Reproducao>(autenticador, `/v1/jobs/${job.id}/reproducao`),
       chamarApi<Decupagem>(autenticador, `/v1/jobs/${job.id}/decupagem`),
+      chamarApi<CatalogoDeCorrecoes>(autenticador, '/v1/correcoes/catalogo'),
     ]).then(
-      ([reproducao, decupagem]) => {
-        if (ativo) setCarga({ tipo: 'pronta', reproducao, decupagem })
+      ([reproducao, decupagem, catalogo]) => {
+        if (ativo) setCarga({ tipo: 'pronta', reproducao, decupagem, catalogo })
       },
       (erro: unknown) => {
         if (!ativo) return
@@ -784,11 +674,11 @@ export default function Video({
     )
   }
 
-  const { decupagem, reproducao } = carga
+  const { decupagem, reproducao, catalogo } = carga
   // Depois de recarregar a decupagem, a seleção antiga não vale mais (os índices podem ter
   // mudado). O modal aberto segue com ela, para mostrar o antes e depois que enviou.
   const selecaoAtual = selecao?.decupagem === decupagem ? selecao : null
-  const faixas = faixasDe(decupagem).map((f) =>
+  const faixas = faixasDe(decupagem, catalogo).map((f) =>
     selecaoAtual && arrastado
       ? {
           ...f,
@@ -837,478 +727,480 @@ export default function Video({
   const quadro = (i: Intervalo) => `${reproducao.url}#t=${i.inicio_ms / 1000 + 1}`
 
   return (
-    <Grid gap="sm">
-      <Grid.Col span={{ base: 12, lg: 8 }}>
-        <Stack gap="sm">
-          <Group justify="space-between">
-            <Text fw={700}>{job.nome}</Text>
-            <Text ff="monospace" size="xl" c="red.5">
-              {`${tempo(atualMs)} / ${tempo(duracaoMs)}`}
-            </Text>
-          </Group>
-          <AspectRatio ratio={16 / 9}>
-            <video
-              ref={player}
-              src={reproducao.url}
-              controls
-              onError={renovarLink}
-              onLoadedMetadata={(e) => {
-                retomar()
-                // Sem duração conhecida (NaN, ou Infinity num stream), fica a da decupagem.
-                const duracao = e.currentTarget.duration
-                setDuracaoDoPlayerMs(Number.isFinite(duracao) ? duracao * 1000 : null)
-              }}
-              onTimeUpdate={(e) => setAtualMs(e.currentTarget.currentTime * 1000)}
-              aria-label="Player"
-              style={{ background: '#000' }}
-            />
-          </AspectRatio>
-          <Paper p="sm" withBorder>
-            <Stack gap={6}>
-              <Group gap="sm" wrap="nowrap">
-                <Box w={LARGURA_DO_ROTULO} />
-                <Slider
-                  flex={1}
-                  min={0}
-                  max={duracaoMs}
-                  step={1000}
-                  value={atualMs}
-                  onChange={saltar}
-                  size="xs"
-                  color="red"
-                  label={tempo}
-                />
-              </Group>
-              {faixas.map((faixa) => (
-                <FaixaDoTempo
-                  key={faixa.nome}
-                  faixa={faixa}
-                  duracaoMs={duracaoMs}
-                  saltar={saltar}
-                  alcas={alcas}
-                />
-              ))}
-            </Stack>
-          </Paper>
-        </Stack>
-      </Grid.Col>
-      <Grid.Col span={{ base: 12, lg: 4 }}>
-        <Paper withBorder p="sm" h="calc(100vh - 76px)" aria-label="Decupagem">
-          <Stack h="100%" gap="sm">
+    <ContextoDoCatalogo.Provider value={catalogo}>
+      <Grid gap="sm">
+        <Grid.Col span={{ base: 12, lg: 8 }}>
+          <Stack gap="sm">
             <Group justify="space-between">
-              <SegmentedControl
-                size="xs"
-                data={[...ABAS]}
-                value={aba}
-                onChange={(v) => setAba(v as Aba)}
-              />
-              <Group gap="xs">
-                {podeEditar && fila.length > 0 && (
-                  <Badge
-                    component="button"
-                    type="button"
-                    color="orange"
-                    variant="light"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setFilaAberta(true)}
-                  >
-                    {`${fila.length} na fila`}
-                  </Badge>
-                )}
-                {podeEditar && (
-                  <Tooltip label="Histórico de correções">
-                    <ActionIcon
-                      variant="default"
-                      aria-label="Histórico"
-                      onClick={() => setHistoricoAberto(true)}
-                    >
-                      <IconHistory />
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-                <BaixarJson nome={job.nome} decupagem={decupagem} />
-              </Group>
+              <Text fw={700}>{job.nome}</Text>
+              <Text ff="monospace" size="xl" c="red.5">
+                {`${tempo(atualMs)} / ${tempo(duracaoMs)}`}
+              </Text>
             </Group>
-            <ScrollArea flex={1}>
-              {aba === 'Pessoas' && (
-                <AbaPessoas
-                  decupagem={decupagem}
-                  quadro={quadro}
-                  saltar={saltar}
-                  pendentes={pendentes}
-                  aoCorrigir={podeEditar ? setCorrigindo : undefined}
-                  aoOcorrencia={podeEditar ? setOcorrenciaAberta : undefined}
-                  aoCampo={podeEditar ? setCampoAberto : undefined}
+            <AspectRatio ratio={16 / 9}>
+              <video
+                ref={player}
+                src={reproducao.url}
+                controls
+                onError={renovarLink}
+                onLoadedMetadata={(e) => {
+                  retomar()
+                  // Sem duração conhecida (NaN, ou Infinity num stream), fica a da decupagem.
+                  const duracao = e.currentTarget.duration
+                  setDuracaoDoPlayerMs(Number.isFinite(duracao) ? duracao * 1000 : null)
+                }}
+                onTimeUpdate={(e) => setAtualMs(e.currentTarget.currentTime * 1000)}
+                aria-label="Player"
+                style={{ background: '#000' }}
+              />
+            </AspectRatio>
+            <Paper p="sm" withBorder>
+              <Stack gap={6}>
+                <Group gap="sm" wrap="nowrap">
+                  <Box w={LARGURA_DO_ROTULO} />
+                  <Slider
+                    flex={1}
+                    min={0}
+                    max={duracaoMs}
+                    step={1000}
+                    value={atualMs}
+                    onChange={saltar}
+                    size="xs"
+                    color="red"
+                    label={tempo}
+                  />
+                </Group>
+                {faixas.map((faixa) => (
+                  <FaixaDoTempo
+                    key={faixa.nome}
+                    faixa={faixa}
+                    duracaoMs={duracaoMs}
+                    saltar={saltar}
+                    alcas={alcas}
+                  />
+                ))}
+              </Stack>
+            </Paper>
+          </Stack>
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, lg: 4 }}>
+          <Paper withBorder p="sm" h="calc(100vh - 76px)" aria-label="Decupagem">
+            <Stack h="100%" gap="sm">
+              <Group justify="space-between">
+                <SegmentedControl
+                  size="xs"
+                  data={[...ABAS]}
+                  value={aba}
+                  onChange={(v) => setAba(v as Aba)}
                 />
-              )}
-              {aba === 'Pautas' &&
-                decupagem.pautas.map((p, i) => (
-                  <Group key={`pauta-${i}`} gap={4} wrap="nowrap">
-                    <NavLink
-                      flex={1}
-                      label={
-                        <Group gap={6} wrap="nowrap">
-                          <Text size="sm">{p.titulo}</Text>
-                          {p.tom && (
-                            <Badge size="xs" color="gray" variant="outline">
-                              {rotuloDoTom(p.tom)}
-                            </Badge>
-                          )}
-                          {p.origem === 'revisao' && (
-                            <Badge size="xs" color="teal" variant="light">
-                              revisado
-                            </Badge>
-                          )}
-                          {pendentes.has(chaveDoItem('pauta', p.id)) && <SeloAguardando />}
-                        </Group>
-                      }
-                      description={`${tempo(p.inicio_ms)}–${tempo(p.fim_ms)}`}
-                      active={dentro(atualMs, p)}
-                      onClick={() => saltar(p.inicio_ms)}
-                    />
-                    {podeEditar && 'tom' in p && (
+                <Group gap="xs">
+                  {podeEditar && fila.length > 0 && (
+                    <Badge
+                      component="button"
+                      type="button"
+                      color="orange"
+                      variant="light"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setFilaAberta(true)}
+                    >
+                      {`${fila.length} na fila`}
+                    </Badge>
+                  )}
+                  {podeEditar && (
+                    <Tooltip label="Histórico de correções">
                       <ActionIcon
-                        variant="subtle"
-                        color="gray"
-                        size="sm"
-                        aria-label={`Corrigir tom da pauta ${p.titulo}`}
-                        onClick={() => setCampoAberto({ modo: 'tom', pauta: p })}
+                        variant="default"
+                        aria-label="Histórico"
+                        onClick={() => setHistoricoAberto(true)}
                       >
-                        <IconPencil size={14} />
+                        <IconHistory />
                       </ActionIcon>
-                    )}
-                    {podeEditar && (
-                      <ActionIcon
-                        variant="subtle"
-                        color="gray"
-                        size="sm"
-                        aria-label={`Corrigir pauta ${p.titulo}`}
-                        onClick={() => setCorrigindoPauta(p)}
-                      >
-                        <IconPencil size={14} />
-                      </ActionIcon>
-                    )}
-                  </Group>
-                ))}
-              {aba === 'Marcas' && podeEditar && (
-                <Button
-                  type="button"
-                  variant="light"
-                  size="xs"
-                  mb={4}
-                  onClick={() => setComercialAberto('novo')}
-                >
-                  Acrescentar comercial
-                </Button>
-              )}
-              {aba === 'Marcas' &&
-                decupagem.comerciais.map((c, i) => (
-                  <Group key={`com-${i}`} gap={4} wrap="nowrap">
-                    <NavLink
-                      flex={1}
-                      label={
-                        <Group gap={6} wrap="nowrap">
-                          <Text size="sm">{c.marca}</Text>
-                          {(c.evidencias ?? (c.evidencia ? [c.evidencia] : [])).map((e) => (
-                            <Badge key={e} size="xs" color="gray" variant="outline">
-                              {e}
-                            </Badge>
-                          ))}
-                          {c.origem === 'revisao' && (
-                            <Badge size="xs" color="teal" variant="light">
-                              revisado
-                            </Badge>
-                          )}
-                          {pendentes.has(chaveDoItem('comercial', c.id)) && <SeloAguardando />}
-                        </Group>
-                      }
-                      description={`${c.tipo} · ${tempo(c.inicio_ms)}`}
-                      onClick={() => saltar(c.inicio_ms)}
-                    />
-                    {podeEditar && c.id && !c.acrescentado && (
-                      <ActionIcon
-                        variant="subtle"
-                        color="gray"
-                        size="sm"
-                        aria-label={`Corrigir comercial ${c.marca}`}
-                        onClick={() => setComercialAberto(c)}
-                      >
-                        <IconPencil size={14} />
-                      </ActionIcon>
-                    )}
-                  </Group>
-                ))}
-              {aba === 'Planos' &&
-                decupagem.planos.map((p) => (
-                  <Group key={p.id} gap={4} wrap="nowrap">
-                    <NavLink
-                      flex={1}
-                      label={
-                        <Group gap={6} wrap="nowrap">
-                          <Text size="sm">{p.acao ?? p.ambiente}</Text>
-                          {p.plano_limpo && (
-                            <Badge size="xs" color="gray" variant="light">
-                              limpo
-                            </Badge>
-                          )}
-                          {p.origem === 'revisao' && (
-                            <Badge size="xs" color="teal" variant="light">
-                              revisado
-                            </Badge>
-                          )}
-                          {pendentes.has(chaveDoItem('plano', p.id)) && <SeloAguardando />}
-                        </Group>
-                      }
-                      description={
-                        <>
-                          {`${p.ambiente} · ${tempo(p.inicio_ms)}`}
-                          {p.objetos && p.objetos.length > 0 && (
-                            <Text span size="xs" display="block">
-                              {p.objetos.join(', ')}
-                            </Text>
-                          )}
-                        </>
-                      }
-                      onClick={() => saltar(p.inicio_ms)}
-                    />
-                    {podeEditar && (
-                      <ActionIcon
-                        variant="subtle"
-                        color="gray"
-                        size="sm"
-                        aria-label={`Corrigir plano ${p.ambiente} ${tempo(p.inicio_ms)}`}
-                        onClick={() => setTrechoAberto({ tipo: 'plano', plano: p })}
-                      >
-                        <IconPencil size={14} />
-                      </ActionIcon>
-                    )}
-                  </Group>
-                ))}
-              {aba === 'Fala' &&
-                decupagem.transcricao.map((f, i) => (
-                  <Group key={`fala-${i}`} gap={4} wrap="nowrap" align="flex-start">
-                    <UnstyledButton flex={1} onClick={() => saltar(f.inicio_ms)}>
-                      <Paper p={6} bg={dentro(atualMs, f) ? 'red.9' : 'transparent'}>
-                        <Group gap={6} wrap="nowrap">
-                          <Text size="xs" ff="monospace" c="dimmed">
-                            {`${tempo(f.inicio_ms)} ${f.locutor.toUpperCase()}`}
-                          </Text>
-                          {f.origem === 'revisao' && (
-                            <Badge size="xs" color="teal" variant="light">
-                              revisado
-                            </Badge>
-                          )}
-                          {pendentes.has(chaveDoItem('fala', f.id)) && <SeloAguardando />}
-                        </Group>
-                        <Text size="sm">{f.texto}</Text>
-                      </Paper>
-                    </UnstyledButton>
-                    {podeEditar && f.id && (
-                      <ActionIcon
-                        variant="subtle"
-                        color="gray"
-                        size="sm"
-                        mt={6}
-                        aria-label={`Corrigir fala ${tempo(f.inicio_ms)}`}
-                        onClick={() => setTrechoAberto({ tipo: 'fala', fala: f })}
-                      >
-                        <IconPencil size={14} />
-                      </ActionIcon>
-                    )}
-                  </Group>
-                ))}
-              {aba === 'Texto na tela' && podeEditar && (
-                <Button
-                  type="button"
-                  variant="light"
-                  size="xs"
-                  mb={4}
-                  onClick={() => setCampoAberto({ modo: 'novo_texto' })}
-                >
-                  Acrescentar texto na tela
-                </Button>
-              )}
-              {aba === 'Texto na tela' &&
-                (decupagem.textos_na_tela ?? []).map((t, i) => {
-                  // O id (`txt000`) é a posição no modelo e vem da API; o acrescentado não tem.
-                  const id = t.id
-                  return (
-                    <Group key={`texto-${i}`} gap={4} wrap="nowrap">
+                    </Tooltip>
+                  )}
+                  <BaixarJson nome={job.nome} decupagem={decupagem} />
+                </Group>
+              </Group>
+              <ScrollArea flex={1}>
+                {aba === 'Pessoas' && (
+                  <AbaPessoas
+                    decupagem={decupagem}
+                    quadro={quadro}
+                    saltar={saltar}
+                    pendentes={pendentes}
+                    aoCorrigir={podeEditar ? setCorrigindo : undefined}
+                    aoOcorrencia={podeEditar ? setOcorrenciaAberta : undefined}
+                    aoCampo={podeEditar ? setCampoAberto : undefined}
+                  />
+                )}
+                {aba === 'Pautas' &&
+                  decupagem.pautas.map((p, i) => (
+                    <Group key={`pauta-${i}`} gap={4} wrap="nowrap">
                       <NavLink
                         flex={1}
                         label={
                           <Group gap={6} wrap="nowrap">
-                            <Text size="sm">{t.texto}</Text>
-                            {t.origem === 'revisao' && (
+                            <Text size="sm">{p.titulo}</Text>
+                            {p.tom && (
+                              <Badge size="xs" color="gray" variant="outline">
+                                {rotuloDe(catalogo.tons_da_pauta, p.tom)}
+                              </Badge>
+                            )}
+                            {p.origem === 'revisao' && (
                               <Badge size="xs" color="teal" variant="light">
                                 revisado
                               </Badge>
                             )}
-                            {id && pendentes.has(chaveDoItem('texto_na_tela', id)) && (
-                              <SeloAguardando />
-                            )}
+                            {pendentes.has(chaveDoItem('pauta', p.id)) && <SeloAguardando />}
                           </Group>
                         }
-                        description={`${tempo(t.inicio_ms)} · ${t.tipo}`}
-                        active={dentro(atualMs, t)}
-                        onClick={() => saltar(t.inicio_ms)}
+                        description={`${tempo(p.inicio_ms)}–${tempo(p.fim_ms)}`}
+                        active={dentro(atualMs, p)}
+                        onClick={() => saltar(p.inicio_ms)}
                       />
-                      {podeEditar && id && !t.acrescentado && (
+                      {podeEditar && 'tom' in p && (
                         <ActionIcon
                           variant="subtle"
                           color="gray"
                           size="sm"
-                          aria-label={`Corrigir texto na tela ${t.texto}`}
-                          onClick={() => setCampoAberto({ modo: 'texto', texto: t, id })}
+                          aria-label={`Corrigir tom da pauta ${p.titulo}`}
+                          onClick={() => setCampoAberto({ modo: 'tom', pauta: p })}
+                        >
+                          <IconPencil size={14} />
+                        </ActionIcon>
+                      )}
+                      {podeEditar && (
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          size="sm"
+                          aria-label={`Corrigir pauta ${p.titulo}`}
+                          onClick={() => setCorrigindoPauta(p)}
                         >
                           <IconPencil size={14} />
                         </ActionIcon>
                       )}
                     </Group>
-                  )
-                })}
-            </ScrollArea>
-          </Stack>
-        </Paper>
-      </Grid.Col>
-      {podeEditar && (
-        <FilaDeRevisao
-          aberta={filaAberta}
-          itens={fila}
+                  ))}
+                {aba === 'Marcas' && podeEditar && (
+                  <Button
+                    type="button"
+                    variant="light"
+                    size="xs"
+                    mb={4}
+                    onClick={() => setComercialAberto('novo')}
+                  >
+                    Acrescentar comercial
+                  </Button>
+                )}
+                {aba === 'Marcas' &&
+                  decupagem.comerciais.map((c, i) => (
+                    <Group key={`com-${i}`} gap={4} wrap="nowrap">
+                      <NavLink
+                        flex={1}
+                        label={
+                          <Group gap={6} wrap="nowrap">
+                            <Text size="sm">{c.marca}</Text>
+                            {(c.evidencias ?? (c.evidencia ? [c.evidencia] : [])).map((e) => (
+                              <Badge key={e} size="xs" color="gray" variant="outline">
+                                {e}
+                              </Badge>
+                            ))}
+                            {c.origem === 'revisao' && (
+                              <Badge size="xs" color="teal" variant="light">
+                                revisado
+                              </Badge>
+                            )}
+                            {pendentes.has(chaveDoItem('comercial', c.id)) && <SeloAguardando />}
+                          </Group>
+                        }
+                        description={`${c.tipo} · ${tempo(c.inicio_ms)}`}
+                        onClick={() => saltar(c.inicio_ms)}
+                      />
+                      {podeEditar && c.id && !c.acrescentado && (
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          size="sm"
+                          aria-label={`Corrigir comercial ${c.marca}`}
+                          onClick={() => setComercialAberto(c)}
+                        >
+                          <IconPencil size={14} />
+                        </ActionIcon>
+                      )}
+                    </Group>
+                  ))}
+                {aba === 'Planos' &&
+                  decupagem.planos.map((p) => (
+                    <Group key={p.id} gap={4} wrap="nowrap">
+                      <NavLink
+                        flex={1}
+                        label={
+                          <Group gap={6} wrap="nowrap">
+                            <Text size="sm">{p.acao ?? p.ambiente}</Text>
+                            {p.plano_limpo && (
+                              <Badge size="xs" color="gray" variant="light">
+                                limpo
+                              </Badge>
+                            )}
+                            {p.origem === 'revisao' && (
+                              <Badge size="xs" color="teal" variant="light">
+                                revisado
+                              </Badge>
+                            )}
+                            {pendentes.has(chaveDoItem('plano', p.id)) && <SeloAguardando />}
+                          </Group>
+                        }
+                        description={
+                          <>
+                            {`${p.ambiente} · ${tempo(p.inicio_ms)}`}
+                            {p.objetos && p.objetos.length > 0 && (
+                              <Text span size="xs" display="block">
+                                {p.objetos.join(', ')}
+                              </Text>
+                            )}
+                          </>
+                        }
+                        onClick={() => saltar(p.inicio_ms)}
+                      />
+                      {podeEditar && (
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          size="sm"
+                          aria-label={`Corrigir plano ${p.ambiente} ${tempo(p.inicio_ms)}`}
+                          onClick={() => setTrechoAberto({ tipo: 'plano', plano: p })}
+                        >
+                          <IconPencil size={14} />
+                        </ActionIcon>
+                      )}
+                    </Group>
+                  ))}
+                {aba === 'Fala' &&
+                  decupagem.transcricao.map((f, i) => (
+                    <Group key={`fala-${i}`} gap={4} wrap="nowrap" align="flex-start">
+                      <UnstyledButton flex={1} onClick={() => saltar(f.inicio_ms)}>
+                        <Paper p={6} bg={dentro(atualMs, f) ? 'red.9' : 'transparent'}>
+                          <Group gap={6} wrap="nowrap">
+                            <Text size="xs" ff="monospace" c="dimmed">
+                              {`${tempo(f.inicio_ms)} ${f.locutor.toUpperCase()}`}
+                            </Text>
+                            {f.origem === 'revisao' && (
+                              <Badge size="xs" color="teal" variant="light">
+                                revisado
+                              </Badge>
+                            )}
+                            {pendentes.has(chaveDoItem('fala', f.id)) && <SeloAguardando />}
+                          </Group>
+                          <Text size="sm">{f.texto}</Text>
+                        </Paper>
+                      </UnstyledButton>
+                      {podeEditar && f.id && (
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          size="sm"
+                          mt={6}
+                          aria-label={`Corrigir fala ${tempo(f.inicio_ms)}`}
+                          onClick={() => setTrechoAberto({ tipo: 'fala', fala: f })}
+                        >
+                          <IconPencil size={14} />
+                        </ActionIcon>
+                      )}
+                    </Group>
+                  ))}
+                {aba === 'Texto na tela' && podeEditar && (
+                  <Button
+                    type="button"
+                    variant="light"
+                    size="xs"
+                    mb={4}
+                    onClick={() => setCampoAberto({ modo: 'novo_texto' })}
+                  >
+                    Acrescentar texto na tela
+                  </Button>
+                )}
+                {aba === 'Texto na tela' &&
+                  (decupagem.textos_na_tela ?? []).map((t, i) => {
+                    // O id (`txt000`) é a posição no modelo e vem da API; o acrescentado não tem.
+                    const id = t.id
+                    return (
+                      <Group key={`texto-${i}`} gap={4} wrap="nowrap">
+                        <NavLink
+                          flex={1}
+                          label={
+                            <Group gap={6} wrap="nowrap">
+                              <Text size="sm">{t.texto}</Text>
+                              {t.origem === 'revisao' && (
+                                <Badge size="xs" color="teal" variant="light">
+                                  revisado
+                                </Badge>
+                              )}
+                              {id && pendentes.has(chaveDoItem('texto_na_tela', id)) && (
+                                <SeloAguardando />
+                              )}
+                            </Group>
+                          }
+                          description={`${tempo(t.inicio_ms)} · ${t.tipo}`}
+                          active={dentro(atualMs, t)}
+                          onClick={() => saltar(t.inicio_ms)}
+                        />
+                        {podeEditar && id && !t.acrescentado && (
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            size="sm"
+                            aria-label={`Corrigir texto na tela ${t.texto}`}
+                            onClick={() => setCampoAberto({ modo: 'texto', texto: t, id })}
+                          >
+                            <IconPencil size={14} />
+                          </ActionIcon>
+                        )}
+                      </Group>
+                    )
+                  })}
+              </ScrollArea>
+            </Stack>
+          </Paper>
+        </Grid.Col>
+        {podeEditar && (
+          <FilaDeRevisao
+            aberta={filaAberta}
+            itens={fila}
+            autenticador={autenticador}
+            jobId={job.id}
+            aoFechar={() => setFilaAberta(false)}
+            aoResolver={() => {
+              setRecargaDaFila((n) => n + 1)
+              recarregarDecupagem()
+            }}
+            aoSessaoExpirada={() => sessaoExpirada.current()}
+          />
+        )}
+        {podeEditar && (
+          <HistoricoDeCorrecoes
+            aberto={historicoAberto}
+            autenticador={autenticador}
+            jobId={job.id}
+            aoFechar={() => setHistoricoAberto(false)}
+            podeAprovar={podeAprovar}
+            aoMudar={recarregarDecupagem}
+            aoSessaoExpirada={() => sessaoExpirada.current()}
+          />
+        )}
+        <CorrigirPessoa
+          key={corrigindo?.id ?? 'fechado'}
+          pessoa={corrigindo}
+          versao={decupagem.versao_decupagem ?? ''}
           autenticador={autenticador}
           jobId={job.id}
-          aoFechar={() => setFilaAberta(false)}
-          aoResolver={() => {
-            setRecargaDaFila((n) => n + 1)
+          aoFechar={() => setCorrigindo(null)}
+          aoSalvar={() => {
+            setCorrigindo(null)
             recarregarDecupagem()
           }}
+          aoVersaoDesatualizada={recarregarDecupagem}
           aoSessaoExpirada={() => sessaoExpirada.current()}
         />
-      )}
-      {podeEditar && (
-        <HistoricoDeCorrecoes
-          aberto={historicoAberto}
+        <CorrigirOcorrencia
+          key={ocorrenciaAberta ? JSON.stringify(ocorrenciaAberta) : 'fechada'}
+          acao={ocorrenciaAberta}
+          pessoas={decupagem.pessoas.filter((p) => pessoaDoModelo(catalogo, p))}
+          versao={decupagem.versao_decupagem ?? ''}
           autenticador={autenticador}
           jobId={job.id}
-          aoFechar={() => setHistoricoAberto(false)}
-          podeAprovar={podeAprovar}
-          aoMudar={recarregarDecupagem}
+          aoFechar={() => setOcorrenciaAberta(null)}
+          aoSalvar={() => {
+            setOcorrenciaAberta(null)
+            recarregarDecupagem()
+          }}
+          aoVersaoDesatualizada={recarregarDecupagem}
           aoSessaoExpirada={() => sessaoExpirada.current()}
         />
-      )}
-      <CorrigirPessoa
-        key={corrigindo?.id ?? 'fechado'}
-        pessoa={corrigindo}
-        versao={decupagem.versao_decupagem ?? ''}
-        autenticador={autenticador}
-        jobId={job.id}
-        aoFechar={() => setCorrigindo(null)}
-        aoSalvar={() => {
-          setCorrigindo(null)
-          recarregarDecupagem()
-        }}
-        aoVersaoDesatualizada={recarregarDecupagem}
-        aoSessaoExpirada={() => sessaoExpirada.current()}
-      />
-      <CorrigirOcorrencia
-        key={ocorrenciaAberta ? JSON.stringify(ocorrenciaAberta) : 'fechada'}
-        acao={ocorrenciaAberta}
-        pessoas={decupagem.pessoas.filter(pessoaDoModelo)}
-        versao={decupagem.versao_decupagem ?? ''}
-        autenticador={autenticador}
-        jobId={job.id}
-        aoFechar={() => setOcorrenciaAberta(null)}
-        aoSalvar={() => {
-          setOcorrenciaAberta(null)
-          recarregarDecupagem()
-        }}
-        aoVersaoDesatualizada={recarregarDecupagem}
-        aoSessaoExpirada={() => sessaoExpirada.current()}
-      />
-      <CorrigirPauta
-        key={corrigindoPauta?.id ?? 'fechada'}
-        pauta={corrigindoPauta}
-        versao={decupagem.versao_decupagem ?? ''}
-        autenticador={autenticador}
-        jobId={job.id}
-        aoFechar={() => setCorrigindoPauta(null)}
-        aoSalvar={() => {
-          setCorrigindoPauta(null)
-          recarregarDecupagem()
-        }}
-        aoVersaoDesatualizada={recarregarDecupagem}
-        aoSessaoExpirada={() => sessaoExpirada.current()}
-      />
-      <CorrigirTempos
-        key={confirmandoTempos ? 'tempos-aberto' : 'tempos-fechado'}
-        selecao={confirmandoTempos ? selecao : null}
-        depois={arrastado}
-        versao={decupagem.versao_decupagem ?? ''}
-        autenticador={autenticador}
-        jobId={job.id}
-        aoFechar={() => {
-          // Cancelar devolve a ocorrência ao intervalo anterior.
-          setConfirmandoTempos(false)
-          setArrastado(null)
-        }}
-        aoSalvar={() => {
-          // O intervalo arrastado fica na linha do tempo até a decupagem recarregada chegar;
-          // aí a seleção antiga deixa de valer e as alças somem.
-          setConfirmandoTempos(false)
-          recarregarDecupagem()
-        }}
-        aoVersaoDesatualizada={recarregarDecupagem}
-        aoSessaoExpirada={() => sessaoExpirada.current()}
-      />
-      <CorrigirTrecho
-        key={
-          trechoAberto
-            ? trechoAberto.tipo === 'plano'
-              ? trechoAberto.plano.id
-              : trechoAberto.fala.id
-            : 'fechado'
-        }
-        trecho={trechoAberto}
-        versao={decupagem.versao_decupagem ?? ''}
-        autenticador={autenticador}
-        jobId={job.id}
-        aoFechar={() => setTrechoAberto(null)}
-        aoSalvar={() => {
-          setTrechoAberto(null)
-          recarregarDecupagem()
-        }}
-        aoVersaoDesatualizada={recarregarDecupagem}
-        aoSessaoExpirada={() => sessaoExpirada.current()}
-      />
-      <CorrigirCampo
-        key={campoAberto ? JSON.stringify(campoAberto) : 'fechado'}
-        campo={campoAberto}
-        versao={decupagem.versao_decupagem ?? ''}
-        autenticador={autenticador}
-        jobId={job.id}
-        aoFechar={() => setCampoAberto(null)}
-        aoSalvar={() => {
-          setCampoAberto(null)
-          recarregarDecupagem()
-        }}
-        aoVersaoDesatualizada={recarregarDecupagem}
-        aoSessaoExpirada={() => sessaoExpirada.current()}
-      />
-      <CorrigirComercial
-        key={comercialAberto === 'novo' ? 'novo' : (comercialAberto?.id ?? 'fechado')}
-        comercial={comercialAberto}
-        versao={decupagem.versao_decupagem ?? ''}
-        autenticador={autenticador}
-        jobId={job.id}
-        aoFechar={() => setComercialAberto(null)}
-        aoSalvar={() => {
-          setComercialAberto(null)
-          recarregarDecupagem()
-        }}
-        aoVersaoDesatualizada={recarregarDecupagem}
-        aoSessaoExpirada={() => sessaoExpirada.current()}
-      />
-    </Grid>
+        <CorrigirPauta
+          key={corrigindoPauta?.id ?? 'fechada'}
+          pauta={corrigindoPauta}
+          versao={decupagem.versao_decupagem ?? ''}
+          autenticador={autenticador}
+          jobId={job.id}
+          aoFechar={() => setCorrigindoPauta(null)}
+          aoSalvar={() => {
+            setCorrigindoPauta(null)
+            recarregarDecupagem()
+          }}
+          aoVersaoDesatualizada={recarregarDecupagem}
+          aoSessaoExpirada={() => sessaoExpirada.current()}
+        />
+        <CorrigirTempos
+          key={confirmandoTempos ? 'tempos-aberto' : 'tempos-fechado'}
+          selecao={confirmandoTempos ? selecao : null}
+          depois={arrastado}
+          versao={decupagem.versao_decupagem ?? ''}
+          autenticador={autenticador}
+          jobId={job.id}
+          aoFechar={() => {
+            // Cancelar devolve a ocorrência ao intervalo anterior.
+            setConfirmandoTempos(false)
+            setArrastado(null)
+          }}
+          aoSalvar={() => {
+            // O intervalo arrastado fica na linha do tempo até a decupagem recarregada chegar;
+            // aí a seleção antiga deixa de valer e as alças somem.
+            setConfirmandoTempos(false)
+            recarregarDecupagem()
+          }}
+          aoVersaoDesatualizada={recarregarDecupagem}
+          aoSessaoExpirada={() => sessaoExpirada.current()}
+        />
+        <CorrigirTrecho
+          key={
+            trechoAberto
+              ? trechoAberto.tipo === 'plano'
+                ? trechoAberto.plano.id
+                : trechoAberto.fala.id
+              : 'fechado'
+          }
+          trecho={trechoAberto}
+          versao={decupagem.versao_decupagem ?? ''}
+          autenticador={autenticador}
+          jobId={job.id}
+          aoFechar={() => setTrechoAberto(null)}
+          aoSalvar={() => {
+            setTrechoAberto(null)
+            recarregarDecupagem()
+          }}
+          aoVersaoDesatualizada={recarregarDecupagem}
+          aoSessaoExpirada={() => sessaoExpirada.current()}
+        />
+        <CorrigirCampo
+          key={campoAberto ? JSON.stringify(campoAberto) : 'fechado'}
+          campo={campoAberto}
+          versao={decupagem.versao_decupagem ?? ''}
+          autenticador={autenticador}
+          jobId={job.id}
+          aoFechar={() => setCampoAberto(null)}
+          aoSalvar={() => {
+            setCampoAberto(null)
+            recarregarDecupagem()
+          }}
+          aoVersaoDesatualizada={recarregarDecupagem}
+          aoSessaoExpirada={() => sessaoExpirada.current()}
+        />
+        <CorrigirComercial
+          key={comercialAberto === 'novo' ? 'novo' : (comercialAberto?.id ?? 'fechado')}
+          comercial={comercialAberto}
+          versao={decupagem.versao_decupagem ?? ''}
+          autenticador={autenticador}
+          jobId={job.id}
+          aoFechar={() => setComercialAberto(null)}
+          aoSalvar={() => {
+            setComercialAberto(null)
+            recarregarDecupagem()
+          }}
+          aoVersaoDesatualizada={recarregarDecupagem}
+          aoSessaoExpirada={() => sessaoExpirada.current()}
+        />
+      </Grid>
+    </ContextoDoCatalogo.Provider>
   )
 }
 
@@ -1382,6 +1274,7 @@ function CorrigirPessoa({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const [nome, setNome] = useState(pessoa?.nome ?? '')
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
@@ -1420,13 +1313,13 @@ function CorrigirPessoa({
         <TextInput
           label="Nome"
           value={nome}
-          maxLength={200}
+          maxLength={catalogo.limites.nome}
           onChange={(e) => setNome(e.currentTarget.value)}
         />
         <Textarea
           label="Motivo"
           value={motivo}
-          maxLength={500}
+          maxLength={catalogo.limites.motivo}
           rows={3}
           onChange={(e) => setMotivo(e.currentTarget.value)}
         />
@@ -1525,6 +1418,7 @@ function CorrigirOcorrencia({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const [destino, setDestino] = useState<string>('citada_na_fala')
   const [evidencia, setEvidencia] = useState('')
   const [pessoaId, setPessoaId] = useState(
@@ -1670,7 +1564,7 @@ function CorrigirOcorrencia({
           <TextInput
             label="Nome"
             value={nome}
-            maxLength={200}
+            maxLength={catalogo.limites.nome}
             onChange={(e) => setNome(e.currentTarget.value)}
           />
         )}
@@ -1695,14 +1589,14 @@ function CorrigirOcorrencia({
             label="Evidência"
             description="O que mostra a pessoa na imagem"
             value={evidencia}
-            maxLength={200}
+            maxLength={catalogo.limites.nome}
             onChange={(e) => setEvidencia(e.currentTarget.value)}
           />
         )}
         <Textarea
           label="Motivo"
           value={motivo}
-          maxLength={500}
+          maxLength={catalogo.limites.motivo}
           rows={3}
           onChange={(e) => setMotivo(e.currentTarget.value)}
         />
@@ -1757,6 +1651,7 @@ function CorrigirTempos({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
@@ -1782,7 +1677,10 @@ function CorrigirTempos({
     setSalvando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, { metodo: 'POST', corpo })
+      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
+        metodo: 'POST',
+        corpo,
+      })
       aoSalvar()
     } catch (e) {
       if (e instanceof SessaoExpirada) aoSessaoExpirada()
@@ -1809,7 +1707,7 @@ function CorrigirTempos({
           <Textarea
             label="Motivo"
             value={motivo}
-            maxLength={500}
+            maxLength={catalogo.limites.motivo}
             rows={3}
             onChange={(e) => setMotivo(e.currentTarget.value)}
           />
@@ -1858,6 +1756,7 @@ function CorrigirPauta({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const [titulo, setTitulo] = useState(pauta?.titulo ?? '')
   const [resumo, setResumo] = useState(pauta?.resumo ?? '')
   const [inicio, setInicio] = useState(pauta ? tempo(pauta.inicio_ms) : '')
@@ -1921,13 +1820,13 @@ function CorrigirPauta({
         <TextInput
           label="Título"
           value={titulo}
-          maxLength={200}
+          maxLength={catalogo.limites.nome}
           onChange={(e) => setTitulo(e.currentTarget.value)}
         />
         <Textarea
           label="Resumo"
           value={resumo}
-          maxLength={2000}
+          maxLength={catalogo.limites.texto}
           rows={4}
           error={resumoApagado ? 'O resumo não pode ficar vazio' : undefined}
           onChange={(e) => setResumo(e.currentTarget.value)}
@@ -1954,7 +1853,7 @@ function CorrigirPauta({
         <Textarea
           label="Motivo"
           value={motivo}
-          maxLength={500}
+          maxLength={catalogo.limites.motivo}
           rows={3}
           onChange={(e) => setMotivo(e.currentTarget.value)}
         />
@@ -2016,8 +1915,11 @@ function CorrigirCampo({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const [tom, setTom] = useState<string | null>(
-    campo?.modo === 'tom' && campo.pauta.tom && ehTomDaLista(campo.pauta.tom)
+    campo?.modo === 'tom' &&
+      campo.pauta.tom &&
+      catalogo.tons_da_pauta.some((o) => o.valor === campo.pauta.tom)
       ? campo.pauta.tom
       : null,
   )
@@ -2049,9 +1951,7 @@ function CorrigirCampo({
           item_id: campo.pessoa.id,
           // Na ordem do esquema, não na ordem dos cliques.
           valor: JSON.stringify(
-            (Object.keys(FONTES_DO_NOME) as (keyof typeof FONTES_DO_NOME)[]).filter((f) =>
-              fontes.includes(f),
-            ),
+            catalogo.fontes_do_nome.map((o) => o.valor).filter((f) => fontes.includes(f)),
           ),
         }
       case 'papel':
@@ -2063,7 +1963,10 @@ function CorrigirCampo({
             inicio_ms: campo.aparicao.inicio_ms,
             fim_ms: campo.aparicao.fim_ms,
           },
-          valor: JSON.stringify({ papel: papel.trim() || null, visual: visual.trim() || null }),
+          valor: JSON.stringify({
+            papel: papel.trim() || null,
+            visual: visual.trim() || null,
+          }),
         }
       case 'texto':
         return tipoDoTexto && texto.trim()
@@ -2122,7 +2025,7 @@ function CorrigirCampo({
   const tipoDeTexto = (
     <Select
       label="Tipo"
-      data={[...TIPOS_DE_TEXTO_NA_TELA]}
+      data={comoSelect(catalogo.tipos_de_texto_na_tela)}
       value={tipoDoTexto}
       allowDeselect={false}
       onChange={setTipoDoTexto}
@@ -2140,7 +2043,7 @@ function CorrigirCampo({
         {campo?.modo === 'tom' && (
           <Select
             label="Tom"
-            data={Object.entries(TONS_DA_PAUTA).map(([value, label]) => ({ value, label }))}
+            data={comoSelect(catalogo.tons_da_pauta)}
             value={tom}
             allowDeselect={false}
             onChange={setTom}
@@ -2153,7 +2056,7 @@ function CorrigirCampo({
             </Text>
             <Chip.Group multiple value={fontes} onChange={setFontes}>
               <Group gap={6}>
-                {Object.entries(FONTES_DO_NOME).map(([valor, rotulo]) => (
+                {catalogo.fontes_do_nome.map(({ valor, rotulo }) => (
                   <Chip key={valor} value={valor} size="xs">
                     {rotulo}
                   </Chip>
@@ -2167,13 +2070,13 @@ function CorrigirCampo({
             <TextInput
               label="Papel na cena"
               value={papel}
-              maxLength={200}
+              maxLength={catalogo.limites.nome}
               onChange={(e) => setPapel(e.currentTarget.value)}
             />
             <TextInput
               label="Visual"
               value={visual}
-              maxLength={200}
+              maxLength={catalogo.limites.nome}
               onChange={(e) => setVisual(e.currentTarget.value)}
             />
           </>
@@ -2208,7 +2111,7 @@ function CorrigirCampo({
         <Textarea
           label="Motivo"
           value={motivo}
-          maxLength={500}
+          maxLength={catalogo.limites.motivo}
           rows={3}
           onChange={(e) => setMotivo(e.currentTarget.value)}
         />
@@ -2256,6 +2159,7 @@ function CorrigirTrecho({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const plano = trecho?.tipo === 'plano' ? trecho.plano : null
   const fala = trecho?.tipo === 'fala' ? trecho.fala : null
   const [ambiente, setAmbiente] = useState(plano?.ambiente ?? '')
@@ -2283,13 +2187,20 @@ function CorrigirTrecho({
     if (mudouDescricao)
       candidatas.push({
         tipo: 'plano.descricao',
-        valor: JSON.stringify({ ambiente, acao: acao.trim() || null, objetos: listaDeObjetos }),
+        valor: JSON.stringify({
+          ambiente,
+          acao: acao.trim() || null,
+          objetos: listaDeObjetos,
+        }),
       })
     if (limpo !== (plano.plano_limpo ?? false))
       candidatas.push({ tipo: 'plano.limpo', valor: String(limpo) })
   }
   if (fala && (texto.trim() !== fala.texto || locutor.trim() !== fala.locutor))
-    candidatas.push({ tipo: 'fala.texto', valor: JSON.stringify({ texto, locutor }) })
+    candidatas.push({
+      tipo: 'fala.texto',
+      valor: JSON.stringify({ texto, locutor }),
+    })
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
   const itemId = plano?.id ?? fala?.id ?? ''
 
@@ -2338,13 +2249,13 @@ function CorrigirTrecho({
             <TextInput
               label="Ambiente"
               value={ambiente}
-              maxLength={200}
+              maxLength={catalogo.limites.nome}
               onChange={(e) => setAmbiente(e.currentTarget.value)}
             />
             <Textarea
               label="Ação"
               value={acao}
-              maxLength={2000}
+              maxLength={catalogo.limites.texto}
               rows={3}
               onChange={(e) => setAcao(e.currentTarget.value)}
             />
@@ -2365,13 +2276,13 @@ function CorrigirTrecho({
             <TextInput
               label="Locutor"
               value={locutor}
-              maxLength={200}
+              maxLength={catalogo.limites.nome}
               onChange={(e) => setLocutor(e.currentTarget.value)}
             />
             <Textarea
               label="Texto"
               value={texto}
-              maxLength={2000}
+              maxLength={catalogo.limites.texto}
               rows={4}
               onChange={(e) => setTexto(e.currentTarget.value)}
             />
@@ -2380,7 +2291,7 @@ function CorrigirTrecho({
         <Textarea
           label="Motivo"
           value={motivo}
-          maxLength={500}
+          maxLength={catalogo.limites.motivo}
           rows={3}
           onChange={(e) => setMotivo(e.currentTarget.value)}
         />
@@ -2433,6 +2344,7 @@ function CorrigirComercial({
   aoVersaoDesatualizada: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const novo = comercial === 'novo'
   const atual = comercial !== null && !novo ? comercial : null
   const [marca, setMarca] = useState(atual?.marca ?? '')
@@ -2522,12 +2434,12 @@ function CorrigirComercial({
         <TextInput
           label="Marca"
           value={marca}
-          maxLength={200}
+          maxLength={catalogo.limites.nome}
           onChange={(e) => setMarca(e.currentTarget.value)}
         />
         <Select
           label="Tipo"
-          data={TIPOS_DE_COMERCIAL}
+          data={comoSelect(catalogo.tipos_de_comercial)}
           value={tipo}
           allowDeselect={false}
           onChange={setTipo}
@@ -2570,7 +2482,7 @@ function CorrigirComercial({
         <Textarea
           label="Motivo"
           value={motivo}
-          maxLength={500}
+          maxLength={catalogo.limites.motivo}
           rows={3}
           onChange={(e) => setMotivo(e.currentTarget.value)}
         />
@@ -2636,43 +2548,13 @@ interface ItemDoHistorico {
   motivo: string
   antes: string
   depois: string
+  antes_legivel: string
+  depois_legivel: string
   estado: 'ativa' | 'desfeita' | 'reaplicada' | 'descartada' | 'pendente' | 'aprovada' | 'recusada'
   reaplica?: string | null
   desfaz?: string | null
   aprova?: string | null
   recusa?: string | null
-}
-
-const TIPOS_DE_CORRECAO: Record<ItemDoHistorico['tipo'], string> = {
-  'pessoa.renomear': 'Renomear pessoa',
-  'pauta.titulo': 'Título da pauta',
-  'pauta.resumo': 'Resumo da pauta',
-  'item.tempos': 'Tempos',
-  'comercial.marca': 'Marca do comercial',
-  'comercial.tipo': 'Tipo do comercial',
-  'comercial.acrescentar': 'Comercial acrescentado',
-  'pessoa.nao_e': 'Não é esta pessoa',
-  'pessoa.aparicao_para_mencao': 'Aparição para menção',
-  'pessoa.mencao_para_aparicao': 'Menção para aparição',
-  'pessoa.acrescentar_aparicao': 'Aparição acrescentada',
-  'plano.descricao': 'Descrição do plano',
-  'plano.limpo': 'Plano limpo',
-  'fala.texto': 'Texto da fala',
-  'pauta.tom': 'Tom da pauta',
-  'pessoa.fontes_do_nome': 'Fontes do nome',
-  'aparicao.papel_visual': 'Papel na cena e visual',
-  'texto_na_tela.texto': 'Texto na tela',
-  'texto_na_tela.acrescentar': 'Texto na tela acrescentado',
-  desfazer: 'Desfazer',
-  descartar: 'Descartar da fila',
-  aprovar: 'Aprovação',
-  recusar: 'Recusa',
-}
-
-/** O tipo do valor do item: desfazer, aprovação e recusa mostram o valor do tipo que decidem. */
-const tipoDoValor = (itens: ItemDoHistorico[], item: ItemDoHistorico) => {
-  const alvo = item.desfaz ?? item.aprova ?? item.recusa
-  return alvo ? itens.find((o) => o.id === alvo)?.tipo : item.tipo
 }
 
 /** Data da correção que a reaplicação refaz, para ligar uma à outra na gaveta. */
@@ -2702,6 +2584,7 @@ function HistoricoDeCorrecoes({
   aoMudar: () => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const [itens, setItens] = useState<ItemDoHistorico[] | null>(null)
   const [falhou, setFalhou] = useState(false)
   // O que o modal de motivo está pedindo: desfazer uma correção ou recusar uma pendente.
@@ -2825,7 +2708,7 @@ function HistoricoDeCorrecoes({
               <Stack gap={4}>
                 <Group justify="space-between">
                   <Text size="xs" fw={700}>
-                    {TIPOS_DE_CORRECAO[i.tipo]}
+                    {rotuloDe(catalogo.tipos, i.tipo)}
                   </Text>
                   {i.estado !== 'ativa' && (
                     <Badge size="xs" color="gray" variant="light">
@@ -2843,14 +2726,14 @@ function HistoricoDeCorrecoes({
                   <Text size="xs" c="dimmed">
                     Antes:
                   </Text>
-                  <Text size="sm">{valorLegivel(tipoDoValor(itens, i), i.antes)}</Text>
+                  <Text size="sm">{i.antes_legivel}</Text>
                 </Group>
                 <Group gap={4} wrap="nowrap">
                   <Text size="xs" c="dimmed">
                     Depois:
                   </Text>
                   <Text size="sm" fw={600}>
-                    {valorLegivel(tipoDoValor(itens, i), i.depois)}
+                    {i.depois_legivel}
                   </Text>
                 </Group>
                 <Text size="sm">{i.motivo}</Text>
@@ -2900,7 +2783,7 @@ function HistoricoDeCorrecoes({
           <Textarea
             label="Motivo"
             value={motivo}
-            maxLength={500}
+            maxLength={catalogo.limites.motivo}
             rows={3}
             onChange={(e) => setMotivo(e.currentTarget.value)}
           />
@@ -2937,6 +2820,8 @@ interface ItemDaFila {
   motivo: string
   antes: string
   depois: string
+  antes_legivel: string
+  depois_legivel: string
   candidatos: {
     item_id: string
     nome: string
@@ -3014,6 +2899,7 @@ function ItemDaFilaDeRevisao({
   aoResolver: (aviso?: string) => void
   aoSessaoExpirada: () => void
 }) {
+  const catalogo = useCatalogo()
   const [candidato, setCandidato] = useState<string | null>(null)
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
@@ -3051,14 +2937,14 @@ function ItemDaFilaDeRevisao({
           <Text size="xs" c="dimmed">
             Antes:
           </Text>
-          <Text size="sm">{valorLegivel(item.tipo, item.antes)}</Text>
+          <Text size="sm">{item.antes_legivel}</Text>
         </Group>
         <Group gap={4} wrap="nowrap">
           <Text size="xs" c="dimmed">
             Depois:
           </Text>
           <Text size="sm" fw={600}>
-            {valorLegivel(item.tipo, item.depois)}
+            {item.depois_legivel}
           </Text>
         </Group>
         <Text size="sm">{item.motivo}</Text>
@@ -3075,7 +2961,7 @@ function ItemDaFilaDeRevisao({
         <Textarea
           label="Motivo"
           value={motivo}
-          maxLength={500}
+          maxLength={catalogo.limites.motivo}
           rows={2}
           onChange={(e) => setMotivo(e.currentTarget.value)}
         />
@@ -3116,14 +3002,15 @@ function FontesDoNome({
   pessoa: Pessoa
   aoCorrigir?: (c: CampoAberto) => void
 }) {
+  const catalogo = useCatalogo()
   // Só se corrige o que o modelo trouxe: sem a chave (1.1 ou pessoa da revisão) não há o que trocar.
-  const corrigivel = aoCorrigir && pessoaDoModelo(pessoa) && 'fontes_do_nome' in pessoa
+  const corrigivel = aoCorrigir && pessoaDoModelo(catalogo, pessoa) && 'fontes_do_nome' in pessoa
   if (!pessoa.fontes_do_nome?.length && !corrigivel) return null
   return (
     <Group gap={4} wrap="nowrap" aria-label={`Fontes do nome de ${pessoa.nome}`}>
       {(pessoa.fontes_do_nome ?? []).map((f) => (
         <Badge key={f} size="xs" color="blue" variant="outline">
-          {FONTES_DO_NOME[f] ?? f}
+          {rotuloDe(catalogo.fontes_do_nome, f)}
         </Badge>
       ))}
       {corrigivel && (
@@ -3159,6 +3046,7 @@ function AbaPessoas({
   aoOcorrencia?: (a: AcaoDeOcorrencia) => void
   aoCampo?: (c: CampoAberto) => void
 }) {
+  const catalogo = useCatalogo()
   const aparecem = decupagem.pessoas.filter((p) => p.na_imagem.length > 0)
   const citadas = decupagem.pessoas.filter(
     (p) => p.citada_na_fala.length > 0 || p.citada_no_texto.length > 0,
@@ -3190,7 +3078,7 @@ function AbaPessoas({
               aoCorrigir={aoCorrigir}
             />
             <FontesDoNome pessoa={p} aoCorrigir={aoCampo} />
-            {aoOcorrencia && pessoaDoModelo(p) && (
+            {aoOcorrencia && pessoaDoModelo(catalogo, p) && (
               <Button
                 size="compact-xs"
                 variant="subtle"
@@ -3227,7 +3115,7 @@ function AbaPessoas({
                         {[a.papel, a.visual].filter(Boolean).join(' · ')}
                       </Text>
                     )}
-                    {aoCampo && pessoaDoModelo(p) && ('papel' in a || 'visual' in a) && (
+                    {aoCampo && pessoaDoModelo(catalogo, p) && ('papel' in a || 'visual' in a) && (
                       <ActionIcon
                         variant="subtle"
                         color="gray"
@@ -3238,7 +3126,7 @@ function AbaPessoas({
                         <IconPencil size={14} />
                       </ActionIcon>
                     )}
-                    {aoOcorrencia && pessoaDoModelo(p) && (
+                    {aoOcorrencia && pessoaDoModelo(catalogo, p) && (
                       <MenuDaOcorrencia
                         pessoa={p}
                         lista="na_imagem"
@@ -3265,7 +3153,7 @@ function AbaPessoas({
               aoCorrigir={aoCorrigir}
             />
             {p.na_imagem.length === 0 && <FontesDoNome pessoa={p} aoCorrigir={aoCampo} />}
-            {aoOcorrencia && pessoaDoModelo(p) && p.na_imagem.length === 0 && (
+            {aoOcorrencia && pessoaDoModelo(catalogo, p) && p.na_imagem.length === 0 && (
               <Button
                 size="compact-xs"
                 variant="subtle"
@@ -3289,7 +3177,7 @@ function AbaPessoas({
                   >
                     {`fala ${tempo(m.inicio_ms)}`}
                   </Badge>
-                  {aoOcorrencia && pessoaDoModelo(p) && (
+                  {aoOcorrencia && pessoaDoModelo(catalogo, p) && (
                     <MenuDaOcorrencia
                       pessoa={p}
                       lista="citada_na_fala"
@@ -3313,7 +3201,7 @@ function AbaPessoas({
                       {`texto ${tempo(m.inicio_ms)}`}
                     </Badge>
                   </Tooltip>
-                  {aoOcorrencia && pessoaDoModelo(p) && (
+                  {aoOcorrencia && pessoaDoModelo(catalogo, p) && (
                     <MenuDaOcorrencia
                       pessoa={p}
                       lista="citada_no_texto"
