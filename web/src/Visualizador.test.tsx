@@ -417,10 +417,10 @@ test('sem a decupagem pronta, não há botão de baixar o JSON', async () => {
   expect(screen.queryByRole('button', { name: 'Baixar decupagem (JSON)' })).toBeNull()
 })
 
-test('as seis faixas aparecem com a contagem, sem a faixa de planos, e os cortes na régua', async () => {
+test('as sete faixas aparecem com a contagem, sem a faixa de planos, e os cortes na régua', async () => {
   const { container } = await abrirComFaixas()
 
-  for (const nome of ['Pautas 3', 'Pessoas 2', 'Menções 1', 'Comerciais 0', 'Textos 0', 'Falas 1']) {
+  for (const nome of ['Pautas 3', 'Pessoas 2', 'Menções 1', 'Objetos 0', 'Comerciais 0', 'Textos 0', 'Falas 1']) {
     expect(screen.getByRole('group', { name: nome })).toBeTruthy()
   }
   expect(screen.queryByRole('group', { name: /Planos/ })).toBeNull()

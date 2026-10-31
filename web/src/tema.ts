@@ -157,6 +157,29 @@ export const CORES_DE_OCORRENCIA = {
   texto_na_tela: { cor: '#A8EFC8', rotulo: 'Texto na tela' },
 } as const
 
+/**
+ * A cor de cada `cor_base` do objeto, para o quadradinho da lista. É a cor do objeto, não a do
+ * tipo de ocorrência; a tela sempre escreve a palavra ao lado.
+ */
+export const CORES_DE_OBJETO = {
+  vermelho: '#E03C3C',
+  laranja: '#F08A24',
+  amarelo: '#F2D13A',
+  verde: '#3FAE5A',
+  azul: '#3F7FE0',
+  roxo: '#8C4FD0',
+  rosa: '#F28DB8',
+  marrom: '#8B5A2B',
+  bege: '#D9C3A0',
+  preto: '#0B0C0D',
+  branco: '#F5F5F5',
+  cinza: '#8A8D93',
+  dourado: '#D4AF37',
+  prateado: '#C0C4CC',
+  // Sem uma cor só: o cinza do texto secundário.
+  estampado: CORES.textoSecundario,
+} as const
+
 export type TipoDeOcorrencia = keyof typeof CORES_DE_OCORRENCIA
 
 function luminancia(hex: string): number {

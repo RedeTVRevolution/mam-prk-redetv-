@@ -6,6 +6,7 @@ import {
   deltaParaUmTerco,
   itensDoPainel,
   itensDaAba,
+  objetosDaAba,
   semDecupagemEm,
   vizinhoNoPainel,
 } from './painel.ts'
@@ -45,6 +46,23 @@ const D: Decupagem = {
   ],
   planos: [{ id: 'pl1', ambiente: 'estúdio', acao: 'apresentadora em pé', inicio_ms: 0, fim_ms: 5_000 }],
   comerciais: [{ marca: 'Ultrafarma', tipo: 'merchandising', inicio_ms: 100_000, fim_ms: 130_000 }],
+  objetos: [
+    {
+      id: 'o1',
+      categoria: 'calcado',
+      tipo: 'sandália',
+      cor_base: ['vermelho'],
+      cor: 'vermelho vivo',
+      marca: 'Arezzo',
+      pessoa: 'p2',
+      relacao: 'calca',
+      ocorrencias: [
+        { inicio_ms: 230_000, fim_ms: 240_000 },
+        { inicio_ms: 400_000, fim_ms: 410_000 },
+      ],
+    },
+    { id: 'o2', categoria: 'em_cena', tipo: 'troféu', cor_base: ['dourado', 'preto'], ocorrencias: [{ inicio_ms: 100_000, fim_ms: 110_000 }] },
+  ],
   transcricao: [
     { locutor: 'Ana', texto: 'Aqui o leão lobo falando', inicio_ms: 220_000, fim_ms: 225_000 },
   ],
@@ -145,4 +163,41 @@ test('a transcrição acompanha a fala a um terço do topo do painel', () => {
   expect(deltaParaUmTerco({ topo: 0, base: 300 }, { topo: 400, base: 440 })).toBe(300)
   expect(deltaParaUmTerco({ topo: 0, base: 300 }, { topo: 100, base: 140 })).toBe(0)
   expect(deltaParaUmTerco({ topo: 50, base: 350 }, { topo: 60, base: 100 })).toBe(-90)
+})
+
+test('o objeto traz tipo, cores, categoria, dono com a relação e marca; sem dono, "em cena"', () => {
+  const itens = itensDoPainel(D).filter((i) => i.tipo === 'objeto')
+
+  expect(itens.map((i) => i.chave)).toEqual(['objeto-0', 'objeto-1', 'objeto-2'])
+  expect(itens[0].objeto).toEqual({
+    id: 'o1',
+    tipo: 'sandália',
+    categoria: 'calçado',
+    coresBase: ['vermelho'],
+    tom: 'vermelho vivo',
+    dono: { id: 'p2', nome: 'não identificado', relacao: 'calçado por' },
+    marca: 'Arezzo',
+    detalhe: undefined,
+    ocorrencias: 2,
+  })
+  expect(itens[2].objeto).toMatchObject({ tom: 'dourado e preto', dono: null, categoria: 'em cena' })
+})
+
+test('a aba Objetos lista cada objeto uma vez, em ordem de tempo, com as suas ocorrências', () => {
+  const objetos = objetosDaAba(itensDoPainel(D))
+
+  expect(objetos.map((o) => [o.dados.id, o.ocorrencias.map((i) => i.chave)])).toEqual([
+    ['o2', ['objeto-2']],
+    ['o1', ['objeto-0', 'objeto-1']],
+  ])
+  expect(abaDaChave('objeto-1')).toBe('objetos')
+})
+
+test('o agora traz os objetos visíveis no tempo, depois das menções', () => {
+  expect(agora(itensDoPainel(D), 235_000).filter((i) => i.tipo === 'objeto').map((i) => i.chave)).toEqual(['objeto-0'])
+})
+
+test('uma decupagem anterior ao 1.3 não tem objetos', () => {
+  const { objetos: _, ...antiga } = D
+  expect(itensDoPainel(antiga).some((i) => i.tipo === 'objeto')).toBe(false)
 })

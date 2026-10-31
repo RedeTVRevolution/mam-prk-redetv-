@@ -1,25 +1,51 @@
 /** O painel do Visualizador sem React e sem DOM: itens por tipo, abas, o que é "agora" e a rolagem. */
-import { type Intervalo, relogio, trechosSemPauta } from './linhaDoTempo.ts'
-import type { Decupagem } from './Video.tsx'
+import {
+  type Intervalo,
+  NAO_IDENTIFICADO,
+  nomeExibido,
+  ocorrenciasDosObjetos,
+  relogio,
+  SEM_NOME,
+  trechosSemPauta,
+} from './linhaDoTempo.ts'
+import type { CategoriaDeObjeto, CorBase, Decupagem, RelacaoDoObjeto } from './Video.tsx'
 
-export type Aba = 'agora' | 'pessoas' | 'pautas' | 'comerciais' | 'textos' | 'planos' | 'transcricao'
+export { NAO_IDENTIFICADO }
+
+export type Aba = 'agora' | 'pessoas' | 'pautas' | 'objetos' | 'comerciais' | 'textos' | 'planos' | 'transcricao'
 
 export const ABAS: { chave: Aba; rotulo: string }[] = [
   { chave: 'agora', rotulo: 'Agora' },
   { chave: 'pessoas', rotulo: 'Pessoas' },
   { chave: 'pautas', rotulo: 'Pautas' },
+  { chave: 'objetos', rotulo: 'Objetos' },
   { chave: 'comerciais', rotulo: 'Comerciais' },
   { chave: 'textos', rotulo: 'Textos na tela' },
   { chave: 'planos', rotulo: 'Planos' },
   { chave: 'transcricao', rotulo: 'Transcrição' },
 ]
 
-export type TipoDoItem = 'pauta' | 'aparicao' | 'mencao' | 'comercial' | 'texto' | 'plano' | 'fala'
+export type TipoDoItem = 'pauta' | 'aparicao' | 'mencao' | 'objeto' | 'comercial' | 'texto' | 'plano' | 'fala'
 
 /** A prova do nome: `inicio_ms` é o tempo onde saltar; `null` quando a fonte não tem tempo. */
 export interface Selo {
   rotulo: string
   inicio_ms: number | null
+}
+
+/** O que a lista mostra de um objeto: o tipo, a cor (base e tom), o dono e a marca. */
+export interface DadosDoObjeto {
+  id: string
+  tipo: string
+  categoria: string
+  coresBase: CorBase[]
+  /** O tom em palavras; sem ele, a lista escreve as cores base. */
+  tom: string
+  dono: { id: string; nome: string; relacao: string } | null
+  marca?: string
+  detalhe?: string
+  /** Quantas vezes o objeto aparece. */
+  ocorrencias: number
 }
 
 export interface ItemDoPainel extends Intervalo {
@@ -36,12 +62,14 @@ export interface ItemDoPainel extends Intervalo {
   pessoa?: string
   /** O tom da pauta ou o tipo do texto na tela e do comercial. */
   rotulo?: string
+  objeto?: DadosDoObjeto
 }
 
 const ABA_DO_TIPO: Record<TipoDoItem, Aba | null> = {
   pauta: 'pautas',
   aparicao: 'pessoas',
   mencao: 'pessoas',
+  objeto: 'objetos',
   comercial: 'comerciais',
   texto: 'textos',
   plano: 'planos',
@@ -61,10 +89,6 @@ const normalizar = (t: string): string =>
 
 const escapar = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-export const NAO_IDENTIFICADO = 'não identificado'
-
-const SEM_NOME = /^n[ãa]o identificado\s*[,:\-–—]?\s*/i
-
 const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Referência' }
 
 /** Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm tempo). */
@@ -80,10 +104,28 @@ function selosDoNome(nome: string, fontes: string[], d: Decupagem): Selo[] {
   }))
 }
 
+const NOME_DA_CATEGORIA: Record<CategoriaDeObjeto, string> = {
+  roupa: 'roupa',
+  calcado: 'calçado',
+  acessorio: 'acessório',
+  na_mao: 'na mão',
+  em_cena: 'em cena',
+  veiculo: 'veículo',
+  outro: 'outro',
+}
+
+/** A relação do dono com o objeto, para "calçada por Mel Breia". */
+const FRASE_DA_RELACAO: Record<RelacaoDoObjeto, string> = {
+  veste: 'vestido por',
+  calca: 'calçado por',
+  usa: 'usado por',
+  segura: 'na mão de',
+}
+
 /** Todos os itens da decupagem, com as chaves que a linha do tempo usa. */
 export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
   const itens: ItemDoPainel[] = []
-  const nome = (n: string) => (SEM_NOME.test(n) ? NAO_IDENTIFICADO : n)
+  const nome = nomeExibido
   d.pautas.forEach((p, i) =>
     itens.push({
       chave: `pauta-${i}`,
@@ -129,6 +171,34 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
   for (const p of d.pessoas) for (const x of p.citada_na_fala) mencao(p.nome, x, 'citado na fala')
   for (const p of d.pessoas)
     for (const x of p.citada_no_texto) mencao(p.nome, x, `citado no texto: ${x.texto}`)
+  const objetos = new Map((d.objetos ?? []).map((o) => [o.id, o]))
+  const donos = new Map(d.pessoas.map((p) => [p.id, p]))
+  ocorrenciasDosObjetos(d).forEach((o, i) => {
+    const { objeto } = o
+    const dono = objeto.pessoa ? donos.get(objeto.pessoa) : undefined
+    itens.push({
+      chave: `objeto-${i}`,
+      tipo: 'objeto',
+      titulo: objeto.tipo,
+      linhas: [],
+      selos: [],
+      inicio_ms: o.inicio_ms,
+      fim_ms: o.fim_ms,
+      objeto: {
+        id: objeto.id,
+        tipo: objeto.tipo,
+        categoria: NOME_DA_CATEGORIA[objeto.categoria] ?? objeto.categoria,
+        coresBase: objeto.cor_base,
+        tom: objeto.cor || objeto.cor_base.join(' e '),
+        dono: dono
+          ? { id: dono.id, nome: nomeExibido(dono.nome), relacao: objeto.relacao ? FRASE_DA_RELACAO[objeto.relacao] : 'com' }
+          : null,
+        marca: objeto.marca || undefined,
+        detalhe: objeto.detalhe || undefined,
+        ocorrencias: objetos.get(objeto.id)?.ocorrencias.length ?? 1,
+      },
+    })
+  })
   d.comerciais.forEach((c, i) =>
     itens.push({
       chave: `comercial-${i}`,
@@ -181,7 +251,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
 export const contem = (i: Intervalo, ms: number): boolean => ms >= i.inicio_ms && ms < i.fim_ms
 
 /** Os tipos que a aba Agora mostra, na ordem dos grupos. */
-export const TIPOS_DO_AGORA: TipoDoItem[] = ['aparicao', 'mencao', 'comercial', 'texto']
+export const TIPOS_DO_AGORA: TipoDoItem[] = ['aparicao', 'mencao', 'objeto', 'comercial', 'texto']
 
 /** O que está no tempo atual, agrupado por tipo. */
 export function agora(itens: ItemDoPainel[], ms: number): ItemDoPainel[] {
@@ -191,6 +261,7 @@ export function agora(itens: ItemDoPainel[], ms: number): ItemDoPainel[] {
 const TIPOS_DA_ABA: Record<Exclude<Aba, 'agora'>, TipoDoItem[]> = {
   pessoas: ['aparicao', 'mencao'],
   pautas: ['pauta'],
+  objetos: ['objeto'],
   comerciais: ['comercial'],
   textos: ['texto'],
   planos: ['plano'],
@@ -201,6 +272,18 @@ const TIPOS_DA_ABA: Record<Exclude<Aba, 'agora'>, TipoDoItem[]> = {
 export function itensDaAba(itens: ItemDoPainel[], aba: Exclude<Aba, 'agora'>): ItemDoPainel[] {
   const ordem = (a: ItemDoPainel, b: ItemDoPainel) => a.inicio_ms - b.inicio_ms || a.fim_ms - b.fim_ms
   return TIPOS_DA_ABA[aba].flatMap((t) => itens.filter((i) => i.tipo === t).sort(ordem))
+}
+
+/** Os objetos da aba, em ordem do primeiro tempo, cada um com as suas ocorrências em ordem de tempo. */
+export function objetosDaAba(itens: ItemDoPainel[]): { dados: DadosDoObjeto; ocorrencias: ItemDoPainel[] }[] {
+  const porId = new Map<string, { dados: DadosDoObjeto; ocorrencias: ItemDoPainel[] }>()
+  for (const i of itensDaAba(itens, 'objetos')) {
+    if (!i.objeto) continue
+    const achado = porId.get(i.objeto.id)
+    if (achado) achado.ocorrencias.push(i)
+    else porId.set(i.objeto.id, { dados: i.objeto, ocorrencias: [i] })
+  }
+  return [...porId.values()]
 }
 
 /** A chave ao lado da selecionada na aba; sem seleção (ou fora da aba), a primeira. */

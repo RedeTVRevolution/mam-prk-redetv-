@@ -2,7 +2,7 @@
 import type { MantineColor } from '@mantine/core'
 import { pessoaDoModelo, type CatalogoDeCorrecoes } from './catalogo.ts'
 import { CORES_DE_OCORRENCIA } from './tema.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem, Objeto } from './Video.tsx'
 
 /** `ms` em `MM:SS`: trunca os segundos e os minutos passam de 59, sem horas (ADR 0003). */
 export function tempo(ms: number): string {
@@ -313,10 +313,19 @@ export interface BlocoDaFaixa extends Intervalo {
   nome: string
 }
 
+export const NAO_IDENTIFICADO = 'não identificado'
+
+export const SEM_NOME = /^n[ãa]o identificado\s*[,:\-–—]?\s*/i
+
+/** O nome da pessoa como a tela o diz: "Não identificado, mulher loira" vira "não identificado". */
+export const nomeExibido = (nome: string): string => (SEM_NOME.test(nome) ? NAO_IDENTIFICADO : nome)
+
 export interface FaixaDoVisualizador {
   chave: string
   rotulo: string
   cor: string
+  /** O que a faixa diz quando não tem nenhum bloco, se tiver o que dizer. */
+  vazio?: string
   /** Em ordem de início. */
   blocos: BlocoDaFaixa[]
 }
@@ -326,8 +335,31 @@ const TAMANHO_DO_TRECHO = 60
 const resumo = (texto: string): string =>
   texto.length > TAMANHO_DO_TRECHO ? `${texto.slice(0, TAMANHO_DO_TRECHO).trimEnd()}…` : texto
 
+export const SEM_OBJETOS = 'Este vídeo não tem objetos decupados.'
+
+/** "sandália (vermelho vivo) de Mel Breia": o tipo, o tom e o dono, quando houver. */
+export function descricaoDoObjeto(o: Objeto, dono: string | null): string {
+  const tom = o.cor ?? (o.cor_base.length > 0 ? o.cor_base.join(' e ') : null)
+  return `${o.tipo}${tom ? ` (${tom})` : ''}${dono ? ` de ${dono}` : ''}`
+}
+
+/** Uma ocorrência por intervalo de cada objeto, na ordem da decupagem: a chave é `objeto-i`. */
+export function ocorrenciasDosObjetos(
+  d: Decupagem,
+): (Intervalo & { objeto: Objeto; dono: string | null })[] {
+  const nomes = new Map(d.pessoas.map((p) => [p.id, nomeExibido(p.nome)]))
+  return (d.objetos ?? []).flatMap((objeto) =>
+    objeto.ocorrencias.map((x) => ({
+      inicio_ms: x.inicio_ms,
+      fim_ms: x.fim_ms,
+      objeto,
+      dono: (objeto.pessoa && nomes.get(objeto.pessoa)) || null,
+    })),
+  )
+}
+
 /**
- * As seis faixas do Visualizador: pautas, pessoas na imagem, menções, comerciais, textos na tela
+ * As sete faixas do Visualizador: pautas, pessoas na imagem, menções, objetos, comerciais, textos na tela
  * e falas. Os planos não são faixa; os cortes viram riscos da régua.
  */
 export function faixasDoVisualizador(d: Decupagem): FaixaDoVisualizador[] {
@@ -336,10 +368,12 @@ export function faixasDoVisualizador(d: Decupagem): FaixaDoVisualizador[] {
     rotulo: string,
     cor: string,
     itens: (Intervalo & { nome: string })[],
+    vazio?: string,
   ): FaixaDoVisualizador => ({
     chave,
     rotulo,
     cor,
+    vazio,
     blocos: itens
       .map((x, i) => ({
         chave: `${chave}-${i}`,
@@ -371,6 +405,13 @@ export function faixasDoVisualizador(d: Decupagem): FaixaDoVisualizador[] {
       ...daPessoa('citada_na_fala', (n) => `Menção a ${n} na fala`),
       ...daPessoa('citada_no_texto', (n) => `Menção a ${n} no texto`),
     ]),
+    faixa(
+      'objeto',
+      'Objetos',
+      CORES_DE_OCORRENCIA.objeto.cor,
+      ocorrenciasDosObjetos(d).map((o) => ({ ...o, nome: `Objeto: ${descricaoDoObjeto(o.objeto, o.dono)}` })),
+      SEM_OBJETOS,
+    ),
     faixa(
       'comercial',
       'Comerciais',

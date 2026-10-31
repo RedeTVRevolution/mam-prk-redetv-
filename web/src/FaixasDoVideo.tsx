@@ -181,6 +181,11 @@ export function FaixasDoVideo({
                     </Tooltip>
                   )
                 })}
+              {faixa.blocos.length === 0 && faixa.vazio && (
+                <Text size="xs" c="dimmed" style={{ position: 'absolute', top: 0, left: 0, lineHeight: `${ALTURA_DA_FAIXA}px` }}>
+                  {faixa.vazio}
+                </Text>
+              )}
               {faixa.blocos.map((b) => (
                 <Tooltip key={b.chave} label={b.nome}>
                   <Box

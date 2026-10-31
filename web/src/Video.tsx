@@ -87,7 +87,7 @@ import {
   type Ocorrencia,
   type Selecao,
 } from './linhaDoTempo.ts'
-import { CORES } from './tema.ts'
+import { CORES, CORES_DE_OBJETO } from './tema.ts'
 
 export interface JobAberto {
   id: string
@@ -181,6 +181,27 @@ interface TextoNaTela extends Intervalo {
   texto: string
 }
 
+export type CorBase = keyof typeof CORES_DE_OBJETO
+
+export type CategoriaDeObjeto = 'roupa' | 'calcado' | 'acessorio' | 'na_mao' | 'em_cena' | 'veiculo' | 'outro'
+export type RelacaoDoObjeto = 'veste' | 'calca' | 'usa' | 'segura'
+
+/** 1.3: roupa, calçado, acessório ou objeto em cena, com a cor e o dono. */
+export interface Objeto {
+  id: string
+  categoria: CategoriaDeObjeto
+  tipo: string
+  cor_base: CorBase[]
+  /** O tom em palavras ("vermelho vivo"). */
+  cor?: string | null
+  detalhe?: string | null
+  marca?: string | null
+  /** O id de uma pessoa da mesma decupagem; `null` para objeto em cena. */
+  pessoa?: string | null
+  relacao?: RelacaoDoObjeto | null
+  ocorrencias: Intervalo[]
+}
+
 export interface Decupagem {
   versao_decupagem?: string
   video?: { duracao_ms: number }
@@ -191,6 +212,8 @@ export interface Decupagem {
   transcricao: Fala[]
   /** 1.2; falta nas decupagens 1.1. */
   textos_na_tela?: TextoNaTela[]
+  /** 1.3; falta nas decupagens anteriores. */
+  objetos?: Objeto[]
 }
 
 export interface Reproducao {

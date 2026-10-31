@@ -249,15 +249,28 @@ const noVisualizador: Decupagem = {
   comerciais: [{ marca: 'Marca X', tipo: 'merchan', inicio_ms: 3_700_000, fim_ms: 3_760_000 }],
   transcricao: [{ locutor: 'Ana', texto: 'Boa noite', inicio_ms: 0, fim_ms: 3_000 }],
   textos_na_tela: [{ tipo: 'gc', texto: 'AO VIVO', inicio_ms: 5_000, fim_ms: 8_000 }],
+  objetos: [
+    {
+      id: 'o1',
+      categoria: 'calcado',
+      tipo: 'sandália',
+      cor_base: ['vermelho'],
+      cor: 'vermelho vivo',
+      pessoa: 'p1',
+      relacao: 'calca',
+      ocorrencias: [{ inicio_ms: 724_000, fim_ms: 731_000 }],
+    },
+  ],
 }
 
-test('o Visualizador tem seis faixas com contagem e sem planos', () => {
+test('o Visualizador tem sete faixas com contagem e sem planos', () => {
   const faixas = faixasDoVisualizador(noVisualizador)
 
   expect(faixas.map((f) => [f.rotulo, f.blocos.length])).toEqual([
     ['Pautas', 2],
     ['Pessoas', 1],
     ['Menções', 2],
+    ['Objetos', 1],
     ['Comerciais', 1],
     ['Textos', 1],
     ['Falas', 1],
@@ -378,4 +391,15 @@ test('a fala sem locutor não leva "de" no nome', () => {
   const falas = faixasDoVisualizador(d).find((f) => f.rotulo === 'Falas')
 
   expect(falas?.blocos.map((b) => b.nome)).toEqual(['Fala: Boa noite, 00:00 a 00:03'])
+})
+
+test('o bloco do objeto diz o tipo, o tom, o dono e os tempos; sem objetos, a faixa tem o aviso', () => {
+  const faixa = (d: Decupagem) => faixasDoVisualizador(d).find((f) => f.rotulo === 'Objetos')
+
+  expect(faixa(noVisualizador)?.blocos.map((b) => b.nome)).toEqual([
+    'Objeto: sandália (vermelho vivo) de Leão Lobo, 12:04 a 12:11',
+  ])
+  const antiga = { ...noVisualizador, objetos: undefined }
+  expect(faixa(antiga)?.blocos).toEqual([])
+  expect(faixa(antiga)?.vazio).toBe('Este vídeo não tem objetos decupados.')
 })

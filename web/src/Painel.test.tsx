@@ -53,9 +53,27 @@ const DECUPAGEM = {
     { locutor: 'Leão', texto: 'Obrigado, Ana, é um prazer', inicio_ms: 224_000, fim_ms: 300_000 },
   ],
   textos_na_tela: [{ tipo: 'GC', texto: 'LEÃO LOBO · colunista', inicio_ms: 213_000, fim_ms: 235_000 }],
+  objetos: [
+    {
+      id: 'o1',
+      categoria: 'calcado',
+      tipo: 'sandália',
+      cor_base: ['vermelho'],
+      cor: 'vermelho vivo',
+      detalhe: 'salto alto',
+      marca: 'Arezzo',
+      pessoa: 'p1',
+      relacao: 'calca',
+      ocorrencias: [
+        { inicio_ms: 214_000, fim_ms: 230_000 },
+        { inicio_ms: 500_000, fim_ms: 510_000 },
+      ],
+    },
+    { id: 'o2', categoria: 'em_cena', tipo: 'troféu', cor_base: ['dourado', 'preto'], ocorrencias: [{ inicio_ms: 214_000, fim_ms: 220_000 }] },
+  ],
 }
 
-const VAZIA = { ...DECUPAGEM, pautas: [], pessoas: [], planos: [], comerciais: [], transcricao: [], textos_na_tela: [] }
+const VAZIA = { ...DECUPAGEM, pautas: [], pessoas: [], planos: [], comerciais: [], transcricao: [], textos_na_tela: [], objetos: [] }
 
 const servidor = setupServer(
   http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(DECUPAGEM)),
@@ -129,7 +147,7 @@ const aba = (nome: string | RegExp) => screen.getByRole('tab', { name: nome })
 test('as abas trazem a contagem ao lado do nome', async () => {
   await abrir()
 
-  for (const nome of ['Agora', 'Pessoas 2', 'Pautas 3', 'Comerciais 1', 'Textos na tela 1', 'Planos 2', 'Transcrição 2']) {
+  for (const nome of ['Agora', 'Pessoas 2', 'Pautas 3', 'Objetos 2', 'Comerciais 1', 'Textos na tela 1', 'Planos 2', 'Transcrição 2']) {
     expect(aba(nome)).toBeTruthy()
   }
   expect(aba('Agora').getAttribute('aria-selected')).toBe('true')
@@ -419,6 +437,7 @@ test('toda aba vazia diz que está vazia', async () => {
   const vazios: [string, string][] = [
     ['Pessoas 0', 'Nenhuma pessoa neste vídeo.'],
     ['Pautas 0', 'Nenhuma pauta neste vídeo.'],
+    ['Objetos 0', 'Este vídeo não tem objetos decupados.'],
     ['Comerciais 0', 'Nenhum comercial neste vídeo.'],
     ['Textos na tela 0', 'Nenhum texto na tela neste vídeo.'],
     ['Planos 0', 'Nenhum plano neste vídeo.'],
@@ -426,7 +445,7 @@ test('toda aba vazia diz que está vazia', async () => {
   ]
   for (const [nome, frase] of vazios) {
     await usuario.click(aba(nome))
-    expect(screen.getByText(frase)).toBeTruthy()
+    expect(within(painel()).getByText(frase)).toBeTruthy()
   }
 })
 
@@ -500,4 +519,78 @@ test('Transcrição: ↓ e Enter funcionam como nas outras abas', async () => {
   await usuario.keyboard('{ArrowDown}{ArrowDown}{Enter}')
 
   expect(player.currentTime).toBe(224)
+})
+
+test('o agora mostra os objetos visíveis com a cor em palavras, o dono e "em cena"', async () => {
+  const player = await abrir()
+  irPara(player, 215)
+
+  const secao = within(painel()).getByText('Objetos', { selector: 'p' }).parentElement as HTMLElement
+  const sandalia = within(secao).getByRole('button', { name: /sandália/ }).parentElement as HTMLElement
+  expect(within(sandalia).getByText('vermelho vivo')).toBeTruthy()
+  expect(within(sandalia).getByText(/^calçado ·/)).toBeTruthy()
+  expect(within(sandalia).getByText(/marca Arezzo/)).toBeTruthy()
+  expect(within(sandalia).getByText('salto alto')).toBeTruthy()
+  expect(within(sandalia).getByText(/calçado por/)).toBeTruthy()
+  expect(within(sandalia).getByRole('button', { name: 'Leão Lobo' })).toBeTruthy()
+  const trofeu = within(secao).getByRole('button', { name: /troféu/ }).parentElement as HTMLElement
+  expect(within(trofeu).getByText('dourado e preto')).toBeTruthy()
+  // A categoria ("em cena") e o dono (sem dono: "em cena") dizem a mesma coisa em linhas próprias.
+  expect(within(trofeu).getAllByText('em cena').length).toBe(2)
+})
+
+test('toda cor de objeto tem a palavra ao lado', async () => {
+  const player = await abrir()
+  irPara(player, 215)
+
+  const quadradinhos = painel().querySelectorAll('[data-cor-base]')
+  expect(quadradinhos.length).toBe(3)
+  for (const q of quadradinhos) {
+    expect(q.getAttribute('aria-hidden')).toBe('true')
+    expect(q.parentElement?.textContent?.trim()).not.toBe('')
+  }
+})
+
+test('clicar no dono salta para a pessoa na aba Pessoas', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 215)
+
+  await usuario.click(within(painel()).getByRole('button', { name: 'Leão Lobo' }))
+
+  expect(aba('Pessoas 2').getAttribute('aria-selected')).toBe('true')
+  expect(within(painel()).getByRole('button', { name: /^Leão Lobo, 03:31 a 04:21/ }).getAttribute('aria-pressed')).toBe('true')
+})
+
+test('a aba Objetos lista cada objeto com o número de ocorrências e abre as ocorrências', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+
+  await usuario.click(aba('Objetos 2'))
+  expect(within(painel()).getByText('2 ocorrências')).toBeTruthy()
+  expect(within(painel()).getByText('1 ocorrência')).toBeTruthy()
+  expect(within(painel()).queryByRole('button', { name: /sandália, 08:20/ })).toBeNull()
+
+  await usuario.click(within(painel()).getByRole('button', { name: 'sandália, 2 ocorrências' }))
+  expect(within(painel()).getByRole('button', { name: 'sandália, 08:20 a 08:30' })).toBeTruthy()
+})
+
+test('o bloco do objeto na faixa leva à aba Objetos com a ocorrência selecionada', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+
+  await usuario.click(
+    await screen.findByRole('button', { name: 'Objeto: sandália (vermelho vivo) de Leão Lobo, 08:20 a 08:30' }),
+  )
+
+  expect(aba('Objetos 2').getAttribute('aria-selected')).toBe('true')
+  expect(within(painel()).getByRole('button', { name: 'sandália, 08:20 a 08:30' }).getAttribute('aria-pressed')).toBe('true')
+})
+
+test('uma Decupagem sem objetos mostra o aviso na faixa', async () => {
+  const { objetos: _, ...antiga } = DECUPAGEM
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(antiga)))
+  await abrir()
+
+  expect(await screen.findByText('Este vídeo não tem objetos decupados.')).toBeTruthy()
 })

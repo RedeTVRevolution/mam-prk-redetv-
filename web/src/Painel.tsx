@@ -1,7 +1,7 @@
 import { Badge, Box, Group, Stack, Text, UnstyledButton, Button } from '@mantine/core'
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAtalhos } from './atalhos.ts'
-import { type Intervalo, relogio } from './linhaDoTempo.ts'
+import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
   ABAS,
   type Aba,
@@ -9,10 +9,12 @@ import {
   contem,
   deltaDeRolagem,
   deltaParaUmTerco,
+  type DadosDoObjeto,
   type ItemDoPainel,
   itensDaAba,
   itensDoPainel,
   NAO_IDENTIFICADO,
+  objetosDaAba,
   semDecupagemEm,
   type Selo,
   textoDoSemDecupagem,
@@ -20,7 +22,7 @@ import {
   type TipoDoItem,
   vizinhoNoPainel,
 } from './painel.ts'
-import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
+import { CORES, CORES_DE_OBJETO, CORES_DE_OCORRENCIA } from './tema.ts'
 import type { Decupagem } from './Video.tsx'
 
 /** Depois que a pessoa rola o painel, ele não anda sozinho por este tempo. */
@@ -32,6 +34,7 @@ const COR_DO_TIPO: Record<TipoDoItem, string> = {
   pauta: CORES_DE_OCORRENCIA.pauta.cor,
   aparicao: CORES_DE_OCORRENCIA.aparicao.cor,
   mencao: CORES_DE_OCORRENCIA.mencao.cor,
+  objeto: CORES_DE_OCORRENCIA.objeto.cor,
   comercial: CORES_DE_OCORRENCIA.comercial.cor,
   texto: CORES_DE_OCORRENCIA.texto_na_tela.cor,
   plano: CORES.textoSecundario,
@@ -41,6 +44,7 @@ const COR_DO_TIPO: Record<TipoDoItem, string> = {
 const TITULO_DO_TIPO: Partial<Record<TipoDoItem, string>> = {
   aparicao: 'Pessoas na imagem',
   mencao: 'Menções',
+  objeto: 'Objetos',
   comercial: 'Comerciais',
   texto: 'Textos na tela',
 }
@@ -48,6 +52,7 @@ const TITULO_DO_TIPO: Partial<Record<TipoDoItem, string>> = {
 const VAZIO_DA_ABA: Record<Exclude<Aba, 'agora'>, string> = {
   pessoas: 'Nenhuma pessoa neste vídeo.',
   pautas: 'Nenhuma pauta neste vídeo.',
+  objetos: SEM_OBJETOS,
   comerciais: 'Nenhum comercial neste vídeo.',
   textos: 'Nenhum texto na tela neste vídeo.',
   planos: 'Nenhum plano neste vídeo.',
@@ -109,6 +114,71 @@ function SeloDaProva({ selo, aoSaltar }: { selo: Selo; aoSaltar: (ms: number) =>
   )
 }
 
+/** O quadradinho da cor base (10 px) e o tom em palavras: a cor nunca vem sem a palavra. */
+function CorDoObjeto({ dados }: { dados: DadosDoObjeto }) {
+  return (
+    <Group gap={6} wrap="nowrap" align="center">
+      {dados.coresBase.slice(0, 2).map((c) => (
+        <Box
+          key={c}
+          aria-hidden
+          data-cor-base={c}
+          style={{
+            width: 10,
+            height: 10,
+            flex: 'none',
+            background: CORES_DE_OBJETO[c],
+            border: `1px solid ${CORES.textoSecundario}`,
+            borderRadius: 'var(--mantine-radius-xs)',
+          }}
+        />
+      ))}
+      <Text size="xs">{dados.tom}</Text>
+    </Group>
+  )
+}
+
+/** Cor, categoria, marca, detalhe e dono do objeto; o dono é um botão que leva à aba Pessoas. */
+function DescricaoDoObjeto({
+  dados,
+  aoIrParaDono,
+}: {
+  dados: DadosDoObjeto
+  aoIrParaDono: (pessoa: string) => void
+}) {
+  const { dono } = dados
+  return (
+    <Stack gap={0} ml={16}>
+      <CorDoObjeto dados={dados} />
+      <Text size="xs" c="dimmed">
+        {[dados.categoria, dados.marca && `marca ${dados.marca}`].filter(Boolean).join(' · ')}
+      </Text>
+      {dados.detalhe && (
+        <Text size="xs" c="dimmed">
+          {dados.detalhe}
+        </Text>
+      )}
+      <Text size="xs">
+        {dono ? (
+          <>
+            {`${dono.relacao} `}
+            <UnstyledButton
+              component="button"
+              type="button"
+              onClick={() => aoIrParaDono(dono.id)}
+              style={{ fontSize: 'inherit', color: CORES.focoTexto, textDecoration: 'underline' }}
+            >
+              {dono.nome}
+            </UnstyledButton>
+          </>
+        ) : (
+          'em cena'
+        )}
+      </Text>
+    </Stack>
+  )
+}
+
 function Item({
   item,
   atual,
@@ -116,6 +186,8 @@ function Item({
   aoClicar,
   aoSaltar,
   aoReproduzir,
+  aoIrParaDono,
+  compacto,
 }: {
   item: ItemDoPainel
   atual: boolean
@@ -123,6 +195,9 @@ function Item({
   aoClicar: (i: ItemDoPainel) => void
   aoSaltar: (ms: number) => void
   aoReproduzir: (i: ItemDoPainel) => void
+  aoIrParaDono: (pessoa: string) => void
+  /** Objeto na lista das ocorrências: só o tipo e o tempo, o resto fica na linha do objeto. */
+  compacto?: boolean
 }) {
   const resumo = item.tipo === 'pauta' && item.detalhe
   return (
@@ -201,6 +276,7 @@ function Item({
           </Group>
         )}
       </UnstyledButton>
+      {item.objeto && !compacto && <DescricaoDoObjeto dados={item.objeto} aoIrParaDono={aoIrParaDono} />}
       {(item.selos.length > 0 || selecionado) && (
         <Group gap="xs" mt={4} ml={16}>
           {item.selos.map((s) => (
@@ -274,6 +350,29 @@ export function Painel({
     if (pessoaSelecionada && !pessoasAbertas.has(pessoaSelecionada)) aoAbrirPessoa(pessoaSelecionada)
   }, [pessoaSelecionada, pessoasAbertas, aoAbrirPessoa])
 
+  // Os objetos com a lista de ocorrências aberta; o objeto da ocorrência selecionada abre sozinho.
+  const [objetosAbertos, setObjetosAbertos] = useState<ReadonlySet<string>>(new Set())
+  const alternarObjeto = useCallback(
+    (id: string) =>
+      setObjetosAbertos((a) => {
+        const novo = new Set(a)
+        if (!novo.delete(id)) novo.add(id)
+        return novo
+      }),
+    [],
+  )
+  const objetoSelecionado = selecionado?.objeto?.id
+  // Ajuste durante a renderização: só quando o objeto selecionado muda, e depois fecha no clique.
+  const [objetoVisto, setObjetoVisto] = useState<string | undefined>(undefined)
+  if (objetoSelecionado !== objetoVisto) {
+    setObjetoVisto(objetoSelecionado)
+    if (objetoSelecionado && !objetosAbertos.has(objetoSelecionado)) {
+      setObjetosAbertos(new Set(objetosAbertos).add(objetoSelecionado))
+    }
+  }
+
+  const objetos = useMemo(() => objetosDaAba(itens), [itens])
+
   const { aparicoes, mencoes } = useMemo(() => {
     const daAba = itensDaAba(itens, 'pessoas')
     return { aparicoes: daAba.filter((i) => i.tipo === 'aparicao'), mencoes: daAba.filter((i) => i.tipo === 'mencao') }
@@ -283,6 +382,7 @@ export function Painel({
   const contagens: Record<Exclude<Aba, 'agora'>, number> = {
     pessoas: pessoas.length,
     pautas: pautas.length,
+    objetos: objetos.length,
     comerciais: itensDaAba(itens, 'comerciais').length,
     textos: itensDaAba(itens, 'textos').length,
     planos: itensDaAba(itens, 'planos').length,
@@ -299,8 +399,9 @@ export function Painel({
         .flatMap((p) => aparicoes.filter((i) => i.pessoa === p.id))
       return [...abertas, ...mencoes]
     }
+    if (aba === 'objetos') return objetos.filter((o) => objetosAbertos.has(o.dados.id)).flatMap((o) => o.ocorrencias)
     return itensDaAba(itens, aba)
-  }, [aba, itens, atualMs, pessoasAbertas, pessoas, aparicoes, mencoes])
+  }, [aba, itens, atualMs, pessoasAbertas, pessoas, aparicoes, mencoes, objetos, objetosAbertos])
 
   const chaveAtual = navegaveis.find((i) => contem(i, atualMs))?.chave
 
@@ -381,7 +482,14 @@ export function Painel({
     },
   ])
 
-  const lista = (itensDaLista: ItemDoPainel[]) =>
+  // O dono do objeto: abre a aba Pessoas na primeira aparição dele (a seleção abre a lista da pessoa).
+  const irParaDono = (pessoa: string) => {
+    aoTrocarAba('pessoas')
+    const primeira = itens.find((i) => i.tipo === 'aparicao' && i.pessoa === pessoa)
+    if (primeira) aoSelecionar(primeira.chave)
+  }
+
+  const lista = (itensDaLista: ItemDoPainel[], compacto?: boolean) =>
     itensDaLista.map((i) => (
       <Item
         key={i.chave}
@@ -394,6 +502,8 @@ export function Painel({
         }}
         aoSaltar={aoSaltar}
         aoReproduzir={aoReproduzir}
+        aoIrParaDono={irParaDono}
+        compacto={compacto}
       />
     ))
 
@@ -462,6 +572,43 @@ export function Painel({
             <Secao titulo="Só citadas (não contam como tempo de tela)">{lista(mencoes)}</Secao>
           )}
         </>
+      )
+  } else if (aba === 'objetos') {
+    conteudo =
+      objetos.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          {VAZIO_DA_ABA.objetos}
+        </Text>
+      ) : (
+        objetos.map(({ dados, ocorrencias }) => {
+          const abrir = objetosAbertos.has(dados.id)
+          const quantas = `${ocorrencias.length} ${ocorrencias.length === 1 ? 'ocorrência' : 'ocorrências'}`
+          return (
+            <Stack key={dados.id} gap={2}>
+              <UnstyledButton
+                aria-expanded={abrir}
+                aria-label={`${dados.tipo}, ${quantas}`}
+                onClick={() => alternarObjeto(dados.id)}
+                p="xs"
+              >
+                <Group gap="xs" justify="space-between" wrap="nowrap">
+                  <Text size="sm">{dados.tipo}</Text>
+                  <Text size="xs" c="dimmed">
+                    {quantas}
+                  </Text>
+                </Group>
+              </UnstyledButton>
+              <Box px="xs">
+                <DescricaoDoObjeto dados={dados} aoIrParaDono={irParaDono} />
+              </Box>
+              {abrir && (
+                <Stack gap={2} ml="md">
+                  {lista(ocorrencias, true)}
+                </Stack>
+              )}
+            </Stack>
+          )
+        })
       )
   } else {
     const doTipo = itensDaAba(itens, aba)

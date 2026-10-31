@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { MantineTheme } from '@mantine/core'
-import { contraste, CORES, CORES_DE_OCORRENCIA, ESTADOS_DO_JOB, tema, variaveis } from './tema.ts'
+import { contraste, CORES, CORES_DE_OBJETO, CORES_DE_OCORRENCIA, ESTADOS_DO_JOB, tema, variaveis } from './tema.ts'
 
 const FUNDOS = { fundo: CORES.fundo, superficie: CORES.superficie, elevada: CORES.elevada }
 
@@ -150,4 +150,13 @@ test('o erro e o placeholder que o Mantine pinta nos campos passam no AA', () =>
       expect(contraste(dark[variavel], fundo)).toBeGreaterThanOrEqual(4.5)
     }
   }
+})
+
+test('toda cor base do objeto tem a sua cor no mapa', () => {
+  expect(Object.keys(CORES_DE_OBJETO).sort()).toEqual(
+    [
+      'vermelho', 'laranja', 'amarelo', 'verde', 'azul', 'roxo', 'rosa', 'marrom',
+      'bege', 'preto', 'branco', 'cinza', 'dourado', 'prateado', 'estampado',
+    ].sort(),
+  )
 })
