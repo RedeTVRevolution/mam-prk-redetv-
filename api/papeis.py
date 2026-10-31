@@ -51,7 +51,8 @@ def papeis_do_usuario(
     """Os papéis efetivos de uma pessoa. O Administrador é calculado a cada
     requisição para quem tem e-mail verificado em `ADMINS_EMERGENCIA`; nada é gravado."""
     efetivos = papeis_efetivos(guardados)
-    if email_verificado and email.strip().lower() in admins:
+    admin = email_verificado and email.strip().lower() in admins
+    if admin and "administrador" not in efetivos:
         efetivos = [*efetivos, "administrador"]
     return efetivos
 

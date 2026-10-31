@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import get_args
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 from api.auth import Usuario
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
-from api.papeis import Papel, RepositorioDePapeisEmMemoria
+from api.papeis import Papel, Permissao, RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 
@@ -141,9 +142,7 @@ def _mundo_admin(
     )
 
 
-TODAS = sorted(
-    ["decupagem.ver", "video.enviar", "decupagem.editar", "correcao.aprovar"]
-)
+TODAS = sorted(get_args(Permissao))
 
 
 @pytest.mark.parametrize("guardados", [None, ["consulta"]])
@@ -169,16 +168,12 @@ def test_admin_de_emergencia_passa_nas_rotas_de_editar_e_aprovar() -> None:
         ("GET", "/v1/jobs/x/correcoes"),
         ("POST", "/v1/jobs/x/correcoes/y/aprovar"),
     ):
-        assert comum.request(metodo, caminho, headers=AUTORIZACAO).status_code in (
-            403,
-            404,
-        )
+        assert comum.request(metodo, caminho, headers=AUTORIZACAO).status_code == 403
         assert cliente.request(metodo, caminho, headers=AUTORIZACAO).status_code == 404
 
 
-@pytest.mark.parametrize("verificado", [False])
-def test_email_nao_verificado_nao_vira_administrador(verificado: bool) -> None:
-    cliente = _mundo_admin(["consulta"], "ana@redetv.com.br", verificado)
+def test_email_nao_verificado_nao_vira_administrador() -> None:
+    cliente = _mundo_admin(["consulta"], "ana@redetv.com.br", verificado=False)
 
     eu = cliente.get("/v1/eu", headers=AUTORIZACAO).json()
 

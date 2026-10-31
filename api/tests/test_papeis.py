@@ -137,3 +137,9 @@ def test_atribuir_aceita_administrador() -> None:
 
     assert codigo == 0
     assert repo.obter("u1") == ["administrador"]
+
+
+def test_administrador_ja_guardado_nao_se_repete() -> None:
+    papeis = papeis_do_usuario(["administrador"], "a@b.c", True, admins_de("a@b.c"))
+
+    assert papeis == ["administrador"]
