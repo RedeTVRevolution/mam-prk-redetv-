@@ -309,7 +309,7 @@ test('o programa escolhido vai no corpo da criação do Job', async () => {
   await screen.findByText('Nenhum vídeo enviado ainda.')
 
   await usuario.click(await screen.findByRole('combobox', { name: 'Programa' }))
-  await usuario.click(await screen.findByText('TV Fama'))
+  await usuario.click(await screen.findByRole('option', { name: 'TV Fama' }))
   await usuario.upload(screen.getByLabelText('Enviar vídeo'), mp4())
 
   expect(await screen.findByText('Envio concluído.')).toBeTruthy()
