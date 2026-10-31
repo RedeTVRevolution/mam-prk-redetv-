@@ -25,6 +25,7 @@ from pydantic import (
     model_validator,
 )
 
+from api import catalogo_de_correcoes as textos
 from api.catalogo import Catalogo
 from api.comparador import normalizar
 from api.decupagem import (
@@ -175,6 +176,8 @@ EstadoNoHistorico = Literal[
 
 class ItemDoHistorico(Correcao):
     estado: EstadoNoHistorico
+    antes_legivel: str
+    depois_legivel: str
 
 
 def tempos_de(valor: str) -> tuple[int, int]:
@@ -498,6 +501,8 @@ class Candidato(BaseModel):
 
 class ItemDaFila(Correcao):
     candidatos: list[Candidato]
+    antes_legivel: str
+    depois_legivel: str
 
 
 class NovaResolucao(BaseModel):
@@ -1086,9 +1091,20 @@ def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
     fila (reaplicada ou descartada) ou, se exige aprovação, pendente, aprovada
     ou recusada."""
     estado = estado_das(correcoes)
+    tipos = {c.id: c.tipo for c in correcoes}
+
+    def legivel(c: Correcao, valor: str) -> str:
+        # Desfazer, aprovação e recusa mostram o valor do tipo que decidem.
+        alvo = c.desfaz or c.aprova or c.recusa
+        return valor_legivel(tipos.get(alvo) if alvo else c.tipo, valor)
 
     return [
-        ItemDoHistorico(**c.model_dump(), estado=estado.de(c.id))
+        ItemDoHistorico(
+            **c.model_dump(),
+            estado=estado.de(c.id),
+            antes_legivel=legivel(c, c.antes),
+            depois_legivel=legivel(c, c.depois),
+        )
         for c in reversed(em_ordem(correcoes))
     ]
 
@@ -1575,7 +1591,14 @@ def fila(
                         fim_ms=intervalo[1],
                     )
                 )
-        itens.append(ItemDaFila(**c.model_dump(), candidatos=candidatos))
+        itens.append(
+            ItemDaFila(
+                **c.model_dump(),
+                candidatos=candidatos,
+                antes_legivel=valor_legivel(c.tipo, c.antes),
+                depois_legivel=valor_legivel(c.tipo, c.depois),
+            )
+        )
     return itens
 
 
@@ -1740,6 +1763,10 @@ class Tipo:
 
     # Valida o pedido e devolve o valor na forma única em que é guardado.
     canonizar: Callable[[NovaCorrecao], str]
+    # O nome do tipo para quem lê.
+    rotulo: str
+    # O valor (`antes` ou `depois`) para quem lê; recebe o texto gravado.
+    legivel: Callable[[str], str]
     # O tipo do item corrigido; `None` no que o pedido escolhe (`item.tempos`).
     tipo_do_item: TipoDoItem | None = None
     # O valor, que pode ser JSON, passa do limite do texto simples.
@@ -2193,6 +2220,8 @@ _PESSOA_NOVA = Acrescenta(
 TIPOS: dict[str, Tipo] = {
     "pessoa.renomear": Tipo(
         canonizar=_campo_longo,
+        rotulo="Renomear pessoa",
+        legivel=textos.como_veio,
         tipo_do_item="pessoa",
         valor_do_item=_campo("nome"),
         valor_do_alvo=_nome_entregue_do_alvo,
@@ -2204,18 +2233,24 @@ TIPOS: dict[str, Tipo] = {
     ),
     "pauta.titulo": Tipo(
         canonizar=_campo_longo,
+        rotulo="Título da pauta",
+        legivel=textos.como_veio,
         tipo_do_item="pauta",
         valor_do_item=_campo("titulo"),
         aplicar_no_item=_no_campo("titulo"),
     ),
     "pauta.resumo": Tipo(
         canonizar=_canonizar_resumo,
+        rotulo="Resumo da pauta",
+        legivel=textos.como_veio,
         tipo_do_item="pauta",
         valor_do_item=_campo("resumo"),
         aplicar_no_item=_no_campo("resumo"),
     ),
     "item.tempos": Tipo(
         canonizar=_canonizar_tempos,
+        rotulo="Tempos",
+        legivel=textos.tempos,
         valor_do_item=_tempos_do_item,
         valor_da_ocorrencia=_tempos_na_lista,
         fim_ms=_fim_dos_tempos,
@@ -2224,6 +2259,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "comercial.marca": Tipo(
         canonizar=_campo_longo,
+        rotulo="Marca do comercial",
+        legivel=textos.como_veio,
         tipo_do_item="comercial",
         valor_do_item=_campo("marca"),
         aplicar_no_item=_no_campo("marca"),
@@ -2232,6 +2269,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "comercial.tipo": Tipo(
         canonizar=_canonizar_tipo_de_comercial,
+        rotulo="Tipo do comercial",
+        legivel=textos.como_veio,
         tipo_do_item="comercial",
         valor_do_item=_campo("tipo"),
         aplicar_no_item=_no_campo("tipo"),
@@ -2240,6 +2279,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "comercial.acrescentar": Tipo(
         canonizar=_canonizar_comercial_acrescentado,
+        rotulo="Comercial acrescentado",
+        legivel=textos.comercial_acrescentado,
         tipo_do_item="comercial",
         valor_do_item=_json_do_comercial,
         fim_ms=_fim_do_json,
@@ -2247,6 +2288,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "pessoa.nao_e": Tipo(
         canonizar=_canonizar_nao_e,
+        rotulo="Não é esta pessoa",
+        legivel=textos.ocorrencia,
         tipo_do_item="pessoa",
         de_ocorrencia=True,
         valor_da_ocorrencia=_na_lista,
@@ -2255,6 +2298,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "pessoa.aparicao_para_mencao": Tipo(
         canonizar=_canonizar_aparicao_para_mencao,
+        rotulo="Aparição para menção",
+        legivel=textos.ocorrencia,
         tipo_do_item="pessoa",
         de_ocorrencia=True,
         valor_da_ocorrencia=_na_lista,
@@ -2262,6 +2307,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "pessoa.mencao_para_aparicao": Tipo(
         canonizar=_canonizar_mencao_para_aparicao,
+        rotulo="Menção para aparição",
+        legivel=textos.ocorrencia,
         tipo_do_item="pessoa",
         de_ocorrencia=True,
         valor_da_ocorrencia=_na_lista,
@@ -2269,6 +2316,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "pessoa.acrescentar_aparicao": Tipo(
         canonizar=_canonizar_aparicao_nova,
+        rotulo="Aparição acrescentada",
+        legivel=textos.aparicao_acrescentada,
         tipo_do_item="pessoa",
         valor_da_ocorrencia=_aparicao_acrescentada_na_lista,
         fim_ms=_fim_do_json,
@@ -2279,6 +2328,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "plano.descricao": Tipo(
         canonizar=_canonizar_descricao,
+        rotulo="Descrição do plano",
+        legivel=textos.descricao_do_plano,
         tipo_do_item="plano",
         json_longo=True,
         valor_do_item=_valor_da_descricao,
@@ -2287,6 +2338,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "plano.limpo": Tipo(
         canonizar=_canonizar_limpo,
+        rotulo="Plano limpo",
+        legivel=textos.plano_limpo,
         tipo_do_item="plano",
         json_longo=True,
         valor_do_item=_valor_do_limpo,
@@ -2295,6 +2348,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "fala.texto": Tipo(
         canonizar=_canonizar_fala,
+        rotulo="Texto da fala",
+        legivel=textos.fala,
         tipo_do_item="fala",
         json_longo=True,
         valor_do_item=_valor_da_fala,
@@ -2303,6 +2358,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "pauta.tom": Tipo(
         canonizar=_canonizar_tom,
+        rotulo="Tom da pauta",
+        legivel=textos.tom_da_pauta,
         tipo_do_item="pauta",
         valor_do_item=_valor_do_tom,
         traz_o_campo=_traz_tom,
@@ -2310,6 +2367,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "pessoa.fontes_do_nome": Tipo(
         canonizar=_canonizar_fontes,
+        rotulo="Fontes do nome",
+        legivel=textos.fontes_do_nome,
         tipo_do_item="pessoa",
         valor_do_item=_valor_das_fontes_do_item,
         traz_o_campo=_traz_fontes,
@@ -2318,6 +2377,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "aparicao.papel_visual": Tipo(
         canonizar=_canonizar_papel_visual,
+        rotulo="Papel na cena e visual",
+        legivel=textos.papel_visual,
         tipo_do_item="pessoa",
         de_ocorrencia=True,
         valor_da_ocorrencia=_papel_visual_na_lista,
@@ -2327,6 +2388,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "texto_na_tela.texto": Tipo(
         canonizar=_canonizar_texto_na_tela,
+        rotulo="Texto na tela",
+        legivel=textos.texto_na_tela,
         tipo_do_item="texto_na_tela",
         json_longo=True,
         valor_do_item=_valor_do_texto_na_tela,
@@ -2337,6 +2400,8 @@ TIPOS: dict[str, Tipo] = {
     ),
     "texto_na_tela.acrescentar": Tipo(
         canonizar=_canonizar_texto_acrescentado,
+        rotulo="Texto na tela acrescentado",
+        legivel=textos.texto_na_tela_acrescentado,
         tipo_do_item="texto_na_tela",
         json_longo=True,
         valor_do_item=_tempos_do_item,
@@ -2345,3 +2410,28 @@ TIPOS: dict[str, Tipo] = {
         acrescenta=_TEXTO_NOVO,
     ),
 }
+
+ROTULOS_DAS_DECISOES = {
+    "desfazer": "Desfazer",
+    "descartar": "Descartar da fila",
+    "aprovar": "Aprovação",
+    "recusar": "Recusa",
+}
+
+
+def rotulos_dos_tipos() -> list[textos.Opcao]:
+    """Todo tipo de Correção com o rótulo: os da tabela e os das decisões."""
+    rotulos = {t: e.rotulo for t, e in TIPOS.items()} | ROTULOS_DAS_DECISOES
+    return [textos.Opcao(valor=t, rotulo=r) for t, r in rotulos.items()]
+
+
+def valor_legivel(tipo: str | None, valor: str) -> str:
+    """O valor de uma Correção para quem lê, pela entrada do tipo; o que não
+    for o formato esperado sai como veio."""
+    entrada = TIPOS.get(tipo or "")
+    if entrada is None:
+        return valor
+    try:
+        return entrada.legivel(valor)
+    except (ValueError, KeyError, TypeError):
+        return valor

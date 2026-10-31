@@ -23,6 +23,8 @@ from api.auth import (
     exigir_autenticacao,
 )
 from api.catalogo import Catalogo, CatalogoEmMemoria
+from api.catalogo_de_correcoes import CatalogoDeCorrecoes
+from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.correcoes import (
     RepositorioDeAprovacao,
     RepositorioDeAprovacaoEmMemoria,
@@ -135,6 +137,11 @@ def criar_app(
     def programas(_chamador: ChamadorAutenticado) -> list[str]:
         """Os programas com perfil, para o envio escolher."""
         return sorted(PERFIS)
+
+    @v1.get("/correcoes/catalogo")
+    def tipos_de_correcao(_chamador: ChamadorAutenticado) -> CatalogoDeCorrecoes:
+        """Os tipos de Correção e os vocabulários que o front mostra."""
+        return catalogo_de_correcoes()
 
     v1.include_router(
         criar_rotas(
