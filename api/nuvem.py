@@ -1,7 +1,8 @@
 """Adaptadores de nuvem da E0: Firestore (Jobs) e Cloud Storage (upload)."""
 
+import hashlib
 from collections.abc import Callable, Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from google.cloud.storage import Client as ClienteStorage
 from api.catalogo import (
     PessoaDoCatalogo,
     PessoaInexistente,
+    Rosto,
     corrigida,
     nomes_de_busca,
     novo_id,
@@ -40,6 +42,7 @@ COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
+COLECAO_DAS_SUGESTOES = "sugestoes_de_perfil"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
@@ -263,11 +266,50 @@ class CatalogoFirestore:
             raise PessoaInexistente(id)
         return self._gravar(corrigida(atual, nome, papel, apelidos))
 
+    def definir_rostos(self, id: str, rostos: list[Rosto]) -> PessoaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        return self._gravar(atual.model_copy(update={"rostos": list(rostos)}))
+
     def apagar(self, id: str) -> None:
         referencia = self._colecao.document(id)
         if not referencia.get().exists:
             raise PessoaInexistente(id)
         referencia.delete()
+
+
+class SugestoesFirestore:
+    """Nomes sugeridos para o perfil de um programa (#111). Um documento por programa
+    e nome, de id estável: sugerir de novo não duplica."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DAS_SUGESTOES
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def sugerir(self, programa: str, nome: str, busca: str, quando: datetime) -> None:
+        chave = hashlib.sha256(f"{programa}\n{normalizar(nome)}".encode()).hexdigest()
+        self._colecao.document(chave).set(
+            {"programa": programa, "nome": nome, "busca": busca, "quando": quando}
+        )
+
+    def do_programa(self, programa: str) -> list[str]:
+        consulta = self._colecao.where(filter=FieldFilter("programa", "==", programa))
+        return [(d.to_dict() or {})["nome"] for d in consulta.stream()]
+
+
+class ReferenciasStorage:
+    """As fotos de referência, no bucket delas (`BUCKET_REFERENCIAS`)."""
+
+    def __init__(self, cliente: ClienteStorage, bucket: str) -> None:
+        self._cliente = cliente
+        self._bucket = bucket
+
+    def gravar(self, objeto: str, jpeg: bytes) -> None:
+        self._cliente.bucket(self._bucket).blob(objeto).upload_from_string(
+            jpeg, content_type="image/jpeg"
+        )
 
 
 class RepositorioDeCorrecoesFirestore:

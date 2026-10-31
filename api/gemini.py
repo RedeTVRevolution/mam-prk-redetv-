@@ -131,6 +131,9 @@ class Chamada:
     # JPEGs que seguem no lugar do vídeo (identificação pelo modelo forte, `video_uri`
     # vazio); essa chamada é Standard, sem o Flex da análise por janelas.
     imagens: tuple[bytes, ...] = ()
+    # Texto no lugar do vídeo (extração de nomes do Job de referências, `video_uri`
+    # vazio); também Standard. Com `imagens`, o texto segue as imagens.
+    texto: str = ""
 
 
 def _duracao(ms: int) -> str:
@@ -179,7 +182,7 @@ class TransporteVertex:
             f"{chamada.modelo}:generateContent"
         )
         partes_do_pedido: list[dict[str, Any]]
-        if chamada.imagens:
+        if chamada.imagens or chamada.texto:
             partes_do_pedido = [
                 {
                     "inlineData": {
@@ -189,6 +192,8 @@ class TransporteVertex:
                 }
                 for imagem in chamada.imagens
             ]
+            if chamada.texto:
+                partes_do_pedido.append({"text": chamada.texto})
         else:
             metadados: dict[str, Any] = {"fps": 1}
             if chamada.trecho_ms is not None:
@@ -221,7 +226,7 @@ class TransporteVertex:
         # Só Flex, sem Provisioned Throughput antes (doc "Flex PayGo" da Vertex).
         cabecalhos = (
             {}
-            if chamada.imagens
+            if chamada.imagens or chamada.texto
             else {
                 "X-Vertex-AI-LLM-Request-Type": "shared",
                 "X-Vertex-AI-LLM-Shared-Request-Type": "flex",

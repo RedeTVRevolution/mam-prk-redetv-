@@ -47,6 +47,18 @@ variable "tolerancia_da_fala_ms" {
   default     = 2000
 }
 
+variable "validade_das_referencias_dias" {
+  description = "Dias em que uma foto de referência da web vale, a contar de quando foi obtida; depois disso é buscada de novo"
+  type        = number
+  default     = 180
+}
+
+variable "referencias_do_acervo" {
+  description = "\"ligado\" liga o uso das referências de rosto do acervo (caminho pronto, desligado por padrão)"
+  type        = string
+  default     = "desligado"
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -86,6 +98,7 @@ resource "google_project_service" "apis" {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "run.googleapis.com",
+    "secretmanager.googleapis.com",
     "storage.googleapis.com",
   ])
   service            = each.key
@@ -111,7 +124,7 @@ resource "google_firestore_database" "mam" {
 # de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
 # web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).
 locals {
-  sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro"]
+  sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro", "referencias"]
   buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
 }
 
@@ -139,7 +152,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "orquestracao", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "referencias", "orquestracao", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -154,6 +167,7 @@ resource "google_service_account" "mam" {
 # conector do Workflows acompanha a execução do Job pela operação, que é do projeto e
 # não do Job; sem ele, o passo `valida` falharia depois de o Job rodar e marcaria um
 # vídeo bom como arquivo_corrompido.
+# A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
   papeis_no_projeto = {
     web          = ["roles/datastore.user"]
@@ -161,6 +175,7 @@ locals {
     transcricao  = ["roles/datastore.user"]
     ocr          = ["roles/datastore.user"]
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
+    referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
     build = ["roles/logging.logWriter"]
@@ -178,6 +193,8 @@ locals {
     # (objectUser, porque cada janela sobrescreve o próprio objeto); a decupagem vai para o
     # bucket dela.
     analise = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectCreator" }
+    # Grava as fotos de referência.
+    referencias = { referencias = "roles/storage.objectUser" }
   }
 }
 
@@ -641,6 +658,73 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_analise" {
   location = google_cloud_run_v2_job.analise.location
   role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
+}
+
+# Job de referências de rosto (#111, ADR 0005): o único com internet (sem vpc_access),
+# por isso só recebe nomes (NOMES, em JSON, e PROGRAMA) e nunca quadros do vídeo. Busca
+# fotos pelo SerpAPI, o Gemini as confere e as guarda no bucket de referências.
+# A chave do SerpAPI fica no Secret Manager: o Terraform cria o segredo vazio (aditivo,
+# ADR 0002) e a versão com a chave é posta à mão; só este Job a lê.
+resource "google_secret_manager_secret" "serpapi" {
+  secret_id = "mam-serpapi"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_iam_member" "referencias_le_serpapi" {
+  secret_id = google_secret_manager_secret.serpapi.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.mam["referencias"].member
+}
+
+resource "google_cloud_run_v2_job" "referencias" {
+  name                = "mam-referencias"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["referencias"].email
+      max_retries     = 0
+      # Poucos nomes por execução: cada um é uma busca, dez miniaturas no máximo e uma chamada ao Gemini.
+      timeout = "1800s"
+      containers {
+        image   = var.imagem
+        command = ["python"]
+        args    = ["-m", "api.referencias_job"]
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "1Gi"
+          }
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_REFERENCIAS"
+          value = local.buckets["referencias"]
+        }
+        env {
+          name  = "SEGREDO_DO_SERPAPI"
+          value = google_secret_manager_secret.serpapi.id
+        }
+        env {
+          name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
+          value = tostring(var.validade_das_referencias_dias)
+        }
+        env {
+          name  = "REFERENCIAS_DO_ACERVO"
+          value = var.referencias_do_acervo
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
 # Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise.

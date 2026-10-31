@@ -7,6 +7,7 @@ como dono dos objetos da busca.
 
 import uuid
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
@@ -15,10 +16,16 @@ from api.comparador import normalizar
 
 
 class Rosto(BaseModel):
-    """Uma referência de rosto ligada à pessoa e de onde ela veio."""
+    """Uma referência de rosto ligada à pessoa e de onde ela veio. `referencia` é o
+    objeto da foto no bucket; da busca na web guardam-se também a página, a imagem, a
+    busca e a data (de onde sai a validade)."""
 
     origem: Literal["web", "acervo"]
     referencia: str
+    pagina_url: str = ""
+    imagem_url: str = ""
+    busca: str = ""
+    obtida_em: datetime | None = None
 
 
 class PessoaDoCatalogo(BaseModel):
@@ -64,6 +71,10 @@ class Catalogo(Protocol):
         """Troca só o que veio; `PessoaInexistente` se o id não existe."""
         ...
 
+    def definir_rostos(self, id: str, rostos: list[Rosto]) -> PessoaDoCatalogo:
+        """Troca as referências de rosto; `PessoaInexistente` se o id não existe."""
+        ...
+
     def apagar(self, id: str) -> None:
         """`PessoaInexistente` se o id não existe."""
         ...
@@ -86,6 +97,28 @@ def corrigida(
             "apelidos": pessoa.apelidos if apelidos is None else list(apelidos),
         }
     )
+
+
+def rostos_validos(
+    pessoa: PessoaDoCatalogo,
+    agora: datetime,
+    validade: timedelta,
+    *,
+    com_acervo: bool = False,
+) -> list[Rosto]:
+    """As referências que ainda valem, conferidas na hora de usar: as da web só
+    até `validade` depois da data em que foram obtidas (sem data, não valem); as do
+    acervo só com `com_acervo`, desligado por configuração."""
+    return [
+        r
+        for r in pessoa.rostos
+        if (r.origem == "acervo" and com_acervo)
+        or (
+            r.origem == "web"
+            and r.obtida_em is not None
+            and agora - r.obtida_em <= validade
+        )
+    ]
 
 
 class CatalogoEmMemoria:
@@ -123,6 +156,13 @@ class CatalogoEmMemoria:
         if atual is None:
             raise PessoaInexistente(id)
         self._pessoas[id] = corrigida(atual, nome, papel, apelidos)
+        return self._pessoas[id]
+
+    def definir_rostos(self, id: str, rostos: list[Rosto]) -> PessoaDoCatalogo:
+        atual = self._pessoas.get(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        self._pessoas[id] = atual.model_copy(update={"rostos": list(rostos)})
         return self._pessoas[id]
 
     def apagar(self, id: str) -> None:
