@@ -137,7 +137,8 @@ export default function Visualizador({
   /** O endereço copiado da barra é sempre o do momento atual, sem entrada nova no histórico. */
   function gravarNoEndereco() {
     if (!player.current) return
-    history.replaceState(history.state, '', enderecoDoVideo(job.id, player.current.currentTime))
+    const busca = new URLSearchParams(location.search).get('busca')
+    history.replaceState(history.state, '', enderecoDoVideo(job.id, player.current.currentTime, busca))
   }
 
   function saltarPara(segundos: number) {

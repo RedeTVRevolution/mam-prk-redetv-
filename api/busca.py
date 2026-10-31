@@ -19,7 +19,12 @@ from pydantic import BaseModel
 
 from api.catalogo import Catalogo
 from api.comparador import normalizar
-from api.entendimento_da_consulta import ConsultaEntendida, ModelArmor, entender
+from api.entendimento_da_consulta import (
+    EVIDENCIAS,
+    ConsultaEntendida,
+    ModelArmor,
+    entender,
+)
 from api.gemini import Transporte
 from api.indice_da_busca import Consulta, Filtros, IndiceDaBusca, Registro
 from api.jobs import Armazenamento, Job, RepositorioDeJobs
@@ -34,6 +39,8 @@ JUNCAO_MS = 3_000
 VALIDADE_DO_QUADRO = timedelta(minutes=10)
 
 Ordem = Literal["relevancia", "data"]
+# As evidências que o editor liga e desliga: as quatro do modelo, mais objeto e marca.
+EvidenciaDaBusca = Literal["imagem", "citada", "fala", "gc", "objeto", "marca"]
 
 
 class Ranking(Protocol):
@@ -83,7 +90,27 @@ class SemAparicao(BaseModel):
     mencoes_na_tela: int
 
 
+class Entendida(BaseModel):
+    """O que a busca usou da consulta: os chips e filtros que a tela mostra ligados."""
+
+    evidencias: list[EvidenciaDaBusca]
+    programa: str | None
+    desde: date | None
+    ate: date | None
+
+
+@dataclass(frozen=True)
+class Ajustes:
+    """O que o editor mudou na tela, por cima do que o modelo entendeu."""
+
+    evidencias: tuple[EvidenciaDaBusca, ...] = ()  # vazio: fica o entendido
+    programa: str | None = None  # "": sem programa
+    desde: date | None = None
+    ate: date | None = None
+
+
 class ResultadoDaBusca(BaseModel):
+    entendida: Entendida
     videos: list[VideoDoResultado]
     sem_aparicoes: list[SemAparicao]
     plano_b: bool
@@ -181,15 +208,19 @@ class Busca:
         limite: int = VIDEOS_POR_PADRAO,
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
+        ajustes: Ajustes | None = None,
     ) -> ResultadoDaBusca:
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
-        entendida = entender(
-            texto,
-            transporte=self._transporte,
-            catalogo=self._catalogo,
-            armor=self._armor,
-            programas=self._programas,
+        entendida = _ajustada(
+            entender(
+                texto,
+                transporte=self._transporte,
+                catalogo=self._catalogo,
+                armor=self._armor,
+                programas=self._programas,
+            ),
+            ajustes or Ajustes(),
         )
         jobs: dict[str, Job | None] = {}
 
@@ -251,6 +282,12 @@ class Busca:
         )
         agora = self._relogio()
         return ResultadoDaBusca(
+            entendida=Entendida(
+                evidencias=_ligadas(entendida),
+                programa=entendida.programa,
+                desde=entendida.exibido_desde,
+                ate=entendida.exibido_ate,
+            ),
             videos=videos,
             sem_aparicoes=vazios,
             plano_b=entendida.plano_b,
@@ -391,6 +428,43 @@ class Busca:
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
+
+
+def _ligadas(e: ConsultaEntendida) -> list[EvidenciaDaBusca]:
+    """Os chips ligados: as evidências da consulta (ou o padrão de pessoa e de frase)."""
+    ligadas: list[EvidenciaDaBusca] = list(e.evidencias)
+    if not ligadas and e.pessoas:
+        ligadas.append("imagem")
+    if not ligadas and e.frase_exata:
+        ligadas.append("fala")
+    if e.objetos:
+        ligadas.append("objeto")
+    if e.marcas:
+        ligadas.append("marca")
+    return ligadas
+
+
+def _ajustada(e: ConsultaEntendida, a: Ajustes) -> ConsultaEntendida:
+    """Aplica o que o editor ligou ou desligou; só o que ele pediu muda."""
+    if a.evidencias:
+        ligadas = set(a.evidencias)
+        do_modelo = tuple(x for x in EVIDENCIAS if x in ligadas)
+        e = replace(
+            e,
+            evidencias=do_modelo,
+            objetos=e.objetos if "objeto" in ligadas else (),
+            marcas=e.marcas if "marca" in ligadas else (),
+            # Sem evidência de pessoa ou de frase ligada, as duas saem (o padrão ligaria uma).
+            pessoas=e.pessoas if do_modelo else (),
+            frase_exata=e.frase_exata if do_modelo else None,
+        )
+    if a.programa is not None:
+        e = replace(e, programa=a.programa or None)
+    if a.desde is not None:
+        e = replace(e, exibido_desde=a.desde)
+    if a.ate is not None:
+        e = replace(e, exibido_ate=a.ate)
+    return e
 
 
 def _base(e: ConsultaEntendida) -> Filtros:

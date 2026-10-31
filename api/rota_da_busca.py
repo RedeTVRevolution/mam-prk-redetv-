@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TempoEsgotado
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,7 +15,9 @@ from api.auth import Chamador, Sistema
 from api.busca import (
     TETO_DE_VIDEOS,
     VIDEOS_POR_PADRAO,
+    Ajustes,
     Busca,
+    EvidenciaDaBusca,
     Ordem,
     ResultadoDaBusca,
     filtros_do_servidor,
@@ -73,6 +75,10 @@ def criar_rotas_da_busca(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         q: Annotated[str, Query(min_length=1, max_length=1000)],
         ordem: Ordem = "relevancia",
+        evidencias: Annotated[list[EvidenciaDaBusca] | None, Query(alias="ev")] = None,
+        programa: Annotated[str | None, Query(max_length=100)] = None,
+        desde: date | None = None,
+        ate: date | None = None,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
@@ -92,6 +98,12 @@ def criar_rotas_da_busca(
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
+            ajustes=Ajustes(
+                evidencias=tuple(dict.fromkeys(evidencias or ())),
+                programa=programa,
+                desde=desde,
+                ate=ate,
+            ),
         )
         try:
             return futuro.result(timeout=tempo_maximo_s)

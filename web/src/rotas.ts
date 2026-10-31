@@ -1,3 +1,4 @@
+import { consultaDaBusca, consultaParaEndereco, type ConsultaDaBusca } from './busca.ts'
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
 import { useMemo, useSyncExternalStore, type MouseEvent } from 'react'
 
@@ -6,17 +7,31 @@ import { useMemo, useSyncExternalStore, type MouseEvent } from 'react'
 export type Rota =
   | { tipo: 'raiz' }
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
-  | { tipo: 'video'; id: string; t: number | null }
-  | { tipo: 'video_anterior'; id: string; t: number | null }
+  | { tipo: 'busca'; consulta: ConsultaDaBusca }
+  | { tipo: 'video'; id: string; t: number | null; busca: string | null }
+  | { tipo: 'video_anterior'; id: string; t: number | null; busca: string | null }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
 export const ACERVO = '/acervo'
 
-/** O endereço do vídeo, com o instante em segundos inteiros quando houver. */
-export function enderecoDoVideo(id: string, t?: number | null): string {
+/** O endereço da busca, com a consulta e os filtros na query. */
+export function enderecoDaBusca(consulta: ConsultaDaBusca): string {
+  return `/busca${consultaParaEndereco(consulta)}`
+}
+
+/** O endereço do vídeo, com o instante em segundos inteiros e a busca de origem, se houver. */
+export function enderecoDoVideo(id: string, t?: number | null, busca?: string | null): string {
   const base = `/video/${encodeURIComponent(id)}`
-  return t != null && t > 0 ? `${base}?t=${Math.floor(t)}` : base
+  const p = new URLSearchParams()
+  if (t != null && t > 0) p.set('t', String(Math.floor(t)))
+  if (busca) p.set('busca', busca)
+  const query = p.toString()
+  return query ? `${base}?${query}` : base
+}
+
+function buscaDeOrigem(busca: string): string | null {
+  return new URLSearchParams(busca).get('busca') || null
 }
 
 function instante(busca: string): number | null {
@@ -34,17 +49,18 @@ export function lerRota(caminho: string, busca = ''): Rota {
   const partes = caminho.split('/').filter(Boolean)
   if (partes.length === 0) return { tipo: 'raiz' }
   if (partes.length === 1 && partes[0] === 'acervo') return { tipo: 'acervo', filtros: filtrosDaBusca(busca) }
+  if (partes.length === 1 && partes[0] === 'busca') return { tipo: 'busca', consulta: consultaDaBusca(busca) }
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {
-      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca) }
+      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca), busca: buscaDeOrigem(busca) }
     } catch {
       return { tipo: 'nao_encontrada' }
     }
   }
   if (partes.length === 3 && partes[0] === 'video' && partes[2] === 'anterior') {
     try {
-      return { tipo: 'video_anterior', id: decodeURIComponent(partes[1]), t: instante(busca) }
+      return { tipo: 'video_anterior', id: decodeURIComponent(partes[1]), t: instante(busca), busca: buscaDeOrigem(busca) }
     } catch {
       return { tipo: 'nao_encontrada' }
     }

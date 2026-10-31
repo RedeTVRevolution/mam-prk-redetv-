@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
-from api.busca import Busca, Ranking, RankingEmOrdem
+from api.busca import Ajustes, Busca, Ranking, RankingEmOrdem
 from api.catalogo import CatalogoEmMemoria
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
@@ -605,3 +605,85 @@ def test_pedido_sem_consulta_responde_422() -> None:
 def test_o_tempo_maximo_da_rota_passa_do_teto_do_modelo() -> None:
     # senão a rota responde 504 antes de o plano B chegar
     assert TEMPO_MAXIMO_S > TEMPO_DA_CONSULTA_S
+
+
+# --- chips e filtros da tela (#169) ---------------------------------------------------
+
+
+def _fala(id: str, texto: str) -> Registro:
+    return Registro(
+        id=id, tipo="fala", job_id="j1", inicio_ms=0, fim_ms=1_000, texto=texto
+    )
+
+
+def test_o_resultado_diz_quais_chips_estao_ligados_e_o_programa_entendido() -> None:
+    m = Mundo(pedido(pessoas=["Sabrina Sato"], objetos=[VESTIDO], programa="TV Fama"))
+    m.com(job("j1"))
+
+    entendida = buscar(m, "x").entendida
+
+    assert entendida.evidencias == ["imagem", "objeto"]
+    assert entendida.programa == "TV Fama"
+
+
+def test_ligar_citada_e_fala_traz_as_mencoes_que_o_padrao_deixava_de_fora() -> None:
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]), pedido(pessoas=["Sabrina Sato"]))
+    m.com(job("j1"), _fala("f1", "oi Sabrina Sato"))
+
+    assert buscar(m, "Sabrina Sato").videos == []
+
+    de_novo = buscar(m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem", "fala")))
+    assert [v.momentos[0].motivo for v in de_novo.videos] == ["Fala: 'oi Sabrina Sato'"]
+    assert de_novo.entendida.evidencias == ["imagem", "fala"]
+
+
+def test_desligar_o_chip_de_objeto_tira_as_clausulas_de_objeto() -> None:
+    m = Mundo(pedido(objetos=[VESTIDO]))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+
+    resultado = buscar(m, "vestido", ajustes=Ajustes(evidencias=("fala",)))
+
+    assert resultado.videos == []
+    assert resultado.entendida.evidencias == ["fala"]
+
+
+def test_programa_e_periodo_da_tela_valem_sobre_o_entendido() -> None:
+    m = Mundo(pedido(texto_livre="vestido", programa="Leo Dias"))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+
+    buscar(
+        m,
+        "vestido",
+        ajustes=Ajustes(
+            programa="TV Fama", desde=date(2024, 1, 1), ate=date(2024, 12, 31)
+        ),
+    )
+
+    (consulta,) = m.indice.consultas
+    assert consulta.filtros.programa == "TV Fama"
+    assert consulta.filtros.exibido_desde == date(2024, 1, 1)
+    assert consulta.filtros.exibido_ate == date(2024, 12, 31)
+
+
+def test_a_rota_aceita_ev_programa_e_periodo() -> None:
+    c, _ = cliente(["consulta"], pedido(texto_livre="vestido"))
+    r = c.get(
+        "/v1/busca",
+        params={
+            "q": "vestido",
+            "ev": ["fala", "gc"],
+            "programa": "TV Fama",
+            "desde": "2024-01-01",
+            "ate": "2024-12-31",
+        },
+        headers=AUTORIZACAO,
+    )
+    assert r.status_code == 200
+    assert r.json()["entendida"]["programa"] == "TV Fama"
+    assert r.json()["entendida"]["desde"] == "2024-01-01"
+    assert (
+        c.get(
+            "/v1/busca", params={"q": "v", "ev": "inventada"}, headers=AUTORIZACAO
+        ).status_code
+        == 422
+    )

@@ -1,5 +1,6 @@
 import type { Usuario } from './App.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
+import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './Video.tsx'
@@ -69,6 +70,8 @@ export interface ClienteDaApi {
   acervo(filtros: FiltrosDoAcervo, cursor?: string | null): Promise<PaginaDoAcervo>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
+  /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
+  buscar(consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
   job(id: string): ClienteDoJob
 }
 
@@ -165,6 +168,7 @@ export function criarClienteDaApi(
     },
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
+    buscar: (consulta, limite) => chamar(`/v1/busca?${consultaParaApi(consulta, limite)}`),
     job,
   }
 }

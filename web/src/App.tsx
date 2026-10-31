@@ -15,6 +15,7 @@ import { AtalhosProvider } from './AtalhosProvider.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
 import Barra from './Barra.tsx'
 import Acervo from './Acervo.tsx'
+import Busca from './Busca.tsx'
 import Login from './Login.tsx'
 import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
@@ -161,6 +162,10 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'acervo' ? (
         // O front só esconde o envio; quem barra é a API.
         <Acervo api={api} filtros={rota.filtros} podeEnviar={podeEnviar} />
+      ) : rota.tipo === 'busca' ? (
+        <AppShell.Main bg="dark.7">
+          <Busca api={api} consulta={rota.consulta} />
+        </AppShell.Main>
       ) : (
         <AppShell.Main bg="dark.7">
           <Center h="60vh">
