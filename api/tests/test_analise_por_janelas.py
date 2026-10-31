@@ -6,19 +6,21 @@ como a Vertex.
 """
 
 import json
+import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
-from api.analise import criar_app
+from api.analise import executar
 from api.analise_por_janelas import analisar_video
 from api.decupagem import Decupagem, Video
 from api.gemini import AnaliseFalhou, Chamada, ErroHttp
 from api.janelas import LIMITE_DE_TENTATIVAS
 from api.jobs import Job, RepositorioEmMemoria
+from api.progresso_das_janelas import JanelasEmMemoria
 from api.tests.test_analise import DecupagensEmMemoria
 from api.tests.test_gemini import BOA, TransporteFalso
 
@@ -192,11 +194,10 @@ def test_job_com_janela_falha_vai_a_analise_falhou_sem_decupagem() -> None:
             atualizado_em=agora,
         )
     )
-    cliente = TestClient(
-        criar_app(repositorio, decupagens, modelo, dormir=lambda _s: None)
-    )
 
-    assert cliente.post("/analisar", json={"job_id": "j"}).status_code == 200
+    resultado = executar("j", repositorio, decupagens, modelo, dormir=lambda _s: None)
+
+    assert resultado == "falhou"
 
     job = repositorio.obter("j")
     assert job is not None
@@ -253,3 +254,138 @@ def test_sem_cortes_a_regra_de_tempos_nao_roda() -> None:
     d = _decupar(ModeloFalso(_fala_no_inicio_do_nucleo))
 
     assert all(c.inicio_modelo_ms is None for c in d.comerciais)
+
+
+class ModeloContador(ModeloFalso):
+    """Conta quantas chamadas estão em andamento ao mesmo tempo."""
+
+    def __init__(self, por_trecho: Callable[[int, int], str | Exception]) -> None:
+        super().__init__(por_trecho)
+        self._trava = threading.Lock()
+        self.em_andamento = 0
+        self.maximo = 0
+
+    def gerar(self, chamada: Chamada) -> str:
+        with self._trava:
+            self.em_andamento += 1
+            self.maximo = max(self.maximo, self.em_andamento)
+        try:
+            time.sleep(0.03)
+            return super().gerar(chamada)
+        finally:
+            with self._trava:
+                self.em_andamento -= 1
+
+
+@pytest.mark.parametrize("n", [1, 3, 8])
+def test_nunca_mais_de_n_chamadas_ao_mesmo_tempo(n: int) -> None:
+    modelo = ModeloContador(_fala_no_inicio_do_nucleo)
+
+    d = _decupar(modelo, max_paralelas=n)
+
+    assert modelo.maximo <= n
+    # Com mais de uma janela por vez, elas de fato se sobrepõem.
+    assert modelo.maximo == n
+    assert len(modelo.chamadas) == 30
+    assert [f.inicio_ms for f in d.transcricao] == sorted(
+        f.inicio_ms for f in d.transcricao
+    )
+
+
+def test_em_paralelo_o_resultado_e_o_mesmo_do_serial() -> None:
+    serial = _decupar(ModeloFalso(_fala_no_inicio_do_nucleo))
+    paralelo = _decupar(ModeloFalso(_fala_no_inicio_do_nucleo), max_paralelas=6)
+
+    assert paralelo == serial
+
+
+def test_em_paralelo_a_janela_que_esgota_as_tentativas_derruba_a_analise() -> None:
+    modelo = ModeloFalso(
+        lambda inicio, fim: ErroHttp(400) if inicio == 290_000 else resposta()
+    )
+
+    with pytest.raises(AnaliseFalhou):
+        _decupar(modelo, max_paralelas=4)
+
+    assert modelo.trechos().count((290_000, 610_000)) == LIMITE_DE_TENTATIVAS
+
+
+def test_em_paralelo_o_escalonamento_refaz_as_janelas_sorteadas() -> None:
+    modelo = ModeloFalso(_fala_no_inicio_do_nucleo)
+
+    _decupar(modelo, fracao_escalonada=1.0, max_paralelas=5)
+
+    assert len(modelo.chamadas) == 60
+
+
+def test_max_paralelas_menor_que_um_e_erro_de_quem_chamou() -> None:
+    with pytest.raises(ValueError):
+        _decupar(ModeloFalso(_fala_no_inicio_do_nucleo), max_paralelas=0)
+
+
+def test_retomada_nao_chama_o_gemini_para_janelas_concluidas() -> None:
+    janelas = JanelasEmMemoria()
+
+    def cai_na_janela_20(inicio: int, fim: int) -> str:
+        if inicio == 20 * 300_000 - 10_000:
+            raise RuntimeError("o processo caiu")
+        return _fala_no_inicio_do_nucleo(inicio, fim)
+
+    with pytest.raises(RuntimeError):
+        _decupar(ModeloFalso(cai_na_janela_20), janelas_do_job=janelas)
+    gravadas = janelas.ler("j")
+    concluidas = {i for i, g in gravadas.items() if g.situacao == "concluida"}
+    assert concluidas == set(range(20))
+    assert gravadas[20].situacao == "em_andamento"
+
+    segunda = ModeloFalso(_fala_no_inicio_do_nucleo)
+    d = _decupar(segunda, janelas_do_job=janelas)
+
+    # Só as dez janelas que faltavam; a que caiu conta mais uma tentativa.
+    assert [c.trecho_ms for c in segunda.chamadas] == [
+        (j * 300_000 - 10_000, min(j * 300_000 + 310_000, DURACAO_MS))
+        for j in range(20, 30)
+    ]
+    assert janelas.ler("j")[20].tentativas == 2
+    assert len(d.transcricao) == 30
+
+
+def test_retomada_junta_o_que_estava_gravado_com_o_que_rodou_agora() -> None:
+    janelas = JanelasEmMemoria()
+    _decupar(ModeloFalso(_fala_no_inicio_do_nucleo), janelas_do_job=janelas)
+
+    modelo = ModeloFalso(_fala_no_inicio_do_nucleo)
+    d = _decupar(modelo, janelas_do_job=janelas)
+
+    assert modelo.chamadas == []
+    assert len(d.transcricao) == 30
+
+
+def test_retomada_nao_refaz_o_que_o_escalonamento_ja_refez() -> None:
+    janelas = JanelasEmMemoria()
+    _decupar(
+        ModeloFalso(_fala_no_inicio_do_nucleo),
+        janelas_do_job=janelas,
+        fracao_escalonada=1.0,
+    )
+
+    modelo = ModeloFalso(_fala_no_inicio_do_nucleo)
+    _decupar(modelo, janelas_do_job=janelas, fracao_escalonada=1.0)
+
+    assert modelo.chamadas == []
+
+
+def test_janela_que_esgotou_as_tentativas_nao_gasta_mais_chamadas_ao_retomar() -> None:
+    janelas = JanelasEmMemoria()
+    modelo = ModeloFalso(
+        lambda inicio, fim: ErroHttp(400) if inicio == 290_000 else resposta()
+    )
+    with pytest.raises(AnaliseFalhou):
+        _decupar(modelo, janelas_do_job=janelas)
+
+    gravada = janelas.ler("j")[1]
+    assert (gravada.situacao, gravada.tentativas) == ("falhou", LIMITE_DE_TENTATIVAS)
+    outra = ModeloFalso(_fala_no_inicio_do_nucleo)
+    with pytest.raises(AnaliseFalhou):
+        _decupar(outra, janelas_do_job=janelas)
+    assert (290_000, 610_000) not in outra.trechos()

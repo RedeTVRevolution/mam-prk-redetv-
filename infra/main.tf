@@ -34,6 +34,13 @@ variable "imagem" {
   type        = string
 }
 
+variable "janelas_em_paralelo" {
+  description = "Quantas janelas de análise o Job de análise decupa ao mesmo tempo"
+  type        = number
+  # ponytail: 4 é um chute; o valor sai do piloto e da cota do Gemini.
+  default     = 4
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -135,7 +142,7 @@ resource "google_service_account" "mam" {
 # Firestore, recebe o evento do Eventarc e invoca o Workflows (o provider não tem
 # papel no próprio Workflows); o papel de rodar o Job fica mais abaixo, no próprio
 # Job (ADR 0002), e o de chamar o serviço de análise, no próprio serviço. Quem lê o
-# proxy por gs:// na Vertex é a conta que chama (mam-analise, com objectViewer em
+# proxy por gs:// na Vertex é a conta que chama (mam-analise, com acesso a
 # aceitos), segundo a doc do generateContent; o agente de serviço da Vertex não
 # precisa de papel no bucket. O run.viewer da orquestração fica no projeto porque o
 # conector do Workflows acompanha a execução do Job pela operação, que é do projeto e
@@ -161,8 +168,10 @@ locals {
     transcricao = { aceitos = "roles/storage.objectUser" }
     # Lê o proxy e grava a leitura da tela ao lado dele.
     ocr = { aceitos = "roles/storage.objectUser" }
-    # O Gemini lê o proxy de reprodução; a decupagem vai para o bucket dela.
-    analise = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectCreator" }
+    # O Gemini lê o proxy de reprodução; o progresso das janelas é regravado ao lado dele
+    # (objectUser, porque cada janela sobrescreve o próprio objeto); a decupagem vai para o
+    # bucket dela.
+    analise = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectCreator" }
   }
 }
 
@@ -534,52 +543,57 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
-# Serviço de análise (#39): a mesma imagem do web, com outro comando. Entrada só
-# interna (sem allUsers): o Workflows o chama por OIDC, e a chamada de dentro do
-# Google Cloud passa pelo ingress interno. O timeout acompanha o teto de 1800 s da
-# chamada HTTP do Workflows.
-resource "google_cloud_run_v2_service" "analise" {
+# Job de análise (#127): a mesma imagem do web, com outro comando. Um Job, e não um
+# serviço chamado por HTTP, porque a análise de um programa de 2–3 h passa do teto de
+# 1800 s da chamada HTTP do Workflows; o conector do Workflows espera o Job terminar. As
+# janelas rodam até `janelas_em_paralelo` ao mesmo tempo e o progresso fica gravado no
+# bucket de aceitos: sem nova tentativa do Cloud Run, uma nova execução do mesmo Job retoma.
+resource "google_cloud_run_v2_job" "analise" {
   name                = "mam-analise"
   location            = var.regiao
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
   deletion_protection = false
   template {
-    service_account                  = google_service_account.mam["analise"].email
-    timeout                          = "1800s"
-    max_instance_request_concurrency = 8
-    scaling {
-      max_instance_count = 5
-    }
-    containers {
-      image   = var.imagem
-      command = ["uvicorn"]
-      args    = ["api.analise:app", "--host", "0.0.0.0", "--port", "8080"]
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = var.projeto
-      }
-      env {
-        name  = "BUCKET_ACEITOS"
-        value = local.buckets["aceitos"]
-      }
-      env {
-        name  = "BUCKET_DECUPAGENS"
-        value = local.buckets["decupagens"]
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["analise"].email
+      max_retries     = 0
+      timeout         = "14400s"
+      containers {
+        image   = var.imagem
+        command = ["python"]
+        args    = ["-m", "api.analise"]
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "JANELAS_EM_PARALELO"
+          value = tostring(var.janelas_em_paralelo)
+        }
       }
     }
   }
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
-# A orquestração chama o serviço de análise.
-resource "google_cloud_run_v2_service_iam_member" "orquestracao_chama_analise" {
-  name     = google_cloud_run_v2_service.analise.name
-  location = google_cloud_run_v2_service.analise.location
-  role     = "roles/run.invoker"
+# A orquestração roda o Job de análise, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_analise" {
+  name     = google_cloud_run_v2_job.analise.name
+  location = google_cloud_run_v2_job.analise.location
+  role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
 }
 
-# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> serviço de análise.
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise.
 resource "google_workflows_workflow" "validacao" {
   name            = "mam-validacao"
   region          = var.regiao
@@ -590,7 +604,7 @@ resource "google_workflows_workflow" "validacao" {
     job_de_validacao   = google_cloud_run_v2_job.validacao.name
     job_de_transcricao = google_cloud_run_v2_job.transcricao.name
     job_de_ocr         = google_cloud_run_v2_job.ocr.name
-    url_da_analise     = google_cloud_run_v2_service.analise.uri
+    job_de_analise     = google_cloud_run_v2_job.analise.name
   })
   depends_on = [google_project_service.apis]
 }

@@ -1,9 +1,10 @@
 # Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
 # quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
 # falhou, salvo se estiver cancelado. Depois, só se o Job ficou em `analisando`, roda o
-# Job de transcrição, o de OCR da tela e chama o serviço de análise.
+# Job de transcrição, o de OCR da tela e o de análise. A análise é um Job, e não uma
+# chamada HTTP, porque passa do teto de 1800 s da chamada do Workflows (#127).
 # Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao},
-# ${job_de_transcricao}, ${job_de_ocr}, ${url_da_analise}.
+# ${job_de_transcricao}, ${job_de_ocr}, ${job_de_analise}.
 main:
   params: [evento]
   steps:
@@ -183,22 +184,25 @@ main:
                 raise: $${e}
     - analisa:
         try:
-          call: http.post
+          call: googleapis.run.v2.projects.locations.jobs.run
           args:
-            url: ${url_da_analise}/analisar
-            auth:
-              type: OIDC
-              audience: ${url_da_analise}
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_analise}
             body:
-              job_id: $${job_id}
-            # ponytail: 1800 s é o teto da chamada HTTP do Workflows; a análise
-            # tem de caber nele (o serviço também tem timeout de 1800 s).
-            timeout: 1800
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de análise tem até 14400 s
+            # (as janelas de um programa de 2–3 h, a Flex com até 15 min por chamada).
+            connector_params:
+              timeout: 14700
         except:
           as: e
           steps:
-            # O serviço pode ter concluído depois de o Workflows desistir: só marca
-            # a falha se o Job segue em `analisando` e não mudou desde a leitura.
+            # O Job de análise já trata a falha da análise (o Job vai a `falhou`); aqui
+            # cobre o que o impediu de chegar lá (tempo esgotado, memória estourada).
+            # Só marca se o Job segue em `analisando` e não mudou desde a leitura.
             - rele_o_job:
                 call: googleapis.firestore.v1.projects.databases.documents.get
                 args:

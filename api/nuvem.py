@@ -22,6 +22,7 @@ from api.jobs import (
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.papeis import PAPEIS, Papel
+from api.progresso_das_janelas import JanelaGravada
 from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
 
@@ -45,6 +46,14 @@ def objeto_do_audio(job_id: str) -> str:
 
 def objeto_da_transcricao(job_id: str) -> str:
     return f"{job_id}/transcricao.json"
+
+
+def prefixo_das_janelas(job_id: str) -> str:
+    return f"{job_id}/janelas/"
+
+
+def objeto_da_janela(job_id: str, indice: int) -> str:
+    return f"{prefixo_das_janelas(job_id)}{indice:04d}.json"
 
 
 def objeto_da_leitura_da_tela(job_id: str) -> str:
@@ -296,6 +305,28 @@ class TranscricoesStorage:
             return Transcricao.model_validate_json(blob.download_as_bytes())
         except NotFound:
             return None
+
+
+class JanelasStorage:
+    """O progresso das janelas de análise, um objeto por janela no bucket de aceitos."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_aceitos: str) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+
+    def ler(self, job_id: str) -> dict[int, JanelaGravada]:
+        gravadas = [
+            JanelaGravada.model_validate_json(blob.download_as_bytes())
+            for blob in self._cliente.list_blobs(
+                self._aceitos, prefix=prefixo_das_janelas(job_id)
+            )
+        ]
+        return {g.indice: g for g in gravadas}
+
+    def gravar(self, job_id: str, janela: JanelaGravada) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_janela(job_id, janela.indice)
+        ).upload_from_string(janela.model_dump_json(), content_type="application/json")
 
 
 class LeiturasStorage:

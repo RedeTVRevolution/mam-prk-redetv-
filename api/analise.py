@@ -1,9 +1,13 @@
-"""Serviço de análise: manda o proxy ao Gemini e grava a decupagem.
+"""Cloud Run Job da análise: manda o proxy ao Gemini, por janelas, e grava a decupagem.
 
-O Workflows chama `POST /analisar` depois da validação. Só um Job em
-`analisando` é processado; qualquer outro estado (evento repetido, Job já
-concluído) responde 200 sem fazer nada. A falha da análise é tratada: o Job vai
-a `falhou` e a resposta continua 200, para o Workflows não repetir a chamada.
+O Workflows passa o id do Job em `JOB_ID`, depois do OCR da tela. Só um Job em
+`analisando` é processado; qualquer outro estado (evento repetido, Job já concluído)
+sai sem fazer nada. A falha da análise é tratada: o Job vai a `falhou` e a execução
+termina bem, para o Workflows não tratá-la de novo. Rodar de novo o mesmo Job retoma
+as janelas já concluídas (`api/progresso_das_janelas.py`).
+
+É um Job, e não um serviço chamado por HTTP, porque a análise de um programa de
+2–3 h passa do teto de 1800 s da chamada HTTP do Workflows (decisão registrada no #127).
 """
 
 import os
@@ -13,11 +17,9 @@ from datetime import datetime
 from typing import Any, Protocol, cast
 
 import google.auth
-from fastapi import FastAPI
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
-from pydantic import BaseModel, ConfigDict
 
 from api.analise_por_janelas import analisar_video
 from api.ciclo_de_vida import transitar
@@ -27,17 +29,13 @@ from api.jobs import RepositorioDeJobs, agora_utc
 from api.leitura_da_tela import LeituraDaTela
 from api.nuvem import (
     DecupagensStorage,
+    JanelasStorage,
     LeiturasStorage,
     RepositorioFirestore,
     TranscricoesStorage,
 )
+from api.progresso_das_janelas import JanelasDoJob
 from api.transcricao import Transcricao
-
-
-class NovaAnalise(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    job_id: str
 
 
 class DecupagensDaAnalise(Protocol):
@@ -60,83 +58,81 @@ class LeiturasDaAnalise(Protocol):
     def ler_leitura(self, job_id: str) -> LeituraDaTela | None: ...
 
 
-def criar_app(
+def executar(
+    job_id: str,
     repositorio: RepositorioDeJobs,
     decupagens: DecupagensDaAnalise,
     transporte: Transporte,
     transcricoes: TranscricoesDaAnalise | None = None,
     leituras: LeiturasDaAnalise | None = None,
+    janelas_do_job: JanelasDoJob | None = None,
+    max_paralelas: int = 1,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
-) -> FastAPI:
-    app = FastAPI(title="MAM RedeTV — análise")
+) -> str:
+    """Devolve `ignorado`, `concluido`, `falhou` ou `cancelado`."""
+    job = repositorio.obter(job_id)
+    if job is None or job.estado != "analisando":
+        return "ignorado"
 
-    @app.post("/analisar")
-    def analisar_job(corpo: NovaAnalise) -> dict[str, str]:
-        job = repositorio.obter(corpo.job_id)
-        if job is None or job.estado != "analisando":
-            return {"status": "ignorado"}
+    def falhar() -> str:
+        falhou = transitar(
+            repositorio,
+            job.id,
+            "analisando",
+            "falhou",
+            relogio(),
+            codigo_falha="analise_falhou",
+        )
+        return "falhou" if falhou else "cancelado"
 
-        def falhar() -> dict[str, str]:
-            falhou = transitar(
-                repositorio,
-                job.id,
-                "analisando",
-                "falhou",
-                relogio(),
-                codigo_falha="analise_falhou",
-            )
-            return {"status": "falhou" if falhou else "cancelado"}
-
-        if job.sha256 is None or job.duracao_s is None:
-            return falhar()
-        try:
-            decupagem = analisar_video(
-                transporte,
-                video_uri=decupagens.uri_do_proxy(job.id),
-                job_id=job.id,
-                programa=job.programa,
-                cortes_ms=job.cortes_ms or (),
-                video=Video(sha256=job.sha256, duracao_ms=round(job.duracao_s * 1000)),
-                transcricao=transcricoes.ler_transcricao(job.id)
-                if transcricoes
-                else None,
-                leitura=leituras.ler_leitura(job.id) if leituras else None,
-                dormir=dormir,
-            )
-        except AnaliseFalhou:
-            return falhar()
-        # A Decupagem só fica visível com o Job `concluido`: se o cancelamento
-        # chegou antes da transição, o arquivo gravado aqui não é lido por ninguém.
-        decupagens.gravar_decupagem(job.id, decupagem.model_dump_json())
-        if transitar(repositorio, job.id, "analisando", "concluido", relogio()):
-            return {"status": "concluido"}
-        return {"status": "cancelado"}
-
-    return app
+    if job.sha256 is None or job.duracao_s is None:
+        return falhar()
+    try:
+        decupagem = analisar_video(
+            transporte,
+            video_uri=decupagens.uri_do_proxy(job.id),
+            job_id=job.id,
+            programa=job.programa,
+            cortes_ms=job.cortes_ms or (),
+            video=Video(sha256=job.sha256, duracao_ms=round(job.duracao_s * 1000)),
+            transcricao=transcricoes.ler_transcricao(job.id) if transcricoes else None,
+            leitura=leituras.ler_leitura(job.id) if leituras else None,
+            max_paralelas=max_paralelas,
+            janelas_do_job=janelas_do_job,
+            dormir=dormir,
+        )
+    except AnaliseFalhou:
+        return falhar()
+    # A Decupagem só fica visível com o Job `concluido`: se o cancelamento
+    # chegou antes da transição, o arquivo gravado aqui não é lido por ninguém.
+    decupagens.gravar_decupagem(job.id, decupagem.model_dump_json())
+    if transitar(repositorio, job.id, "analisando", "concluido", relogio()):
+        return "concluido"
+    return "cancelado"
 
 
-def _app_da_nuvem(projeto: str) -> FastAPI:
+def main() -> None:
+    projeto = os.environ["GCP_PROJECT_ID"]
+    aceitos = os.environ["BUCKET_ACEITOS"]
     credenciais: Any
     credenciais, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
-    return criar_app(
+    executar(
+        os.environ["JOB_ID"],
         RepositorioFirestore(firestore.Client(project=projeto)),
         DecupagensStorage(
-            ClienteStorage(project=projeto),
-            os.environ["BUCKET_ACEITOS"],
-            os.environ["BUCKET_DECUPAGENS"],
+            ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
         ),
         TransporteVertex(projeto, sessao),
-        TranscricoesStorage(
-            ClienteStorage(project=projeto), os.environ["BUCKET_ACEITOS"]
-        ),
-        LeiturasStorage(ClienteStorage(project=projeto), os.environ["BUCKET_ACEITOS"]),
+        TranscricoesStorage(ClienteStorage(project=projeto), aceitos),
+        LeiturasStorage(ClienteStorage(project=projeto), aceitos),
+        JanelasStorage(ClienteStorage(project=projeto), aceitos),
+        max_paralelas=int(os.environ["JANELAS_EM_PARALELO"]),
     )
 
 
-# No Cloud Run, o Terraform define o projeto; fora dele (testes) o app não existe.
-_projeto = os.environ.get("GCP_PROJECT_ID")
-app = _app_da_nuvem(_projeto) if _projeto else None
+if __name__ == "__main__":
+    main()

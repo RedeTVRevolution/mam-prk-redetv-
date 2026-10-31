@@ -128,7 +128,7 @@ O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cl
 | Agent Platform | Gemini em Standard e Batch, rótulos de custo, avaliação | Resposta em segundos no dia a dia, 50% de desconto no acervo e custo por vídeo |
 | Identity Platform | Login de usuários, contas locais, MFA | Gerenciado; gratuito até 49.999 usuários ativos por mês |
 | BigQuery | Eventos de uso, painel da diretoria, relatórios | Consulta barata sobre todo o histórico |
-| Cloud Run (serviço de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Até 80 chamadas por instância: a espera da resposta é dividida e custa centavos |
+| Cloud Run (Job de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Até 80 chamadas por instância: a espera da resposta é dividida e custa centavos |
 
 O Agent Engine do Agent Platform, feito para agentes conversacionais, não é necessário para a decupagem, que é um pipeline determinístico. Ele entra numa segunda fase, num assistente de busca no acervo que usa o modo agêntico de vídeo.
 
@@ -521,7 +521,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Projeto GCP | Projeto `dev` novo na organização da RedeTV, com billing da RedeTV e alerta de orçamento; `staging` e `prod` ficam fora |
 | Região | Tudo em `southamerica-east1`; o Gemini usa o endpoint global, coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
 | Hospedagem | Um único serviço Cloud Run: o FastAPI serve a API e o build do React. Sem balanceador nem Cloud Armor; o front ganha serviço próprio quando o balanceador entrar (E10) |
-| Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → serviço de análise → decupagem no Storage |
+| Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → Job de análise → decupagem no Storage |
 | Login | Só contas locais no Identity Platform, com MFA TOTP obrigatório, criadas por script, inclusive os 2 administradores de emergência com alerta a cada login. Sem papéis: toda conta autenticada envia e vê todos os vídeos |
 | Contas iniciais | Administradores: Bruno e uma pessoa da TI da RedeTV. Usuários: Bruno |
 | Clipes | 5 clipes reais de programas variados, com 1 a 10 min; são também os clipes-ouro do teste de contrato. Ficam só num bucket do `dev`, nunca no git, e o envio ao Gemini é autorizado por escrito |

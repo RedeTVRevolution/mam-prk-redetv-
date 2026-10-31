@@ -28,36 +28,39 @@ def test_falha_da_execucao_grava_falhou_com_arquivo_corrompido() -> None:
     assert "falhou" in texto
 
 
-def test_chama_a_analise_so_se_o_job_esta_em_analisando() -> None:
+def test_roda_o_job_de_analise_so_se_o_job_esta_em_analisando() -> None:
     texto = _texto()
 
     leitura = texto.index("documents.get")
     condicao = texto.index('estado.stringValue == "analisando"')
-    chamada = texto.index("call: http.post")
-    assert leitura < condicao < chamada
-    assert "${url_da_analise}/analisar" in texto
-    assert "type: OIDC" in texto
-    assert "audience: ${url_da_analise}" in texto
-    # Fora de `analisando` o fluxo pula a chamada.
+    analisa = texto.index("- analisa:")
+    assert leitura < condicao < analisa
+    passo = texto[analisa:]
+    assert "googleapis.run.v2.projects.locations.jobs.run" in passo
+    assert "jobs/${job_de_analise}" in passo
+    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
+    # A análise não é mais uma chamada HTTP: o teto de 1800 s do Workflows não vale.
+    assert "http.post" not in texto and "url_da_analise" not in texto
+    # O conector espera mais que o timeout de 14400 s do Job, não o padrão de 1800 s.
+    assert "timeout: 14700" in passo
+    # Fora de `analisando` o fluxo pula a análise.
     assert "next: fim" in texto
-    # O teto da chamada HTTP do Workflows está registrado.
-    assert "timeout: 1800" in texto and "ponytail:" in texto
 
 
-def test_falha_da_chamada_de_analise_grava_analise_falhou() -> None:
+def test_falha_da_analise_grava_analise_falhou() -> None:
     texto = _texto()
 
-    depois_da_chamada = texto[texto.index("call: http.post") :]
-    assert "except:" in depois_da_chamada and "as: e" in depois_da_chamada
-    assert "stringValue: analise_falhou" in depois_da_chamada
-    assert "stringValue: falhou" in depois_da_chamada
-    assert "raise: $${e}" in depois_da_chamada
+    depois = texto[texto.index("- analisa:") :]
+    assert "except:" in depois and "as: e" in depois
+    assert "stringValue: analise_falhou" in depois
+    assert "stringValue: falhou" in depois
+    assert "raise: $${e}" in depois
 
 
 def test_falha_da_chamada_nao_sobrescreve_job_que_ja_saiu_de_analisando() -> None:
     texto = _texto()
 
-    depois_da_chamada = texto[texto.index("call: http.post") :]
+    depois_da_chamada = texto[texto.index("- analisa:") :]
     releitura = depois_da_chamada.index("documents.get")
     condicao = depois_da_chamada.index('estado.stringValue != "analisando"')
     patch = depois_da_chamada.index("documents.patch")
@@ -165,3 +168,18 @@ def test_job_de_ocr_no_main_tf_sem_internet_e_na_rede_da_validacao() -> None:
     assert "max_retries     = 0" in job
     assert "external_ip" not in main and "google_compute_router_nat" not in main
     assert "job_de_ocr         = google_cloud_run_v2_job.ocr.name" in main
+
+
+def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    job = main[main.index('resource "google_cloud_run_v2_job" "analise"') :].split(
+        "\nresource "
+    )[0]
+    assert 'args    = ["-m", "api.analise"]' in job
+    assert "max_retries     = 0" in job
+    assert "JANELAS_EM_PARALELO" in job and "var.janelas_em_paralelo" in job
+    assert "job_de_analise     = google_cloud_run_v2_job.analise.name" in main
+    assert "google_cloud_run_v2_service.analise" not in main
+    # O Job de análise dura mais que o teto de 1800 s da chamada HTTP do Workflows.
+    assert 'timeout         = "14400s"' in job
