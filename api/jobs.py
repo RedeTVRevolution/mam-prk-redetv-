@@ -59,7 +59,13 @@ from api.correcoes import (
     valor_atual,
     versao_do_modelo,
 )
-from api.papeis import Permissao, RepositorioDePapeis, papeis_efetivos, permissoes_de
+from api.papeis import (
+    Papel,
+    Permissao,
+    RepositorioDePapeis,
+    papeis_do_usuario,
+    permissoes_de,
+)
 from api.programas import PERFIS
 
 TIPO_DO_VIDEO = "video/mp4"
@@ -325,9 +331,9 @@ PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {
 }
 
 
-def _confere_permissao(request: Request, uid: str, permissao: Permissao) -> None:
+def _confere_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> None:
     """403 se a pessoa não tem a permissão por nenhum dos seus papéis."""
-    if not _tem_permissao(request, uid, permissao):
+    if not _tem_permissao(request, pessoa, permissao):
         raise HTTPException(403, f"Sem a permissão {permissao}")
 
 
@@ -339,7 +345,7 @@ def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
             if escopo not in chamador.escopos:
                 raise HTTPException(403, f"Chave sem o escopo {escopo}")
             return chamador
-        _confere_permissao(request, chamador.uid, PERMISSAO_DO_ESCOPO[escopo])
+        _confere_permissao(request, chamador, PERMISSAO_DO_ESCOPO[escopo])
         return chamador
 
     return verificar
@@ -349,7 +355,7 @@ def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `decupagem.editar`; chave de sistema não corrige."""
     if not isinstance(chamador, Usuario):
         raise HTTPException(403, "Chave de sistema não corrige a decupagem")
-    _confere_permissao(request, chamador.uid, "decupagem.editar")
+    _confere_permissao(request, chamador, "decupagem.editar")
     return chamador
 
 
@@ -357,13 +363,23 @@ def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `correcao.aprovar` (o Curador)."""
     if not isinstance(chamador, Usuario):
         raise HTTPException(403, "Chave de sistema não aprova correções")
-    _confere_permissao(request, chamador.uid, "correcao.aprovar")
+    _confere_permissao(request, chamador, "correcao.aprovar")
     return chamador
 
 
-def _tem_permissao(request: Request, uid: str, permissao: Permissao) -> bool:
+def papeis_da_pessoa(request: Request, pessoa: Usuario) -> list[Papel]:
+    """Os papéis efetivos, num ponto só para o `/v1/eu` e as rotas nunca discordarem."""
     papeis: RepositorioDePapeis = request.app.state.papeis
-    return permissao in permissoes_de(papeis_efetivos(papeis.obter(uid)))
+    return papeis_do_usuario(
+        papeis.obter(pessoa.uid),
+        pessoa.email,
+        pessoa.email_verificado,
+        request.app.state.admins,
+    )
+
+
+def _tem_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> bool:
+    return permissao in permissoes_de(papeis_da_pessoa(request, pessoa))
 
 
 def _enxerga(chamador: Chamador, job: Job | None) -> Job:
@@ -498,7 +514,7 @@ def criar_rotas(
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
         """Só a correção de quem não é Curador, num tipo da lista, espera decisão."""
         return tipo in aprovacao.tipos() and not _tem_permissao(
-            request, autor.uid, "correcao.aprovar"
+            request, autor, "correcao.aprovar"
         )
 
     @rotas.post("/{job_id}/correcoes", status_code=201)

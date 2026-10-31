@@ -98,6 +98,7 @@ def test_eu_devolve_papeis_e_permissoes() -> None:
     assert resposta.json() == {
         "uid": "u1",
         "email": "a@b.c",
+        "email_verificado": False,
         "papeis": ["curador"],
         "permissoes": [
             "correcao.aprovar",
@@ -112,3 +113,82 @@ def test_eu_sem_documento_mostra_os_papeis_padrao() -> None:
 
     assert corpo["papeis"] == ["consulta", "operador"]
     assert corpo["permissoes"] == ["decupagem.ver", "video.enviar"]
+
+
+def _mundo_admin(
+    papeis: list[Papel] | None, admins: str | None, verificado: bool = True
+) -> TestClient:
+    repo_papeis = RepositorioDePapeisEmMemoria()
+    if papeis is not None:
+        repo_papeis.salvar("u1", papeis)
+    jobs = RepositorioEmMemoria()
+    return TestClient(
+        criar_app(
+            VerificadorFalso(
+                {
+                    "token-bom": Usuario(
+                        uid="u1",
+                        email=" Ana@RedeTV.com.br",
+                        email_verificado=verificado,
+                    )
+                }
+            ),
+            jobs,
+            ArmazenamentoFalso(),
+            papeis=repo_papeis,
+            admins_emergencia=admins,
+        )
+    )
+
+
+TODAS = sorted(
+    ["decupagem.ver", "video.enviar", "decupagem.editar", "correcao.aprovar"]
+)
+
+
+@pytest.mark.parametrize("guardados", [None, ["consulta"]])
+def test_admin_de_emergencia_vira_administrador_com_tudo(
+    guardados: list[Papel] | None,
+) -> None:
+    cliente = _mundo_admin(guardados, "ana@redetv.com.br,outra@x.y")
+
+    eu = cliente.get("/v1/eu", headers=AUTORIZACAO).json()
+
+    assert "administrador" in eu["papeis"]
+    assert eu["permissoes"] == TODAS
+    assert (
+        cliente.post("/v1/jobs", json=NOVO_JOB, headers=AUTORIZACAO).status_code == 202
+    )
+
+
+def test_admin_de_emergencia_passa_nas_rotas_de_editar_e_aprovar() -> None:
+    cliente = _mundo_admin(["consulta"], "ana@redetv.com.br")
+    comum = _mundo_admin(["consulta"], None)
+
+    for metodo, caminho in (
+        ("GET", "/v1/jobs/x/correcoes"),
+        ("POST", "/v1/jobs/x/correcoes/y/aprovar"),
+    ):
+        assert comum.request(metodo, caminho, headers=AUTORIZACAO).status_code in (
+            403,
+            404,
+        )
+        assert cliente.request(metodo, caminho, headers=AUTORIZACAO).status_code == 404
+
+
+@pytest.mark.parametrize("verificado", [False])
+def test_email_nao_verificado_nao_vira_administrador(verificado: bool) -> None:
+    cliente = _mundo_admin(["consulta"], "ana@redetv.com.br", verificado)
+
+    eu = cliente.get("/v1/eu", headers=AUTORIZACAO).json()
+
+    assert eu["papeis"] == ["consulta"]
+    assert (
+        cliente.post("/v1/jobs", json=NOVO_JOB, headers=AUTORIZACAO).status_code == 403
+    )
+
+
+def test_sem_lista_de_admins_o_comportamento_e_o_de_hoje() -> None:
+    eu = _mundo_admin(None, None).get("/v1/eu", headers=AUTORIZACAO).json()
+
+    assert eu["papeis"] == ["consulta", "operador"]

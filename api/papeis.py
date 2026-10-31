@@ -6,7 +6,7 @@ As permissões ficam na aplicação (um documento por uid), não no token.
 from collections.abc import Callable, Iterable
 from typing import Literal, Protocol, get_args
 
-Papel = Literal["consulta", "operador", "editor", "curador"]
+Papel = Literal["consulta", "operador", "editor", "curador", "administrador"]
 PAPEIS: tuple[Papel, ...] = get_args(Papel)
 Permissao = Literal[
     "decupagem.ver", "video.enviar", "decupagem.editar", "correcao.aprovar"
@@ -19,6 +19,8 @@ PERMISSOES_DO_PAPEL: dict[Papel, frozenset[Permissao]] = {
     "operador": _CONSULTA | frozenset({"video.enviar"}),
     "editor": _EDITOR,
     "curador": _EDITOR | frozenset({"correcao.aprovar"}),
+    # Do próprio tipo, para uma permissão nova chegar ao Administrador sozinha.
+    "administrador": frozenset(get_args(Permissao)),
 }
 
 # Conta sem documento de papéis: o comportamento da E0, para ninguém perder acesso.
@@ -32,6 +34,26 @@ def permissoes_de(papeis: Iterable[Papel]) -> set[Permissao]:
 def papeis_efetivos(guardados: list[Papel] | None) -> list[Papel]:
     """Os papéis do documento, ou os padrões se a conta não tem documento."""
     return list(PAPEIS_PADRAO) if guardados is None else guardados
+
+
+def admins_de(lista: str | None) -> frozenset[str]:
+    """Os e-mails de `ADMINS_EMERGENCIA` (separados por vírgula), sem espaços nem maiúsculas."""
+    emails = (e.strip().lower() for e in (lista or "").split(","))
+    return frozenset(e for e in emails if e)
+
+
+def papeis_do_usuario(
+    guardados: list[Papel] | None,
+    email: str,
+    email_verificado: bool,
+    admins: frozenset[str],
+) -> list[Papel]:
+    """Os papéis efetivos de uma pessoa. O Administrador é calculado a cada
+    requisição para quem tem e-mail verificado em `ADMINS_EMERGENCIA`; nada é gravado."""
+    efetivos = papeis_efetivos(guardados)
+    if email_verificado and email.strip().lower() in admins:
+        efetivos = [*efetivos, "administrador"]
+    return efetivos
 
 
 class RepositorioDePapeis(Protocol):

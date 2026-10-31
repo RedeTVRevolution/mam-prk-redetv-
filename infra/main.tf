@@ -263,6 +263,11 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "BUCKET_DECUPAGENS"
         value = local.buckets["decupagens"]
       }
+      # Quem tem esses e-mails (verificados) é Administrador (api/papeis.py).
+      env {
+        name  = "ADMINS_EMERGENCIA"
+        value = var.admins_emergencia
+      }
     }
   }
   depends_on = [google_project_service.apis]

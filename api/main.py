@@ -38,6 +38,7 @@ from api.jobs import (
     TipoNaoSuportado,
     agora_utc,
     criar_rotas,
+    papeis_da_pessoa,
 )
 from api.nuvem import (
     ArmazenamentoStorage,
@@ -51,7 +52,7 @@ from api.papeis import (
     Permissao,
     RepositorioDePapeis,
     RepositorioDePapeisEmMemoria,
-    papeis_efetivos,
+    admins_de,
     permissoes_de,
 )
 from api.programas import PERFIS
@@ -85,6 +86,7 @@ def criar_app(
     armazenamento: Armazenamento | None = None,
     chaves: VerificadorDeChave | None = None,
     papeis: RepositorioDePapeis | None = None,
+    admins_emergencia: str | None = None,
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
@@ -104,6 +106,7 @@ def criar_app(
     app.state.verificador = verificador or _SemVerificador()
     app.state.chaves = chaves or _SemChaves()
     app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
+    app.state.admins = admins_de(admins_emergencia)
     app.middleware("http")(exigir_autenticacao)
 
     @app.get(CAMINHO_HEALTH)
@@ -118,8 +121,7 @@ def criar_app(
     ) -> UsuarioComPapeis | Sistema:
         if isinstance(chamador, Sistema):
             return chamador
-        repositorio_de_papeis: RepositorioDePapeis = request.app.state.papeis
-        efetivos = papeis_efetivos(repositorio_de_papeis.obter(chamador.uid))
+        efetivos = papeis_da_pessoa(request, chamador)
         return UsuarioComPapeis(
             **chamador.model_dump(),
             papeis=efetivos,
@@ -160,6 +162,7 @@ if _projeto:
             os.environ["BUCKET_DECUPAGENS"],
         ),
         papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
+        admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
     )

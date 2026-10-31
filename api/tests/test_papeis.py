@@ -1,9 +1,14 @@
+from typing import get_args
+
 import pytest
 
 from api.papeis import (
     ContaNaoEncontrada,
+    Permissao,
     RepositorioDePapeisEmMemoria,
+    admins_de,
     atribuir_papeis_main,
+    papeis_do_usuario,
     papeis_efetivos,
     permissoes_de,
 )
@@ -91,3 +96,44 @@ def test_atribuir_recusa_pedido_invalido_sem_gravar(argv: list[str]) -> None:
     assert atribuir_papeis_main(argv, repo, _uids, saida.append) == 2
     assert repo.obter("u1") is None
     assert saida
+
+
+def test_administrador_tem_todas_as_permissoes() -> None:
+    assert permissoes_de(["administrador"]) == set(get_args(Permissao))
+
+
+@pytest.mark.parametrize(
+    ("email", "verificado", "admins", "esperado"),
+    [
+        (" Ana@RedeTV.com.br", True, "ana@redetv.com.br", True),
+        ("ana@redetv.com.br", True, "x@y.z, ANA@redetv.com.br ,", True),
+        ("ana@redetv.com.br", False, "ana@redetv.com.br", False),
+        ("ana@redetv.com.br", True, "outra@redetv.com.br", False),
+        ("ana@redetv.com.br", True, None, False),
+        ("", True, "", False),
+    ],
+)
+def test_so_email_verificado_da_lista_vira_administrador(
+    email: str, verificado: bool, admins: str | None, esperado: bool
+) -> None:
+    papeis = papeis_do_usuario(["consulta"], email, verificado, admins_de(admins))
+
+    assert ("administrador" in papeis) is esperado
+    assert "consulta" in papeis
+
+
+def test_administrador_sem_documento_soma_aos_papeis_padrao() -> None:
+    papeis = papeis_do_usuario(None, "a@b.c", True, admins_de("a@b.c"))
+
+    assert papeis == ["consulta", "operador", "administrador"]
+
+
+def test_atribuir_aceita_administrador() -> None:
+    repo = RepositorioDePapeisEmMemoria()
+
+    codigo = atribuir_papeis_main(
+        ["ana@redetv.com.br", "administrador"], repo, _uids, lambda _: None
+    )
+
+    assert codigo == 0
+    assert repo.obter("u1") == ["administrador"]

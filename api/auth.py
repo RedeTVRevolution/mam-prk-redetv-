@@ -17,6 +17,7 @@ class Usuario(BaseModel):
 
     uid: str
     email: str
+    email_verificado: bool = False
 
 
 Escopo = Literal["criar", "ler", "cancelar"]
@@ -92,7 +93,11 @@ class VerificadorIdentityPlatform:
             or claims.get("firebase", {}).get("sign_in_second_factor") != "totp"
         ):
             raise TokenInvalido
-        return Usuario(uid=claims["sub"], email=claims.get("email", ""))
+        return Usuario(
+            uid=claims["sub"],
+            email=claims.get("email", ""),
+            email_verificado=claims.get("email_verified") is True,
+        )
 
 
 async def _autenticar(request: Request) -> Chamador | None:

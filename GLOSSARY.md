@@ -111,8 +111,11 @@ Correção de Editor, num tipo que exige aprovação, que espera a decisão de u
 **Conta local**:
 Usuário criado no próprio sistema de identidade, independente do login do sistema legado da RedeTV.
 
+**Administrador**:
+Papel com todas as permissões, dado automaticamente aos administradores de emergência.
+
 **Administrador de emergência**:
-Conta local com acesso total, segundo fator obrigatório e alerta a cada login; existe para não depender do login legado.
+Conta local que recebe o papel Administrador (acesso total), segundo fator obrigatório e alerta a cada login; existe para não depender do login legado.
 
 **Papel**:
 Pacote de permissões dado a um usuário, opcionalmente limitado a programas.

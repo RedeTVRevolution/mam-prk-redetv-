@@ -25,6 +25,7 @@ def _token(chave: Any = _CHAVE, **mudancas: Any) -> str:
         "aud": PROJETO,
         "sub": "u1",
         "email": "ana@redetv.com.br",
+        "email_verified": True,
         "iat": agora,
         "exp": agora + 3600,
         "firebase": {"sign_in_provider": "password", "sign_in_second_factor": "totp"},
@@ -35,8 +36,32 @@ def _token(chave: Any = _CHAVE, **mudancas: Any) -> str:
 
 def test_token_com_segundo_fator_vira_usuario() -> None:
     assert _verificador().verificar(_token()) == Usuario(
-        uid="u1", email="ana@redetv.com.br"
+        uid="u1", email="ana@redetv.com.br", email_verificado=True
     )
+
+
+@pytest.mark.parametrize("claim", [False, None])
+def test_email_sem_verificacao_fica_nao_verificado(claim: bool | None) -> None:
+    claims = {"email_verified": claim} if claim is not None else {}
+    token = _token(**claims)
+    if claim is None:
+        # Sem o claim: remonta o token sem `email_verified`.
+        agora = int(time.time())
+        token = jwt.encode(
+            {
+                "iss": f"https://securetoken.google.com/{PROJETO}",
+                "aud": PROJETO,
+                "sub": "u1",
+                "email": "ana@redetv.com.br",
+                "iat": agora,
+                "exp": agora + 3600,
+                "firebase": {"sign_in_second_factor": "totp"},
+            },
+            _CHAVE,
+            algorithm="RS256",
+        )
+
+    assert _verificador().verificar(token).email_verificado is False
 
 
 @pytest.mark.parametrize(
