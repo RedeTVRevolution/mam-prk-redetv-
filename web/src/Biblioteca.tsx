@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClienteDaApi } from './api.ts'
 import { validarArquivo } from './envio/arquivo.ts'
 import { enviarRetomavel } from './envio/upload.ts'
+import { tempo } from './linhaDoTempo.ts'
 import { ESTADOS_DO_JOB, type EstadoDoJob } from './tema.ts'
 import type { JobAberto } from './Video.tsx'
 
@@ -46,13 +47,6 @@ type Envio =
   | { tipo: 'erro'; mensagem: string }
 
 const ESTADOS = Object.keys(ESTADOS_DO_JOB) as EstadoDoJob[]
-
-function formatarDuracao(segundos: number) {
-  const total = Math.round(segundos)
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
-}
 
 function QuadroDoEstado({ estado }: { estado: string }) {
   if (estado === 'concluido') {
@@ -280,7 +274,7 @@ export default function Biblioteca({
                   </Group>
                   <Text size="xs" c="dimmed">
                     {new Date(job.criado_em).toLocaleString('pt-BR')}
-                    {job.duracao_s != null && ` · ${formatarDuracao(job.duracao_s)}`}
+                    {job.duracao_s != null && ` · ${tempo(job.duracao_s * 1000)}`}
                     {job.programa && ` · ${job.programa}`}
                   </Text>
                   {job.codigo_falha && (

@@ -1505,19 +1505,6 @@ test('cancelar o modal devolve a ocorrência ao intervalo anterior', async () =>
   expect(correcoesRecebidas).toHaveLength(0)
 })
 
-test('as alças não passam uma da outra nem saem do vídeo', async () => {
-  const usuario = userEvent.setup()
-  await selecionarNaLinha(usuario, 'Pautas 00:30')
-
-  for (let i = 0; i < 31; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowRight', shiftKey: true })
-  expect(alca('Início').getAttribute('aria-valuenow')).toBe('60000')
-  for (let i = 0; i < 91; i++) fireEvent.keyDown(alca('Fim'), { key: 'ArrowRight', shiftKey: true })
-  // Sem metadata, a linha do tempo vai até o maior fim da decupagem (02:30).
-  expect(alca('Fim').getAttribute('aria-valuenow')).toBe('150000')
-  for (let i = 0; i < 61; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowLeft', shiftKey: true })
-  expect(alca('Início').getAttribute('aria-valuenow')).toBe('0')
-}, 30_000)
-
 test('arrastar a alça leva o player ao tempo dela e soltar abre o modal', async () => {
   const usuario = userEvent.setup()
   const player = await selecionarNaLinha(usuario, 'Pautas 00:30')

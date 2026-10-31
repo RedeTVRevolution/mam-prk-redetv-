@@ -249,6 +249,13 @@ test('mostra a duração em mm:ss quando a API traz', async () => {
   expect(await screen.findByText(/· 02:05/)).toBeTruthy()
 })
 
+test('a duração trunca os segundos, como no visualizador', async () => {
+  jobs = [job({ estado: 'concluido', duracao_s: 59.6 })]
+  await abrir()
+
+  expect(await screen.findByText(/· 00:59/)).toBeTruthy()
+})
+
 test('desmarcar um estado esconde os cards daquele estado', async () => {
   const usuario = userEvent.setup()
   jobs = [
