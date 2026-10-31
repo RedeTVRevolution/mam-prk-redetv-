@@ -23,7 +23,7 @@ J0, J1, J2 = (
 
 def decupagem(**partes: Any) -> Decupagem:
     base: dict[str, Any] = {
-        "versao_esquema": "1.2",
+        "versao_esquema": "1.3",
         "video": VIDEO.model_dump(),
         "programa": {"resumo": "", "blocos": []},
         "pautas": [],

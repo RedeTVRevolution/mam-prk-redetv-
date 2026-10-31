@@ -22,12 +22,14 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.analise_por_janelas import analisar_video
+from api.catalogo import Catalogo
 from api.ciclo_de_vida import transitar
 from api.decupagem import Video
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs, agora_utc
 from api.leitura_da_tela import LeituraDaTela
 from api.nuvem import (
+    CatalogoFirestore,
     DecupagensStorage,
     JanelasStorage,
     LeiturasStorage,
@@ -67,6 +69,7 @@ def executar(
     leituras: LeiturasDaAnalise | None = None,
     janelas_do_job: JanelasDoJob | None = None,
     max_paralelas: int = 1,
+    catalogo: Catalogo | None = None,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
 ) -> str:
@@ -104,6 +107,7 @@ def executar(
             leitura=leituras.ler_leitura(job.id) if leituras else None,
             max_paralelas=max_paralelas,
             janelas_do_job=janelas_do_job,
+            catalogo=catalogo,
             dormir=dormir,
         )
     except AnaliseFalhou:
@@ -135,6 +139,7 @@ def main() -> None:
         LeiturasStorage(ClienteStorage(project=projeto), aceitos),
         JanelasStorage(ClienteStorage(project=projeto), aceitos),
         max_paralelas=int(os.environ["JANELAS_EM_PARALELO"]),
+        catalogo=CatalogoFirestore(firestore.Client(project=projeto)),
     )
 
 

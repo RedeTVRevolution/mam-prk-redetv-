@@ -35,8 +35,12 @@ Contexto fixo de um programa (apresentadores, repórteres, merchandising frequen
 ### Pessoas e evidência
 
 **Catálogo de pessoas**:
-Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel, apelidos e as referências de rosto ligadas a ela (origem `web` ou `acervo`). Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo.
+Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel, apelidos e as referências de rosto ligadas a ela (origem `web` ou `acervo`). Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
 _Evitar_: base de famosos
+
+**Nome confirmado / palpite**:
+`Pessoa.estado_do_nome`. Confirmado é o nome com uma prova que o código conferiu (`api/identificacao.py`): um GC ou tarja com o nome ou apelido, ou o nome ou apelido dito no texto original do Whisper, enquanto a pessoa está na imagem e sem outra pessoa sem nome na imagem no mesmo intervalo. O nome que o modelo deu sem prova conferida é palpite. Estar no perfil ou no catálogo torna a pessoa candidata e não confirma nome; `contexto` não é prova. A correção da revisora (`origem` `revisao`) vale mais e nenhum reprocessamento a sobrescreve.
+_Evitar_: aceitar `fontes_do_nome` como declarada pelo modelo
 
 **Aparição**:
 Pessoa visível na imagem; só ela conta como tempo de tela.

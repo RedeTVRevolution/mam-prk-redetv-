@@ -2,7 +2,8 @@
 
 Planeja as janelas, chama o Gemini uma vez por janela (com `startOffset` e
 `endOffset`, contexto incluído), repete a janela que falha, consolida e aplica a
-regra de tempos quando há cortes. Com a leitura da tela (OCR), os tempos dos textos
+regra de tempos quando há cortes. Depois da consolidação, `identificar`
+(`api/identificacao.py`) confere as provas do nome de cada pessoa. Com a leitura da tela (OCR), os tempos dos textos
 na tela são os medidos nos quadros (`api/medicao_dos_textos.py`), por janela e de
 novo depois da consolidação. O `Transporte` de `api/gemini.py` é o único
 seam; `planejar_janelas`, `consolidar` e a regra de tempos são peças internas e
@@ -24,11 +25,13 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from functools import partial
 from threading import Event
 
+from api.catalogo import Catalogo
 from api.consolidacao import consolidar
 from api.decupagem import Decupagem, Video
 from api.escalonamento import janelas_a_escalonar
 from api.espera import sorteio_uniforme
 from api.gemini import AnaliseFalhou, Transporte, analisar
+from api.identificacao import TOLERANCIA_DA_FALA_MS, candidatos_do_video, identificar
 from api.janelas import (
     EstadoJanela,
     Janela,
@@ -89,6 +92,8 @@ def analisar_video(
     limiar_do_ocr: float = LIMIAR_DE_SEMELHANCA_DO_OCR,
     tolerancia_do_ocr: int = TOLERANCIA_DE_QUADROS,
     limiar_de_semelhanca: float = LIMIAR_DE_SEMELHANCA,
+    catalogo: Catalogo | None = None,
+    tolerancia_da_fala_ms: int = TOLERANCIA_DA_FALA_MS,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
@@ -111,6 +116,15 @@ def analisar_video(
     def medir(decupagem: Decupagem, trecho_ms: tuple[int, int] | None) -> Decupagem:
         return medicao.medir(decupagem, trecho_ms) if medicao else decupagem
 
+    def identificar_pessoas(decupagem: Decupagem) -> Decupagem:
+        return identificar(
+            decupagem,
+            candidatos=candidatos_do_video(programa, catalogo),
+            transcricao=transcricao,
+            catalogo=catalogo,
+            tolerancia_ms=tolerancia_da_fala_ms,
+        )
+
     def passo(trecho_ms: tuple[int, int] | None) -> Decupagem:
         # Cada janela já sai medida: o texto que o OCR não achou é dúvida do escalonamento.
         return medir(chamar(trecho_ms), trecho_ms)
@@ -132,7 +146,7 @@ def analisar_video(
         )
 
     if len(janelas) <= 1:
-        return aplicar_regra_de_tempos(passo(None), cortes_ms)
+        return identificar_pessoas(aplicar_regra_de_tempos(passo(None), cortes_ms))
 
     gravadas = janelas_do_job.ler(job_id) if janelas_do_job else {}
 
@@ -200,4 +214,4 @@ def analisar_video(
     consolidada = consolidar(
         video, [(j, resultados[j.indice]) for j in janelas], list(cortes_ms)
     )
-    return medir(consolidada, None)
+    return identificar_pessoas(medir(consolidada, None))
