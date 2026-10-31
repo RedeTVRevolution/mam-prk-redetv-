@@ -92,6 +92,10 @@ RUN baixar() { \
     && echo "0bbe984570f597af3638e50bdf2e8276f3ab26a61966096538b3b0d1849f5c84  /modelos/$RECONHECEDOR/inference.yml" >> /tmp/hashes \
     && sha256sum -c /tmp/hashes && rm /tmp/hashes
 COPY api/ api/
+# Os testes usam um modelo falso: aqui o PaddleOCR lê um quadro de verdade com os modelos
+# da imagem, para a imagem não ser construída com uma versão que não roda em CPU.
+RUN HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
+    && rm -rf /tmp/ocr /tmp/ocr.png
 USER nobody
 # HOME e TMPDIR no volume em memória: o Paddle grava cache e o ffmpeg, os quadros, e a imagem não tem pasta gravável.
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos \

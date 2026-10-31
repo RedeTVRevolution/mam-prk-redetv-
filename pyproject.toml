@@ -28,7 +28,9 @@ transcricao = [
 ]
 ocr = [
     "paddleocr==3.7.0",
-    "paddlepaddle==3.3.1",
+    # O 3.3 quebra na inferência pelo oneDNN, em CPU, com os modelos PP-OCRv5:
+    # ConvertPirAttribute2RuntimeAttribute not support [pir::ArrayAttribute<pir::DoubleAttribute>].
+    "paddlepaddle==3.2.2",
 ]
 
 [tool.uv]
