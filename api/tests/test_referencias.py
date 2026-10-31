@@ -84,9 +84,23 @@ def test_foto_recortada_e_a_mesma() -> None:
     assert mesma_foto(jpeg(recorte(original, 0.9)), jpeg(original))
 
 
+def test_recorte_de_outra_proporcao_ou_menor_e_a_mesma() -> None:
+    for semente in range(1, 6):
+        original = foto(semente)
+        w, h = original.size
+        quadrado = original.crop(((w - h) // 2, 0, (w - h) // 2 + h, h))
+        no_canto = original.crop((0, 0, int(w * 0.6), int(h * 0.6)))
+
+        assert mesma_foto(jpeg(original), jpeg(quadrado)), semente
+        assert mesma_foto(jpeg(no_canto), jpeg(original)), semente
+
+
 def test_fotos_diferentes_nao_sao_a_mesma() -> None:
     assert not mesma_foto(jpeg(foto(1)), jpeg(foto(2)))
     assert not mesma_foto(jpeg(foto(3)), jpeg(foto(4)))
+    for a in range(1, 9):
+        for b in range(a + 1, 9):
+            assert not mesma_foto(jpeg(foto(a)), jpeg(foto(b))), (a, b)
 
 
 # --- fotos de um nome ------------------------------------------------------
@@ -123,11 +137,11 @@ class BuscaFalsa:
 def baixador(fotos: Mapping[str, bytes | None]):  # type: ignore[no-untyped-def]
     """Devolve o JPEG do thumbnail pelo número no fim da URL; None é recusa."""
 
-    def baixar(r: ResultadoDeImagem) -> bytes:
+    def baixar(r: ResultadoDeImagem) -> tuple[bytes, str]:
         dados = fotos.get(r.thumbnail.rsplit("/", 1)[1])
         if dados is None:
             raise ImagemRecusada("falso")
-        return dados
+        return dados, r.thumbnail
 
     return baixar
 
@@ -271,9 +285,9 @@ def test_foto_baixada_usa_o_thumbnail_e_so_cai_para_o_original_se_for_recusado()
     ruim = ResultadoDeImagem("https://t/ruim", "https://o/ruim", "p", "t")
     sem_thumb = ResultadoDeImagem("", "https://o/so", "p", "t")
 
-    assert baixar(bom) == b"thumb"
-    assert baixar(ruim) == b"original"
-    assert baixar(sem_thumb) == b"original"
+    assert baixar(bom) == (b"thumb", "https://t/bom")
+    assert baixar(ruim) == (b"original", "https://o/ruim")
+    assert baixar(sem_thumb) == (b"original", "https://o/so")
     assert pedidos == [
         "https://t/bom",
         "https://t/ruim",
@@ -328,7 +342,8 @@ def test_as_fotos_ficam_ligadas_a_pessoa_do_catalogo_com_origem_web() -> None:
         assert r.referencia in bucket.objetos
         assert r.referencia.startswith(f"referencias/{leao.id}/")
         assert r.pagina_url == f"https://site{i}.com/pagina"
-        assert r.imagem_url == f"https://site{i}.com/{i}.jpg"
+        # A URL do arquivo que foi baixado e regravado: o thumbnail.
+        assert r.imagem_url == f"https://encrypted-tbn0.gstatic.com/{i}"
         assert r.busca == "Leão Lobo"
         assert r.obtida_em == AGORA
     assert busca.consultas == [("imagens", "Leão Lobo")]
@@ -338,11 +353,15 @@ def test_achar_o_nome_pelo_apelido_liga_a_mesma_pessoa() -> None:
     catalogo = CatalogoEmMemoria()
     leao = catalogo.acrescentar("Leão Lobo", "apresentador", ["Leãozinho"])
 
-    referenciar_nome(
-        "leaozinho", catalogo, BuscaFalsa([resultado(i) for i in range(4)]), Bucket()
-    )
+    busca = BuscaFalsa([resultado(i) for i in range(4)])
 
-    assert len(catalogo.obter(leao.id).rostos) == 3  # type: ignore[union-attr]
+    referenciar_nome("leaozinho", catalogo, busca, Bucket())
+
+    rostos = catalogo.obter(leao.id).rostos  # type: ignore[union-attr]
+    assert len(rostos) == 3
+    # A busca é pelo nome do catálogo, não pelo apelido que chegou.
+    assert busca.consultas == [("imagens", "Leão Lobo")]
+    assert {r.busca for r in rostos} == {"Leão Lobo"}
 
 
 def test_sem_tres_fotos_nada_e_gravado() -> None:

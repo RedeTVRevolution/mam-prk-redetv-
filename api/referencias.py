@@ -34,6 +34,7 @@ MAXIMO_DE_NOMES_SUGERIDOS = 10
 # Fotos da mesma sessão ou recortadas: a distância (em bits, de 64) abaixo da qual duas
 # impressões são a mesma foto.
 DISTANCIA_DA_MESMA_FOTO = 8
+FRACOES_DO_RECORTE = (1.0, 0.9, 0.75, 0.6)
 ETAPA = "referencias"
 MODELO = "gemini-3.8-flash"
 
@@ -52,23 +53,27 @@ def _impressao(imagem: Image.Image) -> int:
 
 
 def _janelas(imagem: Image.Image) -> list[Image.Image]:
-    """A foto inteira e janelas de 90 % e 75 % no centro e nos quatro cantos: um
-    recorte de outra foto cai perto de alguma delas."""
+    """A foto inteira e janelas no centro e nos quatro cantos, de 100 %, 90 %, 75 % ou
+    60 % em cada eixo, independentes: um recorte de outra foto, mesmo de outra
+    proporção (o quadrado de uma foto 4:3), cai perto de alguma delas."""
     largura, altura = imagem.size
     achadas = [imagem]
-    for fracao in (0.9, 0.75):
-        w, h = int(largura * fracao), int(altura * fracao)
-        if w < 16 or h < 16:
-            continue
-        sobra_x, sobra_y = largura - w, altura - h
-        for x, y in (
-            (sobra_x // 2, sobra_y // 2),
-            (0, 0),
-            (sobra_x, 0),
-            (0, sobra_y),
-            (sobra_x, sobra_y),
-        ):
-            achadas.append(imagem.crop((x, y, x + w, y + h)))
+    for fracao_x in FRACOES_DO_RECORTE:
+        for fracao_y in FRACOES_DO_RECORTE:
+            if fracao_x == fracao_y == 1.0:
+                continue
+            w, h = int(largura * fracao_x), int(altura * fracao_y)
+            if w < 16 or h < 16:
+                continue
+            sobra_x, sobra_y = largura - w, altura - h
+            cantos = {
+                (sobra_x // 2, sobra_y // 2),
+                (0, 0),
+                (sobra_x, 0),
+                (0, sobra_y),
+                (sobra_x, sobra_y),
+            }
+            achadas.extend(imagem.crop((x, y, x + w, y + h)) for x, y in sorted(cantos))
     return achadas
 
 
@@ -218,9 +223,11 @@ class ExtratorGemini:
 class Foto:
     jpeg: bytes
     resultado: ResultadoDeImagem
+    url: str  # a que foi baixada: o thumbnail ou o original
 
 
-Baixar = Callable[[ResultadoDeImagem], bytes]
+# O JPEG e a URL de onde ele veio.
+Baixar = Callable[[ResultadoDeImagem], tuple[bytes, str]]
 
 
 def foto_baixada(
@@ -228,15 +235,15 @@ def foto_baixada(
 ) -> Baixar:
     """O thumbnail primeiro; o original só se o thumbnail falta ou é recusado."""
 
-    def baixar(resultado: ResultadoDeImagem) -> bytes:
+    def baixar(resultado: ResultadoDeImagem) -> tuple[bytes, str]:
         if resultado.thumbnail:
             try:
-                return baixar_thumbnail(resultado.thumbnail)
+                return baixar_thumbnail(resultado.thumbnail), resultado.thumbnail
             except ImagemRecusada:
                 pass
         if not resultado.original:
             raise ImagemRecusada("sem original")
-        return baixar_original(resultado.original)
+        return baixar_original(resultado.original), resultado.original
 
     return baixar
 
@@ -253,12 +260,12 @@ def fotos_diferentes(
         if r.original and any(r.original == f.resultado.original for f in achadas):
             continue
         try:
-            jpeg = baixar(r)
+            jpeg, url = baixar(r)
         except ImagemRecusada:
             continue
         if any(mesma_foto(jpeg, f.jpeg) for f in achadas):
             continue
-        achadas.append(Foto(jpeg, r))
+        achadas.append(Foto(jpeg, r, url))
     return achadas
 
 
@@ -315,7 +322,7 @@ def guardar(
                 origem="web",
                 referencia=objeto,
                 pagina_url=f.resultado.pagina,
-                imagem_url=f.resultado.original or f.resultado.thumbnail,
+                imagem_url=f.url,
                 busca=consulta,
                 obtida_em=agora,
             )
@@ -349,13 +356,16 @@ def referenciar(
         >= FOTOS_POR_NOME
     ):
         return "ja_tinha"
-    fotos = fotos_de_um_nome(nome, busca=busca, baixar=baixar, conferidor=conferidor)
+    # Pelo nome do catálogo: um apelido ("Leãozinho") traz fotos de qualquer um.
+    fotos = fotos_de_um_nome(
+        pessoa.nome, busca=busca, baixar=baixar, conferidor=conferidor
+    )
     if fotos is None:
         return "sem_referencia"
     guardar(
         pessoa,
         fotos,
-        consulta=nome,
+        consulta=pessoa.nome,
         agora=agora,
         armazenamento=armazenamento,
         catalogo=catalogo,

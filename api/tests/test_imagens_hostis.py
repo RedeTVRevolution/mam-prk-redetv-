@@ -41,6 +41,7 @@ class Resposta:
         self.corpo = corpo
         self.status_code = status
         self.headers = headers or {}
+        self.raw = Corpo(corpo)
 
     def __enter__(self) -> Self:
         return self
@@ -48,9 +49,20 @@ class Resposta:
     def __exit__(self, *args: object) -> None:
         return None
 
-    def iter_content(self, chunk_size: int) -> Any:
-        for i in range(0, len(self.corpo), chunk_size):
-            yield self.corpo[i : i + chunk_size]
+
+class Corpo:
+    """O `raw` do urllib3: `read1` devolve o que chegou numa leitura só."""
+
+    def __init__(self, corpo: bytes, por_leitura: int | None = None) -> None:
+        self.restante = corpo
+        self.por_leitura = por_leitura
+        self.leituras = 0
+
+    def read1(self, amt: int, decode_content: bool) -> bytes:
+        self.leituras += 1
+        n = min(amt, self.por_leitura or amt)
+        pedaco, self.restante = self.restante[:n], self.restante[n:]
+        return pedaco
 
 
 class Sessao:
@@ -302,3 +314,18 @@ def test_original_que_demora_alem_do_prazo_e_recusado() -> None:
             relogio=lambda: next(relogio),
         )
     assert sessao.opcoes[0]["timeout"] > 0
+
+
+def test_original_que_pinga_um_byte_por_vez_para_no_prazo() -> None:
+    lento = Resposta(bytes(1000))
+    lento.raw = Corpo(bytes(1000), por_leitura=1)
+    tempo = iter(float(t) for t in range(10_000))
+
+    with pytest.raises(ImagemRecusada, match="prazo"):
+        baixar_original(
+            "https://exemplo.com/f.jpg",
+            Sessao(lento),
+            resolver=resolve(*PUBLICO),
+            relogio=lambda: next(tempo),
+        )
+    assert lento.raw.leituras <= 12

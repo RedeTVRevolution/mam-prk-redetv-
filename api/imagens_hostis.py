@@ -28,6 +28,9 @@ PRAZO_DO_ORIGINAL_S = 10.0
 PRAZO_DO_THUMBNAIL_S = 10.0
 REDIRECIONAMENTOS_DO_ORIGINAL = 3
 QUALIDADE_DO_JPEG = 90
+# Cada leitura é no máximo um `recv` (com o `timeout` do pedido): o prazo total é
+# conferido entre elas, e um servidor que pinga um byte por vez não o contorna.
+TAMANHO_DA_LEITURA = 16384
 
 
 class ImagemRecusada(Exception):
@@ -65,7 +68,12 @@ def recodificar(dados: bytes, *, max_bytes: int, max_pixels: int) -> bytes:
                 raise ImagemRecusada("acima do limite de pixels")
             imagem.load()
             colorida = imagem.convert("RGBA")
-    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as e:
+    except (
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+        OSError,
+        ValueError,
+    ) as e:
         raise ImagemRecusada("não é uma imagem válida") from e
     # Imagem nova: o EXIF, o ICC e o resto de `info` ficam no arquivo de origem.
     limpa = Image.new("RGB", colorida.size, (255, 255, 255))
@@ -91,7 +99,10 @@ def _corpo(
 
 
 def _pedacos(resposta: Any) -> Iterator[bytes]:
-    yield from resposta.iter_content(chunk_size=65536)
+    # `iter_content` espera juntar o pedaço inteiro antes de devolver; `read1` devolve o
+    # que chegou numa leitura só.
+    while pedaco := resposta.raw.read1(TAMANHO_DA_LEITURA, decode_content=True):
+        yield pedaco
 
 
 def _https(url: str) -> Any:
