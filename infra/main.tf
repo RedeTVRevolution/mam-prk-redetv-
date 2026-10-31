@@ -41,6 +41,12 @@ variable "janelas_em_paralelo" {
   default = 4
 }
 
+variable "tolerancia_da_fala_ms" {
+  description = "Folga, em ms, entre o nome dito no Whisper e a pessoa na imagem para a fala provar o nome"
+  type        = number
+  default     = 2000
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -618,6 +624,10 @@ resource "google_cloud_run_v2_job" "analise" {
         env {
           name  = "JANELAS_EM_PARALELO"
           value = tostring(var.janelas_em_paralelo)
+        }
+        env {
+          name  = "TOLERANCIA_DA_FALA_MS"
+          value = tostring(var.tolerancia_da_fala_ms)
         }
       }
     }

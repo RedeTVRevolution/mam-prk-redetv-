@@ -417,3 +417,55 @@ def test_correcao_da_revisora_sobrevive_a_um_reprocessamento() -> None:
 
     [ana] = mundo.decupagem()["pessoas"]
     assert (ana["nome"], ana["origem"]) == ("Ana Souza Lima", "revisao")
+
+
+def _reprocessada(nome: str, transcricao: Transcricao | None) -> dict[str, Any]:
+    d = identificar(
+        decupagem([pessoa("pes01", nome, [(1000, 5000)])]),
+        candidatos=[Candidato(nome, "repórter")],
+        transcricao=transcricao,
+    )
+    return Decupagem.model_validate(
+        {**d.model_dump(), "video": {"duracao_ms": 60_000, "sha256": "a" * 64}}
+    ).model_dump(mode="json")
+
+
+def test_nome_confirmado_chega_a_leitura_com_a_origem_modelo_forte() -> None:
+    mundo = Mundo(["editor"])
+    mundo.reprocessar(_reprocessada("Ana Souza", whisper(("Ana", 2.0), ("Souza", 2.5))))
+
+    [ana] = mundo.decupagem()["pessoas"]
+    assert (ana["origem"], ana["estado_do_nome"]) == ("modelo_forte", "confirmado")
+
+
+def test_nome_da_revisora_sobre_um_palpite_fica_confirmado() -> None:
+    mundo = Mundo(["editor"])
+    mundo.reprocessar(_reprocessada("Ana Souza", None))
+    entregue = mundo.decupagem()
+    assert entregue["pessoas"][0]["estado_do_nome"] == "palpite"
+
+    mundo.corrigir(versao=entregue["versao_decupagem"])  # pes01: → "Ana Souza Lima"
+
+    [ana] = mundo.decupagem()["pessoas"]
+    assert (ana["nome"], ana["origem"], ana["estado_do_nome"]) == (
+        "Ana Souza Lima",
+        "revisao",
+        "confirmado",
+    )
+
+
+def test_correcao_atendida_mantem_a_origem_e_o_estado_do_modelo() -> None:
+    mundo = Mundo(["editor"])
+    mundo.corrigir()  # pes01: "Ana Souza" → "Ana Souza Lima"
+    mundo.reprocessar(
+        _reprocessada(
+            "Ana Souza Lima", whisper(("Ana", 2.0), ("Souza", 2.5), ("Lima", 3.0))
+        )
+    )
+
+    [ana] = mundo.decupagem()["pessoas"]
+    assert (ana["nome"], ana["origem"], ana["estado_do_nome"]) == (
+        "Ana Souza Lima",
+        "modelo_forte",
+        "confirmado",
+    )

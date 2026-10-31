@@ -1466,10 +1466,12 @@ def aplicar(
                 real["id"] = _id_posicional(chave, n)
                 posicionais.append(real)
     for item in [*pessoas, *_pautas(resultado), *_planos(resultado), *posicionais]:
-        item["origem"] = "modelo"
+        # O nome confirmado pelo código (`modelo_forte`) segue como o modelo gravou.
+        if item.get("origem") != "modelo_forte":
+            item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
-    nomes_do_modelo = [p["nome"] for p in pessoas]
+    pessoas_do_modelo = [dict(p) for p in pessoas]
     estado = estado_das(correcoes)
     # ponytail: reconciliar a cada leitura relê as pessoas do modelo por
     # correção antiga (custo pequeno hoje); guardar o resultado quando houver
@@ -1502,14 +1504,14 @@ def aplicar(
             if c.id not in atendidas:
                 _aplicar_no_item(resultado, c)
             continue
-        for pessoa, identidade, nome in zip(
-            pessoas, identidades, nomes_do_modelo, strict=True
+        for pessoa, identidade, do_modelo in zip(
+            pessoas, identidades, pessoas_do_modelo, strict=True
         ):
             if not casa(c, pessoa, identidade):
                 continue
             if c.id in atendidas:
                 if entrada.atender_na_pessoa is not None:
-                    entrada.atender_na_pessoa(pessoa, nome, c)
+                    entrada.atender_na_pessoa(pessoa, do_modelo, c)
                 continue
             assert entrada.aplicar_na_pessoa is not None
             entrada.aplicar_na_pessoa(resultado, pessoa, c)
@@ -1761,8 +1763,11 @@ class Tipo:
     aplicar_na_pessoa: (
         Callable[[dict[str, Any], dict[str, Any], Correcao], None] | None
     ) = None
-    # Na pessoa cujo modelo já traz o "depois": o que fazer, se algo.
-    atender_na_pessoa: Callable[[dict[str, Any], str, Correcao], None] | None = None
+    # Na pessoa cujo modelo (o terceiro argumento, antes das correções) já traz
+    # o "depois": o que fazer, se algo.
+    atender_na_pessoa: (
+        Callable[[dict[str, Any], dict[str, Any], Correcao], None] | None
+    ) = None
     # A pessoa pode ficar sem nenhuma ocorrência e sumir da decupagem.
     pode_esvaziar: bool = False
     # O item da versão nova já traz o "depois".
@@ -2029,11 +2034,19 @@ def _renomear_pessoa(
     resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
 ) -> None:
     pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
+    # O nome da revisora vale sobre a conferência do código, feita no nome anterior.
+    pessoa["estado_do_nome"] = "confirmado"
     _catalogo_id_na_pessoa(pessoa, c)
 
 
-def _manter_o_nome_do_modelo(pessoa: dict[str, Any], nome: str, c: Correcao) -> None:
-    pessoa["nome"], pessoa["origem"] = nome, "modelo"
+def _manter_o_nome_do_modelo(
+    pessoa: dict[str, Any], do_modelo: dict[str, Any], c: Correcao
+) -> None:
+    pessoa["nome"], pessoa["origem"] = do_modelo["nome"], do_modelo["origem"]
+    if "estado_do_nome" in do_modelo:
+        pessoa["estado_do_nome"] = do_modelo["estado_do_nome"]
+    else:
+        pessoa.pop("estado_do_nome", None)
     _catalogo_id_na_pessoa(pessoa, c)
 
 

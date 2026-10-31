@@ -26,6 +26,7 @@ from api.catalogo import Catalogo
 from api.ciclo_de_vida import transitar
 from api.decupagem import Video
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
+from api.identificacao import TOLERANCIA_DA_FALA_MS
 from api.jobs import RepositorioDeJobs, agora_utc
 from api.leitura_da_tela import LeituraDaTela
 from api.nuvem import (
@@ -70,6 +71,7 @@ def executar(
     janelas_do_job: JanelasDoJob | None = None,
     max_paralelas: int = 1,
     catalogo: Catalogo | None = None,
+    tolerancia_da_fala_ms: int = TOLERANCIA_DA_FALA_MS,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
 ) -> str:
@@ -108,6 +110,7 @@ def executar(
             max_paralelas=max_paralelas,
             janelas_do_job=janelas_do_job,
             catalogo=catalogo,
+            tolerancia_da_fala_ms=tolerancia_da_fala_ms,
             dormir=dormir,
         )
     except AnaliseFalhou:
@@ -140,6 +143,9 @@ def main() -> None:
         JanelasStorage(ClienteStorage(project=projeto), aceitos),
         max_paralelas=int(os.environ["JANELAS_EM_PARALELO"]),
         catalogo=CatalogoFirestore(firestore.Client(project=projeto)),
+        tolerancia_da_fala_ms=int(
+            os.environ.get("TOLERANCIA_DA_FALA_MS", TOLERANCIA_DA_FALA_MS)
+        ),
     )
 
 

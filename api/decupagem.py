@@ -128,14 +128,6 @@ class Pessoa(_Estrito):
     estado_do_nome: EstadoDoNome | None = None
     # A pessoa do catálogo (#108); o servidor grava, o modelo não conhece.
     catalogo_id: Id | None = None
-
-    @field_validator("fontes_do_nome", mode="before")
-    @classmethod
-    def _sem_fontes_antigas(cls, fontes: Any) -> Any:
-        if isinstance(fontes, list):
-            return [f for f in fontes if f not in FONTES_ANTIGAS]
-        return fontes
-
     na_imagem: list[Aparicao] = Field(
         description="Aparições: a pessoa visível na imagem. Foto num gráfico, logo "
         "ou QR code não é aparição."
@@ -146,6 +138,13 @@ class Pessoa(_Estrito):
     citada_no_texto: list[MencaoNoTexto] = Field(
         description="Nome em texto na tela sem a pessoa aparecer."
     )
+
+    @field_validator("fontes_do_nome", mode="before")
+    @classmethod
+    def _sem_fontes_antigas(cls, fontes: Any) -> Any:
+        if isinstance(fontes, list):
+            return [f for f in fontes if f not in FONTES_ANTIGAS]
+        return fontes
 
 
 class Plano(_Intervalo):
