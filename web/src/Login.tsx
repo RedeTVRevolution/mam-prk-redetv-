@@ -24,6 +24,7 @@ import {
   type Autenticador,
   type ResultadoDaSenha,
 } from './auth/autenticador.ts'
+import { CORES } from './tema.ts'
 
 type Etapa = Exclude<ResultadoDaSenha, { tipo: 'logado' }> | { tipo: 'senha' }
 
@@ -101,7 +102,7 @@ export default function Login({
         bg="dark.8"
       >
         <Stack gap={4} pos="absolute" bottom={48} left={48}>
-          <Badge color="red" size="lg" radius="sm">
+          <Badge color={CORES.marca} variant="filled" size="lg" radius="sm">
             MAM
           </Badge>
           <Title order={1} size={56} c="white">
