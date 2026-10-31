@@ -103,9 +103,8 @@ def executar(
         lambda caminho, jpeg: armazenamento.gravar_quadro(job_id, caminho, jpeg),
     )
     armazenamento.gravar_decupagem(job_id, pronta.model_dump_json())
-    capa = capa_da_decupagem(pronta)
-    if capa is not None:
-        repositorio.transitar(job_id, "concluido", {"capa": capa})
+    # Grava também a falta de capa: um reprocessamento sem quadros não deixa a antiga.
+    repositorio.transitar(job_id, "concluido", {"capa": capa_da_decupagem(pronta)})
 
 
 def main() -> None:

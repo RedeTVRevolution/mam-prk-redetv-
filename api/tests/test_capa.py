@@ -93,3 +93,23 @@ def test_o_job_guarda_o_caminho_da_capa(tmp_path: Path) -> None:
     job = repositorio.obter("j1")
     assert job is not None
     assert job.capa == "quadros/plano-1.jpg"
+
+
+def test_reprocessar_sem_planos_tira_a_capa_antiga(tmp_path: Path) -> None:
+    repositorio = RepositorioEmMemoria()
+    agora = datetime(2026, 10, 31, tzinfo=UTC)
+    repositorio.salvar(
+        Job(
+            id="j1", nome="a.mp4", tamanho_bytes=1, estado="concluido",
+            criado_por="u", capa="quadros/plano-9.jpg",
+            criado_em=agora, atualizado_em=agora,
+        )
+    )  # fmt: skip
+    armazenamento = QuadrosFalso(_video(tmp_path / "v.mp4"), _decupagem([], []))
+    (tmp_path / "saida").mkdir()
+
+    executar("j1", repositorio, armazenamento, tmp_path / "saida")
+
+    job = repositorio.obter("j1")
+    assert job is not None
+    assert job.capa is None

@@ -16,6 +16,7 @@ from api.jobs import (
     expirar_uploads,
 )
 from api.main import criar_app
+from api.papeis import RepositorioDePapeisEmMemoria
 
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
 INICIO = datetime(2026, 10, 29, 12, 0, tzinfo=UTC)
@@ -741,3 +742,25 @@ def test_listagem_traz_a_url_assinada_da_capa_e_job_sem_capa_traz_null() -> None
         "com": "https://storage.exemplo/quadros/com/quadros/plano-1.jpg?validade=600",
         "sem": None,
     }
+
+
+def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
+    repositorio = RepositorioEmMemoria()
+    armazenamento = ArmazenamentoFalso()
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("u1", [])
+    cliente = TestClient(
+        criar_app(VerificadorFalso(), repositorio, armazenamento, papeis=papeis)
+    )
+    repositorio.salvar(
+        Job(
+            id="com", nome="com.mp4", tamanho_bytes=10, estado="concluido",
+            criado_por="u1", capa="quadros/plano-1.jpg",
+            criado_em=INICIO, atualizado_em=INICIO,
+        )
+    )  # fmt: skip
+
+    resposta = cliente.get("/v1/jobs", headers=AUTORIZACAO)
+
+    assert resposta.status_code == 403
+    assert "capa_url" not in resposta.text

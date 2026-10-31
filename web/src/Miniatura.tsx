@@ -47,6 +47,12 @@ export function MiniaturaDoPainel({
   const raiz = useRef<HTMLDivElement>(null)
   const [visivel, setVisivel] = useState(typeof IntersectionObserver === 'undefined')
   const [url, setUrl] = useState<string | null>(null)
+  // Outro momento (ou nenhum, depois de uma Correção) não fica com o quadro do anterior.
+  const [caminhoVisto, setCaminhoVisto] = useState(caminho)
+  if (caminho !== caminhoVisto) {
+    setCaminhoVisto(caminho)
+    setUrl(null)
+  }
 
   useEffect(() => {
     const el = raiz.current
