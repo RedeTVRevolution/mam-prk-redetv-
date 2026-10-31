@@ -6,7 +6,7 @@ import json
 import uuid
 import zlib
 from collections.abc import Callable, Iterator
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -75,6 +75,8 @@ TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
+# O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
+FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
 Estado = Literal[
     "aguardando_upload",
@@ -198,8 +200,9 @@ class NovoJob(BaseModel):
     @field_validator("data_exibicao", mode="before")
     @classmethod
     def _data_so_como_texto(cls, valor: Any) -> Any:
-        # O Pydantic leria um número como timestamp; aqui só vale "AAAA-MM-DD".
-        if valor is not None and not isinstance(valor, str):
+        # O Pydantic leria um número como timestamp e aceitaria data com hora
+        # zerada; aqui só vale "AAAA-MM-DD".
+        if valor is not None and not (isinstance(valor, str) and len(valor) == 10):
             raise ValueError("data_exibicao deve ser texto AAAA-MM-DD")
         return valor
 
@@ -458,7 +461,10 @@ def criar_rotas(
         else:
             criado_por, sistema = chamador.uid, None
         agora = relogio()
-        if novo.data_exibicao is not None and novo.data_exibicao > agora.date():
+        if (
+            novo.data_exibicao is not None
+            and novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date()
+        ):
             raise HTTPException(422, "Data de exibição no futuro")
         job = Job(
             id=uuid.uuid4().hex,

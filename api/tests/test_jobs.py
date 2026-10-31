@@ -591,7 +591,19 @@ def test_data_de_exibicao_de_hoje_e_aceita_e_a_de_amanha_da_422() -> None:
     assert ambiente.criar(data_exibicao="2026-10-30").status_code == 422
 
 
-@pytest.mark.parametrize("valor", ["31/12/1999", "1999-13-40", "ontem", 20261029, ""])
+def test_data_de_exibicao_futura_conta_pelo_dia_de_brasilia() -> None:
+    ambiente = Ambiente()
+    # 01h30 em UTC do dia 30 ainda é 22h30 do dia 29 em Brasília.
+    ambiente.relogio.agora = datetime(2026, 10, 30, 1, 30, tzinfo=UTC)
+
+    assert ambiente.criar(data_exibicao="2026-10-30").status_code == 422
+    assert ambiente.criar(data_exibicao="2026-10-29").status_code == 202
+
+
+@pytest.mark.parametrize(
+    "valor",
+    ["31/12/1999", "1999-13-40", "ontem", 20261029, "", "1999-12-31T00:00:00"],
+)
 def test_data_de_exibicao_mal_formada_da_422(valor: Any) -> None:
     assert Ambiente().criar(data_exibicao=valor).status_code == 422
 
