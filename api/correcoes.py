@@ -1509,7 +1509,7 @@ def aplicar(
                 continue
             if c.id in atendidas:
                 if entrada.atender_na_pessoa is not None:
-                    entrada.atender_na_pessoa(pessoa, nome)
+                    entrada.atender_na_pessoa(pessoa, nome, c)
                 continue
             assert entrada.aplicar_na_pessoa is not None
             entrada.aplicar_na_pessoa(resultado, pessoa, c)
@@ -1762,7 +1762,7 @@ class Tipo:
         Callable[[dict[str, Any], dict[str, Any], Correcao], None] | None
     ) = None
     # Na pessoa cujo modelo já traz o "depois": o que fazer, se algo.
-    atender_na_pessoa: Callable[[dict[str, Any], str], None] | None = None
+    atender_na_pessoa: Callable[[dict[str, Any], str, Correcao], None] | None = None
     # A pessoa pode ficar sem nenhuma ocorrência e sumir da decupagem.
     pode_esvaziar: bool = False
     # O item da versão nova já traz o "depois".
@@ -2029,12 +2029,20 @@ def _renomear_pessoa(
     resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
 ) -> None:
     pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
-    if c.catalogo_id is not None:
-        pessoa["catalogo_id"] = c.catalogo_id
+    _catalogo_id_na_pessoa(pessoa, c)
 
 
-def _manter_o_nome_do_modelo(pessoa: dict[str, Any], nome: str) -> None:
+def _manter_o_nome_do_modelo(pessoa: dict[str, Any], nome: str, c: Correcao) -> None:
     pessoa["nome"], pessoa["origem"] = nome, "modelo"
+    _catalogo_id_na_pessoa(pessoa, c)
+
+
+def _catalogo_id_na_pessoa(pessoa: dict[str, Any], c: Correcao) -> None:
+    # O nome novo vale por inteiro: o id de um nome anterior não fica.
+    if c.catalogo_id is None:
+        pessoa.pop("catalogo_id", None)
+    else:
+        pessoa["catalogo_id"] = c.catalogo_id
 
 
 def _fontes_na_pessoa(

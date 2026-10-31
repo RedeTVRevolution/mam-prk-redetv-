@@ -1,7 +1,8 @@
 """A correção de nome da revisora grava o `catalogo_id` da pessoa do catálogo
 que casa com o nome novo (#108)."""
 
-from api.tests.test_correcoes import Mundo
+from api.tests.test_correcoes import MODELO, Mundo
+from api.tests.test_correcoes import _pessoa as _pessoa_do_modelo
 
 
 def _pessoa(mundo: Mundo, id: str) -> dict[str, object]:
@@ -55,3 +56,27 @@ def test_correcao_desfeita_nao_deixa_o_catalogo_id() -> None:
     mundo.desfazer(cid)
 
     assert _pessoa(mundo, "pes01").get("catalogo_id") is None
+
+
+def test_renomear_para_nome_fora_do_catalogo_tira_o_id_do_nome_anterior() -> None:
+    mundo = Mundo(["editor"])
+    mundo.catalogo.acrescentar("Ana Souza Lima", "repórter", [])
+    mundo.corrigir()
+
+    mundo.avancar()
+    mundo.corrigir(valor="Fulano de Tal")
+
+    assert _pessoa(mundo, "pes01").get("catalogo_id") is None
+
+
+def test_correcao_atendida_pelo_modelo_novo_mantem_o_catalogo_id() -> None:
+    mundo = Mundo(["editor"])
+    ana = mundo.catalogo.acrescentar("Ana Souza Lima", "repórter", [])
+    mundo.corrigir()
+
+    mundo.reprocessar(
+        {**MODELO, "pessoas": [_pessoa_do_modelo("p9", "ANA SOUZA LIMA", 1200, 4800)]}
+    )
+
+    pessoa = mundo.decupagem()["pessoas"][0]
+    assert (pessoa["origem"], pessoa["catalogo_id"]) == ("modelo", ana.id)

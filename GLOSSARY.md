@@ -35,7 +35,8 @@ Contexto fixo de um programa (apresentadores, repórteres, merchandising frequen
 ### Pessoas e evidência
 
 **Catálogo de pessoas**:
-Dado vivo no Firestore (`api/catalogo.py`): cada pessoa tem id estável, nome, papel, apelidos e referências de rosto (origem `web` ou `acervo`). A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo.
+Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel, apelidos e as referências de rosto ligadas a ela (origem `web` ou `acervo`). Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo.
+_Evitar_: base de famosos
 
 **Aparição**:
 Pessoa visível na imagem; só ela conta como tempo de tela.
@@ -56,10 +57,6 @@ _Evitar_: galeria facial
 
 **Palpite**:
 Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
-
-**Catálogo de pessoas**:
-Nomes, papéis e apelidos das pessoas frequentes da emissora, em todos os programas. Começa à mão e cresce com as correções e sugestões aprovadas. Não guarda rostos: as fotos são as referências de rosto.
-_Evitar_: base de famosos
 
 ### Busca
 

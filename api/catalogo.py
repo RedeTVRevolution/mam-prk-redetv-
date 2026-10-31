@@ -146,6 +146,6 @@ def carregar_programas(
     for p in _pessoas_dos_programas(programas):
         if catalogo.achar(p["nome"]):
             continue
-        catalogo.acrescentar(p["nome"], p["papel"], list(p["apelidos"]))
+        catalogo.acrescentar(p["nome"], p["papel"], list(p.get("apelidos", [])))
         entraram += 1
     return entraram
