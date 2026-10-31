@@ -1,6 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +13,7 @@ from api.chaves import (
     emitir_chave,
 )
 from api.correcoes import (
+    TIPOS,
     Autoria,
     Correcao,
     CorrecaoJaExiste,
@@ -22,6 +23,7 @@ from api.correcoes import (
     NovaCorrecao,
     RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoesEmMemoria,
+    TipoNovo,
     aplicar,
     corrigir,
     descartar,
@@ -949,3 +951,61 @@ def test_fila_sem_decupagem_editar_da_403_e_chave_de_sistema_tambem() -> None:
     assert _fila(mundo).status_code == 403
     assert _resolver(mundo, "c", "descartar").status_code == 403
     assert _fila(mundo, mundo.chave_com_todos_os_escopos()).status_code == 403
+
+
+# --- Uma entrada por tipo e formato gravado (#132) ---
+
+
+def test_todo_tipo_novo_tem_entrada_na_tabela() -> None:
+    assert [t for t in get_args(TipoNovo) if t not in TIPOS] == []
+
+
+def test_registros_no_formato_gravado_continuam_sendo_aplicados() -> None:
+    # Como o Firestore guarda hoje: `valor` e `depois` em texto, a âncora em dict.
+    gravados = [
+        {
+            "id": "c1",
+            "job_id": "j1",
+            "autor_uid": "u1",
+            "autor_email": "ana@redetv.com.br",
+            "criada_em": BASE.isoformat(),
+            "motivo": "sobrenome",
+            "tipo": "pessoa.renomear",
+            "item_id": "pes01",
+            "antes": "Ana Souza",
+            "depois": "Ana Souza Lima",
+            "ancora": {
+                "versao": VERSAO,
+                "tipo_do_item": "pessoa",
+                "identidade": "ana souza",
+                "inicio_ms": 1000,
+                "fim_ms": 5000,
+            },
+        },
+        {
+            "id": "c2",
+            "job_id": "j1",
+            "autor_uid": "u1",
+            "autor_email": "ana@redetv.com.br",
+            "criada_em": (BASE + timedelta(minutes=1)).isoformat(),
+            "motivo": "tempos",
+            "tipo": "item.tempos",
+            "item_id": "pau01",
+            "antes": "0-20000",
+            "depois": "0-18000",
+            "ancora": {
+                "versao": VERSAO,
+                "tipo_do_item": "pauta",
+                "identidade": "economia",
+                "inicio_ms": 0,
+                "fim_ms": 20000,
+            },
+        },
+    ]
+
+    correcoes = [Correcao.model_validate(g) for g in gravados]
+    entregue = aplicar(MODELO, VERSAO, correcoes)
+
+    assert entregue["pessoas"][0]["nome"] == "Ana Souza Lima"
+    assert entregue["pessoas"][0]["origem"] == "revisao"
+    assert entregue["pautas"][0]["fim_ms"] == 18000
