@@ -15,7 +15,7 @@ import { baixarDecupagem } from './baixar.ts'
 import { dataDeExibicao, type Job } from './jobs.ts'
 import { FaixasDoVideo } from './FaixasDoVideo.tsx'
 import { Link } from './Link.tsx'
-import { faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
+import { duracaoDaLinha, faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
 import { enderecoDaTelaAnterior, enderecoDoVideo } from './rotas.ts'
@@ -27,6 +27,7 @@ const SALTO_LONGO_S = 5
 const AVISO_DO_TC_MS = 1500
 
 const GRUPO = 'Player'
+const GRUPO_DA_LINHA = 'Linha do tempo'
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 function tecla(e: KeyboardEvent, ...teclas: string[]): boolean {
@@ -110,12 +111,7 @@ export default function Visualizador({
   }, [api, job.id, concluido, cargasDaDecupagem])
 
   const faixas = useMemo(() => (decupagem ? faixasDoVisualizador(decupagem) : null), [decupagem])
-  // A duração do player; sem ela, a do Job e, por fim, o fim do último bloco.
-  const duracaoDaLinhaMs = Math.max(
-    duracaoMs,
-    ...(faixas ?? []).flatMap((f) => f.blocos.map((b) => b.fim_ms)),
-    1,
-  )
+  const duracaoDaLinhaMs = duracaoDaLinha(duracaoMs, faixas ?? [])
 
   // Outro `?t=` no mesmo vídeo salta o player.
   const tAnterior = useRef(t)
@@ -214,8 +210,12 @@ export default function Visualizador({
       },
     },
     { tecla: 'F', acao: 'Tela cheia', grupo: GRUPO, casa: (e) => tecla(e, 'f'), executar: telaCheia },
-    { tecla: '← →', acao: 'Numa faixa: passar de bloco (o player não anda)', grupo: 'Linha do tempo' },
-    { tecla: 'Enter', acao: 'Numa faixa: saltar ao bloco', grupo: 'Linha do tempo' },
+    {
+      tecla: '← →',
+      acao: 'Numa faixa: passar de ocorrência (o player não anda)',
+      grupo: GRUPO_DA_LINHA,
+    },
+    { tecla: 'Enter', acao: 'Numa faixa: saltar à ocorrência', grupo: GRUPO_DA_LINHA },
   ])
 
   const tc = useMemo(

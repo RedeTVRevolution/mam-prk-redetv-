@@ -9,8 +9,10 @@ import {
   limitarAlca,
   limitesDasAlcas,
   maiorFim,
+  duracaoDaLinha,
   marcasDaRegua,
   posicaoDoBloco,
+  posicaoDoCursor,
   riscosDeCorte,
   trechosSemPauta,
   vizinhoNaFaixa,
@@ -286,7 +288,7 @@ test('as chaves dos blocos são únicas entre as faixas', () => {
   expect(new Set(chaves).size).toBe(chaves.length)
 })
 
-test('a régua marca de 1, 5 ou 10 em 10 minutos conforme a duração', () => {
+test('a régua marca de 1, 5 ou 10 em 10 minutos conforme a duração, e o fim', () => {
   expect(marcasDaRegua(8 * 60_000).map((m) => m.rotulo)).toEqual([
     '00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00', '07:00', '08:00',
   ])
@@ -294,14 +296,38 @@ test('a régua marca de 1, 5 ou 10 em 10 minutos conforme a duração', () => {
     '00:00', '05:00', '10:00', '15:00', '20:00',
   ])
   const longa = marcasDaRegua(2_959_000)
-  expect(longa.map((m) => m.rotulo)).toEqual(['00:00', '10:00', '20:00', '30:00', '40:00'])
+  expect(longa.map((m) => m.rotulo)).toEqual([
+    '00:00', '10:00', '20:00', '30:00', '40:00', '49:19',
+  ])
   expect(longa[1].percentual).toBeCloseTo((600_000 / 2_959_000) * 100, 6)
+  expect(longa.map((m) => m.noFim)).toEqual([false, false, false, false, false, true])
   expect(marcasDaRegua(0)).toEqual([])
 })
 
-test('os riscos de corte ficam em percentual e ignoram o que está fora do vídeo', () => {
-  expect(riscosDeCorte([0, 25_000, 50_000, 100_000, 200_000], 100_000)).toEqual([25, 50])
+test('a marca redonda a menos de meio passo do fim dá lugar à do fim', () => {
+  expect(marcasDaRegua(2_520_000).map((m) => m.rotulo)).toEqual([
+    '00:00', '10:00', '20:00', '30:00', '42:00',
+  ])
+})
+
+test('os riscos de corte ficam em percentual, sem repetição, e ignoram o que está fora do vídeo', () => {
+  expect(riscosDeCorte([0, 25_000, 25_000, 50_000, 100_000, 200_000], 100_000)).toEqual([25, 50])
   expect(riscosDeCorte(null, 100_000)).toEqual([])
+})
+
+test('o cursor fica dentro da trilha', () => {
+  expect(posicaoDoCursor(25_000, 100_000)).toBe(25)
+  expect(posicaoDoCursor(150_000, 100_000)).toBe(100)
+  expect(posicaoDoCursor(-1, 100_000)).toBe(0)
+})
+
+test('a duração da linha do tempo é a do player, ou o fim do último bloco se passar dela', () => {
+  const faixas = [
+    { chave: 'pauta', rotulo: 'Pautas', cor: '', blocos: [{ chave: 'p', nome: '', inicio_ms: 0, fim_ms: 90_000 }] },
+  ]
+  expect(duracaoDaLinha(100_000, faixas)).toBe(100_000)
+  expect(duracaoDaLinha(0, faixas)).toBe(90_000)
+  expect(duracaoDaLinha(0, [])).toBe(1)
 })
 
 test('o trecho sem pauta vai do fim da última pauta ao fim do vídeo', () => {

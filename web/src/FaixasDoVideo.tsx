@@ -1,10 +1,11 @@
 import { Box, Text, Tooltip } from '@mantine/core'
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react'
 import {
   type FaixaDoVisualizador,
+  type Intervalo,
   marcasDaRegua,
-  percentualDoTempo,
   posicaoDoBloco,
+  posicaoDoCursor,
   relogio,
   riscosDeCorte,
   tempoDoPonteiro,
@@ -81,139 +82,134 @@ export function FaixasDoVideo({
             aria-hidden
             style={{ lineHeight: `${ALTURA_DA_FAIXA}px` }}
           >
-            {`${faixa.rotulo} ${faixa.blocos.length}`}
+            {rotuloDaFaixa(faixa)}
           </Text>
         ))}
       </Box>
-      <Box style={{ flex: 1, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column', gap: VAO }}>
       <Box
-        ref={trilha}
-        role="presentation"
         style={{
+          flex: 1,
+          minWidth: 0,
           position: 'relative',
-          height: ALTURA_DA_REGUA,
-          cursor: 'pointer',
-          touchAction: 'none',
-          borderBottom: `1px solid ${CORES.borda}`,
-        }}
-        onPointerDown={(e) => {
-          arrastando.current = true
-          e.currentTarget.setPointerCapture?.(e.pointerId)
-          saltarNoPonteiro(e)
-        }}
-        onPointerMove={(e) => {
-          if (arrastando.current) saltarNoPonteiro(e)
-        }}
-        onPointerUp={() => {
-          arrastando.current = false
-        }}
-        onPointerCancel={() => {
-          arrastando.current = false
+          display: 'flex',
+          flexDirection: 'column',
+          gap: VAO,
         }}
       >
-        {marcasDaRegua(duracaoMs).map((m) => (
-          <Text
-            key={m.ms}
-            size="xs"
-            c="dimmed"
-            style={{
-              position: 'absolute',
-              left: `${m.percentual}%`,
-              fontVariantNumeric: 'tabular-nums',
-              transform: m.percentual > 95 ? 'translateX(-100%)' : undefined,
-              pointerEvents: 'none',
-            }}
-          >
-            {m.rotulo}
-          </Text>
-        ))}
-        {riscosDeCorte(cortesMs, duracaoMs).map((p) => (
-          <Box
-            key={p}
-            data-corte=""
-            style={{
-              position: 'absolute',
-              left: `${p}%`,
-              bottom: 0,
-              width: 1,
-              height: 6,
-              background: CORES.textoSecundario,
-              pointerEvents: 'none',
-            }}
-          />
-        ))}
-      </Box>
-      {faixas.map((faixa) => {
-        const ativo =
-          ativos[faixa.chave] ??
-          faixa.blocos.find((b) => b.chave === selecionada)?.chave ??
-          faixa.blocos[0]?.chave
-        const nome = `${faixa.rotulo} ${faixa.blocos.length}`
-        return (
+        <Box
+          ref={trilha}
+          role="presentation"
+          style={{
+            position: 'relative',
+            height: ALTURA_DA_REGUA,
+            cursor: 'pointer',
+            touchAction: 'none',
+            borderBottom: `1px solid ${CORES.borda}`,
+          }}
+          onPointerDown={(e) => {
+            arrastando.current = true
+            e.currentTarget.setPointerCapture?.(e.pointerId)
+            saltarNoPonteiro(e)
+          }}
+          onPointerMove={(e) => {
+            if (arrastando.current) saltarNoPonteiro(e)
+          }}
+          onPointerUp={() => {
+            arrastando.current = false
+          }}
+          onPointerCancel={() => {
+            arrastando.current = false
+          }}
+        >
+          {marcasDaRegua(duracaoMs).map((m) => (
+            <Text
+              key={m.ms}
+              size="xs"
+              c="dimmed"
+              style={{
+                position: 'absolute',
+                left: `${m.percentual}%`,
+                fontVariantNumeric: 'tabular-nums',
+                transform: m.noFim ? 'translateX(-100%)' : undefined,
+                pointerEvents: 'none',
+              }}
+            >
+              {m.rotulo}
+            </Text>
+          ))}
+          {riscosDeCorte(cortesMs, duracaoMs).map((p) => (
+            <Box
+              key={p}
+              data-corte=""
+              style={{
+                position: 'absolute',
+                left: `${p}%`,
+                bottom: 0,
+                width: 1,
+                height: 6,
+                background: CORES.textoSecundario,
+                pointerEvents: 'none',
+              }}
+            />
+          ))}
+        </Box>
+        {faixas.map((faixa) => {
+          const ativo =
+            ativos[faixa.chave] ??
+            faixa.blocos.find((b) => b.chave === selecionada)?.chave ??
+            faixa.blocos[0]?.chave
+          return (
             <Box
               key={faixa.chave}
               role="group"
-              aria-label={nome}
+              aria-label={rotuloDaFaixa(faixa)}
+              // A faixa sem blocos ainda é uma parada de Tab.
+              tabIndex={faixa.blocos.length === 0 ? 0 : undefined}
               onKeyDown={(e) => aoTeclar(e, faixa)}
               style={{ position: 'relative', height: ALTURA_DA_FAIXA }}
             >
               {faixa.chave === 'pauta' &&
                 semPauta.map((t) => {
                   const dica = `Sem decupagem, ${relogio(t.inicio_ms)}–${relogio(t.fim_ms)}`
-                  const { esquerda, largura } = posicaoDoBloco(t, duracaoMs)
                   return (
                     <Tooltip key={t.inicio_ms} label={dica}>
                       <Box
                         role="img"
                         aria-label={dica}
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          bottom: 0,
-                          left: `${esquerda}%`,
-                          width: `${largura}%`,
-                          background: HACHURADO,
-                        }}
+                        style={{ ...trecho(t, duracaoMs), background: HACHURADO }}
                       />
                     </Tooltip>
                   )
                 })}
-              {faixa.blocos.map((b) => {
-                const { esquerda, largura } = posicaoDoBloco(b, duracaoMs)
-                return (
-                  <Tooltip key={b.chave} label={b.nome}>
-                    <Box
-                      component="button"
-                      type="button"
-                      data-chave={b.chave}
-                      aria-label={b.nome}
-                      aria-pressed={selecionada === b.chave}
-                      tabIndex={b.chave === ativo ? 0 : -1}
-                      onFocus={() => setAtivos((a) => ({ ...a, [faixa.chave]: b.chave }))}
-                      onClick={() => aoSelecionar(b.chave, b.inicio_ms)}
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        bottom: 0,
-                        left: `${esquerda}%`,
-                        width: `${largura}%`,
-                        minWidth: 2,
-                        padding: 0,
-                        cursor: 'pointer',
-                        background: faixa.cor,
-                        border: `1px solid ${CORES.fundo}`,
-                        borderRadius: 2,
-                        outline: selecionada === b.chave ? `2px solid ${CORES.foco}` : undefined,
-                        outlineOffset: 1,
-                        zIndex: selecionada === b.chave ? 1 : undefined,
-                      }}
-                    />
-                  </Tooltip>
-                )
-              })}
+              {faixa.blocos.map((b) => (
+                <Tooltip key={b.chave} label={b.nome}>
+                  <Box
+                    component="button"
+                    type="button"
+                    data-chave={b.chave}
+                    aria-label={b.nome}
+                    aria-pressed={selecionada === b.chave}
+                    tabIndex={b.chave === ativo ? 0 : -1}
+                    onFocus={() => setAtivos((a) => ({ ...a, [faixa.chave]: b.chave }))}
+                    onClick={() => aoSelecionar(b.chave, b.inicio_ms)}
+                    style={{
+                      ...trecho(b, duracaoMs),
+                      minWidth: 2,
+                      padding: 0,
+                      cursor: 'pointer',
+                      background: faixa.cor,
+                      border: `1px solid ${CORES.fundo}`,
+                      borderRadius: 'var(--mantine-radius-xs)',
+                      outline: selecionada === b.chave ? `2px solid ${CORES.foco}` : undefined,
+                      outlineOffset: 1,
+                      zIndex: selecionada === b.chave ? 1 : undefined,
+                    }}
+                  />
+                </Tooltip>
+              ))}
             </Box>
-        )
-      })}
+          )
+        })}
         <Box
           aria-hidden
           data-cursor=""
@@ -221,7 +217,7 @@ export function FaixasDoVideo({
             position: 'absolute',
             top: 0,
             bottom: 0,
-            left: `${Math.min(percentualDoTempo(atualMs, duracaoMs), 100)}%`,
+            left: `${posicaoDoCursor(atualMs, duracaoMs)}%`,
             width: 2,
             background: CORES.texto,
             pointerEvents: 'none',
@@ -231,4 +227,12 @@ export function FaixasDoVideo({
       </Box>
     </Box>
   )
+}
+
+const rotuloDaFaixa = (f: FaixaDoVisualizador): string => `${f.rotulo} ${f.blocos.length}`
+
+/** O estilo de um trecho de tempo dentro da faixa, com a posição do módulo da linha do tempo. */
+function trecho(t: Intervalo, duracaoMs: number): CSSProperties {
+  const { esquerda, largura } = posicaoDoBloco(t, duracaoMs)
+  return { position: 'absolute', top: 0, bottom: 0, left: `${esquerda}%`, width: `${largura}%` }
 }

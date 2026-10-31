@@ -396,25 +396,47 @@ export interface MarcaDaRegua {
   ms: number
   percentual: number
   rotulo: string
+  /** A marca do fim do vídeo: o rótulo fica à esquerda dela, para não sair da régua. */
+  noFim: boolean
 }
 
-/** As marcas da régua: a cada 1 minuto até 10, a cada 5 até 30 e a cada 10 acima disso. */
+/**
+ * As marcas da régua: a cada 1 minuto até 10, a cada 5 até 30 e a cada 10 acima disso, mais a
+ * do fim do vídeo; a marca redonda a menos de meio passo do fim sai, para os rótulos não se
+ * encostarem.
+ */
 export function marcasDaRegua(duracaoMs: number): MarcaDaRegua[] {
   if (duracaoMs <= 0) return []
   const minutos = duracaoMs / 60_000
   const passoMs = (minutos <= 10 ? 1 : minutos <= 30 ? 5 : 10) * 60_000
-  const marcas: MarcaDaRegua[] = []
-  for (let ms = 0; ms <= duracaoMs; ms += passoMs) {
-    marcas.push({ ms, percentual: percentualDoTempo(ms, duracaoMs), rotulo: relogio(ms) })
-  }
-  return marcas
+  const tempos: number[] = []
+  for (let ms = 0; ms < duracaoMs; ms += passoMs) tempos.push(ms)
+  if (tempos.length > 1 && duracaoMs - tempos[tempos.length - 1] < passoMs / 2) tempos.pop()
+  tempos.push(duracaoMs)
+  return tempos.map((ms) => ({
+    ms,
+    percentual: percentualDoTempo(ms, duracaoMs),
+    rotulo: relogio(ms),
+    noFim: ms === duracaoMs,
+  }))
 }
 
-/** Os cortes de câmera dentro do vídeo, em % da largura. */
+/** Os cortes de câmera dentro do vídeo, em % da largura, sem repetição. */
 export function riscosDeCorte(cortesMs: number[] | null | undefined, duracaoMs: number): number[] {
-  return (cortesMs ?? [])
+  return [...new Set(cortesMs ?? [])]
     .filter((ms) => ms > 0 && ms < duracaoMs)
     .map((ms) => percentualDoTempo(ms, duracaoMs))
+}
+
+/** A posição do cursor de reprodução, em % da largura, dentro da trilha. */
+export const posicaoDoCursor = (atualMs: number, duracaoMs: number): number =>
+  Math.min(Math.max(percentualDoTempo(atualMs, duracaoMs), 0), 100)
+
+/** A duração da linha do tempo: a do player ou, se um bloco passa dela, o fim do último bloco. */
+export function duracaoDaLinha(duracaoMs: number, faixas: FaixaDoVisualizador[]): number {
+  let maior = Math.max(duracaoMs, 1)
+  for (const f of faixas) for (const b of f.blocos) maior = Math.max(maior, b.fim_ms)
+  return maior
 }
 
 /** Menor vão sem pauta que vale mostrar. */

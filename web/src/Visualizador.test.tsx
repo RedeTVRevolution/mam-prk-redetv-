@@ -482,6 +482,19 @@ test('cada faixa tem uma parada de Tab só', async () => {
   expect(paradas.length).toBe(1)
 })
 
+test('a faixa sem ocorrências também é uma parada de Tab', async () => {
+  await abrirComFaixas()
+
+  expect(screen.getByRole('group', { name: 'Comerciais 0' }).tabIndex).toBe(0)
+  expect(screen.getByRole('group', { name: 'Pessoas 2' }).hasAttribute('tabindex')).toBe(false)
+})
+
+test('a régua termina com o rótulo do fim do vídeo', async () => {
+  await abrirComFaixas()
+
+  expect(screen.getByText('49:19')).toBeTruthy()
+})
+
 test('clicar na régua salta o player para o tempo do ponteiro', async () => {
   const { container } = await abrirComFaixas()
   const regua = container.querySelector('[data-corte]')?.parentElement as HTMLElement
