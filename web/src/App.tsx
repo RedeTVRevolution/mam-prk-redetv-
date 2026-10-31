@@ -11,7 +11,7 @@ import {
   Text,
 } from '@mantine/core'
 import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { criarClienteDaApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import Biblioteca from './Biblioteca.tsx'
@@ -45,10 +45,19 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
     setAberto(null)
   }, [autenticador])
 
-  // O 401 de qualquer tela chega aqui, num lugar só.
+  // O 401 de qualquer tela chega aqui, num lugar só. Chamadas em paralelo podem voltar 401
+  // juntas: a sessão cai uma vez só, e o próximo login volta a ouvir o aviso.
+  const expirou = useRef(false)
+  const aoSessaoExpirada = useCallback(() => {
+    if (expirou.current) return
+    expirou.current = true
+    void sair()
+  }, [sair])
   const api = useMemo(
-    () => criarClienteDaApi(autenticador, () => void sair()),
-    [autenticador, sair],
+    // O cliente só guarda o callback; o ref é lido quando chega um 401, fora da renderização.
+    // oxlint-disable-next-line react/refs
+    () => criarClienteDaApi(autenticador, aoSessaoExpirada),
+    [autenticador, aoSessaoExpirada],
   )
 
   const verificar = useCallback(async () => {
@@ -67,6 +76,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
   }, [verificar])
 
   function reverificar() {
+    expirou.current = false
     setSessao({ tipo: 'verificando' })
     void verificar()
   }

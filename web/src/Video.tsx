@@ -44,6 +44,7 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   type RefObject,
 } from 'react'
 import {
@@ -1236,62 +1237,77 @@ function NomeDaPessoa({
   )
 }
 
-/** Modal da Ilha de edição: novo nome e motivo; a API confere a permissão e a versão. */
-function CorrigirPessoa({
-  pessoa,
-  versao,
-  api,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-}: {
-  pessoa: Pessoa | null
+/** O que todo modal de Correção recebe da tela do vídeo. */
+interface PropsDaCorrecao {
   versao: string
   api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
+}
+
+const DECUPAGEM_MUDOU = 'A decupagem mudou e foi recarregada. Confira e salve de novo.'
+
+/**
+ * Casca comum dos modais de Correção: os campos do modal, o motivo, o erro e Cancelar/Salvar.
+ * `enviar` grava com o motivo; os erros do cliente viram as mensagens da tela.
+ */
+function FormularioDeCorrecao({
+  titulo,
+  aberto,
+  podeSalvar,
+  conflito = DECUPAGEM_MUDOU,
+  invalido,
+  enviar,
+  aoFechar,
+  aoSalvar,
+  aoVersaoDesatualizada,
+  children,
+}: {
+  titulo: string
+  aberto: boolean
+  /** Os campos do modal permitem salvar; o motivo o formulário confere. */
+  podeSalvar: boolean
+  /** Mensagem do 409, depois de recarregar a decupagem. */
+  conflito?: string
+  /** Mensagem do 422; sem ela, vale a mensagem genérica. */
+  invalido?: string
+  enviar: (motivo: string) => Promise<void>
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
+  children: ReactNode
 }) {
   const catalogo = useCatalogo()
-  const [nome, setNome] = useState(pessoa?.nome ?? '')
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
 
   async function salvar() {
-    if (!pessoa) return
     setSalvando(true)
     setErro(null)
     try {
-      await api.corrigir({
-        tipo: 'pessoa.renomear',
-        item_id: pessoa.id,
-        valor: nome,
-        motivo,
-        versao,
-      })
+      await enviar(motivo)
       aoSalvar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) {
-        // O cliente já avisou o App.
-      } else if (e instanceof ConflitoNaApi) {
+      if (e instanceof ConflitoNaApi) {
         // Recarrega o painel: a versão nova chega ao modal e o Editor pode salvar de novo.
         aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else setErro('Não foi possível salvar a correção.')
+        setErro(conflito)
+      } else if (e instanceof PedidoInvalido && invalido) {
+        setErro(invalido)
+      } else if (!(e instanceof SessaoExpirada)) {
+        // Na sessão expirada o cliente já avisou o App.
+        setErro('Não foi possível salvar a correção.')
+      }
       setSalvando(false)
     }
   }
 
   return (
-    <Modal opened={pessoa !== null} onClose={aoFechar} title="Corrigir pessoa" centered>
+    <Modal opened={aberto} onClose={aoFechar} title={titulo} centered>
       <Stack gap="sm">
-        <TextInput
-          label="Nome"
-          value={nome}
-          maxLength={catalogo.limites.nome}
-          onChange={(e) => setNome(e.currentTarget.value)}
-        />
+        {children}
         <Textarea
           label="Motivo"
           value={motivo}
@@ -1311,7 +1327,7 @@ function CorrigirPessoa({
           <Button
             type="button"
             loading={salvando}
-            disabled={!nome.trim() || !motivo.trim()}
+            disabled={!podeSalvar || !motivo.trim()}
             onClick={() => void salvar()}
           >
             Salvar
@@ -1319,6 +1335,45 @@ function CorrigirPessoa({
         </Group>
       </Stack>
     </Modal>
+  )
+}
+
+/** Modal da Ilha de edição: novo nome e motivo; a API confere a permissão e a versão. */
+function CorrigirPessoa({
+  pessoa,
+  versao,
+  api,
+  ...props
+}: PropsDaCorrecao & { pessoa: Pessoa | null }) {
+  const catalogo = useCatalogo()
+  const [nome, setNome] = useState(pessoa?.nome ?? '')
+
+  async function enviar(motivo: string) {
+    if (!pessoa) return
+    await api.corrigir({
+      tipo: 'pessoa.renomear',
+      item_id: pessoa.id,
+      valor: nome,
+      motivo,
+      versao,
+    })
+  }
+
+  return (
+    <FormularioDeCorrecao
+      {...props}
+      titulo="Corrigir pessoa"
+      aberto={pessoa !== null}
+      podeSalvar={!!nome.trim()}
+      enviar={enviar}
+    >
+      <TextInput
+        label="Nome"
+        value={nome}
+        maxLength={catalogo.limites.nome}
+        onChange={(e) => setNome(e.currentTarget.value)}
+      />
+    </FormularioDeCorrecao>
   )
 }
 
@@ -1377,18 +1432,8 @@ function CorrigirOcorrencia({
   pessoas,
   versao,
   api,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-}: {
-  acao: AcaoDeOcorrencia | null
-  pessoas: Pessoa[]
-  versao: string
-  api: ClienteDoJob
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-}) {
+  ...props
+}: PropsDaCorrecao & { acao: AcaoDeOcorrencia | null; pessoas: Pessoa[] }) {
   const catalogo = useCatalogo()
   const [destino, setDestino] = useState<string>('citada_na_fala')
   const [evidencia, setEvidencia] = useState('')
@@ -1398,9 +1443,6 @@ function CorrigirOcorrencia({
   const [nome, setNome] = useState('')
   const [inicio, setInicio] = useState(acao && acao.tipo === 'tempos' ? tempo(acao.inicio_ms) : '')
   const [fim, setFim] = useState(acao && acao.tipo === 'tempos' ? tempo(acao.fim_ms) : '')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
 
   const inicioMs = acao?.tipo === 'tempos' ? tempoDoCampo(inicio, acao.inicio_ms) : lerTempo(inicio)
   const fimMs = acao?.tipo === 'tempos' ? tempoDoCampo(fim, acao.fim_ms) : lerTempo(fim)
@@ -1463,132 +1505,92 @@ function CorrigirOcorrencia({
 
   const corpo = pedido()
 
-  async function salvar() {
+  async function enviar(motivo: string) {
     if (!corpo) return
-    setSalvando(true)
-    setErro(null)
-    try {
-      await api.corrigir({ ...corpo, motivo, versao })
-      aoSalvar()
-    } catch (e) {
-      if (e instanceof SessaoExpirada) {
-        // O cliente já avisou o App.
-      } else if (e instanceof ConflitoNaApi) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof PedidoInvalido) {
-        setErro(
-          acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos'
-            ? 'Confira os campos: os tempos ficam dentro da duração do vídeo.'
-            : 'A ocorrência não foi encontrada. Recarregue a página e confira.',
-        )
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
-    }
+    await api.corrigir({ ...corpo, motivo, versao })
   }
 
   return (
-    <Modal
-      opened={acao !== null}
-      onClose={aoFechar}
-      title={acao ? TITULOS[acao.tipo] : ''}
-      centered
+    <FormularioDeCorrecao
+      {...props}
+      titulo={acao ? TITULOS[acao.tipo] : ''}
+      aberto={acao !== null}
+      podeSalvar={corpo !== null}
+      invalido={
+        acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos'
+          ? 'Confira os campos: os tempos ficam dentro da duração do vídeo.'
+          : 'A ocorrência não foi encontrada. Recarregue a página e confira.'
+      }
+      enviar={enviar}
     >
-      <Stack gap="sm">
-        {acao && acao.tipo !== 'acrescentar' && (
-          <Text size="sm">
-            {`${acao.pessoa.nome}, ${tempo(acao.inicio_ms)}–${tempo(acao.fim_ms)}`}
-          </Text>
-        )}
-        {acao?.tipo === 'nao_e' && (
-          <Text size="sm" c="dimmed">
-            O trecho passa para uma pessoa “não identificado”.
-          </Text>
-        )}
-        {acao?.tipo === 'aparicao_para_mencao' && (
-          <Select
-            label="Citada"
-            allowDeselect={false}
-            data={[
-              { value: 'citada_na_fala', label: 'Na fala' },
-              { value: 'citada_no_texto', label: 'No texto' },
-            ]}
-            value={destino}
-            onChange={(v) => setDestino(v ?? 'citada_na_fala')}
-          />
-        )}
-        {acao?.tipo === 'acrescentar' && (
-          <Select
-            label="Pessoa"
-            allowDeselect={false}
-            data={[
-              { value: NOVA_PESSOA, label: 'Nova pessoa' },
-              ...pessoas.map((p) => ({ value: p.id, label: p.nome })),
-            ]}
-            value={pessoaId}
-            onChange={(v) => setPessoaId(v ?? NOVA_PESSOA)}
-          />
-        )}
-        {acao?.tipo === 'acrescentar' && pessoaNova && (
-          <TextInput
-            label="Nome"
-            value={nome}
-            maxLength={catalogo.limites.nome}
-            onChange={(e) => setNome(e.currentTarget.value)}
-          />
-        )}
-        {(acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos') && (
-          <Group grow align="flex-start">
-            <TextInput
-              label="Início (mm:ss)"
-              value={inicio}
-              error={inicio && lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setInicio(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Fim (mm:ss)"
-              value={fim}
-              error={fim && lerTempo(fim) === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setFim(e.currentTarget.value)}
-            />
-          </Group>
-        )}
-        {(acao?.tipo === 'acrescentar' || acao?.tipo === 'mencao_para_aparicao') && (
-          <TextInput
-            label="Evidência"
-            description="O que mostra a pessoa na imagem"
-            value={evidencia}
-            maxLength={catalogo.limites.nome}
-            onChange={(e) => setEvidencia(e.currentTarget.value)}
-          />
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
+      {acao && acao.tipo !== 'acrescentar' && (
+        <Text size="sm">
+          {`${acao.pessoa.nome}, ${tempo(acao.inicio_ms)}–${tempo(acao.fim_ms)}`}
+        </Text>
+      )}
+      {acao?.tipo === 'nao_e' && (
+        <Text size="sm" c="dimmed">
+          O trecho passa para uma pessoa “não identificado”.
+        </Text>
+      )}
+      {acao?.tipo === 'aparicao_para_mencao' && (
+        <Select
+          label="Citada"
+          allowDeselect={false}
+          data={[
+            { value: 'citada_na_fala', label: 'Na fala' },
+            { value: 'citada_no_texto', label: 'No texto' },
+          ]}
+          value={destino}
+          onChange={(v) => setDestino(v ?? 'citada_na_fala')}
         />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={aoFechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={!corpo || !motivo.trim()}
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
+      )}
+      {acao?.tipo === 'acrescentar' && (
+        <Select
+          label="Pessoa"
+          allowDeselect={false}
+          data={[
+            { value: NOVA_PESSOA, label: 'Nova pessoa' },
+            ...pessoas.map((p) => ({ value: p.id, label: p.nome })),
+          ]}
+          value={pessoaId}
+          onChange={(v) => setPessoaId(v ?? NOVA_PESSOA)}
+        />
+      )}
+      {acao?.tipo === 'acrescentar' && pessoaNova && (
+        <TextInput
+          label="Nome"
+          value={nome}
+          maxLength={catalogo.limites.nome}
+          onChange={(e) => setNome(e.currentTarget.value)}
+        />
+      )}
+      {(acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos') && (
+        <Group grow align="flex-start">
+          <TextInput
+            label="Início (mm:ss)"
+            value={inicio}
+            error={inicio && lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setInicio(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Fim (mm:ss)"
+            value={fim}
+            error={fim && lerTempo(fim) === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setFim(e.currentTarget.value)}
+          />
         </Group>
-      </Stack>
-    </Modal>
+      )}
+      {(acao?.tipo === 'acrescentar' || acao?.tipo === 'mencao_para_aparicao') && (
+        <TextInput
+          label="Evidência"
+          description="O que mostra a pessoa na imagem"
+          value={evidencia}
+          maxLength={catalogo.limites.nome}
+          onChange={(e) => setEvidencia(e.currentTarget.value)}
+        />
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
@@ -1603,26 +1605,9 @@ function CorrigirTempos({
   depois,
   versao,
   api,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-}: {
-  selecao: Selecao | null
-  depois: Intervalo | null
-  versao: string
-  api: ClienteDoJob
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-}) {
-  const catalogo = useCatalogo()
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
-
-  const aberto = selecao !== null && depois !== null
-
-  async function salvar() {
+  ...props
+}: PropsDaCorrecao & { selecao: Selecao | null; depois: Intervalo | null }) {
+  async function enviar(motivo: string) {
     if (!selecao || !depois) return
     const { alvo, original } = selecao
     const base = { tipo: 'item.tempos', item_id: alvo.id, motivo, versao }
@@ -1638,62 +1623,28 @@ function CorrigirTempos({
         : alvo.tipo === 'comercial'
           ? { ...base, tipo_do_item: 'comercial', valor }
           : { ...base, valor }
-    setSalvando(true)
-    setErro(null)
-    try {
-      await api.corrigir(corpo)
-      aoSalvar()
-    } catch (e) {
-      if (e instanceof SessaoExpirada) {
-        // O cliente já avisou o App.
-      } else if (e instanceof ConflitoNaApi) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Cancele e arraste de novo.')
-      } else if (e instanceof PedidoInvalido) {
-        setErro(
-          'Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir.',
-        )
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
-    }
+    await api.corrigir(corpo)
   }
 
   return (
-    <Modal opened={aberto} onClose={aoFechar} title="Corrigir tempos" centered>
+    <FormularioDeCorrecao
+      {...props}
+      titulo="Corrigir tempos"
+      aberto={selecao !== null && depois !== null}
+      podeSalvar
+      conflito="A decupagem mudou e foi recarregada. Cancele e arraste de novo."
+      invalido="Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir."
+      enviar={enviar}
+    >
       {selecao && depois && (
-        <Stack gap="sm">
+        <>
           <Text size="sm">{`Antes: ${tempoPreciso(selecao.original.inicio_ms)}–${tempoPreciso(selecao.original.fim_ms)}`}</Text>
           <Text size="sm" fw={700}>
             {`Depois: ${tempoPreciso(depois.inicio_ms)}–${tempoPreciso(depois.fim_ms)}`}
           </Text>
-          <Textarea
-            label="Motivo"
-            value={motivo}
-            maxLength={catalogo.limites.motivo}
-            rows={3}
-            onChange={(e) => setMotivo(e.currentTarget.value)}
-          />
-          {erro && (
-            <Alert color="red" variant="light" role="alert">
-              {erro}
-            </Alert>
-          )}
-          <Group justify="flex-end">
-            <Button type="button" variant="default" onClick={aoFechar}>
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              loading={salvando}
-              disabled={!motivo.trim()}
-              onClick={() => void salvar()}
-            >
-              Salvar
-            </Button>
-          </Group>
-        </Stack>
+        </>
       )}
-    </Modal>
+    </FormularioDeCorrecao>
   )
 }
 
@@ -1705,22 +1656,12 @@ function CorrigirPauta({
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-}: {
-  pauta: Pauta | null
-  versao: string
-  api: ClienteDoJob
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-}) {
+}: PropsDaCorrecao & { pauta: Pauta | null }) {
   const catalogo = useCatalogo()
   const [titulo, setTitulo] = useState(pauta?.titulo ?? '')
   const [resumo, setResumo] = useState(pauta?.resumo ?? '')
   const [inicio, setInicio] = useState(pauta ? tempo(pauta.inicio_ms) : '')
   const [fim, setFim] = useState(pauta ? tempo(pauta.fim_ms) : '')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
   // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
   const [gravadas, setGravadas] = useState<Record<string, string>>({})
 
@@ -1738,28 +1679,17 @@ function CorrigirPauta({
     candidatas.push({ tipo: 'item.tempos', valor: `${inicioMs}-${fimMs}` })
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
 
-  async function salvar() {
+  async function enviar(motivo: string) {
     if (!pauta) return
-    setSalvando(true)
-    setErro(null)
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
         await api.corrigir({ ...m, item_id: pauta.id, motivo, versao })
         feitas[m.tipo] = m.valor
       }
-      aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) {
-        // O cliente já avisou o App.
-      } else if (e instanceof ConflitoNaApi) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof PedidoInvalido) {
-        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
+      throw e
     }
   }
 
@@ -1770,74 +1700,52 @@ function CorrigirPauta({
   }
 
   return (
-    <Modal opened={pauta !== null} onClose={fechar} title="Corrigir pauta" centered>
-      <Stack gap="sm">
+    <FormularioDeCorrecao
+      titulo="Corrigir pauta"
+      aberto={pauta !== null}
+      podeSalvar={
+        !!titulo.trim() && !(temposMudaram && !temposValidos) && !resumoApagado && mudancas.length > 0
+      }
+      invalido="Confira os campos: os tempos ficam dentro da duração do vídeo."
+      enviar={enviar}
+      aoFechar={fechar}
+      aoSalvar={aoSalvar}
+      aoVersaoDesatualizada={aoVersaoDesatualizada}
+    >
+      <TextInput
+        label="Título"
+        value={titulo}
+        maxLength={catalogo.limites.nome}
+        onChange={(e) => setTitulo(e.currentTarget.value)}
+      />
+      <Textarea
+        label="Resumo"
+        value={resumo}
+        maxLength={catalogo.limites.texto}
+        rows={4}
+        error={resumoApagado ? 'O resumo não pode ficar vazio' : undefined}
+        onChange={(e) => setResumo(e.currentTarget.value)}
+      />
+      <Group grow align="flex-start">
         <TextInput
-          label="Título"
-          value={titulo}
-          maxLength={catalogo.limites.nome}
-          onChange={(e) => setTitulo(e.currentTarget.value)}
+          label="Início (mm:ss)"
+          value={inicio}
+          error={lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
+          onChange={(e) => setInicio(e.currentTarget.value)}
         />
-        <Textarea
-          label="Resumo"
-          value={resumo}
-          maxLength={catalogo.limites.texto}
-          rows={4}
-          error={resumoApagado ? 'O resumo não pode ficar vazio' : undefined}
-          onChange={(e) => setResumo(e.currentTarget.value)}
+        <TextInput
+          label="Fim (mm:ss)"
+          value={fim}
+          error={lerTempo(fim) === null ? 'Use mm:ss' : undefined}
+          onChange={(e) => setFim(e.currentTarget.value)}
         />
-        <Group grow align="flex-start">
-          <TextInput
-            label="Início (mm:ss)"
-            value={inicio}
-            error={lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
-            onChange={(e) => setInicio(e.currentTarget.value)}
-          />
-          <TextInput
-            label="Fim (mm:ss)"
-            value={fim}
-            error={lerTempo(fim) === null ? 'Use mm:ss' : undefined}
-            onChange={(e) => setFim(e.currentTarget.value)}
-          />
-        </Group>
-        {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
-          <Text size="xs" c="red">
-            O início não pode vir depois do fim.
-          </Text>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
-        />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={fechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={
-              !titulo.trim() ||
-              !motivo.trim() ||
-              (temposMudaram && !temposValidos) ||
-              resumoApagado ||
-              mudancas.length === 0
-            }
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+      </Group>
+      {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
+        <Text size="xs" c="red">
+          O início não pode vir depois do fim.
+        </Text>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
@@ -1854,17 +1762,8 @@ function CorrigirCampo({
   campo,
   versao,
   api,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-}: {
-  campo: CampoAberto | null
-  versao: string
-  api: ClienteDoJob
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-}) {
+  ...props
+}: PropsDaCorrecao & { campo: CampoAberto | null }) {
   const catalogo = useCatalogo()
   const [tom, setTom] = useState<string | null>(
     campo?.modo === 'tom' &&
@@ -1884,9 +1783,6 @@ function CorrigirCampo({
   const [texto, setTexto] = useState(campo?.modo === 'texto' ? campo.texto.texto : '')
   const [inicio, setInicio] = useState('')
   const [fim, setFim] = useState('')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
 
   const inicioMs = lerTempo(inicio)
   const fimMs = lerTempo(fim)
@@ -1950,24 +1846,9 @@ function CorrigirCampo({
 
   const corpo = pedido()
 
-  async function salvar() {
+  async function enviar(motivo: string) {
     if (!corpo) return
-    setSalvando(true)
-    setErro(null)
-    try {
-      await api.corrigir({ ...corpo, motivo, versao })
-      aoSalvar()
-    } catch (e) {
-      if (e instanceof SessaoExpirada) {
-        // O cliente já avisou o App.
-      } else if (e instanceof ConflitoNaApi) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof PedidoInvalido) {
-        setErro('Confira os campos: o valor não foi aceito.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
-    }
+    await api.corrigir({ ...corpo, motivo, versao })
   }
 
   const tipoDeTexto = (
@@ -1981,109 +1862,84 @@ function CorrigirCampo({
   )
 
   return (
-    <Modal
-      opened={campo !== null}
-      onClose={aoFechar}
-      title={campo ? TITULOS_DO_CAMPO[campo.modo] : ''}
-      centered
+    <FormularioDeCorrecao
+      {...props}
+      titulo={campo ? TITULOS_DO_CAMPO[campo.modo] : ''}
+      aberto={campo !== null}
+      podeSalvar={corpo !== null}
+      invalido="Confira os campos: o valor não foi aceito."
+      enviar={enviar}
     >
-      <Stack gap="sm">
-        {campo?.modo === 'tom' && (
-          <Select
-            label="Tom"
-            data={comoSelect(catalogo.tons_da_pauta)}
-            value={tom}
-            allowDeselect={false}
-            onChange={setTom}
-          />
-        )}
-        {campo?.modo === 'fontes' && (
-          <Stack gap={4}>
-            <Text size="sm" fw={500}>
-              Fontes do nome
-            </Text>
-            <Chip.Group multiple value={fontes} onChange={setFontes}>
-              <Group gap={6}>
-                {catalogo.fontes_do_nome.map(({ valor, rotulo }) => (
-                  <Chip key={valor} value={valor} size="xs">
-                    {rotulo}
-                  </Chip>
-                ))}
-              </Group>
-            </Chip.Group>
-          </Stack>
-        )}
-        {campo?.modo === 'papel' && (
-          <>
-            <TextInput
-              label="Papel na cena"
-              value={papel}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setPapel(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Visual"
-              value={visual}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setVisual(e.currentTarget.value)}
-            />
-          </>
-        )}
-        {(campo?.modo === 'texto' || campo?.modo === 'novo_texto') && (
-          <>
-            {tipoDeTexto}
-            <Textarea
-              label="Texto"
-              value={texto}
-              maxLength={catalogo.limites.texto}
-              rows={3}
-              onChange={(e) => setTexto(e.currentTarget.value)}
-            />
-          </>
-        )}
-        {campo?.modo === 'novo_texto' && (
-          <Group grow align="flex-start">
-            <TextInput
-              label="Início (mm:ss)"
-              value={inicio}
-              error={inicio !== '' && inicioMs === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setInicio(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Fim (mm:ss)"
-              value={fim}
-              error={fim !== '' && fimMs === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setFim(e.currentTarget.value)}
-            />
-          </Group>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
+      {campo?.modo === 'tom' && (
+        <Select
+          label="Tom"
+          data={comoSelect(catalogo.tons_da_pauta)}
+          value={tom}
+          allowDeselect={false}
+          onChange={setTom}
         />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={aoFechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={!corpo || !motivo.trim()}
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
+      )}
+      {campo?.modo === 'fontes' && (
+        <Stack gap={4}>
+          <Text size="sm" fw={500}>
+            Fontes do nome
+          </Text>
+          <Chip.Group multiple value={fontes} onChange={setFontes}>
+            <Group gap={6}>
+              {catalogo.fontes_do_nome.map(({ valor, rotulo }) => (
+                <Chip key={valor} value={valor} size="xs">
+                  {rotulo}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
+        </Stack>
+      )}
+      {campo?.modo === 'papel' && (
+        <>
+          <TextInput
+            label="Papel na cena"
+            value={papel}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setPapel(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Visual"
+            value={visual}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setVisual(e.currentTarget.value)}
+          />
+        </>
+      )}
+      {(campo?.modo === 'texto' || campo?.modo === 'novo_texto') && (
+        <>
+          {tipoDeTexto}
+          <Textarea
+            label="Texto"
+            value={texto}
+            maxLength={catalogo.limites.texto}
+            rows={3}
+            onChange={(e) => setTexto(e.currentTarget.value)}
+          />
+        </>
+      )}
+      {campo?.modo === 'novo_texto' && (
+        <Group grow align="flex-start">
+          <TextInput
+            label="Início (mm:ss)"
+            value={inicio}
+            error={inicio !== '' && inicioMs === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setInicio(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Fim (mm:ss)"
+            value={fim}
+            error={fim !== '' && fimMs === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setFim(e.currentTarget.value)}
+          />
         </Group>
-      </Stack>
-    </Modal>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
@@ -2095,14 +1951,7 @@ function CorrigirTrecho({
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-}: {
-  trecho: Trecho | null
-  versao: string
-  api: ClienteDoJob
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-}) {
+}: PropsDaCorrecao & { trecho: Trecho | null }) {
   const catalogo = useCatalogo()
   const plano = trecho?.tipo === 'plano' ? trecho.plano : null
   const fala = trecho?.tipo === 'fala' ? trecho.fala : null
@@ -2112,9 +1961,6 @@ function CorrigirTrecho({
   const [limpo, setLimpo] = useState(plano?.plano_limpo ?? false)
   const [texto, setTexto] = useState(fala?.texto ?? '')
   const [locutor, setLocutor] = useState(fala?.locutor ?? '')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
   // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
   const [gravadas, setGravadas] = useState<Record<string, string>>({})
 
@@ -2148,27 +1994,16 @@ function CorrigirTrecho({
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
   const itemId = plano?.id ?? fala?.id ?? ''
 
-  async function salvar() {
-    setSalvando(true)
-    setErro(null)
+  async function enviar(motivo: string) {
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
         await api.corrigir({ ...m, item_id: itemId, motivo, versao })
         feitas[m.tipo] = m.valor
       }
-      aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) {
-        // O cliente já avisou o App.
-      } else if (e instanceof ConflitoNaApi) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof PedidoInvalido) {
-        setErro('Confira os campos: o trecho não foi encontrado ou há valor inválido.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
+      throw e
     }
   }
 
@@ -2179,89 +2014,65 @@ function CorrigirTrecho({
   }
 
   return (
-    <Modal
-      opened={trecho !== null}
-      onClose={fechar}
-      title={plano ? 'Corrigir plano' : 'Corrigir fala'}
-      centered
+    <FormularioDeCorrecao
+      titulo={plano ? 'Corrigir plano' : 'Corrigir fala'}
+      aberto={trecho !== null}
+      podeSalvar={
+        !(plano !== null && !ambiente.trim()) &&
+        !(fala !== null && (!texto.trim() || !locutor.trim())) &&
+        mudancas.length > 0
+      }
+      invalido="Confira os campos: o trecho não foi encontrado ou há valor inválido."
+      enviar={enviar}
+      aoFechar={fechar}
+      aoSalvar={aoSalvar}
+      aoVersaoDesatualizada={aoVersaoDesatualizada}
     >
-      <Stack gap="sm">
-        {plano && (
-          <>
-            <TextInput
-              label="Ambiente"
-              value={ambiente}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setAmbiente(e.currentTarget.value)}
-            />
-            <Textarea
-              label="Ação"
-              value={acao}
-              maxLength={catalogo.limites.texto}
-              rows={3}
-              onChange={(e) => setAcao(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Objetos (separados por vírgula)"
-              value={objetos}
-              onChange={(e) => setObjetos(e.currentTarget.value)}
-            />
-            <Switch
-              label="Plano limpo"
-              checked={limpo}
-              onChange={(e) => setLimpo(e.currentTarget.checked)}
-            />
-          </>
-        )}
-        {fala && (
-          <>
-            <TextInput
-              label="Locutor"
-              value={locutor}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setLocutor(e.currentTarget.value)}
-            />
-            <Textarea
-              label="Texto"
-              value={texto}
-              maxLength={catalogo.limites.texto}
-              rows={4}
-              onChange={(e) => setTexto(e.currentTarget.value)}
-            />
-          </>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
-        />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={fechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={
-              !motivo.trim() ||
-              (plano !== null && !ambiente.trim()) ||
-              (fala !== null && (!texto.trim() || !locutor.trim())) ||
-              mudancas.length === 0
-            }
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+      {plano && (
+        <>
+          <TextInput
+            label="Ambiente"
+            value={ambiente}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setAmbiente(e.currentTarget.value)}
+          />
+          <Textarea
+            label="Ação"
+            value={acao}
+            maxLength={catalogo.limites.texto}
+            rows={3}
+            onChange={(e) => setAcao(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Objetos (separados por vírgula)"
+            value={objetos}
+            onChange={(e) => setObjetos(e.currentTarget.value)}
+          />
+          <Switch
+            label="Plano limpo"
+            checked={limpo}
+            onChange={(e) => setLimpo(e.currentTarget.checked)}
+          />
+        </>
+      )}
+      {fala && (
+        <>
+          <TextInput
+            label="Locutor"
+            value={locutor}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setLocutor(e.currentTarget.value)}
+          />
+          <Textarea
+            label="Texto"
+            value={texto}
+            maxLength={catalogo.limites.texto}
+            rows={4}
+            onChange={(e) => setTexto(e.currentTarget.value)}
+          />
+        </>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
@@ -2273,14 +2084,7 @@ function CorrigirComercial({
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-}: {
-  comercial: Comercial | 'novo' | null
-  versao: string
-  api: ClienteDoJob
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-}) {
+}: PropsDaCorrecao & { comercial: Comercial | 'novo' | null }) {
   const catalogo = useCatalogo()
   const novo = comercial === 'novo'
   const atual = comercial !== null && !novo ? comercial : null
@@ -2289,9 +2093,6 @@ function CorrigirComercial({
   const [inicio, setInicio] = useState(atual ? tempo(atual.inicio_ms) : '')
   const [fim, setFim] = useState(atual ? tempo(atual.fim_ms) : '')
   const [evidencias, setEvidencias] = useState<string[]>([])
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
   // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
   const [gravadas, setGravadas] = useState<Record<string, string>>({})
 
@@ -2328,27 +2129,16 @@ function CorrigirComercial({
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
   const temposMudaram = atual !== null && (inicioMs !== atual.inicio_ms || fimMs !== atual.fim_ms)
 
-  async function salvar() {
-    setSalvando(true)
-    setErro(null)
+  async function enviar(motivo: string) {
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
         await api.corrigir({ ...m, item_id: atual?.id ?? '', motivo, versao })
         feitas[m.tipo] = m.valor
       }
-      aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) {
-        // O cliente já avisou o App.
-      } else if (e instanceof ConflitoNaApi) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof PedidoInvalido) {
-        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
+      throw e
     }
   }
 
@@ -2359,93 +2149,65 @@ function CorrigirComercial({
   }
 
   return (
-    <Modal
-      opened={comercial !== null}
-      onClose={fechar}
-      title={novo ? 'Acrescentar comercial' : 'Corrigir comercial'}
-      centered
+    <FormularioDeCorrecao
+      titulo={novo ? 'Acrescentar comercial' : 'Corrigir comercial'}
+      aberto={comercial !== null}
+      podeSalvar={!!marca.trim() && !(temposMudaram && !temposValidos) && mudancas.length > 0}
+      invalido="Confira os campos: os tempos ficam dentro da duração do vídeo."
+      enviar={enviar}
+      aoFechar={fechar}
+      aoSalvar={aoSalvar}
+      aoVersaoDesatualizada={aoVersaoDesatualizada}
     >
-      <Stack gap="sm">
+      <TextInput
+        label="Marca"
+        value={marca}
+        maxLength={catalogo.limites.nome}
+        onChange={(e) => setMarca(e.currentTarget.value)}
+      />
+      <Select
+        label="Tipo"
+        data={comoSelect(catalogo.tipos_de_comercial)}
+        value={tipo}
+        allowDeselect={false}
+        onChange={setTipo}
+      />
+      <Group grow align="flex-start">
         <TextInput
-          label="Marca"
-          value={marca}
-          maxLength={catalogo.limites.nome}
-          onChange={(e) => setMarca(e.currentTarget.value)}
+          label="Início (mm:ss)"
+          value={inicio}
+          error={lerTempo(inicio) === null && inicio !== '' ? 'Use mm:ss' : undefined}
+          onChange={(e) => setInicio(e.currentTarget.value)}
         />
-        <Select
-          label="Tipo"
-          data={comoSelect(catalogo.tipos_de_comercial)}
-          value={tipo}
-          allowDeselect={false}
-          onChange={setTipo}
+        <TextInput
+          label="Fim (mm:ss)"
+          value={fim}
+          error={lerTempo(fim) === null && fim !== '' ? 'Use mm:ss' : undefined}
+          onChange={(e) => setFim(e.currentTarget.value)}
         />
-        <Group grow align="flex-start">
-          <TextInput
-            label="Início (mm:ss)"
-            value={inicio}
-            error={lerTempo(inicio) === null && inicio !== '' ? 'Use mm:ss' : undefined}
-            onChange={(e) => setInicio(e.currentTarget.value)}
-          />
-          <TextInput
-            label="Fim (mm:ss)"
-            value={fim}
-            error={lerTempo(fim) === null && fim !== '' ? 'Use mm:ss' : undefined}
-            onChange={(e) => setFim(e.currentTarget.value)}
-          />
-        </Group>
-        {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
-          <Text size="xs" c="red">
-            O início não pode vir depois do fim.
+      </Group>
+      {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
+        <Text size="xs" c="red">
+          O início não pode vir depois do fim.
+        </Text>
+      )}
+      {novo && (
+        <Stack gap={4}>
+          <Text size="sm" fw={500}>
+            Evidências
           </Text>
-        )}
-        {novo && (
-          <Stack gap={4}>
-            <Text size="sm" fw={500}>
-              Evidências
-            </Text>
-            <Chip.Group multiple value={evidencias} onChange={setEvidencias}>
-              <Group gap={6}>
-                {EVIDENCIAS.map((e) => (
-                  <Chip key={e} value={e} size="xs">
-                    {e}
-                  </Chip>
-                ))}
-              </Group>
-            </Chip.Group>
-          </Stack>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
-        />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={fechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={
-              !marca.trim() ||
-              !motivo.trim() ||
-              (temposMudaram && !temposValidos) ||
-              mudancas.length === 0
-            }
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+          <Chip.Group multiple value={evidencias} onChange={setEvidencias}>
+            <Group gap={6}>
+              {EVIDENCIAS.map((e) => (
+                <Chip key={e} value={e} size="xs">
+                  {e}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
+        </Stack>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 

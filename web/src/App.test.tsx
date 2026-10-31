@@ -3,7 +3,7 @@ import { render } from './render-teste.tsx'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import App from './App.tsx'
 import { ContaBloqueada } from './auth/autenticador.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
@@ -223,6 +223,36 @@ test('401 da API derruba a sessão e leva ao login', async () => {
   expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   await waitFor(async () => expect(await auth.token()).toBeNull())
   expect(screen.queryByText('Biblioteca')).toBeNull()
+})
+
+test('várias chamadas com 401 ao mesmo tempo derrubam a sessão uma vez só', async () => {
+  const usuario = userEvent.setup()
+  const auth = await autenticadorComSessao()
+  const sair = vi.spyOn(auth, 'sair')
+  servidor.use(
+    http.get('/v1/jobs', () =>
+      HttpResponse.json([
+        {
+          id: 'j1',
+          nome: 'pronto.mp4',
+          estado: 'concluido',
+          codigo_falha: null,
+          duracao_s: null,
+          programa: null,
+          criado_em: '2026-10-29T15:00:00Z',
+          atualizado_em: '2026-10-29T15:00:00Z',
+        },
+      ]),
+    ),
+    // A tela do vídeo pede reprodução, decupagem e catálogo juntos.
+    http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 401 })),
+    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 401 })),
+  )
+  render(<App autenticador={auth} />)
+  await usuario.click(await screen.findByRole('button', { name: 'pronto.mp4' }))
+
+  expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
+  expect(sair).toHaveBeenCalledTimes(1)
 })
 
 test('API recusando o token logo depois do login volta ao início do login', async () => {

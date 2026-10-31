@@ -61,7 +61,8 @@ export interface ClienteDaApi {
 
 /**
  * Cliente de `/v1` com o token da sessão. É o único lugar que conhece caminhos, token e
- * status HTTP; `aoSessaoExpirada` é chamado a cada 401 (ou sessão sem token).
+ * status HTTP; `aoSessaoExpirada` é chamado a cada 401 (ou sessão sem token); quem o liga decide
+ * o que fazer com avisos repetidos.
  */
 export function criarClienteDaApi(
   autenticador: Autenticador,
