@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { criarClienteDaApi } from './api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 import catalogo from './catalogo.fixture.json'
 import Video from './Video.tsx'
@@ -244,9 +245,8 @@ async function abrir(
   await auth.confirmarTotp(CODIGO_TOTP_FALSO)
   render(
     <Video
-      autenticador={auth}
+      api={criarClienteDaApi(auth, () => {})}
       job={{ id: 'j1', nome: 'clipe.mp4', codigo_falha: null, ...job }}
-      aoSessaoExpirada={() => {}}
       podeEditar={podeEditar}
       podeAprovar={podeAprovar}
     />,

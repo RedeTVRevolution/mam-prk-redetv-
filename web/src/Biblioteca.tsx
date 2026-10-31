@@ -19,14 +19,13 @@ import {
 } from '@mantine/core'
 import { IconAlertTriangle, IconBan, IconPlayerPlay, IconUpload } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { chamarApi, SessaoExpirada } from './api.ts'
-import type { Autenticador } from './auth/autenticador.ts'
+import type { ClienteDaApi } from './api.ts'
 import { validarArquivo } from './envio/arquivo.ts'
 import { enviarRetomavel } from './envio/upload.ts'
 import { ESTADOS_DO_JOB, type EstadoDoJob } from './tema.ts'
 import type { JobAberto } from './Video.tsx'
 
-interface Job {
+export interface Job {
   id: string
   nome: string
   estado: string
@@ -36,7 +35,7 @@ interface Job {
   criado_em: string
 }
 
-interface JobCriado extends Job {
+export interface JobCriado extends Job {
   url_de_upload: string
 }
 
@@ -82,14 +81,12 @@ function QuadroDoEstado({ estado }: { estado: string }) {
 }
 
 export default function Biblioteca({
-  autenticador,
-  aoSessaoExpirada,
+  api,
   aoAbrir,
   podeEnviar,
   intervaloMs = 5000,
 }: {
-  autenticador: Autenticador
-  aoSessaoExpirada: () => void
+  api: ClienteDaApi
   aoAbrir?: (job: JobAberto) => void
   podeEnviar: boolean
   intervaloMs?: number
@@ -104,22 +101,14 @@ export default function Biblioteca({
   const limparSeletor = useRef<() => void>(null)
   const enviando = envio.tipo === 'enviando'
 
-  const tratar = useCallback(
-    (erro: unknown) => {
-      if (erro instanceof SessaoExpirada) aoSessaoExpirada()
-    },
-    [aoSessaoExpirada],
-  )
-
   const atualizar = useCallback(async () => {
     try {
-      setJobs(await chamarApi<Job[]>(autenticador, '/v1/jobs'))
+      setJobs(await api.jobs())
       setListaFalhou(false)
-    } catch (erro) {
-      tratar(erro)
+    } catch {
       setListaFalhou(true)
     }
-  }, [autenticador, tratar])
+  }, [api])
 
   useEffect(() => {
     // Sincroniza com a API, um sistema externo.
@@ -132,18 +121,16 @@ export default function Biblioteca({
   useEffect(() => {
     if (!podeEnviar) return
     let ativo = true
-    chamarApi<string[]>(autenticador, '/v1/programas').then(
+    api.programas().then(
       (lista) => {
         if (ativo) setProgramas(lista)
       },
-      (erro: unknown) => {
-        if (ativo) tratar(erro)
-      },
+      () => {},
     )
     return () => {
       ativo = false
     }
-  }, [autenticador, podeEnviar, tratar])
+  }, [api, podeEnviar])
 
   async function escolher(arquivo: File | null) {
     if (!arquivo) return
@@ -156,22 +143,18 @@ export default function Biblioteca({
     }
     setEnvio({ tipo: 'enviando', fracao: 0 })
     try {
-      const criado = await chamarApi<JobCriado>(autenticador, '/v1/jobs', {
-        metodo: 'POST',
-        corpo: {
-          nome: arquivo.name,
-          tamanho_bytes: arquivo.size,
-          tipo: arquivo.type,
-          ...(programa ? { programa } : {}),
-        },
+      const criado = await api.criarJob({
+        nome: arquivo.name,
+        tamanho_bytes: arquivo.size,
+        tipo: arquivo.type,
+        ...(programa ? { programa } : {}),
       })
       void atualizar()
       await enviarRetomavel(criado.url_de_upload, arquivo, {
         aoProgresso: (fracao) => setEnvio({ tipo: 'enviando', fracao }),
       })
       setEnvio({ tipo: 'concluido' })
-    } catch (erro) {
-      tratar(erro)
+    } catch {
       setEnvio({ tipo: 'erro', mensagem: 'Não foi possível enviar o vídeo.' })
     }
   }
@@ -204,7 +187,10 @@ export default function Biblioteca({
                 onChange={(arquivo) => void escolher(arquivo)}
                 resetRef={limparSeletor}
                 disabled={enviando}
-                inputProps={{ 'aria-label': 'Enviar vídeo', disabled: enviando }}
+                inputProps={{
+                  'aria-label': 'Enviar vídeo',
+                  disabled: enviando,
+                }}
               >
                 {(props) => (
                   <Button

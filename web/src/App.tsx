@@ -1,14 +1,25 @@
-import { ActionIcon, Alert, AppShell, Badge, Button, Center, Group, Loader, Stack, Text } from '@mantine/core'
+import {
+  ActionIcon,
+  Alert,
+  AppShell,
+  Badge,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Stack,
+  Text,
+} from '@mantine/core'
 import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react'
-import { useCallback, useEffect, useState } from 'react'
-import { chamarApi, SessaoExpirada } from './api.ts'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { criarClienteDaApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
 import { CORES, NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import Video, { type JobAberto } from './Video.tsx'
 
-interface Usuario {
+export interface Usuario {
   uid: string
   email: string
   permissoes: string[]
@@ -34,15 +45,20 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
     setAberto(null)
   }, [autenticador])
 
+  // O 401 de qualquer tela chega aqui, num lugar só.
+  const api = useMemo(
+    () => criarClienteDaApi(autenticador, () => void sair()),
+    [autenticador, sair],
+  )
+
   const verificar = useCallback(async () => {
     try {
-      const usuario = await chamarApi<Usuario>(autenticador, '/v1/eu')
-      setSessao({ tipo: 'ativa', usuario })
+      setSessao({ tipo: 'ativa', usuario: await api.eu() })
     } catch (erro) {
-      if (erro instanceof SessaoExpirada) await sair()
-      else setSessao({ tipo: 'api_indisponivel' })
+      // Sessão expirada: o cliente já avisou e `sair` cuida do resto.
+      if (!(erro instanceof SessaoExpirada)) setSessao({ tipo: 'api_indisponivel' })
     }
-  }, [autenticador, sair])
+  }, [api])
 
   useEffect(() => {
     // Sincroniza com o SDK de login, um sistema externo.
@@ -113,7 +129,13 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
             <Text size="xs" c="dimmed">
               {sessao.usuario.email}
             </Text>
-            <Button type="button" variant="subtle" size="xs" color="gray" onClick={() => void sair()}>
+            <Button
+              type="button"
+              variant="subtle"
+              size="xs"
+              color="gray"
+              onClick={() => void sair()}
+            >
               Sair
             </Button>
           </Group>
@@ -122,9 +144,8 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
       {aberto ? (
         <AppShell.Main bg="dark.7">
           <Video
-            autenticador={autenticador}
+            api={api}
             job={aberto}
-            aoSessaoExpirada={() => void sair()}
             podeEditar={sessao.usuario.permissoes.includes('decupagem.editar')}
             podeAprovar={sessao.usuario.permissoes.includes('correcao.aprovar')}
           />
@@ -132,8 +153,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
       ) : (
         // A Biblioteca traz a própria barra lateral e a área principal.
         <Biblioteca
-          autenticador={autenticador}
-          aoSessaoExpirada={() => void sair()}
+          api={api}
           aoAbrir={setAberto}
           // O front só esconde; quem barra é a API.
           podeEnviar={sessao.usuario.permissoes.includes('video.enviar')}

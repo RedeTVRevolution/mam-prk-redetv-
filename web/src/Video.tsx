@@ -39,14 +39,20 @@ import {
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type PointerEvent,
   type RefObject,
 } from 'react'
-import { chamarApi, SessaoExpirada } from './api.ts'
-import type { Autenticador } from './auth/autenticador.ts'
+import {
+  type ClienteDaApi,
+  type ClienteDoJob,
+  ConflitoNaApi,
+  PedidoInvalido,
+  SessaoExpirada,
+} from './api.ts'
 import {
   comoSelect,
   ContextoDoCatalogo,
@@ -168,7 +174,7 @@ export interface Decupagem {
   textos_na_tela?: TextoNaTela[]
 }
 
-interface Reproducao {
+export interface Reproducao {
   url: string
   expira_em: string
 }
@@ -499,15 +505,13 @@ type Carga =
     }
 
 export default function Video({
-  autenticador,
+  api: apiDaApp,
   job,
-  aoSessaoExpirada,
   podeEditar = false,
   podeAprovar = false,
 }: {
-  autenticador: Autenticador
+  api: ClienteDaApi
   job: JobAberto
-  aoSessaoExpirada: () => void
   podeEditar?: boolean
   podeAprovar?: boolean
 }) {
@@ -526,50 +530,39 @@ export default function Video({
   const [recargaDaFila, setRecargaDaFila] = useState(0)
   // Itens com correção pendente de aprovação (`chaveDoItem`), da decupagem aberta.
   const [pendentes, setPendentes] = useState<Set<string>>(new Set())
-  // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
-  const sessaoExpirada = useRef(aoSessaoExpirada)
-  useEffect(() => {
-    sessaoExpirada.current = aoSessaoExpirada
-  })
+  const api = useMemo(() => apiDaApp.job(job.id), [apiDaApp, job.id])
 
   useEffect(() => {
     if (!concluido) return
     let ativo = true
-    Promise.all([
-      chamarApi<Reproducao>(autenticador, `/v1/jobs/${job.id}/reproducao`),
-      chamarApi<Decupagem>(autenticador, `/v1/jobs/${job.id}/decupagem`),
-      chamarApi<CatalogoDeCorrecoes>(autenticador, '/v1/correcoes/catalogo'),
-    ]).then(
+    Promise.all([api.reproducao(), api.decupagem(), api.catalogo()]).then(
       ([reproducao, decupagem, catalogo]) => {
         if (ativo) setCarga({ tipo: 'pronta', reproducao, decupagem, catalogo })
       },
       (erro: unknown) => {
         if (!ativo) return
-        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
-        else setCarga({ tipo: 'erro' })
+        if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro' })
       },
     )
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, concluido])
+  }, [api, concluido])
 
   // A fila de revisão só existe para quem edita; falhar aqui não derruba a tela.
   useEffect(() => {
     if (!concluido || !podeEditar) return
     let ativo = true
-    chamarApi<ItemDaFila[]>(autenticador, `/v1/jobs/${job.id}/fila`).then(
+    api.fila().then(
       (itens) => {
         if (ativo) setFila(itens)
       },
-      (erro: unknown) => {
-        if (ativo && erro instanceof SessaoExpirada) sessaoExpirada.current()
-      },
+      () => {},
     )
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, concluido, podeEditar, recargaDaFila])
+  }, [api, concluido, podeEditar, recargaDaFila])
 
   // As pendentes saem da decupagem entregue: o selo vem do histórico, que é recarregado a
   // cada nova decupagem (toda correção, aprovação ou recusa recarrega o painel).
@@ -577,7 +570,7 @@ export default function Video({
   useEffect(() => {
     if (!podeEditar || !decupagemAtual) return
     let ativo = true
-    chamarApi<ItemDoHistorico[]>(autenticador, `/v1/jobs/${job.id}/correcoes`).then(
+    api.historico().then(
       (itens) => {
         if (!ativo) return
         setPendentes(
@@ -591,25 +584,22 @@ export default function Video({
           ),
         )
       },
-      (erro: unknown) => {
-        if (ativo && erro instanceof SessaoExpirada) sessaoExpirada.current()
-      },
+      () => {},
     )
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, podeEditar, decupagemAtual])
+  }, [api, podeEditar, decupagemAtual])
 
   // Depois de uma correção, só o painel recarrega: o player segue no mesmo link e ponto.
   const recarregarDecupagem = useCallback(() => {
-    chamarApi<Decupagem>(autenticador, `/v1/jobs/${job.id}/decupagem`).then(
+    api.decupagem().then(
       (decupagem) => setCarga((c) => (c.tipo === 'pronta' ? { ...c, decupagem } : c)),
       (erro: unknown) => {
-        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
-        else setCarga({ tipo: 'erro' })
+        if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro' })
       },
     )
-  }, [autenticador, job.id])
+  }, [api])
 
   const retomarEm = useRef<number | null>(null)
   // O link assinado expira em minutos: se o player falhar depois disso, pede outro e
@@ -618,17 +608,16 @@ export default function Video({
     if (carga.tipo !== 'pronta') return
     if (Date.parse(carga.reproducao.expira_em) > Date.now()) return
     const instante = player.current?.currentTime ?? 0
-    chamarApi<Reproducao>(autenticador, `/v1/jobs/${job.id}/reproducao`).then(
+    api.reproducao().then(
       (reproducao) => {
         retomarEm.current = instante
         setCarga((atual) => (atual.tipo === 'pronta' ? { ...atual, reproducao } : atual))
       },
       (erro: unknown) => {
-        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
-        else setCarga({ tipo: 'erro' })
+        if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro' })
       },
     )
-  }, [autenticador, carga, job.id])
+  }, [api, carga])
   const retomar = useCallback(() => {
     if (player.current && retomarEm.current !== null) {
       player.current.currentTime = retomarEm.current
@@ -1077,77 +1066,66 @@ export default function Video({
           <FilaDeRevisao
             aberta={filaAberta}
             itens={fila}
-            autenticador={autenticador}
-            jobId={job.id}
+            api={api}
             aoFechar={() => setFilaAberta(false)}
             aoResolver={() => {
               setRecargaDaFila((n) => n + 1)
               recarregarDecupagem()
             }}
-            aoSessaoExpirada={() => sessaoExpirada.current()}
           />
         )}
         {podeEditar && (
           <HistoricoDeCorrecoes
             aberto={historicoAberto}
-            autenticador={autenticador}
-            jobId={job.id}
+            api={api}
             aoFechar={() => setHistoricoAberto(false)}
             podeAprovar={podeAprovar}
             aoMudar={recarregarDecupagem}
-            aoSessaoExpirada={() => sessaoExpirada.current()}
           />
         )}
         <CorrigirPessoa
           key={corrigindo?.id ?? 'fechado'}
           pessoa={corrigindo}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setCorrigindo(null)}
           aoSalvar={() => {
             setCorrigindo(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirOcorrencia
           key={ocorrenciaAberta ? JSON.stringify(ocorrenciaAberta) : 'fechada'}
           acao={ocorrenciaAberta}
           pessoas={decupagem.pessoas.filter((p) => pessoaDoModelo(catalogo, p))}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setOcorrenciaAberta(null)}
           aoSalvar={() => {
             setOcorrenciaAberta(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirPauta
           key={corrigindoPauta?.id ?? 'fechada'}
           pauta={corrigindoPauta}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setCorrigindoPauta(null)}
           aoSalvar={() => {
             setCorrigindoPauta(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirTempos
           key={confirmandoTempos ? 'tempos-aberto' : 'tempos-fechado'}
           selecao={confirmandoTempos ? selecao : null}
           depois={arrastado}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => {
             // Cancelar devolve a ocorrência ao intervalo anterior.
             setConfirmandoTempos(false)
@@ -1160,7 +1138,6 @@ export default function Video({
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirTrecho
           key={
@@ -1172,43 +1149,37 @@ export default function Video({
           }
           trecho={trechoAberto}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setTrechoAberto(null)}
           aoSalvar={() => {
             setTrechoAberto(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirCampo
           key={campoAberto ? JSON.stringify(campoAberto) : 'fechado'}
           campo={campoAberto}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setCampoAberto(null)}
           aoSalvar={() => {
             setCampoAberto(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirComercial
           key={comercialAberto === 'novo' ? 'novo' : (comercialAberto?.id ?? 'fechado')}
           comercial={comercialAberto}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setComercialAberto(null)}
           aoSalvar={() => {
             setComercialAberto(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
       </Grid>
     </ContextoDoCatalogo.Provider>
@@ -1269,21 +1240,17 @@ function NomeDaPessoa({
 function CorrigirPessoa({
   pessoa,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
 }: {
   pessoa: Pessoa | null
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [nome, setNome] = useState(pessoa?.nome ?? '')
@@ -1296,20 +1263,18 @@ function CorrigirPessoa({
     setSalvando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo: {
-          tipo: 'pessoa.renomear',
-          item_id: pessoa.id,
-          valor: nome,
-          motivo,
-          versao,
-        },
+      await api.corrigir({
+        tipo: 'pessoa.renomear',
+        item_id: pessoa.id,
+        valor: nome,
+        motivo,
+        versao,
       })
       aoSalvar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         // Recarrega o painel: a versão nova chega ao modal e o Editor pode salvar de novo.
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
@@ -1411,22 +1376,18 @@ function CorrigirOcorrencia({
   acao,
   pessoas,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
 }: {
   acao: AcaoDeOcorrencia | null
   pessoas: Pessoa[]
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [destino, setDestino] = useState<string>('citada_na_fala')
@@ -1507,17 +1468,15 @@ function CorrigirOcorrencia({
     setSalvando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo: { ...corpo, motivo, versao },
-      })
+      await api.corrigir({ ...corpo, motivo, versao })
       aoSalvar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+      } else if (e instanceof PedidoInvalido) {
         setErro(
           acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos'
             ? 'Confira os campos: os tempos ficam dentro da duração do vídeo.'
@@ -1643,22 +1602,18 @@ function CorrigirTempos({
   selecao,
   depois,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
 }: {
   selecao: Selecao | null
   depois: Intervalo | null
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [motivo, setMotivo] = useState('')
@@ -1686,17 +1641,15 @@ function CorrigirTempos({
     setSalvando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo,
-      })
+      await api.corrigir(corpo)
       aoSalvar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Cancele e arraste de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+      } else if (e instanceof PedidoInvalido) {
         setErro(
           'Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir.',
         )
@@ -1748,21 +1701,17 @@ function CorrigirTempos({
 function CorrigirPauta({
   pauta,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
 }: {
   pauta: Pauta | null
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [titulo, setTitulo] = useState(pauta?.titulo ?? '')
@@ -1796,20 +1745,18 @@ function CorrigirPauta({
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
-        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-          metodo: 'POST',
-          corpo: { ...m, item_id: pauta.id, motivo, versao },
-        })
+        await api.corrigir({ ...m, item_id: pauta.id, motivo, versao })
         feitas[m.tipo] = m.valor
       }
       aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+      } else if (e instanceof PedidoInvalido) {
         setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
       } else setErro('Não foi possível salvar a correção.')
       setSalvando(false)
@@ -1906,21 +1853,17 @@ const TITULOS_DO_CAMPO = {
 function CorrigirCampo({
   campo,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
 }: {
   campo: CampoAberto | null
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [tom, setTom] = useState<string | null>(
@@ -2012,17 +1955,15 @@ function CorrigirCampo({
     setSalvando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo: { ...corpo, motivo, versao },
-      })
+      await api.corrigir({ ...corpo, motivo, versao })
       aoSalvar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+      } else if (e instanceof PedidoInvalido) {
         setErro('Confira os campos: o valor não foi aceito.')
       } else setErro('Não foi possível salvar a correção.')
       setSalvando(false)
@@ -2150,21 +2091,17 @@ function CorrigirCampo({
 function CorrigirTrecho({
   trecho,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
 }: {
   trecho: Trecho | null
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const plano = trecho?.tipo === 'plano' ? trecho.plano : null
@@ -2217,20 +2154,18 @@ function CorrigirTrecho({
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
-        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-          metodo: 'POST',
-          corpo: { ...m, item_id: itemId, motivo, versao },
-        })
+        await api.corrigir({ ...m, item_id: itemId, motivo, versao })
         feitas[m.tipo] = m.valor
       }
       aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+      } else if (e instanceof PedidoInvalido) {
         setErro('Confira os campos: o trecho não foi encontrado ou há valor inválido.')
       } else setErro('Não foi possível salvar a correção.')
       setSalvando(false)
@@ -2334,21 +2269,17 @@ function CorrigirTrecho({
 function CorrigirComercial({
   comercial,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
 }: {
   comercial: Comercial | 'novo' | null
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const novo = comercial === 'novo'
@@ -2403,20 +2334,18 @@ function CorrigirComercial({
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
-        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-          metodo: 'POST',
-          corpo: { ...m, item_id: atual?.id ?? '', motivo, versao },
-        })
+        await api.corrigir({ ...m, item_id: atual?.id ?? '', motivo, versao })
         feitas[m.tipo] = m.valor
       }
       aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         aoVersaoDesatualizada()
         setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
+      } else if (e instanceof PedidoInvalido) {
         setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
       } else setErro('Não foi possível salvar a correção.')
       setSalvando(false)
@@ -2520,7 +2449,7 @@ function CorrigirComercial({
   )
 }
 
-interface ItemDoHistorico {
+export interface ItemDoHistorico {
   id: string
   tipo:
     | 'pessoa.renomear'
@@ -2574,20 +2503,16 @@ const quando = (iso: string) =>
 /** Gaveta com as correções da mais recente à mais antiga; desfazer, aprovar e recusar acrescentam, nada se apaga. */
 function HistoricoDeCorrecoes({
   aberto,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   podeAprovar,
   aoMudar,
-  aoSessaoExpirada,
 }: {
   aberto: boolean
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   podeAprovar: boolean
   aoMudar: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [itens, setItens] = useState<ItemDoHistorico[] | null>(null)
@@ -2604,15 +2529,11 @@ function HistoricoDeCorrecoes({
   const [enviando, setEnviando] = useState(false)
 
   const [recarga, setRecarga] = useState(0)
-  const sessaoExpirada = useRef(aoSessaoExpirada)
-  useEffect(() => {
-    sessaoExpirada.current = aoSessaoExpirada
-  })
 
   useEffect(() => {
     if (!aberto) return
     let ativo = true
-    chamarApi<ItemDoHistorico[]>(autenticador, `/v1/jobs/${jobId}/correcoes`).then(
+    api.historico().then(
       (lista) => {
         if (!ativo) return
         setItens(lista)
@@ -2620,14 +2541,13 @@ function HistoricoDeCorrecoes({
       },
       (e: unknown) => {
         if (!ativo) return
-        if (e instanceof SessaoExpirada) sessaoExpirada.current()
-        else setFalhou(true)
+        if (!(e instanceof SessaoExpirada)) setFalhou(true)
       },
     )
     return () => {
       ativo = false
     }
-  }, [aberto, autenticador, jobId, recarga])
+  }, [aberto, api, recarga])
 
   const carregar = () => setRecarga((n) => n + 1)
 
@@ -2643,20 +2563,14 @@ function HistoricoDeCorrecoes({
     setEnviando(true)
     setErro(null)
     try {
-      await chamarApi(
-        autenticador,
-        `/v1/jobs/${jobId}/correcoes/${item.id}/${acao === 'desfazer' ? 'desfazer' : 'recusar'}`,
-        {
-          metodo: 'POST',
-          corpo: { motivo },
-        },
-      )
+      await (acao === 'desfazer' ? api.desfazer(item.id, motivo) : api.recusar(item.id, motivo))
       fecharModal()
       carregar()
       aoMudar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         // Outra pessoa pode ter decidido antes: a decupagem também mudou.
         setErro(
           acao === 'desfazer'
@@ -2679,12 +2593,11 @@ function HistoricoDeCorrecoes({
     setAprovando(item.id)
     setErroDaLista(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes/${item.id}/aprovar`, {
-        metodo: 'POST',
-      })
+      await api.aprovar(item.id)
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409'))
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi)
         setErroDaLista('Essa correção não está mais pendente. O histórico foi recarregado.')
       else setErroDaLista('Não foi possível aprovar a correção.')
     }
@@ -2816,7 +2729,7 @@ function HistoricoDeCorrecoes({
   )
 }
 
-interface ItemDaFila {
+export interface ItemDaFila {
   id: string
   tipo: ItemDoHistorico['tipo']
   autor_email: string
@@ -2838,19 +2751,15 @@ interface ItemDaFila {
 function FilaDeRevisao({
   aberta,
   itens,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoResolver,
-  aoSessaoExpirada,
 }: {
   aberta: boolean
   itens: ItemDaFila[]
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoResolver: () => void
-  aoSessaoExpirada: () => void
 }) {
   // Fica no painel: o item resolvido some da lista ao recarregar a fila.
   const [aviso, setAviso] = useState<string | null>(null)
@@ -2875,13 +2784,11 @@ function FilaDeRevisao({
           <ItemDaFilaDeRevisao
             key={i.id}
             item={i}
-            autenticador={autenticador}
-            jobId={jobId}
+            api={api}
             aoResolver={(mensagem) => {
               setAviso(mensagem ?? null)
               aoResolver()
             }}
-            aoSessaoExpirada={aoSessaoExpirada}
           />
         ))}
       </Stack>
@@ -2891,17 +2798,13 @@ function FilaDeRevisao({
 
 function ItemDaFilaDeRevisao({
   item,
-  autenticador,
-  jobId,
+  api,
   aoResolver,
-  aoSessaoExpirada,
 }: {
   item: ItemDaFila
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   /** `aviso`, se houver, sobrevive à recarga da fila. */
   aoResolver: (aviso?: string) => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [candidato, setCandidato] = useState<string | null>(null)
@@ -2913,14 +2816,14 @@ function ItemDaFilaDeRevisao({
     setEnviando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/fila/${item.id}/${acao}`, {
-        metodo: 'POST',
-        corpo: acao === 'reaplicar' ? { item_id: candidato, motivo } : { motivo },
-      })
+      await (acao === 'reaplicar'
+        ? api.reaplicar(item.id, candidato, motivo)
+        : api.descartar(item.id, motivo))
       aoResolver()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         // Outro Editor resolveu antes: a fila e a decupagem mudaram.
         aoResolver('Essa correção não está mais na fila. A fila foi recarregada.')
       } else setErro('Não foi possível resolver a correção.')

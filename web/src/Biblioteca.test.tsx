@@ -6,6 +6,7 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { AppShell } from '@mantine/core'
 import type { ReactNode } from 'react'
+import { criarClienteDaApi } from './api.ts'
 import Biblioteca from './Biblioteca.tsx'
 import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
@@ -103,8 +104,7 @@ async function abrir(
   render(
     noShell(
       <Biblioteca
-        autenticador={await comSessao()}
-        aoSessaoExpirada={opcoes.aoSessaoExpirada ?? (() => {})}
+        api={criarClienteDaApi(await comSessao(), opcoes.aoSessaoExpirada ?? (() => {}))}
         intervaloMs={opcoes.intervaloMs}
         podeEnviar={opcoes.podeEnviar ?? true}
       />,
@@ -229,8 +229,7 @@ test('abrir um vídeo concluído ou falhado chama aoAbrir; os demais não são c
   render(
     noShell(
       <Biblioteca
-        autenticador={await comSessao()}
-        aoSessaoExpirada={() => {}}
+        api={criarClienteDaApi(await comSessao(), () => {})}
         aoAbrir={aoAbrir}
         podeEnviar
       />,
