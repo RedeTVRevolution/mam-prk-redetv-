@@ -134,6 +134,29 @@ def test_aceito_envia_copia_limpa_e_proxy_apaga_o_original_e_segue_para_analise(
     assert job.codigo_falha is None
     assert job.sha256 is not None and len(job.sha256) == 64
     assert job.duracao_s == pytest.approx(2, abs=0.2)
+    assert job.cortes_ms == []
+
+
+def test_cortes_de_camera_ficam_no_job(ambiente: Ambiente, tmp_path: Path) -> None:
+    arquivo = tmp_path / "cortes.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=red:s=320x240:r=10:d=1.5",
+            "-f", "lavfi", "-i", "color=blue:s=320x240:r=10:d=1.5",
+            "-filter_complex", "[0][1]concat=n=2:v=1:a=0",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(arquivo),
+        ],
+        check=True,
+        capture_output=True,
+    )  # fmt: skip
+    ambiente.enviar("j-cortes", arquivo.read_bytes())
+
+    ambiente.executar("j-cortes")
+
+    cortes = ambiente.job("j-cortes").cortes_ms
+    assert cortes is not None and len(cortes) == 1
+    assert abs(cortes[0] - 1_500) <= 100
 
 
 def test_recusado_grava_falhou_com_o_codigo_e_apaga_o_original(

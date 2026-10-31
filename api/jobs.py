@@ -101,6 +101,8 @@ class Job(BaseModel):
     tamanho_bytes: int
     sha256: str | None = None
     duracao_s: float | None = None
+    # Cortes de câmera da validação, em ms; `None` em Job anterior à detecção.
+    cortes_ms: list[int] | None = None
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str

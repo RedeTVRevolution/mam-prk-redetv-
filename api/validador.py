@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from api.cortes import LIMIAR_PADRAO, DeteccaoFalhou, detectar_cortes
 from api.jobs import CodigoDeFalha
 
 MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
@@ -37,6 +38,7 @@ class Aceito:
     sha256: str
     duracao_s: float
     audio: Path | None = None
+    cortes_ms: tuple[int, ...] = ()
 
 
 def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -116,7 +118,9 @@ def _conferir_faixas(sondagem: dict[str, Any]) -> None:
         raise Recusa("codec_nao_suportado")
 
 
-def validar(entrada: Path, saida: Path) -> Aceito:
+def validar(
+    entrada: Path, saida: Path, limiar_de_cortes: float = LIMIAR_PADRAO
+) -> Aceito:
     _conferir_ftyp(entrada)
     sondagem = _sondar(entrada)
     _conferir_faixas(sondagem)
@@ -161,7 +165,15 @@ def validar(entrada: Path, saida: Path) -> Aceito:
             copia.unlink(missing_ok=True)
             proxy.unlink(missing_ok=True)
             raise Recusa("arquivo_corrompido")
-    return Aceito(copia, proxy, _sha256(entrada), duracao, audio)
+    try:
+        cortes = detectar_cortes(copia, limiar_de_cortes)
+    except DeteccaoFalhou:
+        copia.unlink(missing_ok=True)
+        proxy.unlink(missing_ok=True)
+        if audio is not None:
+            audio.unlink(missing_ok=True)
+        raise Recusa("arquivo_corrompido") from None
+    return Aceito(copia, proxy, _sha256(entrada), duracao, audio, tuple(cortes))
 
 
 def _separar_audio(copia: Path, saida: Path) -> Path | None:

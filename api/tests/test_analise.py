@@ -54,7 +54,11 @@ class Ambiente:
     cliente: TestClient
 
     def registrar(
-        self, job_id: str, estado: str = "analisando", programa: str | None = None
+        self,
+        job_id: str,
+        estado: str = "analisando",
+        programa: str | None = None,
+        cortes_ms: list[int] | None = None,
     ) -> Job:
         job = Job(
             id=job_id,
@@ -65,6 +69,7 @@ class Ambiente:
             estado=estado,  # type: ignore[arg-type]
             criado_por="uid-1",
             programa=programa,
+            cortes_ms=cortes_ms,
             criado_em=BASE,
             atualizado_em=BASE,
         )
@@ -112,6 +117,35 @@ def test_sucesso_grava_a_decupagem_e_leva_o_job_a_concluido() -> None:
     chamada = ambiente.transporte.chamadas[0]
     assert chamada.video_uri == "gs://teste-aceitos/j1/proxy.mp4"
     assert chamada.rotulos == {"job_id": "j1"}
+
+
+def test_cortes_do_job_viram_os_planos_da_decupagem() -> None:
+    ambiente = _ambiente(BOA)
+    ambiente.registrar("j9", cortes_ms=[20_000, 40_000])
+
+    _analisar(ambiente, "j9")
+
+    gravada = Decupagem.model_validate_json(ambiente.decupagens.gravadas["j9"])
+    inicios = [p.inicio_ms for p in gravada.planos]
+    assert {0, 20_000, 40_000} <= set(inicios)
+    assert all(
+        p.inicio_modelo_ms is not None
+        for p in gravada.planos
+        if p.inicio_ms in (20_000, 40_000)
+    )
+
+
+def test_job_sem_cortes_nao_muda_os_planos_do_modelo() -> None:
+    sem, com = _ambiente(BOA), _ambiente(BOA)
+    sem.registrar("j10")
+    com.registrar("j10", cortes_ms=[])
+
+    _analisar(sem, "j10")
+    _analisar(com, "j10")
+
+    assert sem.decupagens.gravadas["j10"] == com.decupagens.gravadas["j10"]
+    gravada = Decupagem.model_validate_json(sem.decupagens.gravadas["j10"])
+    assert all(p.inicio_modelo_ms is None for p in gravada.planos)
 
 
 def test_programa_do_job_leva_o_perfil_a_instrucao() -> None:

@@ -80,6 +80,7 @@ def test_h264_valido_gera_copia_limpa_proxy_e_sha256(tmp_path: Path) -> None:
     aceito = validar(entrada, tmp_path / "saida")
 
     assert aceito.sha256 == hashlib.sha256(entrada.read_bytes()).hexdigest()
+    assert aceito.cortes_ms == ()  # um plano só
     tipos = [f["codec_type"] for f in _probe(aceito.copia_limpa)["streams"]]
     assert sorted(tipos) == ["audio", "video"]
     assert b"segredo" not in aceito.copia_limpa.read_bytes()

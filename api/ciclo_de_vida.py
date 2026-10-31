@@ -8,6 +8,7 @@ no meio do caminho).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -49,6 +50,7 @@ def transitar(
     codigo_falha: CodigoDeFalha | None = None,
     sha256: str | None = None,
     duracao_s: float | None = None,
+    cortes_ms: Sequence[int] | None = None,
 ) -> Job | None:
     """O Job já em `para`, ou `None` se ele não estava mais em `de`."""
     if para not in TRANSICOES[de]:
@@ -60,6 +62,8 @@ def transitar(
         mudancas["sha256"] = sha256
     if duracao_s is not None:
         mudancas["duracao_s"] = duracao_s
+    if cortes_ms is not None:
+        mudancas["cortes_ms"] = list(cortes_ms)
     return repositorio.transitar(job_id, de, mudancas)
 
 

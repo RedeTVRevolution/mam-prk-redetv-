@@ -96,6 +96,7 @@ def criar_app(
                 video_uri=decupagens.uri_do_proxy(job.id),
                 job_id=job.id,
                 programa=job.programa,
+                cortes_ms=job.cortes_ms or (),
                 video=Video(sha256=job.sha256, duracao_ms=round(job.duracao_s * 1000)),
                 transcricao=transcricoes.ler_transcricao(job.id)
                 if transcricoes

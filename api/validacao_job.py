@@ -13,6 +13,7 @@ from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 
 from api.ciclo_de_vida import transitar
+from api.cortes import LIMIAR_PADRAO
 from api.jobs import RepositorioDeJobs
 from api.jobs import agora_utc as agora
 from api.nuvem import RepositorioFirestore, objeto_do_audio
@@ -29,6 +30,7 @@ def executar(
     aceitos: Bucket,
     entrada: Path,
     saida: Path,
+    limiar_de_cortes: float = LIMIAR_PADRAO,
 ) -> None:
     """`entrada` é a pasta da quarentena montada; o objeto tem o nome do id."""
     job = repositorio.obter(job_id)
@@ -37,7 +39,7 @@ def executar(
     if not transitar(repositorio, job_id, "aguardando_upload", "validando", agora()):
         return
     try:
-        aceito = validar(entrada / job_id, saida / job_id)
+        aceito = validar(entrada / job_id, saida / job_id, limiar_de_cortes)
     except Recusa as recusa:
         if transitar(
             repositorio,
@@ -71,6 +73,7 @@ def executar(
         agora(),
         sha256=aceito.sha256,
         duracao_s=aceito.duracao_s,
+        cortes_ms=aceito.cortes_ms,
     )
 
 
@@ -84,6 +87,7 @@ def main() -> None:
         storage.bucket(os.environ["BUCKET_ACEITOS"]),
         Path(os.environ.get("QUARENTENA_MONTADA", "/quarentena")),
         Path(os.environ["TMPDIR"]),
+        float(os.environ.get("LIMIAR_DE_CORTES", LIMIAR_PADRAO)),
     )
 
 
