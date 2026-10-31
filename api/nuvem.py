@@ -76,6 +76,15 @@ def objeto_da_decupagem(job_id: str) -> str:
     return f"{job_id}.json"
 
 
+def objeto_do_quadro(job_id: str, caminho: str) -> str:
+    """`caminho` é o do campo `quadro` da Decupagem (`quadros/plano-0.jpg`)."""
+    return f"{job_id}/{caminho}"
+
+
+def objeto_da_copia_limpa(job_id: str) -> str:
+    return f"{job_id}/copia_limpa.mp4"
+
+
 class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
@@ -472,6 +481,39 @@ class LeiturasStorage:
             return None
 
 
+class QuadrosStorage:
+    """A cópia limpa que o ffmpeg lê, e os JPEGs e a Decupagem no bucket das decupagens."""
+
+    def __init__(
+        self, cliente: ClienteStorage, bucket_de_aceitos: str, bucket_de_decupagens: str
+    ) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+        self._decupagens = bucket_de_decupagens
+
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_copia_limpa(job_id)
+        ).download_to_filename(str(destino))
+
+    def ler_decupagem(self, job_id: str) -> bytes:
+        return bytes(
+            self._cliente.bucket(self._decupagens)
+            .blob(objeto_da_decupagem(job_id))
+            .download_as_bytes()
+        )
+
+    def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_do_quadro(job_id, caminho)
+        ).upload_from_string(jpeg, content_type="image/jpeg")
+
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_da_decupagem(job_id)
+        ).upload_from_string(conteudo, content_type="application/json")
+
+
 class ArmazenamentoStorage:
     """Upload, cancelamento do upload, reprodução e leitura da decupagem."""
 
@@ -516,6 +558,15 @@ class ArmazenamentoStorage:
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
+        url: str = blob.generate_signed_url(
+            version="v4", expiration=validade, method="GET", **self._assinatura()
+        )
+        return url
+
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        blob = self._cliente.bucket(self._decupagens).blob(
+            objeto_do_quadro(job_id, caminho)
+        )
         url: str = blob.generate_signed_url(
             version="v4", expiration=validade, method="GET", **self._assinatura()
         )

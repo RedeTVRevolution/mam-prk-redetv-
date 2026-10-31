@@ -49,6 +49,9 @@ class ArmazenamentoFalso:
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/proxy/{job_id}?validade={int(validade.total_seconds())}"
 
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        return f"https://storage.exemplo/quadros/{job_id}/{caminho}?validade={int(validade.total_seconds())}"
+
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         # Gerador, como seria o adaptador real: a falha só aparece no primeiro pedaço.
         if self.decupagens_indisponiveis:
@@ -268,6 +271,36 @@ def test_reproducao_devolve_link_assinado_e_quando_expira() -> None:
         "url": "https://storage.exemplo/proxy/j1?validade=600",
         "expira_em": "2026-10-29T12:10:00Z",
     }
+
+
+def test_quadro_devolve_link_assinado_do_jpeg_e_quando_expira() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/quadros/plano-0.jpg", headers=AUTORIZACAO
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.json() == {
+        "url": "https://storage.exemplo/quadros/j1/quadros/plano-0.jpg?validade=600",
+        "expira_em": "2026-10-29T12:10:00Z",
+    }
+
+
+def test_quadro_recusa_nome_que_nao_e_de_um_quadro_e_job_que_nao_concluiu() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    for nome in ("..%2Fj2%2Fproxy.mp4", "plano-0.png", ".jpg", "a%2Fb.jpg"):
+        resposta = ambiente.cliente.get(
+            f"/v1/jobs/{job_id}/quadros/{nome}", headers=AUTORIZACAO
+        )
+        assert resposta.status_code in (404, 422), nome
+    em_analise = _job_com_estado(ambiente, "analisando")
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{em_analise}/quadros/plano-0.jpg", headers=AUTORIZACAO
+    )
+    assert resposta.status_code == 409
 
 
 def test_reproducao_e_decupagem_dao_409_antes_de_concluido_e_404_sem_job() -> None:

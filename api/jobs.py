@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -260,6 +260,10 @@ class Armazenamento(Protocol):
         """URL assinada de leitura do proxy de reprodução, válida por `validade`."""
         ...
 
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        """URL assinada de leitura do JPEG de `caminho` (o campo `quadro` da Decupagem)."""
+        ...
+
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         """O JSON da decupagem, em pedaços."""
         ...
@@ -318,6 +322,9 @@ class ArmazenamentoIndisponivel:
         raise ServicoIndisponivel
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
+        raise ServicoIndisponivel
+
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
@@ -535,6 +542,18 @@ def criar_rotas(
     ) -> Reproducao:
         job = obter_concluido(job_id, chamador)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
+        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
+
+    @rotas.get("/{job_id}/quadros/{arquivo}")
+    def quadro(
+        job_id: str,
+        arquivo: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$")],
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> Reproducao:
+        job = obter_concluido(job_id, chamador)
+        url = armazenamento.url_do_quadro(
+            job.id, f"quadros/{arquivo}", VALIDADE_DA_REPRODUCAO
+        )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:

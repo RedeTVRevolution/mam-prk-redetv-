@@ -93,7 +93,7 @@ class Aparicao(_Intervalo):
         default=None,
         description="Visual de destaque, se relevante (ex.: vestido de gala vermelho).",
     )
-    quadro: str | None = None  # vazio na E0
+    quadro: str | None = None  # o JPEG da aparição (#115)
 
 
 class MencaoNaFala(_Intervalo):
@@ -201,6 +201,7 @@ class Objeto(_Estrito):
     ocorrencias: list[_Intervalo] = Field(
         min_length=1, description="Intervalos em que o objeto está visível."
     )
+    quadro: str | None = None  # o JPEG da primeira ocorrência (#115)
 
     @model_validator(mode="after")
     def _dono_e_relacao_juntos(self) -> Self:
@@ -224,6 +225,7 @@ class Plano(_Intervalo):
     movimento_camera: Rotulo | None = None
     externa: bool | None = None
     periodo: Literal["dia", "noite"] | None = None
+    quadro: str | None = None  # o JPEG do meio do plano (#115)
 
 
 EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
