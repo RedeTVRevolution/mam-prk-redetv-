@@ -36,8 +36,8 @@ BACKOFF_BASE_S = 1.0
 BACKOFF_TETO_S = 60.0
 TIMEOUT_DO_FLEX_S = 600  # o Flex pode demorar; o servidor também desiste aos 600 s
 TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
-# O Workflows e o Cloud Run desistem aos 1800 s: uma tentativa só começa se cabe
-# inteira neste prazo, com folga para gravar a decupagem e o Job.
+# Prazo de cada janela: uma tentativa só começa se cabe inteira nele. O `timeout` do
+# Job de análise (infra/main.tf) é dimensionado por ele; se mudar, refaça aquela conta.
 PRAZO_DA_ANALISE_S = 1500
 
 # Texto aprovado no diagnóstico do clipe3. `{programa}` e `{perfil_do_programa}`

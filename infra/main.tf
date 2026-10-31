@@ -332,8 +332,9 @@ resource "google_cloud_run_v2_job" "validacao" {
       # Medido (#135) com 120 s de vídeo sintético (854x480, H.264 a 2,3 Mbit/s e AAC,
       # com ruído e movimento) em 8 vCPU: a validação inteira levou 7,6 s, 0,063 s por
       # segundo de vídeo, ou ~910 s para 4 h. Na nuvem, com 4 vCPU, conto 3x: ~2730 s.
-      # 10800 s dá 4x de folga sobre essa conta (12x sobre a medida) e fica acima do teto
-      # de 7200 s de cada chamada ao ffmpeg.
+      # 10800 s dá 4x de folga sobre essa conta (12x sobre a medida). O teto de 7200 s de
+      # cada chamada ao ffmpeg só pega um ffmpeg travado; as chamadas são em sequência, e
+      # quem limita o total é este timeout.
       timeout = "10800s"
       vpc_access {
         egress = "ALL_TRAFFIC"
@@ -585,11 +586,23 @@ resource "google_cloud_run_v2_job" "analise" {
       # desiste em 1500 s (PRAZO_DA_ANALISE_S): o pior caso é 12 x 1500 = 18000 s. 21600 s
       # (6 h) cobre o pior caso com 1,2x de folga; o caso comum, de 1 a 3 min por janela,
       # leva de 12 a 36 min. Com um paralelismo menor o pior caso sobe: refaça a conta.
-      timeout         = "21600s"
+      timeout = "21600s"
       containers {
         image   = var.imagem
         command = ["python"]
         args    = ["-m", "api.analise"]
+        resources {
+          # Sem volume: o proxy vai ao Gemini pela URI do bucket, sem baixar. Na memória
+          # ficam a transcrição e a leitura da tela de 4 h (14.400 quadros), as janelas
+          # concluídas e a decupagem: dezenas de MiB em JSON, algumas centenas em objetos
+          # Python, mais ~300 MiB do Python e dos clientes do Google. NÃO medido (#135):
+          # 2 GiB dá ~3x de folga sobre essa conta; o padrão do Cloud Run, 512 MiB, não.
+          # 1 vCPU: o trabalho é esperar o Gemini.
+          limits = {
+            cpu    = "1"
+            memory = "2Gi"
+          }
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto

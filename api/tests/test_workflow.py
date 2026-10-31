@@ -183,7 +183,7 @@ def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
     assert "job_de_analise     = google_cloud_run_v2_job.analise.name" in main
     assert "google_cloud_run_v2_service.analise" not in main
     # O Job de análise dura mais que o teto de 1800 s da chamada HTTP do Workflows.
-    assert 'timeout         = "21600s"' in job
+    assert 'timeout = "21600s"' in job
 
 
 def _segundos(texto: str) -> int:
