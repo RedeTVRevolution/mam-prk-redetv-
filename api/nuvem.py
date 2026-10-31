@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import google.auth
@@ -20,6 +21,7 @@ from api.jobs import (
     ServicoIndisponivel,
 )
 from api.papeis import PAPEIS, Papel
+from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
@@ -34,6 +36,14 @@ TAMANHO_DO_PEDACO = 256 * 1024
 
 def objeto_do_proxy(job_id: str) -> str:
     return f"{job_id}/proxy.mp4"
+
+
+def objeto_do_audio(job_id: str) -> str:
+    return f"{job_id}/audio.wav"
+
+
+def objeto_da_transcricao(job_id: str) -> str:
+    return f"{job_id}/transcricao.json"
 
 
 def objeto_da_decupagem(job_id: str) -> str:
@@ -251,6 +261,36 @@ class DecupagensStorage:
                     yield pedaco
         except NotFound as e:
             raise ServicoIndisponivel from e
+
+
+class TranscricoesStorage:
+    """O áudio e a transcrição, ao lado do proxy no bucket de aceitos."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_aceitos: str) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+
+    def baixar_audio(self, job_id: str, destino: Path) -> bool:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_do_audio(job_id))
+        try:
+            blob.download_to_filename(str(destino))
+        except NotFound:
+            return False
+        return True
+
+    def gravar_transcricao(self, job_id: str, transcricao: Transcricao) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_transcricao(job_id)
+        ).upload_from_string(
+            transcricao.model_dump_json(), content_type="application/json"
+        )
+
+    def ler_transcricao(self, job_id: str) -> Transcricao | None:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_transcricao(job_id))
+        try:
+            return Transcricao.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
 
 
 class ArmazenamentoStorage:

@@ -19,6 +19,7 @@ from api.nuvem import RepositorioFirestore
 from api.validador import Recusa, validar
 
 TIPO_DO_VIDEO = "video/mp4"
+TIPO_DO_AUDIO = "audio/wav"
 
 
 def executar(
@@ -55,6 +56,10 @@ def executar(
     for arquivo in (aceito.copia_limpa, aceito.proxy):
         aceitos.blob(f"{job_id}/{arquivo.name}").upload_from_filename(
             str(arquivo), content_type=TIPO_DO_VIDEO
+        )
+    if aceito.audio is not None:
+        aceitos.blob(f"{job_id}/{aceito.audio.name}").upload_from_filename(
+            str(aceito.audio), content_type=TIPO_DO_AUDIO
         )
     quarentena.blob(job_id).delete()
     transitar(

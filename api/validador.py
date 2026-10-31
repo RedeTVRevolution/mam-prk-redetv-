@@ -20,6 +20,8 @@ LADO_LONGO_MAXIMO = 1920
 DURACAO_MINIMA_S = 1.0
 DURACAO_MAXIMA_S = 600.0
 TEMPO_LIMITE_S = 900
+NOME_DO_AUDIO = "audio.wav"
+TAXA_DO_AUDIO_HZ = 16_000
 
 
 class Recusa(Exception):
@@ -34,6 +36,7 @@ class Aceito:
     proxy: Path
     sha256: str
     duracao_s: float
+    audio: Path | None = None
 
 
 def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -150,4 +153,25 @@ def validar(entrada: Path, saida: Path) -> Aceito:
         copia.unlink(missing_ok=True)
         proxy.unlink(missing_ok=True)
         raise Recusa("arquivo_corrompido")
-    return Aceito(copia, proxy, _sha256(entrada), duracao)
+    return Aceito(copia, proxy, _sha256(entrada), duracao, _separar_audio(copia, saida))
+
+
+def _separar_audio(copia: Path, saida: Path) -> Path | None:
+    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; sem faixa de áudio, `None`."""
+    if not any(
+        f.get("codec_type") == "audio" for f in _sondar(copia).get("streams", [])
+    ):
+        return None
+    audio = saida / NOME_DO_AUDIO
+    extrair = _executar(
+        [
+            "ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y",
+            "-i", str(copia), "-map", "0:a", "-vn",
+            "-ac", "1", "-ar", str(TAXA_DO_AUDIO_HZ), "-c:a", "pcm_s16le",
+            "-map_metadata", "-1", str(audio),
+        ]
+    )  # fmt: skip
+    if extrair.returncode != 0:
+        audio.unlink(missing_ok=True)
+        raise Recusa("arquivo_corrompido")
+    return audio

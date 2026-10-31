@@ -127,6 +127,7 @@ def test_aceito_envia_copia_limpa_e_proxy_apaga_o_original_e_segue_para_analise(
 
     assert ambiente.aceitos.blob("j1/copia_limpa.mp4").exists()
     assert ambiente.aceitos.blob("j1/proxy.mp4").exists()
+    assert ambiente.aceitos.blob("j1/audio.wav").exists()
     assert not ambiente.quarentena.blob("j1").exists()
     job = ambiente.job("j1")
     assert job.estado == "analisando"

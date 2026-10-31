@@ -90,6 +90,7 @@ CodigoDeFalha = Literal[
     "duracao_excedida",
     "upload_expirado",
     "analise_falhou",
+    "transcricao_falhou",
 ]
 
 

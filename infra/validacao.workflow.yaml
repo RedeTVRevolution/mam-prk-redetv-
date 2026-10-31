@@ -1,8 +1,9 @@
 # Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
 # quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
-# falhou, salvo se estiver cancelado. Depois chama o serviço de análise, só se o
-# Job ficou em `analisando`.
-# Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao}, ${url_da_analise}.
+# falhou, salvo se estiver cancelado. Depois, só se o Job ficou em `analisando`, roda o
+# Job de transcrição e chama o serviço de análise.
+# Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao},
+# ${job_de_transcricao}, ${url_da_analise}.
 main:
   params: [evento]
   steps:
@@ -84,8 +85,52 @@ main:
     - so_se_analisando:
         switch:
           - condition: $${documento.fields.estado.stringValue == "analisando"}
-            next: analisa
+            next: transcreve
         next: fim
+    - transcreve:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_transcricao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+        except:
+          as: e
+          steps:
+            # O Job de transcrição já derruba o Job pelo ciclo de vida; aqui cobre o que
+            # o impediu de chegar lá (tempo esgotado, memória estourada). Só marca se o
+            # Job segue em `analisando` e não mudou desde a leitura.
+            - rele_antes_da_transcricao:
+                call: googleapis.firestore.v1.projects.databases.documents.get
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                result: durante
+            - so_se_ainda_analisando_na_transcricao:
+                switch:
+                  - condition: $${durante.fields.estado.stringValue != "analisando"}
+                    next: encerra_a_transcricao_com_falha
+            - marca_transcricao_como_falha:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  currentDocument:
+                    updateTime: $${durante.updateTime}
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: transcricao_falhou
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
+            - encerra_a_transcricao_com_falha:
+                raise: $${e}
     - analisa:
         try:
           call: http.post

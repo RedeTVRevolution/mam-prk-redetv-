@@ -27,6 +27,25 @@ USER nobody
 ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.validacao_job"]
 
+# Job de transcrição (#104): `docker build --target transcricao`. Só o faster-whisper e o
+# modelo, sem ffmpeg nem front. O modelo é baixado aqui, na construção, na revisão fixada
+# e conferido pelo SHA-256 do model.bin; no ar o Job roda sem internet (HF_HUB_OFFLINE).
+FROM python:3.12-slim-bookworm AS transcricao
+COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+ARG MODELO_REPOSITORIO=dropbox-dash/faster-whisper-large-v3-turbo
+ARG MODELO_REVISAO=0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf
+ARG MODELO_SHA256=e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --group transcricao
+RUN /app/.venv/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('$MODELO_REPOSITORIO', revision='$MODELO_REVISAO', local_dir='/modelo')" \
+    && echo "$MODELO_SHA256  /modelo/model.bin" | sha256sum -c - \
+    && rm -rf /modelo/.cache
+COPY api/ api/
+USER nobody
+ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
+CMD ["python", "-m", "api.transcricao_job"]
+
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 WORKDIR /app

@@ -39,6 +39,11 @@ variable "imagem_validacao" {
   type        = string
 }
 
+variable "imagem_transcricao" {
+  description = "Imagem do Job de transcrição (--target transcricao), de preferência pelo digest"
+  type        = string
+}
+
 provider "google" {
   project        = var.projeto
   region         = var.regiao
@@ -116,7 +121,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "analise", "orquestracao", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "analise", "orquestracao", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -135,6 +140,7 @@ locals {
   papeis_no_projeto = {
     web          = ["roles/datastore.user"]
     validacao    = ["roles/datastore.user"]
+    transcricao  = ["roles/datastore.user"]
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
@@ -145,6 +151,8 @@ locals {
     web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectViewer" }
     # Lê e apaga o original da quarentena; grava a cópia limpa e o proxy de reprodução.
     validacao = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectCreator" }
+    # Lê o áudio que a validação separou e grava a transcrição ao lado do proxy.
+    transcricao = { aceitos = "roles/storage.objectUser" }
     # O Gemini lê o proxy de reprodução; a decupagem vai para o bucket dela.
     analise = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectCreator" }
   }
@@ -370,6 +378,76 @@ resource "google_cloud_run_v2_job" "validacao" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
+# Job de transcrição (#104): faster-whisper com o modelo da imagem, em CPU. Na mesma
+# rede da validação, sem IP externo nem Cloud NAT: o áudio não alcança a internet, só o
+# Storage e o Firestore (acesso privado do Google). Um vídeo por execução, e sem nova
+# tentativa: a falha derruba o Job pelo ciclo de vida.
+resource "google_cloud_run_v2_job" "transcricao" {
+  name                = "mam-transcricao"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["transcricao"].email
+      max_retries     = 0
+      timeout         = "3600s"
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao.id
+        }
+      }
+      containers {
+        image = var.imagem_transcricao
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        # O áudio baixado vai para o volume em memória.
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        resources {
+          # O modelo large-v3-turbo em int8 cabe em poucos GiB; o áudio de até 10 min
+          # em WAV mono de 16 kHz tem ~19 MiB.
+          limits = {
+            cpu    = "8"
+            memory = "16Gi"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "1Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração roda o Job de transcrição, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_transcricao" {
+  name     = google_cloud_run_v2_job.transcricao.name
+  location = google_cloud_run_v2_job.transcricao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
 # A orquestração roda o Job com override de JOB_ID.
 resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda" {
   name     = google_cloud_run_v2_job.validacao.name
@@ -423,16 +501,17 @@ resource "google_cloud_run_v2_service_iam_member" "orquestracao_chama_analise" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
-# Quarentena -> Eventarc -> Workflows -> Job de validação -> serviço de análise.
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> serviço de análise.
 resource "google_workflows_workflow" "validacao" {
   name            = "mam-validacao"
   region          = var.regiao
   service_account = google_service_account.mam["orquestracao"].id
   source_contents = templatefile("${path.module}/validacao.workflow.yaml", {
-    projeto          = var.projeto
-    regiao           = var.regiao
-    job_de_validacao = google_cloud_run_v2_job.validacao.name
-    url_da_analise   = google_cloud_run_v2_service.analise.uri
+    projeto            = var.projeto
+    regiao             = var.regiao
+    job_de_validacao   = google_cloud_run_v2_job.validacao.name
+    job_de_transcricao = google_cloud_run_v2_job.transcricao.name
+    url_da_analise     = google_cloud_run_v2_service.analise.uri
   })
   depends_on = [google_project_service.apis]
 }

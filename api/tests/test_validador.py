@@ -218,3 +218,25 @@ def test_corrupcao_no_meio_do_arquivo_e_recusada(tmp_path: Path) -> None:
     entrada.write_bytes(bytes(dados))
 
     assert _recusa(entrada, tmp_path) == "arquivo_corrompido"
+
+
+def test_audio_sai_da_copia_limpa_em_mono_16khz_ao_lado_dela(tmp_path: Path) -> None:
+    entrada = _gerar(tmp_path / "video.mp4", extra=("-ac", "2", "-ar", "44100"))
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert aceito.audio == aceito.copia_limpa.parent / "audio.wav"
+    (faixa,) = _probe(aceito.audio)["streams"]
+    assert faixa["codec_type"] == "audio"
+    assert faixa["channels"] == 1
+    assert faixa["sample_rate"] == "16000"
+    assert float(faixa["duration"]) == pytest.approx(2, abs=0.1)
+
+
+def test_video_sem_audio_nao_gera_arquivo_de_audio(tmp_path: Path) -> None:
+    entrada = _gerar(tmp_path / "video.mp4", audio=None)
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert aceito.audio is None
+    assert not (tmp_path / "saida" / "audio.wav").exists()
