@@ -22,7 +22,13 @@ from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
-from api.jobs import Indexacao, Job, RepositorioDeJobs, agora_utc
+from api.jobs import (
+    EstadoDaIndexacao,
+    Indexacao,
+    Job,
+    RepositorioDeJobs,
+    agora_utc,
+)
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
@@ -67,10 +73,24 @@ def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, A
 
 
 def _registrar(
-    repositorio: RepositorioDeJobs, job_id: str, estado: str, agora: datetime
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    estado: EstadoDaIndexacao,
+    agora: datetime,
 ) -> Job | None:
-    indexacao = Indexacao(estado=estado, em=agora)  # type: ignore[arg-type]
-    return repositorio.transitar(job_id, "concluido", {"indexacao": indexacao})
+    """Grava o estado da indexação sem mudar o `estado` do Job.
+
+    Não é uma transição do ciclo de vida: a troca condicional em `concluido` só garante
+    que o Job ainda está lá. Uma falha do repositório vai ao log e devolve `None`, para
+    não transformar em erro uma Correção que já foi gravada.
+    """
+    try:
+        return repositorio.transitar(
+            job_id, "concluido", {"indexacao": Indexacao(estado=estado, em=agora)}
+        )
+    except Exception:
+        log.exception("estado da indexação não gravado para %s", job_id)
+        return None
 
 
 def reindexar(
@@ -88,6 +108,7 @@ def reindexar(
     if job.estado != "concluido":
         return None
     _registrar(repositorio, job.id, "pendente", relogio())
+    estado: EstadoDaIndexacao
     try:
         conteudo = b"".join(decupagens.abrir_decupagem(job.id))
         entregue = decupagem_entregue(
@@ -115,12 +136,20 @@ def reindexar_jobs(
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
 ) -> dict[str, str]:
-    """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um."""
+    """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
+
+    Um id que não existe sai como `inexistente`.
+    """
+    resultado: dict[str, str] = {}
     if ids:
-        jobs = [j for i in ids if (j := repositorio.obter(i)) is not None]
+        jobs = []
+        for i in ids:
+            if (job := repositorio.obter(i)) is None:
+                resultado[i] = "inexistente"
+            else:
+                jobs.append(job)
     else:
         jobs = [j for j in repositorio.listar() if j.estado == "concluido"]
-    resultado: dict[str, str] = {}
     for job in jobs:
         nova = reindexar(job, repositorio, decupagens, correcoes, indice)
         resultado[job.id] = nova.estado if nova else "ignorado"
@@ -143,7 +172,7 @@ def main(argv: list[str]) -> int:
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")
-    return 1 if "falhou" in resultado.values() else 0
+    return 1 if {"falhou", "inexistente"} & set(resultado.values()) else 0
 
 
 if __name__ == "__main__":

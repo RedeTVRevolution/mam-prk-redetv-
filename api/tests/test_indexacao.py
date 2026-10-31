@@ -33,6 +33,13 @@ CURADOR = {"Authorization": "Bearer token-curador"}
 MODELO = json.loads(SABRINA_EXEMPLO.decupagem.model_dump_json())
 
 
+class JobsQueNaoGravam(RepositorioEmMemoria):
+    def transitar(self, job_id: str, de: Any, mudancas: dict[str, Any]) -> Job | None:
+        if "indexacao" in mudancas:
+            raise ConnectionError("Firestore fora do ar")
+        return super().transitar(job_id, de, mudancas)
+
+
 class IndiceQueFalha(IndiceEmMemoria):
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
         raise ConnectionError("índice fora do ar")
@@ -197,6 +204,30 @@ def test_job_que_nao_concluiu_nao_e_indexado() -> None:
         ["j2"], mundo.jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
     ) == {"j2": "ignorado"}
     assert mundo.indice.total() == 0
+
+
+def test_id_que_nao_existe_sai_como_inexistente() -> None:
+    mundo = Mundo()
+
+    assert reindexar_jobs(
+        ["j1", "nao-existe"],
+        mundo.jobs,
+        mundo.armazenamento,
+        mundo.correcoes,
+        mundo.indice,
+    ) == {"nao-existe": "inexistente", "j1": "indexado"}
+
+
+def test_falha_ao_gravar_o_estado_nao_derruba_nem_impede_a_indexacao() -> None:
+    mundo = Mundo()
+    jobs = JobsQueNaoGravam()
+    jobs.salvar(_job())
+
+    assert (
+        reindexar(_job(), jobs, mundo.armazenamento, mundo.correcoes, mundo.indice)
+        is None
+    )
+    assert mundo.indice.total() == 6
 
 
 def test_reindexar_todos_pega_so_os_concluidos() -> None:

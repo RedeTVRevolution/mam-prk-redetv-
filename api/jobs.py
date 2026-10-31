@@ -99,10 +99,13 @@ CodigoDeFalha = Literal[
 ]
 
 
+EstadoDaIndexacao = Literal["pendente", "indexado", "falhou"]
+
+
 class Indexacao(BaseModel):
     """Onde o Job está no índice da busca; uma falha dela não muda o `estado` do Job."""
 
-    estado: Literal["pendente", "indexado", "falhou"]
+    estado: EstadoDaIndexacao
     em: datetime
 
 

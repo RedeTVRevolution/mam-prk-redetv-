@@ -201,8 +201,9 @@ locals {
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
     quadros      = ["roles/datastore.user"]
     # Grava o estado da indexação no Job. O papel no Vector Search (escrever na coleção da
-    # busca) não está aqui: o nome exato não foi conferido (#118); sem ele o Job de
-    # indexação roda e o Job fica com indexacao.estado = falhou.
+    # busca) não está aqui nem na conta `web`, que reindexa a cada Correção: o nome exato
+    # não foi conferido (#118); sem ele a indexação roda e o Job fica com
+    # indexacao.estado = falhou.
     indexacao    = ["roles/datastore.user"]
     referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
