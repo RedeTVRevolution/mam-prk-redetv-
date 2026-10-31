@@ -14,7 +14,7 @@ os apelidos; não confirma nada. O nome sem prova vira palpite.
 """
 
 import re
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,10 +103,13 @@ def _livre_de_outro_sem_nome(
     inicio_ms: int,
     fim_ms: int,
     folga_ms: int,
-    sem_nome: Collection[str],
+    sem_nome: Mapping[str, str],
 ) -> bool:
     return not any(
-        (nao_identificado(o.nome) or o.id in sem_nome)
+        (
+            nao_identificado(o.nome)
+            or (o.id in sem_nome and sem_nome[o.id] != sem_nome.get(pessoa.id))
+        )
         and any(_sobrepoe(a, inicio_ms, fim_ms, folga_ms) for a in o.na_imagem)
         for o in decupagem.pessoas
         if o.id != pessoa.id
@@ -117,7 +120,7 @@ def _prova_de_gc(
     decupagem: Decupagem,
     pessoa: Pessoa,
     nomes: Sequence[Sequence[str]],
-    sem_nome: Collection[str],
+    sem_nome: Mapping[str, str],
 ) -> bool:
     for t in decupagem.textos_na_tela:
         if t.tipo not in TIPOS_DE_GC:
@@ -140,7 +143,7 @@ def _prova_de_fala(
     nomes: Sequence[Sequence[str]],
     transcricao: Transcricao | None,
     tolerancia_ms: int,
-    sem_nome: Collection[str],
+    sem_nome: Mapping[str, str],
 ) -> bool:
     if transcricao is None:
         return False
@@ -182,14 +185,16 @@ def identificar(
     transcricao: Transcricao | None = None,
     catalogo: Catalogo | None = None,
     tolerancia_ms: int = TOLERANCIA_DA_FALA_MS,
-    sem_nome: Collection[str] = (),
+    sem_nome: Mapping[str, str] | None = None,
 ) -> Decupagem:
     """Confere o nome de cada pessoa. Com prova, o nome é `confirmado` (origem
     `modelo_forte`, só as fontes conferidas) e vai para o catálogo; sem prova, é
     `palpite`, sem fontes. A pessoa da revisora e o "não identificado" ficam como estão.
 
-    `sem_nome` são ids de pessoas que, para a regra "outra pessoa sem nome na imagem",
-    contam como sem nome mesmo com um nome (o do modelo forte, ainda sem prova)."""
+    `sem_nome` leva o id de cada pessoa que, para a regra "outra pessoa sem nome na
+    imagem", conta como sem nome mesmo com um nome (o do modelo forte, ainda sem prova)
+    ao grupo dela: as do mesmo grupo são uma pessoa só e não se bloqueiam."""
+    sem_nome = sem_nome or {}
     pessoas: list[Pessoa] = []
     for p in decupagem.pessoas:
         if p.origem == "revisao" or nao_identificado(p.nome):

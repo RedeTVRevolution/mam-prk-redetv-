@@ -19,8 +19,10 @@ def instantes_das_aparicoes(
     aparicoes: Sequence[_Intervalo], maximo: int = QUADROS_POR_PESSOA
 ) -> list[int]:
     """Instantes (ms) dos quadros: o meio de cada uma das `maximo` aparições mais
-    longas. Com uma aparição só, dois quadros dela, a 1/3 e a 2/3. Em ordem de tempo."""
-    mais_longas = sorted(aparicoes, key=lambda a: a.duracao_ms, reverse=True)[:maximo]
+    longas. Com uma aparição só, dois quadros dela, a 1/3 e a 2/3. Em ordem de tempo.
+    A mesma aparição repetida (duas entradas da mesma pessoa) conta uma vez."""
+    unicas = {(a.inicio_ms, a.fim_ms): a for a in aparicoes}.values()
+    mais_longas = sorted(unicas, key=lambda a: a.duracao_ms, reverse=True)[:maximo]
     if len(mais_longas) == 1:
         a = mais_longas[0]
         instantes = [

@@ -32,6 +32,7 @@ from api.identificacao import (
     identificar,
 )
 from api.programas import PERFIS
+from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import instantes_das_aparicoes
 from api.transcricao import Transcricao
 
@@ -128,7 +129,9 @@ def agrupar(decupagem: Decupagem) -> list[Grupo]:
     for p in decupagem.pessoas:
         if p.origem == "revisao" or not nao_identificado(p.nome) or not p.na_imagem:
             continue
-        descricao = normalizar(p.nome).removeprefix("nao identificado").strip(" ,:-")
+        descricao = normalizar(p.nome).removeprefix("nao identificado")
+        # sem a pontuação das bordas: vírgula, dois-pontos, travessão, ponto
+        descricao = re.sub(r"^\W+|\W+$", "", descricao)
         grupos.setdefault(descricao or f"#{p.id}", []).append(p)
     achados = [Grupo(d, tuple(ps)) for d, ps in grupos.items()]
     return sorted(achados, key=lambda g: g.na_imagem_ms, reverse=True)
@@ -203,21 +206,22 @@ def olhar_pessoas_sem_nome(
     da cópia limpa."""
     candidatos = candidatos_do_video(programa, catalogo)
     nomes: dict[str, str] = {}
+    grupo_de: dict[str, str] = {}
     for grupo in agrupar(decupagem)[: max(limite_de_pessoas, 0)]:
         instantes = instantes_das_aparicoes(
             [a for p in grupo.pessoas for a in p.na_imagem]
         )
-        chamada = Chamada(
-            modelo=MODELO_FORTE,
-            instrucao=_instrucao(
-                grupo, instantes, decupagem, programa, candidatos, transcricao
-            ),
-            video_uri="",
-            esquema=esquema_da_resposta(),
-            rotulos={"job_id": job_id, "etapa": ETAPA},
-            imagens=tuple(quadros_em(instantes)),
-        )
         try:
+            chamada = Chamada(
+                modelo=MODELO_FORTE,
+                instrucao=_instrucao(
+                    grupo, instantes, decupagem, programa, candidatos, transcricao
+                ),
+                video_uri="",
+                esquema=esquema_da_resposta(),
+                rotulos={"job_id": job_id, "etapa": ETAPA},
+                imagens=tuple(quadros_em(instantes)),
+            )
             resposta = gerar_validado(
                 transporte,
                 chamada,
@@ -226,10 +230,11 @@ def olhar_pessoas_sem_nome(
                 sortear=sortear,
                 relogio=relogio,
             )
-        except AnaliseFalhou:
+        except (AnaliseFalhou, FalhaNosQuadros):
             continue  # uma pessoa sem resposta não derruba a análise do vídeo
         if resposta.resultado != "nao_identificado" and resposta.nome:
             nomes.update({p.id: resposta.nome.strip() for p in grupo.pessoas})
+            grupo_de.update({p.id: grupo.descricao for p in grupo.pessoas})
     if not nomes:
         return decupagem
     renomeada = decupagem.model_copy(
@@ -248,5 +253,5 @@ def olhar_pessoas_sem_nome(
         transcricao=transcricao,
         catalogo=catalogo,
         tolerancia_ms=tolerancia_ms,
-        sem_nome=nomes.keys(),
+        sem_nome=grupo_de,
     )

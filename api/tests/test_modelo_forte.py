@@ -18,6 +18,7 @@ from api.modelo_forte import (
     esquema_da_resposta,
     olhar_pessoas_sem_nome,
 )
+from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros, instantes_das_aparicoes
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem, gc, pessoa, whisper
@@ -71,6 +72,17 @@ def test_duas_aparicoes_da_mesma_pessoa_sem_nome_geram_uma_chamada() -> None:
     assert len(transporte.chamadas) == 1
 
 
+def test_a_pontuacao_depois_de_nao_identificado_nao_separa_a_pessoa() -> None:
+    d = decupagem(
+        [
+            pessoa("pes01", "não identificado — repórter", [(0, 5_000)]),
+            pessoa("pes02", "Não identificado, repórter.", [(10_000, 15_000)]),
+        ]
+    )
+
+    assert [len(g.pessoas) for g in agrupar(d)] == [2]
+
+
 def test_descricoes_diferentes_ou_sem_descricao_sao_pessoas_diferentes() -> None:
     d = decupagem(
         [
@@ -119,6 +131,19 @@ def test_uma_aparicao_so_da_dois_quadros_dela() -> None:
     d = decupagem([pessoa("pes01", BARBA, [(30_000, 60_000)])])
 
     assert instantes_das_aparicoes(d.pessoas[0].na_imagem) == [40_000, 50_000]
+
+
+def test_a_mesma_aparicao_repetida_ainda_da_dois_quadros() -> None:
+    d = decupagem(
+        [
+            pessoa("pes01", BARBA, [(30_000, 60_000)]),
+            pessoa("pes02", BARBA, [(30_000, 60_000)]),
+        ]
+    )
+    [grupo] = agrupar(d)
+
+    aparicoes = [a for p in grupo.pessoas for a in p.na_imagem]
+    assert instantes_das_aparicoes(aparicoes) == [40_000, 50_000]
 
 
 def test_a_chamada_leva_os_quadros_o_modelo_forte_e_o_rotulo_de_custo() -> None:
@@ -259,6 +284,22 @@ def test_duas_pessoas_nomeadas_pelo_modelo_no_mesmo_intervalo_nao_se_confirmam()
     assert (barba.estado_do_nome, mulher.estado_do_nome) == ("palpite", "palpite")
 
 
+def test_entradas_da_mesma_pessoa_juntas_na_imagem_nao_se_bloqueiam() -> None:
+    d = decupagem(
+        [
+            pessoa("pes01", BARBA, [(100_000, 110_000)]),
+            pessoa("pes02", BARBA, [(105_000, 112_000)]),
+        ],
+        [gc("Leão Lobo", 106_000, 108_000)],
+    )
+    transporte = TransporteFalso(resposta("nome_com_prova", "Leão Lobo", "gc", "01:46"))
+
+    r = olhar(d, transporte)
+
+    assert len(transporte.chamadas) == 1
+    assert [p.estado_do_nome for p in r.pessoas] == ["confirmado", "confirmado"]
+
+
 def test_o_limite_por_video_e_respeitado_e_vale_a_de_mais_tempo_na_imagem() -> None:
     d = decupagem(
         [
@@ -303,6 +344,28 @@ def test_falha_do_modelo_forte_deixa_a_pessoa_sem_nome_e_segue_com_as_outras() -
     r = olhar(d, transporte)
 
     assert [p.nome for p in r.pessoas] == ["não identificado, a", "Beltrano"]
+
+
+def test_falha_nos_quadros_deixa_a_pessoa_sem_nome_e_segue_com_as_outras() -> None:
+    d = decupagem(
+        [
+            pessoa("pes01", "não identificado, a", [(0, 50_000)]),
+            pessoa("pes02", "não identificado, b", [(0, 20_000)]),
+        ]
+    )
+    falhas = iter([True, False])
+
+    def quadros_que_falham(instantes: Sequence[int]) -> list[bytes]:
+        if next(falhas):
+            raise FalhaNosQuadros
+        return quadros(instantes)
+
+    transporte = TransporteFalso(resposta("palpite", "Beltrano"))
+
+    r = olhar(d, transporte, quadros_em=quadros_que_falham)
+
+    assert [p.nome for p in r.pessoas] == ["não identificado, a", "Beltrano"]
+    assert len(transporte.chamadas) == 1
 
 
 def test_resposta_fora_do_esquema_e_repetida_e_depois_desistida() -> None:
