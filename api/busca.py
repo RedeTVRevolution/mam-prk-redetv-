@@ -1,0 +1,501 @@
+"""Busca (#120): a consulta entendida vira cláusulas no índice, que voltam fundidas por RRF,
+reordenadas, juntadas em trechos e agrupadas por vídeo.
+
+Os filtros do servidor (permissão, lixeira) entram por cima de tudo o que vem da consulta
+(`com_filtros_do_servidor`); nomes de campo e operadores são fixos no código, e o texto
+do usuário só chega ao índice como texto puro.
+"""
+
+import logging
+import time
+import unicodedata
+from collections import defaultdict
+from collections.abc import Callable, Collection
+from dataclasses import dataclass, fields, replace
+from datetime import date, datetime, timedelta
+from typing import Literal, Protocol
+
+from pydantic import BaseModel
+
+from api.catalogo import Catalogo
+from api.comparador import normalizar
+from api.entendimento_da_consulta import ConsultaEntendida, ModelArmor, entender
+from api.gemini import Transporte
+from api.indice_da_busca import Consulta, Filtros, IndiceDaBusca, Registro
+from api.jobs import Armazenamento, Job, RepositorioDeJobs
+
+log = logging.getLogger(__name__)
+
+RRF_K = 60
+TETO_DE_REGISTROS = 100  # por cláusula
+TETO_DE_VIDEOS = 50
+VIDEOS_POR_PADRAO = 20
+JUNCAO_MS = 3_000
+VALIDADE_DO_QUADRO = timedelta(minutes=10)
+
+Ordem = Literal["relevancia", "data"]
+
+
+class Ranking(Protocol):
+    """Porta da API de Ranking: reordena os registros pela consulta de texto livre."""
+
+    def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]: ...
+
+
+class RankingEmOrdem:
+    """Dublê: mantém a ordem recebida."""
+
+    def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+        return registros
+
+
+class Destaque(BaseModel):
+    """Posições `[inicio, fim)` no `motivo`, em caracteres; nunca HTML."""
+
+    inicio: int
+    fim: int
+
+
+class Momento(BaseModel):
+    inicio_ms: int
+    fim_ms: int
+    motivo: str
+    destaques: list[Destaque]
+    quadro_url: str | None
+
+
+class VideoDoResultado(BaseModel):
+    job_id: str
+    nome: str
+    programa: str | None
+    data_exibicao: date | None
+    duracao_s: float | None
+    n_momentos: int
+    momentos: list[Momento]
+
+
+class SemAparicao(BaseModel):
+    """A pessoa pedida não aparece em imagem nenhuma; quantas vezes é só citada."""
+
+    pessoa_id: str
+    nome: str
+    mencoes_na_fala: int
+    mencoes_na_tela: int
+
+
+class ResultadoDaBusca(BaseModel):
+    videos: list[VideoDoResultado]
+    sem_aparicoes: list[SemAparicao]
+    plano_b: bool
+    quadros_expiram_em: datetime
+
+
+def filtros_do_servidor() -> Filtros:
+    """Os filtros que o servidor impõe a toda busca, acima da consulta.
+
+    Hoje nenhum campo do índice carrega a permissão. O filtro "não está na lixeira" (#144)
+    entra aqui; enquanto isso, `Busca` já descarta o vídeo cujo Job não está concluído.
+    """
+    return Filtros()
+
+
+def com_filtros_do_servidor(da_consulta: Filtros, do_servidor: Filtros) -> Filtros:
+    """Todo campo do servidor vale, e o da consulta só preenche o que ele deixou livre."""
+    impostos = {
+        f.name: getattr(do_servidor, f.name)
+        for f in fields(Filtros)
+        if getattr(do_servidor, f.name) is not None
+    }
+    return replace(da_consulta, **impostos)
+
+
+@dataclass(frozen=True)
+class _Clausula:
+    consulta: Consulta
+    motivo: Callable[[Registro], str]
+
+
+def _sem_acento(texto: str) -> str:
+    """Minúsculas e sem acento, um caractere por caractere (as posições se mantêm)."""
+    return "".join(unicodedata.normalize("NFD", c)[0].lower() for c in texto)
+
+
+def _destaques(texto: str, termos: Collection[str]) -> list[Destaque]:
+    palheiro = _sem_acento(texto)
+    achados: list[tuple[int, int]] = []
+    for termo in {_sem_acento(t) for t in termos if len(t.strip()) >= 2}:
+        i = palheiro.find(termo)
+        while i != -1:
+            achados.append((i, i + len(termo)))
+            i = palheiro.find(termo, i + len(termo))
+    unidos: list[list[int]] = []
+    for inicio, fim in sorted(achados):
+        if unidos and inicio <= unidos[-1][1]:
+            unidos[-1][1] = max(unidos[-1][1], fim)
+        else:
+            unidos.append([inicio, fim])
+    return [Destaque(inicio=i, fim=f) for i, f in unidos]
+
+
+@dataclass
+class _Trecho:
+    job_id: str
+    inicio_ms: int
+    fim_ms: int
+    motivo: str
+    posicao: int  # a melhor posição, no resultado fundido, entre os registros juntados
+    quadro: str | None
+
+
+class Busca:
+    def __init__(
+        self,
+        *,
+        transporte: Transporte,
+        catalogo: Catalogo,
+        armor: ModelArmor,
+        programas: Collection[str],
+        indice: IndiceDaBusca,
+        ranking: Ranking,
+        repositorio: RepositorioDeJobs,
+        armazenamento: Armazenamento,
+        relogio: Callable[[], datetime],
+    ) -> None:
+        self._transporte = transporte
+        self._catalogo = catalogo
+        self._armor = armor
+        self._programas = programas
+        self._indice = indice
+        self._ranking = ranking
+        self._repositorio = repositorio
+        self._armazenamento = armazenamento
+        self._relogio = relogio
+
+    def buscar(
+        self,
+        texto: str,
+        *,
+        ordem: Ordem = "relevancia",
+        limite: int = VIDEOS_POR_PADRAO,
+        filtros_do_servidor: Filtros | None = None,
+        sistema: str | None = None,
+    ) -> ResultadoDaBusca:
+        inicio = time.perf_counter()
+        impostos = filtros_do_servidor or Filtros()
+        entendida = entender(
+            texto,
+            transporte=self._transporte,
+            catalogo=self._catalogo,
+            armor=self._armor,
+            programas=self._programas,
+        )
+        jobs: dict[str, Job | None] = {}
+
+        def job(id: str) -> Job | None:
+            if id not in jobs:
+                achado = self._repositorio.obter(id)
+                visivel = (
+                    achado is not None
+                    and achado.estado == "concluido"
+                    and (sistema is None or achado.sistema == sistema)
+                )
+                jobs[id] = achado if visivel else None
+            return jobs[id]
+
+        def consultar(c: Consulta) -> list[Registro]:
+            c = replace(
+                c,
+                filtros=com_filtros_do_servidor(c.filtros, impostos),
+                limite=TETO_DE_REGISTROS,
+            )
+            return [r for r in self._indice.buscar(c) if job(r.job_id)]
+
+        nomes: dict[str, str] = {}
+
+        def nome(id: str | None) -> str | None:
+            if id and id not in nomes:
+                pessoa = self._catalogo.obter(id)
+                nomes[id] = pessoa.nome if pessoa else ""
+            return nomes.get(id or "") or None
+
+        clausulas = self._clausulas(entendida, nome)
+        fundidos = _fundir([consultar(c.consulta) for c in clausulas])
+        achados = [r for r, _ in fundidos]
+        if entendida.texto_livre and achados:
+            try:
+                achados = self._ranking.reordenar(entendida.texto_livre, achados)
+            except Exception:
+                log.exception("ranking indisponível; fica a ordem do índice")
+        motivo_de = {r.id: clausulas[c].motivo(r) for r, c in fundidos}
+        posicao = {r.id: i for i, r in enumerate(achados)}
+        termos = _termos(entendida, nome)
+        trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
+        videos = self._videos(trechos, job, termos, ordem)[:limite]
+        vazios = []
+        if not videos:
+            vazios = self._sem_aparicoes(entendida, clausulas, consultar, nome)
+        log.info(
+            "busca em %d ms: %d vídeos, %d clausulas%s",
+            (time.perf_counter() - inicio) * 1000,
+            len(videos),
+            len(clausulas),
+            ", plano B" if entendida.plano_b else "",
+        )
+        agora = self._relogio()
+        return ResultadoDaBusca(
+            videos=videos,
+            sem_aparicoes=vazios,
+            plano_b=entendida.plano_b,
+            quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
+        )
+
+    def _clausulas(
+        self,
+        e: ConsultaEntendida,
+        nome: Callable[[str | None], str | None],
+    ) -> list[_Clausula]:
+        base = Filtros(
+            programa=e.programa,
+            exibido_desde=e.exibido_desde,
+            exibido_ate=e.exibido_ate,
+        )
+        clausulas: list[_Clausula] = []
+        for o in e.objetos:
+            clausulas.append(
+                _Clausula(
+                    Consulta(
+                        filtros=replace(
+                            base,
+                            tipo="objeto",
+                            categoria=o.categoria,
+                            cor_base=o.cor_base,
+                            dono=o.dono,
+                        ),
+                        texto=o.tipo,
+                    ),
+                    lambda r: _motivo(r, nome),
+                )
+            )
+        for marca in e.marcas:
+            clausulas.append(
+                _Clausula(
+                    Consulta(filtros=replace(base, tipo="objeto", marca=marca)),
+                    lambda r: _motivo(r, nome),
+                )
+            )
+        donos = {o.dono for o in e.objetos if o.dono}
+        for pessoa in e.pessoas:
+            if pessoa in donos:
+                continue
+            clausulas.extend(_clausulas_da_pessoa(pessoa, e, base, nome))
+        if e.frase_exata:
+            for tipo in _tipos_de_texto(e):
+                clausulas.append(
+                    _Clausula(
+                        Consulta(filtros=replace(base, tipo=tipo), texto=e.frase_exata),
+                        lambda r: _motivo(r, nome),
+                    )
+                )
+        if e.texto_livre:
+            clausulas.append(
+                _Clausula(
+                    Consulta(
+                        filtros=base, texto=e.texto_livre, significado=e.texto_livre
+                    ),
+                    lambda r: _motivo(r, nome),
+                )
+            )
+        return clausulas
+
+    def _videos(
+        self,
+        trechos: list[_Trecho],
+        job: Callable[[str], Job | None],
+        termos: list[str],
+        ordem: Ordem,
+    ) -> list[VideoDoResultado]:
+        por_video: dict[str, list[_Trecho]] = defaultdict(list)
+        for t in trechos:
+            por_video[t.job_id].append(t)
+        videos: list[tuple[int, VideoDoResultado]] = []
+        for id, lista in por_video.items():
+            j = job(id)
+            if j is None:
+                continue
+            lista.sort(key=lambda t: (t.inicio_ms, t.fim_ms))
+            momentos = [
+                Momento(
+                    inicio_ms=t.inicio_ms,
+                    fim_ms=t.fim_ms,
+                    motivo=t.motivo,
+                    destaques=_destaques(t.motivo, termos),
+                    quadro_url=(
+                        self._armazenamento.url_do_quadro(
+                            id, t.quadro, VALIDADE_DO_QUADRO
+                        )
+                        if t.quadro
+                        else None
+                    ),
+                )
+                for t in lista
+            ]
+            videos.append(
+                (
+                    min(t.posicao for t in lista),
+                    VideoDoResultado(
+                        job_id=id,
+                        nome=j.nome,
+                        programa=j.programa,
+                        data_exibicao=j.data_exibicao,
+                        duracao_s=j.duracao_s,
+                        n_momentos=len(momentos),
+                        momentos=momentos,
+                    ),
+                )
+            )
+        if ordem == "data":
+            videos.sort(key=lambda v: v[1].data_exibicao or date.min, reverse=True)
+        else:
+            videos.sort(key=lambda v: (v[0], -v[1].n_momentos))
+        return [v for _, v in videos]
+
+    def _sem_aparicoes(
+        self,
+        e: ConsultaEntendida,
+        clausulas: list[_Clausula],
+        consultar: Callable[[Consulta], list[Registro]],
+        nome: Callable[[str | None], str | None],
+    ) -> list[SemAparicao]:
+        donos = {o.dono for o in e.objetos if o.dono}
+        vazios: list[SemAparicao] = []
+        for pessoa in dict.fromkeys(e.pessoas):
+            quem = nome(pessoa)
+            if pessoa in donos or not quem or "imagem" not in _evidencias(e):
+                continue
+            na_fala = consultar(Consulta(filtros=Filtros(tipo="fala"), texto=quem))
+            na_tela = consultar(
+                Consulta(filtros=Filtros(tipo="texto_na_tela"), texto=quem)
+            )
+            vazios.append(
+                SemAparicao(
+                    pessoa_id=pessoa,
+                    nome=quem,
+                    mencoes_na_fala=len(na_fala),
+                    mencoes_na_tela=len(na_tela),
+                )
+            )
+        return vazios
+
+
+def _evidencias(e: ConsultaEntendida) -> tuple[str, ...]:
+    return e.evidencias or ("imagem",)
+
+
+def _tipos_de_texto(e: ConsultaEntendida) -> list[Literal["fala", "texto_na_tela"]]:
+    """A frase exata vale na fala, salvo se o usuário pediu só o que está escrito na tela."""
+    evidencias = e.evidencias or ("fala",)
+    tipos: list[Literal["fala", "texto_na_tela"]] = []
+    if "fala" in evidencias or "citada" in evidencias:
+        tipos.append("fala")
+    if "gc" in evidencias or "citada" in evidencias:
+        tipos.append("texto_na_tela")
+    return tipos or ["fala"]
+
+
+def _clausulas_da_pessoa(
+    pessoa: str,
+    e: ConsultaEntendida,
+    base: Filtros,
+    nome: Callable[[str | None], str | None],
+) -> list[_Clausula]:
+    quem = nome(pessoa)
+    clausulas: list[_Clausula] = []
+    evidencias = _evidencias(e)
+    if "imagem" in evidencias:
+        clausulas.append(
+            _Clausula(
+                Consulta(filtros=replace(base, tipo="plano", pessoa=pessoa)),
+                lambda r: f"Na imagem: {quem}" if quem else "Na imagem",
+            )
+        )
+    if quem:
+        if "fala" in evidencias or "citada" in evidencias:
+            clausulas.append(
+                _Clausula(
+                    Consulta(filtros=replace(base, tipo="fala"), texto=quem),
+                    lambda r: _motivo(r, nome),
+                )
+            )
+        if "gc" in evidencias or "citada" in evidencias:
+            clausulas.append(
+                _Clausula(
+                    Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem),
+                    lambda r: _motivo(r, nome),
+                )
+            )
+    return clausulas
+
+
+def _motivo(r: Registro, nome: Callable[[str | None], str | None]) -> str:
+    """O motivo em palavras; o texto vem do índice e segue como texto puro."""
+    if r.tipo == "objeto":
+        peca = " ".join(
+            p
+            for p in (r.tipo_do_objeto or r.categoria, r.cor or " ".join(r.cor_base))
+            if p
+        )
+        dono = nome(r.dono)
+        return f"Objeto: {peca} · {dono}" if dono else f"Objeto: {peca}"
+    if r.tipo == "fala":
+        return f"Fala: '{r.texto}'"
+    if r.tipo == "texto_na_tela":
+        return f"GC: {r.texto}"
+    return f"Cena: {r.descricao}" if r.descricao else "Cena"
+
+
+def _termos(
+    e: ConsultaEntendida, nome: Callable[[str | None], str | None]
+) -> list[str]:
+    """O que se destaca no motivo: a frase, o texto livre e o nome das pessoas citadas."""
+    termos = [e.frase_exata] if e.frase_exata else []
+    if e.texto_livre:
+        termos += [e.texto_livre, *normalizar(e.texto_livre).split()]
+    termos += [q for p in e.pessoas if (q := nome(p))]
+    return termos
+
+
+def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int]]:
+    """RRF entre as cláusulas; cada registro leva o índice da cláusula em que ficou melhor."""
+    pontos: dict[str, float] = defaultdict(float)
+    melhor: dict[str, tuple[int, int]] = {}  # id -> (posição, cláusula)
+    registros: dict[str, Registro] = {}
+    for c, lista in enumerate(listas):
+        for posicao, r in enumerate(lista):
+            pontos[r.id] += 1 / (RRF_K + posicao + 1)
+            registros[r.id] = r
+            if r.id not in melhor or posicao < melhor[r.id][0]:
+                melhor[r.id] = (posicao, c)
+    ids = sorted(pontos, key=lambda i: (-pontos[i], melhor[i]))
+    return [(registros[i], melhor[i][1]) for i in ids[:TETO_DE_REGISTROS]]
+
+
+def _juntar(
+    registros: list[Registro], motivos: dict[str, str], posicao: dict[str, int]
+) -> list[_Trecho]:
+    """Registros do mesmo vídeo, com o mesmo motivo e a até 3 s um do outro, viram um trecho."""
+    trechos: list[_Trecho] = []
+    abertos: dict[tuple[str, str], _Trecho] = {}
+    for r in sorted(registros, key=lambda r: (r.job_id, r.inicio_ms, r.fim_ms)):
+        chave = (r.job_id, motivos[r.id])
+        atual = abertos.get(chave)
+        if atual and r.inicio_ms - atual.fim_ms <= JUNCAO_MS:
+            atual.fim_ms = max(atual.fim_ms, r.fim_ms)
+            atual.posicao = min(atual.posicao, posicao[r.id])
+            atual.quadro = atual.quadro or r.quadro
+            continue
+        atual = _Trecho(
+            r.job_id, r.inicio_ms, r.fim_ms, motivos[r.id], posicao[r.id], r.quadro
+        )
+        abertos[chave] = atual
+        trechos.append(atual)
+    return trechos

@@ -65,6 +65,7 @@ ROTAS = [
     ("ler", "GET", "/v1/jobs/j1", {}),
     ("ler", "GET", "/v1/jobs/j1/decupagem", {}),
     ("ler", "GET", "/v1/jobs/j1/reproducao", {}),
+    ("ler", "GET", "/v1/busca?q=vestido", {}),
     ("ler", "GET", "/v1/jobs/j1/quadros/plano-0.jpg", {}),
     ("cancelar", "DELETE", "/v1/jobs/j1", {}),
 ]
