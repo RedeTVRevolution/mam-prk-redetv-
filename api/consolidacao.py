@@ -12,6 +12,8 @@ from api.decupagem import (
     VERSAO_ESQUEMA,
     Bloco,
     Comercial,
+    CorrecaoDaTranscricao,
+    CorrecaoDescartada,
     Decupagem,
     Fala,
     Pauta,
@@ -198,6 +200,8 @@ def consolidar(
     comerciais: list[Comercial] = []
     transcricao: list[Fala] = []
     textos_na_tela: list[TextoNaTela] = []
+    correcoes: list[CorrecaoDaTranscricao] = []
+    descartadas: list[CorrecaoDescartada] = []
     for k, (janela, d) in enumerate(resultados):
         ultima = k == ultimo
         planos += _dono(d.planos, janela, ultima)
@@ -207,6 +211,8 @@ def consolidar(
         # sai cortado no fim do contexto dela.
         transcricao += _dono(d.transcricao, janela, ultima)
         textos_na_tela += _dono(d.textos_na_tela, janela, ultima)
+        correcoes += _dono(d.correcoes_da_transcricao, janela, ultima)
+        descartadas += _dono(d.correcoes_descartadas, janela, ultima)
         proximos = (
             _antes_do_nucleo(decupagens[k + 1].comerciais, resultados[k + 1][0])
             if k < ultimo
@@ -238,6 +244,8 @@ def consolidar(
         comerciais=_em_ordem(comerciais),
         transcricao=_em_ordem(transcricao),
         textos_na_tela=_em_ordem(textos_na_tela),
+        correcoes_da_transcricao=_em_ordem(correcoes),
+        correcoes_descartadas=_em_ordem(descartadas),
     )
     # `model_copy` não valida: valida de novo depois da regra de tempos.
     return Decupagem.model_validate(

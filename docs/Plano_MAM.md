@@ -15,7 +15,8 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 | Segurança | Produção acessível só pela rede da RedeTV; chave de API por sistema; login pelo Identity Platform; Cloud Armor e VPC Service Controls |
 | Duplicidade | `Idempotency-Key` por requisição; SHA-256 conferido depois do upload evita processar o mesmo arquivo duas vezes, sem dar acesso à decupagem de outro sistema |
 | Vídeos longos | Janelas de análise de 5 min em paralelo; qualquer duração, uma resposta única |
-| Fora do escopo | Video Intelligence, Cloud Vision, transcrição separada |
+| Fora do escopo | Video Intelligence, Cloud Vision |
+| Transcrição | Whisper (faster-whisper, Job `transcricao`) transcreve o áudio com o tempo de cada palavra; o Gemini recebe o texto na instrução, diz quem fala e corrige nomes só com prova da tela |
 | Busca | Vídeos e momentos por pessoa, objeto, cena, frase ou imagem: Agent Retrieval híbrido com reordenação |
 | Stack | Python (FastAPI, Pydantic) no back, React com TypeScript no front, Terraform na infraestrutura |
 | Testes | TDD com testes unitários sem nuvem, emuladores locais e um ambiente efêmero por PR no GCP |
@@ -42,7 +43,7 @@ O Gemini 3.5 Flash-Lite é o melhor custo para decupar o vídeo inteiro: custa c
 | Gemini 3.8 Flash | 1,50 / 7,50 (metade até 31/12/2026) | \~1,14 | 87,1% ([model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/)) | Escalonamento e referência do piloto |
 | Gemini 4 Argon | Batch 2,00 / 10,00 (a partir de 01/12/2026) | \~1,53 (Batch) | 91,7% | Não usar no volume |
 
-Premissas do custo por hora: preços Standard do endpoint global, o dobro do Flex ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com transcrição e raciocínio baixo. No dev, em 30/10/2026, o clipe2 (5 min) custou \~US$ 0,02 no Flash-Lite em Standard, ou \~US$ 0,24 por hora, dentro da estimativa. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
+Premissas do custo por hora: preços Standard do endpoint global, o dobro do Flex ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com raciocínio baixo. No dev, em 30/10/2026, o clipe2 (5 min) custou \~US$ 0,02 no Flash-Lite em Standard, ou \~US$ 0,24 por hora, dentro da estimativa. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
 
 Não há benchmark público de vídeo longo para o 3.5 Flash-Lite. Por isso a escolha é confirmada no piloto da E1: cinco programas completos e variados, processados inteiros pelos dois modelos, sem depender das dúvidas do primeiro, e comparados visualmente lado a lado no player (ver Qualidade em produção). Se o Flash-Lite ficar aquém só em famosos, apenas a detecção de pessoas sobe para o 3.8 Flash.
 
@@ -78,7 +79,7 @@ De onde vem a economia:
 | --- | --- |
 | 3.5 Flash-Lite em vez de 3.8 Flash no volume | \~75% a menos por hora |
 | Resolução padrão (70 tokens por quadro) em vez de alta (280) | 75% a menos nos tokens de imagem |
-| Transcrição na mesma chamada do Gemini | Evita o Gemini 3.5 Transcribe, que sairia \~US$ 0,31/h, mais que a passada inteira |
+| Transcrição pelo Whisper no próprio projeto | Evita o Gemini 3.5 Transcribe (\~US$ 0,31/h, mais que a passada inteira); o custo do Job sai do piloto (#81) |
 | Escalonamento seletivo | O 3.8 Flash olha \~10–15% do tempo (dúvidas e amostra), não 100%; a taxa real sai do piloto |
 | SHA-256 do arquivo | Vídeo repetido custa zero |
 | [Batch](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/batch-inference) para o acervo histórico | 50% de desconto, sem disputar cota com o dia a dia |
@@ -290,7 +291,7 @@ O JSON cobre os cinco requisitos e traz a transcrição como bônus; todo tempo 
 | Objetos, cenários e B-roll | Por plano: ambiente, objetos, ação, enquadramento, movimento de câmera, externa/estúdio, dia/noite e a flag "plano limpo" (sem GC nem ninguém falando para a câmera) |
 | Merchandising e inserções | Marca, tipo (intervalo, merchan com apresentador, patrocínio/vinheta, sobreposição gráfica, marca incidental, menção editorial), início/fim e evidência |
 | Timecode | Planos e B-roll usam os cortes exatos. Eventos visuais (aparição, produto em cena) só se ajustam a um corte que esteja a até 1 s. Falas e menções seguem as próprias palavras e nunca se ajustam a cortes. O tempo original do modelo fica guardado, e início e fim são medidos separadamente. Timecode de origem quando o arquivo tiver |
-| Transcrição | Falas com início/fim e locutor, geradas na mesma chamada do Gemini |
+| Transcrição | Falas com início/fim e locutor: o texto vem do Whisper, o locutor do Gemini. O texto original do Whisper fica guardado ao lado das correções do Gemini, cada uma com a prova (texto da tela) e a palavra original; as recusadas ficam registradas |
 
 Estrutura de topo, com valores fictícios:
 

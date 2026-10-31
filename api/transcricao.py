@@ -32,6 +32,40 @@ class Transcricao(BaseModel):
     def texto(self) -> str:
         return " ".join(p.texto for p in self.palavras)
 
+    def recortar(self, inicio_ms: int, fim_ms: int) -> "Transcricao":
+        """As palavras cujo meio cai em `[inicio_ms, fim_ms]`."""
+        return self.model_copy(
+            update={
+                "palavras": [
+                    p
+                    for p in self.palavras
+                    if inicio_ms <= (p.inicio_s + p.fim_s) * 500 <= fim_ms
+                ]
+            }
+        )
+
+    def em_linhas(self) -> str:
+        """Uma linha por trecho, `[MM:SS] texto`, para a instrução do Gemini.
+
+        O trecho muda quando há pausa de mais de 1 s ou passa de 15 palavras.
+        """
+        linhas: list[str] = []
+        atual: list[Palavra] = []
+        for p in self.palavras:
+            if atual and (p.inicio_s - atual[-1].fim_s > 1 or len(atual) >= 15):
+                linhas.append(_linha(atual))
+                atual = []
+            atual.append(p)
+        if atual:
+            linhas.append(_linha(atual))
+        return "\n".join(linhas)
+
+
+def _linha(palavras: list[Palavra]) -> str:
+    segundos = int(palavras[0].inicio_s)
+    texto = " ".join(p.texto for p in palavras)
+    return f"[{segundos // 60:02d}:{segundos % 60:02d}] {texto}"
+
 
 class Transcritor(Protocol):
     """Porta do motor de transcrição; a importação do faster-whisper fica só no adaptador."""

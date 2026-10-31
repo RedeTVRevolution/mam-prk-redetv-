@@ -283,3 +283,39 @@ def test_cancelamento_depois_da_ultima_leitura_nao_e_sobrescrito(
     assert job is not None
     assert (job.estado, job.codigo_falha) == ("cancelado", None)
     # Uma Decupagem já gravada fica invisível: a leitura exige `concluido`.
+
+
+def test_a_transcricao_do_job_entra_na_instrucao() -> None:
+    from api.transcricao import Palavra, Transcricao, TranscricoesEmMemoria
+
+    transcricoes = TranscricoesEmMemoria()
+    transcricoes.gravar_transcricao(
+        "j9",
+        Transcricao(
+            modelo="m",
+            idioma="pt",
+            palavras=[Palavra(texto="olá", inicio_s=3.0, fim_s=3.4)],
+        ),
+    )
+    repositorio = RepositorioEmMemoria()
+    transporte = TransporteFalso(BOA)
+    ambiente = Ambiente(
+        repositorio,
+        DecupagensEmMemoria("teste-aceitos"),
+        transporte,
+        TestClient(
+            criar_app(
+                repositorio,
+                DecupagensEmMemoria("teste-aceitos"),
+                transporte,
+                transcricoes,
+                dormir=lambda _s: None,
+                relogio=lambda: DEPOIS,
+            )
+        ),
+    )
+    ambiente.registrar("j9")
+
+    _analisar(ambiente, "j9")
+
+    assert "[00:03] olá" in transporte.chamadas[0].instrucao

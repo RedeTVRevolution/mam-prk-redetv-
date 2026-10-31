@@ -28,6 +28,8 @@ from api.janelas import (
     planejar_janelas,
 )
 from api.tempos import aplicar_regra_de_tempos
+from api.transcricao import Transcricao
+from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA
 
 
 def analisar_video(
@@ -39,6 +41,8 @@ def analisar_video(
     programa: str | None = None,
     cortes_ms: Sequence[int] = (),
     fracao_escalonada: float | None = None,
+    transcricao: Transcricao | None = None,
+    limiar_de_semelhanca: float = LIMIAR_DE_SEMELHANCA,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
@@ -58,6 +62,9 @@ def analisar_video(
             video=video,
             programa=programa,
             trecho_ms=trecho_ms,
+            transcricao=transcricao
+            and transcricao.recortar(*(trecho_ms or (0, video.duracao_ms))),
+            limiar_de_semelhanca=limiar_de_semelhanca,
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,

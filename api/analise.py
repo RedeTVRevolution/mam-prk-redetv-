@@ -24,7 +24,8 @@ from api.ciclo_de_vida import transitar
 from api.decupagem import Video
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs, agora_utc
-from api.nuvem import DecupagensStorage, RepositorioFirestore
+from api.nuvem import DecupagensStorage, RepositorioFirestore, TranscricoesStorage
+from api.transcricao import Transcricao
 
 
 class NovaAnalise(BaseModel):
@@ -41,10 +42,17 @@ class DecupagensDaAnalise(Protocol):
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None: ...
 
 
+class TranscricoesDaAnalise(Protocol):
+    """Porta para ler a transcrição que o Job de transcrição guardou."""
+
+    def ler_transcricao(self, job_id: str) -> Transcricao | None: ...
+
+
 def criar_app(
     repositorio: RepositorioDeJobs,
     decupagens: DecupagensDaAnalise,
     transporte: Transporte,
+    transcricoes: TranscricoesDaAnalise | None = None,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
 ) -> FastAPI:
@@ -76,6 +84,9 @@ def criar_app(
                 job_id=job.id,
                 programa=job.programa,
                 video=Video(sha256=job.sha256, duracao_ms=round(job.duracao_s * 1000)),
+                transcricao=transcricoes.ler_transcricao(job.id)
+                if transcricoes
+                else None,
                 dormir=dormir,
             )
         except AnaliseFalhou:
@@ -104,6 +115,9 @@ def _app_da_nuvem(projeto: str) -> FastAPI:
             os.environ["BUCKET_DECUPAGENS"],
         ),
         TransporteVertex(projeto, sessao),
+        TranscricoesStorage(
+            ClienteStorage(project=projeto), os.environ["BUCKET_ACEITOS"]
+        ),
     )
 
 
