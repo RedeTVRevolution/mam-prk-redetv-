@@ -27,6 +27,8 @@ from api.auth import (
     Sistema,
     Usuario,
 )
+from api.ciclo_de_vida import JaTerminou, transitar
+from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
     Correcao,
     CorrecaoJaExiste,
@@ -198,6 +200,16 @@ class RepositorioDeJobs(Protocol):
 
     def obter(self, job_id: str) -> Job | None: ...
 
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        """Aplica `mudancas` só se o Job ainda estiver em `de`; atômica.
+
+        Devolve o Job gravado, ou `None` se ele não existe ou já saiu de `de`.
+        Quem decide as transições é `api.ciclo_de_vida`; use `transitar` de lá.
+        """
+        ...
+
     def listar(self) -> list[Job]:
         """Do mais recente para o mais antigo."""
         ...
@@ -235,6 +247,15 @@ class RepositorioEmMemoria:
     def obter(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        job = self._jobs.get(job_id)
+        if job is None or job.estado != de:
+            return None
+        self._jobs[job_id] = job.model_copy(update=mudancas)
+        return self._jobs[job_id]
+
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
@@ -247,6 +268,11 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def obter(self, job_id: str) -> Job | None:
+        raise ServicoIndisponivel
+
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
         raise ServicoIndisponivel
 
     def listar(self) -> list[Job]:
@@ -276,20 +302,18 @@ def expirar_uploads(
     """Falha os Jobs sem upload completo há 24 h ou mais e cancela a sessão de upload."""
     expirados: list[str] = []
     for job in repositorio.listar():
-        if (
-            job.estado == "aguardando_upload"
-            and agora - job.criado_em >= PRAZO_DO_UPLOAD
+        if job.estado != "aguardando_upload" or agora - job.criado_em < PRAZO_DO_UPLOAD:
+            continue
+        # Primeiro a transição: se o Job andou nesse meio-tempo, o upload é dele.
+        if transitar(
+            repositorio,
+            job.id,
+            "aguardando_upload",
+            "falhou",
+            agora,
+            codigo_falha="upload_expirado",
         ):
             armazenamento.cancelar_upload(job.id)
-            repositorio.salvar(
-                job.model_copy(
-                    update={
-                        "estado": "falhou",
-                        "codigo_falha": "upload_expirado",
-                        "atualizado_em": agora,
-                    }
-                )
-            )
             expirados.append(job.id)
     return expirados
 
@@ -461,15 +485,14 @@ def criar_rotas(
     def cancelar(
         job_id: str, chamador: Annotated[Chamador, Depends(_exige("cancelar"))]
     ) -> JobPublico:
-        job = _enxerga(chamador, repositorio.obter(job_id))
-        if job.estado in ("concluido", "falhou"):
-            raise HTTPException(409, f"Job em {job.estado}, não cancelável")
-        if job.estado != "cancelado":
-            job = job.model_copy(
-                update={"estado": "cancelado", "atualizado_em": relogio()}
-            )
-            repositorio.salvar(job)
-        return JobPublico.de(job)
+        _enxerga(chamador, repositorio.obter(job_id))
+        try:
+            job = cancelar_job(repositorio, job_id, relogio())
+        except JaTerminou as terminou:
+            raise HTTPException(
+                409, f"Job em {terminou.estado}, não cancelável"
+            ) from None
+        return JobPublico.de(_enxerga(chamador, job))
 
     @rotas.get("/{job_id}/reproducao")
     def reproducao(

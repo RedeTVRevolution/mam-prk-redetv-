@@ -141,8 +141,8 @@ locals {
     build = ["roles/logging.logWriter"]
   }
   papeis_nos_buckets = {
-    # A API assina as URLs de envio para a quarentena e lê o proxy de reprodução e a decupagem.
-    web = { quarentena = "roles/storage.objectCreator", aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectViewer" }
+    # A API assina as URLs de envio para a quarentena, apaga dela o upload cancelado e lê o proxy de reprodução e a decupagem.
+    web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectViewer" }
     # Lê e apaga o original da quarentena; grava a cópia limpa e o proxy de reprodução.
     validacao = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectCreator" }
     # O Gemini lê o proxy de reprodução; a decupagem vai para o bucket dela.

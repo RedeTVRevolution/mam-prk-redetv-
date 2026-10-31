@@ -1,7 +1,7 @@
-"""Serviço de análise, contra os emuladores do Firestore e do Storage.
+"""Serviço de análise, com dublês em memória do repositório e do Storage.
 
-Sem `FIRESTORE_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`, os testes são pulados;
-no CI os emuladores sobem antes do pytest. O Gemini é sempre o `TransporteFalso`.
+O Gemini é sempre o `TransporteFalso`. A leitura da Decupagem gravada, pela API
+web, é o único teste que pede os emuladores (pulado sem eles).
 """
 
 import json
@@ -14,16 +14,15 @@ import pytest
 from fastapi.testclient import TestClient
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
-from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 
 from api.analise import criar_app
 from api.auth import Usuario
 from api.decupagem import Decupagem
 from api.gemini import Chamada, ErroHttp
-from api.jobs import Job
+from api.jobs import Job, RepositorioDeJobs, RepositorioEmMemoria
 from api.main import criar_app as criar_app_web
-from api.nuvem import ArmazenamentoStorage, RepositorioFirestore
+from api.nuvem import ArmazenamentoStorage, DecupagensStorage, RepositorioFirestore
 from api.programas import PERFIS
 from api.tests.test_gemini import BOA, TransporteFalso
 from api.tests.test_nuvem import _credencial_local
@@ -34,15 +33,23 @@ BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 DEPOIS = BASE + timedelta(minutes=5)
 SHA = "a" * 64
 
-pytestmark = pytest.mark.skipif(
-    not (EMULADOR_FIRESTORE and EMULADOR_STORAGE), reason="sem emuladores"
-)
+
+class DecupagensEmMemoria:
+    def __init__(self, aceitos: str) -> None:
+        self.aceitos = aceitos
+        self.gravadas: dict[str, str] = {}
+
+    def uri_do_proxy(self, job_id: str) -> str:
+        return f"gs://{self.aceitos}/{job_id}/proxy.mp4"
+
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
+        self.gravadas[job_id] = conteudo
 
 
 @dataclass
 class Ambiente:
-    repositorio: RepositorioFirestore
-    decupagens: Bucket
+    repositorio: RepositorioDeJobs
+    decupagens: DecupagensEmMemoria
     transporte: TransporteFalso
     cliente: TestClient
 
@@ -70,27 +77,16 @@ class Ambiente:
         return job
 
 
-def _ambiente(*respostas: str | Exception) -> Ambiente:
-    sufixo = uuid.uuid4().hex[:8]
-    storage = ClienteStorage(
-        project="teste",
-        credentials=AnonymousCredentials(),  # type: ignore[no-untyped-call]
-        client_options={"api_endpoint": EMULADOR_STORAGE},
-    )
-    repositorio = RepositorioFirestore(
-        firestore.Client(
-            project="teste",
-            credentials=AnonymousCredentials(),  # type: ignore[no-untyped-call]
-        ),
-        colecao=f"jobs-{sufixo}",
-    )
-    decupagens = storage.create_bucket(f"teste-decupagens-{sufixo}")
+def _ambiente(
+    *respostas: str | Exception, repositorio: RepositorioDeJobs | None = None
+) -> Ambiente:
+    repositorio = repositorio or RepositorioEmMemoria()
+    decupagens = DecupagensEmMemoria("teste-aceitos")
     transporte = TransporteFalso(*respostas)
     app = criar_app(
         repositorio,
         decupagens,
         transporte,
-        bucket_de_aceitos=f"teste-aceitos-{sufixo}",
         dormir=lambda _s: None,
         relogio=lambda: DEPOIS,
     )
@@ -110,14 +106,11 @@ def test_sucesso_grava_a_decupagem_e_leva_o_job_a_concluido() -> None:
     job = ambiente.job("j1")
     assert (job.estado, job.codigo_falha) == ("concluido", None)
     assert job.atualizado_em == DEPOIS
-    gravada = Decupagem.model_validate_json(
-        ambiente.decupagens.blob("j1.json").download_as_bytes()
-    )
+    gravada = Decupagem.model_validate_json(ambiente.decupagens.gravadas["j1"])
     # O bloco `video` vem do Job, não do modelo.
     assert (gravada.video.sha256, gravada.video.duracao_ms) == (SHA, 60_000)
     chamada = ambiente.transporte.chamadas[0]
-    assert chamada.video_uri.startswith("gs://teste-aceitos-")
-    assert chamada.video_uri.endswith("/j1/proxy.mp4")
+    assert chamada.video_uri == "gs://teste-aceitos/j1/proxy.mp4"
     assert chamada.rotulos == {"job_id": "j1"}
 
 
@@ -138,7 +131,7 @@ def test_analise_falhou_grava_falhou_sem_decupagem() -> None:
 
     job = ambiente.job("j2")
     assert (job.estado, job.codigo_falha) == ("falhou", "analise_falhou")
-    assert not ambiente.decupagens.blob("j2.json").exists()
+    assert "j2" not in ambiente.decupagens.gravadas
 
 
 @pytest.mark.parametrize(
@@ -152,7 +145,7 @@ def test_job_fora_de_analisando_nao_muda(estado: str) -> None:
 
     assert ambiente.job("j3") == antes
     assert ambiente.transporte.chamadas == []
-    assert not ambiente.decupagens.blob("j3.json").exists()
+    assert "j3" not in ambiente.decupagens.gravadas
 
 
 def test_job_inexistente_responde_200_sem_fazer_nada() -> None:
@@ -172,16 +165,42 @@ def test_corpo_fora_do_esquema_estrito_e_recusado() -> None:
     assert ambiente.cliente.post("/analisar", json=corpo).status_code == 422
 
 
+@pytest.mark.skipif(
+    not (EMULADOR_FIRESTORE and EMULADOR_STORAGE), reason="sem emuladores"
+)
 def test_decupagem_gravada_e_servida_pela_api_web() -> None:
-    ambiente = _ambiente(BOA)
+    sufixo = uuid.uuid4().hex[:8]
+    storage = ClienteStorage(
+        project="teste",
+        credentials=AnonymousCredentials(),  # type: ignore[no-untyped-call]
+        client_options={"api_endpoint": EMULADOR_STORAGE},
+    )
+    storage.create_bucket(f"teste-decupagens-{sufixo}")
+    repositorio = RepositorioFirestore(
+        firestore.Client(
+            project="teste",
+            credentials=AnonymousCredentials(),  # type: ignore[no-untyped-call]
+        ),
+        colecao=f"jobs-{sufixo}",
+    )
+    ambiente = _ambiente(BOA, repositorio=repositorio)
     ambiente.registrar("j4")
+    ambiente.cliente = TestClient(
+        criar_app(
+            repositorio,
+            DecupagensStorage(storage, "aceitos", f"teste-decupagens-{sufixo}"),
+            ambiente.transporte,
+            dormir=lambda _s: None,
+            relogio=lambda: DEPOIS,
+        )
+    )
     _analisar(ambiente, "j4")
     credencial = _credencial_local()
     armazenamento = ArmazenamentoStorage(
-        ambiente.decupagens.client,
+        storage,
         "quarentena",
         "aceitos",
-        ambiente.decupagens.name,
+        f"teste-decupagens-{sufixo}",
         assinatura=lambda: {"credentials": credencial},
     )
 
@@ -211,7 +230,9 @@ def _cancelar_durante_a_chamada(ambiente: Ambiente, job_id: str) -> None:
     ambiente.transporte.gerar = chamar_e_cancelar  # type: ignore[method-assign]
 
 
-def test_cancelado_durante_a_analise_continua_cancelado_e_sem_decupagem() -> None:
+def test_cancelado_durante_a_analise_continua_cancelado_e_sem_decupagem_visivel() -> (
+    None
+):
     ambiente = _ambiente(BOA)
     ambiente.registrar("j6")
     _cancelar_durante_a_chamada(ambiente, "j6")
@@ -219,7 +240,6 @@ def test_cancelado_durante_a_analise_continua_cancelado_e_sem_decupagem() -> Non
     assert _analisar(ambiente, "j6") == 200
 
     assert ambiente.job("j6").estado == "cancelado"
-    assert not ambiente.decupagens.blob("j6.json").exists()
 
 
 def test_cancelado_durante_a_analise_nao_vira_falhou_se_o_gemini_falhar() -> None:
@@ -230,4 +250,27 @@ def test_cancelado_durante_a_analise_nao_vira_falhou_se_o_gemini_falhar() -> Non
     assert _analisar(ambiente, "j7") == 200
 
     job = ambiente.job("j7")
+    assert (job.estado, job.codigo_falha) == ("cancelado", None)
+
+
+class _CancelaAposLer(RepositorioEmMemoria):
+    """O cancelamento chega logo depois da última leitura do worker."""
+
+    def obter(self, job_id: str) -> Job | None:
+        job = super().obter(job_id)
+        if job is not None:
+            self.salvar(job.model_copy(update={"estado": "cancelado"}))
+        return job
+
+
+@pytest.mark.parametrize("resposta", [BOA, ErroHttp(400)])
+def test_cancelamento_depois_da_ultima_leitura_nao_e_sobrescrito(
+    resposta: str | Exception,
+) -> None:
+    ambiente = _ambiente(resposta, repositorio=_CancelaAposLer())
+    ambiente.registrar("j9")
+
+    assert _analisar(ambiente, "j9") == 200
+
+    job = ambiente.job("j9")
     assert (job.estado, job.codigo_falha) == ("cancelado", None)

@@ -10,16 +10,16 @@ import os
 import time
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import google.auth
 from fastapi import FastAPI
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud import firestore
-from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict
 
+from api.ciclo_de_vida import transitar
 from api.decupagem import Video
 from api.gemini import (
     AnaliseFalhou,
@@ -28,8 +28,8 @@ from api.gemini import (
     TransporteVertex,
     analisar,
 )
-from api.jobs import Job, RepositorioDeJobs, agora_utc
-from api.nuvem import RepositorioFirestore, objeto_da_decupagem, objeto_do_proxy
+from api.jobs import RepositorioDeJobs, agora_utc
+from api.nuvem import DecupagensStorage, RepositorioFirestore
 
 
 class NovaAnalise(BaseModel):
@@ -38,23 +38,18 @@ class NovaAnalise(BaseModel):
     job_id: str
 
 
-def _atualizar(
-    repositorio: RepositorioDeJobs, job: Job, agora: datetime, **campos: object
-) -> None:
-    repositorio.salvar(job.model_copy(update={**campos, "atualizado_em": agora}))
+class DecupagensDaAnalise(Protocol):
+    """Porta do Cloud Storage para a análise; os testes usam um dublê em memória."""
 
+    def uri_do_proxy(self, job_id: str) -> str: ...
 
-def _cancelado(repositorio: RepositorioDeJobs, job_id: str) -> bool:
-    """Relê o Job: o cancelamento pode ter chegado durante a chamada ao Gemini."""
-    atual = repositorio.obter(job_id)
-    return atual is not None and atual.estado == "cancelado"
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None: ...
 
 
 def criar_app(
     repositorio: RepositorioDeJobs,
-    decupagens: Bucket,
+    decupagens: DecupagensDaAnalise,
     transporte: Transporte,
-    bucket_de_aceitos: str,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
 ) -> FastAPI:
@@ -65,42 +60,37 @@ def criar_app(
         job = repositorio.obter(corpo.job_id)
         if job is None or job.estado != "analisando":
             return {"status": "ignorado"}
-        if job.sha256 is None or job.duracao_s is None:
-            _atualizar(
+
+        def falhar() -> dict[str, str]:
+            falhou = transitar(
                 repositorio,
-                job,
+                job.id,
+                "analisando",
+                "falhou",
                 relogio(),
-                estado="falhou",
                 codigo_falha="analise_falhou",
             )
-            return {"status": "falhou"}
+            return {"status": "falhou" if falhou else "cancelado"}
+
+        if job.sha256 is None or job.duracao_s is None:
+            return falhar()
         try:
             decupagem = analisar(
                 transporte,
-                video_uri=f"gs://{bucket_de_aceitos}/{objeto_do_proxy(job.id)}",
+                video_uri=decupagens.uri_do_proxy(job.id),
                 job_id=job.id,
                 programa=job.programa,
                 video=Video(sha256=job.sha256, duracao_ms=round(job.duracao_s * 1000)),
                 dormir=dormir,
             )
         except AnaliseFalhou:
-            if _cancelado(repositorio, job.id):
-                return {"status": "cancelado"}
-            _atualizar(
-                repositorio,
-                job,
-                relogio(),
-                estado="falhou",
-                codigo_falha="analise_falhou",
-            )
-            return {"status": "falhou"}
-        if _cancelado(repositorio, job.id):
-            return {"status": "cancelado"}
-        decupagens.blob(objeto_da_decupagem(job.id)).upload_from_string(
-            decupagem.model_dump_json(), content_type="application/json"
-        )
-        _atualizar(repositorio, job, relogio(), estado="concluido")
-        return {"status": "concluido"}
+            return falhar()
+        # A Decupagem só fica visível com o Job `concluido`: se o cancelamento
+        # chegou antes da transição, o arquivo gravado aqui não é lido por ninguém.
+        decupagens.gravar_decupagem(job.id, decupagem.model_dump_json())
+        if transitar(repositorio, job.id, "analisando", "concluido", relogio()):
+            return {"status": "concluido"}
+        return {"status": "cancelado"}
 
     return app
 
@@ -113,9 +103,12 @@ def _app_da_nuvem(projeto: str) -> FastAPI:
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
     return criar_app(
         RepositorioFirestore(firestore.Client(project=projeto)),
-        ClienteStorage(project=projeto).bucket(os.environ["BUCKET_DECUPAGENS"]),
+        DecupagensStorage(
+            ClienteStorage(project=projeto),
+            os.environ["BUCKET_ACEITOS"],
+            os.environ["BUCKET_DECUPAGENS"],
+        ),
         TransporteVertex(projeto, sessao),
-        os.environ["BUCKET_ACEITOS"],
     )
 
 

@@ -15,7 +15,7 @@ from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
-    ArmazenamentoIndisponivel,
+    Estado,
     Job,
     ServicoIndisponivel,
 )
@@ -44,10 +44,33 @@ class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def salvar(self, job: Job) -> None:
         self._colecao.document(job.id).set(job.model_dump())
+
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        # Lê, confere a origem e grava na mesma transação: um cancelamento que
+        # chegue no meio faz o Firestore repetir a transação, que então vê o novo estado.
+        referencia = self._colecao.document(job_id)
+
+        @firestore.transactional
+        def trocar(transacao: Any) -> Job | None:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                return None
+            job = Job(**(doc.to_dict() or {}))
+            if job.estado != de:
+                return None
+            novo = job.model_copy(update=mudancas)
+            transacao.set(referencia, novo.model_dump())
+            return novo
+
+        resultado: Job | None = trocar(self._cliente.transaction())
+        return resultado
 
     def obter(self, job_id: str) -> Job | None:
         doc = self._colecao.document(job_id).get()
@@ -202,8 +225,36 @@ def assinatura_pelo_iam() -> dict[str, Any]:
     }
 
 
-class ArmazenamentoStorage(ArmazenamentoIndisponivel):
-    """Upload, reprodução e decupagem; o cancelamento do upload segue indisponível."""
+class DecupagensStorage:
+    """A Decupagem no Cloud Storage e o proxy que o Gemini lê: o mesmo adaptador grava e lê."""
+
+    def __init__(
+        self, cliente: ClienteStorage, bucket_de_aceitos: str, bucket_de_decupagens: str
+    ) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+        self._decupagens = bucket_de_decupagens
+
+    def uri_do_proxy(self, job_id: str) -> str:
+        return f"gs://{self._aceitos}/{objeto_do_proxy(job_id)}"
+
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_da_decupagem(job_id)
+        ).upload_from_string(conteudo, content_type="application/json")
+
+    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
+        try:
+            with blob.open("rb") as arquivo:
+                while pedaco := arquivo.read(TAMANHO_DO_PEDACO):
+                    yield pedaco
+        except NotFound as e:
+            raise ServicoIndisponivel from e
+
+
+class ArmazenamentoStorage:
+    """Upload, cancelamento do upload, reprodução e leitura da decupagem."""
 
     def __init__(
         self,
@@ -217,6 +268,9 @@ class ArmazenamentoStorage(ArmazenamentoIndisponivel):
         self._bucket = bucket_de_quarentena
         self._aceitos = bucket_de_aceitos
         self._decupagens = bucket_de_decupagens
+        self._leitor = DecupagensStorage(
+            cliente, bucket_de_aceitos, bucket_de_decupagens
+        )
         self._assinatura = assinatura
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
@@ -234,6 +288,13 @@ class ArmazenamentoStorage(ArmazenamentoIndisponivel):
         )
         return url
 
+    def cancelar_upload(self, job_id: str) -> None:
+        """Apaga o objeto do Job da quarentena; o upload pode nem ter começado."""
+        try:
+            self._cliente.bucket(self._bucket).blob(job_id).delete()
+        except NotFound:
+            pass
+
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
         url: str = blob.generate_signed_url(
@@ -242,10 +303,4 @@ class ArmazenamentoStorage(ArmazenamentoIndisponivel):
         return url
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        try:
-            with blob.open("rb") as arquivo:
-                while pedaco := arquivo.read(TAMANHO_DO_PEDACO):
-                    yield pedaco
-        except NotFound as e:
-            raise ServicoIndisponivel from e
+        return self._leitor.abrir_decupagem(job_id)

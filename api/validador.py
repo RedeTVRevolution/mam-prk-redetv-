@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from api.jobs import CodigoDeFalha
+
 MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
 CODECS_VIDEO = {"h264", "hevc"}
 LADO_CURTO_MAXIMO = 1080  # 1080p, também em retrato
@@ -21,7 +23,7 @@ TEMPO_LIMITE_S = 900
 
 
 class Recusa(Exception):
-    def __init__(self, codigo: str) -> None:
+    def __init__(self, codigo: CodigoDeFalha) -> None:
         super().__init__(codigo)
         self.codigo = codigo
 

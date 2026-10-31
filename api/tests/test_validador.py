@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from api.jobs import CodigoDeFalha
 from api.validador import Recusa, validar
 
 # Sem ffmpeg na máquina (o CI), os testes rodam na imagem do Job: make testar-na-imagem.
@@ -56,7 +57,7 @@ def _probe(arquivo: Path) -> dict[str, list[dict[str, Any]]]:
     return json.loads(saida)  # type: ignore[no-any-return]
 
 
-def _recusa(arquivo: Path, tmp_path: Path) -> str:
+def _recusa(arquivo: Path, tmp_path: Path) -> CodigoDeFalha:
     with pytest.raises(Recusa) as erro:
         validar(arquivo, tmp_path / "saida")
     return erro.value.codigo
