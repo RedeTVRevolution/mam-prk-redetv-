@@ -253,12 +253,18 @@ def test_cancelado_durante_a_analise_nao_vira_falhou_se_o_gemini_falhar() -> Non
     assert (job.estado, job.codigo_falha) == ("cancelado", None)
 
 
-class _CancelaAposLer(RepositorioEmMemoria):
-    """O cancelamento chega logo depois da última leitura do worker."""
+class _CancelaDepoisDaUltimaLeitura(RepositorioEmMemoria):
+    """O cancelamento chega logo depois de cada leitura do Job em `analisando`.
+
+    A leitura devolve o Job de antes do cancelamento, como se ele chegasse
+    entre a última releitura do worker e a gravação.
+    """
 
     def obter(self, job_id: str) -> Job | None:
         job = super().obter(job_id)
-        if job is not None:
+        if job is not None and job.estado == "cancelado":
+            return job.model_copy(update={"estado": "analisando"})
+        if job is not None and job.estado == "analisando":
             self.salvar(job.model_copy(update={"estado": "cancelado"}))
         return job
 
@@ -267,10 +273,13 @@ class _CancelaAposLer(RepositorioEmMemoria):
 def test_cancelamento_depois_da_ultima_leitura_nao_e_sobrescrito(
     resposta: str | Exception,
 ) -> None:
-    ambiente = _ambiente(resposta, repositorio=_CancelaAposLer())
+    repositorio = _CancelaDepoisDaUltimaLeitura()
+    ambiente = _ambiente(resposta, repositorio=repositorio)
     ambiente.registrar("j9")
 
     assert _analisar(ambiente, "j9") == 200
 
-    job = ambiente.job("j9")
+    job = RepositorioEmMemoria.obter(repositorio, "j9")
+    assert job is not None
     assert (job.estado, job.codigo_falha) == ("cancelado", None)
+    # Uma Decupagem já gravada fica invisível: a leitura exige `concluido`.

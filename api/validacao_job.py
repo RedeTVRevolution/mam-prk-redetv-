@@ -48,6 +48,10 @@ def executar(
         ):
             quarentena.blob(job_id).delete()
         return
+    # Releitura só para não subir arquivos à toa; quem decide é a transição.
+    atual = repositorio.obter(job_id)
+    if atual is None or atual.estado != "validando":
+        return
     for arquivo in (aceito.copia_limpa, aceito.proxy):
         aceitos.blob(f"{job_id}/{arquivo.name}").upload_from_filename(
             str(arquivo), content_type=TIPO_DO_VIDEO

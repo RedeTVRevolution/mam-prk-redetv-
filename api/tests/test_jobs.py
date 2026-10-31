@@ -270,7 +270,13 @@ def test_reproducao_devolve_link_assinado_e_quando_expira() -> None:
 
 def test_reproducao_e_decupagem_dao_409_antes_de_concluido_e_404_sem_job() -> None:
     ambiente = Ambiente()
-    estados: list[Estado] = ["aguardando_upload", "validando", "analisando", "falhou"]
+    estados: list[Estado] = [
+        "aguardando_upload",
+        "validando",
+        "analisando",
+        "falhou",
+        "cancelado",
+    ]
     for estado in estados:
         job_id = _job_com_estado(ambiente, estado)
         for rota in ("reproducao", "decupagem"):

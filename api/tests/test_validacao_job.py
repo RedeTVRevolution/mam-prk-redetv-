@@ -212,12 +212,18 @@ def test_cancelado_durante_a_validacao_nao_vira_falhou_se_o_arquivo_for_recusado
     assert (job.estado, job.codigo_falha) == ("cancelado", None)
 
 
-class _CancelaAposLer(RepositorioFirestore):
-    """O cancelamento chega logo depois da última leitura do worker."""
+class _CancelaDepoisDaUltimaLeitura(RepositorioFirestore):
+    """O cancelamento chega logo depois de cada leitura do Job em `validando`.
+
+    A leitura devolve o Job de antes do cancelamento, como se ele chegasse
+    entre a última releitura do worker e a gravação.
+    """
 
     def obter(self, job_id: str) -> Job | None:
         job = super().obter(job_id)
-        if job is not None:
+        if job is not None and job.estado == "cancelado":
+            return job.model_copy(update={"estado": "validando"})
+        if job is not None and job.estado == "validando":
             self.salvar(job.model_copy(update={"estado": "cancelado"}))
         return job
 
@@ -226,8 +232,9 @@ def test_cancelamento_depois_da_ultima_leitura_nao_e_sobrescrito(
     ambiente: Ambiente, tmp_path: Path
 ) -> None:
     ambiente.enviar("j6", _mp4(tmp_path / "v.mp4"))
-    ambiente.repositorio.__class__ = _CancelaAposLer
+    ambiente.repositorio.__class__ = _CancelaDepoisDaUltimaLeitura
 
     ambiente.executar("j6")
 
+    ambiente.repositorio.__class__ = RepositorioFirestore
     assert ambiente.job("j6").estado == "cancelado"
