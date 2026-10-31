@@ -7,7 +7,6 @@ como a Vertex.
 
 import json
 import threading
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -262,11 +261,19 @@ def test_sem_cortes_a_regra_de_tempos_nao_roda() -> None:
 
 
 class ModeloContador(ModeloFalso):
-    """Conta quantas chamadas estão em andamento ao mesmo tempo."""
+    """Conta quantas chamadas estão em andamento ao mesmo tempo.
 
-    def __init__(self, por_trecho: Callable[[int, int], str | Exception]) -> None:
+    Segura cada chamada até que `paralelas` estejam em andamento, e então solta
+    todas: a sobreposição não depende de as threads se cruzarem por acaso.
+    """
+
+    def __init__(
+        self, por_trecho: Callable[[int, int], str | Exception], paralelas: int
+    ) -> None:
         super().__init__(por_trecho)
         self._trava = threading.Lock()
+        self._paralelas = paralelas
+        self._todas_em_andamento = threading.Event()
         self.em_andamento = 0
         self.maximo = 0
 
@@ -274,8 +281,13 @@ class ModeloContador(ModeloFalso):
         with self._trava:
             self.em_andamento += 1
             self.maximo = max(self.maximo, self.em_andamento)
+            if self.em_andamento >= self._paralelas:
+                self._todas_em_andamento.set()
         try:
-            time.sleep(0.03)
+            # Se nunca chegarem a `paralelas`, o tempo-limite solta todas de uma
+            # vez e a asserção sobre o máximo falha, em vez de travar o teste.
+            if not self._todas_em_andamento.wait(timeout=5):
+                self._todas_em_andamento.set()
             return super().gerar(chamada)
         finally:
             with self._trava:
@@ -284,7 +296,7 @@ class ModeloContador(ModeloFalso):
 
 @pytest.mark.parametrize("n", [1, 3, 8])
 def test_nunca_mais_de_n_chamadas_ao_mesmo_tempo(n: int) -> None:
-    modelo = ModeloContador(_fala_no_inicio_do_nucleo)
+    modelo = ModeloContador(_fala_no_inicio_do_nucleo, paralelas=n)
 
     d = _decupar(modelo, max_paralelas=n)
 
@@ -332,7 +344,7 @@ def test_job_de_analise_roda_as_janelas_em_paralelo_e_grava_o_progresso() -> Non
     repositorio = _repositorio_com_job_em_analise()
     decupagens = DecupagensEmMemoria("aceitos")
     janelas = JanelasEmMemoria()
-    modelo = ModeloContador(_fala_no_inicio_do_nucleo)
+    modelo = ModeloContador(_fala_no_inicio_do_nucleo, paralelas=4)
 
     resultado = executar(
         "j",
