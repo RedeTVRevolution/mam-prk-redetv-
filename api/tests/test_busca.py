@@ -687,3 +687,31 @@ def test_a_rota_aceita_ev_programa_e_periodo() -> None:
         ).status_code
         == 422
     )
+
+
+def test_sem_periodo_tira_o_periodo_entendido() -> None:
+    m = Mundo(
+        pedido(
+            texto_livre="vestido",
+            exibido_desde="2024-01-01",
+            exibido_ate="2024-12-31",
+        )
+    )
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+
+    resultado = buscar(m, "vestido em 2024", ajustes=Ajustes(sem_periodo=True))
+
+    (consulta,) = m.indice.consultas
+    assert consulta.filtros.exibido_desde is None
+    assert consulta.filtros.exibido_ate is None
+    assert resultado.entendida.desde is None
+
+
+def test_periodo_com_inicio_depois_do_fim_responde_422() -> None:
+    c, _ = cliente(["consulta"], pedido(texto_livre="vestido"))
+    r = c.get(
+        "/v1/busca",
+        params={"q": "vestido", "desde": "2025-01-01", "ate": "2024-12-31"},
+        headers=AUTORIZACAO,
+    )
+    assert r.status_code == 422

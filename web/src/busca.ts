@@ -19,7 +19,8 @@ export interface ConsultaDaBusca {
   evidencias: Evidencia[] | null
   /** `null`: o programa entendido; `''`: nenhum programa. */
   programa: string | null
-  ano: number | null
+  /** `null`: o período entendido; `'todos'`: nenhum período. */
+  ano: number | 'todos' | null
   ordem: OrdemDaBusca
 }
 
@@ -62,15 +63,20 @@ export interface ResultadoDaBusca {
 
 const IDS_DE_EVIDENCIA: string[] = EVIDENCIAS.map((e) => e.id)
 
+/** A busca de um texto novo: chips e filtros voltam ao que a API entender. */
+export function consultaNova(q: string): ConsultaDaBusca {
+  return { q, evidencias: null, programa: null, ano: null, ordem: 'relevancia' }
+}
+
 export function consultaDaBusca(busca: string): ConsultaDaBusca {
   const p = new URLSearchParams(busca)
   const ev = [...new Set(p.getAll('ev'))].filter((e): e is Evidencia => IDS_DE_EVIDENCIA.includes(e))
-  const ano = Number(p.get('ano'))
+  const ano = p.get('ano') === 'todos' ? 'todos' : Number(p.get('ano'))
   return {
     q: p.get('q')?.trim() ?? '',
     evidencias: ev.length ? ev : null,
     programa: p.get('programa'),
-    ano: Number.isInteger(ano) && ano >= 1900 && ano <= 2999 ? ano : null,
+    ano: ano === 'todos' || (Number.isInteger(ano) && ano >= 1900 && ano <= 2999) ? ano : null,
     ordem: p.get('ordem') === 'data' ? 'data' : 'relevancia',
   }
 }
@@ -92,7 +98,8 @@ export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
   const p = new URLSearchParams({ q: c.q, ordem: c.ordem, limite: String(limite) })
   for (const e of c.evidencias ?? []) p.append('ev', e)
   if (c.programa !== null) p.set('programa', c.programa)
-  if (c.ano !== null) {
+  if (c.ano === 'todos') p.set('sem_periodo', 'true')
+  else if (c.ano !== null) {
     p.set('desde', `${c.ano}-01-01`)
     p.set('ate', `${c.ano}-12-31`)
   }

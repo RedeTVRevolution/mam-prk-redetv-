@@ -107,6 +107,7 @@ class Ajustes:
     programa: str | None = None  # "": sem programa
     desde: date | None = None
     ate: date | None = None
+    sem_periodo: bool = False  # tira o período entendido (o "Todos os anos" da tela)
 
 
 class ResultadoDaBusca(BaseModel):
@@ -460,6 +461,8 @@ def _ajustada(e: ConsultaEntendida, a: Ajustes) -> ConsultaEntendida:
         )
     if a.programa is not None:
         e = replace(e, programa=a.programa or None)
+    if a.sem_periodo:
+        e = replace(e, exibido_desde=None, exibido_ate=None)
     if a.desde is not None:
         e = replace(e, exibido_desde=a.desde)
     if a.ate is not None:

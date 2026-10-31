@@ -2,6 +2,7 @@ import { AppShell, Badge, Button, Group, Kbd, Menu, Text, TextInput } from '@man
 import { IconChevronDown, IconKeyboard, IconLogout, IconSearch } from '@tabler/icons-react'
 import { useRef, useState } from 'react'
 import { useAtalhos, useMostrarAtalhos } from './atalhos.ts'
+import { consultaNova } from './busca.ts'
 import { Link } from './Link.tsx'
 import { ACERVO, enderecoDaBusca, navegar, useRota } from './rotas.ts'
 import { CORES } from './tema.ts'
@@ -40,7 +41,7 @@ function CaixaDeBusca() {
       onSubmit={(e) => {
         e.preventDefault()
         const q = texto.trim()
-        if (q) navegar(enderecoDaBusca({ q, evidencias: null, programa: null, ano: null, ordem: 'relevancia' }))
+        if (q) navegar(enderecoDaBusca(consultaNova(q)))
       }}
     >
       <TextInput

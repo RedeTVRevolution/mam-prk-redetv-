@@ -8,8 +8,8 @@ export type Rota =
   | { tipo: 'raiz' }
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'busca'; consulta: ConsultaDaBusca }
-  | { tipo: 'video'; id: string; t: number | null; busca: string | null }
-  | { tipo: 'video_anterior'; id: string; t: number | null; busca: string | null }
+  | { tipo: 'video'; id: string; t: number | null }
+  | { tipo: 'video_anterior'; id: string; t: number | null }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
@@ -28,10 +28,6 @@ export function enderecoDoVideo(id: string, t?: number | null, busca?: string | 
   if (busca) p.set('busca', busca)
   const query = p.toString()
   return query ? `${base}?${query}` : base
-}
-
-function buscaDeOrigem(busca: string): string | null {
-  return new URLSearchParams(busca).get('busca') || null
 }
 
 function instante(busca: string): number | null {
@@ -53,14 +49,14 @@ export function lerRota(caminho: string, busca = ''): Rota {
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {
-      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca), busca: buscaDeOrigem(busca) }
+      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca) }
     } catch {
       return { tipo: 'nao_encontrada' }
     }
   }
   if (partes.length === 3 && partes[0] === 'video' && partes[2] === 'anterior') {
     try {
-      return { tipo: 'video_anterior', id: decodeURIComponent(partes[1]), t: instante(busca), busca: buscaDeOrigem(busca) }
+      return { tipo: 'video_anterior', id: decodeURIComponent(partes[1]), t: instante(busca) }
     } catch {
       return { tipo: 'nao_encontrada' }
     }

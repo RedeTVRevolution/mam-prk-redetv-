@@ -79,10 +79,13 @@ def criar_rotas_da_busca(
         programa: Annotated[str | None, Query(max_length=100)] = None,
         desde: date | None = None,
         ate: date | None = None,
+        sem_periodo: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
     ) -> ResultadoDaBusca:
+        if desde and ate and desde > ate:
+            raise HTTPException(422, "O início do período passa do fim")
         sistema = chamador.sistema if isinstance(chamador, Sistema) else None
         quem = (
             f"sistema:{chamador.sistema}"
@@ -103,6 +106,7 @@ def criar_rotas_da_busca(
                 programa=programa,
                 desde=desde,
                 ate=ate,
+                sem_periodo=sem_periodo,
             ),
         )
         try:

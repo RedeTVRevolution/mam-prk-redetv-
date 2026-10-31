@@ -1,9 +1,9 @@
 import { Box, Button, Group, Loader, Paper, Select, Stack, Text } from '@mantine/core'
 import { IconCheck } from '@tabler/icons-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { codigoDoErro, FalhaNaApi, SessaoExpirada, type ClienteDaApi } from './api.ts'
-import { useAtalhos, type Atalho } from './atalhos.ts'
+import { useAtalhos } from './atalhos.ts'
 import {
   EVIDENCIAS,
   contagemDeMencoes,
@@ -22,22 +22,16 @@ import { Quadro } from './Miniatura.tsx'
 import { enderecoDaBusca, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
 
-const ATALHOS: Atalho[] = [
-  {
-    tecla: '↓ ↑',
-    acao: 'Ir ao momento seguinte ou anterior, também entre vídeos',
-    grupo: 'Busca',
-    casa: (e) => e.key === 'ArrowDown' || e.key === 'ArrowUp',
-  },
-  { tecla: 'Enter', acao: 'Abrir o vídeo no momento selecionado', grupo: 'Busca' },
-]
-
 const VIDEOS_POR_VEZ = 20
 const TETO_DE_VIDEOS = 50
 const TODOS = 'todos'
+const ENTENDIDO = 'entendido'
 const ANOS_NO_SELECT = 26
 const ANO_ATUAL = new Date().getFullYear()
-const ANOS = Array.from({ length: ANOS_NO_SELECT }, (_, i) => String(ANO_ATUAL - i))
+const NUMEROS = { fontVariantNumeric: 'tabular-nums' } as const
+// Momento selecionado pelo teclado: o azul de foco a 16% (0x29).
+const SELECIONADO = { background: `${CORES.foco}29` }
+const ANOS: string[] = Array.from({ length: ANOS_NO_SELECT }, (_, i) => String(ANO_ATUAL - i))
 
 type Carga =
   | { tipo: 'carregando' }
@@ -50,6 +44,12 @@ function mensagemDoErro(erro: unknown): string {
     return 'A busca demorou demais. Tente uma consulta mais específica.'
   }
   return 'Não foi possível buscar agora. Tente de novo.'
+}
+
+/** "01/03/2020 a 31/12/2024", "Desde 01/03/2020", "Até 31/12/2024". */
+function rotuloDoPeriodo(desde: string | null, ate: string | null): string {
+  if (desde && ate) return `${dataDeExibicao(desde)} a ${dataDeExibicao(ate)}`
+  return desde ? `Desde ${dataDeExibicao(desde)}` : `Até ${dataDeExibicao(ate)}`
 }
 
 /** O motivo com os trechos destacados, montado pelas posições: o texto nunca vira HTML. */
@@ -95,9 +95,7 @@ function Chip({ rotulo, tipo, ligado, desabilitado, aoAlternar }: {
       disabled={desabilitado}
       leftSection={ligado ? <IconCheck size={14} aria-hidden /> : undefined}
       onClick={aoAlternar}
-      styles={{
-        root: ligado ? { borderColor: cor, color: cor, background: `${cor}1A` } : {},
-      }}
+      styles={{ root: ligado ? { borderColor: cor, color: cor } : {} }}
     >
       {rotulo}
     </Button>
@@ -123,7 +121,7 @@ function PosicaoDosMomentos({ video }: { video: VideoDoResultado }) {
           pos="absolute"
           top={0}
           h={8}
-          bg={CORES_DE_OCORRENCIA.aparicao.cor}
+          bg={CORES.foco}
           style={{
             left: `${Math.min(100, (m.inicio_ms / total) * 100)}%`,
             width: `max(2px, ${Math.min(100, ((m.fim_ms - m.inicio_ms) / total) * 100)}%)`,
@@ -154,12 +152,11 @@ function Linha({ video, momento, selecionado, busca }: {
         padding: 'var(--mantine-spacing-xs)',
         color: 'inherit',
         textDecoration: 'none',
-        borderLeft: `3px solid ${selecionado ? CORES.foco : 'transparent'}`,
-        background: selecionado ? CORES.elevada : undefined,
+        ...(selecionado ? SELECIONADO : {}),
       }}
     >
       <Quadro url={momento.quadro_url} largura={96} altura={54} />
-      <Text size="sm" c={CORES.textoSecundario} style={{ fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
+      <Text size="sm" c={CORES.textoSecundario} style={{ ...NUMEROS, flex: 'none' }}>
         {relogio(momento.inicio_ms)}–{relogio(momento.fim_ms)}
       </Text>
       <Motivo momento={momento} />
@@ -174,11 +171,9 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
   const [tentativas, setTentativas] = useState(0)
   const [programas, setProgramas] = useState<string[]>([])
   const [selecionado, setSelecionado] = useState<number | null>(null)
-  useAtalhos(ATALHOS)
 
-  const endereco = enderecoDaBusca({ ...consulta, ordem: 'relevancia' })
   // O limite volta ao padrão quando muda a consulta, os chips ou os filtros (não a ordem).
-  const chaveDaConsulta = endereco
+  const chaveDaConsulta = enderecoDaBusca({ ...consulta, ordem: 'relevancia' })
   const [chaveVista, setChaveVista] = useState(chaveDaConsulta)
   if (chaveVista !== chaveDaConsulta) {
     setChaveVista(chaveDaConsulta)
@@ -189,7 +184,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
   useEffect(() => {
     consultaAtual.current = consulta
   })
-  const chave = enderecoDaBusca(consulta)
+  const chaveDaBusca = enderecoDaBusca(consulta)
   useEffect(() => {
     if (!consultaAtual.current.q) return
     let ativo = true
@@ -210,7 +205,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     return () => {
       ativo = false
     }
-  }, [api, chave, limite, tentativas])
+  }, [api, chaveDaBusca, limite, tentativas])
 
   useEffect(() => {
     let ativo = true
@@ -231,34 +226,38 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     [resultado],
   )
 
-  const abrir = useCallback(
-    (i: number) => {
-      const { video, momento } = momentos[i]
-      navegar(enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, consulta.q))
-    },
-    [momentos, consulta.q],
-  )
+  function abrir(i: number) {
+    const { video, momento } = momentos[i]
+    navegar(enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, consulta.q))
+  }
 
-  useEffect(() => {
-    function aoTeclar(e: KeyboardEvent) {
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || momentos.length === 0) return
-      const alvo = e.target
-      if (alvo instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo.tagName)) return
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault()
-        setSelecionado((atual) => {
-          if (atual === null) return e.key === 'ArrowDown' ? 0 : momentos.length - 1
-          return Math.min(momentos.length - 1, Math.max(0, atual + (e.key === 'ArrowDown' ? 1 : -1)))
-        })
-      } else if (e.key === 'Enter' && selecionado !== null && alvo === document.body) {
-        // Com o foco num botão ou link, o Enter é dele.
-        e.preventDefault()
-        abrir(selecionado)
-      }
-    }
-    document.addEventListener('keydown', aoTeclar)
-    return () => document.removeEventListener('keydown', aoTeclar)
-  }, [momentos, selecionado, abrir])
+  // Pelo registro de atalhos, que já ignora os campos de texto.
+  useAtalhos([
+    {
+      tecla: '↓ ↑',
+      acao: 'Ir ao momento seguinte ou anterior, também entre vídeos',
+      grupo: 'Busca',
+      casa: (e) => momentos.length > 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp'),
+      executar: (e) => {
+        const passo = e.key === 'ArrowDown' ? 1 : -1
+        setSelecionado((atual) =>
+          atual === null
+            ? passo === 1 ? 0 : momentos.length - 1
+            : Math.min(momentos.length - 1, Math.max(0, atual + passo)),
+        )
+      },
+    },
+    {
+      tecla: 'Enter',
+      acao: 'Abrir o vídeo no momento selecionado',
+      grupo: 'Busca',
+      // Com o foco num momento (pelo Tab), o Enter é do próprio link.
+      casa: (e) => e.key === 'Enter' && selecionado !== null && !(e.target instanceof HTMLAnchorElement),
+      executar: () => {
+        if (selecionado !== null) abrir(selecionado)
+      },
+    },
+  ])
 
   useEffect(() => {
     if (selecionado === null) return
@@ -273,7 +272,8 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     navegar(enderecoDaBusca({ ...consulta, ...mudancas }))
   }
 
-  const ligadas = resultado?.entendida.evidencias ?? consulta.evidencias ?? []
+  // Os chips da URL valem sobre o entendido: um clique antes de a busca voltar não se perde.
+  const ligadas = consulta.evidencias ?? resultado?.entendida.evidencias ?? []
   function alternar(id: Evidencia) {
     mudar({ evidencias: ligadas.includes(id) ? ligadas.filter((e) => e !== id) : [...ligadas, id] })
   }
@@ -288,11 +288,14 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
 
   const programaEntendido = resultado?.entendida.programa ?? null
   const programaNaTela = consulta.programa ?? programaEntendido ?? ''
-  const anoEntendido =
-    resultado?.entendida.desde && resultado.entendida.desde.slice(0, 4) === resultado.entendida.ate?.slice(0, 4)
-      ? Number(resultado.entendida.desde.slice(0, 4))
-      : null
+  const { desde, ate } = resultado?.entendida ?? { desde: null, ate: null }
+  const anoEntendido = desde && ate && desde.slice(0, 4) === ate.slice(0, 4) ? Number(desde.slice(0, 4)) : null
+  // Um período entendido que não cabe num ano aparece como está; "Todos os anos" o tira.
+  const periodoEntendido =
+    consulta.ano === null && anoEntendido === null && (desde || ate) ? rotuloDoPeriodo(desde, ate) : null
   const anoNaTela = consulta.ano ?? anoEntendido
+  const valorDoAno = periodoEntendido ? ENTENDIDO : anoNaTela === null ? TODOS : String(anoNaTela)
+  const anos = typeof anoNaTela === 'number' && !ANOS.includes(String(anoNaTela)) ? [String(anoNaTela), ...ANOS] : ANOS
   const totalDeMomentos = momentos.length
 
   return (
@@ -324,9 +327,15 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
           w={110}
           size="xs"
           allowDeselect={false}
-          data={[{ value: TODOS, label: 'Todos os anos' }, ...ANOS]}
-          value={anoNaTela ? String(anoNaTela) : TODOS}
-          onChange={(v) => mudar({ ano: v && v !== TODOS ? Number(v) : null })}
+          data={[
+            { value: TODOS, label: 'Todos os anos' },
+            ...(periodoEntendido ? [{ value: ENTENDIDO, label: periodoEntendido }] : []),
+            ...anos,
+          ]}
+          value={valorDoAno}
+          onChange={(v) => {
+            if (v !== ENTENDIDO) mudar({ ano: !v || v === TODOS ? 'todos' : Number(v) })
+          }}
         />
       </Group>
 
@@ -393,7 +402,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
             <Paper key={video.job_id} withBorder bg="dark.6" p="sm" component="section" aria-label={video.nome}>
               <Stack gap="xs">
                 <Group justify="space-between" wrap="nowrap">
-                  <Text size="sm" fw={600}>
+                  <Text size="sm" fw={600} style={NUMEROS}>
                     {[
                       video.programa ?? video.nome,
                       video.data_exibicao ? dataDeExibicao(video.data_exibicao) : null,

@@ -265,3 +265,55 @@ test('trocar a ordem refaz a busca com ordem=data', async () => {
 
   expect(location.search).toBe('?q=sapato&ordem=data')
 })
+
+test('com o foco noutro campo do Acervo, / vira texto e não pula para a caixa', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/acervo')
+  const filtro = await screen.findByRole('textbox', { name: 'Buscar por nome' })
+
+  await usuario.type(filtro, 'a/b')
+
+  expect(document.activeElement).toBe(filtro)
+  expect((filtro as HTMLInputElement).value).toBe('a/b')
+})
+
+test('Enter abre o momento selecionado mesmo com o foco num chip', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=sapato')
+  await screen.findByText('3 momentos em 2 vídeos')
+  screen.getByRole('button', { name: 'Fala' }).focus()
+
+  await usuario.keyboard('{ArrowDown}{Enter}')
+
+  expect(location.pathname + location.search).toBe('/video/v1?t=724&busca=sapato')
+})
+
+test('os chips seguem a URL: dois cliques seguidos ligam os dois, mesmo fora do entendido', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=sapato')
+  await screen.findByText('3 momentos em 2 vídeos')
+
+  await usuario.click(screen.getByRole('button', { name: 'Fala' }))
+  await usuario.click(screen.getByRole('button', { name: 'Marca' }))
+
+  expect(location.search).toBe('?q=sapato&ev=imagem&ev=objeto&ev=fala&ev=marca')
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Marca' }).getAttribute('aria-pressed')).toBe('true'))
+})
+
+test('"Todos os anos" tira o período que a API entendeu', async () => {
+  const usuario = userEvent.setup()
+  resposta = () =>
+    HttpResponse.json(
+      resultado({ entendida: { evidencias: ['objeto'], programa: null, desde: '2020-03-01', ate: '2024-12-31' } }),
+    )
+  await abrir('/busca?q=vestido')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const ano = screen.getByRole('combobox', { name: 'Ano' }) as HTMLInputElement
+  expect(ano.value).toBe('01/03/2020 a 31/12/2024')
+
+  await usuario.click(ano)
+  await usuario.click(await screen.findByRole('option', { name: 'Todos os anos' }))
+
+  expect(location.search).toBe('?q=vestido&ano=todos')
+  await waitFor(() => expect(buscas.at(-1)?.get('sem_periodo')).toBe('true'))
+})
