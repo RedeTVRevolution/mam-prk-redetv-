@@ -655,24 +655,18 @@ def criar_rotas(
 
     def _tirar_da_fila(
         job_id: str,
-        correcao_id: str,
         autor: Usuario,
-        resolver: Callable[..., Correcao],
-        *args: str,
+        resolver: Callable[
+            [dict[str, Any], str, list[Correcao], str, Autoria], Correcao
+        ],
     ) -> dict[str, str]:
-        """`resolver` é `reaplicar` ou `descartar`; `args` são o que cada um pede
-        entre o id da correção e o Job."""
+        """`resolver` é `reaplicar` ou `descartar` já com o pedido da rota; recebe
+        o modelo, a versão, as Correções, o Job e a autoria."""
         job = obter_concluido(job_id, autor)
         modelo, versao_atual = _ler_modelo(job.id)
         try:
             registro = resolver(
-                modelo,
-                versao_atual,
-                _ler_correcoes(job.id),
-                correcao_id,
-                *args,
-                job.id,
-                _autoria(autor),
+                modelo, versao_atual, _ler_correcoes(job.id), job.id, _autoria(autor)
             )
             correcoes.acrescentar(registro)
         except CorrecaoInexistente:
@@ -695,7 +689,18 @@ def criar_rotas(
         # Não espera o Curador: só reaponta uma correção que já valia (pendente
         # não vai para a fila), e a original sai da fila quando ela nasce.
         return _tirar_da_fila(
-            job_id, correcao_id, autor, reaplicar, corpo.item_id, corpo.motivo
+            job_id,
+            autor,
+            lambda modelo, versao, todas, job, autoria: reaplicar(
+                modelo,
+                versao,
+                todas,
+                correcao_id,
+                corpo.item_id,
+                corpo.motivo,
+                job,
+                autoria,
+            ),
         )
 
     @rotas.post("/{job_id}/fila/{correcao_id}/descartar", status_code=201)
@@ -705,7 +710,13 @@ def criar_rotas(
         corpo: NovaResolucao,
         autor: Annotated[Usuario, Depends(_exige_editar)],
     ) -> dict[str, str]:
-        return _tirar_da_fila(job_id, correcao_id, autor, descartar, corpo.motivo)
+        return _tirar_da_fila(
+            job_id,
+            autor,
+            lambda modelo, versao, todas, job, autoria: descartar(
+                modelo, versao, todas, correcao_id, corpo.motivo, job, autoria
+            ),
+        )
 
     def _decidir(
         job_id: str,

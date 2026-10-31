@@ -1001,6 +1001,27 @@ def test_registros_no_formato_gravado_continuam_sendo_aplicados() -> None:
                 "fim_ms": 20000,
             },
         },
+        {
+            "id": "c3",
+            "job_id": "j1",
+            "autor_uid": "u1",
+            "autor_email": "ana@redetv.com.br",
+            "criada_em": (BASE + timedelta(minutes=2)).isoformat(),
+            "motivo": "faltou o merchan",
+            "tipo": "comercial.acrescentar",
+            "item_id": "acr-c3",
+            "antes": "",
+            # O valor em JSON fica em texto, com as chaves em ordem.
+            "depois": '{"evidencia": "logo", "fim_ms": 22000, "inicio_ms": 20000, '
+            '"marca": "Loja Sol", "tipo": "merchan_apresentador"}',
+            "ancora": {
+                "versao": VERSAO,
+                "tipo_do_item": "comercial",
+                "identidade": "loja sol|merchan_apresentador",
+                "inicio_ms": 20000,
+                "fim_ms": 22000,
+            },
+        },
     ]
 
     correcoes = [Correcao.model_validate(g) for g in gravados]
@@ -1009,3 +1030,15 @@ def test_registros_no_formato_gravado_continuam_sendo_aplicados() -> None:
     assert entregue["pessoas"][0]["nome"] == "Ana Souza Lima"
     assert entregue["pessoas"][0]["origem"] == "revisao"
     assert entregue["pautas"][0]["fim_ms"] == 18000
+    assert entregue["comerciais"] == [
+        {
+            "evidencia": "logo",
+            "fim_ms": 22000,
+            "inicio_ms": 20000,
+            "marca": "Loja Sol",
+            "tipo": "merchan_apresentador",
+            "id": "acr-c3",
+            "origem": "revisao",
+            "acrescentado": True,
+        }
+    ]
