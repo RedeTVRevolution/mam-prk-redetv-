@@ -22,6 +22,7 @@ from api.catalogo import (
     novo_id,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.comparacao import FotoAusente
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
@@ -357,6 +358,14 @@ class ReferenciasStorage:
         self._cliente.bucket(self._bucket).blob(objeto).upload_from_string(
             jpeg, content_type="image/jpeg"
         )
+
+    def ler(self, objeto: str) -> bytes:
+        try:
+            blob = self._cliente.bucket(self._bucket).blob(objeto)
+            conteudo: bytes = blob.download_as_bytes()
+            return conteudo
+        except NotFound as e:
+            raise FotoAusente(objeto) from e
 
 
 class RepositorioDeCorrecoesFirestore:
