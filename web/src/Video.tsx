@@ -80,7 +80,7 @@ interface Pessoa {
   nome: string
   origem?: 'modelo' | 'revisao'
   /** 1.2: de onde veio o nome; falta em 1.1 e em pessoa acrescentada pela revisão. */
-  fontes_do_nome?: ('rosto' | 'gc' | 'fala' | 'contexto')[]
+  fontes_do_nome?: string[]
   na_imagem: Aparicao[]
   citada_na_fala: Intervalo[]
   citada_no_texto: (Intervalo & { texto: string })[]
@@ -2087,6 +2087,7 @@ function CorrigirCampo({
             <Textarea
               label="Texto"
               value={texto}
+              maxLength={catalogo.limites.texto}
               rows={3}
               onChange={(e) => setTexto(e.currentTarget.value)}
             />

@@ -1,0 +1,221 @@
+{
+  "tipos": [
+    {
+      "valor": "pessoa.renomear",
+      "rotulo": "Renomear pessoa"
+    },
+    {
+      "valor": "pauta.titulo",
+      "rotulo": "Título da pauta"
+    },
+    {
+      "valor": "pauta.resumo",
+      "rotulo": "Resumo da pauta"
+    },
+    {
+      "valor": "item.tempos",
+      "rotulo": "Tempos"
+    },
+    {
+      "valor": "comercial.marca",
+      "rotulo": "Marca do comercial"
+    },
+    {
+      "valor": "comercial.tipo",
+      "rotulo": "Tipo do comercial"
+    },
+    {
+      "valor": "comercial.acrescentar",
+      "rotulo": "Comercial acrescentado"
+    },
+    {
+      "valor": "pessoa.nao_e",
+      "rotulo": "Não é esta pessoa"
+    },
+    {
+      "valor": "pessoa.aparicao_para_mencao",
+      "rotulo": "Aparição para menção"
+    },
+    {
+      "valor": "pessoa.mencao_para_aparicao",
+      "rotulo": "Menção para aparição"
+    },
+    {
+      "valor": "pessoa.acrescentar_aparicao",
+      "rotulo": "Aparição acrescentada"
+    },
+    {
+      "valor": "plano.descricao",
+      "rotulo": "Descrição do plano"
+    },
+    {
+      "valor": "plano.limpo",
+      "rotulo": "Plano limpo"
+    },
+    {
+      "valor": "fala.texto",
+      "rotulo": "Texto da fala"
+    },
+    {
+      "valor": "pauta.tom",
+      "rotulo": "Tom da pauta"
+    },
+    {
+      "valor": "pessoa.fontes_do_nome",
+      "rotulo": "Fontes do nome"
+    },
+    {
+      "valor": "aparicao.papel_visual",
+      "rotulo": "Papel na cena e visual"
+    },
+    {
+      "valor": "texto_na_tela.texto",
+      "rotulo": "Texto na tela"
+    },
+    {
+      "valor": "texto_na_tela.acrescentar",
+      "rotulo": "Texto na tela acrescentado"
+    },
+    {
+      "valor": "desfazer",
+      "rotulo": "Desfazer"
+    },
+    {
+      "valor": "descartar",
+      "rotulo": "Descartar da fila"
+    },
+    {
+      "valor": "aprovar",
+      "rotulo": "Aprovação"
+    },
+    {
+      "valor": "recusar",
+      "rotulo": "Recusa"
+    }
+  ],
+  "tipos_de_comercial": [
+    {
+      "valor": "intervalo",
+      "rotulo": "intervalo"
+    },
+    {
+      "valor": "merchan_apresentador",
+      "rotulo": "merchan_apresentador"
+    },
+    {
+      "valor": "testemunhal",
+      "rotulo": "testemunhal"
+    },
+    {
+      "valor": "produto_em_cena",
+      "rotulo": "produto_em_cena"
+    },
+    {
+      "valor": "patrocinio_vinheta",
+      "rotulo": "patrocinio_vinheta"
+    },
+    {
+      "valor": "sobreposicao_grafica",
+      "rotulo": "sobreposicao_grafica"
+    },
+    {
+      "valor": "marca_incidental",
+      "rotulo": "marca_incidental"
+    },
+    {
+      "valor": "mencao_editorial",
+      "rotulo": "mencao_editorial"
+    }
+  ],
+  "tipos_de_texto_na_tela": [
+    {
+      "valor": "gc",
+      "rotulo": "gc"
+    },
+    {
+      "valor": "tarja",
+      "rotulo": "tarja"
+    },
+    {
+      "valor": "legenda",
+      "rotulo": "legenda"
+    },
+    {
+      "valor": "placar",
+      "rotulo": "placar"
+    },
+    {
+      "valor": "chamada",
+      "rotulo": "chamada"
+    },
+    {
+      "valor": "logo",
+      "rotulo": "logo"
+    },
+    {
+      "valor": "qr_code",
+      "rotulo": "qr_code"
+    },
+    {
+      "valor": "outro",
+      "rotulo": "outro"
+    }
+  ],
+  "tons_da_pauta": [
+    {
+      "valor": "informativo",
+      "rotulo": "informativo"
+    },
+    {
+      "valor": "polemico",
+      "rotulo": "polêmico"
+    },
+    {
+      "valor": "descontraido",
+      "rotulo": "descontraído"
+    },
+    {
+      "valor": "exclusivo",
+      "rotulo": "exclusivo"
+    },
+    {
+      "valor": "homenagem",
+      "rotulo": "homenagem"
+    },
+    {
+      "valor": "analise",
+      "rotulo": "análise"
+    },
+    {
+      "valor": "comercial",
+      "rotulo": "comercial"
+    }
+  ],
+  "fontes_do_nome": [
+    {
+      "valor": "rosto",
+      "rotulo": "rosto"
+    },
+    {
+      "valor": "gc",
+      "rotulo": "GC"
+    },
+    {
+      "valor": "fala",
+      "rotulo": "fala"
+    },
+    {
+      "valor": "referencia",
+      "rotulo": "referência de rosto"
+    }
+  ],
+  "limites": {
+    "nome": 200,
+    "texto": 2000,
+    "motivo": 500
+  },
+  "prefixos": {
+    "acrescentado": "acr-",
+    "nao_identificado": "nid-"
+  }
+}

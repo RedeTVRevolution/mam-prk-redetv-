@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from typing import get_args
 
 import pytest
@@ -50,6 +51,17 @@ def test_rotulos_cobrem_os_vocabularios_do_esquema() -> None:
 
 def test_rota_do_catalogo_exige_login() -> None:
     assert Mundo(["editor"]).cliente.get("/v1/correcoes/catalogo").status_code == 401
+
+
+def test_o_catalogo_dos_testes_do_front_e_o_da_api() -> None:
+    # web/src/Video.test.tsx serve este arquivo no msw; se a API mudar, regrave-o com
+    # `catalogo().model_dump(mode="json")`.
+    fixture = Path(__file__).parents[2] / "web" / "src" / "catalogo.fixture.json"
+    resposta = Mundo(["editor"]).cliente.get(
+        "/v1/correcoes/catalogo", headers=AUTORIZACAO
+    )
+
+    assert json.loads(fixture.read_text(encoding="utf-8")) == resposta.json()
 
 
 COMERCIAL = {

@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
+import catalogo from './catalogo.fixture.json'
 import Video from './Video.tsx'
 
 // Segue o esquema 1.2 (api/decupagem.py).
@@ -61,49 +62,6 @@ let statusDoPost = 201
 let versaoAtual = 'v1'
 let pedidosDeReproducao = 0
 let links: { url: string; expira_em: string }[] = []
-
-// O mesmo que a API serve em `GET /v1/correcoes/catalogo`.
-const catalogo = {
-  tipos: [
-    { valor: 'pessoa.renomear', rotulo: 'Renomear pessoa' },
-    { valor: 'pauta.titulo', rotulo: 'Título da pauta' },
-    { valor: 'pauta.tom', rotulo: 'Tom da pauta' },
-    { valor: 'item.tempos', rotulo: 'Tempos' },
-    { valor: 'desfazer', rotulo: 'Desfazer' },
-    { valor: 'aprovar', rotulo: 'Aprovação' },
-    { valor: 'recusar', rotulo: 'Recusa' },
-  ],
-  tipos_de_comercial: [
-    { valor: 'intervalo', rotulo: 'intervalo' },
-    { valor: 'merchan_apresentador', rotulo: 'merchan_apresentador' },
-    { valor: 'patrocinio_vinheta', rotulo: 'patrocinio_vinheta' },
-    { valor: 'sobreposicao_grafica', rotulo: 'sobreposicao_grafica' },
-    { valor: 'marca_incidental', rotulo: 'marca_incidental' },
-    { valor: 'mencao_editorial', rotulo: 'mencao_editorial' },
-    { valor: 'testemunhal', rotulo: 'testemunhal' },
-    { valor: 'produto_em_cena', rotulo: 'produto_em_cena' },
-  ],
-  tipos_de_texto_na_tela: ['gc', 'tarja', 'legenda', 'placar', 'chamada', 'logo', 'qr_code', 'outro'].map(
-    (valor) => ({ valor, rotulo: valor }),
-  ),
-  tons_da_pauta: [
-    { valor: 'informativo', rotulo: 'informativo' },
-    { valor: 'polemico', rotulo: 'polêmico' },
-    { valor: 'descontraido', rotulo: 'descontraído' },
-    { valor: 'exclusivo', rotulo: 'exclusivo' },
-    { valor: 'homenagem', rotulo: 'homenagem' },
-    { valor: 'analise', rotulo: 'análise' },
-    { valor: 'comercial', rotulo: 'comercial' },
-  ],
-  fontes_do_nome: [
-    { valor: 'rosto', rotulo: 'rosto' },
-    { valor: 'gc', rotulo: 'GC' },
-    { valor: 'fala', rotulo: 'fala' },
-    { valor: 'referencia', rotulo: 'referência' },
-  ],
-  limites: { nome: 200, texto: 2000, motivo: 500 },
-  prefixos: { acrescentado: 'acr-', nao_identificado: 'nid-' },
-}
 
 const item = (campos: Record<string, unknown>) => ({
   id: 'c1',
