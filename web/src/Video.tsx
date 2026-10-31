@@ -302,14 +302,10 @@ function FaixaDoTempo({
 }) {
   const trilha = useRef<HTMLDivElement>(null)
   const selecionada = faixa.ocorrencias.find((o) => o.chave === alcas?.selecionada)
-  const limites = limitesDasAlcas(
-    selecionada ?? { inicio_ms: 0, fim_ms: 0 },
-    duracaoMs,
-    alcas?.limiteMs ?? Infinity,
-  )
-  const porChave = new Map(faixa.ocorrencias.map((o) => [o.chave, o]))
+  const limites =
+    alcas && selecionada ? limitesDasAlcas(selecionada, duracaoMs, alcas.limiteMs) : null
   const secoes = secoesDaFaixa(faixa.ocorrencias, duracaoMs).map((secao) => {
-    const o = porChave.get(secao.chave)
+    const o = secao.ocorrencia
     if (!o) return <Progress.Section key={secao.chave} value={secao.percentual} color="transparent" />
     return (
       <Progress.Section
@@ -346,7 +342,7 @@ function FaixaDoTempo({
         <Progress.Root size={14} radius="xs" bg="dark.6">
           {secoes}
         </Progress.Root>
-        {alcas && selecionada && (
+        {alcas && selecionada && limites && (
           <>
             <AlcaDoTempo
               borda="inicio"

@@ -34,6 +34,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { useState, type CSSProperties, type ReactNode } from 'react'
+import { tempo as tempoEmMs } from './linhaDoTempo.ts'
 import {
   contraste,
   CORES,
@@ -56,10 +57,8 @@ const ANEL: CSSProperties = { outline: `2px solid ${CORES.foco}`, outlineOffset:
 // Item selecionado: o azul de foco a 16% (0x29), sobre a superfície.
 const SELECIONADO = `${CORES.foco}29`
 
-/** Segundos em MM:SS; a amostra não passa de uma hora. */
-function tempo(s: number): string {
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-}
+/** Os tempos da amostra estão em segundos. */
+const tempo = (s: number): string => tempoEmMs(s * 1000)
 
 const razao = (cor: string, fundo: string) =>
   `${contraste(cor, fundo).toFixed(1).replace('.', ',')}:1`

@@ -134,12 +134,10 @@ export function maiorFim(faixas: Faixa[]): number {
   return Math.max(0, ...faixas.flatMap((f) => f.ocorrencias.map((o) => o.fim_ms)))
 }
 
-/** Uma seção desenhada da faixa: `percentual` da largura, e `chave` da ocorrência ou do vão. */
-export interface Secao {
-  chave: string
-  vao: boolean
-  percentual: number
-}
+/** Uma seção desenhada da faixa, em `percentual` da largura: uma ocorrência ou o vão antes dela. */
+export type Secao =
+  | { chave: string; percentual: number; ocorrencia: Ocorrencia }
+  | { chave: string; percentual: number; ocorrencia: null }
 
 /**
  * As seções de uma faixa, que é uma fileira só: o trecho que se sobrepõe ao anterior não é
@@ -157,11 +155,11 @@ export function secoesDaFaixa(ocorrencias: Ocorrencia[], duracaoMs: number): Sec
     if (inicio > cursor) {
       secoes.push({
         chave: `vao-${o.chave}`,
-        vao: true,
         percentual: ((inicio - cursor) / duracaoMs) * 100,
+        ocorrencia: null,
       })
     }
-    secoes.push({ chave: o.chave, vao: false, percentual: ((fim - inicio) / duracaoMs) * 100 })
+    secoes.push({ chave: o.chave, percentual: ((fim - inicio) / duracaoMs) * 100, ocorrencia: o })
     cursor = fim
   }
   return secoes

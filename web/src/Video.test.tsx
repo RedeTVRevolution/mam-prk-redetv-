@@ -1465,6 +1465,8 @@ test('as setas movem a alça 100 ms, Shift move 1 s, e Enter grava item.tempos',
   fireEvent.keyDown(inicio, { key: 'ArrowRight', shiftKey: true })
   expect(inicio.getAttribute('aria-valuenow')).toBe('31100')
   expect(player.currentTime).toBe(31.1)
+  // Sem metadata, a alça de fim vai até o maior fim da decupagem (02:30).
+  expect(alca('Fim').getAttribute('aria-valuemax')).toBe('150000')
   fireEvent.keyDown(alca('Início'), { key: 'Enter' })
 
   const modal = within(await screen.findByRole('dialog'))

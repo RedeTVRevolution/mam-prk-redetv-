@@ -95,9 +95,10 @@ test('as seções da faixa têm vãos, largura mínima e não redesenham a sobre
     fim_ms,
   })
   // 100 s: a ocorrência de 10 a 20 s, um vão de 10 s, outra sobreposta a ela.
-  expect(secoesDaFaixa([o('a', 10_000, 20_000)], 100_000)).toEqual([
-    { chave: 'vao-a', vao: true, percentual: 10 },
-    { chave: 'a', vao: false, percentual: 10 },
+  const a = o('a', 10_000, 20_000)
+  expect(secoesDaFaixa([a], 100_000)).toEqual([
+    { chave: 'vao-a', percentual: 10, ocorrencia: null },
+    { chave: 'a', percentual: 10, ocorrencia: a },
   ])
   const sobrepostas = secoesDaFaixa([o('a', 0, 20_000), o('b', 10_000, 30_000)], 100_000)
   expect(sobrepostas.map((s) => [s.chave, s.percentual])).toEqual([
