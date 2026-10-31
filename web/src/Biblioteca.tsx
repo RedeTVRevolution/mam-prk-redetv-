@@ -77,7 +77,7 @@ function QuadroDoEstado({ estado }: { estado: string }) {
       </ThemeIcon>
     )
   }
-  if (estado === 'analisando') return <Loader color="blue" />
+  if (estado === 'analisando') return <Loader color={ESTADOS_DO_JOB.analisando.cor} />
   return <Loader type="dots" color="gray" />
 }
 
@@ -218,7 +218,7 @@ export default function Biblioteca({
                 )}
               </FileButton>
               {envio.tipo === 'enviando' && (
-                <Progress color="red" aria-label="Progresso do envio" value={envio.fracao * 100} />
+                <Progress aria-label="Progresso do envio" value={envio.fracao * 100} />
               )}
               {envio.tipo === 'concluido' && (
                 <Text size="xs" c="green">

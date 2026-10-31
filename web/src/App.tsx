@@ -58,7 +58,7 @@ export default function App({ autenticador }: { autenticador: Autenticador }) {
   if (sessao.tipo === 'verificando') {
     return (
       <Center h="100vh">
-        <Loader color="red" role="status" aria-label="Verificando a sessão" />
+        <Loader role="status" aria-label="Verificando a sessão" />
       </Center>
     )
   }
