@@ -1,0 +1,15 @@
+# Índice da busca no Agent Retrieval em us-east4, fora do Brasil
+
+A busca usa o Agent Retrieval (o antigo Vector Search 2.0), que não existe em `southamerica-east1`. Das regiões dos Estados Unidos em que ele existe (`us-central1`, `us-east4` e `us-west1`, na [lista de regiões](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/vector-search-2/overview) de 30/10/2026), o índice fica em `us-east4`, no norte da Virgínia: é a mais próxima de São Paulo, na costa leste, onde chegam os cabos submarinos do Brasil. `us-central1` (Iowa) e `us-west1` (Oregon) acrescentam o trecho por terra até o meio ou o oeste do país. Não há medição publicada da latência entre `southamerica-east1` e `us-east4`; o ticket do teste no ar mede o tempo de resposta de uma consulta feita do Cloud Run em São Paulo, e, se ele contradisser a escolha, esta ADR muda.
+
+Ficam fora do Brasil, guardados no índice, os dados de cada momento da decupagem: nomes de pessoas e o id delas no catálogo, falas transcritas, textos lidos na tela, descrições de planos e de objetos, marcas, programa, data de exibição e os vetores das descrições e dos quadros-chave. Os quadros-chave em JPEG continuam no Storage em São Paulo, mas passam pelo modelo de embedding para virar vetor. Os vídeos não vão para o índice.
+
+É a mesma linha da [ADR 0001](0001-gemini-endpoint-global.md), que já manda os vídeos ao Gemini fora do país com a autorização da RedeTV. A diferença é que o Gemini processa e devolve, e o índice **guarda** os dados lá enquanto o vídeo estiver no acervo. Como nomes e falas são dados pessoais, isso é transferência internacional pela LGPD (art. 33), e o jurídico da emissora deve saber antes de a PoC virar produto, como no caso das referências de rosto ([ADR 0005](0005-identificacao-por-referencia.md)).
+
+A coleção nasce com o índice ANN implantado, e toda busca o usa. O KNN sem índice, cobrado só por uso, foi recusado: ele aceita no máximo 100 mil registros ([documentação](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/vector-search-2/query-search/query)), e, com um registro por plano, fala, texto na tela e objeto, esse teto chegaria ainda na PoC. Fica aceito o custo fixo das réplicas do índice, sempre ligadas.
+
+A região, como os outros nomes da nuvem, só aparece no `infra/main.tf`, que a entrega ao serviço por variável de ambiente. A consulta em linguagem natural continua indo ao Gemini pelo endpoint global, e a reordenação usa a Ranking API, também fora do Brasil.
+
+Alternativas recusadas:
+- **BigQuery vector search ou Elasticsearch em São Paulo:** manteriam os dados no país, mas sem a busca híbrida, os filtros e a reordenação gerenciados que o plano escolheu.
+- **`us-central1`:** a região padrão de muitos produtos, mas mais longe de São Paulo que `us-east4`.
