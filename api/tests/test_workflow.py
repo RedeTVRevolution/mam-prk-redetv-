@@ -213,3 +213,22 @@ def test_nenhum_comentario_da_infra_fala_em_ate_10_min() -> None:
     infra = Path(__file__).parents[2] / "infra"
     for arquivo in (infra / "main.tf", DEFINICAO):
         assert "até 10 min" not in arquivo.read_text()
+
+
+def test_job_de_referencias_no_main_tf_tem_internet_e_o_segredo_e_so_dele() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    job = main[main.index('resource "google_cloud_run_v2_job" "referencias"') :].split(
+        "\nresource "
+    )[0]
+    assert "vpc_access" not in job
+    assert "max_retries     = 0" in job
+    assert 'local.buckets["referencias"]' in job
+    assert "google_secret_manager_secret.serpapi.id" in job
+    assert 'google_service_account.mam["referencias"]' in job
+    assert "google_secret_manager_secret_version" not in main
+    acesso = main[
+        main.index('resource "google_secret_manager_secret_iam_member"') :
+    ].split("\nresource ")[0]
+    assert 'google_service_account.mam["referencias"].member' in acesso
+    assert main.count("secretAccessor") == 1

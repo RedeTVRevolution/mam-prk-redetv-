@@ -1,5 +1,6 @@
 """Referências de rosto pela web (#111)."""
 
+import base64
 import io
 import json
 import random
@@ -9,7 +10,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from PIL import Image, ImageDraw
 
-from api.catalogo import CatalogoEmMemoria, Rosto, rostos_validos
+from api.catalogo import (
+    CatalogoEmMemoria,
+    PessoaInexistente,
+    Rosto,
+    rostos_validos,
+)
 from api.gemini import AnaliseFalhou, ErroHttp
 from api.imagens_hostis import ImagemRecusada
 from api.referencias import (
@@ -579,3 +585,81 @@ def test_falha_do_gemini_na_conferencia_levanta() -> None:
 
     with pytest.raises(AnaliseFalhou):
         ConferidorGemini(transporte, "j", dormir=lambda _: None).conferir("A", [b"x"])
+
+
+def test_definir_rostos_troca_so_os_rostos_e_id_inexistente_levanta() -> None:
+    catalogo = CatalogoEmMemoria()
+    ana = catalogo.acrescentar("Ana", "apresentador", ["Aninha"])
+    rosto = Rosto(origem="acervo", referencia="referencias/x/1.jpg")
+
+    atualizada = catalogo.definir_rostos(ana.id, [rosto])
+
+    assert atualizada.rostos == [rosto]
+    assert atualizada.nome == "Ana" and atualizada.apelidos == ["Aninha"]
+    assert catalogo.obter(ana.id) == atualizada
+    with pytest.raises(PessoaInexistente):
+        catalogo.definir_rostos("nao-existe", [rosto])
+
+
+def test_job_executa_cada_nome_e_so_busca_apresentadores_com_programa() -> None:
+    from api.referencias_job import executar
+
+    catalogo = CatalogoEmMemoria()
+    leao = catalogo.acrescentar("Leão Lobo", "apresentador", [])
+    bucket = Bucket()
+    sugestoes = SugestoesEmMemoria()
+    fotos = cenas(1, 2, 3, 4)
+    busca = BuscaFalsa([resultado(i) for i in range(4)], web=WEB)
+
+    def rodar(programa: str | None) -> Mapping[str, str]:
+        return executar(
+            ["Leão Lobo", "Fulano Qualquer"],
+            programa,
+            catalogo=catalogo,
+            busca=busca,
+            baixar_thumbnail_de=lambda url: fotos[url.rsplit("/", 1)[1]] or b"",
+            baixar_original_de=lambda url: b"",
+            conferidor=ConferidorFalso(),
+            extrator=extrator("Maria Silva"),
+            armazenamento=bucket,
+            sugestoes=sugestoes,
+            validade=VALIDADE,
+            agora=AGORA,
+        )
+
+    sem_programa = rodar(None)
+
+    assert sem_programa["Leão Lobo"] == "guardada"
+    assert sem_programa["Fulano Qualquer"] != "guardada"
+    assert len(catalogo.obter(leao.id).rostos) == 3  # type: ignore[union-attr]
+    assert not [c for c in busca.consultas if c[0] == "web"]
+
+    rodar("Programa X")
+
+    assert sugestoes.do_programa("Programa X") == ["Maria Silva"]
+
+
+def test_ler_segredo_decodifica_a_ultima_versao_sem_o_espaco_final() -> None:
+    from api.referencias_job import ler_segredo
+
+    class Resposta:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, dict[str, str]]:
+            return {"payload": {"data": base64.b64encode(b"chave-123\n").decode()}}
+
+    class Sessao:
+        def __init__(self) -> None:
+            self.urls: list[str] = []
+
+        def get(self, url: str, **kwargs: object) -> Resposta:
+            self.urls.append(url)
+            return Resposta()
+
+    sessao = Sessao()
+
+    assert ler_segredo(sessao, "projects/p/secrets/s") == "chave-123"
+    assert sessao.urls == [
+        "https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/latest:access"
+    ]

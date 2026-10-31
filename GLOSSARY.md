@@ -60,6 +60,7 @@ A prova que confirma o nome de uma pessoa, conferida pelo código: GC, fala ou r
 
 **Referência de rosto**:
 Foto de uma pessoa nomeada, guardada para comparar com o rosto da tela: 3 fotos diferentes por nome, buscadas na web, com a página de origem.
+Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet: recebe só nomes (`NOMES`, `PROGRAMA`), lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo (nome fora do catálogo ou ambíguo não busca). O `make carregar-catalogo` não apaga os rostos já guardados.
 _Evitar_: galeria facial
 
 **Palpite**:
