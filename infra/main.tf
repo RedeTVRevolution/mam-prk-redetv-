@@ -176,7 +176,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "referencias", "orquestracao", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "orquestracao", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -200,6 +200,10 @@ locals {
     ocr          = ["roles/datastore.user"]
     analise      = ["roles/datastore.user", "roles/aiplatform.user"]
     quadros      = ["roles/datastore.user"]
+    # Grava o estado da indexação no Job. O papel no Vector Search (escrever na coleção da
+    # busca) não está aqui: o nome exato não foi conferido (#118); sem ele o Job de
+    # indexação roda e o Job fica com indexacao.estado = falhou.
+    indexacao    = ["roles/datastore.user"]
     referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
@@ -220,6 +224,8 @@ locals {
     analise = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectCreator" }
     # Lê a cópia limpa; grava os JPEGs e regrava a decupagem (objectUser, porque a sobrescreve).
     quadros = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
+    # Lê a Decupagem entregue, com os quadros-chave.
+    indexacao = { decupagens = "roles/storage.objectViewer" }
     # Grava as fotos de referência.
     referencias = { referencias = "roles/storage.objectUser" }
   }
@@ -784,6 +790,79 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_quadros" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
+# Job de indexação (#118): lê a Decupagem entregue (com as Correções em vigor), apaga e
+# regrava o vídeo na coleção de momentos da busca e grava o estado no Job. Tem internet
+# (sem vpc_access), porque o Agent Retrieval é uma API pública; só recebe a Decupagem já
+# pronta, nunca o vídeo. Roda depois dos quadros-chave; a falha dele só fica no estado
+# do Job (indexacao.estado), que `make reindexar` refaz.
+resource "google_cloud_run_v2_job" "indexacao" {
+  name                = "mam-indexacao"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["indexacao"].email
+      max_retries     = 0
+      # NÃO medido: milhares de registros em lotes de 200, uns segundos por lote.
+      timeout = "1800s"
+      containers {
+        image   = var.imagem
+        command = ["python"]
+        args    = ["-m", "api.indexacao"]
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "1Gi"
+          }
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "BUSCA_REGIAO"
+          value = var.regiao_da_busca
+        }
+        env {
+          name  = "BUSCA_COLECAO"
+          value = local.colecao_da_busca
+        }
+        env {
+          name  = "BUSCA_INDICE_DESCRICAO"
+          value = local.indice_da_descricao
+        }
+        env {
+          name  = "BUSCA_INDICE_QUADRO"
+          value = local.indice_do_quadro
+        }
+        env {
+          name  = "BUSCA_DIMENSAO"
+          value = tostring(var.dimensao_dos_vetores)
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração roda o Job de indexação, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_indexacao" {
+  name     = google_cloud_run_v2_job.indexacao.name
+  location = google_cloud_run_v2_job.indexacao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
 # Job de referências de rosto (#111, ADR 0005): o único com internet (sem vpc_access),
 # por isso só recebe nomes (NOMES, em JSON, e PROGRAMA) e nunca quadros do vídeo. Busca
 # fotos pelo SerpAPI, o Gemini as confere e as guarda no bucket de referências.
@@ -851,7 +930,7 @@ resource "google_cloud_run_v2_job" "referencias" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
-# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de quadros.
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de quadros -> Job de indexação.
 resource "google_workflows_workflow" "validacao" {
   name            = "mam-validacao"
   region          = var.regiao
@@ -864,6 +943,7 @@ resource "google_workflows_workflow" "validacao" {
     job_de_ocr         = google_cloud_run_v2_job.ocr.name
     job_de_analise     = google_cloud_run_v2_job.analise.name
     job_de_quadros     = google_cloud_run_v2_job.quadros.name
+    job_de_indexacao   = google_cloud_run_v2_job.indexacao.name
   })
   depends_on = [google_project_service.apis]
 }
@@ -1074,6 +1154,14 @@ output "busca_indice_quadro" {
 
 output "busca_dimensao" {
   value = var.dimensao_dos_vetores
+}
+
+output "bucket_aceitos" {
+  value = local.buckets["aceitos"]
+}
+
+output "bucket_decupagens" {
+  value = local.buckets["decupagens"]
 }
 
 output "bucket_clipes_ouro" {

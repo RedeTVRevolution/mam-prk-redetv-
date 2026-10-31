@@ -158,3 +158,22 @@ def test_cancelar_job_final_avisa_o_estado(estado: Estado) -> None:
         cancelar(repositorio, "j1", DEPOIS)
 
     assert repositorio.obter("j1") == _job(estado)
+
+
+def test_concluir_deixa_a_indexacao_pendente() -> None:
+    repositorio = RepositorioEmMemoria()
+    repositorio.salvar(_job("analisando"))
+
+    job = transitar(repositorio, "j1", "analisando", "concluido", DEPOIS)
+
+    assert job and job.indexacao
+    assert (job.indexacao.estado, job.indexacao.em) == ("pendente", DEPOIS)
+
+
+def test_falhar_nao_mexe_na_indexacao() -> None:
+    repositorio = RepositorioEmMemoria()
+    repositorio.salvar(_job("analisando"))
+
+    job = transitar(repositorio, "j1", "analisando", "falhou", DEPOIS)
+
+    assert job and job.indexacao is None

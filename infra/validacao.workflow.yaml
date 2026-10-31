@@ -257,5 +257,28 @@ main:
                 args:
                   severity: WARNING
                   text: $${"quadros-chave falharam para " + job_id}
+    - indexa:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_indexacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de indexação tem até 1800 s.
+            connector_params:
+              timeout: 2100
+        except:
+          as: e
+          steps:
+            # O Job já está concluído; a falha fica no estado da indexação e no log.
+            - registra_a_falha_da_indexacao:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"indexação falhou para " + job_id}
     - fim:
         return: $${job_id}

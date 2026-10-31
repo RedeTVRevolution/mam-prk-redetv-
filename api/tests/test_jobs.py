@@ -183,6 +183,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "nome",
         "programa",
         "data_exibicao",
+        "indexacao",
         "estado",
         "codigo_falha",
         "duracao_s",

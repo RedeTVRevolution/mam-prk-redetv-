@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
@@ -31,6 +32,8 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.indexacao import reindexar
+from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
     Armazenamento,
@@ -94,6 +97,7 @@ def criar_app(
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
     catalogo: Catalogo | None = None,
+    indice: IndiceDaBusca | None = None,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -143,15 +147,27 @@ def criar_app(
         """Os tipos de Correção e os vocabulários que o front mostra."""
         return catalogo_de_correcoes()
 
+    repositorio_de_jobs = repositorio or RepositorioIndisponivel()
+    armazenamento_dos_jobs = armazenamento or ArmazenamentoIndisponivel()
+    repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
+    indice_da_busca = indice or IndiceEmMemoria()
     v1.include_router(
         criar_rotas(
-            repositorio or RepositorioIndisponivel(),
-            armazenamento or ArmazenamentoIndisponivel(),
+            repositorio_de_jobs,
+            armazenamento_dos_jobs,
             tamanho_maximo_bytes,
             relogio,
-            correcoes or RepositorioDeCorrecoesEmMemoria(),
+            repositorio_de_correcoes,
             aprovacao or RepositorioDeAprovacaoEmMemoria(),
             catalogo or CatalogoEmMemoria(),
+            lambda job: reindexar(
+                job,
+                repositorio_de_jobs,
+                armazenamento_dos_jobs,
+                repositorio_de_correcoes,
+                indice_da_busca,
+                relogio,
+            ),
         )
     )
     app.include_router(v1)
@@ -177,6 +193,11 @@ if _projeto:
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
+        indice=(
+            AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
+            if "BUSCA_COLECAO" in os.environ
+            else None
+        ),
     )
 else:
     app = criar_app()

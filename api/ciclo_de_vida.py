@@ -57,6 +57,11 @@ def transitar(
     if para not in TRANSICOES[de]:
         raise TransicaoProibida(de, para)
     mudancas: dict[str, Any] = {"estado": para, "atualizado_em": agora}
+    if para == "concluido":
+        # Quem indexa (api.indexacao) troca este estado ao terminar.
+        from api.jobs import Indexacao
+
+        mudancas["indexacao"] = Indexacao(estado="pendente", em=agora)
     if codigo_falha is not None:
         mudancas["codigo_falha"] = codigo_falha
     if sha256 is not None:

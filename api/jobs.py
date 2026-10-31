@@ -99,6 +99,13 @@ CodigoDeFalha = Literal[
 ]
 
 
+class Indexacao(BaseModel):
+    """Onde o Job está no índice da busca; uma falha dela não muda o `estado` do Job."""
+
+    estado: Literal["pendente", "indexado", "falhou"]
+    em: datetime
+
+
 class Job(BaseModel):
     id: str
     nome: str
@@ -117,6 +124,8 @@ class Job(BaseModel):
     programa: str | None = None
     # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
     data_exibicao: date | None = None
+    # `None` até o Job concluir (e em Job anterior ao campo).
+    indexacao: Indexacao | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -136,6 +145,7 @@ class JobPublico(BaseModel):
     duracao_s: float | None
     programa: str | None = None
     data_exibicao: date | None = None
+    indexacao: Indexacao | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -459,6 +469,7 @@ def criar_rotas(
     correcoes: RepositorioDeCorrecoes,
     aprovacao: RepositorioDeAprovacao,
     catalogo: Catalogo,
+    reindexar: Callable[[Job], object],
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -629,6 +640,9 @@ def criar_rotas(
         except TemposInvalidos:
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         correcoes.acrescentar(correcao)
+        # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
+        if not correcao.exige_aprovacao:
+            reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
 
     @rotas.get("/{job_id}/correcoes")
@@ -666,6 +680,7 @@ def criar_rotas(
                 "Correção já desfeita, saiu da fila, não é uma renomeação"
                 " ou não casa com a versão atual",
             ) from None
+        reindexar(job)
         return {"id": registro.id}
 
     @rotas.get("/{job_id}/fila")
@@ -700,6 +715,7 @@ def criar_rotas(
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
+        reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
@@ -763,6 +779,8 @@ def criar_rotas(
             raise HTTPException(404, "Correção não encontrada") from None
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
+        if aprovada:
+            reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/aprovar", status_code=201)
