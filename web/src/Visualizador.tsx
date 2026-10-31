@@ -16,6 +16,7 @@ import { dataDeExibicao, type Job } from './jobs.ts'
 import { FaixasDoVideo } from './FaixasDoVideo.tsx'
 import { Link } from './Link.tsx'
 import { Painel } from './Painel.tsx'
+import { criarCacheDeQuadros } from './quadros.ts'
 import { type Aba, abaDaChave } from './painel.ts'
 import { duracaoDaLinha, faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
@@ -115,6 +116,9 @@ export default function Visualizador({
       ativo = false
     }
   }, [api, job.id, concluido, cargasDaDecupagem])
+
+  // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
+  const urlDoQuadro = useMemo(() => criarCacheDeQuadros((arquivo) => api.job(job.id).quadro(arquivo)), [api, job.id])
 
   const faixas = useMemo(() => (decupagem ? faixasDoVisualizador(decupagem) : null), [decupagem])
   const duracaoDaLinhaMs = duracaoDaLinha(duracaoMs, faixas ?? [])
@@ -495,6 +499,7 @@ export default function Visualizador({
               aoSelecionar={setSelecionada}
               aoSaltar={(ms) => saltarPara(ms / 1000)}
               aoReproduzir={reproduzirTrecho}
+              urlDoQuadro={urlDoQuadro}
             />
           ) : (
             <Text size="sm" c="dimmed">

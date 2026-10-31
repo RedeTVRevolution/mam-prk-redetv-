@@ -1,6 +1,7 @@
 import { Badge, Box, Group, Stack, Text, UnstyledButton, Button } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAtalhos } from './atalhos.ts'
+import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
   ABAS,
@@ -197,6 +198,7 @@ function Item({
   aoSaltar,
   aoReproduzir,
   aoIrParaDono,
+  urlDoQuadro,
   compacto,
 }: {
   item: ItemDoPainel
@@ -206,6 +208,7 @@ function Item({
   aoSaltar: (ms: number) => void
   aoReproduzir: (i: ItemDoPainel) => void
   aoIrParaDono: (pessoa: string) => void
+  urlDoQuadro?: (caminho: string) => Promise<string>
   /** Objeto na lista das ocorrências: só o tipo e o tempo, o resto fica na linha do objeto. */
   compacto?: boolean
 }) {
@@ -245,6 +248,9 @@ function Item({
           </Group>
         ) : (
           <Group gap="xs" wrap="nowrap" align="flex-start">
+            {item.quadro !== undefined && !compacto && (
+              <MiniaturaDoPainel caminho={item.quadro} urlDoQuadro={urlDoQuadro} />
+            )}
             <Box
               aria-hidden
               style={{ width: 8, height: 8, marginTop: 6, flex: 'none', background: COR_DO_TIPO[item.tipo], borderRadius: 'var(--mantine-radius-xs)' }}
@@ -329,6 +335,7 @@ export function Painel({
   aoSelecionar,
   aoSaltar,
   aoReproduzir,
+  urlDoQuadro,
 }: {
   decupagem: Decupagem
   duracaoMs: number
@@ -343,6 +350,8 @@ export function Painel({
   aoSelecionar: (chave: string) => void
   aoSaltar: (ms: number) => void
   aoReproduzir: (i: Intervalo) => void
+  /** A URL assinada do quadro de um momento; sem ela as miniaturas ficam como retângulo. */
+  urlDoQuadro?: (caminho: string) => Promise<string>
 }) {
   const itens = useMemo(() => itensDoPainel(decupagem), [decupagem])
   const pautas = useMemo(() => itensDaAba(itens, 'pautas'), [itens])
@@ -513,6 +522,7 @@ export function Painel({
         aoSaltar={aoSaltar}
         aoReproduzir={aoReproduzir}
         aoIrParaDono={irParaDono}
+        urlDoQuadro={urlDoQuadro}
         compacto={compacto}
       />
     ))
@@ -602,7 +612,10 @@ export function Painel({
                 p="xs"
               >
                 <Group gap="xs" justify="space-between" wrap="nowrap">
-                  <Text size="sm">{dados.tipo}</Text>
+                  <MiniaturaDoPainel caminho={ocorrencias[0]?.quadro ?? null} urlDoQuadro={urlDoQuadro} />
+                  <Text size="sm" style={{ flex: 1 }}>
+                    {dados.tipo}
+                  </Text>
                   <Text size="xs" c="dimmed">
                     {quantas}
                   </Text>

@@ -13,6 +13,8 @@ export interface Job {
   /** Timecode do primeiro quadro do arquivo (`HH:MM:SS:FF`, ou `;FF` no drop-frame). */
   timecode_origem?: string | null
   taxa_de_quadros?: number | null
+  /** URL assinada, de curta validade, do quadro de capa; só a listagem a traz. */
+  capa_url?: string | null
   programa?: string | null
   data_exibicao?: string | null
   enviado_por?: { tipo: 'pessoa' | 'sistema'; nome: string | null }

@@ -191,6 +191,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "cortes_ms",
         "timecode_origem",
         "taxa_de_quadros",
+        "capa_url",
         "criado_em",
         "atualizado_em",
     }
@@ -711,3 +712,32 @@ def test_data_de_exibicao_vai_ao_armazenamento_como_texto() -> None:
 
     assert registro["data_exibicao"] == "1999-12-31"
     assert Job.model_validate(registro) == job
+
+
+def _job_com_capa(ambiente: Ambiente, job_id: str, capa: str | None) -> None:
+    ambiente.repositorio.salvar(
+        Job(
+            id=job_id,
+            nome=f"{job_id}.mp4",
+            tamanho_bytes=10,
+            estado="concluido",
+            criado_por="u1",
+            capa=capa,
+            criado_em=ambiente.relogio(),
+            atualizado_em=ambiente.relogio(),
+        )
+    )
+
+
+def test_listagem_traz_a_url_assinada_da_capa_e_job_sem_capa_traz_null() -> None:
+    ambiente = Ambiente()
+    _job_com_capa(ambiente, "com", "quadros/plano-1.jpg")
+    _job_com_capa(ambiente, "sem", None)
+
+    lista = ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json()
+
+    urls = {j["id"]: j["capa_url"] for j in lista}
+    assert urls == {
+        "com": "https://storage.exemplo/quadros/com/quadros/plano-1.jpg?validade=600",
+        "sem": None,
+    }

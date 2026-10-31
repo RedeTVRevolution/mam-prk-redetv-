@@ -66,6 +66,8 @@ export interface ItemDoPainel extends Intervalo {
   /** O tom da pauta ou o tipo do texto na tela e do comercial. */
   rotulo?: string
   objeto?: DadosDoObjeto
+  /** O JPEG do momento (`null` sem quadro); só aparição, objeto e plano têm miniatura. */
+  quadro?: string | null
 }
 
 const ABA_DO_TIPO: Record<TipoDoItem, Aba | null> = {
@@ -159,6 +161,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
         linhas: [...(sem ? [p.nome.replace(SEM_NOME, '')].filter(Boolean) : []), ...(apoio ? [apoio] : [])],
         selos,
         pessoa: p.id,
+        quadro: x.quadro ?? null,
         inicio_ms: x.inicio_ms,
         fim_ms: x.fim_ms,
       })
@@ -184,6 +187,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
     itens.push({
       chave: `objeto-${i}`,
       tipo: 'objeto',
+      quadro: objeto.quadro ?? null,
       titulo: objeto.tipo,
       linhas: [],
       selos: [],
@@ -236,6 +240,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
       chave: `plano-${i}`,
       tipo: 'plano',
       titulo: p.ambiente,
+      quadro: p.quadro ?? null,
       linhas: p.acao ? [p.acao] : [],
       selos: [],
       inicio_ms: p.inicio_ms,

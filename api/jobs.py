@@ -125,6 +125,9 @@ class Job(BaseModel):
     timecode_origem: str | None = None
     # Quadros por segundo do vídeo (ffprobe); `None` em Job anterior ao campo.
     taxa_de_quadros: float | None = None
+    # Caminho do quadro de capa (`quadros/plano-1.jpg`), escolhido ao tirar os
+    # quadros-chave; `None` sem planos com quadro e em Job anterior ao campo.
+    capa: str | None = None
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
@@ -178,6 +181,8 @@ class JobPublico(BaseModel):
     cortes_ms: list[int] | None = None
     timecode_origem: str | None = None
     taxa_de_quadros: float | None = None
+    # URL assinada, de curta validade, do quadro de capa; só a listagem a preenche.
+    capa_url: str | None = None
     programa: str | None = None
     data_exibicao: date | None = None
     indexacao: Indexacao | None = None
@@ -631,6 +636,14 @@ def criar_rotas(
         url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
+    def _com_capa(job: Job) -> JobPublico:
+        publico = JobPublico.de(job)
+        if job.capa is not None:
+            publico.capa_url = armazenamento.url_do_quadro(
+                job.id, job.capa, VALIDADE_DA_REPRODUCAO
+            )
+        return publico
+
     @rotas.get("", response_model=list[JobPublico])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
@@ -664,7 +677,7 @@ def criar_rotas(
             pagina = repositorio.consultar(filtro)
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        corpo = [JobPublico.de(j).model_dump(mode="json") for j in pagina.jobs]
+        corpo = [_com_capa(j).model_dump(mode="json") for j in pagina.jobs]
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )

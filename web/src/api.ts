@@ -49,6 +49,8 @@ async function detalhe(resposta: Response): Promise<string> {
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
   reproducao(): Promise<Reproducao>
+  /** URL assinada do JPEG `arquivo` (`plano-0.jpg`) de um momento da decupagem. */
+  quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
   catalogo(): Promise<CatalogoDeCorrecoes>
   historico(): Promise<ItemDoHistorico[]>
@@ -122,6 +124,7 @@ export function criarClienteDaApi(
     return {
       detalhe: () => chamar(base),
       reproducao: () => chamar(`${base}/reproducao`),
+      quadro: (arquivo) => chamar(`${base}/quadros/${encodeURIComponent(arquivo)}`),
       decupagem: () => chamar(`${base}/decupagem`),
       catalogo: () => chamar('/v1/correcoes/catalogo'),
       historico: () => chamar(`${base}/correcoes`),

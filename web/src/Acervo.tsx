@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Mous
 import { codigoDoErro, SessaoExpirada, type ClienteDaApi } from './api.ts'
 import { useAtalhos, type Atalho } from './atalhos.ts'
 import EnvioDeVideo from './EnvioDeVideo.tsx'
+import { Quadro } from './Miniatura.tsx'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { fraseDaFalha } from './falhas.ts'
 import { dataDeExibicao, filtrosParaBusca, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
@@ -143,13 +144,9 @@ function Linha({
       style={{ cursor: abre ? 'pointer' : undefined, ...(selecionada ? SELECIONADA : {}) }}
     >
       <Table.Td p={0} w={72}>
-        <Box
-          aria-hidden
-          w={64}
-          h={36}
-          ml="sm"
-          bg="dark.5"
-        />
+        <Box ml="sm">
+          <Quadro url={job.capa_url} largura={64} altura={36} />
+        </Box>
       </Table.Td>
       <Table.Td maw={360}>
         <Tooltip label={job.nome}>

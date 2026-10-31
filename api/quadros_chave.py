@@ -67,6 +67,24 @@ def com_quadros_chave(
     return pronta
 
 
+def capa_da_decupagem(decupagem: Decupagem) -> str | None:
+    """O quadro de capa: o do primeiro plano com pessoa na imagem, ou o do primeiro plano.
+
+    Só entram planos que ganharam quadro; sem nenhum, não há capa.
+    """
+    planos = sorted(
+        (p for p in decupagem.planos if p.quadro is not None),
+        key=lambda p: p.inicio_ms,
+    )
+    aparicoes = [a for pessoa in decupagem.pessoas for a in pessoa.na_imagem]
+    for plano in planos:
+        if any(
+            a.inicio_ms < plano.fim_ms and a.fim_ms > plano.inicio_ms for a in aparicoes
+        ):
+            return plano.quadro
+    return planos[0].quadro if planos else None
+
+
 def executar(
     job_id: str,
     repositorio: RepositorioDeJobs,
@@ -85,6 +103,9 @@ def executar(
         lambda caminho, jpeg: armazenamento.gravar_quadro(job_id, caminho, jpeg),
     )
     armazenamento.gravar_decupagem(job_id, pronta.model_dump_json())
+    capa = capa_da_decupagem(pronta)
+    if capa is not None:
+        repositorio.transitar(job_id, "concluido", {"capa": capa})
 
 
 def main() -> None:

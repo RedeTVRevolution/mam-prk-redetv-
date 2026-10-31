@@ -20,6 +20,7 @@ interface JobApi {
   programa: string | null
   data_exibicao: string | null
   enviado_por: { tipo: string; nome: string | null }
+  capa_url?: string | null
   criado_em: string
   atualizado_em: string
 }
@@ -582,4 +583,16 @@ test('reabrir o diálogo começa um envio novo, sem o aviso do anterior', async 
   const reaberto = within(await abrirEnvio(usuario))
 
   expect(reaberto.queryByText(/Envio concluído/)).toBeNull()
+})
+
+test('a coluna da miniatura mostra a capa do vídeo; sem capa fica o retângulo', async () => {
+  jobs = [
+    job({ id: 'a', nome: 'com-capa.mp4', estado: 'concluido', capa_url: 'https://storage.exemplo/quadros/a/plano-1.jpg?x=1' }),
+    job({ id: 'b', nome: 'sem-planos.mp4', estado: 'concluido', capa_url: null }),
+  ]
+  await abrir()
+
+  const comCapa = await waitFor(() => linha('com-capa.mp4'))
+  expect(comCapa.querySelector('img')?.getAttribute('src')).toBe('https://storage.exemplo/quadros/a/plano-1.jpg?x=1')
+  expect(linha('sem-planos.mp4').querySelector('img')).toBeNull()
 })

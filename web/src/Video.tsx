@@ -100,6 +100,8 @@ type Aparicao = Intervalo & {
   evidencia: string
   papel?: string | null
   visual?: string | null
+  /** O JPEG do meio da aparição, relativo à pasta do Job (`quadros/aparicao-0-1.jpg`). */
+  quadro?: string | null
 }
 
 interface Pessoa {
@@ -138,6 +140,8 @@ interface Plano extends Intervalo {
   acao?: string | null
   objetos?: string[]
   plano_limpo?: boolean
+  /** O JPEG do meio do plano. */
+  quadro?: string | null
   origem?: 'modelo' | 'revisao'
 }
 
@@ -199,6 +203,8 @@ export interface Objeto {
   /** O id de uma pessoa da mesma decupagem; `null` para objeto em cena. */
   pessoa?: string | null
   relacao?: RelacaoDoObjeto | null
+  /** O JPEG da primeira ocorrência. */
+  quadro?: string | null
   ocorrencias: Intervalo[]
 }
 
