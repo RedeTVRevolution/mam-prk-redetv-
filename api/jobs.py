@@ -91,6 +91,7 @@ CodigoDeFalha = Literal[
     "upload_expirado",
     "analise_falhou",
     "transcricao_falhou",
+    "ocr_falhou",
 ]
 
 

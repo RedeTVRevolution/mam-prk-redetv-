@@ -124,3 +124,44 @@ def test_falha_da_transcricao_grava_transcricao_falhou_sem_sobrescrever_outro_es
     assert "updateTime: $${durante.updateTime}" in passo
     assert "stringValue: transcricao_falhou" in passo
     assert "raise: $${e}" in passo
+
+
+def test_ocr_da_tela_roda_depois_da_transcricao_e_antes_da_analise() -> None:
+    texto = _texto()
+
+    transcreve = texto.index("- transcreve:")
+    le_a_tela = texto.index("- le_a_tela:")
+    analisa = texto.index("- analisa:")
+    assert transcreve < le_a_tela < analisa
+    passo = texto[le_a_tela:analisa]
+    assert "googleapis.run.v2.projects.locations.jobs.run" in passo
+    assert "jobs/${job_de_ocr}" in passo
+    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
+    assert "timeout: 3900" in passo
+
+
+def test_falha_do_ocr_grava_ocr_falhou_sem_sobrescrever_outro_estado() -> None:
+    texto = _texto()
+
+    passo = texto[texto.index("- le_a_tela:") : texto.index("- analisa:")]
+    releitura = passo.index("documents.get")
+    condicao = passo.index('estado.stringValue != "analisando"')
+    patch = passo.index("documents.patch")
+    assert releitura < condicao < patch
+    assert "updateTime: $${durante_o_ocr.updateTime}" in passo
+    assert "stringValue: ocr_falhou" in passo
+    assert "raise: $${e}" in passo
+
+
+def test_job_de_ocr_no_main_tf_sem_internet_e_na_rede_da_validacao() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    job = main[main.index('resource "google_cloud_run_v2_job" "ocr"') :].split(
+        "\nresource "
+    )[0]
+    assert "google_compute_network.validacao.id" in job
+    assert "google_compute_subnetwork.validacao.id" in job
+    assert "var.imagem_ocr" in job
+    assert "max_retries     = 0" in job
+    assert "external_ip" not in main and "google_compute_router_nat" not in main
+    assert "job_de_ocr         = google_cloud_run_v2_job.ocr.name" in main

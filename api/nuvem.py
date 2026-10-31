@@ -20,6 +20,7 @@ from api.jobs import (
     Job,
     ServicoIndisponivel,
 )
+from api.leitura_da_tela import LeituraDaTela
 from api.papeis import PAPEIS, Papel
 from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
@@ -44,6 +45,10 @@ def objeto_do_audio(job_id: str) -> str:
 
 def objeto_da_transcricao(job_id: str) -> str:
     return f"{job_id}/transcricao.json"
+
+
+def objeto_da_leitura_da_tela(job_id: str) -> str:
+    return f"{job_id}/leitura_da_tela.json"
 
 
 def objeto_da_decupagem(job_id: str) -> str:
@@ -289,6 +294,33 @@ class TranscricoesStorage:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_da_transcricao(job_id))
         try:
             return Transcricao.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
+
+
+class LeiturasStorage:
+    """O proxy que o OCR lê e a leitura da tela, no bucket de aceitos."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_aceitos: str) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+
+    def baixar_proxy(self, job_id: str, destino: Path) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_do_proxy(job_id)
+        ).download_to_filename(str(destino))
+
+    def gravar_leitura(self, job_id: str, leitura: LeituraDaTela) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_leitura_da_tela(job_id)
+        ).upload_from_string(leitura.model_dump_json(), content_type="application/json")
+
+    def ler_leitura(self, job_id: str) -> LeituraDaTela | None:
+        blob = self._cliente.bucket(self._aceitos).blob(
+            objeto_da_leitura_da_tela(job_id)
+        )
+        try:
+            return LeituraDaTela.model_validate_json(blob.download_as_bytes())
         except NotFound:
             return None
 

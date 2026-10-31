@@ -1,9 +1,9 @@
 # Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
 # quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
 # falhou, salvo se estiver cancelado. Depois, só se o Job ficou em `analisando`, roda o
-# Job de transcrição e chama o serviço de análise.
+# Job de transcrição, o de OCR da tela e chama o serviço de análise.
 # Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao},
-# ${job_de_transcricao}, ${url_da_analise}.
+# ${job_de_transcricao}, ${job_de_ocr}, ${url_da_analise}.
 main:
   params: [evento]
   steps:
@@ -133,6 +133,53 @@ main:
                       atualizado_em:
                         timestampValue: $${time.format(sys.now())}
             - encerra_a_transcricao_com_falha:
+                raise: $${e}
+    - le_a_tela:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_ocr}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de OCR tem até 3600 s.
+            connector_params:
+              timeout: 3900
+        except:
+          as: e
+          steps:
+            # O Job de OCR já derruba o Job pelo ciclo de vida; aqui cobre o que
+            # o impediu de chegar lá (tempo esgotado, memória estourada). Só marca se o
+            # Job segue em `analisando` e não mudou desde a leitura.
+            - rele_antes_do_ocr:
+                call: googleapis.firestore.v1.projects.databases.documents.get
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                result: durante_o_ocr
+            - so_se_ainda_analisando_no_ocr:
+                switch:
+                  - condition: $${durante_o_ocr.fields.estado.stringValue != "analisando"}
+                    next: encerra_o_ocr_com_falha
+            - marca_ocr_como_falha:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  currentDocument:
+                    updateTime: $${durante_o_ocr.updateTime}
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: ocr_falhou
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
+            - encerra_o_ocr_com_falha:
                 raise: $${e}
     - analisa:
         try:

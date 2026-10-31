@@ -1,4 +1,4 @@
-# As três imagens do MAM (#71), pelo scripts/deploy-dev.sh. O Cloud Build as envia
+# As quatro imagens do MAM (#71), pelo scripts/deploy-dev.sh. O Cloud Build as envia
 # ao Artifact Registry, e o script publica pelos digests delas, sem rebuild.
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -7,7 +7,9 @@ steps:
     args: [build, --target, validacao, -t, $_VALIDACAO, .]
   - name: gcr.io/cloud-builders/docker
     args: [build, --target, transcricao, -t, $_TRANSCRICAO, .]
-images: [$_WEB, $_VALIDACAO, $_TRANSCRICAO]
+  - name: gcr.io/cloud-builders/docker
+    args: [build, --target, ocr, -t, $_OCR, .]
+images: [$_WEB, $_VALIDACAO, $_TRANSCRICAO, $_OCR]
 options:
   # Obrigatório com conta de serviço própria (mam-build).
   logging: CLOUD_LOGGING_ONLY

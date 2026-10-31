@@ -23,6 +23,10 @@ dev = [
 transcricao = [
     "faster-whisper==1.2.1",
 ]
+ocr = [
+    "paddleocr==3.7.0",
+    "paddlepaddle==3.3.1",
+]
 
 [tool.uv]
 package = false
@@ -45,5 +49,5 @@ module = ["google.cloud.storage", "google.cloud.storage.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["faster_whisper", "faster_whisper.*"]
+module = ["faster_whisper", "faster_whisper.*", "paddleocr", "paddleocr.*", "cv2"]
 ignore_missing_imports = true
