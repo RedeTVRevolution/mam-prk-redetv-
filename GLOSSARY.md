@@ -71,6 +71,9 @@ Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 
 **Momento**:
 Unidade de busca: um plano ou um evento da decupagem, com início e fim.
 
+**Objeto**:
+Peça visível na Decupagem (`objetos`, esquema 1.3): roupa, calçado, acessório, o que alguém segura ou um objeto em cena, com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`, nulos em cena) e os tempos. A busca filtra pelo objeto inteiro, não por itens soltos no plano.
+
 **Ocorrência**:
 Algo detectado num momento: pessoa, marca, objeto ou pauta.
 

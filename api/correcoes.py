@@ -1543,6 +1543,10 @@ def aplicar(
         for pauta in _pautas(resultado):
             if "pessoas" in pauta:
                 pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
+        # O objeto de quem sumiu fica em cena: sem dono, sem relação.
+        for objeto in resultado.get("objetos", []):
+            if isinstance(objeto, dict) and objeto.get("pessoa") in ids:
+                objeto["pessoa"] = objeto["relacao"] = None
     if "textos_na_tela" in resultado:
         resultado["textos_na_tela"].sort(key=lambda t: (t["inicio_ms"], t["fim_ms"]))
     if "comerciais" in resultado:

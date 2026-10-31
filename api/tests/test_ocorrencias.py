@@ -81,6 +81,33 @@ def test_pessoa_que_some_sai_tambem_das_pautas() -> None:
     assert mundo.decupagem()["pautas"][0]["pessoas"] == ["pes02"]
 
 
+def test_pessoa_que_some_deixa_os_objetos_dela_em_cena() -> None:
+    mundo = Mundo(["editor"])
+    objeto = {
+        "id": "obj01",
+        "categoria": "calcado",
+        "tipo": "sandália",
+        "cor_base": ["vermelho"],
+        "pessoa": "pes01",
+        "relacao": "calca",
+        "ocorrencias": [{"inicio_ms": 1000, "fim_ms": 5000}],
+    }
+    modelo = {**MODELO, "objetos": [objeto]}
+    mundo.reprocessar(modelo)
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    _nao_e(mundo, versao=versao)
+    mundo.corrigir(
+        tipo="pessoa.nao_e",
+        item_id="pes01",
+        valor="Não identificado",
+        ocorrencia=_ocorrencia("citada_na_fala", 5005, 5009),
+        versao=versao,
+    )
+
+    [o] = mundo.decupagem()["objetos"]
+    assert (o["pessoa"], o["relacao"]) == (None, None)
+
+
 def test_aparicao_para_mencao_tira_o_trecho_do_tempo_de_tela() -> None:
     mundo = Mundo(["editor"])
 

@@ -1,7 +1,7 @@
 """Regra de tempos: ajusta os tempos da decupagem aos cortes de câmera.
 
 Os planos são os intervalos entre cortes, cada um com a descrição do plano do
-modelo com que mais se sobrepõe; aparições e comerciais vão ao corte mais
+modelo com que mais se sobrepõe; aparições, ocorrências de objeto e comerciais vão ao corte mais
 próximo só se ele estiver a até 1 s; menções, fala e `mencao_editorial`
 seguem as próprias palavras.
 Quando a regra muda um item, os tempos originais ficam em
@@ -100,6 +100,22 @@ def aplicar_regra_de_tempos(
         )
         for p in decupagem.pessoas
     ]
+    # O objeto é evento visual: ajusta ao corte a até 1 s, como a aparição.
+    objetos = [
+        o.model_copy(
+            update={
+                "ocorrencias": [
+                    _ajustar(i, cortes, LIMITE_DE_AJUSTE_MS) for i in o.ocorrencias
+                ]
+            }
+        )
+        for o in decupagem.objetos
+    ]
     return decupagem.model_copy(
-        update={"planos": planos, "comerciais": comerciais, "pessoas": pessoas}
+        update={
+            "planos": planos,
+            "comerciais": comerciais,
+            "pessoas": pessoas,
+            "objetos": objetos,
+        }
     )

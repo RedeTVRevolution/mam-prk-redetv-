@@ -16,6 +16,7 @@ from api.decupagem import (
     CorrecaoDescartada,
     Decupagem,
     Fala,
+    Objeto,
     Pauta,
     Plano,
     Programa,
@@ -196,6 +197,24 @@ def consolidar(
         p.model_copy(update={"id": f"pau{n:02d}"}) for n, p in enumerate(pautas, 1)
     ]
 
+    def objetos_da_janela(
+        k: int, o: Objeto, janela: Janela, ultima: bool
+    ) -> Objeto | None:
+        """O objeto com o dono pelo mapa das pessoas, só com as ocorrências que
+        começam no núcleo; sem nenhuma, a janela vizinha o decupa."""
+        ocorrencias = _dono(o.ocorrencias, janela, ultima)
+        if not ocorrencias:
+            return None
+        # Dono que não sobreviveu à consolidação: o objeto fica em cena.
+        dono = mapa[k].get(o.pessoa) if o.pessoa else None
+        return o.model_copy(
+            update={
+                "pessoa": dono,
+                "relacao": o.relacao if dono else None,
+                "ocorrencias": _em_ordem(ocorrencias),
+            }
+        )
+
     planos: list[Plano] = []
     comerciais: list[Comercial] = []
     transcricao: list[Fala] = []
@@ -231,6 +250,17 @@ def consolidar(
         for n, p in enumerate(_em_ordem(planos), 1)
     ]
 
+    achados: list[Objeto] = []
+    for k, (janela, d) in enumerate(resultados):
+        for o in d.objetos:
+            novo = objetos_da_janela(k, o, janela, k == ultimo)
+            if novo is not None:
+                achados.append(novo)
+    achados.sort(key=lambda o: (o.ocorrencias[0].inicio_ms, o.ocorrencias[0].fim_ms))
+    objetos = [
+        o.model_copy(update={"id": f"obj{n:02d}"}) for n, o in enumerate(achados, 1)
+    ]
+
     resumo = " ".join(d.programa.resumo for d in decupagens if d.programa.resumo)
     # ponytail: o resumo provisório é cortado em 2000 caracteres; a passada
     # narrativa o reescreve.
@@ -240,6 +270,7 @@ def consolidar(
         programa=Programa(resumo=resumo[:_LIMITE_DO_RESUMO], blocos=blocos),
         pautas=pautas,
         pessoas=pessoas,
+        objetos=objetos,
         planos=planos,
         comerciais=_em_ordem(comerciais),
         transcricao=_em_ordem(transcricao),

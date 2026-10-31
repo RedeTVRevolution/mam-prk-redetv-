@@ -74,11 +74,19 @@ REGRAS GERAIS
 - Cada vez que um texto fica visível é um item, com o início e o fim em que ele está na tela. Um GC que sai e volta são dois itens.
 - Nunca estenda o texto até o fim do bloco ou do plano: um GC fixo no rodapé do bloco todo só vale se ficou visível o tempo todo.
 
-5. LOCAIS, OBJETOS E IMAGENS DE APOIO
-- Registre locais (estúdio, aeroporto, estádio, rua, restaurante, palco), objetos de destaque (carro de luxo, joia, troféu, produto em cena) e cenas reaproveitáveis.
+5. OBJETOS, ROUPAS E ACESSÓRIOS
+- Para cada pessoa que aparece na imagem, registre em objetos o que ela veste, calça e usa (roupa, calçado, acessório) e o que segura na mão, com o id dela em pessoa e a relação (veste, calca, usa, segura). Só o que estiver visível; não deduza o calçado se os pés não aparecem.
+- Registre também os objetos em cena que alguém poderia procurar no acervo: produto, troféu, carro, joia, animal, comida. Ignore o mobiliário comum do estúdio. Sem dono, deixe pessoa e relação nulas.
+- Para cada objeto: categoria, tipo no singular, a cor base da lista (até 2 cores) e o tom como você vê no campo cor, detalhe curto e os intervalos em que está visível.
+- Marca só quando o logo ou o nome estiver legível. Na dúvida, deixe em branco.
+- A cor sob a luz do estúdio engana: prefira a cor base mais provável e diga o tom no campo cor.
+- No máximo 5 peças por pessoa em cada aparição, as mais visíveis.
+
+6. LOCAIS E IMAGENS DE APOIO
+- Registre locais (estúdio, aeroporto, estádio, rua, restaurante, palco) e cenas reaproveitáveis.
 - Marque como plano limpo os planos sem texto na tela e sem ninguém falando para a câmera.
 
-6. COMERCIAIS E MERCHANDISING
+7. COMERCIAIS E MERCHANDISING
 - Registre toda ação comercial: merchandising do apresentador, testemunhal, produto em cena, banner, bug, QR code, chamada de site e intervalo comercial.
 - Para cada uma: marca, tipo, início, fim e evidência (fala, logo ou texto na tela).
 - Distinga ação comercial de menção editorial a uma marca.
