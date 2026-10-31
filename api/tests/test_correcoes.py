@@ -13,6 +13,7 @@ from api.chaves import (
     emitir_chave,
 )
 from api.correcoes import (
+    Autoria,
     Correcao,
     CorrecaoJaExiste,
     ItemInexistente,
@@ -22,12 +23,12 @@ from api.correcoes import (
     RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoesEmMemoria,
     aplicar,
+    corrigir,
+    descartar,
     fila,
     historico,
     identidade_da_pessoa,
-    montar_correcao,
-    montar_descarte,
-    montar_reaplicacao,
+    reaplicar,
     reconciliar,
     versao_do_modelo,
 )
@@ -192,7 +193,14 @@ def test_aplicar_sem_correcoes_marca_tudo_como_modelo_e_nao_altera_o_original() 
 
 def test_montar_correcao_de_item_inexistente_levanta() -> None:
     with pytest.raises(ItemInexistente):
-        montar_correcao(MODELO, VERSAO, NovaCorrecao(**_novo(item_id="pes99")), "x")
+        corrigir(
+            MODELO,
+            VERSAO,
+            [],
+            NovaCorrecao(**_novo(item_id="pes99")),
+            "j1",
+            _AUTORIA,
+        )
 
 
 def test_renomear_grava_autor_data_motivo_antes_depois_e_ancora() -> None:
@@ -731,15 +739,7 @@ def test_desfazer_correcao_reconciliada_volta_ao_nome_do_modelo_novo() -> None:
 # --- Fila de revisão (#60) ---
 
 
-def _registro(**campos: Any) -> dict[str, Any]:
-    return {
-        "id": "n1",
-        "job_id": "j1",
-        "autor_uid": "u2",
-        "autor_email": "bia@redetv.com.br",
-        "criada_em": BASE + timedelta(hours=1),
-        **campos,
-    }
+_AUTORIA = Autoria("u2", "bia@redetv.com.br", BASE + timedelta(hours=1))
 
 
 def test_fila_lista_a_que_nao_casou_com_os_candidatos_que_sobrepoem_o_intervalo() -> (
@@ -769,8 +769,8 @@ def test_reaplicar_cria_correcao_na_versao_atual_ligada_a_original() -> None:
     novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
     original = _correcao_antiga()
 
-    nova = montar_reaplicacao(
-        novo, "nova", original, [original], "p1", "é a mesma", **_registro()
+    nova = reaplicar(
+        novo, "nova", [original], original.id, "p1", "é a mesma", "j1", _AUTORIA
     )
 
     assert (nova.tipo, nova.reaplica, nova.item_id) == ("pessoa.renomear", "c1", "p1")
@@ -793,9 +793,7 @@ def test_reaplicar_em_quem_nao_e_candidato_levanta(item_id: str) -> None:
     original = _correcao_antiga()
 
     with pytest.raises(NaoCandidato):
-        montar_reaplicacao(
-            novo, "nova", original, [original], item_id, "x", **_registro()
-        )
+        reaplicar(novo, "nova", [original], original.id, item_id, "x", "j1", _AUTORIA)
 
 
 def test_reaplicar_quem_nao_esta_na_fila_levanta() -> None:
@@ -803,21 +801,21 @@ def test_reaplicar_quem_nao_esta_na_fila_levanta() -> None:
     original = _correcao_antiga()  # casa, logo não está na fila
 
     with pytest.raises(NaoNaFila):
-        montar_reaplicacao(novo, "nova", original, [original], "p9", "x", **_registro())
+        reaplicar(novo, "nova", [original], original.id, "p9", "x", "j1", _AUTORIA)
 
 
 def test_descartar_tira_da_fila_e_o_historico_marca_descartada() -> None:
     novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
     original = _correcao_antiga()
 
-    descarte = montar_descarte(
-        novo, "nova", original, [original], "não vale", **_registro()
+    descarte = descartar(
+        novo, "nova", [original], original.id, "não vale", "j1", _AUTORIA
     )
 
     assert (descarte.tipo, descarte.descarta) == ("descartar", "c1")
     assert fila(novo, "nova", [original, descarte]) == []
     assert [(i.id, i.estado) for i in historico([original, descarte])] == [
-        ("n1", "ativa"),
+        ("c1-resolvida", "ativa"),
         ("c1", "descartada"),
     ]
     assert (
@@ -829,24 +827,20 @@ def test_descartar_tira_da_fila_e_o_historico_marca_descartada() -> None:
 def test_descartar_duas_vezes_levanta() -> None:
     novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
     original = _correcao_antiga()
-    descarte = montar_descarte(novo, "nova", original, [original], "x", **_registro())
+    descarte = descartar(novo, "nova", [original], original.id, "x", "j1", _AUTORIA)
 
     with pytest.raises(NaoNaFila):
-        montar_descarte(
-            novo, "nova", original, [original, descarte], "x", **_registro()
-        )
+        descartar(novo, "nova", [original, descarte], original.id, "x", "j1", _AUTORIA)
 
 
 def test_historico_marca_a_original_reaplicada() -> None:
     novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
     original = _correcao_antiga()
-    nova = montar_reaplicacao(
-        novo, "nova", original, [original], "p1", "x", **_registro()
-    )
+    nova = reaplicar(novo, "nova", [original], original.id, "p1", "x", "j1", _AUTORIA)
 
     estados = {i.id: i.estado for i in historico([original, nova])}
 
-    assert estados == {"c1": "reaplicada", "n1": "ativa"}
+    assert estados == {"c1": "reaplicada", "c1-resolvida": "ativa"}
 
 
 def _mundo_com_fila() -> tuple["Mundo", str]:
