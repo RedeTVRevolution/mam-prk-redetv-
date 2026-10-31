@@ -380,6 +380,8 @@ def test_modelos_do_dockerfile_estao_fixados_por_revisao_e_hash() -> None:
     assert "ffmpeg=$FFMPEG" in alvo
     assert f"ARG DETECTOR={DETECTOR}\n" in alvo
     assert f"ARG RECONHECEDOR={RECONHECEDOR}\n" in alvo
+    # Os modelos vêm antes do uv sync: mudar o uv.lock não os baixa de novo (#211).
+    assert alvo.index("baixar()") < alvo.index("RUN uv sync")
 
 
 def test_versao_do_ffmpeg_vale_para_todos_os_estagios() -> None:

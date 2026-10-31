@@ -172,9 +172,19 @@ def test_job_inexistente_nao_faz_nada(tmp_path: Path) -> None:
 
 def test_modelo_do_dockerfile_esta_fixado_por_revisao_e_hash() -> None:
     dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
+    modelo = dockerfile[dockerfile.index("AS modelo-whisper") :].split("\nFROM ")[0]
     alvo = dockerfile[dockerfile.index("AS transcricao") :].split("\nFROM ")[0]
 
-    assert re.search(r"^ARG MODELO_REVISAO=[0-9a-f]{40}$", alvo, re.MULTILINE)
-    assert re.search(r"^ARG MODELO_SHA256=[0-9a-f]{64}$", alvo, re.MULTILINE)
-    assert "sha256sum -c" in alvo
+    assert re.search(r"^ARG MODELO_REVISAO=[0-9a-f]{40}$", modelo, re.MULTILINE)
+    assert re.search(r"^ARG MODELO_SHA256=[0-9a-f]{64}$", modelo, re.MULTILINE)
+    assert "sha256sum -c" in modelo
+    assert re.search(r"huggingface_hub==\d+\.\d+\.\d+", modelo)
     assert "--group transcricao" in alvo
+
+
+def test_modelo_do_dockerfile_vem_antes_do_uv_sync() -> None:
+    # Para uma mudança no uv.lock não baixar o modelo de novo (#211).
+    dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
+    alvo = dockerfile[dockerfile.index("AS transcricao") :].split("\nFROM ")[0]
+
+    assert alvo.index("COPY --from=modelo-whisper") < alvo.index("RUN uv sync")
