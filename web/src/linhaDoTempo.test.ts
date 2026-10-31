@@ -372,3 +372,10 @@ test('← e → passam de bloco em bloco e param nas pontas', () => {
   expect(vizinhoNaFaixa(blocos, 'c', 1)).toBe('c')
   expect(vizinhoNaFaixa(blocos, 'a', -1)).toBe('a')
 })
+
+test('a fala sem locutor não leva "de" no nome', () => {
+  const d = { ...noVisualizador, transcricao: [{ locutor: '', texto: 'Boa noite', inicio_ms: 0, fim_ms: 3_000 }] }
+  const falas = faixasDoVisualizador(d).find((f) => f.rotulo === 'Falas')
+
+  expect(falas?.blocos.map((b) => b.nome)).toEqual(['Fala: Boa noite, 00:00 a 00:03'])
+})

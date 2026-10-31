@@ -48,7 +48,7 @@ const ABA_DO_TIPO: Record<TipoDoItem, Aba | null> = {
   fala: 'transcricao',
 }
 
-/** A aba do tipo do bloco. */
+/** A aba do tipo do item. */
 export function abaDaChave(chave: string): Aba | null {
   return ABA_DO_TIPO[chave.split('-')[0] as TipoDoItem] ?? null
 }

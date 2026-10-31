@@ -125,21 +125,26 @@ function Item({
   aoReproduzir: (i: ItemDoPainel) => void
 }) {
   const resumo = item.tipo === 'pauta' && item.detalhe
-  if (item.tipo === 'fala') {
-    return (
-      <Box
-        data-chave={item.chave}
-        aria-current={atual ? 'true' : undefined}
-        p="xs"
-        style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
+  return (
+    <Box
+      data-chave={item.chave}
+      aria-current={atual ? 'true' : undefined}
+      p="xs"
+      style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
+    >
+      <UnstyledButton
+        data-item
+        aria-label={
+          item.tipo === 'fala'
+            ? `${item.linhas[0] ? `${item.linhas[0]}: ` : ''}${item.titulo}, ${relogio(item.inicio_ms)}`
+            : `${item.titulo}, ${relogio(item.inicio_ms)} a ${relogio(item.fim_ms)}`
+        }
+        aria-pressed={selecionado}
+        onClick={() => aoClicar(item)}
+        style={{ display: 'block', width: '100%', textAlign: 'left' }}
       >
-        <UnstyledButton
-          data-item
-          aria-label={`${item.linhas[0] ? `${item.linhas[0]}: ` : ''}${item.titulo}, ${relogio(item.inicio_ms)}`}
-          aria-pressed={selecionado}
-          onClick={() => aoClicar(item)}
-          style={{ display: 'block', width: '100%', textAlign: 'left' }}
-        >
+        {item.tipo === 'fala' ? (
+          // Na transcrição a linha é o início, o locutor (quando houver) e o texto inteiro.
           <Group gap="sm" wrap="nowrap" align="flex-start">
             <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none', paddingTop: 2 }}>
               {relogio(item.inicio_ms)}
@@ -153,64 +158,48 @@ function Item({
               <Text size="sm">{item.titulo}</Text>
             </Stack>
           </Group>
-        </UnstyledButton>
-      </Box>
-    )
-  }
-  return (
-    <Box
-      data-chave={item.chave}
-      aria-current={atual ? 'true' : undefined}
-      p="xs"
-      style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
-    >
-      <UnstyledButton
-        data-item
-        aria-label={`${item.titulo}, ${relogio(item.inicio_ms)} a ${relogio(item.fim_ms)}`}
-        aria-pressed={selecionado}
-        onClick={() => aoClicar(item)}
-        style={{ display: 'block', width: '100%', textAlign: 'left' }}
-      >
-        <Group gap="xs" wrap="nowrap" align="flex-start">
-          <Box
-            aria-hidden
-            style={{ width: 8, height: 8, marginTop: 6, flex: 'none', background: COR_DO_TIPO[item.tipo], borderRadius: 'var(--mantine-radius-xs)' }}
-          />
-          <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
-            <Group gap="xs" wrap="nowrap" justify="space-between" align="baseline">
-              <Text size="sm" style={{ minWidth: 0 }}>
-                {item.tipo === 'texto' && item.rotulo ? (
-                  <>
-                    <Text span size="sm" c="dimmed" fw={600}>
-                      {item.rotulo}
-                    </Text>
-                    {'  '}
-                  </>
-                ) : null}
-                {item.titulo}
-              </Text>
-              <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
-                {tempos(item)}
-              </Text>
-            </Group>
-            {item.rotulo && item.tipo !== 'texto' && (
-              <Text size="xs" c="dimmed">
-                {item.rotulo}
-              </Text>
-            )}
-            {item.linhas.map((l, i) =>
-              resumo && i === 0 ? (
-                <Text key={l} size="xs" c="dimmed" lineClamp={selecionado ? undefined : 2}>
-                  {l}
+        ) : (
+          <Group gap="xs" wrap="nowrap" align="flex-start">
+            <Box
+              aria-hidden
+              style={{ width: 8, height: 8, marginTop: 6, flex: 'none', background: COR_DO_TIPO[item.tipo], borderRadius: 'var(--mantine-radius-xs)' }}
+            />
+            <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+              <Group gap="xs" wrap="nowrap" justify="space-between" align="baseline">
+                <Text size="sm" style={{ minWidth: 0 }}>
+                  {item.tipo === 'texto' && item.rotulo ? (
+                    <>
+                      <Text span size="sm" c="dimmed" fw={600}>
+                        {item.rotulo}
+                      </Text>
+                      {'  '}
+                    </>
+                  ) : null}
+                  {item.titulo}
                 </Text>
-              ) : (
-                <Text key={l} size="xs" c="dimmed">
-                  {l}
+                <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
+                  {tempos(item)}
                 </Text>
-              ),
-            )}
-          </Stack>
-        </Group>
+              </Group>
+              {item.rotulo && item.tipo !== 'texto' && (
+                <Text size="xs" c="dimmed">
+                  {item.rotulo}
+                </Text>
+              )}
+              {item.linhas.map((l, i) =>
+                resumo && i === 0 ? (
+                  <Text key={l} size="xs" c="dimmed" lineClamp={selecionado ? undefined : 2}>
+                    {l}
+                  </Text>
+                ) : (
+                  <Text key={l} size="xs" c="dimmed">
+                    {l}
+                  </Text>
+                ),
+              )}
+            </Stack>
+          </Group>
+        )}
       </UnstyledButton>
       {(item.selos.length > 0 || selecionado) && (
         <Group gap="xs" mt={4} ml={16}>
@@ -348,8 +337,9 @@ export function Painel({
     mostrar(chaveAtual, aba === 'transcricao')
   }, [chaveAtual, aba])
 
+  // A seleção só entra na vista; o terço é do acompanhamento da fala que toca.
   useEffect(() => {
-    if (selecionada) mostrar(selecionada, aba === 'transcricao')
+    if (selecionada) mostrar(selecionada, false)
   }, [selecionada, aba])
 
   const indiceDaAba = ABAS.findIndex((a) => a.chave === aba)

@@ -473,7 +473,7 @@ test('Transcrição: a fala atual muda com o tempo, sem fundo vermelho', async (
   }
 })
 
-test('Transcrição: clicar numa fala salta ao início e seleciona o bloco da faixa Falas, e vice-versa', async () => {
+test('Transcrição: clicar numa fala salta ao início e seleciona a ocorrência da faixa Falas, e vice-versa', async () => {
   const usuario = userEvent.setup()
   const player = await abrir()
   await usuario.click(aba('Transcrição 2'))
@@ -481,6 +481,7 @@ test('Transcrição: clicar numa fala salta ao início e seleciona o bloco da fa
   await usuario.click(within(painel()).getByRole('button', { name: /Obrigado, Ana/ }))
 
   expect(player.currentTime).toBe(224)
+  expect(within(painel()).getByRole('button', { name: 'Reproduzir trecho' })).toBeTruthy()
   const bloco = screen.getAllByRole('button', { name: /^Fala/ }).find((b) => b.getAttribute('aria-pressed') === 'true')
   expect(bloco).toBeTruthy()
 

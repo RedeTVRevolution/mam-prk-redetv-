@@ -387,7 +387,7 @@ export function faixasDoVisualizador(d: Decupagem): FaixaDoVisualizador[] {
       'fala',
       'Falas',
       CORES_DE_OCORRENCIA.fala.cor,
-      d.transcricao.map((f) => ({ ...f, nome: `Fala de ${f.locutor}: ${resumo(f.texto)}` })),
+      d.transcricao.map((f) => ({ ...f, nome: f.locutor ? `Fala de ${f.locutor}: ${resumo(f.texto)}` : `Fala: ${resumo(f.texto)}` })),
     ),
   ]
 }
