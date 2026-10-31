@@ -510,6 +510,16 @@ export default function Video({
     if (player.current) player.current.currentTime = inicioMs / 1000
   }, [])
 
+  // O mesmo vídeo com outro `?t=` (o endereço mudou, a tela não remontou): salta para lá.
+  const inicioAnterior = useRef(inicioEmS)
+  useEffect(() => {
+    if (inicioEmS === inicioAnterior.current) return
+    inicioAnterior.current = inicioEmS
+    if (inicioEmS === null) return
+    if (player.current && player.current.readyState > 0) player.current.currentTime = inicioEmS
+    else retomarEm.current = inicioEmS
+  }, [inicioEmS])
+
   const [atualMs, setAtualMs] = useState(0)
   const [duracaoDoPlayerMs, setDuracaoDoPlayerMs] = useState<number | null>(null)
   const [aba, setAba] = useState<Aba>('Pessoas')

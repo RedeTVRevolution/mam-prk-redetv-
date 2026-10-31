@@ -41,7 +41,9 @@ export function lerRota(caminho: string, busca = ''): Rota {
 const AVISO = 'mam:navegou'
 
 export function navegar(destino: string, opcoes: { substituir?: boolean } = {}) {
-  if (opcoes.substituir) history.replaceState(null, '', destino)
+  // Ir ao endereço em que já se está não empilha uma entrada repetida no histórico.
+  const repetido = destino === location.pathname + location.search
+  if (opcoes.substituir || repetido) history.replaceState(null, '', destino)
   else history.pushState(null, '', destino)
   window.dispatchEvent(new Event(AVISO))
 }

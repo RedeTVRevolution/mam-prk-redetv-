@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { useState } from 'react'
 import { criarClienteDaApi } from './api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 import catalogo from './catalogo.fixture.json'
@@ -539,6 +540,41 @@ test('link expirado: o player pede outro e volta ao mesmo ponto', async () => {
   await waitFor(() => expect(player.getAttribute('src')).toBe('https://storage.exemplo/proxy/j1?v=2'))
   player.currentTime = 0
   fireEvent.loadedMetadata(player)
+  expect(player.currentTime).toBe(30)
+})
+
+test('o instante do endereço posiciona o player, e um novo instante salta para ele', async () => {
+  const auth = new AutenticadorFalso([
+    { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
+  ])
+  await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
+  await auth.confirmarTotp(CODIGO_TOTP_FALSO)
+  const api = criarClienteDaApi(auth, () => {})
+  // O endereço muda de `?t=90` para `?t=30` sem trocar de vídeo: a tela não remonta.
+  function ComInstante() {
+    const [inicio, setInicio] = useState(90)
+    return (
+      <>
+        <button type="button" onClick={() => setInicio(30)}>
+          Outro instante
+        </button>
+        <Video
+          api={api}
+          job={{ id: 'j1', nome: 'clipe.mp4', codigo_falha: null, estado: 'concluido' }}
+          inicioEmS={inicio}
+        />
+      </>
+    )
+  }
+  const usuario = userEvent.setup()
+  render(<ComInstante />)
+  const player = await jogador()
+
+  fireEvent.loadedMetadata(player)
+  expect(player.currentTime).toBe(90)
+
+  Object.defineProperty(player, 'readyState', { value: 1, configurable: true })
+  await usuario.click(screen.getByRole('button', { name: 'Outro instante' }))
   expect(player.currentTime).toBe(30)
 })
 

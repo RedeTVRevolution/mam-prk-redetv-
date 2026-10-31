@@ -68,6 +68,7 @@ const servidor = setupServer(
 
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => {
+  history.replaceState(null, '', '/')
   servidor.resetHandlers()
   jobs = []
   statusDaLista = 200
@@ -240,7 +241,6 @@ test('abrir um vídeo concluído ou falhado é um link para o endereço do víde
 
   expect(location.pathname).toBe('/video/a')
   expect(screen.queryByRole('link', { name: 'andando.mp4' })).toBeNull()
-  history.replaceState(null, '', '/')
 })
 
 test('mostra a duração em mm:ss quando a API traz', async () => {

@@ -5,9 +5,7 @@ import { Link } from './Link.tsx'
 import { ACERVO } from './rotas.ts'
 import { CORES } from './tema.ts'
 
-/** A barra fixa de toda tela depois do login (no máximo 44 px). */
-export const ALTURA_DA_BARRA = 44
-
+/** A barra fixa de toda tela depois do login (`ALTURA_DA_BARRA`, no tema). */
 export default function Barra({ email, aoSair }: { email: string; aoSair: () => void }) {
   const mostrarAtalhos = useMostrarAtalhos()
   return (

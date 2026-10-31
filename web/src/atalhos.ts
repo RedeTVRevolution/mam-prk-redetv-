@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef } from 'react'
 
 /** Um atalho de teclado: a tela declara a tecla, a ação e o grupo. */
 export interface Atalho {
+  /** O que a lista mostra; com `executar`, é também o `KeyboardEvent.key` que dispara. */
   tecla: string
   acao: string
   grupo: string

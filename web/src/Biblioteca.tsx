@@ -239,7 +239,7 @@ export default function Biblioteca({
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
             {visiveis.map((job) => {
               const estado = ESTADOS_DO_JOB[job.estado as EstadoDoJob]
-              const clicavel = (job.estado === 'concluido' || job.estado === 'falhou')
+              const clicavel = job.estado === 'concluido' || job.estado === 'falhou'
               return (
                 <Card
                   key={job.id}

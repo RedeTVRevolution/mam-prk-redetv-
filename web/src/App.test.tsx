@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { render } from './render-teste.tsx'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -430,6 +430,80 @@ test('/amostra abre a página de amostra sem login e sem chamar a API', async ()
   expect(await screen.findByRole('heading', { name: /Sistema visual/i }, { timeout: 5000 })).toBeTruthy()
   expect(screen.queryByLabelText(/^E-mail/)).toBeNull()
   expect(chamadas).toEqual([])
+})
+
+test('/amostra com sessão também abre sem chamar a API', async () => {
+  history.replaceState(null, '', '/amostra')
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  expect(await screen.findByRole('heading', { name: /Sistema visual/i }, { timeout: 5000 })).toBeTruthy()
+  expect(chamadas).toEqual([])
+})
+
+test('clicar no link do endereço atual não empilha outra entrada no histórico', async () => {
+  const usuario = userEvent.setup()
+  render(<App autenticador={await autenticadorComSessao()} />)
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+  const antes = history.length
+
+  await usuario.click(within(screen.getByRole('banner')).getByRole('link', { name: 'Acervo' }))
+
+  expect(location.pathname).toBe('/acervo')
+  expect(history.length).toBe(antes)
+})
+
+test('Ctrl+clique no cartão fica com o navegador (outra aba) e não muda a tela', async () => {
+  servidor.use(http.get('/v1/jobs', () => HttpResponse.json([VIDEO_J1])))
+  render(<App autenticador={await autenticadorComSessao()} />)
+  const link = await screen.findByRole('link', { name: 'pronto.mp4' })
+
+  const seguiu = fireEvent.click(link, { button: 0, ctrlKey: true })
+
+  // O app não cancelou o clique: quem decide é o navegador.
+  expect(seguiu).toBe(true)
+  expect(location.pathname).toBe('/acervo')
+})
+
+test('na tela do vídeo, ? lista também as teclas da linha do tempo', async () => {
+  history.replaceState(null, '', '/video/j1')
+  servidor.use(
+    http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
+    http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 500 })),
+    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 500 })),
+  )
+  const usuario = userEvent.setup()
+  render(<App autenticador={await autenticadorComSessao()} />)
+  await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+  await usuario.keyboard('?')
+
+  const dialogo = await screen.findByRole('dialog', { name: 'Atalhos' })
+  expect(within(dialogo).getByRole('table', { name: 'Linha do tempo' })).toBeTruthy()
+  expect(within(dialogo).getByText('Na faixa: ir à ocorrência em foco')).toBeTruthy()
+})
+
+test('falha ao abrir o vídeo mostra o código para o suporte e tenta de novo', async () => {
+  history.replaceState(null, '', '/video/j1')
+  let falhar = true
+  servidor.use(
+    http.get('/v1/jobs/j1', () =>
+      falhar ? new HttpResponse(null, { status: 503 }) : HttpResponse.json(VIDEO_J1),
+    ),
+    http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 500 })),
+    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 500 })),
+  )
+  const usuario = userEvent.setup()
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  const aviso = await screen.findByRole('alert')
+  expect(aviso.textContent).toContain('Não foi possível abrir o vídeo')
+  expect(aviso.textContent).toContain('Código para o suporte: http_503')
+  falhar = false
+  await usuario.click(within(aviso).getByRole('button', { name: 'Tentar de novo' }))
+
+  await waitFor(() =>
+    expect(screen.queryByText(/Código para o suporte: http_503/)).toBeNull(),
+  )
 })
 
 test('voltar no navegador volta ao acervo', async () => {

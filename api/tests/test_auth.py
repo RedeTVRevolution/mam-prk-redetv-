@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,11 +20,13 @@ class VerificadorFalso:
             raise TokenInvalido from None
 
 
-def _cliente() -> TestClient:
+def _cliente(pasta_web: Path | None = None) -> TestClient:
     verificador: VerificadorDeToken = VerificadorFalso(
         {"token-bom": Usuario(uid="u1", email="ana@redetv.com.br")}
     )
-    return TestClient(criar_app(verificador))
+    if pasta_web is None:
+        return TestClient(criar_app(verificador))
+    return TestClient(criar_app(verificador, pasta_web=pasta_web))
 
 
 def test_v1_sem_token_recebe_401() -> None:
@@ -65,6 +69,24 @@ def test_rota_inexistente_em_v1_com_token_valido_recebe_404() -> None:
     assert resposta.status_code == 404
 
 
-def test_caminho_que_so_comeca_com_v1_nao_e_protegido() -> None:
-    # Fora de `/v1`, é endereço do front (index.html, se houver build) ou 404; nunca 401.
-    assert _cliente().get("/v1x").status_code in (200, 404)
+def test_caminho_que_so_comeca_com_v1_nao_e_protegido(tmp_path: Path) -> None:
+    # Fora de `/v1`, é endereço do front: devolve o index.html, sem pedir token.
+    (tmp_path / "index.html").write_text("<div id=root></div>")
+
+    resposta = _cliente(tmp_path).get("/v1x")
+
+    assert resposta.status_code == 200
+    assert resposta.text == "<div id=root></div>"
+
+
+def test_rota_inexistente_em_v1_com_build_montado_continua_404_em_json(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.html").write_text("<div id=root></div>")
+
+    resposta = _cliente(tmp_path).get(
+        "/v1/inexistente", headers={"Authorization": "Bearer token-bom"}
+    )
+
+    assert resposta.status_code == 404
+    assert resposta.headers["content-type"].startswith("application/json")

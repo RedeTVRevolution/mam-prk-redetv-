@@ -44,13 +44,6 @@ def test_endereco_do_front_devolve_o_index_com_200(tmp_path: Path) -> None:
         assert resposta.text == "<div id=root></div>"
 
 
-def test_v1_desconhecido_continua_404_em_json(tmp_path: Path) -> None:
-    resposta = _app_com_build(tmp_path).get("/v1/inexistente")
-
-    assert resposta.status_code in (401, 404)
-    assert resposta.headers["content-type"].startswith("application/json")
-
-
 def test_arquivo_do_build_e_servido_como_arquivo(tmp_path: Path) -> None:
     resposta = _app_com_build(tmp_path).get("/assets/app.js")
 

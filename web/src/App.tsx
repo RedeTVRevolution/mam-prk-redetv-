@@ -13,12 +13,12 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { criarClienteDaApi, SessaoExpirada } from './api.ts'
 import { AtalhosProvider } from './AtalhosProvider.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
-import Barra, { ALTURA_DA_BARRA } from './Barra.tsx'
+import Barra from './Barra.tsx'
 import Biblioteca from './Biblioteca.tsx'
 import Login from './Login.tsx'
 import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
-import { NAVBAR_DA_BIBLIOTECA } from './tema.ts'
+import { ALTURA_DA_BARRA, NAVBAR_DA_BIBLIOTECA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
 
 // A amostra do sistema visual é grande e sem login: fica num pedaço à parte do bundle.
@@ -87,11 +87,14 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
     }
   }, [api])
 
+  // A amostra abre sem login e sem a API: só verifica a sessão fora dela.
+  const naAmostra = rota.tipo === 'amostra'
   useEffect(() => {
+    if (naAmostra) return
     // Sincroniza com o SDK de login, um sistema externo.
     // oxlint-disable-next-line react/set-state-in-effect
     void verificar()
-  }, [verificar])
+  }, [verificar, naAmostra])
 
   function reverificar() {
     expirou.current = false
@@ -99,7 +102,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
     void verificar()
   }
 
-  if (rota.tipo === 'amostra') {
+  if (naAmostra) {
     return (
       <Suspense fallback={null}>
         <Amostra />
@@ -137,6 +140,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
   }
   const podeEditar = sessao.usuario.permissoes.includes('decupagem.editar')
   const podeAprovar = sessao.usuario.permissoes.includes('correcao.aprovar')
+  const podeEnviar = sessao.usuario.permissoes.includes('video.enviar')
   const naBiblioteca = rota.tipo === 'acervo' || rota.tipo === 'raiz'
   return (
     <AppShell
@@ -158,7 +162,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : naBiblioteca ? (
         // A Biblioteca traz a própria barra lateral e a área principal.
         // O front só esconde; quem barra é a API.
-        <Biblioteca api={api} podeEnviar={sessao.usuario.permissoes.includes('video.enviar')} />
+        <Biblioteca api={api} podeEnviar={podeEnviar} />
       ) : (
         <AppShell.Main bg="dark.7">
           <Center h="60vh">
