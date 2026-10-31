@@ -1,7 +1,14 @@
 import { expect, test } from 'vitest'
 import catalogoJson from './catalogo.fixture.json'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
-import { editorDoItem, podeRemover, pedidoDeRemocao, TIPOS_FORA_DESTE_TICKET } from './catalogacao.ts'
+import {
+  editorDeNovaAparicao,
+  editorDoItem,
+  marcasDosItens,
+  podeRemover,
+  pedidoDeRemocao,
+  TIPOS_FORA_DESTE_TICKET,
+} from './catalogacao.ts'
 import { itensDoPainel } from './painel.ts'
 import type { Decupagem } from './Video.tsx'
 
@@ -144,8 +151,68 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os de
   }
   caminhos.add('pessoa.nao_e')
   caminhos.add('desfazer')
-  caminhos.add('pessoa.acrescentar_aparicao')
+  for (const t of editorDeNovaAparicao(D.pessoas[0], 0, catalogo).tiposPossiveis) caminhos.add(t)
 
   const sem = catalogo.tipos.map((t) => t.valor).filter((t) => !caminhos.has(t))
   expect(sem.sort()).toEqual([...TIPOS_FORA_DESTE_TICKET].sort())
+})
+
+test('as alças mandam nos tempos, com os décimos, no lugar dos campos', () => {
+  const e = editor('comercial-0')!
+  expect(e.intervalo).toEqual({ inicio_ms: 40_000, fim_ms: 50_000 })
+
+  const pedidos = e.pedidos(e.inicial, { inicio_ms: 40_300, fim_ms: 51_000 })
+
+  expect(pedidos).toEqual([
+    { tipo: 'item.tempos', tipo_do_item: 'comercial', item_id: 'c1', valor: '40300-51000' },
+  ])
+  expect(e.pedidos(e.inicial, { inicio_ms: 52_000, fim_ms: 51_000 })).toBeNull()
+})
+
+test('plano e fala não têm tempos para as alças', () => {
+  expect(editor('plano-0')!.intervalo).toBeUndefined()
+  expect(editor('fala-0')!.intervalo).toBeUndefined()
+})
+
+test('acrescentar aparição pede tempos e evidência e vai para a pessoa', () => {
+  const e = editorDeNovaAparicao(D.pessoas[0], 61_000, catalogo)
+
+  expect(e.inicial).toMatchObject({ inicio: '01:01', fim: '01:06' })
+  expect(e.pedidos(e.inicial)).toBeNull()
+  expect(e.pedidos({ ...e.inicial, evidencia: 'rosto' })).toEqual([
+    {
+      tipo: 'pessoa.acrescentar_aparicao',
+      item_id: 'p1',
+      valor: JSON.stringify({ inicio_ms: 61_000, fim_ms: 66_000, evidencia: 'rosto' }),
+    },
+  ])
+})
+
+test('marcas: corrigido, ou aguardando o Curador; só as da versão aberta e ainda de pé', () => {
+  const d = { ...D, versao_decupagem: 'v1' } as Decupagem
+  const h = (id: string, tipo_do_item: string, item_id: string, estado: string, versao = 'v1') =>
+    ({
+      id,
+      tipo: 'pauta.titulo',
+      estado,
+      item_id,
+      ancora: { versao, tipo_do_item },
+      autor_email: 'ana@redetv.com.br',
+      criada_em: '2026-10-31T12:00:00Z',
+      motivo: 'título corrigido',
+    }) as never
+
+  const marcas = marcasDosItens(d, itens, [
+    h('1', 'pauta', 'pa1', 'ativa'),
+    h('2', 'pessoa', 'p1', 'pendente'),
+    h('3', 'comercial', 'c1', 'desfeita'),
+    h('4', 'plano', 'pl1', 'ativa', 'v0'),
+  ])
+
+  expect(marcas['pauta-0'].pendente).toBe(false)
+  expect(marcas['pauta-0'].dica).toContain('ana@redetv.com.br')
+  expect(marcas['pauta-0'].dica).toContain('título corrigido')
+  expect(marcas['aparicao-0'].pendente).toBe(true)
+  expect(marcas['comercial-0']).toBeUndefined()
+  expect(marcas['plano-0']).toBeUndefined()
 })

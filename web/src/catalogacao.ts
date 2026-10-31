@@ -1,6 +1,6 @@
 /** A correção do item em foco sem React: os campos de cada tipo e os pedidos que as mudanças geram. */
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
-import { type Intervalo, SEM_NOME, tempo, tempoDoCampo } from './linhaDoTempo.ts'
+import { type Intervalo, lerTempo, SEM_NOME, tempo, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
 import type { Decupagem, ItemDoHistorico } from './Video.tsx'
 
@@ -28,8 +28,13 @@ export interface Pedido {
 export interface Editor {
   campos: CampoDoEditor[]
   inicial: Record<string, Valor>
-  /** Os pedidos das mudanças (nenhuma: lista vazia); `null` se os campos não permitem salvar. */
-  pedidos(valores: Record<string, Valor>): Pedido[] | null
+  /**
+   * Os pedidos das mudanças (nenhuma: lista vazia); `null` se os campos não permitem salvar.
+   * `exatos` são os tempos das alças da linha do tempo (com os décimos), que valem no lugar dos campos.
+   */
+  pedidos(valores: Record<string, Valor>, exatos?: Intervalo | null): Pedido[] | null
+  /** O intervalo do item, quando os tempos dele se corrigem (as alças da linha do tempo). */
+  intervalo?: Intervalo
   /** O motivo do gesto, quando o editor não escreve um. */
   motivo(pedidos: Pedido[]): string
   /** Todos os tipos de correção que este editor sabe gerar. */
@@ -62,6 +67,7 @@ const MOTIVOS: Record<string, string> = {
   'fala.texto': 'fala corrigida pelo editor',
   'texto_na_tela.texto': 'texto na tela corrigido pelo editor',
   'pessoa.nao_e': 'pessoa removida desta aparição pelo editor',
+  'pessoa.acrescentar_aparicao': 'aparição acrescentada pelo editor',
 }
 
 /** O motivo do gesto: o de uma correção só, ou os de todas, sem repetir. */
@@ -132,7 +138,8 @@ function camposDeTempo(): CampoDoEditor[] {
 }
 
 /** Os tempos dos campos; `undefined` se não são MM:SS ou o início passa do fim. */
-function temposDosCampos(v: Record<string, Valor>, o: Intervalo): Intervalo | undefined {
+function temposDosCampos(v: Record<string, Valor>, o: Intervalo, exatos?: Intervalo | null): Intervalo | undefined {
+  if (exatos) return exatos.inicio_ms > exatos.fim_ms ? undefined : exatos
   const inicio = tempoDoCampo(texto(v.inicio), o.inicio_ms)
   const fim = tempoDoCampo(texto(v.fim), o.fim_ms)
   return inicio === null || fim === null || inicio > fim ? undefined : { inicio_ms: inicio, fim_ms: fim }
@@ -142,7 +149,7 @@ function montar(
   campos: CampoDoEditor[],
   inicial: Record<string, Valor>,
   tiposPossiveis: string[],
-  gerar: (valores: Record<string, Valor>) => Pedido[] | null,
+  gerar: (valores: Record<string, Valor>, exatos?: Intervalo | null) => Pedido[] | null,
 ): Editor {
   return { campos, inicial, pedidos: gerar, motivo: motivoDoGesto, tiposPossiveis }
 }
@@ -152,8 +159,9 @@ function pedidoDeTempos(
   v: Record<string, Valor>,
   o: Intervalo,
   base: Omit<Pedido, 'tipo' | 'valor'>,
+  exatos?: Intervalo | null,
 ): Pedido[] | null {
-  const novos = temposDosCampos(v, o)
+  const novos = temposDosCampos(v, o, exatos)
   if (!novos) return null
   if (novos.inicio_ms === o.inicio_ms && novos.fim_ms === o.fim_ms) return []
   return [{ ...base, tipo: 'item.tempos', valor: `${novos.inicio_ms}-${novos.fim_ms}` }]
@@ -166,6 +174,13 @@ function juntar(partes: (Pedido[] | null)[]): Pedido[] | null {
 
 /** O editor do item: os campos do tipo (do catálogo, #134) e os pedidos das mudanças; `null` sem o que corrigir. */
 export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes): Editor | null {
+  const editor = montarEditor(d, item, c)
+  if (editor?.campos.some((campo) => campo.chave === 'inicio'))
+    editor.intervalo = { inicio_ms: item.inicio_ms, fim_ms: item.fim_ms }
+  return editor
+}
+
+function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes): Editor | null {
   const o = origemDoItem(d, item)
   if (!o) return null
   const tempos = (i: Intervalo): Record<string, Valor> => ({ inicio: tempo(i.inicio_ms), fim: tempo(i.fim_ms) })
@@ -220,7 +235,7 @@ export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorr
           ...(o.tipo === 'aparicao' ? ['aparicao.papel_visual'] : []),
           ...(comFontes ? ['pessoa.fontes_do_nome'] : []),
         ],
-        (v) => {
+        (v, exatos) => {
           const partes: (Pedido[] | null)[] = []
           const nome = texto(v.nome)
           if (!nome) return null
@@ -239,7 +254,7 @@ export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorr
                 valor: JSON.stringify({ papel: texto(v.papel) || null, visual: texto(v.visual) || null }),
               },
             ])
-          partes.push(pedidoDeTempos(v, intervalo, { tipo_do_item: 'pessoa', item_id: pessoa.id, ocorrencia }))
+          partes.push(pedidoDeTempos(v, intervalo, { tipo_do_item: 'pessoa', item_id: pessoa.id, ocorrencia }, exatos))
           // A troca de lista vai por último: as outras correções ainda acham a ocorrência onde ela está.
           if (v.destino !== lista) {
             if (o.tipo === 'mencao') {
@@ -265,7 +280,7 @@ export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorr
         ],
         { titulo: pauta.titulo, resumo: pauta.resumo ?? '', tom: pauta.tom ?? '', ...tempos(pauta) },
         ['pauta.titulo', 'pauta.resumo', 'pauta.tom', 'item.tempos'],
-        (v) => {
+        (v, exatos) => {
           const partes: (Pedido[] | null)[] = []
           if (!texto(v.titulo)) return null
           if (texto(v.titulo) !== pauta.titulo) partes.push([{ tipo: 'pauta.titulo', item_id: pauta.id, valor: texto(v.titulo) }])
@@ -274,7 +289,7 @@ export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorr
             partes.push([{ tipo: 'pauta.resumo', item_id: pauta.id, valor: texto(v.resumo) }])
           if (v.tom && v.tom !== (pauta.tom ?? ''))
             partes.push([{ tipo: 'pauta.tom', item_id: pauta.id, valor: String(v.tom) }])
-          partes.push(pedidoDeTempos(v, pauta, { item_id: pauta.id }))
+          partes.push(pedidoDeTempos(v, pauta, { item_id: pauta.id }, exatos))
           return juntar(partes)
         },
       )
@@ -291,12 +306,12 @@ export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorr
         ],
         { marca: comercial.marca, tipo: comercial.tipo, ...tempos(comercial) },
         ['comercial.marca', 'comercial.tipo', 'item.tempos'],
-        (v) => {
+        (v, exatos) => {
           const partes: (Pedido[] | null)[] = []
           if (!texto(v.marca)) return null
           if (texto(v.marca) !== comercial.marca) partes.push([{ tipo: 'comercial.marca', item_id: id, valor: texto(v.marca) }])
           if (v.tipo && v.tipo !== comercial.tipo) partes.push([{ tipo: 'comercial.tipo', item_id: id, valor: String(v.tipo) }])
-          partes.push(pedidoDeTempos(v, comercial, { tipo_do_item: 'comercial', item_id: id }))
+          partes.push(pedidoDeTempos(v, comercial, { tipo_do_item: 'comercial', item_id: id }, exatos))
           return juntar(partes)
         },
       )
@@ -313,12 +328,12 @@ export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorr
         ],
         { tipo: t.tipo, texto: t.texto, ...tempos(t) },
         ['texto_na_tela.texto', 'item.tempos'],
-        (v) => {
+        (v, exatos) => {
           const partes: (Pedido[] | null)[] = []
           if (!texto(v.texto) || !v.tipo) return null
           if (texto(v.texto) !== t.texto || v.tipo !== t.tipo)
             partes.push([{ tipo: 'texto_na_tela.texto', item_id: id, valor: JSON.stringify({ tipo: v.tipo, texto: texto(v.texto) }) }])
-          partes.push(pedidoDeTempos(v, t, { tipo_do_item: 'texto_na_tela', item_id: id }))
+          partes.push(pedidoDeTempos(v, t, { tipo_do_item: 'texto_na_tela', item_id: id }, exatos))
           return juntar(partes)
         },
       )
@@ -399,4 +414,91 @@ export function desfazivel(i: ItemDoHistorico): boolean {
     (i.estado === 'ativa' || i.estado === 'aprovada') &&
     !['desfazer', 'descartar', 'aprovar', 'recusar'].includes(i.tipo)
   )
+}
+
+/** O editor de uma aparição nova da pessoa: começa no momento atual e dura 5 s. */
+export function editorDeNovaAparicao(
+  pessoa: { id: string; nome: string },
+  atualMs: number,
+  c: CatalogoDeCorrecoes,
+): Editor {
+  return montar(
+    [
+      ...camposDeTempo(),
+      { chave: 'evidencia', rotulo: 'Evidência na imagem', tipo: 'texto', limite: c.limites.nome },
+    ],
+    { inicio: tempo(atualMs), fim: tempo(atualMs + 5000), evidencia: '' },
+    ['pessoa.acrescentar_aparicao'],
+    (v) => {
+      const inicio = lerTempo(texto(v.inicio))
+      const fim = lerTempo(texto(v.fim))
+      if (inicio === null || fim === null || inicio >= fim || !texto(v.evidencia)) return null
+      return [
+        {
+          tipo: 'pessoa.acrescentar_aparicao',
+          item_id: pessoa.id,
+          valor: JSON.stringify({ inicio_ms: inicio, fim_ms: fim, evidencia: texto(v.evidencia) }),
+        },
+      ]
+    },
+  )
+}
+
+/** Quem o item corrige na API: o tipo e o id do item da Correção (a pessoa vale para todas as aparições). */
+export function identidadeDoItem(d: Decupagem, item: ItemDoPainel): { tipo_do_item: string; item_id: string } | null {
+  const o = origemDoItem(d, item)
+  if (!o) return null
+  switch (o.tipo) {
+    case 'aparicao':
+    case 'mencao':
+      return { tipo_do_item: 'pessoa', item_id: o.pessoa.id }
+    case 'pauta':
+      return o.pauta.id ? { tipo_do_item: 'pauta', item_id: o.pauta.id } : null
+    case 'comercial':
+      return o.comercial.id ? { tipo_do_item: 'comercial', item_id: o.comercial.id } : null
+    case 'texto':
+      return o.texto.id ? { tipo_do_item: 'texto_na_tela', item_id: o.texto.id } : null
+    case 'plano':
+      return o.plano.id ? { tipo_do_item: 'plano', item_id: o.plano.id } : null
+    case 'fala':
+      return o.fala.id ? { tipo_do_item: 'fala', item_id: o.fala.id } : null
+  }
+}
+
+/** A marca de um item corrigido: "corrigido" ou "aguardando o Curador", com a dica de quem, quando e por quê. */
+export interface Marca {
+  pendente: boolean
+  dica: string
+}
+
+const DECISOES = ['desfazer', 'descartar', 'aprovar', 'recusar']
+
+const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+
+/** As marcas por chave de item: só valem as correções da decupagem aberta que ainda estão de pé. */
+export function marcasDosItens(
+  d: Decupagem,
+  itens: ItemDoPainel[],
+  historico: ItemDoHistorico[],
+): Record<string, Marca> {
+  const vivas = historico.filter(
+    (h) =>
+      h.ancora.versao === d.versao_decupagem &&
+      !DECISOES.includes(h.tipo) &&
+      (h.estado === 'ativa' || h.estado === 'pendente'),
+  )
+  const marcas: Record<string, Marca> = {}
+  for (const item of itens) {
+    const id = identidadeDoItem(d, item)
+    if (!id) continue
+    const doItem = vivas.filter((h) => h.item_id === id.item_id && h.ancora.tipo_do_item === id.tipo_do_item)
+    if (doItem.length === 0) continue
+    // O histórico vem da mais recente à mais antiga.
+    const ultima = doItem.find((h) => h.estado === 'pendente') ?? doItem[0]
+    marcas[item.chave] = {
+      pendente: ultima.estado === 'pendente',
+      dica: `${ultima.autor_email} · ${quando(ultima.criada_em)} · ${ultima.motivo}`,
+    }
+  }
+  return marcas
 }

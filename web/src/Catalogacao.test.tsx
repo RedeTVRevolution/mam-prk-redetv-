@@ -123,7 +123,12 @@ test('com decupagem.editar, a lista do ? traz os atalhos da catalogação', asyn
 
   await usuario.keyboard('?')
   const lista = await screen.findByRole('dialog')
-  for (const acao of [/Ligar e desligar o modo de catalogação/, /Desfazer a última correção/])
+  for (const acao of [
+    /Ligar e desligar o modo de catalogação/,
+    /Desfazer a última correção/,
+    /Corrigir o item em foco/,
+    /Não é isto/,
+  ])
     expect(within(lista).getByText(acao)).toBeTruthy()
   await waitFor(() => expect(within(lista).getByRole('table', { name: 'Catalogação' })).toBeTruthy())
 })
@@ -133,6 +138,10 @@ function correcaoDoHistorico(id: string, autor: string, estado = 'ativa', tipo =
     id,
     tipo,
     estado,
+    item_id: 'p1',
+    ancora: { versao: 'v1', tipo_do_item: 'pessoa' },
+    criada_em: '2026-10-31T12:00:00Z',
+    motivo: 'nome corrigido',
     autor_email: autor,
     antes_legivel: 'Não identificado',
     depois_legivel: 'Leão Lobo',
@@ -236,4 +245,291 @@ test('o botão Desfazer fica desabilitado sem correção do editor para desfazer
 
   const botao = screen.getByRole('button', { name: 'Desfazer' })
   await waitFor(() => expect((botao as HTMLButtonElement).disabled).toBe(true))
+})
+
+async function catalogarPauta() {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Pautas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Eleição, 00:00 a 01:00/ }))
+  await usuario.keyboard('e')
+  return usuario
+}
+
+test('F2 → editar → Enter grava a correção com o motivo preenchido, sem diálogo', async () => {
+  const usuario = await catalogarPauta()
+
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  expect(screen.queryByRole('dialog')).toBeNull()
+  const titulo = within(formulario).getByLabelText('Título')
+  expect(document.activeElement).toBe(titulo)
+  expect((within(formulario).getByLabelText('Motivo (opcional)') as HTMLInputElement).value).toBe('')
+
+  await usuario.clear(titulo)
+  await usuario.type(titulo, 'Eleição 2026')
+  expect((within(formulario).getByLabelText('Motivo (opcional)') as HTMLInputElement).value).toBe(
+    'título da pauta corrigido pelo editor',
+  )
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({
+    tipo: 'pauta.titulo',
+    item_id: 'pa1',
+    valor: 'Eleição 2026',
+    motivo: 'título da pauta corrigido pelo editor',
+    versao: 'v1',
+  })
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+})
+
+test('o motivo apagado vale o do gesto; o motivo escrito vale como escrito', async () => {
+  const usuario = await catalogarPauta()
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  const titulo = within(formulario).getByLabelText('Título')
+  await usuario.type(titulo, ' II')
+  const motivo = within(formulario).getByLabelText('Motivo (opcional)')
+  await usuario.clear(motivo)
+  await usuario.type(motivo, 'a emissora mudou o nome')
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ motivo: 'a emissora mudou o nome' })
+})
+
+test('Esc cancela a correção e não grava nada', async () => {
+  const usuario = await catalogarPauta()
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  await usuario.type(within(formulario).getByLabelText('Título'), ' II')
+
+  await usuario.keyboard('{Escape}')
+
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+  expect(correcoes).toEqual([])
+})
+
+test('F2 fora do modo de catalogação não abre o formulário', async () => {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Pautas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Eleição, 00:00 a 01:00/ }))
+
+  await usuario.keyboard('{F2}')
+
+  expect(screen.queryByRole('form')).toBeNull()
+})
+
+test('um 409 mostra a mensagem do servidor e recarrega a decupagem', async () => {
+  let cargas = 0
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () => {
+      cargas += 1
+      return HttpResponse.json(decupagemAtual)
+    }),
+    http.post('/v1/jobs/j1/correcoes', () =>
+      HttpResponse.json({ detail: 'A decupagem mudou. Confira e corrija de novo.' }, { status: 409 }),
+    ),
+  )
+  const usuario = await catalogarPauta()
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  await usuario.type(within(formulario).getByLabelText('Título'), ' II')
+  const antes = cargas
+
+  await usuario.keyboard('{Enter}')
+
+  expect(await screen.findByText('A decupagem mudou. Confira e corrija de novo.')).toBeTruthy()
+  await waitFor(() => expect(cargas).toBeGreaterThan(antes))
+})
+
+test('um 422 fica no formulário, com a mensagem do servidor', async () => {
+  servidor.use(
+    http.post('/v1/jobs/j1/correcoes', () =>
+      HttpResponse.json({ detail: 'O título é longo demais.' }, { status: 422 }),
+    ),
+  )
+  const usuario = await catalogarPauta()
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  await usuario.type(within(formulario).getByLabelText('Título'), ' II')
+
+  await usuario.keyboard('{Enter}')
+
+  expect((await within(formulario).findByRole('alert')).textContent).toBe('O título é longo demais.')
+  expect(screen.getByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
+})
+
+async function selecionarAparicao() {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 1 aparição/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 00:10 a 00:20/ }))
+  await usuario.keyboard('e')
+  return usuario
+}
+
+test('Del pede a confirmação na linha; Esc desiste e Enter grava o "não é esta pessoa"', async () => {
+  const usuario = await selecionarAparicao()
+
+  await usuario.keyboard('{Delete}')
+  expect(await screen.findByText('Remover Leão Lobo desta aparição?')).toBeTruthy()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await usuario.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByText('Remover Leão Lobo desta aparição?')).toBeNull())
+  expect(correcoes).toEqual([])
+
+  await usuario.keyboard('{Delete}')
+  await screen.findByText('Remover Leão Lobo desta aparição?')
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({
+    tipo: 'pessoa.nao_e',
+    item_id: 'p1',
+    ocorrencia: { lista: 'na_imagem', inicio_ms: 10_000, fim_ms: 20_000 },
+    motivo: 'pessoa removida desta aparição pelo editor',
+  })
+})
+
+test('as alças aparecem na linha do tempo e movem os tempos de 0,1 s em 0,1 s', async () => {
+  const usuario = await selecionarAparicao()
+  await usuario.keyboard('{F2}')
+  await screen.findByRole('form', { name: /Corrigir Leão Lobo/ })
+
+  const inicio = screen.getByRole('slider', { name: 'Início do item' })
+  expect(inicio.getAttribute('aria-valuetext')).toBe('00:10')
+  inicio.focus()
+  await usuario.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}')
+  expect(screen.getByRole('slider', { name: 'Início do item' }).getAttribute('aria-valuenow')).toBe('10300')
+
+  screen.getByRole('slider', { name: 'Fim do item' }).focus()
+  await usuario.keyboard('{Shift>}{ArrowRight}{/Shift}')
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'item.tempos', tipo_do_item: 'pessoa', valor: '10300-21000' })
+})
+
+test('acrescentar aparição na linha da pessoa', async () => {
+  const usuario = await selecionarAparicao()
+
+  await usuario.click(screen.getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' }))
+  const formulario = await screen.findByRole('form', { name: 'Acrescentar aparição de Leão Lobo' })
+  await usuario.type(within(formulario).getByLabelText('Evidência na imagem'), 'rosto')
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.acrescentar_aparicao', item_id: 'p1' })
+  expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({ evidencia: 'rosto' })
+})
+
+test('o item corrigido mostra "corrigido", e o pendente, "aguardando o Curador"', async () => {
+  historico = [
+    {
+      ...correcaoDoHistorico('c1', 'ana@redetv.com.br', 'ativa', 'pauta.titulo'),
+      item_id: 'pa1',
+      ancora: { versao: 'v1', tipo_do_item: 'pauta' },
+      criada_em: '2026-10-31T12:00:00Z',
+      motivo: 'título corrigido',
+    },
+    {
+      ...correcaoDoHistorico('c2', 'ana@redetv.com.br', 'pendente', 'comercial.marca'),
+      item_id: 'c1',
+      ancora: { versao: 'v1', tipo_do_item: 'comercial' },
+      criada_em: '2026-10-31T12:01:00Z',
+      motivo: 'marca certa',
+    },
+  ]
+  const usuario = await abrir(true)
+
+  await usuario.click(screen.getByRole('tab', { name: /Pautas/ }))
+  expect(await screen.findByText('corrigido')).toBeTruthy()
+  await usuario.click(screen.getByRole('tab', { name: /Comerciais/ }))
+  expect(await screen.findByText('aguardando o Curador')).toBeTruthy()
+})
+
+/** A lixeira da linha selecionada: as das outras linhas ficam transparentes. */
+function lixeiraDaLinhaSelecionada() {
+  const visiveis = screen
+    .getAllByRole('button', { name: 'Não é isto: Leão Lobo' })
+    .filter((b) => b.parentElement?.style.opacity === '1')
+  expect(visiveis).toHaveLength(1)
+  return visiveis[0]
+}
+
+async function catalogarSemSelecionar() {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Pautas/ }))
+  const linha = await screen.findByRole('button', { name: /^Eleição, 00:00 a 01:00/ })
+  await usuario.keyboard('e')
+  return { usuario, linha }
+}
+
+test('o duplo clique na linha abre o mesmo formulário do F2', async () => {
+  const { usuario, linha } = await catalogarSemSelecionar()
+
+  await usuario.dblClick(linha)
+
+  expect(await screen.findByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('o lápis aparece ao passar o mouse, com a dica Corrigir (F2), e abre o formulário', async () => {
+  const { usuario, linha } = await catalogarSemSelecionar()
+  const lapis = screen.getByRole('button', { name: 'Corrigir Eleição' })
+  // A pauta não tem "não é isto".
+  expect(screen.queryByRole('button', { name: /^Não é isto/ })).toBeNull()
+  expect(lapis.parentElement?.style.opacity).toBe('0')
+
+  await usuario.hover(linha)
+  await waitFor(() => expect(lapis.parentElement?.style.opacity).toBe('1'))
+  await usuario.hover(lapis)
+  expect(await screen.findByText('Corrigir (F2)')).toBeTruthy()
+  await usuario.click(lapis)
+
+  expect(await screen.findByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
+})
+
+test('o lápis aparece com a linha selecionada, e não existe fora do modo de catalogação', async () => {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Pautas/ }))
+  const linha = await screen.findByRole('button', { name: /^Eleição, 00:00 a 01:00/ })
+  await usuario.click(linha)
+  expect(screen.queryByRole('button', { name: 'Corrigir Eleição' })).toBeNull()
+
+  await usuario.keyboard('e')
+  const lapis = await screen.findByRole('button', { name: 'Corrigir Eleição' })
+  expect(lapis.parentElement?.style.opacity).toBe('1')
+})
+
+test('a lixeira abre a confirmação do Del, e Cancelar e Remover funcionam com o clique', async () => {
+  const usuario = await selecionarAparicao()
+
+  await usuario.click(lixeiraDaLinhaSelecionada())
+  const confirmacao = await screen.findByRole('group', { name: 'Confirmar a remoção' })
+  expect(within(confirmacao).getByText('Remover Leão Lobo desta aparição?')).toBeTruthy()
+  expect(screen.queryByRole('dialog')).toBeNull()
+
+  await usuario.click(within(confirmacao).getByRole('button', { name: 'Cancelar' }))
+  await waitFor(() => expect(screen.queryByRole('group', { name: 'Confirmar a remoção' })).toBeNull())
+  expect(correcoes).toEqual([])
+
+  await usuario.click(lixeiraDaLinhaSelecionada())
+  const outra = await screen.findByRole('group', { name: 'Confirmar a remoção' })
+  await usuario.click(within(outra).getByRole('button', { name: 'Remover' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.nao_e', item_id: 'p1' })
+})
+
+test('a confirmação e o formulário mostram os atalhos nas dicas dos botões', async () => {
+  const usuario = await selecionarAparicao()
+  await usuario.click(lixeiraDaLinhaSelecionada())
+  const confirmacao = await screen.findByRole('group', { name: 'Confirmar a remoção' })
+
+  await usuario.hover(within(confirmacao).getByRole('button', { name: 'Remover' }))
+  expect(await screen.findByText('Enter')).toBeTruthy()
+  await usuario.hover(within(confirmacao).getByRole('button', { name: 'Cancelar' }))
+  expect(await screen.findByText('Esc')).toBeTruthy()
 })

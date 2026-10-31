@@ -1,9 +1,11 @@
-import { Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Button } from '@mantine/core'
+import { ActionIcon, Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Button } from '@mantine/core'
+import { IconPencil, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FotosDoNome } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
 import { ComparacaoDoRosto } from './ComparacaoDoRosto.tsx'
 import { InventarioDoPlano, type ObjetoApontado } from './Inventario.tsx'
+import type { Marca } from './catalogacao.ts'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
@@ -33,6 +35,12 @@ import type { Decupagem } from './Video.tsx'
 const PAUSA_DA_ROLAGEM_MS = 5000
 
 const GRUPO = 'Painel'
+
+/** O que toma o lugar da linha de um item (ou, com `acrescentar:<pessoa>`, abre sob a linha da pessoa). */
+export interface EdicaoNoPainel {
+  chave: string
+  conteudo: ReactNode
+}
 
 const COR_DO_TIPO: Record<TipoDoItem, string> = {
   pauta: CORES_DE_OCORRENCIA.pauta.cor,
@@ -244,6 +252,9 @@ function Item({
   urlDoQuadro,
   aoApontarObjeto,
   compacto,
+  edicao,
+  marca,
+  acoes,
 }: {
   item: ItemDoPainel
   atual: boolean
@@ -259,114 +270,174 @@ function Item({
   aoApontarObjeto?: (o: ObjetoApontado | null) => void
   /** Objeto na lista das ocorrências: só o tipo e o tempo, o resto fica na linha do objeto. */
   compacto?: boolean
+  /** O formulário (ou a confirmação) que substitui a linha enquanto o item é corrigido. */
+  edicao?: ReactNode
+  marca?: Marca
+  /** Só no modo de catalogação: o lápis, a lixeira e o duplo clique, com o mouse no lugar do F2 e do Del. */
+  acoes?: AcoesDaLinha
 }) {
+  const [sobre, setSobre] = useState(false)
+  const [comFoco, setComFoco] = useState(false)
   const resumo = item.tipo === 'pauta' && item.detalhe
   return (
     <Box
       data-chave={item.chave}
       aria-current={atual ? 'true' : undefined}
       p="xs"
-      style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
+      onMouseOver={() => setSobre(true)}
+      onMouseOut={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSobre(false)
+      }}
+      onFocus={() => setComFoco(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setComFoco(false)
+      }}
+      style={{ position: 'relative', borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
     >
-      <UnstyledButton
-        data-item
-        aria-label={
-          item.tipo === 'fala'
-            ? `${item.linhas[0] ? `${item.linhas[0]}: ` : ''}${item.titulo}, ${relogio(item.inicio_ms)}`
-            : `${item.titulo}, ${relogio(item.inicio_ms)} a ${relogio(item.fim_ms)}`
-        }
-        aria-pressed={selecionado}
-        onClick={() => aoClicar(item)}
-        style={{ display: 'block', width: '100%', textAlign: 'left' }}
-      >
-        {item.tipo === 'fala' ? (
-          // Na transcrição a linha é o início, o locutor (quando houver) e o texto inteiro.
-          <Group gap="sm" wrap="nowrap" align="flex-start">
-            <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none', paddingTop: 2 }}>
-              {relogio(item.inicio_ms)}
-            </Text>
-            <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
-              {item.linhas[0] && (
-                <Text size="xs" c="dimmed">
-                  {item.linhas[0]}
+      {edicao ? (
+        edicao
+      ) : (
+        <>
+          <UnstyledButton
+            data-item
+            aria-label={
+              item.tipo === 'fala'
+                ? `${item.linhas[0] ? `${item.linhas[0]}: ` : ''}${item.titulo}, ${relogio(item.inicio_ms)}`
+                : `${item.titulo}, ${relogio(item.inicio_ms)} a ${relogio(item.fim_ms)}`
+            }
+            aria-pressed={selecionado}
+            onClick={() => aoClicar(item)}
+            onDoubleClick={acoes?.podeCorrigir(item) ? () => acoes.corrigir(item) : undefined}
+            style={{ display: 'block', width: '100%', textAlign: 'left' }}
+          >
+            {item.tipo === 'fala' ? (
+              // Na transcrição a linha é o início, o locutor (quando houver) e o texto inteiro.
+              <Group gap="sm" wrap="nowrap" align="flex-start">
+                <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none', paddingTop: 2 }}>
+                  {relogio(item.inicio_ms)}
                 </Text>
-              )}
-              <Text size="sm">{item.titulo}</Text>
-            </Stack>
-          </Group>
-        ) : (
-          <Group gap="xs" wrap="nowrap" align="flex-start">
-            {item.quadro !== undefined && !compacto && (
-              <MiniaturaDoPainel caminho={item.quadro} urlDoQuadro={urlDoQuadro} />
-            )}
-            <Box
-              aria-hidden
-              style={{ width: 8, height: 8, marginTop: 6, flex: 'none', background: COR_DO_TIPO[item.tipo], borderRadius: 'var(--mantine-radius-xs)' }}
-            />
-            <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
-              <Group gap="xs" wrap="nowrap" justify="space-between" align="baseline">
-                <Text size="sm" style={{ minWidth: 0 }}>
-                  {item.tipo === 'texto' && item.rotulo ? (
-                    <>
-                      <Text span size="sm" c="dimmed" fw={600}>
-                        {item.rotulo}
-                      </Text>
-                      {'  '}
-                    </>
-                  ) : null}
-                  {item.titulo}
-                </Text>
-                <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
-                  {tempos(item)}
-                </Text>
+                <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+                  {item.linhas[0] && (
+                    <Text size="xs" c="dimmed">
+                      {item.linhas[0]}
+                    </Text>
+                  )}
+                  <Text size="sm">{item.titulo}</Text>
+                </Stack>
               </Group>
-              {item.rotulo && item.tipo !== 'texto' && (
-                <Text size="xs" c="dimmed">
-                  {item.rotulo}
-                </Text>
+            ) : (
+              <Group gap="xs" wrap="nowrap" align="flex-start">
+                {item.quadro !== undefined && !compacto && (
+                  <MiniaturaDoPainel caminho={item.quadro} urlDoQuadro={urlDoQuadro} />
+                )}
+                <Box
+                  aria-hidden
+                  style={{ width: 8, height: 8, marginTop: 6, flex: 'none', background: COR_DO_TIPO[item.tipo], borderRadius: 'var(--mantine-radius-xs)' }}
+                />
+                <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+                  <Group gap="xs" wrap="nowrap" justify="space-between" align="baseline">
+                    <Text size="sm" style={{ minWidth: 0 }}>
+                      {item.tipo === 'texto' && item.rotulo ? (
+                        <>
+                          <Text span size="sm" c="dimmed" fw={600}>
+                            {item.rotulo}
+                          </Text>
+                          {'  '}
+                        </>
+                      ) : null}
+                      {item.titulo}
+                    </Text>
+                    <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
+                      {tempos(item)}
+                    </Text>
+                  </Group>
+                  {item.rotulo && item.tipo !== 'texto' && (
+                    <Text size="xs" c="dimmed">
+                      {item.rotulo}
+                    </Text>
+                  )}
+                  {item.linhas.map((l, i) =>
+                    resumo && i === 0 ? (
+                      <Text key={l} size="xs" c="dimmed" lineClamp={selecionado ? undefined : 2}>
+                        {l}
+                      </Text>
+                    ) : (
+                      <Text key={l} size="xs" c="dimmed">
+                        {l}
+                      </Text>
+                    ),
+                  )}
+                </Stack>
+              </Group>
+            )}
+          </UnstyledButton>
+          {item.objeto && !compacto && <DescricaoDoObjeto dados={item.objeto} aoIrParaDono={aoIrParaDono} />}
+          {item.inventario && !compacto && (
+            <InventarioDoPlano inventario={item.inventario} plano={item.titulo} aoApontar={aoApontarObjeto ?? (() => {})} />
+          )}
+          {(item.selos.length > 0 || selecionado || marca) && (
+            <Group gap="xs" mt={4} ml={16}>
+              {item.selos.map((s) => (
+                <SeloDaProva
+                  key={s.rotulo}
+                  selo={s}
+                  aoSaltar={aoSaltar}
+                  aoComparar={
+                    aoComparar && item.pessoa
+                      ? () => aoComparar({ pessoa: item.pessoa!, nome: item.titulo, quadro: item.quadro ?? null })
+                      : undefined
+                  }
+                />
+              ))}
+              {marca && (
+                <Tooltip label={marca.dica}>
+                  <Badge size="sm" variant="light" tabIndex={0}>
+                    {marca.pendente ? 'aguardando o Curador' : 'corrigido'}
+                  </Badge>
+                </Tooltip>
               )}
-              {item.linhas.map((l, i) =>
-                resumo && i === 0 ? (
-                  <Text key={l} size="xs" c="dimmed" lineClamp={selecionado ? undefined : 2}>
-                    {l}
-                  </Text>
-                ) : (
-                  <Text key={l} size="xs" c="dimmed">
-                    {l}
-                  </Text>
-                ),
+              {selecionado && (
+                <Button size="compact-xs" variant="default" onClick={() => aoReproduzir(item)}>
+                  Reproduzir trecho
+                </Button>
               )}
-            </Stack>
-          </Group>
-        )}
-      </UnstyledButton>
-      {item.objeto && !compacto && <DescricaoDoObjeto dados={item.objeto} aoIrParaDono={aoIrParaDono} />}
-      {item.inventario && !compacto && (
-        <InventarioDoPlano inventario={item.inventario} plano={item.titulo} aoApontar={aoApontarObjeto ?? (() => {})} />
+            </Group>
+          )}
+        </>
       )}
-      {(item.selos.length > 0 || selecionado) && (
-        <Group gap="xs" mt={4} ml={16}>
-          {item.selos.map((s) => (
-            <SeloDaProva
-              key={s.rotulo}
-              selo={s}
-              aoSaltar={aoSaltar}
-              aoComparar={
-                aoComparar && item.pessoa
-                  ? () => aoComparar({ pessoa: item.pessoa!, nome: item.titulo, quadro: item.quadro ?? null })
-                  : undefined
-              }
-            />
-          ))}
-          {selecionado && (
-            <Button size="compact-xs" variant="default" onClick={() => aoReproduzir(item)}>
-              Reproduzir trecho
-            </Button>
+      {acoes && !edicao && (
+        // Sempre no DOM (e na ordem do Tab): só ficam à vista com o mouse, o foco ou o item selecionado.
+        <Group
+          gap={2}
+          wrap="nowrap"
+          style={{ position: 'absolute', top: 4, right: 4, opacity: sobre || comFoco || selecionado ? 1 : 0 }}
+        >
+          {acoes.podeCorrigir(item) && (
+            <Tooltip label="Corrigir (F2)">
+              <ActionIcon size="sm" variant="subtle" aria-label={`Corrigir ${item.titulo}`} onClick={() => acoes.corrigir(item)}>
+                <IconPencil size={14} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          {acoes.podeRemover(item) && (
+            <Tooltip label="Não é isto (Del)">
+              <ActionIcon size="sm" variant="subtle" aria-label={`Não é isto: ${item.titulo}`} onClick={() => acoes.remover(item)}>
+                <IconTrash size={14} />
+              </ActionIcon>
+            </Tooltip>
           )}
         </Group>
       )}
     </Box>
   )
+}
+
+/** O que o mouse faz na linha do item, no modo de catalogação. */
+export interface AcoesDaLinha {
+  corrigir: (i: ItemDoPainel) => void
+  remover: (i: ItemDoPainel) => void
+  podeCorrigir: (i: ItemDoPainel) => boolean
+  podeRemover: (i: ItemDoPainel) => boolean
 }
 
 function Secao({ titulo, children }: { titulo?: string; children: ReactNode }) {
@@ -398,6 +469,10 @@ export function Painel({
   urlDoQuadro,
   aoApontarObjeto,
   fotosDoNome,
+  edicao = null,
+  marcas,
+  aoAcrescentar,
+  acoes,
 }: {
   decupagem: Decupagem
   duracaoMs: number
@@ -418,6 +493,14 @@ export function Painel({
   aoApontarObjeto?: (o: ObjetoApontado | null) => void
   /** As fotos de referência do nome de uma pessoa; sem ele, o selo "Rosto" não abre a comparação. */
   fotosDoNome?: (pessoaId: string) => Promise<FotosDoNome>
+  /** A correção em curso: o formulário toma o lugar da linha do item. */
+  edicao?: EdicaoNoPainel | null
+  /** "corrigido" e "aguardando o Curador", por chave de item. */
+  marcas?: Record<string, Marca>
+  /** Só no modo de catalogação: acrescentar uma aparição na linha da pessoa. */
+  aoAcrescentar?: (pessoa: string) => void
+  /** Só no modo de catalogação: corrigir e remover pelo mouse. */
+  acoes?: AcoesDaLinha
 }) {
   const [comparando, setComparando] = useState<Comparacao | null>(null)
   const fecharComparacao = useCallback(() => setComparando(null), [])
@@ -598,6 +681,9 @@ export function Painel({
         urlDoQuadro={urlDoQuadro}
         aoApontarObjeto={aoApontarObjeto}
         compacto={compacto}
+        edicao={edicao?.chave === i.chave ? edicao.conteudo : undefined}
+        marca={marcas?.[i.chave]}
+        acoes={acoes}
       />
     ))
 
@@ -668,6 +754,12 @@ export function Painel({
                         ))}
                       </Group>
                     </Group>
+                    {abrir && aoAcrescentar && edicao?.chave !== `acrescentar:${p.id}` && (
+                      <Button size="compact-xs" variant="default" ml="md" style={{ alignSelf: 'flex-start' }} onClick={() => aoAcrescentar(p.id)}>
+                        {`Acrescentar aparição de ${rotulo}`}
+                      </Button>
+                    )}
+                    {edicao?.chave === `acrescentar:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
                     {abrir && <Stack gap={2} ml="md">{lista(doId)}</Stack>}
                   </Stack>
                 )
