@@ -204,7 +204,9 @@ class TestRepositorioFirestore:
                 )
             )
 
-        assert [j.id for j in repositorio.listar_por_sistema("A")] == [
+        assert [
+            j.id for j in repositorio.consultar(FiltroDeJobs(sistema="A")).jobs
+        ] == [
             "a-novo",
             "a-velho",
         ]

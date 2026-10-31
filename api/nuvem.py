@@ -131,16 +131,6 @@ class RepositorioFirestore:
         ).stream()
         return [Job(**(doc.to_dict() or {})) for doc in docs]
 
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
-        # Consulta filtrada no Firestore; em produção exige o índice composto
-        # (sistema + criado_em), que o emulador dispensa.
-        docs = (
-            self._colecao.where(filter=FieldFilter("sistema", "==", sistema))
-            .order_by("criado_em", direction=firestore.Query.DESCENDING)
-            .stream()
-        )
-        return [Job(**(doc.to_dict() or {})) for doc in docs]
-
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
@@ -180,16 +170,10 @@ class RepositorioFirestore:
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
-        jobs: list[Job] = []
-        for doc in consulta.stream():
-            job = Job(**(doc.to_dict() or {}))
-            if not casa_com_o_filtro(job, filtro):
-                continue
-            jobs.append(job)
-            if filtro.limite is not None and len(jobs) > filtro.limite:
-                pagina = jobs[: filtro.limite]
-                return PaginaDeJobs(pagina, pagina[-1].id)
-        return PaginaDeJobs(jobs)
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return PaginaDeJobs.de(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
+        )
 
 
 class RepositorioDeChavesFirestore:

@@ -7,7 +7,7 @@ import re
 import unicodedata
 import uuid
 import zlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
@@ -147,7 +147,10 @@ class Job(BaseModel):
 
 
 def palavras_do_nome(nome: str) -> list[str]:
-    """Palavras do nome do arquivo, sem maiúsculas nem acentos, quebradas em `_ - . espaço`."""
+    """Palavras do nome do arquivo, sem maiúsculas nem acentos.
+
+    Quebra em tudo que não é letra nem dígito (`_`, `-`, `.`, espaço, parênteses...).
+    """
     sem_acento = "".join(
         c for c in unicodedata.normalize("NFKD", nome) if not unicodedata.combining(c)
     )
@@ -270,7 +273,6 @@ class CursorInvalido(Exception):
 
 
 Ordem = Literal["enviado", "exibicao"]
-LIMITE_PADRAO = 50
 LIMITE_MAXIMO = 200
 
 
@@ -279,7 +281,7 @@ class FiltroDeJobs:
     """Os filtros do acervo; todos opcionais e combináveis."""
 
     programa: str | None = None
-    estados: frozenset[str] = frozenset()
+    estados: frozenset[Estado] = frozenset()
     exibicao_de: date | None = None
     exibicao_ate: date | None = None
     palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
@@ -293,6 +295,17 @@ class FiltroDeJobs:
 class PaginaDeJobs:
     jobs: list[Job]
     proximo_cursor: str | None = None
+
+    @classmethod
+    def de(cls, jobs: Iterable[Job], limite: int | None) -> "PaginaDeJobs":
+        """Corta os Jobs já filtrados e em ordem; só lê um além do limite."""
+        if limite is None:
+            return cls(list(jobs))
+        lidos = list(itertools.islice(jobs, limite + 1))
+        if len(lidos) <= limite:
+            return cls(lidos)
+        pagina = lidos[:limite]
+        return cls(pagina, pagina[-1].id)
 
 
 def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
@@ -339,10 +352,6 @@ class RepositorioDeJobs(Protocol):
 
     def listar(self) -> list[Job]:
         """Do mais recente para o mais antigo."""
-        ...
-
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
-        """Só os jobs do sistema, do mais recente para o mais antigo."""
         ...
 
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
@@ -394,9 +403,6 @@ class RepositorioEmMemoria:
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
-        return [j for j in self.listar() if j.sistema == sistema]
-
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         corte = None
         if filtro.cursor is not None:
@@ -414,10 +420,7 @@ class RepositorioEmMemoria:
             key=lambda j: chave_de_ordem(j, filtro.ordem),
             reverse=True,
         )
-        if filtro.limite is None or len(jobs) <= filtro.limite:
-            return PaginaDeJobs(jobs)
-        pagina = jobs[: filtro.limite]
-        return PaginaDeJobs(pagina, pagina[-1].id)
+        return PaginaDeJobs.de(jobs, filtro.limite)
 
 
 class RepositorioIndisponivel:
@@ -433,9 +436,6 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def listar(self) -> list[Job]:
-        raise ServicoIndisponivel
-
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
         raise ServicoIndisponivel
 
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
@@ -600,7 +600,7 @@ def criar_rotas(
             criado_por, sistema = f"sistema:{chamador.sistema}", chamador.sistema
             email = None
         else:
-            criado_por, sistema, email = chamador.uid, None, chamador.email
+            criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
         if (
             novo.data_exibicao is not None

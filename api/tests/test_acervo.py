@@ -3,9 +3,18 @@
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from api.jobs import Job, palavras_do_nome
+from fastapi.testclient import TestClient
+
+from api.auth import Usuario
+from api.jobs import Job, RepositorioEmMemoria, palavras_do_nome
+from api.main import criar_app
 from api.tests.test_escopos import Mundo
-from api.tests.test_jobs import AUTORIZACAO, Ambiente
+from api.tests.test_jobs import (
+    AUTORIZACAO,
+    Ambiente,
+    ArmazenamentoFalso,
+    Relogio,
+)
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 
@@ -237,6 +246,30 @@ def test_job_antigo_sem_email_tem_nome_nulo() -> None:
     lista = a.cliente.get("/v1/jobs", headers=AUTORIZACAO).json()
 
     assert lista[0]["enviado_por"] == {"tipo": "pessoa", "nome": None}
+
+
+class _SemEmail:
+    def verificar(self, token: str) -> Usuario:
+        return Usuario(uid="u1", email="")
+
+
+def test_pessoa_sem_email_no_token_tem_nome_nulo() -> None:
+    repositorio = RepositorioEmMemoria()
+    cliente = TestClient(
+        criar_app(
+            _SemEmail(),
+            repositorio=repositorio,
+            armazenamento=ArmazenamentoFalso(),
+            relogio=Relogio(),
+        )
+    )
+    corpo = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+
+    criado = cliente.post("/v1/jobs", json=corpo, headers=AUTORIZACAO).json()
+
+    assert criado["enviado_por"] == {"tipo": "pessoa", "nome": None}
+    job = repositorio.obter(criado["id"])
+    assert job is not None and job.criado_por_email is None
 
 
 def test_job_criado_por_sistema_traz_o_nome_do_sistema() -> None:
