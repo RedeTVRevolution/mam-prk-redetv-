@@ -78,6 +78,18 @@ test('os selos do nome trazem o tempo da prova: GC e fala', () => {
   expect(item?.linhas).toEqual(['colunista · terno preto'])
 })
 
+test('o selo só casa o nome inteiro: "Ana" não acha a prova em "MARIANA"', () => {
+  const d: Decupagem = {
+    ...D,
+    pessoas: [{ ...D.pessoas[0], nome: 'Ana', fontes_do_nome: ['gc'] }],
+    textos_na_tela: [
+      { tipo: 'GC', texto: 'MARIANA SOUZA', inicio_ms: 100_000, fim_ms: 105_000 },
+      { tipo: 'GC', texto: 'ANA · repórter', inicio_ms: 200_000, fim_ms: 205_000 },
+    ],
+  }
+  expect(itensDoPainel(d).find((i) => i.chave === 'aparicao-0')?.selos).toEqual([{ rotulo: 'GC', inicio_ms: 200_000 }])
+})
+
 test('menção e aparição têm tipos separados', () => {
   const tipos = itensDoPainel(D).map((i) => [i.chave, i.tipo])
   expect(tipos).toContainEqual(['aparicao-0', 'aparicao'])

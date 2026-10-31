@@ -11,6 +11,7 @@ import {
   type ItemDoPainel,
   itensDaAba,
   itensDoPainel,
+  NAO_IDENTIFICADO,
   semDecupagemEm,
   type Selo,
   textoDoSemDecupagem,
@@ -130,6 +131,7 @@ function Item({
       style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
     >
       <UnstyledButton
+        data-item
         aria-label={`${item.titulo}, ${relogio(item.inicio_ms)} a ${relogio(item.fim_ms)}`}
         aria-pressed={selecionado}
         onClick={() => aoClicar(item)}
@@ -240,11 +242,20 @@ export function Painel({
 
   const selecionado = itens.find((i) => i.chave === selecionada)
   const pessoaSelecionada = selecionado?.pessoa
-  const aberta = (id: string) => pessoasAbertas.has(id) || id === pessoaSelecionada
 
-  const aparicoes = itensDaAba(itens, 'pessoas').filter((i) => i.tipo === 'aparicao')
-  const mencoes = itensDaAba(itens, 'pessoas').filter((i) => i.tipo === 'mencao')
-  const pessoas = decupagem.pessoas.filter((p) => p.na_imagem.length > 0)
+  // A aparição selecionada (na linha do tempo, por exemplo) abre a lista da pessoa, que depois fecha no clique.
+  const abertaPelaSelecao = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (pessoaSelecionada === abertaPelaSelecao.current) return
+    abertaPelaSelecao.current = pessoaSelecionada
+    if (pessoaSelecionada && !pessoasAbertas.has(pessoaSelecionada)) aoAbrirPessoa(pessoaSelecionada)
+  }, [pessoaSelecionada, pessoasAbertas, aoAbrirPessoa])
+
+  const { aparicoes, mencoes } = useMemo(() => {
+    const daAba = itensDaAba(itens, 'pessoas')
+    return { aparicoes: daAba.filter((i) => i.tipo === 'aparicao'), mencoes: daAba.filter((i) => i.tipo === 'mencao') }
+  }, [itens])
+  const pessoas = useMemo(() => decupagem.pessoas.filter((p) => p.na_imagem.length > 0), [decupagem])
 
   const contagens: Record<Exclude<Aba, 'agora'>, number> = {
     pessoas: pessoas.length,
@@ -258,13 +269,14 @@ export function Painel({
   const navegaveis = useMemo(() => {
     if (aba === 'agora') return agora(itens, atualMs)
     if (aba === 'pessoas') {
-      const visiveis = (i: ItemDoPainel) => i.tipo === 'mencao' || (i.pessoa && (pessoasAbertas.has(i.pessoa) || i.pessoa === pessoaSelecionada))
-      return itensDaAba(itens, 'pessoas')
-        .filter(visiveis)
-        .sort((a, b) => (a.tipo === b.tipo ? 0 : a.tipo === 'aparicao' ? -1 : 1))
+      // Como na tela: as aparições agrupadas por pessoa (só as abertas), depois as menções.
+      const abertas = pessoas
+        .filter((p) => pessoasAbertas.has(p.id))
+        .flatMap((p) => aparicoes.filter((i) => i.pessoa === p.id))
+      return [...abertas, ...mencoes]
     }
     return itensDaAba(itens, aba)
-  }, [aba, itens, atualMs, pessoasAbertas, pessoaSelecionada])
+  }, [aba, itens, atualMs, pessoasAbertas, pessoas, aparicoes, mencoes])
 
   const chaveAtual = navegaveis.find((i) => contem(i, atualMs))?.chave
 
@@ -277,7 +289,20 @@ export function Painel({
     area.scrollTop += deltaDeRolagem({ topo: a.top, base: a.bottom }, { topo: e.top, base: e.bottom })
   }
 
-  // O painel acompanha o item atual, menos quando a pessoa acabou de rolar.
+  // O painel acompanha o item atual, menos quando a pessoa acabou de rolar; passada a pausa, volta a ele.
+  const chaveAtualRef = useRef(chaveAtual)
+  useEffect(() => {
+    chaveAtualRef.current = chaveAtual
+  }, [chaveAtual])
+  const fimDaPausa = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(fimDaPausa.current), [])
+  function rolouAMao() {
+    ultimaRolagem.current = Date.now()
+    clearTimeout(fimDaPausa.current)
+    fimDaPausa.current = setTimeout(() => {
+      if (chaveAtualRef.current) mostrar(chaveAtualRef.current)
+    }, PAUSA_DA_ROLAGEM_MS)
+  }
   useEffect(() => {
     if (!chaveAtual || Date.now() - ultimaRolagem.current < PAUSA_DA_ROLAGEM_MS) return
     mostrar(chaveAtual)
@@ -307,10 +332,11 @@ export function Painel({
       tecla: 'Enter',
       acao: 'No painel: saltar o player ao item selecionado',
       grupo: GRUPO,
-      // Com o foco num botão ou link, o Enter já faz o que o elemento faz; na aba, só a troca.
+      // Com o foco num botão ou link, o Enter faz o que o elemento faz; menos na aba e no próprio item,
+      // em que o foco pode ter ficado num item enquanto as setas moveram a seleção.
       casa: (e) =>
         e.key === 'Enter' &&
-        !(e.target instanceof HTMLElement && e.target.closest('button:not([role="tab"]), a')),
+        !(e.target instanceof HTMLElement && e.target.closest('button:not([role="tab"]):not([data-item]), a')),
       executar: () => {
         if (selecionado) aoSaltar(selecionado.inicio_ms)
       },
@@ -371,7 +397,7 @@ export function Painel({
             <Secao titulo="Pessoas na imagem">
               {pessoas.map((p) => {
                 const doId = aparicoes.filter((i) => i.pessoa === p.id)
-                const abrir = aberta(p.id)
+                const abrir = pessoasAbertas.has(p.id)
                 const rotulo = doId[0]?.titulo ?? p.nome
                 return (
                   <Stack key={p.id} gap={2}>
@@ -384,7 +410,7 @@ export function Painel({
                       <Group gap="xs" justify="space-between" wrap="nowrap">
                         <Stack gap={0}>
                           <Text size="sm">{rotulo}</Text>
-                          {doId[0]?.linhas[0] && rotulo === 'não identificado' && (
+                          {doId[0]?.linhas[0] && rotulo === NAO_IDENTIFICADO && (
                             <Text size="xs" c="dimmed">{doId[0].linhas[0]}</Text>
                           )}
                         </Stack>
@@ -459,9 +485,9 @@ export function Painel({
         ref={rolagem}
         role="tabpanel"
         gap="sm"
-        onWheel={() => (ultimaRolagem.current = Date.now())}
-        onTouchMove={() => (ultimaRolagem.current = Date.now())}
-        onPointerDown={() => (ultimaRolagem.current = Date.now())}
+        onWheel={rolouAMao}
+        onTouchMove={rolouAMao}
+        onPointerDown={rolouAMao}
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative' }}
       >
         {conteudo}

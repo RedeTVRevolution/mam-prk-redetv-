@@ -58,15 +58,20 @@ const normalizar = (t: string): string =>
     .replace(/\p{M}/gu, '')
     .toLowerCase()
 
+const escapar = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+export const NAO_IDENTIFICADO = 'não identificado'
+
 const SEM_NOME = /^n[ãa]o identificado\s*[,:\-–—]?\s*/i
 
 const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Referência' }
 
 /** Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm tempo). */
 function selosDoNome(nome: string, fontes: string[], d: Decupagem): Selo[] {
-  const alvo = normalizar(nome)
+  // O nome inteiro, entre limites de palavra: "Ana" não casa com "MARIANA".
+  const alvo = new RegExp(`(^|[^\\p{L}\\p{N}])${escapar(normalizar(nome))}($|[^\\p{L}\\p{N}])`, 'u')
   const prova = (trechos: (Intervalo & { texto: string })[]) =>
-    trechos.filter((t) => normalizar(t.texto).includes(alvo)).sort((a, b) => a.inicio_ms - b.inicio_ms)[0]
+    trechos.filter((t) => alvo.test(normalizar(t.texto))).sort((a, b) => a.inicio_ms - b.inicio_ms)[0]
       ?.inicio_ms ?? null
   return fontes.map((f) => ({
     rotulo: FONTES[f] ?? f,
@@ -77,7 +82,7 @@ function selosDoNome(nome: string, fontes: string[], d: Decupagem): Selo[] {
 /** Todos os itens da decupagem, com as chaves que a linha do tempo usa. */
 export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
   const itens: ItemDoPainel[] = []
-  const nome = (n: string) => (SEM_NOME.test(n) ? 'não identificado' : n)
+  const nome = (n: string) => (SEM_NOME.test(n) ? NAO_IDENTIFICADO : n)
   d.pautas.forEach((p, i) =>
     itens.push({
       chave: `pauta-${i}`,

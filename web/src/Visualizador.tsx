@@ -125,6 +125,7 @@ export default function Visualizador({
     if (t === tAnterior.current) return
     tAnterior.current = t
     if (t === null) return
+    pararEm.current = null
     if (player.current && player.current.readyState > 0) player.current.currentTime = t
     else retomarEm.current = t
   }, [t])
@@ -178,9 +179,12 @@ export default function Visualizador({
   }
   function aoAtualizarOTempo(el: HTMLVideoElement) {
     setAtualMs(el.currentTime * 1000)
+    // O `timeupdate` chega a cada ~250 ms: o player volta ao fim exato do trecho.
     if (pararEm.current !== null && el.currentTime * 1000 >= pararEm.current) {
-      pararEm.current = null
       el.pause()
+      el.currentTime = pararEm.current / 1000
+      setAtualMs(pararEm.current)
+      pararEm.current = null
     }
   }
   const telaCheia = () => {

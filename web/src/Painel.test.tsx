@@ -248,6 +248,53 @@ test('↑ e ↓ movem a seleção na aba ativa e Enter salta o player ao item', 
   ).toBe('true')
 })
 
+test('Enter com o foco num item salta ao item selecionado pelas setas, não ao do foco', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  await usuario.click(aba('Pautas 3'))
+  await usuario.click(within(painel()).getByRole('button', { name: /^Eleição/ }))
+
+  await usuario.keyboard('{ArrowDown}{Enter}')
+
+  expect(player.currentTime).toBe(724)
+  expect(within(painel()).getByRole('button', { name: /Bastidores/ }).getAttribute('aria-pressed')).toBe('true')
+})
+
+test('na aba Pessoas, ↓ segue a ordem da tela: as aparições de cada pessoa juntas, depois as menções', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(aba('Pessoas 2'))
+  await usuario.click(within(painel()).getByRole('button', { name: /Leão Lobo.*aparições/ }))
+  await usuario.click(within(painel()).getByRole('button', { name: /não identificado.*aparição/ }))
+  // Tira o foco dos botões, para as setas não dependerem dele.
+  ;(document.activeElement as HTMLElement).blur()
+
+  const ordem: string[] = []
+  for (let i = 0; i < 4; i++) {
+    await usuario.keyboard('{ArrowDown}')
+    ordem.push(painel().querySelector('[aria-pressed="true"]')?.getAttribute('aria-label') ?? '')
+  }
+
+  expect(ordem).toEqual([
+    'Leão Lobo, 03:31 a 04:21',
+    'Leão Lobo, 05:00 a 05:20',
+    'não identificado, 03:40 a 04:10',
+    'Felipe Camargo, 03:50 a 03:55',
+  ])
+})
+
+test('a aparição selecionada na linha do tempo abre a lista da pessoa, que fecha no clique', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+
+  await usuario.click(screen.getByRole('button', { name: 'Aparição de Leão Lobo, 05:00 a 05:20' }))
+
+  const linha = within(painel()).getByRole('button', { name: /Leão Lobo.*2 aparições/ })
+  expect(linha.getAttribute('aria-expanded')).toBe('true')
+  await usuario.click(linha)
+  expect(linha.getAttribute('aria-expanded')).toBe('false')
+})
+
 test('as setas não agem com o foco num campo de texto', async () => {
   const usuario = userEvent.setup()
   await abrir()
@@ -277,6 +324,8 @@ test('"Reproduzir trecho" toca do início ao fim do item e para sozinho', async 
   expect(pauseMock).not.toHaveBeenCalled()
   irPara(player, 240.1)
   expect(pauseMock).toHaveBeenCalledTimes(1)
+  // Para no fim exato, não no instante do último `timeupdate`.
+  expect(player.currentTime).toBe(240)
   // Depois de parar, tocar de novo segue até o fim do vídeo.
   irPara(player, 300)
   expect(pauseMock).toHaveBeenCalledTimes(1)
