@@ -3,69 +3,55 @@
 Um por plano (no meio dele), um por aparição (no meio dela) e um por objeto (no meio da
 primeira ocorrência). O campo `quadro` do momento guarda o caminho do JPEG, relativo à
 pasta do Job no bucket das decupagens. O Job roda sem internet, com o ffmpeg da imagem da
-validação.
+validação, e tira cada quadro como os do modelo forte (`extrair_quadros`).
 """
 
 import os
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
-from api.decupagem import Decupagem
+from api.decupagem import Decupagem, caminho_do_quadro
 from api.jobs import RepositorioDeJobs
-from api.nuvem import (
-    QuadrosStorage,
-    RepositorioFirestore,
-)
-
-TEMPO_LIMITE_S = 120
+from api.nuvem import QuadrosStorage, RepositorioFirestore
+from api.quadros import FalhaNosQuadros
+from api.quadros_das_pessoas import extrair_quadros
 
 
-class FalhaNoQuadroChave(Exception):
-    pass
+class QuadrosDoJob(Protocol):
+    """Porta do Cloud Storage para os quadros-chave; os testes usam um dublê."""
 
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> None: ...
 
-def tirar_quadro(video: Path, instante_ms: int, destino: Path) -> bytes:
-    """O JPEG do quadro do instante: o `-ss` antes do `-i` salta pelo índice do arquivo."""
-    try:
-        resultado = subprocess.run(
-            [
-                "ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y",
-                "-ss", f"{instante_ms / 1000:.3f}", "-i", str(video),
-                "-an", "-frames:v", "1", "-q:v", "3", str(destino),
-            ],
-            check=False,
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
-            timeout=TEMPO_LIMITE_S,
-        )  # fmt: skip
-    except subprocess.TimeoutExpired:
-        raise FalhaNoQuadroChave from None
-    if resultado.returncode != 0 or not destino.is_file():
-        raise FalhaNoQuadroChave
-    return destino.read_bytes()
+    def ler_decupagem(self, job_id: str) -> bytes: ...
+
+    def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None: ...
+
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None: ...
 
 
 def com_quadros_chave(
-    video: Path,
-    decupagem: Decupagem,
-    gravar: Callable[[str, bytes], None],
-    pasta: Path,
+    video: Path, decupagem: Decupagem, gravar: Callable[[str, bytes], None]
 ) -> Decupagem:
     """A decupagem com `quadro` em cada plano, aparição e objeto.
 
     `gravar(caminho, jpeg)` guarda o JPEG. Os nomes saem da posição do momento, não do id
-    que o modelo deu, que não é seguro como nome de objeto.
+    que o modelo deu, que não é seguro como nome de objeto. O momento cujo quadro o
+    ffmpeg não tira (um instante depois do fim do vídeo) fica sem `quadro`; os outros não
+    se perdem por ele.
     """
-    pasta.mkdir(parents=True, exist_ok=True)
     pronta = decupagem.model_copy(deep=True)
 
-    def quadro(nome: str, inicio_ms: int, fim_ms: int) -> str:
-        caminho = f"quadros/{nome}.jpg"
-        gravar(caminho, tirar_quadro(video, (inicio_ms + fim_ms) // 2, pasta / "q.jpg"))
+    def quadro(nome: str, inicio_ms: int, fim_ms: int) -> str | None:
+        try:
+            [jpeg] = extrair_quadros(video, [(inicio_ms + fim_ms) // 2])
+        except FalhaNosQuadros:
+            return None
+        caminho = caminho_do_quadro(f"{nome}.jpg")
+        gravar(caminho, jpeg)
         return caminho
 
     for i, plano in enumerate(pronta.planos):
@@ -84,7 +70,7 @@ def com_quadros_chave(
 def executar(
     job_id: str,
     repositorio: RepositorioDeJobs,
-    armazenamento: QuadrosStorage,
+    armazenamento: QuadrosDoJob,
     pasta: Path,
 ) -> None:
     job = repositorio.obter(job_id)
@@ -97,7 +83,6 @@ def executar(
         copia,
         decupagem,
         lambda caminho, jpeg: armazenamento.gravar_quadro(job_id, caminho, jpeg),
-        pasta / "quadros",
     )
     armazenamento.gravar_decupagem(job_id, pronta.model_dump_json())
 

@@ -324,8 +324,8 @@ resource "google_cloud_run_v2_service" "web" {
   depends_on = [google_project_service.apis]
 }
 
-# Rede dos Jobs de validação e de transcrição: sem IP externo e sem Cloud NAT, o arquivo
-# hostil e o áudio não alcançam a internet, só o Storage e o Firestore (pelo acesso privado do Google).
+# Rede dos Jobs de validação, transcrição, OCR e quadros-chave: sem IP externo e sem Cloud
+# NAT, o arquivo hostil e o áudio não alcançam a internet, só o Storage e o Firestore (pelo acesso privado do Google).
 resource "google_compute_network" "validacao" {
   name                    = "mam-validacao"
   auto_create_subnetworks = false

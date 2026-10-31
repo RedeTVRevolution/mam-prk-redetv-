@@ -82,6 +82,11 @@ class Pauta(_Intervalo):
     )
 
 
+def caminho_do_quadro(arquivo: str) -> str:
+    """O campo `quadro` de um momento: o JPEG `arquivo`, relativo à pasta do Job (#115)."""
+    return f"quadros/{arquivo}"
+
+
 class Aparicao(_Intervalo):
     evidencia: Rotulo = Field(description="O que mostra que é essa pessoa.")
     papel: Rotulo | None = Field(

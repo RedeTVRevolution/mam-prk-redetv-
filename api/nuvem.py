@@ -481,15 +481,8 @@ class LeiturasStorage:
             return None
 
 
-class QuadrosStorage:
+class QuadrosStorage(DecupagensStorage):
     """A cópia limpa que o ffmpeg lê, e os JPEGs e a Decupagem no bucket das decupagens."""
-
-    def __init__(
-        self, cliente: ClienteStorage, bucket_de_aceitos: str, bucket_de_decupagens: str
-    ) -> None:
-        self._cliente = cliente
-        self._aceitos = bucket_de_aceitos
-        self._decupagens = bucket_de_decupagens
 
     def baixar_copia_limpa(self, job_id: str, destino: Path) -> None:
         self._cliente.bucket(self._aceitos).blob(
@@ -497,21 +490,12 @@ class QuadrosStorage:
         ).download_to_filename(str(destino))
 
     def ler_decupagem(self, job_id: str) -> bytes:
-        return bytes(
-            self._cliente.bucket(self._decupagens)
-            .blob(objeto_da_decupagem(job_id))
-            .download_as_bytes()
-        )
+        return b"".join(self.abrir_decupagem(job_id))
 
     def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None:
         self._cliente.bucket(self._decupagens).blob(
             objeto_do_quadro(job_id, caminho)
         ).upload_from_string(jpeg, content_type="image/jpeg")
-
-    def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
-        self._cliente.bucket(self._decupagens).blob(
-            objeto_da_decupagem(job_id)
-        ).upload_from_string(conteudo, content_type="application/json")
 
 
 class ArmazenamentoStorage:

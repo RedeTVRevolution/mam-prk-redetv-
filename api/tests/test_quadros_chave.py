@@ -101,7 +101,7 @@ def test_cada_plano_aparicao_e_objeto_tem_um_jpeg_e_o_quadro_aponta_para_ele(
     gravados: dict[str, bytes] = {}
 
     pronta = com_quadros_chave(
-        _video(tmp_path / "v.mp4"), _decupagem(), gravados.__setitem__, tmp_path / "q"
+        _video(tmp_path / "v.mp4"), _decupagem(), gravados.__setitem__
     )
 
     quadros = [
@@ -121,7 +121,7 @@ def test_o_quadro_e_do_meio_do_plano_e_da_primeira_ocorrencia_do_objeto(
     gravados: dict[str, bytes] = {}
 
     pronta = com_quadros_chave(
-        _video(tmp_path / "v.mp4"), _decupagem(), gravados.__setitem__, tmp_path / "q"
+        _video(tmp_path / "v.mp4"), _decupagem(), gravados.__setitem__
     )
 
     def cor(caminho: str | None) -> tuple[int, int, int]:
@@ -136,6 +136,23 @@ def test_o_quadro_e_do_meio_do_plano_e_da_primeira_ocorrencia_do_objeto(
     assert cor(pronta.objetos[0].quadro)[0] > 150
     # A segunda aparição, no meio do plano azul.
     assert cor(pronta.pessoas[0].na_imagem[1].quadro)[2] > 150
+
+
+def test_momento_depois_do_fim_do_video_fica_sem_quadro_e_os_outros_ficam(
+    tmp_path: Path,
+) -> None:
+    decupagem = _decupagem()
+    decupagem.planos[2].inicio_ms, decupagem.planos[2].fim_ms = 8_000, 9_000
+    gravados: dict[str, bytes] = {}
+
+    pronta = com_quadros_chave(
+        _video(tmp_path / "v.mp4"), decupagem, gravados.__setitem__
+    )
+
+    assert pronta.planos[2].quadro is None
+    assert pronta.planos[0].quadro in gravados
+    assert pronta.planos[1].quadro in gravados
+    assert len(gravados) == 5
 
 
 class QuadrosFalso:
@@ -175,7 +192,7 @@ def test_o_job_grava_os_jpegs_e_a_decupagem_com_o_caminho_de_cada_um(
     armazenamento = QuadrosFalso(_video(tmp_path / "v.mp4"), _decupagem())
     (tmp_path / "saida").mkdir()
 
-    executar("j1", repositorio, armazenamento, tmp_path / "saida")  # type: ignore[arg-type]
+    executar("j1", repositorio, armazenamento, tmp_path / "saida")
 
     gravada = Decupagem.model_validate_json(armazenamento.decupagem)
     assert gravada.planos[0].quadro == "quadros/plano-0.jpg"
@@ -194,7 +211,7 @@ def test_job_que_nao_concluiu_nao_ganha_quadros(tmp_path: Path) -> None:
     _job(repositorio, "cancelado")
     armazenamento = QuadrosFalso(_video(tmp_path / "v.mp4"), _decupagem())
 
-    executar("j1", repositorio, armazenamento, tmp_path / "saida")  # type: ignore[arg-type]
+    executar("j1", repositorio, armazenamento, tmp_path / "saida")
 
     assert armazenamento.quadros == {}
     assert (

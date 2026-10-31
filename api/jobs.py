@@ -62,6 +62,7 @@ from api.correcoes import (
     reaplicar,
     versao_do_modelo,
 )
+from api.decupagem import caminho_do_quadro
 from api.papeis import (
     Papel,
     Permissao,
@@ -552,7 +553,7 @@ def criar_rotas(
     ) -> Reproducao:
         job = obter_concluido(job_id, chamador)
         url = armazenamento.url_do_quadro(
-            job.id, f"quadros/{arquivo}", VALIDADE_DA_REPRODUCAO
+            job.id, caminho_do_quadro(arquivo), VALIDADE_DA_REPRODUCAO
         )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
