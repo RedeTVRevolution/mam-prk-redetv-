@@ -290,7 +290,7 @@ O JSON cobre os cinco requisitos e traz a transcrição como bônus; todo tempo 
 | Contexto e narrativa | Blocos do programa, pautas com título, resumo, pessoas e locais; resumo geral do vídeo |
 | Objetos, cenários e B-roll | Por plano: ambiente, objetos, ação, enquadramento, movimento de câmera, externa/estúdio, dia/noite e a flag "plano limpo" (sem GC nem ninguém falando para a câmera) |
 | Merchandising e inserções | Marca, tipo (intervalo, merchan com apresentador, patrocínio/vinheta, sobreposição gráfica, marca incidental, menção editorial), início/fim e evidência |
-| Timecode | Planos e B-roll usam os cortes exatos. Eventos visuais (aparição, produto em cena) só se ajustam a um corte que esteja a até 1 s. Falas e menções seguem as próprias palavras e nunca se ajustam a cortes. O tempo original do modelo fica guardado, e início e fim são medidos separadamente. Timecode de origem quando o arquivo tiver |
+| Timecode | Planos e B-roll usam os cortes exatos. Eventos visuais (aparição, produto em cena) só se ajustam a um corte que esteja a até 1 s. Falas e menções seguem as próprias palavras e nunca se ajustam a cortes. Textos na tela usam os tempos medidos nos quadros pelo OCR; o que o OCR não acha fica com o tempo do modelo e é dúvida. O tempo original do modelo fica guardado, e início e fim são medidos separadamente. Timecode de origem quando o arquivo tiver |
 | Transcrição | Falas com início/fim e locutor: o texto vem do Whisper, o locutor do Gemini. O texto original do Whisper fica guardado ao lado das correções do Gemini, cada uma com a prova (texto da tela) e a palavra original; as recusadas ficam registradas |
 
 Estrutura de topo, com valores fictícios:

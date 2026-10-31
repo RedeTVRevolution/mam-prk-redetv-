@@ -33,7 +33,7 @@ from api.leitura_da_tela import LeituraDaTela
 from api.medicao_dos_textos import (
     LIMIAR_DE_SEMELHANCA_DO_OCR,
     TOLERANCIA_DE_QUADROS,
-    medir_textos,
+    MedicaoDosTextos,
 )
 from api.tempos import aplicar_regra_de_tempos
 from api.transcricao import Transcricao
@@ -65,22 +65,20 @@ def analisar_video(
     """
     janelas = planejar_janelas(video.duracao_ms)
 
+    medicao = (
+        MedicaoDosTextos(leitura, limiar=limiar_do_ocr, tolerancia=tolerancia_do_ocr)
+        if leitura
+        else None
+    )
+
     def medir(decupagem: Decupagem, trecho_ms: tuple[int, int] | None) -> Decupagem:
-        if leitura is None:
-            return decupagem
-        return medir_textos(
-            decupagem,
-            leitura,
-            limiar=limiar_do_ocr,
-            tolerancia=tolerancia_do_ocr,
-            trecho_ms=trecho_ms,
-        )
+        return medicao.medir(decupagem, trecho_ms) if medicao else decupagem
 
     def passo(trecho_ms: tuple[int, int] | None) -> Decupagem:
         # Cada janela já sai medida: o texto que o OCR não achou é dúvida do escalonamento.
-        return medir(_analisar(trecho_ms), trecho_ms)
+        return medir(chamar(trecho_ms), trecho_ms)
 
-    def _analisar(trecho_ms: tuple[int, int] | None) -> Decupagem:
+    def chamar(trecho_ms: tuple[int, int] | None) -> Decupagem:
         return analisar(
             transporte,
             video_uri=video_uri,
