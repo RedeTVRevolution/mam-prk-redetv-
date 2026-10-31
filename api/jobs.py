@@ -123,6 +123,8 @@ class Job(BaseModel):
     # Timecode inicial da faixa `tmcd` do arquivo; `None` sem a faixa, fora do
     # formato ou em Job anterior ao campo.
     timecode_origem: str | None = None
+    # Quadros por segundo do vídeo (ffprobe); `None` em Job anterior ao campo.
+    taxa_de_quadros: float | None = None
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
@@ -172,6 +174,8 @@ class JobPublico(BaseModel):
     estado: Estado
     codigo_falha: CodigoDeFalha | None
     duracao_s: float | None
+    timecode_origem: str | None = None
+    taxa_de_quadros: float | None = None
     programa: str | None = None
     data_exibicao: date | None = None
     indexacao: Indexacao | None = None

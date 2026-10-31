@@ -12,6 +12,14 @@ export function tempo(ms: number): string {
   return `${mm}:${ss}`
 }
 
+/** O relógio do player: `MM:SS`, e `H:MM:SS` a partir de uma hora. */
+export function relogio(ms: number): string {
+  const total = Math.floor(Math.max(ms, 0) / 1000)
+  if (total < 3600) return tempo(ms)
+  const hh = Math.floor(total / 3600)
+  return `${hh}:${tempo((total % 3600) * 1000)}`
+}
+
 /** "mm:ss.mmm": o modal dos tempos arrastados mostra os milissegundos. */
 export function tempoPreciso(ms: number): string {
   return `${tempo(ms)}.${String(ms % 1000).padStart(3, '0')}`

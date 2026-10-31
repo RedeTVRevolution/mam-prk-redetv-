@@ -367,23 +367,37 @@ test('a raiz redireciona para o acervo', async () => {
   expect(location.pathname).toBe('/acervo')
 })
 
-test('abrir /video/{id}?t= com sessão abre o vídeo e posiciona o player no instante', async () => {
+test('abrir /video/{id}?t= com sessão abre o Visualizador e posiciona o player no instante', async () => {
   history.replaceState(null, '', '/video/j1?t=724')
   servidor.use(
     http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
     http.get('/v1/jobs/j1/reproducao', () =>
       HttpResponse.json({ url: 'https://exemplo.test/v.mp4', expira_em: '2999-01-01T00:00:00Z' }),
     ),
-    http.get('/v1/jobs/j1/decupagem', () => new HttpResponse(null, { status: 500 })),
-    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 500 })),
   )
   const { container } = render(<App autenticador={await autenticadorComSessao()} />)
 
-  // A tela do vídeo só desenha o player depois da decupagem; aqui basta a rota certa.
-  await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  const player = (await screen.findByLabelText('Player')) as HTMLVideoElement
+  fireEvent.loadedMetadata(player)
+  expect(player.currentTime).toBe(724)
   expect(location.pathname).toBe('/video/j1')
   expect(container.textContent).not.toContain('Página não encontrada')
   expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
+})
+
+test('a tela antiga abre em /video/{id}/anterior', async () => {
+  history.replaceState(null, '', '/video/j1/anterior')
+  servidor.use(
+    http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
+    http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 500 })),
+    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 500 })),
+  )
+  render(<App autenticador={await autenticadorComSessao()} />)
+
+  await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  expect(location.pathname).toBe('/video/j1/anterior')
+  expect(screen.queryByText('Página não encontrada.')).toBeNull()
+  expect(screen.queryByRole('link', { name: 'Tela anterior' })).toBeNull()
 })
 
 test('vídeo inexistente mostra o aviso e o link para o acervo', async () => {
@@ -464,8 +478,8 @@ test('Ctrl+clique no cartão fica com o navegador (outra aba) e não muda a tela
   expect(location.pathname).toBe('/acervo')
 })
 
-test('na tela do vídeo, ? lista também as teclas da linha do tempo', async () => {
-  history.replaceState(null, '', '/video/j1')
+test('na tela anterior do vídeo, ? lista também as teclas da linha do tempo', async () => {
+  history.replaceState(null, '', '/video/j1/anterior')
   servidor.use(
     http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
     http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 500 })),

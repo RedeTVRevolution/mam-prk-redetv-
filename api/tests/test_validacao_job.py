@@ -159,6 +159,7 @@ def test_timecode_de_origem_do_arquivo_chega_ao_job(
 
     job = ambiente.job("j-tc")
     assert (job.estado, job.timecode_origem) == ("analisando", "01:00:00:00")
+    assert job.taxa_de_quadros == 25.0
 
 
 def test_cortes_de_camera_ficam_no_job(ambiente: Ambiente, tmp_path: Path) -> None:

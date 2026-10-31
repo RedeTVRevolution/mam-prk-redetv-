@@ -52,6 +52,7 @@ def transitar(
     duracao_s: float | None = None,
     cortes_ms: Sequence[int] | None = None,
     timecode_origem: str | None = None,
+    taxa_de_quadros: float | None = None,
 ) -> Job | None:
     """O Job já em `para`, ou `None` se ele não estava mais em `de`."""
     if para not in TRANSICOES[de]:
@@ -72,6 +73,8 @@ def transitar(
         mudancas["cortes_ms"] = list(cortes_ms)
     if timecode_origem is not None:
         mudancas["timecode_origem"] = timecode_origem
+    if taxa_de_quadros is not None:
+        mudancas["taxa_de_quadros"] = taxa_de_quadros
     return repositorio.transitar(job_id, de, mudancas)
 
 

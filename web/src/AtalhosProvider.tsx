@@ -51,9 +51,9 @@ export function AtalhosProvider({ children }: { children: ReactNode }) {
         return
       }
       for (const a of juntar()) {
-        if (a.executar && a.tecla === e.key) {
+        if (a.executar && (a.casa ? a.casa(e) : a.tecla === e.key)) {
           e.preventDefault()
-          a.executar()
+          a.executar(e)
           return
         }
       }

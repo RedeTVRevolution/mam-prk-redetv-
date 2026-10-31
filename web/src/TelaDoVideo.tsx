@@ -8,6 +8,7 @@ import { Link } from './Link.tsx'
 import { ACERVO } from './rotas.ts'
 import { CORES } from './tema.ts'
 import Video from './Video.tsx'
+import Visualizador from './Visualizador.tsx'
 
 // As teclas da linha do tempo agem no elemento em foco (o `Video` as trata); aqui só
 // entram na lista do `?`.
@@ -33,16 +34,20 @@ export default function TelaDoVideo({
   t,
   podeEditar,
   podeAprovar,
+  anterior = false,
 }: {
   api: ClienteDaApi
   id: string
   t: number | null
   podeEditar: boolean
   podeAprovar: boolean
+  /** A tela antiga, em `/video/{id}/anterior`, até o #165. */
+  anterior?: boolean
 }) {
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const [tentativas, setTentativas] = useState(0)
-  useAtalhos(podeEditar ? [...DA_LINHA_DO_TEMPO, ...DAS_ALCAS] : DA_LINHA_DO_TEMPO)
+  const daLinhaDoTempo = podeEditar ? [...DA_LINHA_DO_TEMPO, ...DAS_ALCAS] : DA_LINHA_DO_TEMPO
+  useAtalhos(anterior ? daLinhaDoTempo : [])
 
   useEffect(() => {
     let ativo = true
@@ -106,6 +111,9 @@ export default function TelaDoVideo({
         </Stack>
       </Center>
     )
+  }
+  if (!anterior) {
+    return <Visualizador key={carga.job.id} api={api} job={carga.job} t={t} podeEditar={podeEditar} />
   }
   return (
     <Video

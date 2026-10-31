@@ -147,7 +147,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       padding="sm"
     >
       <Barra email={sessao.usuario.email} aoSair={() => void sair()} />
-      {rota.tipo === 'video' ? (
+      {rota.tipo === 'video' || rota.tipo === 'video_anterior' ? (
         <AppShell.Main bg="dark.7">
           <TelaDoVideo
             api={api}
@@ -155,6 +155,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
             t={rota.t}
             podeEditar={podeEditar}
             podeAprovar={podeAprovar}
+            anterior={rota.tipo === 'video_anterior'}
           />
         </AppShell.Main>
       ) : rota.tipo === 'acervo' ? (

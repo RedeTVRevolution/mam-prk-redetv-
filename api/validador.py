@@ -43,6 +43,7 @@ class Aceito:
     audio: Path | None = None
     cortes_ms: tuple[int, ...] = ()
     timecode_origem: str | None = None
+    taxa_de_quadros: float | None = None
 
 
 def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -142,6 +143,23 @@ def ler_timecode_origem(sondagem: dict[str, Any]) -> str | None:
     return None
 
 
+def ler_taxa_de_quadros(sondagem: dict[str, Any]) -> float | None:
+    """Quadros por segundo da faixa de vídeo; `None` sem taxa legível."""
+    for faixa in sondagem.get("streams", []):
+        if faixa.get("codec_type") != "video":
+            continue
+        valor = faixa.get("avg_frame_rate")
+        if not isinstance(valor, str):
+            return None
+        try:
+            numerador, _, denominador = valor.partition("/")
+            taxa = float(numerador) / float(denominador or 1)
+        except (ValueError, ZeroDivisionError):
+            return None
+        return taxa if taxa > 0 else None
+    return None
+
+
 def validar(
     entrada: Path, saida: Path, limiar_de_cortes: float = LIMIAR_PADRAO
 ) -> Aceito:
@@ -197,6 +215,7 @@ def validar(
         audio=audio,
         cortes_ms=tuple(cortes),
         timecode_origem=ler_timecode_origem(sondagem),
+        taxa_de_quadros=ler_taxa_de_quadros(sondagem),
     )
 
 

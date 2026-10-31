@@ -84,6 +84,7 @@ def executar(
         duracao_s=aceito.duracao_s,
         cortes_ms=aceito.cortes_ms,
         timecode_origem=aceito.timecode_origem,
+        taxa_de_quadros=aceito.taxa_de_quadros,
     )
 
 

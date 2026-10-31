@@ -7,7 +7,9 @@ export interface Atalho {
   acao: string
   grupo: string
   /** Sem `executar`, a linha só informa (o Esc de janelas e menus é do próprio componente). */
-  executar?: () => void
+  executar?: (e: KeyboardEvent) => void
+  /** Quando a linha agrupa várias teclas (ou exige `Shift`), diz se o evento é dela. */
+  casa?: (e: KeyboardEvent) => boolean
 }
 
 export interface Registro {
