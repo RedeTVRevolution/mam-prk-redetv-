@@ -75,7 +75,7 @@ class VideoDoResultado(BaseModel):
 
 
 class SemAparicao(BaseModel):
-    """A pessoa pedida não aparece em imagem nenhuma; quantas vezes é só citada."""
+    """A pessoa pedida não aparece na imagem no programa e período pedidos; quantas vezes é citada."""
 
     pessoa_id: str
     nome: str
@@ -113,6 +113,8 @@ def com_filtros_do_servidor(da_consulta: Filtros, do_servidor: Filtros) -> Filtr
 class _Clausula:
     consulta: Consulta
     motivo: Callable[[Registro], str]
+    # A cláusula "na imagem" de uma pessoa: vazia, a resposta conta as menções dela.
+    pessoa_na_imagem: str | None = None
 
 
 def _sem_acento(texto: str) -> str:
@@ -219,21 +221,27 @@ class Busca:
             return nomes.get(id or "") or None
 
         clausulas = self._clausulas(entendida, nome)
-        fundidos = _fundir([consultar(c.consulta) for c in clausulas])
-        achados = [r for r, _ in fundidos]
+        resultados = [consultar(c.consulta) for c in clausulas]
+        fundidos = _fundir(resultados)
+        achados = [r for r, _, _ in fundidos]
+        # Sem a API de Ranking, a posição é a da pontuação do RRF: registros de mesma
+        # pontuação empatam, e o desempate dos vídeos é o número de momentos.
+        posicao = _posicoes_por_pontos(fundidos)
         if entendida.texto_livre and achados:
             try:
                 achados = self._ranking.reordenar(entendida.texto_livre, achados)
+                posicao = {r.id: i for i, r in enumerate(achados)}
             except Exception:
                 log.exception("ranking indisponível; fica a ordem do índice")
-        motivo_de = {r.id: clausulas[c].motivo(r) for r, c in fundidos}
-        posicao = {r.id: i for i, r in enumerate(achados)}
+        motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
         videos = self._videos(trechos, job, termos, ordem)[:limite]
-        vazios = []
-        if not videos:
-            vazios = self._sem_aparicoes(entendida, clausulas, consultar, nome)
+        vazios = [
+            self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
+            for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
+            if c.pessoa_na_imagem and not achados_da_clausula
+        ]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas%s",
             (time.perf_counter() - inicio) * 1000,
@@ -254,13 +262,16 @@ class Busca:
         e: ConsultaEntendida,
         nome: Callable[[str | None], str | None],
     ) -> list[_Clausula]:
-        base = Filtros(
-            programa=e.programa,
-            exibido_desde=e.exibido_desde,
-            exibido_ate=e.exibido_ate,
-        )
+        base = _base(e)
         clausulas: list[_Clausula] = []
+        donos: set[str] = set()
         for o in e.objetos:
+            # O índice não aceita cláusula só de filtros: a peça vai também como texto.
+            texto = o.tipo or o.cor_base or o.categoria
+            if not texto:
+                continue
+            if o.dono:
+                donos.add(o.dono)
             clausulas.append(
                 _Clausula(
                     Consulta(
@@ -271,7 +282,7 @@ class Busca:
                             cor_base=o.cor_base,
                             dono=o.dono,
                         ),
-                        texto=o.tipo,
+                        texto=texto,
                     ),
                     lambda r: _motivo(r, nome),
                 )
@@ -279,11 +290,12 @@ class Busca:
         for marca in e.marcas:
             clausulas.append(
                 _Clausula(
-                    Consulta(filtros=replace(base, tipo="objeto", marca=marca)),
+                    Consulta(
+                        filtros=replace(base, tipo="objeto", marca=marca), texto=marca
+                    ),
                     lambda r: _motivo(r, nome),
                 )
             )
-        donos = {o.dono for o in e.objetos if o.dono}
         for pessoa in e.pessoas:
             if pessoa in donos:
                 continue
@@ -353,38 +365,41 @@ class Busca:
                     ),
                 )
             )
+        videos.sort(key=lambda v: (v[0], -v[1].n_momentos))
         if ordem == "data":
+            # Estável: na mesma data, fica a relevância; sem data, no fim.
             videos.sort(key=lambda v: v[1].data_exibicao or date.min, reverse=True)
-        else:
-            videos.sort(key=lambda v: (v[0], -v[1].n_momentos))
         return [v for _, v in videos]
 
-    def _sem_aparicoes(
+    def _sem_aparicao(
         self,
+        pessoa: str,
         e: ConsultaEntendida,
-        clausulas: list[_Clausula],
         consultar: Callable[[Consulta], list[Registro]],
         nome: Callable[[str | None], str | None],
-    ) -> list[SemAparicao]:
-        donos = {o.dono for o in e.objetos if o.dono}
-        vazios: list[SemAparicao] = []
-        for pessoa in dict.fromkeys(e.pessoas):
-            quem = nome(pessoa)
-            if pessoa in donos or not quem or "imagem" not in _evidencias(e):
-                continue
-            na_fala = consultar(Consulta(filtros=Filtros(tipo="fala"), texto=quem))
-            na_tela = consultar(
-                Consulta(filtros=Filtros(tipo="texto_na_tela"), texto=quem)
-            )
-            vazios.append(
-                SemAparicao(
-                    pessoa_id=pessoa,
-                    nome=quem,
-                    mencoes_na_fala=len(na_fala),
-                    mencoes_na_tela=len(na_tela),
-                )
-            )
-        return vazios
+    ) -> SemAparicao:
+        """Quantas vezes a pessoa sem aparição é citada, no mesmo programa e período."""
+        quem = nome(pessoa) or ""
+        base = _base(e)
+        na_fala = consultar(Consulta(filtros=replace(base, tipo="fala"), texto=quem))
+        na_tela = consultar(
+            Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem)
+        )
+        return SemAparicao(
+            pessoa_id=pessoa,
+            nome=quem,
+            mencoes_na_fala=len(na_fala),
+            mencoes_na_tela=len(na_tela),
+        )
+
+
+def _base(e: ConsultaEntendida) -> Filtros:
+    """Os filtros que a consulta impõe a toda cláusula: programa e período."""
+    return Filtros(
+        programa=e.programa,
+        exibido_desde=e.exibido_desde,
+        exibido_ate=e.exibido_ate,
+    )
 
 
 def _evidencias(e: ConsultaEntendida) -> tuple[str, ...]:
@@ -411,11 +426,16 @@ def _clausulas_da_pessoa(
     quem = nome(pessoa)
     clausulas: list[_Clausula] = []
     evidencias = _evidencias(e)
-    if "imagem" in evidencias:
+    if "imagem" in evidencias and quem:
+        # O índice não aceita cláusula só de filtros: os planos dela vão pelo significado.
         clausulas.append(
             _Clausula(
-                Consulta(filtros=replace(base, tipo="plano", pessoa=pessoa)),
-                lambda r: f"Na imagem: {quem}" if quem else "Na imagem",
+                Consulta(
+                    filtros=replace(base, tipo="plano", pessoa=pessoa),
+                    significado=e.texto_livre or quem,
+                ),
+                lambda r: f"Na imagem: {quem}",
+                pessoa_na_imagem=pessoa,
             )
         )
     if quem:
@@ -450,7 +470,7 @@ def _motivo(r: Registro, nome: Callable[[str | None], str | None]) -> str:
         return f"Fala: '{r.texto}'"
     if r.tipo == "texto_na_tela":
         return f"GC: {r.texto}"
-    return f"Cena: {r.descricao}" if r.descricao else "Cena"
+    return f"Plano: {r.descricao}" if r.descricao else "Plano"
 
 
 def _termos(
@@ -459,13 +479,17 @@ def _termos(
     """O que se destaca no motivo: a frase, o texto livre e o nome das pessoas citadas."""
     termos = [e.frase_exata] if e.frase_exata else []
     if e.texto_livre:
-        termos += [e.texto_livre, *normalizar(e.texto_livre).split()]
+        # Palavras de uma ou duas letras ("de", "da") acenderiam dentro de outras.
+        termos += [
+            e.texto_livre,
+            *(p for p in normalizar(e.texto_livre).split() if len(p) > 2),
+        ]
     termos += [q for p in e.pessoas if (q := nome(p))]
     return termos
 
 
-def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int]]:
-    """RRF entre as cláusulas; cada registro leva o índice da cláusula em que ficou melhor."""
+def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int, float]]:
+    """RRF entre as cláusulas; cada registro leva a cláusula em que ficou melhor e os pontos."""
     pontos: dict[str, float] = defaultdict(float)
     melhor: dict[str, tuple[int, int]] = {}  # id -> (posição, cláusula)
     registros: dict[str, Registro] = {}
@@ -476,7 +500,14 @@ def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int]]:
             if r.id not in melhor or posicao < melhor[r.id][0]:
                 melhor[r.id] = (posicao, c)
     ids = sorted(pontos, key=lambda i: (-pontos[i], melhor[i]))
-    return [(registros[i], melhor[i][1]) for i in ids[:TETO_DE_REGISTROS]]
+    return [(registros[i], melhor[i][1], pontos[i]) for i in ids[:TETO_DE_REGISTROS]]
+
+
+def _posicoes_por_pontos(fundidos: list[tuple[Registro, int, float]]) -> dict[str, int]:
+    """A posição de cada registro pela pontuação; mesma pontuação, mesma posição."""
+    niveis = sorted({round(p, 12) for _, _, p in fundidos}, reverse=True)
+    nivel = {p: i for i, p in enumerate(niveis)}
+    return {r.id: nivel[round(p, 12)] for r, _, p in fundidos}
 
 
 def _juntar(

@@ -12,11 +12,12 @@ from fastapi.testclient import TestClient
 from api.auth import Usuario
 from api.busca import Busca, Ranking, RankingEmOrdem
 from api.catalogo import CatalogoEmMemoria
-from api.entendimento_da_consulta import ModelArmorEmMemoria
+from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
+from api.rota_da_busca import TEMPO_MAXIMO_S
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -250,18 +251,52 @@ def test_video_fora_de_concluido_ou_de_outro_sistema_nao_aparece() -> None:
 
 
 def test_videos_pelo_melhor_momento_e_no_empate_pelo_numero_de_momentos() -> None:
-    m = Mundo(pedido(texto_livre="vestido"), pedido(texto_livre="vestido"))
-    m.com(job("j1", data_exibicao=date(2020, 1, 1)), objeto("a", "j1", 0, 1_000))
+    sandalia = {
+        "categoria": "calcado",
+        "tipo": "sandalia",
+        "cor_base": None,
+        "pessoa": None,
+    }
+    pedido_dos_dois = pedido(objetos=[{**VESTIDO, "pessoa": None}, sandalia])
+    m = Mundo(pedido_dos_dois, pedido_dos_dois)
+    m.com(job("j1", data_exibicao=date(2024, 1, 1)), objeto("a", "j1", 0, 1_000))
     m.com(
-        job("j2", data_exibicao=date(2024, 1, 1)),
-        objeto("b", "j2", 0, 1_000),
-        objeto("c", "j2", 20_000, 21_000),
+        job("j2", data_exibicao=date(2020, 1, 1)),
+        *(
+            objeto(
+                id,
+                "j2",
+                inicio,
+                inicio + 1_000,
+                categoria="calcado",
+                tipo_do_objeto="sandalia",
+                texto="sandalia",
+            )
+            for id, inicio in (("b", 0), ("c", 20_000))
+        ),
     )
-    # a ordem do índice põe o melhor momento de cada vídeo em primeiro lugar, empatado
-    resultado = buscar(m, "vestido")
-    assert resultado.videos[0].job_id in {"j1", "j2"}
-    por_data = buscar(m, "vestido", ordem="data")
-    assert [v.job_id for v in por_data.videos] == ["j2", "j1"]
+    # o melhor momento de cada vídeo é o primeiro da sua cláusula: empatam no RRF
+    resultado = buscar(m, "vestido vermelho e sandália")
+    assert [v.job_id for v in resultado.videos] == ["j2", "j1"]
+    por_data = buscar(m, "vestido vermelho e sandália", ordem="data")
+    assert [v.job_id for v in por_data.videos] == ["j1", "j2"]
+
+
+def test_nenhuma_clausula_vai_ao_indice_so_com_filtros() -> None:
+    m = Mundo(
+        pedido(
+            pessoas=["Sabrina Sato"],
+            marcas=["Farm"],
+            objetos=[
+                {"categoria": "roupa", "tipo": None, "cor_base": None, "pessoa": None}
+            ],
+        )
+    )
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000, marca="Farm", texto="vestido Farm"))
+    resultado = buscar(m, "Sabrina Sato e Farm")
+    assert m.indice.consultas
+    assert all(c.texto or c.significado for c in m.indice.consultas)
+    assert [v.job_id for v in resultado.videos] == ["j1"]
 
 
 def test_o_melhor_momento_decide_a_ordem_dos_videos() -> None:
@@ -356,6 +391,50 @@ def test_sem_aparicoes_diz_quantas_mencoes_ha_na_fala_e_na_tela() -> None:
     )
 
 
+def test_sem_aparicoes_vem_mesmo_com_outros_resultados_e_no_programa_pedido() -> None:
+    m = Mundo(
+        pedido(pessoas=["Sabrina Sato"], programa="Leo Dias", texto_livre="praia")
+    )
+    m.com(
+        job("j1", programa="Leo Dias"),
+        Registro(
+            id="p",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            programa="Leo Dias",
+            descricao="praia",
+        ),
+        Registro(
+            id="f",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            programa="Leo Dias",
+            texto="a Sabrina Sato",
+        ),
+    )
+    m.com(
+        job("j2"),
+        Registro(
+            id="g",
+            tipo="fala",
+            job_id="j2",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="Sabrina Sato de novo",
+        ),
+    )
+
+    resultado = buscar(m, "Sabrina Sato na praia no Leo Dias")
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    (vazio,) = resultado.sem_aparicoes
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 0)
+
+
 def test_motivos_da_fala_e_do_gc_com_destaques_por_posicao() -> None:
     m = Mundo(
         pedido(frase_exata="promoção imperdível"), pedido(texto_livre="sabrina sato")
@@ -430,7 +509,7 @@ def cliente(
     papeis: list[Papel] | None = None,
     *respostas: str,
     maximo_por_minuto: int = 30,
-    tempo_maximo_s: float = 10.0,
+    tempo_maximo_s: float = TEMPO_MAXIMO_S,
     indice: IndiceEmMemoria | None = None,
 ) -> tuple[TestClient, Mundo]:
     m = Mundo(*respostas)
@@ -521,3 +600,8 @@ def test_sem_modelo_nem_model_armor_a_busca_cai_no_plano_b() -> None:
 def test_pedido_sem_consulta_responde_422() -> None:
     c, _ = cliente(["consulta"])
     assert c.get("/v1/busca", headers=AUTORIZACAO).status_code == 422
+
+
+def test_o_tempo_maximo_da_rota_passa_do_teto_do_modelo() -> None:
+    # senão a rota responde 504 antes de o plano B chegar
+    assert TEMPO_MAXIMO_S > TEMPO_DA_CONSULTA_S

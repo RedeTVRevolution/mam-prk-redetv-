@@ -1,6 +1,7 @@
 """A rota `/v1/busca` (#120): permissão, limites de uso e tempo máximo; a busca é `busca.py`."""
 
 import logging
+import threading
 from collections import defaultdict, deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -19,12 +20,14 @@ from api.busca import (
     ResultadoDaBusca,
     filtros_do_servidor,
 )
+from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S
 from api.jobs import _exige
 
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
-TEMPO_MAXIMO_S = 10.0
+# Acima do teto do modelo, para que o plano B chegue ao usuário antes do 504.
+TEMPO_MAXIMO_S = TEMPO_DA_CONSULTA_S + 5.0
 
 _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="busca")
 
@@ -42,16 +45,18 @@ class LimiteDeConsultas:
         self._relogio = relogio
         self._janela = janela
         self._feitas: dict[str, deque[datetime]] = defaultdict(deque)
+        self._trava = threading.Lock()  # a rota é síncrona: roda em várias threads
 
     def consumir(self, quem: str) -> bool:
-        agora = self._relogio()
-        feitas = self._feitas[quem]
-        while feitas and agora - feitas[0] >= self._janela:
-            feitas.popleft()
-        if len(feitas) >= self._maximo:
-            return False
-        feitas.append(agora)
-        return True
+        with self._trava:
+            agora = self._relogio()
+            feitas = self._feitas[quem]
+            while feitas and agora - feitas[0] >= self._janela:
+                feitas.popleft()
+            if len(feitas) >= self._maximo:
+                return False
+            feitas.append(agora)
+            return True
 
 
 def criar_rotas_da_busca(

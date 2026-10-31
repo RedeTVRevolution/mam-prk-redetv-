@@ -178,7 +178,7 @@ def criar_app(
     armazenamento_dos_jobs = armazenamento or ArmazenamentoIndisponivel()
     repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
     indice_da_busca = indice or IndiceEmMemoria()
-    catalogo_da_busca = catalogo or CatalogoEmMemoria()
+    catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     v1.include_router(
         criar_rotas(
             repositorio_de_jobs,
@@ -187,7 +187,7 @@ def criar_app(
             relogio,
             repositorio_de_correcoes,
             aprovacao or RepositorioDeAprovacaoEmMemoria(),
-            catalogo_da_busca,
+            catalogo_de_pessoas,
             lambda job: reindexar(
                 job,
                 repositorio_de_jobs,
@@ -202,7 +202,7 @@ def criar_app(
         criar_rotas_da_busca(
             Busca(
                 transporte=transporte_da_consulta or _SemModelo(),
-                catalogo=catalogo_da_busca,
+                catalogo=catalogo_de_pessoas,
                 armor=armor or _SemModelArmor(),
                 programas=sorted(PERFIS),
                 indice=indice_da_busca,
