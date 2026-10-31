@@ -699,25 +699,36 @@ def _pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pautas", []) if isinstance(p, dict)]
 
 
-def _comerciais(modelo: dict[str, Any]) -> list[dict[str, Any]]:
-    """Os comerciais não têm id no esquema: o id é a posição no JSON do modelo.
+# Comerciais, falas e textos na tela não têm id no esquema: o id é a posição.
+_PREFIXO_POSICIONAL = {
+    "comerciais": "com",
+    "transcricao": "fal",
+    "textos_na_tela": "txt",
+}
 
-    São cópias; o que já traz id (decupagem entregue) o mantém.
+
+def _id_posicional(chave: str, n: int) -> str:
+    return f"{_PREFIXO_POSICIONAL[chave]}{n:03d}"
+
+
+def _com_ids_posicionais(modelo: dict[str, Any], chave: str) -> list[dict[str, Any]]:
+    """Os itens de `chave` (cópias) com o id da posição no JSON do modelo.
+
+    O que já traz id (decupagem entregue) o mantém.
     """
     return [
-        {"id": f"com{n:03d}", **c}
-        for n, c in enumerate(modelo.get("comerciais", []))
-        if isinstance(c, dict)
+        {"id": _id_posicional(chave, n), **item}
+        for n, item in enumerate(modelo.get(chave, []))
+        if isinstance(item, dict)
     ]
+
+
+def _comerciais(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    return _com_ids_posicionais(modelo, "comerciais")
 
 
 def _textos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
-    """Os textos na tela não têm id no esquema: o id é a posição (`txt000`)."""
-    return [
-        {"id": f"txt{n:03d}", **t}
-        for n, t in enumerate(modelo.get("textos_na_tela", []))
-        if isinstance(t, dict)
-    ]
+    return _com_ids_posicionais(modelo, "textos_na_tela")
 
 
 def _tipo_do_item(tipo: str, escolhido: str | None = None) -> TipoDoItem:
@@ -739,12 +750,7 @@ def _planos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _falas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
-    """As falas não têm id no esquema: o id é a posição, como nos comerciais."""
-    return [
-        {"id": f"fal{n:03d}", **f}
-        for n, f in enumerate(modelo.get("transcricao", []))
-        if isinstance(f, dict)
-    ]
+    return _com_ids_posicionais(modelo, "transcricao")
 
 
 def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
@@ -1018,28 +1024,68 @@ class NaoDesfazivel(Exception):
     versão, não casa com a decupagem atual (não está aplicada)."""
 
 
-def _desfeitas(correcoes: list[Correcao]) -> set[str]:
-    return {c.desfaz for c in correcoes if c.tipo == "desfazer" and c.desfaz}
+@dataclass(frozen=True)
+class EstadoDasCorrecoes:
+    """O estado de cada Correção de um Job, derivado uma vez dos registros.
+
+    Histórico, fila, `aplicar`, `reconciliar` e desfazer leem daqui.
+    """
+
+    desfeitas: frozenset[str]
+    reaplicadas: frozenset[str]
+    descartadas: frozenset[str]
+    aprovadas: frozenset[str]
+    recusadas: frozenset[str]
+    exigem_aprovacao: frozenset[str]
+
+    @property
+    def decididas(self) -> frozenset[str]:
+        return self.aprovadas | self.recusadas
+
+    def saiu_da_fila(self, id: str) -> bool:
+        return id in self.reaplicadas or id in self.descartadas
+
+    def espera_decisao(self, id: str) -> bool:
+        return id in self.exigem_aprovacao and id not in self.decididas
+
+    def fora_da_entrega(self, id: str) -> bool:
+        """Exige aprovação e ainda não a tem: pendente ou recusada."""
+        return id in self.exigem_aprovacao and id not in self.aprovadas
+
+    def em_vigor(self, id: str) -> bool:
+        """Entra na decupagem entregue: nem desfeita, nem fora da entrega."""
+        return id not in self.desfeitas and not self.fora_da_entrega(id)
+
+    def casavel(self, id: str) -> bool:
+        """Em vigor e ainda na fila de revisão ou casada: `reconciliar` a considera."""
+        return self.em_vigor(id) and not self.saiu_da_fila(id)
+
+    def de(self, id: str) -> "EstadoNoHistorico":
+        if id in self.desfeitas:
+            return "desfeita"
+        if id in self.recusadas:
+            return "recusada"
+        # A aprovada que depois saiu da fila mostra o que lhe aconteceu por último.
+        if id in self.reaplicadas:
+            return "reaplicada"
+        if id in self.descartadas:
+            return "descartada"
+        if id in self.exigem_aprovacao:
+            return "aprovada" if id in self.aprovadas else "pendente"
+        return "ativa"
 
 
-def _resolvidas(correcoes: list[Correcao]) -> set[str]:
-    """As que saíram da fila: reaplicadas ou descartadas."""
-    return {c.reaplica for c in correcoes if c.reaplica} | {
-        c.descarta for c in correcoes if c.descarta
-    }
-
-
-def _aprovadas(correcoes: list[Correcao]) -> set[str]:
-    return {c.aprova for c in correcoes if c.aprova}
-
-
-def _recusadas(correcoes: list[Correcao]) -> set[str]:
-    return {c.recusa for c in correcoes if c.recusa}
-
-
-def _fora_da_entrega(correcoes: list[Correcao]) -> set[str]:
-    """As que exigem aprovação e ainda não a têm: pendentes ou recusadas."""
-    return {c.id for c in correcoes if c.exige_aprovacao} - _aprovadas(correcoes)
+def estado_das(correcoes: list[Correcao]) -> EstadoDasCorrecoes:
+    return EstadoDasCorrecoes(
+        desfeitas=frozenset(
+            c.desfaz for c in correcoes if c.tipo == "desfazer" and c.desfaz
+        ),
+        reaplicadas=frozenset(c.reaplica for c in correcoes if c.reaplica),
+        descartadas=frozenset(c.descarta for c in correcoes if c.descarta),
+        aprovadas=frozenset(c.aprova for c in correcoes if c.aprova),
+        recusadas=frozenset(c.recusa for c in correcoes if c.recusa),
+        exigem_aprovacao=frozenset(c.id for c in correcoes if c.exige_aprovacao),
+    )
 
 
 def _em_ordem_de_vigencia(
@@ -1049,10 +1095,6 @@ def _em_ordem_de_vigencia(
     feita enquanto ela esperava o Curador não a encobre depois de aprovada."""
     aprovada_em = {c.aprova: c.criada_em for c in correcoes if c.aprova}
     return sorted(alvos, key=lambda c: (aprovada_em.get(c.id, c.criada_em), c.id))
-
-
-def _decididas(correcoes: list[Correcao]) -> set[str]:
-    return _aprovadas(correcoes) | _recusadas(correcoes)
 
 
 def id_do_desfazer(alvo_id: str) -> str:
@@ -1097,12 +1139,7 @@ def montar_desfazer(
     mais nova no mesmo campo, desfazer a antiga não muda o que se vê. A de outra
     versão só se desfaz se `reconciliar` a casar; o registro aponta o item novo.
     """
-    if (
-        alvo.tipo not in CORRIGIVEIS
-        or alvo.id in _desfeitas(correcoes)
-        or alvo.id in _resolvidas(correcoes)
-        or alvo.id in _fora_da_entrega(correcoes)
-    ):
+    if alvo.tipo not in CORRIGIVEIS or not estado_das(correcoes).casavel(alvo.id):
         raise NaoDesfazivel(alvo.id)
     restantes = [c for c in correcoes if c.id != alvo.id]
     if alvo.ancora.versao == versao:
@@ -1147,27 +1184,10 @@ def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
     """Da mais recente para a mais antiga, cada uma ativa, desfeita, fora da
     fila (reaplicada ou descartada) ou, se exige aprovação, pendente, aprovada
     ou recusada."""
-    desfeitas = _desfeitas(correcoes)
-    reaplicadas = {c.reaplica for c in correcoes if c.reaplica}
-    descartadas = {c.descarta for c in correcoes if c.descarta}
-    aprovadas, recusadas = _aprovadas(correcoes), _recusadas(correcoes)
-
-    def estado(c: Correcao) -> EstadoNoHistorico:
-        if c.id in desfeitas:
-            return "desfeita"
-        if c.id in recusadas:
-            return "recusada"
-        # A aprovada que depois saiu da fila mostra o que lhe aconteceu por último.
-        if c.id in reaplicadas:
-            return "reaplicada"
-        if c.id in descartadas:
-            return "descartada"
-        if c.exige_aprovacao:
-            return "aprovada" if c.id in aprovadas else "pendente"
-        return "ativa"
+    estado = estado_das(correcoes)
 
     return [
-        ItemDoHistorico(**c.model_dump(), estado=estado(c))
+        ItemDoHistorico(**c.model_dump(), estado=estado.de(c.id))
         for c in reversed(em_ordem(correcoes))
     ]
 
@@ -1399,10 +1419,14 @@ def reconciliar(
     desfeitas, as que saíram da fila, as que esperam aprovação ou foram
     recusadas e os registros que não corrigem um item.
     """
-    fora = _desfeitas(correcoes) | _resolvidas(correcoes) | _fora_da_entrega(correcoes)
+    estado = estado_das(correcoes)
     resultado = Reconciliacao(casadas=[], atendidas=[], sem_casar=[])
     for c in em_ordem(correcoes):
-        if c.ancora.versao == versao or c.tipo not in CORRIGIVEIS or c.id in fora:
+        if (
+            c.ancora.versao == versao
+            or c.tipo not in CORRIGIVEIS
+            or not estado.casavel(c.id)
+        ):
             continue
         candidatos = _candidatos(modelo, c)
         if c.tipo in ("comercial.acrescentar", ACRESCENTAR_TEXTO) or (
@@ -1613,32 +1637,19 @@ def aplicar(
     """
     resultado: dict[str, Any] = json.loads(json.dumps(modelo))
     pessoas = _pessoas(resultado)
-    comerciais = [c for c in resultado.get("comerciais", []) if isinstance(c, dict)]
-    for n, comercial in enumerate(comerciais):
-        comercial["id"] = f"com{n:03d}"
-    falas = []
-    for n, fala in enumerate(resultado.get("transcricao", [])):
-        if isinstance(fala, dict):
-            fala["id"] = f"fal{n:03d}"
-            falas.append(fala)
-    textos = []
-    for n, texto in enumerate(resultado.get("textos_na_tela", [])):
-        if isinstance(texto, dict):
-            texto["id"] = f"txt{n:03d}"
-            textos.append(texto)
-    for item in [
-        *pessoas,
-        *_pautas(resultado),
-        *comerciais,
-        *_planos(resultado),
-        *falas,
-        *textos,
-    ]:
+    # Os ids posicionais saem da posição no modelo, antes de qualquer correção.
+    posicionais = []
+    for chave in _PREFIXO_POSICIONAL:
+        for n, real in enumerate(resultado.get(chave, [])):
+            if isinstance(real, dict):
+                real["id"] = _id_posicional(chave, n)
+                posicionais.append(real)
+    for item in [*pessoas, *_pautas(resultado), *_planos(resultado), *posicionais]:
         item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
     nomes_do_modelo = [p["nome"] for p in pessoas]
-    desfeitas = _desfeitas(correcoes) | _fora_da_entrega(correcoes)
+    estado = estado_das(correcoes)
     # ponytail: reconciliar a cada leitura relê as pessoas do modelo por
     # correção antiga (custo pequeno hoje); guardar o resultado quando houver
     # reprocessamentos frequentes ou muitas correções por vídeo.
@@ -1659,7 +1670,7 @@ def aplicar(
     # Em ordem de data: a mais nova vence, e desfazer uma antiga não a derruba.
     # A aprovada vale a partir da aprovação, não de quando o Editor a fez.
     for c in _em_ordem_de_vigencia(da_versao + reconciliadas.casadas, correcoes):
-        if c.id in desfeitas:
+        if not estado.em_vigor(c.id):
             continue
         if c.tipo == "comercial.acrescentar":
             if c.id not in atendidas:
@@ -1848,7 +1859,7 @@ def montar_decisao(
 ) -> Correcao:
     """O registro em que um Curador aprova (autor e data, os do registro) ou
     recusa `alvo`, que tem de estar pendente. A recusa traz o motivo."""
-    if not alvo.exige_aprovacao or alvo.id in _decididas(correcoes):
+    if not alvo.exige_aprovacao or alvo.id in estado_das(correcoes).decididas:
         raise NaoPendente(alvo.id)
     return Correcao(
         tipo="aprovar" if aprovada else "recusar",
