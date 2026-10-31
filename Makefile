@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca
 
 instalar:
 	uv sync --locked
@@ -76,3 +76,22 @@ gravar-cassetes:
 	set -a && . ./.env && set +a && \
 	BUCKET_CLIPES_OURO="$${BUCKET_CLIPES_OURO:-$$(terraform -chdir=infra output -raw bucket_clipes_ouro)}" \
 	uv run --locked python -m api.cassete
+
+# Coleção de momentos e índice ANN da busca (#117), no Agent Retrieval; idempotente.
+# Os nomes vêm do Terraform (outputs busca_*), salvo se já vierem no ambiente.
+criar-colecao-da-busca:
+	set -a && . ./.env && set +a && \
+	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
+	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
+	BUSCA_INDICE="$${BUSCA_INDICE:-$$(terraform -chdir=infra output -raw busca_indice)}" \
+	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}" \
+	uv run --locked python -m api.criar_colecao_da_busca
+
+# Medição da busca (#117): make medir-busca [CONSULTAS=30] [DIMENSOES="128 256"]; só com credenciais.
+medir-busca:
+	set -a && . ./.env && set +a && \
+	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
+	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
+	BUSCA_INDICE="$${BUSCA_INDICE:-$$(terraform -chdir=infra output -raw busca_indice)}" \
+	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}" \
+	uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)

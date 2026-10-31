@@ -24,6 +24,18 @@ variable "regiao" {
   type = string
 }
 
+# O Agent Retrieval não existe em southamerica-east1: o índice da busca fica nos EUA (ADR 0006).
+variable "regiao_da_busca" {
+  type    = string
+  default = "us-east4"
+}
+
+variable "dimensao_dos_vetores" {
+  description = "Dimensão dos vetores da busca; fixa na criação da coleção"
+  type        = number
+  default     = 256
+}
+
 variable "admins_emergencia" {
   description = "E-mails dos administradores de emergência, separados por vírgula"
   type        = string
@@ -92,6 +104,7 @@ resource "google_project_service" "apis" {
     "monitoring.googleapis.com",
     "pubsub.googleapis.com",
     "sts.googleapis.com",
+    "vectorsearch.googleapis.com",
     "workflows.googleapis.com",
     # Ligadas antes pelo wizard; aqui para que o Terraform as declare.
     "aiplatform.googleapis.com",
@@ -126,6 +139,14 @@ resource "google_firestore_database" "mam" {
 locals {
   sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro", "referencias"]
   buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
+}
+
+# A coleção de momentos da busca (#117) e o índice ANN dela nascem no `make
+# criar-colecao-da-busca` (idempotente), porque o provedor do Terraform ainda não tem o
+# recurso. Este é o único lugar que monta os nomes; o código os recebe por BUSCA_*.
+locals {
+  colecao_da_busca = "momentos"
+  indice_da_busca  = "momentos-ann"
 }
 
 # clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git,
@@ -313,6 +334,22 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUCKET_DECUPAGENS"
         value = local.buckets["decupagens"]
+      }
+      env {
+        name  = "BUSCA_REGIAO"
+        value = var.regiao_da_busca
+      }
+      env {
+        name  = "BUSCA_COLECAO"
+        value = local.colecao_da_busca
+      }
+      env {
+        name  = "BUSCA_INDICE"
+        value = local.indice_da_busca
+      }
+      env {
+        name  = "BUSCA_DIMENSAO"
+        value = tostring(var.dimensao_dos_vetores)
       }
       # Quem tem esses e-mails (verificados) é Administrador (api/papeis.py).
       env {
@@ -1005,6 +1042,23 @@ output "url" {
 # make gravar-cassetes sobe o clipe sintético no bucket de clipes-ouro.
 output "repositorio" {
   value = "${var.regiao}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam.repository_id}"
+}
+
+# Para o make criar-colecao-da-busca e o make medir-busca.
+output "busca_regiao" {
+  value = var.regiao_da_busca
+}
+
+output "busca_colecao" {
+  value = local.colecao_da_busca
+}
+
+output "busca_indice" {
+  value = local.indice_da_busca
+}
+
+output "busca_dimensao" {
+  value = var.dimensao_dos_vetores
 }
 
 output "bucket_clipes_ouro" {

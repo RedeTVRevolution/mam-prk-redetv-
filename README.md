@@ -83,6 +83,17 @@ As contas de `ADMINS_EMERGENCIA` são Administradoras: a API dá o papel `admini
 
 Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda a cada pessoa o link para definir a senha; no primeiro login, a pessoa cadastra o aplicativo autenticador. Rodar de novo só reenvia o link. A API recusa todo token sem o segundo fator TOTP, e o Identity Platform bloqueia a conta por um tempo após tentativas erradas.
 
+## Índice da busca (Agent Retrieval)
+
+A busca guarda um registro por plano, fala, texto na tela e objeto de cada Decupagem numa coleção do Agent Retrieval, em outra região (ADR 0006). O código (`api/indice_da_busca.py`, `api/agent_retrieval.py`) lê projeto, região, coleção, índice e dimensão das variáveis `GCP_PROJECT_ID`, `BUSCA_REGIAO`, `BUSCA_COLECAO`, `BUSCA_INDICE` e `BUSCA_DIMENSAO`, que o `infra/main.tf` entrega ao serviço. Todo pedido de busca leva o `searchHint.indexHint` do índice ANN.
+
+Os dois alvos abaixo só rodam com credenciais (ADC de quem roda e o `.env`) e ficam fora do CI e do `make verificar`:
+
+- `make criar-colecao-da-busca`: cria a coleção de momentos e o índice ANN, com os campos de filtro declarados (idempotente: o que já existe fica). **Custo:** o índice implantado tem réplicas sempre ligadas, cobradas por hora, mesmo sem consulta (aceito na ADR 0006); veja a tabela de preços do Agent Retrieval, que não está registrada aqui.
+- `make medir-busca [CONSULTAS=30] [DIMENSOES="128 256"]`: indexa 3 Decupagens de exemplo (`api/exemplos_da_busca.py`) na coleção, consulta "vestido vermelho da Sabrina Sato" (filtros exatos, texto e significado, fundidos por RRF), confere que só volta o objeto dela, mede o p50 e o p95 de N consultas e imprime a tabela com o total de registros da coleção. Apaga os vídeos de exemplo no fim. Cada dimensão fora da configurada cria uma coleção e um índice temporários (cobrados enquanto existirem) e os apaga no fim. O comando sai com erro se o filtro composto devolver outra coisa.
+
+Os nomes dos campos do corpo REST seguem a documentação de 30/10/2026 e ainda não foram conferidos no ar: o #122 faz isso com a primeira execução do `make medir-busca`.
+
 ## Cassete do Gemini
 
 O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema da decupagem e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video` e o texto da resposta, sem cabeçalhos nem credenciais. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.
