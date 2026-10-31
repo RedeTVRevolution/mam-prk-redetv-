@@ -1,8 +1,9 @@
 import json
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
@@ -178,6 +179,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "id",
         "nome",
         "programa",
+        "data_exibicao",
         "estado",
         "codigo_falha",
         "duracao_s",
@@ -558,3 +560,64 @@ def test_get_programas_lista_os_perfis() -> None:
 
 def test_get_programas_exige_login() -> None:
     assert Ambiente().cliente.get("/v1/programas").status_code == 401
+
+
+def test_data_de_exibicao_fica_no_job_e_volta_no_get_e_na_lista() -> None:
+    ambiente = Ambiente()
+
+    criado = ambiente.criar(data_exibicao="1999-12-31")
+
+    assert criado.status_code == 202
+    assert criado.json()["data_exibicao"] == "1999-12-31"
+    job_id = criado.json()["id"]
+    lido = ambiente.cliente.get(f"/v1/jobs/{job_id}", headers=AUTORIZACAO).json()
+    assert lido["data_exibicao"] == "1999-12-31"
+    lista = ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json()
+    assert lista[0]["data_exibicao"] == "1999-12-31"
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None and job.data_exibicao == date(1999, 12, 31)
+
+
+def test_sem_data_de_exibicao_o_campo_vem_nulo() -> None:
+    resposta = Ambiente().criar()
+
+    assert resposta.json()["data_exibicao"] is None
+
+
+def test_data_de_exibicao_de_hoje_e_aceita_e_a_de_amanha_da_422() -> None:
+    ambiente = Ambiente()
+
+    assert ambiente.criar(data_exibicao="2026-10-29").status_code == 202
+    assert ambiente.criar(data_exibicao="2026-10-30").status_code == 422
+
+
+@pytest.mark.parametrize("valor", ["31/12/1999", "1999-13-40", "ontem", 20261029, ""])
+def test_data_de_exibicao_mal_formada_da_422(valor: Any) -> None:
+    assert Ambiente().criar(data_exibicao=valor).status_code == 422
+
+
+def test_job_guardado_sem_data_de_exibicao_continua_sendo_lido() -> None:
+    registro = {
+        "id": "antigo",
+        "nome": "a.mp4",
+        "tamanho_bytes": 1,
+        "estado": "concluido",
+        "criado_por": "u",
+        "criado_em": INICIO,
+        "atualizado_em": INICIO,
+    }
+
+    assert Job.model_validate(registro).data_exibicao is None
+
+
+def test_data_de_exibicao_vai_ao_armazenamento_como_texto() -> None:
+    # O Firestore não guarda `date`; o Job a entrega como texto ISO e a lê de volta.
+    job = Job(
+        id="j", nome="a.mp4", tamanho_bytes=1, estado="concluido", criado_por="u",
+        data_exibicao=date(1999, 12, 31), criado_em=INICIO, atualizado_em=INICIO,
+    )  # fmt: skip
+
+    registro = job.model_dump()
+
+    assert registro["data_exibicao"] == "1999-12-31"
+    assert Job.model_validate(registro) == job

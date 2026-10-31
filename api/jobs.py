@@ -6,7 +6,7 @@ import json
 import uuid
 import zlib
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -108,8 +109,15 @@ class Job(BaseModel):
     criado_por: str
     sistema: str | None = None
     programa: str | None = None
+    # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
+    data_exibicao: date | None = None
     criado_em: datetime
     atualizado_em: datetime
+
+    @field_serializer("data_exibicao")
+    def _data_como_texto(self, data: date | None) -> str | None:
+        # O Firestore não guarda `date`; o Pydantic a lê de volta do texto ISO.
+        return data.isoformat() if data else None
 
 
 class JobPublico(BaseModel):
@@ -121,6 +129,7 @@ class JobPublico(BaseModel):
     codigo_falha: CodigoDeFalha | None
     duracao_s: float | None
     programa: str | None = None
+    data_exibicao: date | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -162,6 +171,7 @@ class NovoJob(BaseModel):
     tamanho_bytes: Annotated[int, Field(strict=True)]
     tipo: Literal["video/mp4"]
     programa: str | None = None  # um nome de `programas.toml`
+    data_exibicao: date | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -184,6 +194,14 @@ class NovoJob(BaseModel):
         if not nome.lower().endswith(".mp4"):
             raise ValueError("nome sem extensão .mp4")
         return nome
+
+    @field_validator("data_exibicao", mode="before")
+    @classmethod
+    def _data_so_como_texto(cls, valor: Any) -> Any:
+        # O Pydantic leria um número como timestamp; aqui só vale "AAAA-MM-DD".
+        if valor is not None and not isinstance(valor, str):
+            raise ValueError("data_exibicao deve ser texto AAAA-MM-DD")
+        return valor
 
     @field_validator("programa")
     @classmethod
@@ -440,6 +458,8 @@ def criar_rotas(
         else:
             criado_por, sistema = chamador.uid, None
         agora = relogio()
+        if novo.data_exibicao is not None and novo.data_exibicao > agora.date():
+            raise HTTPException(422, "Data de exibição no futuro")
         job = Job(
             id=uuid.uuid4().hex,
             nome=novo.nome,
@@ -448,6 +468,7 @@ def criar_rotas(
             criado_por=criado_por,
             sistema=sistema,
             programa=novo.programa,
+            data_exibicao=novo.data_exibicao,
             criado_em=agora,
             atualizado_em=agora,
         )
