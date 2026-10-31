@@ -85,6 +85,13 @@ export function filtrosDaBusca(busca: string): FiltrosDoAcervo {
   }
 }
 
+/** A data de exibição (`AAAA-MM-DD`) como `DD/MM/AAAA`; sem data, um travessão. */
+export function dataDeExibicao(data: string | null | undefined): string {
+  if (!data) return '—'
+  const [ano, mes, dia] = data.split('-')
+  return `${dia}/${mes}/${ano}`
+}
+
 /** A query de `GET /v1/jobs` para estes filtros. */
 export function filtrosParaApi(f: FiltrosDoAcervo, cursor: string | null): string {
   const p = new URLSearchParams({ limite: String(POR_PAGINA), ordem: f.ordem })

@@ -303,3 +303,84 @@ test('falha ao carregar o vídeo mostra o código e tenta de novo', async () => 
 
   expect(await screen.findByLabelText('Player')).toBeTruthy()
 })
+
+test('L com o vídeo pausado recomeça o ciclo em 1×', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrir()
+
+  await usuario.keyboard('lll')
+  expect(player.playbackRate).toBe(4)
+  await usuario.keyboard('k')
+  await usuario.keyboard('l')
+
+  expect(player.paused).toBe(false)
+  expect(player.playbackRate).toBe(1)
+})
+
+test('com o link válido, a falha do arquivo mostra o código e não pede o link de novo', async () => {
+  let pedidos = 0
+  servidor.events.on('request:start', ({ request }) => {
+    if (request.url.endsWith('/reproducao')) pedidos += 1
+  })
+  const player = await abrir()
+  const antes = pedidos
+
+  fireEvent.error(player)
+
+  const aviso = await screen.findByRole('alert')
+  expect(aviso.textContent).toContain('Código para o suporte: midia_')
+  expect(pedidos).toBe(antes)
+  servidor.events.removeAllListeners()
+})
+
+test('com o link vencido, a falha do arquivo pede outro link e volta ao mesmo ponto', async () => {
+  let pedidos = 0
+  servidor.use(
+    http.get('/v1/jobs/j1/reproducao', () => {
+      pedidos += 1
+      return HttpResponse.json({
+        url: `https://exemplo.test/v.mp4?p=${pedidos}`,
+        expira_em: pedidos === 1 ? '2000-01-01T00:00:00Z' : '2999-01-01T00:00:00Z',
+      })
+    }),
+  )
+  history.replaceState(null, '', '/video/j1')
+  const auth = new AutenticadorFalso([
+    { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
+  ])
+  await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
+  await auth.confirmarTotp(CODIGO_TOTP_FALSO)
+  render(
+    <AtalhosProvider>
+      <Visualizador api={criarClienteDaApi(auth, () => {})} job={JOB} t={null} podeEditar={false} />
+    </AtalhosProvider>,
+  )
+  const player = (await screen.findByLabelText('Player')) as HTMLVideoElement
+  await waitFor(() => expect(player.getAttribute('src')).toBe('https://exemplo.test/v.mp4?p=1'))
+  irPara(player, 300)
+
+  fireEvent.error(player)
+
+  await waitFor(() => expect(player.getAttribute('src')).toBe('https://exemplo.test/v.mp4?p=2'))
+  player.currentTime = 0
+  fireEvent.loadedMetadata(player)
+  expect(player.currentTime).toBe(300)
+  expect(pedidos).toBe(2)
+})
+
+test('falha ao baixar a decupagem mostra o código para o suporte', async () => {
+  const usuario = userEvent.setup()
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => new HttpResponse(null, { status: 409 })))
+  await abrir()
+
+  await usuario.click(screen.getByRole('button', { name: 'Baixar decupagem (JSON)' }))
+
+  const aviso = await screen.findByRole('alert')
+  expect(aviso.textContent).toContain('Código para o suporte: http_409')
+})
+
+test('sem a decupagem pronta, não há botão de baixar o JSON', async () => {
+  await abrir({ estado: 'analisando' })
+
+  expect(screen.queryByRole('button', { name: 'Baixar decupagem (JSON)' })).toBeNull()
+})

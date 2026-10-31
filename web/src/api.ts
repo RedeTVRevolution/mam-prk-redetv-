@@ -25,6 +25,15 @@ export class FalhaNaApi extends Error {
   }
 }
 
+/** O código para o suporte de uma falha da API. */
+export function codigoDoErro(erro: unknown): string {
+  if (erro instanceof FalhaNaApi) return `http_${erro.status}`
+  if (erro instanceof NaoEncontrado) return 'http_404'
+  if (erro instanceof ConflitoNaApi) return 'http_409'
+  if (erro instanceof PedidoInvalido) return 'http_422'
+  return 'api_inacessivel'
+}
+
 async function detalhe(resposta: Response): Promise<string> {
   try {
     const { detail } = (await resposta.json()) as { detail?: unknown }

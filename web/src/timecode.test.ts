@@ -49,3 +49,7 @@ test('drop-frame com início em 01:00:00;00 acompanha a hora', () => {
 test('drop-frame com início no meio do minuto pula na virada', () => {
   expect(timecodeNoInstante('00:00:59;29', NTSC, noQuadro(1))).toBe('00:01:00;02')
 })
+
+test('drop-frame fora de 29,97 não dá TC', () => {
+  expect(timecodeNoInstante('00:00:00;00', 60000 / 1001, 1000)).toBeNull()
+})

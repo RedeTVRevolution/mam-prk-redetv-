@@ -11,12 +11,15 @@ function partes(tc: string): { h: number; m: number; s: number; f: number; drop:
 /**
  * O TC no instante `ms` do arquivo, dado o TC do primeiro quadro e a taxa real de quadros.
  * `HH:MM:SS;FF` (ponto e vírgula) é drop-frame (29,97 fps, regra SMPTE: pula os quadros 00 e 01
- * a cada minuto, menos nos múltiplos de 10). Devolve `null` se o TC inicial não estiver no formato.
+ * a cada minuto, menos nos múltiplos de 10). Devolve `null` se o TC inicial não estiver no formato
+ * ou se for drop-frame numa taxa que não seja 29,97.
  */
 export function timecodeNoInstante(inicial: string, fps: number, ms: number): string | null {
   const p = partes(inicial)
   if (!p || !(fps > 0)) return null
   const base = Math.round(fps)
+  // A regra de 2 quadros por minuto só vale para 29,97; noutra taxa, o TC sairia errado sem aviso.
+  if (p.drop && base !== 30) return null
   const porMinuto = base * 60 - QUADROS_PERDIDOS_POR_MINUTO
   const porDezMinutos = base * 600 - 9 * QUADROS_PERDIDOS_POR_MINUTO
   const minutosInicio = p.h * 60 + p.m

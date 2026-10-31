@@ -1,5 +1,4 @@
 import {
-  Alert,
   AppShell,
   Badge,
   Box,
@@ -17,7 +16,6 @@ import {
   VisuallyHidden,
 } from '@mantine/core'
 import {
-  IconAlertTriangle,
   IconArrowDown,
   IconFilterOff,
   IconSearch,
@@ -25,11 +23,12 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { FalhaNaApi, SessaoExpirada, type ClienteDaApi } from './api.ts'
+import { codigoDoErro, SessaoExpirada, type ClienteDaApi } from './api.ts'
 import { useAtalhos, type Atalho } from './atalhos.ts'
 import EnvioDeVideo from './EnvioDeVideo.tsx'
+import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { fraseDaFalha } from './falhas.ts'
-import { filtrosParaBusca, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
+import { dataDeExibicao, filtrosParaBusca, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
 import { tempo } from './linhaDoTempo.ts'
 import { ACERVO, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, ESTADOS_DO_JOB, type EstadoDoJob } from './tema.ts'
@@ -47,12 +46,6 @@ const ATALHOS: Atalho[] = [
   { tecla: 'Enter', acao: 'Na tabela: abrir o vídeo da linha selecionada', grupo: 'Acervo' },
 ]
 
-function dataDeExibicao(data: string | null | undefined): string {
-  if (!data) return '—'
-  const [ano, mes, dia] = data.split('-')
-  return `${dia}/${mes}/${ano}`
-}
-
 function dataEHora(iso: string): string {
   const d = new Date(iso)
   const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -63,37 +56,6 @@ type Carga =
   | { tipo: 'carregando' }
   | { tipo: 'pronta'; jobs: Job[]; proximo: string | null }
   | { tipo: 'erro'; codigo: string }
-
-function codigoDoErro(erro: unknown): string {
-  return erro instanceof FalhaNaApi ? `http_${erro.status}` : 'api_inacessivel'
-}
-
-/** Alerta de erro do sistema visual: frase com a ação, código para o suporte e o botão. */
-function AlertaDeErro({
-  mensagem,
-  codigo,
-  aoTentar,
-}: {
-  mensagem: string
-  codigo: string
-  aoTentar?: () => void
-}) {
-  return (
-    <Alert color={CORES.falhou} variant="light" icon={<IconAlertTriangle />} role="alert">
-      <Group gap="sm">
-        <Text size="sm">{mensagem}</Text>
-        <Text size="xs" c={CORES.textoSecundario}>
-          Código para o suporte: {codigo}
-        </Text>
-        {aoTentar && (
-          <Button type="button" size="xs" variant="default" onClick={aoTentar}>
-            Tentar de novo
-          </Button>
-        )}
-      </Group>
-    </Alert>
-  )
-}
 
 function irPara(filtros: FiltrosDoAcervo, opcoes: { substituir?: boolean } = {}) {
   navegar(`${ACERVO}${filtrosParaBusca(filtros)}`, opcoes)
