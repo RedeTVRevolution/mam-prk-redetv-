@@ -32,7 +32,11 @@ from api.decupagem import (
     TextoNaTela,
     TomDaPauta,
 )
-from api.pessoas import LISTAS, nao_identificado
+from api.identidade import (
+    identidade_do_comercial as _identidade_do_comercial,
+)
+from api.identidade import identidade_do_nome, nao_identificado
+from api.pessoas import LISTAS
 
 TipoNovo = Literal[
     "pessoa.renomear",
@@ -680,10 +684,11 @@ def identidade_da_pessoa(pessoa: dict[str, Any]) -> str:
     das aparições (só elas mostram quem é).
     """
     nome = str(pessoa["nome"])
-    if nao_identificado(nome):
+    identidade = identidade_do_nome(nome)
+    if identidade is None:
         inicio, fim = _intervalo_da_pessoa(pessoa, ("na_imagem",))
         return f"{normalizar(nome)}@{inicio}-{fim}"
-    return normalizar(nome)
+    return identidade
 
 
 def _pessoas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
@@ -763,7 +768,7 @@ def _intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
 
 def identidade_do_comercial(comercial: dict[str, Any]) -> str:
     """Marca normalizada e tipo, como a emenda da consolidação (#45)."""
-    return f"{normalizar(str(comercial['marca']))}|{comercial['tipo']}"
+    return _identidade_do_comercial(str(comercial["marca"]), str(comercial["tipo"]))
 
 
 def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, int]:

@@ -8,7 +8,6 @@ nela, porque a vizinha o decupa.
 from collections.abc import Sequence
 from typing import cast
 
-from api.comparador import normalizar
 from api.decupagem import (
     VERSAO_ESQUEMA,
     Bloco,
@@ -22,6 +21,7 @@ from api.decupagem import (
     Video,
     _Intervalo,
 )
+from api.identidade import identidade_do_comercial
 from api.janelas import Janela
 from api.pessoas import LISTAS, unir_pessoas
 from api.tempos import aplicar_regra_de_tempos
@@ -216,7 +216,8 @@ def consolidar(
             pares = [
                 s
                 for s in proximos
-                if s.tipo == c.tipo and normalizar(s.marca) == normalizar(c.marca)
+                if identidade_do_comercial(s.marca, s.tipo)
+                == identidade_do_comercial(c.marca, c.tipo)
             ]
             comerciais.append(_emendar(c, pares))
     planos = [

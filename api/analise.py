@@ -19,15 +19,10 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict
 
+from api.analise_por_janelas import analisar_video
 from api.ciclo_de_vida import transitar
 from api.decupagem import Video
-from api.gemini import (
-    AnaliseFalhou,
-    SessaoHttp,
-    Transporte,
-    TransporteVertex,
-    analisar,
-)
+from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs, agora_utc
 from api.nuvem import DecupagensStorage, RepositorioFirestore
 
@@ -75,7 +70,7 @@ def criar_app(
         if job.sha256 is None or job.duracao_s is None:
             return falhar()
         try:
-            decupagem = analisar(
+            decupagem = analisar_video(
                 transporte,
                 video_uri=decupagens.uri_do_proxy(job.id),
                 job_id=job.id,

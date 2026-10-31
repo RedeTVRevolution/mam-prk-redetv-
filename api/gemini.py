@@ -102,6 +102,9 @@ class Chamada:
     esquema: dict[str, Any]
     rotulos: dict[str, str]
     ferramentas: tuple[()] = ()  # o modelo nunca recebe ferramentas
+    # Trecho do vídeo (`videoMetadata.startOffset`/`endOffset`), em ms do início
+    # do arquivo; sem ele, o vídeo inteiro. O modelo conta os tempos do arquivo.
+    trecho_ms: tuple[int, int] | None = None
 
 
 class ErroHttp(Exception):
@@ -144,6 +147,11 @@ class TransporteVertex:
             f"{self._projeto}/locations/global/publishers/google/models/"
             f"{chamada.modelo}:generateContent"
         )
+        metadados: dict[str, Any] = {"fps": 1}
+        if chamada.trecho_ms is not None:
+            inicio_ms, fim_ms = chamada.trecho_ms
+            metadados["startOffset"] = f"{inicio_ms / 1000:g}s"
+            metadados["endOffset"] = f"{fim_ms / 1000:g}s"
         corpo = {
             "systemInstruction": {"parts": [{"text": chamada.instrucao}]},
             "contents": [
@@ -155,7 +163,7 @@ class TransporteVertex:
                                 "mimeType": "video/mp4",
                                 "fileUri": chamada.video_uri,
                             },
-                            "videoMetadata": {"fps": 1},
+                            "videoMetadata": metadados,
                         }
                     ],
                 }
@@ -224,6 +232,7 @@ def analisar(
     job_id: str,
     video: Video,
     programa: str | None = None,
+    trecho_ms: tuple[int, int] | None = None,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
@@ -234,6 +243,7 @@ def analisar(
         video_uri=video_uri,
         esquema=esquema_do_modelo(),
         rotulos={"job_id": job_id},
+        trecho_ms=trecho_ms,
     )
     falhas_rede = 0
     falhas_esquema = 0

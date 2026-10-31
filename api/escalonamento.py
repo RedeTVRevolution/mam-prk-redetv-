@@ -10,7 +10,7 @@ import hashlib
 from typing import Literal
 
 from api.decupagem import Decupagem
-from api.pessoas import nao_identificado
+from api.identidade import nao_identificado
 
 # ponytail: 10% é um chute; o valor real sai do piloto.
 FRACAO_PADRAO = 0.1
