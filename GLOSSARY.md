@@ -34,6 +34,9 @@ Contexto fixo de um programa (apresentadores, repórteres, merchandising frequen
 
 ### Pessoas e evidência
 
+**Catálogo de pessoas**:
+Dado vivo no Firestore (`api/catalogo.py`): cada pessoa tem id estável, nome, papel, apelidos e referências de rosto (origem `web` ou `acervo`). A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo.
+
 **Aparição**:
 Pessoa visível na imagem; só ela conta como tempo de tela.
 

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
+from api.catalogo import CatalogoEmMemoria
 from api.chaves import (
     MacSimulado,
     RepositorioDeChavesEmMemoria,
@@ -117,6 +118,7 @@ class Mundo:
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
         self.aprovacao = RepositorioDeAprovacaoEmMemoria()
         self.chaves = RepositorioDeChavesEmMemoria()
+        self.catalogo = CatalogoEmMemoria()
         self.agora = BASE
         self.cliente = TestClient(
             criar_app(
@@ -131,6 +133,7 @@ class Mundo:
                 papeis=repo_papeis,
                 correcoes=self.correcoes,
                 aprovacao=self.aprovacao,
+                catalogo=self.catalogo,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
                 relogio=lambda: self.agora,
             )

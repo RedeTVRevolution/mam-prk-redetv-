@@ -119,6 +119,8 @@ class Pessoa(_Estrito):
         'Vazia para "não identificado".',
     )
     origem: Literal["modelo", "revisao"] = "modelo"
+    # A pessoa do catálogo (#108); o servidor grava, o modelo não conhece.
+    catalogo_id: Id | None = None
     na_imagem: list[Aparicao] = Field(
         description="Aparições: a pessoa visível na imagem. Foto num gráfico, logo "
         "ou QR code não é aparição."
@@ -279,6 +281,7 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "inicio_modelo_ms",
         "fim_modelo_ms",
         "origem",
+        "catalogo_id",
         "quadro",
         "texto_original",
         "medido",

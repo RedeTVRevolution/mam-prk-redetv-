@@ -28,6 +28,7 @@ from api.auth import (
     Sistema,
     Usuario,
 )
+from api.catalogo import Catalogo
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
@@ -449,6 +450,7 @@ def criar_rotas(
     relogio: Callable[[], datetime],
     correcoes: RepositorioDeCorrecoes,
     aprovacao: RepositorioDeAprovacao,
+    catalogo: Catalogo,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -596,6 +598,7 @@ def criar_rotas(
                 job.id,
                 _autoria(autor),
                 exige_aprovacao=_espera_curador(request, autor, novo.tipo),
+                catalogo=catalogo,
             )
         except VersaoDesatualizada:
             raise HTTPException(

@@ -12,7 +12,15 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
+from api.catalogo import (
+    PessoaDoCatalogo,
+    PessoaInexistente,
+    corrigida,
+    nomes_de_busca,
+    novo_id,
+)
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
@@ -31,6 +39,7 @@ COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
+COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
@@ -194,6 +203,71 @@ class RepositorioDePapeisFirestore:
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         self._colecao.document(uid).set({"papeis": papeis})
+
+
+class CatalogoFirestore:
+    """Um documento por pessoa, com o id estável como chave. `nomes_de_busca`
+    (nome e apelidos normalizados) é o índice de `achar`."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def _gravar(self, pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
+        self._colecao.document(pessoa.id).set(
+            {
+                **pessoa.model_dump(exclude={"id"}),
+                "nomes_de_busca": nomes_de_busca(pessoa),
+            }
+        )
+        return pessoa
+
+    @staticmethod
+    def _pessoa(id: str, dados: dict[str, Any]) -> PessoaDoCatalogo:
+        dados = {k: v for k, v in dados.items() if k != "nomes_de_busca"}
+        return PessoaDoCatalogo(id=id, **dados)
+
+    def obter(self, id: str) -> PessoaDoCatalogo | None:
+        doc = self._colecao.document(id).get()
+        return self._pessoa(id, doc.to_dict() or {}) if doc.exists else None
+
+    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
+        consulta = self._colecao.where(
+            filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
+        )
+        return [self._pessoa(d.id, d.to_dict() or {}) for d in consulta.stream()]
+
+    def todas(self) -> list[PessoaDoCatalogo]:
+        return [self._pessoa(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
+
+    def acrescentar(
+        self, nome: str, papel: str, apelidos: list[str]
+    ) -> PessoaDoCatalogo:
+        return self._gravar(
+            PessoaDoCatalogo(
+                id=novo_id(), nome=nome, papel=papel, apelidos=list(apelidos)
+            )
+        )
+
+    def corrigir(
+        self,
+        id: str,
+        *,
+        nome: str | None = None,
+        papel: str | None = None,
+        apelidos: list[str] | None = None,
+    ) -> PessoaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        return self._gravar(corrigida(atual, nome, papel, apelidos))
+
+    def apagar(self, id: str) -> None:
+        referencia = self._colecao.document(id)
+        if not referencia.get().exists:
+            raise PessoaInexistente(id)
+        referencia.delete()
 
 
 class RepositorioDeCorrecoesFirestore:

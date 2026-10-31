@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis definir-aprovacao gravar-cassetes testar-na-imagem
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem
 
 instalar:
 	uv sync --locked
@@ -60,6 +60,10 @@ revogar-chave:
 # Papéis de uma conta (E3): make atribuir-papeis EMAIL=ana@redetv.com.br PAPEIS=editor,curador
 atribuir-papeis:
 	uv run --locked python -m api.atribuir_papeis "$(EMAIL)" "$(PAPEIS)"
+
+# Carga inicial do catálogo de pessoas (#108), a partir do api/programas.toml; idempotente.
+carregar-catalogo:
+	uv run --locked python -m api.carregar_catalogo
 
 # Tipos de correção que exigem aprovação de Curador (E3): make definir-aprovacao TIPOS=pessoa.renomear,pauta.titulo (vazio: nenhum)
 definir-aprovacao:

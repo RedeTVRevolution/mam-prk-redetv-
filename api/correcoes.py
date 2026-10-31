@@ -25,6 +25,7 @@ from pydantic import (
     model_validator,
 )
 
+from api.catalogo import Catalogo
 from api.comparador import normalizar
 from api.decupagem import (
     Comercial,
@@ -148,6 +149,8 @@ class Correcao(BaseModel):
     aprova: str | None = None  # só no tipo "aprovar": o id da correção aprovada
     recusa: str | None = None  # só no tipo "recusar": o id da correção recusada
     ocorrencia: Ocorrencia | None = None  # nas correções de aparição e menção
+    # Só no `pessoa.renomear` cujo nome casa com uma pessoa do catálogo.
+    catalogo_id: str | None = None
     antes: str
     depois: str
     ancora: Ancora
@@ -808,6 +811,7 @@ def corrigir(
     autoria: Autoria,
     *,
     exige_aprovacao: bool = False,
+    catalogo: Catalogo | None = None,
 ) -> Correcao:
     """O registro da correção de `novo` sobre o item do JSON do modelo, com a
     âncora pronta. A ocorrência de uma pessoa tem de existir na decupagem
@@ -867,9 +871,19 @@ def corrigir(
         item_id=novo.item_id,
         antes=antes,
         ocorrencia=novo.ocorrencia,
+        catalogo_id=_id_no_catalogo(novo, catalogo),
         ancora=_ancora_do_item(item, tipo_do_item, versao),
         **campos,
     )
+
+
+def _id_no_catalogo(novo: NovaCorrecao, catalogo: Catalogo | None) -> str | None:
+    """O id da pessoa do catálogo que tem o nome novo; vazio sem catálogo, sem
+    ninguém com esse nome ou com mais de uma (a revisora não escolhe aqui)."""
+    if catalogo is None or not TIPOS[novo.tipo].acha_no_catalogo:
+        return None
+    achadas = catalogo.achar(novo.valor)
+    return achadas[0].id if len(achadas) == 1 else None
 
 
 def _ancora_do_item(
@@ -1757,6 +1771,8 @@ class Tipo:
     identidades: Callable[[Correcao], set[str]] = _so_a_ancora
     # Pessoa: casa também pelo nome novo; ou longe do que ela já tem.
     casa_pelo_nome_novo: bool = False
+    # O nome novo é procurado no catálogo e, se casa com uma só pessoa, grava o id.
+    acha_no_catalogo: bool = False
     casa_longe: bool = False
     acrescenta: Acrescenta | None = None
 
@@ -2013,6 +2029,8 @@ def _renomear_pessoa(
     resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
 ) -> None:
     pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
+    if c.catalogo_id is not None:
+        pessoa["catalogo_id"] = c.catalogo_id
 
 
 def _manter_o_nome_do_modelo(pessoa: dict[str, Any], nome: str) -> None:
@@ -2161,6 +2179,7 @@ TIPOS: dict[str, Tipo] = {
         atender_na_pessoa=_manter_o_nome_do_modelo,
         ja_traz=_traz_o_nome,
         casa_pelo_nome_novo=True,
+        acha_no_catalogo=True,
     ),
     "pauta.titulo": Tipo(
         canonizar=_campo_longo,
