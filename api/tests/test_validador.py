@@ -170,12 +170,11 @@ def test_padrao_da_redetv_com_faixa_de_timecode_e_aceito(tmp_path: Path) -> None
         sondagem = _probe(arquivo)
         assert _faixas(arquivo) == ["video", "audio"]
         assert all("timecode" not in f.get("tags", {}) for f in sondagem["streams"])
-    saida = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_format", "-of", "json",
-         str(aceito.copia_limpa)],
-        check=True, capture_output=True, text=True,
-    ).stdout  # fmt: skip
-    assert "timecode" not in json.loads(saida)["format"].get("tags", {})
+        saida = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_format", "-of", "json", str(arquivo)],
+            check=True, capture_output=True, text=True,
+        ).stdout  # fmt: skip
+        assert "timecode" not in json.loads(saida)["format"].get("tags", {})
 
 
 def test_mp4_sem_faixa_de_timecode_tem_timecode_origem_none(tmp_path: Path) -> None:
@@ -206,7 +205,9 @@ def _faixa_de_timecode(valor: str | None) -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize("valor", ["abc", "25:00:00", "", "01:00:00:0", None])
+@pytest.mark.parametrize(
+    "valor", ["abc", "25:00:00", "", "01:00:00:0", "01:00:00:000", None]
+)
 def test_timecode_fora_do_formato_vira_none(valor: str | None) -> None:
     assert validador.ler_timecode_origem(_faixa_de_timecode(valor)) is None
 

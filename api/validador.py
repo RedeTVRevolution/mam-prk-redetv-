@@ -25,7 +25,7 @@ TEMPO_LIMITE_S = 7200
 NOME_DO_AUDIO = "audio.wav"
 TAXA_DO_AUDIO_HZ = 16_000
 # HH:MM:SS:FF, ou HH:MM:SS;FF no drop-frame.
-FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2,3}")
+FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2}")
 
 
 class Recusa(Exception):
@@ -133,15 +133,12 @@ def ler_timecode_origem(sondagem: dict[str, Any]) -> str | None:
     for faixa in sondagem.get("streams", []):
         if faixa.get("codec_type") != "data":
             continue
-        tags = faixa.get("tags")
-        if not isinstance(tags, dict) or tags.get("timecode") is None:
-            continue
         if faixa.get("codec_tag_string") != "tmcd":
             continue
-        valor = tags["timecode"]
+        tags = faixa.get("tags")
+        valor = tags.get("timecode") if isinstance(tags, dict) else None
         if isinstance(valor, str) and FORMATO_DO_TIMECODE.fullmatch(valor):
             return valor
-        return None
     return None
 
 
@@ -193,13 +190,13 @@ def validar(
     except DeteccaoFalhou:
         raise _corrompido(copia, proxy, audio) from None
     return Aceito(
-        copia,
-        proxy,
-        _sha256(entrada),
-        duracao,
-        audio,
-        tuple(cortes),
-        ler_timecode_origem(sondagem),
+        copia_limpa=copia,
+        proxy=proxy,
+        sha256=_sha256(entrada),
+        duracao_s=duracao,
+        audio=audio,
+        cortes_ms=tuple(cortes),
+        timecode_origem=ler_timecode_origem(sondagem),
     )
 
 
