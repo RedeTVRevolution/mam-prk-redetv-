@@ -107,7 +107,11 @@ export const tema = createTheme({
     Menu: Menu.extend({ styles: { dropdown: { background: CORES.elevada } } }),
     Popover: Popover.extend({ styles: { dropdown: { background: CORES.elevada } } }),
     Modal: Modal.extend({
-      defaultProps: { transitionProps: { duration: 150 } },
+      // O botão de fechar é só um ícone: sem isto, o leitor de tela não tem o que dizer.
+      defaultProps: {
+        transitionProps: { duration: 150 },
+        closeButtonProps: { 'aria-label': 'Fechar' },
+      },
       styles: { content: { background: CORES.elevada }, header: { background: CORES.elevada } },
     }),
     Loader: Loader.extend({ defaultProps: { size: 'sm' } }),

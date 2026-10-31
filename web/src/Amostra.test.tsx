@@ -1,4 +1,5 @@
 import { cleanup, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test, vi } from 'vitest'
 import Amostra from './Amostra.tsx'
 import { render } from './render-teste.tsx'
@@ -76,4 +77,14 @@ test('o painel destaca o item atual', () => {
     .getAllByRole('button')
     .filter((b) => b.getAttribute('aria-current') === 'true')
   expect(atual).toHaveLength(1)
+})
+
+test('o botão de fechar do diálogo tem nome acessível', async () => {
+  const usuario = userEvent.setup()
+  render(<Amostra />)
+
+  await usuario.click(screen.getByRole('button', { name: 'Abrir o diálogo' }))
+
+  const dialogo = await screen.findByRole('dialog', { name: 'Corrigir pessoa' })
+  expect(within(dialogo).getByRole('button', { name: 'Fechar' })).toBeTruthy()
 })
