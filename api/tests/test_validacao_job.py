@@ -135,6 +135,30 @@ def test_aceito_envia_copia_limpa_e_proxy_apaga_o_original_e_segue_para_analise(
     assert job.sha256 is not None and len(job.sha256) == 64
     assert job.duracao_s == pytest.approx(2, abs=0.2)
     assert job.cortes_ms == []
+    assert job.timecode_origem is None
+
+
+def test_timecode_de_origem_do_arquivo_chega_ao_job(
+    ambiente: Ambiente, tmp_path: Path
+) -> None:
+    arquivo = tmp_path / "tc.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=2",
+            "-f", "lavfi", "-i", "sine=duration=2",
+            "-c:v", "libx264", "-c:a", "aac", "-timecode", "01:00:00:00",
+            str(arquivo),
+        ],
+        check=True,
+        capture_output=True,
+    )  # fmt: skip
+    ambiente.enviar("j-tc", arquivo.read_bytes())
+
+    ambiente.executar("j-tc")
+
+    job = ambiente.job("j-tc")
+    assert (job.estado, job.timecode_origem) == ("analisando", "01:00:00:00")
 
 
 def test_cortes_de_camera_ficam_no_job(ambiente: Ambiente, tmp_path: Path) -> None:

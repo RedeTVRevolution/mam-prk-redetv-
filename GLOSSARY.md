@@ -72,8 +72,12 @@ Algo detectado num momento: pessoa, marca, objeto ou pauta.
 Lugar onde um vídeo enviado espera a validação; nada é processado a partir dela.
 
 **Cópia limpa**:
-O MP4 aceito pela quarentena, regravado só com as faixas de vídeo e áudio, sem metadados e sem recodificar. É dele que todo o processamento parte.
+O MP4 aceito pela quarentena, regravado só com as faixas de vídeo e áudio (as faixas de dados, como a de timecode, ficam de fora), sem metadados e sem recodificar. É dele que todo o processamento parte.
 _Evitar_: cópia limpa 720p, original tratado
+
+**Timecode de origem**:
+O timecode inicial lido da faixa de timecode do arquivo enviado, guardado no Job e levado ao bloco `video` da Decupagem. Ausente quando o arquivo não tem a faixa.
+_Evitar_: timecode inventado, 00:00:00:00 por padrão
 
 **Proxy de escalonamento**:
 Cópia do vídeo em resolução maior, usada só para reanalisar trechos no escalonamento.

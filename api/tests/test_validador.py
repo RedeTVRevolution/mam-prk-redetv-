@@ -145,9 +145,111 @@ def test_acima_de_1080p_e_recusado(tmp_path: Path) -> None:
     assert _recusa(entrada, tmp_path) == "codec_nao_suportado"
 
 
-def test_faixa_de_dados_extra_e_recusada(tmp_path: Path) -> None:
-    entrada = _gerar(tmp_path / "video.mp4", extra=("-timecode", "01:00:00:00"))
-    assert "data" in [f["codec_type"] for f in _probe(entrada)["streams"]]
+def _faixas(arquivo: Path) -> list[str]:
+    return [f["codec_type"] for f in _probe(arquivo)["streams"]]
+
+
+def _padrao_da_redetv(destino: Path) -> Path:
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=s=854x480:d=2",
+        "-f", "lavfi", "-i", "sine=d=2",
+        "-c:v", "libx264", "-profile:v", "high", "-c:a", "aac",
+        "-timecode", "01:00:00:00", str(destino),
+    )  # fmt: skip
+    return destino
+
+
+def test_padrao_da_redetv_com_faixa_de_timecode_e_aceito(tmp_path: Path) -> None:
+    entrada = _padrao_da_redetv(tmp_path / "video.mp4")
+    assert _faixas(entrada) == ["video", "audio", "data"]
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert aceito.timecode_origem == "01:00:00:00"
+    for arquivo in (aceito.copia_limpa, aceito.proxy):
+        sondagem = _probe(arquivo)
+        assert _faixas(arquivo) == ["video", "audio"]
+        assert all("timecode" not in f.get("tags", {}) for f in sondagem["streams"])
+    saida = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_format", "-of", "json",
+         str(aceito.copia_limpa)],
+        check=True, capture_output=True, text=True,
+    ).stdout  # fmt: skip
+    assert "timecode" not in json.loads(saida)["format"].get("tags", {})
+
+
+def test_mp4_sem_faixa_de_timecode_tem_timecode_origem_none(tmp_path: Path) -> None:
+    aceito = validar(_gerar(tmp_path / "video.mp4"), tmp_path / "saida")
+
+    assert aceito.timecode_origem is None
+
+
+def test_video_com_faixa_de_dados_sem_audio_e_aceito(tmp_path: Path) -> None:
+    entrada = _gerar(
+        tmp_path / "video.mp4", audio=None, extra=("-timecode", "01:00:00:00")
+    )
+    assert _faixas(entrada) == ["video", "data"]
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert aceito.audio is None
+    assert _faixas(aceito.copia_limpa) == ["video"]
+
+
+def _faixa_de_timecode(valor: str | None) -> dict[str, Any]:
+    tags = {} if valor is None else {"timecode": valor}
+    return {
+        "streams": [
+            {"codec_type": "video"},
+            {"codec_type": "data", "codec_tag_string": "tmcd", "tags": tags},
+        ]
+    }
+
+
+@pytest.mark.parametrize("valor", ["abc", "25:00:00", "", "01:00:00:0", None])
+def test_timecode_fora_do_formato_vira_none(valor: str | None) -> None:
+    assert validador.ler_timecode_origem(_faixa_de_timecode(valor)) is None
+
+
+@pytest.mark.parametrize("valor", ["01:00:00;00", "01:00:00:00"])
+def test_timecode_no_formato_passa_como_veio(valor: str) -> None:
+    assert validador.ler_timecode_origem(_faixa_de_timecode(valor)) == valor
+
+
+def test_duas_faixas_de_audio_com_uma_de_dados_e_recusada(tmp_path: Path) -> None:
+    base = _gerar(tmp_path / "base.mp4", extra=("-timecode", "01:00:00:00"))
+    entrada = tmp_path / "video.mp4"
+    _ffmpeg(
+        "-i", str(base), "-i", str(base),
+        "-map", "0:v", "-map", "0:a", "-map", "1:a", "-c", "copy",
+        "-timecode", "01:00:00:00", str(entrada),
+    )  # fmt: skip
+    assert sorted(_faixas(entrada)) == ["audio", "audio", "data", "video"]
+
+    assert _recusa(entrada, tmp_path) == "codec_nao_suportado"
+
+
+def test_duas_faixas_de_audio_e_recusada(tmp_path: Path) -> None:
+    base = _gerar(tmp_path / "base.mp4")
+    entrada = tmp_path / "video.mp4"
+    _ffmpeg(
+        "-i", str(base), "-i", str(base),
+        "-map", "0", "-map", "1:a", "-c", "copy", str(entrada),
+    )  # fmt: skip
+
+    assert _recusa(entrada, tmp_path) == "codec_nao_suportado"
+
+
+def test_faixa_de_legenda_e_recusada(tmp_path: Path) -> None:
+    base = _gerar(tmp_path / "base.mp4")
+    legenda = tmp_path / "l.srt"
+    legenda.write_text("1\n00:00:00,000 --> 00:00:01,000\noi\n")
+    entrada = tmp_path / "video.mp4"
+    _ffmpeg(
+        "-i", str(base), "-i", str(legenda),
+        "-map", "0", "-map", "1", "-c", "copy", "-c:s", "mov_text", str(entrada),
+    )  # fmt: skip
+    assert "subtitle" in _faixas(entrada)
 
     assert _recusa(entrada, tmp_path) == "codec_nao_suportado"
 

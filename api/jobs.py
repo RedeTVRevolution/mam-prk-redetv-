@@ -106,6 +106,8 @@ class Job(BaseModel):
     duracao_s: float | None = None
     # Cortes de câmera da validação, em ms; `None` em Job anterior à detecção.
     cortes_ms: list[int] | None = None
+    # Timecode inicial da faixa `tmcd` do arquivo; `None` sem a faixa.
+    timecode_origem: str | None = None
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
