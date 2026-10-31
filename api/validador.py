@@ -154,26 +154,26 @@ def validar(
         ]
     )  # fmt: skip
     if regravar.returncode != 0 or gerar_proxy.returncode != 0:
-        copia.unlink(missing_ok=True)
-        proxy.unlink(missing_ok=True)
-        raise Recusa("arquivo_corrompido")
+        raise _corrompido(copia, proxy)
     audio = None
     # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
     if any(f.get("codec_type") == "audio" for f in sondagem.get("streams", [])):
         audio = _separar_audio(copia, saida)
         if audio is None:
-            copia.unlink(missing_ok=True)
-            proxy.unlink(missing_ok=True)
-            raise Recusa("arquivo_corrompido")
+            raise _corrompido(copia, proxy)
     try:
         cortes = detectar_cortes(copia, limiar_de_cortes)
     except DeteccaoFalhou:
-        copia.unlink(missing_ok=True)
-        proxy.unlink(missing_ok=True)
-        if audio is not None:
-            audio.unlink(missing_ok=True)
-        raise Recusa("arquivo_corrompido") from None
+        raise _corrompido(copia, proxy, audio) from None
     return Aceito(copia, proxy, _sha256(entrada), duracao, audio, tuple(cortes))
+
+
+def _corrompido(*gerados: Path | None) -> Recusa:
+    """Apaga o que a validação já gravou e devolve a recusa."""
+    for arquivo in gerados:
+        if arquivo is not None:
+            arquivo.unlink(missing_ok=True)
+    return Recusa("arquivo_corrompido")
 
 
 def _separar_audio(copia: Path, saida: Path) -> Path | None:

@@ -2,7 +2,8 @@
 
 Os planos são os intervalos entre cortes, cada um com a descrição do plano do
 modelo com que mais se sobrepõe; aparições e comerciais vão ao corte mais
-próximo só se ele estiver a até 1 s; menções, fala e `mencao_editorial` seguem as próprias palavras.
+próximo só se ele estiver a até 1 s; menções, fala e `mencao_editorial`
+seguem as próprias palavras.
 Quando a regra muda um item, os tempos originais ficam em
 `inicio_modelo_ms` e `fim_modelo_ms`.
 """
@@ -31,7 +32,14 @@ def _ajustar[T: _Intervalo](item: T, cortes: Sequence[int], limite_ms: int | Non
         return corte
 
     inicio, fim = ponta(item.inicio_ms), ponta(item.fim_ms)
-    if inicio >= fim or (inicio, fim) == (item.inicio_ms, item.fim_ms):
+    if inicio >= fim:
+        return item
+    return _com_tempos(item, inicio, fim)
+
+
+def _com_tempos[T: _Intervalo](item: T, inicio: int, fim: int) -> T:
+    """O item com os tempos novos; os do modelo ficam guardados se mudaram."""
+    if (inicio, fim) == (item.inicio_ms, item.fim_ms):
         return item
     # Numa segunda passada, os tempos do modelo já guardados ficam.
     if item.inicio_modelo_ms is None:
@@ -46,10 +54,11 @@ def _sobreposicao(a: _Intervalo, inicio_ms: int, fim_ms: int) -> int:
 
 
 def _planos_pelos_cortes(planos: Sequence[Plano], cortes: Sequence[int]) -> list[Plano]:
-    """Um plano por intervalo entre cortes; sem plano do modelo, nenhum.
+    """Um plano por intervalo entre cortes que algum plano do modelo cobre.
 
-    O intervalo herda o plano do modelo com que mais se sobrepõe (o mais perto,
-    se nenhum se sobrepõe; o primeiro, num empate). Os tempos do modelo ficam só
+    O intervalo herda o plano do modelo com que mais se sobrepõe (o primeiro,
+    num empate). Intervalo que nenhum plano do modelo toca fica sem plano: a
+    descrição de outro trecho seria inventada. Os tempos do modelo ficam só
     quando o intervalo difere do plano de que herdou.
     """
     if not planos:
@@ -57,17 +66,8 @@ def _planos_pelos_cortes(planos: Sequence[Plano], cortes: Sequence[int]) -> list
     herdados: list[Plano] = []
     for inicio, fim in pairwise(cortes):
         origem = max(planos, key=lambda p: _sobreposicao(p, inicio, fim))
-        if origem.inicio_modelo_ms is None:
-            modelo = {
-                "inicio_modelo_ms": origem.inicio_ms,
-                "fim_modelo_ms": origem.fim_ms,
-            }
-        else:
-            modelo = {}
-        mudanca = {"inicio_ms": inicio, "fim_ms": fim}
-        if (inicio, fim) == (origem.inicio_ms, origem.fim_ms):
-            modelo = {}
-        herdados.append(origem.model_copy(update={**mudanca, **modelo}))
+        if _sobreposicao(origem, inicio, fim) > 0:
+            herdados.append(_com_tempos(origem, inicio, fim))
     return [
         p.model_copy(update={"id": f"pla{n:03d}"}) for n, p in enumerate(herdados, 1)
     ]

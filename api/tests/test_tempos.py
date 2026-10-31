@@ -230,3 +230,13 @@ def test_segunda_passada_mantem_os_tempos_do_modelo() -> None:
 def test_sem_planos_do_modelo_os_cortes_nao_inventam_planos() -> None:
     d = decupagem(aparicoes=[(5_000, 9_000)])
     assert aplicar_regra_de_tempos(d, [10_000]).planos == []
+
+
+def test_intervalo_que_nenhum_plano_do_modelo_toca_fica_sem_plano() -> None:
+    d = decupagem(planos=[(0, 10_000), (30_000, 60_000)])
+    r = aplicar_regra_de_tempos(d, [10_000, 20_000, 30_000])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [
+        (0, 10_000),
+        (30_000, 60_000),
+    ]
+    assert [p.id for p in r.planos] == ["pla001", "pla002"]

@@ -121,18 +121,20 @@ def test_sucesso_grava_a_decupagem_e_leva_o_job_a_concluido() -> None:
 
 def test_cortes_do_job_viram_os_planos_da_decupagem() -> None:
     ambiente = _ambiente(BOA)
-    ambiente.registrar("j9", cortes_ms=[20_000, 40_000])
+    # O plano do modelo vai de 0 a 4 s.
+    ambiente.registrar("j9", cortes_ms=[1_000, 2_000])
 
     _analisar(ambiente, "j9")
 
     gravada = Decupagem.model_validate_json(ambiente.decupagens.gravadas["j9"])
-    inicios = [p.inicio_ms for p in gravada.planos]
-    assert {0, 20_000, 40_000} <= set(inicios)
-    assert all(
-        p.inicio_modelo_ms is not None
-        for p in gravada.planos
-        if p.inicio_ms in (20_000, 40_000)
-    )
+    assert [(p.inicio_ms, p.fim_ms) for p in gravada.planos] == [
+        (0, 1_000),
+        (1_000, 2_000),
+        (2_000, 60_000),
+    ]
+    assert {(p.inicio_modelo_ms, p.fim_modelo_ms) for p in gravada.planos} == {
+        (0, 4_000)
+    }
 
 
 def test_job_sem_cortes_nao_muda_os_planos_do_modelo() -> None:
