@@ -677,6 +677,42 @@ test('Esc fecha a comparação e o foco volta ao selo', async () => {
   expect(document.activeElement).toBe(selo)
 })
 
+test('Esc com o foco num campo de texto não fecha a comparação', async () => {
+  comPessoas([PESSOA_PELO_ROSTO])
+  servidor.use(http.get('/v1/jobs/j1/pessoas/p1/referencias', () => HttpResponse.json(FOTOS)))
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 222)
+  await usuario.click(screen.getByRole('button', { name: /^Rosto/ }))
+  await screen.findByRole('dialog')
+  const campo = document.createElement('input')
+  document.body.appendChild(campo)
+  campo.focus()
+
+  await usuario.keyboard('{Escape}')
+
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  campo.remove()
+})
+
+test('o nome sem comparação guardada diz isso, sem mandar abrir de novo', async () => {
+  comPessoas([PESSOA_PELO_ROSTO])
+  servidor.use(
+    http.get('/v1/jobs/j1/pessoas/p1/referencias', () =>
+      HttpResponse.json({ detail: 'Este nome não tem comparação de rosto' }, { status: 404 }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 222)
+
+  await usuario.click(screen.getByRole('button', { name: /^Rosto/ }))
+
+  const comparacao = await screen.findByRole('dialog')
+  expect(await within(comparacao).findByText(/Este nome não tem comparação de rosto/)).toBeTruthy()
+  expect(within(comparacao).queryByRole('alert')).toBeNull()
+})
+
 test('a comparação que falha diz o que fazer e guarda o código no detalhe', async () => {
   comPessoas([PESSOA_PELO_ROSTO])
   servidor.use(http.get('/v1/jobs/j1/pessoas/p1/referencias', () => new HttpResponse(null, { status: 403 })))

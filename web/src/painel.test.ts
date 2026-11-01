@@ -109,6 +109,13 @@ test('o selo só casa o nome inteiro: "Ana" não acha a prova em "MARIANA"', () 
   expect(itensDoPainel(d).find((i) => i.chave === 'aparicao-0')?.selos).toEqual([{ rotulo: 'GC', inicio_ms: 200_000 }])
 })
 
+test('rosto e referência dão um selo "Rosto" só', () => {
+  const d: Decupagem = { ...D, pessoas: [{ ...D.pessoas[0], fontes_do_nome: ['rosto', 'referencia'] }] }
+  expect(itensDoPainel(d).find((i) => i.chave === 'aparicao-0')?.selos).toEqual([
+    { rotulo: 'Rosto', inicio_ms: null, tipo: 'rosto' },
+  ])
+})
+
 test('menção e aparição têm tipos separados', () => {
   const tipos = itensDoPainel(D).map((i) => [i.chave, i.tipo])
   expect(tipos).toContainEqual(['aparicao-0', 'aparicao'])

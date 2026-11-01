@@ -116,7 +116,9 @@ function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = fal
   const prova = (trechos: (Intervalo & { texto: string })[]) =>
     trechos.filter((t) => alvo.test(normalizar(t.texto))).sort((a, b) => a.inicio_ms - b.inicio_ms)[0]
       ?.inicio_ms ?? null
-  return fontes.map((f) => ({
+  // `rosto` e `referencia` dão o mesmo selo "Rosto": um só.
+  const unicas = fontes.filter((f, i) => fontes.findIndex((g) => (FONTES[g] ?? g) === (FONTES[f] ?? f)) === i)
+  return unicas.map((f) => ({
     rotulo: FONTES[f] ?? f,
     inicio_ms: f === 'gc' ? prova(d.textos_na_tela ?? []) : f === 'fala' ? prova(d.transcricao) : null,
     ...(f === 'rosto' || f === 'referencia' ? { tipo: 'rosto' as const } : {}),

@@ -1,6 +1,7 @@
 import { Badge, Box, Button, Group, Stack, Text } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
-import { codigoDoErro, type FotoDoNome, type FotosDoNome } from './api.ts'
+import { codigoDoErro, NaoEncontrado, type FotoDoNome, type FotosDoNome } from './api.ts'
+import { emCampoDeTexto } from './atalhos.ts'
 import { Quadro } from './Miniatura.tsx'
 import { CORES } from './tema.ts'
 
@@ -9,7 +10,11 @@ const RESULTADO: Record<NonNullable<FotoDoNome['resultado']>, string> = {
   nao_confere: 'não confere',
 }
 
-type Estado = { fase: 'carregando' } | { fase: 'pronto'; fotos: FotoDoNome[] } | { fase: 'falhou'; codigo: string }
+type Estado =
+  | { fase: 'carregando' }
+  | { fase: 'pronto'; fotos: FotoDoNome[] }
+  | { fase: 'sem_comparacao' }
+  | { fase: 'falhou'; codigo: string }
 
 /**
  * A comparação do rosto: o quadro da aparição e as fotos de referência do nome, cada uma com a
@@ -31,14 +36,16 @@ export function ComparacaoDoRosto({
   aoFechar: () => void
 }) {
   const [estado, setEstado] = useState<Estado>({ fase: 'carregando' })
-  const [urlDoQuadroPronta, setUrlDoQuadro] = useState<string | null>(null)
+  const [urlDoQuadroPronta, setUrlDoQuadroPronta] = useState<string | null>(null)
   const titulo = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
     let ativo = true
     carregar().then(
       (r) => ativo && setEstado({ fase: 'pronto', fotos: r.fotos }),
-      (e: unknown) => ativo && setEstado({ fase: 'falhou', codigo: codigoDoErro(e) }),
+      (e: unknown) =>
+        ativo &&
+        setEstado(e instanceof NaoEncontrado ? { fase: 'sem_comparacao' } : { fase: 'falhou', codigo: codigoDoErro(e) }),
     )
     return () => {
       ativo = false
@@ -49,7 +56,7 @@ export function ComparacaoDoRosto({
     if (!quadro || !urlDoQuadro) return
     let ativo = true
     urlDoQuadro(quadro).then(
-      (u) => ativo && setUrlDoQuadro(u),
+      (u) => ativo && setUrlDoQuadroPronta(u),
       // Sem o quadro fica o retângulo: o que a pessoa veio ver são as fotos.
       () => undefined,
     )
@@ -69,7 +76,7 @@ export function ComparacaoDoRosto({
 
   useEffect(() => {
     const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+      if (e.key !== 'Escape' || emCampoDeTexto(e.target)) return
       e.preventDefault()
       aoFechar()
     }
@@ -123,6 +130,11 @@ export function ComparacaoDoRosto({
           <Text size="sm" role="alert">
             Não foi possível carregar as fotos de referência. Feche e abra a comparação de novo.{' '}
             <Text span size="xs" c="dimmed">{`Detalhe: ${estado.codigo}`}</Text>
+          </Text>
+        )}
+        {estado.fase === 'sem_comparacao' && (
+          <Text size="sm" c="dimmed">
+            Este nome não tem comparação de rosto: ele não foi conferido pelas fotos de referência.
           </Text>
         )}
         {estado.fase === 'pronto' && estado.fotos.length === 0 && (

@@ -46,7 +46,6 @@ async function detalhe(resposta: Response): Promise<string> {
   return `Falha ${resposta.status}`
 }
 
-/** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 /** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
 export interface FotoDoNome {
   url: string
@@ -61,6 +60,7 @@ export interface FotosDoNome {
   expira_em: string
 }
 
+/** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
   reproducao(): Promise<Reproducao>

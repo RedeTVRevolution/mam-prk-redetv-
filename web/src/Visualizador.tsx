@@ -117,8 +117,8 @@ export default function Visualizador({
     }
   }, [api, job.id, concluido, cargasDaDecupagem])
 
-  // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
   const fotosDoNome = useCallback((pessoaId: string) => api.job(job.id).fotosDoNome(pessoaId), [api, job.id])
+  // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
   const urlDoQuadro = useMemo(() => criarCacheDeQuadros((arquivo) => api.job(job.id).quadro(arquivo)), [api, job.id])
 
   const faixas = useMemo(() => (decupagem ? faixasDoVisualizador(decupagem) : null), [decupagem])
