@@ -226,6 +226,9 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
         "texto": texto,
         "descricao": texto,
         "quadro": texto,
+        # Só para o embedding automático, que recusa registro sem texto: a descrição do
+        # plano ou o texto da fala, do texto na tela ou do objeto (ADR 0006).
+        "significado": texto,
     }
     return {
         "dataSchema": {"type": "object", "properties": propriedades},
@@ -235,7 +238,7 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
                     "dimensions": config.dimensao,
                     "vertexEmbeddingConfig": {
                         "modelId": MODELO_DO_EMBEDDING,
-                        "textTemplate": "{descricao}",
+                        "textTemplate": "{significado}",
                         "taskType": "RETRIEVAL_DOCUMENT",
                     },
                 }
@@ -247,7 +250,8 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
 
 def indices_da_colecao(config: ConfigDaBusca) -> dict[str, dict[str, Any]]:
     """O corpo de cada índice ANN, pelo id: um campo de vetor, os de filtro e os guardados."""
-    guardados = list(esquema_da_colecao(config)["dataSchema"]["properties"])
+    propriedades = esquema_da_colecao(config)["dataSchema"]["properties"]
+    guardados = [p for p in propriedades if p != "significado"]
     return {
         indice: {
             "indexField": campo,
@@ -329,6 +333,8 @@ def _dados(r: Registro) -> dict[str, Any]:
         "fim_ms": r.fim_ms,
         "pessoas": r.pessoas,
         "cor_base": r.cor_base,
+        # Nunca vazio: o tipo é o último recurso.
+        "significado": r.descricao or r.texto or r.tipo,
     }
     opcionais = {
         "programa": r.programa,
@@ -449,7 +455,11 @@ def transporte_http() -> Transporte:
         )
         if resposta.status_code == 409:
             raise JaExiste(caminho)
-        resposta.raise_for_status()
+        if not resposta.ok:
+            # A mensagem do serviço diz qual campo ele recusou.
+            raise RuntimeError(
+                f"{metodo} {caminho}: HTTP {resposta.status_code}: {resposta.text[:2000]}"
+            )
         return dict(resposta.json()) if resposta.content else {}
 
     return chamar

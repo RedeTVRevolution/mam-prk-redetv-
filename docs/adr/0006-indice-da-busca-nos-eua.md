@@ -10,6 +10,10 @@ A coleção nasce com o índice ANN implantado, e toda busca o usa. O KNN sem í
 
 Por enquanto, só o índice da descrição está no ar (1/11/2026, #122). O do quadro-chave fica desligado até a busca por imagem, porque cada índice cobra réplicas por hora: a variável `indice_do_quadro_ligado` do `infra/main.tf` (padrão `false`) entrega `BUSCA_INDICE_QUADRO` vazia, e o adaptador recusa a busca por quadro em vez de cair no KNN. O campo do vetor do quadro continua na coleção, e os registros podem levá-lo; ligar o índice depois é pôr a variável em `true`, aplicar o Terraform e rodar o `make criar-colecao-da-busca`, sem recriar a coleção. Cada índice nasce com uma réplica só, no modo `PERFORMANCE_OPTIMIZED`.
 
+Todo registro tem vetor, e não só os planos, ao contrário do que o #117 decidiu. O embedding automático do Agent Retrieval recusa o registro sem o campo do modelo ("Field path 'descricao' not found") ou com ele vazio ("The text content is empty"). O modelo usa o campo `significado`: a descrição do plano ou o texto da fala, do texto na tela ou do objeto. Esse campo não volta na busca. Assim a busca por significado também acha falas e objetos; o custo extra (o embedding de cada registro e 256 números a mais no índice) é desprezível na PoC.
+
+Medição do Mac, em São Paulo, 1/11/2026 (`make medir-busca CONSULTAS=100`, 16 registros, dimensão 256). É só uma aproximação: o caminho real sai do Cloud Run em `southamerica-east1`. A busca híbrida (texto, significado e filtros, fundidos por RRF, com o índice ANN) deu p50 de 262 ms e p95 de 322 ms. O filtro composto devolveu só o objeto da Sabrina, e a cor filtra de verdade.
+
 A região, como os outros nomes da nuvem, só aparece no `infra/main.tf`, que a entrega ao serviço por variável de ambiente. A consulta em linguagem natural continua indo ao Gemini pelo endpoint global, e a reordenação usa a Ranking API, também fora do Brasil.
 
 Alternativas recusadas:

@@ -175,6 +175,8 @@ def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
     assert vetores["descricao_vetor"]["denseVector"]["dimensions"] == 256
     embedding = vetores["descricao_vetor"]["denseVector"]["vertexEmbeddingConfig"]
     assert embedding["modelId"] and embedding["taskType"] == "RETRIEVAL_DOCUMENT"
+    # O embedding automático recusa registro sem o campo do modelo ou com ele vazio.
+    assert embedding["textTemplate"] == "{significado}"
     propriedades = esquema["dataSchema"]["properties"]
     assert propriedades["data_de_exibicao"] == {"type": "integer"}
     indices = indices_da_colecao(CONFIG)
@@ -187,7 +189,8 @@ def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
             corpo["filterFields"]
         )
         assert set(corpo["filterFields"]) <= set(propriedades)
-        assert set(corpo["storeFields"]) == set(propriedades)
+        # O significado só alimenta o embedding: não volta na busca.
+        assert set(corpo["storeFields"]) == set(propriedades) - {"significado"}
         # Uma réplica só, explícita: o padrão do serviço é de 2 a 5, cobradas por hora.
         assert corpo["dedicatedInfrastructure"]["autoscalingSpec"] == {
             "minReplicaCount": 1,
@@ -230,6 +233,7 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     assert pedido["dataObjectId"] == "m-j-objeto-0"
     assert pedido["dataObject"]["data"]["cor_base"] == ["vermelho"]
     assert pedido["dataObject"]["data"]["data_de_exibicao"] == 20260102
+    assert pedido["dataObject"]["data"]["significado"] == "objeto"
 
     transporte.resposta = {
         "results": [{"results": [{"dataObject": pedido["dataObject"]}]}]
@@ -348,4 +352,18 @@ def test_apagar_colecao_leva_os_indices_e_os_objetos_e_espera() -> None:
     # Sem force, o DELETE só funciona com a coleção sem índices e sem objetos.
     assert transporte.chamadas == [
         ("DELETE", "projects/proj-x/locations/reg-y/collections/col-z?force=true", None)
+    ]
+
+
+def test_significado_e_a_descricao_ou_o_texto_do_registro() -> None:
+    base: dict[str, Any] = {"id": "j:x:0", "job_id": "j", "inicio_ms": 0, "fim_ms": 1}
+    plano = Registro(tipo="plano", descricao="estúdio", texto="t", **base)
+    fala = Registro(tipo="fala", texto="boa noite", **base)
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, transporte).gravar("j", [plano, fala])
+    corpo = transporte.chamadas[-1][2]
+    assert corpo is not None
+    assert [r["dataObject"]["data"]["significado"] for r in corpo["requests"]] == [
+        "estúdio",
+        "boa noite",
     ]
