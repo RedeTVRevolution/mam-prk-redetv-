@@ -3,8 +3,9 @@
 Um a três por plano (conforme a duração), um por aparição (no meio dela) e um por objeto
 (no meio da primeira ocorrência); o alvo escuro desvia para um instante próximo e claro.
 O campo `quadro` do momento guarda o caminho do JPEG, relativo à pasta do Job no bucket
-das decupagens; o plano guarda também todos em `quadros`. O Job roda sem internet, com o ffmpeg da imagem da
-validação, e tira cada quadro como os do modelo forte (`extrair_quadros`).
+das decupagens; o plano guarda também todos em `quadros`. O Job roda sem internet, com o
+ffmpeg da imagem da validação, e tira cada quadro como os do modelo forte
+(`extrair_quadros`).
 """
 
 import io
