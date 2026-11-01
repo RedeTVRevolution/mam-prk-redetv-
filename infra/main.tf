@@ -232,17 +232,16 @@ resource "google_service_account" "mam" {
 # A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
   papeis_no_projeto = {
-    web         = ["roles/datastore.user"]
+    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
     validacao   = ["roles/datastore.user"]
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
     analise     = ["roles/datastore.user", "roles/aiplatform.user"]
     quadros     = ["roles/datastore.user"]
-    # Grava o estado da indexação no Job. O papel no Vector Search (escrever na coleção da
-    # busca) não está aqui nem na conta `web`, que reindexa a cada Correção: o nome exato
-    # não foi conferido (#118); sem ele a indexação roda e o Job fica com
-    # indexacao.estado = falhou.
-    indexacao    = ["roles/datastore.user"]
+    # Grava o estado da indexação no Job e escreve na coleção da busca (gravar, apagar,
+    # consultar e buscar; conferido no #122). A conta `web` tem o mesmo papel, porque
+    # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção.
+    indexacao    = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
     referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.

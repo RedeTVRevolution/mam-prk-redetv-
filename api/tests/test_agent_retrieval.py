@@ -51,7 +51,7 @@ def test_filtro_composto_junta_todos_os_campos_com_and() -> None:
         "$and": [
             {"tipo": {"$eq": "objeto"}},
             {"categoria": {"$eq": "roupa"}},
-            {"cor_base": {"$all": ["vermelho"]}},
+            {"cor_base": {"$in": ["vermelho"]}},
             {"dono": {"$eq": "cat-1"}},
         ]
     }
@@ -65,7 +65,7 @@ def test_filtro_de_datas_e_pessoa() -> None:
     )
     assert filtro == {
         "$and": [
-            {"pessoas": {"$all": ["cat-1"]}},
+            {"pessoas": {"$in": ["cat-1"]}},
             {"data_de_exibicao": {"$gte": 20260102}},
             {"data_de_exibicao": {"$lte": 20260304}},
         ]
@@ -101,10 +101,14 @@ def test_pedido_hibrido_leva_texto_significado_vetor_e_rrf() -> None:
     assert buscas["vectorSearch"]["vector"] == {"values": [0.1, 0.2]}
     assert buscas["vectorSearch"]["searchField"] == "quadro_vetor"
     assert all(b["topK"] == 7 for b in buscas.values())
-    assert all(b["outputFields"] == {"dataFields": "*"} for b in buscas.values())
+    assert all(b["outputFields"] == {"dataFields": ["*"]} for b in buscas.values())
     filtro = {"$and": [{"tipo": {"$eq": "plano"}}]}
     assert all(b["filter"] == filtro for b in buscas.values())
-    assert pedido["combine"] == {"ranker": {"rrf": {"weights": [1.0, 1.0, 1.0]}}}
+    assert pedido["combine"] == {
+        "ranker": {"rrf": {"weights": [1.0, 1.0, 1.0]}},
+        "topK": 7,
+        "outputFields": {"dataFields": ["*"]},
+    }
 
 
 def test_toda_busca_por_vetor_leva_o_index_hint_do_indice_ann_do_seu_campo() -> None:
@@ -146,6 +150,8 @@ def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
     vetores = esquema["vectorSchema"]
     assert vetores["quadro_vetor"]["denseVector"]["dimensions"] == 256
     assert vetores["descricao_vetor"]["denseVector"]["dimensions"] == 256
+    embedding = vetores["descricao_vetor"]["denseVector"]["vertexEmbeddingConfig"]
+    assert embedding["modelId"] and embedding["taskType"] == "RETRIEVAL_DOCUMENT"
     propriedades = esquema["dataSchema"]["properties"]
     assert propriedades["data_de_exibicao"] == {"type": "integer"}
     indices = indices_da_colecao(CONFIG)
@@ -159,6 +165,11 @@ def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
         )
         assert set(corpo["filterFields"]) <= set(propriedades)
         assert set(corpo["storeFields"]) == set(propriedades)
+        # Uma réplica só, explícita: o padrão do serviço é de 2 a 5, cobradas por hora.
+        assert corpo["dedicatedInfrastructure"]["autoscalingSpec"] == {
+            "minReplicaCount": 1,
+            "maxReplicaCount": 1,
+        }
 
 
 class TransporteFalso:
@@ -188,15 +199,18 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     transporte = TransporteFalso()
     adaptador = AgentRetrieval(CONFIG, transporte)
     adaptador.gravar("j", [registro])
-    [_, (metodo, caminho, corpo)] = transporte.chamadas
+    [_, (metodo, caminho, corpo)] = transporte.chamadas  # a consulta do apagar, vazia
     assert (metodo, caminho.endswith("/dataObjects:batchCreate")) == ("POST", True)
     assert corpo is not None
     [pedido] = corpo["requests"]
-    assert pedido["dataObjectId"] == "j-objeto-0"
+    # O id do objeto começa por letra: o job_id (uuid em hex) pode começar por dígito.
+    assert pedido["dataObjectId"] == "m-j-objeto-0"
     assert pedido["dataObject"]["data"]["cor_base"] == ["vermelho"]
     assert pedido["dataObject"]["data"]["data_de_exibicao"] == 20260102
 
-    transporte.resposta = {"results": [{"dataObject": pedido["dataObject"]}]}
+    transporte.resposta = {
+        "results": [{"results": [{"dataObject": pedido["dataObject"]}]}]
+    }
     [achado] = adaptador.buscar(Consulta(texto="vestido", filtros=Filtros(dono="c")))
     assert achado == registro
 
@@ -206,18 +220,27 @@ def test_gravar_apaga_antes_os_registros_do_video() -> None:
     AgentRetrieval(CONFIG, transporte).gravar("j", [])
     [(metodo, caminho, corpo)] = transporte.chamadas
     assert metodo == "POST"
-    assert caminho.endswith("/dataObjects:batchDelete")
-    assert corpo == {"filter": {"job_id": {"$eq": "j"}}}
+    assert caminho.endswith("/dataObjects:query")
+    assert corpo == {"filter": {"job_id": {"$eq": "j"}}, "pageSize": 1000}
 
 
-def test_caminho_leva_projeto_regiao_e_colecao_da_config() -> None:
-    transporte = TransporteFalso()
-    AgentRetrieval(CONFIG, transporte).apagar("j")
-    [(_, caminho, _)] = transporte.chamadas
-    assert (
-        caminho
-        == "projects/proj-x/locations/reg-y/collections/col-z/dataObjects:batchDelete"
+def test_apagar_consulta_os_nomes_pagina_a_pagina_e_apaga_em_lote() -> None:
+    nomes = [f"col/dataObjects/{n}" for n in range(3)]
+    respostas = iter(
+        [
+            {"dataObjects": [{"name": n} for n in nomes[:2]], "nextPageToken": "p2"},
+            {"dataObjects": [{"name": nomes[2]}]},
+            {},
+        ]
     )
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, _Sequencia(transporte, respostas)).apagar("j")
+    [(_, c1, _), (_, _, corpo2), (_, c3, corpo3)] = transporte.chamadas
+    colecao = "projects/proj-x/locations/reg-y/collections/col-z"
+    assert c1 == f"{colecao}/dataObjects:query"
+    assert corpo2 is not None and corpo2["pageToken"] == "p2"
+    assert c3 == f"{colecao}/dataObjects:batchDelete"
+    assert corpo3 == {"requests": [{"name": n} for n in nomes]}
 
 
 def test_total_soma_a_contagem_do_aggregate() -> None:
@@ -225,7 +248,7 @@ def test_total_soma_a_contagem_do_aggregate() -> None:
     assert AgentRetrieval(CONFIG, transporte).total() == 16
     [(_, caminho, corpo)] = transporte.chamadas
     assert caminho.endswith("/dataObjects:aggregate")
-    assert corpo == {"aggregate": "count"}
+    assert corpo == {"aggregate": "COUNT"}
 
 
 def _nao_dorme(_: float) -> None:
