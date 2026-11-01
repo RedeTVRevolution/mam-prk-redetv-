@@ -137,6 +137,8 @@ def test_resposta_simulada_com_carro_sem_dono_e_produto_no_telao_sai_em_14() -> 
         pessoa=None,
         relacao=None,
         cor_base=["azul"],
+        cor="azul-marinho",
+        detalhe=None,
         marca="BYD",
     )
     produto = objeto(
@@ -152,7 +154,7 @@ def test_resposta_simulada_com_carro_sem_dono_e_produto_no_telao_sai_em_14() -> 
 
     assert d.versao_esquema == "1.4"
     assert [(o.categoria, o.pessoa, o.detalhe) for o in d.objetos] == [
-        ("veiculo", None, "salto alto"),
+        ("veiculo", None, None),
         ("produto", None, "no telão"),
     ]
 
