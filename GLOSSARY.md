@@ -14,6 +14,13 @@ _Evitar_: resultado, insights
 Um pedido de decupagem de um vídeo, do registro ao fim do processamento.
 _Evitar_: tarefa, pedido
 
+**Etapa**:
+Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, quadros-chave, indexação), com início, fim e resultado (`concluida` ou `falhou`). A falha de uma etapa depois do `concluido` não muda o estado do Job.
+_Evitar_: fase
+
+**Reprocessar**:
+Refazer um Job a partir da primeira etapa que falhou, sem enviar o vídeo de novo (`POST /v1/jobs/{id}/reprocessar`, permissão `video.reprocessar`). As etapas anteriores não rodam; só vale para falha de etapa, e a falha do arquivo pede novo envio. Cada reprocessamento vai à auditoria (`video.reprocessado`).
+
 **Bloco**:
 Segmento editorial de um programa de TV, como a abertura ou o trecho entre dois intervalos.
 _Evitar_: segmento, parte
@@ -66,13 +73,22 @@ _Evitar_: galeria facial
 **Palpite**:
 Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
 
+**Comparação**:
+Passo que compara as pessoas sem nome e os palpites do vídeo com as fotos de referência (`api/comparacao.py`, `comparar`). Primeiro a escolha às cegas: o modelo vê as fotos com rótulos A, B… embaralhados a cada chamada e nunca recebe os nomes; o código traduz o rótulo. Depois a conferência foto a foto: uma chamada por foto, com a confiança de cada uma; o nome só se confirma com as 3 fotos no limiar ou acima. Confirma com `fontes_do_nome=["referencia"]`, liga a pessoa ao catálogo e propõe sugestões para o perfil. Há um limite de pessoas por vídeo; as que passam dele ficam como palpite não confirmado.
+
+**Veredito**:
+Registro, por pessoa, do que a comparação decidiu (confirmado, palpite descartado, palpite não confirmado ou sem resultado), com as 3 fotos e a confiança de cada uma. Um palpite trocado por outro nome confirmado fica confirmado e marcado como descartado. Serve à auditoria; a `Pessoa` não guarda a prova.
+
+**Palpite descartado / palpite não confirmado**:
+Descartado: o nome foi recusado (a escolha apontou outro candidato ou nenhum, ou o nome está ou fica confirmado para outra pessoa do vídeo) e a pessoa volta a "não identificado". Não confirmado: o nome continua palpite porque não há referência para conferir, o limite de pessoas passou ou uma foto ficou abaixo do limiar.
+
 ### Busca
 
 **Momento**:
 Unidade de busca: um plano ou um evento da decupagem, com início e fim.
 
 **Objeto**:
-Peça visível na Decupagem (`objetos`, esquema 1.3): roupa, calçado, acessório, o que alguém segura ou um objeto em cena, com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`, nulos em cena) e os tempos. A busca filtra pelo objeto inteiro, não por itens soltos no plano.
+Peça visível na Decupagem (`objetos`, esquema 1.4): roupa, calçado, acessório, o que alguém segura ou um objeto em cena (veículo, produto, eletrônico, animal, comida), com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`, nulos em cena) e os tempos. A categoria diz o que a coisa é (`em_cena` e `na_mao` só quando nenhuma outra serve). Produto mostrado num telão ou em gráfico entra como objeto, com o detalhe "no telão" ou "em gráfico". A busca filtra pelo objeto inteiro, não por itens soltos no plano.
 
 **Ocorrência**:
 Algo detectado num momento: pessoa, marca, objeto ou pauta.

@@ -13,6 +13,11 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.auditoria import (
+    RepositorioDeAuditoria,
+    RepositorioDeAuditoriaEmMemoria,
+    criar_rotas_da_auditoria,
+)
 from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
@@ -55,7 +60,9 @@ from api.jobs import (
 from api.nuvem import (
     ArmazenamentoStorage,
     CatalogoFirestore,
+    DisparoPeloWorkflows,
     RepositorioDeAprovacaoFirestore,
+    RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
     RepositorioFirestore,
@@ -69,6 +76,11 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import PERFIS
+from api.reprocessamento import (
+    DisparoDoWorkflow,
+    DisparoIndisponivel,
+    criar_rotas_do_reprocessamento,
+)
 from api.rota_da_busca import (
     CONSULTAS_POR_MINUTO,
     TEMPO_MAXIMO_S,
@@ -137,6 +149,8 @@ def criar_app(
     admins_emergencia: str | None = None,
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
+    auditoria: RepositorioDeAuditoria | None = None,
+    disparo: DisparoDoWorkflow | None = None,
     catalogo: Catalogo | None = None,
     indice: IndiceDaBusca | None = None,
     transporte_da_consulta: Transporte | None = None,
@@ -235,6 +249,16 @@ def criar_app(
             tempo_maximo_da_busca_s,
         )
     )
+    repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
+    v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
+    v1.include_router(
+        criar_rotas_do_reprocessamento(
+            repositorio_de_jobs,
+            repositorio_de_auditoria,
+            disparo or DisparoIndisponivel(),
+            relogio,
+        )
+    )
     app.include_router(v1)
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
@@ -257,6 +281,10 @@ if _projeto:
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
+        auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
+        disparo=DisparoPeloWorkflows(
+            _projeto, os.environ["WORKFLOW_REGIAO"], os.environ["WORKFLOW_VALIDACAO"]
+        ),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         indice=(
             AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())

@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from google.api_core.exceptions import NotFound
 from PIL import Image, ImageDraw
 
 from api.catalogo import (
@@ -16,8 +17,10 @@ from api.catalogo import (
     Rosto,
     rostos_validos,
 )
+from api.comparacao import FotoAusente
 from api.gemini import AnaliseFalhou, ErroHttp
 from api.imagens_hostis import ImagemRecusada
+from api.nuvem import ReferenciasStorage
 from api.referencias import (
     ConferidorGemini,
     ExtratorGemini,
@@ -682,3 +685,38 @@ def test_ler_segredo_decodifica_a_ultima_versao_sem_o_espaco_final() -> None:
     assert sessao.urls == [
         "https://secretmanager.googleapis.com/v1/projects/p/secrets/s/versions/latest:access"
     ]
+
+
+# --- ReferenciasStorage.ler -------------------------------------------------
+
+
+class _BlobDoBucket:
+    def __init__(self, objetos: dict[str, bytes], nome: str) -> None:
+        self._objetos, self._nome = objetos, nome
+
+    def download_as_bytes(self) -> bytes:
+        if self._nome not in self._objetos:
+            raise NotFound(self._nome)  # type: ignore[no-untyped-call]
+        return self._objetos[self._nome]
+
+
+class _ClienteDoStorage:
+    def __init__(self, objetos: dict[str, bytes]) -> None:
+        self._objetos = objetos
+
+    def bucket(self, _nome: str) -> "_ClienteDoStorage":
+        return self
+
+    def blob(self, nome: str) -> _BlobDoBucket:
+        return _BlobDoBucket(self._objetos, nome)
+
+
+def test_ler_devolve_o_jpeg_guardado_e_foto_ausente_se_nao_existe() -> None:
+    armazenamento = ReferenciasStorage(
+        _ClienteDoStorage({"referencias/x/1.jpg": b"jpeg"}),
+        "bucket",
+    )
+
+    assert armazenamento.ler("referencias/x/1.jpg") == b"jpeg"
+    with pytest.raises(FotoAusente):
+        armazenamento.ler("referencias/x/2.jpg")

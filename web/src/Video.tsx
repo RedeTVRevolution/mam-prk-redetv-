@@ -187,10 +187,21 @@ interface TextoNaTela extends Intervalo {
 
 export type CorBase = keyof typeof CORES_DE_OBJETO
 
-export type CategoriaDeObjeto = 'roupa' | 'calcado' | 'acessorio' | 'na_mao' | 'em_cena' | 'veiculo' | 'outro'
+export type CategoriaDeObjeto =
+  | 'roupa'
+  | 'calcado'
+  | 'acessorio'
+  | 'na_mao'
+  | 'em_cena'
+  | 'veiculo'
+  | 'outro'
+  | 'eletronico'
+  | 'produto'
+  | 'animal'
+  | 'alimento'
 export type RelacaoDoObjeto = 'veste' | 'calca' | 'usa' | 'segura'
 
-/** 1.3: roupa, calçado, acessório ou objeto em cena, com a cor e o dono. */
+/** 1.3: roupa, calçado, acessório ou objeto em cena, com a cor e o dono; 1.4 acrescenta eletrônico, produto, animal e alimento. */
 export interface Objeto {
   id: string
   categoria: CategoriaDeObjeto

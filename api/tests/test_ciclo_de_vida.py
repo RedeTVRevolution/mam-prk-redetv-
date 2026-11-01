@@ -10,9 +10,11 @@ from api.ciclo_de_vida import (
     JaTerminou,
     TransicaoProibida,
     cancelar,
+    encerrar_etapa,
+    iniciar_etapa,
     transitar,
 )
-from api.jobs import CodigoDeFalha, Estado, Job, RepositorioEmMemoria
+from api.jobs import CodigoDeFalha, Estado, Job, JobPublico, RepositorioEmMemoria
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 DEPOIS = BASE + timedelta(minutes=5)
@@ -177,3 +179,84 @@ def test_falhar_nao_mexe_na_indexacao() -> None:
     job = transitar(repositorio, "j1", "analisando", "falhou", DEPOIS)
 
     assert job and job.indexacao is None
+
+
+def test_etapas_de_um_job_que_falha_na_leitura_da_tela() -> None:
+    repositorio = _repositorio("analisando")
+    for etapa in ("transcricao", "leitura_da_tela"):
+        iniciar_etapa(repositorio, "j1", etapa, BASE)
+        if etapa == "transcricao":
+            encerrar_etapa(repositorio, "j1", etapa, "concluida", DEPOIS)
+    encerrar_etapa(repositorio, "j1", "leitura_da_tela", "falhou", DEPOIS)
+    transitar(
+        repositorio, "j1", "analisando", "falhou", DEPOIS, codigo_falha="ocr_falhou"
+    )
+
+    job = repositorio.obter("j1")
+    assert job is not None
+    assert job.estado == "falhou"
+    assert job.etapa_atual is None
+    assert job.etapas["transcricao"].resultado == "concluida"
+    assert job.etapas["transcricao"].fim == DEPOIS
+    assert job.etapas["leitura_da_tela"].resultado == "falhou"
+    assert "analise" not in job.etapas
+
+
+def test_etapa_atual_e_o_inicio_e_o_fim_ficam_na_etapa() -> None:
+    repositorio = _repositorio("analisando")
+
+    iniciada = iniciar_etapa(repositorio, "j1", "analise", BASE)
+    assert iniciada is not None
+    assert iniciada.etapa_atual == "analise"
+    assert iniciada.etapas["analise"].inicio == BASE
+    assert iniciada.etapas["analise"].fim is None
+
+    encerrada = encerrar_etapa(repositorio, "j1", "analise", "concluida", DEPOIS)
+    assert encerrada is not None
+    assert encerrada.etapa_atual is None
+    assert encerrada.etapas["analise"].fim == DEPOIS
+
+
+def test_indexacao_que_falha_em_job_concluido_nao_muda_o_estado() -> None:
+    repositorio = _repositorio("concluido")
+
+    iniciar_etapa(repositorio, "j1", "indexacao", BASE)
+    encerrar_etapa(repositorio, "j1", "indexacao", "falhou", DEPOIS)
+
+    job = repositorio.obter("j1")
+    assert job is not None
+    assert job.estado == "concluido"
+    assert job.etapas["indexacao"].resultado == "falhou"
+
+
+def test_encerrar_etapa_que_nao_comecou_nao_grava() -> None:
+    repositorio = _repositorio("analisando")
+
+    assert encerrar_etapa(repositorio, "j1", "analise", "concluida", DEPOIS) is None
+    assert encerrar_etapa(repositorio, "outro", "analise", "falhou", DEPOIS) is None
+
+
+def test_job_anterior_ao_campo_e_lido_com_etapas_vazias() -> None:
+    job = Job.model_validate(
+        {
+            k: v
+            for k, v in _job("concluido").model_dump().items()
+            if k not in {"etapa_atual", "etapas"}
+        }
+    )
+    publico = JobPublico.de(job)
+
+    assert job.etapas == {} and job.etapa_atual is None
+    assert publico.etapas == [] and publico.etapa_atual is None
+
+
+def test_job_publico_lista_as_etapas_na_ordem_do_inicio() -> None:
+    repositorio = _repositorio("analisando")
+    iniciar_etapa(repositorio, "j1", "transcricao", BASE)
+    iniciar_etapa(repositorio, "j1", "validacao", BASE - timedelta(minutes=1))
+    job = repositorio.obter("j1")
+    assert job is not None
+
+    publico = JobPublico.de(job)
+
+    assert [e.nome for e in publico.etapas] == ["validacao", "transcricao"]

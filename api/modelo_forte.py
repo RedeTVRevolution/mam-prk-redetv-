@@ -196,14 +196,15 @@ def olhar_pessoas_sem_nome(
     catalogo: Catalogo | None = None,
     tolerancia_ms: int = TOLERANCIA_DA_FALA_MS,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
+    ao_falhar: Callable[[Exception], None] = lambda erro: None,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
 ) -> Decupagem:
     """Uma chamada por pessoa sem nome (até `limite_de_pessoas`) e, com o nome que o
     modelo der, a conferência das provas. Quem o modelo não nomeia, ou cuja chamada
-    falha, continua "não identificado". `quadros_em` tira os JPEGs dos instantes (ms)
-    da cópia limpa."""
+    falha, continua "não identificado" (e `ao_falhar` recebe o erro). `quadros_em` tira
+    os JPEGs dos instantes (ms) da cópia limpa."""
     candidatos = candidatos_do_video(programa, catalogo)
     nomes: dict[str, str] = {}
     grupo_de: dict[str, str] = {}
@@ -230,7 +231,8 @@ def olhar_pessoas_sem_nome(
                 sortear=sortear,
                 relogio=relogio,
             )
-        except (AnaliseFalhou, FalhaNosQuadros):
+        except (AnaliseFalhou, FalhaNosQuadros) as e:
+            ao_falhar(e)
             continue  # uma pessoa sem resposta não derruba a análise do vídeo
         if resposta.resultado != "nao_identificado" and resposta.nome:
             nomes.update({p.id: resposta.nome.strip() for p in grupo.pessoas})

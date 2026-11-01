@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 DEFINICAO = Path(__file__).parents[2] / "infra" / "validacao.workflow.yaml"
 
 
@@ -296,3 +298,232 @@ def test_job_de_referencias_no_main_tf_tem_internet_e_o_segredo_e_so_dele() -> N
     ].split("\nresource ")[0]
     assert 'google_service_account.mam["referencias"].member' in acesso
     assert main.count("secretAccessor") == 1
+
+
+ETAPAS = [
+    ("valida", "validacao"),
+    ("transcreve", "transcricao"),
+    ("le_a_tela", "leitura_da_tela"),
+    ("analisa", "analise"),
+    ("tira_os_quadros", "quadros_chave"),
+    ("indexa", "indexacao"),
+]
+
+
+def test_cada_etapa_grava_o_inicio_antes_e_o_fim_depois_de_rodar() -> None:
+    texto = _texto()
+
+    for passo, etapa in ETAPAS:
+        inicio = texto.index(
+            f"call: marca_inicio\n        args:\n          job_id: $${{job_id}}\n          etapa: {etapa}\n"
+        )
+        roda = texto.index(f"    - {passo}:\n")
+        fim = texto.index(
+            f"call: marca_fim\n        args:\n          job_id: $${{job_id}}\n          etapa: {etapa}\n          falhou_na_execucao: false"
+        )
+        assert inicio < roda < fim
+
+
+def test_falha_da_execucao_de_cada_etapa_grava_o_fim_como_falhou() -> None:
+    texto = _texto()
+
+    for passo, etapa in ETAPAS:
+        inicio = texto.index(f"\n    - {passo}:\n")
+        corpo = texto[inicio + 1 :]
+        corpo = corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
+        assert f"etapa: {etapa}\n" in corpo, passo
+        assert "falhou_na_execucao: true" in corpo, passo
+
+
+def test_subworkflow_grava_so_os_campos_da_etapa_sem_mexer_no_estado() -> None:
+    texto = _texto()
+
+    marcas = texto[texto.index("\nmarca_inicio:") :]
+    assert '"etapas." + etapa' in marcas
+    assert 'etapas." + etapa + ".fim"' in marcas
+    assert "resultado" in marcas
+    assert '"estado"' not in marcas and "estado]" not in marcas
+    # Um objeto sem Job não cria documento, e a medição nunca derruba o processamento.
+    assert marcas.count("exists: true") == 2
+    assert "sys.log" in marcas
+
+
+def test_quadros_e_indexacao_so_comecam_com_o_job_concluido() -> None:
+    texto = _texto()
+
+    guarda = texto.index("so_se_concluido:")
+    assert texto.index("- analisa:") < guarda < texto.index("- tira_os_quadros:")
+    assert 'estado.stringValue == "concluido"' in texto
+
+
+def test_falha_de_cada_etapa_nao_cai_no_encerra_que_a_gravaria_como_concluida() -> None:
+    texto = _texto()
+
+    for passo, etapa in ETAPAS:
+        excecao = texto[
+            texto.index(
+                "        except:\n", texto.index(f"\n    - {passo}:\n")
+            ) : texto.index(f"\n    - encerra_{etapa}:\n")
+        ]
+        ultimo_passo = excecao.rstrip().rsplit("\n            - ", 1)[1]
+        assert "raise:" in ultimo_passo or "next:" in ultimo_passo, passo
+
+
+def test_fim_de_etapa_sem_inicio_nao_e_gravado() -> None:
+    texto = _texto()
+
+    marca_fim = texto[texto.index("\nmarca_fim:") :]
+    guarda = marca_fim.index('["etapas", "mapValue", "fields", etapa]) == null')
+    assert guarda < marca_fim.index("grava_o_fim:")
+
+
+def _depois_de(texto: str, passo: str) -> str:
+    return texto[texto.index(f"- {passo}:") :]
+
+
+def test_reprocessamento_entra_pelo_job_e_pela_etapa_inicial_do_argumento() -> None:
+    texto = _texto()
+
+    escolha = _depois_de(texto, "escolhe_a_entrada")
+    assert 'map.get(evento, "etapa_inicial") != null' in escolha
+    assert "job_id: $${evento.job_id}" in texto
+    assert "etapa_inicial: $${evento.etapa_inicial}" in texto
+    # O evento do Eventarc segue rodando tudo, a começar pela validação.
+    assert "job_id: $${evento.data.name}" in texto
+    assert "etapa_inicial: validacao" in texto
+
+
+def _destino(texto: str, etapa: str) -> str:
+    roteia = _depois_de(texto, "parte_da_etapa")
+    achado = re.search(
+        rf'etapa_inicial == "{etapa}"\}}\n\s+next: (\w+)',
+        roteia.split("- inicia_validacao:")[0],
+    )
+    assert achado, etapa
+    return achado.group(1)
+
+
+def test_partindo_da_analise_nem_a_transcricao_nem_a_leitura_da_tela_rodam() -> None:
+    texto = _texto()
+
+    destino = _destino(texto, "analise")
+
+    assert destino == "inicia_analise"
+    # Do destino em diante estão a análise, os quadros-chave e a indexação, e só elas.
+    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
+    assert "jobs/${job_de_analise}" in daqui
+    for antes in (
+        "job_de_validacao",
+        "job_de_transcricao",
+        "job_de_ocr",
+    ):
+        assert antes not in daqui
+    for depois in ("job_de_quadros", "job_de_indexacao"):
+        assert depois in daqui
+
+
+def test_partindo_da_indexacao_nada_antes_dela_roda() -> None:
+    texto = _texto()
+
+    destino = _destino(texto, "indexacao")
+
+    assert destino == "inicia_indexacao"
+    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
+    assert "jobs/${job_de_indexacao}" in daqui
+    for antes in (
+        "job_de_validacao",
+        "job_de_transcricao",
+        "job_de_ocr",
+        "job_de_analise",
+        "job_de_quadros",
+    ):
+        assert antes not in daqui
+
+
+def test_cada_etapa_de_partida_cai_no_inicio_da_propria_etapa() -> None:
+    texto = _texto()
+
+    assert _destino(texto, "transcricao") == "inicia_transcricao"
+    assert _destino(texto, "leitura_da_tela") == "inicia_leitura_da_tela"
+    assert _destino(texto, "quadros_chave") == "inicia_quadros_chave"
+
+
+def test_a_api_so_inicia_execucoes_do_workflow_e_sabe_qual_e() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    web = main[main.index("papeis_no_projeto = {") :].split("validacao ")[0]
+    assert '"roles/workflows.invoker"' in web
+    assert "workflows.admin" not in main and "workflows.editor" not in main
+    # O mesmo nome no workflow e na web, pelo local (a referência ao recurso fecha um ciclo).
+    assert "name            = local.workflow_validacao" in main
+    assert "value = local.workflow_validacao" in main
+    assert 'name  = "WORKFLOW_VALIDACAO"' in main
+    assert 'name  = "WORKFLOW_REGIAO"' in main
+
+
+def _job_do_main_tf(nome: str) -> str:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    return main[main.index(f'resource "google_cloud_run_v2_job" "{nome}"') :].split(
+        "\nresource "
+    )[0]
+
+
+@pytest.mark.parametrize(
+    ("nome", "modulo"),
+    [("identificacao", "identificacao_job"), ("comparacao", "comparacao_job")],
+)
+def test_jobs_de_identificacao_e_comparacao_sem_internet_com_a_imagem_do_ffmpeg(
+    nome: str, modulo: str
+) -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    job = _job_do_main_tf(nome)
+
+    assert "google_compute_network.validacao.id" in job
+    assert "google_compute_subnetwork.validacao.id" in job
+    assert "var.imagem_validacao" in job
+    assert f'args    = ["-m", "api.{modulo}"]' in job
+    assert "max_retries     = 0" in job
+    assert f'google_service_account.mam["{nome}"]' in job
+    assert "external_ip" not in main and "google_compute_router_nat" not in main
+    assert 'local.buckets["aceitos"]' in job and 'local.buckets["decupagens"]' in job
+
+
+def test_variaveis_dos_jobs_novos_vem_do_main_tf() -> None:
+    ident = _job_do_main_tf("identificacao")
+    comp = _job_do_main_tf("comparacao")
+
+    assert "var.limite_de_pessoas_do_modelo_forte" in ident
+    assert 'name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"' in ident
+    for env, valor in [
+        ("LIMIAR_DA_COMPARACAO", "var.limiar_da_comparacao"),
+        ("LIMITE_DE_COMPARACOES", "var.limite_de_comparacoes"),
+        ("VALIDADE_DAS_REFERENCIAS_DIAS", "var.validade_das_referencias_dias"),
+        ("REFERENCIAS_DO_ACERVO", "var.referencias_do_acervo"),
+    ]:
+        assert f'name  = "{env}"' in comp
+        assert valor in comp
+    assert 'local.buckets["referencias"]' in comp
+    assert 'local.buckets["referencias"]' not in ident
+
+
+def test_contas_e_papeis_dos_jobs_novos_sao_so_os_combinados() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    contas = main.split("for_each     = toset([")[1].split("])")[0]
+    for nome in ("identificacao", "comparacao"):
+        assert f'"{nome}"' in contas
+        assert re.search(
+            rf'\n\s+{nome}\s+= \["roles/datastore.user", "roles/aiplatform.user"\]',
+            main,
+        )
+    assert re.search(
+        r'identificacao = \{ aceitos = "roles/storage.objectViewer", '
+        r'decupagens = "roles/storage.objectUser" \}',
+        main,
+    )
+    assert re.search(
+        r'comparacao = \{ aceitos = "roles/storage.objectViewer", '
+        r'decupagens = "roles/storage.objectUser", '
+        r'referencias = "roles/storage.objectViewer" \}',
+        main,
+    )

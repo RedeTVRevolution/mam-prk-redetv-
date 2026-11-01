@@ -1,6 +1,7 @@
 """Adaptadores de nuvem da E0: Firestore (Jobs) e Cloud Storage (upload)."""
 
 import hashlib
+import json
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -8,11 +9,24 @@ from typing import Any
 
 import google.auth
 import google.auth.transport.requests
+import requests
 from google.api_core.exceptions import AlreadyExists, NotFound
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
+from api.auditoria import (
+    FiltroDeAuditoria,
+    PaginaDeAuditoria,
+    RegistroDeAuditoria,
+    campo_da_pessoa,
+)
+from api.auditoria import (
+    casa_com_o_filtro as casa_com_o_filtro_da_auditoria,
+)
+from api.auditoria import (
+    pagina_de as pagina_da_auditoria,
+)
 from api.catalogo import (
     PessoaDoCatalogo,
     PessoaInexistente,
@@ -22,14 +36,17 @@ from api.catalogo import (
     novo_id,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.comparacao import FotoAusente
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
+from api.decupagem import Decupagem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
     Job,
+    NomeDaEtapa,
     PaginaDeJobs,
     ServicoIndisponivel,
     casa_com_o_filtro,
@@ -48,6 +65,7 @@ COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DAS_SUGESTOES = "sugestoes_de_perfil"
 COLECAO_DE_CONFIGURACAO = "configuracao"
+COLECAO_DA_AUDITORIA = "auditoria"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 
@@ -89,6 +107,10 @@ def objeto_da_copia_limpa(job_id: str) -> str:
     return f"{job_id}/copia_limpa.mp4"
 
 
+def objeto_da_comparacao(job_id: str) -> str:
+    return f"{job_id}.comparacao.json"
+
+
 class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
@@ -119,6 +141,28 @@ class RepositorioFirestore:
             return novo
 
         resultado: Job | None = trocar(self._cliente.transaction())
+        return resultado
+
+    def trocar(
+        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
+    ) -> Job | None:
+        # Como `transitar`, mas quem decide é `mudar`, que o Firestore pode repetir.
+        referencia = self._colecao.document(job_id)
+
+        @firestore.transactional
+        def trocar_na_transacao(transacao: Any) -> Job | None:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                return None
+            job = Job(**(doc.to_dict() or {}))
+            mudancas = mudar(job)
+            if mudancas is None:
+                return None
+            novo = job.model_copy(update=mudancas)
+            transacao.set(referencia, novo.model_dump())
+            return novo
+
+        resultado: Job | None = trocar_na_transacao(self._cliente.transaction())
         return resultado
 
     def obter(self, job_id: str) -> Job | None:
@@ -358,6 +402,14 @@ class ReferenciasStorage:
             jpeg, content_type="image/jpeg"
         )
 
+    def ler(self, objeto: str) -> bytes:
+        try:
+            blob = self._cliente.bucket(self._bucket).blob(objeto)
+            conteudo: bytes = blob.download_as_bytes()
+            return conteudo
+        except NotFound as e:
+            raise FotoAusente(objeto) from e
+
 
 class RepositorioDeCorrecoesFirestore:
     """Só acrescenta: `create` falha se o id já existe, então nada é sobrescrito."""
@@ -399,6 +451,88 @@ class RepositorioDeAprovacaoFirestore:
         self._documento.set({"tipos": sorted(tipos)})
 
 
+class RepositorioDeAuditoriaFirestore:
+    """Só acrescenta: `create` falha se o id já existe, e não há como alterar nem apagar."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DA_AUDITORIA
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def acrescentar(self, registro: RegistroDeAuditoria) -> None:
+        self._colecao.document(registro.id).create(registro.model_dump())
+
+    def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
+        # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os
+        # índices compostos estão no infra/main.tf.
+        consulta: Any = self._colecao
+        if filtro.pessoa is not None:
+            campo, valor = campo_da_pessoa(filtro.pessoa)
+            consulta = consulta.where(filter=FieldFilter(campo, "==", valor))
+        if filtro.alvo_id is not None:
+            consulta = consulta.where(
+                filter=FieldFilter("alvo_id", "==", filtro.alvo_id)
+            )
+        if filtro.acao is not None:
+            consulta = consulta.where(filter=FieldFilter("acao", "==", filtro.acao))
+        if filtro.de is not None:
+            consulta = consulta.where(filter=FieldFilter("quando", ">=", filtro.de))
+        if filtro.ate is not None:
+            consulta = consulta.where(filter=FieldFilter("quando", "<=", filtro.ate))
+        # O desempate implícito é o id do documento, na mesma direção da ordem.
+        consulta = consulta.order_by("quando", direction=firestore.Query.DESCENDING)
+        if filtro.cursor is not None:
+            ancora = self._colecao.document(filtro.cursor).get()
+            if not ancora.exists:
+                raise CursorInvalido
+            consulta = consulta.start_after(ancora)
+        registros = (
+            RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()
+        )
+        return pagina_da_auditoria(
+            (r for r in registros if casa_com_o_filtro_da_auditoria(r, filtro)),
+            filtro.limite,
+        )
+
+
+class DisparoPeloWorkflows:
+    """Começa uma execução do Workflows da validação a partir de uma etapa.
+
+    O argumento (`job_id` e `etapa_inicial`) é o que o workflow reconhece como
+    reprocessamento, no lugar do evento do Eventarc. A conta da API só tem a
+    permissão de iniciar execuções.
+    """
+
+    def __init__(
+        self, projeto: str, regiao: str, workflow: str, sessao: Any = None
+    ) -> None:
+        self._url = (
+            "https://workflowexecutions.googleapis.com/v1/projects/"
+            f"{projeto}/locations/{regiao}/workflows/{workflow}/executions"
+        )
+        self._sessao = sessao
+
+    def _sessao_autenticada(self) -> Any:
+        if self._sessao is None:
+            credenciais, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            sessao: Any = google.auth.transport.requests.AuthorizedSession
+            self._sessao = sessao(credenciais)
+        return self._sessao
+
+    def iniciar(self, job_id: str, etapa: NomeDaEtapa) -> None:
+        argumento = json.dumps({"job_id": job_id, "etapa_inicial": etapa})
+        try:
+            resposta = self._sessao_autenticada().post(
+                self._url, json={"argument": argumento}, timeout=30
+            )
+            resposta.raise_for_status()
+        except requests.RequestException as e:
+            # Vira 503 na rota, que antes devolve o Job ao que era.
+            raise ServicoIndisponivel from e
+
+
 def assinatura_pelo_iam() -> dict[str, Any]:
     """Assinatura pedida ao IAM pela conta do serviço, sem chave em arquivo."""
     credenciais: Any
@@ -438,6 +572,26 @@ class DecupagensStorage:
                     yield pedaco
         except NotFound as e:
             raise ServicoIndisponivel from e
+
+    def ler_decupagem(self, job_id: str) -> Decupagem | None:
+        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
+        try:
+            return Decupagem.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
+
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        try:
+            blob.download_to_filename(str(destino))
+        except NotFound:
+            return False
+        return True
+
+    def gravar_comparacao(self, job_id: str, conteudo: str) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_da_comparacao(job_id)
+        ).upload_from_string(conteudo, content_type="application/json")
 
 
 class TranscricoesStorage:
@@ -520,15 +674,7 @@ class LeiturasStorage:
 
 
 class QuadrosStorage(DecupagensStorage):
-    """A cópia limpa que o ffmpeg lê, e os JPEGs e a Decupagem no bucket das decupagens."""
-
-    def baixar_copia_limpa(self, job_id: str, destino: Path) -> None:
-        self._cliente.bucket(self._aceitos).blob(
-            objeto_da_copia_limpa(job_id)
-        ).download_to_filename(str(destino))
-
-    def ler_decupagem(self, job_id: str) -> bytes:
-        return b"".join(self.abrir_decupagem(job_id))
+    """Os JPEGs dos quadros-chave no bucket das decupagens, além da cópia limpa e da Decupagem."""
 
     def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None:
         self._cliente.bucket(self._decupagens).blob(

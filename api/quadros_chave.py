@@ -24,9 +24,9 @@ from api.quadros_das_pessoas import extrair_quadros
 class QuadrosDoJob(Protocol):
     """Porta do Cloud Storage para os quadros-chave; os testes usam um dublê."""
 
-    def baixar_copia_limpa(self, job_id: str, destino: Path) -> None: ...
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool: ...
 
-    def ler_decupagem(self, job_id: str) -> bytes: ...
+    def ler_decupagem(self, job_id: str) -> Decupagem | None: ...
 
     def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None: ...
 
@@ -95,8 +95,9 @@ def executar(
     if job is None or job.estado != "concluido":
         return
     copia = pasta / f"{job_id}.mp4"
-    armazenamento.baixar_copia_limpa(job_id, copia)
-    decupagem = Decupagem.model_validate_json(armazenamento.ler_decupagem(job_id))
+    decupagem = armazenamento.ler_decupagem(job_id)
+    if decupagem is None or not armazenamento.baixar_copia_limpa(job_id, copia):
+        raise FalhaNosQuadros(f"sem Decupagem ou cópia limpa do job {job_id}")
     pronta = com_quadros_chave(
         copia,
         decupagem,

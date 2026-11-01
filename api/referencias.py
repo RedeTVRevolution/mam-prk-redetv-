@@ -398,15 +398,20 @@ def _limpo(nome: str) -> str:
     return re.sub(r"\s+", " ", sem_controle).strip()
 
 
+def nomes_do_perfil(programa: str) -> set[str]:
+    """Os nomes (normalizados) das pessoas do perfil do programa."""
+    return {
+        normalizar(p["nome"]) for p in (DADOS.get(programa) or {}).get("pessoas", [])
+    }
+
+
 def apresentadores_do_programa(
     programa: str, *, busca: Busca, extrator: ExtratorDeNomes
 ) -> list[str]:
     """Os nomes que a busca web aponta como apresentadores do programa, limpos e sem
     repetição, e só os que ainda não estão no perfil. Nunca vão sozinhos ao catálogo."""
     nomes = extrator.extrair(programa, busca.web(consulta_de_apresentadores(programa)))
-    do_perfil = {
-        normalizar(p["nome"]) for p in (DADOS.get(programa) or {}).get("pessoas", [])
-    }
+    do_perfil = nomes_do_perfil(programa)
     unicos: dict[str, str] = {}
     for n in nomes:
         limpo = _limpo(n)

@@ -182,6 +182,27 @@ test('o objeto traz tipo, cores, categoria, dono com a relação e marca; sem do
   expect(itens[2].objeto).toMatchObject({ tom: 'dourado e preto', dono: null, categoria: 'em cena' })
 })
 
+test('as categorias do esquema 1.4 saem com o rótulo legível', () => {
+  const [o1] = D.objetos ?? []
+  const d = {
+    ...D,
+    objetos: (['eletronico', 'produto', 'animal', 'alimento'] as const).map((categoria, n) => ({
+      ...o1,
+      id: `o${n}`,
+      categoria,
+      pessoa: null,
+      relacao: null,
+    })),
+  }
+
+  expect(objetosDaAba(itensDoPainel(d)).map((o) => o.dados.categoria)).toEqual([
+    'eletrônico',
+    'produto',
+    'animal',
+    'alimento',
+  ])
+})
+
 test('um dono fora das pessoas da decupagem não vira "em cena"', () => {
   const [o1] = D.objetos ?? []
   const d = { ...D, objetos: [{ ...o1, pessoa: 'p9', relacao: null }] }

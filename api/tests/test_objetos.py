@@ -102,7 +102,90 @@ def test_listas_fechadas_vivem_num_lugar_so_e_vao_para_o_esquema_do_modelo() -> 
         "em_cena",
         "veiculo",
         "outro",
+        "eletronico",
+        "produto",
+        "animal",
+        "alimento",
     } == set(CATEGORIAS_DE_OBJETO)
+
+
+def test_esquema_do_modelo_traz_as_descricoes_do_esquema_14() -> None:
+    esquema = esquema_do_modelo()
+    objeto_do_modelo = esquema["$defs"]["Objeto"]["properties"]
+
+    assert (
+        "objetos em cena (veículo, produto, eletrônico"
+        in (esquema["properties"]["objetos"]["description"])
+    )
+    assert (
+        "só quando nenhuma outra categoria servir"
+        in (objeto_do_modelo["categoria"]["description"])
+    )
+    assert '"carro"' in objeto_do_modelo["tipo"]["description"]
+    assert '"celular"' in objeto_do_modelo["tipo"]["description"]
+    assert (
+        "também entra em `objetos`"
+        in (esquema["$defs"]["Plano"]["properties"]["objetos"]["description"])
+    )
+
+
+def test_resposta_simulada_com_carro_sem_dono_e_produto_no_telao_sai_em_14() -> None:
+    carro = objeto(
+        id="obj01",
+        categoria="veiculo",
+        tipo="carro",
+        pessoa=None,
+        relacao=None,
+        cor_base=["azul"],
+        cor="azul-marinho",
+        detalhe=None,
+        marca="BYD",
+    )
+    produto = objeto(
+        id="obj02",
+        categoria="produto",
+        tipo="moto",
+        pessoa=None,
+        relacao=None,
+        detalhe="no telão",
+    )
+
+    d = _rodar(TransporteFalso(_resposta_com_objetos(carro, produto)))
+
+    assert d.versao_esquema == "1.4"
+    assert [(o.categoria, o.pessoa, o.detalhe) for o in d.objetos] == [
+        ("veiculo", None, None),
+        ("produto", None, "no telão"),
+    ]
+
+
+def test_decupagem_13_gravada_continua_valida() -> None:
+    d = Decupagem.model_validate(com_objetos(objeto()))
+
+    assert d.versao_esquema == "1.3"
+
+
+@pytest.mark.parametrize("categoria", ["eletronico", "produto", "animal", "alimento"])
+def test_categorias_novas_passam_no_esquema(categoria: str) -> None:
+    d = Decupagem.model_validate(
+        {
+            **com_objetos(objeto(categoria=categoria, pessoa=None, relacao=None)),
+            "versao_esquema": "1.4",
+        }
+    )
+
+    assert d.objetos[0].categoria == categoria
+
+
+def test_instrucao_traz_as_regras_de_objeto_em_cena_e_de_telao() -> None:
+    texto = instrucao(None)
+
+    assert "Os dois grupos têm o mesmo peso" in texto
+    assert "os objetos em cena: veículo, produto, eletrônico" in texto
+    assert "Produto mostrado num telão, num gráfico ou numa vinheta" in texto
+    assert "Todo objeto que você citar em objetos de um plano também entra" in texto
+    assert "comercial tiver a evidência produto, o produto entra em objetos" in texto
+    assert "Use em_cena ou na_mao só quando nenhuma outra servir" in texto
 
 
 def _resposta_com_objetos(*objetos: dict[str, Any]) -> str:

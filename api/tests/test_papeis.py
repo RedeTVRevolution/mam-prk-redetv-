@@ -19,7 +19,11 @@ def test_consulta_so_ve_a_decupagem() -> None:
 
 
 def test_operador_e_consulta_mais_enviar_video() -> None:
-    assert permissoes_de(["operador"]) == {"decupagem.ver", "video.enviar"}
+    assert permissoes_de(["operador"]) == {
+        "decupagem.ver",
+        "video.enviar",
+        "video.reprocessar",
+    }
 
 
 def test_editor_e_consulta_mais_editar() -> None:
@@ -43,6 +47,7 @@ def test_varios_papeis_somam_permissoes() -> None:
     assert permissoes_de(["operador", "editor"]) == {
         "decupagem.ver",
         "video.enviar",
+        "video.reprocessar",
         "decupagem.editar",
     }
 
@@ -53,7 +58,11 @@ def test_sem_papeis_nao_ha_permissao() -> None:
 
 def test_conta_sem_documento_vale_consulta_e_operador() -> None:
     assert papeis_efetivos(None) == ["consulta", "operador"]
-    assert permissoes_de(papeis_efetivos(None)) == {"decupagem.ver", "video.enviar"}
+    assert permissoes_de(papeis_efetivos(None)) == {
+        "decupagem.ver",
+        "video.enviar",
+        "video.reprocessar",
+    }
 
 
 def test_conta_com_documento_usa_so_os_papeis_dele() -> None:
@@ -143,3 +152,15 @@ def test_administrador_ja_guardado_nao_se_repete() -> None:
     papeis = papeis_do_usuario(["administrador"], "a@b.c", True, admins_de("a@b.c"))
 
     assert papeis == ["administrador"]
+
+
+def test_so_o_administrador_ve_a_auditoria() -> None:
+    for papel in ("consulta", "operador", "editor", "curador"):
+        assert "auditoria.ver" not in permissoes_de([papel])
+    assert "auditoria.ver" in permissoes_de(["administrador"])
+
+
+def test_so_o_operador_e_o_administrador_reprocessam() -> None:
+    assert "video.reprocessar" not in permissoes_de(["consulta", "editor", "curador"])
+    assert "video.reprocessar" in permissoes_de(["operador"])
+    assert "video.reprocessar" in permissoes_de(["administrador"])
