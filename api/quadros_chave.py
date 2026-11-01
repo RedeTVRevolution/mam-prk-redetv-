@@ -1,11 +1,13 @@
 """Um JPEG por momento da Decupagem, tirado da cópia limpa depois da análise.
 
-Um por plano (no meio dele), um por aparição (no meio dela) e um por objeto (no meio da
-primeira ocorrência). O campo `quadro` do momento guarda o caminho do JPEG, relativo à
-pasta do Job no bucket das decupagens. O Job roda sem internet, com o ffmpeg da imagem da
+Um a três por plano (conforme a duração), um por aparição (no meio dela) e um por objeto
+(no meio da primeira ocorrência); o alvo escuro desvia para um instante próximo e claro.
+O campo `quadro` do momento guarda o caminho do JPEG, relativo à pasta do Job no bucket
+das decupagens; o plano guarda também todos em `quadros`. O Job roda sem internet, com o ffmpeg da imagem da
 validação, e tira cada quadro como os do modelo forte (`extrair_quadros`).
 """
 
+import io
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -13,12 +15,35 @@ from typing import Protocol
 
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
+from PIL import Image, ImageStat
 
 from api.decupagem import Decupagem, caminho_do_quadro
 from api.jobs import RepositorioDeJobs
 from api.nuvem import QuadrosStorage, RepositorioFirestore
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
+
+# ponytail: limiar fixo, calibrar com os quadros do piloto
+LIMIAR_DE_ESCURO = 20  # luminância média, de 0 a 255
+DESVIOS_MS = (1_000, -1_000, 2_000, -2_000, 3_000, -3_000)
+FOLGA_DAS_BORDAS_MS = 500
+
+
+def instantes_alvo(inicio_ms: int, fim_ms: int) -> list[int]:
+    """Os instantes (ms) dos quadros de um plano: 1 abaixo de 10 s, 2 até 30 s, 3 depois."""
+    duracao = fim_ms - inicio_ms
+    if duracao < 10_000:
+        fracoes = [(1, 2)]
+    elif duracao < 30_000:
+        fracoes = [(1, 3), (2, 3)]
+    else:
+        fracoes = [(1, 4), (2, 4), (3, 4)]
+    return [inicio_ms + duracao * n // d for n, d in fracoes]
+
+
+def e_escuro(jpeg: bytes) -> bool:
+    with Image.open(io.BytesIO(jpeg)) as imagem:
+        return ImageStat.Stat(imagem.convert("L")).mean[0] < LIMIAR_DE_ESCURO
 
 
 class QuadrosDoJob(Protocol):
@@ -45,17 +70,54 @@ def com_quadros_chave(
     """
     pronta = decupagem.model_copy(deep=True)
 
+    def claro(alvo_ms: int, inicio_ms: int, fim_ms: int) -> tuple[int, bytes] | None:
+        """O primeiro quadro não escuro: o alvo, depois ±1 s, ±2 s e ±3 s dele."""
+        for desvio in (0, *DESVIOS_MS):
+            instante = alvo_ms + desvio
+            if desvio and not (
+                inicio_ms + FOLGA_DAS_BORDAS_MS
+                <= instante
+                <= fim_ms - FOLGA_DAS_BORDAS_MS
+            ):
+                continue
+            try:
+                [jpeg] = extrair_quadros(video, [instante])
+            except FalhaNosQuadros:
+                continue
+            if not e_escuro(jpeg):
+                return instante, jpeg
+        return None
+
     def quadro(nome: str, inicio_ms: int, fim_ms: int) -> str | None:
-        try:
-            [jpeg] = extrair_quadros(video, [(inicio_ms + fim_ms) // 2])
-        except FalhaNosQuadros:
+        achado = claro((inicio_ms + fim_ms) // 2, inicio_ms, fim_ms)
+        if achado is None:
             return None
         caminho = caminho_do_quadro(f"{nome}.jpg")
-        gravar(caminho, jpeg)
+        gravar(caminho, achado[1])
         return caminho
 
     for i, plano in enumerate(pronta.planos):
-        plano.quadro = quadro(f"plano-{i}", plano.inicio_ms, plano.fim_ms)
+        achados: dict[int, bytes] = {}
+        for alvo in instantes_alvo(plano.inicio_ms, plano.fim_ms):
+            achado = claro(alvo, plano.inicio_ms, plano.fim_ms)
+            if achado is not None:
+                achados.setdefault(*achado)
+        meio = (plano.inicio_ms + plano.fim_ms) / 2
+        representativo = min(achados, key=lambda t: abs(t - meio), default=None)
+        plano.quadro = None
+        plano.quadros = []
+        outros = 0
+        for instante in sorted(achados):
+            if instante == representativo:
+                arquivo = f"plano-{i}.jpg"
+            else:
+                arquivo = f"plano-{i}-{outros}.jpg"
+                outros += 1
+            caminho = caminho_do_quadro(arquivo)
+            gravar(caminho, achados[instante])
+            plano.quadros.append(caminho)
+            if instante == representativo:
+                plano.quadro = caminho
     for i, pessoa in enumerate(pronta.pessoas):
         for j, aparicao in enumerate(pessoa.na_imagem):
             aparicao.quadro = quadro(

@@ -245,7 +245,9 @@ class Plano(_Intervalo):
     movimento_camera: Rotulo | None = None
     externa: bool | None = None
     periodo: Literal["dia", "noite"] | None = None
-    quadro: str | None = None  # o JPEG do meio do plano (#115)
+    quadro: str | None = None  # o JPEG não escuro mais perto do meio do plano (#115)
+    # Os 1 a 3 JPEGs do plano em ordem de tempo, incluindo o de `quadro` (#227).
+    quadros: list[str] = []
 
 
 EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
@@ -397,6 +399,7 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "estado_do_nome",
         "catalogo_id",
         "quadro",
+        "quadros",
         "texto_original",
         "medido",
         "motivo",
