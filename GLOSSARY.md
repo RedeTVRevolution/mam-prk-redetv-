@@ -67,7 +67,7 @@ A prova que confirma o nome de uma pessoa, conferida pelo código: GC, fala ou r
 
 **Referência de rosto**:
 Foto de uma pessoa nomeada, guardada para comparar com o rosto da tela: 3 fotos diferentes por nome, buscadas na web, com a página de origem.
-Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet: recebe só nomes (`NOMES`, `PROGRAMA`), lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo. O nome fora do catálogo (palpite) ganha as fotos sob o prefixo `palpites/` (ver **Fotos de palpite**); o ambíguo não busca. Há um limite de buscas por vídeo (`LIMITE_DE_BUSCAS_POR_VIDEO`), e cada busca leva o rótulo de custo. O `make carregar-catalogo` não apaga os rostos já guardados.
+Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet. Recebe só nomes: `NOMES` e `PROGRAMA`, ou `JOB_ID`, e então lê a lista que o Job de identificação gravou (`<job>.nomes_a_buscar.json`, com os candidatos e os palpites sem referência válida e o programa). Lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo. O nome fora do catálogo (palpite) ganha as fotos sob o prefixo `palpites/` (ver **Fotos de palpite**); o ambíguo não busca. Há um limite de buscas por vídeo (`LIMITE_DE_BUSCAS_POR_VIDEO`), e cada busca leva o rótulo de custo. O `make carregar-catalogo` não apaga os rostos já guardados.
 _Evitar_: galeria facial
 
 **Fotos de palpite**:

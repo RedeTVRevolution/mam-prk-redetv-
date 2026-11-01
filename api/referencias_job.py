@@ -1,10 +1,10 @@
 """Cloud Run Job das referências de rosto pela web (#111, ADR 0005).
 
 Único Job com internet (sem `vpc_access`), por isso só recebe nomes: `NOMES` (lista em
-JSON) e, se houver, `PROGRAMA`; ou `JOB_ID`, e a lista vem da identificação do vídeo. Nunca recebe quadros nem o vídeo. A chave do SerpAPI
-fica no Secret Manager e só este Job a lê (`SEGREDO_DO_SERPAPI` é o nome do recurso, que
-vem do Terraform). Um nome sem foto boa não derruba os outros; a busca que falha, sim,
-termina a execução com erro.
+JSON) e, se houver, `PROGRAMA`; ou `JOB_ID`, e a lista vem da identificação do vídeo.
+Nunca recebe quadros nem o vídeo. A chave do SerpAPI fica no Secret Manager e só este
+Job a lê (`SEGREDO_DO_SERPAPI` é o nome do recurso, que vem do Terraform). Um nome sem
+foto boa não derruba os outros; a busca que falha, sim, termina a execução com erro.
 """
 
 import base64

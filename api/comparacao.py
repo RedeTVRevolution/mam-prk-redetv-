@@ -190,16 +190,17 @@ def _opcoes(
         achadas = catalogo.achar(nome)
         if len(achadas) > 1:
             continue
+        chave = achadas[0].id if achadas else normalizar(nome)
+        if chave in opcoes:
+            continue
         if achadas:
             pessoa = achadas[0]
-            chave: str = pessoa.id
             achou = _com_fotos(
                 rostos_validos(pessoa, agora, validade, com_acervo=com_acervo), fotos
             )
             catalogo_id: str | None = pessoa.id
             nome_da_opcao = pessoa.nome
         elif palpites is not None:
-            chave = normalizar(nome)
             achou = _com_fotos(
                 rostos_que_valem(palpites.rostos(nome), agora, validade), fotos
             )
@@ -207,7 +208,7 @@ def _opcoes(
             nome_da_opcao = nome
         else:
             continue
-        if achou is None or chave in opcoes:
+        if achou is None:
             continue
         opcoes[chave] = Opcao(chave, nome_da_opcao, catalogo_id, *achou)
     return list(opcoes.values())
