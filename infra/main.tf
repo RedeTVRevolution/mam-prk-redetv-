@@ -275,7 +275,9 @@ resource "google_service_account" "mam" {
 # A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
   papeis_no_projeto = {
-    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user"]
+    # `workflows.invoker` é só iniciar execuções (o reprocessar do #147), e o projeto tem
+    # um único workflow.
+    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/workflows.invoker"]
     validacao   = ["roles/datastore.user"]
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
@@ -426,6 +428,15 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUCKET_DECUPAGENS"
         value = local.buckets["decupagens"]
+      }
+      # O workflow que o reprocessar dispara (api/nuvem.py).
+      env {
+        name  = "WORKFLOW_VALIDACAO"
+        value = google_workflows_workflow.validacao.name
+      }
+      env {
+        name  = "WORKFLOW_REGIAO"
+        value = var.regiao
       }
       env {
         name  = "BUSCA_REGIAO"

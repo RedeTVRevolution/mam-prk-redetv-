@@ -9,10 +9,35 @@
 main:
   params: [evento]
   steps:
+    # Duas entradas: o evento do Eventarc (upload completo, roda tudo) e o reprocessamento
+    # da API (#147), com `job_id` e `etapa_inicial`: a etapa e as seguintes rodam, as
+    # anteriores já concluíram e não rodam de novo.
+    - escolhe_a_entrada:
+        switch:
+          - condition: $${map.get(evento, "etapa_inicial") != null}
+            next: tira_o_id_do_reprocessamento
     - tira_o_id:
         assign:
           # O objeto na quarentena tem o nome do id do Job.
           - job_id: $${evento.data.name}
+          - etapa_inicial: validacao
+        next: parte_da_etapa
+    - tira_o_id_do_reprocessamento:
+        assign:
+          - job_id: $${evento.job_id}
+          - etapa_inicial: $${evento.etapa_inicial}
+    - parte_da_etapa:
+        switch:
+          - condition: $${etapa_inicial == "transcricao"}
+            next: inicia_transcricao
+          - condition: $${etapa_inicial == "leitura_da_tela"}
+            next: inicia_leitura_da_tela
+          - condition: $${etapa_inicial == "analise"}
+            next: inicia_analise
+          - condition: $${etapa_inicial == "quadros_chave"}
+            next: inicia_quadros_chave
+          - condition: $${etapa_inicial == "indexacao"}
+            next: inicia_indexacao
     - inicia_validacao:
         call: marca_inicio
         args:

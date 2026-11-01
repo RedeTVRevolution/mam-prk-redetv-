@@ -373,3 +373,85 @@ def test_fim_de_etapa_sem_inicio_nao_e_gravado() -> None:
     marca_fim = texto[texto.index("\nmarca_fim:") :]
     guarda = marca_fim.index('["etapas", "mapValue", "fields", etapa]) == null')
     assert guarda < marca_fim.index("grava_o_fim:")
+
+
+def _depois_de(texto: str, passo: str) -> str:
+    return texto[texto.index(f"- {passo}:") :]
+
+
+def test_reprocessamento_entra_pelo_job_e_pela_etapa_inicial_do_argumento() -> None:
+    texto = _texto()
+
+    escolha = _depois_de(texto, "escolhe_a_entrada")
+    assert 'map.get(evento, "etapa_inicial") != null' in escolha
+    assert "job_id: $${evento.job_id}" in texto
+    assert "etapa_inicial: $${evento.etapa_inicial}" in texto
+    # O evento do Eventarc segue rodando tudo, a começar pela validação.
+    assert "job_id: $${evento.data.name}" in texto
+    assert "etapa_inicial: validacao" in texto
+
+
+def _destino(texto: str, etapa: str) -> str:
+    roteia = _depois_de(texto, "parte_da_etapa")
+    achado = re.search(
+        rf'etapa_inicial == "{etapa}"\}}\n\s+next: (\w+)',
+        roteia.split("- inicia_validacao:")[0],
+    )
+    assert achado, etapa
+    return achado.group(1)
+
+
+def test_partindo_da_analise_nem_a_transcricao_nem_a_leitura_da_tela_rodam() -> None:
+    texto = _texto()
+
+    destino = _destino(texto, "analise")
+
+    assert destino == "inicia_analise"
+    # Do destino em diante estão a análise, os quadros-chave e a indexação, e só elas.
+    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
+    assert "jobs/${job_de_analise}" in daqui
+    for antes in (
+        "job_de_validacao",
+        "job_de_transcricao",
+        "job_de_ocr",
+    ):
+        assert antes not in daqui
+    for depois in ("job_de_quadros", "job_de_indexacao"):
+        assert depois in daqui
+
+
+def test_partindo_da_indexacao_nada_antes_dela_roda() -> None:
+    texto = _texto()
+
+    destino = _destino(texto, "indexacao")
+
+    assert destino == "inicia_indexacao"
+    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
+    assert "jobs/${job_de_indexacao}" in daqui
+    for antes in (
+        "job_de_validacao",
+        "job_de_transcricao",
+        "job_de_ocr",
+        "job_de_analise",
+        "job_de_quadros",
+    ):
+        assert antes not in daqui
+
+
+def test_cada_etapa_de_partida_cai_no_inicio_da_propria_etapa() -> None:
+    texto = _texto()
+
+    assert _destino(texto, "transcricao") == "inicia_transcricao"
+    assert _destino(texto, "leitura_da_tela") == "inicia_leitura_da_tela"
+    assert _destino(texto, "quadros_chave") == "inicia_quadros_chave"
+
+
+def test_a_api_so_inicia_execucoes_do_workflow_e_sabe_qual_e() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    web = main[main.index("papeis_no_projeto = {") :].split("validacao ")[0]
+    assert '"roles/workflows.invoker"' in web
+    assert "workflows.admin" not in main and "workflows.editor" not in main
+    assert "google_workflows_workflow.validacao.name" in main
+    assert 'name  = "WORKFLOW_VALIDACAO"' in main
+    assert 'name  = "WORKFLOW_REGIAO"' in main

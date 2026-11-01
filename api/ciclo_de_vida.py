@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
 # `api.jobs` usa este módulo nas rotas; aqui os tipos só servem à checagem.
 if TYPE_CHECKING:
@@ -165,3 +165,132 @@ def encerrar_etapa(
     return _gravar_etapa(
         repositorio, job_id, mudar, exige=lambda job: etapa in job.etapas
     )
+
+
+# Falhas do próprio arquivo: refazer o processamento não as conserta.
+FALHAS_DO_ARQUIVO = frozenset(
+    {
+        "formato_invalido",
+        "arquivo_corrompido",
+        "codec_nao_suportado",
+        "duracao_excedida",
+        "upload_expirado",
+    }
+)
+# Job em `falhou` sem etapa `falhou` no registro (anterior ao #146): o código diz a etapa.
+ETAPA_DA_FALHA: dict[str, NomeDaEtapa] = {
+    "transcricao_falhou": "transcricao",
+    "ocr_falhou": "leitura_da_tela",
+    "analise_falhou": "analise",
+}
+# Depois do `concluido`, só estas etapas rodam: o Job e a Decupagem seguem como estão.
+ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = ("quadros_chave", "indexacao")
+
+
+class NaoReprocessavel(Exception):
+    """O Job não pode ser reprocessado; a mensagem diz o porquê (vira 409)."""
+
+
+def _ordem_das_etapas() -> tuple[NomeDaEtapa, ...]:
+    from api.jobs import NomeDaEtapa
+
+    return get_args(NomeDaEtapa)
+
+
+def etapa_de_partida(job: Job) -> NomeDaEtapa:
+    """A primeira etapa que falhou, de onde o reprocessamento recomeça."""
+    if job.estado == "falhou":
+        if job.codigo_falha in FALHAS_DO_ARQUIVO or job.codigo_falha is None:
+            raise NaoReprocessavel(
+                "A falha é do arquivo: é preciso enviar o vídeo de novo"
+            )
+    elif job.estado != "concluido":
+        raise NaoReprocessavel(f"Job em {job.estado}, não reprocessável")
+    falhas = [
+        e
+        for e in _ordem_das_etapas()
+        if (r := job.etapas.get(e)) and r.resultado == "falhou"
+    ]
+    if job.estado == "falhou":
+        partida = falhas[0] if falhas else ETAPA_DA_FALHA.get(job.codigo_falha or "")
+        if partida is None or partida == "validacao":
+            raise NaoReprocessavel(
+                "A falha é do arquivo: é preciso enviar o vídeo de novo"
+            )
+        return partida
+    if not falhas or falhas[0] not in ETAPAS_DEPOIS_DO_CONCLUIDO:
+        raise NaoReprocessavel("Job concluído sem etapa que tenha falhado")
+    return falhas[0]
+
+
+def reprocessar(
+    repositorio: RepositorioDeJobs, job_id: str, agora: datetime
+) -> tuple[Job, Job] | None:
+    """Recomeça o Job da primeira etapa que falhou: devolve o Job de antes e o de depois.
+
+    O `etapa_atual` do de depois é a etapa de partida.
+
+    Um Job `falhou` passa a `analisando` (a transição fora da tabela de `TRANSICOES`,
+    porque `falhou` segue final para o resto) e perde o `codigo_falha`; um `concluido`
+    continua `concluido` e só a etapa volta a em andamento. Atômico: de dois pedidos
+    para o mesmo Job, só um passa, o outro levanta `NaoReprocessavel`. `None` se o Job
+    não existe. As etapas dali em diante perdem o registro antigo, porque vão rodar de novo.
+    """
+    from api.jobs import Etapa, Indexacao
+
+    lido: list[Job] = []
+
+    def mudar(job: Job) -> dict[str, Any]:
+        lido[:] = [job]
+        partida = etapa_de_partida(job)
+        ordem = _ordem_das_etapas()
+        etapas = {
+            n: e for n, e in job.etapas.items() if ordem.index(n) < ordem.index(partida)
+        }
+        etapas[partida] = Etapa(inicio=agora)
+        mudancas: dict[str, Any] = {
+            "etapa_atual": partida,
+            "etapas": etapas,
+            "reprocessamentos": job.reprocessamentos + 1,
+            "atualizado_em": agora,
+        }
+        if job.estado == "falhou":
+            mudancas.update(estado="analisando", codigo_falha=None)
+        if partida in ETAPAS_DEPOIS_DO_CONCLUIDO:
+            # Quem indexa (api.indexacao) troca este estado ao terminar.
+            mudancas["indexacao"] = Indexacao(estado="pendente", em=agora)
+        return mudancas
+
+    depois = repositorio.trocar(job_id, mudar)
+    return (lido[0], depois) if depois is not None else None
+
+
+def desfazer_reprocessamento(
+    repositorio: RepositorioDeJobs, antes: Job, depois: Job, agora: datetime
+) -> Job | None:
+    """Devolve o Job ao que era antes do `reprocessar`, se ninguém mexeu nele desde então.
+
+    Para quando o Workflows não pôde ser disparado: sem isto o Job ficaria `analisando`
+    (ou com a etapa em andamento) sem nada rodando.
+    """
+
+    def mudar(job: Job) -> dict[str, Any] | None:
+        if (job.reprocessamentos, job.etapa_atual) != (
+            depois.reprocessamentos,
+            depois.etapa_atual,
+        ):
+            return None
+        voltam = (
+            "estado",
+            "codigo_falha",
+            "etapa_atual",
+            "etapas",
+            "reprocessamentos",
+            "indexacao",
+        )
+        return {
+            **{campo: getattr(antes, campo) for campo in voltam},
+            "atualizado_em": agora,
+        }
+
+    return repositorio.trocar(antes.id, mudar)

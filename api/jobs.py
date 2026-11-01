@@ -167,6 +167,8 @@ class Job(BaseModel):
     # Só as etapas iniciadas, por nome; vazio em Job anterior ao campo. Quem grava é
     # `api.ciclo_de_vida` (e o Workflows, com o mesmo formato).
     etapas: dict[NomeDaEtapa, Etapa] = {}
+    # Quantas vezes o Job foi reprocessado a partir da etapa que falhou (#147).
+    reprocessamentos: int = 0
     criado_em: datetime
     atualizado_em: datetime
 
@@ -218,6 +220,7 @@ class JobPublico(BaseModel):
     etapa_atual: NomeDaEtapa | None = None
     # As etapas iniciadas, da primeira à última.
     etapas: list[EtapaPublica] = []
+    reprocessamentos: int = 0
     enviado_por: EnviadoPor
     criado_em: datetime
     atualizado_em: datetime
@@ -398,6 +401,17 @@ class RepositorioDeJobs(Protocol):
         """
         ...
 
+    def trocar(
+        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
+    ) -> Job | None:
+        """Lê o Job, pede a `mudar` as mudanças e as grava, tudo atômico.
+
+        `mudar` devolve `None` para recusar (nada é gravado); ela pode rodar mais de
+        uma vez, então não pode ter efeito de fora. Devolve o Job gravado, ou `None`
+        se ele não existe ou `mudar` recusou. Quem decide é `api.ciclo_de_vida`.
+        """
+        ...
+
     def listar(self) -> list[Job]:
         """Do mais recente para o mais antigo."""
         ...
@@ -448,6 +462,16 @@ class RepositorioEmMemoria:
         self._jobs[job_id] = job.model_copy(update=mudancas)
         return self._jobs[job_id]
 
+    def trocar(
+        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
+    ) -> Job | None:
+        job = self._jobs.get(job_id)
+        mudancas = mudar(job) if job is not None else None
+        if job is None or mudancas is None:
+            return None
+        self._jobs[job_id] = job.model_copy(update=mudancas)
+        return self._jobs[job_id]
+
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
@@ -480,6 +504,11 @@ class RepositorioIndisponivel:
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        raise ServicoIndisponivel
+
+    def trocar(
+        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:
         raise ServicoIndisponivel
 

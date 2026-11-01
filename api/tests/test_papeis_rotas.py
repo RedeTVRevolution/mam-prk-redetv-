@@ -120,7 +120,7 @@ def test_eu_sem_documento_mostra_os_papeis_padrao() -> None:
     corpo = _mundo(None).get("/v1/eu", headers=AUTORIZACAO).json()
 
     assert corpo["papeis"] == ["consulta", "operador"]
-    assert corpo["permissoes"] == ["decupagem.ver", "video.enviar"]
+    assert corpo["permissoes"] == ["decupagem.ver", "video.enviar", "video.reprocessar"]
 
 
 def _mundo_admin(

@@ -18,6 +18,9 @@ _Evitar_: tarefa, pedido
 Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, quadros-chave, indexação), com início, fim e resultado (`concluida` ou `falhou`). A falha de uma etapa depois do `concluido` não muda o estado do Job.
 _Evitar_: fase
 
+**Reprocessar**:
+Refazer um Job a partir da primeira etapa que falhou, sem enviar o vídeo de novo (`POST /v1/jobs/{id}/reprocessar`, permissão `video.reprocessar`). As etapas anteriores não rodam; só vale para falha de etapa, e a falha do arquivo pede novo envio. Cada reprocessamento vai à auditoria (`video.reprocessado`).
+
 **Bloco**:
 Segmento editorial de um programa de TV, como a abertura ou o trecho entre dois intervalos.
 _Evitar_: segmento, parte

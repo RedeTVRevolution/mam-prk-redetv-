@@ -1,6 +1,7 @@
 """Adaptadores de nuvem da E0: Firestore (Jobs) e Cloud Storage (upload)."""
 
 import hashlib
+import json
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -132,6 +133,28 @@ class RepositorioFirestore:
             return novo
 
         resultado: Job | None = trocar(self._cliente.transaction())
+        return resultado
+
+    def trocar(
+        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
+    ) -> Job | None:
+        # Como `transitar`, mas quem decide é `mudar`, que o Firestore pode repetir.
+        referencia = self._colecao.document(job_id)
+
+        @firestore.transactional
+        def trocar_na_transacao(transacao: Any) -> Job | None:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                return None
+            job = Job(**(doc.to_dict() or {}))
+            mudancas = mudar(job)
+            if mudancas is None:
+                return None
+            novo = job.model_copy(update=mudancas)
+            transacao.set(referencia, novo.model_dump())
+            return novo
+
+        resultado: Job | None = trocar_na_transacao(self._cliente.transaction())
         return resultado
 
     def obter(self, job_id: str) -> Job | None:
@@ -454,6 +477,40 @@ class RepositorioDeAuditoriaFirestore:
             (r for r in registros if casa_com_o_filtro_da_auditoria(r, filtro)),
             filtro.limite,
         )
+
+
+class DisparoPeloWorkflows:
+    """Começa uma execução do Workflows da validação a partir de uma etapa.
+
+    O argumento (`job_id` e `etapa_inicial`) é o que o workflow reconhece como
+    reprocessamento, no lugar do evento do Eventarc. A conta da API só tem a
+    permissão de iniciar execuções.
+    """
+
+    def __init__(
+        self, projeto: str, regiao: str, workflow: str, sessao: Any = None
+    ) -> None:
+        self._url = (
+            "https://workflowexecutions.googleapis.com/v1/projects/"
+            f"{projeto}/locations/{regiao}/workflows/{workflow}/executions"
+        )
+        self._sessao = sessao
+
+    def _sessao_autenticada(self) -> Any:
+        if self._sessao is None:
+            credenciais, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            sessao: Any = google.auth.transport.requests.AuthorizedSession
+            self._sessao = sessao(credenciais)
+        return self._sessao
+
+    def iniciar(self, job_id: str, etapa: str) -> None:
+        argumento = json.dumps({"job_id": job_id, "etapa_inicial": etapa})
+        resposta = self._sessao_autenticada().post(
+            self._url, json={"argument": argumento}, timeout=30
+        )
+        resposta.raise_for_status()
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:
