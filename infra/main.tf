@@ -242,7 +242,7 @@ resource "google_service_account" "mam" {
 # A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
   papeis_no_projeto = {
-    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
+    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user"]
     validacao   = ["roles/datastore.user"]
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
@@ -250,8 +250,10 @@ locals {
     quadros     = ["roles/datastore.user"]
     # Grava o estado da indexação no Job e escreve na coleção da busca (gravar, apagar,
     # consultar e buscar; conferido no #122). A conta `web` tem o mesmo papel, porque
-    # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção.
-    indexacao    = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
+    # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção. O
+    # embedding automático da coleção roda com a credencial de quem grava ou busca, e não
+    # com a do Agent Retrieval: as duas precisam chamar a Vertex (aiplatform.user).
+    indexacao    = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user"]
     referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
