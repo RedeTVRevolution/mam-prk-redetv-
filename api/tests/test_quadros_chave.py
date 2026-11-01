@@ -12,7 +12,10 @@ from api.decupagem import Decupagem
 from api.jobs import Job, RepositorioEmMemoria
 from api.quadros_chave import com_quadros_chave, executar
 
-pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
+precisa_de_ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None, reason="sem ffmpeg"
+)
+pytestmark = precisa_de_ffmpeg
 
 COR_DO_PLANO = [("red", 2.0), ("blue", 2.0), ("green", 2.0)]
 

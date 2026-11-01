@@ -6,7 +6,7 @@ from pathlib import Path
 from api.decupagem import Decupagem
 from api.jobs import Job, RepositorioEmMemoria
 from api.quadros_chave import capa_da_decupagem, executar
-from api.tests.test_quadros_chave import QuadrosFalso, _video
+from api.tests.test_quadros_chave import QuadrosFalso, _video, precisa_de_ffmpeg
 
 
 def _decupagem(
@@ -75,6 +75,7 @@ def test_sem_planos_nao_ha_capa() -> None:
     assert capa_da_decupagem(_decupagem([], [(0, 1_000)])) is None
 
 
+@precisa_de_ffmpeg
 def test_o_job_guarda_o_caminho_da_capa(tmp_path: Path) -> None:
     repositorio = RepositorioEmMemoria()
     agora = datetime(2026, 10, 31, tzinfo=UTC)
@@ -95,6 +96,7 @@ def test_o_job_guarda_o_caminho_da_capa(tmp_path: Path) -> None:
     assert job.capa == "quadros/plano-1.jpg"
 
 
+@precisa_de_ffmpeg
 def test_reprocessar_sem_planos_tira_a_capa_antiga(tmp_path: Path) -> None:
     repositorio = RepositorioEmMemoria()
     agora = datetime(2026, 10, 31, tzinfo=UTC)
