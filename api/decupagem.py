@@ -1,4 +1,4 @@
-"""Esquema 1.3 da decupagem (aceita as anteriores: 1.2 continua válido).
+"""Esquema 1.4 da decupagem (aceita as anteriores: 1.2 e 1.3 continuam válidas).
 
 Um modelo só: dele saem a saída estruturada pedida ao Gemini
 (`esquema_do_modelo()`), a validação da resposta e o tipo do OpenAPI.
@@ -13,8 +13,8 @@ from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-VersaoEsquema = Literal["1.2", "1.3"]
-VERSAO_ESQUEMA: VersaoEsquema = "1.3"  # o mypy cobra se o tipo mudar sozinho
+VersaoEsquema = Literal["1.2", "1.3", "1.4"]
+VERSAO_ESQUEMA: VersaoEsquema = "1.4"  # o mypy cobra se o tipo mudar sozinho
 
 Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]
@@ -153,7 +153,17 @@ class Pessoa(_Estrito):
 
 
 CategoriaDeObjeto = Literal[
-    "roupa", "calcado", "acessorio", "na_mao", "em_cena", "veiculo", "outro"
+    "roupa",
+    "calcado",
+    "acessorio",
+    "na_mao",
+    "em_cena",
+    "veiculo",
+    "outro",
+    "eletronico",
+    "produto",
+    "animal",
+    "alimento",
 ]
 CorBase = Literal[
     "vermelho",
@@ -181,9 +191,13 @@ RELACOES_DO_OBJETO = get_args(RelacaoDoObjeto)
 
 class Objeto(_Estrito):
     id: Id
-    categoria: CategoriaDeObjeto
+    categoria: CategoriaDeObjeto = Field(
+        description="O que a coisa é. `em_cena` e `na_mao` só quando nenhuma outra "
+        "categoria servir."
+    )
     tipo: Rotulo = Field(
-        description='Texto curto e no singular: "sandália", "vestido".'
+        description='Texto curto e no singular: "vestido", "sandália", "carro", '
+        '"celular".'
     )
     cor_base: list[CorBase] = Field(
         max_length=2, description="Até 2 cores da lista: é o que a busca filtra."
@@ -223,7 +237,8 @@ class Plano(_Intervalo):
     )
     objetos: list[Rotulo] = Field(
         default=[],
-        description="Objetos de destaque: carro de luxo, joia, troféu, produto…",
+        description="Os objetos de destaque do plano; cada um também entra em "
+        "`objetos`, com os tempos.",
     )
     acao: Texto | None = None
     enquadramento: Rotulo | None = None
@@ -310,8 +325,10 @@ class Decupagem(_Estrito):
     pessoas: list[Pessoa]
     objetos: list[Objeto] = Field(
         default=[],
-        description="Roupas, calçados, acessórios e objetos em cena, cada um com os "
-        "atributos, o dono (uma pessoa da lista `pessoas`) e os intervalos visíveis.",
+        description="Tudo o que alguém procuraria no acervo: o que cada pessoa veste, "
+        "calça, usa e segura, e os objetos em cena (veículo, produto, eletrônico, "
+        "troféu, joia, animal, comida), cada um com os atributos, o dono quando há e "
+        "os intervalos visíveis.",
     )
     planos: list[Plano]
     comerciais: list[Comercial]

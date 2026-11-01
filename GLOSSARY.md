@@ -88,7 +88,7 @@ Descartado: o nome foi recusado (a escolha apontou outro candidato ou nenhum, ou
 Unidade de busca: um plano ou um evento da decupagem, com início e fim.
 
 **Objeto**:
-Peça visível na Decupagem (`objetos`, esquema 1.3): roupa, calçado, acessório, o que alguém segura ou um objeto em cena, com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`, nulos em cena) e os tempos. A busca filtra pelo objeto inteiro, não por itens soltos no plano.
+Peça visível na Decupagem (`objetos`, esquema 1.4): roupa, calçado, acessório, o que alguém segura ou um objeto em cena (veículo, produto, eletrônico, animal, comida), com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`, nulos em cena) e os tempos. A categoria diz o que a coisa é (`em_cena` e `na_mao` só quando nenhuma outra serve). Produto mostrado num telão ou em gráfico entra como objeto, com o detalhe "no telão" ou "em gráfico". A busca filtra pelo objeto inteiro, não por itens soltos no plano.
 
 **Ocorrência**:
 Algo detectado num momento: pessoa, marca, objeto ou pauta.
