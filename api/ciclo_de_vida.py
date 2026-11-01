@@ -221,6 +221,11 @@ ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
     "comparacao",
 )
 
+# Ainda fora do Workflows (#223): partir delas cairia na validação e rodaria tudo de novo.
+ETAPAS_SEM_REPROCESSAR: frozenset[NomeDaEtapa] = frozenset(
+    {"identificacao", "comparacao"}
+)
+
 
 class NaoReprocessavel(Exception):
     """O Job não pode ser reprocessado; a mensagem diz o porquê (vira 409)."""
@@ -246,6 +251,8 @@ def etapa_de_partida(job: Job) -> NomeDaEtapa:
         for e in _ordem_das_etapas()
         if (r := job.etapas.get(e)) and r.resultado == "falhou"
     ]
+    if falhas and falhas[0] in ETAPAS_SEM_REPROCESSAR:
+        raise NaoReprocessavel(f"A etapa {falhas[0]} ainda não pode ser reprocessada")
     if job.estado == "falhou":
         partida = (
             falhas[0]

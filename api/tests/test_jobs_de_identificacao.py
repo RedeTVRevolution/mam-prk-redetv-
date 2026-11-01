@@ -334,3 +334,34 @@ def test_erro_inesperado_deixa_a_etapa_falhou_e_sobe(tmp_path: Path) -> None:
         )
 
     assert_etapa(repo, "identificacao", "falhou")
+
+
+def test_sem_os_vereditos_gravados_a_decupagem_fica_como_estava(tmp_path: Path) -> None:
+    repo = repositorio()
+    c = Cenario()
+
+    class SemAuditoria(DecupagensEmMemoria):
+        def gravar_comparacao(self, job_id: str, conteudo: str) -> None:
+            raise RuntimeError("storage fora")
+
+    decupagens = SemAuditoria(
+        decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
+    )
+
+    with pytest.raises(RuntimeError):
+        comparacao_job.executar(
+            "job-1",
+            repo,
+            decupagens,
+            TransporteFalso(
+                escolha("A"), confianca(0.9), confianca(0.9), confianca(0.9)
+            ),
+            c.fotos,
+            c.catalogo,
+            SugestoesEmMemoria(),
+            tmp_path,
+            validade=timedelta(days=180),
+        )
+
+    assert decupagens.gravada is None
+    assert_etapa(repo, "comparacao", "falhou")

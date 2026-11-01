@@ -94,7 +94,7 @@ variable "limiar_da_comparacao" {
 variable "limite_de_comparacoes" {
   description = "Quantas pessoas por vídeo a comparação com as fotos de referência examina; as demais ficam como palpite não confirmado"
   type        = number
-  default     = 10
+  default     = 8
 }
 
 variable "imagem_validacao" {

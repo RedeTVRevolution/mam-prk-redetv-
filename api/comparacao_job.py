@@ -103,11 +103,12 @@ def executar(
             )
         except (AnaliseFalhou, FalhaNosQuadros):
             return "sem_alteracao"
-        decupagens.gravar_decupagem(job_id, resultado.decupagem.model_dump_json())
+        # Os vereditos antes: uma Decupagem aprimorada nunca fica sem a sua auditoria.
         decupagens.gravar_comparacao(
             job_id,
             json.dumps([asdict(v) for v in resultado.vereditos], default=str),
         )
+        decupagens.gravar_decupagem(job_id, resultado.decupagem.model_dump_json())
         return "incompleto" if falhas else "comparado"
 
     return rodar_etapa(
