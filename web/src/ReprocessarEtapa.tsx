@@ -2,24 +2,20 @@ import { Alert, Button, Group, Paper, Radio, Stack, Text, Textarea } from '@mant
 import { IconAlertTriangle } from '@tabler/icons-react'
 import { useState } from 'react'
 import { type ClienteDoJob, ConflitoNaApi, PedidoInvalido, SessaoExpirada, codigoDoErro } from './api.ts'
+import { nomeDaEtapa } from './etapas.ts'
 import type { Job } from './jobs.ts'
 import { CORES } from './tema.ts'
 
 /** As etapas que o Curador pode escolher num vídeo concluído, na ordem em que rodam. */
 const ETAPAS_ESCOLHIVEIS = [
-  { valor: 'analise', nome: 'Análise', refaz: 'Refaz a decupagem inteira com o modelo, nas instruções de hoje.' },
+  { valor: 'analise', refaz: 'Refaz a decupagem inteira com o modelo, nas instruções de hoje.' },
   {
     valor: 'identificacao',
-    nome: 'Identificação',
-    refaz: 'Confere de novo os nomes das pessoas, busca as fotos e compara os rostos.',
+    refaz: 'Tenta de novo nomear as pessoas sem nome, busca as fotos e compara os rostos.',
   },
-  { valor: 'quadros_chave', nome: 'Quadros-chave', refaz: 'Extrai de novo os quadros das miniaturas.' },
-  { valor: 'indexacao', nome: 'Indexação', refaz: 'Atualiza o índice da busca com a decupagem atual.' },
+  { valor: 'quadros_chave', refaz: 'Extrai de novo os quadros das miniaturas.' },
+  { valor: 'indexacao', refaz: 'Atualiza o índice da busca com a decupagem atual.' },
 ] as const
-
-function nomeDoValor(valor: string): string {
-  return ETAPAS_ESCOLHIVEIS.find((e) => e.valor === valor)?.nome ?? valor
-}
 
 type Etapa = (typeof ETAPAS_ESCOLHIVEIS)[number]['valor']
 
@@ -68,7 +64,7 @@ export function ReprocessarEtapa({
         >
           <Stack gap={4} mt={4}>
             {ETAPAS_ESCOLHIVEIS.map((e) => (
-              <Radio key={e.valor} value={e.valor} label={e.nome} description={e.refaz} />
+              <Radio key={e.valor} value={e.valor} label={nomeDaEtapa(e.valor)} description={e.refaz} />
             ))}
           </Stack>
         </Radio.Group>
@@ -84,7 +80,7 @@ export function ReprocessarEtapa({
         <Text size="sm">
           {etapa === 'analise'
             ? 'Reprocessar a partir da análise? A Decupagem fica indisponível até a nova análise terminar, e as etapas seguintes rodam de novo.'
-            : `Reprocessar a partir de ${nomeDoValor(etapa).toLowerCase()}? Ela e as etapas seguintes rodam de novo; a Decupagem continua disponível.`}
+            : `Reprocessar a partir da etapa ${nomeDaEtapa(etapa)}? Ela e as etapas seguintes rodam de novo; a Decupagem continua disponível.`}
         </Text>
         {falha && (
           <Alert color={CORES.falhou} variant="light" icon={<IconAlertTriangle />} role="alert">

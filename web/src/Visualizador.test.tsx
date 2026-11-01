@@ -83,6 +83,7 @@ async function abrir(
   t: number | null = null,
   podeEditar = false,
   podeReprocessar = false,
+  intervaloDoAcompanhamentoMs?: number,
 ) {
   const auth = new AutenticadorFalso([
     { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
@@ -99,6 +100,7 @@ async function abrir(
         t={t}
         podeEditar={podeEditar}
         podeReprocessar={podeReprocessar}
+        intervaloDoAcompanhamentoMs={intervaloDoAcompanhamentoMs}
       />
     </AtalhosProvider>,
   )
@@ -640,3 +642,42 @@ test('um 409 mostra a mensagem do servidor e cancelar fecha a escolha', async ()
   expect(screen.queryByRole('radio', { name: /Análise/ })).toBeNull()
   expect(screen.getByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
 })
+
+test('o acompanhamento vai até a indexação terminar e então recarrega a decupagem', async () => {
+  let cargas = 0
+  const respostas: Partial<Job>[] = [
+    // Entre a identificação e os quadros, sem etapa em andamento, mas a indexação pendente.
+    { etapa_atual: null, indexacao: { estado: 'pendente', em: '2026-11-01T10:00:00Z' } },
+    { etapa_atual: null, indexacao: { estado: 'indexado', em: '2026-11-01T10:05:00Z' } },
+  ]
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () => {
+      cargas += 1
+      return HttpResponse.json(DECUPAGEM)
+    }),
+    http.post('/v1/jobs/j1/reprocessar', () =>
+      HttpResponse.json(
+        { ...JOB, etapa_atual: 'identificacao', indexacao: { estado: 'pendente', em: '2026-11-01T10:00:00Z' } },
+        { status: 202 },
+      ),
+    ),
+    http.get('/v1/jobs/j1', () => HttpResponse.json({ ...JOB, ...(respostas.shift() ?? respostas.at(-1)) })),
+  )
+  await abrir({}, null, false, true, 20)
+  await screen.findByRole('group', { name: 'Pautas 3' })
+  expect(cargas).toBe(1)
+  const usuario = userEvent.setup()
+
+  await usuario.click(screen.getByRole('button', { name: /Reprocessar…/ }))
+  await usuario.click(screen.getByRole('radio', { name: /Identificação/ }))
+  await usuario.type(screen.getByRole('textbox', { name: /Motivo/ }), 'nomes novos')
+  await usuario.click(screen.getByRole('button', { name: 'Reprocessar' }))
+  expect(await screen.findByText(/Reprocessando: Identificação em andamento\./)).toBeTruthy()
+  // No intervalo entre etapas o botão não volta.
+  await waitFor(() => expect(screen.queryByText(/em andamento/)).toBeNull())
+  expect(screen.queryByRole('button', { name: /Reprocessar…/ })).toBeNull()
+
+  await waitFor(() => expect(cargas).toBe(2))
+  expect(await screen.findByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
+})
+

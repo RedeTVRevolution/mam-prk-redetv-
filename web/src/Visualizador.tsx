@@ -31,7 +31,6 @@ const VELOCIDADES = [1, 2, 4]
 const SALTO_CURTO_S = 1
 const SALTO_LONGO_S = 5
 const AVISO_DO_TC_MS = 1500
-const INTERVALO_DO_ACOMPANHAMENTO_MS = 5000
 
 const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
@@ -53,12 +52,14 @@ export default function Visualizador({
   t,
   podeEditar,
   podeReprocessar = false,
+  intervaloDoAcompanhamentoMs = 5000,
 }: {
   api: ClienteDaApi
   job: Job
   t: number | null
   podeEditar: boolean
   podeReprocessar?: boolean
+  intervaloDoAcompanhamentoMs?: number
 }) {
   // O Job muda quando a pessoa reprocessa: o que a API devolveu vale mais que o da abertura.
   const [job, setJob] = useState(jobInicial)
@@ -127,20 +128,24 @@ export default function Visualizador({
     }
   }, [api, job.id, concluido, cargasDaDecupagem])
 
-  // Depois do pedido, vê de tempos em tempos se a etapa e a análise já terminaram.
-  const emAndamento = job.estado === 'analisando' || Boolean(job.etapa_atual)
+  // Depois do pedido, vê de tempos em tempos se as etapas já terminaram. Entre uma etapa e a
+  // seguinte o `etapa_atual` fica vazio; a indexação, a última, só sai de `pendente` no fim.
+  const emAndamento =
+    job.estado === 'analisando' || Boolean(job.etapa_atual) || job.indexacao?.estado === 'pendente'
   useEffect(() => {
     if (!acompanhando) return
     if (!emAndamento) {
       // oxlint-disable-next-line react/set-state-in-effect
       setAcompanhando(false)
+      // Identificação e quadros-chave regravam a Decupagem com o Job sempre `concluido`.
+      setCargasDaDecupagem((n) => n + 1)
       return
     }
     const intervalo = setInterval(() => {
       api.job(job.id).detalhe().then(setJob, () => {})
-    }, INTERVALO_DO_ACOMPANHAMENTO_MS)
+    }, intervaloDoAcompanhamentoMs)
     return () => clearInterval(intervalo)
-  }, [api, job.id, acompanhando, emAndamento])
+  }, [api, job.id, acompanhando, emAndamento, intervaloDoAcompanhamentoMs])
 
   function aoReprocessar(novo: Job, etapa: string) {
     setJob(novo)
@@ -342,7 +347,7 @@ export default function Visualizador({
               Tela anterior
             </Link>
           )}
-          {podeReprocessar && job.estado === 'concluido' && !job.etapa_atual && !escolhendo && (
+          {podeReprocessar && job.estado === 'concluido' && !job.etapa_atual && !acompanhando && !escolhendo && (
             <Button
               variant="default"
               leftSection={<IconRefresh />}
@@ -369,8 +374,8 @@ export default function Visualizador({
       )}
       {job.etapa_atual && (
         <Text size="sm" c={CORES.andamento} role="status">
-          {`Reprocessando: ${nomeDaEtapa(job.etapa_atual)} em andamento.`}
-          {job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
+          {`${acompanhando ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
+          {acompanhando && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
         </Text>
       )}
       {falhaDoJson && (

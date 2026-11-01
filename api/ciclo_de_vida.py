@@ -253,7 +253,7 @@ def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
             )
         if escolhida not in ETAPAS_ESCOLHIVEIS:
             raise NaoReprocessavel(
-                "Etapa não permitida; escolha análise, quadros-chave, identificação "
+                "Etapa não permitida; escolha análise, identificação, quadros-chave "
                 "ou indexação"
             )
         return escolhida
