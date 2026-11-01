@@ -1,4 +1,4 @@
-"""Porta do índice da busca (#117): um registro por plano, fala, texto na tela e objeto.
+"""Porta do índice da busca (#117): um registro por plano, fala, texto na tela e ocorrência de objeto.
 
 O adaptador do Agent Retrieval mora em `agent_retrieval.py`; o dublê em memória daqui
 implementa os filtros exatos e o texto, e é o que os testes usam.
