@@ -55,6 +55,10 @@ class JanelasDoJob(Protocol):
 
     def gravar(self, job_id: str, janela: JanelaGravada) -> None: ...
 
+    def apagar(self, job_id: str) -> None:
+        """Descarta o progresso do Job, para a análise recomeçar do zero."""
+        ...
+
 
 class JanelasEmMemoria:
     def __init__(self) -> None:
@@ -68,3 +72,6 @@ class JanelasEmMemoria:
 
     def gravar(self, job_id: str, janela: JanelaGravada) -> None:
         self._guardadas.setdefault(job_id, {})[janela.indice] = janela.model_dump_json()
+
+    def apagar(self, job_id: str) -> None:
+        self._guardadas.pop(job_id, None)

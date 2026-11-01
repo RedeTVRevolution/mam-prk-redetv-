@@ -356,8 +356,9 @@ locals {
   }
   papeis_nos_buckets = {
     # A API assina as URLs de envio para a quarentena, apaga dela o upload cancelado e lê o proxy de reprodução e a decupagem.
+    # Em aceitos também apaga o progresso das janelas, quando o Curador reprocessa a partir da análise (objectUser).
     # As referências: o link assinado das fotos do nome (Visualizador), só leitura.
-    web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectViewer", referencias = "roles/storage.objectViewer" }
+    web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectViewer", referencias = "roles/storage.objectViewer" }
     # Lê e apaga o original da quarentena; grava a cópia limpa e o proxy de reprodução.
     validacao = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectCreator" }
     # Lê o áudio que a validação separou e grava a transcrição ao lado do proxy.
@@ -366,8 +367,8 @@ locals {
     ocr = { aceitos = "roles/storage.objectUser" }
     # O Gemini lê o proxy de reprodução; o progresso das janelas é regravado ao lado dele
     # (objectUser, porque cada janela sobrescreve o próprio objeto); a decupagem vai para o
-    # bucket dela.
-    analise = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectCreator" }
+    # bucket dela (objectUser, porque o reprocessamento escolhido a sobrescreve).
+    analise = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
     # Lê a cópia limpa; grava os JPEGs e regrava a decupagem (objectUser, porque a sobrescreve).
     quadros = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
     # Lê a Decupagem entregue, com os quadros-chave.

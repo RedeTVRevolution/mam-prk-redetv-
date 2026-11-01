@@ -112,6 +112,7 @@ def test_eu_devolve_papeis_e_permissoes() -> None:
             "correcao.aprovar",
             "decupagem.editar",
             "decupagem.ver",
+            "video.reprocessar_etapa",
         ],
     }
 

@@ -703,3 +703,26 @@ def test_a_api_le_as_fotos_de_referencia_para_assinar_o_link_do_nome() -> None:
     )[0]
     assert 'name  = "BUCKET_REFERENCIAS"' in servico
     assert 'local.buckets["referencias"]' in servico
+
+
+def test_quem_regrava_o_que_ja_gravou_pode_sobrescrever_no_main_tf() -> None:
+    # O reprocessamento escolhido (#235) refaz etapas de um Job concluído: sobrescrever
+    # exige `storage.objects.delete`, que o `objectCreator` não tem.
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    def papel(conta: str, bucket: str) -> str:
+        achado = re.search(
+            rf"^\s+{conta} = \{{.*?\b{bucket} = \"([\w./]+)\"", main, re.MULTILINE
+        )
+        assert achado, (conta, bucket)
+        return achado.group(1)
+
+    for conta, bucket in [
+        ("analise", "decupagens"),
+        ("analise", "aceitos"),
+        ("web", "aceitos"),
+        ("quadros", "decupagens"),
+        ("identificacao", "decupagens"),
+        ("comparacao", "decupagens"),
+    ]:
+        assert papel(conta, bucket) == "roles/storage.objectUser", (conta, bucket)

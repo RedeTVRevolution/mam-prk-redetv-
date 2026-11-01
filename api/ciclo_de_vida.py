@@ -221,6 +221,13 @@ ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
     "quadros_chave",
     "indexacao",
 )
+# As que o Curador pode escolher num Job concluído, para refazer um vídeo bom.
+ETAPAS_ESCOLHIVEIS: tuple[NomeDaEtapa, ...] = (
+    "analise",
+    "identificacao",
+    "quadros_chave",
+    "indexacao",
+)
 
 
 class NaoReprocessavel(Exception):
@@ -233,8 +240,23 @@ def _ordem_das_etapas() -> tuple[NomeDaEtapa, ...]:
     return get_args(NomeDaEtapa)
 
 
-def etapa_de_partida(job: Job) -> NomeDaEtapa:
-    """A primeira etapa que falhou, de onde o reprocessamento recomeça."""
+def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
+    """A primeira etapa que falhou, de onde o reprocessamento recomeça.
+
+    Com `escolhida`, a etapa é a que a pessoa pediu, e só um Job `concluido` a aceita.
+    """
+    if escolhida is not None:
+        if job.estado != "concluido":
+            raise NaoReprocessavel(
+                f"Só um vídeo concluído pode ser reprocessado a partir de uma etapa "
+                f"escolhida; este está em {job.estado}"
+            )
+        if escolhida not in ETAPAS_ESCOLHIVEIS:
+            raise NaoReprocessavel(
+                "Etapa não permitida; escolha análise, quadros-chave, identificação "
+                "ou indexação"
+            )
+        return escolhida
     if job.estado == "falhou":
         if job.codigo_falha in FALHAS_DO_ARQUIVO or job.codigo_falha is None:
             raise NaoReprocessavel(
@@ -266,7 +288,10 @@ def etapa_de_partida(job: Job) -> NomeDaEtapa:
 
 
 def reprocessar(
-    repositorio: RepositorioDeJobs, job_id: str, agora: datetime
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    agora: datetime,
+    etapa_escolhida: str | None = None,
 ) -> tuple[Job, Job] | None:
     """Recomeça o Job da primeira etapa que falhou: devolve o Job de antes e o de depois.
 
@@ -277,6 +302,10 @@ def reprocessar(
     continua `concluido` e só a etapa volta a em andamento. Atômico: de dois pedidos
     para o mesmo Job, só um passa, o outro levanta `NaoReprocessavel`. `None` se o Job
     não existe. As etapas dali em diante perdem o registro antigo, porque vão rodar de novo.
+
+    Com `etapa_escolhida`, o Job `concluido` recomeça da etapa pedida: com a análise ele
+    volta a `analisando` (a Decupagem antiga some até a nova análise terminar); com as
+    outras continua `concluido`.
     """
     from api.jobs import Etapa, Indexacao
 
@@ -284,7 +313,7 @@ def reprocessar(
 
     def mudar(job: Job) -> dict[str, Any]:
         lido[:] = [job]
-        partida = etapa_de_partida(job)
+        partida = etapa_de_partida(job, etapa_escolhida)
         ordem = _ordem_das_etapas()
         etapas = {
             n: e for n, e in job.etapas.items() if ordem.index(n) < ordem.index(partida)
@@ -298,7 +327,9 @@ def reprocessar(
         }
         if job.estado == "falhou":
             mudancas.update(estado="analisando", codigo_falha=None)
-        if partida in ETAPAS_DEPOIS_DO_CONCLUIDO:
+        elif partida == "analise":
+            mudancas["estado"] = "analisando"
+        if partida in ETAPAS_DEPOIS_DO_CONCLUIDO or etapa_escolhida:
             # Quem indexa (api.indexacao) troca este estado ao terminar.
             mudancas["indexacao"] = Indexacao(estado="pendente", em=agora)
         return mudancas

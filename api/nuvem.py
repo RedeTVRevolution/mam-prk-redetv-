@@ -688,6 +688,12 @@ class JanelasStorage:
             objeto_da_janela(job_id, janela.indice)
         ).upload_from_string(janela.model_dump_json(), content_type="application/json")
 
+    def apagar(self, job_id: str) -> None:
+        for blob in self._cliente.list_blobs(
+            self._aceitos, prefix=prefixo_das_janelas(job_id)
+        ):
+            blob.delete()
+
 
 class LeiturasStorage:
     """O proxy que o OCR lê e a leitura da tela, no bucket de aceitos."""

@@ -3,6 +3,7 @@ from typing import get_args
 import pytest
 
 from api.papeis import (
+    PERMISSOES_DO_PAPEL,
     ContaNaoEncontrada,
     Permissao,
     RepositorioDePapeisEmMemoria,
@@ -30,11 +31,12 @@ def test_editor_e_consulta_mais_editar() -> None:
     assert permissoes_de(["editor"]) == {"decupagem.ver", "decupagem.editar"}
 
 
-def test_curador_e_editor_mais_aprovar_correcao() -> None:
+def test_curador_e_editor_mais_aprovar_correcao_e_reprocessar_etapa() -> None:
     assert permissoes_de(["curador"]) == {
         "decupagem.ver",
         "decupagem.editar",
         "correcao.aprovar",
+        "video.reprocessar_etapa",
     }
 
 
@@ -164,3 +166,13 @@ def test_so_o_operador_e_o_administrador_reprocessam() -> None:
     assert "video.reprocessar" not in permissoes_de(["consulta", "editor", "curador"])
     assert "video.reprocessar" in permissoes_de(["operador"])
     assert "video.reprocessar" in permissoes_de(["administrador"])
+
+
+def test_so_curador_e_administrador_reprocessam_a_partir_de_uma_etapa() -> None:
+    com = {
+        p
+        for p, permissoes in PERMISSOES_DO_PAPEL.items()
+        if "video.reprocessar_etapa" in permissoes
+    }
+
+    assert com == {"curador", "administrador"}

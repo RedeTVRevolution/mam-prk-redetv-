@@ -61,6 +61,7 @@ from api.nuvem import (
     ArmazenamentoStorage,
     CatalogoFirestore,
     DisparoPeloWorkflows,
+    JanelasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
@@ -76,6 +77,7 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import PERFIS
+from api.progresso_das_janelas import JanelasDoJob
 from api.reprocessamento import (
     DisparoDoWorkflow,
     DisparoIndisponivel,
@@ -151,6 +153,7 @@ def criar_app(
     aprovacao: RepositorioDeAprovacao | None = None,
     auditoria: RepositorioDeAuditoria | None = None,
     disparo: DisparoDoWorkflow | None = None,
+    janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
     indice: IndiceDaBusca | None = None,
     transporte_da_consulta: Transporte | None = None,
@@ -257,6 +260,7 @@ def criar_app(
             repositorio_de_auditoria,
             disparo or DisparoIndisponivel(),
             relogio,
+            janelas,
         )
     )
     app.include_router(v1)
@@ -285,6 +289,9 @@ if _projeto:
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         disparo=DisparoPeloWorkflows(
             _projeto, os.environ["WORKFLOW_REGIAO"], os.environ["WORKFLOW_VALIDACAO"]
+        ),
+        janelas=JanelasStorage(
+            ClienteStorage(project=_projeto), os.environ["BUCKET_ACEITOS"]
         ),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         indice=(
