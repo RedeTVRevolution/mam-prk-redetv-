@@ -8,11 +8,12 @@ internet. Para cada pessoa ainda sem nome confirmado, em dois passos:
    ordem aleatória e sem nomes. Responde qual rótulo é a mesma pessoa, ou "nenhum". O
    código traduz o rótulo para o nome.
 2. **Conferência foto a foto:** para o escolhido, uma chamada por foto, com a confiança
-   de cada uma. O nome só se confirma se as 3 passam do limiar.
+   de cada uma. O nome só se confirma com as 3 no limiar ou acima.
 
-O modelo nunca identifica pela memória. Sem as 3 fotos acima do limiar, o palpite fica
-"não confirmado"; se a escolha apontou outro candidato (ou "nenhum"), ele é descartado e
-a pessoa volta a "não identificado". Cada veredito fica no resultado da etapa, para
+O modelo nunca identifica pela memória. Sem as 3 fotos no limiar, o palpite fica "não
+confirmado"; se a escolha apontou outro candidato (ou "nenhum"), ou se o nome ficou
+confirmado para outra pessoa do vídeo, ele é descartado e a pessoa volta a "não
+identificado". Cada veredito fica no resultado da etapa, para
 auditoria.
 """
 
@@ -20,8 +21,9 @@ import random
 import string
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from itertools import chain, count, islice, product
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -34,10 +36,9 @@ from api.gemini import AnaliseFalhou, Chamada, Transporte, gerar_validado
 from api.identidade import nao_identificado
 from api.identificacao import candidatos_do_video
 from api.modelo_forte import MODELO_FORTE, Grupo, agrupar
-from api.programas import DADOS
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import instantes_das_aparicoes
-from api.referencias import FOTOS_POR_NOME, Sugestoes
+from api.referencias import FOTOS_POR_NOME, Sugestoes, nomes_do_perfil
 
 ETAPA_DA_ESCOLHA = "comparacao_escolha"
 ETAPA_DA_CONFERENCIA = "comparacao_conferencia"
@@ -208,8 +209,16 @@ def _unidades(decupagem: Decupagem) -> list[Grupo]:
     return sorted(unidades, key=lambda g: g.na_imagem_ms, reverse=True)
 
 
+def _rotulos(quantos: int) -> list[str]:
+    """A, B… Z, depois AA, AB…: o catálogo inteiro entra nas opções e passa de 26."""
+    todos = chain.from_iterable(
+        product(string.ascii_uppercase, repeat=n) for n in count(1)
+    )
+    return ["".join(letras) for letras in islice(todos, quantos)]
+
+
 def _grupos(opcoes: Sequence[Opcao], depois_de: int) -> tuple[list[str], str]:
-    rotulos = list(string.ascii_uppercase[: len(opcoes)])
+    rotulos = _rotulos(len(opcoes))
     linhas = []
     proxima = depois_de + 1
     for rotulo, o in zip(rotulos, opcoes, strict=True):
@@ -224,7 +233,6 @@ def _grupos(opcoes: Sequence[Opcao], depois_de: int) -> tuple[list[str], str]:
 class _Ajustes:
     transporte: Transporte
     job_id: str
-    limiar: float
     embaralhar: Embaralhar
     dormir: Callable[[float], None]
     sortear: Callable[[float], float]
@@ -348,7 +356,7 @@ def comparar(
     todas = _opcoes(
         [*candidatos, *palpites], catalogo, fotos, agora, validade, com_acervo
     )
-    ajustes = _Ajustes(transporte, job_id, limiar, embaralhar, dormir, sortear, relogio)
+    ajustes = _Ajustes(transporte, job_id, embaralhar, dormir, sortear, relogio)
     confirmadas = {
         p.catalogo_id or _chave(catalogo, p.nome)
         for p in decupagem.pessoas
@@ -385,10 +393,15 @@ def comparar(
             and all(c >= limiar for c in confiancas)
         )
         # O palpite foi testado se estava entre as opções; só então "nenhum" ou outro
-        # candidato o descartam. Sem referência (ou sem a conferência), segue não confirmado.
+        # candidato o descartam. Sem referência (ou sem a conferência), segue não
+        # confirmado, a não ser que outro nome se confirme no lugar dele.
         testado = rodou and any(o.chave == chave_do_palpite for o in opcoes)
+        trocado = (
+            confirmou and escolhida is not None and escolhida.chave != chave_do_palpite
+        )
         descartado = palpite is not None and (
             no_palpite
+            or trocado
             or (testado and (escolhida is None or escolhida.chave != chave_do_palpite))
         )
         if confirmou and escolhida is not None:
@@ -416,6 +429,20 @@ def comparar(
                 fotos=escolhida.rostos if escolhida else (),
             )
         )
+    # Um palpite não confirmado cujo nome se confirmou depois, para outra pessoa do
+    # vídeo, também é descartado: o resultado não depende da ordem das pessoas.
+    por_id = {p.id: p for p in decupagem.pessoas}
+    for i, v in enumerate(vereditos):
+        if (
+            v.estado == "palpite_nao_confirmado"
+            and v.palpite is not None
+            and _chave(catalogo, v.palpite) in confirmadas
+        ):
+            for pessoa_id in v.pessoas:
+                novas[pessoa_id] = _sem_nome(por_id[pessoa_id])
+            vereditos[i] = replace(
+                v, estado="palpite_descartado", palpite_descartado=True
+            )
     resultado = decupagem.model_copy(
         update={"pessoas": [novas.get(p.id, p) for p in decupagem.pessoas]}
     )
@@ -432,10 +459,7 @@ def _com_sugestoes(
     programa (que ainda não o tenha); fica guardada para aprovação, não entra sozinha.
     Palpite não vira sugestão."""
     if programa and sugestoes:
-        do_perfil = {
-            normalizar(p["nome"])
-            for p in (DADOS.get(programa) or {}).get("pessoas", [])
-        }
+        do_perfil = nomes_do_perfil(programa)
         for p in decupagem.pessoas:
             if p.estado_do_nome == "confirmado" and normalizar(p.nome) not in do_perfil:
                 sugestoes.sugerir(programa, p.nome, "identificacao", agora)

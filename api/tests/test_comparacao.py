@@ -118,8 +118,11 @@ def test_escolha_as_cegas_e_tres_fotos_acima_do_limiar_confirmam_o_nome() -> Non
         ["referencia"],
     )
     assert p.catalogo_id == c.leao
-    assert [v.estado for v in r.vereditos] == ["confirmado"]
-    assert len(c.catalogo.obter(c.leao).rostos) == 3  # type: ignore[union-attr]
+    [v] = r.vereditos
+    assert v.estado == "confirmado"
+    # as fotos que confirmaram são as da pessoa do catálogo ligada à pessoa do vídeo
+    assert v.fotos == tuple(c.catalogo.obter(c.leao).rostos)  # type: ignore[union-attr]
+    assert v.confiancas == (0.9, 0.95, 0.85)
     # 1 escolha + 3 conferências, uma por foto
     assert len(transporte.chamadas) == 4
 
@@ -348,3 +351,104 @@ def test_foto_ausente_tira_o_candidato_das_opcoes() -> None:
     r = rodar(c, d, transporte)
 
     assert r.decupagem.pessoas[0].nome == "Nelson Rubens"  # só ele ficou
+
+
+def test_confianca_igual_ao_limiar_confirma() -> None:
+    c = Cenario()
+    d = decupagem([palpite("pes01", "Leão Lobo", [(10_000, 40_000)])])
+    transporte = TransporteFalso(
+        escolha("A"), confianca(0.8), confianca(0.8), confianca(0.8)
+    )
+
+    r = rodar(c, d, transporte, limiar=0.8)
+
+    assert r.decupagem.pessoas[0].estado_do_nome == "confirmado"
+
+
+def test_palpite_ja_confirmado_sem_outra_opcao_e_descartado_sem_chamar_o_modelo() -> (
+    None
+):
+    c = Cenario()
+    for p in c.catalogo.todas():
+        if p.id != c.leao:
+            c.catalogo.definir_rostos(p.id, [])
+    d = decupagem(
+        [
+            pessoa(
+                "pes01",
+                "Leão Lobo",
+                [(10_000, 40_000)],
+                estado_do_nome="confirmado",
+                origem="modelo_forte",
+                fontes_do_nome=["gc"],
+            ),
+            palpite("pes02", "Leão Lobo", [(100_000, 130_000)]),
+        ]
+    )
+    transporte = TransporteFalso()
+
+    r = rodar(c, d, transporte)
+
+    assert transporte.chamadas == []
+    segunda = r.decupagem.pessoas[1]
+    assert segunda.nome.startswith("não identificado")
+    assert segunda.estado_do_nome is None
+    [v] = r.vereditos
+    assert (v.estado, v.palpite_descartado) == ("palpite_descartado", True)
+
+
+def test_palpite_nao_confirmado_e_descartado_se_o_nome_se_confirma_depois() -> None:
+    c = Cenario()
+    # o palpite "Leão" tem mais tempo na imagem e vai primeiro, mas uma foto falha;
+    # depois o homem de barba se confirma como o Leão
+    d = decupagem(
+        [
+            palpite("pes01", "Leão Lobo", [(10_000, 90_000)]),
+            pessoa("pes02", BARBA, [(100_000, 130_000)], fontes_do_nome=[]),
+        ]
+    )
+    transporte = TransporteFalso(
+        escolha("A"),
+        confianca(0.9),
+        confianca(0.5),
+        confianca(0.9),
+        escolha("A"),
+        confianca(1),
+        confianca(1),
+        confianca(1),
+    )
+
+    r = rodar(c, d, transporte, limiar=0.8)
+
+    primeira, segunda = r.decupagem.pessoas
+    assert (segunda.nome, segunda.estado_do_nome) == ("Leão Lobo", "confirmado")
+    assert primeira.nome.startswith("não identificado")
+    assert [v.estado for v in r.vereditos] == ["palpite_descartado", "confirmado"]
+    assert r.vereditos[0].palpite_descartado
+
+
+def test_palpite_sem_referencia_substituido_por_outro_nome_fica_descartado() -> None:
+    c = Cenario()
+    d = decupagem([palpite("pes01", "Fulano de Tal", [(10_000, 40_000)])])
+    transporte = TransporteFalso(escolha("A"), confianca(1), confianca(1), confianca(1))
+
+    r = rodar(c, d, transporte)
+
+    [v] = r.vereditos
+    assert (v.estado, v.nome, v.palpite_descartado) == ("confirmado", "Leão Lobo", True)
+
+
+def test_mais_de_26_candidatos_ganham_rotulos_de_duas_letras() -> None:
+    c = Cenario()
+    for i in range(30):
+        c.com_fotos(f"Pessoa {i:02d}", "convidado", [])
+    d = decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
+    transporte = TransporteFalso(
+        escolha("AF"), confianca(1), confianca(1), confianca(1)
+    )
+
+    r = rodar(c, d, transporte)
+
+    # 32 opções: A a Z, AA a AF; a 32ª é a última do catálogo
+    assert "- Grupo AF:" in transporte.chamadas[0].instrucao
+    assert r.decupagem.pessoas[0].nome == "Pessoa 29"
