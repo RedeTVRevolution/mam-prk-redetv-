@@ -20,11 +20,11 @@ export function enderecoDaBusca(consulta: ConsultaDaBusca): string {
   return `/busca${consultaParaEndereco(consulta)}`
 }
 
-/** O endereço do vídeo, com o instante em segundos inteiros e a busca de origem, se houver. */
+/** O endereço do vídeo, com o instante em segundos (até o milissegundo) e a busca de origem, se houver. */
 export function enderecoDoVideo(id: string, t?: number | null, busca?: string | null): string {
   const base = `/video/${encodeURIComponent(id)}`
   const p = new URLSearchParams()
-  if (t != null && t > 0) p.set('t', String(Math.floor(t)))
+  if (t != null && t > 0) p.set('t', String(Math.round(t * 1000) / 1000))
   if (busca) p.set('busca', busca)
   const query = p.toString()
   return query ? `${base}?${query}` : base
@@ -33,7 +33,7 @@ export function enderecoDoVideo(id: string, t?: number | null, busca?: string | 
 function instante(busca: string): number | null {
   const valor = new URLSearchParams(busca).get('t')
   if (valor === null || !/^\d+(\.\d+)?$/.test(valor)) return null
-  return Math.floor(Number(valor))
+  return Number(valor)
 }
 
 /** A tela antiga do vídeo, até o #165 removê-la. */

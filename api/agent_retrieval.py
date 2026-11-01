@@ -67,11 +67,18 @@ class ConfigDaBusca:
     # None: o índice do quadro-chave está desligado (ADR 0006), e a busca por quadro também.
     indice_do_quadro: str | None
     dimensao: int
+    # O corte do que vem só da busca por significado (`Consulta.cortar_significado`): a
+    # distância de cosseno máxima e o mínimo de palavras do registro. Falas curtas ("ok.",
+    # "Tchau,") ficam perto de qualquer consulta. None: sem corte.
+    distancia_maxima: float | None = None
+    palavras_minimas: int = 0
 
     @classmethod
     def do_ambiente(cls, ambiente: Mapping[str, str]) -> "ConfigDaBusca":
         """Levanta `KeyError` se faltar uma variável: sem ela a busca não tem onde ir.
-        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave."""
+        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave. O corte
+        (`BUSCA_DISTANCIA_MAXIMA`, `BUSCA_PALAVRAS_MINIMAS`) só o serviço recebe."""
+        distancia = ambiente.get("BUSCA_DISTANCIA_MAXIMA")
         return cls(
             projeto=ambiente["GCP_PROJECT_ID"],
             regiao=ambiente["BUSCA_REGIAO"],
@@ -79,6 +86,8 @@ class ConfigDaBusca:
             indice_da_descricao=ambiente["BUSCA_INDICE_DESCRICAO"],
             indice_do_quadro=ambiente["BUSCA_INDICE_QUADRO"] or None,
             dimensao=int(ambiente["BUSCA_DIMENSAO"]),
+            distancia_maxima=float(distancia) if distancia else None,
+            palavras_minimas=int(ambiente.get("BUSCA_PALAVRAS_MINIMAS") or 0),
         )
 
     @property
@@ -193,6 +202,9 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
     if not buscas:
         raise ValueError("a busca precisa de texto, significado ou vetor do quadro")
     pedido: dict[str, Any] = {"searches": buscas}
+    if consulta.cortar_significado:
+        # A distância de cada busca, mesmo depois da fusão: é ela que o corte lê.
+        pedido["metadataOptions"] = {"searchSignalsEnabled": True}
     if len(buscas) > 1:
         pedido["combine"] = {
             "ranker": {"rrf": {"weights": [1.0] * len(buscas)}},
@@ -429,11 +441,37 @@ class AgentRetrieval:
             "dataObjects:batchSearch", pedido_de_busca(self._config, consulta)
         )
         # Uma lista de resultados por busca; com o RRF, uma lista só, já fundida.
-        return [
-            _registro(r["dataObject"]["data"])
+        registros = [
+            (_registro(r["dataObject"]["data"]), r)
             for lista in resposta.get("results", [])
             for r in lista.get("results", [])
         ]
+        if consulta.cortar_significado and consulta.significado:
+            # A busca por significado vem depois da por texto (`pedido_de_busca`).
+            busca = 1 if consulta.texto else 0
+            registros = [(r, x) for r, x in registros if self._perto(r, x, busca)]
+        return [r for r, _ in registros]
+
+    def _perto(self, r: Registro, resultado: dict[str, Any], busca: int) -> bool:
+        """Achado por outra busca, ou perto o bastante e com palavras bastantes.
+
+        ponytail: corte fixo, calibrado em 3 vídeos do dev; com a API de Ranking no ar,
+        o corte passa a ser a nota dela."""
+        distancias = {
+            d["searchIndex"]: d["distance"]
+            for d in resultado.get("searchResultMetadata", {}).get(
+                "searchDistances", []
+            )
+        }
+        if any(i != busca for i in distancias):
+            return True
+        distancia = distancias.get(busca, resultado.get("distance"))
+        maxima = self._config.distancia_maxima
+        return (
+            maxima is None or (distancia is not None and distancia <= maxima)
+        ) and len(
+            (r.descricao or r.texto or "").split()
+        ) >= self._config.palavras_minimas
 
     def total(self) -> int:
         resposta = self._chamar("dataObjects:aggregate", {"aggregate": "COUNT"})

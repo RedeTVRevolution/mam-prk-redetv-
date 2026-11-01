@@ -138,7 +138,7 @@ export default function Visualizador({
   function gravarNoEndereco() {
     if (!player.current) return
     const busca = new URLSearchParams(location.search).get('busca')
-    history.replaceState(history.state, '', enderecoDoVideo(job.id, player.current.currentTime, busca))
+    history.replaceState(history.state, '', enderecoDoVideo(job.id, Math.floor(player.current.currentTime), busca))
   }
 
   function saltarPara(segundos: number) {
@@ -304,7 +304,7 @@ export default function Visualizador({
         </Group>
         <Group gap="xs" wrap="nowrap">
           {podeEditar && (
-            <Link para={enderecoDaTelaAnterior(job.id, atualMs / 1000)} size="sm">
+            <Link para={enderecoDaTelaAnterior(job.id, Math.floor(atualMs / 1000))} size="sm">
               Tela anterior
             </Link>
           )}

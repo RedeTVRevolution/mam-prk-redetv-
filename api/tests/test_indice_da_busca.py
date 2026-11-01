@@ -1,5 +1,12 @@
-from api.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA
-from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
+from api.decupagem import Decupagem
+from api.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA, _decupagem, _objeto
+from api.indice_da_busca import (
+    Consulta,
+    Filtros,
+    IndiceEmMemoria,
+    Registro,
+    registros_da_decupagem,
+)
 
 
 def _indice() -> IndiceEmMemoria:
@@ -81,3 +88,36 @@ def test_registro_de_objeto_leva_atributos_e_tempos() -> None:
         0,
         4_000,
     )
+
+
+def _com_quadros(d: Decupagem) -> Decupagem:
+    planos = [p.model_copy(update={"quadro": f"{p.id}.jpg"}) for p in d.planos]
+    return d.model_copy(update={"planos": planos})
+
+
+def test_cada_ocorrencia_do_objeto_e_um_registro_com_os_seus_tempos() -> None:
+    # A calça vinho aparece aos 0 s e aos 5 s: dois momentos, e não um bloco de 0 a 6 s.
+    calca = _objeto("obj01", "roupa", "calça", "vermelho", None, 1_000)
+    calca["ocorrencias"].append({"inicio_ms": 5_000, "fim_ms": 6_000})
+    calca["quadro"] = "obj01.jpg"
+    decupagem = _com_quadros(_decupagem([], [calca], []))
+    objetos = [
+        r
+        for r in registros_da_decupagem("j", decupagem, None, None)
+        if r.tipo == "objeto"
+    ]
+    # A primeira ocorrência leva o quadro do objeto; as outras, o do plano em que começam.
+    assert [(r.id, r.inicio_ms, r.fim_ms, r.quadro) for r in objetos] == [
+        ("j:objeto:0:0", 0, 1_000, "obj01.jpg"),
+        ("j:objeto:0:1", 5_000, 6_000, "pla2.jpg"),
+    ]
+
+
+def test_fala_e_gc_levam_o_quadro_do_plano_em_que_comecam() -> None:
+    decupagem = _com_quadros(_decupagem([], [], ["Boa noite"]))
+    quadros = {
+        r.tipo: r.quadro
+        for r in registros_da_decupagem("j", decupagem, None, None)
+        if r.tipo in ("fala", "texto_na_tela")
+    }
+    assert quadros == {"fala": "pla1.jpg", "texto_na_tela": "pla1.jpg"}
