@@ -112,6 +112,26 @@ class Indexacao(BaseModel):
     em: datetime
 
 
+NomeDaEtapa = Literal[
+    "validacao",
+    "transcricao",
+    "leitura_da_tela",
+    "analise",
+    "quadros_chave",
+    "indexacao",
+    # As etapas do #112 (#221 a #223) entram aqui quando existirem.
+]
+ResultadoDaEtapa = Literal["concluida", "falhou"]
+
+
+class Etapa(BaseModel):
+    """Uma etapa já iniciada do processamento; `fim` e `resultado` só depois que ela acaba."""
+
+    inicio: datetime
+    fim: datetime | None = None
+    resultado: ResultadoDaEtapa | None = None
+
+
 class Job(BaseModel):
     id: str
     nome: str
@@ -142,6 +162,11 @@ class Job(BaseModel):
     data_exibicao: date | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
     indexacao: Indexacao | None = None
+    # A etapa em andamento; `None` entre etapas, com o Job parado e em Job anterior ao campo.
+    etapa_atual: NomeDaEtapa | None = None
+    # Só as etapas iniciadas, por nome; vazio em Job anterior ao campo. Quem grava é
+    # `api.ciclo_de_vida` (e o Workflows, com o mesmo formato).
+    etapas: dict[NomeDaEtapa, Etapa] = {}
     criado_em: datetime
     atualizado_em: datetime
 
@@ -169,6 +194,10 @@ class EnviadoPor(BaseModel):
     nome: str | None
 
 
+class EtapaPublica(Etapa):
+    nome: NomeDaEtapa
+
+
 class JobPublico(BaseModel):
     """O que a API mostra de um Job; o SHA-256 e o tamanho ficam no armazenamento."""
 
@@ -186,19 +215,27 @@ class JobPublico(BaseModel):
     programa: str | None = None
     data_exibicao: date | None = None
     indexacao: Indexacao | None = None
+    etapa_atual: NomeDaEtapa | None = None
+    # As etapas iniciadas, da primeira à última.
+    etapas: list[EtapaPublica] = []
     enviado_por: EnviadoPor
     criado_em: datetime
     atualizado_em: datetime
 
     @classmethod
     def de(cls, job: Job) -> "JobPublico":
-        campos = set(cls.model_fields) - {"enviado_por"}
+        campos = set(cls.model_fields) - {"enviado_por", "etapas"}
         enviado_por = (
             EnviadoPor(tipo="sistema", nome=job.sistema)
             if job.sistema is not None
             else EnviadoPor(tipo="pessoa", nome=job.criado_por_email)
         )
-        return cls(**job.model_dump(include=campos), enviado_por=enviado_por)
+        etapas = sorted(job.etapas.items(), key=lambda par: par[1].inicio)
+        return cls(
+            **job.model_dump(include=campos),
+            etapas=[EtapaPublica(nome=n, **e.model_dump()) for n, e in etapas],
+            enviado_por=enviado_por,
+        )
 
 
 def _etag(publico: JobPublico) -> str:

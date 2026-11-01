@@ -13,6 +13,11 @@ main:
         assign:
           # O objeto na quarentena tem o nome do id do Job.
           - job_id: $${evento.data.name}
+    - inicia_validacao:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: validacao
     - valida:
         try:
           call: googleapis.run.v2.projects.locations.jobs.run
@@ -31,6 +36,12 @@ main:
           as: e
           # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
           steps:
+            - grava_a_falha_de_validacao:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: validacao
+                  falhou_na_execucao: true
             - le_antes_de_marcar:
                 try:
                   call: googleapis.firestore.v1.projects.databases.documents.get
@@ -71,6 +82,12 @@ main:
                         timestampValue: $${time.format(sys.now())}
             - encerra_com_falha:
                 raise: $${e}
+    - encerra_validacao:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: validacao
+          falhou_na_execucao: false
     - le_o_job:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get
@@ -90,8 +107,13 @@ main:
     - so_se_analisando:
         switch:
           - condition: $${documento.fields.estado.stringValue == "analisando"}
-            next: transcreve
+            next: inicia_transcricao
         next: fim
+    - inicia_transcricao:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: transcricao
     - transcreve:
         try:
           call: googleapis.run.v2.projects.locations.jobs.run
@@ -109,6 +131,12 @@ main:
         except:
           as: e
           steps:
+            - grava_a_falha_de_transcricao:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: transcricao
+                  falhou_na_execucao: true
             # O Job de transcrição já derruba o Job pelo ciclo de vida; aqui cobre o que
             # o impediu de chegar lá (tempo esgotado, memória estourada). Só marca se o
             # Job segue em `analisando` e não mudou desde a leitura.
@@ -139,6 +167,17 @@ main:
                         timestampValue: $${time.format(sys.now())}
             - encerra_a_transcricao_com_falha:
                 raise: $${e}
+    - encerra_transcricao:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: transcricao
+          falhou_na_execucao: false
+    - inicia_leitura_da_tela:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: leitura_da_tela
     - le_a_tela:
         try:
           call: googleapis.run.v2.projects.locations.jobs.run
@@ -156,6 +195,12 @@ main:
         except:
           as: e
           steps:
+            - grava_a_falha_de_leitura_da_tela:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: leitura_da_tela
+                  falhou_na_execucao: true
             # O Job de OCR já derruba o Job pelo ciclo de vida; aqui cobre o que
             # o impediu de chegar lá (tempo esgotado, memória estourada). Só marca se o
             # Job segue em `analisando` e não mudou desde a leitura.
@@ -186,6 +231,17 @@ main:
                         timestampValue: $${time.format(sys.now())}
             - encerra_o_ocr_com_falha:
                 raise: $${e}
+    - encerra_leitura_da_tela:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: leitura_da_tela
+          falhou_na_execucao: false
+    - inicia_analise:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: analise
     - analisa:
         try:
           call: googleapis.run.v2.projects.locations.jobs.run
@@ -204,6 +260,12 @@ main:
         except:
           as: e
           steps:
+            - grava_a_falha_de_analise:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: analise
+                  falhou_na_execucao: true
             # O Job de análise já trata a falha da análise (o Job vai a `falhou`); aqui
             # cobre o que o impediu de chegar lá (tempo esgotado, memória estourada).
             # Só marca se o Job segue em `analisando` e não mudou desde a leitura.
@@ -234,6 +296,29 @@ main:
                         timestampValue: $${time.format(sys.now())}
             - encerra_a_analise_com_falha:
                 raise: $${e}
+    - encerra_analise:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: analise
+          falhou_na_execucao: false
+    - le_o_job_depois_da_analise:
+        call: googleapis.firestore.v1.projects.databases.documents.get
+        args:
+          name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+        result: depois_da_analise
+    # Quadros-chave e indexação só valem com o Job `concluido`; uma análise que derrubou
+    # o Job (sai sem erro) não as inicia.
+    - so_se_concluido:
+        switch:
+          - condition: $${depois_da_analise.fields.estado.stringValue == "concluido"}
+            next: inicia_quadros_chave
+        next: fim
+    - inicia_quadros_chave:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: quadros_chave
     - tira_os_quadros:
         try:
           call: googleapis.run.v2.projects.locations.jobs.run
@@ -251,12 +336,29 @@ main:
         except:
           as: e
           steps:
+            - grava_a_falha_de_quadros_chave:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: quadros_chave
+                  falhou_na_execucao: true
             # O Job já está concluído; sem os JPEGs a Decupagem segue valendo.
             - registra_a_falha_dos_quadros:
                 call: sys.log
                 args:
                   severity: WARNING
                   text: $${"quadros-chave falharam para " + job_id}
+    - encerra_quadros_chave:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: quadros_chave
+          falhou_na_execucao: false
+    - inicia_indexacao:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: indexacao
     - indexa:
         try:
           call: googleapis.run.v2.projects.locations.jobs.run
@@ -274,11 +376,135 @@ main:
         except:
           as: e
           steps:
+            - grava_a_falha_de_indexacao:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: indexacao
+                  falhou_na_execucao: true
             # O Job já está concluído; a falha fica no estado da indexação e no log.
             - registra_a_falha_da_indexacao:
                 call: sys.log
                 args:
                   severity: WARNING
                   text: $${"indexação falhou para " + job_id}
+    - encerra_indexacao:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: indexacao
+          falhou_na_execucao: false
     - fim:
         return: $${job_id}
+
+# Tempo de cada etapa (#146): o início e o fim vão para `etapas.<nome>` do Job, com o
+# mesmo formato de `api.ciclo_de_vida`. Não é transição: não mexe em `estado`. Uma falha
+# aqui só vai ao log, para a medição nunca derrubar o processamento; o `exists: true`
+# faz um objeto sem Job correspondente não criar documento.
+marca_inicio:
+  params: [job_id, etapa]
+  steps:
+    - monta_o_inicio:
+        assign:
+          - agora: $${time.format(sys.now())}
+          - por_etapa: {}
+          - por_etapa[etapa]:
+              mapValue:
+                fields:
+                  inicio:
+                    timestampValue: $${agora}
+    - grava_o_inicio:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.patch
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            currentDocument:
+              exists: true
+            updateMask:
+              fieldPaths: $${["etapa_atual", "etapas." + etapa, "atualizado_em"]}
+            body:
+              fields:
+                etapa_atual:
+                  stringValue: $${etapa}
+                etapas:
+                  mapValue:
+                    fields: $${por_etapa}
+                atualizado_em:
+                  timestampValue: $${agora}
+        except:
+          as: erro_do_inicio
+          steps:
+            - registra_o_erro_do_inicio:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"início da etapa " + etapa + " não gravado para " + job_id}
+    - fim_do_inicio:
+        return: null
+
+marca_fim:
+  params: [job_id, etapa, falhou_na_execucao]
+  steps:
+    - le_o_estado:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: documento_da_etapa
+        except:
+          as: erro_da_leitura_da_etapa
+          steps:
+            - registra_o_erro_da_leitura:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"fim da etapa " + etapa + " não gravado para " + job_id}
+            - sai_sem_gravar:
+                return: null
+    - decide_o_resultado:
+        assign:
+          # Os Jobs de validação e de análise terminam sem erro quando derrubam o Job
+          # pelo ciclo de vida: o resultado vem do estado, e não só da execução.
+          - resultado: concluida
+    - confere_a_execucao:
+        switch:
+          - condition: $${falhou_na_execucao or documento_da_etapa.fields.estado.stringValue == "falhou"}
+            assign:
+              - resultado: falhou
+    - monta_o_fim:
+        assign:
+          - agora: $${time.format(sys.now())}
+          - por_etapa: {}
+          - por_etapa[etapa]:
+              mapValue:
+                fields:
+                  fim:
+                    timestampValue: $${agora}
+                  resultado:
+                    stringValue: $${resultado}
+    - grava_o_fim:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.patch
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            currentDocument:
+              exists: true
+            updateMask:
+              fieldPaths: $${["etapa_atual", "etapas." + etapa + ".fim", "etapas." + etapa + ".resultado", "atualizado_em"]}
+            body:
+              fields:
+                etapas:
+                  mapValue:
+                    fields: $${por_etapa}
+                atualizado_em:
+                  timestampValue: $${agora}
+        except:
+          as: erro_do_fim
+          steps:
+            - registra_o_erro_do_fim:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"fim da etapa " + etapa + " não gravado para " + job_id}
+    - fim_do_fim:
+        return: null

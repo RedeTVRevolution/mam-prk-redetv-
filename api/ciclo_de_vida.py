@@ -8,13 +8,20 @@ no meio do caminho).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 # `api.jobs` usa este módulo nas rotas; aqui os tipos só servem à checagem.
 if TYPE_CHECKING:
-    from api.jobs import CodigoDeFalha, Estado, Job, RepositorioDeJobs
+    from api.jobs import (
+        CodigoDeFalha,
+        Estado,
+        Job,
+        NomeDaEtapa,
+        RepositorioDeJobs,
+        ResultadoDaEtapa,
+    )
 
 TRANSICOES: dict[Estado, frozenset[Estado]] = {
     "aguardando_upload": frozenset({"validando", "falhou", "cancelado"}),
@@ -89,5 +96,71 @@ def cancelar(
             raise JaTerminou(job.estado)
         # Se o Job andou entre a leitura e a troca, lê de novo: os estados só avançam.
         if novo := transitar(repositorio, job_id, job.estado, "cancelado", agora):
+            return novo
+    return None
+
+
+def _gravar_etapa(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    mudar: Callable[[Job], dict[str, Any]],
+) -> Job | None:
+    """Grava a mudança de etapa sem mudar o `estado` do Job (nem exigir um).
+
+    É a mesma troca condicional das transições, com o estado lido na hora: se o Job
+    andou entre a leitura e a troca, lê de novo.
+    """
+    while (job := repositorio.obter(job_id)) is not None:
+        if novo := repositorio.transitar(job_id, job.estado, mudar(job)):
+            return novo
+    return None
+
+
+def iniciar_etapa(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    etapa: NomeDaEtapa,
+    agora: datetime,
+) -> Job | None:
+    """Abre a etapa (refazê-la, como no reprocessar, recomeça o relógio dela)."""
+    from api.jobs import Etapa
+
+    return _gravar_etapa(
+        repositorio,
+        job_id,
+        lambda job: {
+            "etapa_atual": etapa,
+            "etapas": {**job.etapas, etapa: Etapa(inicio=agora)},
+            "atualizado_em": agora,
+        },
+    )
+
+
+def encerrar_etapa(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    etapa: NomeDaEtapa,
+    resultado: ResultadoDaEtapa,
+    agora: datetime,
+) -> Job | None:
+    """Fecha a etapa com o resultado. `None` se o Job não existe ou a etapa não começou.
+
+    A falha de uma etapa não muda o `estado` do Job: quem o derruba é a transição
+    `analisando` → `falhou`; uma etapa depois do `concluido` só fica `falhou`.
+    """
+
+    def mudar(job: Job) -> dict[str, Any]:
+        aberta = job.etapas[etapa]
+        return {
+            "etapa_atual": None if job.etapa_atual == etapa else job.etapa_atual,
+            "etapas": {
+                **job.etapas,
+                etapa: aberta.model_copy(update={"fim": agora, "resultado": resultado}),
+            },
+            "atualizado_em": agora,
+        }
+
+    while (job := repositorio.obter(job_id)) is not None and etapa in job.etapas:
+        if novo := repositorio.transitar(job_id, job.estado, mudar(job)):
             return novo
     return None

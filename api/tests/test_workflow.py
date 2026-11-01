@@ -296,3 +296,59 @@ def test_job_de_referencias_no_main_tf_tem_internet_e_o_segredo_e_so_dele() -> N
     ].split("\nresource ")[0]
     assert 'google_service_account.mam["referencias"].member' in acesso
     assert main.count("secretAccessor") == 1
+
+
+ETAPAS = [
+    ("valida", "validacao"),
+    ("transcreve", "transcricao"),
+    ("le_a_tela", "leitura_da_tela"),
+    ("analisa", "analise"),
+    ("tira_os_quadros", "quadros_chave"),
+    ("indexa", "indexacao"),
+]
+
+
+def test_cada_etapa_grava_o_inicio_antes_e_o_fim_depois_de_rodar() -> None:
+    texto = _texto()
+
+    for passo, etapa in ETAPAS:
+        inicio = texto.index(
+            f"call: marca_inicio\n        args:\n          job_id: $${{job_id}}\n          etapa: {etapa}\n"
+        )
+        roda = texto.index(f"    - {passo}:\n")
+        fim = texto.index(
+            f"call: marca_fim\n        args:\n          job_id: $${{job_id}}\n          etapa: {etapa}\n          falhou_na_execucao: false"
+        )
+        assert inicio < roda < fim
+
+
+def test_falha_da_execucao_de_cada_etapa_grava_o_fim_como_falhou() -> None:
+    texto = _texto()
+
+    for passo, etapa in ETAPAS:
+        inicio = texto.index(f"\n    - {passo}:\n")
+        corpo = texto[inicio + 1 :]
+        corpo = corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
+        assert f"etapa: {etapa}\n" in corpo, passo
+        assert "falhou_na_execucao: true" in corpo, passo
+
+
+def test_subworkflow_grava_so_os_campos_da_etapa_sem_mexer_no_estado() -> None:
+    texto = _texto()
+
+    marcas = texto[texto.index("\nmarca_inicio:") :]
+    assert '"etapas." + etapa' in marcas
+    assert 'etapas." + etapa + ".fim"' in marcas
+    assert "resultado" in marcas
+    assert '"estado"' not in marcas and "estado]" not in marcas
+    # Um objeto sem Job não cria documento, e a medição nunca derruba o processamento.
+    assert marcas.count("exists: true") == 2
+    assert "sys.log" in marcas
+
+
+def test_quadros_e_indexacao_so_comecam_com_o_job_concluido() -> None:
+    texto = _texto()
+
+    guarda = texto.index("so_se_concluido:")
+    assert texto.index("- analisa:") < guarda < texto.index("- tira_os_quadros:")
+    assert 'estado.stringValue == "concluido"' in texto
