@@ -92,7 +92,7 @@ test('os selos do nome trazem o tempo da prova: GC e fala', () => {
   expect(item?.selos).toEqual([
     { rotulo: 'GC', inicio_ms: 211_000 },
     { rotulo: 'Fala', inicio_ms: 220_000 },
-    { rotulo: 'Rosto', inicio_ms: null },
+    { rotulo: 'Rosto', inicio_ms: null, tipo: 'rosto' },
   ])
   expect(item?.linhas).toEqual(['colunista · terno preto'])
 })

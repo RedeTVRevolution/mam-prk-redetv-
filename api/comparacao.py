@@ -88,6 +88,7 @@ class Veredito:
     escolhido: str | None = None  # o que a escolha às cegas apontou, se rodou
     confiancas: tuple[float, ...] = ()
     fotos: tuple[Rosto, ...] = ()  # as que confirmaram (ou não) o nome
+    conferem: tuple[bool, ...] = ()  # por foto: a confiança chegou ao limiar
 
 
 @dataclass(frozen=True)
@@ -471,6 +472,7 @@ def comparar(
                 escolhido=escolhida.nome if escolhida else None,
                 confiancas=confiancas,
                 fotos=escolhida.rostos if escolhida else (),
+                conferem=tuple(c >= limiar for c in confiancas),
             )
         )
     # Um palpite não confirmado cujo nome se confirmou depois, para outra pessoa do

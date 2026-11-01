@@ -356,7 +356,8 @@ locals {
   }
   papeis_nos_buckets = {
     # A API assina as URLs de envio para a quarentena, apaga dela o upload cancelado e lê o proxy de reprodução e a decupagem.
-    web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectViewer" }
+    # As referências: o link assinado das fotos do nome (Visualizador), só leitura.
+    web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectViewer", referencias = "roles/storage.objectViewer" }
     # Lê e apaga o original da quarentena; grava a cópia limpa e o proxy de reprodução.
     validacao = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectCreator" }
     # Lê o áudio que a validação separou e grava a transcrição ao lado do proxy.
@@ -494,6 +495,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUCKET_DECUPAGENS"
         value = local.buckets["decupagens"]
+      }
+      env {
+        name  = "BUCKET_REFERENCIAS"
+        value = local.buckets["referencias"]
       }
       # O workflow que o reprocessar dispara (api/nuvem.py). Pelo local e não pelo
       # recurso: o workflow depende dos Jobs, que dependem do IAM dos buckets, e a

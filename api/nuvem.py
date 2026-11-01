@@ -605,6 +605,14 @@ class DecupagensStorage:
             objeto_da_comparacao(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
 
+    def ler_comparacao(self, job_id: str) -> bytes | None:
+        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_comparacao(job_id))
+        try:
+            conteudo: bytes = blob.download_as_bytes()
+            return conteudo
+        except NotFound:
+            return None
+
     def gravar_nomes_a_buscar(self, job_id: str, conteudo: str) -> None:
         self._cliente.bucket(self._decupagens).blob(
             objeto_dos_nomes_a_buscar(job_id)
@@ -727,8 +735,10 @@ class ArmazenamentoStorage:
         bucket_de_aceitos: str,
         bucket_de_decupagens: str,
         assinatura: Callable[[], dict[str, Any]] = assinatura_pelo_iam,
+        bucket_de_referencias: str | None = None,
     ) -> None:
         self._cliente = cliente
+        self._referencias = bucket_de_referencias
         self._bucket = bucket_de_quarentena
         self._aceitos = bucket_de_aceitos
         self._decupagens = bucket_de_decupagens
@@ -777,3 +787,15 @@ class ArmazenamentoStorage:
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         return self._leitor.abrir_decupagem(job_id)
+
+    def ler_comparacao(self, job_id: str) -> bytes | None:
+        return self._leitor.ler_comparacao(job_id)
+
+    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
+        if self._referencias is None:
+            raise ServicoIndisponivel
+        blob = self._cliente.bucket(self._referencias).blob(objeto)
+        url: str = blob.generate_signed_url(
+            version="v4", expiration=validade, method="GET", **self._assinatura()
+        )
+        return url

@@ -110,6 +110,8 @@ interface Pessoa {
   origem?: 'modelo' | 'revisao'
   /** 1.2: de onde veio o nome; falta em 1.1 e em pessoa acrescentada pela revisão. */
   fontes_do_nome?: string[]
+  /** 1.3: `palpite` é o nome que o modelo deu sem achar prova; falta onde a identificação não rodou. */
+  estado_do_nome?: 'confirmado' | 'palpite' | null
   na_imagem: Aparicao[]
   citada_na_fala: Intervalo[]
   citada_no_texto: (Intervalo & { texto: string })[]

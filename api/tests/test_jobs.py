@@ -36,6 +36,7 @@ class ArmazenamentoFalso:
         self.pedidos: list[dict[str, Any]] = []
         self.cancelados: list[str] = []
         self.decupagens: dict[str, list[bytes]] = {}
+        self.comparacoes: dict[str, bytes] = {}
         self.decupagens_indisponiveis = False
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
@@ -52,6 +53,12 @@ class ArmazenamentoFalso:
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/quadros/{job_id}/{caminho}?validade={int(validade.total_seconds())}"
+
+    def ler_comparacao(self, job_id: str) -> bytes | None:
+        return self.comparacoes.get(job_id)
+
+    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
+        return f"https://storage.exemplo/fotos/{objeto}?validade={int(validade.total_seconds())}"
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         # Gerador, como seria o adaptador real: a falha só aparece no primeiro pedaço.

@@ -47,12 +47,28 @@ async function detalhe(resposta: Response): Promise<string> {
 }
 
 /** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
+/** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
+export interface FotoDoNome {
+  url: string
+  /** Vazia quando a página de origem não é um endereço web. */
+  pagina_url: string
+  dominio: string
+  resultado: 'confere' | 'nao_confere' | null
+}
+
+export interface FotosDoNome {
+  fotos: FotoDoNome[]
+  expira_em: string
+}
+
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
   reproducao(): Promise<Reproducao>
   /** URL assinada do JPEG `arquivo` (`plano-0.jpg`) de um momento da decupagem. */
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
+  /** As fotos de referência que sustentam o nome da pessoa (exige `decupagem.ver`). */
+  fotosDoNome(pessoaId: string): Promise<FotosDoNome>
   catalogo(): Promise<CatalogoDeCorrecoes>
   historico(): Promise<ItemDoHistorico[]>
   fila(): Promise<ItemDaFila[]>
@@ -129,6 +145,7 @@ export function criarClienteDaApi(
       reproducao: () => chamar(`${base}/reproducao`),
       quadro: (arquivo) => chamar(`${base}/quadros/${encodeURIComponent(arquivo)}`),
       decupagem: () => chamar(`${base}/decupagem`),
+      fotosDoNome: (pessoaId) => chamar(`${base}/pessoas/${encodeURIComponent(pessoaId)}/referencias`),
       catalogo: () => chamar('/v1/correcoes/catalogo'),
       historico: () => chamar(`${base}/correcoes`),
       fila: () => chamar(`${base}/fila`),

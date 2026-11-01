@@ -690,3 +690,16 @@ def test_limite_de_buscas_e_a_lista_de_nomes_do_job_de_referencias_vem_do_main_t
         r'decupagens = "roles/storage.objectViewer" \}',
         main,
     )
+
+
+def test_a_api_le_as_fotos_de_referencia_para_assinar_o_link_do_nome() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    assert re.search(
+        r'web = \{[^}\n]*referencias = "roles/storage.objectViewer"[^}\n]*\}', main
+    )
+    servico = main.split('resource "google_cloud_run_v2_service" "web"')[1].split(
+        "\nresource "
+    )[0]
+    assert 'name  = "BUCKET_REFERENCIAS"' in servico
+    assert 'local.buckets["referencias"]' in servico

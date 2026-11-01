@@ -32,7 +32,14 @@ export type TipoDoItem = 'pauta' | 'aparicao' | 'mencao' | 'objeto' | 'comercial
 export interface Selo {
   rotulo: string
   inicio_ms: number | null
+  /** `rosto`: o clique abre a comparação das fotos. `nao_confirmado`: o nome é palpite, sem prova. */
+  tipo?: 'rosto' | 'nao_confirmado'
+  /** A explicação, em dica. */
+  dica?: string
 }
+
+const DICA_DO_NAO_CONFIRMADO =
+  'O modelo sugeriu este nome, mas não achou prova: nem GC, nem fala, nem rosto conferido com as fotos de referência.'
 
 /** O que a lista mostra de um objeto: o tipo, a cor (base e tom), o dono e a marca. */
 export interface DadosDoObjeto {
@@ -94,10 +101,16 @@ const normalizar = (t: string): string =>
 
 const escapar = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Referência' }
+const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Rosto' }
 
-/** Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm tempo). */
-function selosDoNome(nome: string, fontes: string[], d: Decupagem): Selo[] {
+/**
+ * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm
+ * tempo: abrem a comparação). O palpite sem prova leva só o selo "não confirmado".
+ */
+function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = false): Selo[] {
+  if (palpite && fontes.length === 0) {
+    return [{ rotulo: 'não confirmado', inicio_ms: null, tipo: 'nao_confirmado', dica: DICA_DO_NAO_CONFIRMADO }]
+  }
   // O nome inteiro, entre limites de palavra: "Ana" não casa com "MARIANA".
   const alvo = new RegExp(`(^|[^\\p{L}\\p{N}])${escapar(normalizar(nome))}($|[^\\p{L}\\p{N}])`, 'u')
   const prova = (trechos: (Intervalo & { texto: string })[]) =>
@@ -106,6 +119,7 @@ function selosDoNome(nome: string, fontes: string[], d: Decupagem): Selo[] {
   return fontes.map((f) => ({
     rotulo: FONTES[f] ?? f,
     inicio_ms: f === 'gc' ? prova(d.textos_na_tela ?? []) : f === 'fala' ? prova(d.transcricao) : null,
+    ...(f === 'rosto' || f === 'referencia' ? { tipo: 'rosto' as const } : {}),
   }))
 }
 
@@ -155,7 +169,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
   let m = 0
   for (const p of d.pessoas) {
     const sem = SEM_NOME.test(p.nome)
-    const selos = sem ? [] : selosDoNome(p.nome, p.fontes_do_nome ?? [], d)
+    const selos = sem ? [] : selosDoNome(p.nome, p.fontes_do_nome ?? [], d, p.estado_do_nome === 'palpite')
     for (const x of p.na_imagem) {
       const apoio = [x.papel, x.visual].filter(Boolean).join(' · ')
       itens.push({

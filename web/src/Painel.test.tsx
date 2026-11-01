@@ -605,3 +605,128 @@ test('uma Decupagem sem objetos mostra o aviso na aba Objetos', async () => {
   await usuario.click(aba('Objetos 0'))
   expect(within(painel()).getByText('Este vídeo não tem objetos decupados.')).toBeTruthy()
 })
+
+const FOTOS = {
+  fotos: [
+    { url: 'https://fotos.test/1.jpg', pagina_url: 'https://www.exemplo.com.br/a', dominio: 'exemplo.com.br', resultado: 'confere' },
+    { url: 'https://fotos.test/2.jpg', pagina_url: 'https://noticias.exemplo.org/b', dominio: 'noticias.exemplo.org', resultado: 'confere' },
+    { url: 'https://fotos.test/3.jpg', pagina_url: 'https://outro.test/c', dominio: 'outro.test', resultado: 'nao_confere' },
+  ],
+  expira_em: '2999-01-01T00:00:00Z',
+}
+
+function comPessoas(pessoas: object[]) {
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json({ ...DECUPAGEM, pessoas })))
+}
+
+const PESSOA_PELO_ROSTO = {
+  id: 'p1',
+  nome: 'Leão Lobo',
+  fontes_do_nome: ['referencia'],
+  estado_do_nome: 'confirmado',
+  na_imagem: [{ inicio_ms: 211_000, fim_ms: 261_000, evidencia: 'rosto', quadro: 'quadros/aparicao-0-0.jpg' }],
+  citada_na_fala: [],
+  citada_no_texto: [],
+}
+
+test('o selo "Rosto" abre a comparação com as 3 fotos, os links e o resultado em palavras', async () => {
+  comPessoas([PESSOA_PELO_ROSTO])
+  servidor.use(
+    http.get('/v1/jobs/j1/pessoas/p1/referencias', () => HttpResponse.json(FOTOS)),
+    http.get('/v1/jobs/j1/quadros/aparicao-0-0.jpg', () =>
+      HttpResponse.json({ url: 'https://quadros.test/a.jpg', expira_em: '2999-01-01T00:00:00Z' }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 222)
+
+  await usuario.click(screen.getByRole('button', { name: /^Rosto/ }))
+
+  const comparacao = await screen.findByRole('dialog', { name: 'Comparação do rosto de Leão Lobo' })
+  expect(painel().contains(comparacao)).toBe(true)
+  // O vídeo continua na tela.
+  expect(screen.getByLabelText('Player')).toBeTruthy()
+  const fotos = await within(comparacao).findAllByRole('img')
+  expect(fotos.map((f) => f.getAttribute('src'))).toEqual(FOTOS.fotos.map((f) => f.url))
+  const links = within(comparacao).getAllByRole('link')
+  expect(links.map((l) => l.textContent)).toEqual(['exemplo.com.br', 'noticias.exemplo.org', 'outro.test'])
+  expect(links.map((l) => l.getAttribute('href'))).toEqual(FOTOS.fotos.map((f) => f.pagina_url))
+  for (const l of links) {
+    expect(l.getAttribute('target')).toBe('_blank')
+    expect(l.getAttribute('rel')).toBe('noopener noreferrer')
+  }
+  expect(within(comparacao).getAllByText('confere')).toHaveLength(2)
+  expect(within(comparacao).getByText('não confere')).toBeTruthy()
+  expect(comparacao.textContent).not.toMatch(/%/)
+})
+
+test('Esc fecha a comparação e o foco volta ao selo', async () => {
+  comPessoas([PESSOA_PELO_ROSTO])
+  servidor.use(http.get('/v1/jobs/j1/pessoas/p1/referencias', () => HttpResponse.json(FOTOS)))
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 222)
+  const selo = screen.getByRole('button', { name: /^Rosto/ })
+  await usuario.click(selo)
+  await screen.findByRole('dialog')
+
+  await usuario.keyboard('{Escape}')
+
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(selo)
+})
+
+test('a comparação que falha diz o que fazer e guarda o código no detalhe', async () => {
+  comPessoas([PESSOA_PELO_ROSTO])
+  servidor.use(http.get('/v1/jobs/j1/pessoas/p1/referencias', () => new HttpResponse(null, { status: 403 })))
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 222)
+
+  await usuario.click(screen.getByRole('button', { name: /^Rosto/ }))
+
+  const alerta = await screen.findByRole('alert')
+  expect(alerta.textContent).toMatch(/Não foi possível carregar as fotos de referência\. Feche e abra a comparação de novo\./)
+  expect(alerta.textContent).toContain('http_403')
+})
+
+test('o selo "Rosto" também está na aba Pessoas, fora do botão que abre a lista', async () => {
+  comPessoas([PESSOA_PELO_ROSTO])
+  servidor.use(http.get('/v1/jobs/j1/pessoas/p1/referencias', () => HttpResponse.json(FOTOS)))
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(aba('Pessoas 1'))
+
+  const selo = screen.getByRole('button', { name: /^Rosto/ })
+  expect(selo.closest('[aria-expanded]')).toBeNull()
+  await usuario.click(selo)
+
+  expect(await screen.findByRole('dialog', { name: 'Comparação do rosto de Leão Lobo' })).toBeTruthy()
+})
+
+test('o palpite não confirmado leva o selo em texto, com a dica, e nenhuma porcentagem', async () => {
+  comPessoas([
+    { ...PESSOA_PELO_ROSTO, fontes_do_nome: [], estado_do_nome: 'palpite', nome: 'Leão Lobo' },
+  ])
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 222)
+
+  const selo = screen.getByText('não confirmado')
+  expect(selo.closest('button')).toBeNull()
+  expect(painel().textContent).not.toMatch(/\d\s*%/)
+  await usuario.hover(selo)
+  expect(await screen.findByText(/não achou prova/)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /^Rosto/ })).toBeNull()
+})
+
+test('a pessoa confirmada por GC não abre a comparação', async () => {
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  irPara(player, 222)
+
+  expect(screen.queryByRole('button', { name: /^Rosto/ })).toBeNull()
+  await usuario.click(screen.getByRole('button', { name: 'GC 03:33' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+})

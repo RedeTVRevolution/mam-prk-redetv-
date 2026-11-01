@@ -1,6 +1,8 @@
-import { Badge, Box, Group, Stack, Text, UnstyledButton, Button } from '@mantine/core'
+import { Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Button } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { FotosDoNome } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
+import { ComparacaoDoRosto } from './ComparacaoDoRosto.tsx'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
@@ -99,7 +101,46 @@ function Cabecalho({
   )
 }
 
-function SeloDaProva({ selo, aoSaltar }: { selo: Selo; aoSaltar: (ms: number) => void }) {
+/** O que o clique no selo "Rosto" precisa para abrir a comparação. */
+interface Comparacao {
+  pessoa: string
+  nome: string
+  quadro: string | null
+}
+
+function SeloDaProva({
+  selo,
+  aoSaltar,
+  aoComparar,
+}: {
+  selo: Selo
+  aoSaltar: (ms: number) => void
+  /** Sem ele, o selo "Rosto" é só texto. */
+  aoComparar?: () => void
+}) {
+  if (selo.tipo === 'nao_confirmado') {
+    return (
+      <Tooltip label={selo.dica} multiline w={260} events={{ hover: true, focus: true, touch: true }}>
+        <Badge size="sm" variant="outline" color={CORES.textoSecundario} tabIndex={0}>
+          {selo.rotulo}
+        </Badge>
+      </Tooltip>
+    )
+  }
+  if (selo.tipo === 'rosto' && aoComparar) {
+    return (
+      <Badge
+        size="sm"
+        component="button"
+        type="button"
+        style={{ cursor: 'pointer' }}
+        aria-label="Rosto: ver a comparação com as fotos de referência"
+        onClick={aoComparar}
+      >
+        {selo.rotulo}
+      </Badge>
+    )
+  }
   if (selo.inicio_ms === null) return <Badge size="sm">{selo.rotulo}</Badge>
   const inicio = selo.inicio_ms
   return (
@@ -198,6 +239,7 @@ function Item({
   aoSaltar,
   aoReproduzir,
   aoIrParaDono,
+  aoComparar,
   urlDoQuadro,
   compacto,
 }: {
@@ -208,6 +250,8 @@ function Item({
   aoSaltar: (ms: number) => void
   aoReproduzir: (i: ItemDoPainel) => void
   aoIrParaDono: (pessoa: string) => void
+  /** Abre a comparação do rosto da pessoa do item; sem ele, o selo "Rosto" é só texto. */
+  aoComparar?: (c: Comparacao) => void
   urlDoQuadro?: (caminho: string) => Promise<string>
   /** Objeto na lista das ocorrências: só o tipo e o tempo, o resto fica na linha do objeto. */
   compacto?: boolean
@@ -296,7 +340,16 @@ function Item({
       {(item.selos.length > 0 || selecionado) && (
         <Group gap="xs" mt={4} ml={16}>
           {item.selos.map((s) => (
-            <SeloDaProva key={s.rotulo} selo={s} aoSaltar={aoSaltar} />
+            <SeloDaProva
+              key={s.rotulo}
+              selo={s}
+              aoSaltar={aoSaltar}
+              aoComparar={
+                aoComparar && item.pessoa
+                  ? () => aoComparar({ pessoa: item.pessoa!, nome: item.titulo, quadro: item.quadro ?? null })
+                  : undefined
+              }
+            />
           ))}
           {selecionado && (
             <Button size="compact-xs" variant="default" onClick={() => aoReproduzir(item)}>
@@ -336,6 +389,7 @@ export function Painel({
   aoSaltar,
   aoReproduzir,
   urlDoQuadro,
+  fotosDoNome,
 }: {
   decupagem: Decupagem
   duracaoMs: number
@@ -352,7 +406,15 @@ export function Painel({
   aoReproduzir: (i: Intervalo) => void
   /** A URL assinada do quadro de um momento; sem ela as miniaturas ficam como retângulo. */
   urlDoQuadro?: (caminho: string) => Promise<string>
+  /** As fotos de referência do nome de uma pessoa; sem ele, o selo "Rosto" não abre a comparação. */
+  fotosDoNome?: (pessoaId: string) => Promise<FotosDoNome>
 }) {
+  const [comparando, setComparando] = useState<Comparacao | null>(null)
+  const fecharComparacao = useCallback(() => setComparando(null), [])
+  const carregarFotos = useCallback(
+    () => (comparando && fotosDoNome ? fotosDoNome(comparando.pessoa) : Promise.reject(new Error('sem rota'))),
+    [comparando, fotosDoNome],
+  )
   const itens = useMemo(() => itensDoPainel(decupagem), [decupagem])
   const pautas = useMemo(() => itensDaAba(itens, 'pautas'), [itens])
   const rolagem = useRef<HTMLDivElement>(null)
@@ -522,6 +584,7 @@ export function Painel({
         aoSaltar={aoSaltar}
         aoReproduzir={aoReproduzir}
         aoIrParaDono={irParaDono}
+        aoComparar={fotosDoNome ? setComparando : undefined}
         urlDoQuadro={urlDoQuadro}
         compacto={compacto}
       />
@@ -561,27 +624,39 @@ export function Painel({
                 const rotulo = doId[0]?.titulo ?? p.nome
                 return (
                   <Stack key={p.id} gap={2}>
-                    <UnstyledButton
-                      aria-expanded={abrir}
-                      aria-label={`${rotulo}, ${doId.length} ${doId.length === 1 ? 'aparição' : 'aparições'}`}
-                      onClick={() => aoAbrirPessoa(p.id)}
-                      p="xs"
-                    >
-                      <Group gap="xs" justify="space-between" wrap="nowrap">
-                        <Stack gap={0}>
-                          <Text size="sm">{rotulo}</Text>
-                          {doId[0]?.linhas[0] && rotulo === NAO_IDENTIFICADO && (
-                            <Text size="xs" c="dimmed">{doId[0].linhas[0]}</Text>
-                          )}
-                        </Stack>
-                        <Group gap="xs" wrap="nowrap">
-                          {(doId[0]?.selos ?? []).map((s) => (
-                            <Badge key={s.rotulo} size="sm">{s.rotulo}</Badge>
-                          ))}
+                    <Group gap="xs" justify="space-between" wrap="nowrap" align="flex-start">
+                      <UnstyledButton
+                        aria-expanded={abrir}
+                        aria-label={`${rotulo}, ${doId.length} ${doId.length === 1 ? 'aparição' : 'aparições'}`}
+                        onClick={() => aoAbrirPessoa(p.id)}
+                        p="xs"
+                        style={{ flex: 1, minWidth: 0, textAlign: 'left' }}
+                      >
+                        <Group gap="xs" justify="space-between" wrap="nowrap">
+                          <Stack gap={0}>
+                            <Text size="sm">{rotulo}</Text>
+                            {doId[0]?.linhas[0] && rotulo === NAO_IDENTIFICADO && (
+                              <Text size="xs" c="dimmed">{doId[0].linhas[0]}</Text>
+                            )}
+                          </Stack>
                           <Text size="xs" c="dimmed">{`${doId.length} ${doId.length === 1 ? 'aparição' : 'aparições'}`}</Text>
                         </Group>
+                      </UnstyledButton>
+                      <Group gap="xs" wrap="wrap" p="xs" justify="flex-end">
+                        {(doId[0]?.selos ?? []).map((s) => (
+                          <SeloDaProva
+                            key={s.rotulo}
+                            selo={s}
+                            aoSaltar={aoSaltar}
+                            aoComparar={
+                              fotosDoNome
+                                ? () => setComparando({ pessoa: p.id, nome: rotulo, quadro: doId[0]?.quadro ?? null })
+                                : undefined
+                            }
+                          />
+                        ))}
                       </Group>
-                    </UnstyledButton>
+                    </Group>
                     {abrir && <Stack gap={2} ml="md">{lista(doId)}</Stack>}
                   </Stack>
                 )
@@ -646,7 +721,16 @@ export function Painel({
   }
 
   return (
-    <Stack gap="sm" style={{ height: '100%', minHeight: 0 }}>
+    <Stack gap="sm" style={{ height: '100%', minHeight: 0, position: 'relative' }}>
+      {comparando && (
+        <ComparacaoDoRosto
+          nome={comparando.nome}
+          quadro={comparando.quadro}
+          carregar={carregarFotos}
+          urlDoQuadro={urlDoQuadro}
+          aoFechar={fecharComparacao}
+        />
+      )}
       <Cabecalho itens={itens} pautas={pautas} duracaoMs={duracaoMs} atualMs={atualMs} />
       <Group gap="xs" role="tablist" aria-label="Abas do painel" wrap="wrap">
         {ABAS.map((a) => {

@@ -89,6 +89,12 @@ class _SemQuadro:
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return caminho
 
+    def ler_comparacao(self, job_id: str) -> bytes | None:
+        return None
+
+    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
+        return objeto
+
 
 def main() -> int:
     # O plano B registra a falta do Model Armor a cada consulta; aqui é o esperado.

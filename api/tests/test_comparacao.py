@@ -130,6 +130,7 @@ def test_escolha_as_cegas_e_tres_fotos_acima_do_limiar_confirmam_o_nome() -> Non
     # as fotos que confirmaram são as da pessoa do catálogo ligada à pessoa do vídeo
     assert v.fotos == tuple(c.catalogo.obter(c.leao).rostos)  # type: ignore[union-attr]
     assert v.confiancas == (0.9, 0.95, 0.85)
+    assert v.conferem == (True, True, True)  # o que a tela mostra como "confere"
     # 1 escolha + 3 conferências, uma por foto
     assert len(transporte.chamadas) == 4
 
