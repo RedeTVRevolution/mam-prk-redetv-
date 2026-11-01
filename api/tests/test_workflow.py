@@ -172,7 +172,7 @@ def test_job_de_ocr_no_main_tf_sem_internet_e_na_rede_da_validacao() -> None:
     assert "var.imagem_ocr" in job
     assert "max_retries     = 0" in job
     assert "external_ip" not in main and "google_compute_router_nat" not in main
-    assert "job_de_ocr         = google_cloud_run_v2_job.ocr.name" in main
+    assert re.search(r"job_de_ocr\s+= google_cloud_run_v2_job\.ocr\.name", main)
 
 
 def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
@@ -184,7 +184,7 @@ def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
     assert 'args    = ["-m", "api.analise"]' in job
     assert "max_retries     = 0" in job
     assert "JANELAS_EM_PARALELO" in job and "var.janelas_em_paralelo" in job
-    assert "job_de_analise     = google_cloud_run_v2_job.analise.name" in main
+    assert re.search(r"job_de_analise\s+= google_cloud_run_v2_job\.analise\.name", main)
     assert "google_cloud_run_v2_service.analise" not in main
     # O Job de análise dura mais que o teto de 1800 s da chamada HTTP do Workflows.
     assert 'timeout = "21600s"' in job
@@ -218,7 +218,7 @@ def test_job_de_quadros_no_main_tf_sem_internet_com_a_imagem_da_validacao() -> N
     assert 'args    = ["-m", "api.quadros_chave"]' in job
     assert "max_retries     = 0" in job
     assert 'local.buckets["aceitos"]' in job and 'local.buckets["decupagens"]' in job
-    assert "job_de_quadros     = google_cloud_run_v2_job.quadros.name" in main
+    assert re.search(r"job_de_quadros\s+= google_cloud_run_v2_job\.quadros\.name", main)
     # Lê a cópia limpa e grava os JPEGs e a Decupagem; não escreve em aceitos.
     assert 'quadros = { aceitos = "roles/storage.objectViewer"' in main
     assert 'decupagens = "roles/storage.objectUser"' in main
@@ -247,7 +247,9 @@ def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
     assert 'args    = ["-m", "api.indexacao"]' in job
     assert "max_retries     = 0" in job
     assert "BUSCA_COLECAO" in job and "BUSCA_INDICE_QUADRO" in job
-    assert "job_de_indexacao   = google_cloud_run_v2_job.indexacao.name" in main
+    assert re.search(
+        r"job_de_indexacao\s+= google_cloud_run_v2_job\.indexacao\.name", main
+    )
     # Só lê a Decupagem; não escreve em bucket nenhum.
     assert 'indexacao = { decupagens = "roles/storage.objectViewer" }' in main
 
@@ -263,7 +265,14 @@ def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
         "valida": ("validacao", "- valida:", "- le_o_job:"),
         "transcreve": ("transcricao", "- transcreve:", "- le_a_tela:"),
         "le_a_tela": ("ocr", "- le_a_tela:", "- analisa:"),
-        "analisa": ("analise", "- analisa:", "- tira_os_quadros:"),
+        "analisa": ("analise", "- analisa:", "- inicia_identificacao:"),
+        "identifica": ("identificacao", "- identifica:", "- inicia_referencias:"),
+        "busca_as_referencias": (
+            "referencias",
+            "- busca_as_referencias:",
+            "- inicia_comparacao:",
+        ),
+        "compara": ("comparacao", "- compara:", "- inicia_quadros_chave:"),
         "tira_os_quadros": ("quadros", "- tira_os_quadros:", "- indexa:"),
         "indexa": ("indexacao", "- indexa:", "- fim:"),
     }
@@ -307,6 +316,7 @@ ETAPAS = [
     ("transcreve", "transcricao"),
     ("le_a_tela", "leitura_da_tela"),
     ("analisa", "analise"),
+    ("busca_as_referencias", "referencias"),
     ("tira_os_quadros", "quadros_chave"),
     ("indexa", "indexacao"),
 ]
@@ -356,6 +366,7 @@ def test_quadros_e_indexacao_so_comecam_com_o_job_concluido() -> None:
     guarda = texto.index("so_se_concluido:")
     assert texto.index("- analisa:") < guarda < texto.index("- tira_os_quadros:")
     assert 'estado.stringValue == "concluido"' in texto
+    assert "next: inicia_identificacao" in texto[guarda:]
 
 
 def test_falha_de_cada_etapa_nao_cai_no_encerra_que_a_gravaria_como_concluida() -> None:
@@ -377,6 +388,65 @@ def test_fim_de_etapa_sem_inicio_nao_e_gravado() -> None:
     marca_fim = texto[texto.index("\nmarca_fim:") :]
     guarda = marca_fim.index('["etapas", "mapValue", "fields", etapa]) == null')
     assert guarda < marca_fim.index("grava_o_fim:")
+
+
+def test_ordem_nova_identificacao_referencias_comparacao_quadros_indexacao() -> None:
+    texto = _texto()
+
+    ordem = [
+        "- analisa:",
+        "- identifica:",
+        "- busca_as_referencias:",
+        "- compara:",
+        "- tira_os_quadros:",
+        "- indexa:",
+        "- fim:",
+    ]
+    posicoes = [texto.index(passo) for passo in ordem]
+    assert posicoes == sorted(posicoes)
+    for job in ("identificacao", "referencias", "comparacao"):
+        passo = texto[
+            texto.index(
+                f"call: marca_inicio\n        args:\n          job_id: $${{job_id}}\n          etapa: {job}"
+            ) :
+        ]
+        assert f"jobs/${{job_de_{job}}}" in passo.split("- tira_os_quadros:")[0]
+    # Sem internet: a identificação e a comparação; com internet: só as referências.
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    for job in ("identificacao", "referencias", "comparacao"):
+        assert f"job_de_{job}" in main
+
+
+@pytest.mark.parametrize(
+    ("passo", "etapa", "seguinte"),
+    [
+        ("identifica", "identificacao", "inicia_referencias"),
+        ("busca_as_referencias", "referencias", "inicia_comparacao"),
+        ("compara", "comparacao", "inicia_quadros_chave"),
+    ],
+)
+def test_falha_dos_passos_novos_vai_ao_log_e_a_etapa_e_os_seguintes_rodam(
+    passo: str, etapa: str, seguinte: str
+) -> None:
+    texto = _texto()
+
+    corpo = texto[texto.index(f"\n    - {passo}:\n") + 1 :]
+    corpo = corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
+    excecao = corpo[corpo.index("except:") :]
+    assert "falhou_na_execucao: true" in excecao
+    assert "sys.log" in excecao and "raise" not in excecao
+    assert f"next: {seguinte}" in excecao
+    # Nunca mexem no `estado` do Job: o Job continua `concluido`.
+    assert "documents.patch" not in excecao
+
+
+def test_etapas_dos_jobs_que_gravam_o_proprio_resultado_nao_sao_regravadas_como_concluida() -> (
+    None
+):
+    texto = _texto()
+
+    assert "etapa: identificacao\n          falhou_na_execucao: false" not in texto
+    assert "etapa: comparacao\n          falhou_na_execucao: false" not in texto
 
 
 def _depois_de(texto: str, passo: str) -> str:
@@ -411,7 +481,7 @@ def test_partindo_da_analise_nem_a_transcricao_nem_a_leitura_da_tela_rodam() -> 
     destino = _destino(texto, "analise")
 
     assert destino == "inicia_analise"
-    # Do destino em diante estão a análise, os quadros-chave e a indexação, e só elas.
+    # Do destino em diante estão a análise e as etapas depois dela.
     daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
     assert "jobs/${job_de_analise}" in daqui
     for antes in (
@@ -420,7 +490,13 @@ def test_partindo_da_analise_nem_a_transcricao_nem_a_leitura_da_tela_rodam() -> 
         "job_de_ocr",
     ):
         assert antes not in daqui
-    for depois in ("job_de_quadros", "job_de_indexacao"):
+    for depois in (
+        "job_de_identificacao",
+        "job_de_referencias",
+        "job_de_comparacao",
+        "job_de_quadros",
+        "job_de_indexacao",
+    ):
         assert depois in daqui
 
 
@@ -437,9 +513,43 @@ def test_partindo_da_indexacao_nada_antes_dela_roda() -> None:
         "job_de_transcricao",
         "job_de_ocr",
         "job_de_analise",
+        "job_de_identificacao",
+        "job_de_referencias",
+        "job_de_comparacao",
         "job_de_quadros",
     ):
         assert antes not in daqui
+
+
+def test_partindo_da_comparacao_nem_a_identificacao_nem_as_referencias_rodam() -> None:
+    texto = _texto()
+
+    destino = _destino(texto, "comparacao")
+
+    assert destino == "inicia_comparacao"
+    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
+    assert "jobs/${job_de_comparacao}" in daqui
+    for antes in (
+        "job_de_validacao",
+        "job_de_transcricao",
+        "job_de_ocr",
+        "job_de_analise",
+        "job_de_identificacao",
+        "job_de_referencias",
+    ):
+        assert antes not in daqui
+    for depois in ("job_de_quadros", "job_de_indexacao"):
+        assert depois in daqui
+
+
+def test_partindo_das_referencias_a_identificacao_nao_roda() -> None:
+    texto = _texto()
+
+    destino = _destino(texto, "referencias")
+
+    assert destino == "inicia_referencias"
+    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
+    assert "job_de_identificacao" not in daqui and "job_de_comparacao" in daqui
 
 
 def test_cada_etapa_de_partida_cai_no_inicio_da_propria_etapa() -> None:
@@ -448,6 +558,7 @@ def test_cada_etapa_de_partida_cai_no_inicio_da_propria_etapa() -> None:
     assert _destino(texto, "transcricao") == "inicia_transcricao"
     assert _destino(texto, "leitura_da_tela") == "inicia_leitura_da_tela"
     assert _destino(texto, "quadros_chave") == "inicia_quadros_chave"
+    assert _destino(texto, "identificacao") == "inicia_identificacao"
 
 
 def test_a_api_so_inicia_execucoes_do_workflow_e_sabe_qual_e() -> None:

@@ -215,15 +215,11 @@ ETAPA_DA_FALHA: dict[CodigoDeFalha, NomeDaEtapa] = {
 }
 # Depois do `concluido`, só estas etapas rodam: o Job e a Decupagem seguem como estão.
 ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
+    "identificacao",
+    "referencias",
+    "comparacao",
     "quadros_chave",
     "indexacao",
-    "identificacao",
-    "comparacao",
-)
-
-# Ainda fora do Workflows (#223): partir delas cairia na validação e rodaria tudo de novo.
-ETAPAS_SEM_REPROCESSAR: frozenset[NomeDaEtapa] = frozenset(
-    {"identificacao", "comparacao"}
 )
 
 
@@ -251,8 +247,6 @@ def etapa_de_partida(job: Job) -> NomeDaEtapa:
         for e in _ordem_das_etapas()
         if (r := job.etapas.get(e)) and r.resultado == "falhou"
     ]
-    if falhas and falhas[0] in ETAPAS_SEM_REPROCESSAR:
-        raise NaoReprocessavel(f"A etapa {falhas[0]} ainda não pode ser reprocessada")
     if job.estado == "falhou":
         partida = (
             falhas[0]

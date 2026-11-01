@@ -1113,7 +1113,7 @@ resource "google_cloud_run_v2_job" "referencias" {
 # comando, na mesma rede, sem internet (só o Storage, o Firestore e a Vertex pelo acesso
 # privado do Google). Lê a Decupagem e a cópia limpa de um Job `concluido` e regrava a
 # Decupagem com os nomes conferidos; a falha dele só fica na etapa, e o Job segue `concluido`.
-# Ainda fora do Workflows (parte 4 do #112).
+# O Workflows o roda depois da análise (parte 4 do #112).
 resource "google_cloud_run_v2_job" "identificacao" {
   name                = "mam-identificacao"
   location            = var.regiao
@@ -1191,7 +1191,7 @@ resource "google_cloud_run_v2_job" "identificacao" {
 # Job da comparação com as fotos de referência (#221): como o de identificação, e ainda lê
 # o bucket das referências (as fotos já guardadas pelo `mam-referencias`, que é o único com
 # internet). Regrava a Decupagem e grava os vereditos em `<job>.comparacao.json`.
-# Ainda fora do Workflows (parte 4 do #112).
+# O Workflows o roda depois da análise (parte 4 do #112).
 resource "google_cloud_run_v2_job" "comparacao" {
   name                = "mam-comparacao"
   location            = var.regiao
@@ -1278,7 +1278,31 @@ resource "google_cloud_run_v2_job" "comparacao" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
-# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de quadros -> Job de indexação.
+# A orquestração roda o Job de identificacao, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_identificacao" {
+  name     = google_cloud_run_v2_job.identificacao.name
+  location = google_cloud_run_v2_job.identificacao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# A orquestração roda o Job de referencias, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_referencias" {
+  name     = google_cloud_run_v2_job.referencias.name
+  location = google_cloud_run_v2_job.referencias.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# A orquestração roda o Job de comparacao, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_comparacao" {
+  name     = google_cloud_run_v2_job.comparacao.name
+  location = google_cloud_run_v2_job.comparacao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Jobs de identificação, referências e comparação -> Job de quadros -> Job de indexação.
 locals {
   workflow_validacao = "mam-validacao"
 }
@@ -1288,14 +1312,17 @@ resource "google_workflows_workflow" "validacao" {
   region          = var.regiao
   service_account = google_service_account.mam["orquestracao"].id
   source_contents = templatefile("${path.module}/validacao.workflow.yaml", {
-    projeto            = var.projeto
-    regiao             = var.regiao
-    job_de_validacao   = google_cloud_run_v2_job.validacao.name
-    job_de_transcricao = google_cloud_run_v2_job.transcricao.name
-    job_de_ocr         = google_cloud_run_v2_job.ocr.name
-    job_de_analise     = google_cloud_run_v2_job.analise.name
-    job_de_quadros     = google_cloud_run_v2_job.quadros.name
-    job_de_indexacao   = google_cloud_run_v2_job.indexacao.name
+    projeto              = var.projeto
+    regiao               = var.regiao
+    job_de_validacao     = google_cloud_run_v2_job.validacao.name
+    job_de_transcricao   = google_cloud_run_v2_job.transcricao.name
+    job_de_ocr           = google_cloud_run_v2_job.ocr.name
+    job_de_analise       = google_cloud_run_v2_job.analise.name
+    job_de_identificacao = google_cloud_run_v2_job.identificacao.name
+    job_de_referencias   = google_cloud_run_v2_job.referencias.name
+    job_de_comparacao    = google_cloud_run_v2_job.comparacao.name
+    job_de_quadros       = google_cloud_run_v2_job.quadros.name
+    job_de_indexacao     = google_cloud_run_v2_job.indexacao.name
   })
   depends_on = [google_project_service.apis]
 }

@@ -160,16 +160,18 @@ def test_a_etapa_de_partida_e_a_primeira_que_falhou() -> None:
     assert "indexacao" not in mundo.job().etapas
 
 
-@pytest.mark.parametrize("etapa", ["identificacao", "comparacao"])
-def test_etapa_que_o_workflows_ainda_nao_recomeca_da_409(etapa: str) -> None:
+@pytest.mark.parametrize("etapa", ["identificacao", "referencias", "comparacao"])
+def test_etapa_nova_do_112_e_etapa_de_partida(etapa: str) -> None:
     job = _concluido_sem_indexar()
     job.etapas["indexacao"] = _etapa()
     job.etapas[etapa] = _etapa("falhou")  # type: ignore[index]
     mundo = Mundo(job)
 
-    assert mundo.reprocessar().status_code == 409
-    assert mundo.disparo.disparos == []
-    assert mundo.job() == job
+    assert mundo.reprocessar().status_code == 202
+    assert mundo.disparo.disparos == [("j1", etapa)]
+    assert mundo.job().estado == "concluido"
+    # As etapas dali em diante vão rodar de novo.
+    assert "indexacao" not in mundo.job().etapas
 
 
 def test_job_falhou_sem_registro_de_etapa_parte_do_codigo_da_falha() -> None:
