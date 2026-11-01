@@ -17,6 +17,8 @@ steps:
       - OCR=$_OCR
       - CACHE=$_CACHE
       - VITE_IDENTITY_API_KEY=$_VITE_IDENTITY_API_KEY
+# O padrão é 600 s: o build de hoje chega perto, e o sem cache, que também exporta o cache, pode passar (#211).
+timeout: 1800s
 options:
   # Obrigatório com conta de serviço própria (mam-build).
   logging: CLOUD_LOGGING_ONLY
