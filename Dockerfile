@@ -33,12 +33,24 @@ CMD ["python", "-m", "api.validacao_job"]
 
 # Job de transcrição (#104): `docker build --target transcricao`. Só o faster-whisper e o
 # modelo, sem ffmpeg nem front. O modelo é baixado aqui, na construção, na revisão fixada
-# e conferido pelo SHA-256 do model.bin; no ar o Job roda sem internet (HF_HUB_OFFLINE).
+# e conferido pelo SHA-256 de cada arquivo; no ar o Job roda sem internet (HF_HUB_OFFLINE).
 FROM python:3.12-slim-bookworm AS transcricao
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 ARG MODELO_REPOSITORIO=dropbox-dash/faster-whisper-large-v3-turbo
 ARG MODELO_REVISAO=0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf
 ARG MODELO_SHA256=e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da
+# O modelo vem antes do `uv sync` (#211): só uma mudança de modelo o baixa de novo. O
+# download usa só o urllib, do Python da imagem base, como o do OCR.
+RUN mkdir /modelo && for arquivo in config.json model.bin preprocessor_config.json tokenizer.json vocabulary.json; do \
+      python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+        "https://huggingface.co/$MODELO_REPOSITORIO/resolve/$MODELO_REVISAO/$arquivo" "/modelo/$arquivo" || exit 1; \
+    done \
+    && echo "$MODELO_SHA256  /modelo/model.bin" > /tmp/hashes \
+    && echo "b0253ea6c0d3bea6b1e19e91a02acfd3b53f4467362efcb5a3e6b16c9b3a9b7e  /modelo/config.json" >> /tmp/hashes \
+    && echo "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711  /modelo/preprocessor_config.json" >> /tmp/hashes \
+    && echo "297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd  /modelo/tokenizer.json" >> /tmp/hashes \
+    && echo "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1  /modelo/vocabulary.json" >> /tmp/hashes \
+    && sha256sum -c /tmp/hashes && rm /tmp/hashes
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group transcricao
@@ -46,9 +58,6 @@ RUN uv sync --locked --no-dev --group transcricao
 # PyAV instalado, para a imagem não ser construída com versões que não conversam.
 RUN /app/.venv/bin/python -c "import wave; w = wave.open('/tmp/s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(32000)); w.close(); from faster_whisper.audio import decode_audio; assert len(decode_audio('/tmp/s.wav')) == 16000" \
     && rm /tmp/s.wav
-RUN /app/.venv/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('$MODELO_REPOSITORIO', revision='$MODELO_REVISAO', local_dir='/modelo')" \
-    && echo "$MODELO_SHA256  /modelo/model.bin" | sha256sum -c - \
-    && rm -rf /modelo/.cache
 COPY api/ api/
 USER nobody
 ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
@@ -71,12 +80,11 @@ RUN apt-get update \
     && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
         || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
     && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --group ocr
+# Os modelos vêm antes do `uv sync` (#211): só uma mudança de modelo os baixa de novo. O
+# download usa só o urllib, do Python da imagem base.
 RUN baixar() { \
       mkdir -p "/modelos/$1" && for arquivo in config.json inference.json inference.pdiparams inference.yml; do \
-        /app/.venv/bin/python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
           "https://huggingface.co/PaddlePaddle/$1/resolve/$2/$arquivo" "/modelos/$1/$arquivo" || return 1; \
       done; \
     } \
@@ -91,6 +99,9 @@ RUN baixar() { \
     && echo "820b2ee8e5072de5156c3d55124c2b03c82ef278d59f453f857c0789bacb4da1  /modelos/$RECONHECEDOR/inference.json" >> /tmp/hashes \
     && echo "0bbe984570f597af3638e50bdf2e8276f3ab26a61966096538b3b0d1849f5c84  /modelos/$RECONHECEDOR/inference.yml" >> /tmp/hashes \
     && sha256sum -c /tmp/hashes && rm /tmp/hashes
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --group ocr
 COPY api/ api/
 # Os testes usam um modelo falso: aqui o PaddleOCR lê um quadro de verdade com os modelos
 # da imagem, para a imagem não ser construída com uma versão que não roda em CPU.

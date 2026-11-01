@@ -52,11 +52,13 @@ VALIDACAO="$REPOSITORIO/validacao:$COMMIT"
 TRANSCRICAO="$REPOSITORIO/transcricao:$COMMIT"
 # A imagem do Job de OCR da tela (#106), com os modelos do PaddleOCR dentro.
 OCR="$REPOSITORIO/ocr:$COMMIT"
-# O Cloud Build constrói e envia as quatro imagens (cloudbuild.yaml), como a mam-build.
+# O cache das camadas (#211): uma tag por alvo no mesmo repositório, sobrescrita a cada montagem.
+CACHE="$REPOSITORIO/cache"
+# O Cloud Build constrói, em paralelo e com cache, e envia as quatro imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
   --gcs-source-staging-dir "gs://$(tf output -raw bucket_fontes)/fontes" \
-  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_TRANSCRICAO=$TRANSCRICAO,_OCR=$OCR,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
+  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_TRANSCRICAO=$TRANSCRICAO,_OCR=$OCR,_CACHE=$CACHE,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
 # Pelo digest que o Cloud Build enviou, para que um rebuild com o mesmo commit
 # também gere revisão nova. Daqui em diante nada é recompilado.
 digest() { echo "${1%:*}@$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)')"; }

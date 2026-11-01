@@ -1,15 +1,27 @@
-# As quatro imagens do MAM (#71), pelo scripts/deploy-dev.sh. O Cloud Build as envia
-# ao Artifact Registry, e o script publica pelos digests delas, sem rebuild.
+# As quatro imagens do MAM (#71, #211), pelo scripts/deploy-dev.sh. Um passo só, com o
+# buildx e o docker-bake.hcl: as imagens são montadas em paralelo, com o cache das camadas
+# no Artifact Registry, e enviadas pelo próprio BuildKit (--push no bake). O script publica
+# pelos digests delas, sem rebuild.
 steps:
-  - name: gcr.io/cloud-builders/docker
-    args: [build, -t, $_WEB, --build-arg, VITE_IDENTITY_API_KEY=$_VITE_IDENTITY_API_KEY, .]
-  - name: gcr.io/cloud-builders/docker
-    args: [build, --target, validacao, -t, $_VALIDACAO, .]
-  - name: gcr.io/cloud-builders/docker
-    args: [build, --target, transcricao, -t, $_TRANSCRICAO, .]
-  - name: gcr.io/cloud-builders/docker
-    args: [build, --target, ocr, -t, $_OCR, .]
-images: [$_WEB, $_VALIDACAO, $_TRANSCRICAO, $_OCR]
+  - name: docker:27.5.1-cli
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        docker buildx create --name mam --driver docker-container --driver-opt image=moby/buildkit:v0.20.0 --use &&
+        docker buildx bake --progress=plain
+    env:
+      - WEB=$_WEB
+      - VALIDACAO=$_VALIDACAO
+      - TRANSCRICAO=$_TRANSCRICAO
+      - OCR=$_OCR
+      - CACHE=$_CACHE
+      - VITE_IDENTITY_API_KEY=$_VITE_IDENTITY_API_KEY
+# O padrão é 600 s: o build de hoje chega perto, e o sem cache, que também exporta o cache, pode passar (#211).
+timeout: 1800s
 options:
   # Obrigatório com conta de serviço própria (mam-build).
   logging: CLOUD_LOGGING_ONLY
+  # Máquina maior (#211): quatro montagens ao mesmo tempo, com modelos e bibliotecas pesadas.
+  machineType: E2_HIGHCPU_32
+  diskSizeGb: 200

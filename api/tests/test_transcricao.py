@@ -176,5 +176,8 @@ def test_modelo_do_dockerfile_esta_fixado_por_revisao_e_hash() -> None:
 
     assert re.search(r"^ARG MODELO_REVISAO=[0-9a-f]{40}$", alvo, re.MULTILINE)
     assert re.search(r"^ARG MODELO_SHA256=[0-9a-f]{64}$", alvo, re.MULTILINE)
+    assert "/resolve/$MODELO_REVISAO/" in alvo
     assert "sha256sum -c" in alvo
     assert "--group transcricao" in alvo
+    # O modelo vem antes do uv sync: mudar o uv.lock não o baixa de novo (#211).
+    assert alvo.index("/resolve/$MODELO_REVISAO/") < alvo.index("RUN uv sync")

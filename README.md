@@ -49,7 +49,7 @@ Ele impersona a `mam-terraform` (ADR 0002), sem chave em arquivo, e:
 
 1. cria o bucket do estado do Terraform, o `BUCKET_ESTADO_TF` que o wizard põe no `.env`, se não existir: privado, com acesso uniforme e versionamento;
 2. aplica só o Artifact Registry, o Identity Platform e o que o Cloud Build usa (a conta `mam-build` e o bucket de fontes);
-3. sobe o código para o Cloud Build, que constrói as duas imagens (`cloudbuild.yaml`: a do serviço, com a chave web do login, e a do Job de validação) e as envia ao Artifact Registry. O `.gcloudignore` deixa de fora tudo o que o git ignora, inclusive o `.env`;
+3. sobe o código para o Cloud Build, que constrói as quatro imagens em paralelo, com o cache das camadas no Artifact Registry (`cloudbuild.yaml` e `docker-bake.hcl`) e as envia ao Artifact Registry. O `.gcloudignore` deixa de fora tudo o que o git ignora, inclusive o `.env`;
 4. aplica o resto pelos digests que o Cloud Build enviou, sem recompilar, então cada deploy gera uma revisão nova;
 5. confere que `/v1/health` responde 200 e mostra a URL.
 
