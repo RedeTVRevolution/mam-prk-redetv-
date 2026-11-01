@@ -317,3 +317,33 @@ test('"Todos os anos" tira o período que a API entendeu', async () => {
   expect(location.search).toBe('?q=vestido&ano=todos')
   await waitFor(() => expect(buscas.at(-1)?.get('sem_periodo')).toBe('true'))
 })
+
+test('o clique abre o Visualizador exatamente no início do momento, com os milissegundos', async () => {
+  const usuario = userEvent.setup()
+  resposta = () =>
+    HttpResponse.json(resultado({ videos: [video('v1', [momento(6_540, 8_000, 'Objeto: calça vinho')])] }))
+  await abrir('/busca?q=calça vinho')
+  await usuario.click(await screen.findByRole('link', { name: /Objeto: calça vinho/ }))
+
+  expect(location.pathname + location.search).toBe('/video/v1?t=6.54&busca=cal%C3%A7a+vinho')
+})
+
+test('o GC longo vem encurtado, com "ver mais" e "ver menos"', async () => {
+  const usuario = userEvent.setup()
+  const longo = `GC: ${'PARTICIPAÇÃO VÁLIDA DAS 0H DE 27/04 ATÉ 15H DE 25/11/2025, EXCLUSIVA PARA AS '.repeat(3)}`
+  resposta = () =>
+    HttpResponse.json(
+      resultado({ videos: [video('v1', [momento(9_000, 12_000, longo), momento(14_000, 15_000, 'GC: BOLÃO')])] }),
+    )
+  await abrir('/busca?q=bolão')
+  const verMais = await screen.findByRole('button', { name: 'ver mais' })
+  // Só o longo tem o botão.
+  expect(screen.getAllByRole('button', { name: /ver (mais|menos)/ })).toHaveLength(1)
+  expect(verMais.getAttribute('aria-expanded')).toBe('false')
+
+  await usuario.click(verMais)
+
+  expect(screen.getByRole('button', { name: 'ver menos' }).getAttribute('aria-expanded')).toBe('true')
+  // Abrir o texto não abre o vídeo.
+  expect(location.pathname).toBe('/busca')
+})

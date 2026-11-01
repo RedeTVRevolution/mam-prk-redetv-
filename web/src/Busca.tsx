@@ -31,6 +31,8 @@ const ANO_ATUAL = new Date().getFullYear()
 const NUMEROS = { fontVariantNumeric: 'tabular-nums' } as const
 // Momento selecionado pelo teclado: o azul de foco a 16% (0x29).
 const SELECIONADO = { background: `${CORES.foco}29` }
+// Acima disso (os GCs de regulamento), o motivo vem em 2 linhas, com "ver mais".
+const MOTIVO_LONGO = 120
 const ANOS: string[] = Array.from({ length: ANOS_NO_SELECT }, (_, i) => String(ANO_ATUAL - i))
 
 type Carga =
@@ -53,9 +55,9 @@ function rotuloDoPeriodo(desde: string | null, ate: string | null): string {
 }
 
 /** O motivo com os trechos destacados, montado pelas posições: o texto nunca vira HTML. */
-function Motivo({ momento }: { momento: Momento }) {
+function Motivo({ momento, encurtado }: { momento: Momento; encurtado: boolean }) {
   return (
-    <Text size="sm" component="span">
+    <Text size="sm" component="span" lineClamp={encurtado ? 2 : undefined}>
       {trechosDoMotivo(momento.motivo, momento.destaques).map((t, i) =>
         t.destacado ? (
           <mark
@@ -139,28 +141,40 @@ function Linha({ video, momento, selecionado, busca }: {
   busca: string
 }) {
   const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, busca)
+  const [aberto, setAberto] = useState(false)
+  const longo = momento.motivo.length > MOTIVO_LONGO
   return (
-    <a
-      href={endereco}
-      onClick={(e) => seguir(e, endereco)}
-      aria-current={selecionado ? 'true' : undefined}
-      data-momento={`${video.job_id}:${momento.inicio_ms}`}
-      style={{
-        display: 'flex',
-        gap: 'var(--mantine-spacing-sm)',
-        alignItems: 'center',
-        padding: 'var(--mantine-spacing-xs)',
-        color: 'inherit',
-        textDecoration: 'none',
-        ...(selecionado ? SELECIONADO : {}),
-      }}
-    >
-      <Quadro url={momento.quadro_url} largura={96} altura={54} />
-      <Text size="sm" c={CORES.textoSecundario} style={{ ...NUMEROS, flex: 'none' }}>
-        {relogio(momento.inicio_ms)}–{relogio(momento.fim_ms)}
-      </Text>
-      <Motivo momento={momento} />
-    </a>
+    <Group gap={0} wrap="nowrap">
+      <a
+        href={endereco}
+        onClick={(e) => seguir(e, endereco)}
+        aria-current={selecionado ? 'true' : undefined}
+        data-momento={`${video.job_id}:${momento.inicio_ms}`}
+        style={{
+          display: 'flex',
+          flex: 1,
+          minWidth: 0,
+          gap: 'var(--mantine-spacing-sm)',
+          alignItems: 'center',
+          padding: 'var(--mantine-spacing-xs)',
+          color: 'inherit',
+          textDecoration: 'none',
+          ...(selecionado ? SELECIONADO : {}),
+        }}
+      >
+        <Quadro url={momento.quadro_url} largura={96} altura={54} />
+        <Text size="sm" c={CORES.textoSecundario} style={{ ...NUMEROS, flex: 'none' }}>
+          {relogio(momento.inicio_ms)}–{relogio(momento.fim_ms)}
+        </Text>
+        <Motivo momento={momento} encurtado={longo && !aberto} />
+      </a>
+      {/* Fora do link: abrir o texto não abre o vídeo. */}
+      {longo && (
+        <Button variant="subtle" size="compact-xs" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>
+          {aberto ? 'ver menos' : 'ver mais'}
+        </Button>
+      )}
+    </Group>
   )
 }
 

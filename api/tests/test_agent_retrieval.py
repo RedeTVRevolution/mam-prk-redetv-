@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -367,3 +368,89 @@ def test_significado_e_a_descricao_ou_o_texto_do_registro() -> None:
         "estúdio",
         "boa noite",
     ]
+
+
+def _achado(id: str, texto: str, *distancias: tuple[int, float]) -> dict[str, Any]:
+    """Um resultado fundido, com a distância de cada busca (índice, distância) que o achou."""
+    return {
+        "dataObject": {
+            "data": {
+                "id": id,
+                "tipo": "fala",
+                "job_id": "j",
+                "inicio_ms": 0,
+                "fim_ms": 1,
+            }
+            | {"texto": texto}
+        },
+        "searchResultMetadata": {
+            "searchDistances": [
+                {"searchIndex": i, "distance": d} for i, d in distancias
+            ]
+        },
+    }
+
+
+def test_so_do_significado_volta_o_que_esta_perto_e_tem_palavras_bastantes() -> None:
+    # Medido no dev: "terno" achava "ok." a 0,30 e "Tchau," a 0,32 só pelo vetor.
+    config = replace(CONFIG, distancia_maxima=0.25, palavras_minimas=3)
+    transporte = TransporteFalso(
+        {
+            "results": [
+                {
+                    "results": [
+                        _achado("pelo-texto", "terno", (0, 1.26), (1, 0.32)),
+                        _achado("perto", "terno preto de alfaiataria", (1, 0.20)),
+                        _achado("longe", "calça vinho estilo pantalona", (1, 0.30)),
+                        _achado("curta", "ok.", (1, 0.10)),
+                    ]
+                }
+            ]
+        }
+    )
+    adaptador = AgentRetrieval(config, transporte)
+    consulta = Consulta(texto="terno", significado="terno", cortar_significado=True)
+    assert [r.id for r in adaptador.buscar(consulta)] == ["pelo-texto", "perto"]
+    [(_, _, corpo)] = transporte.chamadas
+    assert corpo is not None
+    assert corpo["metadataOptions"] == {"searchSignalsEnabled": True}
+    # Sem o pedido de corte (a cláusula de pessoa na imagem), volta tudo.
+    sem_corte = replace(consulta, cortar_significado=False)
+    assert len(adaptador.buscar(sem_corte)) == 4
+
+
+def test_so_o_significado_tambem_e_cortado() -> None:
+    config = replace(CONFIG, distancia_maxima=0.25, palavras_minimas=3)
+    transporte = TransporteFalso(
+        {
+            "results": [
+                {
+                    "results": [
+                        _achado("perto", "terno preto de alfaiataria", (0, 0.20)),
+                        _achado("longe", "calça vinho estilo pantalona", (0, 0.30)),
+                    ]
+                }
+            ]
+        }
+    )
+    consulta = Consulta(significado="terno", cortar_significado=True)
+    assert [r.id for r in AgentRetrieval(config, transporte).buscar(consulta)] == [
+        "perto"
+    ]
+
+
+def test_corte_vem_do_ambiente_e_sem_ele_nao_ha_corte() -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+    }
+    sem_corte = ConfigDaBusca.do_ambiente(ambiente)
+    assert (sem_corte.distancia_maxima, sem_corte.palavras_minimas) == (None, 0)
+    corte = ConfigDaBusca.do_ambiente(
+        ambiente | {"BUSCA_DISTANCIA_MAXIMA": "0.25", "BUSCA_PALAVRAS_MINIMAS": "3"}
+    )
+    assert (corte.distancia_maxima, corte.palavras_minimas) == (0.25, 3)

@@ -1,4 +1,4 @@
-"""Porta do índice da busca (#117): um registro por plano, fala, texto na tela e objeto.
+"""Porta do índice da busca (#117): um registro por plano, fala, texto na tela e ocorrência de objeto.
 
 O adaptador do Agent Retrieval mora em `agent_retrieval.py`; o dublê em memória daqui
 implementa os filtros exatos e o texto, e é o que os testes usam.
@@ -66,6 +66,9 @@ class Consulta:
     # Vetor do quadro-chave da consulta (Gemini Embedding 2), na dimensão da coleção.
     vetor_do_quadro: list[float] | None = None
     limite: int = 20
+    # O que vem só da busca por significado passa pelo corte da configuração; o que a
+    # busca por texto acha fica. Falso quando o significado só leva os filtros ao índice.
+    cortar_significado: bool = False
 
 
 class IndiceDaBusca(Protocol):
@@ -111,6 +114,13 @@ def registros_da_decupagem(
                 achados.append(pessoa.catalogo_id)
         return achados
 
+    def quadro_do_plano(i: _Intervalo) -> str | None:
+        """O quadro-chave do plano em que o momento começa."""
+        for plano in decupagem.planos:
+            if plano.inicio_ms <= i.inicio_ms < plano.fim_ms:
+                return plano.quadro
+        return None
+
     registros: list[Registro] = []
     for n, plano in enumerate(decupagem.planos):
         registros.append(
@@ -134,6 +144,7 @@ def registros_da_decupagem(
                 fim_ms=fala.fim_ms,
                 pessoas=na_imagem(fala),
                 texto=fala.texto,
+                quadro=quadro_do_plano(fala),
                 **base,
             )
         )
@@ -146,31 +157,34 @@ def registros_da_decupagem(
                 fim_ms=texto.fim_ms,
                 pessoas=na_imagem(texto),
                 texto=texto.texto,
+                quadro=quadro_do_plano(texto),
                 **base,
             )
         )
     for n, objeto in enumerate(decupagem.objetos):
-        # Uma ocorrência é um intervalo; o registro cobre do primeiro ao último.
-        inicio = min(o.inicio_ms for o in objeto.ocorrencias)
-        fim = max(o.fim_ms for o in objeto.ocorrencias)
-        registros.append(
-            Registro(
-                id=f"{job_id}:objeto:{n}",
-                tipo="objeto",
-                inicio_ms=inicio,
-                fim_ms=fim,
-                categoria=objeto.categoria,
-                tipo_do_objeto=objeto.tipo,
-                cor_base=list(objeto.cor_base),
-                cor=objeto.cor,
-                marca=objeto.marca,
-                dono=catalogo.get(objeto.pessoa) if objeto.pessoa else None,
-                relacao=objeto.relacao,
-                texto=_frase(objeto.tipo, objeto.cor, objeto.marca, objeto.detalhe),
-                quadro=objeto.quadro,
-                **base,
+        # Cada ocorrência é um momento: um registro do primeiro ao último aparecimento
+        # viraria um bloco que aponta para o lugar errado.
+        for k, ocorrencia in enumerate(objeto.ocorrencias):
+            registros.append(
+                Registro(
+                    id=f"{job_id}:objeto:{n}:{k}",
+                    tipo="objeto",
+                    inicio_ms=ocorrencia.inicio_ms,
+                    fim_ms=ocorrencia.fim_ms,
+                    categoria=objeto.categoria,
+                    tipo_do_objeto=objeto.tipo,
+                    cor_base=list(objeto.cor_base),
+                    cor=objeto.cor,
+                    marca=objeto.marca,
+                    dono=catalogo.get(objeto.pessoa) if objeto.pessoa else None,
+                    relacao=objeto.relacao,
+                    texto=_frase(objeto.tipo, objeto.cor, objeto.marca, objeto.detalhe),
+                    # O quadro do objeto é o da primeira ocorrência.
+                    quadro=(objeto.quadro if k == 0 else None)
+                    or quadro_do_plano(ocorrencia),
+                    **base,
+                )
             )
-        )
     return registros
 
 

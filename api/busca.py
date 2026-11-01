@@ -350,7 +350,10 @@ class Busca:
             clausulas.append(
                 _Clausula(
                     Consulta(
-                        filtros=base, texto=e.texto_livre, significado=e.texto_livre
+                        filtros=base,
+                        texto=e.texto_livre,
+                        significado=e.texto_livre,
+                        cortar_significado=True,
                     ),
                     lambda r: _motivo(r, nome),
                 )
@@ -372,7 +375,8 @@ class Busca:
             j = job(id)
             if j is None:
                 continue
-            lista.sort(key=lambda t: (t.inicio_ms, t.fim_ms))
+            # A relevância também dentro do vídeo; no empate, o tempo.
+            lista.sort(key=lambda t: (t.posicao, t.inicio_ms, t.fim_ms))
             momentos = [
                 Momento(
                     inicio_ms=t.inicio_ms,

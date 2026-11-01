@@ -44,6 +44,18 @@ variable "indice_do_quadro_ligado" {
   default = false
 }
 
+# O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima
+# e o mínimo de palavras do registro. Calibrados em 3 vídeos do dev; mudar aqui e aplicar.
+variable "busca_distancia_maxima" {
+  type    = number
+  default = 0.25
+}
+
+variable "busca_palavras_minimas" {
+  type    = number
+  default = 3
+}
+
 variable "admins_emergencia" {
   description = "E-mails dos administradores de emergência, separados por vírgula"
   type        = string
@@ -413,6 +425,14 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_DIMENSAO"
         value = tostring(var.dimensao_dos_vetores)
+      }
+      env {
+        name  = "BUSCA_DISTANCIA_MAXIMA"
+        value = tostring(var.busca_distancia_maxima)
+      }
+      env {
+        name  = "BUSCA_PALAVRAS_MINIMAS"
+        value = tostring(var.busca_palavras_minimas)
       }
       # Quem tem esses e-mails (verificados) é Administrador (api/papeis.py).
       env {

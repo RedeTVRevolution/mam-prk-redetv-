@@ -715,3 +715,29 @@ def test_periodo_com_inicio_depois_do_fim_responde_422() -> None:
         headers=AUTORIZACAO,
     )
     assert r.status_code == 422
+
+
+def test_dentro_do_video_os_momentos_seguem_a_relevancia() -> None:
+    class Inverte:
+        def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+            return sorted(registros, key=lambda r: r.id, reverse=True)
+
+    m = Mundo(pedido(texto_livre="vestido"))
+    m.com(
+        job("j1"),
+        objeto("a", "j1", 0, 1_000),
+        objeto("b", "j1", 60_000, 61_000),
+    )
+    [video] = m.busca(Inverte()).buscar("vestido").videos
+    assert [x.inicio_ms for x in video.momentos] == [60_000, 0]
+
+
+def test_so_a_clausula_do_texto_livre_corta_o_significado() -> None:
+    # Na cláusula da pessoa na imagem, o significado só leva o filtro ao índice.
+    m = Mundo(pedido(pessoas=["Sabrina Sato"], texto_livre="no estúdio"))
+    buscar(m, "Sabrina Sato no estúdio")
+    com_significado = [c for c in m.indice.consultas if c.significado]
+    assert {(c.filtros.pessoa, c.cortar_significado) for c in com_significado} == {
+        (m.sabrina, False),
+        (None, True),
+    }
