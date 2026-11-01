@@ -23,5 +23,5 @@ options:
   # Obrigatório com conta de serviço própria (mam-build).
   logging: CLOUD_LOGGING_ONLY
   # Máquina maior (#211): quatro montagens ao mesmo tempo, com modelos e bibliotecas pesadas.
-  machineType: E2_HIGHCPU_32
+  machineType: E2_HIGHCPU_8
   diskSizeGb: 200
