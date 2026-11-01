@@ -207,22 +207,27 @@ def test_plano_que_ja_e_um_intervalo_entre_cortes_fica_como_esta() -> None:
 def test_plano_do_modelo_fora_dos_cortes_vira_o_intervalo_dos_cortes() -> None:
     d = decupagem(planos=[(4_800, 10_300)])
     r = aplicar_regra_de_tempos(d, [5_000, 10_000])
-    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [
-        (0, 5_000),
-        (5_000, 10_000),
-        (10_000, 60_000),
-    ]
-    assert r.planos[1].inicio_modelo_ms == 4_800
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [(5_000, 10_000)]
+    assert r.planos[0].inicio_modelo_ms == 4_800
+
+
+def test_intervalo_tocado_por_94_ms_fica_sem_plano() -> None:
+    d = decupagem(planos=[(50_000, 59_000)])
+    r = aplicar_regra_de_tempos(d, [10_000, 50_100])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [(50_100, 60_000)]
+
+
+def test_intervalo_que_o_plano_cobre_pela_metade_herda_a_descricao() -> None:
+    d = decupagem(planos=[(0, 5_000)])
+    r = aplicar_regra_de_tempos(d, [10_000])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [(0, 10_000)]
 
 
 def test_segunda_passada_mantem_os_tempos_do_modelo() -> None:
     d = decupagem(planos=[(0, 10_300)])
     r = aplicar_regra_de_tempos(d, [10_000])
     r = aplicar_regra_de_tempos(r, [10_000])
-    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [
-        (0, 10_000),
-        (10_000, 60_000),
-    ]
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [(0, 10_000)]
     assert r.planos[0].inicio_modelo_ms == 0
     assert r.planos[0].fim_modelo_ms == 10_300
 

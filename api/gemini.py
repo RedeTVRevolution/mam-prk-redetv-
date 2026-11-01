@@ -8,7 +8,7 @@ tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levant
 import base64
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -89,7 +89,7 @@ REGRAS GERAIS
 6. LOCAIS E IMAGENS DE APOIO
 - Registre locais (estúdio, aeroporto, estádio, rua, restaurante, palco) e cenas reaproveitáveis.
 - Marque como plano limpo os planos sem texto na tela e sem ninguém falando para a câmera.
-
+{secao_dos_cortes}
 7. COMERCIAIS E MERCHANDISING
 - Registre toda ação comercial: merchandising do apresentador, testemunhal, produto em cena, banner, bug, QR code, chamada de site e intervalo comercial.
 - Para cada uma: marca, tipo, início, fim e evidência (fala, logo ou texto na tela).
@@ -112,8 +112,27 @@ TRANSCRIÇÃO AUTOMÁTICA
 """
 
 
-def instrucao(programa: str | None, transcricao: Transcricao | None = None) -> str:
-    """Só um programa de `programas.toml` entra na instrução: nunca texto livre."""
+SECAO_DOS_CORTES = """\
+- O vídeo já foi cortado nestes instantes (MM:SS): {cortes}. Cada intervalo entre dois cortes seguidos é um plano: devolva um item em planos para cada um, com início e fim nos cortes, e o ambiente, a ação e os objetos do que se vê naquele intervalo, não do trecho todo. Se dois planos vizinhos mostram coisas diferentes, as descrições são diferentes.
+- Intervalo de tela preta: ambiente "tela preta", ação nula, sem objetos.
+"""
+
+
+def _mmss(ms: int) -> str:
+    total = ms // 1000
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def instrucao(
+    programa: str | None,
+    transcricao: Transcricao | None = None,
+    cortes_ms: Sequence[int] = (),
+) -> str:
+    """Só um programa de `programas.toml` entra na instrução: nunca texto livre.
+
+    `cortes_ms` são os cortes que caem no trecho da chamada; sem eles, a seção
+    dos cortes não entra.
+    """
     if programa not in PERFIS:
         programa = None
     perfil = f"{PERFIS[programa]}\n" if programa else ""
@@ -122,10 +141,16 @@ def instrucao(programa: str | None, transcricao: Transcricao | None = None) -> s
         if transcricao is None
         else SECAO_COM_TRANSCRICAO.replace("{transcricao}", transcricao.em_linhas())
     )
+    secao_dos_cortes = (
+        SECAO_DOS_CORTES.replace("{cortes}", ", ".join(_mmss(c) for c in cortes_ms))
+        if cortes_ms
+        else ""
+    )
     return (
         INSTRUCAO.replace("{programa}", programa or "não informado")
         .replace("{perfil_do_programa}\n", perfil)
         .replace("{secao_da_transcricao}", secao)
+        .replace("{secao_dos_cortes}", secao_dos_cortes)
     )
 
 
@@ -336,14 +361,19 @@ def analisar(
     programa: str | None = None,
     trecho_ms: tuple[int, int] | None = None,
     transcricao: Transcricao | None = None,
+    cortes_ms: Sequence[int] = (),
     limiar_de_semelhanca: float = LIMIAR_DE_SEMELHANCA,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
 ) -> Decupagem:
+    """`cortes_ms`: os cortes de câmera do vídeo; só os do trecho entram na instrução."""
+    inicio, fim = trecho_ms or (0, video.duracao_ms)
     chamada = Chamada(
         modelo=MODELO,
-        instrucao=instrucao(programa, transcricao),
+        instrucao=instrucao(
+            programa, transcricao, [c for c in cortes_ms if inicio < c < fim]
+        ),
         video_uri=video_uri,
         esquema=esquema_do_modelo(),
         rotulos={"job_id": job_id},

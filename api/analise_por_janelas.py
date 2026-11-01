@@ -137,6 +137,7 @@ def analisar_video(
             video=video,
             programa=programa,
             trecho_ms=trecho_ms,
+            cortes_ms=cortes_ms,
             transcricao=transcricao
             and transcricao.recortar(*(trecho_ms or (0, video.duracao_ms))),
             limiar_de_semelhanca=limiar_de_semelhanca,

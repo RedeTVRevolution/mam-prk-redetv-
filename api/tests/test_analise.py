@@ -153,7 +153,6 @@ def test_cortes_do_job_viram_os_planos_da_decupagem() -> None:
     assert [(p.inicio_ms, p.fim_ms) for p in gravada.planos] == [
         (0, 1_000),
         (1_000, 2_000),
-        (2_000, 60_000),
     ]
     assert {(p.inicio_modelo_ms, p.fim_modelo_ms) for p in gravada.planos} == {
         (0, 4_000)

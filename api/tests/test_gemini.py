@@ -494,3 +494,23 @@ def test_transporte_vertex_manda_imagens_no_lugar_do_video_e_sem_flex() -> None:
         {"inlineData": {"mimeType": "image/jpeg", "data": "/9hkZWY="}},
     ]
     assert pedido["headers"] == {}
+
+
+def test_instrucao_traz_os_cortes_em_mmss_e_sem_cortes_nao_traz_a_secao() -> None:
+    texto = instrucao(None, cortes_ms=[6_540, 28_430, 40_610])
+    assert "(MM:SS): 00:06, 00:28, 00:40." in texto
+    assert "{" not in texto
+    assert "já foi cortado" not in instrucao(None)
+
+
+def test_a_janela_leva_so_os_cortes_dentro_do_trecho() -> None:
+    t = TransporteFalso(BOA)
+    analisar(
+        t,
+        video_uri=VIDEO,
+        job_id=JOB,
+        video=VIDEO_CONFIAVEL,
+        trecho_ms=(10_000, 60_000),
+        cortes_ms=[6_540, 28_430, 40_610, 70_000],
+    )
+    assert "(MM:SS): 00:28, 00:40." in t.chamadas[0].instrucao

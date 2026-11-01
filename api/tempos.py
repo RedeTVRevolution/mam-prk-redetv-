@@ -57,8 +57,9 @@ def _planos_pelos_cortes(planos: Sequence[Plano], cortes: Sequence[int]) -> list
     """Um plano por intervalo entre cortes que algum plano do modelo cobre.
 
     O intervalo herda o plano do modelo com que mais se sobrepõe (o primeiro,
-    num empate). Intervalo que nenhum plano do modelo toca fica sem plano: a
-    descrição de outro trecho seria inventada. Os tempos do modelo ficam só
+    num empate), desde que ele cubra pelo menos metade do intervalo. Intervalo
+    que nenhum plano do modelo cobre assim fica sem plano: a descrição de outro
+    trecho seria inventada. Os tempos do modelo ficam só
     quando o intervalo difere do plano de que herdou.
     """
     if not planos:
@@ -66,7 +67,7 @@ def _planos_pelos_cortes(planos: Sequence[Plano], cortes: Sequence[int]) -> list
     herdados: list[Plano] = []
     for inicio, fim in pairwise(cortes):
         origem = max(planos, key=lambda p: _sobreposicao(p, inicio, fim))
-        if _sobreposicao(origem, inicio, fim) > 0:
+        if 2 * _sobreposicao(origem, inicio, fim) >= fim - inicio:
             herdados.append(_com_tempos(origem, inicio, fim))
     return [
         p.model_copy(update={"id": f"pla{n:03d}"}) for n, p in enumerate(herdados, 1)

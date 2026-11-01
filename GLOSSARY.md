@@ -26,7 +26,7 @@ Segmento editorial de um programa de TV, como a abertura ou o trecho entre dois 
 _Evitar_: segmento, parte
 
 **Plano**:
-Trecho do vídeo entre dois cortes de câmera.
+Trecho do vídeo entre dois cortes de câmera. A descrição (ambiente, ação, objetos) é do intervalo entre cortes, não do trecho que o modelo descreveu; a tela preta é um plano com ambiente "tela preta".
 _Evitar_: cena, take
 
 **Plano limpo**:
