@@ -73,6 +73,15 @@ _Evitar_: galeria facial
 **Palpite**:
 Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
 
+**Comparação**:
+Passo que compara as pessoas sem nome e os palpites do vídeo com as fotos de referência (`api/comparacao.py`, `comparar`). Primeiro a escolha às cegas: o modelo vê as fotos com rótulos A, B… embaralhados a cada chamada e nunca recebe os nomes; o código traduz o rótulo. Depois a conferência foto a foto: uma chamada por foto, com a confiança de cada uma; o nome só se confirma com as 3 fotos no limiar ou acima. Confirma com `fontes_do_nome=["referencia"]`, liga a pessoa ao catálogo e propõe sugestões para o perfil. Há um limite de pessoas por vídeo; as que passam dele ficam como palpite não confirmado.
+
+**Veredito**:
+Registro, por pessoa, do que a comparação decidiu (confirmado, palpite descartado ou palpite não confirmado), com as 3 fotos e a confiança de cada uma. Serve à auditoria; a `Pessoa` não guarda a prova.
+
+**Palpite descartado / palpite não confirmado**:
+Descartado: o nome foi recusado (a escolha apontou outro candidato ou nenhum, ou já está confirmado para outra pessoa do vídeo) e a pessoa volta a "não identificado". Não confirmado: o nome continua palpite porque não há referência para conferir, o limite de pessoas passou ou uma foto ficou abaixo do limiar.
+
 ### Busca
 
 **Momento**:
