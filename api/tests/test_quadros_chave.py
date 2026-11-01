@@ -164,11 +164,12 @@ class QuadrosFalso:
         self.decupagem = decupagem.model_dump_json()
         self.quadros: dict[str, bytes] = {}
 
-    def baixar_copia_limpa(self, job_id: str, destino: Path) -> None:
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
         shutil.copy(self.video, destino)
+        return True
 
-    def ler_decupagem(self, job_id: str) -> bytes:
-        return self.decupagem.encode()
+    def ler_decupagem(self, job_id: str) -> Decupagem | None:
+        return Decupagem.model_validate_json(self.decupagem)
 
     def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None:
         self.quadros[f"{job_id}/{caminho}"] = jpeg

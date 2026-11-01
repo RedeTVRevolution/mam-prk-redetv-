@@ -339,13 +339,15 @@ def comparar(
     com_acervo: bool = False,
     limiar: float = LIMIAR_PADRAO,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
+    ao_falhar: Callable[[Exception], None] = lambda erro: None,
     embaralhar: Embaralhar = _SORTEIO.shuffle,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
 ) -> Comparacao:
     """Compara cada pessoa sem nome confirmado com as referências dos candidatos e
-    aplica o resultado. `quadros_em` tira os JPEGs dos instantes (ms) da cópia limpa."""
+    aplica o resultado. `quadros_em` tira os JPEGs dos instantes (ms) da cópia limpa;
+    a pessoa cuja chamada falha fica como estava e `ao_falhar` recebe o erro."""
     unidades = _unidades(decupagem)
     if not unidades:
         return Comparacao(_com_sugestoes(decupagem, programa, sugestoes, agora), [])
@@ -385,7 +387,8 @@ def comparar(
                 rodou = True
                 if escolhida is not None:
                     confiancas = ajustes.conferir(quadros, escolhida)
-            except (AnaliseFalhou, FalhaNosQuadros):
+            except (AnaliseFalhou, FalhaNosQuadros) as e:
+                ao_falhar(e)
                 escolhida, rodou, confiancas = None, False, ()
         confirmou = (
             escolhida is not None

@@ -79,6 +79,24 @@ variable "referencias_do_acervo" {
   default     = "desligado"
 }
 
+variable "limite_de_pessoas_do_modelo_forte" {
+  description = "Quantas pessoas sem nome por vídeo o modelo forte olha (as de mais tempo na imagem primeiro)"
+  type        = number
+  default     = 8
+}
+
+variable "limiar_da_comparacao" {
+  description = "Confiança mínima de cada uma das 3 fotos para a comparação confirmar um nome"
+  type        = number
+  default     = 0.8
+}
+
+variable "limite_de_comparacoes" {
+  description = "Quantas pessoas por vídeo a comparação com as fotos de referência examina; as demais ficam como palpite não confirmado"
+  type        = number
+  default     = 10
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -257,7 +275,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "orquestracao", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -288,9 +306,13 @@ locals {
     # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção. O
     # embedding automático da coleção roda com a credencial de quem grava ou busca, e não
     # com a do Agent Retrieval: as duas precisam chamar a Vertex (aiplatform.user).
-    indexacao    = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user"]
-    referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
-    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
+    indexacao   = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user"]
+    referencias = ["roles/datastore.user", "roles/aiplatform.user"]
+    # Leem o Job, o catálogo e a Decupagem no Firestore e chamam o Gemini; a comparação
+    # também grava as sugestões de perfil.
+    identificacao = ["roles/datastore.user", "roles/aiplatform.user"]
+    comparacao    = ["roles/datastore.user", "roles/aiplatform.user"]
+    orquestracao  = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
     build = ["roles/logging.logWriter"]
   }
@@ -313,6 +335,10 @@ locals {
     indexacao = { decupagens = "roles/storage.objectViewer" }
     # Grava as fotos de referência.
     referencias = { referencias = "roles/storage.objectUser" }
+    # Lê a cópia limpa e regrava a Decupagem (objectUser, porque a sobrescreve).
+    identificacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
+    # Como a identificação, mais as fotos de referência (só leitura); grava `<job>.comparacao.json`.
+    comparacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser", referencias = "roles/storage.objectViewer" }
   }
 }
 
@@ -1017,6 +1043,171 @@ resource "google_cloud_run_v2_job" "referencias" {
         env {
           name  = "REFERENCIAS_DO_ACERVO"
           value = var.referencias_do_acervo
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# Job de identificação pelo modelo forte (#221): a imagem da validação (ffmpeg) com outro
+# comando, na mesma rede, sem internet (só o Storage, o Firestore e a Vertex pelo acesso
+# privado do Google). Lê a Decupagem e a cópia limpa de um Job `concluido` e regrava a
+# Decupagem com os nomes conferidos; a falha dele só fica na etapa, e o Job segue `concluido`.
+# Ainda fora do Workflows (parte 4 do #112).
+resource "google_cloud_run_v2_job" "identificacao" {
+  name                = "mam-identificacao"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["identificacao"].email
+      max_retries     = 0
+      # NÃO medido (#135): no máximo `limite_de_pessoas_do_modelo_forte` chamadas ao Gemini
+      # com 2 ou 3 quadros cada, de segundos a ~1 min, e um `ffmpeg -ss` por quadro. 3600 s
+      # dão folga larga; meça no dev com um programa de 4 h.
+      timeout = "3600s"
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao.id
+        }
+      }
+      containers {
+        image   = var.imagem_validacao
+        command = ["python"]
+        args    = ["-m", "api.identificacao_job"]
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"
+          value = tostring(var.limite_de_pessoas_do_modelo_forte)
+        }
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        resources {
+          # No volume, só a cópia limpa (até 4 GiB) e os quadros de uma chamada; 6 GiB.
+          # Memória: o volume mais ~1 GiB do ffmpeg e do Python.
+          limits = {
+            cpu    = "2"
+            memory = "8Gi"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "6Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# Job da comparação com as fotos de referência (#221): como o de identificação, e ainda lê
+# o bucket das referências (as fotos já guardadas pelo `mam-referencias`, que é o único com
+# internet). Regrava a Decupagem e grava os vereditos em `<job>.comparacao.json`.
+# Ainda fora do Workflows (parte 4 do #112).
+resource "google_cloud_run_v2_job" "comparacao" {
+  name                = "mam-comparacao"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["comparacao"].email
+      max_retries     = 0
+      # NÃO medido (#135): por pessoa, uma chamada às cegas e 3 conferências foto a foto,
+      # até `limite_de_comparacoes` pessoas; de segundos a ~2 min por pessoa no pior caso.
+      # 3600 s dão folga larga; meça no dev.
+      timeout = "3600s"
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao.id
+        }
+      }
+      containers {
+        image   = var.imagem_validacao
+        command = ["python"]
+        args    = ["-m", "api.comparacao_job"]
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "BUCKET_REFERENCIAS"
+          value = local.buckets["referencias"]
+        }
+        env {
+          name  = "LIMIAR_DA_COMPARACAO"
+          value = tostring(var.limiar_da_comparacao)
+        }
+        env {
+          name  = "LIMITE_DE_COMPARACOES"
+          value = tostring(var.limite_de_comparacoes)
+        }
+        env {
+          name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
+          value = tostring(var.validade_das_referencias_dias)
+        }
+        env {
+          name  = "REFERENCIAS_DO_ACERVO"
+          value = var.referencias_do_acervo
+        }
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        resources {
+          # No volume, só a cópia limpa (até 4 GiB) e os quadros de uma chamada; 6 GiB.
+          # Memória: o volume mais ~1 GiB do ffmpeg e do Python.
+          limits = {
+            cpu    = "2"
+            memory = "8Gi"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "6Gi"
         }
       }
     }

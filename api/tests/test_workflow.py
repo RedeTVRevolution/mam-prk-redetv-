@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 DEFINICAO = Path(__file__).parents[2] / "infra" / "validacao.workflow.yaml"
 
 
@@ -455,3 +457,71 @@ def test_a_api_so_inicia_execucoes_do_workflow_e_sabe_qual_e() -> None:
     assert "google_workflows_workflow.validacao.name" in main
     assert 'name  = "WORKFLOW_VALIDACAO"' in main
     assert 'name  = "WORKFLOW_REGIAO"' in main
+
+
+def _job_do_main_tf(nome: str) -> str:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    return main[main.index(f'resource "google_cloud_run_v2_job" "{nome}"') :].split(
+        "\nresource "
+    )[0]
+
+
+@pytest.mark.parametrize(
+    ("nome", "modulo"),
+    [("identificacao", "identificacao_job"), ("comparacao", "comparacao_job")],
+)
+def test_jobs_de_identificacao_e_comparacao_sem_internet_com_a_imagem_do_ffmpeg(
+    nome: str, modulo: str
+) -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    job = _job_do_main_tf(nome)
+
+    assert "google_compute_network.validacao.id" in job
+    assert "google_compute_subnetwork.validacao.id" in job
+    assert "var.imagem_validacao" in job
+    assert f'args    = ["-m", "api.{modulo}"]' in job
+    assert "max_retries     = 0" in job
+    assert f'google_service_account.mam["{nome}"]' in job
+    assert "external_ip" not in main and "google_compute_router_nat" not in main
+    assert 'local.buckets["aceitos"]' in job and 'local.buckets["decupagens"]' in job
+
+
+def test_variaveis_dos_jobs_novos_vem_do_main_tf() -> None:
+    ident = _job_do_main_tf("identificacao")
+    comp = _job_do_main_tf("comparacao")
+
+    assert "var.limite_de_pessoas_do_modelo_forte" in ident
+    assert 'name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"' in ident
+    for env, valor in [
+        ("LIMIAR_DA_COMPARACAO", "var.limiar_da_comparacao"),
+        ("LIMITE_DE_COMPARACOES", "var.limite_de_comparacoes"),
+        ("VALIDADE_DAS_REFERENCIAS_DIAS", "var.validade_das_referencias_dias"),
+        ("REFERENCIAS_DO_ACERVO", "var.referencias_do_acervo"),
+    ]:
+        assert f'name  = "{env}"' in comp
+        assert valor in comp
+    assert 'local.buckets["referencias"]' in comp
+    assert 'local.buckets["referencias"]' not in ident
+
+
+def test_contas_e_papeis_dos_jobs_novos_sao_so_os_combinados() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    contas = main.split("for_each     = toset([")[1].split("])")[0]
+    for nome in ("identificacao", "comparacao"):
+        assert f'"{nome}"' in contas
+        assert re.search(
+            rf'\n\s+{nome}\s+= \["roles/datastore.user", "roles/aiplatform.user"\]',
+            main,
+        )
+    assert re.search(
+        r'identificacao = \{ aceitos = "roles/storage.objectViewer", '
+        r'decupagens = "roles/storage.objectUser" \}',
+        main,
+    )
+    assert re.search(
+        r'comparacao = \{ aceitos = "roles/storage.objectViewer", '
+        r'decupagens = "roles/storage.objectUser", '
+        r'referencias = "roles/storage.objectViewer" \}',
+        main,
+    )

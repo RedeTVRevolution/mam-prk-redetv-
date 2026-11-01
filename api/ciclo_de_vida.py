@@ -167,6 +167,36 @@ def encerrar_etapa(
     )
 
 
+def rodar_etapa(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    etapa: NomeDaEtapa,
+    trabalho: Callable[[], str],
+    *,
+    bem_sucedido: str,
+) -> str:
+    """Roda `trabalho` entre o início e o fim da etapa; só o resultado `bem_sucedido` conclui.
+
+    Qualquer outro resultado, ou uma exceção (que segue adiante), deixa a etapa `falhou`.
+    """
+    from api.jobs import agora_utc
+
+    iniciar_etapa(repositorio, job_id, etapa, agora_utc())
+    try:
+        resultado = trabalho()
+    except Exception:
+        encerrar_etapa(repositorio, job_id, etapa, "falhou", agora_utc())
+        raise
+    encerrar_etapa(
+        repositorio,
+        job_id,
+        etapa,
+        "concluida" if resultado == bem_sucedido else "falhou",
+        agora_utc(),
+    )
+    return resultado
+
+
 # Falhas do próprio arquivo: refazer o processamento não as conserta.
 FALHAS_DO_ARQUIVO: frozenset[CodigoDeFalha] = frozenset(
     {
@@ -184,7 +214,12 @@ ETAPA_DA_FALHA: dict[CodigoDeFalha, NomeDaEtapa] = {
     "analise_falhou": "analise",
 }
 # Depois do `concluido`, só estas etapas rodam: o Job e a Decupagem seguem como estão.
-ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = ("quadros_chave", "indexacao")
+ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
+    "quadros_chave",
+    "indexacao",
+    "identificacao",
+    "comparacao",
+)
 
 
 class NaoReprocessavel(Exception):

@@ -119,7 +119,9 @@ NomeDaEtapa = Literal[
     "analise",
     "quadros_chave",
     "indexacao",
-    # As etapas do #112 (#221 a #223) entram aqui quando existirem.
+    # As do #112, depois do `concluido`: aprimoram a Decupagem no lugar (#221).
+    "identificacao",
+    "comparacao",
 ]
 ResultadoDaEtapa = Literal["concluida", "falhou"]
 

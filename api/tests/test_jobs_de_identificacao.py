@@ -90,11 +90,12 @@ def identificar(
     estado: str = "concluido",
     com_copia: bool = True,
     tmp_path: Path,
+    repo: RepositorioEmMemoria | None = None,
 ) -> tuple[str, DecupagensEmMemoria]:
     decupagens = DecupagensEmMemoria(d, com_copia)
     resultado = identificacao_job.executar(
         "job-1",
-        repositorio(estado),
+        repo or repositorio(estado),
         decupagens,
         TransporteFalso(*respostas),
         TranscricoesEmMemoria(),
@@ -153,20 +154,77 @@ def test_identificacao_sem_decupagem_ou_sem_copia_limpa_nao_muda_nada(
 def test_falha_do_modelo_forte_nao_derruba_a_execucao_e_mantem_a_decupagem(
     tmp_path: Path,
 ) -> None:
-    resultado, decupagens = identificar(com_gc(), ErroHttp(400), tmp_path=tmp_path)
+    repo = repositorio()
 
-    assert resultado == "identificado"
+    resultado, decupagens = identificar(
+        com_gc(), ErroHttp(400), tmp_path=tmp_path, repo=repo
+    )
+
+    assert resultado == "incompleto"
     assert decupagens.gravada is not None
     assert decupagens.gravada.pessoas[0].nome == BARBA
+    assert_etapa(repo, "identificacao", "falhou")
+
+
+def assert_etapa(repo: RepositorioEmMemoria, nome: Any, resultado: str) -> None:
+    job = repo.obter("job-1")
+    assert job is not None
+    assert job.estado == "concluido"
+    assert job.etapa_atual is None
+    etapa = job.etapas[nome]
+    assert etapa.resultado == resultado
+    assert etapa.fim is not None and etapa.fim >= etapa.inicio
+    assert list(job.etapas) == [nome]
+
+
+def test_identificacao_conclui_a_etapa_sem_mudar_o_estado_do_job(
+    tmp_path: Path,
+) -> None:
+    repo = repositorio()
+
+    identificar(com_gc(), nome_do_modelo_forte(), tmp_path=tmp_path, repo=repo)
+
+    assert_etapa(repo, "identificacao", "concluida")
+
+
+@pytest.mark.parametrize("sem", ["decupagem", "copia"])
+def test_identificacao_sem_decupagem_ou_copia_deixa_a_etapa_falhou(
+    sem: str, tmp_path: Path
+) -> None:
+    repo = repositorio()
+
+    identificar(
+        None if sem == "decupagem" else com_gc(),
+        com_copia=sem != "copia",
+        tmp_path=tmp_path,
+        repo=repo,
+    )
+
+    assert_etapa(repo, "identificacao", "falhou")
+
+
+def test_identificacao_de_job_que_nao_esta_concluido_nao_abre_etapa(
+    tmp_path: Path,
+) -> None:
+    repo = repositorio("analisando")
+
+    identificar(com_gc(), tmp_path=tmp_path, repo=repo)
+
+    job = repo.obter("job-1")
+    assert job is not None and job.etapas == {} and job.etapa_atual is None
 
 
 def comparar_em(
-    c: Cenario, d: Decupagem | None, *respostas: str | Exception, tmp_path: Path
+    c: Cenario,
+    d: Decupagem | None,
+    *respostas: str | Exception,
+    tmp_path: Path,
+    repo: RepositorioEmMemoria | None = None,
 ) -> tuple[str, DecupagensEmMemoria]:
     decupagens = DecupagensEmMemoria(d)
     resultado = comparacao_job.executar(
         "job-1",
-        repositorio(),
+        repo or repositorio(),
         decupagens,
         TransporteFalso(*respostas),
         c.fotos,
@@ -200,3 +258,79 @@ def test_comparacao_regrava_a_decupagem_e_guarda_os_vereditos(tmp_path: Path) ->
     assert decupagens.comparacao is not None
     [veredito] = json.loads(decupagens.comparacao)
     assert veredito["estado"] == "confirmado"
+
+
+def test_comparacao_conclui_a_etapa(tmp_path: Path) -> None:
+    repo = repositorio()
+    d = decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
+
+    comparar_em(
+        Cenario(),
+        d,
+        escolha("A"),
+        confianca(0.9),
+        confianca(0.9),
+        confianca(0.9),
+        tmp_path=tmp_path,
+        repo=repo,
+    )
+
+    assert_etapa(repo, "comparacao", "concluida")
+
+
+def test_falha_do_modelo_na_comparacao_deixa_a_decupagem_e_a_etapa_falhou(
+    tmp_path: Path,
+) -> None:
+    repo = repositorio()
+    d = decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
+
+    resultado, decupagens = comparar_em(
+        Cenario(), d, ErroHttp(400), tmp_path=tmp_path, repo=repo
+    )
+
+    assert resultado == "incompleto"
+    assert decupagens.gravada is not None
+    assert decupagens.gravada.pessoas[0].nome == BARBA
+    assert_etapa(repo, "comparacao", "falhou")
+
+
+def test_comparacao_sem_a_copia_limpa_deixa_a_etapa_falhou(tmp_path: Path) -> None:
+    repo = repositorio()
+    decupagens = DecupagensEmMemoria(decupagem([]), com_copia=False)
+
+    resultado = comparacao_job.executar(
+        "job-1",
+        repo,
+        decupagens,
+        TransporteFalso(),
+        Cenario().fotos,
+        CatalogoEmMemoria(),
+        SugestoesEmMemoria(),
+        tmp_path,
+        validade=timedelta(days=180),
+    )
+
+    assert resultado == "sem_alteracao"
+    assert decupagens.gravada is None
+    assert_etapa(repo, "comparacao", "falhou")
+
+
+def test_erro_inesperado_deixa_a_etapa_falhou_e_sobe(tmp_path: Path) -> None:
+    repo = repositorio()
+
+    class Quebrada(DecupagensEmMemoria):
+        def ler_decupagem(self, job_id: str) -> Decupagem | None:
+            raise RuntimeError("storage fora")
+
+    with pytest.raises(RuntimeError):
+        identificacao_job.executar(
+            "job-1",
+            repo,
+            Quebrada(None),
+            TransporteFalso(),
+            TranscricoesEmMemoria(),
+            CatalogoEmMemoria(),
+            tmp_path,
+        )
+
+    assert_etapa(repo, "identificacao", "falhou")

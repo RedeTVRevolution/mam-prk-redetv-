@@ -20,6 +20,7 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.catalogo import Catalogo
+from api.ciclo_de_vida import rodar_etapa
 from api.comparacao import (
     LIMIAR_PADRAO,
     LIMITE_DE_PESSOAS,
@@ -68,38 +69,50 @@ def executar(
     limiar: float = LIMIAR_PADRAO,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
 ) -> str:
-    """Devolve `ignorado`, `sem_alteracao` ou `comparado`."""
+    """Devolve `ignorado`, `sem_alteracao`, `incompleto` ou `comparado`.
+
+    A etapa só conclui com `comparado`; `incompleto` é a falha do modelo ou dos quadros em
+    alguma pessoa (as outras são gravadas) e `sem_alteracao`, a falta da Decupagem ou da
+    cópia limpa. Nenhuma derruba o Job nem a execução."""
     job = repositorio.obter(job_id)
     if job is None or job.estado != "concluido":
         return "ignorado"
-    decupagem = decupagens.ler_decupagem(job_id)
-    copia = pasta / f"{job_id}.copia_limpa.mp4"
-    if decupagem is None or not decupagens.baixar_copia_limpa(job_id, copia):
-        return "sem_alteracao"
-    try:
-        resultado = comparar(
-            decupagem,
-            transporte=transporte,
-            quadros_em=lambda instantes: extrair_quadros(copia, instantes),
-            fotos=fotos,
-            catalogo=catalogo,
-            job_id=job_id,
-            agora=agora_utc(),
-            validade=validade,
-            programa=job.programa,
-            sugestoes=sugestoes,
-            com_acervo=com_acervo,
-            limiar=limiar,
-            limite_de_pessoas=limite_de_pessoas,
+
+    def trabalho() -> str:
+        decupagem = decupagens.ler_decupagem(job_id)
+        copia = pasta / f"{job_id}.copia_limpa.mp4"
+        if decupagem is None or not decupagens.baixar_copia_limpa(job_id, copia):
+            return "sem_alteracao"
+        falhas: list[Exception] = []
+        try:
+            resultado = comparar(
+                decupagem,
+                transporte=transporte,
+                quadros_em=lambda instantes: extrair_quadros(copia, instantes),
+                fotos=fotos,
+                catalogo=catalogo,
+                job_id=job_id,
+                agora=agora_utc(),
+                validade=validade,
+                programa=job.programa,
+                sugestoes=sugestoes,
+                com_acervo=com_acervo,
+                limiar=limiar,
+                limite_de_pessoas=limite_de_pessoas,
+                ao_falhar=falhas.append,
+            )
+        except (AnaliseFalhou, FalhaNosQuadros):
+            return "sem_alteracao"
+        decupagens.gravar_decupagem(job_id, resultado.decupagem.model_dump_json())
+        decupagens.gravar_comparacao(
+            job_id,
+            json.dumps([asdict(v) for v in resultado.vereditos], default=str),
         )
-    except (AnaliseFalhou, FalhaNosQuadros):
-        return "sem_alteracao"
-    decupagens.gravar_decupagem(job_id, resultado.decupagem.model_dump_json())
-    decupagens.gravar_comparacao(
-        job_id,
-        json.dumps([asdict(v) for v in resultado.vereditos], default=str),
+        return "incompleto" if falhas else "comparado"
+
+    return rodar_etapa(
+        repositorio, job_id, "comparacao", trabalho, bem_sucedido="comparado"
     )
-    return "comparado"
 
 
 def main() -> None:
