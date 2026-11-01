@@ -117,7 +117,8 @@ NomeDaEtapa = Literal[
     "transcricao",
     "leitura_da_tela",
     "analise",
-    # As do #112, depois do `concluido`: aprimoram a Decupagem no lugar (#221).
+    # Depois do `concluido`, na ordem do Workflows. As do #112 (identificação,
+    # referências e comparação) aprimoram a Decupagem no lugar (#221).
     "identificacao",
     "referencias",
     "comparacao",

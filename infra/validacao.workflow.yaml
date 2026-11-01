@@ -341,8 +341,8 @@ main:
         args:
           name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
         result: depois_da_analise
-    # Quadros-chave e indexação só valem com o Job `concluido`; uma análise que derrubou
-    # o Job (sai sem erro) não as inicia.
+    # Identificação, referências, comparação, quadros-chave e indexação só valem com o
+    # Job `concluido`; uma análise que derrubou o Job (sai sem erro) não as inicia.
     - so_se_concluido:
         switch:
           - condition: $${depois_da_analise.fields.estado.stringValue == "concluido"}
@@ -419,7 +419,7 @@ main:
                 call: sys.log
                 args:
                   severity: WARNING
-                  text: $${"as fotos de referência falhou para " + job_id}
+                  text: $${"a busca das referências falhou para " + job_id}
                 next: inicia_comparacao
     - encerra_referencias:
         call: marca_fim

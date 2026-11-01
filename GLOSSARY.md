@@ -15,7 +15,7 @@ Um pedido de decupagem de um vídeo, do registro ao fim do processamento.
 _Evitar_: tarefa, pedido
 
 **Etapa**:
-Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, quadros-chave, indexação), com início, fim e resultado (`concluida` ou `falhou`). A falha de uma etapa depois do `concluido` não muda o estado do Job.
+Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, identificação, referências, comparação, quadros-chave, indexação, nessa ordem), com início, fim e resultado (`concluida` ou `falhou`). A falha de uma etapa depois do `concluido` não muda o estado do Job.
 _Evitar_: fase
 
 **Reprocessar**:

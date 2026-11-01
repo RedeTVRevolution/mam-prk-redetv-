@@ -360,7 +360,7 @@ def test_subworkflow_grava_so_os_campos_da_etapa_sem_mexer_no_estado() -> None:
     assert "sys.log" in marcas
 
 
-def test_quadros_e_indexacao_so_comecam_com_o_job_concluido() -> None:
+def test_passos_depois_da_analise_so_comecam_com_o_job_concluido() -> None:
     texto = _texto()
 
     guarda = texto.index("so_se_concluido:")
@@ -405,13 +405,16 @@ def test_ordem_nova_identificacao_referencias_comparacao_quadros_indexacao() -> 
     posicoes = [texto.index(passo) for passo in ordem]
     assert posicoes == sorted(posicoes)
     for job in ("identificacao", "referencias", "comparacao"):
-        passo = texto[
-            texto.index(
-                f"call: marca_inicio\n        args:\n          job_id: $${{job_id}}\n          etapa: {job}"
-            ) :
-        ]
-        assert f"jobs/${{job_de_{job}}}" in passo.split("- tira_os_quadros:")[0]
-    # Sem internet: a identificação e a comparação; com internet: só as referências.
+        inicio = re.search(
+            rf"call: marca_inicio\s+args:\s+job_id: \$\$\{{job_id\}}\s+etapa: {job}\n",
+            texto,
+        )
+        assert inicio, job
+        assert (
+            f"jobs/${{job_de_{job}}}"
+            in texto[inicio.end() :].split("- tira_os_quadros:")[0]
+        )
+    # O nome de cada Job vem do main.tf pelo templatefile.
     main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
     for job in ("identificacao", "referencias", "comparacao"):
         assert f"job_de_{job}" in main
@@ -438,6 +441,20 @@ def test_falha_dos_passos_novos_vai_ao_log_e_a_etapa_e_os_seguintes_rodam(
     assert f"next: {seguinte}" in excecao
     # Nunca mexem no `estado` do Job: o Job continua `concluido`.
     assert "documents.patch" not in excecao
+
+
+def test_depois_da_identificacao_nenhum_desvio_pula_os_quadros_nem_a_indexacao() -> (
+    None
+):
+    texto = _texto()
+
+    # Do início da identificação até a indexação, todo `next:` cai num passo desse
+    # trecho (ou adiante), e nada derruba a execução: uma falha ali não impede o resto.
+    trecho = texto[texto.index("- inicia_identificacao:") : texto.index("- indexa:")]
+    passos = set(re.findall(r"^\s+- (\w+):\n", trecho, re.MULTILINE))
+    for destino in re.findall(r"next: (\w+)", trecho):
+        assert destino in passos or destino in {"inicia_indexacao"}, destino
+    assert "raise:" not in trecho and "return:" not in trecho
 
 
 def test_etapas_dos_jobs_que_gravam_o_proprio_resultado_nao_sao_regravadas_como_concluida() -> (

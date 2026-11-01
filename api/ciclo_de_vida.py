@@ -213,7 +213,7 @@ ETAPA_DA_FALHA: dict[CodigoDeFalha, NomeDaEtapa] = {
     "ocr_falhou": "leitura_da_tela",
     "analise_falhou": "analise",
 }
-# Depois do `concluido`, só estas etapas rodam: o Job e a Decupagem seguem como estão.
+# Depois do `concluido`, só estas etapas rodam; a falha de uma não muda o estado do Job.
 ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
     "identificacao",
     "referencias",
