@@ -67,14 +67,17 @@ A prova que confirma o nome de uma pessoa, conferida pelo código: GC, fala ou r
 
 **Referência de rosto**:
 Foto de uma pessoa nomeada, guardada para comparar com o rosto da tela: 3 fotos diferentes por nome, buscadas na web, com a página de origem.
-Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet: recebe só nomes (`NOMES`, `PROGRAMA`), lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo (nome fora do catálogo ou ambíguo não busca). O `make carregar-catalogo` não apaga os rostos já guardados.
+Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet: recebe só nomes (`NOMES`, `PROGRAMA`), lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo. O nome fora do catálogo (palpite) ganha as fotos sob o prefixo `palpites/` (ver **Fotos de palpite**); o ambíguo não busca. Há um limite de buscas por vídeo (`LIMITE_DE_BUSCAS_POR_VIDEO`), e cada busca leva o rótulo de custo. O `make carregar-catalogo` não apaga os rostos já guardados.
 _Evitar_: galeria facial
+
+**Fotos de palpite**:
+As 3 fotos de referência de um palpite que o catálogo não conhece, guardadas sob `palpites/<nome-normalizado>/` no bucket das referências, com os dados em `rostos.json` ao lado (`api/rostos_dos_palpites.py`). Uma regra de ciclo de vida do bucket apaga só esse prefixo, em 30 dias (`prazo_dos_palpites_dias`). Só o nome que a comparação confirma entra no catálogo, e aí as fotos passam para `referencias/<id>/`.
 
 **Palpite**:
 Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
 
 **Comparação**:
-Passo que compara as pessoas sem nome e os palpites do vídeo com as fotos de referência (`api/comparacao.py`, `comparar`). Primeiro a escolha às cegas: o modelo vê as fotos com rótulos A, B… embaralhados a cada chamada e nunca recebe os nomes; o código traduz o rótulo. Depois a conferência foto a foto: uma chamada por foto, com a confiança de cada uma; o nome só se confirma com as 3 fotos no limiar ou acima. Confirma com `fontes_do_nome=["referencia"]`, liga a pessoa ao catálogo e propõe sugestões para o perfil. Há um limite de pessoas por vídeo; as que passam dele ficam como palpite não confirmado.
+Passo que compara as pessoas sem nome e os palpites do vídeo com as fotos de referência (`api/comparacao.py`, `comparar`). Primeiro a escolha às cegas: o modelo vê as fotos com rótulos A, B… embaralhados a cada chamada e nunca recebe os nomes; o código traduz o rótulo. Depois a conferência foto a foto: uma chamada por foto, com a confiança de cada uma; o nome só se confirma com as 3 fotos no limiar ou acima. Confirma com `fontes_do_nome=["referencia"]`, liga a pessoa ao catálogo e propõe sugestões para o perfil. O palpite fora do catálogo concorre com as fotos de palpite; ao confirmar, entra no catálogo (o papel vem da aparição). Há um limite de pessoas por vídeo; as que passam dele ficam como palpite não confirmado.
 
 **Veredito**:
 Registro, por pessoa, do que a comparação decidiu (confirmado, palpite descartado, palpite não confirmado ou sem resultado), com as 3 fotos e a confiança de cada uma. Um palpite trocado por outro nome confirmado fica confirmado e marcado como descartado. Serve à auditoria; a `Pessoa` não guarda a prova.

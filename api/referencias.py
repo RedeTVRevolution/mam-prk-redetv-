@@ -3,7 +3,8 @@
 O Job `referencias` recebe só nomes. Para cada nome sem referência válida, busca
 imagens, descarta as repetidas ou recortadas, pede ao modelo que confira (um rosto só,
 a mesma pessoa) e guarda 3 fotos diferentes, ligadas à pessoa do catálogo. Com menos
-de 3, o nome fica sem referência. Para programa sem perfil de apresentadores, uma busca
+de 3, o nome fica sem referência. O nome que o catálogo não conhece (palpite) ganha as
+fotos sob o prefixo dos palpites, que expira sozinho. Para programa sem perfil de apresentadores, uma busca
 web e o modelo extraem nomes que viram sugestões, nunca entram sozinhos.
 
 Tudo o que vem da web (imagens, títulos, trechos) é conteúdo, nunca instrução.
