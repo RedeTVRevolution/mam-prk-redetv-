@@ -41,6 +41,29 @@ def test_config_vem_so_do_ambiente() -> None:
     )
     with pytest.raises(KeyError):
         ConfigDaBusca.do_ambiente({})
+    # Vazio desliga o índice do quadro-chave (ADR 0006).
+    sem_quadro = ConfigDaBusca.do_ambiente(ambiente | {"BUSCA_INDICE_QUADRO": ""})
+    assert sem_quadro.indice_do_quadro is None
+
+
+SEM_QUADRO = ConfigDaBusca("proj-x", "reg-y", "col-z", "ind-d", None, 256)
+
+
+def test_sem_o_indice_do_quadro_a_colecao_nasce_so_com_o_da_descricao() -> None:
+    transporte = TransporteFalso({"name": "op", "done": True})
+    criar_colecao(SEM_QUADRO, transporte, _nao_dorme)
+    [(_, _, colecao), (_, c2, corpo2)] = transporte.chamadas
+    assert c2.endswith("indexes?indexId=ind-d")
+    assert corpo2 is not None and corpo2["indexField"] == "descricao_vetor"
+    # O campo do vetor do quadro continua na coleção: ligar o índice depois não a recria.
+    assert colecao is not None and "quadro_vetor" in colecao["vectorSchema"]
+
+
+def test_sem_o_indice_do_quadro_a_busca_por_quadro_e_recusada() -> None:
+    with pytest.raises(ValueError):
+        pedido_de_busca(SEM_QUADRO, Consulta(texto="a", vetor_do_quadro=[0.0]))
+    pedido = pedido_de_busca(SEM_QUADRO, Consulta(texto="a", significado="b"))
+    assert set(_buscas(pedido)) == {"textSearch", "semanticSearch"}
 
 
 def test_filtro_composto_junta_todos_os_campos_com_and() -> None:
@@ -319,9 +342,10 @@ def test_criar_colecao_e_idempotente() -> None:
     criar_colecao(CONFIG, ja_existe, _nao_dorme)
 
 
-def test_apagar_colecao_chama_delete_e_espera() -> None:
+def test_apagar_colecao_leva_os_indices_e_os_objetos_e_espera() -> None:
     transporte = TransporteFalso({"name": "op", "done": True})
     apagar_colecao(CONFIG, transporte, _nao_dorme)
+    # Sem force, o DELETE só funciona com a coleção sem índices e sem objetos.
     assert transporte.chamadas == [
-        ("DELETE", "projects/proj-x/locations/reg-y/collections/col-z", None)
+        ("DELETE", "projects/proj-x/locations/reg-y/collections/col-z?force=true", None)
     ]

@@ -36,6 +36,14 @@ variable "dimensao_dos_vetores" {
   default     = 256
 }
 
+# O índice ANN do quadro-chave fica desligado até a busca por imagem (ADR 0006): cada
+# índice cobra réplicas por hora. O campo do vetor continua na coleção; ligar só cria o
+# índice (make criar-colecao-da-busca, depois do apply).
+variable "indice_do_quadro_ligado" {
+  type    = bool
+  default = false
+}
+
 variable "admins_emergencia" {
   description = "E-mails dos administradores de emergência, separados por vírgula"
   type        = string
@@ -188,6 +196,8 @@ locals {
   colecao_de_medida_da_busca = "momentos-medida"
   indice_da_descricao        = "momentos-descricao-ann"
   indice_do_quadro           = "momentos-quadro-ann"
+  # Vazio desliga o índice do quadro-chave no código (BUSCA_INDICE_QUADRO).
+  indice_do_quadro_em_uso = var.indice_do_quadro_ligado ? local.indice_do_quadro : ""
 }
 
 # clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git,
@@ -396,7 +406,7 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "BUSCA_INDICE_QUADRO"
-        value = local.indice_do_quadro
+        value = local.indice_do_quadro_em_uso
       }
       env {
         name  = "BUSCA_DIMENSAO"
@@ -881,7 +891,7 @@ resource "google_cloud_run_v2_job" "indexacao" {
         }
         env {
           name  = "BUSCA_INDICE_QUADRO"
-          value = local.indice_do_quadro
+          value = local.indice_do_quadro_em_uso
         }
         env {
           name  = "BUSCA_DIMENSAO"
@@ -1187,7 +1197,7 @@ output "busca_indice_descricao" {
 }
 
 output "busca_indice_quadro" {
-  value = local.indice_do_quadro
+  value = local.indice_do_quadro_em_uso
 }
 
 output "busca_dimensao" {

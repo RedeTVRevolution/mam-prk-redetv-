@@ -64,18 +64,20 @@ class ConfigDaBusca:
     regiao: str
     colecao: str
     indice_da_descricao: str
-    indice_do_quadro: str
+    # None: o índice do quadro-chave está desligado (ADR 0006), e a busca por quadro também.
+    indice_do_quadro: str | None
     dimensao: int
 
     @classmethod
     def do_ambiente(cls, ambiente: Mapping[str, str]) -> "ConfigDaBusca":
-        """Levanta `KeyError` se faltar uma variável: sem ela a busca não tem onde ir."""
+        """Levanta `KeyError` se faltar uma variável: sem ela a busca não tem onde ir.
+        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave."""
         return cls(
             projeto=ambiente["GCP_PROJECT_ID"],
             regiao=ambiente["BUSCA_REGIAO"],
             colecao=ambiente["BUSCA_COLECAO"],
             indice_da_descricao=ambiente["BUSCA_INDICE_DESCRICAO"],
-            indice_do_quadro=ambiente["BUSCA_INDICE_QUADRO"],
+            indice_do_quadro=ambiente["BUSCA_INDICE_QUADRO"] or None,
             dimensao=int(ambiente["BUSCA_DIMENSAO"]),
         )
 
@@ -89,11 +91,11 @@ class ConfigDaBusca:
 
     @property
     def indices(self) -> dict[str, str]:
-        """O id do índice ANN de cada campo de vetor."""
-        return {
-            CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao,
-            CAMPO_DO_VETOR_DO_QUADRO: self.indice_do_quadro,
-        }
+        """O id do índice ANN de cada campo de vetor ligado."""
+        indices = {CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao}
+        if self.indice_do_quadro is not None:
+            indices[CAMPO_DO_VETOR_DO_QUADRO] = self.indice_do_quadro
+        return indices
 
     def caminho_do_indice(self, campo: str) -> str:
         return f"{self.caminho_da_colecao}/indexes/{self.indices[campo]}"
@@ -177,6 +179,9 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
             }
         )
     if consulta.vetor_do_quadro is not None:
+        if config.indice_do_quadro is None:
+            # Sem o índice, a busca cairia no KNN, limitado a 100 mil registros.
+            raise ValueError("o índice do quadro-chave está desligado")
         buscas.append(
             {
                 "vectorSearch": {
@@ -310,8 +315,9 @@ def apagar_colecao(
     transporte: Transporte,
     dormir: Callable[[float], None] = sleep,
 ) -> None:
-    """Apaga a coleção (e os índices dela) e espera a operação terminar."""
-    esperar(transporte("DELETE", config.caminho_da_colecao, None), transporte, dormir)
+    """Apaga a coleção com os índices e os objetos dela e espera a operação terminar."""
+    caminho = f"{config.caminho_da_colecao}?force=true"
+    esperar(transporte("DELETE", caminho, None), transporte, dormir)
 
 
 def _dados(r: Registro) -> dict[str, Any]:

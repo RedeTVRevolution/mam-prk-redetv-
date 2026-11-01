@@ -8,6 +8,8 @@ Ficam fora do Brasil, guardados no índice, os dados de cada momento da decupage
 
 A coleção nasce com o índice ANN implantado, e toda busca o usa. O KNN sem índice, cobrado só por uso, foi recusado: ele aceita no máximo 100 mil registros ([documentação](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/vector-search-2/query-search/query)), e, com um registro por plano, fala, texto na tela e objeto, esse teto chegaria ainda na PoC. Fica aceito o custo fixo das réplicas do índice, sempre ligadas.
 
+Por enquanto, só o índice da descrição está no ar (1/11/2026, #122). O do quadro-chave fica desligado até a busca por imagem, porque cada índice cobra réplicas por hora: a variável `indice_do_quadro_ligado` do `infra/main.tf` (padrão `false`) entrega `BUSCA_INDICE_QUADRO` vazia, e o adaptador recusa a busca por quadro em vez de cair no KNN. O campo do vetor do quadro continua na coleção, e os registros podem levá-lo; ligar o índice depois é pôr a variável em `true`, aplicar o Terraform e rodar o `make criar-colecao-da-busca`, sem recriar a coleção. Cada índice nasce com uma réplica só, no modo `PERFORMANCE_OPTIMIZED`.
+
 A região, como os outros nomes da nuvem, só aparece no `infra/main.tf`, que a entrega ao serviço por variável de ambiente. A consulta em linguagem natural continua indo ao Gemini pelo endpoint global, e a reordenação usa a Ranking API, também fora do Brasil.
 
 Alternativas recusadas:
