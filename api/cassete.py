@@ -20,7 +20,7 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
-from api import gemini
+from api import gemini  # lido na chamada, para o teste trocar `INSTRUCAO`
 from api.decupagem import Video
 from api.gemini import (
     MODELO,

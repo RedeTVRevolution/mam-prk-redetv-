@@ -41,10 +41,6 @@ def test_cassete_foi_gravado_com_a_instrucao_em_uso() -> None:
     _exige_instrucao_atual(_cassete())
 
 
-def test_contrato_passa_com_o_hash_da_instrucao_atual() -> None:
-    _exige_instrucao_atual({"instrucao_sha256": instrucao_sha256()})
-
-
 def test_mudar_uma_letra_da_instrucao_derruba_o_contrato(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -59,10 +55,6 @@ def test_mudar_uma_letra_da_instrucao_derruba_o_contrato(
     _exige_instrucao_atual(cassete)
 
 
-def test_hash_da_instrucao_e_o_sha256_do_texto_em_utf8() -> None:
-    assert instrucao_sha256() == hashlib.sha256(gemini.INSTRUCAO.encode()).hexdigest()
-
-
 def test_cassete_foi_gravado_com_a_versao_fixada() -> None:
     """`MODELO` pode ser um apelido que o Google atualiza por baixo."""
     gravada = _cassete()["versao_do_modelo"]
@@ -70,6 +62,17 @@ def test_cassete_foi_gravado_com_a_versao_fixada() -> None:
         f"a Vertex respondeu com {gravada!r}, e o fixado é {VERSAO_DO_MODELO!r}: "
         "a versão do modelo mudou. Confira a resposta e atualize VERSAO_DO_MODELO."
     )
+
+
+def test_cassete_nao_guarda_nada_alem_das_chaves_previstas() -> None:
+    """Vale antes e depois da regravação do #229: nenhum cabeçalho nem credencial."""
+    assert set(_cassete()) <= {
+        "modelo",
+        "versao_do_modelo",
+        "video",
+        "texto",
+        "instrucao_sha256",
+    }
 
 
 @pytest.mark.skip(reason="cassete sem instrucao_sha256; pendente de regravação no #229")
@@ -121,7 +124,9 @@ def test_grava_so_a_resposta_que_passou_no_esquema(tmp_path: Path) -> None:
         "versao_do_modelo": VERSAO_DO_MODELO,
         "video": {"sha256": "b" * 64, "duracao_ms": VIDEO_CONFIAVEL.duracao_ms},
         "texto": BOA,
-        "instrucao_sha256": instrucao_sha256(),
+        "instrucao_sha256": hashlib.sha256(
+            gemini.INSTRUCAO.encode("utf-8")
+        ).hexdigest(),
     }
 
 
