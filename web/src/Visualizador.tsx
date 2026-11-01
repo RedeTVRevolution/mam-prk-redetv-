@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { type ClienteDaApi, codigoDoErro, SessaoExpirada } from './api.ts'
+import { desfazivel } from './catalogacao.ts'
 import { type CatalogoDeCorrecoes, rotuloDe } from './catalogo.ts'
 import { useAtalhos } from './atalhos.ts'
 import { baixarDecupagem } from './baixar.ts'
@@ -38,9 +39,6 @@ const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
 const GRUPO_DA_CATALOGACAO = 'Catalogação'
 const AVISO_DO_DESFAZER_MS = 5000
-/** As correções que o Ctrl+Z desfaz: as que ainda valem (ou esperam aprovação). */
-const DESFAZIVEL = ['ativa', 'pendente']
-const DECISOES = ['desfazer', 'descartar', 'aprovar', 'recusar']
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 function tecla(e: KeyboardEvent, ...teclas: string[]): boolean {
@@ -98,6 +96,8 @@ export default function Visualizador({
   const [aviso, setAviso] = useState<string | null>(null)
   const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoDesfazer.current), [])
+  // Dois Ctrl+Z seguidos não pedem o mesmo desfazer duas vezes.
+  const desfazendo = useRef(false)
   // "Reproduzir trecho": onde o player para sozinho.
   const pararEm = useRef<number | null>(null)
   const avisoDoTc = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -193,9 +193,7 @@ export default function Visualizador({
 
   const ultimaDoEditor = useCallback(async () => {
     const [eu, historico] = await Promise.all([api.eu(), api.job(job.id).historico()])
-    return historico.find(
-      (c) => c.autor_email === eu.email && !DECISOES.includes(c.tipo) && DESFAZIVEL.includes(c.estado),
-    )
+    return historico.find((c) => c.autor_email === eu.email && desfazivel(c))
   }, [api, job.id])
 
   // O botão "Desfazer" só fica ativo quando há correção do editor para desfazer.
@@ -217,7 +215,8 @@ export default function Visualizador({
 
   /** Ctrl+Z e o botão "Desfazer": desfaz a correção mais recente do próprio editor, com o motivo do gesto. */
   async function desfazerUltima() {
-    if (!catalogando || !decupagem) return
+    if (!catalogando || !decupagem || desfazendo.current) return
+    desfazendo.current = true
     try {
       const ultima = await ultimaDoEditor()
       if (!ultima) {
@@ -230,6 +229,8 @@ export default function Visualizador({
       mostrarAviso(`Desfeito: ${rotulo} (${ultima.depois_legivel} → ${ultima.antes_legivel})`)
     } catch (e) {
       if (!(e instanceof SessaoExpirada)) mostrarAviso('Não foi possível desfazer a correção.')
+    } finally {
+      desfazendo.current = false
     }
   }
 
@@ -377,7 +378,8 @@ export default function Visualizador({
             acao: 'Desfazer a última correção sua neste vídeo',
             grupo: GRUPO_DA_CATALOGACAO,
             ctrl: true,
-            casa: (e: KeyboardEvent) => tecla(e, 'z'),
+            // Ctrl+Shift+Z é o refazer de outros programas: aqui não desfaz.
+            casa: (e: KeyboardEvent) => tecla(e, 'z') && !e.shiftKey,
             executar: () => void desfazerUltima(),
           },
         ]
@@ -638,20 +640,18 @@ export default function Visualizador({
           aria-label="Painel"
           style={{ flex: '0 0 38%', minWidth: 380, minHeight: 0, display: 'flex', flexDirection: 'column' }}
         >
-          {(podeEditar || catalogando) && (
+          {podeEditar && (
             <Group gap="xs" mb="xs" wrap="nowrap">
-              {podeEditar && (
-                <Tooltip label="Catalogar (E)">
-                  <Button
-                    size="compact-sm"
-                    variant={catalogando ? 'filled' : 'default'}
-                    aria-pressed={catalogando}
-                    onClick={() => setCatalogando((c) => !c)}
-                  >
-                    Catalogar
-                  </Button>
-                </Tooltip>
-              )}
+              <Tooltip label="Catalogar (E)">
+                <Button
+                  size="compact-sm"
+                  variant={catalogando ? 'filled' : 'default'}
+                  aria-pressed={catalogando}
+                  onClick={() => setCatalogando((c) => !c)}
+                >
+                  Catalogar
+                </Button>
+              </Tooltip>
               {catalogando && (
                 <>
                   <Text size="sm" fw={600}>

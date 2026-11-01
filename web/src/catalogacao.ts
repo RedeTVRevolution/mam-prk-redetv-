@@ -2,7 +2,7 @@
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
 import { type Intervalo, SEM_NOME, tempo, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem, ItemDoHistorico } from './Video.tsx'
 
 export type Valor = string | string[] | boolean
 
@@ -390,3 +390,13 @@ export function pedidoDeRemocao(d: Decupagem, item: ItemDoPainel): Pedido | null
   }
 }
 
+/**
+ * A correção que a rota de desfazer aceita: casável na API (em vigor e ainda na fila), e não uma decisão.
+ * A pendente fica de fora: só se desfaz depois de aprovada.
+ */
+export function desfazivel(i: ItemDoHistorico): boolean {
+  return (
+    (i.estado === 'ativa' || i.estado === 'aprovada') &&
+    !['desfazer', 'descartar', 'aprovar', 'recusar'].includes(i.tipo)
+  )
+}

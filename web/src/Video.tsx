@@ -55,6 +55,7 @@ import {
   PedidoInvalido,
   SessaoExpirada,
 } from './api.ts'
+import { desfazivel } from './catalogacao.ts'
 import {
   comoSelect,
   ContextoDoCatalogo,
@@ -2310,18 +2311,17 @@ function HistoricoDeCorrecoes({
                     {`Reaplica a correção de ${quandoDaOriginal(itens, i.reaplica)}`}
                   </Text>
                 )}
-                {(i.estado === 'ativa' || i.estado === 'aprovada') &&
-                  !['desfazer', 'descartar', 'aprovar', 'recusar'].includes(i.tipo) && (
-                    <Group justify="flex-end">
-                      <Button
-                        size="xs"
-                        variant="default"
-                        onClick={() => setDecidindo({ acao: 'desfazer', item: i })}
-                      >
-                        Desfazer
-                      </Button>
-                    </Group>
-                  )}
+                {desfazivel(i) && (
+                  <Group justify="flex-end">
+                    <Button
+                      size="xs"
+                      variant="default"
+                      onClick={() => setDecidindo({ acao: 'desfazer', item: i })}
+                    >
+                      Desfazer
+                    </Button>
+                  </Group>
+                )}
                 {i.estado === 'pendente' && podeAprovar && (
                   <Group justify="flex-end">
                     <Button

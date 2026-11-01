@@ -159,6 +159,29 @@ test('Ctrl+Z desfaz a última correção do próprio editor e avisa', async () =
   expect(desfeitas).toEqual([{ id: 'c1', motivo: 'correção desfeita pelo editor' }])
 })
 
+test('Ctrl+Z pula a correção pendente, que a API não desfaz, e desfaz a aprovada', async () => {
+  historico = [
+    correcaoDoHistorico('c2', 'ana@redetv.com.br', 'pendente'),
+    correcaoDoHistorico('c1', 'ana@redetv.com.br', 'aprovada'),
+  ]
+  const usuario = await abrir(true)
+  await usuario.keyboard('e')
+
+  await usuario.keyboard('{Control>}z{/Control}')
+
+  await waitFor(() => expect(desfeitas).toEqual([{ id: 'c1', motivo: 'correção desfeita pelo editor' }]))
+})
+
+test('Ctrl+Shift+Z não desfaz', async () => {
+  historico = [correcaoDoHistorico('c1', 'ana@redetv.com.br')]
+  const usuario = await abrir(true)
+  await usuario.keyboard('e')
+
+  await usuario.keyboard('{Control>}{Shift>}z{/Shift}{/Control}')
+
+  expect(desfeitas).toEqual([])
+})
+
 test('Ctrl+Z fora do modo de catalogação não desfaz nada', async () => {
   historico = [correcaoDoHistorico('c1', 'ana@redetv.com.br')]
   const usuario = await abrir(true)
