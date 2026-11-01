@@ -455,14 +455,16 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "BUCKET_DECUPAGENS"
         value = local.buckets["decupagens"]
       }
-      # O workflow que o reprocessar dispara (api/nuvem.py).
+      # O workflow que o reprocessar dispara (api/nuvem.py). Pelo local e não pelo
+      # recurso: o workflow depende dos Jobs, que dependem do IAM dos buckets, e a
+      # quarentena aponta para este serviço no CORS; a referência fecharia um ciclo.
       env {
         name  = "WORKFLOW_VALIDACAO"
-        value = google_workflows_workflow.validacao.name
+        value = local.workflow_validacao
       }
       env {
         name  = "WORKFLOW_REGIAO"
-        value = google_workflows_workflow.validacao.region
+        value = var.regiao
       }
       env {
         name  = "BUSCA_REGIAO"
@@ -1216,8 +1218,12 @@ resource "google_cloud_run_v2_job" "comparacao" {
 }
 
 # Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de quadros -> Job de indexação.
+locals {
+  workflow_validacao = "mam-validacao"
+}
+
 resource "google_workflows_workflow" "validacao" {
-  name            = "mam-validacao"
+  name            = local.workflow_validacao
   region          = var.regiao
   service_account = google_service_account.mam["orquestracao"].id
   source_contents = templatefile("${path.module}/validacao.workflow.yaml", {

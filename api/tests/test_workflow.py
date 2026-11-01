@@ -454,7 +454,9 @@ def test_a_api_so_inicia_execucoes_do_workflow_e_sabe_qual_e() -> None:
     web = main[main.index("papeis_no_projeto = {") :].split("validacao ")[0]
     assert '"roles/workflows.invoker"' in web
     assert "workflows.admin" not in main and "workflows.editor" not in main
-    assert "google_workflows_workflow.validacao.name" in main
+    # O mesmo nome no workflow e na web, pelo local (a referência ao recurso fecha um ciclo).
+    assert "name            = local.workflow_validacao" in main
+    assert "value = local.workflow_validacao" in main
     assert 'name  = "WORKFLOW_VALIDACAO"' in main
     assert 'name  = "WORKFLOW_REGIAO"' in main
 
