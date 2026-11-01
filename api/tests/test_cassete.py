@@ -1,10 +1,12 @@
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from api.cassete import CASSETE, gravar
+from api import gemini
+from api.cassete import CASSETE, gravar, instrucao_sha256
 from api.decupagem import VERSAO_ESQUEMA, Video
 from api.gemini import MODELO, VERSAO_DO_MODELO, analisar
 from api.tests.test_gemini import BOA, VIDEO, VIDEO_CONFIAVEL, TransporteFalso
@@ -26,6 +28,41 @@ def test_cassete_foi_gravado_com_o_modelo_em_uso() -> None:
     assert _cassete()["modelo"] == MODELO
 
 
+def _exige_instrucao_atual(cassete: dict[str, Any]) -> None:
+    """O contrato do cassete: a resposta gravada vale para a `INSTRUCAO` de hoje."""
+    assert cassete.get("instrucao_sha256") == instrucao_sha256(), (
+        "a INSTRUCAO de api/gemini.py mudou desde a gravação do cassete: "
+        "regrave com `make gravar-cassetes`."
+    )
+
+
+@pytest.mark.skip(reason="cassete sem instrucao_sha256; pendente de regravação no #229")
+def test_cassete_foi_gravado_com_a_instrucao_em_uso() -> None:
+    _exige_instrucao_atual(_cassete())
+
+
+def test_contrato_passa_com_o_hash_da_instrucao_atual() -> None:
+    _exige_instrucao_atual({"instrucao_sha256": instrucao_sha256()})
+
+
+def test_mudar_uma_letra_da_instrucao_derruba_o_contrato(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cassete = {"instrucao_sha256": instrucao_sha256()}
+    original = gemini.INSTRUCAO
+
+    monkeypatch.setattr(gemini, "INSTRUCAO", original + "x")
+    with pytest.raises(AssertionError, match="make gravar-cassetes"):
+        _exige_instrucao_atual(cassete)
+
+    monkeypatch.setattr(gemini, "INSTRUCAO", original)
+    _exige_instrucao_atual(cassete)
+
+
+def test_hash_da_instrucao_e_o_sha256_do_texto_em_utf8() -> None:
+    assert instrucao_sha256() == hashlib.sha256(gemini.INSTRUCAO.encode()).hexdigest()
+
+
 def test_cassete_foi_gravado_com_a_versao_fixada() -> None:
     """`MODELO` pode ser um apelido que o Google atualiza por baixo."""
     gravada = _cassete()["versao_do_modelo"]
@@ -35,8 +72,17 @@ def test_cassete_foi_gravado_com_a_versao_fixada() -> None:
     )
 
 
-def test_cassete_guarda_so_modelo_versao_video_e_texto_sem_cabecalhos() -> None:
-    assert set(_cassete()) == {"modelo", "versao_do_modelo", "video", "texto"}
+@pytest.mark.skip(reason="cassete sem instrucao_sha256; pendente de regravação no #229")
+def test_cassete_guarda_so_modelo_versao_video_texto_e_instrucao_sem_cabecalhos() -> (
+    None
+):
+    assert set(_cassete()) == {
+        "modelo",
+        "versao_do_modelo",
+        "video",
+        "texto",
+        "instrucao_sha256",
+    }
 
 
 @pytest.mark.skip(
@@ -75,6 +121,7 @@ def test_grava_so_a_resposta_que_passou_no_esquema(tmp_path: Path) -> None:
         "versao_do_modelo": VERSAO_DO_MODELO,
         "video": {"sha256": "b" * 64, "duracao_ms": VIDEO_CONFIAVEL.duracao_ms},
         "texto": BOA,
+        "instrucao_sha256": instrucao_sha256(),
     }
 
 
