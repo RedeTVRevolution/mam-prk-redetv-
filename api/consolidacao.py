@@ -5,6 +5,7 @@ janela em cujo núcleo ele começa; o que começa só no contexto é descartado
 nela, porque a vizinha o decupa.
 """
 
+import logging
 from collections.abc import Sequence
 from typing import cast
 
@@ -28,6 +29,8 @@ from api.identidade import identidade_do_comercial
 from api.janelas import Janela
 from api.pessoas import LISTAS, unir_pessoas
 from api.tempos import aplicar_regra_de_tempos
+
+log = logging.getLogger(__name__)
 
 _LIMITE_DO_RESUMO = 2000  # tamanho máximo de `Texto` no esquema
 
@@ -135,6 +138,7 @@ def consolidar(
         for k, d in enumerate(decupagens)
         for pa in d.pautas
         for i in pa.pessoas
+        if i in mapa[k]
     }
     pessoas = [
         p.model_copy(
@@ -155,8 +159,19 @@ def consolidar(
     }
 
     def pauta_da_janela(k: int, p: Pauta) -> Pauta:
+        # Id que a janela não tem (Decupagem gravada por outro caminho): fica de fora.
+        desconhecidas = [i for i in p.pessoas if i not in mapa[k]]
+        if desconhecidas:
+            log.warning(
+                "pauta %s da janela %d cita pessoa fora da janela, ignorada: %s",
+                p.id,
+                k,
+                ", ".join(desconhecidas),
+            )
         return p.model_copy(
-            update={"pessoas": _sem_repetir([mapa[k][i] for i in p.pessoas])}
+            update={
+                "pessoas": _sem_repetir([mapa[k][i] for i in p.pessoas if i in mapa[k]])
+            }
         )
 
     def juntar[T: Bloco | Pauta](partes: list[T]) -> T:

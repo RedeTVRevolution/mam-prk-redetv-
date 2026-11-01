@@ -380,6 +380,13 @@ class Decupagem(_Estrito):
             raise ValueError("objeto de uma pessoa que não está na decupagem")
         return self
 
+    @model_validator(mode="after")
+    def _pessoas_da_pauta_existem(self) -> Self:
+        ids = {p.id for p in self.pessoas}
+        if any(i not in ids for pauta in self.pautas for i in pauta.pessoas):
+            raise ValueError("pauta com pessoa que não está na decupagem")
+        return self
+
 
 # Campos que o servidor preenche; o modelo não tem como sabê-los. A versão é
 # nossa; o SHA-256 e a duração (`video`) vêm da quarentena; os tempos originais

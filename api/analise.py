@@ -10,6 +10,7 @@ as janelas já concluídas (`api/progresso_das_janelas.py`).
 2–3 h passa do teto de 1800 s da chamada HTTP do Workflows (decisão registrada no #127).
 """
 
+import logging
 import os
 import time
 from collections.abc import Callable
@@ -59,6 +60,9 @@ class LeiturasDaAnalise(Protocol):
     """Porta para ler a leitura da tela que o Job de OCR guardou."""
 
     def ler_leitura(self, job_id: str) -> LeituraDaTela | None: ...
+
+
+log = logging.getLogger(__name__)
 
 
 def executar(
@@ -114,6 +118,11 @@ def executar(
             dormir=dormir,
         )
     except AnaliseFalhou:
+        return falhar()
+    except Exception:
+        # O que o Workflows não pega a tempo de dizer o porquê: o erro fica no log
+        # e o Job vai a `falhou` por aqui, sem depender do `except` dele.
+        log.exception("análise do Job %s falhou com erro inesperado", job.id)
         return falhar()
     # A Decupagem só fica visível com o Job `concluido`: se o cancelamento
     # chegou antes da transição, o arquivo gravado aqui não é lido por ninguém.

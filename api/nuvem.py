@@ -53,7 +53,7 @@ from api.jobs import (
 from api.leitura_da_tela import LeituraDaTela
 from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
-from api.progresso_das_janelas import JanelaGravada
+from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.rostos_dos_palpites import FotoAusente
 from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
@@ -675,13 +675,13 @@ class JanelasStorage:
         self._aceitos = bucket_de_aceitos
 
     def ler(self, job_id: str) -> dict[int, JanelaGravada]:
-        gravadas = [
-            JanelaGravada.model_validate_json(blob.download_as_bytes())
+        lidas = [
+            ler_janela_gravada(job_id, blob.download_as_bytes())
             for blob in self._cliente.list_blobs(
                 self._aceitos, prefix=prefixo_das_janelas(job_id)
             )
         ]
-        return {g.indice: g for g in gravadas}
+        return {g.indice: g for g in lidas if g is not None}
 
     def gravar(self, job_id: str, janela: JanelaGravada) -> None:
         self._cliente.bucket(self._aceitos).blob(
