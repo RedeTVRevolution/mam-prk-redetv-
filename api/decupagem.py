@@ -419,6 +419,12 @@ TEMPO_DO_MODELO = {
 }
 
 
+def em_mm_ss(ms: int) -> str:
+    """Milissegundos no formato do modelo, truncados ao segundo."""
+    total = ms // 1000
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
 def _ms(tempo: Any, duracao_ms: int) -> int:
     if not isinstance(tempo, str) or not _TEMPO.match(tempo):
         raise ValueError(f"tempo fora de MM:SS: {tempo!r}")

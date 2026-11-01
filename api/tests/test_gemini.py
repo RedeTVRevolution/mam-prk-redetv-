@@ -514,3 +514,8 @@ def test_a_janela_leva_so_os_cortes_dentro_do_trecho() -> None:
         cortes_ms=[6_540, 28_430, 40_610, 70_000],
     )
     assert "(MM:SS): 00:28, 00:40." in t.chamadas[0].instrucao
+
+
+def test_cortes_no_mesmo_segundo_viram_um_tempo_so() -> None:
+    texto = instrucao(None, cortes_ms=[6_100, 6_900, 8_000])
+    assert "(MM:SS): 00:06, 00:08." in texto

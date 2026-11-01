@@ -59,8 +59,8 @@ def _planos_pelos_cortes(planos: Sequence[Plano], cortes: Sequence[int]) -> list
     O intervalo herda o plano do modelo com que mais se sobrepõe (o primeiro,
     num empate), desde que ele cubra pelo menos metade do intervalo. Intervalo
     que nenhum plano do modelo cobre assim fica sem plano: a descrição de outro
-    trecho seria inventada. Os tempos do modelo ficam só
-    quando o intervalo difere do plano de que herdou.
+    trecho seria inventada. Os tempos do modelo ficam só quando o intervalo
+    difere do plano de que herdou.
     """
     if not planos:
         return []

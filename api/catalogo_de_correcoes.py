@@ -12,7 +12,7 @@ from typing import Any, get_args
 
 from pydantic import BaseModel
 
-from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta
+from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta, em_mm_ss
 
 # Os rótulos dos vocabulários do esquema; o que falta aqui sai igual ao valor.
 ROTULOS_DOS_TONS = {
@@ -40,13 +40,8 @@ _OCORRENCIA = re.compile(rf"^({'|'.join(ROTULOS_DAS_LISTAS)}) (\d+)-(\d+)$")
 _TEMPOS = re.compile(r"^(\d+)-(\d+)$")
 
 
-def _tempo(ms: int) -> str:
-    total = ms // 1000
-    return f"{total // 60:02d}:{total % 60:02d}"
-
-
 def _faixa(inicio_ms: int, fim_ms: int) -> str:
-    return f"{_tempo(inicio_ms)}–{_tempo(fim_ms)}"
+    return f"{em_mm_ss(inicio_ms)}–{em_mm_ss(fim_ms)}"
 
 
 def _comercial(c: dict[str, Any]) -> str:

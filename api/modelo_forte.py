@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from api.catalogo import Catalogo
 from api.comparador import normalizar
-from api.decupagem import FORMATO_DO_TEMPO, Decupagem, Pessoa, Rotulo
+from api.decupagem import FORMATO_DO_TEMPO, Decupagem, Pessoa, Rotulo, em_mm_ss
 from api.espera import sorteio_uniforme
 from api.gemini import AnaliseFalhou, Chamada, Transporte, gerar_validado
 from api.identidade import nao_identificado
@@ -137,11 +137,6 @@ def agrupar(decupagem: Decupagem) -> list[Grupo]:
     return sorted(achados, key=lambda g: g.na_imagem_ms, reverse=True)
 
 
-def _mmss(ms: int) -> str:
-    s = ms // 1000
-    return f"{s // 60:02d}:{s % 60:02d}"
-
-
 def _instrucao(
     grupo: Grupo,
     instantes: Sequence[int],
@@ -154,7 +149,7 @@ def _instrucao(
         (a.inicio_ms, a.fim_ms) for p in grupo.pessoas for a in p.na_imagem
     )
     textos = "\n".join(
-        f"[{_mmss(t.inicio_ms)}–{_mmss(t.fim_ms)}] ({t.tipo}) {t.texto}"
+        f"[{em_mm_ss(t.inicio_ms)}–{em_mm_ss(t.fim_ms)}] ({t.tipo}) {t.texto}"
         for t in decupagem.textos_na_tela
     )
     lista = "\n".join(
@@ -167,8 +162,8 @@ def _instrucao(
         "perfil": PERFIS[programa] + "\n" if programa in PERFIS else "",
         "candidatos": lista or "(nenhum)",
         "descricao": re.sub(r"\s+", " ", grupo.pessoas[0].nome),
-        "aparicoes": ", ".join(f"{_mmss(i)}–{_mmss(f)}" for i, f in aparicoes),
-        "instantes": ", ".join(_mmss(i) for i in instantes),
+        "aparicoes": ", ".join(f"{em_mm_ss(i)}–{em_mm_ss(f)}" for i, f in aparicoes),
+        "instantes": ", ".join(em_mm_ss(i) for i in instantes),
         "textos": textos or "(nenhum)",
         "transcricao": transcricao.em_linhas() if transcricao else "(sem transcrição)",
     }

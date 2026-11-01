@@ -212,9 +212,9 @@ def test_plano_do_modelo_fora_dos_cortes_vira_o_intervalo_dos_cortes() -> None:
 
 
 def test_intervalo_tocado_por_94_ms_fica_sem_plano() -> None:
-    d = decupagem(planos=[(50_000, 59_000)])
-    r = aplicar_regra_de_tempos(d, [10_000, 50_100])
-    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [(50_100, 60_000)]
+    d = decupagem(planos=[(49_812, 59_000)])
+    r = aplicar_regra_de_tempos(d, [10_000, 49_906])
+    assert [(p.inicio_ms, p.fim_ms) for p in r.planos] == [(49_906, 60_000)]
 
 
 def test_intervalo_que_o_plano_cobre_pela_metade_herda_a_descricao() -> None:

@@ -19,6 +19,7 @@ from api.decupagem import (
     VERSAO_ESQUEMA,
     Decupagem,
     Video,
+    em_mm_ss,
     esquema_do_modelo,
     tempos_em_ms,
 )
@@ -118,11 +119,6 @@ SECAO_DOS_CORTES = """\
 """
 
 
-def _mmss(ms: int) -> str:
-    total = ms // 1000
-    return f"{total // 60:02d}:{total % 60:02d}"
-
-
 def instrucao(
     programa: str | None,
     transcricao: Transcricao | None = None,
@@ -142,7 +138,10 @@ def instrucao(
         else SECAO_COM_TRANSCRICAO.replace("{transcricao}", transcricao.em_linhas())
     )
     secao_dos_cortes = (
-        SECAO_DOS_CORTES.replace("{cortes}", ", ".join(_mmss(c) for c in cortes_ms))
+        # Cortes no mesmo segundo viram um tempo só: o modelo não vê o intervalo.
+        SECAO_DOS_CORTES.replace(
+            "{cortes}", ", ".join(dict.fromkeys(em_mm_ss(c) for c in cortes_ms))
+        )
         if cortes_ms
         else ""
     )
