@@ -120,8 +120,9 @@ def executar(
     except AnaliseFalhou:
         return falhar()
     except Exception:
-        # O que o Workflows não pega a tempo de dizer o porquê: o erro fica no log
-        # e o Job vai a `falhou` por aqui, sem depender do `except` dele.
+        # Erro que não é da resposta do modelo (um defeito na consolidação, por
+        # exemplo): o traceback fica no log e o Job vai a `falhou` por aqui, sem
+        # depender do `except` do Workflows.
         log.exception("análise do Job %s falhou com erro inesperado", job.id)
         return falhar()
     # A Decupagem só fica visível com o Job `concluido`: se o cancelamento

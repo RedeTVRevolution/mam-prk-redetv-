@@ -2,7 +2,7 @@
 consolidação não cai e a análise marca a própria falha."""
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -11,6 +11,7 @@ from api.analise_por_janelas import analisar_video
 from api.consolidacao import consolidar
 from api.decupagem import Decupagem
 from api.gemini import Chamada, gerar_validado
+from api.nuvem import JanelasStorage, prefixo_das_janelas
 from api.progresso_das_janelas import JanelaGravada, JanelasEmMemoria
 from api.tests.test_analise import _ambiente
 from api.tests.test_analise_por_janelas import URI, ModeloFalso, resposta
@@ -110,9 +111,37 @@ def test_janela_gravada_que_nao_passa_no_esquema_conta_como_nao_gravada(
         )
 
     assert (0, 310_000) in modelo.trechos()
-    assert "j" in caplog.text
-    gravada = janelas.ler("j")[0]
-    assert isinstance(gravada, JanelaGravada)
+    assert "janela gravada do Job j fora do esquema" in caplog.text
+    # A janela refeita substitui a inválida e volta a ser lida.
+    refeita = janelas.ler("j")[0].decupagem
+    assert refeita is not None
+    assert refeita.pautas == []
+
+
+def test_janelas_storage_le_a_janela_invalida_como_nao_gravada(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    valida = JanelaGravada(
+        indice=1, situacao="concluida", tentativas=1, decupagem=decupagem()
+    )
+
+    class Blob:
+        def __init__(self, conteudo: str) -> None:
+            self._conteudo = conteudo
+
+        def download_as_bytes(self) -> bytes:
+            return self._conteudo.encode()
+
+    class Cliente:
+        def list_blobs(self, bucket: str, prefix: str) -> list[Blob]:
+            assert (bucket, prefix) == ("aceitos", prefixo_das_janelas("j"))
+            return [Blob(_janela_gravada_invalida()), Blob(valida.model_dump_json())]
+
+    with caplog.at_level(logging.WARNING):
+        lidas = JanelasStorage(cast(Any, Cliente()), "aceitos").ler("j")
+
+    assert list(lidas) == [1]
+    assert "janela gravada do Job j fora do esquema" in caplog.text
 
 
 def test_erro_inesperado_na_analise_leva_o_job_a_falhou() -> None:

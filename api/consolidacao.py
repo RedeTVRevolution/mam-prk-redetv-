@@ -159,19 +159,19 @@ def consolidar(
     }
 
     def pauta_da_janela(k: int, p: Pauta) -> Pauta:
-        # Id que a janela não tem (Decupagem gravada por outro caminho): fica de fora.
-        desconhecidas = [i for i in p.pessoas if i not in mapa[k]]
-        if desconhecidas:
+        # O esquema já recusa pauta com pessoa fora da Decupagem; isto só protege
+        # a Decupagem que chega sem passar por ele (montada ou alterada depois de
+        # validada): o id que a janela não tem fica de fora, com aviso.
+        conhecidas = [i for i in p.pessoas if i in mapa[k]]
+        if len(conhecidas) < len(p.pessoas):
             log.warning(
                 "pauta %s da janela %d cita pessoa fora da janela, ignorada: %s",
                 p.id,
                 k,
-                ", ".join(desconhecidas),
+                ", ".join(i for i in p.pessoas if i not in mapa[k]),
             )
         return p.model_copy(
-            update={
-                "pessoas": _sem_repetir([mapa[k][i] for i in p.pessoas if i in mapa[k]])
-            }
+            update={"pessoas": _sem_repetir([mapa[k][i] for i in conhecidas])}
         )
 
     def juntar[T: Bloco | Pauta](partes: list[T]) -> T:
