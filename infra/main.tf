@@ -85,6 +85,18 @@ variable "validade_das_referencias_dias" {
   default     = 180
 }
 
+variable "prazo_dos_palpites_dias" {
+  description = "Dias até apagar as fotos de um palpite fora do catálogo que não se confirmou (rosto é dado sensível); vale só para o prefixo palpites/ do bucket de referências"
+  type        = number
+  default     = 30
+}
+
+variable "limite_de_buscas_por_video" {
+  description = "Quantas buscas no SerpAPI o Job de referências faz por vídeo; depois disso não busca mais"
+  type        = number
+  default     = 12
+}
+
 variable "referencias_do_acervo" {
   description = "\"ligado\" liga o uso das referências de rosto do acervo (caminho pronto, desligado por padrão)"
   type        = string
@@ -272,6 +284,20 @@ resource "google_storage_bucket" "mam" {
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
+  # As fotos de um palpite fora do catálogo (#222) são apagadas sozinhas depois do prazo;
+  # as ligadas a uma pessoa do catálogo ficam fora do prefixo e não são apagadas.
+  dynamic "lifecycle_rule" {
+    for_each = each.key == "referencias" ? [1] : []
+    content {
+      condition {
+        age            = var.prazo_dos_palpites_dias
+        matches_prefix = ["palpites/"]
+      }
+      action {
+        type = "Delete"
+      }
+    }
+  }
   # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
   # e só das URLs da aplicação.
   dynamic "cors" {
@@ -345,12 +371,14 @@ locals {
     quadros = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
     # Lê a Decupagem entregue, com os quadros-chave.
     indexacao = { decupagens = "roles/storage.objectViewer" }
-    # Grava as fotos de referência.
-    referencias = { referencias = "roles/storage.objectUser" }
+    # Grava as fotos de referência e lê a lista de nomes que a identificação deixou na decupagem.
+    referencias = { referencias = "roles/storage.objectUser", decupagens = "roles/storage.objectViewer" }
     # Lê a cópia limpa e regrava a Decupagem (objectUser, porque a sobrescreve).
     identificacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
-    # Como a identificação, mais as fotos de referência (só leitura); grava `<job>.comparacao.json`.
-    comparacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser", referencias = "roles/storage.objectViewer" }
+    # Como a identificação, mais as fotos de referência (lê, e passa as fotos do palpite
+    # confirmado para o lugar das do catálogo, apagando as de antes: objectUser); grava
+    # `<job>.comparacao.json`.
+    comparacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser", referencias = "roles/storage.objectUser" }
   }
 }
 
@@ -1006,7 +1034,8 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_indexacao" {
 }
 
 # Job de referências de rosto (#111, ADR 0005): o único com internet (sem vpc_access),
-# por isso só recebe nomes (NOMES, em JSON, e PROGRAMA) e nunca quadros do vídeo. Busca
+# por isso só recebe nomes (a lista que a identificação deixou para o JOB_ID, ou NOMES em
+# JSON e PROGRAMA) e nunca quadros do vídeo. Busca
 # fotos pelo SerpAPI, o Gemini as confere e as guarda no bucket de referências.
 # A chave do SerpAPI fica no Secret Manager: o Terraform cria o segredo vazio (aditivo,
 # ADR 0002) e a versão com a chave é posta à mão; só este Job a lê.
@@ -1057,6 +1086,14 @@ resource "google_cloud_run_v2_job" "referencias" {
         env {
           name  = "SEGREDO_DO_SERPAPI"
           value = google_secret_manager_secret.serpapi.id
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "LIMITE_DE_BUSCAS_POR_VIDEO"
+          value = tostring(var.limite_de_buscas_por_video)
         }
         env {
           name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
@@ -1117,6 +1154,10 @@ resource "google_cloud_run_v2_job" "identificacao" {
         env {
           name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"
           value = tostring(var.limite_de_pessoas_do_modelo_forte)
+        }
+        env {
+          name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
+          value = tostring(var.validade_das_referencias_dias)
         }
         env {
           name  = "TMPDIR"

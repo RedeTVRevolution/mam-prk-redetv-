@@ -24,22 +24,31 @@ from api.catalogo import Catalogo
 from api.gemini import SessaoHttp, TransporteVertex
 from api.imagens_hostis import SessaoDeDownload, baixar_original, baixar_thumbnail
 from api.jobs import agora_utc
-from api.nuvem import CatalogoFirestore, ReferenciasStorage, SugestoesFirestore
+from api.nuvem import (
+    CatalogoFirestore,
+    NomesABuscarStorage,
+    ReferenciasStorage,
+    SugestoesFirestore,
+)
 from api.referencias import (
     Armazenamento,
+    BuscaComLimite,
     Conferidor,
     ConferidorGemini,
     ExtratorDeNomes,
     ExtratorGemini,
+    LimiteDeBuscas,
     Resultado,
     Sugestoes,
     foto_baixada,
     referenciar,
     sugerir_apresentadores,
 )
+from api.rostos_dos_palpites import Palpites
 from api.serpapi import Busca, SerpApi
 
 VALIDADE_PADRAO_DIAS = 180
+LIMITE_DE_BUSCAS_PADRAO = 12  # buscas no SerpAPI por vídeo
 
 
 def executar(
@@ -54,28 +63,47 @@ def executar(
     extrator: ExtratorDeNomes,
     armazenamento: Armazenamento,
     sugestoes: Sugestoes,
+    palpites: Palpites,
     validade: timedelta,
     agora: datetime,
+    limite_de_buscas: int = LIMITE_DE_BUSCAS_PADRAO,
+    job_id: str = "referencias",
+    registrar: Callable[[dict[str, str]], None] = lambda rotulo: None,
 ) -> dict[str, Resultado]:
-    """O resultado de cada nome; as sugestões de apresentadores só com `programa`."""
+    """O resultado de cada nome; as sugestões de apresentadores só com `programa`.
+
+    Depois de `limite_de_buscas` buscas o vídeo não faz mais nenhuma: o nome que
+    precisaria de busca fica `limite_de_buscas`. Cada busca vai a `registrar` com o
+    rótulo de custo."""
     baixar = foto_baixada(baixar_thumbnail_de, baixar_original_de)
-    resultados = {
-        nome: referenciar(
-            nome,
-            catalogo=catalogo,
-            busca=busca,
-            baixar=baixar,
-            conferidor=conferidor,
-            armazenamento=armazenamento,
-            agora=agora,
-            validade=validade,
-        )
-        for nome in nomes
-    }
+    contada = BuscaComLimite(busca, limite_de_buscas, registrar, job_id)
+    resultados: dict[str, Resultado] = {}
+    for nome in nomes:
+        try:
+            resultados[nome] = referenciar(
+                nome,
+                catalogo=catalogo,
+                busca=contada,
+                baixar=baixar,
+                conferidor=conferidor,
+                armazenamento=armazenamento,
+                agora=agora,
+                validade=validade,
+                palpites=palpites,
+            )
+        except LimiteDeBuscas:
+            resultados[nome] = "limite_de_buscas"
     if programa:
-        sugerir_apresentadores(
-            programa, busca=busca, extrator=extrator, sugestoes=sugestoes, agora=agora
-        )
+        try:
+            sugerir_apresentadores(
+                programa,
+                busca=contada,
+                extrator=extrator,
+                sugestoes=sugestoes,
+                agora=agora,
+            )
+        except LimiteDeBuscas:
+            pass
     return resultados
 
 
@@ -92,11 +120,35 @@ def ler_segredo(sessao: SessaoDoSegredo, recurso: str) -> str:
     return base64.b64decode(resposta.json()["payload"]["data"]).decode().strip()
 
 
+def _nomes_do_job(
+    job_id: str, leitor: NomesABuscarStorage
+) -> tuple[list[str], str | None] | None:
+    lista = leitor.ler_nomes_a_buscar(job_id)
+    return None if lista is None else (lista.nomes, lista.programa)
+
+
+def _registrar_o_custo(rotulo: dict[str, str]) -> None:
+    print(json.dumps({"severity": "INFO", "message": "busca", **rotulo}), flush=True)
+
+
 def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
-    nomes = json.loads(os.environ["NOMES"])
-    if not isinstance(nomes, list) or not all(isinstance(n, str) for n in nomes):
-        raise SystemExit("NOMES precisa ser uma lista de nomes em JSON")
+    job_do_video = os.environ.get("JOB_ID")
+    if job_do_video:
+        achados = _nomes_do_job(
+            job_do_video,
+            NomesABuscarStorage(
+                ClienteStorage(project=projeto), os.environ["BUCKET_DECUPAGENS"]
+            ),
+        )
+        if achados is None:
+            return  # a identificação não deixou lista: nada a buscar
+        nomes, programa = achados
+    else:
+        nomes = json.loads(os.environ["NOMES"])
+        if not isinstance(nomes, list) or not all(isinstance(n, str) for n in nomes):
+            raise SystemExit("NOMES precisa ser uma lista de nomes em JSON")
+        programa = os.environ.get("PROGRAMA") or None
     credenciais: Any
     credenciais, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
@@ -104,11 +156,14 @@ def main() -> None:
     sessao = AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
     chave = ler_segredo(cast(SessaoDoSegredo, sessao), os.environ["SEGREDO_DO_SERPAPI"])
     transporte = TransporteVertex(projeto, cast(SessaoHttp, sessao))
-    job_id = os.environ.get("CLOUD_RUN_EXECUTION", "referencias")
+    job_id = job_do_video or os.environ.get("CLOUD_RUN_EXECUTION", "referencias")
     web = requests.Session()
+    armazenamento = ReferenciasStorage(
+        ClienteStorage(project=projeto), os.environ["BUCKET_REFERENCIAS"]
+    )
     executar(
         nomes,
-        os.environ.get("PROGRAMA") or None,
+        programa,
         catalogo=CatalogoFirestore(firestore.Client(project=projeto)),
         busca=SerpApi(chave),
         baixar_thumbnail_de=lambda url: baixar_thumbnail(
@@ -119,16 +174,20 @@ def main() -> None:
         ),
         conferidor=ConferidorGemini(transporte, job_id),
         extrator=ExtratorGemini(transporte, job_id),
-        armazenamento=ReferenciasStorage(
-            ClienteStorage(project=projeto), os.environ["BUCKET_REFERENCIAS"]
-        ),
+        armazenamento=armazenamento,
         sugestoes=SugestoesFirestore(firestore.Client(project=projeto)),
+        palpites=Palpites(armazenamento),
         validade=timedelta(
             days=int(
                 os.environ.get("VALIDADE_DAS_REFERENCIAS_DIAS", VALIDADE_PADRAO_DIAS)
             )
         ),
         agora=agora_utc(),
+        limite_de_buscas=int(
+            os.environ.get("LIMITE_DE_BUSCAS_POR_VIDEO", LIMITE_DE_BUSCAS_PADRAO)
+        ),
+        job_id=job_id,
+        registrar=_registrar_o_custo,
     )
 
 

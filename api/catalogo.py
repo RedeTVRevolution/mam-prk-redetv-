@@ -5,6 +5,7 @@ identificação automática (#82) grava nele as referências de rosto e usa o id
 como dono dos objetos da busca.
 """
 
+import hashlib
 import uuid
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
@@ -80,6 +81,11 @@ class Catalogo(Protocol):
         ...
 
 
+def objeto_da_foto(pessoa_id: str, jpeg: bytes) -> str:
+    """Onde a foto de referência de uma pessoa do catálogo fica no bucket."""
+    return f"referencias/{pessoa_id}/{hashlib.sha256(jpeg).hexdigest()[:24]}.jpg"
+
+
 def novo_id() -> str:
     return uuid.uuid4().hex
 
@@ -99,8 +105,8 @@ def corrigida(
     )
 
 
-def rostos_validos(
-    pessoa: PessoaDoCatalogo,
+def rostos_que_valem(
+    rostos: Iterable[Rosto],
     agora: datetime,
     validade: timedelta,
     *,
@@ -111,7 +117,7 @@ def rostos_validos(
     acervo só com `com_acervo`, desligado por configuração."""
     return [
         r
-        for r in pessoa.rostos
+        for r in rostos
         if (r.origem == "acervo" and com_acervo)
         or (
             r.origem == "web"
@@ -119,6 +125,17 @@ def rostos_validos(
             and agora - r.obtida_em <= validade
         )
     ]
+
+
+def rostos_validos(
+    pessoa: PessoaDoCatalogo,
+    agora: datetime,
+    validade: timedelta,
+    *,
+    com_acervo: bool = False,
+) -> list[Rosto]:
+    """As referências da pessoa que ainda valem (veja `rostos_que_valem`)."""
+    return rostos_que_valem(pessoa.rostos, agora, validade, com_acervo=com_acervo)
 
 
 class CatalogoEmMemoria:

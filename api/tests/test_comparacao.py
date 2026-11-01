@@ -6,9 +6,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from api.catalogo import CatalogoEmMemoria, Rosto
-from api.comparacao import FotoAusente, comparar
+from api.comparacao import comparar
 from api.gemini import ErroHttp
 from api.referencias import SugestoesEmMemoria
+from api.rostos_dos_palpites import FotoAusente
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem, pessoa
 
@@ -24,6 +25,12 @@ class FotosEmMemoria:
         if objeto not in self.objetos:
             raise FotoAusente(objeto)
         return self.objetos[objeto]
+
+    def gravar(self, objeto: str, conteudo: bytes) -> None:
+        self.objetos[objeto] = conteudo
+
+    def apagar(self, objeto: str) -> None:
+        self.objetos.pop(objeto, None)
 
 
 class Cenario:

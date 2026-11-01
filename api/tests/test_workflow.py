@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from api.rostos_dos_palpites import PREFIXO_DOS_PALPITES
+
 DEFINICAO = Path(__file__).parents[2] / "infra" / "validacao.workflow.yaml"
 
 
@@ -524,6 +526,39 @@ def test_contas_e_papeis_dos_jobs_novos_sao_so_os_combinados() -> None:
     assert re.search(
         r'comparacao = \{ aceitos = "roles/storage.objectViewer", '
         r'decupagens = "roles/storage.objectUser", '
-        r'referencias = "roles/storage.objectViewer" \}',
+        r'referencias = "roles/storage.objectUser" \}',
+        main,
+    )
+
+
+def test_so_o_prefixo_dos_palpites_expira_e_o_prazo_vem_da_variavel() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    bucket = main[main.index('resource "google_storage_bucket" "mam"') :].split(
+        "\nresource "
+    )[0]
+    regra = bucket.split('dynamic "lifecycle_rule"')[1].split('dynamic "cors"')[0]
+    variavel = main.split('variable "prazo_dos_palpites_dias"')[1].split("\n}")[0]
+
+    assert 'each.key == "referencias"' in regra
+    assert "age            = var.prazo_dos_palpites_dias" in regra
+    assert f'matches_prefix = ["{PREFIXO_DOS_PALPITES}"]' in regra
+    assert 'type = "Delete"' in regra
+    assert regra.count("condition") == 1 and "created_before" not in regra
+    assert "default     = 30" in variavel
+    assert bucket.count("lifecycle_rule") == 1
+
+
+def test_limite_de_buscas_e_a_lista_de_nomes_do_job_de_referencias_vem_do_main_tf() -> (
+    None
+):
+    job = _job_do_main_tf("referencias")
+
+    assert 'name  = "LIMITE_DE_BUSCAS_POR_VIDEO"' in job
+    assert "var.limite_de_buscas_por_video" in job
+    assert 'name  = "BUCKET_DECUPAGENS"' in job and 'local.buckets["decupagens"]' in job
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    assert re.search(
+        r'referencias = \{ referencias = "roles/storage.objectUser", '
+        r'decupagens = "roles/storage.objectViewer" \}',
         main,
     )

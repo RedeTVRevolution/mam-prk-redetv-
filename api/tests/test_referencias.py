@@ -17,7 +17,6 @@ from api.catalogo import (
     Rosto,
     rostos_validos,
 )
-from api.comparacao import FotoAusente
 from api.gemini import AnaliseFalhou, ErroHttp
 from api.imagens_hostis import ImagemRecusada
 from api.nuvem import ReferenciasStorage
@@ -34,6 +33,7 @@ from api.referencias import (
     referenciar,
     sugerir_apresentadores,
 )
+from api.rostos_dos_palpites import FotoAusente, Palpites
 from api.serpapi import ResultadoDeImagem, ResultadoWeb
 from api.tests.test_gemini import TransporteFalso
 
@@ -309,6 +309,14 @@ class Bucket:
     def gravar(self, objeto: str, jpeg: bytes) -> None:
         self.objetos[objeto] = jpeg
 
+    def ler(self, objeto: str) -> bytes:
+        if objeto not in self.objetos:
+            raise FotoAusente(objeto)
+        return self.objetos[objeto]
+
+    def apagar(self, objeto: str) -> None:
+        self.objetos.pop(objeto, None)
+
 
 def referenciar_nome(
     nome: str,
@@ -327,6 +335,7 @@ def referenciar_nome(
         armazenamento=bucket,
         agora=agora,
         validade=VALIDADE,
+        palpites=Palpites(bucket),
     )
 
 
@@ -381,13 +390,12 @@ def test_sem_tres_fotos_nada_e_gravado() -> None:
     assert bucket.objetos == {}
 
 
-def test_nome_fora_do_catalogo_ou_ambiguo_nao_busca_nada() -> None:
+def test_nome_ambiguo_no_catalogo_nao_busca_nada() -> None:
     catalogo = CatalogoEmMemoria()
     catalogo.acrescentar("Ana Souza", "repórter", ["Aninha"])
     catalogo.acrescentar("Ana Lima", "repórter", ["Aninha"])
     busca = BuscaFalsa([resultado(i) for i in range(4)])
 
-    assert referenciar_nome("Fulano", catalogo, busca, Bucket()) == "fora_do_catalogo"
     assert referenciar_nome("Aninha", catalogo, busca, Bucket()) == "fora_do_catalogo"
     assert busca.consultas == []
 
@@ -645,6 +653,7 @@ def test_job_executa_cada_nome_e_so_busca_apresentadores_com_programa() -> None:
             extrator=extrator("Maria Silva"),
             armazenamento=bucket,
             sugestoes=sugestoes,
+            palpites=Palpites(bucket),
             validade=VALIDADE,
             agora=AGORA,
         )

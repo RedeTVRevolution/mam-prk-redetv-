@@ -36,7 +36,6 @@ from api.catalogo import (
     novo_id,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
-from api.comparacao import FotoAusente
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
@@ -52,8 +51,10 @@ from api.jobs import (
     casa_com_o_filtro,
 )
 from api.leitura_da_tela import LeituraDaTela
+from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
 from api.progresso_das_janelas import JanelaGravada
+from api.rostos_dos_palpites import FotoAusente
 from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
 
@@ -109,6 +110,10 @@ def objeto_da_copia_limpa(job_id: str) -> str:
 
 def objeto_da_comparacao(job_id: str) -> str:
     return f"{job_id}.comparacao.json"
+
+
+def objeto_dos_nomes_a_buscar(job_id: str) -> str:
+    return f"{job_id}.nomes_a_buscar.json"
 
 
 class RepositorioFirestore:
@@ -398,9 +403,16 @@ class ReferenciasStorage:
         self._bucket = bucket
 
     def gravar(self, objeto: str, jpeg: bytes) -> None:
+        tipo = "application/json" if objeto.endswith(".json") else "image/jpeg"
         self._cliente.bucket(self._bucket).blob(objeto).upload_from_string(
-            jpeg, content_type="image/jpeg"
+            jpeg, content_type=tipo
         )
+
+    def apagar(self, objeto: str) -> None:
+        try:
+            self._cliente.bucket(self._bucket).blob(objeto).delete()
+        except NotFound:
+            pass
 
     def ler(self, objeto: str) -> bytes:
         try:
@@ -592,6 +604,29 @@ class DecupagensStorage:
         self._cliente.bucket(self._decupagens).blob(
             objeto_da_comparacao(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
+
+    def gravar_nomes_a_buscar(self, job_id: str, conteudo: str) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_dos_nomes_a_buscar(job_id)
+        ).upload_from_string(conteudo, content_type="application/json")
+
+
+class NomesABuscarStorage:
+    """A lista de nomes que a identificação deixou para o Job de referências, no bucket
+    das decupagens (só leitura)."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_decupagens: str) -> None:
+        self._cliente = cliente
+        self._decupagens = bucket_de_decupagens
+
+    def ler_nomes_a_buscar(self, job_id: str) -> NomesABuscar | None:
+        blob = self._cliente.bucket(self._decupagens).blob(
+            objeto_dos_nomes_a_buscar(job_id)
+        )
+        try:
+            return NomesABuscar.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
 
 
 class TranscricoesStorage:

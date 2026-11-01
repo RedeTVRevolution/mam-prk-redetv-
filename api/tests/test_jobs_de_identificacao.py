@@ -31,6 +31,7 @@ class DecupagensEmMemoria:
         self.com_copia = com_copia
         self.gravada: Decupagem | None = None
         self.comparacao: str | None = None
+        self.nomes: str | None = None
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
         return self.atual
@@ -43,6 +44,9 @@ class DecupagensEmMemoria:
 
     def gravar_comparacao(self, job_id: str, conteudo: str) -> None:
         self.comparacao = conteudo
+
+    def gravar_nomes_a_buscar(self, job_id: str, conteudo: str) -> None:
+        self.nomes = conteudo
 
 
 class TranscricoesEmMemoria:
