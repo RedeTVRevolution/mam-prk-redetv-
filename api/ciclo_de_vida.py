@@ -168,7 +168,7 @@ def encerrar_etapa(
 
 
 # Falhas do próprio arquivo: refazer o processamento não as conserta.
-FALHAS_DO_ARQUIVO = frozenset(
+FALHAS_DO_ARQUIVO: frozenset[CodigoDeFalha] = frozenset(
     {
         "formato_invalido",
         "arquivo_corrompido",
@@ -178,7 +178,7 @@ FALHAS_DO_ARQUIVO = frozenset(
     }
 )
 # Job em `falhou` sem etapa `falhou` no registro (anterior ao #146): o código diz a etapa.
-ETAPA_DA_FALHA: dict[str, NomeDaEtapa] = {
+ETAPA_DA_FALHA: dict[CodigoDeFalha, NomeDaEtapa] = {
     "transcricao_falhou": "transcricao",
     "ocr_falhou": "leitura_da_tela",
     "analise_falhou": "analise",
@@ -212,7 +212,13 @@ def etapa_de_partida(job: Job) -> NomeDaEtapa:
         if (r := job.etapas.get(e)) and r.resultado == "falhou"
     ]
     if job.estado == "falhou":
-        partida = falhas[0] if falhas else ETAPA_DA_FALHA.get(job.codigo_falha or "")
+        partida = (
+            falhas[0]
+            if falhas
+            else ETAPA_DA_FALHA.get(job.codigo_falha)
+            if job.codigo_falha
+            else None
+        )
         if partida is None or partida == "validacao":
             raise NaoReprocessavel(
                 "A falha é do arquivo: é preciso enviar o vídeo de novo"

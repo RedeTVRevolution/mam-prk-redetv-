@@ -436,7 +436,7 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "WORKFLOW_REGIAO"
-        value = var.regiao
+        value = google_workflows_workflow.validacao.region
       }
       env {
         name  = "BUSCA_REGIAO"

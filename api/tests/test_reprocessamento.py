@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from api.auditoria import (
@@ -15,7 +16,7 @@ from api.chaves import (
     emitir_chave,
 )
 from api.ciclo_de_vida import NaoReprocessavel, etapa_de_partida, reprocessar
-from api.jobs import Etapa, Job, RepositorioEmMemoria
+from api.jobs import Etapa, Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.main import criar_app
 from api.nuvem import DisparoPeloWorkflows
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
@@ -361,3 +362,15 @@ def test_o_disparo_cria_uma_execucao_com_o_job_e_a_etapa_inicial() -> None:
     assert kwargs["json"] == {
         "argument": '{"job_id": "j1", "etapa_inicial": "analise"}'
     }
+
+
+class SessaoQueFalha(SessaoFalsa):
+    def raise_for_status(self) -> None:
+        raise requests.HTTPError("403")
+
+
+def test_o_disparo_que_falha_vira_servico_indisponivel() -> None:
+    with pytest.raises(ServicoIndisponivel):
+        DisparoPeloWorkflows("proj", "regiao-1", "fluxo", SessaoQueFalha()).iniciar(
+            "j1", "analise"
+        )

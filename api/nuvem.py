@@ -9,6 +9,7 @@ from typing import Any
 
 import google.auth
 import google.auth.transport.requests
+import requests
 from google.api_core.exceptions import AlreadyExists, NotFound
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -43,6 +44,7 @@ from api.jobs import (
     Estado,
     FiltroDeJobs,
     Job,
+    NomeDaEtapa,
     PaginaDeJobs,
     ServicoIndisponivel,
     casa_com_o_filtro,
@@ -505,12 +507,16 @@ class DisparoPeloWorkflows:
             self._sessao = sessao(credenciais)
         return self._sessao
 
-    def iniciar(self, job_id: str, etapa: str) -> None:
+    def iniciar(self, job_id: str, etapa: NomeDaEtapa) -> None:
         argumento = json.dumps({"job_id": job_id, "etapa_inicial": etapa})
-        resposta = self._sessao_autenticada().post(
-            self._url, json={"argument": argumento}, timeout=30
-        )
-        resposta.raise_for_status()
+        try:
+            resposta = self._sessao_autenticada().post(
+                self._url, json={"argument": argumento}, timeout=30
+            )
+            resposta.raise_for_status()
+        except requests.RequestException as e:
+            # Vira 503 na rota, que antes devolve o Job ao que era.
+            raise ServicoIndisponivel from e
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:
