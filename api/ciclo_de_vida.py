@@ -104,13 +104,15 @@ def _gravar_etapa(
     repositorio: RepositorioDeJobs,
     job_id: str,
     mudar: Callable[[Job], dict[str, Any]],
+    exige: Callable[[Job], bool] = lambda job: True,
 ) -> Job | None:
     """Grava a mudança de etapa sem mudar o `estado` do Job (nem exigir um).
 
     É a mesma troca condicional das transições, com o estado lido na hora: se o Job
-    andou entre a leitura e a troca, lê de novo.
+    andou entre a leitura e a troca, lê de novo. `None` se o Job não existe ou não
+    atende a `exige`.
     """
-    while (job := repositorio.obter(job_id)) is not None:
+    while (job := repositorio.obter(job_id)) is not None and exige(job):
         if novo := repositorio.transitar(job_id, job.estado, mudar(job)):
             return novo
     return None
@@ -160,7 +162,6 @@ def encerrar_etapa(
             "atualizado_em": agora,
         }
 
-    while (job := repositorio.obter(job_id)) is not None and etapa in job.etapas:
-        if novo := repositorio.transitar(job_id, job.estado, mudar(job)):
-            return novo
-    return None
+    return _gravar_etapa(
+        repositorio, job_id, mudar, exige=lambda job: etapa in job.etapas
+    )

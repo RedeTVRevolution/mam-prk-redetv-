@@ -342,12 +342,15 @@ main:
                   job_id: $${job_id}
                   etapa: quadros_chave
                   falhou_na_execucao: true
-            # O Job já está concluído; sem os JPEGs a Decupagem segue valendo.
+            # O Job já está concluído; sem os JPEGs a Decupagem segue valendo. A falha
+            # fica na etapa e no log, e o salto evita o `encerra_quadros_chave`, que a
+            # gravaria por cima como `concluida`.
             - registra_a_falha_dos_quadros:
                 call: sys.log
                 args:
                   severity: WARNING
                   text: $${"quadros-chave falharam para " + job_id}
+                next: inicia_indexacao
     - encerra_quadros_chave:
         call: marca_fim
         args:
@@ -382,12 +385,14 @@ main:
                   job_id: $${job_id}
                   etapa: indexacao
                   falhou_na_execucao: true
-            # O Job já está concluído; a falha fica no estado da indexação e no log.
+            # O Job já está concluído; a falha fica no estado da indexação, na etapa e no
+            # log, e o salto evita o `encerra_indexacao`, que a gravaria como `concluida`.
             - registra_a_falha_da_indexacao:
                 call: sys.log
                 args:
                   severity: WARNING
                   text: $${"indexação falhou para " + job_id}
+                next: fim
     - encerra_indexacao:
         call: marca_fim
         args:
@@ -461,6 +466,12 @@ marca_fim:
                   text: $${"fim da etapa " + etapa + " não gravado para " + job_id}
             - sai_sem_gravar:
                 return: null
+    # Sem o início (o `marca_inicio` falhou), gravar só o fim deixaria a etapa sem
+    # `inicio` e o Job ilegível para a API.
+    - so_se_iniciada:
+        switch:
+          - condition: $${map.get(documento_da_etapa.fields, ["etapas", "mapValue", "fields", etapa]) == null}
+            next: fim_do_fim
     - decide_o_resultado:
         assign:
           # Os Jobs de validação e de análise terminam sem erro quando derrubam o Job

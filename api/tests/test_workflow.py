@@ -352,3 +352,24 @@ def test_quadros_e_indexacao_so_comecam_com_o_job_concluido() -> None:
     guarda = texto.index("so_se_concluido:")
     assert texto.index("- analisa:") < guarda < texto.index("- tira_os_quadros:")
     assert 'estado.stringValue == "concluido"' in texto
+
+
+def test_falha_de_cada_etapa_nao_cai_no_encerra_que_a_gravaria_como_concluida() -> None:
+    texto = _texto()
+
+    for passo, etapa in ETAPAS:
+        excecao = texto[
+            texto.index(
+                "        except:\n", texto.index(f"\n    - {passo}:\n")
+            ) : texto.index(f"\n    - encerra_{etapa}:\n")
+        ]
+        ultimo_passo = excecao.rstrip().rsplit("\n            - ", 1)[1]
+        assert "raise:" in ultimo_passo or "next:" in ultimo_passo, passo
+
+
+def test_fim_de_etapa_sem_inicio_nao_e_gravado() -> None:
+    texto = _texto()
+
+    marca_fim = texto[texto.index("\nmarca_fim:") :]
+    guarda = marca_fim.index('["etapas", "mapValue", "fields", etapa]) == null')
+    assert guarda < marca_fim.index("grava_o_fim:")
