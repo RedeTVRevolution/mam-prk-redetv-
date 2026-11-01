@@ -4,6 +4,7 @@ import {
   IconMaximize,
   IconPlayerPause,
   IconPlayerPlay,
+  IconRefresh,
   IconVolume,
   IconVolumeOff,
 } from '@tabler/icons-react'
@@ -16,10 +17,12 @@ import { dataDeExibicao, type Job } from './jobs.ts'
 import { FaixasDoVideo } from './FaixasDoVideo.tsx'
 import { Link } from './Link.tsx'
 import { Painel } from './Painel.tsx'
+import { nomeDaEtapa } from './etapas.ts'
+import { ReprocessarEtapa } from './ReprocessarEtapa.tsx'
 import { criarCacheDeQuadros } from './quadros.ts'
 import { type Aba, abaDaChave } from './painel.ts'
 import { duracaoDaLinha, faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
-import { ALTURA_DA_BARRA } from './tema.ts'
+import { ALTURA_DA_BARRA, CORES } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
 import { enderecoDaTelaAnterior, enderecoDoVideo } from './rotas.ts'
 import type { Decupagem, Reproducao } from './Video.tsx'
@@ -28,6 +31,7 @@ const VELOCIDADES = [1, 2, 4]
 const SALTO_CURTO_S = 1
 const SALTO_LONGO_S = 5
 const AVISO_DO_TC_MS = 1500
+const INTERVALO_DO_ACOMPANHAMENTO_MS = 5000
 
 const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
@@ -45,15 +49,21 @@ function tocar(player: HTMLVideoElement) {
 /** O Visualizador: o vídeo com controles e atalhos próprios, o TC de origem e o endereço com o tempo. */
 export default function Visualizador({
   api,
-  job,
+  job: jobInicial,
   t,
   podeEditar,
+  podeReprocessar = false,
 }: {
   api: ClienteDaApi
   job: Job
   t: number | null
   podeEditar: boolean
+  podeReprocessar?: boolean
 }) {
+  // O Job muda quando a pessoa reprocessa: o que a API devolveu vale mais que o da abertura.
+  const [job, setJob] = useState(jobInicial)
+  const [escolhendo, setEscolhendo] = useState(false)
+  const [acompanhando, setAcompanhando] = useState(false)
   const [reproducao, setReproducao] = useState<Reproducao | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [tentativas, setTentativas] = useState(0)
@@ -116,6 +126,29 @@ export default function Visualizador({
       ativo = false
     }
   }, [api, job.id, concluido, cargasDaDecupagem])
+
+  // Depois do pedido, vê de tempos em tempos se a etapa e a análise já terminaram.
+  const emAndamento = job.estado === 'analisando' || Boolean(job.etapa_atual)
+  useEffect(() => {
+    if (!acompanhando) return
+    if (!emAndamento) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setAcompanhando(false)
+      return
+    }
+    const intervalo = setInterval(() => {
+      api.job(job.id).detalhe().then(setJob, () => {})
+    }, INTERVALO_DO_ACOMPANHAMENTO_MS)
+    return () => clearInterval(intervalo)
+  }, [api, job.id, acompanhando, emAndamento])
+
+  function aoReprocessar(novo: Job, etapa: string) {
+    setJob(novo)
+    setEscolhendo(false)
+    setAcompanhando(true)
+    // Com a análise, a Decupagem antiga some até a nova terminar.
+    if (etapa === 'analise') setDecupagem(null)
+  }
 
   const fotosDoNome = useCallback((pessoaId: string) => api.job(job.id).fotosDoNome(pessoaId), [api, job.id])
   // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
@@ -309,6 +342,15 @@ export default function Visualizador({
               Tela anterior
             </Link>
           )}
+          {podeReprocessar && job.estado === 'concluido' && !job.etapa_atual && !escolhendo && (
+            <Button
+              variant="default"
+              leftSection={<IconRefresh />}
+              onClick={() => setEscolhendo(true)}
+            >
+              Reprocessar…
+            </Button>
+          )}
           {job.estado === 'concluido' && (
             <Tooltip label="Baixar decupagem (JSON)">
               <ActionIcon variant="default" aria-label="Baixar decupagem (JSON)" onClick={() => void baixar()}>
@@ -318,6 +360,19 @@ export default function Visualizador({
           )}
         </Group>
       </Group>
+      {escolhendo && (
+        <ReprocessarEtapa
+          api={api.job(job.id)}
+          aoReprocessar={aoReprocessar}
+          aoCancelar={() => setEscolhendo(false)}
+        />
+      )}
+      {job.etapa_atual && (
+        <Text size="sm" c={CORES.andamento} role="status">
+          {`Reprocessando: ${nomeDaEtapa(job.etapa_atual)} em andamento.`}
+          {job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
+        </Text>
+      )}
       {falhaDoJson && (
         <AlertaDeErro
           mensagem="Não foi possível baixar a decupagem. Tente de novo em instantes."

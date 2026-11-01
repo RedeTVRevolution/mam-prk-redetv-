@@ -78,6 +78,8 @@ export interface ClienteDoJob {
   aprovar(correcaoId: string): Promise<void>
   reaplicar(itemId: string, candidato: string | null, motivo: string): Promise<void>
   descartar(itemId: string, motivo: string): Promise<void>
+  /** `POST /v1/jobs/{id}/reprocessar` numa etapa escolhida (exige `video.reprocessar_etapa`). */
+  reprocessar(etapa: string, motivo: string): Promise<Job>
 }
 
 export interface ClienteDaApi {
@@ -171,6 +173,8 @@ export function criarClienteDaApi(
           post: true,
           corpo: { motivo },
         }),
+      reprocessar: (etapa, motivo) =>
+        chamar(`${base}/reprocessar`, { post: true, corpo: { etapa, motivo } }),
     }
   }
 

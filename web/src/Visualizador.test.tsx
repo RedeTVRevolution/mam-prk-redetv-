@@ -78,7 +78,12 @@ afterEach(() => {
 })
 afterAll(() => servidor.close())
 
-async function abrir(job: Partial<Job> = {}, t: number | null = null, podeEditar = false) {
+async function abrir(
+  job: Partial<Job> = {},
+  t: number | null = null,
+  podeEditar = false,
+  podeReprocessar = false,
+) {
   const auth = new AutenticadorFalso([
     { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
   ])
@@ -93,6 +98,7 @@ async function abrir(job: Partial<Job> = {}, t: number | null = null, podeEditar
         job={{ ...JOB, ...job }}
         t={t}
         podeEditar={podeEditar}
+        podeReprocessar={podeReprocessar}
       />
     </AtalhosProvider>,
   )
@@ -549,3 +555,88 @@ async function abrirComFaixas() {
   await screen.findByRole('group', { name: 'Pautas 3' })
   return Object.assign(p, { container: document.body })
 }
+
+
+test('o botão "Reprocessar…" só aparece com a permissão e com o vídeo concluído', async () => {
+  await abrir({}, null, false, false)
+  expect(screen.queryByRole('button', { name: /Reprocessar…/ })).toBeNull()
+  cleanup()
+
+  await abrir({ estado: 'analisando' }, null, false, true)
+  expect(screen.queryByRole('button', { name: /Reprocessar…/ })).toBeNull()
+  cleanup()
+
+  await abrir({}, null, false, true)
+  expect(screen.getByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
+})
+
+test('escolher a etapa e o motivo reprocessa e avisa que a decupagem está sendo refeita', async () => {
+  let corpo: unknown = null
+  servidor.use(
+    http.post('/v1/jobs/j1/reprocessar', async ({ request }) => {
+      corpo = await request.json()
+      return HttpResponse.json({ ...JOB, estado: 'analisando', etapa_atual: 'analise' }, { status: 202 })
+    }),
+  )
+  await abrir({}, null, false, true)
+  const usuario = userEvent.setup()
+
+  await usuario.click(screen.getByRole('button', { name: /Reprocessar…/ }))
+  expect(screen.getByRole('radio', { name: /Quadros-chave/ })).toBeTruthy()
+  expect(screen.getByRole('radio', { name: /Identificação/ })).toBeTruthy()
+  expect(screen.getByRole('radio', { name: /Indexação/ })).toBeTruthy()
+  expect(
+    screen.getByText(
+      'Reprocessar a partir da análise? A Decupagem fica indisponível até a nova análise terminar, e as etapas seguintes rodam de novo.',
+    ),
+  ).toBeTruthy()
+  // Sem motivo, o botão não age.
+  expect((screen.getByRole('button', { name: 'Reprocessar' }) as HTMLButtonElement).disabled).toBe(true)
+  await usuario.type(screen.getByRole('textbox', { name: /Motivo/ }), '  instrução nova ')
+  await usuario.click(screen.getByRole('button', { name: 'Reprocessar' }))
+
+  await waitFor(() => expect(corpo).toEqual({ etapa: 'analise', motivo: 'instrução nova' }))
+  expect(
+    await screen.findByText(/Reprocessando: Análise em andamento\. A Decupagem está sendo refeita/),
+  ).toBeTruthy()
+  expect(screen.queryByRole('radio', { name: /Quadros-chave/ })).toBeNull()
+})
+
+test('com outra etapa o pedido leva a etapa escolhida', async () => {
+  let corpo: unknown = null
+  servidor.use(
+    http.post('/v1/jobs/j1/reprocessar', async ({ request }) => {
+      corpo = await request.json()
+      return HttpResponse.json({ ...JOB, etapa_atual: 'quadros_chave' }, { status: 202 })
+    }),
+  )
+  await abrir({}, null, false, true)
+  const usuario = userEvent.setup()
+
+  await usuario.click(screen.getByRole('button', { name: /Reprocessar…/ }))
+  await usuario.click(screen.getByRole('radio', { name: /Quadros-chave/ }))
+  await usuario.type(screen.getByRole('textbox', { name: /Motivo/ }), 'miniaturas ruins')
+  await usuario.click(screen.getByRole('button', { name: 'Reprocessar' }))
+
+  await waitFor(() => expect(corpo).toEqual({ etapa: 'quadros_chave', motivo: 'miniaturas ruins' }))
+  expect(await screen.findByText(/Reprocessando: Quadros-chave em andamento\./)).toBeTruthy()
+})
+
+test('um 409 mostra a mensagem do servidor e cancelar fecha a escolha', async () => {
+  servidor.use(
+    http.post('/v1/jobs/j1/reprocessar', () =>
+      HttpResponse.json({ detail: 'Job em analisando, não reprocessável' }, { status: 409 }),
+    ),
+  )
+  await abrir({}, null, false, true)
+  const usuario = userEvent.setup()
+
+  await usuario.click(screen.getByRole('button', { name: /Reprocessar…/ }))
+  await usuario.type(screen.getByRole('textbox', { name: /Motivo/ }), 'x')
+  await usuario.click(screen.getByRole('button', { name: 'Reprocessar' }))
+
+  expect((await screen.findByRole('alert')).textContent).toMatch(/Job em analisando, não reprocessável/)
+  await usuario.click(screen.getByRole('button', { name: 'Cancelar' }))
+  expect(screen.queryByRole('radio', { name: /Análise/ })).toBeNull()
+  expect(screen.getByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
+})

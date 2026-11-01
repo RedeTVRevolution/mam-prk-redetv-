@@ -7,6 +7,8 @@ export interface Job {
   nome: string
   estado: string
   codigo_falha: string | null
+  /** A etapa em andamento (a API a traz no detalhe do Job). */
+  etapa_atual?: string | null
   duracao_s?: number | null
   /** Cortes de câmera, em ms. */
   cortes_ms?: number[] | null

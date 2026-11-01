@@ -34,6 +34,7 @@ export default function TelaDoVideo({
   t,
   podeEditar,
   podeAprovar,
+  podeReprocessar = false,
   anterior = false,
 }: {
   api: ClienteDaApi
@@ -41,6 +42,7 @@ export default function TelaDoVideo({
   t: number | null
   podeEditar: boolean
   podeAprovar: boolean
+  podeReprocessar?: boolean
   /** A tela antiga, em `/video/{id}/anterior`, até o #165. */
   anterior?: boolean
 }) {
@@ -113,7 +115,16 @@ export default function TelaDoVideo({
     )
   }
   if (!anterior) {
-    return <Visualizador key={carga.job.id} api={api} job={carga.job} t={t} podeEditar={podeEditar} />
+    return (
+      <Visualizador
+        key={carga.job.id}
+        api={api}
+        job={carga.job}
+        t={t}
+        podeEditar={podeEditar}
+        podeReprocessar={podeReprocessar}
+      />
+    )
   }
   return (
     <Video
