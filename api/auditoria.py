@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal, Protocol, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 
 from api.auth import ChamadorAutenticado, Usuario
 from api.jobs import CursorInvalido, _confere_permissao
@@ -37,8 +37,8 @@ LIMITE_MAXIMO = 200
 
 class RegistroDeAuditoria(BaseModel):
     id: str
-    quando: datetime
-    # Quem fez: a pessoa (uid e e-mail) ou o nome do sistema.
+    quando: AwareDatetime
+    # Quem fez: a pessoa (uid e e-mail) ou o nome do sistema, nunca os dois.
     uid: str | None = None
     email: str | None = None
     sistema: str | None = None
@@ -50,6 +50,20 @@ class RegistroDeAuditoria(BaseModel):
     motivo: str | None = None
     # Antes e depois (papéis), números do impacto (lixeira, purga), etapa (reprocessamento).
     detalhes: dict[str, Any] = {}
+
+    @field_validator("email")
+    @classmethod
+    def _email_sem_maiusculas(cls, email: str | None) -> str | None:
+        # A busca por pessoa compara o e-mail sem maiúsculas.
+        return email.lower() if email else email
+
+    @model_validator(mode="after")
+    def _pessoa_ou_sistema(self) -> "RegistroDeAuditoria":
+        pessoa = self.uid is not None and self.email is not None
+        so_parte = (self.uid is None) != (self.email is None)
+        if so_parte or pessoa == (self.sistema is not None):
+            raise ValueError("quem fez é a pessoa (uid e e-mail) ou o sistema")
+        return self
 
 
 @dataclass(frozen=True)
@@ -78,8 +92,7 @@ def campo_da_pessoa(pessoa: str) -> tuple[str, str]:
 def casa_com_o_filtro(registro: RegistroDeAuditoria, filtro: FiltroDeAuditoria) -> bool:
     if filtro.pessoa is not None:
         campo, valor = campo_da_pessoa(filtro.pessoa)
-        guardado = getattr(registro, campo)
-        if (guardado.lower() if campo == "email" and guardado else guardado) != valor:
+        if getattr(registro, campo) != valor:
             return False
     if filtro.alvo_id is not None and registro.alvo_id != filtro.alvo_id:
         return False
@@ -150,11 +163,13 @@ def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
         pessoa: str | None = None,
         alvo: str | None = None,
         acao: Acao | None = None,
-        de: datetime | None = None,
-        ate: datetime | None = None,
+        de: AwareDatetime | None = None,
+        ate: AwareDatetime | None = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_MAXIMO)] = LIMITE_PADRAO,
         cursor: str | None = None,
     ) -> JSONResponse:
+        if de is not None and ate is not None and de > ate:
+            raise HTTPException(422, "Período invertido: `de` depois de `ate`")
         filtro = FiltroDeAuditoria(
             pessoa=pessoa,
             alvo_id=alvo,

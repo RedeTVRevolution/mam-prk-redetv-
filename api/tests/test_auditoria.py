@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from api.auditoria import (
     FiltroDeAuditoria,
@@ -8,9 +10,15 @@ from api.auditoria import (
     RepositorioDeAuditoriaEmMemoria,
 )
 from api.auth import Usuario
+from api.chaves import (
+    RepositorioDeChavesEmMemoria,
+    VerificadorDeChaveDeApi,
+    emitir_chave,
+)
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
+from api.tests.test_escopos import MAC
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
@@ -97,6 +105,35 @@ def test_pagina_por_cursor_sem_repetir_nem_perder() -> None:
     assert p3.proximo_cursor is None
 
 
+def test_pagina_sem_repetir_nem_perder_registros_do_mesmo_instante() -> None:
+    repo = RepositorioDeAuditoriaEmMemoria()
+    for id in ("a", "b", "c"):
+        repo.acrescentar(_registro(id, 0))
+
+    p1 = repo.consultar(FiltroDeAuditoria(limite=2))
+    p2 = repo.consultar(FiltroDeAuditoria(limite=2, cursor=p1.proximo_cursor))
+
+    assert [r.id for r in p1.registros] == ["c", "b"]
+    assert [r.id for r in p2.registros] == ["a"]
+
+
+def test_quem_fez_e_a_pessoa_ou_o_sistema() -> None:
+    assert _registro("s", uid=None, email=None, sistema="Playout").sistema == "Playout"
+    assert _registro("e", email="Ana@RedeTV.com").email == "ana@redetv.com"
+    for quem in (
+        {"uid": None, "email": None},
+        {"email": None},
+        {"sistema": "Playout"},
+    ):
+        with pytest.raises(ValidationError):
+            _registro("x", **quem)
+
+
+def test_quando_exige_fuso() -> None:
+    with pytest.raises(ValidationError):
+        _registro("x", quando=datetime(2026, 10, 30, 12, 0))
+
+
 def _cliente(papeis: list[Papel], repo: RepositorioDeAuditoriaEmMemoria) -> TestClient:
     repo_papeis = RepositorioDePapeisEmMemoria()
     repo_papeis.salvar("u1", papeis)
@@ -172,3 +209,38 @@ def test_acao_fora_da_lista_e_cursor_inexistente_dao_422() -> None:
         cliente.get("/v1/admin/auditoria?cursor=nada", headers=AUTORIZACAO).status_code
         == 422
     )
+
+
+def test_periodo_sem_fuso_ou_invertido_da_422() -> None:
+    cliente = _cliente(["administrador"], RepositorioDeAuditoriaEmMemoria())
+
+    sem_fuso = cliente.get(
+        "/v1/admin/auditoria", params={"de": "2026-10-30T12:00:00"}, headers=AUTORIZACAO
+    )
+    invertido = cliente.get(
+        "/v1/admin/auditoria",
+        params={
+            "de": (BASE + timedelta(hours=1)).isoformat(),
+            "ate": BASE.isoformat(),
+        },
+        headers=AUTORIZACAO,
+    )
+
+    assert sem_fuso.status_code == 422
+    assert invertido.status_code == 422
+
+
+def test_chave_de_sistema_nao_consulta_a_auditoria() -> None:
+    chaves = RepositorioDeChavesEmMemoria()
+    emitida = emitir_chave("Playout", frozenset({"ler"}), MAC, chaves, BASE)
+    cliente = TestClient(
+        criar_app(
+            VerificadorFalso({}),
+            chaves=VerificadorDeChaveDeApi(chaves, MAC),
+            auditoria=RepositorioDeAuditoriaEmMemoria(),
+        )
+    )
+
+    resposta = cliente.get("/v1/admin/auditoria", headers={"X-API-Key": emitida.chave})
+
+    assert resposta.status_code == 403

@@ -421,10 +421,7 @@ class RepositorioDeAuditoriaFirestore:
         self._colecao = cliente.collection(colecao)
 
     def acrescentar(self, registro: RegistroDeAuditoria) -> None:
-        dados = registro.model_dump()
-        # A busca por pessoa compara o e-mail sem maiúsculas.
-        dados["email"] = registro.email.lower() if registro.email else None
-        self._colecao.document(registro.id).create(dados)
+        self._colecao.document(registro.id).create(registro.model_dump())
 
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
         # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os
