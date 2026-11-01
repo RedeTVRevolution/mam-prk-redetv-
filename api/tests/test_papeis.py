@@ -143,3 +143,9 @@ def test_administrador_ja_guardado_nao_se_repete() -> None:
     papeis = papeis_do_usuario(["administrador"], "a@b.c", True, admins_de("a@b.c"))
 
     assert papeis == ["administrador"]
+
+
+def test_so_o_administrador_ve_a_auditoria() -> None:
+    for papel in ("consulta", "operador", "editor", "curador"):
+        assert "auditoria.ver" not in permissoes_de([papel])
+    assert "auditoria.ver" in permissoes_de(["administrador"])

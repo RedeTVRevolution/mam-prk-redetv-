@@ -13,6 +13,11 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.auditoria import (
+    RepositorioDeAuditoria,
+    RepositorioDeAuditoriaEmMemoria,
+    criar_rotas_da_auditoria,
+)
 from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
@@ -56,6 +61,7 @@ from api.nuvem import (
     ArmazenamentoStorage,
     CatalogoFirestore,
     RepositorioDeAprovacaoFirestore,
+    RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
     RepositorioFirestore,
@@ -137,6 +143,7 @@ def criar_app(
     admins_emergencia: str | None = None,
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
+    auditoria: RepositorioDeAuditoria | None = None,
     catalogo: Catalogo | None = None,
     indice: IndiceDaBusca | None = None,
     transporte_da_consulta: Transporte | None = None,
@@ -235,6 +242,9 @@ def criar_app(
             tempo_maximo_da_busca_s,
         )
     )
+    v1.include_router(
+        criar_rotas_da_auditoria(auditoria or RepositorioDeAuditoriaEmMemoria())
+    )
     app.include_router(v1)
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
@@ -257,6 +267,7 @@ if _projeto:
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
+        auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         indice=(
             AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())

@@ -13,6 +13,18 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
+from api.auditoria import (
+    FiltroDeAuditoria,
+    PaginaDeAuditoria,
+    RegistroDeAuditoria,
+    campo_da_pessoa,
+)
+from api.auditoria import (
+    casa_com_o_filtro as casa_com_o_filtro_da_auditoria,
+)
+from api.auditoria import (
+    pagina_de as pagina_da_auditoria,
+)
 from api.catalogo import (
     PessoaDoCatalogo,
     PessoaInexistente,
@@ -48,6 +60,7 @@ COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DAS_SUGESTOES = "sugestoes_de_perfil"
 COLECAO_DE_CONFIGURACAO = "configuracao"
+COLECAO_DA_AUDITORIA = "auditoria"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 
@@ -397,6 +410,53 @@ class RepositorioDeAprovacaoFirestore:
 
     def definir(self, tipos: frozenset[str]) -> None:
         self._documento.set({"tipos": sorted(tipos)})
+
+
+class RepositorioDeAuditoriaFirestore:
+    """Só acrescenta: `create` falha se o id já existe, e não há como alterar nem apagar."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DA_AUDITORIA
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def acrescentar(self, registro: RegistroDeAuditoria) -> None:
+        dados = registro.model_dump()
+        # A busca por pessoa compara o e-mail sem maiúsculas.
+        dados["email"] = registro.email.lower() if registro.email else None
+        self._colecao.document(registro.id).create(dados)
+
+    def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
+        # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os
+        # índices compostos estão no infra/main.tf.
+        consulta: Any = self._colecao
+        if filtro.pessoa is not None:
+            campo, valor = campo_da_pessoa(filtro.pessoa)
+            consulta = consulta.where(filter=FieldFilter(campo, "==", valor))
+        if filtro.alvo_id is not None:
+            consulta = consulta.where(
+                filter=FieldFilter("alvo_id", "==", filtro.alvo_id)
+            )
+        if filtro.acao is not None:
+            consulta = consulta.where(filter=FieldFilter("acao", "==", filtro.acao))
+        if filtro.de is not None:
+            consulta = consulta.where(filter=FieldFilter("quando", ">=", filtro.de))
+        if filtro.ate is not None:
+            consulta = consulta.where(filter=FieldFilter("quando", "<=", filtro.ate))
+        # O desempate implícito é o id do documento, na mesma direção da ordem.
+        consulta = consulta.order_by("quando", direction=firestore.Query.DESCENDING)
+        if filtro.cursor is not None:
+            ancora = self._colecao.document(filtro.cursor).get()
+            if not ancora.exists:
+                raise CursorInvalido
+            consulta = consulta.start_after(ancora)
+        registros = (
+            RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()
+        )
+        return pagina_da_auditoria(
+            (r for r in registros if casa_com_o_filtro_da_auditoria(r, filtro)),
+            filtro.limite,
+        )
 
 
 def assinatura_pelo_iam() -> dict[str, Any]:

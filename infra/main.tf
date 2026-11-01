@@ -179,6 +179,39 @@ resource "google_firestore_index" "acervo" {
   }
 }
 
+# Índices compostos da auditoria (GET /v1/admin/auditoria, #140): cada combinação não
+# vazia de pessoa (`uid` ou `email`), alvo e ação, com o período e a ordem em `quando`.
+# A coleção só recebe acréscimos.
+locals {
+  campos_da_auditoria = ["uid", "email", "alvo_id", "acao"]
+  indices_da_auditoria = {
+    for n in range(1, 16) : tostring(n) => [
+      for j, campo in local.campos_da_auditoria : campo
+      if floor(n / pow(2, j)) % 2 == 1
+    ]
+    # `pessoa` é uid ou e-mail, nunca os dois na mesma consulta.
+    if !(floor(n / 1) % 2 == 1 && floor(n / 2) % 2 == 1)
+  }
+}
+
+resource "google_firestore_index" "auditoria" {
+  for_each   = local.indices_da_auditoria
+  database   = google_firestore_database.mam.name
+  collection = "auditoria"
+
+  dynamic "fields" {
+    for_each = each.value
+    content {
+      field_path = fields.value
+      order      = "ASCENDING"
+    }
+  }
+  fields {
+    field_path = "quando"
+    order      = "DESCENDING"
+  }
+}
+
 # O único lugar que monta os nomes dos buckets. O código os recebe por variável
 # de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
 # web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).

@@ -16,12 +16,14 @@ import pytest
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from google.api_core.exceptions import AlreadyExists
 from google.auth import credentials as google_credentials
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
+from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
 from api.catalogo import PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
@@ -36,6 +38,7 @@ from api.nuvem import (
     ArmazenamentoStorage,
     CatalogoFirestore,
     RepositorioDeAprovacaoFirestore,
+    RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
@@ -788,3 +791,79 @@ class TestCatalogoFirestore:
             catalogo.apagar(p.id)
         with pytest.raises(PessoaInexistente):
             catalogo.corrigir(p.id, nome="X")
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeAuditoriaFirestore:
+    @pytest.fixture
+    def auditoria(self) -> RepositorioDeAuditoriaFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeAuditoriaFirestore(
+            cliente, colecao=f"auditoria-{uuid.uuid4().hex}"
+        )
+
+    @staticmethod
+    def _registro(id: str, minutos: int, **extra: object) -> RegistroDeAuditoria:
+        campos: dict[str, object] = {
+            "id": id,
+            "quando": BASE + timedelta(minutes=minutos),
+            "uid": "u1",
+            "email": "Ana@RedeTV.com",
+            "acao": "chave.emitida",
+            "alvo_tipo": "sistema",
+            "alvo_id": "s1",
+            "alvo_nome": "Playout",
+            "detalhes": {"antes": ["consulta"], "depois": ["editor"]},
+        }
+        campos.update(extra)
+        return RegistroDeAuditoria(**campos)  # type: ignore[arg-type]
+
+    def test_acrescenta_e_consulta_filtrando_e_paginando(
+        self, auditoria: RepositorioDeAuditoriaFirestore
+    ) -> None:
+        auditoria.acrescentar(self._registro("a", 0))
+        auditoria.acrescentar(
+            self._registro("b", 10, uid="u2", email="rui@redetv.com", alvo_id="v1")
+        )
+        auditoria.acrescentar(
+            self._registro("c", 20, acao="item.para_lixeira", alvo_id="v1")
+        )
+
+        todos = auditoria.consultar(FiltroDeAuditoria())
+        assert [r.id for r in todos.registros] == ["c", "b", "a"]
+        assert todos.registros[2].detalhes == {
+            "antes": ["consulta"],
+            "depois": ["editor"],
+        }
+        por_email = auditoria.consultar(FiltroDeAuditoria(pessoa="ana@redetv.com"))
+        assert [r.id for r in por_email.registros] == ["c", "a"]
+        por_uid = auditoria.consultar(FiltroDeAuditoria(pessoa="u2"))
+        assert [r.id for r in por_uid.registros] == ["b"]
+        por_alvo = auditoria.consultar(
+            FiltroDeAuditoria(alvo_id="v1", acao="item.para_lixeira")
+        )
+        assert [r.id for r in por_alvo.registros] == ["c"]
+        periodo = auditoria.consultar(
+            FiltroDeAuditoria(
+                de=BASE + timedelta(minutes=5), ate=BASE + timedelta(minutes=15)
+            )
+        )
+        assert [r.id for r in periodo.registros] == ["b"]
+        p1 = auditoria.consultar(FiltroDeAuditoria(limite=2))
+        p2 = auditoria.consultar(FiltroDeAuditoria(limite=2, cursor=p1.proximo_cursor))
+        assert [r.id for r in p1.registros] == ["c", "b"]
+        assert [r.id for r in p2.registros] == ["a"]
+
+    def test_nao_sobrescreve_um_registro_existente(
+        self, auditoria: RepositorioDeAuditoriaFirestore
+    ) -> None:
+        auditoria.acrescentar(self._registro("a", 0))
+
+        with pytest.raises(AlreadyExists):
+            auditoria.acrescentar(self._registro("a", 5, alvo_nome="Outro"))
+
+    def test_cursor_inexistente_levanta(
+        self, auditoria: RepositorioDeAuditoriaFirestore
+    ) -> None:
+        with pytest.raises(CursorInvalido):
+            auditoria.consultar(FiltroDeAuditoria(cursor="nada"))

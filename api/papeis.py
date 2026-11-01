@@ -9,7 +9,11 @@ from typing import Literal, Protocol, get_args
 Papel = Literal["consulta", "operador", "editor", "curador", "administrador"]
 PAPEIS: tuple[Papel, ...] = get_args(Papel)
 Permissao = Literal[
-    "decupagem.ver", "video.enviar", "decupagem.editar", "correcao.aprovar"
+    "decupagem.ver",
+    "video.enviar",
+    "decupagem.editar",
+    "correcao.aprovar",
+    "auditoria.ver",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
