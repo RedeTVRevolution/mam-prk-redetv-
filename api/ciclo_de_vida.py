@@ -52,11 +52,17 @@ def transitar(
     duracao_s: float | None = None,
     cortes_ms: Sequence[int] | None = None,
     timecode_origem: str | None = None,
+    taxa_de_quadros: float | None = None,
 ) -> Job | None:
     """O Job já em `para`, ou `None` se ele não estava mais em `de`."""
     if para not in TRANSICOES[de]:
         raise TransicaoProibida(de, para)
     mudancas: dict[str, Any] = {"estado": para, "atualizado_em": agora}
+    if para == "concluido":
+        # Quem indexa (api.indexacao) troca este estado ao terminar.
+        from api.jobs import Indexacao
+
+        mudancas["indexacao"] = Indexacao(estado="pendente", em=agora)
     if codigo_falha is not None:
         mudancas["codigo_falha"] = codigo_falha
     if sha256 is not None:
@@ -67,6 +73,8 @@ def transitar(
         mudancas["cortes_ms"] = list(cortes_ms)
     if timecode_origem is not None:
         mudancas["timecode_origem"] = timecode_origem
+    if taxa_de_quadros is not None:
+        mudancas["taxa_de_quadros"] = taxa_de_quadros
     return repositorio.transitar(job_id, de, mudancas)
 
 

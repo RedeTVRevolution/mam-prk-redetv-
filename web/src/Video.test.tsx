@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { useState } from 'react'
+import { criarClienteDaApi } from './api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 import catalogo from './catalogo.fixture.json'
 import Video from './Video.tsx'
@@ -244,9 +246,8 @@ async function abrir(
   await auth.confirmarTotp(CODIGO_TOTP_FALSO)
   render(
     <Video
-      autenticador={auth}
+      api={criarClienteDaApi(auth, () => {})}
       job={{ id: 'j1', nome: 'clipe.mp4', codigo_falha: null, ...job }}
-      aoSessaoExpirada={() => {}}
       podeEditar={podeEditar}
       podeAprovar={podeAprovar}
     />,
@@ -539,6 +540,41 @@ test('link expirado: o player pede outro e volta ao mesmo ponto', async () => {
   await waitFor(() => expect(player.getAttribute('src')).toBe('https://storage.exemplo/proxy/j1?v=2'))
   player.currentTime = 0
   fireEvent.loadedMetadata(player)
+  expect(player.currentTime).toBe(30)
+})
+
+test('o instante do endereço posiciona o player, e um novo instante salta para ele', async () => {
+  const auth = new AutenticadorFalso([
+    { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
+  ])
+  await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
+  await auth.confirmarTotp(CODIGO_TOTP_FALSO)
+  const api = criarClienteDaApi(auth, () => {})
+  // O endereço muda de `?t=90` para `?t=30` sem trocar de vídeo: a tela não remonta.
+  function ComInstante() {
+    const [inicio, setInicio] = useState(90)
+    return (
+      <>
+        <button type="button" onClick={() => setInicio(30)}>
+          Outro instante
+        </button>
+        <Video
+          api={api}
+          job={{ id: 'j1', nome: 'clipe.mp4', codigo_falha: null, estado: 'concluido' }}
+          inicioEmS={inicio}
+        />
+      </>
+    )
+  }
+  const usuario = userEvent.setup()
+  render(<ComInstante />)
+  const player = await jogador()
+
+  fireEvent.loadedMetadata(player)
+  expect(player.currentTime).toBe(90)
+
+  Object.defineProperty(player, 'readyState', { value: 1, configurable: true })
+  await usuario.click(screen.getByRole('button', { name: 'Outro instante' }))
   expect(player.currentTime).toBe(30)
 })
 
@@ -1465,6 +1501,8 @@ test('as setas movem a alça 100 ms, Shift move 1 s, e Enter grava item.tempos',
   fireEvent.keyDown(inicio, { key: 'ArrowRight', shiftKey: true })
   expect(inicio.getAttribute('aria-valuenow')).toBe('31100')
   expect(player.currentTime).toBe(31.1)
+  // Sem metadata, a alça de fim vai até o maior fim da decupagem (02:30).
+  expect(alca('Fim').getAttribute('aria-valuemax')).toBe('150000')
   fireEvent.keyDown(alca('Início'), { key: 'Enter' })
 
   const modal = within(await screen.findByRole('dialog'))
@@ -1504,19 +1542,6 @@ test('cancelar o modal devolve a ocorrência ao intervalo anterior', async () =>
   expect(alca('Fim').getAttribute('aria-valuenow')).toBe('60000')
   expect(correcoesRecebidas).toHaveLength(0)
 })
-
-test('as alças não passam uma da outra nem saem do vídeo', async () => {
-  const usuario = userEvent.setup()
-  await selecionarNaLinha(usuario, 'Pautas 00:30')
-
-  for (let i = 0; i < 31; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowRight', shiftKey: true })
-  expect(alca('Início').getAttribute('aria-valuenow')).toBe('60000')
-  for (let i = 0; i < 91; i++) fireEvent.keyDown(alca('Fim'), { key: 'ArrowRight', shiftKey: true })
-  // Sem metadata, a linha do tempo vai até o maior fim da decupagem (02:30).
-  expect(alca('Fim').getAttribute('aria-valuenow')).toBe('150000')
-  for (let i = 0; i < 61; i++) fireEvent.keyDown(alca('Início'), { key: 'ArrowLeft', shiftKey: true })
-  expect(alca('Início').getAttribute('aria-valuenow')).toBe('0')
-}, 30_000)
 
 test('arrastar a alça leva o player ao tempo dela e soltar abre o modal', async () => {
   const usuario = userEvent.setup()

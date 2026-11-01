@@ -3,13 +3,16 @@
 import hashlib
 import itertools
 import json
+import re
+import unicodedata
 import uuid
 import zlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -62,6 +65,7 @@ from api.correcoes import (
     reaplicar,
     versao_do_modelo,
 )
+from api.decupagem import caminho_do_quadro
 from api.papeis import (
     Papel,
     Permissao,
@@ -98,6 +102,16 @@ CodigoDeFalha = Literal[
 ]
 
 
+EstadoDaIndexacao = Literal["pendente", "indexado", "falhou"]
+
+
+class Indexacao(BaseModel):
+    """Onde o Job está no índice da busca; uma falha dela não muda o `estado` do Job."""
+
+    estado: EstadoDaIndexacao
+    em: datetime
+
+
 class Job(BaseModel):
     id: str
     nome: str
@@ -109,13 +123,25 @@ class Job(BaseModel):
     # Timecode inicial da faixa `tmcd` do arquivo; `None` sem a faixa, fora do
     # formato ou em Job anterior ao campo.
     timecode_origem: str | None = None
+    # Quadros por segundo do vídeo (ffprobe); `None` em Job anterior ao campo.
+    taxa_de_quadros: float | None = None
+    # Caminho do quadro de capa (`quadros/plano-1.jpg`), escolhido ao tirar os
+    # quadros-chave; `None` sem planos com quadro e em Job anterior ao campo.
+    capa: str | None = None
     estado: Estado
     codigo_falha: CodigoDeFalha | None = None
     criado_por: str
+    # E-mail de quem criou; `None` em Job de sistema e em Job anterior ao campo.
+    criado_por_email: str | None = None
     sistema: str | None = None
     programa: str | None = None
+    # Palavras normalizadas do nome do arquivo, para a busca por nome (o Firestore
+    # não busca por trecho); vazio em Job anterior ao campo.
+    palavras: list[str] = []
     # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
     data_exibicao: date | None = None
+    # `None` até o Job concluir (e em Job anterior ao campo).
+    indexacao: Indexacao | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -123,6 +149,24 @@ class Job(BaseModel):
     def _data_como_texto(self, data: date | None) -> str | None:
         # O Firestore não guarda `date`; o Pydantic a lê de volta do texto ISO.
         return data.isoformat() if data else None
+
+
+def palavras_do_nome(nome: str) -> list[str]:
+    """Palavras do nome do arquivo, sem maiúsculas nem acentos.
+
+    Quebra em tudo que não é letra nem dígito (`_`, `-`, `.`, espaço, parênteses...).
+    """
+    sem_acento = "".join(
+        c for c in unicodedata.normalize("NFKD", nome) if not unicodedata.combining(c)
+    )
+    palavras = [p for p in re.split(r"[\W_]+", sem_acento.casefold()) if p]
+    return list(dict.fromkeys(palavras))
+
+
+class EnviadoPor(BaseModel):
+    tipo: Literal["pessoa", "sistema"]
+    # O e-mail da pessoa (`None` em Job antigo) ou o nome do sistema.
+    nome: str | None
 
 
 class JobPublico(BaseModel):
@@ -133,14 +177,28 @@ class JobPublico(BaseModel):
     estado: Estado
     codigo_falha: CodigoDeFalha | None
     duracao_s: float | None
+    # Cortes de câmera, em ms: os riscos da régua do Visualizador.
+    cortes_ms: list[int] | None = None
+    timecode_origem: str | None = None
+    taxa_de_quadros: float | None = None
+    # URL assinada, de curta validade, do quadro de capa; só a listagem a preenche.
+    capa_url: str | None = None
     programa: str | None = None
     data_exibicao: date | None = None
+    indexacao: Indexacao | None = None
+    enviado_por: EnviadoPor
     criado_em: datetime
     atualizado_em: datetime
 
     @classmethod
     def de(cls, job: Job) -> "JobPublico":
-        return cls(**job.model_dump(include=set(cls.model_fields)))
+        campos = set(cls.model_fields) - {"enviado_por"}
+        enviado_por = (
+            EnviadoPor(tipo="sistema", nome=job.sistema)
+            if job.sistema is not None
+            else EnviadoPor(tipo="pessoa", nome=job.criado_por_email)
+        )
+        return cls(**job.model_dump(include=campos), enviado_por=enviado_por)
 
 
 def _etag(publico: JobPublico) -> str:
@@ -221,6 +279,71 @@ class ServicoIndisponivel(Exception):
     """Porta ainda sem adaptador real."""
 
 
+class CursorInvalido(Exception):
+    """O cursor não aponta para um Job que exista."""
+
+
+Ordem = Literal["enviado", "exibicao"]
+LIMITE_MAXIMO = 200
+
+
+@dataclass(frozen=True)
+class FiltroDeJobs:
+    """Os filtros do acervo; todos opcionais e combináveis."""
+
+    programa: str | None = None
+    estados: frozenset[Estado] = frozenset()
+    exibicao_de: date | None = None
+    exibicao_ate: date | None = None
+    palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
+    sistema: str | None = None
+    ordem: Ordem = "enviado"
+    limite: int | None = None  # `None`: a lista inteira, sem cursor
+    cursor: str | None = None  # id do último Job da página anterior
+
+
+@dataclass(frozen=True)
+class PaginaDeJobs:
+    jobs: list[Job]
+    proximo_cursor: str | None = None
+
+    @classmethod
+    def de(cls, jobs: Iterable[Job], limite: int | None) -> "PaginaDeJobs":
+        """Corta os Jobs já filtrados e em ordem; só lê um além do limite."""
+        if limite is None:
+            return cls(list(jobs))
+        lidos = list(itertools.islice(jobs, limite + 1))
+        if len(lidos) <= limite:
+            return cls(lidos)
+        pagina = lidos[:limite]
+        return cls(pagina, pagina[-1].id)
+
+
+def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
+    """Todos os filtros menos ordem e paginação."""
+    if filtro.programa is not None and job.programa != filtro.programa:
+        return False
+    if filtro.sistema is not None and job.sistema != filtro.sistema:
+        return False
+    if filtro.estados and job.estado not in filtro.estados:
+        return False
+    if filtro.exibicao_de is not None or filtro.exibicao_ate is not None:
+        if job.data_exibicao is None:
+            return False
+        if filtro.exibicao_de and job.data_exibicao < filtro.exibicao_de:
+            return False
+        if filtro.exibicao_ate and job.data_exibicao > filtro.exibicao_ate:
+            return False
+    return all(p in job.palavras for p in filtro.palavras)
+
+
+def chave_de_ordem(job: Job, ordem: Ordem) -> tuple[Any, ...]:
+    """Maior primeiro. Na exibição, quem não tem data fica no fim; o id desempata."""
+    if ordem == "exibicao":
+        return (job.data_exibicao is not None, job.data_exibicao or date.min, job.id)
+    return (job.criado_em, job.id)
+
+
 class RepositorioDeJobs(Protocol):
     """Porta para o Firestore; os testes usam uma versão em memória."""
 
@@ -242,8 +365,8 @@ class RepositorioDeJobs(Protocol):
         """Do mais recente para o mais antigo."""
         ...
 
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
-        """Só os jobs do sistema, do mais recente para o mais antigo."""
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        """Filtra, ordena e pagina. Levanta `CursorInvalido` se o cursor não existe."""
         ...
 
 
@@ -258,6 +381,10 @@ class Armazenamento(Protocol):
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         """URL assinada de leitura do proxy de reprodução, válida por `validade`."""
+        ...
+
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        """URL assinada de leitura do JPEG de `caminho` (o campo `quadro` da Decupagem)."""
         ...
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
@@ -287,8 +414,24 @@ class RepositorioEmMemoria:
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
-        return [j for j in self.listar() if j.sistema == sistema]
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        corte = None
+        if filtro.cursor is not None:
+            ancora = self._jobs.get(filtro.cursor)
+            if ancora is None:
+                raise CursorInvalido
+            corte = chave_de_ordem(ancora, filtro.ordem)
+        jobs = sorted(
+            (
+                j
+                for j in self._jobs.values()
+                if casa_com_o_filtro(j, filtro)
+                and (corte is None or chave_de_ordem(j, filtro.ordem) < corte)
+            ),
+            key=lambda j: chave_de_ordem(j, filtro.ordem),
+            reverse=True,
+        )
+        return PaginaDeJobs.de(jobs, filtro.limite)
 
 
 class RepositorioIndisponivel:
@@ -306,7 +449,7 @@ class RepositorioIndisponivel:
     def listar(self) -> list[Job]:
         raise ServicoIndisponivel
 
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         raise ServicoIndisponivel
 
 
@@ -318,6 +461,9 @@ class ArmazenamentoIndisponivel:
         raise ServicoIndisponivel
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
+        raise ServicoIndisponivel
+
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
@@ -451,6 +597,7 @@ def criar_rotas(
     correcoes: RepositorioDeCorrecoes,
     aprovacao: RepositorioDeAprovacao,
     catalogo: Catalogo,
+    reindexar: Callable[[Job], object],
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -462,8 +609,9 @@ def criar_rotas(
             raise HTTPException(422, "Tamanho fora do limite")
         if isinstance(chamador, Sistema):
             criado_por, sistema = f"sistema:{chamador.sistema}", chamador.sistema
+            email = None
         else:
-            criado_por, sistema = chamador.uid, None
+            criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
         if (
             novo.data_exibicao is not None
@@ -476,7 +624,9 @@ def criar_rotas(
             tamanho_bytes=novo.tamanho_bytes,
             estado="aguardando_upload",
             criado_por=criado_por,
+            criado_por_email=email,
             sistema=sistema,
+            palavras=palavras_do_nome(novo.nome),
             programa=novo.programa,
             data_exibicao=novo.data_exibicao,
             criado_em=agora,
@@ -486,15 +636,52 @@ def criar_rotas(
         url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
-    @rotas.get("")
+    def _com_capa(job: Job) -> JobPublico:
+        publico = JobPublico.de(job)
+        if job.capa is not None:
+            publico.capa_url = armazenamento.url_do_quadro(
+                job.id, job.capa, VALIDADE_DA_REPRODUCAO
+            )
+        return publico
+
+    @rotas.get("", response_model=list[JobPublico])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-    ) -> list[JobPublico]:
+        programa: str | None = None,
+        estado: Annotated[list[Estado] | None, Query()] = None,
+        exibicao_de: date | None = None,
+        exibicao_ate: date | None = None,
+        q: str | None = None,
+        sistema: str | None = None,
+        ordem: Ordem = "enviado",
+        limite: Annotated[int | None, Query(ge=1, le=LIMITE_MAXIMO)] = None,
+        cursor: str | None = None,
+    ) -> Response:
         if isinstance(chamador, Sistema):
-            jobs = repositorio.listar_por_sistema(chamador.sistema)
-        else:
-            jobs = repositorio.listar()
-        return [JobPublico.de(j) for j in jobs]
+            # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
+            if sistema not in (None, chamador.sistema):
+                return JSONResponse([])
+            sistema = chamador.sistema
+        filtro = FiltroDeJobs(
+            programa=programa,
+            estados=frozenset(estado or ()),
+            exibicao_de=exibicao_de,
+            exibicao_ate=exibicao_ate,
+            palavras=tuple(palavras_do_nome(q or "")),
+            sistema=sistema,
+            ordem=ordem,
+            limite=limite,
+            cursor=cursor,
+        )
+        try:
+            pagina = repositorio.consultar(filtro)
+        except CursorInvalido:
+            raise HTTPException(422, "Cursor inválido") from None
+        corpo = [_com_capa(j).model_dump(mode="json") for j in pagina.jobs]
+        cabecalhos = (
+            {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
+        )
+        return JSONResponse(corpo, headers=cabecalhos)
 
     @rotas.get("/{job_id}", response_model=JobPublico)
     def ler(
@@ -535,6 +722,18 @@ def criar_rotas(
     ) -> Reproducao:
         job = obter_concluido(job_id, chamador)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
+        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
+
+    @rotas.get("/{job_id}/quadros/{arquivo}")
+    def quadro(
+        job_id: str,
+        arquivo: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$")],
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> Reproducao:
+        job = obter_concluido(job_id, chamador)
+        url = armazenamento.url_do_quadro(
+            job.id, caminho_do_quadro(arquivo), VALIDADE_DA_REPRODUCAO
+        )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
@@ -609,6 +808,9 @@ def criar_rotas(
         except TemposInvalidos:
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         correcoes.acrescentar(correcao)
+        # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
+        if not correcao.exige_aprovacao:
+            reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
 
     @rotas.get("/{job_id}/correcoes")
@@ -646,6 +848,7 @@ def criar_rotas(
                 "Correção já desfeita, saiu da fila, não é uma renomeação"
                 " ou não casa com a versão atual",
             ) from None
+        reindexar(job)
         return {"id": registro.id}
 
     @rotas.get("/{job_id}/fila")
@@ -680,6 +883,7 @@ def criar_rotas(
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
+        reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
@@ -743,6 +947,8 @@ def criar_rotas(
             raise HTTPException(404, "Correção não encontrada") from None
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
+        if aprovada:
+            reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/aprovar", status_code=201)

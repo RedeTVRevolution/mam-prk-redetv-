@@ -53,6 +53,13 @@ def test_so_consulta_nao_cria_job_mas_le_a_decupagem() -> None:
     assert cliente.get("/v1/jobs/j1/decupagem", headers=AUTORIZACAO).status_code == 200
 
 
+def test_quadro_exige_decupagem_ver() -> None:
+    rota = "/v1/jobs/j1/quadros/plano-0.jpg"
+
+    assert _mundo(["consulta"]).get(rota, headers=AUTORIZACAO).status_code == 200
+    assert _mundo([]).get(rota, headers=AUTORIZACAO).status_code == 403
+
+
 @pytest.mark.parametrize("papeis", [None, ["operador"], ["consulta", "operador"]])
 def test_quem_envia_cria_job(papeis: list[Papel] | None) -> None:
     resposta = _mundo(papeis).post("/v1/jobs", json=NOVO_JOB, headers=AUTORIZACAO)

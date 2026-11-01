@@ -65,6 +65,8 @@ ROTAS = [
     ("ler", "GET", "/v1/jobs/j1", {}),
     ("ler", "GET", "/v1/jobs/j1/decupagem", {}),
     ("ler", "GET", "/v1/jobs/j1/reproducao", {}),
+    ("ler", "GET", "/v1/busca?q=vestido", {}),
+    ("ler", "GET", "/v1/jobs/j1/quadros/plano-0.jpg", {}),
     ("cancelar", "DELETE", "/v1/jobs/j1", {}),
 ]
 
@@ -118,7 +120,7 @@ def test_dois_sistemas_com_arquivo_igual_nao_enxergam_o_job_um_do_outro() -> Non
         mundo.armazenamento.decupagens[job_id] = [b"{}"]
 
     for cabecalho, alheio in ((a, id_b), (b, id_a)):
-        for sufixo in ("", "/decupagem", "/reproducao"):
+        for sufixo in ("", "/decupagem", "/reproducao", "/quadros/plano-0.jpg"):
             resposta = mundo.cliente.get(
                 f"/v1/jobs/{alheio}{sufixo}", headers=cabecalho
             )

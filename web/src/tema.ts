@@ -7,7 +7,6 @@ import {
   Popover,
   Table,
   Tooltip,
-  type AppShellNavbarConfiguration,
   type CSSVariablesResolver,
   type MantineColorsTuple,
 } from '@mantine/core'
@@ -131,9 +130,8 @@ export const variaveis: CSSVariablesResolver = () => ({
   },
 })
 
-// A barra lateral é da Biblioteca, mas o AppShell é um só (o do App): dois AppShells
-// aninhados disputam as mesmas variáveis de layout no :root.
-export const NAVBAR_DA_BIBLIOTECA: AppShellNavbarConfiguration = { width: 240, breakpoint: 'sm' }
+/** A barra fixa do topo: no máximo 44 px. */
+export const ALTURA_DA_BARRA = 44
 
 // O selo usa a cor do estado como texto, sobre a mesma cor a 10% (variante light).
 export const ESTADOS_DO_JOB = {
@@ -157,6 +155,29 @@ export const CORES_DE_OCORRENCIA = {
   comercial: { cor: '#D9C2FF', rotulo: 'Comerciais' },
   fala: { cor: '#8E9196', rotulo: 'Fala' },
   texto_na_tela: { cor: '#A8EFC8', rotulo: 'Texto na tela' },
+} as const
+
+/**
+ * A cor de cada `cor_base` do objeto, para o quadradinho da lista. É a cor do objeto, não a do
+ * tipo de ocorrência; a tela sempre escreve a palavra ao lado.
+ */
+export const CORES_DE_OBJETO = {
+  vermelho: '#E03C3C',
+  laranja: '#F08A24',
+  amarelo: '#F2D13A',
+  verde: '#3FAE5A',
+  azul: '#3F7FE0',
+  roxo: '#8C4FD0',
+  rosa: '#F28DB8',
+  marrom: '#8B5A2B',
+  bege: '#D9C3A0',
+  preto: '#0B0C0D',
+  branco: '#F5F5F5',
+  cinza: '#8A8D93',
+  dourado: '#D4AF37',
+  prateado: '#C0C4CC',
+  // Sem uma cor só: o cinza do texto secundário.
+  estampado: CORES.textoSecundario,
 } as const
 
 export type TipoDeOcorrencia = keyof typeof CORES_DE_OCORRENCIA

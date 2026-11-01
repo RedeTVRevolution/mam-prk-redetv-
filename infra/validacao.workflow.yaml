@@ -1,10 +1,11 @@
 # Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
 # quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
 # falhou, salvo se estiver cancelado. Depois, só se o Job ficou em `analisando`, roda o
-# Job de transcrição, o de OCR da tela e o de análise. A análise é um Job, e não uma
+# Job de transcrição, o de OCR da tela e o de análise. Por último vem o Job dos quadros-chave
+# (#115), sem internet: se ele falha, o Job de análise já concluiu e a falha só vai ao log. A análise é um Job, e não uma
 # chamada HTTP, porque passa do teto de 1800 s da chamada do Workflows (#127).
 # Carregado por templatefile: ${projeto}, ${regiao}, ${job_de_validacao},
-# ${job_de_transcricao}, ${job_de_ocr}, ${job_de_analise}.
+# ${job_de_transcricao}, ${job_de_ocr}, ${job_de_analise}, ${job_de_quadros}.
 main:
   params: [evento]
   steps:
@@ -233,5 +234,51 @@ main:
                         timestampValue: $${time.format(sys.now())}
             - encerra_a_analise_com_falha:
                 raise: $${e}
+    - tira_os_quadros:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_quadros}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de quadros tem até 3600 s.
+            connector_params:
+              timeout: 3900
+        except:
+          as: e
+          steps:
+            # O Job já está concluído; sem os JPEGs a Decupagem segue valendo.
+            - registra_a_falha_dos_quadros:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"quadros-chave falharam para " + job_id}
+    - indexa:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_indexacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de indexação tem até 1800 s.
+            connector_params:
+              timeout: 2100
+        except:
+          as: e
+          steps:
+            # O Job já está concluído; a falha fica no estado da indexação e no log.
+            - registra_a_falha_da_indexacao:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"indexação falhou para " + job_id}
     - fim:
         return: $${job_id}

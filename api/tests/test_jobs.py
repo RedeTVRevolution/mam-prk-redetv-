@@ -16,6 +16,7 @@ from api.jobs import (
     expirar_uploads,
 )
 from api.main import criar_app
+from api.papeis import RepositorioDePapeisEmMemoria
 
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
 INICIO = datetime(2026, 10, 29, 12, 0, tzinfo=UTC)
@@ -48,6 +49,9 @@ class ArmazenamentoFalso:
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/proxy/{job_id}?validade={int(validade.total_seconds())}"
+
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        return f"https://storage.exemplo/quadros/{job_id}/{caminho}?validade={int(validade.total_seconds())}"
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         # Gerador, como seria o adaptador real: a falha só aparece no primeiro pedaço.
@@ -180,12 +184,58 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "nome",
         "programa",
         "data_exibicao",
+        "indexacao",
+        "enviado_por",
         "estado",
         "codigo_falha",
         "duracao_s",
+        "cortes_ms",
+        "timecode_origem",
+        "taxa_de_quadros",
+        "capa_url",
         "criado_em",
         "atualizado_em",
     }
+
+
+def test_get_job_traz_timecode_de_origem_e_taxa_de_quadros() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None
+    ambiente.repositorio.salvar(
+        job.model_copy(
+            update={"timecode_origem": "01:00:00;00", "taxa_de_quadros": 30000 / 1001}
+        )
+    )
+
+    corpo = ambiente.cliente.get(f"/v1/jobs/{job_id}", headers=AUTORIZACAO).json()
+
+    assert corpo["timecode_origem"] == "01:00:00;00"
+    assert corpo["taxa_de_quadros"] == pytest.approx(29.97, abs=0.001)
+
+
+def test_get_job_traz_os_cortes_de_camera() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+    job = ambiente.repositorio.obter(job_id)
+    assert job is not None
+    ambiente.repositorio.salvar(job.model_copy(update={"cortes_ms": [1200, 5400]}))
+
+    corpo = ambiente.cliente.get(f"/v1/jobs/{job_id}", headers=AUTORIZACAO).json()
+
+    assert corpo["cortes_ms"] == [1200, 5400]
+
+
+def test_get_job_sem_timecode_traz_null() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "analisando")
+
+    corpo = ambiente.cliente.get(f"/v1/jobs/{job_id}", headers=AUTORIZACAO).json()
+
+    assert corpo["timecode_origem"] is None
+    assert corpo["taxa_de_quadros"] is None
+    assert corpo["cortes_ms"] is None
 
 
 def test_get_job_inexistente_recebe_404() -> None:
@@ -268,6 +318,36 @@ def test_reproducao_devolve_link_assinado_e_quando_expira() -> None:
         "url": "https://storage.exemplo/proxy/j1?validade=600",
         "expira_em": "2026-10-29T12:10:00Z",
     }
+
+
+def test_quadro_devolve_link_assinado_do_jpeg_e_quando_expira() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/quadros/plano-0.jpg", headers=AUTORIZACAO
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.json() == {
+        "url": "https://storage.exemplo/quadros/j1/quadros/plano-0.jpg?validade=600",
+        "expira_em": "2026-10-29T12:10:00Z",
+    }
+
+
+def test_quadro_recusa_nome_que_nao_e_de_um_quadro_e_job_que_nao_concluiu() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    for nome in ("..%2Fj2%2Fproxy.mp4", "plano-0.png", ".jpg", "a%2Fb.jpg"):
+        resposta = ambiente.cliente.get(
+            f"/v1/jobs/{job_id}/quadros/{nome}", headers=AUTORIZACAO
+        )
+        assert resposta.status_code in (404, 422), nome
+    em_analise = _job_com_estado(ambiente, "analisando")
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{em_analise}/quadros/plano-0.jpg", headers=AUTORIZACAO
+    )
+    assert resposta.status_code == 409
 
 
 def test_reproducao_e_decupagem_dao_409_antes_de_concluido_e_404_sem_job() -> None:
@@ -633,3 +713,54 @@ def test_data_de_exibicao_vai_ao_armazenamento_como_texto() -> None:
 
     assert registro["data_exibicao"] == "1999-12-31"
     assert Job.model_validate(registro) == job
+
+
+def _job_com_capa(ambiente: Ambiente, job_id: str, capa: str | None) -> None:
+    ambiente.repositorio.salvar(
+        Job(
+            id=job_id,
+            nome=f"{job_id}.mp4",
+            tamanho_bytes=10,
+            estado="concluido",
+            criado_por="u1",
+            capa=capa,
+            criado_em=ambiente.relogio(),
+            atualizado_em=ambiente.relogio(),
+        )
+    )
+
+
+def test_listagem_traz_a_url_assinada_da_capa_e_job_sem_capa_traz_null() -> None:
+    ambiente = Ambiente()
+    _job_com_capa(ambiente, "com", "quadros/plano-1.jpg")
+    _job_com_capa(ambiente, "sem", None)
+
+    lista = ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json()
+
+    urls = {j["id"]: j["capa_url"] for j in lista}
+    assert urls == {
+        "com": "https://storage.exemplo/quadros/com/quadros/plano-1.jpg?validade=600",
+        "sem": None,
+    }
+
+
+def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
+    repositorio = RepositorioEmMemoria()
+    armazenamento = ArmazenamentoFalso()
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("u1", [])
+    cliente = TestClient(
+        criar_app(VerificadorFalso(), repositorio, armazenamento, papeis=papeis)
+    )
+    repositorio.salvar(
+        Job(
+            id="com", nome="com.mp4", tamanho_bytes=10, estado="concluido",
+            criado_por="u1", capa="quadros/plano-1.jpg",
+            criado_em=INICIO, atualizado_em=INICIO,
+        )
+    )  # fmt: skip
+
+    resposta = cliente.get("/v1/jobs", headers=AUTORIZACAO)
+
+    assert resposta.status_code == 403
+    assert "capa_url" not in resposta.text

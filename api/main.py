@@ -8,7 +8,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
+from starlette.exceptions import HTTPException as ExcecaoHttp
+from starlette.responses import Response
+from starlette.types import Scope
 
+from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
@@ -22,6 +26,7 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
+from api.busca import Busca, Ranking, RankingEmOrdem
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
@@ -31,6 +36,10 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.entendimento_da_consulta import ModelArmor
+from api.gemini import Chamada, ErroHttp, Transporte
+from api.indexacao import reindexar
+from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
     Armazenamento,
@@ -60,6 +69,11 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import PERFIS
+from api.rota_da_busca import (
+    CONSULTAS_POR_MINUTO,
+    TEMPO_MAXIMO_S,
+    criar_rotas_da_busca,
+)
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -79,6 +93,36 @@ class _SemChaves:
         raise ChaveInvalida
 
 
+class _SemModelo:
+    """Sem modelo ligado à busca: toda consulta cai no plano B."""
+
+    def gerar(self, chamada: Chamada) -> str:
+        raise ErroHttp(503)
+
+
+class _SemModelArmor:
+    """Sem Model Armor, não há veredito: o modelo nunca é chamado (plano B)."""
+
+    def acusa_injecao(self, texto: str) -> bool:
+        raise RuntimeError("Model Armor não ligado")
+
+
+class _FrontComEnderecos(StaticFiles):
+    """O front tem endereço por tela (`/video/{id}`): fora de `/v1`, o que não é arquivo
+    do build devolve o `index.html`, e o roteador do front decide a tela."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except ExcecaoHttp as erro:
+            ultimo = path.rsplit("/", 1)[-1]
+            if erro.status_code != 404 or "." in ultimo:
+                raise
+            if path == "v1" or path.startswith("v1/"):
+                raise
+            return await super().get_response("index.html", scope)
+
+
 class UsuarioComPapeis(Usuario):
     papeis: list[Papel]
     permissoes: list[Permissao]
@@ -94,6 +138,12 @@ def criar_app(
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
     catalogo: Catalogo | None = None,
+    indice: IndiceDaBusca | None = None,
+    transporte_da_consulta: Transporte | None = None,
+    armor: ModelArmor | None = None,
+    ranking: Ranking | None = None,
+    busca_por_minuto: int = CONSULTAS_POR_MINUTO,
+    tempo_maximo_da_busca_s: float = TEMPO_MAXIMO_S,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
@@ -143,20 +193,51 @@ def criar_app(
         """Os tipos de Correção e os vocabulários que o front mostra."""
         return catalogo_de_correcoes()
 
+    repositorio_de_jobs = repositorio or RepositorioIndisponivel()
+    armazenamento_dos_jobs = armazenamento or ArmazenamentoIndisponivel()
+    repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
+    indice_da_busca = indice or IndiceEmMemoria()
+    catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     v1.include_router(
         criar_rotas(
-            repositorio or RepositorioIndisponivel(),
-            armazenamento or ArmazenamentoIndisponivel(),
+            repositorio_de_jobs,
+            armazenamento_dos_jobs,
             tamanho_maximo_bytes,
             relogio,
-            correcoes or RepositorioDeCorrecoesEmMemoria(),
+            repositorio_de_correcoes,
             aprovacao or RepositorioDeAprovacaoEmMemoria(),
-            catalogo or CatalogoEmMemoria(),
+            catalogo_de_pessoas,
+            lambda job: reindexar(
+                job,
+                repositorio_de_jobs,
+                armazenamento_dos_jobs,
+                repositorio_de_correcoes,
+                indice_da_busca,
+                relogio,
+            ),
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_busca(
+            Busca(
+                transporte=transporte_da_consulta or _SemModelo(),
+                catalogo=catalogo_de_pessoas,
+                armor=armor or _SemModelArmor(),
+                programas=sorted(PERFIS),
+                indice=indice_da_busca,
+                ranking=ranking or RankingEmOrdem(),
+                repositorio=repositorio_de_jobs,
+                armazenamento=armazenamento_dos_jobs,
+                relogio=relogio,
+            ),
+            relogio,
+            busca_por_minuto,
+            tempo_maximo_da_busca_s,
         )
     )
     app.include_router(v1)
     if pasta_web.is_dir():
-        app.mount("/", StaticFiles(directory=pasta_web, html=True))
+        app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
     return app
 
 
@@ -177,6 +258,11 @@ if _projeto:
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
+        indice=(
+            AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
+            if "BUSCA_COLECAO" in os.environ
+            else None
+        ),
     )
 else:
     app = criar_app()

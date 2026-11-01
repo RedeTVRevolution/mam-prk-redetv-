@@ -186,6 +186,68 @@ def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
     assert 'timeout = "21600s"' in job
 
 
+def test_quadros_chave_rodam_depois_da_analise_e_a_falha_deles_nao_derruba_o_job() -> (
+    None
+):
+    texto = _texto()
+
+    analisa = texto.index("- analisa:")
+    quadros = texto.index("- tira_os_quadros:")
+    fim = texto.index("- fim:")
+    assert analisa < quadros < fim
+    passo = texto[quadros:fim]
+    assert "googleapis.run.v2.projects.locations.jobs.run" in passo
+    assert "jobs/${job_de_quadros}" in passo
+    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
+    # O Job já está concluído: sem os JPEGs a Decupagem segue valendo.
+    assert "except:" in passo and "sys.log" in passo and "raise" not in passo
+
+
+def test_job_de_quadros_no_main_tf_sem_internet_com_a_imagem_da_validacao() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    job = main[main.index('resource "google_cloud_run_v2_job" "quadros"') :].split(
+        "\nresource "
+    )[0]
+    assert "google_compute_network.validacao.id" in job
+    assert "var.imagem_validacao" in job
+    assert 'args    = ["-m", "api.quadros_chave"]' in job
+    assert "max_retries     = 0" in job
+    assert 'local.buckets["aceitos"]' in job and 'local.buckets["decupagens"]' in job
+    assert "job_de_quadros     = google_cloud_run_v2_job.quadros.name" in main
+    # Lê a cópia limpa e grava os JPEGs e a Decupagem; não escreve em aceitos.
+    assert 'quadros = { aceitos = "roles/storage.objectViewer"' in main
+    assert 'decupagens = "roles/storage.objectUser"' in main
+
+
+def test_indexacao_roda_depois_dos_quadros_e_a_falha_dela_nao_derruba_o_job() -> None:
+    texto = _texto()
+
+    quadros = texto.index("- tira_os_quadros:")
+    indexa = texto.index("- indexa:")
+    fim = texto.index("- fim:")
+    assert quadros < indexa < fim
+    passo = texto[indexa:fim]
+    assert "jobs/${job_de_indexacao}" in passo
+    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
+    assert "except:" in passo and "sys.log" in passo and "raise" not in passo
+
+
+def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    job = main[main.index('resource "google_cloud_run_v2_job" "indexacao"') :].split(
+        "\nresource "
+    )[0]
+    assert "vpc_access" not in job
+    assert 'args    = ["-m", "api.indexacao"]' in job
+    assert "max_retries     = 0" in job
+    assert "BUSCA_COLECAO" in job and "BUSCA_INDICE_QUADRO" in job
+    assert "job_de_indexacao   = google_cloud_run_v2_job.indexacao.name" in main
+    # Só lê a Decupagem; não escreve em bucket nenhum.
+    assert 'indexacao = { decupagens = "roles/storage.objectViewer" }' in main
+
+
 def _segundos(texto: str) -> int:
     return int(texto.strip().removesuffix("s"))
 
@@ -197,7 +259,9 @@ def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
         "valida": ("validacao", "- valida:", "- le_o_job:"),
         "transcreve": ("transcricao", "- transcreve:", "- le_a_tela:"),
         "le_a_tela": ("ocr", "- le_a_tela:", "- analisa:"),
-        "analisa": ("analise", "- analisa:", "- fim:"),
+        "analisa": ("analise", "- analisa:", "- tira_os_quadros:"),
+        "tira_os_quadros": ("quadros", "- tira_os_quadros:", "- indexa:"),
+        "indexa": ("indexacao", "- indexa:", "- fim:"),
     }
     for nome, (job, de, ate) in passos.items():
         recurso = main[main.index(f'resource "google_cloud_run_v2_job" "{job}"') :]

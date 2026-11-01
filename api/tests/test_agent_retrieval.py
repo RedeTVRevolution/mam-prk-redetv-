@@ -1,0 +1,304 @@
+from datetime import date
+from typing import Any
+
+import pytest
+
+from api.agent_retrieval import (
+    AgentRetrieval,
+    ConfigDaBusca,
+    JaExiste,
+    apagar_colecao,
+    criar_colecao,
+    esperar,
+    esquema_da_colecao,
+    filtro_do_pedido,
+    indices_da_colecao,
+    pedido_de_busca,
+)
+from api.indice_da_busca import Consulta, Filtros, Registro
+
+CONFIG = ConfigDaBusca(
+    projeto="proj-x",
+    regiao="reg-y",
+    colecao="col-z",
+    indice_da_descricao="ind-d",
+    indice_do_quadro="ind-q",
+    dimensao=256,
+)
+
+
+def test_config_vem_so_do_ambiente() -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+    }
+    assert ConfigDaBusca.do_ambiente(ambiente) == ConfigDaBusca(
+        "p", "r", "c", "d", "q", 128
+    )
+    with pytest.raises(KeyError):
+        ConfigDaBusca.do_ambiente({})
+
+
+def test_filtro_composto_junta_todos_os_campos_com_and() -> None:
+    filtro = filtro_do_pedido(
+        Filtros(tipo="objeto", categoria="roupa", cor_base="vermelho", dono="cat-1")
+    )
+    assert filtro == {
+        "$and": [
+            {"tipo": {"$eq": "objeto"}},
+            {"categoria": {"$eq": "roupa"}},
+            {"cor_base": {"$all": ["vermelho"]}},
+            {"dono": {"$eq": "cat-1"}},
+        ]
+    }
+
+
+def test_filtro_de_datas_e_pessoa() -> None:
+    filtro = filtro_do_pedido(
+        Filtros(
+            pessoa="cat-1", exibido_desde=date(2026, 1, 2), exibido_ate=date(2026, 3, 4)
+        )
+    )
+    assert filtro == {
+        "$and": [
+            {"pessoas": {"$all": ["cat-1"]}},
+            {"data_de_exibicao": {"$gte": 20260102}},
+            {"data_de_exibicao": {"$lte": 20260304}},
+        ]
+    }
+
+
+def test_sem_filtros_nao_ha_filtro() -> None:
+    assert filtro_do_pedido(Filtros()) is None
+
+
+def _buscas(pedido: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {next(iter(b)): b[next(iter(b))] for b in pedido["searches"]}
+
+
+def test_pedido_hibrido_leva_texto_significado_vetor_e_rrf() -> None:
+    pedido = pedido_de_busca(
+        CONFIG,
+        Consulta(
+            filtros=Filtros(tipo="plano"),
+            texto="vestido vermelho",
+            significado="mulher de vestido de gala",
+            vetor_do_quadro=[0.1, 0.2],
+            limite=7,
+        ),
+    )
+    buscas = _buscas(pedido)
+    assert set(buscas) == {"textSearch", "semanticSearch", "vectorSearch"}
+    assert buscas["textSearch"]["structuredQuery"] == {
+        "text": {"text": "vestido vermelho", "fields": ["texto", "descricao"]}
+    }
+    assert buscas["semanticSearch"]["searchText"] == "mulher de vestido de gala"
+    assert buscas["semanticSearch"]["searchField"] == "descricao_vetor"
+    assert buscas["vectorSearch"]["vector"] == {"values": [0.1, 0.2]}
+    assert buscas["vectorSearch"]["searchField"] == "quadro_vetor"
+    assert all(b["topK"] == 7 for b in buscas.values())
+    assert all(b["outputFields"] == {"dataFields": "*"} for b in buscas.values())
+    filtro = {"$and": [{"tipo": {"$eq": "plano"}}]}
+    assert all(b["filter"] == filtro for b in buscas.values())
+    assert pedido["combine"] == {"ranker": {"rrf": {"weights": [1.0, 1.0, 1.0]}}}
+
+
+def test_toda_busca_por_vetor_leva_o_index_hint_do_indice_ann_do_seu_campo() -> None:
+    pedido = pedido_de_busca(
+        CONFIG,
+        Consulta(
+            texto="a",
+            significado="b",
+            vetor_do_quadro=[0.0],
+            filtros=Filtros(tipo="fala"),
+        ),
+    )
+    colecao = "projects/proj-x/locations/reg-y/collections/col-z"
+    buscas = _buscas(pedido)
+    for chave, indice in (("semanticSearch", "ind-d"), ("vectorSearch", "ind-q")):
+        assert buscas[chave]["searchHint"] == {
+            "indexHint": {
+                "name": f"{colecao}/indexes/{indice}",
+                "denseScannParams": {"targetRecall": 0.95},
+            }
+        }
+    # A busca por texto não é KNN: não usa índice de vetor.
+    assert "searchHint" not in buscas["textSearch"]
+
+
+def test_so_filtros_nao_e_busca() -> None:
+    with pytest.raises(ValueError):
+        pedido_de_busca(CONFIG, Consulta(filtros=Filtros(tipo="objeto", dono="c")))
+
+
+def test_uma_busca_so_nao_leva_rrf() -> None:
+    pedido = pedido_de_busca(CONFIG, Consulta(texto="vestido"))
+    assert list(_buscas(pedido)) == ["textSearch"]
+    assert "combine" not in pedido
+
+
+def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
+    esquema = esquema_da_colecao(CONFIG)
+    vetores = esquema["vectorSchema"]
+    assert vetores["quadro_vetor"]["denseVector"]["dimensions"] == 256
+    assert vetores["descricao_vetor"]["denseVector"]["dimensions"] == 256
+    propriedades = esquema["dataSchema"]["properties"]
+    assert propriedades["data_de_exibicao"] == {"type": "integer"}
+    indices = indices_da_colecao(CONFIG)
+    assert {i: c["indexField"] for i, c in indices.items()} == {
+        "ind-d": "descricao_vetor",
+        "ind-q": "quadro_vetor",
+    }
+    for corpo in indices.values():
+        assert {"tipo", "cor_base", "dono", "categoria", "pessoas"} <= set(
+            corpo["filterFields"]
+        )
+        assert set(corpo["filterFields"]) <= set(propriedades)
+        assert set(corpo["storeFields"]) == set(propriedades)
+
+
+class TransporteFalso:
+    def __init__(self, resposta: dict[str, Any] | None = None) -> None:
+        self.chamadas: list[tuple[str, str, dict[str, Any] | None]] = []
+        self.resposta = resposta or {}
+
+    def __call__(
+        self, metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        self.chamadas.append((metodo, caminho, corpo))
+        return self.resposta
+
+
+def test_buscar_devolve_os_registros_gravados() -> None:
+    registro = Registro(
+        id="j:objeto:0",
+        tipo="objeto",
+        job_id="j",
+        inicio_ms=0,
+        fim_ms=10,
+        categoria="roupa",
+        cor_base=["vermelho"],
+        dono="c",
+        data_de_exibicao=date(2026, 1, 2),
+    )
+    transporte = TransporteFalso()
+    adaptador = AgentRetrieval(CONFIG, transporte)
+    adaptador.gravar("j", [registro])
+    [_, (metodo, caminho, corpo)] = transporte.chamadas
+    assert (metodo, caminho.endswith("/dataObjects:batchCreate")) == ("POST", True)
+    assert corpo is not None
+    [pedido] = corpo["requests"]
+    assert pedido["dataObjectId"] == "j-objeto-0"
+    assert pedido["dataObject"]["data"]["cor_base"] == ["vermelho"]
+    assert pedido["dataObject"]["data"]["data_de_exibicao"] == 20260102
+
+    transporte.resposta = {"results": [{"dataObject": pedido["dataObject"]}]}
+    [achado] = adaptador.buscar(Consulta(texto="vestido", filtros=Filtros(dono="c")))
+    assert achado == registro
+
+
+def test_gravar_apaga_antes_os_registros_do_video() -> None:
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, transporte).gravar("j", [])
+    [(metodo, caminho, corpo)] = transporte.chamadas
+    assert metodo == "POST"
+    assert caminho.endswith("/dataObjects:batchDelete")
+    assert corpo == {"filter": {"job_id": {"$eq": "j"}}}
+
+
+def test_caminho_leva_projeto_regiao_e_colecao_da_config() -> None:
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, transporte).apagar("j")
+    [(_, caminho, _)] = transporte.chamadas
+    assert (
+        caminho
+        == "projects/proj-x/locations/reg-y/collections/col-z/dataObjects:batchDelete"
+    )
+
+
+def test_total_soma_a_contagem_do_aggregate() -> None:
+    transporte = TransporteFalso({"aggregateResults": [{"count": 16}]})
+    assert AgentRetrieval(CONFIG, transporte).total() == 16
+    [(_, caminho, corpo)] = transporte.chamadas
+    assert caminho.endswith("/dataObjects:aggregate")
+    assert corpo == {"aggregate": "count"}
+
+
+def _nao_dorme(_: float) -> None:
+    pass
+
+
+def test_criar_colecao_cria_a_colecao_e_um_indice_ann_por_vetor() -> None:
+    transporte = TransporteFalso({"name": "op", "done": True})
+    criar_colecao(CONFIG, transporte, _nao_dorme)
+    [(m1, c1, corpo1), (m2, c2, corpo2), (m3, c3, corpo3)] = transporte.chamadas
+    base = "projects/proj-x/locations/reg-y/collections"
+    assert (m1, c1) == ("POST", f"{base}?collectionId=col-z")
+    assert corpo1 is not None and corpo1["dataSchema"]["properties"]["dono"]
+    assert (m2, c2) == ("POST", f"{base}/col-z/indexes?indexId=ind-d")
+    assert (m3, c3) == ("POST", f"{base}/col-z/indexes?indexId=ind-q")
+    assert corpo2 is not None and corpo2["indexField"] == "descricao_vetor"
+    assert corpo3 is not None and corpo3["indexField"] == "quadro_vetor"
+    assert "dono" in corpo2["filterFields"] and "dono" in corpo3["filterFields"]
+
+
+def test_criar_colecao_espera_cada_operacao_antes_da_seguinte() -> None:
+    respostas = iter(
+        [
+            {"name": "op-colecao", "done": False},
+            {"name": "op-colecao", "done": True},
+            {"name": "op-d"},
+            {"name": "op-q", "done": True},
+        ]
+    )
+    transporte = TransporteFalso()
+    esperas: list[float] = []
+    criar_colecao(CONFIG, _Sequencia(transporte, respostas), esperas.append)
+    assert [(m, c.split("/")[-1]) for m, c, _ in transporte.chamadas] == [
+        ("POST", "collections?collectionId=col-z"),
+        ("GET", "op-colecao"),
+        ("POST", "indexes?indexId=ind-d"),
+        ("POST", "indexes?indexId=ind-q"),
+    ]
+    assert len(esperas) == 1
+
+
+class _Sequencia:
+    """Transporte que anota as chamadas e responde, em ordem, com `respostas`."""
+
+    def __init__(self, falso: TransporteFalso, respostas: Any) -> None:
+        self._falso = falso
+        self._respostas = respostas
+
+    def __call__(
+        self, metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        self._falso(metodo, caminho, corpo)
+        resposta: dict[str, Any] = next(self._respostas)
+        return resposta
+
+
+def test_operacao_com_erro_levanta() -> None:
+    with pytest.raises(RuntimeError):
+        esperar({"name": "op", "done": True, "error": {"code": 3}}, TransporteFalso())
+
+
+def test_criar_colecao_e_idempotente() -> None:
+    def ja_existe(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        raise JaExiste(caminho)
+
+    criar_colecao(CONFIG, ja_existe, _nao_dorme)
+
+
+def test_apagar_colecao_chama_delete_e_espera() -> None:
+    transporte = TransporteFalso({"name": "op", "done": True})
+    apagar_colecao(CONFIG, transporte, _nao_dorme)
+    assert transporte.chamadas == [
+        ("DELETE", "projects/proj-x/locations/reg-y/collections/col-z", None)
+    ]

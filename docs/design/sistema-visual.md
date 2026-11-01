@@ -1,6 +1,6 @@
 # Sistema visual
 
-A referência de toda tela do MAM. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9). Os valores moram em [`web/src/tema.ts`](../../web/src/tema.ts), que é a fonte; este documento explica o porquê. A página de amostra mostra tudo aplicado: no `npm run dev` ou no dev publicado, abra `/?amostra` (sem login, só com dados de exemplo).
+A referência de toda tela do MAM. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9). Os valores moram em [`web/src/tema.ts`](../../web/src/tema.ts), que é a fonte; este documento explica o porquê. A página de amostra mostra tudo aplicado: no `npm run dev` ou no dev publicado, abra `/amostra` (sem login, só com dados de exemplo).
 
 Os testes que guardam as regras:
 
@@ -97,6 +97,14 @@ Uma cor fixa por tipo, a mesma na faixa da linha do tempo, no chip de filtro e n
 O limiar de percepção no Oklab fica perto de 0,02; 0,10 é uma diferença que se vê de relance num bloco pequeno. Resultado: o par mais próximo na visão comum é pauta/fala, com 0,137; na deuteranopia, menção/fala, com 0,104. Para comparar, as cores de hoje (tons padrão do Mantine) ficam perto de 0,01 entre menções e planos na deuteranopia, o que equivale a cores iguais. Na protanopia, que o ticket não cobre, o par mais próximo é menção/fala, com 0,046: distinguíveis lado a lado, mas não de relance. Como a cor nunca é a única pista (cada faixa tem nome e cada bloco, nome acessível), isso fica registrado como limite conhecido.
 
 Sete tons distinguíveis na deuteranopia, todos com AA sobre fundo escuro, sem vermelho e sem o azul do foco: o espaço é apertado, e as cores saíram de uma busca numérica sob essas restrições, ajustada à mão depois. Quem trocar uma cor precisa rodar o teste.
+
+### Cor do objeto
+
+`CORES_DE_OBJETO`, no `tema.ts`, dá uma cor a cada valor de `cor_base` do Objeto (esquema 1.3): `vermelho`, `laranja`, `amarelo`, `verde`, `azul`, `roxo`, `rosa`, `marrom`, `bege`, `preto`, `branco`, `cinza`, `dourado`, `prateado` e `estampado`. É a única exceção à regra de nomear o token pela função e não pelo tom, porque aqui o tom é o dado: a chave é o valor do esquema e a cor representa a peça que aparece no vídeo, não a interface. Por isso, ela é diferente da cor do tipo de ocorrência `Objeto`.
+
+- **Só no quadradinho de 10 px** da lista de objetos, com borda de 1 px em `textoSecundario`, que separa o `preto` do fundo. Nunca vira texto, fundo nem faixa.
+- **Sempre com a palavra** (P3): o tom em palavras ("vermelho vivo") ou, sem ele, as cores base. O teste confere que a palavra ao lado nomeia a cor do quadradinho.
+- **`estampado` não tem uma cor só**: usa o cinza do `textoSecundario`, e a palavra diz o resto.
 
 ### Marca RedeTV
 

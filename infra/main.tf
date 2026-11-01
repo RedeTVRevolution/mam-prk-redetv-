@@ -24,6 +24,18 @@ variable "regiao" {
   type = string
 }
 
+# O Agent Retrieval não existe em southamerica-east1: o índice da busca fica nos EUA (ADR 0006).
+variable "regiao_da_busca" {
+  type    = string
+  default = "us-east4"
+}
+
+variable "dimensao_dos_vetores" {
+  description = "Dimensão dos vetores da busca; fixa na criação da coleção"
+  type        = number
+  default     = 256
+}
+
 variable "admins_emergencia" {
   description = "E-mails dos administradores de emergência, separados por vírgula"
   type        = string
@@ -92,6 +104,7 @@ resource "google_project_service" "apis" {
     "monitoring.googleapis.com",
     "pubsub.googleapis.com",
     "sts.googleapis.com",
+    "vectorsearch.googleapis.com",
     "workflows.googleapis.com",
     # Ligadas antes pelo wizard; aqui para que o Terraform as declare.
     "aiplatform.googleapis.com",
@@ -120,12 +133,61 @@ resource "google_firestore_database" "mam" {
   depends_on              = [google_project_service.apis]
 }
 
+# Índices compostos da lista de Jobs (GET /v1/jobs, #141): cada combinação não vazia de
+# programa, sistema, estado (`in`) e uma palavra do nome (`array-contains`), com a ordem
+# por envio (criado_em) ou por exibição (data_exibicao). O intervalo de datas só vai ao
+# Firestore na ordem por exibicao (ele fica no campo da ordem); na ordem por envio a
+# API o confere depois da leitura.
+locals {
+  campos_do_acervo = ["programa", "sistema", "estado", "palavras"]
+  indices_do_acervo = {
+    for par in setproduct(range(1, 16), ["criado_em", "data_exibicao"]) :
+    "${par[1]}-${par[0]}" => {
+      ordem = par[1]
+      campos = [
+        for j, campo in local.campos_do_acervo : campo
+        if floor(par[0] / pow(2, j)) % 2 == 1
+      ]
+    }
+  }
+}
+
+resource "google_firestore_index" "acervo" {
+  for_each   = local.indices_do_acervo
+  database   = google_firestore_database.mam.name
+  collection = "jobs"
+
+  dynamic "fields" {
+    for_each = each.value.campos
+    content {
+      field_path   = fields.value
+      order        = fields.value == "palavras" ? null : "ASCENDING"
+      array_config = fields.value == "palavras" ? "CONTAINS" : null
+    }
+  }
+  fields {
+    field_path = each.value.ordem
+    order      = "DESCENDING"
+  }
+}
+
 # O único lugar que monta os nomes dos buckets. O código os recebe por variável
 # de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
 # web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).
 locals {
   sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro", "referencias"]
   buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
+}
+
+# A coleção de momentos da busca (#117) e os índices ANN dela (um por campo de vetor)
+# nascem no `make criar-colecao-da-busca` (idempotente), porque o provedor do Terraform
+# ainda não tem o recurso. Este é o único lugar que monta os nomes; o código os recebe
+# por BUSCA_*. A coleção de medida é a temporária do `make medir-busca`.
+locals {
+  colecao_da_busca           = "momentos"
+  colecao_de_medida_da_busca = "momentos-medida"
+  indice_da_descricao        = "momentos-descricao-ann"
+  indice_do_quadro           = "momentos-quadro-ann"
 }
 
 # clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git,
@@ -152,7 +214,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "referencias", "orquestracao", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "orquestracao", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -170,11 +232,17 @@ resource "google_service_account" "mam" {
 # A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
   papeis_no_projeto = {
-    web          = ["roles/datastore.user"]
-    validacao    = ["roles/datastore.user"]
-    transcricao  = ["roles/datastore.user"]
-    ocr          = ["roles/datastore.user"]
-    analise      = ["roles/datastore.user", "roles/aiplatform.user"]
+    web         = ["roles/datastore.user"]
+    validacao   = ["roles/datastore.user"]
+    transcricao = ["roles/datastore.user"]
+    ocr         = ["roles/datastore.user"]
+    analise     = ["roles/datastore.user", "roles/aiplatform.user"]
+    quadros     = ["roles/datastore.user"]
+    # Grava o estado da indexação no Job. O papel no Vector Search (escrever na coleção da
+    # busca) não está aqui nem na conta `web`, que reindexa a cada Correção: o nome exato
+    # não foi conferido (#118); sem ele a indexação roda e o Job fica com
+    # indexacao.estado = falhou.
+    indexacao    = ["roles/datastore.user"]
     referencias  = ["roles/datastore.user", "roles/aiplatform.user"]
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
@@ -193,6 +261,10 @@ locals {
     # (objectUser, porque cada janela sobrescreve o próprio objeto); a decupagem vai para o
     # bucket dela.
     analise = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectCreator" }
+    # Lê a cópia limpa; grava os JPEGs e regrava a decupagem (objectUser, porque a sobrescreve).
+    quadros = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
+    # Lê a Decupagem entregue, com os quadros-chave.
+    indexacao = { decupagens = "roles/storage.objectViewer" }
     # Grava as fotos de referência.
     referencias = { referencias = "roles/storage.objectUser" }
   }
@@ -311,6 +383,26 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "BUCKET_DECUPAGENS"
         value = local.buckets["decupagens"]
       }
+      env {
+        name  = "BUSCA_REGIAO"
+        value = var.regiao_da_busca
+      }
+      env {
+        name  = "BUSCA_COLECAO"
+        value = local.colecao_da_busca
+      }
+      env {
+        name  = "BUSCA_INDICE_DESCRICAO"
+        value = local.indice_da_descricao
+      }
+      env {
+        name  = "BUSCA_INDICE_QUADRO"
+        value = local.indice_do_quadro
+      }
+      env {
+        name  = "BUSCA_DIMENSAO"
+        value = tostring(var.dimensao_dos_vetores)
+      }
       # Quem tem esses e-mails (verificados) é Administrador (api/papeis.py).
       env {
         name  = "ADMINS_EMERGENCIA"
@@ -321,8 +413,8 @@ resource "google_cloud_run_v2_service" "web" {
   depends_on = [google_project_service.apis]
 }
 
-# Rede dos Jobs de validação e de transcrição: sem IP externo e sem Cloud NAT, o arquivo
-# hostil e o áudio não alcançam a internet, só o Storage e o Firestore (pelo acesso privado do Google).
+# Rede dos Jobs de validação, transcrição, OCR e quadros-chave: sem IP externo e sem Cloud
+# NAT, o arquivo hostil e o áudio não alcançam a internet, só o Storage e o Firestore (pelo acesso privado do Google).
 resource "google_compute_network" "validacao" {
   name                    = "mam-validacao"
   auto_create_subnetworks = false
@@ -660,6 +752,156 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_analise" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
+# Job dos quadros-chave (#115): a imagem da validação (ffmpeg) com outro comando, na mesma
+# rede, sem internet. Baixa a cópia limpa, tira um JPEG por plano, aparição e objeto e
+# regrava a decupagem com o campo `quadro`. Roda depois da análise, com o Job `concluido`.
+resource "google_cloud_run_v2_job" "quadros" {
+  name                = "mam-quadros"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["quadros"].email
+      max_retries     = 0
+      # NÃO medido (#135): cada quadro é um `ffmpeg -ss` de uma chamada, de 0,1 s a 0,5 s
+      # na cópia limpa; milhares de momentos de um programa de 4 h levam de minutos a
+      # ~40 min no pior caso. 3600 s dá folga sobre isso; meça no dev com um programa de 4 h.
+      timeout = "3600s"
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao.id
+        }
+      }
+      containers {
+        image   = var.imagem_validacao
+        command = ["python"]
+        args    = ["-m", "api.quadros_chave"]
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        resources {
+          # No volume, só a cópia limpa (até 4 GiB, o tamanho do original) e um JPEG por
+          # vez; 6 GiB. Memória: o volume mais ~1 GiB do ffmpeg e do Python.
+          limits = {
+            cpu    = "2"
+            memory = "8Gi"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "6Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração roda o Job de quadros, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_quadros" {
+  name     = google_cloud_run_v2_job.quadros.name
+  location = google_cloud_run_v2_job.quadros.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# Job de indexação (#118): lê a Decupagem entregue (com as Correções em vigor), apaga e
+# regrava o vídeo na coleção de momentos da busca e grava o estado no Job. Tem internet
+# (sem vpc_access), porque o Agent Retrieval é uma API pública; só recebe a Decupagem já
+# pronta, nunca o vídeo. Roda depois dos quadros-chave; a falha dele só fica no estado
+# do Job (indexacao.estado), que `make reindexar` refaz.
+resource "google_cloud_run_v2_job" "indexacao" {
+  name                = "mam-indexacao"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["indexacao"].email
+      max_retries     = 0
+      # NÃO medido: milhares de registros em lotes de 200, uns segundos por lote.
+      timeout = "1800s"
+      containers {
+        image   = var.imagem
+        command = ["python"]
+        args    = ["-m", "api.indexacao"]
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "1Gi"
+          }
+        }
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "BUSCA_REGIAO"
+          value = var.regiao_da_busca
+        }
+        env {
+          name  = "BUSCA_COLECAO"
+          value = local.colecao_da_busca
+        }
+        env {
+          name  = "BUSCA_INDICE_DESCRICAO"
+          value = local.indice_da_descricao
+        }
+        env {
+          name  = "BUSCA_INDICE_QUADRO"
+          value = local.indice_do_quadro
+        }
+        env {
+          name  = "BUSCA_DIMENSAO"
+          value = tostring(var.dimensao_dos_vetores)
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração roda o Job de indexação, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_indexacao" {
+  name     = google_cloud_run_v2_job.indexacao.name
+  location = google_cloud_run_v2_job.indexacao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
 # Job de referências de rosto (#111, ADR 0005): o único com internet (sem vpc_access),
 # por isso só recebe nomes (NOMES, em JSON, e PROGRAMA) e nunca quadros do vídeo. Busca
 # fotos pelo SerpAPI, o Gemini as confere e as guarda no bucket de referências.
@@ -727,7 +969,7 @@ resource "google_cloud_run_v2_job" "referencias" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
-# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise.
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de quadros -> Job de indexação.
 resource "google_workflows_workflow" "validacao" {
   name            = "mam-validacao"
   region          = var.regiao
@@ -739,6 +981,8 @@ resource "google_workflows_workflow" "validacao" {
     job_de_transcricao = google_cloud_run_v2_job.transcricao.name
     job_de_ocr         = google_cloud_run_v2_job.ocr.name
     job_de_analise     = google_cloud_run_v2_job.analise.name
+    job_de_quadros     = google_cloud_run_v2_job.quadros.name
+    job_de_indexacao   = google_cloud_run_v2_job.indexacao.name
   })
   depends_on = [google_project_service.apis]
 }
@@ -924,6 +1168,39 @@ output "url" {
 # make gravar-cassetes sobe o clipe sintético no bucket de clipes-ouro.
 output "repositorio" {
   value = "${var.regiao}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam.repository_id}"
+}
+
+# Para o make criar-colecao-da-busca e o make medir-busca.
+output "busca_regiao" {
+  value = var.regiao_da_busca
+}
+
+output "busca_colecao" {
+  value = local.colecao_da_busca
+}
+
+output "busca_colecao_de_medida" {
+  value = local.colecao_de_medida_da_busca
+}
+
+output "busca_indice_descricao" {
+  value = local.indice_da_descricao
+}
+
+output "busca_indice_quadro" {
+  value = local.indice_do_quadro
+}
+
+output "busca_dimensao" {
+  value = var.dimensao_dos_vetores
+}
+
+output "bucket_aceitos" {
+  value = local.buckets["aceitos"]
+}
+
+output "bucket_decupagens" {
+  value = local.buckets["decupagens"]
 }
 
 output "bucket_clipes_ouro" {

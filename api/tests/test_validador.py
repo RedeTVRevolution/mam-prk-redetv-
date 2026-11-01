@@ -217,6 +217,29 @@ def test_timecode_no_formato_passa_como_veio(valor: str) -> None:
     assert validador.ler_timecode_origem(_faixa_de_timecode(valor)) == valor
 
 
+@pytest.mark.parametrize(
+    ("taxa", "esperada"),
+    [
+        ("30000/1001", pytest.approx(29.97, abs=0.001)),
+        ("25/1", 25.0),
+        ("0/0", None),
+        ("abc", None),
+        ("30/0", None),
+        (None, None),
+    ],
+)
+def test_taxa_de_quadros_vem_da_faixa_de_video(taxa: str | None, esperada: Any) -> None:
+    faixa = {"codec_type": "video"} if taxa is None else {
+        "codec_type": "video", "avg_frame_rate": taxa
+    }  # fmt: skip
+    assert validador.ler_taxa_de_quadros({"streams": [faixa]}) == esperada
+
+
+def test_taxa_de_quadros_do_arquivo_chega_ao_aceito(tmp_path: Path) -> None:
+    aceito = validar(_gerar(tmp_path / "video.mp4"), tmp_path / "saida")
+    assert aceito.taxa_de_quadros == 10.0
+
+
 def test_duas_faixas_de_audio_com_uma_de_dados_e_recusada(tmp_path: Path) -> None:
     base = _gerar(tmp_path / "base.mp4", extra=("-timecode", "01:00:00:00"))
     entrada = tmp_path / "video.mp4"

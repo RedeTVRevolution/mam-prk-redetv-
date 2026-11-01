@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca reindexar
 
 instalar:
 	uv sync --locked
@@ -76,3 +76,28 @@ gravar-cassetes:
 	set -a && . ./.env && set +a && \
 	BUCKET_CLIPES_OURO="$${BUCKET_CLIPES_OURO:-$$(terraform -chdir=infra output -raw bucket_clipes_ouro)}" \
 	uv run --locked python -m api.cassete
+
+# Nomes da busca (#117): vêm do Terraform (outputs busca_*), salvo se já vierem no ambiente.
+AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
+	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
+	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
+	BUSCA_COLECAO_DE_MEDIDA="$${BUSCA_COLECAO_DE_MEDIDA:-$$(terraform -chdir=infra output -raw busca_colecao_de_medida)}" \
+	BUSCA_INDICE_DESCRICAO="$${BUSCA_INDICE_DESCRICAO:-$$(terraform -chdir=infra output -raw busca_indice_descricao)}" \
+	BUSCA_INDICE_QUADRO="$${BUSCA_INDICE_QUADRO:-$$(terraform -chdir=infra output -raw busca_indice_quadro)}" \
+	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}"
+
+# Coleção de momentos e índices ANN da busca, no Agent Retrieval; idempotente.
+criar-colecao-da-busca:
+	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.criar_colecao_da_busca
+
+# Medição da busca (#117): make medir-busca [CONSULTAS=30] [DIMENSOES="128 256"]; só com credenciais.
+medir-busca:
+	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)
+
+# Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
+# make reindexar [JOB=<id>]. Apaga e regrava o vídeo; repetir dá o mesmo resultado.
+reindexar:
+	$(AMBIENTE_DA_BUSCA) \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.indexacao $(JOB)

@@ -9,7 +9,7 @@ os tempos saíam como 124 para 01:24 (clipe3).
 """
 
 import re
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -82,6 +82,11 @@ class Pauta(_Intervalo):
     )
 
 
+def caminho_do_quadro(arquivo: str) -> str:
+    """O campo `quadro` de um momento: o JPEG `arquivo`, relativo à pasta do Job (#115)."""
+    return f"quadros/{arquivo}"
+
+
 class Aparicao(_Intervalo):
     evidencia: Rotulo = Field(description="O que mostra que é essa pessoa.")
     papel: Rotulo | None = Field(
@@ -93,7 +98,7 @@ class Aparicao(_Intervalo):
         default=None,
         description="Visual de destaque, se relevante (ex.: vestido de gala vermelho).",
     )
-    quadro: str | None = None  # vazio na E0
+    quadro: str | None = None  # o JPEG da aparição (#115)
 
 
 class MencaoNaFala(_Intervalo):
@@ -147,6 +152,69 @@ class Pessoa(_Estrito):
         return fontes
 
 
+CategoriaDeObjeto = Literal[
+    "roupa", "calcado", "acessorio", "na_mao", "em_cena", "veiculo", "outro"
+]
+CorBase = Literal[
+    "vermelho",
+    "laranja",
+    "amarelo",
+    "verde",
+    "azul",
+    "roxo",
+    "rosa",
+    "marrom",
+    "bege",
+    "preto",
+    "branco",
+    "cinza",
+    "dourado",
+    "prateado",
+    "estampado",
+]
+RelacaoDoObjeto = Literal["veste", "calca", "usa", "segura"]
+# As listas fechadas num lugar só: o entendimento da consulta da busca as usa.
+CATEGORIAS_DE_OBJETO = get_args(CategoriaDeObjeto)
+CORES_BASE = get_args(CorBase)
+RELACOES_DO_OBJETO = get_args(RelacaoDoObjeto)
+
+
+class Objeto(_Estrito):
+    id: Id
+    categoria: CategoriaDeObjeto
+    tipo: Rotulo = Field(
+        description='Texto curto e no singular: "sandália", "vestido".'
+    )
+    cor_base: list[CorBase] = Field(
+        max_length=2, description="Até 2 cores da lista: é o que a busca filtra."
+    )
+    cor: Rotulo | None = Field(
+        default=None, description='O tom como você vê: "vinho", "azul-marinho".'
+    )
+    detalhe: Rotulo | None = None
+    marca: Rotulo | None = Field(
+        default=None, description="Só se o logo ou o nome estiver legível na imagem."
+    )
+    pessoa: Id | None = Field(
+        default=None,
+        description="Id de uma pessoa da lista `pessoas`; nulo para objeto em cena.",
+    )
+    relacao: RelacaoDoObjeto | None = Field(
+        default=None,
+        description="Como a pessoa se liga ao objeto; nulo sem `pessoa`.",
+    )
+    ocorrencias: list[_Intervalo] = Field(
+        min_length=1, description="Intervalos em que o objeto está visível."
+    )
+    quadro: str | None = None  # o JPEG da primeira ocorrência (#115)
+
+    @model_validator(mode="after")
+    def _dono_e_relacao_juntos(self) -> Self:
+        if (self.pessoa is None) != (self.relacao is None):
+            raise ValueError("`pessoa` e `relacao` vêm juntas ou nenhuma")
+        return self
+
+
 class Plano(_Intervalo):
     id: Id
     ambiente: Rotulo = Field(description="Local: estúdio, aeroporto, estádio, rua…")
@@ -162,6 +230,7 @@ class Plano(_Intervalo):
     movimento_camera: Rotulo | None = None
     externa: bool | None = None
     periodo: Literal["dia", "noite"] | None = None
+    quadro: str | None = None  # o JPEG do meio do plano (#115)
 
 
 EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
@@ -239,6 +308,11 @@ class Decupagem(_Estrito):
     programa: Programa
     pautas: list[Pauta]
     pessoas: list[Pessoa]
+    objetos: list[Objeto] = Field(
+        default=[],
+        description="Roupas, calçados, acessórios e objetos em cena, cada um com os "
+        "atributos, o dono (uma pessoa da lista `pessoas`) e os intervalos visíveis.",
+    )
     planos: list[Plano]
     comerciais: list[Comercial]
     transcricao: list[Fala] = Field(
@@ -263,6 +337,7 @@ class Decupagem(_Estrito):
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
         for p in self.pessoas:
             achados += [*p.na_imagem, *p.citada_na_fala, *p.citada_no_texto]
+        achados += [o for objeto in self.objetos for o in objeto.ocorrencias]
         return [
             *achados,
             *self.planos,
@@ -277,6 +352,13 @@ class Decupagem(_Estrito):
     def _tempos_dentro_da_duracao(self) -> Self:
         if any(i.fim_ms > self.video.duracao_ms for i in self._intervalos()):
             raise ValueError("tempo além da duração do vídeo")
+        return self
+
+    @model_validator(mode="after")
+    def _dono_do_objeto_existe(self) -> Self:
+        ids = {p.id for p in self.pessoas}
+        if any(o.pessoa is not None and o.pessoa not in ids for o in self.objetos):
+            raise ValueError("objeto de uma pessoa que não está na decupagem")
         return self
 
 

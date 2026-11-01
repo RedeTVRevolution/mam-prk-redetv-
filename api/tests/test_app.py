@@ -26,3 +26,30 @@ def test_raiz_serve_a_pagina_do_build_do_react(tmp_path: Path) -> None:
 
     assert resposta.status_code == 200
     assert resposta.text == "<div id=root></div>"
+
+
+def _app_com_build(tmp_path: Path) -> TestClient:
+    (tmp_path / "index.html").write_text("<div id=root></div>")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "app.js").write_text("console.log(1)")
+    return TestClient(criar_app(pasta_web=tmp_path))
+
+
+def test_endereco_do_front_devolve_o_index_com_200(tmp_path: Path) -> None:
+    cliente = _app_com_build(tmp_path)
+    for caminho in ("/video/qualquer", "/acervo", "/amostra", "/outra/rota/funda"):
+        resposta = cliente.get(caminho)
+
+        assert resposta.status_code == 200, caminho
+        assert resposta.text == "<div id=root></div>"
+
+
+def test_arquivo_do_build_e_servido_como_arquivo(tmp_path: Path) -> None:
+    resposta = _app_com_build(tmp_path).get("/assets/app.js")
+
+    assert resposta.status_code == 200
+    assert resposta.text == "console.log(1)"
+
+
+def test_arquivo_inexistente_de_assets_continua_404(tmp_path: Path) -> None:
+    assert _app_com_build(tmp_path).get("/assets/nao-existe.js").status_code == 404

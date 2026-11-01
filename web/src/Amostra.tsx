@@ -34,6 +34,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { useState, type CSSProperties, type ReactNode } from 'react'
+import { tempo as tempoEmMs } from './linhaDoTempo.ts'
 import {
   contraste,
   CORES,
@@ -44,7 +45,7 @@ import {
   type TipoDeOcorrencia,
 } from './tema.ts'
 
-// A página de amostra do sistema visual (docs/design/sistema-visual.md): abre em /?amostra,
+// A página de amostra do sistema visual (docs/design/sistema-visual.md): abre em /amostra,
 // sem login, e só usa os dados fixos daqui. Não chama a API.
 
 type CampoProps = { error?: string; disabled?: boolean; styles?: { input: CSSProperties } }
@@ -56,10 +57,8 @@ const ANEL: CSSProperties = { outline: `2px solid ${CORES.foco}`, outlineOffset:
 // Item selecionado: o azul de foco a 16% (0x29), sobre a superfície.
 const SELECIONADO = `${CORES.foco}29`
 
-/** Segundos em MM:SS; a amostra não passa de uma hora. */
-function tempo(s: number): string {
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-}
+/** Os tempos da amostra estão em segundos. */
+const tempo = (s: number): string => tempoEmMs(s * 1000)
 
 const razao = (cor: string, fundo: string) =>
   `${contraste(cor, fundo).toFixed(1).replace('.', ',')}:1`

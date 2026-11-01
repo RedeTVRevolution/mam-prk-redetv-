@@ -26,9 +26,13 @@ from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
+    CursorInvalido,
     Estado,
+    FiltroDeJobs,
     Job,
+    PaginaDeJobs,
     ServicoIndisponivel,
+    casa_com_o_filtro,
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.papeis import PAPEIS, Papel
@@ -76,6 +80,15 @@ def objeto_da_decupagem(job_id: str) -> str:
     return f"{job_id}.json"
 
 
+def objeto_do_quadro(job_id: str, caminho: str) -> str:
+    """`caminho` é o do campo `quadro` da Decupagem (`quadros/plano-0.jpg`)."""
+    return f"{job_id}/{caminho}"
+
+
+def objeto_da_copia_limpa(job_id: str) -> str:
+    return f"{job_id}/copia_limpa.mp4"
+
+
 class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
@@ -118,15 +131,49 @@ class RepositorioFirestore:
         ).stream()
         return [Job(**(doc.to_dict() or {})) for doc in docs]
 
-    def listar_por_sistema(self, sistema: str) -> list[Job]:
-        # Consulta filtrada no Firestore; em produção exige o índice composto
-        # (sistema + criado_em), que o emulador dispensa.
-        docs = (
-            self._colecao.where(filter=FieldFilter("sistema", "==", sistema))
-            .order_by("criado_em", direction=firestore.Query.DESCENDING)
-            .stream()
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
+        # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
+        # estar no campo da ordem). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
+        # Os índices estão no infra/main.tf.
+        consulta: Any = self._colecao
+        if filtro.programa is not None:
+            consulta = consulta.where(
+                filter=FieldFilter("programa", "==", filtro.programa)
+            )
+        if filtro.sistema is not None:
+            consulta = consulta.where(
+                filter=FieldFilter("sistema", "==", filtro.sistema)
+            )
+        if filtro.estados:
+            consulta = consulta.where(
+                filter=FieldFilter("estado", "in", sorted(filtro.estados))
+            )
+        if filtro.palavras:
+            consulta = consulta.where(
+                filter=FieldFilter("palavras", "array_contains", filtro.palavras[0])
+            )
+        campo = "criado_em" if filtro.ordem == "enviado" else "data_exibicao"
+        if filtro.ordem == "exibicao":
+            if filtro.exibicao_de is not None:
+                consulta = consulta.where(
+                    filter=FieldFilter(campo, ">=", filtro.exibicao_de.isoformat())
+                )
+            if filtro.exibicao_ate is not None:
+                consulta = consulta.where(
+                    filter=FieldFilter(campo, "<=", filtro.exibicao_ate.isoformat())
+                )
+        # O desempate implícito é o id do documento, na mesma direção da ordem.
+        consulta = consulta.order_by(campo, direction=firestore.Query.DESCENDING)
+        if filtro.cursor is not None:
+            ancora = self._colecao.document(filtro.cursor).get()
+            if not ancora.exists:
+                raise CursorInvalido
+            consulta = consulta.start_after(ancora)
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return PaginaDeJobs.de(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
         )
-        return [Job(**(doc.to_dict() or {})) for doc in docs]
 
 
 class RepositorioDeChavesFirestore:
@@ -472,6 +519,23 @@ class LeiturasStorage:
             return None
 
 
+class QuadrosStorage(DecupagensStorage):
+    """A cópia limpa que o ffmpeg lê, e os JPEGs e a Decupagem no bucket das decupagens."""
+
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> None:
+        self._cliente.bucket(self._aceitos).blob(
+            objeto_da_copia_limpa(job_id)
+        ).download_to_filename(str(destino))
+
+    def ler_decupagem(self, job_id: str) -> bytes:
+        return b"".join(self.abrir_decupagem(job_id))
+
+    def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_do_quadro(job_id, caminho)
+        ).upload_from_string(jpeg, content_type="image/jpeg")
+
+
 class ArmazenamentoStorage:
     """Upload, cancelamento do upload, reprodução e leitura da decupagem."""
 
@@ -516,6 +580,15 @@ class ArmazenamentoStorage:
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
+        url: str = blob.generate_signed_url(
+            version="v4", expiration=validade, method="GET", **self._assinatura()
+        )
+        return url
+
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        blob = self._cliente.bucket(self._decupagens).blob(
+            objeto_do_quadro(job_id, caminho)
+        )
         url: str = blob.generate_signed_url(
             version="v4", expiration=validade, method="GET", **self._assinatura()
         )

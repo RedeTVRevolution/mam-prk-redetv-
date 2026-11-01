@@ -1,3 +1,4 @@
+import { baixarDecupagem } from './baixar.ts'
 import {
   ActionIcon,
   Alert,
@@ -27,7 +28,6 @@ import {
   Textarea,
   Tooltip,
   UnstyledButton,
-  type MantineColor,
 } from '@mantine/core'
 import {
   IconDotsVertical,
@@ -39,14 +39,22 @@ import {
 import {
   useCallback,
   useEffect,
+  useMemo,
+  useReducer,
   useRef,
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   type RefObject,
 } from 'react'
-import { chamarApi, SessaoExpirada } from './api.ts'
-import type { Autenticador } from './auth/autenticador.ts'
+import {
+  type ClienteDaApi,
+  type ClienteDoJob,
+  ConflitoNaApi,
+  PedidoInvalido,
+  SessaoExpirada,
+} from './api.ts'
 import {
   comoSelect,
   ContextoDoCatalogo,
@@ -55,7 +63,31 @@ import {
   useCatalogo,
   type CatalogoDeCorrecoes,
 } from './catalogo.ts'
-import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
+import {
+  faixasComArrasto,
+  faixasDe,
+  LINHA_LIVRE,
+  lerTempo,
+  limitesDasAlcas,
+  maiorFim,
+  percentualDoTempo,
+  reduzirLinha,
+  secoesDaFaixa,
+  selecaoValida,
+  teclaDaAlca,
+  tempo,
+  tempoDoCampo,
+  tempoDoPonteiro,
+  tempoPreciso,
+  type Borda,
+  type Faixa,
+  type Intervalo,
+  type ListaDePessoa,
+  type LimitesDaAlca,
+  type Ocorrencia,
+  type Selecao,
+} from './linhaDoTempo.ts'
+import { CORES, CORES_DE_OBJETO } from './tema.ts'
 
 export interface JobAberto {
   id: string
@@ -64,15 +96,12 @@ export interface JobAberto {
   codigo_falha: string | null
 }
 
-interface Intervalo {
-  inicio_ms: number
-  fim_ms: number
-}
-
 type Aparicao = Intervalo & {
   evidencia: string
   papel?: string | null
   visual?: string | null
+  /** O JPEG do meio da aparição, relativo à pasta do Job (`quadros/aparicao-0-1.jpg`). */
+  quadro?: string | null
 }
 
 interface Pessoa {
@@ -85,8 +114,6 @@ interface Pessoa {
   citada_na_fala: Intervalo[]
   citada_no_texto: (Intervalo & { texto: string })[]
 }
-
-type ListaDePessoa = 'na_imagem' | 'citada_na_fala' | 'citada_no_texto'
 
 /** O que o Editor pede sobre uma aparição ou menção (ou acrescentar uma aparição). */
 type AcaoDeOcorrencia =
@@ -113,6 +140,8 @@ interface Plano extends Intervalo {
   acao?: string | null
   objetos?: string[]
   plano_limpo?: boolean
+  /** O JPEG do meio do plano. */
+  quadro?: string | null
   origem?: 'modelo' | 'revisao'
 }
 
@@ -156,6 +185,29 @@ interface TextoNaTela extends Intervalo {
   texto: string
 }
 
+export type CorBase = keyof typeof CORES_DE_OBJETO
+
+export type CategoriaDeObjeto = 'roupa' | 'calcado' | 'acessorio' | 'na_mao' | 'em_cena' | 'veiculo' | 'outro'
+export type RelacaoDoObjeto = 'veste' | 'calca' | 'usa' | 'segura'
+
+/** 1.3: roupa, calçado, acessório ou objeto em cena, com a cor e o dono. */
+export interface Objeto {
+  id: string
+  categoria: CategoriaDeObjeto
+  tipo: string
+  cor_base: CorBase[]
+  /** O tom em palavras ("vermelho vivo"). */
+  cor?: string | null
+  detalhe?: string | null
+  marca?: string | null
+  /** O id de uma pessoa da mesma decupagem; `null` para objeto em cena. */
+  pessoa?: string | null
+  relacao?: RelacaoDoObjeto | null
+  /** O JPEG da primeira ocorrência. */
+  quadro?: string | null
+  ocorrencias: Intervalo[]
+}
+
 export interface Decupagem {
   versao_decupagem?: string
   video?: { duracao_ms: number }
@@ -166,139 +218,16 @@ export interface Decupagem {
   transcricao: Fala[]
   /** 1.2; falta nas decupagens 1.1. */
   textos_na_tela?: TextoNaTela[]
+  /** 1.3; falta nas decupagens anteriores. */
+  objetos?: Objeto[]
 }
 
-interface Reproducao {
+export interface Reproducao {
   url: string
   expira_em: string
 }
 
-/** O que a correção `item.tempos` precisa para achar a ocorrência no servidor. */
-type Alvo =
-  | { tipo: 'pauta'; id: string }
-  | { tipo: 'comercial'; id: string }
-  | { tipo: 'pessoa'; id: string; lista: ListaDePessoa }
-
-interface Ocorrencia extends Intervalo {
-  chave: string
-  /** Só as ocorrências de tipos com correção de tempo têm alvo. */
-  alvo?: Alvo
-}
-
-/** A ocorrência selecionada na linha do tempo, com o intervalo de antes da correção. */
-interface Selecao {
-  /** A decupagem em que a ocorrência foi selecionada: a chave é um índice e só vale nela. */
-  decupagem: Decupagem
-  chave: string
-  alvo: Alvo
-  original: Intervalo
-}
-
-/** Quanto as setas movem uma alça: 100 ms, ou 1 s com Shift. */
-const PASSO_DA_ALCA_MS = 100
-const PASSO_GRANDE_DA_ALCA_MS = 1000
-
-interface Faixa {
-  nome: string
-  cor: MantineColor
-  ocorrencias: Ocorrencia[]
-}
-
-// Menor largura de uma ocorrência na linha do tempo, para não sumir.
-const LARGURA_MINIMA_MS = 1500
 const LARGURA_DO_ROTULO = 120
-
-function tempo(ms: number): string {
-  const total = Math.floor(ms / 1000)
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
-}
-
-/** "mm:ss" em milissegundos; `null` se não for um tempo. */
-function lerTempo(texto: string): number | null {
-  const achado = /^(\d{1,3}):([0-5]\d)$/.exec(texto.trim())
-  return achado ? (Number(achado[1]) * 60 + Number(achado[2])) * 1000 : null
-}
-
-/** O campo em mm:ss, em ms: o valor original, com os milissegundos, se o Editor não o mudou. */
-function tempoDoCampo(texto: string, originalMs: number): number | null {
-  const ms = lerTempo(texto)
-  return ms !== null && ms === lerTempo(tempo(originalMs)) ? originalMs : ms
-}
-
-function faixasDe(d: Decupagem, catalogo: CatalogoDeCorrecoes): Faixa[] {
-  const de = <T extends Intervalo>(
-    prefixo: string,
-    lista: T[],
-    alvo?: (x: T) => Alvo | undefined,
-  ): Ocorrencia[] =>
-    lista.map((x, i) => ({
-      chave: `${prefixo}-${i}`,
-      inicio_ms: x.inicio_ms,
-      fim_ms: x.fim_ms,
-      alvo: alvo?.(x),
-    }))
-  const daPessoa = (lista: ListaDePessoa) =>
-    d.pessoas.flatMap((p) =>
-      p[lista].map((x) => ({
-        ...x,
-        alvo: pessoaDoModelo(catalogo, p) ? { pessoa: p.id, lista } : null,
-      })),
-    )
-  const alvoDaPessoa = (x: { alvo: { pessoa: string; lista: ListaDePessoa } | null }) =>
-    x.alvo ? ({ tipo: 'pessoa', id: x.alvo.pessoa, lista: x.alvo.lista } as const) : undefined
-  return [
-    {
-      nome: 'Pautas',
-      cor: CORES_DE_OCORRENCIA.pauta.cor,
-      ocorrencias: de('pauta', d.pautas, (p) => ({ tipo: 'pauta', id: p.id })),
-    },
-    {
-      nome: 'Aparições',
-      cor: CORES_DE_OCORRENCIA.aparicao.cor,
-      ocorrencias: de('img', daPessoa('na_imagem'), alvoDaPessoa),
-    },
-    {
-      nome: 'Menções',
-      cor: CORES_DE_OCORRENCIA.mencao.cor,
-      ocorrencias: de(
-        'mencao',
-        [...daPessoa('citada_na_fala'), ...daPessoa('citada_no_texto')],
-        alvoDaPessoa,
-      ),
-    },
-    {
-      nome: 'Comerciais',
-      cor: CORES_DE_OCORRENCIA.comercial.cor,
-      ocorrencias: de('com', d.comerciais, (c) =>
-        c.id && !c.acrescentado ? { tipo: 'comercial', id: c.id } : undefined,
-      ),
-    },
-    {
-      nome: 'Planos',
-      // Fora do mapa de tipos: os planos saem da linha do tempo no redesenho do Visualizador.
-      cor: 'dark.3',
-      ocorrencias: de('plano', d.planos),
-    },
-    {
-      nome: 'Fala',
-      cor: CORES_DE_OCORRENCIA.fala.cor,
-      ocorrencias: de('fala', d.transcricao),
-    },
-    {
-      nome: 'Texto na tela',
-      cor: CORES_DE_OCORRENCIA.texto_na_tela.cor,
-      ocorrencias: de('texto', d.textos_na_tela ?? []),
-    },
-  ]
-}
-
-function maiorFim(faixas: Faixa[]): number {
-  return Math.max(0, ...faixas.flatMap((f) => f.ocorrencias.map((o) => o.fim_ms)))
-}
-
-type Borda = 'inicio' | 'fim'
 
 /** Os comandos das alças da linha do tempo; só existem para quem tem `decupagem.editar`. */
 interface AlcasDaLinha {
@@ -314,23 +243,19 @@ interface AlcasDaLinha {
 function AlcaDoTempo({
   borda,
   ms,
-  minMs,
-  maxMs,
+  limites,
   duracaoMs,
   trilha,
   alcas,
 }: {
   borda: Borda
   ms: number
-  minMs: number
-  maxMs: number
+  limites: LimitesDaAlca
   duracaoMs: number
   trilha: RefObject<HTMLDivElement | null>
   alcas: AlcasDaLinha
 }) {
   const arrastando = useRef(false)
-  const limitar = (valor: number) => Math.round(Math.min(maxMs, Math.max(minMs, valor)))
-  const mover = (valor: number) => alcas.aoMover(borda, limitar(valor))
   // Soltar, cancelar o gesto ou perder a captura encerram o arraste: sem isso, a alça
   // seguiria o ponteiro sem botão pressionado.
   const soltar = () => {
@@ -343,8 +268,8 @@ function AlcaDoTempo({
       role="slider"
       tabIndex={0}
       aria-label={borda === 'inicio' ? 'Início da ocorrência' : 'Fim da ocorrência'}
-      aria-valuemin={minMs}
-      aria-valuemax={maxMs}
+      aria-valuemin={limites.minMs}
+      aria-valuemax={limites.maxMs}
       aria-valuenow={ms}
       aria-valuetext={tempo(ms)}
       pos="absolute"
@@ -353,7 +278,7 @@ function AlcaDoTempo({
       h={20}
       bg="white"
       style={{
-        left: `${(ms / duracaoMs) * 100}%`,
+        left: `${percentualDoTempo(ms, duracaoMs)}%`,
         transform: 'translateX(-50%)',
         borderRadius: 2,
         cursor: 'ew-resize',
@@ -366,8 +291,14 @@ function AlcaDoTempo({
       }}
       onPointerMove={(e: PointerEvent<HTMLDivElement>) => {
         const caixa = trilha.current?.getBoundingClientRect()
-        if (!arrastando.current || !caixa || caixa.width === 0) return
-        mover(((e.clientX - caixa.left) / caixa.width) * duracaoMs)
+        if (!arrastando.current || !caixa) return
+        const novo = tempoDoPonteiro(
+          e.clientX,
+          { esquerda: caixa.left, largura: caixa.width },
+          duracaoMs,
+          limites,
+        )
+        if (novo !== null) alcas.aoMover(borda, novo)
       }}
       onPointerUp={soltar}
       onPointerCancel={soltar}
@@ -378,10 +309,10 @@ function AlcaDoTempo({
           alcas.aoSoltar()
           return
         }
-        const sentido = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
-        if (sentido === 0) return
+        const novo = teclaDaAlca(e.key, e.shiftKey, ms, limites)
+        if (novo === null) return
         e.preventDefault()
-        mover(ms + sentido * (e.shiftKey ? PASSO_GRANDE_DA_ALCA_MS : PASSO_DA_ALCA_MS))
+        alcas.aoMover(borda, novo)
       }}
     />
   )
@@ -401,29 +332,15 @@ function FaixaDoTempo({
 }) {
   const trilha = useRef<HTMLDivElement>(null)
   const selecionada = faixa.ocorrencias.find((o) => o.chave === alcas?.selecionada)
-  const ordenadas = [...faixa.ocorrencias].sort((a, b) => a.inicio_ms - b.inicio_ms)
-  const secoes = []
-  // Uma faixa é uma fileira só: o trecho que se sobrepõe ao anterior não é desenhado de
-  // novo. Cada ocorrência fica no seu tempo, sem empurrar as seguintes.
-  let cursor = 0
-  for (const o of ordenadas) {
-    // A largura mínima cresce para a esquerda quando a ocorrência encosta no fim.
-    const fim = Math.min(Math.max(o.fim_ms, o.inicio_ms + LARGURA_MINIMA_MS), duracaoMs)
-    const inicio = Math.max(cursor, Math.min(o.inicio_ms, fim - LARGURA_MINIMA_MS))
-    if (fim <= inicio) continue
-    if (inicio > cursor) {
-      secoes.push(
-        <Progress.Section
-          key={`vao-${o.chave}`}
-          value={((inicio - cursor) / duracaoMs) * 100}
-          color="transparent"
-        />,
-      )
-    }
-    secoes.push(
+  const limites =
+    alcas && selecionada ? limitesDasAlcas(selecionada, duracaoMs, alcas.limiteMs) : null
+  const secoes = secoesDaFaixa(faixa.ocorrencias, duracaoMs).map((secao) => {
+    const o = secao.ocorrencia
+    if (!o) return <Progress.Section key={secao.chave} value={secao.percentual} color="transparent" />
+    return (
       <Progress.Section
         key={o.chave}
-        value={((fim - inicio) / duracaoMs) * 100}
+        value={secao.percentual}
         color={faixa.cor}
         role="button"
         tabIndex={0}
@@ -443,10 +360,9 @@ function FaixaDoTempo({
           saltar(o.inicio_ms)
           if (o.alvo) alcas?.aoSelecionar(o)
         }}
-      />,
+      />
     )
-    cursor = fim
-  }
+  })
   return (
     <Group gap="sm" wrap="nowrap">
       <Text size="xs" w={LARGURA_DO_ROTULO} ta="right" c="dimmed">
@@ -456,13 +372,12 @@ function FaixaDoTempo({
         <Progress.Root size={14} radius="xs" bg="dark.6">
           {secoes}
         </Progress.Root>
-        {alcas && selecionada && (
+        {alcas && selecionada && limites && (
           <>
             <AlcaDoTempo
               borda="inicio"
               ms={selecionada.inicio_ms}
-              minMs={0}
-              maxMs={selecionada.fim_ms}
+              limites={limites.inicio}
               duracaoMs={duracaoMs}
               trilha={trilha}
               alcas={alcas}
@@ -470,8 +385,7 @@ function FaixaDoTempo({
             <AlcaDoTempo
               borda="fim"
               ms={selecionada.fim_ms}
-              minMs={selecionada.inicio_ms}
-              maxMs={Math.min(duracaoMs, alcas.limiteMs)}
+              limites={limites.fim}
               duracaoMs={duracaoMs}
               trilha={trilha}
               alcas={alcas}
@@ -499,17 +413,18 @@ type Carga =
     }
 
 export default function Video({
-  autenticador,
+  api: apiDaApp,
   job,
-  aoSessaoExpirada,
   podeEditar = false,
   podeAprovar = false,
+  inicioEmS = null,
 }: {
-  autenticador: Autenticador
+  api: ClienteDaApi
   job: JobAberto
-  aoSessaoExpirada: () => void
   podeEditar?: boolean
   podeAprovar?: boolean
+  /** Instante inicial, em segundos (o `?t=` do endereço). */
+  inicioEmS?: number | null
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
@@ -526,50 +441,39 @@ export default function Video({
   const [recargaDaFila, setRecargaDaFila] = useState(0)
   // Itens com correção pendente de aprovação (`chaveDoItem`), da decupagem aberta.
   const [pendentes, setPendentes] = useState<Set<string>>(new Set())
-  // O pai recria o callback a cada render; o efeito não deve recarregar por isso.
-  const sessaoExpirada = useRef(aoSessaoExpirada)
-  useEffect(() => {
-    sessaoExpirada.current = aoSessaoExpirada
-  })
+  const api = useMemo(() => apiDaApp.job(job.id), [apiDaApp, job.id])
 
   useEffect(() => {
     if (!concluido) return
     let ativo = true
-    Promise.all([
-      chamarApi<Reproducao>(autenticador, `/v1/jobs/${job.id}/reproducao`),
-      chamarApi<Decupagem>(autenticador, `/v1/jobs/${job.id}/decupagem`),
-      chamarApi<CatalogoDeCorrecoes>(autenticador, '/v1/correcoes/catalogo'),
-    ]).then(
+    Promise.all([api.reproducao(), api.decupagem(), api.catalogo()]).then(
       ([reproducao, decupagem, catalogo]) => {
         if (ativo) setCarga({ tipo: 'pronta', reproducao, decupagem, catalogo })
       },
       (erro: unknown) => {
         if (!ativo) return
-        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
-        else setCarga({ tipo: 'erro' })
+        if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro' })
       },
     )
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, concluido])
+  }, [api, concluido])
 
   // A fila de revisão só existe para quem edita; falhar aqui não derruba a tela.
   useEffect(() => {
     if (!concluido || !podeEditar) return
     let ativo = true
-    chamarApi<ItemDaFila[]>(autenticador, `/v1/jobs/${job.id}/fila`).then(
+    api.fila().then(
       (itens) => {
         if (ativo) setFila(itens)
       },
-      (erro: unknown) => {
-        if (ativo && erro instanceof SessaoExpirada) sessaoExpirada.current()
-      },
+      () => {},
     )
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, concluido, podeEditar, recargaDaFila])
+  }, [api, concluido, podeEditar, recargaDaFila])
 
   // As pendentes saem da decupagem entregue: o selo vem do histórico, que é recarregado a
   // cada nova decupagem (toda correção, aprovação ou recusa recarrega o painel).
@@ -577,7 +481,7 @@ export default function Video({
   useEffect(() => {
     if (!podeEditar || !decupagemAtual) return
     let ativo = true
-    chamarApi<ItemDoHistorico[]>(autenticador, `/v1/jobs/${job.id}/correcoes`).then(
+    api.historico().then(
       (itens) => {
         if (!ativo) return
         setPendentes(
@@ -591,44 +495,40 @@ export default function Video({
           ),
         )
       },
-      (erro: unknown) => {
-        if (ativo && erro instanceof SessaoExpirada) sessaoExpirada.current()
-      },
+      () => {},
     )
     return () => {
       ativo = false
     }
-  }, [autenticador, job.id, podeEditar, decupagemAtual])
+  }, [api, podeEditar, decupagemAtual])
 
   // Depois de uma correção, só o painel recarrega: o player segue no mesmo link e ponto.
   const recarregarDecupagem = useCallback(() => {
-    chamarApi<Decupagem>(autenticador, `/v1/jobs/${job.id}/decupagem`).then(
+    api.decupagem().then(
       (decupagem) => setCarga((c) => (c.tipo === 'pronta' ? { ...c, decupagem } : c)),
       (erro: unknown) => {
-        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
-        else setCarga({ tipo: 'erro' })
+        if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro' })
       },
     )
-  }, [autenticador, job.id])
+  }, [api])
 
-  const retomarEm = useRef<number | null>(null)
+  const retomarEm = useRef<number | null>(inicioEmS ?? null)
   // O link assinado expira em minutos: se o player falhar depois disso, pede outro e
   // continua do mesmo ponto.
   const renovarLink = useCallback(() => {
     if (carga.tipo !== 'pronta') return
     if (Date.parse(carga.reproducao.expira_em) > Date.now()) return
     const instante = player.current?.currentTime ?? 0
-    chamarApi<Reproducao>(autenticador, `/v1/jobs/${job.id}/reproducao`).then(
+    api.reproducao().then(
       (reproducao) => {
         retomarEm.current = instante
         setCarga((atual) => (atual.tipo === 'pronta' ? { ...atual, reproducao } : atual))
       },
       (erro: unknown) => {
-        if (erro instanceof SessaoExpirada) sessaoExpirada.current()
-        else setCarga({ tipo: 'erro' })
+        if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro' })
       },
     )
-  }, [autenticador, carga, job.id])
+  }, [api, carga])
   const retomar = useCallback(() => {
     if (player.current && retomarEm.current !== null) {
       player.current.currentTime = retomarEm.current
@@ -640,14 +540,22 @@ export default function Video({
     if (player.current) player.current.currentTime = inicioMs / 1000
   }, [])
 
+  // O mesmo vídeo com outro `?t=` (o endereço mudou, a tela não remontou): salta para lá.
+  const inicioAnterior = useRef(inicioEmS)
+  useEffect(() => {
+    if (inicioEmS === inicioAnterior.current) return
+    inicioAnterior.current = inicioEmS
+    if (inicioEmS === null) return
+    if (player.current && player.current.readyState > 0) player.current.currentTime = inicioEmS
+    else retomarEm.current = inicioEmS
+  }, [inicioEmS])
+
   const [atualMs, setAtualMs] = useState(0)
   const [duracaoDoPlayerMs, setDuracaoDoPlayerMs] = useState<number | null>(null)
   const [aba, setAba] = useState<Aba>('Pessoas')
-  // Alças da linha do tempo: a ocorrência selecionada, o intervalo arrastado (`null` = sem
-  // mudança) e se o modal de confirmação está aberto.
-  const [selecao, setSelecao] = useState<Selecao | null>(null)
-  const [arrastado, setArrastado] = useState<Intervalo | null>(null)
-  const [confirmandoTempos, setConfirmandoTempos] = useState(false)
+  // Alças da linha do tempo: a seleção, o intervalo arrastado e o modal de confirmação.
+  const [linha, despachar] = useReducer(reduzirLinha, LINHA_LIVRE)
+  const { arrastado, confirmando: confirmandoTempos } = linha
 
   if (!concluido) {
     return job.estado === 'falhou' ? (
@@ -676,52 +584,20 @@ export default function Video({
   }
 
   const { decupagem, reproducao, catalogo } = carga
-  // Depois de recarregar a decupagem, a seleção antiga não vale mais (os índices podem ter
-  // mudado). O modal aberto segue com ela, para mostrar o antes e depois que enviou.
-  const selecaoAtual = selecao?.decupagem === decupagem ? selecao : null
-  const faixas = faixasDe(decupagem, catalogo).map((f) =>
-    selecaoAtual && arrastado
-      ? {
-          ...f,
-          ocorrencias: f.ocorrencias.map((o) =>
-            o.chave === selecaoAtual.chave ? { ...o, ...arrastado } : o,
-          ),
-        }
-      : f,
-  )
+  // O modal aberto segue com a seleção antiga, para mostrar o antes e depois que enviou.
+  const selecaoAtual = selecaoValida(linha, decupagem)
+  const faixas = faixasComArrasto(faixasDe(decupagem, catalogo), selecaoAtual, arrastado)
   const alcas: AlcasDaLinha | undefined = podeEditar
     ? {
         selecionada: selecaoAtual?.chave ?? null,
         limiteMs: decupagem.video?.duracao_ms ?? Infinity,
-        aoSelecionar: (o) => {
-          if (!o.alvo || o.chave === selecaoAtual?.chave) return
-          setArrastado(null)
-          setSelecao({
-            decupagem,
-            chave: o.chave,
-            alvo: o.alvo,
-            original: { inicio_ms: o.inicio_ms, fim_ms: o.fim_ms },
-          })
-        },
+        aoSelecionar: (ocorrencia) => despachar({ tipo: 'selecionar', decupagem, ocorrencia }),
         aoMover: (borda, ms) => {
           if (!selecaoAtual) return
-          const { original } = selecaoAtual
-          setArrastado((a) => ({
-            ...(a ?? original),
-            [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms,
-          }))
+          despachar({ tipo: 'mover', decupagem, borda, ms })
           saltar(ms)
         },
-        aoSoltar: () => {
-          if (!selecaoAtual) return
-          if (
-            arrastado &&
-            (arrastado.inicio_ms !== selecaoAtual.original.inicio_ms ||
-              arrastado.fim_ms !== selecaoAtual.original.fim_ms)
-          )
-            setConfirmandoTempos(true)
-          else setArrastado(null)
-        },
+        aoSoltar: () => despachar({ tipo: 'soltar', decupagem }),
       }
     : undefined
   const duracaoMs = Math.max(duracaoDoPlayerMs ?? maiorFim(faixas), 1)
@@ -1077,90 +953,72 @@ export default function Video({
           <FilaDeRevisao
             aberta={filaAberta}
             itens={fila}
-            autenticador={autenticador}
-            jobId={job.id}
+            api={api}
             aoFechar={() => setFilaAberta(false)}
             aoResolver={() => {
               setRecargaDaFila((n) => n + 1)
               recarregarDecupagem()
             }}
-            aoSessaoExpirada={() => sessaoExpirada.current()}
           />
         )}
         {podeEditar && (
           <HistoricoDeCorrecoes
             aberto={historicoAberto}
-            autenticador={autenticador}
-            jobId={job.id}
+            api={api}
             aoFechar={() => setHistoricoAberto(false)}
             podeAprovar={podeAprovar}
             aoMudar={recarregarDecupagem}
-            aoSessaoExpirada={() => sessaoExpirada.current()}
           />
         )}
         <CorrigirPessoa
           key={corrigindo?.id ?? 'fechado'}
           pessoa={corrigindo}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setCorrigindo(null)}
           aoSalvar={() => {
             setCorrigindo(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirOcorrencia
           key={ocorrenciaAberta ? JSON.stringify(ocorrenciaAberta) : 'fechada'}
           acao={ocorrenciaAberta}
           pessoas={decupagem.pessoas.filter((p) => pessoaDoModelo(catalogo, p))}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setOcorrenciaAberta(null)}
           aoSalvar={() => {
             setOcorrenciaAberta(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirPauta
           key={corrigindoPauta?.id ?? 'fechada'}
           pauta={corrigindoPauta}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setCorrigindoPauta(null)}
           aoSalvar={() => {
             setCorrigindoPauta(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirTempos
           key={confirmandoTempos ? 'tempos-aberto' : 'tempos-fechado'}
-          selecao={confirmandoTempos ? selecao : null}
+          selecao={confirmandoTempos ? linha.selecao : null}
           depois={arrastado}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
-          aoFechar={() => {
-            // Cancelar devolve a ocorrência ao intervalo anterior.
-            setConfirmandoTempos(false)
-            setArrastado(null)
-          }}
+          api={api}
+          aoFechar={() => despachar({ tipo: 'cancelar' })}
           aoSalvar={() => {
-            // O intervalo arrastado fica na linha do tempo até a decupagem recarregada chegar;
-            // aí a seleção antiga deixa de valer e as alças somem.
-            setConfirmandoTempos(false)
+            despachar({ tipo: 'enviado' })
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirTrecho
           key={
@@ -1172,43 +1030,37 @@ export default function Video({
           }
           trecho={trechoAberto}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setTrechoAberto(null)}
           aoSalvar={() => {
             setTrechoAberto(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirCampo
           key={campoAberto ? JSON.stringify(campoAberto) : 'fechado'}
           campo={campoAberto}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setCampoAberto(null)}
           aoSalvar={() => {
             setCampoAberto(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
         <CorrigirComercial
           key={comercialAberto === 'novo' ? 'novo' : (comercialAberto?.id ?? 'fechado')}
           comercial={comercialAberto}
           versao={decupagem.versao_decupagem ?? ''}
-          autenticador={autenticador}
-          jobId={job.id}
+          api={api}
           aoFechar={() => setComercialAberto(null)}
           aoSalvar={() => {
             setComercialAberto(null)
             recarregarDecupagem()
           }}
           aoVersaoDesatualizada={recarregarDecupagem}
-          aoSessaoExpirada={() => sessaoExpirada.current()}
         />
       </Grid>
     </ContextoDoCatalogo.Provider>
@@ -1265,68 +1117,77 @@ function NomeDaPessoa({
   )
 }
 
-/** Modal da Ilha de edição: novo nome e motivo; a API confere a permissão e a versão. */
-function CorrigirPessoa({
-  pessoa,
-  versao,
-  autenticador,
-  jobId,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-  aoSessaoExpirada,
-}: {
-  pessoa: Pessoa | null
+/** O que todo modal de Correção recebe da tela do vídeo. */
+interface PropsDaCorrecao {
   versao: string
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoSalvar: () => void
   aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
+}
+
+const DECUPAGEM_MUDOU = 'A decupagem mudou e foi recarregada. Confira e salve de novo.'
+
+/**
+ * Casca comum dos modais de Correção: os campos do modal, o motivo, o erro e Cancelar/Salvar.
+ * `enviar` grava com o motivo; os erros do cliente viram as mensagens da tela.
+ */
+function FormularioDeCorrecao({
+  titulo,
+  aberto,
+  podeSalvar,
+  conflito = DECUPAGEM_MUDOU,
+  invalido,
+  enviar,
+  aoFechar,
+  aoSalvar,
+  aoVersaoDesatualizada,
+  children,
+}: {
+  titulo: string
+  aberto: boolean
+  /** Os campos do modal permitem salvar; o motivo o formulário confere. */
+  podeSalvar: boolean
+  /** Mensagem do 409, depois de recarregar a decupagem. */
+  conflito?: string
+  /** Mensagem do 422; sem ela, vale a mensagem genérica. */
+  invalido?: string
+  enviar: (motivo: string) => Promise<void>
+  aoFechar: () => void
+  aoSalvar: () => void
+  aoVersaoDesatualizada: () => void
+  children: ReactNode
 }) {
   const catalogo = useCatalogo()
-  const [nome, setNome] = useState(pessoa?.nome ?? '')
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
 
   async function salvar() {
-    if (!pessoa) return
     setSalvando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo: {
-          tipo: 'pessoa.renomear',
-          item_id: pessoa.id,
-          valor: nome,
-          motivo,
-          versao,
-        },
-      })
+      await enviar(motivo)
       aoSalvar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof ConflitoNaApi) {
         // Recarrega o painel: a versão nova chega ao modal e o Editor pode salvar de novo.
         aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else setErro('Não foi possível salvar a correção.')
+        setErro(conflito)
+      } else if (e instanceof PedidoInvalido && invalido) {
+        setErro(invalido)
+      } else if (!(e instanceof SessaoExpirada)) {
+        // Na sessão expirada o cliente já avisou o App.
+        setErro('Não foi possível salvar a correção.')
+      }
       setSalvando(false)
     }
   }
 
   return (
-    <Modal opened={pessoa !== null} onClose={aoFechar} title="Corrigir pessoa" centered>
+    <Modal opened={aberto} onClose={aoFechar} title={titulo} centered>
       <Stack gap="sm">
-        <TextInput
-          label="Nome"
-          value={nome}
-          maxLength={catalogo.limites.nome}
-          onChange={(e) => setNome(e.currentTarget.value)}
-        />
+        {children}
         <Textarea
           label="Motivo"
           value={motivo}
@@ -1346,7 +1207,7 @@ function CorrigirPessoa({
           <Button
             type="button"
             loading={salvando}
-            disabled={!nome.trim() || !motivo.trim()}
+            disabled={!podeSalvar || !motivo.trim()}
             onClick={() => void salvar()}
           >
             Salvar
@@ -1354,6 +1215,45 @@ function CorrigirPessoa({
         </Group>
       </Stack>
     </Modal>
+  )
+}
+
+/** Modal da Ilha de edição: novo nome e motivo; a API confere a permissão e a versão. */
+function CorrigirPessoa({
+  pessoa,
+  versao,
+  api,
+  ...props
+}: PropsDaCorrecao & { pessoa: Pessoa | null }) {
+  const catalogo = useCatalogo()
+  const [nome, setNome] = useState(pessoa?.nome ?? '')
+
+  async function enviar(motivo: string) {
+    if (!pessoa) return
+    await api.corrigir({
+      tipo: 'pessoa.renomear',
+      item_id: pessoa.id,
+      valor: nome,
+      motivo,
+      versao,
+    })
+  }
+
+  return (
+    <FormularioDeCorrecao
+      {...props}
+      titulo="Corrigir pessoa"
+      aberto={pessoa !== null}
+      podeSalvar={!!nome.trim()}
+      enviar={enviar}
+    >
+      <TextInput
+        label="Nome"
+        value={nome}
+        maxLength={catalogo.limites.nome}
+        onChange={(e) => setNome(e.currentTarget.value)}
+      />
+    </FormularioDeCorrecao>
   )
 }
 
@@ -1411,23 +1311,9 @@ function CorrigirOcorrencia({
   acao,
   pessoas,
   versao,
-  autenticador,
-  jobId,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-  aoSessaoExpirada,
-}: {
-  acao: AcaoDeOcorrencia | null
-  pessoas: Pessoa[]
-  versao: string
-  autenticador: Autenticador
-  jobId: string
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
-}) {
+  api,
+  ...props
+}: PropsDaCorrecao & { acao: AcaoDeOcorrencia | null; pessoas: Pessoa[] }) {
   const catalogo = useCatalogo()
   const [destino, setDestino] = useState<string>('citada_na_fala')
   const [evidencia, setEvidencia] = useState('')
@@ -1437,9 +1323,6 @@ function CorrigirOcorrencia({
   const [nome, setNome] = useState('')
   const [inicio, setInicio] = useState(acao && acao.tipo === 'tempos' ? tempo(acao.inicio_ms) : '')
   const [fim, setFim] = useState(acao && acao.tipo === 'tempos' ? tempo(acao.fim_ms) : '')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
 
   const inicioMs = acao?.tipo === 'tempos' ? tempoDoCampo(inicio, acao.inicio_ms) : lerTempo(inicio)
   const fimMs = acao?.tipo === 'tempos' ? tempoDoCampo(fim, acao.fim_ms) : lerTempo(fim)
@@ -1502,140 +1385,93 @@ function CorrigirOcorrencia({
 
   const corpo = pedido()
 
-  async function salvar() {
+  async function enviar(motivo: string) {
     if (!corpo) return
-    setSalvando(true)
-    setErro(null)
-    try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo: { ...corpo, motivo, versao },
-      })
-      aoSalvar()
-    } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro(
-          acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos'
-            ? 'Confira os campos: os tempos ficam dentro da duração do vídeo.'
-            : 'A ocorrência não foi encontrada. Recarregue a página e confira.',
-        )
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
-    }
+    await api.corrigir({ ...corpo, motivo, versao })
   }
 
   return (
-    <Modal
-      opened={acao !== null}
-      onClose={aoFechar}
-      title={acao ? TITULOS[acao.tipo] : ''}
-      centered
+    <FormularioDeCorrecao
+      {...props}
+      titulo={acao ? TITULOS[acao.tipo] : ''}
+      aberto={acao !== null}
+      podeSalvar={corpo !== null}
+      invalido={
+        acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos'
+          ? 'Confira os campos: os tempos ficam dentro da duração do vídeo.'
+          : 'A ocorrência não foi encontrada. Recarregue a página e confira.'
+      }
+      enviar={enviar}
     >
-      <Stack gap="sm">
-        {acao && acao.tipo !== 'acrescentar' && (
-          <Text size="sm">
-            {`${acao.pessoa.nome}, ${tempo(acao.inicio_ms)}–${tempo(acao.fim_ms)}`}
-          </Text>
-        )}
-        {acao?.tipo === 'nao_e' && (
-          <Text size="sm" c="dimmed">
-            O trecho passa para uma pessoa “não identificado”.
-          </Text>
-        )}
-        {acao?.tipo === 'aparicao_para_mencao' && (
-          <Select
-            label="Citada"
-            allowDeselect={false}
-            data={[
-              { value: 'citada_na_fala', label: 'Na fala' },
-              { value: 'citada_no_texto', label: 'No texto' },
-            ]}
-            value={destino}
-            onChange={(v) => setDestino(v ?? 'citada_na_fala')}
-          />
-        )}
-        {acao?.tipo === 'acrescentar' && (
-          <Select
-            label="Pessoa"
-            allowDeselect={false}
-            data={[
-              { value: NOVA_PESSOA, label: 'Nova pessoa' },
-              ...pessoas.map((p) => ({ value: p.id, label: p.nome })),
-            ]}
-            value={pessoaId}
-            onChange={(v) => setPessoaId(v ?? NOVA_PESSOA)}
-          />
-        )}
-        {acao?.tipo === 'acrescentar' && pessoaNova && (
-          <TextInput
-            label="Nome"
-            value={nome}
-            maxLength={catalogo.limites.nome}
-            onChange={(e) => setNome(e.currentTarget.value)}
-          />
-        )}
-        {(acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos') && (
-          <Group grow align="flex-start">
-            <TextInput
-              label="Início (mm:ss)"
-              value={inicio}
-              error={inicio && lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setInicio(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Fim (mm:ss)"
-              value={fim}
-              error={fim && lerTempo(fim) === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setFim(e.currentTarget.value)}
-            />
-          </Group>
-        )}
-        {(acao?.tipo === 'acrescentar' || acao?.tipo === 'mencao_para_aparicao') && (
-          <TextInput
-            label="Evidência"
-            description="O que mostra a pessoa na imagem"
-            value={evidencia}
-            maxLength={catalogo.limites.nome}
-            onChange={(e) => setEvidencia(e.currentTarget.value)}
-          />
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
+      {acao && acao.tipo !== 'acrescentar' && (
+        <Text size="sm">
+          {`${acao.pessoa.nome}, ${tempo(acao.inicio_ms)}–${tempo(acao.fim_ms)}`}
+        </Text>
+      )}
+      {acao?.tipo === 'nao_e' && (
+        <Text size="sm" c="dimmed">
+          O trecho passa para uma pessoa “não identificado”.
+        </Text>
+      )}
+      {acao?.tipo === 'aparicao_para_mencao' && (
+        <Select
+          label="Citada"
+          allowDeselect={false}
+          data={[
+            { value: 'citada_na_fala', label: 'Na fala' },
+            { value: 'citada_no_texto', label: 'No texto' },
+          ]}
+          value={destino}
+          onChange={(v) => setDestino(v ?? 'citada_na_fala')}
         />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={aoFechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={!corpo || !motivo.trim()}
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
+      )}
+      {acao?.tipo === 'acrescentar' && (
+        <Select
+          label="Pessoa"
+          allowDeselect={false}
+          data={[
+            { value: NOVA_PESSOA, label: 'Nova pessoa' },
+            ...pessoas.map((p) => ({ value: p.id, label: p.nome })),
+          ]}
+          value={pessoaId}
+          onChange={(v) => setPessoaId(v ?? NOVA_PESSOA)}
+        />
+      )}
+      {acao?.tipo === 'acrescentar' && pessoaNova && (
+        <TextInput
+          label="Nome"
+          value={nome}
+          maxLength={catalogo.limites.nome}
+          onChange={(e) => setNome(e.currentTarget.value)}
+        />
+      )}
+      {(acao?.tipo === 'acrescentar' || acao?.tipo === 'tempos') && (
+        <Group grow align="flex-start">
+          <TextInput
+            label="Início (mm:ss)"
+            value={inicio}
+            error={inicio && lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setInicio(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Fim (mm:ss)"
+            value={fim}
+            error={fim && lerTempo(fim) === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setFim(e.currentTarget.value)}
+          />
         </Group>
-      </Stack>
-    </Modal>
+      )}
+      {(acao?.tipo === 'acrescentar' || acao?.tipo === 'mencao_para_aparicao') && (
+        <TextInput
+          label="Evidência"
+          description="O que mostra a pessoa na imagem"
+          value={evidencia}
+          maxLength={catalogo.limites.nome}
+          onChange={(e) => setEvidencia(e.currentTarget.value)}
+        />
+      )}
+    </FormularioDeCorrecao>
   )
-}
-
-/** "mm:ss.mmm": o modal dos tempos arrastados mostra os milissegundos. */
-function tempoPreciso(ms: number): string {
-  return `${tempo(ms)}.${String(ms % 1000).padStart(3, '0')}`
 }
 
 /** Modal das alças: mostra antes e depois e pede o motivo; salvar grava um `item.tempos`. */
@@ -1643,31 +1479,10 @@ function CorrigirTempos({
   selecao,
   depois,
   versao,
-  autenticador,
-  jobId,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-  aoSessaoExpirada,
-}: {
-  selecao: Selecao | null
-  depois: Intervalo | null
-  versao: string
-  autenticador: Autenticador
-  jobId: string
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
-}) {
-  const catalogo = useCatalogo()
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
-
-  const aberto = selecao !== null && depois !== null
-
-  async function salvar() {
+  api,
+  ...props
+}: PropsDaCorrecao & { selecao: Selecao | null; depois: Intervalo | null }) {
+  async function enviar(motivo: string) {
     if (!selecao || !depois) return
     const { alvo, original } = selecao
     const base = { tipo: 'item.tempos', item_id: alvo.id, motivo, versao }
@@ -1683,64 +1498,28 @@ function CorrigirTempos({
         : alvo.tipo === 'comercial'
           ? { ...base, tipo_do_item: 'comercial', valor }
           : { ...base, valor }
-    setSalvando(true)
-    setErro(null)
-    try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo,
-      })
-      aoSalvar()
-    } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Cancele e arraste de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro(
-          'Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir.',
-        )
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
-    }
+    await api.corrigir(corpo)
   }
 
   return (
-    <Modal opened={aberto} onClose={aoFechar} title="Corrigir tempos" centered>
+    <FormularioDeCorrecao
+      {...props}
+      titulo="Corrigir tempos"
+      aberto={selecao !== null && depois !== null}
+      podeSalvar
+      conflito="A decupagem mudou e foi recarregada. Cancele e arraste de novo."
+      invalido="Confira os tempos: ficam dentro da duração do vídeo e a ocorrência precisa existir."
+      enviar={enviar}
+    >
       {selecao && depois && (
-        <Stack gap="sm">
+        <>
           <Text size="sm">{`Antes: ${tempoPreciso(selecao.original.inicio_ms)}–${tempoPreciso(selecao.original.fim_ms)}`}</Text>
           <Text size="sm" fw={700}>
             {`Depois: ${tempoPreciso(depois.inicio_ms)}–${tempoPreciso(depois.fim_ms)}`}
           </Text>
-          <Textarea
-            label="Motivo"
-            value={motivo}
-            maxLength={catalogo.limites.motivo}
-            rows={3}
-            onChange={(e) => setMotivo(e.currentTarget.value)}
-          />
-          {erro && (
-            <Alert color="red" variant="light" role="alert">
-              {erro}
-            </Alert>
-          )}
-          <Group justify="flex-end">
-            <Button type="button" variant="default" onClick={aoFechar}>
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              loading={salvando}
-              disabled={!motivo.trim()}
-              onClick={() => void salvar()}
-            >
-              Salvar
-            </Button>
-          </Group>
-        </Stack>
+        </>
       )}
-    </Modal>
+    </FormularioDeCorrecao>
   )
 }
 
@@ -1748,30 +1527,16 @@ function CorrigirTempos({
 function CorrigirPauta({
   pauta,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
-}: {
-  pauta: Pauta | null
-  versao: string
-  autenticador: Autenticador
-  jobId: string
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
-}) {
+}: PropsDaCorrecao & { pauta: Pauta | null }) {
   const catalogo = useCatalogo()
   const [titulo, setTitulo] = useState(pauta?.titulo ?? '')
   const [resumo, setResumo] = useState(pauta?.resumo ?? '')
   const [inicio, setInicio] = useState(pauta ? tempo(pauta.inicio_ms) : '')
   const [fim, setFim] = useState(pauta ? tempo(pauta.fim_ms) : '')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
   // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
   const [gravadas, setGravadas] = useState<Record<string, string>>({})
 
@@ -1789,30 +1554,17 @@ function CorrigirPauta({
     candidatas.push({ tipo: 'item.tempos', valor: `${inicioMs}-${fimMs}` })
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
 
-  async function salvar() {
+  async function enviar(motivo: string) {
     if (!pauta) return
-    setSalvando(true)
-    setErro(null)
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
-        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-          metodo: 'POST',
-          corpo: { ...m, item_id: pauta.id, motivo, versao },
-        })
+        await api.corrigir({ ...m, item_id: pauta.id, motivo, versao })
         feitas[m.tipo] = m.valor
       }
-      aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
+      throw e
     }
   }
 
@@ -1823,74 +1575,52 @@ function CorrigirPauta({
   }
 
   return (
-    <Modal opened={pauta !== null} onClose={fechar} title="Corrigir pauta" centered>
-      <Stack gap="sm">
+    <FormularioDeCorrecao
+      titulo="Corrigir pauta"
+      aberto={pauta !== null}
+      podeSalvar={
+        !!titulo.trim() && !(temposMudaram && !temposValidos) && !resumoApagado && mudancas.length > 0
+      }
+      invalido="Confira os campos: os tempos ficam dentro da duração do vídeo."
+      enviar={enviar}
+      aoFechar={fechar}
+      aoSalvar={aoSalvar}
+      aoVersaoDesatualizada={aoVersaoDesatualizada}
+    >
+      <TextInput
+        label="Título"
+        value={titulo}
+        maxLength={catalogo.limites.nome}
+        onChange={(e) => setTitulo(e.currentTarget.value)}
+      />
+      <Textarea
+        label="Resumo"
+        value={resumo}
+        maxLength={catalogo.limites.texto}
+        rows={4}
+        error={resumoApagado ? 'O resumo não pode ficar vazio' : undefined}
+        onChange={(e) => setResumo(e.currentTarget.value)}
+      />
+      <Group grow align="flex-start">
         <TextInput
-          label="Título"
-          value={titulo}
-          maxLength={catalogo.limites.nome}
-          onChange={(e) => setTitulo(e.currentTarget.value)}
+          label="Início (mm:ss)"
+          value={inicio}
+          error={lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
+          onChange={(e) => setInicio(e.currentTarget.value)}
         />
-        <Textarea
-          label="Resumo"
-          value={resumo}
-          maxLength={catalogo.limites.texto}
-          rows={4}
-          error={resumoApagado ? 'O resumo não pode ficar vazio' : undefined}
-          onChange={(e) => setResumo(e.currentTarget.value)}
+        <TextInput
+          label="Fim (mm:ss)"
+          value={fim}
+          error={lerTempo(fim) === null ? 'Use mm:ss' : undefined}
+          onChange={(e) => setFim(e.currentTarget.value)}
         />
-        <Group grow align="flex-start">
-          <TextInput
-            label="Início (mm:ss)"
-            value={inicio}
-            error={lerTempo(inicio) === null ? 'Use mm:ss' : undefined}
-            onChange={(e) => setInicio(e.currentTarget.value)}
-          />
-          <TextInput
-            label="Fim (mm:ss)"
-            value={fim}
-            error={lerTempo(fim) === null ? 'Use mm:ss' : undefined}
-            onChange={(e) => setFim(e.currentTarget.value)}
-          />
-        </Group>
-        {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
-          <Text size="xs" c="red">
-            O início não pode vir depois do fim.
-          </Text>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
-        />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={fechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={
-              !titulo.trim() ||
-              !motivo.trim() ||
-              (temposMudaram && !temposValidos) ||
-              resumoApagado ||
-              mudancas.length === 0
-            }
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+      </Group>
+      {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
+        <Text size="xs" c="red">
+          O início não pode vir depois do fim.
+        </Text>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
@@ -1906,22 +1636,9 @@ const TITULOS_DO_CAMPO = {
 function CorrigirCampo({
   campo,
   versao,
-  autenticador,
-  jobId,
-  aoFechar,
-  aoSalvar,
-  aoVersaoDesatualizada,
-  aoSessaoExpirada,
-}: {
-  campo: CampoAberto | null
-  versao: string
-  autenticador: Autenticador
-  jobId: string
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
-}) {
+  api,
+  ...props
+}: PropsDaCorrecao & { campo: CampoAberto | null }) {
   const catalogo = useCatalogo()
   const [tom, setTom] = useState<string | null>(
     campo?.modo === 'tom' &&
@@ -1941,9 +1658,6 @@ function CorrigirCampo({
   const [texto, setTexto] = useState(campo?.modo === 'texto' ? campo.texto.texto : '')
   const [inicio, setInicio] = useState('')
   const [fim, setFim] = useState('')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
 
   const inicioMs = lerTempo(inicio)
   const fimMs = lerTempo(fim)
@@ -2007,26 +1721,9 @@ function CorrigirCampo({
 
   const corpo = pedido()
 
-  async function salvar() {
+  async function enviar(motivo: string) {
     if (!corpo) return
-    setSalvando(true)
-    setErro(null)
-    try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-        metodo: 'POST',
-        corpo: { ...corpo, motivo, versao },
-      })
-      aoSalvar()
-    } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro('Confira os campos: o valor não foi aceito.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
-    }
+    await api.corrigir({ ...corpo, motivo, versao })
   }
 
   const tipoDeTexto = (
@@ -2040,109 +1737,84 @@ function CorrigirCampo({
   )
 
   return (
-    <Modal
-      opened={campo !== null}
-      onClose={aoFechar}
-      title={campo ? TITULOS_DO_CAMPO[campo.modo] : ''}
-      centered
+    <FormularioDeCorrecao
+      {...props}
+      titulo={campo ? TITULOS_DO_CAMPO[campo.modo] : ''}
+      aberto={campo !== null}
+      podeSalvar={corpo !== null}
+      invalido="Confira os campos: o valor não foi aceito."
+      enviar={enviar}
     >
-      <Stack gap="sm">
-        {campo?.modo === 'tom' && (
-          <Select
-            label="Tom"
-            data={comoSelect(catalogo.tons_da_pauta)}
-            value={tom}
-            allowDeselect={false}
-            onChange={setTom}
-          />
-        )}
-        {campo?.modo === 'fontes' && (
-          <Stack gap={4}>
-            <Text size="sm" fw={500}>
-              Fontes do nome
-            </Text>
-            <Chip.Group multiple value={fontes} onChange={setFontes}>
-              <Group gap={6}>
-                {catalogo.fontes_do_nome.map(({ valor, rotulo }) => (
-                  <Chip key={valor} value={valor} size="xs">
-                    {rotulo}
-                  </Chip>
-                ))}
-              </Group>
-            </Chip.Group>
-          </Stack>
-        )}
-        {campo?.modo === 'papel' && (
-          <>
-            <TextInput
-              label="Papel na cena"
-              value={papel}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setPapel(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Visual"
-              value={visual}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setVisual(e.currentTarget.value)}
-            />
-          </>
-        )}
-        {(campo?.modo === 'texto' || campo?.modo === 'novo_texto') && (
-          <>
-            {tipoDeTexto}
-            <Textarea
-              label="Texto"
-              value={texto}
-              maxLength={catalogo.limites.texto}
-              rows={3}
-              onChange={(e) => setTexto(e.currentTarget.value)}
-            />
-          </>
-        )}
-        {campo?.modo === 'novo_texto' && (
-          <Group grow align="flex-start">
-            <TextInput
-              label="Início (mm:ss)"
-              value={inicio}
-              error={inicio !== '' && inicioMs === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setInicio(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Fim (mm:ss)"
-              value={fim}
-              error={fim !== '' && fimMs === null ? 'Use mm:ss' : undefined}
-              onChange={(e) => setFim(e.currentTarget.value)}
-            />
-          </Group>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
+      {campo?.modo === 'tom' && (
+        <Select
+          label="Tom"
+          data={comoSelect(catalogo.tons_da_pauta)}
+          value={tom}
+          allowDeselect={false}
+          onChange={setTom}
         />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={aoFechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={!corpo || !motivo.trim()}
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
+      )}
+      {campo?.modo === 'fontes' && (
+        <Stack gap={4}>
+          <Text size="sm" fw={500}>
+            Fontes do nome
+          </Text>
+          <Chip.Group multiple value={fontes} onChange={setFontes}>
+            <Group gap={6}>
+              {catalogo.fontes_do_nome.map(({ valor, rotulo }) => (
+                <Chip key={valor} value={valor} size="xs">
+                  {rotulo}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
+        </Stack>
+      )}
+      {campo?.modo === 'papel' && (
+        <>
+          <TextInput
+            label="Papel na cena"
+            value={papel}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setPapel(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Visual"
+            value={visual}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setVisual(e.currentTarget.value)}
+          />
+        </>
+      )}
+      {(campo?.modo === 'texto' || campo?.modo === 'novo_texto') && (
+        <>
+          {tipoDeTexto}
+          <Textarea
+            label="Texto"
+            value={texto}
+            maxLength={catalogo.limites.texto}
+            rows={3}
+            onChange={(e) => setTexto(e.currentTarget.value)}
+          />
+        </>
+      )}
+      {campo?.modo === 'novo_texto' && (
+        <Group grow align="flex-start">
+          <TextInput
+            label="Início (mm:ss)"
+            value={inicio}
+            error={inicio !== '' && inicioMs === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setInicio(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Fim (mm:ss)"
+            value={fim}
+            error={fim !== '' && fimMs === null ? 'Use mm:ss' : undefined}
+            onChange={(e) => setFim(e.currentTarget.value)}
+          />
         </Group>
-      </Stack>
-    </Modal>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
@@ -2150,22 +1822,11 @@ function CorrigirCampo({
 function CorrigirTrecho({
   trecho,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
-}: {
-  trecho: Trecho | null
-  versao: string
-  autenticador: Autenticador
-  jobId: string
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
-}) {
+}: PropsDaCorrecao & { trecho: Trecho | null }) {
   const catalogo = useCatalogo()
   const plano = trecho?.tipo === 'plano' ? trecho.plano : null
   const fala = trecho?.tipo === 'fala' ? trecho.fala : null
@@ -2175,9 +1836,6 @@ function CorrigirTrecho({
   const [limpo, setLimpo] = useState(plano?.plano_limpo ?? false)
   const [texto, setTexto] = useState(fala?.texto ?? '')
   const [locutor, setLocutor] = useState(fala?.locutor ?? '')
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
   // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
   const [gravadas, setGravadas] = useState<Record<string, string>>({})
 
@@ -2211,29 +1869,16 @@ function CorrigirTrecho({
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
   const itemId = plano?.id ?? fala?.id ?? ''
 
-  async function salvar() {
-    setSalvando(true)
-    setErro(null)
+  async function enviar(motivo: string) {
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
-        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-          metodo: 'POST',
-          corpo: { ...m, item_id: itemId, motivo, versao },
-        })
+        await api.corrigir({ ...m, item_id: itemId, motivo, versao })
         feitas[m.tipo] = m.valor
       }
-      aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro('Confira os campos: o trecho não foi encontrado ou há valor inválido.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
+      throw e
     }
   }
 
@@ -2244,89 +1889,65 @@ function CorrigirTrecho({
   }
 
   return (
-    <Modal
-      opened={trecho !== null}
-      onClose={fechar}
-      title={plano ? 'Corrigir plano' : 'Corrigir fala'}
-      centered
+    <FormularioDeCorrecao
+      titulo={plano ? 'Corrigir plano' : 'Corrigir fala'}
+      aberto={trecho !== null}
+      podeSalvar={
+        !(plano !== null && !ambiente.trim()) &&
+        !(fala !== null && (!texto.trim() || !locutor.trim())) &&
+        mudancas.length > 0
+      }
+      invalido="Confira os campos: o trecho não foi encontrado ou há valor inválido."
+      enviar={enviar}
+      aoFechar={fechar}
+      aoSalvar={aoSalvar}
+      aoVersaoDesatualizada={aoVersaoDesatualizada}
     >
-      <Stack gap="sm">
-        {plano && (
-          <>
-            <TextInput
-              label="Ambiente"
-              value={ambiente}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setAmbiente(e.currentTarget.value)}
-            />
-            <Textarea
-              label="Ação"
-              value={acao}
-              maxLength={catalogo.limites.texto}
-              rows={3}
-              onChange={(e) => setAcao(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Objetos (separados por vírgula)"
-              value={objetos}
-              onChange={(e) => setObjetos(e.currentTarget.value)}
-            />
-            <Switch
-              label="Plano limpo"
-              checked={limpo}
-              onChange={(e) => setLimpo(e.currentTarget.checked)}
-            />
-          </>
-        )}
-        {fala && (
-          <>
-            <TextInput
-              label="Locutor"
-              value={locutor}
-              maxLength={catalogo.limites.nome}
-              onChange={(e) => setLocutor(e.currentTarget.value)}
-            />
-            <Textarea
-              label="Texto"
-              value={texto}
-              maxLength={catalogo.limites.texto}
-              rows={4}
-              onChange={(e) => setTexto(e.currentTarget.value)}
-            />
-          </>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
-        />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={fechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={
-              !motivo.trim() ||
-              (plano !== null && !ambiente.trim()) ||
-              (fala !== null && (!texto.trim() || !locutor.trim())) ||
-              mudancas.length === 0
-            }
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+      {plano && (
+        <>
+          <TextInput
+            label="Ambiente"
+            value={ambiente}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setAmbiente(e.currentTarget.value)}
+          />
+          <Textarea
+            label="Ação"
+            value={acao}
+            maxLength={catalogo.limites.texto}
+            rows={3}
+            onChange={(e) => setAcao(e.currentTarget.value)}
+          />
+          <TextInput
+            label="Objetos (separados por vírgula)"
+            value={objetos}
+            onChange={(e) => setObjetos(e.currentTarget.value)}
+          />
+          <Switch
+            label="Plano limpo"
+            checked={limpo}
+            onChange={(e) => setLimpo(e.currentTarget.checked)}
+          />
+        </>
+      )}
+      {fala && (
+        <>
+          <TextInput
+            label="Locutor"
+            value={locutor}
+            maxLength={catalogo.limites.nome}
+            onChange={(e) => setLocutor(e.currentTarget.value)}
+          />
+          <Textarea
+            label="Texto"
+            value={texto}
+            maxLength={catalogo.limites.texto}
+            rows={4}
+            onChange={(e) => setTexto(e.currentTarget.value)}
+          />
+        </>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
@@ -2334,22 +1955,11 @@ function CorrigirTrecho({
 function CorrigirComercial({
   comercial,
   versao,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoSalvar,
   aoVersaoDesatualizada,
-  aoSessaoExpirada,
-}: {
-  comercial: Comercial | 'novo' | null
-  versao: string
-  autenticador: Autenticador
-  jobId: string
-  aoFechar: () => void
-  aoSalvar: () => void
-  aoVersaoDesatualizada: () => void
-  aoSessaoExpirada: () => void
-}) {
+}: PropsDaCorrecao & { comercial: Comercial | 'novo' | null }) {
   const catalogo = useCatalogo()
   const novo = comercial === 'novo'
   const atual = comercial !== null && !novo ? comercial : null
@@ -2358,9 +1968,6 @@ function CorrigirComercial({
   const [inicio, setInicio] = useState(atual ? tempo(atual.inicio_ms) : '')
   const [fim, setFim] = useState(atual ? tempo(atual.fim_ms) : '')
   const [evidencias, setEvidencias] = useState<string[]>([])
-  const [motivo, setMotivo] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
   // O que já foi gravado neste modal (tipo → valor): numa falha no meio, não reenviar.
   const [gravadas, setGravadas] = useState<Record<string, string>>({})
 
@@ -2397,29 +2004,16 @@ function CorrigirComercial({
   const mudancas = candidatas.filter((m) => gravadas[m.tipo] !== m.valor)
   const temposMudaram = atual !== null && (inicioMs !== atual.inicio_ms || fimMs !== atual.fim_ms)
 
-  async function salvar() {
-    setSalvando(true)
-    setErro(null)
+  async function enviar(motivo: string) {
     const feitas = { ...gravadas }
     try {
       for (const m of mudancas) {
-        await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes`, {
-          metodo: 'POST',
-          corpo: { ...m, item_id: atual?.id ?? '', motivo, versao },
-        })
+        await api.corrigir({ ...m, item_id: atual?.id ?? '', motivo, versao })
         feitas[m.tipo] = m.valor
       }
-      aoSalvar()
     } catch (e) {
       setGravadas(feitas)
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
-        aoVersaoDesatualizada()
-        setErro('A decupagem mudou e foi recarregada. Confira e salve de novo.')
-      } else if (e instanceof Error && e.message.startsWith('Falha 422')) {
-        setErro('Confira os campos: os tempos ficam dentro da duração do vídeo.')
-      } else setErro('Não foi possível salvar a correção.')
-      setSalvando(false)
+      throw e
     }
   }
 
@@ -2430,97 +2024,69 @@ function CorrigirComercial({
   }
 
   return (
-    <Modal
-      opened={comercial !== null}
-      onClose={fechar}
-      title={novo ? 'Acrescentar comercial' : 'Corrigir comercial'}
-      centered
+    <FormularioDeCorrecao
+      titulo={novo ? 'Acrescentar comercial' : 'Corrigir comercial'}
+      aberto={comercial !== null}
+      podeSalvar={!!marca.trim() && !(temposMudaram && !temposValidos) && mudancas.length > 0}
+      invalido="Confira os campos: os tempos ficam dentro da duração do vídeo."
+      enviar={enviar}
+      aoFechar={fechar}
+      aoSalvar={aoSalvar}
+      aoVersaoDesatualizada={aoVersaoDesatualizada}
     >
-      <Stack gap="sm">
+      <TextInput
+        label="Marca"
+        value={marca}
+        maxLength={catalogo.limites.nome}
+        onChange={(e) => setMarca(e.currentTarget.value)}
+      />
+      <Select
+        label="Tipo"
+        data={comoSelect(catalogo.tipos_de_comercial)}
+        value={tipo}
+        allowDeselect={false}
+        onChange={setTipo}
+      />
+      <Group grow align="flex-start">
         <TextInput
-          label="Marca"
-          value={marca}
-          maxLength={catalogo.limites.nome}
-          onChange={(e) => setMarca(e.currentTarget.value)}
+          label="Início (mm:ss)"
+          value={inicio}
+          error={lerTempo(inicio) === null && inicio !== '' ? 'Use mm:ss' : undefined}
+          onChange={(e) => setInicio(e.currentTarget.value)}
         />
-        <Select
-          label="Tipo"
-          data={comoSelect(catalogo.tipos_de_comercial)}
-          value={tipo}
-          allowDeselect={false}
-          onChange={setTipo}
+        <TextInput
+          label="Fim (mm:ss)"
+          value={fim}
+          error={lerTempo(fim) === null && fim !== '' ? 'Use mm:ss' : undefined}
+          onChange={(e) => setFim(e.currentTarget.value)}
         />
-        <Group grow align="flex-start">
-          <TextInput
-            label="Início (mm:ss)"
-            value={inicio}
-            error={lerTempo(inicio) === null && inicio !== '' ? 'Use mm:ss' : undefined}
-            onChange={(e) => setInicio(e.currentTarget.value)}
-          />
-          <TextInput
-            label="Fim (mm:ss)"
-            value={fim}
-            error={lerTempo(fim) === null && fim !== '' ? 'Use mm:ss' : undefined}
-            onChange={(e) => setFim(e.currentTarget.value)}
-          />
-        </Group>
-        {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
-          <Text size="xs" c="red">
-            O início não pode vir depois do fim.
+      </Group>
+      {inicioMs !== null && fimMs !== null && inicioMs > fimMs && (
+        <Text size="xs" c="red">
+          O início não pode vir depois do fim.
+        </Text>
+      )}
+      {novo && (
+        <Stack gap={4}>
+          <Text size="sm" fw={500}>
+            Evidências
           </Text>
-        )}
-        {novo && (
-          <Stack gap={4}>
-            <Text size="sm" fw={500}>
-              Evidências
-            </Text>
-            <Chip.Group multiple value={evidencias} onChange={setEvidencias}>
-              <Group gap={6}>
-                {EVIDENCIAS.map((e) => (
-                  <Chip key={e} value={e} size="xs">
-                    {e}
-                  </Chip>
-                ))}
-              </Group>
-            </Chip.Group>
-          </Stack>
-        )}
-        <Textarea
-          label="Motivo"
-          value={motivo}
-          maxLength={catalogo.limites.motivo}
-          rows={3}
-          onChange={(e) => setMotivo(e.currentTarget.value)}
-        />
-        {erro && (
-          <Alert color="red" variant="light" role="alert">
-            {erro}
-          </Alert>
-        )}
-        <Group justify="flex-end">
-          <Button type="button" variant="default" onClick={fechar}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            loading={salvando}
-            disabled={
-              !marca.trim() ||
-              !motivo.trim() ||
-              (temposMudaram && !temposValidos) ||
-              mudancas.length === 0
-            }
-            onClick={() => void salvar()}
-          >
-            Salvar
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+          <Chip.Group multiple value={evidencias} onChange={setEvidencias}>
+            <Group gap={6}>
+              {EVIDENCIAS.map((e) => (
+                <Chip key={e} value={e} size="xs">
+                  {e}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
+        </Stack>
+      )}
+    </FormularioDeCorrecao>
   )
 }
 
-interface ItemDoHistorico {
+export interface ItemDoHistorico {
   id: string
   tipo:
     | 'pessoa.renomear'
@@ -2574,20 +2140,16 @@ const quando = (iso: string) =>
 /** Gaveta com as correções da mais recente à mais antiga; desfazer, aprovar e recusar acrescentam, nada se apaga. */
 function HistoricoDeCorrecoes({
   aberto,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   podeAprovar,
   aoMudar,
-  aoSessaoExpirada,
 }: {
   aberto: boolean
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   podeAprovar: boolean
   aoMudar: () => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [itens, setItens] = useState<ItemDoHistorico[] | null>(null)
@@ -2604,15 +2166,11 @@ function HistoricoDeCorrecoes({
   const [enviando, setEnviando] = useState(false)
 
   const [recarga, setRecarga] = useState(0)
-  const sessaoExpirada = useRef(aoSessaoExpirada)
-  useEffect(() => {
-    sessaoExpirada.current = aoSessaoExpirada
-  })
 
   useEffect(() => {
     if (!aberto) return
     let ativo = true
-    chamarApi<ItemDoHistorico[]>(autenticador, `/v1/jobs/${jobId}/correcoes`).then(
+    api.historico().then(
       (lista) => {
         if (!ativo) return
         setItens(lista)
@@ -2620,14 +2178,13 @@ function HistoricoDeCorrecoes({
       },
       (e: unknown) => {
         if (!ativo) return
-        if (e instanceof SessaoExpirada) sessaoExpirada.current()
-        else setFalhou(true)
+        if (!(e instanceof SessaoExpirada)) setFalhou(true)
       },
     )
     return () => {
       ativo = false
     }
-  }, [aberto, autenticador, jobId, recarga])
+  }, [aberto, api, recarga])
 
   const carregar = () => setRecarga((n) => n + 1)
 
@@ -2643,20 +2200,14 @@ function HistoricoDeCorrecoes({
     setEnviando(true)
     setErro(null)
     try {
-      await chamarApi(
-        autenticador,
-        `/v1/jobs/${jobId}/correcoes/${item.id}/${acao === 'desfazer' ? 'desfazer' : 'recusar'}`,
-        {
-          metodo: 'POST',
-          corpo: { motivo },
-        },
-      )
+      await (acao === 'desfazer' ? api.desfazer(item.id, motivo) : api.recusar(item.id, motivo))
       fecharModal()
       carregar()
       aoMudar()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         // Outra pessoa pode ter decidido antes: a decupagem também mudou.
         setErro(
           acao === 'desfazer'
@@ -2679,12 +2230,11 @@ function HistoricoDeCorrecoes({
     setAprovando(item.id)
     setErroDaLista(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/correcoes/${item.id}/aprovar`, {
-        metodo: 'POST',
-      })
+      await api.aprovar(item.id)
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409'))
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi)
         setErroDaLista('Essa correção não está mais pendente. O histórico foi recarregado.')
       else setErroDaLista('Não foi possível aprovar a correção.')
     }
@@ -2816,7 +2366,7 @@ function HistoricoDeCorrecoes({
   )
 }
 
-interface ItemDaFila {
+export interface ItemDaFila {
   id: string
   tipo: ItemDoHistorico['tipo']
   autor_email: string
@@ -2838,19 +2388,15 @@ interface ItemDaFila {
 function FilaDeRevisao({
   aberta,
   itens,
-  autenticador,
-  jobId,
+  api,
   aoFechar,
   aoResolver,
-  aoSessaoExpirada,
 }: {
   aberta: boolean
   itens: ItemDaFila[]
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   aoFechar: () => void
   aoResolver: () => void
-  aoSessaoExpirada: () => void
 }) {
   // Fica no painel: o item resolvido some da lista ao recarregar a fila.
   const [aviso, setAviso] = useState<string | null>(null)
@@ -2875,13 +2421,11 @@ function FilaDeRevisao({
           <ItemDaFilaDeRevisao
             key={i.id}
             item={i}
-            autenticador={autenticador}
-            jobId={jobId}
+            api={api}
             aoResolver={(mensagem) => {
               setAviso(mensagem ?? null)
               aoResolver()
             }}
-            aoSessaoExpirada={aoSessaoExpirada}
           />
         ))}
       </Stack>
@@ -2891,17 +2435,13 @@ function FilaDeRevisao({
 
 function ItemDaFilaDeRevisao({
   item,
-  autenticador,
-  jobId,
+  api,
   aoResolver,
-  aoSessaoExpirada,
 }: {
   item: ItemDaFila
-  autenticador: Autenticador
-  jobId: string
+  api: ClienteDoJob
   /** `aviso`, se houver, sobrevive à recarga da fila. */
   aoResolver: (aviso?: string) => void
-  aoSessaoExpirada: () => void
 }) {
   const catalogo = useCatalogo()
   const [candidato, setCandidato] = useState<string | null>(null)
@@ -2913,14 +2453,14 @@ function ItemDaFilaDeRevisao({
     setEnviando(true)
     setErro(null)
     try {
-      await chamarApi(autenticador, `/v1/jobs/${jobId}/fila/${item.id}/${acao}`, {
-        metodo: 'POST',
-        corpo: acao === 'reaplicar' ? { item_id: candidato, motivo } : { motivo },
-      })
+      await (acao === 'reaplicar'
+        ? api.reaplicar(item.id, candidato, motivo)
+        : api.descartar(item.id, motivo))
       aoResolver()
     } catch (e) {
-      if (e instanceof SessaoExpirada) aoSessaoExpirada()
-      else if (e instanceof Error && e.message.startsWith('Falha 409')) {
+      if (e instanceof SessaoExpirada) {
+        // O cliente já avisou o App.
+      } else if (e instanceof ConflitoNaApi) {
         // Outro Editor resolveu antes: a fila e a decupagem mudaram.
         aoResolver('Essa correção não está mais na fila. A fila foi recarregada.')
       } else setErro('Não foi possível resolver a correção.')
@@ -3224,16 +2764,7 @@ function AbaPessoas({
 
 function BaixarJson({ nome, decupagem }: { nome: string; decupagem: Decupagem }) {
   function baixar() {
-    const blob = new Blob([JSON.stringify(decupagem, null, 2)], {
-      type: 'application/json',
-    })
-    const url = URL.createObjectURL(blob)
-    const ancora = document.createElement('a')
-    ancora.href = url
-    ancora.download = `${nome.replace(/\.mp4$/i, '')}.decupagem.json`
-    ancora.click()
-    // Revogar na hora pode cancelar o download em alguns navegadores.
-    setTimeout(() => URL.revokeObjectURL(url), 0)
+    baixarDecupagem(nome, decupagem)
   }
   return (
     <Tooltip label="Baixar decupagem (JSON)">

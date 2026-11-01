@@ -16,7 +16,12 @@ from api.ciclo_de_vida import transitar
 from api.cortes import LIMIAR_PADRAO
 from api.jobs import RepositorioDeJobs
 from api.jobs import agora_utc as agora
-from api.nuvem import RepositorioFirestore, objeto_do_audio
+from api.nuvem import (
+    RepositorioFirestore,
+    objeto_da_copia_limpa,
+    objeto_do_audio,
+    objeto_do_proxy,
+)
 from api.validador import Recusa, validar
 
 TIPO_DO_VIDEO = "video/mp4"
@@ -55,8 +60,12 @@ def executar(
     atual = repositorio.obter(job_id)
     if atual is None or atual.estado != "validando":
         return
-    for arquivo in (aceito.copia_limpa, aceito.proxy):
-        aceitos.blob(f"{job_id}/{arquivo.name}").upload_from_filename(
+    # As mesmas chaves que a análise e os quadros-chave leem.
+    for arquivo, objeto in (
+        (aceito.copia_limpa, objeto_da_copia_limpa(job_id)),
+        (aceito.proxy, objeto_do_proxy(job_id)),
+    ):
+        aceitos.blob(objeto).upload_from_filename(
             str(arquivo), content_type=TIPO_DO_VIDEO
         )
     if aceito.audio is not None:
@@ -75,6 +84,7 @@ def executar(
         duracao_s=aceito.duracao_s,
         cortes_ms=aceito.cortes_ms,
         timecode_origem=aceito.timecode_origem,
+        taxa_de_quadros=aceito.taxa_de_quadros,
     )
 
 

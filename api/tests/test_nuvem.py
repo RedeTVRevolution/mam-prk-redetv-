@@ -8,7 +8,8 @@ import contextlib
 import os
 import threading
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -24,7 +25,13 @@ from google.oauth2 import service_account
 from api.catalogo import PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
-from api.jobs import Job, ServicoIndisponivel
+from api.jobs import (
+    CursorInvalido,
+    FiltroDeJobs,
+    Job,
+    ServicoIndisponivel,
+    palavras_do_nome,
+)
 from api.nuvem import (
     ArmazenamentoStorage,
     CatalogoFirestore,
@@ -129,6 +136,59 @@ class TestRepositorioFirestore:
 
         assert [j.id for j in repositorio.listar()] == ["novo", "meio", "velho"]
 
+    def test_consulta_combina_filtros_ordem_e_cursor(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        dias = [20, 20, 19, None, 18, 20]
+        for i, dia in enumerate(dias):
+            repositorio.salvar(
+                _job(
+                    f"j{i}",
+                    BASE + timedelta(minutes=i),
+                    programa="TV Fama" if i != 4 else "Outro",
+                    data_exibicao=date(2026, 10, dia) if dia else None,
+                    palavras=palavras_do_nome(
+                        "FAMA_BLU.mp4" if i != 5 else "FAMA_RED.mp4"
+                    ),
+                ).model_copy(update={"estado": "falhou" if i == 1 else "concluido"})
+            )
+
+        def ids(**filtro: Any) -> list[str]:
+            return [j.id for j in repositorio.consultar(FiltroDeJobs(**filtro)).jobs]
+
+        assert ids() == ["j5", "j4", "j3", "j2", "j1", "j0"]
+        assert ids(programa="TV Fama", estados=frozenset({"concluido"})) == [
+            "j5",
+            "j3",
+            "j2",
+            "j0",
+        ]
+        assert ids(palavras=("fama", "blu")) == ["j4", "j3", "j2", "j1", "j0"]
+        assert ids(
+            programa="TV Fama",
+            estados=frozenset({"concluido"}),
+            exibicao_de=date(2026, 10, 19),
+            exibicao_ate=date(2026, 10, 20),
+            ordem="exibicao",
+        ) == ["j5", "j0", "j2"]
+        assert ids(ordem="exibicao") == ["j5", "j1", "j0", "j2", "j4", "j3"]
+        paginas, cursor = [], None
+        while True:
+            pagina = repositorio.consultar(
+                FiltroDeJobs(ordem="exibicao", limite=4, cursor=cursor)
+            )
+            paginas.append([j.id for j in pagina.jobs])
+            cursor = pagina.proximo_cursor
+            if cursor is None:
+                break
+        assert paginas == [["j5", "j1", "j0", "j2"], ["j4", "j3"]]
+
+    def test_consulta_com_cursor_inexistente_levanta(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        with pytest.raises(CursorInvalido):
+            repositorio.consultar(FiltroDeJobs(limite=1, cursor="nada"))
+
     def test_lista_por_sistema_so_traz_os_jobs_do_sistema(
         self, repositorio: RepositorioFirestore
     ) -> None:
@@ -144,7 +204,9 @@ class TestRepositorioFirestore:
                 )
             )
 
-        assert [j.id for j in repositorio.listar_por_sistema("A")] == [
+        assert [
+            j.id for j in repositorio.consultar(FiltroDeJobs(sistema="A")).jobs
+        ] == [
             "a-novo",
             "a-velho",
         ]
