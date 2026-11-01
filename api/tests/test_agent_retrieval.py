@@ -41,6 +41,29 @@ def test_config_vem_so_do_ambiente() -> None:
     )
     with pytest.raises(KeyError):
         ConfigDaBusca.do_ambiente({})
+    # Vazio desliga o índice do quadro-chave (ADR 0006).
+    sem_quadro = ConfigDaBusca.do_ambiente(ambiente | {"BUSCA_INDICE_QUADRO": ""})
+    assert sem_quadro.indice_do_quadro is None
+
+
+SEM_QUADRO = ConfigDaBusca("proj-x", "reg-y", "col-z", "ind-d", None, 256)
+
+
+def test_sem_o_indice_do_quadro_a_colecao_nasce_so_com_o_da_descricao() -> None:
+    transporte = TransporteFalso({"name": "op", "done": True})
+    criar_colecao(SEM_QUADRO, transporte, _nao_dorme)
+    [(_, _, colecao), (_, c2, corpo2)] = transporte.chamadas
+    assert c2.endswith("indexes?indexId=ind-d")
+    assert corpo2 is not None and corpo2["indexField"] == "descricao_vetor"
+    # O campo do vetor do quadro continua na coleção: ligar o índice depois não a recria.
+    assert colecao is not None and "quadro_vetor" in colecao["vectorSchema"]
+
+
+def test_sem_o_indice_do_quadro_a_busca_por_quadro_e_recusada() -> None:
+    with pytest.raises(ValueError):
+        pedido_de_busca(SEM_QUADRO, Consulta(texto="a", vetor_do_quadro=[0.0]))
+    pedido = pedido_de_busca(SEM_QUADRO, Consulta(texto="a", significado="b"))
+    assert set(_buscas(pedido)) == {"textSearch", "semanticSearch"}
 
 
 def test_filtro_composto_junta_todos_os_campos_com_and() -> None:
@@ -51,7 +74,7 @@ def test_filtro_composto_junta_todos_os_campos_com_and() -> None:
         "$and": [
             {"tipo": {"$eq": "objeto"}},
             {"categoria": {"$eq": "roupa"}},
-            {"cor_base": {"$all": ["vermelho"]}},
+            {"cor_base": {"$in": ["vermelho"]}},
             {"dono": {"$eq": "cat-1"}},
         ]
     }
@@ -65,7 +88,7 @@ def test_filtro_de_datas_e_pessoa() -> None:
     )
     assert filtro == {
         "$and": [
-            {"pessoas": {"$all": ["cat-1"]}},
+            {"pessoas": {"$in": ["cat-1"]}},
             {"data_de_exibicao": {"$gte": 20260102}},
             {"data_de_exibicao": {"$lte": 20260304}},
         ]
@@ -101,10 +124,14 @@ def test_pedido_hibrido_leva_texto_significado_vetor_e_rrf() -> None:
     assert buscas["vectorSearch"]["vector"] == {"values": [0.1, 0.2]}
     assert buscas["vectorSearch"]["searchField"] == "quadro_vetor"
     assert all(b["topK"] == 7 for b in buscas.values())
-    assert all(b["outputFields"] == {"dataFields": "*"} for b in buscas.values())
+    assert all(b["outputFields"] == {"dataFields": ["*"]} for b in buscas.values())
     filtro = {"$and": [{"tipo": {"$eq": "plano"}}]}
     assert all(b["filter"] == filtro for b in buscas.values())
-    assert pedido["combine"] == {"ranker": {"rrf": {"weights": [1.0, 1.0, 1.0]}}}
+    assert pedido["combine"] == {
+        "ranker": {"rrf": {"weights": [1.0, 1.0, 1.0]}},
+        "topK": 7,
+        "outputFields": {"dataFields": ["*"]},
+    }
 
 
 def test_toda_busca_por_vetor_leva_o_index_hint_do_indice_ann_do_seu_campo() -> None:
@@ -146,6 +173,10 @@ def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
     vetores = esquema["vectorSchema"]
     assert vetores["quadro_vetor"]["denseVector"]["dimensions"] == 256
     assert vetores["descricao_vetor"]["denseVector"]["dimensions"] == 256
+    embedding = vetores["descricao_vetor"]["denseVector"]["vertexEmbeddingConfig"]
+    assert embedding["modelId"] and embedding["taskType"] == "RETRIEVAL_DOCUMENT"
+    # O embedding automático recusa registro sem o campo do modelo ou com ele vazio.
+    assert embedding["textTemplate"] == "{significado}"
     propriedades = esquema["dataSchema"]["properties"]
     assert propriedades["data_de_exibicao"] == {"type": "integer"}
     indices = indices_da_colecao(CONFIG)
@@ -158,7 +189,13 @@ def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
             corpo["filterFields"]
         )
         assert set(corpo["filterFields"]) <= set(propriedades)
-        assert set(corpo["storeFields"]) == set(propriedades)
+        # O significado só alimenta o embedding: não volta na busca.
+        assert set(corpo["storeFields"]) == set(propriedades) - {"significado"}
+        # Uma réplica só, explícita: o padrão do serviço é de 2 a 5, cobradas por hora.
+        assert corpo["dedicatedInfrastructure"]["autoscalingSpec"] == {
+            "minReplicaCount": 1,
+            "maxReplicaCount": 1,
+        }
 
 
 class TransporteFalso:
@@ -188,15 +225,19 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     transporte = TransporteFalso()
     adaptador = AgentRetrieval(CONFIG, transporte)
     adaptador.gravar("j", [registro])
-    [_, (metodo, caminho, corpo)] = transporte.chamadas
+    [_, (metodo, caminho, corpo)] = transporte.chamadas  # a consulta do apagar, vazia
     assert (metodo, caminho.endswith("/dataObjects:batchCreate")) == ("POST", True)
     assert corpo is not None
     [pedido] = corpo["requests"]
-    assert pedido["dataObjectId"] == "j-objeto-0"
+    # O id do objeto começa por letra: o job_id (uuid em hex) pode começar por dígito.
+    assert pedido["dataObjectId"] == "m-j-objeto-0"
     assert pedido["dataObject"]["data"]["cor_base"] == ["vermelho"]
     assert pedido["dataObject"]["data"]["data_de_exibicao"] == 20260102
+    assert pedido["dataObject"]["data"]["significado"] == "objeto"
 
-    transporte.resposta = {"results": [{"dataObject": pedido["dataObject"]}]}
+    transporte.resposta = {
+        "results": [{"results": [{"dataObject": pedido["dataObject"]}]}]
+    }
     [achado] = adaptador.buscar(Consulta(texto="vestido", filtros=Filtros(dono="c")))
     assert achado == registro
 
@@ -206,18 +247,27 @@ def test_gravar_apaga_antes_os_registros_do_video() -> None:
     AgentRetrieval(CONFIG, transporte).gravar("j", [])
     [(metodo, caminho, corpo)] = transporte.chamadas
     assert metodo == "POST"
-    assert caminho.endswith("/dataObjects:batchDelete")
-    assert corpo == {"filter": {"job_id": {"$eq": "j"}}}
+    assert caminho.endswith("/dataObjects:query")
+    assert corpo == {"filter": {"job_id": {"$eq": "j"}}, "pageSize": 1000}
 
 
-def test_caminho_leva_projeto_regiao_e_colecao_da_config() -> None:
-    transporte = TransporteFalso()
-    AgentRetrieval(CONFIG, transporte).apagar("j")
-    [(_, caminho, _)] = transporte.chamadas
-    assert (
-        caminho
-        == "projects/proj-x/locations/reg-y/collections/col-z/dataObjects:batchDelete"
+def test_apagar_consulta_os_nomes_pagina_a_pagina_e_apaga_em_lote() -> None:
+    nomes = [f"col/dataObjects/{n}" for n in range(3)]
+    respostas = iter(
+        [
+            {"dataObjects": [{"name": n} for n in nomes[:2]], "nextPageToken": "p2"},
+            {"dataObjects": [{"name": nomes[2]}]},
+            {},
+        ]
     )
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, _Sequencia(transporte, respostas)).apagar("j")
+    [(_, c1, _), (_, _, corpo2), (_, c3, corpo3)] = transporte.chamadas
+    colecao = "projects/proj-x/locations/reg-y/collections/col-z"
+    assert c1 == f"{colecao}/dataObjects:query"
+    assert corpo2 is not None and corpo2["pageToken"] == "p2"
+    assert c3 == f"{colecao}/dataObjects:batchDelete"
+    assert corpo3 == {"requests": [{"name": n} for n in nomes]}
 
 
 def test_total_soma_a_contagem_do_aggregate() -> None:
@@ -225,7 +275,7 @@ def test_total_soma_a_contagem_do_aggregate() -> None:
     assert AgentRetrieval(CONFIG, transporte).total() == 16
     [(_, caminho, corpo)] = transporte.chamadas
     assert caminho.endswith("/dataObjects:aggregate")
-    assert corpo == {"aggregate": "count"}
+    assert corpo == {"aggregate": "COUNT"}
 
 
 def _nao_dorme(_: float) -> None:
@@ -296,9 +346,24 @@ def test_criar_colecao_e_idempotente() -> None:
     criar_colecao(CONFIG, ja_existe, _nao_dorme)
 
 
-def test_apagar_colecao_chama_delete_e_espera() -> None:
+def test_apagar_colecao_leva_os_indices_e_os_objetos_e_espera() -> None:
     transporte = TransporteFalso({"name": "op", "done": True})
     apagar_colecao(CONFIG, transporte, _nao_dorme)
+    # Sem force, o DELETE só funciona com a coleção sem índices e sem objetos.
     assert transporte.chamadas == [
-        ("DELETE", "projects/proj-x/locations/reg-y/collections/col-z", None)
+        ("DELETE", "projects/proj-x/locations/reg-y/collections/col-z?force=true", None)
+    ]
+
+
+def test_significado_e_a_descricao_ou_o_texto_do_registro() -> None:
+    base: dict[str, Any] = {"id": "j:x:0", "job_id": "j", "inicio_ms": 0, "fim_ms": 1}
+    plano = Registro(tipo="plano", descricao="estúdio", texto="t", **base)
+    fala = Registro(tipo="fala", texto="boa noite", **base)
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, transporte).gravar("j", [plano, fala])
+    corpo = transporte.chamadas[-1][2]
+    assert corpo is not None
+    assert [r["dataObject"]["data"]["significado"] for r in corpo["requests"]] == [
+        "estúdio",
+        "boa noite",
     ]

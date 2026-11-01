@@ -19,6 +19,7 @@ def test_medicao_com_o_duble_confere_o_filtro_composto_e_conta_os_registros() ->
         IndiceEmMemoria(), dimensao=256, consultas=10, relogio=relogio.__next__
     )
     assert resultado.so_o_objeto_da_sabrina
+    assert resultado.cor_filtra
     assert resultado.registros == 16  # 3 vídeos: planos, falas, textos e objetos
     assert len(resultado.tempos_s) == 10
     assert resultado.p50_s == pytest.approx(0.01)
@@ -46,3 +47,4 @@ def test_tabela_mostra_dimensao_registros_e_percentis() -> None:
     assert "128" in texto
     assert "16" in texto
     assert "p50" in texto and "p95" in texto
+    assert "cor filtra" in texto

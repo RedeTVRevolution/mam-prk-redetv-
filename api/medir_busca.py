@@ -6,7 +6,7 @@ e mede a latência da busca híbrida. Roda só com credenciais e fica fora do CI
 Cada dimensão pede uma coleção própria (a dimensão dos vetores é fixa na criação): a da
 configuração (`BUSCA_DIMENSAO`) é usada como está; cada uma das outras, uma de cada vez,
 ganha a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` (o nome vem do `infra/main.tf`) com
-os seus índices, apagada no fim.
+os seus índices, apagada no fim com tudo o que tiver dentro, mesmo se a medição falhar.
 """
 
 import os
@@ -33,6 +33,9 @@ class Medicao:
     dimensao: int
     registros: int
     so_o_objeto_da_sabrina: bool
+    # O vestido dela é vermelho: pedir azul não pode voltar nada. Servido pelo índice ANN,
+    # um filtro que ele não aceita pode ser ignorado sem erro.
+    cor_filtra: bool
     tempos_s: list[float]
 
     @property
@@ -51,13 +54,11 @@ def percentil(tempos: list[float], p: int) -> float:
     return ordenados[posicao - 1]
 
 
-def _consulta(vetor: list[float] | None = None) -> Consulta:
+def _consulta(vetor: list[float] | None = None, cor: str = "vermelho") -> Consulta:
     """ "vestido vermelho da Sabrina Sato" como o entendimento da consulta a entregaria:
     filtros exatos, o texto que sobra e o significado da frase inteira."""
     return Consulta(
-        filtros=Filtros(
-            tipo="objeto", categoria="roupa", cor_base="vermelho", dono=SABRINA
-        ),
+        filtros=Filtros(tipo="objeto", categoria="roupa", cor_base=cor, dono=SABRINA),
         texto="vestido",
         significado=CONSULTA,
         vetor_do_quadro=vetor,
@@ -84,23 +85,28 @@ def medir(
             (achados[0].job_id, achados[0].dono, achados[0].cor_base)
             == ("ex-sabrina", SABRINA, ["vermelho"])
         )
+        cor_filtra = not indice.buscar(_consulta(vetor, cor="azul"))
         tempos: list[float] = []
         for _ in range(consultas):
             inicio = relogio()
             indice.buscar(_consulta(vetor))
             tempos.append(relogio() - inicio)
-        return Medicao(dimensao, registros, so_a_sabrina, tempos)
+        return Medicao(dimensao, registros, so_a_sabrina, cor_filtra, tempos)
     finally:
         for exemplo in EXEMPLOS:
             indice.apagar(exemplo.job_id)
 
 
+def _sim(ok: bool) -> str:
+    return "sim" if ok else "NÃO"
+
+
 def tabela(medicoes: list[Medicao]) -> str:
-    linhas = ["dimensão | registros | só a Sabrina | p50 (ms) | p95 (ms)"]
+    linhas = ["dimensão | registros | só a Sabrina | cor filtra | p50 (ms) | p95 (ms)"]
     for m in medicoes:
         linhas.append(
-            f"{m.dimensao:>8} | {m.registros:>9} | {'sim' if m.so_o_objeto_da_sabrina else 'NÃO':>12}"
-            f" | {m.p50_s * 1000:>8.0f} | {m.p95_s * 1000:>8.0f}"
+            f"{m.dimensao:>8} | {m.registros:>9} | {_sim(m.so_o_objeto_da_sabrina):>12}"
+            f" | {_sim(m.cor_filtra):>10} | {m.p50_s * 1000:>8.0f} | {m.p95_s * 1000:>8.0f}"
         )
     return "\n".join(linhas)
 
@@ -115,9 +121,10 @@ def main(argumentos: list[str]) -> int:
     for dimensao in dimensoes:
         temporaria = dimensao != config.dimensao
         alvo = replace(medida, dimensao=dimensao) if temporaria else config
-        if temporaria:
-            criar_colecao(alvo, transporte)
         try:
+            # Dentro do try: se um índice falhar ao nascer, a coleção não fica no ar.
+            if temporaria:
+                criar_colecao(alvo, transporte)
             medicoes.append(
                 medir(AgentRetrieval(alvo, transporte), dimensao, consultas)
             )
@@ -125,7 +132,7 @@ def main(argumentos: list[str]) -> int:
             if temporaria:
                 apagar_colecao(alvo, transporte)
     print(tabela(medicoes))
-    return 0 if all(m.so_o_objeto_da_sabrina for m in medicoes) else 1
+    return 0 if all(m.so_o_objeto_da_sabrina and m.cor_filtra for m in medicoes) else 1
 
 
 if __name__ == "__main__":
