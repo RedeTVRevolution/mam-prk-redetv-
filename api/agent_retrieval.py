@@ -77,7 +77,8 @@ class ConfigDaBusca:
     def do_ambiente(cls, ambiente: Mapping[str, str]) -> "ConfigDaBusca":
         """Levanta `KeyError` se faltar uma variável: sem ela a busca não tem onde ir.
         `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave. O corte
-        (`BUSCA_DISTANCIA_MAXIMA`, `BUSCA_PALAVRAS_MINIMAS`) só o serviço recebe."""
+        (`BUSCA_DISTANCIA_MAXIMA`, `BUSCA_PALAVRAS_MINIMAS`) só o serviço e o
+        `make sondar-busca` recebem."""
         distancia = ambiente.get("BUSCA_DISTANCIA_MAXIMA")
         return cls(
             projeto=ambiente["GCP_PROJECT_ID"],

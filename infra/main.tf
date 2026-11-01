@@ -1201,7 +1201,7 @@ output "repositorio" {
   value = "${var.regiao}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam.repository_id}"
 }
 
-# Para o make criar-colecao-da-busca e o make medir-busca.
+# Para o make criar-colecao-da-busca, o make medir-busca e o make sondar-busca.
 output "busca_regiao" {
   value = var.regiao_da_busca
 }
@@ -1224,6 +1224,15 @@ output "busca_indice_quadro" {
 
 output "busca_dimensao" {
   value = var.dimensao_dos_vetores
+}
+
+# O corte do serviço, para o make sondar-busca ver o mesmo que o dev.
+output "busca_distancia_maxima" {
+  value = var.busca_distancia_maxima
+}
+
+output "busca_palavras_minimas" {
+  value = var.busca_palavras_minimas
 }
 
 output "bucket_aceitos" {

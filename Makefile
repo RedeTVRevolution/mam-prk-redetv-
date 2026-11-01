@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca reindexar
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar
 
 instalar:
 	uv sync --locked
@@ -94,6 +94,13 @@ criar-colecao-da-busca:
 # Medição da busca (#117): make medir-busca [CONSULTAS=30] [DIMENSOES="128 256"]; só com credenciais.
 medir-busca:
 	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)
+
+# Sonda da busca: 15 consultas no dev, com o corte do serviço, e um veredito por consulta.
+sondar-busca:
+	$(AMBIENTE_DA_BUSCA) \
+	BUSCA_DISTANCIA_MAXIMA="$${BUSCA_DISTANCIA_MAXIMA:-$$(terraform -chdir=infra output -raw busca_distancia_maxima)}" \
+	BUSCA_PALAVRAS_MINIMAS="$${BUSCA_PALAVRAS_MINIMAS:-$$(terraform -chdir=infra output -raw busca_palavras_minimas)}" \
+	uv run --locked python -m api.sondar_busca
 
 # Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
 # make reindexar [JOB=<id>]. Apaga e regrava o vídeo; repetir dá o mesmo resultado.
