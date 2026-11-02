@@ -1,7 +1,7 @@
 import { Box, Button, Stack, Text, UnstyledButton } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
 import { inventarioDeDestaque, inventarioPorCategoria, maiorCaixa } from './painel.ts'
-import type { CaixaDoQuadro, ObjetoDoInventario } from './Video.tsx'
+import type { CaixaDoQuadro, ObjetoDoInventario } from './decupagem.ts'
 
 /** O objeto sob o mouse (ou o foco): o nome e a caixa do quadro onde ela foi medida. */
 export interface ObjetoApontado {

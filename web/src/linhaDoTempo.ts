@@ -2,7 +2,7 @@
 import type { MantineColor } from '@mantine/core'
 import { pessoaDoModelo, type CatalogoDeCorrecoes } from './catalogo.ts'
 import { CORES_DE_OCORRENCIA } from './tema.ts'
-import type { Decupagem, Objeto } from './Video.tsx'
+import type { Decupagem, Objeto } from './decupagem.ts'
 
 /** `ms` em `MM:SS`: trunca os segundos e os minutos passam de 59, sem horas (ADR 0003). */
 export function tempo(ms: number): string {

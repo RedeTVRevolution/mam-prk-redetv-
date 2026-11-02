@@ -1,7 +1,8 @@
-import { ActionIcon, Box, Button, Group, Kbd, Paper, Slider, Stack, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Box, Button, Group, Indicator, Kbd, Paper, Slider, Stack, Text, Tooltip } from '@mantine/core'
 import {
   IconArrowBackUp,
   IconDownload,
+  IconHistory,
   IconMaximize,
   IconPlayerPause,
   IconPlayerPlay,
@@ -19,6 +20,7 @@ import {
   desfazivel,
   editorDeNovaAparicao,
   editorDoItem,
+  itemDaCorrecao,
   marcasDosItens,
   type Pedido,
   motivoDaRemocao,
@@ -28,7 +30,7 @@ import {
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
 import { dataDeExibicao, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo } from './FaixasDoVideo.tsx'
-import { Link } from './Link.tsx'
+import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
 import { nomeDaEtapa } from './etapas.ts'
 import { ReprocessarEtapa } from './ReprocessarEtapa.tsx'
@@ -38,8 +40,8 @@ import { type Aba, abaDaChave, type ItemDoPainel, itensDoPainel } from './painel
 import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA, CORES } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
-import { enderecoDaTelaAnterior, enderecoDoVideo } from './rotas.ts'
-import type { Decupagem, ItemDoHistorico, Reproducao } from './Video.tsx'
+import { enderecoDoVideo } from './rotas.ts'
+import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './decupagem.ts'
 
 const VELOCIDADES = [1, 2, 4]
 const SALTO_CURTO_S = 1
@@ -67,6 +69,7 @@ export default function Visualizador({
   job: jobInicial,
   t,
   podeEditar,
+  podeAprovar = false,
   podeReprocessar = false,
   intervaloDoAcompanhamentoMs = 5000,
 }: {
@@ -74,6 +77,7 @@ export default function Visualizador({
   job: Job
   t: number | null
   podeEditar: boolean
+  podeAprovar?: boolean
   podeReprocessar?: boolean
   intervaloDoAcompanhamentoMs?: number
 }) {
@@ -111,6 +115,9 @@ export default function Visualizador({
   const [temposDaAlca, setTemposDaAlca] = useState<Intervalo | null>(null)
   const salvarDasAlcas = useRef<(() => void) | null>(null)
   const [historico, setHistorico] = useState<ItemDoHistorico[]>([])
+  const [fila, setFila] = useState<ItemDaFila[]>([])
+  const [gavetaAberta, setGavetaAberta] = useState(false)
+  const [abaDaGaveta, setAbaDaGaveta] = useState<AbaDaGaveta>('historico')
   const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoDesfazer.current), [])
   // Dois Ctrl+Z seguidos não pedem o mesmo desfazer duas vezes.
@@ -212,6 +219,12 @@ export default function Visualizador({
       },
       () => {},
     )
+    api.job(job.id).fila().then(
+      (f) => {
+        if (ativo) setFila(f)
+      },
+      () => {},
+    )
     return () => {
       ativo = false
     }
@@ -290,6 +303,19 @@ export default function Visualizador({
     setTemposDaAlca(null)
     selecionar(item.chave)
     setEmEdicao({ chave: item.chave, modo: 'remover' })
+  }
+
+  const pendentes = historico.filter((h) => h.estado === 'pendente').length
+
+  /** Da gaveta ao painel: seleciona o item da correção, abre a aba dele e salta o player. */
+  function saltarAoItemDaCorrecao(correcao: ItemDoHistorico): boolean {
+    const item = decupagem ? itemDaCorrecao(decupagem, itens, correcao) : undefined
+    if (!item) return false
+    selecionar(item.chave)
+    const aberta = abaDaChave(item.chave)
+    if (aberta) setAba(aberta)
+    saltarPara(item.inicio_ms / 1000)
+    return true
   }
 
   function selecionar(chave: string | null) {
@@ -647,9 +673,23 @@ export default function Visualizador({
         </Group>
         <Group gap="xs" wrap="nowrap">
           {podeEditar && (
-            <Link para={enderecoDaTelaAnterior(job.id, Math.floor(atualMs / 1000))} size="sm">
-              Tela anterior
-            </Link>
+            <Tooltip label="Histórico, fila de revisão e aprovação">
+              <Indicator
+                disabled={fila.length + pendentes === 0}
+                label={fila.length + pendentes}
+                size={16}
+                color={CORES.andamento}
+              >
+                <ActionIcon
+                  variant={gavetaAberta ? 'filled' : 'default'}
+                  aria-label="Histórico"
+                  aria-pressed={gavetaAberta}
+                  onClick={() => setGavetaAberta((a) => !a)}
+                >
+                  <IconHistory />
+                </ActionIcon>
+              </Indicator>
+            </Tooltip>
           )}
           {podeReprocessar && job.estado === 'concluido' && !job.etapa_atual && !acompanhando && !escolhendo && (
             <Button
@@ -926,6 +966,7 @@ export default function Visualizador({
               aoReproduzir={reproduzirTrecho}
               urlDoQuadro={urlDoQuadro}
               aoApontarObjeto={apontarObjeto}
+              atalhosAtivos={!gavetaAberta}
               fotosDoNome={fotosDoNome}
             />
           ) : (
@@ -935,6 +976,21 @@ export default function Visualizador({
           )}
         </Paper>
       </Group>
+      {podeEditar && (
+        <Gaveta
+          aberta={gavetaAberta}
+          aba={abaDaGaveta}
+          aoTrocarAba={setAbaDaGaveta}
+          aoFechar={() => setGavetaAberta(false)}
+          historico={historico}
+          fila={fila}
+          podeAprovar={podeAprovar}
+          api={api.job(job.id)}
+          catalogo={catalogo}
+          aoMudar={() => setCargasDaDecupagem((n) => n + 1)}
+          aoSaltar={saltarAoItemDaCorrecao}
+        />
+      )}
     </Stack>
   )
 }

@@ -29,7 +29,7 @@ import {
   vizinhoNoPainel,
 } from './painel.ts'
 import { CORES, CORES_DE_OBJETO, CORES_DE_OCORRENCIA } from './tema.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem } from './decupagem.ts'
 
 /** Depois que a pessoa rola o painel, ele não anda sozinho por este tempo. */
 const PAUSA_DA_ROLAGEM_MS = 5000
@@ -468,6 +468,7 @@ export function Painel({
   aoReproduzir,
   urlDoQuadro,
   aoApontarObjeto,
+  atalhosAtivos = true,
   fotosDoNome,
   edicao = null,
   marcas,
@@ -491,6 +492,8 @@ export function Painel({
   urlDoQuadro?: (caminho: string) => Promise<string>
   /** O objeto do inventário sob o mouse ou o foco, para o player mostrar o quadro com a caixa. */
   aoApontarObjeto?: (o: ObjetoApontado | null) => void
+  /** Falso com a gaveta aberta: as setas e o Enter são dela. */
+  atalhosAtivos?: boolean
   /** As fotos de referência do nome de uma pessoa; sem ele, o selo "Rosto" não abre a comparação. */
   fotosDoNome?: (pessoaId: string) => Promise<FotosDoNome>
   /** A correção em curso: o formulário toma o lugar da linha do item. */
@@ -630,7 +633,7 @@ export function Painel({
       tecla: '↑ ↓',
       acao: 'No painel: mover a seleção na aba',
       grupo: GRUPO,
-      casa: (e) => e.key === 'ArrowUp' || e.key === 'ArrowDown',
+      casa: (e) => atalhosAtivos && (e.key === 'ArrowUp' || e.key === 'ArrowDown'),
       executar: (e) => mover(e.key === 'ArrowUp' ? -1 : 1),
     },
     {
@@ -640,6 +643,7 @@ export function Painel({
       // Com o foco num botão ou link, o Enter faz o que o elemento faz; menos na aba e no próprio item,
       // em que o foco pode ter ficado num item enquanto as setas moveram a seleção.
       casa: (e) =>
+        atalhosAtivos &&
         e.key === 'Enter' &&
         !(e.target instanceof HTMLElement && e.target.closest('button:not([role="tab"]):not([data-item]), a')),
       executar: () => {
@@ -651,7 +655,7 @@ export function Painel({
       acao: 'No painel: trocar de aba',
       grupo: GRUPO,
       ctrl: true,
-      casa: (e) => e.key === 'ArrowLeft' || e.key === 'ArrowRight',
+      casa: (e) => atalhosAtivos && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'),
       executar: (e) => trocar(e.key === 'ArrowLeft' ? -1 : 1),
     },
   ])

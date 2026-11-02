@@ -11,7 +11,7 @@ import {
   vizinhoNoPainel,
 } from './painel.ts'
 import { faixasDoVisualizador } from './linhaDoTempo.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem } from './decupagem.ts'
 
 const D: Decupagem = {
   pautas: [

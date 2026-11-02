@@ -84,6 +84,7 @@ async function abrir(
   podeEditar = false,
   podeReprocessar = false,
   intervaloDoAcompanhamentoMs?: number,
+  podeAprovar = false,
 ) {
   const auth = new AutenticadorFalso([
     { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
@@ -99,6 +100,7 @@ async function abrir(
         job={{ ...JOB, ...job }}
         t={t}
         podeEditar={podeEditar}
+        podeAprovar={podeAprovar}
         podeReprocessar={podeReprocessar}
         intervaloDoAcompanhamentoMs={intervaloDoAcompanhamentoMs}
       />
@@ -120,17 +122,6 @@ test('o cabeçalho mostra programa, data e nome do arquivo', async () => {
   expect(screen.getByText('TV Fama · 21/10/2026')).toBeTruthy()
   expect(screen.getByText(/FAMA_20261021_720_BLU\.mp4/)).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Baixar decupagem (JSON)' })).toBeTruthy()
-})
-
-test('"Tela anterior" só aparece para quem edita e leva a /anterior', async () => {
-  await abrir({}, null, false)
-  expect(screen.queryByRole('link', { name: 'Tela anterior' })).toBeNull()
-  cleanup()
-
-  await abrir({}, null, true)
-  expect(screen.getByRole('link', { name: 'Tela anterior' }).getAttribute('href')).toBe(
-    '/video/j1/anterior',
-  )
 })
 
 test('o relógio mostra o tempo do arquivo e o TC de origem do quadro atual', async () => {
@@ -682,3 +673,98 @@ test('o acompanhamento vai até a indexação terminar e então recarrega a decu
   expect(await screen.findByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
 })
 
+
+const CORRECAO = {
+  id: 'c1',
+  tipo: 'pessoa.renomear',
+  item_id: 'p1',
+  ancora: { versao: 'v1', tipo_do_item: 'pessoa' },
+  autor_email: 'bia@redetv.com.br',
+  criada_em: '2026-10-30T15:00:00Z',
+  motivo: 'sobrenome completo',
+  antes: 'Leão',
+  depois: 'Leão Lobo',
+  antes_legivel: 'Leão',
+  depois_legivel: 'Leão Lobo',
+  estado: 'pendente',
+}
+
+function comGaveta() {
+  const pedidos = { historico: 0, fila: 0 }
+  servidor.use(
+    http.get('/v1/jobs/j1/correcoes', () => {
+      pedidos.historico += 1
+      return HttpResponse.json([CORRECAO])
+    }),
+    http.get('/v1/jobs/j1/fila', () => {
+      pedidos.fila += 1
+      return HttpResponse.json([])
+    }),
+  )
+  return pedidos
+}
+
+test('o botão Histórico abre a gaveta com o player à vista, e a contagem vem da fila e das pendentes', async () => {
+  comGaveta()
+  const usuario = userEvent.setup()
+  await abrir({}, null, true, false, undefined, true)
+
+  const botao = await screen.findByRole('button', { name: 'Histórico' })
+  await waitFor(() => expect(document.querySelector('.mantine-Indicator-indicator')?.textContent).toBe('1'))
+  await usuario.click(botao)
+
+  expect(await screen.findByRole('dialog', { name: 'Correções do vídeo' })).toBeTruthy()
+  expect(screen.getByLabelText('Player')).toBeTruthy()
+  expect(await screen.findByRole('tab', { name: 'Aprovação (1)' })).toBeTruthy()
+
+  await usuario.click(screen.getByRole('button', { name: 'Fechar' }))
+  expect(screen.queryByRole('dialog', { name: 'Correções do vídeo' })).toBeNull()
+})
+
+test('clicar numa correção da gaveta salta o player ao item e abre a aba dele', async () => {
+  comGaveta()
+  const usuario = userEvent.setup()
+  const player = await abrir({}, null, true)
+
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Saltar ao item/ }))
+
+  expect(player.currentTime).toBe(211)
+})
+
+test('sem decupagem.editar não há botão Histórico nem pedido de histórico ou fila', async () => {
+  const pedidos = comGaveta()
+  await abrir({}, null, false)
+  await screen.findByLabelText('Painel')
+
+  expect(screen.queryByRole('button', { name: 'Histórico' })).toBeNull()
+  expect(pedidos).toEqual({ historico: 0, fila: 0 })
+})
+
+test('com a gaveta aberta, as setas e o Enter são dela e o painel não os trata', async () => {
+  comGaveta()
+  const usuario = userEvent.setup()
+  const player = await abrir({}, null, true)
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await screen.findByRole('button', { name: /^Saltar ao item/ })
+
+  // O foco no corpo da página: o Enter não é de nenhum botão.
+  await usuario.click(document.body)
+  await usuario.keyboard('{ArrowDown}{Enter}')
+
+  // Um só salto (o da gaveta, ao item da correção): o Enter do painel não saltou a outro item.
+  expect(player.currentTime).toBe(211)
+})
+
+test('decupagem sem os campos novos (1.1) abre o painel, e sem catálogo a catalogação não corrige nada', async () => {
+  servidor.use(http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 503 })))
+  const usuario = userEvent.setup()
+  await abrir({}, null, true)
+
+  expect((await screen.findAllByText('Eleição')).length).toBeGreaterThan(0)
+  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.keyboard('{F2}')
+
+  expect(screen.queryByRole('textbox', { name: 'Motivo' })).toBeNull()
+  expect(screen.queryByRole('button', { name: /^Corrigir / })).toBeNull()
+})

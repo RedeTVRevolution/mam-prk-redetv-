@@ -28,7 +28,7 @@ import {
   type EstadoDaLinha,
   type Ocorrencia,
 } from './linhaDoTempo.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem } from './decupagem.ts'
 
 const decupagem: Decupagem = {
   video: { duracao_ms: 180_000 },

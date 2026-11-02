@@ -3,7 +3,7 @@ import type { Autenticador } from './auth/autenticador.ts'
 import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
-import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './Video.tsx'
+import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './decupagem.ts'
 
 /** 401 ou sessão sem token. O cliente já avisou quem o criou; quem chama só não mostra erro. */
 export class SessaoExpirada extends Error {}

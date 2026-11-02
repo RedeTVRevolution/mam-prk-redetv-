@@ -9,7 +9,6 @@ export type Rota =
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'busca'; consulta: ConsultaDaBusca }
   | { tipo: 'video'; id: string; t: number | null }
-  | { tipo: 'video_anterior'; id: string; t: number | null }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
@@ -36,11 +35,6 @@ function instante(busca: string): number | null {
   return Number(valor)
 }
 
-/** A tela antiga do vídeo, até o #165 removê-la. */
-export function enderecoDaTelaAnterior(id: string, t?: number | null): string {
-  return enderecoDoVideo(id, t).replace(/(\?|$)/, '/anterior$1')
-}
-
 export function lerRota(caminho: string, busca = ''): Rota {
   const partes = caminho.split('/').filter(Boolean)
   if (partes.length === 0) return { tipo: 'raiz' }
@@ -50,13 +44,6 @@ export function lerRota(caminho: string, busca = ''): Rota {
   if (partes.length === 2 && partes[0] === 'video') {
     try {
       return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca) }
-    } catch {
-      return { tipo: 'nao_encontrada' }
-    }
-  }
-  if (partes.length === 3 && partes[0] === 'video' && partes[2] === 'anterior') {
-    try {
-      return { tipo: 'video_anterior', id: decodeURIComponent(partes[1]), t: instante(busca) }
     } catch {
       return { tipo: 'nao_encontrada' }
     }

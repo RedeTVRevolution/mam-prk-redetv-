@@ -2,7 +2,7 @@
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
 import { type Intervalo, lerTempo, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
-import type { Decupagem, ItemDoHistorico } from './Video.tsx'
+import type { Decupagem, ItemDoHistorico } from './decupagem.ts'
 
 export type Valor = string | string[] | boolean
 

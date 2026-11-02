@@ -11,7 +11,7 @@ import {
   TIPOS_FORA_DESTE_TICKET,
 } from './catalogacao.ts'
 import { itensDoPainel } from './painel.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem } from './decupagem.ts'
 
 const catalogo = catalogoJson as CatalogoDeCorrecoes
 

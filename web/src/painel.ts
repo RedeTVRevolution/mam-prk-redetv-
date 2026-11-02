@@ -16,7 +16,7 @@ import type {
   Decupagem,
   ObjetoDoInventario,
   RelacaoDoObjeto,
-} from './Video.tsx'
+} from './decupagem.ts'
 
 export { NAO_IDENTIFICADO }
 

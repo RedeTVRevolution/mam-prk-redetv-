@@ -1,5 +1,7 @@
 # Os sete modais da tela antiga e o caminho na tela nova
 
+> A tela antiga (`Video.tsx`) saiu no #165; as referências a ela abaixo são do que ela fazia.
+
 Lista do #219, para o #165 tirar a tela antiga sem perder nada. Conferida com `web/src/Video.tsx` (tela antiga) e `web/src/catalogacao.ts` (tela nova). "Teclado" vale com o modo de catalogação ligado (`E`) e a linha em foco; o formulário da linha grava com `Enter` e descarta com `Esc`. "Mouse" é o duplo clique na linha ou o lápis "Corrigir (F2)", e os botões Salvar e Cancelar do formulário.
 
 | Modal antigo | O que faz (correções que grava) | Teclado (tela nova) | Mouse (tela nova) |
