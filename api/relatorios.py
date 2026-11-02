@@ -8,9 +8,9 @@ não cabe ou não termina.
 
 import csv
 import io
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, Protocol
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import Response
@@ -24,7 +24,7 @@ from api.copia_bigquery import (
     _parametro,
     transporte_http,
 )
-from api.jobs import _confere_permissao
+from api.jobs import RepositorioDeJobs, _confere_permissao
 
 
 def _exige_ver_o_relatorio(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -148,6 +148,23 @@ def consultar_no_bigquery(
     if resposta.get("pageToken"):
         raise RuntimeError("o relatório não cabe numa resposta: peça um período menor")
     return [[campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])]
+
+
+class _ComVideo(Protocol):
+    job_id: str
+    nome: str | None
+
+
+def poe_o_nome_dos_videos(
+    itens: Iterable[_ComVideo], repositorio: RepositorioDeJobs
+) -> None:
+    """Preenche o nome de cada vídeo do JSON, lendo cada Job uma vez só."""
+    nomes: dict[str, str | None] = {}
+    for item in itens:
+        if item.job_id not in nomes:
+            job = repositorio.obter(item.job_id)
+            nomes[item.job_id] = job.nome if job else None
+        item.nome = nomes[item.job_id]
 
 
 def config_e_transporte_do_ambiente(

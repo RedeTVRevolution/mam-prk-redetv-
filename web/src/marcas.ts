@@ -51,11 +51,11 @@ export const TIPOS_DE_INSERCAO: Record<string, string> = {
 }
 
 export function nomeDoTipo(tipo: string): string {
-  return TIPOS_DE_INSERCAO[tipo] ?? tipo
+  return Object.hasOwn(TIPOS_DE_INSERCAO, tipo) ? TIPOS_DE_INSERCAO[tipo] : tipo
 }
 
 /** Os filtros da query do endereço; tipo desconhecido de um link editado à mão sai. */
 export function filtrosDeMarcas(busca: string): FiltrosDeMarcas {
   const tipo = new URLSearchParams(busca).get('tipo') ?? ''
-  return { ...filtrosDoRelatorio(busca), tipo: tipo in TIPOS_DE_INSERCAO ? tipo : '' }
+  return { ...filtrosDoRelatorio(busca), tipo: Object.hasOwn(TIPOS_DE_INSERCAO, tipo) ? tipo : '' }
 }

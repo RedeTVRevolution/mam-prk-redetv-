@@ -26,6 +26,7 @@ from api.relatorios import (
     csv_em_texto,
     linhas_da_copia,
     ou_503,
+    poe_o_nome_dos_videos,
     resposta_em_csv,
 )
 
@@ -92,7 +93,11 @@ class ConsultaBigQuery:
         ate: date | None,
         tipo: str | None,
     ) -> list[Insercao]:
-        condicoes = ["t.marca IS NOT NULL", "t.tipo_de_insercao IS NOT NULL"]
+        # Marca ou tipo vazio também fica de fora, como no dublê.
+        condicoes = [
+            "NULLIF(t.marca, '') IS NOT NULL",
+            "NULLIF(t.tipo_de_insercao, '') IS NOT NULL",
+        ]
         parametros: list[dict[str, Any]] = []
         if tipo is not None:
             condicoes.append("t.tipo_de_insercao = @tipo_de_insercao")
@@ -160,24 +165,25 @@ def _total(tipo: str, itens: list[Insercao]) -> TotalPorTipo:
 
 def relatorio(insercoes: list[Insercao]) -> list[MarcaNoRelatorio]:
     """Uma linha por marca, do maior tempo para o menor; o detalhe por tipo segue a ordem
-    de `TIPOS_DE_INSERCAO` e a lista das inserções, a do vídeo e do tempo."""
+    de `TIPOS_DE_INSERCAO` (um tipo que a decupagem não tem mais, de uma linha antiga, vem
+    no fim, para as partes fecharem com o total) e a lista das inserções, a do vídeo e do
+    tempo."""
     por_marca: dict[str, list[Insercao]] = defaultdict(list)
     for i in insercoes:
         por_marca[i.marca].append(i)
     marcas: list[MarcaNoRelatorio] = []
     for marca, dela in por_marca.items():
-        total = _total("", dela)
+        total = _total(TIPO_DO_TOTAL, dela)
+        tipos = {i.tipo for i in dela}
+        ordem = [t for t in TIPOS_DE_INSERCAO if t in tipos]
+        ordem += sorted(tipos - set(TIPOS_DE_INSERCAO))
         marcas.append(
             MarcaNoRelatorio(
                 marca=marca,
                 insercoes=total.insercoes,
                 tempo_ms=total.tempo_ms,
                 videos=total.videos,
-                por_tipo=[
-                    _total(t, [i for i in dela if i.tipo == t])
-                    for t in TIPOS_DE_INSERCAO
-                    if any(i.tipo == t for i in dela)
-                ],
+                por_tipo=[_total(t, [i for i in dela if i.tipo == t]) for t in ordem],
                 lista=[
                     InsercaoNoRelatorio(
                         job_id=i.job_id,
@@ -230,13 +236,7 @@ def criar_rotas_das_marcas(
         achadas = ou_503(lambda: relatorio(fonte.insercoes(programa, desde, ate, tipo)))
         if formato == "csv":
             return resposta_em_csv(em_csv(achadas), "marcas.csv")
-        nomes: dict[str, str | None] = {}
-        for m in achadas:
-            for i in m.lista:
-                if i.job_id not in nomes:
-                    job = repositorio.obter(i.job_id)
-                    nomes[i.job_id] = job.nome if job else None
-                i.nome = nomes[i.job_id]
+        poe_o_nome_dos_videos((i for m in achadas for i in m.lista), repositorio)
         return RelatorioDeMarcas(
             programa=programa, desde=desde, ate=ate, tipo=tipo, marcas=achadas
         )

@@ -124,7 +124,7 @@ from api.taxa_de_correcao import criar_rotas_da_qualidade
 from api.tempo_de_tela import (
     ConsultaDeMomentos,
     consulta_do_ambiente,
-    criar_rotas_dos_relatorios,
+    criar_rotas_do_tempo_de_tela,
 )
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
@@ -348,7 +348,7 @@ def criar_app(
             repositorio_da_revisao,
         )
     )
-    v1.include_router(criar_rotas_dos_relatorios(tempo_de_tela, repositorio_de_jobs))
+    v1.include_router(criar_rotas_do_tempo_de_tela(tempo_de_tela, repositorio_de_jobs))
     v1.include_router(criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs))
     app.include_router(v1)
     if pasta_web.is_dir():

@@ -102,8 +102,9 @@ export default function Marcas({ api, filtros }: { api: ClienteDaApi; filtros: F
                       <Table.Td colSpan={5}>
                         <Table aria-label={`Inserções de ${m.marca}`} withRowBorders={false}>
                           <Table.Tbody>
-                            {m.lista.map((i) => (
-                              <Table.Tr key={`${i.job_id}-${i.tipo}-${i.inicio_ms}-${i.fim_ms}`}>
+                            {m.lista.map((i, n) => (
+                              // Duas inserções iguais no mesmo vídeo podem existir: a posição desempata.
+                              <Table.Tr key={`${n}-${i.job_id}-${i.inicio_ms}`}>
                                 <Table.Td>
                                   <Link para={enderecoDoVideo(i.job_id, i.inicio_ms / 1000)}>{i.nome ?? i.job_id}</Link>
                                 </Table.Td>

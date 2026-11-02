@@ -177,4 +177,5 @@ test('a barra leva ao relatório', async () => {
 test('tipo desconhecido no endereço sai dos filtros', () => {
   expect(filtrosDeMarcas('tipo=outdoor&programa=X')).toEqual({ programa: 'X', de: '', ate: '', tipo: '' })
   expect(filtrosDeMarcas('tipo=testemunhal').tipo).toBe('testemunhal')
+  expect(filtrosDeMarcas('tipo=toString').tipo).toBe('')
 })

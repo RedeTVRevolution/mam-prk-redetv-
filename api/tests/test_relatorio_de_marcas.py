@@ -2,7 +2,9 @@
 
 import csv
 import io
+import re
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -98,7 +100,13 @@ def _copia() -> CopiaEmMemoria:
         "j2",
         [_linha("j2", "Fama", date(2026, 10, 15), "Ambev", "merchan_apresentador")],
     )
-    copia.gravar("j3", [_linha("j3", "Jornal", None, "Ambev", "intervalo")])
+    copia.gravar(
+        "j3",
+        [
+            _linha("j3", "Jornal", None, "Ambev", "intervalo"),
+            _linha("j3", "Jornal", None, "", "intervalo"),  # marca vazia fica de fora
+        ],
+    )
     return copia
 
 
@@ -148,7 +156,7 @@ def test_bigquery_pede_so_comerciais_com_marca_e_os_filtros_como_parametros() ->
     (corpo,) = transporte.corpos
     consulta = corpo["query"]
     assert "`proj.ds.tab`" in consulta and "'comercial'" in consulta
-    assert "t.marca IS NOT NULL" in consulta
+    assert "NULLIF(t.marca, '') IS NOT NULL" in consulta
     parametros = {
         p["name"]: (p["parameterType"]["type"], p["parameterValue"]["value"])
         for p in corpo["queryParameters"]
@@ -307,3 +315,24 @@ def test_chave_de_sistema_nao_consulta_o_relatorio() -> None:
 def test_os_tipos_de_insercao_vem_do_modelo_da_decupagem() -> None:
     assert "merchan_apresentador" in TIPOS_DE_INSERCAO
     assert "mencao_editorial" in TIPOS_DE_INSERCAO
+
+
+def test_a_tela_conhece_os_mesmos_tipos_de_insercao() -> None:
+    # web/src/marcas.ts dá o nome de cada tipo na tela; um tipo novo na decupagem entra lá
+    # também, ou o filtro da tela não o oferece.
+    fonte = (Path(__file__).parents[2] / "web" / "src" / "marcas.ts").read_text()
+    depois = fonte.split("TIPOS_DE_INSERCAO: Record<string, string> = {")[1]
+    bloco = depois.split("}")[0]
+    assert re.findall(r"^\s*(\w+):", bloco, re.MULTILINE) == list(TIPOS_DE_INSERCAO)
+
+
+def test_tipo_que_a_decupagem_nao_tem_mais_entra_no_detalhe_e_fecha_o_total() -> None:
+    (ambev,) = relatorio(
+        [
+            _i("j1", "Ambev", "tipo_antigo", 0, 1_000),
+            _i("j1", "Ambev", "intervalo", 0, 2_000),
+        ]
+    )
+
+    assert [t.tipo for t in ambev.por_tipo] == ["intervalo", "tipo_antigo"]
+    assert sum(t.tempo_ms for t in ambev.por_tipo) == ambev.tempo_ms

@@ -31,6 +31,7 @@ from api.relatorios import (
     csv_em_texto,
     linhas_da_copia,
     ou_503,
+    poe_o_nome_dos_videos,
     resposta_em_csv,
 )
 
@@ -216,7 +217,7 @@ def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
     )
 
 
-def criar_rotas_dos_relatorios(
+def criar_rotas_do_tempo_de_tela(
     consulta: ConsultaDeMomentos | None, repositorio: RepositorioDeJobs
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
@@ -236,13 +237,7 @@ def criar_rotas_dos_relatorios(
         pessoas = ou_503(lambda: relatorio(fonte.momentos(programa, desde, ate)))
         if formato == "csv":
             return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
-        nomes: dict[str, str | None] = {}
-        for p in pessoas:
-            for v in p.por_video:
-                if v.job_id not in nomes:
-                    job = repositorio.obter(v.job_id)
-                    nomes[v.job_id] = job.nome if job else None
-                v.nome = nomes[v.job_id]
+        poe_o_nome_dos_videos((v for p in pessoas for v in p.por_video), repositorio)
         return RelatorioDeTempoDeTela(
             programa=programa, desde=desde, ate=ate, pessoas=pessoas
         )
