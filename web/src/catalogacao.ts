@@ -508,3 +508,15 @@ export function marcasDosItens(
   }
   return marcas
 }
+
+/** O item do painel que uma correção do histórico mexeu (o primeiro, se a pessoa tem várias ocorrências); `undefined` se saiu da decupagem. */
+export function itemDaCorrecao(
+  d: Decupagem,
+  itens: ItemDoPainel[],
+  correcao: ItemDoHistorico,
+): ItemDoPainel | undefined {
+  return itens.find((item) => {
+    const id = identidadeDoItem(d, item)
+    return id?.item_id === correcao.item_id && id.tipo_do_item === correcao.ancora.tipo_do_item
+  })
+}
