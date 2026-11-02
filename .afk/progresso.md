@@ -200,3 +200,8 @@
 - Decisões: a marca não tem busca pelo nome para inferir id (só o escolhido); a pessoa mantém a inferência do #108 quando não vem id; o id escolhido vale sobre ela. Papel da pessoa nova é opcional (vazio, rótulo sem parênteses). Sem caminho de web: a tela é o #166.
 - Armadilha: `api/marcas.py` não pode importar `correcoes` (ciclo); a leitura das Decupagens fica em `carregar_marcas.py`.
 - Fim da iteração 36 (aviso de contexto): o código e os testes do #150 estão prontos e commitados (`make verificar` verde antes de reordenar um verbete do GLOSSARY, que não entra na verificação). Falta só conferir os critérios do ticket um a um, rodar `make verificar` de novo e fechar como `feito`; para o PR: marca sem inferência de id, papel da pessoa nova opcional, emulador do Firestore não rodado aqui.
+- 2026-11-02 06:21:48 · #150: parcial (1/3); a próxima iteração continua
+- 2026-11-02 06:21:48 · iteração 37: #150
+
+## #150 iteração 37 (feito, `make verificar` verde)
+- Critérios do ticket conferidos um a um contra os testes commitados; nada novo no código. Para o PR: marca sem inferência de id, papel da pessoa nova opcional, emulador do Firestore não rodado aqui.
