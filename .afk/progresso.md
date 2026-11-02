@@ -911,3 +911,9 @@ Não corrigido:
   7. `_sugestoes_abertas` (`jobs.py`) usa a Decupagem entregue sem `sem_catalogo_apagado`.
   8. `so_o_rosto` não olha `origem`: um nome corrigido pela revisora com `fontes_do_nome=["rosto"]` também volta a "não identificado".
   9. Duplicações (`SISTEMA_DA_PURGA`/`PedidoDePurga` repetem `purga.py`; enviar/restaurar de pessoa e marca quase iguais) e imports de privados de `api.jobs`/`api.lixeira`: deixei como está.
+- 2026-11-02 20:47:09 · #151: feito
+- 2026-11-02 20:47:14 · iteração 99: #153
+
+## #153 iteração 100
+- Pronto: regra `_palpite_nao_confirmado` em `api/sugestoes.py` (entra em `REGRAS`): pessoa com `estado_do_nome == "palpite"` e aparições vira "O modelo acha que é X. Confirma?", `pessoa.renomear` com `catalogo_id` quando o nome é único no catálogo. Aceitar usa o renomear existente (origem `revisao`, estado `confirmado`). Testes em `test_sugestoes.py`. `make verificar` verde.
+- Decisões: id da sugestão por pessoa (não pelo trecho), para não mudar se as aparições mudarem; intervalo = da primeira aparição ao fim da última; palpite sem aparição não gera. Sem regra própria de descrição × perfil (vem pelo modelo forte). Nada mudou no front.

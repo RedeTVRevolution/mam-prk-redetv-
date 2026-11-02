@@ -173,6 +173,43 @@ def _mencoes_para_aparicao(
     ]
 
 
+# --- Palpite do modelo forte sem prova ----------------------------------------------
+
+
+def _palpite_nao_confirmado(mundo: Contexto) -> Iterable[Sugestao]:
+    """O palpite sem prova (ADR 0005) vira a pergunta; o aceite do editor é a prova."""
+    for pessoa in mundo.entregue.get("pessoas", []):
+        if not isinstance(pessoa, dict) or pessoa.get("estado_do_nome") != "palpite":
+            continue
+        aparicoes = sorted(_aparicoes(pessoa))
+        if not aparicoes:
+            continue
+        nome = " ".join(str(pessoa["nome"]).split())
+        achadas = mundo.catalogo.achar(nome)
+        do_catalogo = achadas[0] if len(achadas) == 1 else None
+        if do_catalogo is not None:
+            nome = do_catalogo.nome
+        inicio, fim = aparicoes[0][0], max(a[1] for a in aparicoes)
+        onde = ", ".join(f"{_relogio(a[0])}–{_relogio(a[1])}" for a in aparicoes)
+        yield Sugestao(
+            id=_id("palpite_nao_confirmado", str(pessoa["id"]), 0, 0),
+            tipo="identificar_pessoa",
+            inicio_ms=inicio,
+            fim_ms=fim,
+            pergunta=f"O modelo acha que é {nome}. Confirma?",
+            contexto=(
+                "Palpite do modelo forte, sem prova (GC, fala ou fotos de "
+                f"referência). Aparece às {onde}"
+            ),
+            correcao=Proposta(
+                tipo="pessoa.renomear",
+                item_id=str(pessoa["id"]),
+                valor=nome,
+                catalogo_id=do_catalogo.id if do_catalogo else None,
+            ),
+        )
+
+
 # --- Trecho do vídeo sem pauta ------------------------------------------------------
 
 
@@ -215,7 +252,11 @@ def _trecho_sem_pauta(mundo: Contexto) -> Iterable[Sugestao]:
         )
 
 
-REGRAS: tuple[Regra, ...] = (_gc_de_identificacao, _trecho_sem_pauta)
+REGRAS: tuple[Regra, ...] = (
+    _gc_de_identificacao,
+    _palpite_nao_confirmado,
+    _trecho_sem_pauta,
+)
 
 
 def sugestoes_abertas(

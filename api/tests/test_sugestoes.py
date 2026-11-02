@@ -205,6 +205,78 @@ def test_a_mencao_no_texto_passa_a_aparicao_depois_de_renomear() -> None:
     }
 
 
+def _com_palpite(nome: str = "Leão Lobo", **extra: Any) -> dict[str, Any]:
+    palpite = _pessoa(
+        "pes01", nome, 211_000, 250_000, estado_do_nome="palpite", **extra
+    )
+    return _modelo(
+        pessoas=[palpite, _pessoa("pes02", "Apresentador", 230_000, 260_000)]
+    )
+
+
+def _do_palpite(mundo: Mundo) -> list[dict[str, Any]]:
+    return [s for s in _abertas(mundo) if s["correcao"]["tipo"] == "pessoa.renomear"]
+
+
+def test_o_palpite_nao_confirmado_pergunta_se_o_modelo_acertou() -> None:
+    [sugestao] = _do_palpite(_mundo(_com_palpite()))
+
+    assert sugestao["tipo"] == "identificar_pessoa"
+    assert sugestao["pergunta"] == "O modelo acha que é Leão Lobo. Confirma?"
+    assert "sem prova" in sugestao["contexto"]
+    assert "03:31" in sugestao["contexto"]
+    assert (sugestao["inicio_ms"], sugestao["fim_ms"]) == (211_000, 250_000)
+    assert sugestao["correcao"] == {
+        "tipo": "pessoa.renomear",
+        "item_id": "pes01",
+        "valor": "Leão Lobo",
+        "catalogo_id": None,
+        "ocorrencia": None,
+    }
+
+
+def test_o_nome_confirmado_nao_gera_sugestao_de_palpite() -> None:
+    modelo = _com_palpite()
+    modelo["pessoas"][0]["estado_do_nome"] = "confirmado"
+    modelo["pessoas"][0]["fontes_do_nome"] = ["referencia"]
+
+    assert _do_palpite(_mundo(modelo)) == []
+
+
+def test_o_palpite_do_catalogo_leva_o_catalogo_id() -> None:
+    mundo = _mundo(_com_palpite())
+    leao = mundo.catalogo.acrescentar("Leão Lobo", "comentarista", [])
+
+    [sugestao] = _do_palpite(mundo)
+
+    assert sugestao["correcao"]["catalogo_id"] == leao.id
+
+
+def test_aceitar_o_palpite_confirma_o_nome_pela_revisao() -> None:
+    mundo = _mundo(_com_palpite())
+    [sugestao] = _do_palpite(mundo)
+
+    resposta = _aceitar(mundo, sugestao["id"])
+
+    assert resposta.status_code == 201
+    [item] = mundo.historico().json()
+    assert item["motivo"] == "sugestão confirmada pelo editor"
+    pessoa = mundo.decupagem()["pessoas"][0]
+    assert (pessoa["nome"], pessoa["origem"]) == ("Leão Lobo", "revisao")
+    assert pessoa["estado_do_nome"] == "confirmado"
+    assert _do_palpite(mundo) == []
+
+
+def test_recusar_o_palpite_nao_o_sugere_de_novo() -> None:
+    mundo = _mundo(_com_palpite())
+    [sugestao] = _do_palpite(mundo)
+
+    assert _recusar(mundo, sugestao["id"]).status_code == 204
+
+    assert _do_palpite(mundo) == []
+    assert mundo.decupagem()["pessoas"][0]["estado_do_nome"] == "palpite"
+
+
 def test_trecho_longo_sem_pauta_gera_a_sugestao_de_pauta() -> None:
     [sugestao] = _da_pauta(_mundo(_modelo_com_trecho_sem_pauta()))
 
