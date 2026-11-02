@@ -182,6 +182,8 @@ export interface ItemDoHistorico {
     | 'texto_na_tela.texto'
     | 'texto_na_tela.acrescentar'
     | 'pauta.acrescentar'
+    | 'pauta.juntar'
+    | 'pauta.dividir'
     | 'desfazer'
     | 'descartar'
     | 'aprovar'

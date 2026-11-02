@@ -89,7 +89,9 @@ function Montada({
   aoMudar = () => {},
   aoSaltar = () => true,
   falhaAoCarregar = false,
+  aoRefazerAMao,
 }: {
+  aoRefazerAMao?: () => void
   historico?: ItemDoHistorico[]
   fila?: ItemDaFila[]
   podeAprovar?: boolean
@@ -116,6 +118,7 @@ function Montada({
         falhaAoCarregar={falhaAoCarregar}
         aoMudar={aoMudar}
         aoSaltar={aoSaltar}
+        aoRefazerAMao={aoRefazerAMao}
       />
     </AtalhosProvider>
   )
@@ -460,4 +463,43 @@ test('a falha ao carregar o histórico avisa e Tentar de novo recarrega', async 
   expect(gaveta().getByRole('alert').textContent).toContain('Não foi possível carregar o histórico')
   await usuario.click(gaveta().getByRole('button', { name: 'Tentar de novo' }))
   expect(aoMudar).toHaveBeenCalled()
+})
+
+const JUNCAO_NAO_REAPLICADA: ItemDaFila = {
+  ...NA_FILA,
+  id: 'f2',
+  tipo: 'pauta.juntar',
+  antes_legivel: 'Abertura + Debate',
+  depois_legivel: 'Abertura',
+  candidatos: [],
+}
+
+test('juntar e dividir que não casaram aparecem marcados como não reaplicados, com refazer à mão e desfazer', async () => {
+  const usuario = userEvent.setup()
+  const aoRefazerAMao = vi.fn()
+  const divisao = { ...JUNCAO_NAO_REAPLICADA, id: 'f3', tipo: 'pauta.dividir' } as ItemDaFila
+  render(
+    <Montada
+      api={await cliente()}
+      fila={[NA_FILA, JUNCAO_NAO_REAPLICADA, divisao]}
+      abaInicial="fila"
+      aoRefazerAMao={aoRefazerAMao}
+    />,
+  )
+  const g = gaveta()
+
+  expect(g.getAllByText('não reaplicada')).toHaveLength(2)
+  expect(g.getAllByText(/Nenhuma pauta nova corresponde/)).toHaveLength(2)
+  // A correção de outro tipo na fila não leva a marca.
+  expect(g.getAllByRole('button', { name: 'Refazer à mão' })).toHaveLength(2)
+
+  await usuario.click(g.getAllByRole('button', { name: 'Refazer à mão' })[0])
+  expect(aoRefazerAMao).toHaveBeenCalledOnce()
+
+  // Desfazer é descartar: some da fila, sem voltar.
+  await usuario.click(g.getAllByRole('button', { name: 'Descartar' })[1])
+  await usuario.click(
+    within(g.getByRole('group', { name: 'Confirmar o descarte' })).getByRole('button', { name: 'Descartar' }),
+  )
+  await waitFor(() => expect(pedidos.map((p) => p.caminho)).toEqual(['/v1/jobs/j1/fila/f2/descartar']))
 })

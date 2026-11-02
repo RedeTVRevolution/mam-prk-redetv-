@@ -170,6 +170,7 @@ Tipos de Correção (`pauta.juntar`, valor `{ids, titulo}`; `pauta.dividir`, val
 
 **Correção não reaplicada**:
 Juntar ou dividir pautas para a qual o reprocessar não achou pauta correspondente. Não se perde: aparece na fila (`/fila`) com `candidatos` vazios, e só pode ser descartada.
+Na tela (modo de catalogação, aba Pautas): `M` marca a pauta em foco, `U` junta as marcadas, `D` divide a pauta em foco no ponto do player; na gaveta, a fila mostra a marca "não reaplicada" com "Refazer à mão" (volta a essas teclas) e Descartar.
 
 **Sugestão**:
 Pista do próprio sistema que o editor só confirma (`api/sugestoes.py`, `GET /v1/jobs/{id}/sugestoes`): uma pergunta, o contexto que a sustenta e a correção proposta, no formato das correções. Nunca muda nada sozinha: aceitar cria a correção com o motivo "sugestão confirmada pelo editor" (ou "corrigida", se o editor deu outro nome ou o título da pauta); aceita ou recusada, sai da lista naquele vídeo, mesmo depois de reprocessar e mesmo com a correção pendente. Não confundir com as sugestões para o perfil que a comparação propõe (`sugestoes_de_perfil`). As regras são do servidor: o GC de identificação sobre um "não identificado" (só o tipo `gc` sustenta; a chamada nunca) e o trecho de 30 s ou mais sem pauta. Aceitas e recusadas por tipo ficam em `GET /v1/sugestoes/contagem`.

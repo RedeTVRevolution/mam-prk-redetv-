@@ -139,6 +139,7 @@ export function Gaveta({
   falhaAoCarregar,
   aoMudar,
   aoSaltar,
+  aoRefazerAMao,
 }: {
   aberta: boolean
   aba: AbaDaGaveta
@@ -155,6 +156,8 @@ export function Gaveta({
   aoMudar: () => void
   /** Salta o player ao item da correção; `false` se o item não está mais na decupagem. */
   aoSaltar: (correcao: ItemDoHistorico) => boolean
+  /** Juntar ou dividir pautas que a reprocessagem não reaplicou: refazer na tela das pautas. */
+  aoRefazerAMao?: () => void
 }) {
   const pendentes = historico.filter((h) => h.estado === 'pendente')
   const [selecionado, setSelecionado] = useState(0)
@@ -369,6 +372,7 @@ export function Gaveta({
                       item={f}
                       rotulo={rotulo(f.tipo)}
                       ocupado={ocupado === f.id}
+                      aoRefazerAMao={aoRefazerAMao}
                       aoReaplicar={(candidato) =>
                         void decidir(
                           f.id,
@@ -455,21 +459,34 @@ function ItemDaFilaDeRevisao({
   ocupado,
   aoReaplicar,
   aoDescartar,
+  aoRefazerAMao,
 }: {
   item: ItemDaFila
   rotulo: string
   ocupado: boolean
   aoReaplicar: (candidato: string) => void
   aoDescartar: () => void
+  aoRefazerAMao?: () => void
 }) {
+  const estrutural = item.tipo === 'pauta.juntar' || item.tipo === 'pauta.dividir'
   const [candidato, setCandidato] = useState<string | null>(null)
   const [confirmando, setConfirmando] = useState(false)
   return (
     <Paper withBorder p="sm">
       <Stack gap={4}>
         <CabecalhoDaCorrecao item={item} rotulo={rotulo} />
+        {estrutural && (
+          <Badge size="xs" variant="light" color={CORES.falhou} style={{ alignSelf: 'flex-start' }}>
+            não reaplicada
+          </Badge>
+        )}
         <AntesEDepois item={item} />
         <Text size="sm">{item.motivo}</Text>
+        {estrutural ? (
+          <Text size="sm">
+            Nenhuma pauta nova corresponde a esta correção: o modelo refez as pautas. Refaça à mão ou descarte.
+          </Text>
+        ) : (
         <Select
           label="Candidato"
           size="xs"
@@ -481,6 +498,7 @@ function ItemDaFilaDeRevisao({
           value={candidato}
           onChange={setCandidato}
         />
+        )}
         {confirmando ? (
           // Descartar não tem volta: a confirmação fica na própria linha (sistema visual, botão de perigo).
           <Group
@@ -521,11 +539,19 @@ function ItemDaFilaDeRevisao({
                 Descartar
               </Button>
             </Tooltip>
-            <Tooltip label="Reaplicar no candidato escolhido">
-              <Button size="xs" loading={ocupado} disabled={!candidato} onClick={() => candidato && aoReaplicar(candidato)}>
-                Reaplicar
-              </Button>
-            </Tooltip>
+            {estrutural ? (
+              aoRefazerAMao && (
+                <Button size="xs" disabled={ocupado} onClick={aoRefazerAMao}>
+                  Refazer à mão
+                </Button>
+              )
+            ) : (
+              <Tooltip label="Reaplicar no candidato escolhido">
+                <Button size="xs" loading={ocupado} disabled={!candidato} onClick={() => candidato && aoReaplicar(candidato)}>
+                  Reaplicar
+                </Button>
+              </Tooltip>
+            )}
           </Group>
         )}
       </Stack>

@@ -513,3 +513,8 @@ Não corrigido:
   3. Testes já escritos, guardados fora do vitest para a suíte não ficar vermelha: `.afk/pendente/JuntarEDividirPautas.test.tsx.txt` (mover para `web/src/JuntarEDividirPautas.test.tsx`; usa msw, 10 testes com os textos/rótulos acima) e `.afk/pendente/Gaveta.test.patch` (`git apply`; teste da marca "não reaplicada"). Depois de movidos, apagar `.afk/pendente/`. Rodar até verde; conferir que o `?` lista os três atalhos.
   4. GLOSSARY (Juntar e dividir pautas na tela: M/U/D, "não reaplicada") e `docs/design/` se couber.
 - Armadilhas: não rodar prettier em `web/src`; no teste, o `PrimeiroPlano` do Visualizador usa `fireEvent.timeUpdate(player)` para o tempo atual; relogio(45000) = "00:45".
+- 2026-11-02 11:57:02 · #262: parcial (1/3); a próxima iteração continua
+- 2026-11-02 11:57:02 · iteração 60: #262
+
+## #262 iteração 61
+- Pronto: Visualizador ligado (M/U/D, barra de marcadas, formulário de juntar/dividir acima do painel, Esc fecha), Gaveta com "não reaplicada" + "Refazer à mão", testes movidos de `.afk/pendente/`, tipos `pauta.juntar/dividir` em `ItemDaFila`, GLOSSARY. `make verificar` verde. Ticket completo.

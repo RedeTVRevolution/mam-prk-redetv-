@@ -16,6 +16,7 @@ import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { type ClienteDaApi, codigoDoErro, ConflitoNaApi, PedidoInvalido, SessaoExpirada } from './api.ts'
 import { type CatalogoDeCorrecoes, rotuloDe } from './catalogo.ts'
 import { useAtalhos } from './atalhos.ts'
+import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from './pautas.ts'
 import { baixarDecupagem } from './baixar.ts'
 import {
   aindaIndexando,
@@ -60,7 +61,7 @@ import {
   rotuloDaBusca,
   type VideoGuardado,
 } from './resultadoDaBusca.ts'
-import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
+import type { Decupagem, ItemDaFila, Pauta, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
 const VELOCIDADES = [1, 2, 4]
 const SALTO_CURTO_S = 1
@@ -153,6 +154,17 @@ export default function Visualizador({
   const [cargasDeSugestoes, setCargasDeSugestoes] = useState(0)
   const [falhaNoHistorico, setFalhaNoHistorico] = useState(false)
   const [gavetaAberta, setGavetaAberta] = useState(false)
+  // Juntar e dividir pautas: os ids marcados e o formulário aberto.
+  const [pautasMarcadas, setPautasMarcadas] = useState<ReadonlySet<string>>(new Set())
+  const [estrutura, setEstrutura] = useState<
+    { modo: 'juntar'; pautas: Pauta[] } | { modo: 'dividir'; pauta: Pauta; em_ms: number } | null
+  >(null)
+  const [jobDasMarcas, setJobDasMarcas] = useState(job.id)
+  if (jobDasMarcas !== job.id) {
+    setJobDasMarcas(job.id)
+    setPautasMarcadas(new Set())
+    setEstrutura(null)
+  }
   const [abaDaGaveta, setAbaDaGaveta] = useState<AbaDaGaveta>('historico')
   const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoDesfazer.current), [])
@@ -339,6 +351,69 @@ export default function Visualizador({
     () => (decupagem && podeEditar ? marcasDosItens(decupagem, itens, historico) : undefined),
     [decupagem, itens, historico, podeEditar],
   )
+
+  function pautaDoItem(item: ItemDoPainel | undefined): Pauta | undefined {
+    if (!decupagem || item?.tipo !== 'pauta') return undefined
+    return decupagem.pautas[Number(item.chave.slice('pauta-'.length))]
+  }
+
+  function alternarMarcaDaPauta(item: ItemDoPainel | undefined) {
+    if (!catalogando || !decupagem) return
+    const pauta = pautaDoItem(item)
+    if (!pauta) {
+      mostrarAviso('Selecione a pauta que vai ser marcada (↑ ↓).')
+      return
+    }
+    setPautasMarcadas((marcadas) => {
+      const novas = new Set(marcadas)
+      if (!novas.delete(pauta.id)) novas.add(pauta.id)
+      return novas
+    })
+  }
+
+  function juntarMarcadas() {
+    if (!catalogando || !decupagem) return
+    const r = pautasParaJuntar(decupagem.pautas, pautasMarcadas)
+    if ('aviso' in r) {
+      mostrarAviso(r.aviso)
+      return
+    }
+    fecharEdicao()
+    setDescrevendo(false)
+    setEstrutura({ modo: 'juntar', pautas: r.pautas })
+  }
+
+  function dividirPauta(item: ItemDoPainel | undefined) {
+    if (!catalogando || !decupagem) return
+    const pauta = pautaDoItem(item)
+    if (!pauta) {
+      mostrarAviso('Selecione a pauta que vai ser dividida (↑ ↓).')
+      return
+    }
+    if (!cabeNaPauta(pauta, atualMs)) {
+      mostrarAviso('Leve o vídeo para dentro da pauta em foco para dividir (D).')
+      return
+    }
+    fecharEdicao()
+    setDescrevendo(false)
+    setEstrutura({ modo: 'dividir', pauta, em_ms: atualMs })
+  }
+
+  async function gravarEstrutura(pedidos: Pedido[], motivo: string): Promise<string | null> {
+    const falha = await gravar(pedidos, motivo)
+    if (!falha) {
+      setPautasMarcadas(new Set())
+      setEstrutura(null)
+    }
+    return falha
+  }
+
+  /** "Refazer à mão" na fila: fecha a gaveta e leva à aba das pautas. */
+  function refazerPautasAMao() {
+    setGavetaAberta(false)
+    setAba('pautas')
+    mostrarAviso('Marque as pautas (M) e junte (U), ou divida (D).')
+  }
 
   function fecharEdicao() {
     setEmEdicao(null)
@@ -793,6 +868,27 @@ export default function Visualizador({
             grupo: GRUPO_DA_CATALOGACAO,
             casa: (e: KeyboardEvent) => e.key === 'F2',
             executar: corrigirEmFoco,
+          },
+          {
+            tecla: 'M',
+            acao: 'Marcar a pauta em foco para juntar',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'm'),
+            executar: () => alternarMarcaDaPauta(itens.find((i) => i.chave === selecionada)),
+          },
+          {
+            tecla: 'U',
+            acao: 'Juntar as pautas marcadas',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'u'),
+            executar: juntarMarcadas,
+          },
+          {
+            tecla: 'D',
+            acao: 'Dividir a pauta em foco no ponto do player',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'd'),
+            executar: () => dividirPauta(itens.find((i) => i.chave === selecionada)),
           },
           {
             tecla: 'Del',
@@ -1285,6 +1381,46 @@ export default function Visualizador({
               {aviso}
             </Text>
           )}
+          {catalogando && pautasMarcadas.size > 0 && (
+            <Group gap="xs" mb="xs">
+              <Text size="sm">
+                {`${pautasMarcadas.size} ${pautasMarcadas.size === 1 ? 'pauta marcada' : 'pautas marcadas'} para juntar`}
+              </Text>
+              <Button size="compact-xs" onClick={juntarMarcadas}>
+                Juntar as pautas marcadas
+              </Button>
+              <Button size="compact-xs" variant="default" onClick={() => setPautasMarcadas(new Set())}>
+                Limpar marcas
+              </Button>
+            </Group>
+          )}
+          {catalogando && catalogo && estrutura && (
+            <div
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation()
+                  setEstrutura(null)
+                }
+              }}
+            >
+              <FormularioDeCorrecao
+                key={estrutura.modo === 'juntar' ? estrutura.pautas.map((p) => p.id).join() : `${estrutura.pauta.id}@${estrutura.em_ms}`}
+                editor={
+                  estrutura.modo === 'juntar'
+                    ? editorDeJuncao(estrutura.pautas, catalogo)
+                    : editorDeDivisao(estrutura.pauta, estrutura.em_ms, catalogo)
+                }
+                rotulo={
+                  estrutura.modo === 'juntar'
+                    ? `Juntar ${estrutura.pautas.length} pautas`
+                    : `Dividir ${estrutura.pauta.titulo} em ${relogio(estrutura.em_ms)}`
+                }
+                limiteDoMotivo={catalogo.limites.motivo}
+                aoSalvar={gravarEstrutura}
+                aoCancelar={() => setEstrutura(null)}
+              />
+            </div>
+          )}
           {catalogando && catalogo && descrevendo && trecho?.fim_ms != null && (
             <FormularioDoTrecho
               trecho={trechoDoFormulario}
@@ -1336,6 +1472,14 @@ export default function Visualizador({
                       remover: removerItem,
                       podeCorrigir: (i) => !!editorDoItem(decupagem, i, catalogo),
                       podeRemover: (i) => podeRemover(decupagem, i),
+                      pautas: {
+                        marcada: (i) => {
+                          const p = pautaDoItem(i)
+                          return !!p && pautasMarcadas.has(p.id)
+                        },
+                        alternar: alternarMarcaDaPauta,
+                        dividir: dividirPauta,
+                      },
                     }
                   : undefined
               }
@@ -1369,6 +1513,7 @@ export default function Visualizador({
           falhaAoCarregar={falhaNoHistorico}
           aoMudar={() => setCargasDaDecupagem((n) => n + 1)}
           aoSaltar={saltarAoItemDaCorrecao}
+          aoRefazerAMao={refazerPautasAMao}
         />
       )}
     </Stack>
