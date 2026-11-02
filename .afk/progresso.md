@@ -295,3 +295,10 @@ Não corrigido:
   - `Etapa`/`etapas` na passada e o parâmetro `etapa=` de `analisar_video` usam "etapa" para os passos internos da análise (janelas, consolidação, identificação), não para a Etapa do Workflows do GLOSSARY. A spec pede "o tempo de cada etapa"; renomear muda o JSON que o #249 vai ler, e fica para lá se incomodar.
   - `PassadasStorage.listar_passadas` baixa cada passada inteira (com a decupagem) para devolver o resumo: são poucas por Job no piloto.
   - Transporte sem contadores de tokens grava custo 0 sem aviso (o mesmo do `comparar-objetos`); o `TransporteVertex` conta.
+- 2026-11-02 08:53:43 · #247: feito
+- 2026-11-02 08:53:47 · iteração 48: #248
+
+## #248 iteração 49 (feito, `make verificar` verde)
+- Pronto: `api/comparar_passadas.py` (`comparar`, `comparar_decupagens`, `somar`, relatório em Markdown e JSON, CLI `python -m api.comparar_passadas JOBS [PASSADA] [MODELO] [PASTA]`), `make comparar-passadas JOB=|JOBS= [PASSADA=] [MODELO=]`, 19 testes em `test_comparar_passadas.py`, README e GLOSSARY. Requisitos: famosos, mencoes, pautas, broll_limpos, broll_descricoes, comerciais, mais timecode (média, p95, fora da tolerância, sobre os pares de todos menos `broll_limpos`, que repetiria planos).
+- Decisões: usa `parear` do `comparador` (importado); o nome trocado é achado repareando o que sobrou dos dois lados só pelo tempo (tipo trocado para "pauta" e devolvido). Pauta/plano pareiam só pelo tempo, e o título/ambiente diferente vira motivo "nome"/"descricao". "Não identificado" fica fora dos famosos. Comercial: motivo "tipo"; plano: "plano_limpo".
+- Armadilha/pendência: o Job NÃO guarda tokens, então o custo do lado do Job vem de `TOKENS_DO_JOB=job=entrada:saida` (senão "n/d", e a soma também); registrar os tokens no Job ficaria para outro ticket. Data da tabela de preços: `DATA_DA_TABELA_DE_PRECOS` (obrigatória). Tempo do Job: etapas do Workflows; o da passada: janelas/consolidação/identificação (não são as mesmas etapas, então a comparação por etapa é lado a lado, não etapa a etapa). Não rodado na nuvem (sem credencial).
