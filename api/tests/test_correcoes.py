@@ -37,6 +37,7 @@ from api.correcoes import (
 )
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
+from api.marcas import CatalogoDeMarcasEmMemoria
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -119,6 +120,7 @@ class Mundo:
         self.aprovacao = RepositorioDeAprovacaoEmMemoria()
         self.chaves = RepositorioDeChavesEmMemoria()
         self.catalogo = CatalogoEmMemoria()
+        self.marcas = CatalogoDeMarcasEmMemoria()
         self.agora = BASE
         self.cliente = TestClient(
             criar_app(
@@ -134,6 +136,7 @@ class Mundo:
                 correcoes=self.correcoes,
                 aprovacao=self.aprovacao,
                 catalogo=self.catalogo,
+                marcas=self.marcas,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
                 relogio=lambda: self.agora,
             )

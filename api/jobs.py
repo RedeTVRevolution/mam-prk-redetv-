@@ -37,6 +37,7 @@ from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
     Autoria,
+    CatalogoIdInvalido,
     Correcao,
     CorrecaoInexistente,
     CorrecaoJaExiste,
@@ -67,6 +68,7 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
+from api.marcas import CatalogoDeMarcas
 from api.papeis import (
     Papel,
     Permissao,
@@ -712,6 +714,7 @@ def criar_rotas(
     correcoes: RepositorioDeCorrecoes,
     aprovacao: RepositorioDeAprovacao,
     catalogo: Catalogo,
+    marcas: CatalogoDeMarcas,
     reindexar: Callable[[Job], object],
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
@@ -956,6 +959,7 @@ def criar_rotas(
                 _autoria(autor),
                 exige_aprovacao=_espera_curador(request, autor, novo.tipo),
                 catalogo=catalogo,
+                marcas=marcas,
             )
         except VersaoDesatualizada:
             raise HTTPException(
@@ -965,6 +969,8 @@ def criar_rotas(
             raise HTTPException(422, "Item inexistente") from None
         except TemposInvalidos:
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
+        except CatalogoIdInvalido:
+            raise HTTPException(422, "catalogo_id não é o desse nome") from None
         correcoes.acrescentar(correcao)
         # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
         if not correcao.exige_aprovacao:

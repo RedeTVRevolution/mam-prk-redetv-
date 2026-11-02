@@ -34,8 +34,10 @@ from api.jobs import (
     ServicoIndisponivel,
     palavras_do_nome,
 )
+from api.marcas import carregar_marcas
 from api.nuvem import (
     ArmazenamentoStorage,
+    CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
@@ -791,6 +793,57 @@ class TestCatalogoFirestore:
             catalogo.apagar(p.id)
         with pytest.raises(PessoaInexistente):
             catalogo.corrigir(p.id, nome="X")
+
+    def test_nome_novo_fica_a_revisar_com_o_autor(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        nova = catalogo.acrescentar("Zeca", "cantor", [], a_revisar=True, autor="a@b")
+
+        lida = catalogo.obter(nova.id)
+
+        assert lida == nova
+        assert lida is not None
+        assert (lida.a_revisar, lida.acrescentada_por) == (True, "a@b")
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestCatalogoDeMarcasFirestore:
+    @pytest.fixture
+    def marcas(self) -> CatalogoDeMarcasFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return CatalogoDeMarcasFirestore(cliente, colecao=f"marcas-{uuid.uuid4().hex}")
+
+    def test_acrescenta_obtem_e_acha_por_nome_ou_apelido(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        banco = marcas.acrescentar("Banco Verde", ["BV"])
+
+        assert marcas.obter(banco.id) == banco
+        assert marcas.achar("BANCO verde") == [banco]
+        assert marcas.achar("bv") == [banco]
+        assert marcas.achar("Outro") == []
+        assert marcas.obter("inexistente") is None
+        assert marcas.todas() == [banco]
+
+    def test_nome_novo_fica_a_revisar_com_o_autor(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        nova = marcas.acrescentar("Loja Sol", [], a_revisar=True, autor="a@b")
+
+        lida = marcas.obter(nova.id)
+
+        assert lida == nova
+        assert lida is not None
+        assert (lida.a_revisar, lida.acrescentada_por) == (True, "a@b")
+
+    def test_a_carga_e_idempotente(self, marcas: CatalogoDeMarcasFirestore) -> None:
+        decupagens = [{"comerciais": [{"marca": "Banco Verde"}, {"marca": "Loja Sol"}]}]
+
+        primeira = carregar_marcas(marcas, decupagens)
+        segunda = carregar_marcas(marcas, decupagens)
+
+        assert (primeira, segunda) == (2, 0)
+        assert len(marcas.todas()) == 2
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")

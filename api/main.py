@@ -57,8 +57,10 @@ from api.jobs import (
     criar_rotas,
     papeis_da_pessoa,
 )
+from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
     ArmazenamentoStorage,
+    CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     DisparoPeloWorkflows,
     JanelasStorage,
@@ -88,6 +90,7 @@ from api.rota_da_busca import (
     TEMPO_MAXIMO_S,
     criar_rotas_da_busca,
 )
+from api.rotas_do_catalogo import criar_rotas_do_catalogo
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -155,6 +158,7 @@ def criar_app(
     disparo: DisparoDoWorkflow | None = None,
     janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
+    marcas: CatalogoDeMarcas | None = None,
     indice: IndiceDaBusca | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
@@ -215,6 +219,7 @@ def criar_app(
     repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
     indice_da_busca = indice or IndiceEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
+    catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
     v1.include_router(
         criar_rotas(
             repositorio_de_jobs,
@@ -224,6 +229,7 @@ def criar_app(
             repositorio_de_correcoes,
             aprovacao or RepositorioDeAprovacaoEmMemoria(),
             catalogo_de_pessoas,
+            catalogo_de_marcas,
             lambda job: reindexar(
                 job,
                 repositorio_de_jobs,
@@ -233,6 +239,9 @@ def criar_app(
                 relogio,
             ),
         )
+    )
+    v1.include_router(
+        criar_rotas_do_catalogo(catalogo_de_pessoas, catalogo_de_marcas, relogio)
     )
     v1.include_router(
         criar_rotas_da_busca(
@@ -294,6 +303,7 @@ if _projeto:
             ClienteStorage(project=_projeto), os.environ["BUCKET_ACEITOS"]
         ),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
+        marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
         indice=(
             AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
             if "BUSCA_COLECAO" in os.environ

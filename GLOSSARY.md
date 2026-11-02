@@ -50,7 +50,14 @@ Contexto fixo de um programa (apresentadores, repórteres, merchandising frequen
 
 **Catálogo de pessoas**:
 Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel, apelidos e as referências de rosto ligadas a ela (origem `web` ou `acervo`). Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
+
 _Evitar_: base de famosos
+
+**Catálogo de marcas**:
+Dado vivo no Firestore (`api/marcas.py`), no molde do de pessoas: id estável, nome e apelidos. Começa pela carga das marcas já vistas nos comerciais das Decupagens (`make carregar-marcas`, idempotente) e cresce com os nomes novos digitados por quem corrige. A Decupagem aponta para ela por `catalogo_id` no comercial, gravado quando a correção da marca vem com o id escolhido no autocompletar.
+
+**Autocompletar**:
+`GET /v1/catalogo/pessoas?q=` e `/v1/catalogo/marcas?q=` (`api/rotas_do_catalogo.py`, `api/achar_nomes.py`): até 10 resultados, por prefixo de palavra do nome ou do apelido, sem acento nem maiúscula, com um erro de digitação tolerado em termos de 5 letras ou mais. O `POST` do mesmo caminho acrescenta o nome digitado como **a revisar** (com o autor) ou devolve o que já existe com esse nome; a tela Pessoas do Curador, que revisa esses nomes, fica para outro ticket. A correção de nome de pessoa ou de marca que traz `catalogo_id` o grava; o servidor recusa (422) o id que não existe ou que é de outro nome.
 
 **Nome confirmado / palpite**:
 `Pessoa.estado_do_nome`. Confirmado é o nome com uma prova que o código conferiu (`api/identificacao.py`): um GC ou tarja com o nome ou apelido, ou o nome ou apelido dito no texto original do Whisper, enquanto a pessoa está na imagem e sem outra pessoa sem nome na imagem no mesmo intervalo. O nome que o modelo deu sem prova conferida é palpite. Estar no perfil ou no catálogo torna a pessoa candidata e não confirma nome; `contexto` não é prova. A correção da revisora (`origem` `revisao`) vale mais e nenhum reprocessamento a sobrescreve.

@@ -35,6 +35,9 @@ class PessoaDoCatalogo(BaseModel):
     papel: str
     apelidos: list[str] = []
     rostos: list[Rosto] = []
+    # Nome acrescentado por quem corrige (#150): o Curador confere depois.
+    a_revisar: bool = False
+    acrescentada_por: str | None = None
 
 
 class PessoaInexistente(Exception):
@@ -58,7 +61,13 @@ class Catalogo(Protocol):
     def todas(self) -> list[PessoaDoCatalogo]: ...
 
     def acrescentar(
-        self, nome: str, papel: str, apelidos: list[str]
+        self,
+        nome: str,
+        papel: str,
+        apelidos: list[str],
+        *,
+        a_revisar: bool = False,
+        autor: str | None = None,
     ) -> PessoaDoCatalogo: ...
 
     def corrigir(
@@ -153,10 +162,21 @@ class CatalogoEmMemoria:
         return list(self._pessoas.values())
 
     def acrescentar(
-        self, nome: str, papel: str, apelidos: list[str]
+        self,
+        nome: str,
+        papel: str,
+        apelidos: list[str],
+        *,
+        a_revisar: bool = False,
+        autor: str | None = None,
     ) -> PessoaDoCatalogo:
         pessoa = PessoaDoCatalogo(
-            id=novo_id(), nome=nome, papel=papel, apelidos=list(apelidos)
+            id=novo_id(),
+            nome=nome,
+            papel=papel,
+            apelidos=list(apelidos),
+            a_revisar=a_revisar,
+            acrescentada_por=autor,
         )
         self._pessoas[pessoa.id] = pessoa
         return pessoa

@@ -295,6 +295,8 @@ EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
 
 class Comercial(_Intervalo):
     marca: Rotulo
+    # A marca do catálogo (#150); o servidor grava, o modelo não conhece.
+    catalogo_id: Id | None = None
     tipo: Literal[
         "intervalo",
         "merchan_apresentador",

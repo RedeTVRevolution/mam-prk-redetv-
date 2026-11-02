@@ -52,6 +52,7 @@ from api.jobs import (
     casa_com_o_filtro,
 )
 from api.leitura_da_tela import LeituraDaTela
+from api.marcas import MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
@@ -65,6 +66,7 @@ COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
+COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
 COLECAO_DAS_SUGESTOES = "sugestoes_de_perfil"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
@@ -346,11 +348,22 @@ class CatalogoFirestore:
         return [self._pessoa(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
 
     def acrescentar(
-        self, nome: str, papel: str, apelidos: list[str]
+        self,
+        nome: str,
+        papel: str,
+        apelidos: list[str],
+        *,
+        a_revisar: bool = False,
+        autor: str | None = None,
     ) -> PessoaDoCatalogo:
         return self._gravar(
             PessoaDoCatalogo(
-                id=novo_id(), nome=nome, papel=papel, apelidos=list(apelidos)
+                id=novo_id(),
+                nome=nome,
+                papel=papel,
+                apelidos=list(apelidos),
+                a_revisar=a_revisar,
+                acrescentada_por=autor,
             )
         )
 
@@ -378,6 +391,57 @@ class CatalogoFirestore:
         if not referencia.get().exists:
             raise PessoaInexistente(id)
         referencia.delete()
+
+
+class CatalogoDeMarcasFirestore:
+    """Um documento por marca, com o id estável como chave. `nomes_de_busca` (nome e
+    apelidos normalizados) é o índice de `achar`."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO_DE_MARCAS
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    @staticmethod
+    def _marca(id: str, dados: dict[str, Any]) -> MarcaDoCatalogo:
+        dados = {k: v for k, v in dados.items() if k != "nomes_de_busca"}
+        return MarcaDoCatalogo(id=id, **dados)
+
+    def obter(self, id: str) -> MarcaDoCatalogo | None:
+        doc = self._colecao.document(id).get()
+        return self._marca(id, doc.to_dict() or {}) if doc.exists else None
+
+    def achar(self, nome: str) -> list[MarcaDoCatalogo]:
+        consulta = self._colecao.where(
+            filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
+        )
+        return [self._marca(d.id, d.to_dict() or {}) for d in consulta.stream()]
+
+    def todas(self) -> list[MarcaDoCatalogo]:
+        return [self._marca(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
+
+    def acrescentar(
+        self,
+        nome: str,
+        apelidos: list[str],
+        *,
+        a_revisar: bool = False,
+        autor: str | None = None,
+    ) -> MarcaDoCatalogo:
+        marca = MarcaDoCatalogo(
+            id=novo_id(),
+            nome=nome,
+            apelidos=list(apelidos),
+            a_revisar=a_revisar,
+            acrescentada_por=autor,
+        )
+        self._colecao.document(marca.id).set(
+            {
+                **marca.model_dump(exclude={"id"}),
+                "nomes_de_busca": nomes_de_busca_da_marca(marca),
+            }
+        )
+        return marca
 
 
 class SugestoesFirestore:

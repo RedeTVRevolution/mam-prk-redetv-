@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras
 
 instalar:
 	uv sync --locked
@@ -64,6 +64,12 @@ atribuir-papeis:
 # Carga inicial do catálogo de pessoas (#108), a partir do api/programas.toml; idempotente.
 carregar-catalogo:
 	uv run --locked python -m api.carregar_catalogo
+
+# Carga inicial do catálogo de marcas (#150), a partir dos comerciais das Decupagens; idempotente.
+carregar-marcas:
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.carregar_marcas
 
 # Tipos de correção que exigem aprovação de Curador (E3): make definir-aprovacao TIPOS=pessoa.renomear,pauta.titulo (vazio: nenhum)
 definir-aprovacao:

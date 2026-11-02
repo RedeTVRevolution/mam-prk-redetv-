@@ -26,7 +26,7 @@ from pydantic import (
 )
 
 from api import catalogo_de_correcoes as textos
-from api.catalogo import Catalogo
+from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import (
     Comercial,
@@ -39,6 +39,7 @@ from api.identidade import (
     identidade_do_comercial as _identidade_do_comercial,
 )
 from api.identidade import identidade_do_nome, nao_identificado
+from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.pessoas import LISTAS
 
 TipoNovo = Literal[
@@ -151,7 +152,9 @@ class Correcao(BaseModel):
     aprova: str | None = None  # só no tipo "aprovar": o id da correção aprovada
     recusa: str | None = None  # só no tipo "recusar": o id da correção recusada
     ocorrencia: Ocorrencia | None = None  # nas correções de aparição e menção
-    # Só no `pessoa.renomear` cujo nome casa com uma pessoa do catálogo.
+    # No `pessoa.renomear` e no `comercial.marca` cujo nome é de uma pessoa ou marca do
+    # catálogo, escolhida pela revisora (`NovaCorrecao.catalogo_id`) ou, na pessoa, a
+    # única que casa com o nome.
     catalogo_id: str | None = None
     antes: str
     depois: str
@@ -493,6 +496,9 @@ class NovaCorrecao(BaseModel):
     tipo_do_item: Literal["pauta", "comercial", "pessoa", "texto_na_tela"] | None = None
     # Nas correções de aparição e menção (e no `item.tempos` de pessoa).
     ocorrencia: Ocorrencia | None = None
+    # O id da pessoa ou da marca do catálogo que o nome novo é (`pessoa.renomear` e
+    # `comercial.marca`); o servidor confere que existe e que o nome é o dela.
+    catalogo_id: Annotated[str, StringConstraints(max_length=64)] | None = None
     # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
     item_id: Annotated[str, StringConstraints(max_length=40)] = ""
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
@@ -529,6 +535,8 @@ class NovaCorrecao(BaseModel):
             raise ValueError("ocorrencia vale só para aparição e menção de pessoa")
         if not entrada.json_longo and len(self.valor) > LIMITE_DO_TEXTO:
             raise ValueError("valor longo demais")
+        if self.catalogo_id is not None and entrada.catalogo_de is None:
+            raise ValueError("catalogo_id vale só no nome de pessoa ou de marca")
         self.valor = entrada.canonizar(self)
         return self
 
@@ -864,6 +872,7 @@ def corrigir(
     *,
     exige_aprovacao: bool = False,
     catalogo: Catalogo | None = None,
+    marcas: CatalogoDeMarcas | None = None,
 ) -> Correcao:
     """O registro da correção de `novo` sobre o item do JSON do modelo, com a
     âncora pronta. A ocorrência de uma pessoa tem de existir na decupagem
@@ -923,19 +932,43 @@ def corrigir(
         item_id=novo.item_id,
         antes=antes,
         ocorrencia=novo.ocorrencia,
-        catalogo_id=_id_no_catalogo(novo, catalogo),
+        catalogo_id=_id_no_catalogo(novo, catalogo, marcas),
         ancora=_ancora_do_item(item, tipo_do_item, versao),
         **campos,
     )
 
 
-def _id_no_catalogo(novo: NovaCorrecao, catalogo: Catalogo | None) -> str | None:
-    """O id da pessoa do catálogo que tem o nome novo; vazio sem catálogo, sem
-    ninguém com esse nome ou com mais de uma (a revisora não escolhe aqui)."""
-    if catalogo is None or not TIPOS[novo.tipo].acha_no_catalogo:
+class CatalogoIdInvalido(Exception):
+    """O `catalogo_id` não existe no catálogo ou é de outro nome."""
+
+
+def _id_no_catalogo(
+    novo: NovaCorrecao, catalogo: Catalogo | None, marcas: CatalogoDeMarcas | None
+) -> str | None:
+    """O id do catálogo que a correção grava. Se a revisora escolheu um (`catalogo_id`),
+    ele tem de existir e o nome novo ser o nome ou um apelido dele. Sem escolha, só a
+    pessoa tem busca pelo nome: o id da única pessoa com esse nome; vazio sem catálogo,
+    sem ninguém com esse nome ou com mais de uma (a revisora não escolhe aqui)."""
+    entrada = TIPOS[novo.tipo]
+    if novo.catalogo_id is not None:
+        achado = (
+            (catalogo.obter(novo.catalogo_id) if catalogo else None)
+            if entrada.catalogo_de == "pessoas"
+            else (marcas.obter(novo.catalogo_id) if marcas else None)
+        )
+        if achado is None or normalizar(novo.valor) not in _nomes_de_busca(achado):
+            raise CatalogoIdInvalido(novo.catalogo_id)
+        return achado.id
+    if catalogo is None or not entrada.acha_no_catalogo:
         return None
     achadas = catalogo.achar(novo.valor)
     return achadas[0].id if len(achadas) == 1 else None
+
+
+def _nomes_de_busca(entrada: PessoaDoCatalogo | MarcaDoCatalogo) -> list[str]:
+    if isinstance(entrada, PessoaDoCatalogo):
+        return nomes_de_busca(entrada)
+    return nomes_de_busca_da_marca(entrada)
 
 
 def _ancora_do_item(
@@ -1885,6 +1918,8 @@ class Tipo:
     casa_pelo_nome_novo: bool = False
     # O nome novo é procurado no catálogo e, se casa com uma só pessoa, grava o id.
     acha_no_catalogo: bool = False
+    # O catálogo cujo id a correção pode trazer (`NovaCorrecao.catalogo_id`).
+    catalogo_de: Literal["pessoas", "marcas"] | None = None
     casa_longe: bool = False
     acrescenta: Acrescenta | None = None
 
@@ -2120,6 +2155,15 @@ def _no_campo(nome: str) -> Callable[[dict[str, Any], Correcao], None]:
     return aplicar_no_campo
 
 
+def _marca_no_comercial(item: dict[str, Any], c: Correcao) -> None:
+    item["marca"] = c.depois
+    # A marca nova vale por inteiro: o id da marca anterior não fica.
+    if c.catalogo_id is None:
+        item.pop("catalogo_id", None)
+    else:
+        item["catalogo_id"] = c.catalogo_id
+
+
 def _descricao_no_plano(item: dict[str, Any], c: Correcao) -> None:
     descricao = json.loads(c.depois)
     item["ambiente"], item["objetos"] = descricao["ambiente"], descricao["objetos"]
@@ -2344,6 +2388,7 @@ TIPOS: dict[str, Tipo] = {
         ja_traz=_traz_o_nome,
         casa_pelo_nome_novo=True,
         acha_no_catalogo=True,
+        catalogo_de="pessoas",
     ),
     "pauta.titulo": Tipo(
         canonizar=_campo_longo,
@@ -2377,7 +2422,8 @@ TIPOS: dict[str, Tipo] = {
         legivel=textos.como_veio,
         tipo_do_item="comercial",
         valor_do_item=_campo("marca"),
-        aplicar_no_item=_no_campo("marca"),
+        aplicar_no_item=_marca_no_comercial,
+        catalogo_de="marcas",
         ja_traz=_traz_a_marca,
         identidades=_identidades_com_a_marca,
     ),
