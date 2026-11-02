@@ -418,6 +418,22 @@ def test_a_imagem_com_gpu_mantem_o_detector_server_e_o_script_chega_na_imagem() 
     assert "!scripts/baixar-modelos-ocr.sh" in (raiz / ".dockerignore").read_text()
 
 
+def test_a_construcao_da_imagem_com_gpu_nao_importa_o_paddle() -> None:
+    # O paddlepaddle-gpu pede o libcuda.so.1 (do driver) já no import, e a máquina da
+    # construção não tem driver: o build do CD parou aí. A amostra do teste depois da
+    # publicação ainda sai desta etapa, e a roda tem de ser a de GPU.
+    dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
+    alvo = dockerfile[dockerfile.index("AS ocr-gpu\n") :].split("\nFROM ")[0]
+    execucoes = [
+        linha for linha in alvo.splitlines() if "/app/.venv/bin/python" in linha
+    ]
+
+    assert execucoes
+    assert not any("import paddle" in e or "testar_ocr(" in e for e in execucoes)
+    assert "/amostras/quadro.png" in alvo
+    assert "'paddlepaddle-gpu' in nomes and 'paddlepaddle' not in nomes" in alvo
+
+
 def test_o_bake_escolhe_o_detector_do_alvo_de_cpu() -> None:
     bake = (Path(__file__).parents[2] / "docker-bake.hcl").read_text()
     alvo = bake[bake.index('target "ocr" {') :].split("\n}\n")[0]
