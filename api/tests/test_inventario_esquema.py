@@ -15,7 +15,13 @@ from api.decupagem import (
 from api.inventario import destaque_da_caixa
 from api.tests.test_decupagem import decupagem_valida
 
-CAIXA = {"quadro": "quadros/plano-1.jpg", "x": 0.1, "y": 0.2, "largura": 0.3, "altura": 0.4}
+CAIXA = {
+    "quadro": "quadros/plano-1.jpg",
+    "x": 0.1,
+    "y": 0.2,
+    "largura": 0.3,
+    "altura": 0.4,
+}
 
 
 def item(**mudancas: Any) -> dict[str, Any]:
