@@ -245,13 +245,32 @@ def test_o_ci_valida_dev_staging_e_prod() -> None:
     ci = (RAIZ / ".github" / "workflows" / "ci.yml").read_text()
 
     for pasta in ("infra", "infra/ambientes/staging", "infra/ambientes/prod"):
-        assert f"terraform -chdir={pasta} validate" in ci
+        init = ci.index(f"terraform -chdir={pasta} init -backend=false")
+        assert init < ci.index(f"terraform -chdir={pasta} validate")
 
 
 def test_o_readme_da_infra_tem_a_tabela_e_a_lista_do_que_precisa_existir() -> None:
     readme = (INFRA / "README.md").read_text()
 
     for ambiente in ("dev", "staging", "prod"):
-        assert ambiente in readme
-    assert "| " in readme and "mam-terraform" in readme and "mam-build" in readme
+        assert f"| {ambiente} |" in readme
     assert "#294" in readme and "#296" in readme
+
+
+def test_o_readme_lista_os_papeis_da_terraform_do_wizard_e_os_da_build() -> None:
+    readme = (INFRA / "README.md").read_text()
+    wizard = (RAIZ / "scripts" / "wizard-gcp-dev.sh").read_text()
+    bloco = re.search(
+        r"^PAPEIS_DA_TERRAFORM=\((.*?)^\)", wizard, re.DOTALL | re.MULTILINE
+    )
+    assert bloco
+    papeis = re.findall(r"^\s*(roles/[\w.]+)", bloco.group(1), re.MULTILINE)
+
+    assert papeis
+    for papel in papeis:
+        assert f"- `{papel}`" in readme, papel
+    for papel in re.findall(
+        r'role\s*= "(roles/[\w.]+)"\n\s*member\s*= google_service_account\.mam\["build"\]',
+        (MODULO / "main.tf").read_text(),
+    ) + ["roles/logging.logWriter"]:
+        assert f"`{papel}`" in readme, papel

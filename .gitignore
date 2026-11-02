@@ -10,6 +10,9 @@ node_modules/
 dist/
 .terraform/
 *.tfstate*
+# Os valores reais de staging e prod (#293); só o exemplo vai para o git.
+*.tfvars
+!exemplo.tfvars
 *.mp4
 .codex/
 # Gravada pelo google-github-actions/auth no CD (#71).
