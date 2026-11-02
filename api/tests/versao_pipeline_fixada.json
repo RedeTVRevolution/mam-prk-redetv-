@@ -1,0 +1,25 @@
+{
+  "versao_pipeline": "2026.11.1",
+  "manifesto": {
+    "esquema": "1.4",
+    "modelos": {
+      "analise": "gemini-3.5-flash-lite",
+      "versao_do_modelo_da_analise": "gemini-3.5-flash-lite",
+      "modelo_forte": "gemini-3.8-flash",
+      "referencias": "gemini-3.8-flash",
+      "consulta": "gemini-3.5-flash-lite",
+      "embedding": "gemini-embedding-001"
+    },
+    "instrucoes": {
+      "analise": "05cca2135f6bcafb763d013ec548c08b6fe2ef568cdb844c57ab1f4111edb830",
+      "modelo_forte": "4e0f3949d47638e8a758ecc7a54735da602de50820bcb303e2204c8a37341881",
+      "conferencia_das_referencias": "f439d473fc67ec4c35ee3a35ebe1c4d8ec633ff7bde609b9158115a8fd9f9ab2",
+      "nomes_das_referencias": "560c66c0d3d15899d19e38e4f05d2a10a918719ead527c296393a9bf4a58fabb"
+    },
+    "motores": {
+      "transcricao": "faster-whisper large-v3-turbo",
+      "ocr": "paddleocr PP-OCRv5_server_det+latin_PP-OCRv5_mobile_rec",
+      "objetos": "florence florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317"
+    }
+  }
+}

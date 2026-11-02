@@ -141,6 +141,9 @@ Janelas sorteadas que também passam pelo escalonamento, para medir o que a prim
 **Chave de conteúdo**:
 Identidade de uma decupagem: o arquivo, a versão do pipeline e as opções que mudam a saída. Dois jobs com a mesma chave de conteúdo compartilham um processamento.
 
+**Versão do pipeline**:
+Nome curto (`2026.11.1`) mais o manifesto do que ele fixa: o modelo de cada etapa, o hash de cada instrução, a versão do esquema e os motores de transcrição, OCR e objetos (`api/versao_pipeline.py`). Cada Decupagem nova grava `versao_pipeline` e `manifesto_do_pipeline`; a anterior, sem o campo, é "anterior à versão". Mudar modelo, instrução, esquema ou motor exige mudar a versão (um teste cobra), e a versão nova permite reprocessar o acervo de propósito (`make reprocessar-versao`).
+
 **Chave de idempotência**:
 Identificador de uma intenção de envio do cliente, reutilizado em todas as repetições dessa intenção.
 

@@ -334,3 +334,10 @@ Não corrigido:
 - `usePassadas` engole todo erro (não só o 403): o seletor só some, e o Visualizador fica como hoje, que é o que a spec pede. Mostrar alerta por um recurso opcional poluiria a tela.
 - Smells de julgamento: `a`/`b` na resposta HTTP (vêm do `Resultado` do #248), `marca: str` sem `Literal`, `TITULOS` repetindo os `REQUISITOS` no front, rotas dentro de `comparar_passadas.py`, blocos espelhados de Job/passada. Refatoração sem bug.
 - Custo do Job "n/d": depende de gravar tokens no Job (decisão humana, já anotada no #248).
+- 2026-11-02 09:24:38 · #249: feito
+- 2026-11-02 09:24:43 · iteração 50: #250
+
+## #250 iteração 51 (feito, `make verificar` verde)
+- Pronto: `api/versao_pipeline.py` (`VERSAO_PIPELINE = "2026.11.1"`, `manifesto()`: esquema, modelos, hashes das instruções, motores Whisper/Paddle/Florence); `Decupagem.versao_pipeline`/`manifesto_do_pipeline` (opcionais, em `CAMPOS_DO_SERVIDOR`), gravados em `analise.py` antes de gravar; teste `test_versao_pipeline.py` contra `api/tests/versao_pipeline_fixada.json`; `api/reprocessar_versao.py` + `make reprocessar-versao [DE=] [LIMITE=] [CONFIRMAR=1]`; núcleo da rota extraído para `reprocessar_com_rastro` (`reprocessamento.py`), usado pela rota e pelo comando; Visualizador mostra "Pipeline <versão>"; outputs `workflow_regiao`/`workflow_validacao` no `infra/main.tf`; README e GLOSSARY.
+- Decisões: esquema continua 1.4 (campos opcionais). Custo estimado = horas × `CUSTO_POR_HORA_USD` (sem ele "n/d"). Lotes de 5 com pausa de 60 s (env). `DE=anterior` = decupagem sem o campo. Auditoria por `sistema="reprocessar-versao"`.
+- Armadilhas: manifesto não leva o motor de objetos do inventário (vem do ambiente do Job) nem o detector real do OCR da imagem (usa o padrão). Decupagem ilegível fica fora da lista. Output novo do Terraform precisa de `terraform apply` para o make funcionar.

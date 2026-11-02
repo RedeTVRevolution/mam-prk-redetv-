@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao
 
 instalar:
 	uv sync --locked
@@ -132,6 +132,19 @@ reindexar:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.indexacao $(JOB)
+
+# Reprocessa o acervo de propósito (#250): make reprocessar-versao [DE=<versão ou anterior>] [LIMITE=<n>]
+# Lista os Jobs concluídos de versão do pipeline anterior à atual (api/versao_pipeline.py) e o custo
+# estimado (CUSTO_POR_HORA_USD, opcional). Só com CONFIRMAR=1 reprocessa, em lotes, pela análise.
+reprocessar-versao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	WORKFLOW_REGIAO="$${WORKFLOW_REGIAO:-$$(terraform -chdir=infra output -raw workflow_regiao)}" \
+	WORKFLOW_VALIDACAO="$${WORKFLOW_VALIDACAO:-$$(terraform -chdir=infra output -raw workflow_validacao)}" \
+	CONFIRMAR="$(CONFIRMAR)" \
+	uv run --locked python -m api.reprocessar_versao "$(DE)" "$(LIMITE)"
 
 # Passada de comparação (#247): make passada-de-comparacao JOB=<id> MODELO=<modelo do Gemini>
 # Roda a análise inteira do Job concluído com outro modelo (sem escalonamento) e grava a passada

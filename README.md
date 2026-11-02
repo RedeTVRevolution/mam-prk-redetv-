@@ -104,6 +104,23 @@ Os dois alvos abaixo só rodam com credenciais (ADC de quem roda e o `.env`) e f
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022), conferido no #122.
 
+
+## Versão fixa do pipeline (#250)
+
+`api/versao_pipeline.py` é o único lugar que define a `VERSAO_PIPELINE` (por exemplo `2026.11.1`) e o manifesto: o modelo de cada etapa, o hash de cada instrução, a versão do esquema e os motores de transcrição, OCR e objetos. Cada decupagem nova grava `versao_pipeline` e `manifesto_do_pipeline` (ao fim da análise); a anterior, sem o campo, continua válida e aparece como "anterior à versão". O Visualizador mostra a versão ao lado do nome do vídeo.
+
+Trocar modelo, instrução, esquema ou motor exige trocar a versão: `api/tests/test_versao_pipeline.py` compara o manifesto com `api/tests/versao_pipeline_fixada.json` e falha com a instrução de regravar o arquivo. O motor de objetos (`MOTOR_OBJETOS`/`MODELO_OBJETOS` do inventário) vem do ambiente do Job e não está no manifesto; o manifesto leva o Florence.
+
+Reprocessar o acervo de propósito, depois de trocar a versão e fazer o deploy:
+
+```bash
+make reprocessar-versao                       # só lista os Jobs concluídos de versão anterior e o custo estimado
+make reprocessar-versao DE=anterior LIMITE=20 # só os sem versão, até 20 (DE também aceita uma versão, como 2026.10.1)
+make reprocessar-versao LIMITE=20 CONFIRMAR=1 # reprocessa pela análise, em lotes (TAMANHO_DO_LOTE=5, PAUSA_ENTRE_LOTES_S=60)
+```
+
+O custo estimado é as horas de vídeo × `CUSTO_POR_HORA_USD` (do ambiente; sem ele sai "n/d"). Cada Job reprocessado entra na auditoria como `video.reprocessado`, por `sistema` `reprocessar-versao`, com o mesmo caminho da rota (#147, #235). A chave de conteúdo e a deduplicação ficam fora (E7).
+
 ## Passada de comparação (#247)
 
 Roda a análise inteira de um Job concluído com outro modelo e guarda o resultado ao lado da decupagem, para comparar por requisito (#248) e lado a lado (#249). Só no dev, com as credenciais de quem roda (a conta que lê o bucket de decupagens e chama o Gemini), depois do merge:

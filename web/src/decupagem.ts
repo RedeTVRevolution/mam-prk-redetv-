@@ -136,6 +136,9 @@ export interface Objeto {
 
 export interface Decupagem {
   versao_decupagem?: string
+  /** A versão do pipeline que fez a decupagem; ausente na anterior à versão (#250). */
+  versao_pipeline?: string | null
+  manifesto_do_pipeline?: Record<string, unknown> | null
   video?: { duracao_ms: number }
   pautas: Pauta[]
   pessoas: Pessoa[]

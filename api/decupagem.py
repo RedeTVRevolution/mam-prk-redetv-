@@ -393,6 +393,10 @@ class Decupagem(_Estrito):
     correcoes_descartadas: list[CorrecaoDescartada] = []
     # Quem gerou o inventário dos planos; `None` sem inventário (#244).
     inventario_gerado_por: GeradorDoInventario | None = None
+    # A versão do pipeline e o manifesto com que a decupagem foi feita (#250); `None` na
+    # decupagem anterior à versão.
+    versao_pipeline: Rotulo | None = None
+    manifesto_do_pipeline: dict[str, Any] | None = None
 
     def _intervalos(self) -> list[_Intervalo]:
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
@@ -455,6 +459,8 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "correcoes_descartadas",
         "inventario",
         "inventario_gerado_por",
+        "versao_pipeline",
+        "manifesto_do_pipeline",
     }
 )
 

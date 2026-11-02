@@ -946,6 +946,21 @@ export default function Visualizador({
           <Text size="sm" c="dimmed" truncate>
             {titulo.length > 0 ? `· ${job.nome}` : job.nome}
           </Text>
+          {decupagem && (
+            <Tooltip
+              label={
+                decupagem.manifesto_do_pipeline
+                  ? JSON.stringify(decupagem.manifesto_do_pipeline, null, 1)
+                  : 'Decupagem feita antes da versão fixa do pipeline'
+              }
+              multiline
+              maw={420}
+            >
+              <Text size="xs" c="dimmed" aria-label="Versão do pipeline" style={{ whiteSpace: 'nowrap' }}>
+                Pipeline {decupagem.versao_pipeline ?? 'anterior à versão'}
+              </Text>
+            </Tooltip>
+          )}
         </Group>
         <Group gap="xs" wrap="nowrap">
           {passadas.length > 0 && (

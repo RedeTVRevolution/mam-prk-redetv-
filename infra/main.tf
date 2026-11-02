@@ -2124,6 +2124,14 @@ output "bucket_decupagens" {
   value = local.buckets["decupagens"]
 }
 
+output "workflow_regiao" {
+  value = var.regiao
+}
+
+output "workflow_validacao" {
+  value = local.workflow_validacao
+}
+
 output "bucket_clipes_ouro" {
   value = local.buckets["clipes-ouro"]
 }

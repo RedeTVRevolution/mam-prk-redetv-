@@ -23,6 +23,7 @@ from api.ciclo_de_vida import (
     reprocessar,
 )
 from api.jobs import (
+    Job,
     JobPublico,
     NomeDaEtapa,
     RepositorioDeJobs,
@@ -70,6 +71,55 @@ def _exige_pessoa(chamador: ChamadorAutenticado) -> Usuario:
     return chamador
 
 
+def reprocessar_com_rastro(
+    repositorio: RepositorioDeJobs,
+    auditoria: RepositorioDeAuditoria,
+    disparo: DisparoDoWorkflow,
+    janelas: JanelasDoJob | None,
+    job_id: str,
+    agora: datetime,
+    escolhida: str | None,
+    *,
+    autor: dict[str, str],
+    motivo: str | None,
+    relogio: Callable[[], datetime],
+) -> Job | None:
+    """Muda o Job, registra na auditoria e dispara o Workflows; o Job de depois, ou
+    `None` se não existe. `NaoReprocessavel` sobe; falha no registro ou no disparo
+    devolve o Job ao que era e sobe também. `autor` é `uid` e `email` ou `sistema`."""
+    trocado = reprocessar(repositorio, job_id, agora, escolhida)
+    if trocado is None:
+        return None
+    antes, job = trocado
+    etapa = job.etapa_atual
+    assert etapa is not None
+    try:
+        # O Job já mudou: o registro vem antes do disparo, para nunca haver
+        # reprocessamento sem rastro.
+        auditoria.acrescentar(
+            RegistroDeAuditoria(
+                id=uuid.uuid4().hex,
+                quando=agora,
+                **autor,
+                acao="video.reprocessado",
+                alvo_tipo="job",
+                alvo_id=job.id,
+                alvo_nome=job.nome,
+                motivo=motivo,
+                detalhes={"etapa": etapa}
+                | ({"etapa_escolhida": True} if escolhida else {}),
+            )
+        )
+        if escolhida == "analise" and janelas is not None:
+            janelas.apagar(job.id)
+        disparo.iniciar(job.id, etapa)
+    except Exception:
+        # Sem execução no Workflows o Job ficaria andando sem ninguém rodando.
+        desfazer_reprocessamento(repositorio, antes, job, relogio())
+        raise
+    return job
+
+
 def criar_rotas_do_reprocessamento(
     repositorio: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
@@ -97,39 +147,22 @@ def criar_rotas_do_reprocessamento(
             raise HTTPException(422, "Informe o motivo do reprocessamento")
         agora = relogio()
         try:
-            trocado = reprocessar(repositorio, job_id, agora, escolhida)
+            job = reprocessar_com_rastro(
+                repositorio,
+                auditoria,
+                disparo,
+                janelas,
+                job_id,
+                agora,
+                escolhida,
+                autor={"uid": pessoa.uid, "email": pessoa.email},
+                motivo=pedido.motivo if pedido else None,
+                relogio=relogio,
+            )
         except NaoReprocessavel as erro:
             raise HTTPException(409, str(erro)) from None
-        if trocado is None:
+        if job is None:
             raise HTTPException(404, "Job não encontrado")
-        antes, job = trocado
-        etapa = job.etapa_atual
-        assert etapa is not None
-        try:
-            # O Job já mudou: o registro vem antes do disparo, para nunca haver
-            # reprocessamento sem rastro.
-            auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
-                    quando=agora,
-                    uid=pessoa.uid,
-                    email=pessoa.email,
-                    acao="video.reprocessado",
-                    alvo_tipo="job",
-                    alvo_id=job.id,
-                    alvo_nome=job.nome,
-                    motivo=pedido.motivo if pedido else None,
-                    detalhes={"etapa": etapa}
-                    | ({"etapa_escolhida": True} if escolhida else {}),
-                )
-            )
-            if escolhida == "analise" and janelas is not None:
-                janelas.apagar(job.id)
-            disparo.iniciar(job.id, etapa)
-        except Exception:
-            # Sem execução no Workflows o Job ficaria andando sem ninguém rodando.
-            desfazer_reprocessamento(repositorio, antes, job, relogio())
-            raise
         return JobPublico.de(job)
 
     return rotas

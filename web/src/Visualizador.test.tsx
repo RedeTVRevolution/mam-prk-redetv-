@@ -768,3 +768,18 @@ test('decupagem sem os campos novos (1.1) abre o painel, e sem catálogo a catal
   expect(screen.queryByRole('textbox', { name: 'Motivo' })).toBeNull()
   expect(screen.queryByRole('button', { name: /^Corrigir / })).toBeNull()
 })
+
+test('o detalhe do vídeo mostra a versão do pipeline da decupagem', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json({ ...DECUPAGEM, versao_pipeline: '2026.11.1' })),
+  )
+  await abrirComFaixas()
+
+  expect((await screen.findByLabelText('Versão do pipeline')).textContent).toBe('Pipeline 2026.11.1')
+})
+
+test('a decupagem sem versão do pipeline aparece como anterior à versão', async () => {
+  await abrirComFaixas()
+
+  expect((await screen.findByLabelText('Versão do pipeline')).textContent).toBe('Pipeline anterior à versão')
+})

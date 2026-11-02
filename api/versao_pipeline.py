@@ -1,0 +1,55 @@
+"""A versão fixa do pipeline (#250): o único lugar que a define.
+
+A `VERSAO_PIPELINE` é um nome curto; o manifesto diz o que ela fixa: o modelo de cada
+etapa, o hash de cada instrução, a versão do esquema e os motores de transcrição, OCR e
+objetos. Cada decupagem nova grava os dois (`api/analise.py`); a antiga, sem o campo, é
+lida como "anterior à versão". `api/tests/test_versao_pipeline.py` falha quando o
+manifesto muda sem a versão mudar. Trocar a versão é o que permite reprocessar o acervo
+de propósito (`make reprocessar-versao`).
+"""
+
+import hashlib
+from typing import Any
+
+from api import (
+    entendimento_da_consulta,
+    florence,
+    gemini,
+    modelo_forte,
+    paddle,
+    referencias,
+    whisper,
+)
+from api.agent_retrieval import MODELO_DO_EMBEDDING
+from api.decupagem import VERSAO_ESQUEMA
+
+VERSAO_PIPELINE = "2026.11.1"
+
+
+def _hash(texto: str) -> str:
+    return hashlib.sha256(texto.encode()).hexdigest()
+
+
+def manifesto() -> dict[str, Any]:
+    return {
+        "esquema": VERSAO_ESQUEMA,
+        "modelos": {
+            "analise": gemini.MODELO,
+            "versao_do_modelo_da_analise": gemini.VERSAO_DO_MODELO,
+            "modelo_forte": modelo_forte.MODELO_FORTE,
+            "referencias": referencias.MODELO,
+            "consulta": entendimento_da_consulta.MODELO_DA_CONSULTA,
+            "embedding": MODELO_DO_EMBEDDING,
+        },
+        "instrucoes": {
+            "analise": _hash(gemini.INSTRUCAO),
+            "modelo_forte": _hash(modelo_forte.INSTRUCAO),
+            "conferencia_das_referencias": _hash(referencias.INSTRUCAO_DA_CONFERENCIA),
+            "nomes_das_referencias": _hash(referencias.INSTRUCAO_DOS_NOMES),
+        },
+        "motores": {
+            "transcricao": f"faster-whisper {whisper.NOME_DO_MODELO}",
+            "ocr": f"paddleocr {paddle.DETECTOR}+{paddle.RECONHECEDOR}",
+            "objetos": f"florence {florence.NOME_DO_MODELO}",
+        },
+    }

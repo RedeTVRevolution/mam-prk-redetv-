@@ -40,6 +40,7 @@ from api.nuvem import (
 )
 from api.progresso_das_janelas import JanelasDoJob
 from api.transcricao import Transcricao
+from api.versao_pipeline import VERSAO_PIPELINE, manifesto
 
 
 class DecupagensDaAnalise(Protocol):
@@ -127,6 +128,12 @@ def executar(
         return falhar()
     # A Decupagem só fica visível com o Job `concluido`: se o cancelamento
     # chegou antes da transição, o arquivo gravado aqui não é lido por ninguém.
+    decupagem = decupagem.model_copy(
+        update={
+            "versao_pipeline": VERSAO_PIPELINE,
+            "manifesto_do_pipeline": manifesto(),
+        }
+    )
     decupagens.gravar_decupagem(job.id, decupagem.model_dump_json())
     if transitar(repositorio, job.id, "analisando", "concluido", relogio()):
         return "concluido"
