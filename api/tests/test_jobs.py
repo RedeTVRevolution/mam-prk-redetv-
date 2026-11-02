@@ -774,3 +774,18 @@ def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
 
     assert resposta.status_code == 403
     assert "capa_url" not in resposta.text
+
+
+def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() -> None:
+    from datetime import UTC, datetime
+
+    from api.jobs import Etapa, EtapaPublica
+
+    agora = datetime(2026, 11, 2, tzinfo=UTC)
+
+    assert Etapa(inicio=agora).dispositivo is None
+    assert Etapa(inicio=agora).tentativas_gpu is None
+    etapa = EtapaPublica(
+        nome="transcricao", inicio=agora, dispositivo="cpu", tentativas_gpu=6
+    )
+    assert etapa.dispositivo == "cpu" and etapa.tentativas_gpu == 6

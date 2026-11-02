@@ -95,70 +95,97 @@ def test_falha_da_execucao_nao_sobrescreve_job_cancelado() -> None:
     assert "erro_da_leitura.code == 404" in excecao
 
 
+def _subworkflow(texto: str, nome: str) -> str:
+    """O texto de um subworkflow (do nome, no início da linha, ao próximo)."""
+    inicio = texto.index(f"\n{nome}:\n")
+    resto = texto[inicio + 1 :]
+    proximo = re.search(r"\n[a-z_]+:\n", resto)
+    return resto[: proximo.start()] if proximo else resto
+
+
+def _paralelo(texto: str) -> str:
+    return texto[texto.index("- roda_em_paralelo:") : texto.index("- inicia_analise:")]
+
+
+def _ramo(texto: str, nome: str) -> str:
+    paralelo = _paralelo(texto)
+    ramos = re.split(r"\n\s+- (?=ramo_da_\w+:)", paralelo)
+    achado = [r for r in ramos if r.startswith(nome + ":")]
+    assert achado, nome
+    return achado[0]
+
+
 def test_ordem_e_validacao_transcricao_analise() -> None:
     texto = _texto()
 
     valida = texto.index("- valida:")
-    transcreve = texto.index("- transcreve:")
+    paralelo = texto.index("- roda_em_paralelo:")
     analisa = texto.index("- analisa:")
-    assert valida < transcreve < analisa
+    assert valida < paralelo < analisa
     assert "jobs/${job_de_validacao}" in texto
-    assert "jobs/${job_de_transcricao}" in texto
-    # A transcrição só roda com o Job em `analisando`.
-    assert texto.index('estado.stringValue == "analisando"') < transcreve
+    # A transcrição e a leitura da tela só rodam com o Job em `analisando`.
+    assert texto.index('estado.stringValue == "analisando"') < paralelo
 
 
-def test_transcricao_roda_o_job_com_override_de_job_id() -> None:
+def test_transcricao_e_leitura_da_tela_rodam_em_paralelo_nos_jobs_com_gpu() -> None:
     texto = _texto()
 
-    passo = texto[texto.index("- transcreve:") : texto.index("- analisa:")]
-    assert "googleapis.run.v2.projects.locations.jobs.run" in passo
-    assert "jobs/${job_de_transcricao}" in passo
-    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    # O conector espera mais que o timeout de 21600 s do Job, não o padrão de 1800 s.
-    assert "timeout: 21900" in passo
+    paralelo = _paralelo(texto)
+    assert "parallel:" in paralelo and "branches:" in paralelo
+    transcricao = _ramo(texto, "ramo_da_transcricao")
+    leitura = _ramo(texto, "ramo_da_leitura_da_tela")
+    assert "job_gpu: ${job_de_transcricao_gpu}" in transcricao
+    assert "job_cpu: ${job_de_transcricao}" in transcricao
+    assert "job_gpu: ${job_de_ocr_gpu}" in leitura
+    assert "job_cpu: ${job_de_ocr}" in leitura
+    # Os dois ramos mantêm o próprio registro de etapa e o próprio código de falha.
+    assert "etapa: transcricao" in transcricao and "etapa: leitura_da_tela" in leitura
+    assert "codigo_da_falha: transcricao_falhou" in transcricao
+    assert "codigo_da_falha: ocr_falhou" in leitura
+    # Só o paralelo chama os Jobs de GPU, e a análise vem depois dele.
+    assert texto.count("job_gpu: ${job_de_transcricao_gpu}") == 1
+    assert texto.count("job_gpu: ${job_de_ocr_gpu}") == 1
+    assert texto.index("- roda_em_paralelo:") < texto.index("- analisa:")
 
 
-def test_falha_da_transcricao_grava_transcricao_falhou_sem_sobrescrever_outro_estado() -> (
-    None
-):
+def test_falha_de_um_ramo_derruba_o_job_e_a_analise_nao_comeca() -> None:
     texto = _texto()
 
-    passo = texto[texto.index("- transcreve:") : texto.index("- analisa:")]
-    releitura = passo.index("documents.get")
-    condicao = passo.index('estado.stringValue != "analisando"')
-    patch = passo.index("documents.patch")
+    paralelo = _paralelo(texto)
+    # O ramo que não falhou termina e registra o fim; a falha sobe depois dos dois.
+    assert "exception_policy: continueAll" in paralelo
+    excecao = paralelo[paralelo.index("        except:") :]
+    assert "raise: $${e}" in excecao
+    # A falha de cada ramo derruba o Job com o código da etapa, na releitura segura.
+    etapa = _subworkflow(texto, "etapa_com_gpu")
+    assert "falhou_na_execucao: true" in etapa
+    assert "stringValue: $${codigo_da_falha}" in etapa
+    assert "stringValue: falhou" in etapa
+    assert etapa.rstrip().count("raise: $${e}") == 1
+    # Falhou o paralelo, o fluxo não cai em nenhum passo: a execução termina com erro.
+    assert "next:" not in excecao
+
+
+def test_falha_de_cada_ramo_nao_sobrescreve_outro_estado() -> None:
+    texto = _texto()
+
+    etapa = _subworkflow(texto, "etapa_com_gpu")
+    releitura = etapa.index("documents.get")
+    condicao = etapa.index('estado.stringValue != "analisando"')
+    patch = etapa.index("documents.patch")
     assert releitura < condicao < patch
-    assert "updateTime: $${durante.updateTime}" in passo
-    assert "stringValue: transcricao_falhou" in passo
-    assert "raise: $${e}" in passo
+    assert "updateTime: $${durante.updateTime}" in etapa
+    assert "raise: $${e}" in etapa
 
 
-def test_ocr_da_tela_roda_depois_da_transcricao_e_antes_da_analise() -> None:
+def test_ramo_roda_o_job_com_override_de_job_id() -> None:
     texto = _texto()
 
-    transcreve = texto.index("- transcreve:")
-    le_a_tela = texto.index("- le_a_tela:")
-    analisa = texto.index("- analisa:")
-    assert transcreve < le_a_tela < analisa
-    passo = texto[le_a_tela:analisa]
-    assert "googleapis.run.v2.projects.locations.jobs.run" in passo
-    assert "jobs/${job_de_ocr}" in passo
-    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    assert "timeout: 29100" in passo
-
-
-def test_falha_do_ocr_grava_ocr_falhou_sem_sobrescrever_outro_estado() -> None:
-    texto = _texto()
-
-    passo = texto[texto.index("- le_a_tela:") : texto.index("- analisa:")]
-    releitura = passo.index("documents.get")
-    condicao = passo.index('estado.stringValue != "analisando"')
-    patch = passo.index("documents.patch")
-    assert releitura < condicao < patch
-    assert "updateTime: $${durante_o_ocr.updateTime}" in passo
-    assert "stringValue: ocr_falhou" in passo
-    assert "raise: $${e}" in passo
+    roda = _subworkflow(texto, "roda_o_job_com_gpu")
+    assert roda.count("googleapis.run.v2.projects.locations.jobs.run") == 2
+    assert roda.count("name: JOB_ID") == 2 and roda.count("value: $${job_id}") == 2
+    assert "locations/${regiao_gpu}/jobs/" in roda
+    assert "locations/${regiao}/jobs/" in roda
 
 
 def test_job_de_ocr_no_main_tf_sem_internet_e_na_rede_da_validacao() -> None:
@@ -263,8 +290,6 @@ def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
     texto = _texto()
     passos = {
         "valida": ("validacao", "- valida:", "- le_o_job:"),
-        "transcreve": ("transcricao", "- transcreve:", "- le_a_tela:"),
-        "le_a_tela": ("ocr", "- le_a_tela:", "- analisa:"),
         "analisa": ("analise", "- analisa:", "- inicia_identificacao:"),
         "identifica": ("identificacao", "- identifica:", "- inicia_referencias:"),
         "busca_as_referencias": (
@@ -277,13 +302,33 @@ def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
         "indexa": ("indexacao", "- indexa:", "- fim:"),
     }
     for nome, (job, de, ate) in passos.items():
-        recurso = main[main.index(f'resource "google_cloud_run_v2_job" "{job}"') :]
-        recurso = recurso[: recurso.index("\n}\n")]
-        job_s = _segundos(re.search(r'timeout\s*=\s*"(\d+s)"', recurso).group(1))  # type: ignore[union-attr]
         passo = texto[texto.index(de) : texto.index(ate)]
         conector = re.search(r"connector_params:\s+timeout: (\d+)", passo)
         assert conector is not None, nome
-        assert int(conector.group(1)) > job_s, nome
+        assert int(conector.group(1)) > _timeout_do_job(main, job), nome
+
+    # Os Jobs de GPU e os de CPU do paralelo: o timeout vem no argumento de cada ramo.
+    ramos = {
+        "ramo_da_transcricao": ("transcricao_gpu", "transcricao"),
+        "ramo_da_leitura_da_tela": ("ocr_gpu", "ocr"),
+    }
+    for ramo, (gpu, cpu) in ramos.items():
+        texto_do_ramo = _ramo(texto, ramo)
+        for sufixo, job in (("gpu", gpu), ("cpu", cpu)):
+            achado = re.search(rf"timeout_{sufixo}: (\d+)", texto_do_ramo)
+            assert achado is not None, (ramo, sufixo)
+            assert int(achado.group(1)) > _timeout_do_job(main, job), (ramo, sufixo)
+    # O subworkflow passa o argumento ao conector, sem valor fixo.
+    roda = _subworkflow(texto, "roda_o_job_com_gpu")
+    assert "timeout: $${timeout_gpu}" in roda and "timeout: $${timeout_cpu}" in roda
+
+
+def _timeout_do_job(main: str, job: str) -> int:
+    recurso = main[main.index(f'resource "google_cloud_run_v2_job" "{job}"') :]
+    recurso = recurso[: recurso.index("\n}\n")]
+    achado = re.search(r'timeout\s*=\s*"(\d+s)"', recurso)
+    assert achado is not None, job
+    return _segundos(achado.group(1))
 
 
 def test_nenhum_comentario_da_infra_fala_em_ate_10_min() -> None:
@@ -313,8 +358,6 @@ def test_job_de_referencias_no_main_tf_tem_internet_e_o_segredo_e_so_dele() -> N
 
 ETAPAS = [
     ("valida", "validacao"),
-    ("transcreve", "transcricao"),
-    ("le_a_tela", "leitura_da_tela"),
     ("analisa", "analise"),
     ("busca_as_referencias", "referencias"),
     ("tira_os_quadros", "quadros_chave"),
@@ -350,7 +393,7 @@ def test_falha_da_execucao_de_cada_etapa_grava_o_fim_como_falhou() -> None:
 def test_subworkflow_grava_so_os_campos_da_etapa_sem_mexer_no_estado() -> None:
     texto = _texto()
 
-    marcas = texto[texto.index("\nmarca_inicio:") :]
+    marcas = texto[texto.index("\nmarca_inicio:") : texto.index("\netapa_com_gpu:")]
     assert '"etapas." + etapa' in marcas
     assert 'etapas." + etapa + ".fim"' in marcas
     assert "resultado" in marcas
@@ -572,8 +615,6 @@ def test_partindo_das_referencias_a_identificacao_nao_roda() -> None:
 def test_cada_etapa_de_partida_cai_no_inicio_da_propria_etapa() -> None:
     texto = _texto()
 
-    assert _destino(texto, "transcricao") == "inicia_transcricao"
-    assert _destino(texto, "leitura_da_tela") == "inicia_leitura_da_tela"
     assert _destino(texto, "quadros_chave") == "inicia_quadros_chave"
     assert _destino(texto, "identificacao") == "inicia_identificacao"
 
@@ -726,3 +767,163 @@ def test_quem_regrava_o_que_ja_gravou_pode_sobrescrever_no_main_tf() -> None:
         ("comparacao", "decupagens"),
     ]:
         assert papel(conta, bucket) == "roles/storage.objectUser", (conta, bucket)
+
+
+def test_reprocessar_a_transcricao_roda_os_dois_ramos() -> None:
+    texto = _texto()
+
+    assert _destino(texto, "transcricao") == "roda_em_paralelo"
+    atribuicoes = texto[texto.index("- tira_o_id_do_reprocessamento:") :].split(
+        "- parte_da_etapa:"
+    )[0]
+    assert "roda_a_transcricao: true" in atribuicoes
+    assert "roda_a_leitura_da_tela: true" in atribuicoes
+    # Cada ramo só roda se a sua variável deixa.
+    assert "condition: $${roda_a_transcricao}" in _ramo(texto, "ramo_da_transcricao")
+    assert "condition: $${roda_a_leitura_da_tela}" in _ramo(
+        texto, "ramo_da_leitura_da_tela"
+    )
+
+
+def test_reprocessar_a_leitura_da_tela_roda_so_o_ocr_e_ele_mostra_a_etapa() -> None:
+    texto = _texto()
+
+    assert _destino(texto, "leitura_da_tela") == "so_a_leitura_da_tela"
+    passo = _depois_de(texto, "so_a_leitura_da_tela").split("- roda_em_paralelo:")[0]
+    assert "roda_a_transcricao: false" in passo
+    assert "next: roda_em_paralelo" in passo
+    # Sozinha, a leitura da tela é a etapa atual; com a transcrição, quem mostra é ela.
+    assert "mostra_a_etapa: $${not roda_a_transcricao}" in _ramo(
+        texto, "ramo_da_leitura_da_tela"
+    )
+    assert "mostra_a_etapa: true" in _ramo(texto, "ramo_da_transcricao")
+
+
+def test_etapas_em_paralelo_nao_se_atropelam_no_etapa_atual() -> None:
+    texto = _texto()
+
+    inicio = _subworkflow(texto, "marca_inicio")
+    fim = _subworkflow(texto, "marca_fim")
+    assert "params: [job_id, etapa, mostra_a_etapa: true]" in inicio
+    assert "params: [job_id, etapa, falhou_na_execucao, limpa_a_etapa: true]" in fim
+    etapa = _subworkflow(texto, "etapa_com_gpu")
+    assert etapa.count("limpa_a_etapa: false") == 2
+    # Só a falha do paralelo, depois dos dois ramos, limpa o campo.
+    assert "call: limpa_a_etapa_atual" in _paralelo(texto)
+    assert "etapa_atual" in _subworkflow(texto, "limpa_a_etapa_atual")
+
+
+def test_espera_total_vem_de_uma_variavel_do_main_tf_com_15_minutos() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    variavel = main.split('variable "espera_gpu_minutos"')[1].split("\n}")[0]
+    assert "default     = 15" in variavel
+    assert re.search(r"gpu_espera_total_s\s+=\s+var\.espera_gpu_minutos \* 60", main)
+    texto = _texto()
+    assert texto.count("${gpu_espera_total_s}") >= 1
+    for nome in ("gpu_espera_s", "gpu_fator_da_espera", "gpu_espera_maxima_s"):
+        assert re.search(rf"{nome}\s+= var\.{nome}", main), nome
+        assert "${" + nome + "}" in texto, nome
+
+
+def test_so_a_falta_de_gpu_ou_de_cota_tenta_de_novo_e_o_plano_b_vem_depois() -> None:
+    texto = _texto()
+
+    roda = _subworkflow(texto, "roda_o_job_com_gpu")
+    # Falha dentro do contêiner: marca a GPU e sobe, sem espera nem plano B.
+    falha = roda.index("falha_dentro_do_conteiner:")
+    espera = roda.index("ainda_cabe_esperar:")
+    assert falha < espera
+    dentro = roda[falha:espera]
+    assert "condition: $${not faltou_gpu}" in dentro
+    assert "raise: $${erro_da_gpu}" in dentro
+    assert "sys.sleep" not in dentro and "plano_b" not in dentro
+    # O que conta como falta de GPU ou de cota, e o que nunca conta.
+    assert "codigo_http == 429" in roda
+    assert "quota|capacity" in roda
+    assert "exit[(]|exit code|container called" in roda
+
+
+def test_as_esperas_crescem_ate_o_teto_e_nao_passam_da_espera_total() -> None:
+    texto = _texto()
+
+    roda = _subworkflow(texto, "roda_o_job_com_gpu")
+    assert "esperado + espera <= ${gpu_espera_total_s}" in roda
+    assert "esperado: $${esperado + espera}" in roda
+    assert "math.min(espera * ${gpu_fator_da_espera}, ${gpu_espera_maxima_s})" in roda
+    # A ordem: decide se cabe, avisa, espera, cresce e tenta de novo.
+    ordem = [
+        "ainda_cabe_esperar:",
+        "registra_a_nova_tentativa:",
+        "espera_a_gpu:",
+        "cresce_a_espera:",
+    ]
+    posicoes = [roda.index(passo) for passo in ordem]
+    assert posicoes == sorted(posicoes)
+    assert "next: conta_a_tentativa" in roda[roda.index("cresce_a_espera:") :]
+    # O log diz por que cada tentativa falhou.
+    assert "sys.log" in roda and "mensagem" in roda
+
+
+def _tentativas(total: int, inicio: int, fator: int, teto: int) -> int:
+    """Espelha a conta do Workflows: quantas vezes o Job com GPU é pedido."""
+    tentativas, espera, esperado = 1, inicio, 0
+    while esperado + espera <= total:
+        esperado += espera
+        espera = min(espera * fator, teto)
+        tentativas += 1
+    return tentativas
+
+
+def test_a_conta_das_tentativas_dos_valores_propostos_e_de_uma_espera_menor() -> None:
+    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+
+    def padrao(nome: str) -> int:
+        variavel = main.split(f'variable "{nome}"')[1].split("\n}")[0]
+        return int(re.search(r"default\s+=\s+(\d+)", variavel).group(1))  # type: ignore[union-attr]
+
+    inicio = padrao("gpu_espera_s")
+    fator = padrao("gpu_fator_da_espera")
+    teto = padrao("gpu_espera_maxima_s")
+    total = padrao("espera_gpu_minutos") * 60
+
+    # 60, 120, 240, 240, 240 s: 6 tentativas em 15 minutos.
+    assert _tentativas(total, inicio, fator, teto) == 6
+    # Uma espera total menor dá menos tentativas; a zero vai direto ao plano B.
+    assert _tentativas(5 * 60, inicio, fator, teto) == 3
+    assert _tentativas(0, inicio, fator, teto) == 1
+
+
+def test_esgotada_a_espera_o_ramo_roda_o_job_em_cpu_e_registra_cpu() -> None:
+    texto = _texto()
+
+    roda = _subworkflow(texto, "roda_o_job_com_gpu")
+    plano_b = roda[roda.index("registra_o_plano_b:") :]
+    assert "plano B" in plano_b and "sys.log" in plano_b
+    assert plano_b.index("dispositivo: cpu") < plano_b.index(
+        "googleapis.run.v2.projects.locations.jobs.run"
+    )
+    assert "tentativas: $${tentativas}" in plano_b
+    assert "locations/${regiao}/jobs/" in plano_b
+    assert "return: cpu" in plano_b
+    # O plano B não tem `try`: a falha dele derruba a etapa como a de hoje.
+    assert "try:" not in plano_b
+
+
+def test_sucesso_na_gpu_registra_gpu_e_as_tentativas() -> None:
+    texto = _texto()
+
+    roda = _subworkflow(texto, "roda_o_job_com_gpu")
+    sucesso = roda[
+        roda.index("registra_o_sucesso_na_gpu:") : roda.index(
+            "registra_a_nova_tentativa:"
+        )
+    ]
+    assert "dispositivo: gpu" in sucesso and "tentativas: $${tentativas}" in sucesso
+    assert "return: gpu" in sucesso
+    marca = _subworkflow(texto, "marca_dispositivo")
+    assert 'etapas." + etapa + ".dispositivo"' in marca
+    assert 'etapas." + etapa + ".tentativas_gpu"' in marca
+    assert "integerValue" in marca
+    # Medição: a falha da gravação só vai ao log.
+    assert "except:" in marca and "sys.log" in marca

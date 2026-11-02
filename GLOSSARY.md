@@ -15,7 +15,7 @@ Um pedido de decupagem de um vídeo, do registro ao fim do processamento.
 _Evitar_: tarefa, pedido
 
 **Etapa**:
-Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, identificação, referências, comparação, quadros-chave, indexação, nessa ordem), com início, fim e resultado (`concluida` ou `falhou`). A falha de uma etapa depois do `concluido` não muda o estado do Job.
+Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, identificação, referências, comparação, quadros-chave, indexação, nessa ordem), com início, fim e resultado (`concluida` ou `falhou`). A transcrição e a leitura da tela rodam em paralelo, cada uma num Job com GPU, e a análise só começa quando as duas terminam. Essas duas etapas registram também o `dispositivo` (`gpu` ou `cpu`, se o plano B entrou) e as `tentativas_gpu`. A falha de uma etapa depois do `concluido` não muda o estado do Job.
 _Evitar_: fase
 
 **Dispositivo**:
