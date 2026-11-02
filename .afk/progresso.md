@@ -286,3 +286,12 @@ Não corrigido:
 - Decisões: o preço vem de `PRECOS_DOS_MODELOS` (mesmo formato do `comparar-objetos`); custo = tokens do transporte × preço; sem escalonamento nem janelas gravadas (nada de `janelas_do_job`). O cassete não foi usado: os testes usam transporte falso com a resposta `BOA`.
 - Armadilhas: `api.passadas` importa `api.nuvem` (por isso `PassadasStorage` mora em `passadas.py`, não em `nuvem.py`). Sem permissão de nuvem aqui: a passada real no dev roda à mão depois do merge. Papel IAM novo não foi preciso (lê os buckets que a conta já lê; grava no das decupagens).
 - Encerrada por aviso de contexto (120 mil tokens), com tudo commitado e `make verificar` verde. Falta só conferir os critérios do #247 um a um e mandar para a revisão: o código, os testes (12), o Makefile e o README estão prontos.
+
+## #247 revisão
+- Corrigido: o teste "a decupagem do Job não muda" era tautológico (`decupagem_do_job` que ninguém tocava); agora roda pelo `PassadasStorage` sobre um Storage falso e confere que só `<job>/passadas/<id>.json` foi gravado e que `<job>.json` ficou igual. Novo teste com 12 min (três janelas, consolidação, todas com o modelo e o rótulo, sem escalonamento). Modelo com barra (`publishers/...`) é recusado antes de rodar: o id ficaria ilegível pela rota. `_tokens`/`_exigir` deixaram de ser cópias: `comparar_objetos` expõe `tokens_do_transporte` e `exigir_do_ambiente`. `PassadasStorage` monta a URI do proxy direto, sem um `DecupagensStorage` só para isso. GLOSSARY ganhou **Passada de comparação**. README avisa do Flex.
+- Não corrigido:
+  - O cassete não entra nos testes da passada: está no esquema 1.3 e o próprio teste dele está pulado até a regravação do #229; os testes usam a resposta `BOA`.
+  - Precisa de decisão humana: o ADR 0004 diz Standard, mas o `TransporteVertex` ainda manda os cabeçalhos do Flex nas chamadas com vídeo (antes deste ticket). A passada sai em Flex; o README dá o custo em Standard e pede o preço do modo real em `PRECOS_DOS_MODELOS`.
+  - `Etapa`/`etapas` na passada e o parâmetro `etapa=` de `analisar_video` usam "etapa" para os passos internos da análise (janelas, consolidação, identificação), não para a Etapa do Workflows do GLOSSARY. A spec pede "o tempo de cada etapa"; renomear muda o JSON que o #249 vai ler, e fica para lá se incomodar.
+  - `PassadasStorage.listar_passadas` baixa cada passada inteira (com a decupagem) para devolver o resumo: são poucas por Job no piloto.
+  - Transporte sem contadores de tokens grava custo 0 sem aviso (o mesmo do `comparar-objetos`); o `TransporteVertex` conta.

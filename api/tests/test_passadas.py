@@ -1,10 +1,11 @@
 """Passada de comparação (#247): comando e rotas, sem nuvem."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from google.api_core.exceptions import NotFound
 
 from api.auth import Usuario
 from api.comparar_objetos import FaltaNoAmbiente, Preco
@@ -18,6 +19,7 @@ from api.passadas import (
     JobNaoConcluido,
     Passada,
     PassadasEmMemoria,
+    PassadasStorage,
     rodar_passada,
 )
 from api.tests.test_auth import VerificadorFalso
@@ -115,13 +117,103 @@ def test_a_chamada_usa_o_modelo_pedido_e_o_rotulo_de_custo_proprio() -> None:
     assert chamada.rotulos == {"job_id": "j1", "etapa": ETAPA_DE_CUSTO}
 
 
+class _Blob:
+    def __init__(self, cliente: "_StorageFalso", bucket: str, nome: str) -> None:
+        self._cliente, self._chave = cliente, (bucket, nome)
+
+    def download_as_bytes(self) -> bytes:
+        if self._chave not in self._cliente.objetos:
+            raise NotFound(self._chave[1])  # type: ignore[no-untyped-call]
+        return self._cliente.objetos[self._chave]
+
+    def upload_from_string(self, conteudo: str, content_type: str) -> None:
+        self._cliente.objetos[self._chave] = conteudo.encode()
+        self._cliente.gravados.append(self._chave)
+
+
+class _Bucket:
+    def __init__(self, cliente: "_StorageFalso", nome: str) -> None:
+        self._cliente, self._nome = cliente, nome
+
+    def blob(self, nome: str) -> _Blob:
+        return _Blob(self._cliente, self._nome, nome)
+
+
+class _StorageFalso:
+    def __init__(self, objetos: dict[tuple[str, str], bytes]) -> None:
+        self.objetos = objetos
+        self.gravados: list[tuple[str, str]] = []
+
+    def bucket(self, nome: str) -> _Bucket:
+        return _Bucket(self, nome)
+
+    def list_blobs(self, bucket: str, prefix: str) -> list[_Blob]:
+        return [
+            _Blob(self, b, n)
+            for b, n in sorted(self.objetos)
+            if b == bucket and n.startswith(prefix)
+        ]
+
+
 def test_a_decupagem_do_job_nao_muda() -> None:
-    armazem = PassadasEmMemoria()
-    armazem.decupagem_do_job["j1"] = '{"intacta": true}'
+    decupagem_do_job = ("decupagens", "j1.json")
+    storage = _StorageFalso({decupagem_do_job: b'{"intacta": true}'})
+    armazem = PassadasStorage(cast(Any, storage), "aceitos", "decupagens")
+    repositorio = RepositorioEmMemoria()
+    repositorio.salvar(_job())
+    transporte = TransporteContado()
 
-    _rodar(armazem=armazem)
+    passada = rodar_passada(
+        "j1",
+        "gemini-3.8-flash",
+        PRECO,
+        repositorio=repositorio,
+        armazem=armazem,
+        transporte=transporte,
+        agora=lambda: BASE,
+        dormir=lambda _s: None,
+    )
 
-    assert armazem.decupagem_do_job == {"j1": '{"intacta": true}'}
+    assert storage.objetos[decupagem_do_job] == b'{"intacta": true}'
+    assert storage.gravados == [("decupagens", f"j1/passadas/{passada.id}.json")]
+    assert transporte.chamadas[0].video_uri == "gs://aceitos/j1/proxy.mp4"
+    assert armazem.ler_passada("j1", passada.id) == passada
+    assert [r.id for r in armazem.listar_passadas("j1")] == [passada.id]
+    assert armazem.ler_passada("j1", "outra") is None
+
+
+def test_todas_as_janelas_usam_o_modelo_pedido_sem_escalonamento() -> None:
+    repositorio = RepositorioEmMemoria()
+    repositorio.salvar(_job().model_copy(update={"duracao_s": 720.0}))
+    transporte = TransporteContado()
+
+    passada = rodar_passada(
+        "j1",
+        "gemini-3.8-flash",
+        PRECO,
+        repositorio=repositorio,
+        armazem=PassadasEmMemoria(),
+        transporte=transporte,
+        relogio=Relogio(),
+        agora=lambda: BASE,
+        dormir=lambda _s: None,
+    )
+
+    # 12 min: três janelas, uma chamada cada (nada de escalonamento).
+    assert len(transporte.chamadas) == 3
+    assert {c.modelo for c in transporte.chamadas} == {"gemini-3.8-flash"}
+    assert all(c.rotulos["etapa"] == ETAPA_DE_CUSTO for c in transporte.chamadas)
+    assert passada.custo.tokens_de_entrada == 3000
+    assert [e.nome for e in passada.etapas] == [
+        "janelas",
+        "consolidacao",
+        "identificacao",
+    ]
+
+
+def test_modelo_com_barra_nao_roda() -> None:
+    with pytest.raises(ValueError, match="sem barra"):
+        _rodar(modelo="publishers/google/models/gemini-3.8-flash")
 
 
 def test_job_que_nao_esta_concluido_nao_roda_passada() -> None:

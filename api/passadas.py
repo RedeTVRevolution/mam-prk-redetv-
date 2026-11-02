@@ -17,9 +17,10 @@ tokens) e, opcional, `JANELAS_EM_PARALELO`.
 """
 
 import os
+import re
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated, Any, Protocol, cast
@@ -35,7 +36,13 @@ from pydantic import BaseModel
 from api.analise_por_janelas import analisar_video
 from api.auth import Chamador
 from api.catalogo import Catalogo, CatalogoEmMemoria
-from api.comparar_objetos import FaltaNoAmbiente, Preco, precos_do_ambiente
+from api.comparar_objetos import (
+    FaltaNoAmbiente,
+    Preco,
+    exigir_do_ambiente,
+    precos_do_ambiente,
+    tokens_do_transporte,
+)
 from api.decupagem import Decupagem, Video
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import (
@@ -47,14 +54,16 @@ from api.jobs import (
 from api.leitura_da_tela import LeituraDaTela
 from api.nuvem import (
     CatalogoFirestore,
-    DecupagensStorage,
     LeiturasStorage,
     RepositorioFirestore,
     TranscricoesStorage,
+    objeto_do_proxy,
 )
 from api.transcricao import Transcricao
 
 ETAPA_DE_CUSTO = "passada_de_comparacao"  # o rótulo de custo de cada chamada
+# O id da passada leva o nome do modelo e vira nome de objeto e trecho da rota: sem barra.
+FORMA_DO_ID = r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
 
 
 class JobNaoConcluido(Exception):
@@ -109,11 +118,10 @@ class ArmazemDaPassada(LeituraDePassadas, Protocol):
 
 
 class PassadasEmMemoria:
-    """Dublê do Storage; `decupagem_do_job` fica aqui só para os testes verem que não muda."""
+    """Dublê do Storage."""
 
     def __init__(self) -> None:
         self.passadas: dict[tuple[str, str], Passada] = {}
-        self.decupagem_do_job: dict[str, str] = {}
         self.transcricoes: dict[str, Transcricao] = {}
         self.leituras: dict[str, LeituraDaTela] = {}
 
@@ -147,13 +155,6 @@ def preco_do_modelo(modelo: str, texto: str) -> Preco:
     return precos[modelo]
 
 
-def _tokens(transporte: Transporte) -> tuple[int, int]:
-    return (
-        getattr(transporte, "tokens_de_entrada", 0),
-        getattr(transporte, "tokens_de_saida", 0),
-    )
-
-
 def rodar_passada(
     job_id: str,
     modelo: str,
@@ -168,7 +169,10 @@ def rodar_passada(
     agora: Callable[[], datetime] = agora_utc,
     dormir: Callable[[float], None] = time.sleep,
 ) -> Passada:
-    """Levanta `JobNaoConcluido` (o Job não existe ou não terminou) e `AnaliseFalhou`."""
+    """Levanta `JobNaoConcluido` (o Job não existe ou não terminou) e `AnaliseFalhou`;
+    `ValueError` para o modelo que não cabe no id da passada (`publishers/...`)."""
+    if not re.fullmatch(FORMA_DO_ID, modelo):
+        raise ValueError(f"modelo {modelo!r}: só o nome curto, sem barra")
     job = repositorio.obter(job_id)
     if job is None or job.estado != "concluido":
         raise JobNaoConcluido(f"O Job {job_id} não está concluído.")
@@ -182,7 +186,7 @@ def rodar_passada(
         yield
         etapas.append(Etapa(nome=nome, segundos=round(relogio() - inicio, 2)))
 
-    entrada_antes, saida_antes = _tokens(transporte)
+    entrada_antes, saida_antes = tokens_do_transporte(transporte)
     decupagem = analisar_video(
         transporte,
         video_uri=armazem.uri_do_proxy(job.id),
@@ -203,7 +207,7 @@ def rodar_passada(
         etapa=etapa,
         dormir=dormir,
     )
-    entrada, saida = _tokens(transporte)
+    entrada, saida = tokens_do_transporte(transporte)
     entrada -= entrada_antes
     saida -= saida_antes
     criada_em = agora()
@@ -243,13 +247,13 @@ class PassadasStorage:
         self, cliente: ClienteStorage, bucket_de_aceitos: str, bucket_de_decupagens: str
     ) -> None:
         self._cliente = cliente
+        self._bucket_de_aceitos = bucket_de_aceitos
         self._aceitos = TranscricoesStorage(cliente, bucket_de_aceitos)
         self._leituras = LeiturasStorage(cliente, bucket_de_aceitos)
-        self._uri = DecupagensStorage(cliente, bucket_de_aceitos, bucket_de_decupagens)
         self._decupagens = bucket_de_decupagens
 
     def uri_do_proxy(self, job_id: str) -> str:
-        return self._uri.uri_do_proxy(job_id)
+        return f"gs://{self._bucket_de_aceitos}/{objeto_do_proxy(job_id)}"
 
     def ler_transcricao(self, job_id: str) -> Transcricao | None:
         return self._aceitos.ler_transcricao(job_id)
@@ -297,7 +301,7 @@ def criar_rotas_das_passadas(
     @rotas.get("/{job_id}/passadas/{passada_id}")
     def ler(
         job_id: str,
-        passada_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")],
+        passada_id: Annotated[str, Path(pattern=FORMA_DO_ID)],
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
     ) -> Passada:
         job = _enxerga(chamador, repositorio.obter(job_id))
@@ -309,16 +313,18 @@ def criar_rotas_das_passadas(
     return rotas
 
 
-def main(argumentos: list[str], ambiente: dict[str, str] | Any = os.environ) -> int:
+def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int:
     if len(argumentos) != 2:
         print("uso: python -m api.passadas JOB_ID MODELO", file=sys.stderr)
         return 2
     job_id, modelo = argumentos
     try:
-        projeto = _exigir(ambiente, "GCP_PROJECT_ID")
-        aceitos = _exigir(ambiente, "BUCKET_ACEITOS")
-        decupagens = _exigir(ambiente, "BUCKET_DECUPAGENS")
-        preco = preco_do_modelo(modelo, _exigir(ambiente, "PRECOS_DOS_MODELOS"))
+        projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
+        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
+        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        preco = preco_do_modelo(
+            modelo, exigir_do_ambiente(ambiente, "PRECOS_DOS_MODELOS")
+        )
         paralelas = int(ambiente.get("JANELAS_EM_PARALELO") or 1)
     except (FaltaNoAmbiente, ValueError) as e:
         print(f"erro: {e}", file=sys.stderr)
@@ -342,7 +348,7 @@ def main(argumentos: list[str], ambiente: dict[str, str] | Any = os.environ) -> 
             catalogo=CatalogoFirestore(banco),
             max_paralelas=paralelas,
         )
-    except (JobNaoConcluido, AnaliseFalhou) as e:
+    except (JobNaoConcluido, AnaliseFalhou, ValueError) as e:
         print(f"erro: {e or 'a análise falhou'}", file=sys.stderr)
         return 1
     print(f"passada {passada.id} gravada")
@@ -355,12 +361,6 @@ def main(argumentos: list[str], ambiente: dict[str, str] | Any = os.environ) -> 
 def _hms(passada: Passada) -> str:
     segundos = passada.decupagem.video.duracao_ms // 1000
     return f"{segundos // 3600}h{segundos % 3600 // 60:02d}min"
-
-
-def _exigir(ambiente: Any, nome: str) -> str:
-    if not ambiente.get(nome):
-        raise FaltaNoAmbiente(f"{nome} não está no ambiente")
-    return str(ambiente[nome])
 
 
 if __name__ == "__main__":

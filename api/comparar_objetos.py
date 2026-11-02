@@ -92,7 +92,7 @@ def precos_do_ambiente(texto: str) -> dict[str, Preco]:
     return precos
 
 
-def _tokens(transporte: Transporte) -> tuple[int, int]:
+def tokens_do_transporte(transporte: Transporte) -> tuple[int, int]:
     return (
         getattr(transporte, "tokens_de_entrada", 0),
         getattr(transporte, "tokens_de_saida", 0),
@@ -109,11 +109,11 @@ def _medir(
     preco_da_gpu: float,
     gerar: Callable[[], Inventarios],
 ) -> tuple[Inventarios, Medida]:
-    entrada_antes, saida_antes = _tokens(transporte)
+    entrada_antes, saida_antes = tokens_do_transporte(transporte)
     inicio = relogio()
     inventarios = gerar()
     segundos = relogio() - inicio
-    entrada, saida = _tokens(transporte)
+    entrada, saida = tokens_do_transporte(transporte)
     entrada -= entrada_antes
     saida -= saida_antes
     custo = (
@@ -275,7 +275,7 @@ class DisparadorDoCloudRun:
             )
 
 
-def _exigir(ambiente: Mapping[str, str], nome: str) -> str:
+def exigir_do_ambiente(ambiente: Mapping[str, str], nome: str) -> str:
     if not ambiente.get(nome):
         raise FaltaNoAmbiente(f"{nome} não está no ambiente")
     return ambiente[nome]
@@ -287,14 +287,15 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
         return 2
     job_id, pasta = argumentos
     try:
-        projeto = _exigir(ambiente, "GCP_PROJECT_ID")
-        bucket = _exigir(ambiente, "BUCKET_DECUPAGENS")
-        regiao = _exigir(ambiente, "REGIAO_GPU")
-        job = _exigir(ambiente, "JOB_DE_OBJETOS_GPU")
+        projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
+        bucket = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        regiao = exigir_do_ambiente(ambiente, "REGIAO_GPU")
+        job = exigir_do_ambiente(ambiente, "JOB_DE_OBJETOS_GPU")
         modelos = [
-            m.strip() for m in _exigir(ambiente, "MODELOS_DA_COMPARACAO").split(",")
+            m.strip()
+            for m in exigir_do_ambiente(ambiente, "MODELOS_DA_COMPARACAO").split(",")
         ]
-        precos = precos_do_ambiente(_exigir(ambiente, "PRECOS_DOS_MODELOS"))
+        precos = precos_do_ambiente(exigir_do_ambiente(ambiente, "PRECOS_DOS_MODELOS"))
         preco_da_gpu = float(
             ambiente.get("PRECO_DA_GPU_POR_HORA") or PRECO_DA_GPU_POR_HORA
         )

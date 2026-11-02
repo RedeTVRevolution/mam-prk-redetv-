@@ -144,6 +144,9 @@ Identidade de uma decupagem: o arquivo, a versão do pipeline e as opções que 
 **Chave de idempotência**:
 Identificador de uma intenção de envio do cliente, reutilizado em todas as repetições dessa intenção.
 
+**Passada de comparação**:
+A análise inteira de um Job concluído refeita com outro modelo, sem escalonamento, guardada ao lado da Decupagem com o modelo, a data, o custo e o tempo de cada passo (`api/passadas.py`, `make passada-de-comparacao`). Não é Job nem Decupagem: não é indexada, não aparece no Acervo, não recebe correções nem dispara webhook, e a Decupagem do Job não muda. Cada chamada leva o rótulo de custo `etapa=passada_de_comparacao`. Serve para comparar modelos no mesmo vídeo.
+
 ### Revisão
 
 **Correção**:

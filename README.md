@@ -110,14 +110,14 @@ Roda a análise inteira de um Job concluído com outro modelo e guarda o resulta
 
 ```bash
 export PRECOS_DOS_MODELOS="gemini-3.8-flash=1.5:7.5"   # modelo=entrada:saída, US$ por milhão de tokens
-make passada-de-comparacao JOB=<id do Job> MODELO=gemini-3.8-flash   # JANELAS_EM_PARALELO=4 acelera
+make passada-de-comparacao JOB=<id do Job> MODELO=gemini-3.8-flash   # nome curto, sem barra; JANELAS_EM_PARALELO=4 acelera
 ```
 
 - A análise é a do Job (janelas, consolidação, identificação, com a transcrição e a leitura da tela que ele já tem), sem escalonamento: o modelo pedido faz todas as janelas. Dá para repetir com outros modelos; cada rodada é uma passada nova.
 - A passada vai para `<job>/passadas/<data>-<modelo>.json` no bucket das decupagens, com o modelo, a data, os tokens e o custo (pelos preços do `PRECOS_DOS_MODELOS`) e os segundos de `janelas`, `consolidacao` e `identificacao`. Não é indexada, não aparece no Acervo nem na busca, não recebe correções, não dispara webhook, e a Decupagem do Job não é regravada. A identificação lê o catálogo de pessoas, mas não acrescenta nome nele.
 - Cada chamada ao Gemini leva o rótulo `etapa=passada_de_comparacao`, para o faturamento separar o custo.
 - Leitura: `GET /v1/jobs/{id}/passadas` (resumos) e `GET /v1/jobs/{id}/passadas/{passada}` (com a decupagem), com `decupagem.ver`.
-- Custo por hora de vídeo, pelas premissas do `docs/Plano_MAM.md` (Standard, 1 fps, ~60 mil tokens de saída por hora): ~US$ 1,14 no 3.8 Flash, ~US$ 1,24 no 3.5 Flash e ~US$ 0,30 no 3.5 Flash-Lite. Um programa de 2 h custa, então, uns US$ 2,30 no 3.8 Flash. O custo real da rodada sai impresso no fim do comando e fica na passada.
+- Custo por hora de vídeo, pelas premissas do `docs/Plano_MAM.md` (Standard, 1 fps, ~60 mil tokens de saída por hora): ~US$ 1,14 no 3.8 Flash, ~US$ 1,24 no 3.5 Flash e ~US$ 0,30 no 3.5 Flash-Lite. Um programa de 2 h custa, então, uns US$ 2,30 no 3.8 Flash. O custo real da rodada sai impresso no fim do comando e fica na passada. As chamadas com vídeo saem com os cabeçalhos do Flex do `TransporteVertex` (o ADR 0004 pede Standard, e o código ainda não seguiu); ponha em `PRECOS_DOS_MODELOS` o preço do modo em que elas de fato saem, e leia as contas acima como teto.
 
 ## Cassete do Gemini
 
