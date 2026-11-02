@@ -10,27 +10,27 @@ feita aqui, sobre as linhas que voltam. Um período grande demais para uma respo
 
 import csv
 import io
-from collections import defaultdict
-from collections.abc import Callable
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from api.auth import Chamador
+from api.auth import ChamadorAutenticado, Usuario
 from api.copia_bigquery import (
+    TIPOS_DAS_PESSOAS,
     ConfigDoBigQuery,
     CopiaEmMemoria,
     Transporte,
     _parametro,
     transporte_http,
 )
-from api.jobs import RepositorioDeJobs, _exige
+from api.jobs import RepositorioDeJobs, _confere_permissao
 
-TIPOS_DO_RELATORIO = ("aparicao", "mencao_na_fala", "mencao_no_texto")
+TIPOS_DO_RELATORIO = TIPOS_DAS_PESSOAS
 COLUNAS_DO_CSV = (
     "pessoa_id",
     "nome",
@@ -186,12 +186,18 @@ def _uniao(intervalos: list[tuple[int, int]]) -> list[tuple[int, int]]:
 
 
 def relatorio(momentos: list[MomentoDaPessoa]) -> list[PessoaNoRelatorio]:
-    """Uma linha por pessoa, do maior tempo de tela para o menor."""
-    por_pessoa: dict[tuple[str, str], list[MomentoDaPessoa]] = defaultdict(list)
+    """Uma linha por pessoa, do maior tempo de tela para o menor.
+
+    A pessoa é o id do catálogo; o nome é o que mais aparece nas linhas dela (um vídeo
+    copiado antes de uma correção de grafia não parte a pessoa em duas).
+    """
+    por_pessoa: dict[str, list[MomentoDaPessoa]] = defaultdict(list)
     for m in momentos:
-        por_pessoa[(m.pessoa_id, m.nome)].append(m)
+        por_pessoa[m.pessoa_id].append(m)
     pessoas: list[PessoaNoRelatorio] = []
-    for (pessoa_id, nome), dela in por_pessoa.items():
+    for pessoa_id, dela in por_pessoa.items():
+        contagem = Counter(m.nome for m in dela)
+        nome = min(contagem, key=lambda n: (-contagem[n], n))
         por_job: dict[str, list[MomentoDaPessoa]] = defaultdict(list)
         for m in dela:
             por_job[m.job_id].append(m)
@@ -228,7 +234,7 @@ def relatorio(momentos: list[MomentoDaPessoa]) -> list[PessoaNoRelatorio]:
 
 def _celula(texto: str) -> str:
     """O nome que começa como fórmula não vira fórmula na planilha."""
-    return f"'{texto}" if texto[:1] in ("=", "+", "-", "@") else texto
+    return f"'{texto}" if texto[:1] in ("=", "+", "-", "@", "\t", "\r") else texto
 
 
 def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
@@ -250,21 +256,31 @@ def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
     return saida.getvalue()
 
 
+def _exige_ver_o_relatorio(request: Request, chamador: ChamadorAutenticado) -> Usuario:
+    """Dependência: pessoa com `decupagem.ver`. A cópia não guarda o sistema dono do
+    vídeo, então uma chave de sistema veria os vídeos dos outros: não consulta."""
+    if not isinstance(chamador, Usuario):
+        raise HTTPException(403, "Chave de sistema não consulta o relatório")
+    _confere_permissao(request, chamador, "decupagem.ver")
+    return chamador
+
+
 def criar_rotas_dos_relatorios(
     consulta: ConsultaDeMomentos | None, repositorio: RepositorioDeJobs
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
-    ler: Callable[..., Chamador] = _exige("ler")
 
     @rotas.get("/tempo-de-tela", response_model=RelatorioDeTempoDeTela)
     def tempo_de_tela(
-        _chamador: Annotated[Chamador, Depends(ler)],
+        _pessoa: Annotated[Usuario, Depends(_exige_ver_o_relatorio)],
         programa: Annotated[str | None, Query(max_length=100)] = None,
         desde: date | None = None,
         ate: date | None = None,
         formato: Literal["json", "csv"] = "json",
     ) -> Any:
-        """`desde` e `ate` são datas de exibição, as duas inclusive."""
+        """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa
+        (ou com `programa=` vazio), todos."""
+        programa = programa or None
         if consulta is None:
             raise HTTPException(503, "O BigQuery não está configurado neste ambiente")
         if desde and ate and desde > ate:

@@ -216,8 +216,11 @@ def test_aparicoes_e_mencoes_viram_linhas_separadas_por_pessoa() -> None:
         update={"id": "p2", "catalogo_id": "c2", "estado_do_nome": "palpite"}
     )
     sem_catalogo = pessoa.model_copy(update={"id": "p3", "catalogo_id": None})
+    sem_identificacao = pessoa.model_copy(
+        update={"id": "p4", "catalogo_id": "c4", "estado_do_nome": None}
+    )
     decupagem = DECUPAGEM.model_copy(
-        update={"pessoas": [pessoa, palpite, sem_catalogo]}
+        update={"pessoas": [pessoa, palpite, sem_catalogo, sem_identificacao]}
     )
 
     linhas = linhas_da_decupagem("j1", decupagem, "Exemplo", DIA, BASE)

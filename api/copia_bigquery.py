@@ -96,6 +96,10 @@ def linhas_da_decupagem(
     return linhas
 
 
+# Os tipos das linhas por pessoa, na ordem aparição, menção na fala, menção no texto.
+TIPOS_DAS_PESSOAS = ("aparicao", "mencao_na_fala", "mencao_no_texto")
+
+
 def _linhas_das_pessoas(
     decupagem: Decupagem, base: dict[str, Any]
 ) -> list[LinhaDoMomento]:
@@ -103,19 +107,21 @@ def _linhas_das_pessoas(
 
     É daqui que sai o tempo de tela: `aparicao` é a pessoa visível, e as menções na fala e
     no texto da tela ficam em tipos à parte, nunca somam tempo. Quem não está confirmado
-    no catálogo (sem `catalogo_id`, ou só palpite) fica de fora dos relatórios.
+    no catálogo (sem `catalogo_id`, palpite ou sem a identificação) fica de fora.
     """
     linhas: list[LinhaDoMomento] = []
     for p in decupagem.pessoas:
-        if not p.catalogo_id or p.estado_do_nome == "palpite":
+        if not p.catalogo_id or p.estado_do_nome != "confirmado":
             continue
         dona = [PessoaDoMomento(p.catalogo_id, p.nome)]
-        momentos: list[tuple[str, Sequence[Any]]] = [
-            ("aparicao", p.na_imagem),
-            ("mencao_na_fala", p.citada_na_fala),
-            ("mencao_no_texto", p.citada_no_texto),
-        ]
-        for tipo, intervalos in momentos:
+        intervalos_por_tipo: tuple[Sequence[Any], ...] = (
+            p.na_imagem,
+            p.citada_na_fala,
+            p.citada_no_texto,
+        )
+        for tipo, intervalos in zip(
+            TIPOS_DAS_PESSOAS, intervalos_por_tipo, strict=True
+        ):
             linhas += [
                 LinhaDoMomento(
                     tipo=tipo,
