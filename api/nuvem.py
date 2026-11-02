@@ -728,7 +728,8 @@ class LeiturasStorage:
 
 
 class ObjetosStorage:
-    """O Job de objetos só toca o bucket das decupagens: lê a Decupagem e os quadros, grava o resultado."""
+    """Os Jobs de objetos só tocam o bucket das decupagens: o da GPU lê a Decupagem e os quadros
+    e grava o resultado bruto; o do inventário (CPU) lê o resultado e regrava a Decupagem."""
 
     def __init__(self, cliente: ClienteStorage, bucket_de_decupagens: str) -> None:
         self._cliente = cliente
@@ -756,6 +757,22 @@ class ObjetosStorage:
         ).upload_from_string(
             resultado.model_dump_json(), content_type="application/json"
         )
+
+    def ler_resultado(
+        self, job_id: str, destino: str | None = None
+    ) -> ObjetosDaDecupagem | None:
+        blob = self._cliente.bucket(self._decupagens).blob(
+            destino or objeto_do_resultado_dos_objetos(job_id)
+        )
+        try:
+            return ObjetosDaDecupagem.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
+
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            objeto_da_decupagem(job_id)
+        ).upload_from_string(conteudo, content_type="application/json")
 
 
 class QuadrosStorage(DecupagensStorage):
