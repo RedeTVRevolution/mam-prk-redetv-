@@ -127,12 +127,11 @@ def test_o_deploy_so_testa_o_dominio_com_o_certificado_ativo() -> None:
     assert certificado < ativo < teste
 
 
-def test_o_endereco_sai_como_output_e_o_dominio_chega_aos_tres_ambientes() -> None:
+def test_o_endereco_sai_como_output_e_o_dominio_chega_aos_dois_ambientes() -> None:
     assert 'output "ip_do_balanceador"' in BALANCEADOR
     assert 'output "ip_do_balanceador"' in (INFRA / "main.tf").read_text()
     for main in (
         INFRA / "main.tf",
-        INFRA / "ambientes" / "staging" / "main.tf",
         INFRA / "ambientes" / "prod" / "main.tf",
     ):
         texto = main.read_text()
@@ -235,10 +234,9 @@ def test_ips_da_redetv_ate_dez_e_no_formato_de_ip() -> None:
     assert "cidrhost(" in ips
 
 
-def test_o_cloud_armor_chega_aos_tres_ambientes_e_ao_wizard() -> None:
+def test_o_cloud_armor_chega_aos_dois_ambientes_e_ao_wizard() -> None:
     for main in (
         INFRA / "main.tf",
-        INFRA / "ambientes" / "staging" / "main.tf",
         INFRA / "ambientes" / "prod" / "main.tf",
     ):
         texto = main.read_text()

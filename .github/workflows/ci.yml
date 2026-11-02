@@ -78,9 +78,6 @@ jobs:
       - run: terraform -chdir=infra init -backend=false -input=false
       - run: terraform -chdir=infra fmt -check
       - run: terraform -chdir=infra validate
-      - run: terraform -chdir=infra/ambientes/staging init -backend=false -input=false
-      - run: terraform -chdir=infra/ambientes/staging fmt -check
-      - run: terraform -chdir=infra/ambientes/staging validate
       - run: terraform -chdir=infra/ambientes/prod init -backend=false -input=false
       - run: terraform -chdir=infra/ambientes/prod fmt -check
       - run: terraform -chdir=infra/ambientes/prod validate

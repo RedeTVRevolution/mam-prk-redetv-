@@ -10,7 +10,7 @@ node_modules/
 dist/
 .terraform/
 *.tfstate*
-# Os valores reais de staging e prod (#293); só o exemplo vai para o git.
+# Os valores reais de prod (#293); só o exemplo vai para o git.
 *.tfvars
 !exemplo.tfvars
 *.mp4

@@ -201,7 +201,7 @@ def test_destruicao_so_passa_com_a_variavel_explicita(tmp_path: Path) -> None:
     assert any(" apply " in f" {c} " for c in _chamadas(tmp_path))
 
 
-AMBIENTES = ("staging", "prod")
+AMBIENTES = ("prod",)
 
 
 def _sem_padrao(texto: str) -> list[str]:
@@ -215,7 +215,7 @@ def _sem_padrao(texto: str) -> list[str]:
 
 
 @pytest.mark.parametrize("ambiente", AMBIENTES)
-def test_staging_e_prod_chamam_o_modulo_com_estado_proprio(ambiente: str) -> None:
+def test_prod_chama_o_modulo_com_estado_proprio(ambiente: str) -> None:
     texto = (INFRA / "ambientes" / ambiente / "main.tf").read_text()
 
     assert 'source = "../../modulos/mam"' in texto
@@ -226,7 +226,7 @@ def test_staging_e_prod_chamam_o_modulo_com_estado_proprio(ambiente: str) -> Non
 
 
 @pytest.mark.parametrize("ambiente", AMBIENTES)
-def test_staging_e_prod_passam_as_variaveis_sem_padrao_do_modulo(
+def test_prod_passa_as_variaveis_sem_padrao_do_modulo(
     ambiente: str,
 ) -> None:
     texto = (INFRA / "ambientes" / ambiente / "main.tf").read_text()
@@ -245,10 +245,10 @@ def test_o_tfvars_de_exemplo_cobre_as_variaveis_sem_padrao(ambiente: str) -> Non
     assert "redetv" not in exemplo.lower()
 
 
-def test_o_ci_valida_dev_staging_e_prod() -> None:
+def test_o_ci_valida_dev_e_prod() -> None:
     ci = (RAIZ / ".github" / "workflows" / "ci.yml").read_text()
 
-    for pasta in ("infra", "infra/ambientes/staging", "infra/ambientes/prod"):
+    for pasta in ("infra", "infra/ambientes/prod"):
         init = ci.index(f"terraform -chdir={pasta} init -backend=false")
         assert init < ci.index(f"terraform -chdir={pasta} validate")
 
@@ -256,8 +256,9 @@ def test_o_ci_valida_dev_staging_e_prod() -> None:
 def test_o_readme_da_infra_tem_a_tabela_e_a_lista_do_que_precisa_existir() -> None:
     readme = (INFRA / "README.md").read_text()
 
-    for ambiente in ("dev", "staging", "prod"):
+    for ambiente in ("dev", "prod"):
         assert f"| {ambiente} |" in readme
+    assert "staging" not in readme
     assert "#294" in readme and "#296" in readme
 
 
