@@ -386,7 +386,7 @@ function FaixaDoTrecho({ trecho, duracaoMs }: { trecho: TrechoMarcado; duracaoMs
       {completo && (
         <Box
           data-trecho=""
-          style={{ ...estiloDoTrecho({ inicio_ms: trecho.inicio_ms, fim_ms: trecho.fim_ms as number }, duracaoMs), background: CORES.foco, opacity: 0.35, borderRadius: 'var(--mantine-radius-xs)' }}
+          style={{ ...estiloDoTrecho({ inicio_ms: trecho.inicio_ms, fim_ms: trecho.fim_ms as number }, duracaoMs), background: `${CORES.foco}29`, border: `1px solid ${CORES.foco}`, borderRadius: 'var(--mantine-radius-xs)' }}
         />
       )}
       <Text

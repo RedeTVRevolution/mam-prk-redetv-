@@ -76,7 +76,7 @@ export function FormularioDoTrecho({
         />
       ) : (
         <Text size="xs" c="dimmed">
-          Escolha o tipo: 1 Pessoa · 3 Marca · 4 Texto na tela · 5 Pauta · Esc cancela
+          Escolha o tipo: {ABAS_DO_TRECHO.map((a) => `${a.tecla} ${a.rotulo}`).join(' · ')} · Esc cancela
         </Text>
       )}
     </Stack>

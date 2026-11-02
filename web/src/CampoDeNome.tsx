@@ -2,8 +2,11 @@ import { Loader, Paper, Text, TextInput } from '@mantine/core'
 import { type KeyboardEvent, useContext, useRef, useState } from 'react'
 import type { CatalogoDeNomes, NomeDoCatalogo } from './api.ts'
 import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
+import { CORES } from './tema.ts'
 
 const MINIMO_DE_LETRAS = 2
+// Opção ativa: o azul de foco a 16% (0x29).
+const ATIVA = `${CORES.foco}29`
 
 /**
  * Campo de nome de pessoa ou de marca com autocompletar: a lista abre a partir de 2 letras; ↑ ↓ e Enter
@@ -114,7 +117,7 @@ export function CampoDeNome({
         onKeyDown={aoTeclar}
       />
       {comLista && (
-        <Paper withBorder shadow="md" p={4} style={{ position: 'absolute', zIndex: 10, left: 0, right: 0 }}>
+        <Paper withBorder shadow="sm" bg={CORES.elevada} p={4} style={{ position: 'absolute', zIndex: 10, left: 0, right: 0 }}>
           <div role="listbox" aria-label={`${rotulo}: nomes do catálogo`}>
             {achados.map((n, i) => (
               <div
@@ -122,7 +125,7 @@ export function CampoDeNome({
                 role="option"
                 aria-selected={i === ativo}
                 tabIndex={-1}
-                style={{ cursor: 'pointer', padding: '2px 4px', background: i === ativo ? 'var(--mantine-color-dark-5)' : undefined }}
+                style={{ cursor: 'pointer', padding: '2px 4px', background: i === ativo ? ATIVA : undefined }}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => escolher(n)}
               >
@@ -133,7 +136,7 @@ export function CampoDeNome({
               </div>
             ))}
             {erro && (
-              <Text size="xs" role="alert" c="red.4" px={4}>
+              <Text size="xs" role="alert" c={CORES.falhou} px={4}>
                 {erro}
               </Text>
             )}

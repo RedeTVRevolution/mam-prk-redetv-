@@ -253,6 +253,28 @@ test('I e O de novo movem a borda', async () => {
   expect(screen.getByText('00:12–00:20')).toBeTruthy()
 })
 
+test('I depois da saída, com o campo aberto, apaga a saída, fecha o campo e avisa', async () => {
+  const usuario = await trechoPorTeclas(10, 20)
+  await usuario.keyboard('a')
+  expect(screen.getByRole('tablist', { name: 'Tipo do trecho' })).toBeTruthy()
+  const { ir } = await marcar(usuario, 0, 0)
+  ir(30)
+  await usuario.click(screen.getByRole('button', { name: 'Marcar entrada' }))
+  expect(screen.queryByRole('tablist', { name: 'Tipo do trecho' })).toBeNull()
+  expect(screen.getByText('00:30–…')).toBeTruthy()
+  expect(screen.getByText(/marque a saída de novo/)).toBeTruthy()
+  await usuario.keyboard('{Escape}')
+  expect(screen.queryByText('00:30–…')).toBeNull()
+})
+
+test('sair do modo de catalogação descarta o trecho', async () => {
+  const usuario = await trechoPorTeclas(10, 20)
+  await usuario.keyboard('a')
+  await usuario.keyboard('ee')
+  expect(screen.queryByText('00:10–00:20')).toBeNull()
+  expect(screen.queryByRole('tablist', { name: 'Tipo do trecho' })).toBeNull()
+})
+
 test('sem o modo de catalogação, I, O e A não fazem nada; com o foco num campo também não', async () => {
   const usuario = await abrir(true)
   await usuario.keyboard('io')
@@ -269,6 +291,8 @@ test('os atalhos do trecho estão na lista do ?', async () => {
   expect(within(lista).getByText(/Marcar a entrada do trecho/)).toBeTruthy()
   expect(within(lista).getByText(/Marcar a saída do trecho/)).toBeTruthy()
   expect(within(lista).getByText(/Descrever o trecho marcado/)).toBeTruthy()
+  expect(within(lista).getByText(/o tipo Texto na tela/)).toBeTruthy()
+  expect(within(lista).getByText(/criar o nome digitado no catálogo/)).toBeTruthy()
 })
 
 async function renomearLeao() {

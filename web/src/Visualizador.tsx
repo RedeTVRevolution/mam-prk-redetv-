@@ -33,6 +33,7 @@ import { dataDeExibicao, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
 import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
 import { FormularioDoTrecho } from './FormularioDoTrecho.tsx'
+import { ABAS_DO_TRECHO } from './trecho.ts'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
 import { nomeDaEtapa } from './etapas.ts'
@@ -289,10 +290,21 @@ export default function Visualizador({
     setDescrevendo(false)
   }
 
-  /** `I`: a entrada do trecho no tempo atual; uma saída que ficaria antes dela sai. */
+  /** `I`: a entrada do trecho no tempo atual; uma saída que ficaria antes dela sai, e o campo fecha. */
   function marcarEntrada() {
     if (!catalogando) return
-    setTrecho((t) => ({ inicio_ms: atualMs, fim_ms: t?.fim_ms != null && t.fim_ms >= atualMs ? t.fim_ms : null }))
+    const fim = trecho?.fim_ms != null && trecho.fim_ms >= atualMs ? trecho.fim_ms : null
+    if (trecho?.fim_ms != null && fim === null) {
+      setDescrevendo(false)
+      mostrarAviso('A entrada passou da saída: marque a saída de novo (O).')
+    }
+    setTrecho({ inicio_ms: atualMs, fim_ms: fim })
+  }
+
+  /** `E`: liga e desliga o modo; o trecho marcado não sobrevive à saída do modo. */
+  function alternarCatalogacao() {
+    descartarTrecho()
+    setCatalogando((c) => !c)
   }
 
   /** `O`: a saída do trecho no tempo atual, depois da entrada. */
@@ -575,7 +587,7 @@ export default function Visualizador({
             acao: 'Ligar e desligar o modo de catalogação',
             grupo: GRUPO_DA_CATALOGACAO,
             casa: (e: KeyboardEvent) => tecla(e, 'e'),
-            executar: () => setCatalogando((c) => !c),
+            executar: alternarCatalogacao,
           },
           {
             tecla: 'Ctrl + Z',
@@ -602,10 +614,20 @@ export default function Visualizador({
           },
           {
             tecla: 'A',
-            acao: 'Descrever o trecho marcado (1 Pessoa, 3 Marca, 4 Texto na tela, 5 Pauta)',
+            acao: 'Descrever o trecho marcado',
             grupo: GRUPO_DA_CATALOGACAO,
             casa: (e: KeyboardEvent) => tecla(e, 'a'),
             executar: descreverTrecho,
+          },
+          ...ABAS_DO_TRECHO.map((a) => ({
+            tecla: a.tecla,
+            acao: `No campo do trecho: o tipo ${a.rotulo}`,
+            grupo: GRUPO_DA_CATALOGACAO,
+          })),
+          {
+            tecla: 'Shift + Enter',
+            acao: 'Num campo de nome: criar o nome digitado no catálogo, a revisar',
+            grupo: GRUPO_DA_CATALOGACAO,
           },
           {
             tecla: 'Esc',
@@ -937,24 +959,24 @@ export default function Visualizador({
                   <Box style={{ flex: 1 }} />
                   {catalogando && (
                     <Group gap={4} wrap="nowrap" aria-label="Trecho">
-                      <Tooltip label="I">
+                      <Tooltip label="Marcar entrada (I)">
                         <Button size="compact-sm" variant="default" onClick={marcarEntrada}>
                           Marcar entrada
                         </Button>
                       </Tooltip>
-                      <Tooltip label="O">
+                      <Tooltip label="Marcar saída (O)">
                         <Button size="compact-sm" variant="default" onClick={marcarSaida}>
                           Marcar saída
                         </Button>
                       </Tooltip>
                       {trecho?.fim_ms != null && (
                         <>
-                          <Tooltip label="A">
+                          <Tooltip label="Descrever o trecho (A)">
                             <Button size="compact-sm" onClick={descreverTrecho}>
                               Descrever o trecho
                             </Button>
                           </Tooltip>
-                          <Tooltip label="Esc">
+                          <Tooltip label="Descartar o trecho (Esc)">
                             <ActionIcon variant="default" aria-label="Descartar o trecho" onClick={descartarTrecho}>
                               <IconX size={16} />
                             </ActionIcon>
@@ -1040,7 +1062,7 @@ export default function Visualizador({
                   size="compact-sm"
                   variant={catalogando ? 'filled' : 'default'}
                   aria-pressed={catalogando}
-                  onClick={() => setCatalogando((c) => !c)}
+                  onClick={alternarCatalogacao}
                 >
                   Catalogar
                 </Button>
