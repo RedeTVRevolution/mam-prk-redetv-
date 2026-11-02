@@ -158,3 +158,17 @@ test('sem planos parecidos a tela avisa, e Limpar esquece a foto', async () => {
   expect(screen.queryByText(/Nenhum plano parecido/)).toBeNull()
   expect(screen.getByText(/Arraste uma foto/)).toBeTruthy()
 })
+
+test('digitar uma consulta depois de escolher a foto não perde a foto nem a grade', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca')
+  await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
+  await screen.findByRole('list', { name: 'Planos' })
+
+  await usuario.type(screen.getByRole('textbox', { name: 'Buscar no acervo' }), 'pista{Enter}')
+
+  await waitFor(() => expect(location.search).toContain('q=pista'))
+  expect(screen.getByText('pista.png')).toBeTruthy()
+  expect(screen.getByRole('list', { name: 'Planos' })).toBeTruthy()
+  expect(pedidos).toHaveLength(1)
+})

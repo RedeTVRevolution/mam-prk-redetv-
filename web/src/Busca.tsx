@@ -364,7 +364,8 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     return (
       <Stack p="md" gap="md" component="main">
         <Text c={CORES.textoSecundario}>Escreva na caixa do topo o que procurar no acervo.</Text>
-        <BuscaPorImagem api={api} consulta={consulta} />
+        {/* A mesma chave nas duas telas: digitar uma consulta não perde a foto escolhida. */}
+        <BuscaPorImagem key="busca-por-imagem" api={api} consulta={consulta} />
       </Stack>
     )
   }
@@ -384,7 +385,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
 
   return (
     <Stack p="md" gap="md" component="main">
-      <BuscaPorImagem api={api} consulta={consulta} />
+      <BuscaPorImagem key="busca-por-imagem" api={api} consulta={consulta} />
       <Group gap="xs" role="group" aria-label="Tipo de evidência">
         {EVIDENCIAS.map((e) => (
           <Chip

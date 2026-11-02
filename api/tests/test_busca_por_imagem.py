@@ -2,6 +2,7 @@
 
 import io
 import logging
+import tempfile
 from typing import Any
 
 import pytest
@@ -196,3 +197,59 @@ def test_a_busca_por_imagem_conta_no_limite_de_consultas() -> None:
     c, _ = com_planos(EmbeddingDeTexto([1.0, 0.0]), maximo_por_minuto=1)
     assert enviar(c, foto()).status_code == 200
     assert enviar(c, foto()).status_code == 429
+
+
+def test_jpeg_de_celular_que_abre_como_mpo_e_aceito() -> None:
+    quadros = [Image.new("RGB", (32, 24), cor) for cor in ((200, 30, 30), (0, 0, 0))]
+    saida = io.BytesIO()
+    quadros[0].save(saida, format="MPO", save_all=True, append_images=quadros[1:])
+    with Image.open(io.BytesIO(saida.getvalue())) as lida:
+        assert lida.format == "MPO"
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+    c, _ = com_planos(embedding)
+
+    assert enviar(c, saida.getvalue()).status_code == 200
+    [enviada] = embedding.imagens
+    with Image.open(io.BytesIO(enviada)) as lida:
+        assert lida.format == "JPEG"
+
+
+def test_corpo_declarado_acima_do_teto_e_recusado_sem_ler_o_arquivo() -> None:
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+    c, _ = com_planos(embedding, limites_da_imagem=LimitesDaImagem(max_bytes=100))
+
+    r = enviar(c, b"\0" * 10_000)
+
+    assert r.status_code == 422
+    assert r.json()["detail"] == "A imagem passa do tamanho máximo"
+    assert embedding.imagens == []
+
+
+def test_a_foto_fica_em_memoria_e_nunca_vai_para_arquivo_temporario(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Acima de 1 MB o multipart comum passaria a foto para um arquivo em disco.
+    criados: list[int] = []
+    original: Any = tempfile.SpooledTemporaryFile
+
+    def espiao(max_size: int = 0, **kw: Any) -> Any:
+        criados.append(max_size)
+        return original(max_size=max_size, **kw)
+
+    monkeypatch.setattr("starlette.formparsers.SpooledTemporaryFile", espiao)
+    c, _ = com_planos(EmbeddingDeTexto([1.0, 0.0]))
+    grande = foto("PNG", (1024, 1024), compress_level=0)
+    assert len(grande) > 1024 * 1024
+
+    assert enviar(c, grande).status_code == 200
+    assert criados and all(m > len(grande) for m in criados)
+
+
+def test_sem_o_campo_arquivo_ou_com_corpo_que_nao_e_multipart_responde_422() -> None:
+    c, _ = com_planos(EmbeddingDeTexto([1.0, 0.0]))
+    r = c.post(
+        ROTA, files={"outro": ("a.png", foto(), "image/png")}, headers=AUTORIZACAO
+    )
+    assert r.status_code == 422
+    r = c.post(ROTA, json={"arquivo": "x"}, headers=AUTORIZACAO)
+    assert r.status_code == 422
