@@ -586,6 +586,7 @@ test('escolher a etapa e o motivo reprocessa e avisa que a decupagem está sendo
   await usuario.click(screen.getByRole('button', { name: /Reprocessar…/ }))
   expect(screen.getByRole('radio', { name: /Quadros-chave/ })).toBeTruthy()
   expect(screen.getByRole('radio', { name: /Identificação/ })).toBeTruthy()
+  expect(screen.getByRole('radio', { name: /Inventário de objetos/ })).toBeTruthy()
   expect(screen.getByRole('radio', { name: /Indexação/ })).toBeTruthy()
   expect(
     screen.getByText(

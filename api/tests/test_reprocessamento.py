@@ -407,23 +407,38 @@ def _concluido_completo() -> Job:
                 "referencias",
                 "comparacao",
                 "quadros_chave",
+                "inventario_de_objetos",
                 "indexacao",
             )
         },
     )
 
 
-ETAPAS_ESCOLHIDAS = ["analise", "quadros_chave", "identificacao", "indexacao"]
+ETAPAS_ESCOLHIDAS = [
+    "analise",
+    "quadros_chave",
+    "identificacao",
+    "inventario_de_objetos",
+    "indexacao",
+]
 SEGUINTES = {
     "analise": {
         "identificacao",
         "referencias",
         "comparacao",
         "quadros_chave",
+        "inventario_de_objetos",
         "indexacao",
     },
-    "identificacao": {"referencias", "comparacao", "quadros_chave", "indexacao"},
-    "quadros_chave": {"indexacao"},
+    "identificacao": {
+        "referencias",
+        "comparacao",
+        "quadros_chave",
+        "inventario_de_objetos",
+        "indexacao",
+    },
+    "quadros_chave": {"inventario_de_objetos", "indexacao"},
+    "inventario_de_objetos": {"indexacao"},
     "indexacao": set(),
 }
 
@@ -457,7 +472,9 @@ def test_com_a_analise_escolhida_o_job_volta_a_analisando() -> None:
     assert mundo.job().estado == "analisando"
 
 
-@pytest.mark.parametrize("etapa", ["quadros_chave", "identificacao", "indexacao"])
+@pytest.mark.parametrize(
+    "etapa", ["quadros_chave", "identificacao", "inventario_de_objetos", "indexacao"]
+)
 def test_com_as_outras_etapas_o_job_continua_concluido(etapa: str) -> None:
     mundo = Mundo(_concluido_completo(), ["curador"])
 

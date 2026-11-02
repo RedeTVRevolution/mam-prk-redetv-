@@ -5,6 +5,7 @@ const NOMES: Record<string, string> = {
   referencias: 'Referências',
   comparacao: 'Comparação',
   quadros_chave: 'Quadros-chave',
+  inventario_de_objetos: 'Inventário de objetos',
   indexacao: 'Indexação',
 }
 

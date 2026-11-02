@@ -127,6 +127,7 @@ NomeDaEtapa = Literal[
     "referencias",
     "comparacao",
     "quadros_chave",
+    "inventario_de_objetos",
     "indexacao",
 ]
 ResultadoDaEtapa = Literal["concluida", "falhou"]

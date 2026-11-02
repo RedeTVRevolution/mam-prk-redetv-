@@ -219,6 +219,7 @@ ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
     "referencias",
     "comparacao",
     "quadros_chave",
+    "inventario_de_objetos",
     "indexacao",
 )
 # As que o Curador pode escolher num Job concluído, para refazer um vídeo bom.
@@ -226,6 +227,7 @@ ETAPAS_ESCOLHIVEIS: tuple[NomeDaEtapa, ...] = (
     "analise",
     "identificacao",
     "quadros_chave",
+    "inventario_de_objetos",
     "indexacao",
 )
 
@@ -253,8 +255,8 @@ def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
             )
         if escolhida not in ETAPAS_ESCOLHIVEIS:
             raise NaoReprocessavel(
-                "Etapa não permitida; escolha análise, identificação, quadros-chave "
-                "ou indexação"
+                "Etapa não permitida; escolha análise, identificação, quadros-chave, "
+                "inventário de objetos ou indexação"
             )
         return escolhida
     if job.estado == "falhou":

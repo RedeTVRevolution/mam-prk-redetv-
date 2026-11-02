@@ -14,6 +14,10 @@ const ETAPAS_ESCOLHIVEIS = [
     refaz: 'Tenta de novo nomear as pessoas sem nome, busca as fotos e compara os rostos.',
   },
   { valor: 'quadros_chave', refaz: 'Extrai de novo os quadros das miniaturas.' },
+  {
+    valor: 'inventario_de_objetos',
+    refaz: 'Lista de novo os objetos de cada plano e atualiza o índice da busca.',
+  },
   { valor: 'indexacao', refaz: 'Atualiza o índice da busca com a decupagem atual.' },
 ] as const
 
