@@ -454,6 +454,8 @@ if _projeto:
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
         # Até a chave MAC do Cloud KMS chegar, só a simulada (como no `make emitir-chave`).
+        # Sem ela, emitir dá 503 e a API não aceita chave de sistema; listar e revogar
+        # funcionam.
         repositorio_de_chaves=RepositorioDeChavesFirestore(
             firestore.Client(project=_projeto)
         ),

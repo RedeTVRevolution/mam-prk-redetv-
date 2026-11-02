@@ -416,6 +416,18 @@ class TestRepositorioDeChavesFirestore:
 
         assert [r.id for r in chaves.listar_por_sistema("Legado")] == ["a", "b", "c"]
 
+    def test_listar_traz_todos_os_sistemas_das_mais_novas_para_as_mais_antigas(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        chaves.salvar(_registro_de_chave("velha"))
+        chaves.salvar(
+            _registro_de_chave("nova").model_copy(
+                update={"sistema": "Outro", "criada_em": BASE + timedelta(hours=1)}
+            )
+        )
+
+        assert [r.id for r in chaves.listar()] == ["nova", "velha"]
+
     def test_dois_comandos_simultaneos_nao_criam_a_terceira(
         self, chaves: RepositorioDeChavesFirestore
     ) -> None:

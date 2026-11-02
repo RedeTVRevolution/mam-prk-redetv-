@@ -192,13 +192,16 @@ class VerificadorDeChaveDeApi:
 
 def revogar_chave(
     chave_id: str, repositorio: RepositorioDeChaves, revogada_em: datetime
-) -> None:
-    """Vale na hora: a API lê o registro a cada requisição. Repetir não muda a data."""
+) -> RegistroDeChave:
+    """Vale na hora: a API lê o registro a cada requisição. Repetir não muda a data.
+    Devolve o registro revogado."""
     registro = repositorio.obter(chave_id)
     if registro is None:
         raise ValueError(f"a chave {chave_id} não existe")
     if registro.ativa:
-        repositorio.salvar(registro.model_copy(update={"revogada_em": revogada_em}))
+        registro = registro.model_copy(update={"revogada_em": revogada_em})
+        repositorio.salvar(registro)
+    return registro
 
 
 def listar_chaves_main(

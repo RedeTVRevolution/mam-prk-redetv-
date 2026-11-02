@@ -25,7 +25,7 @@ from api.chaves import (
 )
 from api.jobs import ServicoIndisponivel, _confere_permissao
 
-NOME_MAXIMO = 100
+SISTEMA_MAXIMO = 100
 
 
 class ChaveIndisponivel:
@@ -71,7 +71,9 @@ class NovaChave(BaseModel):
 
     sistema: Annotated[
         str,
-        StringConstraints(strip_whitespace=True, min_length=1, max_length=NOME_MAXIMO),
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=SISTEMA_MAXIMO
+        ),
     ]
     escopos: Annotated[list[Escopo], Field(min_length=1)]
 
@@ -159,9 +161,7 @@ def criar_rotas_das_chaves(
             raise HTTPException(404, "Chave não encontrada")
         if not antes.ativa:
             return _da_lista(antes)
-        revogar_chave(chave_id, repositorio, relogio())
-        depois = repositorio.obter(chave_id)
-        assert depois is not None
+        depois = revogar_chave(chave_id, repositorio, relogio())
         try:
             registrar(pessoa, "chave.revogada", depois)
         except Exception:
