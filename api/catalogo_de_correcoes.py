@@ -7,12 +7,21 @@ de uma Correção (o `antes` e o `depois`) também sai daqui, uma vez por tipo.
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, get_args
 
 from pydantic import BaseModel
 
-from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta, em_mm_ss
+from api.decupagem import (
+    CATEGORIAS_DE_OBJETO,
+    CORES_BASE,
+    RELACOES_DO_OBJETO,
+    Comercial,
+    FonteDoNome,
+    TextoNaTela,
+    TomDaPauta,
+    em_mm_ss,
+)
 from api.indice_da_busca import NOME_DA_CATEGORIA
 
 # Os rótulos dos vocabulários do esquema; o que falta aqui sai igual ao valor.
@@ -24,6 +33,12 @@ ROTULOS_DOS_TONS = {
     "homenagem": "homenagem",
     "analise": "análise",
     "comercial": "comercial",
+}
+ROTULOS_DAS_RELACOES = {
+    "veste": "veste",
+    "calca": "calça",
+    "usa": "usa",
+    "segura": "segura",
 }
 ROTULOS_DAS_FONTES = {
     "rosto": "rosto",
@@ -198,11 +213,14 @@ class CatalogoDeCorrecoes(BaseModel):
     tipos_de_texto_na_tela: list[Opcao]
     tons_da_pauta: list[Opcao]
     fontes_do_nome: list[Opcao]
+    categorias_de_objeto: list[Opcao]
+    cores_base: list[Opcao]
+    relacoes_do_objeto: list[Opcao]
     limites: Limites
     prefixos: Prefixos
 
 
-def _opcoes(valores: tuple[str, ...], rotulos: dict[str, str]) -> list[Opcao]:
+def _opcoes(valores: tuple[str, ...], rotulos: Mapping[Any, str]) -> list[Opcao]:
     return [Opcao(valor=v, rotulo=rotulos.get(v, v)) for v in valores]
 
 
@@ -220,6 +238,9 @@ def catalogo() -> CatalogoDeCorrecoes:
         ),
         tons_da_pauta=_opcoes(get_args(TomDaPauta), ROTULOS_DOS_TONS),
         fontes_do_nome=_opcoes(get_args(FonteDoNome), ROTULOS_DAS_FONTES),
+        categorias_de_objeto=_opcoes(CATEGORIAS_DE_OBJETO, NOME_DA_CATEGORIA),
+        cores_base=_opcoes(CORES_BASE, {}),
+        relacoes_do_objeto=_opcoes(RELACOES_DO_OBJETO, ROTULOS_DAS_RELACOES),
         limites=Limites(
             nome=correcoes.LIMITE_DO_NOME,
             texto=correcoes.LIMITE_DO_TEXTO,

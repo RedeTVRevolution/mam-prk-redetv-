@@ -12,6 +12,9 @@ export interface CatalogoDeCorrecoes {
   tipos_de_texto_na_tela: Opcao[]
   tons_da_pauta: Opcao[]
   fontes_do_nome: Opcao[]
+  categorias_de_objeto: Opcao[]
+  cores_base: Opcao[]
+  relacoes_do_objeto: Opcao[]
   limites: { nome: number; texto: number; motivo: number }
   prefixos: { acrescentado: string; nao_identificado: string }
 }

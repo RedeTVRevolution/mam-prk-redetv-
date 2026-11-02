@@ -237,6 +237,160 @@
       "rotulo": "referência de rosto"
     }
   ],
+  "categorias_de_objeto": [
+    {
+      "valor": "roupa",
+      "rotulo": "roupa"
+    },
+    {
+      "valor": "calcado",
+      "rotulo": "calçado"
+    },
+    {
+      "valor": "acessorio",
+      "rotulo": "acessório"
+    },
+    {
+      "valor": "na_mao",
+      "rotulo": "na mão"
+    },
+    {
+      "valor": "em_cena",
+      "rotulo": "em cena"
+    },
+    {
+      "valor": "veiculo",
+      "rotulo": "veículo"
+    },
+    {
+      "valor": "outro",
+      "rotulo": "outro"
+    },
+    {
+      "valor": "eletronico",
+      "rotulo": "eletrônico"
+    },
+    {
+      "valor": "produto",
+      "rotulo": "produto"
+    },
+    {
+      "valor": "animal",
+      "rotulo": "animal"
+    },
+    {
+      "valor": "alimento",
+      "rotulo": "alimento"
+    },
+    {
+      "valor": "movel",
+      "rotulo": "móvel"
+    },
+    {
+      "valor": "decoracao",
+      "rotulo": "decoração"
+    },
+    {
+      "valor": "instrumento_musical",
+      "rotulo": "instrumento musical"
+    },
+    {
+      "valor": "utensilio",
+      "rotulo": "utensílio"
+    },
+    {
+      "valor": "documento",
+      "rotulo": "documento"
+    },
+    {
+      "valor": "planta",
+      "rotulo": "planta"
+    },
+    {
+      "valor": "bebida",
+      "rotulo": "bebida"
+    }
+  ],
+  "cores_base": [
+    {
+      "valor": "vermelho",
+      "rotulo": "vermelho"
+    },
+    {
+      "valor": "laranja",
+      "rotulo": "laranja"
+    },
+    {
+      "valor": "amarelo",
+      "rotulo": "amarelo"
+    },
+    {
+      "valor": "verde",
+      "rotulo": "verde"
+    },
+    {
+      "valor": "azul",
+      "rotulo": "azul"
+    },
+    {
+      "valor": "roxo",
+      "rotulo": "roxo"
+    },
+    {
+      "valor": "rosa",
+      "rotulo": "rosa"
+    },
+    {
+      "valor": "marrom",
+      "rotulo": "marrom"
+    },
+    {
+      "valor": "bege",
+      "rotulo": "bege"
+    },
+    {
+      "valor": "preto",
+      "rotulo": "preto"
+    },
+    {
+      "valor": "branco",
+      "rotulo": "branco"
+    },
+    {
+      "valor": "cinza",
+      "rotulo": "cinza"
+    },
+    {
+      "valor": "dourado",
+      "rotulo": "dourado"
+    },
+    {
+      "valor": "prateado",
+      "rotulo": "prateado"
+    },
+    {
+      "valor": "estampado",
+      "rotulo": "estampado"
+    }
+  ],
+  "relacoes_do_objeto": [
+    {
+      "valor": "veste",
+      "rotulo": "veste"
+    },
+    {
+      "valor": "calca",
+      "rotulo": "calça"
+    },
+    {
+      "valor": "usa",
+      "rotulo": "usa"
+    },
+    {
+      "valor": "segura",
+      "rotulo": "segura"
+    }
+  ],
   "limites": {
     "nome": 200,
     "texto": 2000,

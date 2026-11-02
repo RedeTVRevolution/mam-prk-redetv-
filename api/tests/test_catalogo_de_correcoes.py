@@ -10,7 +10,16 @@ from api.catalogo_de_correcoes import (
     ROTULOS_DOS_TONS,
 )
 from api.correcoes import TIPOS, Lista, TipoDeCorrecao, TipoNovo, valor_legivel
-from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta
+from api.decupagem import (
+    CATEGORIAS_DE_OBJETO,
+    CORES_BASE,
+    RELACOES_DO_OBJETO,
+    Comercial,
+    FonteDoNome,
+    TextoNaTela,
+    TomDaPauta,
+)
+from api.indice_da_busca import NOME_DA_CATEGORIA
 from api.tests.test_correcoes import AUTORIZACAO, Mundo
 
 
@@ -41,6 +50,25 @@ def test_rota_do_catalogo_lista_tipos_e_vocabularios() -> None:
     )
     assert corpo["limites"] == {"nome": 200, "texto": 2000, "motivo": 500}
     assert corpo["prefixos"] == {"acrescentado": "acr-", "nao_identificado": "nid-"}
+
+
+def test_catalogo_traz_as_listas_fechadas_do_objeto() -> None:
+    resposta = Mundo(["editor"]).cliente.get(
+        "/v1/correcoes/catalogo", headers=AUTORIZACAO
+    )
+
+    corpo = resposta.json()
+    assert [o["valor"] for o in corpo["categorias_de_objeto"]] == list(
+        CATEGORIAS_DE_OBJETO
+    )
+    assert {o["valor"]: o["rotulo"] for o in corpo["categorias_de_objeto"]} == (
+        NOME_DA_CATEGORIA
+    )
+    assert [o["valor"] for o in corpo["cores_base"]] == list(CORES_BASE)
+    assert [o["valor"] for o in corpo["relacoes_do_objeto"]] == list(RELACOES_DO_OBJETO)
+    assert {o["valor"]: o["rotulo"] for o in corpo["relacoes_do_objeto"]}["calca"] == (
+        "calça"
+    )
 
 
 def test_rotulos_cobrem_os_vocabularios_do_esquema() -> None:

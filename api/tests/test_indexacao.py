@@ -436,3 +436,43 @@ def test_a_rota_devolve_os_tipos_gravados_pelo_reindexar() -> None:
 
     assert buscar("sa").json() == [{"tipo": "sandália", "ocorrencias": 1}]
     assert buscar("SCAR").json() == [{"tipo": "scarpin", "ocorrencias": 1}]
+
+
+def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
+    mundo = Mundo()
+    versao = versao_do_modelo(json.dumps(MODELO).encode())
+
+    def corrigir(tipo: str, valor: dict[str, Any], item_id: str = "") -> Any:
+        return mundo.cliente.post(
+            "/v1/jobs/j1/correcoes",
+            json={
+                "tipo": tipo,
+                "item_id": item_id,
+                "valor": json.dumps(valor),
+                "motivo": "ouvi de novo",
+                "versao": versao,
+            },
+            headers=AUTORIZACAO,
+        )
+
+    def buscar(q: str) -> list[str]:
+        r = mundo.cliente.get("/v1/objetos/tipos", params={"q": q}, headers=AUTORIZACAO)
+        return [t["tipo"] for t in r.json()]
+
+    mundo.reindexar()
+    assert buscar("sa") == []
+
+    novo = {
+        "categoria": "calcado",
+        "tipo": "sandália",
+        "cor_base": ["vermelho"],
+        "inicio_ms": 0,
+        "fim_ms": 4000,
+    }
+    assert corrigir("objeto.acrescentar", novo).status_code == 201
+    assert buscar("SA") == ["sandália"]
+
+    atributos = {"tipo": "scarpin", "cor_base": MODELO["objetos"][0]["cor_base"]}
+    assert corrigir("objeto.atributos", atributos, "obj01").status_code == 201
+    assert buscar("scar") == ["scarpin"]
+    assert buscar("vest") == ["vestido"]
