@@ -1,8 +1,8 @@
 import { ActionIcon, Button, Group, Paper, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core'
 import { IconCheck, IconChevronDown, IconChevronRight, IconPencil, IconX } from '@tabler/icons-react'
 import { useState } from 'react'
-import { type ClienteDoJob, PedidoInvalido } from './api.ts'
-import { type Atalho, useAtalhos } from './atalhos.ts'
+import { type ClienteDoJob, codigoDoErro, NaoEncontrado, PedidoInvalido, SessaoExpirada } from './api.ts'
+import { type Atalho, emCampoDeTexto, useAtalhos } from './atalhos.ts'
 import { CampoDeNome } from './CampoDeNome.tsx'
 import type { Decupagem, Sugestao } from './decupagem.ts'
 import { relogio } from './linhaDoTempo.ts'
@@ -10,16 +10,15 @@ import { CORES } from './tema.ts'
 
 const GRUPO = 'Sugestões'
 
-/** O catálogo do campo "outro nome", pelo tipo da correção proposta; os outros tipos pedem um texto livre. */
-function catalogoDoCampo(s: Sugestao): 'pessoas' | 'marcas' | null {
-  if (s.correcao.tipo.startsWith('pessoa.')) return 'pessoas'
-  if (s.correcao.tipo === 'comercial.marca') return 'marcas'
-  return null
+/** O catálogo do campo "outro nome", pela correção proposta (só as que trocam um nome); as outras pedem um texto livre. */
+const CATALOGO_DO_CAMPO: Record<string, 'pessoas' | 'marcas'> = {
+  'pessoa.renomear': 'pessoas',
+  'comercial.marca': 'marcas',
 }
 
 /** "Vale para as 7 aparições de Leão Lobo neste vídeo": a pessoa é uma entidade e a correção é uma só. */
 function valeParaAsAparicoes(s: Sugestao, decupagem: Decupagem | null, nome: string): string | null {
-  if (!s.correcao.tipo.startsWith('pessoa.')) return null
+  if (CATALOGO_DO_CAMPO[s.correcao.tipo] !== 'pessoas') return null
   const pessoa = decupagem?.pessoas.find((p) => p.id === s.correcao.item_id)
   if (!pessoa) return null
   const n = pessoa.na_imagem.length
@@ -28,10 +27,19 @@ function valeParaAsAparicoes(s: Sugestao, decupagem: Decupagem | null, nome: str
 
 const teclaDe = (e: KeyboardEvent, letra: string) => e.key.toLowerCase() === letra && !e.shiftKey
 
+/** A mensagem de uma falha ao decidir: a ação para a pessoa e, se for o caso, o código para o suporte. */
+function falhaAoDecidir(e: unknown, acao: 'aceitar' | 'recusar'): { mensagem: string; codigo: string | null } | null {
+  if (e instanceof SessaoExpirada) return null
+  if (e instanceof NaoEncontrado) return { mensagem: 'Esta sugestão já foi decidida; a lista foi atualizada.', codigo: null }
+  if (e instanceof PedidoInvalido && acao === 'aceitar')
+    return { mensagem: 'Esta sugestão pede um valor: use "Outro nome" (R) para informá-lo.', codigo: null }
+  return { mensagem: `Não foi possível ${acao} a sugestão. Tente de novo.`, codigo: codigoDoErro(e) }
+}
+
 /**
  * A seção "Sugestões (N)" acima das abas: cada uma é uma pergunta, o trecho e o contexto, e se resolve com
  * `S` (aceita), `N` (recusa) e `R` (outro nome, com autocompletar) ou pelos botões. Trata qualquer tipo pelo
- * formato da rota; só olha o tipo da correção proposta para escolher o catálogo do campo.
+ * formato da rota; só olha o tipo da correção proposta para escolher o catálogo do campo (`CATALOGO_DO_CAMPO`).
  */
 export function Sugestoes({
   sugestoes,
@@ -40,6 +48,7 @@ export function Sugestoes({
   ativo,
   aoSaltar,
   aoResolver,
+  aoFalhar,
   aoAvisar,
 }: {
   sugestoes: Sugestao[]
@@ -48,17 +57,20 @@ export function Sugestoes({
   /** O modo de catalogação está ligado: sem ele nada aparece nem age. */
   ativo: boolean
   aoSaltar: (ms: number) => void
-  /** A sugestão saiu da lista (aceita, recusada ou já resolvida por outra pessoa); `recarregar` pede a lista de novo. */
-  aoResolver: (id: string, recarregar: boolean) => void
+  /** A sugestão foi aceita ou recusada: sai da lista, e a decupagem muda. */
+  aoResolver: (id: string) => void
+  /** A decisão falhou: a lista vem de novo (a sugestão pode já ter sido decidida). */
+  aoFalhar: () => void
   aoAvisar: (texto: string) => void
 }) {
   const [recolhida, setRecolhida] = useState(false)
-  const [foco, setFoco] = useState(0)
+  // O foco guarda o id: se a lista vem de novo em outra ordem, as teclas não passam a outra sugestão.
+  const [foco, setFoco] = useState<string | null>(null)
   const [outroNome, setOutroNome] = useState<{ id: string; valor: string } | null>(null)
   const [ocupada, setOcupada] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
+  const [erro, setErro] = useState<{ mensagem: string; codigo: string | null } | null>(null)
   const visivel = ativo && sugestoes.length > 0
-  const emFoco = visivel ? sugestoes[Math.min(foco, sugestoes.length - 1)] : undefined
+  const emFoco = visivel ? (sugestoes.find((s) => s.id === foco) ?? sugestoes[0]) : undefined
 
   async function aceitar(s: Sugestao, valor?: string) {
     if (ocupada) return
@@ -70,14 +82,10 @@ export function Sugestoes({
       const vale = valeParaAsAparicoes(s, decupagem, nome)
       if (vale) aoAvisar(vale)
       setOutroNome(null)
-      aoResolver(s.id, false)
+      aoResolver(s.id)
     } catch (e) {
-      setErro(
-        e instanceof PedidoInvalido
-          ? 'Esta sugestão pede um valor: use "Outro nome" (R) para informá-lo.'
-          : 'Não foi possível aceitar a sugestão. Tente de novo.',
-      )
-      aoResolver('', true)
+      setErro(falhaAoDecidir(e, 'aceitar'))
+      aoFalhar()
     } finally {
       setOcupada(false)
     }
@@ -90,10 +98,10 @@ export function Sugestoes({
     try {
       await api.recusarSugestao(s.id)
       setOutroNome(null)
-      aoResolver(s.id, false)
-    } catch {
-      setErro('Não foi possível recusar a sugestão. Tente de novo.')
-      aoResolver('', true)
+      aoResolver(s.id)
+    } catch (e) {
+      setErro(falhaAoDecidir(e, 'recusar'))
+      aoFalhar()
     } finally {
       setOcupada(false)
     }
@@ -132,6 +140,8 @@ export function Sugestoes({
         pedirOutroNome(emFoco)
       },
     },
+    // As setas são da própria seção (não andam o painel); a linha só informa.
+    { tecla: '↑ ↓', acao: 'Na seção Sugestões: trocar a sugestão em foco', grupo: GRUPO },
   ]
   useAtalhos(ativo ? atalhos : [])
 
@@ -145,10 +155,11 @@ export function Sugestoes({
       data-sugestoes
       onKeyDown={(e) => {
         // ↑ ↓ dentro da seção trocam a sugestão em foco; o painel não anda junto.
-        if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || (e.target as HTMLElement).tagName === 'INPUT') return
+        if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || emCampoDeTexto(e.target)) return
         e.preventDefault()
         e.stopPropagation()
-        setFoco((f) => Math.min(Math.max(f + (e.key === 'ArrowUp' ? -1 : 1), 0), sugestoes.length - 1))
+        const i = sugestoes.findIndex((s) => s.id === emFoco?.id) + (e.key === 'ArrowUp' ? -1 : 1)
+        setFoco(sugestoes[Math.min(Math.max(i, 0), sugestoes.length - 1)].id)
       }}
     >
       <UnstyledButton
@@ -165,7 +176,7 @@ export function Sugestoes({
         sugestoes.map((s) => {
           const emEdicao = editando(s)
           const doFoco = s.id === emFoco?.id
-          const catalogo = catalogoDoCampo(s)
+          const catalogo = CATALOGO_DO_CAMPO[s.correcao.tipo]
           return (
             <div
               key={s.id}
@@ -173,7 +184,7 @@ export function Sugestoes({
               aria-label={s.pergunta}
               aria-current={doFoco}
               tabIndex={doFoco ? 0 : -1}
-              onClick={() => setFoco(sugestoes.findIndex((x) => x.id === s.id))}
+              onClick={() => setFoco(s.id)}
               style={{
                 padding: '4px 6px',
                 marginTop: 4,
@@ -276,9 +287,16 @@ export function Sugestoes({
           )
         })}
       {erro && (
-        <Text size="xs" role="alert" c={CORES.falhou} mt={4}>
-          {erro}
-        </Text>
+        <div role="alert">
+          <Text size="xs" c={CORES.falhou} mt={4}>
+            {erro.mensagem}
+          </Text>
+          {erro.codigo && (
+            <Text size="xs" c={CORES.textoSecundario}>
+              Código para o suporte: {erro.codigo}
+            </Text>
+          )}
+        </div>
       )}
     </Paper>
   )

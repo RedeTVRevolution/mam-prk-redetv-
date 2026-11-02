@@ -252,3 +252,59 @@ test('S, N e R aparecem na lista de atalhos', async () => {
   expect(within(lista).getByText('Sugestão em foco: recusar')).toBeTruthy()
   expect(within(lista).getByText('Sugestão em foco: outro nome')).toBeTruthy()
 })
+
+test('↑ ↓ da seção aparecem na lista de atalhos', async () => {
+  const usuario = await catalogar()
+  await usuario.keyboard('?')
+  const lista = await screen.findByRole('dialog')
+  expect(within(lista).getByText('Na seção Sugestões: trocar a sugestão em foco')).toBeTruthy()
+})
+
+test('clicar no trecho salta o player ao começo dele', async () => {
+  const usuario = await catalogar()
+  const player = (await screen.findByLabelText('Player')) as HTMLVideoElement
+  await usuario.click(screen.getByRole('button', { name: 'Saltar a 03:31' }))
+  expect(player.currentTime).toBe(211)
+})
+
+test('a sugestão que já foi decidida avisa e sai da lista', async () => {
+  servidor.use(
+    http.post('/v1/jobs/j1/sugestoes/:id/aceitar', () => {
+      lista = lista.filter((s) => s.id !== 's1')
+      return HttpResponse.json({ detail: 'Sugestão não encontrada' }, { status: 404 })
+    }),
+  )
+  const usuario = await catalogar()
+  await usuario.keyboard('s')
+  expect((await screen.findByRole('alert')).textContent).toContain('Esta sugestão já foi decidida')
+  await screen.findByRole('button', { name: /Sugestões \(1\)/ })
+})
+
+test('uma falha da API diz o que fazer e dá o código para o suporte', async () => {
+  servidor.use(http.post('/v1/jobs/j1/sugestoes/:id/recusar', () => new HttpResponse(null, { status: 500 })))
+  const usuario = await catalogar()
+  await usuario.keyboard('n')
+  const alerta = await screen.findByRole('alert')
+  expect(alerta.textContent).toContain('Não foi possível recusar a sugestão. Tente de novo.')
+  expect(alerta.textContent).toContain('Código para o suporte: http_500')
+})
+
+test('o foco segue a sugestão, não a posição, quando a lista vem de novo em outra ordem', async () => {
+  servidor.use(
+    http.post('/v1/jobs/j1/sugestoes/:id/recusar', () => {
+      lista = [...lista].reverse()
+      return new HttpResponse(null, { status: 500 })
+    }),
+  )
+  const usuario = await catalogar()
+  await usuario.click(screen.getByText('Acrescentar vestido vermelho?'))
+  await usuario.keyboard('n')
+  await screen.findByRole('alert')
+  // A lista veio de novo invertida: a sugestão escolhida agora é a primeira.
+  await waitFor(() =>
+    expect(within(document.querySelector('[data-sugestoes]') as HTMLElement).getAllByRole('group')[0].getAttribute('aria-label')).toBe(
+      'Acrescentar vestido vermelho?',
+    ),
+  )
+  await waitFor(() => expect(screen.getByRole('group', { name: 'Acrescentar vestido vermelho?' }).getAttribute('aria-current')).toBe('true'))
+})

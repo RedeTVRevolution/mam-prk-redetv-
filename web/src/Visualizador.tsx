@@ -1124,11 +1124,11 @@ export default function Visualizador({
               api={api.job(job.id)}
               ativo={catalogando}
               aoSaltar={(ms) => saltarPara(ms / 1000)}
-              aoResolver={(id, recarregar) => {
+              aoResolver={(id) => {
                 setSugestoes((lista) => lista.filter((x) => x.id !== id))
-                if (recarregar) setCargasDeSugestoes((n) => n + 1)
-                else setCargasDaDecupagem((n) => n + 1)
+                setCargasDaDecupagem((n) => n + 1)
               }}
+              aoFalhar={() => setCargasDeSugestoes((n) => n + 1)}
               aoAvisar={mostrarAviso}
             />
           )}
