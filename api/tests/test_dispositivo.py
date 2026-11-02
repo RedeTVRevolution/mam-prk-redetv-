@@ -42,7 +42,7 @@ def test_le_gpu_e_cpu_da_configuracao() -> None:
 
 
 def test_valor_desconhecido_e_erro_claro() -> None:
-    with pytest.raises(DispositivoIndisponivel, match="'cpu' ou 'gpu'"):
+    with pytest.raises(ValueError, match="'cpu' ou 'gpu'"):
         ler_dispositivo({"DISPOSITIVO": "tpu"})
 
 

@@ -6,6 +6,7 @@ Se a transcrição falha, o Job vai a `falhou` pelo ciclo de vida e a execução
 falha, para o Workflows não seguir para a análise.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -51,6 +52,9 @@ def executar(
 
 
 def main() -> None:
+    # O log do Job diz em qual dispositivo rodou (`api.whisper`, `api.paddle`, em INFO).
+    logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("api").setLevel(logging.INFO)
     projeto = os.environ["GCP_PROJECT_ID"]
     executar(
         os.environ["JOB_ID"],

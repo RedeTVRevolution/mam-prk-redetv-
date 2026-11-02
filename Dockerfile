@@ -75,7 +75,7 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/a
     DISPOSITIVO=gpu
 # A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
 # que o faster-whisper roda o modelo e a detecção de voz em CPU. Não se confere o driver, a
-# GPU nem o CUDA em uso: isso é da primeira execução no dev (240).
+# GPU nem o CUDA em uso: isso é da primeira execução no dev (#240).
 RUN /app/.venv/bin/python -c "import ctypes, wave; import ctranslate2; ctypes.CDLL('libcublas.so.12'); ctypes.CDLL('libcudnn.so.9'); w = wave.open('/tmp/s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close(); from api.whisper import VAD_PARAMETROS; from faster_whisper import WhisperModel; m = WhisperModel('/modelo', device='cpu', compute_type='int8', local_files_only=True); segmentos, _ = m.transcribe('/tmp/s.wav', language='pt', word_timestamps=True, vad_filter=True, vad_parameters=VAD_PARAMETROS); assert list(segmentos) == []" \
     && rm /tmp/s.wav
 USER nobody
@@ -147,9 +147,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr-gpu
 COPY api/ api/
 ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64
-# A máquina da construção não tem GPU: o Paddle lê um quadro de verdade em CPU, com os
-# modelos da imagem. Isso pega roda que não instala, biblioteca CUDA que não carrega e
-# modelo incompatível; não pega o driver nem a GPU (primeira execução no dev, 240).
+# A máquina da construção não tem GPU: confere que o Paddle foi compilado com CUDA e lê um
+# quadro de verdade em CPU, com os modelos da imagem. Isso pega roda que não instala e
+# modelo incompatível. Não pega o cuDNN e o cuBLAS, que o Paddle só abre na primeira
+# operação na GPU, nem o driver e a GPU: isso é da primeira execução no dev (#240).
 RUN HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy, paddle; assert paddle.device.is_compiled_with_cuda(); q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos', 'cpu').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
     && rm -rf /tmp/ocr /tmp/ocr.png
 USER nobody

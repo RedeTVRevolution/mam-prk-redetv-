@@ -4,12 +4,9 @@
 nunca motivo para cair para a CPU em silêncio: o Workflows decide o plano B (#239).
 """
 
-import logging
 import os
 from collections.abc import Mapping
 from typing import Literal
-
-log = logging.getLogger(__name__)
 
 Dispositivo = Literal["cpu", "gpu"]
 VARIAVEL = "DISPOSITIVO"
@@ -23,9 +20,7 @@ def ler_dispositivo(ambiente: Mapping[str, str] | None = None) -> Dispositivo:
     valor = (os.environ if ambiente is None else ambiente).get(VARIAVEL, "cpu")
     valor = valor.strip().lower() or "cpu"
     if valor not in ("cpu", "gpu"):
-        raise DispositivoIndisponivel(
-            f"{VARIAVEL}={valor!r} não é válido: use 'cpu' ou 'gpu'."
-        )
+        raise ValueError(f"{VARIAVEL}={valor!r} não é válido: use 'cpu' ou 'gpu'.")
     return valor  # type: ignore[return-value]
 
 

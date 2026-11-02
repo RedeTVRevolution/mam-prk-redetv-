@@ -53,7 +53,7 @@ target "ocr" {
 }
 
 # As imagens com GPU (E1, ADR 0007): `docker buildx bake gpu` as monta, sem enviar nem
-# usar cache (o repositório em us-east4, o cache e a publicação são do 238), por isso não
+# usar cache (o repositório delas, o cache e a publicação são do #238), por isso não
 # estão no grupo `default`, que o cloudbuild.yaml envia.
 group "gpu" {
   targets = ["transcricao-gpu", "ocr-gpu"]
