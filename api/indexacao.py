@@ -19,15 +19,7 @@ from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
-from api.copia_bigquery import (
-    ConfigDoBigQuery,
-    CopiaDosMomentos,
-    copia_do_ambiente,
-    linhas_da_decupagem,
-)
-from api.copia_bigquery import (
-    transporte_http as transporte_do_bigquery,
-)
+from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
 from api.embedding_do_quadro import (
@@ -258,12 +250,9 @@ def main(argv: list[str]) -> int:
     busca = ConfigDaBusca.do_ambiente(os.environ)
     # O sinal por programa só vale para o vídeo que acabou de concluir (o Workflows passa
     # JOB_ID); reindexar todos os vídeos de uma vez não o avalia, para não alertar o passado.
-    sinal = None
-    if not argv and "JOB_ID" in os.environ and "BIGQUERY_DATASET" in os.environ:
-        bigquery = ConfigDoBigQuery.do_ambiente(os.environ)
-        sinal = sinal_do_ambiente(
-            os.environ, bigquery, transporte_do_bigquery(bigquery.projeto)
-        )
+    sinal = (
+        sinal_do_ambiente(os.environ) if not argv and "JOB_ID" in os.environ else None
+    )
     resultado = reindexar_jobs(
         argv or ([os.environ["JOB_ID"]] if "JOB_ID" in os.environ else None),
         RepositorioFirestore(firestore_),

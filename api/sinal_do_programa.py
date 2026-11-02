@@ -20,6 +20,7 @@ from api.copia_bigquery import (
     LinhaDoMomento,
     Transporte,
     _parametro,
+    transporte_http,
 )
 from api.sinais import Registrar, imprimir
 
@@ -44,11 +45,11 @@ class Referencia:
 
 @dataclass(frozen=True)
 class Desvio:
+    """Um evento do vídeo fora de K desvios da referência do programa."""
+
     tipo: str
     valor: float
-    media: float
-    desvio: float
-    videos: int
+    referencia: Referencia
 
 
 @dataclass(frozen=True)
@@ -134,7 +135,7 @@ class HistoricoBigQuery:
         c = self._config
         contagens = ",\n    ".join(
             f"COUNTIF(tipo IN ({', '.join(repr(t) for t in tipos)})) "
-            f"* 3600000 / ANY_VALUE(duracao_do_video_ms) AS {evento}"
+            f"* {HORA_MS} / ANY_VALUE(duracao_do_video_ms) AS {evento}"
             for evento, tipos in EVENTOS.items()
         )
         estatisticas = ",\n  ".join(
@@ -201,7 +202,7 @@ class SinalDoPrograma:
             return []
         referencias = self._historico.do_programa(programa, job_id, self._config.videos)
         achados = [
-            Desvio(evento, valor, ref.media, ref.desvio, ref.videos)
+            Desvio(evento, valor, ref)
             for evento, valor in taxas.items()
             if (ref := referencias[evento]).videos >= self._config.videos
             and ref.desvio > 0
@@ -225,19 +226,21 @@ def registro_do_desvio(
             "programa": programa,
             "tipo": desvio.tipo,
             "valor": desvio.valor,
-            "media": round(desvio.media, 4),
-            "desvio": round(desvio.desvio, 4),
-            "videos_no_historico": desvio.videos,
+            "media": round(desvio.referencia.media, 4),
+            "desvio": round(desvio.referencia.desvio, 4),
+            "videos_no_historico": desvio.referencia.videos,
             "limite_de_desvios": limite_de_desvios,
         },
         ensure_ascii=False,
     )
 
 
-def sinal_do_ambiente(
-    ambiente: Mapping[str, str], config: ConfigDoBigQuery, transporte: Transporte
-) -> "SinalDoPrograma | None":
+def sinal_do_ambiente(ambiente: Mapping[str, str]) -> "SinalDoPrograma | None":
+    """O sinal configurado, ou `None` se o ambiente não traz N e K ou a cópia."""
     sinal = ConfigDoSinal.do_ambiente(ambiente)
-    if sinal is None:
+    if sinal is None or "BIGQUERY_DATASET" not in ambiente:
         return None
-    return SinalDoPrograma(HistoricoBigQuery(config, transporte), sinal, imprimir)
+    config = ConfigDoBigQuery.do_ambiente(ambiente)
+    return SinalDoPrograma(
+        HistoricoBigQuery(config, transporte_http(config.projeto)), sinal, imprimir
+    )

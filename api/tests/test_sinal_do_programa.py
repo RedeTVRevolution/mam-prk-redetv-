@@ -13,11 +13,14 @@ from api.copia_bigquery import (
 from api.indexacao import reindexar
 from api.sinal_do_programa import (
     ConfigDoSinal,
+    Desvio,
     HistoricoBigQuery,
     HistoricoEmMemoria,
+    Referencia,
     SinalDoPrograma,
     eventos_por_hora,
     registro_do_desvio,
+    sinal_do_ambiente,
 )
 from api.tests.test_indexacao import Mundo
 
@@ -151,9 +154,9 @@ def test_historico_sem_variacao_nao_alerta() -> None:
 
 
 def test_registro_do_desvio_e_uma_linha_json() -> None:
-    from api.sinal_do_programa import Desvio
-
-    linha = registro_do_desvio("j", "P", Desvio("pautas", 9.0, 3.0, 1.0, 5), 2)
+    linha = registro_do_desvio(
+        "j", "P", Desvio("pautas", 9.0, Referencia(5, 3.0, 1.0)), 2
+    )
     dados = json.loads(linha)
     assert dados["tipo"] == "pautas" and dados["limite_de_desvios"] == 2
     assert "\n" not in linha
@@ -234,3 +237,8 @@ def test_falha_do_sinal_nao_derruba_a_indexacao() -> None:
     job = mundo.jobs.obter("j1")
     assert job and job.indexacao and job.indexacao.estado == "indexado"
     assert job.copia_bigquery and job.copia_bigquery.estado == "copiado"
+
+
+def test_sinal_do_ambiente_pede_n_k_e_a_copia() -> None:
+    assert sinal_do_ambiente({"BIGQUERY_DATASET": "d"}) is None
+    assert sinal_do_ambiente({"SINAL_VIDEOS": "10", "SINAL_DESVIOS": "3"}) is None
