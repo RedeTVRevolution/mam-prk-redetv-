@@ -192,6 +192,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "programa",
         "data_exibicao",
         "indexacao",
+        "copia_bigquery",
         "etapa_atual",
         "etapas",
         "reprocessamentos",

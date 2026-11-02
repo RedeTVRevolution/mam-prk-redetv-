@@ -1,8 +1,8 @@
 """Cópia das decupagens no BigQuery (#260): um momento por linha, para os relatórios.
 
 As linhas são o recorte do índice da busca (`registros_da_decupagem`) mais um momento por
-comercial (marca e tipo de inserção). Cada gravação troca todas as linhas do Job numa
-transação, então repetir dá o mesmo resultado e nunca deixa versões acumuladas.
+comercial (marca e tipo de inserção). Cada gravação troca todas as linhas do Job num
+único MERGE, então repetir dá o mesmo resultado e nunca deixa versões acumuladas.
 """
 
 import json
@@ -137,9 +137,10 @@ def _json_da_linha(linha: LinhaDoMomento) -> dict[str, Any]:
 
 
 class CopiaBigQuery:
-    """A cópia real: um script numa transação (apaga as linhas do Job e insere as novas).
+    """A cópia real: um único MERGE apaga as linhas do Job e insere as novas.
 
-    Sem `insertAll`: o que entra pelo buffer de streaming não pode ser apagado por um tempo.
+    Um comando só é atômico sem transação: duas transações que mudam a mesma tabela ao
+    mesmo tempo se abortam, e os MERGE concorrentes entram na fila do BigQuery. Sem `insertAll`: o que entra pelo buffer de streaming não pode ser apagado por um tempo.
     """
 
     def __init__(self, config: ConfigDoBigQuery, transporte: Transporte) -> None:
@@ -150,29 +151,34 @@ class CopiaBigQuery:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela}`"
         consulta = f"""
-BEGIN TRANSACTION;
-DELETE FROM {tabela} WHERE job_id = @job_id;
-INSERT INTO {tabela}
+MERGE {tabela} AS t
+USING (
+  SELECT
+    JSON_VALUE(l, '$.job_id') AS job_id,
+    JSON_VALUE(l, '$.programa') AS programa,
+    DATE(JSON_VALUE(l, '$.data_de_exibicao')) AS data_de_exibicao,
+    JSON_VALUE(l, '$.tipo') AS tipo,
+    CAST(JSON_VALUE(l, '$.inicio_ms') AS INT64) AS inicio_ms,
+    CAST(JSON_VALUE(l, '$.fim_ms') AS INT64) AS fim_ms,
+    ARRAY(
+      SELECT AS STRUCT JSON_VALUE(p, '$.id') AS id, JSON_VALUE(p, '$.nome') AS nome
+      FROM UNNEST(JSON_QUERY_ARRAY(l, '$.pessoas')) AS p
+    ) AS pessoas,
+    JSON_VALUE(l, '$.marca') AS marca,
+    JSON_VALUE(l, '$.tipo_de_insercao') AS tipo_de_insercao,
+    JSON_VALUE(l, '$.texto') AS texto,
+    JSON_VALUE(l, '$.versao_pipeline') AS versao_pipeline,
+    TIMESTAMP(JSON_VALUE(l, '$.gravado_em')) AS gravado_em
+  FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
+) AS s
+ON FALSE
+WHEN NOT MATCHED BY SOURCE AND t.job_id = @job_id THEN DELETE
+WHEN NOT MATCHED THEN INSERT
   (job_id, programa, data_de_exibicao, tipo, inicio_ms, fim_ms, pessoas, marca,
    tipo_de_insercao, texto, versao_pipeline, gravado_em)
-SELECT
-  JSON_VALUE(l, '$.job_id'),
-  JSON_VALUE(l, '$.programa'),
-  DATE(JSON_VALUE(l, '$.data_de_exibicao')),
-  JSON_VALUE(l, '$.tipo'),
-  CAST(JSON_VALUE(l, '$.inicio_ms') AS INT64),
-  CAST(JSON_VALUE(l, '$.fim_ms') AS INT64),
-  ARRAY(
-    SELECT AS STRUCT JSON_VALUE(p, '$.id') AS id, JSON_VALUE(p, '$.nome') AS nome
-    FROM UNNEST(JSON_QUERY_ARRAY(l, '$.pessoas')) AS p
-  ),
-  JSON_VALUE(l, '$.marca'),
-  JSON_VALUE(l, '$.tipo_de_insercao'),
-  JSON_VALUE(l, '$.texto'),
-  JSON_VALUE(l, '$.versao_pipeline'),
-  TIMESTAMP(JSON_VALUE(l, '$.gravado_em'))
-FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l;
-COMMIT TRANSACTION;
+VALUES
+  (s.job_id, s.programa, s.data_de_exibicao, s.tipo, s.inicio_ms, s.fim_ms, s.pessoas,
+   s.marca, s.tipo_de_insercao, s.texto, s.versao_pipeline, s.gravado_em)
 """
         resposta = self._transporte(
             {

@@ -469,3 +469,16 @@ Não corrigido (decisão humana):
 - Papéis: `bigquery.admin` da mam-terraform já está no wizard (linha do #260). Nada a dar à mão.
 - Não confirmado (sem nuvem): o script em transação via `jobs.query`, o tamanho do parâmetro de um vídeo grande (limite de 10 MB da requisição) e a recriação da tabela (`deletion_protection = true`). Nada saiu do Brasil por este ticket.
 - Armadilha: `terraform init` altera `infra/.terraform.lock.hcl`; reverta.
+
+## #260 revisão
+Corrigido:
+- Duas transações que mudam a mesma tabela ao mesmo tempo se abortam no BigQuery: Correções de Jobs diferentes, ou a carga junto com a web, davam `falhou`. A troca agora é um único `MERGE ... ON FALSE` (apaga as linhas do Job e insere as novas), atômico sem transação; os MERGE concorrentes entram na fila.
+- `job_id` entrou no agrupamento da tabela (`programa`, `job_id`): sem ele, cada troca varria a tabela toda.
+- Estado visível: `copia_bigquery` passou a sair no `JobPublico` (`GET /v1/jobs/...`), com teste.
+Não corrigido:
+- `jobComplete=false` depois de 120 s marca `falhou`, mas o MERGE segue no BigQuery e pode terminar depois (o estado engana; o `make copiar-para-bigquery` refaz). Esperar pelo `jobReference` pede outro tipo de transporte; fica.
+- A cópia roda dentro da requisição da Correção (até ~150 s se o BigQuery estiver lento), como a reindexação.
+- Ambiente com `BIGQUERY_DATASET` sem `BIGQUERY_TABELA`/`BIGQUERY_REGIAO` dá `KeyError` no boot: o Terraform entrega as três juntas, e falhar alto é aceitável.
+- Vídeo muito grande pode passar dos 10 MB da requisição (não fatiado; sem confirmar na nuvem). Também não confirmado: MERGE com parâmetros nomeados e `PARSE_JSON` no `jobs.query`.
+- Smells sem bug: `copiar()` repete o ramo de cópia de `reindexar`; `_registrar(campo: str, valor)` aceita campo e tipo trocados e é importado de fora; `tipo: str` em vez de `TipoDeRegistro`; `gravado_em` opcional no Python e REQUIRED no schema; `MundoComCopia` só repassa para `Mundo`. A web não mostra o estado da cópia (só a API).
+- Decisão humana: `mam-web` (exposta à internet) ganhou `bigquery.dataEditor` e `jobUser` para gravar a cada Correção; registrar num ADR se for para ficar.

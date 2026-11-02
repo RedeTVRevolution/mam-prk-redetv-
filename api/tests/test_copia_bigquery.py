@@ -15,7 +15,7 @@ from api.copiar_para_bigquery import copiar_jobs
 from api.decupagem import Comercial
 from api.exemplos_da_busca import EXEMPLOS
 from api.tests.test_correcoes import BASE
-from api.tests.test_indexacao import Mundo, _job
+from api.tests.test_indexacao import AUTORIZACAO, Mundo, _job
 
 DECUPAGEM = EXEMPLOS[0].decupagem
 DIA = date(2026, 10, 30)
@@ -113,6 +113,8 @@ def test_falha_do_bigquery_numa_correcao_nao_derruba_a_correcao() -> None:
     assert mundo.textos_das_falas() == ["outro texto"]
     job = mundo.jobs.obter("j1")
     assert job and job.copia_bigquery and job.copia_bigquery.estado == "falhou"
+    publico = mundo.cliente.get("/v1/jobs/j1", headers=AUTORIZACAO).json()
+    assert publico["copia_bigquery"]["estado"] == "falhou"
 
 
 def test_correcao_pela_rota_troca_as_linhas_na_copia() -> None:
@@ -155,7 +157,7 @@ def test_carga_ignora_job_nao_concluido_e_aponta_inexistente() -> None:
     assert resultado == {"nada": "inexistente", "j1": "copiado", "j2": "ignorado"}
 
 
-def test_adaptador_troca_as_linhas_do_job_numa_transacao() -> None:
+def test_adaptador_troca_as_linhas_do_job_num_unico_merge() -> None:
     pedidos: list[dict[str, Any]] = []
 
     def transporte(corpo: dict[str, Any]) -> dict[str, Any]:
@@ -168,8 +170,10 @@ def test_adaptador_troca_as_linhas_do_job_numa_transacao() -> None:
 
     (pedido,) = pedidos
     sql = pedido["query"]
-    assert sql.index("BEGIN TRANSACTION") < sql.index("DELETE FROM `p.d.t`")
-    assert sql.index("DELETE FROM") < sql.index("INSERT INTO") < sql.index("COMMIT")
+    assert "TRANSACTION" not in sql and sql.count(";") == 0
+    assert sql.index("MERGE `p.d.t`") < sql.index("ON FALSE")
+    assert "NOT MATCHED BY SOURCE AND t.job_id = @job_id THEN DELETE" in sql
+    assert "WHEN NOT MATCHED THEN INSERT" in sql
     assert pedido["location"] == "regiao-x"
     parametros = {
         q["name"]: q["parameterValue"]["value"] for q in pedido["queryParameters"]

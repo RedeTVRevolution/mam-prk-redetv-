@@ -715,7 +715,7 @@ resource "google_bigquery_table" "momentos" {
     type  = "DAY"
     field = "data_de_exibicao"
   }
-  clustering = ["programa"]
+  clustering = ["programa", "job_id"]
   schema = jsonencode([
     { name = "job_id", type = "STRING", mode = "REQUIRED" },
     { name = "programa", type = "STRING", mode = "NULLABLE" },

@@ -261,6 +261,7 @@ class JobPublico(BaseModel):
     programa: str | None = None
     data_exibicao: date | None = None
     indexacao: Indexacao | None = None
+    copia_bigquery: CopiaNoBigQuery | None = None
     etapa_atual: NomeDaEtapa | None = None
     # As etapas iniciadas, da primeira à última.
     etapas: list[EtapaPublica] = []
