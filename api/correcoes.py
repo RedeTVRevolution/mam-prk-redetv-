@@ -416,7 +416,7 @@ class NovaPauta(BaseModel):
         ]
         | None
     ) = None
-    tom: str
+    tom: TomDaPauta
     inicio_ms: Annotated[int, Field(ge=0)]
     fim_ms: Annotated[int, Field(ge=0)]
 
@@ -432,8 +432,6 @@ class NovaPauta(BaseModel):
 
     @model_validator(mode="after")
     def _coerente(self) -> Self:
-        if self.tom not in TONS_DA_PAUTA:
-            raise ValueError("tom desconhecido")
         if self.inicio_ms > self.fim_ms:
             raise ValueError("início depois do fim")
         return self
@@ -1621,6 +1619,8 @@ def aplicar(
         for objeto in _objetos(resultado):
             if objeto.get("pessoa") in ids:
                 objeto["pessoa"] = objeto["relacao"] = None
+    # As pautas do modelo ficam na ordem em que vieram; só a acrescentada
+    # pede reordenar, para entrar no lugar do seu início.
     if any(p.get("acrescentado") for p in _pautas(resultado)):
         resultado["pautas"].sort(key=lambda p: (p["inicio_ms"], p["fim_ms"]))
     if "textos_na_tela" in resultado:

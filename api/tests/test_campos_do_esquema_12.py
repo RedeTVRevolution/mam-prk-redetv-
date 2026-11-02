@@ -263,6 +263,26 @@ def test_acrescentar_texto_na_tela_e_desfazer() -> None:
     ]
 
 
+def test_texto_acrescentado_com_aprovacao_so_vale_depois_de_aprovar() -> None:
+    mundo = _mundo()
+    mundo.aprovacao.definir(frozenset({"texto_na_tela.acrescentar"}))
+    valor = json.dumps(_texto(4000, 6000, "Ao vivo", "logo"))
+
+    r = _corrigir(mundo, "texto_na_tela.acrescentar", valor)
+
+    assert r.status_code == 201
+    textos = [t["texto"] for t in mundo.decupagem()["textos_na_tela"]]
+    assert textos == ["Ana Souza", "Placar"]
+    mundo.avancar()
+    curador = {"Authorization": "Bearer token-curador"}
+    aprovada = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{r.json()['id']}/aprovar", headers=curador
+    )
+    assert aprovada.status_code == 201
+    textos = [t["texto"] for t in mundo.decupagem()["textos_na_tela"]]
+    assert textos == ["Ana Souza", "Ao vivo", "Placar"]
+
+
 def test_acrescentar_texto_alem_da_duracao_ou_invertido_e_422() -> None:
     mundo = _mundo()
 

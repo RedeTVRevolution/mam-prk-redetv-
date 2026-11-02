@@ -175,6 +175,7 @@ export interface ItemDoHistorico {
     | 'aparicao.papel_visual'
     | 'texto_na_tela.texto'
     | 'texto_na_tela.acrescentar'
+    | 'pauta.acrescentar'
     | 'desfazer'
     | 'descartar'
     | 'aprovar'
