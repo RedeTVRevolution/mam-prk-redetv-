@@ -2580,14 +2580,15 @@ def _preparar_juncao(
 def _aplicar_juncao(resultado: dict[str, Any], c: Correcao) -> None:
     """Junta as pautas que estão no intervalo da âncora na primeira delas (a que
     mantém o id), com o título escolhido; a mesma regra de sobreposição serve à
-    versão em que a correção foi feita e à reaplicação."""
+    versão em que a correção foi feita e à reaplicação. Com uma pauta só (o modelo
+    já juntou, com outro título), só o título muda."""
     intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
     juntas = [
         p
         for p in _pautas_em_ordem(resultado)
         if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
     ]
-    if len(juntas) < 2:
+    if not juntas:
         return
     primeira, *outras = juntas
     primeira["titulo"] = json.loads(c.depois)["titulo"]
@@ -2619,13 +2620,8 @@ def _reapontar_juncao(
         # Uma pauta só: o modelo já a trouxe junta se ela cobre ao menos metade do trecho.
         inicio, fim = _intervalo_da_pauta(achadas[0])
         sobreposicao = min(fim, intervalo[1]) - max(inicio, intervalo[0])
-        if sobreposicao * 2 < intervalo[1] - intervalo[0]:
+        if sobreposicao * 2 <= intervalo[1] - intervalo[0]:
             return None
-        ancora = _ancora_do_item(achadas[0], "pauta", versao)
-        nova = c.model_copy(
-            update={"item_id": str(achadas[0].get("id", "")), "ancora": ancora}
-        )
-        return nova, True
     inicio = achadas[0]["inicio_ms"]
     fim = max(p["fim_ms"] for p in achadas)
     ancora = Ancora(
@@ -2635,9 +2631,8 @@ def _reapontar_juncao(
         inicio_ms=inicio,
         fim_ms=fim,
     )
-    depois = _json_canonico(
-        {"titulo": json.loads(c.depois)["titulo"], "inicio_ms": inicio, "fim_ms": fim}
-    )
+    titulo = json.loads(c.depois)["titulo"]
+    depois = _json_canonico({"titulo": titulo, "inicio_ms": inicio, "fim_ms": fim})
     nova = c.model_copy(
         update={
             "item_id": str(achadas[0].get("id", "")),
@@ -2645,7 +2640,11 @@ def _reapontar_juncao(
             "depois": depois,
         }
     )
-    return nova, False
+    # Atendida só se o modelo já juntou e com o mesmo título: senão o título se perde.
+    atendida = len(achadas) == 1 and normalizar(achadas[0]["titulo"]) == normalizar(
+        titulo
+    )
+    return nova, atendida
 
 
 def _preparar_divisao(
@@ -2661,9 +2660,27 @@ def _preparar_divisao(
 
 
 def _aplicar_divisao(resultado: dict[str, Any], c: Correcao) -> None:
+    """Corta a pauta em duas; se o modelo já cortou ali (a pauta acaba no corte),
+    só dá a cada metade o seu título."""
     divisao = json.loads(c.depois)
     em = divisao["em_ms"]
     for pauta in _itens_com_o_id(resultado, c):
+        if abs(pauta["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS:
+            seguinte = next(
+                (
+                    p
+                    for p in _pautas_em_ordem(resultado)
+                    if p is not pauta
+                    and abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS
+                ),
+                None,
+            )
+            if seguinte is not None:
+                for metade, titulo in zip(
+                    (pauta, seguinte), divisao["titulos"], strict=True
+                ):
+                    metade["titulo"], metade["origem"] = titulo, "revisao"
+            continue
         if not pauta["inicio_ms"] < em < pauta["fim_ms"]:
             continue
         segunda = {
@@ -2682,19 +2699,22 @@ def _aplicar_divisao(resultado: dict[str, Any], c: Correcao) -> None:
 def _reapontar_divisao(
     modelo: dict[str, Any], c: Correcao, versao: str
 ) -> tuple[Correcao, bool] | None:
-    em = json.loads(c.depois)["em_ms"]
+    divisao = json.loads(c.depois)
+    em = divisao["em_ms"]
     intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
     achadas = [
         p
-        for p in _pautas(modelo)
+        for p in _pautas_em_ordem(modelo)
         if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
     ]
     antes = [p for p in achadas if abs(p["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
     depois = [p for p in achadas if abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
     com_o_corte = [p for p in achadas if p["inicio_ms"] < em < p["fim_ms"]]
     if antes and depois:
-        # O modelo já cortou aqui.
-        item, atendida = antes[0], True
+        # O modelo já cortou aqui; atendida só se os títulos também são os escolhidos.
+        trazidos = [normalizar(p["titulo"]) for p in (antes[0], depois[0])]
+        item = antes[0]
+        atendida = trazidos == [normalizar(t) for t in divisao["titulos"]]
     elif len(com_o_corte) == 1:
         item, atendida = com_o_corte[0], False
     else:

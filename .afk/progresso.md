@@ -495,3 +495,10 @@ Não corrigido:
 
 ## #261 iteração 59
 - Pronto: GLOSSARY (juntar e dividir pautas, correção não reaplicada); `make verificar` verde. Ticket completo; a tela da fila fica no #262.
+
+## #261 revisão
+- Corrigido: título escolhido se perdia quando o modelo já tinha juntado/dividido (agora só é atendida com o mesmo título; senão a reaplicação troca só os títulos); uma pauta nova cobrindo exatamente metade do trecho contava como junção feita (agora vai para a fila); `_reapontar_divisao` usa pautas em ordem; GLOSSARY (`{ids, titulo}`, aprovação opcional); teste de reindexação de juntar.
+- Não corrigido: a junção escolhe as pautas por `_sobrepoe_metade` (critério pedido pela spec), então uma pauta que envolve as juntadas ou sobrepõe a borda em mais da metade do próprio tempo entra junto; raro com pautas do modelo que não se sobrepõem.
+- Não corrigido: correção de título numa pauta que depois é absorvida por uma junção deixa de ter efeito sem ir à fila (a junção posterior do editor substitui o título; tratado como intenção).
+- Para o #262 / decisão: "não reaplicada" não tem campo próprio no `ItemDaFila`; a tela reconhece pelo tipo (`pauta.juntar`/`pauta.dividir`) com `candidatos` vazios. Se a tela precisar de um marcador explícito, acrescentar no #262.
+- Smells sem bug: `reapontar` devolve `tuple[Correcao, bool]`; `TOLERANCIA_DO_PLANO_MS` reaproveitada para o corte de pauta; `EstruturaInvalida` devolve a mensagem da exceção no 422; mais um ramo `reestrutura` em `corrigir`/`reconciliar`/`aplicar`/`fila`; sem teste de dividir com aprovação.

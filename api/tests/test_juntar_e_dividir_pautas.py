@@ -220,6 +220,36 @@ def test_dividir_reindexa_o_video() -> None:
     ]
 
 
+def test_juntar_reindexa_o_video() -> None:
+    mundo = MundoDaBusca()
+    modelo = json.loads(mundo.armazenamento.decupagens["j1"][0])
+    modelo["pautas"] = [
+        {**_pauta("pau01", "Abertura", 0, 1000), "pessoas": []},
+        {**_pauta("pau02", "Entrevista", 1000, 2000), "pessoas": []},
+    ]
+    mundo.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
+    mundo.reindexar()
+
+    r = mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "pauta.juntar",
+            "item_id": "pau01",
+            "valor": json.dumps({"ids": ["pau01", "pau02"], "titulo": "Bloco"}),
+            "motivo": "é um assunto só",
+            "versao": _versao(modelo),
+        },
+        headers=AUTORIZACAO,
+    )
+
+    assert r.status_code == 201, r.text
+    assert mundo.indexacao()["estado"] == "indexado"
+    historico = mundo.cliente.get("/v1/jobs/j1/correcoes", headers=AUTORIZACAO).json()
+    assert [(i["tipo"], i["na_busca"]) for i in historico] == [
+        ("pauta.juntar", "na_busca")
+    ]
+
+
 def test_reprocessar_reaplica_a_juncao_sobre_as_pautas_novas() -> None:
     mundo = _mundo()
     _juntar(mundo, ["pau01", "pau02"])
@@ -276,7 +306,7 @@ def test_reprocessar_sem_pauta_a_dividir_deixa_a_divisao_na_fila() -> None:
     assert [i["id"] for i in fila] == [cid]
 
 
-def test_a_divisao_ja_feita_pelo_modelo_nao_duplica() -> None:
+def test_a_divisao_ja_feita_pelo_modelo_nao_duplica_e_mantem_os_titulos() -> None:
     mundo = _mundo()
     _dividir(mundo)
     mundo.reprocessar(
@@ -288,20 +318,55 @@ def test_a_divisao_ja_feita_pelo_modelo_nao_duplica() -> None:
         )
     )
 
-    assert [p[1:] for p in _pautas(mundo)] == [
-        ("Parte um", 20000, 30100),
-        ("Parte dois", 30100, 50000),
+    assert _pautas(mundo) == [
+        ("nov1", "Primeira", 20000, 30100),
+        ("nov2", "Segunda", 30100, 50000),
     ]
     assert mundo.cliente.get("/v1/jobs/j1/fila", headers=AUTORIZACAO).json() == []
 
 
-def test_a_juncao_ja_feita_pelo_modelo_nao_vai_para_a_fila() -> None:
+def test_a_divisao_ja_feita_com_os_mesmos_titulos_fica_como_o_modelo() -> None:
+    mundo = _mundo()
+    _dividir(mundo)
+    mundo.reprocessar(
+        _modelo(
+            pautas=[
+                _pauta("nov1", "primeira", 20000, 30100),
+                _pauta("nov2", "SEGUNDA", 30100, 50000),
+            ]
+        )
+    )
+
+    assert [p[1] for p in _pautas(mundo)] == ["primeira", "SEGUNDA"]
+    assert all(p["origem"] != "revisao" for p in mundo.decupagem()["pautas"])
+
+
+def test_a_juncao_ja_feita_pelo_modelo_mantem_o_titulo_escolhido() -> None:
     mundo = _mundo()
     _juntar(mundo, ["pau01", "pau02"])
     mundo.reprocessar(_modelo(pautas=[_pauta("nov1", "Tudo junto", 0, 50000)]))
 
-    assert _pautas(mundo) == [("nov1", "Tudo junto", 0, 50000)]
+    assert _pautas(mundo) == [("nov1", "Geral", 0, 50000)]
     assert mundo.cliente.get("/v1/jobs/j1/fila", headers=AUTORIZACAO).json() == []
+
+
+def test_a_juncao_ja_feita_com_o_mesmo_titulo_fica_como_o_modelo() -> None:
+    mundo = _mundo()
+    _juntar(mundo, ["pau01", "pau02"])
+    mundo.reprocessar(_modelo(pautas=[_pauta("nov1", "geral", 0, 50000)]))
+
+    assert _pautas(mundo) == [("nov1", "geral", 0, 50000)]
+    assert mundo.decupagem()["pautas"][0]["origem"] != "revisao"
+
+
+def test_uma_pauta_nova_em_so_metade_do_trecho_deixa_a_juncao_na_fila() -> None:
+    mundo = _mundo()
+    cid = _juntar(mundo, ["pau01", "pau02"]).json()["id"]
+    mundo.reprocessar(_modelo(pautas=[_pauta("nov1", "Metade", 0, 25000)]))
+
+    assert _pautas(mundo) == [("nov1", "Metade", 0, 25000)]
+    fila = mundo.cliente.get("/v1/jobs/j1/fila", headers=AUTORIZACAO).json()
+    assert [i["id"] for i in fila] == [cid]
 
 
 def test_v12_importada_nao_se_perde() -> None:

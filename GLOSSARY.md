@@ -166,7 +166,7 @@ _Evitar_: edição, ajuste
 Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale).
 
 **Juntar e dividir pautas**:
-Tipos de Correção (`pauta.juntar`, valor `{ids, titulos}`; `pauta.dividir`, valor `{em_ms, titulos}`) que mudam a estrutura das pautas e exigem aprovação e reindexação. Juntar vale só para pautas que se seguem; dividir, para um corte dentro da pauta. No reprocessar, cada uma é reconciliada com as pautas novas do modelo: se o modelo já fez o mesmo, a correção está atendida; se não, é reaplicada.
+Tipos de Correção (`pauta.juntar`, valor `{ids, titulo}`; `pauta.dividir`, valor `{em_ms, titulos}`) que mudam a estrutura das pautas, podem exigir aprovação como os outros tipos e reindexam o vídeo. Juntar vale só para pautas que se seguem; dividir, para um corte dentro da pauta. No reprocessar, cada uma é reconciliada com as pautas novas do modelo: se o modelo já fez o mesmo, com os mesmos títulos, a correção está atendida; se fez o mesmo com outros títulos, só os títulos mudam; se não, é reaplicada.
 
 **Correção não reaplicada**:
 Juntar ou dividir pautas para a qual o reprocessar não achou pauta correspondente. Não se perde: aparece na fila (`/fila`) com `candidatos` vazios, e só pode ser descartada.
