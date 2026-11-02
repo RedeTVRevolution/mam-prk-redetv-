@@ -27,6 +27,8 @@ export interface Pedido {
   ocorrencia?: { lista: string; inicio_ms: number; fim_ms: number }
   /** O nome escolhido no catálogo (só `pessoa.renomear` e `comercial.marca`). */
   catalogo_id?: string
+  /** O item é a pessoa de nome igual a este, que só existe depois do pedido anterior: a tela a procura na decupagem recarregada. */
+  pessoa_do_nome?: string
 }
 
 export interface Editor {
@@ -47,9 +49,6 @@ export interface Editor {
 
 /** Os tipos do catálogo que não têm caminho no painel neste ticket. */
 export const TIPOS_FORA_DESTE_TICKET = [
-  'comercial.acrescentar',
-  'texto_na_tela.acrescentar',
-  'pauta.acrescentar',
   'descartar',
   'aprovar',
   'recusar',

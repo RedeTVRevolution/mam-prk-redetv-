@@ -108,6 +108,9 @@ const normalizar = (t: string): string =>
     .replace(/\p{M}/gu, '')
     .toLowerCase()
 
+/** O nome sem acento, caixa nem espaços nas pontas, para comparar nomes. */
+export const nomeNormalizado = (t: string): string => normalizar(t).trim()
+
 const escapar = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Rosto' }

@@ -1,9 +1,7 @@
 import { Loader, Paper, Text, TextInput } from '@mantine/core'
-import { createContext, type KeyboardEvent, useContext, useRef, useState } from 'react'
-import type { CatalogoDeNomes, ClienteDeNomes, NomeDoCatalogo } from './api.ts'
-
-/** O cliente do catálogo de nomes, para os campos de nome dos formulários (o Visualizador o provê). */
-export const NomesDoCatalogo = createContext<ClienteDeNomes | null>(null)
+import { type KeyboardEvent, useContext, useRef, useState } from 'react'
+import type { CatalogoDeNomes, NomeDoCatalogo } from './api.ts'
+import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
 
 const MINIMO_DE_LETRAS = 2
 

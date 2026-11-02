@@ -21,6 +21,12 @@ const EVIDENCIAS_DA_MARCA: Opcao[] = [
   { valor: 'produto', rotulo: 'Produto' },
 ]
 
+/** Onde uma pessoa só citada é citada (os valores são as listas da decupagem). */
+const ONDE_E_CITADA: Opcao[] = [
+  { valor: 'citada_na_fala', rotulo: 'Na fala' },
+  { valor: 'citada_no_texto', rotulo: 'No texto na tela' },
+]
+
 export const MOTIVO_DO_TRECHO = 'trecho marcado pelo editor'
 
 /** O editor da aba: os campos do tipo, mais os tempos do trecho (que as alças também ajustam). */
@@ -44,21 +50,47 @@ export function editorDoTrecho(aba: AbaDoTrecho, trecho: Intervalo, c: CatalogoD
         montar(
           [
             { chave: 'nome', rotulo: 'Nome', tipo: 'nome', catalogo: 'pessoas', limite: c.limites.nome },
-            { chave: 'evidencia', rotulo: 'Evidência na imagem', tipo: 'texto', limite: c.limites.nome },
+            { chave: 'citada', rotulo: 'Citada (não aparece na imagem)', tipo: 'booleano' },
+            {
+              chave: 'destino',
+              rotulo: 'Onde é citada',
+              tipo: 'opcoes',
+              opcoes: ONDE_E_CITADA,
+              visivel: (v) => v.citada === true,
+            },
+            {
+              chave: 'evidencia',
+              rotulo: 'Evidência na imagem',
+              tipo: 'texto',
+              limite: c.limites.nome,
+              visivel: (v) => v.citada !== true,
+            },
             ...camposDeTempo(),
           ],
-          { nome: '', evidencia: '', ...tempos },
-          ['pessoa.acrescentar_aparicao'],
-          comTempos((v, t) =>
-            texto(v.nome) && texto(v.evidencia)
-              ? acrescentar('pessoa.acrescentar_aparicao', {
-                  inicio_ms: t.inicio_ms,
-                  fim_ms: t.fim_ms,
-                  evidencia: texto(v.evidencia),
-                  nome: texto(v.nome),
-                })
-              : null,
-          ),
+          { nome: '', citada: false, destino: ONDE_E_CITADA[0].valor, evidencia: '', ...tempos },
+          ['pessoa.acrescentar_aparicao', 'pessoa.aparicao_para_mencao'],
+          comTempos((v, t) => {
+            const citada = v.citada === true
+            if (!texto(v.nome) || (!citada && !texto(v.evidencia))) return null
+            const aparicao = acrescentar('pessoa.acrescentar_aparicao', {
+              inicio_ms: t.inicio_ms,
+              fim_ms: t.fim_ms,
+              // A menção nasce como aparição e troca de lista em seguida: a API não tem "menção nova".
+              evidencia: citada ? MOTIVO_DO_TRECHO : texto(v.evidencia),
+              nome: texto(v.nome),
+            })
+            if (!citada) return aparicao
+            return [
+              ...aparicao,
+              {
+                tipo: 'pessoa.aparicao_para_mencao',
+                item_id: '',
+                pessoa_do_nome: texto(v.nome),
+                ocorrencia: { lista: 'na_imagem', inicio_ms: t.inicio_ms, fim_ms: t.fim_ms },
+                valor: String(v.destino),
+              },
+            ]
+          }),
         ),
       )
     case 'marca': {

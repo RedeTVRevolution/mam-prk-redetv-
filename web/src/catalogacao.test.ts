@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { ABAS_DO_TRECHO, editorDoTrecho } from './trecho.ts'
 import catalogoJson from './catalogo.fixture.json'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import {
@@ -149,7 +150,7 @@ test('o motivo do "não é isto" diz se era aparição ou menção', () => {
   expect(motivoDaRemocao(mencao)).toBe('pessoa removida desta menção pelo editor')
 })
 
-test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os de acrescentar trecho (#166) e os da fila (#165)', () => {
+test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os da fila (#165)', () => {
   const caminhos = new Set<string>()
   for (const chave of itens.map((i) => i.chave)) {
     const e = editor(chave)
@@ -160,6 +161,10 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os de
   caminhos.add('pessoa.nao_e')
   caminhos.add('desfazer')
   for (const t of editorDeNovaAparicao(D.pessoas[0], 0, catalogo).tiposPossiveis) caminhos.add(t)
+
+  const trecho = { inicio_ms: 0, fim_ms: 1_000 }
+  for (const aba of ABAS_DO_TRECHO)
+    for (const t of editorDoTrecho(aba.valor, trecho, catalogo).tiposPossiveis) caminhos.add(t)
 
   const sem = catalogo.tipos.map((t) => t.valor).filter((t) => !caminhos.has(t))
   expect(sem.sort()).toEqual([...TIPOS_FORA_DESTE_TICKET].sort())

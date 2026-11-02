@@ -31,7 +31,7 @@ import {
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
 import { dataDeExibicao, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
-import { NomesDoCatalogo } from './CampoDeNome.tsx'
+import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
 import { FormularioDoTrecho } from './FormularioDoTrecho.tsx'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
@@ -39,7 +39,7 @@ import { nomeDaEtapa } from './etapas.ts'
 import { ReprocessarEtapa } from './ReprocessarEtapa.tsx'
 import { QuadroDoObjeto, type ObjetoApontado } from './Inventario.tsx'
 import { criarCacheDeQuadros } from './quadros.ts'
-import { type Aba, abaDaChave, type ItemDoPainel, itensDoPainel } from './painel.ts'
+import { type Aba, abaDaChave, type ItemDoPainel, itensDoPainel, nomeNormalizado } from './painel.ts'
 import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA, CORES } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
@@ -249,8 +249,19 @@ export default function Visualizador({
     if (!decupagem) return null
     let gravadas = 0
     try {
-      for (const p of pedidos) {
-        await api.job(job.id).corrigir({ ...p, motivo, versao: decupagem.versao_decupagem })
+      let versao = decupagem.versao_decupagem
+      for (const { pessoa_do_nome, ...p } of pedidos) {
+        let item_id = p.item_id
+        if (pessoa_do_nome) {
+          // A pessoa acabou de ser acrescentada: o id dela está na decupagem recarregada.
+          const atual = await api.job(job.id).decupagem()
+          const alvo = nomeNormalizado(pessoa_do_nome)
+          const pessoa = atual.pessoas.find((x) => nomeNormalizado(x.nome) === alvo)
+          if (!pessoa) throw new PedidoInvalido('A pessoa acrescentada não apareceu na decupagem. Marque a menção pelo painel.')
+          item_id = pessoa.id
+          versao = atual.versao_decupagem
+        }
+        await api.job(job.id).corrigir({ ...p, item_id, motivo, versao })
         gravadas += 1
       }
     } catch (e) {

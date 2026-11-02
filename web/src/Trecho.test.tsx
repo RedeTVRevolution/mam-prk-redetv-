@@ -384,3 +384,34 @@ test('no trecho, a marca do catálogo preenche o nome, sem catalogo_id (a API s�
   expect(correcoes[0]).not.toHaveProperty('catalogo_id')
   expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({ marca: 'Marca Y' })
 })
+
+test('aba Pessoa com "Citada": acrescenta a aparição e troca para menção na fala, com o id da pessoa nova', async () => {
+  const nova = {
+    ...DECUPAGEM,
+    pessoas: [
+      ...DECUPAGEM.pessoas,
+      { id: 'p9', nome: 'Sabrina Sato', fontes_do_nome: [], na_imagem: [], citada_na_fala: [], citada_no_texto: [] },
+    ],
+  }
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(correcoes.length > 0 ? nova : DECUPAGEM)),
+  )
+  const usuario = await trechoPorTeclas(30, 32)
+  await usuario.keyboard('a')
+  await usuario.keyboard('1')
+  await usuario.type(screen.getByLabelText('Nome'), 'sabrina sato')
+  await usuario.click(screen.getByRole('checkbox', { name: 'Citada (não aparece na imagem)' }))
+  expect(screen.queryByLabelText('Evidência na imagem')).toBeNull()
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(2))
+  expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.acrescentar_aparicao', item_id: '' })
+  expect(correcoes[1]).toMatchObject({
+    tipo: 'pessoa.aparicao_para_mencao',
+    item_id: 'p9',
+    valor: 'citada_na_fala',
+    ocorrencia: { lista: 'na_imagem', inicio_ms: 30_000, fim_ms: 32_000 },
+    motivo: 'trecho marcado pelo editor',
+  })
+  expect(correcoes[1]).not.toHaveProperty('pessoa_do_nome')
+})
