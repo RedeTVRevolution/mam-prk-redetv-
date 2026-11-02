@@ -137,6 +137,13 @@ const NOME_DA_CATEGORIA: Record<CategoriaDeObjeto, string> = {
   produto: 'produto',
   animal: 'animal',
   alimento: 'alimento',
+  movel: 'móvel',
+  decoracao: 'decoração',
+  instrumento_musical: 'instrumento musical',
+  utensilio: 'utensílio',
+  documento: 'documento',
+  planta: 'planta',
+  bebida: 'bebida',
 }
 
 /** A relação do dono com o objeto, como verbo depois do nome ("Mel Breia calça"): não depende do gênero do tipo. */

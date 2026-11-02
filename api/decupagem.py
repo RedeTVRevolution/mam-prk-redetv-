@@ -164,6 +164,14 @@ CategoriaDeObjeto = Literal[
     "produto",
     "animal",
     "alimento",
+    # Objetos de cena (#244): só o inventário de objetos os usa, mas a lista é uma só.
+    "movel",
+    "decoracao",
+    "instrumento_musical",
+    "utensilio",
+    "documento",
+    "planta",
+    "bebida",
 ]
 CorBase = Literal[
     "vermelho",
@@ -229,6 +237,36 @@ class Objeto(_Estrito):
         return self
 
 
+Fracao = Annotated[float, Field(ge=0, le=1)]
+
+
+class CaixaDoQuadro(_Estrito):
+    """Onde o objeto está num quadro do plano, em fração da largura e da altura."""
+
+    quadro: str
+    x: Fracao
+    y: Fracao
+    largura: Fracao
+    altura: Fracao
+
+
+class ObjetoDoInventario(_Estrito):
+    """Um objeto do plano, em português, com as caixas de cada quadro onde aparece."""
+
+    nome: Rotulo
+    categoria: CategoriaDeObjeto
+    cor: CorBase | None = None
+    marca: Rotulo | None = None
+    caixas: list[CaixaDoQuadro] = Field(min_length=1)
+    # De 1 a 3, calculado pelo servidor a partir da maior caixa (`api/inventario.py`).
+    destaque: int = Field(ge=1, le=3)
+
+
+class GeradorDoInventario(_Estrito):
+    motor: Literal["florence", "gemini"]
+    modelo: Rotulo
+
+
 class Plano(_Intervalo):
     id: Id
     ambiente: Rotulo = Field(description="Local: estúdio, aeroporto, estádio, rua…")
@@ -247,6 +285,8 @@ class Plano(_Intervalo):
     quadro: str | None = None  # o JPEG não escuro mais perto do meio do plano (#115)
     # Os 1 a 3 JPEGs do plano em ordem de tempo, incluindo o de `quadro` (#227).
     quadros: list[str] = []
+    # O inventário de objetos (#244): preenchido pelo servidor, fora do esquema da análise.
+    inventario: list[ObjetoDoInventario] = []
 
 
 EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
@@ -348,6 +388,8 @@ class Decupagem(_Estrito):
         "como está. Nunca troque uma palavra por outra de som diferente.",
     )
     correcoes_descartadas: list[CorrecaoDescartada] = []
+    # Quem gerou o inventário dos planos; `None` sem inventário (#244).
+    inventario_gerado_por: GeradorDoInventario | None = None
 
     def _intervalos(self) -> list[_Intervalo]:
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
@@ -408,6 +450,8 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "medido",
         "motivo",
         "correcoes_descartadas",
+        "inventario",
+        "inventario_gerado_por",
     }
 )
 
@@ -460,6 +504,9 @@ def esquema_do_modelo() -> dict[str, Any]:
     lista vazia), para o modelo não pular nenhum."""
     esquema = Decupagem.model_json_schema()
     del esquema["$defs"]["Video"], esquema["$defs"]["CorrecaoDescartada"]
+    # O inventário é do servidor: as definições dele saem junto com o campo.
+    for nome in ("CaixaDoQuadro", "ObjetoDoInventario", "GeradorDoInventario"):
+        del esquema["$defs"][nome]
     for definicao in [esquema, *esquema["$defs"].values()]:
         propriedades = definicao.get("properties", {})
         intervalo = "inicio_ms" in propriedades

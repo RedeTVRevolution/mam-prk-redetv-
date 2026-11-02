@@ -202,6 +202,13 @@ export type CategoriaDeObjeto =
   | 'produto'
   | 'animal'
   | 'alimento'
+  | 'movel'
+  | 'decoracao'
+  | 'instrumento_musical'
+  | 'utensilio'
+  | 'documento'
+  | 'planta'
+  | 'bebida'
 export type RelacaoDoObjeto = 'veste' | 'calca' | 'usa' | 'segura'
 
 /** 1.3: roupa, calçado, acessório ou objeto em cena, com a cor e o dono; 1.4 acrescenta eletrônico, produto, animal e alimento. */

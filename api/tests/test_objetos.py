@@ -106,6 +106,13 @@ def test_listas_fechadas_vivem_num_lugar_so_e_vao_para_o_esquema_do_modelo() -> 
         "produto",
         "animal",
         "alimento",
+        "movel",
+        "decoracao",
+        "instrumento_musical",
+        "utensilio",
+        "documento",
+        "planta",
+        "bebida",
     } == set(CATEGORIAS_DE_OBJETO)
 
 
