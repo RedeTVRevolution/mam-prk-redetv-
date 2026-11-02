@@ -3,6 +3,7 @@ import { ABAS_DO_TRECHO, editorDoTrecho } from './trecho.ts'
 import catalogoJson from './catalogo.fixture.json'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import {
+  aindaIndexando,
   editorDeNovaAparicao,
   editorDoItem,
   marcasDosItens,
@@ -253,4 +254,12 @@ test('marcas: corrigido, ou aguardando o Curador; só as da versão aberta e ain
   expect(marcas['aparicao-0'].pendente).toBe(true)
   expect(marcas['comercial-0']).toBeUndefined()
   expect(marcas['plano-0']).toBeUndefined()
+})
+
+test('a tela volta a perguntar enquanto uma correção que vale (ativa ou aprovada) está indexando', () => {
+  const h = (estado: string, na_busca: string) => ({ estado, na_busca }) as never
+
+  expect(aindaIndexando([h('ativa', 'na_busca'), h('aprovada', 'indexando')])).toBe(true)
+  expect(aindaIndexando([h('ativa', 'indexando')])).toBe(true)
+  expect(aindaIndexando([h('desfeita', 'indexando'), h('ativa', 'salva')])).toBe(false)
 })

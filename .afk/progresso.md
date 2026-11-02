@@ -251,3 +251,14 @@
 - Pronto e commitado: API: `ItemDoHistorico.na_busca` (`salva|indexando|na_busca`, `com_o_estado_na_busca` em `api/correcoes.py`, ligado em `GET /v1/jobs/{id}/correcoes`), `Indexacao.desde` (começo da rodada, gravado por `reindexar`); testes em `test_indexacao.py`. Web: `resultadoDaBusca.ts` (sessionStorage `mam:busca`, `passoNoResultado`), faixa "Busca" + "Fechar busca" em `FaixasDoVideo.tsx`, N/Shift+N no `Visualizador` (grupo "Busca"; N cede ao "recusar" do Sugestões quando há sugestões abertas), `busca` na rota de vídeo, `Busca.tsx` guarda o resultado, marca do Painel diz salva/indexando/na busca (pergunta de novo a cada 2 s enquanto há "indexando"). 13 testes em `BuscaNoVisualizador.test.tsx`.
 - Falta (só conferência/docs): atualizar `docs/design/catalogacao-manual.md` (item 6, "Estado visível") e GLOSSARY se couber; conferir os critérios do ticket um a um.
 - Decisões: o estado por correção sai do estado da indexação do Job (não há registro por correção); a correção pendente de aprovação fica "salva" até aprovada; a busca refeita no Visualizador usa `consultaNova(q)` (sem chips/filtros da página), e o resultado da sessão vale só se o `q` é o mesmo. Armadilha: o indexador roda dentro do POST, então na prática "indexando" só aparece se a indexação falha ou demora.
+
+## #170: revisão (2026-11-02)
+
+Corrigido: `aindaIndexando` passa a olhar também as correções aprovadas; a falha da nova consulta do histórico não encerra a espera do "indexando"; a falha da busca refeita faz o N avisar com a ação e o código, em vez de "ainda está carregando" para sempre; o recuo do JSX novo em `FaixasDoVideo.tsx`.
+
+Não corrigido, por precisar de decisão ou por ser maior que a revisão:
+- O endereço leva só `busca=q`. Sem o resultado na sessão (outra aba, sessão limpa), o Visualizador refaz a busca sem os chips, filtros e ordem, e o N pode percorrer outro resultado. Levar a consulta inteira no endereço é decisão de produto (a spec pede só `?busca=`).
+- A sessão guarda só os vídeos já carregados na Busca (`limite`): no último vídeo carregado, o N diz "último momento da busca" mesmo havendo mais páginas.
+- A rota de correção chama `reindexar` de forma síncrona, então na prática a tela quase sempre já recebe "na busca"; o "indexando" só aparece com a indexação rodando em outro pedido. Duas rodadas concorrentes podem deixar a correção em "salva" (a rodada mais antiga grava `indexado` com o `desde` dela depois que a nova começou) até a tela recarregar.
+- Shift+N dentro de um momento volta ao começo desse momento, não ao anterior (como num player); no primeiro momento do vídeo, abre o vídeo anterior no último momento dele. A spec não define; fica como está.
+- Smells sem correção: `com_o_estado_na_busca` recebe `estado` e `ate` soltos em vez de `Indexacao` (que mora em `api/jobs.py`, importada por `correcoes.py` não tem), e repete o mapa `aprovada_em` do `historico`.

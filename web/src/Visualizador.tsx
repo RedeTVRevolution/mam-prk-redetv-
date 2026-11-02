@@ -18,11 +18,11 @@ import { type CatalogoDeCorrecoes, rotuloDe } from './catalogo.ts'
 import { useAtalhos } from './atalhos.ts'
 import { baixarDecupagem } from './baixar.ts'
 import {
+  aindaIndexando,
   desfazivel,
   editorDeNovaAparicao,
   editorDoItem,
   itemDaCorrecao,
-  aindaIndexando,
   marcasDosItens,
   type Pedido,
   motivoDaRemocao,
@@ -265,7 +265,8 @@ export default function Visualizador({
     const espera = setTimeout(() => {
       api.job(job.id).historico().then(
         (h) => ativo && setHistorico(h),
-        () => {},
+        // Uma falha não encerra a espera: a cópia do histórico agenda a próxima pergunta.
+        () => ativo && setHistorico((h) => [...h]),
       )
     }, intervaloDaIndexacaoMs)
     return () => {
@@ -276,10 +277,13 @@ export default function Visualizador({
 
   // O resultado da busca de onde a pessoa veio: o da sessão, ou a busca refeita.
   const [resultadoDaBusca, setResultadoDaBusca] = useState<VideoGuardado[] | null>(null)
+  // O código da falha da busca refeita: o N avisa em vez de esperar para sempre.
+  const [buscaFalhou, setBuscaFalhou] = useState<string | null>(null)
   useEffect(() => {
     // Sem busca no endereço, a faixa e o N somem.
     // oxlint-disable-next-line react/set-state-in-effect
     setResultadoDaBusca(null)
+    setBuscaFalhou(null)
     if (!busca) return
     const guardada = lerResultado(busca)
     if (guardada) {
@@ -294,7 +298,9 @@ export default function Visualizador({
         guardarResultado(busca, videos)
         setResultadoDaBusca(videos)
       },
-      () => {},
+      (erro) => {
+        if (ativo && !(erro instanceof SessaoExpirada)) setBuscaFalhou(codigoDoErro(erro))
+      },
     )
     return () => {
       ativo = false
@@ -485,7 +491,11 @@ export default function Visualizador({
   function passarDeMomento(passo: 1 | -1) {
     if (!busca) return
     if (!resultadoDaBusca) {
-      mostrarAviso('A busca ainda está carregando.')
+      mostrarAviso(
+        buscaFalhou
+          ? `A busca não carregou. Volte à busca e abra o vídeo de novo (código ${buscaFalhou}).`
+          : 'A busca ainda está carregando.',
+      )
       return
     }
     const atual = (player.current?.currentTime ?? 0) * 1000

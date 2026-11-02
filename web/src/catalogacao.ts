@@ -501,7 +501,7 @@ export const ROTULO_NA_BUSCA: Record<EstadoNaBusca, string> = {
 
 /** Há correção ainda entrando no índice: a tela volta a perguntar até ela confirmar. */
 export const aindaIndexando = (historico: ItemDoHistorico[]): boolean =>
-  historico.some((h) => h.estado === 'ativa' && h.na_busca === 'indexando')
+  historico.some((h) => (h.estado === 'ativa' || h.estado === 'aprovada') && h.na_busca === 'indexando')
 
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
