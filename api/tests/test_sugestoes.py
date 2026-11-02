@@ -235,6 +235,21 @@ def test_o_palpite_nao_confirmado_pergunta_se_o_modelo_acertou() -> None:
     }
 
 
+def test_o_contexto_diz_de_onde_veio_o_palpite() -> None:
+    [da_analise] = _do_palpite(_mundo(_com_palpite()))
+    [do_forte] = _do_palpite(_mundo(_com_palpite(origem="modelo_forte")))
+
+    assert da_analise["contexto"].startswith("Palpite da análise do vídeo")
+    assert do_forte["contexto"].startswith("Palpite do modelo forte")
+
+
+def test_outro_palpite_para_a_mesma_pessoa_e_outra_sugestao() -> None:
+    [leao] = _do_palpite(_mundo(_com_palpite()))
+    [outro] = _do_palpite(_mundo(_com_palpite("Felipe Bueno")))
+
+    assert leao["id"] != outro["id"]
+
+
 def test_o_nome_confirmado_nao_gera_sugestao_de_palpite() -> None:
     modelo = _com_palpite()
     modelo["pessoas"][0]["estado_do_nome"] = "confirmado"
@@ -250,6 +265,19 @@ def test_o_palpite_do_catalogo_leva_o_catalogo_id() -> None:
     [sugestao] = _do_palpite(mundo)
 
     assert sugestao["correcao"]["catalogo_id"] == leao.id
+
+
+def test_o_palpite_leva_o_nome_como_esta_no_catalogo() -> None:
+    mundo = _mundo(_com_palpite("leao  lobo"))
+    leao = mundo.catalogo.acrescentar("Leão Lobo", "comentarista", [])
+
+    [sugestao] = _do_palpite(mundo)
+
+    assert sugestao["pergunta"] == "O modelo acha que é Leão Lobo. Confirma?"
+    assert (sugestao["correcao"]["valor"], sugestao["correcao"]["catalogo_id"]) == (
+        "Leão Lobo",
+        leao.id,
+    )
 
 
 def test_aceitar_o_palpite_confirma_o_nome_pela_revisao() -> None:

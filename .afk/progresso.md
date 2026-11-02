@@ -917,3 +917,10 @@ Não corrigido:
 ## #153 iteração 100
 - Pronto: regra `_palpite_nao_confirmado` em `api/sugestoes.py` (entra em `REGRAS`): pessoa com `estado_do_nome == "palpite"` e aparições vira "O modelo acha que é X. Confirma?", `pessoa.renomear` com `catalogo_id` quando o nome é único no catálogo. Aceitar usa o renomear existente (origem `revisao`, estado `confirmado`). Testes em `test_sugestoes.py`. `make verificar` verde.
 - Decisões: id da sugestão por pessoa (não pelo trecho), para não mudar se as aparições mudarem; intervalo = da primeira aparição ao fim da última; palpite sem aparição não gera. Sem regra própria de descrição × perfil (vem pelo modelo forte). Nada mudou no front.
+
+## #153 revisão
+- Corrigido: (1) o contexto dizia sempre "Palpite do modelo forte", mas a primeira análise também gera palpite (`identificacao.py` marca qualquer nome sem prova); agora o texto sai da `origem` da pessoa. (2) O id da sugestão era só pela pessoa: recusar "pes01 é Leão Lobo" escondia para sempre outro palpite da mesma pessoa depois de um reprocessamento. Agora o id inclui o nome normalizado. (3) A busca no catálogo, que estava copiada da regra do GC, virou `_no_catalogo`; a docstring do módulo cita o #153. Testes novos: o contexto pela origem, o id por nome e o nome como está no catálogo.
+- Não corrigido / decisão humana:
+  1. Critério "Aceitar grava o nome com a fonte de confirmação pelo editor": hoje o aceite grava `origem="revisao"`, `estado_do_nome="confirmado"` e o motivo "sugestão confirmada pelo editor"; `fontes_do_nome` fica `[]`. `FonteDoNome` não tem valor para o editor, e o GLOSSARY define "fonte do nome" como a prova conferida pelo código; o tipo também vai no esquema do modelo. Se a fonte precisar dizer isso, falta criar o valor (por exemplo `editor`) e decidir o efeito no esquema do Gemini e em `so_o_rosto`.
+  2. Duas pessoas "não identificado" com a mesma descrição podem receber o mesmo palpite (`comparacao.py`) e dão duas sugestões; aceitar uma não fecha a outra.
+  3. `tipo="identificar_pessoa"` é o mesmo da regra do GC, então `contar()` mistura as taxas de aceite das duas regras.

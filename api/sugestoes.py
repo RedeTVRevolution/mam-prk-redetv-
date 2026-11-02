@@ -1,11 +1,12 @@
-"""Sugestões que o editor confirma com uma tecla (#152).
+"""Sugestões que o editor confirma com uma tecla (#152, #153).
 
 Cada regra olha a decupagem entregue (o modelo com as correções) e devolve as
 sugestões abertas: uma pergunta, o contexto que a sustenta e a correção proposta, no
 formato das correções. A regra nunca muda nada: o editor aceita ou recusa. Uma regra
 nova entra em `REGRAS`, e a lista, as rotas e a tela não mudam.
 
-Regra da ADR 0005: o GC de identificação sustenta o nome; a chamada nunca.
+Regras da ADR 0005: o GC de identificação sustenta o nome; a chamada nunca. O
+palpite sem prova vira a pergunta, e o aceite do editor é a prova.
 """
 
 import hashlib
@@ -18,7 +19,7 @@ from typing import Any, Literal, Protocol
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api.catalogo import Catalogo
+from api.catalogo import Catalogo, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.correcoes import LIMITE_DO_NOME, Ocorrencia, TipoNovo
 from api.identidade import nao_identificado
@@ -134,10 +135,7 @@ def _gc_de_identificacao(mundo: Contexto) -> Iterable[Sugestao]:
         if any(normalizar(str(p["nome"])) == normalizar(nome) for p in em_cena):
             continue
         alvo = sem_nome[0]
-        achadas = mundo.catalogo.achar(nome)
-        do_catalogo = achadas[0] if len(achadas) == 1 else None
-        if do_catalogo is not None:
-            nome = do_catalogo.nome
+        nome, do_catalogo = _no_catalogo(mundo, nome)
         yield Sugestao(
             id=_id("gc_de_identificacao", normalizar(str(texto["texto"])), *tempo),
             tipo="identificar_pessoa",
@@ -153,6 +151,14 @@ def _gc_de_identificacao(mundo: Contexto) -> Iterable[Sugestao]:
             ),
             depois=_mencoes_para_aparicao(alvo, tempo),
         )
+
+
+def _no_catalogo(mundo: Contexto, nome: str) -> tuple[str, PessoaDoCatalogo | None]:
+    """O nome como está no catálogo e a pessoa, quando só uma tem esse nome."""
+    achadas = mundo.catalogo.achar(nome)
+    if len(achadas) != 1:
+        return nome, None
+    return achadas[0].nome, achadas[0]
 
 
 def _mencoes_para_aparicao(
@@ -173,7 +179,12 @@ def _mencoes_para_aparicao(
     ]
 
 
-# --- Palpite do modelo forte sem prova ----------------------------------------------
+# --- Palpite sem prova ---------------------------------------------------------------
+
+_DE_ONDE_VEM_O_PALPITE = {
+    "modelo": "Palpite da análise do vídeo",
+    "modelo_forte": "Palpite do modelo forte, que olhou a pessoa sem nome",
+}
 
 
 def _palpite_nao_confirmado(mundo: Contexto) -> Iterable[Sugestao]:
@@ -184,22 +195,23 @@ def _palpite_nao_confirmado(mundo: Contexto) -> Iterable[Sugestao]:
         aparicoes = sorted(_aparicoes(pessoa))
         if not aparicoes:
             continue
-        nome = " ".join(str(pessoa["nome"]).split())
-        achadas = mundo.catalogo.achar(nome)
-        do_catalogo = achadas[0] if len(achadas) == 1 else None
-        if do_catalogo is not None:
-            nome = do_catalogo.nome
+        palpite = " ".join(str(pessoa["nome"]).split())
+        nome, do_catalogo = _no_catalogo(mundo, palpite)
         inicio, fim = aparicoes[0][0], max(a[1] for a in aparicoes)
         onde = ", ".join(f"{_relogio(a[0])}–{_relogio(a[1])}" for a in aparicoes)
+        # Por pessoa e nome, não pelo trecho: mudar as aparições não reabre a pergunta;
+        # outro palpite para a mesma pessoa, sim.
+        chave = f"{pessoa['id']}:{normalizar(palpite)}"
+        de_onde = _DE_ONDE_VEM_O_PALPITE.get(str(pessoa.get("origem")), "Palpite")
         yield Sugestao(
-            id=_id("palpite_nao_confirmado", str(pessoa["id"]), 0, 0),
+            id=_id("palpite_nao_confirmado", chave, 0, 0),
             tipo="identificar_pessoa",
             inicio_ms=inicio,
             fim_ms=fim,
             pergunta=f"O modelo acha que é {nome}. Confirma?",
             contexto=(
-                "Palpite do modelo forte, sem prova (GC, fala ou fotos de "
-                f"referência). Aparece às {onde}"
+                f"{de_onde}, sem prova (GC, fala ou fotos de referência). "
+                f"Aparece às {onde}"
             ),
             correcao=Proposta(
                 tipo="pessoa.renomear",
