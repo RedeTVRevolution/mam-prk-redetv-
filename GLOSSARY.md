@@ -161,3 +161,6 @@ _Evitar_: perfil, grupo
 
 **Chave de API**:
 Credencial de um sistema consumidor da RedeTV, nunca de uma pessoa.
+
+**Resultado bruto do Florence-2**:
+O `florence.json` que o Job de objetos grava em `<job>/objetos/`, com, por quadro-chave de cada plano, os objetos detectados (rótulo e caixa normalizada de 0 a 1) e as regiões com legenda, mais o modelo e a revisão. É a matéria-prima do inventário de objetos de cena; ainda não é a lista `objetos` da Decupagem.

@@ -215,3 +215,18 @@ def test_a_imagem_e_o_nome_do_job_saem_como_output() -> None:
         'output "job_de_objetos_gpu"'
     )
     assert 'variable "imagem_objetos"' in MAIN
+
+
+def test_deploy_dev_publica_e_testa_o_job_de_objetos_pelo_digest() -> None:
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+
+    primeiro = deploy[: deploy.index("REPOSITORIO=$(")]
+    assert "-var imagem_objetos=pendente" in primeiro
+    assert 'OBJETOS_GPU="$REPOSITORIO_GPU/objetos-gpu:$COMMIT"' in deploy
+    assert "JOB_OBJETOS_GPU_ANTES=$(tf output -raw job_de_objetos_gpu" in deploy
+    assert 'OBJETOS_GPU_ANTES=$(imagem_do_job "$JOB_OBJETOS_GPU_ANTES")' in deploy
+    assert "_OBJETOS_GPU=$OBJETOS_GPU" in deploy
+    assert 'IMAGEM_OBJETOS=$(digest "$OBJETOS_GPU")' in deploy
+    assert '-var "imagem_objetos=$IMAGEM_OBJETOS"' in deploy
+    assert "job_de_objetos_gpu),$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS" in deploy
+    assert "as sete imagens" in deploy

@@ -44,7 +44,7 @@ tf apply -input=false -target=google_artifact_registry_repository.mam \
   -target=google_artifact_registry_repository.mam_gpu \
   -target=google_artifact_registry_repository_iam_member.build_envia_gpu \
   -var imagem=pendente -var imagem_validacao=pendente -var imagem_transcricao=pendente -var imagem_ocr=pendente \
-  -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente
+  -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
 # O nome do repositório vem do Terraform, o único lugar que monta os nomes.
 REPOSITORIO=$(tf output -raw repositorio)
 COMMIT=$(git rev-parse --short HEAD)
@@ -62,6 +62,7 @@ CACHE="$REPOSITORIO/cache"
 REPOSITORIO_GPU=$(tf output -raw repositorio_gpu)
 TRANSCRICAO_GPU="$REPOSITORIO_GPU/transcricao-gpu:$COMMIT"
 OCR_GPU="$REPOSITORIO_GPU/ocr-gpu:$COMMIT"
+OBJETOS_GPU="$REPOSITORIO_GPU/objetos-gpu:$COMMIT"
 CACHE_GPU="$REPOSITORIO_GPU/cache"
 # Os Jobs com GPU e as imagens que têm hoje, lidas antes do apply, para o teste depois da
 # publicação saber quais imagens mudaram e a que voltar. Vazias na primeira publicação: o
@@ -76,13 +77,15 @@ imagem_do_job() {
 }
 JOB_TRANSCRICAO_GPU_ANTES=$(tf output -raw job_de_transcricao_gpu 2>/dev/null || true)
 JOB_OCR_GPU_ANTES=$(tf output -raw job_de_ocr_gpu 2>/dev/null || true)
+JOB_OBJETOS_GPU_ANTES=$(tf output -raw job_de_objetos_gpu 2>/dev/null || true)
 TRANSCRICAO_GPU_ANTES=$(imagem_do_job "$JOB_TRANSCRICAO_GPU_ANTES")
 OCR_GPU_ANTES=$(imagem_do_job "$JOB_OCR_GPU_ANTES")
-# O Cloud Build constrói, em paralelo e com cache, e envia as seis imagens (cloudbuild.yaml), como a mam-build.
+OBJETOS_GPU_ANTES=$(imagem_do_job "$JOB_OBJETOS_GPU_ANTES")
+# O Cloud Build constrói, em paralelo e com cache, e envia as sete imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
   --gcs-source-staging-dir "gs://$(tf output -raw bucket_fontes)/fontes" \
-  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_TRANSCRICAO=$TRANSCRICAO,_OCR=$OCR,_CACHE=$CACHE,_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_CACHE_GPU=$CACHE_GPU,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
+  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_TRANSCRICAO=$TRANSCRICAO,_OCR=$OCR,_CACHE=$CACHE,_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_OBJETOS_GPU=$OBJETOS_GPU,_CACHE_GPU=$CACHE_GPU,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
 # Pelo digest que o Cloud Build enviou, para que um rebuild com o mesmo commit
 # também gere revisão nova. Daqui em diante nada é recompilado.
 digest() { echo "${1%:*}@$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)')"; }
@@ -92,9 +95,11 @@ IMAGEM_TRANSCRICAO=$(digest "$TRANSCRICAO")
 IMAGEM_OCR=$(digest "$OCR")
 IMAGEM_TRANSCRICAO_GPU=$(digest "$TRANSCRICAO_GPU")
 IMAGEM_OCR_GPU=$(digest "$OCR_GPU")
+IMAGEM_OBJETOS=$(digest "$OBJETOS_GPU")
 tf apply -input=false -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO" \
   -var "imagem_transcricao=$IMAGEM_TRANSCRICAO" -var "imagem_ocr=$IMAGEM_OCR" \
-  -var "imagem_transcricao_gpu=$IMAGEM_TRANSCRICAO_GPU" -var "imagem_ocr_gpu=$IMAGEM_OCR_GPU"
+  -var "imagem_transcricao_gpu=$IMAGEM_TRANSCRICAO_GPU" -var "imagem_ocr_gpu=$IMAGEM_OCR_GPU" \
+  -var "imagem_objetos=$IMAGEM_OBJETOS"
 
 # Teste dos Jobs com GPU (#238), só dos que mudaram: se não passar, o script volta os Jobs
 # para a imagem anterior e esta publicação falha, e o Workflows não manda vídeo para uma
@@ -102,6 +107,7 @@ tf apply -input=false -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALID
 JOBS_GPU=(
   "$(tf output -raw job_de_transcricao_gpu),$TRANSCRICAO_GPU_ANTES,$IMAGEM_TRANSCRICAO_GPU"
   "$(tf output -raw job_de_ocr_gpu),$OCR_GPU_ANTES,$IMAGEM_OCR_GPU"
+  "$(tf output -raw job_de_objetos_gpu),$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS"
 )
 GPU_REGIAO=$(tf output -raw regiao_gpu) GPU_ESPERA_TOTAL_S=$(tf output -raw gpu_espera_total_s) \
   GPU_ESPERA_S=$(tf output -raw gpu_espera_s) GPU_FATOR_DA_ESPERA=$(tf output -raw gpu_fator_da_espera) \

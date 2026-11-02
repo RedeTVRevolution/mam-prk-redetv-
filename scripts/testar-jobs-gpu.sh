@@ -6,8 +6,8 @@
 # imagem, nada lido nem gravado nos buckets) e confere o dispositivo e o resultado.
 #
 # Uso: testar-jobs-gpu.sh NOME,IMAGEM_ANTERIOR,IMAGEM_NOVA...
-# Um argumento por Job com GPU; para um Job a mais (o Florence-2, do inventário de objetos),
-# basta mais um argumento. IMAGEM_ANTERIOR vazia é a primeira publicação do Job.
+# Um argumento por Job com GPU (transcrição, OCR e o Florence-2 do inventário de objetos);
+# para um Job a mais, basta mais um argumento. IMAGEM_ANTERIOR vazia é a primeira publicação do Job.
 #
 # Ambiente: GCP_PROJECT_ID, GOOGLE_IMPERSONATE_SERVICE_ACCOUNT, GPU_REGIAO e a espera por
 # falta de GPU ou de cota (os outputs gpu_* do Terraform, os mesmos do Workflows):

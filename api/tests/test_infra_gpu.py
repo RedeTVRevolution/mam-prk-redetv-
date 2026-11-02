@@ -190,7 +190,7 @@ def test_deploy_dev_cria_o_repositorio_novo_no_primeiro_apply_e_publica_pelos_di
         "-var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente" in primeiro
     )
     assert (
-        "_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_CACHE_GPU=$CACHE_GPU"
+        "_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_OBJETOS_GPU=$OBJETOS_GPU,_CACHE_GPU=$CACHE_GPU"
         in deploy
     )
     assert 'digest "$TRANSCRICAO_GPU"' in deploy and 'digest "$OCR_GPU"' in deploy
