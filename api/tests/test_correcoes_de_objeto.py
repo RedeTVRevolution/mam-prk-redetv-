@@ -83,14 +83,20 @@ def test_atributos_aplicam_e_aparecem_legiveis_no_historico() -> None:
 
 
 def test_atributos_sem_cor_detalhe_e_marca_apagam_o_que_havia() -> None:
-    modelo = _modelo([_objeto("obj01", "vestido", 1000, 5000, cor="vinho", marca="Z")])
+    modelo = _modelo(
+        [
+            _objeto(
+                "obj01", "vestido", 1000, 5000, cor="vinho", detalhe="renda", marca="Z"
+            )
+        ]
+    )
     mundo = _mundo(modelo)
 
     r = _corrigir(mundo, _atributos(), versao=_versao(modelo))
 
     assert r.status_code == 201
     [o] = _objetos(mundo)
-    assert (o["cor"], o["marca"]) == (None, None)
+    assert (o["cor"], o["detalhe"], o["marca"]) == (None, None, None)
 
 
 def test_desfazer_devolve_os_atributos_do_modelo() -> None:
@@ -142,6 +148,17 @@ def test_segue_o_objeto_depois_de_trocar_o_tipo() -> None:
     assert mundo.cliente.get("/v1/jobs/j1/fila", headers=EDITOR).json() == []
 
 
+def test_reaplica_no_objeto_que_ja_tem_o_tipo_novo_com_outros_atributos() -> None:
+    mundo = _mundo()
+    _corrigir(mundo, _atributos(tipo="saia"))
+    novo = _modelo([_objeto("obj01", "saia", 1000, 5000, cor_base=["preto"])])
+    mundo.reprocessar(novo)
+
+    [o] = _objetos(mundo)
+    assert (o["tipo"], o["cor_base"], o["origem"]) == ("saia", ["azul"], "revisao")
+    assert mundo.cliente.get("/v1/jobs/j1/fila", headers=EDITOR).json() == []
+
+
 def test_entra_na_fila_ao_reprocessar_sem_objeto_correspondente() -> None:
     mundo = _mundo()
     _corrigir(mundo, _atributos(tipo="saia"))
@@ -185,7 +202,7 @@ def test_valor_invalido_e_422(valor: str) -> None:
     assert _corrigir(_mundo(), valor).status_code == 422
 
 
-def test_objeto_inexistente_e_404_ou_422() -> None:
+def test_objeto_inexistente_da_422() -> None:
     r = _corrigir(_mundo(), _atributos(), item_id="obj99")
 
-    assert r.status_code in (404, 422)
+    assert r.status_code == 422
