@@ -140,7 +140,7 @@ function camposDeTempo(): CampoDoEditor[] {
   ]
 }
 
-/** Os tempos dos campos; `undefined` se não são MM:SS ou o início passa do fim. */
+/** Os tempos dos campos; `undefined` se não são MM:SS ou H:MM:SS, ou se o início passa do fim. */
 function temposDosCampos(v: Record<string, Valor>, o: Intervalo, exatos?: Intervalo | null): Intervalo | undefined {
   if (exatos) return exatos.inicio_ms > exatos.fim_ms ? undefined : exatos
   const inicio = tempoDoCampo(texto(v.inicio), o.inicio_ms)

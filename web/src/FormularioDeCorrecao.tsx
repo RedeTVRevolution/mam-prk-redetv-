@@ -1,5 +1,5 @@
 import { Button, Checkbox, Group, NativeSelect, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core'
-import { type KeyboardEvent, type MutableRefObject, useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from 'react'
 import type { CampoDoEditor, Editor, Valor } from './catalogacao.ts'
 import { type Intervalo, relogio } from './linhaDoTempo.ts'
 
@@ -20,7 +20,7 @@ export function FormularioDeCorrecao({
   /** Os tempos que as alças da linha do tempo ajustaram; valem no lugar dos campos de tempo. */
   tempos?: Intervalo | null
   /** Recebe o salvar do formulário, para o Enter nas alças gravar como o Enter nos campos. */
-  salvarRef?: MutableRefObject<(() => void) | null>
+  salvarRef?: RefObject<(() => void) | null>
   /** Grava os pedidos com o motivo; devolve a mensagem de erro, ou `null` quando gravou. */
   aoSalvar: (pedidos: NonNullable<ReturnType<Editor['pedidos']>>, motivo: string) => Promise<string | null>
   aoCancelar: () => void

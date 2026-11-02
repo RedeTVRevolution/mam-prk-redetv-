@@ -209,6 +209,18 @@ test('acima de uma hora os campos mostram e leem H:MM:SS', () => {
   ])
 })
 
+test('um item depois de 1:00:00 abre e grava os tempos em H:MM:SS', () => {
+  const tarde = { ...D, comerciais: [{ id: 'c1', marca: 'Marca X', tipo: 'intervalo', inicio_ms: 3_700_250, fim_ms: 3_710_000 }] } as Decupagem
+  const item = itensDoPainel(tarde).find((i) => i.chave === 'comercial-0')!
+  const e = editorDoItem(tarde, item, catalogo)!
+
+  expect(e.inicial).toMatchObject({ inicio: '1:01:40', fim: '1:01:50' })
+  expect(e.pedidos(e.inicial)).toEqual([])
+  expect(e.pedidos({ ...e.inicial, fim: '1:02:05' })).toEqual([
+    { tipo: 'item.tempos', tipo_do_item: 'comercial', item_id: 'c1', valor: '3700250-3725000' },
+  ])
+})
+
 test('marcas: corrigido, ou aguardando o Curador; só as da versão aberta e ainda de pé', () => {
   const d = { ...D, versao_decupagem: 'v1' } as Decupagem
   const h = (id: string, tipo_do_item: string, item_id: string, estado: string, versao = 'v1') =>

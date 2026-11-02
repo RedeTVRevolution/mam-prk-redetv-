@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -453,12 +453,17 @@ test('Esc descarta os tempos das alças', async () => {
 test('arrastar uma alça e clicar em Salvar grava os tempos novos; Cancelar descarta', async () => {
   const usuario = await abrirAlcas()
   const alca = () => screen.getByRole('slider', { name: 'Início do item' })
-  const trilha = alca().parentElement as HTMLElement
-  trilha.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect
+  const arrastar = async () => {
+    const trilha = alca().parentElement as HTMLElement
+    trilha.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect
+    await usuario.pointer([
+      { keys: '[MouseLeft>]', target: alca(), coords: { clientX: 0 } },
+      { target: alca(), coords: { clientX: 120 } },
+      { keys: '[/MouseLeft]', target: alca() },
+    ])
+  }
 
-  fireEvent.pointerDown(alca(), { clientX: 0, pointerId: 1 })
-  fireEvent.pointerMove(alca(), { clientX: 120, pointerId: 1 })
-  fireEvent.pointerUp(alca(), { pointerId: 1 })
+  await arrastar()
   const novo = Number(alca().getAttribute('aria-valuenow'))
   expect(novo).not.toBe(10_000)
 
@@ -468,11 +473,7 @@ test('arrastar uma alça e clicar em Salvar grava os tempos novos; Cancelar desc
 
   await usuario.keyboard('{F2}')
   await screen.findByRole('form', { name: /Corrigir Leão Lobo/ })
-  const trilha2 = alca().parentElement as HTMLElement
-  trilha2.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect
-  fireEvent.pointerDown(alca(), { clientX: 0, pointerId: 1 })
-  fireEvent.pointerMove(alca(), { clientX: 120, pointerId: 1 })
-  fireEvent.pointerUp(alca(), { pointerId: 1 })
+  await arrastar()
   await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
 
   await waitFor(() => expect(correcoes).toHaveLength(1))
