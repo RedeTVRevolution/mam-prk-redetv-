@@ -805,7 +805,7 @@ def test_etapas_em_paralelo_nao_se_atropelam_no_etapa_atual() -> None:
     inicio = _subworkflow(texto, "marca_inicio")
     fim = _subworkflow(texto, "marca_fim")
     assert "params: [job_id, etapa, mostra_a_etapa: true]" in inicio
-    assert "params: [job_id, etapa, falhou_na_execucao, limpa_a_etapa: true]" in fim
+    assert "falhou_na_execucao, limpa_a_etapa: true," in fim
     etapa = _subworkflow(texto, "etapa_com_gpu")
     assert etapa.count("limpa_a_etapa: false") == 2
     # Só a falha do paralelo, depois dos dois ramos, limpa o campo.
@@ -889,7 +889,7 @@ def test_a_conta_das_tentativas_dos_valores_propostos_e_de_uma_espera_menor() ->
 
     # 60, 120, 240, 240, 240 s: 6 tentativas em 15 minutos.
     assert _tentativas(total, inicio, fator, teto) == 6
-    # Uma espera total menor dá menos tentativas; a zero vai direto ao plano B.
+    # Uma espera total menor dá menos tentativas; com zero, uma só antes do plano B.
     assert _tentativas(5 * 60, inicio, fator, teto) == 3
     assert _tentativas(0, inicio, fator, teto) == 1
 
@@ -927,3 +927,55 @@ def test_sucesso_na_gpu_registra_gpu_e_as_tentativas() -> None:
     assert "integerValue" in marca
     # Medição: a falha da gravação só vai ao log.
     assert "except:" in marca and "sys.log" in marca
+
+
+def test_falta_de_gpu_le_o_motivo_da_operacao_e_nao_confunde_permissao() -> None:
+    texto = _texto()
+
+    roda = _subworkflow(texto, "roda_o_job_com_gpu")
+    # A execução que falhou vem como OperationError: o motivo fica na operação.
+    assert '["operation", "error", "message"]' in roda
+    # A mesma conta do teste depois da publicação (scripts/testar-jobs-gpu.sh).
+    assert "insufficient (gpu|resources|capacity)" in roda
+    assert "|insufficient|" not in roda
+    script = (Path(__file__).parents[2] / "scripts" / "testar-jobs-gpu.sh").read_text()
+    assert "insufficient (gpu|resources|capacity)" in script
+
+
+def test_ramo_que_terminou_bem_nao_vira_falhou_pela_falha_do_outro() -> None:
+    texto = _texto()
+
+    fim = _subworkflow(texto, "marca_fim")
+    assert "confere_o_estado: true" in fim
+    assert (
+        '(confere_o_estado and documento_da_etapa.fields.estado.stringValue == "falhou")'
+        in fim
+    )
+    etapa = _subworkflow(texto, "etapa_com_gpu")
+    encerra = etapa[etapa.index("- encerra_a_etapa:") :]
+    assert "confere_o_estado: false" in encerra
+
+
+def test_marcar_a_falha_rele_o_job_se_o_outro_ramo_gravou_no_meio() -> None:
+    texto = _texto()
+
+    etapa = _subworkflow(texto, "etapa_com_gpu")
+    marca = etapa[
+        etapa.index("- marca_a_etapa_como_falha:") : etapa.index(
+            "- encerra_a_etapa_com_falha:"
+        )
+    ]
+    assert "try:" in marca and "except:" in marca
+    assert "next: rele_antes_da_falha" in marca
+    assert "releituras < 5" in marca
+    # Esgotadas as releituras, o erro original ainda sobe.
+    assert "raise: $${e}" in etapa[etapa.index("- encerra_a_etapa_com_falha:") :]
+
+
+def test_dispositivo_so_e_gravado_na_etapa_iniciada() -> None:
+    texto = _texto()
+
+    marca = _subworkflow(texto, "marca_dispositivo")
+    confere = marca.index('["etapas", "mapValue", "fields", etapa]) == null')
+    assert confere < marca.index("documents.patch")
+    assert "next: fim_do_dispositivo" in marca

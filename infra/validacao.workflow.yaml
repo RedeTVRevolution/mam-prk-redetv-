@@ -549,7 +549,7 @@ marca_inicio:
         return: null
 
 marca_fim:
-  params: [job_id, etapa, falhou_na_execucao, limpa_a_etapa: true]
+  params: [job_id, etapa, falhou_na_execucao, limpa_a_etapa: true, confere_o_estado: true]
   steps:
     - le_o_estado:
         try:
@@ -576,11 +576,13 @@ marca_fim:
     - decide_o_resultado:
         assign:
           # Os Jobs de validação e de análise terminam sem erro quando derrubam o Job
-          # pelo ciclo de vida: o resultado vem do estado, e não só da execução.
+          # pelo ciclo de vida: o resultado vem do estado, e não só da execução. As etapas
+          # em paralelo não conferem o estado: o Job que falhou pelo outro ramo não faz
+          # falhar a que terminou bem (o reprocessar recomeça da primeira etapa `falhou`).
           - resultado: concluida
     - confere_a_execucao:
         switch:
-          - condition: $${falhou_na_execucao or documento_da_etapa.fields.estado.stringValue == "falhou"}
+          - condition: $${falhou_na_execucao or (confere_o_estado and documento_da_etapa.fields.estado.stringValue == "falhou")}
             assign:
               - resultado: falhou
     - monta_o_fim:
@@ -667,6 +669,9 @@ etapa_com_gpu:
             # O Job já derruba o Job pelo ciclo de vida; aqui cobre o que o impediu de chegar
             # lá (tempo esgotado, memória estourada). Só marca se o Job segue em `analisando`
             # e não mudou desde a leitura.
+            - prepara_a_marcacao:
+                assign:
+                  - releituras: 0
             - rele_antes_da_falha:
                 call: googleapis.firestore.v1.projects.databases.documents.get
                 args:
@@ -677,21 +682,39 @@ etapa_com_gpu:
                   - condition: $${durante.fields.estado.stringValue != "analisando"}
                     next: encerra_a_etapa_com_falha
             - marca_a_etapa_como_falha:
-                call: googleapis.firestore.v1.projects.databases.documents.patch
-                args:
-                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
-                  currentDocument:
-                    updateTime: $${durante.updateTime}
-                  updateMask:
-                    fieldPaths: [estado, codigo_falha, atualizado_em]
-                  body:
-                    fields:
-                      estado:
-                        stringValue: falhou
-                      codigo_falha:
-                        stringValue: $${codigo_da_falha}
-                      atualizado_em:
-                        timestampValue: $${time.format(sys.now())}
+                try:
+                  call: googleapis.firestore.v1.projects.databases.documents.patch
+                  args:
+                    name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                    currentDocument:
+                      updateTime: $${durante.updateTime}
+                    updateMask:
+                      fieldPaths: [estado, codigo_falha, atualizado_em]
+                    body:
+                      fields:
+                        estado:
+                          stringValue: falhou
+                        codigo_falha:
+                          stringValue: $${codigo_da_falha}
+                        atualizado_em:
+                          timestampValue: $${time.format(sys.now())}
+                except:
+                  as: erro_da_marcacao
+                  steps:
+                    # O outro ramo gravou no Job entre a leitura e a gravação (o
+                    # `updateTime` mudou): relê e tenta de novo, sem perder o erro `e`.
+                    - conta_a_releitura:
+                        assign:
+                          - releituras: $${releituras + 1}
+                    - rele_de_novo:
+                        switch:
+                          - condition: $${releituras < 5}
+                            next: rele_antes_da_falha
+                    - registra_o_erro_da_marcacao:
+                        call: sys.log
+                        args:
+                          severity: ERROR
+                          text: $${"o Job " + job_id + " não foi marcado com " + codigo_da_falha}
             - encerra_a_etapa_com_falha:
                 raise: $${e}
     - encerra_a_etapa:
@@ -701,6 +724,7 @@ etapa_com_gpu:
           etapa: $${etapa}
           falhou_na_execucao: false
           limpa_a_etapa: false
+          confere_o_estado: false
 
 # O Job com GPU de `${regiao_gpu}`, com novas tentativas só quando falta GPU ou cota, e o Job
 # em CPU de `${regiao}` como plano B. Conta como falta de GPU ou de cota só a falha antes de o
@@ -741,9 +765,11 @@ roda_o_job_com_gpu:
           steps:
             - le_o_motivo:
                 assign:
-                  - mensagem: $${default(map.get(erro_da_gpu, "message"), "")}
+                  # A execução que falhou chega como OperationError, com mensagem genérica
+                  # no topo e o motivo em `operation.error.message`: as duas entram na conta.
+                  - mensagem: $${default(map.get(erro_da_gpu, "message"), "") + " " + default(map.get(erro_da_gpu, ["operation", "error", "message"]), "")}
                   - codigo_http: $${default(map.get(erro_da_gpu, "code"), 0)}
-                  - faltou_gpu: $${(codigo_http == 429 or text.match_regex(mensagem, "(?i)quota|capacity|resource.?exhausted|insufficient|no available|out of stock")) and not text.match_regex(mensagem, "(?i)exit[(]|exit code|container called")}
+                  - faltou_gpu: $${(codigo_http == 429 or text.match_regex(mensagem, "(?i)quota|capacity|resource.?exhausted|insufficient (gpu|resources|capacity)|no available|out of stock")) and not text.match_regex(mensagem, "(?i)exit[(]|exit code|container called")}
             - falha_dentro_do_conteiner:
                 switch:
                   - condition: $${not faltou_gpu}
@@ -822,6 +848,27 @@ roda_o_job_com_gpu:
 marca_dispositivo:
   params: [job_id, etapa, dispositivo, tentativas]
   steps:
+    - le_a_etapa:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: documento_do_dispositivo
+        except:
+          as: erro_da_leitura_do_dispositivo
+          steps:
+            - registra_o_erro_da_leitura_do_dispositivo:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"dispositivo da etapa " + etapa + " não gravado para " + job_id}
+            - sai_sem_gravar_o_dispositivo:
+                return: null
+    # Como no `marca_fim`: sem o início, a etapa ficaria sem `inicio` e o Job, ilegível.
+    - so_se_a_etapa_comecou:
+        switch:
+          - condition: $${map.get(documento_do_dispositivo.fields, ["etapas", "mapValue", "fields", etapa]) == null}
+            next: fim_do_dispositivo
     - monta_o_dispositivo:
         assign:
           - agora: $${time.format(sys.now())}

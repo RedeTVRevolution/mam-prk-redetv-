@@ -50,7 +50,7 @@ variable "espera_gpu_minutos" {
   default     = 15
   validation {
     condition     = floor(var.espera_gpu_minutos) == var.espera_gpu_minutos && var.espera_gpu_minutos >= 0
-    error_message = "espera_gpu_minutos é um inteiro a partir de 0 (0 vai direto para a CPU)."
+    error_message = "espera_gpu_minutos é um inteiro a partir de 0 (com 0, a GPU é tentada uma vez só antes da CPU)."
   }
 }
 
