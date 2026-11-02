@@ -115,6 +115,7 @@ from api.sugestoes import (
     RepositorioDeSugestoesEmMemoria,
     criar_rotas_da_contagem,
 )
+from api.taxa_de_correcao import criar_rotas_da_qualidade
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -250,6 +251,7 @@ def criar_app(
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
     repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
+    repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
     v1.include_router(
         criar_rotas(
             repositorio_de_jobs,
@@ -321,9 +323,17 @@ def criar_app(
     v1.include_router(
         criar_rotas_da_revisao(
             repositorio_de_jobs,
-            revisao or RepositorioDeRevisaoEmMemoria(),
+            repositorio_da_revisao,
             relogio,
             limite_de_inatividade_s,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_qualidade(
+            repositorio_de_jobs,
+            armazenamento_dos_jobs,
+            repositorio_de_correcoes,
+            repositorio_da_revisao,
         )
     )
     app.include_router(v1)

@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao taxa-de-correcao
 
 instalar:
 	uv sync --locked
@@ -193,3 +193,12 @@ exportar-regressao:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.regressao "$(PASTA)"
+
+# Taxa de correção por tipo, programa e versão do pipeline, em CSV (#265):
+# make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO, UTC, inclusive)
+taxa-de-correcao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.taxa_de_correcao "$(DESDE)" "$(ATE)" "$(PROGRAMA)"
