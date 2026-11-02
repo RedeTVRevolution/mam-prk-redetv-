@@ -278,12 +278,20 @@ def _palavras(texto: str) -> list[str]:
     return _PALAVRA.findall(normalizar(texto))
 
 
-def _forma(palavra: str, citada: str) -> bool:
-    """`citada` é `palavra`, no plural simples ou no feminino ("vermelha", "pretas")."""
+def _no_plural(palavra: str, citada: str) -> bool:
+    """`citada` é `palavra` ou o plural simples dela ("sandálias", "azuis")."""
     formas = {palavra, palavra + "s", palavra + "es"}
-    if palavra.endswith("o"):
-        formas |= {palavra[:-1] + "a", palavra[:-1] + "as"}
+    if palavra.endswith("l"):
+        formas.add(palavra[:-1] + "is")
     return citada in formas
+
+
+def _e_a_cor(cor: str, citada: str) -> bool:
+    """A cor também concorda com a peça: "vermelha", "pretas". Só a cor: no tipo, a
+    troca do "o" pelo "a" faria "bolsa" casar com "bolso"."""
+    if cor.endswith("o") and _no_plural(cor[:-1] + "a", citada):
+        return True
+    return _no_plural(cor, citada)
 
 
 def _onde_cita(tipo: str, palavras: list[str]) -> int | None:
@@ -292,26 +300,34 @@ def _onde_cita(tipo: str, palavras: list[str]) -> int | None:
     if not do_tipo:
         return None
     for i in range(len(palavras) - len(do_tipo) + 1):
-        if all(
-            _forma(t, palavras[i + k])
-            if k == len(do_tipo) - 1
-            else t == palavras[i + k]
-            for k, t in enumerate(do_tipo)
-        ):
+        if all(_no_plural(t, palavras[i + k]) for k, t in enumerate(do_tipo)):
             return i
     return None
 
 
-def _cor_perto(inicio: int, fim: int, palavras: list[str]) -> str | None:
-    """A cor da lista fechada mais perto do tipo (palavras `inicio` a `fim`), que é
-    de quem ela descreve em "terno preto e camisa rosa"."""
-    achadas = [
-        (min(abs(i - fim), abs(inicio - i)), i, cor)
-        for i, p in enumerate(palavras)
-        for cor in CORES_BASE
-        if _forma(cor, p)
-    ]
-    return min(achadas)[2] if achadas else None
+def _citados(conhecidos: list[str], palavras: list[str]) -> list[tuple[int, int, str]]:
+    """Os tipos citados, com a primeira e a última palavra de cada, na ordem do texto.
+    O mais longo vem antes e fica com as palavras: "óculos de sol" não cita "óculos"."""
+    citados: list[tuple[int, int, str]] = []
+    for tipo in conhecidos:
+        onde = _onde_cita(tipo, palavras)
+        if onde is None:
+            continue
+        fim = onde + len(_palavras(tipo)) - 1
+        if not any(onde <= b and a <= fim for a, b, _ in citados):
+            citados.append((onde, fim, tipo))
+    return sorted(citados)
+
+
+def _cor_depois(palavras: list[str]) -> str | None:
+    """A primeira cor da lista fechada nas palavras que seguem o tipo até o próximo
+    tipo citado: em "terno preto e camisa rosa" o preto é do terno, e em "terno e
+    camisa rosa" o terno fica sem cor."""
+    for p in palavras:
+        for cor in CORES_BASE:
+            if _e_a_cor(cor, p):
+                return str(cor)
+    return None
 
 
 def _ja_tem(
@@ -325,7 +341,8 @@ def _ja_tem(
             continue
         do_objeto = _palavras(str(o.get("tipo", "")))
         if len(do_objeto) == len(alvo) and all(
-            _forma(a, b) or _forma(b, a) for a, b in zip(alvo, do_objeto, strict=True)
+            _no_plural(a, b) or _no_plural(b, a)
+            for a, b in zip(alvo, do_objeto, strict=True)
         ):
             return True
     return False
@@ -344,12 +361,13 @@ def _objeto_citado_no_visual(mundo: Contexto) -> Iterable[Sugestao]:
     if not aparicoes:
         return
     objetos = [o for o in mundo.entregue.get("objetos", []) if isinstance(o, dict)]
+    # A lista de tipos não guarda a categoria: vem de um objeto do mesmo tipo no
+    # vídeo, senão é roupa, o que a análise principal mais registra.
     categorias = {
         normalizar(str(o["tipo"])): str(o["categoria"])
         for o in objetos
         if o.get("tipo") and o.get("categoria")
     }
-    # Os tipos mais longos primeiro: "óculos de sol" antes de "óculos".
     conhecidos = sorted(
         {" ".join(t.split()): None for t in mundo.tipos_de_objeto() if t.strip()},
         key=lambda t: (-len(_palavras(t)), t),
@@ -357,51 +375,49 @@ def _objeto_citado_no_visual(mundo: Contexto) -> Iterable[Sugestao]:
     for pessoa, aparicao in aparicoes:
         trecho = _intervalo(aparicao)
         palavras = _palavras(str(aparicao["visual"]))
-        usadas: list[tuple[int, int]] = []
-        for tipo in conhecidos:
-            onde = _onde_cita(tipo, palavras)
-            if onde is None:
-                continue
-            fim = onde + len(_palavras(tipo)) - 1
-            if any(onde <= b and a <= fim for a, b in usadas):
-                continue
-            usadas.append((onde, fim))
+        citados = _citados(conhecidos, palavras)
+        for n, (_, fim, tipo) in enumerate(citados):
             if _ja_tem(objetos, str(pessoa["id"]), tipo, trecho):
                 continue
-            cor = _cor_perto(onde, fim, palavras)
-            categoria = categorias.get(normalizar(tipo), "roupa")
-            descricao = f"{tipo} {cor}" if cor else tipo
-            yield Sugestao(
-                id=_id(
-                    "objeto_no_visual",
-                    f"{pessoa['id']}:{normalizar(tipo)}",
-                    *trecho,
-                ),
-                tipo="objeto_do_visual",
-                inicio_ms=trecho[0],
-                fim_ms=trecho[1],
-                pergunta=f"Acrescentar {descricao} de {pessoa['nome']}?",
-                contexto=(
-                    f"Visual às {_relogio(trecho[0])}: "
-                    f"{' '.join(str(aparicao['visual']).split())}"
-                ),
-                correcao=Proposta(
-                    tipo="objeto.acrescentar",
-                    item_id="",
-                    valor=json.dumps(
-                        {
-                            "tipo": tipo,
-                            "cor_base": [cor] if cor else [],
-                            "categoria": categoria,
-                            "pessoa": str(pessoa["id"]),
-                            "relacao": _RELACAO_DA_CATEGORIA.get(categoria, "usa"),
-                            "inicio_ms": trecho[0],
-                            "fim_ms": trecho[1],
-                        },
-                        ensure_ascii=False,
-                    ),
-                ),
-            )
+            ate = citados[n + 1][0] if n + 1 < len(citados) else len(palavras)
+            cor = _cor_depois(palavras[fim + 1 : ate])
+            objeto = {
+                "tipo": tipo,
+                "cor_base": [cor] if cor else [],
+                "categoria": categorias.get(normalizar(tipo), "roupa"),
+                "pessoa": str(pessoa["id"]),
+                "inicio_ms": trecho[0],
+                "fim_ms": trecho[1],
+            }
+            yield _acrescentar_objeto(objeto, pessoa, aparicao)
+
+
+def _acrescentar_objeto(
+    objeto: dict[str, Any], pessoa: dict[str, Any], aparicao: dict[str, Any]
+) -> Sugestao:
+    objeto["relacao"] = _RELACAO_DA_CATEGORIA.get(objeto["categoria"], "usa")
+    descricao = " ".join([objeto["tipo"], *objeto["cor_base"]])
+    return Sugestao(
+        id=_id(
+            "objeto_citado_no_visual",
+            f"{pessoa['id']}:{normalizar(objeto['tipo'])}",
+            objeto["inicio_ms"],
+            objeto["fim_ms"],
+        ),
+        tipo="objeto_do_visual",
+        inicio_ms=objeto["inicio_ms"],
+        fim_ms=objeto["fim_ms"],
+        pergunta=f"Acrescentar {descricao} de {pessoa['nome']}?",
+        contexto=(
+            f"Visual às {_relogio(objeto['inicio_ms'])}: "
+            f"{' '.join(str(aparicao['visual']).split())}"
+        ),
+        correcao=Proposta(
+            tipo="objeto.acrescentar",
+            item_id="",
+            valor=json.dumps(objeto, ensure_ascii=False),
+        ),
+    )
 
 
 REGRAS: tuple[Regra, ...] = (
@@ -426,21 +442,18 @@ def sugestoes_abertas(
     return sorted(todas, key=lambda s: (s.inicio_ms, s.fim_ms, s.id))
 
 
+# As propostas que levam um JSON: o campo que o "outro valor" do editor troca.
+_CAMPO_DO_VALOR_DO_EDITOR = {"pauta_do_trecho": "titulo", "objeto_do_visual": "tipo"}
+
+
 def com_o_valor_do_editor(sugestao: Sugestao, valor: str) -> Sugestao:
-    """A sugestão com o "outro nome" (o título da pauta, o tipo do objeto) que o editor deu no lugar
-    do proposto."""
+    """A sugestão com o "outro nome" (o título da pauta, o tipo do objeto) que o
+    editor deu no lugar do proposto."""
     proposta = sugestao.correcao
-    if sugestao.tipo == "pauta_do_trecho":
-        pauta = json.loads(proposta.valor)
-        pauta["titulo"] = valor
-        novo = json.dumps(pauta, ensure_ascii=False)
-        return sugestao.model_copy(
-            update={"correcao": proposta.model_copy(update={"valor": novo})}
-        )
-    if sugestao.tipo == "objeto_do_visual":
-        objeto = json.loads(proposta.valor)
-        objeto["tipo"] = valor
-        novo = json.dumps(objeto, ensure_ascii=False)
+    campo = _CAMPO_DO_VALOR_DO_EDITOR.get(sugestao.tipo)
+    if campo:
+        corpo = json.loads(proposta.valor) | {campo: valor}
+        novo = json.dumps(corpo, ensure_ascii=False)
         return sugestao.model_copy(
             update={"correcao": proposta.model_copy(update={"valor": novo})}
         )

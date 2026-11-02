@@ -408,6 +408,26 @@ def test_a_categoria_e_a_relacao_vem_do_objeto_ja_visto_no_video() -> None:
     assert sugestao["pergunta"] == "Acrescentar sandália de Sabrina Sato?"
 
 
+def test_a_cor_e_so_a_que_segue_o_tipo_ate_o_proximo() -> None:
+    sugestoes_ = _do_visual(_com_visual("cabelo preto, terno e camisa rosa"))
+
+    por_tipo = {o["tipo"]: o["cor_base"] for o in map(_objeto_da_sugestao, sugestoes_)}
+    assert por_tipo == {"terno": [], "camisa": ["rosa"]}
+
+
+def test_a_cor_no_plural_irregular_casa() -> None:
+    [sugestao] = _do_visual(_com_visual("sandálias azuis"))
+
+    assert _objeto_da_sugestao(sugestao)["cor_base"] == ["azul"]
+
+
+def test_o_feminino_vale_para_a_cor_nao_para_o_tipo() -> None:
+    mundo = _com_visual("bolsa preta")
+    mundo.tipos_de_objeto.registrar("j1", {"bolso": 1})
+
+    assert _do_visual(mundo) == []
+
+
 def test_o_tipo_com_varias_palavras_vale_e_nao_repete_o_mais_curto() -> None:
     mundo = _com_visual("óculos de sol escuros")
     mundo.tipos_de_objeto.registrar("j1", {"óculos": 4})

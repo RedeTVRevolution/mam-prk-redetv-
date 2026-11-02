@@ -1053,6 +1053,14 @@ class TestTiposDeObjetoFirestore:
 
         assert [t["tipo"] for t in achados] == ["sandália", "saia"]
 
+    def test_conhecidos_traz_todos_os_vivos_sem_o_teto_da_busca(
+        self, tipos: TiposDeObjetoFirestore
+    ) -> None:
+        tipos.registrar("j1", {"sapato": 1, "saia": 2})
+        tipos.registrar("j1", {"saia": 2})
+
+        assert tipos.conhecidos() == ["saia"]
+
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestRepositorioDeAuditoriaFirestore:

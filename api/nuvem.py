@@ -687,6 +687,12 @@ class TiposDeObjetoFirestore:
         vivos.sort(key=lambda d: (-d["total"], d["chave"]))
         return [{"tipo": d["tipo"], "ocorrencias": d["total"]} for d in vivos[:limite]]
 
+    def conhecidos(self) -> list[str]:
+        """A coleção inteira: a busca corta em `TETO_DA_BUSCA_DE_TIPOS` pela ordem da
+        chave, e a regra das sugestões precisa de todos."""
+        achados = (d.to_dict() or {} for d in self._colecao.stream())
+        return [d["tipo"] for d in achados if d.get("total", 0) > 0 and d.get("tipo")]
+
 
 class SugestoesFirestore:
     """Nomes sugeridos para o perfil de um programa (#111). Um documento por programa
