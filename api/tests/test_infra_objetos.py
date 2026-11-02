@@ -202,12 +202,12 @@ def test_o_motor_dos_objetos_e_florence_por_padrao_e_so_aceita_dois_valores() ->
 def test_o_workflows_recebe_o_motor_e_o_job_de_objetos_e_o_cabecalho_os_cita() -> None:
     assert re.search(r"motor_objetos\s+= var\.motor_objetos", MAIN)
     assert re.search(
-        r"job_de_objetos\s+= google_cloud_run_v2_job\.objetos_gpu\.name", MAIN
+        r"job_de_objetos_gpu\s+= google_cloud_run_v2_job\.objetos_gpu\.name", MAIN
     )
     cabecalho = (
         (RAIZ / "infra" / "validacao.workflow.yaml").read_text().split("\nmain:")[0]
     )
-    assert "${motor_objetos}" in cabecalho and "${job_de_objetos}" in cabecalho
+    assert "${motor_objetos}" in cabecalho and "${job_de_objetos_gpu}" in cabecalho
 
 
 def test_a_imagem_e_o_nome_do_job_saem_como_output() -> None:

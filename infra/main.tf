@@ -1681,7 +1681,7 @@ resource "google_workflows_workflow" "validacao" {
     gpu_espera_maxima_s    = var.gpu_espera_maxima_s
     job_de_transcricao_gpu = google_cloud_run_v2_job.transcricao_gpu.name
     job_de_ocr_gpu         = google_cloud_run_v2_job.ocr_gpu.name
-    job_de_objetos         = google_cloud_run_v2_job.objetos_gpu.name
+    job_de_objetos_gpu     = google_cloud_run_v2_job.objetos_gpu.name
     motor_objetos          = var.motor_objetos
     job_de_analise         = google_cloud_run_v2_job.analise.name
     job_de_identificacao   = google_cloud_run_v2_job.identificacao.name

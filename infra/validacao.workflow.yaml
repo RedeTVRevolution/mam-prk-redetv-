@@ -11,7 +11,7 @@
 # Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
 # ${job_de_transcricao}, ${job_de_ocr}, ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
 # ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
-# ${job_de_objetos}, ${motor_objetos} (o inventário de objetos do Florence-2, #243: o passo
+# ${job_de_objetos_gpu}, ${motor_objetos} (o inventário de objetos do Florence-2, #243: o passo
 # ainda não existe aqui),
 # ${job_de_analise}, ${job_de_identificacao}, ${job_de_referencias}, ${job_de_comparacao},
 # ${job_de_quadros}, ${job_de_indexacao}.

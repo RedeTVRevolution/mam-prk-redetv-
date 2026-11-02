@@ -46,8 +46,8 @@ options:
   logging: CLOUD_LOGGING_ONLY
   # Máquina maior (#211): sete montagens ao mesmo tempo, com modelos e bibliotecas pesadas.
   machineType: E2_HIGHCPU_8
-  # Disco da primeira montagem, sem cache (#238, #243): as sete imagens expandidas somam ~25 GB
+  # Disco da primeira montagem, sem cache (#238, #243): as sete imagens expandidas somam ~33 GB
   # (as de CPU ~8 GB; as GPU, ~25 GB com o CUDA, o Paddle e o torch), mais as rodas baixadas, os
-  # blobs comprimidos do cache e do envio (~15 GB) e os intermediários do uv e das
-  # camadas: ~3x, ~165 GB. 300 GB dá folga de ~1,8x.
+  # blobs comprimidos do cache e do envio (~21 GB) e os intermediários do uv e das
+  # camadas: ~3x, ~160 a 170 GB. 300 GB dá folga de ~1,8x.
   diskSizeGb: 300
