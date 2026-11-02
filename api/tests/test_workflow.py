@@ -686,7 +686,7 @@ def test_contas_e_papeis_dos_jobs_novos_sao_so_os_combinados() -> None:
     for nome in ("identificacao", "comparacao"):
         assert f'"{nome}"' in contas
         assert re.search(
-            rf'\n\s+{nome}\s+= \["roles/datastore.user", "roles/aiplatform.user"\]',
+            rf'\n\s+{nome}\s+= \["roles/datastore.user", local.papel_vertex_predicao\]',
             main,
         )
     assert re.search(

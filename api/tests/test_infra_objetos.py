@@ -146,7 +146,7 @@ def test_a_conta_do_job_so_toca_o_bucket_das_decupagens() -> None:
     ]
     linha_do_projeto = re.search(r"^\s+objetos\s+= \[(.*)\]$", projeto, re.MULTILINE)
     assert linha_do_projeto
-    assert linha_do_projeto.group(1) == '"roles/aiplatform.user"'
+    assert linha_do_projeto.group(1) == "local.papel_vertex_predicao"
 
 
 def test_o_job_de_objetos_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu() -> None:

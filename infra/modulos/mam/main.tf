@@ -638,6 +638,12 @@ resource "google_service_account" "mam" {
 # vídeo bom como arquivo_corrompido.
 # A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
+  # Escritos pelo role_id, e não pelo atributo do recurso: o for_each do iam_member
+  # tira as chaves daqui, e elas têm de ser conhecidas no plan (o depends_on do
+  # iam_member garante que o papel existe antes da concessão).
+  papel_vertex_predicao  = "projects/${var.projeto}/roles/mamVertexPredicao"
+  papel_vertex_avaliacao = "projects/${var.projeto}/roles/mamVertexAvaliacao"
+
   papeis_no_projeto = {
     # `workflows.invoker` é só iniciar execuções (o reprocessar do #147), e o projeto tem
     # um único workflow.
@@ -645,30 +651,29 @@ locals {
     # menor papel com a permissão `discoveryengine.rankingConfigs.rank`, da Ranking API (#232).
     # `bigquery.jobUser` (web e indexacao): rodar o script que troca as linhas do Job na
     # cópia do BigQuery (#260); o acesso aos dados é só no dataset, mais abaixo.
-    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/workflows.invoker", "roles/modelarmor.user", "roles/discoveryengine.viewer", "roles/bigquery.jobUser"]
+    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", local.papel_vertex_predicao, "roles/workflows.invoker", "roles/modelarmor.user", "roles/discoveryengine.viewer", "roles/bigquery.jobUser"]
     validacao   = ["roles/datastore.user"]
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
-    analise     = ["roles/datastore.user", "roles/aiplatform.user"]
+    analise     = ["roles/datastore.user", local.papel_vertex_predicao]
     quadros     = ["roles/datastore.user"]
     # Grava o estado da indexação no Job e escreve na coleção da busca (gravar, apagar,
     # consultar e buscar; conferido no #122). A conta `web` tem o mesmo papel, porque
     # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção. O
     # embedding automático da coleção roda com a credencial de quem grava ou busca, e não
-    # com a do Agent Retrieval: as duas precisam chamar a Vertex (aiplatform.user).
-    indexacao   = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/bigquery.jobUser"]
-    referencias = ["roles/datastore.user", "roles/aiplatform.user"]
+    # com a do Agent Retrieval: as duas precisam chamar a Vertex (papel sob medida, só a predição).
+    indexacao   = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", local.papel_vertex_predicao, "roles/bigquery.jobUser"]
+    referencias = ["roles/datastore.user", local.papel_vertex_predicao]
     # Leem o Job, o catálogo e a Decupagem no Firestore e chamam o Gemini; a comparação
     # também grava as sugestões de perfil.
-    identificacao = ["roles/datastore.user", "roles/aiplatform.user"]
-    comparacao    = ["roles/datastore.user", "roles/aiplatform.user"]
+    identificacao = ["roles/datastore.user", local.papel_vertex_predicao]
+    comparacao    = ["roles/datastore.user", local.papel_vertex_predicao]
     # O Job do inventário chama o Gemini (texto, ou os quadros); não toca o Firestore.
-    objetos = ["roles/aiplatform.user"]
+    objetos = [local.papel_vertex_predicao]
     # A avaliação (#255) lê os Jobs, grava as notas no Firestore e chama o serviço de
-    # avaliação da Vertex. Papel sob medida do #302 ainda não existe: aiplatform.user por
-    # enquanto; o serviço de avaliação chama o juiz (Gemini) e a conta precisa de
-    # aiplatform.endpoints.predict e aiplatform.evaluationTasks.* ou equivalente (a confirmar).
-    avaliacao = ["roles/datastore.user", "roles/aiplatform.user"]
+    # avaliação da Vertex (`evaluateInstances`): papel sob medida com a predição e a
+    # permissão do próprio `evaluateInstances` (#302).
+    avaliacao = ["roles/datastore.user", local.papel_vertex_avaliacao]
     # A amostra da fila (#288) só lê os Jobs do Firestore e escreve no log.
     fila = ["roles/datastore.user"]
     # O agendador só dispara os Jobs da avaliação e da fila (papel em cada Job, mais abaixo).
@@ -722,6 +727,10 @@ resource "google_project_iam_member" "mam" {
   project = var.projeto
   role    = each.value.papel
   member  = google_service_account.mam[each.value.sa].member
+  depends_on = [
+    google_project_iam_custom_role.vertex_predicao,
+    google_project_iam_custom_role.vertex_avaliacao,
+  ]
 }
 
 resource "google_storage_bucket_iam_member" "mam" {
