@@ -454,3 +454,23 @@ def test_corte_vem_do_ambiente_e_sem_ele_nao_ha_corte() -> None:
         ambiente | {"BUSCA_DISTANCIA_MAXIMA": "0.25", "BUSCA_PALAVRAS_MINIMAS": "3"}
     )
     assert (corte.distancia_maxima, corte.palavras_minimas) == (0.25, 3)
+
+
+def test_o_destaque_vai_ao_indice_e_volta_na_busca() -> None:
+    base: dict[str, Any] = {"id": "j:x:0", "job_id": "j", "inicio_ms": 0, "fim_ms": 1}
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, transporte).gravar(
+        "j", [Registro(tipo="objeto", destaque=3, texto="carro azul, veiculo", **base)]
+    )
+    corpo = transporte.chamadas[-1][2]
+    assert corpo is not None
+    dados = corpo["requests"][0]["dataObject"]["data"]
+    assert dados["destaque"] == 3
+    assert esquema_da_colecao(CONFIG)["dataSchema"]["properties"]["destaque"] == {
+        "type": "integer"
+    }
+    transporte = TransporteFalso(
+        {"results": [{"results": [{"dataObject": {"data": dados}}]}]}
+    )
+    [achado] = AgentRetrieval(CONFIG, transporte).buscar(Consulta(texto="carro"))
+    assert achado.destaque == 3

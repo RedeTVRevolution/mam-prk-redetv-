@@ -32,6 +32,10 @@ from api.jobs import Armazenamento, Job, RepositorioDeJobs
 log = logging.getLogger(__name__)
 
 RRF_K = 60
+# Cada nível de destaque acima de 1 soma isto à pontuação do objeto do inventário: o
+# destaque 3 (+6%) passa quem está logo atrás, uns três lugares na lista, e não quem
+# está bem mais acima. Registro sem destaque pesa 1.
+PESO_POR_NIVEL_DE_DESTAQUE = 0.03
 TETO_DE_REGISTROS = 100  # por cláusula
 TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
@@ -262,7 +266,10 @@ class Busca:
         if entendida.texto_livre and achados:
             try:
                 achados = self._ranking.reordenar(entendida.texto_livre, achados)
-                posicao = {r.id: i for i, r in enumerate(achados)}
+                # A ordem do ranking, com o peso do destaque sobre a posição.
+                posicao = _posicoes_por_pontos(
+                    [(r, 0, _peso(r) / (RRF_K + i + 1)) for i, r in enumerate(achados)]
+                )
             except Exception:
                 log.exception("ranking indisponível; fica a ordem do índice")
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
@@ -569,6 +576,10 @@ def _termos(
     return termos
 
 
+def _peso(r: Registro) -> float:
+    return 1 + PESO_POR_NIVEL_DE_DESTAQUE * max((r.destaque or 1) - 1, 0)
+
+
 def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int, float]]:
     """RRF entre as cláusulas; cada registro leva a cláusula em que ficou melhor e os pontos."""
     pontos: dict[str, float] = defaultdict(float)
@@ -576,7 +587,7 @@ def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int, float]]:
     registros: dict[str, Registro] = {}
     for c, lista in enumerate(listas):
         for posicao, r in enumerate(lista):
-            pontos[r.id] += 1 / (RRF_K + posicao + 1)
+            pontos[r.id] += _peso(r) / (RRF_K + posicao + 1)
             registros[r.id] = r
             if r.id not in melhor or posicao < melhor[r.id][0]:
                 melhor[r.id] = (posicao, c)

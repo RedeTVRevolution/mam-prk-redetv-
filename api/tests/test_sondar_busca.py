@@ -1,5 +1,5 @@
 from api.busca import Momento, VideoDoResultado
-from api.sondar_busca import Caso, veredito
+from api.sondar_busca import CASOS, Caso, veredito
 
 
 def _video(*motivos: str) -> VideoDoResultado:
@@ -43,3 +43,19 @@ def test_existe_olha_o_primeiro_momento_e_o_teto() -> None:
 def test_ausente_pede_nenhum_video() -> None:
     assert veredito(Caso("xyzzy", None), [])
     assert not veredito(Caso("xyzzy", None), [_video("Fala: xyzzy")])
+
+
+def test_a_sonda_tem_consultas_de_objetos_de_cena() -> None:
+    termos = {c.termo for c in CASOS if c.consulta in CONSULTAS_DE_CENA}
+    # O carro BYD e as motos do telão (#121); os livros, a revista e o microfone da FAMA.
+    assert termos == {"byd", "moto", "livro", "revista", "microfone"}
+    assert all(c.termo and c.teto for c in CASOS if c.consulta in CONSULTAS_DE_CENA)
+
+
+CONSULTAS_DE_CENA = {
+    "carro BYD",
+    "motos no telão",
+    "livros",
+    "revista",
+    "microfone da RedeTV!",
+}

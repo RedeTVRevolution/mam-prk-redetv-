@@ -1,5 +1,12 @@
-from api.decupagem import Decupagem
-from api.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA, _decupagem, _objeto
+from api.decupagem import Decupagem, ObjetoDoInventario
+from api.exemplos_da_busca import (
+    EXEMPLOS,
+    OUTRA,
+    SABRINA,
+    _decupagem,
+    _objeto,
+    _pessoa,
+)
 from api.indice_da_busca import (
     Consulta,
     Filtros,
@@ -121,3 +128,116 @@ def test_fala_e_gc_levam_o_quadro_do_plano_em_que_comecam() -> None:
         if r.tipo in ("fala", "texto_na_tela")
     }
     assert quadros == {"fala": "pla1.jpg", "texto_na_tela": "pla1.jpg"}
+
+
+def _com_inventario(d: Decupagem) -> Decupagem:
+    def objeto(
+        nome: str, categoria: str, cor: str | None, destaque: int
+    ) -> ObjetoDoInventario:
+        return ObjetoDoInventario.model_validate(
+            {
+                "nome": nome,
+                "categoria": categoria,
+                "cor": cor,
+                "caixas": [
+                    {
+                        "quadro": "pla1-a.jpg",
+                        "x": 0.1,
+                        "y": 0.1,
+                        "largura": 0.5,
+                        "altura": 0.5,
+                    }
+                ],
+                "destaque": destaque,
+            }
+        )
+
+    inventario = [
+        objeto("carro", "veiculo", "azul", 3),
+        objeto("microfone", "eletronico", None, 2),
+        objeto("livro", "documento", "vermelho", 1),
+    ]
+    planos = [
+        p.model_copy(update={"inventario": inventario if p.id == "pla1" else []})
+        for p in d.planos
+    ]
+    return d.model_copy(update={"planos": planos})
+
+
+def test_o_plano_com_inventario_leva_todos_os_objetos_no_registro_do_plano() -> None:
+    decupagem = _com_inventario(_decupagem([], [], []))
+    [plano, outro] = [
+        r
+        for r in registros_da_decupagem("j", decupagem, None, None)
+        if r.tipo == "plano"
+    ]
+    for palavra in ("carro", "azul", "microfone", "livro", "vermelho", "documento"):
+        assert palavra in (plano.descricao or "")
+    assert "carro" not in (outro.descricao or "")
+
+
+def test_so_o_destaque_3_ganha_registro_proprio() -> None:
+    decupagem = _com_inventario(_decupagem([], [], []))
+    objetos = [
+        r
+        for r in registros_da_decupagem("j", decupagem, None, None)
+        if r.tipo == "objeto"
+    ]
+    [carro] = objetos
+    assert (carro.destaque, carro.categoria, carro.tipo_do_objeto, carro.cor) == (
+        3,
+        "veiculo",
+        "carro",
+        "azul",
+    )
+    assert (carro.inicio_ms, carro.fim_ms, carro.quadro) == (0, 4_000, "pla1-a.jpg")
+    assert carro.cor_base == ["azul"]
+
+
+def test_o_objeto_de_cena_curto_leva_a_categoria_e_passa_do_piso_de_palavras() -> None:
+    decupagem = _com_inventario(_decupagem([], [], []))
+    [carro] = [
+        r
+        for r in registros_da_decupagem("j", decupagem, None, None)
+        if r.tipo == "objeto"
+    ]
+    assert carro.texto == "carro azul, veiculo"
+    assert len((carro.texto or "").split()) >= 3
+
+
+def test_a_roupa_curta_leva_a_categoria_e_o_dono() -> None:
+    blazer = _objeto("obj01", "roupa", "blazer", "preto", "pes01", 1_000)
+    decupagem = _decupagem(
+        [_pessoa("pes01", "Flávia Noronha", "cat-flavia", 0, 4_000)], [blazer], []
+    )
+    [roupa] = [
+        r
+        for r in registros_da_decupagem("j", decupagem, None, None)
+        if r.tipo == "objeto"
+    ]
+    assert roupa.texto == "blazer preto, roupa, de Flávia Noronha"
+    assert len((roupa.texto or "").split()) >= 3
+
+
+def test_pessoa_nao_identificada_nao_vira_dono_no_texto() -> None:
+    blazer = _objeto("obj01", "roupa", "blazer", "preto", "pes01", 1_000)
+    decupagem = _decupagem(
+        [_pessoa("pes01", "não identificado", "cat-x", 0, 4_000)], [blazer], []
+    )
+    [roupa] = [
+        r
+        for r in registros_da_decupagem("j", decupagem, None, None)
+        if r.tipo == "objeto"
+    ]
+    assert roupa.texto == "blazer preto, roupa"
+
+
+def test_decupagem_sem_inventario_segue_como_antes() -> None:
+    decupagem = _decupagem([], [], [])
+    registros = registros_da_decupagem("j", decupagem, None, None)
+    assert [r.tipo for r in registros] == ["plano", "plano", "texto_na_tela"]
+    assert all(r.destaque is None for r in registros)
+    assert [r.descricao for r in registros if r.tipo == "plano"] == [
+        "estúdio",
+        "bastidor",
+    ]

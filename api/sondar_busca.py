@@ -1,4 +1,4 @@
-"""`make sondar-busca`: roda 15 consultas na busca do dev (índice, Firestore e plano B
+"""`make sondar-busca`: roda as consultas de `CASOS` na busca do dev (índice, Firestore e plano B
 reais, com o corte do serviço) e dá um veredito por consulta. Roda só com credenciais
 e fica fora do CI.
 
@@ -46,6 +46,14 @@ CASOS = [
     Caso("sorteio de prêmios", "prêmios", 15),
     Caso("tchau", "tchau", 15),
     Caso("ultrafarma", "ultrafarma", 25),
+    # Objetos de cena (#245): o inventário no registro do plano e os de destaque 3.
+    # Gabarito do #121 (o carro BYD, as motos no telão do Bolão) e do programa FAMA
+    # (os livros, a revista, o microfone da RedeTV!).
+    Caso("carro BYD", "byd", 30),
+    Caso("motos no telão", "moto", 30),
+    Caso("livros", "livro", 30),
+    Caso("revista", "revista", 30),
+    Caso("microfone da RedeTV!", "microfone", 30),
     Caso("bicicleta", None),
     Caso("cachorro", None),
     Caso("foguete espacial", None),

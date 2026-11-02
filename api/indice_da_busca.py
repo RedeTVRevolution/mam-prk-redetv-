@@ -9,7 +9,7 @@ from datetime import date
 from typing import Any, Literal, Protocol
 
 from api.comparador import normalizar
-from api.decupagem import Decupagem, Pessoa, _Intervalo
+from api.decupagem import Decupagem, ObjetoDoInventario, Pessoa, _Intervalo
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
 
@@ -36,6 +36,8 @@ class Registro:
     texto: str | None = None
     descricao: str | None = None  # o plano; leva o vetor da descrição
     quadro: str | None = None  # o JPEG do momento; leva o vetor do quadro-chave
+    # De 1 a 3, só no objeto do inventário (#245); pesa na ordem dos resultados.
+    destaque: int | None = None
     # Gemini Embedding 2 sobre o quadro; só em plano, e só quando o chamador o calculou.
     vetor_do_quadro: list[float] | None = field(default=None, compare=False, repr=False)
 
@@ -89,6 +91,22 @@ def _frase(*partes: str | None) -> str | None:
     return texto or None
 
 
+# Os de destaque 1 e 2 ficam só no registro do plano.
+DESTAQUE_COM_REGISTRO_PROPRIO = 3
+
+
+def _texto_curto(peca: str | None, categoria: str, dono: str | None = None) -> str:
+    """A peça, a categoria e o dono ("blazer preto, roupa, de Flávia Noronha"): um objeto
+    de uma ou duas palavras passa do piso de palavras da busca por significado."""
+    return ", ".join(p for p in (peca, categoria, f"de {dono}" if dono else None) if p)
+
+
+def _inventario_em_texto(inventario: list[ObjetoDoInventario]) -> str | None:
+    """Todos os objetos do plano, para a consulta achar o plano por qualquer um deles."""
+    itens = [f"{_frase(i.nome, i.cor, i.marca)} ({i.categoria})" for i in inventario]
+    return f"Objetos: {', '.join(itens)}" if itens else None
+
+
 def registros_da_decupagem(
     job_id: str,
     decupagem: Decupagem,
@@ -121,6 +139,14 @@ def registros_da_decupagem(
                 return plano.quadro
         return None
 
+    def nome_do_dono(id: str | None) -> str | None:
+        for pessoa in decupagem.pessoas:
+            if pessoa.id == id and not pessoa.nome.lower().startswith(
+                "não identificado"
+            ):
+                return pessoa.nome
+        return None
+
     registros: list[Registro] = []
     for n, plano in enumerate(decupagem.planos):
         registros.append(
@@ -130,11 +156,38 @@ def registros_da_decupagem(
                 inicio_ms=plano.inicio_ms,
                 fim_ms=plano.fim_ms,
                 pessoas=na_imagem(plano),
-                descricao=_frase(plano.ambiente, plano.acao, ", ".join(plano.objetos)),
+                descricao=_frase(
+                    plano.ambiente,
+                    plano.acao,
+                    ", ".join(plano.objetos),
+                    _inventario_em_texto(plano.inventario),
+                ),
                 quadro=plano.quadro,
                 **base,
             )
         )
+        for k, item in enumerate(plano.inventario):
+            if item.destaque < DESTAQUE_COM_REGISTRO_PROPRIO:
+                continue
+            registros.append(
+                Registro(
+                    id=f"{job_id}:inventario:{n}:{k}",
+                    tipo="objeto",
+                    inicio_ms=plano.inicio_ms,
+                    fim_ms=plano.fim_ms,
+                    categoria=item.categoria,
+                    tipo_do_objeto=item.nome,
+                    cor_base=[item.cor] if item.cor else [],
+                    cor=item.cor,
+                    marca=item.marca,
+                    texto=_texto_curto(
+                        _frase(item.nome, item.cor, item.marca), item.categoria
+                    ),
+                    quadro=item.caixas[0].quadro,
+                    destaque=item.destaque,
+                    **base,
+                )
+            )
     for n, fala in enumerate(decupagem.transcricao):
         registros.append(
             Registro(
@@ -178,7 +231,16 @@ def registros_da_decupagem(
                     marca=objeto.marca,
                     dono=catalogo.get(objeto.pessoa) if objeto.pessoa else None,
                     relacao=objeto.relacao,
-                    texto=_frase(objeto.tipo, objeto.cor, objeto.marca, objeto.detalhe),
+                    texto=_texto_curto(
+                        _frase(
+                            objeto.tipo,
+                            objeto.cor or " ".join(objeto.cor_base),
+                            objeto.marca,
+                            objeto.detalhe,
+                        ),
+                        objeto.categoria,
+                        nome_do_dono(objeto.pessoa),
+                    ),
                     # O quadro do objeto é o da primeira ocorrência.
                     quadro=(objeto.quadro if k == 0 else None)
                     or quadro_do_plano(ocorrencia),

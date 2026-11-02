@@ -239,6 +239,7 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
         "texto": texto,
         "descricao": texto,
         "quadro": texto,
+        "destaque": numero,
         # Só para o embedding automático, que recusa registro sem texto: a descrição do
         # plano ou o texto da fala, do texto na tela ou do objeto (ADR 0006).
         "significado": texto,
@@ -361,6 +362,7 @@ def _dados(r: Registro) -> dict[str, Any]:
         "texto": r.texto,
         "descricao": r.descricao,
         "quadro": r.quadro,
+        "destaque": r.destaque,
     }
     return dados | {k: v for k, v in opcionais.items() if v is not None}
 
@@ -386,6 +388,7 @@ def _registro(dados: dict[str, Any]) -> Registro:
         texto=dados.get("texto"),
         descricao=dados.get("descricao"),
         quadro=dados.get("quadro"),
+        destaque=dados.get("destaque"),
     )
 
 

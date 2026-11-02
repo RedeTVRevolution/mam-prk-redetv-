@@ -741,3 +741,55 @@ def test_so_a_clausula_do_texto_livre_corta_o_significado() -> None:
         (m.sabrina, False),
         (None, True),
     }
+
+
+def _por_destaque(destaque: int | None, id: str, inicio: int) -> Registro:
+    return objeto(
+        id, "j1", inicio, inicio + 1_000, destaque=destaque, texto="carro azul, veiculo"
+    )
+
+
+def test_com_a_mesma_relevancia_o_destaque_maior_vem_antes() -> None:
+    # Dois carros colados na lista do índice: a diferença de posição é menor que o peso.
+    m = Mundo(pedido(texto_livre="carro"))
+    m.com(
+        job("j1"),
+        _por_destaque(1, "baixo", 0),
+        _por_destaque(3, "alto", 60_000),
+    )
+    [video] = m.busca().buscar("carro").videos
+    assert [x.inicio_ms for x in video.momentos] == [60_000, 0]
+
+
+def test_o_peso_do_destaque_vale_tambem_depois_do_ranking() -> None:
+    class Ordem:
+        def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+            return sorted(registros, key=lambda r: r.id)  # "a" antes de "b"
+
+    m = Mundo(pedido(texto_livre="carro"))
+    m.com(
+        job("j1"),
+        _por_destaque(1, "a", 0),
+        _por_destaque(3, "b", 60_000),
+    )
+    [video] = m.busca(Ordem()).buscar("carro").videos
+    assert [x.inicio_ms for x in video.momentos] == [60_000, 0]
+
+
+def test_o_destaque_nao_passa_na_frente_de_quem_e_bem_mais_relevante() -> None:
+    class Ordem:
+        def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+            return sorted(registros, key=lambda r: r.id)
+
+    m = Mundo(pedido(texto_livre="carro"))
+    m.com(
+        job("j1"),
+        _por_destaque(1, "a", 0),
+        _por_destaque(None, "b", 10_000),
+        _por_destaque(None, "c", 20_000),
+        _por_destaque(None, "d", 30_000),
+        _por_destaque(None, "e", 40_000),
+        _por_destaque(3, "f", 60_000),
+    )
+    [video] = m.busca(Ordem()).buscar("carro").videos
+    assert video.momentos[0].inicio_ms == 0
