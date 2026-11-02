@@ -280,14 +280,15 @@ def test_chave_com_data_futura_ou_mal_formada_da_422(data: object) -> None:
     assert _criar_com_chave(chaves, chave, data_exibicao=data).status_code == 422
 
 
-def test_chave_com_escopo_de_criar_ou_ler_lista_os_programas() -> None:
-    escopos_aceitos: list[list[Escopo]] = [["criar"], ["ler"]]
-    for escopos in escopos_aceitos:
-        chaves = RepositorioDeChavesEmMemoria()
-        chave = emitir_chave("Legado", escopos, MAC_V1, chaves, BASE).chave
-        resposta = _cliente(chaves).get("/v1/programas", headers={"X-API-Key": chave})
-        assert resposta.status_code == 200
-        assert resposta.json() == ["TV Fama"]
+@pytest.mark.parametrize("escopo", ["criar", "ler"])
+def test_chave_com_escopo_de_criar_ou_ler_lista_os_programas(escopo: Escopo) -> None:
+    chaves = RepositorioDeChavesEmMemoria()
+    chave = emitir_chave("Legado", [escopo], MAC_V1, chaves, BASE).chave
+
+    resposta = _cliente(chaves).get("/v1/programas", headers={"X-API-Key": chave})
+
+    assert resposta.status_code == 200
+    assert resposta.json() == ["TV Fama"]
 
 
 def test_chave_so_com_cancelar_nao_lista_os_programas() -> None:

@@ -3,7 +3,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
@@ -58,6 +58,7 @@ from api.jobs import (
     RepositorioIndisponivel,
     ServicoIndisponivel,
     TipoNaoSuportado,
+    _chave_com_algum,
     _exige_aprovar,
     agora_utc,
     criar_rotas,
@@ -252,14 +253,10 @@ def criar_app(
             permissoes=sorted(permissoes_de(efetivos)),
         )
 
-    @v1.get("/programas")
-    def programas(chamador: ChamadorAutenticado) -> list[str]:
+    # A chave precisa poder enviar ou ler; só cancelar não tem o que escolher.
+    @v1.get("/programas", dependencies=[Depends(_chave_com_algum("criar", "ler"))])
+    def programas() -> list[str]:
         """Os programas com perfil, para o envio escolher."""
-        # A chave precisa poder enviar ou ler; só cancelar não tem o que escolher.
-        if isinstance(chamador, Sistema) and not {"criar", "ler"} & set(
-            chamador.escopos
-        ):
-            raise ExcecaoHttp(403, "Chave sem o escopo criar ou ler")
         return sorted(PERFIS)
 
     @v1.get("/correcoes/catalogo")

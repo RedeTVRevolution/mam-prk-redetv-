@@ -703,6 +703,17 @@ def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
     return verificar
 
 
+def _chave_com_algum(*escopos: Escopo) -> Callable[[Chamador], Chamador]:
+    """Dependência: chave sem nenhum dos escopos recebe 403; pessoa passa."""
+
+    def verificar(chamador: ChamadorAutenticado) -> Chamador:
+        if isinstance(chamador, Sistema) and not set(escopos) & set(chamador.escopos):
+            raise HTTPException(403, f"Chave sem o escopo {' ou '.join(escopos)}")
+        return chamador
+
+    return verificar
+
+
 def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `decupagem.editar`; chave de sistema não corrige."""
     if not isinstance(chamador, Usuario):
