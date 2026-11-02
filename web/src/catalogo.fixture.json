@@ -77,6 +77,10 @@
       "rotulo": "Texto na tela acrescentado"
     },
     {
+      "valor": "pauta.acrescentar",
+      "rotulo": "Pauta acrescentada"
+    },
+    {
       "valor": "desfazer",
       "rotulo": "Desfazer"
     },

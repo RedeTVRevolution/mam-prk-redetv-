@@ -45,6 +45,7 @@ export interface Editor {
 export const TIPOS_FORA_DESTE_TICKET = [
   'comercial.acrescentar',
   'texto_na_tela.acrescentar',
+  'pauta.acrescentar',
   'descartar',
   'aprovar',
   'recusar',

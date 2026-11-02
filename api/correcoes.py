@@ -61,6 +61,7 @@ TipoNovo = Literal[
     "aparicao.papel_visual",
     "texto_na_tela.texto",
     "texto_na_tela.acrescentar",
+    "pauta.acrescentar",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
 TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela"]
@@ -395,6 +396,49 @@ class NovoTextoAcrescentado(NovoTextoNaTela):
         return self
 
 
+class NovaPauta(BaseModel):
+    """A pauta de um `pauta.acrescentar`: título, resumo opcional, tom e tempos."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    titulo: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+        ),
+    ]
+    resumo: (
+        Annotated[
+            str,
+            StringConstraints(
+                strip_whitespace=True, min_length=1, max_length=LIMITE_DO_TEXTO
+            ),
+        ]
+        | None
+    ) = None
+    tom: str
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+
+    @field_validator("titulo")
+    @classmethod
+    def _titulo(cls, valor: str) -> str:
+        return _sem_controle(valor)
+
+    @field_validator("resumo")
+    @classmethod
+    def _resumo(cls, valor: str | None) -> str | None:
+        return None if valor is None else _sem_controle_salvo_quebra(valor)
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if self.tom not in TONS_DA_PAUTA:
+            raise ValueError("tom desconhecido")
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        return self
+
+
 _FONTES = TypeAdapter(list[FonteDoNome])
 
 
@@ -462,7 +506,8 @@ class NovaCorrecao(BaseModel):
     # `pauta.tom`: o tom; `pessoa.fontes_do_nome`: a lista JSON das fontes;
     # `aparicao.papel_visual`: o JSON {papel, visual}; `texto_na_tela.texto`: o
     # JSON {tipo, texto}; `texto_na_tela.acrescentar`: o JSON {inicio_ms,
-    # fim_ms, tipo, texto}.
+    # fim_ms, tipo, texto}; `pauta.acrescentar`: o JSON {titulo, resumo?, tom,
+    # inicio_ms, fim_ms}.
     valor: Annotated[
         str,
         StringConstraints(
@@ -1576,6 +1621,8 @@ def aplicar(
         for objeto in _objetos(resultado):
             if objeto.get("pessoa") in ids:
                 objeto["pessoa"] = objeto["relacao"] = None
+    if any(p.get("acrescentado") for p in _pautas(resultado)):
+        resultado["pautas"].sort(key=lambda p: (p["inicio_ms"], p["fim_ms"]))
     if "textos_na_tela" in resultado:
         resultado["textos_na_tela"].sort(key=lambda t: (t["inicio_ms"], t["fim_ms"]))
     if "comerciais" in resultado:
@@ -1902,6 +1949,10 @@ def _canonizar_texto_acrescentado(n: NovaCorrecao) -> str:
     )
 
 
+def _canonizar_pauta_acrescentada(n: NovaCorrecao) -> str:
+    return _json_canonico(NovaPauta.model_validate_json(n.valor).model_dump())
+
+
 def _canonizar_aparicao_nova(n: NovaCorrecao) -> str:
     aparicao = NovaAparicao.model_validate_json(n.valor)
     if bool(n.item_id) == (aparicao.nome is not None):
@@ -2188,12 +2239,29 @@ def _acrescentar_texto_na_tela(resultado: dict[str, Any], c: Correcao) -> None:
     )
 
 
+def _acrescentar_pauta(resultado: dict[str, Any], c: Correcao) -> None:
+    pauta = json.loads(c.depois)
+    resultado.setdefault("pautas", []).append(
+        {
+            **pauta,
+            "resumo": pauta.get("resumo") or "",
+            "id": c.item_id,
+            "origem": "revisao",
+            "acrescentado": True,
+        }
+    )
+
+
 def _ancora_do_comercial_novo(valor: str, item_id: str, versao: str) -> Ancora:
     return _ancora_do_item(json.loads(valor), "comercial", versao)
 
 
 def _ancora_do_texto_novo(valor: str, item_id: str, versao: str) -> Ancora:
     return _ancora_do_item(json.loads(valor), "texto_na_tela", versao)
+
+
+def _ancora_da_pauta_nova(valor: str, item_id: str, versao: str) -> Ancora:
+    return _ancora_do_item(json.loads(valor), "pauta", versao)
 
 
 def _ancora_da_pessoa_nova(valor: str, item_id: str, versao: str) -> Ancora | None:
@@ -2220,6 +2288,13 @@ def _do_mesmo_tipo_de_texto(
     return [i for i in candidatos if i["tipo"] == tipo]
 
 
+def _com_o_mesmo_titulo(
+    c: Correcao, candidatos: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    titulo = normalizar(json.loads(c.depois)["titulo"])
+    return [i for i in candidatos if normalizar(str(i["titulo"])) == titulo]
+
+
 def _com_a_aparicao(
     c: Correcao, candidatos: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -2242,6 +2317,12 @@ _TEXTO_NOVO = Acrescenta(
     acrescenta=lambda c: True,
     atendentes=_do_mesmo_tipo_de_texto,
     aplicar=_acrescentar_texto_na_tela,
+)
+_PAUTA_NOVA = Acrescenta(
+    ancora=_ancora_da_pauta_nova,
+    acrescenta=lambda c: True,
+    atendentes=_com_o_mesmo_titulo,
+    aplicar=_acrescentar_pauta,
 )
 _PESSOA_NOVA = Acrescenta(
     ancora=_ancora_da_pessoa_nova,
@@ -2441,6 +2522,16 @@ TIPOS: dict[str, Tipo] = {
         fim_ms=_fim_do_json,
         traz_o_campo=_traz_textos,
         acrescenta=_TEXTO_NOVO,
+    ),
+    "pauta.acrescentar": Tipo(
+        canonizar=_canonizar_pauta_acrescentada,
+        rotulo="Pauta acrescentada",
+        legivel=textos.pauta_acrescentada,
+        tipo_do_item="pauta",
+        json_longo=True,
+        valor_do_item=_tempos_do_item,
+        fim_ms=_fim_do_json,
+        acrescenta=_PAUTA_NOVA,
     ),
 }
 

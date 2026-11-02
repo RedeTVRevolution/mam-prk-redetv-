@@ -61,6 +61,11 @@ def _texto_acrescentado(t: dict[str, Any]) -> str:
     return f"{_texto_na_tela(t)} {_faixa(t['inicio_ms'], t['fim_ms'])}"
 
 
+def _pauta_acrescentada(p: dict[str, Any]) -> str:
+    tom = ROTULOS_DOS_TONS.get(p["tom"], p["tom"])
+    return f"{p['titulo']} ({tom}) {_faixa(p['inicio_ms'], p['fim_ms'])}"
+
+
 def _papel_visual(d: dict[str, Any]) -> str:
     return " · ".join(x for x in (d["papel"], d["visual"]) if x) or (
         "sem papel na cena e visual"
@@ -98,6 +103,7 @@ comercial_acrescentado = de_json(_comercial)
 aparicao_acrescentada = de_json(_aparicao)
 texto_na_tela = de_json(_texto_na_tela)
 texto_na_tela_acrescentado = de_json(_texto_acrescentado)
+pauta_acrescentada = de_json(_pauta_acrescentada)
 papel_visual = de_json(_papel_visual)
 fontes_do_nome = de_json(_fontes)
 descricao_do_plano = de_json(_plano)

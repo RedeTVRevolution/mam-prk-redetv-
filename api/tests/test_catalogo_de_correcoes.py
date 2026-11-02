@@ -96,6 +96,18 @@ TEXTO = {"tipo": "gc", "texto": "Olá", "inicio_ms": 1000, "fim_ms": 2000}
         ("texto_na_tela.texto", json.dumps({"tipo": "gc", "texto": "Olá"}), "gc: Olá"),
         ("texto_na_tela.acrescentar", json.dumps(TEXTO), "gc: Olá 00:01–00:02"),
         (
+            "pauta.acrescentar",
+            json.dumps(
+                {
+                    "titulo": "Bastidores",
+                    "tom": "descontraido",
+                    "inicio_ms": 0,
+                    "fim_ms": 5000,
+                }
+            ),
+            "Bastidores (descontraído) 00:00–00:05",
+        ),
+        (
             "aparicao.papel_visual",
             json.dumps({"papel": "âncora", "visual": "terno"}),
             "âncora · terno",
@@ -154,6 +166,7 @@ def test_valor_legivel_por_tipo(tipo: str, valor: str, esperado: str) -> None:
         "pessoa.acrescentar_aparicao",
         "texto_na_tela.texto",
         "texto_na_tela.acrescentar",
+        "pauta.acrescentar",
         "aparicao.papel_visual",
         "pessoa.fontes_do_nome",
         "plano.descricao",
