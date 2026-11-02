@@ -1,6 +1,6 @@
 import type { Usuario } from './App.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
-import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
+import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
@@ -124,6 +124,8 @@ export interface ClienteDaApi {
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
   buscar(consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
+  /** `POST /v1/busca/imagem`: a foto é a consulta; só programa e período da `consulta` valem. */
+  buscarPorImagem(foto: File, consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
   /** `GET /v1/relatorios/tempo-de-tela`: tempo de tela por pessoa, contando só aparições. */
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
@@ -147,7 +149,7 @@ export function criarClienteDaApi(
 ): ClienteDaApi {
   async function pedir(
     caminho: string,
-    opcoes: { post?: true; corpo?: object } = {},
+    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<Response> {
     const token = await autenticador.token()
     if (!token) {
@@ -161,7 +163,8 @@ export function criarClienteDaApi(
     const resposta = await fetch(caminho, {
       method: opcoes.post ? 'POST' : undefined,
       headers,
-      body: opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo),
+      // Com `FormData` o navegador monta o Content-Type do multipart, com o limite.
+      body: opcoes.formulario ?? (opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo)),
     })
     if (resposta.status === 401) {
       aoSessaoExpirada()
@@ -178,7 +181,7 @@ export function criarClienteDaApi(
 
   async function chamar<T>(
     caminho: string,
-    opcoes: { post?: true; corpo?: object } = {},
+    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<T> {
     return (await (await pedir(caminho, opcoes)).json()) as T
   }
@@ -247,6 +250,11 @@ export function criarClienteDaApi(
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite) => chamar(`/v1/busca?${consultaParaApi(consulta, limite)}`),
+    buscarPorImagem: (foto, consulta, limite) => {
+      const formulario = new FormData()
+      formulario.append('arquivo', foto)
+      return chamar(`/v1/busca/imagem?${consultaDaImagemParaApi(consulta, limite)}`, { post: true, formulario })
+    },
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
     tempoDeTelaEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),

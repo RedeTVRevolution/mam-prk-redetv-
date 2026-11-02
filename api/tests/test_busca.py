@@ -18,7 +18,7 @@ from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
-from api.rota_da_busca import TEMPO_MAXIMO_S
+from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -518,6 +518,7 @@ def cliente(
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     indice: IndiceEmMemoria | None = None,
     embedding_da_consulta: EmbeddingDaConsulta | None = None,
+    limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
 ) -> tuple[TestClient, Mundo]:
     m = Mundo(*respostas)
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
@@ -536,6 +537,7 @@ def cliente(
         busca_por_minuto=maximo_por_minuto,
         tempo_maximo_da_busca_s=tempo_maximo_s,
         embedding_da_consulta=embedding_da_consulta,
+        limites_da_imagem=limites_da_imagem,
     )
     return TestClient(app), m
 
@@ -1004,6 +1006,13 @@ class EmbeddingDeTexto:
     def __init__(self, vetor: list[float] | Exception) -> None:
         self.vetor = vetor
         self.textos: list[str] = []
+        self.imagens: list[bytes] = []
+
+    def vetor_da_imagem(self, jpeg: bytes) -> list[float]:
+        self.imagens.append(jpeg)
+        if isinstance(self.vetor, Exception):
+            raise self.vetor
+        return self.vetor
 
     def vetor_do_texto(self, texto: str) -> list[float]:
         self.textos.append(texto)

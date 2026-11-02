@@ -147,10 +147,8 @@ export function consultaParaEndereco(c: ConsultaDaBusca): string {
   return texto ? `?${texto}` : ''
 }
 
-/** A query de `GET /v1/busca`. */
-export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
-  const p = new URLSearchParams({ q: c.q, ordem: c.ordem, limite: String(limite) })
-  for (const e of c.evidencias ?? []) p.append('ev', e)
+/** O programa e o período da consulta, como a API os recebe (a busca por texto e a por imagem). */
+function filtrosParaApi(p: URLSearchParams, c: ConsultaDaBusca) {
   if (c.programa !== null) p.set('programa', c.programa)
   const mes = MES.exec(c.mes ?? '')
   if (mes) {
@@ -163,6 +161,20 @@ export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
     p.set('desde', `${c.ano}-01-01`)
     p.set('ate', `${c.ano}-12-31`)
   }
+}
+
+/** A query de `POST /v1/busca/imagem`: só programa e período valem (a foto é a consulta). */
+export function consultaDaImagemParaApi(c: ConsultaDaBusca, limite: number): string {
+  const p = new URLSearchParams({ limite: String(limite) })
+  filtrosParaApi(p, c)
+  return p.toString()
+}
+
+/** A query de `GET /v1/busca`. */
+export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
+  const p = new URLSearchParams({ q: c.q, ordem: c.ordem, limite: String(limite) })
+  for (const e of c.evidencias ?? []) p.append('ev', e)
+  filtrosParaApi(p, c)
   if (c.pessoa !== null) p.set('pessoa', c.pessoa)
   if (c.marca !== null) p.set('marca', c.marca)
   if (c.tipo !== null) p.set('tipo', c.tipo)

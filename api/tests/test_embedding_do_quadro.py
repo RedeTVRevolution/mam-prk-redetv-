@@ -177,3 +177,17 @@ def test_o_pedido_da_consulta_leva_so_o_texto() -> None:
     assert pedidos[0]["content"]["parts"] == [{"text": "pista molhada"}]
     assert pedidos[0]["embedContentConfig"] == {"outputDimensionality": 2}
     assert vetor == pytest.approx([0.6, 0.8])
+
+
+def test_o_pedido_da_foto_da_consulta_leva_so_a_imagem() -> None:
+    pedidos: list[dict[str, Any]] = []
+
+    def transporte(url: str, corpo: dict[str, Any]) -> dict[str, Any]:
+        pedidos.append(corpo)
+        return {"embedding": {"values": [3.0, 4.0]}}
+
+    vetor = GeminiEmbedding("proj", 2, transporte).vetor_da_imagem(JPEG)
+
+    [parte] = pedidos[0]["content"]["parts"]
+    assert parte["inlineData"]["mimeType"] == "image/jpeg"
+    assert vetor == pytest.approx([0.6, 0.8])

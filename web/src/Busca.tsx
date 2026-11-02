@@ -22,7 +22,9 @@ import {
 import { dataDeExibicao } from './jobs.ts'
 import { relogio } from './linhaDoTempo.ts'
 import { guardado, guardarResultado } from './resultadoDaBusca.ts'
+import { BuscaPorImagem } from './BuscaPorImagem.tsx'
 import { Quadro } from './Miniatura.tsx'
+import { GradeDePlanos } from './GradeDePlanos.tsx'
 import { enderecoDaBusca, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
 
@@ -232,48 +234,6 @@ function Linha({ video, momento, selecionado, busca }: {
   )
 }
 
-/** O modo visual: um card por plano, com a miniatura do quadro-chave, em grade. */
-function GradeDePlanos({ videos, busca }: { videos: VideoDoResultado[]; busca: string }) {
-  return (
-    <ul
-      aria-label="Planos"
-      style={{
-        listStyle: 'none',
-        margin: 0,
-        padding: 0,
-        display: 'grid',
-        gap: 'var(--mantine-spacing-sm)',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-      }}
-    >
-      {videos.flatMap((video) =>
-        video.momentos.filter((momento) => momento.tipo === 'plano').map((momento) => {
-          const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, busca)
-          return (
-            <li key={`${video.job_id}:${momento.inicio_ms}`}>
-              <a
-                href={endereco}
-                onClick={(e) => seguir(e, endereco)}
-                aria-label={`${video.nome} em ${relogio(momento.inicio_ms)}`}
-                data-momento={`${video.job_id}:${momento.inicio_ms}`}
-                style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}
-              >
-                <Quadro url={momento.quadro_url} largura={200} altura={113} />
-                <Text size="xs" c={CORES.textoSecundario} mt={4} style={NUMEROS}>
-                  {[video.programa ?? video.nome, relogio(momento.inicio_ms)].join(' · ')}
-                </Text>
-                <Text size="sm" lineClamp={2}>
-                  {momento.motivo}
-                </Text>
-              </a>
-            </li>
-          )
-        }),
-      )}
-    </ul>
-  )
-}
-
 /** A página `/busca`: o estado todo na URL, o resultado agrupado por vídeo. */
 export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: ConsultaDaBusca }) {
   const [limite, setLimite] = useState(VIDEOS_POR_VEZ)
@@ -402,9 +362,10 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
 
   if (!consulta.q) {
     return (
-      <Box p="md">
+      <Stack p="md" gap="md" component="main">
         <Text c={CORES.textoSecundario}>Escreva na caixa do topo o que procurar no acervo.</Text>
-      </Box>
+        <BuscaPorImagem api={api} consulta={consulta} />
+      </Stack>
     )
   }
 
@@ -423,6 +384,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
 
   return (
     <Stack p="md" gap="md" component="main">
+      <BuscaPorImagem api={api} consulta={consulta} />
       <Group gap="xs" role="group" aria-label="Tipo de evidência">
         {EVIDENCIAS.map((e) => (
           <Chip

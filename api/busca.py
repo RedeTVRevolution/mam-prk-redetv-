@@ -68,6 +68,12 @@ class EmbeddingDaConsulta(Protocol):
 
     def vetor_do_texto(self, texto: str) -> list[float]: ...
 
+    def vetor_da_imagem(self, jpeg: bytes) -> list[float]: ...
+
+
+class BuscaPorImagemIndisponivel(Exception):
+    """Sem índice do quadro-chave ou sem o embedding: a imagem não vira vetor."""
+
 
 class Ranking(Protocol):
     """Porta da API de Ranking: reordena os registros pela consulta de texto livre."""
@@ -267,19 +273,28 @@ class Busca:
         sistema: str | None = None,
         ajustes: Ajustes | None = None,
         visual: bool = False,
+        imagem: bytes | None = None,
     ) -> ResultadoDaBusca:
+        """`imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
+        só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
+        `BuscaPorImagemIndisponivel`."""
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
-        entendida = _ajustada(
-            entender(
-                texto,
-                transporte=self._transporte,
-                catalogo=self._catalogo,
-                armor=self._armor,
-                programas=self._programas,
-            ),
-            ajustes or Ajustes(),
-        )
+        vetor_da_imagem = None
+        if imagem is not None:
+            vetor_da_imagem = self._vetor_da_imagem(imagem)
+            entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
+        else:
+            entendida = _ajustada(
+                entender(
+                    texto,
+                    transporte=self._transporte,
+                    catalogo=self._catalogo,
+                    armor=self._armor,
+                    programas=self._programas,
+                ),
+                ajustes or Ajustes(),
+            )
         jobs: dict[str, Job | None] = {}
 
         def job(id: str) -> Job | None:
@@ -313,7 +328,13 @@ class Busca:
         # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
         # entendidos já filtram, e não entram no vetor.
         consulta_visual = entendida.texto_livre or texto
-        vetor = self._vetor_da_consulta(consulta_visual) if visual else None
+        vetor = (
+            vetor_da_imagem
+            if vetor_da_imagem is not None
+            else self._vetor_da_consulta(consulta_visual)
+            if visual
+            else None
+        )
         if vetor is not None:
             clausulas.append(_clausula_visual(entendida, vetor, nome))
         facetado = ajustes or Ajustes()
@@ -379,6 +400,15 @@ class Busca:
             facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
         )
+
+    def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:
+        if self._embedding is None:
+            raise BuscaPorImagemIndisponivel
+        try:
+            return self._embedding.vetor_da_imagem(jpeg)
+        except Exception as e:
+            log.exception("vetor da imagem não calculado")
+            raise BuscaPorImagemIndisponivel from e
 
     def _vetor_da_consulta(self, texto: str) -> list[float] | None:
         """`None` sem embedding (índice do quadro desligado) ou se ele falhar: busca comum."""

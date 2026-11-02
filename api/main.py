@@ -112,7 +112,9 @@ from api.revisao import (
 )
 from api.rota_da_busca import (
     CONSULTAS_POR_MINUTO,
+    LIMITES_DA_IMAGEM,
     TEMPO_MAXIMO_S,
+    LimitesDaImagem,
     criar_rotas_da_busca,
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
@@ -209,6 +211,7 @@ def criar_app(
     ranking: Ranking | None = None,
     busca_por_minuto: int = CONSULTAS_POR_MINUTO,
     tempo_maximo_da_busca_s: float = TEMPO_MAXIMO_S,
+    limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     limite_de_inatividade_s: float = LIMITE_DE_INATIVIDADE_S,
     relogio: Callable[[], datetime] = agora_utc,
@@ -325,6 +328,7 @@ def criar_app(
             relogio,
             busca_por_minuto,
             tempo_maximo_da_busca_s,
+            limites_da_imagem,
         )
     )
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
@@ -402,6 +406,14 @@ if _projeto:
         copia=copia_do_ambiente(os.environ),
         embedding=_embedding,
         embedding_da_consulta=_embedding,
+        limites_da_imagem=LimitesDaImagem(
+            max_bytes=int(
+                os.environ.get("BUSCA_IMAGEM_MAX_BYTES") or LimitesDaImagem.max_bytes
+            ),
+            max_pixels=int(
+                os.environ.get("BUSCA_IMAGEM_MAX_PIXELS") or LimitesDaImagem.max_pixels
+            ),
+        ),
         tempo_de_tela=consulta_do_ambiente(os.environ),
         relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(

@@ -58,6 +58,19 @@ class GeminiEmbedding:
         """O vetor da consulta de texto, no mesmo espaço dos vetores dos quadros (#269)."""
         return self._embutir([{"text": texto}])
 
+    def vetor_da_imagem(self, jpeg: bytes) -> list[float]:
+        """O vetor da foto enviada na busca por imagem (#270): só a imagem, sem descrição."""
+        return self._embutir(
+            [
+                {
+                    "inlineData": {
+                        "mimeType": "image/jpeg",
+                        "data": base64.b64encode(jpeg).decode(),
+                    }
+                }
+            ]
+        )
+
     def _embutir(self, partes: list[dict[str, Any]]) -> list[float]:
         url = (
             f"{URL_BASE}/projects/{self._projeto}/locations/global/publishers/google/"

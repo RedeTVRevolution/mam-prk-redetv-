@@ -55,13 +55,19 @@ def resolver_dns(host: str) -> list[str]:
         raise ImagemRecusada("host não resolve") from e
 
 
-def recodificar(dados: bytes, *, max_bytes: int, max_pixels: int) -> bytes:
+def recodificar(
+    dados: bytes,
+    *,
+    max_bytes: int,
+    max_pixels: int,
+    formatos: frozenset[str] | set[str] = FORMATOS_ACEITOS,
+) -> bytes:
     """Confere o conteúdo e devolve um JPEG novo, sem metadados."""
     if len(dados) > max_bytes:
         raise ImagemRecusada("acima do limite de bytes")
     try:
         with Image.open(io.BytesIO(dados)) as imagem:
-            if imagem.format not in FORMATOS_ACEITOS:
+            if imagem.format not in formatos:
                 raise ImagemRecusada("tipo de imagem não aceito")
             largura, altura = imagem.size
             if largura * altura > max_pixels:
