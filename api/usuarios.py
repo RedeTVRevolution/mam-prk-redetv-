@@ -10,15 +10,15 @@ registro na auditoria.
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import Annotated, Protocol
+from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
     ConfigDict,
     StringConstraints,
-    field_validator,
 )
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
@@ -29,6 +29,7 @@ from api.papeis import (
     Papel,
     RepositorioDePapeis,
     papeis_do_usuario,
+    papeis_efetivos,
 )
 
 NOME_MAXIMO = 200
@@ -107,23 +108,20 @@ class ContasDeUsuarioEmMemoria:
 class ContasIndisponiveis:
     """Sem Identity Platform configurado (fora do Cloud Run): tudo vira 503."""
 
-    def _falha(self) -> ServicoIndisponivel:
-        return ServicoIndisponivel()
-
     def listar(self) -> list[ContaDoIdentityPlatform]:
-        raise self._falha()
+        raise ServicoIndisponivel
 
     def obter(self, uid: str) -> ContaDoIdentityPlatform | None:
-        raise self._falha()
+        raise ServicoIndisponivel
 
     def criar(self, email: str, nome: str) -> ContaDoIdentityPlatform:
-        raise self._falha()
+        raise ServicoIndisponivel
 
     def enviar_link_de_senha(self, email: str) -> None:
-        raise self._falha()
+        raise ServicoIndisponivel
 
     def bloquear(self, uid: str, bloqueada: bool) -> None:
-        raise self._falha()
+        raise ServicoIndisponivel
 
 
 class UsuarioDaLista(BaseModel):
@@ -133,7 +131,15 @@ class UsuarioDaLista(BaseModel):
     papeis: list[Papel]
     criada_em: AwareDatetime | None
     ultimo_acesso: AwareDatetime | None
-    situacao: str  # "ativa" ou "desativada"
+    situacao: Literal["ativa", "desativada"]
+
+
+def _em_ordem(papeis: list[Papel]) -> list[Papel]:
+    return [p for p in PAPEIS if p in papeis]
+
+
+# Sem repetição e na ordem de `PAPEIS`.
+PapeisPedidos = Annotated[list[Papel], AfterValidator(_em_ordem)]
 
 
 class NovoUsuario(BaseModel):
@@ -146,27 +152,13 @@ class NovoUsuario(BaseModel):
         str,
         StringConstraints(strip_whitespace=True, min_length=1, max_length=NOME_MAXIMO),
     ]
-    papeis: list[Papel]
-
-    @field_validator("papeis")
-    @classmethod
-    def _sem_repeticao(cls, papeis: list[Papel]) -> list[Papel]:
-        return _em_ordem(papeis)
+    papeis: PapeisPedidos
 
 
 class PapeisDoUsuario(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    papeis: list[Papel]
-
-    @field_validator("papeis")
-    @classmethod
-    def _sem_repeticao(cls, papeis: list[Papel]) -> list[Papel]:
-        return _em_ordem(papeis)
-
-
-def _em_ordem(papeis: list[Papel]) -> list[Papel]:
-    return [p for p in PAPEIS if p in papeis]
+    papeis: PapeisPedidos
 
 
 def _exige_gerir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -186,9 +178,11 @@ def criar_rotas_dos_usuarios(
 ) -> APIRouter:
     rotas = APIRouter(prefix="/admin/usuarios")
 
-    def efetivos(conta: ContaDoIdentityPlatform) -> list[Papel]:
+    def efetivos(
+        conta: ContaDoIdentityPlatform, guardados: list[Papel] | None
+    ) -> list[Papel]:
         return papeis_do_usuario(
-            papeis.obter(conta.uid), conta.email, conta.email_verificado, admins()
+            guardados, conta.email, conta.email_verificado, admins()
         )
 
     def da_lista(conta: ContaDoIdentityPlatform) -> UsuarioDaLista:
@@ -197,7 +191,7 @@ def criar_rotas_dos_usuarios(
             uid=conta.uid,
             email=conta.email,
             nome=conta.nome,
-            papeis=efetivos(conta),
+            papeis=efetivos(conta, papeis.obter(conta.uid)),
             criada_em=conta.criada_em,
             ultimo_acesso=conta.ultimo_acesso,
             situacao="desativada" if desativada else "ativa",
@@ -246,8 +240,10 @@ def criar_rotas_dos_usuarios(
         except EmailJaCadastrado:
             raise HTTPException(409, "Já existe uma conta com esse e-mail") from None
         papeis.salvar(conta.uid, pedido.papeis)
-        contas.enviar_link_de_senha(conta.email)
+        # O registro antes do link: se o envio falha, a conta já tem rastro e o
+        # link pode ser reenviado.
         registrar(pessoa, "conta.criada", conta, {"papeis": pedido.papeis})
+        contas.enviar_link_de_senha(conta.email)
         return da_lista(conta)
 
     @rotas.post("/{uid}/link-de-senha")
@@ -266,22 +262,27 @@ def criar_rotas_dos_usuarios(
         pessoa: Annotated[Usuario, Depends(_exige_gerir)],
     ) -> UsuarioDaLista:
         conta = achar(uid)
-        antes = efetivos(conta)
+        guardados = papeis.obter(uid)
+        # Antes e depois são os papéis efetivos: o administrador de emergência
+        # continua Administrador mesmo sem o papel guardado.
+        antes = efetivos(conta, guardados)
+        depois = efetivos(conta, pedido.papeis)
         if (
             uid == pessoa.uid
             and "administrador" in antes
-            and "administrador" not in pedido.papeis
+            and "administrador" not in depois
         ):
             raise HTTPException(
                 409, "Você não pode tirar de si mesmo o papel de Administrador"
             )
         papeis.salvar(uid, pedido.papeis)
-        registrar(
-            pessoa,
-            "papeis.alterados",
-            conta,
-            {"antes": antes, "depois": pedido.papeis},
-        )
+        try:
+            registrar(
+                pessoa, "papeis.alterados", conta, {"antes": antes, "depois": depois}
+            )
+        except Exception:
+            papeis.salvar(uid, papeis_efetivos(guardados))
+            raise
         return da_lista(conta)
 
     @rotas.post("/{uid}/desativar")
@@ -291,11 +292,16 @@ def criar_rotas_dos_usuarios(
         if uid == pessoa.uid:
             raise HTTPException(409, "Você não pode desativar a própria conta")
         conta = achar(uid)
-        # A marca primeiro: é ela que corta o acesso na hora; o bloqueio no
-        # Identity Platform e a revogação dos tokens vêm em seguida.
+        # A marca primeiro: é ela que corta o acesso na hora. Sem registro, a marca
+        # sai. O bloqueio no Identity Platform e a revogação dos tokens vêm por
+        # último; se falham, o corte já vale e o pedido pode ser repetido.
         papeis.marcar_desativada(uid, True)
+        try:
+            registrar(pessoa, "conta.desativada", conta)
+        except Exception:
+            papeis.marcar_desativada(uid, False)
+            raise
         contas.bloquear(uid, True)
-        registrar(pessoa, "conta.desativada", conta)
         return da_lista(achar(uid))
 
     @rotas.post("/{uid}/reativar")
@@ -305,7 +311,12 @@ def criar_rotas_dos_usuarios(
         conta = achar(uid)
         contas.bloquear(uid, False)
         papeis.marcar_desativada(uid, False)
-        registrar(pessoa, "conta.reativada", conta)
+        try:
+            registrar(pessoa, "conta.reativada", conta)
+        except Exception:
+            papeis.marcar_desativada(uid, True)
+            contas.bloquear(uid, True)
+            raise
         return da_lista(achar(uid))
 
     return rotas

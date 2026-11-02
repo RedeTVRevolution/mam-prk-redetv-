@@ -5,7 +5,11 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
+from api.auditoria import (
+    FiltroDeAuditoria,
+    RegistroDeAuditoria,
+    RepositorioDeAuditoriaEmMemoria,
+)
 from api.auth import Usuario
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
@@ -25,7 +29,11 @@ ROTA = "/v1/admin/usuarios"
 
 
 class Mundo:
-    def __init__(self, papeis_do_admin: list[Papel] | None = None) -> None:
+    def __init__(
+        self,
+        papeis_do_admin: list[Papel] | None = None,
+        auditoria: RepositorioDeAuditoriaEmMemoria | None = None,
+    ) -> None:
         self.papeis = RepositorioDePapeisEmMemoria()
         self.papeis.salvar("adm", papeis_do_admin or ["administrador"])
         self.papeis.salvar("u2", ["editor"])
@@ -44,7 +52,7 @@ class Mundo:
                 ),
             ]
         )
-        self.auditoria = RepositorioDeAuditoriaEmMemoria()
+        self.auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(
@@ -226,6 +234,71 @@ def test_admin_de_emergencia_segue_administrador_apos_trocar_papeis() -> None:
 
     lista = {u["uid"]: u["papeis"] for u in cliente.get(ROTA, headers=ADMIN).json()}
     assert lista["uid-3"] == ["consulta", "administrador"]
+    (registro,) = mundo.registros()
+    assert registro.detalhes == {
+        "antes": ["consulta", "operador", "administrador"],
+        "depois": ["consulta", "administrador"],
+    }
+
+
+def test_admin_de_emergencia_pode_trocar_os_proprios_papeis_sem_o_administrador() -> (
+    None
+):
+    mundo = Mundo()
+    conta = mundo.contas.criar("emerg@redetv.com", "Emerg")
+    cliente = TestClient(
+        criar_app(
+            VerificadorFalso(
+                {
+                    "emerg": Usuario(
+                        uid=conta.uid, email="emerg@redetv.com", email_verificado=True
+                    )
+                }
+            ),
+            RepositorioEmMemoria(),
+            ArmazenamentoFalso(),
+            papeis=mundo.papeis,
+            admins_emergencia="emerg@redetv.com",
+            auditoria=mundo.auditoria,
+            contas=mundo.contas,
+        )
+    )
+
+    resposta = cliente.put(
+        f"{ROTA}/{conta.uid}/papeis",
+        json={"papeis": ["curador"]},
+        headers={"Authorization": "Bearer emerg"},
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.json()["papeis"] == ["curador", "administrador"]
+    assert mundo.papeis.obter(conta.uid) == ["curador"]
+
+
+class AuditoriaQueFalha(RepositorioDeAuditoriaEmMemoria):
+    def acrescentar(self, registro: RegistroDeAuditoria) -> None:
+        raise RuntimeError("Firestore fora")
+
+
+def test_sem_auditoria_os_papeis_voltam_ao_que_eram() -> None:
+    mundo = Mundo(auditoria=AuditoriaQueFalha())
+
+    with pytest.raises(RuntimeError):
+        mundo.cliente.put(
+            f"{ROTA}/u2/papeis", json={"papeis": ["consulta"]}, headers=ADMIN
+        )
+
+    assert mundo.papeis.obter("u2") == ["editor"]
+
+
+def test_sem_auditoria_a_conta_nao_fica_desativada() -> None:
+    mundo = Mundo(auditoria=AuditoriaQueFalha())
+
+    with pytest.raises(RuntimeError):
+        mundo.cliente.post(f"{ROTA}/u2/desativar", headers=ADMIN)
+
+    assert not mundo.papeis.desativada("u2")
+    assert not mundo.contas.obter("u2").bloqueada  # type: ignore[union-attr]
 
 
 def test_desativar_corta_o_acesso_na_hora_mesmo_com_token_valido() -> None:
