@@ -266,6 +266,12 @@ class RepositorioDeChavesFirestore:
         registros = [RegistroDeChave(**(doc.to_dict() or {})) for doc in docs]
         return sorted(registros, key=lambda r: r.criada_em)
 
+    def listar(self) -> list[RegistroDeChave]:
+        registros = [
+            RegistroDeChave(**(doc.to_dict() or {})) for doc in self._colecao.stream()
+        ]
+        return sorted(registros, key=lambda r: r.criada_em, reverse=True)
+
     def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
         # A contagem roda dentro da transação: dois comandos simultâneos
         # conflitam e o Firestore repete o perdedor. Filtra as ativas aqui, e

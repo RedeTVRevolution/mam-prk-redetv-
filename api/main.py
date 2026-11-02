@@ -36,6 +36,12 @@ from api.busca_na_nuvem import adaptadores_da_busca
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
+from api.chaves import (
+    Mac,
+    MacSimulado,
+    RepositorioDeChaves,
+    VerificadorDeChaveDeApi,
+)
 from api.comparar_passadas import criar_rotas_da_comparacao
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente
 from api.correcao_de_estado import criar_rotas_da_correcao_de_estado
@@ -75,6 +81,7 @@ from api.nuvem import (
     JanelasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
+    RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeRevisaoFirestore,
@@ -120,6 +127,11 @@ from api.rota_da_busca import (
     TEMPO_MAXIMO_S,
     LimitesDaImagem,
     criar_rotas_da_busca,
+)
+from api.rotas_das_chaves import (
+    ChaveIndisponivel,
+    MacIndisponivel,
+    criar_rotas_das_chaves,
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
 from api.sugestoes import (
@@ -208,6 +220,8 @@ def criar_app(
     aprovacao: RepositorioDeAprovacao | None = None,
     auditoria: RepositorioDeAuditoria | None = None,
     contas: ContasDeUsuario | None = None,
+    repositorio_de_chaves: RepositorioDeChaves | None = None,
+    mac: Mac | None = None,
     revisao: RepositorioDeRevisao | None = None,
     disparo: DisparoDoWorkflow | None = None,
     janelas: JanelasDoJob | None = None,
@@ -244,6 +258,9 @@ def criar_app(
         return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
 
     app.state.verificador = verificador or _SemVerificador()
+    # Com repositório e chave MAC, a API confere as chaves emitidas por ela mesma.
+    if chaves is None and repositorio_de_chaves and mac:
+        chaves = VerificadorDeChaveDeApi(repositorio_de_chaves, mac)
     app.state.chaves = chaves or _SemChaves()
     app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
     app.state.admins = admins_de(admins_emergencia)
@@ -363,6 +380,14 @@ def criar_app(
         )
     )
     v1.include_router(
+        criar_rotas_das_chaves(
+            repositorio_de_chaves or ChaveIndisponivel(),
+            mac or MacIndisponivel(),
+            repositorio_de_auditoria,
+            relogio,
+        )
+    )
+    v1.include_router(
         criar_rotas_do_reprocessamento(
             repositorio_de_jobs,
             repositorio_de_auditoria,
@@ -405,6 +430,7 @@ def criar_app(
 
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
+_chave_mac = os.environ.get("MAC_SIMULADO_CHAVE")
 if _projeto:
     _adaptadores = adaptadores_da_busca(os.environ)
     _busca = (
@@ -427,6 +453,15 @@ if _projeto:
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
+        # Até a chave MAC do Cloud KMS chegar, só a simulada (como no `make emitir-chave`).
+        repositorio_de_chaves=RepositorioDeChavesFirestore(
+            firestore.Client(project=_projeto)
+        ),
+        mac=(
+            MacSimulado({1: bytes.fromhex(_chave_mac)}, versao_atual=1)
+            if _chave_mac
+            else None
+        ),
         revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
         limite_de_inatividade_s=float(
             os.environ.get("REVISAO_INATIVIDADE_S") or LIMITE_DE_INATIVIDADE_S

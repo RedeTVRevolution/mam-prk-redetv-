@@ -80,6 +80,10 @@ class RepositorioDeChaves(Protocol):
 
     def listar_por_sistema(self, sistema: str) -> list[RegistroDeChave]: ...
 
+    def listar(self) -> list[RegistroDeChave]:
+        """Todas as chaves, das mais novas para as mais antigas."""
+        ...
+
     def salvar_nova(self, registro: RegistroDeChave, maximo_ativas: int) -> None:
         """Grava a chave nova se o sistema tiver menos de `maximo_ativas` ativas.
         Contagem e gravação são atômicas. `LimiteDeChavesAtivas` se estourar."""
@@ -107,6 +111,9 @@ class RepositorioDeChavesEmMemoria:
         if len(ativas) >= maximo_ativas:
             raise LimiteDeChavesAtivas(registro.sistema)
         self.salvar(registro)
+
+    def listar(self) -> list[RegistroDeChave]:
+        return sorted(self._registros.values(), key=lambda r: r.criada_em, reverse=True)
 
     def todas(self) -> list[RegistroDeChave]:
         return list(self._registros.values())
