@@ -55,6 +55,7 @@ from api.jobs import (
     casa_com_o_filtro,
 )
 from api.leitura_da_tela import LeituraDaTela
+from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
@@ -1149,6 +1150,31 @@ class QuadrosStorage(DecupagensStorage):
         self._cliente.bucket(self._decupagens).blob(
             objeto_do_quadro(job_id, caminho)
         ).upload_from_string(jpeg, content_type="image/jpeg")
+
+
+class ArquivosNoStorage:
+    """Quantos arquivos do Job há nos buckets, para o impacto da lixeira."""
+
+    def __init__(
+        self, cliente: ClienteStorage, bucket_de_aceitos: str, bucket_de_decupagens: str
+    ) -> None:
+        self._cliente = cliente
+        self._aceitos = bucket_de_aceitos
+        self._decupagens = bucket_de_decupagens
+
+    def _existe(self, bucket: str, objeto: str) -> int:
+        return int(self._cliente.bucket(bucket).blob(objeto).exists())
+
+    def contar(self, job_id: str) -> ArquivosContados:
+        quadros = self._cliente.list_blobs(
+            self._decupagens, prefix=objeto_do_quadro(job_id, "quadros/")
+        )
+        return ArquivosContados(
+            decupagem=self._existe(self._decupagens, objeto_da_decupagem(job_id)),
+            copia_limpa=self._existe(self._aceitos, objeto_da_copia_limpa(job_id)),
+            proxy=self._existe(self._aceitos, objeto_do_proxy(job_id)),
+            quadros=sum(1 for _ in quadros),
+        )
 
 
 class ArmazenamentoStorage:

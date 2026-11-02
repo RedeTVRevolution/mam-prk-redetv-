@@ -15,7 +15,7 @@ from api.catalogo import CatalogoEmMemoria
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import EnvioParaLixeira, Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
@@ -254,6 +254,27 @@ def test_video_fora_de_concluido_ou_de_outro_sistema_nao_aparece() -> None:
     resultado = m.busca().buscar("vestido", sistema="outro")
 
     assert [v.job_id for v in resultado.videos] == ["j3"]
+
+
+def test_video_na_lixeira_nao_aparece_na_busca() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+    m.com(
+        job(
+            "j2",
+            lixeira=EnvioParaLixeira(
+                em=datetime(2026, 11, 2, tzinfo=UTC),
+                por_uid="adm",
+                por_email="adm@redetv.com",
+                motivo="duplicado",
+            ),
+        ),
+        objeto("b", "j2", 0, 1_000),
+    )
+
+    resultado = m.busca().buscar("vestido")
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
 
 
 def test_videos_pelo_melhor_momento_e_no_empate_pelo_numero_de_momentos() -> None:

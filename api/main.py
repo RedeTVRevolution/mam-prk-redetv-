@@ -71,9 +71,16 @@ from api.jobs import (
     criar_rotas,
     papeis_da_pessoa,
 )
+from api.lixeira import (
+    ArquivosDoJob,
+    ArquivosEmMemoria,
+    criar_rotas_da_lixeira,
+    sem_job_na_lixeira,
+)
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
     ArmazenamentoStorage,
+    ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     ContasIdentityPlatform,
@@ -222,6 +229,7 @@ def criar_app(
     contas: ContasDeUsuario | None = None,
     repositorio_de_chaves: RepositorioDeChaves | None = None,
     mac: Mac | None = None,
+    arquivos: ArquivosDoJob | None = None,
     revisao: RepositorioDeRevisao | None = None,
     disparo: DisparoDoWorkflow | None = None,
     janelas: JanelasDoJob | None = None,
@@ -397,6 +405,15 @@ def criar_app(
         )
     )
     v1.include_router(
+        criar_rotas_da_lixeira(
+            repositorio_de_jobs,
+            repositorio_de_correcoes,
+            arquivos or ArquivosEmMemoria(),
+            repositorio_de_auditoria,
+            relogio,
+        )
+    )
+    v1.include_router(
         criar_rotas_da_correcao_de_estado(
             repositorio_de_jobs,
             repositorio_de_auditoria,
@@ -422,7 +439,10 @@ def criar_app(
     )
     v1.include_router(criar_rotas_do_tempo_de_tela(tempo_de_tela, repositorio_de_jobs))
     v1.include_router(criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs))
-    app.include_router(v1)
+    # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
+    app.include_router(
+        v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]
+    )
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
     return app
@@ -458,6 +478,11 @@ if _projeto:
         # funcionam.
         repositorio_de_chaves=RepositorioDeChavesFirestore(
             firestore.Client(project=_projeto)
+        ),
+        arquivos=ArquivosNoStorage(
+            ClienteStorage(project=_projeto),
+            os.environ["BUCKET_ACEITOS"],
+            os.environ["BUCKET_DECUPAGENS"],
         ),
         mac=(
             MacSimulado({1: bytes.fromhex(_chave_mac)}, versao_atual=1)

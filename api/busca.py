@@ -184,8 +184,8 @@ class ResultadoDaBusca(BaseModel):
 def filtros_do_servidor() -> Filtros:
     """Os filtros que o servidor impõe a toda busca, acima da consulta.
 
-    Hoje nenhum campo do índice carrega a permissão. O filtro "não está na lixeira" (#144)
-    entra aqui; enquanto isso, `Busca` já descarta o vídeo cujo Job não está concluído.
+    Hoje nenhum campo do índice carrega a permissão. O vídeo na lixeira (#144) sai pelo Job:
+    `Busca` descarta o vídeo cujo Job não está concluído ou está na lixeira.
     """
     return Filtros()
 
@@ -417,9 +417,9 @@ class Busca:
         return self._indice.vetores_dos_planos(job_id)
 
     def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
-        """O vídeo, se concluído e, para uma chave de sistema, do mesmo sistema."""
+        """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
         achado = self._repositorio.obter(job_id)
-        if achado is None or achado.estado != "concluido":
+        if achado is None or achado.estado != "concluido" or achado.lixeira:
             return None
         if sistema is not None and achado.sistema != sistema:
             return None

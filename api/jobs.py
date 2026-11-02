@@ -175,6 +175,15 @@ class Etapa(BaseModel):
     tentativas_gpu: int | None = None
 
 
+class EnvioParaLixeira(BaseModel):
+    """Quando, por quem e por quê o vídeo foi para a lixeira (E8, #144)."""
+
+    em: datetime
+    por_uid: str
+    por_email: str
+    motivo: str
+
+
 class Job(BaseModel):
     id: str
     nome: str
@@ -214,6 +223,8 @@ class Job(BaseModel):
     etapas: dict[NomeDaEtapa, Etapa] = {}
     # Quantas vezes o Job foi reprocessado a partir da etapa que falhou (#147).
     reprocessamentos: int = 0
+    # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
+    lixeira: EnvioParaLixeira | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -404,6 +415,8 @@ class FiltroDeJobs:
     exibicao_ate: date | None = None
     palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
     sistema: str | None = None
+    # `False`: só os Jobs fora da lixeira (o acervo); `True`: só os que estão nela.
+    na_lixeira: bool = False
     ordem: Ordem = "enviado"
     limite: int | None = None  # `None`: a lista inteira, sem cursor
     cursor: str | None = None  # id do último Job da página anterior
@@ -428,6 +441,8 @@ class PaginaDeJobs:
 
 def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
     """Todos os filtros menos ordem e paginação."""
+    if (job.lixeira is not None) != filtro.na_lixeira:
+        return False
     if filtro.programa is not None and job.programa != filtro.programa:
         return False
     if filtro.sistema is not None and job.sistema != filtro.sistema:

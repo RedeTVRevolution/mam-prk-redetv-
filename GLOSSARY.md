@@ -180,6 +180,12 @@ A análise inteira de um Job concluído refeita com outro modelo, sem escaloname
 Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada.
 _Evitar_: edição, ajuste
 
+**Lixeira**:
+Primeiro tempo de apagar um item (`api/lixeira.py`, `/v1/admin/lixeira`, #144, [ADR 0010](docs/adr/0010-lixeira-e-purga.md)): o vídeo ganha `Job.lixeira` (quando, quem, motivo) e some da lista, da busca e das rotas do Job para quem não é Administrador, mas nada é apagado e restaurar volta tudo. Só Job `concluido`, `falhou` ou `cancelado`. Cada envio e restauração vai para a auditoria com o impacto.
+
+**Purga**:
+Segundo tempo de apagar: 30 dias depois do envio à lixeira, ou antes por decisão do Administrador, um processo próprio apaga de fato (única exceção à regra de que correções e saída do modelo nunca são apagadas) e deixa o registro na auditoria.
+
 **Correção pendente**:
 Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale).
 

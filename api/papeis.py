@@ -19,6 +19,7 @@ Permissao = Literal[
     "job.corrigir_estado",
     "usuarios.gerir",
     "chaves.gerir",
+    "lixeira.gerir",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
