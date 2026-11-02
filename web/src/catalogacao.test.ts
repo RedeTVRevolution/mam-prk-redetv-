@@ -11,6 +11,7 @@ import {
   podeRemover,
   pedidoDeRemocao,
   TIPOS_FORA_DESTE_TICKET,
+  teclasDasOpcoes,
 } from './catalogacao.ts'
 import { itensDoPainel } from './painel.ts'
 import { editorDeDivisao, editorDeJuncao } from './pautas.ts'
@@ -360,4 +361,9 @@ test('a tela volta a perguntar enquanto uma correção que vale (ativa ou aprova
   expect(aindaIndexando([h('ativa', 'na_busca'), h('aprovada', 'indexando')])).toBe(true)
   expect(aindaIndexando([h('ativa', 'indexando')])).toBe(true)
   expect(aindaIndexando([h('desfeita', 'indexando'), h('ativa', 'salva')])).toBe(false)
+})
+
+test('teclasDasOpcoes: a primeira letra livre do rótulo, sem repetir nenhuma', () => {
+  const cores = ['verde', 'vermelho', 'azul', 'amarelo', 'índigo'].map((r) => ({ valor: r, rotulo: r }))
+  expect([...teclasDasOpcoes(cores).values()]).toEqual(['v', 'e', 'a', 'm', 'i'])
 })

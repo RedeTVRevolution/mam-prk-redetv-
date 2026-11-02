@@ -6,14 +6,36 @@ import type { Decupagem, EstadoNaBusca, ItemDoHistorico, Objeto } from './decupa
 
 export type Valor = string | string[] | boolean
 
+/** O limite do esquema do objeto (`cor_base`). */
+const MAXIMO_DE_CORES_BASE = 2
+
+/**
+ * A letra de atalho de cada opção: a primeira letra do rótulo que ninguém usou ainda, ou a primeira
+ * letra livre do alfabeto. Opções além das 26 letras ficam sem tecla.
+ */
+export function teclasDasOpcoes(opcoes: Opcao[]): Map<string, string> {
+  const teclas = new Map<string, string>()
+  const usadas = new Set<string>()
+  for (const o of opcoes) {
+    const sem = o.rotulo.normalize('NFD').replace(/[^a-zA-Z]/g, '').toLowerCase()
+    const letra = [...sem, ...'abcdefghijklmnopqrstuvwxyz'].find((l) => !usadas.has(l))
+    if (!letra) continue
+    usadas.add(letra)
+    teclas.set(o.valor, letra)
+  }
+  return teclas
+}
+
 export interface CampoDoEditor {
   chave: string
   rotulo: string
-  tipo: 'texto' | 'nome' | 'area' | 'opcoes' | 'multiplas' | 'booleano' | 'tempo'
+  tipo: 'texto' | 'nome' | 'area' | 'opcoes' | 'multiplas' | 'cores' | 'booleano' | 'tempo'
   /** Do tipo `nome`: o catálogo que o autocompletar consulta. */
   catalogo?: 'pessoas' | 'marcas'
   opcoes?: Opcao[]
   limite?: number
+  /** Do tipo `cores`: quantas opções cabem marcadas ao mesmo tempo. */
+  maximo?: number
   /** Só aparece quando a função diz que sim (a evidência de quem passa a aparecer na imagem). */
   visivel?: (valores: Record<string, Valor>) => boolean
 }
@@ -417,7 +439,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
       const cores = objeto.cor_base
       const campos: CampoDoEditor[] = [
         { chave: 'tipo', rotulo: 'Tipo', tipo: 'texto', limite: c.limites.nome },
-        { chave: 'cor_base', rotulo: 'Cor base (até 2)', tipo: 'multiplas', opcoes: c.cores_base },
+        { chave: 'cor_base', rotulo: `Cor base (até ${MAXIMO_DE_CORES_BASE})`, tipo: 'cores', opcoes: c.cores_base, maximo: MAXIMO_DE_CORES_BASE },
         { chave: 'cor', rotulo: 'Tom', tipo: 'texto', limite: c.limites.nome },
         { chave: 'detalhe', rotulo: 'Detalhe', tipo: 'texto', limite: c.limites.nome },
         { chave: 'marca', rotulo: 'Marca', tipo: 'nome', catalogo: 'marcas', limite: c.limites.nome },
@@ -442,7 +464,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
         const tipo = texto(v.tipo)
         if (!tipo) return null
         const escolhidas = c.cores_base.map((x) => x.valor).filter((x) => (v.cor_base as string[]).includes(x))
-        if (escolhidas.length > 2) return null
+        if (escolhidas.length > MAXIMO_DE_CORES_BASE) return null
         const mesmasCores = [...(v.cor_base as string[])].sort().join() === [...cores].sort().join()
         const partes: Pedido[] = []
         if (

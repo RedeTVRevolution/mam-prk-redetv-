@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -872,4 +872,77 @@ test('objeto: a lixeira abre a confirmação, e Cancelar e Remover funcionam com
 
   await waitFor(() => expect(correcoes).toHaveLength(1))
   expect(correcoes[0]).toMatchObject({ tipo: 'objeto.nao_existe', item_id: 'o1' })
+})
+
+async function abrirOFormularioDoObjeto() {
+  const usuario = await selecionarObjeto()
+  await usuario.keyboard('{F2}')
+  const formulario = within(await screen.findByRole('form', { name: /Corrigir camisa/ }))
+  return { usuario, formulario, grupo: formulario.getByRole('group', { name: 'Cor base (até 2)' }) }
+}
+
+const corMarcada = (grupo: HTMLElement, nome: string) =>
+  within(grupo).getByRole('button', { name: nome }).getAttribute('aria-pressed') === 'true'
+
+function focarNaCor(grupo: HTMLElement, nome: string) {
+  act(() => within(grupo).getByRole('button', { name: nome }).focus())
+}
+
+test('objeto: a cor base marca e desmarca pela tecla, com o foco no grupo das cores', async () => {
+  const { usuario, formulario, grupo } = await abrirOFormularioDoObjeto()
+  expect(corMarcada(grupo, 'azul')).toBe(true)
+
+  focarNaCor(grupo, 'azul')
+  await usuario.keyboard('v')
+  expect(corMarcada(grupo, 'vermelho')).toBe(true)
+  await usuario.keyboard('z')
+  expect(corMarcada(grupo, 'azul')).toBe(false)
+  await usuario.click(formulario.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(JSON.parse(correcoes[0].valor as string).cor_base).toEqual(['vermelho'])
+})
+
+test('objeto: a cor base pelo clique recusa a terceira e diz por quê; desmarcar libera a vaga', async () => {
+  const { usuario, grupo } = await abrirOFormularioDoObjeto()
+
+  await usuario.click(within(grupo).getByRole('button', { name: 'verde' }))
+  expect(corMarcada(grupo, 'verde')).toBe(true)
+  await usuario.click(within(grupo).getByRole('button', { name: 'roxo' }))
+  expect(corMarcada(grupo, 'roxo')).toBe(false)
+  expect((await screen.findByRole('alert')).textContent).toMatch(/no máximo 2/i)
+
+  await usuario.click(within(grupo).getByRole('button', { name: 'azul' }))
+  await usuario.click(within(grupo).getByRole('button', { name: 'roxo' }))
+  expect(corMarcada(grupo, 'roxo')).toBe(true)
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test('objeto: a terceira cor pela tecla também não marca', async () => {
+  const { usuario, grupo } = await abrirOFormularioDoObjeto()
+  focarNaCor(grupo, 'azul')
+  await usuario.keyboard('v')
+  await usuario.keyboard('l')
+  expect(corMarcada(grupo, 'laranja')).toBe(false)
+  expect(screen.getByRole('alert').textContent).toMatch(/no máximo 2/i)
+})
+
+test('objeto: as letras das cores não agem com o foco num campo de texto', async () => {
+  const { usuario, formulario, grupo } = await abrirOFormularioDoObjeto()
+  const detalhe = formulario.getByLabelText('Detalhe')
+  await usuario.click(detalhe)
+  await usuario.keyboard('vl')
+
+  expect((detalhe as HTMLInputElement).value).toBe('vl')
+  expect(corMarcada(grupo, 'vermelho')).toBe(false)
+  expect(corMarcada(grupo, 'laranja')).toBe(false)
+})
+
+test('objeto: as teclas das cores entram na lista do ?', async () => {
+  const { usuario, grupo } = await abrirOFormularioDoObjeto()
+  focarNaCor(grupo, 'azul')
+  await usuario.keyboard('?')
+  const tabela = await screen.findByRole('table', { name: 'Cor base do objeto' })
+  expect(within(tabela).getByText('V')).toBeTruthy()
+  expect(within(tabela).getByText('Marcar ou desmarcar vermelho')).toBeTruthy()
 })

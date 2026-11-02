@@ -1,5 +1,6 @@
 import { Button, Checkbox, Group, NativeSelect, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core'
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from 'react'
+import { CampoDeCores } from './CampoDeCores.tsx'
 import { CampoDeNome } from './CampoDeNome.tsx'
 import { type CampoDoEditor, type Editor, idDoNome, type Valor } from './catalogacao.ts'
 import { type Intervalo, relogio } from './linhaDoTempo.ts'
@@ -151,6 +152,17 @@ export function FormularioDeCorrecao({
               ))}
             </Group>
           </Checkbox.Group>
+        )
+      case 'cores':
+        return (
+          <CampoDeCores
+            key={c.chave}
+            rotulo={c.rotulo}
+            opcoes={c.opcoes ?? []}
+            maximo={c.maximo ?? 1}
+            valor={(valor as string[]) ?? []}
+            aoMudar={(v) => mudar(c, v)}
+          />
         )
       case 'booleano':
         return (
