@@ -22,6 +22,9 @@ As imagens:
 - **Leitura da tela:** os mesmos modelos, copiados do alvo `ocr`, e o `paddlepaddle-gpu` 3.2.2, a mesma versão do de CPU, com CUDA 12.6, do índice de rodas do Paddle (`pyproject.toml`). O erro do oneDNN que fixou o 3.2.2 é do caminho em CPU. Os grupos `ocr` e `ocr-gpu` declaram conflito no `uv.lock`, porque as duas rodas são o mesmo módulo `paddle`.
 - **Falha clara:** com `DISPOSITIVO=gpu` numa instância sem GPU, o Job falha com mensagem que diz o motivo, e nunca cai para a CPU em silêncio. O log diz em qual dispositivo rodou.
 - **Detecção de voz:** o Whisper pula o que não é fala (`vad_filter`), nas duas versões, com os tempos das palavras ainda contados do início do arquivo.
+- **Construção e cache:** as imagens GPU vão para um repositório do Artifact Registry em `us-east4`, que guarda também o cache das camadas do build. É só código e modelos públicos, sem dado de vídeo, e deixa o Job puxar a imagem de 5 GB ou mais na mesma região em que roda. A sub-rede e o repositório nascem no `infra/main.tf`.
+- **Modo de teste:** com `MODO_TESTE=1`, os Jobs não leem o bucket: rodam sobre uma fala curta sintética (`/amostras/fala.wav`, gerada com espeak-ng na construção da imagem) e saem com 20 se a GPU não funcionou ou 21 se o resultado veio errado.
+- **Teste depois da publicação:** o `scripts/deploy-dev.sh` executa os dois Jobs em modo de teste (`scripts/testar-jobs-gpu.sh`), em paralelo. Falta de GPU ou de cota espera 60 s e 120 s e tenta de novo; qualquer outra falha derruba o teste. Se falhar, os Jobs voltam ao digest anterior, para o Workflows nunca disparar uma imagem que não roda na GPU.
 
 Alternativas recusadas:
 - **GPU em outra região dos EUA (`us-central1`, `us-west1`):** mais longe de São Paulo que `us-east4`, sem ganho que compense, e o jurídico aprovou `us-east4`.
