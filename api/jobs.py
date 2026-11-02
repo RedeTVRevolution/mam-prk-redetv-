@@ -130,6 +130,7 @@ NomeDaEtapa = Literal[
     "indexacao",
 ]
 ResultadoDaEtapa = Literal["concluida", "falhou"]
+DispositivoDaEtapa = Literal["gpu", "cpu"]
 
 
 class Etapa(BaseModel):
@@ -138,6 +139,11 @@ class Etapa(BaseModel):
     inicio: datetime
     fim: datetime | None = None
     resultado: ResultadoDaEtapa | None = None
+    # Só a transcrição e a leitura da tela (#239): onde rodaram e quantas vezes o Workflows
+    # tentou o Job com GPU (a espera por falta de GPU ou de cota); `None` nas outras etapas
+    # e em etapa anterior ao campo.
+    dispositivo: DispositivoDaEtapa | None = None
+    tentativas_gpu: int | None = None
 
 
 class Job(BaseModel):

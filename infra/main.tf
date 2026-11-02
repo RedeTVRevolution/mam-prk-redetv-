@@ -37,16 +37,20 @@ variable "regiao_gpu" {
   default = "us-east4"
 }
 
-# Falta de GPU ou de cota: a mesma espera e as mesmas novas tentativas valem para o teste
-# depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*) e para o
-# Workflows (#239). Até `gpu_tentativas` tentativas no total; a espera antes da segunda é
-# `gpu_espera_s`, e cada espera seguinte é a anterior vezes `gpu_fator_da_espera`.
-variable "gpu_tentativas" {
-  type    = number
-  default = 3
+# Falta de GPU ou de cota: a mesma espera vale para o Workflows (#239) e para o teste
+# depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*). O Job com GPU
+# tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
+# anterior vezes `gpu_fator_da_espera`, com teto em `gpu_espera_maxima_s`, até a soma das
+# esperas passar de `espera_gpu_minutos`; o número de tentativas sai dessa conta. Com os
+# padrões: 1, 2, 4, 4 e 4 minutos, seis tentativas em 15 minutos. Só depois disso o Workflows
+# roda o Job em CPU.
+variable "espera_gpu_minutos" {
+  description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
+  type        = number
+  default     = 15
   validation {
-    condition     = floor(var.gpu_tentativas) == var.gpu_tentativas && var.gpu_tentativas >= 1
-    error_message = "gpu_tentativas é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
+    condition     = floor(var.espera_gpu_minutos) == var.espera_gpu_minutos && var.espera_gpu_minutos >= 0
+    error_message = "espera_gpu_minutos é um inteiro a partir de 0 (0 vai direto para a CPU)."
   }
 }
 
@@ -54,8 +58,8 @@ variable "gpu_espera_s" {
   type    = number
   default = 60
   validation {
-    condition     = floor(var.gpu_espera_s) == var.gpu_espera_s && var.gpu_espera_s >= 0
-    error_message = "gpu_espera_s é um inteiro a partir de 0 (o script do teste faz a conta em bash)."
+    condition     = floor(var.gpu_espera_s) == var.gpu_espera_s && var.gpu_espera_s >= 1
+    error_message = "gpu_espera_s é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
   }
 }
 
@@ -65,6 +69,15 @@ variable "gpu_fator_da_espera" {
   validation {
     condition     = floor(var.gpu_fator_da_espera) == var.gpu_fator_da_espera && var.gpu_fator_da_espera >= 1
     error_message = "gpu_fator_da_espera é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
+  }
+}
+
+variable "gpu_espera_maxima_s" {
+  type    = number
+  default = 240
+  validation {
+    condition     = floor(var.gpu_espera_maxima_s) == var.gpu_espera_maxima_s && var.gpu_espera_maxima_s >= 1
+    error_message = "gpu_espera_maxima_s é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
   }
 }
 
@@ -1561,6 +1574,10 @@ resource "google_workflows_workflow" "validacao" {
     job_de_transcricao     = google_cloud_run_v2_job.transcricao.name
     job_de_ocr             = google_cloud_run_v2_job.ocr.name
     regiao_gpu             = var.regiao_gpu
+    gpu_espera_total_s     = var.espera_gpu_minutos * 60
+    gpu_espera_s           = var.gpu_espera_s
+    gpu_fator_da_espera    = var.gpu_fator_da_espera
+    gpu_espera_maxima_s    = var.gpu_espera_maxima_s
     job_de_transcricao_gpu = google_cloud_run_v2_job.transcricao_gpu.name
     job_de_ocr_gpu         = google_cloud_run_v2_job.ocr_gpu.name
     job_de_analise         = google_cloud_run_v2_job.analise.name
@@ -1774,8 +1791,12 @@ output "job_de_ocr_gpu" {
   value = google_cloud_run_v2_job.ocr_gpu.name
 }
 
-output "gpu_tentativas" {
-  value = var.gpu_tentativas
+output "gpu_espera_total_s" {
+  value = var.espera_gpu_minutos * 60
+}
+
+output "gpu_espera_maxima_s" {
+  value = var.gpu_espera_maxima_s
 }
 
 output "gpu_espera_s" {

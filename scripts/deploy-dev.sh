@@ -103,8 +103,9 @@ JOBS_GPU=(
   "$(tf output -raw job_de_transcricao_gpu),$TRANSCRICAO_GPU_ANTES,$IMAGEM_TRANSCRICAO_GPU"
   "$(tf output -raw job_de_ocr_gpu),$OCR_GPU_ANTES,$IMAGEM_OCR_GPU"
 )
-GPU_REGIAO=$(tf output -raw regiao_gpu) GPU_TENTATIVAS=$(tf output -raw gpu_tentativas) \
+GPU_REGIAO=$(tf output -raw regiao_gpu) GPU_ESPERA_TOTAL_S=$(tf output -raw gpu_espera_total_s) \
   GPU_ESPERA_S=$(tf output -raw gpu_espera_s) GPU_FATOR_DA_ESPERA=$(tf output -raw gpu_fator_da_espera) \
+  GPU_ESPERA_MAXIMA_S=$(tf output -raw gpu_espera_maxima_s) \
   GCP_PROJECT_ID=$GCP_PROJECT_ID GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT \
   scripts/testar-jobs-gpu.sh "${JOBS_GPU[@]}"
 

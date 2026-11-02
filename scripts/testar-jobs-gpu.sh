@@ -11,7 +11,8 @@
 #
 # Ambiente: GCP_PROJECT_ID, GOOGLE_IMPERSONATE_SERVICE_ACCOUNT, GPU_REGIAO e a espera por
 # falta de GPU ou de cota (os outputs gpu_* do Terraform, os mesmos do Workflows):
-# GPU_TENTATIVAS (no total), GPU_ESPERA_S (antes da segunda) e GPU_FATOR_DA_ESPERA.
+# GPU_ESPERA_TOTAL_S (a soma das esperas não passa disso, e dela sai o número de tentativas),
+# GPU_ESPERA_S (antes da segunda), GPU_FATOR_DA_ESPERA e GPU_ESPERA_MAXIMA_S (o teto de cada espera).
 #
 # Sai com 0 se tudo passou ou se nenhuma imagem mudou. Se algum teste falhar, volta os
 # Jobs que mudaram para a imagem anterior e sai com 1, dizendo qual das três falhas foi:
@@ -20,7 +21,9 @@
 set -uo pipefail
 
 : "${GCP_PROJECT_ID:?}" "${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?}" "${GPU_REGIAO:?}"
-: "${GPU_TENTATIVAS:?}" "${GPU_ESPERA_S:?}" "${GPU_FATOR_DA_ESPERA:?}"
+: "${GPU_ESPERA_TOTAL_S:?}" "${GPU_ESPERA_S:?}" "${GPU_FATOR_DA_ESPERA:?}" "${GPU_ESPERA_MAXIMA_S:?}"
+# Espera zero nunca esgotaria o total: o Terraform exige pelo menos 1 s.
+((GPU_ESPERA_S >= 1)) || { echo "GPU_ESPERA_S precisa ser pelo menos 1." >&2; exit 2; }
 
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 
@@ -46,12 +49,16 @@ classificar() {
 # minutos, e sem ele um teste travado prenderia a publicação pelo timeout do Job (horas).
 LIMITE_DA_EXECUCAO=15m
 
-# Um Job: até GPU_TENTATIVAS execuções, com espera crescente, só quando falta GPU ou cota.
-# Escreve o veredito (ok, sem_gpu, gpu_nao_funcionou, resultado_errado) no arquivo dado.
+# Um Job: executa de novo, com espera crescente (com teto), só quando falta GPU ou cota, até
+# a soma das esperas passar de GPU_ESPERA_TOTAL_S: é a mesma conta do Workflows.
+# Escreve o veredito (ok, sem_gpu, gpu_nao_funcionou, resultado_errado) no arquivo dado e,
+# em `<veredito>.tentativas`, quantas execuções fez.
 testar_um() {
-  local job=$1 veredito=$2 inicio=$SECONDS espera=$GPU_ESPERA_S tentativa saida
-  for ((tentativa = 1; tentativa <= GPU_TENTATIVAS; tentativa++)); do
-    echo "[$job] teste, tentativa $tentativa de $GPU_TENTATIVAS"
+  local job=$1 veredito=$2 inicio=$SECONDS espera=$GPU_ESPERA_S esperado=0 tentativa=0 saida motivo
+  while true; do
+    tentativa=$((tentativa + 1))
+    echo "$tentativa" >"$veredito.tentativas"
+    echo "[$job] teste, tentativa $tentativa"
     if saida=$(gc run jobs execute "$job" --region "$GPU_REGIAO" --wait \
       --task-timeout "$LIMITE_DA_EXECUCAO" --update-env-vars MODO_TESTE=1 2>&1); then
       echo "[$job] passou em $((SECONDS - inicio)) s"
@@ -59,19 +66,21 @@ testar_um() {
       return
     fi
     echo "$saida" | sed "s/^/[$job] /"
-    local motivo
     motivo=$(classificar "$saida")
     if [[ $motivo != sem_gpu ]]; then
       echo "$motivo" >"$veredito"
       return
     fi
-    if ((tentativa < GPU_TENTATIVAS)); then
-      echo "[$job] sem GPU ou sem cota: nova tentativa em $espera s"
-      sleep "$espera"
-      espera=$((espera * GPU_FATOR_DA_ESPERA))
+    if ((esperado + espera > GPU_ESPERA_TOTAL_S)); then
+      echo sem_gpu >"$veredito"
+      return
     fi
+    echo "[$job] sem GPU ou sem cota: nova tentativa em $espera s"
+    sleep "$espera"
+    esperado=$((esperado + espera))
+    espera=$((espera * GPU_FATOR_DA_ESPERA))
+    ((espera > GPU_ESPERA_MAXIMA_S)) && espera=$GPU_ESPERA_MAXIMA_S
   done
-  echo sem_gpu >"$veredito"
 }
 
 mudaram=()
@@ -107,7 +116,7 @@ for argumento in "${mudaram[@]}"; do
   case $(cat "$pasta/$job.veredito" 2>/dev/null) in
     ok) ;;
     sem_gpu)
-      echo "ERRO sem GPU: o Job $job não conseguiu GPU ou cota em $GPU_TENTATIVAS tentativas." >&2
+      echo "ERRO sem GPU: o Job $job não conseguiu GPU ou cota em $(cat "$pasta/$job.veredito.tentativas") tentativas, esperando até $GPU_ESPERA_TOTAL_S s." >&2
       falhou=1
       ;;
     resultado_errado)

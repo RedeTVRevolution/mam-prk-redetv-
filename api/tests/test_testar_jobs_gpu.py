@@ -53,8 +53,12 @@ def pasta(tmp_path: Path) -> Path:
 
 
 def _rodar(
-    pasta: Path, argumentos: list[str], respostas: dict[str, list[str]]
+    pasta: Path,
+    argumentos: list[str],
+    respostas: dict[str, list[str]],
+    ambiente_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    ambiente_extra = ambiente_extra or {}
     for job, lista in respostas.items():
         (pasta / f"{job}.respostas").write_text("".join(f"{r}\n" for r in lista))
     ambiente = {
@@ -64,9 +68,11 @@ def _rodar(
         "GCP_PROJECT_ID": "projeto-x",
         "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT": "conta@x",
         "GPU_REGIAO": "regiao-gpu",
-        "GPU_TENTATIVAS": "3",
+        "GPU_ESPERA_TOTAL_S": "15",
         "GPU_ESPERA_S": "5",
         "GPU_FATOR_DA_ESPERA": "2",
+        "GPU_ESPERA_MAXIMA_S": "10",
+        **ambiente_extra,
     }
     return subprocess.run(
         [str(SCRIPT), *argumentos],
@@ -199,6 +205,48 @@ def test_falta_de_gpu_nas_tentativas_falha_como_sem_gpu_e_volta_a_imagem(
     assert (pasta / "esperas").read_text().split() == ["5", "10"]
     (volta,) = _chamadas(pasta, "update")
     assert "--image img@b" in volta
+
+
+def test_o_numero_de_tentativas_sai_da_espera_total_e_nenhuma_espera_passa_do_teto(
+    pasta: Path,
+) -> None:
+    # Esperas 5, 10, 10, 10 (o teto é 10): somam 35, e a seguinte passaria dos 40.
+    r = _rodar(
+        pasta,
+        [f"{OCR},img@b,img@c"],
+        {OCR: ["sem_gpu"] * 9},
+        {"GPU_ESPERA_TOTAL_S": "40"},
+    )
+
+    assert r.returncode == 1
+    assert "5 tentativas" in r.stderr
+    assert (pasta / "esperas").read_text().split() == ["5", "10", "10", "10"]
+
+
+def test_uma_espera_total_menor_da_menos_tentativas(pasta: Path) -> None:
+    r = _rodar(
+        pasta,
+        [f"{OCR},img@b,img@c"],
+        {OCR: ["sem_gpu"] * 9},
+        {"GPU_ESPERA_TOTAL_S": "7"},
+    )
+
+    assert r.returncode == 1
+    assert "2 tentativas" in r.stderr
+    assert (pasta / "esperas").read_text().split() == ["5"]
+
+
+def test_espera_total_zero_tenta_uma_vez_so(pasta: Path) -> None:
+    r = _rodar(
+        pasta,
+        [f"{OCR},img@b,img@c"],
+        {OCR: ["sem_gpu"] * 3},
+        {"GPU_ESPERA_TOTAL_S": "0"},
+    )
+
+    assert r.returncode == 1
+    assert "1 tentativas" in r.stderr
+    assert not (pasta / "esperas").exists()
 
 
 def test_na_primeira_publicacao_a_falha_nao_tem_imagem_para_voltar(

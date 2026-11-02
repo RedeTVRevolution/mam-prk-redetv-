@@ -119,7 +119,8 @@ def test_saidas_para_o_workflows_e_para_o_teste_depois_da_publicacao() -> None:
         ("regiao_gpu", "var.regiao_gpu"),
         ("job_de_transcricao_gpu", "google_cloud_run_v2_job.transcricao_gpu.name"),
         ("job_de_ocr_gpu", "google_cloud_run_v2_job.ocr_gpu.name"),
-        ("gpu_tentativas", "var.gpu_tentativas"),
+        ("gpu_espera_total_s", "var.espera_gpu_minutos * 60"),
+        ("gpu_espera_maxima_s", "var.gpu_espera_maxima_s"),
         ("gpu_espera_s", "var.gpu_espera_s"),
         ("gpu_fator_da_espera", "var.gpu_fator_da_espera"),
         ("repositorio_gpu", "google_artifact_registry_repository.mam_gpu"),
@@ -134,10 +135,12 @@ def test_saidas_para_o_workflows_e_para_o_teste_depois_da_publicacao() -> None:
     assert re.search(r"job_de_ocr_gpu\s+= google_cloud_run_v2_job\.ocr_gpu\.name", MAIN)
 
 
-def test_as_esperas_por_falta_de_gpu_tem_padroes_de_ate_3_tentativas() -> None:
-    assert re.search(r"default\s+= 3", _bloco('variable "gpu_tentativas"'))
+def test_a_espera_por_falta_de_gpu_tem_15_minutos_e_esperas_de_1_a_4_minutos() -> None:
+    assert re.search(r"default\s+= 15", _bloco('variable "espera_gpu_minutos"'))
     assert re.search(r"default\s+= 60", _bloco('variable "gpu_espera_s"'))
     assert re.search(r"default\s+= 2", _bloco('variable "gpu_fator_da_espera"'))
+    assert re.search(r"default\s+= 240", _bloco('variable "gpu_espera_maxima_s"'))
+    assert 'variable "gpu_tentativas"' not in MAIN
 
 
 def test_o_bake_e_o_cloud_build_montam_e_enviam_as_duas_imagens_com_cache() -> None:
@@ -210,9 +213,10 @@ def test_deploy_dev_le_as_imagens_antes_do_apply_e_testa_depois_so_os_jobs_com_g
     assert "job_de_ocr_gpu),$OCR_GPU_ANTES,$IMAGEM_OCR_GPU" in deploy
     # As esperas são as do Terraform, as mesmas do Workflows.
     for saida in (
-        "gpu_tentativas",
+        "gpu_espera_total_s",
         "gpu_espera_s",
         "gpu_fator_da_espera",
+        "gpu_espera_maxima_s",
         "regiao_gpu",
     ):
         assert f"tf output -raw {saida}" in deploy[teste - 600 :]
