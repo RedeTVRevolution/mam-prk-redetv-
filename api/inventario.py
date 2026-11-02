@@ -26,8 +26,8 @@ from api.florence import ObjetosDaDecupagem
 from api.gemini import Chamada, Transporte, gerar_validado
 from api.leitura_da_tela import Caixa
 
-# Regra do destaque (1 a 3), só da maior caixa do objeto: área em fração do quadro e
-# distância do centro da caixa ao centro do quadro (0 a ~0,71).
+# Regra do destaque (1 a 3), por caixa; o objeto fica com o maior destaque das suas
+# caixas. Área em fração do quadro e distância do centro da caixa ao centro do quadro (0 a ~0,71).
 AREA_GRANDE = 0.10
 AREA_MEDIA = 0.02
 PERTO_DO_CENTRO = 0.25

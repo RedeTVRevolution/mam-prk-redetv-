@@ -873,7 +873,7 @@ roda_o_job_com_gpu:
                 switch:
                   - condition: $${esperado + espera <= ${gpu_espera_total_s}}
                     next: registra_a_nova_tentativa
-                next: registra_o_plano_b
+                next: confere_se_ha_plano_b
     - registra_o_sucesso_na_gpu:
         call: marca_dispositivo
         args:

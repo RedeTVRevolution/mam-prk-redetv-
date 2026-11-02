@@ -1045,3 +1045,8 @@ def test_sem_job_em_cpu_a_gpu_esgotada_repassa_a_falha() -> None:
     assert "$${job_cpu == null}" in funcao
     assert "raise: $${erro_final}" in funcao
     assert funcao.index("raise: $${erro_final}") < funcao.index("- registra_o_plano_b:")
+    # Esgotada a espera, o fluxo passa pela conferência antes do plano B.
+    cabe = funcao[
+        funcao.index("- ainda_cabe_esperar:") : funcao.index("- registra_o_sucesso")
+    ]
+    assert cabe.rstrip().endswith("next: confere_se_ha_plano_b")

@@ -164,7 +164,8 @@ CategoriaDeObjeto = Literal[
     "produto",
     "animal",
     "alimento",
-    # Objetos de cena (#244): só o inventário de objetos os usa, mas a lista é uma só.
+    # Objetos de cena (#244), para o inventário de objetos; como a lista é uma só, o
+    # esquema da análise também passa a aceitá-las em `Objeto.categoria`.
     "movel",
     "decoracao",
     "instrumento_musical",
