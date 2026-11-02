@@ -122,7 +122,7 @@ def test_esquema_do_modelo_traz_as_descricoes_do_esquema_14() -> None:
     assert '"celular"' in objeto_do_modelo["tipo"]["description"]
     assert (
         "também entra em `objetos`"
-        in (esquema["$defs"]["Plano"]["properties"]["objetos"]["description"])
+        not in (esquema["$defs"]["Plano"]["properties"]["objetos"]["description"])
     )
 
 
@@ -174,23 +174,26 @@ def test_categorias_novas_passam_no_esquema(categoria: str) -> None:
     assert d.objetos[0].categoria == categoria
 
 
+def _secao_das_pessoas() -> str:
+    return instrucao(None).split("\n5. ")[1].split("\n6. LOCAIS")[0]
+
+
 def test_instrucao_pede_as_pecas_das_pessoas_com_dono_e_relacao() -> None:
-    texto = instrucao(None)
+    secao = _secao_das_pessoas()
 
     assert (
         "Para cada pessoa na imagem, registre em objetos o que ela veste, calça e usa"
-        in texto
+        in secao
     )
-    for verbo in ("veste", "calca", "usa", "segura"):
-        assert verbo in texto.split("6. LOCAIS")[0].split("5. ")[1]
-    assert "No máximo 5 peças por pessoa em cada aparição" in texto
-    assert "Só o que estiver visível" in texto
+    assert "a relação (veste, calca, usa, segura)" in secao
+    assert "No máximo 5 peças por pessoa em cada aparição" in secao
+    assert "Só o que estiver visível" in secao
 
 
 def test_instrucao_nao_pede_mais_os_objetos_em_cena() -> None:
-    secao = instrucao(None).split("6. LOCAIS")[0].split("\n5. ")[1]
+    texto = instrucao(None)
 
-    assert "Os objetos de cena não são pedidos aqui" in secao
+    assert "Os objetos de cena não são pedidos aqui" in _secao_das_pessoas()
     for sumiu in (
         "Os dois grupos têm o mesmo peso",
         "os objetos em cena: veículo",
@@ -198,7 +201,7 @@ def test_instrucao_nao_pede_mais_os_objetos_em_cena() -> None:
         "Todo objeto que você citar em objetos de um plano também entra",
         "comercial tiver a evidência produto",
     ):
-        assert sumiu not in secao
+        assert sumiu not in texto
 
 
 def _resposta_com_objetos(*objetos: dict[str, Any]) -> str:
@@ -237,11 +240,10 @@ def test_resposta_com_pessoa_inexistente_e_refeita() -> None:
     assert len(t.chamadas) == 2
 
 
-def test_instrucao_tem_a_secao_de_objetos_e_a_de_locais() -> None:
+def test_instrucao_tem_a_secao_das_pessoas_e_a_de_locais() -> None:
     texto = instrucao(None)
 
     assert "5. PESSOAS: ROUPAS, CALÇADOS E ACESSÓRIOS" in texto
-    assert "No máximo 5 peças por pessoa em cada aparição" in texto
     assert "6. LOCAIS E IMAGENS DE APOIO" in texto
     assert "7. COMERCIAIS E MERCHANDISING" in texto
 

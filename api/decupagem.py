@@ -237,8 +237,7 @@ class Plano(_Intervalo):
     )
     objetos: list[Rotulo] = Field(
         default=[],
-        description="Os objetos de destaque do plano; cada um também entra em "
-        "`objetos`, com os tempos.",
+        description="Os objetos de destaque do plano.",
     )
     acao: Texto | None = None
     enquadramento: Rotulo | None = None

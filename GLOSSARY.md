@@ -95,7 +95,7 @@ Descartado: o nome foi recusado (a escolha apontou outro candidato ou nenhum, ou
 Unidade de busca: um plano ou um evento da decupagem, com início e fim.
 
 **Objeto**:
-Peça visível na Decupagem (`objetos`, esquema 1.4): a análise principal registra só o que cada pessoa veste, calça, usa ou segura (roupa, calçado, acessório, na mão), com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`) e os tempos. Os objetos de cena (veículo, produto, eletrônico, animal, comida) já cabem no esquema, mas vêm da etapa de inventário de objetos (Florence-2), não da análise principal (#242). A categoria diz o que a coisa é (`em_cena` e `na_mao` só quando nenhuma outra serve). A busca filtra pelo objeto inteiro, não por itens soltos no plano.
+Peça visível na Decupagem (`objetos`, esquema 1.4): a análise principal registra só o que cada pessoa veste, calça, usa ou segura (roupa, calçado, acessório, na mão), com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`) e os tempos. Os objetos de cena (veículo, produto, eletrônico, animal, comida) já cabem no esquema, mas vêm da etapa de inventário de objetos (Florence-2), não da análise principal. A categoria diz o que a coisa é (`em_cena` e `na_mao` só quando nenhuma outra serve). A busca filtra pelo objeto inteiro, não por itens soltos no plano.
 
 **Ocorrência**:
 Algo detectado num momento: pessoa, marca, objeto ou pauta.

@@ -77,7 +77,7 @@ REGRAS GERAIS
 
 5. PESSOAS: ROUPAS, CALÇADOS E ACESSÓRIOS
 - Para cada pessoa na imagem, registre em objetos o que ela veste, calça e usa (roupa, calçado, acessório) e o que segura na mão, com o id dela em pessoa e a relação (veste, calca, usa, segura). Só o que estiver visível; não deduza o calçado se os pés não aparecem. No máximo 5 peças por pessoa em cada aparição, as mais visíveis.
-- Os objetos de cena não são pedidos aqui: não registre veículo, produto, eletrônico, troféu, joia, animal nem comida sem dono.
+- Os objetos de cena não são pedidos aqui: veículo, produto, eletrônico, troféu, joia, animal ou comida só entram se uma pessoa os veste, usa ou segura.
 - A categoria diz o que a peça é. Use na_mao só quando nenhuma outra servir.
 - Para cada peça: categoria, tipo no singular, a cor base da lista (até 2 cores) e o tom como você vê no campo cor, detalhe curto e os intervalos em que está visível.
 - Marca só quando o logo ou o nome estiver legível. Na dúvida, deixe em branco.
