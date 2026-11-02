@@ -12,13 +12,14 @@ variable "CACHE" {}
 # (#238): o BuildKit, ao enviar a imagem, não reenvia as camadas que o cache já pôs lá.
 variable "TRANSCRICAO_GPU" {}
 variable "OCR_GPU" {}
+variable "OBJETOS_GPU" {}
 variable "CACHE_GPU" {}
 variable "VITE_IDENTITY_API_KEY" {
   default = ""
 }
 
 group "default" {
-  targets = ["web", "validacao", "transcricao", "ocr", "transcricao-gpu", "ocr-gpu"]
+  targets = ["web", "validacao", "transcricao", "ocr", "transcricao-gpu", "ocr-gpu", "objetos-gpu"]
 }
 
 target "base" {
@@ -60,7 +61,7 @@ target "ocr" {
 # As imagens com GPU (E1, ADR 0007, #238): estão no grupo `default`, que o cloudbuild.yaml
 # envia. O grupo `gpu` monta só elas, para quem quiser conferir uma construção à mão.
 group "gpu" {
-  targets = ["transcricao-gpu", "ocr-gpu"]
+  targets = ["transcricao-gpu", "ocr-gpu", "objetos-gpu"]
 }
 
 target "transcricao-gpu" {
@@ -77,4 +78,12 @@ target "ocr-gpu" {
   tags       = [OCR_GPU]
   cache-from = ["type=registry,ref=${CACHE_GPU}:ocr-gpu"]
   cache-to   = ["type=registry,ref=${CACHE_GPU}:ocr-gpu,mode=max,image-manifest=true,oci-mediatypes=true"]
+}
+
+target "objetos-gpu" {
+  inherits   = ["base"]
+  target     = "objetos-gpu"
+  tags       = [OBJETOS_GPU]
+  cache-from = ["type=registry,ref=${CACHE_GPU}:objetos-gpu"]
+  cache-to   = ["type=registry,ref=${CACHE_GPU}:objetos-gpu,mode=max,image-manifest=true,oci-mediatypes=true"]
 }
