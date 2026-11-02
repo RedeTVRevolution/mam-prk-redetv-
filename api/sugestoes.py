@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from api.catalogo import Catalogo
 from api.comparador import normalizar
-from api.correcoes import Ocorrencia
+from api.correcoes import LIMITE_DO_NOME, Ocorrencia, TipoNovo
 from api.identidade import nao_identificado
 
 TipoDeSugestao = Literal["identificar_pessoa", "pauta_do_trecho"]
@@ -42,7 +42,7 @@ class Proposta(BaseModel):
     """Uma correção no formato do `POST /v1/jobs/{id}/correcoes`, sem motivo nem
     versão: quem aceita os põe."""
 
-    tipo: str
+    tipo: TipoNovo
     item_id: str
     valor: str
     catalogo_id: str | None = None
@@ -163,7 +163,7 @@ def _mencoes_para_aparicao(
         Proposta(
             tipo="pessoa.mencao_para_aparicao",
             item_id=str(pessoa["id"]),
-            valor=" ".join(str(m["texto"]).split())[:200],
+            valor=" ".join(str(m["texto"]).split())[:LIMITE_DO_NOME],
             ocorrencia=Ocorrencia(
                 lista="citada_no_texto", inicio_ms=m["inicio_ms"], fim_ms=m["fim_ms"]
             ),
@@ -219,17 +219,19 @@ REGRAS: tuple[Regra, ...] = (_gc_de_identificacao, _trecho_sem_pauta)
 
 
 def sugestoes_abertas(
-    entregue: dict[str, Any], catalogo: Catalogo, recusadas: set[str]
+    entregue: dict[str, Any], catalogo: Catalogo, decididas: set[str]
 ) -> list[Sugestao]:
-    """As sugestões do vídeo que o editor ainda não recusou, na ordem do tempo."""
+    """As sugestões do vídeo que o editor ainda não aceitou nem recusou, na ordem do
+    tempo. A aceita sai pela decisão, não só pela correção: a correção pendente fica
+    fora da decupagem entregue, e a regra a sugeriria de novo."""
     mundo = Contexto(entregue, catalogo)
-    todas = [s for regra in REGRAS for s in regra(mundo) if s.id not in recusadas]
+    todas = [s for regra in REGRAS for s in regra(mundo) if s.id not in decididas]
     return sorted(todas, key=lambda s: (s.inicio_ms, s.fim_ms, s.id))
 
 
-def com_o_valor_do_editor(sugestao: Sugestao, valor: str) -> Sugestao | None:
+def com_o_valor_do_editor(sugestao: Sugestao, valor: str) -> Sugestao:
     """A sugestão com o "outro nome" (ou o título da pauta) que o editor deu no lugar
-    do proposto; `None` se o valor não serve."""
+    do proposto."""
     proposta = sugestao.correcao
     if sugestao.tipo == "pauta_do_trecho":
         pauta = json.loads(proposta.valor)
@@ -258,8 +260,8 @@ class RepositorioDeSugestoes(Protocol):
         self, job_id: str, sugestao_id: str, tipo: TipoDeSugestao, decisao: Decisao
     ) -> None: ...
 
-    def recusadas(self, job_id: str) -> set[str]:
-        """Os ids das sugestões que o editor recusou nesse vídeo."""
+    def decididas(self, job_id: str) -> set[str]:
+        """Os ids das sugestões que o editor aceitou ou recusou nesse vídeo."""
         ...
 
     def contagem(self) -> dict[str, ContagemDoTipo]:
@@ -276,19 +278,15 @@ class RepositorioDeSugestoesEmMemoria:
     ) -> None:
         self._decisoes[(job_id, sugestao_id)] = (tipo, decisao)
 
-    def recusadas(self, job_id: str) -> set[str]:
-        return {
-            sid
-            for (job, sid), (_, decisao) in self._decisoes.items()
-            if job == job_id and decisao == "recusada"
-        }
+    def decididas(self, job_id: str) -> set[str]:
+        return {sid for job, sid in self._decisoes if job == job_id}
 
     def contagem(self) -> dict[str, ContagemDoTipo]:
         return contar(self._decisoes.values())
 
 
 def contar(
-    decisoes: Iterable[tuple[str, str]],
+    decisoes: Iterable[tuple[str, Decisao]],
 ) -> dict[str, ContagemDoTipo]:
     contagem: dict[str, ContagemDoTipo] = {}
     for tipo, decisao in decisoes:

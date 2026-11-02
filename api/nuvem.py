@@ -537,10 +537,9 @@ class RepositorioDeSugestoesFirestore:
             }
         )
 
-    def recusadas(self, job_id: str) -> set[str]:
+    def decididas(self, job_id: str) -> set[str]:
         consulta = self._colecao.where(filter=FieldFilter("job_id", "==", job_id))
-        docs = [d.to_dict() or {} for d in consulta.stream()]
-        return {d["sugestao_id"] for d in docs if d.get("decisao") == "recusada"}
+        return {(d.to_dict() or {})["sugestao_id"] for d in consulta.stream()}
 
     def contagem(self) -> dict[str, ContagemDoTipo]:
         docs = [d.to_dict() or {} for d in self._colecao.stream()]

@@ -732,7 +732,7 @@ class AceiteDaSugestao(BaseModel):
 def _correcao_da_proposta(proposta: Proposta, motivo: str, versao: str) -> NovaCorrecao:
     try:
         return NovaCorrecao(
-            tipo=proposta.tipo,  # type: ignore[arg-type]
+            tipo=proposta.tipo,
             item_id=proposta.item_id,
             valor=proposta.valor,
             catalogo_id=proposta.catalogo_id,
@@ -987,8 +987,21 @@ def criar_rotas(
         novo: NovaCorrecao,
         autor: Usuario,
     ) -> Correcao:
+        correcao = _conferir_correcao(job, modelo, versao_atual, request, novo, autor)
+        correcoes.acrescentar(correcao)
+        return correcao
+
+    def _conferir_correcao(
+        job: Job,
+        modelo: dict[str, Any],
+        versao_atual: str,
+        request: Request,
+        novo: NovaCorrecao,
+        autor: Usuario,
+    ) -> Correcao:
+        """O registro da correção, ainda não gravado; 409 ou 422 se ela não vale."""
         try:
-            correcao = corrigir(
+            return corrigir(
                 modelo,
                 versao_atual,
                 _ler_correcoes(job.id),
@@ -1009,8 +1022,6 @@ def criar_rotas(
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except CatalogoIdInvalido:
             raise HTTPException(422, "catalogo_id não é o desse nome") from None
-        correcoes.acrescentar(correcao)
-        return correcao
 
     @rotas.post("/{job_id}/correcoes", status_code=201)
     def corrigir_decupagem(
@@ -1032,7 +1043,7 @@ def criar_rotas(
     ) -> tuple[list[Sugestao], dict[str, Any], str]:
         modelo, versao_atual = _ler_modelo(job.id)
         entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
-        abertas = sugestoes_abertas(entregue, catalogo, sugestoes.recusadas(job.id))
+        abertas = sugestoes_abertas(entregue, catalogo, sugestoes.decididas(job.id))
         return abertas, modelo, versao_atual
 
     def _a_sugestao(abertas: list[Sugestao], sugestao_id: str) -> Sugestao:
@@ -1062,16 +1073,24 @@ def criar_rotas(
         if valor is not None:
             if not valor:
                 raise HTTPException(422, "O valor não pode ser vazio")
-            sugestao = com_o_valor_do_editor(sugestao, valor) or sugestao
+            sugestao = com_o_valor_do_editor(sugestao, valor)
         elif sugestao.tipo == "pauta_do_trecho":
             raise HTTPException(422, "A pauta pede um título")
         motivo = MOTIVO_CORRIGIDA if valor is not None else MOTIVO_CONFIRMADA
-        gravadas: list[Correcao] = []
-        for proposta in [sugestao.correcao, *sugestao.depois]:
-            novo = _correcao_da_proposta(proposta, motivo, versao_atual)
-            gravadas.append(
-                _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
+        # Confere todas antes de gravar a primeira: o aceite não fica pela metade.
+        gravadas = [
+            _conferir_correcao(
+                job,
+                modelo,
+                versao_atual,
+                request,
+                _correcao_da_proposta(proposta, motivo, versao_atual),
+                autor,
             )
+            for proposta in [sugestao.correcao, *sugestao.depois]
+        ]
+        for correcao in gravadas:
+            correcoes.acrescentar(correcao)
         sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
         if any(not c.exige_aprovacao for c in gravadas):
             reindexar(job)

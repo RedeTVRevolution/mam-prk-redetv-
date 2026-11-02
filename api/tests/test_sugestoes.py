@@ -4,6 +4,10 @@ e trecho sem pauta, e a contagem por tipo."""
 import json
 from typing import Any
 
+import pytest
+
+from api import sugestoes
+from api.correcoes import Ocorrencia
 from api.tests.test_correcoes import AUTORIZACAO, Mundo
 
 CURADOR = {"Authorization": "Bearer token-curador"}
@@ -308,6 +312,45 @@ def test_aceitar_leva_as_correcoes_seguintes_na_ordem() -> None:
     assert len(pessoa["na_imagem"]) == 2
 
 
+def test_o_aceite_que_falha_numa_correcao_seguinte_nao_grava_nenhuma(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def mencao_que_nao_existe(
+        pessoa: dict[str, Any], gc: tuple[int, int]
+    ) -> list[sugestoes.Proposta]:
+        return [
+            sugestoes.Proposta(
+                tipo="pessoa.mencao_para_aparicao",
+                item_id=str(pessoa["id"]),
+                valor="LEÃO LOBO",
+                ocorrencia=Ocorrencia(
+                    lista="citada_no_texto", inicio_ms=1_000, fim_ms=2_000
+                ),
+            )
+        ]
+
+    monkeypatch.setattr(sugestoes, "_mencoes_para_aparicao", mencao_que_nao_existe)
+    mundo = _mundo(_clipe4())
+    sid = _da_pessoa(mundo)["id"]
+
+    assert _aceitar(mundo, sid).status_code == 422
+    assert mundo.historico().json() == []
+    assert [s["id"] for s in _abertas(mundo)] == [sid]
+
+
+def test_a_sugestao_aceita_com_a_correcao_pendente_nao_volta() -> None:
+    mundo = _mundo(_clipe4())
+    mundo.aprovacao.definir(frozenset({"pessoa.renomear"}))
+    sid = _da_pessoa(mundo)["id"]
+
+    assert _aceitar(mundo, sid).status_code == 201
+    [item] = mundo.historico().json()
+    assert item["exige_aprovacao"] is True
+    assert mundo.decupagem()["pessoas"][0]["nome"].startswith("Não identificado")
+    assert _abertas(mundo) == []
+    assert _aceitar(mundo, sid).status_code == 404
+
+
 def test_aceitar_a_pauta_pede_o_titulo() -> None:
     mundo = _mundo(_modelo_com_trecho_sem_pauta())
     [sugestao] = _da_pauta(mundo)
@@ -377,7 +420,7 @@ def test_a_recusa_vale_so_no_video_dela() -> None:
     mundo = _mundo(_clipe4())
     _recusar(mundo, _da_pessoa(mundo)["id"])
 
-    assert mundo.sugestoes.recusadas("j2") == set()
+    assert mundo.sugestoes.decididas("j2") == set()
 
 
 def test_sugestao_inexistente_ou_ja_decidida_da_404() -> None:
