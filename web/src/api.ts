@@ -62,6 +62,8 @@ export interface FotosDoNome {
 }
 
 /** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
+export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
+
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
   reproducao(): Promise<Reproducao>
@@ -74,6 +76,8 @@ export interface ClienteDoJob {
   comparacao(passadaId: string): Promise<ComparacaoDaPassada>
   /** As fotos de referência que sustentam o nome da pessoa (exige `decupagem.ver`). */
   fotosDoNome(pessoaId: string): Promise<FotosDoNome>
+  /** Avisa que a pessoa começou, segue ou terminou de revisar (exige `decupagem.editar`). */
+  pulsoDeRevisao(evento: EventoDeRevisao): Promise<void>
   catalogo(): Promise<CatalogoDeCorrecoes>
   historico(): Promise<ItemDoHistorico[]>
   fila(): Promise<ItemDaFila[]>
@@ -178,6 +182,9 @@ export function criarClienteDaApi(
       passadas: () => chamar(`${base}/passadas`),
       comparacao: (passadaId) => chamar(`${base}/passadas/${encodeURIComponent(passadaId)}/comparacao`),
       fotosDoNome: (pessoaId) => chamar(`${base}/pessoas/${encodeURIComponent(pessoaId)}/referencias`),
+      pulsoDeRevisao: async (evento) => {
+        await pedir(`${base}/revisao/pulso`, { post: true, corpo: { evento } })
+      },
       catalogo: () => chamar('/v1/correcoes/catalogo'),
       historico: () => chamar(`${base}/correcoes`),
       fila: () => chamar(`${base}/fila`),

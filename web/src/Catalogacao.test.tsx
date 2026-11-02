@@ -43,6 +43,7 @@ const correcoes: Record<string, unknown>[] = []
 let desfeitas: { id: string; motivo: unknown }[] = []
 let historico: Record<string, unknown>[] = []
 let decupagemAtual: typeof DECUPAGEM = DECUPAGEM
+let pulsos: string[] = []
 
 const servidor = setupServer(
   http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(decupagemAtual)),
@@ -55,6 +56,10 @@ const servidor = setupServer(
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json(historico)),
   http.get('/v1/jobs/j1/fila', () => HttpResponse.json([])),
+  http.post('/v1/jobs/j1/revisao/pulso', async ({ request }) => {
+    pulsos.push(((await request.json()) as { evento: string }).evento)
+    return new HttpResponse(null, { status: 204 })
+  }),
   http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
     correcoes.push((await request.json()) as Record<string, unknown>)
     return HttpResponse.json({}, { status: 201 })
@@ -68,6 +73,7 @@ beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 beforeEach(() => {
   correcoes.length = 0
   desfeitas = []
+  pulsos = []
   historico = []
   decupagemAtual = DECUPAGEM
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
@@ -105,6 +111,17 @@ test('E liga e desliga o modo de catalogação, só para quem edita', async () =
 
   await usuario.keyboard('e')
   expect(screen.queryByText('Catalogando')).toBeNull()
+})
+
+test('o modo de catalogação abre a sessão de revisão e sair do modo a fecha', async () => {
+  const usuario = await abrir(true)
+  expect(pulsos).toEqual([])
+
+  await usuario.keyboard('e')
+  await waitFor(() => expect(pulsos).toEqual(['inicio']))
+
+  await usuario.keyboard('e')
+  await waitFor(() => expect(pulsos).toEqual(['inicio', 'fim']))
 })
 
 test('sem decupagem.editar, E não faz nada e não está na lista do ?', async () => {

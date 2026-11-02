@@ -72,6 +72,7 @@ from api.nuvem import (
     RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
+    RepositorioDeRevisaoFirestore,
     RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
 )
@@ -95,6 +96,12 @@ from api.reprocessamento import (
     DisparoDoWorkflow,
     DisparoIndisponivel,
     criar_rotas_do_reprocessamento,
+)
+from api.revisao import (
+    LIMITE_DE_INATIVIDADE_S,
+    RepositorioDeRevisao,
+    RepositorioDeRevisaoEmMemoria,
+    criar_rotas_da_revisao,
 )
 from api.rota_da_busca import (
     CONSULTAS_POR_MINUTO,
@@ -171,6 +178,7 @@ def criar_app(
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
     auditoria: RepositorioDeAuditoria | None = None,
+    revisao: RepositorioDeRevisao | None = None,
     disparo: DisparoDoWorkflow | None = None,
     janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
@@ -184,6 +192,7 @@ def criar_app(
     busca_por_minuto: int = CONSULTAS_POR_MINUTO,
     tempo_maximo_da_busca_s: float = TEMPO_MAXIMO_S,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
+    limite_de_inatividade_s: float = LIMITE_DE_INATIVIDADE_S,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
@@ -306,6 +315,14 @@ def criar_app(
             janelas,
         )
     )
+    v1.include_router(
+        criar_rotas_da_revisao(
+            repositorio_de_jobs,
+            revisao or RepositorioDeRevisaoEmMemoria(),
+            relogio,
+            limite_de_inatividade_s,
+        )
+    )
     app.include_router(v1)
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
@@ -331,6 +348,10 @@ if _projeto:
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
+        revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
+        limite_de_inatividade_s=float(
+            os.environ.get("REVISAO_INATIVIDADE_S") or LIMITE_DE_INATIVIDADE_S
+        ),
         disparo=DisparoPeloWorkflows(
             _projeto, os.environ["WORKFLOW_REGIAO"], os.environ["WORKFLOW_VALIDACAO"]
         ),

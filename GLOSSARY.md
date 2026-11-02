@@ -193,3 +193,6 @@ Nota de 1 a 3 de quanto um objeto do inventário aparece no quadro, calculada pe
 
 **Motor do inventário**:
 Quem faz o inventário de objetos: `florence` (Florence-2 numa GPU, com o Gemini só convertendo o texto para o português) ou `gemini` (o modelo olha os quadros-chave). Vem da variável `motor_objetos`; o inventário guarda o motor e o modelo que o geraram.
+
+**Sessão de revisão**:
+O tempo que uma pessoa passa revisando um vídeo no modo de catalogação (#251). A tela avisa a API ao começar, a cada minuto com atividade (tecla, clique ou player tocando) e ao sair (`POST /v1/jobs/{id}/revisao/pulso`); sem atividade por 5 minutos (`REVISAO_INATIVIDADE_S`) a sessão pausa e o tempo parado não conta. A API guarda por vídeo e por pessoa o tempo ativo, as sessões e a duração do vídeo; duas abas da mesma pessoa não contam em dobro. O total sai em minutos de revisão por hora de vídeo (`GET /v1/jobs/{id}/revisao`, `make tempo-de-revisao`). A pessoa não vê cronômetro: o objetivo é medir.

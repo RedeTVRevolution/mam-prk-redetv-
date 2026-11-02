@@ -353,3 +353,10 @@ Não corrigido:
 - A passada de comparação (#247) não grava `versao_pipeline`: ela já guarda o modelo e a spec não pede. Mostrar a versão na comparação lado a lado (#249) fica para decisão humana.
 - O detector real do OCR vem da imagem (`DETECTOR` no Dockerfile) e o manifesto usa o padrão: gravar o detector exigiria que o Job de OCR escrevesse na Decupagem, o que ele não faz hoje.
 - Smells de julgamento: `autor: dict[str, str]` com `**autor`, o quarteto repositório/auditoria/disparo/janelas viajando junto, `ANTERIOR` como texto sentinela, `exigir_do_ambiente` morando em `comparar_objetos`, `_dolar` em pt-BR diferente do `US$ x.xxxx` dos comandos de comparação, `DE`/`LIMITE` por argumento e `CONFIRMAR` por ambiente. Todos são refatoração sem bug.
+- 2026-11-02 09:39:44 · #250: feito
+- 2026-11-02 09:39:50 · iteração 51: #251
+
+## #251 iteração 52 (feito, `make verificar` verde)
+- Pronto: `api/revisao.py` (`aplicar` puro, `Medida`, `Pulso`, repositório em memória, rotas `POST /v1/jobs/{id}/revisao/pulso` com `decupagem.editar` e `GET /v1/jobs/{id}/revisao` com `correcao.aprovar` ou `auditoria.ver`, CSV); `RepositorioDeRevisaoFirestore` em `nuvem.py` (coleção `tempo_de_revisao`, transação, doc `<job>:<uid>`); `api/tempo_de_revisao.py` + `make tempo-de-revisao [DESDE=]`; web: `useSessaoDeRevisao.ts` ligado no Visualizador (`podeEditar && catalogando`), `pulsoDeRevisao` no `ClienteDoJob`; testes em `test_revisao`, `test_rotas_da_revisao`, `test_tempo_de_revisao`, `SessaoDeRevisao.test.tsx`, `Catalogacao.test.tsx`.
+- Decisões: o tempo cresce pela fronteira `ultimo_pulso` (intervalo ≤ limite soma, maior abre sessão sem contar, pulso que não passa da fronteira não soma: duas abas não dobram); `inicio` nunca soma. Limite padrão 300 s (`REVISAO_INATIVIDADE_S` na API). `DESDE` filtra pelo último pulso. Sem cronômetro na tela; falha de pulso é calada.
+- Armadilhas: com relógio falso no vitest, `waitFor` do RTL trava (usa setInterval): usar `vi.waitFor`. O pulso `fim` no unmount vai por fetch comum (não há `keepalive`), então fechar a aba pode perder o último pulso (até 1 min).

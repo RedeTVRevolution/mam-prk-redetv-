@@ -38,6 +38,7 @@ import { ABAS_DO_TRECHO } from './trecho.ts'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import { ComparacaoDePassada, SeletorDePassada } from './ComparacaoDePassadas.tsx'
 import { usePassadas } from './usePassadas.ts'
+import { useSessaoDeRevisao } from './useSessaoDeRevisao.ts'
 import { Sugestoes } from './Sugestoes.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
 import { nomeDaEtapa } from './etapas.ts'
@@ -186,6 +187,8 @@ export default function Visualizador({
   // depende dele pediria de novo a cada render.
   const clienteDoJob = useMemo(() => api.job(job.id), [api, job.id])
   const passadas = usePassadas(clienteDoJob, concluido)
+  // A sessão de revisão (#251) vale no modo de catalogação; a pessoa não vê nada dela.
+  useSessaoDeRevisao(clienteDoJob, podeEditar && catalogando, tocando)
   const [comparandoCom, setComparandoCom] = useState<string | null>(null)
   useEffect(() => {
     if (!concluido) return

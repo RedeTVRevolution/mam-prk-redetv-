@@ -56,6 +56,8 @@ from api.marcas import MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
+from api.revisao import Medida, Pulso
+from api.revisao import aplicar as aplicar_o_pulso
 from api.rostos_dos_palpites import FotoAusente
 from api.sugestoes import ContagemDoTipo, Decisao, TipoDeSugestao, contar
 from api.transcricao import Transcricao
@@ -72,6 +74,7 @@ COLECAO_DAS_SUGESTOES = "sugestoes_de_perfil"
 COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
+COLECAO_DA_REVISAO = "tempo_de_revisao"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 
@@ -607,6 +610,45 @@ class RepositorioDeAuditoriaFirestore:
         return pagina_da_auditoria(
             (r for r in registros if casa_com_o_filtro_da_auditoria(r, filtro)),
             filtro.limite,
+        )
+
+
+class RepositorioDeRevisaoFirestore:
+    """Um documento por vídeo e pessoa (`<job>:<uid>`); o pulso é aplicado numa transação."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DA_REVISAO
+    ) -> None:
+        self._cliente = cliente
+        self._colecao = cliente.collection(colecao)
+
+    def aplicar(self, pulso: Pulso, limite_s: float) -> Medida:
+        referencia = self._colecao.document(f"{pulso.job_id}:{pulso.uid}")
+
+        @firestore.transactional
+        def gravar(transacao: Any) -> Medida:
+            doc = referencia.get(transaction=transacao)
+            atual = Medida(**(doc.to_dict() or {})) if doc.exists else None
+            medida = aplicar_o_pulso(atual, pulso, limite_s)
+            transacao.set(referencia, medida.model_dump())
+            return medida
+
+        resultado: Medida = gravar(self._cliente.transaction())
+        return resultado
+
+    def do_video(self, job_id: str) -> list[Medida]:
+        docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
+        return sorted(
+            (Medida(**(d.to_dict() or {})) for d in docs), key=lambda m: m.email
+        )
+
+    def todas(self, desde: datetime | None = None) -> list[Medida]:
+        consulta: Any = self._colecao
+        if desde is not None:
+            consulta = consulta.where(filter=FieldFilter("ultimo_pulso", ">=", desde))
+        return sorted(
+            (Medida(**(d.to_dict() or {})) for d in consulta.stream()),
+            key=lambda m: (m.job_id, m.email),
         )
 
 

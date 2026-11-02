@@ -117,6 +117,8 @@ Reprocessar o acervo de propósito, depois de trocar a versão e fazer o deploy:
 make reprocessar-versao                       # só lista os Jobs concluídos de versão anterior e o custo estimado
 make reprocessar-versao DE=anterior LIMITE=20 # só os sem versão, até 20 (DE também aceita uma versão, como 2026.10.1)
 make reprocessar-versao LIMITE=20 CONFIRMAR=1 # reprocessa pela análise, em lotes (TAMANHO_DO_LOTE=5, PAUSA_ENTRE_LOTES_S=60)
+make tempo-de-revisao                         # CSV do tempo de revisão por vídeo e por pessoa (minutos por hora de vídeo)
+make tempo-de-revisao DESDE=2026-11-01        # só o que teve pulso de 1º/11 em diante (data ISO, UTC)
 ```
 
 O custo estimado é as horas de vídeo × `CUSTO_POR_HORA_USD` (do ambiente; sem ele sai "n/d"). Cada Job reprocessado entra na auditoria como `video.reprocessado`, por `sistema` `reprocessar-versao`, com o mesmo caminho da rota (#147, #235). A chave de conteúdo e a deduplicação ficam fora (E7).
