@@ -435,3 +435,15 @@ Não corrigido / decisão humana:
 - Decisões: o Agent Retrieval/índice não agrega (a API só devolve registros; sem doc/nuvem aqui para confirmar), então a contagem é nossa sobre os candidatos. Faceta de um valor ligado: só aparecem os valores dos candidatos já filtrados (para trocar, desliga e liga outro). Mês filtra por `desde`/`ate` e vale sobre o ano; mexer no select de ano zera o mês.
 - Armadilhas: rodar `prettier` sem config reformata o arquivo todo (o projeto não tem prettier); `TransporteFalso` gasta uma resposta por busca.
 - Falta (decisão humana): confirmar na doc do Agent Retrieval se há contagem por faceta nativa; se houver, trocar `_facetas`.
+
+## #257 revisão (iteração 55)
+Corrigido:
+- Pessoa, marca e tipo filtravam só os até 100 registros que cada cláusula já tinha trazido (o registro raro além do teto nunca aparecia). Agora vão ao índice nos `Filtros` de cada cláusula (`_com_facetas`); pessoa sem tipo na cláusula vira duas consultas (`dono` no objeto, `pessoa` no resto), intercaladas. O `_casa` fica como conferência. "Nenhuma aparição" continua olhando o acervo sem a faceta.
+- Programa e mês eram contados pelo Job e filtrados pelo registro do índice: com o Job editado sem reindexar, a faceta mostrava N e o clique dava 0. Agora contam pelo registro.
+- Rótulo do mês: a API manda `05/2024` e a web usa o `rotulo` (saiu o `rotuloDoMes`).
+- Teste da rota confere as contagens com e sem filtro; teste novo do filtro além do teto (falha no código antigo) e da pessoa na imagem ou dona.
+Não corrigido:
+- Pessoa ligada que o catálogo não conhece (id velho na URL) some do painel e só sai pelo endereço. Raro; fica.
+- `ano=todos&mes=…` na URL: o mês vence em silêncio. A tela zera o mês ao trocar o ano, então só acontece com URL montada à mão.
+- Smells sem bug: cada faceta aparece em vários lugares (Python e web), `ROTULO_DO_TIPO` repete rótulos da web, `mudar({ [faceta]: … })` perde o tipo da chave.
+- Contagem nativa do Agent Retrieval continua sem conferência na doc (decisão humana, já anotada).

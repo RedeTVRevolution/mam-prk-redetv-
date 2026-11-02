@@ -360,7 +360,7 @@ test('as facetas aparecem ao lado dos resultados com a contagem; clicar filtra e
           ? { ...SEM_FACETAS, programa: [faceta(programa, 1)], marca: [faceta('Adidas', 1)] }
           : {
               programa: [faceta('TV Fama', 8), faceta('Leo Dias', 2)],
-              mes: [faceta('2024-05', 7), faceta('2024-04', 3)],
+              mes: [faceta('2024-05', 7, '05/2024'), faceta('2024-04', 3, '04/2024')],
               pessoa: [faceta('p1', 5, 'Sabrina Sato')],
               marca: [faceta('Nike', 4), faceta('Adidas', 1)],
               tipo: [faceta('fala', 6, 'Fala'), faceta('objeto', 4, 'Objeto')],
@@ -375,7 +375,7 @@ test('as facetas aparecem ao lado dos resultados com a contagem; clicar filtra e
     name: /Leo Dias/,
   })
   expect(leo.textContent).toContain('2')
-  expect(within(lateral).getByRole('button', { name: /05\/2024|2024-05/ }).textContent).toContain('7')
+  expect(within(lateral).getByRole('button', { name: /05\/2024/ }).textContent).toContain('7')
   expect(within(lateral).getByRole('button', { name: /Sabrina Sato/ }).textContent).toContain('5')
   expect(within(lateral).getByRole('button', { name: /Nike/ }).textContent).toContain('4')
   expect(within(lateral).getByRole('button', { name: /Fala/ }).textContent).toContain('6')
@@ -401,7 +401,7 @@ test('clicar nas facetas de mês, pessoa, marca e tipo manda o filtro à API; cl
       resultado({
         facetas: {
           ...SEM_FACETAS,
-          mes: [faceta('2024-02', 3)],
+          mes: [faceta('2024-02', 3, '02/2024')],
           pessoa: [faceta('p1', 5, 'Sabrina Sato')],
           marca: [faceta('Nike', 4)],
           tipo: [faceta('texto_na_tela', 2, 'GC')],

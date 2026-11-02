@@ -13,6 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
+from itertools import zip_longest
 from typing import Literal, Protocol
 
 from pydantic import BaseModel
@@ -295,9 +296,22 @@ class Busca:
             return nomes.get(id or "") or None
 
         clausulas = self._clausulas(entendida, nome)
-        brutos = [consultar(c.consulta) for c in clausulas]
         facetado = ajustes or Ajustes()
-        resultados = [[r for r in lista if _casa(r, facetado)] for lista in brutos]
+        # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
+        # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
+        resultados = [
+            [
+                r
+                for r in _intercalar(
+                    [consultar(q) for q in _com_facetas(c.consulta, facetado)]
+                )
+                if _casa(r, facetado)
+            ]
+            for c in clausulas
+        ]
+        sem_facetas = all(
+            x is None for x in (facetado.pessoa, facetado.marca, facetado.tipo)
+        )
         fundidos = _fundir(resultados)
         achados = [r for r, _, _ in fundidos]
         # Sem a API de Ranking, a posição é a da pontuação do RRF: registros de mesma
@@ -318,8 +332,10 @@ class Busca:
         videos = self._videos(trechos, job, termos, ordem)[:limite]
         vazios = [
             self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
-            for c, achados_da_clausula in zip(clausulas, brutos, strict=True)
-            if c.pessoa_na_imagem and not achados_da_clausula
+            for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
+            # "Nenhuma aparição" fala do acervo, não do que a faceta deixou.
+            if c.pessoa_na_imagem
+            and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
         ]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas%s",
@@ -339,7 +355,7 @@ class Busca:
             videos=videos,
             sem_aparicoes=vazios,
             plano_b=entendida.plano_b,
-            facetas=_facetas([r for r, _, _ in fundidos], job, nome),
+            facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
         )
 
@@ -492,18 +508,50 @@ def _casa(r: Registro, a: Ajustes) -> bool:
     )
 
 
+def _com_facetas(c: Consulta, a: Ajustes) -> list[Consulta]:
+    """A consulta da cláusula com as facetas no filtro; nenhuma, se elas se excluem.
+
+    A pessoa casa na imagem (`pessoa`, que o objeto não tem) ou como dona do objeto
+    (`dono`): sem tipo na cláusula, isso dá duas consultas.
+    """
+    f = c.filtros
+    if a.tipo is not None:
+        if f.tipo not in (None, a.tipo):
+            return []
+        f = replace(f, tipo=a.tipo)
+    if a.marca is not None:
+        if f.marca not in (None, a.marca):
+            return []
+        f = replace(f, marca=a.marca)
+    if a.pessoa is None:
+        return [replace(c, filtros=f)]
+    filtros: list[Filtros] = []
+    if f.tipo in (None, "objeto") and f.dono in (None, a.pessoa):
+        filtros.append(replace(f, tipo="objeto", dono=a.pessoa))
+    # Marca só existe no objeto; outra pessoa já filtrada fica para o `_casa`.
+    if f.tipo != "objeto" and f.marca is None:
+        filtros.append(
+            f if f.pessoa not in (None, a.pessoa) else replace(f, pessoa=a.pessoa)
+        )
+    return [replace(c, filtros=x) for x in filtros]
+
+
+def _intercalar(listas: list[list[Registro]]) -> list[Registro]:
+    """Uma lista só, alternando as posições, para nenhuma consulta passar na frente."""
+    return [r for grupo in zip_longest(*listas) for r in grupo if r is not None]
+
+
 def _facetas(
     candidatos: list[Registro],
-    job: Callable[[str], Job | None],
     nome: Callable[[str | None], str | None],
 ) -> Facetas:
     """Vídeos distintos por valor, sobre os candidatos (os registros que sobraram do RRF).
 
     ponytail: o Agent Retrieval não devolve contagem por faceta (a API só traz os registros
     e o índice não agrega), então a conta é nossa e vai até `TETO_DE_REGISTROS` (100)
-    candidatos: o valor que só aparece além deles não entra, e as contagens são de
-    "vídeos entre os 100 melhores registros", não do acervo todo. Os filtros já valem
-    porque os candidatos saíram filtrados.
+    candidatos fundidos (cada cláusula traz até 100, já com os filtros e as facetas no
+    índice): o valor que só aparece além deles não entra, e as contagens são de
+    "vídeos entre os 100 melhores registros", não do acervo todo.
     """
     por_faceta: dict[str, dict[str, tuple[str, set[str]]]] = {
         f: {} for f in ("programa", "mes", "pessoa", "marca", "tipo")
@@ -513,14 +561,12 @@ def _facetas(
         if valor:
             por_faceta[faceta].setdefault(valor, (rotulo or valor, set()))[1].add(id)
 
+    # Programa e mês vêm do registro, que é o que o filtro compara (não do Job).
     for r in candidatos:
-        j = job(r.job_id)
-        if j is None:
-            continue
-        contar("programa", j.programa, None, r.job_id)
-        if j.data_exibicao:
-            mes = j.data_exibicao.strftime("%Y-%m")
-            contar("mes", mes, mes, r.job_id)
+        contar("programa", r.programa, None, r.job_id)
+        if r.data_de_exibicao:
+            mes = r.data_de_exibicao
+            contar("mes", mes.strftime("%Y-%m"), mes.strftime("%m/%Y"), r.job_id)
         for pessoa in dict.fromkeys([*r.pessoas, *([r.dono] if r.dono else [])]):
             contar("pessoa", pessoa, nome(pessoa), r.job_id)
         contar("marca", r.marca, None, r.job_id)

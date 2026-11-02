@@ -154,11 +154,6 @@ export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
   return p.toString()
 }
 
-/** "05/2024" para o mês `2024-05`. */
-export function rotuloDoMes(mes: string): string {
-  return `${mes.slice(5)}/${mes.slice(0, 4)}`
-}
-
 export interface Trecho {
   texto: string
   destacado: boolean

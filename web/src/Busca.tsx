@@ -9,7 +9,6 @@ import {
   contagemDeMencoes,
   contagemDeMomentos,
   contagemDeVideos,
-  rotuloDoMes,
   trechosDoMotivo,
   type ConsultaDaBusca,
   type Evidencia,
@@ -149,7 +148,7 @@ function Facetas({ valores, ligado, aoClicar }: {
                   label: { overflow: 'hidden', textOverflow: 'ellipsis' },
                 }}
               >
-                {nome === 'mes' ? rotuloDoMes(v.valor) : v.rotulo}
+                {v.rotulo}
               </Button>
             )
           })}
