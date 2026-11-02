@@ -47,14 +47,15 @@ def test_wizard_da_os_25_papeis_a_mam_terraform() -> None:
         for linha in _linhas_dos_papeis()
         if (m := re.match(r"\s*roles/(\S+)", linha))
     ]
-    assert papeis == PAPEIS_DE_ANTES + PAPEIS_NOVOS
+    assert len(papeis) == len(set(papeis)) == 25
+    assert set(papeis) == set(PAPEIS_DE_ANTES + PAPEIS_NOVOS)
 
 
 def test_cada_papel_novo_tem_comentario_na_mesma_linha() -> None:
     linhas = _linhas_dos_papeis()
     for papel in PAPEIS_NOVOS:
-        linha = next(item for item in linhas if f"roles/{papel} " in item + " ")
-        assert re.search(r"#\s*\S", linha), papel
+        padrao = rf"\s*roles/{re.escape(papel)}\s+#\s*\S.{{9,}}"
+        assert any(re.match(padrao, linha) for linha in linhas), papel
 
 
 def test_regra_do_papel_a_mao_esta_acima_da_lista() -> None:

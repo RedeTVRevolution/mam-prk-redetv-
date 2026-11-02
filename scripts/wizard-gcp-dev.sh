@@ -271,8 +271,9 @@ if ! gcloud iam service-accounts describe "$SA_EMAIL" --project "$P" >/dev/null 
 fi
 # Sem owner, só o que o Terraform usa. projectIamAdmin entra porque Gemini,
 # Firestore, logs e Eventarc só têm papéis no nível do projeto; o Terraform só
-# usa google_project_iam_member (ADR 0002). Os últimos do bloco original são do
-# CD (#71): a federação com o GitHub e o envio ao Cloud Build.
+# usa google_project_iam_member (ADR 0002). iam.workloadIdentityPoolAdmin e
+# cloudbuild.builds.editor são do CD (#71): a federação com o GitHub e o envio
+# ao Cloud Build.
 # Papel dado à mão à mam-terraform entra aqui no mesmo dia.
 PAPEIS_DA_TERRAFORM=(
   roles/resourcemanager.projectIamAdmin
@@ -291,7 +292,7 @@ PAPEIS_DA_TERRAFORM=(
   roles/compute.networkAdmin
   roles/iam.workloadIdentityPoolAdmin
   roles/cloudbuild.builds.editor
-  roles/secretmanager.admin # cria o segredo do SerpAPI (serpapi) e dá acesso a ele (referencias_le_serpapi)
+  roles/secretmanager.admin # cria o segredo do SerpAPI (google_secret_manager_secret.serpapi) e dá acesso a ele (referencias_le_serpapi)
   roles/cloudscheduler.admin # agendamento diário da avaliação por rubrica (#255)
   roles/bigquery.admin # dataset, tabelas e IAM no dataset do BigQuery (#260, #279, #280, #285)
   roles/cloudkms.admin # key ring, chave MAC do hash das chaves de API e IAM na chave (#272)
