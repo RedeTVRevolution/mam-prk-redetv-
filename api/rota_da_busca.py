@@ -23,6 +23,7 @@ from api.busca import (
     filtros_do_servidor,
 )
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S
+from api.indice_da_busca import TipoDeRegistro
 from api.jobs import _exige
 
 log = logging.getLogger(__name__)
@@ -80,6 +81,9 @@ def criar_rotas_da_busca(
         desde: date | None = None,
         ate: date | None = None,
         sem_periodo: bool = False,
+        pessoa: Annotated[str | None, Query(max_length=100)] = None,
+        marca: Annotated[str | None, Query(max_length=100)] = None,
+        tipo: TipoDeRegistro | None = None,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
@@ -107,6 +111,9 @@ def criar_rotas_da_busca(
                 desde=desde,
                 ate=ate,
                 sem_periodo=sem_periodo,
+                pessoa=pessoa,
+                marca=marca,
+                tipo=tipo,
             ),
         )
         try:

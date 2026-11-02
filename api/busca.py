@@ -26,7 +26,13 @@ from api.entendimento_da_consulta import (
     entender,
 )
 from api.gemini import Transporte
-from api.indice_da_busca import Consulta, Filtros, IndiceDaBusca, Registro
+from api.indice_da_busca import (
+    Consulta,
+    Filtros,
+    IndiceDaBusca,
+    Registro,
+    TipoDeRegistro,
+)
 from api.jobs import Armazenamento, Job, RepositorioDeJobs
 
 log = logging.getLogger(__name__)
@@ -42,6 +48,14 @@ TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
 JUNCAO_MS = 3_000
 VALIDADE_DO_QUADRO = timedelta(minutes=10)
+# Valores mostrados por faceta: os de mais vídeos.
+TETO_DE_VALORES_POR_FACETA = 20
+ROTULO_DO_TIPO: dict[str, str] = {
+    "plano": "Plano",
+    "fala": "Fala",
+    "texto_na_tela": "GC",
+    "objeto": "Objeto",
+}
 
 Ordem = Literal["relevancia", "data"]
 # As evidências que o editor liga e desliga: as quatro do modelo, mais objeto e marca.
@@ -113,6 +127,28 @@ class Ajustes:
     desde: date | None = None
     ate: date | None = None
     sem_periodo: bool = False  # tira o período entendido (o "Todos os anos" da tela)
+    # Facetas da tela: filtram os candidatos (os de programa e mês são o programa e o período).
+    pessoa: str | None = None  # id do catálogo: na imagem ou dona do objeto
+    marca: str | None = None
+    tipo: TipoDeRegistro | None = None
+
+
+class ValorDaFaceta(BaseModel):
+    """Um valor da faceta e em quantos vídeos dos candidatos ele aparece."""
+
+    valor: str
+    rotulo: str
+    videos: int
+
+
+class Facetas(BaseModel):
+    """Contagens por faceta, sobre os candidatos que a busca trouxe (veja `_facetas`)."""
+
+    programa: list[ValorDaFaceta] = []
+    mes: list[ValorDaFaceta] = []
+    pessoa: list[ValorDaFaceta] = []
+    marca: list[ValorDaFaceta] = []
+    tipo: list[ValorDaFaceta] = []
 
 
 class ResultadoDaBusca(BaseModel):
@@ -120,6 +156,7 @@ class ResultadoDaBusca(BaseModel):
     videos: list[VideoDoResultado]
     sem_aparicoes: list[SemAparicao]
     plano_b: bool
+    facetas: Facetas
     quadros_expiram_em: datetime
 
 
@@ -258,7 +295,9 @@ class Busca:
             return nomes.get(id or "") or None
 
         clausulas = self._clausulas(entendida, nome)
-        resultados = [consultar(c.consulta) for c in clausulas]
+        brutos = [consultar(c.consulta) for c in clausulas]
+        facetado = ajustes or Ajustes()
+        resultados = [[r for r in lista if _casa(r, facetado)] for lista in brutos]
         fundidos = _fundir(resultados)
         achados = [r for r, _, _ in fundidos]
         # Sem a API de Ranking, a posição é a da pontuação do RRF: registros de mesma
@@ -279,7 +318,7 @@ class Busca:
         videos = self._videos(trechos, job, termos, ordem)[:limite]
         vazios = [
             self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
-            for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
+            for c, achados_da_clausula in zip(clausulas, brutos, strict=True)
             if c.pessoa_na_imagem and not achados_da_clausula
         ]
         log.info(
@@ -300,6 +339,7 @@ class Busca:
             videos=videos,
             sem_aparicoes=vazios,
             plano_b=entendida.plano_b,
+            facetas=_facetas([r for r, _, _ in fundidos], job, nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
         )
 
@@ -441,6 +481,71 @@ class Busca:
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
+
+
+def _casa(r: Registro, a: Ajustes) -> bool:
+    """O registro passa nas facetas de pessoa, marca e tipo que o editor clicou."""
+    return (
+        (a.pessoa is None or a.pessoa in r.pessoas or a.pessoa == r.dono)
+        and (a.marca is None or r.marca == a.marca)
+        and (a.tipo is None or r.tipo == a.tipo)
+    )
+
+
+def _facetas(
+    candidatos: list[Registro],
+    job: Callable[[str], Job | None],
+    nome: Callable[[str | None], str | None],
+) -> Facetas:
+    """Vídeos distintos por valor, sobre os candidatos (os registros que sobraram do RRF).
+
+    ponytail: o Agent Retrieval não devolve contagem por faceta (a API só traz os registros
+    e o índice não agrega), então a conta é nossa e vai até `TETO_DE_REGISTROS` (100)
+    candidatos: o valor que só aparece além deles não entra, e as contagens são de
+    "vídeos entre os 100 melhores registros", não do acervo todo. Os filtros já valem
+    porque os candidatos saíram filtrados.
+    """
+    por_faceta: dict[str, dict[str, tuple[str, set[str]]]] = {
+        f: {} for f in ("programa", "mes", "pessoa", "marca", "tipo")
+    }
+
+    def contar(faceta: str, valor: str | None, rotulo: str | None, id: str) -> None:
+        if valor:
+            por_faceta[faceta].setdefault(valor, (rotulo or valor, set()))[1].add(id)
+
+    for r in candidatos:
+        j = job(r.job_id)
+        if j is None:
+            continue
+        contar("programa", j.programa, None, r.job_id)
+        if j.data_exibicao:
+            mes = j.data_exibicao.strftime("%Y-%m")
+            contar("mes", mes, mes, r.job_id)
+        for pessoa in dict.fromkeys([*r.pessoas, *([r.dono] if r.dono else [])]):
+            contar("pessoa", pessoa, nome(pessoa), r.job_id)
+        contar("marca", r.marca, None, r.job_id)
+        contar("tipo", r.tipo, ROTULO_DO_TIPO.get(r.tipo), r.job_id)
+
+    def valores(faceta: str, por_mes: bool = False) -> list[ValorDaFaceta]:
+        lista = [
+            ValorDaFaceta(valor=v, rotulo=rotulo, videos=len(ids))
+            for v, (rotulo, ids) in por_faceta[faceta].items()
+            # Pessoa que o catálogo não conhece não tem o que mostrar.
+            if faceta != "pessoa" or rotulo != v
+        ]
+        lista.sort(key=lambda x: (-x.videos, x.rotulo))
+        lista = lista[:TETO_DE_VALORES_POR_FACETA]
+        if por_mes:
+            lista.sort(key=lambda x: x.valor, reverse=True)
+        return lista
+
+    return Facetas(
+        programa=valores("programa"),
+        mes=valores("mes", por_mes=True),
+        pessoa=valores("pessoa"),
+        marca=valores("marca"),
+        tipo=valores("tipo"),
+    )
 
 
 def _ligadas(e: ConsultaEntendida) -> list[EvidenciaDaBusca]:

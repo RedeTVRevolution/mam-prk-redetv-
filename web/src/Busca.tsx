@@ -9,9 +9,13 @@ import {
   contagemDeMencoes,
   contagemDeMomentos,
   contagemDeVideos,
+  rotuloDoMes,
   trechosDoMotivo,
   type ConsultaDaBusca,
   type Evidencia,
+  type NomeDaFaceta,
+  type TipoDeMomento,
+  type ValorDaFaceta,
   type Momento,
   type ResultadoDaBusca,
   type VideoDoResultado,
@@ -102,6 +106,56 @@ function Chip({ rotulo, tipo, ligado, desabilitado, aoAlternar }: {
     >
       {rotulo}
     </Button>
+  )
+}
+
+const SECOES_DE_FACETA: { nome: NomeDaFaceta; titulo: string }[] = [
+  { nome: 'programa', titulo: 'Programa' },
+  { nome: 'mes', titulo: 'Data de exibição' },
+  { nome: 'pessoa', titulo: 'Pessoa' },
+  { nome: 'marca', titulo: 'Marca' },
+  { nome: 'tipo', titulo: 'Tipo de momento' },
+]
+
+/** As facetas ao lado dos resultados: o valor ligado mostra a marca de seleção; clicar liga ou desliga. */
+function Facetas({ valores, ligado, aoClicar }: {
+  valores: Record<NomeDaFaceta, ValorDaFaceta[]>
+  ligado: Record<NomeDaFaceta, string | null>
+  aoClicar: (faceta: NomeDaFaceta, valor: string, ligar: boolean) => void
+}) {
+  return (
+    <Stack gap="md" component="aside" aria-label="Facetas" w={240} style={{ flex: 'none' }}>
+      {SECOES_DE_FACETA.filter((s) => valores[s.nome].length > 0).map(({ nome, titulo }) => (
+        <Stack key={nome} gap={4} component="section" aria-label={titulo}>
+          <Text size="xs" fw={700} c={CORES.textoSecundario} tt="uppercase">
+            {titulo}
+          </Text>
+          {valores[nome].map((v) => {
+            const ativo = ligado[nome] === v.valor
+            return (
+              <Button
+                key={v.valor}
+                type="button"
+                size="compact-sm"
+                variant="default"
+                justify="space-between"
+                fullWidth
+                aria-pressed={ativo}
+                leftSection={ativo ? <IconCheck size={14} aria-hidden /> : undefined}
+                rightSection={<span style={NUMEROS}>{v.videos}</span>}
+                onClick={() => aoClicar(nome, v.valor, !ativo)}
+                styles={{
+                  root: ativo ? { borderColor: CORES.foco, color: CORES.foco } : {},
+                  label: { overflow: 'hidden', textOverflow: 'ellipsis' },
+                }}
+              >
+                {nome === 'mes' ? rotuloDoMes(v.valor) : v.rotulo}
+              </Button>
+            )
+          })}
+        </Stack>
+      ))}
+    </Stack>
   )
 }
 
@@ -292,6 +346,13 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     navegar(enderecoDaBusca({ ...consulta, ...mudancas }))
   }
 
+  function clicarNaFaceta(faceta: NomeDaFaceta, valor: string, ligar: boolean) {
+    if (faceta === 'programa') mudar({ programa: ligar ? valor : '' })
+    else if (faceta === 'mes') mudar({ mes: ligar ? valor : null })
+    else if (faceta === 'tipo') mudar({ tipo: ligar ? (valor as TipoDeMomento) : null })
+    else mudar({ [faceta]: ligar ? valor : null })
+  }
+
   // Os chips da URL valem sobre o entendido: um clique antes de a busca voltar não se perde.
   const ligadas = consulta.evidencias ?? resultado?.entendida.evidencias ?? []
   function alternar(id: Evidencia) {
@@ -354,7 +415,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
           ]}
           value={valorDoAno}
           onChange={(v) => {
-            if (v !== ENTENDIDO) mudar({ ano: !v || v === TODOS ? 'todos' : Number(v) })
+            if (v !== ENTENDIDO) mudar({ ano: !v || v === TODOS ? 'todos' : Number(v), mes: null })
           }}
         />
       </Group>
@@ -372,99 +433,112 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
       {carga.tipo === 'carregando' && <Loader role="status" aria-label="Buscando" />}
 
       {resultado && (
-        <>
-          <Group justify="space-between">
-            <Text size="sm" role="status">
-              {contagemDeMomentos(totalDeMomentos)} em {contagemDeVideos(resultado.videos.length)}
-            </Text>
-            <Select
-              aria-label="Ordenar"
-              w={190}
-              size="xs"
-              allowDeselect={false}
-              data={[
-                { value: 'relevancia', label: 'Ordenar: Relevância' },
-                { value: 'data', label: 'Ordenar: Data de exibição' },
-              ]}
-              value={consulta.ordem}
-              onChange={(v) => mudar({ ordem: v === 'data' ? 'data' : 'relevancia' })}
-            />
-          </Group>
+        <Group align="flex-start" wrap="nowrap" gap="md">
+          <Facetas
+            valores={resultado.facetas}
+            ligado={{
+              programa: programaNaTela || null,
+              mes: consulta.mes,
+              pessoa: consulta.pessoa,
+              marca: consulta.marca,
+              tipo: consulta.tipo,
+            }}
+            aoClicar={clicarNaFaceta}
+          />
+          <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
+            <Group justify="space-between">
+              <Text size="sm" role="status">
+                {contagemDeMomentos(totalDeMomentos)} em {contagemDeVideos(resultado.videos.length)}
+              </Text>
+              <Select
+                aria-label="Ordenar"
+                w={190}
+                size="xs"
+                allowDeselect={false}
+                data={[
+                  { value: 'relevancia', label: 'Ordenar: Relevância' },
+                  { value: 'data', label: 'Ordenar: Data de exibição' },
+                ]}
+                value={consulta.ordem}
+                onChange={(v) => mudar({ ordem: v === 'data' ? 'data' : 'relevancia' })}
+              />
+            </Group>
 
-          {resultado.sem_aparicoes.map((s) => {
-            const mencoes = s.mencoes_na_fala + s.mencoes_na_tela
-            return (
-              <Group key={s.pessoa_id} gap="sm">
-                <Text size="sm">
-                  Nenhuma aparição de {s.nome}.
-                  {s.mencoes_na_fala > 0 && ` ${contagemDeMencoes(s.mencoes_na_fala)} na fala.`}
-                  {s.mencoes_na_tela > 0 && ` ${contagemDeMencoes(s.mencoes_na_tela)} na tela.`}
-                </Text>
-                {mencoes > 0 && (
-                  <Button
-                    type="button"
-                    size="compact-sm"
-                    variant="default"
-                    onClick={() => mudar({ evidencias: [...new Set<Evidencia>([...ligadas, 'citada', 'fala'])] })}
-                  >
-                    Ver as menções
-                  </Button>
-                )}
-              </Group>
-            )
-          })}
-
-          {resultado.videos.length === 0 && resultado.sem_aparicoes.length === 0 && (
-            <Text c={CORES.textoSecundario}>Nenhum momento encontrado. Tente outras palavras ou tire um filtro.</Text>
-          )}
-
-          {resultado.videos.map((video) => (
-            <Paper key={video.job_id} withBorder bg="dark.6" p="sm" component="section" aria-label={video.nome}>
-              <Stack gap="xs">
-                <Group justify="space-between" wrap="nowrap">
-                  <Text size="sm" fw={600} style={NUMEROS}>
-                    {[
-                      video.programa ?? video.nome,
-                      video.data_exibicao ? dataDeExibicao(video.data_exibicao) : null,
-                      video.duracao_s ? relogio(video.duracao_s * 1000) : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
+            {resultado.sem_aparicoes.map((s) => {
+              const mencoes = s.mencoes_na_fala + s.mencoes_na_tela
+              return (
+                <Group key={s.pessoa_id} gap="sm">
+                  <Text size="sm">
+                    Nenhuma aparição de {s.nome}.
+                    {s.mencoes_na_fala > 0 && ` ${contagemDeMencoes(s.mencoes_na_fala)} na fala.`}
+                    {s.mencoes_na_tela > 0 && ` ${contagemDeMencoes(s.mencoes_na_tela)} na tela.`}
                   </Text>
-                  <Text size="sm" c={CORES.textoSecundario}>
-                    {contagemDeMomentos(video.n_momentos)}
-                  </Text>
+                  {mencoes > 0 && (
+                    <Button
+                      type="button"
+                      size="compact-sm"
+                      variant="default"
+                      onClick={() => mudar({ evidencias: [...new Set<Evidencia>([...ligadas, 'citada', 'fala'])] })}
+                    >
+                      Ver as menções
+                    </Button>
+                  )}
                 </Group>
-                <PosicaoDosMomentos video={video} />
-                <div>
-                  {video.momentos.map((momento) => (
-                    <Linha
-                      key={momento.inicio_ms}
-                      video={video}
-                      momento={momento}
-                      busca={consulta.q}
-                      selecionado={
-                        selecionado !== null &&
-                        momentos[selecionado]?.video === video &&
-                        momentos[selecionado].momento === momento
-                      }
-                    />
-                  ))}
-                </div>
-              </Stack>
-            </Paper>
-          ))}
+              )
+            })}
 
-          {resultado.videos.length >= limite && limite < TETO_DE_VIDEOS && (
-            <Button
-              type="button"
-              variant="default"
-              onClick={() => setLimite((l) => Math.min(TETO_DE_VIDEOS, l + VIDEOS_POR_VEZ))}
-            >
-              Mais vídeos
-            </Button>
-          )}
-        </>
+            {resultado.videos.length === 0 && resultado.sem_aparicoes.length === 0 && (
+              <Text c={CORES.textoSecundario}>Nenhum momento encontrado. Tente outras palavras ou tire um filtro.</Text>
+            )}
+
+            {resultado.videos.map((video) => (
+              <Paper key={video.job_id} withBorder bg="dark.6" p="sm" component="section" aria-label={video.nome}>
+                <Stack gap="xs">
+                  <Group justify="space-between" wrap="nowrap">
+                    <Text size="sm" fw={600} style={NUMEROS}>
+                      {[
+                        video.programa ?? video.nome,
+                        video.data_exibicao ? dataDeExibicao(video.data_exibicao) : null,
+                        video.duracao_s ? relogio(video.duracao_s * 1000) : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                    <Text size="sm" c={CORES.textoSecundario}>
+                      {contagemDeMomentos(video.n_momentos)}
+                    </Text>
+                  </Group>
+                  <PosicaoDosMomentos video={video} />
+                  <div>
+                    {video.momentos.map((momento) => (
+                      <Linha
+                        key={momento.inicio_ms}
+                        video={video}
+                        momento={momento}
+                        busca={consulta.q}
+                        selecionado={
+                          selecionado !== null &&
+                          momentos[selecionado]?.video === video &&
+                          momentos[selecionado].momento === momento
+                        }
+                      />
+                    ))}
+                  </div>
+                </Stack>
+              </Paper>
+            ))}
+
+            {resultado.videos.length >= limite && limite < TETO_DE_VIDEOS && (
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => setLimite((l) => Math.min(TETO_DE_VIDEOS, l + VIDEOS_POR_VEZ))}
+              >
+                Mais vídeos
+              </Button>
+            )}
+          </Stack>
+        </Group>
       )}
     </Stack>
   )

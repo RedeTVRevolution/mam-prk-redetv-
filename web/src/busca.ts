@@ -21,8 +21,18 @@ export interface ConsultaDaBusca {
   programa: string | null
   /** `null`: o período entendido; `'todos'`: nenhum período. */
   ano: number | 'todos' | null
+  /** Faceta de mês (`2024-05`): vale sobre o ano. */
+  mes: string | null
+  /** Facetas de pessoa (id do catálogo), marca e tipo de momento: `null`, sem filtro. */
+  pessoa: string | null
+  marca: string | null
+  tipo: TipoDeMomento | null
   ordem: OrdemDaBusca
 }
+
+export type TipoDeMomento = 'plano' | 'fala' | 'texto_na_tela' | 'objeto'
+const TIPOS_DE_MOMENTO: string[] = ['plano', 'fala', 'texto_na_tela', 'objeto']
+const MES = /^(\d{4})-(0[1-9]|1[0-2])$/
 
 export interface Destaque {
   inicio: number
@@ -54,18 +64,39 @@ export interface SemAparicao {
   mencoes_na_tela: number
 }
 
+/** Um valor de faceta e em quantos vídeos dos candidatos da busca ele aparece. */
+export interface ValorDaFaceta {
+  valor: string
+  rotulo: string
+  videos: number
+}
+
+export type NomeDaFaceta = 'programa' | 'mes' | 'pessoa' | 'marca' | 'tipo'
+export type Facetas = Record<NomeDaFaceta, ValorDaFaceta[]>
+
 export interface ResultadoDaBusca {
   entendida: { evidencias: Evidencia[]; programa: string | null; desde: string | null; ate: string | null }
   videos: VideoDoResultado[]
   sem_aparicoes: SemAparicao[]
   plano_b: boolean
+  facetas: Facetas
 }
 
 const IDS_DE_EVIDENCIA: string[] = EVIDENCIAS.map((e) => e.id)
 
 /** A busca de um texto novo: chips e filtros voltam ao que a API entender. */
 export function consultaNova(q: string): ConsultaDaBusca {
-  return { q, evidencias: null, programa: null, ano: null, ordem: 'relevancia' }
+  return {
+    q,
+    evidencias: null,
+    programa: null,
+    ano: null,
+    mes: null,
+    pessoa: null,
+    marca: null,
+    tipo: null,
+    ordem: 'relevancia',
+  }
 }
 
 export function consultaDaBusca(busca: string): ConsultaDaBusca {
@@ -77,6 +108,10 @@ export function consultaDaBusca(busca: string): ConsultaDaBusca {
     evidencias: ev.length ? ev : null,
     programa: p.get('programa'),
     ano: ano === 'todos' || (Number.isInteger(ano) && ano >= 1900 && ano <= 2999) ? ano : null,
+    mes: MES.test(p.get('mes') ?? '') ? p.get('mes') : null,
+    pessoa: p.get('pessoa') || null,
+    marca: p.get('marca') || null,
+    tipo: TIPOS_DE_MOMENTO.includes(p.get('tipo') ?? '') ? (p.get('tipo') as TipoDeMomento) : null,
     ordem: p.get('ordem') === 'data' ? 'data' : 'relevancia',
   }
 }
@@ -88,6 +123,10 @@ export function consultaParaEndereco(c: ConsultaDaBusca): string {
   for (const e of c.evidencias ?? []) p.append('ev', e)
   if (c.programa !== null) p.set('programa', c.programa)
   if (c.ano !== null) p.set('ano', String(c.ano))
+  if (c.mes !== null) p.set('mes', c.mes)
+  if (c.pessoa !== null) p.set('pessoa', c.pessoa)
+  if (c.marca !== null) p.set('marca', c.marca)
+  if (c.tipo !== null) p.set('tipo', c.tipo)
   if (c.ordem !== 'relevancia') p.set('ordem', c.ordem)
   const texto = p.toString()
   return texto ? `?${texto}` : ''
@@ -98,12 +137,26 @@ export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
   const p = new URLSearchParams({ q: c.q, ordem: c.ordem, limite: String(limite) })
   for (const e of c.evidencias ?? []) p.append('ev', e)
   if (c.programa !== null) p.set('programa', c.programa)
-  if (c.ano === 'todos') p.set('sem_periodo', 'true')
+  const mes = MES.exec(c.mes ?? '')
+  if (mes) {
+    // O dia 0 do mês seguinte é o último deste.
+    const ultimo = new Date(Date.UTC(Number(mes[1]), Number(mes[2]), 0)).getUTCDate()
+    p.set('desde', `${c.mes}-01`)
+    p.set('ate', `${c.mes}-${String(ultimo).padStart(2, '0')}`)
+  } else if (c.ano === 'todos') p.set('sem_periodo', 'true')
   else if (c.ano !== null) {
     p.set('desde', `${c.ano}-01-01`)
     p.set('ate', `${c.ano}-12-31`)
   }
+  if (c.pessoa !== null) p.set('pessoa', c.pessoa)
+  if (c.marca !== null) p.set('marca', c.marca)
+  if (c.tipo !== null) p.set('tipo', c.tipo)
   return p.toString()
+}
+
+/** "05/2024" para o mês `2024-05`. */
+export function rotuloDoMes(mes: string): string {
+  return `${mes.slice(5)}/${mes.slice(0, 4)}`
 }
 
 export interface Trecho {

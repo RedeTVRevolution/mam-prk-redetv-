@@ -427,3 +427,11 @@ Não corrigido / decisão humana:
 - Média da queda: é por vídeo (dia com mais vídeos pesa mais) e mistura `versao_pipeline`. A spec não pede outra coisa.
 - Custo por vídeo, modelo juiz e permissões extras do serviço de avaliação continuam sem conferência (sem doc nem nuvem aqui). O PR precisa medi-los no dev.
 - Smells sem bug: log JSON montado à mão em dois lugares (sem `message`), chave `(dia, job_id)` repetida no repositório em memória e no Firestore, `extra` em `registro_da_queda` com um só uso, `exigir_do_ambiente` morando em `comparar_objetos`.
+- 2026-11-02 10:33:31 · #255: feito
+- 2026-11-02 10:33:36 · iteração 54: #257
+
+## #257 iteração 55
+- Pronto: `facetas` no `ResultadoDaBusca` (programa, mês, pessoa, marca, tipo; vídeos distintos por valor, até 20 valores, `ponytail:` em `_facetas` com o teto de 100 candidatos); `Ajustes` e a rota ganham `pessoa`, `marca`, `tipo` (filtram os candidatos; programa e mês usam `programa`/`desde`/`ate`); web: URL com `mes`, `pessoa`, `marca`, `tipo`, painel `Facetas` à esquerda dos resultados; testes da API e da web com msw; GLOSSARY "Faceta".
+- Decisões: o Agent Retrieval/índice não agrega (a API só devolve registros; sem doc/nuvem aqui para confirmar), então a contagem é nossa sobre os candidatos. Faceta de um valor ligado: só aparecem os valores dos candidatos já filtrados (para trocar, desliga e liga outro). Mês filtra por `desde`/`ate` e vale sobre o ano; mexer no select de ano zera o mês.
+- Armadilhas: rodar `prettier` sem config reformata o arquivo todo (o projeto não tem prettier); `TransporteFalso` gasta uma resposta por busca.
+- Falta (decisão humana): confirmar na doc do Agent Retrieval se há contagem por faceta nativa; se houver, trocar `_facetas`.

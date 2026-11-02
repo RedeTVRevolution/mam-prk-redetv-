@@ -13,6 +13,7 @@ from api.auth import Usuario
 from api.busca import Ajustes, Busca, Ranking, RankingEmOrdem
 from api.catalogo import CatalogoEmMemoria
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
+from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
@@ -798,3 +799,119 @@ def test_o_destaque_nao_passa_na_frente_de_quem_e_bem_mais_relevante() -> None:
     )
     [video] = m.busca(Ordem()).buscar("carro").videos
     assert video.momentos[0].inicio_ms == 0
+
+
+# --- facetas (#257) -------------------------------------------------------------
+
+
+def mundo_das_facetas() -> Mundo:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 3)
+    m.com(
+        job("j1", programa="TV Fama", data_exibicao=date(2024, 5, 1)),
+        objeto("a", "j1", 0, 1_000, marca="Nike", dono=m.sabrina),
+        objeto("b", "j1", 5_000, 6_000, marca="Nike", dono=m.sabrina),
+    )
+    m.com(
+        job("j2", programa="Leo Dias", data_exibicao=date(2024, 6, 2)),
+        objeto("c", "j2", 0, 1_000, marca="Adidas", programa="Leo Dias"),
+    )
+    return m
+
+
+def contagens(faceta: Any) -> dict[str, int]:
+    return {
+        (v["valor"] if isinstance(v, dict) else v.valor): (
+            v["videos"] if isinstance(v, dict) else v.videos
+        )
+        for v in faceta
+    }
+
+
+def test_facetas_contam_videos_distintos_por_valor() -> None:
+    m = mundo_das_facetas()
+
+    f = buscar(m, "vestido").facetas
+
+    assert contagens(f.programa) == {"TV Fama": 1, "Leo Dias": 1}
+    assert contagens(f.mes) == {"2024-06": 1, "2024-05": 1}
+    assert [v.valor for v in f.mes] == ["2024-06", "2024-05"]
+    assert contagens(f.marca) == {"Nike": 1, "Adidas": 1}
+    assert contagens(f.tipo) == {"objeto": 2}
+    assert f.tipo[0].rotulo == "Objeto"
+    assert [(v.valor, v.rotulo, v.videos) for v in f.pessoa] == [
+        (m.sabrina, "Sabrina Sato", 1)
+    ]
+
+
+def test_facetas_mudam_com_o_programa_filtrado() -> None:
+    m = mundo_das_facetas()
+
+    sem = buscar(m, "vestido").facetas
+    com = buscar(m, "vestido", ajustes=Ajustes(programa="Leo Dias")).facetas
+
+    assert contagens(sem.marca) == {"Nike": 1, "Adidas": 1}
+    assert contagens(com.marca) == {"Adidas": 1}
+    assert com.pessoa == []
+    assert contagens(com.programa) == {"Leo Dias": 1}
+
+
+def test_faceta_de_marca_pessoa_e_tipo_filtra_os_resultados_e_as_contagens() -> None:
+    m = mundo_das_facetas()
+
+    por_marca = buscar(m, "vestido", ajustes=Ajustes(marca="Adidas"))
+    por_pessoa = buscar(m, "vestido", ajustes=Ajustes(pessoa=m.sabrina))
+    por_tipo = buscar(m, "vestido", ajustes=Ajustes(tipo="fala"))
+
+    assert [v.job_id for v in por_marca.videos] == ["j2"]
+    assert contagens(por_marca.facetas.programa) == {"Leo Dias": 1}
+    assert [v.job_id for v in por_pessoa.videos] == ["j1"]
+    assert contagens(por_pessoa.facetas.marca) == {"Nike": 1}
+    assert por_tipo.videos == []
+    assert por_tipo.facetas.programa == []
+
+
+def test_facetas_ignoram_video_que_o_usuario_nao_ve() -> None:
+    m = mundo_das_facetas()
+    m.jobs.salvar(job("j2", estado="analisando"))
+
+    f = buscar(m, "vestido").facetas
+
+    assert contagens(f.programa) == {"TV Fama": 1}
+
+
+def test_plano_b_tambem_devolve_as_facetas() -> None:
+    m = Mundo(ErroHttp(400))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000, marca="Nike"))
+
+    r = buscar(m, "vestido")
+
+    assert r.plano_b
+    assert contagens(r.facetas.marca) == {"Nike": 1}
+
+
+def test_busca_sem_resultado_tem_facetas_vazias() -> None:
+    m = Mundo(pedido(texto_livre="nada"))
+
+    f = buscar(m, "nada").facetas
+
+    assert f.programa == f.mes == f.pessoa == f.marca == f.tipo == []
+
+
+def test_a_rota_devolve_facetas_e_aceita_pessoa_marca_e_tipo() -> None:
+    c, _ = cliente(["consulta"], *[pedido(texto_livre="vestido")] * 2)
+    r = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
+    assert contagens(r.json()["facetas"]["programa"]) == {"TV Fama": 1}
+
+    filtrada = c.get(
+        "/v1/busca",
+        params={"q": "vestido", "marca": "Nike", "tipo": "objeto", "pessoa": "p1"},
+        headers=AUTORIZACAO,
+    )
+    assert filtrada.status_code == 200
+    assert filtrada.json()["videos"] == []
+    assert (
+        c.get(
+            "/v1/busca", params={"q": "v", "tipo": "inventado"}, headers=AUTORIZACAO
+        ).status_code
+        == 422
+    )

@@ -28,6 +28,8 @@ function video(id: string, momentos: ReturnType<typeof momento>[]) {
   }
 }
 
+const SEM_FACETAS = { programa: [], mes: [], pessoa: [], marca: [], tipo: [] }
+
 function resultado(extra: object = {}) {
   return {
     entendida: { evidencias: ['imagem', 'objeto'], programa: null, desde: null, ate: null },
@@ -40,6 +42,7 @@ function resultado(extra: object = {}) {
     ],
     sem_aparicoes: [],
     plano_b: false,
+    facetas: SEM_FACETAS,
     ...extra,
   }
 }
@@ -48,9 +51,7 @@ const buscas: URLSearchParams[] = []
 let resposta: () => Response = () => HttpResponse.json(resultado())
 
 const servidor = setupServer(
-  http.get('/v1/eu', () =>
-    HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br', permissoes: ['decupagem.ver'] }),
-  ),
+  http.get('/v1/eu', () => HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br', permissoes: ['decupagem.ver'] })),
   http.get('/v1/jobs', () => HttpResponse.json([])),
   http.get('/v1/programas', () => HttpResponse.json(['TV Fama', 'Leo Dias'])),
   http.get('/v1/jobs/:id', () => new HttpResponse(null, { status: 404 })),
@@ -71,9 +72,7 @@ afterEach(() => {
 afterAll(() => servidor.close())
 
 async function abrir(endereco: string) {
-  const auth = new AutenticadorFalso([
-    { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
-  ])
+  const auth = new AutenticadorFalso([{ email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true }])
   await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
   await auth.confirmarTotp(CODIGO_TOTP_FALSO)
   history.replaceState(null, '', endereco)
@@ -165,9 +164,7 @@ test('o destaque sai das posições e um <script> da API aparece como texto', as
   resposta = () =>
     HttpResponse.json(
       resultado({
-        videos: [
-          video('v1', [momento(0, 1000, 'Fala: <script>alert(1)</script> sapato', [{ inicio: 6, fim: 14 }])]),
-        ],
+        videos: [video('v1', [momento(0, 1000, 'Fala: <script>alert(1)</script> sapato', [{ inicio: 6, fim: 14 }])])],
       }),
     )
   await abrir('/busca?q=sapato')
@@ -179,7 +176,12 @@ test('o destaque sai das posições e um <script> da API aparece como texto', as
 })
 
 test('trechosDoMotivo conta caracteres, não unidades UTF-16, e ignora posição fora do texto', () => {
-  expect(trechosDoMotivo('😀 ab', [{ inicio: 2, fim: 4 }, { inicio: 3, fim: 99 }])).toEqual([
+  expect(
+    trechosDoMotivo('😀 ab', [
+      { inicio: 2, fim: 4 },
+      { inicio: 3, fim: 99 },
+    ]),
+  ).toEqual([
     { texto: '😀 ', destacado: false },
     { texto: 'ab', destacado: true },
   ])
@@ -194,9 +196,7 @@ test('↓ e ↑ atravessam os grupos e Enter abre o vídeo no tempo, com o busca
   const selecionado = document.querySelector('[aria-current="true"]')
   expect(selecionado?.getAttribute('href')).toBe('/video/v2?t=60&busca=sapato')
   await usuario.keyboard('{ArrowUp}')
-  expect(document.querySelector('[aria-current="true"]')?.getAttribute('href')).toBe(
-    '/video/v1?t=2462&busca=sapato',
-  )
+  expect(document.querySelector('[aria-current="true"]')?.getAttribute('href')).toBe('/video/v1?t=2462&busca=sapato')
 
   await usuario.keyboard('{Enter}')
 
@@ -346,4 +346,82 @@ test('o GC longo vem encurtado, com "ver mais" e "ver menos"', async () => {
   expect(screen.getByRole('button', { name: 'ver menos' }).getAttribute('aria-expanded')).toBe('true')
   // Abrir o texto não abre o vídeo.
   expect(location.pathname).toBe('/busca')
+})
+
+const faceta = (valor: string, videos: number, rotulo = valor) => ({ valor, rotulo, videos })
+
+test('as facetas aparecem ao lado dos resultados com a contagem; clicar filtra e as contagens se atualizam', async () => {
+  const usuario = userEvent.setup()
+  resposta = () => {
+    const programa = buscas[buscas.length - 1].get('programa')
+    return HttpResponse.json(
+      resultado({
+        facetas: programa
+          ? { ...SEM_FACETAS, programa: [faceta(programa, 1)], marca: [faceta('Adidas', 1)] }
+          : {
+              programa: [faceta('TV Fama', 8), faceta('Leo Dias', 2)],
+              mes: [faceta('2024-05', 7), faceta('2024-04', 3)],
+              pessoa: [faceta('p1', 5, 'Sabrina Sato')],
+              marca: [faceta('Nike', 4), faceta('Adidas', 1)],
+              tipo: [faceta('fala', 6, 'Fala'), faceta('objeto', 4, 'Objeto')],
+            },
+      }),
+    )
+  }
+  await abrir('/busca?q=sapato')
+  const lateral = await screen.findByRole('complementary', { name: 'Facetas' })
+
+  const leo = within(within(lateral).getByRole('region', { name: 'Programa' })).getByRole('button', {
+    name: /Leo Dias/,
+  })
+  expect(leo.textContent).toContain('2')
+  expect(within(lateral).getByRole('button', { name: /05\/2024|2024-05/ }).textContent).toContain('7')
+  expect(within(lateral).getByRole('button', { name: /Sabrina Sato/ }).textContent).toContain('5')
+  expect(within(lateral).getByRole('button', { name: /Nike/ }).textContent).toContain('4')
+  expect(within(lateral).getByRole('button', { name: /Fala/ }).textContent).toContain('6')
+
+  await usuario.click(leo)
+
+  await waitFor(() => expect(buscas[buscas.length - 1].get('programa')).toBe('Leo Dias'))
+  expect(location.search).toContain('programa=Leo+Dias')
+  const depois = await screen.findByRole('complementary', { name: 'Facetas' })
+  await waitFor(() => expect(within(depois).queryByRole('button', { name: /Nike/ })).toBeNull())
+  expect(within(depois).getByRole('button', { name: /Adidas/ }).textContent).toContain('1')
+  expect(
+    within(depois)
+      .getByRole('button', { name: /Leo Dias/ })
+      .getAttribute('aria-pressed'),
+  ).toBe('true')
+})
+
+test('clicar nas facetas de mês, pessoa, marca e tipo manda o filtro à API; clicar de novo o tira', async () => {
+  const usuario = userEvent.setup()
+  resposta = () =>
+    HttpResponse.json(
+      resultado({
+        facetas: {
+          ...SEM_FACETAS,
+          mes: [faceta('2024-02', 3)],
+          pessoa: [faceta('p1', 5, 'Sabrina Sato')],
+          marca: [faceta('Nike', 4)],
+          tipo: [faceta('texto_na_tela', 2, 'GC')],
+        },
+      }),
+    )
+  await abrir('/busca?q=sapato')
+  await usuario.click(await screen.findByRole('button', { name: /02\/2024/ }))
+  await usuario.click(await screen.findByRole('button', { name: /Sabrina Sato/ }))
+  await usuario.click(await screen.findByRole('button', { name: /Nike/ }))
+  await usuario.click(within(await screen.findByRole('complementary', { name: 'Facetas' })).getByRole('button', { name: /GC/ }))
+
+  await waitFor(() => expect(buscas[buscas.length - 1].get('tipo')).toBe('texto_na_tela'))
+  const p = buscas[buscas.length - 1]
+  expect(p.get('desde')).toBe('2024-02-01')
+  expect(p.get('ate')).toBe('2024-02-29')
+  expect(p.get('pessoa')).toBe('p1')
+  expect(p.get('marca')).toBe('Nike')
+
+  await usuario.click(await screen.findByRole('button', { name: /Nike/ }))
+
+  await waitFor(() => expect(buscas[buscas.length - 1].get('marca')).toBeNull())
 })

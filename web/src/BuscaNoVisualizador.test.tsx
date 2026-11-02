@@ -46,6 +46,7 @@ const RESULTADO = {
     video('v2', [momento(20_000, 24_000, 'Objeto: scarpin vermelho'), momento(70_000, 74_000, 'Fala: sapato')]),
   ],
   sem_aparicoes: [],
+  facetas: { programa: [], mes: [], pessoa: [], marca: [], tipo: [] },
   plano_b: false,
 }
 
