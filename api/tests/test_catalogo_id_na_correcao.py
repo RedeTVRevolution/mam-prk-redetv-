@@ -135,3 +135,26 @@ def test_marca_com_id_resiste_ao_reprocessamento() -> None:
 
     com = mundo.decupagem()["comerciais"][0]
     assert (com["marca"], com.get("catalogo_id")) == ("Banco Verde", banco.id)
+
+
+def test_marca_com_id_fica_quando_o_modelo_novo_ja_traz_a_marca() -> None:
+    mundo = _mundo()
+    banco = mundo.marcas.acrescentar("Banco Verde", [])
+    _corrigir_marca(mundo, "Banco Verde", catalogo_id=banco.id)
+
+    novo = {
+        **MODELO,
+        "comerciais": [
+            {
+                "marca": "banco verde",
+                "tipo": "patrocinio_vinheta",
+                "inicio_ms": 10000,
+                "fim_ms": 15000,
+                "evidencias": ["logo"],
+            }
+        ],
+    }
+    mundo.reprocessar(novo)
+
+    com = mundo.decupagem()["comerciais"][0]
+    assert (com["marca"], com.get("catalogo_id")) == ("banco verde", banco.id)

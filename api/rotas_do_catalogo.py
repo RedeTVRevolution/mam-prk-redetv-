@@ -13,12 +13,12 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, StringConstraints, field_validator
 
-from api.achar_nomes import LIMITE_DO_AUTOCOMPLETAR, ComNome, achar_por_prefixo
+from api.achar_nomes import ComNome, achar_por_prefixo
 from api.auth import Usuario
 from api.catalogo import Catalogo, PessoaDoCatalogo
 from api.correcoes import LIMITE_DO_NOME, _sem_controle
 from api.jobs import _exige, _exige_editar
-from api.marcas import CatalogoDeMarcas
+from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
 
 VALIDADE_DA_COPIA = timedelta(seconds=30)
 
@@ -101,13 +101,14 @@ def criar_rotas_do_catalogo(
             a_revisar=p.a_revisar,
         )
 
+    def marca_achada(m: MarcaDoCatalogo) -> MarcaAchada:
+        return MarcaAchada(id=m.id, nome=m.nome, a_revisar=m.a_revisar)
+
     @rotas.get("/pessoas", dependencies=[Depends(_exige("ler"))])
     def achar_pessoas(
         q: Annotated[str, Query(max_length=LIMITE_DO_NOME)],
     ) -> list[PessoaAchada]:
-        achadas = achar_por_prefixo(
-            copia_das_pessoas.itens(), q, LIMITE_DO_AUTOCOMPLETAR
-        )
+        achadas = achar_por_prefixo(copia_das_pessoas.itens(), q)
         return [pessoa_achada(p) for p in achadas]
 
     @rotas.post("/pessoas")
@@ -134,12 +135,8 @@ def criar_rotas_do_catalogo(
     def achar_marcas(
         q: Annotated[str, Query(max_length=LIMITE_DO_NOME)],
     ) -> list[MarcaAchada]:
-        achadas = achar_por_prefixo(
-            copia_das_marcas.itens(), q, LIMITE_DO_AUTOCOMPLETAR
-        )
-        return [
-            MarcaAchada(id=m.id, nome=m.nome, a_revisar=m.a_revisar) for m in achadas
-        ]
+        achadas = achar_por_prefixo(copia_das_marcas.itens(), q)
+        return [marca_achada(m) for m in achadas]
 
     @rotas.post("/marcas")
     def acrescentar_marca(
@@ -149,13 +146,12 @@ def criar_rotas_do_catalogo(
     ) -> MarcaAchada:
         existentes = marcas.achar(nova.nome)
         if existentes:
-            marca = existentes[0]
-        else:
-            resposta.status_code = 201
-            marca = marcas.acrescentar(
-                nova.nome, [], a_revisar=True, autor=autor.email or autor.uid
-            )
-            copia_das_marcas.descartar()
-        return MarcaAchada(id=marca.id, nome=marca.nome, a_revisar=marca.a_revisar)
+            return marca_achada(existentes[0])
+        resposta.status_code = 201
+        criada = marcas.acrescentar(
+            nova.nome, [], a_revisar=True, autor=autor.email or autor.uid
+        )
+        copia_das_marcas.descartar()
+        return marca_achada(criada)
 
     return rotas

@@ -1400,12 +1400,18 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
     do item é estável, e a reapontada já traz o id novo."""
     aplica = TIPOS[c.tipo].aplicar_no_item
     assert aplica is not None
-    chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
-    for item in resultado.get(chave, []):
-        if not isinstance(item, dict) or item.get("id") != c.item_id:
-            continue
+    for item in _itens_com_o_id(resultado, c):
         aplica(item, c)
         item["origem"] = "revisao"
+
+
+def _itens_com_o_id(resultado: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
+    chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
+    return [
+        item
+        for item in resultado.get(chave, [])
+        if isinstance(item, dict) and item.get("id") == c.item_id
+    ]
 
 
 def _por_inicio(ocorrencias: list[dict[str, Any]]) -> None:
@@ -1624,6 +1630,9 @@ def aplicar(
         if c.ancora.tipo_do_item != "pessoa":
             if c.id not in atendidas:
                 _aplicar_no_item(resultado, c)
+            elif entrada.atender_no_item is not None:
+                for item in _itens_com_o_id(resultado, c):
+                    entrada.atender_no_item(item, c)
             continue
         for pessoa, identidade, do_modelo in zip(
             pessoas, identidades, pessoas_do_modelo, strict=True
@@ -1900,6 +1909,8 @@ class Tipo:
     # Se a decupagem entregue traz o campo que o tipo corrige (esquema 1.2).
     traz_o_campo: Callable[[dict[str, Any]], bool] | None = None
     aplicar_no_item: Callable[[dict[str, Any], Correcao], None] | None = None
+    # No item cujo modelo já traz o "depois": o que fazer, se algo.
+    atender_no_item: Callable[[dict[str, Any], Correcao], None] | None = None
     aplicar_na_pessoa: (
         Callable[[dict[str, Any], dict[str, Any], Correcao], None] | None
     ) = None
@@ -2157,7 +2168,12 @@ def _no_campo(nome: str) -> Callable[[dict[str, Any], Correcao], None]:
 
 def _marca_no_comercial(item: dict[str, Any], c: Correcao) -> None:
     item["marca"] = c.depois
-    # A marca nova vale por inteiro: o id da marca anterior não fica.
+    _catalogo_id_no_comercial(item, c)
+
+
+def _catalogo_id_no_comercial(item: dict[str, Any], c: Correcao) -> None:
+    # A marca nova vale por inteiro: o id da marca anterior não fica. O modelo que já
+    # escreve a marca não conhece o id, que vem da correção.
     if c.catalogo_id is None:
         item.pop("catalogo_id", None)
     else:
@@ -2423,6 +2439,7 @@ TIPOS: dict[str, Tipo] = {
         tipo_do_item="comercial",
         valor_do_item=_campo("marca"),
         aplicar_no_item=_marca_no_comercial,
+        atender_no_item=_catalogo_id_no_comercial,
         catalogo_de="marcas",
         ja_traz=_traz_a_marca,
         identidades=_identidades_com_a_marca,
