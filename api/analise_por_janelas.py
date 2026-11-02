@@ -48,6 +48,7 @@ from api.medicao_dos_textos import (
     MedicaoDosTextos,
 )
 from api.progresso_das_janelas import JanelaGravada, JanelasDoJob
+from api.sinais import ContagemDaAnalise
 from api.tempos import aplicar_regra_de_tempos
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA
@@ -101,11 +102,14 @@ def analisar_video(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    contagem: ContagemDaAnalise | None = None,
 ) -> Decupagem:
     """Decupa o vídeo inteiro; levanta `AnaliseFalhou` se uma janela esgotar as tentativas.
 
     `fracao_escalonada` `None` desliga o escalonamento inteiro (motivos `duvida`
     e `amostra`); a entrada fica aqui, e o piloto escolhe a fração.
+
+    `contagem` recebe as janelas, as escalonadas e as respostas fora do esquema (#286).
 
     `modelo` e `etapa_de_custo` (o rótulo de custo) são da passada de comparação
     (`api/passadas.py`); `etapa(nome)` envolve `janelas`, `consolidacao` e
@@ -114,6 +118,8 @@ def analisar_video(
     if max_paralelas < 1:
         raise ValueError(f"janelas em paralelo: {max_paralelas}")
     janelas = planejar_janelas(video.duracao_ms)
+    if contagem:
+        contagem.janelas = len(janelas)
 
     medicao = (
         MedicaoDosTextos(leitura, limiar=limiar_do_ocr, tolerancia=tolerancia_do_ocr)
@@ -154,6 +160,7 @@ def analisar_video(
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,
+            ao_fora_do_esquema=contagem.resposta_fora_do_esquema if contagem else None,
         )
 
     if len(janelas) <= 1:
@@ -225,6 +232,8 @@ def analisar_video(
                 for indice in janelas_a_escalonar(job_id, resultados, fracao_escalonada)
                 if not (indice in gravadas and gravadas[indice].refeita)
             ]
+            if contagem:
+                contagem.escalonadas = len(a_refazer)
             resultados.update(decupar_em_paralelo(a_refazer, escalonar=True))
     with etapa("consolidacao"):
         consolidada = medir(

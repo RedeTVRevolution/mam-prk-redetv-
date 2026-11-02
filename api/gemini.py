@@ -328,9 +328,11 @@ def gerar_validado[T](
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    ao_fora_do_esquema: Callable[[], None] | None = None,
 ) -> T:
     """Chama o transporte e valida a resposta com `validar` (que levanta `ValueError`),
-    com as tentativas de rede e de esquema, dentro do prazo. Esgotados, `AnaliseFalhou`."""
+    com as tentativas de rede e de esquema, dentro do prazo. Esgotados, `AnaliseFalhou`.
+    `ao_fora_do_esquema` roda a cada resposta recusada (o sinal do #286)."""
     falhas_rede = 0
     falhas_esquema = 0
     inicio = relogio()
@@ -350,6 +352,8 @@ def gerar_validado[T](
         try:
             return validar(texto)
         except ValueError as e:
+            if ao_fora_do_esquema:
+                ao_fora_do_esquema()
             if falhas_esquema >= TENTATIVAS_ESQUEMA:
                 raise AnaliseFalhou() from e
             falhas_esquema += 1
@@ -371,6 +375,7 @@ def analisar(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    ao_fora_do_esquema: Callable[[], None] | None = None,
 ) -> Decupagem:
     """`cortes_ms`: os cortes de câmera do vídeo; só os do trecho entram na instrução.
 
@@ -396,5 +401,6 @@ def analisar(
         dormir=dormir,
         sortear=sortear,
         relogio=relogio,
+        ao_fora_do_esquema=ao_fora_do_esquema,
     )
     return aplicar_transcricao(decupagem, transcricao, limiar_de_semelhanca)

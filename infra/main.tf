@@ -254,6 +254,36 @@ variable "fuso_da_agenda" {
   default     = "America/Sao_Paulo"
 }
 
+variable "limiar_de_escalonadas_pct" {
+  description = "Média, na janela do alerta, do percentual de janelas escalonadas para o 3.8 Flash por vídeo, acima da qual o alerta dispara. O plano espera 10 a 15% do tempo; 25% é o dobro do esperado, e a amostra de controle sozinha já é 10%"
+  type        = number
+  default     = 25
+}
+
+variable "limiar_de_nao_identificadas_pct" {
+  description = "Média, na janela do alerta, do percentual de pessoas na imagem sem nome por vídeo (antes do modelo forte), acima da qual o alerta dispara. Sem medida do piloto ainda: 50% é um chute largo, a ajustar com os dados reais (#286)"
+  type        = number
+  default     = 50
+}
+
+variable "limiar_de_fora_do_esquema" {
+  description = "Respostas do modelo recusadas pelo esquema (e refeitas) na janela do alerta, acima das quais o alerta dispara. Cada vídeo longo faz dezenas de chamadas: 10 por dia é raro o bastante para indicar mudança do modelo ou do prompt"
+  type        = number
+  default     = 10
+}
+
+variable "limite_de_falhas_por_etapa" {
+  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa em separado"
+  type        = number
+  default     = 3
+}
+
+variable "janela_dos_alertas_horas" {
+  description = "Horas de log que cada alerta de sinal de qualidade soma ou calcula a média; o volume é de poucos vídeos por dia, então a janela é de um dia"
+  type        = number
+  default     = 24
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -2269,6 +2299,246 @@ resource "google_monitoring_alert_policy" "login_admin_emergencia" {
     content = "Uma conta de administrador de emergência tentou entrar no MAM. Se não foi você nem o outro administrador, troque a senha e o autenticador da conta."
   }
   depends_on = [google_identity_platform_config.mam]
+}
+
+# Sinais de qualidade em produção (#286). Os jobs escrevem uma linha JSON por evento
+# (`api/sinais.py`; a queda da avaliação sai de `api/avaliacao.py`) e o Cloud Run a lê como
+# `jsonPayload`. Os nomes dos campos e dos eventos são o contrato com o código: mudar um
+# lá pede mudar o filtro aqui (um teste confere). Cada percentual vira uma métrica de
+# distribuição, e o alerta olha a média na janela.
+locals {
+  janela_dos_alertas_s = "${var.janela_dos_alertas_horas * 3600}s"
+  canais_de_alerta     = [for canal in google_monitoring_notification_channel.admin_emergencia : canal.id]
+  filtro_video_concluido = join(" AND ", [
+    "resource.type=\"cloud_run_job\"",
+    "jsonPayload.evento=\"video_concluido\"",
+  ])
+  sinais_percentuais = {
+    escalonadas = {
+      campo     = "pct_escalonadas"
+      limiar    = var.limiar_de_escalonadas_pct
+      titulo    = "Janelas escalonadas para o 3.8 Flash acima do limiar"
+      documento = "A média do percentual de janelas reanalisadas pelo 3.8 Flash passou do limiar. Ou a primeira passada está deixando mais dúvidas (modelo ou prompt mudou?), ou a fração da amostra de controle subiu."
+    }
+    nao_identificadas = {
+      campo     = "pct_nao_identificadas"
+      limiar    = var.limiar_de_nao_identificadas_pct
+      titulo    = "Pessoas não identificadas acima do limiar"
+      documento = "A média do percentual de pessoas na imagem sem nome passou do limiar. Confira o catálogo do programa, as fotos de referência e a transcrição dos vídeos recentes."
+    }
+  }
+}
+
+resource "google_logging_metric" "sinal_percentual" {
+  for_each        = local.sinais_percentuais
+  name            = "mam_pct_${each.key}"
+  description     = "Percentual ${each.value.campo} por vídeo concluído (log video_concluido)"
+  filter          = local.filtro_video_concluido
+  value_extractor = "EXTRACT(jsonPayload.${each.value.campo})"
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "DISTRIBUTION"
+    unit        = "%"
+  }
+  bucket_options {
+    linear_buckets {
+      num_finite_buckets = 20
+      width              = 5
+      offset             = 0
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_logging_metric" "respostas_fora_do_esquema" {
+  name            = "mam_respostas_fora_do_esquema"
+  description     = "Respostas do modelo recusadas pelo esquema, somadas por vídeo concluído"
+  filter          = local.filtro_video_concluido
+  value_extractor = "EXTRACT(jsonPayload.respostas_fora_do_esquema)"
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_logging_metric" "falhas_por_etapa" {
+  name        = "mam_falhas_por_etapa"
+  description = "Falhas de etapa do processamento, com a etapa como rótulo"
+  filter = join(" AND ", [
+    "resource.type=\"cloud_run_job\"",
+    "jsonPayload.evento=\"falha_de_etapa\"",
+  ])
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+    labels {
+      key         = "etapa"
+      value_type  = "STRING"
+      description = "Etapa que falhou"
+    }
+  }
+  label_extractors = {
+    etapa = "EXTRACT(jsonPayload.etapa)"
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_logging_metric" "queda_da_avaliacao" {
+  name        = "mam_queda_da_avaliacao"
+  description = "Quedas da avaliação por rubrica (#255), com o requisito como rótulo"
+  filter = join(" AND ", [
+    "resource.type=\"cloud_run_job\"",
+    "jsonPayload.evento=\"queda_de_qualidade\"",
+  ])
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+    labels {
+      key         = "requisito"
+      value_type  = "STRING"
+      description = "Requisito da rubrica que caiu"
+    }
+  }
+  label_extractors = {
+    requisito = "EXTRACT(jsonPayload.requisito)"
+  }
+  depends_on = [google_project_service.apis]
+}
+
+# Os avisos de métrica não têm limite de repetição como os de log: o `auto_close` fecha o
+# incidente quando a janela volta ao normal.
+resource "google_monitoring_alert_policy" "escalonadas" {
+  display_name = local.sinais_percentuais.escalonadas.titulo
+  combiner     = "OR"
+  conditions {
+    display_name = local.sinais_percentuais.escalonadas.titulo
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual["escalonadas"].name}\" AND resource.type=\"cloud_run_job\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = local.sinais_percentuais.escalonadas.limiar
+      duration        = "0s"
+      aggregations {
+        alignment_period   = local.janela_dos_alertas_s
+        per_series_aligner = "ALIGN_MEAN"
+      }
+    }
+  }
+  alert_strategy {
+    auto_close = "1800s"
+  }
+  notification_channels = local.canais_de_alerta
+  documentation {
+    content = local.sinais_percentuais.escalonadas.documento
+  }
+}
+
+resource "google_monitoring_alert_policy" "nao_identificadas" {
+  display_name = local.sinais_percentuais.nao_identificadas.titulo
+  combiner     = "OR"
+  conditions {
+    display_name = local.sinais_percentuais.nao_identificadas.titulo
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual["nao_identificadas"].name}\" AND resource.type=\"cloud_run_job\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = local.sinais_percentuais.nao_identificadas.limiar
+      duration        = "0s"
+      aggregations {
+        alignment_period   = local.janela_dos_alertas_s
+        per_series_aligner = "ALIGN_MEAN"
+      }
+    }
+  }
+  alert_strategy {
+    auto_close = "1800s"
+  }
+  notification_channels = local.canais_de_alerta
+  documentation {
+    content = local.sinais_percentuais.nao_identificadas.documento
+  }
+}
+
+resource "google_monitoring_alert_policy" "fora_do_esquema" {
+  display_name = "Respostas fora do esquema acima do limiar"
+  combiner     = "OR"
+  conditions {
+    display_name = "Respostas fora do esquema acima do limiar"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.respostas_fora_do_esquema.name}\" AND resource.type=\"cloud_run_job\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = var.limiar_de_fora_do_esquema
+      duration        = "0s"
+      aggregations {
+        alignment_period     = local.janela_dos_alertas_s
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+    }
+  }
+  alert_strategy {
+    auto_close = "1800s"
+  }
+  notification_channels = local.canais_de_alerta
+  documentation {
+    content = "O Gemini devolveu mais respostas fora do esquema (refeitas) do que o limiar na janela. Suspeite de mudança do modelo ou do prompt; as respostas refeitas custam chamadas a mais."
+  }
+}
+
+resource "google_monitoring_alert_policy" "falhas_por_etapa" {
+  display_name = "Falhas de uma etapa acima do limite"
+  combiner     = "OR"
+  conditions {
+    display_name = "Falhas de uma etapa acima do limite"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\" AND resource.type=\"cloud_run_job\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = var.limite_de_falhas_por_etapa
+      duration        = "0s"
+      aggregations {
+        alignment_period     = local.janela_dos_alertas_s
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["metric.label.etapa"]
+      }
+    }
+  }
+  alert_strategy {
+    auto_close = "1800s"
+  }
+  notification_channels = local.canais_de_alerta
+  documentation {
+    content = "Uma etapa do processamento falhou mais vezes do que o limite na janela; o rótulo `etapa` diz qual. O log `falha_de_etapa` traz o job e o motivo."
+  }
+}
+
+resource "google_monitoring_alert_policy" "queda_da_avaliacao" {
+  display_name = "Queda na avaliação por rubrica"
+  combiner     = "OR"
+  conditions {
+    display_name = "Queda na avaliação por rubrica"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.queda_da_avaliacao.name}\" AND resource.type=\"cloud_run_job\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+      aggregations {
+        alignment_period     = local.janela_dos_alertas_s
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["metric.label.requisito"]
+      }
+    }
+  }
+  alert_strategy {
+    auto_close = "1800s"
+  }
+  notification_channels = local.canais_de_alerta
+  documentation {
+    content = "A avaliação diária por rubrica (#255) achou um requisito abaixo do limiar ou em queda frente à média dos dias anteriores. O rótulo `requisito` diz qual; o log `queda_de_qualidade` traz as notas."
+  }
 }
 
 # Chave web do login, que vai no build do front. O provider a marca como

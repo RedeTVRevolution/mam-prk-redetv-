@@ -12,6 +12,8 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, get_args
 
+from api.sinais import Registrar, imprimir, registro_da_falha_de_etapa
+
 # `api.jobs` usa este módulo nas rotas; aqui os tipos só servem à checagem.
 if TYPE_CHECKING:
     from api.jobs import (
@@ -174,6 +176,7 @@ def rodar_etapa(
     trabalho: Callable[[], str],
     *,
     bem_sucedido: str,
+    registrar: Registrar = imprimir,
 ) -> str:
     """Roda `trabalho` entre o início e o fim da etapa; só o resultado `bem_sucedido` conclui.
 
@@ -184,9 +187,12 @@ def rodar_etapa(
     iniciar_etapa(repositorio, job_id, etapa, agora_utc())
     try:
         resultado = trabalho()
-    except Exception:
+    except Exception as e:
         encerrar_etapa(repositorio, job_id, etapa, "falhou", agora_utc())
+        registrar(registro_da_falha_de_etapa(etapa, job_id, f"{type(e).__name__}: {e}"))
         raise
+    if resultado != bem_sucedido:
+        registrar(registro_da_falha_de_etapa(etapa, job_id, f"resultado {resultado}"))
     encerrar_etapa(
         repositorio,
         job_id,
