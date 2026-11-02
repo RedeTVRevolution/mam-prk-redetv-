@@ -443,7 +443,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
         if (!tipo) return null
         const escolhidas = c.cores_base.map((x) => x.valor).filter((x) => (v.cor_base as string[]).includes(x))
         if (escolhidas.length > 2) return null
-        const mesmasCores = escolhidas.length === cores.length && escolhidas.every((x) => cores.includes(x as never))
+        const mesmasCores = [...(v.cor_base as string[])].sort().join() === [...cores].sort().join()
         const partes: Pedido[] = []
         if (
           tipo !== objeto.tipo ||

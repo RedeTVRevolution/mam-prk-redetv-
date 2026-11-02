@@ -220,12 +220,14 @@ test('objeto: cada atributo sozinho muda só ele, e mais de duas cores base não
     const [p] = e.pedidos({ ...e.inicial, ...v } as never)!
     return JSON.parse(p.valor)
   }
+  expect(valor({ tipo: 'camiseta' })).toMatchObject({ tipo: 'camiseta', cor_base: ['azul'], cor: 'azul marinho' })
   expect(valor({ cor_base: ['branco'] })).toMatchObject({ cor_base: ['branco'], cor: 'azul marinho', marca: 'Lacoste' })
   expect(valor({ cor: 'azul royal' })).toMatchObject({ cor_base: ['azul'], cor: 'azul royal' })
   expect(valor({ detalhe: 'lisa' })).toMatchObject({ detalhe: 'lisa', tipo: 'camisa' })
   expect(valor({ marca: 'Polo' })).toMatchObject({ marca: 'Polo' })
   expect(e.pedidos({ ...e.inicial, cor_base: ['azul', 'branco', 'preto'] })).toBeNull()
   expect(e.pedidos({ ...e.inicial, tipo: ' ' })).toBeNull()
+  expect(e.pedidos(e.inicial)).toEqual([])
 })
 
 test('objeto: trocar o dono, a relação e tirar o dono geram objeto.dono', () => {
