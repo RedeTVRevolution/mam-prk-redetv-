@@ -2312,6 +2312,12 @@ resource "google_identity_platform_config" "mam" {
       enabled           = true
       password_required = true
     }
+    # O login por telefone fica desligado. O Google devolve este bloco com enabled=false e
+    # o provider não o marca como computado: sem declará-lo, todo plan mostrava a remoção
+    # do bloco e o apply "corrigia" sem mudar nada (#291).
+    phone_number {
+      enabled = false
+    }
   }
   # A chave web vai no front e é pública: sem isto, qualquer um criaria uma conta.
   client {
