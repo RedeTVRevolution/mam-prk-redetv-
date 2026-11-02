@@ -126,6 +126,14 @@ GPU_REGIAO=$(tf output -raw regiao_gpu) GPU_ESPERA_TOTAL_S=$(tf output -raw gpu_
   GCP_PROJECT_ID=$GCP_PROJECT_ID GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT \
   scripts/testar-jobs-gpu.sh "${JOBS_GPU[@]}"
 
+# Com o balanceador (#294), o run.app não responde de fora e o teste vai pelo domínio, mas o
+# certificado só fica ativo depois do DNS (até 24 h): até lá, só um aviso.
 URL=$(tf output -raw url)
-curl -sSf "$URL/v1/health" >/dev/null
-echo "No ar: $URL (/v1/health respondeu 200)"
+CERTIFICADO=$(tf output -json certificado_do_balanceador | jq -r '. // empty')
+if [[ -n $CERTIFICADO ]] &&
+  [[ $(gc compute ssl-certificates describe "$CERTIFICADO" --global --format='value(managed.status)') != ACTIVE ]]; then
+  echo "Aviso: o certificado de $URL ainda não está ativo (registro A para $(tf output -raw ip_do_balanceador); infra/README.md). /v1/health não foi testado." >&2
+else
+  curl -sSf "$URL/v1/health" >/dev/null
+  echo "No ar: $URL (/v1/health respondeu 200)"
+fi

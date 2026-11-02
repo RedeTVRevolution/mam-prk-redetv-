@@ -834,7 +834,7 @@ resource "google_service_account_iam_member" "github_impersona_terraform" {
 
 locals {
   # Com o balanceador, o domínio entra junto das URLs do Cloud Run no CORS da quarentena.
-  origens_da_aplicacao = local.balanceador ? concat(google_cloud_run_v2_service.web.urls, ["https://${var.dominio}"]) : google_cloud_run_v2_service.web.urls
+  origens_da_aplicacao = concat(google_cloud_run_v2_service.web.urls, local.balanceador ? ["https://${var.dominio}"] : [])
 }
 
 resource "google_cloud_run_v2_service" "web" {
@@ -2286,7 +2286,8 @@ resource "google_eventarc_trigger" "quarentena" {
   depends_on = [google_project_iam_member.storage_publica_eventos, google_project_iam_member.mam]
 }
 
-# URL pública: sem balanceador na E0, e a API exige o token do Identity Platform.
+# URL pública (o run.app ou, com `dominio`, só pelo balanceador), e a API exige o token do
+# Identity Platform.
 resource "google_cloud_run_v2_service_iam_member" "publico" {
   name     = google_cloud_run_v2_service.web.name
   location = google_cloud_run_v2_service.web.location
@@ -3106,8 +3107,9 @@ output "identity_api_key" {
   sensitive = true
 }
 
+# O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.
 output "url" {
-  value = google_cloud_run_v2_service.web.uri
+  value = local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri
 }
 
 # Para as ferramentas locais: o deploy-dev envia as imagens a este repositório, e o

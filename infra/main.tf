@@ -98,6 +98,10 @@ output "identity_api_key" {
   sensitive = true
 }
 
+output "certificado_do_balanceador" {
+  value = module.mam.certificado_do_balanceador
+}
+
 output "ip_do_balanceador" {
   value = module.mam.ip_do_balanceador
 }

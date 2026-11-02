@@ -107,3 +107,8 @@ resource "google_compute_global_forwarding_rule" "http" {
 output "ip_do_balanceador" {
   value = local.balanceador ? google_compute_global_address.balanceador[0].address : null
 }
+
+# O deploy confere o estado dele antes de testar o /v1/health pelo domínio. Nulo sem balanceador.
+output "certificado_do_balanceador" {
+  value = local.balanceador ? google_compute_managed_ssl_certificate.web[0].name : null
+}

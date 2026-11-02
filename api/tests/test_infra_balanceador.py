@@ -56,9 +56,26 @@ def test_o_certificado_e_gerenciado_para_o_dominio() -> None:
 
 
 def test_o_http_redireciona_para_https() -> None:
-    assert "https_redirect         = true" in BALANCEADOR
-    assert 'port_range            = "80"' in BALANCEADOR
-    assert 'port_range            = "443"' in BALANCEADOR
+    http = _bloco(
+        BALANCEADOR, 'resource "google_compute_global_forwarding_rule" "http"'
+    )
+    https = _bloco(
+        BALANCEADOR, 'resource "google_compute_global_forwarding_rule" "https"'
+    )
+    redireciona = _bloco(
+        BALANCEADOR, 'resource "google_compute_url_map" "redireciona_para_https"'
+    )
+    proxy_http = _bloco(
+        BALANCEADOR,
+        'resource "google_compute_target_http_proxy" "redireciona_para_https"',
+    )
+
+    assert re.search(r'port_range\s*= "80"', http)
+    assert "google_compute_target_http_proxy.redireciona_para_https[0].id" in http
+    assert re.search(r'port_range\s*= "443"', https)
+    assert "google_compute_target_https_proxy.web[0].id" in https
+    assert "google_compute_url_map.redireciona_para_https[0].id" in proxy_http
+    assert re.search(r"https_redirect\s*= true", redireciona)
 
 
 def test_o_back_end_e_o_servico_web_por_neg_serverless() -> None:
@@ -80,10 +97,34 @@ def test_com_balanceador_o_cloud_run_so_aceita_o_balanceador() -> None:
 def test_o_cors_e_o_login_incluem_o_dominio() -> None:
     cors = _bloco(MAIN, 'resource "google_storage_bucket" "mam"')
     login = _bloco(MAIN, 'resource "google_identity_platform_config" "mam"')
+    origens = re.search(r"^  origens_da_aplicacao\s*=(.*)$", MAIN, re.MULTILINE)
+    dominios = re.search(r"^  authorized_domains\s*=(.*)$", login, re.MULTILINE)
 
-    assert "local.origens_da_aplicacao" in cors
-    assert re.search(r"authorized_domains\s*=\s*local\.balanceador \?", login)
-    assert "https://${var.dominio}" in MAIN
+    assert "origin          = local.origens_da_aplicacao" in cors
+    assert origens and 'local.balanceador ? ["https://${var.dominio}"]' in origens[1]
+    assert dominios and re.search(
+        r"local\.balanceador \? \[.*var\.dominio\] : null", dominios[1]
+    )
+
+
+def test_o_endereco_e_o_dominio_com_o_balanceador_e_o_run_app_sem_ele() -> None:
+    url = _bloco(MAIN, 'output "url"')
+    ip = _bloco(BALANCEADOR, 'output "ip_do_balanceador"')
+
+    assert (
+        'local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri'
+        in url
+    )
+    assert re.search(r"local\.balanceador \? .* : null", ip)
+
+
+def test_o_deploy_so_testa_o_dominio_com_o_certificado_ativo() -> None:
+    deploy = (INFRA.parent / "scripts" / "deploy-dev.sh").read_text()
+    certificado = deploy.index("tf output -json certificado_do_balanceador")
+    ativo = deploy.index("!= ACTIVE ]]", certificado)
+    teste = deploy.index('curl -sSf "$URL/v1/health"', ativo)
+
+    assert certificado < ativo < teste
 
 
 def test_o_endereco_sai_como_output_e_o_dominio_chega_aos_tres_ambientes() -> None:

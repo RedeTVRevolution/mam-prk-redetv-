@@ -14,6 +14,11 @@ MODULO = INFRA / "modulos" / "mam"
 SCRIPT = RAIZ / "scripts" / "aplicar-sem-destruir.sh"
 
 
+def _texto_do_modulo() -> str:
+    # Outputs e variáveis podem estar em qualquer arquivo do módulo (o balanceador.tf, #294).
+    return "\n".join(f.read_text() for f in sorted(MODULO.glob("*.tf")))
+
+
 def _enderecos(texto: str, tipo: str) -> list[str]:
     return re.findall(rf'^{tipo} "(\w+)" "(\w+)"', texto, re.MULTILINE)
 
@@ -30,6 +35,7 @@ def test_o_dev_chama_o_modulo_e_o_modulo_nao_tem_backend_nem_provider() -> None:
 
 
 def test_cada_recurso_do_modulo_tem_o_seu_bloco_moved() -> None:
+    # Só o main.tf: os recursos dos outros arquivos do módulo nasceram nele, sem `moved`.
     raiz = (INFRA / "main.tf").read_text()
     recursos = re.findall(
         r'^resource "(\w+)" "(\w+)"', (MODULO / "main.tf").read_text(), re.MULTILINE
@@ -48,9 +54,7 @@ def test_cada_recurso_do_modulo_tem_o_seu_bloco_moved() -> None:
 
 def test_cada_output_do_modulo_sai_na_raiz_para_o_make_e_o_deploy() -> None:
     raiz = (INFRA / "main.tf").read_text()
-    saidas = re.findall(
-        r'^output "(\w+)"', (MODULO / "main.tf").read_text(), re.MULTILINE
-    )
+    saidas = re.findall(r'^output "(\w+)"', _texto_do_modulo(), re.MULTILINE)
 
     assert saidas
     for saida in saidas:
@@ -61,7 +65,7 @@ def test_cada_output_do_modulo_sai_na_raiz_para_o_make_e_o_deploy() -> None:
 
 def test_as_variaveis_sem_padrao_do_modulo_sao_passadas_pela_raiz() -> None:
     raiz = (INFRA / "main.tf").read_text()
-    modulo = (MODULO / "main.tf").read_text()
+    modulo = _texto_do_modulo()
     sem_padrao = [
         nome
         for nome, corpo in re.findall(
