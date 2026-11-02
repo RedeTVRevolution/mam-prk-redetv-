@@ -18,6 +18,9 @@ _Evitar_: tarefa, pedido
 Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, identificação, referências, comparação, quadros-chave, indexação, nessa ordem), com início, fim e resultado (`concluida` ou `falhou`). A falha de uma etapa depois do `concluido` não muda o estado do Job.
 _Evitar_: fase
 
+**Dispositivo**:
+Onde a transcrição e a leitura da tela rodam: `cpu` (padrão) ou `gpu` (L4, em `us-east4`, ADR 0007), pela variável `DISPOSITIVO` (`api/dispositivo.py`). Pedir `gpu` numa instância sem GPU derruba o Job com mensagem clara, sem cair para a CPU em silêncio; o plano B em CPU é do Workflows.
+
 **Reprocessar**:
 Refazer um Job a partir de uma etapa, sem enviar o vídeo de novo (`POST /v1/jobs/{id}/reprocessar`). As etapas anteriores não rodam, e cada reprocessamento vai à auditoria (`video.reprocessado`).
 Há dois jeitos. **Reprocessar o que falhou** (`video.reprocessar`, Operador e acima) recomeça da primeira etapa que falhou e só vale para falha de etapa; a falha do arquivo pede novo envio. **Reprocessar a partir de uma etapa escolhida** (`video.reprocessar_etapa`, Curador e Administrador) refaz um vídeo `concluido` e bom, por exemplo por uma instrução nova: o corpo do pedido traz a `etapa` (análise, identificação, quadros-chave ou indexação) e o motivo, obrigatório, e a auditoria marca `etapa_escolhida`. Com a análise escolhida o Job volta a `analisando`, a Decupagem some até a nova análise terminar e o progresso das janelas é descartado, para o modelo rodar de novo em todas; com as outras, o Job continua `concluido`.

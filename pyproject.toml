@@ -33,9 +33,33 @@ ocr = [
     # ConvertPirAttribute2RuntimeAttribute not support [pir::ArrayAttribute<pir::DoubleAttribute>].
     "paddlepaddle==3.2.2",
 ]
+# Imagem do Job de transcrição com GPU (E1): as bibliotecas CUDA 12 e cuDNN 9 que o
+# CTranslate2 4 pede, como rodas do PyPI, para o driver 580 do Cloud Run rodá-las.
+transcricao-gpu = [
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12==9.*",
+]
+# Imagem do Job de OCR com GPU: a mesma versão do `ocr` (3.2.2), mas a roda com CUDA 12.6,
+# do índice do próprio Paddle. O oneDNN que quebra no 3.3 é do caminho em CPU, que a
+# GPU não usa. As duas rodas dão o mesmo módulo `paddle`: nunca juntas.
+ocr-gpu = [
+    "paddleocr==3.7.0",
+    "paddlepaddle-gpu==3.2.2",
+]
 
 [tool.uv]
 package = false
+conflicts = [
+    [{ group = "ocr" }, { group = "ocr-gpu" }],
+]
+
+[[tool.uv.index]]
+name = "paddle-cu126"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+explicit = true
+
+[tool.uv.sources]
+paddlepaddle-gpu = { index = "paddle-cu126", group = "ocr-gpu" }
 
 [tool.ruff]
 target-version = "py312"
@@ -55,5 +79,5 @@ module = ["google.cloud.storage", "google.cloud.storage.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["faster_whisper", "faster_whisper.*", "paddleocr", "paddleocr.*", "cv2"]
+module = ["faster_whisper", "faster_whisper.*", "ctranslate2", "paddle", "paddle.*", "paddleocr", "paddleocr.*", "cv2"]
 ignore_missing_imports = true

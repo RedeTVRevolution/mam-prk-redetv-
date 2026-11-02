@@ -63,6 +63,23 @@ USER nobody
 ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.transcricao_job"]
 
+# Job de transcrição em GPU (E1, ADR 0007): `docker build --target transcricao-gpu`. Parte do
+# alvo `transcricao` (mesmo modelo, mesma revisão, mesmos hashes, sem baixar de novo) e
+# acrescenta as bibliotecas CUDA 12 e cuDNN 9 que o CTranslate2 4 pede, como rodas do
+# PyPI. O driver (580, CUDA 13) é do Cloud Run, que o monta em /usr/local/nvidia/lib64;
+# um runtime CUDA 12 roda nele. Esta imagem só roda com GPU (`DISPOSITIVO=gpu`).
+FROM transcricao AS transcricao-gpu
+USER root
+RUN uv sync --locked --no-dev --group transcricao --group transcricao-gpu
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/nvidia/lib64 \
+    DISPOSITIVO=gpu
+# A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
+# que o faster-whisper roda o modelo e a detecção de voz em CPU. Não se confere o driver, a
+# GPU nem o CUDA em uso: isso é da primeira execução no dev (240).
+RUN /app/.venv/bin/python -c "import ctypes, wave; import ctranslate2; ctypes.CDLL('libcublas.so.12'); ctypes.CDLL('libcudnn.so.9'); w = wave.open('/tmp/s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close(); from api.whisper import VAD_PARAMETROS; from faster_whisper import WhisperModel; m = WhisperModel('/modelo', device='cpu', compute_type='int8', local_files_only=True); segmentos, _ = m.transcribe('/tmp/s.wav', language='pt', word_timestamps=True, vad_filter=True, vad_parameters=VAD_PARAMETROS); assert list(segmentos) == []" \
+    && rm /tmp/s.wav
+USER nobody
+
 # Job de OCR da tela (#106): `docker build --target ocr`. ffmpeg para os quadros, PaddleOCR
 # e os dois modelos, baixados aqui, na construção, nas revisões fixadas e conferidos pelo
 # SHA-256 de cada arquivo; no ar o Job roda sem internet.
@@ -111,6 +128,33 @@ USER nobody
 # HOME e TMPDIR no volume em memória: o Paddle grava cache e o ffmpeg, os quadros, e a imagem não tem pasta gravável.
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1
+CMD ["python", "-m", "api.ocr_job"]
+
+# Job de OCR em GPU (E1, ADR 0007): `docker build --target ocr-gpu`. Os mesmos modelos do
+# alvo `ocr`, copiados dele (mesmas revisões e hashes), e o `paddlepaddle-gpu` 3.2.2 (CUDA
+# 12.6, do índice do Paddle) no lugar do `paddlepaddle` de CPU. Não parte do alvo `ocr` para
+# não carregar a roda de CPU. O driver é do Cloud Run, em /usr/local/nvidia/lib64.
+FROM python:3.12-slim-bookworm AS ocr-gpu
+COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+ARG FFMPEG
+RUN apt-get update \
+    && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
+        || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=ocr /modelos /modelos
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --group ocr-gpu
+COPY api/ api/
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64
+# A máquina da construção não tem GPU: o Paddle lê um quadro de verdade em CPU, com os
+# modelos da imagem. Isso pega roda que não instala, biblioteca CUDA que não carrega e
+# modelo incompatível; não pega o driver nem a GPU (primeira execução no dev, 240).
+RUN HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy, paddle; assert paddle.device.is_compiled_with_cuda(); q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos', 'cpu').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
+    && rm -rf /tmp/ocr /tmp/ocr.png
+USER nobody
+ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos \
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu
 CMD ["python", "-m", "api.ocr_job"]
 
 FROM python:3.12-slim

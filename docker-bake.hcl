@@ -1,4 +1,4 @@
-# As quatro imagens do MAM (#71, #211), montadas pelo cloudbuild.yaml num grafo só: o
+# As imagens do MAM (#71, #211), montadas pelo cloudbuild.yaml num grafo só: o
 # BuildKit roda em paralelo o que os alvos não dividem e monta uma vez o que dividem. Os
 # endereços das imagens e do cache vêm das variáveis de ambiente (scripts/deploy-dev.sh),
 # nunca escritos aqui. O cache de cada alvo é uma tag do repositório, sobrescrita a cada
@@ -50,4 +50,21 @@ target "ocr" {
   tags       = [OCR]
   cache-from = ["type=registry,ref=${CACHE}:ocr"]
   cache-to   = ["type=registry,ref=${CACHE}:ocr,mode=max,image-manifest=true,oci-mediatypes=true"]
+}
+
+# As imagens com GPU (E1, ADR 0007): `docker buildx bake gpu` as monta, sem enviar nem
+# usar cache (o repositório em us-east4, o cache e a publicação são do 238), por isso não
+# estão no grupo `default`, que o cloudbuild.yaml envia.
+group "gpu" {
+  targets = ["transcricao-gpu", "ocr-gpu"]
+}
+
+target "transcricao-gpu" {
+  target = "transcricao-gpu"
+  tags   = ["mam-transcricao-gpu:local"]
+}
+
+target "ocr-gpu" {
+  target = "ocr-gpu"
+  tags   = ["mam-ocr-gpu:local"]
 }
