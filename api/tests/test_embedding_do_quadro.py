@@ -5,11 +5,13 @@ from typing import Any
 
 import pytest
 
+from api import embedding_do_quadro
+from api.agent_retrieval import ConfigDaBusca
 from api.embedding_do_quadro import (
     MODELO_DO_EMBEDDING_DO_QUADRO,
     GeminiEmbedding,
     com_vetores_do_quadro,
-    embedding_do_ambiente,
+    embedding_da_busca,
 )
 from api.indice_da_busca import Registro
 
@@ -115,7 +117,7 @@ def test_o_pedido_ao_gemini_leva_texto_quadro_e_a_dimensao_da_colecao() -> None:
             "data": base64.b64encode(JPEG).decode(),
         }
     } in partes
-    assert corpo["outputDimensionality"] == 2
+    assert corpo["embedContentConfig"] == {"outputDimensionality": 2}
     assert vetor == pytest.approx([0.6, 0.8])  # normalizado
 
 
@@ -127,7 +129,37 @@ def test_resposta_sem_a_dimensao_pedida_e_erro() -> None:
         GeminiEmbedding("proj", 2, transporte).vetor(JPEG, "x")
 
 
-def test_sem_indice_do_quadro_no_ambiente_nao_ha_embedding() -> None:
-    base = {"GCP_PROJECT_ID": "p", "BUSCA_DIMENSAO": "256"}
+def _config(indice_do_quadro: str | None) -> ConfigDaBusca:
+    return ConfigDaBusca(
+        projeto="proj",
+        regiao="us-central1",
+        colecao="c",
+        indice_da_descricao="d",
+        indice_do_quadro=indice_do_quadro,
+        dimensao=256,
+    )
 
-    assert embedding_do_ambiente({**base, "BUSCA_INDICE_QUADRO": ""}) is None
+
+def test_sem_busca_ou_sem_indice_do_quadro_nao_ha_embedding() -> None:
+    assert embedding_da_busca(None) is None
+    assert embedding_da_busca(_config(None)) is None
+
+
+def test_com_o_indice_do_quadro_o_embedding_usa_o_projeto_e_a_dimensao_da_busca(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pedidos: list[tuple[str, dict[str, Any]]] = []
+
+    def transporte(url: str, corpo: dict[str, Any]) -> dict[str, Any]:
+        pedidos.append((url, corpo))
+        return {"embedding": {"values": [1.0] * 256}}
+
+    monkeypatch.setattr(embedding_do_quadro, "transporte_http", lambda: transporte)
+
+    embedding = embedding_da_busca(_config("q"))
+    assert embedding is not None
+    embedding.vetor(JPEG, "estúdio")
+
+    [(url, corpo)] = pedidos
+    assert "/projects/proj/" in url
+    assert corpo["embedContentConfig"] == {"outputDimensionality": 256}

@@ -9,18 +9,24 @@ da coleção). A rede fica atrás de `Transporte`; os testes usam um dublê.
 import base64
 import logging
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Any, Protocol
 
 import google.auth
 import google.auth.transport.requests
 
+from api.agent_retrieval import ConfigDaBusca
+
 log = logging.getLogger(__name__)
 
 MODELO_DO_EMBEDDING_DO_QUADRO = "gemini-embedding-2"
 # Endpoint global, como o Gemini da análise (ADR 0001).
 URL_BASE = "https://aiplatform.googleapis.com/v1"
+# Chamadas simultâneas por vídeo: a reindexação de uma Correção roda dentro do pedido HTTP,
+# e 600 planos em série (uma hora de vídeo) passariam do tempo do Cloud Run.
+CHAMADAS_SIMULTANEAS = 16
 
 Transporte = Callable[[str, dict[str, Any]], dict[str, Any]]
 
@@ -52,7 +58,8 @@ class GeminiEmbedding:
                     },
                 ]
             },
-            "outputDimensionality": self._dimensao,
+            # O `outputDimensionality` no topo do pedido está obsoleto na API v1.
+            "embedContentConfig": {"outputDimensionality": self._dimensao},
         }
         valores = [
             float(v) for v in self._transporte(url, corpo)["embedding"]["values"]
@@ -61,7 +68,8 @@ class GeminiEmbedding:
             raise ValueError(
                 f"o embedding veio com dimensão {len(valores)}, e a coleção tem {self._dimensao}"
             )
-        # O índice compara por produto escalar: o vetor reduzido tem de ter norma 1.
+        # O vetor reduzido já vem normalizado (documentação do Gemini Embedding 2); normalizar
+        # de novo protege a distância de cosseno do índice se isso mudar.
         norma = math.sqrt(sum(v * v for v in valores))
         return [v / norma for v in valores] if norma else valores
 
@@ -74,18 +82,20 @@ def com_vetores_do_quadro(
     """Os registros, com o vetor do quadro nos planos que têm quadro-chave."""
     if embedding is None:
         return registros
-    saida = []
-    for r in registros:
-        if r.tipo == "plano" and r.quadro and r.descricao:
-            try:
-                r = replace(
-                    r,
-                    vetor_do_quadro=embedding.vetor(ler_quadro(r.quadro), r.descricao),
-                )
-            except Exception:
-                log.exception("vetor do quadro não calculado para %s", r.id)
-        saida.append(r)
-    return saida
+
+    def com_vetor(r: Any) -> Any:
+        if not (r.tipo == "plano" and r.quadro and r.descricao):
+            return r
+        try:
+            return replace(
+                r, vetor_do_quadro=embedding.vetor(ler_quadro(r.quadro), r.descricao)
+            )
+        except Exception:
+            log.exception("vetor do quadro não calculado para %s", r.id)
+            return r
+
+    with ThreadPoolExecutor(max_workers=CHAMADAS_SIMULTANEAS) as pool:
+        return list(pool.map(com_vetor, registros))
 
 
 def transporte_http() -> Transporte:
@@ -104,10 +114,8 @@ def transporte_http() -> Transporte:
     return chamar
 
 
-def embedding_do_ambiente(ambiente: Mapping[str, str]) -> GeminiEmbedding | None:
-    """`None` com o índice do quadro-chave desligado (`BUSCA_INDICE_QUADRO` vazia, ADR 0006)."""
-    if not ambiente.get("BUSCA_INDICE_QUADRO"):
+def embedding_da_busca(config: ConfigDaBusca | None) -> GeminiEmbedding | None:
+    """`None` sem busca ou com o índice do quadro-chave desligado (ADR 0006)."""
+    if config is None or config.indice_do_quadro is None:
         return None
-    return GeminiEmbedding(
-        ambiente["GCP_PROJECT_ID"], int(ambiente["BUSCA_DIMENSAO"]), transporte_http()
-    )
+    return GeminiEmbedding(config.projeto, config.dimensao, transporte_http())

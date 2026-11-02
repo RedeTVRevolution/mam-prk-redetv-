@@ -25,7 +25,7 @@ from api.decupagem import Decupagem
 from api.embedding_do_quadro import (
     EmbeddingDoQuadro,
     com_vetores_do_quadro,
-    embedding_do_ambiente,
+    embedding_da_busca,
 )
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
 from api.jobs import (
@@ -129,7 +129,8 @@ def reindexar(
 
     Nunca levanta por falha do índice ou da cópia: cada uma fica no seu estado no Job, e
     uma não impede a outra. Com `embedding` e `quadros` (o índice do quadro-chave ligado,
-    ADR 0006), cada plano com quadro leva o vetor multimodal. `None` se o Job não está `concluido` (não há Decupagem).
+    ADR 0006), cada plano com quadro leva o vetor multimodal. `None` se o Job não está
+    `concluido` (não há Decupagem).
     """
     if job.estado != "concluido":
         return None
@@ -237,15 +238,16 @@ def main(argv: list[str]) -> int:
         os.environ["BUCKET_ACEITOS"],
         os.environ["BUCKET_DECUPAGENS"],
     )
+    busca = ConfigDaBusca.do_ambiente(os.environ)
     resultado = reindexar_jobs(
         argv or ([os.environ["JOB_ID"]] if "JOB_ID" in os.environ else None),
         RepositorioFirestore(firestore_),
         decupagens,
         RepositorioDeCorrecoesFirestore(firestore_),
-        AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http()),
+        AgentRetrieval(busca, transporte_http()),
         copia_do_ambiente(os.environ),
-        embedding_do_ambiente(os.environ),
-        decupagens,
+        embedding=embedding_da_busca(busca),
+        quadros=decupagens,
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

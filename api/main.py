@@ -45,7 +45,7 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
 )
 from api.decupagem import Decupagem
-from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_do_ambiente
+from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.indexacao import reindexar
@@ -364,6 +364,9 @@ def criar_app(
 _projeto = os.environ.get("GCP_PROJECT_ID")
 if _projeto:
     _adaptadores = adaptadores_da_busca(os.environ)
+    _busca = (
+        ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
+    )
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(firestore.Client(project=_projeto)),
@@ -392,13 +395,9 @@ if _projeto:
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
         sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
-        indice=(
-            AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
-            if "BUSCA_COLECAO" in os.environ
-            else None
-        ),
+        indice=AgentRetrieval(_busca, transporte_http()) if _busca else None,
         copia=copia_do_ambiente(os.environ),
-        embedding=embedding_do_ambiente(os.environ),
+        embedding=embedding_da_busca(_busca),
         tempo_de_tela=consulta_do_ambiente(os.environ),
         relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(
