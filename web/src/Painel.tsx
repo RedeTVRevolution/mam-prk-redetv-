@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Button } from '@mantine/core'
-import { IconPencil, IconTrash } from '@tabler/icons-react'
+import { IconArrowsJoin, IconCut, IconPencil, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FotosDoNome } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
@@ -419,6 +419,31 @@ function Item({
               </ActionIcon>
             </Tooltip>
           )}
+          {item.tipo === 'pauta' && acoes.pautas && (
+            <>
+              <Tooltip label={acoes.pautas.marcada(item) ? 'Desmarcar para juntar (M)' : 'Marcar para juntar (M)'}>
+                <ActionIcon
+                  size="sm"
+                  variant={acoes.pautas.marcada(item) ? 'filled' : 'subtle'}
+                  aria-label={`Marcar ${item.titulo} para juntar`}
+                  aria-pressed={acoes.pautas.marcada(item)}
+                  onClick={() => acoes.pautas?.alternar(item)}
+                >
+                  <IconArrowsJoin size={14} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Dividir aqui (D)">
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  aria-label={`Dividir ${item.titulo} no ponto do player`}
+                  onClick={() => acoes.pautas?.dividir(item)}
+                >
+                  <IconCut size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </>
+          )}
           {acoes.podeRemover(item) && (
             <Tooltip label="Não é isto (Del)">
               <ActionIcon size="sm" variant="subtle" aria-label={`Não é isto: ${item.titulo}`} onClick={() => acoes.remover(item)}>
@@ -438,6 +463,12 @@ export interface AcoesDaLinha {
   remover: (i: ItemDoPainel) => void
   podeCorrigir: (i: ItemDoPainel) => boolean
   podeRemover: (i: ItemDoPainel) => boolean
+  /** Juntar e dividir pautas, só nas linhas de pauta. */
+  pautas?: {
+    marcada: (i: ItemDoPainel) => boolean
+    alternar: (i: ItemDoPainel) => void
+    dividir: (i: ItemDoPainel) => void
+  }
 }
 
 function Secao({ titulo, children }: { titulo?: string; children: ReactNode }) {

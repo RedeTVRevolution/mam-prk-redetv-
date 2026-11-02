@@ -13,7 +13,8 @@ import {
   TIPOS_FORA_DESTE_TICKET,
 } from './catalogacao.ts'
 import { itensDoPainel } from './painel.ts'
-import type { Decupagem } from './decupagem.ts'
+import { editorDeDivisao, editorDeJuncao } from './pautas.ts'
+import type { Decupagem, Pauta } from './decupagem.ts'
 
 const catalogo = catalogoJson as CatalogoDeCorrecoes
 
@@ -166,6 +167,10 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os da
   const trecho = { inicio_ms: 0, fim_ms: 1_000 }
   for (const aba of ABAS_DO_TRECHO)
     for (const t of editorDoTrecho(aba.valor, trecho, catalogo).tiposPossiveis) caminhos.add(t)
+
+  const pautas = D.pautas as unknown as Pauta[]
+  for (const t of editorDeJuncao(pautas, catalogo).tiposPossiveis) caminhos.add(t)
+  for (const t of editorDeDivisao(pautas[0], 30_000, catalogo).tiposPossiveis) caminhos.add(t)
 
   const sem = catalogo.tipos.map((t) => t.valor).filter((t) => !caminhos.has(t))
   expect(sem.sort()).toEqual([...TIPOS_FORA_DESTE_TICKET].sort())
