@@ -84,6 +84,9 @@ Um trecho de pessoa já sai como aparição (na imagem). Para menção, um campo
 | `A` | Acrescentar o que há no trecho |
 | `F2` | Corrigir o item em foco (nome, atributos, tempos) |
 | `Del` | "Não é isto" no item em foco, com confirmação na mesma linha |
+| `M` | Marca ou desmarca a pauta em foco para juntar |
+| `U` | Junta as pautas marcadas (seguidas), com o título de uma delas ou um novo |
+| `D` | Divide a pauta em foco no ponto do player, com os dois títulos |
 | `Ctrl+Z` | Desfaz a última correção do editor (a rota de desfazer já existe) |
 | `Esc` | Fecha o campo aberto sem salvar |
 
@@ -91,7 +94,7 @@ Os atalhos do player (Espaço, J/K/L, ←/→) valem também no modo de cataloga
 
 ### 6. Estado visível
 
-Cada correção mostra onde está: **salva**, **indexando** e **na busca**, como pede o plano. Uma correção que exige aprovação mostra "aguardando o Curador" e fica fora da decupagem entregue até ser aprovada.
+Cada correção mostra onde está: **salva**, **indexando** e **na busca**, como pede o plano. O estado sai do estado da indexação do Job (`na_busca` no histórico, `GET /v1/jobs/{id}/correcoes`): não há registro por correção. A tela pergunta de novo a cada 2 s enquanto houver "indexando". Uma correção que exige aprovação mostra "aguardando o Curador" e fica fora da decupagem entregue até ser aprovada.
 
 ## O que medir
 

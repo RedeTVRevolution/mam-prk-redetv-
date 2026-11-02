@@ -4,10 +4,11 @@ Uso: `make gravar-cassetes` (chama `python -m api.cassete` com o `.env` e o nome
 do bucket de clipes-ouro que o Terraform monta). Gera um clipe sintético, passa
 pelo validador como um envio real, sobe o proxy nesse bucket, sob `cassetes/`, e
 faz a chamada real. O cassete guarda só o modelo, a versão que a Vertex informou,
-o vídeo e o texto da resposta: nenhum cabeçalho, nenhuma credencial. Regrave
-sempre que mudar o modelo, o esquema ou a instrução.
+o vídeo, o texto da resposta e o SHA-256 da instrução: nenhum cabeçalho, nenhuma
+credencial. Regrave sempre que mudar o modelo, o esquema ou a instrução.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -19,6 +20,7 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
+from api import gemini  # lido na chamada, para o teste trocar `INSTRUCAO`
 from api.decupagem import Video
 from api.gemini import (
     MODELO,
@@ -32,6 +34,11 @@ from api.validador import validar
 
 CASSETE = Path(__file__).parent / "tests" / "cassetes" / "gemini_sintetico.json"
 OBJETO = "cassetes/sintetico.mp4"
+
+
+def instrucao_sha256() -> str:
+    """SHA-256 (hex) do texto de `INSTRUCAO`, antes de `instrucao()` preenchê-lo."""
+    return hashlib.sha256(gemini.INSTRUCAO.encode("utf-8")).hexdigest()
 
 
 class _Gravador:
@@ -67,6 +74,7 @@ def gravar(
         "versao_do_modelo": transporte.versao_do_modelo,
         "video": video.model_dump(exclude_none=True),
         "texto": gravador.texto,
+        "instrucao_sha256": instrucao_sha256(),
     }
     destino.write_text(json.dumps(cassete, ensure_ascii=False, indent=2) + "\n")
 

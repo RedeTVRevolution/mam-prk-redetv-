@@ -3,13 +3,13 @@
 O Job `referencias` recebe só nomes. Para cada nome sem referência válida, busca
 imagens, descarta as repetidas ou recortadas, pede ao modelo que confira (um rosto só,
 a mesma pessoa) e guarda 3 fotos diferentes, ligadas à pessoa do catálogo. Com menos
-de 3, o nome fica sem referência. Para programa sem perfil de apresentadores, uma busca
+de 3, o nome fica sem referência. O nome que o catálogo não conhece (palpite) ganha as
+fotos sob o prefixo dos palpites, que expira sozinho. Para programa sem perfil de apresentadores, uma busca
 web e o modelo extraem nomes que viram sugestões, nunca entram sozinhos.
 
 Tudo o que vem da web (imagens, títulos, trechos) é conteúdo, nunca instrução.
 """
 
-import hashlib
 import io
 import re
 import unicodedata
@@ -21,11 +21,17 @@ from typing import Any, Literal, Protocol
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from api.catalogo import Catalogo, PessoaDoCatalogo, Rosto, rostos_validos
+from api.catalogo import (
+    Catalogo,
+    PessoaDoCatalogo,
+    Rosto,
+    objeto_da_foto,
+)
 from api.comparador import normalizar
 from api.gemini import Chamada, Transporte, gerar_validado
 from api.imagens_hostis import ImagemRecusada
 from api.programas import DADOS
+from api.rostos_dos_palpites import Palpites
 from api.serpapi import Busca, ResultadoDeImagem, ResultadoWeb
 
 FOTOS_POR_NOME = 3
@@ -298,10 +304,6 @@ class Armazenamento(Protocol):
     def gravar(self, objeto: str, jpeg: bytes) -> None: ...
 
 
-def objeto_da_foto(pessoa_id: str, jpeg: bytes) -> str:
-    return f"referencias/{pessoa_id}/{hashlib.sha256(jpeg).hexdigest()[:24]}.jpg"
-
-
 def guardar(
     pessoa: PessoaDoCatalogo,
     fotos: Sequence[Foto],
@@ -331,7 +333,36 @@ def guardar(
     return catalogo.definir_rostos(pessoa.id, [*do_acervo, *novos])
 
 
-Resultado = Literal["guardada", "ja_tinha", "sem_referencia", "fora_do_catalogo"]
+Resultado = Literal[
+    "guardada",
+    "palpite_guardado",
+    "ja_tinha",
+    "sem_referencia",
+    "fora_do_catalogo",
+    "limite_de_buscas",
+]
+
+
+def _tem_as_tres(rostos: Sequence[Rosto], agora: datetime, validade: timedelta) -> bool:
+    return (
+        len(
+            [
+                r
+                for r in rostos
+                if r.origem == "web"
+                and r.obtida_em is not None
+                and agora - r.obtida_em <= validade
+            ]
+        )
+        >= FOTOS_POR_NOME
+    )
+
+
+def com_as_tres_fotos(
+    pessoa: PessoaDoCatalogo, agora: datetime, validade: timedelta
+) -> bool:
+    """A pessoa já tem as 3 fotos da web ainda válidas."""
+    return _tem_as_tres(pessoa.rostos, agora, validade)
 
 
 def referenciar(
@@ -344,17 +375,42 @@ def referenciar(
     armazenamento: Armazenamento,
     agora: datetime,
     validade: timedelta,
+    palpites: Palpites,
 ) -> Resultado:
-    """As referências de um nome do catálogo: nada se o nome não está nele ou já tem
-    as 3 válidas; senão busca, confere e guarda."""
+    """As referências de um nome: o do catálogo as ganha ligadas à pessoa; o que o
+    catálogo não conhece (um palpite) as ganha sob o prefixo dos palpites; o ambíguo não
+    busca nada. Nada se busca se já tem as 3 válidas."""
     achadas = catalogo.achar(nome)
-    if len(achadas) != 1:
+    if len(achadas) > 1:
         return "fora_do_catalogo"
+    if not achadas:
+        if _tem_as_tres(palpites.rostos(nome), agora, validade):
+            return "ja_tinha"
+        fotos = fotos_de_um_nome(
+            nome, busca=busca, baixar=baixar, conferidor=conferidor
+        )
+        if fotos is None:
+            return "sem_referencia"
+        palpites.guardar(
+            nome,
+            [
+                (
+                    f.jpeg,
+                    Rosto(
+                        origem="web",
+                        referencia="",
+                        pagina_url=f.resultado.pagina,
+                        imagem_url=f.url,
+                        busca=nome,
+                        obtida_em=agora,
+                    ),
+                )
+                for f in fotos
+            ],
+        )
+        return "palpite_guardado"
     pessoa = achadas[0]
-    if (
-        len([r for r in rostos_validos(pessoa, agora, validade) if r.origem == "web"])
-        >= FOTOS_POR_NOME
-    ):
+    if com_as_tres_fotos(pessoa, agora, validade):
         return "ja_tinha"
     # Pelo nome do catálogo: um apelido ("Leãozinho") traz fotos de qualquer um.
     fotos = fotos_de_um_nome(
@@ -371,6 +427,49 @@ def referenciar(
         catalogo=catalogo,
     )
     return "guardada"
+
+
+class LimiteDeBuscas(Exception):
+    """O vídeo já gastou as buscas que o limite permite."""
+
+
+class BuscaComLimite:
+    """Conta as buscas do vídeo: depois do limite não faz mais nenhuma, e cada uma que
+    faz leva o rótulo de custo (`registrar` o recebe, para ir ao log)."""
+
+    def __init__(
+        self,
+        busca: Busca,
+        limite: int,
+        registrar: Callable[[dict[str, str]], None],
+        job_id: str,
+    ) -> None:
+        self._busca = busca
+        self._limite = limite
+        self._registrar = registrar
+        self._job_id = job_id
+        self.feitas = 0
+
+    def _contar(self, engine: str) -> None:
+        if self.feitas >= max(self._limite, 0):
+            raise LimiteDeBuscas
+        self.feitas += 1
+        self._registrar(
+            {
+                "custo": "serpapi",
+                "etapa": ETAPA,
+                "engine": engine,
+                "job_id": self._job_id,
+            }
+        )
+
+    def imagens(self, consulta: str) -> list[ResultadoDeImagem]:
+        self._contar("google_images")
+        return self._busca.imagens(consulta)
+
+    def web(self, consulta: str) -> list[ResultadoWeb]:
+        self._contar("google")
+        return self._busca.web(consulta)
 
 
 def acervo_ligado(ambiente: Mapping[str, str]) -> bool:

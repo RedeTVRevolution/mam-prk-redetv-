@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any, Protocol, get_args
@@ -19,10 +20,18 @@ from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
+from api.embedding_do_quadro import (
+    EmbeddingDoQuadro,
+    com_vetores_do_quadro,
+    embedding_da_busca,
+)
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
 from api.jobs import (
+    CopiaNoBigQuery,
+    EstadoDaCopia,
     EstadoDaIndexacao,
     Indexacao,
     Job,
@@ -33,13 +42,20 @@ from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
+    TiposDeObjetoFirestore,
 )
+from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
+from api.tipos_de_objeto import TiposDeObjeto
 
 log = logging.getLogger(__name__)
 
 
 class LeitorDeDecupagem(Protocol):
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
+
+
+class LeitorDeQuadros(Protocol):
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes: ...
 
 
 def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, Any]:
@@ -75,22 +91,31 @@ def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, A
 def _registrar(
     repositorio: RepositorioDeJobs,
     job_id: str,
-    estado: EstadoDaIndexacao,
-    agora: datetime,
+    campo: str,
+    valor: Indexacao | CopiaNoBigQuery,
 ) -> Job | None:
-    """Grava o estado da indexação sem mudar o `estado` do Job.
+    """Grava o estado da indexação (ou da cópia) sem mudar o `estado` do Job.
 
     Não é uma transição do ciclo de vida: a troca condicional em `concluido` só garante
     que o Job ainda está lá. Uma falha do repositório vai ao log e devolve `None`, para
     não transformar em erro uma Correção que já foi gravada.
     """
     try:
-        return repositorio.transitar(
-            job_id, "concluido", {"indexacao": Indexacao(estado=estado, em=agora)}
-        )
+        return repositorio.transitar(job_id, "concluido", {campo: valor})
     except Exception:
-        log.exception("estado da indexação não gravado para %s", job_id)
+        log.exception("estado de %s não gravado para %s", campo, job_id)
         return None
+
+
+def decupagem_do_job(
+    job: Job, decupagens: LeitorDeDecupagem, correcoes: RepositorioDeCorrecoes
+) -> Decupagem:
+    """A Decupagem entregue (com as Correções em vigor), no esquema do modelo."""
+    conteudo = b"".join(decupagens.abrir_decupagem(job.id))
+    entregue = decupagem_entregue(
+        json.loads(conteudo), versao_do_modelo(conteudo), correcoes.listar(job.id)
+    )
+    return Decupagem.model_validate(_so_o_esquema(Decupagem, entregue))
 
 
 def reindexar(
@@ -100,32 +125,88 @@ def reindexar(
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime] = agora_utc,
+    copia: CopiaDosMomentos | None = None,
+    embedding: EmbeddingDoQuadro | None = None,
+    quadros: LeitorDeQuadros | None = None,
+    sinal: SinalDoPrograma | None = None,
+    tipos_de_objeto: TiposDeObjeto | None = None,
 ) -> Indexacao | None:
-    """Regrava o vídeo no índice e devolve o estado novo; nunca levanta por falha do índice.
+    """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
 
-    `None` se o Job não está `concluido` (não há Decupagem para indexar).
+    Nunca levanta por falha do índice ou da cópia: cada uma fica no seu estado no Job, e
+    uma não impede a outra. Com `embedding` e `quadros` (o índice do quadro-chave ligado,
+    ADR 0006), cada plano com quadro leva o vetor multimodal. `None` se o Job não está
+    `concluido` (não há Decupagem). Com `sinal`, o vídeo copiado é comparado com o histórico
+    do programa (#287); o sinal também nunca levanta. Com `tipos_de_objeto`, os tipos dos
+    objetos da Decupagem entram na lista do autocompletar (#308); falha só vai ao log.
     """
     if job.estado != "concluido":
         return None
-    _registrar(repositorio, job.id, "pendente", relogio())
-    estado: EstadoDaIndexacao
-    try:
-        conteudo = b"".join(decupagens.abrir_decupagem(job.id))
-        entregue = decupagem_entregue(
-            json.loads(conteudo), versao_do_modelo(conteudo), correcoes.listar(job.id)
-        )
-        registros = registros_da_decupagem(
+    inicio = relogio()
+    _registrar(
+        repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio)
+    )
+    if copia:
+        _registrar(
+            repositorio,
             job.id,
-            Decupagem.model_validate(_so_o_esquema(Decupagem, entregue)),
-            job.programa,
-            job.data_exibicao,
+            "copia_bigquery",
+            CopiaNoBigQuery(estado="pendente", em=inicio),
         )
-        indice.gravar(job.id, registros)
-        estado = "indexado"
+    estado: EstadoDaIndexacao = "falhou"
+    estado_da_copia: EstadoDaCopia = "falhou"
+    try:
+        decupagem = decupagem_do_job(job, decupagens, correcoes)
     except Exception:
-        log.exception("indexação falhou para %s", job.id)
-        estado = "falhou"
-    atual = _registrar(repositorio, job.id, estado, relogio())
+        log.exception("decupagem de %s não lida para indexar", job.id)
+    else:
+        if tipos_de_objeto:
+            try:
+                tipos_de_objeto.registrar(
+                    job.id, Counter(o.tipo for o in decupagem.objetos)
+                )
+            except Exception:
+                log.exception("tipos de objeto de %s não registrados", job.id)
+        try:
+            registros = registros_da_decupagem(
+                job.id, decupagem, job.programa, job.data_exibicao
+            )
+            if embedding and quadros:
+                registros = com_vetores_do_quadro(
+                    registros,
+                    lambda caminho: quadros.ler_quadro(job.id, caminho),
+                    embedding,
+                )
+            indice.gravar(job.id, registros)
+            estado = "indexado"
+        except Exception:
+            log.exception("indexação falhou para %s", job.id)
+        if copia:
+            try:
+                linhas = linhas_da_decupagem(
+                    job.id, decupagem, job.programa, job.data_exibicao, inicio
+                )
+                copia.gravar(job.id, linhas)
+                estado_da_copia = "copiado"
+            except Exception:
+                log.exception("cópia para o BigQuery falhou para %s", job.id)
+            else:
+                if sinal:
+                    try:
+                        sinal.avaliar(job.id, job.programa, linhas)
+                    except Exception:
+                        log.exception("sinal por programa falhou para %s", job.id)
+    fim = relogio()
+    if copia:
+        _registrar(
+            repositorio,
+            job.id,
+            "copia_bigquery",
+            CopiaNoBigQuery(estado=estado_da_copia, em=fim, desde=inicio),
+        )
+    atual = _registrar(
+        repositorio, job.id, "indexacao", Indexacao(estado=estado, em=fim, desde=inicio)
+    )
     return atual.indexacao if atual else None
 
 
@@ -135,6 +216,11 @@ def reindexar_jobs(
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
+    copia: CopiaDosMomentos | None = None,
+    embedding: EmbeddingDoQuadro | None = None,
+    quadros: LeitorDeQuadros | None = None,
+    sinal: SinalDoPrograma | None = None,
+    tipos_de_objeto: TiposDeObjeto | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -149,9 +235,24 @@ def reindexar_jobs(
             else:
                 jobs.append(job)
     else:
-        jobs = [j for j in repositorio.listar() if j.estado == "concluido"]
+        jobs = [
+            j
+            for j in repositorio.listar()
+            if j.estado == "concluido" and j.lixeira is None
+        ]
     for job in jobs:
-        nova = reindexar(job, repositorio, decupagens, correcoes, indice)
+        nova = reindexar(
+            job,
+            repositorio,
+            decupagens,
+            correcoes,
+            indice,
+            copia=copia,
+            embedding=embedding,
+            quadros=quadros,
+            sinal=sinal,
+            tipos_de_objeto=tipos_de_objeto,
+        )
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
 
@@ -159,16 +260,28 @@ def reindexar_jobs(
 def main(argv: list[str]) -> int:
     projeto = os.environ["GCP_PROJECT_ID"]
     firestore_ = firestore.Client(project=projeto)
+    decupagens = DecupagensStorage(
+        ClienteStorage(project=projeto),
+        os.environ["BUCKET_ACEITOS"],
+        os.environ["BUCKET_DECUPAGENS"],
+    )
+    busca = ConfigDaBusca.do_ambiente(os.environ)
+    # O sinal por programa só vale para o vídeo que acabou de concluir (o Workflows passa
+    # JOB_ID); reindexar todos os vídeos de uma vez não o avalia, para não alertar o passado.
+    sinal = (
+        sinal_do_ambiente(os.environ) if not argv and "JOB_ID" in os.environ else None
+    )
     resultado = reindexar_jobs(
         argv or ([os.environ["JOB_ID"]] if "JOB_ID" in os.environ else None),
         RepositorioFirestore(firestore_),
-        DecupagensStorage(
-            ClienteStorage(project=projeto),
-            os.environ["BUCKET_ACEITOS"],
-            os.environ["BUCKET_DECUPAGENS"],
-        ),
+        decupagens,
         RepositorioDeCorrecoesFirestore(firestore_),
-        AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http()),
+        AgentRetrieval(busca, transporte_http()),
+        copia_do_ambiente(os.environ),
+        embedding=embedding_da_busca(busca),
+        quadros=decupagens,
+        sinal=sinal,
+        tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

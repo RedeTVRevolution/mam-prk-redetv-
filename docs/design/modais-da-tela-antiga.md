@@ -1,0 +1,17 @@
+# Os sete modais da tela antiga e o caminho na tela nova
+
+> A tela antiga (`Video.tsx`) saiu no #165; as referências a ela abaixo são do que ela fazia.
+
+Lista do #219, para o #165 tirar a tela antiga sem perder nada. Conferida com `web/src/Video.tsx` (tela antiga) e `web/src/catalogacao.ts` (tela nova). "Teclado" vale com o modo de catalogação ligado (`E`) e a linha em foco; o formulário da linha grava com `Enter` e descarta com `Esc`. "Mouse" é o duplo clique na linha ou o lápis "Corrigir (F2)", e os botões Salvar e Cancelar do formulário.
+
+| Modal antigo | O que faz (correções que grava) | Teclado (tela nova) | Mouse (tela nova) |
+| --- | --- | --- | --- |
+| `CorrigirPessoa` | Renomeia a pessoa (`pessoa.renomear`) | `F2` na aparição ou menção da pessoa: campo Nome | Lápis ou duplo clique na linha; Salvar/Cancelar |
+| `CorrigirOcorrencia` | "Não é esta pessoa" (`pessoa.nao_e`); aparição ↔ menção (`pessoa.aparicao_para_mencao`, `pessoa.mencao_para_aparicao`); tempos da ocorrência (`item.tempos`); acrescentar aparição de uma pessoa da lista ou de uma pessoa nova, com o nome (`pessoa.acrescentar_aparicao`) | `Del` na linha pede a confirmação do "não é isto"; `F2` na linha: "Aparição ou menção" (com a evidência na imagem) e os tempos; acrescentar aparição de uma pessoa da lista: o botão "Acrescentar aparição de <nome>" na aba Pessoas. Pessoa nova, com o nome, e menção nova: trecho novo (`I`, `O`, `A`), aba Pessoa, com a chave "Citada" | Lixeira "Não é isto (Del)" e os botões Remover/Cancelar da confirmação; lápis; o botão "Acrescentar aparição de <nome>" com Salvar/Cancelar |
+| `CorrigirTempos` | Início e fim de qualquer item, pelas alças arrastadas (`item.tempos`) | Alças na linha do tempo (← → 0,1 s, `Shift` 1 s, `Enter` grava, `Esc` descarta) ou os campos MM:SS / H:MM:SS do `F2` | Arrastar a alça; Salvar/Cancelar do formulário |
+| `CorrigirPauta` | Título, resumo e tempos da pauta (`pauta.titulo`, `pauta.resumo`, `item.tempos`) | `F2` na pauta, mais as alças | Lápis, Salvar/Cancelar |
+| `CorrigirCampo` | Tom da pauta (`pauta.tom`); fontes do nome (`pessoa.fontes_do_nome`); papel e visual da aparição (`aparicao.papel_visual`); tipo e texto do texto na tela (`texto_na_tela.texto`); acrescentar texto na tela (`texto_na_tela.acrescentar`) | `F2` na pauta (Tom), na aparição (Papel na cena, Visual, Fontes do nome), na menção (Fontes do nome) e no texto na tela (Tipo, Texto). Acrescentar texto na tela: trecho novo (`I`, `O`, `A`), aba Texto na tela | Lápis, Salvar/Cancelar |
+| `CorrigirTrecho` | Descrição (ambiente, ação, objetos) e "plano limpo" do plano (`plano.descricao`, `plano.limpo`); texto e locutor da fala (`fala.texto`) | `F2` na linha do plano ou da fala | Lápis, Salvar/Cancelar |
+| `CorrigirComercial` | Marca, tipo e tempos de um comercial (`comercial.marca`, `comercial.tipo`, `item.tempos`); acrescentar comercial (`comercial.acrescentar`) | `F2` na linha do comercial (Marca, Tipo, tempos), mais as alças. Acrescentar comercial: trecho novo (`I`, `O`, `A`), aba Marca | Lápis, Salvar/Cancelar |
+
+Os três caminhos que a tela nova não tinha (aparição de uma pessoa nova com o nome, texto na tela e comercial acrescentados) vêm com o trecho novo do #166.

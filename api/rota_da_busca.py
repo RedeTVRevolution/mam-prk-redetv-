@@ -3,13 +3,16 @@
 import logging
 import threading
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TempoEsgotado
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException, MultiPartParser
 
 from api.auth import Chamador, Sistema
 from api.busca import (
@@ -17,12 +20,21 @@ from api.busca import (
     VIDEOS_POR_PADRAO,
     Ajustes,
     Busca,
+    BuscaPorImagemIndisponivel,
     EvidenciaDaBusca,
     Ordem,
+    PlanoSemVetor,
     ResultadoDaBusca,
     filtros_do_servidor,
 )
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S
+from api.imagens_hostis import (
+    AcimaDoLimiteDeBytes,
+    AcimaDoLimiteDePixels,
+    ImagemRecusada,
+    recodificar,
+)
+from api.indice_da_busca import TipoDeRegistro
 from api.jobs import _exige
 
 log = logging.getLogger(__name__)
@@ -31,7 +43,21 @@ CONSULTAS_POR_MINUTO = 30
 # Acima do teto do modelo, para que o plano B chegue ao usuário antes do 504.
 TEMPO_MAXIMO_S = TEMPO_DA_CONSULTA_S + 5.0
 
+# A foto da busca por imagem é entrada hostil (#270): só JPEG ou PNG, pelo conteúdo.
+FORMATOS_DA_BUSCA_POR_IMAGEM = frozenset({"JPEG", "PNG"})
+# Folga do multipart (cabeçalhos das partes) acima do limite do arquivo.
+FOLGA_DO_MULTIPART = 4096
+
 _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="busca")
+
+
+@dataclass(frozen=True)
+class LimitesDaImagem:
+    max_bytes: int = 5_000_000
+    max_pixels: int = 25_000_000
+
+
+LIMITES_DA_IMAGEM = LimitesDaImagem()
 
 
 class LimiteDeConsultas:
@@ -61,11 +87,19 @@ class LimiteDeConsultas:
             return True
 
 
+def _quem_e(chamador: Chamador) -> tuple[str | None, str]:
+    """O sistema que filtra os vídeos (só de uma chave de sistema) e quem gasta o limite."""
+    if isinstance(chamador, Sistema):
+        return chamador.sistema, f"sistema:{chamador.sistema}"
+    return None, chamador.uid
+
+
 def criar_rotas_da_busca(
     busca: Busca,
     relogio: Callable[[], datetime],
     consultas_por_minuto: int = CONSULTAS_POR_MINUTO,
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
+    limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
 ) -> APIRouter:
     rotas = APIRouter()
     limite = LimiteDeConsultas(consultas_por_minuto, relogio)
@@ -80,24 +114,24 @@ def criar_rotas_da_busca(
         desde: date | None = None,
         ate: date | None = None,
         sem_periodo: bool = False,
+        pessoa: Annotated[str | None, Query(max_length=100)] = None,
+        marca: Annotated[str | None, Query(max_length=100)] = None,
+        tipo: TipoDeRegistro | None = None,
+        visual: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
-        sistema = chamador.sistema if isinstance(chamador, Sistema) else None
-        quem = (
-            f"sistema:{chamador.sistema}"
-            if isinstance(chamador, Sistema)
-            else chamador.uid
-        )
+        sistema, quem = _quem_e(chamador)
         if not limite.consumir(quem):
             raise HTTPException(429, "Consultas demais; tente em um minuto")
         futuro = _executor.submit(
             busca.buscar,
             q,
             ordem=ordem,
+            visual=visual,
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
@@ -107,6 +141,9 @@ def criar_rotas_da_busca(
                 desde=desde,
                 ate=ate,
                 sem_periodo=sem_periodo,
+                pessoa=pessoa,
+                marca=marca,
+                tipo=tipo,
             ),
         )
         try:
@@ -116,4 +153,154 @@ def criar_rotas_da_busca(
             log.warning("busca passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
 
+    teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
+
+    async def foto_enviada(request: Request) -> bytes:
+        """O arquivo do multipart, lido com teto e só em memória.
+
+        O `File()` do FastAPI leria o corpo inteiro antes da rota, sem limite, e passaria
+        de 1 MB para um arquivo temporário em disco: aqui o `Content-Length` é conferido
+        antes de ler, a leitura para no teto e o arquivo nunca sai da memória.
+        """
+        try:
+            declarado = int(request.headers["content-length"])
+        except (KeyError, ValueError):
+            raise HTTPException(411, "Envie o tamanho do pedido") from None
+        if declarado > teto_do_corpo:
+            raise HTTPException(422, _GRANDE_DEMAIS)
+
+        async def corpo() -> AsyncGenerator[bytes, None]:
+            lido = 0
+            async for pedaco in request.stream():
+                lido += len(pedaco)
+                if lido > teto_do_corpo:
+                    raise HTTPException(422, _GRANDE_DEMAIS)
+                yield pedaco
+
+        parser = MultiPartParser(request.headers, corpo(), max_files=1, max_fields=0)
+        parser.spool_max_size = teto_do_corpo
+        try:
+            formulario = await parser.parse()
+        except (MultiPartException, KeyError):
+            raise HTTPException(422, _RECUSA) from None
+        try:
+            arquivo = formulario.get("arquivo")
+            if not isinstance(arquivo, UploadFile):
+                raise HTTPException(422, "Envie a imagem no campo arquivo")
+            return await arquivo.read(limites_da_imagem.max_bytes + 1)
+        finally:
+            await formulario.close()
+
+    @rotas.post("/busca/imagem")
+    def buscar_por_imagem(
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        dados: Annotated[bytes, Depends(foto_enviada)],
+        programa: Annotated[str | None, Query(max_length=100)] = None,
+        desde: date | None = None,
+        ate: date | None = None,
+        sem_periodo: bool = False,
+        limite_de_videos: Annotated[
+            int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
+        ] = VIDEOS_POR_PADRAO,
+    ) -> ResultadoDaBusca:
+        if desde and ate and desde > ate:
+            raise HTTPException(422, "O início do período passa do fim")
+        sistema, quem = _quem_e(chamador)
+        if not limite.consumir(quem):
+            raise HTTPException(429, "Consultas demais; tente em um minuto")
+        # A foto fica só em memória: nunca no disco, no Storage, no Firestore nem nos logs.
+        try:
+            jpeg = recodificar(
+                dados,
+                max_bytes=limites_da_imagem.max_bytes,
+                max_pixels=limites_da_imagem.max_pixels,
+                formatos=FORMATOS_DA_BUSCA_POR_IMAGEM,
+            )
+        except AcimaDoLimiteDeBytes:
+            raise HTTPException(422, _GRANDE_DEMAIS) from None
+        except AcimaDoLimiteDePixels:
+            raise HTTPException(422, _PIXELS_DEMAIS) from None
+        except ImagemRecusada:
+            raise HTTPException(422, _RECUSA) from None
+        futuro = _executor.submit(
+            busca.buscar,
+            "",
+            imagem=jpeg,
+            limite=limite_de_videos,
+            filtros_do_servidor=filtros_do_servidor(),
+            sistema=sistema,
+            ajustes=Ajustes(
+                programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
+            ),
+        )
+        try:
+            return futuro.result(timeout=tempo_maximo_s)
+        except TempoEsgotado:
+            futuro.cancel()
+            log.warning("busca por imagem passou de %.1f s", tempo_maximo_s)
+            raise HTTPException(504, "A busca demorou demais") from None
+        except BuscaPorImagemIndisponivel:
+            raise HTTPException(
+                503, "A busca por imagem não está disponível agora"
+            ) from None
+
+    @rotas.get("/busca/parecidos/planos")
+    def planos_com_vetor(
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        job: Annotated[str, Query(min_length=1, max_length=100)],
+    ) -> dict[str, list[int]]:
+        """Os planos do vídeo que têm vetor do quadro: só neles "parecidos" aparece.
+
+        Não gasta o limite de consultas por minuto: o Visualizador a chama ao abrir
+        cada vídeo, e isso não deve tirar a vez das buscas de quem está ali.
+        """
+        sistema, _ = _quem_e(chamador)
+        futuro = _executor.submit(busca.planos_com_vetor, job, sistema)
+        try:
+            planos = futuro.result(timeout=tempo_maximo_s)
+        except TempoEsgotado:
+            futuro.cancel()
+            log.warning("lista dos planos com vetor passou de %.1f s", tempo_maximo_s)
+            raise HTTPException(504, "A busca demorou demais") from None
+        return {"planos": sorted(planos)}
+
+    @rotas.get("/busca/parecidos")
+    def buscar_parecidos(
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        job: Annotated[str, Query(min_length=1, max_length=100)],
+        plano: Annotated[int, Query(ge=0)],
+        limite_de_videos: Annotated[
+            int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
+        ] = VIDEOS_POR_PADRAO,
+    ) -> ResultadoDaBusca:
+        sistema, quem = _quem_e(chamador)
+        if not limite.consumir(quem):
+            raise HTTPException(429, "Consultas demais; tente em um minuto")
+        futuro = _executor.submit(
+            busca.buscar_parecidos,
+            job,
+            plano,
+            limite=limite_de_videos,
+            filtros_do_servidor=filtros_do_servidor(),
+            sistema=sistema,
+        )
+        try:
+            return futuro.result(timeout=tempo_maximo_s)
+        except TempoEsgotado:
+            futuro.cancel()
+            log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
+            raise HTTPException(504, "A busca demorou demais") from None
+        except PlanoSemVetor:
+            raise HTTPException(
+                404,
+                "Este plano não tem vetor do quadro (vídeo indexado antes da busca "
+                "por imagem, ou índice do quadro desligado), ou o vídeo não foi "
+                "encontrado",
+            ) from None
+
     return rotas
+
+
+_RECUSA = "Envie uma imagem JPEG ou PNG válida"
+_GRANDE_DEMAIS = "A imagem passa do tamanho máximo"
+_PIXELS_DEMAIS = "A imagem passa do tamanho máximo em pixels"

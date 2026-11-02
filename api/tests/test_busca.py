@@ -10,14 +10,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
-from api.busca import Ajustes, Busca, Ranking, RankingEmOrdem
-from api.catalogo import CatalogoEmMemoria
+from api.busca import Ajustes, Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
+from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
+from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
-from api.rota_da_busca import TEMPO_MAXIMO_S
+from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -106,8 +107,13 @@ class Mundo:
         self.armazenamento = ArmazenamentoFalso()
         self.transporte = TransporteFalso(*respostas)
 
-    def busca(self, ranking: Ranking | None = None) -> Busca:
+    def busca(
+        self,
+        ranking: Ranking | None = None,
+        embedding: EmbeddingDaConsulta | None = None,
+    ) -> Busca:
         return Busca(
+            embedding=embedding,
             transporte=self.transporte,
             catalogo=self.catalogo,
             armor=ModelArmorEmMemoria(),
@@ -248,6 +254,27 @@ def test_video_fora_de_concluido_ou_de_outro_sistema_nao_aparece() -> None:
     resultado = m.busca().buscar("vestido", sistema="outro")
 
     assert [v.job_id for v in resultado.videos] == ["j3"]
+
+
+def test_video_na_lixeira_nao_aparece_na_busca() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+    m.com(
+        job(
+            "j2",
+            lixeira=EnvioParaLixeira(
+                em=datetime(2026, 11, 2, tzinfo=UTC),
+                por_uid="adm",
+                por_email="adm@redetv.com",
+                motivo="duplicado",
+            ),
+        ),
+        objeto("b", "j2", 0, 1_000),
+    )
+
+    resultado = m.busca().buscar("vestido")
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
 
 
 def test_videos_pelo_melhor_momento_e_no_empate_pelo_numero_de_momentos() -> None:
@@ -511,6 +538,8 @@ def cliente(
     maximo_por_minuto: int = 30,
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     indice: IndiceEmMemoria | None = None,
+    embedding_da_consulta: EmbeddingDaConsulta | None = None,
+    limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
 ) -> tuple[TestClient, Mundo]:
     m = Mundo(*respostas)
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
@@ -528,6 +557,8 @@ def cliente(
         armor=ModelArmorEmMemoria(),
         busca_por_minuto=maximo_por_minuto,
         tempo_maximo_da_busca_s=tempo_maximo_s,
+        embedding_da_consulta=embedding_da_consulta,
+        limites_da_imagem=limites_da_imagem,
     )
     return TestClient(app), m
 
@@ -741,3 +772,366 @@ def test_so_a_clausula_do_texto_livre_corta_o_significado() -> None:
         (m.sabrina, False),
         (None, True),
     }
+
+
+def _por_destaque(destaque: int | None, id: str, inicio: int) -> Registro:
+    return objeto(
+        id,
+        "j1",
+        inicio,
+        inicio + 1_000,
+        destaque=destaque,
+        texto="carro azul, veículo, objeto de cena",
+    )
+
+
+def test_com_a_mesma_relevancia_o_destaque_maior_vem_antes() -> None:
+    # Dois carros colados na lista do índice: a diferença de posição é menor que o peso.
+    m = Mundo(pedido(texto_livre="carro"))
+    m.com(
+        job("j1"),
+        _por_destaque(1, "baixo", 0),
+        _por_destaque(3, "alto", 60_000),
+    )
+    [video] = m.busca().buscar("carro").videos
+    assert [x.inicio_ms for x in video.momentos] == [60_000, 0]
+
+
+def test_o_peso_do_destaque_vale_tambem_depois_do_ranking() -> None:
+    class Ordem:
+        def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+            return sorted(registros, key=lambda r: r.id)  # "a" antes de "b"
+
+    m = Mundo(pedido(texto_livre="carro"))
+    m.com(
+        job("j1"),
+        _por_destaque(1, "a", 0),
+        _por_destaque(3, "b", 60_000),
+    )
+    [video] = m.busca(Ordem()).buscar("carro").videos
+    assert [x.inicio_ms for x in video.momentos] == [60_000, 0]
+
+
+def test_o_destaque_nao_passa_na_frente_de_quem_e_bem_mais_relevante() -> None:
+    class Ordem:
+        def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+            return sorted(registros, key=lambda r: r.id)
+
+    m = Mundo(pedido(texto_livre="carro"))
+    m.com(
+        job("j1"),
+        _por_destaque(1, "a", 0),
+        _por_destaque(None, "b", 10_000),
+        _por_destaque(None, "c", 20_000),
+        _por_destaque(None, "d", 30_000),
+        _por_destaque(None, "e", 40_000),
+        _por_destaque(3, "f", 60_000),
+    )
+    [video] = m.busca(Ordem()).buscar("carro").videos
+    assert video.momentos[0].inicio_ms == 0
+
+
+# --- facetas (#257) -------------------------------------------------------------
+
+
+def mundo_das_facetas() -> Mundo:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 3)
+    m.com(
+        job("j1", programa="TV Fama", data_exibicao=date(2024, 5, 1)),
+        objeto(
+            "a",
+            "j1",
+            0,
+            1_000,
+            marca="Nike",
+            dono=m.sabrina,
+            data_de_exibicao=date(2024, 5, 1),
+        ),
+        objeto(
+            "b",
+            "j1",
+            5_000,
+            6_000,
+            marca="Nike",
+            dono=m.sabrina,
+            data_de_exibicao=date(2024, 5, 1),
+        ),
+    )
+    m.com(
+        job("j2", programa="Leo Dias", data_exibicao=date(2024, 6, 2)),
+        objeto(
+            "c",
+            "j2",
+            0,
+            1_000,
+            marca="Adidas",
+            programa="Leo Dias",
+            data_de_exibicao=date(2024, 6, 2),
+        ),
+    )
+    return m
+
+
+def contagens(faceta: Any) -> dict[str, int]:
+    return {
+        (v["valor"] if isinstance(v, dict) else v.valor): (
+            v["videos"] if isinstance(v, dict) else v.videos
+        )
+        for v in faceta
+    }
+
+
+def test_facetas_contam_videos_distintos_por_valor() -> None:
+    m = mundo_das_facetas()
+
+    f = buscar(m, "vestido").facetas
+
+    assert contagens(f.programa) == {"TV Fama": 1, "Leo Dias": 1}
+    assert contagens(f.mes) == {"2024-06": 1, "2024-05": 1}
+    assert [(v.valor, v.rotulo) for v in f.mes] == [
+        ("2024-06", "06/2024"),
+        ("2024-05", "05/2024"),
+    ]
+    assert contagens(f.marca) == {"Nike": 1, "Adidas": 1}
+    assert contagens(f.tipo) == {"objeto": 2}
+    assert f.tipo[0].rotulo == "Objeto"
+    assert [(v.valor, v.rotulo, v.videos) for v in f.pessoa] == [
+        (m.sabrina, "Sabrina Sato", 1)
+    ]
+
+
+def test_facetas_mudam_com_o_programa_filtrado() -> None:
+    m = mundo_das_facetas()
+
+    sem = buscar(m, "vestido").facetas
+    com = buscar(m, "vestido", ajustes=Ajustes(programa="Leo Dias")).facetas
+
+    assert contagens(sem.marca) == {"Nike": 1, "Adidas": 1}
+    assert contagens(com.marca) == {"Adidas": 1}
+    assert com.pessoa == []
+    assert contagens(com.programa) == {"Leo Dias": 1}
+
+
+def test_faceta_de_marca_pessoa_e_tipo_filtra_os_resultados_e_as_contagens() -> None:
+    m = mundo_das_facetas()
+
+    por_marca = buscar(m, "vestido", ajustes=Ajustes(marca="Adidas"))
+    por_pessoa = buscar(m, "vestido", ajustes=Ajustes(pessoa=m.sabrina))
+    por_tipo = buscar(m, "vestido", ajustes=Ajustes(tipo="fala"))
+
+    assert [v.job_id for v in por_marca.videos] == ["j2"]
+    assert contagens(por_marca.facetas.programa) == {"Leo Dias": 1}
+    assert [v.job_id for v in por_pessoa.videos] == ["j1"]
+    assert contagens(por_pessoa.facetas.marca) == {"Nike": 1}
+    assert por_tipo.videos == []
+    assert por_tipo.facetas.programa == []
+
+
+def test_faceta_filtra_no_indice_e_nao_so_entre_os_registros_do_teto() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    # Mais registros que o teto de cada cláusula; o da Adidas fica de fora sem o filtro.
+    m.com(
+        job("j1"),
+        *(objeto(f"n{i}", "j1", i * 1_000, i * 1_000 + 500) for i in range(120)),
+    )
+    m.com(job("j2"), objeto("z", "j2", 0, 1_000, marca="Adidas"))
+
+    r = buscar(m, "vestido", ajustes=Ajustes(marca="Adidas"))
+
+    assert [v.job_id for v in r.videos] == ["j2"]
+    assert all(c.filtros.marca == "Adidas" for c in m.indice.consultas)
+
+
+def test_faceta_de_pessoa_casa_na_imagem_e_como_dona_do_objeto() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    plano = Registro(
+        id="p",
+        tipo="plano",
+        job_id="j2",
+        inicio_ms=0,
+        fim_ms=1_000,
+        pessoas=[m.sabrina],
+        descricao="vestido no palco",
+        texto="vestido no palco",
+    )
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000, dono=m.sabrina))
+    m.com(job("j2"), plano)
+    m.com(job("j3"), objeto("b", "j3", 0, 1_000, dono="outra"))
+
+    r = buscar(m, "vestido", ajustes=Ajustes(pessoa=m.sabrina))
+
+    assert sorted(v.job_id for v in r.videos) == ["j1", "j2"]
+
+
+def test_facetas_ignoram_video_que_o_usuario_nao_ve() -> None:
+    m = mundo_das_facetas()
+    m.jobs.salvar(job("j2", estado="analisando"))
+
+    f = buscar(m, "vestido").facetas
+
+    assert contagens(f.programa) == {"TV Fama": 1}
+
+
+def test_plano_b_tambem_devolve_as_facetas() -> None:
+    m = Mundo(ErroHttp(400))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000, marca="Nike"))
+
+    r = buscar(m, "vestido")
+
+    assert r.plano_b
+    assert contagens(r.facetas.marca) == {"Nike": 1}
+
+
+def test_busca_sem_resultado_tem_facetas_vazias() -> None:
+    m = Mundo(pedido(texto_livre="nada"))
+
+    f = buscar(m, "nada").facetas
+
+    assert f.programa == f.mes == f.pessoa == f.marca == f.tipo == []
+
+
+def test_a_rota_devolve_facetas_com_e_sem_filtro() -> None:
+    c, m = cliente(["consulta"], *[pedido(texto_livre="vestido")] * 3)
+    m.com(
+        job("j2", programa="Leo Dias"),
+        objeto("b", "j2", 0, 1_000, marca="Adidas", programa="Leo Dias"),
+    )
+
+    sem = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
+    com = c.get(
+        "/v1/busca", params={"q": "vestido", "marca": "Adidas"}, headers=AUTORIZACAO
+    )
+    vazia = c.get(
+        "/v1/busca",
+        params={"q": "vestido", "marca": "Nike", "tipo": "objeto", "pessoa": "p1"},
+        headers=AUTORIZACAO,
+    )
+
+    assert contagens(sem.json()["facetas"]["programa"]) == {
+        "TV Fama": 1,
+        "Leo Dias": 1,
+    }
+    assert contagens(com.json()["facetas"]["programa"]) == {"Leo Dias": 1}
+    assert contagens(com.json()["facetas"]["marca"]) == {"Adidas": 1}
+    assert vazia.status_code == 200
+    assert vazia.json()["videos"] == []
+    assert (
+        c.get(
+            "/v1/busca", params={"q": "v", "tipo": "inventado"}, headers=AUTORIZACAO
+        ).status_code
+        == 422
+    )
+
+
+class EmbeddingDeTexto:
+    def __init__(self, vetor: list[float] | Exception) -> None:
+        self.vetor = vetor
+        self.textos: list[str] = []
+        self.imagens: list[bytes] = []
+
+    def vetor_da_imagem(self, jpeg: bytes) -> list[float]:
+        self.imagens.append(jpeg)
+        if isinstance(self.vetor, Exception):
+            raise self.vetor
+        return self.vetor
+
+    def vetor_do_texto(self, texto: str) -> list[float]:
+        self.textos.append(texto)
+        if isinstance(self.vetor, Exception):
+            raise self.vetor
+        return self.vetor
+
+
+def plano(id: str, vetor: list[float] | None, descricao: str = "plano") -> Registro:
+    return Registro(
+        id=id,
+        tipo="plano",
+        job_id="j1",
+        inicio_ms=int(id[-1]) * 10_000,
+        fim_ms=int(id[-1]) * 10_000 + 5_000,
+        descricao=descricao,
+        quadro=f"quadros/{id}.jpg",
+        vetor_do_quadro=vetor,
+    )
+
+
+def mundo_visual(*respostas: str) -> Mundo:
+    m = Mundo(*(respostas or (pedido(texto_livre="pista molhada"),) * 4))
+    m.com(
+        job("j1"),
+        plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+        plano("j1:plano:2", [0.0, 1.0], "estúdio"),
+        plano("j1:plano:3", None, "sem vetor"),
+    )
+    return m
+
+
+def test_no_modo_visual_o_vetor_do_quadro_entra_na_fusao() -> None:
+    m = mundo_visual()
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+
+    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
+
+    assert embedding.textos == ["pista molhada"]
+    # Nenhuma descrição cita "pista molhada": só o vetor do quadro achou o plano.
+    assert [mo.inicio_ms for v in r.videos for mo in v.momentos] == [10_000]
+    assert r.entendida.visual is True
+    assert r.videos[0].momentos[0].quadro_url is not None
+    com_vetor = [c for c in m.indice.consultas if c.vetor_do_quadro]
+    assert com_vetor and all(c.filtros.tipo == "plano" for c in com_vetor)
+
+
+def test_sem_o_modo_visual_nao_ha_vetor_nem_chamada_ao_embedding() -> None:
+    m = mundo_visual()
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+
+    r = m.busca(embedding=embedding).buscar("pista molhada")
+
+    assert embedding.textos == []
+    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
+    assert r.entendida.visual is False
+
+
+@pytest.mark.parametrize("embedding", [None, EmbeddingDeTexto(ConnectionError("x"))])
+def test_indice_desligado_ou_embedding_fora_a_busca_fica_como_hoje(
+    embedding: EmbeddingDeTexto | None,
+) -> None:
+    m = mundo_visual()
+    esperado = buscar(mundo_visual(), "pista molhada")
+
+    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
+
+    assert r.entendida.visual is False
+    assert r.videos == esperado.videos
+    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
+
+
+@pytest.mark.parametrize("visual", [True, False])
+def test_a_rota_leva_o_modo_visual_a_busca(visual: bool) -> None:
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+    c, m = cliente(
+        ["consulta"],
+        *[pedido(texto_livre="pista molhada")] * 2,
+        embedding_da_consulta=embedding,
+    )
+    m.com(job("j1"), plano("j1:plano:1", [1.0, 0.0]))
+    params = {"q": "pista molhada"} | ({"visual": "true"} if visual else {})
+
+    resposta = c.get("/v1/busca", params=params, headers=AUTORIZACAO)
+
+    assert resposta.status_code == 200
+    assert resposta.json()["entendida"]["visual"] is visual
+    assert embedding.textos == (["pista molhada"] if visual else [])
+    if visual:
+        assert resposta.json()["videos"][0]["momentos"][0]["tipo"] == "plano"
+
+
+def test_o_vetor_sai_do_texto_livre_e_a_clausula_visual_so_leva_o_vetor() -> None:
+    m = mundo_visual(pedido(texto_livre="pista molhada", programa="TV Fama"))
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+
+    m.busca(embedding=embedding).buscar("pista molhada no TV Fama", visual=True)
+
+    assert embedding.textos == ["pista molhada"]
+    [visual] = [c for c in m.indice.consultas if c.vetor_do_quadro]
+    assert visual.texto is None and visual.significado is None

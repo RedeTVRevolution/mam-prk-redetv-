@@ -224,13 +224,10 @@ def test_regra_de_tempos_e_aplicada_no_fim() -> None:
 
     d = consolidar(VIDEO, [(janela(0, 0, DURACAO), r)], [1200, 8800])
 
-    # Os planos são os intervalos entre cortes; o do meio guarda os tempos do modelo.
-    assert [(p.inicio_ms, p.fim_ms) for p in d.planos] == [
-        (0, 1200),
-        (1200, 8800),
-        (8800, DURACAO),
-    ]
-    assert (d.planos[1].inicio_modelo_ms, d.planos[1].fim_modelo_ms) == (1000, 9000)
+    # Os planos são os intervalos entre cortes que o plano do modelo cobre pela metade
+    # ou mais; o herdado guarda os tempos do modelo.
+    assert [(p.inicio_ms, p.fim_ms) for p in d.planos] == [(1200, 8800)]
+    assert (d.planos[0].inicio_modelo_ms, d.planos[0].fim_modelo_ms) == (1000, 9000)
 
 
 def test_emenda_nao_duplica_o_item_que_a_janela_seguinte_mantem() -> None:

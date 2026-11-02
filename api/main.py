@@ -1,9 +1,9 @@
 import os
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
@@ -31,16 +31,28 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
-from api.busca import Busca, Ranking, RankingEmOrdem
+from api.busca import Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
+from api.busca_na_nuvem import adaptadores_da_busca
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
+from api.chaves import (
+    Mac,
+    MacSimulado,
+    RepositorioDeChaves,
+    VerificadorDeChaveDeApi,
+)
+from api.comparar_passadas import criar_rotas_da_comparacao
+from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente
+from api.correcao_de_estado import criar_rotas_da_correcao_de_estado
 from api.correcoes import (
     RepositorioDeAprovacao,
     RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoes,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.decupagem import Decupagem
+from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.indexacao import reindexar
@@ -53,19 +65,42 @@ from api.jobs import (
     RepositorioIndisponivel,
     ServicoIndisponivel,
     TipoNaoSuportado,
+    _chave_com_algum,
+    _exige_aprovar,
     agora_utc,
     criar_rotas,
     papeis_da_pessoa,
 )
+from api.lixeira import (
+    ArquivosDoJob,
+    ArquivosEmMemoria,
+    criar_rotas_da_lixeira,
+    sem_job_na_lixeira,
+)
+from api.lixeira_do_catalogo import (
+    FotosDeReferencia,
+    FotosEmMemoria,
+    criar_rotas_da_lixeira_do_catalogo,
+)
+from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
     ArmazenamentoStorage,
+    ArquivosNoStorage,
+    CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ContasIdentityPlatform,
     DisparoPeloWorkflows,
+    JanelasStorage,
+    ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
+    RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
+    RepositorioDeRevisaoFirestore,
+    RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
+    TiposDeObjetoFirestore,
 )
 from api.papeis import (
     Papel,
@@ -75,16 +110,64 @@ from api.papeis import (
     admins_de,
     permissoes_de,
 )
+from api.passadas import (
+    LeituraDePassadas,
+    PassadasEmMemoria,
+    PassadasStorage,
+    criar_rotas_das_passadas,
+)
 from api.programas import PERFIS
+from api.progresso_das_janelas import JanelasDoJob
+from api.purga import LOGIN_RECENTE_PADRAO, Purga, criar_rotas_da_purga
+from api.relatorio_de_marcas import (
+    ConsultaDeInsercoes,
+    criar_rotas_das_marcas,
+)
+from api.relatorio_de_marcas import consulta_do_ambiente as marcas_do_ambiente
 from api.reprocessamento import (
     DisparoDoWorkflow,
     DisparoIndisponivel,
     criar_rotas_do_reprocessamento,
 )
+from api.revisao import (
+    LIMITE_DE_INATIVIDADE_S,
+    RepositorioDeRevisao,
+    RepositorioDeRevisaoEmMemoria,
+    criar_rotas_da_revisao,
+)
 from api.rota_da_busca import (
     CONSULTAS_POR_MINUTO,
+    LIMITES_DA_IMAGEM,
     TEMPO_MAXIMO_S,
+    LimitesDaImagem,
     criar_rotas_da_busca,
+)
+from api.rotas_das_chaves import (
+    ChaveIndisponivel,
+    MacIndisponivel,
+    criar_rotas_das_chaves,
+)
+from api.rotas_do_catalogo import criar_rotas_do_catalogo
+from api.sugestoes import (
+    RepositorioDeSugestoes,
+    RepositorioDeSugestoesEmMemoria,
+    criar_rotas_da_contagem,
+)
+from api.taxa_de_correcao import criar_rotas_da_qualidade
+from api.tempo_de_tela import (
+    ConsultaDeMomentos,
+    consulta_do_ambiente,
+    criar_rotas_do_tempo_de_tela,
+)
+from api.tipos_de_objeto import (
+    TiposDeObjeto,
+    TiposDeObjetoEmMemoria,
+    criar_rotas_dos_tipos_de_objeto,
+)
+from api.usuarios import (
+    ContasDeUsuario,
+    ContasIndisponiveis,
+    criar_rotas_dos_usuarios,
 )
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
@@ -150,15 +233,34 @@ def criar_app(
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
     auditoria: RepositorioDeAuditoria | None = None,
+    contas: ContasDeUsuario | None = None,
+    repositorio_de_chaves: RepositorioDeChaves | None = None,
+    mac: Mac | None = None,
+    arquivos: ArquivosDoJob | None = None,
+    revisao: RepositorioDeRevisao | None = None,
     disparo: DisparoDoWorkflow | None = None,
+    janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
+    marcas: CatalogoDeMarcas | None = None,
+    fotos_de_referencia: FotosDeReferencia | None = None,
+    sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
+    copia: CopiaDosMomentos | None = None,
+    embedding: EmbeddingDoQuadro | None = None,
+    embedding_da_consulta: EmbeddingDaConsulta | None = None,
+    tipos_de_objeto: TiposDeObjeto | None = None,
+    tempo_de_tela: ConsultaDeMomentos | None = None,
+    relatorio_de_marcas: ConsultaDeInsercoes | None = None,
+    passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
     ranking: Ranking | None = None,
     busca_por_minuto: int = CONSULTAS_POR_MINUTO,
     tempo_maximo_da_busca_s: float = TEMPO_MAXIMO_S,
+    limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
+    limite_de_inatividade_s: float = LIMITE_DE_INATIVIDADE_S,
+    login_recente: timedelta = LOGIN_RECENTE_PADRAO,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
@@ -173,6 +275,9 @@ def criar_app(
         return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
 
     app.state.verificador = verificador or _SemVerificador()
+    # Com repositório e chave MAC, a API confere as chaves emitidas por ela mesma.
+    if chaves is None and repositorio_de_chaves and mac:
+        chaves = VerificadorDeChaveDeApi(repositorio_de_chaves, mac)
     app.state.chaves = chaves or _SemChaves()
     app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
     app.state.admins = admins_de(admins_emergencia)
@@ -197,8 +302,9 @@ def criar_app(
             permissoes=sorted(permissoes_de(efetivos)),
         )
 
-    @v1.get("/programas")
-    def programas(_chamador: ChamadorAutenticado) -> list[str]:
+    # A chave precisa poder enviar ou ler; só cancelar não tem o que escolher.
+    @v1.get("/programas", dependencies=[Depends(_chave_com_algum("criar", "ler"))])
+    def programas() -> list[str]:
         """Os programas com perfil, para o envio escolher."""
         return sorted(PERFIS)
 
@@ -211,7 +317,11 @@ def criar_app(
     armazenamento_dos_jobs = armazenamento or ArmazenamentoIndisponivel()
     repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
     indice_da_busca = indice or IndiceEmMemoria()
+    tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
+    catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
+    repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
     v1.include_router(
         criar_rotas(
             repositorio_de_jobs,
@@ -221,6 +331,8 @@ def criar_app(
             repositorio_de_correcoes,
             aprovacao or RepositorioDeAprovacaoEmMemoria(),
             catalogo_de_pessoas,
+            catalogo_de_marcas,
+            repositorio_de_sugestoes,
             lambda job: reindexar(
                 job,
                 repositorio_de_jobs,
@@ -228,8 +340,31 @@ def criar_app(
                 repositorio_de_correcoes,
                 indice_da_busca,
                 relogio,
+                copia,
+                embedding,
+                armazenamento_dos_jobs,
+                tipos_de_objeto=tipos_dos_objetos,
+            ),
+            tipos_dos_objetos.conhecidos,
+        )
+    )
+    leitura_de_passadas = passadas or PassadasEmMemoria()
+    v1.include_router(
+        criar_rotas_das_passadas(repositorio_de_jobs, leitura_de_passadas)
+    )
+    v1.include_router(
+        criar_rotas_da_comparacao(
+            repositorio_de_jobs,
+            leitura_de_passadas,
+            lambda job_id: Decupagem.model_validate_json(
+                b"".join(armazenamento_dos_jobs.abrir_decupagem(job_id))
             ),
         )
+    )
+    v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
+    v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
+    v1.include_router(
+        criar_rotas_do_catalogo(catalogo_de_pessoas, catalogo_de_marcas, relogio)
     )
     v1.include_router(
         criar_rotas_da_busca(
@@ -243,23 +378,111 @@ def criar_app(
                 repositorio=repositorio_de_jobs,
                 armazenamento=armazenamento_dos_jobs,
                 relogio=relogio,
+                embedding=embedding_da_consulta,
             ),
             relogio,
             busca_por_minuto,
             tempo_maximo_da_busca_s,
+            limites_da_imagem,
         )
     )
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
+    v1.include_router(
+        criar_rotas_dos_usuarios(
+            contas or ContasIndisponiveis(),
+            app.state.papeis,
+            repositorio_de_auditoria,
+            lambda: app.state.admins,
+            relogio,
+        )
+    )
+    v1.include_router(
+        criar_rotas_das_chaves(
+            repositorio_de_chaves or ChaveIndisponivel(),
+            mac or MacIndisponivel(),
+            repositorio_de_auditoria,
+            relogio,
+        )
+    )
     v1.include_router(
         criar_rotas_do_reprocessamento(
             repositorio_de_jobs,
             repositorio_de_auditoria,
             disparo or DisparoIndisponivel(),
             relogio,
+            janelas,
         )
     )
-    app.include_router(v1)
+    v1.include_router(
+        criar_rotas_da_lixeira(
+            repositorio_de_jobs,
+            repositorio_de_correcoes,
+            arquivos or ArquivosEmMemoria(),
+            repositorio_de_auditoria,
+            relogio,
+            catalogo_de_pessoas,
+            catalogo_de_marcas,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_lixeira_do_catalogo(
+            catalogo_de_pessoas,
+            catalogo_de_marcas,
+            repositorio_de_jobs,
+            repositorio_de_correcoes,
+            armazenamento_dos_jobs,
+            fotos_de_referencia or FotosEmMemoria(),
+            repositorio_de_auditoria,
+            relogio,
+            login_recente,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_purga(
+            Purga(
+                repositorio_de_jobs,
+                repositorio_de_correcoes,
+                arquivos or ArquivosEmMemoria(),
+                indice_da_busca,
+                repositorio_de_auditoria,
+                relogio,
+            ),
+            repositorio_de_jobs,
+            relogio,
+            login_recente,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_correcao_de_estado(
+            repositorio_de_jobs,
+            repositorio_de_auditoria,
+            armazenamento_dos_jobs,
+            relogio,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_revisao(
+            repositorio_de_jobs,
+            repositorio_da_revisao,
+            relogio,
+            limite_de_inatividade_s,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_qualidade(
+            repositorio_de_jobs,
+            armazenamento_dos_jobs,
+            repositorio_de_correcoes,
+            repositorio_da_revisao,
+        )
+    )
+    v1.include_router(criar_rotas_do_tempo_de_tela(tempo_de_tela, repositorio_de_jobs))
+    v1.include_router(criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs))
+    # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
+    app.include_router(
+        v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]
+    )
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
     return app
@@ -267,7 +490,13 @@ def criar_app(
 
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
+_chave_mac = os.environ.get("MAC_SIMULADO_CHAVE")
 if _projeto:
+    _adaptadores = adaptadores_da_busca(os.environ)
+    _busca = (
+        ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
+    )
+    _embedding = embedding_da_busca(_busca)
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(firestore.Client(project=_projeto)),
@@ -276,21 +505,73 @@ if _projeto:
             os.environ["BUCKET_QUARENTENA"],
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
+            bucket_de_referencias=os.environ["BUCKET_REFERENCIAS"],
         ),
         papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
+        contas=ContasIdentityPlatform(_projeto),
+        # Até a chave MAC do Cloud KMS chegar, só a simulada (como no `make emitir-chave`).
+        # Sem ela, emitir dá 503 e a API não aceita chave de sistema; listar e revogar
+        # funcionam.
+        repositorio_de_chaves=RepositorioDeChavesFirestore(
+            firestore.Client(project=_projeto)
+        ),
+        arquivos=ArquivosNoStorage(
+            ClienteStorage(project=_projeto),
+            os.environ["BUCKET_ACEITOS"],
+            os.environ["BUCKET_DECUPAGENS"],
+        ),
+        mac=(
+            MacSimulado({1: bytes.fromhex(_chave_mac)}, versao_atual=1)
+            if _chave_mac
+            else None
+        ),
+        revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
+        login_recente=timedelta(
+            minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
+            or LOGIN_RECENTE_PADRAO / timedelta(minutes=1)
+        ),
+        limite_de_inatividade_s=float(
+            os.environ.get("REVISAO_INATIVIDADE_S") or LIMITE_DE_INATIVIDADE_S
+        ),
         disparo=DisparoPeloWorkflows(
             _projeto, os.environ["WORKFLOW_REGIAO"], os.environ["WORKFLOW_VALIDACAO"]
         ),
-        catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
-        indice=(
-            AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
-            if "BUSCA_COLECAO" in os.environ
-            else None
+        janelas=JanelasStorage(
+            ClienteStorage(project=_projeto), os.environ["BUCKET_ACEITOS"]
         ),
+        catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
+        marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
+        fotos_de_referencia=ReferenciasStorage(
+            ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
+        ),
+        sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
+        indice=AgentRetrieval(_busca, transporte_http()) if _busca else None,
+        copia=copia_do_ambiente(os.environ),
+        embedding=_embedding,
+        embedding_da_consulta=_embedding,
+        tipos_de_objeto=TiposDeObjetoFirestore(firestore.Client(project=_projeto)),
+        limites_da_imagem=LimitesDaImagem(
+            max_bytes=int(
+                os.environ.get("BUSCA_IMAGEM_MAX_BYTES") or LimitesDaImagem.max_bytes
+            ),
+            max_pixels=int(
+                os.environ.get("BUSCA_IMAGEM_MAX_PIXELS") or LimitesDaImagem.max_pixels
+            ),
+        ),
+        tempo_de_tela=consulta_do_ambiente(os.environ),
+        relatorio_de_marcas=marcas_do_ambiente(os.environ),
+        passadas=PassadasStorage(
+            ClienteStorage(project=_projeto),
+            os.environ["BUCKET_ACEITOS"],
+            os.environ["BUCKET_DECUPAGENS"],
+        ),
+        transporte_da_consulta=_adaptadores.transporte_da_consulta,
+        armor=_adaptadores.armor,
+        ranking=_adaptadores.ranking,
     )
 else:
     app = criar_app()

@@ -9,31 +9,63 @@ permissions:
   contents: read
 
 jobs:
-  verificar:
+  # Backend, front e imagem rodam em jobs paralelos: o `publicar` espera todos.
+  backend:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - uses: ./.github/actions/emuladores
+      # Sem ffmpeg na máquina, o verificar pula os testes do validador; o job `imagem`
+      # os roda com o ffmpeg da produção.
+      - run: uv sync --locked
+      - run: make verificar-api
+        env:
+          FIRESTORE_EMULATOR_HOST: localhost:8686
+          STORAGE_EMULATOR_HOST: http://localhost:4443
+
+  web:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Sobe os emuladores do Firestore e do Storage (testes de api/tests/test_nuvem.py)
+      - run: npm ci --prefix web
+      - run: make verificar-web
+
+  # Só roda de fato quando mudam os arquivos que o `testar-na-imagem` usa. Pulado, o job
+  # termina verde (os passos são pulados, não o job), para não travar o `publicar`.
+  # Os módulos de api/ entram todos: a imagem copia o pacote inteiro e o validador os
+  # importa por tabela (jobs, nuvem); um import que só quebra na imagem passaria.
+  imagem:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: mudou
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          # Sem -public-host, o fake-gcs só atende URL assinada com Host storage.googleapis.com.
-          docker run -d --name fake-gcs -p 4443:4443 fsouza/fake-gcs-server:1.52.2 \
-            -scheme http -port 4443 -public-host localhost:4443
-          docker run -d --name firestore -p 8686:8686 google/cloud-sdk:591.0.0-emulators \
-            gcloud emulators firestore start --host-port=0.0.0.0:8686
-          for i in $(seq 60); do
-            curl -sf localhost:4443/storage/v1/b && curl -sf localhost:8686 && exit 0
-            sleep 2
-          done
-          echo "Emuladores não subiram em 2 minutos" && docker logs fake-gcs; docker logs firestore; exit 1
-      # Sem ffmpeg na máquina, o verificar pula os testes do validador; o testar-na-imagem
-      # os roda com o ffmpeg da produção.
-      - run: make instalar verificar testar-na-imagem
+          # Sem base conhecida (primeiro push do branch) ou sem ela no clone: roda.
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "mudou=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$BASE" "$GITHUB_SHA" | grep -qxE \
+            'Dockerfile|\.dockerignore|Makefile|pyproject\.toml|uv\.lock|\.github/workflows/ci\.yml|\.github/actions/emuladores/action\.yml|api/[^/]+\.py|api/tests/(__init__|test_validador|test_validacao_job)\.py'; then
+            echo "mudou=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nada que o testar-na-imagem use mudou; pulado."
+          fi
+      - if: steps.mudou.outputs.mudou
+        uses: ./.github/actions/emuladores
+      - if: steps.mudou.outputs.mudou
+        run: make testar-na-imagem
         env:
           FIRESTORE_EMULATOR_HOST: localhost:8686
           STORAGE_EMULATOR_HOST: http://localhost:4443
@@ -46,6 +78,9 @@ jobs:
       - run: terraform -chdir=infra init -backend=false -input=false
       - run: terraform -chdir=infra fmt -check
       - run: terraform -chdir=infra validate
+      - run: terraform -chdir=infra/ambientes/prod init -backend=false -input=false
+      - run: terraform -chdir=infra/ambientes/prod fmt -check
+      - run: terraform -chdir=infra/ambientes/prod validate
 
   loop-afk:
     runs-on: ubuntu-26.04
@@ -72,7 +107,7 @@ jobs:
   publicar:
     # Sem as variáveis (configuração única do README), o job é pulado, e não falha.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.WORKLOAD_IDENTITY_PROVIDER != ''
-    needs: [verificar, terraform, loop-afk, gitleaks]
+    needs: [backend, web, imagem, terraform, loop-afk, gitleaks]
     runs-on: ubuntu-26.04
     # Um deploy por vez: o estado do Terraform e a tag do commit não se disputam. A
     # fila não garante a ordem, então o passo `ponta` garante que nunca se volta atrás.

@@ -17,6 +17,7 @@ import {
   trechosSemPauta,
   vizinhoNaFaixa,
   reduzirLinha,
+  relogio,
   secoesDaFaixa,
   selecaoValida,
   tempo,
@@ -27,7 +28,7 @@ import {
   type EstadoDaLinha,
   type Ocorrencia,
 } from './linhaDoTempo.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem } from './decupagem.ts'
 
 const decupagem: Decupagem = {
   video: { duracao_ms: 180_000 },
@@ -64,6 +65,19 @@ test('lê mm:ss em milissegundos, com minutos acima de 59', () => {
   expect(lerTempo(' 62:30 ')).toBe(3_750_000)
   expect(lerTempo('1:60')).toBeNull()
   expect(lerTempo('abc')).toBeNull()
+})
+
+test('lê H:MM:SS acima de uma hora', () => {
+  expect(lerTempo('1:00:00')).toBe(3_600_000)
+  expect(lerTempo(' 1:02:30 ')).toBe(3_750_000)
+  expect(lerTempo('1:60:00')).toBeNull()
+  expect(lerTempo('1:00:60')).toBeNull()
+  expect(lerTempo('1:5:00')).toBeNull()
+})
+
+test('o campo acima de uma hora mantém os milissegundos se não mudou', () => {
+  expect(tempoDoCampo(relogio(3_600_500), 3_600_500)).toBe(3_600_500)
+  expect(tempoDoCampo('1:00:01', 3_600_500)).toBe(3_601_000)
 })
 
 test('o campo que o Editor não mudou volta com os milissegundos originais', () => {

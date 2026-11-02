@@ -6,9 +6,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from api.catalogo import CatalogoEmMemoria, Rosto
-from api.comparacao import FotoAusente, comparar
+from api.comparacao import comparar
 from api.gemini import ErroHttp
 from api.referencias import SugestoesEmMemoria
+from api.rostos_dos_palpites import FotoAusente
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem, pessoa
 
@@ -24,6 +25,12 @@ class FotosEmMemoria:
         if objeto not in self.objetos:
             raise FotoAusente(objeto)
         return self.objetos[objeto]
+
+    def gravar(self, objeto: str, conteudo: bytes) -> None:
+        self.objetos[objeto] = conteudo
+
+    def apagar(self, objeto: str) -> None:
+        self.objetos.pop(objeto, None)
 
 
 class Cenario:
@@ -123,6 +130,7 @@ def test_escolha_as_cegas_e_tres_fotos_acima_do_limiar_confirmam_o_nome() -> Non
     # as fotos que confirmaram são as da pessoa do catálogo ligada à pessoa do vídeo
     assert v.fotos == tuple(c.catalogo.obter(c.leao).rostos)  # type: ignore[union-attr]
     assert v.confiancas == (0.9, 0.95, 0.85)
+    assert v.conferem == (True, True, True)  # o que a tela mostra como "confere"
     # 1 escolha + 3 conferências, uma por foto
     assert len(transporte.chamadas) == 4
 

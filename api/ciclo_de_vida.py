@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
+
+from api.sinais import Registrar, imprimir, registro_da_falha_de_etapa
 
 # `api.jobs` usa este módulo nas rotas; aqui os tipos só servem à checagem.
 if TYPE_CHECKING:
@@ -174,6 +176,7 @@ def rodar_etapa(
     trabalho: Callable[[], str],
     *,
     bem_sucedido: str,
+    registrar: Registrar = imprimir,
 ) -> str:
     """Roda `trabalho` entre o início e o fim da etapa; só o resultado `bem_sucedido` conclui.
 
@@ -185,8 +188,11 @@ def rodar_etapa(
     try:
         resultado = trabalho()
     except Exception:
+        # A execução do Job falha e o Workflows loga a falha da etapa (`marca_fim`).
         encerrar_etapa(repositorio, job_id, etapa, "falhou", agora_utc())
         raise
+    if resultado != bem_sucedido:
+        registrar(registro_da_falha_de_etapa(etapa, job_id, f"resultado {resultado}"))
     encerrar_etapa(
         repositorio,
         job_id,
@@ -213,17 +219,22 @@ ETAPA_DA_FALHA: dict[CodigoDeFalha, NomeDaEtapa] = {
     "ocr_falhou": "leitura_da_tela",
     "analise_falhou": "analise",
 }
-# Depois do `concluido`, só estas etapas rodam: o Job e a Decupagem seguem como estão.
+# Depois do `concluido`, só estas etapas rodam; a falha de uma não muda o estado do Job.
 ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
-    "quadros_chave",
-    "indexacao",
     "identificacao",
+    "referencias",
     "comparacao",
+    "quadros_chave",
+    "inventario_de_objetos",
+    "indexacao",
 )
-
-# Ainda fora do Workflows (#223): partir delas cairia na validação e rodaria tudo de novo.
-ETAPAS_SEM_REPROCESSAR: frozenset[NomeDaEtapa] = frozenset(
-    {"identificacao", "comparacao"}
+# As que o Curador pode escolher num Job concluído, para refazer um vídeo bom.
+ETAPAS_ESCOLHIVEIS: tuple[NomeDaEtapa, ...] = (
+    "analise",
+    "identificacao",
+    "quadros_chave",
+    "inventario_de_objetos",
+    "indexacao",
 )
 
 
@@ -237,8 +248,23 @@ def _ordem_das_etapas() -> tuple[NomeDaEtapa, ...]:
     return get_args(NomeDaEtapa)
 
 
-def etapa_de_partida(job: Job) -> NomeDaEtapa:
-    """A primeira etapa que falhou, de onde o reprocessamento recomeça."""
+def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
+    """A primeira etapa que falhou, de onde o reprocessamento recomeça.
+
+    Com `escolhida`, a etapa é a que a pessoa pediu, e só um Job `concluido` a aceita.
+    """
+    if escolhida is not None:
+        if job.estado != "concluido":
+            raise NaoReprocessavel(
+                f"Só um vídeo concluído pode ser reprocessado a partir de uma etapa "
+                f"escolhida; este está em {job.estado}"
+            )
+        if escolhida not in ETAPAS_ESCOLHIVEIS:
+            raise NaoReprocessavel(
+                "Etapa não permitida; escolha análise, identificação, quadros-chave, "
+                "inventário de objetos ou indexação"
+            )
+        return escolhida
     if job.estado == "falhou":
         if job.codigo_falha in FALHAS_DO_ARQUIVO or job.codigo_falha is None:
             raise NaoReprocessavel(
@@ -251,8 +277,6 @@ def etapa_de_partida(job: Job) -> NomeDaEtapa:
         for e in _ordem_das_etapas()
         if (r := job.etapas.get(e)) and r.resultado == "falhou"
     ]
-    if falhas and falhas[0] in ETAPAS_SEM_REPROCESSAR:
-        raise NaoReprocessavel(f"A etapa {falhas[0]} ainda não pode ser reprocessada")
     if job.estado == "falhou":
         partida = (
             falhas[0]
@@ -272,7 +296,10 @@ def etapa_de_partida(job: Job) -> NomeDaEtapa:
 
 
 def reprocessar(
-    repositorio: RepositorioDeJobs, job_id: str, agora: datetime
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    agora: datetime,
+    etapa_escolhida: str | None = None,
 ) -> tuple[Job, Job] | None:
     """Recomeça o Job da primeira etapa que falhou: devolve o Job de antes e o de depois.
 
@@ -283,6 +310,10 @@ def reprocessar(
     continua `concluido` e só a etapa volta a em andamento. Atômico: de dois pedidos
     para o mesmo Job, só um passa, o outro levanta `NaoReprocessavel`. `None` se o Job
     não existe. As etapas dali em diante perdem o registro antigo, porque vão rodar de novo.
+
+    Com `etapa_escolhida`, o Job `concluido` recomeça da etapa pedida: com a análise ele
+    volta a `analisando` (a Decupagem antiga some até a nova análise terminar); com as
+    outras continua `concluido`.
     """
     from api.jobs import Etapa, Indexacao
 
@@ -290,7 +321,7 @@ def reprocessar(
 
     def mudar(job: Job) -> dict[str, Any]:
         lido[:] = [job]
-        partida = etapa_de_partida(job)
+        partida = etapa_de_partida(job, etapa_escolhida)
         ordem = _ordem_das_etapas()
         etapas = {
             n: e for n, e in job.etapas.items() if ordem.index(n) < ordem.index(partida)
@@ -304,13 +335,100 @@ def reprocessar(
         }
         if job.estado == "falhou":
             mudancas.update(estado="analisando", codigo_falha=None)
-        if partida in ETAPAS_DEPOIS_DO_CONCLUIDO:
+        elif partida == "analise":
+            mudancas["estado"] = "analisando"
+        if partida in ETAPAS_DEPOIS_DO_CONCLUIDO or etapa_escolhida:
             # Quem indexa (api.indexacao) troca este estado ao terminar.
             mudancas["indexacao"] = Indexacao(estado="pendente", em=agora)
         return mudancas
 
     depois = repositorio.trocar(job_id, mudar)
     return (lido[0], depois) if depois is not None else None
+
+
+# A correção manual (#289): de onde cada destino pode ser alcançado. A falha vale de
+# qualquer estado não final; voltar a concluído, só de um Job que falhou ou que ficou
+# em `analisando` sem nada rodando, e se a decupagem estiver completa.
+DestinoDaCorrecao = Literal["concluido", "falhou"]
+DESTINOS_DA_CORRECAO: dict[DestinoDaCorrecao, frozenset[Estado]] = {
+    "falhou": frozenset(e for e in TRANSICOES if e not in FINAIS),
+    "concluido": frozenset({"falhou", "analisando"}),
+}
+
+
+class EstadoNaoCorrigivel(Exception):
+    """A correção manual do estado não vale; a mensagem diz o porquê (vira 409)."""
+
+
+def corrigir_estado(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    destino: DestinoDaCorrecao,
+    agora: datetime,
+    *,
+    decupagem_completa: bool = False,
+) -> tuple[Job, Job] | None:
+    """Põe o Job em `destino` à mão: devolve o Job de antes e o de depois.
+
+    Fora da tabela de `TRANSICOES` de propósito: é a saída de emergência do
+    Administrador (`falhou` e `concluido` seguem finais para o resto). Atômico, como o
+    `reprocessar`. `None` se o Job não existe; `EstadoNaoCorrigivel` se não vale.
+
+    Ao falhar, as etapas que ficaram em andamento fecham como `falhou`, e o
+    `codigo_falha` vem da primeira delas, para o "reprocessar o que falhou" recomeçar
+    dali (sem etapa aberta, ou com a validação aberta, a falha conta como do arquivo). Ao concluir, a indexação fica como
+    estava: nada a dispara, e quem quer o vídeo na busca reprocessa a partir da
+    indexação.
+    """
+    lido: list[Job] = []
+
+    def mudar(job: Job) -> dict[str, Any]:
+        lido[:] = [job]
+        if job.estado not in DESTINOS_DA_CORRECAO[destino]:
+            raise EstadoNaoCorrigivel(f"Job em {job.estado} não pode ir para {destino}")
+        mudancas: dict[str, Any] = {"estado": destino, "atualizado_em": agora}
+        if destino == "falhou":
+            abertas = [
+                n for n in _ordem_das_etapas() if (e := job.etapas.get(n)) and not e.fim
+            ]
+            mudancas["etapas"] = {
+                nome: etapa.model_copy(update={"fim": agora, "resultado": "falhou"})
+                if nome in abertas
+                else etapa
+                for nome, etapa in job.etapas.items()
+            }
+            codigos = [c for c, e in ETAPA_DA_FALHA.items() if e in abertas[:1]]
+            if job.codigo_falha is None and codigos:
+                mudancas["codigo_falha"] = codigos[0]
+            return mudancas
+        if not decupagem_completa:
+            raise EstadoNaoCorrigivel(
+                "Sem decupagem completa guardada, o Job não pode voltar a concluído"
+            )
+        mudancas["codigo_falha"] = None
+        return mudancas
+
+    depois = repositorio.trocar(job_id, mudar)
+    return (lido[0], depois) if depois is not None else None
+
+
+def desfazer_correcao(
+    repositorio: RepositorioDeJobs, antes: Job, depois: Job, agora: datetime
+) -> Job | None:
+    """Devolve o Job ao que era antes do `corrigir_estado`, se ninguém mexeu nele desde
+    então. Para quando a auditoria não pôde ser gravada: sem rastro, a correção não vale.
+    """
+
+    def mudar(job: Job) -> dict[str, Any] | None:
+        if (job.estado, job.atualizado_em) != (depois.estado, depois.atualizado_em):
+            return None
+        voltam = ("estado", "codigo_falha", "etapas")
+        return {
+            **{campo: getattr(antes, campo) for campo in voltam},
+            "atualizado_em": agora,
+        }
+
+    return repositorio.trocar(antes.id, mudar)
 
 
 def desfazer_reprocessamento(

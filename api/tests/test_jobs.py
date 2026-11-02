@@ -36,6 +36,8 @@ class ArmazenamentoFalso:
         self.pedidos: list[dict[str, Any]] = []
         self.cancelados: list[str] = []
         self.decupagens: dict[str, list[bytes]] = {}
+        self.comparacoes: dict[str, bytes] = {}
+        self.quadros: dict[tuple[str, str], bytes] = {}
         self.decupagens_indisponiveis = False
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
@@ -52,6 +54,15 @@ class ArmazenamentoFalso:
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/quadros/{job_id}/{caminho}?validade={int(validade.total_seconds())}"
+
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        return self.quadros[(job_id, caminho)]
+
+    def ler_comparacao(self, job_id: str) -> bytes | None:
+        return self.comparacoes.get(job_id)
+
+    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
+        return f"https://storage.exemplo/fotos/{objeto}?validade={int(validade.total_seconds())}"
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         # Gerador, como seria o adaptador real: a falha só aparece no primeiro pedaço.
@@ -185,6 +196,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "programa",
         "data_exibicao",
         "indexacao",
+        "copia_bigquery",
         "etapa_atual",
         "etapas",
         "reprocessamentos",
@@ -767,3 +779,18 @@ def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
 
     assert resposta.status_code == 403
     assert "capa_url" not in resposta.text
+
+
+def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() -> None:
+    from datetime import UTC, datetime
+
+    from api.jobs import Etapa, EtapaPublica
+
+    agora = datetime(2026, 11, 2, tzinfo=UTC)
+
+    assert Etapa(inicio=agora).dispositivo is None
+    assert Etapa(inicio=agora).tentativas_gpu is None
+    etapa = EtapaPublica(
+        nome="transcricao", inicio=agora, dispositivo="cpu", tentativas_gpu=6
+    )
+    assert etapa.dispositivo == "cpu" and etapa.tentativas_gpu == 6

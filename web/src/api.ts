@@ -1,9 +1,13 @@
 import type { Usuario } from './App.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
-import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
+import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
-import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './Video.tsx'
+import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
+import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
+import { parametrosDoRelatorio } from './tempoDeTela.ts'
+import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
+import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
 /** 401 ou sessão sem token. O cliente já avisou quem o criou; quem chama só não mostra erro. */
 export class SessaoExpirada extends Error {}
@@ -46,6 +50,22 @@ async function detalhe(resposta: Response): Promise<string> {
   return `Falha ${resposta.status}`
 }
 
+/** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
+export interface FotoDoNome {
+  url: string
+  /** Vazia quando a página de origem não é um endereço web. */
+  pagina_url: string
+  dominio: string
+  resultado: 'confere' | 'nao_confere' | null
+}
+
+export interface FotosDoNome {
+  fotos: FotoDoNome[]
+  expira_em: string
+}
+
+export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
+
 /** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
@@ -53,15 +73,48 @@ export interface ClienteDoJob {
   /** URL assinada do JPEG `arquivo` (`plano-0.jpg`) de um momento da decupagem. */
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
+  /** As passadas de comparação do Job (exige `decupagem.ver`). */
+  passadas(): Promise<ResumoDaPassada[]>
+  /** O Job contra uma passada, com cada item marcado (igual, difere, só de um lado). */
+  comparacao(passadaId: string): Promise<ComparacaoDaPassada>
+  /** As fotos de referência que sustentam o nome da pessoa (exige `decupagem.ver`). */
+  fotosDoNome(pessoaId: string): Promise<FotosDoNome>
+  /** Avisa que a pessoa começou, segue ou terminou de revisar (exige `decupagem.editar`). */
+  pulsoDeRevisao(evento: EventoDeRevisao): Promise<void>
   catalogo(): Promise<CatalogoDeCorrecoes>
   historico(): Promise<ItemDoHistorico[]>
   fila(): Promise<ItemDaFila[]>
   corrigir(corpo: object): Promise<void>
+  sugestoes(): Promise<Sugestao[]>
+  /** Aceita a sugestão; `valor` é o "outro nome" (ou o título) do editor. */
+  aceitarSugestao(sugestaoId: string, valor?: string): Promise<void>
+  recusarSugestao(sugestaoId: string): Promise<void>
   desfazer(correcaoId: string, motivo: string): Promise<void>
   recusar(correcaoId: string, motivo: string): Promise<void>
   aprovar(correcaoId: string): Promise<void>
   reaplicar(itemId: string, candidato: string | null, motivo: string): Promise<void>
   descartar(itemId: string, motivo: string): Promise<void>
+  /** `POST /v1/jobs/{id}/reprocessar` numa etapa escolhida (exige `video.reprocessar_etapa`). */
+  reprocessar(etapa: string, motivo: string): Promise<Job>
+}
+
+/** Um nome do catálogo de pessoas ou de marcas (ou um tipo de objeto já visto), como o autocompletar o mostra. */
+export interface NomeDoCatalogo {
+  id: string
+  nome: string
+  /** "Sabrina Sato (apresentadora)" nas pessoas, "camiseta (3)" nos tipos de objeto. */
+  rotulo?: string
+  a_revisar: boolean
+}
+
+/** `tipos_de_objeto` só sugere (`GET /v1/objetos/tipos`): não há nome a criar. */
+export type CatalogoDeNomes = 'pessoas' | 'marcas' | 'tipos_de_objeto'
+
+/** O autocompletar dos campos de nome (exige `decupagem.ver`; criar exige `decupagem.editar`). */
+export interface ClienteDeNomes {
+  achar(catalogo: CatalogoDeNomes, q: string): Promise<NomeDoCatalogo[]>
+  /** Nome novo, "a revisar"; se o nome já existe devolve o existente. */
+  criar(catalogo: CatalogoDeNomes, nome: string): Promise<NomeDoCatalogo>
 }
 
 export interface ClienteDaApi {
@@ -72,6 +125,21 @@ export interface ClienteDaApi {
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
   buscar(consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
+  /** `POST /v1/busca/imagem`: a foto é a consulta; só programa e período da `consulta` valem. */
+  buscarPorImagem(foto: File, consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
+  /** `GET /v1/busca/parecidos`: os planos mais próximos do quadro de um plano (o próprio fica fora). */
+  buscarParecidos(job: string, plano: number, limite: number): Promise<ResultadoDaBusca>
+  /** `GET /v1/busca/parecidos/planos`: os números dos planos do vídeo com vetor do quadro indexado. */
+  planosComVetor(job: string): Promise<number[]>
+  /** `GET /v1/relatorios/tempo-de-tela`: tempo de tela por pessoa, contando só aparições. */
+  tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
+  /** O mesmo relatório em CSV. */
+  tempoDeTelaEmCsv(filtros: FiltrosDoRelatorio): Promise<Blob>
+  /** `GET /v1/relatorios/marcas`: inserções, tempo e vídeos por marca e por tipo de inserção. */
+  marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
+  /** O mesmo relatório em CSV. */
+  marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
+  nomes: ClienteDeNomes
   job(id: string): ClienteDoJob
 }
 
@@ -86,7 +154,7 @@ export function criarClienteDaApi(
 ): ClienteDaApi {
   async function pedir(
     caminho: string,
-    opcoes: { post?: true; corpo?: object } = {},
+    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<Response> {
     const token = await autenticador.token()
     if (!token) {
@@ -100,7 +168,8 @@ export function criarClienteDaApi(
     const resposta = await fetch(caminho, {
       method: opcoes.post ? 'POST' : undefined,
       headers,
-      body: opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo),
+      // Com `FormData` o navegador monta o Content-Type do multipart, com o limite.
+      body: opcoes.formulario ?? (opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo)),
     })
     if (resposta.status === 401) {
       aoSessaoExpirada()
@@ -117,7 +186,7 @@ export function criarClienteDaApi(
 
   async function chamar<T>(
     caminho: string,
-    opcoes: { post?: true; corpo?: object } = {},
+    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<T> {
     return (await (await pedir(caminho, opcoes)).json()) as T
   }
@@ -129,10 +198,25 @@ export function criarClienteDaApi(
       reproducao: () => chamar(`${base}/reproducao`),
       quadro: (arquivo) => chamar(`${base}/quadros/${encodeURIComponent(arquivo)}`),
       decupagem: () => chamar(`${base}/decupagem`),
+      passadas: () => chamar(`${base}/passadas`),
+      comparacao: (passadaId) => chamar(`${base}/passadas/${encodeURIComponent(passadaId)}/comparacao`),
+      fotosDoNome: (pessoaId) => chamar(`${base}/pessoas/${encodeURIComponent(pessoaId)}/referencias`),
+      pulsoDeRevisao: async (evento) => {
+        await pedir(`${base}/revisao/pulso`, { post: true, corpo: { evento } })
+      },
       catalogo: () => chamar('/v1/correcoes/catalogo'),
       historico: () => chamar(`${base}/correcoes`),
       fila: () => chamar(`${base}/fila`),
       corrigir: (corpo) => chamar(`${base}/correcoes`, { post: true, corpo }),
+      sugestoes: () => chamar(`${base}/sugestoes`),
+      aceitarSugestao: (sugestaoId, valor) =>
+        chamar(`${base}/sugestoes/${sugestaoId}/aceitar`, {
+          post: true,
+          corpo: valor === undefined ? undefined : { valor },
+        }),
+      recusarSugestao: async (sugestaoId) => {
+        await pedir(`${base}/sugestoes/${sugestaoId}/recusar`, { post: true })
+      },
       desfazer: (correcaoId, motivo) =>
         chamar(`${base}/correcoes/${correcaoId}/desfazer`, {
           post: true,
@@ -154,6 +238,8 @@ export function criarClienteDaApi(
           post: true,
           corpo: { motivo },
         }),
+      reprocessar: (etapa, motivo) =>
+        chamar(`${base}/reprocessar`, { post: true, corpo: { etapa, motivo } }),
     }
   }
 
@@ -169,6 +255,32 @@ export function criarClienteDaApi(
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite) => chamar(`/v1/busca?${consultaParaApi(consulta, limite)}`),
+    buscarPorImagem: (foto, consulta, limite) => {
+      const formulario = new FormData()
+      formulario.append('arquivo', foto)
+      return chamar(`/v1/busca/imagem?${consultaDaImagemParaApi(consulta, limite)}`, { post: true, formulario })
+    },
+    buscarParecidos: (job, plano, limite) =>
+      chamar(`/v1/busca/parecidos?${new URLSearchParams({ job, plano: String(plano), limite: String(limite) })}`),
+    planosComVetor: async (job) =>
+      (await chamar<{ planos: number[] }>(`/v1/busca/parecidos/planos?${new URLSearchParams({ job })}`)).planos,
+    tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
+    tempoDeTelaEmCsv: async (filtros) =>
+      (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),
+    marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
+    marcasEmCsv: async (filtros) =>
+      (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),
+    nomes: {
+      achar: async (catalogo, q) => {
+        if (catalogo !== 'tipos_de_objeto') return chamar(`/v1/catalogo/${catalogo}?q=${encodeURIComponent(q)}`)
+        const tipos = await chamar<{ tipo: string; ocorrencias: number }[]>(`/v1/objetos/tipos?q=${encodeURIComponent(q)}`)
+        return tipos.map((t) => ({ id: t.tipo, nome: t.tipo, rotulo: `${t.tipo} (${t.ocorrencias})`, a_revisar: false }))
+      },
+      criar: (catalogo, nome) => {
+        if (catalogo === 'tipos_de_objeto') return Promise.reject(new Error('Tipo de objeto não tem catálogo para criar.'))
+        return chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } })
+      },
+    },
     job,
   }
 }

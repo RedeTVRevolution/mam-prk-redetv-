@@ -5,6 +5,7 @@ identificação automática (#82) grava nele as referências de rosto e usa o id
 como dono dos objetos da busca.
 """
 
+import hashlib
 import uuid
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
@@ -28,12 +29,26 @@ class Rosto(BaseModel):
     obtida_em: datetime | None = None
 
 
+class EnvioParaLixeira(BaseModel):
+    """Quando, por quem e por quê o item foi para a lixeira (E8, #144, #151)."""
+
+    em: datetime
+    por_uid: str
+    por_email: str
+    motivo: str
+
+
 class PessoaDoCatalogo(BaseModel):
     id: str
     nome: str
     papel: str
     apelidos: list[str] = []
     rostos: list[Rosto] = []
+    # Nome acrescentado por quem corrige (#150): o Curador confere depois.
+    a_revisar: bool = False
+    acrescentada_por: str | None = None
+    # Na lixeira (#151): some do autocompletar e da busca por nome; fica até a purga.
+    lixeira: EnvioParaLixeira | None = None
 
 
 class PessoaInexistente(Exception):
@@ -51,13 +66,29 @@ class Catalogo(Protocol):
     def obter(self, id: str) -> PessoaDoCatalogo | None: ...
 
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        """As pessoas cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
+        """As pessoas (fora da lixeira) cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
         ...
 
-    def todas(self) -> list[PessoaDoCatalogo]: ...
+    def todas(self) -> list[PessoaDoCatalogo]:
+        """As pessoas que não estão na lixeira."""
+        ...
+
+    def na_lixeira(self) -> list[PessoaDoCatalogo]: ...
+
+    def definir_lixeira(
+        self, id: str, envio: EnvioParaLixeira | None
+    ) -> PessoaDoCatalogo:
+        """Manda para a lixeira (ou, com `None`, tira); `PessoaInexistente` se o id não existe."""
+        ...
 
     def acrescentar(
-        self, nome: str, papel: str, apelidos: list[str]
+        self,
+        nome: str,
+        papel: str,
+        apelidos: list[str],
+        *,
+        a_revisar: bool = False,
+        autor: str | None = None,
     ) -> PessoaDoCatalogo: ...
 
     def corrigir(
@@ -80,6 +111,16 @@ class Catalogo(Protocol):
         ...
 
 
+def prefixo_das_fotos(pessoa_id: str) -> str:
+    """A pasta das fotos de referência de uma pessoa do catálogo no bucket."""
+    return f"referencias/{pessoa_id}/"
+
+
+def objeto_da_foto(pessoa_id: str, jpeg: bytes) -> str:
+    """Onde a foto de referência de uma pessoa do catálogo fica no bucket."""
+    return f"{prefixo_das_fotos(pessoa_id)}{hashlib.sha256(jpeg).hexdigest()[:24]}.jpg"
+
+
 def novo_id() -> str:
     return uuid.uuid4().hex
 
@@ -99,8 +140,8 @@ def corrigida(
     )
 
 
-def rostos_validos(
-    pessoa: PessoaDoCatalogo,
+def rostos_que_valem(
+    rostos: Iterable[Rosto],
     agora: datetime,
     validade: timedelta,
     *,
@@ -111,7 +152,7 @@ def rostos_validos(
     acervo só com `com_acervo`, desligado por configuração."""
     return [
         r
-        for r in pessoa.rostos
+        for r in rostos
         if (r.origem == "acervo" and com_acervo)
         or (
             r.origem == "web"
@@ -121,25 +162,66 @@ def rostos_validos(
     ]
 
 
+def rostos_validos(
+    pessoa: PessoaDoCatalogo,
+    agora: datetime,
+    validade: timedelta,
+    *,
+    com_acervo: bool = False,
+) -> list[Rosto]:
+    """As referências da pessoa que ainda valem (veja `rostos_que_valem`)."""
+    return rostos_que_valem(pessoa.rostos, agora, validade, com_acervo=com_acervo)
+
+
 class CatalogoEmMemoria:
     def __init__(self) -> None:
         self._pessoas: dict[str, PessoaDoCatalogo] = {}
+
+    @classmethod
+    def copia_de(cls, catalogo: Catalogo) -> "CatalogoEmMemoria":
+        """Uma cópia solta: o que se acrescenta nela não chega ao catálogo de origem."""
+        copia = cls()
+        copia._pessoas = {p.id: p for p in catalogo.todas()}
+        return copia
 
     def obter(self, id: str) -> PessoaDoCatalogo | None:
         return self._pessoas.get(id)
 
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
         chave = normalizar(nome)
-        return [p for p in self._pessoas.values() if chave in nomes_de_busca(p)]
+        return [p for p in self.todas() if chave in nomes_de_busca(p)]
 
     def todas(self) -> list[PessoaDoCatalogo]:
-        return list(self._pessoas.values())
+        return [p for p in self._pessoas.values() if p.lixeira is None]
+
+    def na_lixeira(self) -> list[PessoaDoCatalogo]:
+        return [p for p in self._pessoas.values() if p.lixeira is not None]
+
+    def definir_lixeira(
+        self, id: str, envio: EnvioParaLixeira | None
+    ) -> PessoaDoCatalogo:
+        atual = self._pessoas.get(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        self._pessoas[id] = atual.model_copy(update={"lixeira": envio})
+        return self._pessoas[id]
 
     def acrescentar(
-        self, nome: str, papel: str, apelidos: list[str]
+        self,
+        nome: str,
+        papel: str,
+        apelidos: list[str],
+        *,
+        a_revisar: bool = False,
+        autor: str | None = None,
     ) -> PessoaDoCatalogo:
         pessoa = PessoaDoCatalogo(
-            id=novo_id(), nome=nome, papel=papel, apelidos=list(apelidos)
+            id=novo_id(),
+            nome=nome,
+            papel=papel,
+            apelidos=list(apelidos),
+            a_revisar=a_revisar,
+            acrescentada_por=autor,
         )
         self._pessoas[pessoa.id] = pessoa
         return pessoa

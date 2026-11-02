@@ -25,7 +25,7 @@ from api.jobs import Job, RepositorioDeJobs, RepositorioEmMemoria
 from api.main import criar_app as criar_app_web
 from api.nuvem import ArmazenamentoStorage, DecupagensStorage, RepositorioFirestore
 from api.programas import PERFIS
-from api.tests.test_gemini import BOA, TransporteFalso
+from api.tests.test_gemini import BOA, TransporteFalso, resposta_em_mm_ss
 from api.tests.test_nuvem import _credencial_local
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
@@ -153,11 +153,44 @@ def test_cortes_do_job_viram_os_planos_da_decupagem() -> None:
     assert [(p.inicio_ms, p.fim_ms) for p in gravada.planos] == [
         (0, 1_000),
         (1_000, 2_000),
-        (2_000, 60_000),
     ]
     assert {(p.inicio_modelo_ms, p.fim_modelo_ms) for p in gravada.planos} == {
         (0, 4_000)
     }
+
+
+def test_cada_intervalo_entre_cortes_fica_com_a_sua_descricao() -> None:
+    resposta = resposta_em_mm_ss()
+    resposta["planos"] = [
+        {
+            "id": f"pla00{n}",
+            "ambiente": a,
+            "acao": acao,
+            "plano_limpo": False,
+            "inicio": i,
+            "fim": f,
+        }
+        for n, (a, acao, i, f) in enumerate(
+            [
+                ("estúdio", "apresentadora abre o programa", "00:00", "00:20"),
+                ("rua", "carro na estrada", "00:20", "00:40"),
+                ("tela preta", None, "00:40", "01:00"),
+            ],
+            1,
+        )
+    ]
+    ambiente = _ambiente(json.dumps(resposta))
+    ambiente.registrar("j13", cortes_ms=[20_000, 40_000])
+
+    _analisar(ambiente, "j13")
+
+    gravada = Decupagem.model_validate_json(ambiente.decupagens.gravadas["j13"])
+    assert [(p.inicio_ms, p.fim_ms, p.ambiente, p.acao) for p in gravada.planos] == [
+        (0, 20_000, "estúdio", "apresentadora abre o programa"),
+        (20_000, 40_000, "rua", "carro na estrada"),
+        (40_000, 60_000, "tela preta", None),
+    ]
+    assert "(MM:SS): 00:20, 00:40." in ambiente.transporte.chamadas[0].instrucao
 
 
 def test_job_sem_cortes_nao_muda_os_planos_do_modelo() -> None:

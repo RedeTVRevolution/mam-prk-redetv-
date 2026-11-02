@@ -164,6 +164,15 @@ CategoriaDeObjeto = Literal[
     "produto",
     "animal",
     "alimento",
+    # Objetos de cena (#244), para o inventário de objetos; como a lista é uma só, o
+    # esquema da análise também passa a aceitá-las em `Objeto.categoria`.
+    "movel",
+    "decoracao",
+    "instrumento_musical",
+    "utensilio",
+    "documento",
+    "planta",
+    "bebida",
 ]
 CorBase = Literal[
     "vermelho",
@@ -229,6 +238,36 @@ class Objeto(_Estrito):
         return self
 
 
+Fracao = Annotated[float, Field(ge=0, le=1)]
+
+
+class CaixaDoQuadro(_Estrito):
+    """Onde o objeto está num quadro do plano, em fração da largura e da altura."""
+
+    quadro: str
+    x: Fracao
+    y: Fracao
+    largura: Fracao
+    altura: Fracao
+
+
+class ObjetoDoInventario(_Estrito):
+    """Um objeto do plano, em português, com as caixas de cada quadro onde aparece."""
+
+    nome: Rotulo
+    categoria: CategoriaDeObjeto
+    cor: CorBase | None = None
+    marca: Rotulo | None = None
+    caixas: list[CaixaDoQuadro] = Field(min_length=1)
+    # De 1 a 3, calculado pelo servidor a partir da maior caixa (`api/inventario.py`).
+    destaque: int = Field(ge=1, le=3)
+
+
+class GeradorDoInventario(_Estrito):
+    motor: Literal["florence", "gemini"]
+    modelo: Rotulo
+
+
 class Plano(_Intervalo):
     id: Id
     ambiente: Rotulo = Field(description="Local: estúdio, aeroporto, estádio, rua…")
@@ -237,15 +276,18 @@ class Plano(_Intervalo):
     )
     objetos: list[Rotulo] = Field(
         default=[],
-        description="Os objetos de destaque do plano; cada um também entra em "
-        "`objetos`, com os tempos.",
+        description="Os objetos de destaque do plano.",
     )
     acao: Texto | None = None
     enquadramento: Rotulo | None = None
     movimento_camera: Rotulo | None = None
     externa: bool | None = None
     periodo: Literal["dia", "noite"] | None = None
-    quadro: str | None = None  # o JPEG do meio do plano (#115)
+    quadro: str | None = None  # o JPEG não escuro mais perto do meio do plano (#115)
+    # Os 1 a 3 JPEGs do plano em ordem de tempo, incluindo o de `quadro` (#227).
+    quadros: list[str] = []
+    # O inventário de objetos (#244): preenchido pelo servidor, fora do esquema da análise.
+    inventario: list[ObjetoDoInventario] = []
 
 
 EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
@@ -253,6 +295,8 @@ EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
 
 class Comercial(_Intervalo):
     marca: Rotulo
+    # A marca do catálogo (#150); o servidor grava, o modelo não conhece.
+    catalogo_id: Id | None = None
     tipo: Literal[
         "intervalo",
         "merchan_apresentador",
@@ -325,10 +369,8 @@ class Decupagem(_Estrito):
     pessoas: list[Pessoa]
     objetos: list[Objeto] = Field(
         default=[],
-        description="Tudo o que alguém procuraria no acervo: o que cada pessoa veste, "
-        "calça, usa e segura, e os objetos em cena (veículo, produto, eletrônico, "
-        "troféu, joia, animal, comida), cada um com os atributos, o dono quando há e "
-        "os intervalos visíveis.",
+        description="O que cada pessoa veste, calça, usa e segura, cada peça com os "
+        "atributos, o dono e os intervalos visíveis.",
     )
     planos: list[Plano]
     comerciais: list[Comercial]
@@ -349,6 +391,12 @@ class Decupagem(_Estrito):
         "como está. Nunca troque uma palavra por outra de som diferente.",
     )
     correcoes_descartadas: list[CorrecaoDescartada] = []
+    # Quem gerou o inventário dos planos; `None` sem inventário (#244).
+    inventario_gerado_por: GeradorDoInventario | None = None
+    # A versão do pipeline e o manifesto com que a decupagem foi feita (#250); `None` na
+    # decupagem anterior à versão.
+    versao_pipeline: Rotulo | None = None
+    manifesto_do_pipeline: dict[str, Any] | None = None
 
     def _intervalos(self) -> list[_Intervalo]:
         achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
@@ -378,6 +426,13 @@ class Decupagem(_Estrito):
             raise ValueError("objeto de uma pessoa que não está na decupagem")
         return self
 
+    @model_validator(mode="after")
+    def _pessoas_da_pauta_existem(self) -> Self:
+        ids = {p.id for p in self.pessoas}
+        if any(i not in ids for pauta in self.pautas for i in pauta.pessoas):
+            raise ValueError("pauta com pessoa que não está na decupagem")
+        return self
+
 
 # Campos que o servidor preenche; o modelo não tem como sabê-los. A versão é
 # nossa; o SHA-256 e a duração (`video`) vêm da quarentena; os tempos originais
@@ -397,10 +452,15 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "estado_do_nome",
         "catalogo_id",
         "quadro",
+        "quadros",
         "texto_original",
         "medido",
         "motivo",
         "correcoes_descartadas",
+        "inventario",
+        "inventario_gerado_por",
+        "versao_pipeline",
+        "manifesto_do_pipeline",
     }
 )
 
@@ -414,6 +474,12 @@ TEMPO_DO_MODELO = {
     "description": "MM:SS contado do início do arquivo de vídeo, mesmo num trecho. "
     "Minutos passam de 59 (1 h 2 min 30 s = 62:30); nunca use horas.",
 }
+
+
+def em_mm_ss(ms: int) -> str:
+    """Milissegundos no formato do modelo, truncados ao segundo."""
+    total = ms // 1000
+    return f"{total // 60:02d}:{total % 60:02d}"
 
 
 def _ms(tempo: Any, duracao_ms: int) -> int:
@@ -447,6 +513,9 @@ def esquema_do_modelo() -> dict[str, Any]:
     lista vazia), para o modelo não pular nenhum."""
     esquema = Decupagem.model_json_schema()
     del esquema["$defs"]["Video"], esquema["$defs"]["CorrecaoDescartada"]
+    # O inventário é do servidor: as definições dele saem junto com o campo.
+    for nome in ("CaixaDoQuadro", "ObjetoDoInventario", "GeradorDoInventario"):
+        del esquema["$defs"][nome]
     for definicao in [esquema, *esquema["$defs"].values()]:
         propriedades = definicao.get("properties", {})
         intervalo = "inicio_ms" in propriedades

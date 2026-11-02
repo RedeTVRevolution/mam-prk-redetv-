@@ -4,6 +4,7 @@
 !web/
 !pyproject.toml
 !uv.lock
+!scripts/baixar-modelos-ocr.sh
 api/tests/
 web/node_modules/
 web/dist/

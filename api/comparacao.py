@@ -28,7 +28,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from api.catalogo import Catalogo, Rosto, rostos_validos
+from api.catalogo import Catalogo, Rosto, rostos_que_valem, rostos_validos
 from api.comparador import normalizar
 from api.decupagem import Decupagem, Pessoa
 from api.espera import sorteio_uniforme
@@ -39,6 +39,7 @@ from api.modelo_forte import MODELO_FORTE, Grupo, agrupar
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import instantes_das_aparicoes
 from api.referencias import FOTOS_POR_NOME, Sugestoes, nomes_do_perfil
+from api.rostos_dos_palpites import FotoAusente, Palpites
 
 ETAPA_DA_ESCOLHA = "comparacao_escolha"
 ETAPA_DA_CONFERENCIA = "comparacao_conferencia"
@@ -53,10 +54,6 @@ QuadrosEm = Callable[[Sequence[int]], Sequence[bytes]]
 Embaralhar = Callable[[list["Opcao"]], None]
 
 
-class FotoAusente(Exception):
-    """A foto de referência não está no bucket."""
-
-
 class Fotos(Protocol):
     def ler(self, objeto: str) -> bytes:
         """O JPEG guardado; `FotoAusente` se não existe."""
@@ -69,7 +66,7 @@ class Opcao:
 
     chave: str
     nome: str
-    catalogo_id: str
+    catalogo_id: str | None  # `None`: palpite fora do catálogo, ainda sem pessoa
     rostos: tuple[Rosto, ...]
     jpegs: tuple[bytes, ...]
 
@@ -91,6 +88,7 @@ class Veredito:
     escolhido: str | None = None  # o que a escolha às cegas apontou, se rodou
     confiancas: tuple[float, ...] = ()
     fotos: tuple[Rosto, ...] = ()  # as que confirmaram (ou não) o nome
+    conferem: tuple[bool, ...] = ()  # por foto: a confiança chegou ao limiar
 
 
 @dataclass(frozen=True)
@@ -163,6 +161,20 @@ def _chave(catalogo: Catalogo, nome: str) -> str:
     return achadas[0].id if len(achadas) == 1 else normalizar(nome)
 
 
+def _com_fotos(
+    rostos: Sequence[Rosto], fotos: Fotos
+) -> tuple[tuple[Rosto, ...], tuple[bytes, ...]] | None:
+    """As 3 primeiras referências com os JPEGs lidos; `None` se faltam ou se uma sumiu
+    do bucket."""
+    if len(rostos) < FOTOS_POR_NOME:
+        return None
+    escolhidos = tuple(rostos[:FOTOS_POR_NOME])
+    try:
+        return escolhidos, tuple(fotos.ler(r.referencia) for r in escolhidos)
+    except FotoAusente:
+        return None
+
+
 def _opcoes(
     nomes: Sequence[str],
     catalogo: Catalogo,
@@ -170,24 +182,36 @@ def _opcoes(
     agora: datetime,
     validade: timedelta,
     com_acervo: bool,
+    palpites: Palpites | None,
 ) -> list[Opcao]:
+    """Os candidatos com as 3 referências: as da pessoa do catálogo, ou, para o nome
+    que o catálogo não conhece, as guardadas sob o prefixo dos palpites."""
     opcoes: dict[str, Opcao] = {}
     for nome in nomes:
         achadas = catalogo.achar(nome)
-        if len(achadas) != 1 or achadas[0].id in opcoes:
+        if len(achadas) > 1:
             continue
-        pessoa = achadas[0]
-        rostos = rostos_validos(pessoa, agora, validade, com_acervo=com_acervo)
-        if len(rostos) < FOTOS_POR_NOME:
+        chave = achadas[0].id if achadas else normalizar(nome)
+        if chave in opcoes:
             continue
-        rostos = rostos[:FOTOS_POR_NOME]
-        try:
-            jpegs = tuple(fotos.ler(r.referencia) for r in rostos)
-        except FotoAusente:
+        if achadas:
+            pessoa = achadas[0]
+            achou = _com_fotos(
+                rostos_validos(pessoa, agora, validade, com_acervo=com_acervo), fotos
+            )
+            catalogo_id: str | None = pessoa.id
+            nome_da_opcao = pessoa.nome
+        elif palpites is not None:
+            achou = _com_fotos(
+                rostos_que_valem(palpites.rostos(nome), agora, validade), fotos
+            )
+            catalogo_id = None
+            nome_da_opcao = nome
+        else:
             continue
-        opcoes[pessoa.id] = Opcao(
-            pessoa.id, pessoa.nome, pessoa.id, tuple(rostos), jpegs
-        )
+        if achou is None:
+            continue
+        opcoes[chave] = Opcao(chave, nome_da_opcao, catalogo_id, *achou)
     return list(opcoes.values())
 
 
@@ -337,6 +361,7 @@ def comparar(
     programa: str | None = None,
     sugestoes: Sugestoes | None = None,
     com_acervo: bool = False,
+    palpites: Palpites | None = None,
     limiar: float = LIMIAR_PADRAO,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
     ao_falhar: Callable[[Exception], None] = lambda erro: None,
@@ -351,12 +376,18 @@ def comparar(
     unidades = _unidades(decupagem)
     if not unidades:
         return Comparacao(_com_sugestoes(decupagem, programa, sugestoes, agora), [])
-    palpites = [
+    nomes_dos_palpites = [
         g.pessoas[0].nome for g in unidades if g.pessoas[0].estado_do_nome == "palpite"
     ]
     candidatos = [c.nome for c in candidatos_do_video(programa, catalogo)]
     todas = _opcoes(
-        [*candidatos, *palpites], catalogo, fotos, agora, validade, com_acervo
+        [*candidatos, *nomes_dos_palpites],
+        catalogo,
+        fotos,
+        agora,
+        validade,
+        com_acervo,
+        palpites,
     )
     ajustes = _Ajustes(transporte, job_id, embaralhar, dormir, sortear, relogio)
     confirmadas = {
@@ -408,6 +439,17 @@ def comparar(
             or (testado and (escolhida is None or escolhida.chave != chave_do_palpite))
         )
         if confirmou and escolhida is not None:
+            if escolhida.catalogo_id is None and palpites is not None:
+                papel = next(
+                    (a.papel for p in grupo.pessoas for a in p.na_imagem if a.papel), ""
+                )
+                pessoa_nova, rostos = palpites.promover(
+                    escolhida.nome, escolhida.rostos, escolhida.jpegs, papel, catalogo
+                )
+                escolhida = replace(
+                    escolhida, catalogo_id=pessoa_nova.id, rostos=rostos
+                )
+                confirmadas.add(pessoa_nova.id)
             confirmadas.add(escolhida.chave)
             for p in grupo.pessoas:
                 novas[p.id] = _confirmada(p, escolhida)
@@ -430,6 +472,7 @@ def comparar(
                 escolhido=escolhida.nome if escolhida else None,
                 confiancas=confiancas,
                 fotos=escolhida.rostos if escolhida else (),
+                conferem=tuple(c >= limiar for c in confiancas),
             )
         )
     # Um palpite não confirmado cujo nome se confirmou depois, para outra pessoa do

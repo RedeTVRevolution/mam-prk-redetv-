@@ -271,6 +271,33 @@ def test_apagar_consulta_os_nomes_pagina_a_pagina_e_apaga_em_lote() -> None:
     assert corpo3 == {"requests": [{"name": n} for n in nomes]}
 
 
+def test_vetores_dos_planos_le_o_vetor_do_quadro_pagina_a_pagina() -> None:
+    def plano(n: int, vetor: list[float] | None) -> dict[str, Any]:
+        objeto: dict[str, Any] = {"data": {"id": f"j:plano:{n}"}}
+        if vetor:
+            objeto["vectors"] = {"quadro_vetor": {"dense": {"values": vetor}}}
+        return objeto
+
+    respostas = iter(
+        [
+            {
+                "dataObjects": [plano(0, [1.0, 0.0]), plano(1, None)],
+                "nextPageToken": "p",
+            },
+            {"dataObjects": [plano(2, [0.0, 1.0])]},
+        ]
+    )
+    transporte = TransporteFalso()
+    vetores = AgentRetrieval(
+        CONFIG, _Sequencia(transporte, respostas)
+    ).vetores_dos_planos("j")
+    assert vetores == {0: [1.0, 0.0], 2: [0.0, 1.0]}
+    [(_, _, corpo1), (_, _, corpo2)] = transporte.chamadas
+    assert corpo1 is not None and corpo2 is not None
+    assert corpo1["outputFields"]["vectorFields"] == ["quadro_vetor"]
+    assert corpo2["pageToken"] == "p"
+
+
 def test_total_soma_a_contagem_do_aggregate() -> None:
     transporte = TransporteFalso({"aggregateResults": [{"count": 16}]})
     assert AgentRetrieval(CONFIG, transporte).total() == 16
@@ -454,3 +481,23 @@ def test_corte_vem_do_ambiente_e_sem_ele_nao_ha_corte() -> None:
         ambiente | {"BUSCA_DISTANCIA_MAXIMA": "0.25", "BUSCA_PALAVRAS_MINIMAS": "3"}
     )
     assert (corte.distancia_maxima, corte.palavras_minimas) == (0.25, 3)
+
+
+def test_o_destaque_vai_ao_indice_e_volta_na_busca() -> None:
+    base: dict[str, Any] = {"id": "j:x:0", "job_id": "j", "inicio_ms": 0, "fim_ms": 1}
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, transporte).gravar(
+        "j", [Registro(tipo="objeto", destaque=3, texto="carro azul, veiculo", **base)]
+    )
+    corpo = transporte.chamadas[-1][2]
+    assert corpo is not None
+    dados = corpo["requests"][0]["dataObject"]["data"]
+    assert dados["destaque"] == 3
+    assert esquema_da_colecao(CONFIG)["dataSchema"]["properties"]["destaque"] == {
+        "type": "integer"
+    }
+    transporte = TransporteFalso(
+        {"results": [{"results": [{"dataObject": {"data": dados}}]}]}
+    )
+    [achado] = AgentRetrieval(CONFIG, transporte).buscar(Consulta(texto="carro"))
+    assert achado.destaque == 3

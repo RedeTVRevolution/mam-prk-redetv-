@@ -425,6 +425,59 @@ def test_transporte_vertex_guarda_a_versao_que_a_vertex_informa() -> None:
     assert transporte.versao_do_modelo == "gemini-3.5-flash-lite-001"
 
 
+def test_transporte_vertex_soma_os_tokens_das_respostas() -> None:
+    corpo = {
+        "candidates": [],
+        "usageMetadata": {
+            "promptTokenCount": 100,
+            "candidatesTokenCount": 20,
+            "thoughtsTokenCount": 5,
+        },
+    }
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo)))
+
+    transporte.gerar(_chamada())
+
+    assert (transporte.tokens_de_entrada, transporte.tokens_de_saida) == (100, 25)
+
+
+def test_transporte_vertex_loga_o_uso_de_cada_chamada_com_o_modelo() -> None:
+    corpo = {
+        "candidates": [],
+        "usageMetadata": {
+            "promptTokenCount": 100,
+            "candidatesTokenCount": 20,
+            "thoughtsTokenCount": 5,
+        },
+    }
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p", SessaoFalsa(RespostaFalsa(200, corpo)), registrar=linhas.append
+    )
+
+    transporte.gerar(_chamada())
+
+    assert [json.loads(linha) for linha in linhas] == [
+        {
+            "severity": "INFO",
+            "evento": "uso_do_modelo",
+            "modelo": "gemini-3.5-flash-lite",
+            "tokens_de_entrada": 100,
+            "tokens_de_saida": 25,
+        }
+    ]
+
+
+def test_transporte_vertex_sem_registrar_nao_loga_nada(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    corpo = {"candidates": [], "usageMetadata": {"promptTokenCount": 1}}
+
+    TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo))).gerar(_chamada())
+
+    assert capsys.readouterr().out == ""
+
+
 @pytest.mark.parametrize("status", [429, 500, 503])
 def test_transporte_vertex_converte_status_diferente_de_200_em_erro_http(
     status: int,
@@ -494,3 +547,28 @@ def test_transporte_vertex_manda_imagens_no_lugar_do_video_e_sem_flex() -> None:
         {"inlineData": {"mimeType": "image/jpeg", "data": "/9hkZWY="}},
     ]
     assert pedido["headers"] == {}
+
+
+def test_instrucao_traz_os_cortes_em_mmss_e_sem_cortes_nao_traz_a_secao() -> None:
+    texto = instrucao(None, cortes_ms=[6_540, 28_430, 40_610])
+    assert "(MM:SS): 00:06, 00:28, 00:40." in texto
+    assert "{" not in texto
+    assert "já foi cortado" not in instrucao(None)
+
+
+def test_a_janela_leva_so_os_cortes_dentro_do_trecho() -> None:
+    t = TransporteFalso(BOA)
+    analisar(
+        t,
+        video_uri=VIDEO,
+        job_id=JOB,
+        video=VIDEO_CONFIAVEL,
+        trecho_ms=(10_000, 60_000),
+        cortes_ms=[6_540, 28_430, 40_610, 70_000],
+    )
+    assert "(MM:SS): 00:28, 00:40." in t.chamadas[0].instrucao
+
+
+def test_cortes_no_mesmo_segundo_viram_um_tempo_so() -> None:
+    texto = instrucao(None, cortes_ms=[6_100, 6_900, 8_000])
+    assert "(MM:SS): 00:06, 00:08." in texto

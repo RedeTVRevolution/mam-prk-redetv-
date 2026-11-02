@@ -8,14 +8,14 @@ from typing import Any
 
 import pytest
 
-from api.decupagem import Decupagem
+from api.decupagem import Decupagem, esquema_do_modelo
 from api.jobs import Job, RepositorioEmMemoria
-from api.quadros_chave import com_quadros_chave, executar
+from api.quadros_chave import com_quadros_chave, e_escuro, executar, instantes_alvo
+from api.quadros_das_pessoas import extrair_quadros
 
 precisa_de_ffmpeg = pytest.mark.skipif(
     shutil.which("ffmpeg") is None, reason="sem ffmpeg"
 )
-pytestmark = precisa_de_ffmpeg
 
 COR_DO_PLANO = [("red", 2.0), ("blue", 2.0), ("green", 2.0)]
 
@@ -98,6 +98,7 @@ def _cor_media(jpeg: bytes, destino: Path) -> tuple[int, int, int]:
     return bruto[0], bruto[1], bruto[2]
 
 
+@precisa_de_ffmpeg
 def test_cada_plano_aparicao_e_objeto_tem_um_jpeg_e_o_quadro_aponta_para_ele(
     tmp_path: Path,
 ) -> None:
@@ -118,6 +119,7 @@ def test_cada_plano_aparicao_e_objeto_tem_um_jpeg_e_o_quadro_aponta_para_ele(
     assert all(j.startswith(b"\xff\xd8") for j in gravados.values())
 
 
+@precisa_de_ffmpeg
 def test_o_quadro_e_do_meio_do_plano_e_da_primeira_ocorrencia_do_objeto(
     tmp_path: Path,
 ) -> None:
@@ -141,6 +143,7 @@ def test_o_quadro_e_do_meio_do_plano_e_da_primeira_ocorrencia_do_objeto(
     assert cor(pronta.pessoas[0].na_imagem[1].quadro)[2] > 150
 
 
+@precisa_de_ffmpeg
 def test_momento_depois_do_fim_do_video_fica_sem_quadro_e_os_outros_ficam(
     tmp_path: Path,
 ) -> None:
@@ -156,6 +159,96 @@ def test_momento_depois_do_fim_do_video_fica_sem_quadro_e_os_outros_ficam(
     assert pronta.planos[0].quadro in gravados
     assert pronta.planos[1].quadro in gravados
     assert len(gravados) == 5
+
+
+def test_instantes_alvo_nos_limites_de_duracao() -> None:
+    assert instantes_alvo(0, 9_900) == [4_950]
+    assert len(instantes_alvo(0, 10_000)) == 2
+    assert len(instantes_alvo(0, 29_900)) == 2
+    assert instantes_alvo(0, 30_000) == [7_500, 15_000, 22_500]
+    assert instantes_alvo(1_000, 11_000) == [4_333, 7_666]
+
+
+def _video_de(destino: Path, trechos: list[tuple[str, float]]) -> Path:
+    entradas: list[str] = []
+    for fonte, duracao in trechos:
+        junta = ":" if "=" in fonte else "="
+        entradas += ["-f", "lavfi", "-i", f"{fonte}{junta}s=160x120:r=10:d={duracao}"]
+    n = len(trechos)
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y", *entradas,
+            "-filter_complex",
+            "".join(f"[{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(destino),
+        ],
+        check=True,
+        capture_output=True,
+    )  # fmt: skip
+    return destino
+
+
+def _so_planos(*intervalos: tuple[int, int], duracao_ms: int) -> Decupagem:
+    base = _decupagem().model_dump()
+    modelo = base["planos"][0]
+    base["planos"] = [
+        {**modelo, "id": f"pla{i}", "inicio_ms": a, "fim_ms": b}
+        for i, (a, b) in enumerate(intervalos)
+    ]
+    base["pessoas"], base["objetos"] = [], []
+    base["video"]["duracao_ms"] = duracao_ms
+    return Decupagem.model_validate(base)
+
+
+@precisa_de_ffmpeg
+def test_alvo_no_preto_desvia_para_o_primeiro_instante_claro_e_plano_preto_fica_sem_quadro(
+    tmp_path: Path,
+) -> None:
+    # 0–3,5 s preto; 3,5–7 s colorido. O alvo do plano 0–6 s (3 s) cai no preto e desvia
+    # +1 s, para 4 s. O plano 0–3 s é todo preto.
+    video = _video_de(tmp_path / "v.mp4", [("color=black", 3.5), ("testsrc", 3.5)])
+    decupagem = _so_planos((0, 6_000), (0, 3_000), duracao_ms=7_000)
+    gravados: dict[str, bytes] = {}
+    assert e_escuro(extrair_quadros(video, [3_000])[0])
+
+    pronta = com_quadros_chave(video, decupagem, gravados.__setitem__)
+
+    assert pronta.planos[0].quadro == "quadros/plano-0.jpg"
+    assert pronta.planos[0].quadros == ["quadros/plano-0.jpg"]
+    assert gravados["quadros/plano-0.jpg"] == extrair_quadros(video, [4_000])[0]
+    assert pronta.planos[1].quadro is None
+    assert pronta.planos[1].quadros == []
+
+
+@precisa_de_ffmpeg
+def test_plano_longo_claro_ganha_tres_quadros_e_o_do_meio_e_o_representativo(
+    tmp_path: Path,
+) -> None:
+    video = _video_de(tmp_path / "v.mp4", [("testsrc", 40.0)])
+    decupagem = _so_planos((0, 40_000), duracao_ms=40_000)
+    gravados: dict[str, bytes] = {}
+
+    pronta = com_quadros_chave(video, decupagem, gravados.__setitem__)
+
+    assert pronta.planos[0].quadros == [
+        "quadros/plano-0-0.jpg",
+        "quadros/plano-0.jpg",
+        "quadros/plano-0-1.jpg",
+    ]
+    assert pronta.planos[0].quadro == "quadros/plano-0.jpg"
+    assert set(gravados) == set(pronta.planos[0].quadros)
+
+
+def test_decupagem_antiga_sem_quadros_continua_valida() -> None:
+    dados = _decupagem().model_dump()
+    for plano in dados["planos"]:
+        del plano["quadros"]
+
+    assert Decupagem.model_validate(dados).planos[0].quadros == []
+
+
+def test_o_esquema_do_modelo_nao_traz_quadros() -> None:
+    assert "quadros" not in esquema_do_modelo()["$defs"]["Plano"]["properties"]
 
 
 class QuadrosFalso:
@@ -188,6 +281,7 @@ def _job(repositorio: RepositorioEmMemoria, estado: Any) -> None:
     )  # fmt: skip
 
 
+@precisa_de_ffmpeg
 def test_o_job_grava_os_jpegs_e_a_decupagem_com_o_caminho_de_cada_um(
     tmp_path: Path,
 ) -> None:
@@ -210,6 +304,7 @@ def test_o_job_grava_os_jpegs_e_a_decupagem_com_o_caminho_de_cada_um(
     }
 
 
+@precisa_de_ffmpeg
 def test_job_que_nao_concluiu_nao_ganha_quadros(tmp_path: Path) -> None:
     repositorio = RepositorioEmMemoria()
     _job(repositorio, "cancelado")

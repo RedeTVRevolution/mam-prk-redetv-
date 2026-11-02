@@ -1,12 +1,13 @@
 """Indexação da Decupagem entregue no índice da busca (#118)."""
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
+from api.copia_bigquery import CopiaDosMomentos
 from api.correcoes import (
     RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoesEmMemoria,
@@ -21,11 +22,12 @@ from api.indice_da_busca import (
     Registro,
     registros_da_decupagem,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import Indexacao, Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_correcoes import BASE
 from api.tests.test_jobs import ArmazenamentoFalso
+from api.tipos_de_objeto import TiposDeObjetoEmMemoria
 
 SABRINA_EXEMPLO = EXEMPLOS[0]
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
@@ -60,12 +62,19 @@ def _job(id: str = "j1", estado: str = "concluido") -> Job:
 
 
 class Mundo:
-    def __init__(self, indice: IndiceEmMemoria | None = None) -> None:
+    def __init__(
+        self,
+        indice: IndiceEmMemoria | None = None,
+        copia: CopiaDosMomentos | None = None,
+        modelo: dict[str, Any] = MODELO,
+    ) -> None:
         self.indice = indice or IndiceEmMemoria()
+        self.tipos = TiposDeObjetoEmMemoria()
+        self.copia: Any = copia
         self.jobs = RepositorioEmMemoria()
         self.jobs.salvar(_job())
         self.armazenamento = ArmazenamentoFalso()
-        self.armazenamento.decupagens["j1"] = [json.dumps(MODELO).encode()]
+        self.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
         papeis = RepositorioDePapeisEmMemoria()
         papeis.salvar("u1", ["editor"])
@@ -80,6 +89,8 @@ class Mundo:
                 correcoes=self.correcoes,
                 aprovacao=self.aprovacao,
                 indice=self.indice,
+                tipos_de_objeto=self.tipos,
+                copia=copia,
                 relogio=lambda: BASE,
             )
         )
@@ -87,7 +98,15 @@ class Mundo:
     def reindexar(self) -> None:
         job = self.jobs.obter("j1")
         assert job
-        reindexar(job, self.jobs, self.armazenamento, self.correcoes, self.indice)
+        reindexar(
+            job,
+            self.jobs,
+            self.armazenamento,
+            self.correcoes,
+            self.indice,
+            copia=self.copia,
+            tipos_de_objeto=self.tipos,
+        )
 
     def corrigir_a_fala(self, texto: str) -> Any:
         versao = versao_do_modelo(json.dumps(MODELO).encode())
@@ -280,3 +299,181 @@ def test_falha_do_indice_numa_correcao_nao_derruba_a_correcao() -> None:
         mundo.cliente.get("/v1/jobs/j1", headers=AUTORIZACAO).json()["estado"]
         == "concluido"
     )
+
+
+def _na_busca(mundo: Mundo) -> list[str]:
+    historico = mundo.cliente.get("/v1/jobs/j1/correcoes", headers=AUTORIZACAO).json()
+    return [item["na_busca"] for item in historico]
+
+
+def test_correcao_gravada_aparece_na_busca_no_historico() -> None:
+    mundo = Mundo()
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+
+    assert _na_busca(mundo) == ["na_busca"]
+
+
+def test_correcao_mostra_indexando_enquanto_a_indexacao_roda() -> None:
+    mundo = Mundo()
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+    mundo.jobs.transitar(
+        "j1", "concluido", {"indexacao": Indexacao(estado="pendente", em=BASE)}
+    )
+
+    assert _na_busca(mundo) == ["indexando"]
+
+
+def test_correcao_fica_so_salva_se_a_indexacao_falhou() -> None:
+    mundo = Mundo(IndiceQueFalha())
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+
+    assert _na_busca(mundo) == ["salva"]
+
+
+def test_correcao_gravada_depois_da_rodada_nao_esta_na_busca() -> None:
+    mundo = Mundo()
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+    antes = BASE - timedelta(hours=1)
+    mundo.jobs.transitar(
+        "j1",
+        "concluido",
+        {"indexacao": Indexacao(estado="indexado", em=antes, desde=antes)},
+    )
+
+    assert _na_busca(mundo) == ["salva"]
+
+
+def test_correcao_pendente_de_aprovacao_so_entra_na_busca_depois_de_aprovada() -> None:
+    mundo = Mundo()
+    mundo.reindexar()
+    mundo.aprovacao.definir(frozenset({"fala.texto"}))
+    cid = mundo.corrigir_a_fala("Boa noite, Brasil").json()["id"]
+    assert _na_busca(mundo) == ["salva"]
+
+    mundo.cliente.post(f"/v1/jobs/j1/correcoes/{cid}/aprovar", headers=CURADOR)
+
+    assert "na_busca" in _na_busca(mundo)
+
+
+class _EmbeddingFalso:
+    def vetor(self, jpeg: bytes, descricao: str) -> list[float]:
+        return [1.0, 0.0]
+
+
+def test_reindexar_com_embedding_grava_o_vetor_so_nos_planos_com_quadro() -> None:
+    mundo = Mundo()
+    modelo: dict[str, Any] = json.loads(json.dumps(MODELO))
+    modelo["planos"][0]["quadro"] = "quadros/plano-0.jpg"
+    mundo.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
+    mundo.armazenamento.quadros[("j1", "quadros/plano-0.jpg")] = b"jpeg"
+    job = mundo.jobs.obter("j1")
+    assert job
+
+    reindexar(
+        job,
+        mundo.jobs,
+        mundo.armazenamento,
+        mundo.correcoes,
+        mundo.indice,
+        embedding=_EmbeddingFalso(),
+        quadros=mundo.armazenamento,
+    )
+
+    achados = mundo.indice.buscar(Consulta(limite=100))
+    com_vetor = [r for r in achados if r.vetor_do_quadro]
+    assert [r.tipo for r in com_vetor] == ["plano"]
+    assert mundo.indexacao()["estado"] == "indexado"
+    assert len([r for r in achados if r.tipo == "plano"]) == 2
+
+
+def _modelo_com_sandalia_e_scarpin() -> dict[str, Any]:
+    modelo: dict[str, Any] = json.loads(json.dumps(MODELO))
+    for objeto, tipo in zip(modelo["objetos"], ["sandália", "scarpin"], strict=True):
+        objeto["tipo"] = tipo
+    return modelo
+
+
+def test_reindexar_registra_os_tipos_dos_objetos() -> None:
+    mundo = Mundo(modelo=_modelo_com_sandalia_e_scarpin())
+
+    mundo.reindexar()
+
+    assert mundo.tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 1}]
+    assert mundo.tipos.buscar("SCAR") == [{"tipo": "scarpin", "ocorrencias": 1}]
+
+
+def test_reindexar_duas_vezes_nao_dobra_a_contagem_dos_tipos() -> None:
+    mundo = Mundo(modelo=_modelo_com_sandalia_e_scarpin())
+
+    mundo.reindexar()
+    mundo.reindexar()
+
+    assert mundo.tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 1}]
+
+
+def test_tipos_que_falham_nao_derrubam_a_indexacao() -> None:
+    class Quebrado(TiposDeObjetoEmMemoria):
+        def registrar(self, job_id: str, contagens: Any) -> None:
+            raise ConnectionError("Firestore fora do ar")
+
+    mundo = Mundo()
+    mundo.tipos = Quebrado()
+
+    mundo.reindexar()
+
+    assert mundo.indice.total() == 6
+    assert mundo.indexacao()["estado"] == "indexado"
+
+
+def test_a_rota_devolve_os_tipos_gravados_pelo_reindexar() -> None:
+    mundo = Mundo(modelo=_modelo_com_sandalia_e_scarpin())
+    mundo.reindexar()
+
+    def buscar(q: str) -> Any:
+        return mundo.cliente.get(
+            "/v1/objetos/tipos", params={"q": q}, headers=AUTORIZACAO
+        )
+
+    assert buscar("sa").json() == [{"tipo": "sandália", "ocorrencias": 1}]
+    assert buscar("SCAR").json() == [{"tipo": "scarpin", "ocorrencias": 1}]
+
+
+def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
+    mundo = Mundo()
+    versao = versao_do_modelo(json.dumps(MODELO).encode())
+
+    def corrigir(tipo: str, valor: dict[str, Any], item_id: str = "") -> Any:
+        return mundo.cliente.post(
+            "/v1/jobs/j1/correcoes",
+            json={
+                "tipo": tipo,
+                "item_id": item_id,
+                "valor": json.dumps(valor),
+                "motivo": "ouvi de novo",
+                "versao": versao,
+            },
+            headers=AUTORIZACAO,
+        )
+
+    def buscar(q: str) -> list[tuple[str, int]]:
+        r = mundo.cliente.get("/v1/objetos/tipos", params={"q": q}, headers=AUTORIZACAO)
+        return [(t["tipo"], t["ocorrencias"]) for t in r.json()]
+
+    mundo.reindexar()
+    assert buscar("sa") == []
+    [(_, vestidos)] = buscar("vest")
+
+    novo = {
+        "categoria": "calcado",
+        "tipo": "sandália",
+        "cor_base": ["vermelho"],
+        "inicio_ms": 0,
+        "fim_ms": 4000,
+    }
+    assert corrigir("objeto.acrescentar", novo).status_code == 201
+    assert buscar("SA") == [("sandália", 1)]
+
+    atributos = {"tipo": "scarpin", "cor_base": MODELO["objetos"][0]["cor_base"]}
+    assert corrigir("objeto.atributos", atributos, "obj01").status_code == 201
+    assert buscar("scar") == [("scarpin", 1)]
+    assert buscar("vest") == [("vestido", vestidos - 1)]

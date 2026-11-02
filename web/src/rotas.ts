@@ -1,5 +1,7 @@
 import { consultaDaBusca, consultaParaEndereco, type ConsultaDaBusca } from './busca.ts'
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
+import { filtrosDeMarcas, type FiltrosDeMarcas } from './marcas.ts'
+import { filtrosDoRelatorio, filtrosParaEndereco, type FiltrosDoRelatorio } from './tempoDeTela.ts'
 import { useMemo, useSyncExternalStore, type MouseEvent } from 'react'
 
 // Rotas com endereço sobre a History API, sem biblioteca (princípio 9 de docs/design/principios.md).
@@ -8,16 +10,35 @@ export type Rota =
   | { tipo: 'raiz' }
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'busca'; consulta: ConsultaDaBusca }
-  | { tipo: 'video'; id: string; t: number | null }
-  | { tipo: 'video_anterior'; id: string; t: number | null }
+  | { tipo: 'video'; id: string; t: number | null; busca: string | null }
+  | { tipo: 'parecidos'; job: string; plano: number }
+  | { tipo: 'tempo_de_tela'; filtros: FiltrosDoRelatorio }
+  | { tipo: 'marcas'; filtros: FiltrosDeMarcas }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
 export const ACERVO = '/acervo'
+export const TEMPO_DE_TELA = '/relatorios/tempo-de-tela'
+export const MARCAS = '/relatorios/marcas'
+
+/** O endereço do relatório de tempo de tela, com os filtros na query. */
+export function enderecoDoTempoDeTela(filtros: FiltrosDoRelatorio): string {
+  return `${TEMPO_DE_TELA}${filtrosParaEndereco(filtros)}`
+}
+
+/** O endereço do relatório de marcas, com os filtros na query. */
+export function enderecoDasMarcas(filtros: FiltrosDeMarcas): string {
+  return `${MARCAS}${filtrosParaEndereco(filtros, { tipo: filtros.tipo })}`
+}
 
 /** O endereço da busca, com a consulta e os filtros na query. */
 export function enderecoDaBusca(consulta: ConsultaDaBusca): string {
   return `/busca${consultaParaEndereco(consulta)}`
+}
+
+/** O endereço dos planos parecidos com um plano (o número dele no vídeo), #271. */
+export function enderecoDosParecidos(job: string, plano: number): string {
+  return `/busca/parecidos?${new URLSearchParams({ job, plano: String(plano) })}`
 }
 
 /** O endereço do vídeo, com o instante em segundos (até o milissegundo) e a busca de origem, se houver. */
@@ -36,27 +57,27 @@ function instante(busca: string): number | null {
   return Number(valor)
 }
 
-/** A tela antiga do vídeo, até o #165 removê-la. */
-export function enderecoDaTelaAnterior(id: string, t?: number | null): string {
-  return enderecoDoVideo(id, t).replace(/(\?|$)/, '/anterior$1')
-}
-
 export function lerRota(caminho: string, busca = ''): Rota {
   const partes = caminho.split('/').filter(Boolean)
   if (partes.length === 0) return { tipo: 'raiz' }
   if (partes.length === 1 && partes[0] === 'acervo') return { tipo: 'acervo', filtros: filtrosDaBusca(busca) }
+  if (partes.length === 2 && partes[0] === 'busca' && partes[1] === 'parecidos') {
+    const p = new URLSearchParams(busca)
+    const job = p.get('job')
+    const plano = p.get('plano')
+    return job && plano !== null && /^\d+$/.test(plano) ? { tipo: 'parecidos', job, plano: Number(plano) } : { tipo: 'nao_encontrada' }
+  }
   if (partes.length === 1 && partes[0] === 'busca') return { tipo: 'busca', consulta: consultaDaBusca(busca) }
+  if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'tempo-de-tela') {
+    return { tipo: 'tempo_de_tela', filtros: filtrosDoRelatorio(busca) }
+  }
+  if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'marcas') {
+    return { tipo: 'marcas', filtros: filtrosDeMarcas(busca) }
+  }
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {
-      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca) }
-    } catch {
-      return { tipo: 'nao_encontrada' }
-    }
-  }
-  if (partes.length === 3 && partes[0] === 'video' && partes[2] === 'anterior') {
-    try {
-      return { tipo: 'video_anterior', id: decodeURIComponent(partes[1]), t: instante(busca) }
+      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca), busca: new URLSearchParams(busca).get('busca') || null }
     } catch {
       return { tipo: 'nao_encontrada' }
     }

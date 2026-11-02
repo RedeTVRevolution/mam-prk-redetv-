@@ -1,4 +1,5 @@
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import jwt
@@ -79,3 +80,9 @@ def test_email_sem_verificacao_fica_nao_verificado(token: str) -> None:
 def test_token_recusado(token: str) -> None:
     with pytest.raises(TokenInvalido):
         _verificador().verificar(token)
+
+
+def test_auth_time_do_token_vira_o_momento_do_login() -> None:
+    usuario = _verificador().verificar(_token(auth_time=1_793_000_000))
+
+    assert usuario.login_em == datetime(2026, 10, 26, 7, 33, 20, tzinfo=UTC)

@@ -24,7 +24,7 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
-from api.catalogo import PessoaInexistente
+from api.catalogo import EnvioParaLixeira, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.jobs import (
@@ -34,9 +34,13 @@ from api.jobs import (
     ServicoIndisponivel,
     palavras_do_nome,
 )
+from api.marcas import MarcaInexistente, carregar_marcas
 from api.nuvem import (
     ArmazenamentoStorage,
+    ArquivosNoStorage,
+    CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
@@ -44,6 +48,7 @@ from api.nuvem import (
     RepositorioDePapeisFirestore,
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
+    TiposDeObjetoFirestore,
 )
 from api.webhook import RegistroDeWebhook
 
@@ -88,6 +93,18 @@ class TestRepositorioFirestore:
         self, repositorio: RepositorioFirestore
     ) -> None:
         assert repositorio.obter("nao-existe") is None
+
+    def test_remover_apaga_o_job_e_repetir_nao_da_erro(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        repositorio.salvar(_job("a", BASE))
+        repositorio.salvar(_job("b", BASE))
+
+        repositorio.remover("a")
+        repositorio.remover("a")
+
+        assert repositorio.obter("a") is None
+        assert repositorio.obter("b") is not None
 
     def test_salvar_de_novo_atualiza_o_job(
         self, repositorio: RepositorioFirestore
@@ -356,6 +373,73 @@ def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
         next(armazenamento.abrir_decupagem("nao-existe"))
 
 
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_arquivos_no_storage_conta_o_que_o_job_tem(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
+    decupagens = armazenamento._cliente.bucket(armazenamento._decupagens)
+    aceitos.blob("job1/proxy.mp4").upload_from_string(b"x")
+    decupagens.blob("job1.json").upload_from_string(b"{}")
+    decupagens.blob("job1/quadros/plano-0.jpg").upload_from_string(b"x")
+    decupagens.blob("job1/quadros/plano-1.jpg").upload_from_string(b"x")
+    decupagens.blob("job2/quadros/plano-0.jpg").upload_from_string(b"x")
+    arquivos = ArquivosNoStorage(
+        armazenamento._cliente, armazenamento._aceitos, armazenamento._decupagens
+    )
+
+    contados = arquivos.contar("job1")
+
+    assert (contados.decupagem, contados.proxy, contados.quadros) == (1, 1, 2)
+    assert contados.copia_limpa == 0
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
+    decupagens = armazenamento._cliente.bucket(armazenamento._decupagens)
+    do_job = {
+        aceitos: ["job1/proxy.mp4", "job1/copia_limpa.mp4", "job1/janelas/0000.json"],
+        decupagens: ["job1.json", "job1.comparacao.json", "job1/quadros/plano-0.jpg"],
+    }
+    de_outro = {aceitos: ["job10/proxy.mp4"], decupagens: ["job10.json", "job2.json"]}
+    for bucket, objetos in (do_job | de_outro).items():
+        for objeto in objetos:
+            bucket.blob(objeto).upload_from_string(b"x")
+    arquivos = ArquivosNoStorage(
+        armazenamento._cliente, armazenamento._aceitos, armazenamento._decupagens
+    )
+
+    arquivos.apagar("job1")
+    arquivos.apagar("job1")
+
+    assert not any(b.blob(o).exists() for b, os in do_job.items() for o in os)
+    assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_referencias_apagam_a_pasta_da_pessoa_e_nada_de_outra(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    nome = f"teste-referencias-{uuid.uuid4().hex[:8]}"
+    bucket = armazenamento._cliente.create_bucket(nome)
+    da_pessoa = ["referencias/ana/0.jpg", "referencias/ana/velha.jpg"]
+    de_outra = ["referencias/ana2/0.jpg", "palpites/ana/0.jpg"]
+    for objeto in da_pessoa + de_outra:
+        bucket.blob(objeto).upload_from_string(b"x")
+    fotos = ReferenciasStorage(armazenamento._cliente, nome)
+
+    fotos.apagar_prefixo("referencias/ana/")
+    fotos.apagar_prefixo("referencias/ana/")
+
+    assert not any(bucket.blob(o).exists() for o in da_pessoa)
+    assert all(bucket.blob(o).exists() for o in de_outra)
+
+
 def _registro_de_chave(id: str) -> RegistroDeChave:
     return RegistroDeChave(
         id=id,
@@ -412,6 +496,18 @@ class TestRepositorioDeChavesFirestore:
         chaves.salvar_nova(registro("c"), 2)
 
         assert [r.id for r in chaves.listar_por_sistema("Legado")] == ["a", "b", "c"]
+
+    def test_listar_traz_todos_os_sistemas_das_mais_novas_para_as_mais_antigas(
+        self, chaves: RepositorioDeChavesFirestore
+    ) -> None:
+        chaves.salvar(_registro_de_chave("velha"))
+        chaves.salvar(
+            _registro_de_chave("nova").model_copy(
+                update={"sistema": "Outro", "criada_em": BASE + timedelta(hours=1)}
+            )
+        )
+
+        assert [r.id for r in chaves.listar()] == ["nova", "velha"]
 
     def test_dois_comandos_simultaneos_nao_criam_a_terceira(
         self, chaves: RepositorioDeChavesFirestore
@@ -521,6 +617,22 @@ class TestRepositorioDePapeisFirestore:
 
         assert papeis.obter("u1") == ["consulta"]
 
+    def test_marca_de_desativada_nao_cria_papeis_e_sobrevive_a_salvar(
+        self, papeis: RepositorioDePapeisFirestore
+    ) -> None:
+        assert not papeis.desativada("u1")
+
+        papeis.marcar_desativada("u1", True)
+
+        assert papeis.desativada("u1")
+        assert papeis.obter("u1") is None
+        papeis.salvar("u1", ["editor"])
+        assert papeis.desativada("u1")
+        assert papeis.obter("u1") == ["editor"]
+        papeis.marcar_desativada("u1", False)
+        assert not papeis.desativada("u1")
+        assert papeis.obter("u1") == ["editor"]
+
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestRepositorioDeAprovacaoFirestore:
@@ -574,6 +686,17 @@ class TestRepositorioDeCorrecoesFirestore:
         assert lidos["c1"].exige_aprovacao
         assert lidos["c1-decidida"].aprova == "c1"
         assert lidos["c2-decidida"].recusa == "c2"
+
+    def test_purgar_apaga_so_as_correcoes_do_video(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        for id, job_id in (("c1", "j1"), ("c2", "j1"), ("c3", "j2")):
+            correcoes.acrescentar(self._correcao(id, job_id, 1))
+
+        correcoes.purgar("j1")
+
+        assert correcoes.listar("j1") == []
+        assert [c.id for c in correcoes.listar("j2")] == ["c3"]
 
     @pytest.fixture
     def correcoes(self) -> RepositorioDeCorrecoesFirestore:
@@ -753,6 +876,12 @@ class TestRepositorioDeCorrecoesFirestore:
             correcoes.acrescentar(self._correcao("c1", "j1", 2))
 
 
+def _envio_para_lixeira() -> EnvioParaLixeira:
+    return EnvioParaLixeira(
+        em=BASE, por_uid="u1", por_email="c@redetv.com", motivo="duplicada"
+    )
+
+
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestCatalogoFirestore:
     @pytest.fixture
@@ -791,6 +920,146 @@ class TestCatalogoFirestore:
             catalogo.apagar(p.id)
         with pytest.raises(PessoaInexistente):
             catalogo.corrigir(p.id, nome="X")
+
+    def test_lixeira_esconde_da_busca_e_restaurar_devolve(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        p = catalogo.acrescentar("Ana", "repórter", ["Aninha"])
+        envio = _envio_para_lixeira()
+
+        catalogo.definir_lixeira(p.id, envio)
+
+        assert catalogo.todas() == []
+        assert catalogo.achar("ana") == []
+        assert [x.id for x in catalogo.na_lixeira()] == [p.id]
+        assert catalogo.obter(p.id) is not None
+        assert catalogo.obter(p.id).lixeira == envio  # type: ignore[union-attr]
+        catalogo.definir_lixeira(p.id, None)
+        assert [x.id for x in catalogo.todas()] == [p.id]
+        assert catalogo.na_lixeira() == []
+        with pytest.raises(PessoaInexistente):
+            catalogo.definir_lixeira("inexistente", envio)
+
+    def test_nome_novo_fica_a_revisar_com_o_autor(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        nova = catalogo.acrescentar("Zeca", "cantor", [], a_revisar=True, autor="a@b")
+
+        lida = catalogo.obter(nova.id)
+
+        assert lida == nova
+        assert lida is not None
+        assert (lida.a_revisar, lida.acrescentada_por) == (True, "a@b")
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestCatalogoDeMarcasFirestore:
+    @pytest.fixture
+    def marcas(self) -> CatalogoDeMarcasFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return CatalogoDeMarcasFirestore(cliente, colecao=f"marcas-{uuid.uuid4().hex}")
+
+    def test_acrescenta_obtem_e_acha_por_nome_ou_apelido(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        banco = marcas.acrescentar("Banco Verde", ["BV"])
+
+        assert marcas.obter(banco.id) == banco
+        assert marcas.achar("BANCO verde") == [banco]
+        assert marcas.achar("bv") == [banco]
+        assert marcas.achar("Outro") == []
+        assert marcas.obter("inexistente") is None
+        assert marcas.todas() == [banco]
+
+    def test_lixeira_esconde_da_busca_restaura_e_apaga(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        m = marcas.acrescentar("Banco Verde", ["BV"])
+        envio = _envio_para_lixeira()
+
+        marcas.definir_lixeira(m.id, envio)
+
+        assert marcas.todas() == []
+        assert marcas.achar("bv") == []
+        assert [x.id for x in marcas.na_lixeira()] == [m.id]
+        marcas.definir_lixeira(m.id, None)
+        assert [x.id for x in marcas.todas()] == [m.id]
+        marcas.apagar(m.id)
+        assert marcas.obter(m.id) is None
+        with pytest.raises(MarcaInexistente):
+            marcas.apagar(m.id)
+        with pytest.raises(MarcaInexistente):
+            marcas.definir_lixeira(m.id, envio)
+
+    def test_nome_novo_fica_a_revisar_com_o_autor(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        nova = marcas.acrescentar("Loja Sol", [], a_revisar=True, autor="a@b")
+
+        lida = marcas.obter(nova.id)
+
+        assert lida == nova
+        assert lida is not None
+        assert (lida.a_revisar, lida.acrescentada_por) == (True, "a@b")
+
+    def test_a_carga_e_idempotente(self, marcas: CatalogoDeMarcasFirestore) -> None:
+        decupagens = [{"comerciais": [{"marca": "Banco Verde"}, {"marca": "Loja Sol"}]}]
+
+        primeira = carregar_marcas(marcas, decupagens)
+        segunda = carregar_marcas(marcas, decupagens)
+
+        assert (primeira, segunda) == (2, 0)
+        assert len(marcas.todas()) == 2
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestTiposDeObjetoFirestore:
+    @pytest.fixture
+    def tipos(self) -> TiposDeObjetoFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        sufixo = uuid.uuid4().hex
+        return TiposDeObjetoFirestore(
+            cliente, colecao=f"tipos-{sufixo}", colecao_por_job=f"tipos-job-{sufixo}"
+        )
+
+    def test_registra_e_busca_por_prefixo(self, tipos: TiposDeObjetoFirestore) -> None:
+        tipos.registrar("j1", {"sandália": 2, "scarpin": 1})
+
+        assert tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 2}]
+        assert tipos.buscar("SCAR") == [{"tipo": "scarpin", "ocorrencias": 1}]
+        assert tipos.buscar("x") == []
+
+    def test_trocar_a_contribuicao_do_job_nao_dobra(
+        self, tipos: TiposDeObjetoFirestore
+    ) -> None:
+        tipos.registrar("j1", {"sandália": 2})
+        tipos.registrar("j1", {"sandália": 2})
+        assert tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 2}]
+
+        tipos.registrar("j1", {"saia": 1})
+        tipos.registrar("j2", {"Sandalia": 4})
+
+        assert tipos.buscar("sa") == [
+            {"tipo": "Sandalia", "ocorrencias": 4},
+            {"tipo": "saia", "ocorrencias": 1},
+        ]
+
+    def test_ordena_por_ocorrencias_e_corta_no_limite(
+        self, tipos: TiposDeObjetoFirestore
+    ) -> None:
+        tipos.registrar("j1", {"sapato": 1, "sandália": 3, "saia": 2})
+
+        achados = tipos.buscar("sa", limite=2)
+
+        assert [t["tipo"] for t in achados] == ["sandália", "saia"]
+
+    def test_conhecidos_traz_todos_os_vivos_sem_o_teto_da_busca(
+        self, tipos: TiposDeObjetoFirestore
+    ) -> None:
+        tipos.registrar("j1", {"sapato": 1, "saia": 2})
+        tipos.registrar("j1", {"saia": 2})
+
+        assert tipos.conhecidos() == ["saia"]
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")

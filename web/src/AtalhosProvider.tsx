@@ -7,16 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { type Atalho, Contexto, GERAIS } from './atalhos.ts'
-
-function emCampoDeTexto(alvo: EventTarget | null): boolean {
-  if (!(alvo instanceof HTMLElement)) return false
-  return (
-    alvo.isContentEditable ||
-    alvo.getAttribute('contenteditable') === 'true' ||
-    ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo.tagName)
-  )
-}
+import { type Atalho, Contexto, emCampoDeTexto, GERAIS } from './atalhos.ts'
 
 /** O registro único de atalhos: ouve o teclado num lugar só e ignora campos de texto. */
 export function AtalhosProvider({ children }: { children: ReactNode }) {

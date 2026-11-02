@@ -11,7 +11,7 @@ import {
   vizinhoNoPainel,
 } from './painel.ts'
 import { faixasDoVisualizador } from './linhaDoTempo.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem } from './decupagem.ts'
 
 const D: Decupagem = {
   pautas: [
@@ -92,7 +92,7 @@ test('os selos do nome trazem o tempo da prova: GC e fala', () => {
   expect(item?.selos).toEqual([
     { rotulo: 'GC', inicio_ms: 211_000 },
     { rotulo: 'Fala', inicio_ms: 220_000 },
-    { rotulo: 'Rosto', inicio_ms: null },
+    { rotulo: 'Rosto', inicio_ms: null, tipo: 'rosto' },
   ])
   expect(item?.linhas).toEqual(['colunista · terno preto'])
 })
@@ -107,6 +107,13 @@ test('o selo só casa o nome inteiro: "Ana" não acha a prova em "MARIANA"', () 
     ],
   }
   expect(itensDoPainel(d).find((i) => i.chave === 'aparicao-0')?.selos).toEqual([{ rotulo: 'GC', inicio_ms: 200_000 }])
+})
+
+test('rosto e referência dão um selo "Rosto" só', () => {
+  const d: Decupagem = { ...D, pessoas: [{ ...D.pessoas[0], fontes_do_nome: ['rosto', 'referencia'] }] }
+  expect(itensDoPainel(d).find((i) => i.chave === 'aparicao-0')?.selos).toEqual([
+    { rotulo: 'Rosto', inicio_ms: null, tipo: 'rosto' },
+  ])
 })
 
 test('menção e aparição têm tipos separados', () => {

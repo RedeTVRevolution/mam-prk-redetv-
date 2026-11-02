@@ -9,7 +9,14 @@ import {
   tomDoObjeto,
   trechosSemPauta,
 } from './linhaDoTempo.ts'
-import type { CategoriaDeObjeto, CorBase, Decupagem, RelacaoDoObjeto } from './Video.tsx'
+import type {
+  CaixaDoQuadro,
+  CategoriaDeObjeto,
+  CorBase,
+  Decupagem,
+  ObjetoDoInventario,
+  RelacaoDoObjeto,
+} from './decupagem.ts'
 
 export { NAO_IDENTIFICADO }
 
@@ -32,7 +39,14 @@ export type TipoDoItem = 'pauta' | 'aparicao' | 'mencao' | 'objeto' | 'comercial
 export interface Selo {
   rotulo: string
   inicio_ms: number | null
+  /** `rosto`: o clique abre a comparação das fotos. `nao_confirmado`: o nome é palpite, sem prova. */
+  tipo?: 'rosto' | 'nao_confirmado'
+  /** A explicação, em dica. */
+  dica?: string
 }
+
+const DICA_DO_NAO_CONFIRMADO =
+  'O modelo sugeriu este nome, mas não achou prova: nem GC, nem fala, nem rosto conferido com as fotos de referência.'
 
 /** O que a lista mostra de um objeto: o tipo, a cor (base e tom), o dono e a marca. */
 export interface DadosDoObjeto {
@@ -66,6 +80,8 @@ export interface ItemDoPainel extends Intervalo {
   /** O tom da pauta ou o tipo do texto na tela e do comercial. */
   rotulo?: string
   objeto?: DadosDoObjeto
+  /** O inventário do plano; só nos itens de plano, e só se a decupagem o tem. */
+  inventario?: ObjetoDoInventario[]
   /** O JPEG do momento (`null` sem quadro); só aparição, objeto e plano têm miniatura. */
   quadro?: string | null
 }
@@ -92,20 +108,32 @@ const normalizar = (t: string): string =>
     .replace(/\p{M}/gu, '')
     .toLowerCase()
 
+/** O nome sem acento, caixa nem espaços nas pontas, para comparar nomes. */
+export const nomeNormalizado = (t: string): string => normalizar(t).trim()
+
 const escapar = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Referência' }
+const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Rosto' }
 
-/** Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm tempo). */
-function selosDoNome(nome: string, fontes: string[], d: Decupagem): Selo[] {
+/**
+ * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm
+ * tempo: abrem a comparação). O palpite sem prova leva só o selo "não confirmado".
+ */
+function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = false): Selo[] {
+  if (palpite && fontes.length === 0) {
+    return [{ rotulo: 'não confirmado', inicio_ms: null, tipo: 'nao_confirmado', dica: DICA_DO_NAO_CONFIRMADO }]
+  }
   // O nome inteiro, entre limites de palavra: "Ana" não casa com "MARIANA".
   const alvo = new RegExp(`(^|[^\\p{L}\\p{N}])${escapar(normalizar(nome))}($|[^\\p{L}\\p{N}])`, 'u')
   const prova = (trechos: (Intervalo & { texto: string })[]) =>
     trechos.filter((t) => alvo.test(normalizar(t.texto))).sort((a, b) => a.inicio_ms - b.inicio_ms)[0]
       ?.inicio_ms ?? null
-  return fontes.map((f) => ({
+  // `rosto` e `referencia` dão o mesmo selo "Rosto": um só.
+  const unicas = fontes.filter((f, i) => fontes.findIndex((g) => (FONTES[g] ?? g) === (FONTES[f] ?? f)) === i)
+  return unicas.map((f) => ({
     rotulo: FONTES[f] ?? f,
     inicio_ms: f === 'gc' ? prova(d.textos_na_tela ?? []) : f === 'fala' ? prova(d.transcricao) : null,
+    ...(f === 'rosto' || f === 'referencia' ? { tipo: 'rosto' as const } : {}),
   }))
 }
 
@@ -121,7 +149,40 @@ const NOME_DA_CATEGORIA: Record<CategoriaDeObjeto, string> = {
   produto: 'produto',
   animal: 'animal',
   alimento: 'alimento',
+  movel: 'móvel',
+  decoracao: 'decoração',
+  instrumento_musical: 'instrumento musical',
+  utensilio: 'utensílio',
+  documento: 'documento',
+  planta: 'planta',
+  bebida: 'bebida',
 }
+
+/** O nome da categoria como a tela mostra. */
+export const nomeDaCategoria = (c: CategoriaDeObjeto): string => NOME_DA_CATEGORIA[c] ?? c
+
+/** Os objetos de destaque mais alto (3) do inventário, na ordem em que estão. */
+export const inventarioDeDestaque = (inventario: ObjetoDoInventario[]): ObjetoDoInventario[] =>
+  inventario.filter((o) => o.destaque === 3)
+
+/** O inventário inteiro por categoria (ordem alfabética do nome mostrado), com o destaque maior primeiro. */
+export function inventarioPorCategoria(
+  inventario: ObjetoDoInventario[],
+): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoInventario[] }[] {
+  const grupos = new Map<CategoriaDeObjeto, ObjetoDoInventario[]>()
+  for (const o of inventario) grupos.set(o.categoria, [...(grupos.get(o.categoria) ?? []), o])
+  return [...grupos]
+    .map(([categoria, objetos]) => ({
+      categoria,
+      nome: nomeDaCategoria(categoria),
+      objetos: [...objetos].sort((a, b) => b.destaque - a.destaque),
+    }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+}
+
+/** A maior caixa do objeto, a que o player mostra. */
+export const maiorCaixa = (o: ObjetoDoInventario): CaixaDoQuadro =>
+  o.caixas.reduce((a, b) => (b.largura * b.altura > a.largura * a.altura ? b : a))
 
 /** A relação do dono com o objeto, como verbo depois do nome ("Mel Breia calça"): não depende do gênero do tipo. */
 const VERBO_DA_RELACAO: Record<RelacaoDoObjeto, string> = {
@@ -155,7 +216,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
   let m = 0
   for (const p of d.pessoas) {
     const sem = SEM_NOME.test(p.nome)
-    const selos = sem ? [] : selosDoNome(p.nome, p.fontes_do_nome ?? [], d)
+    const selos = sem ? [] : selosDoNome(p.nome, p.fontes_do_nome ?? [], d, p.estado_do_nome === 'palpite')
     for (const x of p.na_imagem) {
       const apoio = [x.papel, x.visual].filter(Boolean).join(' · ')
       itens.push({
@@ -200,7 +261,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
       objeto: {
         id: objeto.id,
         tipo: objeto.tipo,
-        categoria: NOME_DA_CATEGORIA[objeto.categoria] ?? objeto.categoria,
+        categoria: nomeDaCategoria(objeto.categoria),
         coresBase: objeto.cor_base,
         tom: tomDoObjeto(objeto) ?? '',
         dono: objeto.pessoa
@@ -249,6 +310,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
       selos: [],
       inicio_ms: p.inicio_ms,
       fim_ms: p.fim_ms,
+      ...(p.inventario?.length ? { inventario: p.inventario } : {}),
     }),
   )
   d.transcricao.forEach((f, i) =>

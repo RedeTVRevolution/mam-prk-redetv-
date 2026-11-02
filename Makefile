@@ -1,17 +1,24 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao taxa-de-correcao
 
 instalar:
 	uv sync --locked
 	npm ci --prefix web
 	git config core.hooksPath .githooks
 
-verificar:
+verificar: verificar-api verificar-web
+
+# As duas metades rodam em jobs paralelos no CI. Os testes vão em vários processos
+# (pytest-xdist): os que usam os emuladores criam coleção e bucket com UUID, então não
+# disputam dados.
+verificar-api:
 	scripts/checar-nomes-da-nuvem.sh
 	scripts/checar-ffmpeg.sh
 	uv run --locked ruff check
 	uv run --locked ruff format --check
 	uv run --locked mypy api
-	uv run --locked pytest
+	uv run --locked pytest -n auto
+
+verificar-web:
 	npm run --prefix web lint
 	npm run --prefix web typecheck
 	npm run --prefix web test
@@ -61,9 +68,21 @@ revogar-chave:
 atribuir-papeis:
 	uv run --locked python -m api.atribuir_papeis "$(EMAIL)" "$(PAPEIS)"
 
+# Correção manual do estado de um Job (#289), com motivo e auditoria: make corrigir-estado JOB=... ESTADO=concluido|falhou MOTIVO=...
+corrigir-estado:
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.correcao_de_estado "$(JOB)" "$(ESTADO)" "$(MOTIVO)"
+
 # Carga inicial do catálogo de pessoas (#108), a partir do api/programas.toml; idempotente.
 carregar-catalogo:
 	uv run --locked python -m api.carregar_catalogo
+
+# Carga inicial do catálogo de marcas (#150), a partir dos comerciais das Decupagens; idempotente.
+carregar-marcas:
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.carregar_marcas
 
 # Tipos de correção que exigem aprovação de Curador (E3): make definir-aprovacao TIPOS=pessoa.renomear,pauta.titulo (vazio: nenhum)
 definir-aprovacao:
@@ -95,12 +114,29 @@ criar-colecao-da-busca:
 medir-busca:
 	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)
 
-# Sonda da busca: 15 consultas no dev, com o corte do serviço, e um veredito por consulta.
+# Sonda da busca: as consultas de api/consultas_da_sonda.toml no dev, com o corte do serviço, e um veredito por consulta.
 sondar-busca:
 	$(AMBIENTE_DA_BUSCA) \
 	BUSCA_DISTANCIA_MAXIMA="$${BUSCA_DISTANCIA_MAXIMA:-$$(terraform -chdir=infra output -raw busca_distancia_maxima)}" \
 	BUSCA_PALAVRAS_MINIMAS="$${BUSCA_PALAVRAS_MINIMAS:-$$(terraform -chdir=infra output -raw busca_palavras_minimas)}" \
 	uv run --locked python -m api.sondar_busca
+
+# Comparação de duas leituras da tela do mesmo vídeo (#233), sem nuvem:
+# make comparar-leituras REFERENCIA=<json> NOVA=<json> [OPCOES="--lidos-nova N --segundos-nova S --segundos-referencia S"]
+comparar-leituras:
+	uv run --locked python -m api.comparar_leituras "$(REFERENCIA)" "$(NOVA)" $(OPCOES)
+
+# Comparação dos motores do inventário de objetos (#244): make comparar-objetos JOB=<id> [PASTA=comparacao-objetos]
+# Roda o Job do Florence-2 com o destino alternativo (a Decupagem não muda) e, aqui, a
+# conversão e os modelos do Gemini; guarda por motor o inventário, os tokens, o tempo e o custo.
+# MODELOS_DA_COMPARACAO e PRECOS_DOS_MODELOS (modelo=entrada:saida, US$ por milhão de tokens) vêm do ambiente.
+comparar-objetos:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	REGIAO_GPU="$${REGIAO_GPU:-$$(terraform -chdir=infra output -raw regiao_gpu)}" \
+	JOB_DE_OBJETOS_GPU="$${JOB_DE_OBJETOS_GPU:-$$(terraform -chdir=infra output -raw job_de_objetos_gpu)}" \
+	uv run --locked python -m api.comparar_objetos "$(JOB)" "$(or $(PASTA),comparacao-objetos)"
 
 # Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
 # make reindexar [JOB=<id>]. Apaga e regrava o vídeo; repetir dá o mesmo resultado.
@@ -109,3 +145,73 @@ reindexar:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.indexacao $(JOB)
+
+# Copia no BigQuery (#260) as decupagens dos Jobs concluídos, ou a de um Job: make copiar-para-bigquery [JOB=<id>].
+# Troca as linhas do vídeo; repetir dá o mesmo resultado. Nomes vêm do Terraform, salvo se já vierem no ambiente.
+copiar-para-bigquery:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	BIGQUERY_DATASET="$${BIGQUERY_DATASET:-$$(terraform -chdir=infra output -raw bigquery_dataset)}" \
+	BIGQUERY_TABELA="$${BIGQUERY_TABELA:-$$(terraform -chdir=infra output -raw bigquery_tabela)}" \
+	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
+	uv run --locked python -m api.copiar_para_bigquery $(JOB)
+
+# Reprocessa o acervo de propósito (#250): make reprocessar-versao [DE=<versão ou anterior>] [LIMITE=<n>]
+# Lista os Jobs concluídos de versão do pipeline anterior à atual (api/versao_pipeline.py) e o custo
+# estimado (CUSTO_POR_HORA_USD, opcional). Só com CONFIRMAR=1 reprocessa, em lotes, pela análise.
+reprocessar-versao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	WORKFLOW_REGIAO="$${WORKFLOW_REGIAO:-$$(terraform -chdir=infra output -raw workflow_regiao)}" \
+	WORKFLOW_VALIDACAO="$${WORKFLOW_VALIDACAO:-$$(terraform -chdir=infra output -raw workflow_validacao)}" \
+	CONFIRMAR="$(CONFIRMAR)" \
+	uv run --locked python -m api.reprocessar_versao "$(DE)" "$(LIMITE)"
+
+# Passada de comparação (#247): make passada-de-comparacao JOB=<id> MODELO=<modelo do Gemini>
+# Roda a análise inteira do Job concluído com outro modelo (sem escalonamento) e grava a passada
+# ao lado da Decupagem, que não muda. PRECOS_DOS_MODELOS (modelo=entrada:saida, US$ por milhão
+# de tokens) vem do ambiente; JANELAS_EM_PARALELO é opcional (1 por padrão).
+passada-de-comparacao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.passadas "$(JOB)" "$(MODELO)"
+
+# Compara a decupagem do Job com uma passada (#248): make comparar-passadas JOB=<id> [PASSADA=<id>]
+# ou JOBS=<id>,<id>,... (soma por requisito, última passada de cada Job; MODELO= filtra a passada).
+# Grava Markdown e JSON em PASTA (comparacao-passadas). PRECOS_DOS_MODELOS, DATA_DA_TABELA_DE_PRECOS
+# e, opcional, TOKENS_DO_JOB (job=entrada:saida,...) vêm do ambiente.
+comparar-passadas:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.comparar_passadas "$(or $(JOBS),$(JOB))" "$(PASSADA)" "$(MODELO)" "$(PASTA)"
+
+# Tempo de revisão por vídeo e por pessoa, em CSV (#251): make tempo-de-revisao [DESDE=2026-11-01]
+tempo-de-revisao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	uv run --locked python -m api.tempo_de_revisao "$(DESDE)"
+
+# Casos de regressão das correções em vigor (#253): make exportar-regressao [PASTA=evals/regressao/casos]
+exportar-regressao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.regressao "$(PASTA)"
+
+# Taxa de correção por tipo, programa e versão do pipeline, em CSV (#265):
+# make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO, UTC, inclusive)
+taxa-de-correcao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.taxa_de_correcao "$(DESDE)" "$(ATE)" "$(PROGRAMA)"

@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest'
 
 // Um `<video>` por miniatura não serve para uma lista de momentos (#162): o quadro vem do JPEG.
-// O player do Visualizador é o único `<video>` do redesenho; `Video.tsx` é a tela anterior, que o #165 apaga.
-const PERMITIDOS = ['./Visualizador.tsx', './Video.tsx']
+// O player do Visualizador é o único `<video>` da tela.
+const PERMITIDOS = ['./Visualizador.tsx']
 
 const fontes = import.meta.glob(['./**/*.ts', './**/*.tsx', '!./**/*.test.*'], {
   query: '?raw',

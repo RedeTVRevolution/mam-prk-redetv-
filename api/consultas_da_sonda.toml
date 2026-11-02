@@ -1,0 +1,118 @@
+# Consultas da `make sondar-busca` (#258). Cada [[consulta]] tem:
+#   texto      a consulta digitada
+#   termo      (opcional) o critério escrito: um momento é pertinente se o motivo cita o termo
+#              (sem distinguir maiúsculas). Sem termo nem `pertinentes`, o caso `ausente` pede
+#              que nenhum vídeo volte; só com `pertinentes`, não há veredito, só o aceite.
+#   teto       (opcional) máximo de momentos no todo; sem ele, sem limite
+#   visual     (opcional) o modo visual da busca (#269): o vetor do quadro-chave entra na fusão;
+#              sem o índice do quadro a consulta roda como a comum
+#   exatos     (opcional) os que citam o termo vêm antes dos parecidos, e são `teto` (pede os dois)
+#   programa, desde, ate   (opcional) filtros da consulta, como a tela os põe (datas sem aspas:
+#              desde = 2024-05-01)
+#   pertinentes (opcional) momentos que contam como pertinentes, por vídeo e tempo (o momento
+#              conta se toca o intervalo):
+#              [{ job = "<início do id do Job>", de_s = 10, ate_s = 25 }]
+# Pertinente = casa com algum item de `pertinentes` ou cita o `termo`. Consulta sem nenhum
+# dos dois roda e mostra os resultados, mas fica fora da conta do aceite (80% dos 5 primeiros).
+# Os 20 casos editoriais do #259 entram aqui, no fim, no mesmo formato.
+
+[[consulta]]
+texto = "terno"
+termo = "terno"
+teto = 3
+
+[[consulta]]
+texto = "paletó"
+termo = "terno"
+teto = 4
+
+# 7 aparições da calça vinho nos 3 clipes; o cropped vinho e a calça bege vêm depois.
+[[consulta]]
+texto = "calça vinho"
+termo = "calça vinho"
+teto = 7
+exatos = true
+
+[[consulta]]
+texto = "Flávia Noronha"
+termo = "flávia"
+teto = 30
+
+[[consulta]]
+texto = "apresentador de terno"
+termo = "terno"
+teto = 30
+
+[[consulta]]
+texto = "remédio barato"
+termo = "medicamento"
+teto = 25
+
+[[consulta]]
+texto = "sorteio de prêmios"
+termo = "prêmios"
+teto = 15
+
+[[consulta]]
+texto = "tchau"
+termo = "tchau"
+teto = 15
+
+[[consulta]]
+texto = "ultrafarma"
+termo = "ultrafarma"
+teto = 25
+
+# Objetos de cena (#245): o inventário no registro do plano e os de destaque 3.
+# Gabarito do #121 (o carro BYD, as motos no telão do Bolão) e do programa FAMA
+# (os livros, a revista, o microfone da RedeTV!).
+[[consulta]]
+texto = "carro BYD"
+termo = "byd"
+teto = 30
+
+[[consulta]]
+texto = "motos no telão"
+termo = "moto"
+teto = 30
+
+[[consulta]]
+texto = "livros"
+termo = "livro"
+teto = 30
+
+[[consulta]]
+texto = "revista"
+termo = "revista"
+teto = 30
+
+[[consulta]]
+texto = "microfone da RedeTV!"
+termo = "microfone"
+teto = 30
+
+# Nada nos vídeos fala disso: nenhum vídeo deve voltar.
+[[consulta]]
+texto = "bicicleta"
+
+[[consulta]]
+texto = "cachorro"
+
+[[consulta]]
+texto = "foguete espacial"
+
+[[consulta]]
+texto = "receita de bolo de chocolate"
+
+[[consulta]]
+texto = "jogo de futebol no estádio"
+
+[[consulta]]
+texto = "xyzzy"
+
+# Consultas visuais (#269): o termo é o que a descrição do plano costuma citar.
+[[consulta]]
+texto = "pessoa de terno em estúdio"
+termo = "terno"
+teto = 30
+visual = true

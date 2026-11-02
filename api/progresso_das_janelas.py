@@ -8,9 +8,10 @@ Decupagem continua a da primeira passada; `refeita` marca a janela que o escalon
 já decupou de novo.
 """
 
+import logging
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.decupagem import Decupagem
 from api.janelas import EstadoJanela, Situacao
@@ -47,6 +48,19 @@ class JanelaGravada(BaseModel):
         )
 
 
+log = logging.getLogger(__name__)
+
+
+def ler_janela_gravada(job_id: str, conteudo: str | bytes) -> JanelaGravada | None:
+    """A janela gravada, ou `None` se não passa no esquema de hoje (gravada antes de uma
+    regra nova): conta como não gravada, a análise decupa de novo e a retomada não cai."""
+    try:
+        return JanelaGravada.model_validate_json(conteudo)
+    except ValidationError as e:
+        log.warning("janela gravada do Job %s fora do esquema, refeita: %s", job_id, e)
+        return None
+
+
 class JanelasDoJob(Protocol):
     """Porta do progresso das janelas. Cada janela tem o seu registro: gravar janelas
     diferentes ao mesmo tempo é seguro."""
@@ -55,16 +69,24 @@ class JanelasDoJob(Protocol):
 
     def gravar(self, job_id: str, janela: JanelaGravada) -> None: ...
 
+    def apagar(self, job_id: str) -> None:
+        """Descarta o progresso do Job, para a análise recomeçar do zero."""
+        ...
+
 
 class JanelasEmMemoria:
     def __init__(self) -> None:
         self._guardadas: dict[str, dict[int, str]] = {}
 
     def ler(self, job_id: str) -> dict[int, JanelaGravada]:
-        return {
-            indice: JanelaGravada.model_validate_json(conteudo)
+        lidas = {
+            indice: ler_janela_gravada(job_id, conteudo)
             for indice, conteudo in self._guardadas.get(job_id, {}).items()
         }
+        return {i: g for i, g in lidas.items() if g is not None}
 
     def gravar(self, job_id: str, janela: JanelaGravada) -> None:
         self._guardadas.setdefault(job_id, {})[janela.indice] = janela.model_dump_json()
+
+    def apagar(self, job_id: str) -> None:
+        self._guardadas.pop(job_id, None)

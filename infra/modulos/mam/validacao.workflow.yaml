@@ -1,0 +1,1076 @@
+# Workflows da validação (#38): recebe o evento do Eventarc (upload completo na
+# quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
+# falhou, salvo se estiver cancelado. Depois, só se o Job ficou em `analisando`, roda em
+# paralelo a transcrição e a leitura da tela (E1, ADR 0007: cada uma num Job com GPU em
+# `${regiao_gpu}`, com o Job em CPU de `${regiao}` como plano B) e, quando as duas terminam,
+# o Job de análise. Com o Job `concluido`, vêm a
+# identificação (sem internet), as referências (com internet, só nomes) e a comparação (sem
+# internet) (#112), depois os quadros-chave (#115), o inventário de objetos (#244) e a indexação: se um deles falha, o Job
+# de análise já concluiu e a falha só vai ao log e à etapa, e o passo seguinte roda. A análise é um Job, e não uma
+# chamada HTTP, porque passa do teto de 1800 s da chamada do Workflows (#127).
+# Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
+# ${job_de_transcricao}, ${job_de_ocr}, ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
+# ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
+# ${job_de_objetos_gpu}, ${motor_objetos}, ${job_de_inventario} (o inventário de objetos, #244:
+# o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
+# entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
+# ${job_de_analise}, ${job_de_identificacao}, ${job_de_referencias}, ${job_de_comparacao},
+# ${job_de_quadros}, ${job_de_indexacao}.
+main:
+  params: [evento]
+  steps:
+    # Duas entradas: o evento do Eventarc (upload completo, roda tudo) e o reprocessamento
+    # da API (#147), com `job_id` e `etapa_inicial`: a etapa e as seguintes rodam, as
+    # anteriores já concluíram e não rodam de novo.
+    - escolhe_a_entrada:
+        switch:
+          - condition: $${map.get(evento, "etapa_inicial") != null}
+            next: tira_o_id_do_reprocessamento
+    - tira_o_id:
+        assign:
+          # O objeto na quarentena tem o nome do id do Job.
+          - job_id: $${evento.data.name}
+          - etapa_inicial: validacao
+          - roda_a_transcricao: true
+          - roda_a_leitura_da_tela: true
+        next: parte_da_etapa
+    - tira_o_id_do_reprocessamento:
+        assign:
+          - job_id: $${evento.job_id}
+          - etapa_inicial: $${evento.etapa_inicial}
+          # Reprocessar a transcrição refaz as duas (o reprocessar apaga o registro da
+          # leitura da tela, que vem depois dela); reprocessar só a leitura da tela não
+          # mexe na transcrição, que já concluiu.
+          - roda_a_transcricao: true
+          - roda_a_leitura_da_tela: true
+    - parte_da_etapa:
+        switch:
+          - condition: $${etapa_inicial == "transcricao"}
+            next: roda_em_paralelo
+          - condition: $${etapa_inicial == "leitura_da_tela"}
+            next: so_a_leitura_da_tela
+          - condition: $${etapa_inicial == "analise"}
+            next: inicia_analise
+          - condition: $${etapa_inicial == "identificacao"}
+            next: inicia_identificacao
+          - condition: $${etapa_inicial == "referencias"}
+            next: inicia_referencias
+          - condition: $${etapa_inicial == "comparacao"}
+            next: inicia_comparacao
+          - condition: $${etapa_inicial == "quadros_chave"}
+            next: inicia_quadros_chave
+          - condition: $${etapa_inicial == "inventario_de_objetos"}
+            next: inicia_inventario_de_objetos
+          - condition: $${etapa_inicial == "indexacao"}
+            next: inicia_indexacao
+    - inicia_validacao:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: validacao
+    - valida:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_validacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de validação tem até 10800 s.
+            connector_params:
+              timeout: 11100
+        except:
+          as: e
+          # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
+          steps:
+            - grava_a_falha_de_validacao:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: validacao
+                  falhou_na_execucao: true
+            - le_antes_de_marcar:
+                try:
+                  call: googleapis.firestore.v1.projects.databases.documents.get
+                  args:
+                    name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  result: antes
+                except:
+                  as: erro_da_leitura
+                  steps:
+                    # Um objeto sem Job correspondente não cria documento.
+                    - sem_job_para_marcar:
+                        switch:
+                          - condition: $${erro_da_leitura.code == 404}
+                            next: encerra_com_falha
+                    - repassa_o_erro_da_releitura:
+                        raise: $${erro_da_leitura}
+            # Um Job cancelado continua cancelado (#51).
+            - nao_sobrescreve_cancelado:
+                switch:
+                  - condition: $${antes.fields.estado.stringValue == "cancelado"}
+                    next: encerra_com_falha
+            - marca_como_falhou:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  # Só vale se o Job não mudou desde a leitura (um cancelamento no meio).
+                  currentDocument:
+                    updateTime: $${antes.updateTime}
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: arquivo_corrompido
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
+            - encerra_com_falha:
+                raise: $${e}
+    - encerra_validacao:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: validacao
+          falhou_na_execucao: false
+    - le_o_job:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: documento
+        except:
+          as: e
+          steps:
+            # Um objeto sem Job correspondente não tem o que analisar.
+            - sem_job:
+                switch:
+                  - condition: $${e.code == 404}
+                    next: fim
+            - repassa_o_erro_da_leitura:
+                raise: $${e}
+    - so_se_analisando:
+        switch:
+          - condition: $${documento.fields.estado.stringValue == "analisando"}
+            next: roda_em_paralelo
+        next: fim
+    - so_a_leitura_da_tela:
+        assign:
+          - roda_a_transcricao: false
+        next: roda_em_paralelo
+    # A transcrição e a leitura da tela rodam ao mesmo tempo, cada uma no seu ramo, com o
+    # próprio registro de etapa e o próprio tratamento de falha (`etapa_com_gpu`). Com
+    # `continueAll` o ramo que não falhou termina e registra o fim; no fim, a falha de um
+    # ramo falha o passo, e a análise nunca começa. O `etapa_atual` fica com a transcrição
+    # enquanto os dois rodam (ou com a leitura da tela, se só ela roda): a API e a tela leem
+    # um único campo, e o fim de uma etapa em paralelo não o limpa.
+    - roda_em_paralelo:
+        try:
+          parallel:
+            exception_policy: continueAll
+            branches:
+              - ramo_da_transcricao:
+                  steps:
+                    - transcreve_se_preciso:
+                        switch:
+                          - condition: $${roda_a_transcricao}
+                            steps:
+                              - transcreve:
+                                  call: etapa_com_gpu
+                                  args:
+                                    job_id: $${job_id}
+                                    etapa: transcricao
+                                    job_gpu: ${job_de_transcricao_gpu}
+                                    job_cpu: ${job_de_transcricao}
+                                    # O conector desiste em 1800 s por padrão; o Job de transcrição
+                                    # com GPU tem até 10800 s, e o em CPU, até 21600 s.
+                                    timeout_gpu: 11100
+                                    timeout_cpu: 21900
+                                    codigo_da_falha: transcricao_falhou
+                                    mostra_a_etapa: true
+              - ramo_da_leitura_da_tela:
+                  steps:
+                    - le_a_tela_se_preciso:
+                        switch:
+                          - condition: $${roda_a_leitura_da_tela}
+                            steps:
+                              - le_a_tela:
+                                  call: etapa_com_gpu
+                                  args:
+                                    job_id: $${job_id}
+                                    etapa: leitura_da_tela
+                                    job_gpu: ${job_de_ocr_gpu}
+                                    job_cpu: ${job_de_ocr}
+                                    # O Job de OCR com GPU tem até 21600 s, e o em CPU, até 28800 s.
+                                    timeout_gpu: 21900
+                                    timeout_cpu: 29100
+                                    codigo_da_falha: ocr_falhou
+                                    mostra_a_etapa: $${not roda_a_transcricao}
+        except:
+          as: e
+          steps:
+            - limpa_a_etapa_de_antes_de_falhar:
+                call: limpa_a_etapa_atual
+                args:
+                  job_id: $${job_id}
+            - encerra_o_paralelo_com_falha:
+                raise: $${e}
+    - inicia_analise:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: analise
+    - analisa:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_analise}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de análise tem até 21600 s
+            # (as janelas de um programa de até 4 h, a Flex com 600 s por chamada).
+            connector_params:
+              timeout: 21900
+        except:
+          as: e
+          steps:
+            - grava_a_falha_de_analise:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: analise
+                  falhou_na_execucao: true
+            # O Job de análise já trata a falha da análise (o Job vai a `falhou`); aqui
+            # cobre o que o impediu de chegar lá (tempo esgotado, memória estourada).
+            # Só marca se o Job segue em `analisando` e não mudou desde a leitura.
+            - rele_o_job:
+                call: googleapis.firestore.v1.projects.databases.documents.get
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                result: atual
+            - so_se_ainda_analisando:
+                switch:
+                  - condition: $${atual.fields.estado.stringValue != "analisando"}
+                    next: encerra_a_analise_com_falha
+            - marca_analise_como_falha:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  currentDocument:
+                    updateTime: $${atual.updateTime}
+                  updateMask:
+                    fieldPaths: [estado, codigo_falha, atualizado_em]
+                  body:
+                    fields:
+                      estado:
+                        stringValue: falhou
+                      codigo_falha:
+                        stringValue: analise_falhou
+                      atualizado_em:
+                        timestampValue: $${time.format(sys.now())}
+            - encerra_a_analise_com_falha:
+                raise: $${e}
+    - encerra_analise:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: analise
+          falhou_na_execucao: false
+    - le_o_job_depois_da_analise:
+        call: googleapis.firestore.v1.projects.databases.documents.get
+        args:
+          name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+        result: depois_da_analise
+    # Identificação, referências, comparação, quadros-chave e indexação só valem com o
+    # Job `concluido`; uma análise que derrubou o Job (sai sem erro) não as inicia.
+    - so_se_concluido:
+        switch:
+          - condition: $${depois_da_analise.fields.estado.stringValue == "concluido"}
+            next: inicia_identificacao
+        next: fim
+    - inicia_identificacao:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: identificacao
+    - identifica:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_identificacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de identificação tem até 3600 s. Ele grava o
+            # próprio resultado da etapa (`incompleto` fica `falhou`), por isso não há `encerra_`.
+            connector_params:
+              timeout: 3900
+        except:
+          as: e
+          steps:
+            - grava_a_falha_de_identificacao:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: identificacao
+                  falhou_na_execucao: true
+            # O Job já está concluído; sem a identificação a Decupagem segue como estava. A falha
+            # fica na etapa e no log, e o salto evita gravar a etapa por cima como `concluida`.
+            - registra_a_falha_de_identificacao:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"a identificação falhou para " + job_id}
+                next: inicia_referencias
+    - inicia_referencias:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: referencias
+    - busca_as_referencias:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_referencias}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de referências tem até 1800 s. Único com internet.
+            connector_params:
+              timeout: 2100
+        except:
+          as: e
+          steps:
+            - grava_a_falha_de_referencias:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: referencias
+                  falhou_na_execucao: true
+            # O Job já está concluído; sem as fotos de referência a Decupagem segue como estava. A falha
+            # fica na etapa e no log, e o salto evita gravar a etapa por cima como `concluida`.
+            - registra_a_falha_de_referencias:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"a busca das referências falhou para " + job_id}
+                next: inicia_comparacao
+    - encerra_referencias:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: referencias
+          falhou_na_execucao: false
+    - inicia_comparacao:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: comparacao
+    - compara:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_comparacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de comparação tem até 3600 s. Ele grava o
+            # próprio resultado da etapa, por isso não há `encerra_`.
+            connector_params:
+              timeout: 3900
+        except:
+          as: e
+          steps:
+            - grava_a_falha_de_comparacao:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: comparacao
+                  falhou_na_execucao: true
+            # O Job já está concluído; sem a comparação a Decupagem segue como estava. A falha
+            # fica na etapa e no log, e o salto evita gravar a etapa por cima como `concluida`.
+            - registra_a_falha_de_comparacao:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"a comparação falhou para " + job_id}
+                next: inicia_quadros_chave
+    - inicia_quadros_chave:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: quadros_chave
+    - tira_os_quadros:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_quadros}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de quadros tem até 3600 s.
+            connector_params:
+              timeout: 3900
+        except:
+          as: e
+          steps:
+            - grava_a_falha_de_quadros_chave:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: quadros_chave
+                  falhou_na_execucao: true
+            # O Job já está concluído; sem os JPEGs a Decupagem segue valendo. A falha
+            # fica na etapa e no log, e o salto evita o `encerra_quadros_chave`, que a
+            # gravaria por cima como `concluida`.
+            - registra_a_falha_dos_quadros:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"quadros-chave falharam para " + job_id}
+                next: inicia_inventario_de_objetos
+    - encerra_quadros_chave:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: quadros_chave
+          falhou_na_execucao: false
+    - inicia_inventario_de_objetos:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: inventario_de_objetos
+    - escolhe_o_motor_de_objetos:
+        switch:
+          - condition: $${"${motor_objetos}" == "florence"}
+            next: roda_o_florence
+        next: roda_o_inventario
+    # O Florence-2 num Job com GPU de `${regiao_gpu}`, sem plano B em CPU: esgotada a espera
+    # por GPU, a falha sobe (#244). O inventário em CPU lê o que ele gravou.
+    - roda_o_florence:
+        try:
+          call: roda_o_job_com_gpu
+          args:
+            job_id: $${job_id}
+            etapa: inventario_de_objetos
+            job_gpu: ${job_de_objetos_gpu}
+            # O conector desiste em 1800 s por padrão; o Job de objetos tem até 10800 s.
+            timeout_gpu: 11100
+        except:
+          as: e
+          steps:
+            - grava_a_falha_do_florence:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: inventario_de_objetos
+                  falhou_na_execucao: true
+            # O Job já está concluído; sem o inventário a Decupagem segue valendo. A falha
+            # fica na etapa e no log, e o salto evita o `encerra_inventario_de_objetos`.
+            - registra_a_falha_do_florence:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"o Florence-2 falhou para " + job_id}
+                next: inicia_indexacao
+    # O Job em CPU: converte o resultado do Florence-2 (motor florence) ou olha os
+    # quadros-chave (motor gemini), e grava o inventário na Decupagem.
+    - roda_o_inventario:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_inventario}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job do inventário tem até 3600 s.
+            connector_params:
+              timeout: 3900
+        except:
+          as: e
+          steps:
+            - grava_a_falha_do_inventario:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: inventario_de_objetos
+                  falhou_na_execucao: true
+            - registra_a_falha_do_inventario:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"o inventário de objetos falhou para " + job_id}
+                next: inicia_indexacao
+    - encerra_inventario_de_objetos:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: inventario_de_objetos
+          falhou_na_execucao: false
+    - inicia_indexacao:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: indexacao
+    - indexa:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_indexacao}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job de indexação tem até 1800 s.
+            connector_params:
+              timeout: 2100
+        except:
+          as: e
+          steps:
+            - grava_a_falha_de_indexacao:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: indexacao
+                  falhou_na_execucao: true
+            # O Job já está concluído; a falha fica no estado da indexação, na etapa e no
+            # log, e o salto evita o `encerra_indexacao`, que a gravaria como `concluida`.
+            - registra_a_falha_da_indexacao:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"indexação falhou para " + job_id}
+                next: fim
+    - encerra_indexacao:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: indexacao
+          falhou_na_execucao: false
+    - fim:
+        return: $${job_id}
+
+# Tempo de cada etapa (#146): o início e o fim vão para `etapas.<nome>` do Job, com o
+# mesmo formato de `api.ciclo_de_vida`. Não é transição: não mexe em `estado`. Uma falha
+# aqui só vai ao log, para a medição nunca derrubar o processamento; o `exists: true`
+# faz um objeto sem Job correspondente não criar documento.
+marca_inicio:
+  params: [job_id, etapa, mostra_a_etapa: true]
+  steps:
+    - monta_o_inicio:
+        assign:
+          - agora: $${time.format(sys.now())}
+          - por_etapa: {}
+          - por_etapa[etapa]:
+              mapValue:
+                fields:
+                  inicio:
+                    timestampValue: $${agora}
+          - campos: $${["etapas." + etapa, "atualizado_em"]}
+    # Das etapas em paralelo, só uma mostra a etapa atual (o campo é um só).
+    - confere_se_mostra_a_etapa:
+        switch:
+          - condition: $${mostra_a_etapa}
+            assign:
+              - campos: $${list.concat(campos, ["etapa_atual"])}
+    - grava_o_inicio:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.patch
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            currentDocument:
+              exists: true
+            updateMask:
+              fieldPaths: $${campos}
+            body:
+              fields:
+                etapa_atual:
+                  stringValue: $${etapa}
+                etapas:
+                  mapValue:
+                    fields: $${por_etapa}
+                atualizado_em:
+                  timestampValue: $${agora}
+        except:
+          as: erro_do_inicio
+          steps:
+            - registra_o_erro_do_inicio:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"início da etapa " + etapa + " não gravado para " + job_id}
+    - fim_do_inicio:
+        return: null
+
+marca_fim:
+  params: [job_id, etapa, falhou_na_execucao, limpa_a_etapa: true, confere_o_estado: true]
+  steps:
+    # Sinal do #286: a execução que falhou (erro, tempo esgotado, memória estourada) vai ao
+    # log que a métrica `mam_falhas_por_etapa` conta. A falha que o próprio Job trata e
+    # termina sem erro (a análise que derruba o Job, a identificação incompleta) sai do
+    # Job (`api/sinais.py`); a recusa do arquivo na validação é do arquivo, não conta.
+    - so_se_a_execucao_falhou:
+        switch:
+          - condition: $${not falhou_na_execucao}
+            next: le_o_estado
+    - registra_a_falha_da_etapa:
+        call: sys.log
+        args:
+          severity: WARNING
+          json:
+            evento: falha_de_etapa
+            etapa: $${etapa}
+            job_id: $${job_id}
+            motivo: a execução do Job falhou (erro, tempo esgotado ou memória estourada)
+    - le_o_estado:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: documento_da_etapa
+        except:
+          as: erro_da_leitura_da_etapa
+          steps:
+            - registra_o_erro_da_leitura:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"fim da etapa " + etapa + " não gravado para " + job_id}
+            - sai_sem_gravar:
+                return: null
+    # Sem o início (o `marca_inicio` falhou), gravar só o fim deixaria a etapa sem
+    # `inicio` e o Job ilegível para a API.
+    - so_se_iniciada:
+        switch:
+          - condition: $${map.get(documento_da_etapa.fields, ["etapas", "mapValue", "fields", etapa]) == null}
+            next: fim_do_fim
+    - decide_o_resultado:
+        assign:
+          # Os Jobs de validação e de análise terminam sem erro quando derrubam o Job
+          # pelo ciclo de vida: o resultado vem do estado, e não só da execução. As etapas
+          # em paralelo não conferem o estado: o Job que falhou pelo outro ramo não faz
+          # falhar a que terminou bem (o reprocessar recomeça da primeira etapa `falhou`).
+          - resultado: concluida
+    - confere_a_execucao:
+        switch:
+          - condition: $${falhou_na_execucao or (confere_o_estado and documento_da_etapa.fields.estado.stringValue == "falhou")}
+            assign:
+              - resultado: falhou
+    - monta_o_fim:
+        assign:
+          - agora: $${time.format(sys.now())}
+          - por_etapa: {}
+          - por_etapa[etapa]:
+              mapValue:
+                fields:
+                  fim:
+                    timestampValue: $${agora}
+                  resultado:
+                    stringValue: $${resultado}
+    # Tempo da etapa (#288): o painel de tempo por etapa lê esta linha (`mam_duracao_da_etapa`),
+    # só das etapas concluídas, para a falha não puxar o p50 e o p95 para baixo.
+    - registra_a_duracao_da_etapa:
+        switch:
+          - condition: $${resultado == "concluida"}
+            call: sys.log
+            args:
+              severity: INFO
+              json:
+                evento: duracao_da_etapa
+                etapa: $${etapa}
+                job_id: $${job_id}
+                duracao_s: $${sys.now() - time.parse(documento_da_etapa.fields.etapas.mapValue.fields[etapa].mapValue.fields.inicio.timestampValue)}
+    # O fim de uma etapa em paralelo não limpa o `etapa_atual`: a outra pode estar rodando.
+    - monta_os_campos_do_fim:
+        assign:
+          - campos: $${["etapas." + etapa + ".fim", "etapas." + etapa + ".resultado", "atualizado_em"]}
+    - confere_se_limpa_a_etapa:
+        switch:
+          - condition: $${limpa_a_etapa}
+            assign:
+              - campos: $${list.concat(campos, ["etapa_atual"])}
+    - grava_o_fim:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.patch
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            currentDocument:
+              exists: true
+            updateMask:
+              fieldPaths: $${campos}
+            body:
+              fields:
+                etapas:
+                  mapValue:
+                    fields: $${por_etapa}
+                atualizado_em:
+                  timestampValue: $${agora}
+        except:
+          as: erro_do_fim
+          steps:
+            - registra_o_erro_do_fim:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"fim da etapa " + etapa + " não gravado para " + job_id}
+    - fim_do_fim:
+        return: null
+
+# Uma etapa de GPU (a transcrição ou a leitura da tela), num ramo do paralelo: abre a etapa,
+# roda o Job com GPU com as novas tentativas e o plano B em CPU (`roda_o_job_com_gpu`) e
+# fecha a etapa. Se falha, grava o fim como `falhou` e, se o Job segue em `analisando`
+# e não mudou desde a leitura, o derruba com o código da etapa. A falha sobe para o
+# paralelo, que não deixa a análise começar.
+etapa_com_gpu:
+  params: [job_id, etapa, job_gpu, job_cpu, timeout_gpu, timeout_cpu, codigo_da_falha, mostra_a_etapa]
+  steps:
+    - inicia_a_etapa:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: $${etapa}
+          mostra_a_etapa: $${mostra_a_etapa}
+    - roda_a_etapa:
+        try:
+          call: roda_o_job_com_gpu
+          args:
+            job_id: $${job_id}
+            etapa: $${etapa}
+            job_gpu: $${job_gpu}
+            job_cpu: $${job_cpu}
+            timeout_gpu: $${timeout_gpu}
+            timeout_cpu: $${timeout_cpu}
+        except:
+          as: e
+          steps:
+            - grava_a_falha_da_etapa:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: $${etapa}
+                  falhou_na_execucao: true
+                  limpa_a_etapa: false
+            # O Job já derruba o Job pelo ciclo de vida; aqui cobre o que o impediu de chegar
+            # lá (tempo esgotado, memória estourada). Só marca se o Job segue em `analisando`
+            # e não mudou desde a leitura.
+            - prepara_a_marcacao:
+                assign:
+                  - releituras: 0
+            - rele_antes_da_falha:
+                call: googleapis.firestore.v1.projects.databases.documents.get
+                args:
+                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                result: durante
+            - so_se_ainda_analisando:
+                switch:
+                  - condition: $${durante.fields.estado.stringValue != "analisando"}
+                    next: encerra_a_etapa_com_falha
+            - marca_a_etapa_como_falha:
+                try:
+                  call: googleapis.firestore.v1.projects.databases.documents.patch
+                  args:
+                    name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                    currentDocument:
+                      updateTime: $${durante.updateTime}
+                    updateMask:
+                      fieldPaths: [estado, codigo_falha, atualizado_em]
+                    body:
+                      fields:
+                        estado:
+                          stringValue: falhou
+                        codigo_falha:
+                          stringValue: $${codigo_da_falha}
+                        atualizado_em:
+                          timestampValue: $${time.format(sys.now())}
+                except:
+                  as: erro_da_marcacao
+                  steps:
+                    # O outro ramo gravou no Job entre a leitura e a gravação (o
+                    # `updateTime` mudou): relê e tenta de novo, sem perder o erro `e`.
+                    - conta_a_releitura:
+                        assign:
+                          - releituras: $${releituras + 1}
+                    - rele_de_novo:
+                        switch:
+                          - condition: $${releituras < 5}
+                            next: rele_antes_da_falha
+                    - registra_o_erro_da_marcacao:
+                        call: sys.log
+                        args:
+                          severity: ERROR
+                          text: $${"o Job " + job_id + " não foi marcado com " + codigo_da_falha}
+            - encerra_a_etapa_com_falha:
+                raise: $${e}
+    - encerra_a_etapa:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: $${etapa}
+          falhou_na_execucao: false
+          limpa_a_etapa: false
+          confere_o_estado: false
+
+# O Job com GPU de `${regiao_gpu}`, com novas tentativas só quando falta GPU ou cota, e o Job
+# em CPU de `${regiao}` como plano B. Conta como falta de GPU ou de cota só a falha antes de o
+# contêiner rodar: o pedido recusado por cota (429) ou uma mensagem de cota, capacidade ou
+# recurso esgotado, sem código de saída do contêiner. Uma falha dentro do contêiner (Whisper,
+# Paddle, arquivo) sobe na hora, sem nova tentativa e sem plano B: rodar de novo, por até uma
+# hora, um erro que vai se repetir não ajuda. A espera começa em `${gpu_espera_s}` s, é
+# multiplicada por `${gpu_fator_da_espera}` a cada vez, com teto de `${gpu_espera_maxima_s}` s, e a soma das esperas
+# não passa de `${gpu_espera_total_s}` s (a variável `espera_gpu_minutos` do infra/main.tf, a mesma do
+# teste depois da publicação): é dessa conta que sai o número de tentativas. O registro da
+# etapa recebe onde rodou (`gpu` ou `cpu`) e as tentativas feitas na GPU.
+roda_o_job_com_gpu:
+  params: [job_id, etapa, job_gpu, timeout_gpu, job_cpu: null, timeout_cpu: null]
+  steps:
+    - prepara_as_tentativas:
+        assign:
+          - tentativas: 0
+          - espera: ${gpu_espera_s}
+          - esperado: 0
+    - conta_a_tentativa:
+        assign:
+          - tentativas: $${tentativas + 1}
+    - roda_na_gpu:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: $${"projects/${projeto}/locations/${regiao_gpu}/jobs/" + job_gpu}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            connector_params:
+              timeout: $${timeout_gpu}
+        except:
+          as: erro_da_gpu
+          steps:
+            - le_o_motivo:
+                assign:
+                  # A execução que falhou chega como OperationError, com mensagem genérica
+                  # no topo e o motivo em `operation.error.message`: as duas entram na conta.
+                  - erro_final: $${erro_da_gpu}
+                  - mensagem: $${default(map.get(erro_da_gpu, "message"), "") + " " + default(map.get(erro_da_gpu, ["operation", "error", "message"]), "")}
+                  - codigo_http: $${default(map.get(erro_da_gpu, "code"), 0)}
+                  - faltou_gpu: $${(codigo_http == 429 or text.match_regex(mensagem, "(?i)quota|capacity|resource.?exhausted|insufficient (gpu|resources|capacity)|no available|out of stock")) and not text.match_regex(mensagem, "(?i)exit[(]|exit code|container called")}
+            - falha_dentro_do_conteiner:
+                switch:
+                  - condition: $${not faltou_gpu}
+                    steps:
+                      - registra_a_falha_do_conteiner:
+                          call: sys.log
+                          args:
+                            severity: ERROR
+                            text: $${"o Job " + job_gpu + " falhou dentro do contêiner na tentativa " + string(tentativas) + " para " + job_id + ", sem nova tentativa e sem plano B: " + mensagem}
+                      - marca_a_gpu_da_falha:
+                          call: marca_dispositivo
+                          args:
+                            job_id: $${job_id}
+                            etapa: $${etapa}
+                            dispositivo: gpu
+                            tentativas: $${tentativas}
+                      - repassa_a_falha_do_conteiner:
+                          raise: $${erro_da_gpu}
+            # Falta de GPU ou de cota (#288): o painel da GPU conta estas linhas por etapa.
+            - registra_a_falta_de_gpu:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  json:
+                    evento: falta_de_gpu
+                    etapa: $${etapa}
+                    job_id: $${job_id}
+                    tentativa: $${tentativas}
+            - ainda_cabe_esperar:
+                switch:
+                  - condition: $${esperado + espera <= ${gpu_espera_total_s}}
+                    next: registra_a_nova_tentativa
+                next: confere_se_ha_plano_b
+    - registra_o_sucesso_na_gpu:
+        call: marca_dispositivo
+        args:
+          job_id: $${job_id}
+          etapa: $${etapa}
+          dispositivo: gpu
+          tentativas: $${tentativas}
+    - fim_na_gpu:
+        return: gpu
+    - registra_a_nova_tentativa:
+        call: sys.log
+        args:
+          severity: WARNING
+          text: $${"sem GPU ou sem cota para " + job_gpu + " na tentativa " + string(tentativas) + " de " + job_id + ", nova tentativa em " + string(espera) + " s: " + mensagem}
+    - espera_a_gpu:
+        call: sys.sleep
+        args:
+          seconds: $${espera}
+    - cresce_a_espera:
+        assign:
+          - esperado: $${esperado + espera}
+          - espera: $${math.min(espera * ${gpu_fator_da_espera}, ${gpu_espera_maxima_s})}
+        next: conta_a_tentativa
+    # Sem Job em CPU (o inventário de objetos, #244), esgotada a espera a falha sobe.
+    - confere_se_ha_plano_b:
+        switch:
+          - condition: $${job_cpu == null}
+            steps:
+              - registra_a_falta_de_plano_b:
+                  call: sys.log
+                  args:
+                    severity: WARNING
+                    text: $${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", sem plano B: " + mensagem}
+              - marca_a_gpu_sem_plano_b:
+                  call: marca_dispositivo
+                  args:
+                    job_id: $${job_id}
+                    etapa: $${etapa}
+                    dispositivo: gpu
+                    tentativas: $${tentativas}
+              - repassa_a_falta_de_gpu:
+                  raise: $${erro_final}
+    - registra_o_plano_b:
+        call: sys.log
+        args:
+          severity: WARNING
+          text: $${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", plano B: o Job em CPU " + job_cpu + ": " + mensagem}
+    - marca_a_cpu:
+        call: marca_dispositivo
+        args:
+          job_id: $${job_id}
+          etapa: $${etapa}
+          dispositivo: cpu
+          tentativas: $${tentativas}
+    - roda_na_cpu:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: $${"projects/${projeto}/locations/${regiao}/jobs/" + job_cpu}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: JOB_ID
+                      value: $${job_id}
+          connector_params:
+            timeout: $${timeout_cpu}
+    - fim_na_cpu:
+        return: cpu
+
+# Onde a etapa rodou e quantas tentativas foram feitas na GPU (#239), no mesmo registro da
+# etapa (#146). Como o resto da medição, uma falha aqui só vai ao log.
+marca_dispositivo:
+  params: [job_id, etapa, dispositivo, tentativas]
+  steps:
+    - le_a_etapa:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: documento_do_dispositivo
+        except:
+          as: erro_da_leitura_do_dispositivo
+          steps:
+            - registra_o_erro_da_leitura_do_dispositivo:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"dispositivo da etapa " + etapa + " não gravado para " + job_id}
+            - sai_sem_gravar_o_dispositivo:
+                return: null
+    # Como no `marca_fim`: sem o início, a etapa ficaria sem `inicio` e o Job, ilegível.
+    - so_se_a_etapa_comecou:
+        switch:
+          - condition: $${map.get(documento_do_dispositivo.fields, ["etapas", "mapValue", "fields", etapa]) == null}
+            next: fim_do_dispositivo
+    - monta_o_dispositivo:
+        assign:
+          - agora: $${time.format(sys.now())}
+          - por_etapa: {}
+          - por_etapa[etapa]:
+              mapValue:
+                fields:
+                  dispositivo:
+                    stringValue: $${dispositivo}
+                  tentativas_gpu:
+                    integerValue: $${string(tentativas)}
+    - grava_o_dispositivo:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.patch
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            currentDocument:
+              exists: true
+            updateMask:
+              fieldPaths: $${["etapas." + etapa + ".dispositivo", "etapas." + etapa + ".tentativas_gpu", "atualizado_em"]}
+            body:
+              fields:
+                etapas:
+                  mapValue:
+                    fields: $${por_etapa}
+                atualizado_em:
+                  timestampValue: $${agora}
+        except:
+          as: erro_do_dispositivo
+          steps:
+            - registra_o_erro_do_dispositivo:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"dispositivo da etapa " + etapa + " não gravado para " + job_id}
+    - fim_do_dispositivo:
+        return: null
+
+# Depois de uma falha nas etapas em paralelo, o Job não tem mais etapa em andamento.
+limpa_a_etapa_atual:
+  params: [job_id]
+  steps:
+    - limpa:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.patch
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            currentDocument:
+              exists: true
+            updateMask:
+              fieldPaths: [etapa_atual, atualizado_em]
+            body:
+              fields:
+                atualizado_em:
+                  timestampValue: $${time.format(sys.now())}
+        except:
+          as: erro_da_limpeza
+          steps:
+            - registra_o_erro_da_limpeza:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"etapa atual não limpa para " + job_id}
+    - fim_da_limpeza:
+        return: null

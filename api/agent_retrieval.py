@@ -1,7 +1,7 @@
 """Adaptador do índice da busca no Agent Retrieval (#117, ADR 0006).
 
 Projeto, região, coleção, índices e dimensão chegam por variável de ambiente (o
-`infra/main.tf` as entrega); nada disso é escrito aqui. A rede fica atrás de
+`infra/modulos/mam/main.tf` as entrega); nada disso é escrito aqui. A rede fica atrás de
 `Transporte`: aqui moram a montagem dos pedidos e a leitura das respostas, testadas sem
 rede. Cada vetor tem o seu índice ANN (um índice cobre um só campo de vetor), implantado
 junto com a coleção, e toda busca por vetor leva o `searchHint.indexHint` dele, porque o
@@ -239,6 +239,7 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
         "texto": texto,
         "descricao": texto,
         "quadro": texto,
+        "destaque": numero,
         # Só para o embedding automático, que recusa registro sem texto: a descrição do
         # plano ou o texto da fala, do texto na tela ou do objeto (ADR 0006).
         "significado": texto,
@@ -361,6 +362,7 @@ def _dados(r: Registro) -> dict[str, Any]:
         "texto": r.texto,
         "descricao": r.descricao,
         "quadro": r.quadro,
+        "destaque": r.destaque,
     }
     return dados | {k: v for k, v in opcionais.items() if v is not None}
 
@@ -386,6 +388,7 @@ def _registro(dados: dict[str, Any]) -> Registro:
         texto=dados.get("texto"),
         descricao=dados.get("descricao"),
         quadro=dados.get("quadro"),
+        destaque=dados.get("destaque"),
     )
 
 
@@ -473,6 +476,34 @@ class AgentRetrieval:
         ) and len(
             (r.descricao or r.texto or "").split()
         ) >= self._config.palavras_minimas
+
+    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
+        """Os planos do vídeo com o vetor do quadro, lidos página a página (#271)."""
+        pedido: dict[str, Any] = {
+            "filter": {
+                "$and": [{"job_id": {"$eq": job_id}}, {"tipo": {"$eq": "plano"}}]
+            },
+            "outputFields": {
+                "dataFields": ["id"],
+                "vectorFields": [CAMPO_DO_VETOR_DO_QUADRO],
+            },
+            "pageSize": OBJETOS_POR_PAGINA,
+        }
+        vetores: dict[int, list[float]] = {}
+        while True:
+            pagina = self._chamar("dataObjects:query", pedido)
+            for o in pagina.get("dataObjects", []):
+                valores = (
+                    o.get("vectors", {})
+                    .get(CAMPO_DO_VETOR_DO_QUADRO, {})
+                    .get("dense", {})
+                ).get("values")
+                if valores:
+                    n = int(o["data"]["id"].rsplit(":", 1)[1])
+                    vetores[n] = [float(v) for v in valores]
+            if not pagina.get("nextPageToken"):
+                return vetores
+            pedido = pedido | {"pageToken": pagina["nextPageToken"]}
 
     def total(self) -> int:
         resposta = self._chamar("dataObjects:aggregate", {"aggregate": "COUNT"})

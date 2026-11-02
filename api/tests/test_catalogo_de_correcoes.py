@@ -7,10 +7,20 @@ import pytest
 from api.catalogo_de_correcoes import (
     ROTULOS_DAS_FONTES,
     ROTULOS_DAS_LISTAS,
+    ROTULOS_DAS_RELACOES,
     ROTULOS_DOS_TONS,
 )
 from api.correcoes import TIPOS, Lista, TipoDeCorrecao, TipoNovo, valor_legivel
-from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta
+from api.decupagem import (
+    CATEGORIAS_DE_OBJETO,
+    CORES_BASE,
+    RELACOES_DO_OBJETO,
+    Comercial,
+    FonteDoNome,
+    TextoNaTela,
+    TomDaPauta,
+)
+from api.indice_da_busca import NOME_DA_CATEGORIA
 from api.tests.test_correcoes import AUTORIZACAO, Mundo
 
 
@@ -43,10 +53,30 @@ def test_rota_do_catalogo_lista_tipos_e_vocabularios() -> None:
     assert corpo["prefixos"] == {"acrescentado": "acr-", "nao_identificado": "nid-"}
 
 
+def test_catalogo_traz_as_listas_fechadas_do_objeto() -> None:
+    resposta = Mundo(["editor"]).cliente.get(
+        "/v1/correcoes/catalogo", headers=AUTORIZACAO
+    )
+
+    corpo = resposta.json()
+    assert [o["valor"] for o in corpo["categorias_de_objeto"]] == list(
+        CATEGORIAS_DE_OBJETO
+    )
+    assert {o["valor"]: o["rotulo"] for o in corpo["categorias_de_objeto"]} == (
+        NOME_DA_CATEGORIA
+    )
+    assert [o["valor"] for o in corpo["cores_base"]] == list(CORES_BASE)
+    assert [o["valor"] for o in corpo["relacoes_do_objeto"]] == list(RELACOES_DO_OBJETO)
+    assert {o["valor"]: o["rotulo"] for o in corpo["relacoes_do_objeto"]} == (
+        ROTULOS_DAS_RELACOES
+    )
+
+
 def test_rotulos_cobrem_os_vocabularios_do_esquema() -> None:
     assert set(ROTULOS_DOS_TONS) == set(get_args(TomDaPauta))
     assert set(ROTULOS_DAS_FONTES) == set(get_args(FonteDoNome))
     assert set(ROTULOS_DAS_LISTAS) == set(get_args(Lista))
+    assert set(ROTULOS_DAS_RELACOES) == set(RELACOES_DO_OBJETO)
 
 
 def test_rota_do_catalogo_exige_login() -> None:
@@ -96,6 +126,18 @@ TEXTO = {"tipo": "gc", "texto": "Olá", "inicio_ms": 1000, "fim_ms": 2000}
         ("texto_na_tela.texto", json.dumps({"tipo": "gc", "texto": "Olá"}), "gc: Olá"),
         ("texto_na_tela.acrescentar", json.dumps(TEXTO), "gc: Olá 00:01–00:02"),
         (
+            "pauta.acrescentar",
+            json.dumps(
+                {
+                    "titulo": "Bastidores",
+                    "tom": "descontraido",
+                    "inicio_ms": 0,
+                    "fim_ms": 5000,
+                }
+            ),
+            "Bastidores (descontraído) 00:00–00:05",
+        ),
+        (
             "aparicao.papel_visual",
             json.dumps({"papel": "âncora", "visual": "terno"}),
             "âncora · terno",
@@ -136,6 +178,62 @@ TEXTO = {"tipo": "gc", "texto": "Olá", "inicio_ms": 1000, "fim_ms": 2000}
             "citada no texto 00:00–00:05",
         ),
         ("item.tempos", "32000-60000", "00:32–01:00"),
+        (
+            "objeto.atributos",
+            json.dumps(
+                {
+                    "tipo": "vestido",
+                    "cor_base": ["vermelho", "branco"],
+                    "cor": "vinho",
+                    "detalhe": "renda",
+                    "marca": "Zara",
+                }
+            ),
+            "vestido · vermelho, branco · vinho · renda · Zara",
+        ),
+        (
+            "objeto.atributos",
+            json.dumps(
+                {
+                    "tipo": "carro",
+                    "cor_base": [],
+                    "cor": None,
+                    "detalhe": None,
+                    "marca": None,
+                }
+            ),
+            "carro",
+        ),
+        (
+            "objeto.dono",
+            json.dumps({"pessoa": "pes01", "relacao": "veste"}),
+            "dono: pes01 (veste)",
+        ),
+        (
+            "objeto.dono",
+            json.dumps({"pessoa": None, "relacao": None}),
+            "sem dono",
+        ),
+        (
+            "objeto.acrescentar",
+            json.dumps(
+                {
+                    "categoria": "calcado",
+                    "tipo": "sandália",
+                    "cor_base": ["vermelho"],
+                    "cor": None,
+                    "detalhe": None,
+                    "marca": None,
+                    "pessoa": "pes01",
+                    "relacao": "calca",
+                    "inicio_ms": 12000,
+                    "fim_ms": 19000,
+                }
+            ),
+            "calçado sandália vermelho (dono: pes01) 00:12–00:19",
+        ),
+        ("objeto.nao_existe", "existe", "Objeto na imagem"),
+        ("objeto.nao_existe", "nao_existe", "Objeto não está na imagem"),
         ("pauta.titulo", "Um título 1-2", "Um título 1-2"),
         ("pessoa.renomear", "Ana", "Ana"),
         ("comercial.marca", "Acme", "Acme"),
@@ -154,6 +252,10 @@ def test_valor_legivel_por_tipo(tipo: str, valor: str, esperado: str) -> None:
         "pessoa.acrescentar_aparicao",
         "texto_na_tela.texto",
         "texto_na_tela.acrescentar",
+        "pauta.acrescentar",
+        "objeto.atributos",
+        "objeto.dono",
+        "objeto.acrescentar",
         "aparicao.papel_visual",
         "pessoa.fontes_do_nome",
         "plano.descricao",

@@ -385,19 +385,11 @@ test('abrir /video/{id}?t= com sessão abre o Visualizador e posiciona o player 
   expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
 })
 
-test('a tela antiga abre em /video/{id}/anterior', async () => {
+test('/video/{id}/anterior não existe mais', async () => {
   history.replaceState(null, '', '/video/j1/anterior')
-  servidor.use(
-    http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
-    http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 500 })),
-    http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 500 })),
-  )
   render(<App autenticador={await autenticadorComSessao()} />)
 
-  await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
-  expect(location.pathname).toBe('/video/j1/anterior')
-  expect(screen.queryByText('Página não encontrada.')).toBeNull()
-  expect(screen.queryByRole('link', { name: 'Tela anterior' })).toBeNull()
+  expect(await screen.findByText('Página não encontrada.')).toBeTruthy()
 })
 
 test('vídeo inexistente mostra o aviso e o link para o acervo', async () => {
@@ -478,8 +470,8 @@ test('Ctrl+clique no cartão fica com o navegador (outra aba) e não muda a tela
   expect(location.pathname).toBe('/acervo')
 })
 
-test('na tela anterior do vídeo, ? lista também as teclas da linha do tempo', async () => {
-  history.replaceState(null, '', '/video/j1/anterior')
+test('na tela do vídeo, ? lista também as teclas da linha do tempo', async () => {
+  history.replaceState(null, '', '/video/j1')
   servidor.use(
     http.get('/v1/jobs/j1', () => HttpResponse.json(VIDEO_J1)),
     http.get('/v1/jobs/j1/*', () => new HttpResponse(null, { status: 500 })),
@@ -493,7 +485,7 @@ test('na tela anterior do vídeo, ? lista também as teclas da linha do tempo', 
 
   const dialogo = await screen.findByRole('dialog', { name: 'Atalhos' })
   expect(within(dialogo).getByRole('table', { name: 'Linha do tempo' })).toBeTruthy()
-  expect(within(dialogo).getByText('Na faixa: ir à ocorrência em foco')).toBeTruthy()
+  expect(within(dialogo).getByText('Numa faixa: saltar à ocorrência')).toBeTruthy()
 })
 
 test('falha ao abrir o vídeo mostra o código para o suporte e tenta de novo', async () => {

@@ -26,12 +26,16 @@ from pydantic import (
 )
 
 from api import catalogo_de_correcoes as textos
-from api.catalogo import Catalogo
+from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import (
+    CategoriaDeObjeto,
     Comercial,
+    CorBase,
     EvidenciaDoComercial,
     FonteDoNome,
+    Id,
+    RelacaoDoObjeto,
     TextoNaTela,
     TomDaPauta,
 )
@@ -39,6 +43,7 @@ from api.identidade import (
     identidade_do_comercial as _identidade_do_comercial,
 )
 from api.identidade import identidade_do_nome, nao_identificado
+from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.pessoas import LISTAS
 
 TipoNovo = Literal[
@@ -61,9 +66,18 @@ TipoNovo = Literal[
     "aparicao.papel_visual",
     "texto_na_tela.texto",
     "texto_na_tela.acrescentar",
+    "pauta.acrescentar",
+    "pauta.juntar",
+    "pauta.dividir",
+    "objeto.atributos",
+    "objeto.dono",
+    "objeto.nao_existe",
+    "objeto.acrescentar",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
-TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela"]
+TipoDoItem = Literal[
+    "pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela", "objeto"
+]
 CORRIGIVEIS = get_args(TipoNovo)
 Lista = Literal["na_imagem", "citada_na_fala", "citada_no_texto"]
 MENCOES = ("citada_na_fala", "citada_no_texto")
@@ -150,7 +164,9 @@ class Correcao(BaseModel):
     aprova: str | None = None  # só no tipo "aprovar": o id da correção aprovada
     recusa: str | None = None  # só no tipo "recusar": o id da correção recusada
     ocorrencia: Ocorrencia | None = None  # nas correções de aparição e menção
-    # Só no `pessoa.renomear` cujo nome casa com uma pessoa do catálogo.
+    # No `pessoa.renomear` e no `comercial.marca` cujo nome é de uma pessoa ou marca do
+    # catálogo, escolhida pela revisora (`NovaCorrecao.catalogo_id`) ou, na pessoa, a
+    # única que casa com o nome.
     catalogo_id: str | None = None
     antes: str
     depois: str
@@ -174,10 +190,15 @@ EstadoNoHistorico = Literal[
 ]
 
 
+EstadoNaBusca = Literal["salva", "indexando", "na_busca"]
+
+
 class ItemDoHistorico(Correcao):
     estado: EstadoNoHistorico
     antes_legivel: str
     depois_legivel: str
+    # Onde a correção está no índice da busca; `historico` não sabe, quem lê o Job preenche.
+    na_busca: EstadoNaBusca = "salva"
 
 
 def tempos_de(valor: str) -> tuple[int, int]:
@@ -382,6 +403,69 @@ class NovoTextoNaTela(BaseModel):
         return valor
 
 
+_Rotulo = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME),
+]
+
+
+class _AtributosDoObjeto(BaseModel):
+    """O valor de um `objeto.atributos`: tipo, cores base, tom, detalhe e marca."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: _Rotulo
+    cor_base: list[CorBase] = Field(max_length=2)
+    cor: _Rotulo | None = None
+    detalhe: _Rotulo | None = None
+    marca: _Rotulo | None = None
+
+    @field_validator("tipo", "cor", "detalhe", "marca")
+    @classmethod
+    def _sem_controle_nos_rotulos(cls, valor: str | None) -> str | None:
+        return None if valor is None else _sem_controle(valor)
+
+    @field_validator("cor_base")
+    @classmethod
+    def _sem_repetir(cls, valor: list[str]) -> list[str]:
+        if len(set(valor)) != len(valor):
+            raise ValueError("cor base repetida")
+        return valor
+
+
+class NovoObjeto(_AtributosDoObjeto):
+    """O objeto de um `objeto.acrescentar`: categoria, atributos, dono e trecho."""
+
+    categoria: CategoriaDeObjeto
+    pessoa: Id | None = None
+    relacao: RelacaoDoObjeto | None = None
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if (self.pessoa is None) != (self.relacao is None):
+            raise ValueError("pessoa e relação vêm juntas ou nenhuma das duas")
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        return self
+
+
+class _DonoDoObjeto(BaseModel):
+    """O valor de um `objeto.dono`: a pessoa e a relação, os dois ou nenhum (sem dono)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pessoa: Id | None
+    relacao: RelacaoDoObjeto | None
+
+    @model_validator(mode="after")
+    def _os_dois_ou_nenhum(self) -> Self:
+        if (self.pessoa is None) != (self.relacao is None):
+            raise ValueError("pessoa e relação vêm juntas ou nenhuma das duas")
+        return self
+
+
 class NovoTextoAcrescentado(NovoTextoNaTela):
     """O texto na tela de um `texto_na_tela.acrescentar`: tempos, tipo e texto."""
 
@@ -393,6 +477,100 @@ class NovoTextoAcrescentado(NovoTextoNaTela):
         if self.inicio_ms > self.fim_ms:
             raise ValueError("início depois do fim")
         return self
+
+
+class NovaPauta(BaseModel):
+    """A pauta de um `pauta.acrescentar`: título, resumo opcional, tom e tempos."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    titulo: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+        ),
+    ]
+    resumo: (
+        Annotated[
+            str,
+            StringConstraints(
+                strip_whitespace=True, min_length=1, max_length=LIMITE_DO_TEXTO
+            ),
+        ]
+        | None
+    ) = None
+    tom: TomDaPauta
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+
+    @field_validator("titulo")
+    @classmethod
+    def _titulo(cls, valor: str) -> str:
+        return _sem_controle(valor)
+
+    @field_validator("resumo")
+    @classmethod
+    def _resumo(cls, valor: str | None) -> str | None:
+        return None if valor is None else _sem_controle_salvo_quebra(valor)
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        return self
+
+
+class NovaJuncao(BaseModel):
+    """O valor de um `pauta.juntar`: os ids das pautas seguidas e o título escolhido."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: Annotated[
+        list[Annotated[str, StringConstraints(max_length=40)]], Field(min_length=2)
+    ]
+    titulo: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+        ),
+    ]
+
+    @field_validator("titulo")
+    @classmethod
+    def _titulo(cls, valor: str) -> str:
+        return _sem_controle(valor)
+
+    @model_validator(mode="after")
+    def _sem_repetir(self) -> Self:
+        if len(set(self.ids)) != len(self.ids):
+            raise ValueError("pauta repetida")
+        return self
+
+
+class NovaDivisao(BaseModel):
+    """O valor de um `pauta.dividir`: o tempo do corte e o título de cada metade."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    em_ms: Annotated[int, Field(gt=0)]
+    titulos: Annotated[
+        list[
+            Annotated[
+                str,
+                StringConstraints(
+                    strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+                ),
+            ]
+        ],
+        Field(min_length=2, max_length=2),
+    ]
+
+    @field_validator("titulos")
+    @classmethod
+    def _titulos(cls, valor: list[str]) -> list[str]:
+        for titulo in valor:
+            _sem_controle(titulo)
+        return valor
 
 
 _FONTES = TypeAdapter(list[FonteDoNome])
@@ -451,6 +629,9 @@ class NovaCorrecao(BaseModel):
     tipo_do_item: Literal["pauta", "comercial", "pessoa", "texto_na_tela"] | None = None
     # Nas correções de aparição e menção (e no `item.tempos` de pessoa).
     ocorrencia: Ocorrencia | None = None
+    # O id da pessoa ou da marca do catálogo que o nome novo é (`pessoa.renomear` e
+    # `comercial.marca`); o servidor confere que existe e que o nome é o dela.
+    catalogo_id: Annotated[str, StringConstraints(max_length=64)] | None = None
     # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
     item_id: Annotated[str, StringConstraints(max_length=40)] = ""
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
@@ -462,7 +643,9 @@ class NovaCorrecao(BaseModel):
     # `pauta.tom`: o tom; `pessoa.fontes_do_nome`: a lista JSON das fontes;
     # `aparicao.papel_visual`: o JSON {papel, visual}; `texto_na_tela.texto`: o
     # JSON {tipo, texto}; `texto_na_tela.acrescentar`: o JSON {inicio_ms,
-    # fim_ms, tipo, texto}.
+    # fim_ms, tipo, texto}; `pauta.acrescentar`: o JSON {titulo, resumo?, tom,
+    # inicio_ms, fim_ms}; `pauta.juntar`: o JSON {ids, titulo}, com o `item_id` da
+    # primeira; `pauta.dividir`: o JSON {em_ms, titulos: [primeira, segunda]}.
     valor: Annotated[
         str,
         StringConstraints(
@@ -486,6 +669,8 @@ class NovaCorrecao(BaseModel):
             raise ValueError("ocorrencia vale só para aparição e menção de pessoa")
         if not entrada.json_longo and len(self.valor) > LIMITE_DO_TEXTO:
             raise ValueError("valor longo demais")
+        if self.catalogo_id is not None and entrada.catalogo_de is None:
+            raise ValueError("catalogo_id vale só no nome de pessoa ou de marca")
         self.valor = entrada.canonizar(self)
         return self
 
@@ -548,6 +733,11 @@ class ItemInexistente(Exception):
     """O item da correção não existe no JSON do modelo."""
 
 
+class EstruturaInvalida(Exception):
+    """Juntar ou dividir pautas que a decupagem entregue não permite: pautas que não
+    são seguidas, ou um corte fora da pauta."""
+
+
 class CorrecaoJaExiste(Exception):
     """Já há um registro com esse id: o repositório nunca sobrescreve."""
 
@@ -563,6 +753,11 @@ class RepositorioDeCorrecoes(Protocol):
         """Da mais antiga para a mais recente."""
         ...
 
+    def purgar(self, job_id: str) -> None:
+        """Apaga todas as correções do vídeo. Único caminho que apaga, e só a purga
+        (`api.purga`, ADR 0010) o chama."""
+        ...
+
 
 class RepositorioDeCorrecoesEmMemoria:
     def __init__(self) -> None:
@@ -575,6 +770,9 @@ class RepositorioDeCorrecoesEmMemoria:
 
     def listar(self, job_id: str) -> list[Correcao]:
         return em_ordem([c for c in self._correcoes if c.job_id == job_id])
+
+    def purgar(self, job_id: str) -> None:
+        self._correcoes = [c for c in self._correcoes if c.job_id != job_id]
 
 
 def em_ordem(correcoes: list[Correcao]) -> list[Correcao]:
@@ -614,6 +812,10 @@ def identidade_da_pessoa(pessoa: dict[str, Any]) -> str:
 
 def _pessoas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pessoas", []) if isinstance(p, dict)]
+
+
+def _ids_das_pessoas(modelo: dict[str, Any]) -> set[Any]:
+    return {p.get("id") for p in _pessoas(modelo)}
 
 
 def _pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
@@ -681,12 +883,23 @@ def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
         return _falas(modelo)
     if tipo_do_item == "texto_na_tela":
         return _textos(modelo)
+    if tipo_do_item == "objeto":
+        return _objetos(modelo)
     return _pautas(modelo)
 
 
 def _intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
     """Pauta, comercial, plano e fala: o item tem o próprio intervalo."""
     return int(pauta["inicio_ms"]), int(pauta["fim_ms"])
+
+
+def _intervalo_do_objeto(objeto: dict[str, Any]) -> tuple[int, int]:
+    """Do menor início ao maior fim das ocorrências: o objeto não tem intervalo próprio."""
+    ocorrencias = objeto["ocorrencias"]
+    return (
+        min(o["inicio_ms"] for o in ocorrencias),
+        max(o["fim_ms"] for o in ocorrencias),
+    )
 
 
 def identidade_do_comercial(comercial: dict[str, Any]) -> str:
@@ -697,6 +910,8 @@ def identidade_do_comercial(comercial: dict[str, Any]) -> str:
 def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, int]:
     if tipo_do_item == "pessoa":
         return _intervalo_da_pessoa(item)
+    if tipo_do_item == "objeto":
+        return _intervalo_do_objeto(item)
     return _intervalo_da_pauta(item)
 
 
@@ -709,6 +924,8 @@ def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
         return f"{item['locutor']}: {str(item['texto'])[:60]}"
     if tipo_do_item == "texto_na_tela":
         return f"{item['tipo']}: {str(item['texto'])[:60]}"
+    if tipo_do_item == "objeto":
+        return str(item["tipo"])
     return str(item["nome" if tipo_do_item == "pessoa" else "titulo"])
 
 
@@ -821,6 +1038,7 @@ def corrigir(
     *,
     exige_aprovacao: bool = False,
     catalogo: Catalogo | None = None,
+    marcas: CatalogoDeMarcas | None = None,
 ) -> Correcao:
     """O registro da correção de `novo` sobre o item do JSON do modelo, com a
     âncora pronta. A ocorrência de uma pessoa tem de existir na decupagem
@@ -839,6 +1057,9 @@ def corrigir(
         novo.valor,
     )
     _confere_duracao(modelo, novo.tipo, novo.valor)
+    confere = TIPOS[novo.tipo].confere
+    if confere is not None:
+        confere(entregue, novo.valor)
     id = uuid.uuid4().hex
     campos: dict[str, Any] = {
         "tipo": novo.tipo,
@@ -846,6 +1067,18 @@ def corrigir(
         "depois": novo.valor,
         "exige_aprovacao": exige_aprovacao,
     }
+    estrutura = TIPOS[novo.tipo].reestrutura
+    if estrutura is not None:
+        campos["depois"], ancora_nova = estrutura.preparar(entregue, novo, versao)
+        return _registro(
+            job_id,
+            autoria,
+            id,
+            item_id=novo.item_id,
+            antes=antes,
+            ancora=ancora_nova,
+            **campos,
+        )
     acrescenta = TIPOS[novo.tipo].acrescenta
     if acrescenta is not None:
         ancora = acrescenta.ancora(novo.valor, novo.item_id, versao)
@@ -880,19 +1113,47 @@ def corrigir(
         item_id=novo.item_id,
         antes=antes,
         ocorrencia=novo.ocorrencia,
-        catalogo_id=_id_no_catalogo(novo, catalogo),
+        catalogo_id=_id_no_catalogo(novo, catalogo, marcas),
         ancora=_ancora_do_item(item, tipo_do_item, versao),
         **campos,
     )
 
 
-def _id_no_catalogo(novo: NovaCorrecao, catalogo: Catalogo | None) -> str | None:
-    """O id da pessoa do catálogo que tem o nome novo; vazio sem catálogo, sem
-    ninguém com esse nome ou com mais de uma (a revisora não escolhe aqui)."""
-    if catalogo is None or not TIPOS[novo.tipo].acha_no_catalogo:
+class CatalogoIdInvalido(Exception):
+    """O `catalogo_id` não existe no catálogo ou é de outro nome."""
+
+
+def _id_no_catalogo(
+    novo: NovaCorrecao, catalogo: Catalogo | None, marcas: CatalogoDeMarcas | None
+) -> str | None:
+    """O id do catálogo que a correção grava. Se a revisora escolheu um (`catalogo_id`),
+    ele tem de existir e o nome novo ser o nome ou um apelido dele. Sem escolha, só a
+    pessoa tem busca pelo nome: o id da única pessoa com esse nome; vazio sem catálogo,
+    sem ninguém com esse nome ou com mais de uma (a revisora não escolhe aqui)."""
+    entrada = TIPOS[novo.tipo]
+    if novo.catalogo_id is not None:
+        achado = (
+            (catalogo.obter(novo.catalogo_id) if catalogo else None)
+            if entrada.catalogo_de == "pessoas"
+            else (marcas.obter(novo.catalogo_id) if marcas else None)
+        )
+        if (
+            achado is None
+            or achado.lixeira is not None
+            or normalizar(novo.valor) not in _nomes_de_busca(achado)
+        ):
+            raise CatalogoIdInvalido(novo.catalogo_id)
+        return achado.id
+    if catalogo is None or not entrada.acha_no_catalogo:
         return None
     achadas = catalogo.achar(novo.valor)
     return achadas[0].id if len(achadas) == 1 else None
+
+
+def _nomes_de_busca(entrada: PessoaDoCatalogo | MarcaDoCatalogo) -> list[str]:
+    if isinstance(entrada, PessoaDoCatalogo):
+        return nomes_de_busca(entrada)
+    return nomes_de_busca_da_marca(entrada)
 
 
 def _ancora_do_item(
@@ -900,7 +1161,7 @@ def _ancora_do_item(
 ) -> Ancora:
     if tipo_do_item == "pessoa":
         return _ancora_da_pessoa(item, versao)
-    inicio, fim = _intervalo_da_pauta(item)
+    inicio, fim = _intervalo_do_item(item, tipo_do_item)
     # Plano e fala se casam pelo intervalo: a identidade é só o tipo.
     if tipo_do_item == "comercial":
         identidade = identidade_do_comercial(item)
@@ -908,6 +1169,8 @@ def _ancora_do_item(
         identidade = tipo_do_item
     elif tipo_do_item == "texto_na_tela":
         identidade = normalizar(str(item["texto"]))
+    elif tipo_do_item == "objeto":
+        identidade = normalizar(str(item["tipo"]))
     else:
         identidade = normalizar(str(item["titulo"]))
     return Ancora(
@@ -1021,14 +1284,18 @@ def _valor_do_alvo(
     do_alvo = TIPOS[alvo.tipo].valor_do_alvo
     if do_alvo is not None:
         return do_alvo(modelo, entregue, alvo)
-    return _valor_atual(
-        entregue,
-        alvo.tipo,
-        alvo.item_id,
-        alvo.ancora.tipo_do_item,
-        alvo.ocorrencia,
-        alvo.depois,
-    )
+    return _valor_ou_vazio(entregue, alvo)
+
+
+def _valor_ou_vazio(entregue: dict[str, Any], c: Correcao) -> str:
+    """O valor entregue no item de `c`, ou vazio se o item saiu da decupagem
+    (o objeto que não existe): desfazer uma correção dele não muda o que se vê."""
+    try:
+        return _valor_atual(
+            entregue, c.tipo, c.item_id, c.ancora.tipo_do_item, c.ocorrencia, c.depois
+        )
+    except ItemInexistente:
+        return ""
 
 
 def desfazer(
@@ -1065,15 +1332,7 @@ def desfazer(
         alvo_atual = reapontada
         # A reapontada vale pelo id do item novo, como em `aplicar`.
         antes, depois = (
-            _valor_atual(
-                entregue,
-                alvo_atual.tipo,
-                alvo_atual.item_id,
-                alvo_atual.ancora.tipo_do_item,
-                alvo_atual.ocorrencia,
-                alvo_atual.depois,
-            )
-            for entregue in (com, sem)
+            _valor_ou_vazio(entregue, alvo_atual) for entregue in (com, sem)
         )
     return _registro(
         job_id,
@@ -1111,6 +1370,32 @@ def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
         )
         for c in reversed(em_ordem(correcoes))
     ]
+
+
+def com_o_estado_na_busca(
+    itens: list[ItemDoHistorico],
+    estado: str | None,
+    ate: datetime | None,
+) -> list[ItemDoHistorico]:
+    """Marca em cada correção que vale hoje (ativa ou aprovada) onde ela está no índice.
+
+    `estado` e `ate` vêm da indexação do Job: `ate` é o instante a partir do qual a
+    última rodada leu as correções. Com a indexação rodando, a correção está
+    "indexando"; indexado, está "na busca" se foi gravada até `ate`; sem indexação ou
+    com falha, só "salva".
+    """
+    aprovada_em = {i.aprova: i.criada_em for i in itens if i.aprova}
+    marcados: list[ItemDoHistorico] = []
+    for item in itens:
+        situacao: EstadoNaBusca = "salva"
+        if item.estado in ("ativa", "aprovada"):
+            vale_desde = aprovada_em.get(item.id, item.criada_em)
+            if estado == "pendente":
+                situacao = "indexando"
+            elif estado == "indexado" and ate is not None and vale_desde <= ate:
+                situacao = "na_busca"
+        marcados.append(item.model_copy(update={"na_busca": situacao}))
+    return marcados
 
 
 def _valor_atual(
@@ -1216,6 +1501,14 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             if normalizar(str(t["texto"])) in identidades
             and _sobrepoe_de_verdade(ancora, _intervalo_da_pauta(t))
         ]
+    if c.ancora.tipo_do_item == "objeto":
+        identidades = TIPOS[c.tipo].identidades(c)
+        return [
+            o
+            for o in _objetos(modelo)
+            if normalizar(str(o["tipo"])) in identidades
+            and _sobrepoe_de_verdade(ancora, _intervalo_do_objeto(o))
+        ]
     if c.ancora.tipo_do_item == "comercial":
         identidades = TIPOS[c.tipo].identidades(c)
         return [
@@ -1281,6 +1574,17 @@ def reconciliar(
             or not estado.casavel(c.id)
         ):
             continue
+        estrutura = TIPOS[c.tipo].reestrutura
+        if estrutura is not None:
+            # Juntar e dividir se casam com o conjunto de pautas, não com um item só.
+            achada = estrutura.reapontar(modelo, c, versao)
+            if achada is None:
+                resultado.sem_casar.append(c)
+                continue
+            resultado.casadas.append(achada[0])
+            if achada[1]:
+                resultado.atendidas.append(achada[0])
+            continue
         candidatos = _candidatos(modelo, c)
         acrescenta = TIPOS[c.tipo].acrescenta
         if acrescenta is not None and acrescenta.acrescenta(c):
@@ -1316,6 +1620,7 @@ _CHAVE_DO_ITEM = {
     "plano": "planos",
     "fala": "transcricao",
     "texto_na_tela": "textos_na_tela",
+    "objeto": "objetos",
 }
 
 
@@ -1324,12 +1629,24 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
     do item é estável, e a reapontada já traz o id novo."""
     aplica = TIPOS[c.tipo].aplicar_no_item
     assert aplica is not None
-    chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
-    for item in resultado.get(chave, []):
-        if not isinstance(item, dict) or item.get("id") != c.item_id:
-            continue
+    confere = TIPOS[c.tipo].confere
+    if confere is not None:
+        try:
+            confere(resultado, c.depois)
+        except ItemInexistente:
+            return  # o que a correção aponta já não existe nesta versão
+    for item in _itens_com_o_id(resultado, c):
         aplica(item, c)
         item["origem"] = "revisao"
+
+
+def _itens_com_o_id(resultado: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
+    chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
+    return [
+        item
+        for item in resultado.get(chave, [])
+        if isinstance(item, dict) and item.get("id") == c.item_id
+    ]
 
 
 def _por_inicio(ocorrencias: list[dict[str, Any]]) -> None:
@@ -1541,6 +1858,10 @@ def aplicar(
         if not estado.em_vigor(c.id):
             continue
         entrada = TIPOS[c.tipo]
+        if entrada.reestrutura is not None:
+            if c.id not in atendidas:
+                entrada.reestrutura.aplicar(resultado, c)
+            continue
         if entrada.acrescenta is not None and entrada.acrescenta.acrescenta(c):
             if c.id not in atendidas:
                 entrada.acrescenta.aplicar(resultado, c)
@@ -1548,6 +1869,9 @@ def aplicar(
         if c.ancora.tipo_do_item != "pessoa":
             if c.id not in atendidas:
                 _aplicar_no_item(resultado, c)
+            elif entrada.atender_no_item is not None:
+                for item in _itens_com_o_id(resultado, c):
+                    entrada.atender_no_item(item, c)
             continue
         for pessoa, identidade, do_modelo in zip(
             pessoas, identidades, pessoas_do_modelo, strict=True
@@ -1572,10 +1896,19 @@ def aplicar(
         for pauta in _pautas(resultado):
             if "pessoas" in pauta:
                 pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
-        # O objeto de quem sumiu fica em cena: sem dono, sem relação.
-        for objeto in _objetos(resultado):
-            if objeto.get("pessoa") in ids:
-                objeto["pessoa"] = objeto["relacao"] = None
+    # O objeto cuja pessoa não está mais na decupagem fica em cena: sem dono, sem relação.
+    ids_das_pessoas = _ids_das_pessoas(resultado)
+    for objeto in _objetos(resultado):
+        if objeto.get("pessoa") is not None and objeto["pessoa"] not in ids_das_pessoas:
+            objeto["pessoa"] = objeto["relacao"] = None
+    if "objetos" in resultado:
+        resultado["objetos"] = [
+            o for o in _objetos(resultado) if not o.pop("_removido", False)
+        ]
+    # As pautas do modelo ficam na ordem em que vieram; só a acrescentada
+    # pede reordenar, para entrar no lugar do seu início.
+    if any(p.get("acrescentado") for p in _pautas(resultado)):
+        resultado["pautas"].sort(key=lambda p: (p["inicio_ms"], p["fim_ms"]))
     if "textos_na_tela" in resultado:
         resultado["textos_na_tela"].sort(key=lambda t: (t["inicio_ms"], t["fim_ms"]))
     if "comerciais" in resultado:
@@ -1606,7 +1939,8 @@ def fila(
         ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
         tipo_do_item = c.ancora.tipo_do_item
         candidatos = []
-        for item in _itens(modelo, tipo_do_item):
+        # Juntar e dividir não se reaplicam num item só: ficam na fila para descartar.
+        for item in [] if TIPOS[c.tipo].reestrutura else _itens(modelo, tipo_do_item):
             intervalo = _intervalo_do_item(item, tipo_do_item)
             # Plano e fala que só encostam no ancorado não são o mesmo trecho.
             sobrepoe = (
@@ -1791,6 +2125,19 @@ class Acrescenta:
 
 
 @dataclass(frozen=True)
+class Reestrutura:
+    """O que só os tipos que mexem no conjunto de pautas (juntar, dividir) sabem fazer."""
+
+    # Do pedido e da decupagem entregue: o valor guardado e a âncora; `ItemInexistente`
+    # ou `EstruturaInvalida` se o pedido não cabe nela.
+    preparar: Callable[[dict[str, Any], NovaCorrecao, str], tuple[str, Ancora]]
+    aplicar: Callable[[dict[str, Any], Correcao], None]
+    # A correção apontada para as pautas do JSON novo e se o modelo já traz o resultado;
+    # `None` se não há pauta correspondente.
+    reapontar: Callable[[dict[str, Any], Correcao, str], tuple[Correcao, bool] | None]
+
+
+@dataclass(frozen=True)
 class Tipo:
     """A entrada de um tipo de Correção."""
 
@@ -1820,6 +2167,8 @@ class Tipo:
     # Se a decupagem entregue traz o campo que o tipo corrige (esquema 1.2).
     traz_o_campo: Callable[[dict[str, Any]], bool] | None = None
     aplicar_no_item: Callable[[dict[str, Any], Correcao], None] | None = None
+    # No item cujo modelo já traz o "depois": o que fazer, se algo.
+    atender_no_item: Callable[[dict[str, Any], Correcao], None] | None = None
     aplicar_na_pessoa: (
         Callable[[dict[str, Any], dict[str, Any], Correcao], None] | None
     ) = None
@@ -1838,8 +2187,15 @@ class Tipo:
     casa_pelo_nome_novo: bool = False
     # O nome novo é procurado no catálogo e, se casa com uma só pessoa, grava o id.
     acha_no_catalogo: bool = False
+    # O catálogo cujo id a correção pode trazer (`NovaCorrecao.catalogo_id`).
+    catalogo_de: Literal["pessoas", "marcas"] | None = None
     casa_longe: bool = False
     acrescenta: Acrescenta | None = None
+    reestrutura: Reestrutura | None = None
+    # Confere o valor do pedido (já canonizado) com a decupagem entregue; levanta
+    # `ItemInexistente` se ele aponta para o que ela não tem. Também decide se a
+    # correção se reaplica.
+    confere: Callable[[dict[str, Any], str], None] | None = None
 
 
 def _campo_longo(n: NovaCorrecao) -> str:
@@ -1896,10 +2252,26 @@ def _canonizar_texto_na_tela(n: NovaCorrecao) -> str:
     return _json_canonico(NovoTextoNaTela.model_validate_json(n.valor).model_dump())
 
 
+def _canonizar_atributos_do_objeto(n: NovaCorrecao) -> str:
+    return _json_canonico(_AtributosDoObjeto.model_validate_json(n.valor).model_dump())
+
+
+def _canonizar_objeto_acrescentado(n: NovaCorrecao) -> str:
+    return _json_canonico(NovoObjeto.model_validate_json(n.valor).model_dump())
+
+
+def _canonizar_dono_do_objeto(n: NovaCorrecao) -> str:
+    return _json_canonico(_DonoDoObjeto.model_validate_json(n.valor).model_dump())
+
+
 def _canonizar_texto_acrescentado(n: NovaCorrecao) -> str:
     return _json_canonico(
         NovoTextoAcrescentado.model_validate_json(n.valor).model_dump()
     )
+
+
+def _canonizar_pauta_acrescentada(n: NovaCorrecao) -> str:
+    return _json_canonico(NovaPauta.model_validate_json(n.valor).model_dump())
 
 
 def _canonizar_aparicao_nova(n: NovaCorrecao) -> str:
@@ -1976,6 +2348,44 @@ def _valor_das_fontes_do_item(item: dict[str, Any]) -> str:
     return _json_das_fontes(item.get("fontes_do_nome", []))
 
 
+def _valor_do_objeto(item: dict[str, Any]) -> str:
+    return _json_canonico(
+        {
+            "tipo": item["tipo"],
+            "cor_base": item["cor_base"],
+            "cor": item.get("cor"),
+            "detalhe": item.get("detalhe"),
+            "marca": item.get("marca"),
+        }
+    )
+
+
+def _valor_do_dono(item: dict[str, Any]) -> str:
+    return _json_canonico(
+        {"pessoa": item.get("pessoa"), "relacao": item.get("relacao")}
+    )
+
+
+def _confere_o_dono(entregue: dict[str, Any], valor: str) -> None:
+    pessoa = json.loads(valor)["pessoa"]
+    if pessoa is not None and pessoa not in _ids_das_pessoas(entregue):
+        raise ItemInexistente(pessoa)
+
+
+def _valor_do_existe(item: dict[str, Any]) -> str:
+    return "existe"
+
+
+def _canonizar_nao_existe(n: NovaCorrecao) -> str:
+    if n.valor != "nao_existe":
+        raise ValueError("o valor de objeto.nao_existe é nao_existe")
+    return n.valor
+
+
+def _marca_o_objeto_removido(item: dict[str, Any], c: Correcao) -> None:
+    item["_removido"] = True
+
+
 def _valor_do_texto_na_tela(item: dict[str, Any]) -> str:
     return _json_canonico({"tipo": item["tipo"], "texto": item["texto"]})
 
@@ -2046,6 +2456,10 @@ def _traz_textos(entregue: dict[str, Any]) -> bool:
     return "textos_na_tela" in entregue
 
 
+def _traz_objetos(entregue: dict[str, Any]) -> bool:
+    return "objetos" in entregue
+
+
 def _traz_tom(entregue: dict[str, Any]) -> bool:
     return any("tom" in p for p in _pautas(entregue))
 
@@ -2067,6 +2481,20 @@ def _no_campo(nome: str) -> Callable[[dict[str, Any], Correcao], None]:
         item[nome] = c.depois
 
     return aplicar_no_campo
+
+
+def _marca_no_comercial(item: dict[str, Any], c: Correcao) -> None:
+    item["marca"] = c.depois
+    _catalogo_id_no_comercial(item, c)
+
+
+def _catalogo_id_no_comercial(item: dict[str, Any], c: Correcao) -> None:
+    # A marca nova vale por inteiro: o id da marca anterior não fica. O modelo que já
+    # escreve a marca não conhece o id, que vem da correção.
+    if c.catalogo_id is None:
+        item.pop("catalogo_id", None)
+    else:
+        item["catalogo_id"] = c.catalogo_id
 
 
 def _descricao_no_plano(item: dict[str, Any], c: Correcao) -> None:
@@ -2156,6 +2584,10 @@ def _identidades_do_texto(c: Correcao) -> set[str]:
     return {c.ancora.identidade, normalizar(json.loads(c.depois)["texto"])}
 
 
+def _identidades_do_objeto(c: Correcao) -> set[str]:
+    return {c.ancora.identidade, normalizar(json.loads(c.depois)["tipo"])}
+
+
 def _identidades_com_a_marca(c: Correcao) -> set[str]:
     _, tipo = c.ancora.identidade.rsplit("|", 1)
     return {c.ancora.identidade, f"{normalizar(c.depois)}|{tipo}"}
@@ -2188,12 +2620,64 @@ def _acrescentar_texto_na_tela(resultado: dict[str, Any], c: Correcao) -> None:
     )
 
 
+def _acrescentar_pauta(resultado: dict[str, Any], c: Correcao) -> None:
+    pauta = json.loads(c.depois)
+    resultado.setdefault("pautas", []).append(
+        {
+            **pauta,
+            "resumo": pauta.get("resumo") or "",
+            "id": c.item_id,
+            "origem": "revisao",
+            "acrescentado": True,
+        }
+    )
+
+
+def _acrescentar_objeto(resultado: dict[str, Any], c: Correcao) -> None:
+    novo = json.loads(c.depois)
+    inicio, fim = novo.pop("inicio_ms"), novo.pop("fim_ms")
+    resultado.setdefault("objetos", []).append(
+        {
+            **novo,
+            "id": c.item_id,
+            "ocorrencias": [{"inicio_ms": inicio, "fim_ms": fim}],
+            "origem": "revisao",
+            "acrescentado": True,
+        }
+    )
+
+
+def _ancora_do_objeto_novo(valor: str, item_id: str, versao: str) -> Ancora:
+    novo = json.loads(valor)
+    item = {
+        "tipo": novo["tipo"],
+        "ocorrencias": [{"inicio_ms": novo["inicio_ms"], "fim_ms": novo["fim_ms"]}],
+    }
+    return _ancora_do_item(item, "objeto", versao)
+
+
+def _do_mesmo_tipo_de_objeto(
+    c: Correcao, candidatos: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    tipo = normalizar(json.loads(c.depois)["tipo"])
+    return [i for i in candidatos if normalizar(str(i["tipo"])) == tipo]
+
+
+def _tempos_do_objeto(item: dict[str, Any]) -> str:
+    inicio, fim = _intervalo_do_objeto(item)
+    return f"{inicio}-{fim}"
+
+
 def _ancora_do_comercial_novo(valor: str, item_id: str, versao: str) -> Ancora:
     return _ancora_do_item(json.loads(valor), "comercial", versao)
 
 
 def _ancora_do_texto_novo(valor: str, item_id: str, versao: str) -> Ancora:
     return _ancora_do_item(json.loads(valor), "texto_na_tela", versao)
+
+
+def _ancora_da_pauta_nova(valor: str, item_id: str, versao: str) -> Ancora:
+    return _ancora_do_item(json.loads(valor), "pauta", versao)
 
 
 def _ancora_da_pessoa_nova(valor: str, item_id: str, versao: str) -> Ancora | None:
@@ -2220,6 +2704,13 @@ def _do_mesmo_tipo_de_texto(
     return [i for i in candidatos if i["tipo"] == tipo]
 
 
+def _com_o_mesmo_titulo(
+    c: Correcao, candidatos: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    titulo = normalizar(json.loads(c.depois)["titulo"])
+    return [i for i in candidatos if normalizar(str(i["titulo"])) == titulo]
+
+
 def _com_a_aparicao(
     c: Correcao, candidatos: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -2243,12 +2734,235 @@ _TEXTO_NOVO = Acrescenta(
     atendentes=_do_mesmo_tipo_de_texto,
     aplicar=_acrescentar_texto_na_tela,
 )
+_PAUTA_NOVA = Acrescenta(
+    ancora=_ancora_da_pauta_nova,
+    acrescenta=lambda c: True,
+    atendentes=_com_o_mesmo_titulo,
+    aplicar=_acrescentar_pauta,
+)
+_OBJETO_NOVO = Acrescenta(
+    ancora=_ancora_do_objeto_novo,
+    acrescenta=lambda c: True,
+    atendentes=_do_mesmo_tipo_de_objeto,
+    aplicar=_acrescentar_objeto,
+)
 _PESSOA_NOVA = Acrescenta(
     ancora=_ancora_da_pessoa_nova,
     acrescenta=_pessoa_nova,
     atendentes=_com_a_aparicao,
     aplicar=_acrescentar_pessoa,
 )
+
+
+def _titulo_e_tempos(item: dict[str, Any]) -> str:
+    return _json_canonico(
+        {
+            "titulo": item["titulo"],
+            "inicio_ms": item["inicio_ms"],
+            "fim_ms": item["fim_ms"],
+        }
+    )
+
+
+def _canonizar_juncao(n: NovaCorrecao) -> str:
+    juncao = NovaJuncao.model_validate_json(n.valor)
+    if n.item_id != juncao.ids[0]:
+        raise ValueError("item_id é o da primeira pauta")
+    return _json_canonico(juncao.model_dump())
+
+
+def _canonizar_divisao(n: NovaCorrecao) -> str:
+    return _json_canonico(NovaDivisao.model_validate_json(n.valor).model_dump())
+
+
+def _pautas_em_ordem(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(_pautas(modelo), key=lambda p: (p["inicio_ms"], p["fim_ms"]))
+
+
+def _preparar_juncao(
+    entregue: dict[str, Any], novo: NovaCorrecao, versao: str
+) -> tuple[str, Ancora]:
+    juncao = NovaJuncao.model_validate_json(novo.valor)
+    pautas = _pautas_em_ordem(entregue)
+    ids = [p.get("id") for p in pautas]
+    if any(i not in ids for i in juncao.ids):
+        raise ItemInexistente(" ".join(juncao.ids))
+    primeira = ids.index(juncao.ids[0])
+    if ids[primeira : primeira + len(juncao.ids)] != juncao.ids:
+        raise EstruturaInvalida("as pautas não são seguidas")
+    juntas = pautas[primeira : primeira + len(juncao.ids)]
+    inicio, fim = juntas[0]["inicio_ms"], max(p["fim_ms"] for p in juntas)
+    depois = _json_canonico(
+        {"titulo": juncao.titulo, "inicio_ms": inicio, "fim_ms": fim}
+    )
+    ancora = Ancora(
+        versao=versao,
+        tipo_do_item="pauta",
+        identidade=normalizar(str(juntas[0]["titulo"])),
+        inicio_ms=inicio,
+        fim_ms=fim,
+    )
+    return depois, ancora
+
+
+def _aplicar_juncao(resultado: dict[str, Any], c: Correcao) -> None:
+    """Junta as pautas que estão no intervalo da âncora na primeira delas (a que
+    mantém o id), com o título escolhido; a mesma regra de sobreposição serve à
+    versão em que a correção foi feita e à reaplicação. Com uma pauta só (o modelo
+    já juntou, com outro título), só o título muda."""
+    intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    juntas = [
+        p
+        for p in _pautas_em_ordem(resultado)
+        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+    ]
+    if not juntas:
+        return
+    primeira, *outras = juntas
+    primeira["titulo"] = json.loads(c.depois)["titulo"]
+    primeira["inicio_ms"] = min(p["inicio_ms"] for p in juntas)
+    primeira["fim_ms"] = max(p["fim_ms"] for p in juntas)
+    primeira["resumo"] = "\n".join(p["resumo"] for p in juntas if p.get("resumo"))
+    for campo in ("pessoas", "locais"):
+        if campo in primeira:
+            reunidos = [x for p in juntas for x in p.get(campo, [])]
+            primeira[campo] = list(dict.fromkeys(reunidos))
+    primeira["origem"] = "revisao"
+    resultado["pautas"] = [
+        p for p in resultado["pautas"] if not any(p is o for o in outras)
+    ]
+
+
+def _reapontar_juncao(
+    modelo: dict[str, Any], c: Correcao, versao: str
+) -> tuple[Correcao, bool] | None:
+    intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    achadas = [
+        p
+        for p in _pautas_em_ordem(modelo)
+        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+    ]
+    if not achadas:
+        return None
+    if len(achadas) == 1:
+        # Uma pauta só: o modelo já a trouxe junta se ela cobre ao menos metade do trecho.
+        inicio, fim = _intervalo_da_pauta(achadas[0])
+        sobreposicao = min(fim, intervalo[1]) - max(inicio, intervalo[0])
+        if sobreposicao * 2 <= intervalo[1] - intervalo[0]:
+            return None
+    inicio = achadas[0]["inicio_ms"]
+    fim = max(p["fim_ms"] for p in achadas)
+    ancora = Ancora(
+        versao=versao,
+        tipo_do_item="pauta",
+        identidade=normalizar(str(achadas[0]["titulo"])),
+        inicio_ms=inicio,
+        fim_ms=fim,
+    )
+    titulo = json.loads(c.depois)["titulo"]
+    depois = _json_canonico({"titulo": titulo, "inicio_ms": inicio, "fim_ms": fim})
+    nova = c.model_copy(
+        update={
+            "item_id": str(achadas[0].get("id", "")),
+            "ancora": ancora,
+            "depois": depois,
+        }
+    )
+    # Atendida só se o modelo já juntou e com o mesmo título: senão o título se perde.
+    atendida = len(achadas) == 1 and normalizar(achadas[0]["titulo"]) == normalizar(
+        titulo
+    )
+    return nova, atendida
+
+
+def _preparar_divisao(
+    entregue: dict[str, Any], novo: NovaCorrecao, versao: str
+) -> tuple[str, Ancora]:
+    divisao = NovaDivisao.model_validate_json(novo.valor)
+    item = next((p for p in _pautas(entregue) if p.get("id") == novo.item_id), None)
+    if item is None:
+        raise ItemInexistente(novo.item_id)
+    if not item["inicio_ms"] < divisao.em_ms < item["fim_ms"]:
+        raise EstruturaInvalida("o corte cai fora da pauta")
+    return novo.valor, _ancora_do_item(item, "pauta", versao)
+
+
+def _aplicar_divisao(resultado: dict[str, Any], c: Correcao) -> None:
+    """Corta a pauta em duas; se o modelo já cortou ali (a pauta acaba no corte),
+    só dá a cada metade o seu título."""
+    divisao = json.loads(c.depois)
+    em = divisao["em_ms"]
+    for pauta in _itens_com_o_id(resultado, c):
+        if abs(pauta["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS:
+            seguinte = next(
+                (
+                    p
+                    for p in _pautas_em_ordem(resultado)
+                    if p is not pauta
+                    and abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS
+                ),
+                None,
+            )
+            if seguinte is not None:
+                for metade, titulo in zip(
+                    (pauta, seguinte), divisao["titulos"], strict=True
+                ):
+                    metade["titulo"], metade["origem"] = titulo, "revisao"
+            continue
+        if not pauta["inicio_ms"] < em < pauta["fim_ms"]:
+            continue
+        segunda = {
+            **json.loads(json.dumps(pauta)),
+            "id": f"{PREFIXO_ACRESCENTADO}{c.id}",
+            "titulo": divisao["titulos"][1],
+            "resumo": "",
+            "inicio_ms": em,
+            "origem": "revisao",
+        }
+        pauta["titulo"], pauta["fim_ms"] = divisao["titulos"][0], em
+        pauta["origem"] = "revisao"
+        resultado["pautas"].insert(resultado["pautas"].index(pauta) + 1, segunda)
+
+
+def _reapontar_divisao(
+    modelo: dict[str, Any], c: Correcao, versao: str
+) -> tuple[Correcao, bool] | None:
+    divisao = json.loads(c.depois)
+    em = divisao["em_ms"]
+    intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    achadas = [
+        p
+        for p in _pautas_em_ordem(modelo)
+        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+    ]
+    antes = [p for p in achadas if abs(p["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
+    depois = [p for p in achadas if abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
+    com_o_corte = [p for p in achadas if p["inicio_ms"] < em < p["fim_ms"]]
+    if antes and depois:
+        # O modelo já cortou aqui; atendida só se os títulos também são os escolhidos.
+        trazidos = [normalizar(p["titulo"]) for p in (antes[0], depois[0])]
+        item = antes[0]
+        atendida = trazidos == [normalizar(t) for t in divisao["titulos"]]
+    elif len(com_o_corte) == 1:
+        item, atendida = com_o_corte[0], False
+    else:
+        return None
+    nova = c.model_copy(
+        update={
+            "item_id": str(item.get("id", "")),
+            "ancora": _ancora_do_item(item, "pauta", versao),
+        }
+    )
+    return nova, atendida
+
+
+_JUNTAR = Reestrutura(
+    preparar=_preparar_juncao, aplicar=_aplicar_juncao, reapontar=_reapontar_juncao
+)
+_DIVIDIR = Reestrutura(
+    preparar=_preparar_divisao, aplicar=_aplicar_divisao, reapontar=_reapontar_divisao
+)
+
 
 TIPOS: dict[str, Tipo] = {
     "pessoa.renomear": Tipo(
@@ -2263,6 +2977,7 @@ TIPOS: dict[str, Tipo] = {
         ja_traz=_traz_o_nome,
         casa_pelo_nome_novo=True,
         acha_no_catalogo=True,
+        catalogo_de="pessoas",
     ),
     "pauta.titulo": Tipo(
         canonizar=_campo_longo,
@@ -2296,7 +3011,9 @@ TIPOS: dict[str, Tipo] = {
         legivel=textos.como_veio,
         tipo_do_item="comercial",
         valor_do_item=_campo("marca"),
-        aplicar_no_item=_no_campo("marca"),
+        aplicar_no_item=_marca_no_comercial,
+        atender_no_item=_catalogo_id_no_comercial,
+        catalogo_de="marcas",
         ja_traz=_traz_a_marca,
         identidades=_identidades_com_a_marca,
     ),
@@ -2441,6 +3158,76 @@ TIPOS: dict[str, Tipo] = {
         fim_ms=_fim_do_json,
         traz_o_campo=_traz_textos,
         acrescenta=_TEXTO_NOVO,
+    ),
+    "pauta.acrescentar": Tipo(
+        canonizar=_canonizar_pauta_acrescentada,
+        rotulo="Pauta acrescentada",
+        legivel=textos.pauta_acrescentada,
+        tipo_do_item="pauta",
+        json_longo=True,
+        valor_do_item=_tempos_do_item,
+        fim_ms=_fim_do_json,
+        acrescenta=_PAUTA_NOVA,
+    ),
+    "pauta.juntar": Tipo(
+        canonizar=_canonizar_juncao,
+        rotulo="Juntar pautas",
+        legivel=textos.pauta_estrutural,
+        tipo_do_item="pauta",
+        json_longo=True,
+        valor_do_item=_titulo_e_tempos,
+        reestrutura=_JUNTAR,
+    ),
+    "pauta.dividir": Tipo(
+        canonizar=_canonizar_divisao,
+        rotulo="Dividir pauta",
+        legivel=textos.pauta_estrutural,
+        tipo_do_item="pauta",
+        json_longo=True,
+        valor_do_item=_titulo_e_tempos,
+        reestrutura=_DIVIDIR,
+    ),
+    "objeto.atributos": Tipo(
+        canonizar=_canonizar_atributos_do_objeto,
+        rotulo="Atributos do objeto",
+        legivel=textos.atributos_do_objeto,
+        tipo_do_item="objeto",
+        json_longo=True,
+        valor_do_item=_valor_do_objeto,
+        aplicar_no_item=_json_no_item,
+        ja_traz=_ja_traz_o_valor,
+        identidades=_identidades_do_objeto,
+    ),
+    "objeto.dono": Tipo(
+        canonizar=_canonizar_dono_do_objeto,
+        rotulo="Dono do objeto",
+        legivel=textos.dono_do_objeto,
+        tipo_do_item="objeto",
+        json_longo=True,
+        valor_do_item=_valor_do_dono,
+        aplicar_no_item=_json_no_item,
+        ja_traz=_ja_traz_o_valor,
+        confere=_confere_o_dono,
+    ),
+    "objeto.nao_existe": Tipo(
+        canonizar=_canonizar_nao_existe,
+        rotulo="Objeto na imagem",
+        legivel=textos.objeto_na_imagem,
+        tipo_do_item="objeto",
+        valor_do_item=_valor_do_existe,
+        aplicar_no_item=_marca_o_objeto_removido,
+    ),
+    "objeto.acrescentar": Tipo(
+        canonizar=_canonizar_objeto_acrescentado,
+        rotulo="Objeto acrescentado",
+        legivel=textos.objeto_acrescentado,
+        tipo_do_item="objeto",
+        json_longo=True,
+        valor_do_item=_tempos_do_objeto,
+        fim_ms=_fim_do_json,
+        traz_o_campo=_traz_objetos,
+        acrescenta=_OBJETO_NOVO,
+        confere=_confere_o_dono,
     ),
 }
 

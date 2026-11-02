@@ -13,6 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
+from itertools import zip_longest
 from typing import Literal, Protocol
 
 from pydantic import BaseModel
@@ -26,21 +27,56 @@ from api.entendimento_da_consulta import (
     entender,
 )
 from api.gemini import Transporte
-from api.indice_da_busca import Consulta, Filtros, IndiceDaBusca, Registro
+from api.indice_da_busca import (
+    Consulta,
+    Filtros,
+    IndiceDaBusca,
+    Registro,
+    TipoDeRegistro,
+)
 from api.jobs import Armazenamento, Job, RepositorioDeJobs
 
 log = logging.getLogger(__name__)
 
 RRF_K = 60
+# Cada nível de destaque acima de 1 soma isto à pontuação do objeto do inventário: o
+# destaque 3 (+6%) passa quem está logo atrás, uns três lugares no topo da lista (a
+# pontuação é 1/(60+posição), então o ganho cresce para uns nove lugares na
+# centésima posição), e não quem está bem mais acima. Registro sem destaque pesa 1.
+PESO_POR_NIVEL_DE_DESTAQUE = 0.03
 TETO_DE_REGISTROS = 100  # por cláusula
 TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
 JUNCAO_MS = 3_000
 VALIDADE_DO_QUADRO = timedelta(minutes=10)
+# Valores mostrados por faceta: os de mais vídeos.
+TETO_DE_VALORES_POR_FACETA = 20
+ROTULO_DO_TIPO: dict[str, str] = {
+    "plano": "Plano",
+    "fala": "Fala",
+    "texto_na_tela": "GC",
+    "objeto": "Objeto",
+}
 
 Ordem = Literal["relevancia", "data"]
 # As evidências que o editor liga e desliga: as quatro do modelo, mais objeto e marca.
 EvidenciaDaBusca = Literal["imagem", "citada", "fala", "gc", "objeto", "marca"]
+
+
+class EmbeddingDaConsulta(Protocol):
+    """Porta do embedding multimodal: o texto da consulta vira vetor no espaço dos quadros."""
+
+    def vetor_do_texto(self, texto: str) -> list[float]: ...
+
+    def vetor_da_imagem(self, jpeg: bytes) -> list[float]: ...
+
+
+class BuscaPorImagemIndisponivel(Exception):
+    """Sem índice do quadro-chave ou sem o embedding: a imagem não vira vetor."""
+
+
+class PlanoSemVetor(Exception):
+    """O plano não existe, o vídeo não é visível, ou o quadro do plano não tem vetor."""
 
 
 class Ranking(Protocol):
@@ -64,6 +100,7 @@ class Destaque(BaseModel):
 
 
 class Momento(BaseModel):
+    tipo: TipoDeRegistro  # a grade da busca visual mostra só os planos
     inicio_ms: int
     fim_ms: int
     motivo: str
@@ -97,6 +134,9 @@ class Entendida(BaseModel):
     programa: str | None
     desde: date | None
     ate: date | None
+    # A busca usou o vetor do quadro. Falso no modo visual quando o índice do quadro está
+    # desligado ou o embedding falhou: a tela avisa que veio a busca comum.
+    visual: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +148,28 @@ class Ajustes:
     desde: date | None = None
     ate: date | None = None
     sem_periodo: bool = False  # tira o período entendido (o "Todos os anos" da tela)
+    # Facetas da tela: filtram os candidatos (os de programa e mês são o programa e o período).
+    pessoa: str | None = None  # id do catálogo: na imagem ou dona do objeto
+    marca: str | None = None
+    tipo: TipoDeRegistro | None = None
+
+
+class ValorDaFaceta(BaseModel):
+    """Um valor da faceta e em quantos vídeos dos candidatos ele aparece."""
+
+    valor: str
+    rotulo: str
+    videos: int
+
+
+class Facetas(BaseModel):
+    """Contagens por faceta, sobre os candidatos que a busca trouxe (veja `_facetas`)."""
+
+    programa: list[ValorDaFaceta] = []
+    mes: list[ValorDaFaceta] = []
+    pessoa: list[ValorDaFaceta] = []
+    marca: list[ValorDaFaceta] = []
+    tipo: list[ValorDaFaceta] = []
 
 
 class ResultadoDaBusca(BaseModel):
@@ -115,14 +177,15 @@ class ResultadoDaBusca(BaseModel):
     videos: list[VideoDoResultado]
     sem_aparicoes: list[SemAparicao]
     plano_b: bool
+    facetas: Facetas
     quadros_expiram_em: datetime
 
 
 def filtros_do_servidor() -> Filtros:
     """Os filtros que o servidor impõe a toda busca, acima da consulta.
 
-    Hoje nenhum campo do índice carrega a permissão. O filtro "não está na lixeira" (#144)
-    entra aqui; enquanto isso, `Busca` já descarta o vídeo cujo Job não está concluído.
+    Hoje nenhum campo do índice carrega a permissão. O vídeo na lixeira (#144) sai pelo Job:
+    `Busca` descarta o vídeo cujo Job não está concluído ou está na lixeira.
     """
     return Filtros()
 
@@ -175,6 +238,7 @@ class _Trecho:
     motivo: str
     posicao: int  # a melhor posição, no resultado fundido, entre os registros juntados
     quadro: str | None
+    tipo: TipoDeRegistro
 
 
 class Busca:
@@ -190,7 +254,9 @@ class Busca:
         repositorio: RepositorioDeJobs,
         armazenamento: Armazenamento,
         relogio: Callable[[], datetime],
+        embedding: EmbeddingDaConsulta | None = None,
     ) -> None:
+        self._embedding = embedding
         self._transporte = transporte
         self._catalogo = catalogo
         self._armor = armor
@@ -210,30 +276,41 @@ class Busca:
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
         ajustes: Ajustes | None = None,
+        visual: bool = False,
+        imagem: bytes | None = None,
+        parecidos: tuple[str, list[float]] | None = None,
     ) -> ResultadoDaBusca:
+        """`imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
+        só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
+        `BuscaPorImagemIndisponivel`. `parecidos` (#271) é o registro de um plano e o
+        vetor do quadro dele, já no índice: busca do mesmo modo, sem embedding, e o
+        próprio registro fica fora."""
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
-        entendida = _ajustada(
-            entender(
-                texto,
-                transporte=self._transporte,
-                catalogo=self._catalogo,
-                armor=self._armor,
-                programas=self._programas,
-            ),
-            ajustes or Ajustes(),
-        )
+        vetor_da_imagem = None
+        proprio = parecidos[0] if parecidos else None
+        if parecidos is not None:
+            vetor_da_imagem = parecidos[1]
+            entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
+        elif imagem is not None:
+            vetor_da_imagem = self._vetor_da_imagem(imagem)
+            entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
+        else:
+            entendida = _ajustada(
+                entender(
+                    texto,
+                    transporte=self._transporte,
+                    catalogo=self._catalogo,
+                    armor=self._armor,
+                    programas=self._programas,
+                ),
+                ajustes or Ajustes(),
+            )
         jobs: dict[str, Job | None] = {}
 
         def job(id: str) -> Job | None:
             if id not in jobs:
-                achado = self._repositorio.obter(id)
-                visivel = (
-                    achado is not None
-                    and achado.estado == "concluido"
-                    and (sistema is None or achado.sistema == sistema)
-                )
-                jobs[id] = achado if visivel else None
+                jobs[id] = self._visivel(id, sistema)
             return jobs[id]
 
         def consultar(c: Consulta) -> list[Registro]:
@@ -242,7 +319,9 @@ class Busca:
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
                 limite=TETO_DE_REGISTROS,
             )
-            return [r for r in self._indice.buscar(c) if job(r.job_id)]
+            return [
+                r for r in self._indice.buscar(c) if r.id != proprio and job(r.job_id)
+            ]
 
         nomes: dict[str, str] = {}
 
@@ -253,7 +332,34 @@ class Busca:
             return nomes.get(id or "") or None
 
         clausulas = self._clausulas(entendida, nome)
-        resultados = [consultar(c.consulta) for c in clausulas]
+        # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
+        # entendidos já filtram, e não entram no vetor.
+        consulta_visual = entendida.texto_livre or texto
+        vetor = (
+            vetor_da_imagem
+            if vetor_da_imagem is not None
+            else self._vetor_da_consulta(consulta_visual)
+            if visual
+            else None
+        )
+        if vetor is not None:
+            clausulas.append(_clausula_visual(entendida, vetor, nome))
+        facetado = ajustes or Ajustes()
+        # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
+        # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
+        resultados = [
+            [
+                r
+                for r in _intercalar(
+                    [consultar(q) for q in _com_facetas(c.consulta, facetado)]
+                )
+                if _casa(r, facetado)
+            ]
+            for c in clausulas
+        ]
+        sem_facetas = all(
+            x is None for x in (facetado.pessoa, facetado.marca, facetado.tipo)
+        )
         fundidos = _fundir(resultados)
         achados = [r for r, _, _ in fundidos]
         # Sem a API de Ranking, a posição é a da pontuação do RRF: registros de mesma
@@ -262,7 +368,10 @@ class Busca:
         if entendida.texto_livre and achados:
             try:
                 achados = self._ranking.reordenar(entendida.texto_livre, achados)
-                posicao = {r.id: i for i, r in enumerate(achados)}
+                # A ordem do ranking, com o peso do destaque sobre a posição.
+                posicao = _posicoes_por_pontos(
+                    [(r, 0, _peso(r) / (RRF_K + i + 1)) for i, r in enumerate(achados)]
+                )
             except Exception:
                 log.exception("ranking indisponível; fica a ordem do índice")
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
@@ -272,7 +381,9 @@ class Busca:
         vazios = [
             self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
-            if c.pessoa_na_imagem and not achados_da_clausula
+            # "Nenhuma aparição" fala do acervo, não do que a faceta deixou.
+            if c.pessoa_na_imagem
+            and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
         ]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas%s",
@@ -288,12 +399,71 @@ class Busca:
                 programa=entendida.programa,
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
+                visual=vetor is not None,
             ),
             videos=videos,
             sem_aparicoes=vazios,
             plano_b=entendida.plano_b,
+            facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
         )
+
+    def planos_com_vetor(
+        self, job_id: str, sistema: str | None = None
+    ) -> dict[int, list[float]]:
+        """Os vetores do quadro dos planos de um vídeo concluído (e do sistema do chamador)."""
+        if self._visivel(job_id, sistema) is None:
+            return {}
+        return self._indice.vetores_dos_planos(job_id)
+
+    def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
+        """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
+        achado = self._repositorio.obter(job_id)
+        if achado is None or achado.estado != "concluido" or achado.lixeira:
+            return None
+        if sistema is not None and achado.sistema != sistema:
+            return None
+        return achado
+
+    def buscar_parecidos(
+        self,
+        job_id: str,
+        plano: int,
+        *,
+        limite: int = VIDEOS_POR_PADRAO,
+        filtros_do_servidor: Filtros | None = None,
+        sistema: str | None = None,
+    ) -> ResultadoDaBusca:
+        """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271)."""
+        vetor = self.planos_com_vetor(job_id, sistema).get(plano)
+        if vetor is None:
+            raise PlanoSemVetor
+        return self.buscar(
+            "",
+            parecidos=(f"{job_id}:plano:{plano}", vetor),
+            limite=limite,
+            filtros_do_servidor=filtros_do_servidor,
+            sistema=sistema,
+        )
+
+    def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:
+        if self._embedding is None:
+            raise BuscaPorImagemIndisponivel
+        try:
+            return self._embedding.vetor_da_imagem(jpeg)
+        except Exception as e:
+            log.exception("vetor da imagem não calculado")
+            raise BuscaPorImagemIndisponivel from e
+
+    def _vetor_da_consulta(self, texto: str) -> list[float] | None:
+        """`None` sem embedding (índice do quadro desligado) ou se ele falhar: busca comum."""
+        if self._embedding is None:
+            return None
+        try:
+            return self._embedding.vetor_do_texto(texto)
+        except Exception:
+            log.exception("vetor da consulta não calculado; fica a busca comum")
+            return None
 
     def _clausulas(
         self,
@@ -379,6 +549,7 @@ class Busca:
             lista.sort(key=lambda t: (t.posicao, t.inicio_ms, t.fim_ms))
             momentos = [
                 Momento(
+                    tipo=t.tipo,
                     inicio_ms=t.inicio_ms,
                     fim_ms=t.fim_ms,
                     motivo=t.motivo,
@@ -433,6 +604,118 @@ class Busca:
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
+
+
+def _clausula_visual(
+    e: ConsultaEntendida,
+    vetor: list[float],
+    nome: Callable[[str | None], str | None],
+) -> _Clausula:
+    """Os planos só pelo vetor do quadro, como mais uma lista do mesmo RRF.
+
+    O texto e o significado já vêm da cláusula do texto livre: repeti-los aqui contaria
+    duas vezes os planos que a descrição acha. As demais cláusulas seguem como na busca
+    comum (pessoas e objetos pedidos continuam filtrando).
+    """
+    return _Clausula(
+        Consulta(filtros=replace(_base(e), tipo="plano"), vetor_do_quadro=vetor),
+        lambda r: _motivo(r, nome),
+    )
+
+
+def _casa(r: Registro, a: Ajustes) -> bool:
+    """O registro passa nas facetas de pessoa, marca e tipo que o editor clicou."""
+    return (
+        (a.pessoa is None or a.pessoa in r.pessoas or a.pessoa == r.dono)
+        and (a.marca is None or r.marca == a.marca)
+        and (a.tipo is None or r.tipo == a.tipo)
+    )
+
+
+def _com_facetas(c: Consulta, a: Ajustes) -> list[Consulta]:
+    """A consulta da cláusula com as facetas no filtro; nenhuma, se elas se excluem.
+
+    A pessoa casa na imagem (`pessoa`, que o objeto não tem) ou como dona do objeto
+    (`dono`): sem tipo na cláusula, isso dá duas consultas.
+    """
+    f = c.filtros
+    if a.tipo is not None:
+        if f.tipo not in (None, a.tipo):
+            return []
+        f = replace(f, tipo=a.tipo)
+    if a.marca is not None:
+        if f.marca not in (None, a.marca):
+            return []
+        f = replace(f, marca=a.marca)
+    if a.pessoa is None:
+        return [replace(c, filtros=f)]
+    filtros: list[Filtros] = []
+    if f.tipo in (None, "objeto") and f.dono in (None, a.pessoa):
+        filtros.append(replace(f, tipo="objeto", dono=a.pessoa))
+    # Marca só existe no objeto; outra pessoa já filtrada fica para o `_casa`.
+    if f.tipo != "objeto" and f.marca is None:
+        filtros.append(
+            f if f.pessoa not in (None, a.pessoa) else replace(f, pessoa=a.pessoa)
+        )
+    return [replace(c, filtros=x) for x in filtros]
+
+
+def _intercalar(listas: list[list[Registro]]) -> list[Registro]:
+    """Uma lista só, alternando as posições, para nenhuma consulta passar na frente."""
+    return [r for grupo in zip_longest(*listas) for r in grupo if r is not None]
+
+
+def _facetas(
+    candidatos: list[Registro],
+    nome: Callable[[str | None], str | None],
+) -> Facetas:
+    """Vídeos distintos por valor, sobre os candidatos (os registros que sobraram do RRF).
+
+    ponytail: o Agent Retrieval não devolve contagem por faceta (a API só traz os registros
+    e o índice não agrega), então a conta é nossa e vai até `TETO_DE_REGISTROS` (100)
+    candidatos fundidos (cada cláusula traz até 100, já com os filtros e as facetas no
+    índice): o valor que só aparece além deles não entra, e as contagens são de
+    "vídeos entre os 100 melhores registros", não do acervo todo.
+    """
+    por_faceta: dict[str, dict[str, tuple[str, set[str]]]] = {
+        f: {} for f in ("programa", "mes", "pessoa", "marca", "tipo")
+    }
+
+    def contar(faceta: str, valor: str | None, rotulo: str | None, id: str) -> None:
+        if valor:
+            por_faceta[faceta].setdefault(valor, (rotulo or valor, set()))[1].add(id)
+
+    # Programa e mês vêm do registro, que é o que o filtro compara (não do Job).
+    for r in candidatos:
+        contar("programa", r.programa, None, r.job_id)
+        if r.data_de_exibicao:
+            mes = r.data_de_exibicao
+            contar("mes", mes.strftime("%Y-%m"), mes.strftime("%m/%Y"), r.job_id)
+        for pessoa in dict.fromkeys([*r.pessoas, *([r.dono] if r.dono else [])]):
+            contar("pessoa", pessoa, nome(pessoa), r.job_id)
+        contar("marca", r.marca, None, r.job_id)
+        contar("tipo", r.tipo, ROTULO_DO_TIPO.get(r.tipo), r.job_id)
+
+    def valores(faceta: str, por_mes: bool = False) -> list[ValorDaFaceta]:
+        lista = [
+            ValorDaFaceta(valor=v, rotulo=rotulo, videos=len(ids))
+            for v, (rotulo, ids) in por_faceta[faceta].items()
+            # Pessoa que o catálogo não conhece não tem o que mostrar.
+            if faceta != "pessoa" or rotulo != v
+        ]
+        lista.sort(key=lambda x: (-x.videos, x.rotulo))
+        lista = lista[:TETO_DE_VALORES_POR_FACETA]
+        if por_mes:
+            lista.sort(key=lambda x: x.valor, reverse=True)
+        return lista
+
+    return Facetas(
+        programa=valores("programa"),
+        mes=valores("mes", por_mes=True),
+        pessoa=valores("pessoa"),
+        marca=valores("marca"),
+        tipo=valores("tipo"),
+    )
 
 
 def _ligadas(e: ConsultaEntendida) -> list[EvidenciaDaBusca]:
@@ -569,6 +852,10 @@ def _termos(
     return termos
 
 
+def _peso(r: Registro) -> float:
+    return 1 + PESO_POR_NIVEL_DE_DESTAQUE * max((r.destaque or 1) - 1, 0)
+
+
 def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int, float]]:
     """RRF entre as cláusulas; cada registro leva a cláusula em que ficou melhor e os pontos."""
     pontos: dict[str, float] = defaultdict(float)
@@ -576,7 +863,7 @@ def _fundir(listas: list[list[Registro]]) -> list[tuple[Registro, int, float]]:
     registros: dict[str, Registro] = {}
     for c, lista in enumerate(listas):
         for posicao, r in enumerate(lista):
-            pontos[r.id] += 1 / (RRF_K + posicao + 1)
+            pontos[r.id] += _peso(r) / (RRF_K + posicao + 1)
             registros[r.id] = r
             if r.id not in melhor or posicao < melhor[r.id][0]:
                 melhor[r.id] = (posicao, c)
@@ -606,7 +893,13 @@ def _juntar(
             atual.quadro = atual.quadro or r.quadro
             continue
         atual = _Trecho(
-            r.job_id, r.inicio_ms, r.fim_ms, motivos[r.id], posicao[r.id], r.quadro
+            r.job_id,
+            r.inicio_ms,
+            r.fim_ms,
+            motivos[r.id],
+            posicao[r.id],
+            r.quadro,
+            r.tipo,
         )
         abertos[chave] = atual
         trechos.append(atual)

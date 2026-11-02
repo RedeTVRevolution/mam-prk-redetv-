@@ -28,6 +28,7 @@ Acao = Literal[
     "item.restaurado",
     "item.purgado",
     "video.reprocessado",
+    "job.estado_corrigido",
 ]
 ACOES: tuple[Acao, ...] = get_args(Acao)
 

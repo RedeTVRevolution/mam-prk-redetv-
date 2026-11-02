@@ -8,7 +8,7 @@ tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levant
 import base64
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -19,11 +19,18 @@ from api.decupagem import (
     VERSAO_ESQUEMA,
     Decupagem,
     Video,
+    em_mm_ss,
     esquema_do_modelo,
     tempos_em_ms,
 )
 from api.espera import espera_com_jitter, sorteio_uniforme
 from api.programas import PERFIS
+from api.sinais import (
+    Registrar,
+    imprimir,
+    registro_da_resposta_fora_do_esquema,
+    registro_do_uso_do_modelo,
+)
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA, aplicar_transcricao
 
@@ -38,7 +45,7 @@ BACKOFF_TETO_S = 60.0
 TIMEOUT_DO_FLEX_S = 600  # o Flex pode demorar; o servidor também desiste aos 600 s
 TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
 # Prazo de cada janela: uma tentativa só começa se cabe inteira nele. O `timeout` do
-# Job de análise (infra/main.tf) é dimensionado por ele; se mudar, refaça aquela conta.
+# Job de análise (infra/modulos/mam/main.tf) é dimensionado por ele; se mudar, refaça aquela conta.
 PRAZO_DA_ANALISE_S = 1500
 
 # Texto aprovado no diagnóstico do clipe3. `{programa}` e `{perfil_do_programa}`
@@ -74,22 +81,18 @@ REGRAS GERAIS
 - Cada vez que um texto fica visível é um item, com o início e o fim em que ele está na tela. Um GC que sai e volta são dois itens.
 - Nunca estenda o texto até o fim do bloco ou do plano: um GC fixo no rodapé do bloco todo só vale se ficou visível o tempo todo.
 
-5. OBJETOS, ROUPAS E ACESSÓRIOS
-- Registre em objetos tudo o que alguém poderia procurar no acervo. Os dois grupos têm o mesmo peso:
-  a) o que cada pessoa na imagem veste, calça e usa (roupa, calçado, acessório) e o que segura na mão, com o id dela em pessoa e a relação (veste, calca, usa, segura). Só o que estiver visível; não deduza o calçado se os pés não aparecem. No máximo 5 peças por pessoa em cada aparição, as mais visíveis.
-  b) os objetos em cena: veículo, produto, eletrônico, troféu, joia, animal, comida. Sem dono, deixe pessoa e relação nulas. Ignore o mobiliário comum do estúdio (mesa, cadeira, bancada, o próprio telão).
-- Produto mostrado num telão, num gráfico ou numa vinheta também é objeto em cena: registre-o com a categoria do que ele é e escreva "no telão" ou "em gráfico" no detalhe.
-- Todo objeto que você citar em objetos de um plano também entra em objetos, com os intervalos em que está visível.
-- Quando um comercial tiver a evidência produto, o produto entra em objetos.
-- A categoria diz o que a coisa é. Use em_cena ou na_mao só quando nenhuma outra servir.
-- Para cada objeto: categoria, tipo no singular, a cor base da lista (até 2 cores) e o tom como você vê no campo cor, detalhe curto e os intervalos em que está visível.
+5. PESSOAS: ROUPAS, CALÇADOS E ACESSÓRIOS
+- Para cada pessoa na imagem, registre em objetos o que ela veste, calça e usa (roupa, calçado, acessório) e o que segura na mão, com o id dela em pessoa e a relação (veste, calca, usa, segura). Só o que estiver visível; não deduza o calçado se os pés não aparecem. No máximo 5 peças por pessoa em cada aparição, as mais visíveis.
+- Os objetos de cena não são pedidos aqui: veículo, produto, eletrônico, troféu, joia, animal ou comida só entram se uma pessoa os veste, usa ou segura.
+- A categoria diz o que a peça é. Use na_mao só quando nenhuma outra servir.
+- Para cada peça: categoria, tipo no singular, a cor base da lista (até 2 cores) e o tom como você vê no campo cor, detalhe curto e os intervalos em que está visível.
 - Marca só quando o logo ou o nome estiver legível. Na dúvida, deixe em branco.
 - A cor sob a luz do estúdio engana: prefira a cor base mais provável e diga o tom no campo cor.
 
 6. LOCAIS E IMAGENS DE APOIO
 - Registre locais (estúdio, aeroporto, estádio, rua, restaurante, palco) e cenas reaproveitáveis.
 - Marque como plano limpo os planos sem texto na tela e sem ninguém falando para a câmera.
-
+{secao_dos_cortes}
 7. COMERCIAIS E MERCHANDISING
 - Registre toda ação comercial: merchandising do apresentador, testemunhal, produto em cena, banner, bug, QR code, chamada de site e intervalo comercial.
 - Para cada uma: marca, tipo, início, fim e evidência (fala, logo ou texto na tela).
@@ -112,8 +115,22 @@ TRANSCRIÇÃO AUTOMÁTICA
 """
 
 
-def instrucao(programa: str | None, transcricao: Transcricao | None = None) -> str:
-    """Só um programa de `programas.toml` entra na instrução: nunca texto livre."""
+SECAO_DOS_CORTES = """\
+- O vídeo já foi cortado nestes instantes (MM:SS): {cortes}. Cada intervalo entre dois cortes seguidos é um plano: devolva um item em planos para cada um, com início e fim nos cortes, e o ambiente, a ação e os objetos do que se vê naquele intervalo, não do trecho todo. Se dois planos vizinhos mostram coisas diferentes, as descrições são diferentes.
+- Intervalo de tela preta: ambiente "tela preta", ação nula, sem objetos.
+"""
+
+
+def instrucao(
+    programa: str | None,
+    transcricao: Transcricao | None = None,
+    cortes_ms: Sequence[int] = (),
+) -> str:
+    """Só um programa de `programas.toml` entra na instrução: nunca texto livre.
+
+    `cortes_ms` são os cortes que caem no trecho da chamada; sem eles, a seção
+    dos cortes não entra.
+    """
     if programa not in PERFIS:
         programa = None
     perfil = f"{PERFIS[programa]}\n" if programa else ""
@@ -122,10 +139,19 @@ def instrucao(programa: str | None, transcricao: Transcricao | None = None) -> s
         if transcricao is None
         else SECAO_COM_TRANSCRICAO.replace("{transcricao}", transcricao.em_linhas())
     )
+    secao_dos_cortes = (
+        # Cortes no mesmo segundo viram um tempo só: o modelo não vê o intervalo.
+        SECAO_DOS_CORTES.replace(
+            "{cortes}", ", ".join(dict.fromkeys(em_mm_ss(c) for c in cortes_ms))
+        )
+        if cortes_ms
+        else ""
+    )
     return (
         INSTRUCAO.replace("{programa}", programa or "não informado")
         .replace("{perfil_do_programa}\n", perfil)
         .replace("{secao_da_transcricao}", secao)
+        .replace("{secao_dos_cortes}", secao_dos_cortes)
     )
 
 
@@ -182,12 +208,22 @@ class SessaoHttp(Protocol):
 
 
 class TransporteVertex:
-    """REST na Vertex AI, endpoint global (ADR 0001), no modo Flex."""
+    """REST na Vertex AI, endpoint global (ADR 0001): Flex no vídeo, Standard com texto ou imagens."""
 
-    def __init__(self, projeto: str, sessao: SessaoHttp) -> None:
+    def __init__(
+        self,
+        projeto: str,
+        sessao: SessaoHttp,
+        registrar: Registrar | None = None,
+    ) -> None:
         self._projeto = projeto
         self._sessao = sessao
+        # Quem liga o log (os Jobs do processamento) recebe uma linha de uso por chamada.
+        self._registrar = registrar
         self.versao_do_modelo = ""  # a da última resposta; só o cassete a lê
+        # Somados desde a criação do transporte; só a comparação dos motores os lê.
+        self.tokens_de_entrada = 0
+        self.tokens_de_saida = 0
 
     def gerar(self, chamada: Chamada) -> str:
         url = (
@@ -260,6 +296,13 @@ class TransporteVertex:
         except ValueError as e:  # 200 com corpo que não é JSON: falha do servidor
             raise ErroHttp(502) from e
         self.versao_do_modelo = dados.get("modelVersion", "")
+        uso = dados.get("usageMetadata") or {}
+        entrada = uso.get("promptTokenCount", 0)
+        saida = uso.get("candidatesTokenCount", 0) + uso.get("thoughtsTokenCount", 0)
+        self.tokens_de_entrada += entrada
+        self.tokens_de_saida += saida
+        if self._registrar is not None:
+            self._registrar(registro_do_uso_do_modelo(chamada.modelo, entrada, saida))
         partes = (
             (dados.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         )
@@ -300,9 +343,12 @@ def gerar_validado[T](
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    ao_fora_do_esquema: Callable[[], None] | None = None,
+    registrar: Registrar = imprimir,
 ) -> T:
     """Chama o transporte e valida a resposta com `validar` (que levanta `ValueError`),
-    com as tentativas de rede e de esquema, dentro do prazo. Esgotados, `AnaliseFalhou`."""
+    com as tentativas de rede e de esquema, dentro do prazo. Esgotados, `AnaliseFalhou`.
+    Cada resposta recusada sai no log (o sinal do #286) e chama `ao_fora_do_esquema`."""
     falhas_rede = 0
     falhas_esquema = 0
     inicio = relogio()
@@ -322,6 +368,9 @@ def gerar_validado[T](
         try:
             return validar(texto)
         except ValueError as e:
+            registrar(registro_da_resposta_fora_do_esquema(chamada.modelo, str(e)))
+            if ao_fora_do_esquema:
+                ao_fora_do_esquema()
             if falhas_esquema >= TENTATIVAS_ESQUEMA:
                 raise AnaliseFalhou() from e
             falhas_esquema += 1
@@ -335,18 +384,31 @@ def analisar(
     video: Video,
     programa: str | None = None,
     trecho_ms: tuple[int, int] | None = None,
+    modelo: str = MODELO,
+    etapa_de_custo: str | None = None,
     transcricao: Transcricao | None = None,
+    cortes_ms: Sequence[int] = (),
     limiar_de_semelhanca: float = LIMIAR_DE_SEMELHANCA,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    ao_fora_do_esquema: Callable[[], None] | None = None,
 ) -> Decupagem:
+    """`cortes_ms`: os cortes de câmera do vídeo; só os do trecho entram na instrução.
+
+    `etapa_de_custo` acrescenta o rótulo `etapa` à chamada, para o faturamento separar
+    o custo (a passada de comparação usa um próprio).
+    """
+    inicio, fim = trecho_ms or (0, video.duracao_ms)
     chamada = Chamada(
-        modelo=MODELO,
-        instrucao=instrucao(programa, transcricao),
+        modelo=modelo,
+        instrucao=instrucao(
+            programa, transcricao, [c for c in cortes_ms if inicio < c < fim]
+        ),
         video_uri=video_uri,
         esquema=esquema_do_modelo(),
-        rotulos={"job_id": job_id},
+        rotulos={"job_id": job_id}
+        | ({"etapa": etapa_de_custo} if etapa_de_custo else {}),
         trecho_ms=trecho_ms,
     )
     decupagem = gerar_validado(
@@ -356,5 +418,6 @@ def analisar(
         dormir=dormir,
         sortear=sortear,
         relogio=relogio,
+        ao_fora_do_esquema=ao_fora_do_esquema,
     )
     return aplicar_transcricao(decupagem, transcricao, limiar_de_semelhanca)

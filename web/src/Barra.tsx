@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useAtalhos, useMostrarAtalhos } from './atalhos.ts'
 import { consultaNova } from './busca.ts'
 import { Link } from './Link.tsx'
-import { ACERVO, enderecoDaBusca, navegar, useRota } from './rotas.ts'
+import { ACERVO, enderecoDaBusca, MARCAS, navegar, TEMPO_DE_TELA, useRota } from './rotas.ts'
 import { CORES } from './tema.ts'
 
 const ATALHO_DA_BUSCA = {
@@ -80,6 +80,12 @@ export default function Barra({ email, aoSair }: { email: string; aoSair: () => 
           <nav aria-label="Principal">
             <Link para={ACERVO} size="sm" c="dimmed" underline="hover">
               Acervo
+            </Link>
+            <Link para={TEMPO_DE_TELA} size="sm" c="dimmed" underline="hover" ml="md">
+              Relatórios › Tempo de tela
+            </Link>
+            <Link para={MARCAS} size="sm" c="dimmed" underline="hover" ml="md">
+              Relatórios › Marcas
             </Link>
           </nav>
         </Group>

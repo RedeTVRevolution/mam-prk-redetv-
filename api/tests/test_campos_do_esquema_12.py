@@ -263,6 +263,26 @@ def test_acrescentar_texto_na_tela_e_desfazer() -> None:
     ]
 
 
+def test_texto_acrescentado_com_aprovacao_so_vale_depois_de_aprovar() -> None:
+    mundo = _mundo()
+    mundo.aprovacao.definir(frozenset({"texto_na_tela.acrescentar"}))
+    valor = json.dumps(_texto(4000, 6000, "Ao vivo", "logo"))
+
+    r = _corrigir(mundo, "texto_na_tela.acrescentar", valor)
+
+    assert r.status_code == 201
+    textos = [t["texto"] for t in mundo.decupagem()["textos_na_tela"]]
+    assert textos == ["Ana Souza", "Placar"]
+    mundo.avancar()
+    curador = {"Authorization": "Bearer token-curador"}
+    aprovada = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{r.json()['id']}/aprovar", headers=curador
+    )
+    assert aprovada.status_code == 201
+    textos = [t["texto"] for t in mundo.decupagem()["textos_na_tela"]]
+    assert textos == ["Ana Souza", "Ao vivo", "Placar"]
+
+
 def test_acrescentar_texto_alem_da_duracao_ou_invertido_e_422() -> None:
     mundo = _mundo()
 
@@ -449,3 +469,123 @@ def test_os_tipos_novos_podem_exigir_aprovacao() -> None:
 
     assert definir_aprovacao_main([",".join(tipos)], repo, lambda _: None) == 0
     assert repo.tipos() == set(tipos)
+
+
+def _pauta(inicio: int, fim: int, titulo: str, **campos: Any) -> dict[str, Any]:
+    return {
+        "titulo": titulo,
+        "tom": "analise",
+        "inicio_ms": inicio,
+        "fim_ms": fim,
+        **campos,
+    }
+
+
+def test_acrescentar_pauta_ler_na_decupagem_e_desfazer() -> None:
+    mundo = _mundo()
+    valor = json.dumps(_pauta(40000, 50000, "Bastidores", resumo="Conversa solta"))
+
+    resposta = _corrigir(mundo, "pauta.acrescentar", valor)
+
+    assert resposta.status_code == 201
+    pautas = mundo.decupagem()["pautas"]
+    nova = pautas[-1]
+    assert (nova["titulo"], nova["resumo"], nova["tom"]) == (
+        "Bastidores",
+        "Conversa solta",
+        "analise",
+    )
+    assert (nova["origem"], nova["id"].startswith("acr-")) == ("revisao", True)
+    assert len(pautas) == len(M12["pautas"]) + 1
+    assert len(mundo.decupagem("?versao=modelo")["pautas"]) == len(M12["pautas"])
+    [item] = mundo.historico().json()
+    assert (item["tipo"], item["depois_legivel"]) == (
+        "pauta.acrescentar",
+        "Bastidores (análise) 00:40–00:50",
+    )
+    mundo.avancar()
+    assert mundo.desfazer(resposta.json()["id"]).status_code == 201
+    assert len(mundo.decupagem()["pautas"]) == len(M12["pautas"])
+
+
+def test_acrescentar_pauta_sem_resumo_fica_com_resumo_vazio() -> None:
+    mundo = _mundo()
+
+    r = _corrigir(mundo, "pauta.acrescentar", json.dumps(_pauta(40000, 50000, "Sem")))
+
+    assert r.status_code == 201
+    assert mundo.decupagem()["pautas"][-1]["resumo"] == ""
+
+
+def test_acrescentar_pauta_invalida_e_422() -> None:
+    mundo = _mundo()
+
+    for valor in [
+        _pauta(59000, 61000, "x"),  # passa da duração
+        _pauta(5000, 4000, "x"),  # invertida
+        _pauta(0, 1000, "x", tom="triste"),  # tom fora da lista
+        _pauta(0, 1000, " "),  # título vazio
+        _pauta(0, 1000, "x", resumo=" "),  # resumo vazio, se vier
+        {"titulo": "x", "inicio_ms": 0, "fim_ms": 1000},  # sem tom
+    ]:
+        r = _corrigir(mundo, "pauta.acrescentar", json.dumps(valor))
+        assert r.status_code == 422, valor
+
+
+def test_pauta_acrescentada_aparece_no_catalogo() -> None:
+    from api.catalogo_de_correcoes import catalogo
+
+    assert "pauta.acrescentar" in {t.valor for t in catalogo().tipos}
+
+
+def test_pauta_acrescentada_com_aprovacao_so_vale_depois_de_aprovar() -> None:
+    mundo = _mundo()
+    mundo.aprovacao.definir(frozenset({"pauta.acrescentar"}))
+    valor = json.dumps(_pauta(40000, 50000, "Bastidores"))
+
+    r = _corrigir(mundo, "pauta.acrescentar", valor)
+
+    assert r.status_code == 201
+    assert len(mundo.decupagem()["pautas"]) == len(M12["pautas"])
+    mundo.avancar()
+    curador = {"Authorization": "Bearer token-curador"}
+    aprovada = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{r.json()['id']}/aprovar", headers=curador
+    )
+    assert aprovada.status_code == 201
+    assert mundo.decupagem()["pautas"][-1]["titulo"] == "Bastidores"
+
+
+def test_pauta_acrescentada_ja_trazida_pelo_modelo_nao_duplica() -> None:
+    mundo = _mundo()
+    _corrigir(
+        mundo, "pauta.acrescentar", json.dumps(_pauta(40000, 50000, "Bastidores"))
+    )
+    novo = _modelo(
+        pautas=[
+            *M12["pautas"],
+            {
+                **M12["pautas"][0],
+                "id": "pau99",
+                "titulo": "BASTIDORES",
+                "inicio_ms": 40100,
+                "fim_ms": 50000,
+            },
+        ]
+    )
+    mundo.reprocessar(novo)
+
+    titulos = [p["titulo"] for p in mundo.decupagem()["pautas"]]
+
+    assert titulos.count("BASTIDORES") == 1
+    assert "Bastidores" not in titulos
+
+
+def test_pauta_acrescentada_e_reaplicada_em_nova_versao() -> None:
+    mundo = _mundo()
+    _corrigir(
+        mundo, "pauta.acrescentar", json.dumps(_pauta(40000, 50000, "Bastidores"))
+    )
+    mundo.reprocessar(_modelo(pautas=[]))
+
+    assert [p["titulo"] for p in mundo.decupagem()["pautas"]] == ["Bastidores"]

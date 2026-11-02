@@ -40,6 +40,8 @@ from api.nuvem import (
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
 from api.referencias import Sugestoes, acervo_ligado
+from api.rostos_dos_palpites import Palpites
+from api.sinais import imprimir
 
 VALIDADE_PADRAO_DIAS = 180
 
@@ -66,6 +68,7 @@ def executar(
     *,
     validade: timedelta,
     com_acervo: bool = False,
+    palpites: Palpites | None = None,
     limiar: float = LIMIAR_PADRAO,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
 ) -> str:
@@ -97,6 +100,7 @@ def executar(
                 programa=job.programa,
                 sugestoes=sugestoes,
                 com_acervo=com_acervo,
+                palpites=palpites,
                 limiar=limiar,
                 limite_de_pessoas=limite_de_pessoas,
                 ao_falhar=falhas.append,
@@ -123,6 +127,9 @@ def main() -> None:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
+    referencias = ReferenciasStorage(
+        ClienteStorage(project=projeto), os.environ["BUCKET_REFERENCIAS"]
+    )
     executar(
         os.environ["JOB_ID"],
         RepositorioFirestore(firestore.Client(project=projeto)),
@@ -131,10 +138,8 @@ def main() -> None:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        TransporteVertex(projeto, sessao),
-        ReferenciasStorage(
-            ClienteStorage(project=projeto), os.environ["BUCKET_REFERENCIAS"]
-        ),
+        TransporteVertex(projeto, sessao, imprimir),
+        referencias,
         CatalogoFirestore(firestore.Client(project=projeto)),
         SugestoesFirestore(firestore.Client(project=projeto)),
         Path(os.environ["TMPDIR"]),
@@ -144,6 +149,7 @@ def main() -> None:
             )
         ),
         com_acervo=acervo_ligado(os.environ),
+        palpites=Palpites(referencias),
         limiar=float(os.environ.get("LIMIAR_DA_COMPARACAO", LIMIAR_PADRAO)),
         limite_de_pessoas=int(
             os.environ.get("LIMITE_DE_COMPARACOES", LIMITE_DE_PESSOAS)

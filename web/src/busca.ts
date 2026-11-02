@@ -2,6 +2,7 @@
 
 export type Evidencia = 'imagem' | 'citada' | 'fala' | 'gc' | 'objeto' | 'marca'
 export type OrdemDaBusca = 'relevancia' | 'data'
+export type ModoDaBusca = 'texto' | 'visual'
 
 /** Os chips, na ordem da tela, e o tipo de ocorrência cuja cor cada um leva. */
 export const EVIDENCIAS = [
@@ -21,8 +22,20 @@ export interface ConsultaDaBusca {
   programa: string | null
   /** `null`: o período entendido; `'todos'`: nenhum período. */
   ano: number | 'todos' | null
+  /** Faceta de mês (`2024-05`): vale sobre o ano. */
+  mes: string | null
+  /** Facetas de pessoa (id do catálogo), marca e tipo de momento: `null`, sem filtro. */
+  pessoa: string | null
+  marca: string | null
+  tipo: TipoDeMomento | null
   ordem: OrdemDaBusca
+  /** `visual`: o vetor do quadro-chave entra na busca e os planos vêm em grade (#269). */
+  modo: ModoDaBusca
 }
+
+export type TipoDeMomento = 'plano' | 'fala' | 'texto_na_tela' | 'objeto'
+const TIPOS_DE_MOMENTO: string[] = ['plano', 'fala', 'texto_na_tela', 'objeto']
+const MES = /^(\d{4})-(0[1-9]|1[0-2])$/
 
 export interface Destaque {
   inicio: number
@@ -30,6 +43,8 @@ export interface Destaque {
 }
 
 export interface Momento {
+  /** A grade da busca visual mostra só os planos. */
+  tipo: TipoDeMomento
   inicio_ms: number
   fim_ms: number
   motivo: string
@@ -54,18 +69,47 @@ export interface SemAparicao {
   mencoes_na_tela: number
 }
 
+/** Um valor de faceta e em quantos vídeos dos candidatos da busca ele aparece. */
+export interface ValorDaFaceta {
+  valor: string
+  rotulo: string
+  videos: number
+}
+
+export type NomeDaFaceta = 'programa' | 'mes' | 'pessoa' | 'marca' | 'tipo'
+export type Facetas = Record<NomeDaFaceta, ValorDaFaceta[]>
+
 export interface ResultadoDaBusca {
-  entendida: { evidencias: Evidencia[]; programa: string | null; desde: string | null; ate: string | null }
+  entendida: {
+    evidencias: Evidencia[]
+    programa: string | null
+    desde: string | null
+    ate: string | null
+    /** A busca usou o vetor do quadro; falso no modo visual quando o índice do quadro está fora. */
+    visual?: boolean
+  }
   videos: VideoDoResultado[]
   sem_aparicoes: SemAparicao[]
   plano_b: boolean
+  facetas: Facetas
 }
 
 const IDS_DE_EVIDENCIA: string[] = EVIDENCIAS.map((e) => e.id)
 
 /** A busca de um texto novo: chips e filtros voltam ao que a API entender. */
 export function consultaNova(q: string): ConsultaDaBusca {
-  return { q, evidencias: null, programa: null, ano: null, ordem: 'relevancia' }
+  return {
+    q,
+    evidencias: null,
+    programa: null,
+    ano: null,
+    mes: null,
+    pessoa: null,
+    marca: null,
+    tipo: null,
+    ordem: 'relevancia',
+    modo: 'texto',
+  }
 }
 
 export function consultaDaBusca(busca: string): ConsultaDaBusca {
@@ -77,7 +121,12 @@ export function consultaDaBusca(busca: string): ConsultaDaBusca {
     evidencias: ev.length ? ev : null,
     programa: p.get('programa'),
     ano: ano === 'todos' || (Number.isInteger(ano) && ano >= 1900 && ano <= 2999) ? ano : null,
+    mes: MES.test(p.get('mes') ?? '') ? p.get('mes') : null,
+    pessoa: p.get('pessoa') || null,
+    marca: p.get('marca') || null,
+    tipo: TIPOS_DE_MOMENTO.includes(p.get('tipo') ?? '') ? (p.get('tipo') as TipoDeMomento) : null,
     ordem: p.get('ordem') === 'data' ? 'data' : 'relevancia',
+    modo: p.get('modo') === 'visual' ? 'visual' : 'texto',
   }
 }
 
@@ -88,21 +137,48 @@ export function consultaParaEndereco(c: ConsultaDaBusca): string {
   for (const e of c.evidencias ?? []) p.append('ev', e)
   if (c.programa !== null) p.set('programa', c.programa)
   if (c.ano !== null) p.set('ano', String(c.ano))
+  if (c.mes !== null) p.set('mes', c.mes)
+  if (c.pessoa !== null) p.set('pessoa', c.pessoa)
+  if (c.marca !== null) p.set('marca', c.marca)
+  if (c.tipo !== null) p.set('tipo', c.tipo)
   if (c.ordem !== 'relevancia') p.set('ordem', c.ordem)
+  if (c.modo === 'visual') p.set('modo', 'visual')
   const texto = p.toString()
   return texto ? `?${texto}` : ''
+}
+
+/** O programa e o período da consulta, como a API os recebe (a busca por texto e a por imagem). */
+function filtrosParaApi(p: URLSearchParams, c: ConsultaDaBusca) {
+  if (c.programa !== null) p.set('programa', c.programa)
+  const mes = MES.exec(c.mes ?? '')
+  if (mes) {
+    // O dia 0 do mês seguinte é o último deste.
+    const ultimo = new Date(Date.UTC(Number(mes[1]), Number(mes[2]), 0)).getUTCDate()
+    p.set('desde', `${c.mes}-01`)
+    p.set('ate', `${c.mes}-${String(ultimo).padStart(2, '0')}`)
+  } else if (c.ano === 'todos') p.set('sem_periodo', 'true')
+  else if (c.ano !== null) {
+    p.set('desde', `${c.ano}-01-01`)
+    p.set('ate', `${c.ano}-12-31`)
+  }
+}
+
+/** A query de `POST /v1/busca/imagem`: só programa e período valem (a foto é a consulta). */
+export function consultaDaImagemParaApi(c: ConsultaDaBusca, limite: number): string {
+  const p = new URLSearchParams({ limite: String(limite) })
+  filtrosParaApi(p, c)
+  return p.toString()
 }
 
 /** A query de `GET /v1/busca`. */
 export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
   const p = new URLSearchParams({ q: c.q, ordem: c.ordem, limite: String(limite) })
   for (const e of c.evidencias ?? []) p.append('ev', e)
-  if (c.programa !== null) p.set('programa', c.programa)
-  if (c.ano === 'todos') p.set('sem_periodo', 'true')
-  else if (c.ano !== null) {
-    p.set('desde', `${c.ano}-01-01`)
-    p.set('ate', `${c.ano}-12-31`)
-  }
+  filtrosParaApi(p, c)
+  if (c.pessoa !== null) p.set('pessoa', c.pessoa)
+  if (c.marca !== null) p.set('marca', c.marca)
+  if (c.tipo !== null) p.set('tipo', c.tipo)
+  if (c.modo === 'visual') p.set('visual', 'true')
   return p.toString()
 }
 

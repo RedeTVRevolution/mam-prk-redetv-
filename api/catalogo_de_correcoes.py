@@ -7,12 +7,23 @@ de uma Correção (o `antes` e o `depois`) também sai daqui, uma vez por tipo.
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, get_args
 
 from pydantic import BaseModel
 
-from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta
+from api.decupagem import (
+    CATEGORIAS_DE_OBJETO,
+    CORES_BASE,
+    RELACOES_DO_OBJETO,
+    Comercial,
+    FonteDoNome,
+    RelacaoDoObjeto,
+    TextoNaTela,
+    TomDaPauta,
+    em_mm_ss,
+)
+from api.indice_da_busca import NOME_DA_CATEGORIA
 
 # Os rótulos dos vocabulários do esquema; o que falta aqui sai igual ao valor.
 ROTULOS_DOS_TONS = {
@@ -23,6 +34,12 @@ ROTULOS_DOS_TONS = {
     "homenagem": "homenagem",
     "analise": "análise",
     "comercial": "comercial",
+}
+ROTULOS_DAS_RELACOES: dict[RelacaoDoObjeto, str] = {
+    "veste": "veste",
+    "calca": "calça",
+    "usa": "usa",
+    "segura": "segura",
 }
 ROTULOS_DAS_FONTES = {
     "rosto": "rosto",
@@ -40,13 +57,8 @@ _OCORRENCIA = re.compile(rf"^({'|'.join(ROTULOS_DAS_LISTAS)}) (\d+)-(\d+)$")
 _TEMPOS = re.compile(r"^(\d+)-(\d+)$")
 
 
-def _tempo(ms: int) -> str:
-    total = ms // 1000
-    return f"{total // 60:02d}:{total % 60:02d}"
-
-
 def _faixa(inicio_ms: int, fim_ms: int) -> str:
-    return f"{_tempo(inicio_ms)}–{_tempo(fim_ms)}"
+    return f"{em_mm_ss(inicio_ms)}–{em_mm_ss(fim_ms)}"
 
 
 def _comercial(c: dict[str, Any]) -> str:
@@ -64,6 +76,41 @@ def _texto_na_tela(t: dict[str, Any]) -> str:
 
 def _texto_acrescentado(t: dict[str, Any]) -> str:
     return f"{_texto_na_tela(t)} {_faixa(t['inicio_ms'], t['fim_ms'])}"
+
+
+def _pauta_acrescentada(p: dict[str, Any]) -> str:
+    tom = ROTULOS_DOS_TONS.get(p["tom"], p["tom"])
+    return f"{p['titulo']} ({tom}) {_faixa(p['inicio_ms'], p['fim_ms'])}"
+
+
+def _atributos_do_objeto(o: dict[str, Any]) -> str:
+    cores = ", ".join(o["cor_base"])
+    return " · ".join(
+        x for x in (o["tipo"], cores, o["cor"], o["detalhe"], o["marca"]) if x
+    )
+
+
+def _objeto_acrescentado(o: dict[str, Any]) -> str:
+    partes = [NOME_DA_CATEGORIA[o["categoria"]], o["tipo"], ", ".join(o["cor_base"])]
+    texto = " ".join(x for x in partes if x)
+    if o["pessoa"] is not None:
+        texto += f" (dono: {o['pessoa']})"
+    return f"{texto} {_faixa(o['inicio_ms'], o['fim_ms'])}"
+
+
+def _dono_do_objeto(o: dict[str, Any]) -> str:
+    if o["pessoa"] is None:
+        return "sem dono"
+    return f"dono: {o['pessoa']} ({o['relacao']})"
+
+
+def _pauta_estrutural(p: dict[str, Any]) -> str:
+    """O título e a faixa de uma pauta (antes e depois de juntar, antes de dividir) ou
+    as duas metades de uma divisão."""
+    if "titulos" in p:
+        primeira, segunda = p["titulos"]
+        return f"{primeira} | {segunda} (corte em {em_mm_ss(p['em_ms'])})"
+    return f"{p['titulo']} {_faixa(p['inicio_ms'], p['fim_ms'])}"
 
 
 def _papel_visual(d: dict[str, Any]) -> str:
@@ -103,6 +150,11 @@ comercial_acrescentado = de_json(_comercial)
 aparicao_acrescentada = de_json(_aparicao)
 texto_na_tela = de_json(_texto_na_tela)
 texto_na_tela_acrescentado = de_json(_texto_acrescentado)
+pauta_acrescentada = de_json(_pauta_acrescentada)
+pauta_estrutural = de_json(_pauta_estrutural)
+atributos_do_objeto = de_json(_atributos_do_objeto)
+dono_do_objeto = de_json(_dono_do_objeto)
+objeto_acrescentado = de_json(_objeto_acrescentado)
 papel_visual = de_json(_papel_visual)
 fontes_do_nome = de_json(_fontes)
 descricao_do_plano = de_json(_plano)
@@ -115,6 +167,10 @@ def como_veio(valor: str) -> str:
 
 def tom_da_pauta(valor: str) -> str:
     return ROTULOS_DOS_TONS.get(valor, valor)
+
+
+def objeto_na_imagem(valor: str) -> str:
+    return "Objeto na imagem" if valor == "existe" else "Objeto não está na imagem"
 
 
 def plano_limpo(valor: str) -> str:
@@ -158,11 +214,14 @@ class CatalogoDeCorrecoes(BaseModel):
     tipos_de_texto_na_tela: list[Opcao]
     tons_da_pauta: list[Opcao]
     fontes_do_nome: list[Opcao]
+    categorias_de_objeto: list[Opcao]
+    cores_base: list[Opcao]
+    relacoes_do_objeto: list[Opcao]
     limites: Limites
     prefixos: Prefixos
 
 
-def _opcoes(valores: tuple[str, ...], rotulos: dict[str, str]) -> list[Opcao]:
+def _opcoes(valores: tuple[str, ...], rotulos: Mapping[Any, str]) -> list[Opcao]:
     return [Opcao(valor=v, rotulo=rotulos.get(v, v)) for v in valores]
 
 
@@ -180,6 +239,9 @@ def catalogo() -> CatalogoDeCorrecoes:
         ),
         tons_da_pauta=_opcoes(get_args(TomDaPauta), ROTULOS_DOS_TONS),
         fontes_do_nome=_opcoes(get_args(FonteDoNome), ROTULOS_DAS_FONTES),
+        categorias_de_objeto=_opcoes(CATEGORIAS_DE_OBJETO, NOME_DA_CATEGORIA),
+        cores_base=_opcoes(CORES_BASE, {}),
+        relacoes_do_objeto=_opcoes(RELACOES_DO_OBJETO, ROTULOS_DAS_RELACOES),
         limites=Limites(
             nome=correcoes.LIMITE_DO_NOME,
             texto=correcoes.LIMITE_DO_TEXTO,

@@ -63,55 +63,147 @@ USER nobody
 ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.transcricao_job"]
 
+# As amostras do teste dos Jobs com GPU (#238): uns segundos de fala, que o espeak-ng gera
+# na construção (sem arquivo binário no repositório). A frase é a de `api/teste_dos_jobs.py`
+# (`FRASE_FALADA`); o teste do repositório confere que as duas combinam. O quadro com
+# `REDETV` nasce no alvo `ocr-gpu`, que tem o OpenCV.
+FROM python:3.12-slim-bookworm AS amostras
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends espeak-ng \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir /amostras \
+    && espeak-ng -v pt-br -s 130 -w /amostras/fala.wav "Bom dia. Bom dia a todos."
+
+# Job de transcrição em GPU (E1, ADR 0007): `docker build --target transcricao-gpu`. Parte do
+# alvo `transcricao` (mesmo modelo, mesma revisão, mesmos hashes, sem baixar de novo) e
+# acrescenta as bibliotecas CUDA 12 e cuDNN 9 que o CTranslate2 4 pede, como rodas do
+# PyPI. O driver (580, CUDA 13) é do Cloud Run, que o monta em /usr/local/nvidia/lib64;
+# um runtime CUDA 12 roda nele. Esta imagem só roda com GPU (`DISPOSITIVO=gpu`).
+FROM transcricao AS transcricao-gpu
+USER root
+RUN uv sync --locked --no-dev --group transcricao --group transcricao-gpu
+COPY --from=amostras /amostras /amostras
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/nvidia/lib64 \
+    AMOSTRAS=/amostras DISPOSITIVO=gpu
+# A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
+# que o faster-whisper transcreve a amostra em CPU (a mesma conferência do teste depois da
+# publicação, `MODO_TESTE=1`, que lá exige a GPU). Não se confere o driver, a GPU nem o
+# CUDA em uso: isso é do teste depois da publicação e da primeira execução no dev (#240).
+RUN /app/.venv/bin/python -c "import ctypes, ctranslate2; ctypes.CDLL('libcublas.so.12'); ctypes.CDLL('libcudnn.so.9'); from api.teste_dos_jobs import testar_transcricao; raise SystemExit(testar_transcricao('cpu', exigir_gpu=False))"
+USER nobody
+
 # Job de OCR da tela (#106): `docker build --target ocr`. ffmpeg para os quadros, PaddleOCR
 # e os dois modelos, baixados aqui, na construção, nas revisões fixadas e conferidos pelo
-# SHA-256 de cada arquivo; no ar o Job roda sem internet.
+# SHA-256 de cada arquivo (`scripts/baixar-modelos-ocr.sh`); no ar o Job roda sem internet.
+# O detector é escolhido pelo `ARG DETECTOR` (#233): `PP-OCRv5_server_det` ou o leve
+# `PP-OCRv5_mobile_det`, que o Job lê da variável `DETECTOR` da imagem.
 FROM python:3.12-slim-bookworm AS ocr
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 ARG FFMPEG
 ARG DETECTOR=PP-OCRv5_server_det
-ARG DETECTOR_REVISAO=ca867c897ecbca8873081573a802ad70d499cb94
-ARG DETECTOR_SHA256=183146fe9d9910352f68482f623bcbbb9fa7b9e8fa1463b9ad288cef00524d2d
-ARG RECONHECEDOR=latin_PP-OCRv5_mobile_rec
-ARG RECONHECEDOR_REVISAO=ab2cd5cc5fa6309be2e5acdfe66eca2c2c127d57
-ARG RECONHECEDOR_SHA256=53cdc8b481a7394bb108f96d0fb3432b0a8f392e22c7d18f06dbb2d42b8b25f9
 # As bibliotecas do OpenCV (libgl1, libglib2.0-0) e do Paddle (libgomp1).
 RUN apt-get update \
     && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
         || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
     && rm -rf /var/lib/apt/lists/*
-# Os modelos vêm antes do `uv sync` (#211): só uma mudança de modelo os baixa de novo. O
-# download usa só o urllib, do Python da imagem base.
-RUN baixar() { \
-      mkdir -p "/modelos/$1" && for arquivo in config.json inference.json inference.pdiparams inference.yml; do \
-        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
-          "https://huggingface.co/PaddlePaddle/$1/resolve/$2/$arquivo" "/modelos/$1/$arquivo" || return 1; \
-      done; \
-    } \
-    && baixar "$DETECTOR" "$DETECTOR_REVISAO" \
-    && baixar "$RECONHECEDOR" "$RECONHECEDOR_REVISAO" \
-    && echo "$DETECTOR_SHA256  /modelos/$DETECTOR/inference.pdiparams" > /tmp/hashes \
-    && echo "436bf19010fe3879477e8599a870a0ec8ccd14ca39056805ec4ed20ab318ec04  /modelos/$DETECTOR/config.json" >> /tmp/hashes \
-    && echo "af5876933d8806a1b50d895867e0781e135cd92ff37381992828fc8d1b842d28  /modelos/$DETECTOR/inference.json" >> /tmp/hashes \
-    && echo "28fb721efc3634fc8aa677e474b9602cb815a91cf569ef357a7a553d7b3ce685  /modelos/$DETECTOR/inference.yml" >> /tmp/hashes \
-    && echo "$RECONHECEDOR_SHA256  /modelos/$RECONHECEDOR/inference.pdiparams" >> /tmp/hashes \
-    && echo "e0f5ccc44fe86254956f27746058bc4cf88d86145668cecf22ba5dd962483c80  /modelos/$RECONHECEDOR/config.json" >> /tmp/hashes \
-    && echo "820b2ee8e5072de5156c3d55124c2b03c82ef278d59f453f857c0789bacb4da1  /modelos/$RECONHECEDOR/inference.json" >> /tmp/hashes \
-    && echo "0bbe984570f597af3638e50bdf2e8276f3ab26a61966096538b3b0d1849f5c84  /modelos/$RECONHECEDOR/inference.yml" >> /tmp/hashes \
-    && sha256sum -c /tmp/hashes && rm /tmp/hashes
+# Os modelos vêm antes do `uv sync` (#211): só uma mudança de modelo os baixa de novo.
+COPY scripts/baixar-modelos-ocr.sh /usr/local/bin/baixar-modelos-ocr
+RUN baixar-modelos-ocr "$DETECTOR"
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr
 COPY api/ api/
 # Os testes usam um modelo falso: aqui o PaddleOCR lê um quadro de verdade com os modelos
 # da imagem, para a imagem não ser construída com uma versão que não roda em CPU.
-RUN HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
+RUN DETECTOR=$DETECTOR HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
     && rm -rf /tmp/ocr /tmp/ocr.png
 USER nobody
 # HOME e TMPDIR no volume em memória: o Paddle grava cache e o ffmpeg, os quadros, e a imagem não tem pasta gravável.
-ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos \
+ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos DETECTOR=$DETECTOR \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.ocr_job"]
+
+# Job de OCR em GPU (E1, ADR 0007): `docker build --target ocr-gpu`. Os mesmos modelos do
+# alvo `ocr` (o mesmo script, e o detector `server` por padrão: o leve é para o plano B em
+# CPU, #233), e o `paddlepaddle-gpu` 3.2.2 (CUDA
+# 12.6, do índice do Paddle) no lugar do `paddlepaddle` de CPU. Não parte do alvo `ocr` para
+# não carregar a roda de CPU. O driver é do Cloud Run, em /usr/local/nvidia/lib64.
+FROM python:3.12-slim-bookworm AS ocr-gpu
+COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+ARG FFMPEG
+RUN apt-get update \
+    && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
+        || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
+    && rm -rf /var/lib/apt/lists/*
+ARG DETECTOR=PP-OCRv5_server_det
+COPY scripts/baixar-modelos-ocr.sh /usr/local/bin/baixar-modelos-ocr
+RUN baixar-modelos-ocr "$DETECTOR"
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --group ocr-gpu
+COPY api/ api/
+ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
+    LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu DETECTOR=$DETECTOR
+# A máquina da construção não tem GPU: confere que o Paddle foi compilado com CUDA e lê o
+# quadro de amostra (o mesmo do teste depois da publicação, `MODO_TESTE=1`, que lá exige a
+# GPU) em CPU, com os modelos da imagem. Isso pega roda que não instala e modelo
+# incompatível. Não pega o cuDNN e o cuBLAS, que o Paddle só abre na primeira operação na
+# GPU, nem o driver e a GPU: isso é do teste depois da publicação (#238) e do dev (#240).
+RUN mkdir /amostras \
+    && HOME=/tmp/ocr TMPDIR=/tmp /app/.venv/bin/python -c "import cv2, numpy, paddle; assert paddle.device.is_compiled_with_cuda(); q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/amostras/quadro.png', q); from api.teste_dos_jobs import testar_ocr; raise SystemExit(testar_ocr('cpu', exigir_gpu=False))" \
+    && rm -rf /tmp/ocr
+USER nobody
+CMD ["python", "-m", "api.ocr_job"]
+
+# Job de objetos em GPU (E1, ADR 0008): `docker build --target objetos-gpu`. Florence-2
+# (conversão oficial para o transformers, sem `trust_remote_code`), baixado aqui, na
+# construção, na revisão fixada e conferido pelo SHA-256 de cada arquivo; no ar o Job roda
+# sem internet. O quadro de amostra do teste (um carro, `OBJETO_DO_QUADRO` em
+# `api/teste_dos_jobs.py`) vem de um dataset público da Hugging Face, numa revisão fixada
+# e conferido pelo hash. O driver é do Cloud Run, em /usr/local/nvidia/lib64.
+FROM python:3.12-slim-bookworm AS objetos-gpu
+COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+ARG MODELO=florence-community/Florence-2-large
+ARG MODELO_REVISAO=4271c66b88cdbc05735372ec13b2360108de5317
+ARG AMOSTRA_REVISAO=9dd8e4710f6b2ddf5184d308639e0359bc7b55be
+# Os pesos e a amostra vêm antes do `uv sync` (#211): só uma mudança deles os baixa de
+# novo. O download usa só o urllib, do Python da imagem base.
+RUN mkdir -p /modelo /amostras \
+    && for arquivo in config.json generation_config.json model.safetensors preprocessor_config.json processor_config.json tokenizer.json tokenizer_config.json added_tokens.json merges.txt special_tokens_map.json vocab.json; do \
+        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+          "https://huggingface.co/$MODELO/resolve/$MODELO_REVISAO/$arquivo" "/modelo/$arquivo" || exit 1; \
+    done \
+    && python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+        "https://huggingface.co/datasets/huggingface/documentation-images/resolve/$AMOSTRA_REVISAO/transformers/tasks/car.jpg" /amostras/objetos.jpg \
+    && echo "8412483f687f2f71587328a38c6fa70a68d9488f28e90607be3c182641f60f2c  /modelo/config.json" > /tmp/hashes \
+    && echo "0251459c49cc358ac033b5d4b8569e61ac22bde5d76be404b97a44cfb33fb12e  /modelo/generation_config.json" >> /tmp/hashes \
+    && echo "7715423d6549bf1e71188bdd84f4ac960cc0597886af24a5ef7b66f128660685  /modelo/model.safetensors" >> /tmp/hashes \
+    && echo "1396ec5a0a7adfe1c04fb777b09e8ba753be6dbb5868212ab3c3ef39d91fe031  /modelo/preprocessor_config.json" >> /tmp/hashes \
+    && echo "cd0e3bf41a39b1276503fbd273bc03b9afc70d7a15ea681a92a1b4b77f858ee6  /modelo/processor_config.json" >> /tmp/hashes \
+    && echo "3ad7001f773409abe6bba33eac92662611a73d72f459bda2f00d2a221dd31ce4  /modelo/tokenizer.json" >> /tmp/hashes \
+    && echo "cb5f80bd9afa767bb1bb798ee5f0a79eae45239b8e72506166b4218175a16723  /modelo/tokenizer_config.json" >> /tmp/hashes \
+    && echo "1d75deda84dfa81fb6c09301f3fed00f9695059568bbb1403a6bf299cd84fc37  /modelo/added_tokens.json" >> /tmp/hashes \
+    && echo "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5  /modelo/merges.txt" >> /tmp/hashes \
+    && echo "72ff172dc769bc1551b1b4211628ce3271643bc60379e4da45d85a9be9332c39  /modelo/special_tokens_map.json" >> /tmp/hashes \
+    && echo "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e  /modelo/vocab.json" >> /tmp/hashes \
+    && echo "8cd28b372908bcaa704a438965f8de47238c9514d5efefa89c510b82032f9d18  /amostras/objetos.jpg" >> /tmp/hashes \
+    && sha256sum -c /tmp/hashes && rm /tmp/hashes
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --group objetos
+COPY api/ api/
+ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo AMOSTRAS=/amostras \
+    LD_LIBRARY_PATH=/usr/local/nvidia/lib64 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+    PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu
+# A máquina da construção não tem GPU: confere que o torch e o transformers instalam e que o
+# Florence-2 acha o carro da amostra (a mesma conferência do teste depois da publicação,
+# `MODO_TESTE=1`, que lá exige a GPU) em CPU, com os pesos da imagem. Não pega o driver nem
+# a GPU: isso é do teste depois da publicação (#238) e do dev (#240).
+RUN HOME=/tmp/objetos TMPDIR=/tmp /app/.venv/bin/python -c "from api.teste_dos_jobs import testar_objetos; raise SystemExit(testar_objetos('cpu', exigir_gpu=False))" \
+    && rm -rf /tmp/objetos
+USER nobody
+CMD ["python", "-m", "api.objetos_job"]
 
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv

@@ -1,9 +1,11 @@
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from api.analise import executar
 from api.auth import Escopo, Usuario
 from api.chaves import (
     MacSimulado,
@@ -14,7 +16,10 @@ from api.chaves import (
 )
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.programas import PERFIS
+from api.tests.test_analise import SHA, DecupagensEmMemoria
 from api.tests.test_auth import VerificadorFalso
+from api.tests.test_gemini import BOA, TransporteFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
@@ -215,3 +220,89 @@ def test_sistema_consulta_status_com_etag_e_recebe_304() -> None:
     )
 
     assert resposta.status_code == 304
+
+
+def _criar_com_chave(
+    chaves: RepositorioDeChavesEmMemoria,
+    chave: str,
+    jobs: RepositorioEmMemoria | None = None,
+    **corpo: object,
+) -> Any:
+    return _cliente(chaves, jobs=jobs).post(
+        "/v1/jobs", json={**NOVO_JOB, **corpo}, headers={"X-API-Key": chave}
+    )
+
+
+def test_chave_cria_job_com_programa_e_data_e_o_perfil_chega_na_analise() -> None:
+    chaves, chave = _ambiente()
+    jobs = RepositorioEmMemoria()
+
+    resposta = _criar_com_chave(
+        chaves, chave, jobs, programa="TV Fama", data_exibicao="2026-10-01"
+    )
+
+    assert resposta.status_code == 202
+    corpo = resposta.json()
+    assert (corpo["programa"], corpo["data_exibicao"]) == ("TV Fama", "2026-10-01")
+    job = jobs.obter(corpo["id"])
+    assert job is not None and job.sistema == "Sistema Legado"
+    assert (job.programa, job.data_exibicao) == ("TV Fama", date(2026, 10, 1))
+    # O programa guardado é o que a análise usa para escolher o perfil.
+    job = job.model_copy(
+        update={"estado": "analisando", "sha256": SHA, "duracao_s": 60.0}
+    )
+    jobs.salvar(job)
+    transporte = TransporteFalso(BOA)
+    executar(
+        job.id,
+        jobs,
+        DecupagensEmMemoria("teste-aceitos"),
+        transporte,
+        dormir=lambda _s: None,
+        relogio=lambda: BASE,
+    )
+    assert PERFIS["TV Fama"] in transporte.chamadas[0].instrucao
+
+
+def test_chave_com_programa_fora_do_catalogo_da_422_com_os_validos() -> None:
+    chaves, chave = _ambiente()
+
+    resposta = _criar_com_chave(chaves, chave, programa="Programa Inventado")
+
+    assert resposta.status_code == 422
+    assert "TV Fama" in str(resposta.json()["detail"])
+
+
+@pytest.mark.parametrize("data", ["2999-01-01", "31/12/1999", "ontem", 20261029])
+def test_chave_com_data_futura_ou_mal_formada_da_422(data: object) -> None:
+    chaves, chave = _ambiente()
+
+    assert _criar_com_chave(chaves, chave, data_exibicao=data).status_code == 422
+
+
+@pytest.mark.parametrize("escopo", ["criar", "ler"])
+def test_chave_com_escopo_de_criar_ou_ler_lista_os_programas(escopo: Escopo) -> None:
+    chaves = RepositorioDeChavesEmMemoria()
+    chave = emitir_chave("Legado", [escopo], MAC_V1, chaves, BASE).chave
+
+    resposta = _cliente(chaves).get("/v1/programas", headers={"X-API-Key": chave})
+
+    assert resposta.status_code == 200
+    assert resposta.json() == ["TV Fama"]
+
+
+def test_chave_so_com_cancelar_nao_lista_os_programas() -> None:
+    chaves = RepositorioDeChavesEmMemoria()
+    chave = emitir_chave("Legado", ["cancelar"], MAC_V1, chaves, BASE).chave
+
+    resposta = _cliente(chaves).get("/v1/programas", headers={"X-API-Key": chave})
+
+    assert resposta.status_code == 403
+
+
+def test_envio_sem_programa_fica_sem_programa_para_a_chave() -> None:
+    chaves, chave = _ambiente()
+
+    resposta = _criar_com_chave(chaves, chave)
+
+    assert resposta.status_code == 202 and resposta.json()["programa"] is None

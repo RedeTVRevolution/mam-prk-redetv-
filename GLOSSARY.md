@@ -15,18 +15,25 @@ Um pedido de decupagem de um vídeo, do registro ao fim do processamento.
 _Evitar_: tarefa, pedido
 
 **Etapa**:
-Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, quadros-chave, indexação), com início, fim e resultado (`concluida` ou `falhou`). A falha de uma etapa depois do `concluido` não muda o estado do Job.
+Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, identificação, referências, comparação, quadros-chave, indexação, nessa ordem), com início, fim e resultado (`concluida` ou `falhou`). A transcrição e a leitura da tela rodam em paralelo, cada uma num Job com GPU, e a análise só começa quando as duas terminam. Essas duas etapas registram também o `dispositivo` (`gpu` ou `cpu`, se o plano B entrou) e as `tentativas_gpu`. A falha de uma etapa depois do `concluido` não muda o estado do Job.
 _Evitar_: fase
 
+**Dispositivo**:
+Onde a transcrição e a leitura da tela rodam: `cpu` (padrão) ou `gpu` (L4, em `us-east4`, ADR 0007), pela variável `DISPOSITIVO` (`api/dispositivo.py`). Pedir `gpu` numa instância sem GPU derruba o Job com mensagem clara, sem cair para a CPU em silêncio; o plano B em CPU é do Workflows. As imagens GPU ficam num repositório próprio em `us-east4`, e cada publicação testa as que mudaram em modo de teste (`MODO_TESTE=1`, uma fala sintética e um quadro com `REDETV` que estão na imagem; saída 20 = GPU não funcionou, 21 = resultado errado), voltando ao digest anterior se falhar (na primeira publicação não há anterior).
+
 **Reprocessar**:
-Refazer um Job a partir da primeira etapa que falhou, sem enviar o vídeo de novo (`POST /v1/jobs/{id}/reprocessar`, permissão `video.reprocessar`). As etapas anteriores não rodam; só vale para falha de etapa, e a falha do arquivo pede novo envio. Cada reprocessamento vai à auditoria (`video.reprocessado`).
+Refazer um Job a partir de uma etapa, sem enviar o vídeo de novo (`POST /v1/jobs/{id}/reprocessar`). As etapas anteriores não rodam, e cada reprocessamento vai à auditoria (`video.reprocessado`).
+Há dois jeitos. **Reprocessar o que falhou** (`video.reprocessar`, Operador e acima) recomeça da primeira etapa que falhou e só vale para falha de etapa; a falha do arquivo pede novo envio. **Reprocessar a partir de uma etapa escolhida** (`video.reprocessar_etapa`, Curador e Administrador) refaz um vídeo `concluido` e bom, por exemplo por uma instrução nova: o corpo do pedido traz a `etapa` (análise, identificação, quadros-chave ou indexação) e o motivo, obrigatório, e a auditoria marca `etapa_escolhida`. Com a análise escolhida o Job volta a `analisando`, a Decupagem some até a nova análise terminar e o progresso das janelas é descartado, para o modelo rodar de novo em todas; com as outras, o Job continua `concluido`.
+
+**Corrigir o estado**:
+Pôr um Job em `concluido` ou `falhou` à mão, só o Administrador (`job.corrigir_estado`), com motivo obrigatório: `POST /v1/admin/jobs/{id}/estado` ou `make corrigir-estado JOB=... ESTADO=... MOTIVO=...`, pela mesma função (`api/correcao_de_estado.py`). As transições valem em `api/ciclo_de_vida.py` (`DESTINOS_DA_CORRECAO`): falhar vale de qualquer estado não final e fecha como `falhou` as etapas que estavam em andamento, com o código da falha da primeira delas (o "reprocessar o que falhou" recomeça dali; sem etapa aberta, ou com a validação aberta, a falha conta como do arquivo); voltar a concluído, só de `falhou` ou `analisando` e se a decupagem guardada passar pelo esquema inteiro. A correção não dispara nada: a indexação fica como estava, e para o vídeo entrar na busca reprocessa-se a partir da indexação. Se a auditoria não grava, o Job volta ao que era. Vai à auditoria como `job.estado_corrigido`, com o estado de antes e o de depois; no comando, quem fez é o `sistema` `corrigir-estado:<usuário da máquina>`.
 
 **Bloco**:
 Segmento editorial de um programa de TV, como a abertura ou o trecho entre dois intervalos.
 _Evitar_: segmento, parte
 
 **Plano**:
-Trecho do vídeo entre dois cortes de câmera.
+Trecho do vídeo entre dois cortes de câmera. A descrição (ambiente, ação, objetos) é do intervalo entre cortes, não do trecho que o modelo descreveu; a tela preta é um plano com ambiente "tela preta".
 _Evitar_: cena, take
 
 **Plano limpo**:
@@ -36,6 +43,9 @@ Plano sem GC e sem ninguém falando para a câmera, reaproveitável como B-roll.
 GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os tempos. O Gemini lê o texto; os tempos são medidos nos quadros pelo OCR (`medido`), e o texto que o OCR não acha fica com o tempo do Gemini e `medido=False`.
 _Evitar_: lettering
 
+**Leitura da tela**:
+O texto que o OCR lê no proxy, um quadro por segundo (`api/leitura_da_tela.py`). O OCR só lê de novo quando a imagem muda (`api/mudanca_da_tela.py`, #233): compara com o último quadro lido, em seis faixas horizontais de oito blocos, contra o limiar `LIMIAR_DE_MUDANCA`; o quadro igual repete a leitura, e o formato guardado segue com um quadro por segundo. O detector (`server` ou o leve `mobile`) é o `ARG DETECTOR` da imagem. `make comparar-leituras` compara duas leituras do mesmo vídeo.
+
 **Perfil do programa**:
 Contexto fixo de um programa (apresentadores, repórteres, merchandising frequente), em `api/programas.toml`, que a instrução do modelo recebe quando o Job informa o programa.
 
@@ -44,6 +54,12 @@ Contexto fixo de um programa (apresentadores, repórteres, merchandising frequen
 **Catálogo de pessoas**:
 Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel, apelidos e as referências de rosto ligadas a ela (origem `web` ou `acervo`). Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
 _Evitar_: base de famosos
+
+**Catálogo de marcas**:
+Dado vivo no Firestore (`api/marcas.py`), no molde do de pessoas: id estável, nome e apelidos. Começa pela carga das marcas já vistas nos comerciais das Decupagens (`make carregar-marcas`, idempotente) e cresce com os nomes novos digitados por quem corrige. A Decupagem aponta para ela por `catalogo_id` no comercial, gravado quando a correção da marca vem com o id escolhido no autocompletar.
+
+**Autocompletar**:
+`GET /v1/catalogo/pessoas?q=` e `/v1/catalogo/marcas?q=` (`api/rotas_do_catalogo.py`, `api/achar_nomes.py`): até 10 resultados, por prefixo de palavra do nome ou do apelido, sem acento nem maiúscula, com um erro de digitação tolerado em termos de 5 letras ou mais. O `POST` do mesmo caminho acrescenta o nome digitado como **a revisar** (com o autor) ou devolve o que já existe com esse nome; a tela Pessoas do Curador, que revisa esses nomes, fica para outro ticket. A correção de nome de pessoa ou de marca que traz `catalogo_id` o grava; o servidor recusa (422) o id que não existe ou que é de outro nome.
 
 **Nome confirmado / palpite**:
 `Pessoa.estado_do_nome`. Confirmado é o nome com uma prova que o código conferiu (`api/identificacao.py`): um GC ou tarja com o nome ou apelido, ou o nome ou apelido dito no texto original do Whisper, enquanto a pessoa está na imagem e sem outra pessoa sem nome na imagem no mesmo intervalo. O nome que o modelo deu sem prova conferida é palpite. Estar no perfil ou no catálogo torna a pessoa candidata e não confirma nome; `contexto` não é prova. A correção da revisora (`origem` `revisao`) vale mais e nenhum reprocessamento a sobrescreve.
@@ -67,17 +83,20 @@ A prova que confirma o nome de uma pessoa, conferida pelo código: GC, fala ou r
 
 **Referência de rosto**:
 Foto de uma pessoa nomeada, guardada para comparar com o rosto da tela: 3 fotos diferentes por nome, buscadas na web, com a página de origem.
-Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet: recebe só nomes (`NOMES`, `PROGRAMA`), lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo (nome fora do catálogo ou ambíguo não busca). O `make carregar-catalogo` não apaga os rostos já guardados.
+Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet. Recebe só nomes: `NOMES` e `PROGRAMA`, ou `JOB_ID`, e então lê a lista que o Job de identificação gravou (`<job>.nomes_a_buscar.json`, com os candidatos e os palpites sem referência válida e o programa). Lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo. O nome fora do catálogo (palpite) ganha as fotos sob o prefixo `palpites/` (ver **Fotos de palpite**); o ambíguo não busca. Há um limite de buscas por vídeo (`LIMITE_DE_BUSCAS_POR_VIDEO`), e cada busca leva o rótulo de custo. O `make carregar-catalogo` não apaga os rostos já guardados.
 _Evitar_: galeria facial
+
+**Fotos de palpite**:
+As 3 fotos de referência de um palpite que o catálogo não conhece, guardadas sob `palpites/<nome-normalizado>/` no bucket das referências, com os dados em `rostos.json` ao lado (`api/rostos_dos_palpites.py`). Uma regra de ciclo de vida do bucket apaga só esse prefixo, em 30 dias (`prazo_dos_palpites_dias`). Só o nome que a comparação confirma entra no catálogo, e aí as fotos passam para `referencias/<id>/`.
 
 **Palpite**:
 Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
 
 **Comparação**:
-Passo que compara as pessoas sem nome e os palpites do vídeo com as fotos de referência (`api/comparacao.py`, `comparar`). Primeiro a escolha às cegas: o modelo vê as fotos com rótulos A, B… embaralhados a cada chamada e nunca recebe os nomes; o código traduz o rótulo. Depois a conferência foto a foto: uma chamada por foto, com a confiança de cada uma; o nome só se confirma com as 3 fotos no limiar ou acima. Confirma com `fontes_do_nome=["referencia"]`, liga a pessoa ao catálogo e propõe sugestões para o perfil. Há um limite de pessoas por vídeo; as que passam dele ficam como palpite não confirmado.
+Passo que compara as pessoas sem nome e os palpites do vídeo com as fotos de referência (`api/comparacao.py`, `comparar`). Primeiro a escolha às cegas: o modelo vê as fotos com rótulos A, B… embaralhados a cada chamada e nunca recebe os nomes; o código traduz o rótulo. Depois a conferência foto a foto: uma chamada por foto, com a confiança de cada uma; o nome só se confirma com as 3 fotos no limiar ou acima. Confirma com `fontes_do_nome=["referencia"]`, liga a pessoa ao catálogo e propõe sugestões para o perfil. O palpite fora do catálogo concorre com as fotos de palpite; ao confirmar, entra no catálogo (o papel vem da aparição). Há um limite de pessoas por vídeo; as que passam dele ficam como palpite não confirmado.
 
 **Veredito**:
-Registro, por pessoa, do que a comparação decidiu (confirmado, palpite descartado, palpite não confirmado ou sem resultado), com as 3 fotos e a confiança de cada uma. Um palpite trocado por outro nome confirmado fica confirmado e marcado como descartado. Serve à auditoria; a `Pessoa` não guarda a prova.
+Registro, por pessoa, do que a comparação decidiu (confirmado, palpite descartado, palpite não confirmado ou sem resultado), com as 3 fotos e a confiança de cada uma. Um palpite trocado por outro nome confirmado fica confirmado e marcado como descartado. Serve à auditoria e à tela: a rota `GET /v1/jobs/{id}/pessoas/{pessoa}/referencias` (só com `decupagem.ver`, URLs assinadas de 5 min, sem cache) devolve as fotos do veredito com a página, o domínio e se cada uma confere, para o painel de comparação do Visualizador, aberto pelo selo "Rosto". A `Pessoa` não guarda a prova.
 
 **Palpite descartado / palpite não confirmado**:
 Descartado: o nome foi recusado (a escolha apontou outro candidato ou nenhum, ou o nome está ou fica confirmado para outra pessoa do vídeo) e a pessoa volta a "não identificado". Não confirmado: o nome continua palpite porque não há referência para conferir, o limite de pessoas passou ou uma foto ficou abaixo do limiar.
@@ -87,8 +106,29 @@ Descartado: o nome foi recusado (a escolha apontou outro candidato ou nenhum, ou
 **Momento**:
 Unidade de busca: um plano ou um evento da decupagem, com início e fim.
 
+**Busca visual**:
+Modo da busca (`GET /v1/busca?visual=true`, botão "Busca visual" na tela, `?modo=visual` na URL): o texto da consulta vira vetor no Gemini Embedding 2 e entra no mesmo RRF, comparado aos vetores dos quadros-chave dos planos (#268), junto da busca por texto e por significado; só planos, mostrados em grade de miniaturas. Fica ligado só por pedido (cada consulta custa uma chamada ao embedding). Com o índice do quadro desligado ou o embedding fora, a busca roda como a comum e a resposta traz `entendida.visual = false`.
+
+**Busca por imagem**:
+`POST /v1/busca/imagem` (multipart, `decupagem.ver`), botão "Buscar por imagem" na tela de busca (#270): a foto vira vetor no mesmo modelo dos quadros-chave e entra como a cláusula visual do RRF; só programa e período filtram, e só planos voltam (grade). A foto é entrada hostil: só JPEG ou PNG pelo conteúdo, limites de bytes e pixels (`BUSCA_IMAGEM_MAX_BYTES`, `BUSCA_IMAGEM_MAX_PIXELS`, opcionais), decodificada e regravada em JPEG sem metadados (`api/imagens_hostis.py`) e nunca guardada: nem disco, nem Storage, nem Firestore, nem log. O corpo é lido pela rota, com teto (`Content-Length` conferido antes, leitura cortada no limite) e só em memória. O JPEG de celular que abre como MPO vale como JPEG. Sem índice do quadro ou com o embedding fora, responde 503.
+
+**Planos parecidos**:
+Botão "Planos parecidos com este" em cada plano do Visualizador (#271): abre `/busca/parecidos?job=&plano=`, a grade dos planos mais próximos pelo vetor do quadro-chave que já está no índice (`GET /v1/busca/parecidos?job=&plano=`, `decupagem.ver`), sem enviar imagem nem chamar o embedding; o próprio plano fica de fora. `plano` é o número do plano no vídeo. O plano sem vetor (vídeo indexado antes do #268, índice do quadro desligado ou embedding que falhou) responde 404 e o botão não aparece: a lista dos planos com vetor vem de `GET /v1/busca/parecidos/planos?job=`, consultada com o vídeo `indexado`.
+
+**Cópia no BigQuery**:
+Uma linha por momento da Decupagem entregue (plano, fala, texto na tela, objeto e comercial, este com marca e tipo de inserção), para os relatórios de aparições e menções. Fica no Brasil (`southamerica-east1`), particionada pela data de exibição e agrupada por programa. Cada gravação troca as linhas do Job num único MERGE (nunca acumula versões); roda ao concluir o vídeo e a cada Correção em vigor, e falhar só marca `copia_bigquery.estado = falhou` no Job. `make copiar-para-bigquery` carrega os Jobs que já existem e refaz os que falharam.
+
+**Relatório de tempo de tela**:
+Por pessoa do catálogo, num programa e num período de data de exibição (`GET /v1/relatorios/tempo-de-tela`, `formato=csv`; tela "Relatórios › Tempo de tela"): tempo somado das aparições, vídeos e aparições, e as menções na fala e no texto da tela só como contagem. Lê da cópia no BigQuery as linhas `aparicao`, `mencao_na_fala` e `mencao_no_texto` (uma por intervalo de cada pessoa confirmada no catálogo; palpite e "não identificado" ficam fora). Aparições da mesma pessoa no mesmo vídeo que se sobrepõem ou se tocam contam uma vez. A pessoa é o id do catálogo, com o nome mais frequente nas linhas dela. Chave de sistema não consulta (a cópia não guarda o sistema dono do vídeo). Vídeos copiados antes do #266 só entram depois de `make copiar-para-bigquery`.
+
+**Relatório de marcas**:
+Por marca, num programa e num período de data de exibição, com filtro opcional por tipo de inserção (`GET /v1/relatorios/marcas?programa=&desde=&ate=&tipo=`, `formato=csv`; tela "Relatórios › Marcas"): número de inserções, tempo somado e número de vídeos, com o detalhe por tipo e, ao abrir a marca, a lista das inserções com o vídeo e o tempo. Lê da cópia no BigQuery as linhas `comercial`. O tempo é a soma das durações, sem unir sobreposições (marca incidental durante o merchan conta nas duas). A marca é o texto da linha. O CSV tem, por marca, uma linha `todos` com o total e uma por tipo. A base de permissão, filtros, CSV e erros é a do relatório de tempo de tela (`api/relatorios.py`, `web/src/relatorios.tsx`).
+
+**Faceta**:
+Contagem de vídeos por valor ao lado dos resultados da busca: programa, mês de exibição, pessoa, marca e tipo de momento. É calculada sobre os candidatos que a busca já trouxe (os até 100 registros fundidos pelo RRF), já com os filtros aplicados, e não sobre o acervo todo, porque o índice não agrega. Clicar num valor filtra no índice, antes do teto de registros: programa e mês viram programa e período, e pessoa, marca e tipo entram nos filtros de cada cláusula (`pessoa` casa a pessoa na imagem ou a dona do objeto). Programa e mês são contados pelo registro do índice, que é o que o filtro compara. Vale também no plano B.
+
 **Objeto**:
-Peça visível na Decupagem (`objetos`, esquema 1.4): roupa, calçado, acessório, o que alguém segura ou um objeto em cena (veículo, produto, eletrônico, animal, comida), com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`, nulos em cena) e os tempos. A categoria diz o que a coisa é (`em_cena` e `na_mao` só quando nenhuma outra serve). Produto mostrado num telão ou em gráfico entra como objeto, com o detalhe "no telão" ou "em gráfico". A busca filtra pelo objeto inteiro, não por itens soltos no plano.
+Peça visível na Decupagem (`objetos`, esquema 1.4): a análise principal registra só o que cada pessoa veste, calça, usa ou segura (roupa, calçado, acessório, na mão), com categoria, tipo, cor base, tom, marca legível, o dono (`pessoa` e `relacao`) e os tempos. Os objetos de cena (veículo, produto, eletrônico, animal, comida) já cabem no esquema, mas vêm da etapa de inventário de objetos (Florence-2), não da análise principal. A categoria diz o que a coisa é (`em_cena` e `na_mao` só quando nenhuma outra serve). A busca filtra pelo objeto inteiro, não por itens soltos no plano.
 
 **Ocorrência**:
 Algo detectado num momento: pessoa, marca, objeto ou pauta.
@@ -125,8 +165,14 @@ Janelas sorteadas que também passam pelo escalonamento, para medir o que a prim
 **Chave de conteúdo**:
 Identidade de uma decupagem: o arquivo, a versão do pipeline e as opções que mudam a saída. Dois jobs com a mesma chave de conteúdo compartilham um processamento.
 
+**Versão do pipeline**:
+Nome curto (`2026.11.1`) mais o manifesto do que ele fixa: o modelo de cada etapa, o hash de cada instrução, a versão do esquema e os motores de transcrição, OCR e objetos (`api/versao_pipeline.py`). Cada Decupagem nova grava `versao_pipeline` e `manifesto_do_pipeline`; a anterior, sem o campo, é "anterior à versão". Mudar modelo, instrução, esquema ou motor exige mudar a versão (um teste cobra), e a versão nova permite reprocessar o acervo de propósito (`make reprocessar-versao`).
+
 **Chave de idempotência**:
 Identificador de uma intenção de envio do cliente, reutilizado em todas as repetições dessa intenção.
+
+**Passada de comparação**:
+A análise inteira de um Job concluído refeita com outro modelo, sem escalonamento, guardada ao lado da Decupagem com o modelo, a data, o custo e o tempo de cada passo (`api/passadas.py`, `make passada-de-comparacao`). Não é Job nem Decupagem: não é indexada, não aparece no Acervo, não recebe correções nem dispara webhook, e a Decupagem do Job não muda. Cada chamada leva o rótulo de custo `etapa=passada_de_comparacao`. Serve para comparar modelos no mesmo vídeo. `make comparar-passadas` (`api/comparar_passadas.py`, #248) compara a decupagem do Job com uma passada, ou soma vários Jobs, e grava um relatório em Markdown e JSON. No Visualizador (#249), o seletor "Comparar com" mostra as duas decupagens lado a lado, só para leitura (`GET /v1/jobs/{id}/passadas/{passada}/comparacao`).
 
 ### Revisão
 
@@ -134,8 +180,25 @@ Identificador de uma intenção de envio do cliente, reutilizado em todas as rep
 Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada.
 _Evitar_: edição, ajuste
 
+**Lixeira**:
+Primeiro tempo de apagar um item (`api/lixeira.py`, `/v1/admin/lixeira`, #144, [ADR 0010](docs/adr/0010-lixeira-e-purga.md)): o vídeo ganha `Job.lixeira` (quando, quem, motivo) e some da lista, da busca e das rotas do Job para quem não é Administrador, mas nada é apagado e restaurar volta tudo. Só Job `concluido`, `falhou` ou `cancelado`. Cada envio e restauração vai para a auditoria com o impacto. Vale também para pessoa e marca do catálogo (#151, permissão `catalogo.apagar` do Curador e do Administrador; restaurar e purgar só do Administrador): a pessoa perde as fotos de rosto já no envio e, nas decupagens, o nome confirmado só pelo rosto vira "não identificado"; a marca mantém o texto e perde o vínculo.
+
+**Purga**:
+Segundo tempo de apagar: 30 dias depois do envio à lixeira, ou antes por decisão do Administrador, um processo próprio apaga de fato (única exceção à regra de que correções e saída do modelo nunca são apagadas) e deixa o registro na auditoria.
+
 **Correção pendente**:
 Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale).
+
+**Juntar e dividir pautas**:
+Tipos de Correção (`pauta.juntar`, valor `{ids, titulo}`; `pauta.dividir`, valor `{em_ms, titulos}`) que mudam a estrutura das pautas, podem exigir aprovação como os outros tipos e reindexam o vídeo. Juntar vale só para pautas que se seguem; dividir, para um corte dentro da pauta. No reprocessar, cada uma é reconciliada com as pautas novas do modelo: se o modelo já fez o mesmo, com os mesmos títulos, a correção está atendida; se fez o mesmo com outros títulos, só os títulos mudam; se não, é reaplicada.
+
+**Correção não reaplicada**:
+Juntar ou dividir pautas para a qual o reprocessar não achou pauta correspondente. Não se perde: aparece na fila (`/fila`) com `candidatos` vazios, e só pode ser descartada.
+Na tela (modo de catalogação, aba Pautas): `M` marca a pauta em foco, `U` junta as marcadas, `D` divide a pauta em foco no ponto do player; na gaveta, a fila mostra a marca "não reaplicada" com "Refazer à mão" (volta a essas teclas) e Descartar.
+
+**Sugestão**:
+Pista do próprio sistema que o editor só confirma (`api/sugestoes.py`, `GET /v1/jobs/{id}/sugestoes`): uma pergunta, o contexto que a sustenta e a correção proposta, no formato das correções. Nunca muda nada sozinha: aceitar cria a correção com o motivo "sugestão confirmada pelo editor" (ou "corrigida", se o editor deu outro nome ou o título da pauta); aceita ou recusada, sai da lista naquele vídeo, mesmo depois de reprocessar e mesmo com a correção pendente. Não confundir com as sugestões para o perfil que a comparação propõe (`sugestoes_de_perfil`). As regras são do servidor: o GC de identificação sobre um "não identificado" (só o tipo `gc` sustenta; a chamada nunca) e o trecho de 30 s ou mais sem pauta. Aceitas e recusadas por tipo ficam em `GET /v1/sugestoes/contagem`.
+_Evitar_: palpite (é o nome que o modelo propõe sem prova, ADR 0005)
 
 ### Acesso
 
@@ -154,3 +217,35 @@ _Evitar_: perfil, grupo
 
 **Chave de API**:
 Credencial de um sistema consumidor da RedeTV, nunca de uma pessoa.
+
+**Resultado bruto do Florence-2**:
+O `florence.json` que o Job de objetos grava em `<job>/objetos/`, com, por quadro-chave de cada plano, os objetos detectados (rótulo e caixa normalizada de 0 a 1) e as regiões com legenda, mais o modelo e a revisão. É a matéria-prima do inventário de objetos de cena; ainda não é a lista `objetos` da Decupagem.
+
+**Inventário de objetos**:
+Os objetos de cena de cada plano (`Plano.inventario`), separados de `objetos` (o que a pessoa veste ou segura): nome curto, categoria, cor, marca (só se a legenda citar), as caixas por quadro e o destaque, tudo em português. É preenchido pelo servidor na etapa `inventario_de_objetos`, nunca pela análise. Os objetos de cena usam as categorias `veiculo`, `eletronico`, `produto`, `animal`, `alimento`, `bebida`, `movel`, `decoracao`, `instrumento_musical`, `utensilio`, `documento` e `planta`.
+_Evitar_: lista de objetos, detecções
+
+**Destaque**:
+Nota de 1 a 3 de quanto um objeto do inventário aparece no quadro, calculada pelo servidor pela área e pela posição de cada caixa, ficando a maior nota entre as caixas do objeto (3: grande e no centro; 2: grande, ou média e no centro; 1: o resto). O modelo não a decide. Na busca, o destaque entra no registro e pesa na ordem: 3% por nível acima de 1.
+
+**Motor do inventário**:
+Quem faz o inventário de objetos: `florence` (Florence-2 numa GPU, com o Gemini só convertendo o texto para o português) ou `gemini` (o modelo olha os quadros-chave). Vem da variável `motor_objetos`; o inventário guarda o motor e o modelo que o geraram.
+
+**Sessão de revisão**:
+O tempo que uma pessoa passa revisando um vídeo no modo de catalogação (#251). A tela avisa a API ao começar, a cada minuto com atividade (tecla, clique ou player tocando) e ao sair (`POST /v1/jobs/{id}/revisao/pulso`); sem atividade por 5 minutos (`REVISAO_INATIVIDADE_S`) a sessão pausa e o tempo parado não conta. A API guarda por vídeo e por pessoa o tempo ativo, as sessões e a duração do vídeo; duas abas da mesma pessoa não contam em dobro. O total sai em minutos de revisão por hora de vídeo (`GET /v1/jobs/{id}/revisao`, `make tempo-de-revisao`). A pessoa não vê cronômetro: o objetivo é medir.
+
+**Taxa de correção**:
+Por programa, versão do pipeline e tipo de correção, as correções em vigor que passaram a valer no período (na aprovação, se exigem aprovação; na criação, se não; não desfeitas; só as feitas sobre o JSON do modelo atual; conta correções, não itens) divididas pelos itens daquele tipo nas decupagens revisadas (#265). Decupagem revisada é a de um Job concluído que teve no período uma correção, uma aprovação ou um pulso de **sessão de revisão**: o vídeo aberto e deixado como estava entra no denominador. O item é o do tipo que a correção corrige (pessoa, pauta, comercial, plano, fala, texto na tela; no `item.tempos`, todos). Sai em `GET /v1/qualidade/taxa-de-correcao?desde=&ate=&programa=` (`correcao.aprovar` ou `auditoria.ver`) e em `make taxa-de-correcao`; a taxa é vazia se não há item.
+
+**Conjunto de regressão**:
+Casos de teste da decupagem guardados no repositório em `evals/regressao/` (`api/regressao.py`, #253), sem vídeo: cada caso tem o SHA-256 do vídeo enviado (o do bloco `video`), o trecho e o esperado por categoria, nos tipos do comparador. Nascem do gabarito anotado à mão ou das correções em vigor (`make exportar-regressao`, com o Job e a versão do pipeline que errou). Cada caso é **reservado** (só a avaliação final usa, nunca o ajuste de instrução) ou de ajuste, por sorteio estável do id. As metas por requisito ficam em `metas.json`.
+
+**Avaliação diária**:
+Nota por rubrica, todo dia, de uma amostra dos vídeos concluídos no dia anterior (`api/avaliacao.py`, `api/avaliacao_job.py`, #255): uma fração por programa, ao menos um, por sorteio reproduzível. Para cada requisito (famosos, menções, pautas, B-roll, comerciais) o juiz do serviço de avaliação da Vertex lê os campos da Decupagem que a **rubrica** (`api/rubricas.toml`) indica e dá uma nota, guardada por vídeo, requisito e `versao_pipeline`. **Queda** é a média do dia de um requisito abaixo do limiar ou mais que X pontos abaixo da média dos 7 dias anteriores, e sai num log `queda_de_qualidade`. Não confundir com a avaliação final do conjunto de regressão, que compara com o esperado.
+
+**Sinal por programa**:
+Depois que a indexação copia um vídeo concluído para o BigQuery (`api/sinal_do_programa.py`, #287), os eventos dele (aparições, menções, pautas, comerciais) por hora de vídeo, contados pelas linhas da cópia (cada intervalo de aparição conta um, sem juntar os que se tocam como no tempo de tela), são comparados com a média e o desvio dos últimos N vídeos do mesmo programa, calculados no BigQuery. Fora de K desvios, sai um log `desvio_de_programa` (programa, tipo, valor, média, desvio) que um alerta do Monitoring pega. Programa com menos de N vídeos, ou histórico sem variação, não alerta. Só o vídeo que acabou de concluir é avaliado (não as Correções nem o `make reindexar` em massa).
+
+**Painéis de observabilidade**:
+Quatro painéis do Cloud Monitoring no `infra/modulos/mam/main.tf` (#288): tempo e custo por etapa, fila de processamento, erros e latência da API, e Jobs com GPU. Cada número vem de uma métrica de log (linhas JSON dos Jobs e do Workflows: `duracao_da_etapa`, `uso_do_modelo`, `fila_de_jobs`, `falta_de_gpu`, mais as requisições da API) ou de uma métrica nativa do Cloud Run. Nos tokens e no custo, a etapa é o Job que chamou o modelo, sem o `mam-` (`analise`, `identificacao`, `referencias`, `comparacao`, `inventario`). As requisições da API são só as de `/v1/`, com a rota cortada no recurso (`/v1/jobs`). O custo de uma etapa é a soma dos tokens de cada modelo vezes o preço dele em `precos_por_milhao_de_tokens`; sem preço na configuração só os tokens aparecem. A fila só conta os Jobs em andamento (aguardando upload, validando, analisando), amostrados por minuto pelo Job `mam-fila`, e a idade é desde a criação.
+

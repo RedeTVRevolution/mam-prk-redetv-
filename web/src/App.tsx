@@ -16,11 +16,14 @@ import type { Autenticador } from './auth/autenticador.ts'
 import Barra from './Barra.tsx'
 import Acervo from './Acervo.tsx'
 import Busca from './Busca.tsx'
+import { PlanosParecidos } from './PlanosParecidos.tsx'
 import Login from './Login.tsx'
 import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
+import Marcas from './Marcas.tsx'
+import TempoDeTela from './TempoDeTela.tsx'
 
 // A amostra do sistema visual é grande e sem login: fica num pedaço à parte do bundle.
 const Amostra = lazy(() => import('./Amostra.tsx'))
@@ -141,6 +144,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
   }
   const podeEditar = sessao.usuario.permissoes.includes('decupagem.editar')
   const podeAprovar = sessao.usuario.permissoes.includes('correcao.aprovar')
+  const podeReprocessar = sessao.usuario.permissoes.includes('video.reprocessar_etapa')
   const podeEnviar = sessao.usuario.permissoes.includes('video.enviar')
   return (
     <AppShell
@@ -148,15 +152,16 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       padding="sm"
     >
       <Barra email={sessao.usuario.email} aoSair={() => void sair()} />
-      {rota.tipo === 'video' || rota.tipo === 'video_anterior' ? (
+      {rota.tipo === 'video' ? (
         <AppShell.Main bg="dark.7">
           <TelaDoVideo
             api={api}
             id={rota.id}
             t={rota.t}
+            busca={rota.busca}
             podeEditar={podeEditar}
             podeAprovar={podeAprovar}
-            anterior={rota.tipo === 'video_anterior'}
+            podeReprocessar={podeReprocessar}
           />
         </AppShell.Main>
       ) : rota.tipo === 'acervo' ? (
@@ -165,6 +170,18 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'busca' ? (
         <AppShell.Main bg="dark.7">
           <Busca api={api} consulta={rota.consulta} />
+        </AppShell.Main>
+      ) : rota.tipo === 'parecidos' ? (
+        <AppShell.Main bg="dark.7">
+          <PlanosParecidos api={api} job={rota.job} plano={rota.plano} />
+        </AppShell.Main>
+      ) : rota.tipo === 'tempo_de_tela' ? (
+        <AppShell.Main bg="dark.7">
+          <TempoDeTela api={api} filtros={rota.filtros} />
+        </AppShell.Main>
+      ) : rota.tipo === 'marcas' ? (
+        <AppShell.Main bg="dark.7">
+          <Marcas api={api} filtros={rota.filtros} />
         </AppShell.Main>
       ) : (
         <AppShell.Main bg="dark.7">

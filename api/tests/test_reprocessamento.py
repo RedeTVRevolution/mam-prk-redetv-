@@ -20,6 +20,7 @@ from api.jobs import Etapa, Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.main import criar_app
 from api.nuvem import DisparoPeloWorkflows
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
+from api.progresso_das_janelas import JanelaGravada, JanelasEmMemoria
 from api.reprocessamento import DisparoEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
@@ -86,6 +87,7 @@ class Mundo:
             self.jobs.salvar(job)
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         self.disparo = DisparoEmMemoria()
+        self.janelas = JanelasEmMemoria()
         repo_papeis = RepositorioDePapeisEmMemoria()
         if papeis is not None:
             repo_papeis.salvar("u1", papeis)
@@ -103,6 +105,7 @@ class Mundo:
                 papeis=repo_papeis,
                 auditoria=self.auditoria,
                 disparo=self.disparo,
+                janelas=self.janelas,
                 relogio=lambda: AGORA,
             )
         )
@@ -160,16 +163,18 @@ def test_a_etapa_de_partida_e_a_primeira_que_falhou() -> None:
     assert "indexacao" not in mundo.job().etapas
 
 
-@pytest.mark.parametrize("etapa", ["identificacao", "comparacao"])
-def test_etapa_que_o_workflows_ainda_nao_recomeca_da_409(etapa: str) -> None:
+@pytest.mark.parametrize("etapa", ["identificacao", "referencias", "comparacao"])
+def test_etapa_nova_do_112_e_etapa_de_partida(etapa: str) -> None:
     job = _concluido_sem_indexar()
     job.etapas["indexacao"] = _etapa()
     job.etapas[etapa] = _etapa("falhou")  # type: ignore[index]
     mundo = Mundo(job)
 
-    assert mundo.reprocessar().status_code == 409
-    assert mundo.disparo.disparos == []
-    assert mundo.job() == job
+    assert mundo.reprocessar().status_code == 202
+    assert mundo.disparo.disparos == [("j1", etapa)]
+    assert mundo.job().estado == "concluido"
+    # As etapas dali em diante vão rodar de novo.
+    assert "indexacao" not in mundo.job().etapas
 
 
 def test_job_falhou_sem_registro_de_etapa_parte_do_codigo_da_falha() -> None:
@@ -386,3 +391,235 @@ def test_o_disparo_que_falha_vira_servico_indisponivel() -> None:
         DisparoPeloWorkflows("proj", "regiao-1", "fluxo", SessaoQueFalha()).iniciar(
             "j1", "analise"
         )
+
+
+def _concluido_completo() -> Job:
+    return _job(
+        "concluido",
+        etapas={
+            nome: _etapa()
+            for nome in (
+                "validacao",
+                "transcricao",
+                "leitura_da_tela",
+                "analise",
+                "identificacao",
+                "referencias",
+                "comparacao",
+                "quadros_chave",
+                "inventario_de_objetos",
+                "indexacao",
+            )
+        },
+    )
+
+
+ETAPAS_ESCOLHIDAS = [
+    "analise",
+    "quadros_chave",
+    "identificacao",
+    "inventario_de_objetos",
+    "indexacao",
+]
+SEGUINTES = {
+    "analise": {
+        "identificacao",
+        "referencias",
+        "comparacao",
+        "quadros_chave",
+        "inventario_de_objetos",
+        "indexacao",
+    },
+    "identificacao": {
+        "referencias",
+        "comparacao",
+        "quadros_chave",
+        "inventario_de_objetos",
+        "indexacao",
+    },
+    "quadros_chave": {"inventario_de_objetos", "indexacao"},
+    "inventario_de_objetos": {"indexacao"},
+    "indexacao": set(),
+}
+
+
+@pytest.mark.parametrize("papeis", [["curador"], ["administrador"]])
+@pytest.mark.parametrize("etapa", ETAPAS_ESCOLHIDAS)
+def test_curador_e_administrador_reprocessam_um_concluido_a_partir_da_etapa_escolhida(
+    papeis: list[Papel], etapa: str
+) -> None:
+    mundo = Mundo(_concluido_completo(), papeis)
+
+    resposta = mundo.reprocessar(etapa=etapa, motivo="instrução nova")
+
+    assert resposta.status_code == 202
+    job = mundo.job()
+    assert job.etapa_atual == etapa
+    assert job.etapas[etapa] == Etapa(inicio=AGORA)
+    # As posteriores perdem o registro antigo; as anteriores ficam.
+    assert not SEGUINTES[etapa] & set(job.etapas)
+    assert job.etapas["transcricao"] == _etapa()
+    assert mundo.disparo.disparos == [("j1", etapa)]
+    assert job.reprocessamentos == 1
+
+
+def test_com_a_analise_escolhida_o_job_volta_a_analisando() -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+
+    corpo = mundo.reprocessar(etapa="analise", motivo="x").json()
+
+    assert corpo["estado"] == "analisando"
+    assert mundo.job().estado == "analisando"
+
+
+@pytest.mark.parametrize(
+    "etapa", ["quadros_chave", "identificacao", "inventario_de_objetos", "indexacao"]
+)
+def test_com_as_outras_etapas_o_job_continua_concluido(etapa: str) -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+
+    mundo.reprocessar(etapa=etapa, motivo="x")
+
+    assert mundo.job().estado == "concluido"
+
+
+@pytest.mark.parametrize("papeis", [None, ["operador"], ["editor"], ["consulta"]])
+def test_sem_a_permissao_da_etapa_escolhida_da_403(papeis: list[Papel] | None) -> None:
+    mundo = Mundo(_concluido_completo(), papeis)
+
+    assert mundo.reprocessar(etapa="analise", motivo="x").status_code == 403
+    assert mundo.job() == _concluido_completo()
+    assert mundo.disparo.disparos == []
+
+
+def test_curador_sem_etapa_escolhida_nao_reprocessa_o_que_falhou() -> None:
+    mundo = Mundo(_falhou_na_analise(), ["curador"])
+
+    assert mundo.reprocessar().status_code == 403
+
+
+def test_chave_de_sistema_nao_reprocessa_a_partir_de_etapa_escolhida() -> None:
+    mundo = Mundo(_concluido_completo())
+
+    resposta = mundo.cliente.post(
+        ROTA,
+        json={"etapa": "analise", "motivo": "x"},
+        headers={"X-API-Key": mundo.chave},
+    )
+
+    assert resposta.status_code == 403
+
+
+@pytest.mark.parametrize("motivo", [None, "", "   "])
+def test_etapa_escolhida_sem_motivo_da_422(motivo: str | None) -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+    corpo: dict[str, Any] = {"etapa": "analise"}
+    if motivo is not None:
+        corpo["motivo"] = motivo
+
+    assert mundo.reprocessar(**corpo).status_code == 422
+    assert mundo.job() == _concluido_completo()
+
+
+@pytest.mark.parametrize("etapa", ["transcricao", "referencias", "validacao", "xis"])
+def test_etapa_fora_da_lista_da_409(etapa: str) -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+
+    assert mundo.reprocessar(etapa=etapa, motivo="x").status_code == 409
+    assert mundo.job() == _concluido_completo()
+
+
+@pytest.mark.parametrize("estado", ["analisando", "falhou", "cancelado"])
+def test_etapa_escolhida_em_job_que_nao_esta_concluido_da_409(estado: str) -> None:
+    mundo = Mundo(_job(estado), ["curador"])
+
+    assert mundo.reprocessar(etapa="analise", motivo="x").status_code == 409
+
+
+def test_a_auditoria_guarda_motivo_etapa_e_que_foi_escolhida() -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+
+    mundo.reprocessar(etapa="identificacao", motivo="  objetos novos  ")
+
+    [registro] = mundo.auditoria.consultar(FiltroDeAuditoria()).registros
+    assert registro.acao == "video.reprocessado"
+    assert registro.motivo == "objetos novos"
+    assert registro.detalhes == {"etapa": "identificacao", "etapa_escolhida": True}
+
+
+def test_o_registro_do_que_falhou_nao_diz_etapa_escolhida() -> None:
+    mundo = Mundo(_falhou_na_analise())
+
+    mundo.reprocessar()
+
+    [registro] = mundo.auditoria.consultar(FiltroDeAuditoria()).registros
+    assert registro.detalhes == {"etapa": "analise"}
+
+
+def _janela() -> JanelaGravada:
+    return JanelaGravada.model_validate_json(
+        '{"indice": 0, "situacao": "concluida", "tentativas": 1, "erro": null,'
+        ' "decupagem": null, "refeita": false}'
+    )
+
+
+def test_com_a_analise_escolhida_o_progresso_das_janelas_e_apagado_antes_do_disparo() -> (
+    None
+):
+    mundo = Mundo(_concluido_completo(), ["curador"])
+    mundo.janelas.gravar("j1", _janela())
+    mundo.janelas.gravar("outro", _janela())
+    visto: list[bool] = []
+    original = mundo.disparo.iniciar
+
+    def iniciar(job_id: str, etapa: Any) -> None:
+        visto.append(bool(mundo.janelas.ler("j1")))
+        original(job_id, etapa)
+
+    mundo.disparo.iniciar = iniciar  # type: ignore[method-assign]
+
+    mundo.reprocessar(etapa="analise", motivo="x")
+
+    assert visto == [False]
+    assert mundo.janelas.ler("outro") != {}
+
+
+def test_com_as_outras_etapas_as_janelas_ficam() -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+    mundo.janelas.gravar("j1", _janela())
+
+    mundo.reprocessar(etapa="quadros_chave", motivo="x")
+
+    assert mundo.janelas.ler("j1") != {}
+
+
+def test_reprocessar_o_que_falhou_na_analise_mantem_as_janelas() -> None:
+    mundo = Mundo(_falhou_na_analise())
+    mundo.janelas.gravar("j1", _janela())
+
+    mundo.reprocessar()
+
+    assert mundo.janelas.ler("j1") != {}
+
+
+def test_falha_no_disparo_da_etapa_escolhida_desfaz_a_mudanca_no_job() -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+    antes = mundo.job()
+
+    def falha(job_id: str, etapa: str) -> None:
+        raise ConnectionError("Workflows fora do ar")
+
+    mundo.disparo.iniciar = falha  # type: ignore[method-assign]
+    mundo.cliente = TestClient(mundo.cliente.app, raise_server_exceptions=False)
+
+    assert mundo.reprocessar(etapa="analise", motivo="x").status_code == 500
+    assert mundo.job().model_copy(update={"atualizado_em": BASE}) == antes
+
+
+def test_dois_pedidos_de_etapa_escolhida_so_um_passa() -> None:
+    mundo = Mundo(_concluido_completo(), ["curador"])
+
+    primeiro = mundo.reprocessar(etapa="analise", motivo="x")
+    segundo = mundo.reprocessar(etapa="analise", motivo="x")
+
+    assert (primeiro.status_code, segundo.status_code) == (202, 409)

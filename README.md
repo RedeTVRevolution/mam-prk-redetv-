@@ -20,13 +20,13 @@ make instalar   # dependências e o hook de pre-commit com o gitleaks
 make verificar  # lint, tipos, testes unitários e build; nenhuma chamada à nuvem
 ```
 
-O hook de pre-commit recusa o commit se o gitleaks achar um segredo nos arquivos preparados ou se o gitleaks não estiver instalado. O CI roda `make verificar` e o gitleaks em todo PR.
+O hook de pre-commit recusa o commit se o gitleaks achar um segredo nos arquivos preparados ou se o gitleaks não estiver instalado. O CI roda as duas metades do `make verificar` (`verificar-api` e `verificar-web`) e o gitleaks em todo PR.
 
-Os testes do validador usam o ffmpeg de verdade. Sem ffmpeg na máquina, o `make verificar` os pula; `make testar-na-imagem` (pede o Docker) os roda dentro da imagem do Job de validação, com o ffmpeg da produção, e é assim que o CI os roda. O contêiner do loop AFK fixa a mesma versão, no `ARG FFMPEG` do `scripts/afk/Dockerfile`, então o `make verificar` de lá também os roda com ela. O próprio `make verificar` falha se as duas versões forem diferentes (`scripts/checar-ffmpeg.sh`).
+Os testes do validador usam o ffmpeg de verdade. Sem ffmpeg na máquina, o `make verificar` os pula; `make testar-na-imagem` (pede o Docker) os roda dentro da imagem do Job de validação, com o ffmpeg da produção, e é assim que o CI os roda, no job `imagem`, só quando mudam os arquivos que ele usa (o `Dockerfile`, os módulos de `api/` e os testes do validador; pulado, o job termina verde). O CI roda o backend (`make verificar-api`, pytest em vários processos com `pytest-xdist`), o front (`make verificar-web`) e a imagem em jobs paralelos, e o `publicar` espera todos. O contêiner do loop AFK fixa a mesma versão, no `ARG FFMPEG` do `scripts/afk/Dockerfile`, então o `make verificar` de lá também os roda com ela. O próprio `make verificar` falha se as duas versões forem diferentes (`scripts/checar-ffmpeg.sh`).
 
 ## Deploy no dev
 
-A E0 roda num serviço Cloud Run único, `mam-web`, em que o FastAPI serve a API e o build do React. O Terraform em `infra/` cria tudo: Artifact Registry, Firestore, os buckets privados (quarentena, aceitos e decupagens), uma conta de serviço por componente, o serviço, o Identity Platform (login com MFA TOTP e política de senha) e o alerta de login dos administradores de emergência. Antes, rode uma vez o `scripts/wizard-gcp-dev.sh`, que cria o projeto, a conta `mam-terraform` e o `.env` e inicializa o Identity Platform com a sua conta de Owner. Esse último passo é único por projeto (vale também para `staging` e `prod`): ele exige `firebase.projects.update`, que a `mam-terraform` não tem, e depois o Terraform importa a config e cuida do resto. Acrescente também ao `.env` os e-mails das contas, separados por vírgula:
+A E0 roda num serviço Cloud Run único, `mam-web`, em que o FastAPI serve a API e o build do React. O Terraform em `infra/` (o dev chama o módulo `infra/modulos/mam`, #292; o `make deploy-dev` recusa um plano que destrua ou recrie algo, salvo `PERMITIR_DESTRUICAO=sim`) cria tudo: Artifact Registry, Firestore, os buckets privados (quarentena, aceitos e decupagens), uma conta de serviço por componente, o serviço, o Identity Platform (login com MFA TOTP e política de senha) e o alerta de login dos administradores de emergência. Antes, rode uma vez o `scripts/wizard-gcp-dev.sh`, que cria o projeto, a conta `mam-terraform` e o `.env` e inicializa o Identity Platform com a sua conta de Owner. Esse último passo é único por projeto (vale também para `prod`): ele exige `firebase.projects.update`, que a `mam-terraform` não tem, e depois o Terraform importa a config e cuida do resto. Acrescente também ao `.env` os e-mails das contas, separados por vírgula:
 
 ```sh
 ADMINS_EMERGENCIA='bruno.admin@exemplo.com,ti@exemplo.com'
@@ -59,7 +59,7 @@ Ele impersona a `mam-terraform` (ADR 0002), sem chave em arquivo, e:
 
 Cada merge na `main` publica no `dev` sozinho: depois que os jobs do CI passam naquele commit, o job `publicar` do `.github/workflows/ci.yml` roda o mesmo `make deploy-dev`, com os applies aprovados automaticamente. Um merge com o CI vermelho não publica. O GitHub entra no GCP por federação de identidade de cargas de trabalho, sem chave: o provedor só aceita tokens deste repositório (pelo id) na `main`, e só esse repositório pode impersonar a `mam-terraform`. Os merges publicam um de cada vez, e só a ponta da `main`: se outro merge entrou antes de o CI de um commit terminar, esse commit não publica, e o run do mais novo publica no lugar dele, então o `dev` nunca volta para código mais antigo.
 
-Para acompanhar uma publicação: na aba Actions do GitHub, abra a execução do CI do commit e o job `publicar`. O log mostra o link do build no console do Cloud Build, o plano do Terraform e, no fim, a URL com o `/v1/health` respondendo. O staging e a produção, com aprovação no Cloud Deploy, ficam para a E10.
+Para acompanhar uma publicação: na aba Actions do GitHub, abra a execução do CI do commit e o job `publicar`. O log mostra o link do build no console do Cloud Build, o plano do Terraform e, no fim, a URL com o `/v1/health` respondendo. A produção, com aprovação no Cloud Deploy, fica para a E10.
 
 Configuração, uma vez, por quem é Owner do `dev`:
 
@@ -85,20 +85,78 @@ Depois do primeiro deploy, `make criar-contas` cria as contas do `.env` e manda 
 
 ## Índice da busca (Agent Retrieval)
 
-A busca guarda um registro por plano, fala, texto na tela e objeto de cada Decupagem numa coleção do Agent Retrieval, em outra região (ADR 0006). O código (`api/indice_da_busca.py`, `api/agent_retrieval.py`) lê projeto, região, coleção, índices e dimensão das variáveis `GCP_PROJECT_ID`, `BUSCA_REGIAO`, `BUSCA_COLECAO`, `BUSCA_INDICE_DESCRICAO`, `BUSCA_INDICE_QUADRO` e `BUSCA_DIMENSAO`, que o `infra/main.tf` entrega ao serviço. Cada vetor (a descrição e o quadro-chave) tem o seu índice ANN, porque um índice cobre um só campo de vetor, e toda busca por vetor leva o `searchHint.indexHint` do índice do seu campo. O do quadro-chave está desligado por enquanto (`indice_do_quadro_ligado`, ADR 0006): com `BUSCA_INDICE_QUADRO` vazia, a coleção nasce só com o índice da descrição e a busca por quadro é recusada. O embedding automático da descrição lê o campo `significado` de cada registro (a descrição do plano ou o texto da fala, do texto na tela ou do objeto), porque recusa registro sem texto. A busca por texto não é KNN e não usa índice de vetor; só filtros, sem texto nem vetor, não é busca.
+A busca guarda um registro por plano, fala, texto na tela e objeto de cada Decupagem numa coleção do Agent Retrieval, em outra região (ADR 0006). O código (`api/indice_da_busca.py`, `api/agent_retrieval.py`) lê projeto, região, coleção, índices e dimensão das variáveis `GCP_PROJECT_ID`, `BUSCA_REGIAO`, `BUSCA_COLECAO`, `BUSCA_INDICE_DESCRICAO`, `BUSCA_INDICE_QUADRO` e `BUSCA_DIMENSAO`, que o `infra/modulos/mam/main.tf` entrega ao serviço. Cada vetor (a descrição e o quadro-chave) tem o seu índice ANN, porque um índice cobre um só campo de vetor, e toda busca por vetor leva o `searchHint.indexHint` do índice do seu campo. O do quadro-chave está ligado no dev (`indice_do_quadro_ligado`, ADR 0006, #268): a indexação manda o quadro-chave de cada plano e a descrição ao Gemini Embedding 2 (`api/embedding_do_quadro.py`) e grava o vetor no registro do plano; plano sem quadro fica só com o vetor da descrição. Com `BUSCA_INDICE_QUADRO` vazia a coleção nasce só com o índice da descrição, nenhum vetor de quadro é calculado e a busca por quadro é recusada. O embedding automático da descrição lê o campo `significado` de cada registro (a descrição do plano ou o texto da fala, do texto na tela ou do objeto), porque recusa registro sem texto. A busca por texto não é KNN e não usa índice de vetor; só filtros, sem texto nem vetor, não é busca.
 
 Os dois alvos abaixo só rodam com credenciais (ADC de quem roda e o `.env`) e ficam fora do CI e do `make verificar`:
 
 - `make criar-colecao-da-busca`: cria a coleção de momentos e os dois índices ANN, com os campos de filtro declarados, e espera cada operação terminar (idempotente: o que já existe fica). **Custo:** o índice implantado tem réplicas sempre ligadas, cobradas por hora, mesmo sem consulta (aceito na ADR 0006); veja a tabela de preços do Agent Retrieval, que não está registrada aqui.
 - `make medir-busca [CONSULTAS=30] [DIMENSOES="128 256"]`: indexa 3 Decupagens de exemplo (`api/exemplos_da_busca.py`) na coleção, consulta "vestido vermelho da Sabrina Sato" (filtros exatos, texto e significado, fundidos por RRF), confere que só volta o objeto dela e que pedir a cor errada (azul) não volta nada (servido pelo índice ANN, um filtro que ele não aceita pode ser ignorado sem erro), mede o p50 e o p95 de N consultas e imprime a tabela com o total de registros da coleção. Apaga os vídeos de exemplo no fim. Cada dimensão fora da configurada, uma de cada vez, cria a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` com os índices ligados (cobrados enquanto existirem) e a apaga no fim, com os índices e os objetos dentro, mesmo se a medição falhar. O comando sai com erro se uma das duas conferências falhar. Cada índice ANN nasce com uma réplica só (`REPLICAS_DO_INDICE`, em `api/agent_retrieval.py`), no modo `PERFORMANCE_OPTIMIZED`; sem isso o serviço usaria de 2 a 5.
 
-- `make reindexar [JOB=<id>]`: apaga e regrava na busca a Decupagem entregue (com as Correções em vigor) de um Job, ou de todos os concluídos; repetir dá o mesmo resultado. O estado (`pendente`, `indexado` ou `falhou`, com o horário) fica em `indexacao` no `GET /v1/jobs/{id}`. A indexação roda ao fim da análise (Job `mam-indexacao`, depois dos quadros-chave) e a cada Correção que passa a valer (a pendente só entra quando o Curador aprova); uma falha dela nunca muda o `estado` do Job.
+- `make comparar-leituras REFERENCIA=<json> NOVA=<json> [OPCOES="--lidos-nova N --segundos-nova S --segundos-referencia S"]` (#233, sem nuvem): compara duas leituras da tela do mesmo vídeo, a de referência e a nova (`<job>/leitura_da_tela.json` do bucket de aceitos, baixada com `gcloud storage cp`). Mostra os textos distintos que só um dos lados achou, as aparições cujo início ou fim mudou mais de 1 s (ou que a nova não achou) e quantos quadros cada leitura leu e o tempo. Os quadros lidos e o tempo não estão no formato da leitura: saem do log do Job (`Leitura da tela: N quadros lidos e M pulados em S s`), e entram pelas opções; a referência, de um quadro por segundo, leu todos. A referência do programa FAMA (Job `98502242109e4280b7073b07a3ebe573`) não pode ser apagada nem sobrescrita antes da medição: a leitura nova vai num Job novo (reprocessar a etapa regrava a leitura do mesmo Job, então copie a de referência antes).
+- **Leitura da tela só quando a imagem muda (#233).** O OCR compara cada quadro de 1 s com o último quadro lido (reduzido a 128x72 em tons de cinza, em seis faixas horizontais de oito blocos) e só lê de novo se algum bloco mudou, em média, mais que `LIMIAR_DE_MUDANCA` (variável `limiar_de_mudanca_do_ocr` do Terraform, padrão 3, de 0 a 255; 0 lê todo quadro). O quadro que não mudou repete a leitura do anterior, e o resultado segue com um quadro por segundo. O detector do OCR em CPU vem do `ARG DETECTOR` do Dockerfile (`DETECTOR_OCR_CPU` no `docker-bake.hcl`): `PP-OCRv5_server_det` (padrão) ou `PP-OCRv5_mobile_det`; a imagem com GPU fica com o `server`.
+- `make reindexar [JOB=<id>]`: apaga e regrava na busca a Decupagem entregue (com as Correções em vigor) de um Job, ou de todos os concluídos; repetir dá o mesmo resultado. O estado (`pendente`, `indexado` ou `falhou`, com o horário) fica em `indexacao` no `GET /v1/jobs/{id}`. A indexação roda ao fim da análise (Job `mam-indexacao`, depois da etapa `inventario_de_objetos`) e a cada Correção que passa a valer (a pendente só entra quando o Curador aprova); uma falha dela nunca muda o `estado` do Job.
+
+**Ligar o índice do quadro-chave no dev (#268).** Ordem: (1) `terraform apply` (a variável `indice_do_quadro_ligado` já é `true`; o `mam-indexacao` e o serviço web já têm o papel de predição da Vertex (`mamVertexPredicao`, #302) e leem os quadros); (2) `make criar-colecao-da-busca`, que cria o índice do quadro sem recriar a coleção; (3) `make reindexar` sem `JOB`, que recalcula o vetor do quadro de todos os planos. Sem o passo 3 os vídeos antigos seguem sem vetor de quadro.
+
+**Reindexar os vídeos que já estão no dev depois do inventário de objetos (#245).** O registro de cada plano passa a levar o inventário inteiro, os objetos de destaque 3 ganham registro próprio e os registros ganham o campo `destaque`, que pesa na ordem (3% por nível acima de 1: +3% no destaque 2, +6% no 3). Vídeo a vídeo:
+
+- Vídeo **sem inventário** (analisado antes do #244): no Visualizador, "Reprocessar…" a partir de `inventario_de_objetos`, que roda o inventário e depois a indexação. No dev são poucos vídeos; se forem muitos, um laço pela rota do reprocessar (#147).
+- Vídeo **com inventário, mas indexado antes do #245**: `make reindexar` sem `JOB`, que reindexa todos os concluídos.
+- A coleção já criada não muda de esquema: `make criar-colecao-da-busca` é idempotente e deixa como está o que existe. Uma coleção nascida antes deste ticket não declara o campo `destaque`; se o Agent Retrieval recusar (ou ignorar) o campo, recrie a coleção (`apagar_colecao` e `make criar-colecao-da-busca`) e rode `make reindexar`. Ainda não foi conferido se ele aceita campo fora do esquema.
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022), conferido no #122.
 
+
+## Versão fixa do pipeline (#250)
+
+`api/versao_pipeline.py` é o único lugar que define a `VERSAO_PIPELINE` (por exemplo `2026.11.1`) e o manifesto: o modelo de cada etapa, o hash de cada instrução, a versão do esquema e os motores de transcrição, OCR e objetos. Cada decupagem nova grava `versao_pipeline` e `manifesto_do_pipeline` (ao fim da análise); a anterior, sem o campo, continua válida e aparece como "anterior à versão". O Visualizador mostra a versão ao lado do nome do vídeo.
+
+Trocar modelo, instrução, esquema ou motor exige trocar a versão: `api/tests/test_versao_pipeline.py` compara o manifesto com `api/tests/versao_pipeline_fixada.json` e falha com a instrução de regravar o arquivo. O motor de objetos (`MOTOR_OBJETOS`/`MODELO_OBJETOS` do inventário) vem do ambiente do Job e não está no manifesto; o manifesto leva o Florence.
+
+Reprocessar o acervo de propósito, depois de trocar a versão e fazer o deploy:
+
+```bash
+make reprocessar-versao                       # só lista os Jobs concluídos de versão anterior e o custo estimado
+make reprocessar-versao DE=anterior LIMITE=20 # só os sem versão, até 20 (DE também aceita uma versão, como 2026.10.1)
+make reprocessar-versao LIMITE=20 CONFIRMAR=1 # reprocessa pela análise, em lotes (TAMANHO_DO_LOTE=5, PAUSA_ENTRE_LOTES_S=60)
+make tempo-de-revisao                         # CSV do tempo de revisão por vídeo e por pessoa (minutos por hora de vídeo)
+make tempo-de-revisao DESDE=2026-11-01        # só o que teve pulso de 1º/11 em diante (data ISO, UTC)
+make taxa-de-correcao                         # CSV da taxa de correção por programa, versão do pipeline e tipo
+make taxa-de-correcao DESDE=2026-11-01 ATE=2026-11-30 PROGRAMA="TV Fama"  # período (dias ISO, UTC, inclusive) e programa, opcionais
+```
+
+O custo estimado é as horas de vídeo × `CUSTO_POR_HORA_USD` (do ambiente; sem ele sai "n/d"). Cada Job reprocessado entra na auditoria como `video.reprocessado`, por `sistema` `reprocessar-versao`, com o mesmo caminho da rota (#147, #235). A chave de conteúdo e a deduplicação ficam fora (E7).
+
+## Passada de comparação (#247)
+
+Roda a análise inteira de um Job concluído com outro modelo e guarda o resultado ao lado da decupagem, para comparar por requisito (#248) e lado a lado (#249). Só no dev, com as credenciais de quem roda (a conta que lê o bucket de decupagens e chama o Gemini), depois do merge:
+
+```bash
+export PRECOS_DOS_MODELOS="gemini-3.8-flash=1.5:7.5"   # modelo=entrada:saída, US$ por milhão de tokens
+make passada-de-comparacao JOB=<id do Job> MODELO=gemini-3.8-flash   # nome curto, sem barra; JANELAS_EM_PARALELO=4 acelera
+```
+
+- A análise é a do Job (janelas, consolidação, identificação, com a transcrição e a leitura da tela que ele já tem), sem escalonamento: o modelo pedido faz todas as janelas. Dá para repetir com outros modelos; cada rodada é uma passada nova.
+- A passada vai para `<job>/passadas/<data>-<modelo>.json` no bucket das decupagens, com o modelo, a data, os tokens e o custo (pelos preços do `PRECOS_DOS_MODELOS`) e os segundos de `janelas`, `consolidacao` e `identificacao`. Não é indexada, não aparece no Acervo nem na busca, não recebe correções, não dispara webhook, e a Decupagem do Job não é regravada. A identificação lê o catálogo de pessoas, mas não acrescenta nome nele.
+- Cada chamada ao Gemini leva o rótulo `etapa=passada_de_comparacao`, para o faturamento separar o custo.
+- Leitura: `GET /v1/jobs/{id}/passadas` (resumos) e `GET /v1/jobs/{id}/passadas/{passada}` (com a decupagem), com `decupagem.ver`.
+- Custo por hora de vídeo, pelas premissas do `docs/Plano_MAM.md` (Standard, 1 fps, ~60 mil tokens de saída por hora): ~US$ 1,14 no 3.8 Flash, ~US$ 1,24 no 3.5 Flash e ~US$ 0,30 no 3.5 Flash-Lite. Um programa de 2 h custa, então, uns US$ 2,30 no 3.8 Flash. O custo real da rodada sai impresso no fim do comando e fica na passada. As chamadas com vídeo saem com os cabeçalhos do Flex do `TransporteVertex` (o ADR 0004 pede Standard, e o código ainda não seguiu); ponha em `PRECOS_DOS_MODELOS` o preço do modo em que elas de fato saem, e leia as contas acima como teto.
+
+
+### Comparar a decupagem com a passada (#248)
+
+```
+make comparar-passadas JOB=<id> [PASSADA=<id>] [MODELO=<modelo>]   # sem PASSADA, a última (do MODELO, se vier)
+make comparar-passadas JOBS=<id>,<id>,...                            # soma por requisito, a última passada de cada Job
+```
+
+- Grava `comparacao-passadas/<job>-<passada>.md` e `.json` (em `PASTA=`; vários Jobs viram `piloto-<data>`). O lado A é a decupagem do Job e o B, a passada.
+- Por requisito (famosos, menções, pautas, B-roll em planos limpos e em descrições, comerciais): contagens, itens só de um lado e itens dos dois com diferença de nome, tipo ou marca, ou de tempo acima da tolerância de 2 s. O pareamento é o do `api/comparador.py`. Timecode: erro médio, p95 e quantos pares (inclusive os de nome trocado) passam da tolerância.
+- Custo por hora de vídeo e tempo (por etapa e total) dos dois lados. O preço vem de `PRECOS_DOS_MODELOS` e a data da tabela consultada, de `DATA_DA_TABELA_DE_PRECOS`. O Job não guarda os tokens que gastou: passe-os em `TOKENS_DO_JOB=<job>=<entrada>:<saida>,...` (e o modelo em `MODELO_DO_JOB`, o `MODELO` de `api/gemini.py` por padrão); sem eles, o custo do lado do Job sai "n/d", e a soma de vários Jobs também.
+
 ## Cassete do Gemini
 
-O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema da decupagem e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video` e o texto da resposta, sem cabeçalhos nem credenciais. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.
+O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema da decupagem e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video`, o texto da resposta e o `instrucao_sha256` (SHA-256 da `INSTRUCAO` de `api/gemini.py`), sem cabeçalhos nem credenciais. Mudar uma letra da `INSTRUCAO` muda o hash e derruba o contrato até regravar, com a mensagem de rodar `make gravar-cassetes`; o hash não cobre os perfis e as seções que `instrucao()` encaixa nela. O cassete de hoje foi gravado antes do hash, e essa checagem fica pulada até a regravação do #229. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.
 
 Para regravar (a cada troca de modelo, de esquema ou de instrução), com o dev no ar e as credenciais ADC de uma conta com acesso ao projeto (`gcloud auth application-default login`):
 

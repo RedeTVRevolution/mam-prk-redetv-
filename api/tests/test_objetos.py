@@ -106,6 +106,13 @@ def test_listas_fechadas_vivem_num_lugar_so_e_vao_para_o_esquema_do_modelo() -> 
         "produto",
         "animal",
         "alimento",
+        "movel",
+        "decoracao",
+        "instrumento_musical",
+        "utensilio",
+        "documento",
+        "planta",
+        "bebida",
     } == set(CATEGORIAS_DE_OBJETO)
 
 
@@ -113,10 +120,7 @@ def test_esquema_do_modelo_traz_as_descricoes_do_esquema_14() -> None:
     esquema = esquema_do_modelo()
     objeto_do_modelo = esquema["$defs"]["Objeto"]["properties"]
 
-    assert (
-        "objetos em cena (veículo, produto, eletrônico"
-        in (esquema["properties"]["objetos"]["description"])
-    )
+    assert "objetos em cena" not in esquema["properties"]["objetos"]["description"]
     assert (
         "só quando nenhuma outra categoria servir"
         in (objeto_do_modelo["categoria"]["description"])
@@ -125,7 +129,7 @@ def test_esquema_do_modelo_traz_as_descricoes_do_esquema_14() -> None:
     assert '"celular"' in objeto_do_modelo["tipo"]["description"]
     assert (
         "também entra em `objetos`"
-        in (esquema["$defs"]["Plano"]["properties"]["objetos"]["description"])
+        not in (esquema["$defs"]["Plano"]["properties"]["objetos"]["description"])
     )
 
 
@@ -177,15 +181,34 @@ def test_categorias_novas_passam_no_esquema(categoria: str) -> None:
     assert d.objetos[0].categoria == categoria
 
 
-def test_instrucao_traz_as_regras_de_objeto_em_cena_e_de_telao() -> None:
+def _secao_das_pessoas() -> str:
+    return instrucao(None).split("\n5. ")[1].split("\n6. LOCAIS")[0]
+
+
+def test_instrucao_pede_as_pecas_das_pessoas_com_dono_e_relacao() -> None:
+    secao = _secao_das_pessoas()
+
+    assert (
+        "Para cada pessoa na imagem, registre em objetos o que ela veste, calça e usa"
+        in secao
+    )
+    assert "a relação (veste, calca, usa, segura)" in secao
+    assert "No máximo 5 peças por pessoa em cada aparição" in secao
+    assert "Só o que estiver visível" in secao
+
+
+def test_instrucao_nao_pede_mais_os_objetos_em_cena() -> None:
     texto = instrucao(None)
 
-    assert "Os dois grupos têm o mesmo peso" in texto
-    assert "os objetos em cena: veículo, produto, eletrônico" in texto
-    assert "Produto mostrado num telão, num gráfico ou numa vinheta" in texto
-    assert "Todo objeto que você citar em objetos de um plano também entra" in texto
-    assert "comercial tiver a evidência produto, o produto entra em objetos" in texto
-    assert "Use em_cena ou na_mao só quando nenhuma outra servir" in texto
+    assert "Os objetos de cena não são pedidos aqui" in _secao_das_pessoas()
+    for sumiu in (
+        "Os dois grupos têm o mesmo peso",
+        "os objetos em cena: veículo",
+        "Produto mostrado num telão",
+        "Todo objeto que você citar em objetos de um plano também entra",
+        "comercial tiver a evidência produto",
+    ):
+        assert sumiu not in texto
 
 
 def _resposta_com_objetos(*objetos: dict[str, Any]) -> str:
@@ -224,11 +247,10 @@ def test_resposta_com_pessoa_inexistente_e_refeita() -> None:
     assert len(t.chamadas) == 2
 
 
-def test_instrucao_tem_a_secao_de_objetos_e_a_de_locais() -> None:
+def test_instrucao_tem_a_secao_das_pessoas_e_a_de_locais() -> None:
     texto = instrucao(None)
 
-    assert "5. OBJETOS, ROUPAS E ACESSÓRIOS" in texto
-    assert "No máximo 5 peças por pessoa em cada aparição" in texto
+    assert "5. PESSOAS: ROUPAS, CALÇADOS E ACESSÓRIOS" in texto
     assert "6. LOCAIS E IMAGENS DE APOIO" in texto
     assert "7. COMERCIAIS E MERCHANDISING" in texto
 

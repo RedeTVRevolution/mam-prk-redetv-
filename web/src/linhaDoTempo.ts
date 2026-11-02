@@ -2,7 +2,7 @@
 import type { MantineColor } from '@mantine/core'
 import { pessoaDoModelo, type CatalogoDeCorrecoes } from './catalogo.ts'
 import { CORES_DE_OCORRENCIA } from './tema.ts'
-import type { Decupagem, Objeto } from './Video.tsx'
+import type { Decupagem, Objeto } from './decupagem.ts'
 
 /** `ms` em `MM:SS`: trunca os segundos e os minutos passam de 59, sem horas (ADR 0003). */
 export function tempo(ms: number): string {
@@ -25,13 +25,16 @@ export function tempoPreciso(ms: number): string {
   return `${tempo(ms)}.${String(ms % 1000).padStart(3, '0')}`
 }
 
-/** "mm:ss" em milissegundos; `null` se não for um tempo. */
+/** "mm:ss" ou "H:MM:SS" em milissegundos; `null` se não for um tempo. */
 export function lerTempo(texto: string): number | null {
-  const achado = /^(\d{1,3}):([0-5]\d)$/.exec(texto.trim())
+  const t = texto.trim()
+  const horas = /^(\d{1,2}):([0-5]\d):([0-5]\d)$/.exec(t)
+  if (horas) return (Number(horas[1]) * 3600 + Number(horas[2]) * 60 + Number(horas[3])) * 1000
+  const achado = /^(\d{1,3}):([0-5]\d)$/.exec(t)
   return achado ? (Number(achado[1]) * 60 + Number(achado[2])) * 1000 : null
 }
 
-/** O campo em mm:ss, em ms: o valor original, com os milissegundos, se o Editor não o mudou. */
+/** O campo em mm:ss ou H:MM:SS, em ms: o valor original, com os milissegundos, se o Editor não o mudou. */
 export function tempoDoCampo(texto: string, originalMs: number): number | null {
   const ms = lerTempo(texto)
   return ms !== null && ms === lerTempo(tempo(originalMs)) ? originalMs : ms

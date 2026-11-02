@@ -1,4 +1,4 @@
-import type { Reproducao } from './Video.tsx'
+import type { Reproducao } from './decupagem.ts'
 
 /** Folga antes do vencimento: uma URL que vence em segundos já não vale. */
 const MARGEM_MS = 30_000

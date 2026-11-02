@@ -37,6 +37,16 @@ class ImagemRecusada(Exception):
     """A imagem não passou: host, tipo, tamanho, pixels, tempo ou endereço."""
 
 
+class AcimaDoLimiteDeBytes(ImagemRecusada):
+    def __init__(self) -> None:
+        super().__init__("acima do limite de bytes")
+
+
+class AcimaDoLimiteDePixels(ImagemRecusada):
+    def __init__(self) -> None:
+        super().__init__("acima do limite de pixels")
+
+
 class SessaoDeDownload(Protocol):
     """O que o download usa de `requests.Session`."""
 
@@ -55,17 +65,25 @@ def resolver_dns(host: str) -> list[str]:
         raise ImagemRecusada("host não resolve") from e
 
 
-def recodificar(dados: bytes, *, max_bytes: int, max_pixels: int) -> bytes:
+def recodificar(
+    dados: bytes,
+    *,
+    max_bytes: int,
+    max_pixels: int,
+    formatos: frozenset[str] | set[str] = FORMATOS_ACEITOS,
+) -> bytes:
     """Confere o conteúdo e devolve um JPEG novo, sem metadados."""
     if len(dados) > max_bytes:
-        raise ImagemRecusada("acima do limite de bytes")
+        raise AcimaDoLimiteDeBytes
     try:
         with Image.open(io.BytesIO(dados)) as imagem:
-            if imagem.format not in FORMATOS_ACEITOS:
+            # O JPEG de celular com o bloco MPF abre como MPO; vale o primeiro quadro.
+            formato = "JPEG" if imagem.format == "MPO" else imagem.format
+            if formato not in formatos:
                 raise ImagemRecusada("tipo de imagem não aceito")
             largura, altura = imagem.size
             if largura * altura > max_pixels:
-                raise ImagemRecusada("acima do limite de pixels")
+                raise AcimaDoLimiteDePixels
             imagem.load()
             colorida = imagem.convert("RGBA")
     except (
@@ -91,7 +109,7 @@ def _corpo(
     for pedaco in _pedacos(resposta):
         total += len(pedaco)
         if total > max_bytes:
-            raise ImagemRecusada("acima do limite de bytes")
+            raise AcimaDoLimiteDeBytes
         if relogio() > prazo:
             raise ImagemRecusada("demorou além do prazo")
         pedacos.append(pedaco)

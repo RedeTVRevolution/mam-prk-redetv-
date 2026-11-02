@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -19,6 +20,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
     field_serializer,
     field_validator,
     model_validator,
@@ -31,14 +33,18 @@ from api.auth import (
     Sistema,
     Usuario,
 )
-from api.catalogo import Catalogo
+from api.catalogo import Catalogo, EnvioParaLixeira
+from api.catalogo_apagado import sem_catalogo_apagado
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
+    LIMITE_DO_NOME,
     Autoria,
+    CatalogoIdInvalido,
     Correcao,
     CorrecaoInexistente,
     CorrecaoJaExiste,
+    EstruturaInvalida,
     ItemDaFila,
     ItemDoHistorico,
     ItemInexistente,
@@ -55,6 +61,7 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     TemposInvalidos,
     VersaoDesatualizada,
+    com_o_estado_na_busca,
     corrigir,
     decidir,
     decupagem_entregue,
@@ -66,6 +73,7 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
+from api.marcas import CatalogoDeMarcas
 from api.papeis import (
     Papel,
     Permissao,
@@ -74,11 +82,23 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import PERFIS
+from api.sugestoes import (
+    MOTIVO_CONFIRMADA,
+    MOTIVO_CORRIGIDA,
+    Proposta,
+    RepositorioDeSugestoes,
+    Sugestao,
+    com_o_valor_do_editor,
+    sugestoes_abertas,
+)
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
+# As fotos de referência são dado sensível (LGPD): o link vale pouco.
+VALIDADE_DA_FOTO = timedelta(minutes=5)
+PREFIXO_DAS_FOTOS = "referencias/"
 # O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
 FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
@@ -110,6 +130,19 @@ class Indexacao(BaseModel):
 
     estado: EstadoDaIndexacao
     em: datetime
+    # O começo da rodada que terminou em `em`: o que foi gravado até aqui entrou nela.
+    desde: datetime | None = None
+
+
+EstadoDaCopia = Literal["pendente", "copiado", "falhou"]
+
+
+class CopiaNoBigQuery(BaseModel):
+    """Onde o Job está na cópia para o BigQuery (#260); falhar não muda o `estado` do Job."""
+
+    estado: EstadoDaCopia
+    em: datetime
+    desde: datetime | None = None
 
 
 NomeDaEtapa = Literal[
@@ -117,13 +150,17 @@ NomeDaEtapa = Literal[
     "transcricao",
     "leitura_da_tela",
     "analise",
-    "quadros_chave",
-    "indexacao",
-    # As do #112, depois do `concluido`: aprimoram a Decupagem no lugar (#221).
+    # Depois do `concluido`, na ordem do Workflows. As do #112 (identificação,
+    # referências e comparação) aprimoram a Decupagem no lugar (#221).
     "identificacao",
+    "referencias",
     "comparacao",
+    "quadros_chave",
+    "inventario_de_objetos",
+    "indexacao",
 ]
 ResultadoDaEtapa = Literal["concluida", "falhou"]
+DispositivoDaEtapa = Literal["gpu", "cpu"]
 
 
 class Etapa(BaseModel):
@@ -132,6 +169,11 @@ class Etapa(BaseModel):
     inicio: datetime
     fim: datetime | None = None
     resultado: ResultadoDaEtapa | None = None
+    # Só a transcrição e a leitura da tela (#239): onde rodaram e quantas vezes o Workflows
+    # tentou o Job com GPU (a espera por falta de GPU ou de cota); `None` nas outras etapas
+    # e em etapa anterior ao campo.
+    dispositivo: DispositivoDaEtapa | None = None
+    tentativas_gpu: int | None = None
 
 
 class Job(BaseModel):
@@ -164,6 +206,8 @@ class Job(BaseModel):
     data_exibicao: date | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
     indexacao: Indexacao | None = None
+    # `None` até a primeira cópia (e onde o BigQuery não está configurado).
+    copia_bigquery: CopiaNoBigQuery | None = None
     # A etapa em andamento; `None` entre etapas, com o Job parado e em Job anterior ao campo.
     etapa_atual: NomeDaEtapa | None = None
     # Só as etapas iniciadas, por nome; vazio em Job anterior ao campo. Quem grava é
@@ -171,6 +215,8 @@ class Job(BaseModel):
     etapas: dict[NomeDaEtapa, Etapa] = {}
     # Quantas vezes o Job foi reprocessado a partir da etapa que falhou (#147).
     reprocessamentos: int = 0
+    # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
+    lixeira: EnvioParaLixeira | None = None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -219,6 +265,7 @@ class JobPublico(BaseModel):
     programa: str | None = None
     data_exibicao: date | None = None
     indexacao: Indexacao | None = None
+    copia_bigquery: CopiaNoBigQuery | None = None
     etapa_atual: NomeDaEtapa | None = None
     # As etapas iniciadas, da primeira à última.
     etapas: list[EtapaPublica] = []
@@ -263,6 +310,26 @@ class JobCriado(JobPublico):
 class Reproducao(BaseModel):
     url: str
     expira_em: datetime
+
+
+class FotoDoNome(BaseModel):
+    url: str
+    pagina_url: str  # vazia quando a página não é um endereço web
+    dominio: str
+    # Em palavras na tela; `None` quando a comparação foi gravada sem o resultado por foto.
+    resultado: Literal["confere", "nao_confere"] | None
+
+
+class FotosDoNome(BaseModel):
+    fotos: list[FotoDoNome]
+    expira_em: datetime
+
+
+def _pagina_e_dominio(endereco: str) -> tuple[str, str]:
+    partes = urlsplit(endereco)
+    if partes.scheme not in ("http", "https") or not partes.hostname:
+        return "", ""
+    return endereco, partes.hostname.removeprefix("www.")
 
 
 class TipoNaoSuportado(Exception):
@@ -313,7 +380,8 @@ class NovoJob(BaseModel):
     @classmethod
     def _programa_com_perfil(cls, programa: str | None) -> str | None:
         if programa is not None and programa not in PERFIS:
-            raise ValueError("programa sem perfil")
+            validos = ", ".join(sorted(PERFIS))
+            raise ValueError(f"programa sem perfil; programas válidos: {validos}")
         return programa
 
 
@@ -339,6 +407,8 @@ class FiltroDeJobs:
     exibicao_ate: date | None = None
     palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
     sistema: str | None = None
+    # `False`: só os Jobs fora da lixeira (o acervo); `True`: só os que estão nela.
+    na_lixeira: bool = False
     ordem: Ordem = "enviado"
     limite: int | None = None  # `None`: a lista inteira, sem cursor
     cursor: str | None = None  # id do último Job da página anterior
@@ -363,6 +433,8 @@ class PaginaDeJobs:
 
 def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
     """Todos os filtros menos ordem e paginação."""
+    if (job.lixeira is not None) != filtro.na_lixeira:
+        return False
     if filtro.programa is not None and job.programa != filtro.programa:
         return False
     if filtro.sistema is not None and job.sistema != filtro.sistema:
@@ -414,6 +486,10 @@ class RepositorioDeJobs(Protocol):
         """
         ...
 
+    def remover(self, job_id: str) -> None:
+        """Apaga o Job. Só a purga (`api.purga`) chama; não há erro se ele não existe."""
+        ...
+
     def listar(self) -> list[Job]:
         """Do mais recente para o mais antigo."""
         ...
@@ -440,8 +516,20 @@ class Armazenamento(Protocol):
         """URL assinada de leitura do JPEG de `caminho` (o campo `quadro` da Decupagem)."""
         ...
 
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        """O JPEG de `caminho`, para o vetor multimodal da indexação (#268)."""
+        ...
+
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         """O JSON da decupagem, em pedaços."""
+        ...
+
+    def ler_comparacao(self, job_id: str) -> bytes | None:
+        """Os vereditos da comparação (`<job>.comparacao.json`), ou `None` se não rodou."""
+        ...
+
+    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
+        """URL assinada de leitura de uma foto de referência (objeto do bucket delas)."""
         ...
 
 
@@ -473,6 +561,9 @@ class RepositorioEmMemoria:
             return None
         self._jobs[job_id] = job.model_copy(update=mudancas)
         return self._jobs[job_id]
+
+    def remover(self, job_id: str) -> None:
+        self._jobs.pop(job_id, None)
 
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
@@ -514,6 +605,9 @@ class RepositorioIndisponivel:
     ) -> Job | None:
         raise ServicoIndisponivel
 
+    def remover(self, job_id: str) -> None:
+        raise ServicoIndisponivel
+
     def listar(self) -> list[Job]:
         raise ServicoIndisponivel
 
@@ -534,7 +628,16 @@ class ArmazenamentoIndisponivel:
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        raise ServicoIndisponivel
+
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        raise ServicoIndisponivel
+
+    def ler_comparacao(self, job_id: str) -> bytes | None:
+        raise ServicoIndisponivel
+
+    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
 
@@ -617,6 +720,17 @@ def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
     return verificar
 
 
+def _chave_com_algum(*escopos: Escopo) -> Callable[[Chamador], Chamador]:
+    """Dependência: chave sem nenhum dos escopos recebe 403; pessoa passa."""
+
+    def verificar(chamador: ChamadorAutenticado) -> Chamador:
+        if isinstance(chamador, Sistema) and not set(escopos) & set(chamador.escopos):
+            raise HTTPException(403, f"Chave sem o escopo {' ou '.join(escopos)}")
+        return chamador
+
+    return verificar
+
+
 def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `decupagem.editar`; chave de sistema não corrige."""
     if not isinstance(chamador, Usuario):
@@ -657,6 +771,33 @@ def _enxerga(chamador: Chamador, job: Job | None) -> Job:
     return job
 
 
+class AceiteDaSugestao(BaseModel):
+    """Corpo opcional do aceite: o "outro nome" (ou o título da pauta) do editor."""
+
+    valor: (
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_NOME),
+        ]
+        | None
+    ) = None
+
+
+def _correcao_da_proposta(proposta: Proposta, motivo: str, versao: str) -> NovaCorrecao:
+    try:
+        return NovaCorrecao(
+            tipo=proposta.tipo,
+            item_id=proposta.item_id,
+            valor=proposta.valor,
+            catalogo_id=proposta.catalogo_id,
+            ocorrencia=proposta.ocorrencia,
+            motivo=motivo,
+            versao=versao,
+        )
+    except ValidationError as erro:
+        raise HTTPException(422, "Valor inválido para a correção proposta") from erro
+
+
 def criar_rotas(
     repositorio: RepositorioDeJobs,
     armazenamento: Armazenamento,
@@ -665,7 +806,10 @@ def criar_rotas(
     correcoes: RepositorioDeCorrecoes,
     aprovacao: RepositorioDeAprovacao,
     catalogo: Catalogo,
+    marcas: CatalogoDeMarcas,
+    sugestoes: RepositorioDeSugestoes,
     reindexar: Callable[[Job], object],
+    tipos_de_objeto: Callable[[], list[str]] = list,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -804,6 +948,49 @@ def criar_rotas(
         )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
+    @rotas.get("/{job_id}/pessoas/{pessoa_id}/referencias")
+    def fotos_do_nome(
+        job_id: str,
+        pessoa_id: str,
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> JSONResponse:
+        job = obter_concluido(job_id, chamador)
+        bruto = armazenamento.ler_comparacao(job.id)
+        vereditos = json.loads(bruto) if bruto else []
+        veredito = next(
+            (v for v in vereditos if pessoa_id in v.get("pessoas", [])), None
+        )
+        if veredito is None:
+            raise HTTPException(404, "Este nome não tem comparação de rosto")
+        conferem = veredito.get("conferem") or []
+        fotos: list[FotoDoNome] = []
+        for i, foto in enumerate(veredito.get("fotos", [])):
+            objeto = str(foto.get("referencia", ""))
+            # O objeto vem do que o servidor gravou; mesmo assim só assina o das referências.
+            if not objeto.startswith(PREFIXO_DAS_FOTOS) or ".." in objeto:
+                continue
+            pagina, dominio = _pagina_e_dominio(str(foto.get("pagina_url", "")))
+            resultado: Literal["confere", "nao_confere"] | None = (
+                None
+                if i >= len(conferem)
+                else "confere"
+                if conferem[i]
+                else "nao_confere"
+            )
+            fotos.append(
+                FotoDoNome(
+                    url=armazenamento.url_da_foto(objeto, VALIDADE_DA_FOTO),
+                    pagina_url=pagina,
+                    dominio=dominio,
+                    resultado=resultado,
+                )
+            )
+        corpo = FotosDoNome(fotos=fotos, expira_em=relogio() + VALIDADE_DA_FOTO)
+        return JSONResponse(
+            corpo.model_dump(mode="json"),
+            headers={"Cache-Control": "private, no-store"},
+        )
+
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
         cabecalhos = {"Vary": "Accept-Encoding"}
         if _aceita_gzip(request.headers.get("accept-encoding", "")):
@@ -836,6 +1023,11 @@ def criar_rotas(
             return _resposta(pedacos, request)
         modelo, versao_atual = _ler_modelo(job.id)
         entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
+        entregue = sem_catalogo_apagado(
+            entregue,
+            lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
+            lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
+        )
         return _resposta(iter([json.dumps(entregue).encode()]), request)
 
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
@@ -847,17 +1039,29 @@ def criar_rotas(
     def _autoria(autor: Usuario) -> Autoria:
         return Autoria(autor.uid, autor.email, relogio())
 
-    @rotas.post("/{job_id}/correcoes", status_code=201)
-    def corrigir_decupagem(
-        job_id: str,
+    def _gravar_correcao(
+        job: Job,
+        modelo: dict[str, Any],
+        versao_atual: str,
         request: Request,
         novo: NovaCorrecao,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
-    ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
-        modelo, versao_atual = _ler_modelo(job.id)
+        autor: Usuario,
+    ) -> Correcao:
+        correcao = _conferir_correcao(job, modelo, versao_atual, request, novo, autor)
+        correcoes.acrescentar(correcao)
+        return correcao
+
+    def _conferir_correcao(
+        job: Job,
+        modelo: dict[str, Any],
+        versao_atual: str,
+        request: Request,
+        novo: NovaCorrecao,
+        autor: Usuario,
+    ) -> Correcao:
+        """O registro da correção, ainda não gravado; 409 ou 422 se ela não vale."""
         try:
-            correcao = corrigir(
+            return corrigir(
                 modelo,
                 versao_atual,
                 _ler_correcoes(job.id),
@@ -866,6 +1070,7 @@ def criar_rotas(
                 _autoria(autor),
                 exige_aprovacao=_espera_curador(request, autor, novo.tipo),
                 catalogo=catalogo,
+                marcas=marcas,
             )
         except VersaoDesatualizada:
             raise HTTPException(
@@ -875,18 +1080,108 @@ def criar_rotas(
             raise HTTPException(422, "Item inexistente") from None
         except TemposInvalidos:
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
-        correcoes.acrescentar(correcao)
+        except EstruturaInvalida as erro:
+            raise HTTPException(422, str(erro)) from None
+        except CatalogoIdInvalido:
+            raise HTTPException(422, "catalogo_id não é o desse nome") from None
+
+    @rotas.post("/{job_id}/correcoes", status_code=201)
+    def corrigir_decupagem(
+        job_id: str,
+        request: Request,
+        novo: NovaCorrecao,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        job = obter_concluido(job_id, autor)
+        modelo, versao_atual = _ler_modelo(job.id)
+        correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
         # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
         if not correcao.exige_aprovacao:
             reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
+
+    def _sugestoes_abertas(
+        job: Job,
+    ) -> tuple[list[Sugestao], dict[str, Any], str]:
+        modelo, versao_atual = _ler_modelo(job.id)
+        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
+        abertas = sugestoes_abertas(
+            entregue, catalogo, sugestoes.decididas(job.id), tipos_de_objeto
+        )
+        return abertas, modelo, versao_atual
+
+    def _a_sugestao(abertas: list[Sugestao], sugestao_id: str) -> Sugestao:
+        achada = next((s for s in abertas if s.id == sugestao_id), None)
+        if achada is None:
+            raise HTTPException(404, "Sugestão não encontrada")
+        return achada
+
+    @rotas.get("/{job_id}/sugestoes")
+    def sugestoes_do_video(
+        job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
+    ) -> list[Sugestao]:
+        return _sugestoes_abertas(obter_concluido(job_id, autor))[0]
+
+    @rotas.post("/{job_id}/sugestoes/{sugestao_id}/aceitar", status_code=201)
+    def aceitar_sugestao(
+        job_id: str,
+        sugestao_id: str,
+        request: Request,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+        corpo: AceiteDaSugestao | None = None,
+    ) -> dict[str, Any]:
+        job = obter_concluido(job_id, autor)
+        abertas, modelo, versao_atual = _sugestoes_abertas(job)
+        sugestao = _a_sugestao(abertas, sugestao_id)
+        valor = corpo.valor if corpo else None
+        if valor is not None:
+            if not valor:
+                raise HTTPException(422, "O valor não pode ser vazio")
+            sugestao = com_o_valor_do_editor(sugestao, valor)
+        elif sugestao.tipo == "pauta_do_trecho":
+            raise HTTPException(422, "A pauta pede um título")
+        motivo = MOTIVO_CORRIGIDA if valor is not None else MOTIVO_CONFIRMADA
+        # Confere todas antes de gravar a primeira: o aceite não fica pela metade.
+        gravadas = [
+            _conferir_correcao(
+                job,
+                modelo,
+                versao_atual,
+                request,
+                _correcao_da_proposta(proposta, motivo, versao_atual),
+                autor,
+            )
+            for proposta in [sugestao.correcao, *sugestao.depois]
+        ]
+        for correcao in gravadas:
+            correcoes.acrescentar(correcao)
+        sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
+        if any(not c.exige_aprovacao for c in gravadas):
+            reindexar(job)
+        return {"id": gravadas[0].id, "ids": [c.id for c in gravadas]}
+
+    @rotas.post("/{job_id}/sugestoes/{sugestao_id}/recusar", status_code=204)
+    def recusar_sugestao(
+        job_id: str,
+        sugestao_id: str,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> Response:
+        job = obter_concluido(job_id, autor)
+        sugestao = _a_sugestao(_sugestoes_abertas(job)[0], sugestao_id)
+        sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "recusada")
+        return Response(status_code=204)
 
     @rotas.get("/{job_id}/correcoes")
     def historico_de_correcoes(
         job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
     ) -> list[ItemDoHistorico]:
         job = obter_concluido(job_id, autor)
-        return historico(_ler_correcoes(job.id))
+        indexacao = job.indexacao
+        return com_o_estado_na_busca(
+            historico(_ler_correcoes(job.id)),
+            indexacao.estado if indexacao else None,
+            (indexacao.desde or indexacao.em) if indexacao else None,
+        )
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/desfazer", status_code=201)
     def desfazer_correcao(

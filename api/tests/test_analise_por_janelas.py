@@ -465,3 +465,18 @@ def test_janela_que_esgotou_as_tentativas_nao_gasta_mais_chamadas_ao_retomar() -
     with pytest.raises(AnaliseFalhou):
         _decupar(outra, janelas_do_job=janelas)
     assert (290_000, 610_000) not in outra.trechos()
+
+
+def test_apagar_o_progresso_faz_a_nova_analise_chamar_o_gemini_em_todas_as_janelas() -> (
+    None
+):
+    janelas = JanelasEmMemoria()
+    _decupar(ModeloFalso(_fala_no_inicio_do_nucleo), janelas_do_job=janelas)
+    janelas.gravar("outro", janelas.ler("j")[0])
+
+    janelas.apagar("j")
+    nova = ModeloFalso(_fala_no_inicio_do_nucleo)
+    _decupar(nova, janelas_do_job=janelas)
+
+    assert len(nova.chamadas) == 30
+    assert set(janelas.ler("outro")) == {0}

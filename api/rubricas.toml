@@ -1,0 +1,42 @@
+# Rubricas da avaliação diária (#255): uma por requisito. `campos` são as chaves da Decupagem
+# que o juiz recebe; `criterios` são avaliados juntos, numa nota de 1 a 5 (5 = todos cumpridos).
+# Mudar um critério muda a régua: as notas de antes não se comparam com as de depois.
+
+[famosos]
+campos = ["pessoas"]
+criterios = [
+  "Cada pessoa listada aparece de fato no vídeo, com o nome e o papel coerentes entre si.",
+  "Pessoas sem nome confirmado estão marcadas como não identificadas, em vez de receber um nome chutado.",
+  "Os intervalos de aparição são plausíveis (início antes do fim, dentro da duração do vídeo).",
+]
+
+[mencoes]
+campos = ["pessoas", "transcricao"]
+criterios = [
+  "Os nomes citados na transcrição que são de pessoas aparecem como menção, e quem só é citado não é dado como presente.",
+  "Cada menção aponta para um momento em que o nome é de fato dito.",
+]
+
+[pautas]
+campos = ["pautas", "programa"]
+criterios = [
+  "Cada pauta tem um título e um resumo fiéis ao que é dito e mostrado, sem informação inventada.",
+  "Os limites das pautas seguem as mudanças de assunto, sem cortar no meio nem juntar assuntos distintos.",
+  "O tom e o resumo do programa condizem com as pautas.",
+]
+
+[broll]
+campos = ["planos"]
+criterios = [
+  "Os planos sem fala nem texto na tela (B-roll) estão marcados como planos limpos.",
+  "A ação, o ambiente e os objetos de cada plano descrevem o que o quadro-chave mostra.",
+  "Não há plano marcado como limpo com texto na tela ou alguém falando para a câmera.",
+]
+
+[comerciais]
+campos = ["comerciais"]
+criterios = [
+  "Cada comercial tem a marca do anunciante e o intervalo em que ele ocupa a tela.",
+  "A evidência citada (fala, logo, texto na tela ou produto) sustenta a marca.",
+  "Merchandising dentro da pauta não é tratado como bloco comercial inteiro.",
+]

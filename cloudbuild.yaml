@@ -1,4 +1,4 @@
-# As quatro imagens do MAM (#71, #211), pelo scripts/deploy-dev.sh. Um passo só, com o
+# As sete imagens do MAM (#71, #211, #238, #243), pelo scripts/deploy-dev.sh. Um passo só, com o
 # buildx e o docker-bake.hcl: as imagens são montadas em paralelo, com o cache das camadas
 # no Artifact Registry, e enviadas pelo próprio BuildKit (--push no bake). O script publica
 # pelos digests delas, sem rebuild.
@@ -16,12 +16,38 @@ steps:
       - TRANSCRICAO=$_TRANSCRICAO
       - OCR=$_OCR
       - CACHE=$_CACHE
+      - TRANSCRICAO_GPU=$_TRANSCRICAO_GPU
+      - OCR_GPU=$_OCR_GPU
+      - OBJETOS_GPU=$_OBJETOS_GPU
+      - CACHE_GPU=$_CACHE_GPU
       - VITE_IDENTITY_API_KEY=$_VITE_IDENTITY_API_KEY
-# O padrão é 600 s: o build de hoje chega perto, e o sem cache, que também exporta o cache, pode passar (#211).
-timeout: 1800s
+# O padrão é 600 s. O build das quatro imagens de CPU chega perto, e o sem cache, que também
+# exporta o cache, pode passar (#211). Conta da primeira montagem, sem cache, com as duas
+# imagens com GPU (#238), ESTIMADA pelo tamanho das camadas (o tempo real é anotado no PR
+# depois da primeira publicação, passo 2 do #240):
+#   - as quatro de CPU: ~15 min (a folga de 2x do timeout de 1800 s que havia);
+#   - transcricao-gpu: ~2 GB de rodas CUDA 12 (cuBLAS ~0,6 GB, cuDNN 9 ~0,7 GB e o resto)
+#     além do modelo de 1,6 GB, que o alvo de CPU já baixa e o grafo compartilha: ~2 min de
+#     download a 20 MB/s a 50 MB/s, ~2 min de instalação e ~1 min da conferência em CPU;
+#   - ocr-gpu: o paddlepaddle-gpu 3.2.2 (1,9 GB) e as rodas nvidia-* que ele puxa (~3 GB):
+#     ~3 min de download, ~4 min de instalação e ~1 min da conferência do OCR em CPU;
+#   - exportar o cache (mode=max) das duas e enviar as imagens: ~8 GB comprimidos para
+#     outra região a ~50 MB/s, ~3 min. O cache fica no repositório das imagens, e o envio
+#     da imagem não reenvia as camadas que o cache já pôs lá.
+#   - objetos-gpu (#243): torch e as rodas nvidia-* (~4 a 5 GB baixados, ~4 min a 20 MB/s
+#     e ~3 min de instalação), os pesos do Florence-2 (1,6 GB, ~1 min) e a conferência em
+#     CPU (~1 min); exportar o cache (mode=max, ~6 GB) e enviar a imagem: ~3 min mais.
+#     Soma ~11 min.
+# Soma ~41 min com as montagens disputando as 8 vCPUs da E2_HIGHCPU_8; 5400 s (1,5 h) dá
+# folga de ~2x. Antes das sete imagens eram 3600 s.
+timeout: 5400s
 options:
   # Obrigatório com conta de serviço própria (mam-build).
   logging: CLOUD_LOGGING_ONLY
-  # Máquina maior (#211): quatro montagens ao mesmo tempo, com modelos e bibliotecas pesadas.
+  # Máquina maior (#211): sete montagens ao mesmo tempo, com modelos e bibliotecas pesadas.
   machineType: E2_HIGHCPU_8
-  diskSizeGb: 200
+  # Disco da primeira montagem, sem cache (#238, #243): as sete imagens expandidas somam ~33 GB
+  # (as de CPU ~8 GB; as GPU, ~25 GB com o CUDA, o Paddle e o torch), mais as rodas baixadas, os
+  # blobs comprimidos do cache e do envio (~21 GB) e os intermediários do uv e das
+  # camadas: ~3x, ~160 a 170 GB. 300 GB dá folga de ~1,8x.
+  diskSizeGb: 300

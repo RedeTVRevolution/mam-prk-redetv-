@@ -1,6 +1,11 @@
-import { Badge, Box, Group, Stack, Text, UnstyledButton, Button } from '@mantine/core'
+import { ActionIcon, Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Button } from '@mantine/core'
+import { IconArrowsJoin, IconCut, IconPencil, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { FotosDoNome } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
+import { ComparacaoDoRosto } from './ComparacaoDoRosto.tsx'
+import { InventarioDoPlano, type ObjetoApontado } from './Inventario.tsx'
+import { type Marca, ROTULO_NA_BUSCA } from './catalogacao.ts'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
@@ -24,12 +29,18 @@ import {
   vizinhoNoPainel,
 } from './painel.ts'
 import { CORES, CORES_DE_OBJETO, CORES_DE_OCORRENCIA } from './tema.ts'
-import type { Decupagem } from './Video.tsx'
+import type { Decupagem } from './decupagem.ts'
 
 /** Depois que a pessoa rola o painel, ele não anda sozinho por este tempo. */
 const PAUSA_DA_ROLAGEM_MS = 5000
 
 const GRUPO = 'Painel'
+
+/** O que toma o lugar da linha de um item (ou, com `acrescentar:<pessoa>`, abre sob a linha da pessoa). */
+export interface EdicaoNoPainel {
+  chave: string
+  conteudo: ReactNode
+}
 
 const COR_DO_TIPO: Record<TipoDoItem, string> = {
   pauta: CORES_DE_OCORRENCIA.pauta.cor,
@@ -99,7 +110,46 @@ function Cabecalho({
   )
 }
 
-function SeloDaProva({ selo, aoSaltar }: { selo: Selo; aoSaltar: (ms: number) => void }) {
+/** O que o clique no selo "Rosto" precisa para abrir a comparação. */
+interface Comparacao {
+  pessoa: string
+  nome: string
+  quadro: string | null
+}
+
+function SeloDaProva({
+  selo,
+  aoSaltar,
+  aoComparar,
+}: {
+  selo: Selo
+  aoSaltar: (ms: number) => void
+  /** Sem ele, o selo "Rosto" é só texto. */
+  aoComparar?: () => void
+}) {
+  if (selo.tipo === 'nao_confirmado') {
+    return (
+      <Tooltip label={selo.dica} multiline w={260} events={{ hover: true, focus: true, touch: true }}>
+        <Badge size="sm" variant="outline" color={CORES.textoSecundario} tabIndex={0}>
+          {selo.rotulo}
+        </Badge>
+      </Tooltip>
+    )
+  }
+  if (selo.tipo === 'rosto' && aoComparar) {
+    return (
+      <Badge
+        size="sm"
+        component="button"
+        type="button"
+        style={{ cursor: 'pointer' }}
+        aria-label="Rosto: ver a comparação com as fotos de referência"
+        onClick={aoComparar}
+      >
+        {selo.rotulo}
+      </Badge>
+    )
+  }
   if (selo.inicio_ms === null) return <Badge size="sm">{selo.rotulo}</Badge>
   const inicio = selo.inicio_ms
   return (
@@ -198,8 +248,14 @@ function Item({
   aoSaltar,
   aoReproduzir,
   aoIrParaDono,
+  aoComparar,
   urlDoQuadro,
+  aoApontarObjeto,
   compacto,
+  edicao,
+  marca,
+  acoes,
+  aoBuscarParecidos,
 }: {
   item: ItemDoPainel
   atual: boolean
@@ -208,105 +264,219 @@ function Item({
   aoSaltar: (ms: number) => void
   aoReproduzir: (i: ItemDoPainel) => void
   aoIrParaDono: (pessoa: string) => void
+  /** Abre a comparação do rosto da pessoa do item; sem ele, o selo "Rosto" é só texto. */
+  aoComparar?: (c: Comparacao) => void
   urlDoQuadro?: (caminho: string) => Promise<string>
+  /** O objeto do inventário sob o mouse ou o foco; `null` quando sai. */
+  aoApontarObjeto?: (o: ObjetoApontado | null) => void
   /** Objeto na lista das ocorrências: só o tipo e o tempo, o resto fica na linha do objeto. */
   compacto?: boolean
+  /** O formulário (ou a confirmação) que substitui a linha enquanto o item é corrigido. */
+  edicao?: ReactNode
+  marca?: Marca
+  /** Só no plano com vetor do quadro indexado (#271): abre a busca dos planos parecidos. */
+  aoBuscarParecidos?: () => void
+  /** Só no modo de catalogação: o lápis, a lixeira e o duplo clique, com o mouse no lugar do F2 e do Del. */
+  acoes?: AcoesDaLinha
 }) {
+  const [sobre, setSobre] = useState(false)
+  const [comFoco, setComFoco] = useState(false)
   const resumo = item.tipo === 'pauta' && item.detalhe
   return (
     <Box
       data-chave={item.chave}
       aria-current={atual ? 'true' : undefined}
       p="xs"
-      style={{ borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
+      onMouseOver={() => setSobre(true)}
+      onMouseOut={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSobre(false)
+      }}
+      onFocus={() => setComFoco(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setComFoco(false)
+      }}
+      style={{ position: 'relative', borderRadius: 'var(--mantine-radius-sm)', ...(atual ? ATUAL : {}), ...(selecionado ? { background: SELECIONADO.background } : {}) }}
     >
-      <UnstyledButton
-        data-item
-        aria-label={
-          item.tipo === 'fala'
-            ? `${item.linhas[0] ? `${item.linhas[0]}: ` : ''}${item.titulo}, ${relogio(item.inicio_ms)}`
-            : `${item.titulo}, ${relogio(item.inicio_ms)} a ${relogio(item.fim_ms)}`
-        }
-        aria-pressed={selecionado}
-        onClick={() => aoClicar(item)}
-        style={{ display: 'block', width: '100%', textAlign: 'left' }}
-      >
-        {item.tipo === 'fala' ? (
-          // Na transcrição a linha é o início, o locutor (quando houver) e o texto inteiro.
-          <Group gap="sm" wrap="nowrap" align="flex-start">
-            <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none', paddingTop: 2 }}>
-              {relogio(item.inicio_ms)}
-            </Text>
-            <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
-              {item.linhas[0] && (
-                <Text size="xs" c="dimmed">
-                  {item.linhas[0]}
+      {edicao ? (
+        edicao
+      ) : (
+        <>
+          <UnstyledButton
+            data-item
+            aria-label={
+              item.tipo === 'fala'
+                ? `${item.linhas[0] ? `${item.linhas[0]}: ` : ''}${item.titulo}, ${relogio(item.inicio_ms)}`
+                : `${item.titulo}, ${relogio(item.inicio_ms)} a ${relogio(item.fim_ms)}`
+            }
+            aria-pressed={selecionado}
+            onClick={() => aoClicar(item)}
+            onDoubleClick={acoes?.podeCorrigir(item) ? () => acoes.corrigir(item) : undefined}
+            style={{ display: 'block', width: '100%', textAlign: 'left' }}
+          >
+            {item.tipo === 'fala' ? (
+              // Na transcrição a linha é o início, o locutor (quando houver) e o texto inteiro.
+              <Group gap="sm" wrap="nowrap" align="flex-start">
+                <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none', paddingTop: 2 }}>
+                  {relogio(item.inicio_ms)}
                 </Text>
-              )}
-              <Text size="sm">{item.titulo}</Text>
-            </Stack>
-          </Group>
-        ) : (
-          <Group gap="xs" wrap="nowrap" align="flex-start">
-            {item.quadro !== undefined && !compacto && (
-              <MiniaturaDoPainel caminho={item.quadro} urlDoQuadro={urlDoQuadro} />
-            )}
-            <Box
-              aria-hidden
-              style={{ width: 8, height: 8, marginTop: 6, flex: 'none', background: COR_DO_TIPO[item.tipo], borderRadius: 'var(--mantine-radius-xs)' }}
-            />
-            <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
-              <Group gap="xs" wrap="nowrap" justify="space-between" align="baseline">
-                <Text size="sm" style={{ minWidth: 0 }}>
-                  {item.tipo === 'texto' && item.rotulo ? (
-                    <>
-                      <Text span size="sm" c="dimmed" fw={600}>
-                        {item.rotulo}
-                      </Text>
-                      {'  '}
-                    </>
-                  ) : null}
-                  {item.titulo}
-                </Text>
-                <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
-                  {tempos(item)}
-                </Text>
+                <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+                  {item.linhas[0] && (
+                    <Text size="xs" c="dimmed">
+                      {item.linhas[0]}
+                    </Text>
+                  )}
+                  <Text size="sm">{item.titulo}</Text>
+                </Stack>
               </Group>
-              {item.rotulo && item.tipo !== 'texto' && (
-                <Text size="xs" c="dimmed">
-                  {item.rotulo}
-                </Text>
+            ) : (
+              <Group gap="xs" wrap="nowrap" align="flex-start">
+                {item.quadro !== undefined && !compacto && (
+                  <MiniaturaDoPainel caminho={item.quadro} urlDoQuadro={urlDoQuadro} />
+                )}
+                <Box
+                  aria-hidden
+                  style={{ width: 8, height: 8, marginTop: 6, flex: 'none', background: COR_DO_TIPO[item.tipo], borderRadius: 'var(--mantine-radius-xs)' }}
+                />
+                <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+                  <Group gap="xs" wrap="nowrap" justify="space-between" align="baseline">
+                    <Text size="sm" style={{ minWidth: 0 }}>
+                      {item.tipo === 'texto' && item.rotulo ? (
+                        <>
+                          <Text span size="sm" c="dimmed" fw={600}>
+                            {item.rotulo}
+                          </Text>
+                          {'  '}
+                        </>
+                      ) : null}
+                      {item.titulo}
+                    </Text>
+                    <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
+                      {tempos(item)}
+                    </Text>
+                  </Group>
+                  {item.rotulo && item.tipo !== 'texto' && (
+                    <Text size="xs" c="dimmed">
+                      {item.rotulo}
+                    </Text>
+                  )}
+                  {item.linhas.map((l, i) =>
+                    resumo && i === 0 ? (
+                      <Text key={l} size="xs" c="dimmed" lineClamp={selecionado ? undefined : 2}>
+                        {l}
+                      </Text>
+                    ) : (
+                      <Text key={l} size="xs" c="dimmed">
+                        {l}
+                      </Text>
+                    ),
+                  )}
+                </Stack>
+              </Group>
+            )}
+          </UnstyledButton>
+          {item.objeto && !compacto && <DescricaoDoObjeto dados={item.objeto} aoIrParaDono={aoIrParaDono} />}
+          {item.inventario && !compacto && (
+            <InventarioDoPlano inventario={item.inventario} plano={item.titulo} aoApontar={aoApontarObjeto ?? (() => {})} />
+          )}
+          {(item.selos.length > 0 || selecionado || marca || aoBuscarParecidos) && (
+            <Group gap="xs" mt={4} ml={16}>
+              {item.selos.map((s) => (
+                <SeloDaProva
+                  key={s.rotulo}
+                  selo={s}
+                  aoSaltar={aoSaltar}
+                  aoComparar={
+                    aoComparar && item.pessoa
+                      ? () => aoComparar({ pessoa: item.pessoa!, nome: item.titulo, quadro: item.quadro ?? null })
+                      : undefined
+                  }
+                />
+              ))}
+              {marca && (
+                <Tooltip label={marca.dica}>
+                  <Badge size="sm" variant="light" color={marca.pendente || marca.na_busca === 'indexando' ? CORES.andamento : CORES.concluido} tabIndex={0}>
+                    {marca.pendente ? 'aguardando o Curador' : ROTULO_NA_BUSCA[marca.na_busca]}
+                  </Badge>
+                </Tooltip>
               )}
-              {item.linhas.map((l, i) =>
-                resumo && i === 0 ? (
-                  <Text key={l} size="xs" c="dimmed" lineClamp={selecionado ? undefined : 2}>
-                    {l}
-                  </Text>
-                ) : (
-                  <Text key={l} size="xs" c="dimmed">
-                    {l}
-                  </Text>
-                ),
+              {aoBuscarParecidos && (
+                <Button size="compact-xs" variant="default" onClick={aoBuscarParecidos}>
+                  Planos parecidos com este
+                </Button>
               )}
-            </Stack>
-          </Group>
-        )}
-      </UnstyledButton>
-      {item.objeto && !compacto && <DescricaoDoObjeto dados={item.objeto} aoIrParaDono={aoIrParaDono} />}
-      {(item.selos.length > 0 || selecionado) && (
-        <Group gap="xs" mt={4} ml={16}>
-          {item.selos.map((s) => (
-            <SeloDaProva key={s.rotulo} selo={s} aoSaltar={aoSaltar} />
-          ))}
-          {selecionado && (
-            <Button size="compact-xs" variant="default" onClick={() => aoReproduzir(item)}>
-              Reproduzir trecho
-            </Button>
+              {selecionado && (
+                <Button size="compact-xs" variant="default" onClick={() => aoReproduzir(item)}>
+                  Reproduzir trecho
+                </Button>
+              )}
+            </Group>
+          )}
+        </>
+      )}
+      {acoes && !edicao && (
+        // Sempre no DOM (e na ordem do Tab): só ficam à vista com o mouse, o foco ou o item selecionado.
+        <Group
+          gap={2}
+          wrap="nowrap"
+          style={{ position: 'absolute', top: 4, right: 4, opacity: sobre || comFoco || selecionado ? 1 : 0 }}
+        >
+          {acoes.podeCorrigir(item) && (
+            <Tooltip label="Corrigir (F2)">
+              <ActionIcon size="sm" variant="subtle" aria-label={`Corrigir ${item.titulo}`} onClick={() => acoes.corrigir(item)}>
+                <IconPencil size={14} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          {item.tipo === 'pauta' && acoes.pautas && (
+            <>
+              <Tooltip label={acoes.pautas.marcada(item) ? 'Desmarcar para juntar (M)' : 'Marcar para juntar (M)'}>
+                <ActionIcon
+                  size="sm"
+                  variant={acoes.pautas.marcada(item) ? 'filled' : 'subtle'}
+                  aria-label={`Marcar ${item.titulo} para juntar`}
+                  aria-pressed={acoes.pautas.marcada(item)}
+                  onClick={() => acoes.pautas?.alternar(item)}
+                >
+                  <IconArrowsJoin size={14} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Dividir aqui (D)">
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  aria-label={`Dividir ${item.titulo} no ponto do player`}
+                  onClick={() => acoes.pautas?.dividir(item)}
+                >
+                  <IconCut size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </>
+          )}
+          {acoes.podeRemover(item) && (
+            <Tooltip label="Não é isto (Del)">
+              <ActionIcon size="sm" variant="subtle" aria-label={`Não é isto: ${item.titulo}`} onClick={() => acoes.remover(item)}>
+                <IconTrash size={14} />
+              </ActionIcon>
+            </Tooltip>
           )}
         </Group>
       )}
     </Box>
   )
+}
+
+/** O que o mouse faz na linha do item, no modo de catalogação. */
+export interface AcoesDaLinha {
+  corrigir: (i: ItemDoPainel) => void
+  remover: (i: ItemDoPainel) => void
+  podeCorrigir: (i: ItemDoPainel) => boolean
+  podeRemover: (i: ItemDoPainel) => boolean
+  /** Juntar e dividir pautas, só nas linhas de pauta. */
+  pautas?: {
+    marcada: (i: ItemDoPainel) => boolean
+    alternar: (i: ItemDoPainel) => void
+    dividir: (i: ItemDoPainel) => void
+  }
 }
 
 function Secao({ titulo, children }: { titulo?: string; children: ReactNode }) {
@@ -336,6 +506,14 @@ export function Painel({
   aoSaltar,
   aoReproduzir,
   urlDoQuadro,
+  aoApontarObjeto,
+  atalhosAtivos = true,
+  fotosDoNome,
+  edicao = null,
+  marcas,
+  aoAcrescentar,
+  acoes,
+  planosParecidos,
 }: {
   decupagem: Decupagem
   duracaoMs: number
@@ -352,7 +530,29 @@ export function Painel({
   aoReproduzir: (i: Intervalo) => void
   /** A URL assinada do quadro de um momento; sem ela as miniaturas ficam como retângulo. */
   urlDoQuadro?: (caminho: string) => Promise<string>
+  /** O objeto do inventário sob o mouse ou o foco, para o player mostrar o quadro com a caixa. */
+  aoApontarObjeto?: (o: ObjetoApontado | null) => void
+  /** Falso com a gaveta aberta: as setas e o Enter são dela. */
+  atalhosAtivos?: boolean
+  /** As fotos de referência do nome de uma pessoa; sem ele, o selo "Rosto" não abre a comparação. */
+  fotosDoNome?: (pessoaId: string) => Promise<FotosDoNome>
+  /** A correção em curso: o formulário toma o lugar da linha do item. */
+  edicao?: EdicaoNoPainel | null
+  /** "corrigido" e "aguardando o Curador", por chave de item. */
+  marcas?: Record<string, Marca>
+  /** Só no modo de catalogação: acrescentar uma aparição na linha da pessoa. */
+  aoAcrescentar?: (pessoa: string) => void
+  /** Os planos com vetor do quadro indexado e a busca dos parecidos (#271); sem vetor, sem botão. */
+  planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
+  /** Só no modo de catalogação: corrigir e remover pelo mouse. */
+  acoes?: AcoesDaLinha
 }) {
+  const [comparando, setComparando] = useState<Comparacao | null>(null)
+  const fecharComparacao = useCallback(() => setComparando(null), [])
+  const carregarFotos = useCallback(
+    () => (comparando && fotosDoNome ? fotosDoNome(comparando.pessoa) : Promise.reject(new Error('sem rota'))),
+    [comparando, fotosDoNome],
+  )
   const itens = useMemo(() => itensDoPainel(decupagem), [decupagem])
   const pautas = useMemo(() => itensDaAba(itens, 'pautas'), [itens])
   const rolagem = useRef<HTMLDivElement>(null)
@@ -475,7 +675,7 @@ export function Painel({
       tecla: '↑ ↓',
       acao: 'No painel: mover a seleção na aba',
       grupo: GRUPO,
-      casa: (e) => e.key === 'ArrowUp' || e.key === 'ArrowDown',
+      casa: (e) => atalhosAtivos && (e.key === 'ArrowUp' || e.key === 'ArrowDown'),
       executar: (e) => mover(e.key === 'ArrowUp' ? -1 : 1),
     },
     {
@@ -485,6 +685,7 @@ export function Painel({
       // Com o foco num botão ou link, o Enter faz o que o elemento faz; menos na aba e no próprio item,
       // em que o foco pode ter ficado num item enquanto as setas moveram a seleção.
       casa: (e) =>
+        atalhosAtivos &&
         e.key === 'Enter' &&
         !(e.target instanceof HTMLElement && e.target.closest('button:not([role="tab"]):not([data-item]), a')),
       executar: () => {
@@ -496,7 +697,7 @@ export function Painel({
       acao: 'No painel: trocar de aba',
       grupo: GRUPO,
       ctrl: true,
-      casa: (e) => e.key === 'ArrowLeft' || e.key === 'ArrowRight',
+      casa: (e) => atalhosAtivos && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'),
       executar: (e) => trocar(e.key === 'ArrowLeft' ? -1 : 1),
     },
   ])
@@ -506,6 +707,12 @@ export function Painel({
     aoTrocarAba('pessoas')
     const primeira = itens.find((i) => i.tipo === 'aparicao' && i.pessoa === pessoa)
     if (primeira) aoSelecionar(primeira.chave)
+  }
+
+  const parecidosDo = (i: ItemDoPainel) => {
+    const n = i.tipo === 'plano' ? /^plano-(\d+)$/.exec(i.chave)?.[1] : undefined
+    if (n === undefined || !planosParecidos?.comVetor.has(Number(n))) return undefined
+    return () => planosParecidos.abrir(Number(n))
   }
 
   const lista = (itensDaLista: ItemDoPainel[], compacto?: boolean) =>
@@ -522,8 +729,14 @@ export function Painel({
         aoSaltar={aoSaltar}
         aoReproduzir={aoReproduzir}
         aoIrParaDono={irParaDono}
+        aoComparar={fotosDoNome ? setComparando : undefined}
         urlDoQuadro={urlDoQuadro}
+        aoApontarObjeto={aoApontarObjeto}
         compacto={compacto}
+        edicao={edicao?.chave === i.chave ? edicao.conteudo : undefined}
+        marca={marcas?.[i.chave]}
+        acoes={acoes}
+        aoBuscarParecidos={parecidosDo(i)}
       />
     ))
 
@@ -561,27 +774,45 @@ export function Painel({
                 const rotulo = doId[0]?.titulo ?? p.nome
                 return (
                   <Stack key={p.id} gap={2}>
-                    <UnstyledButton
-                      aria-expanded={abrir}
-                      aria-label={`${rotulo}, ${doId.length} ${doId.length === 1 ? 'aparição' : 'aparições'}`}
-                      onClick={() => aoAbrirPessoa(p.id)}
-                      p="xs"
-                    >
-                      <Group gap="xs" justify="space-between" wrap="nowrap">
-                        <Stack gap={0}>
-                          <Text size="sm">{rotulo}</Text>
-                          {doId[0]?.linhas[0] && rotulo === NAO_IDENTIFICADO && (
-                            <Text size="xs" c="dimmed">{doId[0].linhas[0]}</Text>
-                          )}
-                        </Stack>
-                        <Group gap="xs" wrap="nowrap">
-                          {(doId[0]?.selos ?? []).map((s) => (
-                            <Badge key={s.rotulo} size="sm">{s.rotulo}</Badge>
-                          ))}
+                    <Group gap="xs" justify="space-between" wrap="nowrap" align="flex-start">
+                      <UnstyledButton
+                        aria-expanded={abrir}
+                        aria-label={`${rotulo}, ${doId.length} ${doId.length === 1 ? 'aparição' : 'aparições'}`}
+                        onClick={() => aoAbrirPessoa(p.id)}
+                        p="xs"
+                        style={{ flex: 1, minWidth: 0, textAlign: 'left' }}
+                      >
+                        <Group gap="xs" justify="space-between" wrap="nowrap">
+                          <Stack gap={0}>
+                            <Text size="sm">{rotulo}</Text>
+                            {doId[0]?.linhas[0] && rotulo === NAO_IDENTIFICADO && (
+                              <Text size="xs" c="dimmed">{doId[0].linhas[0]}</Text>
+                            )}
+                          </Stack>
                           <Text size="xs" c="dimmed">{`${doId.length} ${doId.length === 1 ? 'aparição' : 'aparições'}`}</Text>
                         </Group>
+                      </UnstyledButton>
+                      <Group gap="xs" wrap="wrap" p="xs" justify="flex-end">
+                        {(doId[0]?.selos ?? []).map((s) => (
+                          <SeloDaProva
+                            key={s.rotulo}
+                            selo={s}
+                            aoSaltar={aoSaltar}
+                            aoComparar={
+                              fotosDoNome
+                                ? () => setComparando({ pessoa: p.id, nome: rotulo, quadro: doId[0]?.quadro ?? null })
+                                : undefined
+                            }
+                          />
+                        ))}
                       </Group>
-                    </UnstyledButton>
+                    </Group>
+                    {abrir && aoAcrescentar && edicao?.chave !== `acrescentar:${p.id}` && (
+                      <Button size="compact-xs" variant="default" ml="md" style={{ alignSelf: 'flex-start' }} onClick={() => aoAcrescentar(p.id)}>
+                        {`Acrescentar aparição de ${rotulo}`}
+                      </Button>
+                    )}
+                    {edicao?.chave === `acrescentar:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
                     {abrir && <Stack gap={2} ml="md">{lista(doId)}</Stack>}
                   </Stack>
                 )
@@ -646,7 +877,16 @@ export function Painel({
   }
 
   return (
-    <Stack gap="sm" style={{ height: '100%', minHeight: 0 }}>
+    <Stack gap="sm" style={{ height: '100%', minHeight: 0, position: 'relative' }}>
+      {comparando && (
+        <ComparacaoDoRosto
+          nome={comparando.nome}
+          quadro={comparando.quadro}
+          carregar={carregarFotos}
+          urlDoQuadro={urlDoQuadro}
+          aoFechar={fecharComparacao}
+        />
+      )}
       <Cabecalho itens={itens} pautas={pautas} duracaoMs={duracaoMs} atualMs={atualMs} />
       <Group gap="xs" role="tablist" aria-label="Abas do painel" wrap="wrap">
         {ABAS.map((a) => {

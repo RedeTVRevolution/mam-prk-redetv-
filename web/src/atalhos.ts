@@ -45,3 +45,13 @@ export function useAtalhos(atalhos: Atalho[]) {
 export function useMostrarAtalhos(): () => void {
   return useRegistro().mostrarAtalhos
 }
+
+/** Se o foco está num campo de texto: aí nenhum atalho age. */
+export function emCampoDeTexto(alvo: EventTarget | null): boolean {
+  if (!(alvo instanceof HTMLElement)) return false
+  return (
+    alvo.isContentEditable ||
+    alvo.getAttribute('contenteditable') === 'true' ||
+    ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo.tagName)
+  )
+}
