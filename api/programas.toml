@@ -3,6 +3,11 @@
 # e as pessoas frequentes, com papel e apelidos, entram na instrução depois dele.
 # Nunca ponha aqui nada que o modelo não deva tomar como verdade sobre o programa.
 
+#
+# Apresentadores conferidos em 02/11/2026. Os blocos com 'confirmar' ainda
+# precisam do OK da produção.
+
+# Equipe confirmada pela RedeTV! em 02/11/2026.
 ["TV Fama"]
 perfil = """
 Revista diária de notícias de celebridades e entretenimento da RedeTV!.
@@ -11,12 +16,12 @@ Merchandising frequente: Ultrafarma, feito pelo apresentador no estúdio, com GC
 
 [["TV Fama".pessoas]]
 nome = "Flávia Noronha"
-papel = "apresentador ou comentarista"
+papel = "apresentadora"
 apelidos = []
 
 [["TV Fama".pessoas]]
 nome = "Leão Lobo"
-papel = "apresentador ou comentarista"
+papel = "apresentador"
 apelidos = ["Leãozinho"]
 
 [["TV Fama".pessoas]]
@@ -26,5 +31,196 @@ apelidos = []
 
 [["TV Fama".pessoas]]
 nome = "Andréa Corazza"
-papel = "repórter"
+papel = "repórter, aparece em algumas matérias"
+apelidos = []
+
+# Fonte: imprensa, jan. e out. de 2026.
+["A Tarde é Sua"]
+perfil = """
+Programa vespertino de notícias de celebridades e entretenimento da RedeTV!.
+"""
+
+[["A Tarde é Sua".pessoas]]
+nome = "Sonia Abrão"
+papel = "apresentadora"
+apelidos = []
+
+# Fonte: imprensa, fev. de 2026.
+["Brasil do Povo"]
+perfil = """
+Telejornal popular da RedeTV!.
+"""
+
+[["Brasil do Povo".pessoas]]
+nome = "Katiuzia Rios"
+papel = "apresentadora"
+apelidos = []
+
+# Fonte: imprensa, nov. de 2025 e maio de 2026.
+["RedeTV! News"]
+perfil = """
+Principal telejornal da RedeTV!.
+"""
+
+[["RedeTV! News".pessoas]]
+nome = "Fabíola Cidral"
+papel = "âncora"
+apelidos = []
+
+# Fonte: imprensa, jan. a maio de 2026.
+["SuperPop"]
+perfil = """
+Talk show noturno da RedeTV!, com convidados.
+"""
+
+# Confirmar: grade de jul. de 2026.
+["Fica com a Gente"]
+perfil = """
+Programa matinal de variedades da RedeTV!.
+"""
+
+[["Fica com a Gente".pessoas]]
+nome = "Edu Guedes"
+papel = "apresentador"
+apelidos = []
+
+# Confirmar: grade de jul. de 2026 e Wikipédia.
+["Operação de Risco"]
+perfil = """
+Programa policial que acompanha operações e ocorrências.
+"""
+
+[["Operação de Risco".pessoas]]
+nome = "Jorge Lordello"
+papel = "apresentador"
+apelidos = []
+
+# Confirmar: grade de jul. de 2026 e Wikipédia.
+["Mega Sonho"]
+perfil = """
+Programa da RedeTV!.
+"""
+
+[["Mega Sonho".pessoas]]
+nome = "Marcelo de Carvalho"
+papel = "apresentador"
+apelidos = []
+
+# Confirmar: grade de jul. de 2026.
+["Sensacional"]
+perfil = """
+Programa da RedeTV!.
+"""
+
+[["Sensacional".pessoas]]
+nome = "Daniela Albuquerque"
+papel = "apresentadora"
+apelidos = []
+
+# Confirmar: grade de jul. de 2026.
+["Madrugada Animada"]
+perfil = """
+Programa da madrugada da RedeTV!.
+"""
+
+[["Madrugada Animada".pessoas]]
+nome = "João Kléber"
+papel = "apresentador"
+apelidos = []
+
+# Confirmar: grade de jul. de 2026.
+["Para Aqui!"]
+perfil = """
+Programa da RedeTV!.
+"""
+
+[["Para Aqui!".pessoas]]
+nome = "João Kléber"
+papel = "apresentador"
+apelidos = []
+
+# Confirmar: formação de abr. de 2025.
+["Bola na Rede"]
+perfil = """
+Programa esportivo de debate sobre futebol.
+"""
+
+[["Bola na Rede".pessoas]]
+nome = "Marcio Spimpolo"
+papel = "apresentador"
+apelidos = []
+
+[["Bola na Rede".pessoas]]
+nome = "Marcos Assunção"
+papel = "comentarista"
+apelidos = []
+
+[["Bola na Rede".pessoas]]
+nome = "Guilherme Pallesi"
+papel = "comentarista"
+apelidos = ["Guipa"]
+
+[["Bola na Rede".pessoas]]
+nome = "Iara Oliveira"
+papel = "comentarista"
+apelidos = []
+
+[["Bola na Rede".pessoas]]
+nome = "Fernando Fontana"
+papel = "comentarista"
+apelidos = ["Fefon"]
+
+# Confirmar: imprensa, abr. de 2023.
+["Leitura Dinâmica"]
+perfil = """
+Telejornal da madrugada da RedeTV!.
+"""
+
+[["Leitura Dinâmica".pessoas]]
+nome = "Gabriela Di França"
+papel = "apresentadora"
+apelidos = []
+
+# Fonte: anúncio da RedeTV!, maio de 2026.
+["O Grande Vencedor"]
+perfil = """
+Game show de viagens da RedeTV!.
+"""
+
+[["O Grande Vencedor".pessoas]]
+nome = "Gianne Albertoni"
+papel = "apresentadora"
+apelidos = []
+
+# Fonte: anúncio da RedeTV!, maio de 2026.
+["Dinheiro na Conta"]
+perfil = """
+Programa da RedeTV!.
+"""
+
+[["Dinheiro na Conta".pessoas]]
+nome = "Nath Finanças"
+papel = "apresentadora"
+apelidos = []
+
+# Fonte: anúncio da RedeTV!, maio de 2026.
+["Vizinhos em Guerra"]
+perfil = """
+Programa da RedeTV!.
+"""
+
+[["Vizinhos em Guerra".pessoas]]
+nome = "Katiuzia Rios"
+papel = "apresentadora"
+apelidos = []
+
+# Fonte: anúncio da RedeTV!, maio de 2026.
+["Amor em Risco"]
+perfil = """
+Programa da RedeTV!.
+"""
+
+[["Amor em Risco".pessoas]]
+nome = "Babi Xavier"
+papel = "apresentadora"
 apelidos = []

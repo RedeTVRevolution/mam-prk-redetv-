@@ -638,7 +638,25 @@ def test_get_programas_lista_os_perfis() -> None:
     resposta = Ambiente().cliente.get("/v1/programas", headers=AUTORIZACAO)
 
     assert resposta.status_code == 200
-    assert resposta.json() == ["TV Fama"]
+    assert resposta.json() == [
+        "A Tarde é Sua",
+        "Amor em Risco",
+        "Bola na Rede",
+        "Brasil do Povo",
+        "Dinheiro na Conta",
+        "Fica com a Gente",
+        "Leitura Dinâmica",
+        "Madrugada Animada",
+        "Mega Sonho",
+        "O Grande Vencedor",
+        "Operação de Risco",
+        "Para Aqui!",
+        "RedeTV! News",
+        "Sensacional",
+        "SuperPop",
+        "TV Fama",
+        "Vizinhos em Guerra",
+    ]
 
 
 def test_get_programas_exige_login() -> None:
