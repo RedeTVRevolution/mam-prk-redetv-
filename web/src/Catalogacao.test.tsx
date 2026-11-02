@@ -523,6 +523,30 @@ test('a lixeira abre a confirmação do Del, e Cancelar e Remover funcionam com 
   expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.nao_e', item_id: 'p1' })
 })
 
+test('Enter com o foco no Cancelar da confirmação cancela, sem remover', async () => {
+  const usuario = await selecionarAparicao()
+  await usuario.keyboard('{Delete}')
+  const confirmacao = await screen.findByRole('group', { name: 'Confirmar a remoção' })
+
+  within(confirmacao).getByRole('button', { name: 'Cancelar' }).focus()
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(screen.queryByRole('group', { name: 'Confirmar a remoção' })).toBeNull())
+  expect(correcoes).toEqual([])
+})
+
+test('Del com o foco num botão do formulário não troca a correção aberta pela remoção', async () => {
+  const usuario = await selecionarAparicao()
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Leão Lobo/ })
+
+  within(formulario).getByRole('button', { name: 'Cancelar' }).focus()
+  await usuario.keyboard('{Delete}')
+
+  expect(screen.getByRole('form', { name: /Corrigir Leão Lobo/ })).toBeTruthy()
+  expect(screen.queryByRole('group', { name: 'Confirmar a remoção' })).toBeNull()
+})
+
 test('a confirmação e o formulário mostram os atalhos nas dicas dos botões', async () => {
   const usuario = await selecionarAparicao()
   await usuario.click(lixeiraDaLinhaSelecionada())

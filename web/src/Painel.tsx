@@ -391,7 +391,7 @@ function Item({
               ))}
               {marca && (
                 <Tooltip label={marca.dica}>
-                  <Badge size="sm" variant="light" tabIndex={0}>
+                  <Badge size="sm" variant="light" color={marca.pendente ? CORES.andamento : CORES.concluido} tabIndex={0}>
                     {marca.pendente ? 'aguardando o Curador' : 'corrigido'}
                   </Badge>
                 </Tooltip>

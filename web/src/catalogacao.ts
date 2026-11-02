@@ -70,6 +70,9 @@ const MOTIVOS: Record<string, string> = {
   'pessoa.acrescentar_aparicao': 'aparição acrescentada pelo editor',
 }
 
+/** As entradas do histórico que decidem sobre outra correção, e não corrigem um item. */
+const DECISOES = ['desfazer', 'descartar', 'aprovar', 'recusar']
+
 /** O motivo do gesto: o de uma correção só, ou os de todas, sem repetir. */
 function motivoDoGesto(pedidos: Pedido[]): string {
   const frases = [...new Set(pedidos.map((p) => MOTIVOS[p.tipo] ?? 'correção feita pelo editor'))]
@@ -405,6 +408,11 @@ export function pedidoDeRemocao(d: Decupagem, item: ItemDoPainel): Pedido | null
   }
 }
 
+/** O motivo do "não é isto": a menção não é uma aparição. */
+export function motivoDaRemocao(pedido: Pedido): string {
+  return pedido.ocorrencia?.lista === 'na_imagem' ? MOTIVOS['pessoa.nao_e'] : 'pessoa removida desta menção pelo editor'
+}
+
 /**
  * A correção que a rota de desfazer aceita: casável na API (em vigor e ainda na fila), e não uma decisão.
  * A pendente fica de fora: só se desfaz depois de aprovada.
@@ -412,7 +420,7 @@ export function pedidoDeRemocao(d: Decupagem, item: ItemDoPainel): Pedido | null
 export function desfazivel(i: ItemDoHistorico): boolean {
   return (
     (i.estado === 'ativa' || i.estado === 'aprovada') &&
-    !['desfazer', 'descartar', 'aprovar', 'recusar'].includes(i.tipo)
+    !DECISOES.includes(i.tipo)
   )
 }
 
@@ -470,8 +478,6 @@ export interface Marca {
   pendente: boolean
   dica: string
 }
-
-const DECISOES = ['desfazer', 'descartar', 'aprovar', 'recusar']
 
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 

@@ -5,6 +5,7 @@ import {
   editorDeNovaAparicao,
   editorDoItem,
   marcasDosItens,
+  motivoDaRemocao,
   podeRemover,
   pedidoDeRemocao,
   TIPOS_FORA_DESTE_TICKET,
@@ -139,6 +140,13 @@ test('só pessoa tem "não é isto", e só com nome', () => {
     ocorrencia: { lista: 'na_imagem', inicio_ms: 10_000, fim_ms: 20_000 },
   })
   expect(podeRemover(D, itens.find((i) => i.chave === 'pauta-0')!)).toBe(false)
+})
+
+test('o motivo do "não é isto" diz se era aparição ou menção', () => {
+  const aparicao = pedidoDeRemocao(D, itens.find((i) => i.chave === 'aparicao-0')!)!
+  const mencao = pedidoDeRemocao(D, itens.find((i) => i.chave === 'mencao-0')!)!
+  expect(motivoDaRemocao(aparicao)).toBe('pessoa removida desta aparição pelo editor')
+  expect(motivoDaRemocao(mencao)).toBe('pessoa removida desta menção pelo editor')
 })
 
 test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os de acrescentar trecho (#166) e os da fila (#165)', () => {

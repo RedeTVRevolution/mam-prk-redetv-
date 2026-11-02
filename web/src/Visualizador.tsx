@@ -21,6 +21,7 @@ import {
   editorDoItem,
   marcasDosItens,
   type Pedido,
+  motivoDaRemocao,
   pedidoDeRemocao,
   podeRemover,
 } from './catalogacao.ts'
@@ -257,6 +258,8 @@ export default function Visualizador({
 
   /** F2: a linha do item em foco vira o formulário dos campos do tipo. */
   function corrigirEmFoco() {
+    // Com a correção aberta, o F2 e o Del (vindos de uma alça ou de um botão) não a descartam.
+    if (emEdicao) return
     corrigirItem(itens.find((i) => i.chave === selecionada))
   }
 
@@ -273,6 +276,7 @@ export default function Visualizador({
 
   /** Del: "não é isto" no item em foco, com a confirmação na mesma linha. */
   function removerEmFoco() {
+    if (emEdicao) return
     removerItem(itens.find((i) => i.chave === selecionada))
   }
 
@@ -567,11 +571,10 @@ export default function Visualizador({
           conteudo: (
             <ConfirmacaoDeRemocao
               texto={`Remover ${itemEmEdicao.titulo} ${alvo}?`}
-              aoConfirmar={() =>
-                void gravar([pedido], 'pessoa removida desta aparição pelo editor').then((falha) => {
-                  if (falha) mostrarAviso(falha)
-                })
-              }
+              aoConfirmar={async () => {
+                const falha = await gravar([pedido], motivoDaRemocao(pedido))
+                if (falha) mostrarAviso(falha)
+              }}
               aoCancelar={fecharEdicao}
             />
           ),

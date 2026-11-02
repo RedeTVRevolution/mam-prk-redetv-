@@ -183,11 +183,22 @@ export function ConfirmacaoDeRemocao({
   aoCancelar,
 }: {
   texto: string
-  aoConfirmar: () => void
+  /** Grava a remoção; enquanto grava, um segundo Enter ou clique não pede outra. */
+  aoConfirmar: () => Promise<void>
   aoCancelar: () => void
 }) {
   const raiz = useRef<HTMLDivElement>(null)
   useEffect(() => raiz.current?.focus(), [])
+  const [removendo, setRemovendo] = useState(false)
+  async function confirmar() {
+    if (removendo) return
+    setRemovendo(true)
+    try {
+      await aoConfirmar()
+    } finally {
+      setRemovendo(false)
+    }
+  }
   return (
     <Group
       ref={raiz}
@@ -199,9 +210,10 @@ export function ConfirmacaoDeRemocao({
       justify="space-between"
       style={{ outline: 'none' }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') {
+        // O Enter num dos botões é o clique dele: no "Cancelar", não pode remover.
+        if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
           e.preventDefault()
-          aoConfirmar()
+          void confirmar()
         } else if (e.key === 'Escape') {
           e.preventDefault()
           aoCancelar()
@@ -216,7 +228,7 @@ export function ConfirmacaoDeRemocao({
           </Button>
         </Tooltip>
         <Tooltip label="Enter">
-          <Button size="compact-xs" color="red" onClick={aoConfirmar}>
+          <Button size="compact-xs" color="red" loading={removendo} onClick={() => void confirmar()}>
             Remover
           </Button>
         </Tooltip>
