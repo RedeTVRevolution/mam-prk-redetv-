@@ -164,3 +164,13 @@ Credencial de um sistema consumidor da RedeTV, nunca de uma pessoa.
 
 **Resultado bruto do Florence-2**:
 O `florence.json` que o Job de objetos grava em `<job>/objetos/`, com, por quadro-chave de cada plano, os objetos detectados (rótulo e caixa normalizada de 0 a 1) e as regiões com legenda, mais o modelo e a revisão. É a matéria-prima do inventário de objetos de cena; ainda não é a lista `objetos` da Decupagem.
+
+**Inventário de objetos**:
+Os objetos de cena de cada plano (`Plano.inventario`), separados de `objetos` (o que a pessoa veste ou segura): nome curto, categoria, cor, marca (só se a legenda citar), as caixas por quadro e o destaque, tudo em português. É preenchido pelo servidor na etapa `inventario_de_objetos`, nunca pela análise. Os objetos de cena usam as categorias `veiculo`, `eletronico`, `produto`, `animal`, `alimento`, `bebida`, `movel`, `decoracao`, `instrumento_musical`, `utensilio`, `documento` e `planta`.
+_Evitar_: lista de objetos, detecções
+
+**Destaque**:
+Nota de 1 a 3 de quanto um objeto do inventário aparece no quadro, calculada pelo servidor pela área e pela posição da maior caixa (3: grande e no centro; 2: grande, ou média e no centro; 1: o resto). O modelo não a decide.
+
+**Motor do inventário**:
+Quem faz o inventário de objetos: `florence` (Florence-2 numa GPU, com o Gemini só convertendo o texto para o português) ou `gemini` (o modelo olha os quadros-chave). Vem da variável `motor_objetos`; o inventário guarda o motor e o modelo que o geraram.
