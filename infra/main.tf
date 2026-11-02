@@ -54,6 +54,20 @@ variable "espera_gpu_minutos" {
   }
 }
 
+# Leitura da tela só quando a imagem muda (#233, api/mudanca_da_tela.py): diferença média
+# (0 a 255) de uma das seis faixas horizontais do quadro, contra o último quadro lido, acima
+# da qual o OCR lê de novo. 0 lê todo quadro, como antes. O padrão é um palpite; a medição no
+# ar (#240, `make comparar-leituras`) acerta o valor sem nova imagem.
+variable "limiar_de_mudanca_do_ocr" {
+  description = "Limiar de mudança da imagem para o OCR ler de novo (0 = lê todo quadro)"
+  type        = number
+  default     = 3
+  validation {
+    condition     = var.limiar_de_mudanca_do_ocr >= 0
+    error_message = "limiar_de_mudanca_do_ocr é zero ou mais."
+  }
+}
+
 variable "gpu_espera_s" {
   type    = number
   default = 60
@@ -876,6 +890,10 @@ resource "google_cloud_run_v2_job" "ocr" {
       containers {
         image = var.imagem_ocr
         env {
+          name  = "LIMIAR_DE_MUDANCA"
+          value = tostring(var.limiar_de_mudanca_do_ocr)
+        }
+        env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
         }
@@ -1020,6 +1038,10 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
       }
       containers {
         image = var.imagem_ocr_gpu
+        env {
+          name  = "LIMIAR_DE_MUDANCA"
+          value = tostring(var.limiar_de_mudanca_do_ocr)
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto

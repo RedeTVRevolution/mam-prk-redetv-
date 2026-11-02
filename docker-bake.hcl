@@ -8,6 +8,11 @@ variable "VALIDACAO" {}
 variable "TRANSCRICAO" {}
 variable "OCR" {}
 variable "CACHE" {}
+# O detector do OCR em CPU, o plano B (#233): `PP-OCRv5_server_det` ou o leve
+# `PP-OCRv5_mobile_det`. A imagem com GPU fica sempre com o `server`.
+variable "DETECTOR_OCR_CPU" {
+  default = "PP-OCRv5_server_det"
+}
 # As imagens com GPU vão para o repositório da região da GPU, com o cache delas ao lado
 # (#238): o BuildKit, ao enviar a imagem, não reenvia as camadas que o cache já pôs lá.
 variable "TRANSCRICAO_GPU" {}
@@ -54,6 +59,7 @@ target "ocr" {
   inherits   = ["base"]
   target     = "ocr"
   tags       = [OCR]
+  args       = { DETECTOR = DETECTOR_OCR_CPU }
   cache-from = ["type=registry,ref=${CACHE}:ocr"]
   cache-to   = ["type=registry,ref=${CACHE}:ocr,mode=max,image-manifest=true,oci-mediatypes=true"]
 }

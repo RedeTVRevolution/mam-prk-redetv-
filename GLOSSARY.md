@@ -40,6 +40,9 @@ Plano sem GC e sem ninguém falando para a câmera, reaproveitável como B-roll.
 GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os tempos. O Gemini lê o texto; os tempos são medidos nos quadros pelo OCR (`medido`), e o texto que o OCR não acha fica com o tempo do Gemini e `medido=False`.
 _Evitar_: lettering
 
+**Leitura da tela**:
+O texto que o OCR lê no proxy, um quadro por segundo (`api/leitura_da_tela.py`). O OCR só lê de novo quando a imagem muda (`api/mudanca_da_tela.py`, #233): compara com o último quadro lido, em seis faixas horizontais, contra o limiar `LIMIAR_DE_MUDANCA`; o quadro igual repete a leitura, e o formato guardado segue com um quadro por segundo. O detector (`server` ou o leve `mobile`) é o `ARG DETECTOR` da imagem. `make comparar-leituras` compara duas leituras do mesmo vídeo.
+
 **Perfil do programa**:
 Contexto fixo de um programa (apresentadores, repórteres, merchandising frequente), em `api/programas.toml`, que a instrução do modelo recebe quando o Job informa o programa.
 

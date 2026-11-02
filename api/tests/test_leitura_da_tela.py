@@ -19,7 +19,7 @@ from api.leitura_da_tela import (
     QuadroLido,
 )
 from api.ocr_job import executar
-from api.paddle import DETECTOR, RECONHECEDOR, LeitorPaddle
+from api.paddle import DETECTOR, DETECTORES, RECONHECEDOR, LeitorPaddle
 from api.quadros import FalhaNosQuadros, quadros_por_trecho, tirar_quadros
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
@@ -369,19 +369,61 @@ def test_adaptador_normaliza_a_caixa_e_descarta_linha_vazia(tmp_path: Path) -> N
 
 
 def test_modelos_do_dockerfile_estao_fixados_por_revisao_e_hash() -> None:
-    dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
-    alvo = dockerfile[dockerfile.index("AS ocr") :].split("\nFROM ")[0]
+    raiz = Path(__file__).parents[2]
+    dockerfile = (raiz / "Dockerfile").read_text()
+    script = (raiz / "scripts" / "baixar-modelos-ocr.sh").read_text()
+    alvo = dockerfile[dockerfile.index("AS ocr\n") :].split("\nFROM ")[0]
 
-    for nome in ("DETECTOR", "RECONHECEDOR"):
-        assert re.search(rf"^ARG {nome}_REVISAO=[0-9a-f]{{40}}$", alvo, re.MULTILINE)
-        assert re.search(rf"^ARG {nome}_SHA256=[0-9a-f]{{64}}$", alvo, re.MULTILINE)
-    assert "sha256sum -c" in alvo
+    # O Dockerfile só escolhe o detector pelo ARG; revisões e hashes vão no script, um bloco
+    # por detector aceito, e o reconhecedor, que é um só.
+    assert f"ARG DETECTOR={DETECTOR}\n" in alvo
+    assert 'RUN baixar-modelos-ocr "$DETECTOR"' in alvo
+    assert "scripts/baixar-modelos-ocr.sh" in alvo
+    assert f"RECONHECEDOR={RECONHECEDOR}\n" in script
+    assert re.search(r"^RECONHECEDOR_REVISAO=[0-9a-f]{40}$", script, re.MULTILINE)
+    for detector in DETECTORES:
+        bloco = script[script.index(f"{detector})") :].split(";;")[0]
+        assert re.search(r"DETECTOR_REVISAO=[0-9a-f]{40}\n", bloco)
+        hashes = re.findall(r"\b[0-9a-f]{64} ([\w.]+)", bloco)
+        assert sorted(hashes) == [
+            "config.json",
+            "inference.json",
+            "inference.pdiparams",
+            "inference.yml",
+        ]
+    assert (
+        len(
+            re.findall(r"^[0-9a-f]{64}  /modelos/\$RECONHECEDOR/", script, re.MULTILINE)
+        )
+        == 4
+    )
+    assert "sha256sum -c" in script
     assert "--group ocr" in alvo
     assert "ffmpeg=$FFMPEG" in alvo
-    assert f"ARG DETECTOR={DETECTOR}\n" in alvo
-    assert f"ARG RECONHECEDOR={RECONHECEDOR}\n" in alvo
+    # A imagem diz ao Job qual detector tem, e a checagem da construção usa o mesmo.
+    assert "DETECTOR=$DETECTOR" in alvo
     # Os modelos vêm antes do uv sync: mudar o uv.lock não os baixa de novo (#211).
-    assert alvo.index("baixar()") < alvo.index("RUN uv sync")
+    assert alvo.index("baixar-modelos-ocr") < alvo.index("RUN uv sync")
+
+
+def test_a_imagem_com_gpu_mantem_o_detector_server_e_o_script_chega_na_imagem() -> None:
+    raiz = Path(__file__).parents[2]
+    dockerfile = (raiz / "Dockerfile").read_text()
+    alvo = dockerfile[dockerfile.index("AS ocr-gpu\n") :].split("\nFROM ")[0]
+
+    assert f"ARG DETECTOR={DETECTOR}\n" in alvo
+    assert 'RUN baixar-modelos-ocr "$DETECTOR"' in alvo
+    assert "COPY --from=ocr /modelos" not in alvo
+    assert "DETECTOR=$DETECTOR" in alvo
+    assert "!scripts/baixar-modelos-ocr.sh" in (raiz / ".dockerignore").read_text()
+
+
+def test_o_bake_escolhe_o_detector_do_alvo_de_cpu() -> None:
+    bake = (Path(__file__).parents[2] / "docker-bake.hcl").read_text()
+    alvo = bake[bake.index('target "ocr" {') :].split("\n}\n")[0]
+
+    assert 'variable "DETECTOR_OCR_CPU"' in bake
+    assert "DETECTOR = DETECTOR_OCR_CPU" in alvo
 
 
 def test_versao_do_ffmpeg_vale_para_todos_os_estagios() -> None:

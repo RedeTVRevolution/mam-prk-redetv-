@@ -164,7 +164,41 @@ def test_alvos_com_gpu_reaproveitam_os_modelos_fixados_dos_alvos_de_cpu() -> Non
     )  # sem baixar de novo: o modelo vem do alvo base
 
     ocr = _alvo(dockerfile, "ocr-gpu")
-    assert "COPY --from=ocr /modelos /modelos" in ocr
+    # Os mesmos modelos fixados do alvo de CPU, pelo mesmo script (o detector `server`).
+    assert 'RUN baixar-modelos-ocr "$DETECTOR"' in ocr
     assert "--group ocr-gpu" in ocr
     assert "resolve/" not in ocr
     assert "DISPOSITIVO=gpu" in ocr
+
+
+def test_paddle_usa_o_detector_da_imagem(
+    paddleocr_falso: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DETECTOR", "PP-OCRv5_mobile_det")
+
+    paddle.LeitorPaddle.da_pasta("/modelos")
+
+    (criado,) = paddleocr_falso
+    assert criado["text_detection_model_name"] == "PP-OCRv5_mobile_det"
+    assert criado["text_detection_model_dir"] == str(
+        Path("/modelos") / "PP-OCRv5_mobile_det"
+    )
+    assert paddle.nome_do_modelo() == f"PP-OCRv5_mobile_det+{paddle.RECONHECEDOR}"
+
+
+def test_paddle_sem_detector_na_imagem_usa_o_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DETECTOR", raising=False)
+
+    assert paddle.detector() == "PP-OCRv5_server_det"
+    assert paddle.nome_do_modelo() == f"PP-OCRv5_server_det+{paddle.RECONHECEDOR}"
+
+
+def test_paddle_com_detector_desconhecido_falha_com_mensagem_clara(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DETECTOR", "outro")
+
+    with pytest.raises(ValueError, match="DETECTOR inválido"):
+        paddle.detector()

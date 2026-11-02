@@ -94,56 +94,38 @@ USER nobody
 
 # Job de OCR da tela (#106): `docker build --target ocr`. ffmpeg para os quadros, PaddleOCR
 # e os dois modelos, baixados aqui, na construção, nas revisões fixadas e conferidos pelo
-# SHA-256 de cada arquivo; no ar o Job roda sem internet.
+# SHA-256 de cada arquivo (`scripts/baixar-modelos-ocr.sh`); no ar o Job roda sem internet.
+# O detector é escolhido pelo `ARG DETECTOR` (#233): `PP-OCRv5_server_det` ou o leve
+# `PP-OCRv5_mobile_det`, que o Job lê da variável `DETECTOR` da imagem.
 FROM python:3.12-slim-bookworm AS ocr
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 ARG FFMPEG
 ARG DETECTOR=PP-OCRv5_server_det
-ARG DETECTOR_REVISAO=ca867c897ecbca8873081573a802ad70d499cb94
-ARG DETECTOR_SHA256=183146fe9d9910352f68482f623bcbbb9fa7b9e8fa1463b9ad288cef00524d2d
-ARG RECONHECEDOR=latin_PP-OCRv5_mobile_rec
-ARG RECONHECEDOR_REVISAO=ab2cd5cc5fa6309be2e5acdfe66eca2c2c127d57
-ARG RECONHECEDOR_SHA256=53cdc8b481a7394bb108f96d0fb3432b0a8f392e22c7d18f06dbb2d42b8b25f9
 # As bibliotecas do OpenCV (libgl1, libglib2.0-0) e do Paddle (libgomp1).
 RUN apt-get update \
     && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
         || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
     && rm -rf /var/lib/apt/lists/*
-# Os modelos vêm antes do `uv sync` (#211): só uma mudança de modelo os baixa de novo. O
-# download usa só o urllib, do Python da imagem base.
-RUN baixar() { \
-      mkdir -p "/modelos/$1" && for arquivo in config.json inference.json inference.pdiparams inference.yml; do \
-        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
-          "https://huggingface.co/PaddlePaddle/$1/resolve/$2/$arquivo" "/modelos/$1/$arquivo" || return 1; \
-      done; \
-    } \
-    && baixar "$DETECTOR" "$DETECTOR_REVISAO" \
-    && baixar "$RECONHECEDOR" "$RECONHECEDOR_REVISAO" \
-    && echo "$DETECTOR_SHA256  /modelos/$DETECTOR/inference.pdiparams" > /tmp/hashes \
-    && echo "436bf19010fe3879477e8599a870a0ec8ccd14ca39056805ec4ed20ab318ec04  /modelos/$DETECTOR/config.json" >> /tmp/hashes \
-    && echo "af5876933d8806a1b50d895867e0781e135cd92ff37381992828fc8d1b842d28  /modelos/$DETECTOR/inference.json" >> /tmp/hashes \
-    && echo "28fb721efc3634fc8aa677e474b9602cb815a91cf569ef357a7a553d7b3ce685  /modelos/$DETECTOR/inference.yml" >> /tmp/hashes \
-    && echo "$RECONHECEDOR_SHA256  /modelos/$RECONHECEDOR/inference.pdiparams" >> /tmp/hashes \
-    && echo "e0f5ccc44fe86254956f27746058bc4cf88d86145668cecf22ba5dd962483c80  /modelos/$RECONHECEDOR/config.json" >> /tmp/hashes \
-    && echo "820b2ee8e5072de5156c3d55124c2b03c82ef278d59f453f857c0789bacb4da1  /modelos/$RECONHECEDOR/inference.json" >> /tmp/hashes \
-    && echo "0bbe984570f597af3638e50bdf2e8276f3ab26a61966096538b3b0d1849f5c84  /modelos/$RECONHECEDOR/inference.yml" >> /tmp/hashes \
-    && sha256sum -c /tmp/hashes && rm /tmp/hashes
+# Os modelos vêm antes do `uv sync` (#211): só uma mudança de modelo os baixa de novo.
+COPY scripts/baixar-modelos-ocr.sh /usr/local/bin/baixar-modelos-ocr
+RUN baixar-modelos-ocr "$DETECTOR"
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr
 COPY api/ api/
 # Os testes usam um modelo falso: aqui o PaddleOCR lê um quadro de verdade com os modelos
 # da imagem, para a imagem não ser construída com uma versão que não roda em CPU.
-RUN HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
+RUN DETECTOR=$DETECTOR HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
     && rm -rf /tmp/ocr /tmp/ocr.png
 USER nobody
 # HOME e TMPDIR no volume em memória: o Paddle grava cache e o ffmpeg, os quadros, e a imagem não tem pasta gravável.
-ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos \
+ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos DETECTOR=$DETECTOR \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.ocr_job"]
 
 # Job de OCR em GPU (E1, ADR 0007): `docker build --target ocr-gpu`. Os mesmos modelos do
-# alvo `ocr`, copiados dele (mesmas revisões e hashes), e o `paddlepaddle-gpu` 3.2.2 (CUDA
+# alvo `ocr` (o mesmo script, e o detector `server` por padrão: o leve é para o plano B em
+# CPU, #233), e o `paddlepaddle-gpu` 3.2.2 (CUDA
 # 12.6, do índice do Paddle) no lugar do `paddlepaddle` de CPU. Não parte do alvo `ocr` para
 # não carregar a roda de CPU. O driver é do Cloud Run, em /usr/local/nvidia/lib64.
 FROM python:3.12-slim-bookworm AS ocr-gpu
@@ -153,14 +135,16 @@ RUN apt-get update \
     && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
         || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=ocr /modelos /modelos
+ARG DETECTOR=PP-OCRv5_server_det
+COPY scripts/baixar-modelos-ocr.sh /usr/local/bin/baixar-modelos-ocr
+RUN baixar-modelos-ocr "$DETECTOR"
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr-gpu
 COPY api/ api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
-    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu DETECTOR=$DETECTOR
 # A máquina da construção não tem GPU: confere que o Paddle foi compilado com CUDA e lê o
 # quadro de amostra (o mesmo do teste depois da publicação, `MODO_TESTE=1`, que lá exige a
 # GPU) em CPU, com os modelos da imagem. Isso pega roda que não instala e modelo

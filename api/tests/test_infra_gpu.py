@@ -223,3 +223,13 @@ def test_deploy_dev_le_as_imagens_antes_do_apply_e_testa_depois_so_os_jobs_com_g
     ):
         assert f"tf output -raw {saida}" in deploy[teste - 600 :]
     assert deploy.index("URL=$(tf output") > teste
+
+
+def test_o_limiar_de_mudanca_do_ocr_vem_de_uma_variavel_nos_dois_jobs() -> None:
+    variavel = _bloco('variable "limiar_de_mudanca_do_ocr"')
+
+    assert "default     = 3" in variavel
+    for nome in ("ocr", "ocr_gpu"):
+        job = _bloco(f'resource "google_cloud_run_v2_job" "{nome}"')
+        assert "LIMIAR_DE_MUDANCA" in job
+        assert "tostring(var.limiar_de_mudanca_do_ocr)" in job
