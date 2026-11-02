@@ -53,7 +53,9 @@ class Mundo:
             [Rosto(origem="acervo", referencia=objeto) for objeto in FOTOS],
         )
         self.marca = self.marcas.acrescentar("Acme", [])
-        self.fotos = FotosEmMemoria(set(FOTOS))
+        # Mais uma foto da web trocada antes, que ficou na pasta da pessoa.
+        self.velha = f"referencias/{self.ana.id}/velha.jpg"
+        self.fotos = FotosEmMemoria({*FOTOS, self.velha, "referencias/outra/0.jpg"})
         self.jobs = RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
@@ -126,7 +128,7 @@ def test_pessoa_na_lixeira_perde_o_nome_so_onde_so_o_rosto_o_sustentava() -> Non
     assert pelo_rosto.get("catalogo_id") is None
     assert len(pelo_rosto["na_imagem"]) == 2
     assert mundo.pessoa_em("j2")["nome"] == "Ana Souza"
-    assert mundo.fotos.objetos == set()
+    assert mundo.fotos.objetos == {"referencias/outra/0.jpg"}
     assert mundo.catalogo.obter(mundo.ana.id).rostos == []  # type: ignore[union-attr]
 
 
@@ -216,6 +218,26 @@ def test_purga_manual_apaga_a_pessoa_e_deixa_o_registro() -> None:
         "item.para_lixeira",
         "item.purgado",
     ]
+    purgado = next(r for r in mundo.registros() if r.acao == "item.purgado")
+    assert purgado.detalhes["aparicoes_que_perdem_o_nome"] == 2
+
+
+def test_restaurar_grava_os_numeros_do_impacto() -> None:
+    mundo = Mundo()
+    mundo.enviar("pessoas", mundo.ana.id)
+    mundo.enviar("marcas", mundo.marca.id)
+
+    mundo.cliente.post(f"{LIXEIRA}/pessoas/{mundo.ana.id}/restaurar", headers=ADMIN)
+    mundo.cliente.post(f"{LIXEIRA}/marcas/{mundo.marca.id}/restaurar", headers=ADMIN)
+
+    detalhes = {
+        r.alvo_tipo: r.detalhes
+        for r in mundo.registros()
+        if r.acao == "item.restaurado"
+    }
+    assert detalhes["pessoa"]["aparicoes_que_perdem_o_nome"] == 2
+    assert detalhes["pessoa"]["fotos_apagadas"] == 0
+    assert detalhes["marca"]["ocorrencias_que_perdem_o_vinculo"] == 2
 
 
 def test_purga_automatica_aos_30_dias() -> None:

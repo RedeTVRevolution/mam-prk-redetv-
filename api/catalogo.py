@@ -111,9 +111,14 @@ class Catalogo(Protocol):
         ...
 
 
+def prefixo_das_fotos(pessoa_id: str) -> str:
+    """A pasta das fotos de referência de uma pessoa do catálogo no bucket."""
+    return f"referencias/{pessoa_id}/"
+
+
 def objeto_da_foto(pessoa_id: str, jpeg: bytes) -> str:
     """Onde a foto de referência de uma pessoa do catálogo fica no bucket."""
-    return f"referencias/{pessoa_id}/{hashlib.sha256(jpeg).hexdigest()[:24]}.jpg"
+    return f"{prefixo_das_fotos(pessoa_id)}{hashlib.sha256(jpeg).hexdigest()[:24]}.jpg"
 
 
 def novo_id() -> str:

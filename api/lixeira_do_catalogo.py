@@ -18,7 +18,12 @@ from pydantic import BaseModel, ConfigDict
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
-from api.catalogo import Catalogo, EnvioParaLixeira, PessoaInexistente
+from api.catalogo import (
+    Catalogo,
+    EnvioParaLixeira,
+    PessoaInexistente,
+    prefixo_das_fotos,
+)
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import (
     RepositorioDeCorrecoes,
@@ -46,6 +51,8 @@ class FotosDeReferencia(Protocol):
 
     def apagar(self, objeto: str) -> None: ...
 
+    def apagar_prefixo(self, prefixo: str) -> None: ...
+
 
 class FotosEmMemoria:
     def __init__(self, objetos: set[str] | None = None) -> None:
@@ -53,6 +60,9 @@ class FotosEmMemoria:
 
     def apagar(self, objeto: str) -> None:
         self.objetos.discard(objeto)
+
+    def apagar_prefixo(self, prefixo: str) -> None:
+        self.objetos = {o for o in self.objetos if not o.startswith(prefixo)}
 
 
 class LeituraDeDecupagens(Protocol):
@@ -249,8 +259,10 @@ def criar_rotas_da_lixeira_do_catalogo(
             raise HTTPException(409, "A pessoa já está na lixeira")
         impacto = impacto_da_pessoa(achada.id, len(achada.rostos))
         # Rosto é dado sensível: as fotos saem já, sem esperar a purga, e não voltam.
+        # Pela pasta da pessoa também: as fotos da web trocadas antes ficaram lá.
         for rosto in achada.rostos:
             fotos.apagar(rosto.referencia)
+        fotos.apagar_prefixo(prefixo_das_fotos(achada.id))
         pessoas.definir_rostos(achada.id, [])
         envio = envio_de(autor, pedido.motivo)
         pessoas.definir_lixeira(achada.id, envio)
@@ -302,10 +314,17 @@ def criar_rotas_da_lixeira_do_catalogo(
         achada = pessoa(id_da_pessoa)
         if achada.lixeira is None:
             raise HTTPException(409, "A pessoa não está na lixeira")
+        # As fotos já saíram no envio e não voltam: o registro conta 0 delas.
+        impacto = impacto_da_pessoa(achada.id, 0)
         pessoas.definir_lixeira(achada.id, None)
         try:
             registrar(
-                "pessoa", "item.restaurado", achada, achada.lixeira.motivo, {}, autor
+                "pessoa",
+                "item.restaurado",
+                achada,
+                achada.lixeira.motivo,
+                impacto.model_dump(),
+                autor,
             )
         except Exception:
             pessoas.definir_lixeira(achada.id, achada.lixeira)
@@ -319,10 +338,16 @@ def criar_rotas_da_lixeira_do_catalogo(
         achada = marca(id_da_marca)
         if achada.lixeira is None:
             raise HTTPException(409, "A marca não está na lixeira")
+        impacto = impacto_da_marca(achada.id)
         marcas.definir_lixeira(achada.id, None)
         try:
             registrar(
-                "marca", "item.restaurado", achada, achada.lixeira.motivo, {}, autor
+                "marca",
+                "item.restaurado",
+                achada,
+                achada.lixeira.motivo,
+                impacto.model_dump(),
+                autor,
             )
         except Exception:
             marcas.definir_lixeira(achada.id, achada.lixeira)
@@ -340,8 +365,20 @@ def criar_rotas_da_lixeira_do_catalogo(
             raise HTTPException(409, "Só se purga o que está na lixeira")
         if pedido.nome != achada.nome:
             raise HTTPException(422, "O nome digitado não é o do item")
+        impacto = (
+            impacto_da_pessoa(achada.id, 0)
+            if tipo == "pessoa"
+            else impacto_da_marca(achada.id)
+        )
         # O registro vem antes: se falha, nada é apagado.
-        registrar(tipo, "item.purgado", achada, achada.lixeira.motivo, {}, autor)
+        registrar(
+            tipo,
+            "item.purgado",
+            achada,
+            achada.lixeira.motivo,
+            impacto.model_dump(),
+            autor,
+        )
         try:
             (pessoas if tipo == "pessoa" else marcas).apagar(achada.id)
         except (PessoaInexistente, MarcaInexistente):

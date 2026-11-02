@@ -727,6 +727,13 @@ class ReferenciasStorage:
         except NotFound:
             pass
 
+    def apagar_prefixo(self, prefixo: str) -> None:
+        for blob in self._cliente.list_blobs(self._bucket, prefix=prefixo):
+            try:
+                blob.delete()
+            except NotFound:
+                pass
+
     def ler(self, objeto: str) -> bytes:
         try:
             blob = self._cliente.bucket(self._bucket).blob(objeto)

@@ -898,3 +898,16 @@ Não corrigido:
 ## #151 iteração 99
 - Pronto: testes no emulador do Firestore (`definir_lixeira`/`na_lixeira`/`apagar` de pessoas e marcas); ADR 0010, GLOSSARY e `administracao.md` atualizados; Terraform: o `web` ganhou `objectUser` em referências (apagar as fotos; `BUCKET_REFERENCIAS` já existia no serviço web); teste do workflow ajustado. O teste da purga manual era instável (relógio fixo empata os registros); agora não depende da ordem. Papel é do Terraform, não manual: o wizard não muda.
 - Não feito / decisão humana: o índice da busca/indexação usa a decupagem sem `sem_catalogo_apagado`, então o nome só por rosto continua achável na busca depois do envio à lixeira, e o envio não reindexa. Fora dos critérios do ticket; precisa de reindexação no envio e na restauração. `terraform apply` pendente (papel novo do web).
+
+## #151 revisão
+- Corrigido: (1) o envio de pessoa à lixeira só apagava as fotos listadas hoje em `rostos`; as fotos da web trocadas antes (`referencias.py` substitui a lista sem apagar o objeto) ficavam no bucket. Agora apaga também a pasta `referencias/{id}/` (`FotosDeReferencia.apagar_prefixo`, `prefixo_das_fotos` em `catalogo.py`), com teste em memória e no emulador do Storage. (2) Restaurar e purgar (manual) gravavam o registro sem os números do impacto (regra 7 do `administracao.md`); agora gravam, com teste.
+- Não corrigido / decisão humana:
+  1. O nome só pelo rosto continua no índice da busca e na cópia do BigQuery (relatório de tempo de tela agrupa pelo `catalogo_id`): a regra 1 diz que o item sai "da busca e dos relatórios" na hora. Precisa reindexar/recopiar os vídeos afetados no envio e na restauração, ou filtrar no servidor.
+  2. `GET /decupagem?versao=modelo` devolve a saída crua, com o nome e o `catalogo_id` da pessoa na lixeira, para quem tem `ler`. O ADR manda não tocar a saída do modelo; decidir se a leitura dela também esconde.
+  3. `GET /jobs/{id}/pessoas/{pessoa}/referencias` (veredito) ainda responde para a pessoa na lixeira, com URLs assinadas de objetos já apagados e o "confere" de cada foto.
+  4. A purga automática grava `item.purgado` sem os números do impacto (ela não tem acesso às Decupagens); a manual grava.
+  5. `achar` esconde a lixeira, então o Curador pode criar "Fulano" com outro "Fulano" na lixeira; ao restaurar, ficam dois com o mesmo nome.
+  6. Se a auditoria falha no envio da pessoa, as fotos já saíram e não fica registro do apagamento biométrico (aceito pela ADR 0010).
+  7. `_sugestoes_abertas` (`jobs.py`) usa a Decupagem entregue sem `sem_catalogo_apagado`.
+  8. `so_o_rosto` não olha `origem`: um nome corrigido pela revisora com `fontes_do_nome=["rosto"]` também volta a "não identificado".
+  9. Duplicações (`SISTEMA_DA_PURGA`/`PedidoDePurga` repetem `purga.py`; enviar/restaurar de pessoa e marca quase iguais) e imports de privados de `api.jobs`/`api.lixeira`: deixei como está.

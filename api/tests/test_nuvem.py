@@ -40,6 +40,7 @@ from api.nuvem import (
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
@@ -418,6 +419,25 @@ def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro(
 
     assert not any(b.blob(o).exists() for b, os in do_job.items() for o in os)
     assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_referencias_apagam_a_pasta_da_pessoa_e_nada_de_outra(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    nome = f"teste-referencias-{uuid.uuid4().hex[:8]}"
+    bucket = armazenamento._cliente.create_bucket(nome)
+    da_pessoa = ["referencias/ana/0.jpg", "referencias/ana/velha.jpg"]
+    de_outra = ["referencias/ana2/0.jpg", "palpites/ana/0.jpg"]
+    for objeto in da_pessoa + de_outra:
+        bucket.blob(objeto).upload_from_string(b"x")
+    fotos = ReferenciasStorage(armazenamento._cliente, nome)
+
+    fotos.apagar_prefixo("referencias/ana/")
+    fotos.apagar_prefixo("referencias/ana/")
+
+    assert not any(bucket.blob(o).exists() for o in da_pessoa)
+    assert all(bucket.blob(o).exists() for o in de_outra)
 
 
 def _registro_de_chave(id: str) -> RegistroDeChave:
