@@ -492,3 +492,128 @@ def test_segundo_nao_existe_no_objeto_que_saiu_da_422() -> None:
     mundo.avancar()
 
     assert _nao_existe(mundo).status_code == 422
+
+
+def _novo(**campos: Any) -> str:
+    return json.dumps(
+        {
+            "categoria": "calcado",
+            "tipo": "sandália",
+            "cor_base": ["vermelho"],
+            "pessoa": "pes01",
+            "relacao": "calca",
+            "inicio_ms": 12000,
+            "fim_ms": 19000,
+            **campos,
+        }
+    )
+
+
+def _acrescentar(mundo: Mundo, valor: str, **campos: Any) -> Any:
+    campos.setdefault("versao", V)
+    return mundo.corrigir(tipo="objeto.acrescentar", valor=valor, item_id="", **campos)
+
+
+def test_acrescentar_grava_o_objeto_com_dono_e_desfazer_tira() -> None:
+    mundo = _mundo()
+
+    r = _acrescentar(mundo, _novo(cor="vermelho-vivo", marca="Acme"))
+
+    assert r.status_code == 201
+    [_, novo] = _objetos(mundo)
+    assert novo["id"].startswith("acr-")
+    assert (novo["categoria"], novo["tipo"], novo["cor_base"]) == (
+        "calcado",
+        "sandália",
+        ["vermelho"],
+    )
+    assert (novo["cor"], novo["detalhe"], novo["marca"]) == (
+        "vermelho-vivo",
+        None,
+        "Acme",
+    )
+    assert (novo["pessoa"], novo["relacao"]) == ("pes01", "calca")
+    assert novo["ocorrencias"] == [{"inicio_ms": 12000, "fim_ms": 19000}]
+    assert (novo["origem"], novo["acrescentado"]) == ("revisao", True)
+    assert len(_objetos(mundo, "?versao=modelo")) == 1
+    [item] = mundo.historico().json()
+    assert (
+        item["depois_legivel"] == "calçado sandália vermelho (dono: pes01) 00:12–00:19"
+    )
+    mundo.avancar()
+    assert mundo.desfazer(r.json()["id"]).status_code == 201
+    assert len(_objetos(mundo)) == 1
+
+
+def test_acrescentar_sem_dono() -> None:
+    mundo = _mundo()
+
+    r = _acrescentar(mundo, _novo(pessoa=None, relacao=None))
+
+    assert r.status_code == 201
+    novo = _objetos(mundo)[-1]
+    assert (novo["pessoa"], novo["relacao"]) == (None, None)
+    [item] = mundo.historico().json()
+    assert item["depois_legivel"] == "calçado sandália vermelho 00:12–00:19"
+
+
+def test_acrescentar_com_aprovacao_so_vale_depois_de_aprovar() -> None:
+    mundo = _mundo()
+    mundo.aprovacao.definir(frozenset({"objeto.acrescentar"}))
+
+    r = _acrescentar(mundo, _novo())
+
+    assert r.status_code == 201
+    assert len(_objetos(mundo)) == 1
+    mundo.avancar()
+    aprovada = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{r.json()['id']}/aprovar", headers=CURADOR
+    )
+    assert aprovada.status_code == 201
+    assert _objetos(mundo)[-1]["tipo"] == "sandália"
+
+
+def test_acrescentar_reaplica_numa_versao_nova() -> None:
+    mundo = _mundo()
+    _acrescentar(mundo, _novo())
+    mundo.reprocessar(_modelo([_objeto("objX", "vestido", 1000, 5000)]))
+
+    assert [o["tipo"] for o in _objetos(mundo)] == ["vestido", "sandália"]
+
+
+def test_acrescentar_atendida_quando_o_modelo_traz_o_mesmo_tipo_no_trecho() -> None:
+    mundo = _mundo()
+    _acrescentar(mundo, _novo())
+    mundo.reprocessar(
+        _modelo([_objeto("obj09", "Sandalia", 12500, 19000, categoria="calcado")])
+    )
+
+    assert [o["tipo"] for o in _objetos(mundo)] == ["Sandalia"]
+
+
+def test_acrescentar_sem_o_dono_na_versao_nova_grava_sem_dono() -> None:
+    mundo = _mundo()
+    _acrescentar(mundo, _novo())
+    sem_pessoas = {**_modelo([_objeto("objX", "vestido", 1000, 5000)]), "pessoas": []}
+    mundo.reprocessar(sem_pessoas)
+
+    novo = _objetos(mundo)[-1]
+
+    assert (novo["tipo"], novo["pessoa"], novo["relacao"]) == ("sandália", None, None)
+
+
+@pytest.mark.parametrize(
+    "valor",
+    [
+        _novo(pessoa="pes99"),  # dono que não existe
+        _novo(relacao=None),  # pessoa sem relação
+        _novo(pessoa=None),  # relação sem pessoa
+        _novo(fim_ms=61000),  # além da duração
+        _novo(inicio_ms=9000, fim_ms=8000),  # invertido
+        _novo(cor_base=["vermelho", "azul", "verde"]),  # 3 cores
+        _novo(categoria="coisa"),  # categoria fora da lista
+        _novo(tipo=" "),  # tipo vazio
+    ],
+)
+def test_acrescentar_invalido_da_422(valor: str) -> None:
+    assert _acrescentar(_mundo(), valor).status_code == 422

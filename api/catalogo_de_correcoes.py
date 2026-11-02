@@ -13,6 +13,7 @@ from typing import Any, get_args
 from pydantic import BaseModel
 
 from api.decupagem import Comercial, FonteDoNome, TextoNaTela, TomDaPauta, em_mm_ss
+from api.indice_da_busca import NOME_DA_CATEGORIA
 
 # Os rótulos dos vocabulários do esquema; o que falta aqui sai igual ao valor.
 ROTULOS_DOS_TONS = {
@@ -73,6 +74,14 @@ def _atributos_do_objeto(o: dict[str, Any]) -> str:
     )
 
 
+def _objeto_acrescentado(o: dict[str, Any]) -> str:
+    partes = [NOME_DA_CATEGORIA[o["categoria"]], o["tipo"], ", ".join(o["cor_base"])]
+    texto = " ".join(x for x in partes if x)
+    if o["pessoa"] is not None:
+        texto += f" (dono: {o['pessoa']})"
+    return f"{texto} {_faixa(o['inicio_ms'], o['fim_ms'])}"
+
+
 def _dono_do_objeto(o: dict[str, Any]) -> str:
     if o["pessoa"] is None:
         return "sem dono"
@@ -129,6 +138,7 @@ pauta_acrescentada = de_json(_pauta_acrescentada)
 pauta_estrutural = de_json(_pauta_estrutural)
 atributos_do_objeto = de_json(_atributos_do_objeto)
 dono_do_objeto = de_json(_dono_do_objeto)
+objeto_acrescentado = de_json(_objeto_acrescentado)
 papel_visual = de_json(_papel_visual)
 fontes_do_nome = de_json(_fontes)
 descricao_do_plano = de_json(_plano)

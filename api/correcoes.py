@@ -29,6 +29,7 @@ from api import catalogo_de_correcoes as textos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import (
+    CategoriaDeObjeto,
     Comercial,
     CorBase,
     EvidenciaDoComercial,
@@ -71,6 +72,7 @@ TipoNovo = Literal[
     "objeto.atributos",
     "objeto.dono",
     "objeto.nao_existe",
+    "objeto.acrescentar",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
 TipoDoItem = Literal[
@@ -429,6 +431,24 @@ class _AtributosDoObjeto(BaseModel):
         if len(set(valor)) != len(valor):
             raise ValueError("cor base repetida")
         return valor
+
+
+class NovoObjeto(_AtributosDoObjeto):
+    """O objeto de um `objeto.acrescentar`: categoria, atributos, dono e trecho."""
+
+    categoria: CategoriaDeObjeto
+    pessoa: Id | None = None
+    relacao: RelacaoDoObjeto | None = None
+    inicio_ms: Annotated[int, Field(ge=0)]
+    fim_ms: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _coerente(self) -> Self:
+        if (self.pessoa is None) != (self.relacao is None):
+            raise ValueError("pessoa e relação vêm juntas ou nenhuma das duas")
+        if self.inicio_ms > self.fim_ms:
+            raise ValueError("início depois do fim")
+        return self
 
 
 class _DonoDoObjeto(BaseModel):
@@ -2224,6 +2244,10 @@ def _canonizar_atributos_do_objeto(n: NovaCorrecao) -> str:
     return _json_canonico(_AtributosDoObjeto.model_validate_json(n.valor).model_dump())
 
 
+def _canonizar_objeto_acrescentado(n: NovaCorrecao) -> str:
+    return _json_canonico(NovoObjeto.model_validate_json(n.valor).model_dump())
+
+
 def _canonizar_dono_do_objeto(n: NovaCorrecao) -> str:
     return _json_canonico(_DonoDoObjeto.model_validate_json(n.valor).model_dump())
 
@@ -2593,6 +2617,43 @@ def _acrescentar_pauta(resultado: dict[str, Any], c: Correcao) -> None:
     )
 
 
+def _acrescentar_objeto(resultado: dict[str, Any], c: Correcao) -> None:
+    novo = json.loads(c.depois)
+    inicio, fim = novo.pop("inicio_ms"), novo.pop("fim_ms")
+    if novo["pessoa"] not in _ids_das_pessoas(resultado):
+        novo["pessoa"] = novo["relacao"] = None
+    resultado.setdefault("objetos", []).append(
+        {
+            **novo,
+            "id": c.item_id,
+            "ocorrencias": [{"inicio_ms": inicio, "fim_ms": fim}],
+            "origem": "revisao",
+            "acrescentado": True,
+        }
+    )
+
+
+def _ancora_do_objeto_novo(valor: str, item_id: str, versao: str) -> Ancora:
+    novo = json.loads(valor)
+    item = {
+        "tipo": novo["tipo"],
+        "ocorrencias": [{"inicio_ms": novo["inicio_ms"], "fim_ms": novo["fim_ms"]}],
+    }
+    return _ancora_do_item(item, "objeto", versao)
+
+
+def _do_mesmo_tipo_de_objeto(
+    c: Correcao, candidatos: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    tipo = normalizar(json.loads(c.depois)["tipo"])
+    return [i for i in candidatos if normalizar(str(i["tipo"])) == tipo]
+
+
+def _tempos_do_objeto(item: dict[str, Any]) -> str:
+    inicio, fim = _intervalo_do_objeto(item)
+    return f"{inicio}-{fim}"
+
+
 def _ancora_do_comercial_novo(valor: str, item_id: str, versao: str) -> Ancora:
     return _ancora_do_item(json.loads(valor), "comercial", versao)
 
@@ -2664,6 +2725,12 @@ _PAUTA_NOVA = Acrescenta(
     acrescenta=lambda c: True,
     atendentes=_com_o_mesmo_titulo,
     aplicar=_acrescentar_pauta,
+)
+_OBJETO_NOVO = Acrescenta(
+    ancora=_ancora_do_objeto_novo,
+    acrescenta=lambda c: True,
+    atendentes=_do_mesmo_tipo_de_objeto,
+    aplicar=_acrescentar_objeto,
 )
 _PESSOA_NOVA = Acrescenta(
     ancora=_ancora_da_pessoa_nova,
@@ -3135,6 +3202,17 @@ TIPOS: dict[str, Tipo] = {
         tipo_do_item="objeto",
         valor_do_item=_valor_do_existe,
         aplicar_no_item=_marca_o_objeto_removido,
+    ),
+    "objeto.acrescentar": Tipo(
+        canonizar=_canonizar_objeto_acrescentado,
+        rotulo="Objeto acrescentado",
+        legivel=textos.objeto_acrescentado,
+        tipo_do_item="objeto",
+        json_longo=True,
+        valor_do_item=_tempos_do_objeto,
+        fim_ms=_fim_do_json,
+        acrescenta=_OBJETO_NOVO,
+        confere=_confere_o_dono,
     ),
 }
 

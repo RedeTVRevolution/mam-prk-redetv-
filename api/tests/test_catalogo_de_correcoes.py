@@ -184,6 +184,24 @@ TEXTO = {"tipo": "gc", "texto": "Olá", "inicio_ms": 1000, "fim_ms": 2000}
             json.dumps({"pessoa": None, "relacao": None}),
             "sem dono",
         ),
+        (
+            "objeto.acrescentar",
+            json.dumps(
+                {
+                    "categoria": "calcado",
+                    "tipo": "sandália",
+                    "cor_base": ["vermelho"],
+                    "cor": None,
+                    "detalhe": None,
+                    "marca": None,
+                    "pessoa": "pes01",
+                    "relacao": "calca",
+                    "inicio_ms": 12000,
+                    "fim_ms": 19000,
+                }
+            ),
+            "calçado sandália vermelho (dono: pes01) 00:12–00:19",
+        ),
         ("objeto.nao_existe", "existe", "Objeto na imagem"),
         ("objeto.nao_existe", "nao_existe", "Objeto não está na imagem"),
         ("pauta.titulo", "Um título 1-2", "Um título 1-2"),
@@ -207,6 +225,7 @@ def test_valor_legivel_por_tipo(tipo: str, valor: str, esperado: str) -> None:
         "pauta.acrescentar",
         "objeto.atributos",
         "objeto.dono",
+        "objeto.acrescentar",
         "aparicao.papel_visual",
         "pessoa.fontes_do_nome",
         "plano.descricao",

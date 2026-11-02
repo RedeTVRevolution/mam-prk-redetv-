@@ -756,3 +756,10 @@ Não corrigido:
 ## #306 revisão
 - Corrigido: (1) desfazer `objeto.atributos`/`objeto.dono` de um objeto que um `objeto.nao_existe` já tirou dava `ItemInexistente` sem tratamento (500). Agora o desfazer usa `_valor_ou_vazio` (vazio quando o item saiu), nas duas pontas (mesma versão e reapontada). (2) Com isso o campo `Tipo.some_o_item` sobrou e saiu: o desfazer do próprio `nao_existe` já pega o vazio, e um segundo `objeto.nao_existe` no objeto que já saiu volta a dar 422, em vez de gravar uma correção que não muda nada. A issue sugeria o campo só "por exemplo", para o desfazer não quebrar. Há testes novos para os dois casos.
 - Não corrigido / dizer no PR: (1) o rótulo do tipo, "Objeto na imagem", descreve um estado, enquanto os vizinhos descrevem a correção. A spec não fixa o texto, então ficou como está. (2) `objeto_na_imagem` trata qualquer valor diferente de `existe` como "não está", inclusive o `""`, e isso é de propósito. (3) Reapontar pela fila (`resolver`) um item que já saiu ainda pode levantar `ItemInexistente`; é anterior a este ticket e vale para outros tipos.
+- 2026-11-02 18:38:19 · #306: feito
+- 2026-11-02 18:38:23 · iteração 86: #307
+
+## #307 iteração 87
+- Pronto: `objeto.acrescentar` em `api/correcoes.py` (`NovoObjeto` herda `_AtributosDoObjeto`; `_OBJETO_NOVO` com âncora por tipo normalizado e trecho, atendida por objeto do mesmo tipo normalizado; `_acrescentar_objeto` grava sem dono se a pessoa sumiu; `confere=_confere_o_dono` dá 422 para dono inexistente; `fim_ms=_fim_do_json`); catálogo (`objeto_acrescentado`, categoria pelo `NOME_DA_CATEGORIA` de `indice_da_busca`), fixture regravada, `TIPOS_FORA_DESTE_TICKET` e união de `decupagem.ts`; testes em `test_correcoes_de_objeto.py` e `test_catalogo_de_correcoes.py`. `make verificar` verde.
+- Decisões: o valor legível omite cor/detalhe/marca (como no exemplo do ticket). Relação do dono é `calca` (não `calça`).
+- Armadilha: `ruff format` antes do `make verificar`; item_id vai vazio no pedido de acrescentar.

@@ -101,6 +101,10 @@
       "rotulo": "Objeto na imagem"
     },
     {
+      "valor": "objeto.acrescentar",
+      "rotulo": "Objeto acrescentado"
+    },
+    {
       "valor": "desfazer",
       "rotulo": "Desfazer"
     },

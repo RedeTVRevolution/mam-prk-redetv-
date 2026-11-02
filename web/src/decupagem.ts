@@ -187,6 +187,7 @@ export interface ItemDoHistorico {
     | 'objeto.atributos'
     | 'objeto.dono'
     | 'objeto.nao_existe'
+    | 'objeto.acrescentar'
     | 'desfazer'
     | 'descartar'
     | 'aprovar'
