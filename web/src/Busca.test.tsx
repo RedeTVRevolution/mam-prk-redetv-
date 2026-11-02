@@ -9,6 +9,7 @@ import { trechosDoMotivo } from './busca.ts'
 import { render } from './render-teste.tsx'
 
 const momento = (inicio_ms: number, fim_ms: number, motivo: string, destaques: object[] = []) => ({
+  tipo: 'plano' as string,
   inicio_ms,
   fim_ms,
   motivo,
@@ -433,6 +434,8 @@ const resultadoVisual = (visual: boolean) =>
       video('v1', [
         { ...momento(724_000, 731_000, 'Plano: rua molhada à noite'), quadro_url: 'https://q.exemplo/a.jpg' },
         { ...momento(2_462_000, 2_490_000, 'Plano: avenida com trânsito'), quadro_url: 'https://q.exemplo/b.jpg' },
+        // A fala que o texto livre trouxe fica fora da grade, que só mostra planos.
+        { ...momento(2_462_000, 2_470_000, 'Fala: a pista estava molhada'), tipo: 'fala' },
       ]),
       video('v2', [{ ...momento(60_000, 65_000, 'Plano: cruzamento'), quadro_url: 'https://q.exemplo/c.jpg' }]),
     ],

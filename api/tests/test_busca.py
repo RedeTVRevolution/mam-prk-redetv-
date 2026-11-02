@@ -517,6 +517,7 @@ def cliente(
     maximo_por_minuto: int = 30,
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     indice: IndiceEmMemoria | None = None,
+    embedding_da_consulta: EmbeddingDaConsulta | None = None,
 ) -> tuple[TestClient, Mundo]:
     m = Mundo(*respostas)
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
@@ -534,6 +535,7 @@ def cliente(
         armor=ModelArmorEmMemoria(),
         busca_por_minuto=maximo_por_minuto,
         tempo_maximo_da_busca_s=tempo_maximo_s,
+        embedding_da_consulta=embedding_da_consulta,
     )
     return TestClient(app), m
 
@@ -1074,16 +1076,32 @@ def test_indice_desligado_ou_embedding_fora_a_busca_fica_como_hoje(
     assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
 
 
-def test_a_rota_aceita_visual() -> None:
-    c, m = cliente(["consulta"], *[pedido(texto_livre="pista molhada")] * 2)
-    m.com(
-        job("j1"),
-        plano("j1:plano:1", [1.0, 0.0]),
+@pytest.mark.parametrize("visual", [True, False])
+def test_a_rota_leva_o_modo_visual_a_busca(visual: bool) -> None:
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+    c, m = cliente(
+        ["consulta"],
+        *[pedido(texto_livre="pista molhada")] * 2,
+        embedding_da_consulta=embedding,
     )
-    resposta = c.get(
-        "/v1/busca",
-        params={"q": "pista molhada", "visual": "true"},
-        headers=AUTORIZACAO,
-    )
+    m.com(job("j1"), plano("j1:plano:1", [1.0, 0.0]))
+    params = {"q": "pista molhada"} | ({"visual": "true"} if visual else {})
+
+    resposta = c.get("/v1/busca", params=params, headers=AUTORIZACAO)
+
     assert resposta.status_code == 200
-    assert resposta.json()["entendida"]["visual"] is False  # sem embedding no teste
+    assert resposta.json()["entendida"]["visual"] is visual
+    assert embedding.textos == (["pista molhada"] if visual else [])
+    if visual:
+        assert resposta.json()["videos"][0]["momentos"][0]["tipo"] == "plano"
+
+
+def test_o_vetor_sai_do_texto_livre_e_a_clausula_visual_so_leva_o_vetor() -> None:
+    m = mundo_visual(pedido(texto_livre="pista molhada", programa="TV Fama"))
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+
+    m.busca(embedding=embedding).buscar("pista molhada no TV Fama", visual=True)
+
+    assert embedding.textos == ["pista molhada"]
+    [visual] = [c for c in m.indice.consultas if c.vetor_do_quadro]
+    assert visual.texto is None and visual.significado is None

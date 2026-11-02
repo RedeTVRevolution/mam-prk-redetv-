@@ -43,6 +43,8 @@ export interface Destaque {
 }
 
 export interface Momento {
+  /** A grade da busca visual mostra só os planos. */
+  tipo: TipoDeMomento
   inicio_ms: number
   fim_ms: number
   motivo: string

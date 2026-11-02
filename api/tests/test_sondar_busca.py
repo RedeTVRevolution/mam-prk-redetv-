@@ -2,13 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from api.busca import Momento, VideoDoResultado
+from api.busca import Entendida, Momento, VideoDoResultado
 from api.sondar_busca import (
     ARQUIVO_DAS_CONSULTAS,
     CASOS,
     Caso,
     Trecho,
     ler_casos,
+    modo_atendido,
     pertinencia,
     primeiros_resultados,
     relatorio_do_aceite,
@@ -21,6 +22,7 @@ def _video(
 ) -> VideoDoResultado:
     momentos = [
         Momento(
+            tipo="plano",
             inicio_ms=inicio_ms,
             fim_ms=inicio_ms + 1 if fim_ms is None else fim_ms,
             motivo=m,
@@ -244,3 +246,15 @@ def test_ler_casos_le_o_modo_visual_e_o_arquivo_traz_consultas_visuais(
     assert caso.visual
     assert not Caso("terno", "terno").visual
     assert any(c.visual for c in CASOS)
+
+
+def test_consulta_visual_que_caiu_na_busca_comum_fica_vermelha() -> None:
+    def entendida(visual: bool) -> Entendida:
+        return Entendida(
+            evidencias=[], programa=None, desde=None, ate=None, visual=visual
+        )
+
+    visual = Caso("pista molhada", "pista", visual=True)
+    assert modo_atendido(visual, entendida(True))
+    assert not modo_atendido(visual, entendida(False))
+    assert modo_atendido(Caso("terno", "terno"), entendida(False))

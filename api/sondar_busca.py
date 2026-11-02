@@ -29,7 +29,14 @@ from typing import Any, cast
 from google.cloud import firestore
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
-from api.busca import Ajustes, Busca, Momento, RankingEmOrdem, VideoDoResultado
+from api.busca import (
+    Ajustes,
+    Busca,
+    Entendida,
+    Momento,
+    RankingEmOrdem,
+    VideoDoResultado,
+)
 from api.embedding_do_quadro import embedding_da_busca
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
@@ -186,6 +193,12 @@ def veredito(caso: Caso, videos: list[VideoDoResultado]) -> bool | None:
     )
 
 
+def modo_atendido(caso: Caso, entendida: Entendida) -> bool:
+    """A consulta visual que caiu na busca comum (índice ou embedding fora) fica vermelha:
+    senão o texto sozinho a deixaria verde, sem medir o vetor do quadro."""
+    return not caso.visual or entendida.visual
+
+
 # O plano B do dev: o `criar_app` de `api/main.py` não recebe modelo nem Model Armor.
 # Importar o `api.main` montaria o app, que pede o ambiente inteiro.
 class _SemModelo:
@@ -240,9 +253,10 @@ def main() -> int:
     falhas = 0
     medidas: list[tuple[Caso, float | None]] = []
     for caso in CASOS:
-        videos = busca.buscar(
+        resultado = busca.buscar(
             caso.consulta, ajustes=_ajustes(caso), visual=caso.visual
-        ).videos
+        )
+        videos = resultado.videos
         total = sum(v.n_momentos for v in videos)
         print(f"\n### {caso.consulta!r}: {total} momentos em {len(videos)} vídeos")
         for v in videos:
@@ -250,6 +264,9 @@ def main() -> int:
             for m in v.momentos[:8]:
                 print(f"     {m.inicio_ms / 1000:7.1f}s {m.motivo[:80]}")
         ok = veredito(caso, videos)
+        if not modo_atendido(caso, resultado.entendida):
+            print("  sem o vetor do quadro: a busca visual caiu na comum")
+            ok = False
         falhas += ok is False
         fracao = pertinencia(caso, videos)
         medidas.append((caso, fracao))

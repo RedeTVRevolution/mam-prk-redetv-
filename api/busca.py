@@ -90,6 +90,7 @@ class Destaque(BaseModel):
 
 
 class Momento(BaseModel):
+    tipo: TipoDeRegistro  # a grade da busca visual mostra só os planos
     inicio_ms: int
     fim_ms: int
     motivo: str
@@ -227,6 +228,7 @@ class _Trecho:
     motivo: str
     posicao: int  # a melhor posição, no resultado fundido, entre os registros juntados
     quadro: str | None
+    tipo: TipoDeRegistro
 
 
 class Busca:
@@ -308,9 +310,12 @@ class Busca:
             return nomes.get(id or "") or None
 
         clausulas = self._clausulas(entendida, nome)
-        vetor = self._vetor_da_consulta(texto) if visual else None
+        # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
+        # entendidos já filtram, e não entram no vetor.
+        consulta_visual = entendida.texto_livre or texto
+        vetor = self._vetor_da_consulta(consulta_visual) if visual else None
         if vetor is not None:
-            clausulas.append(_clausula_visual(entendida, texto, vetor, nome))
+            clausulas.append(_clausula_visual(entendida, vetor, nome))
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
@@ -469,6 +474,7 @@ class Busca:
             lista.sort(key=lambda t: (t.posicao, t.inicio_ms, t.fim_ms))
             momentos = [
                 Momento(
+                    tipo=t.tipo,
                     inicio_ms=t.inicio_ms,
                     fim_ms=t.fim_ms,
                     motivo=t.motivo,
@@ -527,24 +533,17 @@ class Busca:
 
 def _clausula_visual(
     e: ConsultaEntendida,
-    texto: str,
     vetor: list[float],
     nome: Callable[[str | None], str | None],
 ) -> _Clausula:
-    """Os planos pelo vetor do quadro, junto do texto e do significado, no mesmo RRF.
+    """Os planos só pelo vetor do quadro, como mais uma lista do mesmo RRF.
 
-    Só o plano leva o vetor do quadro; as demais cláusulas seguem como na busca comum
-    (pessoas e objetos pedidos continuam filtrando).
+    O texto e o significado já vêm da cláusula do texto livre: repeti-los aqui contaria
+    duas vezes os planos que a descrição acha. As demais cláusulas seguem como na busca
+    comum (pessoas e objetos pedidos continuam filtrando).
     """
-    consulta = e.texto_livre or texto
     return _Clausula(
-        Consulta(
-            filtros=replace(_base(e), tipo="plano"),
-            texto=consulta,
-            significado=consulta,
-            vetor_do_quadro=vetor,
-            cortar_significado=True,
-        ),
+        Consulta(filtros=replace(_base(e), tipo="plano"), vetor_do_quadro=vetor),
         lambda r: _motivo(r, nome),
     )
 
@@ -819,7 +818,13 @@ def _juntar(
             atual.quadro = atual.quadro or r.quadro
             continue
         atual = _Trecho(
-            r.job_id, r.inicio_ms, r.fim_ms, motivos[r.id], posicao[r.id], r.quadro
+            r.job_id,
+            r.inicio_ms,
+            r.fim_ms,
+            motivos[r.id],
+            posicao[r.id],
+            r.quadro,
+            r.tipo,
         )
         abertos[chave] = atual
         trechos.append(atual)

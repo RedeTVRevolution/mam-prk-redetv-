@@ -22,6 +22,7 @@ const DECUPAGEM = {
 }
 
 const momento = (inicio_ms: number, fim_ms: number, motivo: string) => ({
+  tipo: 'plano',
   inicio_ms,
   fim_ms,
   motivo,

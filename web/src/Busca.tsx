@@ -247,7 +247,7 @@ function GradeDePlanos({ videos, busca }: { videos: VideoDoResultado[]; busca: s
       }}
     >
       {videos.flatMap((video) =>
-        video.momentos.map((momento) => {
+        video.momentos.filter((momento) => momento.tipo === 'plano').map((momento) => {
           const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, busca)
           return (
             <li key={`${video.job_id}:${momento.inicio_ms}`}>
