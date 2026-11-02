@@ -78,6 +78,9 @@ jobs:
       - run: terraform -chdir=infra init -backend=false -input=false
       - run: terraform -chdir=infra fmt -check
       - run: terraform -chdir=infra validate
+      # Plano do dev com o provider simulado (infra/plano_simulado.tftest.hcl): pega erro que só
+      # aparece no plan, como tipos diferentes numa condicional, sem credencial de nuvem.
+      - run: terraform -chdir=infra test
       - run: terraform -chdir=infra/ambientes/prod init -backend=false -input=false
       - run: terraform -chdir=infra/ambientes/prod fmt -check
       - run: terraform -chdir=infra/ambientes/prod validate
