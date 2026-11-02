@@ -3,7 +3,7 @@ import type { Autenticador } from './auth/autenticador.ts'
 import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
-import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './decupagem.ts'
+import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
 /** 401 ou sessão sem token. O cliente já avisou quem o criou; quem chama só não mostra erro. */
 export class SessaoExpirada extends Error {}
@@ -73,6 +73,10 @@ export interface ClienteDoJob {
   historico(): Promise<ItemDoHistorico[]>
   fila(): Promise<ItemDaFila[]>
   corrigir(corpo: object): Promise<void>
+  sugestoes(): Promise<Sugestao[]>
+  /** Aceita a sugestão; `valor` é o "outro nome" (ou o título) do editor. */
+  aceitarSugestao(sugestaoId: string, valor?: string): Promise<void>
+  recusarSugestao(sugestaoId: string): Promise<void>
   desfazer(correcaoId: string, motivo: string): Promise<void>
   recusar(correcaoId: string, motivo: string): Promise<void>
   aprovar(correcaoId: string): Promise<void>
@@ -171,6 +175,15 @@ export function criarClienteDaApi(
       historico: () => chamar(`${base}/correcoes`),
       fila: () => chamar(`${base}/fila`),
       corrigir: (corpo) => chamar(`${base}/correcoes`, { post: true, corpo }),
+      sugestoes: () => chamar(`${base}/sugestoes`),
+      aceitarSugestao: (sugestaoId, valor) =>
+        chamar(`${base}/sugestoes/${sugestaoId}/aceitar`, {
+          post: true,
+          corpo: valor === undefined ? undefined : { valor },
+        }),
+      recusarSugestao: async (sugestaoId) => {
+        await pedir(`${base}/sugestoes/${sugestaoId}/recusar`, { post: true })
+      },
       desfazer: (correcaoId, motivo) =>
         chamar(`${base}/correcoes/${correcaoId}/desfazer`, {
           post: true,

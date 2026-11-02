@@ -35,6 +35,7 @@ import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
 import { FormularioDoTrecho } from './FormularioDoTrecho.tsx'
 import { ABAS_DO_TRECHO } from './trecho.ts'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
+import { Sugestoes } from './Sugestoes.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
 import { nomeDaEtapa } from './etapas.ts'
 import { ReprocessarEtapa } from './ReprocessarEtapa.tsx'
@@ -45,7 +46,7 @@ import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relog
 import { ALTURA_DA_BARRA, CORES } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
 import { enderecoDoVideo } from './rotas.ts'
-import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './decupagem.ts'
+import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
 const VELOCIDADES = [1, 2, 4]
 const SALTO_CURTO_S = 1
@@ -124,6 +125,8 @@ export default function Visualizador({
   const salvarDoTrecho = useRef<(() => void) | null>(null)
   const [historico, setHistorico] = useState<ItemDoHistorico[]>([])
   const [fila, setFila] = useState<ItemDaFila[]>([])
+  const [sugestoes, setSugestoes] = useState<Sugestao[]>([])
+  const [cargasDeSugestoes, setCargasDeSugestoes] = useState(0)
   const [falhaNoHistorico, setFalhaNoHistorico] = useState(false)
   const [gavetaAberta, setGavetaAberta] = useState(false)
   const [abaDaGaveta, setAbaDaGaveta] = useState<AbaDaGaveta>('historico')
@@ -233,6 +236,19 @@ export default function Visualizador({
       ativo = false
     }
   }, [api, job.id, podeEditar, decupagem])
+
+  // As sugestões saem da decupagem entregue: a lista vem de novo a cada decupagem nova e ao ligar o modo.
+  useEffect(() => {
+    if (!podeEditar || !catalogando || !decupagem) return
+    let ativo = true
+    api.job(job.id).sugestoes().then(
+      (lista) => ativo && setSugestoes(lista),
+      () => ativo && setSugestoes([]),
+    )
+    return () => {
+      ativo = false
+    }
+  }, [api, job.id, podeEditar, catalogando, decupagem, cargasDeSugestoes])
 
   const itens = useMemo(() => (decupagem ? itensDoPainel(decupagem) : []), [decupagem])
   const marcas = useMemo(
@@ -1099,6 +1115,21 @@ export default function Visualizador({
               salvarRef={salvarDoTrecho}
               aoSalvar={gravarTrecho}
               aoCancelar={() => setDescrevendo(false)}
+            />
+          )}
+          {podeEditar && (
+            <Sugestoes
+              sugestoes={catalogando ? sugestoes : []}
+              decupagem={decupagem}
+              api={api.job(job.id)}
+              ativo={catalogando}
+              aoSaltar={(ms) => saltarPara(ms / 1000)}
+              aoResolver={(id, recarregar) => {
+                setSugestoes((lista) => lista.filter((x) => x.id !== id))
+                if (recarregar) setCargasDeSugestoes((n) => n + 1)
+                else setCargasDaDecupagem((n) => n + 1)
+              }}
+              aoAvisar={mostrarAviso}
             />
           )}
           {decupagem ? (
