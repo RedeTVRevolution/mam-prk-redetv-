@@ -151,6 +151,13 @@ class CatalogoEmMemoria:
     def __init__(self) -> None:
         self._pessoas: dict[str, PessoaDoCatalogo] = {}
 
+    @classmethod
+    def copia_de(cls, catalogo: Catalogo) -> "CatalogoEmMemoria":
+        """Uma cópia solta: o que se acrescenta nela não chega ao catálogo de origem."""
+        copia = cls()
+        copia._pessoas = {p.id: p for p in catalogo.todas()}
+        return copia
+
     def obter(self, id: str) -> PessoaDoCatalogo | None:
         return self._pessoas.get(id)
 

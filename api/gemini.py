@@ -363,6 +363,8 @@ def analisar(
     video: Video,
     programa: str | None = None,
     trecho_ms: tuple[int, int] | None = None,
+    modelo: str = MODELO,
+    etapa_de_custo: str | None = None,
     transcricao: Transcricao | None = None,
     cortes_ms: Sequence[int] = (),
     limiar_de_semelhanca: float = LIMIAR_DE_SEMELHANCA,
@@ -370,16 +372,21 @@ def analisar(
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
 ) -> Decupagem:
-    """`cortes_ms`: os cortes de câmera do vídeo; só os do trecho entram na instrução."""
+    """`cortes_ms`: os cortes de câmera do vídeo; só os do trecho entram na instrução.
+
+    `etapa_de_custo` acrescenta o rótulo `etapa` à chamada, para o faturamento separar
+    o custo (a passada de comparação usa um próprio).
+    """
     inicio, fim = trecho_ms or (0, video.duracao_ms)
     chamada = Chamada(
-        modelo=MODELO,
+        modelo=modelo,
         instrucao=instrucao(
             programa, transcricao, [c for c in cortes_ms if inicio < c < fim]
         ),
         video_uri=video_uri,
         esquema=esquema_do_modelo(),
-        rotulos={"job_id": job_id},
+        rotulos={"job_id": job_id}
+        | ({"etapa": etapa_de_custo} if etapa_de_custo else {}),
         trecho_ms=trecho_ms,
     )
     decupagem = gerar_validado(

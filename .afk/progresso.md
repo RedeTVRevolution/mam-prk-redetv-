@@ -278,3 +278,11 @@ Não corrigido:
 - `google.auth.default()` roda na importação quando `MODEL_ARMOR_*`/`RANKING_CONFIG` existem; sem credencial o serviço não sobe. No Cloud Run sempre há; os outros clientes do `main.py` fazem igual.
 - Um `RefreshError` do google-auth no Gemini da consulta não é `ErroHttp` e subiria como 500; na prática o Model Armor, chamado antes com a mesma sessão, já cai no plano B pelo `except Exception`.
 - `_sessao_autorizada` repete o `google.auth.default` + `AuthorizedSession` de outros módulos; `checar-nomes-da-nuvem.sh` não procura `consulta-da-busca`/`default_ranking_config`. Smells sem correção.
+- 2026-11-02 08:28:39 · #232: feito
+- 2026-11-02 08:28:44 · iteração 46: #247
+
+## #247 iteração 47 (feito, `make verificar` verde)
+- Pronto: `api/passadas.py` (`rodar_passada`, modelos `Passada`/`ResumoDaPassada`/`Custo`/`Etapa`, `PassadasStorage` em `<job>/passadas/<data>-<modelo>.json` no bucket das decupagens, rotas `GET /v1/jobs/{id}/passadas[/{passada}]` com `decupagem.ver`, CLI `python -m api.passadas JOB MODELO`); `make passada-de-comparacao JOB= MODELO=`; `analisar`/`analisar_video` ganharam `modelo`, `etapa_de_custo` (rótulo `etapa=passada_de_comparacao`) e `etapa(nome)` (tempos de `janelas`, `consolidacao`, `identificacao`); `CatalogoEmMemoria.copia_de` (a identificação acrescenta nomes ao catálogo: a passada usa uma cópia solta); README com o custo por hora (da tabela do Plano, não medido). 12 testes em `test_passadas.py`.
+- Decisões: o preço vem de `PRECOS_DOS_MODELOS` (mesmo formato do `comparar-objetos`); custo = tokens do transporte × preço; sem escalonamento nem janelas gravadas (nada de `janelas_do_job`). O cassete não foi usado: os testes usam transporte falso com a resposta `BOA`.
+- Armadilhas: `api.passadas` importa `api.nuvem` (por isso `PassadasStorage` mora em `passadas.py`, não em `nuvem.py`). Sem permissão de nuvem aqui: a passada real no dev roda à mão depois do merge. Papel IAM novo não foi preciso (lê os buckets que a conta já lê; grava no das decupagens).
+- Encerrada por aviso de contexto (120 mil tokens), com tudo commitado e `make verificar` verde. Falta só conferir os critérios do #247 um a um e mandar para a revisão: o código, os testes (12), o Makefile e o README estão prontos.

@@ -22,6 +22,7 @@ refez).
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import CancelledError, ThreadPoolExecutor
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from threading import Event
 
@@ -30,7 +31,7 @@ from api.consolidacao import consolidar
 from api.decupagem import Decupagem, Video
 from api.escalonamento import janelas_a_escalonar
 from api.espera import sorteio_uniforme
-from api.gemini import AnaliseFalhou, Transporte, analisar
+from api.gemini import MODELO, AnaliseFalhou, Transporte, analisar
 from api.identificacao import TOLERANCIA_DA_FALA_MS, candidatos_do_video, identificar
 from api.janelas import (
     EstadoJanela,
@@ -94,6 +95,9 @@ def analisar_video(
     limiar_de_semelhanca: float = LIMIAR_DE_SEMELHANCA,
     catalogo: Catalogo | None = None,
     tolerancia_da_fala_ms: int = TOLERANCIA_DA_FALA_MS,
+    modelo: str = MODELO,
+    etapa_de_custo: str | None = None,
+    etapa: Callable[[str], AbstractContextManager[None]] = lambda _nome: nullcontext(),
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
@@ -102,6 +106,10 @@ def analisar_video(
 
     `fracao_escalonada` `None` desliga o escalonamento inteiro (motivos `duvida`
     e `amostra`); a entrada fica aqui, e o piloto escolhe a fração.
+
+    `modelo` e `etapa_de_custo` (o rótulo de custo) são da passada de comparação
+    (`api/passadas.py`); `etapa(nome)` envolve `janelas`, `consolidacao` e
+    `identificacao`, para ela medir o tempo de cada uma.
     """
     if max_paralelas < 1:
         raise ValueError(f"janelas em paralelo: {max_paralelas}")
@@ -138,6 +146,8 @@ def analisar_video(
             programa=programa,
             trecho_ms=trecho_ms,
             cortes_ms=cortes_ms,
+            modelo=modelo,
+            etapa_de_custo=etapa_de_custo,
             transcricao=transcricao
             and transcricao.recortar(*(trecho_ms or (0, video.duracao_ms))),
             limiar_de_semelhanca=limiar_de_semelhanca,
@@ -147,7 +157,10 @@ def analisar_video(
         )
 
     if len(janelas) <= 1:
-        return identificar_pessoas(aplicar_regra_de_tempos(passo(None), cortes_ms))
+        with etapa("janelas"):
+            unica = aplicar_regra_de_tempos(passo(None), cortes_ms)
+        with etapa("identificacao"):
+            return identificar_pessoas(unica)
 
     gravadas = janelas_do_job.ler(job_id) if janelas_do_job else {}
 
@@ -204,15 +217,21 @@ def analisar_video(
         ]
         return dict(zip(indices, _em_paralelo(tarefas, max_paralelas), strict=True))
 
-    resultados = decupar_em_paralelo([j.indice for j in janelas])
-    if fracao_escalonada is not None:
-        a_refazer = [
-            indice
-            for indice in janelas_a_escalonar(job_id, resultados, fracao_escalonada)
-            if not (indice in gravadas and gravadas[indice].refeita)
-        ]
-        resultados.update(decupar_em_paralelo(a_refazer, escalonar=True))
-    consolidada = consolidar(
-        video, [(j, resultados[j.indice]) for j in janelas], list(cortes_ms)
-    )
-    return identificar_pessoas(medir(consolidada, None))
+    with etapa("janelas"):
+        resultados = decupar_em_paralelo([j.indice for j in janelas])
+        if fracao_escalonada is not None:
+            a_refazer = [
+                indice
+                for indice in janelas_a_escalonar(job_id, resultados, fracao_escalonada)
+                if not (indice in gravadas and gravadas[indice].refeita)
+            ]
+            resultados.update(decupar_em_paralelo(a_refazer, escalonar=True))
+    with etapa("consolidacao"):
+        consolidada = medir(
+            consolidar(
+                video, [(j, resultados[j.indice]) for j in janelas], list(cortes_ms)
+            ),
+            None,
+        )
+    with etapa("identificacao"):
+        return identificar_pessoas(consolidada)

@@ -81,6 +81,12 @@ from api.papeis import (
     admins_de,
     permissoes_de,
 )
+from api.passadas import (
+    LeituraDePassadas,
+    PassadasEmMemoria,
+    PassadasStorage,
+    criar_rotas_das_passadas,
+)
 from api.programas import PERFIS
 from api.progresso_das_janelas import JanelasDoJob
 from api.reprocessamento import (
@@ -169,6 +175,7 @@ def criar_app(
     marcas: CatalogoDeMarcas | None = None,
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
+    passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
     ranking: Ranking | None = None,
@@ -251,6 +258,9 @@ def criar_app(
             ),
         )
     )
+    v1.include_router(
+        criar_rotas_das_passadas(repositorio_de_jobs, passadas or PassadasEmMemoria())
+    )
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
     v1.include_router(
         criar_rotas_do_catalogo(catalogo_de_pessoas, catalogo_de_marcas, relogio)
@@ -322,6 +332,11 @@ if _projeto:
             AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
             if "BUSCA_COLECAO" in os.environ
             else None
+        ),
+        passadas=PassadasStorage(
+            ClienteStorage(project=_projeto),
+            os.environ["BUCKET_ACEITOS"],
+            os.environ["BUCKET_DECUPAGENS"],
         ),
         transporte_da_consulta=_adaptadores.transporte_da_consulta,
         armor=_adaptadores.armor,

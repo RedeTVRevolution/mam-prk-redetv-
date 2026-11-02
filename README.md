@@ -104,6 +104,21 @@ Os dois alvos abaixo só rodam com credenciais (ADC de quem roda e o `.env`) e f
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022), conferido no #122.
 
+## Passada de comparação (#247)
+
+Roda a análise inteira de um Job concluído com outro modelo e guarda o resultado ao lado da decupagem, para comparar por requisito (#248) e lado a lado (#249). Só no dev, com as credenciais de quem roda (a conta que lê o bucket de decupagens e chama o Gemini), depois do merge:
+
+```bash
+export PRECOS_DOS_MODELOS="gemini-3.8-flash=1.5:7.5"   # modelo=entrada:saída, US$ por milhão de tokens
+make passada-de-comparacao JOB=<id do Job> MODELO=gemini-3.8-flash   # JANELAS_EM_PARALELO=4 acelera
+```
+
+- A análise é a do Job (janelas, consolidação, identificação, com a transcrição e a leitura da tela que ele já tem), sem escalonamento: o modelo pedido faz todas as janelas. Dá para repetir com outros modelos; cada rodada é uma passada nova.
+- A passada vai para `<job>/passadas/<data>-<modelo>.json` no bucket das decupagens, com o modelo, a data, os tokens e o custo (pelos preços do `PRECOS_DOS_MODELOS`) e os segundos de `janelas`, `consolidacao` e `identificacao`. Não é indexada, não aparece no Acervo nem na busca, não recebe correções, não dispara webhook, e a Decupagem do Job não é regravada. A identificação lê o catálogo de pessoas, mas não acrescenta nome nele.
+- Cada chamada ao Gemini leva o rótulo `etapa=passada_de_comparacao`, para o faturamento separar o custo.
+- Leitura: `GET /v1/jobs/{id}/passadas` (resumos) e `GET /v1/jobs/{id}/passadas/{passada}` (com a decupagem), com `decupagem.ver`.
+- Custo por hora de vídeo, pelas premissas do `docs/Plano_MAM.md` (Standard, 1 fps, ~60 mil tokens de saída por hora): ~US$ 1,14 no 3.8 Flash, ~US$ 1,24 no 3.5 Flash e ~US$ 0,30 no 3.5 Flash-Lite. Um programa de 2 h custa, então, uns US$ 2,30 no 3.8 Flash. O custo real da rodada sai impresso no fim do comando e fica na passada.
+
 ## Cassete do Gemini
 
 O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema da decupagem e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video`, o texto da resposta e o `instrucao_sha256` (SHA-256 da `INSTRUCAO` de `api/gemini.py`), sem cabeçalhos nem credenciais. Mudar uma letra da `INSTRUCAO` muda o hash e derruba o contrato até regravar, com a mensagem de rodar `make gravar-cassetes`; o hash não cobre os perfis e as seções que `instrucao()` encaixa nela. O cassete de hoje foi gravado antes do hash, e essa checagem fica pulada até a regravação do #229. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.

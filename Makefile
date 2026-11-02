@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras passada-de-comparacao
 
 instalar:
 	uv sync --locked
@@ -132,3 +132,14 @@ reindexar:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.indexacao $(JOB)
+
+# Passada de comparação (#247): make passada-de-comparacao JOB=<id> MODELO=<modelo do Gemini>
+# Roda a análise inteira do Job concluído com outro modelo (sem escalonamento) e grava a passada
+# ao lado da Decupagem, que não muda. PRECOS_DOS_MODELOS (modelo=entrada:saida, US$ por milhão
+# de tokens) vem do ambiente; JANELAS_EM_PARALELO é opcional (1 por padrão).
+passada-de-comparacao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.passadas "$(JOB)" "$(MODELO)"
