@@ -851,3 +851,9 @@ Não corrigido:
 - Pronto: permissão `lixeira.gerir`; `Job.lixeira` (`EnvioParaLixeira`) e `FiltroDeJobs.na_lixeira`; `api/lixeira.py` (`/v1/admin/lixeira`: GET lista com dias até a purga, `videos/{id}/impacto`, POST `videos/{id}` com motivo, `/restaurar`; auditoria `item.para_lixeira`/`item.restaurado` com o impacto, desfeita se a auditoria falha); dependência `sem_job_na_lixeira` no `include_router(v1)` do `main.py` (404 em toda rota com `{job_id}` para quem não tem `lixeira.gerir`); `Busca._visivel` exclui a lixeira; `ArquivosNoStorage` em `nuvem.py` ligado no `main.py`; ADR 0010 e GLOSSARY ("Lixeira", "Purga"). Testes em `test_lixeira.py` e `test_busca.py`. `make verificar` verde.
 - Decisões: o parâmetro das rotas da lixeira é `id_do_video` (a dependência age só em `job_id`); o impacto não traz momentos no índice (o índice não conta por vídeo ainda).
 - Falta: teste no emulador do `ArquivosNoStorage.contar` (`test_nuvem.py`); conferir que nenhum consumidor de `repositorio.listar()` (indexação em massa, relatórios) precisa pular a lixeira.
+- 2026-11-02 20:02:35 · #144: parcial (1/3); a próxima iteração continua
+- 2026-11-02 20:02:35 · iteração 95: #144
+
+## #144 iteração 96
+- Pronto: teste no emulador do `ArquivosNoStorage.contar`; indexação em massa, reprocessar versão e cópia para o BigQuery pulam Jobs na lixeira (`j.lixeira is None`). `make verificar` verde.
+- Não mexi: `expirar_uploads`, `regressao`, `taxa_de_correcao`, `carregar_marcas` (olham outros estados ou métricas; decidir se a lixeira conta).

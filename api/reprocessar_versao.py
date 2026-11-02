@@ -80,7 +80,11 @@ def escolher(
 ) -> list[Candidato]:
     """Os Jobs concluídos de versão anterior, do mais antigo ao mais novo, até `limite`."""
     concluidos = sorted(
-        (j for j in repositorio.listar() if j.estado == "concluido"),
+        (
+            j
+            for j in repositorio.listar()
+            if j.estado == "concluido" and j.lixeira is None
+        ),
         key=lambda j: (j.criado_em, j.id),
     )
     escolhidos: list[Candidato] = []

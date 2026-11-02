@@ -235,7 +235,11 @@ def reindexar_jobs(
             else:
                 jobs.append(job)
     else:
-        jobs = [j for j in repositorio.listar() if j.estado == "concluido"]
+        jobs = [
+            j
+            for j in repositorio.listar()
+            if j.estado == "concluido" and j.lixeira is None
+        ]
     for job in jobs:
         nova = reindexar(
             job,

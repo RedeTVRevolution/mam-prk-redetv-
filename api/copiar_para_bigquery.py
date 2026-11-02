@@ -86,7 +86,11 @@ def copiar_jobs(
             else:
                 jobs.append(job)
     else:
-        jobs = [j for j in repositorio.listar() if j.estado == "concluido"]
+        jobs = [
+            j
+            for j in repositorio.listar()
+            if j.estado == "concluido" and j.lixeira is None
+        ]
     for job in jobs:
         resultado[job.id] = copiar(job, repositorio, decupagens, correcoes, copia)
     return resultado

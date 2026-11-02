@@ -37,6 +37,7 @@ from api.jobs import (
 from api.marcas import carregar_marcas
 from api.nuvem import (
     ArmazenamentoStorage,
+    ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     RepositorioDeAprovacaoFirestore,
@@ -357,6 +358,28 @@ def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
 
     with pytest.raises(ServicoIndisponivel):
         next(armazenamento.abrir_decupagem("nao-existe"))
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_arquivos_no_storage_conta_o_que_o_job_tem(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
+    decupagens = armazenamento._cliente.bucket(armazenamento._decupagens)
+    aceitos.blob("job1/proxy.mp4").upload_from_string(b"x")
+    decupagens.blob("job1.json").upload_from_string(b"{}")
+    decupagens.blob("job1/quadros/plano-0.jpg").upload_from_string(b"x")
+    decupagens.blob("job1/quadros/plano-1.jpg").upload_from_string(b"x")
+    decupagens.blob("job2/quadros/plano-0.jpg").upload_from_string(b"x")
+    arquivos = ArquivosNoStorage(
+        armazenamento._cliente, armazenamento._aceitos, armazenamento._decupagens
+    )
+
+    contados = arquivos.contar("job1")
+
+    assert (contados.decupagem, contados.proxy, contados.quadros) == (1, 1, 2)
+    assert contados.copia_limpa == 0
 
 
 def _registro_de_chave(id: str) -> RegistroDeChave:
