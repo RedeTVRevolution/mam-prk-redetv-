@@ -115,12 +115,12 @@ variable "dimensao_dos_vetores" {
   default     = 256
 }
 
-# O índice ANN do quadro-chave fica desligado até a busca por imagem (ADR 0006): cada
-# índice cobra réplicas por hora. O campo do vetor continua na coleção; ligar só cria o
-# índice (make criar-colecao-da-busca, depois do apply).
+# O índice ANN do quadro-chave está ligado no dev desde o #268 (ADR 0006): cada índice
+# cobra réplicas por hora, e com a variável em false o código não calcula o vetor do
+# quadro. Ligar só cria o índice (make criar-colecao-da-busca, depois do apply).
 variable "indice_do_quadro_ligado" {
   type    = bool
-  default = false
+  default = true
 }
 
 # O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima

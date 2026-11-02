@@ -22,6 +22,11 @@ from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
+from api.embedding_do_quadro import (
+    EmbeddingDoQuadro,
+    com_vetores_do_quadro,
+    embedding_do_ambiente,
+)
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
 from api.jobs import (
     CopiaNoBigQuery,
@@ -43,6 +48,10 @@ log = logging.getLogger(__name__)
 
 class LeitorDeDecupagem(Protocol):
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
+
+
+class LeitorDeQuadros(Protocol):
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes: ...
 
 
 def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, Any]:
@@ -113,11 +122,14 @@ def reindexar(
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime] = agora_utc,
     copia: CopiaDosMomentos | None = None,
+    embedding: EmbeddingDoQuadro | None = None,
+    quadros: LeitorDeQuadros | None = None,
 ) -> Indexacao | None:
     """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
 
     Nunca levanta por falha do índice ou da cópia: cada uma fica no seu estado no Job, e
-    uma não impede a outra. `None` se o Job não está `concluido` (não há Decupagem).
+    uma não impede a outra. Com `embedding` e `quadros` (o índice do quadro-chave ligado,
+    ADR 0006), cada plano com quadro leva o vetor multimodal. `None` se o Job não está `concluido` (não há Decupagem).
     """
     if job.estado != "concluido":
         return None
@@ -140,12 +152,16 @@ def reindexar(
         log.exception("decupagem de %s não lida para indexar", job.id)
     else:
         try:
-            indice.gravar(
-                job.id,
-                registros_da_decupagem(
-                    job.id, decupagem, job.programa, job.data_exibicao
-                ),
+            registros = registros_da_decupagem(
+                job.id, decupagem, job.programa, job.data_exibicao
             )
+            if embedding and quadros:
+                registros = com_vetores_do_quadro(
+                    registros,
+                    lambda caminho: quadros.ler_quadro(job.id, caminho),
+                    embedding,
+                )
+            indice.gravar(job.id, registros)
             estado = "indexado"
         except Exception:
             log.exception("indexação falhou para %s", job.id)
@@ -181,6 +197,8 @@ def reindexar_jobs(
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     copia: CopiaDosMomentos | None = None,
+    embedding: EmbeddingDoQuadro | None = None,
+    quadros: LeitorDeQuadros | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -197,7 +215,16 @@ def reindexar_jobs(
     else:
         jobs = [j for j in repositorio.listar() if j.estado == "concluido"]
     for job in jobs:
-        nova = reindexar(job, repositorio, decupagens, correcoes, indice, copia=copia)
+        nova = reindexar(
+            job,
+            repositorio,
+            decupagens,
+            correcoes,
+            indice,
+            copia=copia,
+            embedding=embedding,
+            quadros=quadros,
+        )
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
 
@@ -205,17 +232,20 @@ def reindexar_jobs(
 def main(argv: list[str]) -> int:
     projeto = os.environ["GCP_PROJECT_ID"]
     firestore_ = firestore.Client(project=projeto)
+    decupagens = DecupagensStorage(
+        ClienteStorage(project=projeto),
+        os.environ["BUCKET_ACEITOS"],
+        os.environ["BUCKET_DECUPAGENS"],
+    )
     resultado = reindexar_jobs(
         argv or ([os.environ["JOB_ID"]] if "JOB_ID" in os.environ else None),
         RepositorioFirestore(firestore_),
-        DecupagensStorage(
-            ClienteStorage(project=projeto),
-            os.environ["BUCKET_ACEITOS"],
-            os.environ["BUCKET_DECUPAGENS"],
-        ),
+        decupagens,
         RepositorioDeCorrecoesFirestore(firestore_),
         AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http()),
         copia_do_ambiente(os.environ),
+        embedding_do_ambiente(os.environ),
+        decupagens,
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

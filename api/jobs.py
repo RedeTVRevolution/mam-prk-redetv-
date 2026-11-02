@@ -504,6 +504,10 @@ class Armazenamento(Protocol):
         """URL assinada de leitura do JPEG de `caminho` (o campo `quadro` da Decupagem)."""
         ...
 
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        """O JPEG de `caminho`, para o vetor multimodal da indexação (#268)."""
+        ...
+
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         """O JSON da decupagem, em pedaços."""
         ...
@@ -604,6 +608,9 @@ class ArmazenamentoIndisponivel:
         raise ServicoIndisponivel
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        raise ServicoIndisponivel
+
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
         raise ServicoIndisponivel
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:

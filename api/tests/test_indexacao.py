@@ -348,3 +348,34 @@ def test_correcao_pendente_de_aprovacao_so_entra_na_busca_depois_de_aprovada() -
     mundo.cliente.post(f"/v1/jobs/j1/correcoes/{cid}/aprovar", headers=CURADOR)
 
     assert "na_busca" in _na_busca(mundo)
+
+
+class _EmbeddingFalso:
+    def vetor(self, jpeg: bytes, descricao: str) -> list[float]:
+        return [1.0, 0.0]
+
+
+def test_reindexar_com_embedding_grava_o_vetor_so_nos_planos_com_quadro() -> None:
+    mundo = Mundo()
+    modelo = json.loads(json.dumps(MODELO))
+    modelo["planos"][0]["quadro"] = "quadros/plano-0.jpg"
+    mundo.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
+    mundo.armazenamento.quadros[("j1", "quadros/plano-0.jpg")] = b"jpeg"
+    job = mundo.jobs.obter("j1")
+    assert job
+
+    reindexar(
+        job,
+        mundo.jobs,
+        mundo.armazenamento,
+        mundo.correcoes,
+        mundo.indice,
+        embedding=_EmbeddingFalso(),
+        quadros=mundo.armazenamento,
+    )
+
+    achados = mundo.indice.buscar(Consulta(limite=100))
+    com_vetor = [r for r in achados if r.vetor_do_quadro]
+    assert [r.tipo for r in com_vetor] == ["plano"]
+    assert mundo.indexacao()["estado"] == "indexado"
+    assert len([r for r in achados if r.tipo == "plano"]) == 2

@@ -45,6 +45,7 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
 )
 from api.decupagem import Decupagem
+from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_do_ambiente
 from api.entendimento_da_consulta import ModelArmor
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.indexacao import reindexar
@@ -198,6 +199,7 @@ def criar_app(
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
+    embedding: EmbeddingDoQuadro | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
@@ -283,6 +285,8 @@ def criar_app(
                 indice_da_busca,
                 relogio,
                 copia,
+                embedding,
+                armazenamento_dos_jobs,
             ),
         )
     )
@@ -394,6 +398,7 @@ if _projeto:
             else None
         ),
         copia=copia_do_ambiente(os.environ),
+        embedding=embedding_do_ambiente(os.environ),
         tempo_de_tela=consulta_do_ambiente(os.environ),
         relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(

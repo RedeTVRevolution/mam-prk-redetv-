@@ -764,6 +764,13 @@ class DecupagensStorage:
         except NotFound:
             return None
 
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        return bytes(
+            self._cliente.bucket(self._decupagens)
+            .blob(objeto_do_quadro(job_id, caminho))
+            .download_as_bytes()
+        )
+
     def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
         try:
@@ -1001,6 +1008,13 @@ class ArmazenamentoStorage:
             version="v4", expiration=validade, method="GET", **self._assinatura()
         )
         return url
+
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        return bytes(
+            self._cliente.bucket(self._decupagens)
+            .blob(objeto_do_quadro(job_id, caminho))
+            .download_as_bytes()
+        )
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         blob = self._cliente.bucket(self._decupagens).blob(

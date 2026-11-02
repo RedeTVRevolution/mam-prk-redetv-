@@ -37,6 +37,7 @@ class ArmazenamentoFalso:
         self.cancelados: list[str] = []
         self.decupagens: dict[str, list[bytes]] = {}
         self.comparacoes: dict[str, bytes] = {}
+        self.quadros: dict[tuple[str, str], bytes] = {}
         self.decupagens_indisponiveis = False
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
@@ -53,6 +54,9 @@ class ArmazenamentoFalso:
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/quadros/{job_id}/{caminho}?validade={int(validade.total_seconds())}"
+
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        return self.quadros[(job_id, caminho)]
 
     def ler_comparacao(self, job_id: str) -> bytes | None:
         return self.comparacoes.get(job_id)
