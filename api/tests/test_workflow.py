@@ -979,3 +979,69 @@ def test_dispositivo_so_e_gravado_na_etapa_iniciada() -> None:
     confere = marca.index('["etapas", "mapValue", "fields", etapa]) == null')
     assert confere < marca.index("documents.patch")
     assert "next: fim_do_dispositivo" in marca
+
+
+def _passo_do_inventario() -> str:
+    texto = _texto()
+    return texto[
+        texto.index("- inicia_inventario_de_objetos:") : texto.index(
+            "- inicia_indexacao:"
+        )
+    ]
+
+
+def test_o_inventario_de_objetos_fica_entre_os_quadros_chave_e_a_indexacao() -> None:
+    texto = _texto()
+
+    assert _destino(texto, "quadros_chave") == "inicia_quadros_chave"
+    assert (
+        texto.index("- encerra_quadros_chave:")
+        < texto.index("- inicia_inventario_de_objetos:")
+        < texto.index("- encerra_inventario_de_objetos:")
+        < texto.index("- inicia_indexacao:")
+    )
+    # A falha dos quadros-chave não pula o inventário; a do inventário não pula a indexação.
+    quadros = texto[
+        texto.index("- tira_os_quadros:") : texto.index("- encerra_quadros")
+    ]
+    assert "next: inicia_inventario_de_objetos" in quadros
+    assert 'etapa_inicial == "inventario_de_objetos"' in texto
+    assert "etapa: inventario_de_objetos" in _passo_do_inventario()
+
+
+def test_o_motor_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None:
+    passo = _passo_do_inventario()
+
+    assert '"${motor_objetos}" == "florence"' in passo
+    florence = passo[
+        passo.index("- roda_o_florence:") : passo.index("- roda_o_inventario:")
+    ]
+    assert "call: roda_o_job_com_gpu" in florence
+    assert "job_gpu: ${job_de_objetos_gpu}" in florence
+    assert "job_cpu" not in florence
+    assert "timeout_gpu: 11100" in florence
+    cpu = passo[passo.index("- roda_o_inventario:") :]
+    assert "jobs/${job_de_inventario}" in cpu
+    assert "timeout: 3900" in cpu
+    # O motor gemini pula o Job com GPU.
+    assert passo.index("next: roda_o_florence") < passo.index("next: roda_o_inventario")
+
+
+def test_a_falha_do_inventario_marca_a_etapa_e_segue_para_a_indexacao() -> None:
+    passo = _passo_do_inventario()
+
+    assert passo.count("falhou_na_execucao: true") == 2
+    assert passo.count("next: inicia_indexacao") == 2
+
+
+def test_sem_job_em_cpu_a_gpu_esgotada_repassa_a_falha() -> None:
+    texto = _texto()
+    funcao = texto[texto.index("roda_o_job_com_gpu:\n") :]
+
+    assert (
+        "params: [job_id, etapa, job_gpu, timeout_gpu, job_cpu: null, timeout_cpu: null]"
+        in funcao
+    )
+    assert "$${job_cpu == null}" in funcao
+    assert "raise: $${erro_final}" in funcao
+    assert funcao.index("raise: $${erro_final}") < funcao.index("- registra_o_plano_b:")

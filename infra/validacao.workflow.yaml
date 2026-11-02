@@ -5,14 +5,15 @@
 # `${regiao_gpu}`, com o Job em CPU de `${regiao}` como plano B) e, quando as duas terminam,
 # o Job de análise. Com o Job `concluido`, vêm a
 # identificação (sem internet), as referências (com internet, só nomes) e a comparação (sem
-# internet) (#112), depois os quadros-chave (#115) e a indexação: se um deles falha, o Job
+# internet) (#112), depois os quadros-chave (#115), o inventário de objetos (#244) e a indexação: se um deles falha, o Job
 # de análise já concluiu e a falha só vai ao log e à etapa, e o passo seguinte roda. A análise é um Job, e não uma
 # chamada HTTP, porque passa do teto de 1800 s da chamada do Workflows (#127).
 # Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
 # ${job_de_transcricao}, ${job_de_ocr}, ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
 # ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
-# ${job_de_objetos_gpu}, ${motor_objetos} (o inventário de objetos do Florence-2, #243: o passo
-# ainda não existe aqui),
+# ${job_de_objetos_gpu}, ${motor_objetos}, ${job_de_inventario} (o inventário de objetos, #244:
+# o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
+# entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
 # ${job_de_analise}, ${job_de_identificacao}, ${job_de_referencias}, ${job_de_comparacao},
 # ${job_de_quadros}, ${job_de_indexacao}.
 main:
@@ -58,6 +59,8 @@ main:
             next: inicia_comparacao
           - condition: $${etapa_inicial == "quadros_chave"}
             next: inicia_quadros_chave
+          - condition: $${etapa_inicial == "inventario_de_objetos"}
+            next: inicia_inventario_de_objetos
           - condition: $${etapa_inicial == "indexacao"}
             next: inicia_indexacao
     - inicia_validacao:
@@ -446,12 +449,87 @@ main:
                 args:
                   severity: WARNING
                   text: $${"quadros-chave falharam para " + job_id}
-                next: inicia_indexacao
+                next: inicia_inventario_de_objetos
     - encerra_quadros_chave:
         call: marca_fim
         args:
           job_id: $${job_id}
           etapa: quadros_chave
+          falhou_na_execucao: false
+    - inicia_inventario_de_objetos:
+        call: marca_inicio
+        args:
+          job_id: $${job_id}
+          etapa: inventario_de_objetos
+    - escolhe_o_motor_de_objetos:
+        switch:
+          - condition: $${"${motor_objetos}" == "florence"}
+            next: roda_o_florence
+        next: roda_o_inventario
+    # O Florence-2 num Job com GPU de `${regiao_gpu}`, sem plano B em CPU: esgotada a espera
+    # por GPU, a falha sobe (#244). O inventário em CPU lê o que ele gravou.
+    - roda_o_florence:
+        try:
+          call: roda_o_job_com_gpu
+          args:
+            job_id: $${job_id}
+            etapa: inventario_de_objetos
+            job_gpu: ${job_de_objetos_gpu}
+            # O conector desiste em 1800 s por padrão; o Job de objetos tem até 10800 s.
+            timeout_gpu: 11100
+        except:
+          as: e
+          steps:
+            - grava_a_falha_do_florence:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: inventario_de_objetos
+                  falhou_na_execucao: true
+            # O Job já está concluído; sem o inventário a Decupagem segue valendo. A falha
+            # fica na etapa e no log, e o salto evita o `encerra_inventario_de_objetos`.
+            - registra_a_falha_do_florence:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"o Florence-2 falhou para " + job_id}
+                next: inicia_indexacao
+    # O Job em CPU: converte o resultado do Florence-2 (motor florence) ou olha os
+    # quadros-chave (motor gemini), e grava o inventário na Decupagem.
+    - roda_o_inventario:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_inventario}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            # O conector desiste em 1800 s por padrão; o Job do inventário tem até 3600 s.
+            connector_params:
+              timeout: 3900
+        except:
+          as: e
+          steps:
+            - grava_a_falha_do_inventario:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: inventario_de_objetos
+                  falhou_na_execucao: true
+            - registra_a_falha_do_inventario:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"o inventário de objetos falhou para " + job_id}
+                next: inicia_indexacao
+    - encerra_inventario_de_objetos:
+        call: marca_fim
+        args:
+          job_id: $${job_id}
+          etapa: inventario_de_objetos
           falhou_na_execucao: false
     - inicia_indexacao:
         call: marca_inicio
@@ -739,7 +817,7 @@ etapa_com_gpu:
 # teste depois da publicação): é dessa conta que sai o número de tentativas. O registro da
 # etapa recebe onde rodou (`gpu` ou `cpu`) e as tentativas feitas na GPU.
 roda_o_job_com_gpu:
-  params: [job_id, etapa, job_gpu, job_cpu, timeout_gpu, timeout_cpu]
+  params: [job_id, etapa, job_gpu, timeout_gpu, job_cpu: null, timeout_cpu: null]
   steps:
     - prepara_as_tentativas:
         assign:
@@ -769,6 +847,7 @@ roda_o_job_com_gpu:
                 assign:
                   # A execução que falhou chega como OperationError, com mensagem genérica
                   # no topo e o motivo em `operation.error.message`: as duas entram na conta.
+                  - erro_final: $${erro_da_gpu}
                   - mensagem: $${default(map.get(erro_da_gpu, "message"), "") + " " + default(map.get(erro_da_gpu, ["operation", "error", "message"]), "")}
                   - codigo_http: $${default(map.get(erro_da_gpu, "code"), 0)}
                   - faltou_gpu: $${(codigo_http == 429 or text.match_regex(mensagem, "(?i)quota|capacity|resource.?exhausted|insufficient (gpu|resources|capacity)|no available|out of stock")) and not text.match_regex(mensagem, "(?i)exit[(]|exit code|container called")}
@@ -818,6 +897,25 @@ roda_o_job_com_gpu:
           - esperado: $${esperado + espera}
           - espera: $${math.min(espera * ${gpu_fator_da_espera}, ${gpu_espera_maxima_s})}
         next: conta_a_tentativa
+    # Sem Job em CPU (o inventário de objetos, #244), esgotada a espera a falha sobe.
+    - confere_se_ha_plano_b:
+        switch:
+          - condition: $${job_cpu == null}
+            steps:
+              - registra_a_falta_de_plano_b:
+                  call: sys.log
+                  args:
+                    severity: WARNING
+                    text: $${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", sem plano B: " + mensagem}
+              - marca_a_gpu_sem_plano_b:
+                  call: marca_dispositivo
+                  args:
+                    job_id: $${job_id}
+                    etapa: $${etapa}
+                    dispositivo: gpu
+                    tentativas: $${tentativas}
+              - repassa_a_falta_de_gpu:
+                  raise: $${erro_final}
     - registra_o_plano_b:
         call: sys.log
         args:

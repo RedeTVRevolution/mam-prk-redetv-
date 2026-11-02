@@ -140,13 +140,13 @@ def test_a_conta_do_job_so_toca_o_bucket_das_decupagens() -> None:
     assert linha.group(1).strip() == 'decupagens = "roles/storage.objectUser"'
     # O comentário diz o que a conta faz com o bucket.
     assert "# Lê a Decupagem e os quadros e grava o resultado" in papeis
-    # Nenhum papel no projeto: sem Firestore nem Vertex.
-    assert (
-        "objetos"
-        not in MAIN[
-            MAIN.index("papeis_no_projeto = {") : MAIN.index("papeis_nos_buckets")
-        ]
-    )
+    # No projeto, só a Vertex (o Job do inventário chama o Gemini): sem Firestore.
+    projeto = MAIN[
+        MAIN.index("papeis_no_projeto = {") : MAIN.index("papeis_nos_buckets")
+    ]
+    linha_do_projeto = re.search(r"^\s+objetos\s+= \[(.*)\]$", projeto, re.MULTILINE)
+    assert linha_do_projeto
+    assert linha_do_projeto.group(1) == '"roles/aiplatform.user"'
 
 
 def test_o_job_de_objetos_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu() -> None:
@@ -230,3 +230,40 @@ def test_deploy_dev_publica_e_testa_o_job_de_objetos_pelo_digest() -> None:
     assert '-var "imagem_objetos=$IMAGEM_OBJETOS"' in deploy
     assert "job_de_objetos_gpu),$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS" in deploy
     assert "as sete imagens" in deploy
+
+
+def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_motor_e_o_modelo() -> None:
+    job = _bloco('resource "google_cloud_run_v2_job" "inventario"')
+
+    assert 'name                = "mam-inventario"' in job
+    assert "location            = var.regiao" in job
+    assert 'google_service_account.mam["objetos"].email' in job
+    assert "image   = var.imagem_validacao" in job
+    assert 'args    = ["-m", "api.inventario_job"]' in job
+    assert "nvidia" not in job
+    assert 'egress = "ALL_TRAFFIC"' in job
+    assert "google_compute_subnetwork.validacao.id" in job
+    assert 'value = local.buckets["decupagens"]' in job
+    assert "value = var.motor_objetos" in job
+    assert "value = var.modelo_objetos" in job
+    assert "max_retries     = 0" in job
+
+
+def test_o_modelo_do_inventario_e_o_flash_lite_do_gemini() -> None:
+    from api.gemini import MODELO
+
+    assert f'default     = "{MODELO}"' in _bloco('variable "modelo_objetos"')
+
+
+def test_a_orquestracao_roda_o_job_do_inventario_e_o_workflows_o_recebe() -> None:
+    iam = _bloco(
+        'resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_inventario"'
+    )
+    assert "google_cloud_run_v2_job.inventario.name" in iam
+    assert 'role     = "roles/run.developer"' in iam
+    assert re.search(
+        r"job_de_inventario\s+= google_cloud_run_v2_job\.inventario\.name", MAIN
+    )
+    assert "google_cloud_run_v2_job.inventario.name" in _bloco(
+        'output "job_de_inventario"'
+    )

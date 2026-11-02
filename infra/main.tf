@@ -214,6 +214,15 @@ variable "motor_objetos" {
   }
 }
 
+# O modelo do Gemini do inventário de objetos (#244): converte o texto do Florence-2 para o
+# português (motor florence) ou olha os quadros-chave (motor gemini). O mesmo Flash-Lite do
+# restante (`api/gemini.py`, ADR 0004).
+variable "modelo_objetos" {
+  description = "Modelo do Gemini do inventário de objetos"
+  type        = string
+  default     = "gemini-3.5-flash-lite"
+}
+
 provider "google" {
   project        = var.projeto
   region         = var.regiao
@@ -438,7 +447,9 @@ locals {
     # também grava as sugestões de perfil.
     identificacao = ["roles/datastore.user", "roles/aiplatform.user"]
     comparacao    = ["roles/datastore.user", "roles/aiplatform.user"]
-    orquestracao  = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
+    # O Job do inventário chama o Gemini (texto, ou os quadros); não toca o Firestore.
+    objetos      = ["roles/aiplatform.user"]
+    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
     build = ["roles/logging.logWriter"]
   }
@@ -472,6 +483,8 @@ locals {
     # Lê a Decupagem e os quadros e grava o resultado do Florence-2 ao lado deles
     # (`<job>/objetos/florence.json`; objectUser, porque o reprocessamento o sobrescreve).
     # Só este bucket: o Job não lê o proxy nem toca o Firestore.
+    # O Job em CPU do inventário (#244) usa a mesma conta: lê o resultado e os quadros e
+    # regrava a Decupagem com o inventário no mesmo bucket.
     objetos = { decupagens = "roles/storage.objectUser" }
   }
 }
@@ -1162,6 +1175,90 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_objetos_gpu" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
+# Job do inventário de objetos em CPU (#244): lê o resultado bruto do Florence-2 (ou os
+# quadros-chave, com o motor gemini) e chama o Gemini pela Vertex, sem internet (só o
+# acesso privado do Google, como a identificação); regrava a Decupagem com o inventário.
+# O Workflows o roda depois do Job com GPU (motor florence) ou sozinho (motor gemini).
+resource "google_cloud_run_v2_job" "inventario" {
+  name                = "mam-inventario"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["objetos"].email
+      max_retries     = 0
+      # NÃO medido: lotes de 20 planos (florence, só texto) ou de 4 planos com imagens
+      # (gemini), ~190 planos por hora de vídeo; segundos por chamada. Um programa de 4 h
+      # são ~760 planos: ~40 chamadas no florence, ~190 no gemini; a ~30 s cada no pior caso
+      # são ~1,6 h no gemini, então 3600 s só cobrem o florence com folga: o motor gemini
+      # precisa do timeout medido no dev.
+      timeout = "3600s"
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao.id
+        }
+      }
+      containers {
+        image   = var.imagem_validacao
+        command = ["python"]
+        args    = ["-m", "api.inventario_job"]
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "MOTOR_OBJETOS"
+          value = var.motor_objetos
+        }
+        env {
+          name  = "MODELO_OBJETOS"
+          value = var.modelo_objetos
+        }
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        resources {
+          # Os quadros do motor gemini são lidos em memória, lote a lote (4 planos, 2 a 3
+          # quadros de resolução cheia cada); o volume é só o TMPDIR.
+          limits = {
+            cpu    = "2"
+            memory = "4Gi"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "1Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# A orquestração roda o Job do inventário, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_inventario" {
+  name     = google_cloud_run_v2_job.inventario.name
+  location = google_cloud_run_v2_job.inventario.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
 # A orquestração roda o Job com override de JOB_ID.
 resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda" {
   name     = google_cloud_run_v2_job.validacao.name
@@ -1683,6 +1780,7 @@ resource "google_workflows_workflow" "validacao" {
     job_de_ocr_gpu         = google_cloud_run_v2_job.ocr_gpu.name
     job_de_objetos_gpu     = google_cloud_run_v2_job.objetos_gpu.name
     motor_objetos          = var.motor_objetos
+    job_de_inventario      = google_cloud_run_v2_job.inventario.name
     job_de_analise         = google_cloud_run_v2_job.analise.name
     job_de_identificacao   = google_cloud_run_v2_job.identificacao.name
     job_de_referencias     = google_cloud_run_v2_job.referencias.name
@@ -1896,6 +1994,10 @@ output "job_de_ocr_gpu" {
 
 output "job_de_objetos_gpu" {
   value = google_cloud_run_v2_job.objetos_gpu.name
+}
+
+output "job_de_inventario" {
+  value = google_cloud_run_v2_job.inventario.name
 }
 
 output "gpu_espera_total_s" {
