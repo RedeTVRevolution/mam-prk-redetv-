@@ -194,6 +194,60 @@ variable "limite_de_comparacoes" {
   default     = 8
 }
 
+variable "regiao_da_avaliacao" {
+  description = "Região do serviço de avaliação da Vertex (evaluateInstances é regional, não global)"
+  type        = string
+  default     = "us-central1"
+}
+
+variable "modelo_do_juiz" {
+  description = "Modelo juiz da avaliação por rubrica (#255); confira no console se a região o oferece"
+  type        = string
+  default     = "gemini-2.5-flash"
+}
+
+variable "fracao_da_avaliacao" {
+  description = "Fração dos vídeos concluídos no dia que a avaliação por rubrica examina (no mínimo 1 por programa)"
+  type        = number
+  default     = 0.1
+}
+
+variable "limiar_da_avaliacao" {
+  description = "Nota média (0 a 100) de um requisito abaixo da qual a avaliação grava o log de queda"
+  type        = number
+  default     = 60
+}
+
+variable "queda_maxima_da_avaliacao" {
+  description = "Pontos que a média de um requisito pode cair da média dos dias anteriores antes do log de queda"
+  type        = number
+  default     = 10
+}
+
+variable "janela_da_avaliacao_dias" {
+  description = "Quantos dias anteriores formam a média de comparação da queda"
+  type        = number
+  default     = 7
+}
+
+variable "preco_por_mil_caracteres_da_avaliacao" {
+  description = "US$ por mil caracteres do serviço de avaliação, para o custo estimado no log; vazio: não estima (preço não confirmado, #255)"
+  type        = string
+  default     = ""
+}
+
+variable "agenda_da_avaliacao" {
+  description = "Cron (formato do Cloud Scheduler) da avaliação diária"
+  type        = string
+  default     = "0 23 * * *"
+}
+
+variable "fuso_da_agenda" {
+  description = "Fuso da agenda da avaliação"
+  type        = string
+  default     = "America/Sao_Paulo"
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -272,6 +326,7 @@ resource "google_project_service" "apis" {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "run.googleapis.com",
+    "cloudscheduler.googleapis.com", # agendamento diário da avaliação por rubrica (#255)
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
   ])
@@ -454,7 +509,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "avaliacao", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -494,7 +549,14 @@ locals {
     identificacao = ["roles/datastore.user", "roles/aiplatform.user"]
     comparacao    = ["roles/datastore.user", "roles/aiplatform.user"]
     # O Job do inventário chama o Gemini (texto, ou os quadros); não toca o Firestore.
-    objetos      = ["roles/aiplatform.user"]
+    objetos = ["roles/aiplatform.user"]
+    # A avaliação (#255) lê os Jobs, grava as notas no Firestore e chama o serviço de
+    # avaliação da Vertex. Papel sob medida do #302 ainda não existe: aiplatform.user por
+    # enquanto; o serviço de avaliação chama o juiz (Gemini) e a conta precisa de
+    # aiplatform.endpoints.predict e aiplatform.evaluationTasks.* ou equivalente (a confirmar).
+    avaliacao = ["roles/datastore.user", "roles/aiplatform.user"]
+    # O agendador só dispara o Job da avaliação (papel no próprio Job, mais abaixo).
+    agendador    = []
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
     build = ["roles/logging.logWriter"]
@@ -532,6 +594,8 @@ locals {
     # O Job em CPU do inventário (#244) usa a mesma conta: lê o resultado e os quadros e
     # regrava a Decupagem com o inventário no mesmo bucket.
     objetos = { decupagens = "roles/storage.objectUser" }
+    # Só lê a Decupagem.
+    avaliacao = { decupagens = "roles/storage.objectViewer" }
   }
 }
 
@@ -1820,6 +1884,99 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_comparacao" {
   location = google_cloud_run_v2_job.comparacao.location
   role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
+}
+
+# Avaliação diária por rubrica (#255): o Job lê a amostra do dia e grava as notas; o
+# Cloud Scheduler o dispara todo dia. Sem rede da VPC: só fala com APIs do Google.
+resource "google_cloud_run_v2_job" "avaliacao" {
+  name                = "mam-avaliacao"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["avaliacao"].email
+      max_retries     = 0
+      # NÃO medido: 5 chamadas ao juiz por vídeo sorteado; 1800 s dão folga larga.
+      timeout = "1800s"
+      containers {
+        image   = var.imagem_validacao
+        command = ["python"]
+        args    = ["-m", "api.avaliacao_job"]
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "REGIAO_DA_AVALIACAO"
+          value = var.regiao_da_avaliacao
+        }
+        env {
+          name  = "MODELO_DO_JUIZ"
+          value = var.modelo_do_juiz
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "FRACAO_DA_AVALIACAO"
+          value = tostring(var.fracao_da_avaliacao)
+        }
+        env {
+          name  = "LIMIAR_DA_AVALIACAO"
+          value = tostring(var.limiar_da_avaliacao)
+        }
+        env {
+          name  = "QUEDA_MAXIMA_DA_AVALIACAO"
+          value = tostring(var.queda_maxima_da_avaliacao)
+        }
+        env {
+          name  = "JANELA_DA_AVALIACAO_DIAS"
+          value = tostring(var.janela_da_avaliacao_dias)
+        }
+        env {
+          name  = "PRECO_POR_MIL_CARACTERES"
+          value = var.preco_por_mil_caracteres_da_avaliacao
+        }
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "1Gi"
+          }
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# O agendador só pode rodar este Job.
+resource "google_cloud_run_v2_job_iam_member" "agendador_roda_avaliacao" {
+  name     = google_cloud_run_v2_job.avaliacao.name
+  location = google_cloud_run_v2_job.avaliacao.location
+  role     = "roles/run.invoker"
+  member   = google_service_account.mam["agendador"].member
+}
+
+resource "google_cloud_scheduler_job" "avaliacao" {
+  name      = "mam-avaliacao-diaria"
+  region    = var.regiao
+  schedule  = var.agenda_da_avaliacao
+  time_zone = var.fuso_da_agenda
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.avaliacao.location}/jobs/${google_cloud_run_v2_job.avaliacao.name}:run"
+    oauth_token {
+      service_account_email = google_service_account.mam["agendador"].email
+    }
+  }
+  depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao]
 }
 
 # Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Jobs de identificação, referências e comparação -> Job de quadros -> Job de indexação.

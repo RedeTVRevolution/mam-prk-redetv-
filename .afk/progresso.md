@@ -402,3 +402,13 @@ Não corrigido / decisão humana:
 - Renomear junto com `item.tempos` de uma das aparições: o caso do renomear usa os tempos do modelo naquela aparição.
 - `reservado` revalidado na leitura: mudar `PERCENTUAL_RESERVADO` invalida os casos. É de propósito (o sorteio não pode mudar).
 - Smells: validação "início depois do fim" repetida, tabelas por tipo que repetem parte do `TIPOS` de `correcoes.py`, `id` como nome. Refatoração sem bug.
+- 2026-11-02 10:16:57 · #253: feito
+- 2026-11-02 10:17:02 · iteração 53: #255
+
+## #255 iteração 54 (feito, `make verificar` verde)
+- Pronto: `api/avaliacao.py` (amostra reproduzível por hash de semente+dia+id, ao menos 1 por programa; `api/rubricas.toml` com os 5 requisitos; `AvaliadorVertex` sobre `evaluateInstances` ponto a ponto, nota 1–5 → 0–100; regra de queda e log `queda_de_qualidade`), `api/avaliacao_job.py` (Job idempotente por dia, grava coleção `avaliacoes` com `versao_pipeline`), `RepositorioDeAvaliacoesFirestore` em `nuvem.py`, Terraform (Job `avaliacao`, Scheduler, contas `avaliacao` e `agendador`, API do Scheduler, variáveis), testes.
+- Decisões: "concluído no dia" = Job `concluido` com `atualizado_em` no dia UTC (reprocesso/correção reentra); lê todos os concluídos e filtra em memória (escala de PoC). Papel da Vertex: `aiplatform.user` (o #302 ainda não existe), comentado no Terraform.
+- Não confirmado (sem acesso à doc completa): o preço do serviço, o modelo juiz padrão e as permissões extras. Preço entra por `preco_por_mil_caracteres_da_avaliacao` (vazio = sem estimativa); o custo por vídeo sai no log `avaliacao_do_dia`. O PR precisa medir o custo real no dev. A região do serviço (`us-central1`) e o `gemini-2.5-flash` são palpites a conferir.
+- A API só aceita texto: os quadros-chave entram pelas descrições/caminhos na Decupagem, não como imagem. Decisão humana se for preciso imagem de fato.
+- Permissões: nada a dar à mão (`cloudscheduler.admin` já está no wizard).
+- Armadilha: `terraform init` altera `infra/.terraform.lock.hcl`; reverta.
