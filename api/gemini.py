@@ -208,6 +208,9 @@ class TransporteVertex:
         self._projeto = projeto
         self._sessao = sessao
         self.versao_do_modelo = ""  # a da última resposta; só o cassete a lê
+        # Somados desde a criação do transporte; só a comparação dos motores os lê.
+        self.tokens_de_entrada = 0
+        self.tokens_de_saida = 0
 
     def gerar(self, chamada: Chamada) -> str:
         url = (
@@ -280,6 +283,11 @@ class TransporteVertex:
         except ValueError as e:  # 200 com corpo que não é JSON: falha do servidor
             raise ErroHttp(502) from e
         self.versao_do_modelo = dados.get("modelVersion", "")
+        uso = dados.get("usageMetadata") or {}
+        self.tokens_de_entrada += uso.get("promptTokenCount", 0)
+        self.tokens_de_saida += uso.get("candidatesTokenCount", 0) + uso.get(
+            "thoughtsTokenCount", 0
+        )
         partes = (
             (dados.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         )

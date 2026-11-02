@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos
 
 instalar:
 	uv sync --locked
@@ -101,6 +101,18 @@ sondar-busca:
 	BUSCA_DISTANCIA_MAXIMA="$${BUSCA_DISTANCIA_MAXIMA:-$$(terraform -chdir=infra output -raw busca_distancia_maxima)}" \
 	BUSCA_PALAVRAS_MINIMAS="$${BUSCA_PALAVRAS_MINIMAS:-$$(terraform -chdir=infra output -raw busca_palavras_minimas)}" \
 	uv run --locked python -m api.sondar_busca
+
+# Comparação dos motores do inventário de objetos (#244): make comparar-objetos JOB=<id> [PASTA=comparacao-objetos]
+# Roda o Job do Florence-2 com o destino alternativo (a Decupagem não muda) e, aqui, a
+# conversão e os modelos do Gemini; guarda por motor o inventário, os tokens, o tempo e o custo.
+# MODELOS_DA_COMPARACAO e PRECOS_DOS_MODELOS (modelo=entrada:saida, US$ por milhão de tokens) vêm do ambiente.
+comparar-objetos:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	REGIAO_GPU="$${REGIAO_GPU:-$$(terraform -chdir=infra output -raw regiao_gpu)}" \
+	JOB_DE_OBJETOS_GPU="$${JOB_DE_OBJETOS_GPU:-$$(terraform -chdir=infra output -raw job_de_objetos_gpu)}" \
+	uv run --locked python -m api.comparar_objetos "$(JOB)" "$(or $(PASTA),comparacao-objetos)"
 
 # Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
 # make reindexar [JOB=<id>]. Apaga e regrava o vídeo; repetir dá o mesmo resultado.

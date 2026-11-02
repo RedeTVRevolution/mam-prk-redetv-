@@ -425,6 +425,22 @@ def test_transporte_vertex_guarda_a_versao_que_a_vertex_informa() -> None:
     assert transporte.versao_do_modelo == "gemini-3.5-flash-lite-001"
 
 
+def test_transporte_vertex_soma_os_tokens_das_respostas() -> None:
+    corpo = {
+        "candidates": [],
+        "usageMetadata": {
+            "promptTokenCount": 100,
+            "candidatesTokenCount": 20,
+            "thoughtsTokenCount": 5,
+        },
+    }
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo)))
+
+    transporte.gerar(_chamada())
+
+    assert (transporte.tokens_de_entrada, transporte.tokens_de_saida) == (100, 25)
+
+
 @pytest.mark.parametrize("status", [429, 500, 503])
 def test_transporte_vertex_converte_status_diferente_de_200_em_erro_http(
     status: int,
