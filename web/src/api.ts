@@ -3,6 +3,7 @@ import type { Autenticador } from './auth/autenticador.ts'
 import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
+import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
 import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
 import { parametrosDoRelatorio } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
@@ -127,6 +128,10 @@ export interface ClienteDaApi {
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
   tempoDeTelaEmCsv(filtros: FiltrosDoRelatorio): Promise<Blob>
+  /** `GET /v1/relatorios/marcas`: inserções, tempo e vídeos por marca e por tipo de inserção. */
+  marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
+  /** O mesmo relatório em CSV. */
+  marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
   nomes: ClienteDeNomes
   job(id: string): ClienteDoJob
 }
@@ -245,6 +250,9 @@ export function criarClienteDaApi(
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
     tempoDeTelaEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),
+    marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
+    marcasEmCsv: async (filtros) =>
+      (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),
     nomes: {
       achar: (catalogo, q) => chamar(`/v1/catalogo/${catalogo}?q=${encodeURIComponent(q)}`),
       criar: (catalogo, nome) => chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } }),

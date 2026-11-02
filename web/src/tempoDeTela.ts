@@ -47,22 +47,28 @@ export function filtrosDoRelatorio(busca: string): FiltrosDoRelatorio {
   return { programa: p.get('programa') ?? '', de: data('de'), ate: data('ate') }
 }
 
-/** A query do endereço da tela (vazia sem filtros). */
-export function filtrosParaEndereco(f: FiltrosDoRelatorio): string {
+/** A query do endereço da tela (vazia sem filtros); `extras` são os filtros próprios de cada relatório. */
+export function filtrosParaEndereco(f: FiltrosDoRelatorio, extras: Record<string, string> = {}): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)
   if (f.de) p.set('de', f.de)
   if (f.ate) p.set('ate', f.ate)
+  for (const [nome, valor] of Object.entries(extras)) if (valor) p.set(nome, valor)
   const query = p.toString()
   return query ? `?${query}` : ''
 }
 
-/** A query de `GET /v1/relatorios/tempo-de-tela` para estes filtros. */
-export function parametrosDoRelatorio(f: FiltrosDoRelatorio, formato?: 'csv'): string {
+/** A query de `GET /v1/relatorios/...` para estes filtros (`extras`: os próprios de cada relatório). */
+export function parametrosDoRelatorio(
+  f: FiltrosDoRelatorio,
+  formato?: 'csv',
+  extras: Record<string, string> = {},
+): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)
   if (f.de) p.set('desde', f.de)
   if (f.ate) p.set('ate', f.ate)
+  for (const [nome, valor] of Object.entries(extras)) if (valor) p.set(nome, valor)
   if (formato) p.set('formato', formato)
   return p.toString()
 }

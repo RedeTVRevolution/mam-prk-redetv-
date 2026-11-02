@@ -93,6 +93,11 @@ from api.passadas import (
 )
 from api.programas import PERFIS
 from api.progresso_das_janelas import JanelasDoJob
+from api.relatorio_de_marcas import (
+    ConsultaDeInsercoes,
+    criar_rotas_das_marcas,
+)
+from api.relatorio_de_marcas import consulta_do_ambiente as marcas_do_ambiente
 from api.reprocessamento import (
     DisparoDoWorkflow,
     DisparoIndisponivel,
@@ -194,6 +199,7 @@ def criar_app(
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
+    relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
@@ -343,6 +349,7 @@ def criar_app(
         )
     )
     v1.include_router(criar_rotas_dos_relatorios(tempo_de_tela, repositorio_de_jobs))
+    v1.include_router(criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs))
     app.include_router(v1)
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
@@ -388,6 +395,7 @@ if _projeto:
         ),
         copia=copia_do_ambiente(os.environ),
         tempo_de_tela=consulta_do_ambiente(os.environ),
+        relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],

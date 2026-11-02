@@ -8,27 +8,31 @@ feita aqui, sobre as linhas que voltam. Um período grande demais para uma respo
 (10 MB) falha alto: peça um período menor.
 """
 
-import csv
-import io
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from api.auth import ChamadorAutenticado, Usuario
 from api.copia_bigquery import (
     TIPOS_DAS_PESSOAS,
     ConfigDoBigQuery,
     CopiaEmMemoria,
     Transporte,
-    _parametro,
-    transporte_http,
 )
-from api.jobs import RepositorioDeJobs, _confere_permissao
+from api.jobs import RepositorioDeJobs
+from api.relatorios import (
+    PodeVerORelatorio,
+    confere_o_pedido,
+    config_e_transporte_do_ambiente,
+    consultar_no_bigquery,
+    csv_em_texto,
+    linhas_da_copia,
+    ou_503,
+    resposta_em_csv,
+)
 
 TIPOS_DO_RELATORIO = TIPOS_DAS_PESSOAS
 COLUNAS_DO_CSV = (
@@ -68,25 +72,13 @@ class ConsultaEmMemoria:
     def momentos(
         self, programa: str | None, desde: date | None, ate: date | None
     ) -> list[MomentoDaPessoa]:
-        achados: list[MomentoDaPessoa] = []
-        for linhas in self._copia.por_job.values():
-            for x in linhas:
-                dia = x.data_de_exibicao
-                if x.tipo not in TIPOS_DO_RELATORIO:
-                    continue
-                if programa is not None and x.programa != programa:
-                    continue
-                if (desde or ate) and dia is None:
-                    continue
-                if (desde and dia and dia < desde) or (ate and dia and dia > ate):
-                    continue
-                achados += [
-                    MomentoDaPessoa(
-                        x.job_id, p.id, p.nome, x.tipo, x.inicio_ms, x.fim_ms
-                    )
-                    for p in x.pessoas
-                ]
-        return achados
+        return [
+            MomentoDaPessoa(x.job_id, p.id, p.nome, x.tipo, x.inicio_ms, x.fim_ms)
+            for x in linhas_da_copia(
+                self._copia, TIPOS_DO_RELATORIO, programa, desde, ate
+            )
+            for p in x.pessoas
+        ]
 
 
 class ConsultaBigQuery:
@@ -99,53 +91,27 @@ class ConsultaBigQuery:
     def momentos(
         self, programa: str | None, desde: date | None, ate: date | None
     ) -> list[MomentoDaPessoa]:
-        c = self._config
-        tipos = ", ".join(f"'{t}'" for t in TIPOS_DO_RELATORIO)
-        condicoes = [f"t.tipo IN ({tipos})", "p.id IS NOT NULL"]
-        parametros: list[dict[str, Any]] = []
-        if programa is not None:
-            condicoes.append("t.programa = @programa")
-            parametros.append(_parametro("programa", programa))
-        for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
-            if dia is not None:
-                condicoes.append(f"t.data_de_exibicao {comparacao} @{nome}")
-                parametros.append(_parametro(nome, dia.isoformat(), "DATE"))
-        consulta = (
-            "SELECT t.job_id, p.id, p.nome, t.tipo, t.inicio_ms, t.fim_ms\n"
-            f"FROM `{c.projeto}.{c.dataset}.{c.tabela}` AS t, UNNEST(t.pessoas) AS p\n"
-            f"WHERE {' AND '.join(condicoes)}"
+        linhas = consultar_no_bigquery(
+            self._config,
+            self._transporte,
+            colunas="t.job_id, p.id, p.nome, t.tipo, t.inicio_ms, t.fim_ms",
+            tipos=TIPOS_DO_RELATORIO,
+            programa=programa,
+            desde=desde,
+            ate=ate,
+            unnest_das_pessoas=True,
+            condicoes=["p.id IS NOT NULL"],
         )
-        resposta = self._transporte(
-            {
-                "query": consulta,
-                "useLegacySql": False,
-                "location": c.regiao,
-                "timeoutMs": 60_000,
-                "maxResults": 100_000,
-                "queryParameters": parametros,
-            }
-        )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError("consulta do tempo de tela não terminou no prazo")
-        if resposta.get("pageToken"):
-            raise RuntimeError(
-                "o relatório não cabe numa resposta: peça um período menor"
-            )
-        achados: list[MomentoDaPessoa] = []
-        for linha in resposta.get("rows", []):
-            v = [campo["v"] for campo in linha["f"]]
-            achados.append(
-                MomentoDaPessoa(v[0], v[1], v[2] or "", v[3], int(v[4]), int(v[5]))
-            )
-        return achados
+        return [
+            MomentoDaPessoa(v[0], v[1], v[2] or "", v[3], int(v[4]), int(v[5]))
+            for v in linhas
+        ]
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
     """A consulta configurada, ou `None` se o ambiente não diz onde a cópia mora."""
-    if "BIGQUERY_DATASET" not in ambiente:
-        return None
-    config = ConfigDoBigQuery.do_ambiente(ambiente)
-    return ConsultaBigQuery(config, transporte_http(config.projeto))
+    onde = config_e_transporte_do_ambiente(ambiente)
+    return ConsultaBigQuery(*onde) if onde else None
 
 
 class VideoDaPessoa(BaseModel):
@@ -232,37 +198,22 @@ def relatorio(momentos: list[MomentoDaPessoa]) -> list[PessoaNoRelatorio]:
     return pessoas
 
 
-def _celula(texto: str) -> str:
-    """O nome que começa como fórmula não vira fórmula na planilha."""
-    return f"'{texto}" if texto[:1] in ("=", "+", "-", "@", "\t", "\r") else texto
-
-
 def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
-    saida = io.StringIO()
-    escritor = csv.writer(saida, lineterminator="\n")
-    escritor.writerow(COLUNAS_DO_CSV)
-    for p in pessoas:
-        escritor.writerow(
+    return csv_em_texto(
+        COLUNAS_DO_CSV,
+        [
             [
                 p.pessoa_id,
-                _celula(p.nome),
+                p.nome,
                 p.tempo_de_tela_ms,
                 p.videos,
                 p.aparicoes,
                 p.mencoes_na_fala,
                 p.mencoes_no_texto,
             ]
-        )
-    return saida.getvalue()
-
-
-def _exige_ver_o_relatorio(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: pessoa com `decupagem.ver`. A cópia não guarda o sistema dono do
-    vídeo, então uma chave de sistema veria os vídeos dos outros: não consulta."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não consulta o relatório")
-    _confere_permissao(request, chamador, "decupagem.ver")
-    return chamador
+            for p in pessoas
+        ],
+    )
 
 
 def criar_rotas_dos_relatorios(
@@ -272,7 +223,7 @@ def criar_rotas_dos_relatorios(
 
     @rotas.get("/tempo-de-tela", response_model=RelatorioDeTempoDeTela)
     def tempo_de_tela(
-        _pessoa: Annotated[Usuario, Depends(_exige_ver_o_relatorio)],
+        _pessoa: PodeVerORelatorio,
         programa: Annotated[str | None, Query(max_length=100)] = None,
         desde: date | None = None,
         ate: date | None = None,
@@ -281,22 +232,10 @@ def criar_rotas_dos_relatorios(
         """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa
         (ou com `programa=` vazio), todos."""
         programa = programa or None
-        if consulta is None:
-            raise HTTPException(503, "O BigQuery não está configurado neste ambiente")
-        if desde and ate and desde > ate:
-            raise HTTPException(422, "`desde` não pode ser depois de `ate`")
-        try:
-            pessoas = relatorio(consulta.momentos(programa, desde, ate))
-        except RuntimeError as e:
-            raise HTTPException(503, str(e)) from e
+        fonte = confere_o_pedido(consulta, desde, ate)
+        pessoas = ou_503(lambda: relatorio(fonte.momentos(programa, desde, ate)))
         if formato == "csv":
-            return Response(
-                em_csv(pessoas),
-                media_type="text/csv; charset=utf-8",
-                headers={
-                    "Content-Disposition": 'attachment; filename="tempo-de-tela.csv"'
-                },
-            )
+            return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
         nomes: dict[str, str | None] = {}
         for p in pessoas:
             for v in p.por_video:
