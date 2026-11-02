@@ -289,7 +289,7 @@ PAPEIS_DA_TERRAFORM=(
   roles/identityplatform.admin
   roles/monitoring.editor
   roles/logging.configWriter
-  roles/compute.networkAdmin
+  roles/compute.networkAdmin # rede mam-validacao dos Jobs e apagar a rede default (#301)
   roles/iam.workloadIdentityPoolAdmin
   roles/cloudbuild.builds.editor
   roles/secretmanager.admin # cria o segredo do SerpAPI (google_secret_manager_secret.serpapi) e dá acesso a ele (referencias_le_serpapi)

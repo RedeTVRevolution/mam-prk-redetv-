@@ -112,11 +112,6 @@ scripts/aplicar-sem-destruir.sh -var "imagem=$IMAGEM" -var "imagem_validacao=$IM
   -var "imagem_transcricao_gpu=$IMAGEM_TRANSCRICAO_GPU" -var "imagem_ocr_gpu=$IMAGEM_OCR_GPU" \
   -var "imagem_objetos=$IMAGEM_OBJETOS"
 
-# A rede default não é usada por nada do MAM (#301): sai depois do apply completo, que já
-# provou que os Jobs usam a mam-validacao.
-GCP_PROJECT_ID=$GCP_PROJECT_ID GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT \
-  scripts/apagar-rede-default.sh
-
 # Teste dos Jobs com GPU (#238), só dos que mudaram: se não passar, o script volta os Jobs
 # para a imagem anterior e esta publicação falha, e o Workflows não manda vídeo para uma
 # imagem com GPU quebrada. Os Jobs em CPU não entram.
@@ -142,3 +137,9 @@ else
   curl -sSf "$URL/v1/health" >/dev/null
   echo "No ar: $URL (/v1/health respondeu 200)"
 fi
+
+# A rede default não é usada por nada do MAM (#301): sai por último, depois do apply completo,
+# que já provou que os Jobs usam a mam-validacao, e dos testes, que não ficam para trás se
+# apagar a rede falhar.
+GCP_PROJECT_ID=$GCP_PROJECT_ID GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT \
+  scripts/apagar-rede-default.sh

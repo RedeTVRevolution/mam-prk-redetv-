@@ -11,7 +11,10 @@ set -euo pipefail
 : "${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?}"
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 
-if ! gc compute networks describe default >/dev/null 2>&1; then
+# Por `list` e não `describe`: o describe falha igual sem a rede e sem permissão, e um erro
+# de acesso não pode passar por "já não existe".
+REDE=$(gc compute networks list --filter='name=default' --format='value(name)')
+if [[ -z $REDE ]]; then
   echo "A rede default já não existe."
   exit 0
 fi
