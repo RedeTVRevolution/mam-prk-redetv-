@@ -1,7 +1,19 @@
 /** O trecho marcado com I e O e o que se diz que há nele: os campos de cada aba e os pedidos que geram. */
 import type { CatalogoDeCorrecoes, Opcao } from './catalogo.ts'
 import type { Pessoa } from './decupagem.ts'
-import { camposDeTempo, camposDoObjeto, type CampoDoEditor, SEM_DONO, type Editor, montar, type Pedido, texto, temposDosCampos, type Valor } from './catalogacao.ts'
+import {
+  camposDeTempo,
+  camposDoObjeto,
+  type CampoDoEditor,
+  coresDaLista,
+  type Editor,
+  montar,
+  type Pedido,
+  SEM_DONO,
+  texto,
+  temposDosCampos,
+  type Valor,
+} from './catalogacao.ts'
 import { type Intervalo, relogio } from './linhaDoTempo.ts'
 
 export type AbaDoTrecho = 'pessoa' | 'objeto' | 'marca' | 'texto' | 'pauta'
@@ -32,7 +44,7 @@ const ONDE_E_CITADA: Opcao[] = [
 export const MOTIVO_DO_TRECHO = 'trecho marcado pelo editor'
 
 /** O editor da aba: os campos do tipo, mais os tempos do trecho (que as alças também ajustam). */
-export function editorDoTrecho(aba: AbaDoTrecho, trecho: Intervalo, c: CatalogoDeCorrecoes, pessoas: Pessoa[] = []): Editor {
+export function editorDoTrecho(aba: AbaDoTrecho, trecho: Intervalo, c: CatalogoDeCorrecoes, pessoas: Pessoa[]): Editor {
   const tempos = { inicio: relogio(trecho.inicio_ms), fim: relogio(trecho.fim_ms) }
   const comTempos = (
     gerar: (v: Record<string, Valor>, t: Intervalo) => Pedido[] | null,
@@ -116,8 +128,8 @@ export function editorDoTrecho(aba: AbaDoTrecho, trecho: Intervalo, c: CatalogoD
           },
           ['objeto.acrescentar'],
           comTempos((v, t) => {
-            const cores = c.cores_base.map((x) => x.valor).filter((x) => (v.cor_base as string[]).includes(x))
-            if (!texto(v.tipo) || !v.categoria || cores.length > 2) return null
+            const cores = coresDaLista(v, c)
+            if (!texto(v.tipo) || !v.categoria || !cores) return null
             const dono = String(v.dono ?? SEM_DONO)
             if (dono !== SEM_DONO && !v.relacao) return null
             return acrescentar('objeto.acrescentar', {

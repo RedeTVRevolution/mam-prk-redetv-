@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -223,20 +223,43 @@ test('aba Objeto pela tecla 2: acrescenta o objeto com categoria, tipo, até 2 c
   await usuario.click(within(grupo).getByRole('button', { name: 'azul' }))
   await usuario.click(within(grupo).getByRole('button', { name: 'roxo' }))
   expect(within(grupo).getByRole('button', { name: 'roxo' }).getAttribute('aria-pressed')).toBe('false')
+  await usuario.type(screen.getByLabelText('Tom'), 'verde-musgo')
+  await usuario.type(screen.getByLabelText('Detalhe'), 'listrada')
   await usuario.click(screen.getByRole('combobox', { name: 'Dono' }))
   await usuario.click(await screen.findByRole('option', { name: 'Leão Lobo' }))
   await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
 
   await waitFor(() => expect(correcoes).toHaveLength(1))
   expect(correcoes[0]).toMatchObject({ tipo: 'objeto.acrescentar', item_id: '' })
-  expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({
+  expect(JSON.parse(String(correcoes[0].valor))).toEqual({
     categoria: 'roupa',
     tipo: 'camiseta',
     cor_base: ['verde', 'azul'],
+    cor: 'verde-musgo',
+    detalhe: 'listrada',
+    marca: null,
     pessoa: 'p1',
+    relacao: 'veste',
     inicio_ms: 10_000,
     fim_ms: 20_000,
   })
+})
+
+test('aba Objeto: a cor base pela tecla, com o foco no grupo, recusa a terceira', async () => {
+  const usuario = await trechoPorTeclas(10, 20)
+  await usuario.keyboard('a')
+  await usuario.keyboard('2')
+  await usuario.type(screen.getByLabelText('Tipo'), 'boné')
+  const grupo = screen.getByRole('group', { name: 'Cor base (até 2)' })
+  act(() => within(grupo).getByRole('button', { name: 'verde' }).focus())
+  await usuario.keyboard('v')
+  await usuario.keyboard('z')
+  await usuario.keyboard('l')
+  expect(within(grupo).getByRole('button', { name: 'laranja' }).getAttribute('aria-pressed')).toBe('false')
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(JSON.parse(String(correcoes[0].valor)).cor_base).toEqual(['vermelho', 'azul'])
 })
 
 test('aba Objeto pelo clique, sem dono: não manda pessoa nem relação', async () => {

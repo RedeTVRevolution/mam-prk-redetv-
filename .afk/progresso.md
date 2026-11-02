@@ -817,3 +817,7 @@ Não corrigido:
 ## #168 iteração 92
 - Pronto: aba `2` Objeto no `A` (`trecho.ts`: `ABAS_DO_TRECHO`, caso `'objeto'` com categoria + `camposDoObjeto`, gera `objeto.acrescentar` com o trecho); `camposDoObjeto` e `SEM_DONO` extraídos de `catalogacao.ts` e usados também pelo F2; `editorDoTrecho` e `FormularioDoTrecho` recebem `pessoas` (dono). `objeto.acrescentar` saiu de `TIPOS_FORA_DESTE_TICKET`. Testes em `Trecho.test.tsx` (tecla 2 com 2 cores, terceira recusada, dono; clique na aba sem dono). `make verificar` verde.
 - Conferência: gestos de #309/#310 já têm teste de teclado e de clique.
+
+## #168 revisão
+- Corrigido: (1) a aba Objeto barrava a terceira cor com o `2` escrito à mão, fora do `MAXIMO_DE_CORES_BASE`; agora o F2 e a aba usam `coresDaLista` (`catalogacao.ts`). (2) `editorDoTrecho` não tem mais `pessoas = []` por padrão, para ninguém esquecer o dono. (3) Testes da aba Objeto: o pedido inteiro (tom, detalhe, marca nula, relação `veste`) e a cor base pela tecla com a terceira recusada.
+- Não corrigido / dizer no PR: (1) A montagem de `pessoa`/`relacao` e o `texto(x) || null` de tom, detalhe e marca ainda se repetem entre o F2 e a aba; juntar exigiria mudar o molde de `montarEditor`. (2) Quando falta tipo ou relação, o Salvar não diz qual campo falta (como nas outras abas). (3) O autocompletar do tipo e da marca só tem teste no F2, que usa os mesmos campos (`camposDoObjeto`).

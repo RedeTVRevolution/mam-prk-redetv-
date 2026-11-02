@@ -189,7 +189,7 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os da
 
   const trecho = { inicio_ms: 0, fim_ms: 1_000 }
   for (const aba of ABAS_DO_TRECHO)
-    for (const t of editorDoTrecho(aba.valor, trecho, catalogo).tiposPossiveis) caminhos.add(t)
+    for (const t of editorDoTrecho(aba.valor, trecho, catalogo, []).tiposPossiveis) caminhos.add(t)
 
   const pautas = D.pautas as unknown as Pauta[]
   for (const t of editorDeJuncao(pautas, catalogo).tiposPossiveis) caminhos.add(t)

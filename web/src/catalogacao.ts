@@ -27,6 +27,13 @@ export function teclasDasOpcoes(opcoes: Opcao[]): Map<string, string> {
   return teclas
 }
 
+/** As cores base marcadas que estão na lista, na ordem dela, ou null se passam do máximo. */
+export function coresDaLista(v: Record<string, Valor>, c: CatalogoDeCorrecoes): string[] | null {
+  const marcadas = Array.isArray(v.cor_base) ? v.cor_base : []
+  const cores = c.cores_base.map((x) => x.valor).filter((x) => marcadas.includes(x))
+  return cores.length > MAXIMO_DE_CORES_BASE ? null : cores
+}
+
 /** O dono "em cena": o valor vazio do campo do dono, sem pessoa. */
 export const SEM_DONO = ''
 
@@ -473,8 +480,8 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
       return montar(campos, inicial, ['objeto.atributos', 'objeto.dono'], (v) => {
         const tipo = texto(v.tipo)
         if (!tipo) return null
-        const escolhidas = c.cores_base.map((x) => x.valor).filter((x) => (v.cor_base as string[]).includes(x))
-        if (escolhidas.length > MAXIMO_DE_CORES_BASE) return null
+        const escolhidas = coresDaLista(v, c)
+        if (!escolhidas) return null
         const mesmasCores = [...(v.cor_base as string[])].sort().join() === [...cores].sort().join()
         const partes: Pedido[] = []
         if (
