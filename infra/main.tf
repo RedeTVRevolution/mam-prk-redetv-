@@ -289,6 +289,26 @@ variable "janela_dos_alertas_horas" {
   }
 }
 
+variable "videos_do_sinal_por_programa" {
+  description = "N do sinal por programa (#287): quantos vídeos anteriores do mesmo programa formam a média e o desvio, e o mínimo para alertar (programa com menos vídeos não alerta)"
+  type        = number
+  default     = 10
+  validation {
+    condition     = var.videos_do_sinal_por_programa >= 2 && floor(var.videos_do_sinal_por_programa) == var.videos_do_sinal_por_programa
+    error_message = "videos_do_sinal_por_programa: inteiro a partir de 2 (o desvio pede dois vídeos)."
+  }
+}
+
+variable "desvios_do_sinal_por_programa" {
+  description = "K do sinal por programa (#287): quantos desvios-padrão de distância da média do programa, em eventos por hora de vídeo, viram alerta. 3 é o convencional; sem dados do piloto, ajuste depois"
+  type        = number
+  default     = 3
+  validation {
+    condition     = var.desvios_do_sinal_por_programa > 0
+    error_message = "desvios_do_sinal_por_programa: maior que zero."
+  }
+}
+
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
   type        = string
@@ -755,7 +775,7 @@ resource "google_bigquery_table" "momentos" {
     { name = "job_id", type = "STRING", mode = "REQUIRED" },
     { name = "programa", type = "STRING", mode = "NULLABLE" },
     { name = "data_de_exibicao", type = "DATE", mode = "NULLABLE" },
-    { name = "tipo", type = "STRING", mode = "REQUIRED", description = "plano, fala, texto_na_tela, objeto, comercial, aparicao, mencao_na_fala ou mencao_no_texto" },
+    { name = "tipo", type = "STRING", mode = "REQUIRED", description = "plano, fala, texto_na_tela, objeto, comercial, pauta, aparicao, mencao_na_fala ou mencao_no_texto" },
     { name = "inicio_ms", type = "INTEGER", mode = "REQUIRED" },
     { name = "fim_ms", type = "INTEGER", mode = "REQUIRED" },
     {
@@ -770,6 +790,7 @@ resource "google_bigquery_table" "momentos" {
     { name = "texto", type = "STRING", mode = "NULLABLE" },
     { name = "versao_pipeline", type = "STRING", mode = "NULLABLE" },
     { name = "gravado_em", type = "TIMESTAMP", mode = "REQUIRED" },
+    { name = "duracao_do_video_ms", type = "INTEGER", mode = "NULLABLE", description = "Duração do vídeo todo, igual em todas as linhas dele; vazia nas copiadas antes do sinal por programa (#287)" },
   ])
 }
 
@@ -1725,6 +1746,14 @@ resource "google_cloud_run_v2_job" "indexacao" {
           name  = "BIGQUERY_REGIAO"
           value = var.regiao_do_bigquery
         }
+        env {
+          name  = "SINAL_VIDEOS"
+          value = tostring(var.videos_do_sinal_por_programa)
+        }
+        env {
+          name  = "SINAL_DESVIOS"
+          value = tostring(var.desvios_do_sinal_por_programa)
+        }
       }
     }
   }
@@ -2421,6 +2450,35 @@ resource "google_logging_metric" "queda_da_avaliacao" {
   depends_on = [google_project_service.apis]
 }
 
+resource "google_logging_metric" "desvio_de_programa" {
+  name        = "mam_desvio_de_programa"
+  description = "Vídeos com eventos por hora fora da média do programa (#287), com o tipo de evento como rótulo"
+  filter = join(" AND ", [
+    "resource.type=\"cloud_run_job\"",
+    "jsonPayload.evento=\"desvio_de_programa\"",
+  ])
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+    labels {
+      key         = "tipo"
+      value_type  = "STRING"
+      description = "aparicoes, mencoes, pautas ou comerciais"
+    }
+    labels {
+      key         = "programa"
+      value_type  = "STRING"
+      description = "Programa do vídeo"
+    }
+  }
+  label_extractors = {
+    tipo     = "EXTRACT(jsonPayload.tipo)"
+    programa = "EXTRACT(jsonPayload.programa)"
+  }
+  depends_on = [google_project_service.apis]
+}
+
 # Os avisos de métrica não têm limite de repetição como os de log: o `auto_close` fecha o
 # incidente quando a janela volta ao normal.
 resource "google_monitoring_alert_policy" "sinal_percentual" {
@@ -2526,6 +2584,33 @@ resource "google_monitoring_alert_policy" "queda_da_avaliacao" {
   notification_channels = local.canais_de_alerta
   documentation {
     content = "A avaliação diária por rubrica (#255) achou um requisito abaixo do limiar ou em queda frente à média dos dias anteriores. O rótulo `requisito` diz qual; o log `queda_de_qualidade` traz as notas."
+  }
+}
+
+resource "google_monitoring_alert_policy" "desvio_de_programa" {
+  display_name = "Vídeo fora da média do programa"
+  combiner     = "OR"
+  conditions {
+    display_name = "Vídeo fora da média do programa"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.desvio_de_programa.name}\" AND resource.type=\"cloud_run_job\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+      aggregations {
+        alignment_period     = local.janela_dos_alertas_s
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["metric.label.programa", "metric.label.tipo"]
+      }
+    }
+  }
+  alert_strategy {
+    auto_close = "1800s"
+  }
+  notification_channels = local.canais_de_alerta
+  documentation {
+    content = "Um vídeo concluído tem aparições, menções, pautas ou comerciais por hora de vídeo a mais de K desvios da média dos últimos N vídeos do mesmo programa (K e N são variáveis do Terraform). Os rótulos dizem o programa e o tipo; o log `desvio_de_programa` traz o job, o valor, a média e o desvio. Pode ser um programa diferente do normal ou uma decupagem ruim: abra o vídeo."
   }
 }
 

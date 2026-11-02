@@ -13,6 +13,7 @@ from api.sinais import (
     registro_da_resposta_fora_do_esquema,
     registro_do_video_concluido,
 )
+from api.sinal_do_programa import Desvio, registro_do_desvio
 from api.tests.test_decupagem import decupagem_valida
 
 INFRA = Path(__file__).parents[2] / "infra"
@@ -115,3 +116,24 @@ def test_todo_alerta_novo_usa_o_canal_de_emergencia() -> None:
         "canais_de_alerta     = [for canal in "
         "google_monitoring_notification_channel.admin_emergencia : canal.id]"
     ) in TF
+
+
+def test_o_alerta_do_sinal_por_programa_casa_o_log_e_os_rotulos() -> None:
+    registro = json.loads(
+        registro_do_desvio("j", "Programa", Desvio("pautas", 9.0, 3.0, 1.0, 5), 3)
+    )
+    metrica = _bloco('resource "google_logging_metric" "desvio_de_programa"')
+    assert f'jsonPayload.evento=\\"{registro["evento"]}\\"' in metrica
+    for rotulo in ("tipo", "programa"):
+        assert registro[rotulo]
+        assert f"EXTRACT(jsonPayload.{rotulo})" in metrica
+    politica = _bloco('resource "google_monitoring_alert_policy" "desvio_de_programa"')
+    assert "metric.label.programa" in politica and "metric.label.tipo" in politica
+
+
+def test_o_job_de_indexacao_recebe_n_e_k_do_sinal_por_programa() -> None:
+    indexacao = _bloco('resource "google_cloud_run_v2_job" "indexacao"')
+    assert 'name  = "SINAL_VIDEOS"' in indexacao
+    assert "var.videos_do_sinal_por_programa" in indexacao
+    assert 'name  = "SINAL_DESVIOS"' in indexacao
+    assert "var.desvios_do_sinal_por_programa" in indexacao

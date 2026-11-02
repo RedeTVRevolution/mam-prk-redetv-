@@ -19,7 +19,15 @@ from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
-from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
+from api.copia_bigquery import (
+    ConfigDoBigQuery,
+    CopiaDosMomentos,
+    copia_do_ambiente,
+    linhas_da_decupagem,
+)
+from api.copia_bigquery import (
+    transporte_http as transporte_do_bigquery,
+)
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
 from api.embedding_do_quadro import (
@@ -42,6 +50,7 @@ from api.nuvem import (
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
+from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 
 log = logging.getLogger(__name__)
 
@@ -124,13 +133,15 @@ def reindexar(
     copia: CopiaDosMomentos | None = None,
     embedding: EmbeddingDoQuadro | None = None,
     quadros: LeitorDeQuadros | None = None,
+    sinal: SinalDoPrograma | None = None,
 ) -> Indexacao | None:
     """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
 
     Nunca levanta por falha do índice ou da cópia: cada uma fica no seu estado no Job, e
     uma não impede a outra. Com `embedding` e `quadros` (o índice do quadro-chave ligado,
     ADR 0006), cada plano com quadro leva o vetor multimodal. `None` se o Job não está
-    `concluido` (não há Decupagem).
+    `concluido` (não há Decupagem). Com `sinal`, o vídeo copiado é comparado com o histórico
+    do programa (#287); o sinal também nunca levanta.
     """
     if job.estado != "concluido":
         return None
@@ -168,15 +179,19 @@ def reindexar(
             log.exception("indexação falhou para %s", job.id)
         if copia:
             try:
-                copia.gravar(
-                    job.id,
-                    linhas_da_decupagem(
-                        job.id, decupagem, job.programa, job.data_exibicao, inicio
-                    ),
+                linhas = linhas_da_decupagem(
+                    job.id, decupagem, job.programa, job.data_exibicao, inicio
                 )
+                copia.gravar(job.id, linhas)
                 estado_da_copia = "copiado"
             except Exception:
                 log.exception("cópia para o BigQuery falhou para %s", job.id)
+            else:
+                if sinal:
+                    try:
+                        sinal.avaliar(job.id, job.programa, linhas)
+                    except Exception:
+                        log.exception("sinal por programa falhou para %s", job.id)
     fim = relogio()
     if copia:
         _registrar(
@@ -200,6 +215,7 @@ def reindexar_jobs(
     copia: CopiaDosMomentos | None = None,
     embedding: EmbeddingDoQuadro | None = None,
     quadros: LeitorDeQuadros | None = None,
+    sinal: SinalDoPrograma | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -225,6 +241,7 @@ def reindexar_jobs(
             copia=copia,
             embedding=embedding,
             quadros=quadros,
+            sinal=sinal,
         )
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
@@ -239,6 +256,14 @@ def main(argv: list[str]) -> int:
         os.environ["BUCKET_DECUPAGENS"],
     )
     busca = ConfigDaBusca.do_ambiente(os.environ)
+    # O sinal por programa só vale para o vídeo que acabou de concluir (o Workflows passa
+    # JOB_ID); reindexar todos os vídeos de uma vez não o avalia, para não alertar o passado.
+    sinal = None
+    if not argv and "JOB_ID" in os.environ and "BIGQUERY_DATASET" in os.environ:
+        bigquery = ConfigDoBigQuery.do_ambiente(os.environ)
+        sinal = sinal_do_ambiente(
+            os.environ, bigquery, transporte_do_bigquery(bigquery.projeto)
+        )
     resultado = reindexar_jobs(
         argv or ([os.environ["JOB_ID"]] if "JOB_ID" in os.environ else None),
         RepositorioFirestore(firestore_),
@@ -248,6 +273,7 @@ def main(argv: list[str]) -> int:
         copia_do_ambiente(os.environ),
         embedding=embedding_da_busca(busca),
         quadros=decupagens,
+        sinal=sinal,
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

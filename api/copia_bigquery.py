@@ -31,7 +31,7 @@ class LinhaDoMomento:
     job_id: str
     programa: str | None
     data_de_exibicao: date | None
-    # plano, fala, texto_na_tela, objeto, comercial; e, por pessoa, aparicao,
+    # plano, fala, texto_na_tela, objeto, comercial, pauta; e, por pessoa, aparicao,
     # mencao_na_fala e mencao_no_texto
     tipo: str
     inicio_ms: int
@@ -43,6 +43,9 @@ class LinhaDoMomento:
     texto: str | None = None
     versao_pipeline: str | None = None
     gravado_em: datetime | None = None
+    # A duração do vídeo todo, igual em todas as linhas dele (o sinal por programa, #287,
+    # divide os eventos por ela).
+    duracao_do_video_ms: int | None = None
 
 
 class CopiaDosMomentos(Protocol):
@@ -68,6 +71,7 @@ def linhas_da_decupagem(
         "data_de_exibicao": data_de_exibicao,
         "versao_pipeline": decupagem.versao_pipeline,
         "gravado_em": gravado_em,
+        "duracao_do_video_ms": decupagem.video.duracao_ms,
     }
     linhas = [
         LinhaDoMomento(
@@ -91,6 +95,16 @@ def linhas_da_decupagem(
             **base,
         )
         for c in decupagem.comerciais
+    ]
+    linhas += [
+        LinhaDoMomento(
+            tipo="pauta",
+            inicio_ms=p.inicio_ms,
+            fim_ms=p.fim_ms,
+            texto=p.titulo,
+            **base,
+        )
+        for p in decupagem.pautas
     ]
     linhas += _linhas_das_pessoas(decupagem, base)
     return linhas
@@ -210,17 +224,19 @@ USING (
     JSON_VALUE(l, '$.tipo_de_insercao') AS tipo_de_insercao,
     JSON_VALUE(l, '$.texto') AS texto,
     JSON_VALUE(l, '$.versao_pipeline') AS versao_pipeline,
-    TIMESTAMP(JSON_VALUE(l, '$.gravado_em')) AS gravado_em
+    TIMESTAMP(JSON_VALUE(l, '$.gravado_em')) AS gravado_em,
+    CAST(JSON_VALUE(l, '$.duracao_do_video_ms') AS INT64) AS duracao_do_video_ms
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
 ) AS s
 ON FALSE
 WHEN NOT MATCHED BY SOURCE AND t.job_id = @job_id THEN DELETE
 WHEN NOT MATCHED THEN INSERT
   (job_id, programa, data_de_exibicao, tipo, inicio_ms, fim_ms, pessoas, marca,
-   tipo_de_insercao, texto, versao_pipeline, gravado_em)
+   tipo_de_insercao, texto, versao_pipeline, gravado_em, duracao_do_video_ms)
 VALUES
   (s.job_id, s.programa, s.data_de_exibicao, s.tipo, s.inicio_ms, s.fim_ms, s.pessoas,
-   s.marca, s.tipo_de_insercao, s.texto, s.versao_pipeline, s.gravado_em)
+   s.marca, s.tipo_de_insercao, s.texto, s.versao_pipeline, s.gravado_em,
+   s.duracao_do_video_ms)
 """
         resposta = self._transporte(
             {
