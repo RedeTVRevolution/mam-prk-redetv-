@@ -28,6 +28,7 @@ from api.indice_da_busca import IndiceDaBusca
 from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs, agora_utc
 from api.lixeira import (
     PRAZO_DA_PURGA,
+    ArquivosDoImpacto,
     ArquivosDoJob,
     ImpactoDoVideo,
     _exige_gerir,
@@ -82,6 +83,14 @@ class Purga:
         impacto = self.impacto(job)
         # Com outro Job na mesma chave de conteúdo, o processamento continua para ele.
         compartilhado = bool(impacto.outros_jobs)
+        if compartilhado:
+            # Os números são do que se apaga: a decupagem e os arquivos ficam.
+            impacto = impacto.model_copy(
+                update={
+                    "decupagem": 0,
+                    "arquivos": ArquivosDoImpacto(copia_limpa=0, proxy=0, quadros=0),
+                }
+            )
         detalhes = impacto.model_dump(mode="json") | {
             "conteudo_compartilhado": compartilhado
         }

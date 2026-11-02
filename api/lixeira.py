@@ -162,8 +162,16 @@ def calcular_impacto(
     arquivos: ArquivosDoJob,
 ) -> ImpactoDoVideo:
     contados = arquivos.contar(job.id)
+    # Os que estão na lixeira também contam: podem ser restaurados e ainda usam o
+    # processamento.
     parecidos = (
-        repositorio.consultar(FiltroDeJobs()).jobs if job.sha256 is not None else []
+        [
+            j
+            for na_lixeira in (False, True)
+            for j in repositorio.consultar(FiltroDeJobs(na_lixeira=na_lixeira)).jobs
+        ]
+        if job.sha256 is not None
+        else []
     )
     return ImpactoDoVideo(
         decupagem=contados.decupagem,

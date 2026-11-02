@@ -144,6 +144,28 @@ def test_com_outro_job_na_mesma_chave_de_conteudo_so_o_job_e_removido() -> None:
         decupagem=1, copia_limpa=1, proxy=1, quadros=3
     )
     assert apagados == []
+    # As correções são do Job removido; as do outro ficam.
+    assert mundo.correcoes.listar("j1") == []
+    assert len(mundo.correcoes.listar("j2")) == 1
+    detalhes = mundo.registros()[0].detalhes
+    assert detalhes["conteudo_compartilhado"] is True
+    assert detalhes["decupagem"] == 0
+    assert detalhes["arquivos"] == {"copia_limpa": 0, "proxy": 0, "quadros": 0}
+    assert detalhes["correcoes"] == 2
+
+
+def test_outro_job_na_lixeira_com_o_mesmo_conteudo_tambem_guarda_o_processamento() -> (
+    None
+):
+    mundo = Mundo(_na_lixeira(), _na_lixeira("j2"))
+    apagados: list[str] = []
+    mundo.indice.apagar = apagados.append  # type: ignore[method-assign, assignment]
+
+    assert mundo.purgar().status_code == 200
+
+    assert mundo.jobs.obter("j1") is None
+    assert mundo.arquivos.contar("j1").quadros == 3
+    assert apagados == []
     assert mundo.registros()[0].detalhes["conteudo_compartilhado"] is True
 
 
