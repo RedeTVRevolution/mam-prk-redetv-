@@ -3134,19 +3134,23 @@ resource "google_monitoring_dashboard" "painel" {
                 for serie in grafico.series : {
                   plotType       = "LINE"
                   legendTemplate = serie.legenda
-                  timeSeriesQuery = can(serie.promql) ? {
-                    prometheusQuery = serie.promql
-                    } : {
-                    timeSeriesFilter = {
-                      filter = serie.filtro
-                      aggregation = {
-                        alignmentPeriod    = "60s"
-                        perSeriesAligner   = serie.aligner
-                        crossSeriesReducer = serie.reducer
-                        groupByFields      = serie.agrupar
+                  # Uma condicional com {prometheusQuery} de um lado e {timeSeriesFilter} do
+                  # outro não passa no plan (os dois lados precisam do mesmo tipo, e o
+                  # validate não pega): cada lado vira um mapa, vazio quando não se aplica.
+                  timeSeriesQuery = merge(
+                    can(serie.promql) ? { prometheusQuery = serie.promql } : {},
+                    can(serie.promql) ? {} : {
+                      timeSeriesFilter = {
+                        filter = serie.filtro
+                        aggregation = {
+                          alignmentPeriod    = "60s"
+                          perSeriesAligner   = serie.aligner
+                          crossSeriesReducer = serie.reducer
+                          groupByFields      = serie.agrupar
+                        }
                       }
-                    }
-                  }
+                    },
+                  )
                 }
               ]
               yAxis = { scale = "LINEAR" }

@@ -253,6 +253,11 @@ def test_o_ci_valida_dev_e_prod() -> None:
     for pasta in ("infra", "infra/ambientes/prod"):
         init = ci.index(f"terraform -chdir={pasta} init -backend=false")
         assert init < ci.index(f"terraform -chdir={pasta} validate")
+    # O plano simulado roda no CI, depois do validate do dev.
+    assert ci.index("terraform -chdir=infra validate") < ci.index(
+        "terraform -chdir=infra test"
+    )
+    assert (INFRA / "plano_simulado.tftest.hcl").exists()
 
 
 def test_o_readme_da_infra_tem_a_tabela_e_a_lista_do_que_precisa_existir() -> None:
