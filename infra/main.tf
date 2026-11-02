@@ -71,6 +71,12 @@ variable "imagem_objetos" {
   type        = string
 }
 
+variable "dominio" {
+  description = "Domínio do MAM. Vazio: sem balanceador e o endereço é o run.app; preenchido: nasce o balanceador HTTPS (#294)"
+  type        = string
+  default     = ""
+}
+
 module "mam" {
   source = "./modulos/mam"
 
@@ -84,11 +90,16 @@ module "mam" {
   imagem_transcricao_gpu = var.imagem_transcricao_gpu
   imagem_ocr_gpu         = var.imagem_ocr_gpu
   imagem_objetos         = var.imagem_objetos
+  dominio                = var.dominio
 }
 
 output "identity_api_key" {
   value     = module.mam.identity_api_key
   sensitive = true
+}
+
+output "ip_do_balanceador" {
+  value = module.mam.ip_do_balanceador
 }
 
 output "url" {

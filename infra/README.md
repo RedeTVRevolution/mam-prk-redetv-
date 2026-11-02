@@ -19,7 +19,7 @@ Nenhum valor real de projeto vai no código: cada ambiente tem um `exemplo.tfvar
 | Estado | bucket GCS, um por projeto | prefixo (`dev`, `staging`, `prod`) | — |
 | Imagens | um digest por componente | o digest publicado em cada projeto | quando prod recebe imagem (promoção a partir do staging) |
 | Tamanhos e limites | os padrões do módulo | `janelas_em_paralelo`, `espera_gpu_minutos`, `limite_de_buscas_por_video`, `limite_de_falhas_por_etapa` (staging menor; prod igual ao dev até o piloto medir) | os valores finais de prod, depois do piloto |
-| Domínio e balanceador | — | — | o domínio e o balanceador HTTPS do #294 |
+| Domínio e balanceador | o código (`modulos/mam/balanceador.tf`) | `dominio` (vazio: sem balanceador) | o domínio de cada ambiente |
 | Identity Platform | `import` da config do projeto | o projeto importado (`var.projeto`) | — |
 | Aplicação | — | só o dev aplica; sem CD para staging e prod | quando criar os ambientes |
 
@@ -32,6 +32,20 @@ Lista para o wizard (uma vez por projeto, igual ao `scripts/wizard-gcp-dev.sh` d
 - [ ] O bucket do estado do Terraform, criado antes do primeiro `init`.
 - [ ] O Identity Platform inicializado pelo Owner (etapa 7 do wizard), antes do primeiro apply.
 - [ ] Os e-mails dos administradores de emergência e as imagens publicadas no Artifact Registry do projeto.
+
+## Domínio e balanceador (#294)
+
+Com `dominio` vazio (o padrão), nada do balanceador é criado e o endereço segue o `run.app`. Com `dominio` preenchido, o módulo cria o balanceador HTTPS externo global (IP, NEG serverless para o `mam-web`, certificado gerenciado e redirecionamento de HTTP para HTTPS), o Cloud Run passa a aceitar só o tráfego do balanceador e o domínio entra no CORS da quarentena e nos domínios autorizados do login. O Cloud Armor vem no #295.
+
+Depois do `apply`:
+
+1. Pegue o endereço: `terraform output ip_do_balanceador`.
+2. Crie no DNS do domínio um registro A (`dominio` → esse IP).
+3. Espere o certificado: o Google só o emite depois que o DNS aponta para o IP; costuma levar de 15 minutos a 1 hora e pode chegar a 24 horas. Até lá o HTTPS falha no handshake. Acompanhe com `gcloud compute ssl-certificates list` (`ACTIVE`).
+
+Custo mensal (estimativa pela tabela de preços do Google, a confirmar na calculadora): duas regras de encaminhamento (80 e 443) a cerca de US$ 0,025/hora cada, ~US$ 36; mais ~US$ 0,008 a 0,012 por GB trafegado. IP reservado em uso e certificado gerenciado não custam. O upload e o player vão direto ao Storage, fora do balanceador, então o tráfego dele é só o front e a API.
+
+Ao ligar o balanceador num ambiente que já tem login, `authorized_domains` passa a ser a lista padrão (`localhost`, `<projeto>.firebaseapp.com`, `<projeto>.web.app`) mais o domínio: qualquer outro domínio posto à mão some.
 
 ## Papéis das contas em cada projeto
 

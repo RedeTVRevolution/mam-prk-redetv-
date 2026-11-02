@@ -94,6 +94,12 @@ variable "limite_de_falhas_por_etapa" {
   default     = 3
 }
 
+variable "dominio" {
+  description = "Domínio do MAM. Vazio: sem balanceador e o endereço é o run.app; preenchido: nasce o balanceador HTTPS (#294)"
+  type        = string
+  default     = ""
+}
+
 module "mam" {
   source = "../../modulos/mam"
 
@@ -107,6 +113,7 @@ module "mam" {
   imagem_transcricao_gpu     = var.imagem_transcricao_gpu
   imagem_ocr_gpu             = var.imagem_ocr_gpu
   imagem_objetos             = var.imagem_objetos
+  dominio                    = var.dominio
   janelas_em_paralelo        = var.janelas_em_paralelo
   espera_gpu_minutos         = var.espera_gpu_minutos
   limite_de_buscas_por_video = var.limite_de_buscas_por_video
@@ -116,6 +123,10 @@ module "mam" {
 output "identity_api_key" {
   value     = module.mam.identity_api_key
   sensitive = true
+}
+
+output "ip_do_balanceador" {
+  value = module.mam.ip_do_balanceador
 }
 
 output "url" {

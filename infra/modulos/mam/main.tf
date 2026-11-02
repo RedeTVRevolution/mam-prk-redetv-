@@ -137,6 +137,12 @@ variable "admins_emergencia" {
   type        = string
 }
 
+variable "dominio" {
+  description = "Domínio do MAM (ex.: mam.exemplo.com.br). Vazio: sem balanceador, e o endereço é o run.app. Preenchido: nasce o balanceador HTTPS e o Cloud Run só aceita o tráfego dele (#294)"
+  type        = string
+  default     = ""
+}
+
 variable "imagem" {
   description = "Imagem do serviço, de preferência pelo digest"
   type        = string
@@ -577,7 +583,7 @@ resource "google_storage_bucket" "mam" {
   dynamic "cors" {
     for_each = each.key == "quarentena" ? [1] : []
     content {
-      origin          = google_cloud_run_v2_service.web.urls
+      origin          = local.origens_da_aplicacao
       method          = ["POST", "PUT"]
       response_header = ["Content-Type", "Content-Range", "x-goog-resumable", "x-upload-content-length", "Location", "Range"]
       max_age_seconds = 3600
@@ -826,10 +832,17 @@ resource "google_service_account_iam_member" "github_impersona_terraform" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repositorio_github_id}"
 }
 
+locals {
+  # Com o balanceador, o domínio entra junto das URLs do Cloud Run no CORS da quarentena.
+  origens_da_aplicacao = local.balanceador ? concat(google_cloud_run_v2_service.web.urls, ["https://${var.dominio}"]) : google_cloud_run_v2_service.web.urls
+}
+
 resource "google_cloud_run_v2_service" "web" {
   name                = "mam-web"
   location            = var.regiao
   deletion_protection = false
+  # Com o balanceador, só ele e o tráfego interno chegam ao serviço; sem ele, o run.app.
+  ingress = local.balanceador ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
   template {
     service_account = google_service_account.mam["web"].email
     scaling {
@@ -2310,6 +2323,9 @@ resource "google_identity_platform_config" "mam" {
       enabled = false
     }
   }
+  # Sem balanceador, a lista fica como o Google a devolve (nula aqui). Com ele, vai a lista
+  # padrão do Identity Platform mais o domínio: o login só funciona nos domínios autorizados.
+  authorized_domains = local.balanceador ? ["localhost", "${var.projeto}.firebaseapp.com", "${var.projeto}.web.app", var.dominio] : null
   # A chave web vai no front e é pública: sem isto, qualquer um criaria uma conta.
   client {
     permissions {
