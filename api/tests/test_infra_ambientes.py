@@ -195,3 +195,63 @@ def test_destruicao_so_passa_com_a_variavel_explicita(tmp_path: Path) -> None:
 
     assert r.returncode == 0, r.stderr
     assert any(" apply " in f" {c} " for c in _chamadas(tmp_path))
+
+
+AMBIENTES = ("staging", "prod")
+
+
+def _sem_padrao(texto: str) -> list[str]:
+    return [
+        nome
+        for nome, corpo in re.findall(
+            r'^variable "(\w+)" \{\n(.*?)^\}', texto, re.DOTALL | re.MULTILINE
+        )
+        if "default" not in corpo
+    ]
+
+
+@pytest.mark.parametrize("ambiente", AMBIENTES)
+def test_staging_e_prod_chamam_o_modulo_com_estado_proprio(ambiente: str) -> None:
+    texto = (INFRA / "ambientes" / ambiente / "main.tf").read_text()
+
+    assert 'source = "../../modulos/mam"' in texto
+    assert f'prefix = "{ambiente}"' in texto
+    backend = re.search(r'backend "gcs" \{(.*?)\n  \}', texto, re.DOTALL)
+    assert backend and "bucket" not in backend.group(1)
+    assert not re.search(r"^resource ", texto, re.MULTILINE)
+
+
+@pytest.mark.parametrize("ambiente", AMBIENTES)
+def test_staging_e_prod_passam_as_variaveis_sem_padrao_do_modulo(
+    ambiente: str,
+) -> None:
+    texto = (INFRA / "ambientes" / ambiente / "main.tf").read_text()
+
+    for nome in _sem_padrao((MODULO / "main.tf").read_text()):
+        assert re.search(rf"^\s*{nome}\s*= var\.{nome}$", texto, re.MULTILINE), nome
+
+
+@pytest.mark.parametrize("ambiente", AMBIENTES)
+def test_o_tfvars_de_exemplo_cobre_as_variaveis_sem_padrao(ambiente: str) -> None:
+    pasta = INFRA / "ambientes" / ambiente
+    exemplo = (pasta / "exemplo.tfvars").read_text()
+
+    for nome in _sem_padrao((pasta / "main.tf").read_text()):
+        assert re.search(rf"^{nome}\s*=", exemplo, re.MULTILINE), nome
+    assert "redetv" not in exemplo.lower()
+
+
+def test_o_ci_valida_dev_staging_e_prod() -> None:
+    ci = (RAIZ / ".github" / "workflows" / "ci.yml").read_text()
+
+    for pasta in ("infra", "infra/ambientes/staging", "infra/ambientes/prod"):
+        assert f"terraform -chdir={pasta} validate" in ci
+
+
+def test_o_readme_da_infra_tem_a_tabela_e_a_lista_do_que_precisa_existir() -> None:
+    readme = (INFRA / "README.md").read_text()
+
+    for ambiente in ("dev", "staging", "prod"):
+        assert ambiente in readme
+    assert "| " in readme and "mam-terraform" in readme and "mam-build" in readme
+    assert "#294" in readme and "#296" in readme
