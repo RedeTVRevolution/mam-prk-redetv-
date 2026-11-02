@@ -857,3 +857,14 @@ Não corrigido:
 ## #144 iteração 96
 - Pronto: teste no emulador do `ArquivosNoStorage.contar`; indexação em massa, reprocessar versão e cópia para o BigQuery pulam Jobs na lixeira (`j.lixeira is None`). `make verificar` verde.
 - Não mexi: `expirar_uploads`, `regressao`, `taxa_de_correcao`, `carregar_marcas` (olham outros estados ou métricas; decidir se a lixeira conta).
+
+## #144 revisão
+- Corrigido: (1) os relatórios de tempo de tela e de marcas mostravam o nome do vídeo na lixeira a quem não é Administrador; `poe_o_nome_dos_videos` agora o deixa sem nome. Os números continuam, porque a tabela do `administracao.md` diz que os eventos no BigQuery ficam guardados. (2) Teste que percorre as rotas de `/v1` e falha se uma rota com parâmetro não usar `{job_id}` e não estiver na lista de exceções (`uid`, `chave_id`, `id_do_video`). A trava `sem_job_na_lixeira` só enxerga `job_id`.
+- Não corrigido / decisão humana:
+  1. O impacto não conta os momentos no índice, que já existe (#118). Falta uma contagem por vídeo no índice.
+  2. A busca tira a lixeira pelo Job (`_visivel`), depois da consulta ao índice, e não por um filtro do servidor como pede a tabela. Uma página pode voltar com menos resultados que o limite. Exigiria guardar a marca no registro do índice e reindexar no envio e na restauração.
+  3. A regra 1 diz que o vídeo sai "dos relatórios", mas a tabela diz que os eventos no BigQuery ficam guardados e os números não mudam. Mantive os números e só escondi o nome. Decidir se as somas devem excluir a lixeira. A `taxa_de_correcao` e o `regressao` também ainda contam os Jobs na lixeira.
+  4. O Administrador ainda pode reprocessar, corrigir o estado ou cancelar um Job na lixeira, e com isso ele fica na lixeira em `analisando`. Decidir se essas rotas dão 409 na lixeira.
+  5. `impacto_de` lê o acervo inteiro (`FiltroDeJobs()`) para achar o mesmo SHA-256, e não inclui os Jobs na lixeira com o mesmo conteúdo. A purga (#145) precisa saber deles, e de uma consulta por `sha256`.
+  6. O registro `item.restaurado` grava o motivo do envio no campo `motivo`, porque o ticket não pede motivo para restaurar.
+  7. `lixeira.py` importa `_confere_permissao`/`_tem_permissao`, privados de `api.jobs`, no mesmo molde de outros módulos.

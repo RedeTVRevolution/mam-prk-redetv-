@@ -158,12 +158,13 @@ class _ComVideo(Protocol):
 def poe_o_nome_dos_videos(
     itens: Iterable[_ComVideo], repositorio: RepositorioDeJobs
 ) -> None:
-    """Preenche o nome de cada vídeo do JSON, lendo cada Job uma vez só."""
+    """Preenche o nome de cada vídeo do JSON, lendo cada Job uma vez só. O vídeo na lixeira
+    fica sem nome: os números do passado não mudam, mas ele some (#144)."""
     nomes: dict[str, str | None] = {}
     for item in itens:
         if item.job_id not in nomes:
             job = repositorio.obter(item.job_id)
-            nomes[item.job_id] = job.nome if job else None
+            nomes[item.job_id] = job.nome if job and job.lixeira is None else None
         item.nome = nomes[item.job_id]
 
 

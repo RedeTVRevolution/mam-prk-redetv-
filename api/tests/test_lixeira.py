@@ -1,6 +1,9 @@
+import re
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
@@ -20,6 +23,7 @@ from api.jobs import Job, RepositorioEmMemoria
 from api.lixeira import ArquivosContados, ArquivosEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.relatorios import poe_o_nome_dos_videos
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 
@@ -273,3 +277,27 @@ def test_auditoria_que_falha_desfaz_o_envio_e_a_restauracao() -> None:
     resposta = cliente.post(f"{ROTA_DO_VIDEO}/restaurar", headers=ADMIN)
     assert resposta.status_code == 500
     assert mundo.jobs.obter("j1").lixeira is not None  # type: ignore[union-attr]
+
+
+def test_toda_rota_de_job_em_v1_chama_o_parametro_de_job_id() -> None:
+    # A trava `sem_job_na_lixeira` só enxerga `{job_id}`: um Job com outro nome escaparia.
+    fora_do_job = {"uid", "chave_id", "id_do_video"}
+    app = Mundo().cliente.app
+    assert isinstance(app, FastAPI)
+    for caminho in app.openapi()["paths"]:
+        parametros = set(re.findall(r"{(\w+)}", caminho))
+        if parametros and "job_id" not in parametros:
+            assert parametros <= fora_do_job, caminho
+
+
+def test_relatorio_nao_mostra_o_nome_do_video_na_lixeira() -> None:
+    mundo = Mundo(_job(), _job("j2", nome="outro.mp4"))
+    mundo.enviar()
+    itens = [
+        SimpleNamespace(job_id="j1", nome=None),
+        SimpleNamespace(job_id="j2", nome=None),
+    ]
+
+    poe_o_nome_dos_videos(itens, mundo.jobs)
+
+    assert [i.nome for i in itens] == [None, "outro.mp4"]
