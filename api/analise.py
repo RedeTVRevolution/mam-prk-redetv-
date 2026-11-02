@@ -168,7 +168,7 @@ def main() -> None:
         DecupagensStorage(
             ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
         ),
-        TransporteVertex(projeto, sessao),
+        TransporteVertex(projeto, sessao, imprimir),
         TranscricoesStorage(ClienteStorage(project=projeto), aceitos),
         LeiturasStorage(ClienteStorage(project=projeto), aceitos),
         JanelasStorage(ClienteStorage(project=projeto), aceitos),

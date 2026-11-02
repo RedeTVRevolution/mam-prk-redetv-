@@ -95,3 +95,18 @@ def registro_da_falha_de_etapa(etapa: str, job_id: str, motivo: str) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def registro_do_uso_do_modelo(modelo: str, entrada: int, saida: int) -> str:
+    """Uma linha por chamada ao modelo: a etapa é o Job que a escreve (`resource.labels.job_name`),
+    e o custo dos painéis é a soma dos tokens vezes o preço do modelo (#288)."""
+    return json.dumps(
+        {
+            "severity": "INFO",
+            "evento": "uso_do_modelo",
+            "modelo": modelo,
+            "tokens_de_entrada": entrada,
+            "tokens_de_saida": saida,
+        },
+        ensure_ascii=False,
+    )

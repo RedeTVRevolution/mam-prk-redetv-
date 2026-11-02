@@ -289,6 +289,31 @@ variable "janela_dos_alertas_horas" {
   }
 }
 
+variable "janela_dos_paineis_horas" {
+  description = "Horas de log que cada gráfico dos painéis de observabilidade (#288) soma ou resume; o volume é de poucos vídeos por dia, então a janela é de um dia"
+  type        = number
+  default     = 24
+  validation {
+    condition     = var.janela_dos_paineis_horas >= 1 && floor(var.janela_dos_paineis_horas) == var.janela_dos_paineis_horas
+    error_message = "janela_dos_paineis_horas: horas inteiras, no mínimo 1."
+  }
+}
+
+variable "precos_por_milhao_de_tokens" {
+  description = "US$ por milhão de tokens de cada modelo (chave: o ID do modelo, como ele sai no log), para o custo por etapa do painel (#288); vazio: o painel mostra só os tokens (preço não confirmado)"
+  type = map(object({
+    entrada = number
+    saida   = number
+  }))
+  default = {}
+}
+
+variable "agenda_da_fila" {
+  description = "Cron (formato do Cloud Scheduler) da amostra da fila de processamento (#288); de minuto em minuto, o Job só conta os Jobs em andamento e loga"
+  type        = string
+  default     = "* * * * *"
+}
+
 variable "videos_do_sinal_por_programa" {
   description = "N do sinal por programa (#287): quantos vídeos anteriores do mesmo programa formam a média e o desvio, e o mínimo para alertar (programa com menos vídeos não alerta)"
   type        = number
@@ -571,7 +596,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "avaliacao", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "avaliacao", "fila", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -619,7 +644,9 @@ locals {
     # enquanto; o serviço de avaliação chama o juiz (Gemini) e a conta precisa de
     # aiplatform.endpoints.predict e aiplatform.evaluationTasks.* ou equivalente (a confirmar).
     avaliacao = ["roles/datastore.user", "roles/aiplatform.user"]
-    # O agendador só dispara o Job da avaliação (papel no próprio Job, mais abaixo).
+    # A amostra da fila (#288) só lê os Jobs do Firestore e escreve no log.
+    fila = ["roles/datastore.user"]
+    # O agendador só dispara os Jobs da avaliação e da fila (papel em cada Job, mais abaixo).
     agendador    = []
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
@@ -2134,6 +2161,63 @@ resource "google_cloud_scheduler_job" "avaliacao" {
   depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao]
 }
 
+# Amostra da fila de processamento (#288): de minuto em minuto o Job conta os Jobs em
+# andamento por estado e a idade do mais antigo e loga (`api/fila_job.py`); o painel da fila
+# lê esse log. Sem rede da VPC: só fala com o Firestore.
+resource "google_cloud_run_v2_job" "fila" {
+  name                = "mam-fila"
+  location            = var.regiao
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["fila"].email
+      max_retries     = 0
+      # Uma consulta ao Firestore; o minuto seguinte refaz a amostra.
+      timeout = "120s"
+      containers {
+        image   = var.imagem_validacao
+        command = ["python"]
+        args    = ["-m", "api.fila_job"]
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "512Mi"
+          }
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_job_iam_member" "agendador_roda_fila" {
+  name     = google_cloud_run_v2_job.fila.name
+  location = google_cloud_run_v2_job.fila.location
+  role     = "roles/run.invoker"
+  member   = google_service_account.mam["agendador"].member
+}
+
+resource "google_cloud_scheduler_job" "fila" {
+  name      = "mam-fila-amostra"
+  region    = var.regiao
+  schedule  = var.agenda_da_fila
+  time_zone = var.fuso_da_agenda
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.fila.location}/jobs/${google_cloud_run_v2_job.fila.name}:run"
+    oauth_token {
+      service_account_email = google_service_account.mam["agendador"].email
+    }
+  }
+  depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_fila]
+}
+
 # Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Jobs de identificação, referências e comparação -> Job de quadros -> Job de indexação.
 locals {
   workflow_validacao = "mam-validacao"
@@ -2612,6 +2696,393 @@ resource "google_monitoring_alert_policy" "desvio_de_programa" {
   documentation {
     content = "Um vídeo concluído tem aparições, menções, pautas ou comerciais por hora de vídeo a mais de K desvios da média dos últimos N vídeos do mesmo programa (K e N são variáveis do Terraform). Os rótulos dizem o programa e o tipo; o log `desvio_de_programa` traz o job, o valor, a média e o desvio. Pode ser um programa diferente do normal ou uma decupagem ruim: abra o vídeo."
   }
+}
+
+# Painéis de observabilidade (#288). Cada gráfico lê uma métrica de log (os jobs e o Workflows
+# escrevem uma linha JSON por evento: `api/sinais.py`, `api/fila_job.py`, `marca_fim` e
+# `roda_o_job_com_gpu` do Workflows; os campos e os eventos são o contrato com os filtros
+# abaixo, e um teste confere) ou uma métrica nativa do Cloud Run. As métricas de log em
+# distribuição são lidas em PromQL (`_sum`, `_count`, `_bucket`); o nome é o da métrica com o
+# prefixo `logging_googleapis_com:user_`.
+locals {
+  janela_dos_paineis = "${var.janela_dos_paineis_horas}h"
+  filtro_dos_jobs    = "resource.type=\"cloud_run_job\""
+  filtro_da_api = join(" AND ", [
+    "resource.type=\"cloud_run_revision\"",
+    "resource.labels.service_name=\"${google_cloud_run_v2_service.web.name}\"",
+    "logName:\"run.googleapis.com%2Frequests\"",
+  ])
+  jobs_com_gpu = [
+    google_cloud_run_v2_job.transcricao_gpu.name,
+    google_cloud_run_v2_job.ocr_gpu.name,
+    google_cloud_run_v2_job.objetos_gpu.name,
+  ]
+  filtro_dos_jobs_com_gpu = "resource.type=\"cloud_run_job\" AND resource.labels.job_name=one_of(${join(",", [for j in local.jobs_com_gpu : "\"${j}\""])})"
+  metrica_de_log          = { for nome in ["duracao_da_etapa", "tokens_de_entrada", "tokens_de_saida", "fila_quantidade", "fila_idade", "falta_de_gpu", "requisicoes_da_api"] : nome => "logging_googleapis_com:user_mam_${nome}" }
+
+  # US$ na janela, por etapa: soma dos tokens de cada modelo vezes o preço dele (o `or` junta
+  # as séries de modelos diferentes antes do `sum`; a etapa que não usou o modelo some).
+  custo_por_etapa = {
+    for sentido, metrica in { entrada = local.metrica_de_log["tokens_de_entrada"], saida = local.metrica_de_log["tokens_de_saida"] } :
+    sentido => "sum by (etapa) (${join(" or ", [for modelo, preco in var.precos_por_milhao_de_tokens : "(increase(${metrica}{modelo=\"${modelo}\"}[${local.janela_dos_paineis}]) * ${preco[sentido] / 1000000})"])})"
+  }
+
+  # Cada painel é uma lista de gráficos; o desenho põe dois por linha.
+  graficos_dos_paineis = {
+    tempo_e_custo = concat(
+      [
+        {
+          titulo = "Tempo por etapa (p50 e p95)"
+          series = [
+            {
+              promql  = "histogram_quantile(0.5, sum by (le, etapa) (increase(${local.metrica_de_log["duracao_da_etapa"]}_bucket[${local.janela_dos_paineis}])))"
+              legenda = "p50 {{etapa}}"
+            },
+            {
+              promql  = "histogram_quantile(0.95, sum by (le, etapa) (increase(${local.metrica_de_log["duracao_da_etapa"]}_bucket[${local.janela_dos_paineis}])))"
+              legenda = "p95 {{etapa}}"
+            },
+          ]
+          unidade = "s"
+        },
+        {
+          titulo = "Tokens por etapa (entrada e saída)"
+          series = [
+            {
+              promql  = "sum by (etapa) (increase(${local.metrica_de_log["tokens_de_entrada"]}_sum[${local.janela_dos_paineis}]))"
+              legenda = "entrada {{etapa}}"
+            },
+            {
+              promql  = "sum by (etapa) (increase(${local.metrica_de_log["tokens_de_saida"]}_sum[${local.janela_dos_paineis}]))"
+              legenda = "saída {{etapa}}"
+            },
+          ]
+          unidade = "1"
+        },
+      ],
+      # Sem preço na configuração o gráfico de custo não existe: os tokens acima são o que há.
+      length(var.precos_por_milhao_de_tokens) == 0 ? [] : [
+        {
+          titulo = "Custo por etapa (US$ na janela, tokens vezes o preço da configuração)"
+          series = [
+            { promql = local.custo_por_etapa["entrada"], legenda = "entrada {{etapa}}" },
+            { promql = local.custo_por_etapa["saida"], legenda = "saída {{etapa}}" },
+          ]
+          unidade = "USD"
+        },
+      ],
+    )
+    fila = [
+      {
+        titulo = "Jobs em cada estado (média das amostras do minuto)"
+        series = [
+          {
+            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_sum[10m])) / sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_count[10m]))"
+            legenda = "{{estado}}"
+          },
+        ]
+        unidade = "1"
+      },
+      {
+        titulo = "Idade do Job mais antigo em andamento, por estado (média das amostras)"
+        series = [
+          {
+            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_sum[10m])) / sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_count[10m]))"
+            legenda = "{{estado}}"
+          },
+        ]
+        unidade = "s"
+      },
+    ]
+    erros_da_api = [
+      {
+        titulo = "Requisições com erro, por rota e código"
+        series = [
+          {
+            promql  = "sum by (rota, codigo) (increase(${local.metrica_de_log["requisicoes_da_api"]}{codigo=~\"[45]..\"}[5m]))"
+            legenda = "{{rota}} {{codigo}}"
+          },
+        ]
+        unidade = "1"
+      },
+      {
+        titulo = "Requisições, por rota"
+        series = [
+          {
+            promql  = "sum by (rota) (increase(${local.metrica_de_log["requisicoes_da_api"]}[5m]))"
+            legenda = "{{rota}}"
+          },
+        ]
+        unidade = "1"
+      },
+      {
+        titulo = "Latência da API (p50, p95 e p99)"
+        series = [
+          for percentil in ["50", "95", "99"] : {
+            filtro  = "metric.type=\"run.googleapis.com/request_latencies\" AND resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${google_cloud_run_v2_service.web.name}\""
+            aligner = "ALIGN_PERCENTILE_${percentil}"
+            reducer = "REDUCE_MAX"
+            agrupar = []
+            legenda = "p${percentil}"
+          }
+        ]
+        unidade = "ms"
+      },
+    ]
+    gpu = [
+      {
+        titulo = "Utilização da GPU (p95), por Job"
+        series = [{
+          filtro  = "metric.type=\"run.googleapis.com/container/gpu/utilizations\" AND ${local.filtro_dos_jobs_com_gpu}"
+          aligner = "ALIGN_PERCENTILE_95"
+          reducer = "REDUCE_MAX"
+          agrupar = ["resource.label.job_name"]
+          legenda = "{{resource.label.job_name}}"
+        }]
+        unidade = "%"
+      },
+      {
+        titulo = "Memória da GPU em uso (p95), por Job"
+        series = [{
+          filtro  = "metric.type=\"run.googleapis.com/container/gpu/memory_usages\" AND ${local.filtro_dos_jobs_com_gpu}"
+          aligner = "ALIGN_PERCENTILE_95"
+          reducer = "REDUCE_MAX"
+          agrupar = ["resource.label.job_name"]
+          legenda = "{{resource.label.job_name}}"
+        }]
+        unidade = "By"
+      },
+      {
+        titulo = "Tempo de início do contêiner (p95), por Job"
+        series = [{
+          filtro  = "metric.type=\"run.googleapis.com/container/startup_latencies\" AND ${local.filtro_dos_jobs_com_gpu}"
+          aligner = "ALIGN_PERCENTILE_95"
+          reducer = "REDUCE_MAX"
+          agrupar = ["resource.label.job_name"]
+          legenda = "{{resource.label.job_name}}"
+        }]
+        unidade = "ms"
+      },
+      {
+        titulo = "Falta de GPU ou de cota (tentativas, por etapa)"
+        series = [
+          {
+            promql  = "sum by (etapa) (increase(${local.metrica_de_log["falta_de_gpu"]}[${local.janela_dos_paineis}]))"
+            legenda = "{{etapa}}"
+          },
+        ]
+        unidade = "1"
+      },
+    ]
+  }
+  titulos_dos_paineis = {
+    tempo_e_custo = "MAM · Tempo e custo por etapa"
+    fila          = "MAM · Fila de processamento"
+    erros_da_api  = "MAM · Erros e latência da API"
+    gpu           = "MAM · Jobs com GPU"
+  }
+}
+
+# O tempo da etapa vem do Workflows (`marca_fim`), só das etapas concluídas.
+resource "google_logging_metric" "duracao_da_etapa" {
+  name            = "mam_duracao_da_etapa"
+  description     = "Duração das etapas concluídas, com a etapa como rótulo (#288)"
+  filter          = "resource.type=\"workflows.googleapis.com/Workflow\" AND jsonPayload.evento=\"duracao_da_etapa\""
+  value_extractor = "EXTRACT(jsonPayload.duracao_s)"
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "DISTRIBUTION"
+    unit        = "s"
+    labels {
+      key         = "etapa"
+      value_type  = "STRING"
+      description = "Etapa do processamento"
+    }
+  }
+  label_extractors = {
+    etapa = "EXTRACT(jsonPayload.etapa)"
+  }
+  # De 1 s a cerca de 5 dias: a leitura da tela com GPU passa de horas.
+  bucket_options {
+    exponential_buckets {
+      num_finite_buckets = 30
+      growth_factor      = 1.5
+      scale              = 1
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+# Os tokens de cada chamada ao modelo (`uso_do_modelo`); a etapa é o Job que chamou.
+resource "google_logging_metric" "tokens_do_modelo" {
+  for_each = {
+    tokens_de_entrada = "tokens_de_entrada"
+    tokens_de_saida   = "tokens_de_saida"
+  }
+  name            = "mam_${each.key}"
+  description     = "${each.value} por chamada ao modelo, com a etapa e o modelo como rótulos (#288)"
+  filter          = "${local.filtro_dos_jobs} AND jsonPayload.evento=\"uso_do_modelo\""
+  value_extractor = "EXTRACT(jsonPayload.${each.value})"
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "DISTRIBUTION"
+    unit        = "1"
+    labels {
+      key         = "etapa"
+      value_type  = "STRING"
+      description = "Job (etapa) que chamou o modelo"
+    }
+    labels {
+      key         = "modelo"
+      value_type  = "STRING"
+      description = "ID do modelo"
+    }
+  }
+  label_extractors = {
+    etapa  = "EXTRACT(resource.labels.job_name)"
+    modelo = "EXTRACT(jsonPayload.modelo)"
+  }
+  # De 1 a cerca de 4 milhões de tokens por chamada.
+  bucket_options {
+    exponential_buckets {
+      num_finite_buckets = 44
+      growth_factor      = 1.4
+      scale              = 1
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+# A amostra da fila (`api/fila_job.py`): uma linha por estado por minuto.
+resource "google_logging_metric" "fila" {
+  for_each = {
+    fila_quantidade = { extrai = "quantidade", unidade = "1" }
+    fila_idade      = { extrai = "idade_do_mais_antigo_s", unidade = "s" }
+  }
+  name            = "mam_${each.key}"
+  description     = "Amostra da fila de processamento (${each.value.extrai}), com o estado como rótulo (#288)"
+  filter          = "${local.filtro_dos_jobs} AND jsonPayload.evento=\"fila_de_jobs\""
+  value_extractor = "EXTRACT(jsonPayload.${each.value.extrai})"
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "DISTRIBUTION"
+    unit        = each.value.unidade
+    labels {
+      key         = "estado"
+      value_type  = "STRING"
+      description = "Estado do Job"
+    }
+  }
+  label_extractors = {
+    estado = "EXTRACT(jsonPayload.estado)"
+  }
+  # De 0 a 100 Jobs ou de 0 a 100 000 s, em 20 faixas lineares (a média sai do _sum e do _count).
+  bucket_options {
+    linear_buckets {
+      num_finite_buckets = 20
+      width              = 5000
+      offset             = 0
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_logging_metric" "falta_de_gpu" {
+  name        = "mam_falta_de_gpu"
+  description = "Tentativas que acharam o Job sem GPU ou sem cota, com a etapa como rótulo (#288)"
+  filter      = "resource.type=\"workflows.googleapis.com/Workflow\" AND jsonPayload.evento=\"falta_de_gpu\""
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+    labels {
+      key         = "etapa"
+      value_type  = "STRING"
+      description = "Etapa com GPU"
+    }
+  }
+  label_extractors = {
+    etapa = "EXTRACT(jsonPayload.etapa)"
+  }
+  depends_on = [google_project_service.apis]
+}
+
+# Uma linha por requisição da API; a rota é o recurso (`/v1/jobs`, `/v1/busca`), sem os
+# ids do caminho, para a cardinalidade ficar no número de recursos.
+resource "google_logging_metric" "requisicoes_da_api" {
+  name        = "mam_requisicoes_da_api"
+  description = "Requisições da API, com a rota (recurso de /v1) e o código HTTP como rótulos (#288)"
+  filter      = local.filtro_da_api
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+    labels {
+      key         = "rota"
+      value_type  = "STRING"
+      description = "Recurso de /v1 do caminho, sem ids"
+    }
+    labels {
+      key         = "codigo"
+      value_type  = "STRING"
+      description = "Código HTTP"
+    }
+  }
+  label_extractors = {
+    rota   = "REGEXP_EXTRACT(httpRequest.requestUrl, \"^https?://[^/]+(/[^/?]+(?:/[^/?]+)?)\")"
+    codigo = "EXTRACT(httpRequest.status)"
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_monitoring_dashboard" "painel" {
+  for_each = toset(keys(local.graficos_dos_paineis))
+  dashboard_json = jsonencode({
+    displayName = local.titulos_dos_paineis[each.key]
+    mosaicLayout = {
+      columns = 12
+      tiles = [
+        for i, grafico in local.graficos_dos_paineis[each.key] : {
+          xPos   = (i % 2) * 6
+          yPos   = floor(i / 2) * 4
+          width  = 6
+          height = 4
+          widget = {
+            title = grafico.titulo
+            xyChart = {
+              dataSets = [
+                for serie in grafico.series : {
+                  plotType       = "LINE"
+                  legendTemplate = serie.legenda
+                  timeSeriesQuery = can(serie.promql) ? {
+                    prometheusQuery = serie.promql
+                    } : {
+                    timeSeriesFilter = {
+                      filter = serie.filtro
+                      aggregation = {
+                        alignmentPeriod    = "60s"
+                        perSeriesAligner   = serie.aligner
+                        crossSeriesReducer = serie.reducer
+                        groupByFields      = serie.agrupar
+                      }
+                    }
+                  }
+                }
+              ]
+              yAxis = { scale = "LINEAR" }
+            }
+          }
+        }
+      ]
+    }
+  })
+  depends_on = [
+    google_logging_metric.duracao_da_etapa,
+    google_logging_metric.tokens_do_modelo,
+    google_logging_metric.fila,
+    google_logging_metric.falta_de_gpu,
+    google_logging_metric.requisicoes_da_api,
+  ]
 }
 
 # Chave web do login, que vai no build do front. O provider a marca como

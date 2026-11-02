@@ -25,7 +25,12 @@ from api.decupagem import (
 )
 from api.espera import espera_com_jitter, sorteio_uniforme
 from api.programas import PERFIS
-from api.sinais import Registrar, imprimir, registro_da_resposta_fora_do_esquema
+from api.sinais import (
+    Registrar,
+    imprimir,
+    registro_da_resposta_fora_do_esquema,
+    registro_do_uso_do_modelo,
+)
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA, aplicar_transcricao
 
@@ -205,9 +210,16 @@ class SessaoHttp(Protocol):
 class TransporteVertex:
     """REST na Vertex AI, endpoint global (ADR 0001): Flex no vídeo, Standard com texto ou imagens."""
 
-    def __init__(self, projeto: str, sessao: SessaoHttp) -> None:
+    def __init__(
+        self,
+        projeto: str,
+        sessao: SessaoHttp,
+        registrar: Registrar | None = None,
+    ) -> None:
         self._projeto = projeto
         self._sessao = sessao
+        # Quem liga o log (os Jobs do processamento) recebe uma linha de uso por chamada.
+        self._registrar = registrar
         self.versao_do_modelo = ""  # a da última resposta; só o cassete a lê
         # Somados desde a criação do transporte; só a comparação dos motores os lê.
         self.tokens_de_entrada = 0
@@ -285,10 +297,12 @@ class TransporteVertex:
             raise ErroHttp(502) from e
         self.versao_do_modelo = dados.get("modelVersion", "")
         uso = dados.get("usageMetadata") or {}
-        self.tokens_de_entrada += uso.get("promptTokenCount", 0)
-        self.tokens_de_saida += uso.get("candidatesTokenCount", 0) + uso.get(
-            "thoughtsTokenCount", 0
-        )
+        entrada = uso.get("promptTokenCount", 0)
+        saida = uso.get("candidatesTokenCount", 0) + uso.get("thoughtsTokenCount", 0)
+        self.tokens_de_entrada += entrada
+        self.tokens_de_saida += saida
+        if self._registrar is not None:
+            self._registrar(registro_do_uso_do_modelo(chamada.modelo, entrada, saida))
         partes = (
             (dados.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         )

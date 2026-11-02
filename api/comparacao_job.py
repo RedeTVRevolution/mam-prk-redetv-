@@ -41,6 +41,7 @@ from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
 from api.referencias import Sugestoes, acervo_ligado
 from api.rostos_dos_palpites import Palpites
+from api.sinais import imprimir
 
 VALIDADE_PADRAO_DIAS = 180
 
@@ -137,7 +138,7 @@ def main() -> None:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        TransporteVertex(projeto, sessao),
+        TransporteVertex(projeto, sessao, imprimir),
         referencias,
         CatalogoFirestore(firestore.Client(project=projeto)),
         SugestoesFirestore(firestore.Client(project=projeto)),

@@ -693,6 +693,19 @@ marca_fim:
                     timestampValue: $${agora}
                   resultado:
                     stringValue: $${resultado}
+    # Tempo da etapa (#288): o painel de tempo por etapa lê esta linha (`mam_duracao_da_etapa`),
+    # só das etapas concluídas, para a falha não puxar o p50 e o p95 para baixo.
+    - registra_a_duracao_da_etapa:
+        switch:
+          - condition: $${resultado == "concluida"}
+            call: sys.log
+            args:
+              severity: INFO
+              json:
+                evento: duracao_da_etapa
+                etapa: $${etapa}
+                job_id: $${job_id}
+                duracao_s: $${sys.now() - time.parse(documento_da_etapa.fields.etapas.mapValue.fields[etapa].mapValue.fields.inicio.timestampValue)}
     # O fim de uma etapa em paralelo não limpa o `etapa_atual`: a outra pode estar rodando.
     - monta_os_campos_do_fim:
         assign:
@@ -886,6 +899,16 @@ roda_o_job_com_gpu:
                             tentativas: $${tentativas}
                       - repassa_a_falha_do_conteiner:
                           raise: $${erro_da_gpu}
+            # Falta de GPU ou de cota (#288): o painel da GPU conta estas linhas por etapa.
+            - registra_a_falta_de_gpu:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  json:
+                    evento: falta_de_gpu
+                    etapa: $${etapa}
+                    job_id: $${job_id}
+                    tentativa: $${tentativas}
             - ainda_cabe_esperar:
                 switch:
                   - condition: $${esperado + espera <= ${gpu_espera_total_s}}

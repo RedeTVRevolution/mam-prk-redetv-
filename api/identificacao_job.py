@@ -32,6 +32,7 @@ from api.nuvem import (
 )
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
+from api.sinais import imprimir
 from api.transcricao import Transcricao
 
 VALIDADE_PADRAO_DIAS = 180
@@ -133,7 +134,7 @@ def main() -> None:
         DecupagensStorage(
             ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
         ),
-        TransporteVertex(projeto, sessao),
+        TransporteVertex(projeto, sessao, imprimir),
         TranscricoesStorage(ClienteStorage(project=projeto), aceitos),
         CatalogoFirestore(firestore.Client(project=projeto)),
         Path(os.environ["TMPDIR"]),

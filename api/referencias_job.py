@@ -46,6 +46,7 @@ from api.referencias import (
 )
 from api.rostos_dos_palpites import Palpites
 from api.serpapi import Busca, SerpApi
+from api.sinais import imprimir
 
 VALIDADE_PADRAO_DIAS = 180
 LIMITE_DE_BUSCAS_PADRAO = 12  # buscas no SerpAPI por vídeo
@@ -155,7 +156,7 @@ def main() -> None:
     )
     sessao = AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
     chave = ler_segredo(cast(SessaoDoSegredo, sessao), os.environ["SEGREDO_DO_SERPAPI"])
-    transporte = TransporteVertex(projeto, cast(SessaoHttp, sessao))
+    transporte = TransporteVertex(projeto, cast(SessaoHttp, sessao), imprimir)
     job_id = job_do_video or os.environ.get("CLOUD_RUN_EXECUTION", "referencias")
     web = requests.Session()
     armazenamento = ReferenciasStorage(

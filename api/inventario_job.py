@@ -28,6 +28,7 @@ from api.inventario import (
     olhar_com_gemini,
 )
 from api.nuvem import ObjetosStorage
+from api.sinais import imprimir
 
 MOTORES = ("florence", "gemini")
 
@@ -118,7 +119,7 @@ def main() -> None:
         ObjetosStorage(
             ClienteStorage(project=projeto), os.environ["BUCKET_DECUPAGENS"]
         ),
-        TransporteVertex(projeto, sessao),
+        TransporteVertex(projeto, sessao, imprimir),
         config_do_ambiente(os.environ),
     )
 

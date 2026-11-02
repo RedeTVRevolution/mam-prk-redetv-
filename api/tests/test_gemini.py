@@ -441,6 +441,43 @@ def test_transporte_vertex_soma_os_tokens_das_respostas() -> None:
     assert (transporte.tokens_de_entrada, transporte.tokens_de_saida) == (100, 25)
 
 
+def test_transporte_vertex_loga_o_uso_de_cada_chamada_com_o_modelo() -> None:
+    corpo = {
+        "candidates": [],
+        "usageMetadata": {
+            "promptTokenCount": 100,
+            "candidatesTokenCount": 20,
+            "thoughtsTokenCount": 5,
+        },
+    }
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p", SessaoFalsa(RespostaFalsa(200, corpo)), registrar=linhas.append
+    )
+
+    transporte.gerar(_chamada())
+
+    assert [json.loads(linha) for linha in linhas] == [
+        {
+            "severity": "INFO",
+            "evento": "uso_do_modelo",
+            "modelo": "gemini-3.5-flash-lite",
+            "tokens_de_entrada": 100,
+            "tokens_de_saida": 25,
+        }
+    ]
+
+
+def test_transporte_vertex_sem_registrar_nao_loga_nada(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    corpo = {"candidates": [], "usageMetadata": {"promptTokenCount": 1}}
+
+    TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo))).gerar(_chamada())
+
+    assert capsys.readouterr().out == ""
+
+
 @pytest.mark.parametrize("status", [429, 500, 503])
 def test_transporte_vertex_converte_status_diferente_de_200_em_erro_http(
     status: int,
