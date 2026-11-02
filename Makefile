@@ -101,7 +101,7 @@ criar-colecao-da-busca:
 medir-busca:
 	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)
 
-# Sonda da busca: 15 consultas no dev, com o corte do serviço, e um veredito por consulta.
+# Sonda da busca: as consultas de api/consultas_da_sonda.toml no dev, com o corte do serviço, e um veredito por consulta.
 sondar-busca:
 	$(AMBIENTE_DA_BUSCA) \
 	BUSCA_DISTANCIA_MAXIMA="$${BUSCA_DISTANCIA_MAXIMA:-$$(terraform -chdir=infra output -raw busca_distancia_maxima)}" \
