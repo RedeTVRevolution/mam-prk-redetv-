@@ -2,8 +2,9 @@
 
 import hashlib
 import json
+import secrets
 from collections.abc import Callable, Iterator, Mapping
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -64,6 +65,7 @@ from api.rostos_dos_palpites import FotoAusente
 from api.sugestoes import ContagemDoTipo, Decisao, TipoDeSugestao, contar
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
+from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
@@ -312,14 +314,129 @@ class RepositorioDePapeisFirestore:
 
     def obter(self, uid: str) -> list[Papel] | None:
         doc = self._colecao.document(uid).get()
-        if not doc.exists:
+        dados = (doc.to_dict() or {}) if doc.exists else {}
+        if "papeis" not in dados:
+            # Só a marca `desativada`: a conta segue sem papéis guardados.
             return None
         # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
-        guardados = (doc.to_dict() or {}).get("papeis", [])
-        return [p for p in PAPEIS if p in guardados]
+        return [p for p in PAPEIS if p in dados["papeis"]]
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
-        self._colecao.document(uid).set({"papeis": papeis})
+        # merge: não apaga a marca `desativada`.
+        self._colecao.document(uid).set({"papeis": papeis}, merge=True)
+
+    def desativada(self, uid: str) -> bool:
+        doc = self._colecao.document(uid).get()
+        return doc.exists and (doc.to_dict() or {}).get("desativada") is True
+
+    def marcar_desativada(self, uid: str, desativada: bool) -> None:
+        self._colecao.document(uid).set({"desativada": desativada}, merge=True)
+
+
+class ContasIdentityPlatform:
+    """As contas do Identity Platform pela API REST de administração (`accounts`).
+    Não tem teste contra a nuvem; o corpo dos pedidos e a leitura da resposta têm."""
+
+    def __init__(self, projeto: str, sessao: Any | None = None) -> None:
+        self._base = f"https://identitytoolkit.googleapis.com/v1/projects/{projeto}"
+        self._cabecalhos = {
+            "x-goog-user-project": projeto,
+            "X-Firebase-Locale": "pt-BR",
+        }
+        self._sessao = sessao
+
+    def _http(self) -> Any:
+        if self._sessao is None:
+            credenciais, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            self._sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+        return self._sessao
+
+    def _chamar(self, metodo: str, sufixo: str, **argumentos: Any) -> Any:
+        resposta = self._http().request(
+            metodo,
+            f"{self._base}/accounts{sufixo}",
+            headers=self._cabecalhos,
+            timeout=30,
+            **argumentos,
+        )
+        if not resposta.ok:
+            raise requests.HTTPError(resposta.text, response=resposta)
+        return resposta.json() if resposta.content else {}
+
+    @staticmethod
+    def _conta(usuario: Mapping[str, Any]) -> ContaDoIdentityPlatform:
+        def instante(ms: Any) -> datetime | None:
+            return (
+                datetime.fromtimestamp(int(ms) / 1000, tz=UTC)
+                if ms and int(ms) > 0
+                else None
+            )
+
+        return ContaDoIdentityPlatform(
+            uid=usuario["localId"],
+            email=usuario.get("email", ""),
+            nome=usuario.get("displayName", ""),
+            email_verificado=usuario.get("emailVerified") is True,
+            criada_em=instante(usuario.get("createdAt")),
+            ultimo_acesso=instante(usuario.get("lastLoginAt")),
+            bloqueada=usuario.get("disabled") is True,
+        )
+
+    def listar(self) -> list[ContaDoIdentityPlatform]:
+        contas: list[ContaDoIdentityPlatform] = []
+        pagina: str | None = None
+        while True:
+            parametros: dict[str, Any] = {"maxResults": 500}
+            if pagina:
+                parametros["nextPageToken"] = pagina
+            dados = self._chamar("GET", ":batchGet", params=parametros)
+            contas += [self._conta(u) for u in dados.get("users", [])]
+            pagina = dados.get("nextPageToken")
+            if not pagina:
+                return contas
+
+    def obter(self, uid: str) -> ContaDoIdentityPlatform | None:
+        dados = self._chamar("POST", ":lookup", json={"localId": [uid]})
+        usuarios = dados.get("users", [])
+        return self._conta(usuarios[0]) if usuarios else None
+
+    def criar(self, email: str, nome: str) -> ContaDoIdentityPlatform:
+        # E-mail verificado: quem define a senha pelo link prova que é dono dele, e o
+        # cadastro do MFA exige e-mail verificado. A senha é aleatória e descartada.
+        try:
+            dados = self._chamar(
+                "POST",
+                "",
+                json={
+                    "email": email,
+                    "displayName": nome,
+                    "emailVerified": True,
+                    "password": secrets.token_urlsafe(32) + "Aa1!",
+                },
+            )
+        except requests.HTTPError as erro:
+            if "EMAIL_EXISTS" in str(erro):
+                raise EmailJaCadastrado(email) from None
+            raise
+        conta = self.obter(dados["localId"])
+        assert conta is not None
+        return conta
+
+    def enviar_link_de_senha(self, email: str) -> None:
+        self._chamar(
+            "POST",
+            ":sendOobCode",
+            json={"requestType": "PASSWORD_RESET", "email": email},
+        )
+
+    def bloquear(self, uid: str, bloqueada: bool) -> None:
+        corpo: dict[str, Any] = {"localId": uid, "disableUser": bloqueada}
+        if bloqueada:
+            # Tokens de atualização emitidos antes deste instante deixam de valer.
+            corpo["validSince"] = str(int(datetime.now(UTC).timestamp()))
+        self._chamar("POST", ":update", json=corpo)
 
 
 class CatalogoFirestore:

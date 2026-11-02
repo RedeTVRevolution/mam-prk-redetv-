@@ -17,6 +17,7 @@ Permissao = Literal[
     "video.reprocessar",
     "video.reprocessar_etapa",
     "job.corrigir_estado",
+    "usuarios.gerir",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
@@ -71,16 +72,31 @@ class RepositorioDePapeis(Protocol):
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None: ...
 
+    def desativada(self, uid: str) -> bool:
+        """A marca `desativada` do documento; a API a confere a cada requisição."""
+        ...
+
+    def marcar_desativada(self, uid: str, desativada: bool) -> None:
+        """Liga ou desliga a marca sem tocar nos papéis (nem criar papéis)."""
+        ...
+
 
 class RepositorioDePapeisEmMemoria:
     def __init__(self) -> None:
         self._papeis: dict[str, list[Papel]] = {}
+        self._desativadas: set[str] = set()
 
     def obter(self, uid: str) -> list[Papel] | None:
         return self._papeis.get(uid)
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         self._papeis[uid] = papeis
+
+    def desativada(self, uid: str) -> bool:
+        return uid in self._desativadas
+
+    def marcar_desativada(self, uid: str, desativada: bool) -> None:
+        (self._desativadas.add if desativada else self._desativadas.discard)(uid)
 
 
 class ContaNaoEncontrada(Exception):

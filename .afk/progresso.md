@@ -821,3 +821,11 @@ Não corrigido:
 ## #168 revisão
 - Corrigido: (1) a aba Objeto barrava a terceira cor com o `2` escrito à mão, fora do `MAXIMO_DE_CORES_BASE`; agora o F2 e a aba usam `coresDaLista` (`catalogacao.ts`). (2) `editorDoTrecho` não tem mais `pessoas = []` por padrão, para ninguém esquecer o dono. (3) Testes da aba Objeto: o pedido inteiro (tom, detalhe, marca nula, relação `veste`) e a cor base pela tecla com a terceira recusada.
 - Não corrigido / dizer no PR: (1) A montagem de `pessoa`/`relacao` e o `texto(x) || null` de tom, detalhe e marca ainda se repetem entre o F2 e a aba; juntar exigiria mudar o molde de `montarEditor`. (2) Quando falta tipo ou relação, o Salvar não diz qual campo falta (como nas outras abas). (3) O autocompletar do tipo e da marca só tem teste no F2, que usa os mesmos campos (`camposDoObjeto`).
+- 2026-11-02 19:36:41 · #168: feito
+- 2026-11-02 19:36:46 · iteração 92: #142
+
+## #142 iteração 93
+- Pronto: permissão `usuarios.gerir`; `api/usuarios.py` (porta `ContasDeUsuario` + dublê em memória, rotas `/v1/admin/usuarios`: GET, POST, `/{uid}/link-de-senha`, PUT `/{uid}/papeis`, `/{uid}/desativar`, `/{uid}/reativar`, auditoria em cada uma, papéis com antes/depois); `RepositorioDePapeis` ganhou `desativada`/`marcar_desativada` (Firestore com `merge=True`, e `obter` devolve None se o doc só tem a marca); middleware de `auth.py` dá 401 a conta desativada; `ContasIdentityPlatform` (REST) em `nuvem.py`, ligada no `main.py`; `roles/firebaseauth.admin` na SA do `web` no `main.tf`. Testes em `test_usuarios.py` e `test_nuvem.py` (emulador). `make verificar` verde.
+- Decisões: desativar grava a marca primeiro (corta na hora), depois bloqueia no IP e revoga tokens (`validSince`). A trava "não tirar de si o Administrador" olha os papéis efetivos. Sem `ContasDeUsuario` configurada, as rotas dão 503.
+- Armadilha: registros de auditoria com relógio fixo empatam em `quando`; testes não devem depender da ordem.
+- Falta (fora do ticket): `ContasIdentityPlatform` não tem teste na nuvem; o papel IAM novo só vale após `terraform apply`.

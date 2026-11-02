@@ -123,6 +123,12 @@ async def _autenticar(request: Request) -> Chamador | None:
         return None
 
 
+async def _desativada(request: Request, usuario: Usuario) -> bool:
+    # O documento de papéis também é lido a cada requisição, para os papéis.
+    papeis: Any = request.app.state.papeis
+    return bool(await run_in_threadpool(papeis.desativada, usuario.uid))
+
+
 def _protegido(caminho: str) -> bool:
     if caminho == CAMINHO_HEALTH:
         return False
@@ -138,6 +144,8 @@ async def exigir_autenticacao(
     if not _protegido(request.url.path):
         return await seguinte(request)
     chamador = await _autenticar(request)
+    if isinstance(chamador, Usuario) and await _desativada(request, chamador):
+        chamador = None  # O corte vale na hora, mesmo com um ID token ainda válido.
     if chamador is None:
         return JSONResponse(
             {"detail": "Not authenticated"},

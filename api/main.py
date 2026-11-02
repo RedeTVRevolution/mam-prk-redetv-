@@ -70,6 +70,7 @@ from api.nuvem import (
     ArmazenamentoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ContasIdentityPlatform,
     DisparoPeloWorkflows,
     JanelasStorage,
     RepositorioDeAprovacaoFirestore,
@@ -137,6 +138,11 @@ from api.tipos_de_objeto import (
     TiposDeObjetoEmMemoria,
     criar_rotas_dos_tipos_de_objeto,
 )
+from api.usuarios import (
+    ContasDeUsuario,
+    ContasIndisponiveis,
+    criar_rotas_dos_usuarios,
+)
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -201,6 +207,7 @@ def criar_app(
     correcoes: RepositorioDeCorrecoes | None = None,
     aprovacao: RepositorioDeAprovacao | None = None,
     auditoria: RepositorioDeAuditoria | None = None,
+    contas: ContasDeUsuario | None = None,
     revisao: RepositorioDeRevisao | None = None,
     disparo: DisparoDoWorkflow | None = None,
     janelas: JanelasDoJob | None = None,
@@ -347,6 +354,15 @@ def criar_app(
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
     v1.include_router(
+        criar_rotas_dos_usuarios(
+            contas or ContasIndisponiveis(),
+            app.state.papeis,
+            repositorio_de_auditoria,
+            lambda: app.state.admins,
+            relogio,
+        )
+    )
+    v1.include_router(
         criar_rotas_do_reprocessamento(
             repositorio_de_jobs,
             repositorio_de_auditoria,
@@ -410,6 +426,7 @@ if _projeto:
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
+        contas=ContasIdentityPlatform(_projeto),
         revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
         limite_de_inatividade_s=float(
             os.environ.get("REVISAO_INATIVIDADE_S") or LIMITE_DE_INATIVIDADE_S

@@ -654,7 +654,7 @@ locals {
     # menor papel com a permissão `discoveryengine.rankingConfigs.rank`, da Ranking API (#232).
     # `bigquery.jobUser` (web e indexacao): rodar o script que troca as linhas do Job na
     # cópia do BigQuery (#260); o acesso aos dados é só no dataset, mais abaixo.
-    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", local.papel_vertex_predicao, "roles/workflows.invoker", "roles/modelarmor.user", "roles/discoveryengine.viewer", "roles/bigquery.jobUser"]
+    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", local.papel_vertex_predicao, "roles/workflows.invoker", "roles/modelarmor.user", "roles/discoveryengine.viewer", "roles/bigquery.jobUser", "roles/firebaseauth.admin"]
     validacao   = ["roles/datastore.user"]
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
