@@ -360,3 +360,16 @@ Não corrigido:
 - Pronto: `api/revisao.py` (`aplicar` puro, `Medida`, `Pulso`, repositório em memória, rotas `POST /v1/jobs/{id}/revisao/pulso` com `decupagem.editar` e `GET /v1/jobs/{id}/revisao` com `correcao.aprovar` ou `auditoria.ver`, CSV); `RepositorioDeRevisaoFirestore` em `nuvem.py` (coleção `tempo_de_revisao`, transação, doc `<job>:<uid>`); `api/tempo_de_revisao.py` + `make tempo-de-revisao [DESDE=]`; web: `useSessaoDeRevisao.ts` ligado no Visualizador (`podeEditar && catalogando`), `pulsoDeRevisao` no `ClienteDoJob`; testes em `test_revisao`, `test_rotas_da_revisao`, `test_tempo_de_revisao`, `SessaoDeRevisao.test.tsx`, `Catalogacao.test.tsx`.
 - Decisões: o tempo cresce pela fronteira `ultimo_pulso` (intervalo ≤ limite soma, maior abre sessão sem contar, pulso que não passa da fronteira não soma: duas abas não dobram); `inicio` nunca soma. Limite padrão 300 s (`REVISAO_INATIVIDADE_S` na API). `DESDE` filtra pelo último pulso. Sem cronômetro na tela; falha de pulso é calada.
 - Armadilhas: com relógio falso no vitest, `waitFor` do RTL trava (usa setInterval): usar `vi.waitFor`. O pulso `fim` no unmount vai por fetch comum (não há `keepalive`), então fechar a aba pode perder o último pulso (até 1 min).
+
+## #251 revisão (iteração 52)
+Corrigido:
+- O tempo parado contava: o hook mandava `atividade` a cada minuto até a pausa, mesmo sem atividade, e a API somava até ~4 min parados a cada pausa. Agora só o minuto com atividade avisa; o intervalo até o próximo aviso entra se couber no limite e some se passar dele. A atividade depois de 5 min parado reabre com `inicio`, mesmo antes da pausa ser vista pelo intervalo. Testes refeitos.
+- Sessões: `inicio` logo depois de um `fim` (saiu e voltou em menos de 5 min) abre outra sessão (`Medida.ultimo_evento`). Outra aba abrindo continua na mesma. Há testes.
+- `minutos_por_hora_de_video(ativo_s, duracao_s)` em vez de uma `Medida` falsa na rota; a rota usa a duração do Job para todas as linhas; `minutos()` sem repetir o arredondamento.
+- JSDoc do `ClienteDoJob` tinha ido parar no tipo `EventoDeRevisao`.
+- `DESDE` documentado: filtra pelo último pulso, e os minutos são o acumulado (a spec não diz se é para recortar).
+Não corrigido:
+- A inatividade é configurável só na API (`REVISAO_INATIVIDADE_S`); a tela usa 5 min fixos. Quem decide o que conta é a API; a tela só decide quando mandar `inicio` de novo. Levar o valor à tela pede uma rota de configuração (decisão humana). A variável também não está no `infra/main.tf` (vale o padrão).
+- Volta da pausa entre 4 e 5 min depois do último aviso: o `inicio` não soma o intervalo (certo), mas não conta outra sessão. Efeito pequeno na contagem.
+- `fim` sem `keepalive` ao fechar a aba (já anotado): o `pedir` busca o token antes do fetch, então `keepalive` sozinho não garante.
+- Smells de julgamento: imports de privados de `api.jobs` (`_exige_editar`, `_tem_permissao`, `_confere_permissao`), `exigir_do_ambiente` vindo de `comparar_objetos`, `total_ativo_s`/uid além do pedido. Refatoração sem bug.

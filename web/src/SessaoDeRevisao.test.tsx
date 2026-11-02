@@ -54,8 +54,11 @@ test('começa avisando, segue a cada minuto com atividade e avisa ao sair', asyn
   const tela = render(<Tela api={api} ativo />)
   await vi.waitFor(() => expect(eventos).toEqual(['inicio']))
 
-  await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).keyboard('x')
-  await minutos(2)
+  const usuario = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+  await usuario.keyboard('x')
+  await minutos(1)
+  await usuario.click(document.body)
+  await minutos(1)
   await vi.waitFor(() => expect(eventos).toEqual(['inicio', 'atividade', 'atividade']))
 
   tela.unmount()
@@ -68,13 +71,24 @@ test('sem atividade por 5 minutos os pulsos param, e a próxima atividade abre o
   await vi.waitFor(() => expect(eventos).toEqual(['inicio']))
 
   await minutos(10)
-  await vi.waitFor(() => expect(eventos).toEqual(['inicio', 'atividade', 'atividade', 'atividade', 'atividade']))
-  await minutos(3)
-  expect(eventos).toHaveLength(5)
+  expect(eventos).toEqual(['inicio'])
 
   await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(document.body)
-  await vi.waitFor(() => expect(eventos).toHaveLength(6))
-  expect(eventos[5]).toBe('inicio')
+  await vi.waitFor(() => expect(eventos).toEqual(['inicio', 'inicio']))
+  await minutos(1)
+  await vi.waitFor(() => expect(eventos).toEqual(['inicio', 'inicio', 'atividade']))
+})
+
+test('um minuto parado não avisa, e a atividade seguinte volta a avisar na mesma sessão', async () => {
+  const api = await cliente()
+  render(<Tela api={api} ativo />)
+  await vi.waitFor(() => expect(eventos).toEqual(['inicio']))
+
+  await minutos(2)
+  expect(eventos).toEqual(['inicio'])
+  await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).keyboard('x')
+  await minutos(1)
+  await vi.waitFor(() => expect(eventos).toEqual(['inicio', 'atividade']))
 })
 
 test('o player tocando conta como atividade', async () => {

@@ -96,3 +96,20 @@ def test_a_duracao_do_video_acompanha_o_ultimo_pulso() -> None:
     novo = aplicar(medida, _pulso(60).model_copy(update={"duracao_s": None}), 300)
 
     assert novo.duracao_s == 3600.0
+
+
+def test_sair_e_voltar_logo_abre_outra_sessao_sem_contar_o_intervalo() -> None:
+    medida = _soma(
+        _pulso(0, "inicio"),
+        _pulso(60),
+        _pulso(90, "fim"),
+        _pulso(150, "inicio"),
+        _pulso(210),
+    )
+
+    assert medida.ativo_s == 90 + 60
+    assert medida.sessoes == 2
+
+
+def test_outra_aba_abrindo_nao_abre_outra_sessao() -> None:
+    assert _soma(_pulso(0, "inicio"), _pulso(60), _pulso(80, "inicio")).sessoes == 1

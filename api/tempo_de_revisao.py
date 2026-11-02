@@ -1,7 +1,8 @@
 """Lista o tempo de revisão por vídeo e por pessoa, em CSV (#251): `make tempo-de-revisao`.
 
 Argumento: `DESDE` (data ou data e hora ISO, em UTC se sem fuso): só as medidas com pulso de
-então em diante. Ambiente: `GCP_PROJECT_ID`.
+então em diante. Os minutos de cada linha são o total acumulado do vídeo e da pessoa, não só os
+de depois de `DESDE`. Ambiente: `GCP_PROJECT_ID`.
 """
 
 import os

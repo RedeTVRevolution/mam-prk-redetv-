@@ -4,6 +4,7 @@ A tela avisa a API (`pulso`) ao começar, a cada minuto com atividade e ao sair.
 de cada (vídeo, pessoa) cresce pela fronteira do que já foi contado (`ultimo_pulso`): um pulso
 dentro do limite soma o que passou desde a fronteira, um intervalo maior abre outra sessão e
 não conta, e um pulso que não passa da fronteira (outra aba da mesma pessoa) não soma de novo.
+Um `inicio` logo depois de um `fim` (a pessoa saiu e voltou) também abre outra sessão.
 """
 
 import csv
@@ -47,6 +48,7 @@ class Medida(BaseModel):
     sessoes: int = 0
     duracao_s: float | None = None
     ultimo_pulso: AwareDatetime
+    ultimo_evento: Evento | None = None
 
 
 def aplicar(medida: Medida | None, pulso: Pulso, limite_s: float) -> Medida:
@@ -60,10 +62,12 @@ def aplicar(medida: Medida | None, pulso: Pulso, limite_s: float) -> Medida:
             sessoes=1,
             duracao_s=duracao,
             ultimo_pulso=pulso.quando,
+            ultimo_evento=pulso.evento,
         )
     intervalo = (pulso.quando - medida.ultimo_pulso).total_seconds()
     ativo, sessoes = medida.ativo_s, medida.sessoes
-    if intervalo > limite_s:
+    voltou = pulso.evento == "inicio" and medida.ultimo_evento == "fim"
+    if intervalo > limite_s or voltou:
         sessoes += 1
     elif intervalo > 0 and pulso.evento != "inicio":
         ativo += intervalo
@@ -74,6 +78,7 @@ def aplicar(medida: Medida | None, pulso: Pulso, limite_s: float) -> Medida:
             "duracao_s": duracao if duracao is not None else medida.duracao_s,
             "email": pulso.email,
             "ultimo_pulso": max(medida.ultimo_pulso, pulso.quando),
+            "ultimo_evento": pulso.evento,
         }
     )
 
@@ -119,11 +124,15 @@ class RepositorioDeRevisaoEmMemoria:
         )
 
 
-def minutos_por_hora_de_video(medida: Medida) -> float | None:
+def minutos(ativo_s: float) -> float:
+    return round(ativo_s / 60, 2)
+
+
+def minutos_por_hora_de_video(ativo_s: float, duracao_s: float | None) -> float | None:
     """Minutos de revisão por hora de vídeo; `None` se o vídeo não tem duração."""
-    if not medida.duracao_s:
+    if not duracao_s:
         return None
-    return round(medida.ativo_s / 60 / (medida.duracao_s / 3600), 2)
+    return round(ativo_s / 60 / (duracao_s / 3600), 2)
 
 
 class CorpoDoPulso(BaseModel):
@@ -147,14 +156,14 @@ class RevisaoDoVideo(BaseModel):
     minutos_por_hora_de_video: float | None
 
 
-def _linha_da_pessoa(medida: Medida) -> PessoaNaRevisao:
+def _linha_da_pessoa(medida: Medida, duracao_s: float | None) -> PessoaNaRevisao:
     return PessoaNaRevisao(
         uid=medida.uid,
         email=medida.email,
         ativo_s=medida.ativo_s,
-        minutos=round(medida.ativo_s / 60, 2),
+        minutos=minutos(medida.ativo_s),
         sessoes=medida.sessoes,
-        minutos_por_hora_de_video=minutos_por_hora_de_video(medida),
+        minutos_por_hora_de_video=minutos_por_hora_de_video(medida.ativo_s, duracao_s),
     )
 
 
@@ -207,20 +216,12 @@ def criar_rotas_da_revisao(
             raise HTTPException(404, "Job não encontrado")
         medidas = revisao.do_video(job.id)
         ativo = sum(m.ativo_s for m in medidas)
-        soma = Medida(
-            job_id=job.id,
-            uid="",
-            email="",
-            ativo_s=ativo,
-            duracao_s=job.duracao_s,
-            ultimo_pulso=relogio(),
-        )
         return RevisaoDoVideo(
             job_id=job.id,
             duracao_s=job.duracao_s,
-            pessoas=[_linha_da_pessoa(m) for m in medidas],
+            pessoas=[_linha_da_pessoa(m, job.duracao_s) for m in medidas],
             total_ativo_s=ativo,
-            minutos_por_hora_de_video=minutos_por_hora_de_video(soma),
+            minutos_por_hora_de_video=minutos_por_hora_de_video(ativo, job.duracao_s),
         )
 
     return rotas
@@ -242,13 +243,13 @@ def relatorio_em_csv(medidas: list[Medida]) -> str:
     escritor = csv.writer(saida, lineterminator="\n")
     escritor.writerow(COLUNAS_DO_CSV)
     for m in medidas:
-        por_hora = minutos_por_hora_de_video(m)
+        por_hora = minutos_por_hora_de_video(m.ativo_s, m.duracao_s)
         escritor.writerow(
             [
                 m.job_id,
                 m.email,
                 m.uid,
-                round(m.ativo_s / 60, 2),
+                minutos(m.ativo_s),
                 m.sessoes,
                 "" if m.duracao_s is None else round(m.duracao_s / 60, 2),
                 "" if por_hora is None else por_hora,

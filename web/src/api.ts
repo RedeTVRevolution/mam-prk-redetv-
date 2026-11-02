@@ -61,9 +61,9 @@ export interface FotosDoNome {
   expira_em: string
 }
 
-/** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
 
+/** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
   reproducao(): Promise<Reproducao>
