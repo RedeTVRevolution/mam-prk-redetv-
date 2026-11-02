@@ -22,6 +22,7 @@ import {
   editorDeNovaAparicao,
   editorDoItem,
   itemDaCorrecao,
+  aindaIndexando,
   marcasDosItens,
   type Pedido,
   motivoDaRemocao,
@@ -45,7 +46,17 @@ import { type Aba, abaDaChave, type ItemDoPainel, itensDoPainel, nomeNormalizado
 import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA, CORES } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
-import { enderecoDoVideo } from './rotas.ts'
+import { enderecoDoVideo, navegar } from './rotas.ts'
+import { consultaNova } from './busca.ts'
+import {
+  guardado,
+  guardarResultado,
+  lerResultado,
+  momentoAtual,
+  passoNoResultado,
+  rotuloDaBusca,
+  type VideoGuardado,
+} from './resultadoDaBusca.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
 const VELOCIDADES = [1, 2, 4]
@@ -57,6 +68,10 @@ const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
 const GRUPO_DA_CATALOGACAO = 'Catalogação'
 const AVISO_DO_DESFAZER_MS = 5000
+const INTERVALO_DA_INDEXACAO_MS = 2000
+// O resultado refeito quando a sessão não o guardou: o teto de vídeos da página de busca.
+const VIDEOS_DO_RESULTADO = 50
+const GRUPO_DA_BUSCA = 'Busca'
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 function tecla(e: KeyboardEvent, ...teclas: string[]): boolean {
@@ -73,18 +88,24 @@ export default function Visualizador({
   api,
   job: jobInicial,
   t,
+  busca = null,
   podeEditar,
   podeAprovar = false,
   podeReprocessar = false,
   intervaloDoAcompanhamentoMs = 5000,
+  intervaloDaIndexacaoMs = INTERVALO_DA_INDEXACAO_MS,
 }: {
   api: ClienteDaApi
   job: Job
   t: number | null
+  /** O texto da busca de onde a pessoa chegou: ele liga a faixa "Busca" e o N. */
+  busca?: string | null
   podeEditar: boolean
   podeAprovar?: boolean
   podeReprocessar?: boolean
   intervaloDoAcompanhamentoMs?: number
+  /** De quanto em quanto a tela pergunta se a correção já entrou no índice. */
+  intervaloDaIndexacaoMs?: number
 }) {
   // O Job muda quando a pessoa reprocessa: o que a API devolveu vale mais que o da abertura.
   const [job, setJob] = useState(jobInicial)
@@ -236,6 +257,53 @@ export default function Visualizador({
       ativo = false
     }
   }, [api, job.id, podeEditar, decupagem])
+
+  // Uma correção nova entra no índice depois de gravada: pergunta de novo até ela confirmar.
+  useEffect(() => {
+    if (!podeEditar || !aindaIndexando(historico)) return
+    let ativo = true
+    const espera = setTimeout(() => {
+      api.job(job.id).historico().then(
+        (h) => ativo && setHistorico(h),
+        () => {},
+      )
+    }, intervaloDaIndexacaoMs)
+    return () => {
+      ativo = false
+      clearTimeout(espera)
+    }
+  }, [api, job.id, podeEditar, historico, intervaloDaIndexacaoMs])
+
+  // O resultado da busca de onde a pessoa veio: o da sessão, ou a busca refeita.
+  const [resultadoDaBusca, setResultadoDaBusca] = useState<VideoGuardado[] | null>(null)
+  useEffect(() => {
+    // Sem busca no endereço, a faixa e o N somem.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setResultadoDaBusca(null)
+    if (!busca) return
+    const guardada = lerResultado(busca)
+    if (guardada) {
+      setResultadoDaBusca(guardada)
+      return
+    }
+    let ativo = true
+    api.buscar(consultaNova(busca), VIDEOS_DO_RESULTADO).then(
+      (r) => {
+        if (!ativo) return
+        const videos = guardado(r.videos)
+        guardarResultado(busca, videos)
+        setResultadoDaBusca(videos)
+      },
+      () => {},
+    )
+    return () => {
+      ativo = false
+    }
+  }, [api, busca])
+  const momentosDaBusca = useMemo(
+    () => resultadoDaBusca?.find((v) => v.job_id === job.id)?.momentos ?? [],
+    [resultadoDaBusca, job.id],
+  )
 
   // As sugestões saem da decupagem entregue: a lista vem de novo a cada decupagem nova e ao ligar o modo.
   useEffect(() => {
@@ -411,6 +479,31 @@ export default function Visualizador({
   function selecionar(chave: string | null) {
     if (chave !== selecionada) fecharEdicao()
     setSelecionada(chave)
+  }
+
+  /** N e Shift+N: o momento seguinte ou anterior do resultado, também entre vídeos. */
+  function passarDeMomento(passo: 1 | -1) {
+    if (!busca) return
+    if (!resultadoDaBusca) {
+      mostrarAviso('A busca ainda está carregando.')
+      return
+    }
+    const atual = (player.current?.currentTime ?? 0) * 1000
+    const destino = passoNoResultado(resultadoDaBusca, job.id, atual, passo)
+    if (!destino) {
+      mostrarAviso(
+        resultadoDaBusca.some((v) => v.job_id === job.id)
+          ? `Este é o ${passo === 1 ? 'último' : 'primeiro'} momento da busca.`
+          : 'Este vídeo não está no resultado da busca.',
+      )
+      return
+    }
+    if (destino.job_id === job.id) saltarPara(destino.inicio_ms / 1000)
+    else navegar(enderecoDoVideo(destino.job_id, destino.inicio_ms / 1000, busca))
+  }
+
+  function fecharBusca() {
+    navegar(enderecoDoVideo(job.id, player.current?.currentTime ?? t), { substituir: true })
   }
 
   function mostrarAviso(texto: string) {
@@ -596,6 +689,25 @@ export default function Visualizador({
       grupo: GRUPO_DA_LINHA,
     },
     { tecla: 'Enter', acao: 'Numa faixa: saltar à ocorrência', grupo: GRUPO_DA_LINHA },
+    ...(busca
+      ? [
+          {
+            tecla: 'N',
+            acao: 'Ir ao momento seguinte da busca, também no vídeo seguinte do resultado',
+            grupo: GRUPO_DA_BUSCA,
+            // No modo de catalogação com sugestões abertas, o N é do "recusar".
+            casa: (e: KeyboardEvent) => tecla(e, 'n') && !e.shiftKey && !(catalogando && sugestoes.length > 0),
+            executar: () => passarDeMomento(1),
+          },
+          {
+            tecla: 'Shift + N',
+            acao: 'Ir ao momento anterior da busca, também no vídeo anterior do resultado',
+            grupo: GRUPO_DA_BUSCA,
+            casa: (e: KeyboardEvent) => tecla(e, 'n') && e.shiftKey,
+            executar: () => passarDeMomento(-1),
+          },
+        ]
+      : []),
     ...(podeEditar
       ? [
           {
@@ -1056,6 +1168,17 @@ export default function Visualizador({
               aoSaltar={(ms) => saltarPara(ms / 1000)}
               alcas={alcasDaCorrecao}
               trecho={trechoNaLinha}
+              busca={
+                busca && momentosDaBusca.length > 0
+                  ? {
+                      rotulo: rotuloDaBusca(busca, momentosDaBusca.length),
+                      momentos: momentosDaBusca,
+                      atual: momentoAtual(momentosDaBusca, atualMs),
+                      aoSaltar: (ms) => saltarPara(ms / 1000),
+                      aoFechar: fecharBusca,
+                    }
+                  : null
+              }
               aoSelecionar={(chave, inicioMs) => {
                 selecionar(chave)
                 const aberta = abaDaChave(chave)

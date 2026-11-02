@@ -178,10 +178,15 @@ EstadoNoHistorico = Literal[
 ]
 
 
+EstadoNaBusca = Literal["salva", "indexando", "na_busca"]
+
+
 class ItemDoHistorico(Correcao):
     estado: EstadoNoHistorico
     antes_legivel: str
     depois_legivel: str
+    # Onde a correção está no índice da busca; `historico` não sabe, quem lê o Job preenche.
+    na_busca: EstadoNaBusca = "salva"
 
 
 def tempos_de(valor: str) -> tuple[int, int]:
@@ -1187,6 +1192,32 @@ def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
         )
         for c in reversed(em_ordem(correcoes))
     ]
+
+
+def com_o_estado_na_busca(
+    itens: list[ItemDoHistorico],
+    estado: str | None,
+    ate: datetime | None,
+) -> list[ItemDoHistorico]:
+    """Marca em cada correção que vale hoje (ativa ou aprovada) onde ela está no índice.
+
+    `estado` e `ate` vêm da indexação do Job: `ate` é o instante a partir do qual a
+    última rodada leu as correções. Com a indexação rodando, a correção está
+    "indexando"; indexado, está "na busca" se foi gravada até `ate`; sem indexação ou
+    com falha, só "salva".
+    """
+    aprovada_em = {i.aprova: i.criada_em for i in itens if i.aprova}
+    marcados: list[ItemDoHistorico] = []
+    for item in itens:
+        situacao: EstadoNaBusca = "salva"
+        if item.estado in ("ativa", "aprovada"):
+            vale_desde = aprovada_em.get(item.id, item.criada_em)
+            if estado == "pendente":
+                situacao = "indexando"
+            elif estado == "indexado" and ate is not None and vale_desde <= ate:
+                situacao = "na_busca"
+        marcados.append(item.model_copy(update={"na_busca": situacao}))
+    return marcados
 
 
 def _valor_atual(

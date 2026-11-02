@@ -153,6 +153,9 @@ export interface Reproducao {
   expira_em: string
 }
 
+/** Onde uma correção está no índice da busca. */
+export type EstadoNaBusca = 'salva' | 'indexando' | 'na_busca'
+
 export interface ItemDoHistorico {
   id: string
   tipo:
@@ -189,6 +192,7 @@ export interface ItemDoHistorico {
   depois: string
   antes_legivel: string
   depois_legivel: string
+  na_busca: EstadoNaBusca
   estado: 'ativa' | 'desfeita' | 'reaplicada' | 'descartada' | 'pendente' | 'aprovada' | 'recusada'
   reaplica?: string | null
   desfaz?: string | null

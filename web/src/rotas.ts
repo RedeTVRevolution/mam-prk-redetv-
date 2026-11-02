@@ -8,7 +8,7 @@ export type Rota =
   | { tipo: 'raiz' }
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'busca'; consulta: ConsultaDaBusca }
-  | { tipo: 'video'; id: string; t: number | null }
+  | { tipo: 'video'; id: string; t: number | null; busca: string | null }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
@@ -43,7 +43,7 @@ export function lerRota(caminho: string, busca = ''): Rota {
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {
-      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca) }
+      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca), busca: new URLSearchParams(busca).get('busca') || null }
     } catch {
       return { tipo: 'nao_encontrada' }
     }

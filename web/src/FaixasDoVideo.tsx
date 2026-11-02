@@ -1,4 +1,5 @@
-import { Box, Text, Tooltip } from '@mantine/core'
+import { Box, Button, Group, Text, Tooltip } from '@mantine/core'
+import { IconX } from '@tabler/icons-react'
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react'
 import {
   type Borda,
@@ -17,6 +18,7 @@ import {
   trechosSemPauta,
   vizinhoNaFaixa,
 } from './linhaDoTempo.ts'
+import type { MomentoGuardado } from './resultadoDaBusca.ts'
 import { CORES, HACHURADO } from './tema.ts'
 
 const LARGURA_DO_ROTULO = 96
@@ -46,6 +48,17 @@ export interface TrechoMarcado {
   aoSalvar: () => void
   /** Esc na alça descarta o trecho. */
   aoDescartar: () => void
+}
+
+/** A faixa "Busca": um bloco por momento do resultado neste vídeo. */
+export interface BuscaNaLinha {
+  /** "Busca: sapato vermelho (4)". */
+  rotulo: string
+  momentos: MomentoGuardado[]
+  /** O momento em que o player está. */
+  atual: number | null
+  aoSaltar: (ms: number) => void
+  aoFechar: () => void
 }
 
 /** Alça de início ou de fim: arrasta com o ponteiro ou move com as setas (0,1 s; com Shift, 1 s). */
@@ -138,6 +151,7 @@ export function FaixasDoVideo({
   aoSelecionar,
   alcas,
   trecho,
+  busca,
 }: {
   faixas: FaixaDoVisualizador[]
   cortesMs: number[] | null | undefined
@@ -150,6 +164,8 @@ export function FaixasDoVideo({
   alcas?: AlcasDaCorrecao | null
   /** O trecho marcado no modo de catalogação. */
   trecho?: TrechoMarcado | null
+  /** O resultado da busca de onde a pessoa chegou, neste vídeo. */
+  busca?: BuscaNaLinha | null
 }) {
   const trilha = useRef<HTMLDivElement>(null)
   const arrastando = useRef(false)
@@ -184,9 +200,31 @@ export function FaixasDoVideo({
   )
 
   return (
+    <Box>
+    {busca && (
+      <Group gap="xs" mb={VAO} wrap="nowrap">
+        <Text size="xs" fw={600} truncate style={{ color: CORES.foco }}>
+          {busca.rotulo}
+        </Text>
+        <Button
+          type="button"
+          size="compact-xs"
+          variant="subtle"
+          leftSection={<IconX size={12} aria-hidden />}
+          onClick={busca.aoFechar}
+        >
+          Fechar busca
+        </Button>
+      </Group>
+    )}
     <Box style={{ display: 'flex', gap: VAO * 2 }}>
       <Box style={{ width: LARGURA_DO_ROTULO, display: 'flex', flexDirection: 'column', gap: VAO }}>
         <Box style={{ height: ALTURA_DA_REGUA }} />
+        {busca && (
+          <Text size="xs" fw={600} aria-hidden style={{ lineHeight: `${ALTURA_DA_FAIXA}px`, color: CORES.foco }}>
+            Busca
+          </Text>
+        )}
         {trecho && (
           <Text size="xs" fw={600} aria-hidden style={{ lineHeight: `${ALTURA_DA_FAIXA}px`, color: CORES.foco }}>
             Trecho
@@ -272,6 +310,7 @@ export function FaixasDoVideo({
             />
           ))}
         </Box>
+        {busca && <FaixaDaBusca busca={busca} duracaoMs={duracaoMs} />}
         {trecho && <FaixaDoTrecho trecho={trecho} duracaoMs={duracaoMs} />}
         {faixas.map((faixa) => {
           const ativo =
@@ -360,6 +399,7 @@ export function FaixasDoVideo({
         />
       </Box>
     </Box>
+    </Box>
   )
 }
 
@@ -409,6 +449,40 @@ function FaixaDoTrecho({ trecho, duracaoMs }: { trecho: TrechoMarcado; duracaoMs
       {trecho.fim_ms !== null && (
         <AlcaDoTempo rotulo="Fim do trecho" borda="fim" ms={trecho.fim_ms} limites={limites.fim} duracaoMs={duracaoMs} aoMover={trecho.aoMover} aoSalvar={trecho.aoSalvar} aoDescartar={trecho.aoDescartar} />
       )}
+    </Box>
+  )
+}
+
+function FaixaDaBusca({ busca, duracaoMs }: { busca: BuscaNaLinha; duracaoMs: number }) {
+  return (
+    <Box role="group" aria-label={busca.rotulo} style={{ position: 'relative', height: ALTURA_DA_FAIXA }}>
+      {busca.momentos.map((m, i) => {
+        const atual = busca.atual === i
+        return (
+          <Tooltip key={m.inicio_ms} label={m.motivo}>
+            <Box
+              component="button"
+              type="button"
+              data-momento-da-busca={m.inicio_ms}
+              aria-label={m.motivo}
+              aria-pressed={atual}
+              onClick={() => busca.aoSaltar(m.inicio_ms)}
+              style={{
+                ...estiloDoTrecho(m, duracaoMs),
+                minWidth: 4,
+                padding: 0,
+                cursor: 'pointer',
+                background: CORES.foco,
+                border: `1px solid ${CORES.fundo}`,
+                borderRadius: 'var(--mantine-radius-xs)',
+                outline: atual ? `2px solid ${CORES.focoTexto}` : undefined,
+                outlineOffset: 1,
+                zIndex: atual ? 1 : undefined,
+              }}
+            />
+          </Tooltip>
+        )
+      })}
     </Box>
   )
 }

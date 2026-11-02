@@ -59,6 +59,7 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     TemposInvalidos,
     VersaoDesatualizada,
+    com_o_estado_na_busca,
     corrigir,
     decidir,
     decupagem_entregue,
@@ -127,6 +128,8 @@ class Indexacao(BaseModel):
 
     estado: EstadoDaIndexacao
     em: datetime
+    # O começo da rodada que terminou em `em`: o que foi gravado até aqui entrou nela.
+    desde: datetime | None = None
 
 
 NomeDaEtapa = Literal[
@@ -1112,7 +1115,12 @@ def criar_rotas(
         job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
     ) -> list[ItemDoHistorico]:
         job = obter_concluido(job_id, autor)
-        return historico(_ler_correcoes(job.id))
+        indexacao = job.indexacao
+        return com_o_estado_na_busca(
+            historico(_ler_correcoes(job.id)),
+            indexacao.estado if indexacao else None,
+            (indexacao.desde or indexacao.em) if indexacao else None,
+        )
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/desfazer", status_code=201)
     def desfazer_correcao(

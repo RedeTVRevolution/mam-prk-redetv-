@@ -59,6 +59,7 @@ const correcao = (extra: Partial<ItemDoHistorico> = {}): ItemDoHistorico => ({
   depois: 'Ana Souza Lima',
   antes_legivel: 'Ana Souza',
   depois_legivel: 'Ana Souza Lima',
+  na_busca: 'na_busca',
   estado: 'ativa',
   ...extra,
 })

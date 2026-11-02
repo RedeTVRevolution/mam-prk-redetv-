@@ -77,6 +77,7 @@ def _registrar(
     job_id: str,
     estado: EstadoDaIndexacao,
     agora: datetime,
+    desde: datetime | None = None,
 ) -> Job | None:
     """Grava o estado da indexação sem mudar o `estado` do Job.
 
@@ -86,7 +87,9 @@ def _registrar(
     """
     try:
         return repositorio.transitar(
-            job_id, "concluido", {"indexacao": Indexacao(estado=estado, em=agora)}
+            job_id,
+            "concluido",
+            {"indexacao": Indexacao(estado=estado, em=agora, desde=desde)},
         )
     except Exception:
         log.exception("estado da indexação não gravado para %s", job_id)
@@ -107,7 +110,8 @@ def reindexar(
     """
     if job.estado != "concluido":
         return None
-    _registrar(repositorio, job.id, "pendente", relogio())
+    inicio = relogio()
+    _registrar(repositorio, job.id, "pendente", inicio)
     estado: EstadoDaIndexacao
     try:
         conteudo = b"".join(decupagens.abrir_decupagem(job.id))
@@ -125,7 +129,7 @@ def reindexar(
     except Exception:
         log.exception("indexação falhou para %s", job.id)
         estado = "falhou"
-    atual = _registrar(repositorio, job.id, estado, relogio())
+    atual = _registrar(repositorio, job.id, estado, relogio(), inicio)
     return atual.indexacao if atual else None
 
 

@@ -508,7 +508,7 @@ test('acrescentar aparição grava e cancela pelos botões, sem tecla nenhuma', 
   expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.acrescentar_aparicao', item_id: 'p1' })
 })
 
-test('o item corrigido mostra "corrigido", e o pendente, "aguardando o Curador"', async () => {
+test('o item corrigido mostra onde a correção está na busca, e o pendente, "aguardando o Curador"', async () => {
   historico = [
     {
       ...correcaoDoHistorico('c1', 'ana@redetv.com.br', 'ativa', 'pauta.titulo'),
@@ -516,6 +516,7 @@ test('o item corrigido mostra "corrigido", e o pendente, "aguardando o Curador"'
       ancora: { versao: 'v1', tipo_do_item: 'pauta' },
       criada_em: '2026-10-31T12:00:00Z',
       motivo: 'título corrigido',
+      na_busca: 'na_busca',
     },
     {
       ...correcaoDoHistorico('c2', 'ana@redetv.com.br', 'pendente', 'comercial.marca'),
@@ -528,7 +529,7 @@ test('o item corrigido mostra "corrigido", e o pendente, "aguardando o Curador"'
   const usuario = await abrir(true)
 
   await usuario.click(screen.getByRole('tab', { name: /Pautas/ }))
-  expect(await screen.findByText('corrigido')).toBeTruthy()
+  expect(await screen.findByText('na busca')).toBeTruthy()
   await usuario.click(screen.getByRole('tab', { name: /Comerciais/ }))
   expect(await screen.findByText('aguardando o Curador')).toBeTruthy()
 })

@@ -1,7 +1,7 @@
 """Indexação da Decupagem entregue no índice da busca (#118)."""
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -21,7 +21,7 @@ from api.indice_da_busca import (
     Registro,
     registros_da_decupagem,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import Indexacao, Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_correcoes import BASE
@@ -280,3 +280,57 @@ def test_falha_do_indice_numa_correcao_nao_derruba_a_correcao() -> None:
         mundo.cliente.get("/v1/jobs/j1", headers=AUTORIZACAO).json()["estado"]
         == "concluido"
     )
+
+
+def _na_busca(mundo: Mundo) -> list[str]:
+    historico = mundo.cliente.get("/v1/jobs/j1/correcoes", headers=AUTORIZACAO).json()
+    return [item["na_busca"] for item in historico]
+
+
+def test_correcao_gravada_aparece_na_busca_no_historico() -> None:
+    mundo = Mundo()
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+
+    assert _na_busca(mundo) == ["na_busca"]
+
+
+def test_correcao_mostra_indexando_enquanto_a_indexacao_roda() -> None:
+    mundo = Mundo()
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+    mundo.jobs.transitar(
+        "j1", "concluido", {"indexacao": Indexacao(estado="pendente", em=BASE)}
+    )
+
+    assert _na_busca(mundo) == ["indexando"]
+
+
+def test_correcao_fica_so_salva_se_a_indexacao_falhou() -> None:
+    mundo = Mundo(IndiceQueFalha())
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+
+    assert _na_busca(mundo) == ["salva"]
+
+
+def test_correcao_gravada_depois_da_rodada_nao_esta_na_busca() -> None:
+    mundo = Mundo()
+    mundo.corrigir_a_fala("Boa noite, Brasil")
+    antes = BASE - timedelta(hours=1)
+    mundo.jobs.transitar(
+        "j1",
+        "concluido",
+        {"indexacao": Indexacao(estado="indexado", em=antes, desde=antes)},
+    )
+
+    assert _na_busca(mundo) == ["salva"]
+
+
+def test_correcao_pendente_de_aprovacao_so_entra_na_busca_depois_de_aprovada() -> None:
+    mundo = Mundo()
+    mundo.reindexar()
+    mundo.aprovacao.definir(frozenset({"fala.texto"}))
+    cid = mundo.corrigir_a_fala("Boa noite, Brasil").json()["id"]
+    assert _na_busca(mundo) == ["salva"]
+
+    mundo.cliente.post(f"/v1/jobs/j1/correcoes/{cid}/aprovar", headers=CURADOR)
+
+    assert "na_busca" in _na_busca(mundo)

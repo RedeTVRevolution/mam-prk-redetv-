@@ -18,6 +18,7 @@ import {
 } from './busca.ts'
 import { dataDeExibicao } from './jobs.ts'
 import { relogio } from './linhaDoTempo.ts'
+import { guardado, guardarResultado } from './resultadoDaBusca.ts'
 import { Quadro } from './Miniatura.tsx'
 import { enderecoDaBusca, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
@@ -239,6 +240,11 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     () => (resultado?.videos ?? []).flatMap((video) => video.momentos.map((momento) => ({ video, momento }))),
     [resultado],
   )
+
+  // O Visualizador aberto daqui percorre este resultado com N e Shift+N.
+  useEffect(() => {
+    if (resultado) guardarResultado(consultaAtual.current.q, guardado(resultado.videos))
+  }, [resultado])
 
   function abrir(i: number) {
     const { video, momento } = momentos[i]

@@ -5,7 +5,7 @@ import type { FotosDoNome } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
 import { ComparacaoDoRosto } from './ComparacaoDoRosto.tsx'
 import { InventarioDoPlano, type ObjetoApontado } from './Inventario.tsx'
-import type { Marca } from './catalogacao.ts'
+import { type Marca, ROTULO_NA_BUSCA } from './catalogacao.ts'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
@@ -391,8 +391,8 @@ function Item({
               ))}
               {marca && (
                 <Tooltip label={marca.dica}>
-                  <Badge size="sm" variant="light" color={marca.pendente ? CORES.andamento : CORES.concluido} tabIndex={0}>
-                    {marca.pendente ? 'aguardando o Curador' : 'corrigido'}
+                  <Badge size="sm" variant="light" color={marca.pendente || marca.na_busca === 'indexando' ? CORES.andamento : CORES.concluido} tabIndex={0}>
+                    {marca.pendente ? 'aguardando o Curador' : ROTULO_NA_BUSCA[marca.na_busca]}
                   </Badge>
                 </Tooltip>
               )}

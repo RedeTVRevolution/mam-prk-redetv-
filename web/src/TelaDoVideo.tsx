@@ -19,6 +19,7 @@ export default function TelaDoVideo({
   api,
   id,
   t,
+  busca = null,
   podeEditar,
   podeAprovar,
   podeReprocessar = false,
@@ -26,6 +27,8 @@ export default function TelaDoVideo({
   api: ClienteDaApi
   id: string
   t: number | null
+  /** O texto da busca de onde a pessoa chegou. */
+  busca?: string | null
   podeEditar: boolean
   podeAprovar: boolean
   podeReprocessar?: boolean
@@ -102,6 +105,7 @@ export default function TelaDoVideo({
       api={api}
       job={carga.job}
       t={t}
+      busca={busca}
       podeEditar={podeEditar}
       podeAprovar={podeAprovar}
       podeReprocessar={podeReprocessar}

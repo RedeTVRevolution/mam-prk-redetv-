@@ -2,7 +2,7 @@
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
 import { type Intervalo, lerTempo, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
-import type { Decupagem, ItemDoHistorico } from './decupagem.ts'
+import type { Decupagem, EstadoNaBusca, ItemDoHistorico } from './decupagem.ts'
 
 export type Valor = string | string[] | boolean
 
@@ -484,11 +484,24 @@ export function identidadeDoItem(d: Decupagem, item: ItemDoPainel): { tipo_do_it
   }
 }
 
-/** A marca de um item corrigido: "corrigido" ou "aguardando o Curador", com a dica de quem, quando e por quê. */
+/** A marca de um item corrigido: "aguardando o Curador" ou onde a correção está no índice, com a dica de quem, quando e por quê. */
 export interface Marca {
   pendente: boolean
+  /** Onde a correção está no índice da busca; vale quando não está pendente. */
+  na_busca: EstadoNaBusca
   dica: string
 }
+
+/** O que a marca escreve de cada estado da correção no índice da busca. */
+export const ROTULO_NA_BUSCA: Record<EstadoNaBusca, string> = {
+  salva: 'salva',
+  indexando: 'indexando',
+  na_busca: 'na busca',
+}
+
+/** Há correção ainda entrando no índice: a tela volta a perguntar até ela confirmar. */
+export const aindaIndexando = (historico: ItemDoHistorico[]): boolean =>
+  historico.some((h) => h.estado === 'ativa' && h.na_busca === 'indexando')
 
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
@@ -514,6 +527,7 @@ export function marcasDosItens(
     const ultima = doItem.find((h) => h.estado === 'pendente') ?? doItem[0]
     marcas[item.chave] = {
       pendente: ultima.estado === 'pendente',
+      na_busca: ultima.na_busca ?? 'salva',
       dica: `${ultima.autor_email} · ${quando(ultima.criada_em)} · ${ultima.motivo}`,
     }
   }

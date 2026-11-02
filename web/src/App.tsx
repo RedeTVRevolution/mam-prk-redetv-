@@ -155,6 +155,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
             api={api}
             id={rota.id}
             t={rota.t}
+            busca={rota.busca}
             podeEditar={podeEditar}
             podeAprovar={podeAprovar}
             podeReprocessar={podeReprocessar}
