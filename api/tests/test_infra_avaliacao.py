@@ -15,7 +15,14 @@ def test_job_roda_o_modulo_da_avaliacao_com_a_conta_propria() -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "avaliacao"')
     assert '"api.avaliacao_job"' in job
     assert 'google_service_account.mam["avaliacao"]' in job
-    for nome in ("REGIAO_DA_AVALIACAO", "MODELO_DO_JUIZ", "BUCKET_DECUPAGENS"):
+    for nome in (
+        "GCP_PROJECT_ID",
+        "REGIAO_DA_AVALIACAO",
+        "MODELO_DO_JUIZ",
+        "BUCKET_ACEITOS",
+        "BUCKET_DECUPAGENS",
+        "FUSO_DA_AVALIACAO",
+    ):
         assert f'"{nome}"' in job
 
 
@@ -32,3 +39,9 @@ def test_agendador_so_roda_o_job_da_avaliacao() -> None:
     )
     assert '"roles/run.invoker"' in papel
     assert re.search(r"agendador\s*=\s*\[\]", TF)
+
+
+def test_job_e_agenda_usam_o_mesmo_fuso() -> None:
+    job = _bloco('resource "google_cloud_run_v2_job" "avaliacao"')
+    agenda = _bloco('resource "google_cloud_scheduler_job" "avaliacao"')
+    assert "var.fuso_da_agenda" in job and "var.fuso_da_agenda" in agenda

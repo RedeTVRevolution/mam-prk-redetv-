@@ -16,7 +16,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -58,7 +58,7 @@ class Avaliacao(BaseModel):
 class Queda(BaseModel):
     requisito: str
     media: float
-    motivo: str  # "abaixo_do_limiar" ou "queda_na_semana"
+    motivo: Literal["abaixo_do_limiar", "queda_na_semana"]
     limiar: float
     media_anterior: float | None = None
 
@@ -153,22 +153,24 @@ class AvaliadorVertex:
             raise AvaliacaoFalhou(str(e)) from e
         if resposta.status_code != 200:
             raise AvaliacaoFalhou(str(ErroHttp(resposta.status_code)))
-        resultado = resposta.json().get("pointwiseMetricResult") or {}
-        if "score" not in resultado:
-            raise AvaliacaoFalhou("o juiz não devolveu nota")
-        return Nota(
-            nota=em_pontos(float(resultado["score"])),
-            explicacao=resultado.get("explanation", ""),
-        )
+        try:
+            resultado = resposta.json()["pointwiseMetricResult"]
+            nota = float(resultado["score"])
+            explicacao = str(resultado.get("explanation", ""))
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            raise AvaliacaoFalhou(f"o juiz não devolveu nota: {e!r}") from e
+        if math.isnan(nota):
+            raise AvaliacaoFalhou("o juiz não devolveu nota: NaN")
+        return Nota(nota=em_pontos(nota), explicacao=explicacao)
 
 
 def medias(avaliacoes: Iterable[Avaliacao]) -> dict[str, float]:
     """A média de cada requisito sobre os vídeos que o têm."""
-    soma: dict[str, list[float]] = defaultdict(list)
+    notas: dict[str, list[float]] = defaultdict(list)
     for a in avaliacoes:
         for requisito, nota in a.notas.items():
-            soma[requisito].append(nota.nota)
-    return {r: sum(v) / len(v) for r, v in soma.items()}
+            notas[requisito].append(nota.nota)
+    return {r: sum(v) / len(v) for r, v in notas.items()}
 
 
 def detectar_quedas(
@@ -187,6 +189,7 @@ def detectar_quedas(
             continue
         media = de_hoje[requisito]
         antes = de_antes.get(requisito)
+        motivo: Literal["abaixo_do_limiar", "queda_na_semana"]
         if media < limiar:
             motivo = "abaixo_do_limiar"
         elif antes is not None and antes - media > queda_maxima:

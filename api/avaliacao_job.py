@@ -1,14 +1,16 @@
 """Cloud Run Job da avaliação diária por rubrica (#255), disparado pelo Cloud Scheduler.
 
-Sorteia a amostra dos vídeos concluídos no dia (`DIA`, padrão: hoje em UTC), avalia cada
-requisito de cada vídeo e grava as notas por vídeo, requisito e `versao_pipeline`. Depois
+Sorteia a amostra dos vídeos concluídos no dia (`DIA`, padrão: ontem no fuso `FUSO_DA_AVALIACAO`,
+o mesmo da agenda, que roda depois da meia-noite), avalia cada requisito de cada vídeo e grava
+as notas por vídeo, requisito e `versao_pipeline`. Depois
 compara a média do dia de cada requisito com o limiar e com a média dos `JANELA_DIAS` dias
 anteriores, e loga um registro estruturado por queda (`evento: queda_de_qualidade`). Rodar de
-novo no mesmo dia não reavalia o que já tem nota. Falha do juiz num requisito deixa só ele
-de fora (com aviso); o Job termina bem.
+novo no mesmo dia não reavalia o que já tem nota, e tenta de novo só os requisitos que
+faltam. Falha do juiz num requisito deixa só ele de fora (com aviso); o Job termina bem.
 
 Ambiente: `GCP_PROJECT_ID`, `REGIAO_DA_AVALIACAO`, `MODELO_DO_JUIZ`, `BUCKET_ACEITOS`,
-`BUCKET_DECUPAGENS`; opcionais `FRACAO_DA_AVALIACAO`, `SEMENTE_DA_AVALIACAO`,
+`BUCKET_DECUPAGENS`; opcionais `DIA`, `FUSO_DA_AVALIACAO` (padrão UTC), `FRACAO_DA_AVALIACAO`,
+`SEMENTE_DA_AVALIACAO`,
 `LIMIAR_DA_AVALIACAO`, `QUEDA_MAXIMA_DA_AVALIACAO`, `JANELA_DA_AVALIACAO_DIAS` e
 `PRECO_POR_MIL_CARACTERES` (para o custo estimado do dia, no log).
 """
@@ -17,8 +19,9 @@ import json
 import os
 import sys
 from collections.abc import Callable, Mapping
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, Protocol, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
@@ -82,10 +85,12 @@ class DecupagensDaAvaliacao(Protocol):
     def ler_decupagem(self, job_id: str) -> Decupagem | None: ...
 
 
-def concluidos_no_dia(repositorio: RepositorioDeJobs, dia: date) -> list[Job]:
-    """Os Jobs `concluido` cuja última atualização caiu em `dia` (UTC)."""
+def concluidos_no_dia(
+    repositorio: RepositorioDeJobs, dia: date, fuso: tzinfo = UTC
+) -> list[Job]:
+    """Os Jobs `concluido` cuja última atualização caiu em `dia`, no `fuso`."""
     pagina = repositorio.consultar(FiltroDeJobs(estados=frozenset({"concluido"})))
-    return [j for j in pagina.jobs if j.atualizado_em.astimezone(UTC).date() == dia]
+    return [j for j in pagina.jobs if j.atualizado_em.astimezone(fuso).date() == dia]
 
 
 def _avaliar_video(
@@ -96,10 +101,14 @@ def _avaliar_video(
     dia: date,
     agora: datetime,
     aviso: Callable[[str], None],
+    anterior: Avaliacao | None,
 ) -> Avaliacao | None:
-    notas = {}
-    caracteres = 0
+    """Avalia os requisitos que `anterior` (a do mesmo dia) ainda não tem."""
+    notas = dict(anterior.notas) if anterior else {}
+    caracteres = anterior.caracteres if anterior else 0
     for requisito in REQUISITOS:
+        if requisito in notas:
+            continue
         conteudo = conteudo_do(rubricas[requisito], decupagem)
         try:
             notas[requisito] = avaliador.avaliar(rubricas[requisito], conteudo)
@@ -107,7 +116,7 @@ def _avaliar_video(
             aviso(f"{job.id}/{requisito}: {e}")
             continue
         caracteres += len(conteudo)
-    if not notas:
+    if not notas or (anterior and notas == anterior.notas):
         return None
     return Avaliacao(
         dia=dia,
@@ -134,6 +143,7 @@ def executar(
     queda_maxima: float = QUEDA_MAXIMA_PADRAO,
     janela_dias: int = JANELA_PADRAO_DIAS,
     preco_por_mil_caracteres: float | None = None,
+    fuso: tzinfo = UTC,
     agora: Callable[[], datetime] = lambda: datetime.now(UTC),
     registrar: Callable[[str], None] = lambda linha: print(linha, flush=True),
 ) -> dict[str, Any]:
@@ -150,16 +160,19 @@ def executar(
             )
         )
 
-    ja_avaliados = {a.job_id for a in avaliacoes.do_dia(dia)}
-    for job in amostrar(concluidos_no_dia(repositorio, dia), dia, fracao, semente):
-        if job.id in ja_avaliados:
+    ja_avaliados = {a.job_id: a for a in avaliacoes.do_dia(dia)}
+    for job in amostrar(
+        concluidos_no_dia(repositorio, dia, fuso), dia, fracao, semente
+    ):
+        anterior = ja_avaliados.get(job.id)
+        if anterior is not None and set(anterior.notas) >= set(REQUISITOS):
             continue
         decupagem = decupagens.ler_decupagem(job.id)
         if decupagem is None:
             aviso(f"{job.id}: sem Decupagem")
             continue
         avaliacao = _avaliar_video(
-            job, decupagem, rubricas, avaliador, dia, agora(), aviso
+            job, decupagem, rubricas, avaliador, dia, agora(), aviso, anterior
         )
         if avaliacao is not None:
             avaliacoes.gravar(avaliacao)
@@ -199,10 +212,11 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         modelo = exigir_do_ambiente(ambiente, "MODELO_DO_JUIZ")
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
         bucket = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        fuso = ZoneInfo(ambiente.get("FUSO_DA_AVALIACAO") or "UTC")
         dia = (
             date.fromisoformat(ambiente["DIA"])
             if ambiente.get("DIA")
-            else datetime.now(UTC).date()
+            else datetime.now(fuso).date() - timedelta(days=1)
         )
         preco = ambiente.get("PRECO_POR_MIL_CARACTERES")
         parametros: dict[str, Any] = {
@@ -216,8 +230,9 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
                 ambiente.get("JANELA_DA_AVALIACAO_DIAS", JANELA_PADRAO_DIAS)
             ),
             "preco_por_mil_caracteres": float(preco) if preco else None,
+            "fuso": fuso,
         }
-    except (FaltaNoAmbiente, ValueError) as e:
+    except (FaltaNoAmbiente, ValueError, ZoneInfoNotFoundError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
     credenciais: Any

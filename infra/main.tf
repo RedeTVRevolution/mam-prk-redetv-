@@ -237,13 +237,13 @@ variable "preco_por_mil_caracteres_da_avaliacao" {
 }
 
 variable "agenda_da_avaliacao" {
-  description = "Cron (formato do Cloud Scheduler) da avaliação diária"
+  description = "Cron (formato do Cloud Scheduler) da avaliação diária; roda depois da meia-noite e avalia o dia anterior"
   type        = string
-  default     = "0 23 * * *"
+  default     = "30 0 * * *"
 }
 
 variable "fuso_da_agenda" {
-  description = "Fuso da agenda da avaliação"
+  description = "Fuso da agenda da avaliação e do dia que ela avalia"
   type        = string
   default     = "America/Sao_Paulo"
 }
@@ -1923,6 +1923,10 @@ resource "google_cloud_run_v2_job" "avaliacao" {
         env {
           name  = "BUCKET_DECUPAGENS"
           value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "FUSO_DA_AVALIACAO"
+          value = var.fuso_da_agenda
         }
         env {
           name  = "FRACAO_DA_AVALIACAO"

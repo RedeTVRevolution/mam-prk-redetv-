@@ -199,3 +199,6 @@ O tempo que uma pessoa passa revisando um vídeo no modo de catalogação (#251)
 
 **Conjunto de regressão**:
 Casos de teste da decupagem guardados no repositório em `evals/regressao/` (`api/regressao.py`, #253), sem vídeo: cada caso tem o SHA-256 do vídeo enviado (o do bloco `video`), o trecho e o esperado por categoria, nos tipos do comparador. Nascem do gabarito anotado à mão ou das correções em vigor (`make exportar-regressao`, com o Job e a versão do pipeline que errou). Cada caso é **reservado** (só a avaliação final usa, nunca o ajuste de instrução) ou de ajuste, por sorteio estável do id. As metas por requisito ficam em `metas.json`.
+
+**Avaliação diária**:
+Nota por rubrica, todo dia, de uma amostra dos vídeos concluídos no dia anterior (`api/avaliacao.py`, `api/avaliacao_job.py`, #255): uma fração por programa, ao menos um, por sorteio reproduzível. Para cada requisito (famosos, menções, pautas, B-roll, comerciais) o juiz do serviço de avaliação da Vertex lê os campos da Decupagem que a **rubrica** (`api/rubricas.toml`) indica e dá uma nota, guardada por vídeo, requisito e `versao_pipeline`. **Queda** é a média do dia de um requisito abaixo do limiar ou mais que X pontos abaixo da média dos 7 dias anteriores, e sai num log `queda_de_qualidade`. Não confundir com a avaliação final do conjunto de regressão, que compara com o esperado.

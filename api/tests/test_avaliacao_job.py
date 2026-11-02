@@ -3,6 +3,7 @@
 import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -116,6 +117,24 @@ def test_falha_do_juiz_num_requisito_deixa_so_ele_de_fora() -> None:
     assert any(linha.get("evento") == "avaliacao_falhou" for linha in linhas)
 
 
+def test_o_dia_e_o_do_fuso() -> None:
+    repositorio = RepositorioEmMemoria()
+    # 01:00 UTC do dia 3 ainda é dia 2 em São Paulo.
+    repositorio.salvar(_job("noite", "A", datetime(2026, 11, 3, 1, tzinfo=UTC)))
+    fuso = ZoneInfo("America/Sao_Paulo")
+    assert [j.id for j in concluidos_no_dia(repositorio, DIA, fuso)] == ["noite"]
+    assert concluidos_no_dia(repositorio, DIA) == []
+
+
+def test_rodar_de_novo_tenta_so_o_requisito_que_falhou() -> None:
+    _, avaliacoes, _ = _rodar([_job("a", "A")], Juiz(falha_em="broll"))
+    juiz = Juiz()
+    _rodar([_job("a", "A")], juiz, avaliacoes)
+    assert juiz.requisitos == ["broll"]
+    (a,) = avaliacoes.do_dia(DIA)
+    assert set(a.notas) == set(REQUISITOS)
+
+
 def test_rodar_de_novo_no_dia_nao_reavalia() -> None:
     juiz = Juiz()
     _, avaliacoes, _ = _rodar([_job("a", "A")], juiz)
@@ -163,6 +182,23 @@ def test_queda_em_relacao_a_semana_anterior() -> None:
     )
     quedas = [linha for linha in linhas if linha.get("evento") == "queda_de_qualidade"]
     assert {q["motivo"] for q in quedas} == {"queda_na_semana"}
+
+
+def test_main_com_fuso_desconhecido_sai_com_erro_de_uso(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    ambiente = {
+        nome: "x"
+        for nome in (
+            "GCP_PROJECT_ID",
+            "REGIAO_DA_AVALIACAO",
+            "MODELO_DO_JUIZ",
+            "BUCKET_ACEITOS",
+            "BUCKET_DECUPAGENS",
+        )
+    }
+    assert main({**ambiente, "FUSO_DA_AVALIACAO": "Marte/Olimpo"}) == 2
+    assert "erro" in capsys.readouterr().err
 
 
 def test_main_sem_ambiente_sai_com_erro_de_uso(

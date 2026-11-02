@@ -412,3 +412,18 @@ Não corrigido / decisão humana:
 - A API só aceita texto: os quadros-chave entram pelas descrições/caminhos na Decupagem, não como imagem. Decisão humana se for preciso imagem de fato.
 - Permissões: nada a dar à mão (`cloudscheduler.admin` já está no wizard).
 - Armadilha: `terraform init` altera `infra/.terraform.lock.hcl`; reverta.
+
+## #255 revisão (iteração 54)
+Corrigido:
+- Dia errado: a agenda rodava às 23h de São Paulo (02h UTC do dia seguinte) e o Job avaliava "hoje em UTC", com só 2h de vídeos. Agora a agenda roda às 00:30 no `fuso_da_agenda`, o Job recebe `FUSO_DA_AVALIACAO` (o mesmo fuso), avalia ontem nesse fuso, e "concluído no dia" usa o fuso. Fuso desconhecido sai com erro de uso.
+- Requisito em que o juiz falhou nunca voltava: rodar de novo no dia pulava o vídeo inteiro. Agora tenta só os requisitos que faltam e mantém as notas que já existem.
+- Uma resposta do juiz sem JSON, sem `pointwiseMetricResult` ou com nota que não é número (ou NaN) derrubava o Job inteiro. Agora vira `AvaliacaoFalhou` e fica de fora só aquele requisito.
+- `Queda.motivo` virou `Literal`; `soma` → `notas` em `medias`.
+- GLOSSARY: verbete "Avaliação diária" (rubrica, queda), distinto da avaliação final do conjunto de regressão. ADR 0002: `mam-avaliacao` entrou na lista das contas com `aiplatform.user` provisório.
+Não corrigido / decisão humana:
+- Região do serviço de avaliação `us-central1`: a ADR 0001 só abre exceção para o endpoint global do Gemini, e as ADRs 0006/0007 escolheram `us-east4`. O JSON da Decupagem (sem vídeo) sai para Iowa. Precisa confirmar se o `evaluateInstances` existe em `southamerica-east1`/`us-east4` e registrar numa ADR. Não mudei o padrão sem a documentação.
+- Quadros-chave: o juiz só recebe texto, e a rubrica `broll` pede para conferir "o que o quadro-chave mostra", o que ele não consegue fazer. Decidir se manda imagem (outra API) ou se reescreve o critério.
+- Rubrica `broll` não recebe `textos_na_tela` nem `transcricao`, então o critério "limpo sem texto/fala" é julgado só pelos planos. Mandar mais campos encarece. Decisão de custo.
+- Média da queda: é por vídeo (dia com mais vídeos pesa mais) e mistura `versao_pipeline`. A spec não pede outra coisa.
+- Custo por vídeo, modelo juiz e permissões extras do serviço de avaliação continuam sem conferência (sem doc nem nuvem aqui). O PR precisa medi-los no dev.
+- Smells sem bug: log JSON montado à mão em dois lugares (sem `message`), chave `(dia, job_id)` repetida no repositório em memória e no Firestore, `extra` em `registro_da_queda` com um só uso, `exigir_do_ambiente` morando em `comparar_objetos`.

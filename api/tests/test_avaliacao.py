@@ -151,7 +151,13 @@ def test_avaliador_da_vertex_monta_o_pedido_e_le_a_nota() -> None:
 
 @pytest.mark.parametrize(
     "sessao",
-    [SessaoFalsa(status=503), SessaoFalsa(corpo={"pointwiseMetricResult": {}})],
+    [
+        SessaoFalsa(status=503),
+        SessaoFalsa(corpo={"pointwiseMetricResult": {}}),
+        SessaoFalsa(corpo={}),
+        SessaoFalsa(corpo={"pointwiseMetricResult": {"score": "ruim"}}),
+        SessaoFalsa(corpo={"pointwiseMetricResult": {"score": "nan"}}),
+    ],
 )
 def test_avaliador_da_vertex_falha_sem_nota(sessao: SessaoFalsa) -> None:
     with pytest.raises(AvaliacaoFalhou):
