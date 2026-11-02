@@ -170,7 +170,7 @@ Os objetos de cena de cada plano (`Plano.inventario`), separados de `objetos` (o
 _Evitar_: lista de objetos, detecções
 
 **Destaque**:
-Nota de 1 a 3 de quanto um objeto do inventário aparece no quadro, calculada pelo servidor pela área e pela posição de cada caixa, ficando a maior nota entre as caixas do objeto (3: grande e no centro; 2: grande, ou média e no centro; 1: o resto). O modelo não a decide.
+Nota de 1 a 3 de quanto um objeto do inventário aparece no quadro, calculada pelo servidor pela área e pela posição de cada caixa, ficando a maior nota entre as caixas do objeto (3: grande e no centro; 2: grande, ou média e no centro; 1: o resto). O modelo não a decide. Na busca, o destaque entra no registro e pesa na ordem: 3% por nível acima de 1.
 
 **Motor do inventário**:
 Quem faz o inventário de objetos: `florence` (Florence-2 numa GPU, com o Gemini só convertendo o texto para o português) ou `gemini` (o modelo olha os quadros-chave). Vem da variável `motor_objetos`; o inventário guarda o motor e o modelo que o geraram.

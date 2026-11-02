@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { FotosDoNome } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
 import { ComparacaoDoRosto } from './ComparacaoDoRosto.tsx'
+import { InventarioDoPlano, type ObjetoApontado } from './Inventario.tsx'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
 import {
@@ -241,6 +242,7 @@ function Item({
   aoIrParaDono,
   aoComparar,
   urlDoQuadro,
+  aoApontarObjeto,
   compacto,
 }: {
   item: ItemDoPainel
@@ -253,6 +255,8 @@ function Item({
   /** Abre a comparação do rosto da pessoa do item; sem ele, o selo "Rosto" é só texto. */
   aoComparar?: (c: Comparacao) => void
   urlDoQuadro?: (caminho: string) => Promise<string>
+  /** O objeto do inventário sob o mouse ou o foco; `null` quando sai. */
+  aoApontarObjeto?: (o: ObjetoApontado | null) => void
   /** Objeto na lista das ocorrências: só o tipo e o tempo, o resto fica na linha do objeto. */
   compacto?: boolean
 }) {
@@ -337,6 +341,9 @@ function Item({
         )}
       </UnstyledButton>
       {item.objeto && !compacto && <DescricaoDoObjeto dados={item.objeto} aoIrParaDono={aoIrParaDono} />}
+      {item.inventario && !compacto && (
+        <InventarioDoPlano inventario={item.inventario} plano={item.titulo} aoApontar={aoApontarObjeto ?? (() => {})} />
+      )}
       {(item.selos.length > 0 || selecionado) && (
         <Group gap="xs" mt={4} ml={16}>
           {item.selos.map((s) => (
@@ -389,6 +396,7 @@ export function Painel({
   aoSaltar,
   aoReproduzir,
   urlDoQuadro,
+  aoApontarObjeto,
   fotosDoNome,
 }: {
   decupagem: Decupagem
@@ -406,6 +414,8 @@ export function Painel({
   aoReproduzir: (i: Intervalo) => void
   /** A URL assinada do quadro de um momento; sem ela as miniaturas ficam como retângulo. */
   urlDoQuadro?: (caminho: string) => Promise<string>
+  /** O objeto do inventário sob o mouse ou o foco, para o player mostrar o quadro com a caixa. */
+  aoApontarObjeto?: (o: ObjetoApontado | null) => void
   /** As fotos de referência do nome de uma pessoa; sem ele, o selo "Rosto" não abre a comparação. */
   fotosDoNome?: (pessoaId: string) => Promise<FotosDoNome>
 }) {
@@ -586,6 +596,7 @@ export function Painel({
         aoIrParaDono={irParaDono}
         aoComparar={fotosDoNome ? setComparando : undefined}
         urlDoQuadro={urlDoQuadro}
+        aoApontarObjeto={aoApontarObjeto}
         compacto={compacto}
       />
     ))

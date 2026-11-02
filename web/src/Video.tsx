@@ -137,11 +137,33 @@ interface Pauta extends Intervalo {
   origem?: 'modelo' | 'revisao'
 }
 
+/** Onde o objeto está num quadro do plano, em fração da largura e da altura (0 a 1). */
+export interface CaixaDoQuadro {
+  /** O JPEG do quadro, relativo à pasta do Job (`quadros/plano-0-1.jpg`). */
+  quadro: string
+  x: number
+  y: number
+  largura: number
+  altura: number
+}
+
+/** Um objeto do inventário do plano (#244), em português; `destaque` vai de 1 a 3. */
+export interface ObjetoDoInventario {
+  nome: string
+  categoria: CategoriaDeObjeto
+  cor?: CorBase | null
+  marca?: string | null
+  caixas: CaixaDoQuadro[]
+  destaque: 1 | 2 | 3
+}
+
 interface Plano extends Intervalo {
   id: string
   ambiente: string
   acao?: string | null
   objetos?: string[]
+  /** Ausente em decupagem antiga ou quando a etapa de inventário falhou. */
+  inventario?: ObjetoDoInventario[]
   plano_limpo?: boolean
   /** O JPEG do meio do plano. */
   quadro?: string | null

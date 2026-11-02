@@ -22,6 +22,7 @@ import { Link } from './Link.tsx'
 import { Painel } from './Painel.tsx'
 import { nomeDaEtapa } from './etapas.ts'
 import { ReprocessarEtapa } from './ReprocessarEtapa.tsx'
+import { QuadroDoObjeto, type ObjetoApontado } from './Inventario.tsx'
 import { criarCacheDeQuadros } from './quadros.ts'
 import { type Aba, abaDaChave } from './painel.ts'
 import { duracaoDaLinha, faixasDoVisualizador, relogio } from './linhaDoTempo.ts'
@@ -94,6 +95,7 @@ export default function Visualizador({
   const [temParaDesfazer, setTemParaDesfazer] = useState(false)
   const [catalogo, setCatalogo] = useState<CatalogoDeCorrecoes | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [objetoApontado, setObjetoApontado] = useState<ObjetoApontado | null>(null)
   const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoDesfazer.current), [])
   // Dois Ctrl+Z seguidos não pedem o mesmo desfazer duas vezes.
@@ -235,6 +237,10 @@ export default function Visualizador({
   }
 
   // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
+  const apontarObjeto = useCallback((o: ObjetoApontado | null) => {
+    const { videoWidth, videoHeight } = player.current ?? { videoWidth: 0, videoHeight: 0 }
+    setObjetoApontado(o && videoWidth && videoHeight ? { ...o, proporcao: videoWidth / videoHeight } : o)
+  }, [])
   const urlDoQuadro = useMemo(() => criarCacheDeQuadros((arquivo) => api.job(job.id).quadro(arquivo)), [api, job.id])
 
   const faixas = useMemo(() => (decupagem ? faixasDoVisualizador(decupagem) : null), [decupagem])
@@ -500,6 +506,7 @@ export default function Visualizador({
               style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
               bg="dark.7"
             >
+              <Box style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex' }}>
               <video
                 ref={player}
                 src={reproducao?.url}
@@ -525,6 +532,13 @@ export default function Visualizador({
                 onRateChange={(e) => setVelocidade(e.currentTarget.playbackRate)}
                 style={{ flex: 1, minHeight: 0, width: '100%', objectFit: 'contain', background: 'var(--mantine-color-black)' }}
               />
+              {objetoApontado && (
+                <QuadroDoObjeto
+                  objeto={objetoApontado}
+                  urlDoQuadro={urlDoQuadro}
+                />
+              )}
+              </Box>
               <Paper withBorder p="xs">
                 <Group gap="sm" wrap="nowrap">
                   <Tooltip label={tocando ? 'Pausar (Espaço)' : 'Tocar (Espaço)'}>
@@ -697,6 +711,7 @@ export default function Visualizador({
               aoSaltar={(ms) => saltarPara(ms / 1000)}
               aoReproduzir={reproduzirTrecho}
               urlDoQuadro={urlDoQuadro}
+              aoApontarObjeto={apontarObjeto}
               fotosDoNome={fotosDoNome}
             />
           ) : (

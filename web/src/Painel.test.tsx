@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -765,4 +765,87 @@ test('a pessoa confirmada por GC não abre a comparação', async () => {
   expect(screen.queryByRole('button', { name: /^Rosto/ })).toBeNull()
   await usuario.click(screen.getByRole('button', { name: 'GC 03:33' }))
   expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+const CAIXA_PEQUENA = { quadro: 'quadros/plano-0-0.jpg', x: 0.5, y: 0.5, largura: 0.1, altura: 0.1 }
+const CAIXA_GRANDE = { quadro: 'quadros/plano-0-1.jpg', x: 0.1, y: 0.2, largura: 0.3, altura: 0.4 }
+const INVENTARIO = [
+  { nome: 'caneca', categoria: 'utensilio', caixas: [CAIXA_PEQUENA], destaque: 1 },
+  { nome: 'carro azul', categoria: 'veiculo', cor: 'azul', marca: 'BYD', caixas: [CAIXA_PEQUENA, CAIXA_GRANDE], destaque: 3 },
+  { nome: 'blazer preto', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 2 },
+  { nome: 'camisa', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 3 },
+]
+
+async function abrirComInventario() {
+  const planos = [{ ...DECUPAGEM.planos[0], inventario: INVENTARIO }, DECUPAGEM.planos[1]]
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json({ ...DECUPAGEM, planos })),
+    http.get('/v1/jobs/j1/quadros/:arquivo', ({ params }) =>
+      HttpResponse.json({ url: `https://quadros.test/${params.arquivo}`, expira_em: '2999-01-01T00:00:00Z' }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(aba(/^Planos/))
+  return usuario
+}
+
+test('o plano mostra só os objetos de destaque e o "ver todos" abre o inventário por categoria', async () => {
+  const usuario = await abrirComInventario()
+
+  const destaque = within(painel()).getByRole('group', { name: 'Objetos de destaque do plano Estúdio' })
+  expect(within(destaque).getAllByRole('button').map((b) => b.textContent)).toEqual([
+    'carro azul (azul · BYD)',
+    'camisa',
+  ])
+  expect(within(painel()).queryByText('caneca')).toBeNull()
+
+  await usuario.click(within(painel()).getByRole('button', { name: 'Ver todos os objetos do plano (4)' }))
+
+  const titulos = within(painel()).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)
+  expect(titulos).toEqual(['roupa', 'utensílio', 'veículo'])
+  const roupas = within(painel()).getByRole('region', { name: 'roupa do plano Estúdio' })
+  // O destaque maior vem primeiro dentro da categoria.
+  expect(within(roupas).getAllByRole('button').map((b) => b.textContent)).toEqual(['camisa', 'blazer preto'])
+  expect(within(painel()).getByText('caneca')).toBeTruthy()
+})
+
+test('o plano sem inventário não tem o "ver todos"', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(aba(/^Planos/))
+
+  expect(within(painel()).getByText('Estúdio')).toBeTruthy()
+  expect(within(painel()).queryByRole('button', { name: /Ver todos os objetos/ })).toBeNull()
+})
+
+test('passar o mouse num objeto mostra o quadro com a caixa, e sair volta ao vídeo', async () => {
+  const usuario = await abrirComInventario()
+
+  await usuario.hover(within(painel()).getByRole('button', { name: /^carro azul/ }))
+
+  const quadro = await screen.findByRole('img', { name: 'Quadro com a caixa de carro azul' })
+  // A maior caixa: a do segundo quadro.
+  expect(quadro.querySelector('image')?.getAttribute('href')).toBe('https://quadros.test/plano-0-1.jpg')
+  const caixa = quadro.querySelector('rect')!
+  const altura = 1000 / (16 / 9)
+  expect(Number(caixa.getAttribute('x'))).toBeCloseTo(100)
+  expect(Number(caixa.getAttribute('y'))).toBeCloseTo(0.2 * altura)
+  expect(Number(caixa.getAttribute('width'))).toBeCloseTo(300)
+  expect(Number(caixa.getAttribute('height'))).toBeCloseTo(0.4 * altura)
+  expect(screen.getByLabelText('Player')).toBeTruthy()
+
+  await usuario.unhover(within(painel()).getByRole('button', { name: /^carro azul/ }))
+  expect(screen.queryByRole('img', { name: /Quadro com a caixa/ })).toBeNull()
+})
+
+test('focar num objeto mostra o quadro com a caixa, e tirar o foco volta ao vídeo', async () => {
+  await abrirComInventario()
+
+  const objeto = within(painel()).getByRole('button', { name: 'camisa' })
+  act(() => objeto.focus())
+  expect(await screen.findByRole('img', { name: 'Quadro com a caixa de camisa' })).toBeTruthy()
+
+  act(() => objeto.blur())
+  expect(screen.queryByRole('img', { name: /Quadro com a caixa/ })).toBeNull()
 })

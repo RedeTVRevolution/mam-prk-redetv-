@@ -9,7 +9,14 @@ import {
   tomDoObjeto,
   trechosSemPauta,
 } from './linhaDoTempo.ts'
-import type { CategoriaDeObjeto, CorBase, Decupagem, RelacaoDoObjeto } from './Video.tsx'
+import type {
+  CaixaDoQuadro,
+  CategoriaDeObjeto,
+  CorBase,
+  Decupagem,
+  ObjetoDoInventario,
+  RelacaoDoObjeto,
+} from './Video.tsx'
 
 export { NAO_IDENTIFICADO }
 
@@ -73,6 +80,8 @@ export interface ItemDoPainel extends Intervalo {
   /** O tom da pauta ou o tipo do texto na tela e do comercial. */
   rotulo?: string
   objeto?: DadosDoObjeto
+  /** O inventário do plano; só nos itens de plano, e só se a decupagem o tem. */
+  inventario?: ObjetoDoInventario[]
   /** O JPEG do momento (`null` sem quadro); só aparição, objeto e plano têm miniatura. */
   quadro?: string | null
 }
@@ -145,6 +154,32 @@ const NOME_DA_CATEGORIA: Record<CategoriaDeObjeto, string> = {
   planta: 'planta',
   bebida: 'bebida',
 }
+
+/** O nome da categoria como a tela mostra. */
+export const nomeDaCategoria = (c: CategoriaDeObjeto): string => NOME_DA_CATEGORIA[c] ?? c
+
+/** Os objetos de destaque mais alto (3) do inventário, na ordem em que estão. */
+export const inventarioDeDestaque = (inventario: ObjetoDoInventario[]): ObjetoDoInventario[] =>
+  inventario.filter((o) => o.destaque === 3)
+
+/** O inventário inteiro por categoria (ordem alfabética do nome mostrado), com o destaque maior primeiro. */
+export function inventarioPorCategoria(
+  inventario: ObjetoDoInventario[],
+): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoInventario[] }[] {
+  const grupos = new Map<CategoriaDeObjeto, ObjetoDoInventario[]>()
+  for (const o of inventario) grupos.set(o.categoria, [...(grupos.get(o.categoria) ?? []), o])
+  return [...grupos]
+    .map(([categoria, objetos]) => ({
+      categoria,
+      nome: nomeDaCategoria(categoria),
+      objetos: [...objetos].sort((a, b) => b.destaque - a.destaque),
+    }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+}
+
+/** A maior caixa do objeto, a que o player mostra. */
+export const maiorCaixa = (o: ObjetoDoInventario): CaixaDoQuadro =>
+  o.caixas.reduce((a, b) => (b.largura * b.altura > a.largura * a.altura ? b : a))
 
 /** A relação do dono com o objeto, como verbo depois do nome ("Mel Breia calça"): não depende do gênero do tipo. */
 const VERBO_DA_RELACAO: Record<RelacaoDoObjeto, string> = {
@@ -272,6 +307,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
       selos: [],
       inicio_ms: p.inicio_ms,
       fim_ms: p.fim_ms,
+      ...(p.inventario?.length ? { inventario: p.inventario } : {}),
     }),
   )
   d.transcricao.forEach((f, i) =>
