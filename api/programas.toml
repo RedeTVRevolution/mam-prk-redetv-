@@ -73,6 +73,11 @@ perfil = """
 Talk show noturno da RedeTV!, com convidados.
 """
 
+[["SuperPop".pessoas]]
+nome = "Cariúcha"
+papel = "apresentadora"
+apelidos = []
+
 # Confirmar: grade de jul. de 2026.
 ["Fica com a Gente"]
 perfil = """
