@@ -4,6 +4,7 @@ import { emCampoDeTexto } from './atalhos.ts'
 import type { Editor, Pedido } from './catalogacao.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
+import type { Pessoa } from './decupagem.ts'
 import type { Intervalo } from './linhaDoTempo.ts'
 import { ABAS_DO_TRECHO, type AbaDoTrecho, editorDoTrecho } from './trecho.ts'
 
@@ -11,12 +12,15 @@ import { ABAS_DO_TRECHO, type AbaDoTrecho, editorDoTrecho } from './trecho.ts'
 export function FormularioDoTrecho({
   trecho,
   catalogo,
+  pessoas,
   salvarRef,
   aoSalvar,
   aoCancelar,
 }: {
   trecho: Intervalo
   catalogo: CatalogoDeCorrecoes
+  /** As pessoas do vídeo, para o dono do objeto. */
+  pessoas: Pessoa[]
   /** Recebe o salvar do formulário aberto, para o Enter nas alças gravar como o Enter nos campos. */
   salvarRef?: RefObject<(() => void) | null>
   aoSalvar: (pedidos: Pedido[], motivo: string) => Promise<string | null>
@@ -31,7 +35,7 @@ export function FormularioDoTrecho({
   // O editor nasce com a aba e com o trecho de então; as alças ajustam os campos depois (`tempos`).
   if (aba !== editorDe) {
     setEditorDe(aba)
-    setEditor(aba ? editorDoTrecho(aba, trecho, catalogo) : null)
+    setEditor(aba ? editorDoTrecho(aba, trecho, catalogo, pessoas) : null)
   }
 
   function aoTeclar(e: KeyboardEvent<HTMLDivElement>) {

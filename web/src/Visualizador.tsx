@@ -1446,6 +1446,7 @@ export default function Visualizador({
             <FormularioDoTrecho
               trecho={trechoDoFormulario}
               catalogo={catalogo}
+              pessoas={decupagem?.pessoas ?? []}
               salvarRef={salvarDoTrecho}
               aoSalvar={gravarTrecho}
               aoCancelar={() => setDescrevendo(false)}

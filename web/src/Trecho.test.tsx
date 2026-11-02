@@ -67,6 +67,7 @@ const servidor = setupServer(
     consultas.push(new URL(request.url).searchParams.get('q') ?? '')
     return HttpResponse.json([{ id: 'cat-marca', nome: 'Marca Y', a_revisar: false }])
   }),
+  http.get('/v1/objetos/tipos', () => HttpResponse.json([])),
   http.post('/v1/catalogo/:catalogo', async ({ request }) => {
     criados.push((await request.json()) as { nome: string })
     return HttpResponse.json({ id: 'cat-nova', nome: criados.at(-1)?.nome, rotulo: criados.at(-1)?.nome, a_revisar: true }, { status: 201 })
@@ -210,6 +211,47 @@ test('aba Marca: acrescenta o comercial com marca, tipo e evidências', async ()
     fim_ms: 50_000,
     evidencias: ['logo'],
   })
+})
+
+test('aba Objeto pela tecla 2: acrescenta o objeto com categoria, tipo, até 2 cores e dono', async () => {
+  const usuario = await trechoPorTeclas(10, 20)
+  await usuario.keyboard('a')
+  await usuario.keyboard('2')
+  await usuario.type(screen.getByLabelText('Tipo'), 'camiseta')
+  const grupo = screen.getByRole('group', { name: 'Cor base (até 2)' })
+  await usuario.click(within(grupo).getByRole('button', { name: 'verde' }))
+  await usuario.click(within(grupo).getByRole('button', { name: 'azul' }))
+  await usuario.click(within(grupo).getByRole('button', { name: 'roxo' }))
+  expect(within(grupo).getByRole('button', { name: 'roxo' }).getAttribute('aria-pressed')).toBe('false')
+  await usuario.click(screen.getByRole('combobox', { name: 'Dono' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Leão Lobo' }))
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'objeto.acrescentar', item_id: '' })
+  expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({
+    categoria: 'roupa',
+    tipo: 'camiseta',
+    cor_base: ['verde', 'azul'],
+    pessoa: 'p1',
+    inicio_ms: 10_000,
+    fim_ms: 20_000,
+  })
+})
+
+test('aba Objeto pelo clique, sem dono: não manda pessoa nem relação', async () => {
+  const usuario = await trechoPorTeclas(10, 20)
+  await usuario.keyboard('a')
+  await usuario.click(screen.getByRole('tab', { name: 'Objeto' }))
+  await usuario.type(screen.getByLabelText('Tipo'), 'vaso')
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'objeto.acrescentar' })
+  const valor = JSON.parse(String(correcoes[0].valor))
+  expect(valor).toMatchObject({ tipo: 'vaso', cor_base: [], inicio_ms: 10_000, fim_ms: 20_000 })
+  expect(valor.pessoa ?? null).toBeNull()
+  expect(valor.relacao ?? null).toBeNull()
 })
 
 test('aba Pauta: acrescenta a pauta com título e tom', async () => {

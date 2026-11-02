@@ -3,7 +3,7 @@ import type { CatalogoDeNomes } from './api.ts'
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
 import { type Intervalo, lerTempo, nomeExibido, ocorrenciasDosObjetos, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
-import type { Decupagem, EstadoNaBusca, ItemDoHistorico, Objeto } from './decupagem.ts'
+import type { Decupagem, EstadoNaBusca, ItemDoHistorico, Objeto, Pessoa } from './decupagem.ts'
 
 export type Valor = string | string[] | boolean
 
@@ -25,6 +25,28 @@ export function teclasDasOpcoes(opcoes: Opcao[]): Map<string, string> {
     teclas.set(o.valor, letra)
   }
   return teclas
+}
+
+/** O dono "em cena": o valor vazio do campo do dono, sem pessoa. */
+export const SEM_DONO = ''
+
+/** Os campos do objeto (tipo, cor base, tom, detalhe, marca, dono e relação), os mesmos ao corrigir e ao acrescentar. */
+export function camposDoObjeto(c: CatalogoDeCorrecoes, pessoas: Pessoa[]): CampoDoEditor[] {
+  return [
+    { chave: 'tipo', rotulo: 'Tipo', tipo: 'nome', catalogo: 'tipos_de_objeto', limite: c.limites.nome },
+    { chave: 'cor_base', rotulo: `Cor base (até ${MAXIMO_DE_CORES_BASE})`, tipo: 'cores', opcoes: c.cores_base, maximo: MAXIMO_DE_CORES_BASE },
+    { chave: 'cor', rotulo: 'Tom', tipo: 'texto', limite: c.limites.nome },
+    { chave: 'detalhe', rotulo: 'Detalhe', tipo: 'texto', limite: c.limites.nome },
+    { chave: 'marca', rotulo: 'Marca', tipo: 'nome', catalogo: 'marcas', limite: c.limites.nome },
+    {
+      chave: 'dono',
+      rotulo: 'Dono',
+      tipo: 'opcoes',
+      buscavel: true,
+      opcoes: [{ valor: SEM_DONO, rotulo: 'Em cena' }, ...pessoas.map((p) => ({ valor: p.id, rotulo: nomeExibido(p.nome) }))],
+    },
+    { chave: 'relacao', rotulo: 'Relação', tipo: 'opcoes', opcoes: c.relacoes_do_objeto, visivel: (v) => v.dono !== SEM_DONO },
+  ]
 }
 
 export interface CampoDoEditor {
@@ -74,7 +96,6 @@ export interface Editor {
 
 /** Os tipos do catálogo que não têm caminho no painel neste ticket. */
 export const TIPOS_FORA_DESTE_TICKET = [
-  'objeto.acrescentar',
   'descartar',
   'aprovar',
   'recusar',
@@ -437,24 +458,9 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
     }
     case 'objeto': {
       const { objeto } = o
-      const SEM_DONO = ''
       const relacoes = c.relacoes_do_objeto
       const cores = objeto.cor_base
-      const campos: CampoDoEditor[] = [
-        { chave: 'tipo', rotulo: 'Tipo', tipo: 'nome', catalogo: 'tipos_de_objeto', limite: c.limites.nome },
-        { chave: 'cor_base', rotulo: `Cor base (até ${MAXIMO_DE_CORES_BASE})`, tipo: 'cores', opcoes: c.cores_base, maximo: MAXIMO_DE_CORES_BASE },
-        { chave: 'cor', rotulo: 'Tom', tipo: 'texto', limite: c.limites.nome },
-        { chave: 'detalhe', rotulo: 'Detalhe', tipo: 'texto', limite: c.limites.nome },
-        { chave: 'marca', rotulo: 'Marca', tipo: 'nome', catalogo: 'marcas', limite: c.limites.nome },
-        {
-          chave: 'dono',
-          rotulo: 'Dono',
-          tipo: 'opcoes',
-          buscavel: true,
-          opcoes: [{ valor: SEM_DONO, rotulo: 'Em cena' }, ...d.pessoas.map((p) => ({ valor: p.id, rotulo: nomeExibido(p.nome) }))],
-        },
-        { chave: 'relacao', rotulo: 'Relação', tipo: 'opcoes', opcoes: relacoes, visivel: (v) => v.dono !== SEM_DONO },
-      ]
+      const campos = camposDoObjeto(c, d.pessoas)
       const inicial: Record<string, Valor> = {
         tipo: objeto.tipo,
         cor_base: cores,
