@@ -296,7 +296,9 @@ def test_aceitar_leva_as_correcoes_seguintes_na_ordem() -> None:
 
     assert resposta.status_code == 201
     assert len(resposta.json()["ids"]) == 2
-    tipos = [i["tipo"] for i in mundo.historico().json()]
+    # o relógio dos testes é parado: a ordem do histórico empata, a dos ids não
+    por_id = {i["id"]: i["tipo"] for i in mundo.historico().json()}
+    tipos = [por_id[cid] for cid in resposta.json()["ids"]]
     assert tipos == ["pessoa.renomear", "pessoa.mencao_para_aparicao"]
     assert {i["motivo"] for i in mundo.historico().json()} == {
         "sugestão confirmada pelo editor"
