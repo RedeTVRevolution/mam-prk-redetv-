@@ -12,8 +12,10 @@ from api.comparador import TIPOS, Item, itens_do_modelo, ler_gabarito, parear
 from api.correcoes import (
     Ancora,
     Correcao,
+    Ocorrencia,
     RepositorioDeCorrecoesEmMemoria,
     TipoDoItem,
+    versao_do_modelo,
 )
 from api.decupagem import Decupagem
 from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
@@ -152,13 +154,44 @@ def test_o_arquivo_de_metas_do_repositorio_le() -> None:
     assert isinstance(ler_metas(), dict)
 
 
+MODELO: dict[str, Any] = {
+    "video": {"sha256": SHA},
+    "versao_pipeline": "2026.11.1",
+    "pessoas": [
+        {
+            "id": "p1",
+            "nome": "Ana",
+            "na_imagem": [
+                {"inicio_ms": 1_000, "fim_ms": 2_000},
+                {"inicio_ms": 4_000, "fim_ms": 5_000},
+            ],
+            "citada_na_fala": [{"inicio_ms": 20_000, "fim_ms": 21_000}],
+        }
+    ],
+}
+
+
+def _ancora(item: TipoDoItem, identidade: str = "x", fim_ms: int = 900) -> Ancora:
+    return Ancora(
+        versao="v",
+        tipo_do_item=item,
+        identidade=identidade,
+        inicio_ms=0,
+        fim_ms=fim_ms,
+    )
+
+
 def test_correcao_de_nome_vira_caso_com_job_trecho_e_versao() -> None:
-    [caso] = casos_das_correcoes(SHA, "2026.11.1", [_c("c1")])
+    [caso] = casos_das_correcoes(MODELO, "v", [_c("c1")])
     assert caso.origem == "correcao"
     assert caso.job_id == "j1" and caso.versao_pipeline == "2026.11.1"
     assert caso.sha256 == SHA
     assert (caso.inicio_ms, caso.fim_ms) == (1_000, 5_000)
-    assert caso.itens() == [Item("aparicao", "Ana Maria", 1_000, 5_000)]
+    # Uma aparição esperada por aparição da pessoa, com o nome novo.
+    assert caso.itens() == [
+        Item("aparicao", "Ana Maria", 1_000, 2_000),
+        Item("aparicao", "Ana Maria", 4_000, 5_000),
+    ]
     assert caso.correcao
     assert (caso.correcao.antes, caso.correcao.depois) == ("Ana", "Ana Maria")
     assert caso.reservado == reservado_pelo_sorteio(caso.id)
@@ -178,7 +211,7 @@ def test_correcao_de_tempos_usa_os_tempos_novos_e_cobre_os_dois() -> None:
             fim_ms=5_000,
         ),
     )
-    [caso] = casos_das_correcoes(SHA, None, [c])
+    [caso] = casos_das_correcoes(MODELO | {"versao_pipeline": None}, "v", [c])
     assert caso.itens() == [Item("pauta", "chuva", 2_000, 9_000)]
     assert (caso.inicio_ms, caso.fim_ms) == (1_000, 9_000)
     assert caso.versao_pipeline is None
@@ -196,43 +229,117 @@ def test_so_correcao_em_vigor_entra() -> None:
         _c("nao-e", tipo="pessoa.nao_e"),
     ]
     ids = {
-        c.correcao.id for c in casos_das_correcoes(SHA, "v", correcoes) if c.correcao
+        c.correcao.id for c in casos_das_correcoes(MODELO, "v", correcoes) if c.correcao
     }
     assert ids == {"aprovada"}
 
 
-def test_correcao_de_outras_categorias_mapeia_o_tipo() -> None:
-    def ancora(item: TipoDoItem) -> Ancora:
-        return Ancora(
-            versao="v", tipo_do_item=item, identidade="x", inicio_ms=0, fim_ms=900
-        )
+def test_correcao_de_outro_json_do_modelo_fica_de_fora() -> None:
+    """Depois de um reprocessamento, o trecho e a versão que errou não são os deste JSON."""
+    assert casos_das_correcoes(MODELO, "outra", [_c("c1")]) == []
 
+
+def test_correcao_de_outras_categorias_mapeia_o_tipo_e_a_identidade() -> None:
     correcoes = [
-        _c("m", tipo="comercial.marca", depois="Nova", ancora=ancora("comercial")),
+        _c("m", tipo="comercial.marca", depois="Nova", ancora=_ancora("comercial")),
         _c(
-            "t", tipo="texto_na_tela.texto", depois="GC", ancora=ancora("texto_na_tela")
+            "ct",
+            tipo="comercial.tipo",
+            item_id="c9",
+            depois="varejo",
+            ancora=_ancora("comercial", "coca cola|merchandising"),
         ),
-        _c("f", tipo="fala.texto", depois="oi", ancora=ancora("fala")),
-        _c("p", tipo="plano.limpo", ancora=ancora("plano")),
-        _c("men", tipo="pessoa.aparicao_para_mencao", ancora=ancora("pessoa")),
+        _c(
+            "t",
+            tipo="texto_na_tela.texto",
+            depois=json.dumps({"texto": "GC", "tipo": "gc"}),
+            ancora=_ancora("texto_na_tela"),
+        ),
+        _c("f", tipo="fala.texto", depois="oi", ancora=_ancora("fala")),
+        _c("p", tipo="plano.limpo", ancora=_ancora("plano")),
     ]
     por_id = {
-        c.correcao.id: c.itens()[0]
-        for c in casos_das_correcoes(SHA, "v", correcoes)
+        c.correcao.id: c.itens()
+        for c in casos_das_correcoes(MODELO, "v", correcoes)
         if c.correcao
     }
     assert por_id == {
-        "m": Item("comercial", "Nova", 0, 900),
-        "t": Item("texto_na_tela", "GC", 0, 900),
-        "f": Item("fala", "x", 0, 900),
-        "p": Item("plano", "x", 0, 900),
-        "men": Item("mencao", "x", 0, 900),
+        "m": [Item("comercial", "Nova", 0, 900)],
+        "ct": [Item("comercial", "coca cola", 0, 900)],
+        "t": [Item("texto_na_tela", "GC", 0, 900)],
+        "f": [Item("fala", "x", 0, 900)],
+        "p": [Item("plano", "x", 0, 900)],
     }
 
 
+def test_correcao_de_ocorrencia_mede_so_a_ocorrencia() -> None:
+    ancora = _ancora("pessoa", "ana", 21_000)
+    na_fala = Ocorrencia(lista="citada_na_fala", inicio_ms=20_000, fim_ms=21_000)
+    na_imagem = Ocorrencia(lista="na_imagem", inicio_ms=4_000, fim_ms=5_000)
+    correcoes = [
+        _c(
+            "men",
+            tipo="pessoa.aparicao_para_mencao",
+            ocorrencia=na_imagem,
+            ancora=ancora,
+        ),
+        _c(
+            "apa", tipo="pessoa.mencao_para_aparicao", ocorrencia=na_fala, ancora=ancora
+        ),
+        _c(
+            "tem",
+            tipo="item.tempos",
+            depois="20500-22000",
+            ocorrencia=na_fala,
+            ancora=ancora,
+        ),
+        _c(
+            "nova",
+            tipo="pessoa.acrescentar_aparicao",
+            depois=json.dumps(
+                {"inicio_ms": 30_000, "fim_ms": 31_000, "evidencia": "rosto"}
+            ),
+            ancora=ancora,
+        ),
+    ]
+    por_id = {
+        c.correcao.id: c.itens()
+        for c in casos_das_correcoes(MODELO, "v", correcoes)
+        if c.correcao
+    }
+    assert por_id == {
+        "men": [Item("mencao", "ana", 4_000, 5_000)],
+        "apa": [Item("aparicao", "ana", 20_000, 21_000)],
+        "tem": [Item("mencao", "ana", 20_500, 22_000)],
+        "nova": [Item("aparicao", "ana", 30_000, 31_000)],
+    }
+
+
+def test_correcoes_do_mesmo_item_esperam_o_mesmo_nome() -> None:
+    tempos = _c(
+        "tem",
+        1,
+        tipo="item.tempos",
+        depois="1500-2000",
+        ocorrencia=Ocorrencia(lista="na_imagem", inicio_ms=1_000, fim_ms=2_000),
+    )
+    [_, caso] = casos_das_correcoes(MODELO, "v", [_c("ren"), tempos])
+    assert caso.itens() == [Item("aparicao", "Ana Maria", 1_500, 2_000)]
+
+
+def test_pessoa_sem_nome_nao_vira_caso() -> None:
+    """O comparador não pareia "não identificado": o caso nunca mediria nada."""
+    ancora = _ancora("pessoa", "nao identificado@1000-5000")
+    c = _c("t", tipo="pessoa.fontes_do_nome", depois='["gc"]', ancora=ancora)
+    assert casos_das_correcoes(MODELO, "v", [c]) == []
+    renomeada = _c("r", ancora=ancora)
+    [caso] = casos_das_correcoes(MODELO, "v", [renomeada])
+    assert {i.identidade for i in caso.itens()} == {"Ana Maria"}
+
+
 def test_correcao_com_tempos_ilegiveis_fica_de_fora() -> None:
-    c = _c("c", tipo="item.tempos", depois="lixo")
-    assert casos_das_correcoes(SHA, "v", [c]) == []
+    c = _c("c", tipo="item.tempos", depois="lixo", ancora=_ancora("pauta"))
+    assert casos_das_correcoes(MODELO, "v", [c]) == []
 
 
 class Decupagens:
@@ -242,7 +349,7 @@ class Decupagens:
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         if job_id not in self._dados:
             raise ServicoIndisponivel
-        yield json.dumps(self._dados[job_id]).encode()
+        yield _bytes(self._dados[job_id])
 
 
 def _job(id: str, estado: str = "concluido") -> Job:
@@ -258,17 +365,25 @@ def _job(id: str, estado: str = "concluido") -> Job:
     )
 
 
+def _bytes(dados: dict[str, Any]) -> bytes:
+    return json.dumps(dados).encode()
+
+
 def test_exportar_grava_um_arquivo_por_caso_e_e_idempotente(tmp_path: Path) -> None:
     jobs = RepositorioEmMemoria()
-    for j in ("j1", "j2", "j3", "j4"):
+    for j in ("j1", "j2", "j3", "j4", "j5"):
         jobs.salvar(_job(j, "falhou" if j == "j3" else "concluido"))
+    dados = {
+        "j1": MODELO,
+        "j2": MODELO | {"versao_pipeline": None},
+        "j5": MODELO | {"video": {"sha256": "NAO-E-SHA"}},
+    }  # j4 sem decupagem legível; j3 não concluído; j5 com sha ruim
     correcoes = RepositorioDeCorrecoesEmMemoria()
-    for job in ("j1", "j2", "j3", "j4"):
-        correcoes.acrescentar(_c(f"{job}-c", job_id=job))
-    video = {"video": {"sha256": SHA}}
-    decupagens = Decupagens(
-        {"j1": {**video, "versao_pipeline": "2026.11.1"}, "j2": video}
-    )  # j4 sem decupagem legível; j3 não concluído
+    for job in ("j1", "j2", "j3", "j4", "j5"):
+        versao = versao_do_modelo(_bytes(dados.get(job, MODELO)))
+        ancora = _ancora("pessoa", "ana", 5_000).model_copy(update={"versao": versao})
+        correcoes.acrescentar(_c(f"{job}-c", job_id=job, ancora=ancora))
+    decupagens = Decupagens(dados)
     saida: list[str] = []
     gravados = exportar(jobs, decupagens, correcoes, tmp_path, saida.append)
     assert {c.job_id for c in gravados} == {"j1", "j2"}
@@ -279,6 +394,10 @@ def test_exportar_grava_um_arquivo_por_caso_e_e_idempotente(tmp_path: Path) -> N
     exportar(jobs, decupagens, correcoes, tmp_path, saida.append)
     assert {p.name: p.read_bytes() for p in tmp_path.glob("*.json")} == antes
     assert len(ler_casos(tmp_path)) == 2
+    # Desfeita a correção, o caso dela sai da pasta.
+    correcoes.acrescentar(_c("d", 5, job_id="j1", tipo="desfazer", desfaz="j1-c"))
+    exportar(jobs, decupagens, correcoes, tmp_path, saida.append)
+    assert [c.job_id for c in ler_casos(tmp_path)] == ["j2"]
 
 
 def test_comando_sem_ambiente_sai_com_2(capsys: pytest.CaptureFixture[str]) -> None:

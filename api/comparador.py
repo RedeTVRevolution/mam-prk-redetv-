@@ -29,11 +29,12 @@ Tipo = Literal[
     "fala",
     "texto_na_tela",
     "objeto",
+    "bloco",
 ]
 TIPOS: tuple[Tipo, ...] = get_args(Tipo)
 TIPOS_COM_IDENTIDADE: frozenset[Tipo] = frozenset(
     {"aparicao", "mencao", "comercial", "texto_na_tela", "objeto"}
-)  # pauta, plano e fala: só tempo
+)  # pauta, plano, fala e bloco: só tempo
 TOLERANCIA_MS = 2000
 META = 0.95
 
@@ -150,6 +151,7 @@ def itens_do_modelo(d: Decupagem) -> list[Item]:
     ]
     for o in d.objetos:
         itens += [Item("objeto", o.tipo, i.inicio_ms, i.fim_ms) for i in o.ocorrencias]
+    itens += [Item("bloco", b.titulo, b.inicio_ms, b.fim_ms) for b in d.programa.blocos]
     return itens
 
 

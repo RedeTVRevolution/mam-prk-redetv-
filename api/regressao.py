@@ -1,7 +1,7 @@
 """Conjunto de regressão (#253): trechos de vídeo com o esperado por categoria.
 
-Cada caso é um JSON em `evals/regressao/casos/`, sem vídeo (o vídeo fica no bucket, pelo
-SHA-256 do proxy). O esperado usa os `Item` e os tipos do `api/comparador.py`, então o
+Cada caso é um JSON em `evals/regressao/casos/`, sem vídeo: aponta o vídeo pelo SHA-256 do
+bloco `video` da Decupagem (o do arquivo enviado, o mesmo do gabarito do comparador). O esperado usa os `Item` e os tipos do `api/comparador.py`, então o
 comparador mede um caso como mede um gabarito. Duas origens: `anotado` (o CSV do gabarito,
 #252) e `correcao` (uma correção em vigor, com o Job, o trecho e a versão do pipeline que
 errou). Cada caso tem `reservado`: os reservados só entram na avaliação final e nunca no
@@ -20,13 +20,13 @@ import os
 import sys
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from api.comparador import TIPOS, Item, Tipo
+from api.comparador import Item, Tipo
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import (
     CORRIGIVEIS,
@@ -34,7 +34,9 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     estado_das,
     tempos_de,
+    versao_do_modelo,
 )
+from api.identidade import identidade_do_nome
 from api.jobs import RepositorioDeJobs, ServicoIndisponivel
 from api.nuvem import (
     DecupagensStorage,
@@ -215,59 +217,121 @@ def ler_metas(caminho: Path = ARQUIVO_DE_METAS) -> dict[str, float]:
 
 
 _CATEGORIA_DO_ITEM: dict[str, Tipo] = {
-    "pessoa": "aparicao",
     "pauta": "pauta",
     "comercial": "comercial",
     "plano": "plano",
     "fala": "fala",
     "texto_na_tela": "texto_na_tela",
 }
-_CATEGORIA_DO_TIPO: dict[str, Tipo] = {
-    "pessoa.aparicao_para_mencao": "mencao",
-    "pessoa.mencao_para_aparicao": "aparicao",
+# O `depois` é o nome novo do item: vira a identidade esperada nesta e nas outras
+# correções do mesmo item (a renomeação e os tempos de uma pessoa não se contradizem).
+_NOME_NOVO: dict[str, Callable[[str], str]] = {
+    "pessoa.renomear": lambda depois: depois,
+    "comercial.marca": lambda depois: depois,
+    "texto_na_tela.texto": lambda depois: str(json.loads(depois)["texto"]),
+    "pauta.titulo": lambda depois: depois,
 }
-# O `depois` é o nome novo: vira a identidade esperada.
-_DEPOIS_E_A_IDENTIDADE = frozenset(
-    {"pessoa.renomear", "comercial.marca", "texto_na_tela.texto", "pauta.titulo"}
-)
 # Dizem o que a pessoa não é: não há item esperado para medir.
 _SEM_ITEM = frozenset({"pessoa.nao_e"})
 
 
-def _item_da_correcao(c: Correcao) -> Item | None:
-    categoria = _CATEGORIA_DO_TIPO.get(c.tipo) or _CATEGORIA_DO_ITEM.get(
-        c.ancora.tipo_do_item
-    )
-    if c.tipo in _SEM_ITEM or categoria is None or categoria not in TIPOS:
-        return None
-    inicio, fim = c.ancora.inicio_ms, c.ancora.fim_ms
+def _nomes_novos(
+    correcoes: list[Correcao], em_vigor: Callable[[str], bool]
+) -> dict[str, str]:
+    """O nome em vigor de cada item renomeado, pelo `item_id`; a mais nova vence."""
+    nomes: dict[str, str] = {}
+    for c in sorted(correcoes, key=lambda c: c.criada_em):
+        if c.tipo in _NOME_NOVO and em_vigor(c.id):
+            nomes[f"{c.ancora.tipo_do_item}:{c.item_id}"] = _NOME_NOVO[c.tipo](c.depois)
+    return nomes
+
+
+def _aparicoes_no_modelo(
+    modelo: Mapping[str, Any], item_id: str
+) -> list[tuple[int, int]]:
+    for pessoa in modelo.get("pessoas", []):
+        if isinstance(pessoa, dict) and pessoa.get("id") == item_id:
+            return [(a["inicio_ms"], a["fim_ms"]) for a in pessoa.get("na_imagem", [])]
+    return []
+
+
+def _itens_da_pessoa(
+    c: Correcao, nome: str | None, modelo: Mapping[str, Any]
+) -> list[Item]:
+    """Pessoa sem nome não se pareia no comparador; a correção da ocorrência mede
+    só ela, e a do nome mede todas as aparições da pessoa."""
+    if c.tipo == "pessoa.acrescentar_aparicao":
+        nova = json.loads(c.depois)
+        nome = nova.get("nome") or nome
+        intervalos = [(nova["inicio_ms"], nova["fim_ms"])]
+        categoria: Tipo = "aparicao"
+    elif c.ocorrencia is not None:
+        o = c.ocorrencia
+        intervalos = [
+            tempos_de(c.depois) if c.tipo == "item.tempos" else (o.inicio_ms, o.fim_ms)
+        ]
+        if c.tipo == "pessoa.aparicao_para_mencao":
+            categoria = "mencao"
+        elif c.tipo == "pessoa.mencao_para_aparicao" or o.lista == "na_imagem":
+            categoria = "aparicao"
+        else:
+            categoria = "mencao"
+    else:
+        intervalos = _aparicoes_no_modelo(modelo, c.item_id)
+        categoria = "aparicao"
+    if nome is None or identidade_do_nome(nome) is None:
+        return []
+    return [Item(categoria, nome, inicio, fim) for inicio, fim in intervalos]
+
+
+def _itens_da_correcao(
+    c: Correcao, nomes: Mapping[str, str], modelo: Mapping[str, Any]
+) -> list[Item]:
+    a = c.ancora
+    if c.tipo in _SEM_ITEM:
+        return []
+    nome = nomes.get(f"{a.tipo_do_item}:{c.item_id}")
+    if a.tipo_do_item == "pessoa":
+        return _itens_da_pessoa(c, nome or a.identidade, modelo)
+    if a.tipo_do_item == "comercial":
+        # A âncora do comercial é `marca|tipo`; o comparador pareia pela marca.
+        nome = nome or a.identidade.rsplit("|", 1)[0]
+    inicio, fim = a.inicio_ms, a.fim_ms
     if c.tipo == "item.tempos":
         inicio, fim = tempos_de(c.depois)
-    identidade = c.depois if c.tipo in _DEPOIS_E_A_IDENTIDADE else c.ancora.identidade
-    return Item(categoria, identidade, inicio, fim)
+    return [Item(_CATEGORIA_DO_ITEM[a.tipo_do_item], nome or a.identidade, inicio, fim)]
 
 
 def casos_das_correcoes(
-    sha256: str,
-    versao_pipeline: str | None,
-    correcoes: list[Correcao],
+    modelo: Mapping[str, Any], versao: str, correcoes: list[Correcao]
 ) -> list[Caso]:
-    """Um caso por correção em vigor, com o Job e a versão do pipeline que errou."""
+    """Um caso por correção em vigor feita sobre este JSON do modelo (`versao`, o
+    SHA-256 do arquivo), com o Job e a versão do pipeline que errou.
+
+    A correção feita sobre outro JSON (antes de um reprocessamento) fica de fora:
+    a versão do pipeline que errou e o trecho são os daquele JSON, que não é este.
+    """
+    sha256 = str(modelo["video"]["sha256"])
+    versao_pipeline = modelo.get("versao_pipeline")
     estado = estado_das(correcoes)
+    nomes = _nomes_novos(correcoes, estado.em_vigor)
     casos: list[Caso] = []
     for c in correcoes:
         if c.tipo not in CORRIGIVEIS or not estado.em_vigor(c.id):
             continue
-        try:
-            esperado = _item_da_correcao(c)
-        except ValueError:
-            log.warning("correção %s com tempos ilegíveis: fora do conjunto", c.id)
+        if c.ancora.versao != versao:
+            log.warning("correção %s de outro JSON do modelo: fora do conjunto", c.id)
             continue
-        if esperado is None:
+        try:
+            esperado = _itens_da_correcao(c, nomes, modelo)
+        except (ValueError, KeyError, TypeError):
+            log.warning("correção %s com valor ilegível: fora do conjunto", c.id)
+            continue
+        if not esperado:
             continue
         # O trecho cobre o que o modelo entregou (a âncora) e o que ficou.
-        inicio = min(esperado.inicio_ms, c.ancora.inicio_ms)
-        fim = max(esperado.fim_ms, c.ancora.fim_ms)
+        inicio = min(c.ancora.inicio_ms, *(e.inicio_ms for e in esperado))
+        fim = max(c.ancora.fim_ms, *(e.fim_ms for e in esperado))
         id = f"correcao-{c.id}".lower()
         casos.append(
             Caso(
@@ -276,10 +340,10 @@ def casos_das_correcoes(
                 sha256=sha256,
                 inicio_ms=inicio,
                 fim_ms=fim,
-                esperado=[ItemEsperado.de(esperado)],
+                esperado=[ItemEsperado.de(e) for e in esperado],
                 reservado=reservado_pelo_sorteio(id),
                 job_id=c.job_id,
-                versao_pipeline=versao_pipeline,
+                versao_pipeline=str(versao_pipeline) if versao_pipeline else None,
                 correcao=CorrecaoDoCaso(
                     id=c.id, tipo=c.tipo, antes=c.antes, depois=c.depois
                 ),
@@ -295,7 +359,9 @@ def exportar(
     pasta: Path,
     escrever: Callable[[str], None] = print,
 ) -> list[Caso]:
-    """Grava os casos das correções dos Jobs concluídos; o mesmo caso sai no mesmo arquivo."""
+    """Grava os casos das correções dos Jobs concluídos; o mesmo caso sai no mesmo
+    arquivo. O caso de uma correção deste JSON que deixou de valer (desfeita,
+    recusada) sai da pasta; o de uma correção de outro JSON fica como está."""
     gravados: list[Caso] = []
     for job in sorted(repositorio.listar(), key=lambda j: (j.criado_em, j.id)):
         if job.estado != "concluido":
@@ -304,15 +370,20 @@ def exportar(
         if not feitas:
             continue
         try:
-            dados = json.loads(b"".join(decupagens.abrir_decupagem(job.id)))
-            sha = dados["video"]["sha256"]
+            conteudo = b"".join(decupagens.abrir_decupagem(job.id))
+            versao = versao_do_modelo(conteudo)
+            casos = casos_das_correcoes(json.loads(conteudo), versao, feitas)
         except (ServicoIndisponivel, ValueError, KeyError, TypeError):
             log.warning("decupagem de %s não lida: fora do conjunto", job.id)
             continue
-        versao = dados.get("versao_pipeline")
-        for caso in casos_das_correcoes(sha, str(versao) if versao else None, feitas):
+        for caso in casos:
             gravar_caso(pasta, caso)
-            gravados.append(caso)
+        validos = {caso.id for caso in casos}
+        for c in feitas:
+            id = f"correcao-{c.id}".lower()
+            if c.ancora.versao == versao and id not in validos:
+                (pasta / f"{id}.json").unlink(missing_ok=True)
+        gravados += casos
     separados = sum(c.reservado for c in gravados)
     escrever(
         f"{len(gravados)} casos gravados em {pasta} "

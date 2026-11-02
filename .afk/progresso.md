@@ -381,3 +381,24 @@ Não corrigido:
 - Decisões: reserva = sha256(id) % 100 < 20, e o `Caso` recusa `reservado` diferente do sorteio. Correção "aprovada" = em vigor (`estado_das.em_vigor`: aprovada, ou de tipo sem aprovação, não desfeita); `pessoa.nao_e` fica de fora (sem item positivo). Esperado da correção: tempos de `item.tempos` vêm do `depois`; nome novo vira a identidade em renomear/marca/texto/título.
 - Falta para o #254: o comando que roda os casos contra a decupagem (aqui só o formato, a exportação e a reserva). O #252 preenche `metas.json` e anota casos.
 - Armadilha: o id do caso anotado usa `sha256[:12]`, então dois trechos iguais do mesmo vídeo colidem (é o desejado: mesmo caso).
+
+## #253 revisão (iteração 53)
+Corrigido:
+- Comercial nunca pareava: a âncora é `marca|tipo` e o comparador pareia pela marca. O esperado usa só a marca.
+- `texto_na_tela.texto`: o `depois` é JSON, e o JSON inteiro virava a identidade. Agora usa o `texto`. O teste usava `depois="GC"` e não pegava o erro.
+- Correções de pessoa com `ocorrencia`: usam o intervalo e a lista da ocorrência, e não o da pessoa inteira. `item.tempos` sobre menção vira `mencao`. `acrescentar_aparicao` usa o intervalo do `depois`. Renomear e fontes do nome esperam uma aparição por aparição da pessoa no JSON do modelo.
+- Pessoa "não identificado" (identidade `nome@ini-fim`) não vira caso, porque o comparador não a pareia. Se for renomeada, vira caso com o nome novo.
+- Correções do mesmo item já não se contradizem: o nome em vigor (renomear, marca, texto, título) vale para todas, pelo `item_id`.
+- A versão que errou: `casos_das_correcoes(modelo, versao, correcoes)` ignora a correção cuja `ancora.versao` não é o SHA-256 deste JSON (feita antes de um reprocessamento). O trecho e a `versao_pipeline` seriam os do JSON atual, não os do que errou.
+- Uma decupagem com SHA ruim (Caso inválido) derrubava a exportação inteira. Agora fica de fora com aviso.
+- O caso de uma correção deste JSON que deixou de valer (desfeita, recusada) sai da pasta. O de outro JSON fica.
+- Categoria `bloco` (`programa.blocos`, só tempo) no comparador.
+- Docs: o SHA-256 é o do bloco `video` (arquivo enviado), não o do proxy.
+Não corrigido / decisão humana:
+- A spec diz "SHA-256 do proxy", mas a Decupagem e o gabarito usam o do arquivo enviado, e não há proxy endereçado por SHA no bucket. Mantive o do `video` e corrigi o texto. Mudar exige decidir qual vídeo o #254 vai buscar.
+- As correções de antes de um reprocessamento ficam fora do conjunto. Recuperar a versão delas exigiria guardar a `versao_pipeline` na correção ou manter os JSONs antigos (decisão humana).
+- Correções que mudam só atributos (`pauta.resumo`/`tom`, `plano.descricao`/`limpo`, `fala.texto`, `comercial.tipo`, `aparicao.papel_visual`, `fontes_do_nome`) geram caso só de tipo/identidade/tempo, porque o comparador não mede atributos. Medir atributo é do #254/#252.
+- `Plano.inventario` não entrou como categoria: os objetos de cena já vêm em `objetos`.
+- Renomear junto com `item.tempos` de uma das aparições: o caso do renomear usa os tempos do modelo naquela aparição.
+- `reservado` revalidado na leitura: mudar `PERCENTUAL_RESERVADO` invalida os casos. É de propósito (o sorteio não pode mudar).
+- Smells: validação "início depois do fim" repetida, tabelas por tipo que repetem parte do `TIPOS` de `correcoes.py`, `id` como nome. Refatoração sem bug.
