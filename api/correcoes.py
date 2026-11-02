@@ -2444,6 +2444,10 @@ def _traz_textos(entregue: dict[str, Any]) -> bool:
     return "textos_na_tela" in entregue
 
 
+def _traz_objetos(entregue: dict[str, Any]) -> bool:
+    return "objetos" in entregue
+
+
 def _traz_tom(entregue: dict[str, Any]) -> bool:
     return any("tom" in p for p in _pautas(entregue))
 
@@ -2620,8 +2624,6 @@ def _acrescentar_pauta(resultado: dict[str, Any], c: Correcao) -> None:
 def _acrescentar_objeto(resultado: dict[str, Any], c: Correcao) -> None:
     novo = json.loads(c.depois)
     inicio, fim = novo.pop("inicio_ms"), novo.pop("fim_ms")
-    if novo["pessoa"] not in _ids_das_pessoas(resultado):
-        novo["pessoa"] = novo["relacao"] = None
     resultado.setdefault("objetos", []).append(
         {
             **novo,
@@ -3211,6 +3213,7 @@ TIPOS: dict[str, Tipo] = {
         json_longo=True,
         valor_do_item=_tempos_do_objeto,
         fim_ms=_fim_do_json,
+        traz_o_campo=_traz_objetos,
         acrescenta=_OBJETO_NOVO,
         confere=_confere_o_dono,
     ),

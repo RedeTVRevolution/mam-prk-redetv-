@@ -380,7 +380,9 @@ def _assert_dono_existe(decupagem: dict[str, Any]) -> None:
     """A regra de `_dono_do_objeto_existe` (`api/decupagem.py`): o modelo dos
     testes não traz o esquema inteiro, então ela é conferida à parte."""
     ids = {p["id"] for p in decupagem["pessoas"]}
-    assert all(o["pessoa"] is None or o["pessoa"] in ids for o in decupagem["objetos"])
+    assert all(
+        o.get("pessoa") is None or o["pessoa"] in ids for o in decupagem["objetos"]
+    )
 
 
 # objeto.nao_existe (#306)
@@ -600,6 +602,14 @@ def test_acrescentar_sem_o_dono_na_versao_nova_grava_sem_dono() -> None:
     novo = _objetos(mundo)[-1]
 
     assert (novo["tipo"], novo["pessoa"], novo["relacao"]) == ("sandália", None, None)
+    _assert_dono_existe(mundo.decupagem())
+
+
+def test_acrescentar_em_decupagem_sem_objetos_da_422() -> None:
+    sem_objetos = {k: v for k, v in M.items() if k != "objetos"}
+    mundo = _mundo(sem_objetos)
+
+    assert _acrescentar(mundo, _novo(), versao=_versao(sem_objetos)).status_code == 422
 
 
 @pytest.mark.parametrize(
