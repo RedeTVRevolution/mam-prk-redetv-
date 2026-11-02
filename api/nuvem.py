@@ -2,10 +2,11 @@
 
 import hashlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import google.auth
 import google.auth.transport.requests
@@ -61,6 +62,7 @@ from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
 from api.rostos_dos_palpites import FotoAusente
 from api.sugestoes import ContagemDoTipo, Decisao, TipoDeSugestao, contar
+from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
 
@@ -77,6 +79,8 @@ COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
 COLECAO_DA_REVISAO = "tempo_de_revisao"
 COLECAO_DAS_AVALIACOES = "avaliacoes"
+COLECAO_DOS_TIPOS_DE_OBJETO = "tipos_de_objeto"
+COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 
@@ -449,6 +453,65 @@ class CatalogoDeMarcasFirestore:
             }
         )
         return marca
+
+
+# ponytail: a busca lê até este tanto de tipos do prefixo; acima disso, o corte é pela chave
+# e não pelas ocorrências (um prefixo com mais de 200 tipos distintos).
+TETO_DA_BUSCA_DE_TIPOS = 200
+
+
+class TiposDeObjetoFirestore:
+    """Um documento por tipo normalizado, com o `total` somado dos jobs, e a contribuição de
+    cada job em outra coleção: trocar a do job aplica só a diferença (`Increment`), sem
+    duplicar. A busca filtra só pela faixa do prefixo da chave e ordena pela própria chave,
+    o que não pede índice composto; a ordem por ocorrências é em Python."""
+
+    def __init__(
+        self,
+        cliente: firestore.Client,
+        colecao: str = COLECAO_DOS_TIPOS_DE_OBJETO,
+        colecao_por_job: str = COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB,
+    ) -> None:
+        self._cliente = cliente
+        self._colecao = cliente.collection(colecao)
+        self._por_job = cliente.collection(colecao_por_job)
+
+    def registrar(self, job_id: str, contagens: Mapping[str, int]) -> None:
+        novas = somar_por_chave(contagens)
+        antigo = self._por_job.document(job_id).get()
+        antes: dict[str, int] = (
+            (antigo.to_dict() or {}).get("totais", {}) if antigo.exists else {}
+        )
+        lote = self._cliente.batch()
+        for chave in novas.keys() | antes.keys():
+            tipo, n = novas.get(chave, ("", 0))
+            delta = n - antes.get(chave, 0)
+            if delta == 0:
+                continue
+            dados: dict[str, Any] = {
+                "chave": chave,
+                "total": firestore.Increment(delta),
+            }
+            if tipo:
+                dados["tipo"] = tipo
+            lote.set(self._colecao.document(quote(chave, safe="")), dados, merge=True)
+        lote.set(
+            self._por_job.document(job_id),
+            {"totais": {chave: n for chave, (_, n) in novas.items()}},
+        )
+        lote.commit()
+
+    def buscar(self, q: str, limite: int = LIMITE_PADRAO) -> list[TipoDeObjeto]:
+        prefixo = normalizar(q)
+        consulta = self._colecao.where(filter=FieldFilter("chave", ">=", prefixo))
+        consulta = consulta.where(filter=FieldFilter("chave", "<", prefixo + "\uf8ff"))
+        achados = [
+            d.to_dict() or {}
+            for d in consulta.order_by("chave").limit(TETO_DA_BUSCA_DE_TIPOS).stream()
+        ]
+        vivos = [d for d in achados if d.get("total", 0) > 0 and d.get("tipo")]
+        vivos.sort(key=lambda d: (-d["total"], d["chave"]))
+        return [{"tipo": d["tipo"], "ocorrencias": d["total"]} for d in vivos[:limite]]
 
 
 class SugestoesFirestore:

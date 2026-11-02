@@ -46,6 +46,7 @@ from api.nuvem import (
     RepositorioDePapeisFirestore,
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
+    TiposDeObjetoFirestore,
 )
 from api.webhook import RegistroDeWebhook
 
@@ -844,6 +845,48 @@ class TestCatalogoDeMarcasFirestore:
 
         assert (primeira, segunda) == (2, 0)
         assert len(marcas.todas()) == 2
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestTiposDeObjetoFirestore:
+    @pytest.fixture
+    def tipos(self) -> TiposDeObjetoFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        sufixo = uuid.uuid4().hex
+        return TiposDeObjetoFirestore(
+            cliente, colecao=f"tipos-{sufixo}", colecao_por_job=f"tipos-job-{sufixo}"
+        )
+
+    def test_registra_e_busca_por_prefixo(self, tipos: TiposDeObjetoFirestore) -> None:
+        tipos.registrar("j1", {"sandália": 2, "scarpin": 1})
+
+        assert tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 2}]
+        assert tipos.buscar("SCAR") == [{"tipo": "scarpin", "ocorrencias": 1}]
+        assert tipos.buscar("x") == []
+
+    def test_trocar_a_contribuicao_do_job_nao_dobra(
+        self, tipos: TiposDeObjetoFirestore
+    ) -> None:
+        tipos.registrar("j1", {"sandália": 2})
+        tipos.registrar("j1", {"sandália": 2})
+        assert tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 2}]
+
+        tipos.registrar("j1", {"saia": 1})
+        tipos.registrar("j2", {"Sandalia": 4})
+
+        assert tipos.buscar("sa") == [
+            {"tipo": "Sandalia", "ocorrencias": 4},
+            {"tipo": "saia", "ocorrencias": 1},
+        ]
+
+    def test_ordena_por_ocorrencias_e_corta_no_limite(
+        self, tipos: TiposDeObjetoFirestore
+    ) -> None:
+        tipos.registrar("j1", {"sapato": 1, "sandália": 3, "saia": 2})
+
+        achados = tipos.buscar("sa", limite=2)
+
+        assert [t["tipo"] for t in achados] == ["sandália", "saia"]
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")

@@ -79,6 +79,7 @@ from api.nuvem import (
     RepositorioDeRevisaoFirestore,
     RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
+    TiposDeObjetoFirestore,
 )
 from api.papeis import (
     Papel,
@@ -130,6 +131,11 @@ from api.tempo_de_tela import (
     ConsultaDeMomentos,
     consulta_do_ambiente,
     criar_rotas_do_tempo_de_tela,
+)
+from api.tipos_de_objeto import (
+    TiposDeObjeto,
+    TiposDeObjetoEmMemoria,
+    criar_rotas_dos_tipos_de_objeto,
 )
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
@@ -205,6 +211,7 @@ def criar_app(
     copia: CopiaDosMomentos | None = None,
     embedding: EmbeddingDoQuadro | None = None,
     embedding_da_consulta: EmbeddingDaConsulta | None = None,
+    tipos_de_objeto: TiposDeObjeto | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
@@ -269,6 +276,7 @@ def criar_app(
     armazenamento_dos_jobs = armazenamento or ArmazenamentoIndisponivel()
     repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
     indice_da_busca = indice or IndiceEmMemoria()
+    tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
     repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
@@ -294,6 +302,7 @@ def criar_app(
                 copia,
                 embedding,
                 armazenamento_dos_jobs,
+                tipos_de_objeto=tipos_dos_objetos,
             ),
         )
     )
@@ -310,6 +319,7 @@ def criar_app(
             ),
         )
     )
+    v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
     v1.include_router(
         criar_rotas_do_catalogo(catalogo_de_pessoas, catalogo_de_marcas, relogio)
@@ -417,6 +427,7 @@ if _projeto:
         copia=copia_do_ambiente(os.environ),
         embedding=_embedding,
         embedding_da_consulta=_embedding,
+        tipos_de_objeto=TiposDeObjetoFirestore(firestore.Client(project=_projeto)),
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(
                 os.environ.get("BUSCA_IMAGEM_MAX_BYTES") or LimitesDaImagem.max_bytes

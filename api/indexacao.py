@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any, Protocol, get_args
@@ -41,8 +42,10 @@ from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
+    TiposDeObjetoFirestore,
 )
 from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
+from api.tipos_de_objeto import TiposDeObjeto
 
 log = logging.getLogger(__name__)
 
@@ -126,6 +129,7 @@ def reindexar(
     embedding: EmbeddingDoQuadro | None = None,
     quadros: LeitorDeQuadros | None = None,
     sinal: SinalDoPrograma | None = None,
+    tipos_de_objeto: TiposDeObjeto | None = None,
 ) -> Indexacao | None:
     """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
 
@@ -133,7 +137,8 @@ def reindexar(
     uma não impede a outra. Com `embedding` e `quadros` (o índice do quadro-chave ligado,
     ADR 0006), cada plano com quadro leva o vetor multimodal. `None` se o Job não está
     `concluido` (não há Decupagem). Com `sinal`, o vídeo copiado é comparado com o histórico
-    do programa (#287); o sinal também nunca levanta.
+    do programa (#287); o sinal também nunca levanta. Com `tipos_de_objeto`, os tipos dos
+    objetos da Decupagem entram na lista do autocompletar (#308); falha só vai ao log.
     """
     if job.estado != "concluido":
         return None
@@ -155,6 +160,13 @@ def reindexar(
     except Exception:
         log.exception("decupagem de %s não lida para indexar", job.id)
     else:
+        if tipos_de_objeto:
+            try:
+                tipos_de_objeto.registrar(
+                    job.id, Counter(o.tipo for o in decupagem.objetos)
+                )
+            except Exception:
+                log.exception("tipos de objeto de %s não registrados", job.id)
         try:
             registros = registros_da_decupagem(
                 job.id, decupagem, job.programa, job.data_exibicao
@@ -208,6 +220,7 @@ def reindexar_jobs(
     embedding: EmbeddingDoQuadro | None = None,
     quadros: LeitorDeQuadros | None = None,
     sinal: SinalDoPrograma | None = None,
+    tipos_de_objeto: TiposDeObjeto | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -234,6 +247,7 @@ def reindexar_jobs(
             embedding=embedding,
             quadros=quadros,
             sinal=sinal,
+            tipos_de_objeto=tipos_de_objeto,
         )
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
@@ -263,6 +277,7 @@ def main(argv: list[str]) -> int:
         embedding=embedding_da_busca(busca),
         quadros=decupagens,
         sinal=sinal,
+        tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

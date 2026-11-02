@@ -767,3 +767,10 @@ Não corrigido:
 ## #307 revisão
 - Corrigido: (1) faltava o `traz_o_campo` pedido na issue (`"objetos" in entregue`): agora `_traz_objetos`, e acrescentar numa decupagem sem `objetos` dá 422 (teste novo). (2) `_acrescentar_objeto` repetia a limpeza do dono órfão que o passe do fim de `aplicar` (#305) já faz; a guarda saiu e o teste da versão nova sem o dono confere também `_assert_dono_existe` (o helper passou a aceitar objeto sem a chave `pessoa`).
 - Não corrigido / dizer no PR: (1) `NovoObjeto` repete a regra pessoa/relação de `_DonoDoObjeto` e de `decupagem.Objeto`; compor com `_DonoDoObjeto` tornaria `pessoa`/`relacao` obrigatórios no pedido (hoje têm default nulo), então ficou. (2) `_tempos_do_objeto` é quase cópia de `_tempos_do_item` (só muda o intervalo); o `valor_do_item` recebe só o item, por isso ficou à parte. (3) O catálogo importa `NOME_DA_CATEGORIA` de `api/indice_da_busca.py` (e `web/src/painel.ts` tem outra cópia): talvez o rótulo da categoria devesse morar no catálogo ou em `decupagem.py`. (4) A atendida olha só o tipo normalizado, não a categoria, como a âncora. (5) O legível mostra o id do dono (`pes01`), não o nome, como o `objeto.dono`.
+- 2026-11-02 18:48:17 · #307: feito
+- 2026-11-02 18:48:22 · iteração 87: #308
+
+## #308 iteração 88
+- Pronto: `api/tipos_de_objeto.py` (Protocol, `TiposDeObjetoEmMemoria`, rota `GET /v1/objetos/tipos?q=` com `_exige("ler")`, `somar_por_chave`); `TiposDeObjetoFirestore` em `api/nuvem.py` (docs por chave + contribuição por job com `Increment`, busca por faixa da chave, até 200, `# ponytail:`); `reindexar`/`reindexar_jobs`/`main` de `indexacao.py` e `criar_app` ligados (falha só no log). Testes em `test_tipos_de_objeto.py`, `test_indexacao.py` e `test_nuvem.py` (emulador rodou). `make verificar` verde.
+- Decisões: o `registrar` recebe tipo→contagem como escrito; a chave normalizada é calculada dentro. O `Mundo` de `test_correcoes.py` não precisou mudar (criar_app já cria o em memória). O `main.tf` não foi tocado.
+- Armadilha: `registrar` no Firestore lê a contribuição antiga e grava em lote, sem transação (dois reindexares simultâneos do mesmo job podem se atrapalhar).

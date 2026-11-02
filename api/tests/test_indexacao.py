@@ -27,6 +27,7 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_correcoes import BASE
 from api.tests.test_jobs import ArmazenamentoFalso
+from api.tipos_de_objeto import TiposDeObjetoEmMemoria
 
 SABRINA_EXEMPLO = EXEMPLOS[0]
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
@@ -65,13 +66,15 @@ class Mundo:
         self,
         indice: IndiceEmMemoria | None = None,
         copia: CopiaDosMomentos | None = None,
+        modelo: dict[str, Any] = MODELO,
     ) -> None:
         self.indice = indice or IndiceEmMemoria()
+        self.tipos = TiposDeObjetoEmMemoria()
         self.copia: Any = copia
         self.jobs = RepositorioEmMemoria()
         self.jobs.salvar(_job())
         self.armazenamento = ArmazenamentoFalso()
-        self.armazenamento.decupagens["j1"] = [json.dumps(MODELO).encode()]
+        self.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
         papeis = RepositorioDePapeisEmMemoria()
         papeis.salvar("u1", ["editor"])
@@ -86,6 +89,7 @@ class Mundo:
                 correcoes=self.correcoes,
                 aprovacao=self.aprovacao,
                 indice=self.indice,
+                tipos_de_objeto=self.tipos,
                 copia=copia,
                 relogio=lambda: BASE,
             )
@@ -101,6 +105,7 @@ class Mundo:
             self.correcoes,
             self.indice,
             copia=self.copia,
+            tipos_de_objeto=self.tipos,
         )
 
     def corrigir_a_fala(self, texto: str) -> Any:
@@ -357,7 +362,7 @@ class _EmbeddingFalso:
 
 def test_reindexar_com_embedding_grava_o_vetor_so_nos_planos_com_quadro() -> None:
     mundo = Mundo()
-    modelo = json.loads(json.dumps(MODELO))
+    modelo: dict[str, Any] = json.loads(json.dumps(MODELO))
     modelo["planos"][0]["quadro"] = "quadros/plano-0.jpg"
     mundo.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
     mundo.armazenamento.quadros[("j1", "quadros/plano-0.jpg")] = b"jpeg"
@@ -379,3 +384,55 @@ def test_reindexar_com_embedding_grava_o_vetor_so_nos_planos_com_quadro() -> Non
     assert [r.tipo for r in com_vetor] == ["plano"]
     assert mundo.indexacao()["estado"] == "indexado"
     assert len([r for r in achados if r.tipo == "plano"]) == 2
+
+
+def _modelo_com_sandalia_e_scarpin() -> dict[str, Any]:
+    modelo: dict[str, Any] = json.loads(json.dumps(MODELO))
+    for objeto, tipo in zip(modelo["objetos"], ["sandália", "scarpin"], strict=True):
+        objeto["tipo"] = tipo
+    return modelo
+
+
+def test_reindexar_registra_os_tipos_dos_objetos() -> None:
+    mundo = Mundo(modelo=_modelo_com_sandalia_e_scarpin())
+
+    mundo.reindexar()
+
+    assert mundo.tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 1}]
+    assert mundo.tipos.buscar("SCAR") == [{"tipo": "scarpin", "ocorrencias": 1}]
+
+
+def test_reindexar_duas_vezes_nao_dobra_a_contagem_dos_tipos() -> None:
+    mundo = Mundo(modelo=_modelo_com_sandalia_e_scarpin())
+
+    mundo.reindexar()
+    mundo.reindexar()
+
+    assert mundo.tipos.buscar("sa") == [{"tipo": "sandália", "ocorrencias": 1}]
+
+
+def test_tipos_que_falham_nao_derrubam_a_indexacao() -> None:
+    class Quebrado(TiposDeObjetoEmMemoria):
+        def registrar(self, job_id: str, contagens: Any) -> None:
+            raise ConnectionError("Firestore fora do ar")
+
+    mundo = Mundo()
+    mundo.tipos = Quebrado()
+
+    mundo.reindexar()
+
+    assert mundo.indice.total() == 6
+    assert mundo.indexacao()["estado"] == "indexado"
+
+
+def test_a_rota_devolve_os_tipos_gravados_pelo_reindexar() -> None:
+    mundo = Mundo(modelo=_modelo_com_sandalia_e_scarpin())
+    mundo.reindexar()
+
+    def buscar(q: str) -> Any:
+        return mundo.cliente.get(
+            "/v1/objetos/tipos", params={"q": q}, headers=AUTORIZACAO
+        )
+
+    assert buscar("sa").json() == [{"tipo": "sandália", "ocorrencias": 1}]
+    assert buscar("SCAR").json() == [{"tipo": "scarpin", "ocorrencias": 1}]
