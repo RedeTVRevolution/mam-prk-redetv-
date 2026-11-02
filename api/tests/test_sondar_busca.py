@@ -16,9 +16,17 @@ from api.sondar_busca import (
 )
 
 
-def _video(*motivos: str, job_id: str = "j", inicio_ms: int = 0) -> VideoDoResultado:
+def _video(
+    *motivos: str, job_id: str = "j", inicio_ms: int = 0, fim_ms: int | None = None
+) -> VideoDoResultado:
     momentos = [
-        Momento(inicio_ms=inicio_ms, fim_ms=1, motivo=m, destaques=[], quadro_url=None)
+        Momento(
+            inicio_ms=inicio_ms,
+            fim_ms=inicio_ms + 1 if fim_ms is None else fim_ms,
+            motivo=m,
+            destaques=[],
+            quadro_url=None,
+        )
         for m in motivos
     ]
     return VideoDoResultado(
@@ -76,7 +84,7 @@ CONSULTAS_DE_CENA = {
 
 
 def test_o_arquivo_do_repositorio_traz_as_consultas_de_hoje() -> None:
-    assert len(CASOS) == 20
+    assert len(CASOS) >= 20
     assert CASOS[0] == Caso("terno", "terno", 3)
     assert next(c for c in CASOS if c.consulta == "calça vinho").exatos
     assert [c.consulta for c in CASOS if c.termo is None][:2] == [
@@ -183,5 +191,42 @@ def test_sem_nenhuma_anotacao_nao_ha_aceite() -> None:
     assert not r.passou
 
 
-def test_o_arquivo_existe_no_lugar_combinado() -> None:
-    assert ARQUIVO_DAS_CONSULTAS.name == "consultas_da_sonda.toml"
+def test_a_consulta_so_com_pertinentes_nao_tem_veredito() -> None:
+    caso = Caso("vestido", None, pertinentes=(Trecho("abc", 10, 25),))
+    assert veredito(caso, [_video("Objeto: vestido", job_id="abc")]) is None
+
+
+def test_existe_sem_teto_nao_limita_os_momentos() -> None:
+    assert veredito(Caso("terno", "terno"), [_video("terno", "a", "b", "c")])
+
+
+def test_o_trecho_conta_o_momento_que_comeca_antes_e_entra_nele() -> None:
+    caso = Caso("vestido", None, pertinentes=(Trecho("abc", 10, 25),))
+    videos = [_video("a", job_id="abc", inicio_ms=8_000, fim_ms=15_000)]
+    assert pertinencia(caso, videos) == 1.0
+
+
+def test_ler_casos_poe_o_termo_em_minusculas(tmp_path: Path) -> None:
+    [caso] = ler_casos(
+        _arquivo(tmp_path, '[[consulta]]\ntexto = "carro"\ntermo = "BYD"\n')
+    )
+    assert caso.termo == "byd"
+    assert pertinencia(caso, [_video("Objeto: carro BYD")]) == 1.0
+
+
+def test_ler_casos_recusa_data_entre_aspas_e_exatos_sem_teto(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="desde"):
+        ler_casos(
+            _arquivo(tmp_path, '[[consulta]]\ntexto = "a"\ndesde = "2024-05-01"\n')
+        )
+    with pytest.raises(ValueError, match="exatos"):
+        ler_casos(
+            _arquivo(
+                tmp_path, '[[consulta]]\ntexto = "a"\ntermo = "a"\nexatos = true\n'
+            )
+        )
+
+
+def test_o_arquivo_do_repositorio_esta_no_lugar_combinado() -> None:
+    assert ARQUIVO_DAS_CONSULTAS.is_file()
+    assert ler_casos(ARQUIVO_DAS_CONSULTAS) == CASOS

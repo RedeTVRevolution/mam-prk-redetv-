@@ -447,3 +447,16 @@ Não corrigido:
 - `ano=todos&mes=…` na URL: o mês vence em silêncio. A tela zera o mês ao trocar o ano, então só acontece com URL montada à mão.
 - Smells sem bug: cada faceta aparece em vários lugares (Python e web), `ROTULO_DO_TIPO` repete rótulos da web, `mudar({ [faceta]: … })` perde o tipo da chave.
 - Contagem nativa do Agent Retrieval continua sem conferência na doc (decisão humana, já anotada).
+
+## #258 revisão
+Corrigido:
+- Consulta só com `pertinentes` (o formato das editoriais do #259) caía no caso `ausente` do `veredito` e ficava VERMELHA sempre que voltava vídeo, derrubando a sonda. Agora não tem veredito (`SEM VEREDITO`); quem a julga é o aceite. `ausente` = sem termo e sem pertinentes.
+- `termo` com maiúscula nunca casava (só o motivo ia para minúsculas): o termo vai para minúsculas na leitura.
+- Trecho pertinente comparava só o início do momento: agora conta o momento que toca o intervalo.
+- `teto` ausente valia 0 e reprovava todo `existe`: agora 0 é sem limite; `exatos` sem termo e teto é recusado na leitura.
+- Data entre aspas (`desde = "2024-05-01"`) e campo desconhecido no trecho são recusados.
+- "5" fixo nas strings trocado por `RESULTADOS_DO_ACEITE`; o relatório marca (+/-) quais dos primeiros contaram como pertinentes.
+- Testes: `len(CASOS) == 20` virou `>= 20` (o #259 acrescenta); o teste que só olhava o nome da constante agora confere que o arquivo existe e é o lido.
+Não corrigido (decisão humana):
+- "No total" é a média das frações por consulta (não soma pertinentes/resultados), e a consulta com menos de 5 resultados é medida sobre os que vieram (1 de 1 vale 100%). A spec admite as duas leituras; se o aceite for precision@5 estrito, dividir sempre por 5.
+- Smells sem bug: `_CAMPOS` repete os campos do `Caso` (e `texto` vira `consulta`); `programa/desde/ate` copiam `Ajustes`; `Trecho` em segundos e o resto da busca em ms; `CASOS` lido no import. Termos "sonda"/"aceite"/"pertinência" fora do GLOSSARY.

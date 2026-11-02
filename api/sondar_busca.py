@@ -6,9 +6,11 @@ e fica fora do CI.
 
 Os casos valem para os clipes do dev (clipe1, clipe2 e clipe3); o formato do arquivo está
 no cabeçalho dele. Há três tipos de caso:
-  existe  -> o 1º momento do 1º vídeo cita o termo, com até `teto` momentos no todo;
+  existe  -> o 1º momento do 1º vídeo cita o termo, com até `teto` momentos no todo (sem `teto`,
+             sem limite);
   exatos  -> `teto` momentos citam o termo e, em cada vídeo, vêm antes dos parecidos;
-  ausente -> nenhum vídeo.
+  ausente -> nenhum vídeo (sem `termo` e sem `pertinentes`).
+A consulta só com `pertinentes` (as editoriais do #259) não tem veredito: quem a julga é o aceite.
 
 O aceite (#258): a média, entre as consultas com anotação de pertinência (`termo` ou
 `pertinentes`), da fração dos 5 primeiros resultados pertinentes, de pelo menos 80%. O relatório
@@ -47,7 +49,7 @@ class Trecho:
 class Caso:
     consulta: str
     termo: str | None = None  # None: nada nos vídeos fala disso
-    teto: int = 0
+    teto: int = 0  # 0: sem limite
     exatos: bool = False
     programa: str | None = None
     desde: date | None = None
@@ -75,10 +77,20 @@ _CAMPOS = {
 
 
 def _trecho(dado: dict[str, Any], consulta: str) -> Trecho:
+    if extras := dado.keys() - {"job", "de_s", "ate_s"}:
+        raise ValueError(f"{consulta!r}: campo desconhecido no trecho {sorted(extras)}")
     trecho = Trecho(job=dado["job"], de_s=dado["de_s"], ate_s=dado["ate_s"])
     if trecho.de_s > trecho.ate_s:
         raise ValueError(f"{consulta!r}: de_s depois de ate_s em {dado}")
     return trecho
+
+
+def _data(dado: dict[str, Any], campo: str, consulta: str) -> date | None:
+    valor = dado.get(campo)
+    # `datetime` é `date`; a data do TOML vai sem aspas (`desde = 2024-05-01`).
+    if valor is not None and (type(valor) is not date):
+        raise ValueError(f"{consulta!r}: {campo} = {valor!r} não é data (sem aspas)")
+    return valor
 
 
 def ler_casos(arquivo: Path = ARQUIVO_DAS_CONSULTAS) -> list[Caso]:
@@ -87,20 +99,20 @@ def ler_casos(arquivo: Path = ARQUIVO_DAS_CONSULTAS) -> list[Caso]:
         texto = dado["texto"]
         if extras := dado.keys() - _CAMPOS:
             raise ValueError(f"{texto!r}: campo desconhecido {sorted(extras)}")
-        casos.append(
-            Caso(
-                consulta=texto,
-                termo=dado.get("termo"),
-                teto=dado.get("teto", 0),
-                exatos=dado.get("exatos", False),
-                programa=dado.get("programa"),
-                desde=dado.get("desde"),
-                ate=dado.get("ate"),
-                pertinentes=tuple(
-                    _trecho(t, texto) for t in dado.get("pertinentes", [])
-                ),
-            )
+        termo = dado.get("termo")
+        caso = Caso(
+            consulta=texto,
+            termo=None if termo is None else termo.lower(),
+            teto=dado.get("teto", 0),
+            exatos=dado.get("exatos", False),
+            programa=dado.get("programa"),
+            desde=_data(dado, "desde", texto),
+            ate=_data(dado, "ate", texto),
+            pertinentes=tuple(_trecho(t, texto) for t in dado.get("pertinentes", [])),
         )
+        if caso.exatos and not (caso.termo and caso.teto):
+            raise ValueError(f"{texto!r}: exatos pede termo e teto")
+        casos.append(caso)
     return casos
 
 
@@ -110,24 +122,25 @@ CASOS = ler_casos()
 def primeiros_resultados(
     videos: list[VideoDoResultado], n: int = RESULTADOS_DO_ACEITE
 ) -> list[tuple[VideoDoResultado, Momento]]:
-    """Os `n` primeiros momentos na ordem em que a tela os mostra (vídeo a vídeo)."""
+    """Os primeiros momentos na ordem em que a tela os mostra (vídeo a vídeo)."""
     return [(v, m) for v in videos for m in v.momentos][:n]
 
 
 def _pertinente(caso: Caso, video: VideoDoResultado, momento: Momento) -> bool:
     if caso.termo is not None and caso.termo in momento.motivo.lower():
         return True
-    inicio_s = momento.inicio_ms / 1000
+    # O momento conta se toca o trecho, não só se começa dentro dele.
+    inicio_s, fim_s = momento.inicio_ms / 1000, momento.fim_ms / 1000
     return any(
-        video.job_id.startswith(t.job) and t.de_s <= inicio_s <= t.ate_s
+        video.job_id.startswith(t.job) and inicio_s <= t.ate_s and fim_s >= t.de_s
         for t in caso.pertinentes
     )
 
 
 def pertinencia(caso: Caso, videos: list[VideoDoResultado]) -> float | None:
-    """Fração dos 5 primeiros resultados pertinentes; None se a consulta não tem anotação.
+    """Fração dos primeiros resultados pertinentes; None se a consulta não tem anotação.
 
-    Com menos de 5 resultados, a fração é dos que vieram; nenhum resultado vale 0."""
+    Com menos de `RESULTADOS_DO_ACEITE` resultados, a fração é dos que vieram; nenhum resultado vale 0."""
     if not caso.anotado:
         return None
     primeiros = primeiros_resultados(videos)
@@ -152,9 +165,10 @@ def relatorio_do_aceite(medidas: list[tuple[Caso, float | None]]) -> Aceite:
     return Aceite(total=total, passou=total >= ACEITE, abaixo=abaixo)
 
 
-def veredito(caso: Caso, videos: list[VideoDoResultado]) -> bool:
+def veredito(caso: Caso, videos: list[VideoDoResultado]) -> bool | None:
+    """None: a consulta só tem `pertinentes`, e quem a julga é o aceite."""
     if caso.termo is None:
-        return not videos
+        return None if caso.pertinentes else not videos
     termo = caso.termo
     if caso.exatos:
         cita = [[termo in m.motivo.lower() for m in v.momentos] for v in videos]
@@ -164,7 +178,7 @@ def veredito(caso: Caso, videos: list[VideoDoResultado]) -> bool:
     return (
         bool(videos)
         and termo in videos[0].momentos[0].motivo.lower()
-        and total <= caso.teto
+        and (not caso.teto or total <= caso.teto)
     )
 
 
@@ -225,11 +239,18 @@ def main() -> int:
             for m in v.momentos[:8]:
                 print(f"     {m.inicio_ms / 1000:7.1f}s {m.motivo[:80]}")
         ok = veredito(caso, videos)
-        falhas += not ok
+        falhas += ok is False
         fracao = pertinencia(caso, videos)
         medidas.append((caso, fracao))
+        if fracao is not None:
+            contados = primeiros_resultados(videos)
+            marcas = "".join(
+                "+" if _pertinente(caso, v, m) else "-" for v, m in contados
+            )
+            print(f"  pertinentes nos {len(contados)} primeiros: {marcas}")
         pertinentes = "sem anotação" if fracao is None else f"{fracao:.0%} pertinentes"
-        print("  =>", "VERDE" if ok else "VERMELHO", f"({pertinentes} nos 5 primeiros)")
+        situacao = {True: "VERDE", False: "VERMELHO", None: "SEM VEREDITO"}[ok]
+        print("  =>", situacao, f"({pertinentes} nos {RESULTADOS_DO_ACEITE} primeiros)")
     print(f"\n{falhas} consulta(s) vermelha(s) de {len(CASOS)}")
     aceite = relatorio_do_aceite(medidas)
     if aceite.total is None:
@@ -237,7 +258,7 @@ def main() -> int:
     else:
         situacao = "PASSOU" if aceite.passou else "NÃO PASSOU"
         print(
-            f"Aceite: {aceite.total:.0%} dos 5 primeiros pertinentes (mínimo {ACEITE:.0%}): {situacao}"
+            f"Aceite: {aceite.total:.0%} dos {RESULTADOS_DO_ACEITE} primeiros pertinentes (mínimo {ACEITE:.0%}): {situacao}"
         )
     for caso, fracao in aceite.abaixo:
         print(f"  abaixo de {ACEITE:.0%}: {caso.consulta!r} ({fracao:.0%})")

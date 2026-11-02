@@ -1,11 +1,14 @@
 # Consultas da `make sondar-busca` (#258). Cada [[consulta]] tem:
 #   texto      a consulta digitada
-#   termo      (opcional) o critério escrito: um momento é pertinente se o motivo cita o termo.
-#              Sem termo, o caso `ausente` pede que nenhum vídeo volte.
-#   teto       (opcional) máximo de momentos no todo
-#   exatos     (opcional) os que citam o termo vêm antes dos parecidos, e são `teto`
-#   programa, desde, ate   (opcional) filtros da consulta, como a tela os põe
-#   pertinentes (opcional) momentos que contam como pertinentes, por vídeo e tempo:
+#   termo      (opcional) o critério escrito: um momento é pertinente se o motivo cita o termo
+#              (sem distinguir maiúsculas). Sem termo nem `pertinentes`, o caso `ausente` pede
+#              que nenhum vídeo volte; só com `pertinentes`, não há veredito, só o aceite.
+#   teto       (opcional) máximo de momentos no todo; sem ele, sem limite
+#   exatos     (opcional) os que citam o termo vêm antes dos parecidos, e são `teto` (pede os dois)
+#   programa, desde, ate   (opcional) filtros da consulta, como a tela os põe (datas sem aspas:
+#              desde = 2024-05-01)
+#   pertinentes (opcional) momentos que contam como pertinentes, por vídeo e tempo (o momento
+#              conta se toca o intervalo):
 #              [{ job = "<início do id do Job>", de_s = 10, ate_s = 25 }]
 # Pertinente = casa com algum item de `pertinentes` ou cita o `termo`. Consulta sem nenhum
 # dos dois roda e mostra os resultados, mas fica fora da conta do aceite (80% dos 5 primeiros).
