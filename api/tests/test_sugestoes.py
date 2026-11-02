@@ -305,6 +305,157 @@ def test_recusar_o_palpite_nao_o_sugere_de_novo() -> None:
     assert mundo.decupagem()["pessoas"][0]["estado_do_nome"] == "palpite"
 
 
+# --- Peça citada no visual (#154) ----------------------------------------------------
+
+
+def _com_visual(visual: str, objetos: list[dict[str, Any]] | None = None) -> Mundo:
+    pessoa = _pessoa("pes01", "Sabrina Sato", 10_000, 50_000)
+    pessoa["na_imagem"][0]["visual"] = visual
+    mundo = _mundo(_modelo(pessoas=[pessoa], objetos=objetos or []))
+    mundo.tipos_de_objeto.registrar(
+        "j0", {"terno": 3, "camisa": 3, "vestido": 5, "sandália": 2, "óculos de sol": 1}
+    )
+    return mundo
+
+
+def _do_visual(mundo: Mundo) -> list[dict[str, Any]]:
+    return [s for s in _abertas(mundo) if s["tipo"] == "objeto_do_visual"]
+
+
+def _objeto_da_sugestao(sugestao: dict[str, Any]) -> dict[str, Any]:
+    assert sugestao["correcao"]["tipo"] == "objeto.acrescentar"
+    corpo: dict[str, Any] = json.loads(sugestao["correcao"]["valor"])
+    return corpo
+
+
+def test_o_visual_com_dois_tipos_conhecidos_gera_duas_sugestoes() -> None:
+    sugestoes_ = _do_visual(_com_visual("terno preto e camisa rosa"))
+
+    assert {s["pergunta"] for s in sugestoes_} == {
+        "Acrescentar camisa rosa de Sabrina Sato?",
+        "Acrescentar terno preto de Sabrina Sato?",
+    }
+    por_tipo = {o["tipo"]: o for o in map(_objeto_da_sugestao, sugestoes_)}
+    assert por_tipo["terno"]["cor_base"] == ["preto"]
+    assert por_tipo["camisa"]["cor_base"] == ["rosa"]
+    assert por_tipo["terno"] | {"cor_base": []} == {
+        "tipo": "terno",
+        "cor_base": [],
+        "categoria": "roupa",
+        "pessoa": "pes01",
+        "relacao": "veste",
+        "inicio_ms": 10_000,
+        "fim_ms": 50_000,
+    }
+
+
+def test_o_objeto_que_a_pessoa_ja_tem_no_trecho_nao_gera() -> None:
+    ja_tem = {
+        "id": "obj01",
+        "categoria": "roupa",
+        "tipo": "terno",
+        "cor_base": ["preto"],
+        "pessoa": "pes01",
+        "relacao": "veste",
+        "ocorrencias": [{"inicio_ms": 0, "fim_ms": 20_000}],
+    }
+    [sugestao] = _do_visual(_com_visual("terno preto e camisa rosa", [ja_tem]))
+
+    assert _objeto_da_sugestao(sugestao)["tipo"] == "camisa"
+
+
+def test_o_objeto_de_outra_pessoa_ou_de_outro_trecho_nao_impede() -> None:
+    de_outra = {
+        "id": "obj01",
+        "categoria": "roupa",
+        "tipo": "terno",
+        "cor_base": ["preto"],
+        "pessoa": "pes09",
+        "relacao": "veste",
+        "ocorrencias": [{"inicio_ms": 0, "fim_ms": 20_000}],
+    }
+    depois = {**de_outra, "id": "obj02", "pessoa": "pes01"}
+    depois["ocorrencias"] = [{"inicio_ms": 60_000, "fim_ms": 70_000}]
+
+    assert len(_do_visual(_com_visual("terno preto", [de_outra, depois]))) == 1
+
+
+def test_acento_maiuscula_e_plural_simples_casam() -> None:
+    [sugestao] = _do_visual(_com_visual("SANDALIAS douradas"))
+
+    assert _objeto_da_sugestao(sugestao)["tipo"] == "sandália"
+    assert _objeto_da_sugestao(sugestao)["cor_base"] == ["dourado"]
+
+
+def test_a_categoria_e_a_relacao_vem_do_objeto_ja_visto_no_video() -> None:
+    sandalia_de_outra = {
+        "id": "obj01",
+        "categoria": "calcado",
+        "tipo": "sandália",
+        "cor_base": ["azul"],
+        "pessoa": "pes09",
+        "relacao": "calca",
+        "ocorrencias": [{"inicio_ms": 0, "fim_ms": 5_000}],
+    }
+    [sugestao] = _do_visual(_com_visual("sandália", [sandalia_de_outra]))
+
+    objeto = _objeto_da_sugestao(sugestao)
+    assert (objeto["categoria"], objeto["relacao"], objeto["cor_base"]) == (
+        "calcado",
+        "calca",
+        [],
+    )
+    assert sugestao["pergunta"] == "Acrescentar sandália de Sabrina Sato?"
+
+
+def test_o_tipo_com_varias_palavras_vale_e_nao_repete_o_mais_curto() -> None:
+    mundo = _com_visual("óculos de sol escuros")
+    mundo.tipos_de_objeto.registrar("j1", {"óculos": 4})
+
+    [sugestao] = _do_visual(mundo)
+
+    assert _objeto_da_sugestao(sugestao)["tipo"] == "óculos de sol"
+
+
+def test_visual_sem_tipo_conhecido_ou_sem_visual_nao_gera() -> None:
+    assert _do_visual(_com_visual("sorridente, de pé")) == []
+    assert _do_visual(_mundo(_modelo(pessoas=[_pessoa("p", "A", 0, 1)]))) == []
+
+
+def test_aceitar_acrescenta_o_objeto_a_pessoa_no_trecho_da_aparicao() -> None:
+    mundo = _com_visual("vestido vermelho")
+    [sugestao] = _do_visual(mundo)
+
+    resposta = _aceitar(mundo, sugestao["id"])
+
+    assert resposta.status_code == 201
+    [objeto] = mundo.decupagem()["objetos"]
+    assert (objeto["tipo"], objeto["cor_base"], objeto["pessoa"]) == (
+        "vestido",
+        ["vermelho"],
+        "pes01",
+    )
+    assert objeto["ocorrencias"] == [{"inicio_ms": 10_000, "fim_ms": 50_000}]
+    assert _do_visual(mundo) == []
+
+
+def test_recusar_o_objeto_do_visual_nao_o_sugere_de_novo() -> None:
+    mundo = _com_visual("vestido vermelho")
+    [sugestao] = _do_visual(mundo)
+
+    assert _recusar(mundo, sugestao["id"]).status_code == 204
+    assert _do_visual(mundo) == []
+
+
+def test_aceitar_com_outro_tipo_troca_so_o_tipo() -> None:
+    mundo = _com_visual("vestido vermelho")
+    [sugestao] = _do_visual(mundo)
+
+    assert _aceitar(mundo, sugestao["id"], {"valor": "macacão"}).status_code == 201
+    [objeto] = mundo.decupagem()["objetos"]
+    assert (objeto["tipo"], objeto["cor_base"]) == ("macacão", ["vermelho"])
+
+
 def test_trecho_longo_sem_pauta_gera_a_sugestao_de_pauta() -> None:
     [sugestao] = _da_pauta(_mundo(_modelo_com_trecho_sem_pauta()))
 

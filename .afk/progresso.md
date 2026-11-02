@@ -924,3 +924,10 @@ Não corrigido:
   1. Critério "Aceitar grava o nome com a fonte de confirmação pelo editor": hoje o aceite grava `origem="revisao"`, `estado_do_nome="confirmado"` e o motivo "sugestão confirmada pelo editor"; `fontes_do_nome` fica `[]`. `FonteDoNome` não tem valor para o editor, e o GLOSSARY define "fonte do nome" como a prova conferida pelo código; o tipo também vai no esquema do modelo. Se a fonte precisar dizer isso, falta criar o valor (por exemplo `editor`) e decidir o efeito no esquema do Gemini e em `so_o_rosto`.
   2. Duas pessoas "não identificado" com a mesma descrição podem receber o mesmo palpite (`comparacao.py`) e dão duas sugestões; aceitar uma não fecha a outra.
   3. `tipo="identificar_pessoa"` é o mesmo da regra do GC, então `contar()` mistura as taxas de aceite das duas regras.
+- 2026-11-02 20:57:20 · #153: feito
+- 2026-11-02 20:57:25 · iteração 100: #154
+
+## #154 iteração 101
+- Pronto: regra `_objeto_citado_no_visual` em `api/sugestoes.py` (entra em `REGRAS`; tipo de sugestão novo `objeto_do_visual`): o `visual` da aparição cita um tipo conhecido (lista do #149 via `tipos_de_objeto`, um callable passado de `main.py` a `jobs.criar_rotas`) que a pessoa não tem no trecho → `objeto.acrescentar` com dono, relação pela categoria, cor base da lista fechada mais perto do tipo no texto, trecho da aparição. Acento/maiúscula/plural simples/feminino da cor; tipo de várias palavras ("óculos de sol") tem precedência sobre o mais curto. Aceitar com "outro valor" troca só o `tipo`. Testes em `test_sugestoes.py`; `Mundo` ganhou `tipos_de_objeto`. `make verificar` verde.
+- Decisões: a lista de tipos não guarda categoria; a categoria vem de um objeto do mesmo tipo já na decupagem, senão `roupa` (relação: roupa→veste, calcado→calca, na_mao→segura, resto→usa). A lista de tipos vem de `buscar("", 1000)` (o Firestore corta em 200).
+- Armadilha: sem cor na frase, `cor_base` vai `[]`. Duas sugestões do mesmo tempo saem ordenadas pelo id.

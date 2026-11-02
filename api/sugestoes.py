@@ -1,4 +1,4 @@
-"""Sugestões que o editor confirma com uma tecla (#152, #153).
+"""Sugestões que o editor confirma com uma tecla (#152, #153, #154).
 
 Cada regra olha a decupagem entregue (o modelo com as correções) e devolve as
 sugestões abertas: uma pergunta, o contexto que a sustenta e a correção proposta, no
@@ -22,9 +22,10 @@ from pydantic import BaseModel
 from api.catalogo import Catalogo, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.correcoes import LIMITE_DO_NOME, Ocorrencia, TipoNovo
+from api.decupagem import CORES_BASE
 from api.identidade import nao_identificado
 
-TipoDeSugestao = Literal["identificar_pessoa", "pauta_do_trecho"]
+TipoDeSugestao = Literal["identificar_pessoa", "pauta_do_trecho", "objeto_do_visual"]
 Decisao = Literal["aceita", "recusada"]
 
 MOTIVO_CONFIRMADA = "sugestão confirmada pelo editor"
@@ -69,6 +70,8 @@ class Contexto:
 
     entregue: dict[str, Any]
     catalogo: Catalogo
+    # Os tipos de objeto já vistos no acervo (#149); só se consulta quando precisa.
+    tipos_de_objeto: Callable[[], list[str]] = list
 
 
 Regra = Callable[[Contexto], Iterable[Sugestao]]
@@ -264,32 +267,180 @@ def _trecho_sem_pauta(mundo: Contexto) -> Iterable[Sugestao]:
         )
 
 
+# --- Peça citada no visual da aparição ---------------------------------------------
+
+# A relação pela categoria do objeto; o que não está aqui é "usa".
+_RELACAO_DA_CATEGORIA = {"roupa": "veste", "calcado": "calca", "na_mao": "segura"}
+_PALAVRA = re.compile(r"[^\W_]+")
+
+
+def _palavras(texto: str) -> list[str]:
+    return _PALAVRA.findall(normalizar(texto))
+
+
+def _forma(palavra: str, citada: str) -> bool:
+    """`citada` é `palavra`, no plural simples ou no feminino ("vermelha", "pretas")."""
+    formas = {palavra, palavra + "s", palavra + "es"}
+    if palavra.endswith("o"):
+        formas |= {palavra[:-1] + "a", palavra[:-1] + "as"}
+    return citada in formas
+
+
+def _onde_cita(tipo: str, palavras: list[str]) -> int | None:
+    """A posição em que o tipo (uma ou mais palavras) aparece nas `palavras`."""
+    do_tipo = _palavras(tipo)
+    if not do_tipo:
+        return None
+    for i in range(len(palavras) - len(do_tipo) + 1):
+        if all(
+            _forma(t, palavras[i + k])
+            if k == len(do_tipo) - 1
+            else t == palavras[i + k]
+            for k, t in enumerate(do_tipo)
+        ):
+            return i
+    return None
+
+
+def _cor_perto(inicio: int, fim: int, palavras: list[str]) -> str | None:
+    """A cor da lista fechada mais perto do tipo (palavras `inicio` a `fim`), que é
+    de quem ela descreve em "terno preto e camisa rosa"."""
+    achadas = [
+        (min(abs(i - fim), abs(inicio - i)), i, cor)
+        for i, p in enumerate(palavras)
+        for cor in CORES_BASE
+        if _forma(cor, p)
+    ]
+    return min(achadas)[2] if achadas else None
+
+
+def _ja_tem(
+    objetos: list[dict[str, Any]], pessoa: str, tipo: str, trecho: tuple[int, int]
+) -> bool:
+    alvo = _palavras(tipo)
+    for o in objetos:
+        if o.get("pessoa") != pessoa:
+            continue
+        if not any(_sobrepoe(trecho, _intervalo(x)) for x in o.get("ocorrencias", [])):
+            continue
+        do_objeto = _palavras(str(o.get("tipo", "")))
+        if len(do_objeto) == len(alvo) and all(
+            _forma(a, b) or _forma(b, a) for a, b in zip(alvo, do_objeto, strict=True)
+        ):
+            return True
+    return False
+
+
+def _objeto_citado_no_visual(mundo: Contexto) -> Iterable[Sugestao]:
+    """O visual da aparição cita um tipo de objeto conhecido que a pessoa não tem
+    naquele trecho: a sugestão acrescenta o objeto, com o trecho da aparição."""
+    pessoas = [p for p in mundo.entregue.get("pessoas", []) if isinstance(p, dict)]
+    aparicoes = [
+        (p, a)
+        for p in pessoas
+        for a in p.get("na_imagem", [])
+        if str(a.get("visual") or "").strip()
+    ]
+    if not aparicoes:
+        return
+    objetos = [o for o in mundo.entregue.get("objetos", []) if isinstance(o, dict)]
+    categorias = {
+        normalizar(str(o["tipo"])): str(o["categoria"])
+        for o in objetos
+        if o.get("tipo") and o.get("categoria")
+    }
+    # Os tipos mais longos primeiro: "óculos de sol" antes de "óculos".
+    conhecidos = sorted(
+        {" ".join(t.split()): None for t in mundo.tipos_de_objeto() if t.strip()},
+        key=lambda t: (-len(_palavras(t)), t),
+    )
+    for pessoa, aparicao in aparicoes:
+        trecho = _intervalo(aparicao)
+        palavras = _palavras(str(aparicao["visual"]))
+        usadas: list[tuple[int, int]] = []
+        for tipo in conhecidos:
+            onde = _onde_cita(tipo, palavras)
+            if onde is None:
+                continue
+            fim = onde + len(_palavras(tipo)) - 1
+            if any(onde <= b and a <= fim for a, b in usadas):
+                continue
+            usadas.append((onde, fim))
+            if _ja_tem(objetos, str(pessoa["id"]), tipo, trecho):
+                continue
+            cor = _cor_perto(onde, fim, palavras)
+            categoria = categorias.get(normalizar(tipo), "roupa")
+            descricao = f"{tipo} {cor}" if cor else tipo
+            yield Sugestao(
+                id=_id(
+                    "objeto_no_visual",
+                    f"{pessoa['id']}:{normalizar(tipo)}",
+                    *trecho,
+                ),
+                tipo="objeto_do_visual",
+                inicio_ms=trecho[0],
+                fim_ms=trecho[1],
+                pergunta=f"Acrescentar {descricao} de {pessoa['nome']}?",
+                contexto=(
+                    f"Visual às {_relogio(trecho[0])}: "
+                    f"{' '.join(str(aparicao['visual']).split())}"
+                ),
+                correcao=Proposta(
+                    tipo="objeto.acrescentar",
+                    item_id="",
+                    valor=json.dumps(
+                        {
+                            "tipo": tipo,
+                            "cor_base": [cor] if cor else [],
+                            "categoria": categoria,
+                            "pessoa": str(pessoa["id"]),
+                            "relacao": _RELACAO_DA_CATEGORIA.get(categoria, "usa"),
+                            "inicio_ms": trecho[0],
+                            "fim_ms": trecho[1],
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+
+
 REGRAS: tuple[Regra, ...] = (
     _gc_de_identificacao,
     _palpite_nao_confirmado,
     _trecho_sem_pauta,
+    _objeto_citado_no_visual,
 )
 
 
 def sugestoes_abertas(
-    entregue: dict[str, Any], catalogo: Catalogo, decididas: set[str]
+    entregue: dict[str, Any],
+    catalogo: Catalogo,
+    decididas: set[str],
+    tipos_de_objeto: Callable[[], list[str]] = list,
 ) -> list[Sugestao]:
     """As sugestões do vídeo que o editor ainda não aceitou nem recusou, na ordem do
     tempo. A aceita sai pela decisão, não só pela correção: a correção pendente fica
     fora da decupagem entregue, e a regra a sugeriria de novo."""
-    mundo = Contexto(entregue, catalogo)
+    mundo = Contexto(entregue, catalogo, tipos_de_objeto)
     todas = [s for regra in REGRAS for s in regra(mundo) if s.id not in decididas]
     return sorted(todas, key=lambda s: (s.inicio_ms, s.fim_ms, s.id))
 
 
 def com_o_valor_do_editor(sugestao: Sugestao, valor: str) -> Sugestao:
-    """A sugestão com o "outro nome" (ou o título da pauta) que o editor deu no lugar
+    """A sugestão com o "outro nome" (o título da pauta, o tipo do objeto) que o editor deu no lugar
     do proposto."""
     proposta = sugestao.correcao
     if sugestao.tipo == "pauta_do_trecho":
         pauta = json.loads(proposta.valor)
         pauta["titulo"] = valor
         novo = json.dumps(pauta, ensure_ascii=False)
+        return sugestao.model_copy(
+            update={"correcao": proposta.model_copy(update={"valor": novo})}
+        )
+    if sugestao.tipo == "objeto_do_visual":
+        objeto = json.loads(proposta.valor)
+        objeto["tipo"] = valor
+        novo = json.dumps(objeto, ensure_ascii=False)
         return sugestao.model_copy(
             update={"correcao": proposta.model_copy(update={"valor": novo})}
         )

@@ -809,6 +809,7 @@ def criar_rotas(
     marcas: CatalogoDeMarcas,
     sugestoes: RepositorioDeSugestoes,
     reindexar: Callable[[Job], object],
+    tipos_de_objeto: Callable[[], list[str]] = list,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
 
@@ -1104,7 +1105,9 @@ def criar_rotas(
     ) -> tuple[list[Sugestao], dict[str, Any], str]:
         modelo, versao_atual = _ler_modelo(job.id)
         entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
-        abertas = sugestoes_abertas(entregue, catalogo, sugestoes.decididas(job.id))
+        abertas = sugestoes_abertas(
+            entregue, catalogo, sugestoes.decididas(job.id), tipos_de_objeto
+        )
         return abertas, modelo, versao_atual
 
     def _a_sugestao(abertas: list[Sugestao], sugestao_id: str) -> Sugestao:

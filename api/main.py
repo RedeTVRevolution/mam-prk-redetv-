@@ -171,6 +171,7 @@ from api.usuarios import (
 )
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
+TETO_DOS_TIPOS_CONHECIDOS = 1000
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
@@ -345,6 +346,10 @@ def criar_app(
                 armazenamento_dos_jobs,
                 tipos_de_objeto=tipos_dos_objetos,
             ),
+            lambda: [
+                t["tipo"]
+                for t in tipos_dos_objetos.buscar("", TETO_DOS_TIPOS_CONHECIDOS)
+            ],
         )
     )
     leitura_de_passadas = passadas or PassadasEmMemoria()
