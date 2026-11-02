@@ -7,6 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
+from api.copia_bigquery import CopiaDosMomentos
 from api.correcoes import (
     RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoesEmMemoria,
@@ -60,8 +61,13 @@ def _job(id: str = "j1", estado: str = "concluido") -> Job:
 
 
 class Mundo:
-    def __init__(self, indice: IndiceEmMemoria | None = None) -> None:
+    def __init__(
+        self,
+        indice: IndiceEmMemoria | None = None,
+        copia: CopiaDosMomentos | None = None,
+    ) -> None:
         self.indice = indice or IndiceEmMemoria()
+        self.copia: Any = copia
         self.jobs = RepositorioEmMemoria()
         self.jobs.salvar(_job())
         self.armazenamento = ArmazenamentoFalso()
@@ -80,6 +86,7 @@ class Mundo:
                 correcoes=self.correcoes,
                 aprovacao=self.aprovacao,
                 indice=self.indice,
+                copia=copia,
                 relogio=lambda: BASE,
             )
         )
@@ -87,7 +94,14 @@ class Mundo:
     def reindexar(self) -> None:
         job = self.jobs.obter("j1")
         assert job
-        reindexar(job, self.jobs, self.armazenamento, self.correcoes, self.indice)
+        reindexar(
+            job,
+            self.jobs,
+            self.armazenamento,
+            self.correcoes,
+            self.indice,
+            copia=self.copia,
+        )
 
     def corrigir_a_fala(self, texto: str) -> Any:
         versao = versao_do_modelo(json.dumps(MODELO).encode())

@@ -132,6 +132,17 @@ class Indexacao(BaseModel):
     desde: datetime | None = None
 
 
+EstadoDaCopia = Literal["pendente", "copiado", "falhou"]
+
+
+class CopiaNoBigQuery(BaseModel):
+    """Onde o Job está na cópia para o BigQuery (#260); falhar não muda o `estado` do Job."""
+
+    estado: EstadoDaCopia
+    em: datetime
+    desde: datetime | None = None
+
+
 NomeDaEtapa = Literal[
     "validacao",
     "transcricao",
@@ -193,6 +204,8 @@ class Job(BaseModel):
     data_exibicao: date | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
     indexacao: Indexacao | None = None
+    # `None` até a primeira cópia (e onde o BigQuery não está configurado).
+    copia_bigquery: CopiaNoBigQuery | None = None
     # A etapa em andamento; `None` entre etapas, com o Job parado e em Job anterior ao campo.
     etapa_atual: NomeDaEtapa | None = None
     # Só as etapas iniciadas, por nome; vazio em Job anterior ao campo. Quem grava é

@@ -460,3 +460,12 @@ Corrigido:
 Não corrigido (decisão humana):
 - "No total" é a média das frações por consulta (não soma pertinentes/resultados), e a consulta com menos de 5 resultados é medida sobre os que vieram (1 de 1 vale 100%). A spec admite as duas leituras; se o aceite for precision@5 estrito, dividir sempre por 5.
 - Smells sem bug: `_CAMPOS` repete os campos do `Caso` (e `texto` vira `consulta`); `programa/desde/ate` copiam `Ajustes`; `Trecho` em segundos e o resto da busca em ms; `CASOS` lido no import. Termos "sonda"/"aceite"/"pertinência" fora do GLOSSARY.
+- 2026-11-02 11:02:55 · #258: feito
+- 2026-11-02 11:03:00 · iteração 56: #260
+
+## #260 iteração 56
+- Pronto: `api/copia_bigquery.py` (linhas por momento = `registros_da_decupagem` + um por comercial; `CopiaEmMemoria`; `CopiaBigQuery` por REST, script `BEGIN TRANSACTION; DELETE do job; INSERT ... FROM UNNEST(JSON)`; sem `insertAll`, que bloqueia DELETE no buffer), `reindexar(..., copia=)` grava a cópia e `Job.copia_bigquery` (pendente/copiado/falhou) sem derrubar índice nem Job, `api/copiar_para_bigquery.py` + `make copiar-para-bigquery [JOB=]`, Terraform (dataset `southamerica-east1`, tabela particionada por `data_de_exibicao` e agrupada por `programa`, dataEditor no dataset e `bigquery.jobUser` no projeto para indexacao e web, API, envs `BIGQUERY_*`, outputs), GLOSSARY, testes.
+- Decisões: sem dependência nova (`google-cloud-bigquery`): REST com ADC como o Agent Retrieval. `pessoas` é REPEATED (id do catálogo e nome); no objeto, o dono. Cópia desligada se `BIGQUERY_DATASET` não existe no ambiente. `copia_bigquery` não vai em `JobPublico` (teste fixa a lista de campos).
+- Papéis: `bigquery.admin` da mam-terraform já está no wizard (linha do #260). Nada a dar à mão.
+- Não confirmado (sem nuvem): o script em transação via `jobs.query`, o tamanho do parâmetro de um vídeo grande (limite de 10 MB da requisição) e a recriação da tabela (`deletion_protection = true`). Nada saiu do Brasil por este ticket.
+- Armadilha: `terraform init` altera `infra/.terraform.lock.hcl`; reverta.

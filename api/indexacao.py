@@ -19,10 +19,13 @@ from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
 from api.jobs import (
+    CopiaNoBigQuery,
+    EstadoDaCopia,
     EstadoDaIndexacao,
     Indexacao,
     Job,
@@ -75,25 +78,31 @@ def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, A
 def _registrar(
     repositorio: RepositorioDeJobs,
     job_id: str,
-    estado: EstadoDaIndexacao,
-    agora: datetime,
-    desde: datetime | None = None,
+    campo: str,
+    valor: Indexacao | CopiaNoBigQuery,
 ) -> Job | None:
-    """Grava o estado da indexação sem mudar o `estado` do Job.
+    """Grava o estado da indexação (ou da cópia) sem mudar o `estado` do Job.
 
     Não é uma transição do ciclo de vida: a troca condicional em `concluido` só garante
     que o Job ainda está lá. Uma falha do repositório vai ao log e devolve `None`, para
     não transformar em erro uma Correção que já foi gravada.
     """
     try:
-        return repositorio.transitar(
-            job_id,
-            "concluido",
-            {"indexacao": Indexacao(estado=estado, em=agora, desde=desde)},
-        )
+        return repositorio.transitar(job_id, "concluido", {campo: valor})
     except Exception:
-        log.exception("estado da indexação não gravado para %s", job_id)
+        log.exception("estado de %s não gravado para %s", campo, job_id)
         return None
+
+
+def decupagem_do_job(
+    job: Job, decupagens: LeitorDeDecupagem, correcoes: RepositorioDeCorrecoes
+) -> Decupagem:
+    """A Decupagem entregue (com as Correções em vigor), no esquema do modelo."""
+    conteudo = b"".join(decupagens.abrir_decupagem(job.id))
+    entregue = decupagem_entregue(
+        json.loads(conteudo), versao_do_modelo(conteudo), correcoes.listar(job.id)
+    )
+    return Decupagem.model_validate(_so_o_esquema(Decupagem, entregue))
 
 
 def reindexar(
@@ -103,33 +112,65 @@ def reindexar(
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime] = agora_utc,
+    copia: CopiaDosMomentos | None = None,
 ) -> Indexacao | None:
-    """Regrava o vídeo no índice e devolve o estado novo; nunca levanta por falha do índice.
+    """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
 
-    `None` se o Job não está `concluido` (não há Decupagem para indexar).
+    Nunca levanta por falha do índice ou da cópia: cada uma fica no seu estado no Job, e
+    uma não impede a outra. `None` se o Job não está `concluido` (não há Decupagem).
     """
     if job.estado != "concluido":
         return None
     inicio = relogio()
-    _registrar(repositorio, job.id, "pendente", inicio)
-    estado: EstadoDaIndexacao
-    try:
-        conteudo = b"".join(decupagens.abrir_decupagem(job.id))
-        entregue = decupagem_entregue(
-            json.loads(conteudo), versao_do_modelo(conteudo), correcoes.listar(job.id)
-        )
-        registros = registros_da_decupagem(
+    _registrar(
+        repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio)
+    )
+    if copia:
+        _registrar(
+            repositorio,
             job.id,
-            Decupagem.model_validate(_so_o_esquema(Decupagem, entregue)),
-            job.programa,
-            job.data_exibicao,
+            "copia_bigquery",
+            CopiaNoBigQuery(estado="pendente", em=inicio),
         )
-        indice.gravar(job.id, registros)
-        estado = "indexado"
+    estado: EstadoDaIndexacao = "falhou"
+    estado_da_copia: EstadoDaCopia = "falhou"
+    try:
+        decupagem = decupagem_do_job(job, decupagens, correcoes)
     except Exception:
-        log.exception("indexação falhou para %s", job.id)
-        estado = "falhou"
-    atual = _registrar(repositorio, job.id, estado, relogio(), inicio)
+        log.exception("decupagem de %s não lida para indexar", job.id)
+    else:
+        try:
+            indice.gravar(
+                job.id,
+                registros_da_decupagem(
+                    job.id, decupagem, job.programa, job.data_exibicao
+                ),
+            )
+            estado = "indexado"
+        except Exception:
+            log.exception("indexação falhou para %s", job.id)
+        if copia:
+            try:
+                copia.gravar(
+                    job.id,
+                    linhas_da_decupagem(
+                        job.id, decupagem, job.programa, job.data_exibicao, inicio
+                    ),
+                )
+                estado_da_copia = "copiado"
+            except Exception:
+                log.exception("cópia para o BigQuery falhou para %s", job.id)
+    fim = relogio()
+    if copia:
+        _registrar(
+            repositorio,
+            job.id,
+            "copia_bigquery",
+            CopiaNoBigQuery(estado=estado_da_copia, em=fim, desde=inicio),
+        )
+    atual = _registrar(
+        repositorio, job.id, "indexacao", Indexacao(estado=estado, em=fim, desde=inicio)
+    )
     return atual.indexacao if atual else None
 
 
@@ -139,6 +180,7 @@ def reindexar_jobs(
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
+    copia: CopiaDosMomentos | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -155,7 +197,7 @@ def reindexar_jobs(
     else:
         jobs = [j for j in repositorio.listar() if j.estado == "concluido"]
     for job in jobs:
-        nova = reindexar(job, repositorio, decupagens, correcoes, indice)
+        nova = reindexar(job, repositorio, decupagens, correcoes, indice, copia=copia)
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
 
@@ -173,6 +215,7 @@ def main(argv: list[str]) -> int:
         ),
         RepositorioDeCorrecoesFirestore(firestore_),
         AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http()),
+        copia_do_ambiente(os.environ),
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

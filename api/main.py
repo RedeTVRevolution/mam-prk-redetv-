@@ -37,6 +37,7 @@ from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.comparar_passadas import criar_rotas_da_comparacao
+from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente
 from api.correcoes import (
     RepositorioDeAprovacao,
     RepositorioDeAprovacaoEmMemoria,
@@ -185,6 +186,7 @@ def criar_app(
     marcas: CatalogoDeMarcas | None = None,
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
+    copia: CopiaDosMomentos | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
@@ -266,6 +268,7 @@ def criar_app(
                 repositorio_de_correcoes,
                 indice_da_busca,
                 relogio,
+                copia,
             ),
         )
     )
@@ -366,6 +369,7 @@ if _projeto:
             if "BUSCA_COLECAO" in os.environ
             else None
         ),
+        copia=copia_do_ambiente(os.environ),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],

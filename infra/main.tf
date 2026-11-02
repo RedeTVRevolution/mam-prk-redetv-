@@ -38,6 +38,12 @@ variable "regiao_do_model_armor" {
   default = "southamerica-east1"
 }
 
+# A cópia das decupagens no BigQuery (#260) fica no Brasil: os dados não saem do país.
+variable "regiao_do_bigquery" {
+  type    = string
+  default = "southamerica-east1"
+}
+
 # Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Cloud Run não tem GPU
 # em southamerica-east1. Só processamento de passagem: nenhum bucket nasce nesta região.
 variable "regiao_gpu" {
@@ -308,6 +314,7 @@ provider "google" {
 resource "google_project_service" "apis" {
   for_each = toset([
     "artifactregistry.googleapis.com",
+    "bigquery.googleapis.com", # cópia das decupagens para relatórios (#260)
     "cloudbuild.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
@@ -531,7 +538,9 @@ locals {
     # um único workflow.
     # `modelarmor.user` só saneia prompts (sanitizeUserPrompt); `discoveryengine.viewer` é o
     # menor papel com a permissão `discoveryengine.rankingConfigs.rank`, da Ranking API (#232).
-    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/workflows.invoker", "roles/modelarmor.user", "roles/discoveryengine.viewer"]
+    # `bigquery.jobUser` (web e indexacao): rodar o script que troca as linhas do Job na
+    # cópia do BigQuery (#260); o acesso aos dados é só no dataset, mais abaixo.
+    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/workflows.invoker", "roles/modelarmor.user", "roles/discoveryengine.viewer", "roles/bigquery.jobUser"]
     validacao   = ["roles/datastore.user"]
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
@@ -542,7 +551,7 @@ locals {
     # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção. O
     # embedding automático da coleção roda com a credencial de quem grava ou busca, e não
     # com a do Agent Retrieval: as duas precisam chamar a Vertex (aiplatform.user).
-    indexacao   = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user"]
+    indexacao   = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/bigquery.jobUser"]
     referencias = ["roles/datastore.user", "roles/aiplatform.user"]
     # Leem o Job, o catálogo e a Decupagem no Firestore e chamam o Gemini; a comparação
     # também grava as sugestões de perfil.
@@ -682,6 +691,60 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   }
 }
 
+# Cópia das decupagens no BigQuery (#260): uma linha por momento, para os relatórios de
+# aparições e menções por pessoa, marca e programa. Este é o único lugar que monta os
+# nomes; o código os recebe por BIGQUERY_*. Quem grava (indexação, no fim da análise e
+# no `make copiar-para-bigquery`, e a web, a cada Correção) é dataEditor só no dataset.
+locals {
+  dataset_do_bigquery = "mam_decupagens"
+  tabela_de_momentos  = "momentos"
+}
+
+resource "google_bigquery_dataset" "decupagens" {
+  dataset_id                 = local.dataset_do_bigquery
+  location                   = var.regiao_do_bigquery
+  delete_contents_on_destroy = false
+  depends_on                 = [google_project_service.apis]
+}
+
+resource "google_bigquery_table" "momentos" {
+  dataset_id          = google_bigquery_dataset.decupagens.dataset_id
+  table_id            = local.tabela_de_momentos
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "data_de_exibicao"
+  }
+  clustering = ["programa"]
+  schema = jsonencode([
+    { name = "job_id", type = "STRING", mode = "REQUIRED" },
+    { name = "programa", type = "STRING", mode = "NULLABLE" },
+    { name = "data_de_exibicao", type = "DATE", mode = "NULLABLE" },
+    { name = "tipo", type = "STRING", mode = "REQUIRED", description = "plano, fala, texto_na_tela, objeto ou comercial" },
+    { name = "inicio_ms", type = "INTEGER", mode = "REQUIRED" },
+    { name = "fim_ms", type = "INTEGER", mode = "REQUIRED" },
+    {
+      name = "pessoas", type = "RECORD", mode = "REPEATED", description = "Quem aparece no momento; no objeto, o dono",
+      fields = [
+        { name = "id", type = "STRING", mode = "NULLABLE" },
+        { name = "nome", type = "STRING", mode = "NULLABLE" },
+      ]
+    },
+    { name = "marca", type = "STRING", mode = "NULLABLE" },
+    { name = "tipo_de_insercao", type = "STRING", mode = "NULLABLE", description = "Só no comercial" },
+    { name = "texto", type = "STRING", mode = "NULLABLE" },
+    { name = "versao_pipeline", type = "STRING", mode = "NULLABLE" },
+    { name = "gravado_em", type = "TIMESTAMP", mode = "REQUIRED" },
+  ])
+}
+
+resource "google_bigquery_dataset_iam_member" "grava_momentos" {
+  for_each   = toset(["indexacao", "web"])
+  dataset_id = google_bigquery_dataset.decupagens.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = google_service_account.mam[each.key].member
+}
+
 # A mam-terraform nasce no wizard, fora do Terraform; aqui só ganha quem a impersona.
 resource "google_service_account_iam_member" "github_impersona_terraform" {
   service_account_id = "projects/${var.projeto}/serviceAccounts/mam-terraform@${var.projeto}.iam.gserviceaccount.com"
@@ -753,6 +816,18 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_DIMENSAO"
         value = tostring(var.dimensao_dos_vetores)
+      }
+      env {
+        name  = "BIGQUERY_DATASET"
+        value = local.dataset_do_bigquery
+      }
+      env {
+        name  = "BIGQUERY_TABELA"
+        value = local.tabela_de_momentos
+      }
+      env {
+        name  = "BIGQUERY_REGIAO"
+        value = var.regiao_do_bigquery
       }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
@@ -1603,6 +1678,18 @@ resource "google_cloud_run_v2_job" "indexacao" {
           name  = "BUSCA_DIMENSAO"
           value = tostring(var.dimensao_dos_vetores)
         }
+        env {
+          name  = "BIGQUERY_DATASET"
+          value = local.dataset_do_bigquery
+        }
+        env {
+          name  = "BIGQUERY_TABELA"
+          value = local.tabela_de_momentos
+        }
+        env {
+          name  = "BIGQUERY_REGIAO"
+          value = var.regiao_do_bigquery
+        }
       }
     }
   }
@@ -2241,6 +2328,19 @@ output "gpu_espera_s" {
 
 output "gpu_fator_da_espera" {
   value = var.gpu_fator_da_espera
+}
+
+# Para o make copiar-para-bigquery.
+output "bigquery_dataset" {
+  value = local.dataset_do_bigquery
+}
+
+output "bigquery_tabela" {
+  value = local.tabela_de_momentos
+}
+
+output "bigquery_regiao" {
+  value = var.regiao_do_bigquery
 }
 
 # Para o make criar-colecao-da-busca, o make medir-busca e o make sondar-busca.
