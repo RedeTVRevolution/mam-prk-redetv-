@@ -3,6 +3,8 @@ import type { Autenticador } from './auth/autenticador.ts'
 import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
+import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
+import { parametrosDoRelatorio } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
@@ -121,6 +123,10 @@ export interface ClienteDaApi {
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
   buscar(consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
+  /** `GET /v1/relatorios/tempo-de-tela`: tempo de tela por pessoa, contando só aparições. */
+  tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
+  /** O mesmo relatório em CSV. */
+  tempoDeTelaEmCsv(filtros: FiltrosDoRelatorio): Promise<Blob>
   nomes: ClienteDeNomes
   job(id: string): ClienteDoJob
 }
@@ -236,6 +242,9 @@ export function criarClienteDaApi(
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite) => chamar(`/v1/busca?${consultaParaApi(consulta, limite)}`),
+    tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
+    tempoDeTelaEmCsv: async (filtros) =>
+      (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),
     nomes: {
       achar: (catalogo, q) => chamar(`/v1/catalogo/${catalogo}?q=${encodeURIComponent(q)}`),
       criar: (catalogo, nome) => chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } }),

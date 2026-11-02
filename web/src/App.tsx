@@ -21,6 +21,7 @@ import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
+import TempoDeTela from './TempoDeTela.tsx'
 
 // A amostra do sistema visual é grande e sem login: fica num pedaço à parte do bundle.
 const Amostra = lazy(() => import('./Amostra.tsx'))
@@ -167,6 +168,10 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'busca' ? (
         <AppShell.Main bg="dark.7">
           <Busca api={api} consulta={rota.consulta} />
+        </AppShell.Main>
+      ) : rota.tipo === 'tempo_de_tela' ? (
+        <AppShell.Main bg="dark.7">
+          <TempoDeTela api={api} filtros={rota.filtros} />
         </AppShell.Main>
       ) : (
         <AppShell.Main bg="dark.7">

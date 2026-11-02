@@ -720,7 +720,7 @@ resource "google_bigquery_table" "momentos" {
     { name = "job_id", type = "STRING", mode = "REQUIRED" },
     { name = "programa", type = "STRING", mode = "NULLABLE" },
     { name = "data_de_exibicao", type = "DATE", mode = "NULLABLE" },
-    { name = "tipo", type = "STRING", mode = "REQUIRED", description = "plano, fala, texto_na_tela, objeto ou comercial" },
+    { name = "tipo", type = "STRING", mode = "REQUIRED", description = "plano, fala, texto_na_tela, objeto, comercial, aparicao, mencao_na_fala ou mencao_no_texto" },
     { name = "inicio_ms", type = "INTEGER", mode = "REQUIRED" },
     { name = "fim_ms", type = "INTEGER", mode = "REQUIRED" },
     {

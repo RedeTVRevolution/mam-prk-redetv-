@@ -116,6 +116,11 @@ from api.sugestoes import (
     criar_rotas_da_contagem,
 )
 from api.taxa_de_correcao import criar_rotas_da_qualidade
+from api.tempo_de_tela import (
+    ConsultaDeMomentos,
+    consulta_do_ambiente,
+    criar_rotas_dos_relatorios,
+)
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -188,6 +193,7 @@ def criar_app(
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
+    tempo_de_tela: ConsultaDeMomentos | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
@@ -336,6 +342,7 @@ def criar_app(
             repositorio_da_revisao,
         )
     )
+    v1.include_router(criar_rotas_dos_relatorios(tempo_de_tela, repositorio_de_jobs))
     app.include_router(v1)
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
@@ -380,6 +387,7 @@ if _projeto:
             else None
         ),
         copia=copia_do_ambiente(os.environ),
+        tempo_de_tela=consulta_do_ambiente(os.environ),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],

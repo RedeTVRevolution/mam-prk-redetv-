@@ -9,10 +9,17 @@ from api.copia_bigquery import (
     CopiaBigQuery,
     CopiaEmMemoria,
     LinhaDoMomento,
+    PessoaDoMomento,
     linhas_da_decupagem,
 )
 from api.copiar_para_bigquery import copiar_jobs
-from api.decupagem import Comercial
+from api.decupagem import (
+    Aparicao,
+    Comercial,
+    MencaoNaFala,
+    MencaoNoTexto,
+    Pessoa,
+)
 from api.exemplos_da_busca import EXEMPLOS
 from api.tests.test_correcoes import BASE
 from api.tests.test_indexacao import AUTORIZACAO, Mundo, _job
@@ -193,3 +200,36 @@ def test_adaptador_recusa_resposta_incompleta() -> None:
     except RuntimeError:
         return
     raise AssertionError("devia levantar")
+
+
+def test_aparicoes_e_mencoes_viram_linhas_separadas_por_pessoa() -> None:
+    pessoa = Pessoa(
+        id="p1",
+        nome="Sabrina Sato",
+        catalogo_id="c1",
+        estado_do_nome="confirmado",
+        na_imagem=[Aparicao(inicio_ms=1000, fim_ms=4000, evidencia="rosto")],
+        citada_na_fala=[MencaoNaFala(inicio_ms=5000, fim_ms=6000)],
+        citada_no_texto=[MencaoNoTexto(inicio_ms=7000, fim_ms=8000, texto="Sabrina")],
+    )
+    palpite = pessoa.model_copy(
+        update={"id": "p2", "catalogo_id": "c2", "estado_do_nome": "palpite"}
+    )
+    sem_catalogo = pessoa.model_copy(update={"id": "p3", "catalogo_id": None})
+    decupagem = DECUPAGEM.model_copy(
+        update={"pessoas": [pessoa, palpite, sem_catalogo]}
+    )
+
+    linhas = linhas_da_decupagem("j1", decupagem, "Exemplo", DIA, BASE)
+
+    das_pessoas = {
+        (x.tipo, x.inicio_ms, x.fim_ms, tuple(x.pessoas))
+        for x in linhas
+        if x.tipo in ("aparicao", "mencao_na_fala", "mencao_no_texto")
+    }
+    dona = PessoaDoMomento("c1", "Sabrina Sato")
+    assert das_pessoas == {
+        ("aparicao", 1000, 4000, (dona,)),
+        ("mencao_na_fala", 5000, 6000, (dona,)),
+        ("mencao_no_texto", 7000, 8000, (dona,)),
+    }

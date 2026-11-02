@@ -106,6 +106,9 @@ Unidade de busca: um plano ou um evento da decupagem, com início e fim.
 **Cópia no BigQuery**:
 Uma linha por momento da Decupagem entregue (plano, fala, texto na tela, objeto e comercial, este com marca e tipo de inserção), para os relatórios de aparições e menções. Fica no Brasil (`southamerica-east1`), particionada pela data de exibição e agrupada por programa. Cada gravação troca as linhas do Job num único MERGE (nunca acumula versões); roda ao concluir o vídeo e a cada Correção em vigor, e falhar só marca `copia_bigquery.estado = falhou` no Job. `make copiar-para-bigquery` carrega os Jobs que já existem e refaz os que falharam.
 
+**Relatório de tempo de tela**:
+Por pessoa do catálogo, num programa e num período de data de exibição (`GET /v1/relatorios/tempo-de-tela`, `formato=csv`; tela "Relatórios › Tempo de tela"): tempo somado das aparições, vídeos e aparições, e as menções na fala e no texto da tela só como contagem. Lê da cópia no BigQuery as linhas `aparicao`, `mencao_na_fala` e `mencao_no_texto` (uma por intervalo de cada pessoa confirmada no catálogo; palpite e "não identificado" ficam fora). Aparições da mesma pessoa no mesmo vídeo que se sobrepõem ou se tocam contam uma vez. Vídeos copiados antes do #266 só entram depois de `make copiar-para-bigquery`.
+
 **Faceta**:
 Contagem de vídeos por valor ao lado dos resultados da busca: programa, mês de exibição, pessoa, marca e tipo de momento. É calculada sobre os candidatos que a busca já trouxe (os até 100 registros fundidos pelo RRF), já com os filtros aplicados, e não sobre o acervo todo, porque o índice não agrega. Clicar num valor filtra no índice, antes do teto de registros: programa e mês viram programa e período, e pessoa, marca e tipo entram nos filtros de cada cláusula (`pessoa` casa a pessoa na imagem ou a dona do objeto). Programa e mês são contados pelo registro do índice, que é o que o filtro compara. Vale também no plano B.
 

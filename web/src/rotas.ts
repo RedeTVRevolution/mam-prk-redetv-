@@ -1,5 +1,6 @@
 import { consultaDaBusca, consultaParaEndereco, type ConsultaDaBusca } from './busca.ts'
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
+import { filtrosDoRelatorio, filtrosParaEndereco, type FiltrosDoRelatorio } from './tempoDeTela.ts'
 import { useMemo, useSyncExternalStore, type MouseEvent } from 'react'
 
 // Rotas com endereço sobre a History API, sem biblioteca (princípio 9 de docs/design/principios.md).
@@ -9,10 +10,17 @@ export type Rota =
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'busca'; consulta: ConsultaDaBusca }
   | { tipo: 'video'; id: string; t: number | null; busca: string | null }
+  | { tipo: 'tempo_de_tela'; filtros: FiltrosDoRelatorio }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
 export const ACERVO = '/acervo'
+export const TEMPO_DE_TELA = '/relatorios/tempo-de-tela'
+
+/** O endereço do relatório de tempo de tela, com os filtros na query. */
+export function enderecoDoTempoDeTela(filtros: FiltrosDoRelatorio): string {
+  return `${TEMPO_DE_TELA}${filtrosParaEndereco(filtros)}`
+}
 
 /** O endereço da busca, com a consulta e os filtros na query. */
 export function enderecoDaBusca(consulta: ConsultaDaBusca): string {
@@ -40,6 +48,9 @@ export function lerRota(caminho: string, busca = ''): Rota {
   if (partes.length === 0) return { tipo: 'raiz' }
   if (partes.length === 1 && partes[0] === 'acervo') return { tipo: 'acervo', filtros: filtrosDaBusca(busca) }
   if (partes.length === 1 && partes[0] === 'busca') return { tipo: 'busca', consulta: consultaDaBusca(busca) }
+  if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'tempo-de-tela') {
+    return { tipo: 'tempo_de_tela', filtros: filtrosDoRelatorio(busca) }
+  }
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {

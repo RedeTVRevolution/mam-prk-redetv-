@@ -6,7 +6,7 @@ comercial (marca e tipo de inserção). Cada gravação troca todas as linhas do
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Any, Protocol
@@ -31,7 +31,9 @@ class LinhaDoMomento:
     job_id: str
     programa: str | None
     data_de_exibicao: date | None
-    tipo: str  # plano, fala, texto_na_tela, objeto ou comercial
+    # plano, fala, texto_na_tela, objeto, comercial; e, por pessoa, aparicao,
+    # mencao_na_fala e mencao_no_texto
+    tipo: str
     inicio_ms: int
     fim_ms: int
     # Quem aparece no momento (do catálogo); no objeto, o dono.
@@ -90,6 +92,40 @@ def linhas_da_decupagem(
         )
         for c in decupagem.comerciais
     ]
+    linhas += _linhas_das_pessoas(decupagem, base)
+    return linhas
+
+
+def _linhas_das_pessoas(
+    decupagem: Decupagem, base: dict[str, Any]
+) -> list[LinhaDoMomento]:
+    """Uma linha por aparição e por menção de cada pessoa do catálogo (#266).
+
+    É daqui que sai o tempo de tela: `aparicao` é a pessoa visível, e as menções na fala e
+    no texto da tela ficam em tipos à parte, nunca somam tempo. Quem não está confirmado
+    no catálogo (sem `catalogo_id`, ou só palpite) fica de fora dos relatórios.
+    """
+    linhas: list[LinhaDoMomento] = []
+    for p in decupagem.pessoas:
+        if not p.catalogo_id or p.estado_do_nome == "palpite":
+            continue
+        dona = [PessoaDoMomento(p.catalogo_id, p.nome)]
+        momentos: list[tuple[str, Sequence[Any]]] = [
+            ("aparicao", p.na_imagem),
+            ("mencao_na_fala", p.citada_na_fala),
+            ("mencao_no_texto", p.citada_no_texto),
+        ]
+        for tipo, intervalos in momentos:
+            linhas += [
+                LinhaDoMomento(
+                    tipo=tipo,
+                    inicio_ms=i.inicio_ms,
+                    fim_ms=i.fim_ms,
+                    pessoas=dona,
+                    **base,
+                )
+                for i in intervalos
+            ]
     return linhas
 
 
@@ -201,10 +237,10 @@ VALUES
             raise RuntimeError(f"cópia de {job_id} não terminou no prazo")
 
 
-def _parametro(nome: str, valor: str) -> dict[str, Any]:
+def _parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
     return {
         "name": nome,
-        "parameterType": {"type": "STRING"},
+        "parameterType": {"type": tipo},
         "parameterValue": {"value": valor},
     }
 
