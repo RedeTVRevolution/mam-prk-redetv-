@@ -5,7 +5,7 @@ nova (leitura só quando a imagem muda, detector leve, ou os dois). Mostra:
 
 - os textos distintos que a referência achou e a nova não, e o contrário;
 - as aparições de um texto cujo início ou fim mudou mais de 1 s (a tolerância do #91), ou
-  que a nova não achou;
+  que só uma das duas achou;
 - quantos quadros cada uma leu e o tempo de processamento.
 
 Os textos e as aparições são os da medição dos textos (`api/medicao_dos_textos.py`): linhas
@@ -39,7 +39,7 @@ Aparicao = tuple[float, float]
 @dataclass(frozen=True)
 class AparicaoMudada:
     texto: str
-    referencia: Aparicao
+    referencia: Aparicao | None  # None: a referência não achou o texto nesse trecho
     nova: Aparicao | None  # None: a nova não achou o texto nesse trecho
 
 
@@ -97,6 +97,11 @@ def _aparicoes_mudadas(
                 mudadas.append(AparicaoMudada(texto, aparicao, None))
             elif _mudou(aparicao, melhor):
                 mudadas.append(AparicaoMudada(texto, aparicao, melhor))
+        mudadas += [
+            AparicaoMudada(texto, None, aparicao)
+            for aparicao in nova[texto]
+            if all(_sobreposicao(r, aparicao) <= 0 for r in referencia[texto])
+        ]
     return mudadas
 
 

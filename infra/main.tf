@@ -55,7 +55,7 @@ variable "espera_gpu_minutos" {
 }
 
 # Leitura da tela só quando a imagem muda (#233, api/mudanca_da_tela.py): diferença média
-# (0 a 255) de uma das seis faixas horizontais do quadro, contra o último quadro lido, acima
+# (0 a 255) de um dos blocos (seis faixas horizontais de oito blocos) do quadro, contra o último quadro lido, acima
 # da qual o OCR lê de novo. 0 lê todo quadro, como antes. O padrão é um palpite; a medição no
 # ar (#240, `make comparar-leituras`) acerta o valor sem nova imagem.
 variable "limiar_de_mudanca_do_ocr" {

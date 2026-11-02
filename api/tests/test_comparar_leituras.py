@@ -82,6 +82,20 @@ def test_aparicao_que_a_nova_nao_achou_naquele_trecho() -> None:
     ]
 
 
+def test_aparicao_que_so_a_nova_achou_naquele_trecho() -> None:
+    # Uma leitura a mais da nova, de um texto que as duas acharam, não passa sem aviso.
+    referencia = _leitura(_de("GC", 1, 3))
+    nova = _leitura({**_de("GC", 1, 3), **_de("GC", 12, 14)})
+
+    resultado = comparar(referencia, nova)
+
+    assert resultado.so_na_nova == []
+    assert resultado.aparicoes_mudadas == [
+        AparicaoMudada("gc", referencia=None, nova=(12, 15))
+    ]
+    assert "gc: referência não achado; nova 12 s a 15 s" in formatar(resultado)
+
+
 def test_falha_isolada_do_ocr_nao_parte_a_aparicao() -> None:
     referencia = _leitura(_de("GC", 1, 8))
     nova = _leitura({s: ["GC"] for s in (1, 2, 3, 5, 6, 7, 8)})

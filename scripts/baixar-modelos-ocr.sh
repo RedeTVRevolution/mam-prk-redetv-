@@ -8,7 +8,7 @@ set -eu
 RECONHECEDOR=latin_PP-OCRv5_mobile_rec
 RECONHECEDOR_REVISAO=ab2cd5cc5fa6309be2e5acdfe66eca2c2c127d57
 
-case "$1" in
+case "${1:-}" in
 PP-OCRv5_server_det)
     DETECTOR_REVISAO=ca867c897ecbca8873081573a802ad70d499cb94
     HASHES="183146fe9d9910352f68482f623bcbbb9fa7b9e8fa1463b9ad288cef00524d2d inference.pdiparams
@@ -24,7 +24,7 @@ PP-OCRv5_mobile_det)
 98069072e1b6b37d727fd9d9f11725faa46d6ea0de012f2ed26caea011c37699 inference.yml"
     ;;
 *)
-    echo "Detector desconhecido: $1 (PP-OCRv5_server_det ou PP-OCRv5_mobile_det)" >&2
+    echo "Detector desconhecido: ${1:-} (PP-OCRv5_server_det ou PP-OCRv5_mobile_det)" >&2
     exit 1
     ;;
 esac

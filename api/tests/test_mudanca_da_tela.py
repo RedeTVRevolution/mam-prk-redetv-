@@ -64,6 +64,19 @@ def test_a_tarja_que_entra_e_lida_no_segundo_em_que_entra(tmp_path: Path) -> Non
     assert mudanca.mudou(_quadro(tmp_path, "c", tarja=True)) is False
 
 
+def test_o_digito_do_placar_que_muda_e_lido(tmp_path: Path) -> None:
+    # Pouca área (um dígito de 16x20 no proxy): sumiria na média da faixa inteira.
+    mudanca = MudancaDaTela(LIMIAR_PADRAO)
+    primeiro = _quadro(tmp_path, "a", gc=True)
+    mudanca.mudou(primeiro)
+    with Image.open(primeiro) as imagem:
+        placar = imagem.copy()
+    ImageDraw.Draw(placar).rectangle((240, 36, 256, 56), fill=(0, 0, 0))
+    placar.save(tmp_path / "b.png")
+
+    assert mudanca.mudou(tmp_path / "b.png") is True
+
+
 def test_a_tela_preta_depois_do_texto_e_lida(tmp_path: Path) -> None:
     mudanca = MudancaDaTela(LIMIAR_PADRAO)
     mudanca.mudou(_quadro(tmp_path, "a", tarja=True))
@@ -118,6 +131,9 @@ def test_o_limiar_vem_da_configuracao() -> None:
     assert limiar_do_ambiente({"LIMIAR_DE_MUDANCA": "0"}) == 0
     with pytest.raises(ValueError, match="LIMIAR_DE_MUDANCA"):
         limiar_do_ambiente({"LIMIAR_DE_MUDANCA": "-1"})
+    for invalido in ("nan", "inf"):
+        with pytest.raises(ValueError, match="LIMIAR_DE_MUDANCA"):
+            limiar_do_ambiente({"LIMIAR_DE_MUDANCA": invalido})
 
 
 class LeitorContador:
