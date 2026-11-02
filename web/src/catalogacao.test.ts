@@ -227,6 +227,8 @@ test('objeto: cada atributo sozinho muda só ele, e mais de duas cores base não
   expect(valor({ detalhe: 'lisa' })).toMatchObject({ detalhe: 'lisa', tipo: 'camisa' })
   expect(valor({ marca: 'Polo' })).toMatchObject({ marca: 'Polo' })
   expect(e.pedidos({ ...e.inicial, cor_base: ['azul', 'branco', 'preto'] })).toBeNull()
+  // Só vale cor da lista fechada: a de fora não conta para o limite e não vai no pedido.
+  expect(valor({ cor_base: ['azul', 'turquesa', 'branco'] }).cor_base.sort()).toEqual(['azul', 'branco'])
   expect(e.pedidos({ ...e.inicial, tipo: ' ' })).toBeNull()
   expect(e.pedidos(e.inicial)).toEqual([])
 })

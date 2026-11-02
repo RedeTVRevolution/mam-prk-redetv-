@@ -98,11 +98,11 @@ export interface ClienteDoJob {
   reprocessar(etapa: string, motivo: string): Promise<Job>
 }
 
-/** Um nome do catálogo de pessoas ou de marcas, como o autocompletar o mostra. */
+/** Um nome do catálogo de pessoas ou de marcas (ou um tipo de objeto já visto), como o autocompletar o mostra. */
 export interface NomeDoCatalogo {
   id: string
   nome: string
-  /** "Sabrina Sato (apresentadora)": só as pessoas têm. */
+  /** "Sabrina Sato (apresentadora)" nas pessoas, "camiseta (3)" nos tipos de objeto. */
   rotulo?: string
   a_revisar: boolean
 }

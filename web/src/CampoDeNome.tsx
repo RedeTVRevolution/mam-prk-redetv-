@@ -9,9 +9,9 @@ const MINIMO_DE_LETRAS = 2
 const ATIVA = `${CORES.foco}29`
 
 /**
- * Campo de nome de pessoa ou de marca (ou de tipo de objeto, que só sugere e não cria) com autocompletar: a lista abre a partir de 2 letras; ↑ ↓ e Enter
+ * Campo de nome de pessoa ou de marca com autocompletar: a lista abre a partir de 2 letras; ↑ ↓ e Enter
  * escolhem, Shift+Enter (ou o clique na última linha) usa o texto digitado como nome novo, "a revisar".
- * Escolher do catálogo devolve o id junto com o nome.
+ * Escolher do catálogo devolve o id junto com o nome. O tipo de objeto só sugere: não há nome a criar.
  */
 export function CampoDeNome({
   rotulo,

@@ -144,7 +144,7 @@ export function FormularioDeCorrecao({
               label={c.rotulo}
               searchable
               allowDeselect={false}
-              nothingFoundMessage="Ninguém com esse nome"
+              nothingFoundMessage="Nada com esse texto"
               data={(c.opcoes ?? []).map((o) => ({ value: o.valor || VALOR_VAZIO, label: o.rotulo }))}
               value={String(valor ?? '') || VALOR_VAZIO}
               onChange={(v) => mudar(c, v === VALOR_VAZIO ? '' : (v ?? ''))}
@@ -177,7 +177,7 @@ export function FormularioDeCorrecao({
             rotulo={c.rotulo}
             opcoes={c.opcoes ?? []}
             maximo={c.maximo ?? 1}
-            valor={(valor as string[]) ?? []}
+            valor={Array.isArray(valor) ? valor : []}
             aoMudar={(v) => mudar(c, v)}
           />
         )

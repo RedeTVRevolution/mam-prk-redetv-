@@ -9,6 +9,7 @@ const GRUPO = 'Cor base do objeto'
 /**
  * As cores da lista fechada como botões ligáveis, cada um com a letra do atalho: a tecla (com o foco
  * no grupo) e o clique marcam e desmarcam. Passou de `maximo`, a cor não marca e o campo diz por quê.
+ * Uma cor de fora da lista só se desmarca: ela não conta para o `maximo` e o pedido a deixa de fora.
  */
 export function CampoDeCores({
   rotulo,
@@ -26,6 +27,8 @@ export function CampoDeCores({
   const teclas = teclasDasOpcoes(opcoes)
   const [recusada, setRecusada] = useState(false)
   const marcadas = valor.filter((v) => opcoes.some((o) => o.valor === v))
+  // Uma cor gravada fora da lista fechada aparece marcada, sem tecla, para poder ser desmarcada.
+  const deFora: Opcao[] = valor.filter((v) => !marcadas.includes(v)).map((v) => ({ valor: v, rotulo: v }))
 
   useAtalhos(
     opcoes.flatMap((o) => {
@@ -62,7 +65,7 @@ export function CampoDeCores({
         {rotulo}
       </Text>
       <Group role="group" aria-label={rotulo} gap={4} mt={2} onKeyDown={aoTeclar}>
-        {opcoes.map((o) => {
+        {[...opcoes, ...deFora].map((o) => {
           const letra = teclas.get(o.valor)
           const ligada = valor.includes(o.valor)
           return (
