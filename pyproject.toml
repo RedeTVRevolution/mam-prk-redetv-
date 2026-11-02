@@ -93,5 +93,5 @@ module = ["google.cloud.storage", "google.cloud.storage.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["faster_whisper", "faster_whisper.*", "ctranslate2", "paddle", "paddle.*", "paddleocr", "paddleocr.*", "cv2"]
+module = ["faster_whisper", "faster_whisper.*", "ctranslate2", "paddle", "paddle.*", "paddleocr", "paddleocr.*", "cv2", "torch", "torch.*", "transformers", "transformers.*"]
 ignore_missing_imports = true

@@ -32,6 +32,8 @@ SAIDA_RESULTADO_ERRADO = 21
 # confere que as duas pontas combinam.
 FRASE_FALADA = "bom dia"
 TEXTO_DO_QUADRO = "REDETV"
+# O quadro de amostra do Florence-2 é um carro (o Dockerfile baixa a foto conferindo o hash).
+OBJETO_DO_QUADRO = "car"
 
 
 def ativo(ambiente: Mapping[str, str] | None = None) -> bool:
@@ -108,3 +110,25 @@ def testar_ocr(
         return " ".join(linha.texto for linha in leitor.ler(amostra))
 
     return _conferir("OCR", dispositivo, exigir_gpu, TEXTO_DO_QUADRO, ler)
+
+
+def testar_objetos(
+    dispositivo: Dispositivo | None = None,
+    exigir_gpu: bool = True,
+    ambiente: Mapping[str, str] | None = None,
+) -> int:
+    from PIL import Image
+
+    from api.florence import DetectorFlorence
+
+    ambiente = os.environ if ambiente is None else ambiente
+    dispositivo = dispositivo or ler_dispositivo(ambiente)
+    amostra = Path(ambiente.get("AMOSTRAS", PASTA_DAS_AMOSTRAS)) / "objetos.jpg"
+
+    def ler() -> str:
+        detector = DetectorFlorence.da_pasta(ambiente["PASTA_DO_MODELO"], dispositivo)
+        with Image.open(amostra) as foto:
+            objetos, _ = detector.detectar(foto.convert("RGB"))
+        return " ".join(o.rotulo for o in objetos)
+
+    return _conferir("objetos", dispositivo, exigir_gpu, OBJETO_DO_QUADRO, ler)

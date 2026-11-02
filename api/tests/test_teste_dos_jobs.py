@@ -9,6 +9,8 @@ import pytest
 
 from api import ocr_job, teste_dos_jobs, transcricao_job
 from api.dispositivo import DispositivoIndisponivel
+from api.florence import DetectorFlorence, ObjetoDetectado
+from api.leitura_da_tela import Caixa
 from api.paddle import LeitorPaddle
 from api.teste_dos_jobs import (
     SAIDA_GPU_NAO_FUNCIONOU,
@@ -16,6 +18,9 @@ from api.teste_dos_jobs import (
     SAIDA_RESULTADO_ERRADO,
     ativo,
     normalizar,
+)
+from api.teste_dos_jobs import (
+    testar_objetos as _objetos,
 )
 from api.teste_dos_jobs import (
     testar_ocr as _ocr,
@@ -181,3 +186,67 @@ def test_a_amostra_falada_na_construcao_e_a_frase_que_o_teste_espera() -> None:
     assert falado
     assert normalizar(teste_dos_jobs.FRASE_FALADA) in normalizar(falado.group(1))
     assert f"putText(q, '{teste_dos_jobs.TEXTO_DO_QUADRO}'" in dockerfile
+
+
+def _detector(
+    monkeypatch: pytest.MonkeyPatch, rotulos: list[str]
+) -> list[tuple[str, Any]]:
+    criados: list[tuple[str, Any]] = []
+
+    class Detector:
+        def detectar(self, imagem: Any) -> tuple[list[ObjetoDetectado], list[Any]]:
+            assert imagem.size == (64, 32)
+            caixa = Caixa(x=0, y=0, largura=1, altura=1)
+            return [ObjetoDetectado(rotulo=r, caixa=caixa) for r in rotulos], []
+
+    def da_pasta(pasta: str, dispositivo: Any = None) -> Detector:
+        criados.append((pasta, dispositivo))
+        return Detector()
+
+    monkeypatch.setattr(DetectorFlorence, "da_pasta", da_pasta)
+    return criados
+
+
+def _amostra(pasta: Path) -> dict[str, str]:
+    from PIL import Image
+
+    Image.new("RGB", (64, 32)).save(pasta / "objetos.jpg")
+    return {**AMBIENTE, "AMOSTRAS": str(pasta)}
+
+
+def test_objetos_acha_o_carro_da_amostra(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    criados = _detector(monkeypatch, ["door handle", "car"])
+
+    assert _objetos("gpu", ambiente=_amostra(tmp_path)) == SAIDA_OK
+    assert criados == [("/modelo", "gpu")]
+
+
+def test_objetos_sem_o_carro_e_resultado_errado(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _detector(monkeypatch, ["dog"])
+
+    assert _objetos("gpu", ambiente=_amostra(tmp_path)) == SAIDA_RESULTADO_ERRADO
+
+
+def test_objetos_sem_a_amostra_diz_que_o_modelo_nao_rodou(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _detector(monkeypatch, ["car"])
+
+    assert _objetos("gpu", ambiente={**AMBIENTE, "AMOSTRAS": str(tmp_path)}) == (
+        SAIDA_GPU_NAO_FUNCIONOU
+    )
+
+
+def test_objetos_na_construcao_roda_em_cpu(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    criados = _detector(monkeypatch, ["car"])
+    ambiente = _amostra(tmp_path)
+
+    assert _objetos("cpu", ambiente=ambiente) == SAIDA_GPU_NAO_FUNCIONOU
+    assert _objetos("cpu", exigir_gpu=False, ambiente=ambiente) == SAIDA_OK
+    assert criados == [("/modelo", "cpu")]

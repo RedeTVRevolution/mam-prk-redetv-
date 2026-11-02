@@ -39,6 +39,7 @@ from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
+from api.florence import ObjetosDaDecupagem
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     CursorInvalido,
@@ -93,6 +94,10 @@ def objeto_da_janela(job_id: str, indice: int) -> str:
 
 def objeto_da_leitura_da_tela(job_id: str) -> str:
     return f"{job_id}/leitura_da_tela.json"
+
+
+def objeto_do_resultado_dos_objetos(job_id: str) -> str:
+    return f"{job_id}/objetos/florence.json"
 
 
 def objeto_da_decupagem(job_id: str) -> str:
@@ -720,6 +725,37 @@ class LeiturasStorage:
             return LeituraDaTela.model_validate_json(blob.download_as_bytes())
         except NotFound:
             return None
+
+
+class ObjetosStorage:
+    """O Job de objetos só toca o bucket das decupagens: lê a Decupagem e os quadros, grava o resultado."""
+
+    def __init__(self, cliente: ClienteStorage, bucket_de_decupagens: str) -> None:
+        self._cliente = cliente
+        self._decupagens = bucket_de_decupagens
+
+    def ler_decupagem(self, job_id: str) -> Decupagem | None:
+        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
+        try:
+            return Decupagem.model_validate_json(blob.download_as_bytes())
+        except NotFound:
+            return None
+
+    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+        return bytes(
+            self._cliente.bucket(self._decupagens)
+            .blob(objeto_do_quadro(job_id, caminho))
+            .download_as_bytes()
+        )
+
+    def gravar_resultado(
+        self, job_id: str, resultado: ObjetosDaDecupagem, destino: str | None
+    ) -> None:
+        self._cliente.bucket(self._decupagens).blob(
+            destino or objeto_do_resultado_dos_objetos(job_id)
+        ).upload_from_string(
+            resultado.model_dump_json(), content_type="application/json"
+        )
 
 
 class QuadrosStorage(DecupagensStorage):
