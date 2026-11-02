@@ -1,17 +1,24 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao taxa-de-correcao
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao taxa-de-correcao
 
 instalar:
 	uv sync --locked
 	npm ci --prefix web
 	git config core.hooksPath .githooks
 
-verificar:
+verificar: verificar-api verificar-web
+
+# As duas metades rodam em jobs paralelos no CI. Os testes vão em vários processos
+# (pytest-xdist): os que usam os emuladores criam coleção e bucket com UUID, então não
+# disputam dados.
+verificar-api:
 	scripts/checar-nomes-da-nuvem.sh
 	scripts/checar-ffmpeg.sh
 	uv run --locked ruff check
 	uv run --locked ruff format --check
 	uv run --locked mypy api
-	uv run --locked pytest
+	uv run --locked pytest -n auto
+
+verificar-web:
 	npm run --prefix web lint
 	npm run --prefix web typecheck
 	npm run --prefix web test

@@ -1,0 +1,17 @@
+name: Emuladores do Firestore e do Storage
+description: Sobe os emuladores dos testes de api/tests/test_nuvem.py e do Job de validação.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        # Sem -public-host, o fake-gcs só atende URL assinada com Host storage.googleapis.com.
+        docker run -d --name fake-gcs -p 4443:4443 fsouza/fake-gcs-server:1.52.2 \
+          -scheme http -port 4443 -public-host localhost:4443
+        docker run -d --name firestore -p 8686:8686 google/cloud-sdk:591.0.0-emulators \
+          gcloud emulators firestore start --host-port=0.0.0.0:8686
+        for i in $(seq 60); do
+          curl -sf localhost:4443/storage/v1/b && curl -sf localhost:8686 && exit 0
+          sleep 2
+        done
+        echo "Emuladores não subiram em 2 minutos" && docker logs fake-gcs; docker logs firestore; exit 1
