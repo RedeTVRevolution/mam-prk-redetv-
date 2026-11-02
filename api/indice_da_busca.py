@@ -93,6 +93,10 @@ class IndiceDaBusca(Protocol):
         """Quantos registros há no índice, de todos os vídeos."""
         ...
 
+    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
+        """O vetor do quadro de cada plano do vídeo que o tem, pelo número do plano (#271)."""
+        ...
+
 
 def _frase(*partes: str | None) -> str | None:
     texto = " ".join(p for p in partes if p)
@@ -335,6 +339,13 @@ class IndiceEmMemoria:
 
     def total(self) -> int:
         return sum(len(r) for r in self._por_job.values())
+
+    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
+        return {
+            int(r.id.rsplit(":", 1)[1]): r.vetor_do_quadro
+            for r in self._por_job.get(job_id, [])
+            if r.tipo == "plano" and r.vetor_do_quadro
+        }
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
         palavras = normalizar(consulta.texto).split() if consulta.texto else []

@@ -255,6 +255,7 @@ function Item({
   edicao,
   marca,
   acoes,
+  aoBuscarParecidos,
 }: {
   item: ItemDoPainel
   atual: boolean
@@ -273,6 +274,8 @@ function Item({
   /** O formulário (ou a confirmação) que substitui a linha enquanto o item é corrigido. */
   edicao?: ReactNode
   marca?: Marca
+  /** Só no plano com vetor do quadro indexado (#271): abre a busca dos planos parecidos. */
+  aoBuscarParecidos?: () => void
   /** Só no modo de catalogação: o lápis, a lixeira e o duplo clique, com o mouse no lugar do F2 e do Del. */
   acoes?: AcoesDaLinha
 }) {
@@ -375,7 +378,7 @@ function Item({
           {item.inventario && !compacto && (
             <InventarioDoPlano inventario={item.inventario} plano={item.titulo} aoApontar={aoApontarObjeto ?? (() => {})} />
           )}
-          {(item.selos.length > 0 || selecionado || marca) && (
+          {(item.selos.length > 0 || selecionado || marca || aoBuscarParecidos) && (
             <Group gap="xs" mt={4} ml={16}>
               {item.selos.map((s) => (
                 <SeloDaProva
@@ -395,6 +398,11 @@ function Item({
                     {marca.pendente ? 'aguardando o Curador' : ROTULO_NA_BUSCA[marca.na_busca]}
                   </Badge>
                 </Tooltip>
+              )}
+              {aoBuscarParecidos && (
+                <Button size="compact-xs" variant="default" onClick={aoBuscarParecidos}>
+                  Planos parecidos com este
+                </Button>
               )}
               {selecionado && (
                 <Button size="compact-xs" variant="default" onClick={() => aoReproduzir(item)}>
@@ -505,6 +513,7 @@ export function Painel({
   marcas,
   aoAcrescentar,
   acoes,
+  planosParecidos,
 }: {
   decupagem: Decupagem
   duracaoMs: number
@@ -533,6 +542,8 @@ export function Painel({
   marcas?: Record<string, Marca>
   /** Só no modo de catalogação: acrescentar uma aparição na linha da pessoa. */
   aoAcrescentar?: (pessoa: string) => void
+  /** Os planos com vetor do quadro indexado e a busca dos parecidos (#271); sem vetor, sem botão. */
+  planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
   /** Só no modo de catalogação: corrigir e remover pelo mouse. */
   acoes?: AcoesDaLinha
 }) {
@@ -698,6 +709,12 @@ export function Painel({
     if (primeira) aoSelecionar(primeira.chave)
   }
 
+  const parecidosDo = (i: ItemDoPainel) => {
+    const n = i.tipo === 'plano' ? /^plano-(\d+)$/.exec(i.chave)?.[1] : undefined
+    if (n === undefined || !planosParecidos?.comVetor.has(Number(n))) return undefined
+    return () => planosParecidos.abrir(Number(n))
+  }
+
   const lista = (itensDaLista: ItemDoPainel[], compacto?: boolean) =>
     itensDaLista.map((i) => (
       <Item
@@ -719,6 +736,7 @@ export function Painel({
         edicao={edicao?.chave === i.chave ? edicao.conteudo : undefined}
         marca={marcas?.[i.chave]}
         acoes={acoes}
+        aoBuscarParecidos={parecidosDo(i)}
       />
     ))
 

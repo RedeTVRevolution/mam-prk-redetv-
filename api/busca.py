@@ -75,6 +75,10 @@ class BuscaPorImagemIndisponivel(Exception):
     """Sem índice do quadro-chave ou sem o embedding: a imagem não vira vetor."""
 
 
+class PlanoSemVetor(Exception):
+    """O plano não existe, o vídeo não é visível, ou o quadro do plano não tem vetor."""
+
+
 class Ranking(Protocol):
     """Porta da API de Ranking: reordena os registros pela consulta de texto livre."""
 
@@ -274,14 +278,21 @@ class Busca:
         ajustes: Ajustes | None = None,
         visual: bool = False,
         imagem: bytes | None = None,
+        parecidos: tuple[str, list[float]] | None = None,
     ) -> ResultadoDaBusca:
         """`imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
         só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
-        `BuscaPorImagemIndisponivel`."""
+        `BuscaPorImagemIndisponivel`. `parecidos` (#271) é o registro de um plano e o
+        vetor do quadro dele, já no índice: busca do mesmo modo, sem embedding, e o
+        próprio registro fica fora."""
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
         vetor_da_imagem = None
-        if imagem is not None:
+        proprio = parecidos[0] if parecidos else None
+        if parecidos is not None:
+            vetor_da_imagem = parecidos[1]
+            entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
+        elif imagem is not None:
             vetor_da_imagem = self._vetor_da_imagem(imagem)
             entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
         else:
@@ -314,7 +325,9 @@ class Busca:
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
                 limite=TETO_DE_REGISTROS,
             )
-            return [r for r in self._indice.buscar(c) if job(r.job_id)]
+            return [
+                r for r in self._indice.buscar(c) if r.id != proprio and job(r.job_id)
+            ]
 
         nomes: dict[str, str] = {}
 
@@ -399,6 +412,38 @@ class Busca:
             plano_b=entendida.plano_b,
             facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
+        )
+
+    def planos_com_vetor(
+        self, job_id: str, sistema: str | None = None
+    ) -> dict[int, list[float]]:
+        """Os vetores do quadro dos planos de um vídeo concluído (e do sistema do chamador)."""
+        achado = self._repositorio.obter(job_id)
+        if achado is None or achado.estado != "concluido":
+            return {}
+        if sistema is not None and achado.sistema != sistema:
+            return {}
+        return self._indice.vetores_dos_planos(job_id)
+
+    def buscar_parecidos(
+        self,
+        job_id: str,
+        plano: int,
+        *,
+        limite: int = VIDEOS_POR_PADRAO,
+        filtros_do_servidor: Filtros | None = None,
+        sistema: str | None = None,
+    ) -> ResultadoDaBusca:
+        """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271)."""
+        vetor = self.planos_com_vetor(job_id, sistema).get(plano)
+        if vetor is None:
+            raise PlanoSemVetor
+        return self.buscar(
+            "",
+            parecidos=(f"{job_id}:plano:{plano}", vetor),
+            limite=limite,
+            filtros_do_servidor=filtros_do_servidor,
+            sistema=sistema,
         )
 
     def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:

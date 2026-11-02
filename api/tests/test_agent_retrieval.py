@@ -271,6 +271,33 @@ def test_apagar_consulta_os_nomes_pagina_a_pagina_e_apaga_em_lote() -> None:
     assert corpo3 == {"requests": [{"name": n} for n in nomes]}
 
 
+def test_vetores_dos_planos_le_o_vetor_do_quadro_pagina_a_pagina() -> None:
+    def plano(n: int, vetor: list[float] | None) -> dict[str, Any]:
+        objeto: dict[str, Any] = {"data": {"id": f"j:plano:{n}"}}
+        if vetor:
+            objeto["vectors"] = {"quadro_vetor": {"dense": {"values": vetor}}}
+        return objeto
+
+    respostas = iter(
+        [
+            {
+                "dataObjects": [plano(0, [1.0, 0.0]), plano(1, None)],
+                "nextPageToken": "p",
+            },
+            {"dataObjects": [plano(2, [0.0, 1.0])]},
+        ]
+    )
+    transporte = TransporteFalso()
+    vetores = AgentRetrieval(
+        CONFIG, _Sequencia(transporte, respostas)
+    ).vetores_dos_planos("j")
+    assert vetores == {0: [1.0, 0.0], 2: [0.0, 1.0]}
+    [(_, _, corpo1), (_, _, corpo2)] = transporte.chamadas
+    assert corpo1 is not None and corpo2 is not None
+    assert corpo1["outputFields"]["vectorFields"] == ["quadro_vetor"]
+    assert corpo2["pageToken"] == "p"
+
+
 def test_total_soma_a_contagem_do_aggregate() -> None:
     transporte = TransporteFalso({"aggregateResults": [{"count": 16}]})
     assert AgentRetrieval(CONFIG, transporte).total() == 16

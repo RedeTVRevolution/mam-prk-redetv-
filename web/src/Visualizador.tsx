@@ -50,7 +50,7 @@ import { type Aba, abaDaChave, type ItemDoPainel, itensDoPainel, nomeNormalizado
 import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relogio } from './linhaDoTempo.ts'
 import { ALTURA_DA_BARRA, CORES } from './tema.ts'
 import { timecodeNoInstante } from './timecode.ts'
-import { enderecoDoVideo, navegar } from './rotas.ts'
+import { enderecoDosParecidos, enderecoDoVideo, navegar } from './rotas.ts'
 import { consultaNova } from './busca.ts'
 import {
   guardado,
@@ -297,6 +297,25 @@ export default function Visualizador({
     }
   }, [api, job.id, podeEditar, historico, intervaloDaIndexacaoMs])
 
+  // Os planos com vetor do quadro indexado (#271): só neles "Planos parecidos" aparece. Vídeo
+  // antigo, índice desligado ou falha da consulta: nenhum botão.
+  const [planosComVetor, setPlanosComVetor] = useState<ReadonlySet<number>>(new Set())
+  const estadoDaIndexacao = job.indexacao?.estado
+  useEffect(() => {
+    let ativo = true
+    // oxlint-disable-next-line react/set-state-in-effect
+    setPlanosComVetor(new Set())
+    if (estadoDaIndexacao !== 'indexado') return
+    api.planosComVetor(job.id).then(
+      (planos) => {
+        if (ativo) setPlanosComVetor(new Set(planos))
+      },
+      () => {},
+    )
+    return () => {
+      ativo = false
+    }
+  }, [api, job.id, estadoDaIndexacao])
   // O resultado da busca de onde a pessoa veio: o da sessão, ou a busca refeita.
   const [resultadoDaBusca, setResultadoDaBusca] = useState<VideoGuardado[] | null>(null)
   // O código da falha da busca refeita: o N avisa em vez de esperar para sempre.
@@ -1487,6 +1506,7 @@ export default function Visualizador({
               aoReproduzir={reproduzirTrecho}
               urlDoQuadro={urlDoQuadro}
               aoApontarObjeto={apontarObjeto}
+              planosParecidos={{ comVetor: planosComVetor, abrir: (plano) => navegar(enderecoDosParecidos(job.id, plano)) }}
               atalhosAtivos={!gavetaAberta}
               fotosDoNome={fotosDoNome}
             />

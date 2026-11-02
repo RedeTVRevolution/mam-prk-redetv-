@@ -23,6 +23,7 @@ from api.busca import (
     BuscaPorImagemIndisponivel,
     EvidenciaDaBusca,
     Ordem,
+    PlanoSemVetor,
     ResultadoDaBusca,
     filtros_do_servidor,
 )
@@ -244,6 +245,53 @@ def criar_rotas_da_busca(
         except BuscaPorImagemIndisponivel:
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
+            ) from None
+
+    def quem_e(chamador: Chamador) -> tuple[str | None, str]:
+        if isinstance(chamador, Sistema):
+            return chamador.sistema, f"sistema:{chamador.sistema}"
+        return None, chamador.uid
+
+    @rotas.get("/busca/parecidos/planos")
+    def planos_com_vetor(
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        job: Annotated[str, Query(min_length=1, max_length=100)],
+    ) -> dict[str, list[int]]:
+        """Os planos do vídeo que têm vetor do quadro: só neles "parecidos" aparece."""
+        sistema, _ = quem_e(chamador)
+        return {"planos": sorted(busca.planos_com_vetor(job, sistema))}
+
+    @rotas.get("/busca/parecidos")
+    def buscar_parecidos(
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        job: Annotated[str, Query(min_length=1, max_length=100)],
+        plano: Annotated[int, Query(ge=0)],
+        limite_de_videos: Annotated[
+            int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
+        ] = VIDEOS_POR_PADRAO,
+    ) -> ResultadoDaBusca:
+        sistema, quem = quem_e(chamador)
+        if not limite.consumir(quem):
+            raise HTTPException(429, "Consultas demais; tente em um minuto")
+        futuro = _executor.submit(
+            busca.buscar_parecidos,
+            job,
+            plano,
+            limite=limite_de_videos,
+            filtros_do_servidor=filtros_do_servidor(),
+            sistema=sistema,
+        )
+        try:
+            return futuro.result(timeout=tempo_maximo_s)
+        except TempoEsgotado:
+            futuro.cancel()
+            log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
+            raise HTTPException(504, "A busca demorou demais") from None
+        except PlanoSemVetor:
+            raise HTTPException(
+                404,
+                "Este plano não tem vetor do quadro (vídeo indexado antes da busca "
+                "por imagem, ou índice do quadro desligado)",
             ) from None
 
     return rotas

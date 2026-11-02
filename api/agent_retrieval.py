@@ -477,6 +477,34 @@ class AgentRetrieval:
             (r.descricao or r.texto or "").split()
         ) >= self._config.palavras_minimas
 
+    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
+        """Os planos do vídeo com o vetor do quadro, lidos página a página (#271)."""
+        pedido: dict[str, Any] = {
+            "filter": {
+                "$and": [{"job_id": {"$eq": job_id}}, {"tipo": {"$eq": "plano"}}]
+            },
+            "outputFields": {
+                "dataFields": ["id"],
+                "vectorFields": [CAMPO_DO_VETOR_DO_QUADRO],
+            },
+            "pageSize": OBJETOS_POR_PAGINA,
+        }
+        vetores: dict[int, list[float]] = {}
+        while True:
+            pagina = self._chamar("dataObjects:query", pedido)
+            for o in pagina.get("dataObjects", []):
+                valores = (
+                    o.get("vectors", {})
+                    .get(CAMPO_DO_VETOR_DO_QUADRO, {})
+                    .get("dense", {})
+                ).get("values")
+                if valores:
+                    n = int(o["data"]["id"].rsplit(":", 1)[1])
+                    vetores[n] = [float(v) for v in valores]
+            if not pagina.get("nextPageToken"):
+                return vetores
+            pedido = pedido | {"pageToken": pagina["nextPageToken"]}
+
     def total(self) -> int:
         resposta = self._chamar("dataObjects:aggregate", {"aggregate": "COUNT"})
         return sum(int(r.get("count", 0)) for r in resposta.get("aggregateResults", []))

@@ -16,6 +16,7 @@ import type { Autenticador } from './auth/autenticador.ts'
 import Barra from './Barra.tsx'
 import Acervo from './Acervo.tsx'
 import Busca from './Busca.tsx'
+import { PlanosParecidos } from './PlanosParecidos.tsx'
 import Login from './Login.tsx'
 import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
@@ -169,6 +170,10 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'busca' ? (
         <AppShell.Main bg="dark.7">
           <Busca api={api} consulta={rota.consulta} />
+        </AppShell.Main>
+      ) : rota.tipo === 'parecidos' ? (
+        <AppShell.Main bg="dark.7">
+          <PlanosParecidos api={api} job={rota.job} plano={rota.plano} />
         </AppShell.Main>
       ) : rota.tipo === 'tempo_de_tela' ? (
         <AppShell.Main bg="dark.7">

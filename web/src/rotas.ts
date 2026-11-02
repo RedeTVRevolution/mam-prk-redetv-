@@ -11,6 +11,7 @@ export type Rota =
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'busca'; consulta: ConsultaDaBusca }
   | { tipo: 'video'; id: string; t: number | null; busca: string | null }
+  | { tipo: 'parecidos'; job: string; plano: number }
   | { tipo: 'tempo_de_tela'; filtros: FiltrosDoRelatorio }
   | { tipo: 'marcas'; filtros: FiltrosDeMarcas }
   | { tipo: 'amostra' }
@@ -35,6 +36,11 @@ export function enderecoDaBusca(consulta: ConsultaDaBusca): string {
   return `/busca${consultaParaEndereco(consulta)}`
 }
 
+/** O endereço dos planos parecidos com um plano (o número dele no vídeo), #271. */
+export function enderecoDosParecidos(job: string, plano: number): string {
+  return `/busca/parecidos?${new URLSearchParams({ job, plano: String(plano) })}`
+}
+
 /** O endereço do vídeo, com o instante em segundos (até o milissegundo) e a busca de origem, se houver. */
 export function enderecoDoVideo(id: string, t?: number | null, busca?: string | null): string {
   const base = `/video/${encodeURIComponent(id)}`
@@ -55,6 +61,12 @@ export function lerRota(caminho: string, busca = ''): Rota {
   const partes = caminho.split('/').filter(Boolean)
   if (partes.length === 0) return { tipo: 'raiz' }
   if (partes.length === 1 && partes[0] === 'acervo') return { tipo: 'acervo', filtros: filtrosDaBusca(busca) }
+  if (partes.length === 2 && partes[0] === 'busca' && partes[1] === 'parecidos') {
+    const p = new URLSearchParams(busca)
+    const job = p.get('job')
+    const plano = p.get('plano')
+    return job && plano !== null && /^\d+$/.test(plano) ? { tipo: 'parecidos', job, plano: Number(plano) } : { tipo: 'nao_encontrada' }
+  }
   if (partes.length === 1 && partes[0] === 'busca') return { tipo: 'busca', consulta: consultaDaBusca(busca) }
   if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'tempo-de-tela') {
     return { tipo: 'tempo_de_tela', filtros: filtrosDoRelatorio(busca) }
