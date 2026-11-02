@@ -6,7 +6,7 @@ que é permitido) e registra na auditoria o estado antigo, o novo, o motivo e qu
 O Job muda antes do registro; se o registro falha, o Job volta ao que era.
 
 Comando: `make corrigir-estado JOB=... ESTADO=... MOTIVO=...`. Ambiente:
-`GCP_PROJECT_ID` e `BUCKET_DECUPAGENS`.
+`GCP_PROJECT_ID`, `BUCKET_ACEITOS` e `BUCKET_DECUPAGENS`.
 """
 
 import getpass
@@ -15,18 +15,22 @@ import sys
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime
-from typing import Annotated, Literal, Protocol, get_args
+from typing import Annotated, Protocol, cast, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
-from api.ciclo_de_vida import EstadoNaoCorrigivel, corrigir_estado
+from api.ciclo_de_vida import (
+    DestinoDaCorrecao,
+    EstadoNaoCorrigivel,
+    corrigir_estado,
+    desfazer_correcao,
+)
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.decupagem import Decupagem
 from api.jobs import (
-    Estado,
     Job,
     JobPublico,
     RepositorioDeJobs,
@@ -35,7 +39,6 @@ from api.jobs import (
     agora_utc,
 )
 
-EstadoDeDestino = Literal["concluido", "falhou"]
 SISTEMA = "corrigir-estado"
 MOTIVO_MAXIMO = 500
 
@@ -58,7 +61,7 @@ def corrigir_estado_com_rastro(
     auditoria: RepositorioDeAuditoria,
     leitor: LeitorDeDecupagem,
     job_id: str,
-    destino: Estado,
+    destino: DestinoDaCorrecao,
     motivo: str,
     agora: datetime,
     *,
@@ -71,7 +74,8 @@ def corrigir_estado_com_rastro(
         job_id,
         destino,
         agora,
-        decupagem_completa=lambda: tem_decupagem_completa(leitor, job_id),
+        decupagem_completa=destino == "concluido"
+        and tem_decupagem_completa(leitor, job_id),
     )
     if trocado is None:
         return None
@@ -91,17 +95,7 @@ def corrigir_estado_com_rastro(
             )
         )
     except Exception:
-        # Sem rastro, a correção não vale.
-        voltam = ("estado", "codigo_falha", "indexacao")
-        repositorio.trocar(
-            job_id,
-            lambda job: (
-                {c: getattr(antes, c) for c in voltam}
-                | {"atualizado_em": antes.atualizado_em}
-                if job.estado == depois.estado
-                else None
-            ),
-        )
+        desfazer_correcao(repositorio, antes, depois, agora)
         raise
     return depois
 
@@ -109,7 +103,7 @@ def corrigir_estado_com_rastro(
 class PedidoDeCorrecao(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    estado: EstadoDeDestino
+    estado: DestinoDaCorrecao
     motivo: Annotated[
         str,
         StringConstraints(
@@ -118,7 +112,7 @@ class PedidoDeCorrecao(BaseModel):
     ]
 
 
-def _exige_administrador(request: Request, chamador: ChamadorAutenticado) -> Usuario:
+def _exige_corrigir_estado(request: Request, chamador: ChamadorAutenticado) -> Usuario:
     """Dependência: só pessoa com `job.corrigir_estado` (o Administrador)."""
     if not isinstance(chamador, Usuario):
         raise HTTPException(403, "Chave de sistema não corrige o estado")
@@ -138,7 +132,7 @@ def criar_rotas_da_correcao_de_estado(
     def corrigir(
         job_id: str,
         pedido: PedidoDeCorrecao,
-        pessoa: Annotated[Usuario, Depends(_exige_administrador)],
+        pessoa: Annotated[Usuario, Depends(_exige_corrigir_estado)],
     ) -> JobPublico:
         try:
             job = corrigir_estado_com_rastro(
@@ -175,7 +169,7 @@ def main(
         escrever("uso: corrigir-estado JOB ESTADO MOTIVO")
         return 2
     job_id, estado, motivo = (a.strip() for a in argumentos)
-    if not job_id or not motivo or estado not in get_args(EstadoDeDestino):
+    if not job_id or not motivo or estado not in get_args(DestinoDaCorrecao):
         escrever("erro: informe JOB, ESTADO (concluido ou falhou) e MOTIVO")
         return 2
     try:
@@ -184,7 +178,7 @@ def main(
             auditoria,
             leitor,
             job_id,
-            estado,  # type: ignore[arg-type]
+            cast(DestinoDaCorrecao, estado),
             motivo,
             relogio(),
             autor={"sistema": f"{SISTEMA}:{quem or getpass.getuser()}"},
@@ -196,6 +190,8 @@ def main(
         escrever(f"erro: Job {job_id} não encontrado")
         return 1
     escrever(f"{job_id}: agora {job.estado}")
+    if job.estado == "concluido":
+        escrever("para entrar na busca, reprocesse a partir da indexação")
     return 0
 
 

@@ -5,14 +5,18 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
+from api.auditoria import (
+    FiltroDeAuditoria,
+    RegistroDeAuditoria,
+    RepositorioDeAuditoriaEmMemoria,
+)
 from api.auth import Usuario
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
     emitir_chave,
 )
-from api.ciclo_de_vida import EstadoNaoCorrigivel, corrigir_estado
+from api.ciclo_de_vida import reprocessar
 from api.correcao_de_estado import main as comando
 from api.jobs import Etapa, Job, RepositorioEmMemoria
 from api.main import criar_app
@@ -137,7 +141,8 @@ def test_devolve_a_concluido_com_decupagem_completa() -> None:
     assert resposta.status_code == 200
     job = mundo.job()
     assert job.estado == "concluido" and job.codigo_falha is None
-    assert job.indexacao is not None and job.indexacao.estado == "pendente"
+    # Nada dispara a indexação: ela fica como estava, sem um "pendente" que não anda.
+    assert job.indexacao is None
     [registro] = mundo.auditoria.consultar(FiltroDeAuditoria()).registros
     assert registro.detalhes == {"de": "falhou", "para": "concluido"}
 
@@ -228,14 +233,61 @@ def test_sem_token_e_401() -> None:
     assert resposta.status_code == 401
 
 
-def test_corrigir_estado_do_ciclo_de_vida_recusa_o_estado_que_nao_existe_na_tabela() -> (
-    None
-):
-    jobs = RepositorioEmMemoria()
-    jobs.salvar(_job("validando"))
+def test_devolve_a_concluido_um_job_que_ficou_analisando() -> None:
+    mundo = Mundo(_job("analisando"), decupagem=True)
 
-    with pytest.raises(EstadoNaoCorrigivel):
-        corrigir_estado(jobs, "j1", "cancelado", AGORA, decupagem_completa=lambda: True)
+    assert mundo.corrigir("concluido").status_code == 200
+    assert mundo.job().estado == "concluido"
+
+
+def test_falha_fecha_as_etapas_abertas_e_o_job_pode_ser_reprocessado() -> None:
+    mundo = Mundo(
+        _job(
+            "analisando",
+            etapa_atual="transcricao",
+            etapas={
+                "validacao": Etapa(inicio=BASE, fim=BASE, resultado="concluida"),
+                "transcricao": Etapa(inicio=BASE),
+                "leitura_da_tela": Etapa(inicio=BASE),
+            },
+        )
+    )
+
+    assert mundo.corrigir("falhou").status_code == 200
+
+    etapas = mundo.job().etapas
+    assert etapas["validacao"].resultado == "concluida"
+    assert etapas["validacao"].fim == BASE
+    for nome in ("transcricao", "leitura_da_tela"):
+        assert (etapas[nome].fim, etapas[nome].resultado) == (AGORA, "falhou")
+    assert mundo.job().codigo_falha == "transcricao_falhou"
+    trocado = reprocessar(mundo.jobs, "j1", AGORA)
+    assert trocado is not None and trocado[1].etapa_atual == "transcricao"
+
+
+class AuditoriaQueFalha(RepositorioDeAuditoriaEmMemoria):
+    def acrescentar(self, registro: RegistroDeAuditoria) -> None:
+        raise RuntimeError("Firestore fora")
+
+
+def test_sem_auditoria_o_job_volta_ao_que_era() -> None:
+    mundo = Mundo(_job("analisando", etapas={"analise": Etapa(inicio=BASE)}))
+    mundo.auditoria = AuditoriaQueFalha()
+
+    with pytest.raises(RuntimeError):
+        comando(
+            ["j1", "falhou", "motivo"],
+            mundo.jobs,
+            mundo.auditoria,
+            mundo.armazenamento,
+            relogio=lambda: AGORA,
+            quem="ana",
+            escrever=lambda _: None,
+        )
+
+    job = mundo.job()
+    assert job.estado == "analisando"
+    assert job.etapas["analise"].resultado is None
 
 
 # O comando `make corrigir-estado`, pela mesma função da rota.
