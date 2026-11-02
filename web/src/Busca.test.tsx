@@ -13,7 +13,7 @@ const momento = (inicio_ms: number, fim_ms: number, motivo: string, destaques: o
   fim_ms,
   motivo,
   destaques,
-  quadro_url: null,
+  quadro_url: null as string | null,
 })
 
 function video(id: string, momentos: ReturnType<typeof momento>[]) {
@@ -424,4 +424,65 @@ test('clicar nas facetas de mês, pessoa, marca e tipo manda o filtro à API; cl
   await usuario.click(await screen.findByRole('button', { name: /Nike/ }))
 
   await waitFor(() => expect(buscas[buscas.length - 1].get('marca')).toBeNull())
+})
+
+const resultadoVisual = (visual: boolean) =>
+  resultado({
+    entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null, visual },
+    videos: [
+      video('v1', [
+        { ...momento(724_000, 731_000, 'Plano: rua molhada à noite'), quadro_url: 'https://q.exemplo/a.jpg' },
+        { ...momento(2_462_000, 2_490_000, 'Plano: avenida com trânsito'), quadro_url: 'https://q.exemplo/b.jpg' },
+      ]),
+      video('v2', [{ ...momento(60_000, 65_000, 'Plano: cruzamento'), quadro_url: 'https://q.exemplo/c.jpg' }]),
+    ],
+  })
+
+test('o modo visual vem da URL e vai à API como visual=true', async () => {
+  resposta = () => HttpResponse.json(resultadoVisual(true))
+  await abrir('/busca?q=pista+molhada&modo=visual')
+
+  await screen.findByRole('list', { name: 'Planos' })
+
+  expect(buscas[0].get('visual')).toBe('true')
+})
+
+test('o botão "Busca visual" liga o modo pela URL; sem ele a API não recebe visual', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=pista+molhada')
+  await screen.findByText('3 momentos em 2 vídeos')
+  expect(buscas[0].has('visual')).toBe(false)
+  const botao = screen.getByRole('button', { name: 'Busca visual' })
+  expect(botao.getAttribute('aria-pressed')).toBe('false')
+  resposta = () => HttpResponse.json(resultadoVisual(true))
+
+  await usuario.click(botao)
+
+  expect(location.search).toBe('?q=pista+molhada&modo=visual')
+  await waitFor(() => expect(buscas.at(-1)?.get('visual')).toBe('true'))
+  expect(screen.getByRole('button', { name: 'Busca visual' }).getAttribute('aria-pressed')).toBe('true')
+})
+
+test('no modo visual os planos vêm numa grade de miniaturas que abre o vídeo no tempo', async () => {
+  resposta = () => HttpResponse.json(resultadoVisual(true))
+  await abrir('/busca?q=pista+molhada&modo=visual')
+
+  const grade = await screen.findByRole('list', { name: 'Planos' })
+
+  const itens = within(grade).getAllByRole('listitem')
+  expect(itens).toHaveLength(3)
+  const primeiro = within(itens[0]).getByRole('link', { name: /v1\.mp4.*12:04/ })
+  expect(primeiro.getAttribute('href')).toBe('/video/v1?t=724&busca=pista+molhada')
+  expect(itens[0].querySelector('img')?.getAttribute('src')).toBe('https://q.exemplo/a.jpg')
+  expect(within(itens[0]).getByText('Plano: rua molhada à noite')).toBeTruthy()
+  expect(screen.queryByRole('region', { name: 'v1.mp4' })).toBeNull()
+})
+
+test('modo visual sem o vetor do quadro (índice desligado) avisa e mostra a busca comum', async () => {
+  resposta = () => HttpResponse.json(resultadoVisual(false))
+  await abrir('/busca?q=pista+molhada&modo=visual')
+
+  expect(await screen.findByText(/busca visual não está disponível/i)).toBeTruthy()
+  expect(screen.queryByRole('list', { name: 'Planos' })).toBeNull()
+  expect(await screen.findByRole('region', { name: 'v1.mp4' })).toBeTruthy()
 })

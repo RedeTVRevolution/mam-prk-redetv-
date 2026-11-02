@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
-from api.busca import Ajustes, Busca, Ranking, RankingEmOrdem
+from api.busca import Ajustes, Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
 from api.catalogo import CatalogoEmMemoria
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
 from api.gemini import ErroHttp
@@ -107,8 +107,13 @@ class Mundo:
         self.armazenamento = ArmazenamentoFalso()
         self.transporte = TransporteFalso(*respostas)
 
-    def busca(self, ranking: Ranking | None = None) -> Busca:
+    def busca(
+        self,
+        ranking: Ranking | None = None,
+        embedding: EmbeddingDaConsulta | None = None,
+    ) -> Busca:
         return Busca(
+            embedding=embedding,
             transporte=self.transporte,
             catalogo=self.catalogo,
             armor=ModelArmorEmMemoria(),
@@ -991,3 +996,94 @@ def test_a_rota_devolve_facetas_com_e_sem_filtro() -> None:
         ).status_code
         == 422
     )
+
+
+class EmbeddingDeTexto:
+    def __init__(self, vetor: list[float] | Exception) -> None:
+        self.vetor = vetor
+        self.textos: list[str] = []
+
+    def vetor_do_texto(self, texto: str) -> list[float]:
+        self.textos.append(texto)
+        if isinstance(self.vetor, Exception):
+            raise self.vetor
+        return self.vetor
+
+
+def plano(id: str, vetor: list[float] | None, descricao: str = "plano") -> Registro:
+    return Registro(
+        id=id,
+        tipo="plano",
+        job_id="j1",
+        inicio_ms=int(id[-1]) * 10_000,
+        fim_ms=int(id[-1]) * 10_000 + 5_000,
+        descricao=descricao,
+        quadro=f"quadros/{id}.jpg",
+        vetor_do_quadro=vetor,
+    )
+
+
+def mundo_visual(*respostas: str) -> Mundo:
+    m = Mundo(*(respostas or (pedido(texto_livre="pista molhada"),) * 4))
+    m.com(
+        job("j1"),
+        plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+        plano("j1:plano:2", [0.0, 1.0], "estúdio"),
+        plano("j1:plano:3", None, "sem vetor"),
+    )
+    return m
+
+
+def test_no_modo_visual_o_vetor_do_quadro_entra_na_fusao() -> None:
+    m = mundo_visual()
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+
+    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
+
+    assert embedding.textos == ["pista molhada"]
+    # Nenhuma descrição cita "pista molhada": só o vetor do quadro achou o plano.
+    assert [mo.inicio_ms for v in r.videos for mo in v.momentos] == [10_000]
+    assert r.entendida.visual is True
+    assert r.videos[0].momentos[0].quadro_url is not None
+    com_vetor = [c for c in m.indice.consultas if c.vetor_do_quadro]
+    assert com_vetor and all(c.filtros.tipo == "plano" for c in com_vetor)
+
+
+def test_sem_o_modo_visual_nao_ha_vetor_nem_chamada_ao_embedding() -> None:
+    m = mundo_visual()
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+
+    r = m.busca(embedding=embedding).buscar("pista molhada")
+
+    assert embedding.textos == []
+    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
+    assert r.entendida.visual is False
+
+
+@pytest.mark.parametrize("embedding", [None, EmbeddingDeTexto(ConnectionError("x"))])
+def test_indice_desligado_ou_embedding_fora_a_busca_fica_como_hoje(
+    embedding: EmbeddingDeTexto | None,
+) -> None:
+    m = mundo_visual()
+    esperado = buscar(mundo_visual(), "pista molhada")
+
+    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
+
+    assert r.entendida.visual is False
+    assert r.videos == esperado.videos
+    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
+
+
+def test_a_rota_aceita_visual() -> None:
+    c, m = cliente(["consulta"], *[pedido(texto_livre="pista molhada")] * 2)
+    m.com(
+        job("j1"),
+        plano("j1:plano:1", [1.0, 0.0]),
+    )
+    resposta = c.get(
+        "/v1/busca",
+        params={"q": "pista molhada", "visual": "true"},
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 200
+    assert resposta.json()["entendida"]["visual"] is False  # sem embedding no teste

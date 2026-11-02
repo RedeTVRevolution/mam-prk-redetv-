@@ -232,6 +232,48 @@ function Linha({ video, momento, selecionado, busca }: {
   )
 }
 
+/** O modo visual: um card por plano, com a miniatura do quadro-chave, em grade. */
+function GradeDePlanos({ videos, busca }: { videos: VideoDoResultado[]; busca: string }) {
+  return (
+    <ul
+      aria-label="Planos"
+      style={{
+        listStyle: 'none',
+        margin: 0,
+        padding: 0,
+        display: 'grid',
+        gap: 'var(--mantine-spacing-sm)',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+      }}
+    >
+      {videos.flatMap((video) =>
+        video.momentos.map((momento) => {
+          const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, busca)
+          return (
+            <li key={`${video.job_id}:${momento.inicio_ms}`}>
+              <a
+                href={endereco}
+                onClick={(e) => seguir(e, endereco)}
+                aria-label={`${video.nome} em ${relogio(momento.inicio_ms)}`}
+                data-momento={`${video.job_id}:${momento.inicio_ms}`}
+                style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}
+              >
+                <Quadro url={momento.quadro_url} largura={200} altura={113} />
+                <Text size="xs" c={CORES.textoSecundario} mt={4} style={NUMEROS}>
+                  {[video.programa ?? video.nome, relogio(momento.inicio_ms)].join(' · ')}
+                </Text>
+                <Text size="sm" lineClamp={2}>
+                  {momento.motivo}
+                </Text>
+              </a>
+            </li>
+          )
+        }),
+      )}
+    </ul>
+  )
+}
+
 /** A página `/busca`: o estado todo na URL, o resultado agrupado por vídeo. */
 export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: ConsultaDaBusca }) {
   const [limite, setLimite] = useState(VIDEOS_POR_VEZ)
@@ -377,6 +419,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
   const valorDoAno = periodoEntendido ? ENTENDIDO : anoNaTela === null ? TODOS : String(anoNaTela)
   const anos = typeof anoNaTela === 'number' && !ANOS.includes(String(anoNaTela)) ? [String(anoNaTela), ...ANOS] : ANOS
   const totalDeMomentos = momentos.length
+  const visualAtivo = consulta.modo === 'visual' && resultado?.entendida.visual === true
 
   return (
     <Stack p="md" gap="md" component="main">
@@ -392,6 +435,17 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
             aoAlternar={() => alternar(e.id)}
           />
         ))}
+        <Button
+          type="button"
+          size="compact-sm"
+          variant="default"
+          aria-pressed={consulta.modo === 'visual'}
+          leftSection={consulta.modo === 'visual' ? <IconCheck size={14} aria-hidden /> : undefined}
+          onClick={() => mudar({ modo: consulta.modo === 'visual' ? 'texto' : 'visual' })}
+          styles={{ root: consulta.modo === 'visual' ? { borderColor: CORES.foco, color: CORES.foco } : {} }}
+        >
+          Busca visual
+        </Button>
         <Select
           aria-label="Programa"
           placeholder="Programa"
@@ -486,11 +540,19 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
               )
             })}
 
+            {consulta.modo === 'visual' && !resultado.entendida.visual && (
+              <Text size="sm" c={CORES.textoSecundario}>
+                A busca visual não está disponível agora; mostrando a busca comum.
+              </Text>
+            )}
+
             {resultado.videos.length === 0 && resultado.sem_aparicoes.length === 0 && (
               <Text c={CORES.textoSecundario}>Nenhum momento encontrado. Tente outras palavras ou tire um filtro.</Text>
             )}
 
-            {resultado.videos.map((video) => (
+            {visualAtivo && <GradeDePlanos videos={resultado.videos} busca={consulta.q} />}
+
+            {!visualAtivo && resultado.videos.map((video) => (
               <Paper key={video.job_id} withBorder bg="dark.6" p="sm" component="section" aria-label={video.nome}>
                 <Stack gap="xs">
                   <Group justify="space-between" wrap="nowrap">

@@ -63,6 +63,12 @@ Ordem = Literal["relevancia", "data"]
 EvidenciaDaBusca = Literal["imagem", "citada", "fala", "gc", "objeto", "marca"]
 
 
+class EmbeddingDaConsulta(Protocol):
+    """Porta do embedding multimodal: o texto da consulta vira vetor no espaço dos quadros."""
+
+    def vetor_do_texto(self, texto: str) -> list[float]: ...
+
+
 class Ranking(Protocol):
     """Porta da API de Ranking: reordena os registros pela consulta de texto livre."""
 
@@ -117,6 +123,9 @@ class Entendida(BaseModel):
     programa: str | None
     desde: date | None
     ate: date | None
+    # A busca usou o vetor do quadro. Falso no modo visual quando o índice do quadro está
+    # desligado ou o embedding falhou: a tela avisa que veio a busca comum.
+    visual: bool = False
 
 
 @dataclass(frozen=True)
@@ -233,7 +242,9 @@ class Busca:
         repositorio: RepositorioDeJobs,
         armazenamento: Armazenamento,
         relogio: Callable[[], datetime],
+        embedding: EmbeddingDaConsulta | None = None,
     ) -> None:
+        self._embedding = embedding
         self._transporte = transporte
         self._catalogo = catalogo
         self._armor = armor
@@ -253,6 +264,7 @@ class Busca:
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
         ajustes: Ajustes | None = None,
+        visual: bool = False,
     ) -> ResultadoDaBusca:
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
@@ -296,6 +308,9 @@ class Busca:
             return nomes.get(id or "") or None
 
         clausulas = self._clausulas(entendida, nome)
+        vetor = self._vetor_da_consulta(texto) if visual else None
+        if vetor is not None:
+            clausulas.append(_clausula_visual(entendida, texto, vetor, nome))
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
@@ -351,6 +366,7 @@ class Busca:
                 programa=entendida.programa,
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
+                visual=vetor is not None,
             ),
             videos=videos,
             sem_aparicoes=vazios,
@@ -358,6 +374,16 @@ class Busca:
             facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
         )
+
+    def _vetor_da_consulta(self, texto: str) -> list[float] | None:
+        """`None` sem embedding (índice do quadro desligado) ou se ele falhar: busca comum."""
+        if self._embedding is None:
+            return None
+        try:
+            return self._embedding.vetor_do_texto(texto)
+        except Exception:
+            log.exception("vetor da consulta não calculado; fica a busca comum")
+            return None
 
     def _clausulas(
         self,
@@ -497,6 +523,30 @@ class Busca:
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
+
+
+def _clausula_visual(
+    e: ConsultaEntendida,
+    texto: str,
+    vetor: list[float],
+    nome: Callable[[str | None], str | None],
+) -> _Clausula:
+    """Os planos pelo vetor do quadro, junto do texto e do significado, no mesmo RRF.
+
+    Só o plano leva o vetor do quadro; as demais cláusulas seguem como na busca comum
+    (pessoas e objetos pedidos continuam filtrando).
+    """
+    consulta = e.texto_livre or texto
+    return _Clausula(
+        Consulta(
+            filtros=replace(_base(e), tipo="plano"),
+            texto=consulta,
+            significado=consulta,
+            vetor_do_quadro=vetor,
+            cortar_significado=True,
+        ),
+        lambda r: _motivo(r, nome),
+    )
 
 
 def _casa(r: Registro, a: Ajustes) -> bool:

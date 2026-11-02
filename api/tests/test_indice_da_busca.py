@@ -304,3 +304,26 @@ def test_decupagem_sem_inventario_segue_como_antes() -> None:
         "estúdio",
         "bastidor",
     ]
+
+
+def test_o_indice_em_memoria_busca_pelo_vetor_do_quadro() -> None:
+    def plano(id: str, vetor: list[float] | None) -> Registro:
+        return Registro(
+            id=id,
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1,
+            descricao="x",
+            vetor_do_quadro=vetor,
+        )
+
+    indice = IndiceEmMemoria()
+    indice.gravar(
+        "j1", [plano("a", [0.0, 1.0]), plano("b", [1.0, 0.1]), plano("c", None)]
+    )
+
+    achados = indice.buscar(Consulta(vetor_do_quadro=[1.0, 0.0]))
+
+    # Só quem tem vetor e aponta para o mesmo lado; o mais perto primeiro.
+    assert [r.id for r in achados] == ["b"]

@@ -30,6 +30,7 @@ from google.cloud import firestore
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.busca import Ajustes, Busca, Momento, RankingEmOrdem, VideoDoResultado
+from api.embedding_do_quadro import embedding_da_busca
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
 from api.nuvem import CatalogoFirestore, RepositorioFirestore
@@ -51,6 +52,7 @@ class Caso:
     termo: str | None = None  # None: nada nos vídeos fala disso
     teto: int = 0  # 0: sem limite
     exatos: bool = False
+    visual: bool = False  # o modo visual: o vetor do quadro entra na fusão (#269)
     programa: str | None = None
     desde: date | None = None
     ate: date | None = None
@@ -69,6 +71,7 @@ _CAMPOS = {
     "termo",
     "teto",
     "exatos",
+    "visual",
     "programa",
     "desde",
     "ate",
@@ -105,6 +108,7 @@ def ler_casos(arquivo: Path = ARQUIVO_DAS_CONSULTAS) -> list[Caso]:
             termo=None if termo is None else termo.lower(),
             teto=dado.get("teto", 0),
             exatos=dado.get("exatos", False),
+            visual=dado.get("visual", False),
             programa=dado.get("programa"),
             desde=_data(dado, "desde", texto),
             ate=_data(dado, "ate", texto),
@@ -220,21 +224,25 @@ def main() -> int:
     # O plano B registra a falta do Model Armor a cada consulta; aqui é o esperado.
     logging.getLogger("api.entendimento_da_consulta").setLevel(logging.CRITICAL)
     cliente = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
+    config = ConfigDaBusca.do_ambiente(os.environ)
     busca = Busca(
         transporte=_SemModelo(),
         catalogo=CatalogoFirestore(cliente),
         armor=_SemModelArmor(),
         programas=sorted(PERFIS),
-        indice=AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http()),
+        indice=AgentRetrieval(config, transporte_http()),
         ranking=RankingEmOrdem(),
         repositorio=RepositorioFirestore(cliente),
         armazenamento=cast(Armazenamento, _SemQuadro()),
         relogio=lambda: datetime.now(UTC),
+        embedding=embedding_da_busca(config),
     )
     falhas = 0
     medidas: list[tuple[Caso, float | None]] = []
     for caso in CASOS:
-        videos = busca.buscar(caso.consulta, ajustes=_ajustes(caso)).videos
+        videos = busca.buscar(
+            caso.consulta, ajustes=_ajustes(caso), visual=caso.visual
+        ).videos
         total = sum(v.n_momentos for v in videos)
         print(f"\n### {caso.consulta!r}: {total} momentos em {len(videos)} vídeos")
         for v in videos:

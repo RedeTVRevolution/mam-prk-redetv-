@@ -84,6 +84,7 @@ def criar_rotas_da_busca(
         pessoa: Annotated[str | None, Query(max_length=100)] = None,
         marca: Annotated[str | None, Query(max_length=100)] = None,
         tipo: TipoDeRegistro | None = None,
+        visual: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
@@ -102,6 +103,7 @@ def criar_rotas_da_busca(
             busca.buscar,
             q,
             ordem=ordem,
+            visual=visual,
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,

@@ -31,7 +31,7 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
-from api.busca import Busca, Ranking, RankingEmOrdem
+from api.busca import Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
 from api.busca_na_nuvem import adaptadores_da_busca
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
@@ -200,6 +200,7 @@ def criar_app(
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
     embedding: EmbeddingDoQuadro | None = None,
+    embedding_da_consulta: EmbeddingDaConsulta | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
@@ -319,6 +320,7 @@ def criar_app(
                 repositorio=repositorio_de_jobs,
                 armazenamento=armazenamento_dos_jobs,
                 relogio=relogio,
+                embedding=embedding_da_consulta,
             ),
             relogio,
             busca_por_minuto,
@@ -367,6 +369,7 @@ if _projeto:
     _busca = (
         ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
     )
+    _embedding = embedding_da_busca(_busca)
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(firestore.Client(project=_projeto)),
@@ -397,7 +400,8 @@ if _projeto:
         sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
         indice=AgentRetrieval(_busca, transporte_http()) if _busca else None,
         copia=copia_do_ambiente(os.environ),
-        embedding=embedding_da_busca(_busca),
+        embedding=_embedding,
+        embedding_da_consulta=_embedding,
         tempo_de_tela=consulta_do_ambiente(os.environ),
         relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(

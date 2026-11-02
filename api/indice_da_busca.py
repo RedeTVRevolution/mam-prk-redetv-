@@ -4,6 +4,7 @@ O adaptador do Agent Retrieval mora em `agent_retrieval.py`; o dublê em memóri
 implementa os filtros exatos e o texto, e é o que os testes usam.
 """
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal, Protocol
@@ -337,12 +338,29 @@ class IndiceEmMemoria:
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
         palavras = normalizar(consulta.texto).split() if consulta.texto else []
+        so_vetor = consulta.vetor_do_quadro is not None and not (
+            consulta.texto or consulta.significado
+        )
         achados: list[Registro] = []
+        parecidos: list[tuple[float, Registro]] = []
         for registros in self._por_job.values():
             for r in registros:
                 if not _casa(r, consulta.filtros):
                     continue
+                if consulta.vetor_do_quadro is not None and r.vetor_do_quadro:
+                    # Como o índice real, a união da busca por texto e a por vetor.
+                    proximidade = _cosseno(consulta.vetor_do_quadro, r.vetor_do_quadro)
+                    if proximidade > 0:
+                        parecidos.append((proximidade, r))
                 palheiro = normalizar(_frase(r.texto, r.descricao) or "")
-                if all(p in palheiro for p in palavras):
+                if not so_vetor and all(p in palheiro for p in palavras):
                     achados.append(r)
+        parecidos.sort(key=lambda p: -p[0])
+        ids = {r.id for r in achados}
+        achados += [r for _, r in parecidos if r.id not in ids]
         return achados[: consulta.limite]
+
+
+def _cosseno(a: list[float], b: list[float]) -> float:
+    norma = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    return sum(x * y for x, y in zip(a, b, strict=False)) / norma if norma else 0.0

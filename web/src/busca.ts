@@ -2,6 +2,7 @@
 
 export type Evidencia = 'imagem' | 'citada' | 'fala' | 'gc' | 'objeto' | 'marca'
 export type OrdemDaBusca = 'relevancia' | 'data'
+export type ModoDaBusca = 'texto' | 'visual'
 
 /** Os chips, na ordem da tela, e o tipo de ocorrência cuja cor cada um leva. */
 export const EVIDENCIAS = [
@@ -28,6 +29,8 @@ export interface ConsultaDaBusca {
   marca: string | null
   tipo: TipoDeMomento | null
   ordem: OrdemDaBusca
+  /** `visual`: o vetor do quadro-chave entra na busca e os planos vêm em grade (#269). */
+  modo: ModoDaBusca
 }
 
 export type TipoDeMomento = 'plano' | 'fala' | 'texto_na_tela' | 'objeto'
@@ -75,7 +78,14 @@ export type NomeDaFaceta = 'programa' | 'mes' | 'pessoa' | 'marca' | 'tipo'
 export type Facetas = Record<NomeDaFaceta, ValorDaFaceta[]>
 
 export interface ResultadoDaBusca {
-  entendida: { evidencias: Evidencia[]; programa: string | null; desde: string | null; ate: string | null }
+  entendida: {
+    evidencias: Evidencia[]
+    programa: string | null
+    desde: string | null
+    ate: string | null
+    /** A busca usou o vetor do quadro; falso no modo visual quando o índice do quadro está fora. */
+    visual?: boolean
+  }
   videos: VideoDoResultado[]
   sem_aparicoes: SemAparicao[]
   plano_b: boolean
@@ -96,6 +106,7 @@ export function consultaNova(q: string): ConsultaDaBusca {
     marca: null,
     tipo: null,
     ordem: 'relevancia',
+    modo: 'texto',
   }
 }
 
@@ -113,6 +124,7 @@ export function consultaDaBusca(busca: string): ConsultaDaBusca {
     marca: p.get('marca') || null,
     tipo: TIPOS_DE_MOMENTO.includes(p.get('tipo') ?? '') ? (p.get('tipo') as TipoDeMomento) : null,
     ordem: p.get('ordem') === 'data' ? 'data' : 'relevancia',
+    modo: p.get('modo') === 'visual' ? 'visual' : 'texto',
   }
 }
 
@@ -128,6 +140,7 @@ export function consultaParaEndereco(c: ConsultaDaBusca): string {
   if (c.marca !== null) p.set('marca', c.marca)
   if (c.tipo !== null) p.set('tipo', c.tipo)
   if (c.ordem !== 'relevancia') p.set('ordem', c.ordem)
+  if (c.modo === 'visual') p.set('modo', 'visual')
   const texto = p.toString()
   return texto ? `?${texto}` : ''
 }
@@ -151,6 +164,7 @@ export function consultaParaApi(c: ConsultaDaBusca, limite: number): string {
   if (c.pessoa !== null) p.set('pessoa', c.pessoa)
   if (c.marca !== null) p.set('marca', c.marca)
   if (c.tipo !== null) p.set('tipo', c.tipo)
+  if (c.modo === 'visual') p.set('visual', 'true')
   return p.toString()
 }
 

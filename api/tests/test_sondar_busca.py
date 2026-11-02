@@ -230,3 +230,17 @@ def test_ler_casos_recusa_data_entre_aspas_e_exatos_sem_teto(tmp_path: Path) -> 
 def test_o_arquivo_do_repositorio_esta_no_lugar_combinado() -> None:
     assert ARQUIVO_DAS_CONSULTAS.is_file()
     assert ler_casos(ARQUIVO_DAS_CONSULTAS) == CASOS
+
+
+def test_ler_casos_le_o_modo_visual_e_o_arquivo_traz_consultas_visuais(
+    tmp_path: Path,
+) -> None:
+    [caso] = ler_casos(
+        _arquivo(
+            tmp_path,
+            '[[consulta]]\ntexto = "pista molhada"\ntermo = "pista"\nvisual = true\n',
+        )
+    )
+    assert caso.visual
+    assert not Caso("terno", "terno").visual
+    assert any(c.visual for c in CASOS)

@@ -42,22 +42,29 @@ class GeminiEmbedding:
         self._transporte = transporte
 
     def vetor(self, jpeg: bytes, descricao: str) -> list[float]:
+        return self._embutir(
+            [
+                {"text": descricao},
+                {
+                    "inlineData": {
+                        "mimeType": "image/jpeg",
+                        "data": base64.b64encode(jpeg).decode(),
+                    }
+                },
+            ]
+        )
+
+    def vetor_do_texto(self, texto: str) -> list[float]:
+        """O vetor da consulta de texto, no mesmo espaço dos vetores dos quadros (#269)."""
+        return self._embutir([{"text": texto}])
+
+    def _embutir(self, partes: list[dict[str, Any]]) -> list[float]:
         url = (
             f"{URL_BASE}/projects/{self._projeto}/locations/global/publishers/google/"
             f"models/{MODELO_DO_EMBEDDING_DO_QUADRO}:embedContent"
         )
         corpo = {
-            "content": {
-                "parts": [
-                    {"text": descricao},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/jpeg",
-                            "data": base64.b64encode(jpeg).decode(),
-                        }
-                    },
-                ]
-            },
+            "content": {"parts": partes},
             # O `outputDimensionality` no topo do pedido está obsoleto na API v1.
             "embedContentConfig": {"outputDimensionality": self._dimensao},
         }

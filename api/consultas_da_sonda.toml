@@ -4,6 +4,8 @@
 #              (sem distinguir maiúsculas). Sem termo nem `pertinentes`, o caso `ausente` pede
 #              que nenhum vídeo volte; só com `pertinentes`, não há veredito, só o aceite.
 #   teto       (opcional) máximo de momentos no todo; sem ele, sem limite
+#   visual     (opcional) o modo visual da busca (#269): o vetor do quadro-chave entra na fusão;
+#              sem o índice do quadro a consulta roda como a comum
 #   exatos     (opcional) os que citam o termo vêm antes dos parecidos, e são `teto` (pede os dois)
 #   programa, desde, ate   (opcional) filtros da consulta, como a tela os põe (datas sem aspas:
 #              desde = 2024-05-01)
@@ -107,3 +109,10 @@ texto = "jogo de futebol no estádio"
 
 [[consulta]]
 texto = "xyzzy"
+
+# Consultas visuais (#269): o termo é o que a descrição do plano costuma citar.
+[[consulta]]
+texto = "pessoa de terno em estúdio"
+termo = "terno"
+teto = 30
+visual = true

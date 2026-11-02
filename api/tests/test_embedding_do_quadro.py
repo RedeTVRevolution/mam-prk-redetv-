@@ -163,3 +163,17 @@ def test_com_o_indice_do_quadro_o_embedding_usa_o_projeto_e_a_dimensao_da_busca(
     [(url, corpo)] = pedidos
     assert "/projects/proj/" in url
     assert corpo["embedContentConfig"] == {"outputDimensionality": 256}
+
+
+def test_o_pedido_da_consulta_leva_so_o_texto() -> None:
+    pedidos: list[dict[str, Any]] = []
+
+    def transporte(url: str, corpo: dict[str, Any]) -> dict[str, Any]:
+        pedidos.append(corpo)
+        return {"embedding": {"values": [3.0, 4.0]}}
+
+    vetor = GeminiEmbedding("proj", 2, transporte).vetor_do_texto("pista molhada")
+
+    assert pedidos[0]["content"]["parts"] == [{"text": "pista molhada"}]
+    assert pedidos[0]["embedContentConfig"] == {"outputDimensionality": 2}
+    assert vetor == pytest.approx([0.6, 0.8])
