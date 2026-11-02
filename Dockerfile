@@ -145,14 +145,14 @@ COPY api/ api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu DETECTOR=$DETECTOR
-# A máquina da construção não tem GPU: confere que o Paddle foi compilado com CUDA e lê o
-# quadro de amostra (o mesmo do teste depois da publicação, `MODO_TESTE=1`, que lá exige a
-# GPU) em CPU, com os modelos da imagem. Isso pega roda que não instala e modelo
-# incompatível. Não pega o cuDNN e o cuBLAS, que o Paddle só abre na primeira operação na
-# GPU, nem o driver e a GPU: isso é do teste depois da publicação (#238) e do dev (#240).
+# A máquina da construção não tem GPU nem o driver, e o `paddlepaddle-gpu` pede o
+# `libcuda.so.1` (do driver) já no `import paddle`: aqui ele não pode ser importado. Esta
+# etapa só grava o quadro de amostra (do teste depois da publicação, `MODO_TESTE=1`) e
+# confere que a roda instalada é a de GPU. Os modelos e o PaddleOCR são os mesmos do alvo
+# `ocr`, que os confere em CPU na construção; a roda, o driver e a GPU são do teste depois da
+# publicação (#238), que volta a imagem anterior se falhar.
 RUN mkdir /amostras \
-    && HOME=/tmp/ocr TMPDIR=/tmp /app/.venv/bin/python -c "import cv2, numpy, paddle; assert paddle.device.is_compiled_with_cuda(); q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/amostras/quadro.png', q); from api.teste_dos_jobs import testar_ocr; raise SystemExit(testar_ocr('cpu', exigir_gpu=False))" \
-    && rm -rf /tmp/ocr
+    && /app/.venv/bin/python -c "import cv2, numpy; from importlib.metadata import distributions; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); assert cv2.imwrite('/amostras/quadro.png', q); nomes = {d.metadata['Name'].lower() for d in distributions()}; assert 'paddlepaddle-gpu' in nomes and 'paddlepaddle' not in nomes, sorted(n for n in nomes if 'paddle' in n)"
 USER nobody
 CMD ["python", "-m", "api.ocr_job"]
 
