@@ -271,14 +271,37 @@ if ! gcloud iam service-accounts describe "$SA_EMAIL" --project "$P" >/dev/null 
 fi
 # Sem owner, só o que o Terraform usa. projectIamAdmin entra porque Gemini,
 # Firestore, logs e Eventarc só têm papéis no nível do projeto; o Terraform só
-# usa google_project_iam_member (ADR 0002). Papel novo: some aqui. Os dois
-# últimos são do CD (#71): a federação com o GitHub e o envio ao Cloud Build.
-for role in roles/resourcemanager.projectIamAdmin roles/serviceusage.serviceUsageAdmin \
-    roles/iam.serviceAccountAdmin roles/iam.serviceAccountUser roles/run.admin \
-    roles/storage.admin roles/artifactregistry.admin roles/datastore.owner \
-    roles/eventarc.admin roles/workflows.admin roles/identityplatform.admin \
-    roles/monitoring.editor roles/logging.configWriter roles/compute.networkAdmin \
-    roles/iam.workloadIdentityPoolAdmin roles/cloudbuild.builds.editor; do
+# usa google_project_iam_member (ADR 0002). Os últimos do bloco original são do
+# CD (#71): a federação com o GitHub e o envio ao Cloud Build.
+# Papel dado à mão à mam-terraform entra aqui no mesmo dia.
+PAPEIS_DA_TERRAFORM=(
+  roles/resourcemanager.projectIamAdmin
+  roles/serviceusage.serviceUsageAdmin
+  roles/iam.serviceAccountAdmin
+  roles/iam.serviceAccountUser
+  roles/run.admin
+  roles/storage.admin
+  roles/artifactregistry.admin
+  roles/datastore.owner
+  roles/eventarc.admin
+  roles/workflows.admin
+  roles/identityplatform.admin
+  roles/monitoring.editor
+  roles/logging.configWriter
+  roles/compute.networkAdmin
+  roles/iam.workloadIdentityPoolAdmin
+  roles/cloudbuild.builds.editor
+  roles/secretmanager.admin # cria o segredo do SerpAPI (serpapi) e dá acesso a ele (referencias_le_serpapi)
+  roles/cloudscheduler.admin # agendamento diário da avaliação por rubrica (#255)
+  roles/bigquery.admin # dataset, tabelas e IAM no dataset do BigQuery (#260, #279, #280, #285)
+  roles/cloudkms.admin # key ring, chave MAC do hash das chaves de API e IAM na chave (#272)
+  roles/pubsub.admin # tópicos, assinaturas e fila de mensagens mortas (#273, #279)
+  roles/compute.loadBalancerAdmin # balanceador HTTPS na frente do Cloud Run (#294)
+  roles/certificatemanager.owner # certificado gerenciado, se o #294 usar o Certificate Manager
+  roles/compute.securityAdmin # Cloud Armor (#295) e firewall da rede default (#301)
+  roles/iam.roleAdmin # papel sob medida da Vertex (#302)
+)
+for role in "${PAPEIS_DA_TERRAFORM[@]}"; do
   gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA_EMAIL" \
     --role="$role" --condition=None >/dev/null
   printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$role"
