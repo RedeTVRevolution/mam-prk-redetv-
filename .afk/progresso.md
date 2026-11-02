@@ -315,3 +315,10 @@ Não corrigido:
 - "Não identificado" fora dos famosos: decisão do implementador, mantida.
 - Itens repetidos (mesmo nome e tempo) viram uma chave só nos dicionários de detalhes de comerciais/planos: caso raro.
 - Smells de julgamento (requisitos como strings espalhadas em quatro lugares, `**extra` com `Any`, conta de preço repetida em três módulos, `Custo` homônimo do de `api.passadas`, `erros_ms` inteiro no JSON): refatoração sem bug, fica para quando o #254 reaproveitar o módulo.
+- 2026-11-02 09:06:52 · #248: feito
+- 2026-11-02 09:06:56 · iteração 49: #249
+
+## #249 iteração 50
+- Pronto: rota `GET /v1/jobs/{id}/passadas/{passada}/comparacao` (`api/comparar_passadas.py`, `criar_rotas_da_comparacao`, ligada no `main.py`; `Requisito.pares_iguais` novo, aditivo no JSON do #248); a web: `ComparacaoDePassadas.tsx` (seletor "Comparar com", dois lados por requisito, topo com custo por hora e tempo, clique leva o player), `usePassadas.ts`, `passadas.ts`, métodos `passadas()`/`comparacao()` no `ClienteDoJob`; o Painel dá lugar à comparação (62% da largura) enquanto há passada escolhida. 4 testes de API (`test_comparacao_da_passada.py`) e 8 da web.
+- Decisões: as regras de diferença ficam só no Python (a web não repete o pareamento). Sem `decupagem.ver` ou sem passada, a lista falha/vem vazia e o seletor não aparece (Visualizador como hoje). O lado do Job é a decupagem do modelo, sem correções (como no relatório do #248). Custo do Job: "n/d" (o Job não guarda tokens).
+- Armadilhas: o `Select` do Mantine tem role `combobox`; o msw do repo usa `onUnhandledFrame`.

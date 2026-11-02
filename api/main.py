@@ -36,12 +36,14 @@ from api.busca_na_nuvem import adaptadores_da_busca
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
+from api.comparar_passadas import criar_rotas_da_comparacao
 from api.correcoes import (
     RepositorioDeAprovacao,
     RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoes,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.decupagem import Decupagem
 from api.entendimento_da_consulta import ModelArmor
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.indexacao import reindexar
@@ -258,8 +260,18 @@ def criar_app(
             ),
         )
     )
+    leitura_de_passadas = passadas or PassadasEmMemoria()
     v1.include_router(
-        criar_rotas_das_passadas(repositorio_de_jobs, passadas or PassadasEmMemoria())
+        criar_rotas_das_passadas(repositorio_de_jobs, leitura_de_passadas)
+    )
+    v1.include_router(
+        criar_rotas_da_comparacao(
+            repositorio_de_jobs,
+            leitura_de_passadas,
+            lambda job_id: Decupagem.model_validate_json(
+                b"".join(armazenamento_dos_jobs.abrir_decupagem(job_id))
+            ),
+        )
     )
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
     v1.include_router(

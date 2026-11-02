@@ -3,6 +3,7 @@ import type { Autenticador } from './auth/autenticador.ts'
 import { consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
+import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
 /** 401 ou sessão sem token. O cliente já avisou quem o criou; quem chama só não mostra erro. */
@@ -67,6 +68,10 @@ export interface ClienteDoJob {
   /** URL assinada do JPEG `arquivo` (`plano-0.jpg`) de um momento da decupagem. */
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
+  /** As passadas de comparação do Job (exige `decupagem.ver`). */
+  passadas(): Promise<ResumoDaPassada[]>
+  /** O Job contra uma passada, com cada item marcado (igual, difere, só de um lado). */
+  comparacao(passadaId: string): Promise<ComparacaoDaPassada>
   /** As fotos de referência que sustentam o nome da pessoa (exige `decupagem.ver`). */
   fotosDoNome(pessoaId: string): Promise<FotosDoNome>
   catalogo(): Promise<CatalogoDeCorrecoes>
@@ -170,6 +175,8 @@ export function criarClienteDaApi(
       reproducao: () => chamar(`${base}/reproducao`),
       quadro: (arquivo) => chamar(`${base}/quadros/${encodeURIComponent(arquivo)}`),
       decupagem: () => chamar(`${base}/decupagem`),
+      passadas: () => chamar(`${base}/passadas`),
+      comparacao: (passadaId) => chamar(`${base}/passadas/${encodeURIComponent(passadaId)}/comparacao`),
       fotosDoNome: (pessoaId) => chamar(`${base}/pessoas/${encodeURIComponent(pessoaId)}/referencias`),
       catalogo: () => chamar('/v1/correcoes/catalogo'),
       historico: () => chamar(`${base}/correcoes`),

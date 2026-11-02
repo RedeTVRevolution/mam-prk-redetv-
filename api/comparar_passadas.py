@@ -31,11 +31,15 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Path as CaminhoDaRota
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
+from pydantic import BaseModel
 
+from api.auth import Chamador
 from api.comparador import (
     TIPOS_COM_IDENTIDADE,
     TOLERANCIA_MS,
@@ -53,9 +57,9 @@ from api.comparar_objetos import (
 )
 from api.decupagem import Decupagem
 from api.gemini import MODELO
-from api.jobs import Job, RepositorioDeJobs
+from api.jobs import Job, RepositorioDeJobs, _enxerga, _exige
 from api.nuvem import DecupagensStorage, RepositorioFirestore
-from api.passadas import LeituraDePassadas, Passada, PassadasStorage
+from api.passadas import FORMA_DO_ID, LeituraDePassadas, Passada, PassadasStorage
 
 LADO_A = "job"
 LADO_B = "passada"
@@ -89,6 +93,8 @@ class Requisito:
     so_em_a: list[Entrada]
     so_em_b: list[Entrada]
     diferentes: list[Diferenca]
+    # Os pares sem diferença (`motivos` vazio), para a tela lado a lado listar os dois lados.
+    pares_iguais: list[Diferenca] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -227,7 +233,7 @@ def _comparar_requisito(
             pareados.append(Pareado(ia, ib))
             sem_par_a.remove(ia)
             sem_par_b.remove(ib)
-    iguais = 0
+    pares_iguais: list[Diferenca] = []
     diferentes: list[Diferenca] = []
     for p in pareados:
         ia, ib = p.gabarito, p.modelo
@@ -238,25 +244,20 @@ def _comparar_requisito(
             motivos.append(motivo_do_detalhe)
         if not p.dentro:
             motivos.append("tempo")
-        if motivos:
-            diferentes.append(
-                Diferenca(
-                    _entrada(job_id, ia, detalhes_a),
-                    _entrada(job_id, ib, detalhes_b),
-                    motivos,
-                )
-            )
-        else:
-            iguais += 1
+        par = Diferenca(
+            _entrada(job_id, ia, detalhes_a), _entrada(job_id, ib, detalhes_b), motivos
+        )
+        (diferentes if motivos else pares_iguais).append(par)
     return _Comparacao(
         Requisito(
             nome=nome,
             contagem_a=len(a),
             contagem_b=len(b),
-            iguais=iguais,
+            iguais=len(pares_iguais),
             so_em_a=[_entrada(job_id, i, detalhes_a) for i in sem_par_a],
             so_em_b=[_entrada(job_id, i, detalhes_b) for i in sem_par_b],
             diferentes=diferentes,
+            pares_iguais=pares_iguais,
         ),
         pareados,
     )
@@ -360,6 +361,7 @@ def _somar_requisito(parte: list[Requisito]) -> Requisito:
         so_em_a=[e for r in parte for e in r.so_em_a],
         so_em_b=[e for r in parte for e in r.so_em_b],
         diferentes=[d for r in parte for d in r.diferentes],
+        pares_iguais=[d for r in parte for d in r.pares_iguais],
     )
 
 
@@ -534,6 +536,121 @@ def comparar(
         jobs=feitos,
         total=somar([f.resultado for f in feitos]),
     )
+
+
+class ItemMarcado(BaseModel):
+    identidade: str
+    inicio_ms: int
+    fim_ms: int
+    detalhe: str | None
+    marca: str  # "igual", "difere" ou "so_aqui"
+    motivos: list[str]
+
+
+class RequisitoLadoALado(BaseModel):
+    nome: str
+    a: list[ItemMarcado]
+    b: list[ItemMarcado]
+
+
+class LadoNaTela(BaseModel):
+    custo_usd: float | None
+    custo_por_hora_usd: float | None
+    tempo_total_s: float
+    etapas: list[dict[str, Any]]
+
+
+class ComparacaoNaTela(BaseModel):
+    passada_id: str
+    modelo: str
+    modelo_do_job: str
+    duracao_ms: int
+    a: LadoNaTela
+    b: LadoNaTela
+    requisitos: list[RequisitoLadoALado]
+
+
+def _marcado(e: Entrada, marca: str, motivos: list[str]) -> ItemMarcado:
+    return ItemMarcado(
+        identidade=e.identidade,
+        inicio_ms=e.inicio_ms,
+        fim_ms=e.fim_ms,
+        detalhe=e.detalhe,
+        marca=marca,
+        motivos=motivos,
+    )
+
+
+def _lado_na_tela(lado: LadoDoResultado, duracao_ms: int) -> LadoNaTela:
+    return LadoNaTela(
+        custo_usd=lado.custo.usd if lado.custo else None,
+        custo_por_hora_usd=custo_por_hora(lado.custo, duracao_ms),
+        tempo_total_s=lado.tempo.total_s,
+        etapas=[{"nome": n, "segundos": s} for n, s in lado.tempo.etapas.items()],
+    )
+
+
+def comparacao_na_tela(
+    r: Resultado, passada: Passada, modelo_do_job: str = MODELO
+) -> ComparacaoNaTela:
+    """As mesmas regras do `make comparar-passadas`, itens de cada lado em ordem de tempo."""
+    requisitos = []
+    for nome in REQUISITOS:
+        q = r.requisitos[nome]
+        a = [_marcado(p.a, "igual", []) for p in q.pares_iguais]
+        a += [_marcado(d.a, "difere", d.motivos) for d in q.diferentes]
+        a += [_marcado(e, "so_aqui", []) for e in q.so_em_a]
+        b = [_marcado(p.b, "igual", []) for p in q.pares_iguais]
+        b += [_marcado(d.b, "difere", d.motivos) for d in q.diferentes]
+        b += [_marcado(e, "so_aqui", []) for e in q.so_em_b]
+        por_tempo = lambda i: (i.inicio_ms, i.fim_ms)
+        requisitos.append(
+            RequisitoLadoALado(
+                nome=nome, a=sorted(a, key=por_tempo), b=sorted(b, key=por_tempo)
+            )
+        )
+    return ComparacaoNaTela(
+        passada_id=passada.id,
+        modelo=passada.modelo,
+        modelo_do_job=modelo_do_job,
+        duracao_ms=r.duracao_ms,
+        a=_lado_na_tela(r.a, r.duracao_ms),
+        b=_lado_na_tela(r.b, r.duracao_ms),
+        requisitos=requisitos,
+    )
+
+
+def criar_rotas_da_comparacao(
+    repositorio: RepositorioDeJobs,
+    passadas: LeituraDePassadas,
+    ler_decupagem: Callable[[str], Decupagem | None],
+) -> APIRouter:
+    """Só leitura, com `decupagem.ver`. O Job entra com a decupagem do modelo (sem as
+    correções), como no relatório do #248; o custo do Job fica "n/d" (ele não guarda os tokens)."""
+    rotas = APIRouter(prefix="/jobs")
+
+    @rotas.get("/{job_id}/passadas/{passada_id}/comparacao")
+    def comparacao(
+        job_id: str,
+        passada_id: Annotated[str, CaminhoDaRota(pattern=FORMA_DO_ID)],
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> ComparacaoNaTela:
+        job = _enxerga(chamador, repositorio.obter(job_id))
+        passada = passadas.ler_passada(job.id, passada_id)
+        decupagem = ler_decupagem(job.id)
+        if passada is None or decupagem is None or job.duracao_s is None:
+            raise HTTPException(404, "Passada não encontrada")
+        resultado = comparar_decupagens(
+            job.id,
+            round(job.duracao_s * 1000),
+            decupagem,
+            passada.decupagem,
+            LadoDoResultado(None, tempo_do_job(job)),
+            lado_da_passada(passada),
+        )
+        return comparacao_na_tela(resultado, passada)
+
+    return rotas
 
 
 def relatorio_em_json(relatorio: Relatorio) -> str:

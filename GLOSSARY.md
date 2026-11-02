@@ -145,7 +145,7 @@ Identidade de uma decupagem: o arquivo, a versão do pipeline e as opções que 
 Identificador de uma intenção de envio do cliente, reutilizado em todas as repetições dessa intenção.
 
 **Passada de comparação**:
-A análise inteira de um Job concluído refeita com outro modelo, sem escalonamento, guardada ao lado da Decupagem com o modelo, a data, o custo e o tempo de cada passo (`api/passadas.py`, `make passada-de-comparacao`). Não é Job nem Decupagem: não é indexada, não aparece no Acervo, não recebe correções nem dispara webhook, e a Decupagem do Job não muda. Cada chamada leva o rótulo de custo `etapa=passada_de_comparacao`. Serve para comparar modelos no mesmo vídeo. `make comparar-passadas` (`api/comparar_passadas.py`, #248) compara a decupagem do Job com uma passada, ou soma vários Jobs, e grava um relatório em Markdown e JSON.
+A análise inteira de um Job concluído refeita com outro modelo, sem escalonamento, guardada ao lado da Decupagem com o modelo, a data, o custo e o tempo de cada passo (`api/passadas.py`, `make passada-de-comparacao`). Não é Job nem Decupagem: não é indexada, não aparece no Acervo, não recebe correções nem dispara webhook, e a Decupagem do Job não muda. Cada chamada leva o rótulo de custo `etapa=passada_de_comparacao`. Serve para comparar modelos no mesmo vídeo. `make comparar-passadas` (`api/comparar_passadas.py`, #248) compara a decupagem do Job com uma passada, ou soma vários Jobs, e grava um relatório em Markdown e JSON. No Visualizador (#249), o seletor "Comparar com" mostra as duas decupagens lado a lado, só para leitura (`GET /v1/jobs/{id}/passadas/{passada}/comparacao`).
 
 ### Revisão
 

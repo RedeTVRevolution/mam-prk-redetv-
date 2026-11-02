@@ -36,6 +36,8 @@ import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
 import { FormularioDoTrecho } from './FormularioDoTrecho.tsx'
 import { ABAS_DO_TRECHO } from './trecho.ts'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
+import { ComparacaoDePassada, SeletorDePassada } from './ComparacaoDePassadas.tsx'
+import { usePassadas } from './usePassadas.ts'
 import { Sugestoes } from './Sugestoes.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
 import { nomeDaEtapa } from './etapas.ts'
@@ -180,6 +182,8 @@ export default function Visualizador({
   }, [api, job.id, tentativas])
 
   const concluido = job.estado === 'concluido'
+  const passadas = usePassadas(api.job(job.id), concluido)
+  const [comparandoCom, setComparandoCom] = useState<string | null>(null)
   useEffect(() => {
     if (!concluido) return
     let ativo = true
@@ -941,6 +945,9 @@ export default function Visualizador({
           </Text>
         </Group>
         <Group gap="xs" wrap="nowrap">
+          {passadas.length > 0 && (
+            <SeletorDePassada passadas={passadas} valor={comparandoCom} aoEscolher={setComparandoCom} />
+          )}
           {podeEditar && (
             <Tooltip label="Histórico, fila de revisão e aprovação">
               <Indicator
@@ -1202,8 +1209,23 @@ export default function Visualizador({
           withBorder
           p="sm"
           aria-label="Painel"
-          style={{ flex: '0 0 38%', minWidth: 380, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+          style={{
+            flex: comparandoCom ? '0 0 62%' : '0 0 38%',
+            minWidth: 380,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
         >
+          {comparandoCom && (
+            <ComparacaoDePassada
+              api={api.job(job.id)}
+              passadaId={comparandoCom}
+              aoSaltar={(ms) => saltarPara(ms / 1000)}
+            />
+          )}
+          {!comparandoCom && (
+            <>
           {podeEditar && (
             <Group gap="xs" mb="xs" wrap="nowrap">
               <Tooltip label="Catalogar (E)">
@@ -1306,6 +1328,8 @@ export default function Visualizador({
             <Text size="sm" c="dimmed">
               {concluido ? 'Carregando a decupagem…' : 'O painel aparece quando a decupagem estiver pronta.'}
             </Text>
+          )}
+            </>
           )}
         </Paper>
       </Group>
