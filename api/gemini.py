@@ -75,15 +75,11 @@ REGRAS GERAIS
 - Cada vez que um texto fica visível é um item, com o início e o fim em que ele está na tela. Um GC que sai e volta são dois itens.
 - Nunca estenda o texto até o fim do bloco ou do plano: um GC fixo no rodapé do bloco todo só vale se ficou visível o tempo todo.
 
-5. OBJETOS, ROUPAS E ACESSÓRIOS
-- Registre em objetos tudo o que alguém poderia procurar no acervo. Os dois grupos têm o mesmo peso:
-  a) o que cada pessoa na imagem veste, calça e usa (roupa, calçado, acessório) e o que segura na mão, com o id dela em pessoa e a relação (veste, calca, usa, segura). Só o que estiver visível; não deduza o calçado se os pés não aparecem. No máximo 5 peças por pessoa em cada aparição, as mais visíveis.
-  b) os objetos em cena: veículo, produto, eletrônico, troféu, joia, animal, comida. Sem dono, deixe pessoa e relação nulas. Ignore o mobiliário comum do estúdio (mesa, cadeira, bancada, o próprio telão).
-- Produto mostrado num telão, num gráfico ou numa vinheta também é objeto em cena: registre-o com a categoria do que ele é e escreva "no telão" ou "em gráfico" no detalhe.
-- Todo objeto que você citar em objetos de um plano também entra em objetos, com os intervalos em que está visível.
-- Quando um comercial tiver a evidência produto, o produto entra em objetos.
-- A categoria diz o que a coisa é. Use em_cena ou na_mao só quando nenhuma outra servir.
-- Para cada objeto: categoria, tipo no singular, a cor base da lista (até 2 cores) e o tom como você vê no campo cor, detalhe curto e os intervalos em que está visível.
+5. PESSOAS: ROUPAS, CALÇADOS E ACESSÓRIOS
+- Para cada pessoa na imagem, registre em objetos o que ela veste, calça e usa (roupa, calçado, acessório) e o que segura na mão, com o id dela em pessoa e a relação (veste, calca, usa, segura). Só o que estiver visível; não deduza o calçado se os pés não aparecem. No máximo 5 peças por pessoa em cada aparição, as mais visíveis.
+- Os objetos de cena não são pedidos aqui: não registre veículo, produto, eletrônico, troféu, joia, animal nem comida sem dono.
+- A categoria diz o que a peça é. Use na_mao só quando nenhuma outra servir.
+- Para cada peça: categoria, tipo no singular, a cor base da lista (até 2 cores) e o tom como você vê no campo cor, detalhe curto e os intervalos em que está visível.
 - Marca só quando o logo ou o nome estiver legível. Na dúvida, deixe em branco.
 - A cor sob a luz do estúdio engana: prefira a cor base mais provável e diga o tom no campo cor.
 

@@ -327,10 +327,8 @@ class Decupagem(_Estrito):
     pessoas: list[Pessoa]
     objetos: list[Objeto] = Field(
         default=[],
-        description="Tudo o que alguém procuraria no acervo: o que cada pessoa veste, "
-        "calça, usa e segura, e os objetos em cena (veículo, produto, eletrônico, "
-        "troféu, joia, animal, comida), cada um com os atributos, o dono quando há e "
-        "os intervalos visíveis.",
+        description="O que cada pessoa veste, calça, usa e segura, cada peça com os "
+        "atributos, o dono e os intervalos visíveis.",
     )
     planos: list[Plano]
     comerciais: list[Comercial]
