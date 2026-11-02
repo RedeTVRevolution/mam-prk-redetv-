@@ -18,6 +18,7 @@ export function pautasParaJuntar(
   return { pautas: indices.map((i) => todas[i]) }
 }
 
+// O motivo da divisão diz onde foi o corte; o da junção é o do catálogo de motivos.
 const motivado = (frase: string, e: Editor): Editor => ({ ...e, motivo: () => frase })
 
 /** O título da junção: um dos das pautas ou um novo. */
@@ -38,20 +39,17 @@ export function editorDeJuncao(pautas: Pauta[], c: CatalogoDeCorrecoes): Editor 
       visivel: (v) => v.escolha === OUTRO_TITULO,
     },
   ]
-  return motivado(
-    'pautas juntadas pelo editor',
-    montar(campos, { escolha: titulos[0], novo: '' }, ['pauta.juntar'], (v) => {
-      const titulo = v.escolha === OUTRO_TITULO ? texto(v.novo) : texto(v.escolha)
-      if (!titulo) return null
-      return [
-        {
-          tipo: 'pauta.juntar',
-          item_id: pautas[0].id,
-          valor: JSON.stringify({ ids: pautas.map((p) => p.id), titulo }),
-        },
-      ]
-    }),
-  )
+  return montar(campos, { escolha: titulos[0], novo: '' }, ['pauta.juntar'], (v) => {
+    const titulo = v.escolha === OUTRO_TITULO ? texto(v.novo) : texto(v.escolha)
+    if (!titulo) return null
+    return [
+      {
+        tipo: 'pauta.juntar',
+        item_id: pautas[0].id,
+        valor: JSON.stringify({ ids: pautas.map((p) => p.id), titulo }),
+      },
+    ]
+  })
 }
 
 /** O corte cabe dentro da pauta, com as duas metades de duração. */

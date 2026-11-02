@@ -518,3 +518,8 @@ Não corrigido:
 
 ## #262 iteração 61
 - Pronto: Visualizador ligado (M/U/D, barra de marcadas, formulário de juntar/dividir acima do painel, Esc fecha), Gaveta com "não reaplicada" + "Refazer à mão", testes movidos de `.afk/pendente/`, tipos `pauta.juntar/dividir` em `ItemDaFila`, GLOSSARY. `make verificar` verde. Ticket completo.
+
+## #262 revisão
+- Corrigido: "Refazer à mão" fora do modo de catalogação não fazia nada (agora liga o modo); sair do modo (E) esquece marcas e formulário de juntar/dividir; F2, Del e A fecham o formulário de juntar/dividir (antes abriam dois); a barra conta só marcas de pautas que ainda existem; Esc do trecho não age com o formulário aberto (o invólucro com `onKeyDown` saiu); motivo da junção repetido em `pautas.ts` saiu; atalhos M/U/D em `docs/design/catalogacao-manual.md`; três testes novos.
+- Não corrigido: "seguidas" na web segue a ordem do array `decupagem.pautas`, e a API ordena por `inicio_ms` (a saída do modelo já vem em ordem); "Refazer à mão" não pré-marca as pautas nem traz os títulos da correção original, e o item antigo fica na fila até ser descartado (desfazer = Descartar); a marca "não reaplicada" vem só do tipo (a API sempre devolve `candidatos` vazios para eles; se mudar, a Gaveta precisa de um campo explícito); badge com `CORES.falhou`.
+- Smells sem bug: `pautaDoItem` desmonta a chave `pauta-<i>` (terceira cópia do formato, junto de `painel.ts` e `origemDoItem`); o JSX testa `estrutura.modo` três vezes; `motivado` repete o de `trecho.ts`.

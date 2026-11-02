@@ -79,7 +79,7 @@ afterEach(() => {
 })
 afterAll(() => servidor.close())
 
-async function abrir() {
+async function abrir({ catalogando = true } = {}) {
   const auth = new AutenticadorFalso([
     { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
   ])
@@ -93,6 +93,7 @@ async function abrir() {
   )
   await screen.findByRole('group', { name: 'Pautas 3' })
   const usuario = userEvent.setup()
+  if (!catalogando) return usuario
   await usuario.keyboard('e')
   await usuario.click(screen.getByRole('tab', { name: /Pautas/ }))
   return usuario
@@ -252,4 +253,60 @@ test('erro da API ao juntar fica no formulário', async () => {
 
   expect((await screen.findByRole('alert')).textContent).toBeTruthy()
   expect(screen.getByRole('form', { name: 'Juntar 2 pautas' })).toBeTruthy()
+})
+
+test('sair do modo de catalogação (E) esquece as pautas marcadas e o formulário aberto', async () => {
+  const usuario = await abrir()
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Abertura para juntar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Debate para juntar' }))
+  await usuario.keyboard('u')
+  await screen.findByRole('form', { name: 'Juntar 2 pautas' })
+  await usuario.click(document.body)
+
+  await usuario.keyboard('ee')
+
+  expect(screen.queryByRole('form', { name: 'Juntar 2 pautas' })).toBeNull()
+  expect(screen.queryByText('2 pautas marcadas para juntar')).toBeNull()
+})
+
+test('F2 com a junção aberta troca um formulário pelo outro', async () => {
+  const usuario = await abrir()
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Abertura para juntar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Debate para juntar' }))
+  await usuario.keyboard('u')
+  await screen.findByRole('form', { name: 'Juntar 2 pautas' })
+  await usuario.click(await linha('Debate'))
+
+  await usuario.keyboard('{F2}')
+
+  await waitFor(() => expect(screen.queryByRole('form', { name: 'Juntar 2 pautas' })).toBeNull())
+})
+
+test('Refazer à mão, fora do modo de catalogação, liga o modo e deixa marcar as pautas', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/fila', () =>
+      HttpResponse.json([
+        {
+          id: 'f1',
+          tipo: 'pauta.juntar',
+          autor_email: 'bia@redetv.com.br',
+          criada_em: '2026-10-30T15:00:00Z',
+          motivo: 'pautas juntadas pelo editor',
+          antes: null,
+          depois: '{"ids":["x1","x2"],"titulo":"Abertura"}',
+          antes_legivel: 'Abertura + Debate',
+          depois_legivel: 'Abertura',
+          candidatos: [],
+        },
+      ]),
+    ),
+  )
+  const usuario = await abrir({ catalogando: false })
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('tab', { name: /Fila de revisão/ }))
+
+  await usuario.click(await screen.findByRole('button', { name: 'Refazer à mão' }))
+
+  await usuario.click(await screen.findByRole('button', { name: 'Marcar Abertura para juntar' }))
+  expect(await screen.findByText('1 pauta marcada para juntar')).toBeTruthy()
 })

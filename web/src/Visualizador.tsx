@@ -352,6 +352,9 @@ export default function Visualizador({
     [decupagem, itens, historico, podeEditar],
   )
 
+  // Depois de recarregar a decupagem, as marcas de pautas que sumiram não contam.
+  const marcadasNaDecupagem = decupagem?.pautas.filter((p) => pautasMarcadas.has(p.id)).length ?? 0
+
   function pautaDoItem(item: ItemDoPainel | undefined): Pauta | undefined {
     if (!decupagem || item?.tipo !== 'pauta') return undefined
     return decupagem.pautas[Number(item.chave.slice('pauta-'.length))]
@@ -408,9 +411,10 @@ export default function Visualizador({
     return falha
   }
 
-  /** "Refazer à mão" na fila: fecha a gaveta e leva à aba das pautas. */
+  /** "Refazer à mão" na fila: fecha a gaveta e leva à aba das pautas, no modo de catalogação. */
   function refazerPautasAMao() {
     setGavetaAberta(false)
+    setCatalogando(true)
     setAba('pautas')
     mostrarAviso('Marque as pautas (M) e junte (U), ou divida (D).')
   }
@@ -476,9 +480,11 @@ export default function Visualizador({
     setTrecho({ inicio_ms: atualMs, fim_ms: fim })
   }
 
-  /** `E`: liga e desliga o modo; o trecho marcado não sobrevive à saída do modo. */
+  /** `E`: liga e desliga o modo; o trecho e as pautas marcados não sobrevivem à saída do modo. */
   function alternarCatalogacao() {
     descartarTrecho()
+    setPautasMarcadas(new Set())
+    setEstrutura(null)
     setCatalogando((c) => !c)
   }
 
@@ -504,6 +510,7 @@ export default function Visualizador({
       return
     }
     fecharEdicao()
+    setEstrutura(null)
     setDescrevendo(true)
   }
 
@@ -532,6 +539,7 @@ export default function Visualizador({
       return
     }
     setTemposDaAlca(null)
+    setEstrutura(null)
     selecionar(item.chave)
     setEmEdicao({ chave: item.chave, modo: 'editar' })
   }
@@ -549,6 +557,7 @@ export default function Visualizador({
       return
     }
     setTemposDaAlca(null)
+    setEstrutura(null)
     selecionar(item.chave)
     setEmEdicao({ chave: item.chave, modo: 'remover' })
   }
@@ -856,7 +865,7 @@ export default function Visualizador({
             tecla: 'Esc',
             acao: 'Descartar o trecho marcado',
             grupo: GRUPO_DA_CATALOGACAO,
-            casa: (e: KeyboardEvent) => e.key === 'Escape' && catalogando && !gavetaAberta && trecho !== null && !descrevendo,
+            casa: (e: KeyboardEvent) => e.key === 'Escape' && catalogando && !gavetaAberta && trecho !== null && !descrevendo && !estrutura,
             executar: (e: KeyboardEvent) => {
               e.preventDefault()
               descartarTrecho()
@@ -1381,10 +1390,10 @@ export default function Visualizador({
               {aviso}
             </Text>
           )}
-          {catalogando && pautasMarcadas.size > 0 && (
+          {catalogando && marcadasNaDecupagem > 0 && (
             <Group gap="xs" mb="xs">
               <Text size="sm">
-                {`${pautasMarcadas.size} ${pautasMarcadas.size === 1 ? 'pauta marcada' : 'pautas marcadas'} para juntar`}
+                {`${marcadasNaDecupagem} ${marcadasNaDecupagem === 1 ? 'pauta marcada' : 'pautas marcadas'} para juntar`}
               </Text>
               <Button size="compact-xs" onClick={juntarMarcadas}>
                 Juntar as pautas marcadas
@@ -1395,15 +1404,7 @@ export default function Visualizador({
             </Group>
           )}
           {catalogando && catalogo && estrutura && (
-            <div
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.stopPropagation()
-                  setEstrutura(null)
-                }
-              }}
-            >
-              <FormularioDeCorrecao
+            <FormularioDeCorrecao
                 key={estrutura.modo === 'juntar' ? estrutura.pautas.map((p) => p.id).join() : `${estrutura.pauta.id}@${estrutura.em_ms}`}
                 editor={
                   estrutura.modo === 'juntar'
@@ -1419,7 +1420,6 @@ export default function Visualizador({
                 aoSalvar={gravarEstrutura}
                 aoCancelar={() => setEstrutura(null)}
               />
-            </div>
           )}
           {catalogando && catalogo && descrevendo && trecho?.fim_ms != null && (
             <FormularioDoTrecho
