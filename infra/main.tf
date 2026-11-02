@@ -71,6 +71,24 @@ variable "imagem_objetos" {
   type        = string
 }
 
+variable "waf_ativo" {
+  description = "Falso: as regras WAF do Cloud Armor só registram no log (prévia); verdadeiro: bloqueiam (#295)"
+  type        = bool
+  default     = false
+}
+
+variable "limite_de_requisicoes_por_ip" {
+  description = "Requisições por minuto por IP no Cloud Armor (#295)"
+  type        = number
+  default     = 600
+}
+
+variable "ips_da_redetv" {
+  description = "IPs ou CIDRs da RedeTV no Cloud Armor. Vazio: sem restrição de IP (#295)"
+  type        = list(string)
+  default     = []
+}
+
 variable "dominio" {
   description = "Domínio do MAM. Vazio: sem balanceador e o endereço é o run.app; preenchido: nasce o balanceador HTTPS (#294)"
   type        = string
@@ -80,17 +98,20 @@ variable "dominio" {
 module "mam" {
   source = "./modulos/mam"
 
-  projeto                = var.projeto
-  regiao                 = var.regiao
-  admins_emergencia      = var.admins_emergencia
-  imagem                 = var.imagem
-  imagem_validacao       = var.imagem_validacao
-  imagem_transcricao     = var.imagem_transcricao
-  imagem_ocr             = var.imagem_ocr
-  imagem_transcricao_gpu = var.imagem_transcricao_gpu
-  imagem_ocr_gpu         = var.imagem_ocr_gpu
-  imagem_objetos         = var.imagem_objetos
-  dominio                = var.dominio
+  projeto                      = var.projeto
+  regiao                       = var.regiao
+  admins_emergencia            = var.admins_emergencia
+  imagem                       = var.imagem
+  imagem_validacao             = var.imagem_validacao
+  imagem_transcricao           = var.imagem_transcricao
+  imagem_ocr                   = var.imagem_ocr
+  imagem_transcricao_gpu       = var.imagem_transcricao_gpu
+  imagem_ocr_gpu               = var.imagem_ocr_gpu
+  imagem_objetos               = var.imagem_objetos
+  dominio                      = var.dominio
+  waf_ativo                    = var.waf_ativo
+  limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
+  ips_da_redetv                = var.ips_da_redetv
 }
 
 output "identity_api_key" {

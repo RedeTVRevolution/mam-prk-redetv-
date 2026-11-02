@@ -145,3 +145,68 @@ def test_o_readme_diz_o_registro_de_dns_a_espera_do_certificado_e_o_custo(
     assunto: str,
 ) -> None:
     assert assunto in (INFRA / "README.md").read_text()
+
+
+ARMOR = (MODULO / "cloud_armor.tf").read_text()
+
+
+def test_a_politica_so_existe_com_balanceador_e_vai_no_back_end() -> None:
+    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+    back_end = _bloco(BALANCEADOR, 'resource "google_compute_backend_service" "web"')
+
+    assert re.search(
+        r"^  count\s*= local\.balanceador \? 1 : 0$", politica, re.MULTILINE
+    )
+    assert re.search(
+        r"security_policy\s*= google_compute_security_policy\.web\[0\]\.id", back_end
+    )
+
+
+def test_as_regras_waf_ficam_em_previa_ate_a_variavel_ligar() -> None:
+    waf = _bloco(ARMOR, 'variable "waf_ativo"')
+    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+
+    assert "default     = false" in waf
+    assert re.search(r"preview\s*= !var\.waf_ativo", politica)
+    for regra in ("sqli", "xss", "lfi", "rce", "scannerdetection"):
+        assert f"{regra}-v33-stable" in ARMOR, regra
+
+
+def test_ha_limite_de_requisicoes_por_ip_por_variavel() -> None:
+    limite = _bloco(ARMOR, 'variable "limite_de_requisicoes_por_ip"')
+    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+
+    assert "type        = number" in limite
+    assert re.search(r'action\s*= "throttle"', politica)
+    assert "var.limite_de_requisicoes_por_ip" in politica
+    assert 'enforce_on_key = "IP"' in politica
+
+
+def test_sem_ips_da_redetv_nenhuma_regra_de_ip_e_o_padrao_deixa_passar() -> None:
+    ips = _bloco(ARMOR, 'variable "ips_da_redetv"')
+    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+
+    assert "default     = []" in ips
+    assert re.search(
+        r"for_each\s*= length\(var\.ips_da_redetv\) > 0 \? \[1\] : \[\]", politica
+    )
+    assert "var.ips_da_redetv" in politica
+    assert re.search(
+        r'priority\s*= 2147483647.*?action\s*= length\(var\.ips_da_redetv\) > 0 \? "deny\(403\)" : "allow"',
+        politica,
+        re.DOTALL,
+    )
+
+
+def test_o_cloud_armor_chega_aos_tres_ambientes_e_ao_wizard() -> None:
+    for main in (
+        INFRA / "main.tf",
+        INFRA / "ambientes" / "staging" / "main.tf",
+        INFRA / "ambientes" / "prod" / "main.tf",
+    ):
+        texto = main.read_text()
+        for v in ("waf_ativo", "limite_de_requisicoes_por_ip", "ips_da_redetv"):
+            assert re.search(rf"^\s*{v}\s*= var\.{v}$", texto, re.MULTILINE), (main, v)
+            assert f'variable "{v}"' in texto, (main, v)
+    wizard = (INFRA.parent / "scripts" / "wizard-gcp-dev.sh").read_text()
+    assert "roles/compute.securityAdmin" in wizard

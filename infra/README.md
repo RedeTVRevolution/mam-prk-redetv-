@@ -85,3 +85,13 @@ A `mam-build` não é pré-requisito: o próprio módulo a cria (`google_service
 - `roles/artifactregistry.writer` nos repositórios `mam` e `mam-gpu`.
 
 Validar sem credencial: `terraform -chdir=infra/ambientes/staging init -backend=false && terraform -chdir=infra/ambientes/staging validate` (o CI faz isso nos três).
+
+## Cloud Armor (#295)
+
+Com o balanceador ligado (`dominio` preenchido), o módulo cria a política `mam-web` no serviço de back-end (`modulos/mam/cloud_armor.tf`). Sem `dominio`, nada disso existe. A conta `mam-terraform` precisa de `roles/compute.securityAdmin` (já no wizard).
+
+- **WAF** (SQLi, XSS, LFI, RCE e scanners, regras `v33-stable`, sensibilidade 1): nasce em **prévia** (`waf_ativo = false`): só registra no log do balanceador o que bloquearia. Olhe os logs e ligue com `waf_ativo = true` (403).
+- **Limite por IP**: `limite_de_requisicoes_por_ip` (padrão 600 por minuto); acima, 429. Um valor só para todas as rotas: as de envio e busca vão direto ao Storage ou são caras no lado do servidor, e separar fica para quando os logs mostrarem necessidade.
+- **IPs da RedeTV**: `ips_da_redetv` (lista de CIDRs). Vazia (o padrão, e o dev): nenhuma regra de IP e todos passam. Preenchida: só esses IPs passam, **em todas as rotas, as `/v1` dos sistemas inclusive** (decisão: os sistemas da RedeTV chamam de dentro da rede; se algum chamar de fora, o IP dele entra na lista).
+
+Custo mensal (estimativa pela tabela do Google, a confirmar: US$): política ~US$ 5, mais ~US$ 1 por regra (7 regras sem lista, 8 com ela, ~US$ 12 a 13 no total) e ~US$ 0,75 por milhão de requisições avaliadas. A regra de limite por IP é cobrada como as demais.

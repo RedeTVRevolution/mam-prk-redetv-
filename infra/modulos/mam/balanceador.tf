@@ -1,6 +1,6 @@
 # Balanceador HTTPS externo global na frente do serviço web (#294). Só nasce com `dominio`
-# preenchido: vazio, nada daqui é criado e o endereço continua o run.app. O Cloud Armor
-# entra neste serviço de back-end no #295.
+# preenchido: vazio, nada daqui é criado e o endereço continua o run.app. A política do Cloud Armor
+# (cloud_armor.tf, #295) vai neste serviço de back-end.
 #
 # Na `main.tf` ficam o `ingress` do Cloud Run, o CORS da quarentena e os domínios do login,
 # que mudam com o balanceador. Aqui ficam só os recursos novos (sem `moved`: nunca
@@ -32,6 +32,7 @@ resource "google_compute_backend_service" "web" {
   name                  = "mam-web"
   protocol              = "HTTPS"
   load_balancing_scheme = "EXTERNAL_MANAGED"
+  security_policy       = google_compute_security_policy.web[0].id
   backend {
     group = google_compute_region_network_endpoint_group.web[0].id
   }
