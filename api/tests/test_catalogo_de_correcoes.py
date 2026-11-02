@@ -184,6 +184,8 @@ TEXTO = {"tipo": "gc", "texto": "Olá", "inicio_ms": 1000, "fim_ms": 2000}
             json.dumps({"pessoa": None, "relacao": None}),
             "sem dono",
         ),
+        ("objeto.nao_existe", "existe", "Objeto na imagem"),
+        ("objeto.nao_existe", "nao_existe", "Objeto não está na imagem"),
         ("pauta.titulo", "Um título 1-2", "Um título 1-2"),
         ("pessoa.renomear", "Ana", "Ana"),
         ("comercial.marca", "Acme", "Acme"),

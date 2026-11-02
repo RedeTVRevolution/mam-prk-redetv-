@@ -51,6 +51,7 @@ export interface Editor {
 export const TIPOS_FORA_DESTE_TICKET = [
   'objeto.atributos',
   'objeto.dono',
+  'objeto.nao_existe',
   'descartar',
   'aprovar',
   'recusar',

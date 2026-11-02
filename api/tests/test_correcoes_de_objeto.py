@@ -381,3 +381,84 @@ def _assert_dono_existe(decupagem: dict[str, Any]) -> None:
     testes não traz o esquema inteiro, então ela é conferida à parte."""
     ids = {p["id"] for p in decupagem["pessoas"]}
     assert all(o["pessoa"] is None or o["pessoa"] in ids for o in decupagem["objetos"])
+
+
+# objeto.nao_existe (#306)
+
+
+def _nao_existe(mundo: Mundo, **campos: Any) -> Any:
+    campos.setdefault("versao", V)
+    campos.setdefault("item_id", "obj01")
+    return mundo.corrigir(tipo="objeto.nao_existe", valor="nao_existe", **campos)
+
+
+def test_nao_existe_tira_o_objeto_da_decupagem() -> None:
+    modelo = _modelo([*M["objetos"], _objeto("obj02", "chapéu", 2000, 3000)])
+    mundo = _mundo(modelo)
+
+    assert _nao_existe(mundo, versao=_versao(modelo)).status_code == 201
+
+    assert [o["id"] for o in _objetos(mundo)] == ["obj02"]
+    assert len(_objetos(mundo, "?versao=modelo")) == 2
+
+
+def test_nao_existe_aparece_legivel_no_historico() -> None:
+    mundo = _mundo()
+    _nao_existe(mundo)
+
+    [item] = mundo.historico().json()
+
+    assert item["antes_legivel"] == "Objeto na imagem"
+    assert item["depois_legivel"] == "Objeto não está na imagem"
+
+
+def test_desfazer_devolve_o_objeto() -> None:
+    mundo = _mundo()
+    cid = _nao_existe(mundo).json()["id"]
+    assert _objetos(mundo) == []
+    mundo.avancar()
+
+    assert mundo.desfazer(cid).status_code == 201
+
+    [o] = _objetos(mundo)
+    assert o["id"] == "obj01"
+    assert "origem" not in o
+    textos = [
+        (h["antes_legivel"], h["depois_legivel"]) for h in mundo.historico().json()
+    ]
+    assert ("Objeto não está na imagem", "Objeto na imagem") in textos
+
+
+def test_nao_existe_com_aprovacao_so_vale_depois_de_aprovar() -> None:
+    mundo = _mundo()
+    mundo.aprovacao.definir(frozenset({"objeto.nao_existe"}))
+    r = _nao_existe(mundo)
+
+    assert r.status_code == 201
+    assert len(_objetos(mundo)) == 1
+    mundo.avancar()
+    aprovada = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{r.json()['id']}/aprovar", headers=CURADOR
+    )
+    assert aprovada.status_code == 201
+    assert _objetos(mundo) == []
+
+
+def test_nao_existe_reaplica_numa_versao_nova() -> None:
+    mundo = _mundo()
+    _nao_existe(mundo)
+    mundo.reprocessar(_modelo([_objeto("obj07", "vestido", 1200, 5200)]))
+
+    assert _objetos(mundo) == []
+
+
+def test_nao_existe_em_objeto_inexistente_da_422() -> None:
+    assert _nao_existe(_mundo(), item_id="obj99").status_code == 422
+
+
+@pytest.mark.parametrize("valor", ["existe", "true", "", "texto solto"])
+def test_nao_existe_com_outro_valor_da_422(valor: str) -> None:
+    r = _mundo().corrigir(
+        tipo="objeto.nao_existe", valor=valor, versao=V, item_id="obj01"
+    )
+    assert r.status_code == 422

@@ -70,6 +70,7 @@ TipoNovo = Literal[
     "pauta.dividir",
     "objeto.atributos",
     "objeto.dono",
+    "objeto.nao_existe",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
 TipoDoItem = Literal[
@@ -1382,7 +1383,8 @@ def _valor_atual(
 
     Vazio para o item acrescentado que não está na decupagem (ainda não existe,
     foi desfeito ou o modelo já o traz) e para a ocorrência de pessoa que a
-    decupagem não tem (ou cuja pessoa saiu dela). `depois` é o valor da
+    decupagem não tem (ou cuja pessoa saiu dela), e para o item que o tipo faz
+    sumir (`some_o_item`) e que já saiu. `depois` é o valor da
     correção, de onde sai o intervalo da aparição acrescentada.
     """
     entrada = TIPOS[tipo]
@@ -1396,7 +1398,7 @@ def _valor_atual(
         if de_ocorrencia:
             return _valor_da_ocorrencia(item, tipo, ocorrencia, depois)
         return _valor_do_item(item, tipo)
-    if entrada.acrescenta is not None or de_ocorrencia:
+    if entrada.acrescenta is not None or de_ocorrencia or entrada.some_o_item:
         return ""
     raise ItemInexistente(item_id)
 
@@ -1872,6 +1874,10 @@ def aplicar(
     for objeto in _objetos(resultado):
         if objeto.get("pessoa") is not None and objeto["pessoa"] not in ids_das_pessoas:
             objeto["pessoa"] = objeto["relacao"] = None
+    if "objetos" in resultado:
+        resultado["objetos"] = [
+            o for o in _objetos(resultado) if not o.pop("_removido", False)
+        ]
     # As pautas do modelo ficam na ordem em que vieram; só a acrescentada
     # pede reordenar, para entrar no lugar do seu início.
     if any(p.get("acrescentado") for p in _pautas(resultado)):
@@ -2163,6 +2169,8 @@ class Tipo:
     # `ItemInexistente` se ele aponta para o que ela não tem. Também decide se a
     # correção se reaplica.
     confere: Callable[[dict[str, Any], str], None] | None = None
+    # A correção tira o item da decupagem: o valor atual de quem já saiu é vazio, não erro.
+    some_o_item: bool = False
 
 
 def _campo_longo(n: NovaCorrecao) -> str:
@@ -2333,6 +2341,20 @@ def _confere_o_dono(entregue: dict[str, Any], valor: str) -> None:
     pessoa = json.loads(valor)["pessoa"]
     if pessoa is not None and pessoa not in _ids_das_pessoas(entregue):
         raise ItemInexistente(pessoa)
+
+
+def _valor_do_existe(item: dict[str, Any]) -> str:
+    return "existe"
+
+
+def _canonizar_nao_existe(n: NovaCorrecao) -> str:
+    if n.valor != "nao_existe":
+        raise ValueError("o valor de objeto.nao_existe é nao_existe")
+    return n.valor
+
+
+def _marca_o_objeto_removido(item: dict[str, Any], c: Correcao) -> None:
+    item["_removido"] = True
 
 
 def _valor_do_texto_na_tela(item: dict[str, Any]) -> str:
@@ -3112,6 +3134,15 @@ TIPOS: dict[str, Tipo] = {
         aplicar_no_item=_json_no_item,
         ja_traz=_ja_traz_o_valor,
         confere=_confere_o_dono,
+    ),
+    "objeto.nao_existe": Tipo(
+        canonizar=_canonizar_nao_existe,
+        rotulo="Objeto na imagem",
+        legivel=textos.objeto_na_imagem,
+        tipo_do_item="objeto",
+        valor_do_item=_valor_do_existe,
+        aplicar_no_item=_marca_o_objeto_removido,
+        some_o_item=True,
     ),
 }
 

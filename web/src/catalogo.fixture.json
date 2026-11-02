@@ -97,6 +97,10 @@
       "rotulo": "Dono do objeto"
     },
     {
+      "valor": "objeto.nao_existe",
+      "rotulo": "Objeto na imagem"
+    },
+    {
       "valor": "desfazer",
       "rotulo": "Desfazer"
     },

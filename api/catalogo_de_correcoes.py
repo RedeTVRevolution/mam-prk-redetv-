@@ -143,6 +143,10 @@ def tom_da_pauta(valor: str) -> str:
     return ROTULOS_DOS_TONS.get(valor, valor)
 
 
+def objeto_na_imagem(valor: str) -> str:
+    return "Objeto na imagem" if valor == "existe" else "Objeto não está na imagem"
+
+
 def plano_limpo(valor: str) -> str:
     return "plano limpo" if valor == "true" else "plano não limpo"
 
