@@ -25,6 +25,9 @@ Onde a transcrição e a leitura da tela rodam: `cpu` (padrão) ou `gpu` (L4, em
 Refazer um Job a partir de uma etapa, sem enviar o vídeo de novo (`POST /v1/jobs/{id}/reprocessar`). As etapas anteriores não rodam, e cada reprocessamento vai à auditoria (`video.reprocessado`).
 Há dois jeitos. **Reprocessar o que falhou** (`video.reprocessar`, Operador e acima) recomeça da primeira etapa que falhou e só vale para falha de etapa; a falha do arquivo pede novo envio. **Reprocessar a partir de uma etapa escolhida** (`video.reprocessar_etapa`, Curador e Administrador) refaz um vídeo `concluido` e bom, por exemplo por uma instrução nova: o corpo do pedido traz a `etapa` (análise, identificação, quadros-chave ou indexação) e o motivo, obrigatório, e a auditoria marca `etapa_escolhida`. Com a análise escolhida o Job volta a `analisando`, a Decupagem some até a nova análise terminar e o progresso das janelas é descartado, para o modelo rodar de novo em todas; com as outras, o Job continua `concluido`.
 
+**Corrigir o estado**:
+Pôr um Job em `concluido` ou `falhou` à mão, só o Administrador (`job.corrigir_estado`), com motivo obrigatório: `POST /v1/admin/jobs/{id}/estado` ou `make corrigir-estado JOB=... ESTADO=... MOTIVO=...`, pela mesma função (`api/correcao_de_estado.py`). As transições valem em `api/ciclo_de_vida.py` (`DESTINOS_DA_CORRECAO`): falhar vale de qualquer estado não final; voltar a concluído, só de `falhou` ou `analisando` e se a decupagem guardada passar pelo esquema inteiro (a indexação volta a `pendente`). Vai à auditoria como `job.estado_corrigido`, com o estado de antes e o de depois; no comando, quem fez é o `sistema` `corrigir-estado:<usuário da máquina>`.
+
 **Bloco**:
 Segmento editorial de um programa de TV, como a abertura ou o trecho entre dois intervalos.
 _Evitar_: segmento, parte

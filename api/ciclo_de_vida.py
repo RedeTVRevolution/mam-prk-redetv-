@@ -346,6 +346,59 @@ def reprocessar(
     return (lido[0], depois) if depois is not None else None
 
 
+# A correção manual (#289): de onde cada destino pode ser alcançado. A falha vale de
+# qualquer estado não final; voltar a concluído, só de um Job que falhou ou que ficou
+# andando sem ninguém rodando, e se a decupagem estiver completa.
+DESTINOS_DA_CORRECAO: dict[Estado, frozenset[Estado]] = {
+    "falhou": frozenset(e for e in TRANSICOES if e not in FINAIS),
+    "concluido": frozenset({"falhou", "analisando"}),
+}
+
+
+class EstadoNaoCorrigivel(Exception):
+    """A correção manual do estado não vale; a mensagem diz o porquê (vira 409)."""
+
+
+def corrigir_estado(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    destino: Estado,
+    agora: datetime,
+    *,
+    decupagem_completa: Callable[[], bool],
+) -> tuple[Job, Job] | None:
+    """Põe o Job em `destino` à mão: devolve o Job de antes e o de depois.
+
+    Fora da tabela de `TRANSICOES` de propósito: é a saída de emergência do
+    Administrador (`falhou` e `concluido` seguem finais para o resto). Atômico, como o
+    `reprocessar`. `None` se o Job não existe; `EstadoNaoCorrigivel` se não vale.
+    `decupagem_completa` pode rodar mais de uma vez e não pode ter efeito de fora.
+    """
+    from api.jobs import Indexacao
+
+    lido: list[Job] = []
+
+    def mudar(job: Job) -> dict[str, Any]:
+        lido[:] = [job]
+        if destino not in DESTINOS_DA_CORRECAO:
+            raise EstadoNaoCorrigivel("Só dá para corrigir para concluido ou falhou")
+        if job.estado not in DESTINOS_DA_CORRECAO[destino]:
+            raise EstadoNaoCorrigivel(f"Job em {job.estado} não pode ir para {destino}")
+        mudancas: dict[str, Any] = {"estado": destino, "atualizado_em": agora}
+        if destino == "concluido":
+            if not decupagem_completa():
+                raise EstadoNaoCorrigivel(
+                    "Sem decupagem completa guardada, o Job não pode voltar a concluído"
+                )
+            mudancas["codigo_falha"] = None
+            # Quem indexa (api.indexacao) troca este estado ao terminar.
+            mudancas["indexacao"] = Indexacao(estado="pendente", em=agora)
+        return mudancas
+
+    depois = repositorio.trocar(job_id, mudar)
+    return (lido[0], depois) if depois is not None else None
+
+
 def desfazer_reprocessamento(
     repositorio: RepositorioDeJobs, antes: Job, depois: Job, agora: datetime
 ) -> Job | None:

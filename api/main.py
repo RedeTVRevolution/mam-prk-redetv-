@@ -38,6 +38,7 @@ from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.comparar_passadas import criar_rotas_da_comparacao
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente
+from api.correcao_de_estado import criar_rotas_da_correcao_de_estado
 from api.correcoes import (
     RepositorioDeAprovacao,
     RepositorioDeAprovacaoEmMemoria,
@@ -342,6 +343,14 @@ def criar_app(
             disparo or DisparoIndisponivel(),
             relogio,
             janelas,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_correcao_de_estado(
+            repositorio_de_jobs,
+            repositorio_de_auditoria,
+            armazenamento_dos_jobs,
+            relogio,
         )
     )
     v1.include_router(

@@ -61,6 +61,12 @@ revogar-chave:
 atribuir-papeis:
 	uv run --locked python -m api.atribuir_papeis "$(EMAIL)" "$(PAPEIS)"
 
+# Correção manual do estado de um Job (#289), com motivo e auditoria: make corrigir-estado JOB=... ESTADO=concluido|falhou MOTIVO=...
+corrigir-estado:
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.correcao_de_estado "$(JOB)" "$(ESTADO)" "$(MOTIVO)"
+
 # Carga inicial do catálogo de pessoas (#108), a partir do api/programas.toml; idempotente.
 carregar-catalogo:
 	uv run --locked python -m api.carregar_catalogo

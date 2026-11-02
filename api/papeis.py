@@ -16,6 +16,7 @@ Permissao = Literal[
     "auditoria.ver",
     "video.reprocessar",
     "video.reprocessar_etapa",
+    "job.corrigir_estado",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
