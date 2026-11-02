@@ -5,11 +5,13 @@ import io
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from api import taxa_de_correcao as taxa
 from api.auth import Usuario
 from api.correcoes import (
     Ancora,
@@ -240,6 +242,72 @@ def test_correcao_aprovada_conta_e_pendente_nao() -> None:
     assert _taxa(linhas, "Jornal", "pessoa.fontes_do_nome").correcoes == 0
 
 
+def test_aprovada_conta_no_periodo_da_aprovacao() -> None:
+    jobs, decupagens, correcoes, revisao = _mundo()
+    modelo = _modelo(10, 5)
+    # criada antes do período e aprovada nele; criada nele e aprovada depois
+    correcoes.acrescentar(
+        _c("f", "j1", modelo, "pessoa.nao_e", dias=-10, exige_aprovacao=True)
+    )
+    correcoes.acrescentar(
+        _c("g", "j1", modelo, "aprovar", aprova="f", antes="", depois="")
+    )
+    correcoes.acrescentar(
+        _c("h", "j1", modelo, "pessoa.nao_e", dias=1, exige_aprovacao=True)
+    )
+    correcoes.acrescentar(
+        _c("i", "j1", modelo, "aprovar", dias=20, aprova="h", antes="", depois="")
+    )
+
+    linhas = calcular(
+        jobs,
+        decupagens,
+        correcoes,
+        revisao,
+        desde=BASE - timedelta(days=1),
+        ate=BASE + timedelta(days=5),
+    )
+
+    assert _taxa(linhas, "Jornal", "pessoa.nao_e").correcoes == 1
+
+
+def test_aprovacao_no_periodo_torna_a_decupagem_revisada() -> None:
+    jobs, decupagens, correcoes, revisao = _mundo()
+    modelo = _modelo(100, 100)
+    correcoes.acrescentar(
+        _c("f", "j4", modelo, "pessoa.nao_e", dias=-10, exige_aprovacao=True)
+    )
+    correcoes.acrescentar(
+        _c("g", "j4", modelo, "aprovar", aprova="f", antes="", depois="")
+    )
+
+    linhas = calcular(
+        jobs, decupagens, correcoes, revisao, desde=BASE - timedelta(days=1)
+    )
+
+    nao_e = _taxa(linhas, "Jornal", "pessoa.nao_e")
+    assert (nao_e.correcoes, nao_e.itens) == (1, 110)
+
+
+def test_decupagem_fora_do_formato_fica_de_fora_sem_somar_pela_metade() -> None:
+    jobs, _decupagens, correcoes, revisao = _mundo()
+    decupagens = Decupagens(
+        {
+            "j1": [1, 2],  # type: ignore[dict-item]
+            "j2": {**_modelo(10, 5, "v2"), "pautas": [{"id": "t0"}, "lixo"]},
+            "j3": {**_modelo(4, 2), "versao_pipeline": 7},
+        }
+    )
+
+    linhas = calcular(jobs, decupagens, correcoes, revisao)
+
+    assert {(x.programa, x.versao_pipeline) for x in linhas} == {
+        ("Jornal", "v2"),
+        ("Fama", None),
+    }
+    assert _taxa(linhas, "Jornal", "pauta.titulo", "v2").itens == 1
+
+
 def test_job_sem_decupagem_legivel_fica_de_fora() -> None:
     jobs, _decupagens, correcoes, revisao = _mundo()
 
@@ -365,3 +433,33 @@ def test_data_invalida_ou_invertida_avisa_e_sai_com_2(
     assert main(["ontem"], ambiente) == 2
     assert main(["2026-11-03", "2026-11-02"], ambiente) == 2
     assert "ontem" in capsys.readouterr().err
+
+
+def test_comando_imprime_o_csv_do_periodo_e_do_programa(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jobs, decupagens, correcoes, revisao = _mundo()
+    monkeypatch.setattr(taxa, "firestore", SimpleNamespace(Client=lambda project: None))
+    monkeypatch.setattr(taxa, "ClienteStorage", lambda project: None)
+    monkeypatch.setattr(taxa, "RepositorioFirestore", lambda banco: jobs)
+    monkeypatch.setattr(taxa, "DecupagensStorage", lambda *_: decupagens)
+    monkeypatch.setattr(
+        taxa, "RepositorioDeCorrecoesFirestore", lambda banco: correcoes
+    )
+    monkeypatch.setattr(taxa, "RepositorioDeRevisaoFirestore", lambda banco: revisao)
+    ambiente = {"GCP_PROJECT_ID": "p", "BUCKET_ACEITOS": "a", "BUCKET_DECUPAGENS": "d"}
+    impresso: list[str] = []
+
+    assert main(["2026-11-02", "2026-11-02", "Jornal"], ambiente, impresso.append) == 0
+
+    [texto] = impresso
+    lidas = list(csv.DictReader(io.StringIO(texto)))
+    assert {x["programa"] for x in lidas} == {"Jornal"}
+    assert {
+        "programa": "Jornal",
+        "versao_pipeline": "v1",
+        "tipo": "pessoa.renomear",
+        "correcoes": "2",
+        "itens": "10",
+        "taxa_de_correcao": "0.2",
+    } in lidas

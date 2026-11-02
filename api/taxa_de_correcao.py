@@ -2,13 +2,21 @@
 e `make taxa-de-correcao`.
 
 Numerador: as correções em vigor do tipo (aprovadas, ou de tipo que não exige aprovação,
-e não desfeitas) criadas no período, sobre o JSON do modelo que está na decupagem do Job.
+e não desfeitas) que passaram a valer no período, sobre o JSON do modelo que está na
+decupagem do Job. Passa a valer na aprovação, se exige aprovação, e na criação, se não
+(a mesma data de `_em_ordem_de_vigencia`): a pendente aprovada depois do período conta
+no período da aprovação, e um período fechado não muda de número. Conta correções, não
+itens: duas na mesma pessoa contam duas, e a taxa pode passar de 1. A feita sobre um JSON
+anterior a um reprocessamento sai, como no conjunto de regressão.
+
 Denominador: os itens daquele tipo nas decupagens revisadas. Revisada é a decupagem de um
-Job concluído que teve, no período, uma correção ou um pulso de revisão (#251): contar só
-as que têm correção esconderia o vídeo que a pessoa abriu e deixou como estava, e o
-modelo acertou. O item é o do tipo que a correção corrige (`pessoa`, `pauta`, `comercial`,
-`plano`, `fala`, `texto_na_tela`); no `item.tempos`, que serve a qualquer um, são todos.
-O tipo que acrescenta (`pauta.acrescentar`) tem como denominador os mesmos itens do tipo.
+Job concluído que teve, no período, uma correção, uma aprovação ou um pulso de revisão
+(#251): contar só as que têm correção esconderia o vídeo que a pessoa abriu e deixou como
+estava, e o modelo acertou. A revisão guarda só o último pulso de cada pessoa no vídeo:
+o vídeo revisado no período e reaberto depois dele, sem correção no período, fica de
+fora. O item é o do tipo que a correção corrige (`pessoa`, `pauta`, `comercial`, `plano`,
+`fala`, `texto_na_tela`); no `item.tempos`, que serve a qualquer um, são todos. O tipo
+que acrescenta (`pauta.acrescentar`) tem como denominador os mesmos itens do tipo.
 
 Uma linha por programa, versão do pipeline (`None` na decupagem anterior à versão) e tipo.
 A taxa é `None` se o denominador é zero. Ambiente do comando: `GCP_PROJECT_ID`,
@@ -23,7 +31,7 @@ import os
 import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud import firestore
@@ -37,6 +45,8 @@ from api.correcoes import (
     TIPOS,
     Correcao,
     RepositorioDeCorrecoes,
+    TipoDoItem,
+    _itens,
     estado_das,
     versao_do_modelo,
 )
@@ -66,7 +76,6 @@ __all__ = [
     "main",
 ]
 
-TIPOS_DE_ITEM = ("pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela")
 COLUNAS_DO_CSV = (
     "programa",
     "versao_pipeline",
@@ -86,27 +95,11 @@ class LinhaDaTaxa(BaseModel):
     taxa_de_correcao: float | None
 
 
-def _itens_do_tipo(modelo: Mapping[str, Any], tipo: str) -> int:
+def _itens_do_tipo(modelo: dict[str, Any], tipo: str) -> int:
     """Quantos itens do tipo do item que a correção do `tipo` corrige."""
     do_item = TIPOS[tipo].tipo_do_item
-    return sum(
-        _quantos(modelo, t) for t in (TIPOS_DE_ITEM if do_item is None else (do_item,))
-    )
-
-
-_CHAVE_DO_ITEM = {
-    "pessoa": "pessoas",
-    "pauta": "pautas",
-    "comercial": "comerciais",
-    "plano": "planos",
-    "fala": "transcricao",
-    "texto_na_tela": "textos_na_tela",
-}
-
-
-def _quantos(modelo: Mapping[str, Any], tipo_do_item: str) -> int:
-    lista = modelo.get(_CHAVE_DO_ITEM[tipo_do_item], [])
-    return sum(isinstance(i, dict) for i in lista) if isinstance(lista, list) else 0
+    tipos = get_args(TipoDoItem) if do_item is None else (do_item,)
+    return sum(len(_itens(modelo, t)) for t in tipos)
 
 
 def _no_periodo(quando: datetime, desde: datetime | None, ate: datetime | None) -> bool:
@@ -128,31 +121,37 @@ def calcular(
         for m in revisao.todas(desde)
         if _no_periodo(m.ultimo_pulso, desde, ate)
     }
-    # (programa, versão, tipo) -> [correções, itens]
-    somas: dict[tuple[str | None, str | None, str], list[int]] = {}
+    # (programa, versão, tipo) -> (correções, itens)
+    somas: dict[tuple[str | None, str | None, str], tuple[int, int]] = {}
     for job in repositorio.listar():
         if job.estado != "concluido" or (programa and job.programa != programa):
             continue
         feitas = correcoes.listar(job.id)
-        no_periodo = [c for c in feitas if _no_periodo(c.criada_em, desde, ate)]
         if job.id not in pulsados and not any(
-            c.tipo in CORRIGIVEIS for c in no_periodo
+            (c.tipo in CORRIGIVEIS or c.aprova) and _no_periodo(c.criada_em, desde, ate)
+            for c in feitas
         ):
             continue
         try:
             conteudo = b"".join(decupagens.abrir_decupagem(job.id))
             modelo = json.loads(conteudo)
-            versao = versao_do_modelo(conteudo)
+            if not isinstance(modelo, dict):
+                raise TypeError("a decupagem não é um objeto")
             versao_pipeline = modelo.get("versao_pipeline")
-            vigor = _em_vigor_no_periodo(feitas, no_periodo, versao)
-            for tipo in CORRIGIVEIS:
-                soma = somas.setdefault(
-                    (job.programa, versao_pipeline or None, tipo), [0, 0]
-                )
-                soma[0] += sum(c.tipo == tipo for c in vigor)
-                soma[1] += _itens_do_tipo(modelo, tipo)
+            if not isinstance(versao_pipeline, str):
+                versao_pipeline = None
+            vigor = _em_vigor_no_periodo(feitas, versao_do_modelo(conteudo), desde, ate)
+            do_job = {
+                tipo: (sum(c.tipo == tipo for c in vigor), _itens_do_tipo(modelo, tipo))
+                for tipo in CORRIGIVEIS
+            }
         except (ServicoIndisponivel, ValueError, KeyError, TypeError):
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
+            continue
+        for tipo, (n, itens) in do_job.items():
+            chave = (job.programa, versao_pipeline or None, tipo)
+            antes = somas.get(chave, (0, 0))
+            somas[chave] = (antes[0] + n, antes[1] + itens)
     return [
         LinhaDaTaxa(
             programa=p,
@@ -169,15 +168,22 @@ def calcular(
 
 
 def _em_vigor_no_periodo(
-    todas: list[Correcao], no_periodo: list[Correcao], versao: str
+    todas: list[Correcao],
+    versao: str,
+    desde: datetime | None,
+    ate: datetime | None,
 ) -> list[Correcao]:
-    """Do período, as em vigor segundo o histórico inteiro (o desfazer ou a aprovação
-    pode ser de fora do período) e feitas sobre este JSON do modelo."""
+    """As em vigor segundo o histórico inteiro (o desfazer pode ser de fora do
+    período), feitas sobre este JSON do modelo e que passaram a valer no período."""
     estado = estado_das(todas)
+    aprovada_em = {c.aprova: c.criada_em for c in todas if c.aprova}
     return [
         c
-        for c in no_periodo
-        if c.tipo in CORRIGIVEIS and estado.em_vigor(c.id) and c.ancora.versao == versao
+        for c in todas
+        if c.tipo in CORRIGIVEIS
+        and estado.em_vigor(c.id)
+        and c.ancora.versao == versao
+        and _no_periodo(aprovada_em.get(c.id, c.criada_em), desde, ate)
     ]
 
 
@@ -199,8 +205,16 @@ def em_csv(linhas: list[LinhaDaTaxa]) -> str:
     return saida.getvalue()
 
 
-def _inicio_do_dia(dia: date) -> datetime:
-    return datetime.combine(dia, time.min, UTC)
+def _periodo(
+    desde: date | None, ate: date | None
+) -> tuple[datetime | None, datetime | None]:
+    """Os dias `desde` e `ate` (UTC, os dois inclusive) como `[desde, ate)`."""
+    if desde and ate and desde > ate:
+        raise ValueError("`desde` depois de `ate`")
+    return (
+        datetime.combine(desde, time.min, UTC) if desde else None,
+        datetime.combine(ate + timedelta(days=1), time.min, UTC) if ate else None,
+    )
 
 
 def _exige_ver_a_taxa(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -235,28 +249,20 @@ def criar_rotas_da_qualidade(
         programa: str | None = None,
     ) -> TaxaDeCorrecao:
         """`desde` e `ate` são dias (UTC), os dois inclusive."""
-        if desde and ate and desde > ate:
-            raise HTTPException(422, "`desde` depois de `ate`")
+        try:
+            inicio, fim = _periodo(desde, ate)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
         return TaxaDeCorrecao(
             desde=desde,
             ate=ate,
             programa=programa,
             linhas=calcular(
-                repositorio,
-                decupagens,
-                correcoes,
-                revisao,
-                _inicio_do_dia(desde) if desde else None,
-                _inicio_do_dia(ate) + timedelta(days=1) if ate else None,
-                programa,
+                repositorio, decupagens, correcoes, revisao, inicio, fim, programa
             ),
         )
 
     return rotas
-
-
-def _dia(texto: str) -> date:
-    return date.fromisoformat(texto)
 
 
 def main(
@@ -270,10 +276,10 @@ def main(
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
         decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
         pedidos = [*argumentos, "", "", ""][:3]
-        desde = _dia(pedidos[0]) if pedidos[0] else None
-        ate = _dia(pedidos[1]) if pedidos[1] else None
-        if desde and ate and desde > ate:
-            raise ValueError("DESDE depois de ATE")
+        inicio, fim = _periodo(
+            date.fromisoformat(pedidos[0]) if pedidos[0] else None,
+            date.fromisoformat(pedidos[1]) if pedidos[1] else None,
+        )
     except (FaltaNoAmbiente, ValueError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -283,8 +289,8 @@ def main(
         DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
         RepositorioDeCorrecoesFirestore(banco),
         RepositorioDeRevisaoFirestore(banco),
-        _inicio_do_dia(desde) if desde else None,
-        _inicio_do_dia(ate) + timedelta(days=1) if ate else None,
+        inicio,
+        fim,
         pedidos[2] or None,
     )
     escrever(em_csv(linhas).rstrip("\n"))
