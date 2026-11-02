@@ -1,32 +1,20 @@
 # Cloud Armor na frente do serviço de back-end do balanceador (#295). Só existe com
-# `dominio` preenchido (local.balanceador, em balanceador.tf).
-
-variable "waf_ativo" {
-  description = "Falso: as regras WAF só registram no log o que bloqueariam (prévia). Verdadeiro: bloqueiam de verdade (403). Ligue depois de olhar os logs da prévia"
-  type        = bool
-  default     = false
-}
-
-variable "limite_de_requisicoes_por_ip" {
-  description = "Requisições por minuto por IP; acima disso, 429"
-  type        = number
-  default     = 600
-}
-
-variable "ips_da_redetv" {
-  description = "IPs ou CIDRs da RedeTV. Vazio: sem restrição de IP. Preenchido: só eles passam, em todas as rotas, as /v1 dos sistemas inclusive"
-  type        = list(string)
-  default     = []
-}
+# `dominio` preenchido (local.balanceador, em balanceador.tf). As variáveis ficam no main.tf.
+#
+# O Cloud Armor para na primeira regra que casa, e o `throttle` deixa passar quem está
+# dentro do limite. Por isso, com a lista de IPs preenchida, o limite casa só com os IPs
+# da RedeTV: quem está fora não casa com nada e cai na regra padrão, que barra.
 
 locals {
-  regras_waf = {
-    sqli             = "sqli-v33-stable"
-    xss              = "xss-v33-stable"
-    lfi              = "lfi-v33-stable"
-    rce              = "rce-v33-stable"
-    scannerdetection = "scannerdetection-v33-stable"
-  }
+  # A ordem da lista é a das prioridades (100, 101...): regra nova entra no fim.
+  regras_waf = [
+    "sqli-v33-stable",
+    "xss-v33-stable",
+    "lfi-v33-stable",
+    "rce-v33-stable",
+    "scannerdetection-v33-stable",
+  ]
+  restringe_ip = length(var.ips_da_redetv) > 0
 }
 
 resource "google_compute_security_policy" "web" {
@@ -35,14 +23,14 @@ resource "google_compute_security_policy" "web" {
   depends_on = [google_project_service.apis]
 
   dynamic "rule" {
-    for_each = { for i, k in keys(local.regras_waf) : k => 100 + i }
+    for_each = { for i, regra in local.regras_waf : regra => 100 + i }
     content {
       priority = rule.value
       action   = "deny(403)"
       preview  = !var.waf_ativo
       match {
         expr {
-          expression = "evaluatePreconfiguredWaf('${local.regras_waf[rule.key]}', {'sensitivity': 1})"
+          expression = "evaluatePreconfiguredWaf('${rule.key}', {'sensitivity': 1})"
         }
       }
       description = "WAF ${rule.key}"
@@ -55,7 +43,7 @@ resource "google_compute_security_policy" "web" {
     match {
       versioned_expr = "SRC_IPS_V1"
       config {
-        src_ip_ranges = ["*"]
+        src_ip_ranges = local.restringe_ip ? var.ips_da_redetv : ["*"]
       }
     }
     rate_limit_options {
@@ -67,29 +55,13 @@ resource "google_compute_security_policy" "web" {
         interval_sec = 60
       }
     }
-    description = "Limite de requisições por IP"
-  }
-
-  # Só com a lista preenchida: deixa passar os IPs da RedeTV (depois do WAF e do limite).
-  dynamic "rule" {
-    for_each = length(var.ips_da_redetv) > 0 ? [1] : []
-    content {
-      priority = 1000
-      action   = "allow"
-      match {
-        versioned_expr = "SRC_IPS_V1"
-        config {
-          src_ip_ranges = var.ips_da_redetv
-        }
-      }
-      description = "IPs da RedeTV"
-    }
+    description = local.restringe_ip ? "Limite por IP, só para os IPs da RedeTV" : "Limite por IP"
   }
 
   # Regra padrão: com a lista preenchida, quem não está nela é barrado.
   rule {
     priority = 2147483647
-    action   = length(var.ips_da_redetv) > 0 ? "deny(403)" : "allow"
+    action   = local.restringe_ip ? "deny(403)" : "allow"
     match {
       versioned_expr = "SRC_IPS_V1"
       config {

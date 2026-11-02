@@ -148,14 +148,27 @@ def test_o_readme_diz_o_registro_de_dns_a_espera_do_certificado_e_o_custo(
 
 
 ARMOR = (MODULO / "cloud_armor.tf").read_text()
+POLITICA = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+
+
+def _regras(politica: str) -> list[tuple[int, str]]:
+    """(prioridade, texto) de cada regra, em ordem de prioridade."""
+    partes = re.split(r"^  (?:dynamic \"rule\"|rule) \{$", politica, flags=re.MULTILINE)
+    regras = []
+    for parte in partes[1:]:
+        achado = re.search(r"priority\s*= (\S+)", parte)
+        assert achado, parte
+        prioridade = achado[1]
+        numero = 100 if prioridade == "rule.value" else int(prioridade)
+        regras.append((numero, parte))
+    return sorted(regras, key=lambda r: r[0])
 
 
 def test_a_politica_so_existe_com_balanceador_e_vai_no_back_end() -> None:
-    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
     back_end = _bloco(BALANCEADOR, 'resource "google_compute_backend_service" "web"')
 
     assert re.search(
-        r"^  count\s*= local\.balanceador \? 1 : 0$", politica, re.MULTILINE
+        r"^  count\s*= local\.balanceador \? 1 : 0$", POLITICA, re.MULTILINE
     )
     assert re.search(
         r"security_policy\s*= google_compute_security_policy\.web\[0\]\.id", back_end
@@ -163,39 +176,63 @@ def test_a_politica_so_existe_com_balanceador_e_vai_no_back_end() -> None:
 
 
 def test_as_regras_waf_ficam_em_previa_ate_a_variavel_ligar() -> None:
-    waf = _bloco(ARMOR, 'variable "waf_ativo"')
-    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+    waf = _bloco(MAIN, 'variable "waf_ativo"')
+    lista = _bloco(ARMOR, "locals {")
 
     assert "default     = false" in waf
-    assert re.search(r"preview\s*= !var\.waf_ativo", politica)
+    assert re.search(r"preview\s*= !var\.waf_ativo", POLITICA)
+    assert re.search(r'action\s*= "deny\(403\)"\n\s*preview', POLITICA)
+    assert "evaluatePreconfiguredWaf('${rule.key}'" in POLITICA
+    assert re.search(
+        r"for_each\s*= \{ for i, regra in local\.regras_waf : regra => 100 \+ i \}",
+        POLITICA,
+    )
     for regra in ("sqli", "xss", "lfi", "rce", "scannerdetection"):
-        assert f"{regra}-v33-stable" in ARMOR, regra
+        assert f'"{regra}-v33-stable",' in lista, regra
 
 
 def test_ha_limite_de_requisicoes_por_ip_por_variavel() -> None:
-    limite = _bloco(ARMOR, 'variable "limite_de_requisicoes_por_ip"')
-    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+    limite = _bloco(MAIN, 'variable "limite_de_requisicoes_por_ip"')
+    throttle = next(r for p, r in _regras(POLITICA) if p == 200)
 
     assert "type        = number" in limite
-    assert re.search(r'action\s*= "throttle"', politica)
-    assert "var.limite_de_requisicoes_por_ip" in politica
-    assert 'enforce_on_key = "IP"' in politica
+    assert re.search(r'action\s*= "throttle"', throttle)
+    assert re.search(r"count\s*= var\.limite_de_requisicoes_por_ip", throttle)
+    assert 'enforce_on_key = "IP"' in throttle
+    assert 'exceed_action  = "deny(429)"' in throttle
 
 
 def test_sem_ips_da_redetv_nenhuma_regra_de_ip_e_o_padrao_deixa_passar() -> None:
-    ips = _bloco(ARMOR, 'variable "ips_da_redetv"')
-    politica = _bloco(ARMOR, 'resource "google_compute_security_policy" "web"')
+    ips = _bloco(MAIN, 'variable "ips_da_redetv"')
+    regras = _regras(POLITICA)
 
     assert "default     = []" in ips
+    assert re.search(r"restringe_ip\s*= length\(var\.ips_da_redetv\) > 0", ARMOR)
+    assert [p for p, _ in regras] == [100, 200, 2147483647]
     assert re.search(
-        r"for_each\s*= length\(var\.ips_da_redetv\) > 0 \? \[1\] : \[\]", politica
+        r'action\s*= local\.restringe_ip \? "deny\(403\)" : "allow"', regras[-1][1]
     )
-    assert "var.ips_da_redetv" in politica
-    assert re.search(
-        r'priority\s*= 2147483647.*?action\s*= length\(var\.ips_da_redetv\) > 0 \? "deny\(403\)" : "allow"',
-        politica,
-        re.DOTALL,
-    )
+
+
+def test_com_ips_da_redetv_quem_esta_fora_nao_passa_por_regra_que_deixa_passar() -> (
+    None
+):
+    # O Cloud Armor para na primeira regra que casa, e o throttle deixa passar quem está
+    # dentro do limite: toda regra que deixa passar, antes da padrão, casa só com a lista.
+    for prioridade, regra in _regras(POLITICA)[:-1]:
+        if "preview" in regra:
+            continue
+        assert re.search(
+            r"src_ip_ranges = local\.restringe_ip \? var\.ips_da_redetv : \[\"\*\"\]",
+            regra,
+        ), prioridade
+
+
+def test_ips_da_redetv_ate_dez_e_no_formato_de_ip() -> None:
+    ips = _bloco(MAIN, 'variable "ips_da_redetv"')
+
+    assert "length(var.ips_da_redetv) <= 10" in ips
+    assert "cidrhost(" in ips
 
 
 def test_o_cloud_armor_chega_aos_tres_ambientes_e_ao_wizard() -> None:

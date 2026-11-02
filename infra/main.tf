@@ -84,7 +84,7 @@ variable "limite_de_requisicoes_por_ip" {
 }
 
 variable "ips_da_redetv" {
-  description = "IPs ou CIDRs da RedeTV no Cloud Armor. Vazio: sem restrição de IP (#295)"
+  description = "IPs ou CIDRs da RedeTV no Cloud Armor, até 10. Vazio: sem restrição de IP (#295)"
   type        = list(string)
   default     = []
 }

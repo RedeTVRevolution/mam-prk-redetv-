@@ -143,6 +143,34 @@ variable "dominio" {
   default     = ""
 }
 
+variable "waf_ativo" {
+  description = "Falso: as regras WAF do Cloud Armor só registram no log o que bloqueariam (prévia). Verdadeiro: bloqueiam de verdade (403). Ligue depois de olhar os logs da prévia (#295)"
+  type        = bool
+  default     = false
+}
+
+variable "limite_de_requisicoes_por_ip" {
+  description = "Requisições por minuto por IP no Cloud Armor; acima disso, 429 (#295)"
+  type        = number
+  default     = 600
+}
+
+variable "ips_da_redetv" {
+  description = "IPs ou CIDRs da RedeTV no Cloud Armor, até 10 (limite do Google por regra). Vazio: sem restrição de IP. Preenchido: só eles passam, em todas as rotas, as /v1 dos sistemas inclusive (#295)"
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = length(var.ips_da_redetv) <= 10
+    error_message = "O Cloud Armor aceita até 10 IPs ou CIDRs por regra."
+  }
+
+  validation {
+    condition     = alltrue([for ip in var.ips_da_redetv : can(cidrhost(strcontains(ip, "/") ? ip : "${ip}/32", 0))])
+    error_message = "Cada item de ips_da_redetv precisa ser um IP ou CIDR (ex.: 200.1.2.0/24)."
+  }
+}
+
 variable "imagem" {
   description = "Imagem do serviço, de preferência pelo digest"
   type        = string
