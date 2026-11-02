@@ -125,7 +125,7 @@ def test_o_cloud_build_cobre_a_imagem_do_florence_com_a_estimativa() -> None:
     assert "objetos-gpu" in cloudbuild.split("timeout:")[0]
 
 
-MAIN = (RAIZ / "infra" / "main.tf").read_text()
+MAIN = (RAIZ / "infra" / "modulos" / "mam" / "main.tf").read_text()
 
 
 def _bloco(cabecalho: str) -> str:
@@ -205,7 +205,9 @@ def test_o_workflows_recebe_o_motor_e_o_job_de_objetos_e_o_cabecalho_os_cita() -
         r"job_de_objetos_gpu\s+= google_cloud_run_v2_job\.objetos_gpu\.name", MAIN
     )
     cabecalho = (
-        (RAIZ / "infra" / "validacao.workflow.yaml").read_text().split("\nmain:")[0]
+        (RAIZ / "infra" / "modulos" / "mam" / "validacao.workflow.yaml")
+        .read_text()
+        .split("\nmain:")[0]
     )
     assert "${motor_objetos}" in cabecalho and "${job_de_objetos_gpu}" in cabecalho
 

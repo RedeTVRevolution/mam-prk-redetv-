@@ -198,7 +198,7 @@ class RepositorioFirestore:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
         # estar no campo da ordem). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
-        # Os índices estão no infra/main.tf.
+        # Os índices estão no infra/modulos/mam/main.tf.
         consulta: Any = self._colecao
         if filtro.programa is not None:
             consulta = consulta.where(
@@ -584,7 +584,7 @@ class RepositorioDeAuditoriaFirestore:
 
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
         # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os
-        # índices compostos estão no infra/main.tf.
+        # índices compostos estão no infra/modulos/mam/main.tf.
         consulta: Any = self._colecao
         if filtro.pessoa is not None:
             campo, valor = campo_da_pessoa(filtro.pessoa)

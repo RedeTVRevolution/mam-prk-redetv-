@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-TF = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+TF = (Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf").read_text()
 
 
 def _bloco(cabecalho: str) -> str:

@@ -9,7 +9,7 @@ from api.fila_job import amostrar_a_fila
 from api.jobs import RepositorioEmMemoria
 from api.sinais import registro_do_uso_do_modelo
 
-INFRA = Path(__file__).parents[2] / "infra"
+INFRA = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
 TF = (INFRA / "main.tf").read_text()
 WORKFLOW = (INFRA / "validacao.workflow.yaml").read_text()
 

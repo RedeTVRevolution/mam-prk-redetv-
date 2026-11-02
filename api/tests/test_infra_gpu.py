@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 RAIZ = Path(__file__).parents[2]
-MAIN = (RAIZ / "infra" / "main.tf").read_text()
+MAIN = (RAIZ / "infra" / "modulos" / "mam" / "main.tf").read_text()
 
 
 def _bloco(cabecalho: str) -> str:
@@ -181,9 +181,9 @@ def test_deploy_dev_cria_o_repositorio_novo_no_primeiro_apply_e_publica_pelos_di
     deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
 
     primeiro = deploy[: deploy.index("REPOSITORIO=$(")]
-    assert "-target=google_artifact_registry_repository.mam_gpu" in primeiro
+    assert "-target=module.mam.google_artifact_registry_repository.mam_gpu" in primeiro
     assert (
-        "-target=google_artifact_registry_repository_iam_member.build_envia_gpu"
+        "-target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu"
         in primeiro
     )
     assert (
@@ -205,7 +205,7 @@ def test_deploy_dev_le_as_imagens_antes_do_apply_e_testa_depois_so_os_jobs_com_g
 
     antes = deploy.index("TRANSCRICAO_GPU_ANTES=$(")
     cloudbuild = deploy.index("gc builds submit")
-    apply = deploy.index('tf apply -input=false -var "imagem=$IMAGEM"')
+    apply = deploy.index('scripts/aplicar-sem-destruir.sh -var "imagem=$IMAGEM"')
     teste = deploy.index("scripts/testar-jobs-gpu.sh")
     assert antes < cloudbuild < apply < teste
     assert (

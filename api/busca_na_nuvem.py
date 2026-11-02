@@ -4,7 +4,7 @@ O Model Armor julga a consulta antes de o modelo vê-la; a Ranking API reordena 
 registros pela consulta de texto livre. As duas só lançam erro: o `entender` e a busca
 já caem no plano B e na ordem do índice (`api/entendimento_da_consulta.py`, `api/busca.py`).
 Os nomes (modelo do Model Armor, região, configuração da Ranking) vêm do ambiente, que
-o `infra/main.tf` preenche.
+o `infra/modulos/mam/main.tf` preenche.
 """
 
 import logging

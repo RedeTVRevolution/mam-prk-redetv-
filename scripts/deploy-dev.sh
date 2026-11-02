@@ -37,12 +37,14 @@ tf init -input=false -backend-config="bucket=$ESTADO"
 # A imagem precisa do repositório, da chave web do Identity Platform e do que o
 # Cloud Build usa (#71), e o serviço precisa da imagem. Este apply só cria esses,
 # então a imagem ainda não importa.
-tf apply -input=false -target=google_artifact_registry_repository.mam \
-  -target=google_identity_platform_config.mam -target=google_project_iam_member.mam \
-  -target=google_storage_bucket_iam_member.build_le_fontes \
-  -target=google_artifact_registry_repository_iam_member.build_envia \
-  -target=google_artifact_registry_repository.mam_gpu \
-  -target=google_artifact_registry_repository_iam_member.build_envia_gpu \
+# Os dois applies passam por scripts/aplicar-sem-destruir.sh: plano com destruição ou
+# recriação para aqui, salvo PERMITIR_DESTRUICAO=sim. Os recursos estão no módulo `mam` (#292).
+scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repository.mam \
+  -target=module.mam.google_identity_platform_config.mam -target=module.mam.google_project_iam_member.mam \
+  -target=module.mam.google_storage_bucket_iam_member.build_le_fontes \
+  -target=module.mam.google_artifact_registry_repository_iam_member.build_envia \
+  -target=module.mam.google_artifact_registry_repository.mam_gpu \
+  -target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu \
   -var imagem=pendente -var imagem_validacao=pendente -var imagem_transcricao=pendente -var imagem_ocr=pendente \
   -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
 # O nome do repositório vem do Terraform, o único lugar que monta os nomes.
@@ -96,7 +98,7 @@ IMAGEM_OCR=$(digest "$OCR")
 IMAGEM_TRANSCRICAO_GPU=$(digest "$TRANSCRICAO_GPU")
 IMAGEM_OCR_GPU=$(digest "$OCR_GPU")
 IMAGEM_OBJETOS=$(digest "$OBJETOS_GPU")
-tf apply -input=false -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO" \
+scripts/aplicar-sem-destruir.sh -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO" \
   -var "imagem_transcricao=$IMAGEM_TRANSCRICAO" -var "imagem_ocr=$IMAGEM_OCR" \
   -var "imagem_transcricao_gpu=$IMAGEM_TRANSCRICAO_GPU" -var "imagem_ocr_gpu=$IMAGEM_OCR_GPU" \
   -var "imagem_objetos=$IMAGEM_OBJETOS"

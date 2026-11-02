@@ -2,7 +2,7 @@
 
 O Cloud Run lê a linha JSON do stdout como `jsonPayload`, com `severity`. Os campos
 `evento`, `etapa` e os percentuais são o contrato com as métricas de log do
-`infra/main.tf`: mudar um nome aqui pede mudar o filtro lá.
+`infra/modulos/mam/main.tf`: mudar um nome aqui pede mudar o filtro lá.
 
 A falha de etapa sai uma vez por falha: daqui, quando o próprio Job a trata e termina sem
 erro (a análise que derruba o Job, a identificação incompleta); do Workflows

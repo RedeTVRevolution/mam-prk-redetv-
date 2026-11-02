@@ -5,7 +5,7 @@ e mede a latência da busca híbrida. Roda só com credenciais e fica fora do CI
 
 Cada dimensão pede uma coleção própria (a dimensão dos vetores é fixa na criação): a da
 configuração (`BUSCA_DIMENSAO`) é usada como está; cada uma das outras, uma de cada vez,
-ganha a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` (o nome vem do `infra/main.tf`) com
+ganha a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` (o nome vem do `infra/modulos/mam/main.tf`) com
 os seus índices, apagada no fim com tudo o que tiver dentro, mesmo se a medição falhar.
 """
 

@@ -1,7 +1,7 @@
 """Adaptador do índice da busca no Agent Retrieval (#117, ADR 0006).
 
 Projeto, região, coleção, índices e dimensão chegam por variável de ambiente (o
-`infra/main.tf` as entrega); nada disso é escrito aqui. A rede fica atrás de
+`infra/modulos/mam/main.tf` as entrega); nada disso é escrito aqui. A rede fica atrás de
 `Transporte`: aqui moram a montagem dos pedidos e a leitura das respostas, testadas sem
 rede. Cada vetor tem o seu índice ANN (um índice cobre um só campo de vetor), implantado
 junto com a coleção, e toda busca por vetor leva o `searchHint.indexHint` dele, porque o

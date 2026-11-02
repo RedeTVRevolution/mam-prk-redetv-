@@ -7,7 +7,9 @@ import pytest
 
 from api.rostos_dos_palpites import PREFIXO_DOS_PALPITES
 
-DEFINICAO = Path(__file__).parents[2] / "infra" / "validacao.workflow.yaml"
+DEFINICAO = (
+    Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "validacao.workflow.yaml"
+)
 
 
 def _texto() -> str:
@@ -189,7 +191,9 @@ def test_ramo_roda_o_job_com_override_de_job_id() -> None:
 
 
 def test_job_de_ocr_no_main_tf_sem_internet_e_na_rede_da_validacao() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     job = main[main.index('resource "google_cloud_run_v2_job" "ocr"') :].split(
         "\nresource "
@@ -203,7 +207,9 @@ def test_job_de_ocr_no_main_tf_sem_internet_e_na_rede_da_validacao() -> None:
 
 
 def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     job = main[main.index('resource "google_cloud_run_v2_job" "analise"') :].split(
         "\nresource "
@@ -235,7 +241,9 @@ def test_quadros_chave_rodam_depois_da_analise_e_a_falha_deles_nao_derruba_o_job
 
 
 def test_job_de_quadros_no_main_tf_sem_internet_com_a_imagem_da_validacao() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     job = main[main.index('resource "google_cloud_run_v2_job" "quadros"') :].split(
         "\nresource "
@@ -265,7 +273,9 @@ def test_indexacao_roda_depois_dos_quadros_e_a_falha_dela_nao_derruba_o_job() ->
 
 
 def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     job = main[main.index('resource "google_cloud_run_v2_job" "indexacao"') :].split(
         "\nresource "
@@ -286,7 +296,9 @@ def _segundos(texto: str) -> int:
 
 
 def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
     texto = _texto()
     passos = {
         "valida": ("validacao", "- valida:", "- le_o_job:"),
@@ -332,13 +344,15 @@ def _timeout_do_job(main: str, job: str) -> int:
 
 
 def test_nenhum_comentario_da_infra_fala_em_ate_10_min() -> None:
-    infra = Path(__file__).parents[2] / "infra"
+    infra = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
     for arquivo in (infra / "main.tf", DEFINICAO):
         assert "até 10 min" not in arquivo.read_text()
 
 
 def test_job_de_referencias_no_main_tf_tem_internet_e_o_segredo_e_so_dele() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     job = main[main.index('resource "google_cloud_run_v2_job" "referencias"') :].split(
         "\nresource "
@@ -458,7 +472,9 @@ def test_ordem_nova_identificacao_referencias_comparacao_quadros_indexacao() -> 
             in texto[inicio.end() :].split("- tira_os_quadros:")[0]
         )
     # O nome de cada Job vem do main.tf pelo templatefile.
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
     for job in ("identificacao", "referencias", "comparacao"):
         assert f"job_de_{job}" in main
 
@@ -620,7 +636,9 @@ def test_cada_etapa_de_partida_cai_no_inicio_da_propria_etapa() -> None:
 
 
 def test_a_api_so_inicia_execucoes_do_workflow_e_sabe_qual_e() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     web = main[main.index("papeis_no_projeto = {") :].split("validacao ")[0]
     assert '"roles/workflows.invoker"' in web
@@ -633,7 +651,9 @@ def test_a_api_so_inicia_execucoes_do_workflow_e_sabe_qual_e() -> None:
 
 
 def _job_do_main_tf(nome: str) -> str:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
     return main[main.index(f'resource "google_cloud_run_v2_job" "{nome}"') :].split(
         "\nresource "
     )[0]
@@ -646,7 +666,9 @@ def _job_do_main_tf(nome: str) -> str:
 def test_jobs_de_identificacao_e_comparacao_sem_internet_com_a_imagem_do_ffmpeg(
     nome: str, modulo: str
 ) -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
     job = _job_do_main_tf(nome)
 
     assert "google_compute_network.validacao.id" in job
@@ -678,7 +700,9 @@ def test_variaveis_dos_jobs_novos_vem_do_main_tf() -> None:
 
 
 def test_contas_e_papeis_dos_jobs_novos_sao_so_os_combinados() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     contas = main.split("for_each     = toset([")[1].split("])")[0]
     for nome in ("identificacao", "comparacao"):
@@ -701,7 +725,9 @@ def test_contas_e_papeis_dos_jobs_novos_sao_so_os_combinados() -> None:
 
 
 def test_so_o_prefixo_dos_palpites_expira_e_o_prazo_vem_da_variavel() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
     bucket = main[main.index('resource "google_storage_bucket" "mam"') :].split(
         "\nresource "
     )[0]
@@ -725,7 +751,9 @@ def test_limite_de_buscas_e_a_lista_de_nomes_do_job_de_referencias_vem_do_main_t
     assert 'name  = "LIMITE_DE_BUSCAS_POR_VIDEO"' in job
     assert "var.limite_de_buscas_por_video" in job
     assert 'name  = "BUCKET_DECUPAGENS"' in job and 'local.buckets["decupagens"]' in job
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
     assert re.search(
         r'referencias = \{ referencias = "roles/storage.objectUser", '
         r'decupagens = "roles/storage.objectViewer" \}',
@@ -734,7 +762,9 @@ def test_limite_de_buscas_e_a_lista_de_nomes_do_job_de_referencias_vem_do_main_t
 
 
 def test_a_api_le_as_fotos_de_referencia_para_assinar_o_link_do_nome() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     assert re.search(
         r'web = \{[^}\n]*referencias = "roles/storage.objectViewer"[^}\n]*\}', main
@@ -749,7 +779,9 @@ def test_a_api_le_as_fotos_de_referencia_para_assinar_o_link_do_nome() -> None:
 def test_quem_regrava_o_que_ja_gravou_pode_sobrescrever_no_main_tf() -> None:
     # O reprocessamento escolhido (#235) refaz etapas de um Job concluído: sobrescrever
     # exige `storage.objects.delete`, que o `objectCreator` não tem.
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     def papel(conta: str, bucket: str) -> str:
         achado = re.search(
@@ -814,7 +846,9 @@ def test_etapas_em_paralelo_nao_se_atropelam_no_etapa_atual() -> None:
 
 
 def test_espera_total_vem_de_uma_variavel_do_main_tf_com_15_minutos() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     variavel = main.split('variable "espera_gpu_minutos"')[1].split("\n}")[0]
     assert "default     = 15" in variavel
@@ -876,7 +910,9 @@ def _tentativas(total: int, inicio: int, fator: int, teto: int) -> int:
 
 
 def test_a_conta_das_tentativas_dos_valores_propostos_e_de_uma_espera_menor() -> None:
-    main = (Path(__file__).parents[2] / "infra" / "main.tf").read_text()
+    main = (
+        Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf"
+    ).read_text()
 
     def padrao(nome: str) -> int:
         variavel = main.split(f'variable "{nome}"')[1].split("\n}")[0]

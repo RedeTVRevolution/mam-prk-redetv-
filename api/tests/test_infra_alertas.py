@@ -16,7 +16,7 @@ from api.sinais import (
 from api.sinal_do_programa import Desvio, Referencia, registro_do_desvio
 from api.tests.test_decupagem import decupagem_valida
 
-INFRA = Path(__file__).parents[2] / "infra"
+INFRA = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
 TF = (INFRA / "main.tf").read_text()
 WORKFLOW = (INFRA / "validacao.workflow.yaml").read_text()
 

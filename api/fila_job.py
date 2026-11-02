@@ -3,7 +3,7 @@
 O Cloud Scheduler o dispara; ele conta os Jobs ainda em andamento por estado e a idade do
 mais antigo (desde a criação) e loga uma linha JSON por estado (`evento: fila_de_jobs`),
 inclusive o estado vazio, para o painel mostrar a fila zerada em vez de um buraco. As
-métricas de log do `infra/main.tf` leem `estado`, `quantidade` e `idade_do_mais_antigo_s`:
+métricas de log do `infra/modulos/mam/main.tf` leem `estado`, `quantidade` e `idade_do_mais_antigo_s`:
 mudar um nome aqui pede mudar lá. Os Jobs terminados (concluído, falhou, cancelado) ficam
 de fora: a falha já tem o alerta de falha de etapa.
 
