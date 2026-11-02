@@ -478,28 +478,35 @@ class TiposDeObjetoFirestore:
 
     def registrar(self, job_id: str, contagens: Mapping[str, int]) -> None:
         novas = somar_por_chave(contagens)
-        antigo = self._por_job.document(job_id).get()
-        antes: dict[str, int] = (
-            (antigo.to_dict() or {}).get("totais", {}) if antigo.exists else {}
-        )
-        lote = self._cliente.batch()
-        for chave in novas.keys() | antes.keys():
-            tipo, n = novas.get(chave, ("", 0))
-            delta = n - antes.get(chave, 0)
-            if delta == 0:
-                continue
-            dados: dict[str, Any] = {
-                "chave": chave,
-                "total": firestore.Increment(delta),
-            }
-            if tipo:
-                dados["tipo"] = tipo
-            lote.set(self._colecao.document(quote(chave, safe="")), dados, merge=True)
-        lote.set(
-            self._por_job.document(job_id),
-            {"totais": {chave: n for chave, (_, n) in novas.items()}},
-        )
-        lote.commit()
+        referencia = self._por_job.document(job_id)
+
+        # Ler a contribuição antiga e aplicar o delta na mesma transação: dois reindexares
+        # do mesmo job ao mesmo tempo não somam a diferença duas vezes.
+        @firestore.transactional
+        def trocar(transacao: Any) -> None:
+            antigo = referencia.get(transaction=transacao)
+            antes: dict[str, int] = (
+                (antigo.to_dict() or {}).get("totais", {}) if antigo.exists else {}
+            )
+            for chave in novas.keys() | antes.keys():
+                tipo, n = novas.get(chave, ("", 0))
+                delta = n - antes.get(chave, 0)
+                if delta == 0:
+                    continue
+                dados: dict[str, Any] = {
+                    "chave": chave,
+                    "total": firestore.Increment(delta),
+                }
+                if tipo:
+                    dados["tipo"] = tipo
+                transacao.set(
+                    self._colecao.document(quote(chave, safe="")), dados, merge=True
+                )
+            transacao.set(
+                referencia, {"totais": {chave: n for chave, (_, n) in novas.items()}}
+            )
+
+        trocar(self._cliente.transaction())
 
     def buscar(self, q: str, limite: int = LIMITE_PADRAO) -> list[TipoDeObjeto]:
         prefixo = normalizar(q)
