@@ -168,12 +168,3 @@ def test_alvos_com_gpu_reaproveitam_os_modelos_fixados_dos_alvos_de_cpu() -> Non
     assert "--group ocr-gpu" in ocr
     assert "resolve/" not in ocr
     assert "DISPOSITIVO=gpu" in ocr
-
-
-def test_alvos_com_gpu_ficam_fora_do_grupo_que_o_cloud_build_envia() -> None:
-    bake = (RAIZ / "docker-bake.hcl").read_text()
-
-    padrao = bake[bake.index('group "default"') :].split("}")[0]
-    assert "gpu" not in padrao
-    grupo = bake[bake.index('group "gpu"') :].split("}")[0]
-    assert "transcricao-gpu" in grupo and "ocr-gpu" in grupo

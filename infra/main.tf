@@ -30,6 +30,32 @@ variable "regiao_da_busca" {
   default = "us-east4"
 }
 
+# Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Cloud Run não tem GPU
+# em southamerica-east1. Só processamento de passagem: nenhum bucket nasce nesta região.
+variable "regiao_gpu" {
+  type    = string
+  default = "us-east4"
+}
+
+# Falta de GPU ou de cota: a mesma espera e as mesmas novas tentativas valem para o teste
+# depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*) e para o
+# Workflows (#239). Até `gpu_tentativas` tentativas no total; a espera antes da segunda é
+# `gpu_espera_s`, e cada espera seguinte é a anterior vezes `gpu_fator_da_espera`.
+variable "gpu_tentativas" {
+  type    = number
+  default = 3
+}
+
+variable "gpu_espera_s" {
+  type    = number
+  default = 60
+}
+
+variable "gpu_fator_da_espera" {
+  type    = number
+  default = 2
+}
+
 variable "dimensao_dos_vetores" {
   description = "Dimensão dos vetores da busca; fixa na criação da coleção"
   type        = number
@@ -136,6 +162,16 @@ variable "imagem_ocr" {
   type        = string
 }
 
+variable "imagem_transcricao_gpu" {
+  description = "Imagem do Job de transcrição com GPU (--target transcricao-gpu), de preferência pelo digest"
+  type        = string
+}
+
+variable "imagem_ocr_gpu" {
+  description = "Imagem do Job de OCR da tela com GPU (--target ocr-gpu), de preferência pelo digest"
+  type        = string
+}
+
 provider "google" {
   project        = var.projeto
   region         = var.regiao
@@ -171,6 +207,16 @@ resource "google_project_service" "apis" {
 resource "google_artifact_registry_repository" "mam" {
   repository_id = "mam"
   location      = var.regiao
+  format        = "DOCKER"
+  depends_on    = [google_project_service.apis]
+}
+
+# As imagens com GPU (e o cache das camadas delas) ficam na região da GPU: o Cloud Run baixa
+# a imagem de uma instância que sobe em us-east4, e o BuildKit, ao enviar a imagem, não
+# reenvia as camadas que o cache já pôs no mesmo repositório.
+resource "google_artifact_registry_repository" "mam_gpu" {
+  repository_id = "mam-gpu"
+  location      = var.regiao_gpu
   format        = "DOCKER"
   depends_on    = [google_project_service.apis]
 }
@@ -434,6 +480,13 @@ resource "google_artifact_registry_repository_iam_member" "build_envia" {
   member     = google_service_account.mam["build"].member
 }
 
+resource "google_artifact_registry_repository_iam_member" "build_envia_gpu" {
+  repository = google_artifact_registry_repository.mam_gpu.name
+  location   = google_artifact_registry_repository.mam_gpu.location
+  role       = "roles/artifactregistry.writer"
+  member     = google_service_account.mam["build"].member
+}
+
 # CD (#71): o GitHub Actions entra sem chave, por federação (ADR 0002), e só a
 # main deste repositório impersona a mam-terraform. Pelo id do repositório, e não
 # pelo nome, para que outro repositório criado com o mesmo nome não herde a confiança.
@@ -563,6 +616,16 @@ resource "google_compute_subnetwork" "validacao" {
   region                   = var.regiao
   network                  = google_compute_network.validacao.id
   ip_cidr_range            = "10.10.0.0/24"
+  private_ip_google_access = true
+}
+
+# A sub-rede dos Jobs com GPU, na mesma rede: sem IP externo e sem Cloud NAT, só o Storage
+# e o Firestore pelo acesso privado do Google. Faixa que não se sobrepõe à de cima.
+resource "google_compute_subnetwork" "validacao_gpu" {
+  name                     = "mam-validacao-gpu"
+  region                   = var.regiao_gpu
+  network                  = google_compute_network.validacao.id
+  ip_cidr_range            = "10.20.0.0/24"
   private_ip_google_access = true
 }
 
@@ -795,6 +858,153 @@ resource "google_cloud_run_v2_job" "ocr" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
+# Job de transcrição com GPU L4 (E1, ADR 0007): a mesma lógica do Job em CPU, na região da
+# GPU. Lê o áudio do bucket de aceitos (São Paulo), grava a transcrição lá, e nada fica em
+# us-east4: os arquivos locais vivem no volume em memória. O Job em CPU continua como plano B.
+resource "google_cloud_run_v2_job" "transcricao_gpu" {
+  name                = "mam-transcricao-gpu"
+  location            = var.regiao_gpu
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["transcricao"].email
+      max_retries     = 0
+      # NÃO medido (#240). Pior caso: a GPU não ser mais rápida que a CPU. A CPU de 8 vCPU
+      # medida (FAMA, 49 min de áudio em 24 min 46 s) roda a 0,5x o tempo real: 4 h de áudio
+      # levam 2 h. Mais 1,5x de folga: 10800 s (3 h). A L4 em float16 deve fazer em minutos;
+      # o #240 mede e reduz (o conector do passo no Workflows, #239, acompanha).
+      timeout                       = "10800s"
+      gpu_zonal_redundancy_disabled = true
+      node_selector {
+        accelerator = "nvidia-l4"
+      }
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao_gpu.id
+        }
+      }
+      containers {
+        image = var.imagem_transcricao_gpu
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        env {
+          name  = "DISPOSITIVO"
+          value = "gpu"
+        }
+        resources {
+          # O mínimo do Cloud Run com GPU: 4 CPUs e 16 GiB. O modelo roda na GPU e o áudio
+          # de 4 h em WAV mono de 16 kHz tem 0,43 GiB (0,9 GiB em float32): 16 GiB sobram.
+          limits = {
+            cpu              = "4"
+            memory           = "16Gi"
+            "nvidia.com/gpu" = "1"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "2Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
+# Job de OCR da tela com GPU L4 (E1, ADR 0007): a mesma lógica do Job em CPU, na região da
+# GPU, lendo o proxy do bucket de aceitos (São Paulo) e gravando a leitura lá. O Job em CPU
+# continua como plano B.
+resource "google_cloud_run_v2_job" "ocr_gpu" {
+  name                = "mam-ocr-gpu"
+  location            = var.regiao_gpu
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["ocr"].email
+      max_retries     = 0
+      # NÃO medido (#240). Pior caso: a GPU não ser mais rápida que a CPU. A CPU de 8 vCPU
+      # medida (FAMA, 49 min de programa em 49 min 01 s) lê a 1x o tempo real, um quadro por
+      # segundo: 4 h levam 4 h. Mais 1,5x de folga: 21600 s (6 h). O #240 mede e reduz.
+      timeout                       = "21600s"
+      gpu_zonal_redundancy_disabled = true
+      node_selector {
+        accelerator = "nvidia-l4"
+      }
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao_gpu.id
+        }
+      }
+      containers {
+        image = var.imagem_ocr_gpu
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_ACEITOS"
+          value = local.buckets["aceitos"]
+        }
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        env {
+          name  = "DISPOSITIVO"
+          value = "gpu"
+        }
+        resources {
+          # O mínimo do Cloud Run com GPU: 4 CPUs e 16 GiB. O volume em memória conta na
+          # memória e continua em 8 GiB (o proxy de 4 h, 5,75 GiB, mais os quadros de um
+          # trecho e o cache do Paddle, ~6,5 GiB; ver o Job em CPU). Sobram 8 GiB para o
+          # Python, o Paddle e o contexto CUDA no lado da CPU (~4 a 5 GiB): cabe.
+          limits = {
+            cpu              = "4"
+            memory           = "16Gi"
+            "nvidia.com/gpu" = "1"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "8Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
 # A orquestração roda o Job de transcrição, também com override de JOB_ID.
 resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_transcricao" {
   name     = google_cloud_run_v2_job.transcricao.name
@@ -807,6 +1017,21 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_transcricao" {
 resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_ocr" {
   name     = google_cloud_run_v2_job.ocr.name
   location = google_cloud_run_v2_job.ocr.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+# A orquestração roda os Jobs com GPU, também com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_transcricao_gpu" {
+  name     = google_cloud_run_v2_job.transcricao_gpu.name
+  location = google_cloud_run_v2_job.transcricao_gpu.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_ocr_gpu" {
+  name     = google_cloud_run_v2_job.ocr_gpu.name
+  location = google_cloud_run_v2_job.ocr_gpu.location
   role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
 }
@@ -1318,17 +1543,20 @@ resource "google_workflows_workflow" "validacao" {
   region          = var.regiao
   service_account = google_service_account.mam["orquestracao"].id
   source_contents = templatefile("${path.module}/validacao.workflow.yaml", {
-    projeto              = var.projeto
-    regiao               = var.regiao
-    job_de_validacao     = google_cloud_run_v2_job.validacao.name
-    job_de_transcricao   = google_cloud_run_v2_job.transcricao.name
-    job_de_ocr           = google_cloud_run_v2_job.ocr.name
-    job_de_analise       = google_cloud_run_v2_job.analise.name
-    job_de_identificacao = google_cloud_run_v2_job.identificacao.name
-    job_de_referencias   = google_cloud_run_v2_job.referencias.name
-    job_de_comparacao    = google_cloud_run_v2_job.comparacao.name
-    job_de_quadros       = google_cloud_run_v2_job.quadros.name
-    job_de_indexacao     = google_cloud_run_v2_job.indexacao.name
+    projeto                = var.projeto
+    regiao                 = var.regiao
+    job_de_validacao       = google_cloud_run_v2_job.validacao.name
+    job_de_transcricao     = google_cloud_run_v2_job.transcricao.name
+    job_de_ocr             = google_cloud_run_v2_job.ocr.name
+    regiao_gpu             = var.regiao_gpu
+    job_de_transcricao_gpu = google_cloud_run_v2_job.transcricao_gpu.name
+    job_de_ocr_gpu         = google_cloud_run_v2_job.ocr_gpu.name
+    job_de_analise         = google_cloud_run_v2_job.analise.name
+    job_de_identificacao   = google_cloud_run_v2_job.identificacao.name
+    job_de_referencias     = google_cloud_run_v2_job.referencias.name
+    job_de_comparacao      = google_cloud_run_v2_job.comparacao.name
+    job_de_quadros         = google_cloud_run_v2_job.quadros.name
+    job_de_indexacao       = google_cloud_run_v2_job.indexacao.name
   })
   depends_on = [google_project_service.apis]
 }
@@ -1514,6 +1742,36 @@ output "url" {
 # make gravar-cassetes sobe o clipe sintético no bucket de clipes-ouro.
 output "repositorio" {
   value = "${var.regiao}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam.repository_id}"
+}
+
+# Para o deploy-dev: o repositório das imagens com GPU, que guarda também o cache delas.
+output "repositorio_gpu" {
+  value = "${var.regiao_gpu}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam_gpu.repository_id}"
+}
+
+# Para o Workflows (#239) e para o teste dos Jobs com GPU depois da publicação.
+output "regiao_gpu" {
+  value = var.regiao_gpu
+}
+
+output "job_de_transcricao_gpu" {
+  value = google_cloud_run_v2_job.transcricao_gpu.name
+}
+
+output "job_de_ocr_gpu" {
+  value = google_cloud_run_v2_job.ocr_gpu.name
+}
+
+output "gpu_tentativas" {
+  value = var.gpu_tentativas
+}
+
+output "gpu_espera_s" {
+  value = var.gpu_espera_s
+}
+
+output "gpu_fator_da_espera" {
+  value = var.gpu_fator_da_espera
 }
 
 # Para o make criar-colecao-da-busca, o make medir-busca e o make sondar-busca.
