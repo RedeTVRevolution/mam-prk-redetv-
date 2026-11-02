@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -422,6 +422,88 @@ test('acrescentar aparição na linha da pessoa', async () => {
   await waitFor(() => expect(correcoes).toHaveLength(1))
   expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.acrescentar_aparicao', item_id: 'p1' })
   expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({ evidencia: 'rosto' })
+})
+
+async function abrirAlcas() {
+  const usuario = await selecionarAparicao()
+  await usuario.keyboard('{F2}')
+  await screen.findByRole('form', { name: /Corrigir Leão Lobo/ })
+  return usuario
+}
+
+test('Enter grava os tempos das alças', async () => {
+  const usuario = await abrirAlcas()
+  screen.getByRole('slider', { name: 'Início do item' }).focus()
+  await usuario.keyboard('{ArrowRight}{ArrowRight}')
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'item.tempos', valor: '10200-20000' })
+})
+
+test('Esc descarta os tempos das alças', async () => {
+  const usuario = await abrirAlcas()
+  screen.getByRole('slider', { name: 'Início do item' }).focus()
+  await usuario.keyboard('{ArrowRight}{Escape}')
+
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+  expect(correcoes).toEqual([])
+})
+
+test('arrastar uma alça e clicar em Salvar grava os tempos novos; Cancelar descarta', async () => {
+  const usuario = await abrirAlcas()
+  const alca = () => screen.getByRole('slider', { name: 'Início do item' })
+  const trilha = alca().parentElement as HTMLElement
+  trilha.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect
+
+  fireEvent.pointerDown(alca(), { clientX: 0, pointerId: 1 })
+  fireEvent.pointerMove(alca(), { clientX: 120, pointerId: 1 })
+  fireEvent.pointerUp(alca(), { pointerId: 1 })
+  const novo = Number(alca().getAttribute('aria-valuenow'))
+  expect(novo).not.toBe(10_000)
+
+  await usuario.click(screen.getByRole('button', { name: 'Cancelar' }))
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+  expect(correcoes).toEqual([])
+
+  await usuario.keyboard('{F2}')
+  await screen.findByRole('form', { name: /Corrigir Leão Lobo/ })
+  const trilha2 = alca().parentElement as HTMLElement
+  trilha2.getBoundingClientRect = () => ({ left: 0, width: 1000 }) as DOMRect
+  fireEvent.pointerDown(alca(), { clientX: 0, pointerId: 1 })
+  fireEvent.pointerMove(alca(), { clientX: 120, pointerId: 1 })
+  fireEvent.pointerUp(alca(), { pointerId: 1 })
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'item.tempos', valor: `${novo}-20000` })
+})
+
+test('cada alça tem a dica com as teclas', async () => {
+  await abrirAlcas()
+  for (const nome of ['Início do item', 'Fim do item']) {
+    expect(screen.getByRole('slider', { name: nome }).getAttribute('title')).toBe(
+      'Arraste, ou use ← → (0,1 s) e Shift (1 s)',
+    )
+  }
+})
+
+test('acrescentar aparição grava e cancela pelos botões, sem tecla nenhuma', async () => {
+  const usuario = await selecionarAparicao()
+  await usuario.click(screen.getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' }))
+  let formulario = await screen.findByRole('form', { name: 'Acrescentar aparição de Leão Lobo' })
+  await usuario.type(within(formulario).getByLabelText('Evidência na imagem'), 'rosto')
+  await usuario.click(within(formulario).getByRole('button', { name: 'Cancelar' }))
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+  expect(correcoes).toEqual([])
+
+  await usuario.click(screen.getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' }))
+  formulario = await screen.findByRole('form', { name: 'Acrescentar aparição de Leão Lobo' })
+  await usuario.type(within(formulario).getByLabelText('Evidência na imagem'), 'rosto')
+  await usuario.click(within(formulario).getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.acrescentar_aparicao', item_id: 'p1' })
 })
 
 test('o item corrigido mostra "corrigido", e o pendente, "aguardando o Curador"', async () => {

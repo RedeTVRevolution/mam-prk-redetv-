@@ -1,6 +1,6 @@
 /** A correção do item em foco sem React: os campos de cada tipo e os pedidos que as mudanças geram. */
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
-import { type Intervalo, lerTempo, SEM_NOME, tempo, tempoDoCampo } from './linhaDoTempo.ts'
+import { type Intervalo, lerTempo, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
 import type { Decupagem, ItemDoHistorico } from './Video.tsx'
 
@@ -135,8 +135,8 @@ const texto = (v: Valor | undefined): string => (typeof v === 'string' ? v.trim(
 
 function camposDeTempo(): CampoDoEditor[] {
   return [
-    { chave: 'inicio', rotulo: 'Início (MM:SS)', tipo: 'tempo' },
-    { chave: 'fim', rotulo: 'Fim (MM:SS)', tipo: 'tempo' },
+    { chave: 'inicio', rotulo: 'Início (MM:SS ou H:MM:SS)', tipo: 'tempo' },
+    { chave: 'fim', rotulo: 'Fim (MM:SS ou H:MM:SS)', tipo: 'tempo' },
   ]
 }
 
@@ -186,7 +186,7 @@ export function editorDoItem(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorr
 function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes): Editor | null {
   const o = origemDoItem(d, item)
   if (!o) return null
-  const tempos = (i: Intervalo): Record<string, Valor> => ({ inicio: tempo(i.inicio_ms), fim: tempo(i.fim_ms) })
+  const tempos = (i: Intervalo): Record<string, Valor> => ({ inicio: relogio(i.inicio_ms), fim: relogio(i.fim_ms) })
   switch (o.tipo) {
     case 'aparicao':
     case 'mencao': {
@@ -435,7 +435,7 @@ export function editorDeNovaAparicao(
       ...camposDeTempo(),
       { chave: 'evidencia', rotulo: 'Evidência na imagem', tipo: 'texto', limite: c.limites.nome },
     ],
-    { inicio: tempo(atualMs), fim: tempo(atualMs + 5000), evidencia: '' },
+    { inicio: relogio(atualMs), fim: relogio(atualMs + 5000), evidencia: '' },
     ['pessoa.acrescentar_aparicao'],
     (v) => {
       const inicio = lerTempo(texto(v.inicio))

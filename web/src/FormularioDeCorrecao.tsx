@@ -1,7 +1,7 @@
 import { Button, Checkbox, Group, NativeSelect, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core'
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, type MutableRefObject, useEffect, useRef, useState } from 'react'
 import type { CampoDoEditor, Editor, Valor } from './catalogacao.ts'
-import { type Intervalo, tempo } from './linhaDoTempo.ts'
+import { type Intervalo, relogio } from './linhaDoTempo.ts'
 
 /** O formulário compacto que toma o lugar da linha do item: Enter salva e Esc cancela, sem diálogo. */
 export function FormularioDeCorrecao({
@@ -9,6 +9,7 @@ export function FormularioDeCorrecao({
   rotulo,
   limiteDoMotivo,
   tempos,
+  salvarRef,
   aoSalvar,
   aoCancelar,
 }: {
@@ -18,6 +19,8 @@ export function FormularioDeCorrecao({
   limiteDoMotivo: number
   /** Os tempos que as alças da linha do tempo ajustaram; valem no lugar dos campos de tempo. */
   tempos?: Intervalo | null
+  /** Recebe o salvar do formulário, para o Enter nas alças gravar como o Enter nos campos. */
+  salvarRef?: MutableRefObject<(() => void) | null>
   /** Grava os pedidos com o motivo; devolve a mensagem de erro, ou `null` quando gravou. */
   aoSalvar: (pedidos: NonNullable<ReturnType<Editor['pedidos']>>, motivo: string) => Promise<string | null>
   aoCancelar: () => void
@@ -33,7 +36,7 @@ export function FormularioDeCorrecao({
     setTemposVistos(tempos)
     if (tempos) {
       setExatos(tempos)
-      setValores((v) => ({ ...v, inicio: tempo(tempos.inicio_ms), fim: tempo(tempos.fim_ms) }))
+      setValores((v) => ({ ...v, inicio: relogio(tempos.inicio_ms), fim: relogio(tempos.fim_ms) }))
     }
   }
   const raiz = useRef<HTMLFormElement>(null)
@@ -52,7 +55,7 @@ export function FormularioDeCorrecao({
   async function salvar() {
     if (salvando) return
     if (!pedidos) {
-      setErro('Confira os campos: há um valor em branco ou um tempo fora do formato MM:SS.')
+      setErro('Confira os campos: há um valor em branco ou um tempo fora do formato MM:SS ou H:MM:SS.')
       return
     }
     if (pedidos.length === 0) {
@@ -65,6 +68,14 @@ export function FormularioDeCorrecao({
     setSalvando(false)
     if (falha) setErro(falha)
   }
+
+  useEffect(() => {
+    if (!salvarRef) return
+    salvarRef.current = () => void salvar()
+    return () => {
+      salvarRef.current = null
+    }
+  })
 
   function aoTeclar(e: KeyboardEvent<HTMLFormElement>) {
     if (e.key === 'Escape') {

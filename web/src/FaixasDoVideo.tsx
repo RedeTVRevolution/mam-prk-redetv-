@@ -7,7 +7,6 @@ import {
   limitesDasAlcas,
   percentualDoTempo,
   teclaDaAlca,
-  tempo,
   type Intervalo,
   marcasDaRegua,
   posicaoDoBloco,
@@ -31,6 +30,10 @@ export interface AlcasDaCorrecao {
   inicio_ms: number
   fim_ms: number
   aoMover: (borda: Borda, ms: number) => void
+  /** Enter na alça grava os tempos, como no formulário da linha. */
+  aoSalvar: () => void
+  /** Esc na alça descarta. */
+  aoDescartar: () => void
 }
 
 /** Alça de início ou de fim: arrasta com o ponteiro ou move com as setas (0,1 s; com Shift, 1 s). */
@@ -40,12 +43,16 @@ function AlcaDoTempo({
   limites,
   duracaoMs,
   aoMover,
+  aoSalvar,
+  aoDescartar,
 }: {
   borda: Borda
   ms: number
   limites: LimitesDaAlca
   duracaoMs: number
   aoMover: (borda: Borda, ms: number) => void
+  aoSalvar: () => void
+  aoDescartar: () => void
 }) {
   const arrastando = useRef(false)
   return (
@@ -56,7 +63,8 @@ function AlcaDoTempo({
       aria-valuemin={limites.minMs}
       aria-valuemax={limites.maxMs}
       aria-valuenow={ms}
-      aria-valuetext={tempo(ms)}
+      aria-valuetext={relogio(ms)}
+      title="Arraste, ou use ← → (0,1 s) e Shift (1 s)"
       style={{
         position: 'absolute',
         top: -3,
@@ -87,6 +95,13 @@ function AlcaDoTempo({
         arrastando.current = false
       }}
       onKeyDown={(e: KeyboardEvent<HTMLElement>) => {
+        if (e.key === 'Enter' || e.key === 'Escape') {
+          e.preventDefault()
+          e.stopPropagation()
+          if (e.key === 'Enter') aoSalvar()
+          else aoDescartar()
+          return
+        }
         const novo = teclaDaAlca(e.key, e.shiftKey, ms, limites)
         if (novo === null) return
         e.preventDefault()
@@ -272,8 +287,8 @@ export function FaixasDoVideo({
                 const limites = limitesDasAlcas(alcas, duracaoMs, duracaoMs)
                 return (
                   <>
-                    <AlcaDoTempo borda="inicio" ms={alcas.inicio_ms} limites={limites.inicio} duracaoMs={duracaoMs} aoMover={alcas.aoMover} />
-                    <AlcaDoTempo borda="fim" ms={alcas.fim_ms} limites={limites.fim} duracaoMs={duracaoMs} aoMover={alcas.aoMover} />
+                    <AlcaDoTempo borda="inicio" ms={alcas.inicio_ms} limites={limites.inicio} duracaoMs={duracaoMs} aoMover={alcas.aoMover} aoSalvar={alcas.aoSalvar} aoDescartar={alcas.aoDescartar} />
+                    <AlcaDoTempo borda="fim" ms={alcas.fim_ms} limites={limites.fim} duracaoMs={duracaoMs} aoMover={alcas.aoMover} aoSalvar={alcas.aoSalvar} aoDescartar={alcas.aoDescartar} />
                   </>
                 )
               })()}

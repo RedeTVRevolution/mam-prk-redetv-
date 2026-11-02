@@ -109,6 +109,7 @@ export default function Visualizador({
   const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' } | null>(null)
   // Os tempos que as alças da linha do tempo ajustaram na correção aberta.
   const [temposDaAlca, setTemposDaAlca] = useState<Intervalo | null>(null)
+  const salvarDasAlcas = useRef<(() => void) | null>(null)
   const [historico, setHistorico] = useState<ItemDoHistorico[]>([])
   const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(avisoDoDesfazer.current), [])
@@ -546,6 +547,7 @@ export default function Visualizador({
               rotulo={`Corrigir ${itemEmEdicao.titulo}`}
               limiteDoMotivo={catalogo.limites.motivo}
               tempos={temposDaAlca}
+              salvarRef={salvarDasAlcas}
               aoSalvar={gravar}
               aoCancelar={fecharEdicao}
             />
@@ -557,6 +559,8 @@ export default function Visualizador({
             chave: emEdicao.chave,
             inicio_ms: atual.inicio_ms,
             fim_ms: atual.fim_ms,
+            aoSalvar: () => salvarDasAlcas.current?.(),
+            aoDescartar: fecharEdicao,
             aoMover: (borda: Borda, ms: number) =>
               setTemposDaAlca({ ...atual, [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms }),
           }

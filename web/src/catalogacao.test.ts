@@ -196,6 +196,19 @@ test('acrescentar aparição pede tempos e evidência e vai para a pessoa', () =
   ])
 })
 
+test('acima de uma hora os campos mostram e leem H:MM:SS', () => {
+  const e = editorDeNovaAparicao(D.pessoas[0], 3_661_000, catalogo)
+
+  expect(e.inicial).toMatchObject({ inicio: '1:01:01', fim: '1:01:06' })
+  expect(e.pedidos({ ...e.inicial, evidencia: 'rosto' })).toEqual([
+    {
+      tipo: 'pessoa.acrescentar_aparicao',
+      item_id: 'p1',
+      valor: JSON.stringify({ inicio_ms: 3_661_000, fim_ms: 3_666_000, evidencia: 'rosto' }),
+    },
+  ])
+})
+
 test('marcas: corrigido, ou aguardando o Curador; só as da versão aberta e ainda de pé', () => {
   const d = { ...D, versao_decupagem: 'v1' } as Decupagem
   const h = (id: string, tipo_do_item: string, item_id: string, estado: string, versao = 'v1') =>
