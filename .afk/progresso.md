@@ -490,3 +490,8 @@ Não corrigido:
 - Reconciliação: juntar = pautas novas que sobrepõem metade do trecho ancorado (≥2 reaplica, 1 que cobre metade = atendida, 0 = fila); dividir = a pauta nova que contém o corte (já cortada pelo modelo, ±1 s = atendida). "Não reaplicada" = a correção aparece na fila (`/fila`) com `candidatos` vazios; só dá para descartar.
 - Falta: conferir `make verificar` completo (mypy corrigido, pytest/web rodando na hora de encerrar); GLOSSARY (juntar/dividir pautas, "não reaplicada"); #262 mostra a fila na tela.
 - Armadilha: exemplo da busca (`SABRINA`) não tem pautas; o teste de reindexação monta uma pauta no modelo.
+- 2026-11-02 11:34:46 · #261: parcial (1/3); a próxima iteração continua
+- 2026-11-02 11:34:46 · iteração 58: #261
+
+## #261 iteração 59
+- Pronto: GLOSSARY (juntar e dividir pautas, correção não reaplicada); `make verificar` verde. Ticket completo; a tela da fila fica no #262.

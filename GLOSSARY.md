@@ -165,6 +165,12 @@ _Evitar_: edição, ajuste
 **Correção pendente**:
 Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale).
 
+**Juntar e dividir pautas**:
+Tipos de Correção (`pauta.juntar`, valor `{ids, titulos}`; `pauta.dividir`, valor `{em_ms, titulos}`) que mudam a estrutura das pautas e exigem aprovação e reindexação. Juntar vale só para pautas que se seguem; dividir, para um corte dentro da pauta. No reprocessar, cada uma é reconciliada com as pautas novas do modelo: se o modelo já fez o mesmo, a correção está atendida; se não, é reaplicada.
+
+**Correção não reaplicada**:
+Juntar ou dividir pautas para a qual o reprocessar não achou pauta correspondente. Não se perde: aparece na fila (`/fila`) com `candidatos` vazios, e só pode ser descartada.
+
 **Sugestão**:
 Pista do próprio sistema que o editor só confirma (`api/sugestoes.py`, `GET /v1/jobs/{id}/sugestoes`): uma pergunta, o contexto que a sustenta e a correção proposta, no formato das correções. Nunca muda nada sozinha: aceitar cria a correção com o motivo "sugestão confirmada pelo editor" (ou "corrigida", se o editor deu outro nome ou o título da pauta); aceita ou recusada, sai da lista naquele vídeo, mesmo depois de reprocessar e mesmo com a correção pendente. Não confundir com as sugestões para o perfil que a comparação propõe (`sugestoes_de_perfil`). As regras são do servidor: o GC de identificação sobre um "não identificado" (só o tipo `gc` sustenta; a chamada nunca) e o trecho de 30 s ou mais sem pauta. Aceitas e recusadas por tipo ficam em `GET /v1/sugestoes/contagem`.
 _Evitar_: palpite (é o nome que o modelo propõe sem prova, ADR 0005)
