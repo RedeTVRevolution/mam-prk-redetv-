@@ -462,3 +462,33 @@ def test_nao_existe_com_outro_valor_da_422(valor: str) -> None:
         tipo="objeto.nao_existe", valor=valor, versao=V, item_id="obj01"
     )
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("tipo", "valor"),
+    [("objeto.atributos", _atributos()), ("objeto.dono", _dono(None, None))],
+)
+def test_desfazer_outra_correcao_do_objeto_que_saiu(tipo: str, valor: str) -> None:
+    mundo = _mundo()
+    cid = mundo.corrigir(tipo=tipo, valor=valor, versao=V, item_id="obj01").json()["id"]
+    mundo.avancar()
+    nao_existe = _nao_existe(mundo).json()["id"]
+    mundo.avancar()
+
+    r = mundo.desfazer(cid)
+
+    assert r.status_code == 201
+    assert _objetos(mundo) == []
+    mundo.avancar()
+    assert mundo.desfazer(nao_existe).status_code == 201
+    [o] = _objetos(mundo)
+    assert o["tipo"] == "vestido" and o["cor_base"] == ["vermelho"]
+    assert (o["pessoa"], o["relacao"]) == ("pes01", "veste")
+
+
+def test_segundo_nao_existe_no_objeto_que_saiu_da_422() -> None:
+    mundo = _mundo()
+    _nao_existe(mundo)
+    mundo.avancar()
+
+    assert _nao_existe(mundo).status_code == 422

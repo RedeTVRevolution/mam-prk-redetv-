@@ -1252,14 +1252,18 @@ def _valor_do_alvo(
     do_alvo = TIPOS[alvo.tipo].valor_do_alvo
     if do_alvo is not None:
         return do_alvo(modelo, entregue, alvo)
-    return _valor_atual(
-        entregue,
-        alvo.tipo,
-        alvo.item_id,
-        alvo.ancora.tipo_do_item,
-        alvo.ocorrencia,
-        alvo.depois,
-    )
+    return _valor_ou_vazio(entregue, alvo)
+
+
+def _valor_ou_vazio(entregue: dict[str, Any], c: Correcao) -> str:
+    """O valor entregue no item de `c`, ou vazio se o item saiu da decupagem
+    (o objeto que não existe): desfazer uma correção dele não muda o que se vê."""
+    try:
+        return _valor_atual(
+            entregue, c.tipo, c.item_id, c.ancora.tipo_do_item, c.ocorrencia, c.depois
+        )
+    except ItemInexistente:
+        return ""
 
 
 def desfazer(
@@ -1296,15 +1300,7 @@ def desfazer(
         alvo_atual = reapontada
         # A reapontada vale pelo id do item novo, como em `aplicar`.
         antes, depois = (
-            _valor_atual(
-                entregue,
-                alvo_atual.tipo,
-                alvo_atual.item_id,
-                alvo_atual.ancora.tipo_do_item,
-                alvo_atual.ocorrencia,
-                alvo_atual.depois,
-            )
-            for entregue in (com, sem)
+            _valor_ou_vazio(entregue, alvo_atual) for entregue in (com, sem)
         )
     return _registro(
         job_id,
@@ -1383,8 +1379,7 @@ def _valor_atual(
 
     Vazio para o item acrescentado que não está na decupagem (ainda não existe,
     foi desfeito ou o modelo já o traz) e para a ocorrência de pessoa que a
-    decupagem não tem (ou cuja pessoa saiu dela), e para o item que o tipo faz
-    sumir (`some_o_item`) e que já saiu. `depois` é o valor da
+    decupagem não tem (ou cuja pessoa saiu dela). `depois` é o valor da
     correção, de onde sai o intervalo da aparição acrescentada.
     """
     entrada = TIPOS[tipo]
@@ -1398,7 +1393,7 @@ def _valor_atual(
         if de_ocorrencia:
             return _valor_da_ocorrencia(item, tipo, ocorrencia, depois)
         return _valor_do_item(item, tipo)
-    if entrada.acrescenta is not None or de_ocorrencia or entrada.some_o_item:
+    if entrada.acrescenta is not None or de_ocorrencia:
         return ""
     raise ItemInexistente(item_id)
 
@@ -2169,8 +2164,6 @@ class Tipo:
     # `ItemInexistente` se ele aponta para o que ela não tem. Também decide se a
     # correção se reaplica.
     confere: Callable[[dict[str, Any], str], None] | None = None
-    # A correção tira o item da decupagem: o valor atual de quem já saiu é vazio, não erro.
-    some_o_item: bool = False
 
 
 def _campo_longo(n: NovaCorrecao) -> str:
@@ -3142,7 +3135,6 @@ TIPOS: dict[str, Tipo] = {
         tipo_do_item="objeto",
         valor_do_item=_valor_do_existe,
         aplicar_no_item=_marca_o_objeto_removido,
-        some_o_item=True,
     ),
 }
 
