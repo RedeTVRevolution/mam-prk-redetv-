@@ -1,8 +1,8 @@
 /** A correção do item em foco sem React: os campos de cada tipo e os pedidos que as mudanças geram. */
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
-import { type Intervalo, lerTempo, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
+import { type Intervalo, lerTempo, nomeExibido, ocorrenciasDosObjetos, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
-import type { Decupagem, EstadoNaBusca, ItemDoHistorico } from './decupagem.ts'
+import type { Decupagem, EstadoNaBusca, ItemDoHistorico, Objeto } from './decupagem.ts'
 
 export type Valor = string | string[] | boolean
 
@@ -49,9 +49,6 @@ export interface Editor {
 
 /** Os tipos do catálogo que não têm caminho no painel neste ticket. */
 export const TIPOS_FORA_DESTE_TICKET = [
-  'objeto.atributos',
-  'objeto.dono',
-  'objeto.nao_existe',
   'objeto.acrescentar',
   'descartar',
   'aprovar',
@@ -78,6 +75,9 @@ const MOTIVOS: Record<string, string> = {
   'pessoa.acrescentar_aparicao': 'aparição acrescentada pelo editor',
   'pauta.juntar': 'pautas juntadas pelo editor',
   'pauta.dividir': 'pauta dividida pelo editor',
+  'objeto.atributos': 'atributos do objeto corrigidos pelo editor',
+  'objeto.dono': 'dono do objeto corrigido pelo editor',
+  'objeto.nao_existe': 'objeto removido da imagem pelo editor',
 }
 
 /** As entradas do histórico que decidem sobre outra correção, e não corrigem um item. */
@@ -102,6 +102,7 @@ type Origem =
   | { tipo: 'texto'; texto: NonNullable<Decupagem['textos_na_tela']>[number] }
   | { tipo: 'plano'; plano: Decupagem['planos'][number] }
   | { tipo: 'fala'; fala: Decupagem['transcricao'][number] }
+  | { tipo: 'objeto'; objeto: Objeto }
 
 /** O dado da decupagem por trás do item do painel (as chaves seguem a ordem de `itensDoPainel`). */
 function origemDoItem(d: Decupagem, item: ItemDoPainel): Origem | null {
@@ -136,6 +137,10 @@ function origemDoItem(d: Decupagem, item: ItemDoPainel): Origem | null {
       return d.planos[n] ? { tipo: 'plano', plano: d.planos[n] } : null
     case 'fala':
       return d.transcricao[n] ? { tipo: 'fala', fala: d.transcricao[n] } : null
+    case 'objeto': {
+      const objeto = ocorrenciasDosObjetos(d)[n]?.objeto
+      return objeto ? { tipo: 'objeto', objeto } : null
+    }
     default:
       return null
   }
@@ -405,17 +410,87 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
         },
       )
     }
+    case 'objeto': {
+      const { objeto } = o
+      const SEM_DONO = ''
+      const relacoes = c.relacoes_do_objeto
+      const cores = objeto.cor_base
+      const campos: CampoDoEditor[] = [
+        { chave: 'tipo', rotulo: 'Tipo', tipo: 'texto', limite: c.limites.nome },
+        { chave: 'cor_base', rotulo: 'Cor base (até 2)', tipo: 'multiplas', opcoes: c.cores_base },
+        { chave: 'cor', rotulo: 'Tom', tipo: 'texto', limite: c.limites.nome },
+        { chave: 'detalhe', rotulo: 'Detalhe', tipo: 'texto', limite: c.limites.nome },
+        { chave: 'marca', rotulo: 'Marca', tipo: 'nome', catalogo: 'marcas', limite: c.limites.nome },
+        {
+          chave: 'dono',
+          rotulo: 'Dono',
+          tipo: 'opcoes',
+          opcoes: [{ valor: SEM_DONO, rotulo: 'Em cena' }, ...d.pessoas.map((p) => ({ valor: p.id, rotulo: nomeExibido(p.nome) }))],
+        },
+        { chave: 'relacao', rotulo: 'Relação', tipo: 'opcoes', opcoes: relacoes, visivel: (v) => v.dono !== SEM_DONO },
+      ]
+      const inicial: Record<string, Valor> = {
+        tipo: objeto.tipo,
+        cor_base: cores,
+        cor: objeto.cor ?? '',
+        detalhe: objeto.detalhe ?? '',
+        marca: objeto.marca ?? '',
+        dono: objeto.pessoa ?? SEM_DONO,
+        relacao: objeto.relacao ?? relacoes[0]?.valor ?? '',
+      }
+      return montar(campos, inicial, ['objeto.atributos', 'objeto.dono'], (v) => {
+        const tipo = texto(v.tipo)
+        if (!tipo) return null
+        const escolhidas = c.cores_base.map((x) => x.valor).filter((x) => (v.cor_base as string[]).includes(x))
+        if (escolhidas.length > 2) return null
+        const mesmasCores = escolhidas.length === cores.length && escolhidas.every((x) => cores.includes(x as never))
+        const partes: Pedido[] = []
+        if (
+          tipo !== objeto.tipo ||
+          !mesmasCores ||
+          texto(v.cor) !== (objeto.cor ?? '') ||
+          texto(v.detalhe) !== (objeto.detalhe ?? '') ||
+          texto(v.marca) !== (objeto.marca ?? '')
+        )
+          partes.push({
+            tipo: 'objeto.atributos',
+            item_id: objeto.id,
+            valor: JSON.stringify({
+              tipo,
+              cor_base: mesmasCores ? cores : escolhidas,
+              cor: texto(v.cor) || null,
+              detalhe: texto(v.detalhe) || null,
+              marca: texto(v.marca) || null,
+            }),
+          })
+        const dono = String(v.dono ?? SEM_DONO)
+        const mudouODono = dono !== (objeto.pessoa ?? SEM_DONO) || (dono !== SEM_DONO && v.relacao !== objeto.relacao)
+        if (mudouODono) {
+          if (dono !== SEM_DONO && !v.relacao) return null
+          partes.push({
+            tipo: 'objeto.dono',
+            item_id: objeto.id,
+            valor: JSON.stringify(
+              dono === SEM_DONO ? { pessoa: null, relacao: null } : { pessoa: dono, relacao: String(v.relacao) },
+            ),
+          })
+        }
+        return partes
+      })
+    }
   }
 }
 
-/** "Não é isto" existe para a pessoa com nome, numa aparição ou menção. */
+/** "Não é isto" existe para a pessoa com nome, numa aparição ou menção, e para o objeto ("não está na imagem"). */
 export function podeRemover(d: Decupagem, item: ItemDoPainel): boolean {
   const o = origemDoItem(d, item)
+  if (o?.tipo === 'objeto') return true
   return !!o && (o.tipo === 'aparicao' || o.tipo === 'mencao') && !SEM_NOME.test(o.pessoa.nome)
 }
 
 export function pedidoDeRemocao(d: Decupagem, item: ItemDoPainel): Pedido | null {
   const o = origemDoItem(d, item)
+  if (o?.tipo === 'objeto') return { tipo: 'objeto.nao_existe', item_id: o.objeto.id, valor: 'nao_existe' }
   if (!o || (o.tipo !== 'aparicao' && o.tipo !== 'mencao')) return null
   return {
     tipo: 'pessoa.nao_e',
@@ -427,6 +502,7 @@ export function pedidoDeRemocao(d: Decupagem, item: ItemDoPainel): Pedido | null
 
 /** O motivo do "não é isto": a menção não é uma aparição. */
 export function motivoDaRemocao(pedido: Pedido): string {
+  if (pedido.tipo === 'objeto.nao_existe') return MOTIVOS[pedido.tipo]
   return pedido.ocorrencia?.lista === 'na_imagem' ? MOTIVOS['pessoa.nao_e'] : 'pessoa removida desta menção pelo editor'
 }
 
@@ -487,6 +563,8 @@ export function identidadeDoItem(d: Decupagem, item: ItemDoPainel): { tipo_do_it
       return o.plano.id ? { tipo_do_item: 'plano', item_id: o.plano.id } : null
     case 'fala':
       return o.fala.id ? { tipo_do_item: 'fala', item_id: o.fala.id } : null
+    case 'objeto':
+      return { tipo_do_item: 'objeto', item_id: o.objeto.id }
   }
 }
 

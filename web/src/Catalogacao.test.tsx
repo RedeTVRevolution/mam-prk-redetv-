@@ -28,6 +28,18 @@ const DECUPAGEM = {
   comerciais: [{ id: 'c1', marca: 'Marca X', tipo: 'intervalo', inicio_ms: 40_000, fim_ms: 50_000 }],
   transcricao: [{ id: 'f1', locutor: 'Ana', texto: 'Boa noite', inicio_ms: 0, fim_ms: 3_000 }],
   textos_na_tela: [{ id: 't1', tipo: 'gc', texto: 'Leão Lobo, jurado', inicio_ms: 12_000, fim_ms: 15_000 }],
+  objetos: [
+    {
+      id: 'o1',
+      categoria: 'roupa',
+      tipo: 'camisa',
+      cor_base: ['azul'],
+      cor: 'azul marinho',
+      pessoa: 'p1',
+      relacao: 'veste',
+      ocorrencias: [{ inicio_ms: 10_000, fim_ms: 20_000 }],
+    },
+  ],
 }
 
 const JOB: Job = {
@@ -767,4 +779,97 @@ test('pelo clique: texto na tela', async () => {
   await salvarComOMouse(usuario, formulario)
 
   expect(correcoes.map((c) => c.tipo)).toEqual(['texto_na_tela.texto'])
+})
+
+async function selecionarObjeto() {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Objetos/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^camisa, 1 ocorrência/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^camisa, 00:10 a 00:20/ }))
+  await usuario.keyboard('e')
+  return usuario
+}
+
+const linhaDoObjeto = () => screen.getByRole('button', { name: /^camisa, 00:10 a 00:20/ })
+
+test('objeto: F2 abre o formulário e Enter grava objeto.atributos', async () => {
+  const usuario = await selecionarObjeto()
+
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir camisa/ })
+  const marca = within(formulario).getByLabelText('Marca')
+  await usuario.type(marca, 'Lacoste')
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({
+    tipo: 'objeto.atributos',
+    item_id: 'o1',
+    motivo: 'atributos do objeto corrigidos pelo editor',
+    versao: 'v1',
+  })
+  expect(JSON.parse(correcoes[0].valor as string)).toEqual({
+    tipo: 'camisa',
+    cor_base: ['azul'],
+    cor: 'azul marinho',
+    detalhe: null,
+    marca: 'Lacoste',
+  })
+})
+
+test('objeto: o duplo clique e o lápis abrem o formulário, e o dono vira "em cena" pelo clique', async () => {
+  const usuario = await selecionarObjeto()
+  await usuario.dblClick(linhaDoObjeto())
+  const formulario = await screen.findByRole('form', { name: /Corrigir camisa/ })
+  await usuario.click(within(formulario).getByRole('button', { name: 'Cancelar' }))
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+
+  await usuario.click(screen.getByRole('button', { name: 'Corrigir camisa' }))
+  const outro = await screen.findByRole('form', { name: /Corrigir camisa/ })
+  await usuario.selectOptions(within(outro).getByLabelText('Dono'), 'Em cena')
+  await usuario.click(within(outro).getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'objeto.dono', item_id: 'o1' })
+  expect(JSON.parse(correcoes[0].valor as string)).toEqual({ pessoa: null, relacao: null })
+})
+
+test('objeto: Del pede "Este objeto não está na imagem?"; Esc não grava e Enter grava objeto.nao_existe', async () => {
+  const usuario = await selecionarObjeto()
+
+  await usuario.keyboard('{Delete}')
+  expect(await screen.findByText('Este objeto não está na imagem?')).toBeTruthy()
+  await usuario.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByText('Este objeto não está na imagem?')).toBeNull())
+  expect(correcoes).toEqual([])
+
+  await usuario.keyboard('{Delete}')
+  await screen.findByText('Este objeto não está na imagem?')
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({
+    tipo: 'objeto.nao_existe',
+    item_id: 'o1',
+    valor: 'nao_existe',
+    motivo: 'objeto removido da imagem pelo editor',
+  })
+})
+
+test('objeto: a lixeira abre a confirmação, e Cancelar e Remover funcionam com o clique', async () => {
+  const usuario = await selecionarObjeto()
+
+  await usuario.click(screen.getByRole('button', { name: 'Não é isto: camisa' }))
+  const confirmacao = await screen.findByRole('group', { name: 'Confirmar a remoção' })
+  expect(within(confirmacao).getByText('Este objeto não está na imagem?')).toBeTruthy()
+  await usuario.click(within(confirmacao).getByRole('button', { name: 'Cancelar' }))
+  await waitFor(() => expect(screen.queryByRole('group', { name: 'Confirmar a remoção' })).toBeNull())
+  expect(correcoes).toEqual([])
+
+  await usuario.click(screen.getByRole('button', { name: 'Não é isto: camisa' }))
+  const outra = await screen.findByRole('group', { name: 'Confirmar a remoção' })
+  await usuario.click(within(outra).getByRole('button', { name: 'Remover' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'objeto.nao_existe', item_id: 'o1' })
 })

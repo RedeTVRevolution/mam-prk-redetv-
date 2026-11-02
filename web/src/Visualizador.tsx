@@ -983,11 +983,13 @@ export default function Visualizador({
       const pedido = pedidoDeRemocao(decupagem, itemEmEdicao)
       if (pedido) {
         const alvo = itemEmEdicao.tipo === 'mencao' ? 'desta menção' : 'desta aparição'
+        const pergunta =
+          itemEmEdicao.tipo === 'objeto' ? 'Este objeto não está na imagem?' : `Remover ${itemEmEdicao.titulo} ${alvo}?`
         edicaoNoPainel = {
           chave: emEdicao.chave,
           conteudo: (
             <ConfirmacaoDeRemocao
-              texto={`Remover ${itemEmEdicao.titulo} ${alvo}?`}
+              texto={pergunta}
               aoConfirmar={async () => {
                 const falha = await gravar([pedido], motivoDaRemocao(pedido))
                 if (falha) mostrarAviso(falha)

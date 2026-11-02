@@ -33,6 +33,27 @@ const D = {
   planos: [{ id: 'pl1', ambiente: 'estúdio', acao: null, objetos: ['mesa'], plano_limpo: false, inicio_ms: 0, fim_ms: 5_000 }],
   comerciais: [{ id: 'c1', marca: 'Marca X', tipo: 'intervalo', inicio_ms: 40_000, fim_ms: 50_000 }],
   transcricao: [{ id: 'f1', locutor: 'Ana', texto: 'Boa noite', inicio_ms: 0, fim_ms: 3_000 }],
+  objetos: [
+    {
+      id: 'o1',
+      categoria: 'roupa',
+      tipo: 'camisa',
+      cor_base: ['azul'],
+      cor: 'azul marinho',
+      detalhe: 'listrada',
+      marca: 'Lacoste',
+      pessoa: 'p1',
+      relacao: 'veste',
+      ocorrencias: [{ inicio_ms: 10_000, fim_ms: 20_000 }],
+    },
+    {
+      id: 'o2',
+      categoria: 'mobiliario',
+      tipo: 'mesa',
+      cor_base: [],
+      ocorrencias: [{ inicio_ms: 0, fim_ms: 5_000 }],
+    },
+  ],
   textos_na_tela: [{ id: 't1', tipo: 'gc', texto: 'Leão Lobo, jurado', inicio_ms: 12_000, fim_ms: 15_000 }],
 } as unknown as Decupagem
 
@@ -161,6 +182,7 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os da
     for (const t of e.tiposPossiveis) caminhos.add(t)
   }
   caminhos.add('pessoa.nao_e')
+  caminhos.add('objeto.nao_existe')
   caminhos.add('desfazer')
   for (const t of editorDeNovaAparicao(D.pessoas[0], 0, catalogo).tiposPossiveis) caminhos.add(t)
 
@@ -174,6 +196,75 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os da
 
   const sem = catalogo.tipos.map((t) => t.valor).filter((t) => !caminhos.has(t))
   expect(sem.sort()).toEqual([...TIPOS_FORA_DESTE_TICKET].sort())
+})
+
+test('objeto: tipo, cor base, tom, detalhe e marca geram um objeto.atributos só', () => {
+  const e = editor('objeto-0')!
+  expect(e.pedidos(e.inicial)).toEqual([])
+
+  const pedidos = e.pedidos({ ...e.inicial, tipo: 'camiseta', cor_base: ['azul', 'branco'], cor: 'azul claro', detalhe: '', marca: 'Nike' })
+
+  expect(pedidos).toEqual([
+    {
+      tipo: 'objeto.atributos',
+      item_id: 'o1',
+      valor: JSON.stringify({ tipo: 'camiseta', cor_base: ['azul', 'branco'], cor: 'azul claro', detalhe: null, marca: 'Nike' }),
+    },
+  ])
+  expect(e.motivo(pedidos!)).toBe('atributos do objeto corrigidos pelo editor')
+})
+
+test('objeto: cada atributo sozinho muda só ele, e mais de duas cores base não salvam', () => {
+  const e = editor('objeto-0')!
+  const valor = (v: Record<string, unknown>) => {
+    const [p] = e.pedidos({ ...e.inicial, ...v } as never)!
+    return JSON.parse(p.valor)
+  }
+  expect(valor({ cor_base: ['branco'] })).toMatchObject({ cor_base: ['branco'], cor: 'azul marinho', marca: 'Lacoste' })
+  expect(valor({ cor: 'azul royal' })).toMatchObject({ cor_base: ['azul'], cor: 'azul royal' })
+  expect(valor({ detalhe: 'lisa' })).toMatchObject({ detalhe: 'lisa', tipo: 'camisa' })
+  expect(valor({ marca: 'Polo' })).toMatchObject({ marca: 'Polo' })
+  expect(e.pedidos({ ...e.inicial, cor_base: ['azul', 'branco', 'preto'] })).toBeNull()
+  expect(e.pedidos({ ...e.inicial, tipo: ' ' })).toBeNull()
+})
+
+test('objeto: trocar o dono, a relação e tirar o dono geram objeto.dono', () => {
+  const e = editor('objeto-0')!
+  expect(e.inicial).toMatchObject({ dono: 'p1', relacao: 'veste' })
+  expect(e.campos.find((c) => c.chave === 'dono')!.opcoes).toEqual([
+    { valor: '', rotulo: 'Em cena' },
+    { valor: 'p1', rotulo: 'Leão Lobo' },
+  ])
+
+  const tipo = (v: Record<string, string>) => e.pedidos({ ...e.inicial, ...v })
+  expect(tipo({ relacao: 'segura' })).toEqual([
+    { tipo: 'objeto.dono', item_id: 'o1', valor: JSON.stringify({ pessoa: 'p1', relacao: 'segura' }) },
+  ])
+  expect(tipo({ dono: '' })).toEqual([
+    { tipo: 'objeto.dono', item_id: 'o1', valor: JSON.stringify({ pessoa: null, relacao: null }) },
+  ])
+  expect(e.motivo(tipo({ dono: '' })!)).toBe('dono do objeto corrigido pelo editor')
+
+  const sem = editor('objeto-1')!
+  expect(sem.inicial).toMatchObject({ dono: '' })
+  expect(sem.pedidos({ ...sem.inicial, dono: 'p1', relacao: 'segura' })).toEqual([
+    { tipo: 'objeto.dono', item_id: 'o2', valor: JSON.stringify({ pessoa: 'p1', relacao: 'segura' }) },
+  ])
+  expect(sem.pedidos(sem.inicial)).toEqual([])
+})
+
+test('objeto: atributos e dono mudados juntos geram dois pedidos', () => {
+  const e = editor('objeto-0')!
+  const pedidos = e.pedidos({ ...e.inicial, marca: 'Polo', dono: '' })!
+  expect(pedidos.map((p) => p.tipo)).toEqual(['objeto.atributos', 'objeto.dono'])
+})
+
+test('o objeto tem "Este objeto não está na imagem?" e gera objeto.nao_existe', () => {
+  const item = itens.find((i) => i.chave === 'objeto-0')!
+  expect(podeRemover(D, item)).toBe(true)
+  const pedido = pedidoDeRemocao(D, item)!
+  expect(pedido).toEqual({ tipo: 'objeto.nao_existe', item_id: 'o1', valor: 'nao_existe' })
+  expect(motivoDaRemocao(pedido)).toBe('objeto removido da imagem pelo editor')
 })
 
 test('as alças mandam nos tempos, com os décimos, no lugar dos campos', () => {
