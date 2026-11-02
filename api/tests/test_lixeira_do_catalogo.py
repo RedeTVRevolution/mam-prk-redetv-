@@ -211,7 +211,11 @@ def test_purga_manual_apaga_a_pessoa_e_deixa_o_registro() -> None:
     assert (errada.status_code, certa.status_code) == (422, 200)
     assert mundo.catalogo.obter(mundo.ana.id) is None
     assert mundo.pessoa_em("j2")["nome"] == "Ana Souza"
-    assert next(r.acao for r in mundo.registros()) == "item.purgado"
+    # O relógio é fixo: os registros empatam na data, então a ordem não vale.
+    assert sorted(r.acao for r in mundo.registros()) == [
+        "item.para_lixeira",
+        "item.purgado",
+    ]
 
 
 def test_purga_automatica_aos_30_dias() -> None:

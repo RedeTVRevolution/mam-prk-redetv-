@@ -24,7 +24,7 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
-from api.catalogo import PessoaInexistente
+from api.catalogo import EnvioParaLixeira, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.jobs import (
@@ -34,7 +34,7 @@ from api.jobs import (
     ServicoIndisponivel,
     palavras_do_nome,
 )
-from api.marcas import carregar_marcas
+from api.marcas import MarcaInexistente, carregar_marcas
 from api.nuvem import (
     ArmazenamentoStorage,
     ArquivosNoStorage,
@@ -856,6 +856,12 @@ class TestRepositorioDeCorrecoesFirestore:
             correcoes.acrescentar(self._correcao("c1", "j1", 2))
 
 
+def _envio_para_lixeira() -> EnvioParaLixeira:
+    return EnvioParaLixeira(
+        em=BASE, por_uid="u1", por_email="c@redetv.com", motivo="duplicada"
+    )
+
+
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestCatalogoFirestore:
     @pytest.fixture
@@ -895,6 +901,25 @@ class TestCatalogoFirestore:
         with pytest.raises(PessoaInexistente):
             catalogo.corrigir(p.id, nome="X")
 
+    def test_lixeira_esconde_da_busca_e_restaurar_devolve(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        p = catalogo.acrescentar("Ana", "repórter", ["Aninha"])
+        envio = _envio_para_lixeira()
+
+        catalogo.definir_lixeira(p.id, envio)
+
+        assert catalogo.todas() == []
+        assert catalogo.achar("ana") == []
+        assert [x.id for x in catalogo.na_lixeira()] == [p.id]
+        assert catalogo.obter(p.id) is not None
+        assert catalogo.obter(p.id).lixeira == envio  # type: ignore[union-attr]
+        catalogo.definir_lixeira(p.id, None)
+        assert [x.id for x in catalogo.todas()] == [p.id]
+        assert catalogo.na_lixeira() == []
+        with pytest.raises(PessoaInexistente):
+            catalogo.definir_lixeira("inexistente", envio)
+
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, catalogo: CatalogoFirestore
     ) -> None:
@@ -925,6 +950,26 @@ class TestCatalogoDeMarcasFirestore:
         assert marcas.achar("Outro") == []
         assert marcas.obter("inexistente") is None
         assert marcas.todas() == [banco]
+
+    def test_lixeira_esconde_da_busca_restaura_e_apaga(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        m = marcas.acrescentar("Banco Verde", ["BV"])
+        envio = _envio_para_lixeira()
+
+        marcas.definir_lixeira(m.id, envio)
+
+        assert marcas.todas() == []
+        assert marcas.achar("bv") == []
+        assert [x.id for x in marcas.na_lixeira()] == [m.id]
+        marcas.definir_lixeira(m.id, None)
+        assert [x.id for x in marcas.todas()] == [m.id]
+        marcas.apagar(m.id)
+        assert marcas.obter(m.id) is None
+        with pytest.raises(MarcaInexistente):
+            marcas.apagar(m.id)
+        with pytest.raises(MarcaInexistente):
+            marcas.definir_lixeira(m.id, envio)
 
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, marcas: CatalogoDeMarcasFirestore

@@ -735,11 +735,12 @@ def test_limite_de_buscas_e_a_lista_de_nomes_do_job_de_referencias_vem_do_main_t
     )
 
 
-def test_a_api_le_as_fotos_de_referencia_para_assinar_o_link_do_nome() -> None:
+def test_a_api_le_e_apaga_as_fotos_de_referencia() -> None:
+    # Lê para assinar o link do nome; apaga as fotos de rosto no envio da pessoa à lixeira (#151).
     main = MAIN.read_text()
 
     assert re.search(
-        r'web = \{[^}\n]*referencias = "roles/storage.objectViewer"[^}\n]*\}', main
+        r'web = \{[^}\n]*referencias = "roles/storage.objectUser"[^}\n]*\}', main
     )
     servico = main.split('resource "google_cloud_run_v2_service" "web"')[1].split(
         "\nresource "

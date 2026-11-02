@@ -25,7 +25,7 @@ O que **não** é do administrador: reprocessar e "indexar agora" são do Operad
 3. **Motivo obrigatório** em todo apagamento, como nas correções.
 4. **Confirmação proporcional ao estrago.** Mandar para a lixeira pede um clique de confirmação na própria linha. A purga pede que o administrador digite o nome do item, e exige um login com MFA feito há poucos minutos.
 5. **Restaurar** volta tudo como estava, inclusive o índice, enquanto o item estiver na lixeira. A tela mostra os dias que faltam ("purga em 12 dias").
-6. **Quem pode.** Mandar um vídeo para a lixeira é do Administrador; uma pessoa ou marca do catálogo, também do Curador, que cuida do catálogo. Restaurar e purgar são só do Administrador.
+6. **Quem pode** (permissão `catalogo.apagar` para o catálogo; `lixeira.gerir` para restaurar e purgar). Mandar um vídeo para a lixeira é do Administrador; uma pessoa ou marca do catálogo, também do Curador, que cuida do catálogo. Restaurar e purgar são só do Administrador.
 7. **O histórico de apagamentos nunca é apagado.** Cada envio para a lixeira, restauração e purga gera um registro com quem, quando, o quê, o motivo e os números do impacto. O administrador lê, mas não edita nem apaga.
 
 ### O que acontece com cada coisa ligada ao vídeo

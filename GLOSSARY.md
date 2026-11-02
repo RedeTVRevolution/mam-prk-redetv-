@@ -181,7 +181,7 @@ Alteração humana sobre a saída do modelo, guardada como camada separada, com 
 _Evitar_: edição, ajuste
 
 **Lixeira**:
-Primeiro tempo de apagar um item (`api/lixeira.py`, `/v1/admin/lixeira`, #144, [ADR 0010](docs/adr/0010-lixeira-e-purga.md)): o vídeo ganha `Job.lixeira` (quando, quem, motivo) e some da lista, da busca e das rotas do Job para quem não é Administrador, mas nada é apagado e restaurar volta tudo. Só Job `concluido`, `falhou` ou `cancelado`. Cada envio e restauração vai para a auditoria com o impacto.
+Primeiro tempo de apagar um item (`api/lixeira.py`, `/v1/admin/lixeira`, #144, [ADR 0010](docs/adr/0010-lixeira-e-purga.md)): o vídeo ganha `Job.lixeira` (quando, quem, motivo) e some da lista, da busca e das rotas do Job para quem não é Administrador, mas nada é apagado e restaurar volta tudo. Só Job `concluido`, `falhou` ou `cancelado`. Cada envio e restauração vai para a auditoria com o impacto. Vale também para pessoa e marca do catálogo (#151, permissão `catalogo.apagar` do Curador e do Administrador; restaurar e purgar só do Administrador): a pessoa perde as fotos de rosto já no envio e, nas decupagens, o nome confirmado só pelo rosto vira "não identificado"; a marca mantém o texto e perde o vínculo.
 
 **Purga**:
 Segundo tempo de apagar: 30 dias depois do envio à lixeira, ou antes por decisão do Administrador, um processo próprio apaga de fato (única exceção à regra de que correções e saída do modelo nunca são apagadas) e deixa o registro na auditoria.
