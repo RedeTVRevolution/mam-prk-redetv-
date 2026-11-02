@@ -638,11 +638,14 @@ resource "google_service_account" "mam" {
 # vídeo bom como arquivo_corrompido.
 # A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
-  # Escritos pelo role_id, e não pelo atributo do recurso: o for_each do iam_member
-  # tira as chaves daqui, e elas têm de ser conhecidas no plan (o depends_on do
-  # iam_member garante que o papel existe antes da concessão).
-  papel_vertex_predicao  = "projects/${var.projeto}/roles/mamVertexPredicao"
-  papel_vertex_avaliacao = "projects/${var.projeto}/roles/mamVertexAvaliacao"
+  # Os IDs dos papéis sob medida (papel_vertex.tf). As concessões são escritas pelo
+  # ID, e não pelo atributo do recurso: o for_each do iam_member tira as chaves daqui,
+  # e elas têm de ser conhecidas no plan (o depends_on do iam_member garante que o
+  # papel existe antes da concessão).
+  id_do_papel_vertex_predicao  = "mamVertexPredicao"
+  id_do_papel_vertex_avaliacao = "mamVertexAvaliacao"
+  papel_vertex_predicao        = "projects/${var.projeto}/roles/${local.id_do_papel_vertex_predicao}"
+  papel_vertex_avaliacao       = "projects/${var.projeto}/roles/${local.id_do_papel_vertex_avaliacao}"
 
   papeis_no_projeto = {
     # `workflows.invoker` é só iniciar execuções (o reprocessar do #147), e o projeto tem

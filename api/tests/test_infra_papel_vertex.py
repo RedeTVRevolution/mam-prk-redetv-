@@ -59,12 +59,21 @@ def test_cada_conta_da_vertex_tem_o_papel_certo() -> None:
 
 
 def test_as_concessoes_esperam_os_papeis_e_as_chaves_sao_conhecidas_no_plan() -> None:
-    assert (
-        'papel_vertex_predicao  = "projects/${var.projeto}/roles/mamVertexPredicao"'
-        in TF
-    )
-    assert 'role_id     = "mamVertexPredicao"' in TF
-    assert 'role_id     = "mamVertexAvaliacao"' in TF
+    for papel, id_do_papel in (
+        ("vertex_predicao", "mamVertexPredicao"),
+        ("vertex_avaliacao", "mamVertexAvaliacao"),
+    ):
+        assert re.search(
+            rf'^\s+id_do_papel_{papel}\s+= "{id_do_papel}"$', TF, re.MULTILINE
+        )
+        assert re.search(
+            rf'^\s+papel_{papel}\s+= "projects/\$\{{var\.projeto\}}/roles/'
+            rf'\$\{{local\.id_do_papel_{papel}\}}"$',
+            TF,
+            re.MULTILINE,
+        ), papel
+        recurso = _bloco(f'resource "google_project_iam_custom_role" "{papel}"')
+        assert f"role_id     = local.id_do_papel_{papel}\n" in recurso, papel
     bloco = _bloco('resource "google_project_iam_member" "mam"')
     assert "google_project_iam_custom_role.vertex_predicao" in bloco
     assert "google_project_iam_custom_role.vertex_avaliacao" in bloco

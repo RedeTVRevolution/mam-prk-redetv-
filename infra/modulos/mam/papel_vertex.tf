@@ -5,7 +5,7 @@
 # (discoveryengine.viewer, na conta web), não da Vertex.
 resource "google_project_iam_custom_role" "vertex_predicao" {
   project     = var.projeto
-  role_id     = "mamVertexPredicao"
+  role_id     = local.id_do_papel_vertex_predicao
   title       = "MAM: predição da Vertex"
   description = "Chamar modelos da Vertex (generateContent, embedContent); nada de gerir recursos."
   permissions = ["aiplatform.endpoints.predict"]
@@ -14,7 +14,7 @@ resource "google_project_iam_custom_role" "vertex_predicao" {
 
 resource "google_project_iam_custom_role" "vertex_avaliacao" {
   project     = var.projeto
-  role_id     = "mamVertexAvaliacao"
+  role_id     = local.id_do_papel_vertex_avaliacao
   title       = "MAM: predição e avaliação da Vertex"
   description = "A predição mais o serviço de avaliação (evaluateInstances) da avaliação por rubrica."
   permissions = ["aiplatform.endpoints.predict", "aiplatform.locations.evaluateInstances"]
