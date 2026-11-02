@@ -322,3 +322,15 @@ Não corrigido:
 - Pronto: rota `GET /v1/jobs/{id}/passadas/{passada}/comparacao` (`api/comparar_passadas.py`, `criar_rotas_da_comparacao`, ligada no `main.py`; `Requisito.pares_iguais` novo, aditivo no JSON do #248); a web: `ComparacaoDePassadas.tsx` (seletor "Comparar com", dois lados por requisito, topo com custo por hora e tempo, clique leva o player), `usePassadas.ts`, `passadas.ts`, métodos `passadas()`/`comparacao()` no `ClienteDoJob`; o Painel dá lugar à comparação (62% da largura) enquanto há passada escolhida. 4 testes de API (`test_comparacao_da_passada.py`) e 8 da web.
 - Decisões: as regras de diferença ficam só no Python (a web não repete o pareamento). Sem `decupagem.ver` ou sem passada, a lista falha/vem vazia e o seletor não aparece (Visualizador como hoje). O lado do Job é a decupagem do modelo, sem correções (como no relatório do #248). Custo do Job: "n/d" (o Job não guarda tokens).
 - Armadilhas: o `Select` do Mantine tem role `combobox`; o msw do repo usa `onUnhandledFrame`.
+
+## #249 revisão (iteração 50)
+Corrigido:
+- Laço infinito de pedidos: `usePassadas(api.job(job.id))` dependia de um objeto novo a cada render e pedia `/passadas` sem parar (o mesmo para a comparação). Agora `clienteDoJob` com `useMemo`; teste conta um pedido só (falhava com 10).
+- Tempos com `relogio` (H:MM:SS depois de uma hora, como o Painel), não `tempo` (75:12). Teste novo.
+- Selo de diferença em `andamento` (cor de estado do Job, sistema-visual P3) trocado pelo neutro `textoSecundario`; a palavra diz o que é.
+- Rota: Job não concluído dá 409, como o `/decupagem` (antes caía em 503/404). O `ler_decupagem` do `main.py` nunca devolvia `None`, e o ramo morto saiu; a decupagem que falta dá 503, como no `/decupagem`. Teste do 409.
+- O mock da web dava custo ao Job, que a API nunca dá: agora `null` e o teste confere "n/d".
+Não corrigido:
+- `usePassadas` engole todo erro (não só o 403): o seletor só some, e o Visualizador fica como hoje, que é o que a spec pede. Mostrar alerta por um recurso opcional poluiria a tela.
+- Smells de julgamento: `a`/`b` na resposta HTTP (vêm do `Resultado` do #248), `marca: str` sem `Literal`, `TITULOS` repetindo os `REQUISITOS` no front, rotas dentro de `comparar_passadas.py`, blocos espelhados de Job/passada. Refatoração sem bug.
+- Custo do Job "n/d": depende de gravar tokens no Job (decisão humana, já anotada no #248).

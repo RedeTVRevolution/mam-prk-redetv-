@@ -34,7 +34,8 @@ const COMPARACAO = {
   modelo: 'gemini-3.8-flash',
   modelo_do_job: 'gemini-3.5-flash-lite',
   duracao_ms: 3_600_000,
-  a: { ...LADO, custo_usd: 0.5, custo_por_hora_usd: 0.5, tempo_total_s: 125 },
+  // O Job não guarda os tokens: a API devolve o custo dele como `null`.
+  a: { ...LADO, tempo_total_s: 125 },
   b: { ...LADO, custo_usd: 3, custo_por_hora_usd: 3, tempo_total_s: 35 },
   requisitos: [
     { nome: 'famosos', a: [], b: [] },
@@ -50,6 +51,7 @@ const COMPARACAO = {
   ],
 }
 
+let pedidosDasPassadas = 0
 let passadas: unknown[] | 'proibido' = [
   { id: 'p1', job_id: 'j1', modelo: 'gemini-3.8-flash', criada_em: '2026-11-02T12:00:00Z', custo: {}, etapas: [] },
 ]
@@ -59,9 +61,10 @@ const servidor = setupServer(
   http.get('/v1/jobs/j1/reproducao', () =>
     HttpResponse.json({ url: 'https://exemplo.test/v.mp4', expira_em: '2999-01-01T00:00:00Z' }),
   ),
-  http.get('/v1/jobs/j1/passadas', () =>
-    passadas === 'proibido' ? new HttpResponse(null, { status: 403 }) : HttpResponse.json(passadas),
-  ),
+  http.get('/v1/jobs/j1/passadas', () => {
+    pedidosDasPassadas += 1
+    return passadas === 'proibido' ? new HttpResponse(null, { status: 403 }) : HttpResponse.json(passadas)
+  }),
   http.get('/v1/jobs/j1/passadas/p1/comparacao', () => HttpResponse.json(COMPARACAO)),
 )
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
@@ -114,6 +117,30 @@ test('o seletor lista as passadas pelo modelo e pela data', async () => {
   expect(await screen.findByRole('option', { name: /gemini-3\.8-flash.*02\/11\/2026/ })).toBeTruthy()
 })
 
+test('a lista de passadas é pedida uma vez só, não a cada render', async () => {
+  pedidosDasPassadas = 0
+  await abrir()
+  await screen.findByRole('combobox', { name: 'Comparar com' })
+  await new Promise((r) => setTimeout(r, 100))
+
+  expect(pedidosDasPassadas).toBe(1)
+})
+
+test('o tempo de um item depois de uma hora tem as horas, como no Painel', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/passadas/p1/comparacao', () =>
+      HttpResponse.json({
+        ...COMPARACAO,
+        requisitos: [{ nome: 'pautas', a: [item('Fim', 4_512_000, 'so_aqui')], b: [] }],
+      }),
+    ),
+  )
+  await abrir()
+  const { job } = await compararComPassada()
+
+  expect(within(job).getByText('1:15:12')).toBeTruthy()
+})
+
 test('sem passada, o Visualizador fica como hoje', async () => {
   passadas = []
   await abrir()
@@ -148,7 +175,7 @@ test('o custo por hora e o tempo de cada lado ficam no topo', async () => {
   await compararComPassada()
 
   const topo = screen.getByRole('region', { name: 'Custo e tempo' })
-  expect(topo.textContent).toContain('US$ 0,50 por hora')
+  expect(within(topo).getByText(/Job/).parentElement?.textContent).toContain('n/d')
   expect(topo.textContent).toContain('US$ 3,00 por hora')
   expect(topo.textContent).toContain('02:05')
   expect(topo.textContent).toContain('00:35')

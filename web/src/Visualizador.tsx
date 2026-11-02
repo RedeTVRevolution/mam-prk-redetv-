@@ -182,7 +182,10 @@ export default function Visualizador({
   }, [api, job.id, tentativas])
 
   const concluido = job.estado === 'concluido'
-  const passadas = usePassadas(api.job(job.id), concluido)
+  // Um cliente só por Job: `api.job()` monta um objeto novo a cada chamada, e o efeito que
+  // depende dele pediria de novo a cada render.
+  const clienteDoJob = useMemo(() => api.job(job.id), [api, job.id])
+  const passadas = usePassadas(clienteDoJob, concluido)
   const [comparandoCom, setComparandoCom] = useState<string | null>(null)
   useEffect(() => {
     if (!concluido) return
@@ -1219,7 +1222,7 @@ export default function Visualizador({
         >
           {comparandoCom && (
             <ComparacaoDePassada
-              api={api.job(job.id)}
+              api={clienteDoJob}
               passadaId={comparandoCom}
               aoSaltar={(ms) => saltarPara(ms / 1000)}
             />

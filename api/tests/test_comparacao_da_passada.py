@@ -17,7 +17,7 @@ from api.tests.test_passadas import AUTORIZACAO, _job
 ROTA = "/v1/jobs/j1/passadas/p1/comparacao"
 
 
-def _cliente(papeis: list[Papel] | None = None) -> Any:
+def _cliente(papeis: list[Papel] | None = None, estado: str = "concluido") -> Any:
     a, b = _par()
     armazem = PassadasEmMemoria()
     armazem.gravar_passada(
@@ -43,7 +43,7 @@ def _cliente(papeis: list[Papel] | None = None) -> Any:
     armazenamento = ArmazenamentoFalso()
     armazenamento.decupagens["j1"] = [a.model_dump_json().encode()]
     jobs = RepositorioEmMemoria()
-    jobs.salvar(_job().model_copy(update={"duracao_s": 3600.0}))
+    jobs.salvar(_job(estado).model_copy(update={"duracao_s": 3600.0}))
     repo_papeis = RepositorioDePapeisEmMemoria()
     if papeis is not None:
         repo_papeis.salvar("u1", papeis)
@@ -113,3 +113,9 @@ def test_passada_que_nao_existe_e_404_e_sem_decupagem_ver_e_403() -> None:
         == 404
     )
     assert _cliente([]).get(ROTA, headers=AUTORIZACAO).status_code == 403
+
+
+def test_job_que_nao_concluiu_e_409() -> None:
+    assert (
+        _cliente(estado="analisando").get(ROTA, headers=AUTORIZACAO).status_code == 409
+    )

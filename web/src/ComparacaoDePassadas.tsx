@@ -2,7 +2,7 @@ import { Badge, Box, Group, Paper, Select, Stack, Text, UnstyledButton } from '@
 import { useEffect, useState } from 'react'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { type ClienteDoJob, codigoDoErro, SessaoExpirada } from './api.ts'
-import { tempo } from './linhaDoTempo.ts'
+import { relogio } from './linhaDoTempo.ts'
 import type { ComparacaoDaPassada, ItemMarcado, ResumoDaPassada } from './passadas.ts'
 import { CORES } from './tema.ts'
 
@@ -49,7 +49,7 @@ function dinheiro(usd: number | null): string {
 }
 
 function duracao(segundos: number): string {
-  return tempo(segundos * 1000)
+  return relogio(segundos * 1000)
 }
 
 function marcaDoItem(i: ItemMarcado): string | null {
@@ -80,19 +80,20 @@ function Lado({
           <UnstyledButton
             key={`${i.inicio_ms}-${i.fim_ms}-${i.identidade}`}
             onClick={() => aoSaltar(i.inicio_ms)}
-            aria-label={`${rotulo}: ${i.identidade} ${tempo(i.inicio_ms)}`}
+            aria-label={`${rotulo}: ${i.identidade} ${relogio(i.inicio_ms)}`}
             style={{ textAlign: 'left' }}
           >
             <Group gap="xs" wrap="nowrap" align="flex-start">
               <Text size="xs" c="dimmed" ff="monospace">
-                {tempo(i.inicio_ms)}
+                {relogio(i.inicio_ms)}
               </Text>
               <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
                 {i.identidade || '(sem descrição)'}
                 {i.detalhe ? ` [${i.detalhe}]` : ''}
               </Text>
               {marca && (
-                <Badge size="xs" variant="light" color={CORES.andamento}>
+                // Diferença não é estado do Job: selo neutro, e a palavra diz o que é (P3).
+                <Badge size="xs" variant="light" color={CORES.textoSecundario}>
                   {marca}
                 </Badge>
               )}

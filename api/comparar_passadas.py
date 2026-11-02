@@ -623,10 +623,11 @@ def comparacao_na_tela(
 def criar_rotas_da_comparacao(
     repositorio: RepositorioDeJobs,
     passadas: LeituraDePassadas,
-    ler_decupagem: Callable[[str], Decupagem | None],
+    ler_decupagem: Callable[[str], Decupagem],
 ) -> APIRouter:
-    """Só leitura, com `decupagem.ver`. O Job entra com a decupagem do modelo (sem as
-    correções), como no relatório do #248; o custo do Job fica "n/d" (ele não guarda os tokens)."""
+    """Só leitura, com `decupagem.ver` e o Job concluído (409 antes, como o `/decupagem`). O
+    Job entra com a decupagem do modelo (sem as correções), como no relatório do #248; o custo
+    do Job fica "n/d" (ele não guarda os tokens)."""
     rotas = APIRouter(prefix="/jobs")
 
     @rotas.get("/{job_id}/passadas/{passada_id}/comparacao")
@@ -636,14 +637,15 @@ def criar_rotas_da_comparacao(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
     ) -> ComparacaoNaTela:
         job = _enxerga(chamador, repositorio.obter(job_id))
+        if job.estado != "concluido" or job.duracao_s is None:
+            raise HTTPException(409, f"Job em {job.estado}, não concluido")
         passada = passadas.ler_passada(job.id, passada_id)
-        decupagem = ler_decupagem(job.id)
-        if passada is None or decupagem is None or job.duracao_s is None:
+        if passada is None:
             raise HTTPException(404, "Passada não encontrada")
         resultado = comparar_decupagens(
             job.id,
             round(job.duracao_s * 1000),
-            decupagem,
+            ler_decupagem(job.id),
             passada.decupagem,
             LadoDoResultado(None, tempo_do_job(job)),
             lado_da_passada(passada),
