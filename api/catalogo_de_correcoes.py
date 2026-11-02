@@ -18,6 +18,7 @@ from api.decupagem import (
     RELACOES_DO_OBJETO,
     Comercial,
     FonteDoNome,
+    RelacaoDoObjeto,
     TextoNaTela,
     TomDaPauta,
     em_mm_ss,
@@ -34,7 +35,7 @@ ROTULOS_DOS_TONS = {
     "analise": "análise",
     "comercial": "comercial",
 }
-ROTULOS_DAS_RELACOES = {
+ROTULOS_DAS_RELACOES: dict[RelacaoDoObjeto, str] = {
     "veste": "veste",
     "calca": "calça",
     "usa": "usa",

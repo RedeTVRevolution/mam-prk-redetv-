@@ -7,6 +7,7 @@ import pytest
 from api.catalogo_de_correcoes import (
     ROTULOS_DAS_FONTES,
     ROTULOS_DAS_LISTAS,
+    ROTULOS_DAS_RELACOES,
     ROTULOS_DOS_TONS,
 )
 from api.correcoes import TIPOS, Lista, TipoDeCorrecao, TipoNovo, valor_legivel
@@ -66,8 +67,8 @@ def test_catalogo_traz_as_listas_fechadas_do_objeto() -> None:
     )
     assert [o["valor"] for o in corpo["cores_base"]] == list(CORES_BASE)
     assert [o["valor"] for o in corpo["relacoes_do_objeto"]] == list(RELACOES_DO_OBJETO)
-    assert {o["valor"]: o["rotulo"] for o in corpo["relacoes_do_objeto"]}["calca"] == (
-        "calça"
+    assert {o["valor"]: o["rotulo"] for o in corpo["relacoes_do_objeto"]} == (
+        ROTULOS_DAS_RELACOES
     )
 
 
@@ -75,6 +76,7 @@ def test_rotulos_cobrem_os_vocabularios_do_esquema() -> None:
     assert set(ROTULOS_DOS_TONS) == set(get_args(TomDaPauta))
     assert set(ROTULOS_DAS_FONTES) == set(get_args(FonteDoNome))
     assert set(ROTULOS_DAS_LISTAS) == set(get_args(Lista))
+    assert set(ROTULOS_DAS_RELACOES) == set(RELACOES_DO_OBJETO)
 
 
 def test_rota_do_catalogo_exige_login() -> None:

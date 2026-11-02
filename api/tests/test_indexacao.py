@@ -455,12 +455,13 @@ def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
             headers=AUTORIZACAO,
         )
 
-    def buscar(q: str) -> list[str]:
+    def buscar(q: str) -> list[tuple[str, int]]:
         r = mundo.cliente.get("/v1/objetos/tipos", params={"q": q}, headers=AUTORIZACAO)
-        return [t["tipo"] for t in r.json()]
+        return [(t["tipo"], t["ocorrencias"]) for t in r.json()]
 
     mundo.reindexar()
     assert buscar("sa") == []
+    [(_, vestidos)] = buscar("vest")
 
     novo = {
         "categoria": "calcado",
@@ -470,9 +471,9 @@ def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
         "fim_ms": 4000,
     }
     assert corrigir("objeto.acrescentar", novo).status_code == 201
-    assert buscar("SA") == ["sandália"]
+    assert buscar("SA") == [("sandália", 1)]
 
     atributos = {"tipo": "scarpin", "cor_base": MODELO["objetos"][0]["cor_base"]}
     assert corrigir("objeto.atributos", atributos, "obj01").status_code == 201
-    assert buscar("scar") == ["scarpin"]
-    assert buscar("vest") == ["vestido"]
+    assert buscar("scar") == [("scarpin", 1)]
+    assert buscar("vest") == [("vestido", vestidos - 1)]
