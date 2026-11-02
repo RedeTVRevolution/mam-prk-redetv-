@@ -3,6 +3,10 @@
 O Cloud Run lê a linha JSON do stdout como `jsonPayload`, com `severity`. Os campos
 `evento`, `etapa` e os percentuais são o contrato com as métricas de log do
 `infra/main.tf`: mudar um nome aqui pede mudar o filtro lá.
+
+A falha de etapa sai uma vez por falha: daqui, quando o próprio Job a trata e termina sem
+erro (a análise que derruba o Job, a identificação incompleta); do Workflows
+(`marca_fim`), quando a execução do Job falha (erro, tempo esgotado, memória estourada).
 """
 
 import json
@@ -62,6 +66,19 @@ def registro_do_video_concluido(
             "pessoas_nao_identificadas": len(sem_nome),
             "pct_nao_identificadas": _percentual(len(sem_nome), len(na_imagem)),
             "respostas_fora_do_esquema": contagem.fora_do_esquema,
+        },
+        ensure_ascii=False,
+    )
+
+
+def registro_da_resposta_fora_do_esquema(modelo: str, motivo: str) -> str:
+    """Uma linha por resposta recusada, de qualquer chamada ao modelo: a métrica conta as linhas."""
+    return json.dumps(
+        {
+            "severity": "WARNING",
+            "evento": "resposta_fora_do_esquema",
+            "modelo": modelo,
+            "motivo": motivo[:300],
         },
         ensure_ascii=False,
     )

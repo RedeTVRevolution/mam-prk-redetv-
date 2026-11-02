@@ -187,9 +187,9 @@ def rodar_etapa(
     iniciar_etapa(repositorio, job_id, etapa, agora_utc())
     try:
         resultado = trabalho()
-    except Exception as e:
+    except Exception:
+        # A execução do Job falha e o Workflows loga a falha da etapa (`marca_fim`).
         encerrar_etapa(repositorio, job_id, etapa, "falhou", agora_utc())
-        registrar(registro_da_falha_de_etapa(etapa, job_id, f"{type(e).__name__}: {e}"))
         raise
     if resultado != bem_sucedido:
         registrar(registro_da_falha_de_etapa(etapa, job_id, f"resultado {resultado}"))

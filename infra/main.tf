@@ -282,6 +282,11 @@ variable "janela_dos_alertas_horas" {
   description = "Horas de log que cada alerta de sinal de qualidade soma ou calcula a média; o volume é de poucos vídeos por dia, então a janela é de um dia"
   type        = number
   default     = 24
+  validation {
+    # O período de alinhamento de um alerta vai até um dia.
+    condition     = var.janela_dos_alertas_horas >= 1 && var.janela_dos_alertas_horas <= 24 && floor(var.janela_dos_alertas_horas) == var.janela_dos_alertas_horas
+    error_message = "janela_dos_alertas_horas: horas inteiras de 1 a 24."
+  }
 }
 
 variable "imagem_validacao" {
@@ -2303,9 +2308,10 @@ resource "google_monitoring_alert_policy" "login_admin_emergencia" {
 
 # Sinais de qualidade em produção (#286). Os jobs escrevem uma linha JSON por evento
 # (`api/sinais.py`; a queda da avaliação sai de `api/avaliacao.py`) e o Cloud Run a lê como
-# `jsonPayload`. Os nomes dos campos e dos eventos são o contrato com o código: mudar um
-# lá pede mudar o filtro aqui (um teste confere). Cada percentual vira uma métrica de
-# distribuição, e o alerta olha a média na janela.
+# `jsonPayload`; a falha da execução de uma etapa sai do Workflows (`marca_fim`). Os nomes
+# dos campos e dos eventos são o contrato com o código: mudar um lá pede mudar o filtro
+# aqui (um teste confere). Cada percentual vira uma métrica de distribuição, e o alerta
+# olha a média na janela; as contagens contam linhas.
 locals {
   janela_dos_alertas_s = "${var.janela_dos_alertas_horas * 3600}s"
   canais_de_alerta     = [for canal in google_monitoring_notification_channel.admin_emergencia : canal.id]
@@ -2350,11 +2356,16 @@ resource "google_logging_metric" "sinal_percentual" {
   depends_on = [google_project_service.apis]
 }
 
+# Uma linha por resposta recusada, de qualquer chamada ao modelo (também do vídeo que
+# falhou). O contador conta as linhas (o `value_extractor` é das métricas de distribuição);
+# o total por vídeo, no log `video_concluido`, fica para a consulta.
 resource "google_logging_metric" "respostas_fora_do_esquema" {
-  name            = "mam_respostas_fora_do_esquema"
-  description     = "Respostas do modelo recusadas pelo esquema, somadas por vídeo concluído"
-  filter          = local.filtro_video_concluido
-  value_extractor = "EXTRACT(jsonPayload.respostas_fora_do_esquema)"
+  name        = "mam_respostas_fora_do_esquema"
+  description = "Respostas do modelo recusadas pelo esquema (e refeitas)"
+  filter = join(" AND ", [
+    "resource.type=\"cloud_run_job\"",
+    "jsonPayload.evento=\"resposta_fora_do_esquema\"",
+  ])
   metric_descriptor {
     metric_kind = "DELTA"
     value_type  = "INT64"
@@ -2366,8 +2377,9 @@ resource "google_logging_metric" "respostas_fora_do_esquema" {
 resource "google_logging_metric" "falhas_por_etapa" {
   name        = "mam_falhas_por_etapa"
   description = "Falhas de etapa do processamento, com a etapa como rótulo"
+  # Do Job, a falha que ele trata; do Workflows, a execução que falhou.
   filter = join(" AND ", [
-    "resource.type=\"cloud_run_job\"",
+    "(resource.type=\"cloud_run_job\" OR resource.type=\"workflows.googleapis.com/Workflow\")",
     "jsonPayload.evento=\"falha_de_etapa\"",
   ])
   metric_descriptor {
@@ -2411,15 +2423,16 @@ resource "google_logging_metric" "queda_da_avaliacao" {
 
 # Os avisos de métrica não têm limite de repetição como os de log: o `auto_close` fecha o
 # incidente quando a janela volta ao normal.
-resource "google_monitoring_alert_policy" "escalonadas" {
-  display_name = local.sinais_percentuais.escalonadas.titulo
+resource "google_monitoring_alert_policy" "sinal_percentual" {
+  for_each     = local.sinais_percentuais
+  display_name = each.value.titulo
   combiner     = "OR"
   conditions {
-    display_name = local.sinais_percentuais.escalonadas.titulo
+    display_name = each.value.titulo
     condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual["escalonadas"].name}\" AND resource.type=\"cloud_run_job\""
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual[each.key].name}\" AND resource.type=\"cloud_run_job\""
       comparison      = "COMPARISON_GT"
-      threshold_value = local.sinais_percentuais.escalonadas.limiar
+      threshold_value = each.value.limiar
       duration        = "0s"
       aggregations {
         alignment_period   = local.janela_dos_alertas_s
@@ -2432,32 +2445,7 @@ resource "google_monitoring_alert_policy" "escalonadas" {
   }
   notification_channels = local.canais_de_alerta
   documentation {
-    content = local.sinais_percentuais.escalonadas.documento
-  }
-}
-
-resource "google_monitoring_alert_policy" "nao_identificadas" {
-  display_name = local.sinais_percentuais.nao_identificadas.titulo
-  combiner     = "OR"
-  conditions {
-    display_name = local.sinais_percentuais.nao_identificadas.titulo
-    condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual["nao_identificadas"].name}\" AND resource.type=\"cloud_run_job\""
-      comparison      = "COMPARISON_GT"
-      threshold_value = local.sinais_percentuais.nao_identificadas.limiar
-      duration        = "0s"
-      aggregations {
-        alignment_period   = local.janela_dos_alertas_s
-        per_series_aligner = "ALIGN_MEAN"
-      }
-    }
-  }
-  alert_strategy {
-    auto_close = "1800s"
-  }
-  notification_channels = local.canais_de_alerta
-  documentation {
-    content = local.sinais_percentuais.nao_identificadas.documento
+    content = each.value.documento
   }
 }
 
@@ -2493,7 +2481,7 @@ resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   conditions {
     display_name = "Falhas de uma etapa acima do limite"
     condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\" AND resource.type=\"cloud_run_job\""
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\""
       comparison      = "COMPARISON_GT"
       threshold_value = var.limite_de_falhas_por_etapa
       duration        = "0s"

@@ -631,6 +631,23 @@ marca_inicio:
 marca_fim:
   params: [job_id, etapa, falhou_na_execucao, limpa_a_etapa: true, confere_o_estado: true]
   steps:
+    # Sinal do #286: a execução que falhou (erro, tempo esgotado, memória estourada) vai ao
+    # log que a métrica `mam_falhas_por_etapa` conta. A falha que o próprio Job trata e
+    # termina sem erro (a análise que derruba o Job, a identificação incompleta) sai do
+    # Job (`api/sinais.py`); a recusa do arquivo na validação é do arquivo, não conta.
+    - so_se_a_execucao_falhou:
+        switch:
+          - condition: $${not falhou_na_execucao}
+            next: le_o_estado
+    - registra_a_falha_da_etapa:
+        call: sys.log
+        args:
+          severity: WARNING
+          json:
+            evento: falha_de_etapa
+            etapa: $${etapa}
+            job_id: $${job_id}
+            motivo: a execução do Job falhou (erro, tempo esgotado ou memória estourada)
     - le_o_estado:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get

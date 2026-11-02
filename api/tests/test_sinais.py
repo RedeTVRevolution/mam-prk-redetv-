@@ -9,7 +9,13 @@ from api.analise import executar
 from api.analise_por_janelas import analisar_video
 from api.ciclo_de_vida import rodar_etapa
 from api.decupagem import Video
-from api.gemini import AnaliseFalhou, ErroHttp
+from api.gemini import (
+    TENTATIVAS_ESQUEMA,
+    AnaliseFalhou,
+    Chamada,
+    ErroHttp,
+    gerar_validado,
+)
 from api.jobs import Job, RepositorioEmMemoria
 from api.sinais import ContagemDaAnalise
 from api.tests.test_analise import BASE, DEPOIS, SHA, DecupagensEmMemoria
@@ -105,6 +111,32 @@ def test_resposta_fora_do_esquema_refeita_entra_na_contagem() -> None:
     assert concluido["respostas_fora_do_esquema"] == 2
 
 
+def test_cada_resposta_fora_do_esquema_sai_numa_linha_do_log() -> None:
+    """A métrica conta estas linhas, de qualquer chamada ao modelo, também as do vídeo que falhou."""
+    linhas: list[str] = []
+
+    def recusa(_texto: str) -> None:
+        raise ValueError("sem o campo x")
+
+    with pytest.raises(AnaliseFalhou):
+        gerar_validado(
+            TransporteFalso(*["{}"] * (TENTATIVAS_ESQUEMA + 1)),
+            Chamada(modelo="m", instrucao="", video_uri="", esquema={}, rotulos={}),
+            recusa,
+            dormir=lambda _s: None,
+            registrar=linhas.append,
+        )
+
+    registros = [json.loads(linha) for linha in linhas]
+    assert len(registros) == TENTATIVAS_ESQUEMA + 1
+    assert registros[0] == {
+        "severity": "WARNING",
+        "evento": "resposta_fora_do_esquema",
+        "modelo": "m",
+        "motivo": "sem o campo x",
+    }
+
+
 def test_falha_da_analise_loga_a_etapa_e_o_motivo() -> None:
     resultado, registros = _rodar(ErroHttp(400))
 
@@ -184,7 +216,8 @@ def test_etapa_que_falha_por_resultado_loga_a_etapa_e_o_resultado() -> None:
     assert "incompleto" in registro["motivo"]
 
 
-def test_etapa_que_levanta_loga_a_falha_e_deixa_a_excecao_seguir() -> None:
+def test_etapa_que_levanta_deixa_a_falha_para_o_workflows_e_a_excecao_seguir() -> None:
+    """A execução do Job falha e o `marca_fim` do Workflows loga: daqui sairia em dobro."""
     repositorio = RepositorioEmMemoria()
     _job(repositorio, "concluido")
     linhas: list[str] = []
@@ -202,11 +235,8 @@ def test_etapa_que_levanta_loga_a_falha_e_deixa_a_excecao_seguir() -> None:
             registrar=linhas.append,
         )
 
-    (registro,) = [json.loads(linha) for linha in linhas]
-    assert (registro["etapa"], registro["motivo"]) == (
-        "comparacao",
-        "AnaliseFalhou: sem resposta",
-    )
+    assert linhas == []
+    assert repositorio.obter("j1").etapas["comparacao"].resultado == "falhou"  # type: ignore[union-attr]
 
 
 def test_etapa_que_conclui_nao_loga_falha() -> None:

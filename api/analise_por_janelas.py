@@ -118,7 +118,7 @@ def analisar_video(
     if max_paralelas < 1:
         raise ValueError(f"janelas em paralelo: {max_paralelas}")
     janelas = planejar_janelas(video.duracao_ms)
-    if contagem:
+    if contagem is not None:
         contagem.janelas = len(janelas)
 
     medicao = (
@@ -160,7 +160,9 @@ def analisar_video(
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,
-            ao_fora_do_esquema=contagem.resposta_fora_do_esquema if contagem else None,
+            ao_fora_do_esquema=(
+                contagem.resposta_fora_do_esquema if contagem is not None else None
+            ),
         )
 
     if len(janelas) <= 1:
@@ -232,7 +234,7 @@ def analisar_video(
                 for indice in janelas_a_escalonar(job_id, resultados, fracao_escalonada)
                 if not (indice in gravadas and gravadas[indice].refeita)
             ]
-            if contagem:
+            if contagem is not None:
                 contagem.escalonadas = len(a_refazer)
             resultados.update(decupar_em_paralelo(a_refazer, escalonar=True))
     with etapa("consolidacao"):

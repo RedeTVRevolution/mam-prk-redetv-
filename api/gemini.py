@@ -25,6 +25,7 @@ from api.decupagem import (
 )
 from api.espera import espera_com_jitter, sorteio_uniforme
 from api.programas import PERFIS
+from api.sinais import Registrar, imprimir, registro_da_resposta_fora_do_esquema
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA, aplicar_transcricao
 
@@ -329,10 +330,11 @@ def gerar_validado[T](
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
     ao_fora_do_esquema: Callable[[], None] | None = None,
+    registrar: Registrar = imprimir,
 ) -> T:
     """Chama o transporte e valida a resposta com `validar` (que levanta `ValueError`),
     com as tentativas de rede e de esquema, dentro do prazo. Esgotados, `AnaliseFalhou`.
-    `ao_fora_do_esquema` roda a cada resposta recusada (o sinal do #286)."""
+    Cada resposta recusada sai no log (o sinal do #286) e chama `ao_fora_do_esquema`."""
     falhas_rede = 0
     falhas_esquema = 0
     inicio = relogio()
@@ -352,6 +354,7 @@ def gerar_validado[T](
         try:
             return validar(texto)
         except ValueError as e:
+            registrar(registro_da_resposta_fora_do_esquema(chamada.modelo, str(e)))
             if ao_fora_do_esquema:
                 ao_fora_do_esquema()
             if falhas_esquema >= TENTATIVAS_ESQUEMA:
