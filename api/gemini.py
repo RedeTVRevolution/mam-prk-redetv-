@@ -202,7 +202,7 @@ class SessaoHttp(Protocol):
 
 
 class TransporteVertex:
-    """REST na Vertex AI, endpoint global (ADR 0001), no modo Flex."""
+    """REST na Vertex AI, endpoint global (ADR 0001): Flex no vídeo, Standard com texto ou imagens."""
 
     def __init__(self, projeto: str, sessao: SessaoHttp) -> None:
         self._projeto = projeto

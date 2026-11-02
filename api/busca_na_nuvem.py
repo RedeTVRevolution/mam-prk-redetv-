@@ -25,8 +25,9 @@ log = logging.getLogger(__name__)
 
 TEMPO_DO_MODEL_ARMOR_S = 3.0
 TEMPO_DA_RANKING_S = 5.0
-# O limite de registros por pedido da Ranking API.
-REGISTROS_POR_PEDIDO = 1_000
+# O limite de registros por pedido da Ranking API (RankRequest.records: no máximo 200);
+# a busca funde várias cláusulas de até 100 registros, então passar disso é comum.
+REGISTROS_POR_PEDIDO = 200
 MODELO_DA_RANKING = "semantic-ranker-default@latest"
 
 

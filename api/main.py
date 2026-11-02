@@ -293,6 +293,7 @@ def criar_app(
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
 if _projeto:
+    _adaptadores = adaptadores_da_busca(os.environ)
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(firestore.Client(project=_projeto)),
@@ -322,7 +323,9 @@ if _projeto:
             if "BUSCA_COLECAO" in os.environ
             else None
         ),
-        **vars(adaptadores_da_busca(os.environ)),
+        transporte_da_consulta=_adaptadores.transporte_da_consulta,
+        armor=_adaptadores.armor,
+        ranking=_adaptadores.ranking,
     )
 else:
     app = criar_app()

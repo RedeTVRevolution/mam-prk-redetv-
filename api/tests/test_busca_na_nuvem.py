@@ -142,6 +142,17 @@ def test_ranking_mantem_no_fim_o_que_a_api_nao_devolveu_e_o_que_nao_tem_texto() 
     assert [r["id"] for r in sessao.pedidos[0]["json"]["records"]] == ["a", "b"]
 
 
+def test_ranking_manda_no_maximo_200_registros_e_o_resto_fica_no_fim() -> None:
+    ranking, sessao = _ranking(_ordem("r1", "r0"))
+    registros = [_r(f"r{i}", "t") for i in range(250)]
+
+    ordem = ranking.reordenar("q", registros)
+
+    assert len(sessao.pedidos[0]["json"]["records"]) == 200
+    assert [r.id for r in ordem[:3]] == ["r1", "r0", "r2"]
+    assert [r.id for r in ordem[-50:]] == [f"r{i}" for i in range(200, 250)]
+
+
 def test_ranking_sem_nenhum_texto_nao_chama_a_api() -> None:
     ranking, sessao = _ranking()
     registros = [_r("v")]
