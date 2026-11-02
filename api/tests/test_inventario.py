@@ -21,6 +21,7 @@ from api.inventario import (
 from api.leitura_da_tela import Caixa
 from api.tests.test_decupagem import decupagem_valida
 from api.tests.test_gemini import TransporteFalso
+from api.versao_pipeline import VERSAO_PIPELINE, manifesto
 
 
 def plano(indice: int, quadros: list[str]) -> Plano:
@@ -311,6 +312,28 @@ def test_aplicar_substitui_o_inventario_anterior() -> None:
     duas = aplicar_inventario(uma, inventarios, motor="florence", modelo="m")
 
     assert len(duas.planos[0].inventario) == 1
+
+
+def test_o_manifesto_do_pipeline_leva_o_motor_que_rodou() -> None:
+    d = decupagem(["q/a.jpg"]).model_copy(
+        update={
+            "versao_pipeline": VERSAO_PIPELINE,
+            "manifesto_do_pipeline": manifesto(),
+        }
+    )
+
+    nova = aplicar_inventario(d, {}, motor="gemini", modelo="gemini-x")
+
+    assert nova.manifesto_do_pipeline is not None
+    objetos = nova.manifesto_do_pipeline["motores"]["objetos"]
+    assert (objetos["motor"], objetos["modelo"]) == ("gemini", "gemini-x")
+    assert d.manifesto_do_pipeline == manifesto()  # a de antes não muda
+
+
+def test_sem_manifesto_o_inventario_nao_inventa_um() -> None:
+    nova = aplicar_inventario(decupagem(["q/a.jpg"]), {}, motor="florence", modelo="m")
+
+    assert nova.manifesto_do_pipeline is None
 
 
 def visto(nome: str, quadro_: int, **caixa_: float) -> dict[str, Any]:

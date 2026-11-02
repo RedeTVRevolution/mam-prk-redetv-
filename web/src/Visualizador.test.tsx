@@ -771,15 +771,22 @@ test('decupagem sem os campos novos (1.1) abre o painel, e sem catálogo a catal
 
 test('o detalhe do vídeo mostra a versão do pipeline da decupagem', async () => {
   servidor.use(
-    http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json({ ...DECUPAGEM, versao_pipeline: '2026.11.1' })),
+    http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json({
+        ...DECUPAGEM,
+        versao_pipeline: '2026.11.1',
+        manifesto_do_pipeline: { modelos: { analise: 'gemini-3.5-flash-lite' } },
+      })),
   )
   await abrirComFaixas()
 
-  expect((await screen.findByLabelText('Versão do pipeline')).textContent).toBe('Pipeline 2026.11.1')
+  const selo = await screen.findByText('Pipeline 2026.11.1')
+  // O manifesto aparece também pelo teclado, não só com o mouse.
+  selo.focus()
+  expect(await screen.findByText(/gemini-3\.5-flash-lite/)).toBeTruthy()
 })
 
 test('a decupagem sem versão do pipeline aparece como anterior à versão', async () => {
   await abrirComFaixas()
 
-  expect((await screen.findByLabelText('Versão do pipeline')).textContent).toBe('Pipeline anterior à versão')
+  expect(await screen.findByText('Pipeline anterior à versão')).toBeTruthy()
 })

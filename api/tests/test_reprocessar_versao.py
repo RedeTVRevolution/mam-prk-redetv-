@@ -11,12 +11,7 @@ from api.auditoria import RepositorioDeAuditoriaEmMemoria
 from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.progresso_das_janelas import JanelasEmMemoria
 from api.reprocessamento import DisparoEmMemoria
-from api.reprocessar_versao import (
-    FaltaNoAmbiente,
-    escolher,
-    main,
-    reprocessar_versao,
-)
+from api.reprocessar_versao import escolher, main, reprocessar_versao
 from api.versao_pipeline import VERSAO_PIPELINE
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
@@ -180,5 +175,36 @@ def test_escolher_nao_muda_a_ordem_nem_passa_do_limite() -> None:
 
 
 def test_o_comando_pede_o_ambiente(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(FaltaNoAmbiente):
-        main([], ambiente={})
+    assert main([], ambiente={}) == 2
+    assert "GCP_PROJECT_ID" in capsys.readouterr().err
+
+
+def test_limite_que_nao_e_numero_e_erro_de_uso(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    ambiente = {
+        nome: "x"
+        for nome in (
+            "GCP_PROJECT_ID",
+            "BUCKET_ACEITOS",
+            "BUCKET_DECUPAGENS",
+            "WORKFLOW_REGIAO",
+            "WORKFLOW_VALIDACAO",
+        )
+    }
+
+    assert main(["", "dez"], ambiente=ambiente) == 2
+    assert "dez" in capsys.readouterr().err
+
+
+def test_job_sem_duracao_fica_fora_do_custo_e_e_avisado() -> None:
+    mundo = Mundo([_job("a"), _job("b")], {"a": None, "b": None})
+    sem = mundo.jobs.obter("b")
+    assert sem is not None
+    mundo.jobs.salvar(sem.model_copy(update={"duracao_s": None}))
+
+    texto = "\n".join(mundo.rodar(custo_por_hora=2.0))
+
+    assert "duração n/d" in texto
+    assert "2 Jobs, 1.00 h" in texto and "US$ 2,00" in texto
+    assert "1 Jobs sem duração" in texto

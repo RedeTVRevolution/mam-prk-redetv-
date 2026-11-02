@@ -12,9 +12,11 @@ import hashlib
 from typing import Any
 
 from api import (
+    comparacao,
     entendimento_da_consulta,
     florence,
     gemini,
+    inventario,
     modelo_forte,
     paddle,
     referencias,
@@ -46,10 +48,32 @@ def manifesto() -> dict[str, Any]:
             "modelo_forte": _hash(modelo_forte.INSTRUCAO),
             "conferencia_das_referencias": _hash(referencias.INSTRUCAO_DA_CONFERENCIA),
             "nomes_das_referencias": _hash(referencias.INSTRUCAO_DOS_NOMES),
+            "consulta": _hash(entendimento_da_consulta.INSTRUCAO),
+            "conversao_do_inventario": _hash(inventario.INSTRUCAO_DA_CONVERSAO),
+            "olhar_do_inventario": _hash(inventario.INSTRUCAO_DO_OLHAR),
+            "escolha_da_comparacao": _hash(comparacao.INSTRUCAO_DA_ESCOLHA),
+            "conferencia_da_comparacao": _hash(comparacao.INSTRUCAO_DA_CONFERENCIA),
         },
         "motores": {
-            "transcricao": f"faster-whisper {whisper.NOME_DO_MODELO}",
-            "ocr": f"paddleocr {paddle.DETECTOR}+{paddle.RECONHECEDOR}",
-            "objetos": f"florence {florence.NOME_DO_MODELO}",
+            "transcricao": {
+                "motor": "faster-whisper",
+                "modelo": whisper.NOME_DO_MODELO,
+                "idioma": whisper.IDIOMA,
+                "vad": whisper.VAD_PARAMETROS,
+            },
+            "ocr": {
+                "motor": "paddleocr",
+                "detector": paddle.DETECTOR,
+                "reconhecedor": paddle.RECONHECEDOR,
+            },
+            # O padrão do Florence-2; o Job do inventário troca `motor` e `modelo` pelos
+            # do ambiente (`MOTOR_OBJETOS`, `MODELO_OBJETOS`) ao gravar (`aplicar_inventario`).
+            "objetos": {
+                "motor": "florence",
+                "modelo": None,
+                "florence": florence.NOME_DO_MODELO,
+                "tarefas": [florence.DETECCAO, florence.REGIOES],
+                "geracao": florence.GERACAO,
+            },
         },
     }

@@ -955,8 +955,9 @@ export default function Visualizador({
               }
               multiline
               maw={420}
+              events={{ hover: true, focus: true, touch: true }}
             >
-              <Text size="xs" c="dimmed" aria-label="Versão do pipeline" style={{ whiteSpace: 'nowrap' }}>
+              <Text size="xs" c="dimmed" tabIndex={0} style={{ whiteSpace: 'nowrap' }}>
                 Pipeline {decupagem.versao_pipeline ?? 'anterior à versão'}
               </Text>
             </Tooltip>

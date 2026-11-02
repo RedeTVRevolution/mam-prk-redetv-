@@ -47,7 +47,7 @@ MOTIVO = "versão nova do pipeline"
 LOTE = 5
 PAUSA_ENTRE_LOTES_S = 60.0
 
-__all__ = ["FaltaNoAmbiente", "escolher", "main", "reprocessar_versao"]
+__all__ = ["escolher", "main", "reprocessar_versao"]
 
 
 class LeitorDeDecupagem(Protocol):
@@ -59,7 +59,7 @@ class Candidato:
     job_id: str
     nome: str
     versao: str
-    duracao_s: float
+    duracao_s: float | None
 
 
 def _versao_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> str | None:
@@ -92,7 +92,7 @@ def escolher(
             continue
         if de is not None and versao != de:
             continue
-        escolhidos.append(Candidato(job.id, job.nome, versao, job.duracao_s or 0))
+        escolhidos.append(Candidato(job.id, job.nome, versao, job.duracao_s))
     return escolhidos
 
 
@@ -118,12 +118,18 @@ def reprocessar_versao(
     escrever: Callable[[str], None] = print,
 ) -> None:
     escolhidos = escolher(repositorio, decupagens, de, limite)
-    horas = sum(c.duracao_s for c in escolhidos) / 3600
+    horas = sum(c.duracao_s or 0 for c in escolhidos) / 3600
+    sem_duracao = sum(1 for c in escolhidos if c.duracao_s is None)
     custo = "n/d" if custo_por_hora is None else _dolar(horas * custo_por_hora)
     escrever(f"Versão do pipeline: {VERSAO_PIPELINE}")
     for c in escolhidos:
-        escrever(f"{c.job_id}  {c.nome}  versão {c.versao}  {c.duracao_s / 3600:.2f} h")
+        duracao = (
+            "duração n/d" if c.duracao_s is None else f"{c.duracao_s / 3600:.2f} h"
+        )
+        escrever(f"{c.job_id}  {c.nome}  versão {c.versao}  {duracao}")
     escrever(f"{len(escolhidos)} Jobs, {horas:.2f} h de vídeo, custo estimado {custo}")
+    if sem_duracao:
+        escrever(f"{sem_duracao} Jobs sem duração ficaram fora das horas e do custo.")
     if not confirmar:
         escrever("Nada foi reprocessado: rode de novo com CONFIRMAR=1.")
         return
@@ -166,27 +172,35 @@ def _reprocessar(
 
 
 def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int:
-    projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-    aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-    decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
-    regiao = exigir_do_ambiente(ambiente, "WORKFLOW_REGIAO")
-    workflow = exigir_do_ambiente(ambiente, "WORKFLOW_VALIDACAO")
-    de = argumentos[0] if argumentos and argumentos[0] else None
-    limite = int(argumentos[1]) if len(argumentos) > 1 and argumentos[1] else None
-    custo = ambiente.get("CUSTO_POR_HORA_USD")
+    try:
+        projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
+        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
+        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        regiao = exigir_do_ambiente(ambiente, "WORKFLOW_REGIAO")
+        workflow = exigir_do_ambiente(ambiente, "WORKFLOW_VALIDACAO")
+        de = argumentos[0] if argumentos and argumentos[0] else None
+        limite = int(argumentos[1]) if len(argumentos) > 1 and argumentos[1] else None
+        custo = ambiente.get("CUSTO_POR_HORA_USD")
+        custo_por_hora = float(custo) if custo else None
+        tamanho_do_lote = int(ambiente.get("TAMANHO_DO_LOTE") or LOTE)
+        pausa_s = float(ambiente.get("PAUSA_ENTRE_LOTES_S") or PAUSA_ENTRE_LOTES_S)
+    except (FaltaNoAmbiente, ValueError) as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    banco = firestore.Client(project=projeto)
     cliente = ClienteStorage(project=projeto)
     reprocessar_versao(
-        RepositorioFirestore(firestore.Client(project=projeto)),
+        RepositorioFirestore(banco),
         DecupagensStorage(cliente, aceitos, decupagens),
-        RepositorioDeAuditoriaFirestore(firestore.Client(project=projeto)),
+        RepositorioDeAuditoriaFirestore(banco),
         DisparoPeloWorkflows(projeto, regiao, workflow),
         JanelasStorage(cliente, aceitos),
         de=de,
         limite=limite,
         confirmar=ambiente.get("CONFIRMAR") == "1",
-        custo_por_hora=float(custo) if custo else None,
-        tamanho_do_lote=int(ambiente.get("TAMANHO_DO_LOTE") or LOTE),
-        pausa_s=float(ambiente.get("PAUSA_ENTRE_LOTES_S") or PAUSA_ENTRE_LOTES_S),
+        custo_por_hora=custo_por_hora,
+        tamanho_do_lote=tamanho_do_lote,
+        pausa_s=pausa_s,
     )
     return 0
 

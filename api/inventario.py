@@ -4,6 +4,7 @@ O inventário é do servidor: não entra no esquema da análise, e a Decupagem s
 texto em português.
 """
 
+import copy
 import time
 from collections.abc import Callable, Sequence
 from typing import Annotated, Any
@@ -397,9 +398,13 @@ def aplicar_inventario(
         p.model_copy(update={"inventario": inventarios.get(i, [])})
         for i, p in enumerate(decupagem.planos)
     ]
-    return decupagem.model_copy(
-        update={
-            "planos": planos,
-            "inventario_gerado_por": GeradorDoInventario(motor=motor, modelo=modelo),  # type: ignore[arg-type]
-        }
-    )
+    update: dict[str, Any] = {
+        "planos": planos,
+        "inventario_gerado_por": GeradorDoInventario(motor=motor, modelo=modelo),  # type: ignore[arg-type]
+    }
+    if decupagem.manifesto_do_pipeline is not None:
+        # O manifesto da análise traz o motor padrão; o que rodou vem do ambiente (#250).
+        manifesto = copy.deepcopy(decupagem.manifesto_do_pipeline)
+        manifesto["motores"]["objetos"] |= {"motor": motor, "modelo": modelo}
+        update["manifesto_do_pipeline"] = manifesto
+    return decupagem.model_copy(update=update)

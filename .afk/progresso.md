@@ -341,3 +341,15 @@ Não corrigido:
 - Pronto: `api/versao_pipeline.py` (`VERSAO_PIPELINE = "2026.11.1"`, `manifesto()`: esquema, modelos, hashes das instruções, motores Whisper/Paddle/Florence); `Decupagem.versao_pipeline`/`manifesto_do_pipeline` (opcionais, em `CAMPOS_DO_SERVIDOR`), gravados em `analise.py` antes de gravar; teste `test_versao_pipeline.py` contra `api/tests/versao_pipeline_fixada.json`; `api/reprocessar_versao.py` + `make reprocessar-versao [DE=] [LIMITE=] [CONFIRMAR=1]`; núcleo da rota extraído para `reprocessar_com_rastro` (`reprocessamento.py`), usado pela rota e pelo comando; Visualizador mostra "Pipeline <versão>"; outputs `workflow_regiao`/`workflow_validacao` no `infra/main.tf`; README e GLOSSARY.
 - Decisões: esquema continua 1.4 (campos opcionais). Custo estimado = horas × `CUSTO_POR_HORA_USD` (sem ele "n/d"). Lotes de 5 com pausa de 60 s (env). `DE=anterior` = decupagem sem o campo. Auditoria por `sistema="reprocessar-versao"`.
 - Armadilhas: manifesto não leva o motor de objetos do inventário (vem do ambiente do Job) nem o detector real do OCR da imagem (usa o padrão). Decupagem ilegível fica fora da lista. Output novo do Terraform precisa de `terraform apply` para o make funcionar.
+
+## #250 revisão (iteração 51)
+Corrigido:
+- O manifesto não cobria todo o pipeline: entram os hashes das instruções da consulta, do inventário (conversão e olhar) e da comparação (escolha e conferência), e os parâmetros dos motores (idioma e VAD do Whisper, tarefas e geração do Florence). Os motores viram objetos. A versão segue 2026.11.1 (ainda não foi para produção), com o JSON fixado regravado.
+- O motor de objetos ficava sempre `florence` no manifesto: agora `aplicar_inventario` grava o `motor` e o `modelo` que rodaram (do ambiente). Há teste.
+- Selo "Pipeline …" no Visualizador: o `aria-label` tapava o texto e o tooltip não abria pelo teclado. Agora tem `tabIndex=0` e `events` com foco, como o selo do Painel. Há teste com foco.
+- `main` do comando: erro de ambiente ou `LIMITE` inválido vira `erro:` com saída 2, como os vizinhos, e o cliente do Firestore é um só. Job sem duração aparece como "duração n/d" e com aviso, sem zerar o custo calado.
+Não corrigido:
+- Filtro por versão "diferente" e não "anterior": as versões são nomes (`2026.11.1`), sem ordem garantida, e reprocessar o que não é a atual é o que se quer depois de um rollback.
+- A passada de comparação (#247) não grava `versao_pipeline`: ela já guarda o modelo e a spec não pede. Mostrar a versão na comparação lado a lado (#249) fica para decisão humana.
+- O detector real do OCR vem da imagem (`DETECTOR` no Dockerfile) e o manifesto usa o padrão: gravar o detector exigiria que o Job de OCR escrevesse na Decupagem, o que ele não faz hoje.
+- Smells de julgamento: `autor: dict[str, str]` com `**autor`, o quarteto repositório/auditoria/disparo/janelas viajando junto, `ANTERIOR` como texto sentinela, `exigir_do_ambiente` morando em `comparar_objetos`, `_dolar` em pt-BR diferente do `US$ x.xxxx` dos comandos de comparação, `DE`/`LIMITE` por argumento e `CONFIRMAR` por ambiente. Todos são refatoração sem bug.
