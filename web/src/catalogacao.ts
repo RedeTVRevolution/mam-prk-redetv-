@@ -1,4 +1,5 @@
 /** A correção do item em foco sem React: os campos de cada tipo e os pedidos que as mudanças geram. */
+import type { CatalogoDeNomes } from './api.ts'
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
 import { type Intervalo, lerTempo, nomeExibido, ocorrenciasDosObjetos, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
@@ -31,8 +32,10 @@ export interface CampoDoEditor {
   rotulo: string
   tipo: 'texto' | 'nome' | 'area' | 'opcoes' | 'multiplas' | 'cores' | 'booleano' | 'tempo'
   /** Do tipo `nome`: o catálogo que o autocompletar consulta. */
-  catalogo?: 'pessoas' | 'marcas'
+  catalogo?: CatalogoDeNomes
   opcoes?: Opcao[]
+  /** Do tipo `opcoes`: digitar filtra a lista (muitas opções, como as pessoas do vídeo). */
+  buscavel?: boolean
   limite?: number
   /** Do tipo `cores`: quantas opções cabem marcadas ao mesmo tempo. */
   maximo?: number
@@ -438,7 +441,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
       const relacoes = c.relacoes_do_objeto
       const cores = objeto.cor_base
       const campos: CampoDoEditor[] = [
-        { chave: 'tipo', rotulo: 'Tipo', tipo: 'texto', limite: c.limites.nome },
+        { chave: 'tipo', rotulo: 'Tipo', tipo: 'nome', catalogo: 'tipos_de_objeto', limite: c.limites.nome },
         { chave: 'cor_base', rotulo: `Cor base (até ${MAXIMO_DE_CORES_BASE})`, tipo: 'cores', opcoes: c.cores_base, maximo: MAXIMO_DE_CORES_BASE },
         { chave: 'cor', rotulo: 'Tom', tipo: 'texto', limite: c.limites.nome },
         { chave: 'detalhe', rotulo: 'Detalhe', tipo: 'texto', limite: c.limites.nome },
@@ -447,6 +450,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
           chave: 'dono',
           rotulo: 'Dono',
           tipo: 'opcoes',
+          buscavel: true,
           opcoes: [{ valor: SEM_DONO, rotulo: 'Em cena' }, ...d.pessoas.map((p) => ({ valor: p.id, rotulo: nomeExibido(p.nome) }))],
         },
         { chave: 'relacao', rotulo: 'Relação', tipo: 'opcoes', opcoes: relacoes, visivel: (v) => v.dono !== SEM_DONO },

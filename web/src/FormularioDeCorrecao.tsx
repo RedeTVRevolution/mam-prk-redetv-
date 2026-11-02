@@ -1,9 +1,12 @@
-import { Button, Checkbox, Group, NativeSelect, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core'
+import { Button, Checkbox, Group, NativeSelect, Select, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core'
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from 'react'
 import { CampoDeCores } from './CampoDeCores.tsx'
 import { CampoDeNome } from './CampoDeNome.tsx'
 import { type CampoDoEditor, type Editor, idDoNome, type Valor } from './catalogacao.ts'
 import { type Intervalo, relogio } from './linhaDoTempo.ts'
+
+// A opção de valor vazio ("Em cena") não cabe no Select, que lê '' como "nada escolhido".
+const VALOR_VAZIO = '__vazio__'
 
 /** O formulário compacto que toma o lugar da linha do item: Enter salva e Esc cancela, sem diálogo. */
 export function FormularioDeCorrecao({
@@ -133,6 +136,20 @@ export function FormularioDeCorrecao({
           />
         )
       case 'opcoes':
+        if (c.buscavel)
+          return (
+            <Select
+              key={c.chave}
+              size="xs"
+              label={c.rotulo}
+              searchable
+              allowDeselect={false}
+              nothingFoundMessage="Ninguém com esse nome"
+              data={(c.opcoes ?? []).map((o) => ({ value: o.valor || VALOR_VAZIO, label: o.rotulo }))}
+              value={String(valor ?? '') || VALOR_VAZIO}
+              onChange={(v) => mudar(c, v === VALOR_VAZIO ? '' : (v ?? ''))}
+            />
+          )
         return (
           <NativeSelect
             key={c.chave}

@@ -800,3 +800,10 @@ Não corrigido:
 ## #309 revisão
 - Corrigido: (1) quando o objeto tinha uma cor base fora de `c.cores_base`, o F2 sem mudança gerava um `objeto.atributos`. Agora a comparação usa as cores marcadas como estão (ordenadas), sem o `as never`. (2) Faltava o teste do tipo mudado sozinho e o do F2 sem mudança, que não gera pedido.
 - Não corrigido / dizer no PR: (1) O limite de 2 cores só vale na hora de gravar: o campo deixa marcar a terceira, e o pedido devolve `null` sem aviso. O 2 também se repete no rótulo e no `max_length` da API, e o catálogo não traz esse limite. Fica para a parte 2 (cor base por tecla). (2) O caso do objeto em `montarEditor` não segue o molde `partes: (Pedido[] | null)[]` + `juntar` dos outros casos, e não tem a guarda `if (!id)`. O `id` do objeto é obrigatório no tipo. (3) `podeRemover`, `pedidoDeRemocao`, `motivoDaRemocao` e a pergunta no `Visualizador.tsx` testam o tipo cada um por conta (repeated switch). (4) "Em cena" como rótulo do sem dono pode se confundir com a categoria `em_cena`, mas segue o comentário de `decupagem.ts`. (5) A troca só da ordem das cores não conta como mudança, como antes.
+- 2026-11-02 19:16:06 · #309: feito
+- 2026-11-02 19:16:10 · iteração 90: #310
+
+## #310 iteração 91
+- Pronto: campo `'cores'` (`web/src/CampoDeCores.tsx`; `teclasDasOpcoes` e `maximo` em `catalogacao.ts`): botões ligáveis com a letra ao lado, tecla com o foco no grupo, no máximo 2 com aviso, letras na lista do `?` (grupo "Cor base do objeto"). Tipo do objeto usa `CampoDeNome` com catálogo `tipos_de_objeto` (só sugere, sem "criar"; `api.nomes.achar` chama `/v1/objetos/tipos`). Dono virou `Select` buscável (opção `buscavel` em `CampoDoEditor`) com "Em cena". Testes em `Catalogacao.test.tsx` e `catalogacao.test.ts`. `make verificar` verde.
+- Decisões: a letra de cada cor é a primeira letra livre do rótulo (verde=V, vermelho=E, azul=Z…), calculada, não fixa. O valor vazio ("Em cena") vira `__vazio__` dentro do Select.
+- Armadilha: o `Select` do Mantine tem role `combobox` e o `getByLabelText` acha dois elementos; o teste antigo do dono (`selectOptions`) foi trocado por clique na opção.

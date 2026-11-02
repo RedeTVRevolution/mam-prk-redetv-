@@ -9,7 +9,7 @@ const MINIMO_DE_LETRAS = 2
 const ATIVA = `${CORES.foco}29`
 
 /**
- * Campo de nome de pessoa ou de marca com autocompletar: a lista abre a partir de 2 letras; ↑ ↓ e Enter
+ * Campo de nome de pessoa ou de marca (ou de tipo de objeto, que só sugere e não cria) com autocompletar: a lista abre a partir de 2 letras; ↑ ↓ e Enter
  * escolhem, Shift+Enter (ou o clique na última linha) usa o texto digitado como nome novo, "a revisar".
  * Escolher do catálogo devolve o id junto com o nome.
  */
@@ -35,6 +35,7 @@ export function CampoDeNome({
   const [criando, setCriando] = useState(false)
   const ultimaBusca = useRef(0)
   const nomeNovo = valor.trim()
+  const soSugere = catalogo === 'tipos_de_objeto'
   const comLista = aberta && nomes !== null && nomeNovo.length >= MINIMO_DE_LETRAS
 
   async function buscar(texto: string) {
@@ -53,7 +54,7 @@ export function CampoDeNome({
     } catch {
       if (busca !== ultimaBusca.current) return
       setAchados([])
-      setErro('Não foi possível consultar o catálogo. Pode seguir com o nome digitado.')
+      setErro(`Não foi possível consultar ${soSugere ? 'os tipos' : 'o catálogo'}. Pode seguir com o texto digitado.`)
       setAberta(true)
     }
   }
@@ -81,7 +82,7 @@ export function CampoDeNome({
   }
 
   function aoTeclar(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' && e.shiftKey) {
+    if (e.key === 'Enter' && e.shiftKey && !soSugere) {
       e.preventDefault()
       e.stopPropagation()
       void criar()
@@ -140,18 +141,20 @@ export function CampoDeNome({
                 {erro}
               </Text>
             )}
-            <div
-              role="option"
-              aria-selected={false}
-              tabIndex={-1}
-              style={{ cursor: 'pointer', padding: '2px 4px' }}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => void criar()}
-            >
-              <Text size="xs" c="dimmed">
-                {`Shift+Enter: criar '${nomeNovo}' como nova`}
-              </Text>
-            </div>
+            {!soSugere && (
+              <div
+                role="option"
+                aria-selected={false}
+                tabIndex={-1}
+                style={{ cursor: 'pointer', padding: '2px 4px' }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => void criar()}
+              >
+                <Text size="xs" c="dimmed">
+                  {`Shift+Enter: criar '${nomeNovo}' como nova`}
+                </Text>
+              </div>
+            )}
           </div>
         </Paper>
       )}

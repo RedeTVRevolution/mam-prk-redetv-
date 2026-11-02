@@ -826,7 +826,8 @@ test('objeto: o duplo clique e o lápis abrem o formulário, e o dono vira "em c
 
   await usuario.click(screen.getByRole('button', { name: 'Corrigir camisa' }))
   const outro = await screen.findByRole('form', { name: /Corrigir camisa/ })
-  await usuario.selectOptions(within(outro).getByLabelText('Dono'), 'Em cena')
+  await usuario.click(within(outro).getByRole('combobox', { name: 'Dono' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Em cena' }))
   await usuario.click(within(outro).getByRole('button', { name: 'Salvar' }))
 
   await waitFor(() => expect(correcoes).toHaveLength(1))
@@ -945,4 +946,65 @@ test('objeto: as teclas das cores entram na lista do ?', async () => {
   const tabela = await screen.findByRole('table', { name: 'Cor base do objeto' })
   expect(within(tabela).getByText('V')).toBeTruthy()
   expect(within(tabela).getByText('Marcar ou desmarcar vermelho')).toBeTruthy()
+})
+
+test('objeto: o tipo sugere os tipos já vistos pela rota, escolher preenche o campo e o texto livre segue valendo', async () => {
+  const buscas: (string | null)[] = []
+  servidor.use(
+    http.get('/v1/objetos/tipos', ({ request }) => {
+      buscas.push(new URL(request.url).searchParams.get('q'))
+      return HttpResponse.json([
+        { tipo: 'camiseta', ocorrencias: 3 },
+        { tipo: 'camisola', ocorrencias: 1 },
+      ])
+    }),
+  )
+  const { usuario, formulario } = await abrirOFormularioDoObjeto()
+  const tipo = formulario.getByLabelText('Tipo')
+  await usuario.clear(tipo)
+  await usuario.type(tipo, 'cami')
+
+  const opcao = await screen.findByRole('option', { name: /^camiseta/ })
+  expect(buscas.at(-1)).toBe('cami')
+  expect(screen.queryByText(/Shift\+Enter: criar/)).toBeNull()
+  await usuario.click(opcao)
+  expect((tipo as HTMLInputElement).value).toBe('camiseta')
+  await usuario.click(formulario.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(JSON.parse(correcoes[0].valor as string).tipo).toBe('camiseta')
+})
+
+test('objeto: o tipo aceita o texto livre mesmo sem sugestão, e a rota fora do ar não trava o campo', async () => {
+  servidor.use(http.get('/v1/objetos/tipos', () => HttpResponse.json({}, { status: 500 })))
+  const { usuario, formulario } = await abrirOFormularioDoObjeto()
+  const tipo = formulario.getByLabelText('Tipo')
+  await usuario.clear(tipo)
+  await usuario.type(tipo, 'chapéu de palha')
+  await usuario.click(formulario.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(JSON.parse(correcoes[0].valor as string).tipo).toBe('chapéu de palha')
+})
+
+test('objeto: o dono sugere as pessoas do vídeo e "Em cena"', async () => {
+  const { usuario, formulario } = await abrirOFormularioDoObjeto()
+  const dono = formulario.getByRole('combobox', { name: 'Dono' })
+  await usuario.click(dono)
+  expect(await screen.findByRole('option', { name: 'Em cena' })).toBeTruthy()
+  expect(screen.getByRole('option', { name: 'Leão Lobo' })).toBeTruthy()
+
+  await usuario.clear(dono)
+  await usuario.type(dono, 'leã')
+  expect(screen.queryByRole('option', { name: 'Em cena' })).toBeNull()
+  expect(screen.getByRole('option', { name: 'Leão Lobo' })).toBeTruthy()
+
+  await usuario.clear(dono)
+  await usuario.type(dono, 'em')
+  await usuario.click(await screen.findByRole('option', { name: 'Em cena' }))
+  await usuario.click(formulario.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'objeto.dono', item_id: 'o1' })
+  expect(JSON.parse(correcoes[0].valor as string)).toEqual({ pessoa: null, relacao: null })
 })

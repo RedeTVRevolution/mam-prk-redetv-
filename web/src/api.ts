@@ -107,7 +107,8 @@ export interface NomeDoCatalogo {
   a_revisar: boolean
 }
 
-export type CatalogoDeNomes = 'pessoas' | 'marcas'
+/** `tipos_de_objeto` só sugere (`GET /v1/objetos/tipos`): não há nome a criar. */
+export type CatalogoDeNomes = 'pessoas' | 'marcas' | 'tipos_de_objeto'
 
 /** O autocompletar dos campos de nome (exige `decupagem.ver`; criar exige `decupagem.editar`). */
 export interface ClienteDeNomes {
@@ -270,8 +271,15 @@ export function criarClienteDaApi(
     marcasEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),
     nomes: {
-      achar: (catalogo, q) => chamar(`/v1/catalogo/${catalogo}?q=${encodeURIComponent(q)}`),
-      criar: (catalogo, nome) => chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } }),
+      achar: async (catalogo, q) => {
+        if (catalogo !== 'tipos_de_objeto') return chamar(`/v1/catalogo/${catalogo}?q=${encodeURIComponent(q)}`)
+        const tipos = await chamar<{ tipo: string; ocorrencias: number }[]>(`/v1/objetos/tipos?q=${encodeURIComponent(q)}`)
+        return tipos.map((t) => ({ id: t.tipo, nome: t.tipo, rotulo: `${t.tipo} (${t.ocorrencias})`, a_revisar: false }))
+      },
+      criar: (catalogo, nome) => {
+        if (catalogo === 'tipos_de_objeto') return Promise.reject(new Error('Tipo de objeto não tem catálogo para criar.'))
+        return chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } })
+      },
     },
     job,
   }
