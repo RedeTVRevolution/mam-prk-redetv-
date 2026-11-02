@@ -54,6 +54,7 @@ const servidor = setupServer(
   ),
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json(historico)),
+  http.get('/v1/jobs/j1/fila', () => HttpResponse.json([])),
   http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
     correcoes.push((await request.json()) as Record<string, unknown>)
     return HttpResponse.json({}, { status: 201 })
@@ -639,4 +640,113 @@ test('a confirmação e o formulário mostram os atalhos nas dicas dos botões',
   expect(await screen.findByText('Enter')).toBeTruthy()
   await usuario.hover(within(confirmacao).getByRole('button', { name: 'Cancelar' }))
   expect(await screen.findByText('Esc')).toBeTruthy()
+})
+
+/** Abre o formulário pelo lápis da linha, com o mouse: a aba, o modo e o lápis (o `n`-ésimo da aba). */
+async function corrigirPeloLapis(aba: RegExp, titulo: string, n = 0) {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('tab', { name: aba }))
+  await usuario.click(screen.getAllByRole('button', { name: `Corrigir ${titulo}` })[n])
+  const formulario = within(await screen.findByRole('form', { name: new RegExp(`Corrigir ${titulo}`) }))
+  return { usuario, formulario }
+}
+
+async function salvarComOMouse(usuario: ReturnType<typeof userEvent.setup>, formulario: ReturnType<typeof within>) {
+  await usuario.click(formulario.getByRole('button', { name: 'Salvar' }))
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+}
+
+test('pelo clique: resumo e tom da pauta', async () => {
+  const { usuario, formulario } = await corrigirPeloLapis(/Pautas/, 'Eleição')
+  await usuario.type(formulario.getByLabelText('Resumo'), ' na TV')
+  await usuario.selectOptions(formulario.getByLabelText('Tom'), 'polemico')
+  await salvarComOMouse(usuario, formulario)
+
+  expect(correcoes.map((c) => [c.tipo, c.valor])).toEqual([
+    ['pauta.resumo', 'Debate na TV'],
+    ['pauta.tom', 'polemico'],
+  ])
+})
+
+test('pelo clique: tipo do comercial', async () => {
+  const { usuario, formulario } = await corrigirPeloLapis(/Comerciais/, 'Marca X')
+  await usuario.selectOptions(formulario.getByLabelText('Tipo'), 'testemunhal')
+  await salvarComOMouse(usuario, formulario)
+
+  expect(correcoes).toMatchObject([{ tipo: 'comercial.tipo', item_id: 'c1', valor: 'testemunhal' }])
+})
+
+test('pelo clique: papel e visual da aparição, as fontes do nome e a aparição que vira menção', async () => {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 1 aparição/ }))
+  // A aparição vem antes da menção na lista da pessoa.
+  await usuario.click(screen.getAllByRole('button', { name: 'Corrigir Leão Lobo' })[0])
+  const formulario = within(await screen.findByRole('form', { name: /Corrigir Leão Lobo/ }))
+  await usuario.clear(formulario.getByLabelText('Papel na cena'))
+  await usuario.type(formulario.getByLabelText('Papel na cena'), 'convidado')
+  await usuario.click(formulario.getByRole('checkbox', { name: 'rosto' }))
+  await usuario.click(formulario.getByRole('checkbox', { name: 'GC' }))
+  await salvarComOMouse(usuario, formulario)
+
+  expect(correcoes.map((c) => [c.tipo, c.valor])).toEqual([
+    ['pessoa.fontes_do_nome', JSON.stringify(['gc'])],
+    ['aparicao.papel_visual', JSON.stringify({ papel: 'convidado', visual: 'barba' })],
+  ])
+
+  correcoes.length = 0
+  await usuario.click(screen.getAllByRole('button', { name: 'Corrigir Leão Lobo' })[0])
+  const deNovo = within(await screen.findByRole('form', { name: /Corrigir Leão Lobo/ }))
+  await usuario.selectOptions(deNovo.getByLabelText('Aparição ou menção'), 'citada_na_fala')
+  await salvarComOMouse(usuario, deNovo)
+
+  expect(correcoes).toMatchObject([
+    { tipo: 'pessoa.aparicao_para_mencao', valor: 'citada_na_fala', ocorrencia: { lista: 'na_imagem' } },
+  ])
+})
+
+test('pelo clique: a menção que vira aparição, com a evidência', async () => {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 1 aparição/ }))
+  await usuario.click(screen.getAllByRole('button', { name: 'Corrigir Leão Lobo' })[1])
+  const formulario = within(await screen.findByRole('form', { name: /Corrigir Leão Lobo/ }))
+  await usuario.selectOptions(formulario.getByLabelText('Aparição ou menção'), 'na_imagem')
+  await usuario.type(formulario.getByLabelText('Evidência na imagem'), 'rosto')
+  await salvarComOMouse(usuario, formulario)
+
+  expect(correcoes).toMatchObject([
+    { tipo: 'pessoa.mencao_para_aparicao', valor: 'rosto', ocorrencia: { lista: 'citada_na_fala' } },
+  ])
+})
+
+test('pelo clique: descrição do plano e plano limpo', async () => {
+  const { usuario, formulario } = await corrigirPeloLapis(/Planos/, 'estúdio')
+  await usuario.type(formulario.getByLabelText('Objetos (separados por vírgula)'), 'mesa, copo')
+  await usuario.click(formulario.getByRole('checkbox', { name: 'Plano limpo' }))
+  await salvarComOMouse(usuario, formulario)
+
+  expect(correcoes.map((c) => c.tipo)).toEqual(['plano.descricao', 'plano.limpo'])
+})
+
+test('pelo clique: texto e locutor da fala', async () => {
+  const { usuario, formulario } = await corrigirPeloLapis(/Transcrição/, 'Boa noite')
+  await usuario.clear(formulario.getByLabelText('Locutor'))
+  await usuario.type(formulario.getByLabelText('Locutor'), 'Bia')
+  await salvarComOMouse(usuario, formulario)
+
+  expect(correcoes).toMatchObject([
+    { tipo: 'fala.texto', item_id: 'f1', valor: JSON.stringify({ texto: 'Boa noite', locutor: 'Bia' }) },
+  ])
+})
+
+test('pelo clique: texto na tela', async () => {
+  const { usuario, formulario } = await corrigirPeloLapis(/Textos na tela/, 'Leão Lobo, jurado')
+  await usuario.selectOptions(formulario.getByLabelText('Tipo'), 'tarja')
+  await salvarComOMouse(usuario, formulario)
+
+  expect(correcoes.map((c) => c.tipo)).toEqual(['texto_na_tela.texto'])
 })

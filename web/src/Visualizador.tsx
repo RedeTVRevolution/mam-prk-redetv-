@@ -116,6 +116,7 @@ export default function Visualizador({
   const salvarDasAlcas = useRef<(() => void) | null>(null)
   const [historico, setHistorico] = useState<ItemDoHistorico[]>([])
   const [fila, setFila] = useState<ItemDaFila[]>([])
+  const [falhaNoHistorico, setFalhaNoHistorico] = useState(false)
   const [gavetaAberta, setGavetaAberta] = useState(false)
   const [abaDaGaveta, setAbaDaGaveta] = useState<AbaDaGaveta>('historico')
   const avisoDoDesfazer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -213,18 +214,13 @@ export default function Visualizador({
   useEffect(() => {
     if (!podeEditar || !decupagem) return
     let ativo = true
-    api.job(job.id).historico().then(
-      (h) => {
-        if (ativo) setHistorico(h)
-      },
-      () => {},
-    )
-    api.job(job.id).fila().then(
-      (f) => {
-        if (ativo) setFila(f)
-      },
-      () => {},
-    )
+    // Um não espera o outro: sem a fila, as marcas do histórico continuam valendo.
+    void Promise.allSettled([api.job(job.id).historico(), api.job(job.id).fila()]).then(([h, f]) => {
+      if (!ativo) return
+      if (h.status === 'fulfilled') setHistorico(h.value)
+      if (f.status === 'fulfilled') setFila(f.value)
+      setFalhaNoHistorico(h.status === 'rejected' || f.status === 'rejected')
+    })
     return () => {
       ativo = false
     }
@@ -305,7 +301,8 @@ export default function Visualizador({
     setEmEdicao({ chave: item.chave, modo: 'remover' })
   }
 
-  const pendentes = historico.filter((h) => h.estado === 'pendente').length
+  // O número do botão é o que a pessoa pode resolver: a fila e, para quem aprova, as pendentes.
+  const aResolver = fila.length + (podeAprovar ? historico.filter((h) => h.estado === 'pendente').length : 0)
 
   /** Da gaveta ao painel: seleciona o item da correção, abre a aba dele e salta o player. */
   function saltarAoItemDaCorrecao(correcao: ItemDoHistorico): boolean {
@@ -675,8 +672,8 @@ export default function Visualizador({
           {podeEditar && (
             <Tooltip label="Histórico, fila de revisão e aprovação">
               <Indicator
-                disabled={fila.length + pendentes === 0}
-                label={fila.length + pendentes}
+                disabled={aResolver === 0}
+                label={aResolver}
                 size={16}
                 color={CORES.andamento}
               >
@@ -987,6 +984,7 @@ export default function Visualizador({
           podeAprovar={podeAprovar}
           api={api.job(job.id)}
           catalogo={catalogo}
+          falhaAoCarregar={falhaNoHistorico}
           aoMudar={() => setCargasDaDecupagem((n) => n + 1)}
           aoSaltar={saltarAoItemDaCorrecao}
         />

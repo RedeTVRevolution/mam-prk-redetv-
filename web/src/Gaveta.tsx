@@ -71,14 +71,13 @@ function RecusaNaLinha({
         label="Motivo da recusa"
         size="xs"
         data-autofocus
-        // O Esc daqui cancela só o campo; sem isto a gaveta inteira fecharia.
-        data-mantine-stop-propagation
         value={motivo}
         maxLength={limite}
         onChange={(e) => setMotivo(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
-            e.stopPropagation()
+            // O Esc daqui cancela só o campo, sem fechar a gaveta.
+            e.preventDefault()
             aoCancelar()
           } else if (e.key === 'Enter' && pronto && !enviando) aoRecusar(motivo.trim())
         }}
@@ -137,6 +136,7 @@ export function Gaveta({
   podeAprovar,
   api,
   catalogo,
+  falhaAoCarregar,
   aoMudar,
   aoSaltar,
 }: {
@@ -149,6 +149,8 @@ export function Gaveta({
   podeAprovar: boolean
   api: ClienteDoJob
   catalogo: CatalogoDeCorrecoes | null
+  /** O histórico ou a fila não vieram da API. */
+  falhaAoCarregar: boolean
   /** Recarrega a decupagem, o histórico e a fila depois de uma decisão. */
   aoMudar: () => void
   /** Salta o player ao item da correção; `false` se o item não está mais na decupagem. */
@@ -165,10 +167,22 @@ export function Gaveta({
   const indice = Math.min(selecionado, Math.max(historico.length - 1, 0))
   const limiteDoMotivo = catalogo?.limites.motivo
 
-  // A seleção do histórico acompanha as setas; ao reabrir, volta ao começo.
+  // A linha selecionada fica à vista ao mover a seleção e ao reabrir a gaveta.
   useEffect(() => {
     lista.current?.querySelector('[data-selecionada="true"]')?.scrollIntoView?.({ block: 'nearest' })
   }, [indice, aberta, aba])
+
+  // O Esc fecha a gaveta, menos quando outro elemento já o usou (o formulário de correção no painel, a
+  // confirmação na linha, a recusa): eles marcam o evento com `preventDefault` ou param a propagação.
+  // O Esc do Mantine não serve: com `trapFocus={false}` ele age em qualquer Esc da janela.
+  useEffect(() => {
+    if (!aberta) return
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && !e.isComposing) aoFechar()
+    }
+    window.addEventListener('keydown', aoTeclar)
+    return () => window.removeEventListener('keydown', aoTeclar)
+  }, [aberta, aoFechar])
 
   function trocarAba(nova: string | null) {
     if (nova !== 'historico' && nova !== 'fila' && nova !== 'aprovacao') return
@@ -194,7 +208,7 @@ export function Gaveta({
       casa: (e) => noHistorico && (e.key === 'ArrowUp' || e.key === 'ArrowDown'),
       executar: (e) => {
         setAviso(null)
-        setSelecionado(Math.min(Math.max(indice + (e.key === 'ArrowUp' ? -1 : 1), 0), historico.length - 1))
+        setSelecionado(Math.max(Math.min(indice + (e.key === 'ArrowUp' ? -1 : 1), historico.length - 1), 0))
       },
     },
     {
@@ -213,6 +227,8 @@ export function Gaveta({
 
   /** Roda a decisão; qualquer que seja o resultado, as listas são recarregadas (outra pessoa pode ter decidido antes). */
   async function decidir(id: string, acao: () => Promise<void>, conflito: string, falha: string) {
+    // Uma decisão por vez: o segundo clique, nesta ou noutra linha, espera a primeira terminar.
+    if (ocupado) return
     setOcupado(id)
     setErro(null)
     setAviso(null)
@@ -220,7 +236,10 @@ export function Gaveta({
       await acao()
       setRecusando(null)
     } catch (e) {
-      if (!(e instanceof SessaoExpirada)) setErro(e instanceof ConflitoNaApi ? conflito : falha)
+      setOcupado(null)
+      // Com a sessão expirada, o aviso é da casca e recarregar só falharia de novo.
+      if (e instanceof SessaoExpirada) return
+      setErro(e instanceof ConflitoNaApi ? conflito : falha)
     }
     setOcupado(null)
     aoMudar()
@@ -252,6 +271,7 @@ export function Gaveta({
     <Drawer.Root
       opened={aberta}
       onClose={aoFechar}
+      closeOnEscape={false}
       position="right"
       size={LARGURA}
       // Sem sombra sobre o resto da tela: o player e o painel seguem à vista e ao alcance do mouse e do teclado.
@@ -273,137 +293,148 @@ export function Gaveta({
               {podeAprovar && <Tabs.Tab value="aprovacao">{`Aprovação (${pendentes.length})`}</Tabs.Tab>}
             </Tabs.List>
             <Stack gap="xs" mt="sm" ref={lista}>
-            {aviso && (
-              <Text size="sm" role="status">
-                {aviso}
-              </Text>
-            )}
-            {erro && (
-              <Alert color={CORES.falhou} variant="light" role="alert">
-                {erro}
-              </Alert>
-            )}
-            {aba === 'historico' && (
-              <>
-                {historico.length === 0 && <Text size="sm">Nenhuma correção ainda.</Text>}
-                {historico.map((c, i) => (
-                  <Paper
-                    key={c.id}
-                    withBorder
-                    p="sm"
-                    data-selecionada={i === indice}
-                    style={i === indice ? { borderColor: CORES.foco } : undefined}
-                  >
-                    <Stack gap={4}>
-                      <UnstyledButton
-                        aria-label={`Saltar ao item: ${rotulo(c.tipo)}, ${c.depois_legivel}`}
-                        onClick={() => saltar(i)}
-                      >
-                        <Stack gap={4}>
-                          <CabecalhoDaCorrecao item={c} rotulo={rotulo(c.tipo)} />
-                          <AntesEDepois item={c} />
-                          <Text size="sm">{c.motivo}</Text>
-                          {c.reaplica && (
-                            <Text size="xs" c="dimmed">
-                              {`Reaplica a correção de ${quandoDaOriginal(historico, c.reaplica)}`}
-                            </Text>
-                          )}
-                        </Stack>
-                      </UnstyledButton>
-                      {desfazivel(c) && (
-                        <Group justify="flex-end">
-                          <Tooltip label="Desfazer esta correção">
-                            <Button
-                              size="xs"
-                              variant="default"
-                              leftSection={<IconArrowBackUp size={14} />}
-                              loading={ocupado === c.id}
-                              onClick={() => void desfazer(c)}
-                            >
-                              Desfazer
-                            </Button>
-                          </Tooltip>
-                        </Group>
-                      )}
-                    </Stack>
-                  </Paper>
-                ))}
-              </>
-            )}
-            {aba === 'fila' && (
-              <>
-                {fila.length === 0 && <Text size="sm">Nada na fila.</Text>}
-                {fila.map((f) => (
-                  <ItemDaFilaDeRevisao
-                    key={f.id}
-                    item={f}
-                    rotulo={rotulo(f.tipo)}
-                    ocupado={ocupado === f.id}
-                    aoReaplicar={(candidato) =>
-                      void decidir(
-                        f.id,
-                        () => api.reaplicar(f.id, candidato, MOTIVO_DE_REAPLICAR),
-                        'Essa correção não está mais na fila. A fila foi recarregada.',
-                        'Não foi possível reaplicar a correção. Tente de novo em instantes.',
-                      )
-                    }
-                    aoDescartar={() =>
-                      void decidir(
-                        f.id,
-                        () => api.descartar(f.id, MOTIVO_DE_DESCARTAR),
-                        'Essa correção não está mais na fila. A fila foi recarregada.',
-                        'Não foi possível descartar a correção. Tente de novo em instantes.',
-                      )
-                    }
-                  />
-                ))}
-              </>
-            )}
-            {aba === 'aprovacao' && podeAprovar && (
-              <>
-                {pendentes.length === 0 && <Text size="sm">Nada aguardando o Curador.</Text>}
-                {pendentes.map((c) => (
-                  <Paper key={c.id} withBorder p="sm">
-                    <Stack gap={4}>
-                      <CabecalhoDaCorrecao item={c} rotulo={rotulo(c.tipo)} />
-                      <AntesEDepois item={c} />
-                      <Text size="sm">{c.motivo}</Text>
-                      {recusando === c.id ? (
-                        <RecusaNaLinha
-                          limite={limiteDoMotivo}
-                          enviando={ocupado === c.id}
-                          aoCancelar={() => setRecusando(null)}
-                          aoRecusar={(motivo) => void recusar(c, motivo)}
-                        />
-                      ) : (
-                        <Group justify="flex-end" gap="xs">
-                          <Tooltip label="Recusar a correção (pede o motivo)">
-                            <Button
-                              size="xs"
-                              variant="default"
-                              leftSection={<IconX size={14} />}
-                              onClick={() => setRecusando(c.id)}
-                            >
-                              Recusar
-                            </Button>
-                          </Tooltip>
-                          <Tooltip label="Aprovar a correção: ela entra na decupagem">
-                            <Button
-                              size="xs"
-                              leftSection={<IconCheck size={14} />}
-                              loading={ocupado === c.id}
-                              onClick={() => void aprovar(c)}
-                            >
-                              Aprovar
-                            </Button>
-                          </Tooltip>
-                        </Group>
-                      )}
-                    </Stack>
-                  </Paper>
-                ))}
-              </>
-            )}
+              {aviso && (
+                <Text size="sm" role="status">
+                  {aviso}
+                </Text>
+              )}
+              {erro && (
+                <Alert color={CORES.falhou} variant="light" role="alert">
+                  {erro}
+                </Alert>
+              )}
+              {falhaAoCarregar && (
+                <Alert color={CORES.falhou} variant="light" role="alert">
+                  <Stack gap="xs" align="flex-start">
+                    <Text size="sm">Não foi possível carregar o histórico e a fila de revisão.</Text>
+                    <Button size="xs" variant="default" onClick={aoMudar}>
+                      Tentar de novo
+                    </Button>
+                  </Stack>
+                </Alert>
+              )}
+              {aba === 'historico' && (
+                <>
+                  {historico.length === 0 && <Text size="sm">Nenhuma correção ainda.</Text>}
+                  {historico.map((c, i) => (
+                    <Paper
+                      key={c.id}
+                      withBorder
+                      p="sm"
+                      data-selecionada={i === indice}
+                      style={i === indice ? { borderColor: CORES.foco } : undefined}
+                    >
+                      <Stack gap={4}>
+                        <UnstyledButton
+                          aria-label={`Saltar ao item: ${rotulo(c.tipo)}, ${c.depois_legivel}`}
+                          onClick={() => saltar(i)}
+                        >
+                          <Stack gap={4}>
+                            <CabecalhoDaCorrecao item={c} rotulo={rotulo(c.tipo)} />
+                            <AntesEDepois item={c} />
+                            <Text size="sm">{c.motivo}</Text>
+                            {c.reaplica && (
+                              <Text size="xs" c="dimmed">
+                                {`Reaplica a correção de ${quandoDaOriginal(historico, c.reaplica)}`}
+                              </Text>
+                            )}
+                          </Stack>
+                        </UnstyledButton>
+                        {desfazivel(c) && (
+                          <Group justify="flex-end">
+                            <Tooltip label="Desfazer esta correção">
+                              <Button
+                                size="xs"
+                                variant="default"
+                                leftSection={<IconArrowBackUp size={14} />}
+                                loading={ocupado === c.id}
+                                onClick={() => void desfazer(c)}
+                              >
+                                Desfazer
+                              </Button>
+                            </Tooltip>
+                          </Group>
+                        )}
+                      </Stack>
+                    </Paper>
+                  ))}
+                </>
+              )}
+              {aba === 'fila' && (
+                <>
+                  {fila.length === 0 && <Text size="sm">Nada na fila.</Text>}
+                  {fila.map((f) => (
+                    <ItemDaFilaDeRevisao
+                      key={f.id}
+                      item={f}
+                      rotulo={rotulo(f.tipo)}
+                      ocupado={ocupado === f.id}
+                      aoReaplicar={(candidato) =>
+                        void decidir(
+                          f.id,
+                          () => api.reaplicar(f.id, candidato, MOTIVO_DE_REAPLICAR),
+                          'Essa correção não está mais na fila. A fila foi recarregada.',
+                          'Não foi possível reaplicar a correção. Tente de novo em instantes.',
+                        )
+                      }
+                      aoDescartar={() =>
+                        void decidir(
+                          f.id,
+                          () => api.descartar(f.id, MOTIVO_DE_DESCARTAR),
+                          'Essa correção não está mais na fila. A fila foi recarregada.',
+                          'Não foi possível descartar a correção. Tente de novo em instantes.',
+                        )
+                      }
+                    />
+                  ))}
+                </>
+              )}
+              {aba === 'aprovacao' && podeAprovar && (
+                <>
+                  {pendentes.length === 0 && <Text size="sm">Nada aguardando o Curador.</Text>}
+                  {pendentes.map((c) => (
+                    <Paper key={c.id} withBorder p="sm">
+                      <Stack gap={4}>
+                        <CabecalhoDaCorrecao item={c} rotulo={rotulo(c.tipo)} />
+                        <AntesEDepois item={c} />
+                        <Text size="sm">{c.motivo}</Text>
+                        {recusando === c.id ? (
+                          <RecusaNaLinha
+                            limite={limiteDoMotivo}
+                            enviando={ocupado === c.id}
+                            aoCancelar={() => setRecusando(null)}
+                            aoRecusar={(motivo) => void recusar(c, motivo)}
+                          />
+                        ) : (
+                          <Group justify="flex-end" gap="xs">
+                            <Tooltip label="Recusar a correção (pede o motivo)">
+                              <Button
+                                size="xs"
+                                variant="default"
+                                leftSection={<IconX size={14} />}
+                                disabled={ocupado === c.id}
+                                onClick={() => setRecusando(c.id)}
+                              >
+                                Recusar
+                              </Button>
+                            </Tooltip>
+                            <Tooltip label="Aprovar a correção: ela entra na decupagem">
+                              <Button
+                                size="xs"
+                                leftSection={<IconCheck size={14} />}
+                                loading={ocupado === c.id}
+                                onClick={() => void aprovar(c)}
+                              >
+                                Aprovar
+                              </Button>
+                            </Tooltip>
+                          </Group>
+                        )}
+                      </Stack>
+                    </Paper>
+                  ))}
+                </>
+              )}
             </Stack>
           </Tabs>
         </Drawer.Body>
@@ -432,6 +463,7 @@ function ItemDaFilaDeRevisao({
   aoDescartar: () => void
 }) {
   const [candidato, setCandidato] = useState<string | null>(null)
+  const [confirmando, setConfirmando] = useState(false)
   return (
     <Paper withBorder p="sm">
       <Stack gap={4}>
@@ -449,18 +481,53 @@ function ItemDaFilaDeRevisao({
           value={candidato}
           onChange={setCandidato}
         />
-        <Group justify="flex-end" gap="xs">
-          <Tooltip label="Descartar a correção: ela não volta">
-            <Button size="xs" variant="default" loading={ocupado} onClick={aoDescartar}>
-              Descartar
-            </Button>
-          </Tooltip>
-          <Tooltip label="Reaplicar no candidato escolhido">
-            <Button size="xs" loading={ocupado} disabled={!candidato} onClick={() => candidato && aoReaplicar(candidato)}>
-              Reaplicar
-            </Button>
-          </Tooltip>
-        </Group>
+        {confirmando ? (
+          // Descartar não tem volta: a confirmação fica na própria linha (sistema visual, botão de perigo).
+          <Group
+            role="group"
+            aria-label="Confirmar o descarte"
+            justify="space-between"
+            gap="xs"
+            wrap="nowrap"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setConfirmando(false)
+              }
+            }}
+          >
+            <Text size="sm">Descartar esta correção? Ela não volta.</Text>
+            <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
+              <Tooltip label="Esc">
+                <Button size="compact-xs" variant="default" onClick={() => setConfirmando(false)}>
+                  Cancelar
+                </Button>
+              </Tooltip>
+              <Button size="compact-xs" variant="outline" color={CORES.falhou} loading={ocupado} onClick={aoDescartar}>
+                Descartar
+              </Button>
+            </Group>
+          </Group>
+        ) : (
+          <Group justify="flex-end" gap="xs">
+            <Tooltip label="Descartar a correção: ela não volta (pede confirmação)">
+              <Button
+                size="xs"
+                variant="outline"
+                color={CORES.falhou}
+                disabled={ocupado}
+                onClick={() => setConfirmando(true)}
+              >
+                Descartar
+              </Button>
+            </Tooltip>
+            <Tooltip label="Reaplicar no candidato escolhido">
+              <Button size="xs" loading={ocupado} disabled={!candidato} onClick={() => candidato && aoReaplicar(candidato)}>
+                Reaplicar
+              </Button>
+            </Tooltip>
+          </Group>
+        )}
       </Stack>
     </Paper>
   )
