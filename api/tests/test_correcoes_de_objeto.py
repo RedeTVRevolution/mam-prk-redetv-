@@ -206,3 +206,141 @@ def test_objeto_inexistente_da_422() -> None:
     r = _corrigir(_mundo(), _atributos(), item_id="obj99")
 
     assert r.status_code == 422
+
+
+# objeto.dono (#305)
+
+
+def _dono(pessoa: str | None, relacao: str | None) -> str:
+    return json.dumps({"pessoa": pessoa, "relacao": relacao})
+
+
+def _corrigir_dono(mundo: Mundo, valor: str, **campos: Any) -> Any:
+    campos.setdefault("versao", V)
+    campos.setdefault("item_id", "obj01")
+    return mundo.corrigir(tipo="objeto.dono", valor=valor, **campos)
+
+
+def test_dono_troca_a_pessoa_e_a_relacao() -> None:
+    mundo = _mundo()
+
+    r = _corrigir_dono(mundo, _dono("pes02", "segura"))
+
+    assert r.status_code == 201
+    [o] = _objetos(mundo)
+    assert (o["pessoa"], o["relacao"], o["origem"]) == ("pes02", "segura", "revisao")
+    assert o["tipo"] == "vestido"
+    assert _objetos(mundo, "?versao=modelo")[0]["pessoa"] == "pes01"
+    [item] = mundo.historico().json()
+    assert item["antes_legivel"] == "dono: pes01 (veste)"
+
+
+def test_dono_nulo_tira_o_dono() -> None:
+    mundo = _mundo()
+
+    assert _corrigir_dono(mundo, _dono(None, None)).status_code == 201
+
+    [o] = _objetos(mundo)
+    assert (o["pessoa"], o["relacao"]) == (None, None)
+
+
+def test_desfazer_devolve_o_dono_do_modelo() -> None:
+    mundo = _mundo()
+    cid = _corrigir_dono(mundo, _dono(None, None)).json()["id"]
+    mundo.avancar()
+
+    assert mundo.desfazer(cid).status_code == 201
+
+    assert (_objetos(mundo)[0]["pessoa"], _objetos(mundo)[0]["relacao"]) == (
+        "pes01",
+        "veste",
+    )
+    assert "origem" not in _objetos(mundo)[0]
+
+
+def test_dono_com_aprovacao_so_vale_depois_de_aprovar() -> None:
+    mundo = _mundo()
+    mundo.aprovacao.definir(frozenset({"objeto.dono"}))
+    r = _corrigir_dono(mundo, _dono("pes02", "usa"))
+
+    assert r.status_code == 201
+    assert _objetos(mundo)[0]["pessoa"] == "pes01"
+    mundo.avancar()
+    aprovada = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{r.json()['id']}/aprovar", headers=CURADOR
+    )
+    assert aprovada.status_code == 201
+    assert _objetos(mundo)[0]["pessoa"] == "pes02"
+
+
+def test_dono_reaplica_numa_versao_nova() -> None:
+    mundo = _mundo()
+    _corrigir_dono(mundo, _dono("pes02", "segura"))
+    mundo.reprocessar(_modelo([_objeto("obj07", "vestido", 1200, 5200)]))
+
+    [o] = _objetos(mundo)
+
+    assert (o["id"], o["pessoa"], o["relacao"], o["origem"]) == (
+        "obj07",
+        "pes02",
+        "segura",
+        "revisao",
+    )
+    assert mundo.cliente.get("/v1/jobs/j1/fila", headers=EDITOR).json() == []
+
+
+def test_dono_que_nao_existe_mais_na_versao_nova_nao_muda_o_objeto() -> None:
+    mundo = _mundo()
+    _corrigir_dono(mundo, _dono("pes02", "segura"))
+    novo = {
+        **_modelo(
+            [_objeto("obj01", "vestido", 1000, 5000, pessoa="pes01", relacao="veste")]
+        ),
+        "pessoas": [MODELO["pessoas"][0]],
+    }
+    mundo.reprocessar(novo)
+
+    [o] = _objetos(mundo)
+
+    assert (o["pessoa"], o["relacao"]) == ("pes01", "veste")
+
+
+@pytest.mark.parametrize(
+    "valor",
+    [
+        _dono("pes99", "veste"),
+        _dono("pes02", None),
+        _dono(None, "veste"),
+        _dono("pes02", "come"),
+        json.dumps({"pessoa": "pes02", "relacao": "usa", "extra": 1}),
+        json.dumps({"pessoa": "pes02"}),
+        "texto solto",
+    ],
+)
+def test_dono_invalido_ou_inexistente_da_422(valor: str) -> None:
+    assert _corrigir_dono(_mundo(), valor).status_code == 422
+
+
+def test_tirar_a_pessoa_da_decupagem_deixa_o_objeto_dela_sem_dono() -> None:
+    sozinha = {**MODELO["pessoas"][0], "citada_na_fala": []}
+    modelo = {
+        **_modelo(
+            [_objeto("obj01", "vestido", 20000, 30000, pessoa="pes01", relacao="veste")]
+        ),
+        "pessoas": [sozinha, MODELO["pessoas"][1]],
+    }
+    mundo = _mundo(modelo)
+
+    r = mundo.corrigir(
+        tipo="pessoa.nao_e",
+        item_id="pes01",
+        valor="Não identificado",
+        ocorrencia={"lista": "na_imagem", "inicio_ms": 1000, "fim_ms": 5000},
+        versao=_versao(modelo),
+    )
+
+    assert r.status_code == 201
+    decupagem = mundo.decupagem()
+    assert "pes01" not in [p["id"] for p in decupagem["pessoas"]]
+    [o] = decupagem["objetos"]
+    assert (o["pessoa"], o["relacao"]) == (None, None)

@@ -185,6 +185,7 @@ export interface ItemDoHistorico {
     | 'pauta.juntar'
     | 'pauta.dividir'
     | 'objeto.atributos'
+    | 'objeto.dono'
     | 'desfazer'
     | 'descartar'
     | 'aprovar'

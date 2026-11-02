@@ -33,6 +33,8 @@ from api.decupagem import (
     CorBase,
     EvidenciaDoComercial,
     FonteDoNome,
+    Id,
+    RelacaoDoObjeto,
     TextoNaTela,
     TomDaPauta,
 )
@@ -67,6 +69,7 @@ TipoNovo = Literal[
     "pauta.juntar",
     "pauta.dividir",
     "objeto.atributos",
+    "objeto.dono",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
 TipoDoItem = Literal[
@@ -425,6 +428,21 @@ class _AtributosDoObjeto(BaseModel):
         if len(set(valor)) != len(valor):
             raise ValueError("cor base repetida")
         return valor
+
+
+class _DonoDoObjeto(BaseModel):
+    """O valor de um `objeto.dono`: a pessoa e a relação, os dois ou nenhum (sem dono)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pessoa: Id | None
+    relacao: RelacaoDoObjeto | None
+
+    @model_validator(mode="after")
+    def _os_dois_ou_nenhum(self) -> Self:
+        if (self.pessoa is None) != (self.relacao is None):
+            raise ValueError("pessoa e relação vêm juntas ou nenhuma das duas")
+        return self
 
 
 class NovoTextoAcrescentado(NovoTextoNaTela):
@@ -1006,6 +1024,9 @@ def corrigir(
         novo.valor,
     )
     _confere_duracao(modelo, novo.tipo, novo.valor)
+    confere = TIPOS[novo.tipo].confere
+    if confere is not None:
+        confere(entregue, novo.valor)
     id = uuid.uuid4().hex
     campos: dict[str, Any] = {
         "tipo": novo.tipo,
@@ -1575,6 +1596,12 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
     do item é estável, e a reapontada já traz o id novo."""
     aplica = TIPOS[c.tipo].aplicar_no_item
     assert aplica is not None
+    confere = TIPOS[c.tipo].confere
+    if confere is not None:
+        try:
+            confere(resultado, c.depois)
+        except ItemInexistente:
+            return  # o que a correção aponta já não existe nesta versão
     for item in _itens_com_o_id(resultado, c):
         aplica(item, c)
         item["origem"] = "revisao"
@@ -1836,10 +1863,11 @@ def aplicar(
         for pauta in _pautas(resultado):
             if "pessoas" in pauta:
                 pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
-        # O objeto de quem sumiu fica em cena: sem dono, sem relação.
-        for objeto in _objetos(resultado):
-            if objeto.get("pessoa") in ids:
-                objeto["pessoa"] = objeto["relacao"] = None
+    # O objeto cuja pessoa não está mais na decupagem fica em cena: sem dono, sem relação.
+    ids_das_pessoas = {p.get("id") for p in _pessoas(resultado)}
+    for objeto in _objetos(resultado):
+        if objeto.get("pessoa") is not None and objeto["pessoa"] not in ids_das_pessoas:
+            objeto["pessoa"] = objeto["relacao"] = None
     # As pautas do modelo ficam na ordem em que vieram; só a acrescentada
     # pede reordenar, para entrar no lugar do seu início.
     if any(p.get("acrescentado") for p in _pautas(resultado)):
@@ -2127,6 +2155,9 @@ class Tipo:
     casa_longe: bool = False
     acrescenta: Acrescenta | None = None
     reestrutura: Reestrutura | None = None
+    # Confere o valor do pedido com a decupagem entregue; levanta `ItemInexistente`
+    # se ele aponta para o que ela não tem. Também decide se a correção se reaplica.
+    confere: Callable[[dict[str, Any], str], None] | None = None
 
 
 def _campo_longo(n: NovaCorrecao) -> str:
@@ -2185,6 +2216,10 @@ def _canonizar_texto_na_tela(n: NovaCorrecao) -> str:
 
 def _canonizar_atributos_do_objeto(n: NovaCorrecao) -> str:
     return _json_canonico(_AtributosDoObjeto.model_validate_json(n.valor).model_dump())
+
+
+def _canonizar_dono_do_objeto(n: NovaCorrecao) -> str:
+    return _json_canonico(_DonoDoObjeto.model_validate_json(n.valor).model_dump())
 
 
 def _canonizar_texto_acrescentado(n: NovaCorrecao) -> str:
@@ -2281,6 +2316,18 @@ def _valor_do_objeto(item: dict[str, Any]) -> str:
             "marca": item.get("marca"),
         }
     )
+
+
+def _valor_do_dono(item: dict[str, Any]) -> str:
+    return _json_canonico(
+        {"pessoa": item.get("pessoa"), "relacao": item.get("relacao")}
+    )
+
+
+def _confere_o_dono(entregue: dict[str, Any], valor: str) -> None:
+    pessoa = json.loads(valor)["pessoa"]
+    if pessoa is not None and pessoa not in {p.get("id") for p in _pessoas(entregue)}:
+        raise ItemInexistente(pessoa)
 
 
 def _valor_do_texto_na_tela(item: dict[str, Any]) -> str:
@@ -3049,6 +3096,17 @@ TIPOS: dict[str, Tipo] = {
         aplicar_no_item=_json_no_item,
         ja_traz=_ja_traz_o_valor,
         identidades=_identidades_do_objeto,
+    ),
+    "objeto.dono": Tipo(
+        canonizar=_canonizar_dono_do_objeto,
+        rotulo="Dono do objeto",
+        legivel=textos.dono_do_objeto,
+        tipo_do_item="objeto",
+        json_longo=True,
+        valor_do_item=_valor_do_dono,
+        aplicar_no_item=_json_no_item,
+        ja_traz=_ja_traz_o_valor,
+        confere=_confere_o_dono,
     ),
 }
 

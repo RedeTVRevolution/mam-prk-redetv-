@@ -73,6 +73,12 @@ def _atributos_do_objeto(o: dict[str, Any]) -> str:
     )
 
 
+def _dono_do_objeto(o: dict[str, Any]) -> str:
+    if o["pessoa"] is None:
+        return "sem dono"
+    return f"dono: {o['pessoa']} ({o['relacao']})"
+
+
 def _pauta_estrutural(p: dict[str, Any]) -> str:
     """O título e a faixa de uma pauta (antes e depois de juntar, antes de dividir) ou
     as duas metades de uma divisão."""
@@ -122,6 +128,7 @@ texto_na_tela_acrescentado = de_json(_texto_acrescentado)
 pauta_acrescentada = de_json(_pauta_acrescentada)
 pauta_estrutural = de_json(_pauta_estrutural)
 atributos_do_objeto = de_json(_atributos_do_objeto)
+dono_do_objeto = de_json(_dono_do_objeto)
 papel_visual = de_json(_papel_visual)
 fontes_do_nome = de_json(_fontes)
 descricao_do_plano = de_json(_plano)

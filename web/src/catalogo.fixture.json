@@ -93,6 +93,10 @@
       "rotulo": "Atributos do objeto"
     },
     {
+      "valor": "objeto.dono",
+      "rotulo": "Dono do objeto"
+    },
+    {
       "valor": "desfazer",
       "rotulo": "Desfazer"
     },
