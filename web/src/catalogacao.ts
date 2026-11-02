@@ -52,6 +52,9 @@ export const TIPOS_FORA_DESTE_TICKET = [
   'descartar',
   'aprovar',
   'recusar',
+  // A tela de juntar e dividir pautas é o #262.
+  'pauta.juntar',
+  'pauta.dividir',
 ]
 
 const MOTIVOS: Record<string, string> = {

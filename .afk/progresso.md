@@ -482,3 +482,11 @@ Não corrigido:
 - Vídeo muito grande pode passar dos 10 MB da requisição (não fatiado; sem confirmar na nuvem). Também não confirmado: MERGE com parâmetros nomeados e `PARSE_JSON` no `jobs.query`.
 - Smells sem bug: `copiar()` repete o ramo de cópia de `reindexar`; `_registrar(campo: str, valor)` aceita campo e tipo trocados e é importado de fora; `tipo: str` em vez de `TipoDeRegistro`; `gravado_em` opcional no Python e REQUIRED no schema; `MundoComCopia` só repassa para `Mundo`. A web não mostra o estado da cópia (só a API).
 - Decisão humana: `mam-web` (exposta à internet) ganhou `bigquery.dataEditor` e `jobUser` para gravar a cada Correção; registrar num ADR se for para ficar.
+- 2026-11-02 11:20:02 · #260: feito
+- 2026-11-02 11:20:06 · iteração 57: #261
+
+## #261 iteração 58
+- Pronto (API): tipos `pauta.juntar` (valor `{ids, titulo}`, `item_id` = primeira) e `pauta.dividir` (valor `{em_ms, titulos:[a,b]}`) em `api/correcoes.py` via `Reestrutura` no `Tipo` (preparar/aplicar/reapontar); catálogo (`pauta_estrutural` legível, rótulos, fixture da web); 422 `EstruturaInvalida` (pautas não seguidas, corte fora); aprovação e reindexação saem do fluxo geral; testes em `api/tests/test_juntar_e_dividir_pautas.py`.
+- Reconciliação: juntar = pautas novas que sobrepõem metade do trecho ancorado (≥2 reaplica, 1 que cobre metade = atendida, 0 = fila); dividir = a pauta nova que contém o corte (já cortada pelo modelo, ±1 s = atendida). "Não reaplicada" = a correção aparece na fila (`/fila`) com `candidatos` vazios; só dá para descartar.
+- Falta: conferir `make verificar` completo (mypy corrigido, pytest/web rodando na hora de encerrar); GLOSSARY (juntar/dividir pautas, "não reaplicada"); #262 mostra a fila na tela.
+- Armadilha: exemplo da busca (`SABRINA`) não tem pautas; o teste de reindexação monta uma pauta no modelo.

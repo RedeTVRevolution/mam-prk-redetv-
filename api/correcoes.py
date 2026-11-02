@@ -63,6 +63,8 @@ TipoNovo = Literal[
     "texto_na_tela.texto",
     "texto_na_tela.acrescentar",
     "pauta.acrescentar",
+    "pauta.juntar",
+    "pauta.dividir",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
 TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela"]
@@ -445,6 +447,59 @@ class NovaPauta(BaseModel):
         return self
 
 
+class NovaJuncao(BaseModel):
+    """O valor de um `pauta.juntar`: os ids das pautas seguidas e o título escolhido."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: Annotated[
+        list[Annotated[str, StringConstraints(max_length=40)]], Field(min_length=2)
+    ]
+    titulo: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+        ),
+    ]
+
+    @field_validator("titulo")
+    @classmethod
+    def _titulo(cls, valor: str) -> str:
+        return _sem_controle(valor)
+
+    @model_validator(mode="after")
+    def _sem_repetir(self) -> Self:
+        if len(set(self.ids)) != len(self.ids):
+            raise ValueError("pauta repetida")
+        return self
+
+
+class NovaDivisao(BaseModel):
+    """O valor de um `pauta.dividir`: o tempo do corte e o título de cada metade."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    em_ms: Annotated[int, Field(gt=0)]
+    titulos: Annotated[
+        list[
+            Annotated[
+                str,
+                StringConstraints(
+                    strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+                ),
+            ]
+        ],
+        Field(min_length=2, max_length=2),
+    ]
+
+    @field_validator("titulos")
+    @classmethod
+    def _titulos(cls, valor: list[str]) -> list[str]:
+        for titulo in valor:
+            _sem_controle(titulo)
+        return valor
+
+
 _FONTES = TypeAdapter(list[FonteDoNome])
 
 
@@ -516,7 +571,8 @@ class NovaCorrecao(BaseModel):
     # `aparicao.papel_visual`: o JSON {papel, visual}; `texto_na_tela.texto`: o
     # JSON {tipo, texto}; `texto_na_tela.acrescentar`: o JSON {inicio_ms,
     # fim_ms, tipo, texto}; `pauta.acrescentar`: o JSON {titulo, resumo?, tom,
-    # inicio_ms, fim_ms}.
+    # inicio_ms, fim_ms}; `pauta.juntar`: o JSON {ids, titulo}, com o `item_id` da
+    # primeira; `pauta.dividir`: o JSON {em_ms, titulos: [primeira, segunda]}.
     valor: Annotated[
         str,
         StringConstraints(
@@ -602,6 +658,11 @@ class RepositorioDeAprovacaoEmMemoria:
 
 class ItemInexistente(Exception):
     """O item da correção não existe no JSON do modelo."""
+
+
+class EstruturaInvalida(Exception):
+    """Juntar ou dividir pautas que a decupagem entregue não permite: pautas que não
+    são seguidas, ou um corte fora da pauta."""
 
 
 class CorrecaoJaExiste(Exception):
@@ -903,6 +964,18 @@ def corrigir(
         "depois": novo.valor,
         "exige_aprovacao": exige_aprovacao,
     }
+    estrutura = TIPOS[novo.tipo].reestrutura
+    if estrutura is not None:
+        campos["depois"], ancora_nova = estrutura.preparar(entregue, novo, versao)
+        return _registro(
+            job_id,
+            autoria,
+            id,
+            item_id=novo.item_id,
+            antes=antes,
+            ancora=ancora_nova,
+            **campos,
+        )
     acrescenta = TIPOS[novo.tipo].acrescenta
     if acrescenta is not None:
         ancora = acrescenta.ancora(novo.valor, novo.item_id, versao)
@@ -1388,6 +1461,17 @@ def reconciliar(
             or not estado.casavel(c.id)
         ):
             continue
+        estrutura = TIPOS[c.tipo].reestrutura
+        if estrutura is not None:
+            # Juntar e dividir se casam com o conjunto de pautas, não com um item só.
+            achada = estrutura.reapontar(modelo, c, versao)
+            if achada is None:
+                resultado.sem_casar.append(c)
+                continue
+            resultado.casadas.append(achada[0])
+            if achada[1]:
+                resultado.atendidas.append(achada[0])
+            continue
         candidatos = _candidatos(modelo, c)
         acrescenta = TIPOS[c.tipo].acrescenta
         if acrescenta is not None and acrescenta.acrescenta(c):
@@ -1654,6 +1738,10 @@ def aplicar(
         if not estado.em_vigor(c.id):
             continue
         entrada = TIPOS[c.tipo]
+        if entrada.reestrutura is not None:
+            if c.id not in atendidas:
+                entrada.reestrutura.aplicar(resultado, c)
+            continue
         if entrada.acrescenta is not None and entrada.acrescenta.acrescenta(c):
             if c.id not in atendidas:
                 entrada.acrescenta.aplicar(resultado, c)
@@ -1726,7 +1814,8 @@ def fila(
         ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
         tipo_do_item = c.ancora.tipo_do_item
         candidatos = []
-        for item in _itens(modelo, tipo_do_item):
+        # Juntar e dividir não se reaplicam num item só: ficam na fila para descartar.
+        for item in [] if TIPOS[c.tipo].reestrutura else _itens(modelo, tipo_do_item):
             intervalo = _intervalo_do_item(item, tipo_do_item)
             # Plano e fala que só encostam no ancorado não são o mesmo trecho.
             sobrepoe = (
@@ -1911,6 +2000,19 @@ class Acrescenta:
 
 
 @dataclass(frozen=True)
+class Reestrutura:
+    """O que só os tipos que mexem no conjunto de pautas (juntar, dividir) sabem fazer."""
+
+    # Do pedido e da decupagem entregue: o valor guardado e a âncora; `ItemInexistente`
+    # ou `EstruturaInvalida` se o pedido não cabe nela.
+    preparar: Callable[[dict[str, Any], NovaCorrecao, str], tuple[str, Ancora]]
+    aplicar: Callable[[dict[str, Any], Correcao], None]
+    # A correção apontada para as pautas do JSON novo e se o modelo já traz o resultado;
+    # `None` se não há pauta correspondente.
+    reapontar: Callable[[dict[str, Any], Correcao, str], tuple[Correcao, bool] | None]
+
+
+@dataclass(frozen=True)
 class Tipo:
     """A entrada de um tipo de Correção."""
 
@@ -1964,6 +2066,7 @@ class Tipo:
     catalogo_de: Literal["pessoas", "marcas"] | None = None
     casa_longe: bool = False
     acrescenta: Acrescenta | None = None
+    reestrutura: Reestrutura | None = None
 
 
 def _campo_longo(n: NovaCorrecao) -> str:
@@ -2422,6 +2525,197 @@ _PESSOA_NOVA = Acrescenta(
     aplicar=_acrescentar_pessoa,
 )
 
+
+def _titulo_e_tempos(item: dict[str, Any]) -> str:
+    return _json_canonico(
+        {
+            "titulo": item["titulo"],
+            "inicio_ms": item["inicio_ms"],
+            "fim_ms": item["fim_ms"],
+        }
+    )
+
+
+def _canonizar_juncao(n: NovaCorrecao) -> str:
+    juncao = NovaJuncao.model_validate_json(n.valor)
+    if n.item_id != juncao.ids[0]:
+        raise ValueError("item_id é o da primeira pauta")
+    return _json_canonico(juncao.model_dump())
+
+
+def _canonizar_divisao(n: NovaCorrecao) -> str:
+    return _json_canonico(NovaDivisao.model_validate_json(n.valor).model_dump())
+
+
+def _pautas_em_ordem(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(_pautas(modelo), key=lambda p: (p["inicio_ms"], p["fim_ms"]))
+
+
+def _preparar_juncao(
+    entregue: dict[str, Any], novo: NovaCorrecao, versao: str
+) -> tuple[str, Ancora]:
+    juncao = NovaJuncao.model_validate_json(novo.valor)
+    pautas = _pautas_em_ordem(entregue)
+    ids = [p.get("id") for p in pautas]
+    if any(i not in ids for i in juncao.ids):
+        raise ItemInexistente(" ".join(juncao.ids))
+    primeira = ids.index(juncao.ids[0])
+    if ids[primeira : primeira + len(juncao.ids)] != juncao.ids:
+        raise EstruturaInvalida("as pautas não são seguidas")
+    juntas = pautas[primeira : primeira + len(juncao.ids)]
+    inicio, fim = juntas[0]["inicio_ms"], max(p["fim_ms"] for p in juntas)
+    depois = _json_canonico(
+        {"titulo": juncao.titulo, "inicio_ms": inicio, "fim_ms": fim}
+    )
+    ancora = Ancora(
+        versao=versao,
+        tipo_do_item="pauta",
+        identidade=normalizar(str(juntas[0]["titulo"])),
+        inicio_ms=inicio,
+        fim_ms=fim,
+    )
+    return depois, ancora
+
+
+def _aplicar_juncao(resultado: dict[str, Any], c: Correcao) -> None:
+    """Junta as pautas que estão no intervalo da âncora na primeira delas (a que
+    mantém o id), com o título escolhido; a mesma regra de sobreposição serve à
+    versão em que a correção foi feita e à reaplicação."""
+    intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    juntas = [
+        p
+        for p in _pautas_em_ordem(resultado)
+        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+    ]
+    if len(juntas) < 2:
+        return
+    primeira, *outras = juntas
+    primeira["titulo"] = json.loads(c.depois)["titulo"]
+    primeira["inicio_ms"] = min(p["inicio_ms"] for p in juntas)
+    primeira["fim_ms"] = max(p["fim_ms"] for p in juntas)
+    primeira["resumo"] = "\n".join(p["resumo"] for p in juntas if p.get("resumo"))
+    for campo in ("pessoas", "locais"):
+        if campo in primeira:
+            reunidos = [x for p in juntas for x in p.get(campo, [])]
+            primeira[campo] = list(dict.fromkeys(reunidos))
+    primeira["origem"] = "revisao"
+    resultado["pautas"] = [
+        p for p in resultado["pautas"] if not any(p is o for o in outras)
+    ]
+
+
+def _reapontar_juncao(
+    modelo: dict[str, Any], c: Correcao, versao: str
+) -> tuple[Correcao, bool] | None:
+    intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    achadas = [
+        p
+        for p in _pautas_em_ordem(modelo)
+        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+    ]
+    if not achadas:
+        return None
+    if len(achadas) == 1:
+        # Uma pauta só: o modelo já a trouxe junta se ela cobre ao menos metade do trecho.
+        inicio, fim = _intervalo_da_pauta(achadas[0])
+        sobreposicao = min(fim, intervalo[1]) - max(inicio, intervalo[0])
+        if sobreposicao * 2 < intervalo[1] - intervalo[0]:
+            return None
+        ancora = _ancora_do_item(achadas[0], "pauta", versao)
+        nova = c.model_copy(
+            update={"item_id": str(achadas[0].get("id", "")), "ancora": ancora}
+        )
+        return nova, True
+    inicio = achadas[0]["inicio_ms"]
+    fim = max(p["fim_ms"] for p in achadas)
+    ancora = Ancora(
+        versao=versao,
+        tipo_do_item="pauta",
+        identidade=normalizar(str(achadas[0]["titulo"])),
+        inicio_ms=inicio,
+        fim_ms=fim,
+    )
+    depois = _json_canonico(
+        {"titulo": json.loads(c.depois)["titulo"], "inicio_ms": inicio, "fim_ms": fim}
+    )
+    nova = c.model_copy(
+        update={
+            "item_id": str(achadas[0].get("id", "")),
+            "ancora": ancora,
+            "depois": depois,
+        }
+    )
+    return nova, False
+
+
+def _preparar_divisao(
+    entregue: dict[str, Any], novo: NovaCorrecao, versao: str
+) -> tuple[str, Ancora]:
+    divisao = NovaDivisao.model_validate_json(novo.valor)
+    item = next((p for p in _pautas(entregue) if p.get("id") == novo.item_id), None)
+    if item is None:
+        raise ItemInexistente(novo.item_id)
+    if not item["inicio_ms"] < divisao.em_ms < item["fim_ms"]:
+        raise EstruturaInvalida("o corte cai fora da pauta")
+    return novo.valor, _ancora_do_item(item, "pauta", versao)
+
+
+def _aplicar_divisao(resultado: dict[str, Any], c: Correcao) -> None:
+    divisao = json.loads(c.depois)
+    em = divisao["em_ms"]
+    for pauta in _itens_com_o_id(resultado, c):
+        if not pauta["inicio_ms"] < em < pauta["fim_ms"]:
+            continue
+        segunda = {
+            **json.loads(json.dumps(pauta)),
+            "id": f"{PREFIXO_ACRESCENTADO}{c.id}",
+            "titulo": divisao["titulos"][1],
+            "resumo": "",
+            "inicio_ms": em,
+            "origem": "revisao",
+        }
+        pauta["titulo"], pauta["fim_ms"] = divisao["titulos"][0], em
+        pauta["origem"] = "revisao"
+        resultado["pautas"].insert(resultado["pautas"].index(pauta) + 1, segunda)
+
+
+def _reapontar_divisao(
+    modelo: dict[str, Any], c: Correcao, versao: str
+) -> tuple[Correcao, bool] | None:
+    em = json.loads(c.depois)["em_ms"]
+    intervalo = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    achadas = [
+        p
+        for p in _pautas(modelo)
+        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+    ]
+    antes = [p for p in achadas if abs(p["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
+    depois = [p for p in achadas if abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
+    com_o_corte = [p for p in achadas if p["inicio_ms"] < em < p["fim_ms"]]
+    if antes and depois:
+        # O modelo já cortou aqui.
+        item, atendida = antes[0], True
+    elif len(com_o_corte) == 1:
+        item, atendida = com_o_corte[0], False
+    else:
+        return None
+    nova = c.model_copy(
+        update={
+            "item_id": str(item.get("id", "")),
+            "ancora": _ancora_do_item(item, "pauta", versao),
+        }
+    )
+    return nova, atendida
+
+
+_JUNTAR = Reestrutura(
+    preparar=_preparar_juncao, aplicar=_aplicar_juncao, reapontar=_reapontar_juncao
+)
+_DIVIDIR = Reestrutura(
+    preparar=_preparar_divisao, aplicar=_aplicar_divisao, reapontar=_reapontar_divisao
+)
+
+
 TIPOS: dict[str, Tipo] = {
     "pessoa.renomear": Tipo(
         canonizar=_campo_longo,
@@ -2626,6 +2920,24 @@ TIPOS: dict[str, Tipo] = {
         valor_do_item=_tempos_do_item,
         fim_ms=_fim_do_json,
         acrescenta=_PAUTA_NOVA,
+    ),
+    "pauta.juntar": Tipo(
+        canonizar=_canonizar_juncao,
+        rotulo="Juntar pautas",
+        legivel=textos.pauta_estrutural,
+        tipo_do_item="pauta",
+        json_longo=True,
+        valor_do_item=_titulo_e_tempos,
+        reestrutura=_JUNTAR,
+    ),
+    "pauta.dividir": Tipo(
+        canonizar=_canonizar_divisao,
+        rotulo="Dividir pauta",
+        legivel=textos.pauta_estrutural,
+        tipo_do_item="pauta",
+        json_longo=True,
+        valor_do_item=_titulo_e_tempos,
+        reestrutura=_DIVIDIR,
     ),
 }
 

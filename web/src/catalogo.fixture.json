@@ -81,6 +81,14 @@
       "rotulo": "Pauta acrescentada"
     },
     {
+      "valor": "pauta.juntar",
+      "rotulo": "Juntar pautas"
+    },
+    {
+      "valor": "pauta.dividir",
+      "rotulo": "Dividir pauta"
+    },
+    {
       "valor": "desfazer",
       "rotulo": "Desfazer"
     },

@@ -43,6 +43,7 @@ from api.correcoes import (
     Correcao,
     CorrecaoInexistente,
     CorrecaoJaExiste,
+    EstruturaInvalida,
     ItemDaFila,
     ItemDoHistorico,
     ItemInexistente,
@@ -1037,6 +1038,8 @@ def criar_rotas(
             raise HTTPException(422, "Item inexistente") from None
         except TemposInvalidos:
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
+        except EstruturaInvalida as erro:
+            raise HTTPException(422, str(erro)) from None
         except CatalogoIdInvalido:
             raise HTTPException(422, "catalogo_id não é o desse nome") from None
 

@@ -66,6 +66,15 @@ def _pauta_acrescentada(p: dict[str, Any]) -> str:
     return f"{p['titulo']} ({tom}) {_faixa(p['inicio_ms'], p['fim_ms'])}"
 
 
+def _pauta_estrutural(p: dict[str, Any]) -> str:
+    """O título e a faixa de uma pauta (antes e depois de juntar, antes de dividir) ou
+    as duas metades de uma divisão."""
+    if "titulos" in p:
+        primeira, segunda = p["titulos"]
+        return f"{primeira} | {segunda} (corte em {em_mm_ss(p['em_ms'])})"
+    return f"{p['titulo']} {_faixa(p['inicio_ms'], p['fim_ms'])}"
+
+
 def _papel_visual(d: dict[str, Any]) -> str:
     return " · ".join(x for x in (d["papel"], d["visual"]) if x) or (
         "sem papel na cena e visual"
@@ -104,6 +113,7 @@ aparicao_acrescentada = de_json(_aparicao)
 texto_na_tela = de_json(_texto_na_tela)
 texto_na_tela_acrescentado = de_json(_texto_acrescentado)
 pauta_acrescentada = de_json(_pauta_acrescentada)
+pauta_estrutural = de_json(_pauta_estrutural)
 papel_visual = de_json(_papel_visual)
 fontes_do_nome = de_json(_fontes)
 descricao_do_plano = de_json(_plano)
