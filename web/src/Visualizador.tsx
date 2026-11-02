@@ -31,6 +31,7 @@ import {
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
 import { dataDeExibicao, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
+import { NomesDoCatalogo } from './CampoDeNome.tsx'
 import { FormularioDoTrecho } from './FormularioDoTrecho.tsx'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
@@ -755,6 +756,7 @@ export default function Visualizador({
   const titulo = [job.programa, job.data_exibicao ? dataDeExibicao(job.data_exibicao) : null].filter(Boolean)
 
   return (
+    <NomesDoCatalogo.Provider value={api.nomes}>
     <Stack
       gap="xs"
       h={`calc(100vh - ${ALTURA_DA_BARRA}px - 2 * var(--mantine-spacing-sm))`}
@@ -1127,5 +1129,6 @@ export default function Visualizador({
         />
       )}
     </Stack>
+    </NomesDoCatalogo.Provider>
   )
 }

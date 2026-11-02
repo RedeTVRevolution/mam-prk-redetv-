@@ -82,6 +82,24 @@ export interface ClienteDoJob {
   reprocessar(etapa: string, motivo: string): Promise<Job>
 }
 
+/** Um nome do catálogo de pessoas ou de marcas, como o autocompletar o mostra. */
+export interface NomeDoCatalogo {
+  id: string
+  nome: string
+  /** "Sabrina Sato (apresentadora)": só as pessoas têm. */
+  rotulo?: string
+  a_revisar: boolean
+}
+
+export type CatalogoDeNomes = 'pessoas' | 'marcas'
+
+/** O autocompletar dos campos de nome (exige `decupagem.ver`; criar exige `decupagem.editar`). */
+export interface ClienteDeNomes {
+  achar(catalogo: CatalogoDeNomes, q: string): Promise<NomeDoCatalogo[]>
+  /** Nome novo, "a revisar"; se o nome já existe devolve o existente. */
+  criar(catalogo: CatalogoDeNomes, nome: string): Promise<NomeDoCatalogo>
+}
+
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
@@ -90,6 +108,7 @@ export interface ClienteDaApi {
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
   buscar(consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
+  nomes: ClienteDeNomes
   job(id: string): ClienteDoJob
 }
 
@@ -190,6 +209,10 @@ export function criarClienteDaApi(
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite) => chamar(`/v1/busca?${consultaParaApi(consulta, limite)}`),
+    nomes: {
+      achar: (catalogo, q) => chamar(`/v1/catalogo/${catalogo}?q=${encodeURIComponent(q)}`),
+      criar: (catalogo, nome) => chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } }),
+    },
     job,
   }
 }

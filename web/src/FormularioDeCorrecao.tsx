@@ -1,6 +1,7 @@
 import { Button, Checkbox, Group, NativeSelect, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core'
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from 'react'
-import type { CampoDoEditor, Editor, Valor } from './catalogacao.ts'
+import { CampoDeNome } from './CampoDeNome.tsx'
+import { type CampoDoEditor, type Editor, idDoNome, type Valor } from './catalogacao.ts'
 import { type Intervalo, relogio } from './linhaDoTempo.ts'
 
 /** O formulário compacto que toma o lugar da linha do item: Enter salva e Esc cancela, sem diálogo. */
@@ -52,6 +53,10 @@ export function FormularioDeCorrecao({
     setValores((v) => ({ ...v, [campo.chave]: valor }))
   }
 
+  function mudarNome(campo: CampoDoEditor, nome: string, id: string) {
+    setValores((v) => ({ ...v, [campo.chave]: nome, [idDoNome(campo.chave)]: id }))
+  }
+
   async function salvar() {
     if (salvando) return
     if (!pedidos) {
@@ -91,6 +96,17 @@ export function FormularioDeCorrecao({
     if (c.visivel && !c.visivel(valores)) return null
     const valor = valores[c.chave]
     switch (c.tipo) {
+      case 'nome':
+        return (
+          <CampoDeNome
+            key={c.chave}
+            rotulo={c.rotulo}
+            catalogo={c.catalogo ?? 'pessoas'}
+            limite={c.limite}
+            valor={String(valor ?? '')}
+            aoMudar={(nome, id) => mudarNome(c, nome, id)}
+          />
+        )
       case 'texto':
       case 'tempo':
         return (

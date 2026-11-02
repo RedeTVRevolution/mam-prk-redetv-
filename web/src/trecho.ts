@@ -43,7 +43,7 @@ export function editorDoTrecho(aba: AbaDoTrecho, trecho: Intervalo, c: CatalogoD
       return motivado(
         montar(
           [
-            { chave: 'nome', rotulo: 'Nome', tipo: 'texto', limite: c.limites.nome },
+            { chave: 'nome', rotulo: 'Nome', tipo: 'nome', catalogo: 'pessoas', limite: c.limites.nome },
             { chave: 'evidencia', rotulo: 'Evidência na imagem', tipo: 'texto', limite: c.limites.nome },
             ...camposDeTempo(),
           ],
@@ -63,7 +63,7 @@ export function editorDoTrecho(aba: AbaDoTrecho, trecho: Intervalo, c: CatalogoD
       )
     case 'marca': {
       const campos: CampoDoEditor[] = [
-        { chave: 'marca', rotulo: 'Marca', tipo: 'texto', limite: c.limites.nome },
+        { chave: 'marca', rotulo: 'Marca', tipo: 'nome', catalogo: 'marcas', limite: c.limites.nome },
         { chave: 'tipo', rotulo: 'Tipo', tipo: 'opcoes', opcoes: c.tipos_de_comercial },
         { chave: 'evidencias', rotulo: 'Evidências', tipo: 'multiplas', opcoes: EVIDENCIAS_DA_MARCA },
         ...camposDeTempo(),

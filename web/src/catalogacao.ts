@@ -9,7 +9,9 @@ export type Valor = string | string[] | boolean
 export interface CampoDoEditor {
   chave: string
   rotulo: string
-  tipo: 'texto' | 'area' | 'opcoes' | 'multiplas' | 'booleano' | 'tempo'
+  tipo: 'texto' | 'nome' | 'area' | 'opcoes' | 'multiplas' | 'booleano' | 'tempo'
+  /** Do tipo `nome`: o catálogo que o autocompletar consulta. */
+  catalogo?: 'pessoas' | 'marcas'
   opcoes?: Opcao[]
   limite?: number
   /** Só aparece quando a função diz que sim (a evidência de quem passa a aparecer na imagem). */
@@ -23,6 +25,8 @@ export interface Pedido {
   valor: string
   tipo_do_item?: string
   ocorrencia?: { lista: string; inicio_ms: number; fim_ms: number }
+  /** O nome escolhido no catálogo (só `pessoa.renomear` e `comercial.marca`). */
+  catalogo_id?: string
 }
 
 export interface Editor {
@@ -132,6 +136,13 @@ function origemDoItem(d: Decupagem, item: ItemDoPainel): Origem | null {
   }
 }
 
+/** A chave que guarda o id do catálogo escolhido no campo de nome `chave`. */
+export const idDoNome = (chave: string): string => `${chave}__id`
+
+/** O `catalogo_id` do nome escolhido, se há um. */
+const comId = (v: Record<string, Valor>, chave: string): { catalogo_id?: string } =>
+  texto(v[idDoNome(chave)]) ? { catalogo_id: texto(v[idDoNome(chave)]) } : {}
+
 export const texto = (v: Valor | undefined): string => (typeof v === 'string' ? v.trim() : '')
 
 export function camposDeTempo(): CampoDoEditor[] {
@@ -197,7 +208,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
       const comFontes = 'fontes_do_nome' in pessoa
       const destinos = o.tipo === 'aparicao' ? LISTAS : LISTAS.filter((l) => l.valor === lista || l.valor === 'na_imagem')
       const campos: CampoDoEditor[] = [
-        { chave: 'nome', rotulo: 'Nome', tipo: 'texto', limite: c.limites.nome },
+        { chave: 'nome', rotulo: 'Nome', tipo: 'nome', catalogo: 'pessoas', limite: c.limites.nome },
         { chave: 'destino', rotulo: 'Aparição ou menção', tipo: 'opcoes', opcoes: destinos },
         ...(o.tipo === 'mencao'
           ? [
@@ -243,7 +254,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
           const partes: (Pedido[] | null)[] = []
           const nome = texto(v.nome)
           if (!nome) return null
-          if (nome !== pessoa.nome) partes.push([{ tipo: 'pessoa.renomear', item_id: pessoa.id, valor: nome }])
+          if (nome !== pessoa.nome) partes.push([{ tipo: 'pessoa.renomear', item_id: pessoa.id, valor: nome, ...comId(v, 'nome') }])
           if (comFontes) {
             const fontes = c.fontes_do_nome.map((f) => f.valor).filter((f) => (v.fontes as string[]).includes(f))
             if (fontes.join() !== fontesAtuais.join())
@@ -304,7 +315,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
       const id = comercial.id
       return montar(
         [
-          { chave: 'marca', rotulo: 'Marca', tipo: 'texto', limite: c.limites.nome },
+          { chave: 'marca', rotulo: 'Marca', tipo: 'nome', catalogo: 'marcas', limite: c.limites.nome },
           { chave: 'tipo', rotulo: 'Tipo', tipo: 'opcoes', opcoes: c.tipos_de_comercial },
           ...camposDeTempo(),
         ],
@@ -313,7 +324,7 @@ function montarEditor(d: Decupagem, item: ItemDoPainel, c: CatalogoDeCorrecoes):
         (v, exatos) => {
           const partes: (Pedido[] | null)[] = []
           if (!texto(v.marca)) return null
-          if (texto(v.marca) !== comercial.marca) partes.push([{ tipo: 'comercial.marca', item_id: id, valor: texto(v.marca) }])
+          if (texto(v.marca) !== comercial.marca) partes.push([{ tipo: 'comercial.marca', item_id: id, valor: texto(v.marca), ...comId(v, 'marca') }])
           if (v.tipo && v.tipo !== comercial.tipo) partes.push([{ tipo: 'comercial.tipo', item_id: id, valor: String(v.tipo) }])
           partes.push(pedidoDeTempos(v, comercial, { tipo_do_item: 'comercial', item_id: id }, exatos))
           return juntar(partes)

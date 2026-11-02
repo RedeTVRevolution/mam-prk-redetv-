@@ -40,6 +40,8 @@ const JOB: Job = {
 }
 
 const correcoes: Record<string, unknown>[] = []
+const consultas: string[] = []
+const criados: { nome: string }[] = []
 let desfeitas: { id: string; motivo: unknown }[] = []
 let historico: Record<string, unknown>[] = []
 let decupagemAtual: typeof DECUPAGEM = DECUPAGEM
@@ -55,6 +57,20 @@ const servidor = setupServer(
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json(historico)),
   http.get('/v1/jobs/j1/fila', () => HttpResponse.json([])),
+  http.get('/v1/catalogo/pessoas', ({ request }) => {
+    consultas.push(new URL(request.url).searchParams.get('q') ?? '')
+    return HttpResponse.json([
+      { id: 'cat-sabrina', nome: 'Sabrina Sato', papel: 'apresentadora', rotulo: 'Sabrina Sato (apresentadora)', a_revisar: false },
+    ])
+  }),
+  http.get('/v1/catalogo/marcas', ({ request }) => {
+    consultas.push(new URL(request.url).searchParams.get('q') ?? '')
+    return HttpResponse.json([{ id: 'cat-marca', nome: 'Marca Y', a_revisar: false }])
+  }),
+  http.post('/v1/catalogo/:catalogo', async ({ request }) => {
+    criados.push((await request.json()) as { nome: string })
+    return HttpResponse.json({ id: 'cat-nova', nome: criados.at(-1)?.nome, rotulo: criados.at(-1)?.nome, a_revisar: true }, { status: 201 })
+  }),
   http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
     correcoes.push((await request.json()) as Record<string, unknown>)
     return HttpResponse.json({}, { status: 201 })
@@ -67,6 +83,8 @@ const servidor = setupServer(
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 beforeEach(() => {
   correcoes.length = 0
+  consultas.length = 0
+  criados.length = 0
   desfeitas = []
   historico = []
   decupagemAtual = DECUPAGEM
@@ -251,4 +269,118 @@ test('os atalhos do trecho estão na lista do ?', async () => {
   expect(within(lista).getByText(/Marcar a entrada do trecho/)).toBeTruthy()
   expect(within(lista).getByText(/Marcar a saída do trecho/)).toBeTruthy()
   expect(within(lista).getByText(/Descrever o trecho marcado/)).toBeTruthy()
+})
+
+async function renomearLeao() {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 1 aparição/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 00:10 a 00:20/ }))
+  await usuario.keyboard('e')
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Leão Lobo/ })
+  const nome = within(formulario).getByLabelText('Nome')
+  await usuario.clear(nome)
+  return { usuario, nome }
+}
+
+test('F2: digitar 2 letras consulta o catálogo; ↓ e Enter escolhem e o Enter seguinte manda o catalogo_id', async () => {
+  const { usuario, nome } = await renomearLeao()
+
+  await usuario.type(nome, 'sabrin')
+  expect(await screen.findByRole('option', { name: 'Sabrina Sato (apresentadora)' })).toBeTruthy()
+  expect(consultas.at(-1)).toBe('sabrin')
+  await usuario.keyboard('{ArrowDown}{Enter}')
+  expect(correcoes).toEqual([])
+  expect((nome as HTMLInputElement).value).toBe('Sabrina Sato')
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({
+    tipo: 'pessoa.renomear',
+    item_id: 'p1',
+    valor: 'Sabrina Sato',
+    catalogo_id: 'cat-sabrina',
+  })
+})
+
+test('F2: clicar na opção manda o catalogo_id', async () => {
+  const { usuario, nome } = await renomearLeao()
+
+  await usuario.type(nome, 'sabrin')
+  await usuario.click(await screen.findByRole('option', { name: 'Sabrina Sato (apresentadora)' }))
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.renomear', valor: 'Sabrina Sato', catalogo_id: 'cat-sabrina' })
+})
+
+test('F2: uma letra não consulta; texto digitado sem escolher não manda catalogo_id', async () => {
+  const { usuario, nome } = await renomearLeao()
+
+  await usuario.type(nome, 'S')
+  expect(consultas).toEqual([])
+  await usuario.type(nome, 'abrina S.')
+  await screen.findByRole('option', { name: /Shift\+Enter: criar 'Sabrina S\.' como nova/ })
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ valor: 'Sabrina S.' })
+  expect(correcoes[0]).not.toHaveProperty('catalogo_id')
+})
+
+test('F2: Shift+Enter cria o nome novo no catálogo e a correção leva o id dele', async () => {
+  const { usuario, nome } = await renomearLeao()
+
+  await usuario.type(nome, 'Sabrina S.')
+  await screen.findByRole('option', { name: /Shift\+Enter: criar/ })
+  await usuario.keyboard('{Shift>}{Enter}{/Shift}')
+  await waitFor(() => expect(criados).toEqual([{ nome: 'Sabrina S.' }]))
+  expect(correcoes).toEqual([])
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.renomear', valor: 'Sabrina S.', catalogo_id: 'cat-nova' })
+})
+
+test('F2: clicar na última linha cria o nome novo', async () => {
+  const { usuario, nome } = await renomearLeao()
+
+  await usuario.type(nome, 'Sabrina S.')
+  await usuario.click(await screen.findByRole('option', { name: /Shift\+Enter: criar 'Sabrina S\.' como nova/ }))
+  await waitFor(() => expect(criados).toEqual([{ nome: 'Sabrina S.' }]))
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ valor: 'Sabrina S.', catalogo_id: 'cat-nova' })
+})
+
+test('a marca do comercial (F2) escolhida do catálogo manda o catalogo_id', async () => {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('tab', { name: /Comerciais/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Marca X/ }))
+  await usuario.keyboard('e')
+  await usuario.keyboard('{F2}')
+  const marca = await screen.findByLabelText('Marca')
+  await usuario.clear(marca)
+  await usuario.type(marca, 'marc')
+  await usuario.click(await screen.findByRole('option', { name: 'Marca Y' }))
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ tipo: 'comercial.marca', item_id: 'c1', valor: 'Marca Y', catalogo_id: 'cat-marca' })
+})
+
+test('no trecho, a marca do catálogo preenche o nome, sem catalogo_id (a API só o aceita ao renomear)', async () => {
+  const usuario = await trechoPorTeclas(40, 50)
+  await usuario.keyboard('a')
+  await usuario.keyboard('3')
+  await usuario.type(screen.getByLabelText('Marca'), 'marc')
+  await usuario.click(await screen.findByRole('option', { name: 'Marca Y' }))
+  await usuario.click(screen.getByRole('checkbox', { name: 'Logo' }))
+  await usuario.click(screen.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).not.toHaveProperty('catalogo_id')
+  expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({ marca: 'Marca Y' })
 })
