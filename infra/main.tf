@@ -197,6 +197,23 @@ variable "imagem_ocr_gpu" {
   type        = string
 }
 
+variable "imagem_objetos" {
+  description = "Imagem do Job de objetos com GPU, Florence-2 (--target objetos-gpu), de preferência pelo digest"
+  type        = string
+}
+
+# Qual motor faz o inventário de objetos dos quadros (#243): o Florence-2, num Job com GPU,
+# ou o Gemini, na análise. O Workflows lê o valor; o YAML ainda não o usa.
+variable "motor_objetos" {
+  description = "Motor do inventário de objetos: florence ou gemini"
+  type        = string
+  default     = "florence"
+  validation {
+    condition     = contains(["florence", "gemini"], var.motor_objetos)
+    error_message = "motor_objetos vale florence ou gemini."
+  }
+}
+
 provider "google" {
   project        = var.projeto
   region         = var.regiao
@@ -384,7 +401,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -452,6 +469,10 @@ locals {
     # confirmado para o lugar das do catálogo, apagando as de antes: objectUser); grava
     # `<job>.comparacao.json`.
     comparacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser", referencias = "roles/storage.objectUser" }
+    # Lê a Decupagem e os quadros e grava o resultado do Florence-2 ao lado deles
+    # (`<job>/objetos/florence.json`; objectUser, porque o reprocessamento o sobrescreve).
+    # Só este bucket: o Job não lê o proxy nem toca o Firestore.
+    objetos = { decupagens = "roles/storage.objectUser" }
   }
 }
 
@@ -1030,6 +1051,79 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
+# Job de objetos com GPU L4 (#243): o Florence-2 lê os quadros-chave da Decupagem, no bucket
+# das decupagens (São Paulo), e grava o resultado bruto ao lado. Só processamento de
+# passagem na região da GPU: nada fica lá. Não tem plano B em CPU nem escreve no Firestore.
+resource "google_cloud_run_v2_job" "objetos_gpu" {
+  name                = "mam-objetos-gpu"
+  location            = var.regiao_gpu
+  deletion_protection = false
+  template {
+    parallelism = 1
+    task_count  = 1
+    template {
+      service_account = google_service_account.mam["objetos"].email
+      max_retries     = 0
+      # NÃO medido (#240). Conta: um programa de 4 h tem ~2000 quadros-chave (1 a 3 por
+      # plano), a ~3 s cada (<OD> e <DENSE_REGION_CAPTION>, 3 feixes, na L4) = ~6000 s,
+      # mais a carga do modelo; vezes 1,75 de folga: 10800 s (3 h). O #240 mede e ajusta.
+      timeout                       = "10800s"
+      gpu_zonal_redundancy_disabled = true
+      node_selector {
+        accelerator = "nvidia-l4"
+      }
+      vpc_access {
+        egress = "ALL_TRAFFIC"
+        network_interfaces {
+          network    = google_compute_network.validacao.id
+          subnetwork = google_compute_subnetwork.validacao_gpu.id
+        }
+      }
+      containers {
+        image = var.imagem_objetos
+        env {
+          name  = "GCP_PROJECT_ID"
+          value = var.projeto
+        }
+        env {
+          name  = "BUCKET_DECUPAGENS"
+          value = local.buckets["decupagens"]
+        }
+        env {
+          name  = "TMPDIR"
+          value = "/saida"
+        }
+        env {
+          name  = "DISPOSITIVO"
+          value = "gpu"
+        }
+        resources {
+          # O mínimo do Cloud Run com GPU: 4 CPUs e 16 GiB. Os quadros são lidos em memória
+          # (sem disco), então o volume em memória é só o TMPDIR e o HOME do Python: 2 GiB.
+          # Sobram 14 GiB para o PyTorch e o contexto CUDA no lado da CPU (~4 a 5 GiB).
+          limits = {
+            cpu              = "4"
+            memory           = "16Gi"
+            "nvidia.com/gpu" = "1"
+          }
+        }
+        volume_mounts {
+          name       = "saida"
+          mount_path = "/saida"
+        }
+      }
+      volumes {
+        name = "saida"
+        empty_dir {
+          medium     = "MEMORY"
+          size_limit = "2Gi"
+        }
+      }
+    }
+  }
+  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+}
+
 # A orquestração roda o Job de transcrição, também com override de JOB_ID.
 resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_transcricao" {
   name     = google_cloud_run_v2_job.transcricao.name
@@ -1057,6 +1151,13 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_transcricao_gpu
 resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_ocr_gpu" {
   name     = google_cloud_run_v2_job.ocr_gpu.name
   location = google_cloud_run_v2_job.ocr_gpu.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["orquestracao"].member
+}
+
+resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_objetos_gpu" {
+  name     = google_cloud_run_v2_job.objetos_gpu.name
+  location = google_cloud_run_v2_job.objetos_gpu.location
   role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
 }
@@ -1580,6 +1681,8 @@ resource "google_workflows_workflow" "validacao" {
     gpu_espera_maxima_s    = var.gpu_espera_maxima_s
     job_de_transcricao_gpu = google_cloud_run_v2_job.transcricao_gpu.name
     job_de_ocr_gpu         = google_cloud_run_v2_job.ocr_gpu.name
+    job_de_objetos         = google_cloud_run_v2_job.objetos_gpu.name
+    motor_objetos          = var.motor_objetos
     job_de_analise         = google_cloud_run_v2_job.analise.name
     job_de_identificacao   = google_cloud_run_v2_job.identificacao.name
     job_de_referencias     = google_cloud_run_v2_job.referencias.name
@@ -1789,6 +1892,10 @@ output "job_de_transcricao_gpu" {
 
 output "job_de_ocr_gpu" {
   value = google_cloud_run_v2_job.ocr_gpu.name
+}
+
+output "job_de_objetos_gpu" {
+  value = google_cloud_run_v2_job.objetos_gpu.name
 }
 
 output "gpu_espera_total_s" {

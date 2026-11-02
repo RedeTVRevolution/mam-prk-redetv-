@@ -123,3 +123,95 @@ def test_o_cloud_build_cobre_a_imagem_do_florence_com_a_estimativa() -> None:
     timeout = re.search(r"^timeout: (\d+)s", cloudbuild, re.MULTILINE)
     assert timeout and int(timeout.group(1)) >= 5400
     assert "objetos-gpu" in cloudbuild.split("timeout:")[0]
+
+
+MAIN = (RAIZ / "infra" / "main.tf").read_text()
+
+
+def _bloco(cabecalho: str) -> str:
+    return MAIN[MAIN.index(cabecalho) :].split("\nresource ")[0].split("\nvariable ")[0]
+
+
+def test_a_conta_do_job_so_toca_o_bucket_das_decupagens() -> None:
+    assert '"objetos"' in MAIN.split('resource "google_service_account" "mam"')[1][:400]
+    papeis = MAIN[MAIN.index("papeis_nos_buckets = {") :]
+    linha = re.search(r"^\s+objetos = \{(.*)\}$", papeis, re.MULTILINE)
+    assert linha
+    assert linha.group(1).strip() == 'decupagens = "roles/storage.objectUser"'
+    # O comentário diz o que a conta faz com o bucket.
+    assert "# Lê a Decupagem e os quadros e grava o resultado" in papeis
+    # Nenhum papel no projeto: sem Firestore nem Vertex.
+    assert (
+        "objetos"
+        not in MAIN[
+            MAIN.index("papeis_no_projeto = {") : MAIN.index("papeis_nos_buckets")
+        ]
+    )
+
+
+def test_o_job_de_objetos_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu() -> None:
+    job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
+
+    assert 'name                = "mam-objetos-gpu"' in job
+    assert "location            = var.regiao_gpu" in job
+    assert 'accelerator = "nvidia-l4"' in job
+    assert '"nvidia.com/gpu" = "1"' in job
+    assert re.search(r'cpu\s+= "4"', job) and re.search(r'memory\s+= "16Gi"', job)
+    assert "gpu_zonal_redundancy_disabled = true" in job
+    assert 'egress = "ALL_TRAFFIC"' in job
+    assert "google_compute_subnetwork.validacao_gpu.id" in job
+    assert 'google_service_account.mam["objetos"]' in job
+    assert "image = var.imagem_objetos\n" in job
+    assert "max_retries     = 0" in job
+    assert re.search(r'timeout\s+= "10800s"', job)
+    assert re.search(r'name\s+= "GCP_PROJECT_ID"\s+value = var.projeto', job)
+    assert re.search(
+        r'name\s+= "BUCKET_DECUPAGENS"\s+value = local.buckets\["decupagens"\]', job
+    )
+    assert "BUCKET_ACEITOS" not in job
+    assert re.search(r'name\s+= "TMPDIR"\s+value = "/saida"', job)
+    assert re.search(r'name\s+= "DISPOSITIVO"\s+value = "gpu"', job)
+    assert re.search(r'medium\s+= "MEMORY"', job) and 'size_limit = "2Gi"' in job
+    assert "us-east4" not in job
+
+
+def test_o_timeout_do_job_de_objetos_tem_a_conta_no_comentario() -> None:
+    job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
+
+    assert "2000 quadros" in job and "1,75" in job
+
+
+def test_a_orquestracao_roda_o_job_de_objetos() -> None:
+    iam = _bloco(
+        'resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_objetos_gpu"'
+    )
+
+    assert "google_cloud_run_v2_job.objetos_gpu.name" in iam
+    assert 'role     = "roles/run.developer"' in iam
+    assert 'google_service_account.mam["orquestracao"]' in iam
+
+
+def test_o_motor_dos_objetos_e_florence_por_padrao_e_so_aceita_dois_valores() -> None:
+    variavel = _bloco('variable "motor_objetos"')
+
+    assert 'default     = "florence"' in variavel or 'default = "florence"' in variavel
+    assert '"florence"' in variavel and '"gemini"' in variavel
+    assert "contains(" in variavel
+
+
+def test_o_workflows_recebe_o_motor_e_o_job_de_objetos_e_o_cabecalho_os_cita() -> None:
+    assert re.search(r"motor_objetos\s+= var\.motor_objetos", MAIN)
+    assert re.search(
+        r"job_de_objetos\s+= google_cloud_run_v2_job\.objetos_gpu\.name", MAIN
+    )
+    cabecalho = (
+        (RAIZ / "infra" / "validacao.workflow.yaml").read_text().split("\nmain:")[0]
+    )
+    assert "${motor_objetos}" in cabecalho and "${job_de_objetos}" in cabecalho
+
+
+def test_a_imagem_e_o_nome_do_job_saem_como_output() -> None:
+    assert "google_cloud_run_v2_job.objetos_gpu.name" in _bloco(
+        'output "job_de_objetos_gpu"'
+    )
+    assert 'variable "imagem_objetos"' in MAIN

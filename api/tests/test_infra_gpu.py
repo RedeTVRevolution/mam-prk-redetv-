@@ -21,9 +21,10 @@ def test_a_regiao_da_gpu_vem_de_uma_variavel_com_us_east4_como_padrao() -> None:
         + _bloco('resource "google_artifact_registry_repository" "mam_gpu"')
         + _bloco('resource "google_cloud_run_v2_job" "transcricao_gpu"')
         + _bloco('resource "google_cloud_run_v2_job" "ocr_gpu"')
+        + _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
     )
     assert "us-east4" not in gpu
-    assert gpu.count("var.regiao_gpu") == 4
+    assert gpu.count("var.regiao_gpu") == 5
 
 
 def test_sub_rede_da_gpu_na_rede_que_ja_existe_sem_nat_e_sem_sobrepor_a_faixa() -> None:
@@ -119,6 +120,7 @@ def test_saidas_para_o_workflows_e_para_o_teste_depois_da_publicacao() -> None:
         ("regiao_gpu", "var.regiao_gpu"),
         ("job_de_transcricao_gpu", "google_cloud_run_v2_job.transcricao_gpu.name"),
         ("job_de_ocr_gpu", "google_cloud_run_v2_job.ocr_gpu.name"),
+        ("job_de_objetos_gpu", "google_cloud_run_v2_job.objetos_gpu.name"),
         ("gpu_espera_total_s", "var.espera_gpu_minutos * 60"),
         ("gpu_espera_maxima_s", "var.gpu_espera_maxima_s"),
         ("gpu_espera_s", "var.gpu_espera_s"),
