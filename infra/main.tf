@@ -30,6 +30,14 @@ variable "regiao_da_busca" {
   default = "us-east4"
 }
 
+# O Model Armor existe em southamerica-east1 (lista de locais de 2/11/2026), então a
+# consulta do editor não sai do Brasil para ser julgada; a Ranking API é global e fica
+# fora do Brasil (ADR 0006).
+variable "regiao_do_model_armor" {
+  type    = string
+  default = "southamerica-east1"
+}
+
 # Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Cloud Run não tem GPU
 # em southamerica-east1. Só processamento de passagem: nenhum bucket nasce nesta região.
 variable "regiao_gpu" {
@@ -250,8 +258,10 @@ resource "google_project_service" "apis" {
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "eventarc.googleapis.com",
+    "discoveryengine.googleapis.com", # Ranking API da busca (#232)
     "firestore.googleapis.com",
     "identitytoolkit.googleapis.com",
+    "modelarmor.googleapis.com", # filtro de injeção da consulta da busca (#232)
     "monitoring.googleapis.com",
     "pubsub.googleapis.com",
     "sts.googleapis.com",
@@ -384,6 +394,26 @@ locals {
   indice_do_quadro           = "momentos-quadro-ann"
   # Vazio desliga o índice do quadro-chave no código (BUSCA_INDICE_QUADRO).
   indice_do_quadro_em_uso = var.indice_do_quadro_ligado ? local.indice_do_quadro : ""
+  # O modelo do Model Armor e a configuração da Ranking API (a padrão, que já existe no
+  # projeto) chegam ao serviço por MODEL_ARMOR_* e RANKING_CONFIG (#232).
+  modelo_do_model_armor = "consulta-da-busca"
+  config_da_ranking     = "default_ranking_config"
+}
+
+# O modelo (template) do Model Armor que julga a consulta antes de o Gemini vê-la: só o
+# filtro de injeção de prompt e jailbreak, no nível que o `sanitizeUserPrompt` acusa
+# com confiança média ou maior. Sem o filtro de conteúdo nocivo: a consulta é só uma frase
+# de busca, e o Gemini já recusa o que é nocivo.
+resource "google_model_armor_template" "consulta_da_busca" {
+  location    = var.regiao_do_model_armor
+  template_id = local.modelo_do_model_armor
+  filter_config {
+    pi_and_jailbreak_filter_settings {
+      filter_enforcement = "ENABLED"
+      confidence_level   = "MEDIUM_AND_ABOVE"
+    }
+  }
+  depends_on = [google_project_service.apis]
 }
 
 # clipes-ouro (#3): os 5 clipes do teste de contrato com o Gemini, nunca no git,
@@ -444,7 +474,9 @@ locals {
   papeis_no_projeto = {
     # `workflows.invoker` é só iniciar execuções (o reprocessar do #147), e o projeto tem
     # um único workflow.
-    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/workflows.invoker"]
+    # `modelarmor.user` só saneia prompts (sanitizeUserPrompt); `discoveryengine.viewer` é o
+    # menor papel com a permissão `discoveryengine.rankingConfigs.rank`, da Ranking API (#232).
+    web         = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/aiplatform.user", "roles/workflows.invoker", "roles/modelarmor.user", "roles/discoveryengine.viewer"]
     validacao   = ["roles/datastore.user"]
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
@@ -665,6 +697,18 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_PALAVRAS_MINIMAS"
         value = tostring(var.busca_palavras_minimas)
+      }
+      env {
+        name  = "MODEL_ARMOR_MODELO"
+        value = google_model_armor_template.consulta_da_busca.template_id
+      }
+      env {
+        name  = "MODEL_ARMOR_REGIAO"
+        value = google_model_armor_template.consulta_da_busca.location
+      }
+      env {
+        name  = "RANKING_CONFIG"
+        value = local.config_da_ranking
       }
       # Quem tem esses e-mails (verificados) é Administrador (api/papeis.py).
       env {

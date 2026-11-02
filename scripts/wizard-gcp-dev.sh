@@ -301,6 +301,7 @@ PAPEIS_DA_TERRAFORM=(
   roles/certificatemanager.owner # certificado gerenciado, se o #294 usar o Certificate Manager
   roles/compute.securityAdmin # Cloud Armor (#295) e firewall da rede default (#301)
   roles/iam.roleAdmin # papel sob medida da Vertex (#302)
+  roles/modelarmor.admin # cria o modelo do Model Armor da busca (#232)
 )
 for role in "${PAPEIS_DA_TERRAFORM[@]}"; do
   gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA_EMAIL" \

@@ -32,6 +32,7 @@ from api.auth import (
     exigir_autenticacao,
 )
 from api.busca import Busca, Ranking, RankingEmOrdem
+from api.busca_na_nuvem import adaptadores_da_busca
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
@@ -321,6 +322,7 @@ if _projeto:
             if "BUSCA_COLECAO" in os.environ
             else None
         ),
+        **vars(adaptadores_da_busca(os.environ)),
     )
 else:
     app = criar_app()
