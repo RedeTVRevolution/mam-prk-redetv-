@@ -91,16 +91,18 @@ def test_o_deploy_aplica_so_pelo_script_que_recusa_destruicao() -> None:
     assert len(chamadas) == 2
 
 
-def test_o_apply_com_target_fica_de_fora_enquanto_os_moved_estao_pendentes() -> None:
+def test_o_estado_de_antes_do_modulo_vai_para_ele_antes_do_apply_com_target() -> None:
     # Com `moved` pendente, o Terraform recusa um plan com -target que não cubra todos os
-    # recursos movidos ("Moved resource instances excluded by targeting").
+    # recursos movidos; sem esse apply, o repositório da GPU não existe antes das imagens.
     deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
     guarda = deploy.index("ENDERECOS=$(tf state list)")
-    condicao = deploy.index("grep -qv '^module\\.'", guarda)
-    senao = deploy.index("\nelse\n", condicao)
-    com_target = deploy.index("-target=module.mam.", senao)
+    mv = deploy.index('tf state mv "$recurso" "module.mam.$recurso"', guarda)
+    com_target = deploy.index("scripts/aplicar-sem-destruir.sh -target=module.mam.", mv)
+    saida_gpu = deploy.index("tf output -raw repositorio_gpu", com_target)
 
-    assert guarda < condicao < senao < com_target < deploy.index("\nfi\n", com_target)
+    assert guarda < mv < com_target < saida_gpu
+    assert "grep -vE '^(module|data)\\.|^$'" in deploy[guarda:mv]
+    assert "-target=module.mam.google_artifact_registry_repository.mam_gpu" in deploy
 
 
 # O terraform falso grava o que recebeu e devolve o plano de `$FALSO/plano.json`.
