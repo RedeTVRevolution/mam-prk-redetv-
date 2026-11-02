@@ -377,7 +377,8 @@ class NovoJob(BaseModel):
     @classmethod
     def _programa_com_perfil(cls, programa: str | None) -> str | None:
         if programa is not None and programa not in PERFIS:
-            raise ValueError("programa sem perfil")
+            validos = ", ".join(sorted(PERFIS))
+            raise ValueError(f"programa sem perfil; programas válidos: {validos}")
         return programa
 
 

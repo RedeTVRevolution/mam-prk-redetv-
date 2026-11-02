@@ -253,8 +253,13 @@ def criar_app(
         )
 
     @v1.get("/programas")
-    def programas(_chamador: ChamadorAutenticado) -> list[str]:
+    def programas(chamador: ChamadorAutenticado) -> list[str]:
         """Os programas com perfil, para o envio escolher."""
+        # A chave precisa poder enviar ou ler; só cancelar não tem o que escolher.
+        if isinstance(chamador, Sistema) and not {"criar", "ler"} & set(
+            chamador.escopos
+        ):
+            raise ExcecaoHttp(403, "Chave sem o escopo criar ou ler")
         return sorted(PERFIS)
 
     @v1.get("/correcoes/catalogo")
