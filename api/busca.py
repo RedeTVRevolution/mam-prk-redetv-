@@ -310,13 +310,7 @@ class Busca:
 
         def job(id: str) -> Job | None:
             if id not in jobs:
-                achado = self._repositorio.obter(id)
-                visivel = (
-                    achado is not None
-                    and achado.estado == "concluido"
-                    and (sistema is None or achado.sistema == sistema)
-                )
-                jobs[id] = achado if visivel else None
+                jobs[id] = self._visivel(id, sistema)
             return jobs[id]
 
         def consultar(c: Consulta) -> list[Registro]:
@@ -418,12 +412,18 @@ class Busca:
         self, job_id: str, sistema: str | None = None
     ) -> dict[int, list[float]]:
         """Os vetores do quadro dos planos de um vídeo concluído (e do sistema do chamador)."""
-        achado = self._repositorio.obter(job_id)
-        if achado is None or achado.estado != "concluido":
-            return {}
-        if sistema is not None and achado.sistema != sistema:
+        if self._visivel(job_id, sistema) is None:
             return {}
         return self._indice.vetores_dos_planos(job_id)
+
+    def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
+        """O vídeo, se concluído e, para uma chave de sistema, do mesmo sistema."""
+        achado = self._repositorio.obter(job_id)
+        if achado is None or achado.estado != "concluido":
+            return None
+        if sistema is not None and achado.sistema != sistema:
+            return None
+        return achado
 
     def buscar_parecidos(
         self,
