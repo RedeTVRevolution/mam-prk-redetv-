@@ -53,6 +53,7 @@ from api.jobs import (
     RepositorioIndisponivel,
     ServicoIndisponivel,
     TipoNaoSuportado,
+    _exige_aprovar,
     agora_utc,
     criar_rotas,
     papeis_da_pessoa,
@@ -68,6 +69,7 @@ from api.nuvem import (
     RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDePapeisFirestore,
+    RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
 )
 from api.papeis import (
@@ -91,6 +93,11 @@ from api.rota_da_busca import (
     criar_rotas_da_busca,
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
+from api.sugestoes import (
+    RepositorioDeSugestoes,
+    RepositorioDeSugestoesEmMemoria,
+    criar_rotas_da_contagem,
+)
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -159,6 +166,7 @@ def criar_app(
     janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
     marcas: CatalogoDeMarcas | None = None,
+    sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
@@ -220,6 +228,7 @@ def criar_app(
     indice_da_busca = indice or IndiceEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     v1.include_router(
         criar_rotas(
             repositorio_de_jobs,
@@ -230,6 +239,7 @@ def criar_app(
             aprovacao or RepositorioDeAprovacaoEmMemoria(),
             catalogo_de_pessoas,
             catalogo_de_marcas,
+            repositorio_de_sugestoes,
             lambda job: reindexar(
                 job,
                 repositorio_de_jobs,
@@ -240,6 +250,7 @@ def criar_app(
             ),
         )
     )
+    v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
     v1.include_router(
         criar_rotas_do_catalogo(catalogo_de_pessoas, catalogo_de_marcas, relogio)
     )
@@ -304,6 +315,7 @@ if _projeto:
         ),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
+        sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
         indice=(
             AgentRetrieval(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
             if "BUSCA_COLECAO" in os.environ

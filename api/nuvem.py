@@ -57,6 +57,7 @@ from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.rostos_dos_palpites import FotoAusente
+from api.sugestoes import ContagemDoTipo, Decisao, TipoDeSugestao, contar
 from api.transcricao import Transcricao
 from api.webhook import RegistroDeWebhook
 
@@ -68,6 +69,7 @@ COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
 COLECAO_DAS_SUGESTOES = "sugestoes_de_perfil"
+COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
@@ -510,6 +512,39 @@ class RepositorioDeCorrecoesFirestore:
         docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
         achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
         return em_ordem(achadas)
+
+
+class RepositorioDeSugestoesFirestore:
+    """Uma decisão do editor por vídeo e sugestão (a chave é `<job>:<sugestão>`): decidir
+    de novo a mesma sugestão troca a decisão, não soma outra."""
+
+    def __init__(
+        self,
+        cliente: firestore.Client,
+        colecao: str = COLECAO_DAS_DECISOES_DE_SUGESTAO,
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def registrar(
+        self, job_id: str, sugestao_id: str, tipo: TipoDeSugestao, decisao: Decisao
+    ) -> None:
+        self._colecao.document(f"{job_id}:{sugestao_id}").set(
+            {
+                "job_id": job_id,
+                "sugestao_id": sugestao_id,
+                "tipo": tipo,
+                "decisao": decisao,
+            }
+        )
+
+    def recusadas(self, job_id: str) -> set[str]:
+        consulta = self._colecao.where(filter=FieldFilter("job_id", "==", job_id))
+        docs = [d.to_dict() or {} for d in consulta.stream()]
+        return {d["sugestao_id"] for d in docs if d.get("decisao") == "recusada"}
+
+    def contagem(self) -> dict[str, ContagemDoTipo]:
+        docs = [d.to_dict() or {} for d in self._colecao.stream()]
+        return contar((d["tipo"], d["decisao"]) for d in docs)
 
 
 class RepositorioDeAprovacaoFirestore:

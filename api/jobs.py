@@ -20,6 +20,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
     field_serializer,
     field_validator,
     model_validator,
@@ -36,6 +37,7 @@ from api.catalogo import Catalogo
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
+    LIMITE_DO_NOME,
     Autoria,
     CatalogoIdInvalido,
     Correcao,
@@ -77,6 +79,15 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import PERFIS
+from api.sugestoes import (
+    MOTIVO_CONFIRMADA,
+    MOTIVO_CORRIGIDA,
+    Proposta,
+    RepositorioDeSugestoes,
+    Sugestao,
+    com_o_valor_do_editor,
+    sugestoes_abertas,
+)
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
@@ -706,6 +717,33 @@ def _enxerga(chamador: Chamador, job: Job | None) -> Job:
     return job
 
 
+class AceiteDaSugestao(BaseModel):
+    """Corpo opcional do aceite: o "outro nome" (ou o título da pauta) do editor."""
+
+    valor: (
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_NOME),
+        ]
+        | None
+    ) = None
+
+
+def _correcao_da_proposta(proposta: Proposta, motivo: str, versao: str) -> NovaCorrecao:
+    try:
+        return NovaCorrecao(
+            tipo=proposta.tipo,  # type: ignore[arg-type]
+            item_id=proposta.item_id,
+            valor=proposta.valor,
+            catalogo_id=proposta.catalogo_id,
+            ocorrencia=proposta.ocorrencia,
+            motivo=motivo,
+            versao=versao,
+        )
+    except ValidationError as erro:
+        raise HTTPException(422, "Valor inválido para a correção proposta") from erro
+
+
 def criar_rotas(
     repositorio: RepositorioDeJobs,
     armazenamento: Armazenamento,
@@ -715,6 +753,7 @@ def criar_rotas(
     aprovacao: RepositorioDeAprovacao,
     catalogo: Catalogo,
     marcas: CatalogoDeMarcas,
+    sugestoes: RepositorioDeSugestoes,
     reindexar: Callable[[Job], object],
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
@@ -940,15 +979,14 @@ def criar_rotas(
     def _autoria(autor: Usuario) -> Autoria:
         return Autoria(autor.uid, autor.email, relogio())
 
-    @rotas.post("/{job_id}/correcoes", status_code=201)
-    def corrigir_decupagem(
-        job_id: str,
+    def _gravar_correcao(
+        job: Job,
+        modelo: dict[str, Any],
+        versao_atual: str,
         request: Request,
         novo: NovaCorrecao,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
-    ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
-        modelo, versao_atual = _ler_modelo(job.id)
+        autor: Usuario,
+    ) -> Correcao:
         try:
             correcao = corrigir(
                 modelo,
@@ -972,10 +1010,83 @@ def criar_rotas(
         except CatalogoIdInvalido:
             raise HTTPException(422, "catalogo_id não é o desse nome") from None
         correcoes.acrescentar(correcao)
+        return correcao
+
+    @rotas.post("/{job_id}/correcoes", status_code=201)
+    def corrigir_decupagem(
+        job_id: str,
+        request: Request,
+        novo: NovaCorrecao,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        job = obter_concluido(job_id, autor)
+        modelo, versao_atual = _ler_modelo(job.id)
+        correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
         # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
         if not correcao.exige_aprovacao:
             reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
+
+    def _sugestoes_abertas(
+        job: Job,
+    ) -> tuple[list[Sugestao], dict[str, Any], str]:
+        modelo, versao_atual = _ler_modelo(job.id)
+        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
+        abertas = sugestoes_abertas(entregue, catalogo, sugestoes.recusadas(job.id))
+        return abertas, modelo, versao_atual
+
+    def _a_sugestao(abertas: list[Sugestao], sugestao_id: str) -> Sugestao:
+        achada = next((s for s in abertas if s.id == sugestao_id), None)
+        if achada is None:
+            raise HTTPException(404, "Sugestão não encontrada")
+        return achada
+
+    @rotas.get("/{job_id}/sugestoes")
+    def sugestoes_do_video(
+        job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
+    ) -> list[Sugestao]:
+        return _sugestoes_abertas(obter_concluido(job_id, autor))[0]
+
+    @rotas.post("/{job_id}/sugestoes/{sugestao_id}/aceitar", status_code=201)
+    def aceitar_sugestao(
+        job_id: str,
+        sugestao_id: str,
+        request: Request,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+        corpo: AceiteDaSugestao | None = None,
+    ) -> dict[str, Any]:
+        job = obter_concluido(job_id, autor)
+        abertas, modelo, versao_atual = _sugestoes_abertas(job)
+        sugestao = _a_sugestao(abertas, sugestao_id)
+        valor = corpo.valor if corpo else None
+        if valor is not None:
+            if not valor:
+                raise HTTPException(422, "O valor não pode ser vazio")
+            sugestao = com_o_valor_do_editor(sugestao, valor) or sugestao
+        elif sugestao.tipo == "pauta_do_trecho":
+            raise HTTPException(422, "A pauta pede um título")
+        motivo = MOTIVO_CORRIGIDA if valor is not None else MOTIVO_CONFIRMADA
+        gravadas: list[Correcao] = []
+        for proposta in [sugestao.correcao, *sugestao.depois]:
+            novo = _correcao_da_proposta(proposta, motivo, versao_atual)
+            gravadas.append(
+                _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
+            )
+        sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
+        if any(not c.exige_aprovacao for c in gravadas):
+            reindexar(job)
+        return {"id": gravadas[0].id, "ids": [c.id for c in gravadas]}
+
+    @rotas.post("/{job_id}/sugestoes/{sugestao_id}/recusar", status_code=204)
+    def recusar_sugestao(
+        job_id: str,
+        sugestao_id: str,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> Response:
+        job = obter_concluido(job_id, autor)
+        sugestao = _a_sugestao(_sugestoes_abertas(job)[0], sugestao_id)
+        sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "recusada")
+        return Response(status_code=204)
 
     @rotas.get("/{job_id}/correcoes")
     def historico_de_correcoes(
