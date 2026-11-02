@@ -11,8 +11,9 @@ Por requisito (famosos, menções, pautas, B-roll, comerciais) o relatório traz
 só um lado tem, os que os dois têm com diferença (nome, tipo, marca ou tempo fora da
 tolerância do `api/comparador.py`) e as contagens; o pareamento é o do comparador. O lado A
 é a decupagem do Job e o B, a passada. Timecode é o erro de início e de fim dos itens
-pareados (média, p95 e quantos passam da tolerância). O custo é por hora de vídeo e o tempo,
-por etapa e total, de cada lado.
+pareados, inclusive os de nome trocado (média e p95 sobre os erros de início e de fim
+juntos; fora da tolerância conta o par pelo maior dos dois). O custo é por hora de vídeo e
+o tempo, por etapa e total, de cada lado.
 
 O Job não guarda os tokens que gastou: os do lado A vêm de `TOKENS_DO_JOB`
 (`job=entrada:saida`, separados por vírgula) e, sem eles, o custo do Job sai "n/d". Vem do
@@ -177,11 +178,22 @@ def _entrada(job_id: str, item: Item, detalhes: Mapping[Item, str]) -> Entrada:
     )
 
 
-def _sem_os_usados(itens: list[Item], usados: list[Item]) -> list[Item]:
-    sobra = list(itens)
-    for u in usados:
-        sobra.remove(u)
-    return sobra
+def _um_para_um(
+    pareados: list[Pareado], b: list[Item]
+) -> tuple[list[Pareado], list[Item], list[Item]]:
+    """O `parear` deixa dois itens de A com o mesmo de B (duas pautas dentro de uma só):
+    o primeiro fica com ele e os outros voltam para os sem par. Devolve os pares, os itens de
+    A que perderam o par e o que sobrou de B."""
+    sobra_b = list(b)
+    pares: list[Pareado] = []
+    repetidos: list[Item] = []
+    for p in pareados:
+        if p.modelo in sobra_b:
+            sobra_b.remove(p.modelo)
+            pares.append(p)
+        else:
+            repetidos.append(p.gabarito)
+    return pares, repetidos, sobra_b
 
 
 def _comparar_requisito(
@@ -196,33 +208,35 @@ def _comparar_requisito(
     motivo_do_nome: str = "nome",
 ) -> _Comparacao:
     """Pareia com o `parear` do comparador (mesma identidade, ou só o tempo, nas pautas e
-    nos planos) e, entre o que sobrou dos dois lados, procura o mesmo trecho com outro nome."""
+    nos planos), um para um, e, entre o que sobrou dos dois lados, procura o mesmo trecho
+    com outro nome. Os pares de nome trocado também entram no timecode."""
     detalhes_a, detalhes_b = detalhes_a or {}, detalhes_b or {}
     pareados, sem_par_a = parear(a, b)
-    sem_par_b = _sem_os_usados(b, [p.modelo for p in pareados])
-    pares: list[tuple[Item, Item]] = [(p.gabarito, p.modelo) for p in pareados]
+    pareados, repetidos, sem_par_b = _um_para_um(pareados, b)
+    sem_par_a += repetidos
     if a and a[0].tipo in TIPOS_COM_IDENTIDADE:
         # Sem identidade para o `parear` olhar, só o trecho em comum conta.
+        tipo = a[0].tipo
         so_o_tempo = [replace(i, tipo="pauta") for i in sem_par_a]
         outros = [replace(i, tipo="pauta") for i in sem_par_b]
         renomeados, _ = parear(so_o_tempo, outros)
+        renomeados, _, _ = _um_para_um(renomeados, outros)
         for r in renomeados:
-            ia = replace(r.gabarito, tipo=a[0].tipo)
-            ib = replace(r.modelo, tipo=a[0].tipo)
-            pares.append((ia, ib))
+            ia = replace(r.gabarito, tipo=tipo)
+            ib = replace(r.modelo, tipo=tipo)
+            pareados.append(Pareado(ia, ib))
             sem_par_a.remove(ia)
             sem_par_b.remove(ib)
     iguais = 0
     diferentes: list[Diferenca] = []
-    for ia, ib in pares:
+    for p in pareados:
+        ia, ib = p.gabarito, p.modelo
         motivos = []
         if normalizar(ia.identidade) != normalizar(ib.identidade):
             motivos.append(motivo_do_nome)
         if detalhes_a.get(ia) != detalhes_b.get(ib):
             motivos.append(motivo_do_detalhe)
-        if max(abs(ia.inicio_ms - ib.inicio_ms), abs(ia.fim_ms - ib.fim_ms)) > (
-            TOLERANCIA_MS
-        ):
+        if not p.dentro:
             motivos.append("tempo")
         if motivos:
             diferentes.append(
@@ -686,7 +700,10 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     jobs = [j.strip() for j in argumentos[0].split(",") if j.strip()]
     passada_id, modelo = argumentos[1] or None, argumentos[2] or None
     pasta = Path(argumentos[3] or "comparacao-passadas")
-    if not jobs or (passada_id and len(jobs) > 1):
+    if not jobs:
+        print("erro: falta JOB ou JOBS", file=sys.stderr)
+        return 2
+    if passada_id and len(jobs) > 1:
         print("erro: PASSADA vale para um Job só", file=sys.stderr)
         return 2
     try:

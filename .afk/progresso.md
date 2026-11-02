@@ -302,3 +302,16 @@ Não corrigido:
 - Pronto: `api/comparar_passadas.py` (`comparar`, `comparar_decupagens`, `somar`, relatório em Markdown e JSON, CLI `python -m api.comparar_passadas JOBS [PASSADA] [MODELO] [PASTA]`), `make comparar-passadas JOB=|JOBS= [PASSADA=] [MODELO=]`, 19 testes em `test_comparar_passadas.py`, README e GLOSSARY. Requisitos: famosos, mencoes, pautas, broll_limpos, broll_descricoes, comerciais, mais timecode (média, p95, fora da tolerância, sobre os pares de todos menos `broll_limpos`, que repetiria planos).
 - Decisões: usa `parear` do `comparador` (importado); o nome trocado é achado repareando o que sobrou dos dois lados só pelo tempo (tipo trocado para "pauta" e devolvido). Pauta/plano pareiam só pelo tempo, e o título/ambiente diferente vira motivo "nome"/"descricao". "Não identificado" fica fora dos famosos. Comercial: motivo "tipo"; plano: "plano_limpo".
 - Armadilha/pendência: o Job NÃO guarda tokens, então o custo do lado do Job vem de `TOKENS_DO_JOB=job=entrada:saida` (senão "n/d", e a soma também); registrar os tokens no Job ficaria para outro ticket. Data da tabela de preços: `DATA_DA_TABELA_DE_PRECOS` (obrigatória). Tempo do Job: etapas do Workflows; o da passada: janelas/consolidação/identificação (não são as mesmas etapas, então a comparação por etapa é lado a lado, não etapa a etapa). Não rodado na nuvem (sem credencial).
+
+## #248 revisão (iteração 49)
+Corrigido:
+- `parear` não reserva o item de B: duas pautas do Job dentro de uma da passada (ou duas aparições sobrepostas) derrubavam o comando com `list.remove`. Agora `_um_para_um` filtra o resultado do `parear` (o primeiro fica com o item, os outros voltam aos sem par), também no repareamento pelo tempo. Teste novo.
+- Pares de nome trocado entram no timecode (eram "pareados" para a diferença, mas não para a média/p95).
+- Teste da soma com Jobs diferentes (p95 e custo por hora recalculados, não média de médias). Mensagem "falta JOB ou JOBS" sem Job. `comparacao-passadas/` no `.gitignore`. README dizia o modelo padrão do Job copiado da constante.
+Não corrigido:
+- O custo da passada usa o preço gravado nela quando rodou, não o `PRECOS_DOS_MODELOS` de hoje; o relatório mostra uma só data de tabela. O preço usado sai ao lado de cada custo; decidir se recalcula fica para o #256.
+- Custo do Job depende de `TOKENS_DO_JOB` à mão (o Job não guarda tokens): pede ticket para gravar tokens no Job (decisão humana).
+- Etapas do Job e da passada não se correspondem; o relatório põe lado a lado.
+- "Não identificado" fora dos famosos: decisão do implementador, mantida.
+- Itens repetidos (mesmo nome e tempo) viram uma chave só nos dicionários de detalhes de comerciais/planos: caso raro.
+- Smells de julgamento (requisitos como strings espalhadas em quatro lugares, `**extra` com `Any`, conta de preço repetida em três módulos, `Custo` homônimo do de `api.passadas`, `erros_ms` inteiro no JSON): refatoração sem bug, fica para quando o #254 reaproveitar o módulo.

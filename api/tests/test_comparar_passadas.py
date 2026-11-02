@@ -241,9 +241,9 @@ def test_broll_limpos_e_descricoes() -> None:
 
 def test_timecode_dos_itens_pareados() -> None:
     t = _comparar().timecode
-    # Pareados de mesmo nome: famosos 2, menções 2, pautas 3, comerciais 3 (a marca
-    # trocada não pareia), planos 3 (os trechos que se cruzam).
-    assert t.pares == 2 + 2 + 3 + 3 + 3
+    # Pareados, com os de nome trocado: famosos 3, menções 3, pautas 3, comerciais 4,
+    # planos 3 (os trechos que se cruzam).
+    assert t.pares == 3 + 3 + 3 + 4 + 3
     assert t.fora_da_tolerancia == 5
     assert t.p95_ms == FORA
     assert t.media_ms is not None and t.media_ms > 0
@@ -257,6 +257,27 @@ def test_timecode_conferido_a_mao() -> None:
     assert t.fora_da_tolerancia == 1  # Y: 5 s no fim
     assert t.media_ms == (1000 + 1000 + 0 + 5000) / 4
     assert t.p95_ms == 5000
+
+
+def test_duas_do_job_dentro_de_uma_da_passada_nao_derrubam() -> None:
+    # O `parear` deixa as duas pautas do Job com a mesma da passada: só a primeira fica.
+    a = _decupagem(
+        pautas=[_pauta("X", 0, 10_000), _pauta("Y", 10_000, 20_000)],
+        pessoas=[_pessoa("Ana", 0, 10_000), _pessoa("Ana", 5_000, 15_000)],
+    )
+    b = _decupagem(
+        pautas=[_pauta("XY", 0, 20_000)], pessoas=[_pessoa("Ana", 0, 15_000)]
+    )
+    r = comparar_decupagens("j", 3_600_000, a, b, LADO, LADO)
+    pautas = r.requisitos["pautas"]
+    assert [(d.a.identidade, d.b.identidade) for d in pautas.diferentes] == [
+        ("X", "XY")
+    ]
+    assert _nomes(pautas.so_em_a) == {"Y"} and not pautas.so_em_b
+    famosos = r.requisitos["famosos"]
+    assert len(famosos.diferentes) + famosos.iguais == 1
+    assert len(famosos.so_em_a) == 1 and not famosos.so_em_b
+    assert r.timecode.pares == 2
 
 
 def test_sem_pares_o_timecode_fica_vazio() -> None:
@@ -446,6 +467,23 @@ def test_varios_jobs_somam_por_requisito() -> None:
     assert total.b.tempo.total_s == 80.0
     assert total.b.tempo.etapas == {"janelas": 60.0, "consolidacao": 20.0}
     assert custo_por_hora(total.b.custo, total.duracao_ms) == 2.8
+
+
+def test_soma_de_jobs_diferentes_junta_os_erros_e_divide_pela_duracao_total() -> None:
+    # Média de p95 ou de custos por hora daria 2500 ms e US$ 2,50; a soma certa, não.
+    exato = _decupagem(pautas=[_pauta("X", 0, 10_000)])
+    atrasado = _decupagem(pautas=[_pauta("X", 0, 15_000)])
+
+    def lado(usd: float) -> LadoDoResultado:
+        return LadoDoResultado(Custo(1, 1, usd, []), Tempo({}, 1.0))
+
+    r1 = comparar_decupagens("j1", 3_600_000, exato, exato, lado(1.0), lado(1.0))
+    r2 = comparar_decupagens("j2", 1_800_000, exato, atrasado, lado(2.0), lado(2.0))
+    total = somar([r1, r2])
+    assert total.timecode.p95_ms == 5000
+    assert total.timecode.media_ms == 1250
+    assert (total.timecode.pares, total.timecode.fora_da_tolerancia) == (2, 1)
+    assert custo_por_hora(total.b.custo, total.duracao_ms) == 2.0
 
 
 def test_soma_sem_tokens_de_um_job_nao_inventa_custo() -> None:

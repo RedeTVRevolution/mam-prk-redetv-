@@ -128,8 +128,8 @@ make comparar-passadas JOBS=<id>,<id>,...                            # soma por 
 ```
 
 - Grava `comparacao-passadas/<job>-<passada>.md` e `.json` (em `PASTA=`; vários Jobs viram `piloto-<data>`). O lado A é a decupagem do Job e o B, a passada.
-- Por requisito (famosos, menções, pautas, B-roll em planos limpos e em descrições, comerciais): contagens, itens só de um lado e itens dos dois com diferença de nome, tipo ou marca, ou de tempo acima da tolerância de 2 s. O pareamento é o do `api/comparador.py`. Timecode: erro médio, p95 e quantos pares passam da tolerância.
-- Custo por hora de vídeo e tempo (por etapa e total) dos dois lados. O preço vem de `PRECOS_DOS_MODELOS` e a data da tabela consultada, de `DATA_DA_TABELA_DE_PRECOS`. O Job não guarda os tokens que gastou: passe-os em `TOKENS_DO_JOB=<job>=<entrada>:<saida>,...` (e o modelo em `MODELO_DO_JOB`, `gemini-3.5-flash-lite` por padrão); sem eles, o custo do lado do Job sai "n/d", e a soma de vários Jobs também.
+- Por requisito (famosos, menções, pautas, B-roll em planos limpos e em descrições, comerciais): contagens, itens só de um lado e itens dos dois com diferença de nome, tipo ou marca, ou de tempo acima da tolerância de 2 s. O pareamento é o do `api/comparador.py`. Timecode: erro médio, p95 e quantos pares (inclusive os de nome trocado) passam da tolerância.
+- Custo por hora de vídeo e tempo (por etapa e total) dos dois lados. O preço vem de `PRECOS_DOS_MODELOS` e a data da tabela consultada, de `DATA_DA_TABELA_DE_PRECOS`. O Job não guarda os tokens que gastou: passe-os em `TOKENS_DO_JOB=<job>=<entrada>:<saida>,...` (e o modelo em `MODELO_DO_JOB`, o `MODELO` de `api/gemini.py` por padrão); sem eles, o custo do lado do Job sai "n/d", e a soma de vários Jobs também.
 
 ## Cassete do Gemini
 
