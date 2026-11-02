@@ -49,6 +49,7 @@ export interface Editor {
 
 /** Os tipos do catálogo que não têm caminho no painel neste ticket. */
 export const TIPOS_FORA_DESTE_TICKET = [
+  'objeto.atributos',
   'descartar',
   'aprovar',
   'recusar',

@@ -30,6 +30,7 @@ from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import (
     Comercial,
+    CorBase,
     EvidenciaDoComercial,
     FonteDoNome,
     TextoNaTela,
@@ -65,9 +66,12 @@ TipoNovo = Literal[
     "pauta.acrescentar",
     "pauta.juntar",
     "pauta.dividir",
+    "objeto.atributos",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
-TipoDoItem = Literal["pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela"]
+TipoDoItem = Literal[
+    "pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela", "objeto"
+]
 CORRIGIVEIS = get_args(TipoNovo)
 Lista = Literal["na_imagem", "citada_na_fala", "citada_no_texto"]
 MENCOES = ("citada_na_fala", "citada_no_texto")
@@ -390,6 +394,36 @@ class NovoTextoNaTela(BaseModel):
     def _tipo(cls, valor: str) -> str:
         if valor not in TIPOS_DE_TEXTO_NA_TELA:
             raise ValueError("tipo de texto na tela desconhecido")
+        return valor
+
+
+_Rotulo = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME),
+]
+
+
+class _AtributosDoObjeto(BaseModel):
+    """O valor de um `objeto.atributos`: tipo, cores base, tom, detalhe e marca."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: _Rotulo
+    cor_base: list[CorBase] = Field(max_length=2)
+    cor: _Rotulo | None = None
+    detalhe: _Rotulo | None = None
+    marca: _Rotulo | None = None
+
+    @field_validator("tipo", "cor", "detalhe", "marca")
+    @classmethod
+    def _sem_controle_nos_rotulos(cls, valor: str | None) -> str | None:
+        return None if valor is None else _sem_controle(valor)
+
+    @field_validator("cor_base")
+    @classmethod
+    def _sem_repetir(cls, valor: list[str]) -> list[str]:
+        if len(set(valor)) != len(valor):
+            raise ValueError("cor base repetida")
         return valor
 
 
@@ -798,12 +832,23 @@ def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
         return _falas(modelo)
     if tipo_do_item == "texto_na_tela":
         return _textos(modelo)
+    if tipo_do_item == "objeto":
+        return _objetos(modelo)
     return _pautas(modelo)
 
 
 def _intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
     """Pauta, comercial, plano e fala: o item tem o próprio intervalo."""
     return int(pauta["inicio_ms"]), int(pauta["fim_ms"])
+
+
+def _intervalo_do_objeto(objeto: dict[str, Any]) -> tuple[int, int]:
+    """Do menor início ao maior fim das ocorrências: o objeto não tem intervalo próprio."""
+    ocorrencias = objeto["ocorrencias"]
+    return (
+        min(o["inicio_ms"] for o in ocorrencias),
+        max(o["fim_ms"] for o in ocorrencias),
+    )
 
 
 def identidade_do_comercial(comercial: dict[str, Any]) -> str:
@@ -814,6 +859,8 @@ def identidade_do_comercial(comercial: dict[str, Any]) -> str:
 def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, int]:
     if tipo_do_item == "pessoa":
         return _intervalo_da_pessoa(item)
+    if tipo_do_item == "objeto":
+        return _intervalo_do_objeto(item)
     return _intervalo_da_pauta(item)
 
 
@@ -826,6 +873,8 @@ def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
         return f"{item['locutor']}: {str(item['texto'])[:60]}"
     if tipo_do_item == "texto_na_tela":
         return f"{item['tipo']}: {str(item['texto'])[:60]}"
+    if tipo_do_item == "objeto":
+        return str(item["tipo"])
     return str(item["nome" if tipo_do_item == "pessoa" else "titulo"])
 
 
@@ -1054,7 +1103,7 @@ def _ancora_do_item(
 ) -> Ancora:
     if tipo_do_item == "pessoa":
         return _ancora_da_pessoa(item, versao)
-    inicio, fim = _intervalo_da_pauta(item)
+    inicio, fim = _intervalo_do_item(item, tipo_do_item)
     # Plano e fala se casam pelo intervalo: a identidade é só o tipo.
     if tipo_do_item == "comercial":
         identidade = identidade_do_comercial(item)
@@ -1062,6 +1111,8 @@ def _ancora_do_item(
         identidade = tipo_do_item
     elif tipo_do_item == "texto_na_tela":
         identidade = normalizar(str(item["texto"]))
+    elif tipo_do_item == "objeto":
+        identidade = normalizar(str(item["tipo"]))
     else:
         identidade = normalizar(str(item["titulo"]))
     return Ancora(
@@ -1396,6 +1447,14 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             if normalizar(str(t["texto"])) in identidades
             and _sobrepoe_de_verdade(ancora, _intervalo_da_pauta(t))
         ]
+    if c.ancora.tipo_do_item == "objeto":
+        identidades = TIPOS[c.tipo].identidades(c)
+        return [
+            o
+            for o in _objetos(modelo)
+            if normalizar(str(o["tipo"])) in identidades
+            and _sobrepoe_de_verdade(ancora, _intervalo_do_objeto(o))
+        ]
     if c.ancora.tipo_do_item == "comercial":
         identidades = TIPOS[c.tipo].identidades(c)
         return [
@@ -1507,6 +1566,7 @@ _CHAVE_DO_ITEM = {
     "plano": "planos",
     "fala": "transcricao",
     "texto_na_tela": "textos_na_tela",
+    "objeto": "objetos",
 }
 
 
@@ -2123,6 +2183,10 @@ def _canonizar_texto_na_tela(n: NovaCorrecao) -> str:
     return _json_canonico(NovoTextoNaTela.model_validate_json(n.valor).model_dump())
 
 
+def _canonizar_atributos_do_objeto(n: NovaCorrecao) -> str:
+    return _json_canonico(_AtributosDoObjeto.model_validate_json(n.valor).model_dump())
+
+
 def _canonizar_texto_acrescentado(n: NovaCorrecao) -> str:
     return _json_canonico(
         NovoTextoAcrescentado.model_validate_json(n.valor).model_dump()
@@ -2205,6 +2269,18 @@ def _valor_do_tom(item: dict[str, Any]) -> str:
 
 def _valor_das_fontes_do_item(item: dict[str, Any]) -> str:
     return _json_das_fontes(item.get("fontes_do_nome", []))
+
+
+def _valor_do_objeto(item: dict[str, Any]) -> str:
+    return _json_canonico(
+        {
+            "tipo": item["tipo"],
+            "cor_base": item["cor_base"],
+            "cor": item.get("cor"),
+            "detalhe": item.get("detalhe"),
+            "marca": item.get("marca"),
+        }
+    )
 
 
 def _valor_do_texto_na_tela(item: dict[str, Any]) -> str:
@@ -2399,6 +2475,10 @@ def _traz_a_aparicao(c: Correcao, item: dict[str, Any]) -> bool:
 
 def _identidades_do_texto(c: Correcao) -> set[str]:
     return {c.ancora.identidade, normalizar(json.loads(c.depois)["texto"])}
+
+
+def _identidades_do_objeto(c: Correcao) -> set[str]:
+    return {c.ancora.identidade, normalizar(json.loads(c.depois)["tipo"])}
 
 
 def _identidades_com_a_marca(c: Correcao) -> set[str]:
@@ -2958,6 +3038,17 @@ TIPOS: dict[str, Tipo] = {
         json_longo=True,
         valor_do_item=_titulo_e_tempos,
         reestrutura=_DIVIDIR,
+    ),
+    "objeto.atributos": Tipo(
+        canonizar=_canonizar_atributos_do_objeto,
+        rotulo="Atributos do objeto",
+        legivel=textos.atributos_do_objeto,
+        tipo_do_item="objeto",
+        json_longo=True,
+        valor_do_item=_valor_do_objeto,
+        aplicar_no_item=_json_no_item,
+        ja_traz=_ja_traz_o_valor,
+        identidades=_identidades_do_objeto,
     ),
 }
 

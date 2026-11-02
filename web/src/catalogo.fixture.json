@@ -89,6 +89,10 @@
       "rotulo": "Dividir pauta"
     },
     {
+      "valor": "objeto.atributos",
+      "rotulo": "Atributos do objeto"
+    },
+    {
       "valor": "desfazer",
       "rotulo": "Desfazer"
     },

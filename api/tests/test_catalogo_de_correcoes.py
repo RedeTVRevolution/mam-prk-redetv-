@@ -148,6 +148,32 @@ TEXTO = {"tipo": "gc", "texto": "Olá", "inicio_ms": 1000, "fim_ms": 2000}
             "citada no texto 00:00–00:05",
         ),
         ("item.tempos", "32000-60000", "00:32–01:00"),
+        (
+            "objeto.atributos",
+            json.dumps(
+                {
+                    "tipo": "vestido",
+                    "cor_base": ["vermelho", "branco"],
+                    "cor": "vinho",
+                    "detalhe": "renda",
+                    "marca": "Zara",
+                }
+            ),
+            "vestido · vermelho, branco · vinho · renda · Zara",
+        ),
+        (
+            "objeto.atributos",
+            json.dumps(
+                {
+                    "tipo": "carro",
+                    "cor_base": [],
+                    "cor": None,
+                    "detalhe": None,
+                    "marca": None,
+                }
+            ),
+            "carro",
+        ),
         ("pauta.titulo", "Um título 1-2", "Um título 1-2"),
         ("pessoa.renomear", "Ana", "Ana"),
         ("comercial.marca", "Acme", "Acme"),
@@ -167,6 +193,7 @@ def test_valor_legivel_por_tipo(tipo: str, valor: str, esperado: str) -> None:
         "texto_na_tela.texto",
         "texto_na_tela.acrescentar",
         "pauta.acrescentar",
+        "objeto.atributos",
         "aparicao.papel_visual",
         "pessoa.fontes_do_nome",
         "plano.descricao",
