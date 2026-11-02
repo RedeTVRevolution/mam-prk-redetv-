@@ -39,14 +39,23 @@ tf init -input=false -backend-config="bucket=$ESTADO"
 # então a imagem ainda não importa.
 # Os dois applies passam por scripts/aplicar-sem-destruir.sh: plano com destruição ou
 # recriação para aqui, salvo PERMITIR_DESTRUICAO=sim. Os recursos estão no módulo `mam` (#292).
-scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repository.mam \
-  -target=module.mam.google_identity_platform_config.mam -target=module.mam.google_project_iam_member.mam \
-  -target=module.mam.google_storage_bucket_iam_member.build_le_fontes \
-  -target=module.mam.google_artifact_registry_repository_iam_member.build_envia \
-  -target=module.mam.google_artifact_registry_repository.mam_gpu \
-  -target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu \
-  -var imagem=pendente -var imagem_validacao=pendente -var imagem_transcricao=pendente -var imagem_ocr=pendente \
-  -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
+# Enquanto o estado tiver endereços de fora do módulo, os blocos `moved` estão pendentes e o
+# Terraform recusa um plan com -target que não cubra todos eles. Esses recursos já existem
+# (o estado é de um dev que já foi ao ar), então este apply fica de fora e o apply completo
+# abaixo faz os `moved`. A lista é lida antes, para o pipefail não pegar o fim do grep.
+ENDERECOS=$(tf state list)
+if [[ -n $ENDERECOS ]] && grep -qv '^module\.' <<<"$ENDERECOS"; then
+  echo "O estado ainda tem endereços de antes do módulo: o apply completo faz os moved."
+else
+  scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repository.mam \
+    -target=module.mam.google_identity_platform_config.mam -target=module.mam.google_project_iam_member.mam \
+    -target=module.mam.google_storage_bucket_iam_member.build_le_fontes \
+    -target=module.mam.google_artifact_registry_repository_iam_member.build_envia \
+    -target=module.mam.google_artifact_registry_repository.mam_gpu \
+    -target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu \
+    -var imagem=pendente -var imagem_validacao=pendente -var imagem_transcricao=pendente -var imagem_ocr=pendente \
+    -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
+fi
 # O nome do repositório vem do Terraform, o único lugar que monta os nomes.
 REPOSITORIO=$(tf output -raw repositorio)
 COMMIT=$(git rev-parse --short HEAD)

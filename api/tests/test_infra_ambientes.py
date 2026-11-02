@@ -79,8 +79,24 @@ def test_as_variaveis_sem_padrao_do_modulo_sao_passadas_pela_raiz() -> None:
 def test_o_deploy_aplica_so_pelo_script_que_recusa_destruicao() -> None:
     deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
 
+    chamadas = re.findall(
+        r"^\s*scripts/aplicar-sem-destruir\.sh ", deploy, re.MULTILINE
+    )
+
     assert "tf apply" not in deploy
-    assert deploy.count("scripts/aplicar-sem-destruir.sh") >= 3  # 2 usos e o comentário
+    assert len(chamadas) == 2
+
+
+def test_o_apply_com_target_fica_de_fora_enquanto_os_moved_estao_pendentes() -> None:
+    # Com `moved` pendente, o Terraform recusa um plan com -target que não cubra todos os
+    # recursos movidos ("Moved resource instances excluded by targeting").
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    guarda = deploy.index("ENDERECOS=$(tf state list)")
+    condicao = deploy.index("grep -qv '^module\\.'", guarda)
+    senao = deploy.index("\nelse\n", condicao)
+    com_target = deploy.index("-target=module.mam.", senao)
+
+    assert guarda < condicao < senao < com_target < deploy.index("\nfi\n", com_target)
 
 
 # O terraform falso grava o que recebeu e devolve o plano de `$FALSO/plano.json`.

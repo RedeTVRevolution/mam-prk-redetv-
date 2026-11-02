@@ -1,6 +1,6 @@
 # Infraestrutura de um ambiente do MAM (E0, #8; módulo desde #292). O ambiente chama
-# este módulo (infra/main.tf para o dev); o backend e o provider ficam lá. Aplicada por
-# `make deploy-dev`, à mão ou no CD (#71), que impersona a conta mam-terraform. No IAM do projeto, só
+# este módulo (infra/main.tf para o dev); o backend e o provider ficam lá. O dev é aplicado
+# por `make deploy-dev`, à mão ou no CD (#71), que impersona a conta mam-terraform. No IAM do projeto, só
 # google_project_iam_member, que é aditivo (ADR 0002).
 
 terraform {
