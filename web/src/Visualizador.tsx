@@ -7,6 +7,7 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconRefresh,
+  IconX,
   IconVolume,
   IconVolumeOff,
 } from '@tabler/icons-react'
@@ -29,7 +30,8 @@ import {
 } from './catalogacao.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
 import { dataDeExibicao, type Job } from './jobs.ts'
-import { type AlcasDaCorrecao, FaixasDoVideo } from './FaixasDoVideo.tsx'
+import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
+import { FormularioDoTrecho } from './FormularioDoTrecho.tsx'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import { type EdicaoNoPainel, Painel } from './Painel.tsx'
 import { nomeDaEtapa } from './etapas.ts'
@@ -114,6 +116,10 @@ export default function Visualizador({
   // Os tempos que as alças da linha do tempo ajustaram na correção aberta.
   const [temposDaAlca, setTemposDaAlca] = useState<Intervalo | null>(null)
   const salvarDasAlcas = useRef<(() => void) | null>(null)
+  // O trecho marcado com I e O; `descrevendo` abre o campo único com o tipo em abas.
+  const [trecho, setTrecho] = useState<{ inicio_ms: number; fim_ms: number | null } | null>(null)
+  const [descrevendo, setDescrevendo] = useState(false)
+  const salvarDoTrecho = useRef<(() => void) | null>(null)
   const [historico, setHistorico] = useState<ItemDoHistorico[]>([])
   const [fila, setFila] = useState<ItemDaFila[]>([])
   const [falhaNoHistorico, setFalhaNoHistorico] = useState(false)
@@ -266,6 +272,52 @@ export default function Visualizador({
     return null
   }
 
+  function descartarTrecho() {
+    setTrecho(null)
+    setDescrevendo(false)
+  }
+
+  /** `I`: a entrada do trecho no tempo atual; uma saída que ficaria antes dela sai. */
+  function marcarEntrada() {
+    if (!catalogando) return
+    setTrecho((t) => ({ inicio_ms: atualMs, fim_ms: t?.fim_ms != null && t.fim_ms >= atualMs ? t.fim_ms : null }))
+  }
+
+  /** `O`: a saída do trecho no tempo atual, depois da entrada. */
+  function marcarSaida() {
+    if (!catalogando) return
+    if (!trecho) {
+      mostrarAviso('Marque a entrada antes (I).')
+      return
+    }
+    if (atualMs < trecho.inicio_ms) {
+      mostrarAviso('A saída fica depois da entrada: avance o vídeo e marque de novo (O).')
+      return
+    }
+    setTrecho({ inicio_ms: trecho.inicio_ms, fim_ms: atualMs })
+  }
+
+  /** `A`: abre o campo do trecho marcado (entrada e saída). */
+  function descreverTrecho() {
+    if (!catalogando) return
+    if (trecho?.fim_ms == null) {
+      mostrarAviso('Marque a entrada e a saída do trecho antes (I e O).')
+      return
+    }
+    fecharEdicao()
+    setDescrevendo(true)
+  }
+
+  /** Grava a correção do trecho; com ela gravada, o trecho some. */
+  async function gravarTrecho(pedidos: Pedido[], motivo: string): Promise<string | null> {
+    const falha = await gravar(pedidos, motivo)
+    if (!falha) descartarTrecho()
+    return falha
+  }
+
+  const moverBordaDoTrecho = (borda: Borda, ms: number) =>
+    setTrecho((t) => (t ? { ...t, [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms } : t))
+
   /** F2: a linha do item em foco vira o formulário dos campos do tipo. */
   function corrigirEmFoco() {
     // Com a correção aberta, o F2 e o Del (vindos de uma alça ou de um botão) não a descartam.
@@ -275,6 +327,7 @@ export default function Visualizador({
 
   function corrigirItem(item: ItemDoPainel | undefined) {
     if (!catalogando || !decupagem || !catalogo) return
+    setDescrevendo(false)
     if (!item || !editorDoItem(decupagem, item, catalogo)) {
       mostrarAviso('Selecione no painel um item que possa ser corrigido (↑ ↓).')
       return
@@ -522,6 +575,37 @@ export default function Visualizador({
             executar: () => void desfazerUltima(),
           },
           {
+            tecla: 'I',
+            acao: 'Marcar a entrada do trecho no tempo atual',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'i'),
+            executar: marcarEntrada,
+          },
+          {
+            tecla: 'O',
+            acao: 'Marcar a saída do trecho no tempo atual',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'o'),
+            executar: marcarSaida,
+          },
+          {
+            tecla: 'A',
+            acao: 'Descrever o trecho marcado (1 Pessoa, 3 Marca, 4 Texto na tela, 5 Pauta)',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'a'),
+            executar: descreverTrecho,
+          },
+          {
+            tecla: 'Esc',
+            acao: 'Descartar o trecho marcado',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => e.key === 'Escape' && catalogando && !gavetaAberta && trecho !== null && !descrevendo,
+            executar: (e: KeyboardEvent) => {
+              e.preventDefault()
+              descartarTrecho()
+            },
+          },
+          {
             tecla: 'F2',
             acao: 'Corrigir o item em foco',
             grupo: GRUPO_DA_CATALOGACAO,
@@ -609,6 +693,21 @@ export default function Visualizador({
       }
     }
   }
+
+  // A identidade do intervalo só muda quando uma borda anda: o formulário acompanha as alças.
+  const trechoDoFormulario = useMemo(
+    () => ({ inicio_ms: trecho?.inicio_ms ?? 0, fim_ms: trecho?.fim_ms ?? 0 }),
+    [trecho?.inicio_ms, trecho?.fim_ms],
+  )
+  const trechoNaLinha: TrechoMarcado | null =
+    catalogando && trecho
+      ? {
+          ...trecho,
+          aoMover: moverBordaDoTrecho,
+          aoSalvar: () => salvarDoTrecho.current?.(),
+          aoDescartar: descartarTrecho,
+        }
+      : null
 
   function acrescentarAparicao(pessoa: string) {
     setTemposDaAlca(null)
@@ -823,6 +922,34 @@ export default function Visualizador({
                     {copiado ? 'Timecode copiado' : ''}
                   </Text>
                   <Box style={{ flex: 1 }} />
+                  {catalogando && (
+                    <Group gap={4} wrap="nowrap" aria-label="Trecho">
+                      <Tooltip label="I">
+                        <Button size="compact-sm" variant="default" onClick={marcarEntrada}>
+                          Marcar entrada
+                        </Button>
+                      </Tooltip>
+                      <Tooltip label="O">
+                        <Button size="compact-sm" variant="default" onClick={marcarSaida}>
+                          Marcar saída
+                        </Button>
+                      </Tooltip>
+                      {trecho?.fim_ms != null && (
+                        <>
+                          <Tooltip label="A">
+                            <Button size="compact-sm" onClick={descreverTrecho}>
+                              Descrever o trecho
+                            </Button>
+                          </Tooltip>
+                          <Tooltip label="Esc">
+                            <ActionIcon variant="default" aria-label="Descartar o trecho" onClick={descartarTrecho}>
+                              <IconX size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </>
+                      )}
+                    </Group>
+                  )}
                   <Tooltip label={mudo ? 'Ligar o som' : 'Silenciar'}>
                     <ActionIcon
                       variant="default"
@@ -877,6 +1004,7 @@ export default function Visualizador({
               selecionada={selecionada}
               aoSaltar={(ms) => saltarPara(ms / 1000)}
               alcas={alcasDaCorrecao}
+              trecho={trechoNaLinha}
               aoSelecionar={(chave, inicioMs) => {
                 selecionar(chave)
                 const aberta = abaDaChave(chave)
@@ -928,6 +1056,15 @@ export default function Visualizador({
             <Text size="sm" role="status" mb="xs">
               {aviso}
             </Text>
+          )}
+          {catalogando && catalogo && descrevendo && trecho?.fim_ms != null && (
+            <FormularioDoTrecho
+              trecho={trechoDoFormulario}
+              catalogo={catalogo}
+              salvarRef={salvarDoTrecho}
+              aoSalvar={gravarTrecho}
+              aoCancelar={() => setDescrevendo(false)}
+            />
           )}
           {decupagem ? (
             <Painel

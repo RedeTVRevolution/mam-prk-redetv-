@@ -132,9 +132,9 @@ function origemDoItem(d: Decupagem, item: ItemDoPainel): Origem | null {
   }
 }
 
-const texto = (v: Valor | undefined): string => (typeof v === 'string' ? v.trim() : '')
+export const texto = (v: Valor | undefined): string => (typeof v === 'string' ? v.trim() : '')
 
-function camposDeTempo(): CampoDoEditor[] {
+export function camposDeTempo(): CampoDoEditor[] {
   return [
     { chave: 'inicio', rotulo: 'Início (MM:SS ou H:MM:SS)', tipo: 'tempo' },
     { chave: 'fim', rotulo: 'Fim (MM:SS ou H:MM:SS)', tipo: 'tempo' },
@@ -142,14 +142,14 @@ function camposDeTempo(): CampoDoEditor[] {
 }
 
 /** Os tempos dos campos; `undefined` se não são MM:SS ou H:MM:SS, ou se o início passa do fim. */
-function temposDosCampos(v: Record<string, Valor>, o: Intervalo, exatos?: Intervalo | null): Intervalo | undefined {
+export function temposDosCampos(v: Record<string, Valor>, o: Intervalo, exatos?: Intervalo | null): Intervalo | undefined {
   if (exatos) return exatos.inicio_ms > exatos.fim_ms ? undefined : exatos
   const inicio = tempoDoCampo(texto(v.inicio), o.inicio_ms)
   const fim = tempoDoCampo(texto(v.fim), o.fim_ms)
   return inicio === null || fim === null || inicio > fim ? undefined : { inicio_ms: inicio, fim_ms: fim }
 }
 
-function montar(
+export function montar(
   campos: CampoDoEditor[],
   inicial: Record<string, Valor>,
   tiposPossiveis: string[],

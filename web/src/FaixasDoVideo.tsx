@@ -36,8 +36,21 @@ export interface AlcasDaCorrecao {
   aoDescartar: () => void
 }
 
+/** O trecho marcado com I e O: a faixa "Trecho" logo abaixo da régua, com as alças dos dois lados. */
+export interface TrechoMarcado {
+  inicio_ms: number
+  /** Sem a saída marcada (só o `I`), a faixa mostra a entrada e as alças esperam. */
+  fim_ms: number | null
+  aoMover: (borda: Borda, ms: number) => void
+  /** Enter na alça grava, como no formulário. */
+  aoSalvar: () => void
+  /** Esc na alça descarta o trecho. */
+  aoDescartar: () => void
+}
+
 /** Alça de início ou de fim: arrasta com o ponteiro ou move com as setas (0,1 s; com Shift, 1 s). */
 function AlcaDoTempo({
+  rotulo,
   borda,
   ms,
   limites,
@@ -46,6 +59,7 @@ function AlcaDoTempo({
   aoSalvar,
   aoDescartar,
 }: {
+  rotulo: string
   borda: Borda
   ms: number
   limites: LimitesDaAlca
@@ -59,7 +73,7 @@ function AlcaDoTempo({
     <Box
       role="slider"
       tabIndex={0}
-      aria-label={borda === 'inicio' ? 'Início do item' : 'Fim do item'}
+      aria-label={rotulo}
       aria-valuemin={limites.minMs}
       aria-valuemax={limites.maxMs}
       aria-valuenow={ms}
@@ -123,6 +137,7 @@ export function FaixasDoVideo({
   aoSaltar,
   aoSelecionar,
   alcas,
+  trecho,
 }: {
   faixas: FaixaDoVisualizador[]
   cortesMs: number[] | null | undefined
@@ -133,6 +148,8 @@ export function FaixasDoVideo({
   aoSelecionar: (chave: string, inicioMs: number) => void
   /** Com a correção de tempos aberta, as alças aparecem na faixa do item. */
   alcas?: AlcasDaCorrecao | null
+  /** O trecho marcado no modo de catalogação. */
+  trecho?: TrechoMarcado | null
 }) {
   const trilha = useRef<HTMLDivElement>(null)
   const arrastando = useRef(false)
@@ -170,6 +187,11 @@ export function FaixasDoVideo({
     <Box style={{ display: 'flex', gap: VAO * 2 }}>
       <Box style={{ width: LARGURA_DO_ROTULO, display: 'flex', flexDirection: 'column', gap: VAO }}>
         <Box style={{ height: ALTURA_DA_REGUA }} />
+        {trecho && (
+          <Text size="xs" fw={600} aria-hidden style={{ lineHeight: `${ALTURA_DA_FAIXA}px`, color: CORES.foco }}>
+            Trecho
+          </Text>
+        )}
         {faixas.map((faixa) => (
           <Text
             key={faixa.chave}
@@ -250,6 +272,7 @@ export function FaixasDoVideo({
             />
           ))}
         </Box>
+        {trecho && <FaixaDoTrecho trecho={trecho} duracaoMs={duracaoMs} />}
         {faixas.map((faixa) => {
           const ativo =
             ativos[faixa.chave] ??
@@ -273,7 +296,7 @@ export function FaixasDoVideo({
                       <Box
                         role="img"
                         aria-label={dica}
-                        style={{ ...trecho(t, duracaoMs), background: HACHURADO }}
+                        style={{ ...estiloDoTrecho(t, duracaoMs), background: HACHURADO }}
                       />
                     </Tooltip>
                   )
@@ -287,8 +310,8 @@ export function FaixasDoVideo({
                 const limites = limitesDasAlcas(alcas, duracaoMs, duracaoMs)
                 return (
                   <>
-                    <AlcaDoTempo borda="inicio" ms={alcas.inicio_ms} limites={limites.inicio} duracaoMs={duracaoMs} aoMover={alcas.aoMover} aoSalvar={alcas.aoSalvar} aoDescartar={alcas.aoDescartar} />
-                    <AlcaDoTempo borda="fim" ms={alcas.fim_ms} limites={limites.fim} duracaoMs={duracaoMs} aoMover={alcas.aoMover} aoSalvar={alcas.aoSalvar} aoDescartar={alcas.aoDescartar} />
+                    <AlcaDoTempo rotulo="Início do item" borda="inicio" ms={alcas.inicio_ms} limites={limites.inicio} duracaoMs={duracaoMs} aoMover={alcas.aoMover} aoSalvar={alcas.aoSalvar} aoDescartar={alcas.aoDescartar} />
+                    <AlcaDoTempo rotulo="Fim do item" borda="fim" ms={alcas.fim_ms} limites={limites.fim} duracaoMs={duracaoMs} aoMover={alcas.aoMover} aoSalvar={alcas.aoSalvar} aoDescartar={alcas.aoDescartar} />
                   </>
                 )
               })()}
@@ -304,7 +327,7 @@ export function FaixasDoVideo({
                     onFocus={() => setAtivos((a) => ({ ...a, [faixa.chave]: b.chave }))}
                     onClick={() => aoSelecionar(b.chave, b.inicio_ms)}
                     style={{
-                      ...trecho(b, duracaoMs),
+                      ...estiloDoTrecho(b, duracaoMs),
                       minWidth: 2,
                       padding: 0,
                       cursor: 'pointer',
@@ -343,7 +366,49 @@ export function FaixasDoVideo({
 const rotuloDaFaixa = (f: FaixaDoVisualizador): string => `${f.rotulo} ${f.blocos.length}`
 
 /** O estilo de um trecho de tempo dentro da faixa, com a posição do módulo da linha do tempo. */
-function trecho(t: Intervalo, duracaoMs: number): CSSProperties {
+function estiloDoTrecho(t: Intervalo, duracaoMs: number): CSSProperties {
   const { esquerda, largura } = posicaoDoBloco(t, duracaoMs)
   return { position: 'absolute', top: 0, bottom: 0, left: `${esquerda}%`, width: `${largura}%` }
+}
+
+const TEMPOS_DO_TRECHO = (t: TrechoMarcado) =>
+  `${relogio(t.inicio_ms)}–${t.fim_ms === null ? '…' : relogio(t.fim_ms)}`
+
+function FaixaDoTrecho({ trecho, duracaoMs }: { trecho: TrechoMarcado; duracaoMs: number }) {
+  const completo = trecho.fim_ms !== null
+  const limites = limitesDasAlcas(
+    { inicio_ms: trecho.inicio_ms, fim_ms: trecho.fim_ms ?? trecho.inicio_ms },
+    duracaoMs,
+    duracaoMs,
+  )
+  return (
+    <Box role="group" aria-label="Trecho" style={{ position: 'relative', height: ALTURA_DA_FAIXA }}>
+      {completo && (
+        <Box
+          data-trecho=""
+          style={{ ...estiloDoTrecho({ inicio_ms: trecho.inicio_ms, fim_ms: trecho.fim_ms as number }, duracaoMs), background: CORES.foco, opacity: 0.35, borderRadius: 'var(--mantine-radius-xs)' }}
+        />
+      )}
+      <Text
+        size="xs"
+        aria-label={`Trecho ${TEMPOS_DO_TRECHO(trecho)}`}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: `${percentualDoTempo(trecho.inicio_ms, duracaoMs)}%`,
+          marginLeft: 8,
+          lineHeight: `${ALTURA_DA_FAIXA}px`,
+          fontVariantNumeric: 'tabular-nums',
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {TEMPOS_DO_TRECHO(trecho)}
+      </Text>
+      <AlcaDoTempo rotulo="Início do trecho" borda="inicio" ms={trecho.inicio_ms} limites={limites.inicio} duracaoMs={duracaoMs} aoMover={trecho.aoMover} aoSalvar={trecho.aoSalvar} aoDescartar={trecho.aoDescartar} />
+      {trecho.fim_ms !== null && (
+        <AlcaDoTempo rotulo="Fim do trecho" borda="fim" ms={trecho.fim_ms} limites={limites.fim} duracaoMs={duracaoMs} aoMover={trecho.aoMover} aoSalvar={trecho.aoSalvar} aoDescartar={trecho.aoDescartar} />
+      )}
+    </Box>
+  )
 }
