@@ -24,7 +24,7 @@ if [[ $acao == update ]]; then exit 0; fi
 echo "inicio $job" >>"$pasta/ordem"
 /bin/sleep 0.4
 resposta=$(head -n1 "$pasta/$job.respostas")
-sed -i 1d "$pasta/$job.respostas"
+tail -n +2 "$pasta/$job.respostas" >"$pasta/$job.resto" && mv "$pasta/$job.resto" "$pasta/$job.respostas"
 echo "fim $job" >>"$pasta/ordem"
 case $resposta in
   ok) exit 0 ;;

@@ -18,7 +18,12 @@ from api.tests.test_comparacao import (
 )
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem
-from api.tests.test_jobs_de_identificacao import com_gc, identificar
+from api.tests.test_jobs_de_identificacao import (  # noqa: F401 (fixture autouse do ffmpeg)
+    com_gc,
+    identificar,
+    nome_do_modelo_forte,
+    quadros_falsos,
+)
 from api.tests.test_referencias import (
     VALIDADE,
     Bucket,
@@ -238,7 +243,8 @@ def test_nomes_a_buscar_palpites_primeiro_e_so_os_sem_as_tres_fotos() -> None:
 
 
 def test_identificacao_grava_a_lista_de_nomes_a_buscar(tmp_path: Path) -> None:
-    _, decupagens = identificar(com_gc(), "{}", tmp_path=tmp_path)
+    _, decupagens = identificar(com_gc(), nome_do_modelo_forte(), tmp_path=tmp_path)
 
     assert decupagens.nomes is not None
-    assert NomesABuscar.model_validate_json(decupagens.nomes).nomes == []
+    # Confirmado pelo modelo e sem fotos no catálogo: vai para a busca.
+    assert NomesABuscar.model_validate_json(decupagens.nomes).nomes == ["Leão Lobo"]

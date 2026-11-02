@@ -304,6 +304,7 @@ def test_o_job_grava_os_jpegs_e_a_decupagem_com_o_caminho_de_cada_um(
     }
 
 
+@precisa_de_ffmpeg
 def test_job_que_nao_concluiu_nao_ganha_quadros(tmp_path: Path) -> None:
     repositorio = RepositorioEmMemoria()
     _job(repositorio, "cancelado")
