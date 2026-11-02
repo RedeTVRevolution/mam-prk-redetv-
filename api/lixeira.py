@@ -43,6 +43,10 @@ class ArquivosDoJob(Protocol):
 
     def contar(self, job_id: str) -> ArquivosContados: ...
 
+    def apagar(self, job_id: str) -> None:
+        """Apaga tudo o que o Job tem nos buckets. Só a purga (`api.purga`) chama."""
+        ...
+
 
 class ArquivosEmMemoria:
     def __init__(self) -> None:
@@ -50,6 +54,9 @@ class ArquivosEmMemoria:
 
     def contar(self, job_id: str) -> ArquivosContados:
         return self.por_job.get(job_id, ArquivosContados())
+
+    def apagar(self, job_id: str) -> None:
+        self.por_job.pop(job_id, None)
 
 
 class ArquivosDoImpacto(BaseModel):
@@ -148,6 +155,32 @@ def _item(job: Job, envio: EnvioParaLixeira, agora: datetime) -> ItemDaLixeira:
     )
 
 
+def calcular_impacto(
+    job: Job,
+    repositorio: RepositorioDeJobs,
+    correcoes: RepositorioDeCorrecoes,
+    arquivos: ArquivosDoJob,
+) -> ImpactoDoVideo:
+    contados = arquivos.contar(job.id)
+    parecidos = (
+        repositorio.consultar(FiltroDeJobs()).jobs if job.sha256 is not None else []
+    )
+    return ImpactoDoVideo(
+        decupagem=contados.decupagem,
+        correcoes=len(correcoes.listar(job.id)),
+        arquivos=ArquivosDoImpacto(
+            copia_limpa=contados.copia_limpa,
+            proxy=contados.proxy,
+            quadros=contados.quadros,
+        ),
+        outros_jobs=[
+            OutroJob(id=j.id, nome=j.nome, enviado_por=_quem_enviou(j))
+            for j in parecidos
+            if j.id != job.id and j.sha256 == job.sha256
+        ],
+    )
+
+
 def criar_rotas_da_lixeira(
     repositorio: RepositorioDeJobs,
     correcoes: RepositorioDeCorrecoes,
@@ -166,24 +199,7 @@ def criar_rotas_da_lixeira(
         return job
 
     def impacto_de(job: Job) -> ImpactoDoVideo:
-        contados = arquivos.contar(job.id)
-        parecidos = (
-            repositorio.consultar(FiltroDeJobs()).jobs if job.sha256 is not None else []
-        )
-        return ImpactoDoVideo(
-            decupagem=contados.decupagem,
-            correcoes=len(correcoes.listar(job.id)),
-            arquivos=ArquivosDoImpacto(
-                copia_limpa=contados.copia_limpa,
-                proxy=contados.proxy,
-                quadros=contados.quadros,
-            ),
-            outros_jobs=[
-                OutroJob(id=j.id, nome=j.nome, enviado_por=_quem_enviou(j))
-                for j in parecidos
-                if j.id != job.id and j.sha256 == job.sha256
-            ],
-        )
+        return calcular_impacto(job, repositorio, correcoes, arquivos)
 
     def registrar(
         autor: Usuario,

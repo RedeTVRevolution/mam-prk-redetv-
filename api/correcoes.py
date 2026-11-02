@@ -753,6 +753,11 @@ class RepositorioDeCorrecoes(Protocol):
         """Da mais antiga para a mais recente."""
         ...
 
+    def purgar(self, job_id: str) -> None:
+        """Apaga todas as correções do vídeo. Único caminho que apaga, e só a purga
+        (`api.purga`, ADR 0010) o chama."""
+        ...
+
 
 class RepositorioDeCorrecoesEmMemoria:
     def __init__(self) -> None:
@@ -765,6 +770,9 @@ class RepositorioDeCorrecoesEmMemoria:
 
     def listar(self, job_id: str) -> list[Correcao]:
         return em_ordem([c for c in self._correcoes if c.job_id == job_id])
+
+    def purgar(self, job_id: str) -> None:
+        self._correcoes = [c for c in self._correcoes if c.job_id != job_id]
 
 
 def em_ordem(correcoes: list[Correcao]) -> list[Correcao]:

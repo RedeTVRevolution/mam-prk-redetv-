@@ -494,6 +494,10 @@ class RepositorioDeJobs(Protocol):
         """
         ...
 
+    def remover(self, job_id: str) -> None:
+        """Apaga o Job. Só a purga (`api.purga`) chama; não há erro se ele não existe."""
+        ...
+
     def listar(self) -> list[Job]:
         """Do mais recente para o mais antigo."""
         ...
@@ -566,6 +570,9 @@ class RepositorioEmMemoria:
         self._jobs[job_id] = job.model_copy(update=mudancas)
         return self._jobs[job_id]
 
+    def remover(self, job_id: str) -> None:
+        self._jobs.pop(job_id, None)
+
     def listar(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
@@ -604,6 +611,9 @@ class RepositorioIndisponivel:
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:
+        raise ServicoIndisponivel
+
+    def remover(self, job_id: str) -> None:
         raise ServicoIndisponivel
 
     def listar(self) -> list[Job]:

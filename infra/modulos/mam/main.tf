@@ -345,6 +345,18 @@ variable "agenda_da_fila" {
   default     = "* * * * *"
 }
 
+variable "agenda_da_purga" {
+  description = "Cron (formato do Cloud Scheduler) da purga automática da lixeira (#145); uma vez por dia, de madrugada"
+  type        = string
+  default     = "0 3 * * *"
+}
+
+variable "minutos_do_login_recente" {
+  description = "Há quantos minutos, no máximo, foi o login com MFA que a purga manual exige (#145)"
+  type        = number
+  default     = 5
+}
+
 variable "videos_do_sinal_por_programa" {
   description = "N do sinal por programa (#287): quantos vídeos anteriores do mesmo programa formam a média e o desvio, e o mínimo para alertar (programa com menos vídeos não alerta)"
   type        = number
@@ -621,7 +633,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "avaliacao", "fila", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -681,7 +693,10 @@ locals {
     avaliacao = ["roles/datastore.user", local.papel_vertex_avaliacao]
     # A amostra da fila (#288) só lê os Jobs do Firestore e escreve no log.
     fila = ["roles/datastore.user"]
-    # O agendador só dispara os Jobs da avaliação e da fila (papel em cada Job, mais abaixo).
+    # A purga automática (#145) apaga o Job e as correções no Firestore e os momentos do índice
+    # (como a `web`, quando ela purga à mão).
+    purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
+    # O agendador só dispara os Jobs da avaliação, da fila e da purga (papel em cada Job, mais abaixo).
     agendador    = []
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
@@ -691,7 +706,8 @@ locals {
     # A API assina as URLs de envio para a quarentena, apaga dela o upload cancelado e lê o proxy de reprodução e a decupagem.
     # Em aceitos também apaga o progresso das janelas, quando o Curador reprocessa a partir da análise (objectUser).
     # As referências: o link assinado das fotos do nome (Visualizador), só leitura.
-    web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectViewer", referencias = "roles/storage.objectViewer" }
+    # A purga manual (#145) apaga também a decupagem e os quadros: objectUser em decupagens.
+    web = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser", referencias = "roles/storage.objectViewer" }
     # Lê e apaga o original da quarentena; grava a cópia limpa e o proxy de reprodução.
     validacao = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectCreator" }
     # Lê o áudio que a validação separou e grava a transcrição ao lado do proxy.
@@ -722,6 +738,8 @@ locals {
     objetos = { decupagens = "roles/storage.objectUser" }
     # Só lê a Decupagem.
     avaliacao = { decupagens = "roles/storage.objectViewer" }
+    # Apaga os arquivos do vídeo purgado: cópia limpa, proxy, janelas, decupagem e quadros.
+    purga = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
   }
 }
 
@@ -925,6 +943,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "WORKFLOW_REGIAO"
         value = var.regiao
+      }
+      env {
+        name  = "PURGA_LOGIN_RECENTE_MIN"
+        value = tostring(var.minutos_do_login_recente)
       }
       env {
         name  = "BUSCA_REGIAO"

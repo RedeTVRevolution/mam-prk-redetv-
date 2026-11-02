@@ -868,3 +868,10 @@ Não corrigido:
   5. `impacto_de` lê o acervo inteiro (`FiltroDeJobs()`) para achar o mesmo SHA-256, e não inclui os Jobs na lixeira com o mesmo conteúdo. A purga (#145) precisa saber deles, e de uma consulta por `sha256`.
   6. O registro `item.restaurado` grava o motivo do envio no campo `motivo`, porque o ticket não pede motivo para restaurar.
   7. `lixeira.py` importa `_confere_permissao`/`_tem_permissao`, privados de `api.jobs`, no mesmo molde de outros módulos.
+- 2026-11-02 20:12:32 · #144: feito
+- 2026-11-02 20:12:36 · iteração 96: #145
+
+## #145 iteração 97
+- Pronto: `api/purga.py` (`Purga`, `purgar_vencidas`, rota `POST /v1/admin/lixeira/videos/{id_do_video}/purgar` com `nome` digitado, 422 se errado, 403 `login_recente_exigido` pelo `Usuario.login_em` = `auth_time` do token; janela `PURGA_LOGIN_RECENTE_MIN`, 5 por padrão; Cloud Run Job `python -m api.purga`). Portas novas: `RepositorioDeJobs.remover`, `RepositorioDeCorrecoes.purgar`, `ArquivosDoJob.apagar` (prefixo `{job}/` nos buckets aceitos e decupagens, mais `{job}.json`, `.comparacao.json`, `.nomes_a_buscar.json`). Terraform em `infra/modulos/mam/purga.tf` (Job, agendador diário `agenda_da_purga`), SA `purga` e `web` com objectUser em decupagens no `main.tf`. Testes em `test_purga.py` e no emulador (`test_nuvem.py`). `make verificar` verde.
+- Decisões: auditoria `item.purgado` grava ANTES de apagar (falhou, nada some); Job removido por último, então falha no meio deixa o Job na lixeira e a próxima execução repete. Com outro Job na mesma `sha256` (inclusive na lixeira): só correções e Job saem; arquivos, decupagem e índice ficam. Autor da automática: `sistema="Purga automática"`. `login_em` com `exclude=True` para não vazar em `/v1/eu`.
+- Falta/armadilhas: os arquivos são por `job_id`, não por chave de conteúdo; se o Job A (dono dos arquivos) for purgado com B ainda vivo, os arquivos de A ficam órfãos quando B for purgado (B apaga só `{B}/`). Sem tela de purga no web. `terraform apply` pendente (SA `purga`, papel novo no web). O registro da auditoria não traz momentos no índice (a contagem por vídeo não existe).

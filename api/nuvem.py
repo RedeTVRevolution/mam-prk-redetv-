@@ -191,6 +191,9 @@ class RepositorioFirestore:
         resultado: Job | None = trocar_na_transacao(self._cliente.transaction())
         return resultado
 
+    def remover(self, job_id: str) -> None:
+        self._colecao.document(job_id).delete()
+
     def obter(self, job_id: str) -> Job | None:
         doc = self._colecao.document(job_id).get()
         return Job(**(doc.to_dict() or {})) if doc.exists else None
@@ -712,6 +715,12 @@ class RepositorioDeCorrecoesFirestore:
         achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
         return em_ordem(achadas)
 
+    def purgar(self, job_id: str) -> None:
+        for doc in self._colecao.where(
+            filter=FieldFilter("job_id", "==", job_id)
+        ).stream():
+            doc.reference.delete()
+
 
 class RepositorioDeSugestoesFirestore:
     """Uma decisão do editor por vídeo e sugestão (a chave é `<job>:<sugestão>`): decidir
@@ -1175,6 +1184,19 @@ class ArquivosNoStorage:
             proxy=self._existe(self._aceitos, objeto_do_proxy(job_id)),
             quadros=sum(1 for _ in quadros),
         )
+
+    def apagar(self, job_id: str) -> None:
+        for bucket in (self._aceitos, self._decupagens):
+            for blob in self._cliente.list_blobs(bucket, prefix=f"{job_id}/"):
+                blob.delete()
+        for objeto in (
+            objeto_da_decupagem(job_id),
+            objeto_da_comparacao(job_id),
+            objeto_dos_nomes_a_buscar(job_id),
+        ):
+            blob = self._cliente.bucket(self._decupagens).blob(objeto)
+            if blob.exists():
+                blob.delete()
 
 
 class ArmazenamentoStorage:

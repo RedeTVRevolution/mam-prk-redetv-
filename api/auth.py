@@ -1,11 +1,12 @@
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Protocol, get_args
 
 import jwt
 from fastapi import Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 PREFIXO_PROTEGIDO = "/v1"
 # Única rota de /v1 sem token: a checagem de saúde do Cloud Run e do deploy.
@@ -18,6 +19,8 @@ class Usuario(BaseModel):
     uid: str
     email: str
     email_verificado: bool = False
+    # Quando a pessoa digitou a senha e o segundo fator (`auth_time` do token).
+    login_em: datetime | None = Field(default=None, exclude=True)
 
 
 Escopo = Literal["criar", "ler", "cancelar"]
@@ -60,6 +63,12 @@ class VerificadorDeChave(Protocol):
 URL_DAS_CHAVES = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
 
 
+def _momento_do_login(auth_time: Any) -> datetime | None:
+    if isinstance(auth_time, bool) or not isinstance(auth_time, int | float):
+        return None
+    return datetime.fromtimestamp(auth_time, UTC)
+
+
 class VerificadorIdentityPlatform:
     """Confere o token de sessão do Identity Platform. O MFA é obrigatório aqui,
     e não só no Identity Platform: um token sem o segundo fator TOTP é recusado."""
@@ -97,6 +106,7 @@ class VerificadorIdentityPlatform:
             uid=claims["sub"],
             email=claims.get("email", ""),
             email_verificado=claims.get("email_verified") is True,
+            login_em=_momento_do_login(claims.get("auth_time")),
         )
 
 

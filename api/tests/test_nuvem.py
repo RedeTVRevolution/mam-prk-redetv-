@@ -93,6 +93,18 @@ class TestRepositorioFirestore:
     ) -> None:
         assert repositorio.obter("nao-existe") is None
 
+    def test_remover_apaga_o_job_e_repetir_nao_da_erro(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        repositorio.salvar(_job("a", BASE))
+        repositorio.salvar(_job("b", BASE))
+
+        repositorio.remover("a")
+        repositorio.remover("a")
+
+        assert repositorio.obter("a") is None
+        assert repositorio.obter("b") is not None
+
     def test_salvar_de_novo_atualiza_o_job(
         self, repositorio: RepositorioFirestore
     ) -> None:
@@ -382,6 +394,32 @@ def test_arquivos_no_storage_conta_o_que_o_job_tem(
     assert contados.copia_limpa == 0
 
 
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
+    decupagens = armazenamento._cliente.bucket(armazenamento._decupagens)
+    do_job = {
+        aceitos: ["job1/proxy.mp4", "job1/copia_limpa.mp4", "job1/janelas/0000.json"],
+        decupagens: ["job1.json", "job1.comparacao.json", "job1/quadros/plano-0.jpg"],
+    }
+    de_outro = {aceitos: ["job10/proxy.mp4"], decupagens: ["job10.json", "job2.json"]}
+    for bucket, objetos in (do_job | de_outro).items():
+        for objeto in objetos:
+            bucket.blob(objeto).upload_from_string(b"x")
+    arquivos = ArquivosNoStorage(
+        armazenamento._cliente, armazenamento._aceitos, armazenamento._decupagens
+    )
+
+    arquivos.apagar("job1")
+    arquivos.apagar("job1")
+
+    assert not any(b.blob(o).exists() for b, os in do_job.items() for o in os)
+    assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
+
+
 def _registro_de_chave(id: str) -> RegistroDeChave:
     return RegistroDeChave(
         id=id,
@@ -628,6 +666,17 @@ class TestRepositorioDeCorrecoesFirestore:
         assert lidos["c1"].exige_aprovacao
         assert lidos["c1-decidida"].aprova == "c1"
         assert lidos["c2-decidida"].recusa == "c2"
+
+    def test_purgar_apaga_so_as_correcoes_do_video(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        for id, job_id in (("c1", "j1"), ("c2", "j1"), ("c3", "j2")):
+            correcoes.acrescentar(self._correcao(id, job_id, 1))
+
+        correcoes.purgar("j1")
+
+        assert correcoes.listar("j1") == []
+        assert [c.id for c in correcoes.listar("j2")] == ["c3"]
 
     @pytest.fixture
     def correcoes(self) -> RepositorioDeCorrecoesFirestore:

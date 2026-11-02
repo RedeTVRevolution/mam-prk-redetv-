@@ -1,6 +1,6 @@
 import os
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request
@@ -112,6 +112,7 @@ from api.passadas import (
 )
 from api.programas import PERFIS
 from api.progresso_das_janelas import JanelasDoJob
+from api.purga import LOGIN_RECENTE_PADRAO, Purga, criar_rotas_da_purga
 from api.relatorio_de_marcas import (
     ConsultaDeInsercoes,
     criar_rotas_das_marcas,
@@ -252,6 +253,7 @@ def criar_app(
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     limite_de_inatividade_s: float = LIMITE_DE_INATIVIDADE_S,
+    login_recente: timedelta = LOGIN_RECENTE_PADRAO,
     relogio: Callable[[], datetime] = agora_utc,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
@@ -414,6 +416,21 @@ def criar_app(
         )
     )
     v1.include_router(
+        criar_rotas_da_purga(
+            Purga(
+                repositorio_de_jobs,
+                repositorio_de_correcoes,
+                arquivos or ArquivosEmMemoria(),
+                indice_da_busca,
+                repositorio_de_auditoria,
+                relogio,
+            ),
+            repositorio_de_jobs,
+            relogio,
+            login_recente,
+        )
+    )
+    v1.include_router(
         criar_rotas_da_correcao_de_estado(
             repositorio_de_jobs,
             repositorio_de_auditoria,
@@ -490,6 +507,10 @@ if _projeto:
             else None
         ),
         revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
+        login_recente=timedelta(
+            minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
+            or LOGIN_RECENTE_PADRAO / timedelta(minutes=1)
+        ),
         limite_de_inatividade_s=float(
             os.environ.get("REVISAO_INATIVIDADE_S") or LIMITE_DE_INATIVIDADE_S
         ),
