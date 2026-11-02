@@ -785,6 +785,10 @@ def _pessoas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pessoas", []) if isinstance(p, dict)]
 
 
+def _ids_das_pessoas(modelo: dict[str, Any]) -> set[Any]:
+    return {p.get("id") for p in _pessoas(modelo)}
+
+
 def _pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pautas", []) if isinstance(p, dict)]
 
@@ -1864,7 +1868,7 @@ def aplicar(
             if "pessoas" in pauta:
                 pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
     # O objeto cuja pessoa não está mais na decupagem fica em cena: sem dono, sem relação.
-    ids_das_pessoas = {p.get("id") for p in _pessoas(resultado)}
+    ids_das_pessoas = _ids_das_pessoas(resultado)
     for objeto in _objetos(resultado):
         if objeto.get("pessoa") is not None and objeto["pessoa"] not in ids_das_pessoas:
             objeto["pessoa"] = objeto["relacao"] = None
@@ -2155,8 +2159,9 @@ class Tipo:
     casa_longe: bool = False
     acrescenta: Acrescenta | None = None
     reestrutura: Reestrutura | None = None
-    # Confere o valor do pedido com a decupagem entregue; levanta `ItemInexistente`
-    # se ele aponta para o que ela não tem. Também decide se a correção se reaplica.
+    # Confere o valor do pedido (já canonizado) com a decupagem entregue; levanta
+    # `ItemInexistente` se ele aponta para o que ela não tem. Também decide se a
+    # correção se reaplica.
     confere: Callable[[dict[str, Any], str], None] | None = None
 
 
@@ -2326,7 +2331,7 @@ def _valor_do_dono(item: dict[str, Any]) -> str:
 
 def _confere_o_dono(entregue: dict[str, Any], valor: str) -> None:
     pessoa = json.loads(valor)["pessoa"]
-    if pessoa is not None and pessoa not in {p.get("id") for p in _pessoas(entregue)}:
+    if pessoa is not None and pessoa not in _ids_das_pessoas(entregue):
         raise ItemInexistente(pessoa)
 
 

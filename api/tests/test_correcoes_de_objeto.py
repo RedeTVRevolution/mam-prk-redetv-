@@ -256,6 +256,11 @@ def test_desfazer_devolve_o_dono_do_modelo() -> None:
         "veste",
     )
     assert "origem" not in _objetos(mundo)[0]
+    desfeita, _ = mundo.historico().json()
+    assert (desfeita["antes_legivel"], desfeita["depois_legivel"]) == (
+        "sem dono",
+        "dono: pes01 (veste)",
+    )
 
 
 def test_dono_com_aprovacao_so_vale_depois_de_aprovar() -> None:
@@ -344,3 +349,35 @@ def test_tirar_a_pessoa_da_decupagem_deixa_o_objeto_dela_sem_dono() -> None:
     assert "pes01" not in [p["id"] for p in decupagem["pessoas"]]
     [o] = decupagem["objetos"]
     assert (o["pessoa"], o["relacao"]) == (None, None)
+    _assert_dono_existe(decupagem)
+
+
+def test_tirar_da_decupagem_o_dono_trocado_deixa_o_objeto_sem_dono() -> None:
+    sozinha = {**MODELO["pessoas"][1], "citada_na_fala": []}
+    modelo = {**M, "pessoas": [MODELO["pessoas"][0], sozinha]}
+    versao = _versao(modelo)
+    mundo = _mundo(modelo)
+    _corrigir_dono(mundo, _dono("pes02", "segura"), versao=versao)
+    mundo.avancar()
+
+    r = mundo.corrigir(
+        tipo="pessoa.nao_e",
+        item_id="pes02",
+        valor="Não identificado",
+        ocorrencia={"lista": "na_imagem", "inicio_ms": 7000, "fim_ms": 9000},
+        versao=versao,
+    )
+
+    assert r.status_code == 201
+    decupagem = mundo.decupagem()
+    assert "pes02" not in [p["id"] for p in decupagem["pessoas"]]
+    [o] = decupagem["objetos"]
+    assert (o["pessoa"], o["relacao"]) == (None, None)
+    _assert_dono_existe(decupagem)
+
+
+def _assert_dono_existe(decupagem: dict[str, Any]) -> None:
+    """A regra de `_dono_do_objeto_existe` (`api/decupagem.py`): o modelo dos
+    testes não traz o esquema inteiro, então ela é conferida à parte."""
+    ids = {p["id"] for p in decupagem["pessoas"]}
+    assert all(o["pessoa"] is None or o["pessoa"] in ids for o in decupagem["objetos"])
