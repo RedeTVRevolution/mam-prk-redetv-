@@ -2712,6 +2712,8 @@ locals {
     "resource.labels.service_name=\"${google_cloud_run_v2_service.web.name}\"",
     "logName:\"run.googleapis.com%2Frequests\"",
   ])
+  # O mesmo serviço entrega o front em `/`: as requisições da API são só as de `/v1/`.
+  filtro_das_requisicoes_da_api = "${local.filtro_da_api} AND httpRequest.requestUrl=~\"^https?://[^/]+/v1/\""
   jobs_com_gpu = [
     google_cloud_run_v2_job.transcricao_gpu.name,
     google_cloud_run_v2_job.ocr_gpu.name,
@@ -2724,7 +2726,7 @@ locals {
   # as séries de modelos diferentes antes do `sum`; a etapa que não usou o modelo some).
   custo_por_etapa = {
     for sentido, metrica in { entrada = local.metrica_de_log["tokens_de_entrada"], saida = local.metrica_de_log["tokens_de_saida"] } :
-    sentido => "sum by (etapa) (${join(" or ", [for modelo, preco in var.precos_por_milhao_de_tokens : "(increase(${metrica}{modelo=\"${modelo}\"}[${local.janela_dos_paineis}]) * ${preco[sentido] / 1000000})"])})"
+    sentido => "sum by (etapa) (${join(" or ", [for modelo, preco in var.precos_por_milhao_de_tokens : "(increase(${metrica}_sum{modelo=\"${modelo}\"}[${local.janela_dos_paineis}]) * ${preco[sentido] / 1000000})"])})"
   }
 
   # Cada painel é uma lista de gráficos; o desenho põe dois por linha.
@@ -2837,7 +2839,7 @@ locals {
           aligner = "ALIGN_PERCENTILE_95"
           reducer = "REDUCE_MAX"
           agrupar = ["resource.label.job_name"]
-          legenda = "{{resource.label.job_name}}"
+          legenda = "$${resource.labels.job_name}"
         }]
         unidade = "%"
       },
@@ -2848,7 +2850,7 @@ locals {
           aligner = "ALIGN_PERCENTILE_95"
           reducer = "REDUCE_MAX"
           agrupar = ["resource.label.job_name"]
-          legenda = "{{resource.label.job_name}}"
+          legenda = "$${resource.labels.job_name}"
         }]
         unidade = "By"
       },
@@ -2859,7 +2861,7 @@ locals {
           aligner = "ALIGN_PERCENTILE_95"
           reducer = "REDUCE_MAX"
           agrupar = ["resource.label.job_name"]
-          legenda = "{{resource.label.job_name}}"
+          legenda = "$${resource.labels.job_name}"
         }]
         unidade = "ms"
       },
@@ -2913,12 +2915,11 @@ resource "google_logging_metric" "duracao_da_etapa" {
   depends_on = [google_project_service.apis]
 }
 
-# Os tokens de cada chamada ao modelo (`uso_do_modelo`); a etapa é o Job que chamou.
+# Os tokens de cada chamada ao modelo (`uso_do_modelo`); a etapa é o Job que chamou, sem o
+# `mam-` do nome, para casar com a etapa do tempo (`mam-analise` -> `analise`; só o
+# `mam-inventario` fica `inventario`, e não `inventario_de_objetos`).
 resource "google_logging_metric" "tokens_do_modelo" {
-  for_each = {
-    tokens_de_entrada = "tokens_de_entrada"
-    tokens_de_saida   = "tokens_de_saida"
-  }
+  for_each        = toset(["tokens_de_entrada", "tokens_de_saida"])
   name            = "mam_${each.key}"
   description     = "${each.value} por chamada ao modelo, com a etapa e o modelo como rótulos (#288)"
   filter          = "${local.filtro_dos_jobs} AND jsonPayload.evento=\"uso_do_modelo\""
@@ -2939,7 +2940,7 @@ resource "google_logging_metric" "tokens_do_modelo" {
     }
   }
   label_extractors = {
-    etapa  = "EXTRACT(resource.labels.job_name)"
+    etapa  = "REGEXP_EXTRACT(resource.labels.job_name, \"^mam-(.+)$\")"
     modelo = "EXTRACT(jsonPayload.modelo)"
   }
   # De 1 a cerca de 4 milhões de tokens por chamada.
@@ -2976,7 +2977,7 @@ resource "google_logging_metric" "fila" {
   label_extractors = {
     estado = "EXTRACT(jsonPayload.estado)"
   }
-  # De 0 a 100 Jobs ou de 0 a 100 000 s, em 20 faixas lineares (a média sai do _sum e do _count).
+  # Só a média é lida (do _sum e do _count); as faixas, de 5000 em 5000, não pesam.
   bucket_options {
     linear_buckets {
       num_finite_buckets = 20
@@ -3012,7 +3013,7 @@ resource "google_logging_metric" "falta_de_gpu" {
 resource "google_logging_metric" "requisicoes_da_api" {
   name        = "mam_requisicoes_da_api"
   description = "Requisições da API, com a rota (recurso de /v1) e o código HTTP como rótulos (#288)"
-  filter      = local.filtro_da_api
+  filter      = local.filtro_das_requisicoes_da_api
   metric_descriptor {
     metric_kind = "DELTA"
     value_type  = "INT64"
@@ -3029,7 +3030,7 @@ resource "google_logging_metric" "requisicoes_da_api" {
     }
   }
   label_extractors = {
-    rota   = "REGEXP_EXTRACT(httpRequest.requestUrl, \"^https?://[^/]+(/[^/?]+(?:/[^/?]+)?)\")"
+    rota   = "REGEXP_EXTRACT(httpRequest.requestUrl, \"^https?://[^/]+(/v1/[^/?]+)\")"
     codigo = "EXTRACT(httpRequest.status)"
   }
   depends_on = [google_project_service.apis]

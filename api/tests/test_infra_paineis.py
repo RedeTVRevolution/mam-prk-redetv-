@@ -2,8 +2,11 @@
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
+from api.fila_job import amostrar_a_fila
+from api.jobs import RepositorioEmMemoria
 from api.sinais import registro_do_uso_do_modelo
 
 INFRA = Path(__file__).parents[2] / "infra"
@@ -34,9 +37,9 @@ def test_os_tokens_saem_do_log_de_uso_com_a_etapa_do_job_e_o_modelo() -> None:
     linha = json.loads(registro_do_uso_do_modelo("m", 1, 2))
     metrica = _bloco('resource "google_logging_metric" "tokens_do_modelo"')
     assert f'jsonPayload.evento=\\"{linha["evento"]}\\"' in metrica
-    for campo in ("tokens_de_entrada", "tokens_de_saida"):
-        assert campo in linha and f'= "{campo}"' in metrica
-    assert "EXTRACT(resource.labels.job_name)" in metrica
+    assert 'toset(["tokens_de_entrada", "tokens_de_saida"])' in metrica
+    assert "tokens_de_entrada" in linha and "tokens_de_saida" in linha
+    assert 'REGEXP_EXTRACT(resource.labels.job_name, \\"^mam-(.+)$\\")' in metrica
     assert "EXTRACT(jsonPayload.modelo)" in metrica
 
 
@@ -45,9 +48,23 @@ def test_cada_metrica_lida_pelos_paineis_esta_declarada_com_esse_nome() -> None:
     assert lidas
     declaradas = set(re.findall(r'name\s+= "mam_(\w+)"', TF))
     # As que nascem de um `for_each` com `name = "mam_${each.key}"`: a chave é o nome.
-    por_chave = set(re.findall(r'^\s+(\w+)\s+= (?:"\w+"|\{ extrai)', TF, re.MULTILINE))
+    tokens = _bloco('resource "google_logging_metric" "tokens_do_modelo"')
+    fila = _bloco('resource "google_logging_metric" "fila"')
+    por_chave = set(re.findall(r'"(\w+)"', tokens.split("toset(")[1].split(")")[0]))
+    por_chave |= set(re.findall(r"^\s+(\w+)\s+= \{ extrai", fila, re.MULTILINE))
+    assert por_chave == {
+        "tokens_de_entrada",
+        "tokens_de_saida",
+        "fila_quantidade",
+        "fila_idade",
+    }
     for nome in re.findall(r'"(\w+)"', lidas.group(1)):
         assert nome in declaradas | por_chave, nome
+
+
+def test_o_custo_le_a_soma_dos_tokens_da_distribuicao() -> None:
+    custo = TF[TF.index("  custo_por_etapa = {") : TF.index("  graficos_dos_paineis")]
+    assert "increase(${metrica}_sum{modelo=" in custo
 
 
 def test_o_custo_usa_o_preco_da_configuracao_e_some_sem_preco() -> None:
@@ -60,8 +77,13 @@ def test_o_custo_usa_o_preco_da_configuracao_e_some_sem_preco() -> None:
 def test_a_fila_loga_o_que_as_metricas_extraem() -> None:
     metrica = _bloco('resource "google_logging_metric" "fila"')
     assert 'jsonPayload.evento=\\"fila_de_jobs\\"' in metrica
-    for campo in ("quantidade", "idade_do_mais_antigo_s", "estado"):
-        assert f"jsonPayload.{campo}" in metrica or f'"{campo}"' in metrica
+    linhas: list[str] = []
+    amostrar_a_fila(RepositorioEmMemoria(), datetime.now(UTC), linhas.append)
+    linha = json.loads(linhas[0])
+    assert linha["evento"] == "fila_de_jobs"
+    for campo in ("quantidade", "idade_do_mais_antigo_s"):
+        assert campo in linha and f'extrai = "{campo}"' in metrica
+    assert "estado" in linha and "EXTRACT(jsonPayload.estado)" in metrica
     job = _bloco('resource "google_cloud_run_v2_job" "fila"')
     assert "api.fila_job" in job
     assert 'google_service_account.mam["fila"]' in job
@@ -87,7 +109,12 @@ def test_os_quatro_paineis_existem_e_o_da_gpu_cobre_os_tres_jobs_com_gpu() -> No
         )
 
 
-def test_a_rota_da_api_nao_leva_ids_do_caminho() -> None:
+def test_a_rota_da_api_e_so_o_recurso_de_v1_sem_o_front_nem_ids() -> None:
     metrica = _bloco('resource "google_logging_metric" "requisicoes_da_api"')
-    assert "REGEXP_EXTRACT(httpRequest.requestUrl" in metrica
+    assert "filter      = local.filtro_das_requisicoes_da_api" in metrica
+    assert '/v1/\\""' in TF[TF.index("  filtro_das_requisicoes_da_api") :]
+    assert (
+        'REGEXP_EXTRACT(httpRequest.requestUrl, \\"^https?://[^/]+(/v1/[^/?]+)\\")'
+        in metrica
+    )
     assert "EXTRACT(httpRequest.status)" in metrica
