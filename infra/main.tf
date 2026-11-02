@@ -44,16 +44,28 @@ variable "regiao_gpu" {
 variable "gpu_tentativas" {
   type    = number
   default = 3
+  validation {
+    condition     = floor(var.gpu_tentativas) == var.gpu_tentativas && var.gpu_tentativas >= 1
+    error_message = "gpu_tentativas é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
+  }
 }
 
 variable "gpu_espera_s" {
   type    = number
   default = 60
+  validation {
+    condition     = floor(var.gpu_espera_s) == var.gpu_espera_s && var.gpu_espera_s >= 0
+    error_message = "gpu_espera_s é um inteiro a partir de 0 (o script do teste faz a conta em bash)."
+  }
 }
 
 variable "gpu_fator_da_espera" {
   type    = number
   default = 2
+  validation {
+    condition     = floor(var.gpu_fator_da_espera) == var.gpu_fator_da_espera && var.gpu_fator_da_espera >= 1
+    error_message = "gpu_fator_da_espera é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
+  }
 }
 
 variable "dimensao_dos_vetores" {

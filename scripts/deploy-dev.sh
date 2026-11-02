@@ -64,10 +64,16 @@ TRANSCRICAO_GPU="$REPOSITORIO_GPU/transcricao-gpu:$COMMIT"
 OCR_GPU="$REPOSITORIO_GPU/ocr-gpu:$COMMIT"
 CACHE_GPU="$REPOSITORIO_GPU/cache"
 # Os Jobs com GPU e as imagens que têm hoje, lidas antes do apply, para o teste depois da
-# publicação saber quais imagens mudaram e a que voltar. Vazias na primeira publicação (o
-# Job ainda não existe). Para um Job com GPU a mais, acrescente uma linha em JOBS_GPU.
+# publicação saber quais imagens mudaram e a que voltar. Vazias na primeira publicação: o
+# Job ainda não está no estado do Terraform. Se ele está e o describe falha, a publicação
+# para aqui, para não seguir sem a imagem a que voltar. Um Job com GPU a mais entra no
+# teste com mais uma linha em JOBS_GPU, depois de ter o alvo de construção, o Job no
+# Terraform e a imagem lida aqui e publicada pelo digest, como estes dois.
 GPU_REGIAO=$(tf output -raw regiao_gpu 2>/dev/null || true)
-imagem_do_job() { [[ -n $1 && -n $GPU_REGIAO ]] && gc run jobs describe "$1" --region "$GPU_REGIAO" --format='value(spec.template.spec.template.spec.containers[0].image)' 2>/dev/null || true; }
+imagem_do_job() {
+  [[ -z $1 ]] && return 0
+  gc run jobs describe "$1" --region "$GPU_REGIAO" --format='value(spec.template.spec.template.spec.containers[0].image)'
+}
 JOB_TRANSCRICAO_GPU_ANTES=$(tf output -raw job_de_transcricao_gpu 2>/dev/null || true)
 JOB_OCR_GPU_ANTES=$(tf output -raw job_de_ocr_gpu 2>/dev/null || true)
 TRANSCRICAO_GPU_ANTES=$(imagem_do_job "$JOB_TRANSCRICAO_GPU_ANTES")

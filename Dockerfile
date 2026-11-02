@@ -167,7 +167,7 @@ ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/model
 # incompatível. Não pega o cuDNN e o cuBLAS, que o Paddle só abre na primeira operação na
 # GPU, nem o driver e a GPU: isso é do teste depois da publicação (#238) e do dev (#240).
 RUN mkdir /amostras \
-    && HOME=/tmp/ocr /app/.venv/bin/python -c "import cv2, numpy, paddle; assert paddle.device.is_compiled_with_cuda(); q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/amostras/quadro.png', q); from api.teste_dos_jobs import testar_ocr; raise SystemExit(testar_ocr('cpu', exigir_gpu=False))" \
+    && HOME=/tmp/ocr TMPDIR=/tmp /app/.venv/bin/python -c "import cv2, numpy, paddle; assert paddle.device.is_compiled_with_cuda(); q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/amostras/quadro.png', q); from api.teste_dos_jobs import testar_ocr; raise SystemExit(testar_ocr('cpu', exigir_gpu=False))" \
     && rm -rf /tmp/ocr
 USER nobody
 CMD ["python", "-m", "api.ocr_job"]

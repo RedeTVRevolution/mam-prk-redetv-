@@ -9,7 +9,7 @@ import pytest
 SCRIPT = Path(__file__).parents[2] / "scripts" / "testar-jobs-gpu.sh"
 
 # O gcloud falso lê, por Job, uma resposta por execução em `<pasta>/<job>.respostas` (ok,
-# sem_gpu, gpu_ausente ou errado) e anota o que recebeu em `<pasta>/chamadas`.
+# sem_gpu, gpu_ausente, errado, errado_codigo ou permissao) e anota o que recebeu em `<pasta>/chamadas`.
 GCLOUD_FALSO = r"""#!/usr/bin/env bash
 pasta=$FALSO
 args=("$@")
@@ -31,6 +31,8 @@ case $resposta in
   sem_gpu) echo "ERROR: Quota exceeded for total allowable count of GPUs" >&2; exit 1 ;;
   gpu_ausente) echo "ERROR: Execution failed. Container called exit(20)." >&2; exit 1 ;;
   errado) echo "ERROR: Execution failed. Container called exit(21)." >&2; exit 1 ;;
+  errado_codigo) echo "ERROR: Task failed with exit code 21." >&2; exit 1 ;;
+  permissao) echo "ERROR: PERMISSION_DENIED: insufficient permissions" >&2; exit 1 ;;
 esac
 """
 
@@ -110,6 +112,7 @@ def test_so_o_job_que_mudou_e_testado(pasta: Path) -> None:
     assert OCR in execucao
     assert "--region regiao-gpu" in execucao and "--wait" in execucao
     assert "--update-env-vars MODO_TESTE=1" in execucao
+    assert "--task-timeout 15m" in execucao
 
 
 def test_os_dois_mudaram_rodam_em_paralelo_e_o_log_diz_quanto_levou(
@@ -219,3 +222,19 @@ def test_um_job_a_mais_entra_so_com_mais_um_argumento(pasta: Path) -> None:
 
     assert r.returncode == 0
     assert len(_chamadas(pasta, "execute")) == 2
+
+
+def test_resultado_errado_tambem_vem_como_exit_code(pasta: Path) -> None:
+    r = _rodar(pasta, [f"{OCR},img@b,img@c"], {OCR: ["errado_codigo"]})
+
+    assert r.returncode == 1
+    assert "resultado errado" in r.stderr
+    assert "a GPU não funcionou" not in r.stderr
+
+
+def test_falta_de_permissao_nao_conta_como_falta_de_gpu(pasta: Path) -> None:
+    r = _rodar(pasta, [f"{OCR},img@b,img@c"], {OCR: ["permissao", "ok"]})
+
+    assert r.returncode == 1
+    assert "a GPU não funcionou" in r.stderr and "sem GPU" not in r.stderr
+    assert len(_chamadas(pasta, "execute")) == 1

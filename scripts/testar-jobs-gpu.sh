@@ -25,20 +25,26 @@ set -uo pipefail
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 
 # O que uma execução que falhou diz, em uma das três falhas. O código de saída do Job
-# (SAIDA_SEM_GPU = 20 e SAIDA_RESULTADO_ERRADO = 21, em api/teste_dos_jobs.py) vem na mensagem do gcloud; falta de GPU ou de cota vem como erro de capacidade,
-# antes de o contêiner existir. Uma falha que não é nenhuma das duas conta como "a GPU não
-# funcionou" e não tenta de novo.
+# (SAIDA_GPU_NAO_FUNCIONOU = 20 e SAIDA_RESULTADO_ERRADO = 21, em api/teste_dos_jobs.py)
+# vem na mensagem do gcloud, como "exit(21)" ou "exit code 21" (o formato real só se
+# confere no dev, #240); falta de GPU ou de cota vem como erro de capacidade, antes de o
+# contêiner existir. Uma falha que não é nenhuma das duas conta como "a GPU não funcionou"
+# e não tenta de novo.
 classificar() {
-  if grep -qE 'exit\(21\)' <<<"$1"; then
+  if grep -qiE 'exit\(21\)|exit code:? (of )?21\b' <<<"$1"; then
     echo resultado_errado
-  elif grep -qE 'exit\(20\)' <<<"$1"; then
+  elif grep -qiE 'exit\(20\)|exit code:? (of )?20\b' <<<"$1"; then
     echo gpu_nao_funcionou
-  elif grep -qiE 'quota|capacity|exhausted|insufficient|no available|out of stock|zonal' <<<"$1"; then
+  elif grep -qiE 'quota|capacity|resource.?exhausted|insufficient (gpu|resources|capacity)|no available|out of stock' <<<"$1"; then
     echo sem_gpu
   else
     echo gpu_nao_funcionou
   fi
 }
+
+# Limite de cada execução de teste: carregar a imagem e o modelo e ler a amostra leva
+# minutos, e sem ele um teste travado prenderia a publicação pelo timeout do Job (horas).
+LIMITE_DA_EXECUCAO=15m
 
 # Um Job: até GPU_TENTATIVAS execuções, com espera crescente, só quando falta GPU ou cota.
 # Escreve o veredito (ok, sem_gpu, gpu_nao_funcionou, resultado_errado) no arquivo dado.
@@ -47,7 +53,7 @@ testar_um() {
   for ((tentativa = 1; tentativa <= GPU_TENTATIVAS; tentativa++)); do
     echo "[$job] teste, tentativa $tentativa de $GPU_TENTATIVAS"
     if saida=$(gc run jobs execute "$job" --region "$GPU_REGIAO" --wait \
-      --update-env-vars MODO_TESTE=1 2>&1); then
+      --task-timeout "$LIMITE_DA_EXECUCAO" --update-env-vars MODO_TESTE=1 2>&1); then
       echo "[$job] passou em $((SECONDS - inicio)) s"
       echo ok >"$veredito"
       return

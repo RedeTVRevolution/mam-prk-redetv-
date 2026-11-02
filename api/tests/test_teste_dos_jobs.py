@@ -11,9 +11,9 @@ from api import ocr_job, teste_dos_jobs, transcricao_job
 from api.dispositivo import DispositivoIndisponivel
 from api.paddle import LeitorPaddle
 from api.teste_dos_jobs import (
+    SAIDA_GPU_NAO_FUNCIONOU,
     SAIDA_OK,
     SAIDA_RESULTADO_ERRADO,
-    SAIDA_SEM_GPU,
     ativo,
     normalizar,
 )
@@ -91,7 +91,7 @@ def test_transcricao_sem_gpu_na_instancia_diz_que_a_gpu_nao_funcionou(
 ) -> None:
     _transcritor(monkeypatch, DispositivoIndisponivel("nenhuma GPU"))
 
-    assert _transcricao("gpu", ambiente=AMBIENTE) == SAIDA_SEM_GPU
+    assert _transcricao("gpu", ambiente=AMBIENTE) == SAIDA_GPU_NAO_FUNCIONOU
 
 
 def test_o_teste_da_publicacao_exige_gpu_e_o_da_construcao_roda_em_cpu(
@@ -99,7 +99,7 @@ def test_o_teste_da_publicacao_exige_gpu_e_o_da_construcao_roda_em_cpu(
 ) -> None:
     criados = _transcritor(monkeypatch, "bom dia")
 
-    assert _transcricao("cpu", ambiente=AMBIENTE) == SAIDA_SEM_GPU
+    assert _transcricao("cpu", ambiente=AMBIENTE) == SAIDA_GPU_NAO_FUNCIONOU
     assert criados == []
     assert _transcricao("cpu", exigir_gpu=False, ambiente=AMBIENTE) == SAIDA_OK
     assert criados == [("/modelo", "cpu")]

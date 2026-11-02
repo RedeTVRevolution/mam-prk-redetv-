@@ -19,7 +19,7 @@ Passo do processamento de um Job que o Workflows roda (validação, transcriçã
 _Evitar_: fase
 
 **Dispositivo**:
-Onde a transcrição e a leitura da tela rodam: `cpu` (padrão) ou `gpu` (L4, em `us-east4`, ADR 0007), pela variável `DISPOSITIVO` (`api/dispositivo.py`). Pedir `gpu` numa instância sem GPU derruba o Job com mensagem clara, sem cair para a CPU em silêncio; o plano B em CPU é do Workflows. As imagens GPU ficam num repositório próprio em `us-east4`, e cada publicação as testa em modo de teste (`MODO_TESTE=1`, fala sintética; saída 20 = GPU não funcionou, 21 = resultado errado), voltando ao digest anterior se falhar.
+Onde a transcrição e a leitura da tela rodam: `cpu` (padrão) ou `gpu` (L4, em `us-east4`, ADR 0007), pela variável `DISPOSITIVO` (`api/dispositivo.py`). Pedir `gpu` numa instância sem GPU derruba o Job com mensagem clara, sem cair para a CPU em silêncio; o plano B em CPU é do Workflows. As imagens GPU ficam num repositório próprio em `us-east4`, e cada publicação testa as que mudaram em modo de teste (`MODO_TESTE=1`, uma fala sintética e um quadro com `REDETV` que estão na imagem; saída 20 = GPU não funcionou, 21 = resultado errado), voltando ao digest anterior se falhar (na primeira publicação não há anterior).
 
 **Reprocessar**:
 Refazer um Job a partir de uma etapa, sem enviar o vídeo de novo (`POST /v1/jobs/{id}/reprocessar`). As etapas anteriores não rodam, e cada reprocessamento vai à auditoria (`video.reprocessado`).

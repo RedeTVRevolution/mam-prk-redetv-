@@ -4,8 +4,9 @@ Depois de cada publicação, o `scripts/testar-jobs-gpu.sh` roda o Job com `MODO
 (uma substituição da execução, que não fica no Job). O Job lê uma amostra que já está na
 imagem (`AMOSTRAS`: alguns segundos de fala e um quadro com `REDETV`), carrega o modelo
 no dispositivo e confere o texto lido. Nada é lido nem gravado no Storage ou no Firestore.
-A saída diz ao script o que deu errado: `SAIDA_SEM_GPU` quando a instância não tem GPU ou
-a GPU não roda o modelo, `SAIDA_RESULTADO_ERRADO` quando roda e o texto não confere.
+A saída diz ao script o que deu errado: `SAIDA_GPU_NAO_FUNCIONOU` quando a instância não
+tem GPU ou o modelo não roda nela (inclusive amostra ausente ou modelo que não carrega),
+`SAIDA_RESULTADO_ERRADO` quando roda e o texto não confere.
 
 A construção das imagens roda a mesma conferência em CPU (`exigir_gpu=False`), para
 pegar a biblioteca ou o modelo quebrado antes da publicação.
@@ -24,7 +25,7 @@ log = logging.getLogger(__name__)
 VARIAVEL = "MODO_TESTE"
 PASTA_DAS_AMOSTRAS = "/amostras"
 SAIDA_OK = 0
-SAIDA_SEM_GPU = 20
+SAIDA_GPU_NAO_FUNCIONOU = 20
 SAIDA_RESULTADO_ERRADO = 21
 
 # O que a amostra diz e mostra. O Dockerfile (alvo `amostras`) fala esta frase; o teste
@@ -57,7 +58,7 @@ def _conferir(
         lido = ler()
     except Exception:
         log.exception("Teste de %s: o modelo não rodou em %s", nome, dispositivo)
-        return SAIDA_SEM_GPU
+        return SAIDA_GPU_NAO_FUNCIONOU
     if normalizar(esperado) not in normalizar(lido):
         log.error(
             "Teste de %s: resultado errado em %s: esperava %r e veio %r",
