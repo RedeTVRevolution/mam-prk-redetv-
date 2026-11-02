@@ -20,6 +20,7 @@ Permissao = Literal[
     "usuarios.gerir",
     "chaves.gerir",
     "lixeira.gerir",
+    "catalogo.apagar",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
@@ -28,7 +29,8 @@ PERMISSOES_DO_PAPEL: dict[Papel, frozenset[Permissao]] = {
     "consulta": _CONSULTA,
     "operador": _CONSULTA | frozenset({"video.enviar", "video.reprocessar"}),
     "editor": _EDITOR,
-    "curador": _EDITOR | frozenset({"correcao.aprovar", "video.reprocessar_etapa"}),
+    "curador": _EDITOR
+    | frozenset({"correcao.aprovar", "video.reprocessar_etapa", "catalogo.apagar"}),
     # Do próprio tipo, para uma permissão nova chegar ao Administrador sozinha.
     "administrador": frozenset(get_args(Permissao)),
 }

@@ -15,15 +15,16 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
+from api.catalogo import Catalogo, EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoes
 from api.jobs import (
-    EnvioParaLixeira,
     FiltroDeJobs,
     Job,
     RepositorioDeJobs,
     _confere_permissao,
     _tem_permissao,
 )
+from api.marcas import CatalogoDeMarcas
 
 PRAZO_DA_PURGA = timedelta(days=30)
 MOTIVO_MAXIMO = 500
@@ -82,8 +83,7 @@ class ImpactoDoVideo(BaseModel):
 
 
 class ItemDaLixeira(BaseModel):
-    # Pessoa e marca entram aqui nos tickets deles (#151).
-    tipo: Literal["video"]
+    tipo: Literal["video", "pessoa", "marca"]
     id: str
     nome: str
     enviado_por: str
@@ -142,17 +142,33 @@ class JobRestaurado(BaseModel):
     nome: str
 
 
-def _item(job: Job, envio: EnvioParaLixeira, agora: datetime) -> ItemDaLixeira:
+def item_da_lixeira(
+    tipo: Literal["video", "pessoa", "marca"],
+    id: str,
+    nome: str,
+    envio: EnvioParaLixeira,
+    agora: datetime,
+) -> ItemDaLixeira:
     faltam = envio.em + PRAZO_DA_PURGA - agora
     return ItemDaLixeira(
-        tipo="video",
-        id=job.id,
-        nome=job.nome,
+        tipo=tipo,
+        id=id,
+        nome=nome,
         enviado_por=envio.por_email,
         enviado_em=envio.em,
         motivo=envio.motivo,
         dias_ate_a_purga=max(0, math.ceil(faltam / timedelta(days=1))),
     )
+
+
+def _item(job: Job, envio: EnvioParaLixeira, agora: datetime) -> ItemDaLixeira:
+    return item_da_lixeira("video", job.id, job.nome, envio, agora)
+
+
+def login_recente_ou_403(pessoa: Usuario, agora: datetime, janela: timedelta) -> None:
+    """A purga manual pede um login com MFA recente (`auth_time` do token)."""
+    if pessoa.login_em is None or agora - pessoa.login_em > janela:
+        raise HTTPException(403, "login_recente_exigido")
 
 
 def calcular_impacto(
@@ -195,6 +211,8 @@ def criar_rotas_da_lixeira(
     arquivos: ArquivosDoJob,
     auditoria: RepositorioDeAuditoria,
     relogio: Callable[[], datetime],
+    pessoas: Catalogo,
+    marcas: CatalogoDeMarcas,
 ) -> APIRouter:
     # O parâmetro não se chama `job_id`: a dependência `sem_job_na_lixeira` esconderia
     # da própria lixeira o Job que ela precisa mostrar.
@@ -240,6 +258,16 @@ def criar_rotas_da_lixeira(
             _item(job, job.lixeira, agora)
             for job in repositorio.consultar(FiltroDeJobs(na_lixeira=True)).jobs
             if job.lixeira is not None
+        ]
+        itens += [
+            item_da_lixeira("pessoa", p.id, p.nome, p.lixeira, agora)
+            for p in pessoas.na_lixeira()
+            if p.lixeira is not None
+        ]
+        itens += [
+            item_da_lixeira("marca", m.id, m.nome, m.lixeira, agora)
+            for m in marcas.na_lixeira()
+            if m.lixeira is not None
         ]
         return sorted(itens, key=lambda i: i.enviado_em, reverse=True)
 

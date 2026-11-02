@@ -77,6 +77,11 @@ from api.lixeira import (
     criar_rotas_da_lixeira,
     sem_job_na_lixeira,
 )
+from api.lixeira_do_catalogo import (
+    FotosDeReferencia,
+    FotosEmMemoria,
+    criar_rotas_da_lixeira_do_catalogo,
+)
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
     ArmazenamentoStorage,
@@ -86,6 +91,7 @@ from api.nuvem import (
     ContasIdentityPlatform,
     DisparoPeloWorkflows,
     JanelasStorage,
+    ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
@@ -236,6 +242,7 @@ def criar_app(
     janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
     marcas: CatalogoDeMarcas | None = None,
+    fotos_de_referencia: FotosDeReferencia | None = None,
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
@@ -413,6 +420,21 @@ def criar_app(
             arquivos or ArquivosEmMemoria(),
             repositorio_de_auditoria,
             relogio,
+            catalogo_de_pessoas,
+            catalogo_de_marcas,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_lixeira_do_catalogo(
+            catalogo_de_pessoas,
+            catalogo_de_marcas,
+            repositorio_de_jobs,
+            repositorio_de_correcoes,
+            armazenamento_dos_jobs,
+            fotos_de_referencia or FotosEmMemoria(),
+            repositorio_de_auditoria,
+            relogio,
+            login_recente,
         )
     )
     v1.include_router(
@@ -522,6 +544,9 @@ if _projeto:
         ),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
+        fotos_de_referencia=ReferenciasStorage(
+            ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
+        ),
         sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
         indice=AgentRetrieval(_busca, transporte_http()) if _busca else None,
         copia=copia_do_ambiente(os.environ),

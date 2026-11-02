@@ -1137,7 +1137,11 @@ def _id_no_catalogo(
             if entrada.catalogo_de == "pessoas"
             else (marcas.obter(novo.catalogo_id) if marcas else None)
         )
-        if achado is None or normalizar(novo.valor) not in _nomes_de_busca(achado):
+        if (
+            achado is None
+            or achado.lixeira is not None
+            or normalizar(novo.valor) not in _nomes_de_busca(achado)
+        ):
             raise CatalogoIdInvalido(novo.catalogo_id)
         return achado.id
     if catalogo is None or not entrada.acha_no_catalogo:

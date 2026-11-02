@@ -5,9 +5,10 @@ from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
+from api.catalogo import EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.indice_da_busca import IndiceEmMemoria
-from api.jobs import EnvioParaLixeira, Job, RepositorioEmMemoria
+from api.jobs import Job, RepositorioEmMemoria
 from api.lixeira import ArquivosContados, ArquivosEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria

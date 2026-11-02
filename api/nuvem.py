@@ -31,6 +31,7 @@ from api.auditoria import (
 )
 from api.avaliacao import Avaliacao
 from api.catalogo import (
+    EnvioParaLixeira,
     PessoaDoCatalogo,
     PessoaInexistente,
     Rosto,
@@ -56,7 +57,7 @@ from api.jobs import (
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
-from api.marcas import MarcaDoCatalogo, nomes_de_busca_da_marca
+from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
 from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
@@ -480,10 +481,25 @@ class CatalogoFirestore:
         consulta = self._colecao.where(
             filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
         )
-        return [self._pessoa(d.id, d.to_dict() or {}) for d in consulta.stream()]
+        achadas = [self._pessoa(d.id, d.to_dict() or {}) for d in consulta.stream()]
+        return [p for p in achadas if p.lixeira is None]
+
+    def _lidas(self) -> list[PessoaDoCatalogo]:
+        return [self._pessoa(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
 
     def todas(self) -> list[PessoaDoCatalogo]:
-        return [self._pessoa(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
+        return [p for p in self._lidas() if p.lixeira is None]
+
+    def na_lixeira(self) -> list[PessoaDoCatalogo]:
+        return [p for p in self._lidas() if p.lixeira is not None]
+
+    def definir_lixeira(
+        self, id: str, envio: EnvioParaLixeira | None
+    ) -> PessoaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        return self._gravar(atual.model_copy(update={"lixeira": envio}))
 
     def acrescentar(
         self,
@@ -553,10 +569,40 @@ class CatalogoDeMarcasFirestore:
         consulta = self._colecao.where(
             filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
         )
-        return [self._marca(d.id, d.to_dict() or {}) for d in consulta.stream()]
+        achadas = [self._marca(d.id, d.to_dict() or {}) for d in consulta.stream()]
+        return [m for m in achadas if m.lixeira is None]
+
+    def _lidas(self) -> list[MarcaDoCatalogo]:
+        return [self._marca(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
 
     def todas(self) -> list[MarcaDoCatalogo]:
-        return [self._marca(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
+        return [m for m in self._lidas() if m.lixeira is None]
+
+    def na_lixeira(self) -> list[MarcaDoCatalogo]:
+        return [m for m in self._lidas() if m.lixeira is not None]
+
+    def _gravar(self, marca: MarcaDoCatalogo) -> MarcaDoCatalogo:
+        self._colecao.document(marca.id).set(
+            {
+                **marca.model_dump(exclude={"id"}),
+                "nomes_de_busca": nomes_de_busca_da_marca(marca),
+            }
+        )
+        return marca
+
+    def definir_lixeira(
+        self, id: str, envio: EnvioParaLixeira | None
+    ) -> MarcaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise MarcaInexistente(id)
+        return self._gravar(atual.model_copy(update={"lixeira": envio}))
+
+    def apagar(self, id: str) -> None:
+        referencia = self._colecao.document(id)
+        if not referencia.get().exists:
+            raise MarcaInexistente(id)
+        referencia.delete()
 
     def acrescentar(
         self,
@@ -573,13 +619,7 @@ class CatalogoDeMarcasFirestore:
             a_revisar=a_revisar,
             acrescentada_por=autor,
         )
-        self._colecao.document(marca.id).set(
-            {
-                **marca.model_dump(exclude={"id"}),
-                "nomes_de_busca": nomes_de_busca_da_marca(marca),
-            }
-        )
-        return marca
+        return self._gravar(marca)
 
 
 # ponytail: a busca lê até este tanto de tipos do prefixo; acima disso, o corte é pela chave

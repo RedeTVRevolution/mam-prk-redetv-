@@ -11,11 +11,11 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.busca import Ajustes, Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
-from api.catalogo import CatalogoEmMemoria
+from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
-from api.jobs import EnvioParaLixeira, Job, RepositorioEmMemoria
+from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem

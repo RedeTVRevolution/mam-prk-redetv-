@@ -37,6 +37,7 @@ def test_curador_e_editor_mais_aprovar_correcao_e_reprocessar_etapa() -> None:
         "decupagem.editar",
         "correcao.aprovar",
         "video.reprocessar_etapa",
+        "catalogo.apagar",
     }
 
 

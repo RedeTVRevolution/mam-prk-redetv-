@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from api.catalogo import novo_id
+from api.catalogo import EnvioParaLixeira, novo_id
 from api.comparador import normalizar
 
 
@@ -20,6 +20,12 @@ class MarcaDoCatalogo(BaseModel):
     apelidos: list[str] = []
     a_revisar: bool = False
     acrescentada_por: str | None = None
+    # Na lixeira (#151): some do autocompletar; fica até a purga.
+    lixeira: EnvioParaLixeira | None = None
+
+
+class MarcaInexistente(Exception):
+    """Nenhuma marca do catálogo tem o id pedido."""
 
 
 def nomes_de_busca_da_marca(marca: MarcaDoCatalogo) -> list[str]:
@@ -36,7 +42,21 @@ class CatalogoDeMarcas(Protocol):
         """As marcas cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
         ...
 
-    def todas(self) -> list[MarcaDoCatalogo]: ...
+    def todas(self) -> list[MarcaDoCatalogo]:
+        """As marcas que não estão na lixeira."""
+        ...
+
+    def na_lixeira(self) -> list[MarcaDoCatalogo]: ...
+
+    def definir_lixeira(
+        self, id: str, envio: EnvioParaLixeira | None
+    ) -> MarcaDoCatalogo:
+        """Manda para a lixeira (ou, com `None`, tira); `MarcaInexistente` se o id não existe."""
+        ...
+
+    def apagar(self, id: str) -> None:
+        """`MarcaInexistente` se o id não existe."""
+        ...
 
     def acrescentar(
         self,
@@ -57,10 +77,26 @@ class CatalogoDeMarcasEmMemoria:
 
     def achar(self, nome: str) -> list[MarcaDoCatalogo]:
         chave = normalizar(nome)
-        return [m for m in self._marcas.values() if chave in nomes_de_busca_da_marca(m)]
+        return [m for m in self.todas() if chave in nomes_de_busca_da_marca(m)]
 
     def todas(self) -> list[MarcaDoCatalogo]:
-        return list(self._marcas.values())
+        return [m for m in self._marcas.values() if m.lixeira is None]
+
+    def na_lixeira(self) -> list[MarcaDoCatalogo]:
+        return [m for m in self._marcas.values() if m.lixeira is not None]
+
+    def definir_lixeira(
+        self, id: str, envio: EnvioParaLixeira | None
+    ) -> MarcaDoCatalogo:
+        atual = self._marcas.get(id)
+        if atual is None:
+            raise MarcaInexistente(id)
+        self._marcas[id] = atual.model_copy(update={"lixeira": envio})
+        return self._marcas[id]
+
+    def apagar(self, id: str) -> None:
+        if self._marcas.pop(id, None) is None:
+            raise MarcaInexistente(id)
 
     def acrescentar(
         self,

@@ -33,9 +33,13 @@ from api.lixeira import (
     ImpactoDoVideo,
     _exige_gerir,
     calcular_impacto,
+    login_recente_ou_403,
 )
+from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.nuvem import (
     ArquivosNoStorage,
+    CatalogoDeMarcasFirestore,
+    CatalogoFirestore,
     RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
@@ -164,8 +168,7 @@ def criar_rotas_da_purga(
         pedido: PedidoDePurga,
         pessoa: Annotated[Usuario, Depends(_exige_gerir)],
     ) -> VideoPurgado:
-        if pessoa.login_em is None or relogio() - pessoa.login_em > login_recente:
-            raise HTTPException(403, "login_recente_exigido")
+        login_recente_ou_403(pessoa, relogio(), login_recente)
         job = repositorio.obter(id_do_video)
         if job is None:
             raise HTTPException(404, "Job não encontrado")
@@ -204,6 +207,13 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     )
     purgados = purgar_vencidas(repositorio, purga, agora_utc())
     log.info("purga automática: %d vídeo(s) purgado(s)", len(purgados))
+    no_catalogo = purgar_catalogo_vencido(
+        CatalogoFirestore(cliente),
+        CatalogoDeMarcasFirestore(cliente),
+        RepositorioDeAuditoriaFirestore(cliente),
+        agora_utc(),
+    )
+    log.info("purga automática: %d item(ns) do catálogo purgado(s)", no_catalogo)
     return 0
 
 

@@ -33,7 +33,8 @@ from api.auth import (
     Sistema,
     Usuario,
 )
-from api.catalogo import Catalogo
+from api.catalogo import Catalogo, EnvioParaLixeira
+from api.catalogo_apagado import sem_catalogo_apagado
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
@@ -173,15 +174,6 @@ class Etapa(BaseModel):
     # e em etapa anterior ao campo.
     dispositivo: DispositivoDaEtapa | None = None
     tentativas_gpu: int | None = None
-
-
-class EnvioParaLixeira(BaseModel):
-    """Quando, por quem e por quê o vídeo foi para a lixeira (E8, #144)."""
-
-    em: datetime
-    por_uid: str
-    por_email: str
-    motivo: str
 
 
 class Job(BaseModel):
@@ -1030,6 +1022,11 @@ def criar_rotas(
             return _resposta(pedacos, request)
         modelo, versao_atual = _ler_modelo(job.id)
         entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
+        entregue = sem_catalogo_apagado(
+            entregue,
+            lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
+            lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
+        )
         return _resposta(iter([json.dumps(entregue).encode()]), request)
 
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:

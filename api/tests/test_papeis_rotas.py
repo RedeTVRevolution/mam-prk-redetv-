@@ -109,6 +109,7 @@ def test_eu_devolve_papeis_e_permissoes() -> None:
         "email_verificado": False,
         "papeis": ["curador"],
         "permissoes": [
+            "catalogo.apagar",
             "correcao.aprovar",
             "decupagem.editar",
             "decupagem.ver",
