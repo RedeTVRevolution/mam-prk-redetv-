@@ -236,11 +236,11 @@ export default function Visualizador({
     }
   }
 
-  // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
   const apontarObjeto = useCallback((o: ObjetoApontado | null) => {
     const { videoWidth, videoHeight } = player.current ?? { videoWidth: 0, videoHeight: 0 }
     setObjetoApontado(o && videoWidth && videoHeight ? { ...o, proporcao: videoWidth / videoHeight } : o)
   }, [])
+  // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
   const urlDoQuadro = useMemo(() => criarCacheDeQuadros((arquivo) => api.job(job.id).quadro(arquivo)), [api, job.id])
 
   const faixas = useMemo(() => (decupagem ? faixasDoVisualizador(decupagem) : null), [decupagem])

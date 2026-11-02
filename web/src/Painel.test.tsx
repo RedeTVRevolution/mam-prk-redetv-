@@ -849,3 +849,16 @@ test('focar num objeto mostra o quadro com a caixa, e tirar o foco volta ao víd
   act(() => objeto.blur())
   expect(screen.queryByRole('img', { name: /Quadro com a caixa/ })).toBeNull()
 })
+
+test('o objeto que some apontado (a lista fechada) não deixa o quadro sobre o player', async () => {
+  const usuario = await abrirComInventario()
+  await usuario.click(within(painel()).getByRole('button', { name: 'Ver todos os objetos do plano (4)' }))
+
+  act(() => within(painel()).getByRole('button', { name: 'caneca' }).focus())
+  expect(await screen.findByRole('img', { name: 'Quadro com a caixa de caneca' })).toBeTruthy()
+
+  // Clique sem mover o foco, como um atalho de teclado: o botão some sem blur.
+  fireEvent.click(within(painel()).getByRole('button', { name: 'Ocultar os objetos do plano' }))
+  expect(within(painel()).queryByText('caneca')).toBeNull()
+  expect(screen.queryByRole('img', { name: /Quadro com a caixa/ })).toBeNull()
+})

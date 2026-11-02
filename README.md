@@ -98,7 +98,7 @@ Os dois alvos abaixo só rodam com credenciais (ADC de quem roda e o `.env`) e f
 
 - Vídeo **sem inventário** (analisado antes do #244): no Visualizador, "Reprocessar…" a partir de `inventario_de_objetos`, que roda o inventário e depois a indexação. No dev são poucos vídeos; se forem muitos, um laço pela rota do reprocessar (#147).
 - Vídeo **com inventário, mas indexado antes do #245**: `make reindexar` sem `JOB`, que reindexa todos os concluídos.
-- A coleção já criada não muda de esquema: `make criar-colecao-da-busca` é idempotente e deixa como está o que existe. Uma coleção nascida antes deste ticket não declara o campo `destaque`; se o Agent Retrieval recusar (ou ignorar) o campo, recrie a coleção (`apagar_colecao` e `make criar-colecao-da-busca`) e rode `make reindexar`. Não conferi aqui, sem credencial, se ele aceita campo fora do esquema.
+- A coleção já criada não muda de esquema: `make criar-colecao-da-busca` é idempotente e deixa como está o que existe. Uma coleção nascida antes deste ticket não declara o campo `destaque`; se o Agent Retrieval recusar (ou ignorar) o campo, recrie a coleção (`apagar_colecao` e `make criar-colecao-da-busca`) e rode `make reindexar`. Ainda não foi conferido se ele aceita campo fora do esquema.
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022), conferido no #122.
 

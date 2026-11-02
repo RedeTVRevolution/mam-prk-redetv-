@@ -1,4 +1,4 @@
-from api.decupagem import Decupagem, ObjetoDoInventario
+from api.decupagem import CATEGORIAS_DE_OBJETO, Decupagem, ObjetoDoInventario
 from api.exemplos_da_busca import (
     EXEMPLOS,
     OUTRA,
@@ -8,6 +8,7 @@ from api.exemplos_da_busca import (
     _pessoa,
 )
 from api.indice_da_busca import (
+    NOME_DA_CATEGORIA,
     Consulta,
     Filtros,
     IndiceEmMemoria,
@@ -201,8 +202,70 @@ def test_o_objeto_de_cena_curto_leva_a_categoria_e_passa_do_piso_de_palavras() -
         for r in registros_da_decupagem("j", decupagem, None, None)
         if r.tipo == "objeto"
     ]
-    assert carro.texto == "carro azul, veiculo"
+    assert carro.texto == "carro azul, veículo, objeto de cena"
     assert len((carro.texto or "").split()) >= 3
+
+
+def test_o_objeto_de_uma_palavra_sem_dono_passa_do_piso_de_palavras() -> None:
+    decupagem = _com_inventario(_decupagem([], [], []))
+    planos = [
+        p.model_copy(
+            update={
+                "inventario": [
+                    i.model_copy(update={"nome": "microfone", "cor": None})
+                    for i in p.inventario
+                    if i.destaque == 3
+                ]
+            }
+        )
+        for p in decupagem.planos
+    ]
+    [microfone] = [
+        r
+        for r in registros_da_decupagem(
+            "j", decupagem.model_copy(update={"planos": planos}), None, None
+        )
+        if r.tipo == "objeto"
+    ]
+    assert microfone.texto == "microfone, veículo, objeto de cena"
+    assert len((microfone.texto or "").split()) >= 3
+
+
+def test_toda_categoria_tem_nome_em_portugues() -> None:
+    assert set(NOME_DA_CATEGORIA) == set(CATEGORIAS_DE_OBJETO)
+
+
+def test_o_registro_proprio_leva_o_quadro_da_maior_caixa() -> None:
+    decupagem = _com_inventario(_decupagem([], [], []))
+    pequena = {
+        "quadro": "pla1-b.jpg",
+        "x": 0.0,
+        "y": 0.0,
+        "largura": 0.1,
+        "altura": 0.1,
+    }
+    grande = {"quadro": "pla1-c.jpg", "x": 0.0, "y": 0.0, "largura": 0.6, "altura": 0.6}
+    planos = [
+        p.model_copy(
+            update={
+                "inventario": [
+                    ObjetoDoInventario.model_validate(
+                        {**i.model_dump(), "caixas": [pequena, grande]}
+                    )
+                    for i in p.inventario
+                ]
+            }
+        )
+        for p in decupagem.planos
+    ]
+    [carro] = [
+        r
+        for r in registros_da_decupagem(
+            "j", decupagem.model_copy(update={"planos": planos}), None, None
+        )
+        if r.tipo == "objeto"
+    ]
+    assert carro.quadro == "pla1-c.jpg"
 
 
 def test_a_roupa_curta_leva_a_categoria_e_o_dono() -> None:
@@ -229,7 +292,7 @@ def test_pessoa_nao_identificada_nao_vira_dono_no_texto() -> None:
         for r in registros_da_decupagem("j", decupagem, None, None)
         if r.tipo == "objeto"
     ]
-    assert roupa.texto == "blazer preto, roupa"
+    assert roupa.texto == "blazer preto, roupa, de pessoa não identificada"
 
 
 def test_decupagem_sem_inventario_segue_como_antes() -> None:

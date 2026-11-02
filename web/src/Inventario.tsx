@@ -1,5 +1,5 @@
 import { Box, Button, Stack, Text, UnstyledButton } from '@mantine/core'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { inventarioDeDestaque, inventarioPorCategoria, maiorCaixa } from './painel.ts'
 import type { CaixaDoQuadro, ObjetoDoInventario } from './Video.tsx'
 
@@ -22,13 +22,28 @@ function Objeto({
   aoApontar: (o: ObjetoApontado | null) => void
 }) {
   const detalhes = [objeto.cor, objeto.marca].filter(Boolean).join(' · ')
-  const apontar = () => aoApontar({ nome: objeto.nome, caixa: maiorCaixa(objeto) })
+  // O botão que some apontado (a lista fechada, outra aba) não recebe o mouse sair nem o blur.
+  const apontado = useRef(false)
+  useEffect(
+    () => () => {
+      if (apontado.current) aoApontar(null)
+    },
+    [aoApontar],
+  )
+  const apontar = () => {
+    apontado.current = true
+    aoApontar({ nome: objeto.nome, caixa: maiorCaixa(objeto) })
+  }
+  const soltar = () => {
+    apontado.current = false
+    aoApontar(null)
+  }
   return (
     <UnstyledButton
       onMouseEnter={apontar}
-      onMouseLeave={() => aoApontar(null)}
+      onMouseLeave={soltar}
       onFocus={apontar}
-      onBlur={() => aoApontar(null)}
+      onBlur={soltar}
       style={{ display: 'block', textAlign: 'left', padding: '2px 4px' }}
     >
       <Text span size="sm">

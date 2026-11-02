@@ -258,7 +258,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
       objeto: {
         id: objeto.id,
         tipo: objeto.tipo,
-        categoria: NOME_DA_CATEGORIA[objeto.categoria] ?? objeto.categoria,
+        categoria: nomeDaCategoria(objeto.categoria),
         coresBase: objeto.cor_base,
         tom: tomDoObjeto(objeto) ?? '',
         dono: objeto.pessoa

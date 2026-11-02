@@ -9,7 +9,14 @@ from datetime import date
 from typing import Any, Literal, Protocol
 
 from api.comparador import normalizar
-from api.decupagem import Decupagem, ObjetoDoInventario, Pessoa, _Intervalo
+from api.decupagem import (
+    CategoriaDeObjeto,
+    Decupagem,
+    ObjetoDoInventario,
+    Pessoa,
+    _Intervalo,
+)
+from api.identidade import nao_identificado
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
 
@@ -95,15 +102,45 @@ def _frase(*partes: str | None) -> str | None:
 DESTAQUE_COM_REGISTRO_PROPRIO = 3
 
 
-def _texto_curto(peca: str | None, categoria: str, dono: str | None = None) -> str:
-    """A peça, a categoria e o dono ("blazer preto, roupa, de Flávia Noronha"): um objeto
-    de uma ou duas palavras passa do piso de palavras da busca por significado."""
-    return ", ".join(p for p in (peca, categoria, f"de {dono}" if dono else None) if p)
+# A categoria como a tela a mostra (`web/src/painel.ts`), para a consulta em português casar.
+NOME_DA_CATEGORIA: dict[CategoriaDeObjeto, str] = {
+    "roupa": "roupa",
+    "calcado": "calçado",
+    "acessorio": "acessório",
+    "na_mao": "na mão",
+    "em_cena": "em cena",
+    "veiculo": "veículo",
+    "outro": "outro",
+    "eletronico": "eletrônico",
+    "produto": "produto",
+    "animal": "animal",
+    "alimento": "alimento",
+    "movel": "móvel",
+    "decoracao": "decoração",
+    "instrumento_musical": "instrumento musical",
+    "utensilio": "utensílio",
+    "documento": "documento",
+    "planta": "planta",
+    "bebida": "bebida",
+}
+# O dono de quem não tem nome, e o do objeto sem pessoa.
+DONO_SEM_NOME = "de pessoa não identificada"
+SEM_DONO = "objeto de cena"
+
+
+def _texto_curto(peca: str | None, categoria: CategoriaDeObjeto, dono: str) -> str:
+    """A peça, a categoria e o dono ("blazer preto, roupa, de Flávia Noronha"; sem
+    dono, "objeto de cena"): um objeto de uma palavra passa do piso de palavras da
+    busca por significado."""
+    return ", ".join(p for p in (peca, NOME_DA_CATEGORIA[categoria], dono) if p)
 
 
 def _inventario_em_texto(inventario: list[ObjetoDoInventario]) -> str | None:
     """Todos os objetos do plano, para a consulta achar o plano por qualquer um deles."""
-    itens = [f"{_frase(i.nome, i.cor, i.marca)} ({i.categoria})" for i in inventario]
+    itens = [
+        f"{_frase(i.nome, i.cor, i.marca)} ({NOME_DA_CATEGORIA[i.categoria]})"
+        for i in inventario
+    ]
     return f"Objetos: {', '.join(itens)}" if itens else None
 
 
@@ -139,13 +176,13 @@ def registros_da_decupagem(
                 return plano.quadro
         return None
 
-    def nome_do_dono(id: str | None) -> str | None:
-        for pessoa in decupagem.pessoas:
-            if pessoa.id == id and not pessoa.nome.lower().startswith(
-                "não identificado"
-            ):
-                return pessoa.nome
-        return None
+    nomes = {p.id: p.nome for p in decupagem.pessoas}
+
+    def dono(id: str | None) -> str:
+        nome = nomes.get(id) if id else None
+        if nome is None:
+            return SEM_DONO
+        return DONO_SEM_NOME if nao_identificado(nome) else f"de {nome}"
 
     registros: list[Registro] = []
     for n, plano in enumerate(decupagem.planos):
@@ -181,9 +218,12 @@ def registros_da_decupagem(
                     cor=item.cor,
                     marca=item.marca,
                     texto=_texto_curto(
-                        _frase(item.nome, item.cor, item.marca), item.categoria
+                        _frase(item.nome, item.cor, item.marca),
+                        item.categoria,
+                        SEM_DONO,
                     ),
-                    quadro=item.caixas[0].quadro,
+                    # O quadro da maior caixa, o mesmo que o player mostra.
+                    quadro=max(item.caixas, key=lambda c: c.largura * c.altura).quadro,
                     destaque=item.destaque,
                     **base,
                 )
@@ -239,7 +279,7 @@ def registros_da_decupagem(
                             objeto.detalhe,
                         ),
                         objeto.categoria,
-                        nome_do_dono(objeto.pessoa),
+                        dono(objeto.pessoa),
                     ),
                     # O quadro do objeto é o da primeira ocorrência.
                     quadro=(objeto.quadro if k == 0 else None)

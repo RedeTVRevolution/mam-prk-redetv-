@@ -745,7 +745,12 @@ def test_so_a_clausula_do_texto_livre_corta_o_significado() -> None:
 
 def _por_destaque(destaque: int | None, id: str, inicio: int) -> Registro:
     return objeto(
-        id, "j1", inicio, inicio + 1_000, destaque=destaque, texto="carro azul, veiculo"
+        id,
+        "j1",
+        inicio,
+        inicio + 1_000,
+        destaque=destaque,
+        texto="carro azul, veículo, objeto de cena",
     )
 
 

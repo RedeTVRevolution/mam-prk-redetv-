@@ -33,8 +33,9 @@ log = logging.getLogger(__name__)
 
 RRF_K = 60
 # Cada nível de destaque acima de 1 soma isto à pontuação do objeto do inventário: o
-# destaque 3 (+6%) passa quem está logo atrás, uns três lugares na lista, e não quem
-# está bem mais acima. Registro sem destaque pesa 1.
+# destaque 3 (+6%) passa quem está logo atrás, uns três lugares no topo da lista (a
+# pontuação é 1/(60+posição), então o ganho cresce para uns nove lugares na
+# centésima posição), e não quem está bem mais acima. Registro sem destaque pesa 1.
 PESO_POR_NIVEL_DE_DESTAQUE = 0.03
 TETO_DE_REGISTROS = 100  # por cláusula
 TETO_DE_VIDEOS = 50
