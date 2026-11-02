@@ -1,4 +1,4 @@
-.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao
+.PHONY: emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao
 
 instalar:
 	uv sync --locked
@@ -173,3 +173,11 @@ tempo-de-revisao:
 	set -a && . ./.env && set +a && \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	uv run --locked python -m api.tempo_de_revisao "$(DESDE)"
+
+# Casos de regressão das correções em vigor (#253): make exportar-regressao [PASTA=evals/regressao/casos]
+exportar-regressao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.regressao "$(PASTA)"

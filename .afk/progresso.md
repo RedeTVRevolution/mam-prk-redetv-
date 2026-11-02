@@ -373,3 +373,11 @@ Não corrigido:
 - Volta da pausa entre 4 e 5 min depois do último aviso: o `inicio` não soma o intervalo (certo), mas não conta outra sessão. Efeito pequeno na contagem.
 - `fim` sem `keepalive` ao fechar a aba (já anotado): o `pedir` busca o token antes do fetch, então `keepalive` sozinho não garante.
 - Smells de julgamento: imports de privados de `api.jobs` (`_exige_editar`, `_tem_permissao`, `_confere_permissao`), `exigir_do_ambiente` vindo de `comparar_objetos`, `total_ativo_s`/uid além do pedido. Refatoração sem bug.
+- 2026-11-02 09:59:33 · #251: feito
+- 2026-11-02 09:59:38 · iteração 52: #253
+
+## #253 iteração 53 (feito, `make verificar` verde)
+- Pronto: `api/comparador.py` ampliado (tipos `plano`, `fala`, `texto_na_tela`, `objeto`; `itens_do_modelo` os lê; `make comparar` igual para os gabaritos de hoje); `api/regressao.py` (`Caso` em JSON com SHA-256, trecho, esperado, `reservado`, Job, `versao_pipeline` e a correção; `caso_do_gabarito`; `casos_das_correcoes`; `exportar`; `ler_casos`; `ler_metas`); `make exportar-regressao [PASTA=]`; `evals/regressao/` (`casos/`, `metas.json` vazio, README); GLOSSARY.
+- Decisões: reserva = sha256(id) % 100 < 20, e o `Caso` recusa `reservado` diferente do sorteio. Correção "aprovada" = em vigor (`estado_das.em_vigor`: aprovada, ou de tipo sem aprovação, não desfeita); `pessoa.nao_e` fica de fora (sem item positivo). Esperado da correção: tempos de `item.tempos` vêm do `depois`; nome novo vira a identidade em renomear/marca/texto/título.
+- Falta para o #254: o comando que roda os casos contra a decupagem (aqui só o formato, a exportação e a reserva). O #252 preenche `metas.json` e anota casos.
+- Armadilha: o id do caso anotado usa `sha256[:12]`, então dois trechos iguais do mesmo vídeo colidem (é o desejado: mesmo caso).

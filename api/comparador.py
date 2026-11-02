@@ -1,6 +1,8 @@
 """Comparador de tempos da decupagem com o gabarito (aceite da E0).
 
-Uso: `python -m api.comparador GABARITO_DIR DECUPAGENS_DIR`. Cada CSV do
+Uso: `python -m api.comparador GABARITO_DIR DECUPAGENS_DIR`. Os tipos são todas as
+categorias da decupagem (`TIPOS`); os casos do conjunto de regressão (`api/regressao.py`)
+usam os mesmos `Item` e `Tipo`. Cada CSV do
 gabarito traz na primeira linha `# sha256: <hex>`, depois o cabeçalho
 `tipo,identidade,inicio,fim` com tempos em `MM:SS`. Cada decupagem é um JSON
 `*.json`; o clipe é pareado com o gabarito pelo SHA-256 do bloco `video`.
@@ -14,15 +16,24 @@ import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from api.decupagem import Decupagem
 
-Tipo = Literal["aparicao", "mencao", "pauta", "comercial"]
-TIPOS: tuple[Tipo, ...] = ("aparicao", "mencao", "pauta", "comercial")
+Tipo = Literal[
+    "aparicao",
+    "mencao",
+    "pauta",
+    "comercial",
+    "plano",
+    "fala",
+    "texto_na_tela",
+    "objeto",
+]
+TIPOS: tuple[Tipo, ...] = get_args(Tipo)
 TIPOS_COM_IDENTIDADE: frozenset[Tipo] = frozenset(
-    {"aparicao", "mencao", "comercial"}
-)  # pauta: só tempo
+    {"aparicao", "mencao", "comercial", "texto_na_tela", "objeto"}
+)  # pauta, plano e fala: só tempo
 TOLERANCIA_MS = 2000
 META = 0.95
 
@@ -132,6 +143,13 @@ def itens_do_modelo(d: Decupagem) -> list[Item]:
         itens += [Item("aparicao", p.nome, a.inicio_ms, a.fim_ms) for a in p.na_imagem]
         for m in [*p.citada_na_fala, *p.citada_no_texto]:
             itens.append(Item("mencao", p.nome, m.inicio_ms, m.fim_ms))
+    itens += [Item("plano", p.ambiente, p.inicio_ms, p.fim_ms) for p in d.planos]
+    itens += [Item("fala", f.locutor, f.inicio_ms, f.fim_ms) for f in d.transcricao]
+    itens += [
+        Item("texto_na_tela", t.texto, t.inicio_ms, t.fim_ms) for t in d.textos_na_tela
+    ]
+    for o in d.objetos:
+        itens += [Item("objeto", o.tipo, i.inicio_ms, i.fim_ms) for i in o.ocorrencias]
     return itens
 
 
