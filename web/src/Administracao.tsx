@@ -7,11 +7,13 @@ import { Link } from './Link.tsx'
 import { ACERVO, enderecoDaAba, navegar } from './rotas.ts'
 import { CORES } from './tema.ts'
 import Chaves from './Chaves.tsx'
+import Entradas from './Entradas.tsx'
+import { filtrosDasEntradas } from './entradas.ts'
 import Lixeira from './Lixeira.tsx'
 import Usuarios from './Usuarios.tsx'
 
 /** `/admin`: as abas são links com endereço próprio; `/admin` abre a primeira permitida. */
-export default function Administracao({ api, aba, usuario, aoEntrarDeNovo }: { api: ClienteDaApi; aba: string | null; usuario: Usuario; aoEntrarDeNovo: () => void }) {
+export default function Administracao({ api, aba, busca, usuario, aoEntrarDeNovo }: { api: ClienteDaApi; aba: string | null; busca: string; usuario: Usuario; aoEntrarDeNovo: () => void }) {
   const permitidas = abasPermitidas(usuario.permissoes)
   const atual = permitidas.find((a) => a.aba === aba)
   const primeira = permitidas[0]?.aba
@@ -50,6 +52,14 @@ export default function Administracao({ api, aba, usuario, aoEntrarDeNovo }: { a
           ))}
         </Group>
       </nav>
+      {atual.aba === 'entradas' && (
+        <Entradas
+          api={api}
+          filtros={filtrosDasEntradas(busca)}
+          podeReprocessar={usuario.permissoes.includes('video.reprocessar')}
+          podeEscolherEtapa={usuario.permissoes.includes('video.reprocessar_etapa')}
+        />
+      )}
       {atual.aba === 'usuarios' && <Usuarios api={api} eu={usuario} />}
       {atual.aba === 'chaves' && <Chaves api={api} />}
       {atual.aba === 'lixeira' && <Lixeira api={api} aoEntrarDeNovo={aoEntrarDeNovo} />}

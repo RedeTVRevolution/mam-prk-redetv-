@@ -2,6 +2,7 @@ import type { Usuario } from './App.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
 import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
+import { consultaDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
 import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
@@ -99,6 +100,8 @@ export interface ClienteDoJob {
   descartar(itemId: string, motivo: string): Promise<void>
   /** `POST /v1/jobs/{id}/reprocessar` numa etapa escolhida (exige `video.reprocessar_etapa`). */
   reprocessar(etapa: string, motivo: string): Promise<Job>
+  /** `POST /v1/jobs/{id}/reprocessar` sem etapa: recomeça da que falhou (exige `video.reprocessar`). */
+  reprocessarOQueFalhou(motivo: string): Promise<Job>
 }
 
 /** Um nome do catálogo de pessoas ou de marcas (ou um tipo de objeto já visto), como o autocompletar o mostra. */
@@ -213,6 +216,8 @@ export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
   acervo(filtros: FiltrosDoAcervo, cursor?: string | null): Promise<PaginaDoAcervo>
+  /** Uma página dos vídeos que entraram, de pessoas e de sistemas; a API só filtra sistema e estado. */
+  entradas(filtros: FiltrosDasEntradas, cursor?: string | null): Promise<PaginaDoAcervo>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
@@ -336,6 +341,8 @@ export function criarClienteDaApi(
         }),
       reprocessar: (etapa, motivo) =>
         chamar(`${base}/reprocessar`, { post: true, corpo: { etapa, motivo } }),
+      reprocessarOQueFalhou: (motivo) =>
+        chamar(`${base}/reprocessar`, { post: true, corpo: motivo ? { motivo } : undefined }),
     }
   }
 
@@ -343,6 +350,13 @@ export function criarClienteDaApi(
     eu: () => chamar('/v1/eu'),
     acervo: async (filtros, cursor = null) => {
       const resposta = await pedir(`/v1/jobs?${filtrosParaApi(filtros, cursor)}`)
+      return {
+        jobs: (await resposta.json()) as Job[],
+        proximo: resposta.headers.get('X-Proximo-Cursor'),
+      }
+    },
+    entradas: async (filtros, cursor = null) => {
+      const resposta = await pedir(`/v1/jobs?${consultaDasEntradas(filtros, cursor)}`)
       return {
         jobs: (await resposta.json()) as Job[],
         proximo: resposta.headers.get('X-Proximo-Cursor'),

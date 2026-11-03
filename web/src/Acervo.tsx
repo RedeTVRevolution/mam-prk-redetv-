@@ -36,7 +36,7 @@ import MandarParaLixeira from './MandarParaLixeira.tsx'
 import { Quadro } from './Miniatura.tsx'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { fraseDaFalha } from './falhas.ts'
-import { dataDeExibicao, filtrosParaBusca, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
+import { dataDeExibicao, dataEHora, filtrosParaBusca, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
 import { tempo } from './linhaDoTempo.ts'
 import { ACERVO, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, ESTADOS_DO_JOB, type EstadoDoJob } from './tema.ts'
@@ -53,12 +53,6 @@ const ATALHOS: Atalho[] = [
   { tecla: '↑ ↓', acao: 'Na tabela: mover a linha selecionada', grupo: 'Acervo' },
   { tecla: 'Enter', acao: 'Na tabela: abrir o vídeo da linha selecionada', grupo: 'Acervo' },
 ]
-
-function dataEHora(iso: string): string {
-  const d = new Date(iso)
-  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  return `${d.toLocaleDateString('pt-BR')} ${hora}`
-}
 
 type Carga =
   | { tipo: 'carregando' }

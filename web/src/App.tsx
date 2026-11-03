@@ -192,7 +192,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
         </AppShell.Main>
       ) : rota.tipo === 'admin' ? (
         <AppShell.Main bg="dark.7">
-          <Administracao api={api} aba={rota.aba} usuario={sessao.usuario} aoEntrarDeNovo={() => void sair()} />
+          <Administracao api={api} aba={rota.aba} busca={rota.busca} usuario={sessao.usuario} aoEntrarDeNovo={() => void sair()} />
         </AppShell.Main>
       ) : (
         <AppShell.Main bg="dark.7">

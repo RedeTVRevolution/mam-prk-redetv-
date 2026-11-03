@@ -2,6 +2,14 @@ import { ESTADOS_DO_JOB } from './tema.ts'
 
 // O que a API mostra de um Job e os filtros do acervo, que viajam na URL e na chamada.
 
+/** Uma etapa já iniciada do Job; `fim` e `resultado` só depois que ela acaba. */
+export interface EtapaDoJob {
+  nome: string
+  inicio: string
+  fim: string | null
+  resultado: 'concluida' | 'falhou' | null
+}
+
 export interface Job {
   id: string
   nome: string
@@ -22,7 +30,10 @@ export interface Job {
   programa?: string | null
   data_exibicao?: string | null
   enviado_por?: { tipo: 'pessoa' | 'sistema'; nome: string | null }
+  /** As etapas iniciadas, da primeira à última. */
+  etapas?: EtapaDoJob[]
   criado_em: string
+  atualizado_em?: string
 }
 
 export interface JobCriado extends Job {
@@ -110,4 +121,11 @@ export function filtrosParaApi(f: FiltrosDoAcervo, cursor: string | null): strin
   for (const e of f.estado) p.append('estado', e)
   if (cursor) p.set('cursor', cursor)
   return p.toString()
+}
+
+/** O instante como `DD/MM/AAAA HH:MM`. */
+export function dataEHora(iso: string): string {
+  const d = new Date(iso)
+  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  return `${d.toLocaleDateString('pt-BR')} ${hora}`
 }
