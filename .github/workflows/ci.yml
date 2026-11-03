@@ -81,6 +81,9 @@ jobs:
       # Plano do dev com o provider simulado (infra/plano_simulado.tftest.hcl): pega erro que só
       # aparece no plan, como tipos diferentes numa condicional, sem credencial de nuvem.
       - run: terraform -chdir=infra test
+      # O pré-voo do apply (api/pre_voo.py) roda no `publicar` com o python3 do runner, sem
+      # instalar nada: este job, na mesma imagem e também sem Python instalado, prova que ele roda.
+      - run: echo '{"resource_changes":[]}' >"$RUNNER_TEMP/plano.json" && python3 -m api.pre_voo "$RUNNER_TEMP/plano.json"
       - run: terraform -chdir=infra/ambientes/prod init -backend=false -input=false
       - run: terraform -chdir=infra/ambientes/prod fmt -check
       - run: terraform -chdir=infra/ambientes/prod validate
