@@ -76,21 +76,22 @@ OBJETOS_GPU="$REPOSITORIO_GPU/objetos-gpu:$COMMIT"
 CACHE_GPU="$REPOSITORIO_GPU/cache"
 # Os Jobs com GPU e as imagens que têm hoje, lidas antes do apply, para o teste depois da
 # publicação saber quais imagens mudaram e a que voltar. Vazias na primeira publicação: o
-# Job ainda não está no estado do Terraform. Se ele está e o describe falha, a publicação
-# para aqui, para não seguir sem a imagem a que voltar. Um Job com GPU a mais entra no
+# Job ainda não está no estado do Terraform. Isso se lê na lista do estado, não no output:
+# o nome do Job sai da configuração e o output fica gravado mesmo quando o apply cai antes
+# de criar o Job (deploy de 2026-11-03). Se ele está no estado e o describe falha, a
+# publicação para aqui, para não seguir sem a imagem a que voltar. Um Job com GPU a mais entra no
 # teste com mais uma linha em JOBS_GPU, depois de ter o alvo de construção, o Job no
 # Terraform e a imagem lida aqui e publicada pelo digest, como estes dois.
 GPU_REGIAO=$(tf output -raw regiao_gpu 2>/dev/null || true)
-imagem_do_job() {
-  [[ -z $1 ]] && return 0
-  gc run jobs describe "$1" --region "$GPU_REGIAO" --format='value(spec.template.spec.template.spec.containers[0].image)'
+ESTADO_DOS_JOBS=$(tf state list)
+imagem_do_job() { # <recurso no módulo> <output com o nome do Job>
+  grep -qxF "module.mam.google_cloud_run_v2_job.$1" <<<"$ESTADO_DOS_JOBS" || return 0
+  gc run jobs describe "$(tf output -raw "$2")" --region "$GPU_REGIAO" \
+    --format='value(spec.template.spec.template.spec.containers[0].image)'
 }
-JOB_TRANSCRICAO_GPU_ANTES=$(tf output -raw job_de_transcricao_gpu 2>/dev/null || true)
-JOB_OCR_GPU_ANTES=$(tf output -raw job_de_ocr_gpu 2>/dev/null || true)
-JOB_OBJETOS_GPU_ANTES=$(tf output -raw job_de_objetos_gpu 2>/dev/null || true)
-TRANSCRICAO_GPU_ANTES=$(imagem_do_job "$JOB_TRANSCRICAO_GPU_ANTES")
-OCR_GPU_ANTES=$(imagem_do_job "$JOB_OCR_GPU_ANTES")
-OBJETOS_GPU_ANTES=$(imagem_do_job "$JOB_OBJETOS_GPU_ANTES")
+TRANSCRICAO_GPU_ANTES=$(imagem_do_job transcricao_gpu job_de_transcricao_gpu)
+OCR_GPU_ANTES=$(imagem_do_job ocr_gpu job_de_ocr_gpu)
+OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu job_de_objetos_gpu)
 # O Cloud Build constrói, em paralelo e com cache, e envia as sete imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
@@ -128,7 +129,9 @@ GPU_REGIAO=$(tf output -raw regiao_gpu) GPU_ESPERA_TOTAL_S=$(tf output -raw gpu_
 # Com o balanceador (#294), o run.app não responde de fora e o teste vai pelo domínio, mas o
 # certificado só fica ativo depois do DNS (até 24 h): até lá, só um aviso.
 URL=$(tf output -raw url)
-CERTIFICADO=$(tf output -json certificado_do_balanceador | jq -r '. // empty')
+# Pela lista inteira: um output nulo (sem balanceador) não fica no estado, e pedido pelo
+# nome o `tf output` falha em vez de dar vazio (deploy de 2026-11-03).
+CERTIFICADO=$(tf output -json | jq -r '.certificado_do_balanceador.value // empty')
 if [[ -n $CERTIFICADO ]] &&
   [[ $(gc compute ssl-certificates describe "$CERTIFICADO" --global --format='value(managed.status)') != ACTIVE ]]; then
   echo "Aviso: o certificado de $URL ainda não está ativo (registro A para $(tf output -raw ip_do_balanceador); infra/README.md). /v1/health não foi testado." >&2

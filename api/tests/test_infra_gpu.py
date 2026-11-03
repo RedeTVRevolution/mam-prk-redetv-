@@ -1,6 +1,8 @@
 """Infraestrutura dos Jobs com GPU (#238): Terraform, build e publicação, sem nuvem."""
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
 RAIZ = Path(__file__).parents[2]
@@ -240,3 +242,39 @@ def test_job_com_gpu_de_mais_de_uma_hora_declara_beta(nome: str) -> None:
     # Sem BETA, a API recusa GPU com timeout acima de 1 h (deploy de 2026-11-03).
     job = _bloco(f'resource "google_cloud_run_v2_job" "{nome}"')
     assert 'launch_stage = "BETA"' in job
+
+
+def _rodar_imagem_do_job(estado: str, describe_falha: bool = False) -> tuple[int, str]:
+    """Roda a imagem_do_job do deploy-dev.sh com tf e gc simulados."""
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    inicio = deploy.index("imagem_do_job() {")
+    funcao = deploy[inicio : deploy.index("\n}\n", inicio) + 3]
+    script = f"""set -euo pipefail
+tf() {{ [[ $* == "output -raw job_de_ocr_gpu" ]] && echo mam-ocr-gpu; }}
+gc() {{ {"echo 'Cannot find job' >&2; return 1" if describe_falha else 'echo "imagem-de-$4"'}; }}
+GPU_REGIAO=us-east4
+ESTADO_DOS_JOBS={shlex.quote(estado)}
+{funcao}
+ANTES=$(imagem_do_job ocr_gpu job_de_ocr_gpu)
+echo "[$ANTES]"
+"""
+    feito = subprocess.run(
+        ["bash", "-c", script], check=False, capture_output=True, text=True
+    )
+    return feito.returncode, feito.stdout.strip()
+
+
+def test_job_fora_do_estado_e_primeira_publicacao_mesmo_com_o_output_gravado() -> None:
+    # O apply que cai antes de criar o Job deixa o output; o estado não tem o Job.
+    assert _rodar_imagem_do_job("module.mam.google_cloud_run_v2_job.ocr") == (0, "[]")
+
+
+def test_job_no_estado_le_a_imagem_pelo_nome_do_output() -> None:
+    estado = "module.mam.google_cloud_run_v2_job.ocr_gpu"
+    assert _rodar_imagem_do_job(estado) == (0, "[imagem-de-mam-ocr-gpu]")
+
+
+def test_job_no_estado_que_o_describe_nao_acha_para_a_publicacao() -> None:
+    estado = "module.mam.google_cloud_run_v2_job.ocr_gpu"
+    codigo, _ = _rodar_imagem_do_job(estado, describe_falha=True)
+    assert codigo != 0
