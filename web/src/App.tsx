@@ -33,7 +33,6 @@ const Amostra = lazy(() => import('./Amostra.tsx'))
 export interface Usuario {
   uid: string
   email: string
-  papeis?: string[]
   permissoes: string[]
 }
 

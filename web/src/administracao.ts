@@ -1,6 +1,21 @@
-const PERMISSOES_DE_ADMINISTRACAO = ['usuarios.gerir', 'chaves.gerir', 'lixeira.gerir', 'auditoria.ver']
+export interface Aba {
+  aba: string
+  rotulo: string
+  permissao: string
+}
 
-/** O link "Administração" da barra só existe para quem tem alguma permissão da área. */
+// Cada ticket da área acrescenta a sua aba aqui (chaves, entradas, lixeira, auditoria).
+export const ABAS: Aba[] = [{ aba: 'usuarios', rotulo: 'Usuários', permissao: 'usuarios.gerir' }]
+
+/** As abas que essas permissões abrem, na ordem da área. */
+export function abasPermitidas(permissoes: string[]): Aba[] {
+  return ABAS.filter((a) => permissoes.includes(a.permissao))
+}
+
+/**
+ * O link "Administração" da barra só existe para quem abre alguma aba da área.
+ * Sai das abas, e não da lista de permissões, para o link nunca levar a uma área vazia.
+ */
 export function podeAdministrar(permissoes: string[]): boolean {
-  return PERMISSOES_DE_ADMINISTRACAO.some((p) => permissoes.includes(p))
+  return abasPermitidas(permissoes).length > 0
 }

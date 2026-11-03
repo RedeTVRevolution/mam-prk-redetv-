@@ -2,23 +2,15 @@ import { Group, Stack, Text, Title } from '@mantine/core'
 import { useEffect } from 'react'
 import type { ClienteDaApi } from './api.ts'
 import type { Usuario } from './App.tsx'
+import { abasPermitidas } from './administracao.ts'
 import { Link } from './Link.tsx'
 import { ACERVO, enderecoDaAba, navegar } from './rotas.ts'
 import { CORES } from './tema.ts'
 import Usuarios from './Usuarios.tsx'
 
-interface Aba {
-  aba: string
-  rotulo: string
-  permissao: string
-}
-
-// Cada ticket da área acrescenta a sua aba aqui (chaves, entradas, lixeira, auditoria).
-const ABAS: Aba[] = [{ aba: 'usuarios', rotulo: 'Usuários', permissao: 'usuarios.gerir' }]
-
 /** `/admin`: as abas são links com endereço próprio; `/admin` abre a primeira permitida. */
 export default function Administracao({ api, aba, usuario }: { api: ClienteDaApi; aba: string | null; usuario: Usuario }) {
-  const permitidas = ABAS.filter((a) => usuario.permissoes.includes(a.permissao))
+  const permitidas = abasPermitidas(usuario.permissoes)
   const atual = permitidas.find((a) => a.aba === aba)
   const primeira = permitidas[0]?.aba
 

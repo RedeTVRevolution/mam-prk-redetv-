@@ -1,4 +1,5 @@
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
@@ -12,6 +13,8 @@ import {
   Table,
   Text,
   TextInput,
+  Tooltip,
+  VisuallyHidden,
 } from '@mantine/core'
 import { IconDots, IconPlus, IconSearch } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -33,13 +36,15 @@ const NOME_DO_PAPEL = Object.fromEntries(PAPEIS.map((p) => [p.valor, p.nome]))
 const TODOS = '__todos__'
 const SEM_PERMISSAO = 'Você não tem permissão para isto.'
 
+type Falha = { mensagem: string; codigo: string }
+
 function ultimoAcesso(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
 }
 
 /** A mensagem em português de uma falha da API; o código interno vai à parte. */
-function falhaDaAcao(erro: unknown): { mensagem: string; codigo: string } {
+function falhaDaAcao(erro: unknown): Falha {
   if (erro instanceof FalhaNaApi && erro.status === 403) return { mensagem: SEM_PERMISSAO, codigo: 'http_403' }
   if (erro instanceof ConflitoNaApi || erro instanceof PedidoInvalido) {
     return { mensagem: erro.message, codigo: codigoDoErro(erro) }
@@ -74,12 +79,11 @@ function CaixasDePapeis({
   )
 }
 
+/** Montado só enquanto aberto: fechar e abrir de novo começa com o formulário vazio. */
 function NovaConta({
-  aberta,
   aoFechar,
   aoSalvar,
 }: {
-  aberta: boolean
   aoFechar: () => void
   aoSalvar: (corpo: { email: string; nome: string; papeis: string[] }) => Promise<void>
 }) {
@@ -87,7 +91,7 @@ function NovaConta({
   const [nome, setNome] = useState('')
   const [papeis, setPapeis] = useState<string[]>([])
   const [salvando, setSalvando] = useState(false)
-  const [falha, setFalha] = useState<{ mensagem: string; codigo: string } | null>(null)
+  const [falha, setFalha] = useState<Falha | null>(null)
   const completa = email.trim() !== '' && nome.trim() !== ''
 
   async function salvar() {
@@ -95,9 +99,6 @@ function NovaConta({
     setFalha(null)
     try {
       await aoSalvar({ email: email.trim(), nome: nome.trim(), papeis })
-      setEmail('')
-      setNome('')
-      setPapeis([])
     } catch (erro) {
       if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro))
     } finally {
@@ -106,7 +107,7 @@ function NovaConta({
   }
 
   return (
-    <Modal opened={aberta} onClose={aoFechar} title="Nova conta">
+    <Modal opened onClose={aoFechar} title="Nova conta">
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -148,7 +149,7 @@ function EditarPapeis({
 }) {
   const [papeis, setPapeis] = useState(conta.papeis)
   const [salvando, setSalvando] = useState(false)
-  const [falha, setFalha] = useState<{ mensagem: string; codigo: string } | null>(null)
+  const [falha, setFalha] = useState<Falha | null>(null)
   const travado = propria && conta.papeis.includes('administrador') ? 'administrador' : undefined
 
   async function salvar() {
@@ -199,7 +200,7 @@ export default function Usuarios({ api, eu }: { api: ClienteDaApi; eu: Usuario }
   const [editando, setEditando] = useState<string | null>(null)
   const [desativando, setDesativando] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
-  const [falha, setFalha] = useState<{ mensagem: string; codigo: string } | null>(null)
+  const [falha, setFalha] = useState<Falha | null>(null)
 
   const carregar = useCallback(async () => {
     setCarga({ tipo: 'carregando' })
@@ -297,7 +298,7 @@ export default function Usuarios({ api, eu }: { api: ClienteDaApi; eu: Usuario }
               <Table.Th>Último acesso</Table.Th>
               <Table.Th>Situação</Table.Th>
               <Table.Th>
-                <span style={{ position: 'absolute', left: -9999 }}>Ações</span>
+                <VisuallyHidden>Ações</VisuallyHidden>
               </Table.Th>
             </Table.Tr>
           </Table.Thead>
@@ -341,8 +342,8 @@ export default function Usuarios({ api, eu }: { api: ClienteDaApi; eu: Usuario }
         </Table>
       )}
       {carga.tipo === 'pronta' && visiveis.length === 0 && <Text size="sm">Nenhuma conta neste filtro.</Text>}
-      <NovaConta
-        aberta={criando}
+      {criando && (
+        <NovaConta
         aoFechar={() => setCriando(false)}
         aoSalvar={async (corpo) => {
           const nova = await api.usuarios.criar(corpo)
@@ -351,7 +352,8 @@ export default function Usuarios({ api, eu }: { api: ClienteDaApi; eu: Usuario }
           setFalha(null)
           setAviso(`Conta criada. O link para definir a senha foi enviado para ${nova.email}.`)
         }}
-      />
+        />
+      )}
       {emEdicao && (
         <EditarPapeis
           key={emEdicao.uid}
@@ -398,7 +400,7 @@ function LinhaDaConta({
       <Table.Tr>
         <Table.Td>{conta.nome}</Table.Td>
         <Table.Td>{conta.email}</Table.Td>
-        <Table.Td>{conta.papeis.map((p) => NOME_DO_PAPEL[p] ?? p).sort().join(', ') || '—'}</Table.Td>
+        <Table.Td>{conta.papeis.map((p) => NOME_DO_PAPEL[p] ?? p).join(', ') || '—'}</Table.Td>
         <Table.Td style={{ fontVariantNumeric: 'tabular-nums' }}>{ultimoAcesso(conta.ultimo_acesso)}</Table.Td>
         <Table.Td>
           <Badge variant="light" color={desativada ? CORES.falhou : CORES.concluido} radius="sm">
@@ -407,11 +409,13 @@ function LinhaDaConta({
         </Table.Td>
         <Table.Td>
           <Menu position="bottom-end">
-            <Menu.Target>
-              <Button type="button" variant="subtle" color="gray" size="compact-sm" aria-label={`Ações de ${conta.nome}`}>
-                <IconDots size={16} aria-hidden />
-              </Button>
-            </Menu.Target>
+            <Tooltip label="Ações">
+              <Menu.Target>
+                <ActionIcon variant="subtle" color="gray" aria-label={`Ações de ${conta.nome}`}>
+                  <IconDots size={16} aria-hidden />
+                </ActionIcon>
+              </Menu.Target>
+            </Tooltip>
             <Menu.Dropdown>
               <Menu.Item onClick={aoEditar}>Editar papéis</Menu.Item>
               <Menu.Item onClick={aoReenviar}>Reenviar link de senha</Menu.Item>
@@ -438,10 +442,10 @@ function LinhaDaConta({
           <Table.Td colSpan={6}>
             <Group gap="sm">
               <Text size="sm">{`Desativar ${conta.nome}? A conta sai na hora. Enter confirma`}</Text>
-              <Button type="button" size="compact-sm" color={CORES.falhou} autoFocus onClick={aoDesativar} aria-label="Confirmar desativação">
+              <Button type="button" size="xs" variant="outline" color={CORES.falhou} autoFocus onClick={aoDesativar} aria-label="Confirmar desativação">
                 Desativar
               </Button>
-              <Button type="button" size="compact-sm" variant="default" onClick={aoCancelar}>
+              <Button type="button" size="xs" variant="default" onClick={aoCancelar}>
                 Cancelar
               </Button>
             </Group>

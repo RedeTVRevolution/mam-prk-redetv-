@@ -101,8 +101,15 @@ async function abrirMenu(usuario: ReturnType<typeof userEvent.setup>, nome: stri
   await usuario.click(within(linha).getByRole('button', { name: `Ações de ${nome}` }))
 }
 
-test('o link Administração só aparece para quem tem uma permissão de administração', async () => {
+test('o link Administração só aparece para quem abre alguma aba da área', async () => {
   eu = COMUM
+  await abrir('/acervo')
+  await screen.findByRole('link', { name: 'Acervo' })
+  expect(screen.queryByRole('link', { name: 'Administração' })).toBeNull()
+  cleanup()
+
+  // Sem a aba da auditoria ainda, o link levaria a uma área vazia.
+  eu = { ...COMUM, permissoes: ['decupagem.ver', 'auditoria.ver'] }
   await abrir('/acervo')
   await screen.findByRole('link', { name: 'Acervo' })
   expect(screen.queryByRole('link', { name: 'Administração' })).toBeNull()
@@ -174,7 +181,7 @@ test('Editar papéis grava os papéis marcados e atualiza a linha', async () => 
   await usuario.click(within(dialogo).getByRole('checkbox', { name: /Curador/ }))
   await usuario.click(within(dialogo).getByRole('button', { name: 'Salvar' }))
 
-  await within(await linhaDe('Rui Prado')).findByText('Curador, Editor')
+  await within(await linhaDe('Rui Prado')).findByText('Editor, Curador')
   const chamada = chamadas.find((c) => c.metodo === 'PUT')!
   expect(chamada.caminho).toBe('/v1/admin/usuarios/u2/papeis')
   expect(chamada.corpo).toEqual({ papeis: ['editor', 'curador'] })
