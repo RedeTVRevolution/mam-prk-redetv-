@@ -65,6 +65,11 @@ testar_um() {
       echo ok >"$veredito"
       return
     fi
+    # O `--wait` troca o motivo por "The execution failed." e o link; o motivo real
+    # ("failed with exit code: 21", falta de cota) está nas condições da última execução.
+    saida+=$'\n'$(gc run jobs executions list --job "$job" --region "$GPU_REGIAO" \
+      --sort-by=~metadata.creationTimestamp --limit 1 \
+      --format='value(status.conditions[].message)' 2>&1 || true)
     echo "$saida" | sed "s/^/[$job] /"
     motivo=$(classificar "$saida")
     if [[ $motivo != sem_gpu ]]; then
