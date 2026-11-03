@@ -61,7 +61,7 @@ export default function MandarParaLixeira({
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (motivo.trim() !== '' && !enviando) void mandar()
+          if (motivo.trim() !== '' && frases !== null && !enviando) void mandar()
         }}
       >
         <Stack gap="sm">
@@ -78,7 +78,7 @@ export default function MandarParaLixeira({
             <Button type="button" variant="default" onClick={aoFechar} disabled={enviando}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={motivo.trim() === ''} loading={enviando}>
+            <Button type="submit" disabled={motivo.trim() === '' || frases === null} loading={enviando}>
               Mandar para a lixeira
             </Button>
           </Group>

@@ -28,7 +28,7 @@ function quando(iso: string): string {
     .replace(',', '')
 }
 
-function pendente(): { tipo: string; id: string } | null {
+function purgaPendente(): { tipo: string; id: string } | null {
   try {
     return JSON.parse(sessionStorage.getItem(PURGA_PENDENTE) ?? 'null') as { tipo: string; id: string } | null
   } catch {
@@ -94,7 +94,7 @@ function PurgarAgora({
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (nome === item.nome && !purgando && !precisaLogin) void purgar()
+          if (nome === item.nome && frases !== null && !purgando && !precisaLogin) void purgar()
         }}
       >
         <Stack gap="sm">
@@ -124,7 +124,7 @@ function PurgarAgora({
                 <Button type="button" variant="default" onClick={aoFechar} disabled={purgando}>
                   Cancelar
                 </Button>
-                <Button type="submit" color={CORES.falhou} disabled={nome !== item.nome} loading={purgando}>
+                <Button type="submit" variant="outline" color={CORES.falhou} disabled={nome !== item.nome || frases === null} loading={purgando}>
                   Purgar
                 </Button>
               </Group>
@@ -153,8 +153,12 @@ export default function Lixeira({ api, aoEntrarDeNovo }: { api: ClienteDaApi; ao
     try {
       const lista = await api.lixeira.listar()
       setItens(lista)
-      const volta = pendente()
-      if (volta) setPurgando(lista.find((i) => i.tipo === volta.tipo && i.id === volta.id) ?? null)
+      const volta = purgaPendente()
+      if (volta) {
+        const item = lista.find((i) => i.tipo === volta.tipo && i.id === volta.id)
+        if (item) setPurgando(item)
+        else setAviso('O item que você ia purgar não está mais na lixeira.')
+      }
       sessionStorage.removeItem(PURGA_PENDENTE)
       setCarga({ tipo: 'pronta' })
     } catch (erro) {
@@ -172,7 +176,7 @@ export default function Lixeira({ api, aoEntrarDeNovo }: { api: ClienteDaApi; ao
   const filtroAtual = tipos.includes(filtro) ? filtro : TUDO
   const visiveis = itens.filter((i) => filtroAtual === TUDO || i.tipo === filtroAtual)
 
-  function sair(item: ItemDaLixeira, frase: string) {
+  function tirarDaLista(item: ItemDaLixeira, frase: string) {
     setItens((atuais) => atuais.filter((i) => !(i.tipo === item.tipo && i.id === item.id)))
     setAviso(frase)
   }
@@ -183,7 +187,7 @@ export default function Lixeira({ api, aoEntrarDeNovo }: { api: ClienteDaApi; ao
     setFalha(null)
     try {
       await api.lixeira.restaurar(item.tipo as TipoDeItem, item.id)
-      sair(item, `${item.nome} voltou.`)
+      tirarDaLista(item, `${item.nome} voltou.`)
     } catch (erro) {
       if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro, `Não foi possível restaurar ${item.nome}. Tente de novo.`))
     }
@@ -237,6 +241,7 @@ export default function Lixeira({ api, aoEntrarDeNovo }: { api: ClienteDaApi; ao
                 aoRestaurar={() => void restaurar(item)}
                 aoPurgar={() => {
                   setAviso(null)
+                  setFalha(null)
                   setPurgando(item)
                 }}
               />
@@ -252,7 +257,7 @@ export default function Lixeira({ api, aoEntrarDeNovo }: { api: ClienteDaApi; ao
           item={purgando}
           aoFechar={() => setPurgando(null)}
           aoPurgar={() => {
-            sair(purgando, `${purgando.nome} foi purgad${purgando.tipo === 'video' ? 'o' : 'a'}.`)
+            tirarDaLista(purgando, `${purgando.nome} saiu de vez da lixeira.`)
             setPurgando(null)
           }}
           aoEntrarDeNovo={aoEntrarDeNovo}

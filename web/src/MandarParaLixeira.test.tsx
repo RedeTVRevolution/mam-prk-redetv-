@@ -103,3 +103,16 @@ test('sem lixeira.gerir não há menu; vídeo em andamento não vai para a lixei
   expect(screen.queryByRole('button', { name: 'Ações de andando.mp4' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Ações de TV Fama.mp4' })).toBeTruthy()
 })
+
+test('sem o impacto calculado, não manda para a lixeira', async () => {
+  servidor.use(http.get('/v1/admin/lixeira/videos/:id/impacto', () => HttpResponse.json({ detail: 'x' }, { status: 500 })))
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(await screen.findByRole('button', { name: 'Ações de TV Fama.mp4' }))
+  await usuario.click(await screen.findByRole('menuitem', { name: /Mandar para a lixeira/ }))
+  const dialogo = await screen.findByRole('dialog')
+  expect(await within(dialogo).findByText(/calcular o que vai junto/)).toBeTruthy()
+  await usuario.type(within(dialogo).getByLabelText(/Motivo/), 'duplicado{Enter}')
+  expect((within(dialogo).getByRole('button', { name: 'Mandar para a lixeira' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(envios).toEqual([])
+})

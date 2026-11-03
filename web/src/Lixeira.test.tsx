@@ -43,7 +43,7 @@ const servidor = setupServer(
   http.get('/v1/admin/lixeira', () => HttpResponse.json(lista)),
   http.get('/v1/admin/lixeira/videos/:id/impacto', () => HttpResponse.json(IMPACTO_DO_VIDEO)),
   http.get('/v1/admin/lixeira/pessoas/:id/impacto', () =>
-    HttpResponse.json({ aparicoes_que_perdem_o_nome: 4, fotos_apagadas: 3, restaurar_devolve_as_fotos: false }),
+    HttpResponse.json({ aparicoes_que_perdem_o_nome: 4, fotos_apagadas: 3 }),
   ),
   http.post('/v1/admin/lixeira/:tipo/:id/restaurar', ({ params }) => {
     chamadas.push({ caminho: `${String(params.tipo)}/${String(params.id)}/restaurar`, corpo: null })
@@ -145,7 +145,7 @@ test('Purgar só habilita com o nome exato e mostra o impacto', async () => {
   await usuario.type(campo, 'Sabrina S.')
   expect(botao.disabled).toBe(false)
   await usuario.click(botao)
-  expect(await screen.findByText(/Sabrina S\. foi purgada/)).toBeTruthy()
+  expect(await screen.findByText('Sabrina S. saiu de vez da lixeira.')).toBeTruthy()
   expect(chamadas[0]).toEqual({ caminho: 'pessoas/p1/purgar', corpo: { nome: 'Sabrina S.' } })
   expect(screen.queryByRole('dialog')).toBeNull()
 })
@@ -174,4 +174,12 @@ test('login_recente_exigido explica, leva ao login e volta ao diálogo da lixeir
   expect(location.pathname).toBe('/admin/lixeira')
   dialogo = await screen.findByRole('dialog')
   expect(within(dialogo).getByRole('heading', { name: 'Purgar TV Fama 21/10/2026.mp4' })).toBeTruthy()
+})
+
+test('a volta do login avisa quando o item já saiu da lixeira', async () => {
+  sessionStorage.setItem('mam:purga-pendente', JSON.stringify({ tipo: 'video', id: 'sumiu' }))
+  await abrir()
+  expect(await screen.findByText('O item que você ia purgar não está mais na lixeira.')).toBeTruthy()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(sessionStorage.getItem('mam:purga-pendente')).toBeNull()
 })
