@@ -117,6 +117,27 @@ export interface ClienteDeNomes {
   criar(catalogo: CatalogoDeNomes, nome: string): Promise<NomeDoCatalogo>
 }
 
+/** Uma conta da administração (`/v1/admin/usuarios`). */
+export interface ContaDaLista {
+  uid: string
+  email: string
+  nome: string
+  papeis: string[]
+  criada_em: string | null
+  ultimo_acesso: string | null
+  situacao: 'ativa' | 'desativada'
+}
+
+/** Contas e papéis (exige `usuarios.gerir`). */
+export interface ClienteDeUsuarios {
+  listar(): Promise<ContaDaLista[]>
+  criar(corpo: { email: string; nome: string; papeis: string[] }): Promise<ContaDaLista>
+  reenviarLink(uid: string): Promise<void>
+  trocarPapeis(uid: string, papeis: string[]): Promise<ContaDaLista>
+  desativar(uid: string): Promise<ContaDaLista>
+  reativar(uid: string): Promise<ContaDaLista>
+}
+
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
@@ -140,6 +161,7 @@ export interface ClienteDaApi {
   /** O mesmo relatório em CSV. */
   marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
   nomes: ClienteDeNomes
+  usuarios: ClienteDeUsuarios
   job(id: string): ClienteDoJob
 }
 
@@ -154,7 +176,7 @@ export function criarClienteDaApi(
 ): ClienteDaApi {
   async function pedir(
     caminho: string,
-    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<Response> {
     const token = await autenticador.token()
     if (!token) {
@@ -166,7 +188,7 @@ export function criarClienteDaApi(
     }
     if (opcoes.corpo !== undefined) headers['Content-Type'] = 'application/json'
     const resposta = await fetch(caminho, {
-      method: opcoes.post ? 'POST' : undefined,
+      method: opcoes.post ? 'POST' : opcoes.put ? 'PUT' : undefined,
       headers,
       // Com `FormData` o navegador monta o Content-Type do multipart, com o limite.
       body: opcoes.formulario ?? (opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo)),
@@ -186,7 +208,7 @@ export function criarClienteDaApi(
 
   async function chamar<T>(
     caminho: string,
-    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<T> {
     return (await (await pedir(caminho, opcoes)).json()) as T
   }
@@ -280,6 +302,17 @@ export function criarClienteDaApi(
         if (catalogo === 'tipos_de_objeto') return Promise.reject(new Error('Tipo de objeto não tem catálogo para criar.'))
         return chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } })
       },
+    },
+    usuarios: {
+      listar: () => chamar('/v1/admin/usuarios'),
+      criar: (corpo) => chamar('/v1/admin/usuarios', { post: true, corpo }),
+      reenviarLink: async (uid) => {
+        await pedir(`/v1/admin/usuarios/${encodeURIComponent(uid)}/link-de-senha`, { post: true })
+      },
+      trocarPapeis: (uid, papeis) =>
+        chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/papeis`, { put: true, corpo: { papeis } }),
+      desativar: (uid) => chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/desativar`, { post: true }),
+      reativar: (uid) => chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/reativar`, { post: true }),
     },
     job,
   }

@@ -22,6 +22,8 @@ import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
+import Administracao from './Administracao.tsx'
+import { podeAdministrar } from './administracao.ts'
 import Marcas from './Marcas.tsx'
 import TempoDeTela from './TempoDeTela.tsx'
 
@@ -31,6 +33,7 @@ const Amostra = lazy(() => import('./Amostra.tsx'))
 export interface Usuario {
   uid: string
   email: string
+  papeis?: string[]
   permissoes: string[]
 }
 
@@ -151,7 +154,11 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       header={{ height: ALTURA_DA_BARRA }}
       padding="sm"
     >
-      <Barra email={sessao.usuario.email} aoSair={() => void sair()} />
+      <Barra
+        email={sessao.usuario.email}
+        aoSair={() => void sair()}
+        podeAdministrar={podeAdministrar(sessao.usuario.permissoes)}
+      />
       {rota.tipo === 'video' ? (
         <AppShell.Main bg="dark.7">
           <TelaDoVideo
@@ -182,6 +189,10 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'marcas' ? (
         <AppShell.Main bg="dark.7">
           <Marcas api={api} filtros={rota.filtros} />
+        </AppShell.Main>
+      ) : rota.tipo === 'admin' ? (
+        <AppShell.Main bg="dark.7">
+          <Administracao api={api} aba={rota.aba} usuario={sessao.usuario} />
         </AppShell.Main>
       ) : (
         <AppShell.Main bg="dark.7">
