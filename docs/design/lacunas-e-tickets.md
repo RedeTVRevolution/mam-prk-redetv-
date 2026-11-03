@@ -53,7 +53,7 @@ As lacunas que a pesquisa encontrou e os tickets para cobri-las, em ordem de pri
 
 ### Documentação
 
-33. A [ADR 0004](../adr/0004-gemini-em-standard.md) e o plano dizem que o Gemini roda em Standard, mas o código voltou ao Flex no #86 (`api/gemini.py`, cabeçalhos `flex`). Um dos dois precisa ser atualizado.
+33. A [ADR 0004](../adr/0004-gemini-flex-no-video.md) e o plano dizem que o Gemini roda em Standard, mas o código voltou ao Flex no #86 (`api/gemini.py`, cabeçalhos `flex`). Um dos dois precisa ser atualizado. **Resolvida em 03/11/2026:** fica o Flex nas chamadas com vídeo; a ADR 0004 e o plano foram atualizados.
 
 ## Tickets propostos, em ordem
 
@@ -81,4 +81,4 @@ As lacunas que a pesquisa encontrou e os tickets para cobri-las, em ordem de pri
 | 20 | **Auditoria visível.** Tela com os registros de apagamento, papel e chave | 30 | E8 | `ready-for-agent` |
 | 21 | **Tela Pessoas.** Catálogo com apelidos, referências de rosto, fundir e renomear em lote | 31 | E4 | Depois do 7 |
 | 22 | **Painel da diretoria** com buscas sem resultado e taxa de correção por tipo | 32 | E9 | Já no plano |
-| 23 | **ADR 0004 × código.** Decidir entre Standard e Flex e alinhar a ADR, o plano e `api/gemini.py` | 33 | — | `ready-for-human` |
+| 23 | **ADR 0004 × código.** Decidir entre Standard e Flex e alinhar a ADR, o plano e `api/gemini.py` | 33 | — | Resolvido em 03/11/2026 (Flex no vídeo) |
