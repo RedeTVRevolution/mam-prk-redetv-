@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 7.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13"
+    }
   }
 }
 
@@ -2668,6 +2672,8 @@ resource "google_monitoring_alert_policy" "sinal_percentual" {
   documentation {
     content = each.value.documento
   }
+  # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
+  depends_on = [time_sleep.metricas_dos_alertas]
 }
 
 resource "google_monitoring_alert_policy" "fora_do_esquema" {
@@ -2694,6 +2700,8 @@ resource "google_monitoring_alert_policy" "fora_do_esquema" {
   documentation {
     content = "O Gemini devolveu mais respostas fora do esquema (refeitas) do que o limiar na janela. Suspeite de mudança do modelo ou do prompt; as respostas refeitas custam chamadas a mais."
   }
+  # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
+  depends_on = [time_sleep.metricas_dos_alertas]
 }
 
 resource "google_monitoring_alert_policy" "falhas_por_etapa" {
@@ -2721,6 +2729,8 @@ resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   documentation {
     content = "Uma etapa do processamento falhou mais vezes do que o limite na janela; o rótulo `etapa` diz qual. O log `falha_de_etapa` traz o job e o motivo."
   }
+  # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
+  depends_on = [time_sleep.metricas_dos_alertas]
 }
 
 resource "google_monitoring_alert_policy" "queda_da_avaliacao" {
@@ -2748,6 +2758,8 @@ resource "google_monitoring_alert_policy" "queda_da_avaliacao" {
   documentation {
     content = "A avaliação diária por rubrica (#255) achou um requisito abaixo do limiar ou em queda frente à média dos dias anteriores. O rótulo `requisito` diz qual; o log `queda_de_qualidade` traz as notas."
   }
+  # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
+  depends_on = [time_sleep.metricas_dos_alertas]
 }
 
 resource "google_monitoring_alert_policy" "desvio_de_programa" {
@@ -2775,6 +2787,8 @@ resource "google_monitoring_alert_policy" "desvio_de_programa" {
   documentation {
     content = "Um vídeo concluído tem aparições, menções, pautas ou comerciais por hora de vídeo a mais de K desvios da média dos últimos N vídeos do mesmo programa (K e N são variáveis do Terraform). Os rótulos dizem o programa e o tipo; o log `desvio_de_programa` traz o job, o valor, a média e o desvio. Pode ser um programa diferente do normal ou uma decupagem ruim: abra o vídeo."
   }
+  # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
+  depends_on = [time_sleep.metricas_dos_alertas]
 }
 
 # Painéis de observabilidade (#288). Cada gráfico lê uma métrica de log (os jobs e o Workflows

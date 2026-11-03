@@ -432,6 +432,15 @@ def test_a_construcao_da_imagem_com_gpu_nao_importa_o_paddle() -> None:
     assert not any("import paddle" in e or "testar_ocr(" in e for e in execucoes)
     assert "/amostras/quadro.png" in alvo
     assert "'paddlepaddle-gpu' in nomes and 'paddlepaddle' not in nomes" in alvo
+    # As bibliotecas CUDA das rodas carregam pelo LD_LIBRARY_PATH (sem o driver).
+    assert (
+        "ctypes.CDLL('libcublas.so.12')" in alvo
+        and "ctypes.CDLL('libcudnn.so.9')" in alvo
+    )
+    assert (
+        "site-packages/nvidia/cudnn/lib" in alvo
+        and "site-packages/nvidia/cublas/lib" in alvo
+    )
 
 
 def test_o_bake_escolhe_o_detector_do_alvo_de_cpu() -> None:
