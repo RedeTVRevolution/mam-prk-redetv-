@@ -854,6 +854,10 @@ roda_o_job_com_gpu:
           - tentativas: 0
           - espera: ${gpu_espera_s}
           - esperado: 0
+          # Criadas aqui porque o `except` as preenche e os passos de fora as leem: uma
+          # variável criada só dentro do `except` não existe fora dele (deploy de 2026-11-03).
+          - mensagem: ""
+          - erro_final: null
     - conta_a_tentativa:
         assign:
           - tentativas: $${tentativas + 1}
