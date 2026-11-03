@@ -306,3 +306,12 @@ def test_o_motivo_vem_da_execucao_quando_o_gcloud_so_diz_que_falhou(
 
     assert feito.returncode == 1
     assert "ERRO resultado errado" in feito.stderr
+
+
+def test_execute_recusado_antes_da_execucao_nao_le_a_execucao_anterior(
+    pasta: Path,
+) -> None:
+    # Cota negada na hora: não há execução nova, e a anterior não diz nada desta.
+    _rodar(pasta, [f"{OCR},antiga,nova"], {OCR: ["sem_gpu", "ok"]})
+
+    assert "list" not in (pasta / "chamadas").read_text().split()
