@@ -313,3 +313,126 @@ def test_a_trava_roda_o_pre_voo_depois_da_destruicao_e_antes_do_apply() -> None:
     pre_voo_ = trava.index('python3 -m api.pre_voo "$PLANO_JSON"')
     apply = trava.index('terraform -chdir=infra apply -input=false "$PLANO"')
     assert destruicao < pre_voo_ < apply
+
+
+def test_recriacao_fica_fora_porque_o_recurso_ainda_existe() -> None:
+    api = ApiFalsa()
+    plano = _plano(_mudanca("google_cloud_run_v2_job", ["delete", "create"], JOB))
+
+    assert pre_voo.conferir(plano, api) == []
+    assert api.chamadas == []
+
+
+def test_metrica_que_o_plano_muda_vale_pelo_plano_e_nao_pelo_descritor_de_hoje() -> (
+    None
+):
+    api = ApiFalsa()
+    metrica = {
+        "name": "mam_pct",
+        "metric_descriptor": [{"metric_kind": "DELTA", "value_type": "DISTRIBUTION"}],
+    }
+    filtro = 'metric.type="logging.googleapis.com/user/mam_pct" AND resource.type="cloud_run_job"'
+    plano = _plano(
+        _mudanca("google_logging_metric", ["update"], metrica),
+        _mudanca(
+            "google_monitoring_alert_policy", ["update"], _alerta(filtro, "ALIGN_MEAN")
+        ),
+    )
+
+    falhas = pre_voo.conferir(plano, api)
+
+    assert len(falhas) == 1 and "DISTRIBUTION" in falhas[0]
+    assert api.chamadas == []
+
+
+def test_o_corpo_do_servico_leva_trafego_e_ingresso_e_vai_ao_patch() -> None:
+    api = ApiFalsa()
+    servico = {
+        "name": "mam-web",
+        "project": "p",
+        "location": "southamerica-east1",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "traffic": [{"type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST", "percent": 100}],
+        "scaling": [{"manual_instance_count": 0, "min_instance_count": 0}],
+        "template": [
+            {
+                "containers": [
+                    {"image": "w@sha256:1", "ports": [{"container_port": 8080}]}
+                ]
+            }
+        ],
+    }
+    plano = _plano(_mudanca("google_cloud_run_v2_service", ["update"], servico))
+
+    assert pre_voo.conferir(plano, api) == []
+    metodo, url, corpo = api.chamadas[0]
+    assert (metodo, url) == (
+        "PATCH",
+        "https://run.googleapis.com/v2/projects/p/locations/southamerica-east1/services/mam-web?validateOnly=true",
+    )
+    assert corpo["ingress"] == "INGRESS_TRAFFIC_ALL"
+    assert corpo["traffic"] == [
+        {"type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST", "percent": 100}
+    ]
+    assert (
+        "scaling" not in corpo
+    )  # só zeros: o provider não manda (manual_instance_count)
+    assert corpo["template"]["containers"] == [
+        {"image": "w@sha256:1", "ports": [{"containerPort": 8080}]}
+    ]
+
+
+def test_main_sem_nada_a_conferir_nao_pede_token_e_sai_com_zero(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    arquivo = tmp_path / "plano.json"
+    arquivo.write_text(
+        json.dumps(_plano(_mudanca("google_storage_bucket", ["create"], {})))
+    )
+    monkeypatch.setattr("sys.argv", ["pre_voo", str(arquivo)])
+
+    def sem_token() -> str:
+        raise AssertionError("não devia pedir token")
+
+    monkeypatch.setattr(pre_voo, "_token", sem_token)
+
+    pre_voo.main()
+
+
+def test_main_com_falha_sai_com_um(tmp_path: Path, monkeypatch: Any) -> None:
+    arquivo = tmp_path / "plano.json"
+    alerta = _alerta('metric.type="x"', "ALIGN_DELTA")
+    arquivo.write_text(
+        json.dumps(
+            _plano(_mudanca("google_monitoring_alert_policy", ["create"], alerta))
+        )
+    )
+    monkeypatch.setattr("sys.argv", ["pre_voo", str(arquivo)])
+    monkeypatch.setattr(pre_voo, "_token", lambda: "t")
+
+    try:
+        pre_voo.main()
+    except SystemExit as saida:
+        assert saida.code == 1
+    else:
+        raise AssertionError("devia sair com 1")
+
+
+def test_o_erro_http_vira_erro_da_api_com_codigo_e_mensagem(monkeypatch: Any) -> None:
+    import io
+    import urllib.error
+
+    def recusa(*_: Any, **__: Any) -> Any:
+        corpo = io.BytesIO(
+            json.dumps({"error": {"message": "at least as BETA"}}).encode()
+        )
+        raise urllib.error.HTTPError("u", 400, "Bad Request", {}, corpo)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("urllib.request.urlopen", recusa)
+
+    try:
+        pre_voo.chamar_com_token("t")("POST", "https://x", {})
+    except pre_voo.ErroDaApi as erro:
+        assert str(erro) == "400 at least as BETA"
+    else:
+        raise AssertionError("devia levantar ErroDaApi")

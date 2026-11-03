@@ -8,9 +8,10 @@ apply, e só aplica se tudo passar. Para cada recurso que o plan cria ou muda:
 
 - Job e serviço do Cloud Run: o corpo REST, montado do plan, vai ao `validateOnly` da API.
 - Painel do Monitoring: o `dashboard_json` vai ao `validateOnly` da API.
-- Alerta do Monitoring: o filtro de cada condição precisa de `resource.type`, e a agregação
-  vai ao `timeSeries.list`, que recusa o alinhador errado como o alerta recusaria. Uma métrica
-  de log criada no mesmo apply ainda não existe: a agregação é conferida pela tabela da API.
+- Alerta do Monitoring, só nas condições de limiar (`condition_threshold`): o filtro precisa
+  de `resource.type`, e a agregação vai ao `timeSeries.list`, que recusa o alinhador errado
+  como o alerta recusaria. A métrica de log que o plan cria ou muda vale pela tabela da API.
+- Recriação (delete+create) fica de fora: o recurso ainda existe.
 - Workflow: a definição é publicada com um nome descartável e apagada em seguida (a API do
   Workflows não tem `validateOnly`, e a compilação só acontece na publicação).
 
@@ -82,11 +83,12 @@ _LISTAS_DO_RUN = {
     "mount_options",
     "traffic",
     "custom_audiences",
+    "http_headers",
 }
 
 # Alinhadores pela documentação da API (Aggregation.Aligner): os tipos de métrica e de
-# valor que cada um aceita. Só para a métrica criada no mesmo apply; a que já existe vai
-# ao timeSeries.list.
+# valor que cada um aceita. Só para a métrica que o plan cria ou muda; a que ele não toca
+# vai ao timeSeries.list.
 _ALINHADORES: dict[str, tuple[set[str], set[str]]] = {
     "ALIGN_NONE": (
         {"GAUGE", "DELTA", "CUMULATIVE"},
@@ -138,12 +140,10 @@ def _bloco(valores: dict[str, Any]) -> dict[str, Any]:
     for chave, valor in valores.items():
         if _vazio(valor):
             continue
-        if isinstance(
-            valor, dict
-        ):  # atributo de mapa (limits, labels): chaves como estão
-            corpo[_camel(chave)] = valor
+        if isinstance(valor, dict):  # mapa (limits, labels): chaves como estão
+            corpo[_camel(chave)] = {k: v for k, v in valor.items() if v is not None}
         elif isinstance(valor, list) and isinstance(valor[0], dict):
-            itens = [b for b in (_bloco(v) for v in valor) if b]
+            itens = [b for b in (_bloco(v) for v in valor if v is not None) if b]
             if itens:
                 corpo[_camel(chave)] = itens if chave in _LISTAS_DO_RUN else itens[0]
         else:
@@ -222,10 +222,9 @@ def _conferir_alerta(
             tipo = re.search(r'metric\.type\s*=\s*"([^"]+)"', filtro)
             for agregacao in limiar.get("aggregations") or []:
                 alinhador = agregacao.get("per_series_aligner") or "ALIGN_NONE"
-                existe = (
-                    _metrica_existe(chamar, projeto, tipo.group(1)) if tipo else True
-                )
-                if not existe and tipo and tipo.group(1) in metricas_novas:
+                # A métrica que o plan cria ou muda vale pelo plan (o descritor de hoje
+                # pode ser o antigo); a que ele não toca vai ao timeSeries.
+                if tipo and tipo.group(1) in metricas_novas:
                     tipo_da_metrica, valor = metricas_novas[tipo.group(1)]
                     aceitos = _ALINHADORES.get(alinhador)
                     if aceitos is None:
@@ -261,18 +260,6 @@ def _conferir_alerta(
                 )
 
 
-def _metrica_existe(chamar: Chamar, projeto: str, tipo: str) -> bool:
-    try:
-        chamar(
-            "GET", f"{MONITORING}/v3/projects/{projeto}/metricDescriptors/{tipo}", None
-        )
-    except ErroDaApi as erro:
-        if "404" in str(erro):
-            return False
-        raise
-    return True
-
-
 def _rfc3339(segundos: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(segundos))
 
@@ -296,9 +283,13 @@ def _conferir_workflow(
                 chamar,
                 dormir,
             )
-        except ErroDaApi as erro:
+        except (
+            ErroDaApi,
+            OSError,
+        ) as erro:  # rede ou recusa: o que sobra não derruba o deploy
             if "404" not in str(erro):  # não chegou a existir: nada a apagar
-                print(f"  aviso: apague à mão o workflow {pai}/{nome}: {erro}")
+                aviso = f"  aviso: apague à mão o workflow {pai}/{nome}: {erro}"
+                print(aviso, file=sys.stderr)
 
 
 def _esperar(
@@ -360,6 +351,9 @@ def a_conferir(plano: dict[str, Any]) -> list[dict[str, Any]]:
         for m in plano.get("resource_changes", [])
         if m.get("type") in _CONFERIDOS
         and {"create", "update"} & set(m["change"]["actions"])
+        # Recriação (delete+create, só com PERMITIR_DESTRUICAO=sim): o recurso ainda
+        # existe e a criação em validateOnly daria 409. Fica fora do pré-voo.
+        and "delete" not in m["change"]["actions"]
     ]
 
 
