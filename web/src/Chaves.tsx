@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Alert,
-  Badge,
   Button,
   Checkbox,
   CopyButton,
@@ -15,7 +14,7 @@ import {
   Tooltip,
   VisuallyHidden,
 } from '@mantine/core'
-import { IconPlus, IconTrash } from '@tabler/icons-react'
+import { IconKeyOff, IconPlus } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
 import { SessaoExpirada, type ChaveDaLista, type ClienteDaApi } from './api.ts'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
@@ -57,7 +56,7 @@ function EmitirChave({
     try {
       setChave(await aoEmitir({ sistema: sistema.trim(), escopos }))
     } catch (erro) {
-      if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro))
+      if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro, 'Não foi possível emitir a chave. Tente de novo.'))
     } finally {
       setEmitindo(false)
     }
@@ -68,11 +67,11 @@ function EmitirChave({
       // Só "Já guardei" fecha: sem X, sem Esc, sem clique fora.
       <Modal opened onClose={() => {}} title="Chave emitida" withCloseButton={false} closeOnEscape={false} closeOnClickOutside={false}>
         <Stack gap="sm">
-          <Alert color={CORES.concluido} variant="light">
+          <Alert color="gray" variant="light">
             Guarde agora: ela não será mostrada de novo.
           </Alert>
           <Group gap="xs" wrap="nowrap" align="flex-end">
-            <TextInput label="Chave" readOnly value={chave} style={{ flex: 1 }} styles={{ input: { fontFamily: 'monospace' } }} />
+            <TextInput label="Chave" readOnly value={chave} style={{ flex: 1 }} styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }} />
             <CopyButton value={chave}>
               {({ copied, copy }) => (
                 <Button type="button" variant="default" onClick={copy}>
@@ -92,7 +91,15 @@ function EmitirChave({
   }
 
   return (
-    <Modal opened onClose={aoFechar} title="Emitir chave">
+    // Enquanto a emissão está no ar o diálogo não fecha: a chave chegaria sem ser vista.
+    <Modal
+      opened
+      onClose={emitindo ? () => {} : aoFechar}
+      title="Emitir chave"
+      withCloseButton={!emitindo}
+      closeOnEscape={!emitindo}
+      closeOnClickOutside={!emitindo}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -109,7 +116,7 @@ function EmitirChave({
               <Checkbox
                 key={e.valor}
                 label={e.valor}
-                description={`${e.valor}: ${e.pode}`}
+                description={e.pode}
                 checked={escopos.includes(e.valor)}
                 onChange={(ev) =>
                   setEscopos(ESCOPOS.map((q) => q.valor).filter((v) => (v === e.valor ? ev.currentTarget.checked : escopos.includes(v))))
@@ -119,7 +126,7 @@ function EmitirChave({
           </Stack>
           {falha && <AlertaDeErro mensagem={falha.mensagem} codigo={falha.codigo} />}
           <Group justify="flex-end">
-            <Button type="button" variant="default" onClick={aoFechar}>
+            <Button type="button" variant="default" onClick={aoFechar} disabled={emitindo}>
               Cancelar
             </Button>
             <Button type="submit" disabled={!completa} loading={emitindo}>
@@ -149,7 +156,7 @@ export default function Chaves({ api }: { api: ClienteDaApi }) {
       setChaves(await api.chaves.listar())
       setCarga({ tipo: 'pronta' })
     } catch (erro) {
-      if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro', ...falhaDaAcao(erro) })
+      if (!(erro instanceof SessaoExpirada)) setCarga({ tipo: 'erro', ...falhaDaAcao(erro, 'Não foi possível carregar as chaves. Tente de novo.') })
     }
   }, [api])
 
@@ -168,7 +175,7 @@ export default function Chaves({ api }: { api: ClienteDaApi }) {
       setChaves((atuais) => atuais.map((c) => (c.id === nova.id ? nova : c)))
       setAviso(`A chave de ${chave.sistema} foi revogada.`)
     } catch (erro) {
-      if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro))
+      if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro, `Não foi possível revogar a chave de ${chave.sistema}. Tente de novo.`))
     }
   }
 
@@ -251,24 +258,18 @@ function LinhaDaChave({
       <Table.Tr>
         <Table.Td>{chave.sistema}</Table.Td>
         <Table.Td>{chave.escopos.join(', ')}</Table.Td>
-        <Table.Td style={{ fontFamily: 'monospace' }}>{chave.id}</Table.Td>
+        <Table.Td ff="monospace">{chave.id}</Table.Td>
         <Table.Td style={{ fontVariantNumeric: 'tabular-nums' }}>{data(chave.criada_em)}</Table.Td>
         <Table.Td>
-          {revogada ? (
-            <Text size="sm" c={CORES.textoSecundario}>
-              {`Revogada em ${data(chave.revogada_em!)}`}
-            </Text>
-          ) : (
-            <Badge variant="light" color={CORES.concluido} radius="sm">
-              Ativa
-            </Badge>
-          )}
+          <Text size="sm" c={CORES.textoSecundario}>
+            {revogada ? `Revogada em ${data(chave.revogada_em!)}` : 'Ativa'}
+          </Text>
         </Table.Td>
         <Table.Td>
           {!revogada && (
             <Tooltip label="Revogar">
               <ActionIcon variant="subtle" color="gray" aria-label={`Revogar a chave de ${chave.sistema}`} onClick={aoPedirRevogar}>
-                <IconTrash size={16} aria-hidden />
+                <IconKeyOff size={16} aria-hidden />
               </ActionIcon>
             </Tooltip>
           )}

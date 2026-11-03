@@ -117,6 +117,32 @@ test('emitir mostra a chave uma vez e depois de "Já guardei" ela não está em 
   expect(within(nova).getByText('Ativa')).toBeTruthy()
 })
 
+test('enquanto a emissão está no ar o diálogo não fecha, e a chave aparece ao chegar', async () => {
+  let responder: () => void = () => {}
+  const resposta = new Promise<void>((r) => (responder = r))
+  servidor.use(
+    http.post('/v1/admin/chaves', async () => {
+      await resposta
+      return HttpResponse.json({ ...chaves()[0]!, id: 'k9', sistema: 'sistema-z', chave: CHAVE_EM_TEXTO }, { status: 201 })
+    }),
+  )
+  const usuario = userEvent.setup()
+  await abrir('/admin/chaves')
+  await linhaDe('sistema-x')
+  await usuario.click(screen.getByRole('button', { name: 'Emitir chave' }))
+  const dialogo = await screen.findByRole('dialog')
+  await usuario.type(within(dialogo).getByLabelText('Sistema'), 'sistema-z')
+  await usuario.click(within(dialogo).getByRole('checkbox', { name: /^ler/ }))
+  await usuario.click(within(dialogo).getByRole('button', { name: 'Emitir chave' }))
+
+  await usuario.keyboard('{Escape}')
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  expect((within(dialogo).getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled).toBe(true)
+
+  responder()
+  expect(((await screen.findByLabelText('Chave')) as HTMLInputElement).value).toBe(CHAVE_EM_TEXTO)
+})
+
 test('revogar pede confirmação na linha, atualiza a situação e mantém a chave na lista', async () => {
   const usuario = userEvent.setup()
   await abrir('/admin/chaves')
