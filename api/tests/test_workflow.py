@@ -1181,3 +1181,15 @@ def test_toda_variavel_usada_existe_no_escopo_do_passo() -> None:
             sub["steps"], escopo, _nomes_dos_passos(sub["steps"]), nome
         )
     assert achados == []
+
+
+def test_list_concat_anexa_um_item_e_nao_uma_lista() -> None:
+    # `list.concat(l, ["x"])` anexa a lista inteira como um item: o updateMask do
+    # Firestore recebe uma lista dentro da lista e o passo cai (dev, 2026-11-03).
+    assert re.findall(r"list\.concat\([^,]+,\s*\[", _texto()) == []
+
+
+def test_conta_da_orquestracao_grava_log_do_sys_log() -> None:
+    assert "call: sys.log" in _texto()
+    linha = re.search(r"^\s*orquestracao\s*=\s*\[.*\]$", MAIN.read_text(), re.MULTILINE)
+    assert linha and '"roles/logging.logWriter"' in linha.group(0)
