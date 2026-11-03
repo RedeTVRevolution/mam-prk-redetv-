@@ -127,7 +127,9 @@ CMD ["python", "-m", "api.ocr_job"]
 # alvo `ocr` (o mesmo script, e o detector `server` por padrão: o leve é para o plano B em
 # CPU, #233), e o `paddlepaddle-gpu` 3.2.2 (CUDA
 # 12.6, do índice do Paddle) no lugar do `paddlepaddle` de CPU. Não parte do alvo `ocr` para
-# não carregar a roda de CPU. O driver é do Cloud Run, em /usr/local/nvidia/lib64.
+# não carregar a roda de CPU. O driver é do Cloud Run, em /usr/local/nvidia/lib64. As
+# bibliotecas CUDA vêm das rodas `nvidia-*` que o Paddle puxa (uv.lock), como no alvo
+# `transcricao-gpu`: as pastas delas vão no LD_LIBRARY_PATH para o Paddle achá-las na GPU.
 FROM python:3.12-slim-bookworm AS ocr-gpu
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 ARG FFMPEG
@@ -143,16 +145,17 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr-gpu
 COPY api/ api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
-    LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
+    LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_cupti/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufft/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufile/lib:/app/.venv/lib/python3.12/site-packages/nvidia/curand/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/app/.venv/lib/python3.12/site-packages/cusparselt/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nccl/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvtx/lib:/usr/local/nvidia/lib64 \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu DETECTOR=$DETECTOR
 # A máquina da construção não tem GPU nem o driver, e o `paddlepaddle-gpu` pede o
 # `libcuda.so.1` (do driver) já no `import paddle`: aqui ele não pode ser importado. Esta
-# etapa só grava o quadro de amostra (do teste depois da publicação, `MODO_TESTE=1`) e
-# confere que a roda instalada é a de GPU. Os modelos e o PaddleOCR são os mesmos do alvo
+# etapa só grava o quadro de amostra (do teste depois da publicação, `MODO_TESTE=1`),
+# confere que o cuBLAS e o cuDNN das rodas carregam pelo LD_LIBRARY_PATH e que a roda
+# instalada é a de GPU. Os modelos e o PaddleOCR são os mesmos do alvo
 # `ocr`, que os confere em CPU na construção; a roda, o driver e a GPU são do teste depois da
 # publicação (#238), que volta a imagem anterior se falhar.
 RUN mkdir /amostras \
-    && /app/.venv/bin/python -c "import cv2, numpy; from importlib.metadata import distributions; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); assert cv2.imwrite('/amostras/quadro.png', q); nomes = {d.metadata['Name'].lower() for d in distributions()}; assert 'paddlepaddle-gpu' in nomes and 'paddlepaddle' not in nomes, sorted(n for n in nomes if 'paddle' in n)"
+    && /app/.venv/bin/python -c "import ctypes, cv2, numpy; ctypes.CDLL('libcublas.so.12'); ctypes.CDLL('libcudnn.so.9'); from importlib.metadata import distributions; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); assert cv2.imwrite('/amostras/quadro.png', q); nomes = {d.metadata['Name'].lower() for d in distributions()}; assert 'paddlepaddle-gpu' in nomes and 'paddlepaddle' not in nomes, sorted(n for n in nomes if 'paddle' in n)"
 USER nobody
 CMD ["python", "-m", "api.ocr_job"]
 
