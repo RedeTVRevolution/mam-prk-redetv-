@@ -138,6 +138,27 @@ export interface ClienteDeUsuarios {
   reativar(uid: string): Promise<ContaDaLista>
 }
 
+/** Uma chave de API da administração (`/v1/admin/chaves`); a chave em texto nunca vem na lista. */
+export interface ChaveDaLista {
+  id: string
+  sistema: string
+  escopos: string[]
+  criada_em: string
+  revogada_em: string | null
+}
+
+/** A resposta da emissão: a única vez em que a chave em texto sai da API. */
+export interface ChaveEmitida extends ChaveDaLista {
+  chave: string
+}
+
+/** Sistemas e chaves de API (exige `chaves.gerir`). */
+export interface ClienteDeChaves {
+  listar(): Promise<ChaveDaLista[]>
+  emitir(corpo: { sistema: string; escopos: string[] }): Promise<ChaveEmitida>
+  revogar(id: string): Promise<ChaveDaLista>
+}
+
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
@@ -162,6 +183,7 @@ export interface ClienteDaApi {
   marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
   nomes: ClienteDeNomes
   usuarios: ClienteDeUsuarios
+  chaves: ClienteDeChaves
   job(id: string): ClienteDoJob
 }
 
@@ -313,6 +335,11 @@ export function criarClienteDaApi(
         chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/papeis`, { put: true, corpo: { papeis } }),
       desativar: (uid) => chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/desativar`, { post: true }),
       reativar: (uid) => chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/reativar`, { post: true }),
+    },
+    chaves: {
+      listar: () => chamar('/v1/admin/chaves'),
+      emitir: (corpo) => chamar('/v1/admin/chaves', { post: true, corpo }),
+      revogar: (id) => chamar(`/v1/admin/chaves/${encodeURIComponent(id)}/revogar`, { post: true }),
     },
     job,
   }

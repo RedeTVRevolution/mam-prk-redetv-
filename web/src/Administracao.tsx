@@ -6,6 +6,7 @@ import { abasPermitidas } from './administracao.ts'
 import { Link } from './Link.tsx'
 import { ACERVO, enderecoDaAba, navegar } from './rotas.ts'
 import { CORES } from './tema.ts'
+import Chaves from './Chaves.tsx'
 import Usuarios from './Usuarios.tsx'
 
 /** `/admin`: as abas são links com endereço próprio; `/admin` abre a primeira permitida. */
@@ -49,6 +50,7 @@ export default function Administracao({ api, aba, usuario }: { api: ClienteDaApi
         </Group>
       </nav>
       {atual.aba === 'usuarios' && <Usuarios api={api} eu={usuario} />}
+      {atual.aba === 'chaves' && <Chaves api={api} />}
     </Stack>
   )
 }

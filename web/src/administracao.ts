@@ -4,8 +4,11 @@ export interface Aba {
   permissao: string
 }
 
-// Cada ticket da área acrescenta a sua aba aqui (chaves, entradas, lixeira, auditoria).
-export const ABAS: Aba[] = [{ aba: 'usuarios', rotulo: 'Usuários', permissao: 'usuarios.gerir' }]
+// Cada ticket da área acrescenta a sua aba aqui (entradas, lixeira, auditoria).
+export const ABAS: Aba[] = [
+  { aba: 'usuarios', rotulo: 'Usuários', permissao: 'usuarios.gerir' },
+  { aba: 'chaves', rotulo: 'Sistemas e chaves', permissao: 'chaves.gerir' },
+]
 
 /** As abas que essas permissões abrem, na ordem da área. */
 export function abasPermitidas(permissoes: string[]): Aba[] {

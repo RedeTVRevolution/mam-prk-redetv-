@@ -18,9 +18,10 @@ import {
 } from '@mantine/core'
 import { IconDots, IconPlus, IconSearch } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
-import { codigoDoErro, ConflitoNaApi, FalhaNaApi, PedidoInvalido, SessaoExpirada, type ClienteDaApi, type ContaDaLista } from './api.ts'
+import { SessaoExpirada, type ClienteDaApi, type ContaDaLista } from './api.ts'
 import type { Usuario } from './App.tsx'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
+import { falhaDaAcao, type Falha } from './falhaDaAcao.ts'
 import { CORES } from './tema.ts'
 
 /** Os papéis do `api/papeis.py`, com o que cada um pode, na ordem em que a API os devolve. */
@@ -34,22 +35,10 @@ const PAPEIS = [
 
 const NOME_DO_PAPEL = Object.fromEntries(PAPEIS.map((p) => [p.valor, p.nome]))
 const TODOS = '__todos__'
-const SEM_PERMISSAO = 'Você não tem permissão para isto.'
-
-type Falha = { mensagem: string; codigo: string }
 
 function ultimoAcesso(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
-}
-
-/** A mensagem em português de uma falha da API; o código interno vai à parte. */
-function falhaDaAcao(erro: unknown): Falha {
-  if (erro instanceof FalhaNaApi && erro.status === 403) return { mensagem: SEM_PERMISSAO, codigo: 'http_403' }
-  if (erro instanceof ConflitoNaApi || erro instanceof PedidoInvalido) {
-    return { mensagem: erro.message, codigo: codigoDoErro(erro) }
-  }
-  return { mensagem: 'Não foi possível concluir. Tente de novo.', codigo: codigoDoErro(erro) }
 }
 
 function CaixasDePapeis({
