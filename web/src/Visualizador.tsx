@@ -31,7 +31,7 @@ import {
   podeRemover,
 } from './catalogacao.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
-import { dataDeExibicao, type Job } from './jobs.ts'
+import { dataDeExibicao, finalizando, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
 import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
 import { FormularioDoTrecho } from './FormularioDoTrecho.tsx'
@@ -114,7 +114,9 @@ export default function Visualizador({
   // O Job muda quando a pessoa reprocessa: o que a API devolveu vale mais que o da abertura.
   const [job, setJob] = useState(jobInicial)
   const [escolhendo, setEscolhendo] = useState(false)
-  const [acompanhando, setAcompanhando] = useState(false)
+  // Aberto com as etapas depois da análise ainda rodando, a tela já acompanha até o fim.
+  const [acompanhando, setAcompanhando] = useState(() => finalizando(jobInicial))
+  const [reprocessou, setReprocessou] = useState(false)
   const [reproducao, setReproducao] = useState<Reproducao | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [tentativas, setTentativas] = useState(0)
@@ -220,10 +222,9 @@ export default function Visualizador({
     }
   }, [api, job.id, concluido, cargasDaDecupagem])
 
-  // Depois do pedido, vê de tempos em tempos se as etapas já terminaram. Entre uma etapa e a
-  // seguinte o `etapa_atual` fica vazio; a indexação, a última, só sai de `pendente` no fim.
-  const emAndamento =
-    job.estado === 'analisando' || Boolean(job.etapa_atual) || job.indexacao?.estado === 'pendente'
+  // Vê de tempos em tempos se as etapas já terminaram (a regra do intervalo entre etapas está
+  // em `finalizando`).
+  const emAndamento = job.estado === 'analisando' || finalizando(job)
   useEffect(() => {
     if (!acompanhando) return
     if (!emAndamento) {
@@ -243,6 +244,7 @@ export default function Visualizador({
     setJob(novo)
     setEscolhendo(false)
     setAcompanhando(true)
+    setReprocessou(true)
     // Com a análise, a Decupagem antiga some até a nova terminar.
     if (etapa === 'analise') setDecupagem(null)
   }
@@ -1115,7 +1117,9 @@ export default function Visualizador({
               </Indicator>
             </Tooltip>
           )}
-          {podeReprocessar && job.estado === 'concluido' && !job.etapa_atual && !acompanhando && !escolhendo && (
+          {/* Escondido enquanto as etapas rodam, para não disparar um segundo processamento;
+              um Job preso volta a mostrá-lo depois do teto de `finalizando`. */}
+          {podeReprocessar && job.estado === 'concluido' && !finalizando(job) && !escolhendo && (
             <Button
               variant="default"
               leftSection={<IconRefresh />}
@@ -1140,10 +1144,10 @@ export default function Visualizador({
           aoCancelar={() => setEscolhendo(false)}
         />
       )}
-      {job.etapa_atual && (
+      {job.etapa_atual && emAndamento && (
         <Text size="sm" c={CORES.andamento} role="status">
-          {`${acompanhando ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
-          {acompanhando && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
+          {`${reprocessou ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
+          {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
         </Text>
       )}
       {falhaDoJson && (

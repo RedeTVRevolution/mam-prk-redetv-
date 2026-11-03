@@ -42,6 +42,9 @@ const servidor = setupServer(
 )
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 
+// O selo de "finalizando" solta depois de um teto: os horários do Job são de agora.
+const AGORA = new Date().toISOString()
+
 const JOB: Job = {
   id: 'j1',
   nome: 'FAMA_20261021_720_BLU.mp4',
@@ -639,8 +642,8 @@ test('o acompanhamento vai até a indexação terminar e então recarrega a decu
   let cargas = 0
   const respostas: Partial<Job>[] = [
     // Entre a identificação e os quadros, sem etapa em andamento, mas a indexação pendente.
-    { etapa_atual: null, indexacao: { estado: 'pendente', em: '2026-11-01T10:00:00Z' } },
-    { etapa_atual: null, indexacao: { estado: 'indexado', em: '2026-11-01T10:05:00Z' } },
+    { etapa_atual: null, indexacao: { estado: 'pendente', em: AGORA } },
+    { etapa_atual: null, indexacao: { estado: 'indexado', em: AGORA } },
   ]
   servidor.use(
     http.get('/v1/jobs/j1/decupagem', () => {
@@ -649,7 +652,7 @@ test('o acompanhamento vai até a indexação terminar e então recarrega a decu
     }),
     http.post('/v1/jobs/j1/reprocessar', () =>
       HttpResponse.json(
-        { ...JOB, etapa_atual: 'identificacao', indexacao: { estado: 'pendente', em: '2026-11-01T10:00:00Z' } },
+        { ...JOB, etapa_atual: 'identificacao', indexacao: { estado: 'pendente', em: AGORA } },
         { status: 202 },
       ),
     ),
@@ -673,6 +676,55 @@ test('o acompanhamento vai até a indexação terminar e então recarrega a decu
   expect(await screen.findByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
 })
 
+
+test('aberto com as etapas depois da análise rodando, acompanha até o fim sem dizer "Reprocessando"', async () => {
+  let cargas = 0
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () => {
+      cargas += 1
+      return HttpResponse.json(DECUPAGEM)
+    }),
+    http.get('/v1/jobs/j1', () =>
+      HttpResponse.json({ ...JOB, etapa_atual: null, indexacao: { estado: 'indexado', em: AGORA } }),
+    ),
+  )
+  await abrir(
+    { etapa_atual: 'referencias', indexacao: { estado: 'pendente', em: AGORA } },
+    null,
+    false,
+    true,
+    20,
+  )
+  expect(await screen.findByText('Referências em andamento.')).toBeTruthy()
+
+  await waitFor(() => expect(screen.queryByText(/em andamento/)).toBeNull())
+  await waitFor(() => expect(cargas).toBe(2))
+  expect(screen.getByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
+})
+
+test('o "Reprocessar…" fica escondido entre etapas e volta num Job preso, passado o teto', async () => {
+  // Entre duas etapas: sem etapa em andamento, a indexação pendente.
+  await abrir({ etapa_atual: null, indexacao: { estado: 'pendente', em: AGORA } }, null, false, true, 60_000)
+  await screen.findByRole('group', { name: 'Pautas 3' })
+  expect(screen.queryByRole('button', { name: /Reprocessar…/ })).toBeNull()
+  cleanup()
+
+  // O Workflows morreu no meio há 7 h: a etapa ficou aberta, mas o selo solta.
+  const haSeteHoras = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
+  await abrir(
+    {
+      etapa_atual: 'referencias',
+      indexacao: { estado: 'pendente', em: haSeteHoras },
+      etapas: [{ nome: 'referencias', inicio: haSeteHoras }],
+    },
+    null,
+    false,
+    true,
+    60_000,
+  )
+  expect(await screen.findByRole('button', { name: /Reprocessar…/ })).toBeTruthy()
+  expect(screen.queryByText(/em andamento/)).toBeNull()
+})
 
 const CORRECAO = {
   id: 'c1',
