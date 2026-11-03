@@ -1,4 +1,5 @@
 import { consultaDaBusca, consultaParaEndereco, type ConsultaDaBusca } from './busca.ts'
+import { filtrosParaEnderecoDaAuditoria, type FiltrosDaAuditoria } from './auditoria.ts'
 import { filtrosParaEnderecoDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
 import { filtrosDeMarcas, type FiltrosDeMarcas } from './marcas.ts'
@@ -32,6 +33,11 @@ export function enderecoDaAba(aba: string): string {
 /** O endereço da aba Entradas, com os filtros na query. */
 export function enderecoDasEntradas(filtros: FiltrosDasEntradas): string {
   return `${enderecoDaAba('entradas')}${filtrosParaEnderecoDasEntradas(filtros)}`
+}
+
+/** O endereço da aba Auditoria, com os filtros na query. */
+export function enderecoDaAuditoria(filtros: FiltrosDaAuditoria): string {
+  return `${enderecoDaAba('auditoria')}${filtrosParaEnderecoDaAuditoria(filtros)}`
 }
 
 /** O endereço do relatório de tempo de tela, com os filtros na query. */

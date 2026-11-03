@@ -2,6 +2,7 @@ import type { Usuario } from './App.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
 import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
+import { consultaDaAuditoria, type FiltrosDaAuditoria, type PaginaDeAuditoria, type RegistroDeAuditoria } from './auditoria.ts'
 import { consultaDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
@@ -218,6 +219,8 @@ export interface ClienteDaApi {
   acervo(filtros: FiltrosDoAcervo, cursor?: string | null): Promise<PaginaDoAcervo>
   /** Uma página dos vídeos que entraram, de pessoas e de sistemas; a API só filtra sistema e estado. */
   entradas(filtros: FiltrosDasEntradas, cursor?: string | null): Promise<PaginaDoAcervo>
+  /** `GET /v1/admin/auditoria` (exige `auditoria.ver`): só leitura; `cursor` é o `proximo` da página anterior. */
+  auditoria(filtros: FiltrosDaAuditoria, limite: number, cursor?: string | null): Promise<PaginaDeAuditoria>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
@@ -359,6 +362,13 @@ export function criarClienteDaApi(
       const resposta = await pedir(`/v1/jobs?${consultaDasEntradas(filtros, cursor)}`)
       return {
         jobs: (await resposta.json()) as Job[],
+        proximo: resposta.headers.get('X-Proximo-Cursor'),
+      }
+    },
+    auditoria: async (filtros, limite, cursor = null) => {
+      const resposta = await pedir(`/v1/admin/auditoria?${consultaDaAuditoria(filtros, limite, cursor)}`)
+      return {
+        registros: (await resposta.json()) as RegistroDeAuditoria[],
         proximo: resposta.headers.get('X-Proximo-Cursor'),
       }
     },

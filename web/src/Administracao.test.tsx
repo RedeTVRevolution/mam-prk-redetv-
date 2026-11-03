@@ -108,8 +108,8 @@ test('o link Administração só aparece para quem abre alguma aba da área', as
   expect(screen.queryByRole('link', { name: 'Administração' })).toBeNull()
   cleanup()
 
-  // Sem a aba da auditoria ainda, o link levaria a uma área vazia.
-  eu = { ...COMUM, permissoes: ['decupagem.ver', 'auditoria.ver'] }
+  // Uma permissão que não abre aba (apagar do catálogo) não leva a uma área vazia.
+  eu = { ...COMUM, permissoes: ['decupagem.ver', 'catalogo.apagar'] }
   await abrir('/acervo')
   await screen.findByRole('link', { name: 'Acervo' })
   expect(screen.queryByRole('link', { name: 'Administração' })).toBeNull()

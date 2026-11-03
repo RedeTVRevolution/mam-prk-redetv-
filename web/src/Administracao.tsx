@@ -6,6 +6,8 @@ import { abasPermitidas } from './administracao.ts'
 import { Link } from './Link.tsx'
 import { ACERVO, enderecoDaAba, navegar } from './rotas.ts'
 import { CORES } from './tema.ts'
+import Auditoria from './Auditoria.tsx'
+import { filtrosDaAuditoria } from './auditoria.ts'
 import Chaves from './Chaves.tsx'
 import Entradas from './Entradas.tsx'
 import { filtrosDasEntradas } from './entradas.ts'
@@ -63,6 +65,7 @@ export default function Administracao({ api, aba, busca, usuario, aoEntrarDeNovo
       )}
       {atual.aba === 'usuarios' && <Usuarios api={api} eu={usuario} />}
       {atual.aba === 'chaves' && <Chaves api={api} />}
+      {atual.aba === 'auditoria' && <Auditoria api={api} filtros={filtrosDaAuditoria(busca)} />}
       {atual.aba === 'lixeira' && <Lixeira api={api} aoEntrarDeNovo={aoEntrarDeNovo} />}
     </Stack>
   )
