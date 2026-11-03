@@ -308,7 +308,7 @@ variable "limiar_de_fora_do_esquema" {
 }
 
 variable "limite_de_falhas_por_etapa" {
-  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa em separado"
+  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa e para cada origem em separado (as falhas tratadas pelos Jobs e as execuções que caíram no Workflows não se somam)"
   type        = number
   default     = 3
 }
@@ -2720,7 +2720,8 @@ resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   display_name = "Falhas de uma etapa acima do limite"
   combiner     = "OR"
   # O filtro de um alerta precisa de um resource.type (a API recusa sem ele), e a métrica
-  # vem de dois: uma condição para cada.
+  # vem de dois: uma condição para cada, e o limite vale por origem. Somar as duas pediria
+  # um filtro com one_of ou PromQL, não validados na API (deploy de 2026-11-03).
   dynamic "conditions" {
     for_each = {
       Jobs      = "cloud_run_job"

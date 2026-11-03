@@ -89,7 +89,7 @@ variable "limite_de_buscas_por_video" {
 }
 
 variable "limite_de_falhas_por_etapa" {
-  description = "Falhas por etapa na janela dos alertas antes de alertar"
+  description = "Falhas por etapa e por origem (Jobs ou Workflows) na janela dos alertas antes de alertar"
   type        = number
   default     = 3
 }
