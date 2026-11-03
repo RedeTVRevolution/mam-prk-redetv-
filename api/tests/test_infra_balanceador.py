@@ -120,7 +120,11 @@ def test_o_endereco_e_o_dominio_com_o_balanceador_e_o_run_app_sem_ele() -> None:
 
 def test_o_deploy_so_testa_o_dominio_com_o_certificado_ativo() -> None:
     deploy = (INFRA.parent / "scripts" / "deploy-dev.sh").read_text()
-    certificado = deploy.index("tf output -json certificado_do_balanceador")
+    # O output nulo não fica no estado: lido pela lista, não pelo nome.
+    assert "tf output -json certificado_do_balanceador" not in deploy
+    certificado = deploy.index(
+        "tf output -json | jq -r '.certificado_do_balanceador.value // empty'"
+    )
     ativo = deploy.index("!= ACTIVE ]]", certificado)
     teste = deploy.index('curl -sSf "$URL/v1/health"', ativo)
 

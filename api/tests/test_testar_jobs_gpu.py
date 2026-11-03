@@ -9,7 +9,7 @@ import pytest
 SCRIPT = Path(__file__).parents[2] / "scripts" / "testar-jobs-gpu.sh"
 
 # O gcloud falso lê, por Job, uma resposta por execução em `<pasta>/<job>.respostas` (ok,
-# sem_gpu, gpu_ausente, errado, errado_codigo ou permissao) e anota o que recebeu em `<pasta>/chamadas`.
+# sem_gpu, gpu_ausente, errado, errado_codigo, permissao ou generico_21) e anota o que recebeu em `<pasta>/chamadas`.
 GCLOUD_FALSO = r"""#!/usr/bin/env bash
 pasta=$FALSO
 args=("$@")
@@ -17,13 +17,22 @@ for i in "${!args[@]}"; do
   case ${args[$i]} in
     execute) acao=execute; job=${args[$((i + 1))]} ;;
     update) acao=update; job=${args[$((i + 1))]} ;;
+    list) acao=list ;;
+    --job) job=${args[$((i + 1))]} ;;
   esac
 done
 echo "$acao $job ${args[*]}" >>"$pasta/chamadas"
 if [[ $acao == update ]]; then exit 0; fi
+# As condições da última execução, como o gcloud de verdade as dá (só para o caso real).
+if [[ $acao == list ]]; then
+  [[ $(cat "$pasta/$job.ultima" 2>/dev/null) == generico_21 ]] &&
+    echo "Task $job-x-task0 failed with exit code: 21 and message: The container exited with an error.;Imported container image."
+  exit 0
+fi
 echo "inicio $job" >>"$pasta/ordem"
 /bin/sleep 0.4
 resposta=$(head -n1 "$pasta/$job.respostas")
+echo "$resposta" >"$pasta/$job.ultima"
 tail -n +2 "$pasta/$job.respostas" >"$pasta/$job.resto" && mv "$pasta/$job.resto" "$pasta/$job.respostas"
 echo "fim $job" >>"$pasta/ordem"
 case $resposta in
@@ -33,6 +42,7 @@ case $resposta in
   errado) echo "ERROR: Execution failed. Container called exit(21)." >&2; exit 1 ;;
   errado_codigo) echo "ERROR: Task failed with exit code 21." >&2; exit 1 ;;
   permissao) echo "ERROR: PERMISSION_DENIED: insufficient permissions" >&2; exit 1 ;;
+  generico_21) echo "ERROR: (gcloud.run.jobs.execute) The execution failed. View details about this execution by running: gcloud run jobs executions describe x" >&2; exit 1 ;;
 esac
 """
 
@@ -286,3 +296,22 @@ def test_falta_de_permissao_nao_conta_como_falta_de_gpu(pasta: Path) -> None:
     assert r.returncode == 1
     assert "a GPU não funcionou" in r.stderr and "sem GPU" not in r.stderr
     assert len(_chamadas(pasta, "execute")) == 1
+
+
+def test_o_motivo_vem_da_execucao_quando_o_gcloud_so_diz_que_falhou(
+    pasta: Path,
+) -> None:
+    # O `--wait` do gcloud de verdade só diz "The execution failed." (deploy de 2026-11-03).
+    feito = _rodar(pasta, [f"{OCR},antiga,nova"], {OCR: ["generico_21"]})
+
+    assert feito.returncode == 1
+    assert "ERRO resultado errado" in feito.stderr
+
+
+def test_execute_recusado_antes_da_execucao_nao_le_a_execucao_anterior(
+    pasta: Path,
+) -> None:
+    # Cota negada na hora: não há execução nova, e a anterior não diz nada desta.
+    _rodar(pasta, [f"{OCR},antiga,nova"], {OCR: ["sem_gpu", "ok"]})
+
+    assert "list" not in (pasta / "chamadas").read_text().split()

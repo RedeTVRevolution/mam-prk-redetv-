@@ -225,8 +225,7 @@ def test_deploy_dev_publica_e_testa_o_job_de_objetos_pelo_digest() -> None:
     primeiro = deploy[: deploy.index("REPOSITORIO=$(")]
     assert "-var imagem_objetos=pendente" in primeiro
     assert 'OBJETOS_GPU="$REPOSITORIO_GPU/objetos-gpu:$COMMIT"' in deploy
-    assert "JOB_OBJETOS_GPU_ANTES=$(tf output -raw job_de_objetos_gpu" in deploy
-    assert 'OBJETOS_GPU_ANTES=$(imagem_do_job "$JOB_OBJETOS_GPU_ANTES")' in deploy
+    assert "OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu job_de_objetos_gpu)" in deploy
     assert "_OBJETOS_GPU=$OBJETOS_GPU" in deploy
     assert 'IMAGEM_OBJETOS=$(digest "$OBJETOS_GPU")' in deploy
     assert '-var "imagem_objetos=$IMAGEM_OBJETOS"' in deploy
