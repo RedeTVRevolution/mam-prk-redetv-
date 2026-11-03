@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -1061,3 +1062,122 @@ def test_a_definicao_renderizada_e_yaml_valido() -> None:
     # publicação falha (deploy de 2026-11-03). Renderiza como o templatefile e abre.
     renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "x", _texto()).replace("$${", "${")
     assert isinstance(yaml.safe_load(renderizado), dict)
+
+
+# Escopo das variáveis, como o Workflows confere ao publicar: uma variável criada dentro de
+# um `except` ou de um `for` só existe ali, e usá-la fora falha a publicação ("symbol ...
+# is neither a variable nor a sub-workflow name", deploy de 2026-11-03).
+_MODULOS = {"sys", "text", "map", "math", "json", "list", "time", "base64", "hash"}
+_MODULOS |= {"uuid", "events", "http", "retry", "googleapis", "experimental"}
+_PALAVRAS = {"and", "or", "not", "in", "true", "false", "null"}
+_SALTOS = {"end", "continue", "break"}
+
+
+def _expressoes(valor: Any) -> list[str]:
+    if isinstance(valor, dict):
+        return [e for v in valor.values() for e in _expressoes(v)]
+    if isinstance(valor, list):
+        return [e for v in valor for e in _expressoes(v)]
+    achadas = []
+    for inicio in re.finditer(r"\$\{", str(valor) if isinstance(valor, str) else ""):
+        i, profundidade = inicio.end(), 1
+        while i < len(valor) and profundidade:
+            profundidade += {"{": 1, "}": -1}.get(valor[i], 0)
+            i += 1
+        achadas.append(valor[inicio.end() : i - 1])
+    return achadas
+
+
+def _simbolos(expressao: str) -> set[str]:
+    sem_texto = re.sub(r'"(?:[^"\\]|\\.)*"', '""', expressao)
+    nomes = set()
+    for m in re.finditer(r"(?<![\w.])([A-Za-z_]\w*)", sem_texto):
+        nome, resto = m.group(1), sem_texto[m.end() :].lstrip()
+        modulo = nome in _MODULOS and resto.startswith(".")
+        if nome not in _PALAVRAS and not resto.startswith("(") and not modulo:
+            nomes.add(nome)
+    return nomes
+
+
+def _definidos(passos: list[Any] | None) -> set[str]:
+    """O que os passos criam no escopo deles, sem entrar no `except` nem no `for`."""
+    nomes: set[str] = set()
+    for passo in passos or []:
+        ((_, corpo),) = passo.items()
+        for atribuicao in corpo.get("assign") or []:
+            nomes |= {re.split(r"[\[.]", chave)[0] for chave in atribuicao}
+        tentativa = corpo.get("try") or {}
+        for fonte in (corpo, tentativa):
+            if "result" in fonte:
+                nomes.add(fonte["result"])
+        nomes |= _definidos(tentativa.get("steps")) | _definidos(corpo.get("steps"))
+        for ramo in corpo.get("switch") or []:
+            nomes |= _definidos(ramo.get("steps"))
+    return nomes
+
+
+def _nomes_dos_passos(passos: list[Any] | None) -> set[str]:
+    nomes: set[str] = set()
+    for passo in passos or []:
+        ((nome, corpo),) = passo.items()
+        nomes.add(nome)
+        nomes |= _nomes_dos_passos(corpo.get("steps"))
+        for ramo in corpo.get("switch") or []:
+            nomes |= _nomes_dos_passos(ramo.get("steps"))
+    return nomes
+
+
+def _problemas(
+    passos: list[Any] | None, escopo: set[str], alvos: set[str], onde: str
+) -> list[str]:
+    achados = []
+    for passo in passos or []:
+        ((nome, corpo),) = passo.items()
+        blocos = ("for", "try", "except", "steps", "switch")
+        proprio = {k: v for k, v in corpo.items() if k not in blocos}
+        ramos = corpo.get("switch") or []
+        condicoes = [{k: v for k, v in r.items() if k != "steps"} for r in ramos]
+        laco = {k: v for k, v in (corpo.get("for") or {}).items() if k != "steps"}
+        for expressao in _expressoes([proprio, condicoes, laco]):
+            for simbolo in _simbolos(expressao) - escopo:
+                achados.append(f"{onde}/{nome}: {simbolo!r} fora do escopo")
+        for salto in [corpo.get("next")] + [r.get("next") for r in ramos]:
+            if salto and salto not in alvos | _SALTOS:
+                achados.append(f"{onde}/{nome}: next {salto!r} não existe")
+        for ramo in ramos:
+            achados += _problemas(ramo.get("steps"), escopo, alvos, onde)
+        achados += _problemas(corpo.get("steps"), escopo, alvos, onde)
+        tentativa = corpo.get("try") or {}
+        if "steps" in tentativa:
+            achados += _problemas(tentativa["steps"], escopo, alvos, onde)
+        elif tentativa:
+            achados += _problemas([{nome: tentativa}], escopo, alvos, onde)
+        for bloco, locais in (
+            (corpo.get("except"), ["as"]),
+            (corpo.get("for"), ["value", "index"]),
+        ):
+            if bloco:
+                interno = bloco.get("steps")
+                local = escopo | {bloco[k] for k in locais if k in bloco}
+                achados += _problemas(
+                    interno,
+                    local | _definidos(interno),
+                    alvos | _nomes_dos_passos(interno),
+                    onde,
+                )
+    return achados
+
+
+def test_toda_variavel_usada_existe_no_escopo_do_passo() -> None:
+    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "1", _texto()).replace("$${", "${")
+    definicao = yaml.safe_load(renderizado)
+    achados = []
+    for nome, sub in definicao.items():
+        params = {
+            p if isinstance(p, str) else next(iter(p)) for p in sub.get("params", [])
+        }
+        escopo = params | _definidos(sub["steps"]) | set(definicao)
+        achados += _problemas(
+            sub["steps"], escopo, _nomes_dos_passos(sub["steps"]), nome
+        )
+    assert achados == []
