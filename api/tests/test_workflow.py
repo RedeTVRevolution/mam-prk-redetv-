@@ -1169,8 +1169,7 @@ def _problemas(
 
 
 def test_toda_variavel_usada_existe_no_escopo_do_passo() -> None:
-    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "1", _texto()).replace("$${", "${")
-    definicao = yaml.safe_load(renderizado)
+    definicao = _definicao()
     achados = []
     for nome, sub in definicao.items():
         params = {
@@ -1193,3 +1192,37 @@ def test_conta_da_orquestracao_grava_log_do_sys_log() -> None:
     assert "call: sys.log" in _texto()
     linha = re.search(r"^\s*orquestracao\s*=\s*\[.*\]$", MAIN.read_text(), re.MULTILINE)
     assert linha and '"roles/logging.logWriter"' in linha.group(0)
+
+
+def _definicao() -> dict[str, Any]:
+    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "1", _texto()).replace("$${", "${")
+    definicao: dict[str, Any] = yaml.safe_load(renderizado)
+    return definicao
+
+
+def test_erro_sem_tratamento_marca_o_job_interrompido_e_sobe() -> None:
+    # Sem isto, o Job fica em `analisando` ("Decupando") para sempre (dev, 2026-11-03).
+    definicao = _definicao()
+    passos = [next(iter(p.values())) for p in definicao["main"]["steps"]]
+    rodada = next(p for p in passos if "try" in p)
+    assert rodada["try"]["call"] == "processa"
+    tratamento = [next(iter(p.values())) for p in rodada["except"]["steps"]]
+    marcacao = [next(iter(p.values())) for p in tratamento[0]["try"]["steps"]]
+    assert marcacao[0]["call"] == "marca_interrompido"
+    assert marcacao[-1]["call"] == "sys.log" and marcacao[-1]["args"]["data"] == "${e}"
+    assert tratamento[-1] == {"raise": "${e}"}
+    # O id sai antes do try, dos dois formatos: o reprocessamento e o Eventarc.
+    texto = _subworkflow(_texto(), "main")
+    assert texto.index('map.get(evento, "job_id")') < texto.index("call: processa")
+    assert "job_do_evento: $${evento.data.name}" in texto
+
+
+def test_marca_interrompido_so_derruba_job_em_andamento() -> None:
+    marca = _subworkflow(_texto(), "marca_interrompido")
+    assert '["aguardando_upload", "validando", "analisando"]' in marca
+    # A etapa já fechada (a do paralelo, que não limpa o `etapa_atual`) não é regravada.
+    assert '"fim", "timestampValue"]) == null' in marca
+    assert "stringValue: processamento_interrompido" in marca
+    assert "updateTime: $${interrompido.updateTime}" in marca
+    # A etapa em andamento fecha como `falhou`, para o reprocessar recomeçar dali.
+    assert "call: marca_fim" in marca and "falhou_na_execucao: true" in marca
