@@ -123,9 +123,9 @@ export function filtrosParaApi(f: FiltrosDoAcervo, cursor: string | null): strin
   return p.toString()
 }
 
-/** O instante como `DD/MM/AAAA HH:MM`. */
+/** O instante como `DD/MM/AAAA HH:MM`, em São Paulo (o dia dos filtros por período). */
 export function dataEHora(iso: string): string {
   const d = new Date(iso)
-  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  return `${d.toLocaleDateString('pt-BR')} ${hora}`
+  const hora = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+  return `${d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} ${hora}`
 }

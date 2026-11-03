@@ -1,4 +1,6 @@
 import { nomeDaEtapa } from './etapas.ts'
+import { NOME_DO_PAPEL } from './papeis.ts'
+import { ESTADOS_DO_JOB } from './tema.ts'
 
 // A aba Auditoria da administração: a lista fechada de ações, os filtros da URL e os detalhes em frases.
 
@@ -57,6 +59,11 @@ export const SEM_FILTROS_DA_AUDITORIA: FiltrosDaAuditoria = { pessoa: '', alvo: 
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/
 
+/** "De" depois de "Até": a API recusa, então a tela avisa sem consultar. */
+export function periodoInvertido(f: FiltrosDaAuditoria): boolean {
+  return Boolean(f.de && f.ate && f.de > f.ate)
+}
+
 export function haFiltroDaAuditoria(f: FiltrosDaAuditoria): boolean {
   return Object.values(f).some(Boolean)
 }
@@ -98,14 +105,6 @@ export function consultaDaAuditoria(f: FiltrosDaAuditoria, limite: number, curso
   return p.toString()
 }
 
-const NOME_DO_PAPEL: Record<string, string> = {
-  consulta: 'Consulta',
-  operador: 'Operador',
-  editor: 'Editor',
-  curador: 'Curador',
-  administrador: 'Administrador',
-}
-
 function lista(valor: unknown): string {
   const itens = Array.isArray(valor) ? valor.map(String) : []
   return itens.length ? itens.map((p) => NOME_DO_PAPEL[p] ?? p).join(', ') : 'nenhum'
@@ -133,8 +132,14 @@ function impacto(d: Record<string, unknown>): string[] {
   ]
   const frases = partes.flatMap(([n, s, p]) => (numero(n) === null ? [] : [contar(numero(n)!, s, p)]))
   const linhas = frases.length ? [`${frases.join(', ')}.`] : []
+  if (Array.isArray(d.outros_jobs) && d.outros_jobs.length)
+    linhas.push(`${contar(d.outros_jobs.length, 'outro envio tinha', 'outros envios tinham')} o mesmo conteúdo.`)
   if (d.conteudo_compartilhado === true) linhas.push('A decupagem e os arquivos ficaram: outro envio usa o mesmo conteúdo.')
   return linhas
+}
+
+function rotuloDoEstado(estado: string): string {
+  return Object.hasOwn(ESTADOS_DO_JOB, estado) ? ESTADOS_DO_JOB[estado as keyof typeof ESTADOS_DO_JOB].rotulo : estado
 }
 
 /** Os detalhes do registro em frases; o que não se conhece sai como `chave: valor`. */
@@ -157,7 +162,7 @@ export function detalhesEmFrases(r: RegistroDeAuditoria): string[] {
         ? [`A partir da etapa ${nomeDaEtapa(d.etapa)}${d.etapa_escolhida === true ? ' (escolhida)' : ''}`]
         : []
     case 'job.estado_corrigido':
-      return typeof d.de === 'string' && typeof d.para === 'string' ? [`Estado: de ${d.de} para ${d.para}`] : []
+      return typeof d.de === 'string' && typeof d.para === 'string' ? [`Estado: de ${rotuloDoEstado(d.de)} para ${rotuloDoEstado(d.para)}`] : []
     default:
       return Object.entries(d).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
   }

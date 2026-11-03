@@ -11,6 +11,7 @@ import {
   FRASE_DA_ACAO,
   fraseDaAcao,
   haFiltroDaAuditoria,
+  periodoInvertido,
   SEM_FILTROS_DA_AUDITORIA,
   type FiltrosDaAuditoria,
   type RegistroDeAuditoria,
@@ -90,14 +91,19 @@ export default function Auditoria({ api, filtros }: { api: ClienteDaApi; filtros
   // Cada carga da lista abre uma geração; a resposta de uma anterior é descartada.
   const geracao = useRef(0)
 
+  const invertido = periodoInvertido(filtros)
+
   useEffect(() => {
     let ativo = true
     geracao.current += 1
-    // Recomeça a lista quando um filtro muda.
+    // Recomeça a lista quando um filtro muda; a página seguinte em voo é da lista anterior.
     // oxlint-disable-next-line react/set-state-in-effect
-    setCarga({ tipo: 'carregando' })
+    setCarregandoMais(false)
     // oxlint-disable-next-line react/set-state-in-effect
     setMaisFalhou(null)
+    if (invertido) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setCarga({ tipo: 'carregando' })
     api.auditoria(filtrosAtuais.current, POR_PAGINA).then(
       (pagina) => {
         if (ativo) setCarga({ tipo: 'pronta', ...pagina })
@@ -109,7 +115,7 @@ export default function Auditoria({ api, filtros }: { api: ClienteDaApi; filtros
     return () => {
       ativo = false
     }
-  }, [api, chave, recarga])
+  }, [api, chave, recarga, invertido])
 
   async function carregarMais() {
     if (carga.tipo !== 'pronta' || !carga.proximo || carregandoMais) return
@@ -123,7 +129,7 @@ export default function Auditoria({ api, filtros }: { api: ClienteDaApi; filtros
     } catch (erro) {
       if (geracao.current === daVez && !(erro instanceof SessaoExpirada)) setMaisFalhou(codigoDoErro(erro))
     } finally {
-      setCarregandoMais(false)
+      if (geracao.current === daVez) setCarregandoMais(false)
     }
   }
 
@@ -156,17 +162,18 @@ export default function Auditoria({ api, filtros }: { api: ClienteDaApi; filtros
           </Button>
         )}
       </Group>
-      {maisFalhou !== null && <AlertaDeErro mensagem="Não foi possível carregar mais registros." codigo={maisFalhou} aoTentar={() => void carregarMais()} />}
-      {carga.tipo === 'carregando' && (
+      {maisFalhou !== null && <AlertaDeErro mensagem="Não foi possível carregar mais registros. Tente de novo." codigo={maisFalhou} aoTentar={() => void carregarMais()} />}
+      {invertido && <Text size="sm">A data em "De" é depois da data em "Até". Troque uma das duas para ver os registros.</Text>}
+      {!invertido && carga.tipo === 'carregando' && (
         <Center py="xl">
           <Loader role="status" aria-label="Carregando a auditoria" size="sm" />
         </Center>
       )}
-      {carga.tipo === 'erro' && <AlertaDeErro mensagem="Não foi possível carregar a auditoria. Tente de novo." codigo={carga.codigo} aoTentar={() => setRecarga((n) => n + 1)} />}
-      {carga.tipo === 'pronta' && registros.length === 0 && (
+      {!invertido && carga.tipo === 'erro' && <AlertaDeErro mensagem="Não foi possível carregar a auditoria. Tente de novo." codigo={carga.codigo} aoTentar={() => setRecarga((n) => n + 1)} />}
+      {!invertido && carga.tipo === 'pronta' && registros.length === 0 && (
         <Text size="sm">{haFiltroDaAuditoria(filtros) ? 'Nenhum registro com esses filtros.' : 'Nenhum registro ainda.'}</Text>
       )}
-      {carga.tipo === 'pronta' && registros.length > 0 && (
+      {!invertido && carga.tipo === 'pronta' && registros.length > 0 && (
         <Table aria-label="Auditoria" highlightOnHover verticalSpacing={4}>
           <Table.Thead>
             <Table.Tr>
@@ -194,7 +201,7 @@ export default function Auditoria({ api, filtros }: { api: ClienteDaApi; filtros
           </Table.Tbody>
         </Table>
       )}
-      {carga.tipo === 'pronta' && carga.proximo !== null && (
+      {!invertido && carga.tipo === 'pronta' && carga.proximo !== null && (
         <Group justify="center">
           <Button type="button" size="xs" variant="default" loading={carregandoMais} onClick={() => void carregarMais()}>
             Carregar mais

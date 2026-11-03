@@ -22,18 +22,9 @@ import { SessaoExpirada, type ClienteDaApi, type ContaDaLista } from './api.ts'
 import type { Usuario } from './App.tsx'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { falhaDaAcao, type Falha } from './falhaDaAcao.ts'
+import { NOME_DO_PAPEL, PAPEIS } from './papeis.ts'
 import { CORES } from './tema.ts'
 
-/** Os papéis do `api/papeis.py`, com o que cada um pode, na ordem em que a API os devolve. */
-const PAPEIS = [
-  { valor: 'consulta', nome: 'Consulta', pode: 'vê a decupagem' },
-  { valor: 'operador', nome: 'Operador', pode: 'envia vídeos e reprocessa' },
-  { valor: 'editor', nome: 'Editor', pode: 'vê e corrige a decupagem' },
-  { valor: 'curador', nome: 'Curador', pode: 'aprova correções, reprocessa etapas e cuida do catálogo' },
-  { valor: 'administrador', nome: 'Administrador', pode: 'gere contas, chaves, lixeira e auditoria' },
-]
-
-const NOME_DO_PAPEL = Object.fromEntries(PAPEIS.map((p) => [p.valor, p.nome]))
 const TODOS = '__todos__'
 
 function ultimoAcesso(iso: string | null): string {

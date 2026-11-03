@@ -218,3 +218,22 @@ test('com filtro e sem resultado, diz que nenhum registro casa', async () => {
   await abrir('/admin/auditoria?alvo=j1')
   expect(await screen.findByText('Nenhum registro com esses filtros.')).toBeTruthy()
 })
+
+test('a correção de estado mostra o estado pelo nome, e o impacto conta os outros envios', async () => {
+  const usuario = userEvent.setup()
+  lista = [
+    { ...registros()[0]!, detalhes: { ...registros()[0]!.detalhes, outros_jobs: [{ id: 'j2', nome: 'copia.mp4', enviado_por: 'rui' }] } },
+    { ...registros()[2]!, id: 'r4', acao: 'job.estado_corrigido', alvo_nome: 'preso.mp4', detalhes: { de: 'analisando', para: 'falhou' } },
+  ]
+  await abrir()
+  await usuario.click(await linhaDe('preso.mp4'))
+  expect(await screen.findByText('Estado: de Decupando para Falhou')).toBeTruthy()
+  await usuario.click(await linhaDe('TV Fama'))
+  expect(await screen.findByText('1 outro envio tinha o mesmo conteúdo.')).toBeTruthy()
+})
+
+test('com "De" depois de "Até", avisa e não consulta a API', async () => {
+  await abrir('/admin/auditoria?de=2026-10-28&ate=2026-10-27')
+  expect(await screen.findByText(/"De" é depois da data em "Até"/)).toBeTruthy()
+  expect(consultas).toEqual([])
+})
