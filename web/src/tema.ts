@@ -145,6 +145,9 @@ export const ESTADOS_DO_JOB = {
 
 export type EstadoDoJob = keyof typeof ESTADOS_DO_JOB
 
+// Não é um estado da API: é o `concluido` com as etapas depois da análise ainda rodando.
+export const FINALIZANDO = { cor: CORES.andamento, rotulo: 'Finalizando' }
+
 // Uma cor por tipo, a mesma na faixa, no chip e no marcador. Distinguíveis entre si
 // também na deuteranopia, e legíveis como texto sobre qualquer superfície.
 export const CORES_DE_OCORRENCIA = {
