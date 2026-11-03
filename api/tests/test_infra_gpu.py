@@ -233,3 +233,10 @@ def test_o_limiar_de_mudanca_do_ocr_vem_de_uma_variavel_nos_dois_jobs() -> None:
         job = _bloco(f'resource "google_cloud_run_v2_job" "{nome}"')
         assert "LIMIAR_DE_MUDANCA" in job
         assert "tostring(var.limiar_de_mudanca_do_ocr)" in job
+
+
+@pytest.mark.parametrize("nome", ["transcricao_gpu", "ocr_gpu", "objetos_gpu"])
+def test_job_com_gpu_de_mais_de_uma_hora_declara_beta(nome: str) -> None:
+    # Sem BETA, a API recusa GPU com timeout acima de 1 h (deploy de 2026-11-03).
+    job = _bloco(f'resource "google_cloud_run_v2_job" "{nome}"')
+    assert 'launch_stage = "BETA"' in job

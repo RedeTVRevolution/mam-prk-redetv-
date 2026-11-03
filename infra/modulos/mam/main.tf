@@ -308,7 +308,7 @@ variable "limiar_de_fora_do_esquema" {
 }
 
 variable "limite_de_falhas_por_etapa" {
-  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa em separado"
+  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa e para cada origem em separado (as falhas tratadas pelos Jobs e as execuções que caíram no Workflows não se somam)"
   type        = number
   default     = 3
 }
@@ -1281,6 +1281,9 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
   name                = "mam-transcricao-gpu"
   location            = var.regiao_gpu
   deletion_protection = false
+  # Job com GPU e timeout acima de 1 h ("Long running GPU jobs") só existe em BETA: sem
+  # isto, a API recusa a criação (deploy de 2026-11-03).
+  launch_stage = "BETA"
   template {
     parallelism = 1
     task_count  = 1
@@ -1354,6 +1357,9 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
   name                = "mam-ocr-gpu"
   location            = var.regiao_gpu
   deletion_protection = false
+  # Job com GPU e timeout acima de 1 h ("Long running GPU jobs") só existe em BETA: sem
+  # isto, a API recusa a criação (deploy de 2026-11-03).
+  launch_stage = "BETA"
   template {
     parallelism = 1
     task_count  = 1
@@ -1432,6 +1438,9 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
   name                = "mam-objetos-gpu"
   location            = var.regiao_gpu
   deletion_protection = false
+  # Job com GPU e timeout acima de 1 h ("Long running GPU jobs") só existe em BETA: sem
+  # isto, a API recusa a criação (deploy de 2026-11-03).
+  launch_stage = "BETA"
   template {
     parallelism = 1
     task_count  = 1
@@ -2659,9 +2668,12 @@ resource "google_monitoring_alert_policy" "sinal_percentual" {
       comparison      = "COMPARISON_GT"
       threshold_value = each.value.limiar
       duration        = "0s"
+      # Métrica de distribuição: o ALIGN_MEAN não se aplica a ela (a API recusa); o
+      # ALIGN_DELTA junta os valores da janela e o REDUCE_MEAN dá a média deles.
       aggregations {
-        alignment_period   = local.janela_dos_alertas_s
-        per_series_aligner = "ALIGN_MEAN"
+        alignment_period     = local.janela_dos_alertas_s
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_MEAN"
       }
     }
   }
@@ -2707,18 +2719,27 @@ resource "google_monitoring_alert_policy" "fora_do_esquema" {
 resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   display_name = "Falhas de uma etapa acima do limite"
   combiner     = "OR"
-  conditions {
-    display_name = "Falhas de uma etapa acima do limite"
-    condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\""
-      comparison      = "COMPARISON_GT"
-      threshold_value = var.limite_de_falhas_por_etapa
-      duration        = "0s"
-      aggregations {
-        alignment_period     = local.janela_dos_alertas_s
-        per_series_aligner   = "ALIGN_DELTA"
-        cross_series_reducer = "REDUCE_SUM"
-        group_by_fields      = ["metric.label.etapa"]
+  # O filtro de um alerta precisa de um resource.type (a API recusa sem ele), e a métrica
+  # vem de dois: uma condição para cada, e o limite vale por origem. Somar as duas pediria
+  # um filtro com one_of ou PromQL, não validados na API (deploy de 2026-11-03).
+  dynamic "conditions" {
+    for_each = {
+      Jobs      = "cloud_run_job"
+      Workflows = "workflows.googleapis.com/Workflow"
+    }
+    content {
+      display_name = "Falhas de uma etapa acima do limite (${conditions.key})"
+      condition_threshold {
+        filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\" AND resource.type=\"${conditions.value}\""
+        comparison      = "COMPARISON_GT"
+        threshold_value = var.limite_de_falhas_por_etapa
+        duration        = "0s"
+        aggregations {
+          alignment_period     = local.janela_dos_alertas_s
+          per_series_aligner   = "ALIGN_DELTA"
+          cross_series_reducer = "REDUCE_SUM"
+          group_by_fields      = ["metric.label.etapa"]
+        }
       }
     }
   }

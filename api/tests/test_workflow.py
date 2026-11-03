@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from api.rostos_dos_palpites import PREFIXO_DOS_PALPITES
 
@@ -1053,3 +1054,10 @@ def test_sem_job_em_cpu_a_gpu_esgotada_repassa_a_falha() -> None:
         funcao.index("- ainda_cabe_esperar:") : funcao.index("- registra_o_sucesso")
     ]
     assert cabe.rstrip().endswith("next: confere_se_ha_plano_b")
+
+
+def test_a_definicao_renderizada_e_yaml_valido() -> None:
+    # O Workflows lê YAML: uma expressão sem aspas com ": " dentro vira chave e valor, e a
+    # publicação falha (deploy de 2026-11-03). Renderiza como o templatefile e abre.
+    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "x", _texto()).replace("$${", "${")
+    assert isinstance(yaml.safe_load(renderizado), dict)
