@@ -89,7 +89,10 @@ def test_a_execucao_que_falha_em_qualquer_etapa_loga_pelo_workflows() -> None:
     metrica = _bloco('resource "google_logging_metric" "falhas_por_etapa"')
     assert 'resource.type=\\"workflows.googleapis.com/Workflow\\"' in metrica
     politica = _bloco('resource "google_monitoring_alert_policy" "falhas_por_etapa"')
-    assert "cloud_run_job" not in politica
+    # Uma condição por origem: só cloud_run_job perderia as falhas do Workflows.
+    assert 'Jobs      = "cloud_run_job"' in politica
+    assert 'Workflows = "workflows.googleapis.com/Workflow"' in politica
+    assert 'resource.type=\\"${conditions.value}\\"' in politica
 
 
 def test_os_limiares_sao_variaveis_com_descricao() -> None:
@@ -139,3 +142,18 @@ def test_o_job_de_indexacao_recebe_n_e_k_do_sinal_por_programa() -> None:
     assert "var.videos_do_sinal_por_programa" in indexacao
     assert 'name  = "SINAL_DESVIOS"' in indexacao
     assert "var.desvios_do_sinal_por_programa" in indexacao
+
+
+def test_todo_alerta_de_metrica_restringe_o_resource_type() -> None:
+    # A API recusa a condição de alerta sem resource.type no filtro (deploy de 2026-11-03).
+    filtros = re.findall(r'filter\s+= "(metric\.type=.*)"', TF)
+    assert len(filtros) >= 5
+    for filtro in filtros:
+        assert "resource.type=" in filtro, filtro
+
+
+def test_o_alerta_do_percentual_nao_usa_align_mean_na_distribuicao() -> None:
+    # ALIGN_MEAN não se aplica a métrica DELTA de distribuição: a API recusa.
+    alerta = _bloco('resource "google_monitoring_alert_policy" "sinal_percentual"')
+    assert not re.search(r'per_series_aligner\s+= "ALIGN_MEAN"', alerta)
+    assert 'cross_series_reducer = "REDUCE_MEAN"' in alerta

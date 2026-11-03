@@ -889,7 +889,7 @@ roda_o_job_com_gpu:
                           call: sys.log
                           args:
                             severity: ERROR
-                            text: $${"o Job " + job_gpu + " falhou dentro do contêiner na tentativa " + string(tentativas) + " para " + job_id + ", sem nova tentativa e sem plano B: " + mensagem}
+                            text: '$${"o Job " + job_gpu + " falhou dentro do contêiner na tentativa " + string(tentativas) + " para " + job_id + ", sem nova tentativa e sem plano B: " + mensagem}'
                       - marca_a_gpu_da_falha:
                           call: marca_dispositivo
                           args:
@@ -927,7 +927,7 @@ roda_o_job_com_gpu:
         call: sys.log
         args:
           severity: WARNING
-          text: $${"sem GPU ou sem cota para " + job_gpu + " na tentativa " + string(tentativas) + " de " + job_id + ", nova tentativa em " + string(espera) + " s: " + mensagem}
+          text: '$${"sem GPU ou sem cota para " + job_gpu + " na tentativa " + string(tentativas) + " de " + job_id + ", nova tentativa em " + string(espera) + " s: " + mensagem}'
     - espera_a_gpu:
         call: sys.sleep
         args:
@@ -946,7 +946,7 @@ roda_o_job_com_gpu:
                   call: sys.log
                   args:
                     severity: WARNING
-                    text: $${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", sem plano B: " + mensagem}
+                    text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", sem plano B: " + mensagem}'
               - marca_a_gpu_sem_plano_b:
                   call: marca_dispositivo
                   args:
@@ -960,7 +960,7 @@ roda_o_job_com_gpu:
         call: sys.log
         args:
           severity: WARNING
-          text: $${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", plano B: o Job em CPU " + job_cpu + ": " + mensagem}
+          text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", plano B: o Job em CPU " + job_cpu + ": " + mensagem}'
     - marca_a_cpu:
         call: marca_dispositivo
         args:
