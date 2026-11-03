@@ -5,7 +5,7 @@ export interface Aba {
   permissoes: string[]
 }
 
-// Cada ticket da área acrescenta a sua aba aqui (entradas, lixeira, auditoria).
+// Cada ticket da área acrescenta a sua aba aqui (falta a auditoria).
 export const ABAS: Aba[] = [
   { aba: 'entradas', rotulo: 'Entradas', permissoes: ['video.reprocessar', 'video.reprocessar_etapa'] },
   { aba: 'usuarios', rotulo: 'Usuários', permissoes: ['usuarios.gerir'] },

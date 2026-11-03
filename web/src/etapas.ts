@@ -40,6 +40,9 @@ const ETAPA_DA_FALHA: Record<string, string> = {
   analise_falhou: 'analise',
 }
 
+/** As falhas que pedem novo envio (`FALHAS_DO_ARQUIVO` em api/ciclo_de_vida.py). */
+const FALHAS_DO_ARQUIVO = ['formato_invalido', 'arquivo_corrompido', 'codec_nao_suportado', 'duracao_excedida', 'upload_expirado']
+
 /** "de" + a etapa, para "Reprocessar a partir da leitura da tela?". */
 const PARTIDA: Record<string, string> = {
   transcricao: 'da transcrição',
@@ -73,6 +76,7 @@ export function etapaDeReprocesso(job: JobComEtapas): string | null {
   if (job.estado !== 'falhou' && (job.estado !== 'concluido' || job.etapa_atual)) return null
   const falhas = ORDEM.filter((nome) => job.etapas?.some((e) => e.nome === nome && e.resultado === 'falhou'))
   if (job.estado === 'falhou') {
+    if (job.codigo_falha === null || FALHAS_DO_ARQUIVO.includes(job.codigo_falha)) return null
     const partida = falhas[0] ?? (job.codigo_falha ? ETAPA_DA_FALHA[job.codigo_falha] : undefined)
     return partida && partida !== 'validacao' ? partida : null
   }

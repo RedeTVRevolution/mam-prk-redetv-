@@ -78,7 +78,7 @@ afterAll(() => servidor.close())
 function Tela({ api, podeReprocessar, podeEscolherEtapa, intervaloMs }: { api: ReturnType<typeof criarClienteDaApi>; podeReprocessar: boolean; podeEscolherEtapa: boolean; intervaloMs: number }) {
   const rota = useRota()
   if (rota.tipo !== 'admin') return null
-  return <Entradas api={api} filtros={filtrosDasEntradas(rota.busca)} podeReprocessar={podeReprocessar} podeEscolherEtapa={podeEscolherEtapa} intervaloMs={intervaloMs} />
+  return <Entradas api={api} filtros={filtrosDasEntradas(rota.busca)} podeReprocessar={podeReprocessar} podeEscolherEtapa={podeEscolherEtapa} podeVerSistemas={false} intervaloMs={intervaloMs} />
 }
 
 async function abrir(opcoes: { endereco?: string; podeReprocessar?: boolean; podeEscolherEtapa?: boolean } = {}) {
@@ -157,6 +157,8 @@ test('Reprocessar só aparece na falha de etapa e no concluído com etapa que fa
   jobs = [
     falhaDeEtapa(),
     job({ id: 'q', nome: 'falha-do-arquivo.mp4', estado: 'falhou', codigo_falha: 'arquivo_corrompido' }),
+    // Sem código, a API recusa o reprocessamento mesmo com uma etapa falha no registro.
+    job({ id: 's', nome: 'falha-sem-codigo.mp4', estado: 'falhou', etapas: [{ nome: 'analise', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
     job({ id: 'c1', nome: 'concluido-com-falha.mp4', etapas: [{ nome: 'indexacao', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
     job({ id: 'c2', nome: 'concluido-limpo.mp4', etapas: [{ nome: 'indexacao', ...ETAPA_OK }] }),
   ]
@@ -166,6 +168,7 @@ test('Reprocessar só aparece na falha de etapa e no concluído com etapa que fa
   expect(botao('falhou-na-tela.mp4')).toBeTruthy()
   expect(botao('concluido-com-falha.mp4')).toBeTruthy()
   expect(botao('falha-do-arquivo.mp4')).toBeNull()
+  expect(botao('falha-sem-codigo.mp4')).toBeNull()
   expect(botao('concluido-limpo.mp4')).toBeNull()
   const arquivo = screen.getByRole('row', { name: /falha-do-arquivo.mp4/ })
   expect(within(arquivo).getByText('Envie o arquivo de novo')).toBeTruthy()
@@ -197,6 +200,7 @@ test('no vídeo concluído, o Reprocessar continua concluído e mostra a etapa e
   await waitFor(() => expect(reprocessos).toEqual([{ id: 'j1', corpo: null }]))
   const linha = await linhaDe('c.mp4')
   await waitFor(() => expect(within(linha).getByText('Quadros-chave')).toBeTruthy())
+  expect(within(linha).getByText('Concluído')).toBeTruthy()
 })
 
 test('"Reprocessar…" com etapa só aparece com a permissão, nas linhas concluídas, e exige o motivo', async () => {

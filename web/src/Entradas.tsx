@@ -65,7 +65,7 @@ function EtapasDoJob({ job, agora }: { job: Job; agora: number }) {
   const etapas = job.etapas ?? []
   if (etapas.length === 0) return <Text size="sm" c={CORES.textoSecundario}>Nenhuma etapa registrada ainda.</Text>
   return (
-    <Table aria-label={`Etapas de ${job.nome}`} verticalSpacing={2}>
+    <Table aria-label={`Etapas de ${job.nome}`} verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
           <Table.Th>Etapa</Table.Th>
@@ -160,10 +160,14 @@ function Linha({
       <Table.Td>{job.programa ?? '—'}</Table.Td>
       <Table.Td style={{ ...NUMEROS, whiteSpace: 'nowrap' }}>{dataEHora(job.criado_em)}</Table.Td>
       <Table.Td>
-        {job.etapa_atual ? (
+        {job.etapa_atual && job.estado !== 'concluido' ? (
           <Badge color={CORES.andamento}>{nomeDaEtapa(job.etapa_atual)}</Badge>
         ) : (
-          <Badge color={estado?.cor}>{estado?.rotulo ?? job.estado}</Badge>
+          <Group gap={4} wrap="nowrap">
+            <Badge color={estado?.cor}>{estado?.rotulo ?? job.estado}</Badge>
+            {/* O vídeo concluído continua concluído enquanto uma etapa de depois roda. */}
+            {job.etapa_atual && <Badge color={CORES.andamento}>{nomeDaEtapa(job.etapa_atual)}</Badge>}
+          </Group>
         )}
       </Table.Td>
       <Table.Td style={NUMEROS}>{relogio(tempoDaEntradaMs(job, agora))}</Table.Td>
@@ -221,7 +225,7 @@ function ConfirmarReprocesso({
 
   return (
     <Stack gap="xs" onKeyDown={(e) => e.key === 'Escape' && !enviando && aoCancelar()}>
-      <Text size="sm">{`Reprocessar ${partidaDaEtapa(etapa) ? `a partir ${partidaDaEtapa(etapa)}` : ''}? As etapas já concluídas não são refeitas.`}</Text>
+      <Text size="sm">{`Reprocessar a partir ${partidaDaEtapa(etapa)}? As etapas já concluídas não são refeitas.`}</Text>
       <TextInput
         label="Motivo (opcional)"
         size="xs"
@@ -250,6 +254,7 @@ export default function Entradas({
   filtros,
   podeReprocessar,
   podeEscolherEtapa,
+  podeVerSistemas,
   intervaloMs = 10_000,
 }: {
   api: ClienteDaApi
@@ -258,6 +263,8 @@ export default function Entradas({
   podeReprocessar: boolean
   /** `video.reprocessar_etapa`: o "Reprocessar…" dos vídeos concluídos. */
   podeEscolherEtapa: boolean
+  /** `chaves.gerir`: os sistemas do filtro vêm das chaves; sem ela, só os das linhas. */
+  podeVerSistemas: boolean
   intervaloMs?: number
 }) {
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
@@ -306,6 +313,7 @@ export default function Entradas({
 
   // Os sistemas do filtro: os que têm chave (quem não pode ver as chaves fica só com os das linhas).
   useEffect(() => {
+    if (!podeVerSistemas) return
     let ativo = true
     api.chaves.listar().then(
       (chaves) => {
@@ -316,7 +324,7 @@ export default function Entradas({
     return () => {
       ativo = false
     }
-  }, [api])
+  }, [api, podeVerSistemas])
 
   const jobs = carga.tipo === 'pronta' ? carga.jobs : []
   const proximo = carga.tipo === 'pronta' ? carga.proximo : null
@@ -441,13 +449,19 @@ export default function Entradas({
       )}
       {carga.tipo === 'erro' && <AlertaDeErro mensagem="Não foi possível carregar as entradas. Tente de novo." codigo={carga.codigo} aoTentar={() => setRecarga((n) => n + 1)} />}
       {carga.tipo === 'pronta' && visiveis.length === 0 && (
-        <Text size="sm">{haFiltroDeEntradas(filtros) ? 'Nenhum vídeo com esses filtros.' : 'Nenhum vídeo entrou ainda.'}</Text>
+        <Text size="sm">
+          {!haFiltroDeEntradas(filtros)
+            ? 'Nenhum vídeo entrou ainda.'
+            : haMais
+              ? 'Nenhum vídeo com esses filtros entre os já carregados. Carregue mais para procurar nos mais antigos.'
+              : 'Nenhum vídeo com esses filtros.'}
+        </Text>
       )}
       {carga.tipo === 'pronta' && visiveis.length > 0 && (
         <Table aria-label="Entradas" highlightOnHover verticalSpacing={4}>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Arquivo</Table.Th>
+              <Table.Th>Nome do arquivo</Table.Th>
               <Table.Th>Enviado por</Table.Th>
               <Table.Th>Programa</Table.Th>
               <Table.Th>Enviado em</Table.Th>

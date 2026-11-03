@@ -58,6 +58,7 @@ export default function Administracao({ api, aba, busca, usuario, aoEntrarDeNovo
           filtros={filtrosDasEntradas(busca)}
           podeReprocessar={usuario.permissoes.includes('video.reprocessar')}
           podeEscolherEtapa={usuario.permissoes.includes('video.reprocessar_etapa')}
+          podeVerSistemas={usuario.permissoes.includes('chaves.gerir')}
         />
       )}
       {atual.aba === 'usuarios' && <Usuarios api={api} eu={usuario} />}
