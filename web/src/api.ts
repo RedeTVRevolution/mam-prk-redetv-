@@ -20,6 +20,9 @@ export class PedidoInvalido extends Error {}
 
 export class NaoEncontrado extends Error {}
 
+/** 403 `login_recente_exigido`: a purga pede um login com MFA feito há poucos minutos. */
+export class LoginRecenteExigido extends Error {}
+
 /** Qualquer outro status de erro. */
 export class FalhaNaApi extends Error {
   readonly status: number
@@ -159,6 +162,53 @@ export interface ClienteDeChaves {
   revogar(id: string): Promise<ChaveDaLista>
 }
 
+export type TipoDeItem = 'video' | 'pessoa' | 'marca'
+
+/** Um item da lixeira (`/v1/admin/lixeira`). */
+export interface ItemDaLixeira {
+  tipo: string
+  id: string
+  nome: string
+  enviado_por: string
+  enviado_em: string
+  motivo: string
+  dias_ate_a_purga: number
+}
+
+/** O que vai junto com o vídeo, antes de confirmar. */
+export interface ImpactoDoVideo {
+  decupagem: number
+  correcoes: number
+  arquivos: { copia_limpa: number; proxy: number; quadros: number }
+  /** Outros envios do mesmo arquivo: a decupagem continua para eles. */
+  outros_jobs: { id: string; nome: string; enviado_por: string }[]
+}
+
+export interface ImpactoDaPessoa {
+  aparicoes_que_perdem_o_nome: number
+  fotos_apagadas: number
+}
+
+export interface ImpactoDaMarca {
+  ocorrencias_que_perdem_o_vinculo: number
+}
+
+export interface ImpactoPorTipo {
+  video: ImpactoDoVideo
+  pessoa: ImpactoDaPessoa
+  marca: ImpactoDaMarca
+}
+
+/** A lixeira: mandar, restaurar e purgar (enviar exige `lixeira.gerir` ou `catalogo.apagar`; o resto, `lixeira.gerir`). */
+export interface ClienteDaLixeira {
+  listar(): Promise<ItemDaLixeira[]>
+  impacto<T extends TipoDeItem>(tipo: T, id: string): Promise<ImpactoPorTipo[T]>
+  enviar(tipo: TipoDeItem, id: string, motivo: string): Promise<ItemDaLixeira>
+  restaurar(tipo: TipoDeItem, id: string): Promise<void>
+  /** `nome` é o nome do item, digitado: a API confere. */
+  purgar(tipo: TipoDeItem, id: string, nome: string): Promise<void>
+}
+
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
@@ -184,6 +234,7 @@ export interface ClienteDaApi {
   nomes: ClienteDeNomes
   usuarios: ClienteDeUsuarios
   chaves: ClienteDeChaves
+  lixeira: ClienteDaLixeira
   job(id: string): ClienteDoJob
 }
 
@@ -223,6 +274,7 @@ export function criarClienteDaApi(
       if (resposta.status === 409) throw new ConflitoNaApi(await detalhe(resposta))
       if (resposta.status === 422) throw new PedidoInvalido(await detalhe(resposta))
       if (resposta.status === 404) throw new NaoEncontrado(await detalhe(resposta))
+      if (resposta.status === 403 && (await detalhe(resposta)) === 'login_recente_exigido') throw new LoginRecenteExigido()
       throw new FalhaNaApi(resposta.status)
     }
     return resposta
@@ -341,6 +393,23 @@ export function criarClienteDaApi(
       emitir: (corpo) => chamar('/v1/admin/chaves', { post: true, corpo }),
       revogar: (id) => chamar(`/v1/admin/chaves/${encodeURIComponent(id)}/revogar`, { post: true }),
     },
+    lixeira: {
+      listar: () => chamar('/v1/admin/lixeira'),
+      impacto: (tipo, id) => chamar(`${caminhoDaLixeira(tipo, id)}/impacto`),
+      enviar: (tipo, id, motivo) => chamar(caminhoDaLixeira(tipo, id), { post: true, corpo: { motivo } }),
+      restaurar: async (tipo, id) => {
+        await pedir(`${caminhoDaLixeira(tipo, id)}/restaurar`, { post: true })
+      },
+      purgar: async (tipo, id, nome) => {
+        await pedir(`${caminhoDaLixeira(tipo, id)}/purgar`, { post: true, corpo: { nome } })
+      },
+    },
     job,
   }
+}
+
+const SEGMENTO_DA_LIXEIRA: Record<TipoDeItem, string> = { video: 'videos', pessoa: 'pessoas', marca: 'marcas' }
+
+function caminhoDaLixeira(tipo: TipoDeItem, id: string): string {
+  return `/v1/admin/lixeira/${SEGMENTO_DA_LIXEIRA[tipo]}/${encodeURIComponent(id)}`
 }

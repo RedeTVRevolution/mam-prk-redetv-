@@ -1,4 +1,6 @@
 import {
+  ActionIcon,
+  Alert,
   AppShell,
   Badge,
   Box,
@@ -7,6 +9,7 @@ import {
   Chip,
   Group,
   Loader,
+  Menu,
   Select,
   Stack,
   Table,
@@ -17,8 +20,10 @@ import {
 } from '@mantine/core'
 import {
   IconArrowDown,
+  IconDots,
   IconFilterOff,
   IconSearch,
+  IconTrash,
   IconUpload,
   IconX,
 } from '@tabler/icons-react'
@@ -26,6 +31,8 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Mous
 import { codigoDoErro, SessaoExpirada, type ClienteDaApi } from './api.ts'
 import { useAtalhos, type Atalho } from './atalhos.ts'
 import EnvioDeVideo from './EnvioDeVideo.tsx'
+import { ESTADOS_QUE_VAO_PARA_A_LIXEIRA } from './lixeira.ts'
+import MandarParaLixeira from './MandarParaLixeira.tsx'
 import { Quadro } from './Miniatura.tsx'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { fraseDaFalha } from './falhas.ts'
@@ -98,12 +105,15 @@ function Linha({
   selecionada,
   ancora,
   aoSelecionar,
+  aoMandarParaLixeira,
 }: {
   job: Job
   selecionada: boolean
   /** Só uma linha entra na ordem do Tab; as setas movem o foco entre as demais. */
   ancora: boolean
   aoSelecionar: (id: string) => void
+  /** Só vem para quem pode apagar; a linha só mostra o menu se o estado do vídeo deixa. */
+  aoMandarParaLixeira?: (job: Job) => void
 }) {
   const estado = ESTADOS_DO_JOB[job.estado as EstadoDoJob]
   // A tela do vídeo também explica a falha, como na Biblioteca de antes.
@@ -198,6 +208,26 @@ function Linha({
       <Table.Td style={{ ...NUMEROS, whiteSpace: 'nowrap' }}>
         {dataEHora(job.criado_em)}
       </Table.Td>
+      {aoMandarParaLixeira && (
+        <Table.Td onClick={(e) => e.stopPropagation()}>
+          {ESTADOS_QUE_VAO_PARA_A_LIXEIRA.includes(job.estado) && (
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <Tooltip label="Ações">
+                  <ActionIcon variant="subtle" color="gray" aria-label={`Ações de ${job.nome}`}>
+                    <IconDots size={16} aria-hidden />
+                  </ActionIcon>
+                </Tooltip>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<IconTrash size={14} aria-hidden />} onClick={() => aoMandarParaLixeira(job)}>
+                  Mandar para a lixeira…
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          )}
+        </Table.Td>
+      )}
     </Table.Tr>
   )
 }
@@ -207,11 +237,14 @@ export default function Acervo({
   api,
   filtros,
   podeEnviar,
+  podeApagar = false,
   intervaloMs = 5000,
 }: {
   api: ClienteDaApi
   filtros: FiltrosDoAcervo
   podeEnviar: boolean
+  /** `lixeira.gerir`: a linha ganha o menu "Mandar para a lixeira…". */
+  podeApagar?: boolean
   intervaloMs?: number
 }) {
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
@@ -221,6 +254,8 @@ export default function Acervo({
   const [selecionada, setSelecionada] = useState<string | null>(null)
   const [programas, setProgramas] = useState<string[]>([])
   const [envioAberto, setEnvioAberto] = useState(false)
+  const [paraLixeira, setParaLixeira] = useState<Job | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
   const [busca, setBusca] = useState(filtros.q)
   const [recarga, setRecarga] = useState(0)
   useAtalhos(ATALHOS)
@@ -440,6 +475,12 @@ export default function Acervo({
         )}
       </Group>
 
+      {aviso && (
+        <Alert color={CORES.concluido} variant="light" role="status" mb="sm" withCloseButton closeButtonLabel="Fechar o aviso" onClose={() => setAviso(null)}>
+          {aviso}
+        </Alert>
+      )}
+
       {maisFalhou !== null ? (
         <Box mb="sm">
           <AlertaDeErro
@@ -521,6 +562,11 @@ export default function Acervo({
                   atual={filtros.ordem}
                   aoOrdenar={(ordem) => mudar({ ordem })}
                 />
+                {podeApagar && (
+                  <Table.Th>
+                    <VisuallyHidden>Ações</VisuallyHidden>
+                  </Table.Th>
+                )}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -531,6 +577,7 @@ export default function Acervo({
                   selecionada={job.id === selecionada}
                   ancora={i === 0 && !jobs.some((j) => j.id === selecionada)}
                   aoSelecionar={setSelecionada}
+                  aoMandarParaLixeira={podeApagar ? setParaLixeira : undefined}
                 />
               ))}
             </Table.Tbody>
@@ -549,6 +596,19 @@ export default function Acervo({
             </Center>
           )}
         </Box>
+      )}
+
+      {paraLixeira && (
+        <MandarParaLixeira
+          api={api}
+          job={paraLixeira}
+          aoFechar={() => setParaLixeira(null)}
+          aoMandar={() => {
+            setAviso(`${paraLixeira.nome} foi para a lixeira.`)
+            setParaLixeira(null)
+            setRecarga((n) => n + 1)
+          }}
+        />
       )}
 
       {podeEnviar && (

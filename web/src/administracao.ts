@@ -8,6 +8,7 @@ export interface Aba {
 export const ABAS: Aba[] = [
   { aba: 'usuarios', rotulo: 'Usuários', permissao: 'usuarios.gerir' },
   { aba: 'chaves', rotulo: 'Sistemas e chaves', permissao: 'chaves.gerir' },
+  { aba: 'lixeira', rotulo: 'Lixeira', permissao: 'lixeira.gerir' },
 ]
 
 /** As abas que essas permissões abrem, na ordem da área. */

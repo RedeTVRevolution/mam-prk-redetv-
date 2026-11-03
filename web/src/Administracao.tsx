@@ -7,10 +7,11 @@ import { Link } from './Link.tsx'
 import { ACERVO, enderecoDaAba, navegar } from './rotas.ts'
 import { CORES } from './tema.ts'
 import Chaves from './Chaves.tsx'
+import Lixeira from './Lixeira.tsx'
 import Usuarios from './Usuarios.tsx'
 
 /** `/admin`: as abas são links com endereço próprio; `/admin` abre a primeira permitida. */
-export default function Administracao({ api, aba, usuario }: { api: ClienteDaApi; aba: string | null; usuario: Usuario }) {
+export default function Administracao({ api, aba, usuario, aoEntrarDeNovo }: { api: ClienteDaApi; aba: string | null; usuario: Usuario; aoEntrarDeNovo: () => void }) {
   const permitidas = abasPermitidas(usuario.permissoes)
   const atual = permitidas.find((a) => a.aba === aba)
   const primeira = permitidas[0]?.aba
@@ -51,6 +52,7 @@ export default function Administracao({ api, aba, usuario }: { api: ClienteDaApi
       </nav>
       {atual.aba === 'usuarios' && <Usuarios api={api} eu={usuario} />}
       {atual.aba === 'chaves' && <Chaves api={api} />}
+      {atual.aba === 'lixeira' && <Lixeira api={api} aoEntrarDeNovo={aoEntrarDeNovo} />}
     </Stack>
   )
 }
