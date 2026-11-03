@@ -198,7 +198,12 @@ def _metricas_do_plano(plano: dict[str, Any]) -> dict[str, tuple[str, str]]:
     metricas = {}
     for mudanca in plano.get("resource_changes", []):
         depois = mudanca["change"].get("after") or {}
-        if mudanca["type"] == "google_logging_metric" and depois.get("name"):
+        muda = {"create", "update"} & set(mudanca["change"]["actions"])
+        if (
+            mudanca.get("type") == "google_logging_metric"
+            and muda
+            and depois.get("name")
+        ):
             descritor = (depois.get("metric_descriptor") or [{}])[0]
             tipo = f"logging.googleapis.com/user/{depois['name']}"
             metricas[tipo] = (

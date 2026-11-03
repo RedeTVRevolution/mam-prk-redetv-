@@ -436,3 +436,23 @@ def test_o_erro_http_vira_erro_da_api_com_codigo_e_mensagem(monkeypatch: Any) ->
         assert str(erro) == "400 at least as BETA"
     else:
         raise AssertionError("devia levantar ErroDaApi")
+
+
+def test_metrica_que_o_plano_nao_toca_vai_ao_time_series_e_nao_a_tabela() -> None:
+    api = ApiFalsa()
+    metrica = {
+        "name": "mam_pct",
+        "metric_descriptor": [{"metric_kind": "DELTA", "value_type": "DISTRIBUTION"}],
+    }
+    filtro = 'metric.type="logging.googleapis.com/user/mam_pct" AND resource.type="cloud_run_job"'
+    plano = _plano(
+        _mudanca("google_logging_metric", ["no-op"], metrica),
+        _mudanca(
+            "google_monitoring_alert_policy",
+            ["update"],
+            _alerta(filtro, "ALIGN_STDDEV"),
+        ),
+    )
+
+    assert pre_voo.conferir(plano, api) == []
+    assert "/timeSeries?" in api.chamadas[-1][1]
