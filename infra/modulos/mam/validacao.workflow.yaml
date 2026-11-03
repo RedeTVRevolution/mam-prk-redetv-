@@ -598,7 +598,7 @@ marca_inicio:
         switch:
           - condition: $${mostra_a_etapa}
             assign:
-              - campos: $${list.concat(campos, ["etapa_atual"])}
+              - campos: $${list.concat(campos, "etapa_atual")}
     - grava_o_inicio:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.patch
@@ -714,7 +714,7 @@ marca_fim:
         switch:
           - condition: $${limpa_a_etapa}
             assign:
-              - campos: $${list.concat(campos, ["etapa_atual"])}
+              - campos: $${list.concat(campos, "etapa_atual")}
     - grava_o_fim:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.patch
