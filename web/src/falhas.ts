@@ -8,6 +8,7 @@ export const FRASES_DE_FALHA: Record<string, string> = {
   analise_falhou: 'Não foi possível decupar o vídeo. Tente enviar de novo; se repetir, chame o suporte.',
   transcricao_falhou: 'Não foi possível transcrever a fala do vídeo. Tente enviar de novo; se repetir, chame o suporte.',
   ocr_falhou: 'Não foi possível ler os textos na tela do vídeo. Tente enviar de novo; se repetir, chame o suporte.',
+  processamento_interrompido: 'O processamento parou por um erro interno. Tente enviar de novo; se repetir, chame o suporte.',
 }
 
 const GENERICA = 'O processamento do vídeo falhou. Envie de novo; se repetir, chame o suporte.'

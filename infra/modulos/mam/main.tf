@@ -702,7 +702,8 @@ locals {
     purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
     # O agendador só dispara os Jobs da avaliação, da fila e da purga (papel em cada Job, mais abaixo).
     agendador    = []
-    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer"]
+    # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
+    orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer", "roles/logging.logWriter"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
     build = ["roles/logging.logWriter"]
   }
