@@ -3,6 +3,7 @@
 A abertura do painel e cada exportação em CSV gravam quem, quando e o filtro.
 """
 
+import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime
@@ -13,6 +14,8 @@ from fastapi import HTTPException, Request
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.jobs import ServicoIndisponivel, _confere_permissao
+
+log = logging.getLogger(__name__)
 
 
 def exige_painel(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -50,8 +53,9 @@ class AcessosAoPainel:
                     detalhes={"filtro": filtro},
                 )
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Sem registro, nada sai: o acesso sem rastro não passa.
+            log.exception("Falha ao registrar %s de %s", acao, pessoa.uid)
             raise ServicoIndisponivel from None
 
     def abriu(self, pessoa: Usuario, filtro: dict[str, Any]) -> None:
