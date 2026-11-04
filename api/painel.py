@@ -693,11 +693,13 @@ def relatorio_de_correcoes(
             )
         ],
         por_usuario=[
-            QuemDeCorrecoes(
-                quem_tipo=tipo,  # type: ignore[arg-type]
-                quem_id=quem_id,
-                email=emails.get(quem_id),
-                correcoes=n,
+            QuemDeCorrecoes.model_validate(
+                {
+                    "quem_tipo": tipo,
+                    "quem_id": quem_id,
+                    "email": emails.get(quem_id),
+                    "correcoes": n,
+                }
             )
             for (tipo, quem_id), n in sorted(
                 por_quem.items(), key=lambda i: (-i[1], i[0][1])
@@ -926,11 +928,13 @@ def relatorio_de_api(
             for d in _dias_do_intervalo(set(do_dia) | set(enviados_do_dia))
         ],
         por_sistema=[
-            SistemaDeApi(
-                quem_tipo=tipo,  # type: ignore[arg-type]
-                quem_id=quem_id,
-                videos_enviados=enviados_do_sistema.get((tipo, quem_id), 0),
-                **_numeros_de_chamadas(do_sistema.get((tipo, quem_id), [])),
+            SistemaDeApi.model_validate(
+                {
+                    "quem_tipo": tipo,
+                    "quem_id": quem_id,
+                    "videos_enviados": enviados_do_sistema.get((tipo, quem_id), 0),
+                    **_numeros_de_chamadas(do_sistema.get((tipo, quem_id), [])),
+                }
             )
             for tipo, quem_id in quem
         ],

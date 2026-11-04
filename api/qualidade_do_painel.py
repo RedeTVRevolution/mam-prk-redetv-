@@ -23,7 +23,8 @@ SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 @dataclass(frozen=True)
 class RevisaoNoVideo:
     """O tempo ativo de uma pessoa num vídeo (o acumulado dela nele, não só o do período: a
-    medida guarda só o total) e o programa do Job."""
+    medida guarda só o total), o programa do Job e a duração do vídeo (a do Job, como no
+    `GET /v1/jobs/{id}/revisao`; sem ela, a que a medida trouxe)."""
 
     job_id: str
     uid: str
@@ -95,20 +96,20 @@ class QualidadeReal:
         usuario: str | None,
     ) -> list[RevisaoNoVideo]:
         inicio, fim = _periodo(desde, ate)
-        programas = {j.id: j.programa for j in self._jobs.listar()}
+        jobs = {j.id: j for j in self._jobs.listar()}
         return [
             RevisaoNoVideo(
                 m.job_id,
                 m.uid,
                 m.email,
-                programas[m.job_id],
+                jobs[m.job_id].programa,
                 m.ativo_s,
-                m.duracao_s,
+                jobs[m.job_id].duracao_s or m.duracao_s,
             )
             for m in self._revisao.todas(inicio)
-            if m.job_id in programas
+            if m.job_id in jobs
             and (fim is None or m.ultimo_pulso < fim)
-            and (programa is None or programas[m.job_id] == programa)
+            and (programa is None or jobs[m.job_id].programa == programa)
             and (usuario is None or m.uid == usuario)
         ]
 

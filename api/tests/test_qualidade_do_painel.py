@@ -19,7 +19,7 @@ class SemDecupagens:
         yield b""
 
 
-def _job(id: str, programa: str | None) -> Job:
+def _job(id: str, programa: str | None, duracao_s: float | None = None) -> Job:
     return Job(
         id=id,
         nome=f"{id}.mp4",
@@ -27,6 +27,7 @@ def _job(id: str, programa: str | None) -> Job:
         estado="concluido",
         criado_por="u1",
         programa=programa,
+        duracao_s=duracao_s,
         criado_em=AGORA,
         atualizado_em=AGORA,
     )
@@ -107,10 +108,36 @@ def test_o_periodo_e_de_dias_de_sao_paulo() -> None:
 
 
 def test_job_sem_programa_vem_sem_programa_e_job_apagado_fica_de_fora() -> None:
-    qualidade, revisao = _qualidade()
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("v3", None))
+    revisao = RepositorioDeRevisaoEmMemoria()
+    qualidade = QualidadeReal(
+        jobs, SemDecupagens(), RepositorioDeCorrecoesEmMemoria(), revisao
+    )
+    _revisar(revisao, "v3", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, 3600)
     _revisar(revisao, "v9", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, 3600)
 
-    assert qualidade.tempo_de_revisao(None, None, None, None) == []
+    assert [
+        (m.job_id, m.programa)
+        for m in qualidade.tempo_de_revisao(None, None, None, None)
+    ] == [("v3", None)]
+
+
+def test_a_duracao_e_a_do_job_e_sem_ela_a_da_medida() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("v1", "Hoje", duracao_s=1800))
+    jobs.salvar(_job("v2", "Hoje"))
+    revisao = RepositorioDeRevisaoEmMemoria()
+    qualidade = QualidadeReal(
+        jobs, SemDecupagens(), RepositorioDeCorrecoesEmMemoria(), revisao
+    )
+    _revisar(revisao, "v1", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, None)
+    _revisar(revisao, "v2", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, 3600)
+
+    assert {
+        m.job_id: m.duracao_s
+        for m in qualidade.tempo_de_revisao(None, None, None, None)
+    } == {"v1": 1800, "v2": 3600}
 
 
 def test_a_taxa_de_correcao_do_periodo_e_calculada_pelo_modulo_da_taxa() -> None:

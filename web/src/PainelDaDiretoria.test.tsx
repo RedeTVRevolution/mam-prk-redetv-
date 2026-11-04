@@ -341,6 +341,38 @@ test('Revisão aceita programa e usuário juntos e os manda à API', async () =>
   expect(pedidos[0].get('usuario')).toBe('u1')
 })
 
+test('Baixar CSV em Revisão pede o formato csv com programa e usuário', async () => {
+  const usuario = userEvent.setup()
+  Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:csv'), revokeObjectURL: vi.fn() })
+  const clique = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  await abrir('/painel/revisao?programa=TV+Fama&usuario=u1')
+  await screen.findByRole('table', { name: 'Correções por dia' })
+
+  await usuario.click(screen.getByRole('button', { name: 'Baixar CSV' }))
+
+  await waitFor(() => expect(clique).toHaveBeenCalled())
+  const csv = pedidos.find((p) => p.get('formato') === 'csv')
+  expect(csv?.get('programa')).toBe('TV Fama')
+  expect(csv?.get('usuario')).toBe('u1')
+  clique.mockRestore()
+})
+
+test('Revisão só com a taxa mostra a taxa', async () => {
+  servidor.use(
+    http.get('/v1/painel/revisao', () =>
+      HttpResponse.json({
+        ...REVISAO,
+        correcoes: { total: 0, por_dia: [], por_tipo: [], por_usuario: [] },
+        tempo_de_revisao: { ...REVISAO.tempo_de_revisao, por_pessoa: [], por_programa: [] },
+      }),
+    ),
+  )
+  await abrir('/painel/revisao')
+
+  expect(linhasDe(await screen.findByRole('table', { name: 'Taxa de correção por tipo' }))).toEqual([['texto', '4', '32', '12,5%']])
+  expect((screen.getByRole('button', { name: 'Baixar CSV' }) as HTMLButtonElement).disabled).toBe(false)
+})
+
 test('Revisão sem nada no filtro diz que não há correção nem revisão', async () => {
   servidor.use(
     http.get('/v1/painel/revisao', () =>

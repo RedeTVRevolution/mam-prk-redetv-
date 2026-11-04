@@ -429,9 +429,17 @@ const celulasDeRevisao = (n: NumerosDeRevisao) => [
 ]
 const COLUNAS_DE_REVISAO = ['Minutos de revisão', 'Vídeos', 'Horas de vídeo', 'Minutos por hora de vídeo']
 
+function revisaoVazia(r: RelatorioDeRevisao) {
+  return (
+    r.correcoes.por_dia.length === 0 &&
+    r.taxa_de_correcao.por_tipo.length === 0 &&
+    r.tempo_de_revisao.por_pessoa.length === 0
+  )
+}
+
 function Revisao({ relatorio }: { relatorio: RelatorioDeRevisao }) {
   const { correcoes, taxa_de_correcao: taxa, tempo_de_revisao: tempo } = relatorio
-  if (correcoes.por_dia.length === 0 && tempo.por_pessoa.length === 0 && tempo.por_programa.length === 0) {
+  if (revisaoVazia(relatorio)) {
     return <Text size="sm">Nenhuma correção nem revisão neste filtro.</Text>
   }
   return (
@@ -684,9 +692,7 @@ export default function PainelDaDiretoria({
             arquivo="revisao.csv"
             baixar={() => api.revisaoDoPainelEmCsv(filtros)}
             bloqueio={periodo}
-            vazio={(r: RelatorioDeRevisao) =>
-              r.correcoes.por_dia.length === 0 && r.tempo_de_revisao.por_pessoa.length === 0 && r.tempo_de_revisao.por_programa.length === 0
-            }
+            vazio={revisaoVazia}
             nota={`A taxa de correção não tem pessoa: com um usuário escolhido ela some. Os minutos de revisão são o acumulado das medidas cujo último pulso cai no período. ${NOTA_DO_DIA}`}
             mostrar={(r) => <Revisao relatorio={r} />}
           />
