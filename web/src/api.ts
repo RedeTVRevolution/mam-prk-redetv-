@@ -78,6 +78,10 @@ export interface ClienteDoJob {
   /** URL assinada do JPEG `arquivo` (`plano-0.jpg`) de um momento da decupagem. */
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
+  /** URL assinada para baixar o MP4; a abertura vai à auditoria (`video.baixado`). */
+  baixarVideo(): Promise<Reproducao>
+  /** O arquivo JSON da decupagem, pela rota do servidor que registra o download. */
+  baixarDecupagem(): Promise<Blob>
   /** As passadas de comparação do Job (exige `decupagem.ver`). */
   passadas(): Promise<ResumoDaPassada[]>
   /** O Job contra uma passada, com cada item marcado (igual, difere, só de um lado). */
@@ -302,6 +306,8 @@ export function criarClienteDaApi(
       reproducao: () => chamar(`${base}/reproducao`),
       quadro: (arquivo) => chamar(`${base}/quadros/${encodeURIComponent(arquivo)}`),
       decupagem: () => chamar(`${base}/decupagem`),
+      baixarVideo: () => chamar(`${base}/download`),
+      baixarDecupagem: async () => (await pedir(`${base}/decupagem/download`)).blob(),
       passadas: () => chamar(`${base}/passadas`),
       comparacao: (passadaId) => chamar(`${base}/passadas/${encodeURIComponent(passadaId)}/comparacao`),
       fotosDoNome: (pessoaId) => chamar(`${base}/pessoas/${encodeURIComponent(pessoaId)}/referencias`),

@@ -75,6 +75,8 @@ class FiltroDeAuditoria:
     pessoa: str | None = None  # uid ou e-mail
     alvo_id: str | None = None
     acao: Acao | None = None
+    # Qualquer uma delas (a tela "Quem acessou" pede as três de acesso de uma vez).
+    acoes: tuple[Acao, ...] | None = None
     de: datetime | None = None  # incluído
     ate: datetime | None = None  # incluído
     limite: int | None = None
@@ -101,6 +103,8 @@ def casa_com_o_filtro(registro: RegistroDeAuditoria, filtro: FiltroDeAuditoria) 
     if filtro.alvo_id is not None and registro.alvo_id != filtro.alvo_id:
         return False
     if filtro.acao is not None and registro.acao != filtro.acao:
+        return False
+    if filtro.acoes is not None and registro.acao not in filtro.acoes:
         return False
     if filtro.de is not None and registro.quando < filtro.de:
         return False
@@ -166,7 +170,7 @@ def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
         _pessoa: Annotated[Usuario, Depends(_exige_ver)],
         pessoa: str | None = None,
         alvo: str | None = None,
-        acao: Acao | None = None,
+        acao: Annotated[list[Acao] | None, Query()] = None,
         de: AwareDatetime | None = None,
         ate: AwareDatetime | None = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_MAXIMO)] = LIMITE_PADRAO,
@@ -177,7 +181,8 @@ def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
         filtro = FiltroDeAuditoria(
             pessoa=pessoa,
             alvo_id=alvo,
-            acao=acao,
+            acao=acao[0] if acao and len(acao) == 1 else None,
+            acoes=tuple(acao) if acao and len(acao) > 1 else None,
             de=de,
             ate=ate,
             limite=limite,

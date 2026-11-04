@@ -21,6 +21,9 @@ const ACOES_DA_API = [
   'item.purgado',
   'video.reprocessado',
   'job.estado_corrigido',
+  'video.aberto',
+  'video.baixado',
+  'decupagem.baixada',
 ]
 
 interface Registro {
@@ -132,6 +135,9 @@ test('cada ação da lista fechada tem frase, e só ela', () => {
   expect(FRASE_DA_ACAO['item.para_lixeira']).toBe('Mandou para a lixeira')
   expect(FRASE_DA_ACAO['papeis.alterados']).toBe('Trocou os papéis')
   expect(FRASE_DA_ACAO['chave.revogada']).toBe('Revogou a chave')
+  expect(FRASE_DA_ACAO['video.aberto']).toBe('Abriu o vídeo')
+  expect(FRASE_DA_ACAO['video.baixado']).toBe('Baixou o vídeo')
+  expect(FRASE_DA_ACAO['decupagem.baixada']).toBe('Baixou a decupagem')
 })
 
 test('a tabela mostra quando, quem, ação em frase, alvo e motivo', async () => {
@@ -175,6 +181,19 @@ test('os filtros vão para a API e para a URL', async () => {
     expect(ultima.get('alvo')).toBe('j1')
     expect(ultima.get('acao')).toBe('chave.revogada')
   })
+})
+
+test('o filtro de ação agrupa os acessos e manda as três ações à API', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/admin/auditoria?alvo=j1&acao=video.aberto,video.baixado,decupagem.baixada')
+  await linhaDe('TV Fama')
+  await waitFor(() => expect(consultas.at(-1)!.getAll('acao')).toEqual(['video.aberto', 'video.baixado', 'decupagem.baixada']))
+  expect((screen.getByRole('combobox', { name: 'Ação' }) as HTMLInputElement).value).toBe('Todos os acessos')
+
+  await usuario.click(screen.getByRole('combobox', { name: 'Ação' }))
+  const lista = screen.getByRole('listbox')
+  expect(within(lista).getByText('Acessos')).toBeTruthy()
+  for (const nome of ['Abriu o vídeo', 'Baixou o vídeo', 'Baixou a decupagem']) expect(within(lista).getByRole('option', { name: nome })).toBeTruthy()
 })
 
 test('o período vai à API como dia inteiro de São Paulo', async () => {

@@ -18,11 +18,25 @@ export const FRASE_DA_ACAO = {
   'item.purgado': 'Purgou da lixeira',
   'video.reprocessado': 'Reprocessou o vídeo',
   'job.estado_corrigido': 'Corrigiu o estado do envio',
+  'video.aberto': 'Abriu o vídeo',
+  'video.baixado': 'Baixou o vídeo',
+  'decupagem.baixada': 'Baixou a decupagem',
 } as const
 
 export type AcaoDaAuditoria = keyof typeof FRASE_DA_ACAO
 
+/** As ações de acesso ao vídeo: o grupo "Acessos" do filtro e o link "Quem acessou". */
+export const ACOES_DE_ACESSO: AcaoDaAuditoria[] = ['video.aberto', 'video.baixado', 'decupagem.baixada']
+
+/** O filtro `acao` com mais de uma ação: os nomes separados por vírgula, como na URL. */
+export const FILTRO_DE_ACESSOS = ACOES_DE_ACESSO.join(',')
+
 export const ACOES_DA_AUDITORIA = Object.keys(FRASE_DA_ACAO) as AcaoDaAuditoria[]
+
+/** Os filtros do link "Quem acessou": o vídeo como alvo e as três ações de acesso. */
+export function filtrosDeQuemAcessou(jobId: string): FiltrosDaAuditoria {
+  return { ...SEM_FILTROS_DA_AUDITORIA, alvo: jobId, acao: FILTRO_DE_ACESSOS }
+}
 
 /** Um registro de `GET /v1/admin/auditoria`. */
 export interface RegistroDeAuditoria {
@@ -49,6 +63,7 @@ export interface FiltrosDaAuditoria {
   pessoa: string
   /** O id do alvo (por exemplo, o de um vídeo). */
   alvo: string
+  /** Uma ação, ou várias separadas por vírgula. */
   acao: string
   /** Período, em `AAAA-MM-DD` (dia de São Paulo), inclusive. */
   de: string
@@ -75,12 +90,12 @@ export function fraseDaAcao(acao: string): string {
 export function filtrosDaAuditoria(busca: string): FiltrosDaAuditoria {
   const p = new URLSearchParams(busca)
   const data = (nome: string) => (DATA.test(p.get(nome) ?? '') ? p.get(nome)! : '')
-  const acao = p.get('acao') ?? ''
+  const acoes = (p.get('acao') ?? '').split(',')
   return {
     pessoa: p.get('pessoa') ?? '',
     alvo: p.get('alvo') ?? '',
     // Ação desconhecida num link editado à mão sai do filtro, em vez de fazer a API recusar.
-    acao: Object.hasOwn(FRASE_DA_ACAO, acao) ? acao : '',
+    acao: acoes.filter((a) => Object.hasOwn(FRASE_DA_ACAO, a)).join(','),
     de: data('de'),
     ate: data('ate'),
   }
@@ -98,7 +113,7 @@ export function consultaDaAuditoria(f: FiltrosDaAuditoria, limite: number, curso
   const p = new URLSearchParams({ limite: String(limite) })
   if (f.pessoa.trim()) p.set('pessoa', f.pessoa.trim())
   if (f.alvo.trim()) p.set('alvo', f.alvo.trim())
-  if (f.acao) p.set('acao', f.acao)
+  for (const acao of f.acao.split(',').filter(Boolean)) p.append('acao', acao)
   if (f.de) p.set('de', `${f.de}T00:00:00-03:00`)
   if (f.ate) p.set('ate', `${f.ate}T23:59:59.999-03:00`)
   if (cursor) p.set('cursor', cursor)

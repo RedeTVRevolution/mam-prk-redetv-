@@ -147,6 +147,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
   const podeEditar = sessao.usuario.permissoes.includes('decupagem.editar')
   const podeAprovar = sessao.usuario.permissoes.includes('correcao.aprovar')
   const podeReprocessar = sessao.usuario.permissoes.includes('video.reprocessar_etapa')
+  const podeVerAuditoria = sessao.usuario.permissoes.includes('auditoria.ver')
   const podeApagar = sessao.usuario.permissoes.includes('lixeira.gerir')
   const podeEnviar = sessao.usuario.permissoes.includes('video.enviar')
   return (
@@ -169,6 +170,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
             podeEditar={podeEditar}
             podeAprovar={podeAprovar}
             podeReprocessar={podeReprocessar}
+            podeVerAuditoria={podeVerAuditoria}
           />
         </AppShell.Main>
       ) : rota.tipo === 'acervo' ? (

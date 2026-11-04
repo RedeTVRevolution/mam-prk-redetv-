@@ -17,7 +17,10 @@ import { type ClienteDaApi, codigoDoErro, ConflitoNaApi, PedidoInvalido, SessaoE
 import { type CatalogoDeCorrecoes, rotuloDe } from './catalogo.ts'
 import { useAtalhos } from './atalhos.ts'
 import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from './pautas.ts'
-import { baixarDecupagem } from './baixar.ts'
+import { baixarDecupagem, baixarPelaUrl } from './baixar.ts'
+import { filtrosDeQuemAcessou } from './auditoria.ts'
+import { Link } from './Link.tsx'
+import { enderecoDaAuditoria } from './rotas.ts'
 import {
   aindaIndexando,
   desfazivel,
@@ -96,6 +99,7 @@ export default function Visualizador({
   podeEditar,
   podeAprovar = false,
   podeReprocessar = false,
+  podeVerAuditoria = false,
   intervaloDoAcompanhamentoMs = 5000,
   intervaloDaIndexacaoMs = INTERVALO_DA_INDEXACAO_MS,
 }: {
@@ -107,6 +111,8 @@ export default function Visualizador({
   podeEditar: boolean
   podeAprovar?: boolean
   podeReprocessar?: boolean
+  /** Mostra o link "Quem acessou" (`auditoria.ver`). */
+  podeVerAuditoria?: boolean
   intervaloDoAcompanhamentoMs?: number
   /** De quanto em quanto a tela pergunta se a correção já entrou no índice. */
   intervaloDaIndexacaoMs?: number
@@ -131,6 +137,8 @@ export default function Visualizador({
   const [mudo, setMudo] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const [falhaDoJson, setFalhaDoJson] = useState<string | null>(null)
+  const [baixandoVideo, setBaixandoVideo] = useState(false)
+  const [falhaDoVideo, setFalhaDoVideo] = useState<string | null>(null)
   const [decupagem, setDecupagem] = useState<Decupagem | null>(null)
   const [falhaDaDecupagem, setFalhaDaDecupagem] = useState<string | null>(null)
   const [cargasDaDecupagem, setCargasDaDecupagem] = useState(0)
@@ -1047,9 +1055,21 @@ export default function Visualizador({
   async function baixar() {
     setFalhaDoJson(null)
     try {
-      baixarDecupagem(job.nome, await api.job(job.id).decupagem())
+      baixarDecupagem(job.nome, await api.job(job.id).baixarDecupagem())
     } catch (e) {
       if (!(e instanceof SessaoExpirada)) setFalhaDoJson(codigoDoErro(e))
+    }
+  }
+
+  async function baixarVideo() {
+    setFalhaDoVideo(null)
+    setBaixandoVideo(true)
+    try {
+      baixarPelaUrl((await api.job(job.id).baixarVideo()).url)
+    } catch (e) {
+      if (!(e instanceof SessaoExpirada)) setFalhaDoVideo(codigoDoErro(e))
+    } finally {
+      setBaixandoVideo(false)
     }
   }
 
@@ -1128,6 +1148,23 @@ export default function Visualizador({
               Reprocessar…
             </Button>
           )}
+          {podeVerAuditoria && (
+            <Link para={enderecoDaAuditoria(filtrosDeQuemAcessou(job.id))} size="sm" style={{ whiteSpace: 'nowrap' }}>
+              Quem acessou
+            </Link>
+          )}
+          {job.estado === 'concluido' && (
+            <Tooltip label="Baixar vídeo (MP4)">
+              <ActionIcon
+                variant="default"
+                aria-label="Baixar vídeo"
+                loading={baixandoVideo}
+                onClick={() => void baixarVideo()}
+              >
+                <IconDownload />
+              </ActionIcon>
+            </Tooltip>
+          )}
           {job.estado === 'concluido' && (
             <Tooltip label="Baixar decupagem (JSON)">
               <ActionIcon variant="default" aria-label="Baixar decupagem (JSON)" onClick={() => void baixar()}>
@@ -1149,6 +1186,13 @@ export default function Visualizador({
           {`${reprocessou ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
           {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
         </Text>
+      )}
+      {falhaDoVideo && (
+        <AlertaDeErro
+          mensagem="Não foi possível preparar o download. Tente de novo."
+          codigo={falhaDoVideo}
+          aoTentar={() => void baixarVideo()}
+        />
       )}
       {falhaDoJson && (
         <AlertaDeErro

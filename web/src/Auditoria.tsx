@@ -6,6 +6,8 @@ import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { useAtalhos, type Atalho } from './atalhos.ts'
 import {
   ACOES_DA_AUDITORIA,
+  ACOES_DE_ACESSO,
+  FILTRO_DE_ACESSOS,
   autorDoRegistro,
   detalhesEmFrases,
   FRASE_DA_ACAO,
@@ -150,7 +152,17 @@ export default function Auditoria({ api, filtros }: { api: ClienteDaApi; filtros
           size="xs"
           w={220}
           allowDeselect={false}
-          data={[{ value: TODAS, label: 'Todas as ações' }, ...ACOES_DA_AUDITORIA.map((a) => ({ value: a, label: FRASE_DA_ACAO[a] }))]}
+          data={[
+            { value: TODAS, label: 'Todas as ações' },
+            ...ACOES_DA_AUDITORIA.filter((a) => !ACOES_DE_ACESSO.includes(a)).map((a) => ({ value: a, label: FRASE_DA_ACAO[a] })),
+            {
+              group: 'Acessos',
+              items: [
+                { value: FILTRO_DE_ACESSOS, label: 'Todos os acessos' },
+                ...ACOES_DE_ACESSO.map((a) => ({ value: a, label: FRASE_DA_ACAO[a] })),
+              ],
+            },
+          ]}
           value={filtros.acao || TODAS}
           onChange={(valor) => mudar({ acao: valor && valor !== TODAS ? valor : '' })}
         />

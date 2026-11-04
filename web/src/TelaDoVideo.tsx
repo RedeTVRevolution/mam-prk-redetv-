@@ -23,6 +23,7 @@ export default function TelaDoVideo({
   podeEditar,
   podeAprovar,
   podeReprocessar = false,
+  podeVerAuditoria = false,
 }: {
   api: ClienteDaApi
   id: string
@@ -32,6 +33,7 @@ export default function TelaDoVideo({
   podeEditar: boolean
   podeAprovar: boolean
   podeReprocessar?: boolean
+  podeVerAuditoria?: boolean
 }) {
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const [tentativas, setTentativas] = useState(0)
@@ -109,6 +111,7 @@ export default function TelaDoVideo({
       podeEditar={podeEditar}
       podeAprovar={podeAprovar}
       podeReprocessar={podeReprocessar}
+      podeVerAuditoria={podeVerAuditoria}
     />
   )
 }
