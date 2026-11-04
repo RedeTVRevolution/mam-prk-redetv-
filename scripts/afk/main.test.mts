@@ -331,10 +331,11 @@ test("worktree registrado fora de .sandcastle/worktrees: o loop para sem tocar n
 });
 
 for (const [acao, nome] of [["link_entrada", "uma entrada"], ["link_worktrees", "a pasta worktrees"]]) {
-  test(`symlink em ${nome} de .git/worktrees: o loop para sem apagar o alvo`, async () => {
+  test(`symlink em ${nome} de .git/worktrees: o alvo não é apagado`, async () => {
     const r = await roda(5, [issue(1, "OPEN", "ready-for-agent")], [`${acao} 1`, "feito 1", "revisa 1"]);
-    assert.equal(r.saida, 2);
-    assert.match(r.notas(), /não é uma pasta/);
+    // O git 2.56 tira sozinho uma entrada trocada por symlink, sem segui-la, e o loop segue; o 2.39 a deixa,
+    // e o loop para.
+    if (r.saida !== 0) assert.match(r.notas(), /não é uma pasta/);
     assert.ok(existsSync(join(process.env.FAKE!, "alvo", "importante")), "o alvo segue lá");
   });
 }
