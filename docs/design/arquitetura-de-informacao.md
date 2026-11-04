@@ -98,8 +98,8 @@ Princípios do mapa:
 | --- | --- |
 | Para quem | Diretoria e Administrador |
 | O que tem | Os indicadores do plano (acessos, vídeos, buscas, revisão, API e custo), com filtros por período, programa e usuário |
-| Existe no código | Nada |
-| Falta | Papel Diretoria, eventos no Pub/Sub e no BigQuery, tela. Duas coisas a mais para o redesenho: **buscas sem resultado** (o que falta decupar ou corrigir) e **taxa de correção por tipo** (onde a decupagem erra) |
+| Existe no código | Papel Diretoria (`painel.ver`), a dependência `exige_painel` e o registro de cada abertura e exportação na auditoria (`api/painel.py`) |
+| Falta | Eventos no Pub/Sub e no BigQuery, tela. Duas coisas a mais para o redesenho: **buscas sem resultado** (o que falta decupar ou corrigir) e **taxa de correção por tipo** (onde a decupagem erra) |
 
 ### Administração
 
@@ -109,7 +109,7 @@ Princípios do mapa:
 | O que tem | Usuários, papéis, chaves de API, regras de aprovação, lixeira e auditoria. Detalhes em [administracao.md](administracao.md) |
 | Existe no código | `GET /v1/eu` com papéis e permissões; `DELETE /v1/jobs/{id}`, que só cancela |
 | Existe sem tela | Criar contas (`make criar-contas`), dar papéis (`make atribuir-papeis`), chaves de API (`make emitir-chave`, `listar-chaves`, `revogar-chave`) |
-| Falta | Os papéis Administrador e Diretoria: o código só conhece Consulta, Operador, Editor e Curador (`api/papeis.py`). Tela de usuários, apagar vídeo (lixeira), auditoria visível |
+| Falta | Tela de usuários, apagar vídeo (lixeira), auditoria visível |
 
 ## Resumo: o que existe, o que existe sem tela, o que falta
 
@@ -121,5 +121,5 @@ Princípios do mapa:
 | Busca | — | — | Tudo (E2) |
 | Catalogação | Correções, histórico, fila e aprovação (para Editor e Curador) | Regra de aprovação | Objetos, trecho novo, autocompletar, sugestões |
 | Pessoas | — | Perfil do programa no TOML | Catálogo, referências de rosto, tela |
-| Painel | — | — | Tudo (E9) |
-| Administração | — | Contas, papéis, chaves, aprovação por script | Papéis Admin e Diretoria, telas, lixeira, auditoria |
+| Painel | — | Papel Diretoria e auditoria do acesso | Indicadores, tela (E9) |
+| Administração | — | Contas, papéis, chaves, aprovação por script | Telas, lixeira, auditoria |

@@ -175,7 +175,7 @@ def test_sem_auditoria_ver_a_rota_responde_403() -> None:
     repo = RepositorioDeAuditoriaEmMemoria()
     repo.acrescentar(_registro("a"))
 
-    for papel in ("consulta", "operador", "editor", "curador"):
+    for papel in ("consulta", "operador", "editor", "curador", "diretoria"):
         resposta = _cliente([papel], repo).get(
             "/v1/admin/auditoria", headers=AUTORIZACAO
         )

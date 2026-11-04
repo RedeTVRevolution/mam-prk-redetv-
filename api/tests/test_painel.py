@@ -18,6 +18,7 @@ from api.tests.test_auth import VerificadorFalso
 
 AGORA = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
 ANA = Usuario(uid="ana", email="Ana@RedeTV.com.br")
+CABECALHO = {"Authorization": "Bearer ana"}
 
 
 def test_abrir_o_painel_grava_quem_quando_e_o_filtro() -> None:
@@ -78,19 +79,16 @@ def _cliente(papeis: list[Papel]) -> TestClient:
     return TestClient(app)
 
 
-def test_dependencia_deixa_passar_a_diretoria_e_barra_os_outros() -> None:
-    cabecalho = {"Authorization": "Bearer ana"}
+@pytest.mark.parametrize("papel", ["diretoria", "administrador"])
+def test_dependencia_deixa_passar_quem_tem_painel_ver(papel: Papel) -> None:
+    resposta = _cliente([papel]).get("/v1/_painel_teste", headers=CABECALHO)
 
-    assert (
-        _cliente(["diretoria"]).get("/v1/_painel_teste", headers=cabecalho).status_code
-        == 200
-    )
-    assert (
-        _cliente(["administrador"])
-        .get("/v1/_painel_teste", headers=cabecalho)
-        .status_code
-        == 200
-    )
-    resposta = _cliente(["curador"]).get("/v1/_painel_teste", headers=cabecalho)
+    assert resposta.status_code == 200
+
+
+@pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
+def test_dependencia_barra_os_outros_papeis(papel: Papel) -> None:
+    resposta = _cliente([papel]).get("/v1/_painel_teste", headers=CABECALHO)
+
     assert resposta.status_code == 403
     assert resposta.json()["detail"] == "Sem a permissão painel.ver"

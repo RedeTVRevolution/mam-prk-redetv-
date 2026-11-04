@@ -149,6 +149,22 @@ test('cada ação da lista fechada tem frase, e só ela', () => {
   expect(FRASE_DA_ACAO['painel.exportado']).toBe('Exportou o painel da diretoria em CSV')
 })
 
+test('a abertura e a exportação do painel mostram o filtro', () => {
+  const acesso = (acao: 'painel.aberto' | 'painel.exportado', filtro: Record<string, unknown>) =>
+    detalhesEmFrases({
+      id: 'r',
+      quando: '2026-11-04T12:00:00Z',
+      acao,
+      alvo_tipo: 'painel',
+      alvo_id: 'diretoria',
+      alvo_nome: 'Painel da diretoria',
+      email: 'ana@redetv.com.br',
+      detalhes: { filtro },
+    })
+  expect(acesso('painel.aberto', { de: '2026-10-01', programa: 'Hoje' })).toEqual(['Filtro: de 2026-10-01, programa Hoje'])
+  expect(acesso('painel.exportado', {})).toEqual(['Filtro: nenhum'])
+})
+
 test('a mudança da regra de aprovação diz se passou a exigir ou deixou de exigir', () => {
   const mudanca = (antes: boolean, depois: boolean) =>
     detalhesEmFrases({

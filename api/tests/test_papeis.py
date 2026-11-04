@@ -159,7 +159,7 @@ def test_administrador_ja_guardado_nao_se_repete() -> None:
 
 
 def test_so_o_administrador_ve_a_auditoria() -> None:
-    for papel in ("consulta", "operador", "editor", "curador"):
+    for papel in ("consulta", "operador", "editor", "curador", "diretoria"):
         assert "auditoria.ver" not in permissoes_de([papel])
     assert "auditoria.ver" in permissoes_de(["administrador"])
 

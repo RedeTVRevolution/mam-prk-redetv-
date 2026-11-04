@@ -138,6 +138,13 @@ function lista(valor: unknown): string {
   return itens.length ? itens.map((p) => NOME_DO_PAPEL[p] ?? p).join(', ') : 'nenhum'
 }
 
+function filtro(valor: unknown): string {
+  const campos = valor && typeof valor === 'object' ? Object.entries(valor) : []
+  return campos.length
+    ? campos.map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(', ')
+    : 'nenhum'
+}
+
 function numero(valor: unknown): number | null {
   return typeof valor === 'number' ? valor : null
 }
@@ -193,6 +200,9 @@ export function detalhesEmFrases(r: RegistroDeAuditoria): string[] {
         : []
     case 'job.estado_corrigido':
       return typeof d.de === 'string' && typeof d.para === 'string' ? [`Estado: de ${rotuloDoEstado(d.de)} para ${rotuloDoEstado(d.para)}`] : []
+    case 'painel.aberto':
+    case 'painel.exportado':
+      return [`Filtro: ${filtro(d.filtro)}`]
     default:
       return Object.entries(d).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
   }

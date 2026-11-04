@@ -191,6 +191,17 @@ def test_troca_os_papeis_e_guarda_antes_e_depois() -> None:
     }
 
 
+def test_da_o_papel_diretoria() -> None:
+    mundo = Mundo()
+
+    resposta = mundo.cliente.put(
+        f"{ROTA}/u2/papeis", json={"papeis": ["diretoria"]}, headers=ADMIN
+    )
+
+    assert resposta.status_code == 200
+    assert mundo.papeis.obter("u2") == ["diretoria"]
+
+
 def test_ninguem_tira_de_si_o_papel_de_administrador() -> None:
     mundo = Mundo()
 
@@ -375,7 +386,7 @@ def test_conta_desconhecida_devolve_404(metodo: str, caminho: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "papeis", [["consulta"], ["operador"], ["editor"], ["curador"]]
+    "papeis", [["consulta"], ["operador"], ["editor"], ["curador"], ["diretoria"]]
 )
 def test_sem_usuarios_gerir_devolve_403_em_toda_rota(papeis: list[Papel]) -> None:
     mundo = Mundo(papeis)
