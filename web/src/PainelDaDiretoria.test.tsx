@@ -80,6 +80,19 @@ const API = {
   por_rota: [{ metodo: 'POST', rota: '/v1/jobs', chamadas: 10, erros_do_cliente: 2, erros_do_servidor: 1 }],
 }
 
+const CUSTO = {
+  desde: null,
+  ate: null,
+  programa: null,
+  usuario: null,
+  moeda: 'BRL',
+  total: { custo: 150, custo_dos_jobs: 100, custo_sem_dono: 50, videos: 2, horas_de_video: 4, custo_por_hora: 25 },
+  por_mes: [{ mes: '2026-11', custo: 150, custo_dos_jobs: 100, custo_sem_dono: 50, videos: 2, horas_de_video: 4, custo_por_hora: 25 }],
+  por_quem: [{ quem_tipo: 'usuario', quem_id: 'u1', email: 'ana@redetv.com.br', custo: 100, videos: 2, horas_de_video: 4, custo_por_hora: 25 }],
+  por_etapa: [{ etapa: 'analise', custo: 100 }],
+  sem_dono_por_servico: [{ servico: 'Cloud Run', custo: 50 }],
+}
+
 const pedidos: URLSearchParams[] = []
 let permissoes = ['decupagem.ver', 'painel.ver']
 let resposta: () => Response = () => HttpResponse.json(RELATORIO)
@@ -116,6 +129,12 @@ const servidor = setupServer(
     pedidos.push(p)
     if (p.get('formato') === 'csv') return new HttpResponse('dia\n', { headers: { 'Content-Type': 'text/csv' } })
     return HttpResponse.json(API)
+  }),
+  http.get('/v1/painel/custo', ({ request }) => {
+    const p = new URL(request.url).searchParams
+    pedidos.push(p)
+    if (p.get('formato') === 'csv') return new HttpResponse('mes\n', { headers: { 'Content-Type': 'text/csv' } })
+    return HttpResponse.json(CUSTO)
   }),
   http.get('/v1/painel/buscas', ({ request }) => {
     const p = new URL(request.url).searchParams
@@ -412,5 +431,34 @@ test('Baixar CSV na aba API pede o formato csv sem programa', async () => {
 
   await waitFor(() => expect(clique).toHaveBeenCalled())
   expect(pedidos.find((p) => p.get('formato') === 'csv')?.has('programa')).toBe(false)
+  clique.mockRestore()
+})
+
+const REAL = (n: string) => `R$\u00a0${n}`
+
+test('a aba Custo mostra o total, o mês, o usuário, a etapa e o custo sem dono, e manda o programa', async () => {
+  await abrir('/painel/custo?programa=TV+Fama')
+
+  expect(linhasDe(await screen.findByRole('table', { name: 'Custo por mês' }))).toEqual([
+    ['11/2026', REAL('150,00'), REAL('100,00'), REAL('50,00'), '2', '4', REAL('25,00')],
+  ])
+  expect(linhasDe(screen.getByRole('table', { name: 'Custo por usuário' }))[0].slice(0, 2)).toEqual(['ana@redetv.com.br', REAL('100,00')])
+  expect(linhasDe(screen.getByRole('table', { name: 'Custo por etapa' }))).toEqual([['analise', REAL('100,00')]])
+  expect(linhasDe(screen.getByRole('table', { name: 'Custo sem dono por serviço' }))).toEqual([['Cloud Run', REAL('50,00')]])
+  expect(screen.getByText('Custo por hora de vídeo').nextSibling?.textContent).toBe(REAL('25,00'))
+  expect(pedidos[0].get('programa')).toBe('TV Fama')
+})
+
+test('Baixar CSV na aba Custo pede o formato csv', async () => {
+  const usuario = userEvent.setup()
+  Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:csv'), revokeObjectURL: vi.fn() })
+  const clique = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  await abrir('/painel/custo')
+  await screen.findByRole('table', { name: 'Custo por mês' })
+
+  await usuario.click(screen.getByRole('button', { name: 'Baixar CSV' }))
+
+  await waitFor(() => expect(clique).toHaveBeenCalled())
+  expect(pedidos.some((p) => p.get('formato') === 'csv')).toBe(true)
   clique.mockRestore()
 })

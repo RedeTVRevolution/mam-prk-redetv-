@@ -20,7 +20,15 @@ from pydantic import BaseModel
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
-from api.jobs import ServicoIndisponivel, _confere_permissao
+from api.custo_do_painel import (
+    COLUNAS_DO_CSV_DE_CUSTO,
+    FonteDeCusto,
+    RelatorioDeCusto,
+    base_de_custo,
+    linhas_do_csv_de_custo,
+    relatorio_de_custo,
+)
+from api.jobs import RepositorioDeJobs, ServicoIndisponivel, _confere_permissao
 from api.qualidade_do_painel import QualidadeDoPainel, RevisaoNoVideo
 from api.relatorios import confere_o_pedido, csv_em_texto, ou_503, resposta_em_csv
 from api.resumos_de_uso import (
@@ -34,7 +42,7 @@ from api.taxa_de_correcao import LinhaDaTaxa
 from api.usuarios import ContasDeUsuario
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
-Aba = Literal["acessos", "videos", "buscas", "revisao", "api"]
+Aba = Literal["acessos", "videos", "buscas", "revisao", "api", "custo"]
 
 log = logging.getLogger(__name__)
 
@@ -957,6 +965,8 @@ def criar_rotas_do_painel(
     contas: ContasDeUsuario,
     acessos_ao_painel: AcessosAoPainel,
     qualidade: QualidadeDoPainel,
+    faturamento: FonteDeCusto | None,
+    jobs: RepositorioDeJobs,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/painel")
 
@@ -1208,5 +1218,39 @@ def criar_rotas_do_painel(
             )
         acessos_ao_painel.abriu(pessoa, "api", filtro)
         return relatorio_de_api(chamadas, envios, filtro)
+
+    @rotas.get("/custo", response_model=RelatorioDeCusto)
+    def custo(
+        pessoa: PodeVerOPainel,
+        filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
+        formato: Literal["json", "csv"] = "json",
+    ) -> RelatorioDeCusto | object:
+        """Custo por hora de vídeo e por mês, por usuário (ou sistema) e no total, do
+        faturamento cruzado com os Jobs (#285). O custo sem dono (fixo ou sem rótulo) só
+        entra sem filtro de programa ou de usuário."""
+        fonte = confere_o_pedido(faturamento, filtro.desde, filtro.ate)
+        base = ou_503(
+            lambda: base_de_custo(
+                fonte.custos(filtro.desde),
+                jobs.listar(),
+                filtro.desde,
+                filtro.ate,
+                filtro.programa,
+                filtro.usuario,
+            )
+        )
+        emails = _emails(contas)
+        if formato == "csv":
+            acessos_ao_painel.exportou(pessoa, "custo", filtro)
+            return resposta_em_csv(
+                csv_em_texto(
+                    COLUNAS_DO_CSV_DE_CUSTO, linhas_do_csv_de_custo(base, emails)
+                ),
+                "custo.csv",
+            )
+        acessos_ao_painel.abriu(pessoa, "custo", filtro)
+        return relatorio_de_custo(
+            base, emails, filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+        )
 
     return rotas

@@ -75,6 +75,46 @@ def test_texto_casa_sem_acento_nem_maiuscula() -> None:
     assert {r.job_id for r in achados} == {"ex-sapato"}
 
 
+def test_texto_casa_qualquer_palavra_inteira_como_o_indice_real() -> None:
+    indice = IndiceEmMemoria()
+    indice.gravar(
+        "j",
+        [
+            Registro(
+                id="a",
+                tipo="fala",
+                job_id="j",
+                inicio_ms=0,
+                fim_ms=1,
+                texto="A Angélica, de azul",
+            ),
+            Registro(
+                id="b",
+                tipo="fala",
+                job_id="j",
+                inicio_ms=0,
+                fim_ms=1,
+                texto="vestido azul",
+            ),
+            Registro(
+                id="c",
+                tipo="fala",
+                job_id="j",
+                inicio_ms=0,
+                fim_ms=1,
+                texto="calça vinho",
+            ),
+        ],
+    )
+
+    def ids(texto: str) -> set[str]:
+        return {r.id for r in indice.buscar(Consulta(texto=texto))}
+
+    assert ids("ANGELICA") == {"a"}
+    assert ids("angelica vestido") == {"a", "b"}
+    assert ids("vest") == set()  # palavra inteira, não pedaço
+
+
 def test_registros_tem_um_por_plano_fala_texto_e_objeto() -> None:
     tipos = [r.tipo for r in EXEMPLOS[0].registros()]
     assert set(tipos) == {"plano", "fala", "texto_na_tela", "objeto"}

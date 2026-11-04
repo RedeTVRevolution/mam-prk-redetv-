@@ -55,6 +55,7 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.decupagem import Decupagem
 from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
@@ -300,6 +301,7 @@ def criar_app(
     tempo_de_tela: ConsultaDeMomentos | None = None,
     resumos_de_uso: ResumosDeUso | None = None,
     qualidade_do_painel: QualidadeDoPainel | None = None,
+    faturamento: FonteDeCusto | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
@@ -559,6 +561,8 @@ def criar_app(
                 repositorio_de_correcoes,
                 repositorio_da_revisao,
             ),
+            faturamento,
+            repositorio_de_jobs,
         )
     )
     v1.include_router(
@@ -747,6 +751,7 @@ if _projeto:
         ),
         tempo_de_tela=consulta_do_ambiente(os.environ),
         resumos_de_uso=resumos_do_ambiente(os.environ),
+        faturamento=faturamento_do_ambiente(os.environ),
         relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),

@@ -33,6 +33,7 @@ from api.indice_da_busca import (
     IndiceDaBusca,
     Registro,
     TipoDeRegistro,
+    palavras,
 )
 from api.jobs import Armazenamento, Job, RepositorioDeJobs
 
@@ -334,7 +335,7 @@ class Busca:
         clausulas = self._clausulas(entendida, nome)
         # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
         # entendidos já filtram, e não entram no vetor.
-        consulta_visual = entendida.texto_livre or texto
+        consulta_visual = _texto_da_busca(entendida) or texto
         vetor = (
             vetor_da_imagem
             if vetor_da_imagem is not None
@@ -353,7 +354,7 @@ class Busca:
                 for r in _intercalar(
                     [consultar(q) for q in _com_facetas(c.consulta, facetado)]
                 )
-                if _casa(r, facetado)
+                if _casa(r, facetado) and _tem_a_frase(r, entendida.frase_exata)
             ]
             for c in clausulas
         ]
@@ -365,9 +366,9 @@ class Busca:
         # Sem a API de Ranking, a posição é a da pontuação do RRF: registros de mesma
         # pontuação empatam, e o desempate dos vídeos é o número de momentos.
         posicao = _posicoes_por_pontos(fundidos)
-        if entendida.texto_livre and achados:
+        if _texto_da_busca(entendida) and achados:
             try:
-                achados = self._ranking.reordenar(entendida.texto_livre, achados)
+                achados = self._ranking.reordenar(_texto_da_busca(entendida), achados)
                 # A ordem do ranking, com o peso do destaque sobre a posição.
                 posicao = _posicoes_por_pontos(
                     [(r, 0, _peso(r) / (RRF_K + i + 1)) for i, r in enumerate(achados)]
@@ -508,21 +509,13 @@ class Busca:
             if pessoa in donos:
                 continue
             clausulas.extend(_clausulas_da_pessoa(pessoa, e, base, nome))
-        if e.frase_exata:
-            for tipo in _tipos_de_texto(e):
-                clausulas.append(
-                    _Clausula(
-                        Consulta(filtros=replace(base, tipo=tipo), texto=e.frase_exata),
-                        lambda r: _motivo(r, nome),
-                    )
-                )
-        if e.texto_livre:
+        if livre := _texto_da_busca(e):
             clausulas.append(
                 _Clausula(
                     Consulta(
                         filtros=base,
-                        texto=e.texto_livre,
-                        significado=e.texto_livre,
+                        texto=livre,
+                        significado=livre,
                         cortar_significado=True,
                     ),
                     lambda r: _motivo(r, nome),
@@ -719,12 +712,10 @@ def _facetas(
 
 
 def _ligadas(e: ConsultaEntendida) -> list[EvidenciaDaBusca]:
-    """Os chips ligados: as evidências da consulta (ou o padrão de pessoa e de frase)."""
+    """Os chips ligados: as evidências da consulta (ou o padrão de pessoa)."""
     ligadas: list[EvidenciaDaBusca] = list(e.evidencias)
     if not ligadas and e.pessoas:
         ligadas.append("imagem")
-    if not ligadas and e.frase_exata:
-        ligadas.append("fala")
     if e.objetos:
         ligadas.append("objeto")
     if e.marcas:
@@ -742,9 +733,9 @@ def _ajustada(e: ConsultaEntendida, a: Ajustes) -> ConsultaEntendida:
             evidencias=do_modelo,
             objetos=e.objetos if "objeto" in ligadas else (),
             marcas=e.marcas if "marca" in ligadas else (),
-            # Sem evidência de pessoa ou de frase ligada, as duas saem (o padrão ligaria uma).
+            # Sem evidência de pessoa ligada, as pessoas saem (o padrão ligaria uma). A
+            # frase das aspas fica: ela filtra todo tipo de registro, não um chip.
             pessoas=e.pessoas if do_modelo else (),
-            frase_exata=e.frase_exata if do_modelo else None,
         )
     if a.programa is not None:
         e = replace(e, programa=a.programa or None)
@@ -770,15 +761,24 @@ def _evidencias(e: ConsultaEntendida) -> tuple[str, ...]:
     return e.evidencias or ("imagem",)
 
 
-def _tipos_de_texto(e: ConsultaEntendida) -> list[Literal["fala", "texto_na_tela"]]:
-    """A frase exata vale na fala, salvo se o usuário pediu só o que está escrito na tela."""
-    evidencias = e.evidencias or ("fala",)
-    tipos: list[Literal["fala", "texto_na_tela"]] = []
-    if "fala" in evidencias or "citada" in evidencias:
-        tipos.append("fala")
-    if "gc" in evidencias or "citada" in evidencias:
-        tipos.append("texto_na_tela")
-    return tipos or ["fala"]
+def _texto_da_busca(e: ConsultaEntendida) -> str:
+    """O que vai à busca por texto e por significado: a frase das aspas e o resto, sem
+    repetir a frase se o modelo já a pôs no texto livre."""
+    if e.frase_exata and e.texto_livre and _contem(e.texto_livre, e.frase_exata):
+        return e.texto_livre
+    return " ".join(p for p in (e.frase_exata, e.texto_livre) if p)
+
+
+def _contem(texto: str, frase: str) -> bool:
+    """A frase inteira no texto, com as palavras juntas e na ordem, sem acento nem maiúscula."""
+    return f" {' '.join(palavras(frase))} " in f" {' '.join(palavras(texto))} "
+
+
+def _tem_a_frase(r: Registro, frase: str | None) -> bool:
+    """A frase inteira, com as palavras juntas e na ordem, no texto ou na descrição."""
+    if not frase:
+        return True
+    return any(_contem(c, frase) for c in (r.texto, r.descricao) if c)
 
 
 def _clausulas_da_pessoa(

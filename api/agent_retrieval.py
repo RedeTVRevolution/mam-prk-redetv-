@@ -20,6 +20,7 @@ from typing import Any, Protocol
 import google.auth
 import google.auth.transport.requests
 
+from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 
 URL_BASE = "https://vectorsearch.googleapis.com/v1beta"
@@ -33,8 +34,11 @@ MODELO_DO_EMBEDDING = "gemini-embedding-001"
 REPLICAS_DO_INDICE = 1
 CAMPO_DO_VETOR_DA_DESCRICAO = "descricao_vetor"
 CAMPO_DO_VETOR_DO_QUADRO = "quadro_vetor"
-# Onde a busca por texto procura.
-CAMPOS_DE_TEXTO = ["texto", "descricao"]
+# Onde a busca por texto procura: a cópia de `texto` e `descricao` sem acento nem
+# maiúscula, porque o `textSearch` compara com o texto gravado como está. A consulta
+# vai normalizada também.
+CAMPO_DO_TEXTO_DA_BUSCA = "texto_da_busca"
+CAMPOS_DE_TEXTO = [CAMPO_DO_TEXTO_DA_BUSCA]
 # Declarados nos índices na criação: são eles que filtram junto com a busca.
 CAMPOS_DE_FILTRO = [
     "tipo",
@@ -176,7 +180,7 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
 
     buscas: list[dict[str, Any]] = []
     if consulta.texto:
-        texto = {"text": consulta.texto, "fields": CAMPOS_DE_TEXTO}
+        texto = {"text": normalizar(consulta.texto), "fields": CAMPOS_DE_TEXTO}
         buscas.append({"textSearch": {**comum, "structuredQuery": {"text": texto}}})
     if consulta.significado:
         buscas.append(
@@ -238,6 +242,7 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
         "relacao": texto,
         "texto": texto,
         "descricao": texto,
+        CAMPO_DO_TEXTO_DA_BUSCA: texto,
         "quadro": texto,
         "destaque": numero,
         # Só para o embedding automático, que recusa registro sem texto: a descrição do
@@ -364,6 +369,11 @@ def _dados(r: Registro) -> dict[str, Any]:
         "quadro": r.quadro,
         "destaque": r.destaque,
     }
+    # O que a tela mostra fica em `texto` e `descricao`; esta é só para o `textSearch`.
+    if r.texto or r.descricao:
+        opcionais[CAMPO_DO_TEXTO_DA_BUSCA] = normalizar(
+            " ".join(p for p in (r.texto, r.descricao) if p)
+        )
     return dados | {k: v for k, v in opcionais.items() if v is not None}
 
 

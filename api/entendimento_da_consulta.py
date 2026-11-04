@@ -144,6 +144,37 @@ def sanear(consulta: str, maximo: int = MAXIMO_DE_CARACTERES) -> str:
     return " ".join(texto.split())[:maximo].strip()
 
 
+ASPAS = '"“”'
+
+
+def separar_aspas(saneada: str) -> tuple[str | None, str]:
+    """A primeira frase entre aspas e o resto da consulta, sem as aspas.
+
+    Aspas sem fechar ou vazias não são frase: ficam como texto, sem a aspa solta. Só a
+    primeira frase restringe; as outras seguem no resto.
+    """
+    abre = next((i for i, c in enumerate(saneada) if c in ASPAS), None)
+    while abre is not None:
+        fecha = next(
+            (i for i in range(abre + 1, len(saneada)) if saneada[i] in ASPAS), None
+        )
+        if fecha is None:
+            break
+        frase = sanear(saneada[abre + 1 : fecha], MAXIMO_DA_FRASE)
+        if frase and normalizar(frase):
+            resto = saneada[:abre] + " " + saneada[fecha + 1 :]
+            return frase, sanear(_sem_aspas(resto))
+        # Aspas vazias: segue procurando depois delas.
+        abre = next(
+            (i for i in range(fecha + 1, len(saneada)) if saneada[i] in ASPAS), None
+        )
+    return None, sanear(_sem_aspas(saneada))
+
+
+def _sem_aspas(texto: str) -> str:
+    return "".join(" " if c in ASPAS else c for c in texto)
+
+
 def esquema_da_resposta(programas: Collection[str]) -> dict[str, Any]:
     """O esquema fechado enviado ao modelo: todo campo obrigatório e as listas como `enum`."""
 
@@ -224,6 +255,7 @@ def _validar(texto: str) -> _Resposta:
 def _montar(
     resposta: _Resposta,
     saneada: str,
+    frase: str | None,
     catalogo: Catalogo,
     programas: Collection[str],
     marcas_conhecidas: Collection[str] | None,
@@ -261,11 +293,7 @@ def _montar(
             marcas.append(conhecidas[chave])
         elif chave:
             sobra.append(saneada_m)
-    frase = (
-        sanear(resposta.frase_exata, MAXIMO_DA_FRASE) if resposta.frase_exata else ""
-    )
-    if not frase or normalizar(frase) not in normalizar(saneada):
-        frase = ""  # só vale o que o usuário escreveu
+    # A frase exata é a das aspas, lida pelo código; o campo do modelo não prevalece.
     desde, ate = _data(resposta.exibido_desde), _data(resposta.exibido_ate)
     if desde and ate and desde > ate:
         desde, ate = ate, desde
@@ -275,7 +303,7 @@ def _montar(
         pessoas=tuple(_unicos(pessoas)),
         objetos=tuple(objetos),
         marcas=tuple(_unicos(marcas)),
-        frase_exata=frase or None,
+        frase_exata=frase,
         texto_livre=livre,
         evidencias=tuple(e for e in EVIDENCIAS if e in resposta.evidencias),
         programa=resposta.programa if resposta.programa in programas else None,
@@ -300,7 +328,10 @@ def entender(
     todas caem no texto livre (não existe catálogo de marcas ainda).
     """
     saneada = sanear(consulta)
-    plano_b = ConsultaEntendida(saneada=saneada, texto_livre=saneada, plano_b=True)
+    frase, resto = separar_aspas(saneada)
+    plano_b = ConsultaEntendida(
+        saneada=saneada, frase_exata=frase, texto_livre=resto, plano_b=True
+    )
     if not saneada:
         return plano_b
     try:
@@ -323,4 +354,4 @@ def entender(
     except (ErroHttp, ValueError) as e:
         log.warning("entendimento da consulta falhou (%s); plano B", e)
         return plano_b
-    return _montar(resposta, saneada, catalogo, programas, marcas_conhecidas)
+    return _montar(resposta, saneada, frase, catalogo, programas, marcas_conhecidas)

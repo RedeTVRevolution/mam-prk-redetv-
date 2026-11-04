@@ -13,6 +13,7 @@ import {
   type OpcoesDoPainel,
   type RelatorioDeAcessos,
   type RelatorioDeApi,
+  type RelatorioDeCusto,
   type RelatorioDeBuscas,
   type RelatorioDeRevisao,
   type RelatorioDeVideos,
@@ -326,6 +327,10 @@ export interface ClienteDaApi {
   apiDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeApi>
   /** A base da API em CSV. */
   apiDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** `GET /v1/painel/custo`: custo por hora de vídeo e por mês, por usuário (ou sistema) e no total. */
+  custoDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeCusto>
+  /** A base do custo em CSV. */
+  custoDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
   /** `GET /v1/relatorios/marcas`: inserções, tempo e vídeos por marca e por tipo de inserção. */
   marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
   /** O mesmo relatório em CSV. */
@@ -494,6 +499,8 @@ export function criarClienteDaApi(
     revisaoDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/revisao?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
     apiDoPainel: (filtros) => chamar(`/v1/painel/api?${parametrosDoPainel(filtros, { semPrograma: true })}`),
     apiDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/api?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
+    custoDoPainel: (filtros) => chamar(`/v1/painel/custo?${parametrosDoPainel(filtros)}`),
+    custoDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/custo?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
     buscasDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/buscas?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
     marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
     marcasEmCsv: async (filtros) =>

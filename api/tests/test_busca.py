@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -1138,3 +1139,116 @@ def test_o_vetor_sai_do_texto_livre_e_a_clausula_visual_so_leva_o_vetor() -> Non
     assert embedding.textos == ["pista molhada"]
     [visual] = [c for c in m.indice.consultas if c.vetor_do_quadro]
     assert visual.texto is None and visual.significado is None
+
+
+def _planos(m: Mundo, *descricoes: str) -> None:
+    m.com(
+        job("j1"),
+        *(
+            Registro(
+                id=f"j1:plano:{i}",
+                tipo="plano",
+                job_id="j1",
+                inicio_ms=i * 1_000,
+                fim_ms=i * 1_000 + 500,
+                descricao=d,
+            )
+            for i, d in enumerate(descricoes)
+        ),
+    )
+
+
+FRASES = (
+    "vestido amarelo",
+    "Vestido Amarelo",
+    "um vestido azul",
+    "um carro amarelo",
+    "amarelo e vestido",
+    "calça vinho",
+)
+
+
+def _achados(resultado: Any) -> list[int]:
+    return sorted(
+        int(m.inicio_ms) // 1_000 for v in resultado.videos for m in v.momentos
+    )
+
+
+@pytest.mark.parametrize("modelo", [True, False])
+def test_frase_entre_aspas_so_deixa_quem_tem_a_frase_inteira(modelo: bool) -> None:
+    # Com o modelo, e no plano B (resposta inválida): o código lê as aspas.
+    m = Mundo(pedido(texto_livre="vestido amarelo") if modelo else "isto nao e json")
+    _planos(m, *FRASES)
+    resultado = buscar(m, '"vestido amarelo"')
+    assert _achados(resultado) == [0, 1]
+
+
+def test_frase_e_resto_da_consulta_ficam_so_com_a_frase() -> None:
+    m = Mundo("isto nao e json")
+    _planos(m, *FRASES)
+    resultado = buscar(m, '"vestido amarelo" calça')
+    assert _achados(resultado) == [0, 1]
+
+
+def test_sem_aspas_vale_qualquer_palavra() -> None:
+    m = Mundo("isto nao e json")
+    _planos(m, *FRASES)
+    resultado = buscar(m, "vestido amarelo")
+    assert _achados(resultado) == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.parametrize("consulta", ['vestido "amarelo', 'vestido ""', '"'])
+def test_aspas_soltas_ou_vazias_nao_quebram(consulta: str) -> None:
+    m = Mundo("isto nao e json")
+    _planos(m, *FRASES)
+    buscar(m, consulta)
+
+
+def test_a_frase_filtra_fala_texto_na_tela_e_objeto() -> None:
+    m = Mundo("isto nao e json")
+    tipos: list[Any] = ["fala", "texto_na_tela", "objeto"]
+    m.com(
+        job("j1"),
+        *(
+            Registro(
+                id=f"j1:{t}:{i}",
+                tipo=t,
+                job_id="j1",
+                inicio_ms=(len(tipos) * i + n) * 1_000,
+                fim_ms=(len(tipos) * i + n) * 1_000 + 500,
+                texto=frase,
+            )
+            for i, frase in enumerate(("Vestido amarelo!", "amarelo e vestido"))
+            for n, t in enumerate(tipos)
+        ),
+    )
+    assert _achados(buscar(m, '"vestido amarelo"')) == [0, 1, 2]
+
+
+class IndicePorSignificado(IndiceEspia):
+    """Como a busca por significado: devolve tudo, com ou sem as palavras."""
+
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        self.consultas.append(consulta)
+        return IndiceEmMemoria.buscar(self, replace(consulta, texto=None))
+
+
+def test_a_frase_tira_o_que_vem_so_da_busca_por_significado() -> None:
+    m = Mundo("isto nao e json")
+    m.indice = IndicePorSignificado()
+    _planos(m, "vestido amarelo", "calça vinho", "camiseta verde limão")
+    assert _achados(buscar(m, '"vestido amarelo"')) == [0]
+
+
+def test_a_frase_nao_se_repete_quando_o_modelo_a_poe_no_texto_livre() -> None:
+    m = Mundo(pedido(texto_livre="Vestido Amarelo"))
+    _planos(m, *FRASES)
+    buscar(m, '"vestido amarelo"')
+    assert {c.texto for c in m.indice.consultas if c.texto} == {"Vestido Amarelo"}
+
+
+def test_a_frase_continua_filtrando_com_qualquer_chip() -> None:
+    m = Mundo("isto nao e json")
+    _planos(m, *FRASES)
+    resultado = buscar(m, '"vestido amarelo"', ajustes=Ajustes(evidencias=("objeto",)))
+    assert _achados(resultado) == [0, 1]

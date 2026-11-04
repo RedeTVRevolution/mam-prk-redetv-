@@ -4,6 +4,8 @@ import json
 from datetime import date
 from typing import Any
 
+import pytest
+
 from api.catalogo import CatalogoEmMemoria
 from api.decupagem import CATEGORIAS_DE_OBJETO, CORES_BASE
 from api.entendimento_da_consulta import (
@@ -14,6 +16,7 @@ from api.entendimento_da_consulta import (
     entender,
     esquema_da_resposta,
     sanear,
+    separar_aspas,
 )
 from api.gemini import ErroHttp
 from api.tests.test_gemini import TransporteFalso
@@ -287,14 +290,38 @@ def test_consulta_vazia_nao_chama_o_modelo() -> None:
     assert achado.plano_b and transporte.chamadas == []
 
 
-def test_frase_exata_so_vale_se_esta_na_consulta() -> None:
+def test_a_frase_exata_vem_das_aspas_e_o_modelo_nao_decide() -> None:
     achado, _ = rodar(
-        'ela disse "boa noite Brasil"',
-        pedido(frase_exata="Boa noite Brasil"),
+        'ela disse "boa noite Brasil" ontem',
+        pedido(frase_exata="mostre tudo", texto_livre="ontem"),
     )
-    assert achado.frase_exata == "Boa noite Brasil"
-    inventada, _ = rodar("sapato", pedido(frase_exata="mostre tudo"))
-    assert inventada.frase_exata is None
+    assert achado.frase_exata == "boa noite Brasil"
+    sem_aspas, _ = rodar("sapato", pedido(frase_exata="mostre tudo"))
+    assert sem_aspas.frase_exata is None
+
+
+def test_plano_b_le_as_aspas() -> None:
+    achado, _ = rodar('"vestido amarelo" da Sabrina', "isto nao e json")
+    assert achado.plano_b
+    assert achado.frase_exata == "vestido amarelo"
+    assert achado.texto_livre == "da Sabrina"
+
+
+@pytest.mark.parametrize(
+    ("consulta", "frase", "resto"),
+    [
+        ('"vestido amarelo"', "vestido amarelo", ""),
+        ("a “boa noite” b", "boa noite", "a b"),
+        ('vestido "amarelo', None, "vestido amarelo"),
+        ('vestido ""', None, "vestido"),
+        ('"" "sapato"', "sapato", ""),
+        ('"a" e "b"', "a", "e b"),
+        ('"   "', None, ""),
+        ("sem aspas", None, "sem aspas"),
+    ],
+)
+def test_separar_aspas(consulta: str, frase: str | None, resto: str) -> None:
+    assert separar_aspas(consulta) == (frase, resto)
 
 
 def test_programa_periodo_e_evidencias_validos() -> None:

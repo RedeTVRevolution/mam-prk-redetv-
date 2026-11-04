@@ -11,3 +11,10 @@ resource "google_bigquery_dataset" "faturamento" {
   delete_contents_on_destroy = false
   depends_on                 = [google_project_service.apis]
 }
+
+# A `mam-web` lê a exportação para a aba Custo do painel. Só `_iam_member`, pelo motivo acima.
+resource "google_bigquery_dataset_iam_member" "faturamento_le" {
+  dataset_id = google_bigquery_dataset.faturamento.dataset_id
+  role       = "roles/bigquery.dataViewer"
+  member     = google_service_account.mam["web"].member
+}

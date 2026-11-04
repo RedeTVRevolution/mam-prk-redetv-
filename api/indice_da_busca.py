@@ -5,6 +5,7 @@ implementa os filtros exatos e o texto, e é o que os testes usam.
 """
 
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal, Protocol
@@ -96,6 +97,11 @@ class IndiceDaBusca(Protocol):
     def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
         """O vetor do quadro de cada plano do vídeo que o tem, pelo número do plano (#271)."""
         ...
+
+
+def palavras(texto: str) -> list[str]:
+    """As palavras como o índice real as separa: sem acento, maiúscula nem pontuação."""
+    return re.findall(r"\w+", normalizar(texto))
 
 
 def _frase(*partes: str | None) -> str | None:
@@ -326,7 +332,7 @@ def _casa(r: Registro, f: Filtros) -> bool:
 
 
 class IndiceEmMemoria:
-    """Dublê do índice: filtros exatos e texto (todas as palavras da consulta)."""
+    """Dublê do índice: filtros exatos e texto (qualquer palavra inteira da consulta, sem acento nem maiúscula)."""
 
     def __init__(self) -> None:
         self._por_job: dict[str, list[Registro]] = {}
@@ -348,7 +354,7 @@ class IndiceEmMemoria:
         }
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
-        palavras = normalizar(consulta.texto).split() if consulta.texto else []
+        da_consulta = palavras(consulta.texto) if consulta.texto else []
         so_vetor = consulta.vetor_do_quadro is not None and not (
             consulta.texto or consulta.significado
         )
@@ -363,8 +369,11 @@ class IndiceEmMemoria:
                     proximidade = _cosseno(consulta.vetor_do_quadro, r.vetor_do_quadro)
                     if proximidade > 0:
                         parecidos.append((proximidade, r))
-                palheiro = normalizar(_frase(r.texto, r.descricao) or "")
-                if not so_vetor and all(p in palheiro for p in palavras):
+                palavras_do_registro = set(palavras(_frase(r.texto, r.descricao) or ""))
+                if not so_vetor and (
+                    not da_consulta
+                    or any(p in palavras_do_registro for p in da_consulta)
+                ):
                     achados.append(r)
         parecidos.sort(key=lambda p: -p[0])
         ids = {r.id for r in achados}
