@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -22,6 +23,7 @@ from api.eventos_de_uso import (
     ErroAoPublicarUso,
     EventoDeUso,
     EventosEmMemoria,
+    EventosEmSegundoPlano,
     EventosPubSub,
     SemEventos,
     registrar,
@@ -192,6 +194,56 @@ def test_registrar_nao_levanta_quando_a_publicacao_falha_e_deixa_o_rastro_no_log
 ) -> None:
     with caplog.at_level(logging.ERROR):
         registrar(EventosQueFalham(), "login", ("usuario", "ana"), AGORA)
+
+    assert "evento de uso login" in caplog.text
+
+
+class ExecutorNaMao(ThreadPoolExecutor):
+    """Guarda as tarefas e só as roda quando o teste manda."""
+
+    def __init__(self) -> None:
+        super().__init__(max_workers=1)
+        self.pendentes: list[tuple[Callable[..., Any], tuple[Any, ...]]] = []
+
+    def submit(
+        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> Future[Any]:
+        self.pendentes.append((fn, args))
+        return Future()
+
+    def rodar(self) -> None:
+        for fn, args in self.pendentes:
+            fn(*args)
+        self.pendentes.clear()
+
+
+def _evento() -> EventoDeUso:
+    return EventoDeUso(
+        id="e1", tipo="login", quem_tipo="usuario", quem_id="a", quando=AGORA
+    )
+
+
+def test_em_segundo_plano_a_publicacao_nao_acontece_na_chamada() -> None:
+    eventos = EventosEmMemoria()
+    executor = ExecutorNaMao()
+    publicador = EventosEmSegundoPlano(eventos, executor)
+
+    publicador.publicar(_evento())
+    assert eventos.publicados == []
+
+    executor.rodar()
+    assert [e.id for e in eventos.publicados] == ["e1"]
+
+
+def test_em_segundo_plano_a_falha_vai_ao_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    executor = ExecutorNaMao()
+    publicador = EventosEmSegundoPlano(EventosQueFalham(), executor)
+
+    publicador.publicar(_evento())
+    with caplog.at_level(logging.ERROR):
+        executor.rodar()
 
     assert "evento de uso login" in caplog.text
 
@@ -559,6 +611,15 @@ def test_a_chamada_recusada_pela_rota_tambem_conta_com_o_status() -> None:
 
     [evento] = [e for e in mundo.eventos.publicados if e.tipo == "chamada_de_api"]
     assert (evento.metodo, evento.rota, evento.status) == ("POST", "/v1/jobs", 422)
+
+
+def test_a_chamada_sem_rota_nao_leva_o_caminho_com_os_valores() -> None:
+    mundo = Mundo()
+
+    mundo.cliente.get("/v1/nada/segredo-123", headers=mundo.chave("ler"))
+
+    [evento] = [e for e in mundo.eventos.publicados if e.tipo == "chamada_de_api"]
+    assert evento.rota == "(sem rota)" and evento.status == 404
 
 
 def test_a_chamada_de_pessoa_nao_e_chamada_de_api() -> None:

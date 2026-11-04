@@ -121,7 +121,8 @@ def criar_rotas_da_busca(
             filtros=[
                 Filtro(nome=nome, valor=str(valor))
                 for nome, valor in filtros.items()
-                if valor not in (None, False, "")
+                # `is`, não `in`: com `in`, o 0 sumiria junto com o False.
+                if valor is not None and valor is not False and valor != ""
             ],
         )
 

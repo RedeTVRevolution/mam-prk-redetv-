@@ -12,6 +12,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable
+from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
@@ -95,6 +96,26 @@ class SemEventos:
 
     def publicar(self, evento: EventoDeUso) -> None:
         return None
+
+
+class EventosEmSegundoPlano:
+    """Publica numa thread à parte: a resposta a quem usa não espera o Pub/Sub. A
+    falha, que já não tem a quem voltar, vai ao log."""
+
+    def __init__(self, eventos: Eventos, executor: Executor | None = None) -> None:
+        self._eventos = eventos
+        self._executor = executor or ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="eventos-de-uso"
+        )
+
+    def publicar(self, evento: EventoDeUso) -> None:
+        self._executor.submit(self._publicar, evento)
+
+    def _publicar(self, evento: EventoDeUso) -> None:
+        try:
+            self._eventos.publicar(evento)
+        except Exception:
+            log.exception("não consegui publicar o evento de uso %s", evento.tipo)
 
 
 class ErroAoPublicarUso(Exception):

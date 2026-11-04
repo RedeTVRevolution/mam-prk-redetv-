@@ -58,7 +58,13 @@ from api.correcoes import (
 from api.decupagem import Decupagem
 from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
-from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
+from api.eventos_de_uso import (
+    Eventos,
+    EventosEmSegundoPlano,
+    SemEventos,
+    quem_do_chamador,
+    registrar,
+)
 from api.eventos_do_job import eventos_do_ambiente
 from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Chamada, ErroHttp, Transporte
@@ -230,6 +236,9 @@ class _FrontComEnderecos(StaticFiles):
             return await super().get_response("index.html", scope)
 
 
+# A rota da chamada de API que não casou com nenhuma rota da API.
+ROTA_DESCONHECIDA = "(sem rota)"
+
 # Um login mais velho que isto já foi visto pela sessão: não é evento novo.
 LOGIN_NOVO = timedelta(minutes=5)
 
@@ -342,7 +351,8 @@ def criar_app(
                 quem_do_chamador(chamador),
                 relogio(),
                 metodo=request.method,
-                rota=rota or request.url.path,
+                # Sem rota casada (404), o caminho levaria os valores: vai o marcador.
+                rota=rota or ROTA_DESCONHECIDA,
                 status=resposta.status_code,
             )
         return resposta
@@ -666,10 +676,11 @@ if _projeto:
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
+        # O evento de uso sai fora da resposta: o Pub/Sub lento não atrasa a ação.
+        eventos=EventosEmSegundoPlano(eventos_do_ambiente(os.environ)),
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
         # sistema; listar e revogar funcionam.
-        eventos=eventos_do_ambiente(os.environ),
         idempotencia=RepositorioDeIdempotenciaFirestore(
             firestore.Client(project=_projeto)
         ),
