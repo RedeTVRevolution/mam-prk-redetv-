@@ -104,7 +104,12 @@ USO = [
 
 class Mundo:
     def __init__(
-        self, papeis: list[str], resumos: Any = "padrao", qualidade: Any = None
+        self,
+        papeis: list[str],
+        resumos: Any = "padrao",
+        qualidade: Any = None,
+        faturamento: Any = None,
+        jobs: Any = None,
     ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
@@ -121,6 +126,8 @@ class Mundo:
                 auditoria=self.auditoria,
                 resumos_de_uso=self.resumos,
                 qualidade_do_painel=qualidade,
+                faturamento=faturamento,
+                repositorio=jobs,
                 contas=ContasDeUsuarioEmMemoria(
                     [
                         ContaDoIdentityPlatform(uid="bia", email="bia@redetv.com.br"),
@@ -139,7 +146,8 @@ def _diretoria() -> Mundo:
 
 
 @pytest.mark.parametrize(
-    "rota", ["/acessos", "/videos", "/buscas", "/revisao", "/api", "/filtros"]
+    "rota",
+    ["/acessos", "/videos", "/buscas", "/revisao", "/api", "/custo", "/filtros"],
 )
 @pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
 def test_sem_painel_ver_e_403(rota: str, papel: str) -> None:
