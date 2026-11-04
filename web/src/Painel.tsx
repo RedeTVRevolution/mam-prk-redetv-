@@ -513,6 +513,7 @@ export function Painel({
   marcas,
   aoAcrescentar,
   aoFundir,
+  aoRenomearEmLote,
   acoes,
   planosParecidos,
 }: {
@@ -545,6 +546,8 @@ export function Painel({
   aoAcrescentar?: (pessoa: string) => void
   /** "Fundir com…" na linha da pessoa do catálogo (`catalogo.fundir`, no modo de catalogação). */
   aoFundir?: (pessoa: string) => void
+  /** "Renomear em todos os vídeos" na linha da pessoa do catálogo (Curador). */
+  aoRenomearEmLote?: (pessoa: string) => void
   /** Os planos com vetor do quadro indexado e a busca dos parecidos (#271); sem vetor, sem botão. */
   planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
   /** Só no modo de catalogação: corrigir e remover pelo mouse. */
@@ -820,6 +823,12 @@ export function Painel({
                         Fundir com…
                       </Button>
                     )}
+                    {abrir && aoRenomearEmLote && p.catalogo_id && edicao?.chave !== `renomear:${p.id}` && (
+                      <Button size="compact-xs" variant="default" ml="md" style={{ alignSelf: 'flex-start' }} aria-label={`Renomear ${rotulo} em todos os vídeos`} onClick={() => aoRenomearEmLote(p.id)}>
+                        Renomear em todos os vídeos
+                      </Button>
+                    )}
+                    {edicao?.chave === `renomear:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
                     {edicao?.chave === `acrescentar:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
                     {edicao?.chave === `fundir:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
                     {abrir && <Stack gap={2} ml="md">{lista(doId)}</Stack>}

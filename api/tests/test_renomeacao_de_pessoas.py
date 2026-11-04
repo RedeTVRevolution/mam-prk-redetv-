@@ -116,7 +116,7 @@ def test_a_previa_conta_videos_e_momentos_sem_mudar_nada() -> None:
         "nome_antigo": "Sabrina Sato",
         "nome_novo": "Sabrina Sato Silva",
         "videos": 2,
-        "momentos": 2,
+        "momentos_afetados": 2,
         "previa": True,
     }
     assert mundo.catalogo.obter(mundo.sabrina.id).nome == "Sabrina Sato"  # type: ignore[union-attr]
@@ -181,7 +181,7 @@ def test_a_renomeacao_grava_o_nome_antigo_o_novo_quem_fez_e_a_quantidade() -> No
         "nome_antigo": "Sabrina Sato",
         "nome_novo": "Sabrina Sato Silva",
         "videos": 2,
-        "momentos": 2,
+        "momentos_afetados": 2,
     }
 
 

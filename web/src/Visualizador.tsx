@@ -35,6 +35,7 @@ import {
 } from './catalogacao.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
 import { FusaoDePessoa } from './FusaoDePessoa.tsx'
+import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { dataDeExibicao, finalizando, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
 import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
@@ -155,7 +156,7 @@ export default function Visualizador({
   const [catalogo, setCatalogo] = useState<CatalogoDeCorrecoes | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [objetoApontado, setObjetoApontado] = useState<ObjetoApontado | null>(null)
-  const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fundir' } | null>(null)
+  const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fundir' | 'renomear' } | null>(null)
   // Os tempos que as alças da linha do tempo ajustaram na correção aberta.
   const [temposDaAlca, setTemposDaAlca] = useState<Intervalo | null>(null)
   const salvarDasAlcas = useRef<(() => void) | null>(null)
@@ -968,6 +969,21 @@ export default function Visualizador({
             />
           ),
         }
+    } else if (emEdicao.modo === 'renomear') {
+      const pessoa = decupagem.pessoas.find((p) => `renomear:${p.id}` === emEdicao.chave)
+      if (pessoa?.catalogo_id)
+        edicaoNoPainel = {
+          chave: emEdicao.chave,
+          conteudo: (
+            <RenomeacaoEmLote
+              pessoaId={pessoa.catalogo_id}
+              nomeAtual={pessoa.nome}
+              renomeacao={api.renomeacao}
+              aoRenomear={() => setCargasDaDecupagem((n) => n + 1)}
+              aoFechar={fecharEdicao}
+            />
+          ),
+        }
     } else if (emEdicao.modo === 'acrescentar') {
       const pessoa = decupagem.pessoas.find((p) => `acrescentar:${p.id}` === emEdicao.chave)
       if (pessoa)
@@ -1054,6 +1070,11 @@ export default function Visualizador({
   function fundirPessoa(pessoa: string) {
     setTemposDaAlca(null)
     setEmEdicao({ chave: `fundir:${pessoa}`, modo: 'fundir' })
+  }
+
+  function renomearEmLote(pessoa: string) {
+    setTemposDaAlca(null)
+    setEmEdicao({ chave: `renomear:${pessoa}`, modo: 'renomear' })
   }
 
   function acrescentarAparicao(pessoa: string) {
@@ -1573,6 +1594,7 @@ export default function Visualizador({
               marcas={marcas}
               aoAcrescentar={catalogando && catalogo ? acrescentarAparicao : undefined}
               aoFundir={catalogando && catalogo && podeFundir ? fundirPessoa : undefined}
+              aoRenomearEmLote={catalogando && catalogo && podeAprovar ? renomearEmLote : undefined}
               acoes={
                 catalogando && catalogo && decupagem
                   ? {

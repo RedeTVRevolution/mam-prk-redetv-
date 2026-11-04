@@ -50,7 +50,7 @@ class ImpactoDaRenomeacao(BaseModel):
     # Vídeos (concluídos, fora da lixeira) onde a pessoa aparece ou é citada, e os momentos
     # (aparições na imagem e citações na fala e no texto) que passam a levar o nome novo.
     videos: int
-    momentos: int
+    momentos_afetados: int
     previa: bool
 
 
@@ -177,7 +177,7 @@ def criar_rotas_da_renomeacao(
             nome_antigo=pessoa.nome,
             nome_novo=novo,
             videos=len(ids),
-            momentos=momentos,
+            momentos_afetados=momentos,
             previa=pedido.previa,
         )
         if pedido.previa:
@@ -218,7 +218,7 @@ def criar_rotas_da_renomeacao(
                         "nome_antigo": pessoa.nome,
                         "nome_novo": novo,
                         "videos": len(ids),
-                        "momentos": momentos,
+                        "momentos_afetados": momentos,
                     },
                 )
             )

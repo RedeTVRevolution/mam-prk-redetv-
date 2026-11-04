@@ -25,6 +25,7 @@ const ACOES_DA_API = [
   'video.baixado',
   'decupagem.baixada',
   'pessoa.fundida',
+  'pessoa.renomeada',
 ]
 
 interface Registro {

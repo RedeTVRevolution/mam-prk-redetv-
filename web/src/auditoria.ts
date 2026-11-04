@@ -22,6 +22,7 @@ export const FRASE_DA_ACAO = {
   'video.baixado': 'Baixou o vídeo',
   'decupagem.baixada': 'Baixou a decupagem',
   'pessoa.fundida': 'Fundiu pessoas',
+  'pessoa.renomeada': 'Renomeou uma pessoa em todos os vídeos',
 } as const
 
 export type AcaoDaAuditoria = keyof typeof FRASE_DA_ACAO
