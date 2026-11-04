@@ -10,7 +10,9 @@ import {
   diaCurto,
   horasDeVideo,
   mesCurto,
+  minutosLegiveis,
   programaEUsuarioJuntos,
+  taxaLegivel,
   type AbaDoPainel,
   type AtivosNoPeriodo,
   type DiaDeAcessos,
@@ -18,8 +20,11 @@ import {
   type FiltrosDoPainel,
   type NumerosDeVideos,
   type OpcoesDoPainel,
+  type NumerosDeRevisao,
   type RelatorioDeAcessos,
+  type RelatorioDeApi,
   type RelatorioDeBuscas,
+  type RelatorioDeRevisao,
   type RelatorioDeVideos,
 } from './painelDaDiretoria.ts'
 import { AlertaDoCsv, BotaoDeCsv, ErroDoRelatorio } from './relatorios.tsx'
@@ -225,7 +230,7 @@ function Acessos({ relatorio }: { relatorio: RelatorioDeAcessos }) {
 const tempoMedio = (n: NumerosDeVideos) => (n.tempo_medio_s === null ? '—' : duracaoLegivel(n.tempo_medio_s * 1000))
 
 /** `quem_tipo` sistema aparece com o nome da chave e o rótulo "(sistema)"; pessoa sem e-mail, com o uid. */
-const nomeDeQuem = (q: { quem_tipo: string; quem_id: string; email: string | null }) =>
+const nomeDeQuem = (q: { quem_tipo: string; quem_id: string; email?: string | null }) =>
   q.quem_tipo === 'sistema' ? `${q.quem_id} (sistema)` : (q.email ?? q.quem_id)
 
 function ColunasDeVideos() {
@@ -376,6 +381,175 @@ function Buscas({ relatorio }: { relatorio: RelatorioDeBuscas }) {
   )
 }
 
+const nomeDoPrograma = (programa: string | null) => programa ?? 'Sem programa'
+
+/** Uma tabela simples: cabeçalhos, e cada linha com a chave e as células já formatadas. */
+function TabelaSimples({
+  rotulo,
+  colunas,
+  linhas,
+  largura = 760,
+}: {
+  rotulo: string
+  colunas: string[]
+  linhas: { chave: string; celulas: (string | number)[] }[]
+  largura?: number
+}) {
+  return (
+    <Table aria-label={rotulo} highlightOnHover maw={largura}>
+      <Table.Thead>
+        <Table.Tr>
+          {colunas.map((c, i) => (
+            <Table.Th key={c} ta={i === 0 ? undefined : 'right'}>
+              {c}
+            </Table.Th>
+          ))}
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
+        {linhas.map((l) => (
+          <Table.Tr key={l.chave}>
+            {l.celulas.map((c, i) => (
+              <Table.Td key={i} ta={i === 0 ? undefined : 'right'} style={i === 0 ? undefined : NUMEROS}>
+                {c}
+              </Table.Td>
+            ))}
+          </Table.Tr>
+        ))}
+      </Table.Tbody>
+    </Table>
+  )
+}
+
+const celulasDeRevisao = (n: NumerosDeRevisao) => [
+  minutosLegiveis(n.minutos),
+  n.videos,
+  horasDeVideo(n.horas_de_video),
+  n.minutos_por_hora_de_video === null ? '—' : minutosLegiveis(n.minutos_por_hora_de_video),
+]
+const COLUNAS_DE_REVISAO = ['Minutos de revisão', 'Vídeos', 'Horas de vídeo', 'Minutos por hora de vídeo']
+
+function Revisao({ relatorio }: { relatorio: RelatorioDeRevisao }) {
+  const { correcoes, taxa_de_correcao: taxa, tempo_de_revisao: tempo } = relatorio
+  if (correcoes.por_dia.length === 0 && tempo.por_pessoa.length === 0 && tempo.por_programa.length === 0) {
+    return <Text size="sm">Nenhuma correção nem revisão neste filtro.</Text>
+  }
+  return (
+    <Stack gap="md">
+      <Group gap="xl">
+        <Numero rotulo="Correções" valor={correcoes.total} />
+        <Numero rotulo="Minutos de revisão" valor={minutosLegiveis(tempo.total.minutos)} />
+        <Numero
+          rotulo="Minutos por hora de vídeo"
+          valor={tempo.total.minutos_por_hora_de_video === null ? '—' : minutosLegiveis(tempo.total.minutos_por_hora_de_video)}
+        />
+      </Group>
+      {correcoes.por_dia.length > 0 && (
+        <TabelaSimples
+          rotulo="Correções por dia"
+          colunas={['Dia', 'Correções']}
+          largura={360}
+          linhas={correcoes.por_dia.map((d) => ({ chave: d.dia, celulas: [dataDeExibicao(d.dia), d.correcoes] }))}
+        />
+      )}
+      {correcoes.por_tipo.length > 0 && (
+        <TabelaSimples
+          rotulo="Correções por tipo"
+          colunas={['Tipo', 'Correções']}
+          largura={360}
+          linhas={correcoes.por_tipo.map((t) => ({ chave: t.tipo ?? '', celulas: [t.tipo ?? 'Sem tipo', t.correcoes] }))}
+        />
+      )}
+      {correcoes.por_usuario.length > 0 && (
+        <TabelaSimples
+          rotulo="Correções por usuário"
+          colunas={['Usuário', 'Correções']}
+          largura={480}
+          linhas={correcoes.por_usuario.map((q) => ({ chave: `${q.quem_tipo}:${q.quem_id}`, celulas: [nomeDeQuem(q), q.correcoes] }))}
+        />
+      )}
+      {taxa.por_tipo.length > 0 && (
+        <TabelaSimples
+          rotulo="Taxa de correção por tipo"
+          colunas={['Tipo', 'Correções', 'Itens', 'Taxa']}
+          linhas={taxa.por_tipo.map((t) => ({ chave: t.tipo, celulas: [t.tipo, t.correcoes, t.itens, taxaLegivel(t.taxa)] }))}
+        />
+      )}
+      {taxa.por_programa.length > 0 && (
+        <TabelaSimples
+          rotulo="Taxa de correção por programa"
+          colunas={['Programa', 'Correções', 'Itens', 'Taxa']}
+          linhas={taxa.por_programa.map((p) => ({
+            chave: p.programa ?? '',
+            celulas: [nomeDoPrograma(p.programa), p.correcoes, p.itens, taxaLegivel(p.taxa)],
+          }))}
+        />
+      )}
+      {tempo.por_pessoa.length > 0 && (
+        <TabelaSimples
+          rotulo="Revisão por pessoa"
+          colunas={['Pessoa', ...COLUNAS_DE_REVISAO]}
+          linhas={tempo.por_pessoa.map((p) => ({ chave: p.uid, celulas: [p.email, ...celulasDeRevisao(p)] }))}
+        />
+      )}
+      {tempo.por_programa.length > 0 && (
+        <TabelaSimples
+          rotulo="Revisão por programa"
+          colunas={['Programa', ...COLUNAS_DE_REVISAO]}
+          linhas={tempo.por_programa.map((p) => ({
+            chave: p.programa ?? '',
+            celulas: [nomeDoPrograma(p.programa), ...celulasDeRevisao(p)],
+          }))}
+        />
+      )}
+    </Stack>
+  )
+}
+
+const COLUNAS_DE_CHAMADAS = ['Chamadas', 'Erros do cliente', 'Erros do servidor']
+
+function Api({ relatorio }: { relatorio: RelatorioDeApi }) {
+  const t = relatorio.total
+  if (relatorio.por_dia.length === 0 && relatorio.por_sistema.length === 0) {
+    return <Text size="sm">Nenhuma chamada de API neste filtro.</Text>
+  }
+  return (
+    <Stack gap="md">
+      <Group gap="xl">
+        <Numero rotulo="Chamadas" valor={t.chamadas} />
+        <Numero rotulo="Sistemas" valor={t.sistemas} />
+        <Numero rotulo="Erros do cliente" valor={t.erros_do_cliente} />
+        <Numero rotulo="Erros do servidor" valor={t.erros_do_servidor} />
+        <Numero rotulo="Vídeos enviados pela API" valor={t.videos_enviados} />
+      </Group>
+      <TabelaSimples
+        rotulo="API por dia"
+        colunas={['Dia', ...COLUNAS_DE_CHAMADAS, 'Vídeos enviados']}
+        linhas={relatorio.por_dia.map((d) => ({
+          chave: d.dia,
+          celulas: [dataDeExibicao(d.dia), d.chamadas, d.erros_do_cliente, d.erros_do_servidor, d.videos_enviados],
+        }))}
+      />
+      <TabelaSimples
+        rotulo="API por sistema"
+        colunas={['Sistema', ...COLUNAS_DE_CHAMADAS, 'Vídeos enviados']}
+        linhas={relatorio.por_sistema.map((s) => ({
+          chave: `${s.quem_tipo}:${s.quem_id}`,
+          celulas: [nomeDeQuem(s), s.chamadas, s.erros_do_cliente, s.erros_do_servidor, s.videos_enviados],
+        }))}
+      />
+      <TabelaSimples
+        rotulo="API por rota"
+        colunas={['Rota', ...COLUNAS_DE_CHAMADAS]}
+        linhas={relatorio.por_rota.map((r) => ({
+          chave: `${r.metodo ?? ''} ${r.rota ?? ''}`,
+          celulas: [`${r.metodo ?? ''} ${r.rota ?? ''}`.trim() || '—', r.chamadas, r.erros_do_cliente, r.erros_do_servidor],
+        }))}
+      />
+    </Stack>
+  )
+}
+
 /**
  * Uma aba: busca o relatório, mostra o "Baixar CSV" e os avisos. `bloqueio` é o motivo de não
  * chamar a API (período invertido, filtros que não se combinam); `vazio` desliga o CSV.
@@ -439,13 +613,15 @@ export default function PainelDaDiretoria({
     ? { mensagem: 'O período começa depois de terminar.', codigo: 'periodo' }
     : null
   const juntos =
-    aba !== 'acessos' && programaEUsuarioJuntos(filtros)
+    (aba === 'videos' || aba === 'buscas') && programaEUsuarioJuntos(filtros)
       ? { mensagem: 'Escolha o programa ou o usuário, não os dois.', codigo: 'filtros' }
       : null
   const bloqueio = periodo ?? juntos
   const buscarAcessos = useCallback(() => api.acessosDoPainel(filtros), [api, filtros])
   const buscarVideos = useCallback(() => api.videosDoPainel(filtros), [api, filtros])
   const buscarBuscas = useCallback(() => api.buscasDoPainel(filtros), [api, filtros])
+  const buscarRevisao = useCallback(() => api.revisaoDoPainel(filtros), [api, filtros])
+  const buscarApi = useCallback(() => api.apiDoPainel(filtros), [api, filtros])
 
   function mudar(parte: Partial<FiltrosDoPainel>) {
     navegar(enderecoDoPainel(aba, { ...filtros, ...parte }), { substituir: true })
@@ -456,7 +632,7 @@ export default function PainelDaDiretoria({
       <Title order={2} size="h3">
         Painel da diretoria
       </Title>
-      <Filtros api={api} filtros={filtros} comPrograma={aba !== 'acessos'} aoMudar={mudar} />
+      <Filtros api={api} filtros={filtros} comPrograma={aba !== 'acessos' && aba !== 'api'} aoMudar={mudar} />
       <Tabs
         value={aba}
         keepMounted={false}
@@ -500,6 +676,30 @@ export default function PainelDaDiretoria({
             vazio={(r: RelatorioDeBuscas) => r.por_dia.length === 0}
             nota={`Busca sem resultado é a que não trouxe nenhum vídeo; as feitas antes de o sistema contar isso não entram nela. A busca só tem programa quando foi filtrada por ele, e então não se sabe quem buscou. ${NOTA_DO_DIA}`}
             mostrar={(r) => <Buscas relatorio={r} />}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value="revisao" pt="md">
+          <AbaDoRelatorio
+            buscar={buscarRevisao}
+            arquivo="revisao.csv"
+            baixar={() => api.revisaoDoPainelEmCsv(filtros)}
+            bloqueio={periodo}
+            vazio={(r: RelatorioDeRevisao) =>
+              r.correcoes.por_dia.length === 0 && r.tempo_de_revisao.por_pessoa.length === 0 && r.tempo_de_revisao.por_programa.length === 0
+            }
+            nota={`A taxa de correção não tem pessoa: com um usuário escolhido ela some. Os minutos de revisão são o acumulado das medidas cujo último pulso cai no período. ${NOTA_DO_DIA}`}
+            mostrar={(r) => <Revisao relatorio={r} />}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value="api" pt="md">
+          <AbaDoRelatorio
+            buscar={buscarApi}
+            arquivo="api.csv"
+            baixar={() => api.apiDoPainelEmCsv(filtros)}
+            bloqueio={periodo}
+            vazio={(r: RelatorioDeApi) => r.por_dia.length === 0 && r.por_sistema.length === 0}
+            nota={`A chamada não tem programa: o filtro de programa vale para as outras abas. O filtro de usuário escolhe o sistema. Vídeos enviados pela API são só os de sistemas. ${NOTA_DO_DIA}`}
+            mostrar={(r) => <Api relatorio={r} />}
           />
         </Tabs.Panel>
       </Tabs>

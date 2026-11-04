@@ -5,6 +5,8 @@ test('abaDoPainel: vazio é Acessos, aba conhecida passa e desconhecida é null'
   expect(abaDoPainel(undefined)).toBe('acessos')
   expect(abaDoPainel('videos')).toBe('videos')
   expect(abaDoPainel('buscas')).toBe('buscas')
+  expect(abaDoPainel('revisao')).toBe('revisao')
+  expect(abaDoPainel('api')).toBe('api')
   expect(abaDoPainel('outra')).toBeNull()
 })
 

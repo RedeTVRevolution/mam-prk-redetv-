@@ -48,6 +48,38 @@ const BUSCAS = {
   por_usuario: [{ quem_tipo: 'usuario', quem_id: 'u1', email: 'ana@redetv.com.br', buscas: 9, sem_resultado: 4 }],
 }
 
+const REVISAO = {
+  desde: null,
+  ate: null,
+  programa: null,
+  usuario: null,
+  correcoes: {
+    total: 6,
+    por_dia: [{ dia: '2026-11-02', correcoes: 6 }],
+    por_tipo: [{ tipo: 'texto', correcoes: 4 }, { tipo: null, correcoes: 2 }],
+    por_usuario: [{ quem_tipo: 'usuario', quem_id: 'u1', email: 'ana@redetv.com.br', correcoes: 6 }],
+  },
+  taxa_de_correcao: {
+    por_tipo: [{ tipo: 'texto', correcoes: 4, itens: 32, taxa: 0.125 }],
+    por_programa: [{ programa: null, correcoes: 4, itens: 32, taxa: null }],
+  },
+  tempo_de_revisao: {
+    total: { minutos: 30, videos: 2, horas_de_video: 1.5, minutos_por_hora_de_video: 20 },
+    por_pessoa: [{ uid: 'u1', email: 'ana@redetv.com.br', minutos: 30, videos: 2, horas_de_video: 1.5, minutos_por_hora_de_video: 20 }],
+    por_programa: [{ programa: 'TV Fama', minutos: 30, videos: 2, horas_de_video: 1.5, minutos_por_hora_de_video: null }],
+  },
+}
+
+const API = {
+  desde: null,
+  ate: null,
+  usuario: null,
+  total: { chamadas: 10, erros_do_cliente: 2, erros_do_servidor: 1, sistemas: 1, videos_enviados: 3 },
+  por_dia: [{ dia: '2026-11-03', chamadas: 10, erros_do_cliente: 2, erros_do_servidor: 1, videos_enviados: 3 }],
+  por_sistema: [{ quem_tipo: 'sistema', quem_id: 'ingestao', chamadas: 10, erros_do_cliente: 2, erros_do_servidor: 1, videos_enviados: 3 }],
+  por_rota: [{ metodo: 'POST', rota: '/v1/jobs', chamadas: 10, erros_do_cliente: 2, erros_do_servidor: 1 }],
+}
+
 const pedidos: URLSearchParams[] = []
 let permissoes = ['decupagem.ver', 'painel.ver']
 let resposta: () => Response = () => HttpResponse.json(RELATORIO)
@@ -72,6 +104,18 @@ const servidor = setupServer(
     pedidos.push(p)
     if (p.get('formato') === 'csv') return new HttpResponse('dia,enviados\n', { headers: { 'Content-Type': 'text/csv' } })
     return HttpResponse.json(VIDEOS)
+  }),
+  http.get('/v1/painel/revisao', ({ request }) => {
+    const p = new URL(request.url).searchParams
+    pedidos.push(p)
+    if (p.get('formato') === 'csv') return new HttpResponse('indicador\n', { headers: { 'Content-Type': 'text/csv' } })
+    return HttpResponse.json(REVISAO)
+  }),
+  http.get('/v1/painel/api', ({ request }) => {
+    const p = new URL(request.url).searchParams
+    pedidos.push(p)
+    if (p.get('formato') === 'csv') return new HttpResponse('dia\n', { headers: { 'Content-Type': 'text/csv' } })
+    return HttpResponse.json(API)
   }),
   http.get('/v1/painel/buscas', ({ request }) => {
     const p = new URL(request.url).searchParams
@@ -274,4 +318,67 @@ test('as abas do painel levam de uma para outra', async () => {
   await screen.findByRole('table', { name: 'Buscas por dia' })
   expect(location.pathname).toBe('/painel/buscas')
   expect(location.search).toContain('usuario=u1')
+})
+
+test('a aba Revisão mostra correções, taxa e minutos de revisão', async () => {
+  await abrir('/painel/revisao')
+
+  expect(linhasDe(await screen.findByRole('table', { name: 'Correções por dia' }))).toEqual([['02/11/2026', '6']])
+  expect(linhasDe(screen.getByRole('table', { name: 'Correções por tipo' }))).toEqual([['texto', '4'], ['Sem tipo', '2']])
+  expect(linhasDe(screen.getByRole('table', { name: 'Correções por usuário' }))).toEqual([['ana@redetv.com.br', '6']])
+  expect(linhasDe(screen.getByRole('table', { name: 'Taxa de correção por tipo' }))).toEqual([['texto', '4', '32', '12,5%']])
+  expect(linhasDe(screen.getByRole('table', { name: 'Taxa de correção por programa' }))).toEqual([['Sem programa', '4', '32', '—']])
+  expect(linhasDe(screen.getByRole('table', { name: 'Revisão por pessoa' }))).toEqual([['ana@redetv.com.br', '30', '2', '1,5', '20']])
+  expect(linhasDe(screen.getByRole('table', { name: 'Revisão por programa' }))).toEqual([['TV Fama', '30', '2', '1,5', '—']])
+  expect(screen.getAllByText('Correções')[0].nextSibling?.textContent).toBe('6')
+})
+
+test('Revisão aceita programa e usuário juntos e os manda à API', async () => {
+  await abrir('/painel/revisao?programa=TV+Fama&usuario=u1')
+
+  await screen.findByRole('table', { name: 'Correções por dia' })
+  expect(pedidos[0].get('programa')).toBe('TV Fama')
+  expect(pedidos[0].get('usuario')).toBe('u1')
+})
+
+test('Revisão sem nada no filtro diz que não há correção nem revisão', async () => {
+  servidor.use(
+    http.get('/v1/painel/revisao', () =>
+      HttpResponse.json({
+        ...REVISAO,
+        correcoes: { total: 0, por_dia: [], por_tipo: [], por_usuario: [] },
+        taxa_de_correcao: { por_tipo: [], por_programa: [] },
+        tempo_de_revisao: { ...REVISAO.tempo_de_revisao, por_pessoa: [], por_programa: [] },
+      }),
+    ),
+  )
+  await abrir('/painel/revisao')
+
+  expect(await screen.findByText('Nenhuma correção nem revisão neste filtro.')).toBeTruthy()
+})
+
+test('a aba API mostra o total, o dia, o sistema e a rota, e nunca manda programa', async () => {
+  await abrir('/painel/api?programa=TV+Fama&usuario=ingestao')
+
+  expect(linhasDe(await screen.findByRole('table', { name: 'API por dia' }))).toEqual([['03/11/2026', '10', '2', '1', '3']])
+  expect(linhasDe(screen.getByRole('table', { name: 'API por sistema' }))).toEqual([['ingestao (sistema)', '10', '2', '1', '3']])
+  expect(linhasDe(screen.getByRole('table', { name: 'API por rota' }))).toEqual([['POST /v1/jobs', '10', '2', '1']])
+  expect(screen.getByText('Vídeos enviados pela API').nextSibling?.textContent).toBe('3')
+  expect(pedidos[0].has('programa')).toBe(false)
+  expect(pedidos[0].get('usuario')).toBe('ingestao')
+  expect((screen.getByRole('combobox', { name: 'Programa' }) as HTMLInputElement).disabled).toBe(true)
+})
+
+test('Baixar CSV na aba API pede o formato csv sem programa', async () => {
+  const usuario = userEvent.setup()
+  Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:csv'), revokeObjectURL: vi.fn() })
+  const clique = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  await abrir('/painel/api?programa=TV+Fama')
+  await screen.findByRole('table', { name: 'API por dia' })
+
+  await usuario.click(screen.getByRole('button', { name: 'Baixar CSV' }))
+
+  await waitFor(() => expect(clique).toHaveBeenCalled())
+  expect(pedidos.find((p) => p.get('formato') === 'csv')?.has('programa')).toBe(false)
+  clique.mockRestore()
 })
