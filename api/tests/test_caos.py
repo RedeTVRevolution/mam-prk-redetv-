@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 
-from api.caos import CORPO, roteiro
+from api.caos import CORPO, em_paralelo, roteiro
 from api.chaves import (
     MacSimulado,
     RepositorioDeChavesEmMemoria,
@@ -339,8 +339,7 @@ def test_evento_de_fim_chega_uma_vez_apesar_de_entrega_repetida_fora_de_ordem_e_
         ids.append(job.id)
 
     # O mesmo Job terminado duas vezes (o segundo `transitar` não acha mais o estado de
-    # origem): o evento sai uma vez. A disputa em paralelo no Firestore fica para o #274
-    # continuar (o `transitar` do emulador estoura as tentativas da transação).
+    # origem): o evento sai uma vez.
     for i in ids * 2:
         transitar(jobs, i, "analisando", "concluido", AGORA)
     assert sorted(m.evento.job_id for m in corretor.eventos()) == sorted(ids)
@@ -358,3 +357,29 @@ def test_evento_de_fim_chega_uma_vez_apesar_de_entrega_repetida_fora_de_ordem_e_
     assert destino.tentativas > 5  # houve repetição e houve falha
     assert len(destino.processados) == 5  # cada evento, uma vez só, para o cliente
     assert len(set(destino.processados)) == 5
+
+
+def test_doze_trabalhadores_terminando_o_mesmo_job_ao_mesmo_tempo_um_vence_e_ninguem_estoura() -> (
+    None
+):
+    mundo = Mundo()
+    job = Job(
+        id=uuid.uuid4().hex,
+        nome="a.mp4",
+        tamanho_bytes=10,
+        estado="analisando",
+        criado_por="sistema:Legado A",
+        sistema="Legado A",
+        criado_em=AGORA,
+        atualizado_em=AGORA,
+    )
+    mundo.jobs.salvar(job)
+
+    def terminar() -> tuple[int, Any]:
+        novo = mundo.jobs.transitar(job.id, "analisando", {"estado": "concluido"})
+        return (1 if novo else 0), None
+
+    vitorias = sum(v for v, _ in em_paralelo(12, terminar))
+    assert vitorias == 1
+    gravado = mundo.jobs.obter(job.id)
+    assert gravado is not None and gravado.estado == "concluido"

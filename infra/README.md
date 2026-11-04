@@ -107,3 +107,7 @@ O hash das chaves de API dos sistemas legados (E7) sai de uma chave MAC `HMAC_SH
 ## Pub/Sub dos webhooks (#273)
 
 O fim de um Job (`concluido` ou `falhou`) vira uma mensagem no tópico `mam-eventos-do-job` (`modulos/mam/eventos.tf`, `api/eventos_do_job.py`). A assinatura push `mam-entrega-do-webhook` chama `POST /interno/webhook` na `mam-web` com o token OIDC da conta `mam-webhook-push`; a API entrega o webhook com o mesmo `X-Webhook-Id` em toda tentativa. Destino fora do ar responde 503 e o Pub/Sub tenta de novo (10 s a 600 s de espera); depois de 10 tentativas a mensagem vai para `mam-eventos-do-job-mortos`, que tem assinatura própria para guardar o que desistiu por 7 dias. A `mam-terraform` precisa de `roles/pubsub.admin` (já no wizard). O tópico sai no output `pubsub_topico_eventos`. O levantamento do que ainda falta está em `docs/levantamento-api-no-ar.md`.
+
+## Chaves de idempotência (#274)
+
+O `POST /v1/jobs` aceita `Idempotency-Key`. A reserva da chave é um documento da coleção `chaves_de_idempotencia` (`api/idempotencia.py`), e a política de TTL de `modulos/mam/idempotencia.tf` apaga o documento 48 h depois (`expira_em`). O TTL do Firestore não é imediato (pode levar até um dia a mais), por isso a API trata a reserva vencida como inexistente. O campo não tem índice próprio.

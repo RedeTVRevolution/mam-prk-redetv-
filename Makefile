@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao caos-dev
 
 instalar:
 	uv sync --locked
@@ -220,3 +220,8 @@ taxa-de-correcao:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.taxa_de_correcao "$(DESDE)" "$(ATE)" "$(PROGRAMA)"
+
+# Teste de caos da API no dev (#274): make caos-dev URL=https://... CHAVE_A=... CHAVE_B=... [CLIPE=arquivo.mp4]
+# Com CLIPE= o clipe passa pelo pipeline inteiro (gasta Gemini e GPU); sem ele, só a API.
+caos-dev:
+	URL="$(URL)" CHAVE_A="$(CHAVE_A)" CHAVE_B="$(CHAVE_B)" CLIPE="$(CLIPE)" uv run --locked python -m api.caos_dev

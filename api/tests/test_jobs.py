@@ -797,3 +797,45 @@ def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() 
         nome="transcricao", inicio=agora, dispositivo="cpu", tentativas_gpu=6
     )
     assert etapa.dispositivo == "cpu" and etapa.tentativas_gpu == 6
+
+
+def _criar_com_chave(ambiente: Ambiente, chave: str, **corpo: Any) -> Any:
+    padrao = {"nome": "clipe.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
+    return ambiente.cliente.post(
+        "/v1/jobs",
+        json={**padrao, **corpo},
+        headers={**AUTORIZACAO, "Idempotency-Key": chave},
+    )
+
+
+def test_idempotency_key_repetida_devolve_200_com_o_mesmo_job_e_sem_novo_job() -> None:
+    ambiente = Ambiente()
+
+    primeira = _criar_com_chave(ambiente, "k1")
+    repeticao = _criar_com_chave(ambiente, "k1")
+
+    assert primeira.status_code == 202
+    assert repeticao.status_code == 200
+    assert repeticao.json()["id"] == primeira.json()["id"]
+    assert len(ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json()) == 1
+
+
+def test_idempotency_key_com_outro_corpo_recebe_409_e_chaves_diferentes_criam_jobs() -> (
+    None
+):
+    ambiente = Ambiente()
+    primeira = _criar_com_chave(ambiente, "k1")
+
+    assert _criar_com_chave(ambiente, "k1", tamanho_bytes=2000).status_code == 409
+    outra = _criar_com_chave(ambiente, "k2")
+
+    assert outra.status_code == 202
+    assert outra.json()["id"] != primeira.json()["id"]
+
+
+def test_idempotency_key_invalida_recebe_422() -> None:
+    ambiente = Ambiente()
+
+    assert _criar_com_chave(ambiente, "x" * 256).status_code == 422
+    assert _criar_com_chave(ambiente, "chave\tcom tab").status_code == 422
+    assert ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json() == []

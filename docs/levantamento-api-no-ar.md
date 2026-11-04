@@ -15,6 +15,5 @@ Comparação das seções "API e segurança" e "Resiliência e duplicidade" do `
 3. **Ligar a rota do push no `api/main.py`**, com `PUSH_AUDIENCIA` (`mam-webhook-push`) e `PUSH_CONTA` (o e-mail da `mam-webhook-push`) no serviço `mam-web` (depende de 1 e 2). Até lá a assinatura bate num 404, e nada chega a ela.
 4. **`falhou` gravado pelo Workflows**: o `validacao.workflow.yaml` marca `falhou` direto no Firestore quando a execução de um Job estoura tempo ou memória (quatro passos `marca_como_falhou`). Esses não publicam. Cobrir pede um passo de publicação no Workflows ou um Job de "evento de fim".
 5. **Evento perdido na publicação**: se o Pub/Sub recusa a publicação, o erro vai ao log e o Job segue (o estado já mudou). Reconciliar (um Job `concluido` sem evento entregue) pede o registro da entrega por Job.
-6. **Chave de idempotência do `POST /v1/jobs`** (48 h, TTL do Firestore): o plano descreve, mas o código não tem `Idempotency-Key` e o Terraform não tem política de TTL.
-7. **`Retry-After` e limite de fila na API**: hoje só o Cloud Armor limita (429 na borda); o limite do plano na própria API (fila acima do teto → 429 com `Retry-After`) não existe.
-8. **Alerta da fila de mortas** (mensagens não confirmadas na assinatura `mam-eventos-do-job-mortos`): sem ele ninguém vê o webhook que desistiu.
+6. **`Retry-After` e limite de fila na API**: hoje só o Cloud Armor limita (429 na borda); o limite do plano na própria API (fila acima do teto → 429 com `Retry-After`) não existe.
+7. **Alerta da fila de mortas** (mensagens não confirmadas na assinatura `mam-eventos-do-job-mortos`): sem ele ninguém vê o webhook que desistiu.

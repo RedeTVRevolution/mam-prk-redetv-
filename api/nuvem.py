@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import random
 import secrets
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -150,6 +151,9 @@ def objeto_dos_nomes_a_buscar(job_id: str) -> str:
     return f"{job_id}.nomes_a_buscar.json"
 
 
+TENTATIVAS_SOB_DISPUTA = 8
+
+
 class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
@@ -167,6 +171,20 @@ class RepositorioFirestore:
             # `Aborted`: o documento está travado por quem o grava neste instante.
             return False
         return True
+
+    def _sob_disputa(self, na_transacao: Callable[[Any], Job | None]) -> Job | None:
+        # Com muitos trabalhadores no mesmo Job, o Firestore esgota as tentativas da
+        # transação (ValueError). Quem perde começa de novo, depois de uma espera
+        # aleatória, e lê o estado que o vencedor deixou.
+        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+            try:
+                resultado: Job | None = na_transacao(self._cliente.transaction())
+                return resultado
+            except (ValueError, Aborted):
+                if rodada == TENTATIVAS_SOB_DISPUTA - 1:
+                    raise
+                time.sleep(random.uniform(0, 0.05 * (rodada + 1)))
+        raise AssertionError("inalcançável")
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -187,8 +205,7 @@ class RepositorioFirestore:
             transacao.set(referencia, novo.model_dump())
             return novo
 
-        resultado: Job | None = trocar(self._cliente.transaction())
-        return resultado
+        return self._sob_disputa(trocar)
 
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
@@ -209,8 +226,7 @@ class RepositorioFirestore:
             transacao.set(referencia, novo.model_dump())
             return novo
 
-        resultado: Job | None = trocar_na_transacao(self._cliente.transaction())
-        return resultado
+        return self._sob_disputa(trocar_na_transacao)
 
     def remover(self, job_id: str) -> None:
         self._colecao.document(job_id).delete()
