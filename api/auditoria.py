@@ -35,6 +35,8 @@ Acao = Literal[
     "pessoa.fundida",
     "pessoa.renomeada",
     "aprovacao.alterada",
+    "painel.aberto",
+    "painel.exportado",
 ]
 ACOES: tuple[Acao, ...] = get_args(Acao)
 

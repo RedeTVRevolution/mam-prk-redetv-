@@ -27,6 +27,8 @@ const ACOES_DA_API = [
   'pessoa.fundida',
   'pessoa.renomeada',
   'aprovacao.alterada',
+  'painel.aberto',
+  'painel.exportado',
 ]
 
 interface Registro {
@@ -143,6 +145,8 @@ test('cada ação da lista fechada tem frase, e só ela', () => {
   expect(FRASE_DA_ACAO['decupagem.baixada']).toBe('Baixou a decupagem')
   expect(FRASE_DA_ACAO['pessoa.fundida']).toBe('Fundiu pessoas')
   expect(FRASE_DA_ACAO['aprovacao.alterada']).toBe('Mudou a regra de aprovação')
+  expect(FRASE_DA_ACAO['painel.aberto']).toBe('Abriu o painel da diretoria')
+  expect(FRASE_DA_ACAO['painel.exportado']).toBe('Exportou o painel da diretoria em CSV')
 })
 
 test('a mudança da regra de aprovação diz se passou a exigir ou deixou de exigir', () => {

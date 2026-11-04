@@ -6,7 +6,9 @@ As permissões ficam na aplicação (um documento por uid), não no token.
 from collections.abc import Callable, Iterable
 from typing import Literal, Protocol, get_args
 
-Papel = Literal["consulta", "operador", "editor", "curador", "administrador"]
+Papel = Literal[
+    "consulta", "operador", "editor", "curador", "diretoria", "administrador"
+]
 PAPEIS: tuple[Papel, ...] = get_args(Papel)
 Permissao = Literal[
     "decupagem.ver",
@@ -23,6 +25,7 @@ Permissao = Literal[
     "catalogo.apagar",
     "catalogo.fundir",
     "aprovacao.definir",
+    "painel.ver",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
@@ -40,6 +43,8 @@ PERMISSOES_DO_PAPEL: dict[Papel, frozenset[Permissao]] = {
             "catalogo.fundir",
         }
     ),
+    # Só leitura do painel de indicadores (E9), nada da decupagem.
+    "diretoria": frozenset({"painel.ver"}),
     # Do próprio tipo, para uma permissão nova chegar ao Administrador sozinha.
     "administrador": frozenset(get_args(Permissao)),
 }

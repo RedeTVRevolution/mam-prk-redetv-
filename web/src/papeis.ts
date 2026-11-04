@@ -4,6 +4,7 @@ export const PAPEIS = [
   { valor: 'operador', nome: 'Operador', pode: 'envia vídeos e reprocessa' },
   { valor: 'editor', nome: 'Editor', pode: 'vê e corrige a decupagem' },
   { valor: 'curador', nome: 'Curador', pode: 'aprova correções, reprocessa etapas e cuida do catálogo' },
+  { valor: 'diretoria', nome: 'Diretoria', pode: 'só vê o painel de indicadores' },
   { valor: 'administrador', nome: 'Administrador', pode: 'gere contas, chaves, lixeira e auditoria' },
 ]
 

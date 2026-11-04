@@ -634,7 +634,7 @@ class TestRepositorioDePapeisFirestore:
     def test_papel_desconhecido_no_documento_e_ignorado(
         self, papeis: RepositorioDePapeisFirestore
     ) -> None:
-        papeis._colecao.document("u1").set({"papeis": ["diretoria", "editor"]})
+        papeis._colecao.document("u1").set({"papeis": ["chefe", "editor"]})
 
         assert papeis.obter("u1") == ["editor"]
 

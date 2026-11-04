@@ -155,7 +155,7 @@ def test_criar_com_e_mail_repetido_devolve_409_sem_registro() -> None:
     [
         {"email": "sem-arroba", "nome": "X", "papeis": ["consulta"]},
         {"email": "x@y.z", "nome": " ", "papeis": ["consulta"]},
-        {"email": "x@y.z", "nome": "X", "papeis": ["diretoria"]},
+        {"email": "x@y.z", "nome": "X", "papeis": ["chefe"]},
     ],
 )
 def test_criar_recusa_pedido_invalido(corpo: dict[str, Any]) -> None:

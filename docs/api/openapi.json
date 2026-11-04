@@ -2139,6 +2139,7 @@
                 "operador",
                 "editor",
                 "curador",
+                "diretoria",
                 "administrador"
               ]
             },
@@ -2162,7 +2163,8 @@
                 "lixeira.gerir",
                 "catalogo.apagar",
                 "catalogo.fundir",
-                "aprovacao.definir"
+                "aprovacao.definir",
+                "painel.ver"
               ]
             },
             "type": "array",

@@ -24,6 +24,8 @@ export const FRASE_DA_ACAO = {
   'pessoa.fundida': 'Fundiu pessoas',
   'pessoa.renomeada': 'Renomeou uma pessoa em todos os vídeos',
   'aprovacao.alterada': 'Mudou a regra de aprovação',
+  'painel.aberto': 'Abriu o painel da diretoria',
+  'painel.exportado': 'Exportou o painel da diretoria em CSV',
 } as const
 
 export type AcaoDaAuditoria = keyof typeof FRASE_DA_ACAO

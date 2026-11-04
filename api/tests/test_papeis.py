@@ -178,3 +178,13 @@ def test_so_curador_e_administrador_reprocessam_a_partir_de_uma_etapa() -> None:
     }
 
     assert com == {"curador", "administrador"}
+
+
+def test_diretoria_so_tem_painel_ver() -> None:
+    assert permissoes_de(["diretoria"]) == {"painel.ver"}
+
+
+def test_so_a_diretoria_e_o_administrador_veem_o_painel() -> None:
+    com = {p for p, perms in PERMISSOES_DO_PAPEL.items() if "painel.ver" in perms}
+
+    assert com == {"diretoria", "administrador"}

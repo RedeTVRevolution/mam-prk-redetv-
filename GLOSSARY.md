@@ -223,6 +223,9 @@ Usuário criado no próprio sistema de identidade, independente do login do sist
 **Administrador**:
 Papel com todas as permissões, dado automaticamente aos administradores de emergência.
 
+**Diretoria**:
+Papel só de leitura com a permissão `painel.ver` e mais nada: não vê a decupagem. O Administrador também a tem. Cada abertura do painel e cada exportação em CSV grava `painel.aberto` ou `painel.exportado` na auditoria, com quem, quando e o filtro (`api/painel.py`).
+
 **Administrador de emergência**:
 Conta local que recebe o papel Administrador (acesso total), segundo fator obrigatório e alerta a cada login; existe para não depender do login legado.
 
