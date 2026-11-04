@@ -922,6 +922,11 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
       }
+      # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+      env {
+        name  = "PUBSUB_TOPICO_USO"
+        value = google_pubsub_topic.eventos_de_uso.id
+      }
       # Pelo local e não pelo recurso: o CORS da quarentena aponta para este
       # serviço, e a referência ao recurso fecharia um ciclo.
       env {
@@ -1084,6 +1089,11 @@ resource "google_cloud_run_v2_job" "validacao" {
           name  = "PUBSUB_TOPICO_EVENTOS"
           value = google_pubsub_topic.eventos_do_job.id
         }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1177,6 +1187,11 @@ resource "google_cloud_run_v2_job" "transcricao" {
           name  = "PUBSUB_TOPICO_EVENTOS"
           value = google_pubsub_topic.eventos_do_job.id
         }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1249,6 +1264,11 @@ resource "google_cloud_run_v2_job" "ocr" {
         env {
           name  = "PUBSUB_TOPICO_EVENTOS"
           value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
         }
         env {
           name  = "LIMIAR_DE_MUDANCA"
@@ -1335,6 +1355,11 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
           name  = "PUBSUB_TOPICO_EVENTOS"
           value = google_pubsub_topic.eventos_do_job.id
         }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1414,6 +1439,11 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
         env {
           name  = "PUBSUB_TOPICO_EVENTOS"
           value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
         }
         env {
           name  = "LIMIAR_DE_MUDANCA"
@@ -1709,6 +1739,11 @@ resource "google_cloud_run_v2_job" "analise" {
         env {
           name  = "PUBSUB_TOPICO_EVENTOS"
           value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
         }
         env {
           name  = "GCP_PROJECT_ID"
