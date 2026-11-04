@@ -133,20 +133,37 @@ def consultar_no_bigquery(
     tabela = f"`{config.projeto}.{config.dataset}.{config.tabela}` AS t"
     if unnest_das_pessoas:
         tabela += ", UNNEST(t.pessoas) AS p"
+    return linhas_da_consulta(
+        transporte,
+        config.regiao,
+        f"SELECT {colunas}\nFROM {tabela}\nWHERE {' AND '.join(onde)}",
+        parametros,
+    )
+
+
+def linhas_da_consulta(
+    transporte: Transporte,
+    regiao: str,
+    sql: str,
+    parametros: Sequence[dict[str, Any]] = (),
+    o_que: str = "relatório",
+) -> list[list[Any]]:
+    """Os valores de cada linha, em texto. Uma consulta que não termina ou não cabe numa
+    resposta falha alto com `RuntimeError`."""
     resposta = transporte(
         {
-            "query": f"SELECT {colunas}\nFROM {tabela}\nWHERE {' AND '.join(onde)}",
+            "query": sql,
             "useLegacySql": False,
-            "location": config.regiao,
+            "location": regiao,
             "timeoutMs": 60_000,
             "maxResults": 100_000,
-            "queryParameters": parametros,
+            "queryParameters": list(parametros),
         }
     )
     if not resposta.get("jobComplete", False):
-        raise RuntimeError("a consulta do relatório não terminou no prazo")
+        raise RuntimeError(f"a consulta do {o_que} não terminou no prazo")
     if resposta.get("pageToken"):
-        raise RuntimeError("o relatório não cabe numa resposta: peça um período menor")
+        raise RuntimeError(f"o {o_que} não cabe numa resposta: peça um período menor")
     return [[campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])]
 
 

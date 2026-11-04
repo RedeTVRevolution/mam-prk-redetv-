@@ -13,6 +13,7 @@ from api.auth import Usuario
 from api.busca import Ajustes, Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
+from api.eventos_de_uso import Eventos
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import Job, RepositorioEmMemoria
@@ -540,6 +541,7 @@ def cliente(
     indice: IndiceEmMemoria | None = None,
     embedding_da_consulta: EmbeddingDaConsulta | None = None,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
+    eventos: Eventos | None = None,
 ) -> tuple[TestClient, Mundo]:
     m = Mundo(*respostas)
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
@@ -559,6 +561,7 @@ def cliente(
         tempo_maximo_da_busca_s=tempo_maximo_s,
         embedding_da_consulta=embedding_da_consulta,
         limites_da_imagem=limites_da_imagem,
+        eventos=eventos,
     )
     return TestClient(app), m
 

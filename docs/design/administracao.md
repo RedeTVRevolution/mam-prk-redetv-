@@ -10,11 +10,11 @@ A administração é a área do papel Administrador, que só existe em conta loc
 | Dar e tirar papéis, limitados a programas | `make atribuir-papeis` (sem escopo por programa) | Na mesma tela, papéis e programas por usuário |
 | Desativar um usuário | Não existe | Desativar bloqueia o login no Identity Platform e encerra as sessões. Nunca se apaga a conta: as correções guardam o autor |
 | Emitir, listar e revogar chaves de API | `make emitir-chave`, `listar-chaves`, `revogar-chave` | Tela de sistemas: a chave aparece uma vez na criação; revogar vale na hora |
-| Definir quais correções exigem aprovação | `make definir-aprovacao` | Uma lista de tipos de correção com uma chave liga/desliga |
+| Definir quais correções exigem aprovação | Aba "Regras de aprovação" (`/v1/admin/aprovacao`, permissão `aprovacao.definir`, só do Administrador; antes, `make definir-aprovacao`) | Uma lista de tipos de correção com uma chave liga/desliga. Vale na hora para as correções novas; as pendentes continuam pendentes. Cada mudança vai para a auditoria (`aprovacao.alterada`: tipo, antes, depois) |
 | Ver o que aconteceu | Cloud Audit Logs, fora da aplicação | Tela de auditoria: quem, quando, o quê e o motivo, filtrável por pessoa, vídeo e tipo |
 | Apagar vídeo, pessoa do catálogo ou marca | Não existe (`DELETE /v1/jobs/{id}` só cancela) | Lixeira, descrita abaixo |
 
-O que **não** é do administrador: reprocessar e "indexar agora" são do Operador; aprovar correções, fundir pessoas e manter o catálogo são do Curador; os indicadores são da Diretoria. O código hoje só conhece Consulta, Operador, Editor e Curador (`api/papeis.py`): os papéis Administrador e Diretoria precisam ser criados.
+O que **não** é do administrador: reprocessar e "indexar agora" são do Operador; aprovar correções, fundir pessoas e manter o catálogo são do Curador; os indicadores são da Diretoria. Os papéis Administrador e Diretoria já existem em `api/papeis.py`.
 
 ## Apagar com segurança
 
@@ -45,7 +45,7 @@ O que **não** é do administrador: reprocessar e "indexar agora" são do Operad
 
 - **Correções só se acrescentam.** O repositório de correções "só acrescenta, nunca altera nem apaga" (`api/correcoes.py:495`), e o glossário diz que a saída do modelo nunca é apagada. Essas regras valem para o trabalho do dia a dia, e a lixeira as respeita: ela não apaga nada. A purga é a única exceção, feita só por um processo da própria purga, que deixa o registro dela no histórico. **Decisão a registrar numa ADR.**
 - **Dois jobs podem dividir um processamento.** A chave de conteúdo faz dois jobs com o mesmo arquivo usarem o mesmo processamento (`videos/{chave}`, plano, "Resiliência e duplicidade"). Apagar um job apaga o job e o acesso de quem o enviou. O processamento, os arquivos e o índice só são purgados quando nenhum job aponta mais para eles. A tela avisa: "Este arquivo também foi enviado pelo sistema X; a decupagem continua para ele."
-- **Pessoa do catálogo tem dado biométrico.** Apagar uma pessoa do catálogo apaga também as 3 referências de rosto dela ([ADR 0005](../adr/0005-identificacao-por-referencia.md)). Rosto é dado sensível pela LGPD, então essas fotos não esperam os 30 dias: saem já no envio para a lixeira. Nas decupagens, as aparições confirmadas pelo rosto voltam a "não identificado"; as confirmadas por GC ou fala mantêm o nome. Antes de apagar, a tela oferece **fundir** com outra pessoa, que é o caso mais comum (nome duplicado).
+- **Pessoa do catálogo tem dado biométrico.** Apagar uma pessoa do catálogo apaga também as 3 referências de rosto dela ([ADR 0005](../adr/0005-identificacao-por-referencia.md)). Rosto é dado sensível pela LGPD, então essas fotos não esperam os 30 dias: saem já no envio para a lixeira. Nas decupagens, as aparições confirmadas pelo rosto voltam a "não identificado"; as confirmadas por GC ou fala mantêm o nome. Antes de apagar, a tela oferece **fundir** com outra pessoa, que é o caso mais comum (nome duplicado); a permissão é `catalogo.fundir` (Curador e Administrador). Renomear a pessoa em todos os vídeos pede `correcao.aprovar` (Curador).
 
 ### Outros apagamentos
 

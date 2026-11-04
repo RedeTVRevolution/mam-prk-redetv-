@@ -455,7 +455,6 @@ def test_aplicar_direto_nao_altera_o_modelo() -> None:
 
 
 def test_os_tipos_novos_podem_exigir_aprovacao() -> None:
-    from api.aprovacao import definir_aprovacao_main
     from api.correcoes import RepositorioDeAprovacaoEmMemoria
 
     repo = RepositorioDeAprovacaoEmMemoria()
@@ -467,7 +466,7 @@ def test_os_tipos_novos_podem_exigir_aprovacao() -> None:
         "texto_na_tela.acrescentar",
     ]
 
-    assert definir_aprovacao_main([",".join(tipos)], repo, lambda _: None) == 0
+    repo.definir(frozenset(tipos))
     assert repo.tipos() == set(tipos)
 
 

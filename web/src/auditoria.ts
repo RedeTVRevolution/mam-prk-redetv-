@@ -18,11 +18,30 @@ export const FRASE_DA_ACAO = {
   'item.purgado': 'Purgou da lixeira',
   'video.reprocessado': 'Reprocessou o vídeo',
   'job.estado_corrigido': 'Corrigiu o estado do envio',
+  'video.aberto': 'Abriu o vídeo',
+  'video.baixado': 'Baixou o vídeo',
+  'decupagem.baixada': 'Baixou a decupagem',
+  'pessoa.fundida': 'Fundiu pessoas',
+  'pessoa.renomeada': 'Renomeou uma pessoa em todos os vídeos',
+  'aprovacao.alterada': 'Mudou a regra de aprovação',
+  'painel.aberto': 'Abriu o painel da diretoria',
+  'painel.exportado': 'Exportou o painel da diretoria em CSV',
 } as const
 
 export type AcaoDaAuditoria = keyof typeof FRASE_DA_ACAO
 
+/** As ações de acesso ao vídeo: o grupo "Acessos" do filtro e o link "Quem acessou". */
+export const ACOES_DE_ACESSO: AcaoDaAuditoria[] = ['video.aberto', 'video.baixado', 'decupagem.baixada']
+
+/** O filtro `acao` com mais de uma ação: os nomes separados por vírgula, como na URL. */
+export const FILTRO_DE_ACESSOS = ACOES_DE_ACESSO.join(',')
+
 export const ACOES_DA_AUDITORIA = Object.keys(FRASE_DA_ACAO) as AcaoDaAuditoria[]
+
+/** Os filtros do link "Quem acessou": o vídeo como alvo e as três ações de acesso. */
+export function filtrosDeQuemAcessou(jobId: string): FiltrosDaAuditoria {
+  return { ...SEM_FILTROS_DA_AUDITORIA, alvo: jobId, acao: FILTRO_DE_ACESSOS }
+}
 
 /** Um registro de `GET /v1/admin/auditoria`. */
 export interface RegistroDeAuditoria {
@@ -49,6 +68,7 @@ export interface FiltrosDaAuditoria {
   pessoa: string
   /** O id do alvo (por exemplo, o de um vídeo). */
   alvo: string
+  /** Uma ação, ou várias separadas por vírgula. */
   acao: string
   /** Período, em `AAAA-MM-DD` (dia de São Paulo), inclusive. */
   de: string
@@ -60,7 +80,7 @@ export const SEM_FILTROS_DA_AUDITORIA: FiltrosDaAuditoria = { pessoa: '', alvo: 
 const DATA = /^\d{4}-\d{2}-\d{2}$/
 
 /** "De" depois de "Até": a API recusa, então a tela avisa sem consultar. */
-export function periodoInvertido(f: FiltrosDaAuditoria): boolean {
+export function periodoInvertido(f: { de: string; ate: string }): boolean {
   return Boolean(f.de && f.ate && f.de > f.ate)
 }
 
@@ -72,15 +92,23 @@ export function fraseDaAcao(acao: string): string {
   return Object.hasOwn(FRASE_DA_ACAO, acao) ? FRASE_DA_ACAO[acao as AcaoDaAuditoria] : acao
 }
 
+// Ação desconhecida num link editado à mão sai do filtro, em vez de fazer a API recusar.
+// Várias ações só valem como o grupo dos acessos inteiro, em qualquer ordem: é a única
+// combinação que o campo Ação sabe mostrar.
+function acaoDoFiltro(acoes: Set<string>): string {
+  if (acoes.size === 1) return [...acoes][0]!
+  const acessos = acoes.size === ACOES_DE_ACESSO.length && ACOES_DE_ACESSO.every((a) => acoes.has(a))
+  return acessos ? FILTRO_DE_ACESSOS : ''
+}
+
 export function filtrosDaAuditoria(busca: string): FiltrosDaAuditoria {
   const p = new URLSearchParams(busca)
   const data = (nome: string) => (DATA.test(p.get(nome) ?? '') ? p.get(nome)! : '')
-  const acao = p.get('acao') ?? ''
+  const acoes = new Set((p.get('acao') ?? '').split(',').filter((a) => Object.hasOwn(FRASE_DA_ACAO, a)))
   return {
     pessoa: p.get('pessoa') ?? '',
     alvo: p.get('alvo') ?? '',
-    // Ação desconhecida num link editado à mão sai do filtro, em vez de fazer a API recusar.
-    acao: Object.hasOwn(FRASE_DA_ACAO, acao) ? acao : '',
+    acao: acaoDoFiltro(acoes),
     de: data('de'),
     ate: data('ate'),
   }
@@ -98,7 +126,7 @@ export function consultaDaAuditoria(f: FiltrosDaAuditoria, limite: number, curso
   const p = new URLSearchParams({ limite: String(limite) })
   if (f.pessoa.trim()) p.set('pessoa', f.pessoa.trim())
   if (f.alvo.trim()) p.set('alvo', f.alvo.trim())
-  if (f.acao) p.set('acao', f.acao)
+  for (const acao of f.acao.split(',').filter(Boolean)) p.append('acao', acao)
   if (f.de) p.set('de', `${f.de}T00:00:00-03:00`)
   if (f.ate) p.set('ate', `${f.ate}T23:59:59.999-03:00`)
   if (cursor) p.set('cursor', cursor)
@@ -108,6 +136,13 @@ export function consultaDaAuditoria(f: FiltrosDaAuditoria, limite: number, curso
 function lista(valor: unknown): string {
   const itens = Array.isArray(valor) ? valor.map(String) : []
   return itens.length ? itens.map((p) => NOME_DO_PAPEL[p] ?? p).join(', ') : 'nenhum'
+}
+
+function filtro(valor: unknown): string {
+  const campos = valor && typeof valor === 'object' ? Object.entries(valor) : []
+  return campos.length
+    ? campos.map(([k, v]) => `${k} ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(', ')
+    : 'nenhum'
 }
 
 function numero(valor: unknown): number | null {
@@ -153,6 +188,8 @@ export function detalhesEmFrases(r: RegistroDeAuditoria): string[] {
     case 'chave.emitida':
     case 'chave.revogada':
       return [`Escopos: ${Array.isArray(d.escopos) && d.escopos.length ? d.escopos.join(', ') : 'nenhum'}`]
+    case 'aprovacao.alterada':
+      return [d.depois === true ? 'Passou a exigir aprovação do Curador' : 'Deixou de exigir aprovação do Curador']
     case 'item.para_lixeira':
     case 'item.restaurado':
     case 'item.purgado':
@@ -163,6 +200,9 @@ export function detalhesEmFrases(r: RegistroDeAuditoria): string[] {
         : []
     case 'job.estado_corrigido':
       return typeof d.de === 'string' && typeof d.para === 'string' ? [`Estado: de ${rotuloDoEstado(d.de)} para ${rotuloDoEstado(d.para)}`] : []
+    case 'painel.aberto':
+    case 'painel.exportado':
+      return [`Filtro: ${filtro(d.filtro)}`]
     default:
       return Object.entries(d).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
   }

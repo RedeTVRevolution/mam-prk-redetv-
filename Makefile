@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao taxa-de-correcao
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao caos-dev atualizar-openapi
 
 instalar:
 	uv sync --locked
@@ -84,10 +84,6 @@ carregar-marcas:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.carregar_marcas
-
-# Tipos de correção que exigem aprovação de Curador (E3): make definir-aprovacao TIPOS=pessoa.renomear,pauta.titulo (vazio: nenhum)
-definir-aprovacao:
-	uv run --locked python -m api.definir_aprovacao "$(TIPOS)"
 
 # Cassete do Gemini (#10): chamada real no dev sobre um clipe sintético, com as
 # credenciais ADC de quem roda. Regrave a cada troca de modelo, esquema ou instrução.
@@ -208,6 +204,15 @@ exportar-regressao:
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.regressao "$(PASTA)"
 
+# Roda uma versão do pipeline no conjunto de regressão e compara com a aprovada (#254):
+# make regressao VERSAO=<versão> [RESERVADOS=1] [PASTA=regressao-da-versao] [CONFIRMAR=1]
+# Sem CONFIRMAR=1 só mostra o custo estimado. Sai com código 1 se um requisito fica abaixo da meta.
+# DECUPAGENS é a pasta com as decupagens de cada versão; CUSTO_POR_HORA_USD é opcional.
+regressao:
+	set -a && . ./.env && set +a && \
+	CONFIRMAR="$(CONFIRMAR)" \
+	uv run --locked python -m api.regressao_da_versao "$(VERSAO)" "$(RESERVADOS)" "$(PASTA)"
+
 # Taxa de correção por tipo, programa e versão do pipeline, em CSV (#265):
 # make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO, UTC, inclusive)
 taxa-de-correcao:
@@ -216,3 +221,12 @@ taxa-de-correcao:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.taxa_de_correcao "$(DESDE)" "$(ATE)" "$(PROGRAMA)"
+
+# Teste de caos da API no dev (#274): make caos-dev URL=https://... CHAVE_A=... CHAVE_B=... [CLIPE=arquivo.mp4]
+# Com CLIPE= o clipe passa pelo pipeline inteiro (gasta Gemini e GPU); sem ele, só a API.
+caos-dev:
+	URL="$(URL)" CHAVE_A="$(CHAVE_A)" CHAVE_B="$(CHAVE_B)" CLIPE="$(CLIPE)" uv run --locked python -m api.caos_dev
+
+# O OpenAPI dos sistemas (#277) em docs/api/openapi.json; um teste do `make verificar` confere que bate.
+atualizar-openapi:
+	uv run --locked python -m api.documentacao_dos_sistemas

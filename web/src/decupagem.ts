@@ -19,6 +19,8 @@ export interface Pessoa {
   fontes_do_nome?: string[]
   /** 1.3: `palpite` é o nome que o modelo deu sem achar prova; falta onde a identificação não rodou. */
   estado_do_nome?: 'confirmado' | 'palpite' | null
+  /** A pessoa do catálogo a que o nome aponta; falta onde o nome não casou com o catálogo. */
+  catalogo_id?: string | null
   na_imagem: Aparicao[]
   citada_na_fala: Intervalo[]
   citada_no_texto: (Intervalo & { texto: string })[]

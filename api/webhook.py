@@ -248,6 +248,43 @@ def _tentar(
         return 503
 
 
+Resultado = Literal["entregue", "repetir", "descartar"]
+
+
+def entregar_uma_vez(
+    evento: Evento,
+    registro: RegistroDeWebhook,
+    cofre: Cofre,
+    http: PortaHttp,
+    *,
+    resolver: Resolvedor = resolver_dns,
+    relogio: Callable[[], datetime],
+) -> Resultado:
+    """Uma tentativa só: quem repete é a assinatura push do Pub/Sub, com espera e fila
+    de mensagens mortas. `repetir` é status repetível ou DNS fora do ar; `descartar` é
+    o que repetir não conserta (4xx, URL que virou inválida, sistema sem segredo). O id
+    do evento é o mesmo em toda tentativa, para o cliente descartar o repetido."""
+    segredo = cofre.obter(registro.sistema)
+    if segredo is None:
+        return "descartar"
+    corpo = _corpo(evento)
+    try:
+        status = _tentar(evento, registro, segredo, corpo, http, resolver, relogio)
+    except HostNaoResolve:
+        return "repetir"
+    except UrlInvalida:
+        return "descartar"
+    if 200 <= status < 300:
+        return "entregue"
+    return "repetir" if _repetivel(status) else "descartar"
+
+
+def _corpo(evento: Evento) -> bytes:
+    return json.dumps(
+        evento.model_dump(mode="json"), separators=(",", ":"), sort_keys=True
+    ).encode()
+
+
 def entregar(
     evento: Evento,
     registro: RegistroDeWebhook,
@@ -265,9 +302,7 @@ def entregar(
     segredo = cofre.obter(registro.sistema)
     if segredo is None:
         return False
-    corpo = json.dumps(
-        evento.model_dump(mode="json"), separators=(",", ":"), sort_keys=True
-    ).encode()
+    corpo = _corpo(evento)
     falhas = 0
     while True:
         try:

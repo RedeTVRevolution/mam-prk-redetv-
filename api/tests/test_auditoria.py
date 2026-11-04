@@ -81,6 +81,31 @@ def test_filtra_por_alvo_e_por_acao() -> None:
     assert _ids(repo, alvo_id="v1", acao="item.para_lixeira") == ["a"]
 
 
+def test_filtra_por_varias_acoes() -> None:
+    repo = RepositorioDeAuditoriaEmMemoria()
+    repo.acrescentar(_registro("a", acao="video.aberto"))
+    repo.acrescentar(_registro("b", acao="conta.criada"))
+    repo.acrescentar(_registro("c", acao="video.baixado"))
+
+    assert _ids(repo, acoes=("video.aberto", "video.baixado")) == ["c", "a"]
+
+
+def test_a_rota_aceita_a_acao_repetida() -> None:
+    repo = RepositorioDeAuditoriaEmMemoria()
+    repo.acrescentar(_registro("a", 0, acao="video.aberto"))
+    repo.acrescentar(_registro("b", 1, acao="conta.criada"))
+    repo.acrescentar(_registro("c", 2, acao="decupagem.baixada"))
+    cliente = _cliente(["administrador"], repo)
+
+    resposta = cliente.get(
+        "/v1/admin/auditoria",
+        params=[("acao", "video.aberto"), ("acao", "decupagem.baixada")],
+        headers=AUTORIZACAO,
+    )
+
+    assert [r["id"] for r in resposta.json()] == ["c", "a"]
+
+
 def test_filtra_por_periodo_com_limites_incluidos() -> None:
     repo = RepositorioDeAuditoriaEmMemoria()
     for i, minutos in enumerate((0, 10, 20, 30)):
@@ -150,7 +175,7 @@ def test_sem_auditoria_ver_a_rota_responde_403() -> None:
     repo = RepositorioDeAuditoriaEmMemoria()
     repo.acrescentar(_registro("a"))
 
-    for papel in ("consulta", "operador", "editor", "curador"):
+    for papel in ("consulta", "operador", "editor", "curador", "diretoria"):
         resposta = _cliente([papel], repo).get(
             "/v1/admin/auditoria", headers=AUTORIZACAO
         )

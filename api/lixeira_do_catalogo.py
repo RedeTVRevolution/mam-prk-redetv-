@@ -30,7 +30,7 @@ from api.correcoes import (
     decupagem_entregue,
     versao_do_modelo,
 )
-from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
+from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs, _confere_permissao
 from api.lixeira import (
     PRAZO_DA_PURGA,
     Envio,
@@ -152,6 +152,38 @@ def purgar_catalogo_vencido(
     return purgadas
 
 
+def decupagens_dos_jobs(
+    repositorio: RepositorioDeJobs,
+    correcoes: RepositorioDeCorrecoes,
+    decupagens: LeituraDeDecupagens,
+) -> Iterator[tuple[Job, dict[str, Any]]]:
+    """Cada vídeo concluído fora da lixeira com a Decupagem entregue; a que não lê é pulada."""
+    for job in repositorio.consultar(FiltroDeJobs()).jobs:
+        if job.estado != "concluido":
+            continue
+        try:
+            conteudo = b"".join(decupagens.abrir_decupagem(job.id))
+            entregue = decupagem_entregue(
+                json.loads(conteudo),
+                versao_do_modelo(conteudo),
+                correcoes.listar(job.id),
+            )
+        except Exception:  # noqa: BLE001 - uma Decupagem ruim não trava o impacto
+            log.warning("decupagem de %s não lida; fora do impacto", job.id)
+            continue
+        yield job, entregue
+
+
+def decupagens_entregues(
+    repositorio: RepositorioDeJobs,
+    correcoes: RepositorioDeCorrecoes,
+    decupagens: LeituraDeDecupagens,
+) -> Iterator[dict[str, Any]]:
+    """A Decupagem entregue de cada vídeo concluído fora da lixeira; a que não lê é pulada."""
+    for _job, entregue in decupagens_dos_jobs(repositorio, correcoes, decupagens):
+        yield entregue
+
+
 def criar_rotas_da_lixeira_do_catalogo(
     pessoas: Catalogo,
     marcas: CatalogoDeMarcas,
@@ -166,19 +198,7 @@ def criar_rotas_da_lixeira_do_catalogo(
     rotas = APIRouter(prefix="/admin/lixeira")
 
     def entregues() -> Iterator[dict[str, Any]]:
-        """A Decupagem entregue de cada vídeo concluído fora da lixeira; a que não lê é pulada."""
-        for job in repositorio.consultar(FiltroDeJobs()).jobs:
-            if job.estado != "concluido":
-                continue
-            try:
-                conteudo = b"".join(decupagens.abrir_decupagem(job.id))
-                yield decupagem_entregue(
-                    json.loads(conteudo),
-                    versao_do_modelo(conteudo),
-                    correcoes.listar(job.id),
-                )
-            except Exception:  # noqa: BLE001 - uma Decupagem ruim não trava o impacto
-                log.warning("decupagem de %s não lida; fora do impacto", job.id)
+        return decupagens_entregues(repositorio, correcoes, decupagens)
 
     def impacto_da_pessoa(id: str, fotos_dela: int) -> ImpactoDaPessoa:
         aparicoes = sum(
@@ -257,6 +277,9 @@ def criar_rotas_da_lixeira_do_catalogo(
         achada = pessoa(id_da_pessoa)
         if achada.lixeira is not None:
             raise HTTPException(409, "A pessoa já está na lixeira")
+        if achada.fundida is not None:
+            # Purgada, ela levaria o apontamento: a leitura deixaria de mostrar o destino.
+            raise HTTPException(422, "Esta pessoa foi fundida em outra: apague a outra")
         impacto = impacto_da_pessoa(achada.id, len(achada.rostos))
         # Rosto é dado sensível: as fotos saem já, sem esperar a purga, e não voltam.
         # Pela pasta da pessoa também: as fotos da web trocadas antes ficaram lá.

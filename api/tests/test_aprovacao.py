@@ -1,8 +1,6 @@
 from typing import Any
 
-from api.aprovacao import definir_aprovacao_main
 from api.correcoes import (
-    RepositorioDeAprovacaoEmMemoria,
     aplicar,
     historico,
 )
@@ -296,38 +294,6 @@ def test_aplicar_puro_ignora_pendente_e_recusada() -> None:
     assert c.exige_aprovacao
     assert aplicar(MODELO, VERSAO, [c])["pessoas"][0]["nome"] == "Ana Souza"
     assert [i.estado for i in historico([c])] == ["pendente"]
-
-
-def test_comando_grava_os_tipos_e_aceita_lista_vazia() -> None:
-    repo = RepositorioDeAprovacaoEmMemoria()
-    saida: list[str] = []
-
-    assert (
-        definir_aprovacao_main(["pauta.titulo, pessoa.renomear"], repo, saida.append)
-        == 0
-    )
-    assert repo.tipos() == {"pauta.titulo", "pessoa.renomear"}
-    assert definir_aprovacao_main([""], repo, saida.append) == 0
-    assert repo.tipos() == frozenset()
-
-
-def test_comando_recusa_tipo_desconhecido_sem_gravar() -> None:
-    repo = RepositorioDeAprovacaoEmMemoria(frozenset({"pauta.titulo"}))
-    saida: list[str] = []
-
-    assert definir_aprovacao_main(["pauta.foo"], repo, saida.append) == 2
-    assert repo.tipos() == {"pauta.titulo"}
-    assert "pauta.foo" in saida[0]
-    assert "pessoa.renomear" in saida[0]
-
-
-def test_comando_sem_argumento_mostra_o_uso() -> None:
-    saida: list[str] = []
-
-    assert (
-        definir_aprovacao_main([], RepositorioDeAprovacaoEmMemoria(), saida.append) == 2
-    )
-    assert "make definir-aprovacao" in saida[0]
 
 
 def test_aprovada_vale_a_partir_da_aprovacao_sobre_a_feita_enquanto_esperava() -> None:

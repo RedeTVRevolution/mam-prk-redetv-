@@ -26,6 +26,7 @@ from api.analise_por_janelas import analisar_video
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import transitar
 from api.decupagem import Video
+from api.eventos_do_job import jobs_do_ambiente
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.identificacao import TOLERANCIA_DA_FALA_MS
 from api.jobs import RepositorioDeJobs, agora_utc
@@ -35,7 +36,6 @@ from api.nuvem import (
     DecupagensStorage,
     JanelasStorage,
     LeiturasStorage,
-    RepositorioFirestore,
     TranscricoesStorage,
 )
 from api.progresso_das_janelas import JanelasDoJob
@@ -164,7 +164,7 @@ def main() -> None:
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
     executar(
         os.environ["JOB_ID"],
-        RepositorioFirestore(firestore.Client(project=projeto)),
+        jobs_do_ambiente(firestore.Client(project=projeto)),
         DecupagensStorage(
             ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
         ),

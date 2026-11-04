@@ -21,3 +21,5 @@ docs/design/referencia/
 .playwright-mcp/
 # Relatórios do make comparar-passadas (#248).
 comparacao-passadas/
+# Relatórios do make regressao (#254).
+regressao-da-versao/

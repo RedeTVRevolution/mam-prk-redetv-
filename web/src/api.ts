@@ -7,6 +7,12 @@ import { consultaDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
 import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
+import {
+  parametrosDoPainel,
+  type FiltrosDoPainel,
+  type OpcoesDoPainel,
+  type RelatorioDeAcessos,
+} from './painelDaDiretoria.ts'
 import { parametrosDoRelatorio } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
@@ -78,6 +84,10 @@ export interface ClienteDoJob {
   /** URL assinada do JPEG `arquivo` (`plano-0.jpg`) de um momento da decupagem. */
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
+  /** URL assinada para baixar o MP4; o download vai à auditoria (`video.baixado`). */
+  baixarVideo(): Promise<Reproducao>
+  /** O arquivo JSON da decupagem, pela rota do servidor que registra o download. */
+  baixarDecupagem(): Promise<Blob>
   /** As passadas de comparação do Job (exige `decupagem.ver`). */
   passadas(): Promise<ResumoDaPassada[]>
   /** O Job contra uma passada, com cada item marcado (igual, difere, só de um lado). */
@@ -124,6 +134,48 @@ export interface ClienteDeNomes {
   criar(catalogo: CatalogoDeNomes, nome: string): Promise<NomeDoCatalogo>
 }
 
+/** O efeito de fundir uma pessoa do catálogo em outra (`GET /v1/catalogo/pessoas/{origem}/fundir/impacto`). */
+export interface ImpactoDaFusao {
+  origem_nome: string
+  destino_nome: string
+  videos: number
+  aparicoes: number
+  fotos_apagadas: number
+}
+
+/** Fundir duas pessoas do catálogo (exige `catalogo.fundir`). */
+export interface ClienteDaFusao {
+  impacto(origemId: string, destinoId: string): Promise<ImpactoDaFusao>
+  /** A origem passa a apontar para o destino; as fotos de rosto dela são apagadas. */
+  fundir(origemId: string, destinoId: string, motivo: string): Promise<void>
+}
+
+/** O efeito de renomear uma pessoa em todos os vídeos (`POST .../renomear`; com `previa` nada muda). */
+export interface ImpactoDaRenomeacao {
+  nome_antigo: string
+  nome_novo: string
+  videos: number
+  momentos_afetados: number
+  previa: boolean
+}
+
+/** O andamento da reindexação depois de renomear: `falhou` espera `retomar`. */
+export interface AndamentoDaRenomeacao {
+  estado: 'em_andamento' | 'concluida' | 'falhou'
+  feitos: number
+  total: number
+  nome_antigo: string
+  nome_novo: string
+}
+
+/** Renomear uma pessoa do catálogo em todos os vídeos (exige `correcao.aprovar`). */
+export interface ClienteDaRenomeacao {
+  previa(pessoaId: string, nome: string): Promise<ImpactoDaRenomeacao>
+  renomear(pessoaId: string, nome: string): Promise<ImpactoDaRenomeacao>
+  andamento(pessoaId: string): Promise<AndamentoDaRenomeacao>
+  retomar(pessoaId: string): Promise<AndamentoDaRenomeacao>
+}
+
 /** Uma conta da administração (`/v1/admin/usuarios`). */
 export interface ContaDaLista {
   uid: string
@@ -164,6 +216,19 @@ export interface ClienteDeChaves {
   listar(): Promise<ChaveDaLista[]>
   emitir(corpo: { sistema: string; escopos: string[] }): Promise<ChaveEmitida>
   revogar(id: string): Promise<ChaveDaLista>
+}
+
+/** Um tipo de correção e se ele exige a aprovação do Curador (`/v1/admin/aprovacao`). */
+export interface RegraDeAprovacao {
+  tipo: string
+  nome: string
+  exige_aprovacao: boolean
+}
+
+/** As regras de aprovação (exige `aprovacao.definir`): a lista e a mudança de um tipo por vez. */
+export interface ClienteDeAprovacao {
+  listar(): Promise<RegraDeAprovacao[]>
+  mudar(tipo: string, exigeAprovacao: boolean): Promise<RegraDeAprovacao[]>
 }
 
 export type TipoDeItem = 'video' | 'pessoa' | 'marca'
@@ -235,13 +300,22 @@ export interface ClienteDaApi {
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
   tempoDeTelaEmCsv(filtros: FiltrosDoRelatorio): Promise<Blob>
+  /** `GET /v1/painel/filtros` (exige `painel.ver`): programas e usuários que os filtros do painel oferecem. */
+  opcoesDoPainel(): Promise<OpcoesDoPainel>
+  /** `GET /v1/painel/acessos`: logins por dia, usuários ativos, por usuário e no total. Sem programa. */
+  acessosDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeAcessos>
+  /** Os mesmos acessos em CSV, uma linha por dia e pessoa. */
+  acessosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
   /** `GET /v1/relatorios/marcas`: inserções, tempo e vídeos por marca e por tipo de inserção. */
   marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
   /** O mesmo relatório em CSV. */
   marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
   nomes: ClienteDeNomes
+  fusao: ClienteDaFusao
+  renomeacao: ClienteDaRenomeacao
   usuarios: ClienteDeUsuarios
   chaves: ClienteDeChaves
+  aprovacao: ClienteDeAprovacao
   lixeira: ClienteDaLixeira
   job(id: string): ClienteDoJob
 }
@@ -302,6 +376,8 @@ export function criarClienteDaApi(
       reproducao: () => chamar(`${base}/reproducao`),
       quadro: (arquivo) => chamar(`${base}/quadros/${encodeURIComponent(arquivo)}`),
       decupagem: () => chamar(`${base}/decupagem`),
+      baixarVideo: () => chamar(`${base}/download`),
+      baixarDecupagem: async () => (await pedir(`${base}/decupagem/download`)).blob(),
       passadas: () => chamar(`${base}/passadas`),
       comparacao: (passadaId) => chamar(`${base}/passadas/${encodeURIComponent(passadaId)}/comparacao`),
       fotosDoNome: (pessoaId) => chamar(`${base}/pessoas/${encodeURIComponent(pessoaId)}/referencias`),
@@ -387,6 +463,10 @@ export function criarClienteDaApi(
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
     tempoDeTelaEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),
+    opcoesDoPainel: () => chamar('/v1/painel/filtros'),
+    acessosDoPainel: (filtros) => chamar(`/v1/painel/acessos?${parametrosDoPainel(filtros, { semPrograma: true })}`),
+    acessosDoPainelEmCsv: async (filtros) =>
+      (await pedir(`/v1/painel/acessos?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
     marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
     marcasEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),
@@ -400,6 +480,25 @@ export function criarClienteDaApi(
         if (catalogo === 'tipos_de_objeto') return Promise.reject(new Error('Tipo de objeto não tem catálogo para criar.'))
         return chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } })
       },
+    },
+    fusao: {
+      impacto: (origemId, destinoId) =>
+        chamar(`/v1/catalogo/pessoas/${encodeURIComponent(origemId)}/fundir/impacto?destino_id=${encodeURIComponent(destinoId)}`),
+      fundir: async (origemId, destinoId, motivo) => {
+        await chamar(`/v1/catalogo/pessoas/${encodeURIComponent(origemId)}/fundir`, {
+          post: true,
+          corpo: { destino_id: destinoId, motivo },
+        })
+      },
+    },
+    renomeacao: {
+      previa: (pessoaId, nome) =>
+        chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear`, { post: true, corpo: { nome, previa: true } }),
+      renomear: (pessoaId, nome) =>
+        chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear`, { post: true, corpo: { nome, previa: false } }),
+      andamento: (pessoaId) => chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear/andamento`),
+      retomar: (pessoaId) =>
+        chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear/retomar`, { post: true }),
     },
     usuarios: {
       listar: () => chamar('/v1/admin/usuarios'),
@@ -416,6 +515,11 @@ export function criarClienteDaApi(
       listar: () => chamar('/v1/admin/chaves'),
       emitir: (corpo) => chamar('/v1/admin/chaves', { post: true, corpo }),
       revogar: (id) => chamar(`/v1/admin/chaves/${encodeURIComponent(id)}/revogar`, { post: true }),
+    },
+    aprovacao: {
+      listar: () => chamar('/v1/admin/aprovacao'),
+      mudar: (tipo, exigeAprovacao) =>
+        chamar('/v1/admin/aprovacao', { put: true, corpo: { tipo, exige_aprovacao: exigeAprovacao } }),
     },
     lixeira: {
       listar: () => chamar('/v1/admin/lixeira'),

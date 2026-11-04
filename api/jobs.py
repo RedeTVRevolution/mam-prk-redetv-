@@ -11,9 +11,9 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -34,7 +34,7 @@ from api.auth import (
     Usuario,
 )
 from api.catalogo import Catalogo, EnvioParaLixeira
-from api.catalogo_apagado import sem_catalogo_apagado
+from api.catalogo_apagado import com_pessoas_fundidas, sem_catalogo_apagado
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
@@ -73,6 +73,14 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
+from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
+from api.idempotencia import (
+    TAMANHO_MAXIMO_DA_CHAVE,
+    ChaveReusadaComOutroCorpo,
+    RepositorioDeIdempotencia,
+    RepositorioDeIdempotenciaEmMemoria,
+    impressao_do_corpo,
+)
 from api.marcas import CatalogoDeMarcas
 from api.papeis import (
     Papel,
@@ -96,6 +104,7 @@ TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
+VALIDADE_DO_DOWNLOAD = timedelta(minutes=5)
 # As fotos de referência são dado sensível (LGPD): o link vale pouco.
 VALIDADE_DA_FOTO = timedelta(minutes=5)
 PREFIXO_DAS_FOTOS = "referencias/"
@@ -297,6 +306,14 @@ def _etag(publico: JobPublico) -> str:
     return f'"{hashlib.sha256(conteudo).hexdigest()[:32]}"'
 
 
+def disposicao_do_nome(nome: str) -> str:
+    """O parâmetro `filename` do `Content-Disposition`: um nome em ASCII para os
+    navegadores antigos e o nome inteiro em UTF-8 (RFC 6266)."""
+    ascii_ = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode()
+    simples = re.sub(r"[^A-Za-z0-9._ -]", "_", ascii_)
+    return f"filename=\"{simples}\"; filename*=UTF-8''{quote(nome, safe='')}"
+
+
 def _casa_etag(if_none_match: str | None, etag: str) -> bool:
     """Comparação fraca do RFC 9110 §13.1.2: lista por vírgulas, `W/` ignorado, `*` casa."""
     if if_none_match is None:
@@ -306,7 +323,28 @@ def _casa_etag(if_none_match: str | None, etag: str) -> bool:
 
 
 class JobCriado(JobPublico):
-    url_de_upload: str
+    # `None` na repetição de um envio cujo upload já passou da espera.
+    url_de_upload: str | None
+
+
+AcaoDeDownload = Literal["video.baixado", "decupagem.baixada"]
+
+
+class AcessosAoVideo(Protocol):
+    """Porta para o registro de quem abriu e quem baixou o vídeo (`api.acessos`)."""
+
+    def abriu(self, chamador: Chamador, job: Job) -> None:
+        """Registra a abertura; no máximo uma por pessoa e vídeo a cada 30 minutos."""
+        ...
+
+    def baixou(
+        self,
+        chamador: Chamador,
+        job: Job,
+        acao: AcaoDeDownload,
+    ) -> None:
+        """Registra o download; `ServicoIndisponivel` se não gravou."""
+        ...
 
 
 class Reproducao(BaseModel):
@@ -465,6 +503,10 @@ class RepositorioDeJobs(Protocol):
 
     def salvar(self, job: Job) -> None: ...
 
+    def criar(self, job: Job) -> bool:
+        """Grava só se o id não existe; `False` se já existia (não regrava)."""
+        ...
+
     def obter(self, job_id: str) -> Job | None: ...
 
     def transitar(
@@ -514,6 +556,10 @@ class Armazenamento(Protocol):
         """URL assinada de leitura do proxy de reprodução, válida por `validade`."""
         ...
 
+    def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
+        """URL assinada de leitura da cópia limpa, que o navegador baixa como `nome`."""
+        ...
+
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         """URL assinada de leitura do JPEG de `caminho` (o campo `quadro` da Decupagem)."""
         ...
@@ -541,6 +587,9 @@ class RepositorioEmMemoria:
 
     def salvar(self, job: Job) -> None:
         self._jobs[job.id] = job
+
+    def criar(self, job: Job) -> bool:
+        return self._jobs.setdefault(job.id, job) is job
 
     def obter(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
@@ -594,6 +643,9 @@ class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
         raise ServicoIndisponivel
 
+    def criar(self, job: Job) -> bool:
+        raise ServicoIndisponivel
+
     def obter(self, job_id: str) -> Job | None:
         raise ServicoIndisponivel
 
@@ -625,6 +677,9 @@ class ArmazenamentoIndisponivel:
         raise ServicoIndisponivel
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
+        raise ServicoIndisponivel
+
+    def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
@@ -811,13 +866,21 @@ def criar_rotas(
     marcas: CatalogoDeMarcas,
     sugestoes: RepositorioDeSugestoes,
     reindexar: Callable[[Job], object],
+    acessos: AcessosAoVideo,
     tipos_de_objeto: Callable[[], list[str]] = list,
+    idempotencia: RepositorioDeIdempotencia | None = None,
+    eventos: Eventos | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
+    publicador = eventos or SemEventos()
+    chaves_de_idempotencia = idempotencia or RepositorioDeIdempotenciaEmMemoria()
 
     @rotas.post("", status_code=202)
     def criar(
-        novo: NovoJob, chamador: Annotated[Chamador, Depends(_exige("criar"))]
+        novo: NovoJob,
+        chamador: Annotated[Chamador, Depends(_exige("criar"))],
+        resposta: Response,
+        idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
@@ -832,8 +895,36 @@ def criar_rotas(
             and novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date()
         ):
             raise HTTPException(422, "Data de exibição no futuro")
+        job_id, nova = uuid.uuid4().hex, True
+        if idempotency_key is not None:
+            if not (
+                0 < len(idempotency_key) <= TAMANHO_MAXIMO_DA_CHAVE
+                and idempotency_key.isascii()
+                and idempotency_key.isprintable()
+            ):
+                raise HTTPException(422, "Idempotency-Key inválida")
+            # A reserva é de quem chama: o mesmo texto em outro sistema é outra chave.
+            escopo = (
+                f"sistema:{sistema}" if sistema is not None else f"pessoa:{criado_por}"
+            )
+            try:
+                reserva, nova = chaves_de_idempotencia.reservar(
+                    escopo,
+                    idempotency_key,
+                    impressao_do_corpo(novo.model_dump(mode="json")),
+                    job_id,
+                    agora,
+                )
+            except ChaveReusadaComOutroCorpo:
+                raise HTTPException(
+                    409, "Idempotency-Key já usada com outro corpo"
+                ) from None
+            # Só o id vem da reserva: a repetição que grava o Job (o processo caiu entre
+            # reservar e gravar) o cria com a hora de agora, para o prazo do upload
+            # contar de quando a URL é dada.
+            job_id = reserva.job_id
         job = Job(
-            id=uuid.uuid4().hex,
+            id=job_id,
             nome=novo.nome,
             tamanho_bytes=novo.tamanho_bytes,
             estado="aguardando_upload",
@@ -846,8 +937,29 @@ def criar_rotas(
             criado_em=agora,
             atualizado_em=agora,
         )
-        repositorio.salvar(job)
-        url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
+        # A repetição lê antes de gravar (muitas ao mesmo tempo brigariam pelo mesmo
+        # documento), e `criar` não regrava: a que chega antes de a primeira gravar não
+        # desfaz o estado do Job.
+        existente = None if nova else repositorio.obter(job.id)
+        if existente is not None:
+            job = existente
+        elif not repositorio.criar(job):
+            job = repositorio.obter(job.id) or job
+        else:
+            registrar(
+                publicador,
+                "envio",
+                quem_do_chamador(chamador),
+                agora,
+                job_id=job.id,
+                programa=job.programa,
+                tamanho_bytes=job.tamanho_bytes,
+            )
+        if not nova:
+            resposta.status_code = 200
+        url = None
+        if job.estado == "aguardando_upload":
+            url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
     def _com_capa(job: Job) -> JobPublico:
@@ -936,7 +1048,18 @@ def criar_rotas(
     ) -> Reproducao:
         job = obter_concluido(job_id, chamador)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
+        acessos.abriu(chamador, job)
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
+
+    @rotas.get("/{job_id}/download")
+    def baixar_video(
+        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+    ) -> Reproducao:
+        job = obter_concluido(job_id, chamador)
+        url = armazenamento.url_de_download(job.id, job.nome, VALIDADE_DO_DOWNLOAD)
+        # O registro vem antes da resposta: sem ele a URL não sai (503).
+        acessos.baixou(chamador, job, "video.baixado")
+        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
 
     @rotas.get("/{job_id}/quadros/{arquivo}")
     def quadro(
@@ -1010,6 +1133,18 @@ def criar_rotas(
     def _ler_correcoes(job_id: str) -> list[Correcao]:
         return correcoes.listar(job_id)
 
+    def _entregue(job: Job) -> dict[str, Any]:
+        """A Decupagem entregue, com as Correções aplicadas."""
+        modelo, versao_atual = _ler_modelo(job.id)
+        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
+        entregue = com_pessoas_fundidas(entregue, catalogo.obter)
+        entregue = sem_catalogo_apagado(
+            entregue,
+            lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
+            lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
+        )
+        return entregue
+
     @rotas.get("/{job_id}/decupagem")
     def decupagem(
         job_id: str,
@@ -1023,14 +1158,25 @@ def criar_rotas(
             # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
             pedacos = itertools.chain([next(pedacos, b"")], pedacos)
             return _resposta(pedacos, request)
-        modelo, versao_atual = _ler_modelo(job.id)
-        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
-        entregue = sem_catalogo_apagado(
-            entregue,
-            lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
-            lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
+        return _resposta(iter([json.dumps(_entregue(job)).encode()]), request)
+
+    @rotas.get("/{job_id}/decupagem/download")
+    def baixar_decupagem(
+        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+    ) -> Response:
+        job = obter_concluido(job_id, chamador)
+        # Indentado como o arquivo que a tela baixava (`web/src/baixar.ts`).
+        corpo = json.dumps(_entregue(job), indent=2, ensure_ascii=False).encode()
+        acessos.baixou(chamador, job, "decupagem.baixada")
+        nome = re.sub(r"\.mp4$", "", job.nome, flags=re.IGNORECASE) + ".decupagem.json"
+        return Response(
+            corpo,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; {disposicao_do_nome(nome)}",
+                "Cache-Control": "private, no-store",
+            },
         )
-        return _resposta(iter([json.dumps(entregue).encode()]), request)
 
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
         """Só a correção de quem não é Curador, num tipo da lista, espera decisão."""
@@ -1097,10 +1243,22 @@ def criar_rotas(
         job = obter_concluido(job_id, autor)
         modelo, versao_atual = _ler_modelo(job.id)
         correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
+        _registrar_correcao(autor, job, correcao)
         # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
         if not correcao.exige_aprovacao:
             reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
+
+    def _registrar_correcao(autor: Usuario, job: Job, correcao: Correcao) -> None:
+        registrar(
+            publicador,
+            "correcao",
+            quem_do_chamador(autor),
+            relogio(),
+            job_id=job.id,
+            programa=job.programa,
+            tipo_de_correcao=correcao.tipo,
+        )
 
     def _sugestoes_abertas(
         job: Job,
@@ -1157,6 +1315,7 @@ def criar_rotas(
         ]
         for correcao in gravadas:
             correcoes.acrescentar(correcao)
+            _registrar_correcao(autor, job, correcao)
         sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
         if any(not c.exige_aprovacao for c in gravadas):
             reindexar(job)
@@ -1213,6 +1372,7 @@ def criar_rotas(
                 "Correção já desfeita, saiu da fila, não é uma renomeação"
                 " ou não casa com a versão atual",
             ) from None
+        _registrar_correcao(autor, job, registro)
         reindexar(job)
         return {"id": registro.id}
 
@@ -1248,6 +1408,7 @@ def criar_rotas(
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
+        _registrar_correcao(autor, job, registro)
         reindexar(job)
         return {"id": registro.id}
 
@@ -1312,6 +1473,7 @@ def criar_rotas(
             raise HTTPException(404, "Correção não encontrada") from None
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
+        _registrar_correcao(autor, job, registro)
         if aprovada:
             reindexar(job)
         return {"id": registro.id}

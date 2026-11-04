@@ -16,7 +16,7 @@ import pytest
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import Aborted, AlreadyExists
 from google.auth import credentials as google_credentials
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
@@ -24,9 +24,10 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
-from api.catalogo import EnvioParaLixeira, PessoaInexistente
+from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
+from api.idempotencia import nova_reserva
 from api.jobs import (
     CursorInvalido,
     FiltroDeJobs,
@@ -36,6 +37,7 @@ from api.jobs import (
 )
 from api.marcas import MarcaInexistente, carregar_marcas
 from api.nuvem import (
+    TENTATIVAS_SOB_DISPUTA,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
@@ -45,10 +47,12 @@ from api.nuvem import (
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
+    RepositorioDeIdempotenciaFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
+    espera_sob_disputa,
 )
 from api.webhook import RegistroDeWebhook
 
@@ -352,6 +356,33 @@ def test_url_de_reproducao_devolve_o_proxy_por_get(
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_url_de_download_devolve_a_copia_limpa_como_anexo_com_o_nome(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    armazenamento._cliente.bucket(armazenamento._aceitos).blob(
+        "job1/copia_limpa.mp4"
+    ).upload_from_string(b"copia-bytes", content_type="video/mp4")
+
+    url = armazenamento.url_de_download(
+        "job1", 'Jornal "Ação"; 1.mp4', timedelta(minutes=5)
+    )
+
+    consulta = parse_qs(urlparse(url).query)
+    assert consulta["X-Goog-Expires"] == ["300"]
+    assert "teste-aceitos" in url and "job1/copia_limpa.mp4" in url
+    disposicao = (
+        'attachment; filename="Jornal _Acao__ 1.mp4"; '
+        "filename*=UTF-8''Jornal%20%22A%C3%A7%C3%A3o%22%3B%201.mp4"
+    )
+    assert consulta["response-content-disposition"] == [disposicao]
+    partes = urlparse(url)
+    resposta = requests.get(f"{EMULADOR_STORAGE}{partes.path}?{partes.query}")
+    assert resposta.status_code == 200
+    assert resposta.content == b"copia-bytes"
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
 def test_abrir_decupagem_le_o_json_em_pedacos(
     armazenamento: ArmazenamentoStorage,
 ) -> None:
@@ -605,7 +636,7 @@ class TestRepositorioDePapeisFirestore:
     def test_papel_desconhecido_no_documento_e_ignorado(
         self, papeis: RepositorioDePapeisFirestore
     ) -> None:
-        papeis._colecao.document("u1").set({"papeis": ["diretoria", "editor"]})
+        papeis._colecao.document("u1").set({"papeis": ["chefe", "editor"]})
 
         assert papeis.obter("u1") == ["editor"]
 
@@ -656,6 +687,16 @@ class TestRepositorioDeAprovacaoFirestore:
 
         aprovacao.definir(frozenset())
         assert aprovacao.tipos() == frozenset()
+
+    def test_mudar_um_tipo_nao_regrava_os_outros(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        aprovacao.mudar("pauta.titulo", True)
+        # A mudança de outra pessoa, em outro tipo, fica.
+        aprovacao.mudar("pessoa.renomear", True)
+        aprovacao.mudar("pauta.titulo", False)
+
+        assert aprovacao.tipos() == {"pessoa.renomear"}
 
     def test_tipo_desconhecido_no_documento_e_ignorado(
         self, aprovacao: RepositorioDeAprovacaoFirestore
@@ -940,6 +981,29 @@ class TestCatalogoFirestore:
         with pytest.raises(PessoaInexistente):
             catalogo.definir_lixeira("inexistente", envio)
 
+    def test_fundida_sai_da_busca_e_aponta_para_o_destino(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        origem = catalogo.acrescentar("Sabrina S.", "", [])
+        destino = catalogo.acrescentar("Sabrina Sato", "apresentadora", [])
+        fusao = FusaoDaPessoa(
+            destino_id=destino.id,
+            em=BASE,
+            por_uid="u1",
+            por_email="c@redetv.com",
+            motivo="nome duplicado",
+        )
+
+        catalogo.definir_fusao(origem.id, fusao)
+
+        assert catalogo.todas() == [destino]
+        assert catalogo.achar("sabrina s") == []
+        assert catalogo.na_lixeira() == []
+        lida = catalogo.obter(origem.id)
+        assert lida is not None and lida.fundida == fusao
+        with pytest.raises(PessoaInexistente):
+            catalogo.definir_fusao("inexistente", fusao)
+
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, catalogo: CatalogoFirestore
     ) -> None:
@@ -1112,6 +1176,13 @@ class TestRepositorioDeAuditoriaFirestore:
             FiltroDeAuditoria(alvo_id="v1", acao="item.para_lixeira")
         )
         assert [r.id for r in por_alvo.registros] == ["c"]
+        varias = auditoria.consultar(
+            FiltroDeAuditoria(
+                alvo_id="v1", acoes=("item.para_lixeira", "chave.emitida"), limite=1
+            )
+        )
+        assert [r.id for r in varias.registros] == ["c"]
+        assert varias.proximo_cursor is not None
         periodo = auditoria.consultar(
             FiltroDeAuditoria(
                 de=BASE + timedelta(minutes=5), ate=BASE + timedelta(minutes=15)
@@ -1136,3 +1207,173 @@ class TestRepositorioDeAuditoriaFirestore:
     ) -> None:
         with pytest.raises(CursorInvalido):
             auditoria.consultar(FiltroDeAuditoria(cursor="nada"))
+
+
+class _ClienteSemRede:
+    """Só o que `RepositorioFirestore` usa fora da transação; a transação é do teste."""
+
+    def __init__(self, colecao: object = None) -> None:
+        self._colecao = colecao
+
+    def collection(self, nome: str) -> object:
+        return self._colecao
+
+    def transaction(self) -> object:
+        return object()
+
+
+def _esgotou_as_tentativas() -> ValueError:
+    erro = ValueError("Failed to commit transaction in 5 attempts.")
+    erro.__cause__ = Aborted("disputa")  # type: ignore[no-untyped-call]
+    return erro
+
+
+def test_sob_disputa_repete_quando_o_firestore_esgota_as_tentativas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    repositorio = RepositorioFirestore(_ClienteSemRede())  # type: ignore[arg-type]
+    chamadas = 0
+
+    def na_transacao(_: Any) -> Job | None:
+        nonlocal chamadas
+        chamadas += 1
+        if chamadas < 3:
+            raise _esgotou_as_tentativas()
+        return None
+
+    assert repositorio._sob_disputa(na_transacao) is None
+    assert chamadas == 3
+
+
+def test_sob_disputa_sem_fim_e_servico_indisponivel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    repositorio = RepositorioFirestore(_ClienteSemRede())  # type: ignore[arg-type]
+
+    def na_transacao(_: Any) -> Job | None:
+        raise _esgotou_as_tentativas()
+
+    with pytest.raises(ServicoIndisponivel):
+        repositorio._sob_disputa(na_transacao)
+
+
+def test_espera_sob_disputa_dobra_a_cada_rodada_ate_o_teto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Com o sorteio no máximo, a espera é o limite da rodada.
+    monkeypatch.setattr("api.nuvem.random.uniform", lambda _a, b: b)
+    esperas = [espera_sob_disputa(r) for r in range(TENTATIVAS_SOB_DISPUTA)]
+    assert esperas == [0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.0, 1.0]
+
+
+def test_sob_disputa_nao_repete_outro_value_error() -> None:
+    repositorio = RepositorioFirestore(_ClienteSemRede())  # type: ignore[arg-type]
+    chamadas = 0
+
+    def na_transacao(_: Any) -> Job | None:
+        nonlocal chamadas
+        chamadas += 1
+        raise ValueError("Job inválido")
+
+    with pytest.raises(ValueError, match="Job inválido"):
+        repositorio._sob_disputa(na_transacao)
+    assert chamadas == 1
+
+
+class _ColecaoQueAborta:
+    """`create` aborta as primeiras vezes (documento travado) e depois responde."""
+
+    def __init__(self, abortos: int, depois: Exception | None) -> None:
+        self._abortos = abortos
+        self._depois = depois
+        self.criacoes = 0
+
+    def document(self, _: str) -> "_ColecaoQueAborta":
+        return self
+
+    def create(self, _: dict[str, Any]) -> None:
+        self.criacoes += 1
+        if self._abortos:
+            self._abortos -= 1
+            raise Aborted("travado")  # type: ignore[no-untyped-call]
+        if self._depois is not None:
+            raise self._depois
+
+
+def _job_novo() -> Job:
+    agora = datetime(2026, 11, 4, tzinfo=UTC)
+    return Job(
+        id="j1",
+        nome="a.mp4",
+        tamanho_bytes=10,
+        estado="aguardando_upload",
+        criado_por="sistema:Legado A",
+        sistema="Legado A",
+        criado_em=agora,
+        atualizado_em=agora,
+    )
+
+
+@pytest.mark.parametrize(
+    ("depois", "gravou"),
+    [(None, True), (AlreadyExists("existe"), False)],  # type: ignore[no-untyped-call]
+)
+def test_criar_abortado_repete_ate_saber_se_gravou(
+    monkeypatch: pytest.MonkeyPatch, depois: Exception | None, gravou: bool
+) -> None:
+    # `Aborted` não diz que outro gravou: devolver `False` aí faria a rota responder
+    # com um Job que não existe.
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    colecao = _ColecaoQueAborta(abortos=2, depois=depois)
+    repositorio = RepositorioFirestore(_ClienteSemRede(colecao))  # type: ignore[arg-type]
+
+    assert repositorio.criar(_job_novo()) is gravou
+    assert colecao.criacoes == 3
+
+
+class _DocumentoDaReservaVencida:
+    """A reserva existe e venceu: `create` dá `AlreadyExists` e a leitura a devolve."""
+
+    def __init__(self, reserva: dict[str, Any]) -> None:
+        self._reserva = reserva
+
+    def document(self, _: str) -> "_DocumentoDaReservaVencida":
+        return self
+
+    def create(self, _: dict[str, Any]) -> None:
+        raise AlreadyExists("existe")  # type: ignore[no-untyped-call]
+
+    def get(self, **_: Any) -> Any:
+        return type("Doc", (), {"exists": True, "to_dict": lambda _: self._reserva})()
+
+
+def test_troca_da_reserva_vencida_repete_quando_o_firestore_esgota_as_tentativas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Várias repetições na mesma reserva vencida disputam a transação da troca.
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    agora = datetime(2026, 11, 4, tzinfo=UTC)
+    vencida = nova_reserva("imp", "velho", agora - timedelta(hours=49))
+    repositorio = RepositorioDeIdempotenciaFirestore(
+        _ClienteSemRede(_DocumentoDaReservaVencida(vencida.model_dump()))  # type: ignore[arg-type]
+    )
+    chamadas = 0
+
+    def transacional(funcao: Any) -> Any:
+        def na_transacao(transacao: Any) -> Any:
+            nonlocal chamadas
+            chamadas += 1
+            if chamadas < 3:
+                raise _esgotou_as_tentativas()
+            return (nova_reserva("imp", "novo", agora), True)
+
+        return na_transacao
+
+    monkeypatch.setattr("api.nuvem.firestore.transactional", transacional)
+
+    reserva, nova = repositorio.reservar("sistema:Legado A", "k1", "imp", "novo", agora)
+
+    assert (reserva.job_id, nova) == ("novo", True)
+    assert chamadas == 3

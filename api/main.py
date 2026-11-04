@@ -1,9 +1,12 @@
 import os
-from collections.abc import Callable
+import threading
+import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
@@ -12,7 +15,9 @@ from starlette.exceptions import HTTPException as ExcecaoHttp
 from starlette.responses import Response
 from starlette.types import Scope
 
+from api.acessos import AcessosNaAuditoria
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.aprovacao import criar_rotas_da_aprovacao
 from api.auditoria import (
     RepositorioDeAuditoria,
     RepositorioDeAuditoriaEmMemoria,
@@ -38,7 +43,6 @@ from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.chaves import (
     Mac,
-    MacSimulado,
     RepositorioDeChaves,
     VerificadorDeChaveDeApi,
 )
@@ -54,13 +58,24 @@ from api.correcoes import (
 from api.decupagem import Decupagem
 from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
+from api.eventos_de_uso import (
+    Eventos,
+    EventosEmSegundoPlano,
+    SemEventos,
+    quem_do_chamador,
+    registrar,
+)
+from api.eventos_do_job import eventos_do_ambiente
+from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Chamada, ErroHttp, Transporte
+from api.idempotencia import RepositorioDeIdempotencia
 from api.indexacao import reindexar
 from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
     Armazenamento,
     ArmazenamentoIndisponivel,
+    Job,
     RepositorioDeJobs,
     RepositorioIndisponivel,
     ServicoIndisponivel,
@@ -82,6 +97,7 @@ from api.lixeira_do_catalogo import (
     FotosEmMemoria,
     criar_rotas_da_lixeira_do_catalogo,
 )
+from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
     ArmazenamentoStorage,
@@ -96,12 +112,14 @@ from api.nuvem import (
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
+    RepositorioDeIdempotenciaFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeRevisaoFirestore,
     RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
 )
+from api.painel import AcessosAoPainel, criar_rotas_do_painel
 from api.papeis import (
     Papel,
     Permissao,
@@ -124,11 +142,13 @@ from api.relatorio_de_marcas import (
     criar_rotas_das_marcas,
 )
 from api.relatorio_de_marcas import consulta_do_ambiente as marcas_do_ambiente
+from api.renomeacao_de_pessoas import criar_rotas_da_renomeacao
 from api.reprocessamento import (
     DisparoDoWorkflow,
     DisparoIndisponivel,
     criar_rotas_do_reprocessamento,
 )
+from api.resumos_de_uso import ResumosDeUso, resumos_do_ambiente
 from api.revisao import (
     LIMITE_DE_INATIVIDADE_S,
     RepositorioDeRevisao,
@@ -218,6 +238,33 @@ class _FrontComEnderecos(StaticFiles):
             return await super().get_response("index.html", scope)
 
 
+# A rota da chamada de API que não casou com nenhuma rota da API.
+ROTA_DESCONHECIDA = "(sem rota)"
+
+# Um login mais velho que isto já foi visto pela sessão: não é evento novo.
+LOGIN_NOVO = timedelta(minutes=5)
+
+
+class _LoginsPublicados:
+    """Os últimos logins já publicados por esta instância, para não repetir o evento
+    a cada recarga. Outra instância pode repetir: o id é o mesmo, e quem lê a tabela
+    descarta a repetida."""
+
+    def __init__(self, tamanho: int = 1000) -> None:
+        self._vistos: dict[str, None] = {}
+        self._tamanho = tamanho
+        self._trava = threading.Lock()
+
+    def novo(self, id_do_login: str) -> bool:
+        with self._trava:
+            if id_do_login in self._vistos:
+                return False
+            self._vistos[id_do_login] = None
+            if len(self._vistos) > self._tamanho:
+                self._vistos.pop(next(iter(self._vistos)))
+            return True
+
+
 class UsuarioComPapeis(Usuario):
     papeis: list[Papel]
     permissoes: list[Permissao]
@@ -250,6 +297,7 @@ def criar_app(
     embedding_da_consulta: EmbeddingDaConsulta | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
+    resumos_de_uso: ResumosDeUso | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
@@ -262,6 +310,9 @@ def criar_app(
     limite_de_inatividade_s: float = LIMITE_DE_INATIVIDADE_S,
     login_recente: timedelta = LOGIN_RECENTE_PADRAO,
     relogio: Callable[[], datetime] = agora_utc,
+    rotas_do_push: APIRouter | None = None,
+    idempotencia: RepositorioDeIdempotencia | None = None,
+    eventos: Eventos | None = None,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV")
@@ -281,7 +332,55 @@ def criar_app(
     app.state.chaves = chaves or _SemChaves()
     app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
     app.state.admins = admins_de(admins_emergencia)
+    publicador = eventos or SemEventos()
+    logins_publicados = _LoginsPublicados()
+
+    # Antes da autenticação na ordem de registro, logo depois dela na execução: o
+    # chamador já está em `request.state`.
+    async def _registrar_chamada_de_api(
+        request: Request, seguinte: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        resposta = await seguinte(request)
+        chamador = getattr(request.state, "chamador", None)
+        if isinstance(chamador, Sistema):
+            # O caminho da rota, com `{job_id}` em vez do valor, e com o prefixo.
+            rota = getattr(request.scope.get("route"), "path", None)
+            if rota is not None and not rota.startswith(PREFIXO_PROTEGIDO):
+                rota = PREFIXO_PROTEGIDO + rota
+            await run_in_threadpool(
+                registrar,
+                publicador,
+                "chamada_de_api",
+                quem_do_chamador(chamador),
+                relogio(),
+                metodo=request.method,
+                # Sem rota casada (404), o caminho levaria os valores: vai o marcador.
+                rota=rota or ROTA_DESCONHECIDA,
+                status=resposta.status_code,
+            )
+        return resposta
+
+    app.middleware("http")(_registrar_chamada_de_api)
     app.middleware("http")(exigir_autenticacao)
+
+    def _registrar_login(pessoa: Usuario) -> None:
+        """O que a API vê do login: a primeira chamada de `/eu` depois dele, que o front
+        faz ao abrir a sessão. O id vem do uid e do momento do login, então a recarga da
+        página não vira outro evento."""
+        entrou = pessoa.login_em
+        if entrou is None or relogio() - entrou > LOGIN_NOVO:
+            return
+        id_do_login = uuid.uuid5(
+            uuid.NAMESPACE_URL, f"login:{pessoa.uid}:{entrou.isoformat()}"
+        ).hex
+        if logins_publicados.novo(id_do_login):
+            registrar(
+                publicador,
+                "login",
+                quem_do_chamador(pessoa),
+                entrou,
+                id=id_do_login,
+            )
 
     @app.get(CAMINHO_HEALTH)
     def health() -> dict[str, str]:
@@ -295,6 +394,7 @@ def criar_app(
     ) -> UsuarioComPapeis | Sistema:
         if isinstance(chamador, Sistema):
             return chamador
+        _registrar_login(chamador)
         efetivos = papeis_da_pessoa(request, chamador)
         return UsuarioComPapeis(
             **chamador.model_dump(),
@@ -320,8 +420,10 @@ def criar_app(
     tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
+    repositorio_de_aprovacao = aprovacao or RepositorioDeAprovacaoEmMemoria()
     v1.include_router(
         criar_rotas(
             repositorio_de_jobs,
@@ -329,7 +431,7 @@ def criar_app(
             tamanho_maximo_bytes,
             relogio,
             repositorio_de_correcoes,
-            aprovacao or RepositorioDeAprovacaoEmMemoria(),
+            repositorio_de_aprovacao,
             catalogo_de_pessoas,
             catalogo_de_marcas,
             repositorio_de_sugestoes,
@@ -344,8 +446,12 @@ def criar_app(
                 embedding,
                 armazenamento_dos_jobs,
                 tipos_de_objeto=tipos_dos_objetos,
+                pessoas=catalogo_de_pessoas.obter,
             ),
+            AcessosNaAuditoria(repositorio_de_auditoria, relogio),
             tipos_dos_objetos.conhecidos,
+            idempotencia,
+            publicador,
         )
     )
     leitura_de_passadas = passadas or PassadasEmMemoria()
@@ -363,8 +469,59 @@ def criar_app(
     )
     v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
+
+    def _reindexar_para_a_renomeacao(job: Job) -> bool:
+        indexacao = reindexar(
+            job,
+            repositorio_de_jobs,
+            armazenamento_dos_jobs,
+            repositorio_de_correcoes,
+            indice_da_busca,
+            relogio,
+            copia,
+            embedding,
+            armazenamento_dos_jobs,
+            tipos_de_objeto=tipos_dos_objetos,
+            pessoas=catalogo_de_pessoas.obter,
+        )
+        return indexacao is not None and indexacao.estado == "indexado"
+
+    def _rotas_das_pessoas(descartar: Callable[[], None]) -> APIRouter:
+        """Fundir (#209) e renomear em todos os vídeos (#263), sob `/catalogo`."""
+        rotas = APIRouter()
+        rotas.include_router(
+            criar_rotas_da_fusao(
+                catalogo_de_pessoas,
+                repositorio_de_jobs,
+                repositorio_de_correcoes,
+                armazenamento_dos_jobs,
+                fotos_de_referencia or FotosEmMemoria(),
+                repositorio_de_auditoria,
+                relogio,
+                descartar,
+            )
+        )
+        rotas.include_router(
+            criar_rotas_da_renomeacao(
+                catalogo_de_pessoas,
+                repositorio_de_jobs,
+                repositorio_de_correcoes,
+                armazenamento_dos_jobs,
+                repositorio_de_auditoria,
+                relogio,
+                _reindexar_para_a_renomeacao,
+                descartar,
+            )
+        )
+        return rotas
+
     v1.include_router(
-        criar_rotas_do_catalogo(catalogo_de_pessoas, catalogo_de_marcas, relogio)
+        criar_rotas_do_catalogo(
+            catalogo_de_pessoas,
+            catalogo_de_marcas,
+            relogio,
+            _rotas_das_pessoas,
+        )
     )
     v1.include_router(
         criar_rotas_da_busca(
@@ -384,10 +541,17 @@ def criar_app(
             busca_por_minuto,
             tempo_maximo_da_busca_s,
             limites_da_imagem,
+            publicador,
         )
     )
-    repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
+    v1.include_router(
+        criar_rotas_do_painel(
+            resumos_de_uso,
+            contas or ContasIndisponiveis(),
+            AcessosAoPainel(repositorio_de_auditoria, relogio),
+        )
+    )
     v1.include_router(
         criar_rotas_dos_usuarios(
             contas or ContasIndisponiveis(),
@@ -401,6 +565,13 @@ def criar_app(
         criar_rotas_das_chaves(
             repositorio_de_chaves or ChaveIndisponivel(),
             mac or MacIndisponivel(),
+            repositorio_de_auditoria,
+            relogio,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_aprovacao(
+            repositorio_de_aprovacao,
             repositorio_de_auditoria,
             relogio,
         )
@@ -483,6 +654,9 @@ def criar_app(
     app.include_router(
         v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]
     )
+    # Fora de `/v1`, com o token do Pub/Sub em vez do de pessoa ou sistema.
+    if rotas_do_push is not None:
+        app.include_router(rotas_do_push)
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
     return app
@@ -490,7 +664,6 @@ def criar_app(
 
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
-_chave_mac = os.environ.get("MAC_SIMULADO_CHAVE")
 if _projeto:
     _adaptadores = adaptadores_da_busca(os.environ)
     _busca = (
@@ -513,9 +686,14 @@ if _projeto:
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
-        # Até a chave MAC do Cloud KMS chegar, só a simulada (como no `make emitir-chave`).
-        # Sem ela, emitir dá 503 e a API não aceita chave de sistema; listar e revogar
-        # funcionam.
+        # O evento de uso sai fora da resposta: o Pub/Sub lento não atrasa a ação.
+        eventos=EventosEmSegundoPlano(eventos_do_ambiente(os.environ)),
+        # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
+        # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
+        # sistema; listar e revogar funcionam.
+        idempotencia=RepositorioDeIdempotenciaFirestore(
+            firestore.Client(project=_projeto)
+        ),
         repositorio_de_chaves=RepositorioDeChavesFirestore(
             firestore.Client(project=_projeto)
         ),
@@ -524,11 +702,7 @@ if _projeto:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        mac=(
-            MacSimulado({1: bytes.fromhex(_chave_mac)}, versao_atual=1)
-            if _chave_mac
-            else None
-        ),
+        mac=mac_do_ambiente(os.environ),
         revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
@@ -563,6 +737,7 @@ if _projeto:
             ),
         ),
         tempo_de_tela=consulta_do_ambiente(os.environ),
+        resumos_de_uso=resumos_do_ambiente(os.environ),
         relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),

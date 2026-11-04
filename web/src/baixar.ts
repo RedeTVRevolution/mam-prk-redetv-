@@ -1,9 +1,14 @@
-/** Entrega a decupagem como arquivo `<nome>.decupagem.json`. */
-export function baixarDecupagem(nome: string, decupagem: unknown) {
-  const blob = new Blob([JSON.stringify(decupagem, null, 2)], {
-    type: 'application/json',
-  })
-  baixarArquivo(`${nome.replace(/\.mp4$/i, '')}.decupagem.json`, blob)
+/** Entrega a decupagem (o arquivo que o servidor mandou) como `<nome>.decupagem.json`. */
+export function baixarDecupagem(nome: string, arquivo: Blob) {
+  baixarArquivo(`${nome.replace(/\.mp4$/i, '')}.decupagem.json`, arquivo)
+}
+
+/** Inicia o download por uma URL assinada (`Content-Disposition: attachment`), sem sair da página. */
+export function baixarPelaUrl(url: string) {
+  const ancora = document.createElement('a')
+  ancora.href = url
+  ancora.download = ''
+  ancora.click()
 }
 
 /** Entrega um CSV (ou outro arquivo já pronto) com o nome dado. */

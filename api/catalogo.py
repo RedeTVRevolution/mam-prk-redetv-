@@ -38,6 +38,32 @@ class EnvioParaLixeira(BaseModel):
     motivo: str
 
 
+class FusaoDaPessoa(BaseModel):
+    """A pessoa fundida em outra (#209): quando, por quem, por quê e para quem aponta."""
+
+    destino_id: str
+    em: datetime
+    por_uid: str
+    por_email: str
+    motivo: str
+
+
+class RenomeacaoDaPessoa(BaseModel):
+    """A última renomeação em todos os vídeos (#263): de onde veio o nome e o andamento da
+    reindexação. `pendentes` são os vídeos que ainda faltam reindexar; a troca é refeita
+    até esvaziar. `nomes_anteriores` guarda todos os nomes que a pessoa já teve."""
+
+    nome_antigo: str
+    nome_novo: str
+    nomes_anteriores: list[str]
+    em: datetime
+    por_uid: str
+    por_email: str
+    total: int
+    pendentes: list[str]
+    estado: Literal["em_andamento", "concluida", "falhou"]
+
+
 class PessoaDoCatalogo(BaseModel):
     id: str
     nome: str
@@ -49,10 +75,19 @@ class PessoaDoCatalogo(BaseModel):
     acrescentada_por: str | None = None
     # Na lixeira (#151): some do autocompletar e da busca por nome; fica até a purga.
     lixeira: EnvioParaLixeira | None = None
+    # Fundida em outra (#209): aponta para o destino e sai das buscas e do autocompletar.
+    fundida: FusaoDaPessoa | None = None
+    # Renomeada em todos os vídeos (#263): a leitura troca os nomes antigos pelo atual.
+    renomeacao: RenomeacaoDaPessoa | None = None
 
 
 class PessoaInexistente(Exception):
     """Nenhuma pessoa do catálogo tem o id pedido."""
+
+
+def visivel(pessoa: PessoaDoCatalogo) -> bool:
+    """Entra nas buscas e no autocompletar: fora da lixeira e não fundida em outra."""
+    return pessoa.lixeira is None and pessoa.fundida is None
 
 
 def nomes_de_busca(pessoa: PessoaDoCatalogo) -> list[str]:
@@ -66,11 +101,11 @@ class Catalogo(Protocol):
     def obter(self, id: str) -> PessoaDoCatalogo | None: ...
 
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        """As pessoas (fora da lixeira) cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
+        """As pessoas (fora da lixeira e não fundidas) cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
         ...
 
     def todas(self) -> list[PessoaDoCatalogo]:
-        """As pessoas que não estão na lixeira."""
+        """As pessoas que não estão na lixeira nem foram fundidas em outra."""
         ...
 
     def na_lixeira(self) -> list[PessoaDoCatalogo]: ...
@@ -79,6 +114,16 @@ class Catalogo(Protocol):
         self, id: str, envio: EnvioParaLixeira | None
     ) -> PessoaDoCatalogo:
         """Manda para a lixeira (ou, com `None`, tira); `PessoaInexistente` se o id não existe."""
+        ...
+
+    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
+        """Marca a pessoa como fundida no destino (ou, com `None`, desfaz); `PessoaInexistente` se o id não existe."""
+        ...
+
+    def definir_renomeacao(
+        self, id: str, renomeacao: RenomeacaoDaPessoa | None
+    ) -> PessoaDoCatalogo:
+        """Grava o andamento da renomeação (ou, com `None`, limpa); `PessoaInexistente` se o id não existe."""
         ...
 
     def acrescentar(
@@ -192,7 +237,7 @@ class CatalogoEmMemoria:
         return [p for p in self.todas() if chave in nomes_de_busca(p)]
 
     def todas(self) -> list[PessoaDoCatalogo]:
-        return [p for p in self._pessoas.values() if p.lixeira is None]
+        return [p for p in self._pessoas.values() if visivel(p)]
 
     def na_lixeira(self) -> list[PessoaDoCatalogo]:
         return [p for p in self._pessoas.values() if p.lixeira is not None]
@@ -204,6 +249,22 @@ class CatalogoEmMemoria:
         if atual is None:
             raise PessoaInexistente(id)
         self._pessoas[id] = atual.model_copy(update={"lixeira": envio})
+        return self._pessoas[id]
+
+    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
+        atual = self._pessoas.get(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        self._pessoas[id] = atual.model_copy(update={"fundida": fusao})
+        return self._pessoas[id]
+
+    def definir_renomeacao(
+        self, id: str, renomeacao: RenomeacaoDaPessoa | None
+    ) -> PessoaDoCatalogo:
+        atual = self._pessoas.get(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        self._pessoas[id] = atual.model_copy(update={"renomeacao": renomeacao})
         return self._pessoas[id]
 
     def acrescentar(

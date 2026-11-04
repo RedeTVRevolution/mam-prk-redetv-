@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import App from './App.tsx'
-import { ACOES_DA_AUDITORIA, FRASE_DA_ACAO } from './auditoria.ts'
+import { ACOES_DA_AUDITORIA, detalhesEmFrases, FRASE_DA_ACAO } from './auditoria.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 import { render } from './render-teste.tsx'
 
@@ -21,6 +21,14 @@ const ACOES_DA_API = [
   'item.purgado',
   'video.reprocessado',
   'job.estado_corrigido',
+  'video.aberto',
+  'video.baixado',
+  'decupagem.baixada',
+  'pessoa.fundida',
+  'pessoa.renomeada',
+  'aprovacao.alterada',
+  'painel.aberto',
+  'painel.exportado',
 ]
 
 interface Registro {
@@ -132,6 +140,44 @@ test('cada ação da lista fechada tem frase, e só ela', () => {
   expect(FRASE_DA_ACAO['item.para_lixeira']).toBe('Mandou para a lixeira')
   expect(FRASE_DA_ACAO['papeis.alterados']).toBe('Trocou os papéis')
   expect(FRASE_DA_ACAO['chave.revogada']).toBe('Revogou a chave')
+  expect(FRASE_DA_ACAO['video.aberto']).toBe('Abriu o vídeo')
+  expect(FRASE_DA_ACAO['video.baixado']).toBe('Baixou o vídeo')
+  expect(FRASE_DA_ACAO['decupagem.baixada']).toBe('Baixou a decupagem')
+  expect(FRASE_DA_ACAO['pessoa.fundida']).toBe('Fundiu pessoas')
+  expect(FRASE_DA_ACAO['aprovacao.alterada']).toBe('Mudou a regra de aprovação')
+  expect(FRASE_DA_ACAO['painel.aberto']).toBe('Abriu o painel da diretoria')
+  expect(FRASE_DA_ACAO['painel.exportado']).toBe('Exportou o painel da diretoria em CSV')
+})
+
+test('a abertura e a exportação do painel mostram o filtro', () => {
+  const acesso = (acao: 'painel.aberto' | 'painel.exportado', filtro: Record<string, unknown>) =>
+    detalhesEmFrases({
+      id: 'r',
+      quando: '2026-11-04T12:00:00Z',
+      acao,
+      alvo_tipo: 'painel',
+      alvo_id: 'diretoria',
+      alvo_nome: 'Painel da diretoria',
+      email: 'ana@redetv.com.br',
+      detalhes: { filtro },
+    })
+  expect(acesso('painel.aberto', { de: '2026-10-01', programa: 'Hoje' })).toEqual(['Filtro: de 2026-10-01, programa Hoje'])
+  expect(acesso('painel.exportado', {})).toEqual(['Filtro: nenhum'])
+})
+
+test('a mudança da regra de aprovação diz se passou a exigir ou deixou de exigir', () => {
+  const mudanca = (antes: boolean, depois: boolean) =>
+    detalhesEmFrases({
+      id: 'r',
+      quando: '2026-11-04T12:00:00Z',
+      acao: 'aprovacao.alterada',
+      alvo_tipo: 'tipo_de_correcao',
+      alvo_id: 'pessoa.renomear',
+      alvo_nome: 'Nome',
+      detalhes: { antes, depois },
+    })
+  expect(mudanca(false, true)).toEqual(['Passou a exigir aprovação do Curador'])
+  expect(mudanca(true, false)).toEqual(['Deixou de exigir aprovação do Curador'])
 })
 
 test('a tabela mostra quando, quem, ação em frase, alvo e motivo', async () => {
@@ -175,6 +221,33 @@ test('os filtros vão para a API e para a URL', async () => {
     expect(ultima.get('alvo')).toBe('j1')
     expect(ultima.get('acao')).toBe('chave.revogada')
   })
+})
+
+test('o filtro de ação agrupa os acessos e manda as três ações à API', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/admin/auditoria?alvo=j1&acao=video.aberto,video.baixado,decupagem.baixada')
+  await linhaDe('TV Fama')
+  await waitFor(() => expect(consultas.at(-1)!.getAll('acao')).toEqual(['video.aberto', 'video.baixado', 'decupagem.baixada']))
+  expect((screen.getByRole('combobox', { name: 'Ação' }) as HTMLInputElement).value).toBe('Todos os acessos')
+
+  await usuario.click(screen.getByRole('combobox', { name: 'Ação' }))
+  const lista = screen.getByRole('listbox')
+  expect(within(lista).getByText('Acessos')).toBeTruthy()
+  for (const nome of ['Abriu o vídeo', 'Baixou o vídeo', 'Baixou a decupagem']) expect(within(lista).getByRole('option', { name: nome })).toBeTruthy()
+})
+
+test('os acessos em outra ordem na URL ainda aparecem no campo Ação; duas ações soltas saem do filtro', async () => {
+  await abrir('/admin/auditoria?alvo=j1&acao=decupagem.baixada,video.aberto,video.baixado,video.aberto')
+  await linhaDe('TV Fama')
+  expect((screen.getByRole('combobox', { name: 'Ação' }) as HTMLInputElement).value).toBe('Todos os acessos')
+  expect(consultas.at(-1)!.getAll('acao')).toHaveLength(3)
+
+  cleanup()
+  consultas.length = 0
+  await abrir('/admin/auditoria?alvo=j1&acao=video.aberto,video.baixado')
+  await linhaDe('TV Fama')
+  expect(consultas.at(-1)!.getAll('acao')).toEqual([])
+  expect((screen.getByRole('combobox', { name: 'Ação' }) as HTMLInputElement).value).toBe('Todas as ações')
 })
 
 test('o período vai à API como dia inteiro de São Paulo', async () => {

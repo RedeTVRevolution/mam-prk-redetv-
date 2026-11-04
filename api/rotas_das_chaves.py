@@ -55,6 +55,9 @@ class MacIndisponivel:
     def calcular(self, versao: int, mensagem: bytes) -> bytes:
         raise ServicoIndisponivel
 
+    def verificar(self, versao: int, mensagem: bytes, mac: bytes) -> bool:
+        raise ServicoIndisponivel
+
 
 class ChaveDaLista(BaseModel):
     """O registro sem o HMAC nem a versão da chave MAC."""

@@ -16,6 +16,7 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api import teste_dos_jobs
 from api.ciclo_de_vida import transitar
+from api.eventos_do_job import jobs_do_ambiente
 from api.jobs import RepositorioDeJobs
 from api.jobs import agora_utc as agora
 from api.leitura_da_tela import (
@@ -26,7 +27,7 @@ from api.leitura_da_tela import (
     QuadroLido,
 )
 from api.mudanca_da_tela import MudancaDaTela, limiar_do_ambiente
-from api.nuvem import LeiturasStorage, RepositorioFirestore
+from api.nuvem import LeiturasStorage
 from api.paddle import LeitorPaddle, nome_do_modelo
 from api.quadros import quadros_por_trecho
 
@@ -92,7 +93,7 @@ def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
     executar(
         os.environ["JOB_ID"],
-        RepositorioFirestore(firestore.Client(project=projeto)),
+        jobs_do_ambiente(firestore.Client(project=projeto)),
         LeiturasStorage(ClienteStorage(project=projeto), os.environ["BUCKET_ACEITOS"]),
         LeitorPaddle.da_pasta(os.environ["PASTA_DOS_MODELOS"]),
         Path(os.environ["TMPDIR"]),

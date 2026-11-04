@@ -1,0 +1,29 @@
+// Esquema do tópico de eventos de uso (#279). Os campos são os de `EventoDeUso` em
+// `api/eventos_de_uso.py` (um teste confere); a tabela do BigQuery sai dele.
+// O texto da consulta da busca não existe aqui de propósito.
+syntax = "proto2";
+
+message Filtro {
+  required string nome = 1;
+  required string valor = 2;
+}
+
+message EventoDeUso {
+  required string id = 1;
+  required string tipo = 2;
+  // Microssegundos desde 1970 (a assinatura grava como TIMESTAMP).
+  required int64 quando = 3;
+  required string quem_tipo = 4;
+  required string quem_id = 5;
+  optional string job_id = 6;
+  optional string programa = 7;
+  optional int64 tamanho_bytes = 8;
+  optional string estado = 9;
+  optional string codigo_falha = 10;
+  optional int64 tamanho_da_consulta = 11;
+  repeated Filtro filtros = 12;
+  optional string tipo_de_correcao = 13;
+  optional string metodo = 14;
+  optional string rota = 15;
+  optional int64 status = 16;
+}

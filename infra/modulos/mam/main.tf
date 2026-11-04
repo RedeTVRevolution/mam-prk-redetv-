@@ -435,8 +435,10 @@ variable "modelo_objetos" {
 resource "google_project_service" "apis" {
   for_each = toset([
     "artifactregistry.googleapis.com",
-    "bigquery.googleapis.com", # cópia das decupagens para relatórios (#260)
+    "bigquery.googleapis.com",             # cópia das decupagens para relatórios (#260)
+    "bigquerydatatransfer.googleapis.com", # consulta agendada dos resumos de uso (#280)
     "cloudbuild.googleapis.com",
+    "cloudkms.googleapis.com", # chave MAC do hash das chaves de API (#272)
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "eventarc.googleapis.com",
@@ -701,7 +703,7 @@ locals {
     # (como a `web`, quando ela purga à mão).
     purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
     # O agendador só dispara os Jobs da avaliação, da fila e da purga (papel em cada Job, mais abaixo).
-    agendador    = []
+    agendador = []
     # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer", "roles/logging.logWriter"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
@@ -921,6 +923,11 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
       }
+      # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+      env {
+        name  = "PUBSUB_TOPICO_USO"
+        value = google_pubsub_topic.eventos_de_uso.id
+      }
       # Pelo local e não pelo recurso: o CORS da quarentena aponta para este
       # serviço, e a referência ao recurso fecharia um ciclo.
       env {
@@ -986,6 +993,15 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "BIGQUERY_REGIAO"
         value = var.regiao_do_bigquery
       }
+      # As tabelas resumidas que o painel da diretoria lê (resumos_de_uso.tf, #282).
+      env {
+        name  = "PAINEL_TABELA_POR_DIA_E_USUARIO"
+        value = local.tabelas_do_painel_na_web.por_dia_e_usuario
+      }
+      env {
+        name  = "PAINEL_TABELA_POR_DIA_E_PROGRAMA"
+        value = local.tabelas_do_painel_na_web.por_dia_e_programa
+      }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
         value = tostring(var.busca_distancia_maxima)
@@ -1010,6 +1026,11 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "ADMINS_EMERGENCIA"
         value = var.admins_emergencia
+      }
+      # A chave MAC do Cloud KMS que faz o hash das chaves de API (api/mac_kms.py).
+      env {
+        name  = "KMS_CHAVE_MAC"
+        value = google_kms_crypto_key.chaves_de_api.id
       }
     }
   }
@@ -1073,6 +1094,16 @@ resource "google_cloud_run_v2_job" "validacao" {
       }
       containers {
         image = var.imagem_validacao
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1161,6 +1192,16 @@ resource "google_cloud_run_v2_job" "transcricao" {
       }
       containers {
         image = var.imagem_transcricao
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1229,6 +1270,16 @@ resource "google_cloud_run_v2_job" "ocr" {
       }
       containers {
         image = var.imagem_ocr
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "LIMIAR_DE_MUDANCA"
           value = tostring(var.limiar_de_mudanca_do_ocr)
@@ -1309,6 +1360,16 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
       }
       containers {
         image = var.imagem_transcricao_gpu
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1384,6 +1445,16 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
       }
       containers {
         image = var.imagem_ocr_gpu
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
         env {
           name  = "LIMIAR_DE_MUDANCA"
           value = tostring(var.limiar_de_mudanca_do_ocr)
@@ -1673,6 +1744,16 @@ resource "google_cloud_run_v2_job" "analise" {
             cpu    = "1"
             memory = "2Gi"
           }
+        }
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
+        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
         }
         env {
           name  = "GCP_PROJECT_ID"
@@ -3210,6 +3291,11 @@ resource "google_monitoring_dashboard" "painel" {
 output "identity_api_key" {
   value     = google_identity_platform_config.mam.client[0].api_key
   sensitive = true
+}
+
+output "chave_mac_kms" {
+  description = "Nome completo da chave MAC do Cloud KMS: KMS_CHAVE_MAC no `make emitir-chave`"
+  value       = google_kms_crypto_key.chaves_de_api.id
 }
 
 # O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.

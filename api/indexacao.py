@@ -20,6 +20,8 @@ from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.catalogo import PessoaDoCatalogo
+from api.catalogo_apagado import com_pessoas_fundidas
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
@@ -39,6 +41,7 @@ from api.jobs import (
     agora_utc,
 )
 from api.nuvem import (
+    CatalogoFirestore,
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
@@ -108,13 +111,19 @@ def _registrar(
 
 
 def decupagem_do_job(
-    job: Job, decupagens: LeitorDeDecupagem, correcoes: RepositorioDeCorrecoes
+    job: Job,
+    decupagens: LeitorDeDecupagem,
+    correcoes: RepositorioDeCorrecoes,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
 ) -> Decupagem:
-    """A Decupagem entregue (com as Correções em vigor), no esquema do modelo."""
+    """A Decupagem entregue (com as Correções em vigor), no esquema do modelo. Com
+    `pessoas`, o catálogo manda no nome e no id de quem foi fundido ou renomeado (#209, #263)."""
     conteudo = b"".join(decupagens.abrir_decupagem(job.id))
     entregue = decupagem_entregue(
         json.loads(conteudo), versao_do_modelo(conteudo), correcoes.listar(job.id)
     )
+    if pessoas is not None:
+        entregue = com_pessoas_fundidas(entregue, pessoas)
     return Decupagem.model_validate(_so_o_esquema(Decupagem, entregue))
 
 
@@ -130,6 +139,7 @@ def reindexar(
     quadros: LeitorDeQuadros | None = None,
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
 ) -> Indexacao | None:
     """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
 
@@ -156,7 +166,7 @@ def reindexar(
     estado: EstadoDaIndexacao = "falhou"
     estado_da_copia: EstadoDaCopia = "falhou"
     try:
-        decupagem = decupagem_do_job(job, decupagens, correcoes)
+        decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas)
     except Exception:
         log.exception("decupagem de %s não lida para indexar", job.id)
     else:
@@ -221,6 +231,7 @@ def reindexar_jobs(
     quadros: LeitorDeQuadros | None = None,
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -252,6 +263,7 @@ def reindexar_jobs(
             quadros=quadros,
             sinal=sinal,
             tipos_de_objeto=tipos_de_objeto,
+            pessoas=pessoas,
         )
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
@@ -282,6 +294,7 @@ def main(argv: list[str]) -> int:
         quadros=decupagens,
         sinal=sinal,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
+        pessoas=CatalogoFirestore(firestore_).obter,
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

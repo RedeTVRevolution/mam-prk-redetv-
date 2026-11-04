@@ -17,7 +17,10 @@ import { type ClienteDaApi, codigoDoErro, ConflitoNaApi, PedidoInvalido, SessaoE
 import { type CatalogoDeCorrecoes, rotuloDe } from './catalogo.ts'
 import { useAtalhos } from './atalhos.ts'
 import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from './pautas.ts'
-import { baixarDecupagem } from './baixar.ts'
+import { baixarDecupagem, baixarPelaUrl } from './baixar.ts'
+import { filtrosDeQuemAcessou } from './auditoria.ts'
+import { Link } from './Link.tsx'
+import { enderecoDaAuditoria } from './rotas.ts'
 import {
   aindaIndexando,
   desfazivel,
@@ -31,6 +34,8 @@ import {
   podeRemover,
 } from './catalogacao.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
+import { FusaoDePessoa } from './FusaoDePessoa.tsx'
+import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { dataDeExibicao, finalizando, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
 import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
@@ -96,6 +101,8 @@ export default function Visualizador({
   podeEditar,
   podeAprovar = false,
   podeReprocessar = false,
+  podeVerAuditoria = false,
+  podeFundir = false,
   intervaloDoAcompanhamentoMs = 5000,
   intervaloDaIndexacaoMs = INTERVALO_DA_INDEXACAO_MS,
 }: {
@@ -107,6 +114,10 @@ export default function Visualizador({
   podeEditar: boolean
   podeAprovar?: boolean
   podeReprocessar?: boolean
+  /** Mostra o link "Quem acessou" (`auditoria.ver`). */
+  podeVerAuditoria?: boolean
+  /** Mostra "Fundir com…" na linha da pessoa, no modo de catalogação (`catalogo.fundir`). */
+  podeFundir?: boolean
   intervaloDoAcompanhamentoMs?: number
   /** De quanto em quanto a tela pergunta se a correção já entrou no índice. */
   intervaloDaIndexacaoMs?: number
@@ -131,6 +142,9 @@ export default function Visualizador({
   const [mudo, setMudo] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const [falhaDoJson, setFalhaDoJson] = useState<string | null>(null)
+  const [baixandoJson, setBaixandoJson] = useState(false)
+  const [baixandoVideo, setBaixandoVideo] = useState(false)
+  const [falhaDoVideo, setFalhaDoVideo] = useState<string | null>(null)
   const [decupagem, setDecupagem] = useState<Decupagem | null>(null)
   const [falhaDaDecupagem, setFalhaDaDecupagem] = useState<string | null>(null)
   const [cargasDaDecupagem, setCargasDaDecupagem] = useState(0)
@@ -142,7 +156,7 @@ export default function Visualizador({
   const [catalogo, setCatalogo] = useState<CatalogoDeCorrecoes | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [objetoApontado, setObjetoApontado] = useState<ObjetoApontado | null>(null)
-  const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' } | null>(null)
+  const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fundir' | 'renomear' } | null>(null)
   // Os tempos que as alças da linha do tempo ajustaram na correção aberta.
   const [temposDaAlca, setTemposDaAlca] = useState<Intervalo | null>(null)
   const salvarDasAlcas = useRef<(() => void) | null>(null)
@@ -936,7 +950,41 @@ export default function Visualizador({
   let edicaoNoPainel: EdicaoNoPainel | null = null
   let alcasDaCorrecao: AlcasDaCorrecao | null = null
   if (catalogando && decupagem && catalogo && emEdicao) {
-    if (emEdicao.modo === 'acrescentar') {
+    if (emEdicao.modo === 'fundir') {
+      const pessoa = decupagem.pessoas.find((p) => `fundir:${p.id}` === emEdicao.chave)
+      if (pessoa?.catalogo_id)
+        edicaoNoPainel = {
+          chave: emEdicao.chave,
+          conteudo: (
+            <FusaoDePessoa
+              origemId={pessoa.catalogo_id}
+              nomeDaOrigem={pessoa.nome}
+              fusao={api.fusao}
+              limiteDoMotivo={catalogo.limites.motivo}
+              aoFundir={() => {
+                fecharEdicao()
+                setCargasDaDecupagem((n) => n + 1)
+              }}
+              aoCancelar={fecharEdicao}
+            />
+          ),
+        }
+    } else if (emEdicao.modo === 'renomear') {
+      const pessoa = decupagem.pessoas.find((p) => `renomear:${p.id}` === emEdicao.chave)
+      if (pessoa?.catalogo_id)
+        edicaoNoPainel = {
+          chave: emEdicao.chave,
+          conteudo: (
+            <RenomeacaoEmLote
+              pessoaId={pessoa.catalogo_id}
+              nomeAtual={pessoa.nome}
+              renomeacao={api.renomeacao}
+              aoRenomear={() => setCargasDaDecupagem((n) => n + 1)}
+              aoFechar={fecharEdicao}
+            />
+          ),
+        }
+    } else if (emEdicao.modo === 'acrescentar') {
       const pessoa = decupagem.pessoas.find((p) => `acrescentar:${p.id}` === emEdicao.chave)
       if (pessoa)
         edicaoNoPainel = {
@@ -1019,6 +1067,16 @@ export default function Visualizador({
         }
       : null
 
+  function fundirPessoa(pessoa: string) {
+    setTemposDaAlca(null)
+    setEmEdicao({ chave: `fundir:${pessoa}`, modo: 'fundir' })
+  }
+
+  function renomearEmLote(pessoa: string) {
+    setTemposDaAlca(null)
+    setEmEdicao({ chave: `renomear:${pessoa}`, modo: 'renomear' })
+  }
+
   function acrescentarAparicao(pessoa: string) {
     setTemposDaAlca(null)
     setEmEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
@@ -1046,10 +1104,25 @@ export default function Visualizador({
 
   async function baixar() {
     setFalhaDoJson(null)
+    setBaixandoJson(true)
     try {
-      baixarDecupagem(job.nome, await api.job(job.id).decupagem())
+      baixarDecupagem(job.nome, await api.job(job.id).baixarDecupagem())
     } catch (e) {
       if (!(e instanceof SessaoExpirada)) setFalhaDoJson(codigoDoErro(e))
+    } finally {
+      setBaixandoJson(false)
+    }
+  }
+
+  async function baixarVideo() {
+    setFalhaDoVideo(null)
+    setBaixandoVideo(true)
+    try {
+      baixarPelaUrl((await api.job(job.id).baixarVideo()).url)
+    } catch (e) {
+      if (!(e instanceof SessaoExpirada)) setFalhaDoVideo(codigoDoErro(e))
+    } finally {
+      setBaixandoVideo(false)
     }
   }
 
@@ -1128,9 +1201,31 @@ export default function Visualizador({
               Reprocessar…
             </Button>
           )}
+          {podeVerAuditoria && (
+            <Link para={enderecoDaAuditoria(filtrosDeQuemAcessou(job.id))} size="sm" style={{ whiteSpace: 'nowrap' }}>
+              Quem acessou
+            </Link>
+          )}
+          {job.estado === 'concluido' && (
+            <Tooltip label="Baixar vídeo (MP4)">
+              <ActionIcon
+                variant="default"
+                aria-label="Baixar vídeo"
+                loading={baixandoVideo}
+                onClick={() => void baixarVideo()}
+              >
+                <IconDownload />
+              </ActionIcon>
+            </Tooltip>
+          )}
           {job.estado === 'concluido' && (
             <Tooltip label="Baixar decupagem (JSON)">
-              <ActionIcon variant="default" aria-label="Baixar decupagem (JSON)" onClick={() => void baixar()}>
+              <ActionIcon
+                variant="default"
+                aria-label="Baixar decupagem (JSON)"
+                loading={baixandoJson}
+                onClick={() => void baixar()}
+              >
                 <IconDownload />
               </ActionIcon>
             </Tooltip>
@@ -1149,6 +1244,13 @@ export default function Visualizador({
           {`${reprocessou ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
           {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
         </Text>
+      )}
+      {falhaDoVideo && (
+        <AlertaDeErro
+          mensagem="Não foi possível preparar o download. Tente de novo."
+          codigo={falhaDoVideo}
+          aoTentar={() => void baixarVideo()}
+        />
       )}
       {falhaDoJson && (
         <AlertaDeErro
@@ -1491,6 +1593,8 @@ export default function Visualizador({
               edicao={edicaoNoPainel}
               marcas={marcas}
               aoAcrescentar={catalogando && catalogo ? acrescentarAparicao : undefined}
+              aoFundir={catalogando && catalogo && podeFundir ? fundirPessoa : undefined}
+              aoRenomearEmLote={catalogando && catalogo && podeAprovar ? renomearEmLote : undefined}
               acoes={
                 catalogando && catalogo && decupagem
                   ? {

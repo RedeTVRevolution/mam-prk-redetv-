@@ -80,7 +80,7 @@ Princípios do mapa:
 | O que tem hoje | No código, para quem tem `decupagem.editar`: menu por ocorrência, formulários para corrigir pessoa, aparição ou menção, tempos (com alças arrastáveis na linha do tempo), pauta, plano, fala e comercial, todos com campo "Motivo"; histórico com desfazer; fila de revisão das correções que não casaram depois de reprocessar; aprovar e recusar para o Curador. **Não foi visto no dev**: a conta usada tem os papéis padrão, sem `decupagem.editar`, e os controles não aparecem |
 | Proposta | Modo de catalogação no próprio visualizador, todo pelo teclado, com sugestões para confirmar. Detalhes em [catalogacao-manual.md](catalogacao-manual.md) |
 | Existe no código | `POST /v1/jobs/{id}/correcoes` com 14 tipos, desfazer, fila, reaplicar, descartar, aprovar e recusar (`api/jobs.py`, `api/correcoes.py`) |
-| Existe sem tela | A regra de quais tipos exigem aprovação: `make definir-aprovacao` |
+| Existe na Administração | A regra de quais tipos exigem aprovação: aba "Regras de aprovação" |
 | Falta | Correção de objetos (o esquema não tem), de texto na tela, tom e fontes do nome (#75, no PR #89), marcar um trecho novo por entrada e saída, autocompletar de pessoas e marcas, sugestões para confirmar |
 
 ### Pessoas (catálogo)
@@ -98,18 +98,18 @@ Princípios do mapa:
 | --- | --- |
 | Para quem | Diretoria e Administrador |
 | O que tem | Os indicadores do plano (acessos, vídeos, buscas, revisão, API e custo), com filtros por período, programa e usuário |
-| Existe no código | Nada |
-| Falta | Papel Diretoria, eventos no Pub/Sub e no BigQuery, tela. Duas coisas a mais para o redesenho: **buscas sem resultado** (o que falta decupar ou corrigir) e **taxa de correção por tipo** (onde a decupagem erra) |
+| Existe no código | Papel Diretoria (`painel.ver`), o registro de cada abertura e exportação na auditoria, os eventos de uso e as tabelas resumidas no BigQuery, as rotas `/v1/painel/...` com filtros e CSV (`api/painel.py`) e a tela `/painel/acessos` com a aba Acessos |
+| Falta | As abas de vídeos e buscas (#283), revisão e API (#284) e custo (#285). Duas coisas a mais para o redesenho: **buscas sem resultado** (o que falta decupar ou corrigir) e **taxa de correção por tipo** (onde a decupagem erra) |
 
 ### Administração
 
 | | |
 | --- | --- |
 | Para quem | Administrador, só em conta local com MFA |
-| O que tem | Usuários, papéis, chaves de API, lixeira e auditoria. Detalhes em [administracao.md](administracao.md) |
+| O que tem | Usuários, papéis, chaves de API, regras de aprovação, lixeira e auditoria. Detalhes em [administracao.md](administracao.md) |
 | Existe no código | `GET /v1/eu` com papéis e permissões; `DELETE /v1/jobs/{id}`, que só cancela |
-| Existe sem tela | Criar contas (`make criar-contas`), dar papéis (`make atribuir-papeis`), regra de aprovação (`make definir-aprovacao`), chaves de API (`make emitir-chave`, `listar-chaves`, `revogar-chave`) |
-| Falta | Os papéis Administrador e Diretoria: o código só conhece Consulta, Operador, Editor e Curador (`api/papeis.py`). Tela de usuários, apagar vídeo (lixeira), auditoria visível |
+| Existe sem tela | Criar contas (`make criar-contas`), dar papéis (`make atribuir-papeis`), chaves de API (`make emitir-chave`, `listar-chaves`, `revogar-chave`) |
+| Falta | Tela de usuários, apagar vídeo (lixeira), auditoria visível |
 
 ## Resumo: o que existe, o que existe sem tela, o que falta
 
@@ -121,5 +121,5 @@ Princípios do mapa:
 | Busca | — | — | Tudo (E2) |
 | Catalogação | Correções, histórico, fila e aprovação (para Editor e Curador) | Regra de aprovação | Objetos, trecho novo, autocompletar, sugestões |
 | Pessoas | — | Perfil do programa no TOML | Catálogo, referências de rosto, tela |
-| Painel | — | — | Tudo (E9) |
-| Administração | — | Contas, papéis, chaves, aprovação por script | Papéis Admin e Diretoria, telas, lixeira, auditoria |
+| Painel | — | Papel Diretoria e auditoria do acesso | Indicadores, tela (E9) |
+| Administração | — | Contas, papéis, chaves, aprovação por script | Telas, lixeira, auditoria |

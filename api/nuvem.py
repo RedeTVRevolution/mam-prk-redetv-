@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import random
 import secrets
+import time
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -12,7 +14,7 @@ from urllib.parse import quote
 import google.auth
 import google.auth.transport.requests
 import requests
-from google.api_core.exceptions import AlreadyExists, NotFound
+from google.api_core.exceptions import Aborted, AlreadyExists, NotFound
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
@@ -32,18 +34,27 @@ from api.auditoria import (
 from api.avaliacao import Avaliacao
 from api.catalogo import (
     EnvioParaLixeira,
+    FusaoDaPessoa,
     PessoaDoCatalogo,
     PessoaInexistente,
+    RenomeacaoDaPessoa,
     Rosto,
     corrigida,
     nomes_de_busca,
     novo_id,
+    visivel,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
+from api.idempotencia import (
+    Reserva,
+    conferir,
+    id_da_reserva,
+    nova_reserva,
+)
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     CursorInvalido,
@@ -54,6 +65,7 @@ from api.jobs import (
     PaginaDeJobs,
     ServicoIndisponivel,
     casa_com_o_filtro,
+    disposicao_do_nome,
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
@@ -73,6 +85,7 @@ from api.webhook import RegistroDeWebhook
 COLECAO_DE_JOBS = "jobs"
 COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
+COLECAO_DE_IDEMPOTENCIA = "chaves_de_idempotencia"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
@@ -138,6 +151,37 @@ def objeto_dos_nomes_a_buscar(job_id: str) -> str:
     return f"{job_id}.nomes_a_buscar.json"
 
 
+TENTATIVAS_SOB_DISPUTA = 8
+# A espera dobra a cada rodada até o teto (0,05 s, 0,1, 0,2, 0,4, 0,8, 1, 1, 1): no pior
+# caso, cerca de 4,5 s antes do 503. Com espera que cresce devagar, os perdedores
+# voltam juntos e disputam de novo (#384).
+ESPERA_BASE_SOB_DISPUTA = 0.05
+TETO_DA_ESPERA_SOB_DISPUTA = 1.0
+
+
+def espera_sob_disputa(rodada: int) -> float:
+    """Espera aleatória (jitter) de 0 até a base dobrada a cada rodada, com teto."""
+    limite = min(TETO_DA_ESPERA_SOB_DISPUTA, ESPERA_BASE_SOB_DISPUTA * 2**rodada)
+    return random.uniform(0, limite)
+
+
+def _repetir_sob_disputa[T](
+    na_transacao: Callable[[Any], T], cliente: firestore.Client
+) -> T:
+    # Com muitas chamadas no mesmo documento, o Firestore esgota as tentativas da
+    # transação (ValueError causado por Aborted). Quem perde começa de novo, depois de
+    # uma espera aleatória, e lê o estado que o vencedor deixou. Outro ValueError (um
+    # Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
+    for rodada in range(TENTATIVAS_SOB_DISPUTA):
+        try:
+            return na_transacao(cliente.transaction())
+        except (ValueError, Aborted) as erro:
+            if isinstance(erro, ValueError) and not isinstance(erro.__cause__, Aborted):
+                raise
+            time.sleep(espera_sob_disputa(rodada))
+    raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
+
 class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
@@ -147,6 +191,24 @@ class RepositorioFirestore:
 
     def salvar(self, job: Job) -> None:
         self._colecao.document(job.id).set(job.model_dump())
+
+    def criar(self, job: Job) -> bool:
+        # `Aborted` não diz que outro gravou: o documento estava travado e o `create`
+        # pode ter perdido para outro que também aborta. Repete até um gravar
+        # (`AlreadyExists` para os outros).
+        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+            try:
+                self._colecao.document(job.id).create(job.model_dump())
+            except AlreadyExists:
+                return False
+            except Aborted:
+                time.sleep(espera_sob_disputa(rodada))
+                continue
+            return True
+        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
+    def _sob_disputa(self, na_transacao: Callable[[Any], Job | None]) -> Job | None:
+        return _repetir_sob_disputa(na_transacao, self._cliente)
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -167,8 +229,7 @@ class RepositorioFirestore:
             transacao.set(referencia, novo.model_dump())
             return novo
 
-        resultado: Job | None = trocar(self._cliente.transaction())
-        return resultado
+        return self._sob_disputa(trocar)
 
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
@@ -189,8 +250,7 @@ class RepositorioFirestore:
             transacao.set(referencia, novo.model_dump())
             return novo
 
-        resultado: Job | None = trocar_na_transacao(self._cliente.transaction())
-        return resultado
+        return self._sob_disputa(trocar_na_transacao)
 
     def remover(self, job_id: str) -> None:
         self._colecao.document(job_id).delete()
@@ -297,6 +357,64 @@ class RepositorioDeChavesFirestore:
             transacao.set(self._colecao.document(registro.id), registro.model_dump())
 
         gravar(self._cliente.transaction())
+
+
+class RepositorioDeIdempotenciaFirestore:
+    """Um documento por reserva; o `expira_em` é o campo da política de TTL (48 h)."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_IDEMPOTENCIA
+    ) -> None:
+        self._cliente = cliente
+        self._colecao = cliente.collection(colecao)
+
+    def reservar(
+        self, escopo: str, chave: str, impressao: str, job_id: str, agora: datetime
+    ) -> tuple[Reserva, bool]:
+        referencia = self._colecao.document(id_da_reserva(escopo, chave))
+        criada = nova_reserva(impressao, job_id, agora)
+        # `create` é atômico e não disputa transação: com muitas chamadas simultâneas na
+        # mesma chave (o cliente que repete em paralelo), uma cria e as outras leem. Uma
+        # transação aqui esgotaria as tentativas sob essa disputa e daria 500. Se o
+        # Firestore aborta o `create` por disputa (`Aborted`), espera um pouco e tenta o
+        # `create` de novo, até criar ou receber `AlreadyExists` e ler a que ficou.
+        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+            try:
+                referencia.create(criada.model_dump())
+                return criada, True
+            except AlreadyExists:
+                pass
+            except Aborted:
+                time.sleep(espera_sob_disputa(rodada))
+                continue
+            doc = referencia.get()
+            if doc.exists:
+                existente = Reserva(**(doc.to_dict() or {}))
+                if existente.expira_em > agora:
+                    conferir(existente, impressao)
+                    return existente, False
+            break
+        else:
+            raise ServicoIndisponivel("Firestore disputado: tente de novo")
+        # Vencida (o TTL do Firestore demora a apagar) ou apagada agora: troca pela nova,
+        # na transação, para quem chegar junto ver a que ficou.
+
+        @firestore.transactional
+        def trocar_a_vencida(transacao: Any) -> tuple[Reserva, bool]:
+            atual = referencia.get(transaction=transacao)
+            if atual.exists:
+                existente = Reserva(**(atual.to_dict() or {}))
+                if existente.expira_em > agora:
+                    conferir(existente, impressao)
+                    return existente, False
+            transacao.set(referencia, criada.model_dump())
+            return criada, True
+
+        # Várias repetições na mesma reserva vencida disputam a transação.
+        resultado: tuple[Reserva, bool] = _repetir_sob_disputa(
+            trocar_a_vencida, self._cliente
+        )
+        return resultado
 
 
 class RepositorioDeWebhooksFirestore:
@@ -482,13 +600,13 @@ class CatalogoFirestore:
             filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
         )
         achadas = [self._pessoa(d.id, d.to_dict() or {}) for d in consulta.stream()]
-        return [p for p in achadas if p.lixeira is None]
+        return [p for p in achadas if visivel(p)]
 
     def _lidas(self) -> list[PessoaDoCatalogo]:
         return [self._pessoa(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
 
     def todas(self) -> list[PessoaDoCatalogo]:
-        return [p for p in self._lidas() if p.lixeira is None]
+        return [p for p in self._lidas() if visivel(p)]
 
     def na_lixeira(self) -> list[PessoaDoCatalogo]:
         return [p for p in self._lidas() if p.lixeira is not None]
@@ -500,6 +618,20 @@ class CatalogoFirestore:
         if atual is None:
             raise PessoaInexistente(id)
         return self._gravar(atual.model_copy(update={"lixeira": envio}))
+
+    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        return self._gravar(atual.model_copy(update={"fundida": fusao}))
+
+    def definir_renomeacao(
+        self, id: str, renomeacao: RenomeacaoDaPessoa | None
+    ) -> PessoaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        return self._gravar(atual.model_copy(update={"renomeacao": renomeacao}))
 
     def acrescentar(
         self,
@@ -826,6 +958,10 @@ class RepositorioDeAprovacaoFirestore:
     def definir(self, tipos: frozenset[str]) -> None:
         self._documento.set({"tipos": sorted(tipos)})
 
+    def mudar(self, tipo: str, exige_aprovacao: bool) -> None:
+        operacao = firestore.ArrayUnion if exige_aprovacao else firestore.ArrayRemove
+        self._documento.set({"tipos": operacao([tipo])}, merge=True)
+
 
 class RepositorioDeAuditoriaFirestore:
     """Só acrescenta: `create` falha se o id já existe, e não há como alterar nem apagar."""
@@ -851,6 +987,11 @@ class RepositorioDeAuditoriaFirestore:
             )
         if filtro.acao is not None:
             consulta = consulta.where(filter=FieldFilter("acao", "==", filtro.acao))
+        if filtro.acoes is not None:
+            # O `in` usa os mesmos índices da igualdade.
+            consulta = consulta.where(
+                filter=FieldFilter("acao", "in", list(filtro.acoes))
+            )
         if filtro.de is not None:
             consulta = consulta.where(filter=FieldFilter("quando", ">=", filtro.de))
         if filtro.ate is not None:
@@ -1300,6 +1441,17 @@ class ArmazenamentoStorage:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
         url: str = blob.generate_signed_url(
             version="v4", expiration=validade, method="GET", **self._assinatura()
+        )
+        return url
+
+    def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        url: str = blob.generate_signed_url(
+            version="v4",
+            expiration=validade,
+            method="GET",
+            response_disposition=f"attachment; {disposicao_do_nome(nome)}",
+            **self._assinatura(),
         )
         return url
 

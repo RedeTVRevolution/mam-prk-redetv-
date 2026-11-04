@@ -15,17 +15,22 @@ from typing import Protocol, cast
 from pydantic import BaseModel, ConfigDict
 
 from api.auth import ESCOPOS, ChaveInvalida, Escopo, Sistema
-from api.jobs import agora_utc
+from api.jobs import ServicoIndisponivel, agora_utc
 
 
 class Mac(Protocol):
-    """Porta para o Cloud KMS; os testes e a máquina local usam `MacSimulado`."""
+    """Porta para o Cloud KMS (`api.mac_kms.MacKms`); os testes e a máquina local usam
+    `MacSimulado`."""
 
     @property
     def versao_atual(self) -> int: ...
 
     def calcular(self, versao: int, mensagem: bytes) -> bytes:
         """HMAC-SHA256 da mensagem com a versão da chave MAC. `KeyError` se a versão não existe."""
+        ...
+
+    def verificar(self, versao: int, mensagem: bytes, mac: bytes) -> bool:
+        """Se `mac` é o HMAC da mensagem com a versão. `KeyError` se a versão não existe."""
         ...
 
 
@@ -38,6 +43,9 @@ class MacSimulado:
 
     def calcular(self, versao: int, mensagem: bytes) -> bytes:
         return hmac.digest(self._chaves[versao], mensagem, sha256)
+
+    def verificar(self, versao: int, mensagem: bytes, mac: bytes) -> bool:
+        return hmac.compare_digest(self.calcular(versao, mensagem), mac)
 
 
 class RegistroDeChave(BaseModel):
@@ -172,21 +180,28 @@ class VerificadorDeChaveDeApi:
         if registro is None or not registro.ativa:
             raise ChaveInvalida
         try:
-            esperado = self._mac.calcular(registro.versao_mac, chave.encode())
-        except KeyError:
-            raise ChaveInvalida from None
-        if not hmac.compare_digest(esperado.hex(), registro.hmac):
-            raise ChaveInvalida
-        versao = self._mac.versao_atual
-        if registro.versao_mac != versao:
-            self._repositorio.salvar(
-                registro.model_copy(
-                    update={
-                        "hmac": self._mac.calcular(versao, chave.encode()).hex(),
-                        "versao_mac": versao,
-                    }
-                )
+            confere = self._mac.verificar(
+                registro.versao_mac, chave.encode(), bytes.fromhex(registro.hmac)
             )
+        except (KeyError, ValueError):
+            raise ChaveInvalida from None
+        if not confere:
+            raise ChaveInvalida
+        # Trocar de versão é só manutenção: se o KMS falhar aqui, a chave já conferiu e
+        # a troca fica para o próximo uso.
+        try:
+            versao = self._mac.versao_atual
+            if registro.versao_mac != versao:
+                self._repositorio.salvar(
+                    registro.model_copy(
+                        update={
+                            "hmac": self._mac.calcular(versao, chave.encode()).hex(),
+                            "versao_mac": versao,
+                        }
+                    )
+                )
+        except ServicoIndisponivel:
+            pass
         return Sistema(sistema=registro.sistema, escopos=registro.escopos)
 
 

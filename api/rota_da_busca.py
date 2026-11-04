@@ -28,6 +28,7 @@ from api.busca import (
     filtros_do_servidor,
 )
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S
+from api.eventos_de_uso import Eventos, Filtro, SemEventos, quem_do_chamador, registrar
 from api.imagens_hostis import (
     AcimaDoLimiteDeBytes,
     AcimaDoLimiteDePixels,
@@ -100,9 +101,35 @@ def criar_rotas_da_busca(
     consultas_por_minuto: int = CONSULTAS_POR_MINUTO,
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
+    eventos: Eventos | None = None,
 ) -> APIRouter:
     rotas = APIRouter()
+    publicador = eventos or SemEventos()
     limite = LimiteDeConsultas(consultas_por_minuto, relogio)
+
+    def registrar_busca(
+        chamador: Chamador,
+        tamanho: int | None,
+        programa: str | None,
+        job_id: str | None = None,
+        **filtros: object,
+    ) -> None:
+        """Só o tamanho da consulta e os filtros que a pessoa pôs; o texto fica aqui."""
+        registrar(
+            publicador,
+            "busca",
+            quem_do_chamador(chamador),
+            relogio(),
+            job_id=job_id,
+            programa=programa,
+            tamanho_da_consulta=tamanho,
+            filtros=[
+                Filtro(nome=nome, valor=str(valor))
+                for nome, valor in filtros.items()
+                # `is`, não `in`: com `in`, o 0 sumiria junto com o False.
+                if valor is not None and valor is not False and valor != ""
+            ],
+        )
 
     @rotas.get("/busca")
     def buscar(
@@ -147,11 +174,27 @@ def criar_rotas_da_busca(
             ),
         )
         try:
-            return futuro.result(timeout=tempo_maximo_s)
+            resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
             log.warning("busca passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
+        registrar_busca(
+            chamador,
+            len(q),
+            programa,
+            modo="texto",
+            ordem=ordem,
+            evidencias=",".join(dict.fromkeys(evidencias or ())),
+            desde=desde,
+            ate=ate,
+            sem_periodo=sem_periodo,
+            pessoa=pessoa,
+            marca=marca,
+            tipo=tipo,
+            visual=visual,
+        )
+        return resultado
 
     teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
 
@@ -234,7 +277,7 @@ def criar_rotas_da_busca(
             ),
         )
         try:
-            return futuro.result(timeout=tempo_maximo_s)
+            resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
             log.warning("busca por imagem passou de %.1f s", tempo_maximo_s)
@@ -243,6 +286,16 @@ def criar_rotas_da_busca(
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
             ) from None
+        registrar_busca(
+            chamador,
+            len(dados),
+            programa,
+            modo="imagem",
+            desde=desde,
+            ate=ate,
+            sem_periodo=sem_periodo,
+        )
+        return resultado
 
     @rotas.get("/busca/parecidos/planos")
     def planos_com_vetor(
@@ -285,7 +338,7 @@ def criar_rotas_da_busca(
             sistema=sistema,
         )
         try:
-            return futuro.result(timeout=tempo_maximo_s)
+            resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
             log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
@@ -297,6 +350,9 @@ def criar_rotas_da_busca(
                 "por imagem, ou índice do quadro desligado), ou o vídeo não foi "
                 "encontrado",
             ) from None
+        # Não há consulta: o ponto de partida é o plano de um vídeo.
+        registrar_busca(chamador, None, None, job, modo="parecidos", plano=plano)
+        return resultado
 
     return rotas
 

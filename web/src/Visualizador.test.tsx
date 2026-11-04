@@ -88,6 +88,7 @@ async function abrir(
   podeReprocessar = false,
   intervaloDoAcompanhamentoMs?: number,
   podeAprovar = false,
+  podeVerAuditoria = false,
 ) {
   const auth = new AutenticadorFalso([
     { email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true },
@@ -105,6 +106,7 @@ async function abrir(
         podeEditar={podeEditar}
         podeAprovar={podeAprovar}
         podeReprocessar={podeReprocessar}
+        podeVerAuditoria={podeVerAuditoria}
         intervaloDoAcompanhamentoMs={intervaloDoAcompanhamentoMs}
       />
     </AtalhosProvider>,
@@ -396,21 +398,102 @@ test('com o link vencido, a falha do arquivo pede outro link e volta ao mesmo po
   expect(pedidos).toBe(2)
 })
 
+test('baixar a decupagem chama a rota do servidor e entrega o arquivo', async () => {
+  const usuario = userEvent.setup()
+  let pedidos = 0
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem/download', () => {
+      pedidos += 1
+      return HttpResponse.json(DECUPAGEM)
+    }),
+  )
+  const entregue: { download: string }[] = []
+  URL.createObjectURL = vi.fn(() => 'blob:decupagem')
+  URL.revokeObjectURL = vi.fn()
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    entregue.push({ download: this.download })
+  })
+  await abrirComFaixas()
+
+  await usuario.click(screen.getByRole('button', { name: 'Baixar decupagem (JSON)' }))
+
+  await waitFor(() => expect(entregue).toEqual([{ download: 'FAMA_20261021_720_BLU.decupagem.json' }]))
+  expect(pedidos).toBe(1)
+})
+
 test('falha ao baixar a decupagem mostra o código para o suporte', async () => {
   const usuario = userEvent.setup()
-  // A primeira leitura é a da linha do tempo; a do botão é a segunda.
-  let leituras = 0
-  servidor.use(
-    http.get('/v1/jobs/j1/decupagem', () =>
-      ++leituras === 1 ? HttpResponse.json(DECUPAGEM) : new HttpResponse(null, { status: 409 }),
-    ),
-  )
+  servidor.use(http.get('/v1/jobs/j1/decupagem/download', () => new HttpResponse(null, { status: 409 })))
   await abrirComFaixas()
 
   await usuario.click(screen.getByRole('button', { name: 'Baixar decupagem (JSON)' }))
 
   const aviso = await screen.findByRole('alert')
   expect(aviso.textContent).toContain('Código para o suporte: http_409')
+})
+
+test('baixar o vídeo chama a rota e inicia o download pela URL devolvida', async () => {
+  const usuario = userEvent.setup()
+  servidor.use(
+    http.get('/v1/jobs/j1/download', () =>
+      HttpResponse.json({ url: 'https://exemplo.test/v.mp4?baixar=1', expira_em: '2999-01-01T00:00:00Z' }),
+    ),
+  )
+  const hrefs: string[] = []
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    hrefs.push(this.href)
+  })
+  await abrir()
+
+  const botao = screen.getByRole('button', { name: 'Baixar vídeo' })
+  await usuario.click(botao)
+
+  await waitFor(() => expect(hrefs).toEqual(['https://exemplo.test/v.mp4?baixar=1']))
+  await waitFor(() => expect(botao.hasAttribute('data-loading')).toBe(false))
+})
+
+test('o botão de baixar o vídeo fica em carregando enquanto a URL não chega', async () => {
+  const usuario = userEvent.setup()
+  let liberar: () => void = () => {}
+  const espera = new Promise<void>((r) => (liberar = r))
+  servidor.use(
+    http.get('/v1/jobs/j1/download', async () => {
+      await espera
+      return HttpResponse.json({ url: 'https://exemplo.test/v.mp4?baixar=1', expira_em: '2999-01-01T00:00:00Z' })
+    }),
+  )
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  await abrir()
+
+  const botao = screen.getByRole('button', { name: 'Baixar vídeo' })
+  await usuario.click(botao)
+  await waitFor(() => expect(botao.hasAttribute('data-loading')).toBe(true))
+  liberar()
+  await waitFor(() => expect(botao.hasAttribute('data-loading')).toBe(false))
+})
+
+test('falha ao preparar o download do vídeo mostra a mensagem em português', async () => {
+  const usuario = userEvent.setup()
+  servidor.use(http.get('/v1/jobs/j1/download', () => new HttpResponse(null, { status: 503 })))
+  await abrir()
+
+  await usuario.click(screen.getByRole('button', { name: 'Baixar vídeo' }))
+
+  const aviso = await screen.findByRole('alert')
+  expect(aviso.textContent).toContain('Não foi possível preparar o download. Tente de novo.')
+  expect(aviso.textContent).toContain('http_503')
+})
+
+test('"Quem acessou" só aparece com auditoria.ver e leva à Auditoria filtrada pelo vídeo', async () => {
+  await abrir()
+  expect(screen.queryByRole('link', { name: 'Quem acessou' })).toBeNull()
+  cleanup()
+
+  await abrir({}, null, false, false, undefined, false, true)
+  const link = screen.getByRole('link', { name: 'Quem acessou' })
+  expect(link.getAttribute('href')).toBe(
+    '/admin/auditoria?alvo=j1&acao=video.aberto%2Cvideo.baixado%2Cdecupagem.baixada',
+  )
 })
 
 test('sem a decupagem pronta, não há botão de baixar o JSON', async () => {

@@ -13,6 +13,7 @@ from datetime import datetime
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api.catalogo import PessoaDoCatalogo
 from api.copia_bigquery import (
     CopiaDosMomentos,
     copia_do_ambiente,
@@ -22,6 +23,7 @@ from api.correcoes import RepositorioDeCorrecoes
 from api.indexacao import LeitorDeDecupagem, _registrar, decupagem_do_job
 from api.jobs import CopiaNoBigQuery, EstadoDaCopia, Job, RepositorioDeJobs, agora_utc
 from api.nuvem import (
+    CatalogoFirestore,
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
@@ -37,6 +39,7 @@ def copiar(
     correcoes: RepositorioDeCorrecoes,
     copia: CopiaDosMomentos,
     relogio: Callable[[], datetime] = agora_utc,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
 ) -> str:
     """Copia o vídeo e devolve o estado: `copiado`, `falhou` ou `ignorado` (não concluído)."""
     if job.estado != "concluido":
@@ -50,7 +53,7 @@ def copiar(
     )
     estado: EstadoDaCopia = "copiado"
     try:
-        decupagem = decupagem_do_job(job, decupagens, correcoes)
+        decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas)
         copia.gravar(
             job.id,
             linhas_da_decupagem(
@@ -75,6 +78,7 @@ def copiar_jobs(
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     copia: CopiaDosMomentos,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
 ) -> dict[str, str]:
     """Copia os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um."""
     resultado: dict[str, str] = {}
@@ -92,7 +96,9 @@ def copiar_jobs(
             if j.estado == "concluido" and j.lixeira is None
         ]
     for job in jobs:
-        resultado[job.id] = copiar(job, repositorio, decupagens, correcoes, copia)
+        resultado[job.id] = copiar(
+            job, repositorio, decupagens, correcoes, copia, pessoas=pessoas
+        )
     return resultado
 
 
@@ -113,6 +119,7 @@ def main(argv: list[str]) -> int:
         ),
         RepositorioDeCorrecoesFirestore(firestore_),
         copia,
+        pessoas=CatalogoFirestore(firestore_).obter,
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

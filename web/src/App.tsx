@@ -19,12 +19,13 @@ import Busca from './Busca.tsx'
 import { PlanosParecidos } from './PlanosParecidos.tsx'
 import Login from './Login.tsx'
 import { Link } from './Link.tsx'
-import { ACERVO, navegar, useRota } from './rotas.ts'
+import { ACERVO, navegar, telaInicial, useRota } from './rotas.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
 import Administracao from './Administracao.tsx'
 import { podeAdministrar } from './administracao.ts'
 import Marcas from './Marcas.tsx'
+import PainelDaDiretoria from './PainelDaDiretoria.tsx'
 import TempoDeTela from './TempoDeTela.tsx'
 
 // A amostra do sistema visual é grande e sem login: fica num pedaço à parte do bundle.
@@ -78,11 +79,12 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
     [autenticador, aoSessaoExpirada],
   )
 
-  // `/` vai ao acervo; o endereço pedido antes do login fica como está e abre depois dele.
-  const ativa = sessao.tipo === 'ativa'
+  // `/` vai ao acervo, ou ao painel para quem só vê o painel (Diretoria); o endereço pedido
+  // antes do login fica como está e abre depois dele.
+  const inicio = sessao.tipo === 'ativa' ? telaInicial(sessao.usuario.permissoes) : null
   useEffect(() => {
-    if (ativa && rota.tipo === 'raiz') navegar(ACERVO, { substituir: true })
-  }, [ativa, rota.tipo])
+    if (inicio && rota.tipo === 'raiz') navegar(inicio, { substituir: true })
+  }, [inicio, rota.tipo])
 
   const verificar = useCallback(async () => {
     try {
@@ -147,8 +149,11 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
   const podeEditar = sessao.usuario.permissoes.includes('decupagem.editar')
   const podeAprovar = sessao.usuario.permissoes.includes('correcao.aprovar')
   const podeReprocessar = sessao.usuario.permissoes.includes('video.reprocessar_etapa')
+  const podeVerAuditoria = sessao.usuario.permissoes.includes('auditoria.ver')
+  const podeFundir = sessao.usuario.permissoes.includes('catalogo.fundir')
   const podeApagar = sessao.usuario.permissoes.includes('lixeira.gerir')
   const podeEnviar = sessao.usuario.permissoes.includes('video.enviar')
+  const podeVerPainel = sessao.usuario.permissoes.includes('painel.ver')
   return (
     <AppShell
       header={{ height: ALTURA_DA_BARRA }}
@@ -158,6 +163,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
         email={sessao.usuario.email}
         aoSair={() => void sair()}
         podeAdministrar={podeAdministrar(sessao.usuario.permissoes)}
+        podeVerPainel={podeVerPainel}
       />
       {rota.tipo === 'video' ? (
         <AppShell.Main bg="dark.7">
@@ -169,6 +175,8 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
             podeEditar={podeEditar}
             podeAprovar={podeAprovar}
             podeReprocessar={podeReprocessar}
+            podeVerAuditoria={podeVerAuditoria}
+            podeFundir={podeFundir}
           />
         </AppShell.Main>
       ) : rota.tipo === 'acervo' ? (
@@ -189,6 +197,11 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'marcas' ? (
         <AppShell.Main bg="dark.7">
           <Marcas api={api} filtros={rota.filtros} />
+        </AppShell.Main>
+      ) : rota.tipo === 'painel' && podeVerPainel ? (
+        // O front só esconde a área; quem barra é a API.
+        <AppShell.Main bg="dark.7">
+          <PainelDaDiretoria api={api} aba={rota.aba} filtros={rota.filtros} />
         </AppShell.Main>
       ) : rota.tipo === 'admin' ? (
         <AppShell.Main bg="dark.7">

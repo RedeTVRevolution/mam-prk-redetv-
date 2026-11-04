@@ -179,12 +179,13 @@ test('Editar papéis grava os papéis marcados e atualiza a linha', async () => 
   const dialogo = await screen.findByRole('dialog')
   await usuario.click(within(dialogo).getByRole('checkbox', { name: /Operador/ }))
   await usuario.click(within(dialogo).getByRole('checkbox', { name: /Curador/ }))
+  await usuario.click(within(dialogo).getByRole('checkbox', { name: /Diretoria/ }))
   await usuario.click(within(dialogo).getByRole('button', { name: 'Salvar' }))
 
-  await within(await linhaDe('Rui Prado')).findByText('Editor, Curador')
+  await within(await linhaDe('Rui Prado')).findByText('Editor, Curador, Diretoria')
   const chamada = chamadas.find((c) => c.metodo === 'PUT')!
   expect(chamada.caminho).toBe('/v1/admin/usuarios/u2/papeis')
-  expect(chamada.corpo).toEqual({ papeis: ['editor', 'curador'] })
+  expect(chamada.corpo).toEqual({ papeis: ['editor', 'curador', 'diretoria'] })
 })
 
 test('Reenviar link de senha chama a API e avisa', async () => {
