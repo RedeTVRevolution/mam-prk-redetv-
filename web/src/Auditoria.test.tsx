@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import App from './App.tsx'
-import { ACOES_DA_AUDITORIA, FRASE_DA_ACAO } from './auditoria.ts'
+import { ACOES_DA_AUDITORIA, detalhesEmFrases, FRASE_DA_ACAO } from './auditoria.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
 import { render } from './render-teste.tsx'
 
@@ -143,6 +143,21 @@ test('cada ação da lista fechada tem frase, e só ela', () => {
   expect(FRASE_DA_ACAO['decupagem.baixada']).toBe('Baixou a decupagem')
   expect(FRASE_DA_ACAO['pessoa.fundida']).toBe('Fundiu pessoas')
   expect(FRASE_DA_ACAO['aprovacao.alterada']).toBe('Mudou a regra de aprovação')
+})
+
+test('a mudança da regra de aprovação diz se passou a exigir ou deixou de exigir', () => {
+  const mudanca = (antes: boolean, depois: boolean) =>
+    detalhesEmFrases({
+      id: 'r',
+      quando: '2026-11-04T12:00:00Z',
+      acao: 'aprovacao.alterada',
+      alvo_tipo: 'tipo_de_correcao',
+      alvo_id: 'pessoa.renomear',
+      alvo_nome: 'Nome',
+      detalhes: { antes, depois },
+    })
+  expect(mudanca(false, true)).toEqual(['Passou a exigir aprovação do Curador'])
+  expect(mudanca(true, false)).toEqual(['Deixou de exigir aprovação do Curador'])
 })
 
 test('a tabela mostra quando, quem, ação em frase, alvo e motivo', async () => {

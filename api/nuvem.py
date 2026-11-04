@@ -844,6 +844,10 @@ class RepositorioDeAprovacaoFirestore:
     def definir(self, tipos: frozenset[str]) -> None:
         self._documento.set({"tipos": sorted(tipos)})
 
+    def mudar(self, tipo: str, exige_aprovacao: bool) -> None:
+        operacao = firestore.ArrayUnion if exige_aprovacao else firestore.ArrayRemove
+        self._documento.set({"tipos": operacao([tipo])}, merge=True)
+
 
 class RepositorioDeAuditoriaFirestore:
     """Só acrescenta: `create` falha se o id já existe, e não há como alterar nem apagar."""

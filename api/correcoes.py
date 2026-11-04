@@ -717,6 +717,11 @@ class RepositorioDeAprovacao(Protocol):
 
     def definir(self, tipos: frozenset[str]) -> None: ...
 
+    def mudar(self, tipo: str, exige_aprovacao: bool) -> None:
+        """Liga ou desliga um tipo só, sem regravar os outros: duas mudanças ao
+        mesmo tempo em tipos diferentes não se apagam."""
+        ...
+
 
 class RepositorioDeAprovacaoEmMemoria:
     def __init__(self, tipos: frozenset[str] = frozenset()) -> None:
@@ -727,6 +732,9 @@ class RepositorioDeAprovacaoEmMemoria:
 
     def definir(self, tipos: frozenset[str]) -> None:
         self._tipos = tipos
+
+    def mudar(self, tipo: str, exige_aprovacao: bool) -> None:
+        self._tipos = self._tipos | {tipo} if exige_aprovacao else self._tipos - {tipo}
 
 
 class ItemInexistente(Exception):

@@ -33,8 +33,12 @@ class MudancaDaRegra(BaseModel):
     exige_aprovacao: bool
 
 
+def _nomes() -> dict[str, str]:
+    return {o.valor: o.rotulo for o in rotulos_dos_tipos()}
+
+
 def _regras(exigem: frozenset[str]) -> list[RegraDeAprovacao]:
-    nomes = {o.valor: o.rotulo for o in rotulos_dos_tipos()}
+    nomes = _nomes()
     return [
         RegraDeAprovacao(tipo=t, nome=nomes.get(t, t), exige_aprovacao=t in exigem)
         for t in CORRIGIVEIS
@@ -71,10 +75,7 @@ def criar_rotas_da_aprovacao(
         antes = repositorio.tipos()
         if (pedido.tipo in antes) == pedido.exige_aprovacao:
             return _regras(antes)
-        depois = (
-            antes | {pedido.tipo} if pedido.exige_aprovacao else antes - {pedido.tipo}
-        )
-        repositorio.definir(depois)
+        repositorio.mudar(pedido.tipo, pedido.exige_aprovacao)
         try:
             auditoria.acrescentar(
                 RegistroDeAuditoria(
@@ -85,9 +86,7 @@ def criar_rotas_da_aprovacao(
                     acao="aprovacao.alterada",
                     alvo_tipo="tipo_de_correcao",
                     alvo_id=pedido.tipo,
-                    alvo_nome=next(
-                        r.nome for r in _regras(depois) if r.tipo == pedido.tipo
-                    ),
+                    alvo_nome=_nomes().get(pedido.tipo, pedido.tipo),
                     detalhes={
                         "antes": pedido.tipo in antes,
                         "depois": pedido.exige_aprovacao,
@@ -96,8 +95,8 @@ def criar_rotas_da_aprovacao(
             )
         except Exception:
             # Sem registro, a mudança não fica.
-            repositorio.definir(antes)
+            repositorio.mudar(pedido.tipo, not pedido.exige_aprovacao)
             raise
-        return _regras(depois)
+        return _regras(repositorio.tipos())
 
     return rotas

@@ -106,7 +106,7 @@ Princípios do mapa:
 | | |
 | --- | --- |
 | Para quem | Administrador, só em conta local com MFA |
-| O que tem | Usuários, papéis, chaves de API, lixeira e auditoria. Detalhes em [administracao.md](administracao.md) |
+| O que tem | Usuários, papéis, chaves de API, regras de aprovação, lixeira e auditoria. Detalhes em [administracao.md](administracao.md) |
 | Existe no código | `GET /v1/eu` com papéis e permissões; `DELETE /v1/jobs/{id}`, que só cancela |
 | Existe sem tela | Criar contas (`make criar-contas`), dar papéis (`make atribuir-papeis`), chaves de API (`make emitir-chave`, `listar-chaves`, `revogar-chave`) |
 | Falta | Os papéis Administrador e Diretoria: o código só conhece Consulta, Operador, Editor e Curador (`api/papeis.py`). Tela de usuários, apagar vídeo (lixeira), auditoria visível |

@@ -684,6 +684,16 @@ class TestRepositorioDeAprovacaoFirestore:
         aprovacao.definir(frozenset())
         assert aprovacao.tipos() == frozenset()
 
+    def test_mudar_um_tipo_nao_regrava_os_outros(
+        self, aprovacao: RepositorioDeAprovacaoFirestore
+    ) -> None:
+        aprovacao.mudar("pauta.titulo", True)
+        # A mudança de outra pessoa, em outro tipo, fica.
+        aprovacao.mudar("pessoa.renomear", True)
+        aprovacao.mudar("pauta.titulo", False)
+
+        assert aprovacao.tipos() == {"pessoa.renomear"}
+
     def test_tipo_desconhecido_no_documento_e_ignorado(
         self, aprovacao: RepositorioDeAprovacaoFirestore
     ) -> None:
