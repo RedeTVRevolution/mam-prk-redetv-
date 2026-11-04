@@ -207,6 +207,15 @@ exportar-regressao:
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.regressao "$(PASTA)"
 
+# Roda uma versão do pipeline no conjunto de regressão e compara com a aprovada (#254):
+# make regressao VERSAO=<versão> [RESERVADOS=1] [PASTA=regressao-da-versao] [CONFIRMAR=1]
+# Sem CONFIRMAR=1 só mostra o custo estimado. Sai com código 1 se um requisito fica abaixo da meta.
+# DECUPAGENS é a pasta com as decupagens de cada versão; CUSTO_POR_HORA_USD é opcional.
+regressao:
+	set -a && . ./.env && set +a && \
+	CONFIRMAR="$(CONFIRMAR)" \
+	uv run --locked python -m api.regressao_da_versao "$(VERSAO)" "$(RESERVADOS)" "$(PASTA)"
+
 # Taxa de correção por tipo, programa e versão do pipeline, em CSV (#265):
 # make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO, UTC, inclusive)
 taxa-de-correcao:
