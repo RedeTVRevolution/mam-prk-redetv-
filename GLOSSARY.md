@@ -183,6 +183,9 @@ A análise inteira de um Job concluído refeita com outro modelo, sem escaloname
 Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada.
 _Evitar_: edição, ajuste
 
+**Fusão de pessoas**:
+Juntar duas pessoas do catálogo numa só, o caso comum de nome duplicado (`api/fusao_de_pessoas.py`, #209, permissão `catalogo.fundir` do Curador e do Administrador). `POST /v1/catalogo/pessoas/{origem}/fundir` (destino e motivo) e `GET .../fundir/impacto?destino_id=` (quantos vídeos mudam e quantas fotos saem). A origem não é apagada: guarda `fundida` (destino, quem, quando, motivo) e some das buscas; o destino ganha o nome e os apelidos dela. Nada gravado é reescrito: a leitura das Decupagens troca a origem pelo destino (`com_pessoas_fundidas`). As fotos de rosto da origem são apagadas (LGPD) e a ação `pessoa.fundida` vai para a auditoria. Na tela, "Fundir com…" na linha da pessoa do catálogo, no modo de catalogação.
+
 **Lixeira**:
 Primeiro tempo de apagar um item (`api/lixeira.py`, `/v1/admin/lixeira`, #144, [ADR 0010](docs/adr/0010-lixeira-e-purga.md)): o vídeo ganha `Job.lixeira` (quando, quem, motivo) e some da lista, da busca e das rotas do Job para quem não é Administrador, mas nada é apagado e restaurar volta tudo. Só Job `concluido`, `falhou` ou `cancelado`. Cada envio e restauração vai para a auditoria com o impacto. Vale também para pessoa e marca do catálogo (#151, permissão `catalogo.apagar` do Curador e do Administrador; restaurar e purgar só do Administrador): a pessoa perde as fotos de rosto já no envio e, nas decupagens, o nome confirmado só pelo rosto vira "não identificado"; a marca mantém o texto e perde o vínculo.
 
