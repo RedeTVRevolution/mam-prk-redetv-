@@ -19,6 +19,7 @@ Chame a skill pela ferramenta Skill, com o nome completo. Se ela não estiver di
 
 - Só commits novos: não use `--amend`, rebase nem reset nos commits que já estão no branch.
 - Não faça push e não troque de branch.
+- Não use `git worktree` nem `git stash`: outros agentes trabalham ao mesmo tempo no mesmo repositório, e os dois mexem no que é de todos.
 - Não comente nem edite issues e não mexa em labels: o script cuida disso.
 - Não edite `scripts/afk/` nem `.claude/`.
 - Não há credencial de nuvem aqui. Nada de `gcloud`, `terraform apply` ou chamadas reais ao Gemini.

@@ -1,6 +1,7 @@
-// Loop AFK com o Sandcastle (#22): um ticket por vez, cada iteração numa vaga nova (um contêiner
-// num worktree do branch do ticket). O integrador, outro sandbox, leva o ticket feito ao branch do PR.
-// Roda no Mac, chamado pelo rodar.sh: node scripts/afk/main.mts <clone> <branch do PR> <máximo de iterações>
+// Loop AFK com o Sandcastle (#22): até K tickets ao mesmo tempo, cada iteração numa vaga nova (um
+// contêiner num worktree do branch do ticket). O integrador, outro sandbox, junta ao branch do PR os
+// tickets feitos, um por vez. Roda no Mac, chamado pelo rodar.sh:
+// node scripts/afk/main.mts <clone> <branch do PR> <máximo de iterações>
 import { appendFileSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -15,9 +16,10 @@ export type Config = {
   clone: string; // fica em main; os worktrees moram em .sandcastle/ dentro dele
   branch: string; // afk/<data-hora>, o do PR
   maxIteracoes: number;
+  vagas: number; // tickets ao mesmo tempo
   caixa: (papel: "vaga" | "integrador") => Caixa;
   claude: string; // o comando, dentro da caixa
-  instalar: string; // roda em cada vaga nova
+  instalar: string; // roda em cada sandbox novo
   verificar: string;
   modelo?: string;
   modeloRevisor: string;
@@ -65,6 +67,16 @@ export const leCurto = (p: string) => {
 };
 const pastaDeVerdade = (p: string) => lstatSync(p, { throwIfNoEntry: false })?.isDirectory() === true;
 
+// Mutex: cada chamada espera a anterior terminar.
+const emSerie = () => {
+  let fila: Promise<unknown> = Promise.resolve();
+  return function <T>(f: () => Promise<T>): Promise<T> {
+    const p = fila.then(f);
+    fila = p.catch(() => {});
+    return p;
+  };
+};
+
 const CONSULTA = `query($owner: String!, $name: String!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
     issues(first: 100, after: $endCursor) {
@@ -73,6 +85,12 @@ const CONSULTA = `query($owner: String!, $name: String!, $endCursor: String) {
     }
   }
 }`;
+
+// A spec de um ticket: a primeira referência (#N ou `....md`) do primeiro parágrafo de "## Parte de".
+export const specDe = (corpo: string) => {
+  const secao = /^##\s*Parte de\s*\n+([^\n]+)/im.exec(corpo)?.[1] ?? "";
+  return /#\d+|`[^`]+\.md`/.exec(secao)?.[0] ?? "";
+};
 
 export async function loop(c: Config): Promise<number> {
   const afk = join(c.clone, ".afk");
@@ -119,6 +137,7 @@ export async function loop(c: Config): Promise<number> {
         number: i.number as number,
         state: i.state as string,
         labels: i.labels.nodes.map((l: any) => l.name) as string[],
+        spec: specDe(i.body ?? ""),
         bloqueios: [...new Set<number>([
           ...i.blockedBy.nodes.map((b: any) => b.number),
           ...(i.body ?? "").split(/\r?\n/)
@@ -127,26 +146,38 @@ export async function loop(c: Config): Promise<number> {
         ])].sort((a, b) => a - b),
       }));
 
-  // A fila, por número: os ready-for-agent abertos e ainda não feitos, cada um com os bloqueadores que
-  // não estão fechados nem afk-feito ("#3	espera #2"). O primeiro sem espera é o próximo ticket.
-  // Grava em .afk/fila, para quem acompanha saber a vez de cada um.
+  // conferido: o último SHA do ticket que passou no portão; começa na base.
+  type Ticket = {
+    ticket: string; spec: string; ramo: string; base: string; conferido: string;
+    parciais: number; falhas: number; mesclar: string; mesclagens: number; iteracoes: number;
+  };
+  const emAndamento = new Map<string, Ticket>();
   // Os tickets feitos ou devolvidos nesta rodada: não voltam à fila nem se o gh falhar ao trocar a label.
   const saidos = new Set<string>();
   // Os feitos nesta rodada liberam quem eles bloqueiam, com ou sem a label afk-feito.
   const feitos = new Set<number>();
+
+  // A fila, por número: os ready-for-agent abertos e ainda não feitos, cada um com o que o segura: os
+  // bloqueadores que não estão fechados nem afk-feito ("#3	espera #2"), estar numa vaga ou ser da mesma
+  // spec de um ticket numa vaga. O primeiro livre é o próximo. Grava em .afk/fila, para quem acompanha.
   const proximoTicket = async () => {
     const todas = await issues();
     const resolvido = new Set(todas.filter((i) => i.state === "CLOSED" || i.labels.includes("afk-feito") || feitos.has(i.number)).map((i) => i.number));
-    const linhas = todas
+    const specs = new Set([...emAndamento.values()].map((t) => t.spec).filter(Boolean));
+    const fila = todas
       .filter((i) => i.state === "OPEN" && i.labels.includes("ready-for-agent") && !i.labels.includes("afk-feito"))
       .filter((i) => !saidos.has(String(i.number)))
       .sort((a, b) => a.number - b.number)
       .map((i) => {
         const espera = i.bloqueios.filter((b) => !resolvido.has(b));
-        return `#${i.number}` + (espera.length ? `\tespera ${espera.map((b) => `#${b}`).join(" ")}` : "");
+        const motivo = emAndamento.has(String(i.number)) ? "em andamento"
+          : espera.length ? `espera ${espera.map((b) => `#${b}`).join(" ")}`
+          : specs.has(i.spec) ? `espera a spec ${i.spec}` : "";
+        return { i, linha: `#${i.number}` + (motivo ? `\t${motivo}` : "") };
       });
-    writeFileSync(join(afk, "fila"), linhas.map((l) => `${l}\n`).join(""));
-    return linhas.find((l) => !l.includes("\t"))?.slice(1);
+    writeFileSync(join(afk, "fila"), fila.map((f) => `${f.linha}\n`).join(""));
+    const livre = fila.find((f) => !f.linha.includes("\t"))?.i;
+    return livre && { ticket: String(livre.number), spec: livre.spec };
   };
 
   const git = async (sb: Vaga, comando: string) => {
@@ -227,12 +258,36 @@ export async function loop(c: Config): Promise<number> {
     return { resposta, cortado: ac.signal.aborted, tokens, vivo };
   };
 
+  // #849 do Sandcastle: um `git worktree repair` dentro de um contêiner grava nos metadados do worktree
+  // o caminho do contêiner, e o `git worktree prune` de cada createSandbox apaga então o worktree de
+  // outra vaga viva. Antes de cada criação, os metadados das vagas vivas voltam ao caminho do Mac. A
+  // escrita passa pelo contêiner do integrador: um symlink que o agente ponha no caminho não a leva
+  // para fora do .git. ponytail: sobra uma janela entre a restauração e o prune do createSandbox.
+  const metadados = new Map<string, { gitdir: string; conteudo: string }>(); // por worktree, no Mac
+  let escritor: Vaga | undefined; // o integrador, depois de criado
+  // Logo depois da criação, antes de qualquer agente: o gitdir ainda é o que o git do Mac escreveu.
+  const registra = (worktree: string) => {
+    const raiz = join(c.clone, ".git", "worktrees");
+    for (const nome of readdirSync(raiz)) {
+      const gitdir = join(raiz, nome, "gitdir");
+      const conteudo = leCurto(gitdir);
+      if (conteudo && real(dirname(conteudo.trim())) === real(worktree)) metadados.set(worktree, { gitdir, conteudo });
+    }
+  };
+  const restaura = async () => {
+    for (const { gitdir, conteudo } of metadados.values()) {
+      if (leCurto(gitdir) === conteudo) continue;
+      await git(escritor!, `rm -rf ${q(gitdir)} && printf %s ${Buffer.from(conteudo).toString("base64")} | base64 -d > ${q(gitdir)}`);
+    }
+  };
+
   // Furo do Sandcastle: o createSandbox reaproveita qualquer worktree registrado no .git com o branch da
   // vaga se o caminho começar, em texto, por .sandcastle/worktrees/, sem resolver "..". O agente alcança
   // .git/worktrees/ e poderia fazer a vaga seguinte montar uma pasta qualquer do Mac (a principal, por
   // exemplo); o Sandcastle ainda roda git nela e, ao fechar, a removeria. Antes de cada criação, nenhum
-  // worktree registrado aponta para uma pasta existente fora de .sandcastle/worktrees/; depois, a vaga
-  // tem de estar na pasta do seu branch. Se não, o loop para sem fechar a vaga.
+  // worktree registrado aponta para uma pasta existente fora de .sandcastle/worktrees/; depois, o sandbox
+  // tem de estar na pasta do seu branch. Se não, o loop para sem fechá-lo. ponytail: com outras vagas
+  // vivas, sobra uma janela entre a conferência e o createSandbox; o conserto é no Sandcastle.
   const pastaDosWorktrees = join(realpathSync(c.clone), ".sandcastle", "worktrees");
   const gerenciado = (p: string) => { const r = real(p); return r !== "" && dirname(r) === pastaDosWorktrees; };
   // O git worktree prune que o Sandcastle roda no Mac apaga cada .git/worktrees/<id> sem gitdir seguindo
@@ -249,47 +304,54 @@ export async function loop(c: Config): Promise<number> {
       if (real(pasta) && !gerenciado(pasta)) throw new Parada(`o worktree ${nome} do .git aponta para ${pasta}, fora de .sandcastle/worktrees`);
     }
   };
-  const cria = async (ramo: string, base: string, papel: "vaga" | "integrador") => {
-    confereWorktrees();
-    const sb = await sc.createSandbox({ branch: ramo, baseBranch: base, sandbox: c.caixa(papel), cwd: c.clone });
-    if (real(sb.worktreePath) !== join(pastaDosWorktrees, ramo.replaceAll("/", "-"))) {
-      throw new Parada(`o sandbox de ${ramo} subiu em ${sb.worktreePath}; o contêiner ficou aberto`);
-    }
-    return sb;
-  };
 
   // Uma falha ao abrir (Docker, rede no uv sync ou no npm ci) é falha da iteração, não do loop. A
   // instalação roda aqui, e não num hook onSandboxReady, que o Sandcastle roda sem olhar a saída.
   class VagaNaoAbriu extends Error {}
-  const abreVaga = async (t: Ticket) => {
-    const vaga = await cria(t.ramo, t.base, "vaga")
-      .catch((e) => { throw e instanceof Parada ? e : new VagaNaoAbriu(String(e?.message ?? e)); });
-    const r = await vaga.exec(c.instalar).catch((e) => ({ exitCode: -1, stderr: String(e?.message ?? e) }));
-    if (r.exitCode === 0) return vaga;
-    await fecha(vaga).catch(() => {});
+  const criacao = emSerie(); // o prune de uma criação não corre junto com a criação de outra
+  const abre = async (ramo: string, base: string, papel: "vaga" | "integrador") => {
+    const sb = await criacao(async () => {
+      confereWorktrees(); // antes da restauração, que grava em .git/worktrees/
+      await restaura();
+      const novo = await sc.createSandbox({ branch: ramo, baseBranch: base, sandbox: c.caixa(papel), cwd: c.clone });
+      if (real(novo.worktreePath) !== join(pastaDosWorktrees, ramo.replaceAll("/", "-"))) {
+        throw new Parada(`o sandbox de ${ramo} subiu em ${novo.worktreePath}; o contêiner ficou aberto`);
+      }
+      registra(novo.worktreePath);
+      return novo;
+    }).catch((e) => { throw e instanceof Parada ? e : new VagaNaoAbriu(String(e?.message ?? e)); });
+    const r = await sb.exec(c.instalar).catch((e) => ({ exitCode: -1, stderr: String(e?.message ?? e) }));
+    if (r.exitCode === 0) return sb;
+    await fecha(sb).catch(() => {});
     throw new VagaNaoAbriu(`a instalação saiu com ${r.exitCode}: ${r.stderr.trim().slice(-500)}`);
   };
 
   // O close() preserva o worktree com sujeira (um agente cortado, um arquivo do make verificar), e a
   // vaga seguinte do ticket o reaproveitaria. Apagado, o createSandbox seguinte o recria do branch.
   const fecha = async (vaga: Vaga) => {
+    metadados.delete(vaga.worktreePath);
     const { preservedWorktreePath } = await vaga.close();
     if (preservedWorktreePath && gerenciado(preservedWorktreePath)) rmSync(preservedWorktreePath, { recursive: true, force: true });
   };
 
-  // conferido: o último SHA do ticket que passou no portão; começa na base.
-  type Ticket = { ticket: string; ramo: string; base: string; conferido: string; parciais: number };
-
-  // Uma iteração: implementação, revisão e portão, numa vaga nova que fecha no fim.
+  // Uma iteração: implementação, revisão e portão, numa vaga nova que fecha no fim. Na iteração de merge,
+  // o agente traz o branch do PR para o do ticket e resolve o conflito; não há revisão, que veria no
+  // base..HEAD os outros tickets.
   const itera = async (t: Ticket, i: number) => {
     const log = join(logs, `iteracao-${i}`);
     let vaga: Vaga | undefined;
     try {
-      vaga = await abreVaga(t);
+      vaga = await abre(t.ramo, t.base, "vaga");
       const inicio = await head(vaga);
       let esta = `\n\n## Esta iteração\n\n- Ticket: #${t.ticket}\n- Commit de antes do ticket: ${t.base}`;
       if (t.base !== inicio) {
         esta += `\n- Continuação: o ticket já tem commits. Leia \`git log ${t.base}..HEAD\` e as notas de .afk/progresso.md.`;
+      }
+      const mesclagem = t.mesclar;
+      if (mesclagem) {
+        esta += `\n- Merge: o ticket estava feito, mas não entrou em \`${c.branch}\` (${mesclagem}). Rode \`git merge ${c.branch}\`, ` +
+          "resolva os conflitos mantendo o que os dois lados fazem, rode `make verificar` até passar e faça o commit do merge. " +
+          "Nada além disso; termine com o status `feito`.";
       }
       // Depois de um corte ou de um erro do run o agente pode seguir vivo no contêiner: só fechá-lo o mata.
       const depoisDoCorte = async (r: { cortado: boolean; tokens: number; vivo: boolean }) => {
@@ -297,7 +359,7 @@ export async function loop(c: Config): Promise<number> {
         if (!r.vivo) return;
         await fecha(vaga!);
         vaga = undefined;
-        vaga = await abreVaga(t);
+        vaga = await abre(t.ramo, t.base, "vaga");
       };
 
       const impl = await roda(vaga, `${log}.jsonl`, readFileSync(join(aqui, "prompt.md"), "utf8") + esta, c.modelo, c.aviso);
@@ -310,7 +372,7 @@ export async function loop(c: Config): Promise<number> {
       // Revisão: outro claude -p, com contexto novo e outro modelo, sobre o ticket inteiro (base..HEAD).
       // Sem aviso de contexto, que manda terminar como parcial: o revisor só tem o corte duro.
       let motivo = "";
-      if (status === "feito" && (await head(vaga)) !== t.base) {
+      if (status === "feito" && !mesclagem && (await head(vaga)) !== t.base) {
         const rev = await roda(vaga, `${log}-revisao.jsonl`, readFileSync(join(aqui, "revisao.md"), "utf8") + esta, c.modeloRevisor);
         const revisao = ultimo(rev.resposta, /<revisao>([a-z]*)<\/revisao>/g);
         await depoisDoCorte(rev);
@@ -340,7 +402,7 @@ export async function loop(c: Config): Promise<number> {
       }
       return { status, verde, motivo, log, ponta: t.conferido };
     } catch (e) {
-      // Um erro numa vaga é falha da iteração; as falhas seguidas param o loop.
+      // Um erro numa vaga é falha da iteração; as falhas seguidas do ticket param o loop.
       if (e instanceof Parada) throw e;
       const m = String((e as Error)?.message ?? e);
       return { status: "", verde: true, motivo: e instanceof VagaNaoAbriu ? `a vaga não abriu: ${m}` : `erro na vaga: ${m}`, log, ponta: "" };
@@ -356,7 +418,8 @@ export async function loop(c: Config): Promise<number> {
     return 3;
   }
 
-  const integ = await cria(c.branch, "main", "integrador");
+  const integ = await abre(c.branch, "main", "integrador");
+  escritor = integ;
   let main = "";
   let esperada = ""; // a ponta que o branch do PR deve ter: o agente alcança a ref e pode movê-la
   try {
@@ -367,27 +430,79 @@ export async function loop(c: Config): Promise<number> {
     // metadados do integrador; o prune pula um worktree travado.
     await git(integ, `echo loop AFK > "$(git rev-parse --git-dir)/locked"`);
   } catch (e) {
-    await integ.close().catch(() => {});
+    await fecha(integ).catch(() => {});
     throw e;
   }
-  const conferePR = async () => {
+  const conferePR = async (ponta = esperada) => {
     const r = await integ.exec(`git rev-parse -q --verify ${q(`refs/heads/${c.branch}`)}`);
-    if (r.stdout.trim() !== esperada) throw new Error(`o branch do PR mudou fora do integrador (${r.stdout.trim() || "sumiu"}, esperado ${esperada})`);
+    if (r.stdout.trim() !== ponta) throw new Error(`o branch do PR mudou fora do integrador (${r.stdout.trim() || "sumiu"}, esperado ${ponta})`);
   };
+  const integracao = emSerie();
+  // Junta ao branch do PR o SHA que passou no portão. Devolve o motivo se não deu, e o branch do PR volta
+  // a como estava. Um branch do PR movido por fora (antes, durante o make verificar ou depois) para o loop.
+  // A instalação roda de novo antes do make verificar: um ticket já juntado pode ter mudado um lockfile.
+  const integra = (t: Ticket, log: string, ponta: string) =>
+    integracao(async () => {
+      await conferePR();
+      const antes = esperada;
+      // Sobras da instalação ou do make verificar do merge anterior (um arquivo reescrito, outro gerado)
+      // sujariam este merge e dariam o alarme falso do branch do PR mudado.
+      await git(integ, `git reset -q --hard ${antes} && git clean -fdq`);
+      const volta = () => integ.exec(`git merge --abort; git reset -q --hard ${antes}`);
+      try {
+        const m = await integ.exec(`git merge -q --no-ff -m ${q(`#${t.ticket}: merge do loop AFK`)} ${ponta}`);
+        if (m.exitCode !== 0) {
+          await volta();
+          return "conflito";
+        }
+        const feito = await head(integ);
+        if (feito === antes) return ""; // o ticket já estava no branch do PR
+        // O SHA vem da ref, que outra vaga pode ter trocado logo depois do merge: um commit forjado tem
+        // outra árvore e não bate com o índice e o worktree, que são os do merge de verdade.
+        if ((await integ.exec("git diff --quiet --cached HEAD && git diff --quiet")).exitCode !== 0) {
+          throw new Error(`o branch do PR mudou fora do integrador durante o merge do #${t.ticket} (${feito})`);
+        }
+        if ((await git(integ, `git rev-parse ${feito}^1 ${feito}^2`)) !== `${antes}\n${ponta}`) {
+          throw new Error(`o merge do #${t.ticket} não tem os pais esperados (${feito})`);
+        }
+        // Árvore igual à da ponta do ticket: o make verificar da vaga já conferiu exatamente isto.
+        if ((await git(integ, `git rev-parse ${feito}^{tree}`)) !== (await git(integ, `git rev-parse ${ponta}^{tree}`))) {
+          const i = await integ.exec(c.instalar);
+          const r = i.exitCode === 0 ? await integ.exec(c.verificar) : i;
+          writeFileSync(`${log}-integracao.verificar`, r.stdout + r.stderr);
+          if (r.exitCode !== 0) {
+            await volta();
+            const oque = i.exitCode === 0 ? "make verificar" : "a instalação";
+            anota(`#${t.ticket}: ${oque} falhou depois do merge (${log}-integracao.verificar)`);
+            return `${oque} falhou depois do merge`;
+          }
+        }
+        await conferePR(feito);
+        esperada = feito;
+        return "";
+      } catch (e) {
+        await volta();
+        throw e;
+      }
+    });
   // Tira o branch do ticket do caminho do PR: com commits, vira afk/<data>-<sufixo>-N e vai no bundle.
   // Por update-ref, que passa por cima de um branch com o mesmo nome que o agente tenha criado: o
   // `git branch -m` também renomeia a seção do branch no .git/config, que é só leitura no sandbox.
   const guardados: string[] = [];
-  const guarda = async (t: Ticket, sufixo: string) => {
-    const ponta = (await integ.exec(`git rev-parse -q --verify ${q(t.ramo)}`)).stdout.trim();
-    if (!ponta || ponta === t.base) return "";
-    const guardado = `${c.branch}-${sufixo}-${t.ticket}`;
-    await git(integ, `git update-ref ${q(`refs/heads/${guardado}`)} ${sha(ponta)} && git update-ref -d ${q(`refs/heads/${t.ramo}`)}`);
-    guardados.push(guardado);
-    return guardado;
+  // Em série com os merges: o integrador faz uma coisa por vez no .git (dois `git branch -M` juntos colidiam).
+  const guarda = (t: Ticket, sufixo: string) => {
+    saidos.add(t.ticket);
+    emAndamento.delete(t.ticket);
+    return integracao(async () => {
+      const ponta = (await integ.exec(`git rev-parse -q --verify ${q(t.ramo)}`)).stdout.trim();
+      if (!ponta || ponta === t.base) return "";
+      const guardado = `${c.branch}-${sufixo}-${t.ticket}`;
+      await git(integ, `git update-ref ${q(`refs/heads/${guardado}`)} ${sha(ponta)} && git update-ref -d ${q(`refs/heads/${t.ramo}`)}`);
+      guardados.push(guardado);
+      return guardado;
+    });
   };
   const paraHumano = async (t: Ticket, motivo: string) => {
-    saidos.add(t.ticket);
     const guardado = await guarda(t, "bloqueado");
     anota(`#${t.ticket} → ready-for-human: ${motivo}${guardado ? `; trabalho guardado em ${guardado}` : ""}`);
     // O ticket já saiu da rodada: sem o gh, a troca de label e o comentário ficam para o humano.
@@ -400,85 +515,115 @@ export async function loop(c: Config): Promise<number> {
     }
   };
 
-  let atual: Ticket | undefined;
-  let falhas = 0;
-  let saida = 0;
-  try {
-    for (let i = 1; i <= c.maxIteracoes; i++) {
-      if (!atual) {
-        const ticket = await proximoTicket();
-        if (!ticket) {
-          anota("sem_tickets: nenhum ticket elegível");
-          break;
-        }
-        const ramo = `afk-t/${c.branch.replace(/^afk\//, "")}/${ticket}`;
-        // Um branch do ticket criado antes pelo agente faria o createSandbox ignorar a base.
-        await git(integ, `git update-ref -d ${q(`refs/heads/${ramo}`)}`);
-        atual = { ticket, ramo, base: esperada, conferido: esperada, parciais: 0 };
-      }
-      const t = atual;
-      anota(`iteração ${i}: #${t.ticket}`);
+  // As iterações são do loop inteiro, somadas as vagas; as falhas seguidas, de cada ticket. Com `parar`,
+  // nenhuma vaga começa iteração nova: as que estão no meio terminam a sua.
+  const loopa = { iteracoes: 0, saida: 0, parar: false };
+  const para = (saida: number, motivo: string) => {
+    anota(motivo);
+    loopa.saida ||= saida;
+    loopa.parar = true;
+  };
+
+  // Um ticket do começo ao fim, uma iteração atrás da outra. Ao voltar, o ticket ou saiu de emAndamento
+  // (feito, bloqueado) ou fica lá para o fim do loop guardá-lo como parcial.
+  const trabalha = async (t: Ticket) => {
+    while (!loopa.parar && loopa.iteracoes < c.maxIteracoes) {
+      const i = ++loopa.iteracoes;
+      t.iteracoes++;
+      anota(`iteração ${i}: #${t.ticket}${t.mesclar ? " (merge)" : ""}`);
       const { status, verde, motivo, log, ponta } = await itera(t, i);
 
       if (status === "erro") {
-        anota(`#${t.ticket}: erro de ambiente informado pelo agente; o loop para (veja as notas acima e ${log}*)`);
-        saida = 2;
-        break;
+        para(2, `#${t.ticket}: erro de ambiente informado pelo agente; o loop para (veja as notas acima e ${log}*)`);
+        return;
       } else if (status === "bloqueado") {
         await paraHumano(t, "o agente precisa de uma decisão; veja o comentário anterior");
-        atual = undefined;
+        return;
       } else if (!verde || !status) {
-        falhas++;
+        t.falhas++;
         anota(`#${t.ticket}: ${!verde
           ? `make verificar falhou depois da iteração; commits da iteração desfeitos (${log}.verificar)`
           : motivo || `iteração terminou sem <ticket>${t.ticket}</ticket> e <status> válidos (${log}.jsonl)`}`);
-        if (falhas >= c.maxFalhas) {
-          anota(`parada: ${falhas} falhas seguidas`);
-          saida = 1;
-          break;
-        }
+        if (t.falhas >= c.maxFalhas) para(1, `parada: ${t.falhas} falhas seguidas do #${t.ticket}`);
         continue;
       } else if (status === "feito") {
-        // K=1: o ticket saiu da ponta do branch do PR, então o merge é sempre fast-forward.
-        await conferePR();
-        await git(integ, `git merge -q --ff-only ${ponta}`);
-        esperada = ponta;
-        atual = undefined; // já está no branch do PR: não é mais guardado como parcial
-        saidos.add(t.ticket);
-        feitos.add(Number(t.ticket));
-        appendFileSync(join(afk, "feitos"), `${t.ticket}\n`);
-        anota(`#${t.ticket}: feito`);
-        try {
-          await gh("issue", "edit", t.ticket, "--add-label", "afk-feito");
-        } catch (e) {
-          anota(`#${t.ticket}: a label afk-feito não entrou (${String((e as Error)?.message ?? e).trim()}); ponha à mão`);
+        t.falhas = 0;
+        const nao = await integra(t, log, ponta);
+        if (!nao) {
+          saidos.add(t.ticket);
+          emAndamento.delete(t.ticket);
+          feitos.add(Number(t.ticket));
+          appendFileSync(join(afk, "feitos"), `${t.ticket}\n`);
+          anota(`#${t.ticket}: feito`);
+          try {
+            await gh("issue", "edit", t.ticket, "--add-label", "afk-feito");
+          } catch (e) {
+            anota(`#${t.ticket}: a label afk-feito não entrou (${String((e as Error)?.message ?? e).trim()}); ponha à mão`);
+          }
+          return;
         }
+        if (t.mesclagens >= 1) {
+          await paraHumano(t, `não entrou em ${c.branch} nem depois de uma iteração de merge (${nao})`);
+          return;
+        }
+        t.mesclagens++;
+        t.mesclar = nao;
+        anota(`#${t.ticket}: não entrou em ${c.branch} (${nao}); a próxima iteração faz o merge`);
+        continue;
       } else if (status === "parcial") {
         t.parciais++;
         if (t.parciais >= c.maxParciais) {
           await paraHumano(t, `${t.parciais} iterações parciais seguidas`);
-          atual = undefined;
-        } else {
-          anota(`#${t.ticket}: parcial (${t.parciais}/${c.maxParciais}); a próxima iteração continua`);
+          return;
         }
+        anota(`#${t.ticket}: parcial (${t.parciais}/${c.maxParciais}); a próxima iteração continua`);
       } else {
-        anota(`#${t.ticket}: status desconhecido '${status}'; o loop para`);
-        saida = 2;
+        para(2, `#${t.ticket}: status desconhecido '${status}'; o loop para`);
+        return;
+      }
+      t.falhas = 0;
+    }
+  };
+
+  const vivas = new Set<Promise<void>>();
+  try {
+    for (;;) {
+      while (!loopa.parar && vivas.size < c.vagas && loopa.iteracoes < c.maxIteracoes) {
+        const proximo = await proximoTicket();
+        // O gh pode levar minutos tentando de novo, e as vagas seguem: o loop pode ter parado nesse meio-tempo.
+        if (!proximo || loopa.parar || loopa.iteracoes >= c.maxIteracoes) break;
+        const ramo = `afk-t/${c.branch.replace(/^afk\//, "")}/${proximo.ticket}`;
+        // Um branch do ticket criado antes pelo agente faria o createSandbox ignorar a base.
+        await git(integ, `git update-ref -d ${q(`refs/heads/${ramo}`)}`);
+        const t: Ticket = {
+          ...proximo, ramo, base: esperada, conferido: esperada, parciais: 0, falhas: 0, mesclar: "", mesclagens: 0, iteracoes: 0,
+        };
+        emAndamento.set(t.ticket, t);
+        const p: Promise<void> = trabalha(t)
+          .catch((e) => para(2, `erro do loop no #${t.ticket}: ${String((e as Error)?.message ?? e)}`))
+          .finally(() => vivas.delete(p));
+        vivas.add(p);
+      }
+      if (!vivas.size) {
+        if (!loopa.parar && loopa.iteracoes < c.maxIteracoes) anota("sem_tickets: nenhum ticket elegível");
         break;
       }
-      falhas = 0;
+      await Promise.race(vivas);
     }
   } catch (e) {
+    loopa.saida = 2;
     anota(`erro do loop: ${String((e as Error)?.message ?? e)}`);
-    saida = 2;
   } finally {
-    // O PR só leva tickets feitos: o ticket ainda em andamento fica num branch à parte.
-    if (atual) {
+    // Depois de um erro do despachante, as vagas vivas terminam a iteração antes do bundle.
+    loopa.parar = true;
+    await Promise.allSettled(vivas);
+    // O PR só leva tickets feitos: os ainda em andamento ficam em branches à parte.
+    for (const t of [...emAndamento.values()]) {
       try {
-        const guardado = await guarda(atual, "parcial");
-        anota(`#${atual.ticket}: ficou em andamento${guardado ? `; trabalho guardado em ${guardado}` : ""}`);
+        const guardado = await guarda(t, "parcial");
+        if (t.iteracoes) anota(`#${t.ticket}: ficou em andamento${guardado ? `; trabalho guardado em ${guardado}` : ""}`);
       } catch (e) {
-        anota(`#${atual.ticket}: ficou em andamento e não foi guardado (${String((e as Error)?.message ?? e)})`);
+        anota(`#${t.ticket}: ficou em andamento e não foi guardado (${String((e as Error)?.message ?? e)})`);
       }
     }
     anota(`fim: feitos: ${readFileSync(join(afk, "feitos"), "utf8").split("\n").filter(Boolean).join(" ")}`);
@@ -495,30 +640,33 @@ export async function loop(c: Config): Promise<number> {
       else anota(`sem bundle: ${b.stderr.trim()}`);
     } catch (e) {
       anota(`sem bundle: ${String((e as Error)?.message ?? e)}`);
-      saida = 2;
+      loopa.saida = 2;
     } finally {
-      await integ.close();
+      await fecha(integ);
     }
   }
-  return saida;
+  return loopa.saida;
 }
 
 if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const { docker } = await import("@ai-hero/sandcastle/sandboxes/docker");
   const [clone, branch, n] = process.argv.slice(2);
   const e = process.env;
+  const vagas = Number(e.AFK_VAGAS || 1);
   const repassa = ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN", "FIRESTORE_EMULATOR_HOST", "STORAGE_EMULATOR_HOST",
     "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
   // O pre-commit do projeto (gitleaks) nos commits do agente: o config do .git é só leitura no sandbox.
   // Só nas vagas: no integrador, os hooks do branch (escritos pelo agente) não rodam. Em todos, o git
   // ignora os refs/replace do agente, que trocariam o conteúdo de um commit no checkout e no merge.
   const hooks = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: ".githooks" };
+  // Com mais de uma vaga, os testes dividem o Mac: medido com duas vagas no make verificar (#22).
+  const divide = vagas > 1 ? { PYTEST_XDIST_AUTO_NUM_WORKERS: "3", VITEST_MAX_WORKERS: "2" } : {};
   const plugin = "/opt/plugins/mattpocock-skills";
   process.exitCode = await loop({
-    clone, branch, maxIteracoes: Number(n),
+    clone, branch, maxIteracoes: Number(n), vagas,
     caixa: (papel) => docker({
       imageName: "mam-afk", containerUid: 1000, containerGid: 1000, network: e.AFK_REDE,
-      env: { ...Object.fromEntries(repassa.map((k) => [k, e[k] ?? ""])), GIT_NO_REPLACE_OBJECTS: "1", ...(papel === "vaga" ? hooks : {}) },
+      env: { ...Object.fromEntries(repassa.map((k) => [k, e[k] ?? ""])), GIT_NO_REPLACE_OBJECTS: "1", ...(papel === "vaga" ? hooks : {}), ...divide },
       mounts: [{ hostPath: e.AFK_PLUGIN_HOST!, sandboxPath: plugin, readonly: true }],
     }),
     claude: "claude",

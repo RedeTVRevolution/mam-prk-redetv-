@@ -83,7 +83,7 @@ if ! git rev-parse -q --verify "refs/heads/$branch" > /dev/null || [ "$(git rev-
   exit "$saida"
 fi
 
-# Arquivo escrito no contêiner: só números passam para o PR.
+# Só números passam para o PR.
 feitos=$(grep -xE '[0-9]+' "$clone/.afk/feitos" | paste -sd ' ' - || true)
 # shellcheck disable=SC2086 # um número por palavra
 fecha=$(printf 'Closes #%s\n' $feitos)

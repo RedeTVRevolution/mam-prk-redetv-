@@ -231,10 +231,12 @@ Cada iteração:
 3. Se o status é `feito`, roda o revisor com `revisao.md`: um `claude -p` novo, com o modelo de `AFK_MODELO_REVISOR`, que roda `mattpocock-skills:code-review` contra o ticket a partir do commit de antes dele e commita as correções. Descarta de novo o que não foi commitado. O revisor termina com `<revisao>feita</revisao>` ou `<revisao>erro</revisao>`; sem um dos dois, ou cortado, a iteração conta como falha e a próxima retoma o ticket.
 4. Roda `make verificar`, já depois da revisão. Se falhar, desfaz os commits da iteração, os do implementador e os do revisor.
 5. Age conforme o status:
-   - `feito` (e revisão `feita`): o integrador leva o branch do ticket ao do PR (fast-forward) e o script põe `afk-feito` no ticket.
+   - `feito` (e revisão `feita`): o integrador junta o branch do ticket ao do PR e o script põe `afk-feito` no ticket.
    - `parcial`: a próxima iteração continua o ticket.
    - `bloqueado`: o agente comentou a pergunta no ticket e trocou a label para `ready-for-human`. O script tira o trabalho do branch, guarda num branch local `<branch>-bloqueado-N` e segue.
    - `erro`, do implementador ou do revisor: problema do ambiente, como uma skill ausente. O loop para, e o trabalho do ticket sai do branch do PR para `<branch>-parcial-N`.
+
+Com `AFK_VAGAS` acima de 1, o loop toca vários tickets ao mesmo tempo, cada um com as suas iterações. Ele não pega dois tickets da mesma spec juntos (a primeira referência, `#N` ou um `.md`, da seção "Parte de" do ticket). O integrador junta os tickets feitos ao branch do PR, um por vez, com `git merge --no-ff`. Se a árvore do merge difere da ponta do ticket, roda `make verificar` de novo. Se o merge conflita ou fica vermelho, o branch do PR volta a como estava e a iteração seguinte do ticket é de merge: o agente traz o branch do PR para o do ticket, resolve e verifica, sem revisão. Se nem assim entrar, o ticket volta para humano como um bloqueado. As iterações contam para o loop inteiro, e as falhas seguidas, para cada ticket; um erro ou a terceira falha seguida de um ticket param a distribuição de tickets, e cada vaga termina a iteração em que está.
 
 O loop para sozinho quando a fila esvazia, depois do número de iterações pedido, depois de 3 falhas seguidas (portão vermelho ou iteração sem sinal válido) ou se houver um ticket aberto com `afk-feito`, o que indica um PR anterior sem merge. Um ticket com 3 parciais seguidas volta para humano como um bloqueado. Um ticket em andamento quando o loop para sai do branch do PR e fica num branch local `<branch>-parcial-N`.
 
@@ -242,6 +244,7 @@ O loop para sozinho quando a fila esvazia, depois do número de iterações pedi
 
 | Variável | Padrão | Para quê |
 |---|---|---|
+| `AFK_VAGAS` | 1 | Tickets ao mesmo tempo, cada um na sua vaga. Com mais de uma, o `make verificar` de cada vaga usa 3 processos no pytest e 2 no vitest |
 | `AFK_AVISO_TOKENS` | 120000 | O hook manda o implementador comitar o que está verde, anotar o que falta e sair como `parcial`. O revisor não recebe o aviso, só o corte |
 | `AFK_CORTE_TOKENS` | 140000 | O script mata a iteração e descarta o que não foi commitado |
 | `AFK_MAX_TURNOS` | 300 | `--max-turns` de cada iteração |
@@ -254,6 +257,8 @@ O loop para sozinho quando a fila esvazia, depois do número de iterações pedi
 O tamanho do contexto é a soma de `input_tokens`, `cache_read_input_tokens` e `cache_creation_input_tokens` da última resposta da conversa principal (sem subagentes).
 
 Um agente que passa 20 minutos sem escrever nada, por exemplo preso numa tool call, também é morto. A iteração conta como falha, e o que ele não commitou é descartado.
+
+Uma falha do `gh` (rede, GitHub fora do ar) não para o loop: ele tenta 5 vezes, com esperas de 30 s a 4 min, e cada chamada tem prazo de 2 min. Um comentário no ticket vai uma vez só; se falhar, a nota no progresso pede para conferir à mão.
 
 ### Testes
 

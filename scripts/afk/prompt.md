@@ -33,6 +33,7 @@ Se um hook avisar que o contexto passou do limite, siga o aviso na hora: comite 
 ## Regras
 
 - Não faça push, não troque de branch e não reescreva commits que você não fez nesta iteração.
+- Não use `git worktree` nem `git stash`: outros agentes trabalham ao mesmo tempo no mesmo repositório, e os dois mexem no que é de todos.
 - Não feche issues e não ponha a label `afk-feito`: o script faz isso depois de conferir `make verificar`.
 - Não edite `scripts/afk/` nem `.claude/`.
 - Não há credencial de nuvem aqui. Nada de `gcloud`, `terraform apply` ou chamadas reais ao Gemini: os testes usam versões falsas.

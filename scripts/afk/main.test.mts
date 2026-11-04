@@ -8,14 +8,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
-import { leCurto, loop, type Config } from "./main.mts";
+import { leCurto, loop, specDe, type Config } from "./main.mts";
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 const tmp = mkdtempSync(join(tmpdir(), "afk-"));
 const bin = join(tmp, "bin");
 mkdirSync(bin);
 
-// claude falso: executa a próxima linha de $FAKE/roteiro ("<ação> <ticket>").
+// claude falso: executa a próxima linha de $FAKE/roteiro ("<ação> <ticket>") do ticket do prompt.
 // Registra em $FAKE/claude.log a ação, o ticket, o --model e se o hook de contexto está ligado,
 // e guarda o prompt em $FAKE/prompt.<modelo>.
 writeFileSync(join(bin, "claude"), String.raw`#!/usr/bin/env bash
@@ -29,13 +29,21 @@ while [ $# -gt 0 ]; do
   shift
 done
 printf '%s' "$prompt" > "$FAKE/prompt.$modelo"
-read -r acao ticket < "$FAKE/roteiro"
-tail -n +2 "$FAKE/roteiro" > "$FAKE/roteiro.novo" && mv "$FAKE/roteiro.novo" "$FAKE/roteiro"
+ticket=$(grep -o 'Ticket: #[0-9]*' <<< "$prompt" | tail -n 1 | tr -dc 0-9)
+until mkdir "$FAKE/trava" 2> /dev/null; do sleep 0.05; done # as vagas leem o roteiro juntas
+linha=$(grep -m 1 " $ticket\$" "$FAKE/roteiro" || true)
+awk -v l="$linha" '!f && $0 == l { f = 1; next } 1' "$FAKE/roteiro" > "$FAKE/roteiro.novo" && mv "$FAKE/roteiro.novo" "$FAKE/roteiro"
+rmdir "$FAKE/trava"
+read -r acao _ <<< "$linha"
 echo "$acao $ticket $modelo${"${AFK_AVISO_TOKENS:+ aviso}"}" >> "$FAKE/claude.log"
 uso() { printf '{"type":"assistant","parent_tool_use_id":%s,"message":{"usage":{"input_tokens":1,"cache_read_input_tokens":%s,"cache_creation_input_tokens":0}}}\n' "$1" "$2"; }
 fim() { printf '{"type":"result","result":"Pronto.\\n<ticket>%s</ticket>\\n<status>%s</status>"}\n' "$ticket" "$1"; }
 fim_revisao() { printf '{"type":"result","result":"Revisado.\\n<revisao>%s</revisao>"}\n' "$1"; }
 commit() { echo "$1" > "$1"; git add "$1"; git commit -qm "#$ticket: $1"; }
+espera() { # até 60 s; se expirar, fica no log (sob carga, a outra vaga pode demorar a chegar)
+  for _ in $(seq 600); do [ -e "$1" ] && return; sleep 0.1; done
+  echo "espera expirou: $1" >> "$FAKE/claude.log"; return 1
+}
 nota() { echo "- nota de $acao $ticket" >> .afk/progresso.md; }
 uso null 5000
 uso '"subagente"' 999999 # contexto de subagente: não conta
@@ -85,6 +93,28 @@ case $acao in
   planta) commit "t$ticket"; git branch afk-t/teste/2; git checkout -q afk-t/teste/2; commit plantado; git checkout -q -; fim feito ;;
   # Ocupa o nome em que o loop guardaria o ticket.
   ocupa) commit "t$ticket-parte"; git branch "afk/teste-parcial-$ticket" main; fim parcial ;;
+  # Duas vagas: só termina se a outra estiver rodando ao mesmo tempo.
+  junto_parcial) touch "$FAKE/vivo.$ticket"; espera "$FAKE/vivo.$((3 - ticket))"; commit "t$ticket-parte"; fim parcial ;;
+  junto) touch "$FAKE/vivo.$ticket"; espera "$FAKE/vivo.$((3 - ticket))"; commit "t$ticket"; fim feito ;;
+  # Mesma spec: anota se outra vaga estiver rodando ao mesmo tempo.
+  sozinho)
+    touch "$FAKE/vivo.$ticket"; sleep 0.5
+    if ls "$FAKE"/vivo.* | grep -qv "vivo.$ticket\$"; then echo colidiu >> "$FAKE/claude.log"; fi
+    rm "$FAKE/vivo.$ticket"; commit "t$ticket"; fim feito ;;
+  comum) echo "$ticket" > comum; git add comum; git commit -qm "#$ticket: comum"; fim feito ;;
+  mescla)
+    git merge -q afk/teste 2> /dev/null || { echo junto > comum; git add comum; git commit -qm "#$ticket: merge"; }
+    fim feito ;;
+  nao_mescla) fim feito ;;
+  # Um merge limpo que, com o outro ticket, quebra a verificação.
+  cria) commit "c$ticket"; fim feito ;;
+  # #849: o agente estraga os metadados do próprio worktree e só commita depois de outra vaga ser criada.
+  estraga)
+    echo /nao/existe/.git > "$(git rev-parse --git-dir)/gitdir"; touch "$FAKE/estragou"
+    espera "$FAKE/vivo.2"; commit "t$ticket"; fim feito ;;
+  # A vaga seguinte do ticket só é criada depois do estraga.
+  depois_do_estraga) espera "$FAKE/estragou"; commit "t$ticket-parte"; fim parcial ;;
+  marca) touch "$FAKE/vivo.$ticket"; commit "t$ticket"; fim feito ;;
 esac
 `);
 
@@ -157,7 +187,7 @@ async function roda(maxIteracoes: number, fila: object[], roteiro: string[], ext
   writeFileSync(join(repo, ".afk", "progresso.md"), notasDeAntes);
   const inicio = Date.now();
   const saida = await loop({
-    clone: repo, branch: "afk/teste", maxIteracoes, caixa: () => noSandbox(),
+    clone: repo, branch: "afk/teste", maxIteracoes, vagas: 1, caixa: () => noSandbox(),
     claude: join(bin, "claude"), instalar: "true", verificar: "test ! -e quebrado",
     modeloRevisor: "opus", aviso: 120000, corte: 140000, maxTurnos: 300, maxFalhas: 3, maxParciais: 3, ocioso: 60, pausaGh: 0,
     ...extra,
@@ -193,7 +223,7 @@ test("ticket feito, na ordem dos bloqueios", async () => {
   assert.ok(r.noPR("t3") && r.noPR("r3"), "commits do agente e da revisão no branch do PR");
   assert.equal(r.rodou(), "feito 1 padrão aviso;revisa 1 opus;feito 2 padrão aviso;revisa 2 opus;feito 3 padrão aviso;revisa 3 opus");
   assert.match(r.prompt("opus"), /Ticket: #3/);
-  assert.match(r.prompt("opus"), new RegExp(r.g("rev-parse", "afk/teste~2")), "a revisão recebe o commit de antes do ticket");
+  assert.match(r.prompt("opus"), new RegExp(r.g("rev-parse", "afk/teste^1")), "a revisão recebe o commit de antes do ticket");
   assert.ok(!r.noPR("lixo-revisao.txt"));
   assert.match(r.notas(), /nota de feito 3/, "as notas do agente voltam ao progresso");
   assert.match(r.notas(), /sem_tickets/);
@@ -362,7 +392,7 @@ test("commit sem portão de uma vaga que não reabriu passa pelo portão depois"
 });
 
 test("branch de ticket criado antes pelo agente é descartado", async () => {
-  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent"), issue(2, "OPEN", "ready-for-agent")],
+  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent"), issue(2, "OPEN", "ready-for-agent", [1])],
     ["planta 1", "revisa 1", "feito 2", "revisa 2"]);
   assert.equal(r.feitos(), "1 2");
   assert.ok(r.noPR("t2") && !r.noPR("plantado"));
@@ -383,7 +413,7 @@ test("branch do PR movido pelo agente: sem bundle", async () => {
 });
 
 test("vaga que não abre conta como falha da iteração", async () => {
-  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"], { instalar: "false" });
+  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"], { instalar: 'case "$PWD" in *afk-t-*) exit 1 ;; esac' });
   assert.equal(r.rodou(), "");
   assert.equal(r.saida, 1, "para depois de 3 falhas seguidas, sem erro do loop");
   assert.equal(r.notas().split("a vaga não abriu").length - 1, 3);
@@ -434,4 +464,76 @@ test("hook de contexto", () => {
   writeFileSync(transcricao, readFileSync(transcricao, "utf8") + uso(false, 130000));
   assert.equal(JSON.parse(hook("120000")).decision, "block", "acima do aviso: bloqueia com instrução");
   assert.equal(hook(), "", "fora do loop: silêncio");
+});
+
+test("a spec vem da seção Parte de", () => {
+  assert.equal(specDe("## Parte de\n\nE1 · Piloto. Esta é a parte de código do #252: o caminho (#253)."), "#252");
+  assert.equal(specDe("x\n## Parte de\n\n`docs/design/catalogacao-manual.md` (objetos). Os tipos vêm do #149."), "`docs/design/catalogacao-manual.md`");
+  assert.equal(specDe("## Contexto\n\nVeja #3."), "");
+});
+
+const duas = { vagas: 2 };
+const doisTickets = (corpo = "") => [issue(1, "OPEN", "ready-for-agent", [], corpo), issue(2, "OPEN", "ready-for-agent", [], corpo)];
+const ordenado = (s: string) => s.split(" ").sort().join(" ");
+
+test("duas vagas: dois tickets ao mesmo tempo", async () => {
+  const r = await roda(5, doisTickets(), ["junto 1", "revisa 1", "junto 2", "revisa 2"], duas);
+  assert.equal(r.saida, 0);
+  assert.equal(ordenado(r.feitos()), "1 2");
+  assert.ok(r.noPR("t1") && r.noPR("r1") && r.noPR("t2") && r.noPR("r2"));
+  assert.match(r.notas(), /sem_tickets/);
+});
+
+test("duas vagas: dois tickets devolvidos ao mesmo tempo", async () => {
+  const r = await roda(4, doisTickets(), ["junto_parcial 1", "junto_parcial 2"], { ...duas, maxParciais: 1 });
+  assert.equal(r.saida, 0);
+  assert.equal(r.rodou().split(";").length, 2, "nenhum ticket devolvido volta para a fila");
+  assert.ok(r.existe("afk/teste-bloqueado-1:t1-parte") && r.existe("afk/teste-bloqueado-2:t2-parte"), "os dois guardados");
+  assert.equal(r.ghLog().split("\n").filter((l) => l.startsWith("comment")).length, 2);
+});
+
+test("duas vagas: tickets da mesma spec, um depois do outro", async () => {
+  const r = await roda(5, doisTickets("## Parte de\n\n#9, a spec."), ["sozinho 1", "revisa 1", "sozinho 2", "revisa 2"], duas);
+  assert.equal(ordenado(r.feitos()), "1 2");
+  assert.doesNotMatch(r.rodou(), /colidiu/);
+});
+
+test("duas vagas: conflito no merge vira uma iteração de merge", async () => {
+  const r = await roda(8, doisTickets(), ["comum 1", "revisa 1", "comum 2", "revisa 2", "mescla 1", "mescla 2"], duas);
+  assert.equal(r.saida, 0);
+  assert.equal(ordenado(r.feitos()), "1 2");
+  assert.match(r.notas(), /\(conflito\); a próxima iteração faz o merge/);
+  assert.equal(r.rodou().split(";").filter((l) => l.startsWith("mescla")).length, 1);
+  assert.equal(r.g("show", "afk/teste:comum"), "junto");
+});
+
+test("duas vagas: merge que segue em conflito vai para humano", async () => {
+  const r = await roda(8, doisTickets(), ["comum 1", "revisa 1", "comum 2", "revisa 2", "nao_mescla 1", "nao_mescla 2"], duas);
+  assert.equal(r.feitos().split(" ").length, 1);
+  const humano = r.feitos() === "1" ? "2" : "1";
+  assert.match(r.ghLog(), new RegExp(`edit ${humano} --remove-label ready-for-agent --add-label ready-for-human`));
+  assert.ok(r.existe(`afk/teste-bloqueado-${humano}:comum`));
+});
+
+test("duas vagas: verde sozinho, vermelho junto", async () => {
+  const r = await roda(8, doisTickets(), ["cria 1", "revisa 1", "cria 2", "revisa 2", "nao_mescla 1", "nao_mescla 2"],
+    { ...duas, verificar: "test ! -e quebrado && ! { test -e c1 && test -e c2; }" });
+  assert.match(r.notas(), /make verificar falhou depois do merge/);
+  assert.equal(r.feitos().split(" ").length, 1);
+  assert.ok(!(r.noPR("c1") && r.noPR("c2")), "o merge vermelho sai do branch do PR");
+});
+
+test("duas vagas: make verificar que reescreve um arquivo no integrador não dá alarme falso", async () => {
+  const r = await roda(8, [...doisTickets(), issue(3, "OPEN", "ready-for-agent", [1, 2])],
+    ["junto 1", "revisa 1", "junto 2", "revisa 2", "feito 3", "revisa 3"],
+    { ...duas, verificar: 'test ! -e quebrado && if [ "$(git branch --show-current)" = afk/teste ]; then echo sujo >> .gitignore; fi' });
+  assert.equal(r.saida, 0);
+  assert.equal(ordenado(r.feitos()), "1 2 3");
+  assert.doesNotMatch(r.notas(), /mudou fora do integrador/);
+});
+
+test("duas vagas: os metadados de uma vaga viva sobrevivem à criação de outra (#849)", async () => {
+  const r = await roda(5, doisTickets(), ["estraga 1", "revisa 1", "depois_do_estraga 2", "marca 2", "revisa 2"], duas);
+  assert.equal(ordenado(r.feitos()), "1 2");
+  assert.ok(r.noPR("t1"));
 });
