@@ -53,7 +53,7 @@ As lacunas que a pesquisa encontrou e os tickets para cobri-las, em ordem de pri
 
 ### Documentação
 
-33. A [ADR 0004](../adr/0004-gemini-flex-no-video.md) e o plano dizem que o Gemini roda em Standard, mas o código voltou ao Flex no #86 (`api/gemini.py`, cabeçalhos `flex`). Um dos dois precisa ser atualizado. **Resolvida em 03/11/2026:** fica o Flex nas chamadas com vídeo; a ADR 0004 e o plano foram atualizados.
+33. A [ADR 0004](../adr/0004-gemini-flex-no-video.md) e o plano diziam que o Gemini roda em Standard, mas o código voltou ao Flex no #86 (`api/gemini.py`, cabeçalhos `flex`). Um dos dois precisa ser atualizado. **Resolvida em 03/11/2026:** fica o Flex nas chamadas com vídeo; a ADR 0004 e o plano foram atualizados.
 
 ## Tickets propostos, em ordem
 
