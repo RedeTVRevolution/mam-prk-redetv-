@@ -14,10 +14,10 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api.ciclo_de_vida import transitar
 from api.cortes import LIMIAR_PADRAO
+from api.eventos_do_job import jobs_do_ambiente
 from api.jobs import RepositorioDeJobs
 from api.jobs import agora_utc as agora
 from api.nuvem import (
-    RepositorioFirestore,
     objeto_da_copia_limpa,
     objeto_do_audio,
     objeto_do_proxy,
@@ -93,7 +93,7 @@ def main() -> None:
     storage = ClienteStorage(project=projeto)
     executar(
         os.environ["JOB_ID"],
-        RepositorioFirestore(firestore.Client(project=projeto)),
+        jobs_do_ambiente(firestore.Client(project=projeto)),
         storage.bucket(os.environ["BUCKET_QUARENTENA"]),
         storage.bucket(os.environ["BUCKET_ACEITOS"]),
         Path(os.environ.get("QUARENTENA_MONTADA", "/quarentena")),

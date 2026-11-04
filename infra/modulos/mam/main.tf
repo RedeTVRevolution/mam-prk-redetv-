@@ -1079,6 +1079,11 @@ resource "google_cloud_run_v2_job" "validacao" {
       }
       containers {
         image = var.imagem_validacao
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1167,6 +1172,11 @@ resource "google_cloud_run_v2_job" "transcricao" {
       }
       containers {
         image = var.imagem_transcricao
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1235,6 +1245,11 @@ resource "google_cloud_run_v2_job" "ocr" {
       }
       containers {
         image = var.imagem_ocr
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
         env {
           name  = "LIMIAR_DE_MUDANCA"
           value = tostring(var.limiar_de_mudanca_do_ocr)
@@ -1315,6 +1330,11 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
       }
       containers {
         image = var.imagem_transcricao_gpu
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
@@ -1390,6 +1410,11 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
       }
       containers {
         image = var.imagem_ocr_gpu
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
         env {
           name  = "LIMIAR_DE_MUDANCA"
           value = tostring(var.limiar_de_mudanca_do_ocr)
@@ -1679,6 +1704,11 @@ resource "google_cloud_run_v2_job" "analise" {
             cpu    = "1"
             memory = "2Gi"
           }
+        }
+        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
+        env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
         }
         env {
           name  = "GCP_PROJECT_ID"

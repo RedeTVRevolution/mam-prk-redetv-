@@ -28,6 +28,9 @@ Há dois jeitos. **Reprocessar o que falhou** (`video.reprocessar`, Operador e a
 **Corrigir o estado**:
 Pôr um Job em `concluido` ou `falhou` à mão, só o Administrador (`job.corrigir_estado`), com motivo obrigatório: `POST /v1/admin/jobs/{id}/estado` ou `make corrigir-estado JOB=... ESTADO=... MOTIVO=...`, pela mesma função (`api/correcao_de_estado.py`). As transições valem em `api/ciclo_de_vida.py` (`DESTINOS_DA_CORRECAO`): falhar vale de qualquer estado não final e fecha como `falhou` as etapas que estavam em andamento, com o código da falha da primeira delas (o "reprocessar o que falhou" recomeça dali; sem etapa aberta, ou com a validação aberta, a falha conta como do arquivo); voltar a concluído, só de `falhou` ou `analisando` e se a decupagem guardada passar pelo esquema inteiro. A correção não dispara nada: a indexação fica como estava, e para o vídeo entrar na busca reprocessa-se a partir da indexação. Se a auditoria não grava, o Job volta ao que era. Vai à auditoria como `job.estado_corrigido`, com o estado de antes e o de depois; no comando, quem fez é o `sistema` `corrigir-estado:<usuário da máquina>`.
 
+**Evento de fim de Job**:
+A mensagem que o Pub/Sub leva quando um Job passa a `concluido` ou `falhou` e o sistema dono tem webhook (`api/eventos_do_job.py`, #273). Quem muda o estado nos Jobs de validação, transcrição, OCR e análise publica (`RepositorioQuePublicaOFim`), com o id do evento criado ali; a assinatura push chama `POST /interno/webhook`, que faz uma tentativa de entrega e devolve 503 se o destino falhou de modo repetível, para o Pub/Sub tentar de novo e, esgotadas as tentativas, mandar à fila de mensagens mortas. A correção de estado à mão e o `falhou` que o Workflows grava direto não publicam.
+
 **Bloco**:
 Segmento editorial de um programa de TV, como a abertura ou o trecho entre dois intervalos.
 _Evitar_: segmento, parte

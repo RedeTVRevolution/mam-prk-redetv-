@@ -267,6 +267,7 @@ def criar_app(
     limite_de_inatividade_s: float = LIMITE_DE_INATIVIDADE_S,
     login_recente: timedelta = LOGIN_RECENTE_PADRAO,
     relogio: Callable[[], datetime] = agora_utc,
+    rotas_do_push: APIRouter | None = None,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV")
@@ -549,6 +550,9 @@ def criar_app(
     app.include_router(
         v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]
     )
+    # Fora de `/v1`, com o token do Pub/Sub em vez do de pessoa ou sistema.
+    if rotas_do_push is not None:
+        app.include_router(rotas_do_push)
     if pasta_web.is_dir():
         app.mount("/", _FrontComEnderecos(directory=pasta_web, html=True))
     return app

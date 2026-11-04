@@ -131,6 +131,10 @@ output "url" {
   value = module.mam.url
 }
 
+output "pubsub_topico_eventos" {
+  value = module.mam.pubsub_topico_eventos
+}
+
 output "chave_mac_kms" {
   value = module.mam.chave_mac_kms
 }
