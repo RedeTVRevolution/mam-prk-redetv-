@@ -679,23 +679,26 @@ test('o acompanhamento vai até a indexação terminar e então recarrega a decu
 
 test('aberto com as etapas depois da análise rodando, acompanha até o fim sem dizer "Reprocessando"', async () => {
   let cargas = 0
+  // A etapa só termina depois que o teste viu o aviso. Com a consulta a cada 20 ms, um
+  // "terminou" já na primeira resposta apagava o aviso antes de o `abrir` voltar.
+  let terminou = false
+  const rodando: Partial<Job> = { etapa_atual: 'referencias', indexacao: { estado: 'pendente', em: AGORA } }
   servidor.use(
     http.get('/v1/jobs/j1/decupagem', () => {
       cargas += 1
       return HttpResponse.json(DECUPAGEM)
     }),
     http.get('/v1/jobs/j1', () =>
-      HttpResponse.json({ ...JOB, etapa_atual: null, indexacao: { estado: 'indexado', em: AGORA } }),
+      HttpResponse.json(
+        terminou
+          ? { ...JOB, etapa_atual: null, indexacao: { estado: 'indexado', em: AGORA } }
+          : { ...JOB, ...rodando },
+      ),
     ),
   )
-  await abrir(
-    { etapa_atual: 'referencias', indexacao: { estado: 'pendente', em: AGORA } },
-    null,
-    false,
-    true,
-    20,
-  )
+  await abrir(rodando, null, false, true, 20)
   expect(await screen.findByText('Referências em andamento.')).toBeTruthy()
+  terminou = true
 
   await waitFor(() => expect(screen.queryByText(/em andamento/)).toBeNull())
   await waitFor(() => expect(cargas).toBe(2))
