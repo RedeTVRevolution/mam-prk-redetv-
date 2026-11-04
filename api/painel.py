@@ -198,12 +198,23 @@ def _com_acesso(linhas: list[AcessoDoDia]) -> list[AcessoDoDia]:
     return [a for a in linhas if a.acessos or a.ativo]
 
 
+def _com_os_dias_vazios(por_dia: dict[date, int]) -> dict[date, int]:
+    if not por_dia:
+        return {}
+    primeiro, ultimo = min(por_dia), max(por_dia)
+    return {
+        primeiro + timedelta(days=i): por_dia.get(primeiro + timedelta(days=i), 0)
+        for i in range((ultimo - primeiro).days + 1)
+    }
+
+
 def relatorio_de_acessos(
     linhas: list[AcessoDoDia], emails: dict[str, str], filtro: FiltroDoPainel
 ) -> RelatorioDeAcessos:
     """Os números do período a partir das linhas por dia e pessoa. Usuário ativo é quem agiu
     (o fim do processamento do vídeo dela não conta: o #280 já o deixou de fora). A primeira
-    e a última semana ou mês contam só os dias do filtro."""
+    e a última semana ou mês contam só os dias do filtro. `por_dia` traz também, com zero, os
+    dias sem login entre o primeiro e o último, para o gráfico não colar dias distantes."""
     acessos_do_dia: dict[date, int] = defaultdict(int)
     ativos_do_dia: dict[date, set[str]] = defaultdict(set)
     acessos_da_pessoa: dict[str, int] = defaultdict(int)
@@ -231,7 +242,7 @@ def relatorio_de_acessos(
                 acessos=n,
                 usuarios_ativos=len(ativos_do_dia.get(d, ())),
             )
-            for d, n in sorted(acessos_do_dia.items())
+            for d, n in sorted(_com_os_dias_vazios(acessos_do_dia).items())
         ],
         por_semana=_ativos_por(
             ativos_do_dia, lambda d: d - timedelta(days=d.weekday())

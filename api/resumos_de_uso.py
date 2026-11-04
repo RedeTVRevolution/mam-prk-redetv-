@@ -95,7 +95,7 @@ class ResumosBigQuery:
         self, sql: str, parametros: Sequence[dict[str, Any]] = ()
     ) -> list[list[Any]]:
         return linhas_da_consulta(
-            self._transporte, self._config.regiao, sql, parametros, "o painel"
+            self._transporte, self._config.regiao, sql, parametros, "painel"
         )
 
     def _tabela(self, nome: str) -> str:

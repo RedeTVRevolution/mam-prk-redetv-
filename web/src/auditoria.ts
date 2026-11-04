@@ -80,7 +80,7 @@ export const SEM_FILTROS_DA_AUDITORIA: FiltrosDaAuditoria = { pessoa: '', alvo: 
 const DATA = /^\d{4}-\d{2}-\d{2}$/
 
 /** "De" depois de "Até": a API recusa, então a tela avisa sem consultar. */
-export function periodoInvertido(f: FiltrosDaAuditoria): boolean {
+export function periodoInvertido(f: { de: string; ate: string }): boolean {
   return Boolean(f.de && f.ate && f.de > f.ate)
 }
 

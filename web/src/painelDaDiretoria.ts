@@ -53,10 +53,6 @@ export function parametrosDoPainel(f: FiltrosDoPainel, opcoes: { csv?: boolean; 
   return p.toString()
 }
 
-export function periodoInvertidoNoPainel(f: FiltrosDoPainel): boolean {
-  return f.de !== '' && f.ate !== '' && f.de > f.ate
-}
-
 /** Um item de `GET /v1/painel/filtros`: quem aparece no filtro de usuário. */
 export interface UsuarioDoFiltro {
   uid: string
@@ -110,10 +106,4 @@ export function diaCurto(dia: string): string {
 export function mesCurto(dia: string): string {
   const [ano, mes] = dia.split('-')
   return `${mes}/${ano}`
-}
-
-/** "03/11/2026" para `2026-11-03`. */
-export function diaCompleto(dia: string): string {
-  const [ano, mes, d] = dia.split('-')
-  return `${d}/${mes}/${ano}`
 }

@@ -146,7 +146,7 @@ def linhas_da_consulta(
     regiao: str,
     sql: str,
     parametros: Sequence[dict[str, Any]] = (),
-    o_que: str = "o relatório",
+    o_que: str = "relatório",
 ) -> list[list[Any]]:
     """Os valores de cada linha, em texto. Uma consulta que não termina ou não cabe numa
     resposta falha alto com `RuntimeError`."""
@@ -161,9 +161,9 @@ def linhas_da_consulta(
         }
     )
     if not resposta.get("jobComplete", False):
-        raise RuntimeError(f"a consulta d{o_que} não terminou no prazo")
+        raise RuntimeError(f"a consulta do {o_que} não terminou no prazo")
     if resposta.get("pageToken"):
-        raise RuntimeError(f"{o_que} não cabe numa resposta: peça um período menor")
+        raise RuntimeError(f"o {o_que} não cabe numa resposta: peça um período menor")
     return [[campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])]
 
 

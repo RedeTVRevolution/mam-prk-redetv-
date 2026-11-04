@@ -159,6 +159,19 @@ def test_ativos_por_semana_e_por_mes_contam_cada_pessoa_uma_vez() -> None:
     ]
 
 
+def test_dias_sem_login_no_meio_do_periodo_vem_com_zero() -> None:
+    resumos = ResumosEmMemoria([_acesso(1, "bia", 2), _acesso(4, "caio", 1)])
+
+    r = Mundo(["diretoria"], resumos=resumos).get("/acessos").json()
+
+    assert r["por_dia"] == [
+        {"dia": "2026-11-01", "acessos": 2, "usuarios_ativos": 1},
+        {"dia": "2026-11-02", "acessos": 0, "usuarios_ativos": 0},
+        {"dia": "2026-11-03", "acessos": 0, "usuarios_ativos": 0},
+        {"dia": "2026-11-04", "acessos": 1, "usuarios_ativos": 1},
+    ]
+
+
 def test_linha_sem_login_nem_acao_nao_vira_dia_nem_pessoa() -> None:
     # Só o fim do processamento do vídeo do caio caiu no dia 4.
     resumos = ResumosEmMemoria([_acesso(3, "bia", 1), _acesso(4, "caio", 0, False)])

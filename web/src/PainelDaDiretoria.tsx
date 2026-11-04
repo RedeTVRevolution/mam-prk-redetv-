@@ -2,13 +2,12 @@ import { Box, Group, Loader, Select, Stack, Table, Tabs, Text, TextInput, Title 
 import { useCallback, useEffect, useState } from 'react'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import type { ClienteDaApi } from './api.ts'
-import { dataEHora } from './jobs.ts'
+import { periodoInvertido } from './auditoria.ts'
+import { dataDeExibicao, dataEHora } from './jobs.ts'
 import {
   ABAS_DO_PAINEL,
-  diaCompleto,
   diaCurto,
   mesCurto,
-  periodoInvertidoNoPainel,
   type AbaDoPainel,
   type AtivosNoPeriodo,
   type DiaDeAcessos,
@@ -94,8 +93,8 @@ function GraficoDeLogins({ dias }: { dias: DiaDeAcessos[] }) {
         const h = (d.acessos / maximo) * altura
         return (
           <g key={d.dia}>
-            <rect x={i * largura + 4} y={altura - h} width={largura - 8} height={h} fill={CORES.foco}>
-              <title>{`${diaCompleto(d.dia)}: ${d.acessos} logins`}</title>
+            <rect x={i * largura + 4} y={altura - h} width={largura - 8} height={h} fill={CORES.textoSecundario}>
+              <title>{`${dataDeExibicao(d.dia)}: ${d.acessos} logins`}</title>
             </rect>
             <text x={i * largura + largura / 2} y={altura + 14} fontSize={9} textAnchor="middle" fill={CORES.textoSecundario}>
               {diaCurto(d.dia)}
@@ -162,7 +161,9 @@ function Acessos({ relatorio }: { relatorio: RelatorioDeAcessos }) {
         <Numero rotulo="Logins no período" valor={relatorio.total.acessos} />
         <Numero rotulo="Usuários ativos no período" valor={relatorio.total.usuarios_ativos} />
       </Group>
-      <GraficoDeLogins dias={relatorio.por_dia} />
+      <Box style={{ overflowX: 'auto' }}>
+        <GraficoDeLogins dias={relatorio.por_dia} />
+      </Box>
       <Table aria-label="Acessos por dia" highlightOnHover maw={520}>
         <Table.Thead>
           <Table.Tr>
@@ -174,7 +175,7 @@ function Acessos({ relatorio }: { relatorio: RelatorioDeAcessos }) {
         <Table.Tbody>
           {relatorio.por_dia.map((d) => (
             <Table.Tr key={d.dia}>
-              <Table.Td>{diaCompleto(d.dia)}</Table.Td>
+              <Table.Td>{dataDeExibicao(d.dia)}</Table.Td>
               <Table.Td ta="right" style={NUMEROS}>{d.acessos}</Table.Td>
               <Table.Td ta="right" style={NUMEROS}>{d.usuarios_ativos}</Table.Td>
             </Table.Tr>
@@ -186,7 +187,7 @@ function Acessos({ relatorio }: { relatorio: RelatorioDeAcessos }) {
           rotulo="Usuários ativos por semana"
           coluna="Semana de"
           periodos={relatorio.por_semana}
-          nome={diaCompleto}
+          nome={dataDeExibicao}
         />
         <TabelaDeAtivos rotulo="Usuários ativos por mês" coluna="Mês" periodos={relatorio.por_mes} nome={mesCurto} />
       </Group>
@@ -224,7 +225,7 @@ export default function PainelDaDiretoria({
   aba: AbaDoPainel
   filtros: FiltrosDoPainel
 }) {
-  const invertido = periodoInvertidoNoPainel(filtros)
+  const invertido = periodoInvertido(filtros)
   const buscar = useCallback(
     () => (invertido ? new Promise<RelatorioDeAcessos>(() => undefined) : api.acessosDoPainel(filtros)),
     [api, filtros, invertido],
