@@ -10,9 +10,10 @@ abertura; filtro novo, sim: é outra coisa vista. As rotas leem só as tabelas r
 import logging
 import uuid
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -20,12 +21,20 @@ from pydantic import BaseModel
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.jobs import ServicoIndisponivel, _confere_permissao
+from api.qualidade_do_painel import QualidadeDoPainel, RevisaoNoVideo
 from api.relatorios import confere_o_pedido, csv_em_texto, ou_503, resposta_em_csv
-from api.resumos_de_uso import AcessoDoDia, ResumosDeUso
+from api.resumos_de_uso import (
+    AcessoDoDia,
+    ChamadaDoDia,
+    CorrecaoDoDia,
+    ResumosDeUso,
+    UsoDoDia,
+)
+from api.taxa_de_correcao import LinhaDaTaxa
 from api.usuarios import ContasDeUsuario
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
-Aba = Literal["acessos"]
+Aba = Literal["acessos", "videos", "buscas", "revisao", "api"]
 
 log = logging.getLogger(__name__)
 
@@ -264,10 +273,690 @@ def relatorio_de_acessos(
     )
 
 
+COLUNAS_DO_CSV_DE_VIDEOS = (
+    "dia",
+    "quem_tipo",
+    "quem_id",
+    "email",
+    "programa",
+    "enviados",
+    "concluidos",
+    "falhos",
+    "horas_concluidas",
+    "segundos_de_processamento",
+)
+COLUNAS_DO_CSV_DE_BUSCAS = (
+    "dia",
+    "quem_tipo",
+    "quem_id",
+    "email",
+    "programa",
+    "buscas",
+    "sem_resultado",
+)
+
+
+class NumerosDeVideos(BaseModel):
+    """Os vídeos de um recorte (o dia, o programa, a pessoa ou o total). O tempo de
+    processamento é o dos concluídos, do registro do Job ao fim: `tempo_medio_s` é a média
+    dele entre os que trazem o tempo, vazia sem nenhum."""
+
+    enviados: int
+    concluidos: int
+    falhos: int
+    horas_concluidas: float
+    tempo_medio_s: float | None
+
+
+class DiaDeVideos(NumerosDeVideos):
+    dia: date
+
+
+class ProgramaDeVideos(NumerosDeVideos):
+    programa: str
+
+
+class QuemDeVideos(NumerosDeVideos):
+    quem_tipo: Literal["usuario", "sistema"]
+    quem_id: str
+    email: str | None
+
+
+class RelatorioDeVideos(BaseModel):
+    desde: date | None
+    ate: date | None
+    programa: str | None
+    usuario: str | None
+    total: NumerosDeVideos
+    por_dia: list[DiaDeVideos]
+    # Vazio quando o filtro é de usuário: o programa só existe na tabela por programa.
+    por_programa: list[ProgramaDeVideos]
+    # Vazio quando o filtro é de programa, pelo mesmo motivo.
+    por_usuario: list[QuemDeVideos]
+
+
+class NumerosDeBuscas(BaseModel):
+    buscas: int
+    sem_resultado: int
+
+
+class DiaDeBuscas(NumerosDeBuscas):
+    dia: date
+    usuarios_que_buscam: int | None
+
+
+class QuemDeBuscas(NumerosDeBuscas):
+    quem_tipo: Literal["usuario", "sistema"]
+    quem_id: str
+    email: str | None
+
+
+class TotalDeBuscas(NumerosDeBuscas):
+    usuarios_que_buscam: int | None
+
+
+class RelatorioDeBuscas(BaseModel):
+    desde: date | None
+    ate: date | None
+    programa: str | None
+    usuario: str | None
+    total: TotalDeBuscas
+    por_dia: list[DiaDeBuscas]
+    # Vazio quando o filtro é de programa: a tabela por programa não sabe quem buscou, e
+    # `usuarios_que_buscam` fica sem valor.
+    por_usuario: list[QuemDeBuscas]
+
+
+@dataclass
+class _SomaDeUso:
+    enviados: int = 0
+    concluidos: int = 0
+    falhos: int = 0
+    horas: float = 0.0
+    segundos: int = 0
+    com_tempo: int = 0
+    buscas: int = 0
+    sem_resultado: int = 0
+
+    def somar(self, u: UsoDoDia) -> None:
+        self.enviados += u.videos_enviados
+        self.concluidos += u.videos_concluidos
+        self.falhos += u.videos_falhos
+        self.horas += u.horas_concluidas
+        self.segundos += u.segundos_de_processamento
+        self.com_tempo += u.videos_concluidos_com_tempo
+        self.buscas += u.buscas
+        self.sem_resultado += u.buscas_sem_resultado
+
+    def videos(self) -> dict[str, Any]:
+        return NumerosDeVideos(
+            enviados=self.enviados,
+            concluidos=self.concluidos,
+            falhos=self.falhos,
+            horas_concluidas=round(self.horas, 2),
+            tempo_medio_s=(
+                round(self.segundos / self.com_tempo, 1) if self.com_tempo else None
+            ),
+        ).model_dump()
+
+    def de_buscas(self) -> dict[str, Any]:
+        return NumerosDeBuscas(
+            buscas=self.buscas, sem_resultado=self.sem_resultado
+        ).model_dump()
+
+
+def _somas_por[C](
+    linhas: list[UsoDoDia], chave: Callable[[UsoDoDia], C]
+) -> dict[C, _SomaDeUso]:
+    somas: dict[C, _SomaDeUso] = defaultdict(_SomaDeUso)
+    for u in linhas:
+        somas[chave(u)].somar(u)
+    return somas
+
+
+def _soma(linhas: list[UsoDoDia]) -> _SomaDeUso:
+    total = _SomaDeUso()
+    for u in linhas:
+        total.somar(u)
+    return total
+
+
+def _por_quem(
+    linhas: list[UsoDoDia],
+    emails: dict[str, str],
+    ordem: Callable[[_SomaDeUso], int],
+) -> list[tuple[dict[str, Any], _SomaDeUso]]:
+    """Cada pessoa ou sistema (`quem_tipo`, `quem_id` e `email`) e a soma das suas linhas,
+    de quem tem mais (`ordem`) para quem tem menos."""
+    somas = _somas_por(
+        [u for u in linhas if u.quem_id is not None],
+        lambda u: (u.quem_tipo or "", u.quem_id or ""),
+    )
+    return [
+        ({"quem_tipo": tipo, "quem_id": quem_id, "email": emails.get(quem_id)}, soma)
+        for (tipo, quem_id), soma in sorted(
+            somas.items(), key=lambda i: (-ordem(i[1]), i[0][1])
+        )
+    ]
+
+
+def _tem_video(u: UsoDoDia) -> bool:
+    return bool(u.videos_enviados or u.videos_concluidos or u.videos_falhos)
+
+
+def _dias_do_intervalo(dias: Iterable[date]) -> list[date]:
+    """Do primeiro ao último dia, sem buracos: o gráfico não cola dias distantes."""
+    dias = list(dias)
+    if not dias:
+        return []
+    primeiro = min(dias)
+    return [
+        primeiro + timedelta(days=i) for i in range((max(dias) - primeiro).days + 1)
+    ]
+
+
+def relatorio_de_videos(
+    base: list[UsoDoDia],
+    por_programa: list[UsoDoDia],
+    emails: dict[str, str],
+    filtro: FiltroDoPainel,
+) -> RelatorioDeVideos:
+    """`base` são as linhas do filtro (por programa ou por pessoa, veja `_base_de_uso`);
+    `por_programa` são as linhas por programa de um pedido sem filtro de usuário."""
+    base = [u for u in base if _tem_video(u)]
+    por_dia = _somas_por(base, lambda u: u.dia)
+    total = _soma(base)
+    programas = _somas_por(
+        [u for u in por_programa if _tem_video(u) and u.programa is not None],
+        lambda u: u.programa or "",
+    )
+    return RelatorioDeVideos(
+        desde=filtro.desde,
+        ate=filtro.ate,
+        programa=filtro.programa,
+        usuario=filtro.usuario,
+        total=NumerosDeVideos(**total.videos()),
+        por_dia=[
+            DiaDeVideos(dia=d, **por_dia.get(d, _SomaDeUso()).videos())
+            for d in _dias_do_intervalo(por_dia)
+        ],
+        por_programa=[
+            ProgramaDeVideos(programa=p, **soma.videos())
+            for p, soma in sorted(programas.items())
+        ],
+        por_usuario=[
+            QuemDeVideos(**quem, **soma.videos())
+            for quem, soma in _por_quem(base, emails, lambda s: s.enviados)
+        ],
+    )
+
+
+def relatorio_de_buscas(
+    base: list[UsoDoDia], emails: dict[str, str], filtro: FiltroDoPainel
+) -> RelatorioDeBuscas:
+    """Quem busca são só pessoas (o sistema que busca pela API aparece em `por_usuario`,
+    mas não conta em `usuarios_que_buscam`)."""
+    base = [u for u in base if u.buscas]
+    por_programa = filtro.programa is not None
+    por_dia = _somas_por(base, lambda u: u.dia)
+    pessoas_do_dia: dict[date, set[str]] = defaultdict(set)
+    for u in base:
+        if u.quem_tipo == "usuario" and u.quem_id is not None:
+            pessoas_do_dia[u.dia].add(u.quem_id)
+    total = _soma(base)
+    return RelatorioDeBuscas(
+        desde=filtro.desde,
+        ate=filtro.ate,
+        programa=filtro.programa,
+        usuario=filtro.usuario,
+        total=TotalDeBuscas(
+            **total.de_buscas(),
+            usuarios_que_buscam=(
+                None
+                if por_programa
+                else len({p for ps in pessoas_do_dia.values() for p in ps})
+            ),
+        ),
+        por_dia=[
+            DiaDeBuscas(
+                dia=d,
+                **por_dia.get(d, _SomaDeUso()).de_buscas(),
+                usuarios_que_buscam=None
+                if por_programa
+                else len(pessoas_do_dia.get(d, ())),
+            )
+            for d in _dias_do_intervalo(por_dia)
+        ],
+        por_usuario=[
+            QuemDeBuscas(**quem, **soma.de_buscas())
+            for quem, soma in _por_quem(base, emails, lambda s: s.buscas)
+        ],
+    )
+
+
+def _base_de_uso(fonte: ResumosDeUso, filtro: FiltroDoPainel) -> list[UsoDoDia]:
+    """As linhas do filtro: da tabela por programa se pediu programa, senão da por pessoa.
+    As duas não se cruzam: pedir os dois é erro, em vez de devolver números que um dos
+    filtros não aplicou."""
+    if filtro.programa is not None and filtro.usuario is not None:
+        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+    if filtro.programa is not None:
+        return ou_503(
+            lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, filtro.programa)
+        )
+    return ou_503(lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario))
+
+
+def _linha_do_csv(
+    u: UsoDoDia, emails: dict[str, str], numeros: Sequence[object]
+) -> list[object]:
+    return [
+        u.dia.isoformat(),
+        u.quem_tipo or "",
+        u.quem_id or "",
+        emails.get(u.quem_id, "") if u.quem_id else "",
+        u.programa or "",
+        *numeros,
+    ]
+
+
+COLUNAS_DO_CSV_DE_REVISAO = (
+    "indicador",
+    "dia",
+    "quem_id",
+    "email",
+    "programa",
+    "tipo",
+    "correcoes",
+    "itens",
+    "taxa_de_correcao",
+    "minutos",
+    "horas_de_video",
+    "minutos_por_hora_de_video",
+)
+COLUNAS_DO_CSV_DE_API = (
+    "dia",
+    "quem_tipo",
+    "quem_id",
+    "metodo",
+    "rota",
+    "chamadas",
+    "erros_do_cliente",
+    "erros_do_servidor",
+    "videos_enviados",
+)
+
+
+class DiaDeCorrecoes(BaseModel):
+    dia: date
+    correcoes: int
+
+
+class TipoDeCorrecoes(BaseModel):
+    # Vazio no evento que não trouxe o tipo.
+    tipo: str | None
+    correcoes: int
+
+
+class QuemDeCorrecoes(BaseModel):
+    quem_tipo: Literal["usuario", "sistema"]
+    quem_id: str
+    email: str | None
+    correcoes: int
+
+
+class CorrecoesNoPeriodo(BaseModel):
+    total: int
+    por_dia: list[DiaDeCorrecoes]
+    por_tipo: list[TipoDeCorrecoes]
+    por_usuario: list[QuemDeCorrecoes]
+
+
+class TaxaDoTipo(BaseModel):
+    tipo: str
+    correcoes: int
+    itens: int
+    taxa: float | None
+
+
+class TaxaDoPrograma(BaseModel):
+    programa: str | None
+    correcoes: int
+    itens: int
+    taxa: float | None
+
+
+class TaxaDeCorrecaoNoPainel(BaseModel):
+    """A taxa de correção (#265) com as versões do pipeline somadas. Não tem pessoa: com
+    filtro de usuário as duas listas vêm vazias."""
+
+    por_tipo: list[TaxaDoTipo]
+    por_programa: list[TaxaDoPrograma]
+
+
+class NumerosDeRevisao(BaseModel):
+    """`minutos` é o tempo ativo de revisão; `horas_de_video`, a duração dos vídeos
+    revisados (cada um uma vez); `minutos_por_hora_de_video` só conta os vídeos com
+    duração conhecida e vem vazio sem nenhum."""
+
+    minutos: float
+    videos: int
+    horas_de_video: float
+    minutos_por_hora_de_video: float | None
+
+
+class PessoaNaRevisaoDoPainel(NumerosDeRevisao):
+    uid: str
+    email: str
+
+
+class ProgramaNaRevisao(NumerosDeRevisao):
+    programa: str | None
+
+
+class TempoDeRevisaoNoPainel(BaseModel):
+    total: NumerosDeRevisao
+    por_pessoa: list[PessoaNaRevisaoDoPainel]
+    por_programa: list[ProgramaNaRevisao]
+
+
+class RelatorioDeRevisao(BaseModel):
+    desde: date | None
+    ate: date | None
+    programa: str | None
+    usuario: str | None
+    correcoes: CorrecoesNoPeriodo
+    taxa_de_correcao: TaxaDeCorrecaoNoPainel
+    tempo_de_revisao: TempoDeRevisaoNoPainel
+
+
+def relatorio_de_correcoes(
+    linhas: list[CorrecaoDoDia], emails: dict[str, str]
+) -> CorrecoesNoPeriodo:
+    por_dia: dict[date, int] = defaultdict(int)
+    por_tipo: dict[str | None, int] = defaultdict(int)
+    por_quem: dict[tuple[str, str], int] = defaultdict(int)
+    for c in linhas:
+        por_dia[c.dia] += c.correcoes
+        por_tipo[c.tipo_de_correcao] += c.correcoes
+        por_quem[(c.quem_tipo, c.quem_id)] += c.correcoes
+    return CorrecoesNoPeriodo(
+        total=sum(por_dia.values()),
+        por_dia=[
+            DiaDeCorrecoes(dia=d, correcoes=por_dia.get(d, 0))
+            for d in _dias_do_intervalo(por_dia)
+        ],
+        por_tipo=[
+            TipoDeCorrecoes(tipo=t, correcoes=n)
+            for t, n in sorted(
+                por_tipo.items(), key=lambda i: (-i[1], i[0] is None, i[0] or "")
+            )
+        ],
+        por_usuario=[
+            QuemDeCorrecoes.model_validate(
+                {
+                    "quem_tipo": tipo,
+                    "quem_id": quem_id,
+                    "email": emails.get(quem_id),
+                    "correcoes": n,
+                }
+            )
+            for (tipo, quem_id), n in sorted(
+                por_quem.items(), key=lambda i: (-i[1], i[0][1])
+            )
+        ],
+    )
+
+
+def _taxa(correcoes: int, itens: int) -> float | None:
+    return round(correcoes / itens, 4) if itens else None
+
+
+def taxa_no_painel(linhas: list[LinhaDaTaxa]) -> TaxaDeCorrecaoNoPainel:
+    por_tipo: dict[str, tuple[int, int]] = defaultdict(lambda: (0, 0))
+    por_programa: dict[str | None, tuple[int, int]] = defaultdict(lambda: (0, 0))
+    for t in linhas:
+        c, i = por_tipo[t.tipo]
+        por_tipo[t.tipo] = (c + t.correcoes, i + t.itens)
+        c, i = por_programa[t.programa]
+        por_programa[t.programa] = (c + t.correcoes, i + t.itens)
+    return TaxaDeCorrecaoNoPainel(
+        por_tipo=[
+            TaxaDoTipo(tipo=t, correcoes=c, itens=i, taxa=_taxa(c, i))
+            for t, (c, i) in sorted(por_tipo.items())
+        ],
+        por_programa=[
+            TaxaDoPrograma(programa=p, correcoes=c, itens=i, taxa=_taxa(c, i))
+            for p, (c, i) in sorted(por_programa.items(), key=lambda x: x[0] or "")
+        ],
+    )
+
+
+def _numeros_de_revisao(medidas: list[RevisaoNoVideo]) -> dict[str, Any]:
+    """Os minutos de revisão dos vídeos dados. A duração é a do vídeo (a maior que alguma
+    medida trouxe) e conta uma vez, mesmo revisado por mais de uma pessoa."""
+    duracao: dict[str, float] = {}
+    for m in medidas:
+        if m.duracao_s:
+            duracao[m.job_id] = max(duracao.get(m.job_id, 0), m.duracao_s)
+    ativo_s = sum(m.ativo_s for m in medidas)
+    ativo_com_duracao_s = sum(m.ativo_s for m in medidas if m.job_id in duracao)
+    horas = sum(duracao.values()) / 3600
+    return NumerosDeRevisao(
+        minutos=round(ativo_s / 60, 2),
+        videos=len({m.job_id for m in medidas}),
+        horas_de_video=round(horas, 2),
+        minutos_por_hora_de_video=(
+            round(ativo_com_duracao_s / 60 / horas, 2) if horas else None
+        ),
+    ).model_dump()
+
+
+def _agrupar[C](
+    medidas: list[RevisaoNoVideo], chave: Callable[[RevisaoNoVideo], C]
+) -> dict[C, list[RevisaoNoVideo]]:
+    grupos: dict[C, list[RevisaoNoVideo]] = defaultdict(list)
+    for m in medidas:
+        grupos[chave(m)].append(m)
+    return grupos
+
+
+def tempo_no_painel(medidas: list[RevisaoNoVideo]) -> TempoDeRevisaoNoPainel:
+    pessoas = _agrupar(medidas, lambda m: (m.uid, m.email))
+    programas = _agrupar(medidas, lambda m: m.programa)
+    return TempoDeRevisaoNoPainel(
+        total=NumerosDeRevisao(**_numeros_de_revisao(medidas)),
+        por_pessoa=[
+            PessoaNaRevisaoDoPainel(uid=uid, email=email, **numeros)
+            for (uid, email), numeros in sorted(
+                ((quem, _numeros_de_revisao(ms)) for quem, ms in pessoas.items()),
+                key=lambda i: (-i[1]["minutos"], i[0][1]),
+            )
+        ],
+        por_programa=[
+            ProgramaNaRevisao(programa=p, **_numeros_de_revisao(ms))
+            for p, ms in sorted(programas.items(), key=lambda i: i[0] or "")
+        ],
+    )
+
+
+def _linhas_do_csv_de_revisao(
+    correcoes: list[CorrecaoDoDia],
+    taxa: list[LinhaDaTaxa],
+    medidas: list[RevisaoNoVideo],
+    emails: dict[str, str],
+) -> list[list[object]]:
+    """Uma tabela só, com a coluna `indicador`: as correções por dia, pessoa, programa e
+    tipo; a taxa por programa e tipo (as versões somadas); o tempo por pessoa e programa."""
+    linhas: list[list[object]] = []
+    for c in sorted(
+        correcoes,
+        key=lambda c: (c.dia, c.quem_id, c.programa or "", c.tipo_de_correcao or ""),
+    ):
+        linhas.append(
+            [
+                "correcoes",
+                c.dia.isoformat(),
+                c.quem_id,
+                emails.get(c.quem_id, ""),
+                c.programa or "",
+                c.tipo_de_correcao or "",
+                c.correcoes,
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
+    somas: dict[tuple[str, str], tuple[int, int]] = defaultdict(lambda: (0, 0))
+    for t in taxa:
+        feitas, itens = somas[(t.programa or "", t.tipo)]
+        somas[(t.programa or "", t.tipo)] = (feitas + t.correcoes, itens + t.itens)
+    for (programa, tipo), (feitas, itens) in sorted(somas.items()):
+        taxa_ = _taxa(feitas, itens)
+        linhas.append(
+            [
+                "taxa",
+                "",
+                "",
+                "",
+                programa,
+                tipo,
+                feitas,
+                itens,
+                "" if taxa_ is None else taxa_,
+            ]
+            + [""] * 3
+        )
+    for (uid, email, programa), ms in sorted(
+        _agrupar(medidas, lambda m: (m.uid, m.email, m.programa or "")).items()
+    ):
+        n = _numeros_de_revisao(ms)
+        por_hora = n["minutos_por_hora_de_video"]
+        linhas.append(
+            ["tempo", "", uid, email, programa, "", "", "", ""]
+            + [n["minutos"], n["horas_de_video"], "" if por_hora is None else por_hora]
+        )
+    return linhas
+
+
+class NumerosDeChamadas(BaseModel):
+    chamadas: int
+    erros_do_cliente: int
+    erros_do_servidor: int
+
+
+class DiaDeApi(NumerosDeChamadas):
+    dia: date
+    videos_enviados: int
+
+
+class SistemaDeApi(NumerosDeChamadas):
+    quem_tipo: Literal["usuario", "sistema"]
+    quem_id: str
+    videos_enviados: int
+
+
+class RotaDeApi(NumerosDeChamadas):
+    metodo: str | None
+    rota: str | None
+
+
+class TotalDeApi(NumerosDeChamadas):
+    sistemas: int
+    videos_enviados: int
+
+
+class RelatorioDeApi(BaseModel):
+    """`videos_enviados` são só os enviados por sistema (as pessoas pela tela não contam)."""
+
+    desde: date | None
+    ate: date | None
+    usuario: str | None
+    total: TotalDeApi
+    por_dia: list[DiaDeApi]
+    por_sistema: list[SistemaDeApi]
+    por_rota: list[RotaDeApi]
+
+
+def _numeros_de_chamadas(linhas: Iterable[ChamadaDoDia]) -> dict[str, int]:
+    linhas = list(linhas)
+    return {
+        "chamadas": sum(c.chamadas for c in linhas),
+        "erros_do_cliente": sum(c.erros_do_cliente for c in linhas),
+        "erros_do_servidor": sum(c.erros_do_servidor for c in linhas),
+    }
+
+
+def relatorio_de_api(
+    chamadas: list[ChamadaDoDia], envios: list[UsoDoDia], filtro: FiltroDoPainel
+) -> RelatorioDeApi:
+    """`envios` são as linhas por pessoa ou sistema; só valem as de sistema com vídeo enviado."""
+    envios = [u for u in envios if u.quem_tipo == "sistema" and u.videos_enviados]
+    enviados_do_dia: dict[date, int] = defaultdict(int)
+    enviados_do_sistema: dict[tuple[str, str], int] = defaultdict(int)
+    for u in envios:
+        enviados_do_dia[u.dia] += u.videos_enviados
+        enviados_do_sistema[("sistema", u.quem_id or "")] += u.videos_enviados
+    do_dia: dict[date, list[ChamadaDoDia]] = defaultdict(list)
+    do_sistema: dict[tuple[str, str], list[ChamadaDoDia]] = defaultdict(list)
+    da_rota: dict[tuple[str | None, str | None], list[ChamadaDoDia]] = defaultdict(list)
+    for c in chamadas:
+        do_dia[c.dia].append(c)
+        do_sistema[(c.quem_tipo, c.quem_id)].append(c)
+        da_rota[(c.metodo, c.rota)].append(c)
+    quem = sorted(
+        set(do_sistema) | set(enviados_do_sistema),
+        key=lambda q: (-_numeros_de_chamadas(do_sistema[q])["chamadas"], q[1]),
+    )
+    return RelatorioDeApi(
+        desde=filtro.desde,
+        ate=filtro.ate,
+        usuario=filtro.usuario,
+        total=TotalDeApi(
+            **_numeros_de_chamadas(chamadas),
+            sistemas=len(quem),
+            videos_enviados=sum(enviados_do_dia.values()),
+        ),
+        por_dia=[
+            DiaDeApi(
+                dia=d,
+                videos_enviados=enviados_do_dia.get(d, 0),
+                **_numeros_de_chamadas(do_dia.get(d, [])),
+            )
+            for d in _dias_do_intervalo(set(do_dia) | set(enviados_do_dia))
+        ],
+        por_sistema=[
+            SistemaDeApi.model_validate(
+                {
+                    "quem_tipo": tipo,
+                    "quem_id": quem_id,
+                    "videos_enviados": enviados_do_sistema.get((tipo, quem_id), 0),
+                    **_numeros_de_chamadas(do_sistema.get((tipo, quem_id), [])),
+                }
+            )
+            for tipo, quem_id in quem
+        ],
+        por_rota=[
+            RotaDeApi(metodo=m, rota=r, **_numeros_de_chamadas(cs))
+            for (m, r), cs in sorted(
+                da_rota.items(),
+                key=lambda i: (
+                    -sum(c.chamadas for c in i[1]),
+                    i[0][1] or "",
+                    i[0][0] or "",
+                ),
+            )
+        ],
+    )
+
+
 def criar_rotas_do_painel(
     resumos: ResumosDeUso | None,
     contas: ContasDeUsuario,
     acessos_ao_painel: AcessosAoPainel,
+    qualidade: QualidadeDoPainel,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/painel")
 
@@ -321,5 +1010,203 @@ def criar_rotas_do_painel(
             )
         acessos_ao_painel.abriu(pessoa, "acessos", filtro)
         return relatorio_de_acessos(linhas, emails, filtro)
+
+    @rotas.get("/videos", response_model=RelatorioDeVideos)
+    def videos(
+        pessoa: PodeVerOPainel,
+        filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
+        formato: Literal["json", "csv"] = "json",
+    ) -> RelatorioDeVideos | object:
+        """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
+        programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
+        fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        base = _base_de_uso(fonte, filtro)
+        emails = _emails(contas)
+        if formato == "csv":
+            acessos_ao_painel.exportou(pessoa, "videos", filtro)
+            return resposta_em_csv(
+                csv_em_texto(
+                    COLUNAS_DO_CSV_DE_VIDEOS,
+                    [
+                        _linha_do_csv(
+                            u,
+                            emails,
+                            [
+                                u.videos_enviados,
+                                u.videos_concluidos,
+                                u.videos_falhos,
+                                round(u.horas_concluidas, 2),
+                                u.segundos_de_processamento,
+                            ],
+                        )
+                        for u in sorted(
+                            filter(_tem_video, base),
+                            key=lambda u: (u.dia, u.programa or "", u.quem_id or ""),
+                        )
+                    ],
+                ),
+                "videos.csv",
+            )
+        if filtro.programa is not None:
+            por_programa = base
+        elif filtro.usuario is None:
+            por_programa = ou_503(
+                lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, None)
+            )
+        else:
+            por_programa = []
+        acessos_ao_painel.abriu(pessoa, "videos", filtro)
+        return relatorio_de_videos(base, por_programa, emails, filtro)
+
+    @rotas.get("/buscas", response_model=RelatorioDeBuscas)
+    def buscas(
+        pessoa: PodeVerOPainel,
+        filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
+        formato: Literal["json", "csv"] = "json",
+    ) -> RelatorioDeBuscas | object:
+        """Buscas, usuários que buscam e buscas sem resultado, por dia e por usuário. A
+        busca só tem programa quando foi filtrada por ele. Programa e usuário não se
+        combinam: 422."""
+        fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        base = _base_de_uso(fonte, filtro)
+        emails = _emails(contas)
+        if formato == "csv":
+            acessos_ao_painel.exportou(pessoa, "buscas", filtro)
+            return resposta_em_csv(
+                csv_em_texto(
+                    COLUNAS_DO_CSV_DE_BUSCAS,
+                    [
+                        _linha_do_csv(u, emails, [u.buscas, u.buscas_sem_resultado])
+                        for u in sorted(
+                            (u for u in base if u.buscas),
+                            key=lambda u: (u.dia, u.programa or "", u.quem_id or ""),
+                        )
+                    ],
+                ),
+                "buscas.csv",
+            )
+        acessos_ao_painel.abriu(pessoa, "buscas", filtro)
+        return relatorio_de_buscas(base, emails, filtro)
+
+    @rotas.get("/revisao", response_model=RelatorioDeRevisao)
+    def revisao(
+        pessoa: PodeVerOPainel,
+        filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
+        formato: Literal["json", "csv"] = "json",
+    ) -> RelatorioDeRevisao | object:
+        """Correções por dia, tipo e usuário; a taxa de correção por tipo e por programa
+        (#265); os minutos de revisão por hora de vídeo por pessoa e por programa (#251).
+        Os filtros se cruzam; a taxa não tem pessoa e vem vazia com filtro de usuário."""
+        fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        correcoes = ou_503(
+            lambda: fonte.correcoes(
+                filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+            )
+        )
+        taxa = (
+            []
+            if filtro.usuario is not None
+            else ou_503(
+                lambda: qualidade.taxa_de_correcao(
+                    filtro.desde, filtro.ate, filtro.programa
+                )
+            )
+        )
+        medidas = ou_503(
+            lambda: qualidade.tempo_de_revisao(
+                filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+            )
+        )
+        emails = _emails(contas)
+        if formato == "csv":
+            acessos_ao_painel.exportou(pessoa, "revisao", filtro)
+            return resposta_em_csv(
+                csv_em_texto(
+                    COLUNAS_DO_CSV_DE_REVISAO,
+                    _linhas_do_csv_de_revisao(correcoes, taxa, medidas, emails),
+                ),
+                "revisao.csv",
+            )
+        acessos_ao_painel.abriu(pessoa, "revisao", filtro)
+        return RelatorioDeRevisao(
+            desde=filtro.desde,
+            ate=filtro.ate,
+            programa=filtro.programa,
+            usuario=filtro.usuario,
+            correcoes=relatorio_de_correcoes(correcoes, emails),
+            taxa_de_correcao=taxa_no_painel(taxa),
+            tempo_de_revisao=tempo_no_painel(medidas),
+        )
+
+    @rotas.get("/api", response_model=RelatorioDeApi)
+    def api(
+        pessoa: PodeVerOPainel,
+        filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
+        formato: Literal["json", "csv"] = "json",
+    ) -> RelatorioDeApi | object:
+        """Chamadas por sistema e por rota, erros e vídeos enviados pela API. A chamada não
+        tem programa: pedir `programa` é erro. `usuario` filtra o sistema."""
+        if filtro.programa is not None:
+            raise HTTPException(422, "As chamadas de API não têm programa")
+        fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        chamadas = ou_503(
+            lambda: fonte.chamadas(filtro.desde, filtro.ate, filtro.usuario)
+        )
+        envios = [
+            u
+            for u in ou_503(
+                lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario)
+            )
+            if u.quem_tipo == "sistema"
+        ]
+        if formato == "csv":
+            acessos_ao_painel.exportou(pessoa, "api", filtro)
+            return resposta_em_csv(
+                csv_em_texto(
+                    COLUNAS_DO_CSV_DE_API,
+                    [
+                        [
+                            c.dia.isoformat(),
+                            c.quem_tipo,
+                            c.quem_id,
+                            c.metodo or "",
+                            c.rota or "",
+                            c.chamadas,
+                            c.erros_do_cliente,
+                            c.erros_do_servidor,
+                            "",
+                        ]
+                        for c in sorted(
+                            chamadas,
+                            key=lambda c: (
+                                c.dia,
+                                c.quem_id,
+                                c.rota or "",
+                                c.metodo or "",
+                            ),
+                        )
+                    ]
+                    + [
+                        [
+                            u.dia.isoformat(),
+                            u.quem_tipo,
+                            u.quem_id,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            u.videos_enviados,
+                        ]
+                        for u in sorted(
+                            (u for u in envios if u.videos_enviados),
+                            key=lambda u: (u.dia, u.quem_id or ""),
+                        )
+                    ],
+                ),
+                "api.csv",
+            )
+        acessos_ao_painel.abriu(pessoa, "api", filtro)
+        return relatorio_de_api(chamadas, envios, filtro)
 
     return rotas

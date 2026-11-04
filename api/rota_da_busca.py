@@ -111,6 +111,7 @@ def criar_rotas_da_busca(
         chamador: Chamador,
         tamanho: int | None,
         programa: str | None,
+        resultado: ResultadoDaBusca,
         job_id: str | None = None,
         **filtros: object,
     ) -> None:
@@ -123,6 +124,7 @@ def criar_rotas_da_busca(
             job_id=job_id,
             programa=programa,
             tamanho_da_consulta=tamanho,
+            n_resultados=len(resultado.videos),
             filtros=[
                 Filtro(nome=nome, valor=str(valor))
                 for nome, valor in filtros.items()
@@ -183,6 +185,7 @@ def criar_rotas_da_busca(
             chamador,
             len(q),
             programa,
+            resultado,
             modo="texto",
             ordem=ordem,
             evidencias=",".join(dict.fromkeys(evidencias or ())),
@@ -290,6 +293,7 @@ def criar_rotas_da_busca(
             chamador,
             len(dados),
             programa,
+            resultado,
             modo="imagem",
             desde=desde,
             ate=ate,
@@ -351,7 +355,9 @@ def criar_rotas_da_busca(
                 "encontrado",
             ) from None
         # Não há consulta: o ponto de partida é o plano de um vídeo.
-        registrar_busca(chamador, None, None, job, modo="parecidos", plano=plano)
+        registrar_busca(
+            chamador, None, None, resultado, job, modo="parecidos", plano=plano
+        )
         return resultado
 
     return rotas

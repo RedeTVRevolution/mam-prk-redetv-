@@ -20,9 +20,12 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.resumos_de_uso import (
     AcessoDoDia,
+    ChamadaDoDia,
     ConfigDosResumos,
+    CorrecaoDoDia,
     ResumosBigQuery,
     ResumosEmMemoria,
+    UsoDoDia,
 )
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
@@ -52,13 +55,62 @@ LINHAS = [
 ]
 
 
+def _uso(
+    dia: int,
+    *,
+    quem: tuple[str, str] | None = None,
+    programa: str | None = None,
+    enviados: int = 0,
+    concluidos: int = 0,
+    falhos: int = 0,
+    horas: float = 0,
+    segundos: int = 0,
+    com_tempo: int | None = None,
+    buscas: int = 0,
+    sem_resultado: int = 0,
+) -> UsoDoDia:
+    return UsoDoDia(
+        dia=date(2026, 11, dia),
+        quem_tipo=quem[0] if quem else None,
+        quem_id=quem[1] if quem else None,
+        programa=programa,
+        videos_enviados=enviados,
+        videos_concluidos=concluidos,
+        videos_falhos=falhos,
+        horas_concluidas=horas,
+        segundos_de_processamento=segundos,
+        videos_concluidos_com_tempo=concluidos if com_tempo is None else com_tempo,
+        buscas=buscas,
+        buscas_sem_resultado=sem_resultado,
+    )
+
+
+BIA = ("usuario", "bia")
+CAIO = ("usuario", "caio")
+CMS = ("sistema", "cms")
+USO = [
+    _uso(1, quem=BIA, enviados=2, concluidos=1, falhos=1, horas=2, segundos=600),
+    _uso(1, quem=CMS, enviados=1, concluidos=1, horas=1, segundos=1800),
+    _uso(1, quem=CAIO, buscas=3, sem_resultado=1),
+    _uso(3, quem=BIA, concluidos=1, horas=0.5, segundos=300, buscas=2, sem_resultado=2),
+    # Sem vídeo nem busca (só login): fica de fora dos dois relatórios.
+    _uso(2, quem=CAIO),
+    _uso(1, programa="Hoje", enviados=2, concluidos=1, falhos=1, horas=2, segundos=600),
+    _uso(1, programa="Fala", enviados=1, concluidos=1, horas=1, segundos=1800),
+    _uso(3, programa="Hoje", concluidos=1, horas=0.5, segundos=300),
+    _uso(3, programa="Hoje", buscas=2, sem_resultado=2),
+]
+
+
 class Mundo:
-    def __init__(self, papeis: list[str], resumos: Any = "padrao") -> None:
+    def __init__(
+        self, papeis: list[str], resumos: Any = "padrao", qualidade: Any = None
+    ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
         repo.salvar("ana", papeis)  # type: ignore[arg-type]
         self.resumos = (
-            ResumosEmMemoria(LINHAS, ["Hoje", "Fofocalizando"])
+            ResumosEmMemoria(LINHAS, ["Hoje", "Fofocalizando"], USO)
             if resumos == "padrao"
             else resumos
         )
@@ -68,6 +120,7 @@ class Mundo:
                 papeis=repo,
                 auditoria=self.auditoria,
                 resumos_de_uso=self.resumos,
+                qualidade_do_painel=qualidade,
                 contas=ContasDeUsuarioEmMemoria(
                     [
                         ContaDoIdentityPlatform(uid="bia", email="bia@redetv.com.br"),
@@ -85,7 +138,9 @@ def _diretoria() -> Mundo:
     return Mundo(["diretoria"])
 
 
-@pytest.mark.parametrize("rota", ["/acessos", "/filtros"])
+@pytest.mark.parametrize(
+    "rota", ["/acessos", "/videos", "/buscas", "/revisao", "/api", "/filtros"]
+)
 @pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
 def test_sem_painel_ver_e_403(rota: str, papel: str) -> None:
     mundo = Mundo([papel])
@@ -287,7 +342,15 @@ def test_consulta_do_bigquery_filtra_com_parametros_e_converte_as_linhas() -> No
         }
 
     resumos = ResumosBigQuery(
-        ConfigDosResumos("proj", "ds", "regiao", "por_usuario", "por_programa"),
+        ConfigDosResumos(
+            "proj",
+            "ds",
+            "regiao",
+            "por_usuario",
+            "por_programa",
+            "correcoes",
+            "chamadas",
+        ),
         transporte,
     )
 
@@ -310,9 +373,306 @@ def test_consulta_do_bigquery_filtra_com_parametros_e_converte_as_linhas() -> No
 
 def test_consulta_que_nao_termina_ou_nao_cabe_falha_alto() -> None:
     resumos = ResumosBigQuery(
-        ConfigDosResumos("p", "d", "r", "a", "b"),
+        ConfigDosResumos("p", "d", "r", "a", "b", "c", "d"),
         lambda corpo: {"jobComplete": False},
     )
 
     with pytest.raises(RuntimeError):
         resumos.acessos(None, None, None)
+
+
+def test_videos_por_dia_programa_e_usuario_com_o_tempo_medio() -> None:
+    r = _diretoria().get("/videos").json()
+
+    assert r["total"] == {
+        "enviados": 3,
+        "concluidos": 3,
+        "falhos": 1,
+        "horas_concluidas": 3.5,
+        "tempo_medio_s": 900.0,  # (600 + 1800 + 300) / 3 concluídos
+    }
+    assert [(d["dia"], d["enviados"], d["concluidos"]) for d in r["por_dia"]] == [
+        ("2026-11-01", 3, 2),
+        ("2026-11-02", 0, 0),  # sem vídeo no meio do período vem com zero
+        ("2026-11-03", 0, 1),
+    ]
+    assert r["por_dia"][1]["tempo_medio_s"] is None
+    assert [
+        (p["programa"], p["enviados"], p["horas_concluidas"]) for p in r["por_programa"]
+    ] == [
+        ("Fala", 1, 1.0),
+        ("Hoje", 2, 2.5),
+    ]
+    assert [
+        (u["quem_tipo"], u["quem_id"], u["email"], u["enviados"])
+        for u in r["por_usuario"]
+    ] == [
+        ("usuario", "bia", "bia@redetv.com.br", 2),
+        ("sistema", "cms", None, 1),
+    ]
+
+
+def test_o_concluido_sem_tempo_fica_fora_do_tempo_medio() -> None:
+    # O fim gravado antes de o evento trazer o tempo: 2 concluídos, só 1 com tempo.
+    resumos = ResumosEmMemoria(
+        uso=[_uso(1, quem=BIA, concluidos=2, segundos=600, com_tempo=1)]
+    )
+
+    r = Mundo(["diretoria"], resumos).get("/videos").json()
+
+    assert (r["total"]["concluidos"], r["total"]["tempo_medio_s"]) == (2, 600.0)
+
+
+def test_videos_filtrados_por_programa_ou_por_usuario() -> None:
+    mundo = _diretoria()
+
+    r = mundo.get("/videos", programa="Hoje").json()
+    assert r["total"]["enviados"] == 2 and r["total"]["concluidos"] == 2
+    assert [p["programa"] for p in r["por_programa"]] == ["Hoje"]
+    assert r["por_usuario"] == []
+
+    r = mundo.get("/videos", usuario="cms").json()
+    assert (r["total"]["enviados"], r["total"]["horas_concluidas"]) == (1, 1.0)
+    assert r["por_programa"] == []
+    assert [u["quem_id"] for u in r["por_usuario"]] == ["cms"]
+
+    r = mundo.get("/videos", desde="2026-11-03").json()
+    assert r["total"]["concluidos"] == 1
+
+
+def test_videos_e_buscas_com_programa_e_usuario_juntos_e_422() -> None:
+    mundo = _diretoria()
+
+    assert mundo.get("/videos", programa="Hoje", usuario="bia").status_code == 422
+    assert mundo.get("/buscas", programa="Hoje", usuario="bia").status_code == 422
+    assert mundo.get("/videos", desde="2026-11-03", ate="2026-11-01").status_code == 422
+
+
+def test_buscas_contam_sem_resultado_e_quem_busca() -> None:
+    r = _diretoria().get("/buscas").json()
+
+    assert r["total"] == {"buscas": 5, "sem_resultado": 3, "usuarios_que_buscam": 2}
+    assert r["por_dia"] == [
+        {
+            "dia": "2026-11-01",
+            "buscas": 3,
+            "sem_resultado": 1,
+            "usuarios_que_buscam": 1,
+        },
+        {
+            "dia": "2026-11-02",
+            "buscas": 0,
+            "sem_resultado": 0,
+            "usuarios_que_buscam": 0,
+        },
+        {
+            "dia": "2026-11-03",
+            "buscas": 2,
+            "sem_resultado": 2,
+            "usuarios_que_buscam": 1,
+        },
+    ]
+    assert [
+        (u["quem_id"], u["email"], u["buscas"], u["sem_resultado"])
+        for u in r["por_usuario"]
+    ] == [
+        ("caio", "caio@redetv.com.br", 3, 1),
+        ("bia", "bia@redetv.com.br", 2, 2),
+    ]
+
+
+def test_buscas_de_um_programa_nao_sabem_quem_buscou() -> None:
+    r = _diretoria().get("/buscas", programa="Hoje").json()
+
+    assert r["total"] == {"buscas": 2, "sem_resultado": 2, "usuarios_que_buscam": None}
+    assert r["por_usuario"] == []
+    assert r["por_dia"][0]["usuarios_que_buscam"] is None
+
+
+def test_buscas_de_um_usuario() -> None:
+    r = _diretoria().get("/buscas", usuario="caio").json()
+
+    assert (r["total"]["buscas"], r["total"]["usuarios_que_buscam"]) == (3, 1)
+
+
+def test_sistema_que_busca_aparece_por_usuario_mas_nao_conta_como_quem_busca() -> None:
+    resumos = ResumosEmMemoria(uso=[_uso(1, quem=CMS, buscas=4)])
+
+    r = Mundo(["diretoria"], resumos=resumos).get("/buscas").json()
+
+    assert r["total"]["usuarios_que_buscam"] == 0
+    assert [u["quem_id"] for u in r["por_usuario"]] == ["cms"]
+
+
+def test_csv_de_videos_e_de_buscas_e_a_base_do_filtro() -> None:
+    mundo = _diretoria()
+
+    videos = mundo.get("/videos", formato="csv")
+    linhas = list(csv.reader(io.StringIO(videos.text)))
+    assert "videos.csv" in videos.headers["content-disposition"]
+    assert linhas[0][:6] == [
+        "dia",
+        "quem_tipo",
+        "quem_id",
+        "email",
+        "programa",
+        "enviados",
+    ]
+    assert linhas[1] == [
+        "2026-11-01",
+        "usuario",
+        "bia",
+        "bia@redetv.com.br",
+        "",
+        "2",
+        "1",
+        "1",
+        "2",
+        "600",
+    ]
+    assert linhas[2][1:3] == ["sistema", "cms"]
+    # Os dois do dia 1 e o do dia 3; a linha só com login fica fora.
+    assert len(linhas) == 4
+
+    por_programa = list(
+        csv.reader(
+            io.StringIO(mundo.get("/videos", formato="csv", programa="Fala").text)
+        )
+    )
+    assert por_programa[1][:5] == ["2026-11-01", "", "", "", "Fala"]
+
+    buscas = list(csv.reader(io.StringIO(mundo.get("/buscas", formato="csv").text)))
+    assert buscas[0] == [
+        "dia",
+        "quem_tipo",
+        "quem_id",
+        "email",
+        "programa",
+        "buscas",
+        "sem_resultado",
+    ]
+    assert buscas[1] == [
+        "2026-11-01",
+        "usuario",
+        "caio",
+        "caio@redetv.com.br",
+        "",
+        "3",
+        "1",
+    ]
+
+
+def test_abrir_e_baixar_videos_e_buscas_gravam_a_aba_na_auditoria() -> None:
+    mundo = _diretoria()
+
+    mundo.get("/videos")
+    mundo.get("/buscas", programa="Hoje")
+    mundo.get("/buscas", programa="Hoje", formato="csv")
+
+    abertos = mundo.auditoria.consultar(
+        FiltroDeAuditoria(acao="painel.aberto")
+    ).registros
+    exportados = mundo.auditoria.consultar(
+        FiltroDeAuditoria(acao="painel.exportado")
+    ).registros
+    assert sorted(r.detalhes["aba"] for r in abertos) == ["buscas", "videos"]
+    assert [r.detalhes for r in exportados] == [
+        {"aba": "buscas", "filtro": {"programa": "Hoje"}}
+    ]
+
+
+def test_uso_no_bigquery_traz_as_colunas_das_duas_tabelas() -> None:
+    pedidos: list[dict[str, Any]] = []
+
+    def transporte(corpo: dict[str, Any]) -> dict[str, Any]:
+        pedidos.append(corpo)
+        valores = [
+            "2026-11-01",
+            "usuario",
+            "bia",
+            None,
+            "2",
+            "1",
+            "1",
+            "2.5",
+            "600",
+            "1",
+            "3",
+            "1",
+        ]
+        return {"jobComplete": True, "rows": [{"f": [{"v": v} for v in valores]}]}
+
+    resumos = ResumosBigQuery(
+        ConfigDosResumos(
+            "proj",
+            "ds",
+            "regiao",
+            "por_usuario",
+            "por_programa",
+            "correcoes",
+            "chamadas",
+        ),
+        transporte,
+    )
+
+    [por_quem] = resumos.uso_por_quem(None, date(2026, 11, 2), "bia")
+    [por_programa] = resumos.uso_por_programa(None, None, "Hoje'; DROP TABLE x")
+
+    assert por_quem == UsoDoDia(
+        date(2026, 11, 1), "usuario", "bia", None, 2, 1, 1, 2.5, 600, 1, 3, 1
+    )
+    assert por_programa.horas_concluidas == 2.5
+    primeiro, segundo = pedidos
+    assert "`proj.ds.por_usuario`" in primeiro["query"]
+    assert "quem_id = @quem_id" in primeiro["query"]
+    assert "`proj.ds.por_programa`" in segundo["query"]
+    assert "DROP" not in segundo["query"]
+    assert segundo["queryParameters"] == [_parametro("programa", "Hoje'; DROP TABLE x")]
+
+
+def test_correcoes_e_chamadas_no_bigquery_trazem_as_colunas_das_duas_tabelas() -> None:
+    pedidos: list[dict[str, Any]] = []
+    respostas: list[list[str | None]] = [
+        ["2026-11-01", "usuario", "bia", None, "fala.texto", "3"],
+        ["2026-11-01", "sistema", "cms", "POST", "/v1/jobs", "5", "1", "2"],
+    ]
+
+    def transporte(corpo: dict[str, Any]) -> dict[str, Any]:
+        pedidos.append(corpo)
+        valores = respostas[len(pedidos) - 1]
+        return {"jobComplete": True, "rows": [{"f": [{"v": v} for v in valores]}]}
+
+    resumos = ResumosBigQuery(
+        ConfigDosResumos(
+            "proj",
+            "ds",
+            "regiao",
+            "por_usuario",
+            "por_programa",
+            "correcoes",
+            "chamadas",
+        ),
+        transporte,
+    )
+
+    [correcao] = resumos.correcoes(None, None, "Hoje'; DROP TABLE x", "bia")
+    [chamada] = resumos.chamadas(date(2026, 11, 1), None, "cms")
+
+    assert correcao == CorrecaoDoDia(
+        date(2026, 11, 1), "usuario", "bia", None, "fala.texto", 3
+    )
+    assert chamada == ChamadaDoDia(
+        date(2026, 11, 1), "sistema", "cms", "POST", "/v1/jobs", 5, 1, 2
+    )
+    primeiro, segundo = pedidos
+    assert "`proj.ds.correcoes`" in primeiro["query"]
+    assert "DROP" not in primeiro["query"]
+    assert primeiro["queryParameters"] == [
+        _parametro("programa", "Hoje'; DROP TABLE x"),
+        _parametro("quem_id", "bia"),
+    ]
+    assert "`proj.ds.chamadas`" in segundo["query"]
+    assert segundo["queryParameters"] == [
+        _parametro("desde", "2026-11-01", "DATE"),
+        _parametro("quem_id", "cms"),
+    ]

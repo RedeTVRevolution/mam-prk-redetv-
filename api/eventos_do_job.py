@@ -252,15 +252,19 @@ class RepositorioQueRegistraOFim:
                 if job.sistema is not None
                 else ("usuario", job.criado_por)
             )
+            agora = self._relogio()
             registrar(
                 self._eventos,
                 "fim_de_processamento",
                 quem,
-                self._relogio(),
+                agora,
                 job_id=job.id,
                 programa=job.programa,
                 estado=job.estado,
                 codigo_falha=job.codigo_falha,
+                segundos_de_processamento=max(
+                    0, round((agora - job.criado_em).total_seconds())
+                ),
             )
         return job
 

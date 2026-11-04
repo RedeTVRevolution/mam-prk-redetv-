@@ -12,6 +12,10 @@ import {
   type FiltrosDoPainel,
   type OpcoesDoPainel,
   type RelatorioDeAcessos,
+  type RelatorioDeApi,
+  type RelatorioDeBuscas,
+  type RelatorioDeRevisao,
+  type RelatorioDeVideos,
 } from './painelDaDiretoria.ts'
 import { parametrosDoRelatorio } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
@@ -306,6 +310,22 @@ export interface ClienteDaApi {
   acessosDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeAcessos>
   /** Os mesmos acessos em CSV, uma linha por dia e pessoa. */
   acessosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** `GET /v1/painel/videos`: enviados, concluídos, falhas, horas e tempo de processamento. Programa e usuário não se combinam. */
+  videosDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeVideos>
+  /** A base dos vídeos em CSV, uma linha por dia e pessoa (ou por dia e programa, com o filtro de programa). */
+  videosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** `GET /v1/painel/buscas`: buscas, quem busca e buscas sem resultado. Programa e usuário não se combinam. */
+  buscasDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeBuscas>
+  /** A base das buscas em CSV. */
+  buscasDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** `GET /v1/painel/revisao`: correções, taxa de correção e minutos de revisão. Os filtros se cruzam. */
+  revisaoDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeRevisao>
+  /** A base da revisão em CSV, uma tabela com a coluna `indicador`. */
+  revisaoDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** `GET /v1/painel/api`: chamadas por sistema e rota, erros e vídeos enviados. Sem programa. */
+  apiDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeApi>
+  /** A base da API em CSV. */
+  apiDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
   /** `GET /v1/relatorios/marcas`: inserções, tempo e vídeos por marca e por tipo de inserção. */
   marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
   /** O mesmo relatório em CSV. */
@@ -467,6 +487,14 @@ export function criarClienteDaApi(
     acessosDoPainel: (filtros) => chamar(`/v1/painel/acessos?${parametrosDoPainel(filtros, { semPrograma: true })}`),
     acessosDoPainelEmCsv: async (filtros) =>
       (await pedir(`/v1/painel/acessos?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
+    videosDoPainel: (filtros) => chamar(`/v1/painel/videos?${parametrosDoPainel(filtros)}`),
+    videosDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/videos?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
+    buscasDoPainel: (filtros) => chamar(`/v1/painel/buscas?${parametrosDoPainel(filtros)}`),
+    revisaoDoPainel: (filtros) => chamar(`/v1/painel/revisao?${parametrosDoPainel(filtros)}`),
+    revisaoDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/revisao?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
+    apiDoPainel: (filtros) => chamar(`/v1/painel/api?${parametrosDoPainel(filtros, { semPrograma: true })}`),
+    apiDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/api?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
+    buscasDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/buscas?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
     marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
     marcasEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),

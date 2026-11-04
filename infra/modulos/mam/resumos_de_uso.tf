@@ -1,6 +1,6 @@
 # Tabelas resumidas do painel da diretoria (#280, E9). Uma consulta agendada do BigQuery
 # (`resumos_de_uso.sql`) refaz `uso_por_dia_e_usuario`, `uso_por_dia`, `uso_por_usuario` e
-# `uso_por_dia_e_programa` a partir de `eventos_de_uso` (#279) e as telas do painel (#282 a
+# `uso_por_dia_e_programa`, `correcoes_por_dia` e `chamadas_de_api_por_dia` a partir de `eventos_de_uso` (#279) e as telas do painel (#282 a
 # #285) leem só elas.
 #
 # Por que consulta agendada e não visão materializada: a visão materializada não aceita
@@ -18,11 +18,13 @@
 # de duração por Job, e não ler os momentos. Estimado, não medido: conferir na fatura
 # (`faturamento.tf`). O armazenamento fica nos 10 GB grátis.
 locals {
-  resumos_de_uso = ["uso_por_dia_e_usuario", "uso_por_dia", "uso_por_usuario", "uso_por_dia_e_programa"]
+  resumos_de_uso = ["uso_por_dia_e_usuario", "uso_por_dia", "uso_por_usuario", "uso_por_dia_e_programa", "correcoes_por_dia", "chamadas_de_api_por_dia"]
   # As que a web lê (PAINEL_TABELA_*): a API do painel não conhece o nome de nenhuma.
   tabelas_do_painel_na_web = {
     por_dia_e_usuario  = "uso_por_dia_e_usuario"
     por_dia_e_programa = "uso_por_dia_e_programa"
+    correcoes_por_dia  = "correcoes_por_dia"
+    chamadas_por_dia   = "chamadas_de_api_por_dia"
   }
 }
 

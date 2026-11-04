@@ -53,13 +53,17 @@ class EventoDeUso(BaseModel):
     programa: str | None = None
     # `envio`: tamanho do arquivo.
     tamanho_bytes: int | None = None
-    # `fim_de_processamento`: `concluido` ou `falhou`, e o código da falha.
+    # `fim_de_processamento`: `concluido` ou `falhou`, o código da falha e quanto o Job
+    # levou, do registro ao fim.
     estado: str | None = None
     codigo_falha: str | None = None
+    segundos_de_processamento: int | None = None
     # `busca`: só o tamanho da consulta (em caracteres, ou em bytes na busca por
     # imagem; nenhum na de parecidos, que parte de um plano) e os filtros; o texto
     # nunca sai da API.
     tamanho_da_consulta: int | None = None
+    # `busca`: quantos vídeos a busca trouxe (0 é busca sem resultado).
+    n_resultados: int | None = None
     filtros: list[Filtro] = []
     # `correcao`: o tipo do registro de Correção (`fala.texto`, `pessoa.renomear`...,
     # ou `desfazer`, `descartar`, `aprovar`, `recusar`).

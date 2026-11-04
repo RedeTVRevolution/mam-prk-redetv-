@@ -4,6 +4,7 @@ import { filtrosParaEnderecoDasEntradas, type FiltrosDasEntradas } from './entra
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
 import { filtrosDeMarcas, type FiltrosDeMarcas } from './marcas.ts'
 import {
+  abaDoPainel,
   filtrosDoPainel,
   filtrosParaEnderecoDoPainel,
   type AbaDoPainel,
@@ -111,8 +112,9 @@ export function lerRota(caminho: string, busca = ''): Rota {
   if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'marcas') {
     return { tipo: 'marcas', filtros: filtrosDeMarcas(busca) }
   }
-  if (partes[0] === 'painel' && partes.length <= 2 && (partes[1] ?? 'acessos') === 'acessos') {
-    return { tipo: 'painel', aba: 'acessos', filtros: filtrosDoPainel(busca) }
+  if (partes[0] === 'painel' && partes.length <= 2) {
+    const aba = abaDoPainel(partes[1])
+    if (aba) return { tipo: 'painel', aba, filtros: filtrosDoPainel(busca) }
   }
   if (partes[0] === 'admin' && partes.length <= 2) return { tipo: 'admin', aba: partes[1] ?? null, busca }
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
