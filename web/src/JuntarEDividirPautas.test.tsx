@@ -130,7 +130,8 @@ test('M marca as pautas, U abre o título e Enter grava a junção com o título
     valor: JSON.stringify({ ids: ['pa1', 'pa2'], titulo: 'Abertura' }),
   })
   await waitFor(() => expect(screen.queryByText(/pautas marcadas para juntar/)).toBeNull())
-})
+  // 15 s: o render do Visualizador inteiro passou dos 5 s com o contêiner do loop ocupado.
+}, 15_000)
 
 test('o título pode ser o de outra pauta ou um novo, e o botão Juntar vale como o U', async () => {
   const usuario = await abrir()
