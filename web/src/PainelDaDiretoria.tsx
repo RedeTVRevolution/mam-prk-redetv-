@@ -7,6 +7,7 @@ import { dataDeExibicao, dataEHora } from './jobs.ts'
 import { duracaoLegivel } from './tempoDeTela.ts'
 import {
   ABAS_DO_PAINEL,
+  custoLegivel,
   diaCurto,
   horasDeVideo,
   mesCurto,
@@ -24,6 +25,7 @@ import {
   type RelatorioDeAcessos,
   type RelatorioDeApi,
   type RelatorioDeBuscas,
+  type RelatorioDeCusto,
   type RelatorioDeRevisao,
   type RelatorioDeVideos,
 } from './painelDaDiretoria.ts'
@@ -558,6 +560,72 @@ function Api({ relatorio }: { relatorio: RelatorioDeApi }) {
   )
 }
 
+function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
+  const { total: t, moeda } = relatorio
+  const valor = (custo: number) => custoLegivel(custo, moeda)
+  const porHora = (custo: number | null) => (custo === null ? '—' : valor(custo))
+  if (relatorio.por_mes.length === 0 && relatorio.sem_dono_por_servico.length === 0) {
+    return <Text size="sm">Nenhum custo neste filtro.</Text>
+  }
+  return (
+    <Stack gap="md">
+      <Group gap="xl">
+        <Numero rotulo="Custo" valor={valor(t.custo)} />
+        <Numero rotulo="Custo dos vídeos" valor={valor(t.custo_dos_jobs)} />
+        <Numero rotulo="Custo sem dono" valor={valor(t.custo_sem_dono)} />
+        <Numero rotulo="Vídeos concluídos" valor={t.videos} />
+        <Numero rotulo="Horas de vídeo" valor={horasDeVideo(t.horas_de_video)} />
+        <Numero rotulo="Custo por hora de vídeo" valor={porHora(t.custo_por_hora)} />
+      </Group>
+      <TabelaSimples
+        rotulo="Custo por mês"
+        colunas={['Mês', 'Custo', 'Custo dos vídeos', 'Custo sem dono', 'Vídeos', 'Horas de vídeo', 'Custo por hora']}
+        linhas={relatorio.por_mes.map((m) => ({
+          chave: m.mes,
+          celulas: [
+            mesCurto(`${m.mes}-01`),
+            valor(m.custo),
+            valor(m.custo_dos_jobs),
+            valor(m.custo_sem_dono),
+            m.videos,
+            horasDeVideo(m.horas_de_video),
+            porHora(m.custo_por_hora),
+          ],
+        }))}
+      />
+      {relatorio.por_quem.length > 0 && (
+        <TabelaSimples
+          rotulo="Custo por usuário"
+          colunas={['Usuário', 'Custo', 'Vídeos', 'Horas de vídeo', 'Custo por hora']}
+          linhas={relatorio.por_quem.map((q) => ({
+            chave: `${q.quem_tipo}:${q.quem_id}`,
+            celulas: [nomeDeQuem(q), valor(q.custo), q.videos, horasDeVideo(q.horas_de_video), porHora(q.custo_por_hora)],
+          }))}
+        />
+      )}
+      {relatorio.por_etapa.length > 0 && (
+        <TabelaSimples
+          rotulo="Custo por etapa"
+          colunas={['Etapa', 'Custo']}
+          largura={360}
+          linhas={relatorio.por_etapa.map((e) => ({ chave: e.etapa, celulas: [e.etapa, valor(e.custo)] }))}
+        />
+      )}
+      {relatorio.sem_dono_por_servico.length > 0 && (
+        <TabelaSimples
+          rotulo="Custo sem dono por serviço"
+          colunas={['Serviço', 'Custo']}
+          largura={480}
+          linhas={relatorio.sem_dono_por_servico.map((s) => ({
+            chave: s.servico ?? '',
+            celulas: [s.servico ?? 'Sem serviço', valor(s.custo)],
+          }))}
+        />
+      )}
+    </Stack>
+  )
+}
+
 /**
  * Uma aba: busca o relatório, mostra o "Baixar CSV" e os avisos. `bloqueio` é o motivo de não
  * chamar a API (período invertido, filtros que não se combinam); `vazio` desliga o CSV.
@@ -630,6 +698,7 @@ export default function PainelDaDiretoria({
   const buscarBuscas = useCallback(() => api.buscasDoPainel(filtros), [api, filtros])
   const buscarRevisao = useCallback(() => api.revisaoDoPainel(filtros), [api, filtros])
   const buscarApi = useCallback(() => api.apiDoPainel(filtros), [api, filtros])
+  const buscarCusto = useCallback(() => api.custoDoPainel(filtros), [api, filtros])
 
   function mudar(parte: Partial<FiltrosDoPainel>) {
     navegar(enderecoDoPainel(aba, { ...filtros, ...parte }), { substituir: true })
@@ -706,6 +775,17 @@ export default function PainelDaDiretoria({
             vazio={(r: RelatorioDeApi) => r.por_dia.length === 0 && r.por_sistema.length === 0}
             nota={`A chamada não tem programa: o filtro de programa vale para as outras abas. O filtro de usuário escolhe o sistema. Vídeos enviados pela API são só os de sistemas. ${NOTA_DO_DIA}`}
             mostrar={(r) => <Api relatorio={r} />}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value="custo" pt="md">
+          <AbaDoRelatorio
+            buscar={buscarCusto}
+            arquivo="custo.csv"
+            baixar={() => api.custoDoPainelEmCsv(filtros)}
+            bloqueio={periodo}
+            vazio={(r: RelatorioDeCusto) => r.por_mes.length === 0 && r.sem_dono_por_servico.length === 0}
+            nota="O custo é o da exportação do faturamento, líquido de créditos. O custo de um vídeo conta no mês em que ele foi enviado; as horas e o custo por hora são só dos concluídos. O que não tem dono (a réplica do índice, os Jobs do Cloud Run, a busca) só entra sem filtro de programa ou de usuário. O faturamento chega com atraso de horas."
+            mostrar={(r) => <Custo relatorio={r} />}
           />
         </Tabs.Panel>
       </Tabs>

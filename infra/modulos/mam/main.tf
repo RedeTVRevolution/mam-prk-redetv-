@@ -1010,6 +1010,15 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "PAINEL_TABELA_CHAMADAS_POR_DIA"
         value = local.tabelas_do_painel_na_web.chamadas_por_dia
       }
+      # A exportação do faturamento que o painel de custo lê (faturamento.tf, #285).
+      env {
+        name  = "FATURAMENTO_DATASET"
+        value = google_bigquery_dataset.faturamento.dataset_id
+      }
+      env {
+        name  = "FATURAMENTO_TABELA"
+        value = "gcp_billing_export_resource_v1_*"
+      }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
         value = tostring(var.busca_distancia_maxima)

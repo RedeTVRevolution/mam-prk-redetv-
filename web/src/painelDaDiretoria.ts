@@ -1,7 +1,7 @@
 // O painel da diretoria (E9): o que a API devolve, os filtros comuns (que viajam na URL e na chamada)
 // e as abas. Não confundir com `painel.ts`, o painel da decupagem no Visualizador.
 
-export type AbaDoPainel = 'acessos' | 'videos' | 'buscas' | 'revisao' | 'api'
+export type AbaDoPainel = 'acessos' | 'videos' | 'buscas' | 'revisao' | 'api' | 'custo'
 
 export const ABAS_DO_PAINEL: { chave: AbaDoPainel; rotulo: string }[] = [
   { chave: 'acessos', rotulo: 'Acessos' },
@@ -9,6 +9,7 @@ export const ABAS_DO_PAINEL: { chave: AbaDoPainel; rotulo: string }[] = [
   { chave: 'buscas', rotulo: 'Buscas' },
   { chave: 'revisao', rotulo: 'Revisão' },
   { chave: 'api', rotulo: 'API' },
+  { chave: 'custo', rotulo: 'Custo' },
 ]
 
 /** A aba do endereço (`/painel/<aba>`); vazia é Acessos, e `null` é aba que não existe. */
@@ -293,6 +294,49 @@ export interface RelatorioDeApi {
   por_dia: DiaDeApi[]
   por_sistema: SistemaDeApi[]
   por_rota: RotaDeApi[]
+}
+
+export interface NumerosDeCusto {
+  custo: number
+  videos: number
+  horas_de_video: number
+  custo_por_hora: number | null
+}
+
+export interface TotalDeCusto extends NumerosDeCusto {
+  custo_dos_jobs: number
+  custo_sem_dono: number
+}
+
+export interface MesDeCusto extends TotalDeCusto {
+  mes: string
+}
+
+export interface QuemDeCusto extends NumerosDeCusto {
+  quem_tipo: 'usuario' | 'sistema'
+  quem_id: string
+  email: string | null
+}
+
+/** `GET /v1/painel/custo`. `custo` é o líquido dos créditos, na `moeda` da exportação (`null` sem linha). */
+export interface RelatorioDeCusto {
+  desde: string | null
+  ate: string | null
+  programa: string | null
+  usuario: string | null
+  moeda: string | null
+  total: TotalDeCusto
+  por_mes: MesDeCusto[]
+  por_quem: QuemDeCusto[]
+  por_etapa: { etapa: string; custo: number }[]
+  sem_dono_por_servico: { servico: string | null; custo: number }[]
+}
+
+/** O custo com duas casas e a moeda da exportação: "R$ 12,50" (BRL) ou "12,50 USD". */
+export function custoLegivel(valor: number, moeda: string | null): string {
+  if (moeda === 'BRL') return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const numero = valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return moeda ? `${numero} ${moeda}` : numero
 }
 
 /** A taxa em porcentagem com uma casa: "12,5%"; sem taxa, um traço. */
