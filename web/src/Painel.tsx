@@ -512,6 +512,7 @@ export function Painel({
   edicao = null,
   marcas,
   aoAcrescentar,
+  aoFundir,
   acoes,
   planosParecidos,
 }: {
@@ -542,6 +543,8 @@ export function Painel({
   marcas?: Record<string, Marca>
   /** Só no modo de catalogação: acrescentar uma aparição na linha da pessoa. */
   aoAcrescentar?: (pessoa: string) => void
+  /** "Fundir com…" na linha da pessoa do catálogo (`catalogo.fundir`, no modo de catalogação). */
+  aoFundir?: (pessoa: string) => void
   /** Os planos com vetor do quadro indexado e a busca dos parecidos (#271); sem vetor, sem botão. */
   planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
   /** Só no modo de catalogação: corrigir e remover pelo mouse. */
@@ -812,7 +815,13 @@ export function Painel({
                         {`Acrescentar aparição de ${rotulo}`}
                       </Button>
                     )}
+                    {abrir && aoFundir && p.catalogo_id && edicao?.chave !== `fundir:${p.id}` && (
+                      <Button size="compact-xs" variant="default" ml="md" style={{ alignSelf: 'flex-start' }} aria-label={`Fundir ${rotulo} com…`} onClick={() => aoFundir(p.id)}>
+                        Fundir com…
+                      </Button>
+                    )}
                     {edicao?.chave === `acrescentar:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
+                    {edicao?.chave === `fundir:${p.id}` && <Box ml="md">{edicao.conteudo}</Box>}
                     {abrir && <Stack gap={2} ml="md">{lista(doId)}</Stack>}
                   </Stack>
                 )

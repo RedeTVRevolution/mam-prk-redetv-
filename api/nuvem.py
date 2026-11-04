@@ -32,12 +32,14 @@ from api.auditoria import (
 from api.avaliacao import Avaliacao
 from api.catalogo import (
     EnvioParaLixeira,
+    FusaoDaPessoa,
     PessoaDoCatalogo,
     PessoaInexistente,
     Rosto,
     corrigida,
     nomes_de_busca,
     novo_id,
+    visivel,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.comparador import normalizar
@@ -483,13 +485,13 @@ class CatalogoFirestore:
             filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
         )
         achadas = [self._pessoa(d.id, d.to_dict() or {}) for d in consulta.stream()]
-        return [p for p in achadas if p.lixeira is None]
+        return [p for p in achadas if visivel(p)]
 
     def _lidas(self) -> list[PessoaDoCatalogo]:
         return [self._pessoa(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
 
     def todas(self) -> list[PessoaDoCatalogo]:
-        return [p for p in self._lidas() if p.lixeira is None]
+        return [p for p in self._lidas() if visivel(p)]
 
     def na_lixeira(self) -> list[PessoaDoCatalogo]:
         return [p for p in self._lidas() if p.lixeira is not None]
@@ -501,6 +503,12 @@ class CatalogoFirestore:
         if atual is None:
             raise PessoaInexistente(id)
         return self._gravar(atual.model_copy(update={"lixeira": envio}))
+
+    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        return self._gravar(atual.model_copy(update={"fundida": fusao}))
 
     def acrescentar(
         self,

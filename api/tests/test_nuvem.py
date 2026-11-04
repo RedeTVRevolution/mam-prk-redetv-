@@ -24,7 +24,7 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
-from api.catalogo import EnvioParaLixeira, PessoaInexistente
+from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.jobs import (
@@ -966,6 +966,29 @@ class TestCatalogoFirestore:
         assert catalogo.na_lixeira() == []
         with pytest.raises(PessoaInexistente):
             catalogo.definir_lixeira("inexistente", envio)
+
+    def test_fundida_sai_da_busca_e_aponta_para_o_destino(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        origem = catalogo.acrescentar("Sabrina S.", "", [])
+        destino = catalogo.acrescentar("Sabrina Sato", "apresentadora", [])
+        fusao = FusaoDaPessoa(
+            destino_id=destino.id,
+            em=BASE,
+            por_uid="u1",
+            por_email="c@redetv.com",
+            motivo="nome duplicado",
+        )
+
+        catalogo.definir_fusao(origem.id, fusao)
+
+        assert catalogo.todas() == [destino]
+        assert catalogo.achar("sabrina s") == []
+        assert catalogo.na_lixeira() == []
+        lida = catalogo.obter(origem.id)
+        assert lida is not None and lida.fundida == fusao
+        with pytest.raises(PessoaInexistente):
+            catalogo.definir_fusao("inexistente", fusao)
 
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, catalogo: CatalogoFirestore

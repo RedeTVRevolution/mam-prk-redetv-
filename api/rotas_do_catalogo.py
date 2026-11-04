@@ -86,8 +86,13 @@ def _rotulo(nome: str, papel: str) -> str:
 
 
 def criar_rotas_do_catalogo(
-    pessoas: Catalogo, marcas: CatalogoDeMarcas, relogio: Callable[[], datetime]
+    pessoas: Catalogo,
+    marcas: CatalogoDeMarcas,
+    relogio: Callable[[], datetime],
+    fusao: Callable[[Callable[[], None]], APIRouter],
 ) -> APIRouter:
+    """`fusao` monta as rotas de fundir pessoas (#209); recebe como descartar a cópia
+    da lista de pessoas, para a fundida sair do autocompletar na hora."""
     rotas = APIRouter(prefix="/catalogo")
     copia_das_pessoas = _CopiaCurta(pessoas.todas, relogio)
     copia_das_marcas = _CopiaCurta(marcas.todas, relogio)
@@ -154,4 +159,5 @@ def criar_rotas_do_catalogo(
         copia_das_marcas.descartar()
         return marca_achada(criada)
 
+    rotas.include_router(fusao(copia_das_pessoas.descartar))
     return rotas

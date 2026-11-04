@@ -34,7 +34,7 @@ from api.auth import (
     Usuario,
 )
 from api.catalogo import Catalogo, EnvioParaLixeira
-from api.catalogo_apagado import sem_catalogo_apagado
+from api.catalogo_apagado import com_pessoas_fundidas, sem_catalogo_apagado
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
@@ -1062,6 +1062,7 @@ def criar_rotas(
         """A Decupagem entregue, com as Correções aplicadas."""
         modelo, versao_atual = _ler_modelo(job.id)
         entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
+        entregue = com_pessoas_fundidas(entregue, catalogo.obter)
         entregue = sem_catalogo_apagado(
             entregue,
             lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,

@@ -55,6 +55,7 @@ from api.correcoes import (
 from api.decupagem import Decupagem
 from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
+from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.indexacao import reindexar
 from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
@@ -367,7 +368,21 @@ def criar_app(
     v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
     v1.include_router(
-        criar_rotas_do_catalogo(catalogo_de_pessoas, catalogo_de_marcas, relogio)
+        criar_rotas_do_catalogo(
+            catalogo_de_pessoas,
+            catalogo_de_marcas,
+            relogio,
+            lambda ao_fundir: criar_rotas_da_fusao(
+                catalogo_de_pessoas,
+                repositorio_de_jobs,
+                repositorio_de_correcoes,
+                armazenamento_dos_jobs,
+                fotos_de_referencia or FotosEmMemoria(),
+                repositorio_de_auditoria,
+                relogio,
+                ao_fundir,
+            ),
+        )
     )
     v1.include_router(
         criar_rotas_da_busca(

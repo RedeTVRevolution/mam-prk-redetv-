@@ -110,6 +110,7 @@ def test_eu_devolve_papeis_e_permissoes() -> None:
         "papeis": ["curador"],
         "permissoes": [
             "catalogo.apagar",
+            "catalogo.fundir",
             "correcao.aprovar",
             "decupagem.editar",
             "decupagem.ver",

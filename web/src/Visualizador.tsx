@@ -34,6 +34,7 @@ import {
   podeRemover,
 } from './catalogacao.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './FormularioDeCorrecao.tsx'
+import { FusaoDePessoa } from './FusaoDePessoa.tsx'
 import { dataDeExibicao, finalizando, type Job } from './jobs.ts'
 import { type AlcasDaCorrecao, FaixasDoVideo, type TrechoMarcado } from './FaixasDoVideo.tsx'
 import { NomesDoCatalogo } from './nomesDoCatalogo.ts'
@@ -100,6 +101,7 @@ export default function Visualizador({
   podeAprovar = false,
   podeReprocessar = false,
   podeVerAuditoria = false,
+  podeFundir = false,
   intervaloDoAcompanhamentoMs = 5000,
   intervaloDaIndexacaoMs = INTERVALO_DA_INDEXACAO_MS,
 }: {
@@ -113,6 +115,8 @@ export default function Visualizador({
   podeReprocessar?: boolean
   /** Mostra o link "Quem acessou" (`auditoria.ver`). */
   podeVerAuditoria?: boolean
+  /** Mostra "Fundir com…" na linha da pessoa, no modo de catalogação (`catalogo.fundir`). */
+  podeFundir?: boolean
   intervaloDoAcompanhamentoMs?: number
   /** De quanto em quanto a tela pergunta se a correção já entrou no índice. */
   intervaloDaIndexacaoMs?: number
@@ -151,7 +155,7 @@ export default function Visualizador({
   const [catalogo, setCatalogo] = useState<CatalogoDeCorrecoes | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [objetoApontado, setObjetoApontado] = useState<ObjetoApontado | null>(null)
-  const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' } | null>(null)
+  const [emEdicao, setEmEdicao] = useState<{ chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fundir' } | null>(null)
   // Os tempos que as alças da linha do tempo ajustaram na correção aberta.
   const [temposDaAlca, setTemposDaAlca] = useState<Intervalo | null>(null)
   const salvarDasAlcas = useRef<(() => void) | null>(null)
@@ -945,7 +949,26 @@ export default function Visualizador({
   let edicaoNoPainel: EdicaoNoPainel | null = null
   let alcasDaCorrecao: AlcasDaCorrecao | null = null
   if (catalogando && decupagem && catalogo && emEdicao) {
-    if (emEdicao.modo === 'acrescentar') {
+    if (emEdicao.modo === 'fundir') {
+      const pessoa = decupagem.pessoas.find((p) => `fundir:${p.id}` === emEdicao.chave)
+      if (pessoa?.catalogo_id)
+        edicaoNoPainel = {
+          chave: emEdicao.chave,
+          conteudo: (
+            <FusaoDePessoa
+              origemId={pessoa.catalogo_id}
+              nomeDaOrigem={pessoa.nome}
+              fusao={api.fusao}
+              limiteDoMotivo={catalogo.limites.motivo}
+              aoFundir={() => {
+                fecharEdicao()
+                setCargasDaDecupagem((n) => n + 1)
+              }}
+              aoCancelar={fecharEdicao}
+            />
+          ),
+        }
+    } else if (emEdicao.modo === 'acrescentar') {
       const pessoa = decupagem.pessoas.find((p) => `acrescentar:${p.id}` === emEdicao.chave)
       if (pessoa)
         edicaoNoPainel = {
@@ -1027,6 +1050,11 @@ export default function Visualizador({
           aoDescartar: descartarTrecho,
         }
       : null
+
+  function fundirPessoa(pessoa: string) {
+    setTemposDaAlca(null)
+    setEmEdicao({ chave: `fundir:${pessoa}`, modo: 'fundir' })
+  }
 
   function acrescentarAparicao(pessoa: string) {
     setTemposDaAlca(null)
@@ -1544,6 +1572,7 @@ export default function Visualizador({
               edicao={edicaoNoPainel}
               marcas={marcas}
               aoAcrescentar={catalogando && catalogo ? acrescentarAparicao : undefined}
+              aoFundir={catalogando && catalogo && podeFundir ? fundirPessoa : undefined}
               acoes={
                 catalogando && catalogo && decupagem
                   ? {

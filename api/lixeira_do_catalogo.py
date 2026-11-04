@@ -152,6 +152,26 @@ def purgar_catalogo_vencido(
     return purgadas
 
 
+def decupagens_entregues(
+    repositorio: RepositorioDeJobs,
+    correcoes: RepositorioDeCorrecoes,
+    decupagens: LeituraDeDecupagens,
+) -> Iterator[dict[str, Any]]:
+    """A Decupagem entregue de cada vídeo concluído fora da lixeira; a que não lê é pulada."""
+    for job in repositorio.consultar(FiltroDeJobs()).jobs:
+        if job.estado != "concluido":
+            continue
+        try:
+            conteudo = b"".join(decupagens.abrir_decupagem(job.id))
+            yield decupagem_entregue(
+                json.loads(conteudo),
+                versao_do_modelo(conteudo),
+                correcoes.listar(job.id),
+            )
+        except Exception:  # noqa: BLE001 - uma Decupagem ruim não trava o impacto
+            log.warning("decupagem de %s não lida; fora do impacto", job.id)
+
+
 def criar_rotas_da_lixeira_do_catalogo(
     pessoas: Catalogo,
     marcas: CatalogoDeMarcas,
@@ -166,19 +186,7 @@ def criar_rotas_da_lixeira_do_catalogo(
     rotas = APIRouter(prefix="/admin/lixeira")
 
     def entregues() -> Iterator[dict[str, Any]]:
-        """A Decupagem entregue de cada vídeo concluído fora da lixeira; a que não lê é pulada."""
-        for job in repositorio.consultar(FiltroDeJobs()).jobs:
-            if job.estado != "concluido":
-                continue
-            try:
-                conteudo = b"".join(decupagens.abrir_decupagem(job.id))
-                yield decupagem_entregue(
-                    json.loads(conteudo),
-                    versao_do_modelo(conteudo),
-                    correcoes.listar(job.id),
-                )
-            except Exception:  # noqa: BLE001 - uma Decupagem ruim não trava o impacto
-                log.warning("decupagem de %s não lida; fora do impacto", job.id)
+        return decupagens_entregues(repositorio, correcoes, decupagens)
 
     def impacto_da_pessoa(id: str, fotos_dela: int) -> ImpactoDaPessoa:
         aparicoes = sum(

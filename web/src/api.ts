@@ -128,6 +128,22 @@ export interface ClienteDeNomes {
   criar(catalogo: CatalogoDeNomes, nome: string): Promise<NomeDoCatalogo>
 }
 
+/** O efeito de fundir uma pessoa do catálogo em outra (`GET /v1/catalogo/pessoas/{origem}/fundir/impacto`). */
+export interface ImpactoDaFusao {
+  origem_nome: string
+  destino_nome: string
+  videos: number
+  aparicoes: number
+  fotos_apagadas: number
+}
+
+/** Fundir duas pessoas do catálogo (exige `catalogo.fundir`). */
+export interface ClienteDaFusao {
+  impacto(origemId: string, destinoId: string): Promise<ImpactoDaFusao>
+  /** A origem passa a apontar para o destino; as fotos de rosto dela são apagadas. */
+  fundir(origemId: string, destinoId: string, motivo: string): Promise<void>
+}
+
 /** Uma conta da administração (`/v1/admin/usuarios`). */
 export interface ContaDaLista {
   uid: string
@@ -244,6 +260,7 @@ export interface ClienteDaApi {
   /** O mesmo relatório em CSV. */
   marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
   nomes: ClienteDeNomes
+  fusao: ClienteDaFusao
   usuarios: ClienteDeUsuarios
   chaves: ClienteDeChaves
   lixeira: ClienteDaLixeira
@@ -405,6 +422,16 @@ export function criarClienteDaApi(
       criar: (catalogo, nome) => {
         if (catalogo === 'tipos_de_objeto') return Promise.reject(new Error('Tipo de objeto não tem catálogo para criar.'))
         return chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } })
+      },
+    },
+    fusao: {
+      impacto: (origemId, destinoId) =>
+        chamar(`/v1/catalogo/pessoas/${encodeURIComponent(origemId)}/fundir/impacto?destino_id=${encodeURIComponent(destinoId)}`),
+      fundir: async (origemId, destinoId, motivo) => {
+        await chamar(`/v1/catalogo/pessoas/${encodeURIComponent(origemId)}/fundir`, {
+          post: true,
+          corpo: { destino_id: destinoId, motivo },
+        })
       },
     },
     usuarios: {
