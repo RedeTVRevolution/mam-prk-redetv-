@@ -8,11 +8,15 @@
 # repetido pelo `id`) nem a junção com os momentos (horas de vídeo). Refazer as tabelas de
 # uma vez também dispensa saber o que mudou.
 #
-# Custo: o volume é pequeno. Cada rodada lê a tabela de eventos, duas colunas dos momentos e
-# as tabelas temporárias, no máximo uns 60 MB cobrados (o mínimo é 10 MB por tabela lida);
-# a cada 10 minutos são ~4.300 rodadas por mês, uns 260 GB contra 1 TiB de consulta grátis
-# por mês. O armazenamento fica nos 10 GB grátis. Conferir na fatura (`faturamento.tf`) depois
-# de alguns dias; se a tabela de eventos crescer, trocar por `every 30 minutes`.
+# Custo: cada rodada lê a tabela de eventos inteira, duas colunas (`job_id` e
+# `duracao_do_video_ms`) da tabela de momentos inteira e as tabelas da própria rodada (o
+# mínimo é 10 MB por tabela lida). No começo são uns 70 MB por rodada; a cada 10 minutos
+# são ~4.300 rodadas por mês, uns 300 GB contra 1 TiB de consulta grátis por mês. Mas a
+# conta cresce com o acervo: a leitura dos momentos custa ~45 bytes por momento, e com
+# ~5 milhões de momentos copiados cada rodada já lê ~225 MB, ~1 TB por mês. Antes disso é
+# preciso levar a duração no evento de fim de processamento ou guardar uma tabela pequena
+# de duração por Job, e não ler os momentos. Estimado, não medido: conferir na fatura
+# (`faturamento.tf`). O armazenamento fica nos 10 GB grátis.
 locals {
   resumos_de_uso = ["uso_por_dia_e_usuario", "uso_por_dia", "uso_por_usuario", "uso_por_dia_e_programa"]
 }

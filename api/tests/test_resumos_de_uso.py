@@ -27,11 +27,9 @@ def _banco() -> sqlite3.Connection:
     banco = sqlite3.connect(":memory:")
     # A única função do BigQuery que o SQL usa e o SQLite não tem.
     banco.create_function("DATE", 2, _dia_de_sao_paulo)
-    banco.execute(
-        "CREATE TABLE eventos_de_uso (id, tipo, quando, quem_tipo, quem_id, job_id, "
-        "programa, tamanho_bytes, estado, codigo_falha, tamanho_da_consulta, "
-        "tipo_de_correcao, metodo, rota, status)"
-    )
+    # As colunas são as do evento (e da tabela, que `test_infra_eventos_de_uso` confere):
+    # o SQL que ler uma coluna que o evento não tem falha aqui.
+    banco.execute(f"CREATE TABLE eventos_de_uso ({', '.join(COLUNAS)})")
     banco.execute("CREATE TABLE momentos (job_id, duracao_do_video_ms)")
     return banco
 
@@ -74,8 +72,8 @@ def _tabela(banco: sqlite3.Connection, nome: str, ordem: str) -> list[dict[str, 
 @pytest.fixture
 def banco() -> sqlite3.Connection:
     b = _banco()
-    # Dia 1 (em São Paulo): Ana entra, envia o vídeo v1 (2 h) e o vídeo v2 (0,5 h, ainda
-    # sem momentos copiados: conta 0 hora), busca duas vezes e corrige uma vez.
+    # Dia 1 (em São Paulo): Ana entra, envia o vídeo v1 (2 h) e o vídeo v2 (que falha e
+    # não tem momentos copiados), busca duas vezes e corrige uma vez.
     _evento(b, "e1", "login", "2026-11-01T12:00:00+00:00", "ana")
     _evento(
         b,
@@ -191,7 +189,6 @@ def test_por_dia_e_usuario_conta_cada_indicador(banco: sqlite3.Connection) -> No
     assert ana["videos_enviados"] == 2
     assert ana["videos_concluidos"] == 1
     assert ana["videos_falhos"] == 1
-    assert ana["horas_enviadas"] == 2.0  # v2 ainda não tem momentos
     assert ana["horas_concluidas"] == 2.0
     assert ana["buscas"] == 2
     assert ana["correcoes"] == 1
@@ -203,7 +200,7 @@ def test_por_dia_e_usuario_conta_cada_indicador(banco: sqlite3.Connection) -> No
         cms["videos_concluidos"],
         cms["chamadas_de_api"],
     ) == (1, 1, 1)
-    assert (cms["horas_enviadas"], cms["horas_concluidas"]) == (1.0, 1.0)
+    assert cms["horas_concluidas"] == 1.0
 
 
 def test_o_dia_e_o_de_sao_paulo(banco: sqlite3.Connection) -> None:
@@ -228,7 +225,6 @@ def test_por_dia_conta_usuarios_ativos_sem_os_sistemas(
     assert dia1["videos_enviados"] == 3
     assert dia1["videos_concluidos"] == 2
     assert dia1["videos_falhos"] == 1
-    assert dia1["horas_enviadas"] == 3.0
     assert dia1["horas_concluidas"] == 3.0
     assert dia1["buscas"] == 2 and dia2["buscas"] == 1
     assert dia1["chamadas_de_api"] == 1
@@ -243,6 +239,7 @@ def test_por_usuario_traz_dias_ativos_e_ultimo_acesso(
 
     assert ana["dias_ativos"] == 2
     assert ana["acessos"] == 3
+    assert ana["videos_enviados"] == 2 and ana["horas_concluidas"] == 2.0
     assert ana["ultimo_acesso"] == "2026-11-02T03:00:00+00:00"
     assert beto["dias_ativos"] == 2 and beto["buscas"] == 1
     assert cms["ultimo_acesso"] is None
@@ -278,6 +275,40 @@ def test_o_evento_repetido_vale_uma_vez(banco: sqlite3.Connection) -> None:
     assert ana["acessos"] == 2
 
 
+def test_o_job_reprocessado_conta_uma_vez_por_estado_final(
+    banco: sqlite3.Connection,
+) -> None:
+    # v1 é reprocessado e conclui de novo; v2 é reprocessado e agora conclui.
+    _evento(
+        banco,
+        "e20",
+        "fim_de_processamento",
+        "2026-11-01T20:00:00+00:00",
+        "ana",
+        job_id="v1",
+        programa="Hoje",
+        estado="concluido",
+    )
+    _evento(
+        banco,
+        "e21",
+        "fim_de_processamento",
+        "2026-11-01T20:00:00+00:00",
+        "ana",
+        job_id="v2",
+        programa="Hoje",
+        estado="concluido",
+    )
+    banco.execute("INSERT INTO momentos VALUES ('v2', ?)", [HORA_MS // 2])
+    _resumir(banco)
+
+    ana = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0]
+
+    assert ana["videos_concluidos"] == 2  # v1 uma vez só, e v2
+    assert ana["videos_falhos"] == 1
+    assert ana["horas_concluidas"] == 2.5
+
+
 def test_rodar_de_novo_refaz_as_tabelas_sem_somar_em_dobro(
     banco: sqlite3.Connection,
 ) -> None:
@@ -299,21 +330,6 @@ def test_sem_eventos_as_tabelas_ficam_vazias() -> None:
 
     for nome in re.findall(r"CREATE OR REPLACE TABLE `\$\{p\}(\w+)`", SQL):
         assert banco.execute(f"SELECT COUNT(*) FROM {nome}").fetchone() == (0,)
-
-
-def test_o_sql_so_le_colunas_que_o_evento_tem() -> None:
-    lidas = {
-        "id",
-        "quando",
-        "tipo",
-        "quem_tipo",
-        "quem_id",
-        "programa",
-        "estado",
-        "job_id",
-    }
-
-    assert lidas <= set(COLUNAS)
 
 
 def test_o_terraform_agenda_o_sql_com_a_conta_dos_resumos() -> None:
