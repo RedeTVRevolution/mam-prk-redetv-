@@ -156,7 +156,9 @@ test('I, O, A, 4, texto e Enter criam um texto na tela com os tempos do trecho',
     texto: 'Rodrigo Faro',
   })
   await waitFor(() => expect(screen.queryByText('12:04–12:11')).toBeNull())
-})
+  // 15 s: digitar letra a letra (o `type` confere que o, a e i no campo não são atalhos)
+  // passou dos 5 s com o contêiner do loop ocupado.
+}, 15_000)
 
 test('o mesmo trecho se cria só com cliques', async () => {
   const usuario = await abrir(true)
