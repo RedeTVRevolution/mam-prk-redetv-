@@ -1,0 +1,13 @@
+# Destino da exportação do faturamento (#281), lida pelo painel de custo (#285), na região
+# do `mam_decupagens` para as duas se cruzarem numa consulta. A exportação se liga uma vez no
+# console da conta de faturamento: não há API nem Terraform para ela. Ao ligar, o console dá
+# escrita no dataset a uma conta de serviço da Google; por isso o IAM deste dataset é só com
+# `_iam_member`, que acrescenta. Um `_iam_policy`, um `_iam_binding` ou um bloco `access` aqui
+# apagaria esse acesso no deploy seguinte, e a exportação pararia calada. Recurso novo, sem
+# `moved`: nunca existiu fora do módulo.
+resource "google_bigquery_dataset" "faturamento" {
+  dataset_id                 = "faturamento"
+  location                   = var.regiao_do_bigquery
+  delete_contents_on_destroy = false
+  depends_on                 = [google_project_service.apis]
+}
