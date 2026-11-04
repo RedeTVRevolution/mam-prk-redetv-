@@ -352,6 +352,33 @@ def test_url_de_reproducao_devolve_o_proxy_por_get(
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+def test_url_de_download_devolve_a_copia_limpa_como_anexo_com_o_nome(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    _com_buckets(armazenamento)
+    armazenamento._cliente.bucket(armazenamento._aceitos).blob(
+        "job1/copia_limpa.mp4"
+    ).upload_from_string(b"copia-bytes", content_type="video/mp4")
+
+    url = armazenamento.url_de_download(
+        "job1", 'Jornal "Ação"; 1.mp4', timedelta(minutes=5)
+    )
+
+    consulta = parse_qs(urlparse(url).query)
+    assert consulta["X-Goog-Expires"] == ["300"]
+    assert "teste-aceitos" in url and "job1/copia_limpa.mp4" in url
+    disposicao = (
+        'attachment; filename="Jornal _Acao__ 1.mp4"; '
+        "filename*=UTF-8''Jornal%20%22A%C3%A7%C3%A3o%22%3B%201.mp4"
+    )
+    assert consulta["response-content-disposition"] == [disposicao]
+    partes = urlparse(url)
+    resposta = requests.get(f"{EMULADOR_STORAGE}{partes.path}?{partes.query}")
+    assert resposta.status_code == 200
+    assert resposta.content == b"copia-bytes"
+
+
+@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
 def test_abrir_decupagem_le_o_json_em_pedacos(
     armazenamento: ArmazenamentoStorage,
 ) -> None:

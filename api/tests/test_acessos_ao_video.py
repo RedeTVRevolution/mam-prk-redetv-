@@ -66,6 +66,7 @@ class Mundo:
                     {
                         "ana": Usuario(uid="ana", email="ana@redetv.com.br"),
                         "beto": Usuario(uid="beto", email="beto@redetv.com.br"),
+                        "carla": Usuario(uid="carla", email="Carla@RedeTV.com.br"),
                     }
                 ),
                 jobs,
@@ -119,6 +120,7 @@ def test_baixar_o_json_entrega_a_decupagem_com_o_nome_e_grava_decupagem_baixada(
 
     assert resposta.status_code == 200
     assert resposta.json()["versao_esquema"] == "1.2"
+    assert resposta.text.startswith('{\n  "versao_esquema": "1.2",\n')
     disposicao = resposta.headers["content-disposition"]
     assert disposicao.startswith("attachment;")
     assert "filename*=UTF-8''Programa%20A%C3%A7%C3%A3o.decupagem.json" in disposicao
@@ -160,6 +162,19 @@ def test_reproducao_grava_no_maximo_uma_abertura_por_pessoa_a_cada_30_minutos() 
         INICIO + timedelta(minutes=31),
         INICIO,
     ]
+
+
+def test_e_mail_com_maiusculas_no_token_nao_conta_nova_abertura() -> None:
+    # O registro guarda o e-mail sem maiúsculas; a renovação ainda é da mesma pessoa.
+    mundo = Mundo()
+    carla = {"Authorization": "Bearer carla"}
+
+    mundo.cliente.get("/v1/jobs/j1/reproducao", headers=carla)
+    mundo.relogio.agora = INICIO + timedelta(minutes=10)
+    mundo.cliente.get("/v1/jobs/j1/reproducao", headers=carla)
+
+    [aberto] = mundo.registros("video.aberto")
+    assert (aberto.uid, aberto.email) == ("carla", "carla@redetv.com.br")
 
 
 def test_sem_decupagem_ver_responde_403_e_nada_e_gravado() -> None:

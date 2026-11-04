@@ -318,6 +318,9 @@ class JobCriado(JobPublico):
     url_de_upload: str
 
 
+AcaoDeDownload = Literal["video.baixado", "decupagem.baixada"]
+
+
 class AcessosAoVideo(Protocol):
     """Porta para o registro de quem abriu e quem baixou o vídeo (`api.acessos`)."""
 
@@ -329,7 +332,7 @@ class AcessosAoVideo(Protocol):
         self,
         chamador: Chamador,
         job: Job,
-        acao: Literal["video.baixado", "decupagem.baixada"],
+        acao: AcaoDeDownload,
     ) -> None:
         """Registra o download; `ServicoIndisponivel` se não gravou."""
         ...
@@ -1055,8 +1058,8 @@ def criar_rotas(
     def _ler_correcoes(job_id: str) -> list[Correcao]:
         return correcoes.listar(job_id)
 
-    def _entregue(job: Job) -> bytes:
-        """O JSON da Decupagem entregue, com as Correções aplicadas."""
+    def _entregue(job: Job) -> dict[str, Any]:
+        """A Decupagem entregue, com as Correções aplicadas."""
         modelo, versao_atual = _ler_modelo(job.id)
         entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
         entregue = sem_catalogo_apagado(
@@ -1064,7 +1067,7 @@ def criar_rotas(
             lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
             lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
         )
-        return json.dumps(entregue).encode()
+        return entregue
 
     @rotas.get("/{job_id}/decupagem")
     def decupagem(
@@ -1079,14 +1082,15 @@ def criar_rotas(
             # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
             pedacos = itertools.chain([next(pedacos, b"")], pedacos)
             return _resposta(pedacos, request)
-        return _resposta(iter([_entregue(job)]), request)
+        return _resposta(iter([json.dumps(_entregue(job)).encode()]), request)
 
     @rotas.get("/{job_id}/decupagem/download")
     def baixar_decupagem(
         job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
     ) -> Response:
         job = obter_concluido(job_id, chamador)
-        corpo = _entregue(job)
+        # Indentado como o arquivo que a tela baixava (`web/src/baixar.ts`).
+        corpo = json.dumps(_entregue(job), indent=2, ensure_ascii=False).encode()
         acessos.baixou(chamador, job, "decupagem.baixada")
         nome = re.sub(r"\.mp4$", "", job.nome, flags=re.IGNORECASE) + ".decupagem.json"
         return Response(

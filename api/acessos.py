@@ -13,11 +13,11 @@ from typing import Any, Literal
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Chamador, Sistema
-from api.jobs import Job, ServicoIndisponivel
+from api.jobs import AcaoDeDownload, Job, ServicoIndisponivel
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
 
-registro = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 def _quem(chamador: Chamador) -> dict[str, Any]:
@@ -26,8 +26,11 @@ def _quem(chamador: Chamador) -> dict[str, Any]:
     return {"uid": chamador.uid, "email": chamador.email}
 
 
-def _e_dele(r: RegistroDeAuditoria, quem: dict[str, Any]) -> bool:
-    return all(getattr(r, campo) == valor for campo, valor in quem.items())
+def _e_dele(r: RegistroDeAuditoria, chamador: Chamador) -> bool:
+    # Pelo uid, não pelo e-mail: o registro guarda o e-mail sem maiúsculas e o token não.
+    if isinstance(chamador, Sistema):
+        return r.sistema == chamador.sistema
+    return r.uid == chamador.uid
 
 
 class AcessosNaAuditoria:
@@ -41,7 +44,7 @@ class AcessosNaAuditoria:
         self,
         chamador: Chamador,
         job: Job,
-        acao: Literal["video.aberto", "video.baixado", "decupagem.baixada"],
+        acao: Literal["video.aberto"] | AcaoDeDownload,
         agora: datetime,
     ) -> None:
         self._auditoria.acrescentar(
@@ -59,26 +62,25 @@ class AcessosNaAuditoria:
     def abriu(self, chamador: Chamador, job: Job) -> None:
         """Não derruba a reprodução: a falha fica no log."""
         agora = self._relogio()
-        quem = _quem(chamador)
         try:
             recentes = self._auditoria.consultar(
                 FiltroDeAuditoria(
                     alvo_id=job.id, acao="video.aberto", de=agora - JANELA_DA_ABERTURA
                 )
             ).registros
-            if not any(_e_dele(r, quem) for r in recentes):
+            if not any(_e_dele(r, chamador) for r in recentes):
                 self._gravar(chamador, job, "video.aberto", agora)
-        except Exception:  # noqa: BLE001
-            registro.exception("Falha ao registrar a abertura do vídeo %s", job.id)
+        except Exception:
+            log.exception("Falha ao registrar a abertura do vídeo %s", job.id)
 
     def baixou(
         self,
         chamador: Chamador,
         job: Job,
-        acao: Literal["video.baixado", "decupagem.baixada"],
+        acao: AcaoDeDownload,
     ) -> None:
         try:
             self._gravar(chamador, job, acao, self._relogio())
-        except Exception:  # noqa: BLE001
-            registro.exception("Falha ao registrar %s do vídeo %s", acao, job.id)
+        except Exception:
+            log.exception("Falha ao registrar %s do vídeo %s", acao, job.id)
             raise ServicoIndisponivel from None
