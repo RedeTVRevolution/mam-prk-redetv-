@@ -88,7 +88,7 @@ Cada chamada ao Gemini leva o id do job como [rótulo de custo](https://docs.clo
 
 ### Armazenamento e acervo de 25 anos
 
-Guardar tudo indefinidamente custa pouco no dia a dia; o acervo de 25 anos é que precisa de teto mensal. O original MP4 fica no storage da RedeTV, e o GCP guarda só o que a aplicação usa.
+Guardar tudo indefinidamente custa pouco no dia a dia; o acervo de 25 anos é que precisa de teto mensal. O original MP4 fica no storage da RedeTV, e um serviço da RedeTV com acesso à internet o envia pela URL assinada ([ADR 0011](adr/0011-envio-por-url-assinada.md)), e o GCP guarda só o que a aplicação usa.
 
 | O que fica guardado | Tamanho estimado | Custo |
 | --- | --- | --- |
