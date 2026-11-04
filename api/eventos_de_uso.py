@@ -57,10 +57,12 @@ class EventoDeUso(BaseModel):
     estado: str | None = None
     codigo_falha: str | None = None
     # `busca`: só o tamanho da consulta (em caracteres, ou em bytes na busca por
-    # imagem) e os filtros; o texto nunca sai da API.
+    # imagem; nenhum na de parecidos, que parte de um plano) e os filtros; o texto
+    # nunca sai da API.
     tamanho_da_consulta: int | None = None
     filtros: list[Filtro] = []
-    # `correcao`: o tipo da correção (`fala.texto`, `pessoa.renomear`...).
+    # `correcao`: o tipo do registro de Correção (`fala.texto`, `pessoa.renomear`...,
+    # ou `desfazer`, `descartar`, `aprovar`, `recusar`).
     tipo_de_correcao: str | None = None
     # `chamada_de_api`: método, rota (com `{job_id}`, sem os valores) e status.
     metodo: str | None = None

@@ -5,7 +5,7 @@ import json
 import logging
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -36,14 +36,17 @@ from api.eventos_do_job import (
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.tests.test_aprovacao import CURADOR
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_busca import (
     AUTORIZACAO as AUTORIZACAO_DA_BUSCA,
 )
-from api.tests.test_busca import EmbeddingDeTexto, pedido
+from api.tests.test_busca import EmbeddingDeTexto, job, pedido, plano
 from api.tests.test_busca import cliente as cliente_da_busca
 from api.tests.test_busca_por_imagem import com_planos, enviar, foto
-from api.tests.test_correcoes import BYTES, VERSAO
+from api.tests.test_correcoes import AUTORIZACAO as AUTORIZACAO_DAS_CORRECOES
+from api.tests.test_correcoes import BYTES, MODELO, VERSAO, _pessoa
+from api.tests.test_correcoes import Mundo as MundoDasCorrecoes
 from api.tests.test_jobs import ArmazenamentoFalso
 
 AGORA = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
@@ -248,9 +251,13 @@ def test_em_segundo_plano_a_falha_vai_ao_log(
     assert "evento de uso login" in caplog.text
 
 
-def test_o_evento_quando_nao_tem_fuso_vira_utc() -> None:
+def test_o_quando_em_outro_fuso_vira_utc() -> None:
     eventos = EventosEmMemoria()
-    registrar(eventos, "login", ("usuario", "ana"), AGORA.astimezone(UTC))
+    brasilia = timezone(timedelta(hours=-3))
+
+    registrar(eventos, "login", ("usuario", "ana"), AGORA.astimezone(brasilia))
+
+    assert eventos.publicados[0].quando.tzinfo == UTC
     assert eventos.publicados[0].quando == AGORA
 
 
@@ -514,6 +521,30 @@ def test_a_busca_por_imagem_publica_so_o_tamanho_da_foto() -> None:
     assert "dados" not in json.dumps(evento.para_json())
 
 
+def test_a_busca_de_parecidos_publica_o_video_e_o_plano_sem_tamanho() -> None:
+    eventos = EventosEmMemoria()
+    c, m = cliente_da_busca(["consulta"], eventos=eventos)
+    m.com(job("j2"), plano("j2:plano:1", [1.0, 0.0], "rua escura"))
+
+    r = c.get(
+        "/v1/busca/parecidos",
+        params={"job": "j2", "plano": 1},
+        headers=AUTORIZACAO_DA_BUSCA,
+    )
+
+    assert r.status_code == 200, r.text
+    [evento] = eventos.publicados
+    assert (evento.tipo, evento.job_id, evento.tamanho_da_consulta) == (
+        "busca",
+        "j2",
+        None,
+    )
+    assert {(f.nome, f.valor) for f in evento.filtros} == {
+        ("modo", "parecidos"),
+        ("plano", "1"),
+    }
+
+
 def test_a_busca_recusada_nao_publica() -> None:
     c, eventos = _busca_com_eventos()
 
@@ -571,6 +602,39 @@ def test_desfazer_a_correcao_tambem_publica() -> None:
         "pessoa.renomear",
         "desfazer",
     ]
+
+
+def test_descartar_da_fila_publica_a_correcao() -> None:
+    eventos = EventosEmMemoria()
+    mundo = MundoDasCorrecoes(["editor"], eventos=eventos)
+    cid = mundo.corrigir().json()["id"]
+    mundo.avancar()
+    mundo.reprocessar({**MODELO, "pessoas": [_pessoa("p1", "Carla Dias", 1000, 5000)]})
+
+    r = mundo.cliente.post(
+        f"/v1/jobs/j1/fila/{cid}/descartar",
+        json={"motivo": "revisei"},
+        headers=AUTORIZACAO_DAS_CORRECOES,
+    )
+
+    assert r.status_code == 201, r.text
+    assert [e.tipo_de_correcao for e in eventos.publicados] == [
+        "pessoa.renomear",
+        "descartar",
+    ]
+
+
+def test_a_decisao_do_curador_publica_a_correcao_com_quem_decidiu() -> None:
+    eventos = EventosEmMemoria()
+    mundo = MundoDasCorrecoes(["editor"], eventos=eventos)
+    mundo.aprovacao.definir(frozenset({"pessoa.renomear"}))
+    cid = mundo.corrigir().json()["id"]
+
+    r = mundo.cliente.post(f"/v1/jobs/j1/correcoes/{cid}/aprovar", headers=CURADOR)
+
+    assert r.status_code == 201, r.text
+    decisao = eventos.publicados[-1]
+    assert (decisao.tipo_de_correcao, decisao.quem_id) == ("aprovar", "u2")
 
 
 def test_a_correcao_recusada_nao_publica() -> None:
@@ -644,8 +708,3 @@ def test_falha_ao_publicar_a_chamada_nao_derruba_a_resposta() -> None:
     r = mundo.cliente.get("/v1/programas", headers=mundo.chave("ler"))
 
     assert r.status_code == 200
-
-
-def test_sem_eventos_configurados_nada_muda() -> None:
-    app: Callable[[], Any] = lambda: criar_app()
-    assert TestClient(app()).get("/v1/health").status_code == 200

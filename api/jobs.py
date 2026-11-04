@@ -1243,8 +1243,8 @@ def criar_rotas(
         job = obter_concluido(job_id, autor)
         modelo, versao_atual = _ler_modelo(job.id)
         correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
-        # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
         _registrar_correcao(autor, job, correcao)
+        # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
         if not correcao.exige_aprovacao:
             reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
@@ -1408,6 +1408,7 @@ def criar_rotas(
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
+        _registrar_correcao(autor, job, registro)
         reindexar(job)
         return {"id": registro.id}
 
@@ -1472,6 +1473,7 @@ def criar_rotas(
             raise HTTPException(404, "Correção não encontrada") from None
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
+        _registrar_correcao(autor, job, registro)
         if aprovada:
             reindexar(job)
         return {"id": registro.id}

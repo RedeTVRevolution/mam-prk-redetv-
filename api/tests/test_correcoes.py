@@ -35,6 +35,7 @@ from api.correcoes import (
     reconciliar,
     versao_do_modelo,
 )
+from api.eventos_de_uso import Eventos
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
@@ -100,7 +101,12 @@ def _novo(**campos: Any) -> dict[str, Any]:
 
 
 class Mundo:
-    def __init__(self, papeis: list[Papel], estado: str = "concluido") -> None:
+    def __init__(
+        self,
+        papeis: list[Papel],
+        estado: str = "concluido",
+        eventos: Eventos | None = None,
+    ) -> None:
         repo_papeis = RepositorioDePapeisEmMemoria()
         repo_papeis.salvar("u1", papeis)
         repo_papeis.salvar("u2", ["curador"])
@@ -145,6 +151,7 @@ class Mundo:
                 tipos_de_objeto=self.tipos_de_objeto,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
                 relogio=lambda: self.agora,
+                eventos=eventos,
             )
         )
 

@@ -108,7 +108,11 @@ def criar_rotas_da_busca(
     limite = LimiteDeConsultas(consultas_por_minuto, relogio)
 
     def registrar_busca(
-        chamador: Chamador, tamanho: int, programa: str | None, **filtros: object
+        chamador: Chamador,
+        tamanho: int | None,
+        programa: str | None,
+        job_id: str | None = None,
+        **filtros: object,
     ) -> None:
         """Só o tamanho da consulta e os filtros que a pessoa pôs; o texto fica aqui."""
         registrar(
@@ -116,6 +120,7 @@ def criar_rotas_da_busca(
             "busca",
             quem_do_chamador(chamador),
             relogio(),
+            job_id=job_id,
             programa=programa,
             tamanho_da_consulta=tamanho,
             filtros=[
@@ -333,7 +338,7 @@ def criar_rotas_da_busca(
             sistema=sistema,
         )
         try:
-            return futuro.result(timeout=tempo_maximo_s)
+            resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
             log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
@@ -345,6 +350,9 @@ def criar_rotas_da_busca(
                 "por imagem, ou índice do quadro desligado), ou o vídeo não foi "
                 "encontrado",
             ) from None
+        # Não há consulta: o ponto de partida é o plano de um vídeo.
+        registrar_busca(chamador, None, None, job, modo="parecidos", plano=plano)
+        return resultado
 
     return rotas
 
