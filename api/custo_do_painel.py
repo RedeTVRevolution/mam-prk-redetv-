@@ -6,7 +6,7 @@ que o custo vira custo de um Job. O que não tem rótulo, ou tem um `job_id` que
 Job (a busca usa `busca`; o vídeo purgado some), e o custo fixo (a réplica do índice, os
 serviços de rede) entram como custo **sem dono**, no mês em que foram cobrados. Os Jobs do
 Cloud Run não levam o id do Job: o Cloud Run não deixa rotular cada execução, então o custo
-deles cai aqui também.
+deles cai aqui também, e o dos embeddings (quadros-chave e busca visual), que vão sem rótulo.
 
 O custo de um Job conta no mês em que o Job foi criado (dia de São Paulo), e o filtro de
 período compara esse dia; o custo sem dono conta no dia em que foi cobrado. Com filtro de
@@ -20,16 +20,16 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Protocol
-from zoneinfo import ZoneInfo
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
 from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.eventos_de_uso import Quem
 from api.jobs import Job
+from api.qualidade_do_painel import SAO_PAULO
 from api.relatorios import linhas_da_consulta
 
-SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 # A chamada da análise principal só leva o `job_id`; as outras etapas levam `etapa`.
 ETAPA_DA_ANALISE = "analise"
 
@@ -189,7 +189,7 @@ class MesDeCusto(TotalDeCusto):
 
 
 class QuemDeCusto(NumerosDeCusto):
-    quem_tipo: str
+    quem_tipo: Literal["usuario", "sistema"]
     quem_id: str
     email: str | None
 
@@ -241,7 +241,7 @@ def _mes(dia: date) -> str:
     return f"{dia.year:04d}-{dia.month:02d}"
 
 
-def _quem(job: Job) -> tuple[str, str]:
+def _quem(job: Job) -> Quem:
     """Quem enviou: o sistema, ou a pessoa (o uid), como nas tabelas de uso."""
     return ("sistema", job.sistema) if job.sistema else ("usuario", job.criado_por)
 
@@ -336,7 +336,7 @@ def relatorio_de_custo(
             "custo_sem_dono": round(sem, 4),
         }
 
-    do_quem: dict[tuple[str, str], list[CustoDeUmJob]] = defaultdict(list)
+    do_quem: dict[Quem, list[CustoDeUmJob]] = defaultdict(list)
     por_etapa: dict[str, float] = defaultdict(float)
     for c in base.jobs:
         do_quem[_quem(c.job)].append(c)
