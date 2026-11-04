@@ -1,0 +1,258 @@
+"""Renomear uma pessoa em todos os vídeos de uma vez (E3, #263), em
+`/v1/catalogo/pessoas/{id_da_pessoa}/renomear`.
+
+O nome novo vale no catálogo e na leitura de todas as Decupagens na mesma hora (veja
+`com_pessoas_fundidas`: o gravado não é reescrito, ADR 0010), então catálogo e decupagens
+nunca ficam com nomes diferentes. O que demora é o índice da busca: os vídeos afetados são
+reindexados em segundo plano, com o andamento gravado na pessoa, e a rodada é refeita até
+terminar (ou até esgotar as tentativas; `retomar` continua dali).
+"""
+
+import logging
+import uuid
+from collections.abc import Callable
+from datetime import datetime
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from pydantic import BaseModel, StringConstraints, field_validator
+
+from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auth import ChamadorAutenticado, Usuario
+from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
+from api.catalogo_apagado import com_pessoas_fundidas
+from api.comparador import normalizar
+from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
+from api.jobs import Job, RepositorioDeJobs, _confere_permissao
+from api.lixeira_do_catalogo import LeituraDeDecupagens, decupagens_dos_jobs
+
+log = logging.getLogger(__name__)
+
+# Rodadas sobre os vídeos que falharam antes de desistir (a pessoa pode retomar).
+RODADAS = 3
+
+
+class PedidoDeRenomeacao(BaseModel):
+    nome: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
+        ),
+    ]
+    previa: bool = False
+
+    _sem_controle_no_nome = field_validator("nome")(_sem_controle)
+
+
+class ImpactoDaRenomeacao(BaseModel):
+    nome_antigo: str
+    nome_novo: str
+    # Vídeos (concluídos, fora da lixeira) onde a pessoa aparece ou é citada, e os momentos
+    # (aparições na imagem e citações na fala e no texto) que passam a levar o nome novo.
+    videos: int
+    momentos: int
+    previa: bool
+
+
+class AndamentoDaRenomeacao(BaseModel):
+    estado: Literal["em_andamento", "concluida", "falhou"]
+    feitos: int
+    total: int
+    nome_antigo: str
+    nome_novo: str
+
+
+def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
+    """Dependência: só pessoa com `correcao.aprovar` (Curador); chave de sistema não mexe no catálogo."""
+    if not isinstance(chamador, Usuario):
+        raise HTTPException(403, "Chave de sistema não mexe no catálogo")
+    _confere_permissao(request, chamador, "correcao.aprovar")
+    return chamador
+
+
+def _andamento(r: RenomeacaoDaPessoa) -> AndamentoDaRenomeacao:
+    return AndamentoDaRenomeacao(
+        estado=r.estado,
+        feitos=r.total - len(r.pendentes),
+        total=r.total,
+        nome_antigo=r.nome_antigo,
+        nome_novo=r.nome_novo,
+    )
+
+
+def criar_rotas_da_renomeacao(
+    pessoas: Catalogo,
+    repositorio: RepositorioDeJobs,
+    correcoes: RepositorioDeCorrecoes,
+    decupagens: LeituraDeDecupagens,
+    auditoria: RepositorioDeAuditoria,
+    relogio: Callable[[], datetime],
+    reindexar: Callable[[Job], bool],
+    ao_renomear: Callable[[], None],
+) -> APIRouter:
+    """`reindexar` devolve se o vídeo ficou indexado; `ao_renomear` descarta a cópia da lista de pessoas."""
+    rotas = APIRouter()
+
+    def viva(id: str) -> PessoaDoCatalogo:
+        pessoa = pessoas.obter(id)
+        if pessoa is None:
+            raise HTTPException(404, "Pessoa não encontrada")
+        if pessoa.lixeira is not None or pessoa.fundida is not None:
+            raise HTTPException(
+                422, "Esta pessoa está na lixeira ou já foi fundida em outra"
+            )
+        return pessoa
+
+    def afetados(pessoa_id: str) -> tuple[list[str], int]:
+        """Os vídeos em que a pessoa está (pela leitura de hoje) e quantos momentos ela tem."""
+        ids: list[str] = []
+        momentos = 0
+        for job, entregue in decupagens_dos_jobs(repositorio, correcoes, decupagens):
+            entregue = com_pessoas_fundidas(entregue, pessoas.obter)
+            nelas = [
+                p
+                for p in entregue.get("pessoas") or []
+                if isinstance(p, dict) and p.get("catalogo_id") == pessoa_id
+            ]
+            if not nelas:
+                continue
+            ids.append(job.id)
+            momentos += sum(
+                len(p.get(campo) or [])
+                for p in nelas
+                for campo in ("na_imagem", "citada_na_fala", "citada_no_texto")
+            )
+        return ids, momentos
+
+    def reindexar_pendentes(pessoa_id: str) -> None:
+        """Reindexa os vídeos pendentes, em até `RODADAS` rodadas, gravando o andamento a cada um."""
+        pessoa = pessoas.obter(pessoa_id)
+        if pessoa is None or pessoa.renomeacao is None:
+            return
+        atual = pessoa.renomeacao.model_copy(update={"estado": "em_andamento"})
+        pessoas.definir_renomeacao(pessoa_id, atual)
+        for _ in range(RODADAS):
+            for job_id in list(atual.pendentes):
+                job = repositorio.obter(job_id)
+                try:
+                    pronto = job is None or job.estado != "concluido" or reindexar(job)
+                except Exception:
+                    log.exception("reindexação de %s falhou", job_id)
+                    pronto = False
+                if pronto:
+                    atual = atual.model_copy(
+                        update={
+                            "pendentes": [i for i in atual.pendentes if i != job_id]
+                        }
+                    )
+                    pessoas.definir_renomeacao(pessoa_id, atual)
+            if not atual.pendentes:
+                break
+        estado = "falhou" if atual.pendentes else "concluida"
+        pessoas.definir_renomeacao(
+            pessoa_id, atual.model_copy(update={"estado": estado})
+        )
+
+    @rotas.post("/pessoas/{id_da_pessoa}/renomear")
+    def renomear(
+        id_da_pessoa: str,
+        pedido: PedidoDeRenomeacao,
+        segundo_plano: BackgroundTasks,
+        autor: Annotated[Usuario, Depends(_exige_aprovar)],
+    ) -> ImpactoDaRenomeacao:
+        pessoa = viva(id_da_pessoa)
+        if pessoa.renomeacao is not None and pessoa.renomeacao.estado != "concluida":
+            raise HTTPException(
+                409, "A renomeação anterior ainda não terminou: aguarde ou retome"
+            )
+        novo = pedido.nome
+        if novo == pessoa.nome:
+            raise HTTPException(422, "O nome novo é igual ao atual")
+        if any(o.id != pessoa.id for o in pessoas.achar(novo)):
+            raise HTTPException(
+                422, "Já existe outra pessoa com esse nome: use Fundir com…"
+            )
+        ids, momentos = afetados(pessoa.id)
+        impacto = ImpactoDaRenomeacao(
+            nome_antigo=pessoa.nome,
+            nome_novo=novo,
+            videos=len(ids),
+            momentos=momentos,
+            previa=pedido.previa,
+        )
+        if pedido.previa:
+            return impacto
+        quando = relogio()
+        anteriores = (
+            list(pessoa.renomeacao.nomes_anteriores) if pessoa.renomeacao else []
+        )
+        if normalizar(pessoa.nome) not in {normalizar(n) for n in anteriores}:
+            anteriores.append(pessoa.nome)
+        pessoas.corrigir(pessoa.id, nome=novo)
+        pessoas.definir_renomeacao(
+            pessoa.id,
+            RenomeacaoDaPessoa(
+                nome_antigo=pessoa.nome,
+                nome_novo=novo,
+                nomes_anteriores=anteriores,
+                em=quando,
+                por_uid=autor.uid,
+                por_email=autor.email.lower(),
+                total=len(ids),
+                pendentes=ids,
+                estado="em_andamento",
+            ),
+        )
+        try:
+            auditoria.acrescentar(
+                RegistroDeAuditoria(
+                    id=uuid.uuid4().hex,
+                    quando=quando,
+                    uid=autor.uid,
+                    email=autor.email,
+                    acao="pessoa.renomeada",
+                    alvo_tipo="pessoa",
+                    alvo_id=pessoa.id,
+                    alvo_nome=novo,
+                    detalhes={
+                        "nome_antigo": pessoa.nome,
+                        "nome_novo": novo,
+                        "videos": len(ids),
+                        "momentos": momentos,
+                    },
+                )
+            )
+        except Exception:
+            # Sem registro a troca não vale: desfaz antes de reindexar.
+            pessoas.corrigir(pessoa.id, nome=pessoa.nome)
+            pessoas.definir_renomeacao(pessoa.id, pessoa.renomeacao)
+            ao_renomear()
+            raise
+        ao_renomear()
+        segundo_plano.add_task(reindexar_pendentes, pessoa.id)
+        return impacto
+
+    @rotas.get("/pessoas/{id_da_pessoa}/renomear/andamento")
+    def andamento(
+        id_da_pessoa: str,
+        _autor: Annotated[Usuario, Depends(_exige_aprovar)],
+    ) -> AndamentoDaRenomeacao:
+        pessoa = pessoas.obter(id_da_pessoa)
+        if pessoa is None or pessoa.renomeacao is None:
+            raise HTTPException(404, "Nenhuma renomeação desta pessoa")
+        return _andamento(pessoa.renomeacao)
+
+    @rotas.post("/pessoas/{id_da_pessoa}/renomear/retomar")
+    def retomar(
+        id_da_pessoa: str,
+        segundo_plano: BackgroundTasks,
+        _autor: Annotated[Usuario, Depends(_exige_aprovar)],
+    ) -> AndamentoDaRenomeacao:
+        pessoa = pessoas.obter(id_da_pessoa)
+        if pessoa is None or pessoa.renomeacao is None:
+            raise HTTPException(404, "Nenhuma renomeação desta pessoa")
+        if pessoa.renomeacao.pendentes:
+            segundo_plano.add_task(reindexar_pendentes, pessoa.id)
+        return _andamento(pessoa.renomeacao)
+
+    return rotas

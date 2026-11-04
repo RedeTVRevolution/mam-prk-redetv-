@@ -63,6 +63,7 @@ from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
     Armazenamento,
     ArmazenamentoIndisponivel,
+    Job,
     RepositorioDeJobs,
     RepositorioIndisponivel,
     ServicoIndisponivel,
@@ -126,6 +127,7 @@ from api.relatorio_de_marcas import (
     criar_rotas_das_marcas,
 )
 from api.relatorio_de_marcas import consulta_do_ambiente as marcas_do_ambiente
+from api.renomeacao_de_pessoas import criar_rotas_da_renomeacao
 from api.reprocessamento import (
     DisparoDoWorkflow,
     DisparoIndisponivel,
@@ -347,6 +349,7 @@ def criar_app(
                 embedding,
                 armazenamento_dos_jobs,
                 tipos_de_objeto=tipos_dos_objetos,
+                pessoas=catalogo_de_pessoas.obter,
             ),
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
             tipos_dos_objetos.conhecidos,
@@ -367,12 +370,28 @@ def criar_app(
     )
     v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
-    v1.include_router(
-        criar_rotas_do_catalogo(
-            catalogo_de_pessoas,
-            catalogo_de_marcas,
+
+    def _reindexar_para_a_renomeacao(job: Job) -> bool:
+        indexacao = reindexar(
+            job,
+            repositorio_de_jobs,
+            armazenamento_dos_jobs,
+            repositorio_de_correcoes,
+            indice_da_busca,
             relogio,
-            lambda ao_fundir: criar_rotas_da_fusao(
+            copia,
+            embedding,
+            armazenamento_dos_jobs,
+            tipos_de_objeto=tipos_dos_objetos,
+            pessoas=catalogo_de_pessoas.obter,
+        )
+        return indexacao is not None and indexacao.estado == "indexado"
+
+    def _rotas_das_pessoas(descartar: Callable[[], None]) -> APIRouter:
+        """Fundir (#209) e renomear em todos os vídeos (#263), sob `/catalogo`."""
+        rotas = APIRouter()
+        rotas.include_router(
+            criar_rotas_da_fusao(
                 catalogo_de_pessoas,
                 repositorio_de_jobs,
                 repositorio_de_correcoes,
@@ -380,8 +399,29 @@ def criar_app(
                 fotos_de_referencia or FotosEmMemoria(),
                 repositorio_de_auditoria,
                 relogio,
-                ao_fundir,
-            ),
+                descartar,
+            )
+        )
+        rotas.include_router(
+            criar_rotas_da_renomeacao(
+                catalogo_de_pessoas,
+                repositorio_de_jobs,
+                repositorio_de_correcoes,
+                armazenamento_dos_jobs,
+                repositorio_de_auditoria,
+                relogio,
+                _reindexar_para_a_renomeacao,
+                descartar,
+            )
+        )
+        return rotas
+
+    v1.include_router(
+        criar_rotas_do_catalogo(
+            catalogo_de_pessoas,
+            catalogo_de_marcas,
+            relogio,
+            _rotas_das_pessoas,
         )
     )
     v1.include_router(

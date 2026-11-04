@@ -35,6 +35,7 @@ from api.catalogo import (
     FusaoDaPessoa,
     PessoaDoCatalogo,
     PessoaInexistente,
+    RenomeacaoDaPessoa,
     Rosto,
     corrigida,
     nomes_de_busca,
@@ -509,6 +510,14 @@ class CatalogoFirestore:
         if atual is None:
             raise PessoaInexistente(id)
         return self._gravar(atual.model_copy(update={"fundida": fusao}))
+
+    def definir_renomeacao(
+        self, id: str, renomeacao: RenomeacaoDaPessoa | None
+    ) -> PessoaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise PessoaInexistente(id)
+        return self._gravar(atual.model_copy(update={"renomeacao": renomeacao}))
 
     def acrescentar(
         self,

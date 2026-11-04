@@ -33,6 +33,7 @@ Acao = Literal[
     "video.baixado",
     "decupagem.baixada",
     "pessoa.fundida",
+    "pessoa.renomeada",
 ]
 ACOES: tuple[Acao, ...] = get_args(Acao)
 
