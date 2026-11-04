@@ -22,6 +22,8 @@ import { Link } from './Link.tsx'
 import { ACERVO, navegar, useRota } from './rotas.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
+import Administracao from './Administracao.tsx'
+import { podeAdministrar } from './administracao.ts'
 import Marcas from './Marcas.tsx'
 import TempoDeTela from './TempoDeTela.tsx'
 
@@ -145,13 +147,18 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
   const podeEditar = sessao.usuario.permissoes.includes('decupagem.editar')
   const podeAprovar = sessao.usuario.permissoes.includes('correcao.aprovar')
   const podeReprocessar = sessao.usuario.permissoes.includes('video.reprocessar_etapa')
+  const podeApagar = sessao.usuario.permissoes.includes('lixeira.gerir')
   const podeEnviar = sessao.usuario.permissoes.includes('video.enviar')
   return (
     <AppShell
       header={{ height: ALTURA_DA_BARRA }}
       padding="sm"
     >
-      <Barra email={sessao.usuario.email} aoSair={() => void sair()} />
+      <Barra
+        email={sessao.usuario.email}
+        aoSair={() => void sair()}
+        podeAdministrar={podeAdministrar(sessao.usuario.permissoes)}
+      />
       {rota.tipo === 'video' ? (
         <AppShell.Main bg="dark.7">
           <TelaDoVideo
@@ -166,7 +173,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
         </AppShell.Main>
       ) : rota.tipo === 'acervo' ? (
         // O front só esconde o envio; quem barra é a API.
-        <Acervo api={api} filtros={rota.filtros} podeEnviar={podeEnviar} />
+        <Acervo api={api} filtros={rota.filtros} podeEnviar={podeEnviar} podeApagar={podeApagar} />
       ) : rota.tipo === 'busca' ? (
         <AppShell.Main bg="dark.7">
           <Busca api={api} consulta={rota.consulta} />
@@ -182,6 +189,10 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'marcas' ? (
         <AppShell.Main bg="dark.7">
           <Marcas api={api} filtros={rota.filtros} />
+        </AppShell.Main>
+      ) : rota.tipo === 'admin' ? (
+        <AppShell.Main bg="dark.7">
+          <Administracao api={api} aba={rota.aba} busca={rota.busca} usuario={sessao.usuario} aoEntrarDeNovo={() => void sair()} />
         </AppShell.Main>
       ) : (
         <AppShell.Main bg="dark.7">

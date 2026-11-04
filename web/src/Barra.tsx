@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useAtalhos, useMostrarAtalhos } from './atalhos.ts'
 import { consultaNova } from './busca.ts'
 import { Link } from './Link.tsx'
-import { ACERVO, enderecoDaBusca, MARCAS, navegar, TEMPO_DE_TELA, useRota } from './rotas.ts'
+import { ACERVO, ADMIN, enderecoDaBusca, MARCAS, navegar, TEMPO_DE_TELA, useRota } from './rotas.ts'
 import { CORES } from './tema.ts'
 
 const ATALHO_DA_BUSCA = {
@@ -63,7 +63,15 @@ function CaixaDeBusca() {
 }
 
 /** A barra fixa de toda tela depois do login (`ALTURA_DA_BARRA`, no tema). */
-export default function Barra({ email, aoSair }: { email: string; aoSair: () => void }) {
+export default function Barra({
+  email,
+  aoSair,
+  podeAdministrar = false,
+}: {
+  email: string
+  aoSair: () => void
+  podeAdministrar?: boolean
+}) {
   const mostrarAtalhos = useMostrarAtalhos()
   return (
     <AppShell.Header>
@@ -87,6 +95,11 @@ export default function Barra({ email, aoSair }: { email: string; aoSair: () => 
             <Link para={MARCAS} size="sm" c="dimmed" underline="hover" ml="md">
               Relatórios › Marcas
             </Link>
+            {podeAdministrar && (
+              <Link para={ADMIN} size="sm" c="dimmed" underline="hover" ml="md">
+                Administração
+              </Link>
+            )}
           </nav>
         </Group>
         <CaixaDeBusca />

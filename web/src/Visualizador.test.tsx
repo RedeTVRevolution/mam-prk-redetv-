@@ -718,7 +718,7 @@ test('o "Reprocessar…" fica escondido entre etapas e volta num Job preso, pass
     {
       etapa_atual: 'referencias',
       indexacao: { estado: 'pendente', em: haSeteHoras },
-      etapas: [{ nome: 'referencias', inicio: haSeteHoras }],
+      etapas: [{ nome: 'referencias', inicio: haSeteHoras, fim: null, resultado: null }],
     },
     null,
     false,

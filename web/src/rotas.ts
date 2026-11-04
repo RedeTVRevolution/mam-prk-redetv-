@@ -1,4 +1,6 @@
 import { consultaDaBusca, consultaParaEndereco, type ConsultaDaBusca } from './busca.ts'
+import { filtrosParaEnderecoDaAuditoria, type FiltrosDaAuditoria } from './auditoria.ts'
+import { filtrosParaEnderecoDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
 import { filtrosDeMarcas, type FiltrosDeMarcas } from './marcas.ts'
 import { filtrosDoRelatorio, filtrosParaEndereco, type FiltrosDoRelatorio } from './tempoDeTela.ts'
@@ -14,12 +16,29 @@ export type Rota =
   | { tipo: 'parecidos'; job: string; plano: number }
   | { tipo: 'tempo_de_tela'; filtros: FiltrosDoRelatorio }
   | { tipo: 'marcas'; filtros: FiltrosDeMarcas }
+  | { tipo: 'admin'; aba: string | null; busca: string }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
 export const ACERVO = '/acervo'
 export const TEMPO_DE_TELA = '/relatorios/tempo-de-tela'
 export const MARCAS = '/relatorios/marcas'
+export const ADMIN = '/admin'
+
+/** O endereço de uma aba da administração (`usuarios`, `chaves`, …). */
+export function enderecoDaAba(aba: string): string {
+  return `${ADMIN}/${aba}`
+}
+
+/** O endereço da aba Entradas, com os filtros na query. */
+export function enderecoDasEntradas(filtros: FiltrosDasEntradas): string {
+  return `${enderecoDaAba('entradas')}${filtrosParaEnderecoDasEntradas(filtros)}`
+}
+
+/** O endereço da aba Auditoria, com os filtros na query. */
+export function enderecoDaAuditoria(filtros: FiltrosDaAuditoria): string {
+  return `${enderecoDaAba('auditoria')}${filtrosParaEnderecoDaAuditoria(filtros)}`
+}
 
 /** O endereço do relatório de tempo de tela, com os filtros na query. */
 export function enderecoDoTempoDeTela(filtros: FiltrosDoRelatorio): string {
@@ -74,6 +93,7 @@ export function lerRota(caminho: string, busca = ''): Rota {
   if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'marcas') {
     return { tipo: 'marcas', filtros: filtrosDeMarcas(busca) }
   }
+  if (partes[0] === 'admin' && partes.length <= 2) return { tipo: 'admin', aba: partes[1] ?? null, busca }
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {
