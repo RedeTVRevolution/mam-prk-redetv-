@@ -154,6 +154,23 @@ def objeto_dos_nomes_a_buscar(job_id: str) -> str:
 TENTATIVAS_SOB_DISPUTA = 8
 
 
+def _repetir_sob_disputa[T](
+    na_transacao: Callable[[Any], T], cliente: firestore.Client
+) -> T:
+    # Com muitas chamadas no mesmo documento, o Firestore esgota as tentativas da
+    # transação (ValueError causado por Aborted). Quem perde começa de novo, depois de
+    # uma espera aleatória, e lê o estado que o vencedor deixou. Outro ValueError (um
+    # Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
+    for rodada in range(TENTATIVAS_SOB_DISPUTA):
+        try:
+            return na_transacao(cliente.transaction())
+        except (ValueError, Aborted) as erro:
+            if isinstance(erro, ValueError) and not isinstance(erro.__cause__, Aborted):
+                raise
+            time.sleep(random.uniform(0, 0.05 * (rodada + 1)))
+    raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
+
 class RepositorioFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
@@ -180,21 +197,7 @@ class RepositorioFirestore:
         raise ServicoIndisponivel("Firestore disputado: tente de novo")
 
     def _sob_disputa(self, na_transacao: Callable[[Any], Job | None]) -> Job | None:
-        # Com muitos trabalhadores no mesmo Job, o Firestore esgota as tentativas da
-        # transação (ValueError causado por Aborted). Quem perde começa de novo, depois de
-        # uma espera aleatória, e lê o estado que o vencedor deixou. Outro ValueError (um
-        # Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
-        for rodada in range(TENTATIVAS_SOB_DISPUTA):
-            try:
-                resultado: Job | None = na_transacao(self._cliente.transaction())
-                return resultado
-            except (ValueError, Aborted) as erro:
-                if isinstance(erro, ValueError) and not isinstance(
-                    erro.__cause__, Aborted
-                ):
-                    raise
-                time.sleep(random.uniform(0, 0.05 * (rodada + 1)))
-        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+        return _repetir_sob_disputa(na_transacao, self._cliente)
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -362,8 +365,8 @@ class RepositorioDeIdempotenciaFirestore:
         # `create` é atômico e não disputa transação: com muitas chamadas simultâneas na
         # mesma chave (o cliente que repete em paralelo), uma cria e as outras leem. Uma
         # transação aqui esgotaria as tentativas sob essa disputa e daria 500. Se o
-        # Firestore aborta o `create` por disputa (`Aborted`), quem disputa é a que está
-        # criando: espera um pouco e lê a reserva dela.
+        # Firestore aborta o `create` por disputa (`Aborted`), espera um pouco e tenta o
+        # `create` de novo, até criar ou receber `AlreadyExists` e ler a que ficou.
         for espera in (0.05, 0.1, 0.2, 0.4, 0.8, 0):
             try:
                 referencia.create(criada.model_dump())
@@ -396,7 +399,10 @@ class RepositorioDeIdempotenciaFirestore:
             transacao.set(referencia, criada.model_dump())
             return criada, True
 
-        resultado: tuple[Reserva, bool] = trocar_a_vencida(self._cliente.transaction())
+        # Várias repetições na mesma reserva vencida disputam a transação.
+        resultado: tuple[Reserva, bool] = _repetir_sob_disputa(
+            trocar_a_vencida, self._cliente
+        )
         return resultado
 
 

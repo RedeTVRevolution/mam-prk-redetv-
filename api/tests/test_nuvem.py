@@ -27,6 +27,7 @@ from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
 from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
+from api.idempotencia import nova_reserva
 from api.jobs import (
     CursorInvalido,
     FiltroDeJobs,
@@ -45,6 +46,7 @@ from api.nuvem import (
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
+    RepositorioDeIdempotenciaFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
@@ -1318,3 +1320,49 @@ def test_criar_abortado_repete_ate_saber_se_gravou(
 
     assert repositorio.criar(_job_novo()) is gravou
     assert colecao.criacoes == 3
+
+
+class _DocumentoDaReservaVencida:
+    """A reserva existe e venceu: `create` dá `AlreadyExists` e a leitura a devolve."""
+
+    def __init__(self, reserva: dict[str, Any]) -> None:
+        self._reserva = reserva
+
+    def document(self, _: str) -> "_DocumentoDaReservaVencida":
+        return self
+
+    def create(self, _: dict[str, Any]) -> None:
+        raise AlreadyExists("existe")  # type: ignore[no-untyped-call]
+
+    def get(self, **_: Any) -> Any:
+        return type("Doc", (), {"exists": True, "to_dict": lambda _: self._reserva})()
+
+
+def test_troca_da_reserva_vencida_repete_quando_o_firestore_esgota_as_tentativas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Várias repetições na mesma reserva vencida disputam a transação da troca.
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    agora = datetime(2026, 11, 4, tzinfo=UTC)
+    vencida = nova_reserva("imp", "velho", agora - timedelta(hours=49))
+    repositorio = RepositorioDeIdempotenciaFirestore(
+        _ClienteSemRede(_DocumentoDaReservaVencida(vencida.model_dump()))  # type: ignore[arg-type]
+    )
+    chamadas = 0
+
+    def transacional(funcao: Any) -> Any:
+        def na_transacao(transacao: Any) -> Any:
+            nonlocal chamadas
+            chamadas += 1
+            if chamadas < 3:
+                raise _esgotou_as_tentativas()
+            return (nova_reserva("imp", "novo", agora), True)
+
+        return na_transacao
+
+    monkeypatch.setattr("api.nuvem.firestore.transactional", transacional)
+
+    reserva, nova = repositorio.reservar("sistema:Legado A", "k1", "imp", "novo", agora)
+
+    assert (reserva.job_id, nova) == ("novo", True)
+    assert chamadas == 3

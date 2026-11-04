@@ -839,3 +839,20 @@ def test_idempotency_key_invalida_recebe_422() -> None:
     assert _criar_com_chave(ambiente, "x" * 256).status_code == 422
     assert _criar_com_chave(ambiente, "chave\tcom tab").status_code == 422
     assert ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json() == []
+
+
+def test_repeticao_que_grava_o_job_que_faltou_usa_a_hora_de_agora() -> None:
+    # O processo caiu entre reservar e gravar: a repetição, horas depois, grava o Job.
+    # Com a hora da reserva, o prazo do upload já estaria quase vencido ao dar a URL.
+    ambiente = Ambiente()
+    primeira = _criar_com_chave(ambiente, "k1").json()
+    del ambiente.repositorio._jobs[primeira["id"]]
+    ambiente.relogio.agora = INICIO + timedelta(hours=30)
+
+    repeticao = _criar_com_chave(ambiente, "k1")
+
+    assert repeticao.status_code == 200
+    assert repeticao.json()["id"] == primeira["id"]
+    assert repeticao.json()["url_de_upload"] is not None
+    guardado = ambiente.repositorio.obter(primeira["id"])
+    assert guardado is not None and guardado.criado_em == INICIO + timedelta(hours=30)

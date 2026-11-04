@@ -916,7 +916,10 @@ def criar_rotas(
                 raise HTTPException(
                     409, "Idempotency-Key já usada com outro corpo"
                 ) from None
-            job_id, agora = reserva.job_id, reserva.criada_em
+            # Só o id vem da reserva: a repetição que grava o Job (o processo caiu entre
+            # reservar e gravar) o cria com a hora de agora, para o prazo do upload
+            # contar de quando a URL é dada.
+            job_id = reserva.job_id
         job = Job(
             id=job_id,
             nome=novo.nome,
