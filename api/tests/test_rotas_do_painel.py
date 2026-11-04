@@ -20,7 +20,9 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.resumos_de_uso import (
     AcessoDoDia,
+    ChamadaDoDia,
     ConfigDosResumos,
+    CorrecaoDoDia,
     ResumosBigQuery,
     ResumosEmMemoria,
     UsoDoDia,
@@ -101,7 +103,9 @@ USO = [
 
 
 class Mundo:
-    def __init__(self, papeis: list[str], resumos: Any = "padrao") -> None:
+    def __init__(
+        self, papeis: list[str], resumos: Any = "padrao", qualidade: Any = None
+    ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
         repo.salvar("ana", papeis)  # type: ignore[arg-type]
@@ -116,6 +120,7 @@ class Mundo:
                 papeis=repo,
                 auditoria=self.auditoria,
                 resumos_de_uso=self.resumos,
+                qualidade_do_painel=qualidade,
                 contas=ContasDeUsuarioEmMemoria(
                     [
                         ContaDoIdentityPlatform(uid="bia", email="bia@redetv.com.br"),
@@ -133,7 +138,9 @@ def _diretoria() -> Mundo:
     return Mundo(["diretoria"])
 
 
-@pytest.mark.parametrize("rota", ["/acessos", "/videos", "/buscas", "/filtros"])
+@pytest.mark.parametrize(
+    "rota", ["/acessos", "/videos", "/buscas", "/revisao", "/api", "/filtros"]
+)
 @pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
 def test_sem_painel_ver_e_403(rota: str, papel: str) -> None:
     mundo = Mundo([papel])
@@ -335,7 +342,15 @@ def test_consulta_do_bigquery_filtra_com_parametros_e_converte_as_linhas() -> No
         }
 
     resumos = ResumosBigQuery(
-        ConfigDosResumos("proj", "ds", "regiao", "por_usuario", "por_programa"),
+        ConfigDosResumos(
+            "proj",
+            "ds",
+            "regiao",
+            "por_usuario",
+            "por_programa",
+            "correcoes",
+            "chamadas",
+        ),
         transporte,
     )
 
@@ -358,7 +373,7 @@ def test_consulta_do_bigquery_filtra_com_parametros_e_converte_as_linhas() -> No
 
 def test_consulta_que_nao_termina_ou_nao_cabe_falha_alto() -> None:
     resumos = ResumosBigQuery(
-        ConfigDosResumos("p", "d", "r", "a", "b"),
+        ConfigDosResumos("p", "d", "r", "a", "b", "c", "d"),
         lambda corpo: {"jobComplete": False},
     )
 
@@ -588,7 +603,15 @@ def test_uso_no_bigquery_traz_as_colunas_das_duas_tabelas() -> None:
         return {"jobComplete": True, "rows": [{"f": [{"v": v} for v in valores]}]}
 
     resumos = ResumosBigQuery(
-        ConfigDosResumos("proj", "ds", "regiao", "por_usuario", "por_programa"),
+        ConfigDosResumos(
+            "proj",
+            "ds",
+            "regiao",
+            "por_usuario",
+            "por_programa",
+            "correcoes",
+            "chamadas",
+        ),
         transporte,
     )
 
@@ -605,3 +628,51 @@ def test_uso_no_bigquery_traz_as_colunas_das_duas_tabelas() -> None:
     assert "`proj.ds.por_programa`" in segundo["query"]
     assert "DROP" not in segundo["query"]
     assert segundo["queryParameters"] == [_parametro("programa", "Hoje'; DROP TABLE x")]
+
+
+def test_correcoes_e_chamadas_no_bigquery_trazem_as_colunas_das_duas_tabelas() -> None:
+    pedidos: list[dict[str, Any]] = []
+    respostas: list[list[str | None]] = [
+        ["2026-11-01", "usuario", "bia", None, "fala.texto", "3"],
+        ["2026-11-01", "sistema", "cms", "POST", "/v1/jobs", "5", "1", "2"],
+    ]
+
+    def transporte(corpo: dict[str, Any]) -> dict[str, Any]:
+        pedidos.append(corpo)
+        valores = respostas[len(pedidos) - 1]
+        return {"jobComplete": True, "rows": [{"f": [{"v": v} for v in valores]}]}
+
+    resumos = ResumosBigQuery(
+        ConfigDosResumos(
+            "proj",
+            "ds",
+            "regiao",
+            "por_usuario",
+            "por_programa",
+            "correcoes",
+            "chamadas",
+        ),
+        transporte,
+    )
+
+    [correcao] = resumos.correcoes(None, None, "Hoje'; DROP TABLE x", "bia")
+    [chamada] = resumos.chamadas(date(2026, 11, 1), None, "cms")
+
+    assert correcao == CorrecaoDoDia(
+        date(2026, 11, 1), "usuario", "bia", None, "fala.texto", 3
+    )
+    assert chamada == ChamadaDoDia(
+        date(2026, 11, 1), "sistema", "cms", "POST", "/v1/jobs", 5, 1, 2
+    )
+    primeiro, segundo = pedidos
+    assert "`proj.ds.correcoes`" in primeiro["query"]
+    assert "DROP" not in primeiro["query"]
+    assert primeiro["queryParameters"] == [
+        _parametro("programa", "Hoje'; DROP TABLE x"),
+        _parametro("quem_id", "bia"),
+    ]
+    assert "`proj.ds.chamadas`" in segundo["query"]
+    assert segundo["queryParameters"] == [
+        _parametro("desde", "2026-11-01", "DATE"),
+        _parametro("quem_id", "cms"),
+    ]

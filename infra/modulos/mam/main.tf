@@ -1003,6 +1003,14 @@ resource "google_cloud_run_v2_service" "web" {
         value = local.tabelas_do_painel_na_web.por_dia_e_programa
       }
       env {
+        name  = "PAINEL_TABELA_CORRECOES_POR_DIA"
+        value = local.tabelas_do_painel_na_web.correcoes_por_dia
+      }
+      env {
+        name  = "PAINEL_TABELA_CHAMADAS_POR_DIA"
+        value = local.tabelas_do_painel_na_web.chamadas_por_dia
+      }
+      env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
         value = tostring(var.busca_distancia_maxima)
       }

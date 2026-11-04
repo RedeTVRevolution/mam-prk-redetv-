@@ -46,6 +46,34 @@ class UsoDoDia:
     buscas_sem_resultado: int
 
 
+@dataclass(frozen=True)
+class CorrecaoDoDia:
+    """As correções de um dia, de uma pessoa, num programa e de um tipo (`None` quando o
+    evento não trouxe programa ou tipo)."""
+
+    dia: date
+    quem_tipo: str
+    quem_id: str
+    programa: str | None
+    tipo_de_correcao: str | None
+    correcoes: int
+
+
+@dataclass(frozen=True)
+class ChamadaDoDia:
+    """As chamadas de API de um dia, de um sistema (ou pessoa), a um método e uma rota.
+    Erro do cliente é o status 4xx; do servidor, o 5xx."""
+
+    dia: date
+    quem_tipo: str
+    quem_id: str
+    metodo: str | None
+    rota: str | None
+    chamadas: int
+    erros_do_cliente: int
+    erros_do_servidor: int
+
+
 class ResumosDeUso(Protocol):
     def acessos(
         self, desde: date | None, ate: date | None, usuario: str | None
@@ -62,6 +90,20 @@ class ResumosDeUso(Protocol):
     ) -> list[UsoDoDia]:
         """Um dia, um programa."""
 
+    def correcoes(
+        self,
+        desde: date | None,
+        ate: date | None,
+        programa: str | None,
+        usuario: str | None,
+    ) -> list[CorrecaoDoDia]:
+        """Um dia, uma pessoa, um programa e um tipo de correção; os dois filtros se cruzam."""
+
+    def chamadas(
+        self, desde: date | None, ate: date | None, usuario: str | None
+    ) -> list[ChamadaDoDia]:
+        """Um dia, um sistema (ou pessoa), um método e uma rota."""
+
     def programas(self) -> list[str]:
         """Os programas que já têm algum evento, em ordem."""
 
@@ -77,10 +119,14 @@ class ResumosEmMemoria:
         acessos: Sequence[AcessoDoDia] = (),
         programas: Sequence[str] = (),
         uso: Sequence[UsoDoDia] = (),
+        correcoes: Sequence[CorrecaoDoDia] = (),
+        chamadas: Sequence[ChamadaDoDia] = (),
     ) -> None:
         self._acessos = list(acessos)
         self._programas = list(programas)
         self._uso = list(uso)
+        self._correcoes = list(correcoes)
+        self._chamadas = list(chamadas)
 
     def _do_periodo(self, desde: date | None, ate: date | None) -> list[UsoDoDia]:
         return [
@@ -105,6 +151,33 @@ class ResumosEmMemoria:
             u
             for u in self._do_periodo(desde, ate)
             if u.programa is not None and (programa is None or u.programa == programa)
+        ]
+
+    def correcoes(
+        self,
+        desde: date | None,
+        ate: date | None,
+        programa: str | None,
+        usuario: str | None,
+    ) -> list[CorrecaoDoDia]:
+        return [
+            c
+            for c in self._correcoes
+            if (desde is None or c.dia >= desde)
+            and (ate is None or c.dia <= ate)
+            and (programa is None or c.programa == programa)
+            and (usuario is None or c.quem_id == usuario)
+        ]
+
+    def chamadas(
+        self, desde: date | None, ate: date | None, usuario: str | None
+    ) -> list[ChamadaDoDia]:
+        return [
+            c
+            for c in self._chamadas
+            if (desde is None or c.dia >= desde)
+            and (ate is None or c.dia <= ate)
+            and (usuario is None or c.quem_id == usuario)
         ]
 
     def acessos(
@@ -132,6 +205,8 @@ class ConfigDosResumos:
     regiao: str
     tabela_por_dia_e_usuario: str
     tabela_por_dia_e_programa: str
+    tabela_de_correcoes_por_dia: str
+    tabela_de_chamadas_por_dia: str
 
     @classmethod
     def do_ambiente(cls, ambiente: Any) -> "ConfigDosResumos":
@@ -141,6 +216,8 @@ class ConfigDosResumos:
             regiao=ambiente["BIGQUERY_REGIAO"],
             tabela_por_dia_e_usuario=ambiente["PAINEL_TABELA_POR_DIA_E_USUARIO"],
             tabela_por_dia_e_programa=ambiente["PAINEL_TABELA_POR_DIA_E_PROGRAMA"],
+            tabela_de_correcoes_por_dia=ambiente["PAINEL_TABELA_CORRECOES_POR_DIA"],
+            tabela_de_chamadas_por_dia=ambiente["PAINEL_TABELA_CHAMADAS_POR_DIA"],
         )
 
 
@@ -194,6 +271,79 @@ class ResumosBigQuery:
             for v in linhas
         ]
 
+    def _onde(
+        self,
+        desde: date | None,
+        ate: date | None,
+        filtros: Sequence[tuple[str, str | None]],
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """O WHERE do período e dos filtros dados (os vazios não filtram), com parâmetros."""
+        onde = ["TRUE"]
+        parametros: list[dict[str, Any]] = []
+        for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
+            if dia is not None:
+                onde.append(f"dia {comparacao} @{nome}")
+                parametros.append(_parametro(nome, dia.isoformat(), "DATE"))
+        for coluna, valor in filtros:
+            if valor is not None:
+                onde.append(f"{coluna} = @{coluna}")
+                parametros.append(_parametro(coluna, valor))
+        return onde, parametros
+
+    def correcoes(
+        self,
+        desde: date | None,
+        ate: date | None,
+        programa: str | None,
+        usuario: str | None,
+    ) -> list[CorrecaoDoDia]:
+        onde, parametros = self._onde(
+            desde, ate, [("programa", programa), ("quem_id", usuario)]
+        )
+        linhas = self._consultar(
+            "SELECT CAST(dia AS STRING), quem_tipo, quem_id, programa, tipo_de_correcao,"
+            " correcoes\n"
+            f"FROM {self._tabela(self._config.tabela_de_correcoes_por_dia)}\n"
+            f"WHERE {' AND '.join(onde)}",
+            parametros,
+        )
+        return [
+            CorrecaoDoDia(
+                dia=date.fromisoformat(v[0]),
+                quem_tipo=v[1],
+                quem_id=v[2],
+                programa=v[3],
+                tipo_de_correcao=v[4],
+                correcoes=int(v[5]),
+            )
+            for v in linhas
+        ]
+
+    def chamadas(
+        self, desde: date | None, ate: date | None, usuario: str | None
+    ) -> list[ChamadaDoDia]:
+        onde, parametros = self._onde(desde, ate, [("quem_id", usuario)])
+        linhas = self._consultar(
+            "SELECT CAST(dia AS STRING), quem_tipo, quem_id, metodo, rota, chamadas,"
+            " erros_do_cliente, erros_do_servidor\n"
+            f"FROM {self._tabela(self._config.tabela_de_chamadas_por_dia)}\n"
+            f"WHERE {' AND '.join(onde)}",
+            parametros,
+        )
+        return [
+            ChamadaDoDia(
+                dia=date.fromisoformat(v[0]),
+                quem_tipo=v[1],
+                quem_id=v[2],
+                metodo=v[3],
+                rota=v[4],
+                chamadas=int(v[5]),
+                erros_do_cliente=int(v[6]),
+                erros_do_servidor=int(v[7]),
+            )
+            for v in linhas
+        ]
+
     def _uso(
         self,
         tabela: str,
@@ -202,16 +352,7 @@ class ResumosBigQuery:
         ate: date | None,
         filtro: tuple[str, str | None],
     ) -> list[UsoDoDia]:
-        onde = ["TRUE"]
-        parametros: list[dict[str, Any]] = []
-        for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
-            if dia is not None:
-                onde.append(f"dia {comparacao} @{nome}")
-                parametros.append(_parametro(nome, dia.isoformat(), "DATE"))
-        coluna, valor = filtro
-        if valor is not None:
-            onde.append(f"{coluna} = @{coluna}")
-            parametros.append(_parametro(coluna, valor))
+        onde, parametros = self._onde(desde, ate, [filtro])
         linhas = self._consultar(
             f"SELECT CAST(dia AS STRING), {chaves}, videos_enviados, videos_concluidos,"
             " videos_falhos, horas_concluidas, segundos_de_processamento,"

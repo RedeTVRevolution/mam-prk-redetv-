@@ -471,3 +471,79 @@ def test_busca_sem_resultado_e_a_que_trouxe_zero_videos(
     assert (dia2["buscas"], dia2["buscas_sem_resultado"]) == (1, 0)
     assert hoje["buscas_sem_resultado"] == 0
     assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["buscas_sem_resultado"] == 1
+
+
+def test_correcoes_por_dia_pessoa_programa_e_tipo(banco: sqlite3.Connection) -> None:
+    for id, quando, quem, programa, tipo in (
+        ("c1", "2026-11-01T14:00:00+00:00", "ana", "Hoje", "fala.texto"),
+        ("c2", "2026-11-01T14:05:00+00:00", "ana", "Hoje", "fala.texto"),
+        ("c3", "2026-11-01T14:06:00+00:00", "ana", "Hoje", "pessoa.renomear"),
+        ("c4", "2026-11-01T14:07:00+00:00", "beto", "Fala", "fala.texto"),
+        ("c5", "2026-11-01T14:08:00+00:00", "ana", None, None),
+    ):
+        _evento(
+            banco,
+            id,
+            "correcao",
+            quando,
+            quem,
+            job_id="v1",
+            programa=programa,
+            tipo_de_correcao=tipo,
+        )
+    _resumir(banco)
+
+    linhas = _tabela(
+        banco, "correcoes_por_dia", "dia, quem_id, programa, tipo_de_correcao"
+    )
+
+    contagem = {
+        (r["dia"], r["quem_id"], r["programa"], r["tipo_de_correcao"]): r["correcoes"]
+        for r in linhas
+    }
+    assert contagem == {
+        ("2026-11-01", "ana", None, None): 1,
+        ("2026-11-01", "ana", "Hoje", "fala.texto"): 2,
+        ("2026-11-01", "ana", "Hoje", "pessoa.renomear"): 1,
+        ("2026-11-01", "beto", "Fala", "fala.texto"): 1,
+        # A correção do fixture (e6), sem tipo.
+        ("2026-11-01", "ana", "Hoje", None): 1,
+    }
+    assert {r["quem_tipo"] for r in linhas} == {"usuario"}
+
+
+def test_chamadas_de_api_por_dia_sistema_e_rota(banco: sqlite3.Connection) -> None:
+    for id, rota, status in (
+        ("a1", "/v1/jobs", 202),
+        ("a2", "/v1/jobs", 422),
+        ("a3", "/v1/jobs", 503),
+        ("a4", "/v1/jobs/{job_id}", 200),
+    ):
+        _evento(
+            banco,
+            id,
+            "chamada_de_api",
+            "2026-11-01T18:00:00+00:00",
+            "cms",
+            quem_tipo="sistema",
+            metodo="POST" if rota == "/v1/jobs" else "GET",
+            rota=rota,
+            status=status,
+        )
+    _resumir(banco)
+
+    linhas = _tabela(banco, "chamadas_de_api_por_dia", "dia, quem_id, metodo, rota")
+
+    resumo = {
+        (r["quem_id"], r["metodo"], r["rota"]): (
+            r["chamadas"],
+            r["erros_do_cliente"],
+            r["erros_do_servidor"],
+        )
+        for r in linhas
+    }
+    assert resumo == {
+        # A chamada do fixture (e9, 202) e as três daqui.
+        ("cms", "POST", "/v1/jobs"): (4, 1, 1),
+        ("cms", "GET", "/v1/jobs/{job_id}"): (1, 0, 0),
+    }

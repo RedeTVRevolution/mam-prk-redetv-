@@ -137,6 +137,7 @@ from api.passadas import (
 from api.programas import PERFIS
 from api.progresso_das_janelas import JanelasDoJob
 from api.purga import LOGIN_RECENTE_PADRAO, Purga, criar_rotas_da_purga
+from api.qualidade_do_painel import QualidadeDoPainel, QualidadeReal
 from api.relatorio_de_marcas import (
     ConsultaDeInsercoes,
     criar_rotas_das_marcas,
@@ -298,6 +299,7 @@ def criar_app(
     tipos_de_objeto: TiposDeObjeto | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
     resumos_de_uso: ResumosDeUso | None = None,
+    qualidade_do_painel: QualidadeDoPainel | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
@@ -550,6 +552,13 @@ def criar_app(
             resumos_de_uso,
             contas or ContasIndisponiveis(),
             AcessosAoPainel(repositorio_de_auditoria, relogio),
+            qualidade_do_painel
+            or QualidadeReal(
+                repositorio_de_jobs,
+                armazenamento_dos_jobs,
+                repositorio_de_correcoes,
+                repositorio_da_revisao,
+            ),
         )
     )
     v1.include_router(

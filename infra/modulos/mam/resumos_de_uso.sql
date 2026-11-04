@@ -1,5 +1,5 @@
 -- Tabelas resumidas do painel da diretoria (#280, E9). Roda de tempos em tempos como
--- consulta agendada (`resumos_de_uso.tf`) e refaz as quatro tabelas a partir dos eventos de
+-- consulta agendada (`resumos_de_uso.tf`) e refaz as seis tabelas a partir dos eventos de
 -- uso (#279). `${prefixo}` é o prefixo `projeto.dataset.` das tabelas que ele cria, e
 -- `${tabela_de_eventos}` e `${tabela_de_momentos}` são os nomes inteiros das que ele lê, que
 -- o `main.tf` e o `eventos_de_uso.tf` montam (os testes rodam este arquivo no SQLite, sem
@@ -15,7 +15,7 @@
 CREATE TEMP TABLE eventos AS
 SELECT
   e.dia, e.quando, e.tipo, e.quem_tipo, e.quem_id, e.programa, e.estado,
-  e.segundos_de_processamento, e.n_resultados,
+  e.segundos_de_processamento, e.n_resultados, e.tipo_de_correcao, e.metodo, e.rota, e.status,
   COALESCE(d.horas, 0) AS horas
 FROM (
   SELECT
@@ -24,7 +24,7 @@ FROM (
   FROM (
     SELECT
       id, quando, tipo, quem_tipo, quem_id, programa, estado, job_id,
-      segundos_de_processamento, n_resultados,
+      segundos_de_processamento, n_resultados, tipo_de_correcao, metodo, rota, status,
       DATE(quando, 'America/Sao_Paulo') AS dia,
       ROW_NUMBER() OVER (PARTITION BY id ORDER BY quando) AS ordem
     FROM `${tabela_de_eventos}`
@@ -117,3 +117,27 @@ SELECT
 FROM eventos
 WHERE programa IS NOT NULL
 GROUP BY dia, programa;
+
+-- Um dia, uma pessoa, um programa, um tipo de correção (#284). `programa` e `tipo_de_correcao`
+-- vazios são o evento que não os trouxe; a tela os agrupa como "sem programa" e "sem tipo".
+-- Aqui, ao contrário de `uso_por_dia_e_programa`, o evento sem programa fica: a correção por
+-- pessoa e por tipo precisa somar todas.
+CREATE OR REPLACE TABLE `${prefixo}correcoes_por_dia` AS
+SELECT
+  dia, quem_tipo, quem_id, programa, tipo_de_correcao,
+  COUNT(*) AS correcoes
+FROM eventos
+WHERE tipo = 'correcao'
+GROUP BY dia, quem_tipo, quem_id, programa, tipo_de_correcao;
+
+-- Um dia, um sistema (ou pessoa), um método e uma rota (#284). Erro do cliente é o status 4xx
+-- e erro do servidor, o 5xx; a rota traz `{job_id}` em vez do valor.
+CREATE OR REPLACE TABLE `${prefixo}chamadas_de_api_por_dia` AS
+SELECT
+  dia, quem_tipo, quem_id, metodo, rota,
+  COUNT(*) AS chamadas,
+  COUNT(CASE WHEN status >= 400 AND status < 500 THEN 1 END) AS erros_do_cliente,
+  COUNT(CASE WHEN status >= 500 THEN 1 END) AS erros_do_servidor
+FROM eventos
+WHERE tipo = 'chamada_de_api'
+GROUP BY dia, quem_tipo, quem_id, metodo, rota;
