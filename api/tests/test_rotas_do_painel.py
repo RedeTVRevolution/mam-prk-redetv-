@@ -63,6 +63,7 @@ def _uso(
     falhos: int = 0,
     horas: float = 0,
     segundos: int = 0,
+    com_tempo: int | None = None,
     buscas: int = 0,
     sem_resultado: int = 0,
 ) -> UsoDoDia:
@@ -76,6 +77,7 @@ def _uso(
         videos_falhos=falhos,
         horas_concluidas=horas,
         segundos_de_processamento=segundos,
+        videos_concluidos_com_tempo=concluidos if com_tempo is None else com_tempo,
         buscas=buscas,
         buscas_sem_resultado=sem_resultado,
     )
@@ -395,6 +397,17 @@ def test_videos_por_dia_programa_e_usuario_com_o_tempo_medio() -> None:
     ]
 
 
+def test_o_concluido_sem_tempo_fica_fora_do_tempo_medio() -> None:
+    # O fim gravado antes de o evento trazer o tempo: 2 concluídos, só 1 com tempo.
+    resumos = ResumosEmMemoria(
+        uso=[_uso(1, quem=BIA, concluidos=2, segundos=600, com_tempo=1)]
+    )
+
+    r = Mundo(["diretoria"], resumos).get("/videos").json()
+
+    assert (r["total"]["concluidos"], r["total"]["tempo_medio_s"]) == (2, 600.0)
+
+
 def test_videos_filtrados_por_programa_ou_por_usuario() -> None:
     mundo = _diretoria()
 
@@ -568,6 +581,7 @@ def test_uso_no_bigquery_traz_as_colunas_das_duas_tabelas() -> None:
             "1",
             "2.5",
             "600",
+            "1",
             "3",
             "1",
         ]
@@ -582,7 +596,7 @@ def test_uso_no_bigquery_traz_as_colunas_das_duas_tabelas() -> None:
     [por_programa] = resumos.uso_por_programa(None, None, "Hoje'; DROP TABLE x")
 
     assert por_quem == UsoDoDia(
-        date(2026, 11, 1), "usuario", "bia", None, 2, 1, 1, 2.5, 600, 3, 1
+        date(2026, 11, 1), "usuario", "bia", None, 2, 1, 1, 2.5, 600, 1, 3, 1
     )
     assert por_programa.horas_concluidas == 2.5
     primeiro, segundo = pedidos

@@ -443,6 +443,9 @@ export default function PainelDaDiretoria({
       ? { mensagem: 'Escolha o programa ou o usuário, não os dois.', codigo: 'filtros' }
       : null
   const bloqueio = periodo ?? juntos
+  const buscarAcessos = useCallback(() => api.acessosDoPainel(filtros), [api, filtros])
+  const buscarVideos = useCallback(() => api.videosDoPainel(filtros), [api, filtros])
+  const buscarBuscas = useCallback(() => api.buscasDoPainel(filtros), [api, filtros])
 
   function mudar(parte: Partial<FiltrosDoPainel>) {
     navegar(enderecoDoPainel(aba, { ...filtros, ...parte }), { substituir: true })
@@ -468,7 +471,7 @@ export default function PainelDaDiretoria({
         </Tabs.List>
         <Tabs.Panel value="acessos" pt="md">
           <AbaDoRelatorio
-            buscar={useCallback(() => api.acessosDoPainel(filtros), [api, filtros])}
+            buscar={buscarAcessos}
             arquivo="acessos.csv"
             baixar={() => api.acessosDoPainelEmCsv(filtros)}
             bloqueio={periodo}
@@ -479,7 +482,7 @@ export default function PainelDaDiretoria({
         </Tabs.Panel>
         <Tabs.Panel value="videos" pt="md">
           <AbaDoRelatorio
-            buscar={useCallback(() => api.videosDoPainel(filtros), [api, filtros])}
+            buscar={buscarVideos}
             arquivo="videos.csv"
             baixar={() => api.videosDoPainelEmCsv(filtros)}
             bloqueio={bloqueio}
@@ -490,7 +493,7 @@ export default function PainelDaDiretoria({
         </Tabs.Panel>
         <Tabs.Panel value="buscas" pt="md">
           <AbaDoRelatorio
-            buscar={useCallback(() => api.buscasDoPainel(filtros), [api, filtros])}
+            buscar={buscarBuscas}
             arquivo="buscas.csv"
             baixar={() => api.buscasDoPainelEmCsv(filtros)}
             bloqueio={bloqueio}

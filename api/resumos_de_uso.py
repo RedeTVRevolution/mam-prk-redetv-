@@ -28,7 +28,9 @@ class AcessoDoDia:
 @dataclass(frozen=True)
 class UsoDoDia:
     """Vídeos e buscas de um dia, de uma pessoa ou sistema (`quem_id`) ou de um programa
-    (`programa`): o outro vem `None`. O tempo é a soma do que os vídeos concluídos levaram."""
+    (`programa`): o outro vem `None`. O tempo é a soma do que os vídeos concluídos levaram, e
+    `videos_concluidos_com_tempo` quantos deles trazem o tempo (o fim gravado antes de o evento
+    ter o campo não traz)."""
 
     dia: date
     quem_tipo: str | None
@@ -39,6 +41,7 @@ class UsoDoDia:
     videos_falhos: int
     horas_concluidas: float
     segundos_de_processamento: int
+    videos_concluidos_com_tempo: int
     buscas: int
     buscas_sem_resultado: int
 
@@ -211,8 +214,8 @@ class ResumosBigQuery:
             parametros.append(_parametro(coluna, valor))
         linhas = self._consultar(
             f"SELECT CAST(dia AS STRING), {chaves}, videos_enviados, videos_concluidos,"
-            " videos_falhos, horas_concluidas, segundos_de_processamento, buscas,"
-            " buscas_sem_resultado\n"
+            " videos_falhos, horas_concluidas, segundos_de_processamento,"
+            " videos_concluidos_com_tempo, buscas, buscas_sem_resultado\n"
             f"FROM {self._tabela(tabela)}\n"
             f"WHERE {' AND '.join(onde)}",
             parametros,
@@ -228,8 +231,9 @@ class ResumosBigQuery:
                 videos_falhos=int(v[6]),
                 horas_concluidas=float(v[7]),
                 segundos_de_processamento=int(v[8]),
-                buscas=int(v[9]),
-                buscas_sem_resultado=int(v[10]),
+                videos_concluidos_com_tempo=int(v[9]),
+                buscas=int(v[10]),
+                buscas_sem_resultado=int(v[11]),
             )
             for v in linhas
         ]

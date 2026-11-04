@@ -428,6 +428,33 @@ def test_o_tempo_de_processamento_soma_so_os_concluidos(
     assert cms["segundos_de_processamento"] == 1800
 
 
+def test_o_concluido_sem_tempo_fica_fora_da_media(banco: sqlite3.Connection) -> None:
+    # Um fim gravado antes de o evento trazer o tempo: conta como concluído, mas não entra
+    # no divisor do tempo médio.
+    _evento(
+        banco,
+        "e20",
+        "fim_de_processamento",
+        "2026-11-01T17:00:00+00:00",
+        "ana",
+        job_id="v9",
+        programa="Hoje",
+        estado="concluido",
+    )
+    _resumir(banco)
+
+    ana = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0]
+    dia1 = _tabela(banco, "uso_por_dia", "dia")[0]
+    hoje = _tabela(banco, "uso_por_dia_e_programa", "programa")[1]
+    ana_total = _tabela(banco, "uso_por_usuario", "quem_id")[0]
+
+    assert (ana["videos_concluidos"], ana["videos_concluidos_com_tempo"]) == (2, 1)
+    assert ana["segundos_de_processamento"] == 3600
+    assert (dia1["videos_concluidos"], dia1["videos_concluidos_com_tempo"]) == (3, 2)
+    assert (hoje["videos_concluidos"], hoje["videos_concluidos_com_tempo"]) == (2, 1)
+    assert ana_total["videos_concluidos_com_tempo"] == 1
+
+
 def test_busca_sem_resultado_e_a_que_trouxe_zero_videos(
     banco: sqlite3.Connection,
 ) -> None:

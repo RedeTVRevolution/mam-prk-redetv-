@@ -9,7 +9,9 @@
 -- mesmo estado final também conta uma vez só (vale o primeiro); o que falhou e depois
 -- concluiu conta uma falha e uma conclusão. O dia é o de São Paulo. As horas são as dos
 -- vídeos concluídos, pela duração que a cópia dos momentos guarda
--- (`momentos.duracao_do_video_ms`); vídeo ainda não copiado conta como 0 hora.
+-- (`momentos.duracao_do_video_ms`); vídeo ainda não copiado conta como 0 hora. O tempo de
+-- processamento médio divide `segundos_de_processamento` por `videos_concluidos_com_tempo`: o
+-- fim gravado antes de o evento trazer o tempo não entra em nenhum dos dois.
 CREATE TEMP TABLE eventos AS
 SELECT
   e.dia, e.quando, e.tipo, e.quem_tipo, e.quem_id, e.programa, e.estado,
@@ -50,6 +52,7 @@ SELECT
   COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'falhou' THEN 1 END) AS videos_falhos,
   COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN horas END), 0) AS horas_concluidas,
   COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN segundos_de_processamento END), 0) AS segundos_de_processamento,
+  COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' AND segundos_de_processamento IS NOT NULL THEN 1 END) AS videos_concluidos_com_tempo,
   COUNT(CASE WHEN tipo = 'busca' THEN 1 END) AS buscas,
   COUNT(CASE WHEN tipo = 'busca' AND n_resultados = 0 THEN 1 END) AS buscas_sem_resultado,
   COUNT(CASE WHEN tipo = 'correcao' THEN 1 END) AS correcoes,
@@ -68,6 +71,7 @@ SELECT
   SUM(videos_falhos) AS videos_falhos,
   SUM(horas_concluidas) AS horas_concluidas,
   SUM(segundos_de_processamento) AS segundos_de_processamento,
+  SUM(videos_concluidos_com_tempo) AS videos_concluidos_com_tempo,
   SUM(buscas) AS buscas,
   SUM(buscas_sem_resultado) AS buscas_sem_resultado,
   SUM(correcoes) AS correcoes,
@@ -87,6 +91,7 @@ SELECT
   SUM(videos_falhos) AS videos_falhos,
   SUM(horas_concluidas) AS horas_concluidas,
   SUM(segundos_de_processamento) AS segundos_de_processamento,
+  SUM(videos_concluidos_com_tempo) AS videos_concluidos_com_tempo,
   SUM(buscas) AS buscas,
   SUM(buscas_sem_resultado) AS buscas_sem_resultado,
   SUM(correcoes) AS correcoes,
@@ -105,6 +110,7 @@ SELECT
   COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'falhou' THEN 1 END) AS videos_falhos,
   COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN horas END), 0) AS horas_concluidas,
   COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN segundos_de_processamento END), 0) AS segundos_de_processamento,
+  COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' AND segundos_de_processamento IS NOT NULL THEN 1 END) AS videos_concluidos_com_tempo,
   COUNT(CASE WHEN tipo = 'busca' THEN 1 END) AS buscas,
   COUNT(CASE WHEN tipo = 'busca' AND n_resultados = 0 THEN 1 END) AS buscas_sem_resultado,
   COUNT(CASE WHEN tipo = 'correcao' THEN 1 END) AS correcoes

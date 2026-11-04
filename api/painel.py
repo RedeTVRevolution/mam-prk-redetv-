@@ -13,7 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -291,7 +291,7 @@ COLUNAS_DO_CSV_DE_BUSCAS = (
 class NumerosDeVideos(BaseModel):
     """Os vídeos de um recorte (o dia, o programa, a pessoa ou o total). O tempo de
     processamento é o dos concluídos, do registro do Job ao fim: `tempo_medio_s` é a média
-    dele, vazia sem nenhum concluído."""
+    dele entre os que trazem o tempo, vazia sem nenhum."""
 
     enviados: int
     concluidos: int
@@ -366,6 +366,7 @@ class _SomaDeUso:
     falhos: int = 0
     horas: float = 0.0
     segundos: int = 0
+    com_tempo: int = 0
     buscas: int = 0
     sem_resultado: int = 0
 
@@ -375,22 +376,25 @@ class _SomaDeUso:
         self.falhos += u.videos_falhos
         self.horas += u.horas_concluidas
         self.segundos += u.segundos_de_processamento
+        self.com_tempo += u.videos_concluidos_com_tempo
         self.buscas += u.buscas
         self.sem_resultado += u.buscas_sem_resultado
 
-    def videos(self) -> dict[str, object]:
-        return {
-            "enviados": self.enviados,
-            "concluidos": self.concluidos,
-            "falhos": self.falhos,
-            "horas_concluidas": round(self.horas, 2),
-            "tempo_medio_s": (
-                round(self.segundos / self.concluidos, 1) if self.concluidos else None
+    def videos(self) -> dict[str, Any]:
+        return NumerosDeVideos(
+            enviados=self.enviados,
+            concluidos=self.concluidos,
+            falhos=self.falhos,
+            horas_concluidas=round(self.horas, 2),
+            tempo_medio_s=(
+                round(self.segundos / self.com_tempo, 1) if self.com_tempo else None
             ),
-        }
+        ).model_dump()
 
-    def de_buscas(self) -> dict[str, int]:
-        return {"buscas": self.buscas, "sem_resultado": self.sem_resultado}
+    def de_buscas(self) -> dict[str, Any]:
+        return NumerosDeBuscas(
+            buscas=self.buscas, sem_resultado=self.sem_resultado
+        ).model_dump()
 
 
 def _somas_por[C](
@@ -400,6 +404,32 @@ def _somas_por[C](
     for u in linhas:
         somas[chave(u)].somar(u)
     return somas
+
+
+def _soma(linhas: list[UsoDoDia]) -> _SomaDeUso:
+    total = _SomaDeUso()
+    for u in linhas:
+        total.somar(u)
+    return total
+
+
+def _por_quem(
+    linhas: list[UsoDoDia],
+    emails: dict[str, str],
+    ordem: Callable[[_SomaDeUso], int],
+) -> list[tuple[dict[str, Any], _SomaDeUso]]:
+    """Cada pessoa ou sistema (`quem_tipo`, `quem_id` e `email`) e a soma das suas linhas,
+    de quem tem mais (`ordem`) para quem tem menos."""
+    somas = _somas_por(
+        [u for u in linhas if u.quem_id is not None],
+        lambda u: (u.quem_tipo or "", u.quem_id or ""),
+    )
+    return [
+        ({"quem_tipo": tipo, "quem_id": quem_id, "email": emails.get(quem_id)}, soma)
+        for (tipo, quem_id), soma in sorted(
+            somas.items(), key=lambda i: (-ordem(i[1]), i[0][1])
+        )
+    ]
 
 
 def _tem_video(u: UsoDoDia) -> bool:
@@ -427,41 +457,28 @@ def relatorio_de_videos(
     `por_programa` são as linhas por programa de um pedido sem filtro de usuário."""
     base = [u for u in base if _tem_video(u)]
     por_dia = _somas_por(base, lambda u: u.dia)
-    total = _SomaDeUso()
-    for u in base:
-        total.somar(u)
-    quem = _somas_por(
-        [u for u in base if u.quem_id is not None],
-        lambda u: (u.quem_tipo, u.quem_id),
-    )
+    total = _soma(base)
     programas = _somas_por(
         [u for u in por_programa if _tem_video(u) and u.programa is not None],
-        lambda u: u.programa,
+        lambda u: u.programa or "",
     )
     return RelatorioDeVideos(
         desde=filtro.desde,
         ate=filtro.ate,
         programa=filtro.programa,
         usuario=filtro.usuario,
-        total=NumerosDeVideos(**total.videos()),  # type: ignore[arg-type]
+        total=NumerosDeVideos(**total.videos()),
         por_dia=[
-            DiaDeVideos(dia=d, **por_dia.get(d, _SomaDeUso()).videos())  # type: ignore[arg-type]
+            DiaDeVideos(dia=d, **por_dia.get(d, _SomaDeUso()).videos())
             for d in _dias_do_intervalo(por_dia)
         ],
         por_programa=[
-            ProgramaDeVideos(programa=p, **soma.videos())  # type: ignore[arg-type]
+            ProgramaDeVideos(programa=p, **soma.videos())
             for p, soma in sorted(programas.items())
         ],
         por_usuario=[
-            QuemDeVideos(
-                quem_tipo=tipo,  # type: ignore[arg-type]
-                quem_id=quem_id,  # type: ignore[arg-type]
-                email=emails.get(quem_id),  # type: ignore[arg-type]
-                **soma.videos(),  # type: ignore[arg-type]
-            )
-            for (tipo, quem_id), soma in sorted(
-                quem.items(), key=lambda i: (-i[1].enviados, str(i[0][1]))
-            )
+            QuemDeVideos(**quem, **soma.videos())
+            for quem, soma in _por_quem(base, emails, lambda s: s.enviados)
         ],
     )
 
@@ -478,13 +495,7 @@ def relatorio_de_buscas(
     for u in base:
         if u.quem_tipo == "usuario" and u.quem_id is not None:
             pessoas_do_dia[u.dia].add(u.quem_id)
-    total = _SomaDeUso()
-    for u in base:
-        total.somar(u)
-    quem = _somas_por(
-        [u for u in base if u.quem_id is not None],
-        lambda u: (u.quem_tipo, u.quem_id),
-    )
+    total = _soma(base)
     return RelatorioDeBuscas(
         desde=filtro.desde,
         ate=filtro.ate,
@@ -509,15 +520,8 @@ def relatorio_de_buscas(
             for d in _dias_do_intervalo(por_dia)
         ],
         por_usuario=[
-            QuemDeBuscas(
-                quem_tipo=tipo,  # type: ignore[arg-type]
-                quem_id=quem_id,  # type: ignore[arg-type]
-                email=emails.get(quem_id),  # type: ignore[arg-type]
-                **soma.de_buscas(),
-            )
-            for (tipo, quem_id), soma in sorted(
-                quem.items(), key=lambda i: (-i[1].buscas, str(i[0][1]))
-            )
+            QuemDeBuscas(**quem, **soma.de_buscas())
+            for quem, soma in _por_quem(base, emails, lambda s: s.buscas)
         ],
     )
 
