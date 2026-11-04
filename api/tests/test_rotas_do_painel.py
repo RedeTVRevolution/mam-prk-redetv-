@@ -136,6 +136,42 @@ def test_acessos_por_dia_por_usuario_e_no_total() -> None:
     assert r["por_usuario"][0]["ultimo_acesso"] == "2026-11-03T15:00:00Z"
 
 
+def test_ativos_por_semana_e_por_mes_contam_cada_pessoa_uma_vez() -> None:
+    resumos = ResumosEmMemoria(
+        [
+            AcessoDoDia(date(2026, 10, 30), "bia", 1, True, None),  # sexta
+            _acesso(1, "caio", 1),  # domingo, ainda a semana de 26/10
+            _acesso(2, "bia", 1),  # segunda
+            _acesso(3, "bia", 2),
+            _acesso(3, "caio", 1),
+        ]
+    )
+
+    r = Mundo(["diretoria"], resumos=resumos).get("/acessos").json()
+
+    assert r["por_semana"] == [
+        {"inicio": "2026-10-26", "usuarios_ativos": 2},
+        {"inicio": "2026-11-02", "usuarios_ativos": 2},
+    ]
+    assert r["por_mes"] == [
+        {"inicio": "2026-10-01", "usuarios_ativos": 1},
+        {"inicio": "2026-11-01", "usuarios_ativos": 2},
+    ]
+
+
+def test_linha_sem_login_nem_acao_nao_vira_dia_nem_pessoa() -> None:
+    # Só o fim do processamento do vídeo do caio caiu no dia 4.
+    resumos = ResumosEmMemoria([_acesso(3, "bia", 1), _acesso(4, "caio", 0, False)])
+    mundo = Mundo(["diretoria"], resumos=resumos)
+
+    r = mundo.get("/acessos").json()
+    linhas = list(csv.reader(io.StringIO(mundo.get("/acessos", formato="csv").text)))
+
+    assert [d["dia"] for d in r["por_dia"]] == ["2026-11-03"]
+    assert [u["uid"] for u in r["por_usuario"]] == ["bia"]
+    assert [linha[1] for linha in linhas[1:]] == ["bia"]
+
+
 def test_filtra_pelo_periodo_e_pelo_usuario() -> None:
     mundo = _diretoria()
 
@@ -183,7 +219,7 @@ def test_csv_tem_uma_linha_por_dia_e_pessoa() -> None:
         "bia@redetv.com.br",
         "2",
         "sim",
-        "2026-11-01T15:00:00+00:00",
+        "2026-11-01T15:00:00Z",
     ]
     assert len(linhas) == 4
 

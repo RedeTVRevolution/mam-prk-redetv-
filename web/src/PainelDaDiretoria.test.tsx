@@ -16,6 +16,8 @@ const RELATORIO = {
     { dia: '2026-11-02', acessos: 3, usuarios_ativos: 2 },
     { dia: '2026-11-03', acessos: 4, usuarios_ativos: 1 },
   ],
+  por_semana: [{ inicio: '2026-11-02', usuarios_ativos: 2 }],
+  por_mes: [{ inicio: '2026-11-01', usuarios_ativos: 2 }],
   por_usuario: [
     { uid: 'u1', email: 'ana@redetv.com.br', acessos: 5, dias_ativos: 2, ultimo_acesso: '2026-11-03T15:00:00Z' },
     { uid: 'u2', email: null, acessos: 2, dias_ativos: 1, ultimo_acesso: null },
@@ -77,6 +79,10 @@ test('a aba Acessos mostra o total, os dias e os usuários', async () => {
   expect(within(linhas[1]).getAllByRole('cell')[0].textContent).toBe('u2')
   expect(screen.getByText('Logins no período').nextSibling?.textContent).toBe('7')
   expect(screen.getByRole('img', { name: /Logins por dia: 02\/11, 3; 03\/11, 4/ })).toBeTruthy()
+  const semanas = screen.getByRole('table', { name: 'Usuários ativos por semana' })
+  expect(within(semanas).getAllByRole('cell').map((c) => c.textContent)).toEqual(['02/11/2026', '2'])
+  const meses = screen.getByRole('table', { name: 'Usuários ativos por mês' })
+  expect(within(meses).getAllByRole('cell').map((c) => c.textContent)).toEqual(['11/2026', '2'])
 })
 
 test('os filtros vão à API e ao endereço, e o programa nunca vai em acessos', async () => {
@@ -88,6 +94,10 @@ test('os filtros vão à API e ao endereço, e o programa nunca vai em acessos',
   expect(pedidos[0].get('desde')).toBe('2026-10-01')
   expect(pedidos[0].get('ate')).toBe('2026-10-31')
   expect(pedidos[0].has('programa')).toBe(false)
+  // O programa da URL fica para as outras abas; aqui o seletor, desligado, diz "todos".
+  const programa = screen.getByRole('combobox', { name: 'Programa' }) as HTMLInputElement
+  expect(programa.disabled).toBe(true)
+  expect(programa.value).toBe('Todos os programas')
 
   fireEvent.change(screen.getByLabelText('Até'), { target: { value: '2026-10-15' } })
 
@@ -130,6 +140,14 @@ test('o link Painel só aparece com painel.ver', async () => {
   await abrir('/acervo')
   await screen.findByRole('link', { name: 'Relatórios › Tempo de tela' })
   expect(screen.queryByRole('link', { name: 'Painel' })).toBeNull()
+})
+
+test('quem só tem painel.ver entra pelo painel, não pelo acervo', async () => {
+  permissoes = ['painel.ver']
+  await abrir('/')
+
+  await screen.findByRole('table', { name: 'Acessos por dia' })
+  expect(location.pathname).toBe('/painel')
 })
 
 test('sem acesso nenhum, a tela diz isso', async () => {

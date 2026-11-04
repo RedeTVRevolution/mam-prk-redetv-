@@ -19,7 +19,7 @@ import Busca from './Busca.tsx'
 import { PlanosParecidos } from './PlanosParecidos.tsx'
 import Login from './Login.tsx'
 import { Link } from './Link.tsx'
-import { ACERVO, navegar, useRota } from './rotas.ts'
+import { ACERVO, navegar, telaInicial, useRota } from './rotas.ts'
 import { ALTURA_DA_BARRA } from './tema.ts'
 import TelaDoVideo from './TelaDoVideo.tsx'
 import Administracao from './Administracao.tsx'
@@ -79,11 +79,12 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
     [autenticador, aoSessaoExpirada],
   )
 
-  // `/` vai ao acervo; o endereço pedido antes do login fica como está e abre depois dele.
-  const ativa = sessao.tipo === 'ativa'
+  // `/` vai ao acervo, ou ao painel para quem só vê o painel (Diretoria); o endereço pedido
+  // antes do login fica como está e abre depois dele.
+  const inicio = sessao.tipo === 'ativa' ? telaInicial(sessao.usuario.permissoes) : null
   useEffect(() => {
-    if (ativa && rota.tipo === 'raiz') navegar(ACERVO, { substituir: true })
-  }, [ativa, rota.tipo])
+    if (inicio && rota.tipo === 'raiz') navegar(inicio, { substituir: true })
+  }, [inicio, rota.tipo])
 
   const verificar = useCallback(async () => {
     try {

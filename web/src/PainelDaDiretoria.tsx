@@ -7,8 +7,10 @@ import {
   ABAS_DO_PAINEL,
   diaCompleto,
   diaCurto,
+  mesCurto,
   periodoInvertidoNoPainel,
   type AbaDoPainel,
+  type AtivosNoPeriodo,
   type DiaDeAcessos,
   type FiltrosDoPainel,
   type OpcoesDoPainel,
@@ -54,7 +56,7 @@ function Filtros({
         allowDeselect={false}
         disabled={!comPrograma}
         data={[{ value: TODOS, label: 'Todos os programas' }, ...opcoes.programas]}
-        value={filtros.programa || TODOS}
+        value={(comPrograma && filtros.programa) || TODOS}
         onChange={(valor) => aoMudar({ programa: valor && valor !== TODOS ? valor : '' })}
       />
       <Select
@@ -118,6 +120,40 @@ function Numero({ rotulo, valor }: { rotulo: string; valor: number }) {
   )
 }
 
+/** Usuários ativos por semana ou por mês: cada pessoa conta uma vez no período. */
+function TabelaDeAtivos({
+  rotulo,
+  coluna,
+  periodos,
+  nome,
+}: {
+  rotulo: string
+  coluna: string
+  periodos: AtivosNoPeriodo[]
+  nome: (inicio: string) => string
+}) {
+  return (
+    <Table aria-label={rotulo} highlightOnHover maw={260}>
+      <Table.Thead>
+        <Table.Tr>
+          <Table.Th>{coluna}</Table.Th>
+          <Table.Th ta="right">Usuários ativos</Table.Th>
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
+        {periodos.map((p) => (
+          <Table.Tr key={p.inicio}>
+            <Table.Td>{nome(p.inicio)}</Table.Td>
+            <Table.Td ta="right" style={NUMEROS}>
+              {p.usuarios_ativos}
+            </Table.Td>
+          </Table.Tr>
+        ))}
+      </Table.Tbody>
+    </Table>
+  )
+}
+
 function Acessos({ relatorio }: { relatorio: RelatorioDeAcessos }) {
   if (relatorio.por_dia.length === 0) return <Text size="sm">Nenhum acesso neste filtro.</Text>
   return (
@@ -145,6 +181,15 @@ function Acessos({ relatorio }: { relatorio: RelatorioDeAcessos }) {
           ))}
         </Table.Tbody>
       </Table>
+      <Group gap="xl" align="flex-start">
+        <TabelaDeAtivos
+          rotulo="Usuários ativos por semana"
+          coluna="Semana de"
+          periodos={relatorio.por_semana}
+          nome={diaCompleto}
+        />
+        <TabelaDeAtivos rotulo="Usuários ativos por mês" coluna="Mês" periodos={relatorio.por_mes} nome={mesCurto} />
+      </Group>
       <Table aria-label="Acessos por usuário" highlightOnHover maw={760}>
         <Table.Thead>
           <Table.Tr>
@@ -219,7 +264,7 @@ export default function PainelDaDiretoria({
             <AlertaDoCsv falhou={csv.falhou} />
             <Text size="xs" c={CORES.textoSecundario}>
               Logins não têm programa: o filtro de programa vale para as outras abas. O dia é o de São Paulo; os números
-              se atualizam a cada 10 minutos.
+              se atualizam a cada 10 minutos. A primeira e a última semana ou mês contam só os dias do período.
             </Text>
             {invertido && <AlertaDeErro mensagem="O período começa depois de terminar." codigo="periodo" />}
             {!invertido && carga.tipo === 'carregando' && <Loader role="status" aria-label="Montando o painel" size="sm" />}

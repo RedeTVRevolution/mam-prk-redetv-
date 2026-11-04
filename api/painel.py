@@ -134,6 +134,13 @@ class UsuarioDeAcessos(BaseModel):
     ultimo_acesso: datetime | None
 
 
+class AtivosNoPeriodo(BaseModel):
+    """Uma semana (começa na segunda) ou um mês (começa no dia 1): `inicio` é o primeiro dia."""
+
+    inicio: date
+    usuarios_ativos: int
+
+
 class TotalDeAcessos(BaseModel):
     acessos: int
     usuarios_ativos: int
@@ -145,6 +152,8 @@ class RelatorioDeAcessos(BaseModel):
     usuario: str | None
     total: TotalDeAcessos
     por_dia: list[DiaDeAcessos]
+    por_semana: list[AtivosNoPeriodo]
+    por_mes: list[AtivosNoPeriodo]
     por_usuario: list[UsuarioDeAcessos]
 
 
@@ -170,11 +179,31 @@ def _emails(contas: ContasDeUsuario) -> dict[str, str]:
         return {}
 
 
+def _ativos_por(
+    ativos_do_dia: dict[date, set[str]], inicio: Callable[[date], date]
+) -> list[AtivosNoPeriodo]:
+    """Os distintos de cada semana ou mês: quem agiu em três dias da semana conta uma vez."""
+    juntos: dict[date, set[str]] = defaultdict(set)
+    for dia, uids in ativos_do_dia.items():
+        juntos[inicio(dia)] |= uids
+    return [
+        AtivosNoPeriodo(inicio=i, usuarios_ativos=len(uids))
+        for i, uids in sorted(juntos.items())
+    ]
+
+
+def _com_acesso(linhas: list[AcessoDoDia]) -> list[AcessoDoDia]:
+    """Sai a linha sem login nem ação (só o fim do processamento de um vídeo da pessoa):
+    não é acesso, e viraria um dia ou uma pessoa com zero em tudo."""
+    return [a for a in linhas if a.acessos or a.ativo]
+
+
 def relatorio_de_acessos(
     linhas: list[AcessoDoDia], emails: dict[str, str], filtro: FiltroDoPainel
 ) -> RelatorioDeAcessos:
     """Os números do período a partir das linhas por dia e pessoa. Usuário ativo é quem agiu
-    (o fim do processamento do vídeo dela não conta: o #280 já o deixou de fora)."""
+    (o fim do processamento do vídeo dela não conta: o #280 já o deixou de fora). A primeira
+    e a última semana ou mês contam só os dias do filtro."""
     acessos_do_dia: dict[date, int] = defaultdict(int)
     ativos_do_dia: dict[date, set[str]] = defaultdict(set)
     acessos_da_pessoa: dict[str, int] = defaultdict(int)
@@ -204,6 +233,10 @@ def relatorio_de_acessos(
             )
             for d, n in sorted(acessos_do_dia.items())
         ],
+        por_semana=_ativos_por(
+            ativos_do_dia, lambda d: d - timedelta(days=d.weekday())
+        ),
+        por_mes=_ativos_por(ativos_do_dia, lambda d: d.replace(day=1)),
         por_usuario=sorted(
             (
                 UsuarioDeAcessos(
@@ -244,12 +277,14 @@ def criar_rotas_do_painel(
         filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
         formato: Literal["json", "csv"] = "json",
     ) -> RelatorioDeAcessos | object:
-        """Logins por dia, usuários ativos, por usuário e no total. O login não tem programa:
+        """Logins por dia, usuários ativos (por dia, semana e mês), por usuário e no total. O login não tem programa:
         pedir `programa` é erro, em vez de devolver números que ele não filtrou."""
         if filtro.programa is not None:
             raise HTTPException(422, "Os acessos não têm programa")
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        linhas = ou_503(lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario))
+        linhas = _com_acesso(
+            ou_503(lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario))
+        )
         emails = _emails(contas)
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "acessos", filtro)
@@ -263,7 +298,10 @@ def criar_rotas_do_painel(
                             emails.get(a.uid, ""),
                             a.acessos,
                             "sim" if a.ativo else "não",
-                            a.ultimo_acesso.isoformat() if a.ultimo_acesso else "",
+                            # Em UTC com `Z`, como no JSON.
+                            a.ultimo_acesso.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            if a.ultimo_acesso
+                            else "",
                         ]
                         for a in sorted(linhas, key=lambda a: (a.dia, a.uid))
                     ],

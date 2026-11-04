@@ -82,6 +82,12 @@ export interface UsuarioDeAcessos {
   ultimo_acesso: string | null
 }
 
+/** Uma semana (começa na segunda) ou um mês (começa no dia 1): `inicio` é o primeiro dia. */
+export interface AtivosNoPeriodo {
+  inicio: string
+  usuarios_ativos: number
+}
+
 /** `GET /v1/painel/acessos`. */
 export interface RelatorioDeAcessos {
   desde: string | null
@@ -89,6 +95,8 @@ export interface RelatorioDeAcessos {
   usuario: string | null
   total: { acessos: number; usuarios_ativos: number }
   por_dia: DiaDeAcessos[]
+  por_semana: AtivosNoPeriodo[]
+  por_mes: AtivosNoPeriodo[]
   por_usuario: UsuarioDeAcessos[]
 }
 
@@ -96,6 +104,12 @@ export interface RelatorioDeAcessos {
 export function diaCurto(dia: string): string {
   const [, mes, d] = dia.split('-')
   return `${d}/${mes}`
+}
+
+/** "11/2026" para `2026-11-01`. */
+export function mesCurto(dia: string): string {
+  const [ano, mes] = dia.split('-')
+  return `${mes}/${ano}`
 }
 
 /** "03/11/2026" para `2026-11-03`. */

@@ -98,8 +98,8 @@ Princípios do mapa:
 | --- | --- |
 | Para quem | Diretoria e Administrador |
 | O que tem | Os indicadores do plano (acessos, vídeos, buscas, revisão, API e custo), com filtros por período, programa e usuário |
-| Existe no código | Papel Diretoria (`painel.ver`), a dependência `exige_painel` e o registro de cada abertura e exportação na auditoria (`api/painel.py`) |
-| Falta | Eventos no Pub/Sub e no BigQuery, tela. Duas coisas a mais para o redesenho: **buscas sem resultado** (o que falta decupar ou corrigir) e **taxa de correção por tipo** (onde a decupagem erra) |
+| Existe no código | Papel Diretoria (`painel.ver`), o registro de cada abertura e exportação na auditoria, os eventos de uso e as tabelas resumidas no BigQuery, as rotas `/v1/painel/...` com filtros e CSV (`api/painel.py`) e a tela `/painel/acessos` com a aba Acessos |
+| Falta | As abas de vídeos e buscas (#283), revisão e API (#284) e custo (#285). Duas coisas a mais para o redesenho: **buscas sem resultado** (o que falta decupar ou corrigir) e **taxa de correção por tipo** (onde a decupagem erra) |
 
 ### Administração
 

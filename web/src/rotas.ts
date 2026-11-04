@@ -53,6 +53,11 @@ export function enderecoDoTempoDeTela(filtros: FiltrosDoRelatorio): string {
   return `${TEMPO_DE_TELA}${filtrosParaEndereco(filtros)}`
 }
 
+/** Para onde `/` leva: o acervo, ou o painel para quem só vê o painel (Diretoria). */
+export function telaInicial(permissoes: readonly string[]): string {
+  return !permissoes.includes('decupagem.ver') && permissoes.includes('painel.ver') ? PAINEL : ACERVO
+}
+
 /** O endereço de uma aba do painel da diretoria, com os filtros na query. */
 export function enderecoDoPainel(aba: AbaDoPainel, filtros: FiltrosDoPainel): string {
   return `${PAINEL}/${aba}${filtrosParaEnderecoDoPainel(filtros)}`

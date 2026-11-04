@@ -2,7 +2,7 @@
 
 O painel lê só `uso_por_dia_e_usuario` e `uso_por_dia_e_programa`, nunca a tabela de eventos.
 Os nomes das tabelas vêm do ambiente (o Terraform os monta). Uma consulta que não termina ou
-não cabe numa resposta falha alto com `RuntimeError`.
+não cabe numa resposta falha alto com `RuntimeError` (`linhas_da_consulta`).
 """
 
 from collections.abc import Sequence
@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
 from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.relatorios import linhas_da_consulta
 
 
 @dataclass(frozen=True)
@@ -93,23 +94,9 @@ class ResumosBigQuery:
     def _consultar(
         self, sql: str, parametros: Sequence[dict[str, Any]] = ()
     ) -> list[list[Any]]:
-        resposta = self._transporte(
-            {
-                "query": sql,
-                "useLegacySql": False,
-                "location": self._config.regiao,
-                "timeoutMs": 60_000,
-                "maxResults": 100_000,
-                "queryParameters": list(parametros),
-            }
+        return linhas_da_consulta(
+            self._transporte, self._config.regiao, sql, parametros, "o painel"
         )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError("a consulta do painel não terminou no prazo")
-        if resposta.get("pageToken"):
-            raise RuntimeError("o painel não cabe numa resposta: peça um período menor")
-        return [
-            [campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])
-        ]
 
     def _tabela(self, nome: str) -> str:
         c = self._config
