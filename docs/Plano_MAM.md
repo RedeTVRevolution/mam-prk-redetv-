@@ -88,7 +88,7 @@ Cada chamada ao Gemini leva o id do job como [rótulo de custo](https://docs.clo
 
 ### Armazenamento e acervo de 25 anos
 
-Guardar tudo indefinidamente custa pouco no dia a dia; o acervo de 25 anos é que precisa de teto mensal. O original MP4 fica no storage da RedeTV, e um serviço da RedeTV com acesso à internet o envia pela URL assinada ([ADR 0011](adr/0011-envio-por-url-assinada.md)), e o GCP guarda só o que a aplicação usa.
+Guardar tudo indefinidamente custa pouco no dia a dia; o acervo de 25 anos é que precisa de teto mensal. O original MP4 fica no storage da RedeTV; um serviço da RedeTV com acesso à internet o envia pela URL assinada ([ADR 0011](adr/0011-envio-por-url-assinada.md)). O GCP guarda só o que a aplicação usa.
 
 | O que fica guardado | Tamanho estimado | Custo |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ A API é REST assíncrona: o cliente registra o vídeo, recebe um id de job e bu
 | Método e rota | O que faz | Respostas |
 | --- | --- | --- |
 | `POST /v1/jobs` | Registra o vídeo (SHA-256, nome, tamanho) e devolve a URL de upload | 202 job novo, aguardando upload (mesmo se o arquivo já foi processado) · 200 mesma chave de idempotência · 409 mesma chave com corpo diferente · 429 com `Retry-After` |
-| `PUT` na URL assinada | Envio do MP4 para o bucket de quarentena; a URL só aceita video/mp4 no tamanho declarado. PUT simples para os sistemas legados, upload retomável no front | 200 |
+| `PUT` na URL assinada | Envio do MP4 para o bucket de quarentena; a URL só aceita video/mp4 no tamanho declarado. Upload retomável para todos: o `POST` na URL abre a sessão e o `PUT` envia ([ADR 0011](adr/0011-envio-por-url-assinada.md)) | 200 |
 | `GET /v1/jobs` | Lista dos jobs visíveis para quem chama, com status (Biblioteca) | 200 |
 | `GET /v1/jobs/{id}` | Status, progresso (janelas prontas/total), erros, `ETag` | 200 · 304 sem mudança |
 | `GET /v1/jobs/{id}/decupagem` | JSON completo, em streaming com gzip | 200 · 409 ainda processando |
@@ -583,7 +583,7 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 - [ ] Contrato da API de login do legado: rota, campos e como o nosso serviço se identifica.
 - [ ] IPs de saída da RedeTV, para liberar no Cloud Armor; e se o legado aceita chamadas do IP fixo do GCP.
 - [ ] Quem recebe cada papel no início (administradores, editores, diretoria).
-- [ ] O sistema legado consegue receber webhook, ou só consulta status?
+- [ ] O sistema legado consegue receber webhook, ou só consulta status? Depende de o serviço intermediário da [ADR 0011](adr/0011-envio-por-url-assinada.md) aceitar chamadas de fora.
 - [x] Prazo aceitável entre o fim da gravação e a decupagem pronta; decide Flex ou Standard. Flex nas chamadas com vídeo, pela [ADR 0004](adr/0004-gemini-flex-no-video.md).
 - [ ] Banda de internet disponível para enviar os vídeos, no dia a dia e no acervo.
 - [ ] Teto mensal para o acervo e ordem de prioridade dos programas.
