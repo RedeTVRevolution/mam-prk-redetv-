@@ -43,6 +43,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -83,6 +86,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -93,6 +99,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo criar ou ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -103,6 +112,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -194,6 +206,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -204,6 +219,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo criar"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -214,6 +232,9 @@
               "application/json": {
                 "example": {
                   "detail": "Idempotency-Key já usada com outro corpo"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -224,6 +245,9 @@
               "application/json": {
                 "example": {
                   "detail": "Só video/mp4"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -236,7 +260,14 @@
                   "detail": "Tamanho fora do limite"
                 },
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErroEmTexto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
                 }
               }
             }
@@ -247,6 +278,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -479,6 +513,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -489,6 +526,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -501,7 +541,14 @@
                   "detail": "Cursor inválido"
                 },
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErroEmTexto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
                 }
               }
             }
@@ -512,6 +559,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -592,6 +642,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -602,6 +655,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -612,6 +668,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -622,6 +681,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -691,6 +753,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -701,6 +766,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo cancelar"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -711,6 +779,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -721,6 +792,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job em concluido, não cancelável"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -731,6 +805,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -778,6 +855,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -788,6 +868,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -798,6 +881,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -808,6 +894,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job em analisando, não concluido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -818,6 +907,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -865,6 +957,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -875,6 +970,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -885,6 +983,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -895,6 +996,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job em analisando, não concluido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -905,6 +1009,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1023,6 +1130,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1033,6 +1143,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1043,6 +1156,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1053,12 +1169,15 @@
               "application/json": {
                 "example": {
                   "detail": "Job em analisando, não concluido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
           },
           "422": {
-            "description": "Erro de validação. Um parâmetro está fora do formato: leia `loc` (onde) e `msg` (por quê) em cada item de `detail`.",
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
             "content": {
               "application/json": {
                 "example": {
@@ -1086,6 +1205,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1187,6 +1309,9 @@
               "application/json": {
                 "example": {
                   "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1197,6 +1322,9 @@
               "application/json": {
                 "example": {
                   "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1207,6 +1335,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1217,6 +1348,9 @@
               "application/json": {
                 "example": {
                   "detail": "Job em analisando, não concluido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1227,6 +1361,9 @@
               "application/json": {
                 "example": {
                   "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
                 }
               }
             }
@@ -1306,6 +1443,19 @@
           "nome"
         ],
         "title": "EnviadoPor"
+      },
+      "ErroEmTexto": {
+        "title": "ErroEmTexto",
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ]
       },
       "EtapaPublica": {
         "properties": {

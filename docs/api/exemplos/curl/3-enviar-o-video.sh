@@ -10,15 +10,17 @@ URL_DE_UPLOAD=$(jq -r .url_de_upload job.json)
 SESSAO=$(curl --fail-with-body -sS -i -X POST "$URL_DE_UPLOAD" \
   -H "Content-Type: video/mp4" \
   -H "x-goog-resumable: start" \
-  -H "x-upload-content-length: $TAMANHO")
+  -H "x-upload-content-length: $TAMANHO" \
+  -H "Content-Length: 0")
 DESTINO=$(printf '%s' "$SESSAO" | awk 'tolower($1) == "location:" {print $2}' | tr -d '\r')
 echo "$DESTINO" > sessao.txt
 
+# --upload-file manda o arquivo aos poucos, sem lê-lo inteiro na memória.
 # Se cair no meio, rode de novo só este PUT: pergunte quanto já chegou com
 #   curl -i -X PUT "$DESTINO" -H "Content-Range: bytes */$TAMANHO" -H "Content-Length: 0"
 # (308 + cabeçalho Range: bytes=0-N) e mande o resto com Content-Range: bytes N+1-fim/total.
 curl --fail-with-body -sS -X PUT "$DESTINO" \
   -H "Content-Type: video/mp4" \
-  --data-binary @"$ARQUIVO"
+  --upload-file "$ARQUIVO"
 echo
 echo "Enviado. O Job passa a validando."

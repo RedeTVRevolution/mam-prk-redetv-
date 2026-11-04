@@ -5,6 +5,8 @@ from typing import Any
 
 from api.decupagem import Decupagem
 from api.documentacao_dos_sistemas import (
+    ARQUIVO,
+    ERRO_EM_TEXTO,
     OPERACOES,
     esquema_dos_sistemas,
     json_do_esquema,
@@ -12,7 +14,6 @@ from api.documentacao_dos_sistemas import (
 from api.main import criar_app
 
 RAIZ = Path(__file__).resolve().parents[2]
-ARQUIVO = RAIZ / "docs" / "api" / "openapi.json"
 GUIA = RAIZ / "docs" / "api" / "guia.md"
 EXEMPLOS = RAIZ / "docs" / "api" / "exemplos"
 
@@ -26,16 +27,14 @@ def _operacoes_do_esquema() -> list[tuple[str, str, dict[str, Any]]]:
     ]
 
 
-def test_toda_rota_dos_sistemas_existe_no_app_e_vice_versa() -> None:
+def test_toda_rota_documentada_existe_no_app() -> None:
     do_app = {
         (metodo.upper(), caminho)
         for caminho, metodos in criar_app().openapi()["paths"].items()
         for metodo in metodos
     }
-    documentadas = {(o.metodo, o.caminho) for o in OPERACOES}
 
-    assert documentadas <= do_app
-    assert {(m, c) for m, c, _ in _operacoes_do_esquema()} == documentadas
+    assert {(o.metodo, o.caminho) for o in OPERACOES} <= do_app
 
 
 def test_toda_rota_dos_sistemas_tem_descricao_e_exemplo() -> None:
@@ -81,8 +80,44 @@ def test_o_exemplo_da_decupagem_vale_no_esquema() -> None:
     )
 
 
-def test_o_json_publicado_e_json_valido() -> None:
-    assert json.loads(ARQUIVO.read_text())["info"]["title"]
+def _textos_do_codigo() -> list[re.Pattern[str]]:
+    """Cada texto entre aspas de `api/`, com o que varia num f-string como `.+`."""
+    textos: set[str] = set()
+    for fonte in (RAIZ / "api").glob("*.py"):
+        if fonte.name != "documentacao_dos_sistemas.py":
+            textos.update(re.findall(r'"([^"\n]+)"', fonte.read_text()))
+    padroes = []
+    for texto in textos:
+        partes = re.split(r"\{[^}]*\}", texto)
+        # Um literal quase só de `{...}` casaria com qualquer mensagem.
+        if len("".join(partes)) >= 8:
+            padroes.append(re.compile(".+".join(map(re.escape, partes))))
+    return padroes
+
+
+def test_cada_mensagem_de_erro_documentada_existe_no_codigo() -> None:
+    padroes = _textos_do_codigo()
+    for o in OPERACOES:
+        for erro in o.erros:
+            detalhe = erro.corpo["detail"]
+            if isinstance(detalhe, list):
+                continue  # a lista da validação vem do FastAPI
+            assert any(p.fullmatch(detalhe) for p in padroes), (
+                f"{o.metodo} {o.caminho}: {detalhe}"
+            )
+
+
+def test_o_esquema_de_cada_erro_aceita_o_exemplo() -> None:
+    for metodo, caminho, operacao in _operacoes_do_esquema():
+        for status, resposta in operacao["responses"].items():
+            if status.startswith("2"):
+                continue
+            conteudo = resposta["content"]["application/json"]
+            refs = json.dumps(conteudo["schema"])
+            em_texto = isinstance(conteudo["example"]["detail"], str)
+            assert (ERRO_EM_TEXTO if em_texto else "HTTPValidationError") in refs, (
+                f"{metodo} {caminho} {status}"
+            )
 
 
 def test_o_guia_cita_cada_rota_e_cada_erro_entre_crases() -> None:

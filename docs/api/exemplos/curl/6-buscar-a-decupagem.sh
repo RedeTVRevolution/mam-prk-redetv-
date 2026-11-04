@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Passo 5: busca a decupagem do Job concluído e a salva em decupagem.json.
-# Uso: URL=... CHAVE=... ./5-buscar-a-decupagem.sh   (lê job.json)
+# Passo 6: busca a decupagem do Job concluído e a salva em decupagem.json.
+# Uso: URL=... CHAVE=... ./6-buscar-a-decupagem.sh   (lê job.json)
 set -euo pipefail
 
 JOB_ID=$(jq -r .id job.json)

@@ -1,6 +1,6 @@
-"""Passo 5: busca a decupagem do Job concluído e a salva em decupagem.json.
+"""Passo 6: busca a decupagem do Job concluído e a salva em decupagem.json.
 
-Uso: URL=... CHAVE=... python 5-buscar-a-decupagem.py   (lê job.json)
+Uso: URL=... CHAVE=... python 6-buscar-a-decupagem.py   (lê job.json)
 """
 
 import json

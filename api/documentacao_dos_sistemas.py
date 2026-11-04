@@ -18,6 +18,9 @@ from fastapi import FastAPI
 ARQUIVO = Path(__file__).resolve().parent.parent / "docs" / "api" / "openapi.json"
 
 ID_DO_JOB = "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b"
+# O erro com `detail` em texto; o 422 de validação do FastAPI traz uma lista.
+ERRO_EM_TEXTO = "ErroEmTexto"
+_REF_DO_ERRO = {"$ref": f"#/components/schemas/{ERRO_EM_TEXTO}"}
 INSTANTE = "2026-11-03T21:14:05.120000Z"
 
 
@@ -83,8 +86,8 @@ _NAO_ACHOU = Erro(
 _VALIDACAO = Erro(
     422,
     "Erro de validação",
-    "Um parâmetro está fora do formato: leia `loc` (onde) e `msg` (por quê) em cada "
-    "item de `detail`.",
+    "Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) "
+    "e `msg` (por quê) em cada item.",
     exemplo=[
         {
             "type": "literal_error",
@@ -187,8 +190,6 @@ _DECUPAGEM = {
     ],
 }
 
-_LISTA = [_JOB]
-
 OPERACOES: tuple[Operacao, ...] = (
     Operacao(
         "GET",
@@ -271,7 +272,7 @@ OPERACOES: tuple[Operacao, ...] = (
         "`limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz "
         "o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. "
         "Escopo `ler`.",
-        _LISTA,
+        [_JOB],
         (
             *_sem_chave("ler"),
             Erro(
@@ -386,10 +387,16 @@ def _documentar(operacao: dict[str, Any], doc: Operacao) -> None:
             "description": f"{erro.detalhe}. {erro.acao}",
         }
         _exemplo_em(resposta, erro.corpo)
+        esquema: dict[str, Any] = _REF_DO_ERRO
         if erro.status == 422 and "422" in respostas:
-            resposta["content"]["application/json"]["schema"] = respostas["422"][
-                "content"
-            ]["application/json"]["schema"]
+            # O mesmo 422 vem em texto (regra da rota) ou em lista (validação do FastAPI).
+            validacao = respostas["422"]["content"]["application/json"]["schema"]
+            esquema = (
+                validacao
+                if isinstance(erro.exemplo, list)
+                else {"anyOf": [_REF_DO_ERRO, validacao]}
+            )
+        resposta["content"]["application/json"]["schema"] = esquema
         respostas[str(erro.status)] = resposta
     if "422" in respostas and not any(e.status == 422 for e in doc.erros):
         del respostas["422"]
@@ -417,6 +424,12 @@ def esquema_dos_sistemas(app: FastAPI) -> dict[str, Any]:
         _documentar(operacao, doc)
         caminhos.setdefault(doc.caminho, {})[doc.metodo.lower()] = operacao
     esquemas: dict[str, Any] = completo.get("components", {}).get("schemas", {})
+    esquemas[ERRO_EM_TEXTO] = {
+        "title": ERRO_EM_TEXTO,
+        "type": "object",
+        "properties": {"detail": {"type": "string", "title": "Detail"}},
+        "required": ["detail"],
+    }
     usados: set[str] = set()
     _referencias(caminhos, usados)
     novos = set(usados)

@@ -59,20 +59,20 @@ Ao fim de um Job (`concluido` ou `falhou`; o cancelado não avisa), o MAM faz `P
 
 Cabeçalhos: `X-Webhook-Id`, `X-Webhook-Data` e `X-Webhook-Assinatura`. Corpo (JSON): `id`, `tipo` (`job.concluido` ou `job.falhou`), `job_id`, `estado`, `codigo_falha` e `data`.
 
-**Confira a assinatura antes de confiar no corpo**: é o HMAC-SHA256, em hexadecimal, de `<X-Webhook-Data>.<corpo exato>` com o segredo do seu sistema. Recuse (401) data com mais de 5 minutos de diferença do seu relógio. Exemplos: `exemplos/curl/6-verificar-o-webhook.sh` e `exemplos/python/6-verificar-o-webhook.py`.
+**Confira a assinatura antes de confiar no corpo**: é o HMAC-SHA256, em hexadecimal, de `<X-Webhook-Data>.<corpo exato>` com o segredo do seu sistema. Recuse (401) data com mais de 5 minutos de diferença do seu relógio. Exemplos: `exemplos/curl/5-verificar-o-webhook.sh` e `exemplos/python/5-verificar-o-webhook.py`.
 
-Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 8 vezes, com espera crescente); **outro 4xx** descarta o evento. A entrega é *pelo menos uma vez*: **deduplique pelo `X-Webhook-Id`**, que é o mesmo em toda repetição do evento.
+Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 10 tentativas ao todo, com espera crescente de 10 s a 10 min); **outro 4xx** descarta o evento. A entrega é *pelo menos uma vez*: **deduplique pelo `X-Webhook-Id`**, que é o mesmo em toda repetição do evento.
 
 ## 6. Buscar o resultado
 
-`GET /v1/jobs/{job_id}/decupagem` devolve a decupagem (planos, falas, textos na tela, objetos). `GET /v1/jobs/{job_id}/decupagem/download` devolve o mesmo conteúdo como arquivo. Antes de `concluido` dá 409. Exemplos: `exemplos/curl/5-buscar-a-decupagem.sh` e `exemplos/python/5-buscar-a-decupagem.py`.
+`GET /v1/jobs/{job_id}/decupagem` devolve a Decupagem (pautas, pessoas, planos, comerciais, transcrição e textos na tela, com tempos). `GET /v1/jobs/{job_id}/decupagem/download` devolve o mesmo conteúdo como arquivo. Antes de `concluido` dá 409. Exemplos: `exemplos/curl/6-buscar-a-decupagem.sh` e `exemplos/python/6-buscar-a-decupagem.py`.
 
 ## 7. Idempotência e novas tentativas
 
 - **Repetir o registro é seguro** com o mesmo `Idempotency-Key` e o mesmo corpo: a resposta é **200** (o primeiro pedido foi 202) com o mesmo Job, sem criar outro. Se o Job ainda aguarda upload, vem uma `url_de_upload` nova. A chave é lembrada por **48 h**. Com o mesmo `Idempotency-Key` e outro corpo, a resposta é 409.
 - Exemplos: `exemplos/curl/7-repetir-com-idempotencia.sh` e `exemplos/python/7-repetir-com-idempotencia.py`.
 - **Quando repetir:** timeout, queda de conexão e `503`. Espere 1 s, 2 s, 4 s... com um limite. Não repita 4xx (corrija o pedido).
-- Leituras (`GET`) e o `DELETE` podem ser repetidos sem risco.
+- Leituras (`GET`) podem ser repetidas sem risco. O `DELETE` repetido de um Job já cancelado responde 409 `Job em cancelado, não cancelável`: o cancelamento já valeu.
 
 ## 8. Erros
 
@@ -94,7 +94,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | `Data de exibição no futuro` | `data_exibicao` é depois de hoje (Brasília). |
 | 422 | `Idempotency-Key inválida` | Use um texto simples, como um UUID. |
 | 422 | `Cursor inválido` | Use o `X-Proximo-Cursor` da resposta anterior, sem mudar os filtros. |
-| 422 | `Erro de validação` | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`): leia `loc` e `msg` em `detail`. |
+| 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`): leia `loc` e `msg` em `detail`. |
 | 503 | `Serviço indisponível` | Falha passageira. Repita com espera crescente; no `POST /v1/jobs`, com o mesmo `Idempotency-Key`. |
 
 `<estado>` na mensagem é o estado real do Job, por exemplo `Job em analisando, não concluido`.

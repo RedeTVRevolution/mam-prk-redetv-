@@ -1,11 +1,11 @@
-"""Passo 6: confere a assinatura de um webhook recebido. Faça isto no seu receptor,
+"""Passo 5: confere a assinatura de um webhook recebido. Faça isto no seu receptor,
 antes de confiar no corpo. A assinatura é o HMAC-SHA256, em hexadecimal, de
 "<X-Webhook-Data>.<corpo exato>" com o segredo do seu sistema; recuse data com mais
 de 5 minutos de diferença do seu relógio e guarde os `X-Webhook-Id` já vistos, porque
 o mesmo evento pode chegar mais de uma vez.
 
 Uso: SEGREDO=... DATA="$X_WEBHOOK_DATA" ASSINATURA="$X_WEBHOOK_ASSINATURA" \
-     python 6-verificar-o-webhook.py corpo.json
+     python 5-verificar-o-webhook.py corpo.json
 """
 
 import hmac
