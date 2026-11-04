@@ -265,6 +265,9 @@ def criar_rotas_da_lixeira_do_catalogo(
         achada = pessoa(id_da_pessoa)
         if achada.lixeira is not None:
             raise HTTPException(409, "A pessoa já está na lixeira")
+        if achada.fundida is not None:
+            # Purgada, ela levaria o apontamento: a leitura deixaria de mostrar o destino.
+            raise HTTPException(422, "Esta pessoa foi fundida em outra: apague a outra")
         impacto = impacto_da_pessoa(achada.id, len(achada.rostos))
         # Rosto é dado sensível: as fotos saem já, sem esperar a purga, e não voltam.
         # Pela pasta da pessoa também: as fotos da web trocadas antes ficaram lá.

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, Rosto
+from api.correcoes import LIMITE_DO_MOTIVO, versao_do_modelo
 from api.jobs import RepositorioEmMemoria
 from api.lixeira_do_catalogo import FotosEmMemoria
 from api.main import criar_app
@@ -236,3 +237,63 @@ def test_o_impacto_conta_videos_aparicoes_e_fotos_sem_mudar_nada() -> None:
     }
     origem = mundo.catalogo.obter(mundo.duplicada.id)
     assert origem and origem.fundida is None
+
+
+def test_o_motivo_vai_ate_o_limite_das_correcoes() -> None:
+    mundo = Mundo()
+
+    resposta = mundo.cliente.post(
+        f"/v1/catalogo/pessoas/{mundo.duplicada.id}/fundir",
+        json={"destino_id": mundo.sabrina.id, "motivo": "a" * LIMITE_DO_MOTIVO},
+        headers=CURADOR,
+    )
+
+    assert resposta.status_code == 200, resposta.text
+
+
+def test_fundir_de_novo_conta_tambem_quem_ja_foi_fundido_na_origem() -> None:
+    mundo = Mundo()
+    terceira = mundo.catalogo.acrescentar("Sabrina Sato Oficial", "", [])
+    mundo.fundir()
+
+    resposta = mundo.fundir(origem=mundo.sabrina.id, destino=terceira.id)
+
+    assert resposta.status_code == 200, resposta.text
+    assert resposta.json()["videos"] == 2
+    lida = mundo.cliente.get("/v1/jobs/j1/decupagem", headers=CURADOR).json()
+    assert lida["pessoas"][0]["catalogo_id"] == terceira.id
+
+
+def test_pessoa_fundida_nao_vai_para_a_lixeira() -> None:
+    mundo = Mundo()
+    mundo.fundir()
+
+    resposta = mundo.cliente.post(
+        f"/v1/admin/lixeira/pessoas/{mundo.duplicada.id}",
+        json={"motivo": "duplicada"},
+        headers=CURADOR,
+    )
+
+    assert resposta.status_code == 422
+    origem = mundo.catalogo.obter(mundo.duplicada.id)
+    assert origem and origem.lixeira is None and origem.fundida is not None
+
+
+def test_a_correcao_nao_aponta_para_pessoa_fundida() -> None:
+    mundo = Mundo()
+    mundo.fundir()
+
+    resposta = mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "pessoa.renomear",
+            "item_id": "pes01",
+            "valor": "Sabrina S.",
+            "catalogo_id": mundo.duplicada.id,
+            "motivo": "nome do catálogo",
+            "versao": versao_do_modelo(mundo.armazenamento.decupagens["j1"][0]),
+        },
+        headers=CURADOR,
+    )
+
+    assert resposta.status_code == 422, resposta.text

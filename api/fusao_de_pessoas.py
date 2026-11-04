@@ -22,19 +22,15 @@ from api.catalogo import (
     nomes_de_busca,
     prefixo_das_fotos,
 )
+from api.catalogo_apagado import com_pessoas_fundidas
 from api.comparador import normalizar
-from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
+from api.correcoes import Motivo, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import RepositorioDeJobs, _confere_permissao
 from api.lixeira_do_catalogo import (
     FotosDeReferencia,
     LeituraDeDecupagens,
     decupagens_entregues,
 )
-
-Motivo = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME),
-]
 
 
 class PedidoDeFusao(BaseModel):
@@ -105,8 +101,10 @@ def criar_rotas_da_fusao(
         return origem, destino
 
     def contar(origem_id: str) -> tuple[int, int]:
+        """Vídeos e aparições que a origem leva, inclusive os de quem já foi fundido nela."""
         videos = aparicoes = 0
-        for decupagem in decupagens_entregues(repositorio, correcoes, decupagens):
+        for entregue in decupagens_entregues(repositorio, correcoes, decupagens):
+            decupagem = com_pessoas_fundidas(entregue, pessoas.obter)
             nelas = [
                 p
                 for p in decupagem.get("pessoas") or []

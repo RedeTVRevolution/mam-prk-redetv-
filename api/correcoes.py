@@ -1140,6 +1140,7 @@ def _id_no_catalogo(
         if (
             achado is None
             or achado.lixeira is not None
+            or (isinstance(achado, PessoaDoCatalogo) and achado.fundida is not None)
             or normalizar(novo.valor) not in _nomes_de_busca(achado)
         ):
             raise CatalogoIdInvalido(novo.catalogo_id)
