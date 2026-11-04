@@ -285,6 +285,21 @@ def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
             if job.codigo_falha
             else None
         )
+        if partida is None and job.codigo_falha == "processamento_interrompido":
+            # O Workflows caiu entre duas etapas, sem etapa em andamento para fechar:
+            # recomeça da primeira que não concluiu.
+            partida = next(
+                (
+                    e
+                    for e in _ordem_das_etapas()
+                    if not ((r := job.etapas.get(e)) and r.resultado == "concluida")
+                ),
+                None,
+            )
+        if partida == "validacao" and job.codigo_falha == "processamento_interrompido":
+            raise NaoReprocessavel(
+                "O processamento parou na validação do arquivo: envie o vídeo de novo"
+            )
         if partida is None or partida == "validacao":
             raise NaoReprocessavel(
                 "A falha é do arquivo: é preciso enviar o vídeo de novo"

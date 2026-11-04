@@ -21,6 +21,9 @@ interface JobApi {
   data_exibicao: string | null
   enviado_por: { tipo: string; nome: string | null }
   capa_url?: string | null
+  etapa_atual?: string | null
+  indexacao?: { estado: string; em: string } | null
+  etapas?: { nome: string; inicio: string; fim?: string | null }[]
   criado_em: string
   atualizado_em: string
 }
@@ -415,6 +418,81 @@ test('só as linhas em andamento são consultadas de novo, e a lista não é rec
   await waitFor(() => expect(within(linha('andando.mp4')).getByText('Concluído')).toBeTruthy())
   expect(new Set(detalhes)).toEqual(new Set(['b']))
   expect(chamadas.length).toBe(listagens)
+})
+
+test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado até a indexação acabar', async () => {
+  const agora = new Date().toISOString()
+  const haSeteHoras = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
+  const pendente = { estado: 'pendente', em: agora }
+  jobs = [
+    job({ id: 'a', nome: 'rodando.mp4', estado: 'concluido', etapa_atual: 'referencias', indexacao: pendente }),
+    // Entre duas etapas: sem etapa em andamento, mas a indexação ainda pendente.
+    job({ id: 'b', nome: 'entre.mp4', estado: 'concluido', etapa_atual: null, indexacao: pendente }),
+    // Uma correção no meio reindexou (tirou o pendente), mas as etapas seguem.
+    job({
+      id: 'e',
+      nome: 'corrigido.mp4',
+      estado: 'concluido',
+      indexacao: { estado: 'indexado', em: agora },
+      etapas: [{ nome: 'identificacao', inicio: agora, fim: agora }],
+    }),
+    // A indexação falhou: a etapa tem fim, e o pendente que sobrou não prende o selo.
+    job({
+      id: 'c',
+      nome: 'falhou.mp4',
+      estado: 'concluido',
+      indexacao: pendente,
+      etapas: [{ nome: 'indexacao', inicio: agora, fim: agora }],
+    }),
+    // O Workflows morreu no meio há 7 h: passado o teto, o selo solta.
+    job({
+      id: 'd',
+      nome: 'preso.mp4',
+      estado: 'concluido',
+      etapa_atual: 'referencias',
+      indexacao: { estado: 'pendente', em: haSeteHoras },
+      etapas: [{ nome: 'referencias', inicio: haSeteHoras }],
+    }),
+  ]
+  const detalhes: string[] = []
+  servidor.use(
+    http.get('/v1/jobs/:id', ({ params }) => {
+      detalhes.push(String(params.id))
+      return HttpResponse.json(jobs.find((j) => j.id === params.id))
+    }),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('rodando.mp4')
+  expect(within(linha('rodando.mp4')).getByText('Finalizando')).toBeTruthy()
+  expect(within(linha('entre.mp4')).getByText('Finalizando')).toBeTruthy()
+  expect(within(linha('corrigido.mp4')).getByText('Finalizando')).toBeTruthy()
+  expect(within(linha('falhou.mp4')).getByText('Concluído')).toBeTruthy()
+  expect(within(linha('preso.mp4')).getByText('Concluído')).toBeTruthy()
+
+  jobs = [
+    job({ ...jobs[0], etapa_atual: null, indexacao: { estado: 'indexado', em: agora }, etapas: [{ nome: 'indexacao', inicio: agora, fim: agora }] }),
+    ...jobs.slice(1),
+  ]
+
+  await waitFor(() => expect(within(linha('rodando.mp4')).getByText('Concluído')).toBeTruthy())
+  expect(new Set(detalhes)).toEqual(new Set(['a', 'b', 'e']))
+})
+
+test('a consulta de uma linha em andamento mantém a capa da lista', async () => {
+  const pendente = { estado: 'pendente', em: new Date().toISOString() }
+  jobs = [job({ id: 'a', nome: 'rodando.mp4', estado: 'concluido', etapa_atual: 'inventario_de_objetos', indexacao: pendente, capa_url: '/capa-a.jpg' })]
+  let consultas = 0
+  servidor.use(
+    http.get('/v1/jobs/:id', () => {
+      consultas++
+      // Como a API: o detalhe não assina a capa.
+      return HttpResponse.json({ ...jobs[0], capa_url: null })
+    }),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('rodando.mp4')
+  await waitFor(() => expect(consultas).toBeGreaterThan(1))
+  expect(document.querySelector('img[src="/capa-a.jpg"]')).toBeTruthy()
 })
 
 test('com a aba escondida, ninguém é consultado', async () => {

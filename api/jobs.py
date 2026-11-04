@@ -119,6 +119,8 @@ CodigoDeFalha = Literal[
     "analise_falhou",
     "transcricao_falhou",
     "ocr_falhou",
+    # O próprio Workflows caiu num erro que nenhum passo tratou (`marca_interrompido`).
+    "processamento_interrompido",
 ]
 
 

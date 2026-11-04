@@ -16,7 +16,60 @@
 # entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
 # ${job_de_analise}, ${job_de_identificacao}, ${job_de_referencias}, ${job_de_comparacao},
 # ${job_de_quadros}, ${job_de_indexacao}.
+# Toda a execução roda num try: um erro que nenhum passo trata (do próprio Workflows,
+# de um conector, de uma permissão) não deixa o Job preso em `analisando`, que a tela
+# mostra como "Decupando" para sempre e o reprocessar recusa (`marca_interrompido`).
 main:
+  params: [evento]
+  steps:
+    # O id do Job sai antes do try: sem ele, não há o que marcar.
+    - tira_o_job_do_reprocessamento:
+        assign:
+          - job_do_evento: $${map.get(evento, "job_id")}
+    # Sem `job_id`, o evento é o do Eventarc: o objeto na quarentena tem o nome do id do Job.
+    - tira_o_job_do_upload:
+        switch:
+          - condition: $${job_do_evento == null}
+            assign:
+              - job_do_evento: $${evento.data.name}
+    - processa_o_evento:
+        try:
+          call: processa
+          args:
+            evento: $${evento}
+          result: resultado
+        except:
+          as: e
+          steps:
+            # A marcação nunca esconde o erro original, que sobe em seguida.
+            - marca_o_job_interrompido:
+                try:
+                  steps:
+                    - chama_a_marcacao:
+                        call: marca_interrompido
+                        args:
+                          job_id: $${job_do_evento}
+                    # O rastro da execução passa a apontar o `raise` abaixo: o erro original
+                    # fica aqui, no log, depois da marcação, para um log que falhe não a pular.
+                    - registra_o_erro_sem_tratamento:
+                        call: sys.log
+                        args:
+                          severity: ERROR
+                          data: $${e}
+                except:
+                  as: erro_da_marcacao
+                  steps:
+                    - registra_o_erro_da_marcacao:
+                        call: sys.log
+                        args:
+                          severity: WARNING
+                          text: $${"Job " + job_do_evento + " não marcado como interrompido"}
+            - repassa_o_erro:
+                raise: $${e}
+    - devolve_o_resultado:
+        return: $${resultado}
+
+processa:
   params: [evento]
   steps:
     # Duas entradas: o evento do Eventarc (upload completo, roda tudo) e o reprocessamento
@@ -575,6 +628,68 @@ main:
           falhou_na_execucao: false
     - fim:
         return: $${job_id}
+
+# Um erro que nenhum passo tratou (`main`): o Job que estava em `aguardando_upload` (o erro
+# antes do Job de validação), `validando` ou `analisando` vai a `falhou` com `processamento_interrompido`, e a etapa em andamento fecha como
+# `falhou`, para o reprocessar recomeçar dali. Um Job `concluido` continua `concluido` (a
+# falha de uma etapa depois dele não o derruba); só a etapa fecha.
+marca_interrompido:
+  params: [job_id]
+  steps:
+    - le_o_job_interrompido:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: interrompido
+        except:
+          as: erro_da_leitura_do_interrompido
+          steps:
+            # Um objeto sem Job correspondente não cria documento.
+            - sem_job_interrompido:
+                switch:
+                  - condition: $${erro_da_leitura_do_interrompido.code == 404}
+                    next: sai_sem_job_interrompido
+            - repassa_o_erro_da_leitura_do_interrompido:
+                raise: $${erro_da_leitura_do_interrompido}
+            - sai_sem_job_interrompido:
+                return: null
+    - tira_a_etapa_interrompida:
+        assign:
+          - etapa_interrompida: $${map.get(interrompido.fields, ["etapa_atual", "stringValue"])}
+    - so_se_em_andamento:
+        switch:
+          - condition: $${not (interrompido.fields.estado.stringValue in ["aguardando_upload", "validando", "analisando"])}
+            next: fecha_a_etapa_interrompida
+    - derruba_o_job_interrompido:
+        call: googleapis.firestore.v1.projects.databases.documents.patch
+        args:
+          name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          # Só vale se o Job não mudou desde a leitura (um cancelamento no meio).
+          currentDocument:
+            updateTime: $${interrompido.updateTime}
+          updateMask:
+            fieldPaths: [estado, codigo_falha, atualizado_em]
+          body:
+            fields:
+              estado:
+                stringValue: falhou
+              codigo_falha:
+                stringValue: processamento_interrompido
+              atualizado_em:
+                timestampValue: $${time.format(sys.now())}
+    # Só a etapa ainda aberta: o paralelo fecha as suas sem limpar o `etapa_atual`, e uma
+    # transcrição concluída não pode virar `falhou` (o reprocessar refaria horas de GPU).
+    - fecha_a_etapa_interrompida:
+        switch:
+          - condition: $${etapa_interrompida != null and map.get(interrompido.fields, ["etapas", "mapValue", "fields", default(etapa_interrompida, ""), "mapValue", "fields", "fim", "timestampValue"]) == null}
+            call: marca_fim
+            args:
+              job_id: $${job_id}
+              etapa: $${etapa_interrompida}
+              falhou_na_execucao: true
+    - fim_do_interrompido:
+        return: null
 
 # Tempo de cada etapa (#146): o início e o fim vão para `etapas.<nome>` do Job, com o
 # mesmo formato de `api.ciclo_de_vida`. Não é transição: não mexe em `estado`. Uma falha
