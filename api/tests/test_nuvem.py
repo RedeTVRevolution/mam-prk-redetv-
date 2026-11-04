@@ -16,7 +16,7 @@ import pytest
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import Aborted, AlreadyExists
 from google.auth import credentials as google_credentials
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
@@ -1203,3 +1203,118 @@ class TestRepositorioDeAuditoriaFirestore:
     ) -> None:
         with pytest.raises(CursorInvalido):
             auditoria.consultar(FiltroDeAuditoria(cursor="nada"))
+
+
+class _ClienteSemRede:
+    """Só o que `RepositorioFirestore` usa fora da transação; a transação é do teste."""
+
+    def __init__(self, colecao: object = None) -> None:
+        self._colecao = colecao
+
+    def collection(self, nome: str) -> object:
+        return self._colecao
+
+    def transaction(self) -> object:
+        return object()
+
+
+def _esgotou_as_tentativas() -> ValueError:
+    erro = ValueError("Failed to commit transaction in 5 attempts.")
+    erro.__cause__ = Aborted("disputa")  # type: ignore[no-untyped-call]
+    return erro
+
+
+def test_sob_disputa_repete_quando_o_firestore_esgota_as_tentativas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    repositorio = RepositorioFirestore(_ClienteSemRede())  # type: ignore[arg-type]
+    chamadas = 0
+
+    def na_transacao(_: Any) -> Job | None:
+        nonlocal chamadas
+        chamadas += 1
+        if chamadas < 3:
+            raise _esgotou_as_tentativas()
+        return None
+
+    assert repositorio._sob_disputa(na_transacao) is None
+    assert chamadas == 3
+
+
+def test_sob_disputa_sem_fim_e_servico_indisponivel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    repositorio = RepositorioFirestore(_ClienteSemRede())  # type: ignore[arg-type]
+
+    def na_transacao(_: Any) -> Job | None:
+        raise _esgotou_as_tentativas()
+
+    with pytest.raises(ServicoIndisponivel):
+        repositorio._sob_disputa(na_transacao)
+
+
+def test_sob_disputa_nao_repete_outro_value_error() -> None:
+    repositorio = RepositorioFirestore(_ClienteSemRede())  # type: ignore[arg-type]
+    chamadas = 0
+
+    def na_transacao(_: Any) -> Job | None:
+        nonlocal chamadas
+        chamadas += 1
+        raise ValueError("Job inválido")
+
+    with pytest.raises(ValueError, match="Job inválido"):
+        repositorio._sob_disputa(na_transacao)
+    assert chamadas == 1
+
+
+class _ColecaoQueAborta:
+    """`create` aborta as primeiras vezes (documento travado) e depois responde."""
+
+    def __init__(self, abortos: int, depois: Exception | None) -> None:
+        self._abortos = abortos
+        self._depois = depois
+        self.criacoes = 0
+
+    def document(self, _: str) -> "_ColecaoQueAborta":
+        return self
+
+    def create(self, _: dict[str, Any]) -> None:
+        self.criacoes += 1
+        if self._abortos:
+            self._abortos -= 1
+            raise Aborted("travado")  # type: ignore[no-untyped-call]
+        if self._depois is not None:
+            raise self._depois
+
+
+def _job_novo() -> Job:
+    agora = datetime(2026, 11, 4, tzinfo=UTC)
+    return Job(
+        id="j1",
+        nome="a.mp4",
+        tamanho_bytes=10,
+        estado="aguardando_upload",
+        criado_por="sistema:Legado A",
+        sistema="Legado A",
+        criado_em=agora,
+        atualizado_em=agora,
+    )
+
+
+@pytest.mark.parametrize(
+    ("depois", "gravou"),
+    [(None, True), (AlreadyExists("existe"), False)],  # type: ignore[no-untyped-call]
+)
+def test_criar_abortado_repete_ate_saber_se_gravou(
+    monkeypatch: pytest.MonkeyPatch, depois: Exception | None, gravou: bool
+) -> None:
+    # `Aborted` não diz que outro gravou: devolver `False` aí faria a rota responder
+    # com um Job que não existe.
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    colecao = _ColecaoQueAborta(abortos=2, depois=depois)
+    repositorio = RepositorioFirestore(_ClienteSemRede(colecao))  # type: ignore[arg-type]
+
+    assert repositorio.criar(_job_novo()) is gravou
+    assert colecao.criacoes == 3

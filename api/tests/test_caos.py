@@ -294,16 +294,19 @@ class DestinoQueFalhaEVolta:
         self.tentativas = 0
         self.processados: list[str] = []
         self._vistos: set[str] = set()
+        # Todo `X-Webhook-Id` que chegou, inclusive nas tentativas que falharam.
+        self.ids_recebidos: set[str] = set()
 
     def enviar(
         self, url: str, ips: list[str], corpo: bytes, cabecalhos: dict[str, str]
     ) -> int:
         with self._trava:
             self.tentativas += 1
+            id_ = cabecalhos["X-Webhook-Id"]
+            self.ids_recebidos.add(id_)
             if self._falhas:
                 self._falhas -= 1
                 return 503
-            id_ = cabecalhos["X-Webhook-Id"]
             if id_ not in self._vistos:
                 self._vistos.add(id_)
                 self.processados.append(id_)
@@ -356,7 +359,9 @@ def test_evento_de_fim_chega_uma_vez_apesar_de_entrega_repetida_fora_de_ordem_e_
     assert corretor.fila == []  # tudo confirmado no fim
     assert destino.tentativas > 5  # houve repetição e houve falha
     assert len(destino.processados) == 5  # cada evento, uma vez só, para o cliente
-    assert len(set(destino.processados)) == 5
+    # O cliente só consegue descartar a repetição se o id não muda entre as tentativas:
+    # 5 eventos, 5 ids, por mais entregas que tenha havido.
+    assert destino.ids_recebidos == set(destino.processados)
 
 
 def test_doze_trabalhadores_terminando_o_mesmo_job_ao_mesmo_tempo_um_vence_e_ninguem_estoura() -> (

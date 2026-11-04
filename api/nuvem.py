@@ -165,26 +165,36 @@ class RepositorioFirestore:
         self._colecao.document(job.id).set(job.model_dump())
 
     def criar(self, job: Job) -> bool:
-        try:
-            self._colecao.document(job.id).create(job.model_dump())
-        except (AlreadyExists, Aborted):
-            # `Aborted`: o documento está travado por quem o grava neste instante.
-            return False
-        return True
+        # `Aborted` não diz que outro gravou: o documento estava travado e o `create`
+        # pode ter perdido para outro que também aborta. Repete até um gravar
+        # (`AlreadyExists` para os outros).
+        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+            try:
+                self._colecao.document(job.id).create(job.model_dump())
+            except AlreadyExists:
+                return False
+            except Aborted:
+                time.sleep(random.uniform(0, 0.05 * (rodada + 1)))
+                continue
+            return True
+        raise ServicoIndisponivel("Firestore disputado: tente de novo")
 
     def _sob_disputa(self, na_transacao: Callable[[Any], Job | None]) -> Job | None:
         # Com muitos trabalhadores no mesmo Job, o Firestore esgota as tentativas da
-        # transação (ValueError). Quem perde começa de novo, depois de uma espera
-        # aleatória, e lê o estado que o vencedor deixou.
+        # transação (ValueError causado por Aborted). Quem perde começa de novo, depois de
+        # uma espera aleatória, e lê o estado que o vencedor deixou. Outro ValueError (um
+        # Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
         for rodada in range(TENTATIVAS_SOB_DISPUTA):
             try:
                 resultado: Job | None = na_transacao(self._cliente.transaction())
                 return resultado
-            except (ValueError, Aborted):
-                if rodada == TENTATIVAS_SOB_DISPUTA - 1:
+            except (ValueError, Aborted) as erro:
+                if isinstance(erro, ValueError) and not isinstance(
+                    erro.__cause__, Aborted
+                ):
                     raise
                 time.sleep(random.uniform(0, 0.05 * (rodada + 1)))
-        raise AssertionError("inalcançável")
+        raise ServicoIndisponivel("Firestore disputado: tente de novo")
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
