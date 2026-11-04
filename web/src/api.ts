@@ -7,6 +7,12 @@ import { consultaDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
 import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
+import {
+  parametrosDoPainel,
+  type FiltrosDoPainel,
+  type OpcoesDoPainel,
+  type RelatorioDeAcessos,
+} from './painelDaDiretoria.ts'
 import { parametrosDoRelatorio } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
@@ -294,6 +300,12 @@ export interface ClienteDaApi {
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
   tempoDeTelaEmCsv(filtros: FiltrosDoRelatorio): Promise<Blob>
+  /** `GET /v1/painel/filtros` (exige `painel.ver`): programas e usuários que os filtros do painel oferecem. */
+  opcoesDoPainel(): Promise<OpcoesDoPainel>
+  /** `GET /v1/painel/acessos`: logins por dia, usuários ativos, por usuário e no total. Sem programa. */
+  acessosDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeAcessos>
+  /** Os mesmos acessos em CSV, uma linha por dia e pessoa. */
+  acessosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
   /** `GET /v1/relatorios/marcas`: inserções, tempo e vídeos por marca e por tipo de inserção. */
   marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
   /** O mesmo relatório em CSV. */
@@ -451,6 +463,10 @@ export function criarClienteDaApi(
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
     tempoDeTelaEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),
+    opcoesDoPainel: () => chamar('/v1/painel/filtros'),
+    acessosDoPainel: (filtros) => chamar(`/v1/painel/acessos?${parametrosDoPainel(filtros, { semPrograma: true })}`),
+    acessosDoPainelEmCsv: async (filtros) =>
+      (await pedir(`/v1/painel/acessos?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
     marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
     marcasEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),

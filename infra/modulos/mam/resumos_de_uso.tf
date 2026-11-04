@@ -19,6 +19,11 @@
 # (`faturamento.tf`). O armazenamento fica nos 10 GB grátis.
 locals {
   resumos_de_uso = ["uso_por_dia_e_usuario", "uso_por_dia", "uso_por_usuario", "uso_por_dia_e_programa"]
+  # As que a web lê (PAINEL_TABELA_*): a API do painel não conhece o nome de nenhuma.
+  tabelas_do_painel_na_web = {
+    por_dia_e_usuario  = "uso_por_dia_e_usuario"
+    por_dia_e_programa = "uso_por_dia_e_programa"
+  }
 }
 
 # A conta que roda a consulta: lê os eventos e os momentos e cria as tabelas no dataset.

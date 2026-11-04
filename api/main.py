@@ -119,6 +119,7 @@ from api.nuvem import (
     RepositorioFirestore,
     TiposDeObjetoFirestore,
 )
+from api.painel import AcessosAoPainel, criar_rotas_do_painel
 from api.papeis import (
     Papel,
     Permissao,
@@ -147,6 +148,7 @@ from api.reprocessamento import (
     DisparoIndisponivel,
     criar_rotas_do_reprocessamento,
 )
+from api.resumos_de_uso import ResumosDeUso, resumos_do_ambiente
 from api.revisao import (
     LIMITE_DE_INATIVIDADE_S,
     RepositorioDeRevisao,
@@ -295,6 +297,7 @@ def criar_app(
     embedding_da_consulta: EmbeddingDaConsulta | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
+    resumos_de_uso: ResumosDeUso | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
@@ -543,6 +546,13 @@ def criar_app(
     )
     v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
     v1.include_router(
+        criar_rotas_do_painel(
+            resumos_de_uso,
+            contas or ContasIndisponiveis(),
+            AcessosAoPainel(repositorio_de_auditoria, relogio),
+        )
+    )
+    v1.include_router(
         criar_rotas_dos_usuarios(
             contas or ContasIndisponiveis(),
             app.state.papeis,
@@ -727,6 +737,7 @@ if _projeto:
             ),
         ),
         tempo_de_tela=consulta_do_ambiente(os.environ),
+        resumos_de_uso=resumos_do_ambiente(os.environ),
         relatorio_de_marcas=marcas_do_ambiente(os.environ),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),

@@ -3,6 +3,12 @@ import { filtrosParaEnderecoDaAuditoria, type FiltrosDaAuditoria } from './audit
 import { filtrosParaEnderecoDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
 import { filtrosDeMarcas, type FiltrosDeMarcas } from './marcas.ts'
+import {
+  filtrosDoPainel,
+  filtrosParaEnderecoDoPainel,
+  type AbaDoPainel,
+  type FiltrosDoPainel,
+} from './painelDaDiretoria.ts'
 import { filtrosDoRelatorio, filtrosParaEndereco, type FiltrosDoRelatorio } from './tempoDeTela.ts'
 import { useMemo, useSyncExternalStore, type MouseEvent } from 'react'
 
@@ -16,6 +22,7 @@ export type Rota =
   | { tipo: 'parecidos'; job: string; plano: number }
   | { tipo: 'tempo_de_tela'; filtros: FiltrosDoRelatorio }
   | { tipo: 'marcas'; filtros: FiltrosDeMarcas }
+  | { tipo: 'painel'; aba: AbaDoPainel; filtros: FiltrosDoPainel }
   | { tipo: 'admin'; aba: string | null; busca: string }
   | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
@@ -24,6 +31,7 @@ export const ACERVO = '/acervo'
 export const TEMPO_DE_TELA = '/relatorios/tempo-de-tela'
 export const MARCAS = '/relatorios/marcas'
 export const ADMIN = '/admin'
+export const PAINEL = '/painel'
 
 /** O endereço de uma aba da administração (`usuarios`, `chaves`, …). */
 export function enderecoDaAba(aba: string): string {
@@ -43,6 +51,11 @@ export function enderecoDaAuditoria(filtros: FiltrosDaAuditoria): string {
 /** O endereço do relatório de tempo de tela, com os filtros na query. */
 export function enderecoDoTempoDeTela(filtros: FiltrosDoRelatorio): string {
   return `${TEMPO_DE_TELA}${filtrosParaEndereco(filtros)}`
+}
+
+/** O endereço de uma aba do painel da diretoria, com os filtros na query. */
+export function enderecoDoPainel(aba: AbaDoPainel, filtros: FiltrosDoPainel): string {
+  return `${PAINEL}/${aba}${filtrosParaEnderecoDoPainel(filtros)}`
 }
 
 /** O endereço do relatório de marcas, com os filtros na query. */
@@ -92,6 +105,9 @@ export function lerRota(caminho: string, busca = ''): Rota {
   }
   if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'marcas') {
     return { tipo: 'marcas', filtros: filtrosDeMarcas(busca) }
+  }
+  if (partes[0] === 'painel' && partes.length <= 2 && (partes[1] ?? 'acessos') === 'acessos') {
+    return { tipo: 'painel', aba: 'acessos', filtros: filtrosDoPainel(busca) }
   }
   if (partes[0] === 'admin' && partes.length <= 2) return { tipo: 'admin', aba: partes[1] ?? null, busca }
   if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }

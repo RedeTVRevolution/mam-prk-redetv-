@@ -993,6 +993,15 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "BIGQUERY_REGIAO"
         value = var.regiao_do_bigquery
       }
+      # As tabelas resumidas que o painel da diretoria lê (resumos_de_uso.tf, #282).
+      env {
+        name  = "PAINEL_TABELA_POR_DIA_E_USUARIO"
+        value = local.tabelas_do_painel_na_web.por_dia_e_usuario
+      }
+      env {
+        name  = "PAINEL_TABELA_POR_DIA_E_PROGRAMA"
+        value = local.tabelas_do_painel_na_web.por_dia_e_programa
+      }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
         value = tostring(var.busca_distancia_maxima)

@@ -25,6 +25,7 @@ import TelaDoVideo from './TelaDoVideo.tsx'
 import Administracao from './Administracao.tsx'
 import { podeAdministrar } from './administracao.ts'
 import Marcas from './Marcas.tsx'
+import PainelDaDiretoria from './PainelDaDiretoria.tsx'
 import TempoDeTela from './TempoDeTela.tsx'
 
 // A amostra do sistema visual é grande e sem login: fica num pedaço à parte do bundle.
@@ -151,6 +152,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
   const podeFundir = sessao.usuario.permissoes.includes('catalogo.fundir')
   const podeApagar = sessao.usuario.permissoes.includes('lixeira.gerir')
   const podeEnviar = sessao.usuario.permissoes.includes('video.enviar')
+  const podeVerPainel = sessao.usuario.permissoes.includes('painel.ver')
   return (
     <AppShell
       header={{ height: ALTURA_DA_BARRA }}
@@ -160,6 +162,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
         email={sessao.usuario.email}
         aoSair={() => void sair()}
         podeAdministrar={podeAdministrar(sessao.usuario.permissoes)}
+        podeVerPainel={podeVerPainel}
       />
       {rota.tipo === 'video' ? (
         <AppShell.Main bg="dark.7">
@@ -193,6 +196,11 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
       ) : rota.tipo === 'marcas' ? (
         <AppShell.Main bg="dark.7">
           <Marcas api={api} filtros={rota.filtros} />
+        </AppShell.Main>
+      ) : rota.tipo === 'painel' && podeVerPainel ? (
+        // O front só esconde a área; quem barra é a API.
+        <AppShell.Main bg="dark.7">
+          <PainelDaDiretoria api={api} aba={rota.aba} filtros={rota.filtros} />
         </AppShell.Main>
       ) : rota.tipo === 'admin' ? (
         <AppShell.Main bg="dark.7">

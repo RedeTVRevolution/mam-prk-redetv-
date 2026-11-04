@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useAtalhos, useMostrarAtalhos } from './atalhos.ts'
 import { consultaNova } from './busca.ts'
 import { Link } from './Link.tsx'
-import { ACERVO, ADMIN, enderecoDaBusca, MARCAS, navegar, TEMPO_DE_TELA, useRota } from './rotas.ts'
+import { ACERVO, ADMIN, enderecoDaBusca, MARCAS, navegar, PAINEL, TEMPO_DE_TELA, useRota } from './rotas.ts'
 import { CORES } from './tema.ts'
 
 const ATALHO_DA_BUSCA = {
@@ -67,10 +67,12 @@ export default function Barra({
   email,
   aoSair,
   podeAdministrar = false,
+  podeVerPainel = false,
 }: {
   email: string
   aoSair: () => void
   podeAdministrar?: boolean
+  podeVerPainel?: boolean
 }) {
   const mostrarAtalhos = useMostrarAtalhos()
   return (
@@ -95,6 +97,11 @@ export default function Barra({
             <Link para={MARCAS} size="sm" c="dimmed" underline="hover" ml="md">
               Relatórios › Marcas
             </Link>
+            {podeVerPainel && (
+              <Link para={PAINEL} size="sm" c="dimmed" underline="hover" ml="md">
+                Painel
+              </Link>
+            )}
             {podeAdministrar && (
               <Link para={ADMIN} size="sm" c="dimmed" underline="hover" ml="md">
                 Administração

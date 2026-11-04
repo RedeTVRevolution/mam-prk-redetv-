@@ -387,3 +387,14 @@ def test_o_sql_le_as_tabelas_pelos_nomes_que_o_terraform_monta() -> None:
 
 def test_a_api_do_data_transfer_esta_ligada() -> None:
     assert "bigquerydatatransfer.googleapis.com" in (MODULO / "main.tf").read_text()
+
+
+def test_a_web_recebe_so_tabelas_que_o_sql_cria() -> None:
+    criadas = re.findall(r"CREATE OR REPLACE TABLE `\$\{prefixo\}(\w+)`", SQL)
+    da_web = re.search(r"tabelas_do_painel_na_web = \{(.*?)\}", TF, re.DOTALL)
+    assert da_web is not None
+
+    assert set(re.findall(r'"(\w+)"', da_web.group(1))) <= set(criadas)
+    principal = (MODULO / "main.tf").read_text()
+    for nome in ("POR_DIA_E_USUARIO", "POR_DIA_E_PROGRAMA"):
+        assert f'"PAINEL_TABELA_{nome}"' in principal
