@@ -24,6 +24,30 @@ const RELATORIO = {
   ],
 }
 
+const VIDEOS = {
+  desde: null,
+  ate: null,
+  programa: null,
+  usuario: null,
+  total: { enviados: 5, concluidos: 3, falhos: 1, horas_concluidas: 3.5, tempo_medio_s: 120 },
+  por_dia: [{ dia: '2026-11-02', enviados: 5, concluidos: 3, falhos: 1, horas_concluidas: 3.5, tempo_medio_s: 120 }],
+  por_programa: [{ programa: 'TV Fama', enviados: 5, concluidos: 3, falhos: 1, horas_concluidas: 3.5, tempo_medio_s: null }],
+  por_usuario: [
+    { quem_tipo: 'usuario', quem_id: 'u1', email: 'ana@redetv.com.br', enviados: 2, concluidos: 2, falhos: 0, horas_concluidas: 1, tempo_medio_s: 60 },
+    { quem_tipo: 'sistema', quem_id: 'ingestao', email: null, enviados: 3, concluidos: 1, falhos: 1, horas_concluidas: 2.5, tempo_medio_s: null },
+  ],
+}
+
+const BUSCAS = {
+  desde: null,
+  ate: null,
+  programa: null,
+  usuario: null,
+  total: { buscas: 9, usuarios_que_buscam: 2, sem_resultado: 4 },
+  por_dia: [{ dia: '2026-11-03', buscas: 9, usuarios_que_buscam: 2, sem_resultado: 4 }],
+  por_usuario: [{ quem_tipo: 'usuario', quem_id: 'u1', email: 'ana@redetv.com.br', buscas: 9, sem_resultado: 4 }],
+}
+
 const pedidos: URLSearchParams[] = []
 let permissoes = ['decupagem.ver', 'painel.ver']
 let resposta: () => Response = () => HttpResponse.json(RELATORIO)
@@ -42,6 +66,18 @@ const servidor = setupServer(
       return new HttpResponse('dia,acessos\n2026-11-02,3\n', { headers: { 'Content-Type': 'text/csv' } })
     }
     return resposta()
+  }),
+  http.get('/v1/painel/videos', ({ request }) => {
+    const p = new URL(request.url).searchParams
+    pedidos.push(p)
+    if (p.get('formato') === 'csv') return new HttpResponse('dia,enviados\n', { headers: { 'Content-Type': 'text/csv' } })
+    return HttpResponse.json(VIDEOS)
+  }),
+  http.get('/v1/painel/buscas', ({ request }) => {
+    const p = new URL(request.url).searchParams
+    pedidos.push(p)
+    if (p.get('formato') === 'csv') return new HttpResponse('dia,buscas\n', { headers: { 'Content-Type': 'text/csv' } })
+    return HttpResponse.json(BUSCAS)
   }),
 )
 
@@ -155,4 +191,87 @@ test('sem acesso nenhum, a tela diz isso', async () => {
   await abrir('/painel/acessos')
 
   expect(await screen.findByText('Nenhum acesso neste filtro.')).toBeTruthy()
+})
+
+const linhasDe = (t: HTMLElement) =>
+  within(t).getAllByRole('row').slice(1).map((l) => within(l).getAllByRole('cell').map((c) => c.textContent))
+
+test('a aba Vídeos mostra os totais e as tabelas por dia, programa e usuário', async () => {
+  await abrir('/painel/videos')
+
+  const dias = await screen.findByRole('table', { name: 'Vídeos por dia' })
+  expect(linhasDe(dias)[0].slice(0, 5)).toEqual(['02/11/2026', '5', '3', '1', '3,5'])
+  expect(screen.getAllByText('Enviados')[0].nextSibling?.textContent).toBe('5')
+  expect(screen.getByText('Horas de vídeo concluídas').nextSibling?.textContent).toBe('3,5')
+  expect(linhasDe(screen.getByRole('table', { name: 'Vídeos por programa' }))[0][0]).toBe('TV Fama')
+  // Sem tempo médio, um traço.
+  expect(linhasDe(screen.getByRole('table', { name: 'Vídeos por programa' }))[0][5]).toBe('—')
+  const quem = linhasDe(screen.getByRole('table', { name: 'Vídeos por usuário' }))
+  expect(quem.map((l) => l[0])).toEqual(['ana@redetv.com.br', 'ingestao (sistema)'])
+})
+
+test('Vídeos manda o programa à API e recusa programa e usuário juntos', async () => {
+  await abrir('/painel/videos?programa=TV+Fama')
+  await screen.findByRole('table', { name: 'Vídeos por dia' })
+  expect(pedidos[0].get('programa')).toBe('TV Fama')
+
+  cleanup()
+  pedidos.length = 0
+  await abrir('/painel/videos?programa=TV+Fama&usuario=u1')
+  expect(await screen.findByText(/Escolha o programa ou o usuário, não os dois/)).toBeTruthy()
+  expect(pedidos).toHaveLength(0)
+})
+
+test('a aba Buscas mostra os totais, o dia e o usuário', async () => {
+  await abrir('/painel/buscas')
+
+  const dias = await screen.findByRole('table', { name: 'Buscas por dia' })
+  expect(linhasDe(dias)).toEqual([['03/11/2026', '9', '2', '4']])
+  expect(screen.getByText('Buscas sem resultado').nextSibling?.textContent).toBe('4')
+  expect(linhasDe(screen.getByRole('table', { name: 'Buscas por usuário' }))).toEqual([['ana@redetv.com.br', '9', '4']])
+})
+
+test('Buscas com filtro de programa mostra traço onde a API não sabe quem buscou', async () => {
+  servidor.use(
+    http.get('/v1/painel/buscas', () =>
+      HttpResponse.json({
+        ...BUSCAS,
+        programa: 'TV Fama',
+        total: { ...BUSCAS.total, usuarios_que_buscam: null },
+        por_dia: [{ ...BUSCAS.por_dia[0], usuarios_que_buscam: null }],
+        por_usuario: [],
+      }),
+    ),
+  )
+  await abrir('/painel/buscas?programa=TV+Fama')
+
+  const dias = await screen.findByRole('table', { name: 'Buscas por dia' })
+  expect(linhasDe(dias)).toEqual([['03/11/2026', '9', '—', '4']])
+  expect(screen.queryByRole('table', { name: 'Buscas por usuário' })).toBeNull()
+})
+
+test('Baixar CSV em Vídeos pede o formato csv', async () => {
+  const usuario = userEvent.setup()
+  Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:csv'), revokeObjectURL: vi.fn() })
+  const clique = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  await abrir('/painel/videos?usuario=u1')
+  await screen.findByRole('table', { name: 'Vídeos por dia' })
+
+  await usuario.click(screen.getByRole('button', { name: 'Baixar CSV' }))
+
+  await waitFor(() => expect(clique).toHaveBeenCalled())
+  expect(pedidos.find((p) => p.get('formato') === 'csv')?.get('usuario')).toBe('u1')
+  clique.mockRestore()
+})
+
+test('as abas do painel levam de uma para outra', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/painel/acessos?usuario=u1')
+  await screen.findByRole('table', { name: 'Acessos por dia' })
+
+  await usuario.click(screen.getByRole('tab', { name: 'Buscas' }))
+
+  await screen.findByRole('table', { name: 'Buscas por dia' })
+  expect(location.pathname).toBe('/painel/buscas')
+  expect(location.search).toContain('usuario=u1')
 })
