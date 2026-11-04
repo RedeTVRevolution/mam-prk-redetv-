@@ -142,6 +142,9 @@ Lugar onde um vídeo enviado espera a validação; nada é processado a partir d
 O MP4 aceito pela quarentena, regravado só com as faixas de vídeo e áudio (as faixas de dados, como a de timecode, ficam de fora), sem metadados e sem recodificar. É dele que todo o processamento parte.
 _Evitar_: cópia limpa 720p, original tratado
 
+**Acessos ao vídeo**:
+Quem abriu e quem baixou cada vídeo, na auditoria (`api/acessos.py`, #207). `GET /v1/jobs/{id}/download` devolve uma URL assinada (5 min) da cópia limpa, com o nome do arquivo (`Content-Disposition: attachment`), e `GET /v1/jobs/{id}/decupagem/download` entrega o JSON da Decupagem (com as Correções aplicadas) como `{arquivo}.decupagem.json`; os dois valem com `decupagem.ver`, só para Job `concluido`, e gravam `video.baixado` e `decupagem.baixada` antes de responder (se a auditoria não grava, 503, sem a URL nem o arquivo). A abertura (`video.aberto`) é gravada no servidor, no pedido da reprodução, no máximo uma vez por pessoa (ou sistema) e vídeo a cada 30 minutos; falha ao gravá-la não derruba a reprodução.
+
 **Timecode de origem**:
 O timecode inicial lido da faixa de timecode do arquivo enviado, guardado no Job e levado ao bloco `video` da Decupagem. Ausente quando o arquivo não tem a faixa.
 _Evitar_: timecode inventado, 00:00:00:00 por padrão

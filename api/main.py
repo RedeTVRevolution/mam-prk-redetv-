@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as ExcecaoHttp
 from starlette.responses import Response
 from starlette.types import Scope
 
+from api.acessos import AcessosNaAuditoria
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.auditoria import (
     RepositorioDeAuditoria,
@@ -320,6 +321,7 @@ def criar_app(
     tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
     v1.include_router(
@@ -345,6 +347,7 @@ def criar_app(
                 armazenamento_dos_jobs,
                 tipos_de_objeto=tipos_dos_objetos,
             ),
+            AcessosNaAuditoria(repositorio_de_auditoria, relogio),
             tipos_dos_objetos.conhecidos,
         )
     )
@@ -386,7 +389,6 @@ def criar_app(
             limites_da_imagem,
         )
     )
-    repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
     v1.include_router(
         criar_rotas_dos_usuarios(

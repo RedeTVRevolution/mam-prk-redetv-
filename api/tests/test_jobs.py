@@ -52,6 +52,9 @@ class ArmazenamentoFalso:
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/proxy/{job_id}?validade={int(validade.total_seconds())}"
 
+    def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
+        return f"https://storage.exemplo/copia-limpa/{job_id}?nome={nome}&validade={int(validade.total_seconds())}"
+
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/quadros/{job_id}/{caminho}?validade={int(validade.total_seconds())}"
 

@@ -54,6 +54,7 @@ from api.jobs import (
     PaginaDeJobs,
     ServicoIndisponivel,
     casa_com_o_filtro,
+    disposicao_do_nome,
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
@@ -1300,6 +1301,17 @@ class ArmazenamentoStorage:
         blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
         url: str = blob.generate_signed_url(
             version="v4", expiration=validade, method="GET", **self._assinatura()
+        )
+        return url
+
+    def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        url: str = blob.generate_signed_url(
+            version="v4",
+            expiration=validade,
+            method="GET",
+            response_disposition=f"attachment; {disposicao_do_nome(nome)}",
+            **self._assinatura(),
         )
         return url
 

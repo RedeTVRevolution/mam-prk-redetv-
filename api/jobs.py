@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -96,6 +96,7 @@ TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
+VALIDADE_DO_DOWNLOAD = timedelta(minutes=5)
 # As fotos de referência são dado sensível (LGPD): o link vale pouco.
 VALIDADE_DA_FOTO = timedelta(minutes=5)
 PREFIXO_DAS_FOTOS = "referencias/"
@@ -297,6 +298,14 @@ def _etag(publico: JobPublico) -> str:
     return f'"{hashlib.sha256(conteudo).hexdigest()[:32]}"'
 
 
+def disposicao_do_nome(nome: str) -> str:
+    """O parâmetro `filename` do `Content-Disposition`: um nome em ASCII para os
+    navegadores antigos e o nome inteiro em UTF-8 (RFC 6266)."""
+    ascii_ = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode()
+    simples = re.sub(r"[^A-Za-z0-9._ -]", "_", ascii_)
+    return f"filename=\"{simples}\"; filename*=UTF-8''{quote(nome, safe='')}"
+
+
 def _casa_etag(if_none_match: str | None, etag: str) -> bool:
     """Comparação fraca do RFC 9110 §13.1.2: lista por vírgulas, `W/` ignorado, `*` casa."""
     if if_none_match is None:
@@ -307,6 +316,23 @@ def _casa_etag(if_none_match: str | None, etag: str) -> bool:
 
 class JobCriado(JobPublico):
     url_de_upload: str
+
+
+class AcessosAoVideo(Protocol):
+    """Porta para o registro de quem abriu e quem baixou o vídeo (`api.acessos`)."""
+
+    def abriu(self, chamador: Chamador, job: Job) -> None:
+        """Registra a abertura; no máximo uma por pessoa e vídeo a cada 30 minutos."""
+        ...
+
+    def baixou(
+        self,
+        chamador: Chamador,
+        job: Job,
+        acao: Literal["video.baixado", "decupagem.baixada"],
+    ) -> None:
+        """Registra o download; `ServicoIndisponivel` se não gravou."""
+        ...
 
 
 class Reproducao(BaseModel):
@@ -514,6 +540,10 @@ class Armazenamento(Protocol):
         """URL assinada de leitura do proxy de reprodução, válida por `validade`."""
         ...
 
+    def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
+        """URL assinada de leitura da cópia limpa, que o navegador baixa como `nome`."""
+        ...
+
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         """URL assinada de leitura do JPEG de `caminho` (o campo `quadro` da Decupagem)."""
         ...
@@ -625,6 +655,9 @@ class ArmazenamentoIndisponivel:
         raise ServicoIndisponivel
 
     def url_de_reproducao(self, job_id: str, validade: timedelta) -> str:
+        raise ServicoIndisponivel
+
+    def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
@@ -811,6 +844,7 @@ def criar_rotas(
     marcas: CatalogoDeMarcas,
     sugestoes: RepositorioDeSugestoes,
     reindexar: Callable[[Job], object],
+    acessos: AcessosAoVideo,
     tipos_de_objeto: Callable[[], list[str]] = list,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
@@ -936,7 +970,18 @@ def criar_rotas(
     ) -> Reproducao:
         job = obter_concluido(job_id, chamador)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
+        acessos.abriu(chamador, job)
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
+
+    @rotas.get("/{job_id}/download")
+    def baixar_video(
+        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+    ) -> Reproducao:
+        job = obter_concluido(job_id, chamador)
+        url = armazenamento.url_de_download(job.id, job.nome, VALIDADE_DO_DOWNLOAD)
+        # O registro vem antes da resposta: sem ele a URL não sai (503).
+        acessos.baixou(chamador, job, "video.baixado")
+        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
 
     @rotas.get("/{job_id}/quadros/{arquivo}")
     def quadro(
@@ -1010,6 +1055,17 @@ def criar_rotas(
     def _ler_correcoes(job_id: str) -> list[Correcao]:
         return correcoes.listar(job_id)
 
+    def _entregue(job: Job) -> bytes:
+        """O JSON da Decupagem entregue, com as Correções aplicadas."""
+        modelo, versao_atual = _ler_modelo(job.id)
+        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
+        entregue = sem_catalogo_apagado(
+            entregue,
+            lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
+            lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
+        )
+        return json.dumps(entregue).encode()
+
     @rotas.get("/{job_id}/decupagem")
     def decupagem(
         job_id: str,
@@ -1023,14 +1079,24 @@ def criar_rotas(
             # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
             pedacos = itertools.chain([next(pedacos, b"")], pedacos)
             return _resposta(pedacos, request)
-        modelo, versao_atual = _ler_modelo(job.id)
-        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
-        entregue = sem_catalogo_apagado(
-            entregue,
-            lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
-            lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
+        return _resposta(iter([_entregue(job)]), request)
+
+    @rotas.get("/{job_id}/decupagem/download")
+    def baixar_decupagem(
+        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+    ) -> Response:
+        job = obter_concluido(job_id, chamador)
+        corpo = _entregue(job)
+        acessos.baixou(chamador, job, "decupagem.baixada")
+        nome = re.sub(r"\.mp4$", "", job.nome, flags=re.IGNORECASE) + ".decupagem.json"
+        return Response(
+            corpo,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; {disposicao_do_nome(nome)}",
+                "Cache-Control": "private, no-store",
+            },
         )
-        return _resposta(iter([json.dumps(entregue).encode()]), request)
 
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
         """Só a correção de quem não é Curador, num tipo da lista, espera decisão."""
