@@ -179,6 +179,9 @@ class RepositorioQuePublicaOFim:
     def salvar(self, job: Job) -> None:
         self._repositorio.salvar(job)
 
+    def criar(self, job: Job) -> bool:
+        return self._repositorio.criar(job)
+
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
 

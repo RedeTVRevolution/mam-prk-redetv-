@@ -57,6 +57,7 @@ from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
 from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Chamada, ErroHttp, Transporte
+from api.idempotencia import RepositorioDeIdempotencia
 from api.indexacao import reindexar
 from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
@@ -100,6 +101,7 @@ from api.nuvem import (
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
+    RepositorioDeIdempotenciaFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeRevisaoFirestore,
     RepositorioDeSugestoesFirestore,
@@ -268,6 +270,7 @@ def criar_app(
     login_recente: timedelta = LOGIN_RECENTE_PADRAO,
     relogio: Callable[[], datetime] = agora_utc,
     rotas_do_push: APIRouter | None = None,
+    idempotencia: RepositorioDeIdempotencia | None = None,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV")
@@ -356,6 +359,7 @@ def criar_app(
             ),
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
             tipos_dos_objetos.conhecidos,
+            idempotencia,
         )
     )
     leitura_de_passadas = passadas or PassadasEmMemoria()
@@ -585,6 +589,9 @@ if _projeto:
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
         # sistema; listar e revogar funcionam.
+        idempotencia=RepositorioDeIdempotenciaFirestore(
+            firestore.Client(project=_projeto)
+        ),
         repositorio_de_chaves=RepositorioDeChavesFirestore(
             firestore.Client(project=_projeto)
         ),

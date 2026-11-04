@@ -3,6 +3,7 @@
 import hashlib
 import json
 import secrets
+import time
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -12,7 +13,7 @@ from urllib.parse import quote
 import google.auth
 import google.auth.transport.requests
 import requests
-from google.api_core.exceptions import AlreadyExists, NotFound
+from google.api_core.exceptions import Aborted, AlreadyExists, NotFound
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
@@ -47,6 +48,12 @@ from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
+from api.idempotencia import (
+    Reserva,
+    conferir,
+    id_da_reserva,
+    nova_reserva,
+)
 from api.jobs import (
     PRAZO_DO_UPLOAD,
     CursorInvalido,
@@ -77,6 +84,7 @@ from api.webhook import RegistroDeWebhook
 COLECAO_DE_JOBS = "jobs"
 COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
+COLECAO_DE_IDEMPOTENCIA = "chaves_de_idempotencia"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
@@ -151,6 +159,14 @@ class RepositorioFirestore:
 
     def salvar(self, job: Job) -> None:
         self._colecao.document(job.id).set(job.model_dump())
+
+    def criar(self, job: Job) -> bool:
+        try:
+            self._colecao.document(job.id).create(job.model_dump())
+        except (AlreadyExists, Aborted):
+            # `Aborted`: o documento está travado por quem o grava neste instante.
+            return False
+        return True
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -301,6 +317,61 @@ class RepositorioDeChavesFirestore:
             transacao.set(self._colecao.document(registro.id), registro.model_dump())
 
         gravar(self._cliente.transaction())
+
+
+class RepositorioDeIdempotenciaFirestore:
+    """Um documento por reserva; o `expira_em` é o campo da política de TTL (48 h)."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DE_IDEMPOTENCIA
+    ) -> None:
+        self._cliente = cliente
+        self._colecao = cliente.collection(colecao)
+
+    def reservar(
+        self, escopo: str, chave: str, impressao: str, job_id: str, agora: datetime
+    ) -> tuple[Reserva, bool]:
+        referencia = self._colecao.document(id_da_reserva(escopo, chave))
+        criada = nova_reserva(impressao, job_id, agora)
+        # `create` é atômico e não disputa transação: com muitas chamadas simultâneas na
+        # mesma chave (o cliente que repete em paralelo), uma cria e as outras leem. Uma
+        # transação aqui esgotaria as tentativas sob essa disputa e daria 500. Se o
+        # Firestore aborta o `create` por disputa (`Aborted`), quem disputa é a que está
+        # criando: espera um pouco e lê a reserva dela.
+        for espera in (0.05, 0.1, 0.2, 0.4, 0.8, 0):
+            try:
+                referencia.create(criada.model_dump())
+                return criada, True
+            except AlreadyExists:
+                pass
+            except Aborted:
+                time.sleep(espera)
+                continue
+            doc = referencia.get()
+            if doc.exists:
+                existente = Reserva(**(doc.to_dict() or {}))
+                if existente.expira_em > agora:
+                    conferir(existente, impressao)
+                    return existente, False
+            break
+        else:
+            raise ServicoIndisponivel("Firestore disputado: tente de novo")
+        # Vencida (o TTL do Firestore demora a apagar) ou apagada agora: troca pela nova,
+        # na transação, para quem chegar junto ver a que ficou.
+
+        @firestore.transactional
+        def trocar_a_vencida(transacao: Any) -> tuple[Reserva, bool]:
+            atual = referencia.get(transaction=transacao)
+            if atual.exists:
+                existente = Reserva(**(atual.to_dict() or {}))
+                if existente.expira_em > agora:
+                    conferir(existente, impressao)
+                    return existente, False
+            transacao.set(referencia, criada.model_dump())
+            return criada, True
+
+        resultado: tuple[Reserva, bool] = trocar_a_vencida(self._cliente.transaction())
+        return resultado
 
 
 class RepositorioDeWebhooksFirestore:

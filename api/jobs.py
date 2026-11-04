@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -73,6 +73,13 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
+from api.idempotencia import (
+    TAMANHO_MAXIMO_DA_CHAVE,
+    ChaveReusadaComOutroCorpo,
+    RepositorioDeIdempotencia,
+    RepositorioDeIdempotenciaEmMemoria,
+    impressao_do_corpo,
+)
 from api.marcas import CatalogoDeMarcas
 from api.papeis import (
     Papel,
@@ -315,7 +322,8 @@ def _casa_etag(if_none_match: str | None, etag: str) -> bool:
 
 
 class JobCriado(JobPublico):
-    url_de_upload: str
+    # `None` na repetição de um envio cujo upload já passou da espera.
+    url_de_upload: str | None
 
 
 AcaoDeDownload = Literal["video.baixado", "decupagem.baixada"]
@@ -494,6 +502,10 @@ class RepositorioDeJobs(Protocol):
 
     def salvar(self, job: Job) -> None: ...
 
+    def criar(self, job: Job) -> bool:
+        """Grava só se o id não existe; `False` se já existia (não regrava)."""
+        ...
+
     def obter(self, job_id: str) -> Job | None: ...
 
     def transitar(
@@ -575,6 +587,9 @@ class RepositorioEmMemoria:
     def salvar(self, job: Job) -> None:
         self._jobs[job.id] = job
 
+    def criar(self, job: Job) -> bool:
+        return self._jobs.setdefault(job.id, job) is job
+
     def obter(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
@@ -625,6 +640,9 @@ class RepositorioEmMemoria:
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
+        raise ServicoIndisponivel
+
+    def criar(self, job: Job) -> bool:
         raise ServicoIndisponivel
 
     def obter(self, job_id: str) -> Job | None:
@@ -849,12 +867,17 @@ def criar_rotas(
     reindexar: Callable[[Job], object],
     acessos: AcessosAoVideo,
     tipos_de_objeto: Callable[[], list[str]] = list,
+    idempotencia: RepositorioDeIdempotencia | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
+    chaves_de_idempotencia = idempotencia or RepositorioDeIdempotenciaEmMemoria()
 
     @rotas.post("", status_code=202)
     def criar(
-        novo: NovoJob, chamador: Annotated[Chamador, Depends(_exige("criar"))]
+        novo: NovoJob,
+        chamador: Annotated[Chamador, Depends(_exige("criar"))],
+        resposta: Response,
+        idempotency_key: Annotated[str | None, Header()] = None,
     ) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
@@ -869,8 +892,33 @@ def criar_rotas(
             and novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date()
         ):
             raise HTTPException(422, "Data de exibição no futuro")
+        job_id, nova = uuid.uuid4().hex, True
+        if idempotency_key is not None:
+            if not (
+                0 < len(idempotency_key) <= TAMANHO_MAXIMO_DA_CHAVE
+                and idempotency_key.isascii()
+                and idempotency_key.isprintable()
+            ):
+                raise HTTPException(422, "Idempotency-Key inválida")
+            # A reserva é de quem chama: o mesmo texto em outro sistema é outra chave.
+            escopo = (
+                f"sistema:{sistema}" if sistema is not None else f"pessoa:{criado_por}"
+            )
+            try:
+                reserva, nova = chaves_de_idempotencia.reservar(
+                    escopo,
+                    idempotency_key,
+                    impressao_do_corpo(novo.model_dump(mode="json")),
+                    job_id,
+                    agora,
+                )
+            except ChaveReusadaComOutroCorpo:
+                raise HTTPException(
+                    409, "Idempotency-Key já usada com outro corpo"
+                ) from None
+            job_id, agora = reserva.job_id, reserva.criada_em
         job = Job(
-            id=uuid.uuid4().hex,
+            id=job_id,
             nome=novo.nome,
             tamanho_bytes=novo.tamanho_bytes,
             estado="aguardando_upload",
@@ -883,8 +931,19 @@ def criar_rotas(
             criado_em=agora,
             atualizado_em=agora,
         )
-        repositorio.salvar(job)
-        url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
+        # A repetição lê antes de gravar (muitas ao mesmo tempo brigariam pelo mesmo
+        # documento), e `criar` não regrava: a que chega antes de a primeira gravar não
+        # desfaz o estado do Job.
+        existente = None if nova else repositorio.obter(job.id)
+        if existente is not None:
+            job = existente
+        elif not repositorio.criar(job):
+            job = repositorio.obter(job.id) or job
+        if not nova:
+            resposta.status_code = 200
+        url = None
+        if job.estado == "aguardando_upload":
+            url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
     def _com_capa(job: Job) -> JobPublico:
