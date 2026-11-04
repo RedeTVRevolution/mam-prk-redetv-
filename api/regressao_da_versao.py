@@ -9,7 +9,8 @@ caso e mede os dois contra o esperado com o pareamento e a tolerância do
 requisito, o relatório conta os acertos de cada versão, diz por caso se melhorou, piorou ou
 ficou igual e confere a meta (`metas.json`). Grava Markdown e JSON em `PASTA`
 (`regressao-da-versao`). Saída 1 se algum requisito com meta fica abaixo dela (o portão
-antes de trocar a versão), 2 se a entrada é inválida.
+antes de trocar a versão), 2 se a entrada é inválida (meta de requisito que não existe,
+versão igual à aprovada).
 
 Sem `RESERVADOS=1` os casos reservados ficam fora; com ele, só eles entram. Sem `CONFIRMAR=1`
 só mostra o custo estimado (`CUSTO_POR_HORA_USD` por hora de trecho, já no preço do Batch).
@@ -147,6 +148,9 @@ def avaliar(
     metas: Mapping[str, float],
     relogio: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> Relatorio:
+    desconhecidos = sorted(set(metas) - set(REQUISITO_DO_TIPO.values()))
+    if desconhecidos:
+        raise ValueError(f"meta de requisito desconhecido: {', '.join(desconhecidos)}")
     resultados: list[ResultadoDoCaso] = []
     for caso in casos:
         nova = _no_trecho(transporte.itens(versao, caso), caso)
@@ -254,9 +258,13 @@ class DecupagensEmPasta:
         self.por_chave: dict[tuple[str, str], list[Item]] = {}
         for arq in sorted(pasta.glob("*.json")):
             d = Decupagem.model_validate_json(arq.read_bytes())
-            self.por_chave[(str(d.versao_pipeline), d.video.sha256)] = itens_do_modelo(
-                d
-            )
+            chave = (str(d.versao_pipeline), d.video.sha256)
+            if chave in self.por_chave:
+                raise ValueError(
+                    f"{arq.name}: outra decupagem da versão {chave[0]} para o vídeo "
+                    f"{chave[1][:12]}"
+                )
+            self.por_chave[chave] = itens_do_modelo(d)
 
     def itens(self, versao: str, caso: Caso) -> list[Item]:
         try:
@@ -281,6 +289,10 @@ def main(
         so_reservados = len(argumentos) > 1 and argumentos[1] == "1"
         pasta = Path(argumentos[2]) if len(argumentos) > 2 and argumentos[2] else None
         aprovada = versao_aprovada or ambiente.get("VERSAO_APROVADA") or VERSAO_PIPELINE
+        if aprovada == versao:
+            raise ValueError(
+                f"a VERSAO {versao} é a aprovada: diga a aprovada em VERSAO_APROVADA"
+            )
         custo = ambiente.get("CUSTO_POR_HORA_USD")
         casos = selecionar(
             ler_casos(Path(ambiente.get("CASOS") or PASTA_DOS_CASOS)), so_reservados
@@ -300,12 +312,16 @@ def main(
             escrever("Nada foi rodado: rode de novo com CONFIRMAR=1.")
             return 0
         if transporte is None:
-            transporte = DecupagensEmPasta(Path(ambiente.get("DECUPAGENS") or ""))
+            decupagens = ambiente.get("DECUPAGENS")
+            if not decupagens:
+                raise ValueError("falta DECUPAGENS, a pasta das decupagens")
+            transporte = DecupagensEmPasta(Path(decupagens))
         relatorio = avaliar(transporte, casos, versao, aprovada, metas)
-    except (ValueError, OSError) as e:  # pydantic.ValidationError é ValueError
+        md, js = gravar(relatorio, pasta or PASTA_DO_RELATORIO)
+    # pydantic.ValidationError é ValueError; o `ler_metas` lança TypeError.
+    except (ValueError, TypeError, OSError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    md, js = gravar(relatorio, pasta or PASTA_DO_RELATORIO)
     escrever(relatorio_em_markdown(relatorio))
     escrever(f"Relatórios: {md}, {js}")
     return 0 if relatorio.passou else 1

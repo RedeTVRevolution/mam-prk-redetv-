@@ -104,10 +104,45 @@ def test_meta_nao_atingida_da_saida_diferente_de_zero(tmp_path: Path) -> None:
     assert dados["passou"] is False
 
 
+def _ambiente(tmp_path: Path, casos: list[Caso], metas: str) -> dict[str, str]:
+    pasta = tmp_path / "casos"
+    for c in casos:
+        gravar_caso(pasta, c)
+    arquivo = tmp_path / "metas.json"
+    arquivo.write_text(metas)
+    return {"CASOS": str(pasta), "METAS": str(arquivo), "CONFIRMAR": "1"}
+
+
 def test_meta_atingida_sai_com_zero(tmp_path: Path) -> None:
     casos, transporte = _tres_casos()
-    r = avaliar(transporte, casos[2:], NOVA, APROVADA, {"pautas": 1.0})
-    assert r.passou is True
+    ambiente = _ambiente(tmp_path, casos[2:], '{"pautas": 1.0}')
+    assert main([NOVA, "", str(tmp_path / "s")], ambiente, transporte, APROVADA) == 0
+
+
+def test_meta_de_requisito_desconhecido_e_entrada_invalida(tmp_path: Path) -> None:
+    casos, transporte = _tres_casos()
+    ambiente = _ambiente(tmp_path, casos, '{"broll": 0.9}')
+    assert main([NOVA, "", str(tmp_path / "s")], ambiente, transporte, APROVADA) == 2
+    assert not (tmp_path / "s").exists()
+
+
+def test_metas_fora_do_formato_sao_entrada_invalida(tmp_path: Path) -> None:
+    casos, transporte = _tres_casos()
+    ambiente = _ambiente(tmp_path, casos, "[]")
+    assert main([NOVA, "", str(tmp_path / "s")], ambiente, transporte, APROVADA) == 2
+
+
+def test_versao_igual_a_aprovada_e_entrada_invalida(tmp_path: Path) -> None:
+    casos, transporte = _tres_casos()
+    ambiente = _ambiente(tmp_path, casos, "{}")
+    assert main([NOVA, "", str(tmp_path / "s")], ambiente, transporte, NOVA) == 2
+    assert transporte.chamadas == []
+
+
+def test_sem_decupagens_e_entrada_invalida(tmp_path: Path) -> None:
+    casos, _ = _tres_casos()
+    ambiente = _ambiente(tmp_path, casos, "{}")
+    assert main([NOVA, "", str(tmp_path / "s")], ambiente, None, APROVADA) == 2
 
 
 def test_reservados_so_entram_com_o_pedido() -> None:
