@@ -17,10 +17,11 @@ from api.eventos_do_job import (
     PublicadorEmMemoria,
     PublicadorPubSub,
     RepositorioQuePublicaOFim,
+    VerificadorDoPushDoGoogle,
     criar_rotas_do_push,
     repositorio_do_ambiente,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.webhook import (
     CofreEmMemoria,
     RepositorioDeWebhooksEmMemoria,
@@ -166,6 +167,30 @@ def test_publicador_pubsub_levanta_se_o_pubsub_recusa() -> None:
         publicador.publicar(MensagemDeEvento(sistema="Legado", evento=_evento(m)))
 
 
+def test_publicador_pubsub_repete_o_erro_passageiro_do_pubsub() -> None:
+    respostas = [(503, {}), (429, {}), (200, {"messageIds": ["1"]})]
+    esperas: list[float] = []
+    m = Mundo()
+    PublicadorPubSub(
+        "projects/p/topics/t", lambda *_: respostas.pop(0), esperas.append
+    ).publicar(MensagemDeEvento(sistema="Legado", evento=_evento(m)))
+    assert respostas == [] and len(esperas) == 2
+
+
+def test_publicador_pubsub_desiste_depois_das_tentativas() -> None:
+    chamadas: list[int] = []
+
+    def transporte(*_: Any) -> tuple[int, dict[str, Any]]:
+        chamadas.append(1)
+        return 503, {}
+
+    m = Mundo()
+    publicador = PublicadorPubSub("projects/p/topics/t", transporte, lambda _: None)
+    with pytest.raises(ErroDoPubSub):
+        publicador.publicar(MensagemDeEvento(sistema="Legado", evento=_evento(m)))
+    assert len(chamadas) == 3
+
+
 def test_sem_topico_no_ambiente_o_repositorio_fica_como_esta() -> None:
     jobs = RepositorioEmMemoria()
     assert repositorio_do_ambiente(jobs, RepositorioDeWebhooksEmMemoria, {}) is jobs
@@ -288,3 +313,36 @@ def test_sistema_que_apagou_o_webhook_tem_o_evento_descartado() -> None:
     m.webhooks = RepositorioDeWebhooksEmMemoria()  # outro repositório, vazio
     resposta = _enviar(_cliente(m, http), corpo)
     assert resposta.status_code == 204 and http.chamadas == []
+
+
+class VerificadorSemCertificados:
+    def confere(self, autorizacao: str | None) -> bool:
+        raise ServicoIndisponivel("certificados do Google fora do ar")
+
+
+def test_sem_os_certificados_do_google_o_push_devolve_503() -> None:
+    m, http = Mundo(), HttpFalso()
+    app = FastAPI()
+    app.include_router(
+        criar_rotas_do_push(
+            VerificadorSemCertificados(), m.webhooks, m.cofre, http, _publico
+        )
+    )
+    resposta = _enviar(TestClient(app), _push(m))
+    assert resposta.status_code == 503
+    assert http.chamadas == []
+
+
+def test_verificador_do_google_troca_falha_de_rede_por_servico_indisponivel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from google.auth.exceptions import TransportError
+    from google.oauth2 import id_token
+
+    def sem_rede(*_: Any) -> Any:
+        raise TransportError("sem rede")  # type: ignore[no-untyped-call]
+
+    monkeypatch.setattr(id_token, "verify_oauth2_token", sem_rede)
+    verificador = VerificadorDoPushDoGoogle("aud", "push@p.iam.gserviceaccount.com")
+    with pytest.raises(ServicoIndisponivel):
+        verificador.confere("Bearer x")

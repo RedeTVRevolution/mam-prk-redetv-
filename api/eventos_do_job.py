@@ -9,18 +9,29 @@ tentativa, então o cliente descarta a repetida. A rede e o Pub/Sub ficam atrás
 
 import base64
 import binascii
+import json
 import logging
 import os
+import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
 import google.auth
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from google.auth.transport.requests import AuthorizedSession
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from api.jobs import Estado, Job, RepositorioDeJobs, agora_utc
+from api.jobs import (
+    Estado,
+    FiltroDeJobs,
+    Job,
+    PaginaDeJobs,
+    RepositorioDeJobs,
+    ServicoIndisponivel,
+    agora_utc,
+)
 from api.webhook import (
     Cofre,
     Evento,
@@ -36,6 +47,9 @@ log = logging.getLogger(__name__)
 
 URL_BASE = "https://pubsub.googleapis.com/v1"
 CAMINHO_DO_PUSH = "/interno/webhook"
+# Status do publish que passam com uma nova tentativa, e a espera antes de cada uma.
+STATUS_REPETIVEIS_DO_PUBSUB = {429, 500, 502, 503, 504}
+ESPERAS_DO_PUBSUB = (1.0, 2.0)
 
 # (método, caminho a partir de /v1, corpo) -> (status HTTP, resposta em JSON)
 Transporte = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
@@ -67,28 +81,39 @@ class ErroDoPubSub(Exception):
 
 
 class PublicadorPubSub:
-    def __init__(self, topico: str, transporte: Transporte) -> None:
+    def __init__(
+        self,
+        topico: str,
+        transporte: Transporte,
+        esperar: Callable[[float], None] = time.sleep,
+    ) -> None:
         # `projects/<p>/topics/<t>`
         self._topico = topico
         self._transporte = transporte
+        self._esperar = esperar
 
     def publicar(self, mensagem: MensagemDeEvento) -> None:
+        """Repete o erro passageiro do Pub/Sub (429, 5xx) algumas vezes: depois que o
+        Job mudou de estado, ninguém mais publica esse evento."""
         dados = base64.b64encode(mensagem.model_dump_json().encode()).decode()
-        status, resposta = self._transporte(
-            "POST",
-            f"{self._topico}:publish",
-            {
-                "messages": [
-                    {
-                        "data": dados,
-                        "attributes": {
-                            "evento_id": mensagem.evento.id,
-                            "tipo": mensagem.evento.tipo,
-                        },
-                    }
-                ]
-            },
-        )
+        corpo = {
+            "messages": [
+                {
+                    "data": dados,
+                    "attributes": {
+                        "evento_id": mensagem.evento.id,
+                        "tipo": mensagem.evento.tipo,
+                    },
+                }
+            ]
+        }
+        for espera in (*ESPERAS_DO_PUBSUB, None):
+            status, resposta = self._transporte(
+                "POST", f"{self._topico}:publish", corpo
+            )
+            if status not in STATUS_REPETIVEIS_DO_PUBSUB or espera is None:
+                break
+            self._esperar(espera)
         if status != 200:
             detalhe = resposta.get("error", {}).get("status", "")
             raise ErroDoPubSub(f"Pub/Sub respondeu {status} {detalhe}".strip())
@@ -176,7 +201,7 @@ class RepositorioQuePublicaOFim:
     def listar(self) -> list[Job]:
         return self._repositorio.listar()
 
-    def consultar(self, filtro: Any) -> Any:
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         return self._repositorio.consultar(filtro)
 
 
@@ -197,7 +222,8 @@ def repositorio_do_ambiente(
 
 
 def jobs_do_ambiente(cliente: Any) -> RepositorioDeJobs:
-    """O repositório do Firestore que os Jobs e a API usam onde um Job pode terminar."""
+    """O repositório do Firestore dos Jobs de processamento onde um Job pode terminar
+    (validação, transcrição, OCR e análise). A API não o usa: ela só leva a `cancelado`."""
     from api.nuvem import RepositorioDeWebhooksFirestore, RepositorioFirestore
 
     return repositorio_do_ambiente(
@@ -218,11 +244,17 @@ class VerificadorDoPushDoGoogle:
     da assinatura (`PUSH_AUDIENCIA`, `PUSH_CONTA`)."""
 
     def __init__(self, audiencia: str, conta: str) -> None:
+        from google.auth.transport import requests as transporte
+
         self._audiencia = audiencia
         self._conta = conta
+        # Uma sessão só, para reaproveitar a conexão com quem serve os certificados.
+        self._pedido = transporte.Request()
 
     def confere(self, autorizacao: str | None) -> bool:
-        from google.auth.transport import requests as transporte
+        """Sem os certificados do Google, levanta `ServicoIndisponivel` (503, e o
+        Pub/Sub tenta de novo), em vez de recusar um token que pode ser bom."""
+        from google.auth.exceptions import TransportError
         from google.oauth2 import id_token
 
         if not autorizacao or not autorizacao.startswith("Bearer "):
@@ -230,9 +262,11 @@ class VerificadorDoPushDoGoogle:
         try:
             token = id_token.verify_oauth2_token(  # type: ignore[no-untyped-call]
                 autorizacao.removeprefix("Bearer "),
-                transporte.Request(),
+                self._pedido,
                 self._audiencia,
             )
+        except TransportError as erro:
+            raise ServicoIndisponivel("certificados do Google fora do ar") from erro
         except ValueError:
             return False
         return bool(token.get("email_verified")) and token.get("email") == self._conta
@@ -256,12 +290,14 @@ def criar_rotas_do_push(
 ) -> APIRouter:
     rotas = APIRouter()
 
-    @rotas.post(CAMINHO_DO_PUSH, status_code=204)
-    async def receber(request: Request) -> Response:
-        if not verificador.confere(request.headers.get("authorization")):
-            raise HTTPException(401, "Not authenticated")
+    def tratar(autorizacao: str | None, corpo: bytes) -> Response:
         try:
-            mensagem = _mensagem(await request.json())
+            if not verificador.confere(autorizacao):
+                raise HTTPException(401, "Not authenticated")
+        except ServicoIndisponivel as erro:
+            raise HTTPException(503, str(erro)) from erro
+        try:
+            mensagem = _mensagem(json.loads(corpo))
         except ValueError:
             mensagem = None
         if mensagem is None:
@@ -281,5 +317,14 @@ def criar_rotas_do_push(
         if resultado == "descartar":
             log.error("evento %s não tem como ser entregue", mensagem.evento.id)
         return Response(status_code=204)
+
+    @rotas.post(CAMINHO_DO_PUSH, status_code=204)
+    async def receber(request: Request) -> Response:
+        # A conferência do token, o Firestore e a entrega (até 30 s) bloqueiam: rodam
+        # fora do laço de eventos, para o destino lento não parar as outras rotas.
+        corpo = await request.body()
+        return await run_in_threadpool(
+            tratar, request.headers.get("authorization"), corpo
+        )
 
     return rotas
