@@ -73,6 +73,7 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
+from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
 from api.idempotencia import (
     TAMANHO_MAXIMO_DA_CHAVE,
     ChaveReusadaComOutroCorpo,
@@ -868,8 +869,10 @@ def criar_rotas(
     acessos: AcessosAoVideo,
     tipos_de_objeto: Callable[[], list[str]] = list,
     idempotencia: RepositorioDeIdempotencia | None = None,
+    eventos: Eventos | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
+    publicador = eventos or SemEventos()
     chaves_de_idempotencia = idempotencia or RepositorioDeIdempotenciaEmMemoria()
 
     @rotas.post("", status_code=202)
@@ -942,6 +945,16 @@ def criar_rotas(
             job = existente
         elif not repositorio.criar(job):
             job = repositorio.obter(job.id) or job
+        else:
+            registrar(
+                publicador,
+                "envio",
+                quem_do_chamador(chamador),
+                agora,
+                job_id=job.id,
+                programa=job.programa,
+                tamanho_bytes=job.tamanho_bytes,
+            )
         if not nova:
             resposta.status_code = 200
         url = None
@@ -1231,9 +1244,21 @@ def criar_rotas(
         modelo, versao_atual = _ler_modelo(job.id)
         correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
         # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
+        _registrar_correcao(autor, job, correcao)
         if not correcao.exige_aprovacao:
             reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
+
+    def _registrar_correcao(autor: Usuario, job: Job, correcao: Correcao) -> None:
+        registrar(
+            publicador,
+            "correcao",
+            quem_do_chamador(autor),
+            relogio(),
+            job_id=job.id,
+            programa=job.programa,
+            tipo_de_correcao=correcao.tipo,
+        )
 
     def _sugestoes_abertas(
         job: Job,
@@ -1290,6 +1315,7 @@ def criar_rotas(
         ]
         for correcao in gravadas:
             correcoes.acrescentar(correcao)
+            _registrar_correcao(autor, job, correcao)
         sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
         if any(not c.exige_aprovacao for c in gravadas):
             reindexar(job)
@@ -1346,6 +1372,7 @@ def criar_rotas(
                 "Correção já desfeita, saiu da fila, não é uma renomeação"
                 " ou não casa com a versão atual",
             ) from None
+        _registrar_correcao(autor, job, registro)
         reindexar(job)
         return {"id": registro.id}
 

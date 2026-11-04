@@ -23,6 +23,13 @@ from fastapi.concurrency import run_in_threadpool
 from google.auth.transport.requests import AuthorizedSession
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from api.eventos_de_uso import (
+    Eventos,
+    EventosPubSub,
+    Quem,
+    SemEventos,
+    registrar,
+)
 from api.jobs import (
     Estado,
     FiltroDeJobs,
@@ -50,6 +57,9 @@ CAMINHO_DO_PUSH = "/interno/webhook"
 # Status do publish que passam com uma nova tentativa, e a espera antes de cada uma.
 STATUS_REPETIVEIS_DO_PUBSUB = {429, 500, 502, 503, 504}
 ESPERAS_DO_PUBSUB = (1.0, 2.0)
+# O evento de uso não vale uma espera longa na ação de quem o causou.
+TEMPO_DO_EVENTO_DE_USO_S = 5.0
+FIM_DE_JOB: tuple[Estado, ...] = ("concluido", "falhou")
 
 # (método, caminho a partir de /v1, corpo) -> (status HTTP, resposta em JSON)
 Transporte = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
@@ -119,7 +129,7 @@ class PublicadorPubSub:
             raise ErroDoPubSub(f"Pub/Sub respondeu {status} {detalhe}".strip())
 
 
-def transporte_do_pubsub() -> Transporte:
+def transporte_do_pubsub(timeout_s: float = 30) -> Transporte:
     credenciais, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/pubsub"]
     )
@@ -129,7 +139,7 @@ def transporte_do_pubsub() -> Transporte:
         metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> tuple[int, dict[str, Any]]:
         resposta = sessao.request(  # type: ignore[no-untyped-call]
-            metodo, f"{URL_BASE}/{caminho}", json=corpo, timeout=30
+            metodo, f"{URL_BASE}/{caminho}", json=corpo, timeout=timeout_s
         )
         try:
             return resposta.status_code, resposta.json()
@@ -208,20 +218,100 @@ class RepositorioQuePublicaOFim:
         return self._repositorio.consultar(filtro)
 
 
+class RepositorioQueRegistraOFim:
+    """Repositório de Jobs que publica o evento de uso (#279) a cada transição para
+    `concluido` ou `falhou`. Como no webhook, `trocar` (correção de estado à mão) não
+    dispara nada."""
+
+    def __init__(
+        self,
+        repositorio: RepositorioDeJobs,
+        eventos: Eventos,
+        relogio: Callable[[], datetime] = agora_utc,
+    ) -> None:
+        self._repositorio = repositorio
+        self._eventos = eventos
+        self._relogio = relogio
+
+    def salvar(self, job: Job) -> None:
+        self._repositorio.salvar(job)
+
+    def criar(self, job: Job) -> bool:
+        return self._repositorio.criar(job)
+
+    def obter(self, job_id: str) -> Job | None:
+        return self._repositorio.obter(job_id)
+
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        job = self._repositorio.transitar(job_id, de, mudancas)
+        if job is not None and job.estado != de and job.estado in FIM_DE_JOB:
+            quem: Quem = (
+                ("sistema", job.sistema)
+                if job.sistema is not None
+                else ("usuario", job.criado_por)
+            )
+            registrar(
+                self._eventos,
+                "fim_de_processamento",
+                quem,
+                self._relogio(),
+                job_id=job.id,
+                programa=job.programa,
+                estado=job.estado,
+                codigo_falha=job.codigo_falha,
+            )
+        return job
+
+    def trocar(
+        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
+    ) -> Job | None:
+        return self._repositorio.trocar(job_id, mudar)
+
+    def remover(self, job_id: str) -> None:
+        self._repositorio.remover(job_id)
+
+    def listar(self) -> list[Job]:
+        return self._repositorio.listar()
+
+    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        return self._repositorio.consultar(filtro)
+
+
+def eventos_do_ambiente(
+    ambiente: Mapping[str, str],
+    transporte: Callable[[float], Transporte] = transporte_do_pubsub,
+) -> Eventos:
+    """Com `PUBSUB_TOPICO_USO` (o Terraform a define na web e nos Jobs que terminam um
+    Job), publica no tópico dos eventos de uso; sem ela, descarta."""
+    topico = ambiente.get("PUBSUB_TOPICO_USO")
+    if not topico:
+        return SemEventos()
+    return EventosPubSub(topico, transporte(TEMPO_DO_EVENTO_DE_USO_S))
+
+
 def repositorio_do_ambiente(
     repositorio: RepositorioDeJobs,
     webhooks: Callable[[], RepositorioDeWebhooks],
     ambiente: Mapping[str, str],
     transporte: Callable[[], Transporte] = transporte_do_pubsub,
+    transporte_de_uso: Callable[[float], Transporte] = transporte_do_pubsub,
 ) -> RepositorioDeJobs:
     """Com `PUBSUB_TOPICO_EVENTOS` (o Terraform a define nos serviços e Jobs que
-    terminam um Job), o repositório publica o fim; sem ela, fica como está."""
+    terminam um Job), o repositório publica o fim para o webhook; com
+    `PUBSUB_TOPICO_USO`, publica também o evento de uso. Sem elas, fica como está."""
     topico = ambiente.get("PUBSUB_TOPICO_EVENTOS")
-    if not topico:
-        return repositorio
-    return RepositorioQuePublicaOFim(
-        repositorio, webhooks(), PublicadorPubSub(topico, transporte())
-    )
+    if topico:
+        repositorio = RepositorioQuePublicaOFim(
+            repositorio, webhooks(), PublicadorPubSub(topico, transporte())
+        )
+    if ambiente.get("PUBSUB_TOPICO_USO"):
+        repositorio = RepositorioQueRegistraOFim(
+            repositorio,
+            eventos_do_ambiente(ambiente, transporte_de_uso),
+        )
+    return repositorio
 
 
 def jobs_do_ambiente(cliente: Any) -> RepositorioDeJobs:
