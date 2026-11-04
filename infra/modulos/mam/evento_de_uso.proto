@@ -1,14 +1,15 @@
 // Esquema do tópico de eventos de uso (#279). Os campos são os de `EventoDeUso` em
 // `api/eventos_de_uso.py` (um teste confere); a tabela do BigQuery sai dele.
-// O texto da consulta da busca não existe aqui de propósito.
+// O texto da consulta da busca não existe aqui de propósito. O Pub/Sub aceita uma
+// mensagem só no primeiro nível: as outras ficam aninhadas.
 syntax = "proto2";
 
-message Filtro {
-  required string nome = 1;
-  required string valor = 2;
-}
-
 message EventoDeUso {
+  message Filtro {
+    required string nome = 1;
+    required string valor = 2;
+  }
+
   required string id = 1;
   required string tipo = 2;
   // Microssegundos desde 1970 (a assinatura grava como TIMESTAMP).

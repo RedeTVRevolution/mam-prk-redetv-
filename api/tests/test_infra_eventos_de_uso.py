@@ -17,14 +17,22 @@ def _bloco(texto: str, cabecalho: str) -> str:
 
 
 def _campos_do_proto() -> set[str]:
+    # Os campos do primeiro nível de `EventoDeUso` têm 2 espaços; os das mensagens
+    # aninhadas (Filtro), 4.
     mensagem = _bloco(PROTO, "message EventoDeUso")
     return set(
         re.findall(
-            r"^\s*(?:required|optional|repeated)\s+\S+\s+(\w+)\s*=",
+            r"^  (?:required|optional|repeated)\s+\S+\s+(\w+)\s*=",
             mensagem,
             re.MULTILINE,
         )
     )
+
+
+def test_o_proto_tem_uma_mensagem_so_no_primeiro_nivel() -> None:
+    # O Pub/Sub recusa o esquema com duas ("Too many message types specified in
+    # schema definition") e o `terraform validate` não chama a API: o deploy caía.
+    assert re.findall(r"^message (\w+)", PROTO, re.MULTILINE) == ["EventoDeUso"]
 
 
 def test_os_campos_do_proto_sao_os_do_evento_e_sem_o_texto_da_consulta() -> None:
