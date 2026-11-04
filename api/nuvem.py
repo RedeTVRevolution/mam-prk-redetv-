@@ -852,6 +852,11 @@ class RepositorioDeAuditoriaFirestore:
             )
         if filtro.acao is not None:
             consulta = consulta.where(filter=FieldFilter("acao", "==", filtro.acao))
+        if filtro.acoes is not None:
+            # O `in` usa os mesmos índices da igualdade.
+            consulta = consulta.where(
+                filter=FieldFilter("acao", "in", list(filtro.acoes))
+            )
         if filtro.de is not None:
             consulta = consulta.where(filter=FieldFilter("quando", ">=", filtro.de))
         if filtro.ate is not None:

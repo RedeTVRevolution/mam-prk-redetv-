@@ -137,6 +137,7 @@ export default function Visualizador({
   const [mudo, setMudo] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const [falhaDoJson, setFalhaDoJson] = useState<string | null>(null)
+  const [baixandoJson, setBaixandoJson] = useState(false)
   const [baixandoVideo, setBaixandoVideo] = useState(false)
   const [falhaDoVideo, setFalhaDoVideo] = useState<string | null>(null)
   const [decupagem, setDecupagem] = useState<Decupagem | null>(null)
@@ -1054,10 +1055,13 @@ export default function Visualizador({
 
   async function baixar() {
     setFalhaDoJson(null)
+    setBaixandoJson(true)
     try {
       baixarDecupagem(job.nome, await api.job(job.id).baixarDecupagem())
     } catch (e) {
       if (!(e instanceof SessaoExpirada)) setFalhaDoJson(codigoDoErro(e))
+    } finally {
+      setBaixandoJson(false)
     }
   }
 
@@ -1167,7 +1171,12 @@ export default function Visualizador({
           )}
           {job.estado === 'concluido' && (
             <Tooltip label="Baixar decupagem (JSON)">
-              <ActionIcon variant="default" aria-label="Baixar decupagem (JSON)" onClick={() => void baixar()}>
+              <ActionIcon
+                variant="default"
+                aria-label="Baixar decupagem (JSON)"
+                loading={baixandoJson}
+                onClick={() => void baixar()}
+              >
                 <IconDownload />
               </ActionIcon>
             </Tooltip>

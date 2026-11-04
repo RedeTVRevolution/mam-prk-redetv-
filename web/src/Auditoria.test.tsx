@@ -196,6 +196,20 @@ test('o filtro de ação agrupa os acessos e manda as três ações à API', asy
   for (const nome of ['Abriu o vídeo', 'Baixou o vídeo', 'Baixou a decupagem']) expect(within(lista).getByRole('option', { name: nome })).toBeTruthy()
 })
 
+test('os acessos em outra ordem na URL ainda aparecem no campo Ação; duas ações soltas saem do filtro', async () => {
+  await abrir('/admin/auditoria?alvo=j1&acao=decupagem.baixada,video.aberto,video.baixado,video.aberto')
+  await linhaDe('TV Fama')
+  expect((screen.getByRole('combobox', { name: 'Ação' }) as HTMLInputElement).value).toBe('Todos os acessos')
+  expect(consultas.at(-1)!.getAll('acao')).toHaveLength(3)
+
+  cleanup()
+  consultas.length = 0
+  await abrir('/admin/auditoria?alvo=j1&acao=video.aberto,video.baixado')
+  await linhaDe('TV Fama')
+  expect(consultas.at(-1)!.getAll('acao')).toEqual([])
+  expect((screen.getByRole('combobox', { name: 'Ação' }) as HTMLInputElement).value).toBe('Todas as ações')
+})
+
 test('o período vai à API como dia inteiro de São Paulo', async () => {
   await abrir('/admin/auditoria?de=2026-10-27&ate=2026-10-28')
   await linhaDe('TV Fama')

@@ -87,15 +87,23 @@ export function fraseDaAcao(acao: string): string {
   return Object.hasOwn(FRASE_DA_ACAO, acao) ? FRASE_DA_ACAO[acao as AcaoDaAuditoria] : acao
 }
 
+// Ação desconhecida num link editado à mão sai do filtro, em vez de fazer a API recusar.
+// Várias ações só valem como o grupo dos acessos inteiro, em qualquer ordem: é a única
+// combinação que o campo Ação sabe mostrar.
+function acaoDoFiltro(acoes: Set<string>): string {
+  if (acoes.size === 1) return [...acoes][0]!
+  const acessos = acoes.size === ACOES_DE_ACESSO.length && ACOES_DE_ACESSO.every((a) => acoes.has(a))
+  return acessos ? FILTRO_DE_ACESSOS : ''
+}
+
 export function filtrosDaAuditoria(busca: string): FiltrosDaAuditoria {
   const p = new URLSearchParams(busca)
   const data = (nome: string) => (DATA.test(p.get(nome) ?? '') ? p.get(nome)! : '')
-  const acoes = (p.get('acao') ?? '').split(',')
+  const acoes = new Set((p.get('acao') ?? '').split(',').filter((a) => Object.hasOwn(FRASE_DA_ACAO, a)))
   return {
     pessoa: p.get('pessoa') ?? '',
     alvo: p.get('alvo') ?? '',
-    // Ação desconhecida num link editado à mão sai do filtro, em vez de fazer a API recusar.
-    acao: acoes.filter((a) => Object.hasOwn(FRASE_DA_ACAO, a)).join(','),
+    acao: acaoDoFiltro(acoes),
     de: data('de'),
     ate: data('ate'),
   }

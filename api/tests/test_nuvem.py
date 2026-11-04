@@ -1139,6 +1139,13 @@ class TestRepositorioDeAuditoriaFirestore:
             FiltroDeAuditoria(alvo_id="v1", acao="item.para_lixeira")
         )
         assert [r.id for r in por_alvo.registros] == ["c"]
+        varias = auditoria.consultar(
+            FiltroDeAuditoria(
+                alvo_id="v1", acoes=("item.para_lixeira", "chave.emitida"), limite=1
+            )
+        )
+        assert [r.id for r in varias.registros] == ["c"]
+        assert varias.proximo_cursor is not None
         periodo = auditoria.consultar(
             FiltroDeAuditoria(
                 de=BASE + timedelta(minutes=5), ate=BASE + timedelta(minutes=15)

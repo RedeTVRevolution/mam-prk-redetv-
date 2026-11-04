@@ -78,7 +78,7 @@ export interface ClienteDoJob {
   /** URL assinada do JPEG `arquivo` (`plano-0.jpg`) de um momento da decupagem. */
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
-  /** URL assinada para baixar o MP4; a abertura vai à auditoria (`video.baixado`). */
+  /** URL assinada para baixar o MP4; o download vai à auditoria (`video.baixado`). */
   baixarVideo(): Promise<Reproducao>
   /** O arquivo JSON da decupagem, pela rota do servidor que registra o download. */
   baixarDecupagem(): Promise<Blob>
