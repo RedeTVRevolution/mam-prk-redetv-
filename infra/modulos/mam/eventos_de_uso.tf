@@ -54,6 +54,8 @@ resource "google_bigquery_table" "eventos_de_uso" {
     { name = "metodo", type = "STRING", mode = "NULLABLE", description = "Só na chamada de API" },
     { name = "rota", type = "STRING", mode = "NULLABLE" },
     { name = "status", type = "INTEGER", mode = "NULLABLE" },
+    { name = "segundos_de_processamento", type = "INTEGER", mode = "NULLABLE", description = "Só no fim de processamento: do registro do Job ao fim" },
+    { name = "n_resultados", type = "INTEGER", mode = "NULLABLE", description = "Só na busca: quantos vídeos trouxe; 0 é busca sem resultado" },
   ])
 }
 

@@ -27,4 +27,6 @@ message EventoDeUso {
   optional string metodo = 14;
   optional string rota = 15;
   optional int64 status = 16;
+  optional int64 segundos_de_processamento = 17;
+  optional int64 n_resultados = 18;
 }

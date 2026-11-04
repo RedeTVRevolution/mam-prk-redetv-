@@ -97,8 +97,16 @@ def banco() -> sqlite3.Connection:
         job_id="v2",
         programa="Hoje",
     )
-    _evento(b, "e4", "busca", "2026-11-01T13:00:00+00:00", "ana")
-    _evento(b, "e5", "busca", "2026-11-01T13:01:00+00:00", "ana", programa="Hoje")
+    _evento(b, "e4", "busca", "2026-11-01T13:00:00+00:00", "ana", n_resultados=0)
+    _evento(
+        b,
+        "e5",
+        "busca",
+        "2026-11-01T13:01:00+00:00",
+        "ana",
+        programa="Hoje",
+        n_resultados=3,
+    )
     _evento(
         b,
         "e6",
@@ -141,6 +149,7 @@ def banco() -> sqlite3.Connection:
         job_id="v1",
         programa="Hoje",
         estado="concluido",
+        segundos_de_processamento=3600,
     )
     _evento(
         b,
@@ -152,6 +161,7 @@ def banco() -> sqlite3.Connection:
         programa="Hoje",
         estado="falhou",
         codigo_falha="X",
+        segundos_de_processamento=600,
     )
     _evento(
         b,
@@ -163,11 +173,12 @@ def banco() -> sqlite3.Connection:
         job_id="v3",
         programa="Fala",
         estado="concluido",
+        segundos_de_processamento=1800,
     )
     # Dia 2: 02:00 UTC ainda é dia 1 em São Paulo (-03:00); 03:00 UTC já é o dia 2.
     _evento(b, "e13", "login", "2026-11-02T02:00:00+00:00", "ana")
     _evento(b, "e14", "login", "2026-11-02T03:00:00+00:00", "ana")
-    _evento(b, "e15", "busca", "2026-11-02T13:00:00+00:00", "beto")
+    _evento(b, "e15", "busca", "2026-11-02T13:00:00+00:00", "beto")  # sem n_resultados
     b.executemany(
         "INSERT INTO momentos VALUES (?, ?)",
         [("v1", 2 * HORA_MS), ("v1", 2 * HORA_MS), ("v3", HORA_MS)],
@@ -316,6 +327,7 @@ def test_o_job_reprocessado_conta_uma_vez_por_estado_final(
         job_id="v1",
         programa="Hoje",
         estado="concluido",
+        segundos_de_processamento=3600,
     )
     _evento(
         banco,
@@ -398,3 +410,37 @@ def test_a_web_recebe_so_tabelas_que_o_sql_cria() -> None:
     principal = (MODULO / "main.tf").read_text()
     for nome in ("POR_DIA_E_USUARIO", "POR_DIA_E_PROGRAMA"):
         assert f'"PAINEL_TABELA_{nome}"' in principal
+
+
+def test_o_tempo_de_processamento_soma_so_os_concluidos(
+    banco: sqlite3.Connection,
+) -> None:
+    _resumir(banco)
+
+    ana = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0]
+    dia1 = _tabela(banco, "uso_por_dia", "dia")[0]
+    hoje = _tabela(banco, "uso_por_dia_e_programa", "programa")[1]
+    cms = _tabela(banco, "uso_por_usuario", "quem_id")[2]
+
+    assert ana["segundos_de_processamento"] == 3600  # o que falhou (600) fica de fora
+    assert dia1["segundos_de_processamento"] == 5400
+    assert hoje["segundos_de_processamento"] == 3600
+    assert cms["segundos_de_processamento"] == 1800
+
+
+def test_busca_sem_resultado_e_a_que_trouxe_zero_videos(
+    banco: sqlite3.Connection,
+) -> None:
+    _resumir(banco)
+
+    ana, beto = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0:2]
+    dia1, dia2 = _tabela(banco, "uso_por_dia", "dia")
+    hoje = _tabela(banco, "uso_por_dia_e_programa", "programa")[1]
+
+    assert (ana["buscas"], ana["buscas_sem_resultado"]) == (2, 1)
+    assert beto["buscas_sem_resultado"] == 0
+    assert dia1["buscas_sem_resultado"] == 1
+    # A busca de antes do campo existir (sem `n_resultados`) não conta como vazia.
+    assert (dia2["buscas"], dia2["buscas_sem_resultado"]) == (1, 0)
+    assert hoje["buscas_sem_resultado"] == 0
+    assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["buscas_sem_resultado"] == 1

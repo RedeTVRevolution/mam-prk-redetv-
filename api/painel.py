@@ -10,7 +10,8 @@ abertura; filtro novo, sim: é outra coisa vista. As rotas leem só as tabelas r
 import logging
 import uuid
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 
@@ -21,11 +22,11 @@ from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeA
 from api.auth import ChamadorAutenticado, Usuario
 from api.jobs import ServicoIndisponivel, _confere_permissao
 from api.relatorios import confere_o_pedido, csv_em_texto, ou_503, resposta_em_csv
-from api.resumos_de_uso import AcessoDoDia, ResumosDeUso
+from api.resumos_de_uso import AcessoDoDia, ResumosDeUso, UsoDoDia
 from api.usuarios import ContasDeUsuario
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
-Aba = Literal["acessos"]
+Aba = Literal["acessos", "videos", "buscas"]
 
 log = logging.getLogger(__name__)
 
@@ -264,6 +265,289 @@ def relatorio_de_acessos(
     )
 
 
+COLUNAS_DO_CSV_DE_VIDEOS = (
+    "dia",
+    "quem_tipo",
+    "quem_id",
+    "email",
+    "programa",
+    "enviados",
+    "concluidos",
+    "falhos",
+    "horas_concluidas",
+    "segundos_de_processamento",
+)
+COLUNAS_DO_CSV_DE_BUSCAS = (
+    "dia",
+    "quem_tipo",
+    "quem_id",
+    "email",
+    "programa",
+    "buscas",
+    "sem_resultado",
+)
+
+
+class NumerosDeVideos(BaseModel):
+    """Os vídeos de um recorte (o dia, o programa, a pessoa ou o total). O tempo de
+    processamento é o dos concluídos, do registro do Job ao fim: `tempo_medio_s` é a média
+    dele, vazia sem nenhum concluído."""
+
+    enviados: int
+    concluidos: int
+    falhos: int
+    horas_concluidas: float
+    tempo_medio_s: float | None
+
+
+class DiaDeVideos(NumerosDeVideos):
+    dia: date
+
+
+class ProgramaDeVideos(NumerosDeVideos):
+    programa: str
+
+
+class QuemDeVideos(NumerosDeVideos):
+    quem_tipo: Literal["usuario", "sistema"]
+    quem_id: str
+    email: str | None
+
+
+class RelatorioDeVideos(BaseModel):
+    desde: date | None
+    ate: date | None
+    programa: str | None
+    usuario: str | None
+    total: NumerosDeVideos
+    por_dia: list[DiaDeVideos]
+    # Vazio quando o filtro é de usuário: o programa só existe na tabela por programa.
+    por_programa: list[ProgramaDeVideos]
+    # Vazio quando o filtro é de programa, pelo mesmo motivo.
+    por_usuario: list[QuemDeVideos]
+
+
+class NumerosDeBuscas(BaseModel):
+    buscas: int
+    sem_resultado: int
+
+
+class DiaDeBuscas(NumerosDeBuscas):
+    dia: date
+    usuarios_que_buscam: int | None
+
+
+class QuemDeBuscas(NumerosDeBuscas):
+    quem_tipo: Literal["usuario", "sistema"]
+    quem_id: str
+    email: str | None
+
+
+class TotalDeBuscas(NumerosDeBuscas):
+    usuarios_que_buscam: int | None
+
+
+class RelatorioDeBuscas(BaseModel):
+    desde: date | None
+    ate: date | None
+    programa: str | None
+    usuario: str | None
+    total: TotalDeBuscas
+    por_dia: list[DiaDeBuscas]
+    # Vazio quando o filtro é de programa: a tabela por programa não sabe quem buscou, e
+    # `usuarios_que_buscam` fica sem valor.
+    por_usuario: list[QuemDeBuscas]
+
+
+@dataclass
+class _SomaDeUso:
+    enviados: int = 0
+    concluidos: int = 0
+    falhos: int = 0
+    horas: float = 0.0
+    segundos: int = 0
+    buscas: int = 0
+    sem_resultado: int = 0
+
+    def somar(self, u: UsoDoDia) -> None:
+        self.enviados += u.videos_enviados
+        self.concluidos += u.videos_concluidos
+        self.falhos += u.videos_falhos
+        self.horas += u.horas_concluidas
+        self.segundos += u.segundos_de_processamento
+        self.buscas += u.buscas
+        self.sem_resultado += u.buscas_sem_resultado
+
+    def videos(self) -> dict[str, object]:
+        return {
+            "enviados": self.enviados,
+            "concluidos": self.concluidos,
+            "falhos": self.falhos,
+            "horas_concluidas": round(self.horas, 2),
+            "tempo_medio_s": (
+                round(self.segundos / self.concluidos, 1) if self.concluidos else None
+            ),
+        }
+
+    def de_buscas(self) -> dict[str, int]:
+        return {"buscas": self.buscas, "sem_resultado": self.sem_resultado}
+
+
+def _somas_por[C](
+    linhas: list[UsoDoDia], chave: Callable[[UsoDoDia], C]
+) -> dict[C, _SomaDeUso]:
+    somas: dict[C, _SomaDeUso] = defaultdict(_SomaDeUso)
+    for u in linhas:
+        somas[chave(u)].somar(u)
+    return somas
+
+
+def _tem_video(u: UsoDoDia) -> bool:
+    return bool(u.videos_enviados or u.videos_concluidos or u.videos_falhos)
+
+
+def _dias_do_intervalo(dias: Iterable[date]) -> list[date]:
+    """Do primeiro ao último dia, sem buracos: o gráfico não cola dias distantes."""
+    dias = list(dias)
+    if not dias:
+        return []
+    primeiro = min(dias)
+    return [
+        primeiro + timedelta(days=i) for i in range((max(dias) - primeiro).days + 1)
+    ]
+
+
+def relatorio_de_videos(
+    base: list[UsoDoDia],
+    por_programa: list[UsoDoDia],
+    emails: dict[str, str],
+    filtro: FiltroDoPainel,
+) -> RelatorioDeVideos:
+    """`base` são as linhas do filtro (por programa ou por pessoa, veja `_base_de_uso`);
+    `por_programa` são as linhas por programa de um pedido sem filtro de usuário."""
+    base = [u for u in base if _tem_video(u)]
+    por_dia = _somas_por(base, lambda u: u.dia)
+    total = _SomaDeUso()
+    for u in base:
+        total.somar(u)
+    quem = _somas_por(
+        [u for u in base if u.quem_id is not None],
+        lambda u: (u.quem_tipo, u.quem_id),
+    )
+    programas = _somas_por(
+        [u for u in por_programa if _tem_video(u) and u.programa is not None],
+        lambda u: u.programa,
+    )
+    return RelatorioDeVideos(
+        desde=filtro.desde,
+        ate=filtro.ate,
+        programa=filtro.programa,
+        usuario=filtro.usuario,
+        total=NumerosDeVideos(**total.videos()),  # type: ignore[arg-type]
+        por_dia=[
+            DiaDeVideos(dia=d, **por_dia.get(d, _SomaDeUso()).videos())  # type: ignore[arg-type]
+            for d in _dias_do_intervalo(por_dia)
+        ],
+        por_programa=[
+            ProgramaDeVideos(programa=p, **soma.videos())  # type: ignore[arg-type]
+            for p, soma in sorted(programas.items())
+        ],
+        por_usuario=[
+            QuemDeVideos(
+                quem_tipo=tipo,  # type: ignore[arg-type]
+                quem_id=quem_id,  # type: ignore[arg-type]
+                email=emails.get(quem_id),  # type: ignore[arg-type]
+                **soma.videos(),  # type: ignore[arg-type]
+            )
+            for (tipo, quem_id), soma in sorted(
+                quem.items(), key=lambda i: (-i[1].enviados, str(i[0][1]))
+            )
+        ],
+    )
+
+
+def relatorio_de_buscas(
+    base: list[UsoDoDia], emails: dict[str, str], filtro: FiltroDoPainel
+) -> RelatorioDeBuscas:
+    """Quem busca são só pessoas (o sistema que busca pela API aparece em `por_usuario`,
+    mas não conta em `usuarios_que_buscam`)."""
+    base = [u for u in base if u.buscas]
+    por_programa = filtro.programa is not None
+    por_dia = _somas_por(base, lambda u: u.dia)
+    pessoas_do_dia: dict[date, set[str]] = defaultdict(set)
+    for u in base:
+        if u.quem_tipo == "usuario" and u.quem_id is not None:
+            pessoas_do_dia[u.dia].add(u.quem_id)
+    total = _SomaDeUso()
+    for u in base:
+        total.somar(u)
+    quem = _somas_por(
+        [u for u in base if u.quem_id is not None],
+        lambda u: (u.quem_tipo, u.quem_id),
+    )
+    return RelatorioDeBuscas(
+        desde=filtro.desde,
+        ate=filtro.ate,
+        programa=filtro.programa,
+        usuario=filtro.usuario,
+        total=TotalDeBuscas(
+            **total.de_buscas(),
+            usuarios_que_buscam=(
+                None
+                if por_programa
+                else len({p for ps in pessoas_do_dia.values() for p in ps})
+            ),
+        ),
+        por_dia=[
+            DiaDeBuscas(
+                dia=d,
+                **por_dia.get(d, _SomaDeUso()).de_buscas(),
+                usuarios_que_buscam=None
+                if por_programa
+                else len(pessoas_do_dia.get(d, ())),
+            )
+            for d in _dias_do_intervalo(por_dia)
+        ],
+        por_usuario=[
+            QuemDeBuscas(
+                quem_tipo=tipo,  # type: ignore[arg-type]
+                quem_id=quem_id,  # type: ignore[arg-type]
+                email=emails.get(quem_id),  # type: ignore[arg-type]
+                **soma.de_buscas(),
+            )
+            for (tipo, quem_id), soma in sorted(
+                quem.items(), key=lambda i: (-i[1].buscas, str(i[0][1]))
+            )
+        ],
+    )
+
+
+def _base_de_uso(fonte: ResumosDeUso, filtro: FiltroDoPainel) -> list[UsoDoDia]:
+    """As linhas do filtro: da tabela por programa se pediu programa, senão da por pessoa.
+    As duas não se cruzam: pedir os dois é erro, em vez de devolver números que um dos
+    filtros não aplicou."""
+    if filtro.programa is not None and filtro.usuario is not None:
+        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+    if filtro.programa is not None:
+        return ou_503(
+            lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, filtro.programa)
+        )
+    return ou_503(lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario))
+
+
+def _linha_do_csv(
+    u: UsoDoDia, emails: dict[str, str], numeros: Sequence[object]
+) -> list[object]:
+    return [
+        u.dia.isoformat(),
+        u.quem_tipo or "",
+        u.quem_id or "",
+        emails.get(u.quem_id, "") if u.quem_id else "",
+        u.programa or "",
+        *numeros,
+    ]
+
+
 def criar_rotas_do_painel(
     resumos: ResumosDeUso | None,
     contas: ContasDeUsuario,
@@ -321,5 +605,82 @@ def criar_rotas_do_painel(
             )
         acessos_ao_painel.abriu(pessoa, "acessos", filtro)
         return relatorio_de_acessos(linhas, emails, filtro)
+
+    @rotas.get("/videos", response_model=RelatorioDeVideos)
+    def videos(
+        pessoa: PodeVerOPainel,
+        filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
+        formato: Literal["json", "csv"] = "json",
+    ) -> RelatorioDeVideos | object:
+        """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
+        programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
+        fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        base = _base_de_uso(fonte, filtro)
+        emails = _emails(contas)
+        if formato == "csv":
+            acessos_ao_painel.exportou(pessoa, "videos", filtro)
+            return resposta_em_csv(
+                csv_em_texto(
+                    COLUNAS_DO_CSV_DE_VIDEOS,
+                    [
+                        _linha_do_csv(
+                            u,
+                            emails,
+                            [
+                                u.videos_enviados,
+                                u.videos_concluidos,
+                                u.videos_falhos,
+                                round(u.horas_concluidas, 2),
+                                u.segundos_de_processamento,
+                            ],
+                        )
+                        for u in sorted(
+                            filter(_tem_video, base),
+                            key=lambda u: (u.dia, u.programa or "", u.quem_id or ""),
+                        )
+                    ],
+                ),
+                "videos.csv",
+            )
+        if filtro.programa is not None:
+            por_programa = base
+        elif filtro.usuario is None:
+            por_programa = ou_503(
+                lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, None)
+            )
+        else:
+            por_programa = []
+        acessos_ao_painel.abriu(pessoa, "videos", filtro)
+        return relatorio_de_videos(base, por_programa, emails, filtro)
+
+    @rotas.get("/buscas", response_model=RelatorioDeBuscas)
+    def buscas(
+        pessoa: PodeVerOPainel,
+        filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
+        formato: Literal["json", "csv"] = "json",
+    ) -> RelatorioDeBuscas | object:
+        """Buscas, usuários que buscam e buscas sem resultado, por dia e por usuário. A
+        busca só tem programa quando foi filtrada por ele. Programa e usuário não se
+        combinam: 422."""
+        fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        base = _base_de_uso(fonte, filtro)
+        emails = _emails(contas)
+        if formato == "csv":
+            acessos_ao_painel.exportou(pessoa, "buscas", filtro)
+            return resposta_em_csv(
+                csv_em_texto(
+                    COLUNAS_DO_CSV_DE_BUSCAS,
+                    [
+                        _linha_do_csv(u, emails, [u.buscas, u.buscas_sem_resultado])
+                        for u in sorted(
+                            (u for u in base if u.buscas),
+                            key=lambda u: (u.dia, u.programa or "", u.quem_id or ""),
+                        )
+                    ],
+                ),
+                "buscas.csv",
+            )
+        acessos_ao_painel.abriu(pessoa, "buscas", filtro)
+        return relatorio_de_buscas(base, emails, filtro)
 
     return rotas

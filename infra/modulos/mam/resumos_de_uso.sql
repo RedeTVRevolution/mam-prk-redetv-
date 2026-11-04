@@ -13,6 +13,7 @@
 CREATE TEMP TABLE eventos AS
 SELECT
   e.dia, e.quando, e.tipo, e.quem_tipo, e.quem_id, e.programa, e.estado,
+  e.segundos_de_processamento, e.n_resultados,
   COALESCE(d.horas, 0) AS horas
 FROM (
   SELECT
@@ -21,6 +22,7 @@ FROM (
   FROM (
     SELECT
       id, quando, tipo, quem_tipo, quem_id, programa, estado, job_id,
+      segundos_de_processamento, n_resultados,
       DATE(quando, 'America/Sao_Paulo') AS dia,
       ROW_NUMBER() OVER (PARTITION BY id ORDER BY quando) AS ordem
     FROM `${tabela_de_eventos}`
@@ -47,7 +49,9 @@ SELECT
   COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN 1 END) AS videos_concluidos,
   COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'falhou' THEN 1 END) AS videos_falhos,
   COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN horas END), 0) AS horas_concluidas,
+  COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN segundos_de_processamento END), 0) AS segundos_de_processamento,
   COUNT(CASE WHEN tipo = 'busca' THEN 1 END) AS buscas,
+  COUNT(CASE WHEN tipo = 'busca' AND n_resultados = 0 THEN 1 END) AS buscas_sem_resultado,
   COUNT(CASE WHEN tipo = 'correcao' THEN 1 END) AS correcoes,
   COUNT(CASE WHEN tipo = 'chamada_de_api' THEN 1 END) AS chamadas_de_api
 FROM eventos
@@ -63,7 +67,9 @@ SELECT
   SUM(videos_concluidos) AS videos_concluidos,
   SUM(videos_falhos) AS videos_falhos,
   SUM(horas_concluidas) AS horas_concluidas,
+  SUM(segundos_de_processamento) AS segundos_de_processamento,
   SUM(buscas) AS buscas,
+  SUM(buscas_sem_resultado) AS buscas_sem_resultado,
   SUM(correcoes) AS correcoes,
   SUM(chamadas_de_api) AS chamadas_de_api
 FROM `${prefixo}uso_por_dia_e_usuario`
@@ -80,7 +86,9 @@ SELECT
   SUM(videos_concluidos) AS videos_concluidos,
   SUM(videos_falhos) AS videos_falhos,
   SUM(horas_concluidas) AS horas_concluidas,
+  SUM(segundos_de_processamento) AS segundos_de_processamento,
   SUM(buscas) AS buscas,
+  SUM(buscas_sem_resultado) AS buscas_sem_resultado,
   SUM(correcoes) AS correcoes,
   SUM(chamadas_de_api) AS chamadas_de_api
 FROM `${prefixo}uso_por_dia_e_usuario`
@@ -96,7 +104,9 @@ SELECT
   COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN 1 END) AS videos_concluidos,
   COUNT(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'falhou' THEN 1 END) AS videos_falhos,
   COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN horas END), 0) AS horas_concluidas,
+  COALESCE(SUM(CASE WHEN tipo = 'fim_de_processamento' AND estado = 'concluido' THEN segundos_de_processamento END), 0) AS segundos_de_processamento,
   COUNT(CASE WHEN tipo = 'busca' THEN 1 END) AS buscas,
+  COUNT(CASE WHEN tipo = 'busca' AND n_resultados = 0 THEN 1 END) AS buscas_sem_resultado,
   COUNT(CASE WHEN tipo = 'correcao' THEN 1 END) AS correcoes
 FROM eventos
 WHERE programa IS NOT NULL

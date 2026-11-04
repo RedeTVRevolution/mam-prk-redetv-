@@ -403,6 +403,16 @@ def test_concluir_publica_o_fim_do_processamento() -> None:
     assert (evento.estado, evento.codigo_falha) == ("concluido", None)
 
 
+def test_o_fim_leva_quanto_o_job_levou_do_registro_ao_fim() -> None:
+    eventos = EventosEmMemoria()
+    job = _job_em("analisando", criado_em=AGORA - timedelta(minutes=20, seconds=30))
+    repositorio = _repositorio_com(job, eventos)
+
+    repositorio.transitar("j1", "analisando", {"estado": "concluido"})
+
+    assert eventos.publicados[0].segundos_de_processamento == 20 * 60 + 30
+
+
 def test_falhar_publica_o_codigo_da_falha_e_o_sistema_dono() -> None:
     eventos = EventosEmMemoria()
     repositorio = _repositorio_com(
@@ -502,6 +512,7 @@ def test_a_busca_publica_o_tamanho_e_os_filtros_e_nunca_o_texto() -> None:
         ("modo", "texto"),
         ("ordem", "relevancia"),
     }
+    assert evento.n_resultados == len(r.json()["videos"]) == 1
     assert "vestido" not in evento.model_dump_json()
     assert "vermelho" not in json.dumps(evento.para_json())
 

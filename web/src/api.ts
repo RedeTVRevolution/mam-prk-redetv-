@@ -12,6 +12,8 @@ import {
   type FiltrosDoPainel,
   type OpcoesDoPainel,
   type RelatorioDeAcessos,
+  type RelatorioDeBuscas,
+  type RelatorioDeVideos,
 } from './painelDaDiretoria.ts'
 import { parametrosDoRelatorio } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
@@ -306,6 +308,14 @@ export interface ClienteDaApi {
   acessosDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeAcessos>
   /** Os mesmos acessos em CSV, uma linha por dia e pessoa. */
   acessosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** `GET /v1/painel/videos`: enviados, concluídos, falhas, horas e tempo de processamento. Programa e usuário não se combinam. */
+  videosDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeVideos>
+  /** A base dos vídeos em CSV, uma linha por dia e pessoa (ou por dia e programa, com o filtro de programa). */
+  videosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** `GET /v1/painel/buscas`: buscas, quem busca e buscas sem resultado. Programa e usuário não se combinam. */
+  buscasDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeBuscas>
+  /** A base das buscas em CSV. */
+  buscasDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
   /** `GET /v1/relatorios/marcas`: inserções, tempo e vídeos por marca e por tipo de inserção. */
   marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
   /** O mesmo relatório em CSV. */
@@ -467,6 +477,10 @@ export function criarClienteDaApi(
     acessosDoPainel: (filtros) => chamar(`/v1/painel/acessos?${parametrosDoPainel(filtros, { semPrograma: true })}`),
     acessosDoPainelEmCsv: async (filtros) =>
       (await pedir(`/v1/painel/acessos?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
+    videosDoPainel: (filtros) => chamar(`/v1/painel/videos?${parametrosDoPainel(filtros)}`),
+    videosDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/videos?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
+    buscasDoPainel: (filtros) => chamar(`/v1/painel/buscas?${parametrosDoPainel(filtros)}`),
+    buscasDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/buscas?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
     marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
     marcasEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),

@@ -1,4 +1,4 @@
-"""A leitura das tabelas resumidas do painel da diretoria (#280, #282).
+"""A leitura das tabelas resumidas do painel da diretoria (#280, #282, #283).
 
 O painel lê só `uso_por_dia_e_usuario` e `uso_por_dia_e_programa`, nunca a tabela de eventos.
 Os nomes das tabelas vêm do ambiente (o Terraform os monta). Uma consulta que não termina ou
@@ -25,11 +25,39 @@ class AcessoDoDia:
     ultimo_acesso: datetime | None
 
 
+@dataclass(frozen=True)
+class UsoDoDia:
+    """Vídeos e buscas de um dia, de uma pessoa ou sistema (`quem_id`) ou de um programa
+    (`programa`): o outro vem `None`. O tempo é a soma do que os vídeos concluídos levaram."""
+
+    dia: date
+    quem_tipo: str | None
+    quem_id: str | None
+    programa: str | None
+    videos_enviados: int
+    videos_concluidos: int
+    videos_falhos: int
+    horas_concluidas: float
+    segundos_de_processamento: int
+    buscas: int
+    buscas_sem_resultado: int
+
+
 class ResumosDeUso(Protocol):
     def acessos(
         self, desde: date | None, ate: date | None, usuario: str | None
     ) -> list[AcessoDoDia]:
         """Só pessoas (sistema não faz login); `desde` e `ate` são dias de São Paulo, inclusive."""
+
+    def uso_por_quem(
+        self, desde: date | None, ate: date | None, usuario: str | None
+    ) -> list[UsoDoDia]:
+        """Um dia, uma pessoa ou sistema (`usuario` é o uid ou o nome do sistema)."""
+
+    def uso_por_programa(
+        self, desde: date | None, ate: date | None, programa: str | None
+    ) -> list[UsoDoDia]:
+        """Um dia, um programa."""
 
     def programas(self) -> list[str]:
         """Os programas que já têm algum evento, em ordem."""
@@ -42,10 +70,39 @@ class ResumosEmMemoria:
     """Dublê: as linhas dadas, com os mesmos filtros da consulta."""
 
     def __init__(
-        self, acessos: Sequence[AcessoDoDia] = (), programas: Sequence[str] = ()
+        self,
+        acessos: Sequence[AcessoDoDia] = (),
+        programas: Sequence[str] = (),
+        uso: Sequence[UsoDoDia] = (),
     ) -> None:
         self._acessos = list(acessos)
         self._programas = list(programas)
+        self._uso = list(uso)
+
+    def _do_periodo(self, desde: date | None, ate: date | None) -> list[UsoDoDia]:
+        return [
+            u
+            for u in self._uso
+            if (desde is None or u.dia >= desde) and (ate is None or u.dia <= ate)
+        ]
+
+    def uso_por_quem(
+        self, desde: date | None, ate: date | None, usuario: str | None
+    ) -> list[UsoDoDia]:
+        return [
+            u
+            for u in self._do_periodo(desde, ate)
+            if u.quem_id is not None and (usuario is None or u.quem_id == usuario)
+        ]
+
+    def uso_por_programa(
+        self, desde: date | None, ate: date | None, programa: str | None
+    ) -> list[UsoDoDia]:
+        return [
+            u
+            for u in self._do_periodo(desde, ate)
+            if u.programa is not None and (programa is None or u.programa == programa)
+        ]
 
     def acessos(
         self, desde: date | None, ate: date | None, usuario: str | None
@@ -133,6 +190,71 @@ class ResumosBigQuery:
             )
             for v in linhas
         ]
+
+    def _uso(
+        self,
+        tabela: str,
+        chaves: str,
+        desde: date | None,
+        ate: date | None,
+        filtro: tuple[str, str | None],
+    ) -> list[UsoDoDia]:
+        onde = ["TRUE"]
+        parametros: list[dict[str, Any]] = []
+        for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
+            if dia is not None:
+                onde.append(f"dia {comparacao} @{nome}")
+                parametros.append(_parametro(nome, dia.isoformat(), "DATE"))
+        coluna, valor = filtro
+        if valor is not None:
+            onde.append(f"{coluna} = @{coluna}")
+            parametros.append(_parametro(coluna, valor))
+        linhas = self._consultar(
+            f"SELECT CAST(dia AS STRING), {chaves}, videos_enviados, videos_concluidos,"
+            " videos_falhos, horas_concluidas, segundos_de_processamento, buscas,"
+            " buscas_sem_resultado\n"
+            f"FROM {self._tabela(tabela)}\n"
+            f"WHERE {' AND '.join(onde)}",
+            parametros,
+        )
+        return [
+            UsoDoDia(
+                dia=date.fromisoformat(v[0]),
+                quem_tipo=v[1],
+                quem_id=v[2],
+                programa=v[3],
+                videos_enviados=int(v[4]),
+                videos_concluidos=int(v[5]),
+                videos_falhos=int(v[6]),
+                horas_concluidas=float(v[7]),
+                segundos_de_processamento=int(v[8]),
+                buscas=int(v[9]),
+                buscas_sem_resultado=int(v[10]),
+            )
+            for v in linhas
+        ]
+
+    def uso_por_quem(
+        self, desde: date | None, ate: date | None, usuario: str | None
+    ) -> list[UsoDoDia]:
+        return self._uso(
+            self._config.tabela_por_dia_e_usuario,
+            "quem_tipo, quem_id, CAST(NULL AS STRING)",
+            desde,
+            ate,
+            ("quem_id", usuario),
+        )
+
+    def uso_por_programa(
+        self, desde: date | None, ate: date | None, programa: str | None
+    ) -> list[UsoDoDia]:
+        return self._uso(
+            self._config.tabela_por_dia_e_programa,
+            "CAST(NULL AS STRING), CAST(NULL AS STRING), programa",
+            desde,
+            ate,
+            ("programa", programa),
+        )
 
     def programas(self) -> list[str]:
         linhas = self._consultar(

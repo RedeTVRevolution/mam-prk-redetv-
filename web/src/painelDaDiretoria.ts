@@ -1,9 +1,19 @@
 // O painel da diretoria (E9): o que a API devolve, os filtros comuns (que viajam na URL e na chamada)
 // e as abas. Não confundir com `painel.ts`, o painel da decupagem no Visualizador.
 
-export type AbaDoPainel = 'acessos'
+export type AbaDoPainel = 'acessos' | 'videos' | 'buscas'
 
-export const ABAS_DO_PAINEL: { chave: AbaDoPainel; rotulo: string }[] = [{ chave: 'acessos', rotulo: 'Acessos' }]
+export const ABAS_DO_PAINEL: { chave: AbaDoPainel; rotulo: string }[] = [
+  { chave: 'acessos', rotulo: 'Acessos' },
+  { chave: 'videos', rotulo: 'Vídeos' },
+  { chave: 'buscas', rotulo: 'Buscas' },
+]
+
+/** A aba do endereço (`/painel/<aba>`); vazia é Acessos, e `null` é aba que não existe. */
+export function abaDoPainel(parte: string | undefined): AbaDoPainel | null {
+  if (parte === undefined) return 'acessos'
+  return ABAS_DO_PAINEL.find((a) => a.chave === parte)?.chave ?? null
+}
 
 export interface FiltrosDoPainel {
   programa: string
@@ -37,6 +47,11 @@ export function filtrosParaEnderecoDoPainel(f: FiltrosDoPainel): string {
   if (f.ate) p.set('ate', f.ate)
   const query = p.toString()
   return query ? `?${query}` : ''
+}
+
+/** Vídeos e Buscas leem tabelas que não se cruzam: a API recusa programa e usuário juntos (422). */
+export function programaEUsuarioJuntos(f: FiltrosDoPainel): boolean {
+  return f.programa !== '' && f.usuario !== ''
 }
 
 /**
@@ -106,4 +121,72 @@ export function diaCurto(dia: string): string {
 export function mesCurto(dia: string): string {
   const [ano, mes] = dia.split('-')
   return `${mes}/${ano}`
+}
+
+/** Os números de vídeos de um recorte. O tempo médio é o de processamento dos concluídos, vazio sem nenhum. */
+export interface NumerosDeVideos {
+  enviados: number
+  concluidos: number
+  falhos: number
+  horas_concluidas: number
+  tempo_medio_s: number | null
+}
+
+export interface DiaDeVideos extends NumerosDeVideos {
+  dia: string
+}
+
+export interface ProgramaDeVideos extends NumerosDeVideos {
+  programa: string
+}
+
+export interface QuemDeVideos extends NumerosDeVideos {
+  quem_tipo: 'usuario' | 'sistema'
+  quem_id: string
+  email: string | null
+}
+
+/** `GET /v1/painel/videos`. `por_programa` vem vazio com filtro de usuário e `por_usuario` com filtro de programa. */
+export interface RelatorioDeVideos {
+  desde: string | null
+  ate: string | null
+  programa: string | null
+  usuario: string | null
+  total: NumerosDeVideos
+  por_dia: DiaDeVideos[]
+  por_programa: ProgramaDeVideos[]
+  por_usuario: QuemDeVideos[]
+}
+
+export interface NumerosDeBuscas {
+  buscas: number
+  sem_resultado: number
+}
+
+/** `usuarios_que_buscam` é `null` com filtro de programa: a tabela por programa não sabe quem buscou. */
+export interface DiaDeBuscas extends NumerosDeBuscas {
+  dia: string
+  usuarios_que_buscam: number | null
+}
+
+export interface QuemDeBuscas extends NumerosDeBuscas {
+  quem_tipo: 'usuario' | 'sistema'
+  quem_id: string
+  email: string | null
+}
+
+/** `GET /v1/painel/buscas`. */
+export interface RelatorioDeBuscas {
+  desde: string | null
+  ate: string | null
+  programa: string | null
+  usuario: string | null
+  total: NumerosDeBuscas & { usuarios_que_buscam: number | null }
+  por_dia: DiaDeBuscas[]
+  por_usuario: QuemDeBuscas[]
+}
+
+/** As horas de vídeo com uma casa e vírgula: "3,5". */
+export function horasDeVideo(horas: number): string {
+  return horas.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })
 }
