@@ -36,7 +36,6 @@ def _exige_instrucao_atual(cassete: dict[str, Any]) -> None:
     )
 
 
-@pytest.mark.skip(reason="cassete sem instrucao_sha256; pendente de regravação no #229")
 def test_cassete_foi_gravado_com_a_instrucao_em_uso() -> None:
     _exige_instrucao_atual(_cassete())
 
@@ -75,7 +74,6 @@ def test_cassete_nao_guarda_nada_alem_das_chaves_previstas() -> None:
     }
 
 
-@pytest.mark.skip(reason="cassete sem instrucao_sha256; pendente de regravação no #229")
 def test_cassete_guarda_so_modelo_versao_video_texto_e_instrucao_sem_cabecalhos() -> (
     None
 ):
@@ -88,9 +86,6 @@ def test_cassete_guarda_so_modelo_versao_video_texto_e_instrucao_sem_cabecalhos(
     }
 
 
-@pytest.mark.skip(
-    reason="cassete gravado com o esquema 1.3; pendente de regravação no #229"
-)
 def test_resposta_gravada_passa_no_esquema_e_nos_invariantes_de_primeira() -> None:
     """O esquema 1.1 confere início ≤ fim e todo tempo dentro da duração."""
     cassete = _cassete()
