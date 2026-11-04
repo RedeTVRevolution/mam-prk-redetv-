@@ -118,7 +118,7 @@ def test_pedido_hibrido_leva_texto_significado_vetor_e_rrf() -> None:
     buscas = _buscas(pedido)
     assert set(buscas) == {"textSearch", "semanticSearch", "vectorSearch"}
     assert buscas["textSearch"]["structuredQuery"] == {
-        "text": {"text": "vestido vermelho", "fields": ["texto", "descricao"]}
+        "text": {"text": "vestido vermelho", "fields": ["texto_da_busca"]}
     }
     assert buscas["semanticSearch"]["searchText"] == "mulher de vestido de gala"
     assert buscas["semanticSearch"]["searchField"] == "descricao_vetor"
@@ -241,6 +241,38 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     }
     [achado] = adaptador.buscar(Consulta(texto="vestido", filtros=Filtros(dono="c")))
     assert achado == registro
+
+
+def test_o_registro_leva_a_copia_do_texto_sem_acento_nem_maiuscula() -> None:
+    registro = Registro(
+        id="j:fala:0",
+        tipo="fala",
+        job_id="j",
+        inicio_ms=0,
+        fim_ms=10,
+        texto="A ANGÉLICA chegou",
+        descricao="Promoção em São Paulo",
+    )
+    transporte = TransporteFalso()
+    AgentRetrieval(CONFIG, transporte).gravar("j", [registro])
+    corpo = transporte.chamadas[-1][2]
+    assert corpo is not None
+    dados = corpo["requests"][0]["dataObject"]["data"]
+    assert dados["texto_da_busca"] == "a angelica chegou promocao em sao paulo"
+    # A tela segue lendo o texto original.
+    assert (dados["texto"], dados["descricao"]) == (
+        "A ANGÉLICA chegou",
+        "Promoção em São Paulo",
+    )
+    assert "texto_da_busca" in esquema_da_colecao(CONFIG)["dataSchema"]["properties"]
+
+
+@pytest.mark.parametrize("consulta", ["Angelica", "ANGÉLICA", "angélica"])
+def test_o_pedido_de_texto_vai_normalizado_ao_campo_normalizado(consulta: str) -> None:
+    pedido = pedido_de_busca(CONFIG, Consulta(texto=consulta))
+    assert _buscas(pedido)["textSearch"]["structuredQuery"] == {
+        "text": {"text": "angelica", "fields": ["texto_da_busca"]}
+    }
 
 
 def test_gravar_apaga_antes_os_registros_do_video() -> None:

@@ -45,8 +45,8 @@ Na imagem ✓   Citada   Fala   GC   Objeto ✓   Marca     Programa ▾  Ano �
 
 ### Por trás da tela
 
-1. **Entendimento da consulta.** O 3.5 Flash-Lite preenche um esquema fechado, sem ferramentas: pessoas, objetos (categoria, tipo, cor base), marcas, frase exata, texto livre, tipos de evidência, programa e período. Pessoas e marcas só entram se existirem no catálogo; cores e categorias só da lista fechada. Tudo o mais vira texto livre. As barreiras contra injeção são as de "Busca sem injeção", no [plano](../Plano_MAM.md).
-2. **Consulta híbrida** no Agent Retrieval: filtros exatos pelos campos estruturados, mais texto e vetor para o que sobrar. Os filtros de permissão são acrescentados pelo servidor depois.
+1. **Entendimento da consulta.** O 3.5 Flash-Lite preenche um esquema fechado, sem ferramentas: pessoas, objetos (categoria, tipo, cor base), marcas, frase exata, texto livre, tipos de evidência, programa e período. Pessoas e marcas só entram se existirem no catálogo; cores e categorias só da lista fechada. Tudo o mais vira texto livre. As aspas são lidas pelo código, antes do modelo e também no plano B: o que está entre aspas é a frase exata, e só ficam os resultados cujo texto ou descrição contém a frase inteira, com as palavras juntas e na ordem, sem diferenciar acento nem maiúscula (#312). Sem aspas, vale qualquer palavra. As barreiras contra injeção são as de "Busca sem injeção", no [plano](../Plano_MAM.md).
+2. **Consulta híbrida** no Agent Retrieval: filtros exatos pelos campos estruturados, mais texto e vetor para o que sobrar. O `textSearch` lê o campo `texto_da_busca`, a cópia de `texto` e `descricao` sem acento nem maiúscula, e a consulta vai normalizada também. Os filtros de permissão são acrescentados pelo servidor depois.
 3. **Junção de momentos.** Momentos do mesmo vídeo que casam pelo mesmo motivo e estão a até 3 s um do outro viram um momento só, para não mostrar 15 linhas de "Sabrina na imagem" seguidas.
 4. **Agrupamento por vídeo** e ordenação.
 5. **Reordenação** pela Ranking API só quando houver texto livre. Consultas puramente estruturadas ("sapato vermelho") já têm a ordem certa pelos filtros.
