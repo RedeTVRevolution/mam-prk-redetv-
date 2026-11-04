@@ -152,6 +152,17 @@ def objeto_dos_nomes_a_buscar(job_id: str) -> str:
 
 
 TENTATIVAS_SOB_DISPUTA = 8
+# A espera dobra a cada rodada até o teto (0,05 s, 0,1, 0,2, 0,4, 0,8, 1, 1, 1): no pior
+# caso, cerca de 4,5 s antes do 503. Com espera que cresce devagar, os perdedores
+# voltam juntos e disputam de novo (doze trabalhadores esgotavam as 8 rodadas, #384).
+ESPERA_BASE_SOB_DISPUTA = 0.05
+TETO_DA_ESPERA_SOB_DISPUTA = 1.0
+
+
+def espera_sob_disputa(rodada: int) -> float:
+    """Espera aleatória (jitter) de 0 até a base dobrada a cada rodada, com teto."""
+    limite = min(TETO_DA_ESPERA_SOB_DISPUTA, ESPERA_BASE_SOB_DISPUTA * 2**rodada)
+    return random.uniform(0, limite)
 
 
 def _repetir_sob_disputa[T](
@@ -167,7 +178,7 @@ def _repetir_sob_disputa[T](
         except (ValueError, Aborted) as erro:
             if isinstance(erro, ValueError) and not isinstance(erro.__cause__, Aborted):
                 raise
-            time.sleep(random.uniform(0, 0.05 * (rodada + 1)))
+            time.sleep(espera_sob_disputa(rodada))
     raise ServicoIndisponivel("Firestore disputado: tente de novo")
 
 
@@ -191,7 +202,7 @@ class RepositorioFirestore:
             except AlreadyExists:
                 return False
             except Aborted:
-                time.sleep(random.uniform(0, 0.05 * (rodada + 1)))
+                time.sleep(espera_sob_disputa(rodada))
                 continue
             return True
         raise ServicoIndisponivel("Firestore disputado: tente de novo")
@@ -367,14 +378,14 @@ class RepositorioDeIdempotenciaFirestore:
         # transação aqui esgotaria as tentativas sob essa disputa e daria 500. Se o
         # Firestore aborta o `create` por disputa (`Aborted`), espera um pouco e tenta o
         # `create` de novo, até criar ou receber `AlreadyExists` e ler a que ficou.
-        for espera in (0.05, 0.1, 0.2, 0.4, 0.8, 0):
+        for rodada in range(TENTATIVAS_SOB_DISPUTA):
             try:
                 referencia.create(criada.model_dump())
                 return criada, True
             except AlreadyExists:
                 pass
             except Aborted:
-                time.sleep(espera)
+                time.sleep(espera_sob_disputa(rodada))
                 continue
             doc = referencia.get()
             if doc.exists:

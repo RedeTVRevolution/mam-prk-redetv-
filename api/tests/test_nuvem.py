@@ -37,6 +37,7 @@ from api.jobs import (
 )
 from api.marcas import MarcaInexistente, carregar_marcas
 from api.nuvem import (
+    TENTATIVAS_SOB_DISPUTA,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
@@ -51,6 +52,7 @@ from api.nuvem import (
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
+    espera_sob_disputa,
 )
 from api.webhook import RegistroDeWebhook
 
@@ -1255,6 +1257,15 @@ def test_sob_disputa_sem_fim_e_servico_indisponivel(
 
     with pytest.raises(ServicoIndisponivel):
         repositorio._sob_disputa(na_transacao)
+
+
+def test_espera_sob_disputa_dobra_a_cada_rodada_ate_o_teto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Com o sorteio no máximo, a espera é o limite da rodada.
+    monkeypatch.setattr("api.nuvem.random.uniform", lambda _a, b: b)
+    esperas = [espera_sob_disputa(r) for r in range(TENTATIVAS_SOB_DISPUTA)]
+    assert esperas == [0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.0, 1.0]
 
 
 def test_sob_disputa_nao_repete_outro_value_error() -> None:
