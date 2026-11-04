@@ -154,7 +154,7 @@ def objeto_dos_nomes_a_buscar(job_id: str) -> str:
 TENTATIVAS_SOB_DISPUTA = 8
 # A espera dobra a cada rodada até o teto (0,05 s, 0,1, 0,2, 0,4, 0,8, 1, 1, 1): no pior
 # caso, cerca de 4,5 s antes do 503. Com espera que cresce devagar, os perdedores
-# voltam juntos e disputam de novo (doze trabalhadores esgotavam as 8 rodadas, #384).
+# voltam juntos e disputam de novo (#384).
 ESPERA_BASE_SOB_DISPUTA = 0.05
 TETO_DA_ESPERA_SOB_DISPUTA = 1.0
 

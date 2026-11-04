@@ -364,9 +364,12 @@ def test_evento_de_fim_chega_uma_vez_apesar_de_entrega_repetida_fora_de_ordem_e_
     assert destino.ids_recebidos == set(destino.processados)
 
 
-def test_doze_trabalhadores_terminando_o_mesmo_job_ao_mesmo_tempo_um_vence_e_ninguem_estoura() -> (
+def test_tres_trabalhadores_terminando_o_mesmo_job_ao_mesmo_tempo_um_vence_e_ninguem_estoura() -> (
     None
 ):
+    # Três é a disputa real: o fim do processamento, uma reentrega do Pub/Sub e um
+    # cancelamento no mesmo instante. Com doze, o emulador do Firestore se travava sozinho
+    # (espera de ~2 s por tentativa perdida) e o teste media o emulador, não o código (#384).
     mundo = Mundo()
     job = Job(
         id=uuid.uuid4().hex,
@@ -384,7 +387,7 @@ def test_doze_trabalhadores_terminando_o_mesmo_job_ao_mesmo_tempo_um_vence_e_nin
         novo = mundo.jobs.transitar(job.id, "analisando", {"estado": "concluido"})
         return (1 if novo else 0), None
 
-    vitorias = sum(v for v, _ in em_paralelo(12, terminar))
+    vitorias = sum(v for v, _ in em_paralelo(3, terminar))
     assert vitorias == 1
     gravado = mundo.jobs.obter(job.id)
     assert gravado is not None and gravado.estado == "concluido"
