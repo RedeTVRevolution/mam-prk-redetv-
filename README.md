@@ -208,6 +208,8 @@ scripts/afk/rodar.sh 1
 
 Veja as notas em `.afk/progresso-afk-<data-hora>.md`, uma cópia na pasta principal, o `git log afk/<data-hora>` e o PR. Inspecione pela pasta principal e não rode `git` dentro do clone do agente: o `.git` dele, inclusive `config` e hooks, ficou sob controle do agente. A execução seguinte apaga e recria o clone. Depois, aumente o número de iterações, por exemplo `scripts/afk/rodar.sh 10`.
 
+Com o loop rodando, `../mam-prk-redetv-afk/.afk/progresso.md` mostra a iteração atual e `../mam-prk-redetv-afk/.afk/fila` mostra a fila: os tickets na ordem em que o loop vai pegá-los, cada um com os bloqueadores que ainda espera. A cada ticket novo o loop regrava a fila.
+
 Para mesclar o lote:
 
 ```sh
