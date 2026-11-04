@@ -2,6 +2,8 @@ import type { Usuario } from './App.tsx'
 import type { Autenticador } from './auth/autenticador.ts'
 import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'
+import { consultaDaAuditoria, type FiltrosDaAuditoria, type PaginaDeAuditoria, type RegistroDeAuditoria } from './auditoria.ts'
+import { consultaDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
 import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
 import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
@@ -19,6 +21,9 @@ export class ConflitoNaApi extends Error {}
 export class PedidoInvalido extends Error {}
 
 export class NaoEncontrado extends Error {}
+
+/** 403 `login_recente_exigido`: a purga pede um login com MFA feito há poucos minutos. */
+export class LoginRecenteExigido extends Error {}
 
 /** Qualquer outro status de erro. */
 export class FalhaNaApi extends Error {
@@ -96,6 +101,8 @@ export interface ClienteDoJob {
   descartar(itemId: string, motivo: string): Promise<void>
   /** `POST /v1/jobs/{id}/reprocessar` numa etapa escolhida (exige `video.reprocessar_etapa`). */
   reprocessar(etapa: string, motivo: string): Promise<Job>
+  /** `POST /v1/jobs/{id}/reprocessar` sem etapa: recomeça da que falhou (exige `video.reprocessar`). */
+  reprocessarOQueFalhou(motivo: string): Promise<Job>
 }
 
 /** Um nome do catálogo de pessoas ou de marcas (ou um tipo de objeto já visto), como o autocompletar o mostra. */
@@ -117,10 +124,103 @@ export interface ClienteDeNomes {
   criar(catalogo: CatalogoDeNomes, nome: string): Promise<NomeDoCatalogo>
 }
 
+/** Uma conta da administração (`/v1/admin/usuarios`). */
+export interface ContaDaLista {
+  uid: string
+  email: string
+  nome: string
+  papeis: string[]
+  criada_em: string | null
+  ultimo_acesso: string | null
+  situacao: 'ativa' | 'desativada'
+}
+
+/** Contas e papéis (exige `usuarios.gerir`). */
+export interface ClienteDeUsuarios {
+  listar(): Promise<ContaDaLista[]>
+  criar(corpo: { email: string; nome: string; papeis: string[] }): Promise<ContaDaLista>
+  reenviarLink(uid: string): Promise<void>
+  trocarPapeis(uid: string, papeis: string[]): Promise<ContaDaLista>
+  desativar(uid: string): Promise<ContaDaLista>
+  reativar(uid: string): Promise<ContaDaLista>
+}
+
+/** Uma chave de API da administração (`/v1/admin/chaves`); a chave em texto nunca vem na lista. */
+export interface ChaveDaLista {
+  id: string
+  sistema: string
+  escopos: string[]
+  criada_em: string
+  revogada_em: string | null
+}
+
+/** A resposta da emissão: a única vez em que a chave em texto sai da API. */
+export interface ChaveEmitida extends ChaveDaLista {
+  chave: string
+}
+
+/** Sistemas e chaves de API (exige `chaves.gerir`). */
+export interface ClienteDeChaves {
+  listar(): Promise<ChaveDaLista[]>
+  emitir(corpo: { sistema: string; escopos: string[] }): Promise<ChaveEmitida>
+  revogar(id: string): Promise<ChaveDaLista>
+}
+
+export type TipoDeItem = 'video' | 'pessoa' | 'marca'
+
+/** Um item da lixeira (`/v1/admin/lixeira`). */
+export interface ItemDaLixeira {
+  tipo: string
+  id: string
+  nome: string
+  enviado_por: string
+  enviado_em: string
+  motivo: string
+  dias_ate_a_purga: number
+}
+
+/** O que vai junto com o vídeo, antes de confirmar. */
+export interface ImpactoDoVideo {
+  decupagem: number
+  correcoes: number
+  arquivos: { copia_limpa: number; proxy: number; quadros: number }
+  /** Outros envios do mesmo arquivo: a decupagem continua para eles. */
+  outros_jobs: { id: string; nome: string; enviado_por: string }[]
+}
+
+export interface ImpactoDaPessoa {
+  aparicoes_que_perdem_o_nome: number
+  fotos_apagadas: number
+}
+
+export interface ImpactoDaMarca {
+  ocorrencias_que_perdem_o_vinculo: number
+}
+
+export interface ImpactoPorTipo {
+  video: ImpactoDoVideo
+  pessoa: ImpactoDaPessoa
+  marca: ImpactoDaMarca
+}
+
+/** A lixeira: mandar, restaurar e purgar (enviar exige `lixeira.gerir` ou `catalogo.apagar`; o resto, `lixeira.gerir`). */
+export interface ClienteDaLixeira {
+  listar(): Promise<ItemDaLixeira[]>
+  impacto<T extends TipoDeItem>(tipo: T, id: string): Promise<ImpactoPorTipo[T]>
+  enviar(tipo: TipoDeItem, id: string, motivo: string): Promise<ItemDaLixeira>
+  restaurar(tipo: TipoDeItem, id: string): Promise<void>
+  /** `nome` é o nome do item, digitado: a API confere. */
+  purgar(tipo: TipoDeItem, id: string, nome: string): Promise<void>
+}
+
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
   acervo(filtros: FiltrosDoAcervo, cursor?: string | null): Promise<PaginaDoAcervo>
+  /** Uma página dos vídeos que entraram, de pessoas e de sistemas; a API só filtra sistema e estado. */
+  entradas(filtros: FiltrosDasEntradas, cursor?: string | null): Promise<PaginaDoAcervo>
+  /** `GET /v1/admin/auditoria` (exige `auditoria.ver`): só leitura; `cursor` é o `proximo` da página anterior. */
+  auditoria(filtros: FiltrosDaAuditoria, limite: number, cursor?: string | null): Promise<PaginaDeAuditoria>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
@@ -140,6 +240,9 @@ export interface ClienteDaApi {
   /** O mesmo relatório em CSV. */
   marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
   nomes: ClienteDeNomes
+  usuarios: ClienteDeUsuarios
+  chaves: ClienteDeChaves
+  lixeira: ClienteDaLixeira
   job(id: string): ClienteDoJob
 }
 
@@ -154,7 +257,7 @@ export function criarClienteDaApi(
 ): ClienteDaApi {
   async function pedir(
     caminho: string,
-    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<Response> {
     const token = await autenticador.token()
     if (!token) {
@@ -166,7 +269,7 @@ export function criarClienteDaApi(
     }
     if (opcoes.corpo !== undefined) headers['Content-Type'] = 'application/json'
     const resposta = await fetch(caminho, {
-      method: opcoes.post ? 'POST' : undefined,
+      method: opcoes.post ? 'POST' : opcoes.put ? 'PUT' : undefined,
       headers,
       // Com `FormData` o navegador monta o Content-Type do multipart, com o limite.
       body: opcoes.formulario ?? (opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo)),
@@ -179,6 +282,7 @@ export function criarClienteDaApi(
       if (resposta.status === 409) throw new ConflitoNaApi(await detalhe(resposta))
       if (resposta.status === 422) throw new PedidoInvalido(await detalhe(resposta))
       if (resposta.status === 404) throw new NaoEncontrado(await detalhe(resposta))
+      if (resposta.status === 403 && (await detalhe(resposta)) === 'login_recente_exigido') throw new LoginRecenteExigido()
       throw new FalhaNaApi(resposta.status)
     }
     return resposta
@@ -186,7 +290,7 @@ export function criarClienteDaApi(
 
   async function chamar<T>(
     caminho: string,
-    opcoes: { post?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<T> {
     return (await (await pedir(caminho, opcoes)).json()) as T
   }
@@ -240,6 +344,8 @@ export function criarClienteDaApi(
         }),
       reprocessar: (etapa, motivo) =>
         chamar(`${base}/reprocessar`, { post: true, corpo: { etapa, motivo } }),
+      reprocessarOQueFalhou: (motivo) =>
+        chamar(`${base}/reprocessar`, { post: true, corpo: motivo ? { motivo } : undefined }),
     }
   }
 
@@ -249,6 +355,20 @@ export function criarClienteDaApi(
       const resposta = await pedir(`/v1/jobs?${filtrosParaApi(filtros, cursor)}`)
       return {
         jobs: (await resposta.json()) as Job[],
+        proximo: resposta.headers.get('X-Proximo-Cursor'),
+      }
+    },
+    entradas: async (filtros, cursor = null) => {
+      const resposta = await pedir(`/v1/jobs?${consultaDasEntradas(filtros, cursor)}`)
+      return {
+        jobs: (await resposta.json()) as Job[],
+        proximo: resposta.headers.get('X-Proximo-Cursor'),
+      }
+    },
+    auditoria: async (filtros, limite, cursor = null) => {
+      const resposta = await pedir(`/v1/admin/auditoria?${consultaDaAuditoria(filtros, limite, cursor)}`)
+      return {
+        registros: (await resposta.json()) as RegistroDeAuditoria[],
         proximo: resposta.headers.get('X-Proximo-Cursor'),
       }
     },
@@ -281,6 +401,39 @@ export function criarClienteDaApi(
         return chamar(`/v1/catalogo/${catalogo}`, { post: true, corpo: { nome } })
       },
     },
+    usuarios: {
+      listar: () => chamar('/v1/admin/usuarios'),
+      criar: (corpo) => chamar('/v1/admin/usuarios', { post: true, corpo }),
+      reenviarLink: async (uid) => {
+        await pedir(`/v1/admin/usuarios/${encodeURIComponent(uid)}/link-de-senha`, { post: true })
+      },
+      trocarPapeis: (uid, papeis) =>
+        chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/papeis`, { put: true, corpo: { papeis } }),
+      desativar: (uid) => chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/desativar`, { post: true }),
+      reativar: (uid) => chamar(`/v1/admin/usuarios/${encodeURIComponent(uid)}/reativar`, { post: true }),
+    },
+    chaves: {
+      listar: () => chamar('/v1/admin/chaves'),
+      emitir: (corpo) => chamar('/v1/admin/chaves', { post: true, corpo }),
+      revogar: (id) => chamar(`/v1/admin/chaves/${encodeURIComponent(id)}/revogar`, { post: true }),
+    },
+    lixeira: {
+      listar: () => chamar('/v1/admin/lixeira'),
+      impacto: (tipo, id) => chamar(`${caminhoDaLixeira(tipo, id)}/impacto`),
+      enviar: (tipo, id, motivo) => chamar(caminhoDaLixeira(tipo, id), { post: true, corpo: { motivo } }),
+      restaurar: async (tipo, id) => {
+        await pedir(`${caminhoDaLixeira(tipo, id)}/restaurar`, { post: true })
+      },
+      purgar: async (tipo, id, nome) => {
+        await pedir(`${caminhoDaLixeira(tipo, id)}/purgar`, { post: true, corpo: { nome } })
+      },
+    },
     job,
   }
+}
+
+const SEGMENTO_DA_LIXEIRA: Record<TipoDeItem, string> = { video: 'videos', pessoa: 'pessoas', marca: 'marcas' }
+
+function caminhoDaLixeira(tipo: TipoDeItem, id: string): string {
+  return `/v1/admin/lixeira/${SEGMENTO_DA_LIXEIRA[tipo]}/${encodeURIComponent(id)}`
 }
