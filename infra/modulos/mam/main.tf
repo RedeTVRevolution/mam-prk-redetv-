@@ -437,6 +437,7 @@ resource "google_project_service" "apis" {
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com", # cópia das decupagens para relatórios (#260)
     "cloudbuild.googleapis.com",
+    "cloudkms.googleapis.com", # chave MAC do hash das chaves de API (#272)
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "eventarc.googleapis.com",
@@ -701,7 +702,7 @@ locals {
     # (como a `web`, quando ela purga à mão).
     purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
     # O agendador só dispara os Jobs da avaliação, da fila e da purga (papel em cada Job, mais abaixo).
-    agendador    = []
+    agendador = []
     # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer", "roles/logging.logWriter"]
     # O Cloud Build com conta própria só grava log no Cloud Logging.
@@ -1010,6 +1011,11 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "ADMINS_EMERGENCIA"
         value = var.admins_emergencia
+      }
+      # A chave MAC do Cloud KMS que faz o hash das chaves de API (api/mac_kms.py).
+      env {
+        name  = "KMS_CHAVE_MAC"
+        value = google_kms_crypto_key.chaves_de_api.id
       }
     }
   }
@@ -3213,6 +3219,11 @@ output "identity_api_key" {
 }
 
 # O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.
+output "chave_mac_kms" {
+  description = "Nome completo da chave MAC do Cloud KMS: KMS_CHAVE_MAC no `make emitir-chave`"
+  value       = google_kms_crypto_key.chaves_de_api.id
+}
+
 output "url" {
   value = local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri
 }

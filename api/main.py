@@ -40,7 +40,6 @@ from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.chaves import (
     Mac,
-    MacSimulado,
     RepositorioDeChaves,
     VerificadorDeChaveDeApi,
 )
@@ -86,6 +85,7 @@ from api.lixeira_do_catalogo import (
     FotosEmMemoria,
     criar_rotas_da_lixeira_do_catalogo,
 )
+from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
     ArmazenamentoStorage,
@@ -556,7 +556,6 @@ def criar_app(
 
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
-_chave_mac = os.environ.get("MAC_SIMULADO_CHAVE")
 if _projeto:
     _adaptadores = adaptadores_da_busca(os.environ)
     _busca = (
@@ -579,9 +578,9 @@ if _projeto:
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
-        # Até a chave MAC do Cloud KMS chegar, só a simulada (como no `make emitir-chave`).
-        # Sem ela, emitir dá 503 e a API não aceita chave de sistema; listar e revogar
-        # funcionam.
+        # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
+        # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
+        # sistema; listar e revogar funcionam.
         repositorio_de_chaves=RepositorioDeChavesFirestore(
             firestore.Client(project=_projeto)
         ),
@@ -590,11 +589,7 @@ if _projeto:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        mac=(
-            MacSimulado({1: bytes.fromhex(_chave_mac)}, versao_atual=1)
-            if _chave_mac
-            else None
-        ),
+        mac=mac_do_ambiente(os.environ),
         revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
