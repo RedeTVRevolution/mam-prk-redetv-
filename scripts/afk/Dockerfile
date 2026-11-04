@@ -17,7 +17,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 # O make verificar daqui testa o validador com este ffmpeg; por isso ele é o da produção.
 RUN apt-get update \
- && (apt-get install -y --no-install-recommends ca-certificates curl ffmpeg=$FFMPEG git jq make unzip \
+ && (apt-get install -y --no-install-recommends ca-certificates curl ffmpeg=$FFMPEG git jq make tini unzip \
      || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile (alvo validacao) e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
  && rm -rf /var/lib/apt/lists/*
 
@@ -43,7 +43,12 @@ RUN case "$TARGETARCH" in \
  && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && git config --system safe.directory '*'
 
-# O Claude Code recusa --dangerously-skip-permissions como root.
-RUN useradd -m agente
-USER agente
-ENV HOME=/home/agente UV_PYTHON_DOWNLOADS=never
+# O Claude Code recusa --dangerously-skip-permissions como root. O Sandcastle exige o usuário
+# agent, com a home em /home/agent, e o UID 1000 que o main.mts passa a ele.
+RUN useradd -m -u 1000 agent
+USER agent
+ENV HOME=/home/agent UV_PYTHON_DOWNLOADS=never
+# O Sandcastle só entra no contêiner por docker exec: ele precisa ficar de pé sozinho. O tini
+# recolhe os processos órfãos dos exec, que o sleep deixaria como zumbis.
+ENTRYPOINT ["tini", "--"]
+CMD ["sleep", "infinity"]

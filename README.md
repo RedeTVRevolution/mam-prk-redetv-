@@ -174,9 +174,9 @@ Ele gera com o ffmpeg um clipe sintético de 30 s, passa pelo validador, sobe o 
 
 ## Loop AFK
 
-`scripts/afk/rodar.sh` implementa os tickets `ready-for-agent` sozinho, sem perguntas, um ticket por iteração. Cada iteração roda dois `claude -p` novos, cada um com o contexto vazio: um implementa o ticket e o outro revisa o que foi commitado. Tudo roda num contêiner Docker sem credencial de nuvem e num clone separado (`../mam-prk-redetv-afk`), para a pasta principal continuar livre. O estado entre as iterações fica em `.afk/` dentro do clone. Só o clone entra no contêiner: o repositório principal fica de fora, e os commits voltam para ele por um `git bundle`, que o `git fetch` confere objeto por objeto. No fim, o script faz um push só, no branch `afk/<data-hora>`, e abre um PR em rascunho com `Closes #N` de cada ticket feito. Se o agente mudou qualquer arquivo fora de `api/` e `web/src/` (por exemplo `.github/workflows/`, `.githooks/`, `Makefile`, lockfiles, configs do `web/`, `AGENTS.md` ou `docs/`), o corpo do PR abre com um aviso em destaque listando esses arquivos. O CI do PR roda o `ci.yml` e o `make verificar` do próprio branch, os hooks de `.githooks/` rodam no Mac e `AGENTS.md` e afins guiam os próximos agentes, então revise antes do merge. O merge sai com `make mesclar-afk` e nunca com o CI vermelho.
+`scripts/afk/rodar.sh` implementa os tickets `ready-for-agent` sozinho, sem perguntas, um ticket por iteração. Cada iteração roda dois `claude -p` novos, cada um com o contexto vazio: um implementa o ticket e o outro revisa o que foi commitado. O loop (`main.mts`, no Mac) usa o [Sandcastle](https://github.com/mattpocock/sandcastle) num clone separado (`../mam-prk-redetv-afk`), para a pasta principal continuar livre. Cada iteração roda numa vaga nova: um contêiner Docker sem credencial de nuvem, montado num worktree do branch do ticket (`afk-t/<data-hora>/N`). Quando o ticket fica pronto, um segundo sandbox, o integrador, leva o branch do ticket ao branch do PR. O estado entre as iterações fica em `.afk/` dentro do clone. O repositório principal fica de fora dos contêineres, e os commits voltam para ele por um `git bundle`, que o `git fetch` confere objeto por objeto. No fim, o script faz um push só, no branch `afk/<data-hora>`, e abre um PR em rascunho com `Closes #N` de cada ticket feito. Se o agente mudou qualquer arquivo fora de `api/` e `web/src/` (por exemplo `.github/workflows/`, `.githooks/`, `Makefile`, lockfiles, configs do `web/`, `AGENTS.md` ou `docs/`), o corpo do PR abre com um aviso em destaque listando esses arquivos. O CI do PR roda o `ci.yml` e o `make verificar` do próprio branch, os hooks de `.githooks/` rodam no Mac e `AGENTS.md` e afins guiam os próximos agentes, então revise antes do merge. O merge sai com `make mesclar-afk` e nunca com o CI vermelho.
 
-Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente implementador recebe; edite à vontade), `revisao.md` (o do revisor), `loop.sh` (o loop, dentro do contêiner), `rodar.sh` (o Mac: Keychain, clone, Docker, bundle, push e PR), `mesclar.sh` (o `make mesclar-afk`), `hook-contexto.sh` (o aviso de contexto, ligado em `.claude/settings.json` e inerte fora do loop), `Dockerfile` e `testes.sh`.
+Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente implementador recebe; edite à vontade), `revisao.md` (o do revisor), `main.mts` (o loop, no Mac), `rodar.sh` (Keychain, clone, emuladores, push e PR), `mesclar.sh` (o `make mesclar-afk`), `hook-contexto.sh` (o aviso de contexto, ligado em `.claude/settings.json` e inerte fora do loop), `Dockerfile`, `main.test.mts` e o `package.json` com o Sandcastle fixo numa versão (o `rodar.sh` e o `make testar-afk` rodam `npm ci` nessa pasta). O `main.mts` roda direto no Node, que tira os tipos sozinho a partir da versão 22.18.
 
 ### Configuração, uma vez só
 
@@ -201,7 +201,7 @@ Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente implementador rece
    gh label create afk-feito --color 0E8A16 --description "Feito pelo loop AFK, aguardando merge"
    ```
 
-4. **Docker Desktop** aberto. A imagem `mam-afk` é construída na primeira execução. O `rodar.sh` também sobe os emuladores do Firestore e do Storage, nas versões do `ci.yml`, e o contêiner do agente entra na rede deles. Assim o `make verificar` do loop roda os testes de nuvem em vez de pulá-los. O `loop.sh` se recusa a começar sem `FIRESTORE_EMULATOR_HOST` e `STORAGE_EMULATOR_HOST`.
+4. **Docker Desktop** aberto. A imagem `mam-afk` é construída na primeira execução. O `rodar.sh` também sobe os emuladores do Firestore e do Storage, nas versões do `ci.yml`, e o contêiner do agente entra na rede deles. Assim o `make verificar` do loop roda os testes de nuvem em vez de pulá-los. O `main.mts` se recusa a começar sem `FIRESTORE_EMULATOR_HOST` e `STORAGE_EMULATOR_HOST`.
 5. **Plugin `mattpocock-skills`** instalado no Claude Code do Mac. O script monta a pasta dele no contêiner, só leitura.
 
 ### Como rodar
@@ -231,7 +231,7 @@ Cada iteração:
 3. Se o status é `feito`, roda o revisor com `revisao.md`: um `claude -p` novo, com o modelo de `AFK_MODELO_REVISOR`, que roda `mattpocock-skills:code-review` contra o ticket a partir do commit de antes dele e commita as correções. Descarta de novo o que não foi commitado. O revisor termina com `<revisao>feita</revisao>` ou `<revisao>erro</revisao>`; sem um dos dois, ou cortado, a iteração conta como falha e a próxima retoma o ticket.
 4. Roda `make verificar`, já depois da revisão. Se falhar, desfaz os commits da iteração, os do implementador e os do revisor.
 5. Age conforme o status:
-   - `feito` (e revisão `feita`): põe `afk-feito` no ticket.
+   - `feito` (e revisão `feita`): o integrador leva o branch do ticket ao do PR (fast-forward) e o script põe `afk-feito` no ticket.
    - `parcial`: a próxima iteração continua o ticket.
    - `bloqueado`: o agente comentou a pergunta no ticket e trocou a label para `ready-for-human`. O script tira o trabalho do branch, guarda num branch local `<branch>-bloqueado-N` e segue.
    - `erro`, do implementador ou do revisor: problema do ambiente, como uma skill ausente. O loop para, e o trabalho do ticket sai do branch do PR para `<branch>-parcial-N`.
@@ -253,10 +253,12 @@ O loop para sozinho quando a fila esvazia, depois do número de iterações pedi
 
 O tamanho do contexto é a soma de `input_tokens`, `cache_read_input_tokens` e `cache_creation_input_tokens` da última resposta da conversa principal (sem subagentes).
 
+Um agente que passa 20 minutos sem escrever nada, por exemplo preso numa tool call, também é morto. A iteração conta como falha, e o que ele não commitou é descartado.
+
 ### Testes
 
 ```sh
 make testar-afk
 ```
 
-Roda o `shellcheck` e o `testes.sh`, que exercita o loop com `claude` e `gh` falsos, sem Docker e sem rede: ticket feito e revisado num `claude -p` à parte, estouro de contexto, ticket bloqueado, verificação falhando depois do commit, revisão que quebra a verificação, revisão sem sinal, revisão com erro, parciais seguidas, fila sem tickets elegíveis, PR anterior sem merge, loop sem as variáveis dos emuladores e o hook abaixo e acima do aviso. O CI roda o mesmo alvo.
+Roda o `shellcheck` e o `main.test.mts` (`node --test`), que exercita o loop com `claude` e `gh` falsos, sem Docker e sem rede (o `noSandbox` do Sandcastle): ticket feito e revisado num `claude -p` à parte, estouro de contexto, ticket bloqueado, verificação falhando depois do commit, revisão que quebra a verificação, revisão sem sinal, revisão com erro, parciais seguidas, fila sem tickets elegíveis, PR anterior sem merge, loop sem as variáveis dos emuladores e o hook abaixo e acima do aviso. O CI roda o mesmo alvo.

@@ -41,7 +41,8 @@ comparar:
 
 testar-afk:
 	shellcheck scripts/afk/*.sh
-	scripts/afk/testes.sh
+	npm ci --silent --prefix scripts/afk
+	node --test scripts/afk/main.test.mts
 
 mesclar-afk:
 	scripts/afk/mesclar.sh $(BRANCH)
