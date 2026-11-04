@@ -10,7 +10,7 @@ A administração é a área do papel Administrador, que só existe em conta loc
 | Dar e tirar papéis, limitados a programas | `make atribuir-papeis` (sem escopo por programa) | Na mesma tela, papéis e programas por usuário |
 | Desativar um usuário | Não existe | Desativar bloqueia o login no Identity Platform e encerra as sessões. Nunca se apaga a conta: as correções guardam o autor |
 | Emitir, listar e revogar chaves de API | `make emitir-chave`, `listar-chaves`, `revogar-chave` | Tela de sistemas: a chave aparece uma vez na criação; revogar vale na hora |
-| Definir quais correções exigem aprovação | `make definir-aprovacao` | Uma lista de tipos de correção com uma chave liga/desliga |
+| Definir quais correções exigem aprovação | Aba "Regras de aprovação" (`/v1/admin/aprovacao`, permissão `aprovacao.definir`, só do Administrador; antes, `make definir-aprovacao`) | Uma lista de tipos de correção com uma chave liga/desliga. Vale na hora para as correções novas; as pendentes continuam pendentes. Cada mudança vai para a auditoria (`aprovacao.alterada`: tipo, antes, depois) |
 | Ver o que aconteceu | Cloud Audit Logs, fora da aplicação | Tela de auditoria: quem, quando, o quê e o motivo, filtrável por pessoa, vídeo e tipo |
 | Apagar vídeo, pessoa do catálogo ou marca | Não existe (`DELETE /v1/jobs/{id}` só cancela) | Lixeira, descrita abaixo |
 

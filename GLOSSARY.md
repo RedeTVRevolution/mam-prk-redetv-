@@ -196,7 +196,7 @@ Primeiro tempo de apagar um item (`api/lixeira.py`, `/v1/admin/lixeira`, #144, [
 Segundo tempo de apagar: 30 dias depois do envio à lixeira, ou antes por decisão do Administrador, um processo próprio apaga de fato (única exceção à regra de que correções e saída do modelo nunca são apagadas) e deixa o registro na auditoria.
 
 **Correção pendente**:
-Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale).
+Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale). Quais tipos exigem aprovação é a **regra de aprovação**, que o Administrador liga e desliga por tipo na aba "Regras de aprovação" da Administração (`/v1/admin/aprovacao`, #264): a mudança vale na hora para as correções novas, as pendentes continuam pendentes, e cada mudança grava `aprovacao.alterada` na auditoria.
 
 **Juntar e dividir pautas**:
 Tipos de Correção (`pauta.juntar`, valor `{ids, titulo}`; `pauta.dividir`, valor `{em_ms, titulos}`) que mudam a estrutura das pautas, podem exigir aprovação como os outros tipos e reindexam o vídeo. Juntar vale só para pautas que se seguem; dividir, para um corte dentro da pauta. No reprocessar, cada uma é reconciliada com as pautas novas do modelo: se o modelo já fez o mesmo, com os mesmos títulos, a correção está atendida; se fez o mesmo com outros títulos, só os títulos mudam; se não, é reaplicada.

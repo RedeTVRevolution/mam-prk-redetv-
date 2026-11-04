@@ -23,6 +23,7 @@ export const FRASE_DA_ACAO = {
   'decupagem.baixada': 'Baixou a decupagem',
   'pessoa.fundida': 'Fundiu pessoas',
   'pessoa.renomeada': 'Renomeou uma pessoa em todos os vídeos',
+  'aprovacao.alterada': 'Mudou a regra de aprovação',
 } as const
 
 export type AcaoDaAuditoria = keyof typeof FRASE_DA_ACAO
@@ -178,6 +179,8 @@ export function detalhesEmFrases(r: RegistroDeAuditoria): string[] {
     case 'chave.emitida':
     case 'chave.revogada':
       return [`Escopos: ${Array.isArray(d.escopos) && d.escopos.length ? d.escopos.join(', ') : 'nenhum'}`]
+    case 'aprovacao.alterada':
+      return [d.depois === true ? 'Passou a exigir aprovação do Curador' : 'Deixou de exigir aprovação do Curador']
     case 'item.para_lixeira':
     case 'item.restaurado':
     case 'item.purgado':

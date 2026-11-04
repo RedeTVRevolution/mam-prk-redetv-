@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas definir-aprovacao gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao
 
 instalar:
 	uv sync --locked
@@ -83,10 +83,6 @@ carregar-marcas:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.carregar_marcas
-
-# Tipos de correção que exigem aprovação de Curador (E3): make definir-aprovacao TIPOS=pessoa.renomear,pauta.titulo (vazio: nenhum)
-definir-aprovacao:
-	uv run --locked python -m api.definir_aprovacao "$(TIPOS)"
 
 # Cassete do Gemini (#10): chamada real no dev sobre um clipe sintético, com as
 # credenciais ADC de quem roda. Regrave a cada troca de modelo, esquema ou instrução.

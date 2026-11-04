@@ -22,6 +22,7 @@ Permissao = Literal[
     "lixeira.gerir",
     "catalogo.apagar",
     "catalogo.fundir",
+    "aprovacao.definir",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})

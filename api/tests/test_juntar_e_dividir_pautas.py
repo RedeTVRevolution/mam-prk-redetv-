@@ -166,7 +166,6 @@ def test_dividir_fora_da_pauta_ou_com_titulo_vazio_e_422() -> None:
 
 
 def test_os_tipos_novos_estao_no_catalogo_e_podem_exigir_aprovacao() -> None:
-    from api.aprovacao import definir_aprovacao_main
     from api.catalogo_de_correcoes import catalogo
     from api.correcoes import RepositorioDeAprovacaoEmMemoria
 
@@ -175,7 +174,8 @@ def test_os_tipos_novos_estao_no_catalogo_e_podem_exigir_aprovacao() -> None:
 
     assert tipos["pauta.juntar"] == "Juntar pautas"
     assert tipos["pauta.dividir"] == "Dividir pauta"
-    assert definir_aprovacao_main(["pauta.juntar,pauta.dividir"], repo, print) == 0
+    repo.definir(frozenset({"pauta.juntar", "pauta.dividir"}))
+    assert repo.tipos() == {"pauta.juntar", "pauta.dividir"}
 
 
 def test_juntar_com_aprovacao_so_vale_depois_de_aprovar() -> None:

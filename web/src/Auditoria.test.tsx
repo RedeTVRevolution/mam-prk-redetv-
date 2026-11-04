@@ -26,6 +26,7 @@ const ACOES_DA_API = [
   'decupagem.baixada',
   'pessoa.fundida',
   'pessoa.renomeada',
+  'aprovacao.alterada',
 ]
 
 interface Registro {
@@ -141,6 +142,7 @@ test('cada ação da lista fechada tem frase, e só ela', () => {
   expect(FRASE_DA_ACAO['video.baixado']).toBe('Baixou o vídeo')
   expect(FRASE_DA_ACAO['decupagem.baixada']).toBe('Baixou a decupagem')
   expect(FRASE_DA_ACAO['pessoa.fundida']).toBe('Fundiu pessoas')
+  expect(FRASE_DA_ACAO['aprovacao.alterada']).toBe('Mudou a regra de aprovação')
 })
 
 test('a tabela mostra quando, quem, ação em frase, alvo e motivo', async () => {

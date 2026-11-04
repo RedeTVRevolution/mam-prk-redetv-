@@ -212,6 +212,19 @@ export interface ClienteDeChaves {
   revogar(id: string): Promise<ChaveDaLista>
 }
 
+/** Um tipo de correção e se ele exige a aprovação do Curador (`/v1/admin/aprovacao`). */
+export interface RegraDeAprovacao {
+  tipo: string
+  nome: string
+  exige_aprovacao: boolean
+}
+
+/** As regras de aprovação (exige `aprovacao.definir`): a lista e a mudança de um tipo por vez. */
+export interface ClienteDeAprovacao {
+  listar(): Promise<RegraDeAprovacao[]>
+  mudar(tipo: string, exigeAprovacao: boolean): Promise<RegraDeAprovacao[]>
+}
+
 export type TipoDeItem = 'video' | 'pessoa' | 'marca'
 
 /** Um item da lixeira (`/v1/admin/lixeira`). */
@@ -290,6 +303,7 @@ export interface ClienteDaApi {
   renomeacao: ClienteDaRenomeacao
   usuarios: ClienteDeUsuarios
   chaves: ClienteDeChaves
+  aprovacao: ClienteDeAprovacao
   lixeira: ClienteDaLixeira
   job(id: string): ClienteDoJob
 }
@@ -485,6 +499,11 @@ export function criarClienteDaApi(
       listar: () => chamar('/v1/admin/chaves'),
       emitir: (corpo) => chamar('/v1/admin/chaves', { post: true, corpo }),
       revogar: (id) => chamar(`/v1/admin/chaves/${encodeURIComponent(id)}/revogar`, { post: true }),
+    },
+    aprovacao: {
+      listar: () => chamar('/v1/admin/aprovacao'),
+      mudar: (tipo, exigeAprovacao) =>
+        chamar('/v1/admin/aprovacao', { put: true, corpo: { tipo, exige_aprovacao: exigeAprovacao } }),
     },
     lixeira: {
       listar: () => chamar('/v1/admin/lixeira'),

@@ -10,6 +10,7 @@ export const ABAS: Aba[] = [
   { aba: 'entradas', rotulo: 'Entradas', permissoes: ['video.reprocessar', 'video.reprocessar_etapa'] },
   { aba: 'usuarios', rotulo: 'Usuários', permissoes: ['usuarios.gerir'] },
   { aba: 'chaves', rotulo: 'Sistemas e chaves', permissoes: ['chaves.gerir'] },
+  { aba: 'aprovacao', rotulo: 'Regras de aprovação', permissoes: ['aprovacao.definir'] },
   { aba: 'lixeira', rotulo: 'Lixeira', permissoes: ['lixeira.gerir'] },
   { aba: 'auditoria', rotulo: 'Auditoria', permissoes: ['auditoria.ver'] },
 ]

@@ -14,6 +14,7 @@ from starlette.types import Scope
 
 from api.acessos import AcessosNaAuditoria
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.aprovacao import criar_rotas_da_aprovacao
 from api.auditoria import (
     RepositorioDeAuditoria,
     RepositorioDeAuditoriaEmMemoria,
@@ -327,6 +328,7 @@ def criar_app(
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
+    repositorio_de_aprovacao = aprovacao or RepositorioDeAprovacaoEmMemoria()
     v1.include_router(
         criar_rotas(
             repositorio_de_jobs,
@@ -334,7 +336,7 @@ def criar_app(
             tamanho_maximo_bytes,
             relogio,
             repositorio_de_correcoes,
-            aprovacao or RepositorioDeAprovacaoEmMemoria(),
+            repositorio_de_aprovacao,
             catalogo_de_pessoas,
             catalogo_de_marcas,
             repositorio_de_sugestoes,
@@ -458,6 +460,13 @@ def criar_app(
         criar_rotas_das_chaves(
             repositorio_de_chaves or ChaveIndisponivel(),
             mac or MacIndisponivel(),
+            repositorio_de_auditoria,
+            relogio,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_aprovacao(
+            repositorio_de_aprovacao,
             repositorio_de_auditoria,
             relogio,
         )

@@ -80,7 +80,7 @@ Princípios do mapa:
 | O que tem hoje | No código, para quem tem `decupagem.editar`: menu por ocorrência, formulários para corrigir pessoa, aparição ou menção, tempos (com alças arrastáveis na linha do tempo), pauta, plano, fala e comercial, todos com campo "Motivo"; histórico com desfazer; fila de revisão das correções que não casaram depois de reprocessar; aprovar e recusar para o Curador. **Não foi visto no dev**: a conta usada tem os papéis padrão, sem `decupagem.editar`, e os controles não aparecem |
 | Proposta | Modo de catalogação no próprio visualizador, todo pelo teclado, com sugestões para confirmar. Detalhes em [catalogacao-manual.md](catalogacao-manual.md) |
 | Existe no código | `POST /v1/jobs/{id}/correcoes` com 14 tipos, desfazer, fila, reaplicar, descartar, aprovar e recusar (`api/jobs.py`, `api/correcoes.py`) |
-| Existe sem tela | A regra de quais tipos exigem aprovação: `make definir-aprovacao` |
+| Existe na Administração | A regra de quais tipos exigem aprovação: aba "Regras de aprovação" |
 | Falta | Correção de objetos (o esquema não tem), de texto na tela, tom e fontes do nome (#75, no PR #89), marcar um trecho novo por entrada e saída, autocompletar de pessoas e marcas, sugestões para confirmar |
 
 ### Pessoas (catálogo)
@@ -108,7 +108,7 @@ Princípios do mapa:
 | Para quem | Administrador, só em conta local com MFA |
 | O que tem | Usuários, papéis, chaves de API, lixeira e auditoria. Detalhes em [administracao.md](administracao.md) |
 | Existe no código | `GET /v1/eu` com papéis e permissões; `DELETE /v1/jobs/{id}`, que só cancela |
-| Existe sem tela | Criar contas (`make criar-contas`), dar papéis (`make atribuir-papeis`), regra de aprovação (`make definir-aprovacao`), chaves de API (`make emitir-chave`, `listar-chaves`, `revogar-chave`) |
+| Existe sem tela | Criar contas (`make criar-contas`), dar papéis (`make atribuir-papeis`), chaves de API (`make emitir-chave`, `listar-chaves`, `revogar-chave`) |
 | Falta | Os papéis Administrador e Diretoria: o código só conhece Consulta, Operador, Editor e Curador (`api/papeis.py`). Tela de usuários, apagar vídeo (lixeira), auditoria visível |
 
 ## Resumo: o que existe, o que existe sem tela, o que falta
