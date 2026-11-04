@@ -103,16 +103,20 @@ def criar_rotas_da_renomeacao(
             )
         return pessoa
 
-    def afetados(pessoa_id: str) -> tuple[list[str], int]:
-        """Os vídeos em que a pessoa está (pela leitura de hoje) e quantos momentos ela tem."""
+    def afetados(pessoa: PessoaDoCatalogo) -> tuple[list[str], int]:
+        """Os vídeos em que o nome da pessoa muda (pela leitura de hoje) e quantos momentos
+        ela tem neles; onde o editor pôs outro nome no vídeo, nada muda e não conta."""
         ids: list[str] = []
         momentos = 0
+        nome = normalizar(pessoa.nome)
         for job, entregue in decupagens_dos_jobs(repositorio, correcoes, decupagens):
             entregue = com_pessoas_fundidas(entregue, pessoas.obter)
             nelas = [
                 p
                 for p in entregue.get("pessoas") or []
-                if isinstance(p, dict) and p.get("catalogo_id") == pessoa_id
+                if isinstance(p, dict)
+                and p.get("catalogo_id") == pessoa.id
+                and normalizar(str(p.get("nome"))) == nome
             ]
             if not nelas:
                 continue
@@ -124,15 +128,43 @@ def criar_rotas_da_renomeacao(
             )
         return ids, momentos
 
-    def reindexar_pendentes(pessoa_id: str) -> None:
-        """Reindexa os vídeos pendentes, em até `RODADAS` rodadas, gravando o andamento a cada um."""
+    # Pessoas com a reindexação rodando nesta instância: `retomar` não abre uma segunda.
+    em_execucao: set[str] = set()
+
+    def tirar_pendente(pessoa_id: str, job_id: str) -> None:
+        """Tira o vídeo dos pendentes lendo a pessoa de novo, sem regravar uma cópia velha."""
         pessoa = pessoas.obter(pessoa_id)
         if pessoa is None or pessoa.renomeacao is None:
             return
-        atual = pessoa.renomeacao.model_copy(update={"estado": "em_andamento"})
-        pessoas.definir_renomeacao(pessoa_id, atual)
+        r = pessoa.renomeacao
+        pessoas.definir_renomeacao(
+            pessoa_id,
+            r.model_copy(update={"pendentes": [i for i in r.pendentes if i != job_id]}),
+        )
+
+    def reindexar_pendentes(pessoa_id: str) -> None:
+        """Reindexa os vídeos pendentes, em até `RODADAS` rodadas, gravando o andamento a cada um."""
+        if pessoa_id in em_execucao:
+            return
+        em_execucao.add(pessoa_id)
+        try:
+            _reindexar_pendentes(pessoa_id)
+        finally:
+            em_execucao.discard(pessoa_id)
+
+    def _reindexar_pendentes(pessoa_id: str) -> None:
+        def atual() -> RenomeacaoDaPessoa | None:
+            pessoa = pessoas.obter(pessoa_id)
+            return None if pessoa is None else pessoa.renomeacao
+
+        inicio = atual()
+        if inicio is None:
+            return
+        pessoas.definir_renomeacao(
+            pessoa_id, inicio.model_copy(update={"estado": "em_andamento"})
+        )
         for _ in range(RODADAS):
-            for job_id in list(atual.pendentes):
+            for job_id in list(inicio.pendentes):
                 job = repositorio.obter(job_id)
                 try:
                     pronto = job is None or job.estado != "concluido" or reindexar(job)
@@ -140,17 +172,15 @@ def criar_rotas_da_renomeacao(
                     log.exception("reindexação de %s falhou", job_id)
                     pronto = False
                 if pronto:
-                    atual = atual.model_copy(
-                        update={
-                            "pendentes": [i for i in atual.pendentes if i != job_id]
-                        }
-                    )
-                    pessoas.definir_renomeacao(pessoa_id, atual)
-            if not atual.pendentes:
+                    tirar_pendente(pessoa_id, job_id)
+            inicio = atual()
+            if inicio is None:
+                return
+            if not inicio.pendentes:
                 break
-        estado = "falhou" if atual.pendentes else "concluida"
+        estado = "falhou" if inicio.pendentes else "concluida"
         pessoas.definir_renomeacao(
-            pessoa_id, atual.model_copy(update={"estado": estado})
+            pessoa_id, inicio.model_copy(update={"estado": estado})
         )
 
     @rotas.post("/pessoas/{id_da_pessoa}/renomear")
@@ -172,7 +202,7 @@ def criar_rotas_da_renomeacao(
             raise HTTPException(
                 422, "Já existe outra pessoa com esse nome: use Fundir com…"
             )
-        ids, momentos = afetados(pessoa.id)
+        ids, momentos = afetados(pessoa)
         impacto = ImpactoDaRenomeacao(
             nome_antigo=pessoa.nome,
             nome_novo=novo,
@@ -188,7 +218,11 @@ def criar_rotas_da_renomeacao(
         )
         if normalizar(pessoa.nome) not in {normalizar(n) for n in anteriores}:
             anteriores.append(pessoa.nome)
-        pessoas.corrigir(pessoa.id, nome=novo)
+        # O nome antigo fica como apelido (como na fusão): a busca e a tarja antiga ainda acham a pessoa.
+        apelidos = list(pessoa.apelidos)
+        if normalizar(pessoa.nome) not in {normalizar(a) for a in apelidos}:
+            apelidos.append(pessoa.nome)
+        pessoas.corrigir(pessoa.id, nome=novo, apelidos=apelidos)
         pessoas.definir_renomeacao(
             pessoa.id,
             RenomeacaoDaPessoa(
@@ -224,7 +258,7 @@ def criar_rotas_da_renomeacao(
             )
         except Exception:
             # Sem registro a troca não vale: desfaz antes de reindexar.
-            pessoas.corrigir(pessoa.id, nome=pessoa.nome)
+            pessoas.corrigir(pessoa.id, nome=pessoa.nome, apelidos=pessoa.apelidos)
             pessoas.definir_renomeacao(pessoa.id, pessoa.renomeacao)
             ao_renomear()
             raise
@@ -251,7 +285,7 @@ def criar_rotas_da_renomeacao(
         pessoa = pessoas.obter(id_da_pessoa)
         if pessoa is None or pessoa.renomeacao is None:
             raise HTTPException(404, "Nenhuma renomeação desta pessoa")
-        if pessoa.renomeacao.pendentes:
+        if pessoa.renomeacao.estado != "concluida":
             segundo_plano.add_task(reindexar_pendentes, pessoa.id)
         return _andamento(pessoa.renomeacao)
 

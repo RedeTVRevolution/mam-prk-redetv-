@@ -41,6 +41,7 @@ from api.jobs import (
     agora_utc,
 )
 from api.nuvem import (
+    CatalogoFirestore,
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
@@ -230,6 +231,7 @@ def reindexar_jobs(
     quadros: LeitorDeQuadros | None = None,
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -261,6 +263,7 @@ def reindexar_jobs(
             quadros=quadros,
             sinal=sinal,
             tipos_de_objeto=tipos_de_objeto,
+            pessoas=pessoas,
         )
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
@@ -291,6 +294,7 @@ def main(argv: list[str]) -> int:
         quadros=decupagens,
         sinal=sinal,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
+        pessoas=CatalogoFirestore(firestore_).obter,
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

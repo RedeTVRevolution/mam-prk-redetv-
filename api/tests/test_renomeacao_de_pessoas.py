@@ -8,8 +8,10 @@ from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
-from api.catalogo import CatalogoEmMemoria
+from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, RenomeacaoDaPessoa
+from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.exemplos_da_busca import EXEMPLOS
+from api.indexacao import reindexar_jobs
 from api.indice_da_busca import IndiceEmMemoria, Registro
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
@@ -154,10 +156,97 @@ def test_a_correcao_de_outro_nome_no_video_nao_e_trocada() -> None:
     modelo["pessoas"][0]["nome"] = "Sabrina Sato Sa"
     mundo.armazenamento.decupagens["j2"] = [json.dumps(modelo).encode()]
 
+    previa = mundo.renomear(previa=True).json()
     mundo.renomear()
 
     assert mundo.nome_na_decupagem("j2") == "Sabrina Sato Sa"
     assert mundo.nome_na_decupagem("j1") == "Sabrina Sato Silva"
+    # A prévia só conta o vídeo em que o nome muda.
+    assert previa["videos"] == 1
+    assert mundo.andamento().json()["total"] == 1
+
+
+def test_o_nome_antigo_fica_como_apelido_para_a_busca() -> None:
+    mundo = Mundo()
+
+    mundo.renomear()
+
+    [achada] = mundo.catalogo.achar("Sabrina Sato")
+    assert achada.id == mundo.sabrina.id
+    assert achada.nome == "Sabrina Sato Silva"
+
+
+def test_reindexar_todos_depois_mantem_o_nome_novo() -> None:
+    mundo = Mundo()
+    mundo.renomear()
+
+    reindexar_jobs(
+        None,
+        mundo.jobs,
+        mundo.armazenamento,
+        RepositorioDeCorrecoesEmMemoria(),
+        mundo.indice,
+        pessoas=mundo.catalogo.obter,
+    )
+
+    assert any("Sabrina Sato Silva" in t for t in mundo.indice.donos("j1"))
+    assert not any(
+        re.search("Sabrina Sato(?! Silva)", t) for t in mundo.indice.donos("j1")
+    )
+
+
+def test_pessoa_inexistente_e_404_e_fundida_e_422() -> None:
+    mundo = Mundo()
+    mundo.catalogo.definir_fusao(
+        mundo.outra.id,
+        FusaoDaPessoa(
+            destino_id=mundo.sabrina.id,
+            em=BASE,
+            por_uid="cur",
+            por_email="cur@redetv.com",
+            motivo="duplicada",
+        ),
+    )
+
+    inexistente = mundo.cliente.post(
+        "/v1/catalogo/pessoas/nao-existe/renomear",
+        json={"nome": "X"},
+        headers=CURADOR,
+    )
+    fundida = mundo.cliente.post(
+        f"/v1/catalogo/pessoas/{mundo.outra.id}/renomear",
+        json={"nome": "X"},
+        headers=CURADOR,
+    )
+
+    assert inexistente.status_code == 404
+    assert fundida.status_code == 422
+
+
+def test_renomeacao_presa_sem_pendentes_termina_ao_retomar() -> None:
+    mundo = Mundo()
+    mundo.catalogo.definir_renomeacao(
+        mundo.sabrina.id,
+        RenomeacaoDaPessoa(
+            nome_antigo="Sabrina",
+            nome_novo="Sabrina Sato",
+            nomes_anteriores=["Sabrina"],
+            em=BASE,
+            por_uid="cur",
+            por_email="cur@redetv.com",
+            total=2,
+            pendentes=[],
+            estado="em_andamento",
+        ),
+    )
+    assert mundo.renomear().status_code == 409
+
+    mundo.cliente.post(
+        f"/v1/catalogo/pessoas/{mundo.sabrina.id}/renomear/retomar", headers=CURADOR
+    )
+
+    assert mundo.andamento().json()["estado"] == "concluida"
+    assert mundo.renomear().status_code == 200
 
 
 def test_sem_correcao_aprovar_e_403_e_nada_muda() -> None:
