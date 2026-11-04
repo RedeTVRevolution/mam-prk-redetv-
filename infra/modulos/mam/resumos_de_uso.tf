@@ -47,7 +47,9 @@ resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
   service_account_name = google_service_account.resumos_de_uso.email
   params = {
     query = templatefile("${path.module}/resumos_de_uso.sql", {
-      p = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}."
+      prefixo            = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}."
+      tabela_de_eventos  = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.eventos_de_uso.table_id}"
+      tabela_de_momentos = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.momentos.table_id}"
     })
   }
   depends_on = [

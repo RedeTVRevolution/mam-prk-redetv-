@@ -53,7 +53,11 @@ def _evento(
 
 
 def _resumir(banco: sqlite3.Connection) -> None:
-    sql = SQL.replace("${p}", "")
+    sql = (
+        SQL.replace("${prefixo}", "")
+        .replace("${tabela_de_eventos}", "eventos_de_uso")
+        .replace("${tabela_de_momentos}", "momentos")
+    )
     # O SQLite não tem CREATE OR REPLACE TABLE: troca por apagar e criar.
     sql = re.sub(
         r"CREATE OR REPLACE TABLE `(\w+)`",
@@ -230,6 +234,30 @@ def test_por_dia_conta_usuarios_ativos_sem_os_sistemas(
     assert dia1["chamadas_de_api"] == 1
 
 
+def test_o_fim_de_processamento_sozinho_nao_faz_ninguem_ativo(
+    banco: sqlite3.Connection,
+) -> None:
+    # O v1 de Ana, reprocessado, termina no dia 3; ela não faz mais nada nesse dia.
+    _evento(
+        banco,
+        "e20",
+        "fim_de_processamento",
+        "2026-11-03T16:00:00+00:00",
+        "ana",
+        job_id="v1",
+        programa="Hoje",
+        estado="falhou",
+    )
+    _resumir(banco)
+
+    dia3 = _tabela(banco, "uso_por_dia", "dia")[2]
+    ana = _tabela(banco, "uso_por_usuario", "quem_id")[0]
+
+    assert (dia3["dia"], dia3["videos_falhos"]) == ("2026-11-03", 1)
+    assert dia3["usuarios_ativos"] == 0
+    assert ana["dias_ativos"] == 2
+
+
 def test_por_usuario_traz_dias_ativos_e_ultimo_acesso(
     banco: sqlite3.Connection,
 ) -> None:
@@ -328,7 +356,7 @@ def test_sem_eventos_as_tabelas_ficam_vazias() -> None:
 
     _resumir(banco)
 
-    for nome in re.findall(r"CREATE OR REPLACE TABLE `\$\{p\}(\w+)`", SQL):
+    for nome in re.findall(r"CREATE OR REPLACE TABLE `\$\{prefixo\}(\w+)`", SQL):
         assert banco.execute(f"SELECT COUNT(*) FROM {nome}").fetchone() == (0,)
 
 
@@ -344,11 +372,17 @@ def test_o_terraform_agenda_o_sql_com_a_conta_dos_resumos() -> None:
 
 
 def test_as_tabelas_do_terraform_sao_as_que_o_sql_cria() -> None:
-    criadas = re.findall(r"CREATE OR REPLACE TABLE `\$\{p\}(\w+)`", SQL)
+    criadas = re.findall(r"CREATE OR REPLACE TABLE `\$\{prefixo\}(\w+)`", SQL)
     listadas = re.search(r"resumos_de_uso = \[(.*?)\]", TF, re.DOTALL)
     assert listadas is not None
 
     assert criadas == re.findall(r'"(\w+)"', listadas.group(1))
+
+
+def test_o_sql_le_as_tabelas_pelos_nomes_que_o_terraform_monta() -> None:
+    assert "google_bigquery_table.eventos_de_uso.table_id" in TF
+    assert "google_bigquery_table.momentos.table_id" in TF
+    assert "eventos_de_uso`" not in SQL and "momentos`" not in SQL
 
 
 def test_a_api_do_data_transfer_esta_ligada() -> None:
