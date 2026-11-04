@@ -154,6 +154,10 @@ output "url" {
   value = module.mam.url
 }
 
+output "chave_mac_kms" {
+  value = module.mam.chave_mac_kms
+}
+
 output "repositorio" {
   value = module.mam.repositorio
 }

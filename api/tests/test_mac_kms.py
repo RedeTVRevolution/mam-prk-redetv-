@@ -7,7 +7,13 @@ from typing import Any
 
 import pytest
 
-from api.chaves import MacSimulado
+from api.chaves import (
+    MacSimulado,
+    RepositorioDeChavesEmMemoria,
+    VerificadorDeChaveDeApi,
+    emitir_chave,
+)
+from api.jobs import ServicoIndisponivel, agora_utc
 from api.mac_kms import ErroDoKms, MacKms, mac_do_ambiente
 
 CHAVE = "projects/p/locations/l/keyRings/r/cryptoKeys/k"
@@ -168,3 +174,48 @@ def test_sem_a_variavel_a_montagem_usa_o_simulado() -> None:
 
 def test_sem_nenhuma_das_duas_nao_ha_mac() -> None:
     assert mac_do_ambiente({}, lambda: KmsFalso({})) is None
+
+
+def test_erro_do_kms_e_servico_indisponivel_para_a_api_dar_503() -> None:
+    assert issubclass(ErroDoKms, ServicoIndisponivel)
+
+
+def test_o_token_da_pagina_vai_codificado() -> None:
+    pedidos: list[str] = []
+
+    def transporte(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> tuple[int, dict[str, Any]]:
+        pedidos.append(caminho)
+        if len(pedidos) == 1:
+            return 200, {"nextPageToken": "a+b/c="}
+        return 200, {
+            "cryptoKeyVersions": [
+                {"name": f"{CHAVE}/cryptoKeyVersions/1", "state": "ENABLED"}
+            ]
+        }
+
+    assert MacKms(CHAVE, transporte).versao_atual == 1
+    assert pedidos[1] == f"{CHAVE}/cryptoKeyVersions?pageToken=a%2Bb%2Fc%3D"
+
+
+def test_chave_que_confere_vale_mesmo_se_o_kms_falha_na_troca_de_versao() -> None:
+    kms = KmsFalso({1: b"a"})
+    repositorio = RepositorioDeChavesEmMemoria()
+    emitida = emitir_chave(
+        "Legado", ["ler"], MacKms(CHAVE, kms), repositorio, agora_utc()
+    )
+
+    def lista_falha(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> tuple[int, dict[str, Any]]:
+        if metodo == "GET":
+            return 503, {"error": {"status": "UNAVAILABLE"}}
+        return kms(metodo, caminho, corpo)
+
+    sistema = VerificadorDeChaveDeApi(
+        repositorio, MacKms(CHAVE, lista_falha)
+    ).verificar(emitida.chave)
+
+    assert sistema.sistema == "Legado"
+    assert repositorio.obter(emitida.registro.id) == emitida.registro

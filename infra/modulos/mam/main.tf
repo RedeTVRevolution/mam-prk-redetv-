@@ -3218,12 +3218,12 @@ output "identity_api_key" {
   sensitive = true
 }
 
-# O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.
 output "chave_mac_kms" {
   description = "Nome completo da chave MAC do Cloud KMS: KMS_CHAVE_MAC no `make emitir-chave`"
   value       = google_kms_crypto_key.chaves_de_api.id
 }
 
+# O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.
 output "url" {
   value = local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri
 }

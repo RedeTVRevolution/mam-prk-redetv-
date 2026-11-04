@@ -7,6 +7,7 @@ manual: criar uma versão nova no KMS (README); a mais alta ativa passa a ser a 
 
 import base64
 import time
+import urllib.parse
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -14,6 +15,7 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 
 from api.chaves import Mac, MacSimulado
+from api.jobs import ServicoIndisponivel
 
 URL_BASE = "https://cloudkms.googleapis.com/v1"
 # Quanto tempo a versão atual fica guardada: evita uma ida ao KMS por requisição.
@@ -23,8 +25,8 @@ VALIDADE_DA_VERSAO_S = 300.0
 Transporte = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
 
 
-class ErroDoKms(RuntimeError):
-    pass
+class ErroDoKms(ServicoIndisponivel):
+    """O KMS não respondeu como devia: a API devolve 503, não 500."""
 
 
 def _erro(status: int, resposta: dict[str, Any]) -> ErroDoKms:
@@ -67,7 +69,9 @@ class MacKms:
             ]
             if not resposta.get("nextPageToken"):
                 break
-            pagina = f"?pageToken={resposta['nextPageToken']}"
+            pagina = "?pageToken=" + urllib.parse.quote(
+                resposta["nextPageToken"], safe=""
+            )
         if not versoes:
             raise ErroDoKms(f"a chave {self._chave} não tem versão ativa")
         self._versao = (max(versoes), self._relogio())
