@@ -435,7 +435,8 @@ variable "modelo_objetos" {
 resource "google_project_service" "apis" {
   for_each = toset([
     "artifactregistry.googleapis.com",
-    "bigquery.googleapis.com", # cópia das decupagens para relatórios (#260)
+    "bigquery.googleapis.com",             # cópia das decupagens para relatórios (#260)
+    "bigquerydatatransfer.googleapis.com", # consulta agendada dos resumos de uso (#280)
     "cloudbuild.googleapis.com",
     "cloudkms.googleapis.com", # chave MAC do hash das chaves de API (#272)
     "cloudresourcemanager.googleapis.com",

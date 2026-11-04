@@ -139,6 +139,10 @@ output "pubsub_topico_uso" {
   value = module.mam.pubsub_topico_uso
 }
 
+output "bigquery_tabelas_do_painel" {
+  value = module.mam.bigquery_tabelas_do_painel
+}
+
 output "chave_mac_kms" {
   value = module.mam.chave_mac_kms
 }
