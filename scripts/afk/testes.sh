@@ -205,6 +205,8 @@ roda 5
 checa "não chama o claude" chamadas 0
 checa "sai com 0" [ "$saida" = 0 ]
 checa "anota sem_tickets" contem "$repo/.afk/progresso.md" sem_tickets
+checa "grava a fila com quem cada ticket espera" \
+  [ "$(cat "$repo/.afk/fila")" = $'#1\tespera #2\n#3\tespera #2' ]
 
 echo "PR anterior sem merge"
 fila=$(issue 1 OPEN ready-for-agent,afk-feito "")

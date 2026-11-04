@@ -13,6 +13,7 @@ verificar: verificar-api verificar-web
 verificar-api:
 	scripts/checar-nomes-da-nuvem.sh
 	scripts/checar-ffmpeg.sh
+	scripts/checar-fim-de-arquivo.sh
 	uv run --locked ruff check
 	uv run --locked ruff format --check
 	uv run --locked mypy api

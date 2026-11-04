@@ -52,14 +52,21 @@ issues() {
     }]'
 }
 
-# Menor ticket ready-for-agent aberto, ainda não feito, com todos os bloqueadores fechados ou afk-feito.
-proximo_ticket() {
+# A fila, por número: os ready-for-agent abertos e ainda não feitos, cada um com os
+# bloqueadores que não estão fechados nem afk-feito ("#3	espera #2"). O primeiro sem
+# espera é o próximo ticket. Grava em .afk/fila, para quem acompanha saber a vez de cada um.
+fila() {
   issues | jq -r '
     (map({key: (.number | tostring), value: (.state == "CLOSED" or (.labels | index("afk-feito") != null))})
       | from_entries) as $resolvido
-    | map(select(.state == "OPEN" and (.labels | index("ready-for-agent")) and (.labels | index("afk-feito") | not)
-        and all(.bloqueios[]; $resolvido[tostring] == true)))
-    | sort_by(.number) | first | .number // empty'
+    | map(select(.state == "OPEN" and (.labels | index("ready-for-agent")) and (.labels | index("afk-feito") | not)))
+    | sort_by(.number)[]
+    | [.bloqueios[] | select($resolvido[tostring] != true) | "#\(.)"] as $espera
+    | "#\(.number)" + (if $espera == [] then "" else "\tespera " + ($espera | join(" ")) end)' > .afk/fila
+}
+proximo_ticket() {
+  fila || return # dentro de $( ), o set -e não para a função
+  awk -F '\t' 'NF == 1 { sub("#", ""); print; exit }' .afk/fila
 }
 
 # Roda um claude -p novo em segundo plano e o mata se o contexto passar do corte. Define $cortado.
