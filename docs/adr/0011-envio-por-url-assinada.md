@@ -10,12 +10,6 @@ Decisão do Bruno, em 02/11/2026 (issue #276).
 
 **O que muda na API: nada.** Não há ticket novo. A alternativa (o MAM buscar no storage da RedeTV) exigiria alcançar o sistema interno pela internet, o que não é possível, e foi descartada.
 
-## O que o #277 (guia do desenvolvedor) deve dizer
+## Onde estão os detalhes
 
-Visto em 4 arquivos reais da RedeTV (de jun/2025 a 30/10/2026):
-
-- **Rede.** Em `prod`, o upload pela URL assinada só é liberado a partir dos IPs da RedeTV (perímetro VPC-SC, ver o `docs/Plano_MAM.md`): o serviço intermediário precisa sair por eles.
-- **Fim do processamento.** Chega por webhook só se o serviço intermediário aceitar chamadas de fora. Se não aceitar, o serviço consulta o status.
-- **Formato.** Os arquivos são MP4 com extensão `.mov` (`major_brand: isom`), em H.264 1280x720 a 29,97 fps, com uma trilha AAC estéreo de 48 kHz. A API recusa o nome `.mov` (`_nome_de_arquivo_mp4` em `api/jobs.py`); por isso o serviço envia com nome `.mp4` e `tipo` `video/mp4` (outro tipo dá 415), sem recodificar. A API aceitar `.mov` com conteúdo MP4 fica como opção, sem decisão.
-- **Timecode.** A trilha `tmcd` vem sempre zerada (`00:00:00;00`): o `timecode_origem` não é o timecode da fita.
-- **Programa.** Vem do sistema legado pelo campo `programa`, nunca dos metadados do arquivo: `title` e `artist` não são confiáveis (um `TARD_20250605_BLU` tinha `artist: TV Fama`).
+Rede (IPs da RedeTV em `prod`), formato dos arquivos (MP4 com extensão `.mov`, enviado com nome `.mp4` e `tipo` `video/mp4`), timecode zerado, programa vindo do sistema legado e fim do processamento por webhook ou consulta estão no guia, `docs/api/guia.md`. A API aceitar `.mov` com conteúdo MP4 fica como opção, sem decisão.

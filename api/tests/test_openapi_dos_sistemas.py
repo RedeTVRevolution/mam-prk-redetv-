@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ from api.main import criar_app
 
 RAIZ = Path(__file__).resolve().parents[2]
 ARQUIVO = RAIZ / "docs" / "api" / "openapi.json"
+GUIA = RAIZ / "docs" / "api" / "guia.md"
+EXEMPLOS = RAIZ / "docs" / "api" / "exemplos"
 
 
 def _operacoes_do_esquema() -> list[tuple[str, str, dict[str, Any]]]:
@@ -80,3 +83,26 @@ def test_o_exemplo_da_decupagem_vale_no_esquema() -> None:
 
 def test_o_json_publicado_e_json_valido() -> None:
     assert json.loads(ARQUIVO.read_text())["info"]["title"]
+
+
+def test_o_guia_cita_cada_rota_e_cada_erro_entre_crases() -> None:
+    guia = GUIA.read_text()
+    for o in OPERACOES:
+        assert f"{o.metodo} {o.caminho}" in guia, f"{o.metodo} {o.caminho}"
+        for erro in o.erros:
+            assert f"`{erro.detalhe}`" in guia, (
+                f"{o.metodo} {o.caminho}: {erro.detalhe}"
+            )
+
+
+def test_o_guia_cita_cada_exemplo_e_cada_exemplo_citado_existe() -> None:
+    guia = GUIA.read_text()
+    existentes = {
+        f"exemplos/{p.parent.name}/{p.name}"
+        for p in EXEMPLOS.glob("*/*")
+        if p.is_file()
+    }
+    citados = set(re.findall(r"exemplos/(?:curl|python)/[\w.-]+\.(?:sh|py)", guia))
+
+    assert existentes
+    assert citados == existentes
