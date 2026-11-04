@@ -330,12 +330,15 @@ test("worktree registrado fora de .sandcastle/worktrees: o loop para sem tocar n
   assert.equal(r.rodou(), "escapa 1 padrão aviso");
 });
 
+// Num git depois do 2.50 (visto no 2.56 do CI), o git que o close() do Sandcastle roda no Mac segue uma
+// entrada trocada por symlink e apaga o alvo antes de o loop vê-la. Risco do Sandcastle, aceito no #390.
+const [maior, menor] = execFileSync("git", ["--version"], { encoding: "utf8" }).match(/(\d+)\.(\d+)/)!.slice(1).map(Number);
+const gitNovo = maior > 2 || (maior === 2 && menor > 50);
 for (const [acao, nome] of [["link_entrada", "uma entrada"], ["link_worktrees", "a pasta worktrees"]]) {
-  test(`symlink em ${nome} de .git/worktrees: o alvo não é apagado`, async () => {
+  test(`symlink em ${nome} de .git/worktrees: o loop para sem apagar o alvo`, { skip: acao === "link_entrada" && gitNovo }, async () => {
     const r = await roda(5, [issue(1, "OPEN", "ready-for-agent")], [`${acao} 1`, "feito 1", "revisa 1"]);
-    // O git 2.56 tira sozinho uma entrada trocada por symlink, sem segui-la, e o loop segue; o 2.39 a deixa,
-    // e o loop para.
-    if (r.saida !== 0) assert.match(r.notas(), /não é uma pasta/);
+    assert.equal(r.saida, 2);
+    assert.match(r.notas(), /não é uma pasta/);
     assert.ok(existsSync(join(process.env.FAKE!, "alvo", "importante")), "o alvo segue lá");
   });
 }
