@@ -349,6 +349,34 @@ def test_sem_disparo_configurado_a_api_responde_503_e_nao_muda_o_job() -> None:
     assert job is not None and job.estado == "falhou"
 
 
+def test_interrompido_com_etapa_fechada_recomeca_dela() -> None:
+    job = _job(
+        "falhou",
+        codigo_falha="processamento_interrompido",
+        etapas={"validacao": _etapa(), "analise": _etapa("falhou")},
+    )
+    assert etapa_de_partida(job) == "analise"
+
+
+def test_interrompido_entre_etapas_recomeca_da_primeira_que_nao_concluiu() -> None:
+    job = _job(
+        "falhou",
+        codigo_falha="processamento_interrompido",
+        etapas={
+            "validacao": _etapa(),
+            "transcricao": _etapa(),
+            "leitura_da_tela": _etapa(),
+        },
+    )
+    assert etapa_de_partida(job) == "analise"
+
+
+def test_interrompido_na_validacao_pede_o_envio_sem_culpar_o_arquivo() -> None:
+    job = _job("falhou", codigo_falha="processamento_interrompido", etapas={})
+    with pytest.raises(NaoReprocessavel, match="na validação do arquivo"):
+        etapa_de_partida(job)
+
+
 def test_etapa_de_partida_de_job_em_andamento_nao_existe() -> None:
     with pytest.raises(NaoReprocessavel):
         etapa_de_partida(_job("analisando", etapas={"analise": _etapa("falhou")}))

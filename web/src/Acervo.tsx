@@ -36,13 +36,13 @@ import MandarParaLixeira from './MandarParaLixeira.tsx'
 import { Quadro } from './Miniatura.tsx'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { fraseDaFalha } from './falhas.ts'
-import { dataDeExibicao, dataEHora, filtrosParaBusca, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
+import { dataDeExibicao, dataEHora, filtrosParaBusca, finalizando, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
 import { tempo } from './linhaDoTempo.ts'
 import { ACERVO, enderecoDoVideo, navegar, seguir } from './rotas.ts'
-import { CORES, ESTADOS_DO_JOB, type EstadoDoJob } from './tema.ts'
+import { CORES, ESTADOS_DO_JOB, FINALIZANDO, type EstadoDoJob } from './tema.ts'
 
 const ESTADOS = Object.keys(ESTADOS_DO_JOB) as EstadoDoJob[]
-const NAO_TERMINAIS: string[] = ESTADOS.filter((e) => e !== 'concluido' && e !== 'falhou')
+const NAO_TERMINAIS: string[] = ESTADOS.filter((e) => e !== 'concluido' && e !== 'falhou' && e !== 'cancelado')
 const TODOS = '__todos__'
 const ESPERA_DA_BUSCA_MS = 300
 const NUMEROS = { fontVariantNumeric: 'tabular-nums' } as const
@@ -109,7 +109,7 @@ function Linha({
   /** Só vem para quem pode apagar; a linha só mostra o menu se o estado do vídeo deixa. */
   aoMandarParaLixeira?: (job: Job) => void
 }) {
-  const estado = ESTADOS_DO_JOB[job.estado as EstadoDoJob]
+  const estado = finalizando(job) ? FINALIZANDO : ESTADOS_DO_JOB[job.estado as EstadoDoJob]
   // A tela do vídeo também explica a falha, como na Biblioteca de antes.
   const abre = job.estado === 'concluido' || job.estado === 'falhou'
   const endereco = enderecoDoVideo(job.id)
@@ -323,7 +323,7 @@ export default function Acervo({
   }, [busca, filtros.q])
 
   // Só as linhas em andamento são consultadas de novo, e só com a aba à vista.
-  const emAndamento = carga.tipo === 'pronta' ? carga.jobs.filter((j) => NAO_TERMINAIS.includes(j.estado)) : []
+  const emAndamento = carga.tipo === 'pronta' ? carga.jobs.filter((j) => NAO_TERMINAIS.includes(j.estado) || finalizando(j)) : []
   const idsEmAndamento = emAndamento.map((j) => j.id).join(',')
   // Com a API lenta, uma rodada não começa enquanto a anterior não volta.
   const atualizando = useRef(false)
@@ -336,11 +336,12 @@ export default function Acervo({
       const novos = await Promise.all(ids.map((id) => api.job(id).detalhe()))
       if (geracao.current !== daVez) return
       setAtualizacaoFalhou(null)
-      setCarga((c) =>
-        c.tipo === 'pronta'
-          ? { ...c, jobs: c.jobs.map((j) => novos.find((n) => n.id === j.id) ?? j) }
-          : c,
-      )
+      // O detalhe não traz a capa (só a listagem assina a URL): fica a da lista.
+      const comACapa = (j: Job) => {
+        const novo = novos.find((n) => n.id === j.id)
+        return novo ? { ...novo, capa_url: novo.capa_url ?? j.capa_url } : j
+      }
+      setCarga((c) => (c.tipo === 'pronta' ? { ...c, jobs: c.jobs.map(comACapa) } : c))
     } catch (erro) {
       if (geracao.current === daVez && !(erro instanceof SessaoExpirada)) {
         setAtualizacaoFalhou(codigoDoErro(erro))

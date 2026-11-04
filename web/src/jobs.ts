@@ -15,7 +15,7 @@ export interface Job {
   nome: string
   estado: string
   codigo_falha: string | null
-  /** A etapa em andamento (a API a traz no detalhe do Job). */
+  /** A etapa em andamento; vazia entre uma etapa e a seguinte. */
   etapa_atual?: string | null
   /** Onde o Job está no índice da busca; `pendente` até a indexação terminar. */
   indexacao?: { estado: string; em: string } | null
@@ -38,6 +38,44 @@ export interface Job {
 
 export interface JobCriado extends Job {
   url_de_upload: string
+}
+
+// As etapas que só rodam depois do `concluido`, na ordem; a indexação é sempre a última.
+// Espelha `ETAPAS_DEPOIS_DO_CONCLUIDO` de `api/ciclo_de_vida.py`: mude as duas juntas.
+const ETAPAS_DEPOIS_DO_CONCLUIDO = [
+  'identificacao',
+  'referencias',
+  'comparacao',
+  'quadros_chave',
+  'inventario_de_objetos',
+  'indexacao',
+]
+// ponytail: teto fixo, acima do pior caso de uma etapa, que é o inventário de objetos: espera
+// por GPU, Florence (11100 s) e o inventário em CPU (3900 s), uns 4 h 40 (timeouts do
+// `validacao.workflow.yaml` e `espera_gpu_minutos` do infra). Um Workflows que morreu entre
+// etapas deixa o Job assim; passado o teto, o selo solta e o "Reprocessar…" volta. Se esses
+// prazos subirem, suba o teto.
+const TETO_DO_FINALIZANDO_MS = 6 * 60 * 60 * 1000
+
+/**
+ * O Job fica `concluido` ao fim da análise, mas as etapas seguintes ainda rodam. Entre uma
+ * etapa e a seguinte o `etapa_atual` fica vazio, então vale também a indexação `pendente`
+ * (posta no `concluido`) ou uma etapa de depois do `concluido` já iniciada (uma correção no
+ * meio reindexa e tira o `pendente`). Acaba quando a etapa da indexação ganha `fim`, que o
+ * Workflows grava mesmo quando ela falha, ou quando o último sinal passa do teto.
+ */
+export function finalizando(job: Job, agora: number = Date.now()): boolean {
+  if (job.estado !== 'concluido') return false
+  const etapas = job.etapas ?? []
+  // O `em` de um `indexado` vem também de uma correção, que não diz nada das etapas.
+  const pendente = job.indexacao?.estado === 'pendente'
+  const sinais = [pendente ? job.indexacao?.em : undefined, ...etapas.map((e) => e.inicio)]
+    .map((t) => (t ? Date.parse(t) : NaN))
+    .filter((t) => !Number.isNaN(t))
+  if (sinais.length > 0 && agora - Math.max(...sinais) > TETO_DO_FINALIZANDO_MS) return false
+  if (job.etapa_atual) return true
+  if (etapas.some((e) => e.nome === 'indexacao' && e.fim)) return false
+  return pendente || etapas.some((e) => ETAPAS_DEPOIS_DO_CONCLUIDO.includes(e.nome))
 }
 
 export type Ordem = 'enviado' | 'exibicao'
