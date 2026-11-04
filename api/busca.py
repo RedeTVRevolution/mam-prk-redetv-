@@ -7,7 +7,6 @@ do usuário só chega ao índice como texto puro.
 """
 
 import logging
-import re
 import time
 import unicodedata
 from collections import defaultdict
@@ -34,6 +33,7 @@ from api.indice_da_busca import (
     IndiceDaBusca,
     Registro,
     TipoDeRegistro,
+    palavras,
 )
 from api.jobs import Armazenamento, Job, RepositorioDeJobs
 
@@ -335,7 +335,7 @@ class Busca:
         clausulas = self._clausulas(entendida, nome)
         # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
         # entendidos já filtram, e não entram no vetor.
-        consulta_visual = _texto_livre(entendida) or texto
+        consulta_visual = _texto_da_busca(entendida) or texto
         vetor = (
             vetor_da_imagem
             if vetor_da_imagem is not None
@@ -366,9 +366,9 @@ class Busca:
         # Sem a API de Ranking, a posição é a da pontuação do RRF: registros de mesma
         # pontuação empatam, e o desempate dos vídeos é o número de momentos.
         posicao = _posicoes_por_pontos(fundidos)
-        if _texto_livre(entendida) and achados:
+        if _texto_da_busca(entendida) and achados:
             try:
-                achados = self._ranking.reordenar(_texto_livre(entendida), achados)
+                achados = self._ranking.reordenar(_texto_da_busca(entendida), achados)
                 # A ordem do ranking, com o peso do destaque sobre a posição.
                 posicao = _posicoes_por_pontos(
                     [(r, 0, _peso(r) / (RRF_K + i + 1)) for i, r in enumerate(achados)]
@@ -509,7 +509,7 @@ class Busca:
             if pessoa in donos:
                 continue
             clausulas.extend(_clausulas_da_pessoa(pessoa, e, base, nome))
-        if livre := _texto_livre(e):
+        if livre := _texto_da_busca(e):
             clausulas.append(
                 _Clausula(
                     Consulta(
@@ -712,12 +712,10 @@ def _facetas(
 
 
 def _ligadas(e: ConsultaEntendida) -> list[EvidenciaDaBusca]:
-    """Os chips ligados: as evidências da consulta (ou o padrão de pessoa e de frase)."""
+    """Os chips ligados: as evidências da consulta (ou o padrão de pessoa)."""
     ligadas: list[EvidenciaDaBusca] = list(e.evidencias)
     if not ligadas and e.pessoas:
         ligadas.append("imagem")
-    if not ligadas and e.frase_exata:
-        ligadas.append("fala")
     if e.objetos:
         ligadas.append("objeto")
     if e.marcas:
@@ -735,9 +733,9 @@ def _ajustada(e: ConsultaEntendida, a: Ajustes) -> ConsultaEntendida:
             evidencias=do_modelo,
             objetos=e.objetos if "objeto" in ligadas else (),
             marcas=e.marcas if "marca" in ligadas else (),
-            # Sem evidência de pessoa ou de frase ligada, as duas saem (o padrão ligaria uma).
+            # Sem evidência de pessoa ligada, as pessoas saem (o padrão ligaria uma). A
+            # frase das aspas fica: ela filtra todo tipo de registro, não um chip.
             pessoas=e.pessoas if do_modelo else (),
-            frase_exata=e.frase_exata if do_modelo else None,
         )
     if a.programa is not None:
         e = replace(e, programa=a.programa or None)
@@ -763,22 +761,24 @@ def _evidencias(e: ConsultaEntendida) -> tuple[str, ...]:
     return e.evidencias or ("imagem",)
 
 
-def _texto_livre(e: ConsultaEntendida) -> str:
-    """O que vai à busca por texto e por significado: a frase das aspas e o resto."""
+def _texto_da_busca(e: ConsultaEntendida) -> str:
+    """O que vai à busca por texto e por significado: a frase das aspas e o resto, sem
+    repetir a frase se o modelo já a pôs no texto livre."""
+    if e.frase_exata and e.texto_livre and _contem(e.texto_livre, e.frase_exata):
+        return e.texto_livre
     return " ".join(p for p in (e.frase_exata, e.texto_livre) if p)
 
 
-def _palavras(texto: str) -> str:
-    """Só as palavras, sem acento, maiúscula nem pontuação, entre espaços."""
-    return f" {' '.join(re.findall(r'\w+', normalizar(texto)))} "
+def _contem(texto: str, frase: str) -> bool:
+    """A frase inteira no texto, com as palavras juntas e na ordem, sem acento nem maiúscula."""
+    return f" {' '.join(palavras(frase))} " in f" {' '.join(palavras(texto))} "
 
 
 def _tem_a_frase(r: Registro, frase: str | None) -> bool:
     """A frase inteira, com as palavras juntas e na ordem, no texto ou na descrição."""
     if not frase:
         return True
-    chave = _palavras(frase)
-    return any(chave in _palavras(c) for c in (r.texto, r.descricao) if c)
+    return any(_contem(c, frase) for c in (r.texto, r.descricao) if c)
 
 
 def _clausulas_da_pessoa(

@@ -99,7 +99,7 @@ class IndiceDaBusca(Protocol):
         ...
 
 
-def _palavras(texto: str) -> list[str]:
+def palavras(texto: str) -> list[str]:
     """As palavras como o índice real as separa: sem acento, maiúscula nem pontuação."""
     return re.findall(r"\w+", normalizar(texto))
 
@@ -354,7 +354,7 @@ class IndiceEmMemoria:
         }
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
-        palavras = _palavras(consulta.texto) if consulta.texto else []
+        da_consulta = palavras(consulta.texto) if consulta.texto else []
         so_vetor = consulta.vetor_do_quadro is not None and not (
             consulta.texto or consulta.significado
         )
@@ -369,11 +369,10 @@ class IndiceEmMemoria:
                     proximidade = _cosseno(consulta.vetor_do_quadro, r.vetor_do_quadro)
                     if proximidade > 0:
                         parecidos.append((proximidade, r))
-                palavras_do_registro = set(
-                    _palavras(_frase(r.texto, r.descricao) or "")
-                )
+                palavras_do_registro = set(palavras(_frase(r.texto, r.descricao) or ""))
                 if not so_vetor and (
-                    not palavras or any(p in palavras_do_registro for p in palavras)
+                    not da_consulta
+                    or any(p in palavras_do_registro for p in da_consulta)
                 ):
                     achados.append(r)
         parecidos.sort(key=lambda p: -p[0])
