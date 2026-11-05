@@ -149,8 +149,8 @@ async function abrirEnvio(usuario: ReturnType<typeof userEvent.setup>) {
   return screen.findByRole('dialog')
 }
 
-function datar(dialogo: ReturnType<typeof within>) {
-  fireEvent.change(dialogo.getByLabelText('Data de exibição'), { target: { value: '2026-10-28' } })
+function preencherData(dialogo: ReturnType<typeof within>) {
+  fireEvent.change(dialogo.getByLabelText(/^Data de exibição/), { target: { value: '2026-10-28' } })
 }
 
 const linha = (nome: string) => screen.getByText(nome).closest('tr') as HTMLElement
@@ -602,7 +602,7 @@ test('envia o MP4 com programa e data de exibição, e o vídeo aparece no topo 
 
   await usuario.click(await dialogo.findByRole('combobox', { name: 'Programa' }))
   await usuario.click(await screen.findByRole('option', { name: 'TV Fama' }))
-  fireEvent.change(dialogo.getByLabelText('Data de exibição'), { target: { value: '2026-10-28' } })
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect(await dialogo.findByText(/Envio concluído/)).toBeTruthy()
@@ -630,7 +630,7 @@ test('sem data de exibição o envio não chama a API e a tela diz o que falta',
   expect(criacoes).toEqual([])
   expect(pedacosEnviados).toEqual([])
 
-  fireEvent.change(dialogo.getByLabelText('Data de exibição'), { target: { value: '2026-10-28' } })
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect(await dialogo.findByText(/Envio concluído/)).toBeTruthy()
@@ -645,7 +645,7 @@ test('sem programa, o corpo da criação leva o arquivo e a data', async () => {
   const dialogo = within(await abrirEnvio(usuario))
 
   expect(dialogo.queryByRole('combobox', { name: 'Programa' })).toBeNull()
-  fireEvent.change(dialogo.getByLabelText('Data de exibição'), { target: { value: '2026-10-28' } })
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect(await dialogo.findByText(/Envio concluído/)).toBeTruthy()
@@ -667,7 +667,7 @@ test('o envio mostra o progresso e trava o arquivo até terminar', async () => {
   const dialogo = within(await abrirEnvio(usuario))
   const campo = dialogo.getByLabelText('Arquivo MP4') as HTMLInputElement
 
-  datar(dialogo)
+  preencherData(dialogo)
   await usuario.upload(campo, mp4())
   await dialogo.findByLabelText('Progresso do envio')
 
@@ -685,7 +685,7 @@ test('data de exibição no futuro vira uma mensagem em português com a ação'
   await abrir()
   const dialogo = within(await abrirEnvio(usuario))
 
-  datar(dialogo)
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect((await dialogo.findByRole('alert')).textContent).toContain('data de exibição não pode ser no futuro')
@@ -697,7 +697,7 @@ test('uma falha ao criar o Job vira mensagem em português', async () => {
   await abrir()
   const dialogo = within(await abrirEnvio(usuario))
 
-  datar(dialogo)
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect((await dialogo.findByRole('alert')).textContent).toContain('Não foi possível enviar o vídeo')
@@ -707,7 +707,7 @@ test('reabrir o diálogo começa um envio novo, sem o aviso do anterior', async 
   const usuario = userEvent.setup()
   await abrir()
   const dialogo = within(await abrirEnvio(usuario))
-  datar(dialogo)
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
   await dialogo.findByText(/Envio concluído/)
 

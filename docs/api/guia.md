@@ -91,11 +91,10 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 409 | `Job em <estado>, não cancelável` | O Job já terminou; não há o que cancelar. |
 | 415 | `Só video/mp4` | Mande `"tipo": "video/mp4"`. Não recodifique. |
 | 422 | `Tamanho fora do limite` | `tamanho_bytes` é zero ou passa de 4 GiB. |
-| 422 | `data_exibicao` ausente ou mal formada | Mande a data de exibição como texto `AAAA-MM-DD`. |
 | 422 | `Data de exibição no futuro` | `data_exibicao` é depois de hoje (Brasília). |
 | 422 | `Idempotency-Key inválida` | Use um texto simples, como um UUID. |
 | 422 | `Cursor inválido` | Use o `X-Proximo-Cursor` da resposta anterior, sem mudar os filtros. |
-| 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`): leia `loc` e `msg` em `detail`. |
+| 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`): leia `loc` e `msg` em `detail`. |
 | 503 | `Serviço indisponível` | Falha passageira. Repita com espera crescente; no `POST /v1/jobs`, com o mesmo `Idempotency-Key`. |
 
 `<estado>` na mensagem é o estado real do Job, por exemplo `Job em analisando, não concluido`.

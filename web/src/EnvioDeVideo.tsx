@@ -109,7 +109,7 @@ export default function EnvioDeVideo({
         <TextInput
           type="date"
           label="Data de exibição"
-          aria-required
+          required
           value={data}
           max={hoje()}
           onChange={(e) => setData(e.currentTarget.value)}

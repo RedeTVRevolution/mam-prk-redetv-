@@ -255,7 +255,8 @@ OPERACOES: tuple[Operacao, ...] = (
                 "O `tamanho_bytes` é zero ou passa do máximo (4 GiB). Outros 422 deste "
                 "pedido: `Data de exibição no futuro`, `Idempotency-Key inválida` e o "
                 "`Erro de validação` dos campos (nome sem `.mp4`, nome com `/`, campo "
-                "desconhecido, `programa` fora de `GET /v1/programas`).",
+                "desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` "
+                "ausente ou fora de `AAAA-MM-DD`).",
             ),
             _INDISPONIVEL,
         ),
