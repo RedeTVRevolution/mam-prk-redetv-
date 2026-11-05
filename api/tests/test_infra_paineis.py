@@ -91,6 +91,17 @@ def test_a_fila_loga_o_que_as_metricas_extraem() -> None:
     assert "var.agenda_da_fila" in agenda
 
 
+def test_a_fila_e_amostrada_a_cada_5_min_e_o_painel_pega_2_amostras() -> None:
+    variavel = _bloco('variable "agenda_da_fila"')
+    assert 'default     = "*/5 * * * *"' in variavel
+    painel = TF[TF.index("    fila = [\n") :]
+    painel = painel[: painel.index("\n    ]\n")]
+    janelas = re.findall(r"\[(\d+)m\]", painel)
+    assert len(janelas) == 4
+    assert all(int(j) >= 2 * 5 for j in janelas)
+    assert len(set(janelas)) == 1
+
+
 def test_a_falta_de_gpu_e_logada_so_quando_falta_gpu_ou_cota() -> None:
     gpu = WORKFLOW[WORKFLOW.index("\nroda_o_job_com_gpu:") :]
     assert gpu.index("not faltou_gpu") < gpu.index("evento: falta_de_gpu")

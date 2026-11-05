@@ -308,9 +308,9 @@ variable "precos_por_milhao_de_tokens" {
 }
 
 variable "agenda_da_fila" {
-  description = "Cron (formato do Cloud Scheduler) da amostra da fila de processamento (#288); de minuto em minuto, o Job só conta os Jobs em andamento e loga"
+  description = "Cron (formato do Cloud Scheduler) da amostra da fila de processamento (#288); de 5 em 5 minutos, o Job só conta os Jobs em andamento e loga"
   type        = string
-  default     = "* * * * *"
+  default     = "*/5 * * * *"
 }
 
 variable "agenda_da_purga" {
@@ -2118,7 +2118,7 @@ resource "google_cloud_scheduler_job" "avaliacao" {
   depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao]
 }
 
-# Amostra da fila de processamento (#288): de minuto em minuto o Job conta os Jobs em
+# Amostra da fila de processamento (#288): de 5 em 5 minutos o Job conta os Jobs em
 # andamento por estado e a idade do mais antigo e loga (`api/fila_job.py`); o painel da fila
 # lê esse log. Sem rede da VPC: só fala com o Firestore.
 resource "google_cloud_run_v2_job" "fila" {
@@ -2763,20 +2763,20 @@ locals {
     )
     fila = [
       {
-        titulo = "Jobs em cada estado (média das amostras do minuto)"
+        titulo = "Jobs em cada estado (média das amostras dos últimos 20 min)"
         series = [
           {
-            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_sum[10m])) / sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_count[10m]))"
+            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_sum[20m])) / sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_count[20m]))"
             legenda = "{{estado}}"
           },
         ]
         unidade = "1"
       },
       {
-        titulo = "Idade do Job mais antigo em andamento, por estado (média das amostras)"
+        titulo = "Idade do Job mais antigo em andamento, por estado (média das amostras dos últimos 20 min)"
         series = [
           {
-            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_sum[10m])) / sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_count[10m]))"
+            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_sum[20m])) / sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_count[20m]))"
             legenda = "{{estado}}"
           },
         ]
@@ -2941,7 +2941,7 @@ resource "google_logging_metric" "tokens_do_modelo" {
   depends_on = [google_project_service.apis]
 }
 
-# A amostra da fila (`api/fila_job.py`): uma linha por estado por minuto.
+# A amostra da fila (`api/fila_job.py`): uma linha por estado a cada 5 minutos.
 resource "google_logging_metric" "fila" {
   for_each = {
     fila_quantidade = { extrai = "quantidade", unidade = "1" }
