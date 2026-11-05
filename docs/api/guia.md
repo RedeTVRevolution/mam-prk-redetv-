@@ -24,7 +24,7 @@ Toda chamada leva a chave no cabeçalho `X-API-Key`.
 
 ## 2. Registrar o vídeo
 
-`POST /v1/jobs` cria o Job e devolve a `url_de_upload`. Corpo: `nome` (termina em `.mp4`, sem `/`), `tamanho_bytes` (de 1 byte a 4 GiB), `tipo` (sempre `video/mp4`) e, se souber, `programa` e `data_exibicao`. Responde **202**.
+`POST /v1/jobs` cria o Job e devolve a `url_de_upload`. Corpo: `nome` (termina em `.mp4`, sem `/`), `tamanho_bytes` (de 1 byte a 4 GiB), `tipo` (sempre `video/mp4`), `data_exibicao` (obrigatória, texto `AAAA-MM-DD`, nunca depois de hoje em Brasília) e, se souber, `programa`. Responde **202**.
 
 Mande sempre um `Idempotency-Key` (um UUID novo por vídeo): veja o passo 7. Exemplos: `exemplos/curl/2-registrar-o-video.sh` e `exemplos/python/2-registrar-o-video.py`.
 
@@ -91,6 +91,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 409 | `Job em <estado>, não cancelável` | O Job já terminou; não há o que cancelar. |
 | 415 | `Só video/mp4` | Mande `"tipo": "video/mp4"`. Não recodifique. |
 | 422 | `Tamanho fora do limite` | `tamanho_bytes` é zero ou passa de 4 GiB. |
+| 422 | `data_exibicao` ausente ou mal formada | Mande a data de exibição como texto `AAAA-MM-DD`. |
 | 422 | `Data de exibição no futuro` | `data_exibicao` é depois de hoje (Brasília). |
 | 422 | `Idempotency-Key inválida` | Use um texto simples, como um UUID. |
 | 422 | `Cursor inválido` | Use o `X-Proximo-Cursor` da resposta anterior, sem mudar os filtros. |

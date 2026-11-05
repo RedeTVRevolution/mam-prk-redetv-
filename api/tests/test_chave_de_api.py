@@ -26,7 +26,12 @@ BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 MAC_V1 = MacSimulado({1: b"k1"}, versao_atual=1)
 MAC_V2 = MacSimulado({1: b"k1", 2: b"k2"}, versao_atual=2)
 TODOS: list[Escopo] = ["cancelar", "criar", "ler"]
-NOVO_JOB = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+NOVO_JOB = {
+    "nome": "a.mp4",
+    "tamanho_bytes": 10,
+    "tipo": "video/mp4",
+    "data_exibicao": "2026-10-01",
+}
 
 
 def _ambiente(mac: MacSimulado = MAC_V1) -> tuple[RepositorioDeChavesEmMemoria, str]:

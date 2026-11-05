@@ -405,7 +405,8 @@ class NovoJob(BaseModel):
     tamanho_bytes: Annotated[int, Field(strict=True)]
     tipo: Literal["video/mp4"]
     programa: str | None = None  # um nome de `programas.toml`
-    data_exibicao: date | None = None
+    # Obrigatória (#365): a tabela de momentos é dividida por ela.
+    data_exibicao: date
 
     @model_validator(mode="before")
     @classmethod
@@ -434,7 +435,7 @@ class NovoJob(BaseModel):
     def _data_so_como_texto(cls, valor: Any) -> Any:
         # O Pydantic leria um número como timestamp e aceitaria data com hora
         # zerada; aqui só vale "AAAA-MM-DD".
-        if valor is not None and not (isinstance(valor, str) and len(valor) == 10):
+        if not (isinstance(valor, str) and len(valor) == 10):
             raise ValueError("data_exibicao deve ser texto AAAA-MM-DD")
         return valor
 
@@ -950,10 +951,7 @@ def criar_rotas(
         else:
             criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
-        if (
-            novo.data_exibicao is not None
-            and novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date()
-        ):
+        if novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date():
             raise HTTPException(422, "Data de exibição no futuro")
         job_id, nova = uuid.uuid4().hex, True
         if idempotency_key is not None:

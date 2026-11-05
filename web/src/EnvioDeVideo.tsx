@@ -62,6 +62,10 @@ export default function EnvioDeVideo({
       setEnvio({ tipo: 'erro', mensagem: motivo })
       return
     }
+    if (!data) {
+      setEnvio({ tipo: 'erro', mensagem: 'Informe a data de exibição antes de escolher o arquivo.' })
+      return
+    }
     setEnvio({ tipo: 'enviando', fracao: 0 })
     try {
       const criado = await api.criarJob({
@@ -69,7 +73,7 @@ export default function EnvioDeVideo({
         tamanho_bytes: arquivo.size,
         tipo: arquivo.type,
         ...(programa ? { programa } : {}),
-        ...(data ? { data_exibicao: data } : {}),
+        data_exibicao: data,
       })
       aoCriar()
       await enviarRetomavel(criado.url_de_upload, arquivo, {
@@ -104,7 +108,8 @@ export default function EnvioDeVideo({
         )}
         <TextInput
           type="date"
-          label="Data de exibição (opcional)"
+          label="Data de exibição"
+          aria-required
           value={data}
           max={hoje()}
           onChange={(e) => setData(e.currentTarget.value)}

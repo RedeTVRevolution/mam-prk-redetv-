@@ -12,7 +12,12 @@ from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
-NOVO_JOB = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+NOVO_JOB = {
+    "nome": "a.mp4",
+    "tamanho_bytes": 10,
+    "tipo": "video/mp4",
+    "data_exibicao": "2026-10-01",
+}
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
 
 

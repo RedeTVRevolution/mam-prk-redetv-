@@ -2231,15 +2231,8 @@
             "title": "Programa"
           },
           "data_exibicao": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "format": "date",
             "title": "Data Exibicao"
           }
         },
@@ -2248,7 +2241,8 @@
         "required": [
           "nome",
           "tamanho_bytes",
-          "tipo"
+          "tipo",
+          "data_exibicao"
         ],
         "title": "NovoJob"
       },

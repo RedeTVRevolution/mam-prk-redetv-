@@ -1,6 +1,6 @@
 """Passo 2: registra o vídeo e guarda o Job e a URL de upload em job.json.
 
-Uso: URL=... CHAVE=... ARQUIVO=video.mp4 [PROGRAMA="TV Fama"] python 2-registrar-o-video.py
+Uso: URL=... CHAVE=... ARQUIVO=video.mp4 DATA_DE_EXIBICAO=AAAA-MM-DD [PROGRAMA="TV Fama"] python 2-registrar-o-video.py
 O nome precisa terminar em .mp4 (um .mov com conteúdo MP4 se envia com nome .mp4).
 """
 
@@ -16,6 +16,7 @@ corpo = {
     "nome": arquivo.name,
     "tamanho_bytes": arquivo.stat().st_size,
     "tipo": "video/mp4",
+    "data_exibicao": os.environ["DATA_DE_EXIBICAO"],
 }
 if os.environ.get("PROGRAMA"):
     corpo["programa"] = os.environ["PROGRAMA"]

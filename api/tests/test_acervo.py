@@ -263,7 +263,12 @@ def test_pessoa_sem_email_no_token_tem_nome_nulo() -> None:
             relogio=Relogio(),
         )
     )
-    corpo = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+    corpo = {
+        "nome": "a.mp4",
+        "tamanho_bytes": 10,
+        "tipo": "video/mp4",
+        "data_exibicao": "2026-10-01",
+    }
 
     criado = cliente.post("/v1/jobs", json=corpo, headers=AUTORIZACAO).json()
 
@@ -275,7 +280,12 @@ def test_pessoa_sem_email_no_token_tem_nome_nulo() -> None:
 def test_job_criado_por_sistema_traz_o_nome_do_sistema() -> None:
     mundo = Mundo()
     chave = mundo.chave("Legado", "criar", "ler")
-    corpo = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+    corpo = {
+        "nome": "a.mp4",
+        "tamanho_bytes": 10,
+        "tipo": "video/mp4",
+        "data_exibicao": "2026-10-01",
+    }
 
     criado = mundo.cliente.post("/v1/jobs", json=corpo, headers=chave).json()
 
