@@ -3572,7 +3572,7 @@
     "/v1/correcoes/catalogo": {
       "get": {
         "summary": "Vocabulários das decupagens",
-        "description": "Os valores que os campos fixos da decupagem aceitam, com o rótulo em português: tipos de comercial e de texto na tela, tons da pauta, fontes do nome, categorias e cores de objeto, relações, e os limites de tamanho dos textos. Serve para ler os códigos que a decupagem traz. `tipos` lista os tipos de Correção que os revisores aplicam; a chave de sistema só lê. Escopo `ler`. O exemplo abaixo está resumido.",
+        "description": "Os valores que os campos fixos da decupagem aceitam, com o rótulo em português: tipos de comercial e de texto na tela, tons da pauta, fontes do nome, categorias e cores de objeto, relações, e os limites de tamanho dos textos. Serve para ler os códigos que a decupagem traz. `tipos` lista os tipos de Correção que os revisores aplicam; a chave de sistema só lê. Qualquer escopo serve. O exemplo abaixo está resumido.",
         "operationId": "tipos_de_correcao_v1_correcoes_catalogo_get",
         "responses": {
           "200": {

@@ -828,8 +828,8 @@ OPERACOES: tuple[Operacao, ...] = (
         "português: tipos de comercial e de texto na tela, tons da pauta, fontes do "
         "nome, categorias e cores de objeto, relações, e os limites de tamanho dos "
         "textos. Serve para ler os códigos que a decupagem traz. `tipos` lista os "
-        "tipos de Correção que os revisores aplicam; a chave de sistema só lê. Escopo "
-        "`ler`. O exemplo abaixo está resumido.",
+        "tipos de Correção que os revisores aplicam; a chave de sistema só lê. Qualquer "
+        "escopo serve. O exemplo abaixo está resumido.",
         {
             "tipos": [{"valor": "pessoa.renomear", "rotulo": "Renomear pessoa"}],
             "tipos_de_comercial": [{"valor": "testemunhal", "rotulo": "testemunhal"}],

@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from api.auth import ESCOPOS
 from api.decupagem import Decupagem
 from api.documentacao_dos_sistemas import (
     ARQUIVO,
@@ -12,6 +13,7 @@ from api.documentacao_dos_sistemas import (
     json_do_esquema,
 )
 from api.main import criar_app
+from api.tests.test_escopos import Mundo
 
 RAIZ = Path(__file__).resolve().parents[2]
 GUIA = RAIZ / "docs" / "api" / "guia.md"
@@ -141,7 +143,7 @@ def test_o_esquema_de_cada_erro_aceita_o_exemplo() -> None:
 def test_o_guia_cita_cada_rota_e_cada_erro_entre_crases() -> None:
     guia = GUIA.read_text()
     for o in OPERACOES:
-        assert f"{o.metodo} {o.caminho}" in guia, f"{o.metodo} {o.caminho}"
+        assert f"`{o.metodo} {o.caminho}" in guia, f"{o.metodo} {o.caminho}"
         for erro in o.erros:
             assert f"`{erro.detalhe}`" in guia, (
                 f"{o.metodo} {o.caminho}: {erro.detalhe}"
@@ -159,3 +161,97 @@ def test_o_guia_cita_cada_exemplo_e_cada_exemplo_citado_existe() -> None:
 
     assert existentes
     assert citados == existentes
+
+
+def _valida(valor: Any, esquema: dict[str, Any], raiz: dict[str, Any]) -> str | None:
+    """Um validador mínimo de JSON Schema: `$ref`, `anyOf`, `type`, `properties`, `required`, `items`."""
+    if "$ref" in esquema:
+        esquema = raiz["components"]["schemas"][esquema["$ref"].rsplit("/", 1)[1]]
+    if "anyOf" in esquema:
+        erros = [_valida(valor, e, raiz) for e in esquema["anyOf"]]
+        return None if None in erros else f"nenhuma opção de anyOf: {erros}"
+    tipos: dict[str, Any] = {
+        "object": dict,
+        "array": list,
+        "string": str,
+        "integer": int,
+        "number": (int, float),
+        "boolean": bool,
+        "null": type(None),
+    }
+    tipo = esquema.get("type")
+    if tipo and not isinstance(valor, tipos[tipo]):
+        return f"{valor!r} não é {tipo}"
+    if tipo == "integer" and isinstance(valor, bool):
+        return f"{valor!r} não é integer"
+    if isinstance(valor, dict):
+        for campo in esquema.get("required", []):
+            if campo not in valor:
+                return f"falta {campo}"
+        for campo, filho in esquema.get("properties", {}).items():
+            if campo in valor:
+                erro = _valida(valor[campo], filho, raiz)
+                if erro:
+                    return f"{campo}: {erro}"
+    if isinstance(valor, list) and "items" in esquema:
+        for item in valor:
+            erro = _valida(item, esquema["items"], raiz)
+            if erro:
+                return erro
+    return None
+
+
+def test_o_exemplo_de_sucesso_de_cada_rota_vale_no_esquema_da_resposta() -> None:
+    esquema = esquema_dos_sistemas(criar_app())
+    for metodo, caminho, operacao in _operacoes_do_esquema():
+        for status, resposta in operacao["responses"].items():
+            if not status.startswith("2"):
+                continue
+            for conteudo in resposta.get("content", {}).values():
+                if "example" in conteudo and "schema" in conteudo:
+                    assert (
+                        _valida(conteudo["example"], conteudo["schema"], esquema)
+                        is None
+                    ), f"{metodo} {caminho} {status}"
+
+
+def _aceita_a_chave(
+    mundo: Mundo, chave: dict[str, str], metodo: str, caminho: str
+) -> bool:
+    caminho = caminho.replace("{arquivo}", "plano-0.jpg")
+    caminho = re.sub(r"\{[^}]+\}", "j1", caminho)
+    argumentos: dict[str, Any] = {"json": {}} if metodo in ("POST", "PUT") else {}
+    resposta = mundo.cliente.request(metodo, caminho, headers=chave, **argumentos)
+    if resposta.status_code == 401:
+        return False
+    recusou = resposta.status_code == 403 and str(
+        resposta.json().get("detail", "")
+    ).startswith("Chave de sistema não")
+    return not recusou
+
+
+def test_toda_rota_que_aceita_a_chave_esta_documentada_e_so_ela() -> None:
+    mundo = Mundo()
+    mundo.job("j1", "sis")
+    chave = mundo.chave("sis", *ESCOPOS)
+    aceitas: set[tuple[str, str]] = set()
+    sem_chave: set[tuple[str, str]] = set()
+    for caminho, metodos in mundo.cliente.app.openapi()["paths"].items():  # type: ignore[attr-defined]
+        if not caminho.startswith("/v1"):
+            continue
+        for metodo in metodos:
+            if metodo.upper() not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+                continue
+            if (metodo.upper(), caminho) == ("GET", "/v1/health"):
+                continue  # pública: não pede chave
+            if _aceita_a_chave(mundo, chave, metodo.upper(), caminho):
+                aceitas.add((metodo.upper(), caminho))
+            else:
+                semchave = mundo.cliente.request(
+                    metodo, re.sub(r"\{[^}]+\}", "j1", caminho)
+                )
+                if semchave.status_code != 401:
+                    sem_chave.add((metodo.upper(), caminho))
+
+    assert not sem_chave
+    assert aceitas == {(o.metodo, o.caminho) for o in OPERACOES}

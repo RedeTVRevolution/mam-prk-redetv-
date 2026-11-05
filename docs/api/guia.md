@@ -122,7 +122,7 @@ Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. 
 - **Quadro de um momento:** `GET /v1/jobs/{job_id}/quadros/{arquivo}` devolve a URL do JPEG; `arquivo` é o nome em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`).
 - **Andamento de vários Jobs:** `GET /v1/jobs/andamento?ids=a,b,c` (até 200 ids).
 - **Passadas:** `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}` e `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, para comparar a decupagem de outro modelo com a entregue.
-- **Catálogo e vocabulários:** `GET /v1/catalogo/pessoas?q=`, `GET /v1/catalogo/marcas?q=`, `GET /v1/objetos/tipos` e `GET /v1/correcoes/catalogo`.
+- **Catálogo e vocabulários:** `GET /v1/catalogo/pessoas?q=`, `GET /v1/catalogo/marcas?q=`, `GET /v1/objetos/tipos` e `GET /v1/correcoes/catalogo` (esta aceita qualquer escopo).
 
 ## Rotas deste guia
 
