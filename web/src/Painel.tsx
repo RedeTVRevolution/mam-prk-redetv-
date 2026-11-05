@@ -1,9 +1,7 @@
 import { ActionIcon, Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Button } from '@mantine/core'
 import { IconArrowsJoin, IconCut, IconPencil, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { FotosDoNome } from './api.ts'
 import { useAtalhos } from './atalhos.ts'
-import { ComparacaoDoRosto } from './ComparacaoDoRosto.tsx'
 import { InventarioDoPlano, type ObjetoApontado } from './Inventario.tsx'
 import { type Marca, ROTULO_NA_BUSCA } from './catalogacao.ts'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
@@ -110,22 +108,12 @@ function Cabecalho({
   )
 }
 
-/** O que o clique no selo "Rosto" precisa para abrir a comparação. */
-interface Comparacao {
-  pessoa: string
-  nome: string
-  quadro: string | null
-}
-
 function SeloDaProva({
   selo,
   aoSaltar,
-  aoComparar,
 }: {
   selo: Selo
   aoSaltar: (ms: number) => void
-  /** Sem ele, o selo "Rosto" é só texto. */
-  aoComparar?: () => void
 }) {
   if (selo.tipo === 'nao_confirmado') {
     return (
@@ -134,20 +122,6 @@ function SeloDaProva({
           {selo.rotulo}
         </Badge>
       </Tooltip>
-    )
-  }
-  if (selo.tipo === 'rosto' && aoComparar) {
-    return (
-      <Badge
-        size="sm"
-        component="button"
-        type="button"
-        style={{ cursor: 'pointer' }}
-        aria-label="Rosto: ver a comparação com as fotos de referência"
-        onClick={aoComparar}
-      >
-        {selo.rotulo}
-      </Badge>
     )
   }
   if (selo.inicio_ms === null) return <Badge size="sm">{selo.rotulo}</Badge>
@@ -248,7 +222,6 @@ function Item({
   aoSaltar,
   aoReproduzir,
   aoIrParaDono,
-  aoComparar,
   urlDoQuadro,
   aoApontarObjeto,
   compacto,
@@ -264,8 +237,6 @@ function Item({
   aoSaltar: (ms: number) => void
   aoReproduzir: (i: ItemDoPainel) => void
   aoIrParaDono: (pessoa: string) => void
-  /** Abre a comparação do rosto da pessoa do item; sem ele, o selo "Rosto" é só texto. */
-  aoComparar?: (c: Comparacao) => void
   urlDoQuadro?: (caminho: string) => Promise<string>
   /** O objeto do inventário sob o mouse ou o foco; `null` quando sai. */
   aoApontarObjeto?: (o: ObjetoApontado | null) => void
@@ -385,11 +356,6 @@ function Item({
                   key={s.rotulo}
                   selo={s}
                   aoSaltar={aoSaltar}
-                  aoComparar={
-                    aoComparar && item.pessoa
-                      ? () => aoComparar({ pessoa: item.pessoa!, nome: item.titulo, quadro: item.quadro ?? null })
-                      : undefined
-                  }
                 />
               ))}
               {marca && (
@@ -508,7 +474,6 @@ export function Painel({
   urlDoQuadro,
   aoApontarObjeto,
   atalhosAtivos = true,
-  fotosDoNome,
   edicao = null,
   marcas,
   aoAcrescentar,
@@ -536,8 +501,6 @@ export function Painel({
   aoApontarObjeto?: (o: ObjetoApontado | null) => void
   /** Falso com a gaveta aberta: as setas e o Enter são dela. */
   atalhosAtivos?: boolean
-  /** As fotos de referência do nome de uma pessoa; sem ele, o selo "Rosto" não abre a comparação. */
-  fotosDoNome?: (pessoaId: string) => Promise<FotosDoNome>
   /** A correção em curso: o formulário toma o lugar da linha do item. */
   edicao?: EdicaoNoPainel | null
   /** "corrigido" e "aguardando o Curador", por chave de item. */
@@ -553,12 +516,6 @@ export function Painel({
   /** Só no modo de catalogação: corrigir e remover pelo mouse. */
   acoes?: AcoesDaLinha
 }) {
-  const [comparando, setComparando] = useState<Comparacao | null>(null)
-  const fecharComparacao = useCallback(() => setComparando(null), [])
-  const carregarFotos = useCallback(
-    () => (comparando && fotosDoNome ? fotosDoNome(comparando.pessoa) : Promise.reject(new Error('sem rota'))),
-    [comparando, fotosDoNome],
-  )
   const itens = useMemo(() => itensDoPainel(decupagem), [decupagem])
   const pautas = useMemo(() => itensDaAba(itens, 'pautas'), [itens])
   const rolagem = useRef<HTMLDivElement>(null)
@@ -735,7 +692,6 @@ export function Painel({
         aoSaltar={aoSaltar}
         aoReproduzir={aoReproduzir}
         aoIrParaDono={irParaDono}
-        aoComparar={fotosDoNome ? setComparando : undefined}
         urlDoQuadro={urlDoQuadro}
         aoApontarObjeto={aoApontarObjeto}
         compacto={compacto}
@@ -804,11 +760,6 @@ export function Painel({
                             key={s.rotulo}
                             selo={s}
                             aoSaltar={aoSaltar}
-                            aoComparar={
-                              fotosDoNome
-                                ? () => setComparando({ pessoa: p.id, nome: rotulo, quadro: doId[0]?.quadro ?? null })
-                                : undefined
-                            }
                           />
                         ))}
                       </Group>
@@ -896,15 +847,6 @@ export function Painel({
 
   return (
     <Stack gap="sm" style={{ height: '100%', minHeight: 0, position: 'relative' }}>
-      {comparando && (
-        <ComparacaoDoRosto
-          nome={comparando.nome}
-          quadro={comparando.quadro}
-          carregar={carregarFotos}
-          urlDoQuadro={urlDoQuadro}
-          aoFechar={fecharComparacao}
-        />
-      )}
       <Cabecalho itens={itens} pautas={pautas} duracaoMs={duracaoMs} atualMs={atualMs} />
       <Group gap="xs" role="tablist" aria-label="Abas do painel" wrap="wrap">
         {ABAS.map((a) => {

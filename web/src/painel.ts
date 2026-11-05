@@ -39,8 +39,8 @@ export type TipoDoItem = 'pauta' | 'aparicao' | 'mencao' | 'objeto' | 'comercial
 export interface Selo {
   rotulo: string
   inicio_ms: number | null
-  /** `rosto`: o clique abre a comparação das fotos. `nao_confirmado`: o nome é palpite, sem prova. */
-  tipo?: 'rosto' | 'nao_confirmado'
+  /** `nao_confirmado`: o nome é palpite, sem prova. */
+  tipo?: 'nao_confirmado'
   /** A explicação, em dica. */
   dica?: string
 }
@@ -116,8 +116,7 @@ const escapar = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Rosto' }
 
 /**
- * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm
- * tempo: abrem a comparação). O palpite sem prova leva só o selo "não confirmado".
+ * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (o rosto não tem tempo). O palpite sem prova leva só o selo "não confirmado".
  */
 function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = false): Selo[] {
   if (palpite && fontes.length === 0) {
@@ -128,12 +127,11 @@ function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = fal
   const prova = (trechos: (Intervalo & { texto: string })[]) =>
     trechos.filter((t) => alvo.test(normalizar(t.texto))).sort((a, b) => a.inicio_ms - b.inicio_ms)[0]
       ?.inicio_ms ?? null
-  // `rosto` e `referencia` dão o mesmo selo "Rosto": um só.
+  // `rosto` e a antiga `referencia` (ainda aceita na leitura) dão o mesmo selo "Rosto": um só.
   const unicas = fontes.filter((f, i) => fontes.findIndex((g) => (FONTES[g] ?? g) === (FONTES[f] ?? f)) === i)
   return unicas.map((f) => ({
     rotulo: FONTES[f] ?? f,
     inicio_ms: f === 'gc' ? prova(d.textos_na_tela ?? []) : f === 'fala' ? prova(d.transcricao) : null,
-    ...(f === 'rosto' || f === 'referencia' ? { tipo: 'rosto' as const } : {}),
   }))
 }
 

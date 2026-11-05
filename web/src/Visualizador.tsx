@@ -263,7 +263,6 @@ export default function Visualizador({
     if (etapa === 'analise') setDecupagem(null)
   }
 
-  const fotosDoNome = useCallback((pessoaId: string) => api.job(job.id).fotosDoNome(pessoaId), [api, job.id])
 
   // O catálogo de correções (rótulos e vocabulários) só serve a quem edita.
   useEffect(() => {
@@ -1619,7 +1618,6 @@ export default function Visualizador({
               aoApontarObjeto={apontarObjeto}
               planosParecidos={{ comVetor: planosComVetor, abrir: (plano) => navegar(enderecoDosParecidos(job.id, plano)) }}
               atalhosAtivos={!gavetaAberta}
-              fotosDoNome={fotosDoNome}
             />
           ) : (
             <Text size="sm" c="dimmed">
