@@ -6,17 +6,21 @@ Os filtros do servidor (permissão, lixeira) entram por cima de tudo o que vem d
 do usuário só chega ao índice como texto puro.
 """
 
+import hashlib
+import json
 import logging
+import secrets
 import threading
 import time
 import unicodedata
+import zlib
 from collections import defaultdict
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, fields, replace
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from itertools import zip_longest
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -47,7 +51,19 @@ RRF_K = 60
 # pontuação é 1/(60+posição), então o ganho cresce para uns nove lugares na
 # centésima posição), e não quem está bem mais acima. Registro sem destaque pesa 1.
 PESO_POR_NIVEL_DE_DESTAQUE = 0.03
-TETO_DE_REGISTROS = 100  # por cláusula
+# Por cláusula e depois da fusão. A 1ª página junta o resultado inteiro (até uns 500
+# vídeos), que as páginas seguintes leem do Firestore sem refazer a busca (#426).
+TETO_DE_REGISTROS = 500
+# A Ranking API cobra pelos registros enviados ("ranking units are computed from the number
+# of records sent to the ranker and the size of their title and content templates"): com
+# 500 candidatos, ela custaria proporcionalmente mais que antes. Só os 100 primeiros da fusão são
+# reordenados, o mesmo volume de quando o teto era 100; o resto vem depois deles, na
+# ordem do índice, e é o que a pessoa só vê a partir da 2ª ou 3ª página.
+TETO_DO_RANKING = 100
+# Quanto vale o cursor da busca: o Firestore apaga a lista depois (política de TTL).
+VALIDADE_DA_LISTA = timedelta(minutes=15)
+# O campo comprimido da lista, bem abaixo do 1 MiB do documento do Firestore.
+TETO_DA_LISTA_BYTES = 800_000
 TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
 JUNCAO_MS = 3_000
@@ -206,6 +222,79 @@ class ResultadoDaBusca(BaseModel):
     _proximo_cursor: str | None = PrivateAttr(default=None)
 
 
+class MomentoGuardado(BaseModel):
+    """O momento como fica na lista: os destaques e a URL são refeitos a cada página."""
+
+    tipo: TipoDeRegistro
+    inicio_ms: int
+    fim_ms: int
+    motivo: str
+    quadro: str | None
+
+
+class VideoGuardado(BaseModel):
+    """Nome, programa e data vêm do Job, relido a cada página."""
+
+    job_id: str
+    momentos: list[MomentoGuardado]
+
+
+# Os campos que o documento guarda soltos; o resto vai num campo só, comprimido.
+_SOLTOS = {"dono", "impressao", "criado_em", "expira_em"}
+
+
+class ListaDaBusca(BaseModel):
+    """O resultado inteiro, em ordem, guardado na 1ª página para as seguintes (#426)."""
+
+    dono: str  # o uid, ou `sistema:<nome>` da chave
+    impressao: str  # SHA-256 da consulta e dos filtros
+    criado_em: datetime
+    expira_em: datetime  # o campo da política de TTL
+    entendida: Entendida
+    sem_aparicoes: list[SemAparicao]
+    plano_b: bool
+    facetas: Facetas
+    termos: list[str]
+    videos: list[VideoGuardado]
+
+    def para_documento(self) -> dict[str, Any]:
+        """A lista num campo de bytes: o Firestore não indexa item por item, e o
+        tamanho medido é o que vai ao documento."""
+        resto = self.model_dump_json(exclude=_SOLTOS).encode()
+        return {k: getattr(self, k) for k in _SOLTOS} | {
+            "conteudo": zlib.compress(resto)
+        }
+
+    @classmethod
+    def do_documento(cls, documento: Mapping[str, Any]) -> "ListaDaBusca":
+        resto = json.loads(zlib.decompress(documento["conteudo"]))
+        return cls.model_validate({k: documento[k] for k in _SOLTOS} | resto)
+
+
+class ListasDaBusca(Protocol):
+    """Porta para o Firestore, com o documento de `ListaDaBusca.para_documento` (o
+    adaptador não importa a busca: as imagens de GPU o copiam sem ela)."""
+
+    def gravar(self, documento: dict[str, Any]) -> str:
+        """Grava com um id aleatório, só de letras e números, e o devolve."""
+        ...
+
+    def ler(self, id: str) -> dict[str, Any] | None: ...
+
+
+class ListasDaBuscaEmMemoria:
+    def __init__(self) -> None:
+        self.documentos: dict[str, dict[str, Any]] = {}
+
+    def gravar(self, documento: dict[str, Any]) -> str:
+        id = secrets.token_hex(10)
+        self.documentos[id] = documento
+        return id
+
+    def ler(self, id: str) -> dict[str, Any] | None:
+        return self.documentos.get(id)
+
+
 def filtros_do_servidor() -> Filtros:
     """Os filtros que o servidor impõe a toda busca, acima da consulta.
 
@@ -286,8 +375,10 @@ class Busca:
         relogio: Callable[[], datetime],
         embedding: EmbeddingDaConsulta | None = None,
         copia_do_catalogo: CopiaCurta[PessoaDoCatalogo] | None = None,
+        listas: ListasDaBusca | None = None,
     ) -> None:
         self._embedding = embedding
+        self._listas = listas or ListasDaBuscaEmMemoria()
         # A mesma cópia do autocompletar, se a aplicação a passa: uma só recarga para todos.
         self._copia_do_catalogo = copia_do_catalogo or CopiaCurta(
             catalogo.todas, relogio
@@ -316,9 +407,14 @@ class Busca:
         parecidos: tuple[str, list[float]] | None = None,
         cancelado: threading.Event | None = None,
         cursor: str | None = None,
+        dono: str = "",
     ) -> ResultadoDaBusca:
-        """`cursor` é o `_proximo_cursor` da página anterior (`CursorInvalido` se não
-        está no resultado). `imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
+        """Sem `cursor`, faz a busca e, se sobra vídeo além de `limite`, guarda a lista
+        inteira para `dono` (#426); com o `_proximo_cursor` de uma página, só lê a lista
+        e corta a página, sem modelo, índice nem ranking (`CursorInvalido` se a lista não
+        existe, venceu, é de outro dono ou de outra consulta).
+
+        `imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
         só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
         `BuscaPorImagemIndisponivel`. `parecidos` (#271) é o registro de um plano e o
         vetor do quadro dele, já no índice: busca do mesmo modo, sem embedding, e o
@@ -327,6 +423,20 @@ class Busca:
         impostos = filtros_do_servidor or Filtros()
         vetor_da_imagem = None
         proprio = parecidos[0] if parecidos else None
+        impressao = _impressao(
+            texto=texto,
+            ordem=ordem,
+            visual=visual,
+            imagem=hashlib.sha256(imagem).hexdigest() if imagem is not None else None,
+            parecidos=proprio,
+            sistema=sistema,
+            ajustes=asdict(ajustes or Ajustes()),
+            filtros=asdict(impostos),
+        )
+        if cursor is not None:
+            return self._pagina_seguinte(
+                cursor, limite, dono, impressao, sistema, cancelado
+            )
         if parecidos is not None:
             vetor_da_imagem = parecidos[1]
             entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
@@ -440,7 +550,12 @@ class Busca:
         posicao = _posicoes_por_pontos(fundidos)
         if _texto_da_busca(entendida) and achados:
             try:
-                achados = self._ranking.reordenar(_texto_da_busca(entendida), achados)
+                achados = [
+                    *self._ranking.reordenar(
+                        _texto_da_busca(entendida), achados[:TETO_DO_RANKING]
+                    ),
+                    *achados[TETO_DO_RANKING:],
+                ]
                 # A ordem do ranking, com o peso do destaque sobre a posição.
                 posicao = _posicoes_por_pontos(
                     [(r, 0, _peso(r) / (RRF_K + i + 1)) for i, r in enumerate(achados)]
@@ -451,9 +566,8 @@ class Busca:
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        videos, proximo = _pagina(
-            self._videos(trechos, job, termos, ordem, cancelado), limite, cursor
-        )
+        todos = self._videos(trechos, job, termos, ordem, cancelado)
+        videos = todos[:limite]
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
         vazios = [
@@ -485,7 +599,132 @@ class Busca:
             facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
         )
-        resultado._proximo_cursor = proximo
+        if len(todos) > limite:
+            resultado._proximo_cursor = self._guardar(
+                resultado, todos, termos, dono, impressao, limite
+            )
+        return resultado
+
+    def _guardar(
+        self,
+        resultado: ResultadoDaBusca,
+        todos: list[VideoDoResultado],
+        termos: list[str],
+        dono: str,
+        impressao: str,
+        limite: int,
+    ) -> str | None:
+        """Grava a lista inteira e devolve o cursor da 2ª página."""
+        agora = self._relogio()
+        lista = ListaDaBusca(
+            dono=dono,
+            impressao=impressao,
+            criado_em=agora,
+            expira_em=agora + VALIDADE_DA_LISTA,
+            entendida=resultado.entendida,
+            sem_aparicoes=resultado.sem_aparicoes,
+            plano_b=resultado.plano_b,
+            facetas=resultado.facetas,
+            termos=termos,
+            videos=[
+                VideoGuardado(
+                    job_id=v.job_id,
+                    momentos=[
+                        MomentoGuardado(
+                            tipo=m.tipo,
+                            inicio_ms=m.inicio_ms,
+                            fim_ms=m.fim_ms,
+                            motivo=m.motivo,
+                            quadro=m.quadro,
+                        )
+                        for m in v.momentos
+                    ],
+                )
+                for v in todos
+            ],
+        )
+        # ponytail: 500 momentos com o texto máximo (2.000 caracteres) cabem com folga
+        # depois de comprimidos; se um dia não couberem, a lista perde o fim até caber.
+        while (
+            len(lista.para_documento()["conteudo"]) > TETO_DA_LISTA_BYTES
+            and len(lista.videos) > limite
+        ):
+            corte = max(limite, len(lista.videos) * 3 // 4)
+            log.warning("lista da busca grande demais: fica com %d vídeos", corte)
+            lista = lista.model_copy(update={"videos": lista.videos[:corte]})
+        if len(lista.videos) <= limite:
+            return None
+        return f"{self._listas.gravar(lista.para_documento())}.{limite}"
+
+    def _pagina_seguinte(
+        self,
+        cursor: str,
+        limite: int,
+        dono: str,
+        impressao: str,
+        sistema: str | None,
+        cancelado: threading.Event | None,
+    ) -> ResultadoDaBusca:
+        """A fatia da lista guardada; os Jobs são relidos, e o vídeo que foi para a
+        lixeira ou saiu do alcance do chamador desde a 1ª página fica de fora."""
+        id, _, posicao = cursor.rpartition(".")
+        # Só letras e números ASCII: um `/` no id viraria outro caminho no Firestore.
+        if not (_ascii_alnum(id) and posicao.isascii() and posicao.isdigit()):
+            raise CursorInvalido
+        documento = self._listas.ler(id)
+        lista = ListaDaBusca.do_documento(documento) if documento else None
+        agora = self._relogio()
+        inicio = int(posicao)
+        if (
+            lista is None
+            or lista.expira_em <= agora  # o TTL do Firestore apaga com atraso
+            or lista.dono != dono
+            or lista.impressao != impressao
+            or not 0 < inicio < len(lista.videos)
+        ):
+            raise CursorInvalido
+        fim = inicio + limite
+        guardados = lista.videos[inicio:fim]
+        lidos = {
+            j.id: j
+            for j in self._repositorio.obter_varios([v.job_id for v in guardados])
+        }
+        videos: list[VideoDoResultado] = []
+        for v in guardados:
+            j = self._visivel_de(lidos.get(v.job_id), sistema)
+            if j is None:
+                continue
+            momentos = [
+                Momento(
+                    **m.model_dump(),
+                    destaques=_destaques(m.motivo, lista.termos),
+                    quadro_url=None,
+                )
+                for m in v.momentos
+            ]
+            videos.append(
+                VideoDoResultado(
+                    job_id=v.job_id,
+                    nome=j.nome,
+                    programa=j.programa,
+                    data_exibicao=j.data_exibicao,
+                    duracao_s=j.duracao_s,
+                    n_momentos=len(momentos),
+                    momentos=momentos,
+                )
+            )
+        if sistema is not None:
+            self._assinar_os_quadros(videos, cancelado)
+        resultado = ResultadoDaBusca(
+            entendida=lista.entendida,
+            videos=videos,
+            sem_aparicoes=lista.sem_aparicoes,
+            plano_b=lista.plano_b,
+            facetas=lista.facetas,
+            quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
+        )
+        if fim < len(lista.videos):
+            resultado._proximo_cursor = f"{id}.{fim}"
         return resultado
 
     def planos_com_vetor(
@@ -518,9 +757,11 @@ class Busca:
         sistema: str | None = None,
         cancelado: threading.Event | None = None,
         cursor: str | None = None,
+        dono: str = "",
     ) -> ResultadoDaBusca:
-        """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271)."""
-        vetor = self.planos_com_vetor(job_id, sistema).get(plano)
+        """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271).
+        Com `cursor`, a página vem da lista guardada, sem ler o vetor no índice."""
+        vetor = [] if cursor else self.planos_com_vetor(job_id, sistema).get(plano)
         if vetor is None:
             raise PlanoSemVetor
         return self.buscar(
@@ -531,6 +772,7 @@ class Busca:
             sistema=sistema,
             cancelado=cancelado,
             cursor=cursor,
+            dono=dono,
         )
 
     def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:
@@ -707,27 +949,6 @@ class Busca:
         )
 
 
-def _pagina(
-    videos: list[VideoDoResultado], limite: int, cursor: str | None
-) -> tuple[list[VideoDoResultado], str | None]:
-    """Como o acervo (`PaginaDeJobs`): o cursor é o último vídeo da página anterior, e o
-    próximo só vem se sobra vídeo depois desta.
-
-    ponytail: cada página refaz a busca (modelo, índice e ranking) e corta a lista; a
-    ordem só se mantém entre páginas se a consulta for entendida do mesmo jeito, e a
-    lista toda segue no teto de `TETO_DE_REGISTROS` registros fundidos.
-    """
-    inicio = 0
-    if cursor is not None:
-        ids = [v.job_id for v in videos]
-        if cursor not in ids:
-            raise CursorInvalido
-        inicio = ids.index(cursor) + 1
-    pagina = videos[inicio : inicio + limite]
-    sobra = len(videos) > inicio + limite
-    return pagina, pagina[-1].job_id if sobra else None
-
-
 def _clausula_visual(
     e: ConsultaEntendida,
     vetor: list[float],
@@ -794,10 +1015,10 @@ def _facetas(
     """Vídeos distintos por valor, sobre os candidatos (os registros que sobraram do RRF).
 
     ponytail: o Agent Retrieval não devolve contagem por faceta (a API só traz os registros
-    e o índice não agrega), então a conta é nossa e vai até `TETO_DE_REGISTROS` (100)
-    candidatos fundidos (cada cláusula traz até 100, já com os filtros e as facetas no
+    e o índice não agrega), então a conta é nossa e vai até `TETO_DE_REGISTROS` (500)
+    candidatos fundidos (cada cláusula traz até 500, já com os filtros e as facetas no
     índice): o valor que só aparece além deles não entra, e as contagens são de
-    "vídeos entre os 100 melhores registros", não do acervo todo.
+    "vídeos entre os 500 melhores registros", não do acervo todo.
     """
     por_faceta: dict[str, dict[str, tuple[str, set[str]]]] = {
         f: {} for f in ("programa", "mes", "pessoa", "marca", "tipo")
@@ -979,6 +1200,16 @@ def _termos(
         ]
     termos += [q for p in e.pessoas if (q := nome(p))]
     return termos
+
+
+def _impressao(**partes: object) -> str:
+    """A consulta e os filtros, sem o tamanho da página: o cursor só vale na mesma."""
+    texto = json.dumps(partes, sort_keys=True, default=str)
+    return hashlib.sha256(texto.encode()).hexdigest()
+
+
+def _ascii_alnum(texto: str) -> bool:
+    return texto.isascii() and texto.isalnum()
 
 
 def _peso(r: Registro) -> float:

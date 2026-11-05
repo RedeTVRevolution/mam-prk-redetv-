@@ -3,6 +3,7 @@
 import io
 import logging
 import tempfile
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -253,3 +254,19 @@ def test_sem_o_campo_arquivo_ou_com_corpo_que_nao_e_multipart_responde_422() -> 
     assert r.status_code == 422
     r = c.post(ROTA, json={"arquivo": "x"}, headers=AUTORIZACAO)
     assert r.status_code == 422
+
+
+def test_a_mesma_foto_pagina_pelo_cursor_sem_chamar_o_embedding_de_novo() -> None:
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+    c, m = com_planos(embedding)
+    m.com(job("j2"), replace(plano("j2:plano:1", [1.0, 0.0]), job_id="j2"))
+    dados = foto("PNG")
+
+    r1 = enviar(c, dados, limite="1")
+    r2 = enviar(c, dados, limite="1", cursor=r1.headers["X-Proximo-Cursor"])
+
+    assert r2.status_code == 200, r2.text
+    ids = [r.json()["videos"][0]["job_id"] for r in (r1, r2)]
+    assert sorted(ids) == ["j1", "j2"]
+    assert "X-Proximo-Cursor" not in r2.headers
+    assert len(embedding.imagens) == 1

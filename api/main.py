@@ -36,7 +36,13 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
-from api.busca import Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
+from api.busca import (
+    Busca,
+    EmbeddingDaConsulta,
+    ListasDaBusca,
+    Ranking,
+    RankingEmOrdem,
+)
 from api.busca_na_nuvem import adaptadores_da_busca
 from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
@@ -110,6 +116,7 @@ from api.nuvem import (
     DisparoDaIndexacaoNoCloudRun,
     DisparoPeloWorkflows,
     JanelasStorage,
+    ListasDaBuscaFirestore,
     ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
@@ -317,6 +324,7 @@ def criar_app(
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
     ranking: Ranking | None = None,
+    listas_da_busca: ListasDaBusca | None = None,
     busca_por_minuto: int = CONSULTAS_POR_MINUTO,
     tempo_maximo_da_busca_s: float = TEMPO_MAXIMO_S,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
@@ -576,6 +584,7 @@ def criar_app(
                 relogio=relogio,
                 embedding=embedding_da_consulta,
                 copia_do_catalogo=copia_das_pessoas,
+                listas=listas_da_busca,
             ),
             relogio,
             busca_por_minuto,
@@ -744,6 +753,7 @@ if _projeto:
         idempotencia=RepositorioDeIdempotenciaFirestore(
             firestore.Client(project=_projeto)
         ),
+        listas_da_busca=ListasDaBuscaFirestore(firestore.Client(project=_projeto)),
         repositorio_de_chaves=RepositorioDeChavesFirestore(
             firestore.Client(project=_projeto)
         ),

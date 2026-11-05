@@ -150,8 +150,9 @@ _DEMOROU = Erro(
 _CURSOR_DA_BUSCA = Erro(
     422,
     "Cursor inválido",
-    "O `cursor` não é um vídeo do resultado: use o `X-Proximo-Cursor` da resposta "
-    "anterior, sem mudar a consulta nem os filtros.",
+    "O `cursor` foi alterado, venceu (vale 15 min), é de outra chave ou de outra "
+    "consulta: use o `X-Proximo-Cursor` da resposta anterior com a mesma consulta e os "
+    "mesmos filtros, ou refaça a busca sem `cursor`.",
 )
 _PERIODO_INVERTIDO = Erro(
     422,
@@ -322,8 +323,9 @@ _BUSCA_DO_SISTEMA = (
     "caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET "
     "/v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O "
     "`quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em "
-    "páginas de `limite` vídeos: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da "
-    "página seguinte e some na última; repita a mesma consulta com ele. Escopo `ler`."
+    "páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o "
+    "`cursor` da página seguinte e some na última. Repita a mesma consulta com ele "
+    "em até 15 min; a ordem é a da 1ª página. Escopo `ler`."
 )
 
 OPERACOES: tuple[Operacao, ...] = (

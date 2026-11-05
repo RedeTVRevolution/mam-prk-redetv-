@@ -176,6 +176,7 @@ def criar_rotas_da_busca(
             sistema=sistema,
             cancelado=cancelado,
             cursor=cursor,
+            dono=quem,
             ajustes=Ajustes(
                 evidencias=tuple(dict.fromkeys(evidencias or ())),
                 programa=programa,
@@ -196,22 +197,23 @@ def criar_rotas_da_busca(
             raise HTTPException(504, "A busca demorou demais") from None
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        registrar_busca(
-            chamador,
-            len(q),
-            programa,
-            resultado,
-            modo="texto",
-            ordem=ordem,
-            evidencias=",".join(dict.fromkeys(evidencias or ())),
-            desde=desde,
-            ate=ate,
-            sem_periodo=sem_periodo,
-            pessoa=pessoa,
-            marca=marca,
-            tipo=tipo,
-            visual=visual,
-        )
+        if cursor is None:  # a página seguinte não conta como busca nova
+            registrar_busca(
+                chamador,
+                len(q),
+                programa,
+                resultado,
+                modo="texto",
+                ordem=ordem,
+                evidencias=",".join(dict.fromkeys(evidencias or ())),
+                desde=desde,
+                ate=ate,
+                sem_periodo=sem_periodo,
+                pessoa=pessoa,
+                marca=marca,
+                tipo=tipo,
+                visual=visual,
+            )
         return _com_cursor(resposta, resultado)
 
     teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
@@ -295,6 +297,7 @@ def criar_rotas_da_busca(
             sistema=sistema,
             cancelado=cancelado,
             cursor=cursor,
+            dono=quem,
             ajustes=Ajustes(
                 programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
             ),
@@ -312,16 +315,17 @@ def criar_rotas_da_busca(
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
             ) from None
-        registrar_busca(
-            chamador,
-            len(dados),
-            programa,
-            resultado,
-            modo="imagem",
-            desde=desde,
-            ate=ate,
-            sem_periodo=sem_periodo,
-        )
+        if cursor is None:  # a página seguinte não conta como busca nova
+            registrar_busca(
+                chamador,
+                len(dados),
+                programa,
+                resultado,
+                modo="imagem",
+                desde=desde,
+                ate=ate,
+                sem_periodo=sem_periodo,
+            )
         return _com_cursor(resposta, resultado)
 
     @rotas.get("/busca/parecidos/planos")
@@ -370,6 +374,7 @@ def criar_rotas_da_busca(
             sistema=sistema,
             cancelado=cancelado,
             cursor=cursor,
+            dono=quem,
         )
         try:
             resultado = futuro.result(timeout=tempo_maximo_s)
@@ -383,9 +388,10 @@ def criar_rotas_da_busca(
         except PlanoSemVetor:
             raise HTTPException(404, _PLANO_SEM_VETOR) from None
         # Não há consulta: o ponto de partida é o plano de um vídeo.
-        registrar_busca(
-            chamador, None, None, resultado, job, modo="parecidos", plano=plano
-        )
+        if cursor is None:  # a página seguinte não conta como busca nova
+            registrar_busca(
+                chamador, None, None, resultado, job, modo="parecidos", plano=plano
+            )
         return _com_cursor(resposta, resultado)
 
     return rotas

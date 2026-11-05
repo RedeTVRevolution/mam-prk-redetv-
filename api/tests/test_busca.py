@@ -2,8 +2,10 @@
 
 import json
 import logging
+import random
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -13,20 +15,28 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.busca import (
+    TETO_DA_LISTA_BYTES,
     TETO_DE_ASSINATURAS,
+    TETO_DE_REGISTROS,
+    TETO_DO_RANKING,
     Ajustes,
     Busca,
     BuscaCancelada,
     EmbeddingDaConsulta,
+    Entendida,
+    Facetas,
+    ListaDaBusca,
+    MomentoGuardado,
     Ranking,
     RankingEmOrdem,
+    VideoGuardado,
 )
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
 from api.eventos_de_uso import Eventos
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import CursorInvalido, Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
@@ -122,6 +132,7 @@ class Mundo:
         self,
         ranking: Ranking | None = None,
         embedding: EmbeddingDaConsulta | None = None,
+        relogio: Callable[[], datetime] = lambda: BASE,
     ) -> Busca:
         return Busca(
             embedding=embedding,
@@ -133,7 +144,7 @@ class Mundo:
             ranking=ranking or RankingEmOrdem(),
             repositorio=self.jobs,
             armazenamento=self.armazenamento,
-            relogio=lambda: BASE,
+            relogio=relogio,
         )
 
     def com(self, j: Job, *registros: Registro) -> None:
@@ -590,7 +601,8 @@ def test_rota_devolve_os_videos_agrupados() -> None:
 
 
 def cliente_com_videos(n: int, consultas: int) -> TestClient:
-    """`n` vídeos com um vestido cada; `consultas` é quantas vezes o modelo responde."""
+    """`n` vídeos com um vestido cada; `consultas` é quantas vezes o modelo responde
+    (uma resposta a menos do que as chamadas faz o teste falhar)."""
     c, m = cliente(["consulta"], *[pedido(texto_livre="vestido")] * consultas)
     for i in range(2, n + 1):
         m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000))
@@ -598,9 +610,9 @@ def cliente_com_videos(n: int, consultas: int) -> TestClient:
 
 
 def pagina_da_busca(
-    c: TestClient, cursor: str | None = None, limite: int = 2
+    c: TestClient, cursor: str | None = None, limite: int = 50, q: str = "vestido"
 ) -> tuple[list[str], str | None]:
-    params: dict[str, Any] = {"q": "vestido", "limite": limite}
+    params: dict[str, Any] = {"q": q, "limite": limite}
     if cursor is not None:
         params["cursor"] = cursor
     r = c.get("/v1/busca", params=params, headers=AUTORIZACAO)
@@ -608,41 +620,247 @@ def pagina_da_busca(
     return [v["job_id"] for v in r.json()["videos"]], r.headers.get("X-Proximo-Cursor")
 
 
-def test_a_busca_vem_em_paginas_sem_repetir_video_e_a_ultima_sem_cursor() -> None:
-    c = cliente_com_videos(5, consultas=4)
+def test_120_videos_vem_em_paginas_de_50_50_e_20_sem_repetir() -> None:
+    # Uma resposta do modelo só: as páginas seguintes não entendem a consulta de novo.
+    c = cliente_com_videos(120, consultas=1)
 
-    tudo, sem_proximo = pagina_da_busca(c, limite=50)
     primeira, cursor = pagina_da_busca(c)
     assert cursor is not None
     segunda, cursor = pagina_da_busca(c, cursor)
     assert cursor is not None
     terceira, fim = pagina_da_busca(c, cursor)
 
-    assert len(tudo) == 5 and sem_proximo is None
-    assert [len(primeira), len(segunda), len(terceira)] == [2, 2, 1]
-    assert primeira + segunda + terceira == tudo
+    assert [len(primeira), len(segunda), len(terceira)] == [50, 50, 20]
+    assert len(set(primeira + segunda + terceira)) == 120
     assert fim is None
 
 
 def test_a_mesma_pagina_vem_na_mesma_ordem_entre_chamadas() -> None:
-    c = cliente_com_videos(5, consultas=4)
+    c = cliente_com_videos(5, consultas=2)
 
-    primeira = pagina_da_busca(c)
-    assert pagina_da_busca(c) == primeira
-    assert pagina_da_busca(c, primeira[1]) == pagina_da_busca(c, primeira[1])
+    primeira = pagina_da_busca(c, limite=2)
+    # Cada 1ª página grava a própria lista: o cursor muda, os vídeos não.
+    assert pagina_da_busca(c, limite=2)[0] == primeira[0]
+    assert pagina_da_busca(c, primeira[1], 2) == pagina_da_busca(c, primeira[1], 2)
 
 
-def test_cursor_que_nao_esta_no_resultado_responde_422() -> None:
+def test_cursor_invalido_ou_de_outra_consulta_responde_422() -> None:
     c = cliente_com_videos(3, consultas=1)
+    _, cursor = pagina_da_busca(c, limite=1)
 
-    r = c.get(
-        "/v1/busca",
-        params={"q": "vestido", "cursor": "nao-existe"},
-        headers=AUTORIZACAO,
+    for q, ruim in [("vestido", "nao-existe"), ("vermelho", cursor)]:
+        r = c.get("/v1/busca", params={"q": q, "cursor": ruim}, headers=AUTORIZACAO)
+        assert r.status_code == 422
+        assert r.json()["detail"] == "Cursor inválido"
+
+
+class RankingQueCaiDepois:
+    """Reordena (invertendo) na 1ª chamada e cai em todas as outras."""
+
+    def __init__(self) -> None:
+        self.recebidos: list[int] = []
+
+    def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+        self.recebidos.append(len(registros))
+        if len(self.recebidos) > 1:
+            raise ConnectionError("ranking fora")
+        return registros[::-1]
+
+
+def mundo_de_videos(n: int, *respostas: str) -> Mundo:
+    m = Mundo(*(respostas or (pedido(texto_livre="vestido"),)))
+    for i in range(1, n + 1):
+        m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000))
+    return m
+
+
+def todas_as_paginas(busca: Busca, limite: int = 50) -> list[str]:
+    r = busca.buscar("vestido", limite=limite, dono="u1")
+    ids = [v.job_id for v in r.videos]
+    while r._proximo_cursor:
+        r = busca.buscar("vestido", limite=limite, dono="u1", cursor=r._proximo_cursor)
+        ids += [v.job_id for v in r.videos]
+    return ids
+
+
+def test_as_paginas_seguintes_nao_chamam_modelo_indice_nem_ranking() -> None:
+    m = mundo_de_videos(5, *[pedido(texto_livre="vestido")] * 2)
+    em_ordem = todas_as_paginas(m.busca())
+    ranking = RankingQueCaiDepois()
+    busca = m.busca(ranking=ranking)
+
+    primeira = busca.buscar("vestido", limite=2, dono="u1")
+    consultas = len(m.indice.consultas)
+    segunda = busca.buscar(
+        "vestido", limite=2, dono="u1", cursor=primeira._proximo_cursor
+    )
+    terceira = busca.buscar(
+        "vestido", limite=2, dono="u1", cursor=segunda._proximo_cursor
     )
 
-    assert r.status_code == 422
-    assert r.json()["detail"] == "Cursor inválido"
+    ids = [v.job_id for r in (primeira, segunda, terceira) for v in r.videos]
+    # A ordem é a do ranking da 1ª página, mesmo com ele fora nas seguintes.
+    assert ids == em_ordem[::-1]
+    assert terceira._proximo_cursor is None
+    assert len(m.transporte.chamadas) == 2  # uma por 1ª página
+    assert len(m.indice.consultas) == consultas
+    assert ranking.recebidos == [5]
+
+
+def test_o_ranking_so_reordena_os_100_primeiros_e_o_resto_vem_depois() -> None:
+    m = mundo_de_videos(150, *[pedido(texto_livre="vestido")] * 2)
+    em_ordem = todas_as_paginas(m.busca())
+    ranking = RankingQueCaiDepois()
+
+    ranqueados = todas_as_paginas(m.busca(ranking=ranking))
+
+    assert ranking.recebidos == [TETO_DO_RANKING]
+    assert ranqueados == em_ordem[:100][::-1] + em_ordem[100:]
+
+
+def test_video_que_vai_para_a_lixeira_entre_as_paginas_some_da_seguinte() -> None:
+    m = mundo_de_videos(4)
+    busca = m.busca()
+    primeira = busca.buscar("vestido", limite=2, dono="u1")
+    seguintes = [
+        v.job_id
+        for v in busca.buscar(
+            "vestido", limite=2, dono="u1", cursor=primeira._proximo_cursor
+        ).videos
+    ]
+    lixo = EnvioParaLixeira(
+        em=BASE, por_uid="adm", por_email="adm@redetv.com", motivo="duplicado"
+    )
+    j = m.jobs.obter(seguintes[0])
+    assert j is not None
+    m.jobs.salvar(j.model_copy(update={"lixeira": lixo}))
+
+    segunda = busca.buscar(
+        "vestido", limite=2, dono="u1", cursor=primeira._proximo_cursor
+    )
+
+    assert [v.job_id for v in segunda.videos] == seguintes[1:]
+
+
+def _cursor_valido() -> tuple[Busca, str, list[datetime]]:
+    agora = [BASE]
+    m = mundo_de_videos(5)
+    busca = m.busca(relogio=lambda: agora[0])
+    cursor = busca.buscar("vestido", limite=2, dono="u1")._proximo_cursor
+    assert cursor is not None
+    return busca, cursor, agora
+
+
+@pytest.mark.parametrize(
+    "mudanca",
+    [
+        "outro-dono",
+        "outra-consulta",
+        "outro-filtro",
+        "outra-ordem",
+        "expirado",
+        "sem-ponto",
+        "posicao-nao-numero",
+        "posicao-zero",
+        "posicao-alem-do-fim",
+        "posicao-unicode",
+        "id-com-barra",
+        "id-desconhecido",
+    ],
+)
+def test_cursor_adulterado_de_outro_dono_ou_vencido_e_invalido(mudanca: str) -> None:
+    busca, cursor, agora = _cursor_valido()
+    id, _, _ = cursor.partition(".")
+    pedido_: dict[str, Any] = {"cursor": cursor, "dono": "u1", "limite": 2}
+    texto = "vestido"
+    if mudanca == "outro-dono":
+        pedido_["dono"] = "u2"
+    elif mudanca == "outra-consulta":
+        texto = "vermelho"
+    elif mudanca == "outro-filtro":
+        pedido_["ajustes"] = Ajustes(programa="TV Fama")
+    elif mudanca == "outra-ordem":
+        pedido_["ordem"] = "data"
+    elif mudanca == "expirado":
+        agora[0] = BASE + timedelta(minutes=15)
+    else:
+        pedido_["cursor"] = {
+            "sem-ponto": id,
+            "posicao-nao-numero": f"{id}.x",
+            "posicao-zero": f"{id}.0",
+            "posicao-alem-do-fim": f"{id}.5",
+            "posicao-unicode": f"{id}.²",
+            "id-com-barra": f"a/{id}.2",
+            "id-desconhecido": f"{id}ff.2",
+        }[mudanca]
+
+    with pytest.raises(CursorInvalido):
+        busca.buscar(texto, **pedido_)
+
+
+def test_o_cursor_ainda_vale_um_pouco_antes_de_vencer() -> None:
+    busca, cursor, agora = _cursor_valido()
+    agora[0] = BASE + timedelta(minutes=14)
+
+    assert busca.buscar("vestido", cursor=cursor, dono="u1", limite=2).videos
+
+
+def test_a_lista_de_500_momentos_com_o_texto_maximo_cabe_no_documento() -> None:
+    sorteio = random.Random(0)
+    letras = "abcdefghijklmnopqrstuvwxyzáéíóãç     "
+
+    def texto() -> str:
+        return "".join(sorteio.choice(letras) for _ in range(2_000))
+
+    lista = ListaDaBusca(
+        dono="u1",
+        impressao="0" * 64,
+        criado_em=BASE,
+        expira_em=BASE,
+        entendida=Entendida(evidencias=[], programa=None, desde=None, ate=None),
+        sem_aparicoes=[],
+        plano_b=False,
+        facetas=Facetas(),
+        termos=["vestido"],
+        videos=[
+            VideoGuardado(
+                job_id=f"{i:032x}",
+                momentos=[
+                    MomentoGuardado(
+                        tipo="fala",
+                        inicio_ms=i * 1_000,
+                        fim_ms=i * 1_000 + 999,
+                        motivo=f"Fala: '{texto()}'",
+                        quadro=f"quadros/plano-{i}.jpg",
+                    )
+                ],
+            )
+            for i in range(TETO_DE_REGISTROS)
+        ],
+    )
+
+    documento = lista.para_documento()
+
+    assert len(documento["conteudo"]) < TETO_DA_LISTA_BYTES
+    assert ListaDaBusca.do_documento(documento) == lista
+
+
+def test_lista_grande_demais_perde_o_fim_e_segue_paginando(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.busca.TETO_DA_LISTA_BYTES", 330)
+    m = mundo_de_videos(40)
+    busca = m.busca()
+
+    primeira = busca.buscar("vestido", limite=2, dono="u1")
+    vistos = [v.job_id for v in primeira.videos]
+    cursor = primeira._proximo_cursor
+    while cursor:
+        pagina = busca.buscar("vestido", limite=2, dono="u1", cursor=cursor)
+        vistos += [v.job_id for v in pagina.videos]
+        cursor = pagina._proximo_cursor
+
+    assert 2 < len(vistos) < 40 and len(set(vistos)) == len(vistos)
 
 
 def test_sem_decupagem_ver_a_rota_responde_403() -> None:
