@@ -101,17 +101,29 @@ gc builds submit . --region "$GCP_REGION" --suppress-logs \
 # leva a atestação de proveniência SLSA, com a hora do build, e muda a cada build mesmo com a
 # imagem igual. Mesma imagem, mesmo digest, nenhuma revisão nova e nenhum teste de GPU à toa;
 # a atestação continua no registro. Daqui em diante nada é recompilado.
-amd64_do_indice() { # <digest do índice>; lê o índice (JSON) na entrada; sem índice, o próprio digest
-  local amd64
-  amd64=$(jq -r '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | first // empty')
-  echo "${amd64:-$1}"
+amd64_do_indice() { # <digest do registro>; lê o manifesto (JSON) na entrada
+  local manifesto amd64
+  manifesto=$(cat)
+  # Imagem sem índice (manifesto único): o próprio digest do registro. Entrada vazia não
+  # passa por aqui: o jq sem entrada nada imprime e sai com 0.
+  if [[ $(jq -r 'has("layers")' <<<"$manifesto" 2>/dev/null) == true ]]; then
+    echo "$1"
+    return
+  fi
+  amd64=$(jq -r '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | first // empty' <<<"$manifesto" 2>/dev/null) || true
+  [[ -n $amd64 ]] || { echo "Nenhuma imagem linux/amd64 no manifesto de $1." >&2; return 1; }
+  echo "$amd64"
 }
+# Dentro de IMAGEM=$(digest ...) o set -e não vale: cada passo devolve o erro, senão uma
+# falha do registro publicaria em silêncio o digest do índice.
 digest() { # <repo:tag>
-  local repo=${1%:*} tag=${1##*:} indice
-  indice=$(curl -fsS -H @<(echo "Authorization: Bearer $(gc auth print-access-token)") \
+  local repo=${1%:*} tag=${1##*:} manifesto do_registro amd64
+  manifesto=$(curl -fsS -H @<(echo "Authorization: Bearer $(gc auth print-access-token)") \
     -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json' \
-    "https://${repo%%/*}/v2/${repo#*/}/manifests/$tag")
-  echo "$repo@$(amd64_do_indice "$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)')" <<<"$indice")"
+    "https://${repo%%/*}/v2/${repo#*/}/manifests/$tag") || return
+  do_registro=$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)') || return
+  amd64=$(amd64_do_indice "$do_registro" <<<"$manifesto") || return
+  echo "$repo@$amd64"
 }
 IMAGEM=$(digest "$WEB")
 IMAGEM_VALIDACAO=$(digest "$VALIDACAO")
