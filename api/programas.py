@@ -76,8 +76,13 @@ class RepositorioDeProgramas(Protocol):
 
     def obter(self, id: str) -> Programa | None: ...
 
-    def salvar(self, programa: Programa) -> None:
-        """Grava (cria ou troca) o programa; `NomeEmUso` se outro já tem o nome."""
+    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
+        """Grava (cria ou troca) o programa; `NomeEmUso` se outro já tem o nome. Sem
+        `com_renomeacao`, o andamento gravado fica como está (a tarefa o muda sozinha)."""
+        ...
+
+    def gravar_renomeacao(self, id: str, renomeacao: RenomeacaoDoPrograma) -> None:
+        """Grava só o andamento; `ProgramaInexistente` se o programa sumiu."""
         ...
 
     def apagar(self, id: str) -> None:
@@ -95,13 +100,25 @@ class ProgramasEmMemoria:
     def obter(self, id: str) -> Programa | None:
         return self._programas.get(id)
 
-    def salvar(self, programa: Programa) -> None:
+    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
         if any(
             p.id != programa.id and p.nome.casefold() == programa.nome.casefold()
             for p in self._programas.values()
         ):
             raise NomeEmUso(programa.nome)
+        if not com_renomeacao:
+            atual = self._programas.get(programa.id)
+            programa = programa.model_copy(
+                update={"renomeacao": atual.renomeacao if atual else None}
+            )
         self._programas[programa.id] = programa
+
+    def gravar_renomeacao(self, id: str, renomeacao: RenomeacaoDoPrograma) -> None:
+        if id not in self._programas:
+            raise ProgramaInexistente(id)
+        self._programas[id] = self._programas[id].model_copy(
+            update={"renomeacao": renomeacao}
+        )
 
     def apagar(self, id: str) -> None:
         if self._programas.pop(id, None) is None:

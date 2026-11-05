@@ -496,6 +496,20 @@ def criar_app(
         )
         return indexacao is not None and indexacao.estado == "indexado"
 
+    def _reindexar_para_o_programa(job: Job) -> bool:
+        """Como na pessoa, e a cópia do BigQuery também precisa ficar: os relatórios
+        são por programa."""
+        if not _reindexar_para_a_renomeacao(job):
+            return False
+        if copia is None:
+            return True
+        atual = repositorio_de_jobs.obter(job.id)
+        return (
+            atual is not None
+            and atual.copia_bigquery is not None
+            and atual.copia_bigquery.estado == "copiado"
+        )
+
     # Uma cópia das pessoas para o autocompletar e para a busca resolver nomes.
     copia_das_pessoas = CopiaCurta(catalogo_de_pessoas.todas, relogio)
 
@@ -544,7 +558,7 @@ def criar_app(
             repositorio_de_jobs,
             repositorio_de_auditoria,
             relogio,
-            _reindexar_para_a_renomeacao,
+            _reindexar_para_o_programa,
             copia_das_pessoas.descartar,
         )
     )

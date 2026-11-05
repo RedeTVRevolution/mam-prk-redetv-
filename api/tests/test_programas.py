@@ -17,7 +17,12 @@ from api.exemplos_da_busca import EXEMPLOS
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
-from api.programas import ProgramasEmMemoria, perfis_dos_programas
+from api.programas import (
+    ProgramaInexistente,
+    ProgramasEmMemoria,
+    RenomeacaoDoPrograma,
+    perfis_dos_programas,
+)
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -167,12 +172,14 @@ def test_renomear_troca_o_nome_nos_videos_e_reindexa() -> None:
     assert renomeado.status_code == 200, renomeado.text
     assert [acervo.programa(j) for j in ("j1", "j2", "j3")] == [
         "Fama Hoje",
-        "Fama Hoje",  # na lixeira: o nome troca, mas não volta ao índice
+        "Fama Hoje",
         "Outro",
     ]
     assert acervo.no_indice("j1") == {"Fama Hoje"}
     assert acervo.na_copia("j1") == {"Fama Hoje"}
-    assert acervo.no_indice("j2") == set() and acervo.na_copia("j2") == set()
+    # Na lixeira também: restaurar não reindexa, e ele voltaria com o nome antigo.
+    assert acervo.no_indice("j2") == {"Fama Hoje"}
+    assert acervo.na_copia("j2") == {"Fama Hoje"}
     assert acervo.no_indice("j3") == set()
     lido = acervo.cliente.get("/v1/admin/programas", headers=AUTORIZACAO).json()
     assert next(p for p in lido if p["id"] == acervo.id)["renomeacao"] == {
@@ -197,9 +204,7 @@ def test_indice_fora_do_ar_deixa_pendente_e_retomar_termina() -> None:
     assert acervo.programa("j1") == "Fama Hoje"
     renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
     assert renomeacao is not None
-    assert (renomeacao.estado, renomeacao.pendentes) == ("falhou", ["j1"])
-    # Outra troca de nome espera; mudar só o perfil, não.
-    assert acervo.renomear("Outro Nome").status_code == 409
+    assert (renomeacao.estado, set(renomeacao.pendentes)) == ("falhou", {"j1", "j2"})
     assert acervo.renomear(perfil="Revista.").status_code == 200
     assert acervo.programas.obter(acervo.id).renomeacao == renomeacao  # type: ignore[union-attr]
 
@@ -270,7 +275,162 @@ def test_renomear_sem_auditoria_desfaz_e_nao_toca_nos_videos() -> None:
         )
 
     assert programas.obter(id).nome == "TV Fama"  # type: ignore[union-attr]
+    assert programas.obter(id).renomeacao is None  # type: ignore[union-attr]
     assert jobs.obter("j1").programa == "TV Fama"  # type: ignore[union-attr]
+
+
+def test_renomear_sem_ler_os_videos_nao_grava_nada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1", programa="TV Fama"))
+    auditoria = RepositorioDeAuditoriaEmMemoria()
+    cliente, programas, _ = _cliente(["editor"], jobs, auditoria)
+
+    def fora(*_: Any, **__: Any) -> Any:
+        raise ConnectionError("Firestore fora")
+
+    monkeypatch.setattr(jobs, "consultar", fora)
+    with pytest.raises(ConnectionError):
+        cliente.put(
+            "/v1/admin/programas/tv-fama",
+            json={"nome": "Fama Hoje"},
+            headers=AUTORIZACAO,
+        )
+
+    # Nada renomeado sem andamento: `retomar` e o 409 dependem dele.
+    programa = programas.obter("tv-fama")
+    assert programa is not None
+    assert (programa.nome, programa.renomeacao) == ("TV Fama", None)
+    assert auditoria.consultar(FiltroDeAuditoria(alvo_id="tv-fama")).registros == []
+
+
+def _andamento(estado: Any, pendentes: list[str]) -> RenomeacaoDoPrograma:
+    return RenomeacaoDoPrograma(
+        nome_antigo="Antigo",
+        nome_novo="TV Fama",
+        total=2,
+        pendentes=pendentes,
+        estado=estado,
+    )
+
+
+def test_salvar_nao_toca_no_andamento_e_o_andamento_nao_recria_o_programa() -> None:
+    programas, _ = cadastro_com_tv_fama()
+    concluida = _andamento("concluida", [])
+    programas.gravar_renomeacao("tv-fama", concluida)
+
+    # A cópia velha do PUT (andamento em andamento) não volta a troca atrás.
+    velho = programas.obter("tv-fama")
+    assert velho is not None
+    programas.salvar(
+        velho.model_copy(
+            update={"perfil": "Novo.", "renomeacao": _andamento("em_andamento", ["j1"])}
+        )
+    )
+    lido = programas.obter("tv-fama")
+    assert lido is not None
+    assert (lido.perfil, lido.renomeacao) == ("Novo.", concluida)
+
+    programas.apagar("tv-fama")
+    with pytest.raises(ProgramaInexistente):
+        programas.gravar_renomeacao("tv-fama", concluida)
+    assert programas.obter("tv-fama") is None
+
+
+def test_com_a_troca_em_andamento_renomear_e_apagar_dao_409() -> None:
+    cliente, programas, _ = _cliente(["editor"])
+    programas.gravar_renomeacao("tv-fama", _andamento("em_andamento", ["j1"]))
+
+    renomear = cliente.put(
+        "/v1/admin/programas/tv-fama", json={"nome": "Outro"}, headers=AUTORIZACAO
+    )
+    apagar = cliente.delete("/v1/admin/programas/tv-fama", headers=AUTORIZACAO)
+
+    assert (renomear.status_code, apagar.status_code) == (409, 409)
+    assert programas.obter("tv-fama") is not None
+
+
+def test_falha_passageira_ao_gravar_o_andamento_nao_mata_a_troca(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acervo = Acervo()
+    gravar = acervo.programas.gravar_renomeacao
+    falhas: list[str] = []
+
+    def falha_uma_vez(id: str, r: RenomeacaoDoPrograma) -> None:
+        if len(r.pendentes) < r.total and not falhas:
+            falhas.append(id)
+            raise ConnectionError("Firestore fora")
+        gravar(id, r)
+
+    monkeypatch.setattr(acervo.programas, "gravar_renomeacao", falha_uma_vez)
+    acervo.renomear()
+
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert falhas and renomeacao is not None
+    # O Job da falha ficou pendente e a rodada seguinte o terminou.
+    assert (renomeacao.estado, renomeacao.pendentes) == ("concluida", [])
+
+
+def test_troca_que_falhou_aceita_outro_nome_e_leva_os_pendentes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acervo = Acervo()
+    trocar = acervo.jobs.trocar
+
+    def trocar_menos_j1(job_id: str, mudar: Any) -> Any:
+        if job_id == "j1":
+            raise ConnectionError("Firestore fora")
+        return trocar(job_id, mudar)
+
+    monkeypatch.setattr(acervo.jobs, "trocar", trocar_menos_j1)
+    acervo.renomear()
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None
+    assert (renomeacao.estado, renomeacao.pendentes) == ("falhou", ["j1"])
+    assert acervo.programa("j1") == "TV Fama"
+
+    monkeypatch.setattr(acervo.jobs, "trocar", trocar)
+    assert acervo.renomear("Fama Já").status_code == 200
+
+    # O pendente herdado ainda tinha o nome mais antigo e também foi para o novo.
+    assert [acervo.programa(j) for j in ("j1", "j2")] == ["Fama Já", "Fama Já"]
+    assert acervo.no_indice("j1") == {"Fama Já"}
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None
+    assert (renomeacao.estado, renomeacao.total, renomeacao.pendentes) == (
+        "concluida",
+        2,
+        [],
+    )
+
+
+def test_copia_que_falha_deixa_pendente_ate_retomar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acervo = Acervo()
+    gravar = acervo.copia.gravar
+
+    def fora(*_: Any) -> None:
+        raise ConnectionError("BigQuery fora")
+
+    monkeypatch.setattr(acervo.copia, "gravar", fora)
+    acervo.renomear()
+
+    assert acervo.no_indice("j1") == {"Fama Hoje"} and acervo.na_copia("j1") == set()
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None
+    assert (renomeacao.estado, set(renomeacao.pendentes)) == ("falhou", {"j1", "j2"})
+
+    monkeypatch.setattr(acervo.copia, "gravar", gravar)
+    acervo.cliente.post(
+        f"/v1/admin/programas/{acervo.id}/renomear/retomar", headers=AUTORIZACAO
+    )
+
+    assert acervo.na_copia("j1") == {"Fama Hoje"}
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None and renomeacao.estado == "concluida"
 
 
 def test_apagar_deixa_o_nome_nos_videos_antigos() -> None:

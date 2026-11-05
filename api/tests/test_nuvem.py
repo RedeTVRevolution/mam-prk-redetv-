@@ -42,6 +42,7 @@ from api.nuvem import (
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
@@ -54,6 +55,7 @@ from api.nuvem import (
     TiposDeObjetoFirestore,
     espera_sob_disputa,
 )
+from api.programas import Programa, ProgramaInexistente, RenomeacaoDoPrograma
 from api.webhook import RegistroDeWebhook
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
@@ -1233,6 +1235,58 @@ class TestCatalogoDeMarcasFirestore:
 
         assert (primeira, segunda) == (2, 0)
         assert len(marcas.todas()) == 2
+
+
+def _andamento(estado: Any, pendentes: list[str]) -> RenomeacaoDoPrograma:
+    return RenomeacaoDoPrograma(
+        nome_antigo="Antigo",
+        nome_novo="Novo",
+        total=2,
+        pendentes=pendentes,
+        estado=estado,
+    )
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestProgramasFirestore:
+    @pytest.fixture
+    def programas(self) -> ProgramasFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return ProgramasFirestore(cliente, colecao=f"programas-{uuid.uuid4().hex}")
+
+    def test_salvar_sem_o_andamento_deixa_o_gravado(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        programas.salvar(Programa(id="p", nome="Novo"))
+        concluida = _andamento("concluida", [])
+        programas.gravar_renomeacao("p", concluida)
+
+        # A cópia velha do PUT não volta a troca para em andamento.
+        programas.salvar(
+            Programa(
+                id="p",
+                nome="Novo",
+                perfil="Revista.",
+                renomeacao=_andamento("em_andamento", ["j1"]),
+            )
+        )
+
+        assert programas.obter("p") == Programa(
+            id="p", nome="Novo", perfil="Revista.", renomeacao=concluida
+        )
+        # O desfazer de uma troca grava o andamento de antes, inclusive nenhum.
+        programas.salvar(Programa(id="p", nome="Antigo"), com_renomeacao=True)
+        assert programas.obter("p") == Programa(id="p", nome="Antigo")
+
+    def test_gravar_o_andamento_nao_recria_o_programa_apagado(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        programas.salvar(Programa(id="p", nome="Novo"))
+        programas.apagar("p")
+
+        with pytest.raises(ProgramaInexistente):
+            programas.gravar_renomeacao("p", _andamento("concluida", []))
+        assert programas.obter("p") is None and programas.listar() == []
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")

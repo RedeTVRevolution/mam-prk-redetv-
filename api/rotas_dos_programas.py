@@ -5,9 +5,11 @@ programas, inclui pessoas do catálogo com o papel que têm no programa e cria a
 pessoa que ainda não existe. Toda mudança vai para a auditoria; se o registro não
 for gravado, a mudança é desfeita.
 
-O Job guarda o nome do programa: renomear troca o nome nos vídeos e os reindexa (busca e
-cópia no BigQuery) em segundo plano, com o andamento gravado no programa, como na
-renomeação de pessoa; `retomar` continua de onde parou.
+O Job guarda o nome do programa: renomear troca o nome nos vídeos (inclusive os da
+lixeira, que podem voltar) e os reindexa (busca e cópia no BigQuery) em segundo plano,
+com o andamento gravado no programa, como na renomeação de pessoa; `retomar` continua de
+onde parou. Só a tarefa grava o andamento depois de criado, e só ele: as outras gravações
+do programa não o tocam.
 """
 
 import logging
@@ -134,7 +136,8 @@ def criar_rotas_dos_programas(
     reindexar: Callable[[Job], bool],
     ao_criar_pessoa: Callable[[], None],
 ) -> APIRouter:
-    """`reindexar` devolve se o vídeo ficou indexado; `ao_criar_pessoa` descarta a cópia da lista de pessoas."""
+    """`reindexar` devolve se o vídeo ficou no índice e na cópia; `ao_criar_pessoa`
+    descarta a cópia da lista de pessoas."""
     rotas = APIRouter(prefix="/admin/programas")
 
     def publico(programa: Programa) -> ProgramaPublico:
@@ -173,9 +176,9 @@ def criar_rotas_dos_programas(
             if pessoa is None or not visivel(pessoa):
                 raise HTTPException(422, f"Pessoa fora do catálogo: {v.pessoa_id}")
 
-    def gravar(programa: Programa) -> None:
+    def gravar(programa: Programa, com_renomeacao: bool = False) -> None:
         try:
-            programas.salvar(programa)
+            programas.salvar(programa, com_renomeacao=com_renomeacao)
         except NomeEmUso:
             raise HTTPException(409, "Já existe um programa com esse nome") from None
 
@@ -219,12 +222,15 @@ def criar_rotas_dos_programas(
         programa_id: str,
         mudar: Callable[[RenomeacaoDoPrograma], RenomeacaoDoPrograma],
     ) -> RenomeacaoDoPrograma | None:
-        """Muda o andamento lendo o programa de novo, sem regravar uma cópia velha."""
+        """Muda só o andamento, lido de novo; `None` se o programa ou a troca sumiram."""
         programa = programas.obter(programa_id)
         if programa is None or programa.renomeacao is None:
             return None
         r = mudar(programa.renomeacao)
-        programas.salvar(programa.model_copy(update={"renomeacao": r}))
+        try:
+            programas.gravar_renomeacao(programa_id, r)
+        except ProgramaInexistente:
+            return None
         return r
 
     def tirar_pendente(programa_id: str, job_id: str) -> RenomeacaoDoPrograma | None:
@@ -254,27 +260,26 @@ def criar_rotas_dos_programas(
         )
         if r is None:
             return
-        de, para = r.nome_antigo, r.nome_novo
+        para = r.nome_novo
         for _ in range(RODADAS):
             for job_id in list(r.pendentes):
                 try:
                     # Reindexa o Job devolvido pela troca (ou relido, se a troca já
                     # tinha sido feita), nunca um lido antes: ele levaria o nome antigo.
+                    # O pendente herdado de uma troca que falhou pode ter um nome mais
+                    # antigo que `nome_antigo`: vale todo nome que não é o novo.
                     job = jobs.trocar(
                         job_id,
-                        lambda j: {"programa": para} if j.programa == de else None,
+                        lambda j: {"programa": para} if j.programa != para else None,
                     ) or jobs.obter(job_id)
-                    pronto = (
-                        job is None
-                        or job.estado != "concluido"
-                        or job.lixeira is not None
-                        or reindexar(job)
-                    )
+                    # Na lixeira também: restaurar não reindexa, e o vídeo voltaria
+                    # com o nome antigo na busca e nos relatórios.
+                    pronto = job is None or job.estado != "concluido" or reindexar(job)
+                    if pronto and tirar_pendente(programa_id, job_id) is None:
+                        return  # o programa foi apagado
                 except Exception:
+                    # O Job fica pendente; a tarefa segue e `retomar` o tenta de novo.
                     log.exception("troca do programa em %s falhou", job_id)
-                    pronto = False
-                if pronto:
-                    tirar_pendente(programa_id, job_id)
             programa = programas.obter(programa_id)
             if programa is None or programa.renomeacao is None:
                 return
@@ -323,45 +328,37 @@ def criar_rotas_dos_programas(
         if antes is None:
             raise HTTPException(404, "Programa inexistente")
         renomear = antes.nome != dados.nome
-        if (
-            renomear
-            and antes.renomeacao is not None
-            and antes.renomeacao.estado != "concluida"
-        ):
+        anterior = antes.renomeacao
+        if renomear and anterior is not None and anterior.estado == "em_andamento":
             raise HTTPException(
                 409, "A troca de nome anterior ainda não terminou: aguarde ou retome"
             )
         conferir_pessoas(dados)
-        depois = Programa(id=id, **dados.model_dump(), renomeacao=antes.renomeacao)
-        gravar(depois)
+        depois = Programa(id=id, **dados.model_dump(), renomeacao=anterior)
+        if renomear:
+            # Antes de gravar: todos os vídeos com o nome antigo, inclusive os da
+            # lixeira, mais os que a troca que falhou deixou pendentes.
+            herdados = anterior.pendentes if anterior is not None else []
+            achados = jobs.consultar(FiltroDeJobs(programa=antes.nome, na_lixeira=None))
+            ids = list(dict.fromkeys([*herdados, *(j.id for j in achados.jobs)]))
+            depois.renomeacao = RenomeacaoDoPrograma(
+                nome_antigo=antes.nome,
+                nome_novo=depois.nome,
+                total=len(ids),
+                pendentes=ids,
+                estado="em_andamento",
+            )
+        # Nome e andamento numa gravação só; sem troca de nome, o andamento não muda.
+        gravar(depois, com_renomeacao=renomear)
         registrar(
             "programa.alterado",
             autor,
             depois,
             antes,
             depois,
-            lambda: programas.salvar(antes),
+            lambda: programas.salvar(antes, com_renomeacao=renomear),
         )
         if renomear:
-            # Todos os vídeos com o nome antigo, inclusive os da lixeira.
-            ids = [
-                j.id
-                for j in jobs.consultar(
-                    FiltroDeJobs(programa=antes.nome, na_lixeira=None)
-                ).jobs
-            ]
-            depois = depois.model_copy(
-                update={
-                    "renomeacao": RenomeacaoDoPrograma(
-                        nome_antigo=antes.nome,
-                        nome_novo=depois.nome,
-                        total=len(ids),
-                        pendentes=ids,
-                        estado="em_andamento",
-                    )
-                }
-            )
-            programas.salvar(depois)
             segundo_plano.add_task(religar_videos, id)
         return publico(depois)
 
@@ -395,6 +392,8 @@ def criar_rotas_dos_programas(
         antes = programas.obter(id)
         if antes is None:
             raise HTTPException(404, "Programa inexistente")
+        if antes.renomeacao is not None and antes.renomeacao.estado == "em_andamento":
+            raise HTTPException(409, "A troca de nome ainda não terminou: aguarde")
         try:
             programas.apagar(id)
         except ProgramaInexistente:
@@ -405,7 +404,7 @@ def criar_rotas_dos_programas(
             antes,
             antes,
             None,
-            lambda: programas.salvar(antes),
+            lambda: programas.salvar(antes, com_renomeacao=True),
         )
         return Response(status_code=204)
 

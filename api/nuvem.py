@@ -72,7 +72,12 @@ from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
 from api.papeis import PAPEIS, DocumentoDePapeis, Papel
-from api.programas import NomeEmUso, Programa, ProgramaInexistente
+from api.programas import (
+    NomeEmUso,
+    Programa,
+    ProgramaInexistente,
+    RenomeacaoDoPrograma,
+)
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
@@ -787,13 +792,24 @@ class ProgramasFirestore:
         doc = self._colecao.document(id).get()
         return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
 
-    def salvar(self, programa: Programa) -> None:
+    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
         if any(
             p.id != programa.id and p.nome.casefold() == programa.nome.casefold()
             for p in self.listar()
         ):
             raise NomeEmUso(programa.nome)
-        self._colecao.document(programa.id).set(programa.model_dump(exclude={"id"}))
+        # Com merge, o campo que não vai fica como está: o andamento é da tarefa.
+        fora = {"id"} if com_renomeacao else {"id", "renomeacao"}
+        self._colecao.document(programa.id).set(
+            programa.model_dump(exclude=fora), merge=True
+        )
+
+    def gravar_renomeacao(self, id: str, renomeacao: RenomeacaoDoPrograma) -> None:
+        # `update` falha se o documento não existe: não recria um programa apagado.
+        try:
+            self._colecao.document(id).update({"renomeacao": renomeacao.model_dump()})
+        except NotFound:
+            raise ProgramaInexistente(id) from None
 
     def apagar(self, id: str) -> None:
         if not self._colecao.document(id).get().exists:
