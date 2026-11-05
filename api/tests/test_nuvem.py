@@ -16,7 +16,7 @@ import pytest
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.api_core.exceptions import Aborted, AlreadyExists
+from google.api_core.exceptions import Aborted, AlreadyExists, NotFound
 from google.auth import credentials as google_credentials
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
@@ -1442,7 +1442,7 @@ def test_sob_disputa_nao_repete_outro_value_error() -> None:
 
 
 class _ColecaoQueAborta:
-    """`create` aborta as primeiras vezes (documento travado) e depois responde."""
+    """`create` e `update` abortam as primeiras vezes (documento travado) e depois respondem."""
 
     def __init__(self, abortos: int, depois: Exception | None) -> None:
         self._abortos = abortos
@@ -1459,6 +1459,9 @@ class _ColecaoQueAborta:
             raise Aborted("travado")  # type: ignore[no-untyped-call]
         if self._depois is not None:
             raise self._depois
+
+    def update(self, campos: dict[str, Any]) -> None:
+        self.create(campos)
 
 
 def _job_novo() -> Job:
@@ -1489,6 +1492,52 @@ def test_criar_abortado_repete_ate_saber_se_gravou(
     repositorio = RepositorioFirestore(_ClienteSemRede(colecao))  # type: ignore[arg-type]
 
     assert repositorio.criar(_job_novo()) is gravou
+    assert colecao.criacoes == 3
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeIdempotenciaFirestore:
+    @pytest.fixture
+    def chaves(self) -> RepositorioDeIdempotenciaFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeIdempotenciaFirestore(
+            cliente, f"idempotencia-{uuid.uuid4().hex}"
+        )
+
+    def test_marca_de_job_gravado_volta_na_repeticao(
+        self, chaves: RepositorioDeIdempotenciaFirestore
+    ) -> None:
+        chaves.reservar("sistema:Legado A", "k1", "imp", "j1", BASE)
+
+        chaves.marcar_job_gravado("sistema:Legado A", "k1")
+
+        reserva, nova = chaves.reservar("sistema:Legado A", "k1", "imp", "j2", BASE)
+        assert (reserva.job_id, reserva.job_gravado, nova) == ("j1", True, False)
+
+    def test_marcar_chave_sem_reserva_nao_falha_nem_cria_reserva(
+        self, chaves: RepositorioDeIdempotenciaFirestore
+    ) -> None:
+        chaves.marcar_job_gravado("sistema:Legado A", "k1")
+
+        reserva, nova = chaves.reservar("sistema:Legado A", "k1", "imp", "j1", BASE)
+        assert (reserva.job_gravado, nova) == (False, True)
+
+
+@pytest.mark.parametrize(
+    "depois",
+    [None, NotFound("vencida")],  # type: ignore[no-untyped-call]
+)
+def test_marca_de_job_gravado_abortada_repete(
+    monkeypatch: pytest.MonkeyPatch, depois: Exception | None
+) -> None:
+    # As repetições em paralelo disputam a reserva; um 500 aqui viria depois de o Job
+    # já estar gravado.
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    colecao = _ColecaoQueAborta(abortos=2, depois=depois)
+    chaves = RepositorioDeIdempotenciaFirestore(_ClienteSemRede(colecao))  # type: ignore[arg-type]
+
+    chaves.marcar_job_gravado("sistema:Legado A", "k1")
+
     assert colecao.criacoes == 3
 
 
