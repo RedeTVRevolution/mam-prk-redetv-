@@ -261,6 +261,11 @@ class RepositorioFirestore:
         # Os índices estão no infra/modulos/mam/main.tf.
         if filtro.sha256 is not None:
             return self._consultar_pelo_arquivo(filtro)
+        if (
+            filtro.pessoa_do_catalogo is not None
+            or filtro.marca_do_catalogo is not None
+        ):
+            return self._consultar_pelo_catalogo(filtro)
         if filtro.na_lixeira is True:
             return self._consultar_a_lixeira(filtro)
         consulta: Any = self._colecao
@@ -311,6 +316,27 @@ class RepositorioFirestore:
         jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
         return PaginaDeJobs.de(
             (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
+        )
+
+    def _consultar_pelo_catalogo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # Só um `array_contains` (índice automático) vai ao Firestore: lê os vídeos da
+        # pessoa ou da marca, não o acervo. O resto do filtro, a ordem e o cursor ficam
+        # em Python, sem índice composto.
+        if filtro.pessoa_do_catalogo is not None:
+            consulta = self._colecao.where(
+                filter=FieldFilter(
+                    "pessoas_do_catalogo", "array_contains", filtro.pessoa_do_catalogo
+                )
+            )
+        else:
+            consulta = self._colecao.where(
+                filter=FieldFilter(
+                    "marcas_do_catalogo", "array_contains", filtro.marca_do_catalogo
+                )
+            )
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return paginar_em_python(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
         )
 
     def _consultar_pelo_arquivo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:

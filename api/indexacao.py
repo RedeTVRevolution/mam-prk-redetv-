@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_apagado import com_pessoas_fundidas
+from api.catalogo_dos_jobs import gravar_catalogo_do_job
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
@@ -170,6 +171,7 @@ def reindexar(
     except Exception:
         log.exception("decupagem de %s não lida para indexar", job.id)
     else:
+        gravar_catalogo_do_job(repositorio, job.id, decupagem.model_dump())
         if tipos_de_objeto:
             try:
                 tipos_de_objeto.registrar(

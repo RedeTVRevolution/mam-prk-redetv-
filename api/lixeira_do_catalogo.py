@@ -156,9 +156,11 @@ def decupagens_dos_jobs(
     repositorio: RepositorioDeJobs,
     correcoes: RepositorioDeCorrecoes,
     decupagens: LeituraDeDecupagens,
+    filtro: FiltroDeJobs | None = None,
 ) -> Iterator[tuple[Job, dict[str, Any]]]:
-    """Cada vídeo concluído fora da lixeira com a Decupagem entregue; a que não lê é pulada."""
-    for job in repositorio.consultar(FiltroDeJobs()).jobs:
+    """Cada vídeo concluído fora da lixeira (e que casa com `filtro`) com a Decupagem
+    entregue; a que não lê é pulada."""
+    for job in repositorio.consultar(filtro or FiltroDeJobs()).jobs:
         if job.estado != "concluido":
             continue
         try:
@@ -178,9 +180,12 @@ def decupagens_entregues(
     repositorio: RepositorioDeJobs,
     correcoes: RepositorioDeCorrecoes,
     decupagens: LeituraDeDecupagens,
+    filtro: FiltroDeJobs | None = None,
 ) -> Iterator[dict[str, Any]]:
     """A Decupagem entregue de cada vídeo concluído fora da lixeira; a que não lê é pulada."""
-    for _job, entregue in decupagens_dos_jobs(repositorio, correcoes, decupagens):
+    for _job, entregue in decupagens_dos_jobs(
+        repositorio, correcoes, decupagens, filtro
+    ):
         yield entregue
 
 
@@ -197,13 +202,13 @@ def criar_rotas_da_lixeira_do_catalogo(
 ) -> APIRouter:
     rotas = APIRouter(prefix="/admin/lixeira")
 
-    def entregues() -> Iterator[dict[str, Any]]:
-        return decupagens_entregues(repositorio, correcoes, decupagens)
+    def entregues(filtro: FiltroDeJobs) -> Iterator[dict[str, Any]]:
+        return decupagens_entregues(repositorio, correcoes, decupagens, filtro)
 
     def impacto_da_pessoa(id: str, fotos_dela: int) -> ImpactoDaPessoa:
         aparicoes = sum(
             len(p.get("na_imagem") or [])
-            for d in entregues()
+            for d in entregues(FiltroDeJobs(pessoa_do_catalogo=id))
             for p in d.get("pessoas") or []
             if p.get("catalogo_id") == id and so_o_rosto(p.get("fontes_do_nome") or [])
         )
@@ -215,7 +220,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         return ImpactoDaMarca(
             ocorrencias_que_perdem_o_vinculo=sum(
                 1
-                for d in entregues()
+                for d in entregues(FiltroDeJobs(marca_do_catalogo=id))
                 for c in d.get("comerciais") or []
                 if c.get("catalogo_id") == id
             )
