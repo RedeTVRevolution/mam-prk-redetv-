@@ -12,7 +12,7 @@ Em 5/11/2026, o Bruno decidiu os modelos de cada etapa da decupagem. A regra ger
 | Transcrição e leitura da tela | faster-whisper large-v3-turbo e PaddleOCR, na GPU, com CPU como plano B | — | ADR 0007 |
 | Juiz da avaliação por rubrica | Gemini 2.5 Flash | Standard (texto) | `modelo_do_juiz` no Terraform |
 
-**O escalonamento fica desligado.** O código sabe reanalisar as janelas com dúvida e uma amostra delas (`api/escalonamento.py`), mas a análise do Job não passa `fracao_escalonada` (`api/analise.py`). E a reanálise, se fosse ligada, repetiria a mesma chamada da primeira passada: o mesmo modelo, o mesmo proxy e 1 quadro por segundo (`api/analise_por_janelas.py`). Hoje o 3.8 Flash só entra na decupagem pelo modelo forte. O alerta `limiar_de_escalonadas_pct` fica sempre em zero.
+**O escalonamento fica desligado.** O código sabe reanalisar as janelas com dúvida e uma amostra delas (`api/escalonamento.py`), mas a análise do Job não passa `fracao_escalonada` (`api/analise.py`). E a reanálise, se fosse ligada, repetiria a mesma chamada da primeira passada: o mesmo modelo, o mesmo proxy e 1 quadro por segundo (`api/analise_por_janelas.py`). Hoje o 3.8 Flash só entra na decupagem pelo modelo forte. O alerta `limiar_de_escalonadas_pct`, que ficava sempre em zero, foi removido em 5/11/2026; se o escalonamento for ligado, o campo `pct_escalonadas` do log `video_concluido` continua lá para um alerta novo.
 
 ## Por quê
 

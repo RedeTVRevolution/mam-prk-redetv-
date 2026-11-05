@@ -37,7 +37,7 @@ def test_cada_percentual_extraido_e_um_campo_que_o_log_do_video_concluido_traz()
     metrica = _bloco('resource "google_logging_metric" "sinal_percentual"')
     assert "EXTRACT(jsonPayload.${each.value.campo})" in metrica
     campos = re.findall(r'campo\s+= "(\w+)"', TF)
-    assert sorted(campos) == ["pct_escalonadas", "pct_nao_identificadas"]
+    assert campos == ["pct_nao_identificadas"]
     for campo in campos:
         assert isinstance(linha[campo], float)
 
@@ -97,7 +97,6 @@ def test_a_execucao_que_falha_em_qualquer_etapa_loga_pelo_workflows() -> None:
 
 def test_os_limiares_sao_variaveis_com_descricao() -> None:
     for nome in (
-        "limiar_de_escalonadas_pct",
         "limiar_de_nao_identificadas_pct",
         "limiar_de_fora_do_esquema",
         "limite_de_falhas_por_etapa",
