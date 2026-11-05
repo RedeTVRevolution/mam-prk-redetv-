@@ -149,6 +149,8 @@ def _carregar(
         .eval()
     )
 
+    maior = 0
+
     def executar(imagens: list[Image.Image], tarefa: str) -> list[dict[str, Any]]:
         entradas = processador(
             text=[tarefa] * len(imagens),
@@ -158,7 +160,10 @@ def _carregar(
         ).to(destino, tipo)
         with torch.no_grad():
             ids = modelo.generate(**entradas, **geracao)
-        log.info("%s: maior resposta do lote, %d tokens", tarefa, ids.shape[-1])
+        nonlocal maior
+        if ids.shape[-1] > maior:  # uma linha só quando cresce: guia o teto de tokens
+            maior = ids.shape[-1]
+            log.info("Maior resposta até aqui: %d tokens (%s)", maior, tarefa)
         textos = processador.batch_decode(ids, skip_special_tokens=False)
         return [
             processador.post_process_generation(

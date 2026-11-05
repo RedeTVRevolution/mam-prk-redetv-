@@ -39,7 +39,7 @@ from api.inventario import Inventarios, converter_do_florence
 from api.nuvem import ObjetosStorage
 
 BASE = "hoje"
-FRACAO_MINIMA = 0.9  # do que há hoje, nos objetos de cena e em cada categoria
+FRACAO_MINIMA = 0.9  # do que há hoje, nos objetos de cena e em cada categoria de cena
 META_S_POR_QUADRO = 0.7
 FORA_DA_CENA = frozenset({"roupa", "acessorio", "calcado"})
 
@@ -80,7 +80,7 @@ class Criterio:
 
     cena_hoje: int
     cena: int
-    pior_categoria: str | None  # a de maior queda, com a fração que sobrou
+    pior_categoria: str | None  # a de cena de maior queda, com a fração que sobrou
     pior_fracao: float
     destaque_3_perdidos: list[str] = field(default_factory=list)
 
@@ -99,7 +99,8 @@ class Criterio:
 
 def avaliar(hoje: Inventarios, variacao: Inventarios) -> Criterio:
     """Os objetos de cena (fora roupa, acessório e calçado) somam pelo menos 90% dos de
-    hoje; nenhuma categoria cai mais que isso; nenhum objeto de destaque 3 de hoje some.
+    hoje; nenhuma categoria de cena cai mais que isso; nenhum objeto de destaque 3 de hoje
+    some.
     O objeto é o mesmo se o plano, a categoria e o nome (sem acento nem caixa) são iguais."""
 
     def contar(inventarios: Inventarios) -> dict[str, int]:
@@ -110,7 +111,9 @@ def avaliar(hoje: Inventarios, variacao: Inventarios) -> Criterio:
         return contagem
 
     antes, depois = contar(hoje), contar(variacao)
-    fracoes = {c: depois.get(c, 0) / n for c, n in antes.items() if n}
+    fracoes = {
+        c: depois.get(c, 0) / n for c, n in antes.items() if n and c not in FORA_DA_CENA
+    }
     pior = min(fracoes, key=lambda c: fracoes[c]) if fracoes else None
     chaves = {
         (p, o.categoria, normalizar(o.nome)) for p, os_ in variacao.items() for o in os_
@@ -191,7 +194,8 @@ def medir(
     dormir: Callable[[float], None] = time.sleep,
 ) -> list[Resultado]:
     """A base (`hoje`) roda primeiro, mesmo que não tenha sido pedida. Uma variação que
-    falha (a memória da GPU, por exemplo) vira `erro` na tabela e as outras seguem."""
+    falha (a memória da GPU, por exemplo) vira `erro` na tabela e as outras seguem. Se a
+    base falha, as outras não rodam: não haveria contra o que medir o critério."""
     decupagem = armazem.ler_decupagem(job_id)
     if decupagem is None:
         raise RuntimeError(f"Não há Decupagem do Job {job_id}.")
@@ -201,6 +205,10 @@ def medir(
         ambiente = dict(variacoes.get(nome, VARIACOES.get(nome, {})))
         resultado = Resultado(nome)
         resultados.append(resultado)
+        base = resultados[0].inventario
+        if nome != BASE and base is None:
+            resultado.erro = f"a base `{BASE}` falhou"
+            continue
         destino = objeto_da_medicao(job_id, nome, "bruto.json")
         try:
             disparador.rodar(job_id, destino, ambiente)
@@ -215,42 +223,39 @@ def medir(
                 job_id=job_id,
                 dormir=dormir,
             )
+            medida = Medida(
+                variacao=nome,
+                ambiente=ambiente,
+                quadros=len(bruto.quadros),
+                segundos=bruto.segundos,
+                segundos_por_quadro=round(bruto.segundos / len(bruto.quadros), 3),
+            )
+            criterio = avaliar(base, inventario) if base is not None else None
+            armazem.gravar_texto(
+                objeto_da_medicao(job_id, nome, "inventario.json"),
+                _inventario_em_json(inventario),
+            )
+            armazem.gravar_texto(
+                objeto_da_medicao(job_id, nome, "medida.json"),
+                json.dumps(
+                    {
+                        **asdict(medida),
+                        "criterio": (
+                            {**asdict(criterio), "passa": criterio.passa}
+                            if criterio
+                            else None
+                        ),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
         except Exception as e:  # noqa: BLE001 - cada variação é independente
             resultado.erro = str(e) or type(e).__name__
             continue
         resultado.inventario = inventario
-        resultado.medida = Medida(
-            variacao=nome,
-            ambiente=ambiente,
-            quadros=len(bruto.quadros),
-            segundos=bruto.segundos,
-            segundos_por_quadro=round(bruto.segundos / len(bruto.quadros), 3),
-        )
-        base = resultados[0].inventario
-        if nome != BASE and base is not None:
-            resultado.criterio = avaliar(base, inventario)
-        armazem.gravar_texto(
-            objeto_da_medicao(job_id, nome, "inventario.json"),
-            _inventario_em_json(inventario),
-        )
-        armazem.gravar_texto(
-            objeto_da_medicao(job_id, nome, "medida.json"),
-            json.dumps(
-                {
-                    **asdict(resultado.medida),
-                    "criterio": (
-                        {
-                            **asdict(resultado.criterio),
-                            "passa": resultado.criterio.passa,
-                        }
-                        if resultado.criterio
-                        else None
-                    ),
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-        )
+        resultado.medida = medida
+        resultado.criterio = criterio
     return resultados
 
 
@@ -285,7 +290,8 @@ def tabela(resultados: list[Resultado]) -> str:
         (
             r
             for r in resultados
-            if r.medida and (r.criterio is None or r.criterio.passa)
+            if r.medida
+            and (r.variacao == BASE or (r.criterio is not None and r.criterio.passa))
         ),
         key=lambda r: cast(Medida, r.medida).segundos_por_quadro,
         default=None,

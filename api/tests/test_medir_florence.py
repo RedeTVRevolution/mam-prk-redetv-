@@ -89,12 +89,12 @@ def test_categoria_que_cai_reprova_mesmo_com_a_cena_inteira_passando() -> None:
     assert not c.passa
 
 
-def test_roupa_fora_da_cena_mas_a_categoria_conta_no_pior() -> None:
+def test_roupa_e_calcado_ficam_fora_da_soma_e_das_categorias() -> None:
     variacao = _hoje()
-    variacao[0] = [o for o in variacao[0] if o.categoria != "roupa"]
+    variacao[0] = [o for o in variacao[0] if o.categoria not in ("roupa", "calcado")]
     c = avaliar(_hoje(), variacao)
-    assert c.cena == c.cena_hoje  # a roupa não entra na soma de cena
-    assert c.pior_categoria == "roupa" and c.pior_fracao == 0 and not c.passa
+    assert c.cena == c.cena_hoje
+    assert c.pior_fracao == 1.0 and c.passa
 
 
 def test_destaque_3_que_some_reprova_e_diz_qual() -> None:
@@ -228,6 +228,31 @@ def test_variacao_que_falha_vira_erro_e_as_outras_seguem() -> None:
     assert "lote16" not in "".join(armazem.textos)
     saida = tabela(resultados)
     assert "lote16" in saida and "falhou: sem memória na GPU" in saida
+
+
+def test_base_que_falha_nao_roda_as_outras_nem_aponta_a_mais_rapida() -> None:
+    armazem = ArmazemFalso()
+    disparador = DisparadorFalso(armazem, falham={BASE})
+    resultados = _medir(armazem, disparador, ["guloso"])
+
+    assert len(disparador.pedidos) == 1
+    assert resultados[1].erro and BASE in resultados[1].erro
+    assert "A mais rápida" not in tabela(resultados)
+
+
+def test_gravacao_que_falha_vira_erro_da_variacao_e_as_outras_seguem() -> None:
+    armazem = ArmazemFalso()
+
+    def gravar_texto(objeto: str, conteudo: str) -> None:
+        if "/guloso/" in objeto:
+            raise OSError("Storage fora")
+        armazem.textos[objeto] = conteudo
+
+    armazem.gravar_texto = gravar_texto  # type: ignore[method-assign]
+    resultados = _medir(armazem, DisparadorFalso(armazem), ["guloso", "lote8"])
+
+    assert [r.erro for r in resultados] == [None, "Storage fora", None]
+    assert resultados[1].medida is None and resultados[2].criterio is not None
 
 
 def test_job_que_nao_gravou_os_segundos_e_erro_da_variacao() -> None:

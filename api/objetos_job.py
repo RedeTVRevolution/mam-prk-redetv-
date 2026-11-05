@@ -86,6 +86,9 @@ def hash_do_quadro(imagem: Image.Image) -> int:
 
 
 def _progresso(feitos: int, total: int, ultimo: int, a_cada: int) -> int:
+    """`feitos` conta só os quadros que já saíram do modelo, não os que esperam no lote."""
+    if feitos == ultimo:
+        return ultimo
     if feitos == total or feitos // a_cada > ultimo // a_cada:
         log.info("Quadros: %d/%d", feitos, total)
         return feitos
@@ -154,9 +157,12 @@ def executar(
             lote.append((caminho, imagem))
             if len(lote) >= configuracao.lote:
                 rodar_lote()
-        ultimo = _progresso(feitos, len(pedidos), ultimo, configuracao.log_a_cada)
+        ultimo = _progresso(
+            feitos - len(lote), len(pedidos), ultimo, configuracao.log_a_cada
+        )
     if lote:
         rodar_lote()
+    _progresso(len(pedidos), len(pedidos), ultimo, configuracao.log_a_cada)
     quadros = []
     for indice, caminho in pedidos:
         objetos, regioes = detectados[iguais_a.get(caminho, caminho)]

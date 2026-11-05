@@ -320,6 +320,37 @@ def test_o_log_de_progresso_sai_a_cada_n_quadros_e_no_fim(
     ]
 
 
+def test_com_lote_o_progresso_so_conta_o_que_saiu_do_modelo(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="api.objetos_job")
+    executar(
+        "j1",
+        _armazenamento(),
+        DetectorFalso(),
+        configuracao=Configuracao(log_a_cada=1, lote=2),
+    )
+    assert [r.getMessage() for r in caplog.records] == [
+        "Quadros: 2/3",
+        "Quadros: 3/3",
+    ]
+
+
+def test_sem_segundos_o_json_gravado_e_o_de_antes() -> None:
+    cliente = _Cliente()
+    armazenamento = ObjetosStorage(cliente, "decupagens-x")
+    armazenamento.gravar_resultado(
+        "j1", ObjetosDaDecupagem(modelo="m", quadros=[]), None
+    )
+    armazenamento.gravar_resultado(
+        "j1", ObjetosDaDecupagem(modelo="m", quadros=[], segundos=1.5), "alt.json"
+    )
+    assert (
+        "segundos" not in cliente.guardado["decupagens-x/j1/objetos/florence.json"][0]
+    )
+    assert '"segundos":1.5' in cliente.guardado["decupagens-x/alt.json"][0]
+
+
 def test_o_storage_grava_texto_solto_no_bucket_das_decupagens() -> None:
     cliente = _Cliente()
     ObjetosStorage(cliente, "decupagens-x").gravar_texto(

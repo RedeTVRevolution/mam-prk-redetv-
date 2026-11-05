@@ -175,8 +175,8 @@ delas o resultado é o de antes.
 | `FLORENCE_PULAR_REPETIDOS` | `0` | distância máxima (de 64 bits) entre os hashes de dois quadros do mesmo plano para o segundo reaproveitar o resultado do primeiro; `0` desliga |
 | `FLORENCE_LOG_A_CADA` | `25` | a cada quantos quadros o Job loga `Quadros: feitos/total` |
 
-O log do Job também diz o tamanho da maior resposta de cada lote, em tokens: serve para
-escolher o `FLORENCE_MAX_TOKENS`.
+O log do Job também diz, cada vez que ela cresce, o tamanho da maior resposta até ali, em
+tokens: a última dessas linhas serve para escolher o `FLORENCE_MAX_TOKENS`.
 
 Para medir, com as credenciais da pessoa (precisa de `MODELO_OBJETOS` no `.env`, o mesmo
 modelo do Job de inventário):
@@ -191,13 +191,14 @@ variação `hoje`, sem variável, roda sempre primeiro e é a base), converte o 
 e guarda, em `<job>/objetos/medicao/<variacao>/` no bucket das decupagens, `bruto.json`,
 `inventario.json` e `medida.json` (tempo por quadro e critério). Nada em `<job>/objetos/florence.json`
 nem na Decupagem é tocado. As variações estão em `api/medir_florence.py` (`VARIACOES`). Uma
-que falha (memória da GPU, por exemplo) aparece como `falhou` na tabela e as outras seguem.
+que falha (memória da GPU, por exemplo) aparece como `falhou` na tabela e as outras seguem;
+se a base `hoje` falhar, as outras nem rodam.
 
 A tabela traz o tempo por quadro, quantas vezes mais rápido que `hoje`, os objetos de cena
-(fora `roupa`, `acessorio` e `calcado`) contra os de hoje, a categoria que mais caiu, os
+(fora `roupa`, `acessorio` e `calcado`) contra os de hoje, a categoria de cena que mais caiu, os
 objetos de destaque 3 que sumiram, o veredito do critério e se bateu a meta (≤ 0,7 s por
 quadro). O critério passa quando os objetos de cena somam pelo menos 90% dos de hoje, nenhuma
-categoria cai mais que isso e nenhum objeto de destaque 3 de hoje some; o objeto é o mesmo se o
+categoria de cena cai mais que isso e nenhum objeto de destaque 3 de hoje some; o objeto é o mesmo se o
 plano, a categoria e o nome (sem acento nem caixa) são iguais. O Gemini não é determinístico:
 repetir a medição pode mexer um pouco nas frações.
 
