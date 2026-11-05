@@ -134,7 +134,6 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py \
-     api/programas.toml \
      api/rubricas.toml api/
 # A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
 # que o faster-whisper transcreve a amostra em CPU (a mesma conferência do teste depois da
@@ -243,7 +242,6 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py \
-     api/programas.toml \
      api/rubricas.toml api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_cupti/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufft/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufile/lib:/app/.venv/lib/python3.12/site-packages/nvidia/curand/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/app/.venv/lib/python3.12/site-packages/cusparselt/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nccl/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvtx/lib:/usr/local/nvidia/lib64 \
@@ -341,7 +339,6 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py \
-     api/programas.toml \
      api/rubricas.toml api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib64 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \

@@ -72,6 +72,7 @@ from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
 from api.papeis import PAPEIS, DocumentoDePapeis, Papel
+from api.programas import NomeEmUso, Programa, ProgramaInexistente
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
@@ -89,6 +90,7 @@ COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
+COLECAO_DOS_PROGRAMAS = "programas"
 COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
@@ -763,6 +765,40 @@ class CatalogoFirestore:
         if not referencia.get().exists:
             raise PessoaInexistente(id)
         referencia.delete()
+
+
+class ProgramasFirestore:
+    """Um documento por programa, com o id estável como chave. O nome é único sem
+    diferença de maiúsculas; a conferência lê antes de gravar, e a tela de edição
+    é de poucas pessoas, então a corrida entre duas gravações é aceita."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DOS_PROGRAMAS
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def listar(self) -> list[Programa]:
+        lidos = [
+            Programa(id=d.id, **(d.to_dict() or {})) for d in self._colecao.stream()
+        ]
+        return sorted(lidos, key=lambda p: p.nome.casefold())
+
+    def obter(self, id: str) -> Programa | None:
+        doc = self._colecao.document(id).get()
+        return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
+
+    def salvar(self, programa: Programa) -> None:
+        if any(
+            p.id != programa.id and p.nome.casefold() == programa.nome.casefold()
+            for p in self.listar()
+        ):
+            raise NomeEmUso(programa.nome)
+        self._colecao.document(programa.id).set(programa.model_dump(exclude={"id"}))
+
+    def apagar(self, id: str) -> None:
+        if not self._colecao.document(id).get().exists:
+            raise ProgramaInexistente(id)
+        self._colecao.document(id).delete()
 
 
 class CatalogoDeMarcasFirestore:

@@ -27,6 +27,7 @@ def test_editor_e_consulta_mais_editar_enviar_e_reprocessar() -> None:
     assert permissoes_de(["editor"]) == {
         "decupagem.ver",
         "decupagem.editar",
+        "programas.editar",
         "video.enviar",
         "video.reprocessar",
     }
@@ -53,6 +54,7 @@ def test_varios_papeis_somam_permissoes() -> None:
         "video.reprocessar",
         "decupagem.editar",
         "painel.ver",
+        "programas.editar",
     }
 
 

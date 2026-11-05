@@ -31,7 +31,7 @@ from api.identificacao import (
     candidatos_do_video,
     identificar,
 )
-from api.programas import PERFIS
+from api.programas import Perfis
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import instantes_das_aparicoes
 from api.transcricao import Transcricao
@@ -144,6 +144,7 @@ def _instrucao(
     programa: str | None,
     candidatos: Sequence[Candidato],
     transcricao: Transcricao | None,
+    perfis: Perfis | None = None,
 ) -> str:
     aparicoes = sorted(
         (a.inicio_ms, a.fim_ms) for p in grupo.pessoas for a in p.na_imagem
@@ -156,10 +157,13 @@ def _instrucao(
         f"- {c.nome}, {c.papel}" + (f" ({', '.join(c.apelidos)})" if c.apelidos else "")
         for c in candidatos
     )
+    perfil_de = perfis or {}
     # `str.replace` e não `format`: a transcrição e os textos da tela têm chaves à vontade.
     valores = {
-        "programa": programa if programa in PERFIS else "não informado",
-        "perfil": PERFIS[programa] + "\n" if programa in PERFIS else "",
+        "programa": programa if programa and programa in perfil_de else "não informado",
+        "perfil": perfil_de[programa].texto() + "\n"
+        if programa and programa in perfil_de
+        else "",
         "candidatos": lista or "(nenhum)",
         "descricao": re.sub(r"\s+", " ", grupo.pessoas[0].nome),
         "aparicoes": ", ".join(f"{em_mm_ss(i)}–{em_mm_ss(f)}" for i, f in aparicoes),
@@ -187,6 +191,7 @@ def olhar_pessoas_sem_nome(
     quadros_em: QuadrosEm,
     job_id: str,
     programa: str | None = None,
+    perfis: Perfis | None = None,
     transcricao: Transcricao | None = None,
     catalogo: Catalogo | None = None,
     tolerancia_ms: int = TOLERANCIA_DA_FALA_MS,
@@ -200,7 +205,7 @@ def olhar_pessoas_sem_nome(
     modelo der, a conferência das provas. Quem o modelo não nomeia, ou cuja chamada
     falha, continua "não identificado" (e `ao_falhar` recebe o erro). `quadros_em` tira
     os JPEGs dos instantes (ms) da cópia limpa."""
-    candidatos = candidatos_do_video(programa, catalogo)
+    candidatos = candidatos_do_video(programa, catalogo, perfis)
     nomes: dict[str, str] = {}
     grupo_de: dict[str, str] = {}
     for grupo in agrupar(decupagem)[: max(limite_de_pessoas, 0)]:
@@ -211,7 +216,13 @@ def olhar_pessoas_sem_nome(
             chamada = Chamada(
                 modelo=MODELO_FORTE,
                 instrucao=_instrucao(
-                    grupo, instantes, decupagem, programa, candidatos, transcricao
+                    grupo,
+                    instantes,
+                    decupagem,
+                    programa,
+                    candidatos,
+                    transcricao,
+                    perfis,
                 ),
                 video_uri="",
                 esquema=esquema_da_resposta(),

@@ -55,10 +55,12 @@ from api.leitura_da_tela import LeituraDaTela
 from api.nuvem import (
     CatalogoFirestore,
     LeiturasStorage,
+    ProgramasFirestore,
     RepositorioFirestore,
     TranscricoesStorage,
     objeto_do_proxy,
 )
+from api.programas import Perfis, perfis_dos_programas
 from api.transcricao import Transcricao
 
 ETAPA_DE_CUSTO = "passada_de_comparacao"  # o rótulo de custo de cada chamada
@@ -164,6 +166,7 @@ def rodar_passada(
     armazem: ArmazemDaPassada,
     transporte: Transporte,
     catalogo: Catalogo | None = None,
+    perfis: Perfis | None = None,
     max_paralelas: int = 1,
     relogio: Callable[[], float] = time.monotonic,
     agora: Callable[[], datetime] = agora_utc,
@@ -192,6 +195,7 @@ def rodar_passada(
         video_uri=armazem.uri_do_proxy(job.id),
         job_id=job.id,
         programa=job.programa,
+        perfis=perfis,
         cortes_ms=job.cortes_ms or (),
         video=Video(
             sha256=job.sha256,
@@ -335,6 +339,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
     banco = firestore.Client(project=projeto)
+    catalogo = CatalogoFirestore(banco)
     try:
         passada = rodar_passada(
             job_id,
@@ -345,7 +350,8 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
                 ClienteStorage(project=projeto), aceitos, decupagens
             ),
             transporte=TransporteVertex(projeto, sessao),
-            catalogo=CatalogoFirestore(banco),
+            catalogo=catalogo,
+            perfis=perfis_dos_programas(ProgramasFirestore(banco), catalogo),
             max_paralelas=paralelas,
         )
     except (JobNaoConcluido, AnaliseFalhou, ValueError) as e:

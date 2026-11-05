@@ -36,8 +36,10 @@ from api.nuvem import (
     DecupagensStorage,
     JanelasStorage,
     LeiturasStorage,
+    ProgramasFirestore,
     TranscricoesStorage,
 )
+from api.programas import Perfis, perfis_dos_programas
 from api.progresso_das_janelas import JanelasDoJob
 from api.sinais import (
     ContagemDaAnalise,
@@ -83,6 +85,7 @@ def executar(
     janelas_do_job: JanelasDoJob | None = None,
     max_paralelas: int = 1,
     catalogo: Catalogo | None = None,
+    perfis: Perfis | None = None,
     tolerancia_da_fala_ms: int = TOLERANCIA_DA_FALA_MS,
     dormir: Callable[[float], None] = time.sleep,
     relogio: Callable[[], datetime] = agora_utc,
@@ -114,6 +117,7 @@ def executar(
             video_uri=decupagens.uri_do_proxy(job.id),
             job_id=job.id,
             programa=job.programa,
+            perfis=perfis,
             cortes_ms=job.cortes_ms or (),
             video=Video(
                 sha256=job.sha256,
@@ -162,6 +166,7 @@ def main() -> None:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
+    catalogo = CatalogoFirestore(firestore.Client(project=projeto))
     executar(
         os.environ["JOB_ID"],
         jobs_do_ambiente(firestore.Client(project=projeto)),
@@ -173,7 +178,10 @@ def main() -> None:
         LeiturasStorage(ClienteStorage(project=projeto), aceitos),
         JanelasStorage(ClienteStorage(project=projeto), aceitos),
         max_paralelas=int(os.environ["JANELAS_EM_PARALELO"]),
-        catalogo=CatalogoFirestore(firestore.Client(project=projeto)),
+        catalogo=catalogo,
+        perfis=perfis_dos_programas(
+            ProgramasFirestore(firestore.Client(project=projeto)), catalogo
+        ),
         tolerancia_da_fala_ms=int(
             os.environ.get("TOLERANCIA_DA_FALA_MS", TOLERANCIA_DA_FALA_MS)
         ),

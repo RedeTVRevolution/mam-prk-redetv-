@@ -89,7 +89,7 @@ Princípios do mapa:
 | --- | --- |
 | Para quem | Todos leem; o Curador edita |
 | O que tem | Lista de pessoas do catálogo com nome, apelidos, papel, as 3 referências de rosto com a página de origem, e os vídeos em que aparece. Na ficha: renomear, fundir duas pessoas, trocar uma referência de rosto, ver as menções e as aparições |
-| Existe no código | Só o perfil do programa, em `api/programas.toml` (4 pessoas do TV Fama) |
+| Existe no código | Programas no Firestore (perfil e pessoas com papel), editados na aba Programas da administração |
 | Falta | Catálogo no banco, referências de rosto (ADR 0005, #82), id estável entre vídeos, tela |
 
 ### Painel da diretoria (E9)

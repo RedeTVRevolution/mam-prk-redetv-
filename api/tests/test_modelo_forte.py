@@ -20,6 +20,7 @@ from api.modelo_forte import (
 )
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros, instantes_das_aparicoes
+from api.tests.programas_de_teste import perfis_da_tv_fama
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem, gc, pessoa, whisper
 
@@ -171,6 +172,7 @@ def test_a_instrucao_traz_todas_as_pistas_do_video() -> None:
         d,
         transporte,
         programa="TV Fama",
+        perfis=perfis_da_tv_fama(),
         transcricao=whisper(("Leãozinho!", 103.0), ("verdade", 104.0)),
     )
 
@@ -210,6 +212,7 @@ def test_nome_com_prova_pelo_apelido_na_fala_do_whisper_e_confirmado() -> None:
         d,
         transporte,
         programa="TV Fama",
+        perfis=perfis_da_tv_fama(),
         transcricao=whisper(("Leãozinho!", 103.0)),
     ).pessoas
 

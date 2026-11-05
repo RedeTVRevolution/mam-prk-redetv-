@@ -13,6 +13,7 @@ import RegrasDeAprovacao from './RegrasDeAprovacao.tsx'
 import Entradas from './Entradas.tsx'
 import { filtrosDasEntradas } from './entradas.ts'
 import Lixeira from './Lixeira.tsx'
+import Programas from './Programas.tsx'
 import Usuarios from './Usuarios.tsx'
 
 /** `/admin`: as abas são links com endereço próprio; `/admin` abre a primeira permitida. */
@@ -68,6 +69,7 @@ export default function Administracao({ api, aba, busca, usuario, aoEntrarDeNovo
       {atual.aba === 'chaves' && <Chaves api={api} />}
       {atual.aba === 'aprovacao' && <RegrasDeAprovacao api={api} />}
       {atual.aba === 'auditoria' && <Auditoria api={api} filtros={filtrosDaAuditoria(busca)} />}
+      {atual.aba === 'programas' && <Programas api={api} />}
       {atual.aba === 'lixeira' && <Lixeira api={api} aoEntrarDeNovo={aoEntrarDeNovo} />}
     </Stack>
   )

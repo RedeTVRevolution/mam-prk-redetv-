@@ -80,7 +80,7 @@ Um objeto não vira documento próprio: ele é campo do momento de plano. A cons
 | Pauta com tempos e pessoas | Sim: `pautas` | Tom em texto livre; lista fechada em #77 |
 | Plano pelos cortes reais | **Não** | Na E0, os planos vêm do modelo. A detecção de cortes está no plano (passo 1 de "Vídeos longos") mas não está ligada |
 | Quadro-chave do momento | **Não** | `quadro` vazio na E0. A tela usa `<video src="…#t=">` como miniatura (`web/src/Video.tsx:760`): um player por miniatura não serve para uma página de resultados com dezenas de momentos |
-| Programa | Sim, no Job | Só os programas de `programas.toml` |
+| Programa | Sim, no Job | Só os programas cadastrados (aba Programas da administração) |
 | Data de exibição | **Não** | O Job não tem data de exibição. É a faceta mais útil num acervo de 25 anos e não sai do nome do arquivo com segurança |
 
 ## Mudanças propostas no esquema (1.3)

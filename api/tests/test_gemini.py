@@ -18,7 +18,7 @@ from api.gemini import (
     analisar,
     instrucao,
 )
-from api.programas import PERFIS
+from api.tests.programas_de_teste import perfis_da_tv_fama
 from api.tests.test_decupagem import DURACAO_MS, decupagem_valida
 
 JOB = "job-123"
@@ -165,10 +165,17 @@ def test_chamada_leva_job_como_rotulo_e_nenhuma_ferramenta() -> None:
 
 def test_instrucao_leva_o_perfil_do_programa() -> None:
     t = TransporteFalso(BOA)
-    analisar(t, video_uri=VIDEO, job_id=JOB, video=VIDEO_CONFIAVEL, programa="TV Fama")
+    analisar(
+        t,
+        video_uri=VIDEO,
+        job_id=JOB,
+        video=VIDEO_CONFIAVEL,
+        programa="TV Fama",
+        perfis=perfis_da_tv_fama(),
+    )
     texto = t.chamadas[0].instrucao
     assert "Programa: TV Fama\n" in texto
-    assert PERFIS["TV Fama"] in texto
+    assert perfis_da_tv_fama()["TV Fama"].texto() in texto
     assert (
         '- Leão Lobo, apresentador ou comentarista; também chamado de "Leãozinho".'
         in texto
@@ -180,11 +187,12 @@ def test_instrucao_leva_o_perfil_do_programa() -> None:
 def test_sem_programa_com_perfil_a_instrucao_segue_sem_perfil(
     programa: str | None,
 ) -> None:
-    """Só um nome de `programas.toml` entra no prompt, nunca texto livre."""
-    texto = instrucao(programa)
+    """Só um nome de programa cadastrado entra no prompt, nunca texto livre."""
+    perfis = perfis_da_tv_fama()
+    texto = instrucao(programa, perfis=perfis)
     assert "Programa: não informado\n\nREGRAS GERAIS" in texto
     assert "{" not in texto
-    assert all(p not in texto for p in PERFIS.values())
+    assert all(p.texto() not in texto for p in perfis.values())
 
 
 def test_bloco_video_vem_da_quarentena_e_nao_do_modelo() -> None:

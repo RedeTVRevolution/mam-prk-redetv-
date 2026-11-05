@@ -97,7 +97,7 @@ from api.papeis import (
     papeis_do_usuario,
     permissoes_de,
 )
-from api.programas import PERFIS
+from api.programas import RepositorioDeProgramas
 from api.sugestoes import (
     MOTIVO_CONFIRMADA,
     MOTIVO_CORRIGIDA,
@@ -407,7 +407,7 @@ class NovoJob(BaseModel):
     nome: Annotated[str, StringConstraints(min_length=1, max_length=255)]
     tamanho_bytes: Annotated[int, Field(strict=True)]
     tipo: Literal["video/mp4"]
-    programa: str | None = None  # um nome de `programas.toml`
+    programa: str | None = None  # o nome de um programa cadastrado
     # Obrigatória (#365): a tabela de momentos é dividida por ela.
     data_exibicao: date
 
@@ -441,14 +441,6 @@ class NovoJob(BaseModel):
         if not (isinstance(valor, str) and len(valor) == 10):
             raise ValueError("data_exibicao deve ser texto AAAA-MM-DD")
         return valor
-
-    @field_validator("programa")
-    @classmethod
-    def _programa_com_perfil(cls, programa: str | None) -> str | None:
-        if programa is not None and programa not in PERFIS:
-            validos = ", ".join(sorted(PERFIS))
-            raise ValueError(f"programa sem perfil; programas válidos: {validos}")
-        return programa
 
 
 class ServicoIndisponivel(Exception):
@@ -928,6 +920,7 @@ def criar_rotas(
     aprovacao: RepositorioDeAprovacao,
     catalogo: Catalogo,
     marcas: CatalogoDeMarcas,
+    programas: RepositorioDeProgramas,
     sugestoes: RepositorioDeSugestoes,
     disparo_da_indexacao: DisparoDaIndexacao,
     acessos: AcessosAoVideo,
@@ -948,6 +941,13 @@ def criar_rotas(
     ) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
+        if novo.programa is not None:
+            validos = sorted(p.nome for p in programas.listar())
+            if novo.programa not in validos:
+                raise HTTPException(
+                    422,
+                    "programa sem perfil; programas válidos: " + ", ".join(validos),
+                )
         if isinstance(chamador, Sistema):
             criado_por, sistema = f"sistema:{chamador.sistema}", chamador.sistema
             email = None

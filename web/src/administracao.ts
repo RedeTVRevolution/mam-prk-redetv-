@@ -11,6 +11,7 @@ export const ABAS: Aba[] = [
   { aba: 'usuarios', rotulo: 'Usuários', permissoes: ['usuarios.gerir'] },
   { aba: 'chaves', rotulo: 'Sistemas e chaves', permissoes: ['chaves.gerir'] },
   { aba: 'aprovacao', rotulo: 'Regras de aprovação', permissoes: ['aprovacao.definir'] },
+  { aba: 'programas', rotulo: 'Programas', permissoes: ['programas.editar'] },
   { aba: 'lixeira', rotulo: 'Lixeira', permissoes: ['lixeira.gerir'] },
   { aba: 'auditoria', rotulo: 'Auditoria', permissoes: ['auditoria.ver'] },
 ]
