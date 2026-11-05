@@ -856,11 +856,27 @@ resource "google_cloud_run_v2_service" "web" {
   ingress = local.balanceador ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
   template {
     service_account = google_service_account.mam["web"].email
+    # 40 pedidos por instância, o tamanho do pool de threads do FastAPI (rotas
+    # `def`): acima disso o pedido esperaria na instância em vez de o Cloud Run
+    # abrir outra.
+    max_instance_request_concurrency = 40
     scaling {
-      max_instance_count = 2
+      # Teto de custo do serviço. Sem min_instance_count: o mínimo é 0 e o primeiro
+      # acesso depois de parado paga a partida a frio (decisão do #357).
+      max_instance_count = 10
     }
     containers {
       image = var.imagem
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "2Gi"
+        }
+        # CPU só durante os pedidos, o padrão do Cloud Run, que o provider deixa de
+        # aplicar quando o bloco resources é declarado: sem isto a CPU fica sempre
+        # alocada e a cobrança passa a ser por instância ligada (#357).
+        cpu_idle = true
+      }
       # Liga o verificador de token do Identity Platform na API (api/main.py).
       env {
         name  = "GCP_PROJECT_ID"
