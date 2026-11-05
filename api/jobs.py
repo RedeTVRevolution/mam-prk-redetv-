@@ -8,6 +8,7 @@ import unicodedata
 import uuid
 import zlib
 from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol, Self
@@ -34,7 +35,12 @@ from api.auth import (
     Usuario,
 )
 from api.catalogo import Catalogo, EnvioParaLixeira
-from api.catalogo_apagado import com_pessoas_fundidas, sem_catalogo_apagado
+from api.catalogo_apagado import (
+    com_pessoas_fundidas,
+    ids_do_catalogo,
+    lido_em_lote,
+    sem_catalogo_apagado,
+)
 from api.catalogo_dos_jobs import atualizar_catalogo_do_job
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
@@ -84,6 +90,7 @@ from api.idempotencia import (
 )
 from api.marcas import CatalogoDeMarcas
 from api.papeis import (
+    DocumentoDePapeis,
     Papel,
     Permissao,
     RepositorioDePapeis,
@@ -132,6 +139,10 @@ CodigoDeFalha = Literal[
 
 
 EstadoDaIndexacao = Literal["pendente", "indexado", "falhou"]
+
+
+# Teto de assinaturas de capa ao mesmo tempo na listagem do Acervo.
+ASSINATURAS_SIMULTANEAS = 8
 
 
 class Indexacao(BaseModel):
@@ -847,9 +858,17 @@ def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
 
 def papeis_da_pessoa(request: Request, pessoa: Usuario) -> list[Papel]:
     """Os papéis efetivos, num ponto só para o `/v1/eu` e as rotas nunca discordarem."""
-    papeis: RepositorioDePapeis = request.app.state.papeis
+    guardado: DocumentoDePapeis | None = getattr(
+        request.state, "papeis_guardados", None
+    )
+    if guardado is not None and guardado.uid == pessoa.uid:
+        # Lido pelo middleware neste pedido; só vale para quem pediu.
+        guardados = guardado.papeis
+    else:
+        papeis: RepositorioDePapeis = request.app.state.papeis
+        guardados = papeis.obter(pessoa.uid)
     return papeis_do_usuario(
-        papeis.obter(pessoa.uid),
+        guardados,
         pessoa.email,
         pessoa.email_verificado,
         request.app.state.admins,
@@ -1044,7 +1063,10 @@ def criar_rotas(
             pagina = repositorio.consultar(filtro)
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        corpo = [_com_capa(j).model_dump(mode="json") for j in pagina.jobs]
+        # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
+        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+            publicos = list(assinando.map(_com_capa, pagina.jobs))
+        corpo = [p.model_dump(mode="json") for p in publicos]
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
@@ -1168,11 +1190,18 @@ def criar_rotas(
         """A Decupagem entregue, com as Correções aplicadas."""
         modelo, versao_atual = _ler_modelo(job.id)
         entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
-        entregue = com_pessoas_fundidas(entregue, catalogo.obter)
+        # Pessoas e marcas distintas da Decupagem, numa leitura em lote cada.
+        pessoa = lido_em_lote(
+            ids_do_catalogo(entregue, "pessoas"), catalogo.obter_varios, catalogo.obter
+        )
+        marca = lido_em_lote(
+            ids_do_catalogo(entregue, "comerciais"), marcas.obter_varios, marcas.obter
+        )
+        entregue = com_pessoas_fundidas(entregue, pessoa)
         entregue = sem_catalogo_apagado(
             entregue,
-            lambda id: (p := catalogo.obter(id)) is not None and p.lixeira is None,
-            lambda id: (m := marcas.obter(id)) is not None and m.lixeira is None,
+            lambda id: (p := pessoa(id)) is not None and p.lixeira is None,
+            lambda id: (m := marca(id)) is not None and m.lixeira is None,
         )
         return entregue
 
