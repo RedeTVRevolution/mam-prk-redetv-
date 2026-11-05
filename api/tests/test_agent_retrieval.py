@@ -9,6 +9,7 @@ from api.agent_retrieval import (
     ConfigDaBusca,
     JaExiste,
     apagar_colecao,
+    conferir_esquema,
     criar_colecao,
     esperar,
     esquema_da_colecao,
@@ -397,13 +398,84 @@ def test_operacao_com_erro_levanta() -> None:
         esperar({"name": "op", "done": True, "error": {"code": 3}}, TransporteFalso())
 
 
-def test_criar_colecao_e_idempotente() -> None:
-    def ja_existe(
-        metodo: str, caminho: str, corpo: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        raise JaExiste(caminho)
+class _ColecaoNoAr:
+    """Transporte de uma coleção que já existe, com o `dataSchema` dado: a criação dá 409."""
 
-    criar_colecao(CONFIG, ja_existe, _nao_dorme)
+    def __init__(self, esquema: dict[str, Any]) -> None:
+        self.esquema = esquema
+        self.chamadas: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    def __call__(
+        self, metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        self.chamadas.append((metodo, caminho, corpo))
+        if metodo == "POST":
+            raise JaExiste(caminho)
+        if metodo == "PATCH":
+            return {"name": "op-patch", "done": True}
+        return {"dataSchema": self.esquema}
+
+    def patches(self) -> list[dict[str, Any] | None]:
+        return [c for m, _, c in self.chamadas if m == "PATCH"]
+
+
+def _esquema_no_ar(**mudancas: Any) -> dict[str, Any]:
+    esquema = esquema_da_colecao(CONFIG)["dataSchema"]
+    propriedades = {
+        c: p for c, p in esquema["properties"].items() if mudancas.get(c, 1) is not None
+    }
+    propriedades |= {c: p for c, p in mudancas.items() if p is not None}
+    return {**esquema, "properties": propriedades}
+
+
+def test_criar_colecao_igual_nao_recebe_patch_nem_pede_reindexar() -> None:
+    transporte = _ColecaoNoAr(_esquema_no_ar())
+    assert criar_colecao(CONFIG, transporte, _nao_dorme) == []
+    assert transporte.patches() == []
+
+
+def test_criar_colecao_que_ja_existe_acrescenta_o_campo_que_falta() -> None:
+    transporte = _ColecaoNoAr(_esquema_no_ar(texto_da_busca=None))
+    acrescentados = criar_colecao(CONFIG, transporte, _nao_dorme)
+    assert acrescentados == ["texto_da_busca"]
+    [(_, caminho, corpo)] = [c for c in transporte.chamadas if c[0] == "PATCH"]
+    assert caminho == (
+        "projects/proj-x/locations/reg-y/collections/col-z?updateMask=dataSchema"
+    )
+    assert corpo is not None
+    propriedades = corpo["dataSchema"]["properties"]
+    # O PATCH troca o esquema inteiro: leva o que já estava e o campo novo.
+    assert propriedades == esquema_da_colecao(CONFIG)["dataSchema"]["properties"]
+    assert propriedades["texto_da_busca"] == {"type": "string"}
+
+
+def test_o_patch_preserva_o_que_mais_vier_no_esquema_no_ar() -> None:
+    no_ar = _esquema_no_ar(texto_da_busca=None)
+    no_ar["required"] = ["id"]
+    transporte = _ColecaoNoAr(no_ar)
+    criar_colecao(CONFIG, transporte, _nao_dorme)
+    [corpo] = transporte.patches()
+    assert corpo is not None and corpo["dataSchema"]["required"] == ["id"]
+
+
+def test_campo_com_tipo_diferente_para_com_erro_nomeando_o_campo() -> None:
+    transporte = _ColecaoNoAr(_esquema_no_ar(inicio_ms={"type": "string"}))
+    with pytest.raises(RuntimeError, match="inicio_ms.*string.*integer"):
+        criar_colecao(CONFIG, transporte, _nao_dorme)
+    assert transporte.patches() == []
+
+
+def test_campo_que_sobra_na_colecao_para_com_erro_nomeando_o_campo() -> None:
+    transporte = _ColecaoNoAr(_esquema_no_ar(antigo={"type": "string"}))
+    with pytest.raises(RuntimeError, match="antigo"):
+        criar_colecao(CONFIG, transporte, _nao_dorme)
+    assert transporte.patches() == []
+
+
+def test_conferir_esquema_lista_os_campos_de_texto_que_faltam() -> None:
+    assert conferir_esquema(CONFIG, _ColecaoNoAr(_esquema_no_ar())) == []
+    sem_campo = _ColecaoNoAr(_esquema_no_ar(texto_da_busca=None))
+    assert conferir_esquema(CONFIG, sem_campo) == ["texto_da_busca"]
 
 
 def test_apagar_colecao_leva_os_indices_e_os_objetos_e_espera() -> None:

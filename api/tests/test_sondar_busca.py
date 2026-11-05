@@ -2,12 +2,14 @@ from pathlib import Path
 
 import pytest
 
+from api.agent_retrieval import CAMPOS_DE_TEXTO, ConfigDaBusca
 from api.busca import Entendida, Momento, VideoDoResultado
 from api.sondar_busca import (
     ARQUIVO_DAS_CONSULTAS,
     CASOS,
     Caso,
     Trecho,
+    esquema_sem_campos,
     ler_casos,
     modo_atendido,
     pertinencia,
@@ -258,3 +260,14 @@ def test_consulta_visual_que_caiu_na_busca_comum_fica_vermelha() -> None:
     assert modo_atendido(visual, entendida(True))
     assert not modo_atendido(visual, entendida(False))
     assert modo_atendido(Caso("terno", "terno"), entendida(False))
+
+
+def test_esquema_sem_campo_de_texto_falha_nomeando_o_campo() -> None:
+    config = ConfigDaBusca("p", "r", "c", "d", None, 128)
+    sem_campos = {"dataSchema": {"properties": {"texto": {"type": "string"}}}}
+    com_campos = {
+        "dataSchema": {"properties": {c: {"type": "string"} for c in CAMPOS_DE_TEXTO}}
+    }
+    erro = esquema_sem_campos(config, lambda m, c, b: sem_campos)
+    assert erro is not None and all(repr(c) in erro for c in CAMPOS_DE_TEXTO)
+    assert esquema_sem_campos(config, lambda m, c, b: com_campos) is None
