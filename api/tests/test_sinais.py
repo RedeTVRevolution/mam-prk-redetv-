@@ -229,14 +229,14 @@ def test_etapa_que_levanta_deixa_a_falha_para_o_workflows_e_a_excecao_seguir() -
         rodar_etapa(
             repositorio,
             "j1",
-            "comparacao",
+            "identificacao",
             quebra,
-            bem_sucedido="comparado",
+            bem_sucedido="identificado",
             registrar=linhas.append,
         )
 
     assert linhas == []
-    assert repositorio.obter("j1").etapas["comparacao"].resultado == "falhou"  # type: ignore[union-attr]
+    assert repositorio.obter("j1").etapas["identificacao"].resultado == "falhou"  # type: ignore[union-attr]
 
 
 def test_etapa_que_conclui_nao_loga_falha() -> None:

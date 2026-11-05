@@ -292,7 +292,7 @@ PAPEIS_DA_TERRAFORM=(
   roles/compute.networkAdmin # rede mam-validacao dos Jobs e apagar a rede default (#301)
   roles/iam.workloadIdentityPoolAdmin
   roles/cloudbuild.builds.editor
-  roles/secretmanager.admin # cria o segredo do SerpAPI (google_secret_manager_secret.serpapi) e dá acesso a ele (referencias_le_serpapi)
+  roles/secretmanager.admin # apaga o segredo do SerpAPI que saiu do Terraform (#327); depois do publicar que o remove, o papel pode sair
   roles/cloudscheduler.admin # agendamento diário da avaliação por rubrica (#255)
   roles/bigquery.admin # dataset, tabelas e IAM no dataset do BigQuery (#260, #279, #280, #285)
   roles/cloudkms.admin # key ring, chave MAC do hash das chaves de API e IAM na chave (#272)

@@ -7,8 +7,6 @@ from typing import Any
 import pytest
 import yaml
 
-from api.rostos_dos_palpites import PREFIXO_DOS_PALPITES
-
 MODULO = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
 MAIN = MODULO / "main.tf"
 DEFINICAO = MODULO / "validacao.workflow.yaml"
@@ -295,13 +293,7 @@ def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
     passos = {
         "valida": ("validacao", "- valida:", "- le_o_job:"),
         "analisa": ("analise", "- analisa:", "- inicia_identificacao:"),
-        "identifica": ("identificacao", "- identifica:", "- inicia_referencias:"),
-        "busca_as_referencias": (
-            "referencias",
-            "- busca_as_referencias:",
-            "- inicia_comparacao:",
-        ),
-        "compara": ("comparacao", "- compara:", "- inicia_quadros_chave:"),
+        "identifica": ("identificacao", "- identifica:", "- inicia_quadros_chave:"),
         "tira_os_quadros": ("quadros", "- tira_os_quadros:", "- indexa:"),
         "indexa": ("indexacao", "- indexa:", "- fim:"),
     }
@@ -341,29 +333,9 @@ def test_nenhum_comentario_da_infra_fala_em_ate_10_min() -> None:
         assert "até 10 min" not in arquivo.read_text()
 
 
-def test_job_de_referencias_no_main_tf_tem_internet_e_o_segredo_e_so_dele() -> None:
-    main = MAIN.read_text()
-
-    job = main[main.index('resource "google_cloud_run_v2_job" "referencias"') :].split(
-        "\nresource "
-    )[0]
-    assert "vpc_access" not in job
-    assert "max_retries     = 0" in job
-    assert 'local.buckets["referencias"]' in job
-    assert "google_secret_manager_secret.serpapi.id" in job
-    assert 'google_service_account.mam["referencias"]' in job
-    assert "google_secret_manager_secret_version" not in main
-    acesso = main[
-        main.index('resource "google_secret_manager_secret_iam_member"') :
-    ].split("\nresource ")[0]
-    assert 'google_service_account.mam["referencias"].member' in acesso
-    assert main.count("secretAccessor") == 1
-
-
 ETAPAS = [
     ("valida", "validacao"),
     ("analisa", "analise"),
-    ("busca_as_referencias", "referencias"),
     ("tira_os_quadros", "quadros_chave"),
     ("indexa", "indexacao"),
 ]
@@ -437,21 +409,19 @@ def test_fim_de_etapa_sem_inicio_nao_e_gravado() -> None:
     assert guarda < marca_fim.index("grava_o_fim:")
 
 
-def test_ordem_nova_identificacao_referencias_comparacao_quadros_indexacao() -> None:
+def test_ordem_nova_identificacao_quadros_indexacao() -> None:
     texto = _texto()
 
     ordem = [
         "- analisa:",
         "- identifica:",
-        "- busca_as_referencias:",
-        "- compara:",
         "- tira_os_quadros:",
         "- indexa:",
         "- fim:",
     ]
     posicoes = [texto.index(passo) for passo in ordem]
     assert posicoes == sorted(posicoes)
-    for job in ("identificacao", "referencias", "comparacao"):
+    for job in ("identificacao",):
         inicio = re.search(
             rf"call: marca_inicio\s+args:\s+job_id: \$\$\{{job_id\}}\s+etapa: {job}\n",
             texto,
@@ -463,16 +433,14 @@ def test_ordem_nova_identificacao_referencias_comparacao_quadros_indexacao() -> 
         )
     # O nome de cada Job vem do main.tf pelo templatefile.
     main = MAIN.read_text()
-    for job in ("identificacao", "referencias", "comparacao"):
+    for job in ("identificacao",):
         assert f"job_de_{job}" in main
 
 
 @pytest.mark.parametrize(
     ("passo", "etapa", "seguinte"),
     [
-        ("identifica", "identificacao", "inicia_referencias"),
-        ("busca_as_referencias", "referencias", "inicia_comparacao"),
-        ("compara", "comparacao", "inicia_quadros_chave"),
+        ("identifica", "identificacao", "inicia_quadros_chave"),
     ],
 )
 def test_falha_dos_passos_novos_vai_ao_log_e_a_etapa_e_os_seguintes_rodam(
@@ -510,7 +478,6 @@ def test_etapas_dos_jobs_que_gravam_o_proprio_resultado_nao_sao_regravadas_como_
     texto = _texto()
 
     assert "etapa: identificacao\n          falhou_na_execucao: false" not in texto
-    assert "etapa: comparacao\n          falhou_na_execucao: false" not in texto
 
 
 def _depois_de(texto: str, passo: str) -> str:
@@ -556,8 +523,6 @@ def test_partindo_da_analise_nem_a_transcricao_nem_a_leitura_da_tela_rodam() -> 
         assert antes not in daqui
     for depois in (
         "job_de_identificacao",
-        "job_de_referencias",
-        "job_de_comparacao",
         "job_de_quadros",
         "job_de_indexacao",
     ):
@@ -578,42 +543,9 @@ def test_partindo_da_indexacao_nada_antes_dela_roda() -> None:
         "job_de_ocr",
         "job_de_analise",
         "job_de_identificacao",
-        "job_de_referencias",
-        "job_de_comparacao",
         "job_de_quadros",
     ):
         assert antes not in daqui
-
-
-def test_partindo_da_comparacao_nem_a_identificacao_nem_as_referencias_rodam() -> None:
-    texto = _texto()
-
-    destino = _destino(texto, "comparacao")
-
-    assert destino == "inicia_comparacao"
-    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
-    assert "jobs/${job_de_comparacao}" in daqui
-    for antes in (
-        "job_de_validacao",
-        "job_de_transcricao",
-        "job_de_ocr",
-        "job_de_analise",
-        "job_de_identificacao",
-        "job_de_referencias",
-    ):
-        assert antes not in daqui
-    for depois in ("job_de_quadros", "job_de_indexacao"):
-        assert depois in daqui
-
-
-def test_partindo_das_referencias_a_identificacao_nao_roda() -> None:
-    texto = _texto()
-
-    destino = _destino(texto, "referencias")
-
-    assert destino == "inicia_referencias"
-    daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
-    assert "job_de_identificacao" not in daqui and "job_de_comparacao" in daqui
 
 
 def test_cada_etapa_de_partida_cai_no_inicio_da_propria_etapa() -> None:
@@ -643,13 +575,8 @@ def _job_do_main_tf(nome: str) -> str:
     )[0]
 
 
-@pytest.mark.parametrize(
-    ("nome", "modulo"),
-    [("identificacao", "identificacao_job"), ("comparacao", "comparacao_job")],
-)
-def test_jobs_de_identificacao_e_comparacao_sem_internet_com_a_imagem_do_ffmpeg(
-    nome: str, modulo: str
-) -> None:
+def test_job_de_identificacao_sem_internet_com_a_imagem_do_ffmpeg() -> None:
+    nome, modulo = "identificacao", "identificacao_job"
     main = MAIN.read_text()
     job = _job_do_main_tf(nome)
 
@@ -665,19 +592,9 @@ def test_jobs_de_identificacao_e_comparacao_sem_internet_com_a_imagem_do_ffmpeg(
 
 def test_variaveis_dos_jobs_novos_vem_do_main_tf() -> None:
     ident = _job_do_main_tf("identificacao")
-    comp = _job_do_main_tf("comparacao")
 
     assert "var.limite_de_pessoas_do_modelo_forte" in ident
     assert 'name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"' in ident
-    for env, valor in [
-        ("LIMIAR_DA_COMPARACAO", "var.limiar_da_comparacao"),
-        ("LIMITE_DE_COMPARACOES", "var.limite_de_comparacoes"),
-        ("VALIDADE_DAS_REFERENCIAS_DIAS", "var.validade_das_referencias_dias"),
-        ("REFERENCIAS_DO_ACERVO", "var.referencias_do_acervo"),
-    ]:
-        assert f'name  = "{env}"' in comp
-        assert valor in comp
-    assert 'local.buckets["referencias"]' in comp
     assert 'local.buckets["referencias"]' not in ident
 
 
@@ -685,56 +602,35 @@ def test_contas_e_papeis_dos_jobs_novos_sao_so_os_combinados() -> None:
     main = MAIN.read_text()
 
     contas = main.split("for_each     = toset([")[1].split("])")[0]
-    for nome in ("identificacao", "comparacao"):
-        assert f'"{nome}"' in contas
-        assert re.search(
-            rf'\n\s+{nome}\s+= \["roles/datastore.user", local.papel_vertex_predicao\]',
-            main,
-        )
+    assert '"identificacao"' in contas
+    assert re.search(
+        r'\n\s+identificacao\s+= \["roles/datastore.user", local.papel_vertex_predicao\]',
+        main,
+    )
     assert re.search(
         r'identificacao = \{ aceitos = "roles/storage.objectViewer", '
         r'decupagens = "roles/storage.objectUser" \}',
         main,
     )
-    assert re.search(
-        r'comparacao = \{ aceitos = "roles/storage.objectViewer", '
-        r'decupagens = "roles/storage.objectUser", '
-        r'referencias = "roles/storage.objectUser" \}',
-        main,
-    )
 
 
-def test_so_o_prefixo_dos_palpites_expira_e_o_prazo_vem_da_variavel() -> None:
+def test_o_bucket_das_referencias_nao_tem_regra_de_ciclo_de_vida() -> None:
     main = MAIN.read_text()
     bucket = main[main.index('resource "google_storage_bucket" "mam"') :].split(
         "\nresource "
     )[0]
-    regra = bucket.split('dynamic "lifecycle_rule"')[1].split('dynamic "cors"')[0]
-    variavel = main.split('variable "prazo_dos_palpites_dias"')[1].split("\n}")[0]
 
-    assert 'each.key == "referencias"' in regra
-    assert "age            = var.prazo_dos_palpites_dias" in regra
-    assert f'matches_prefix = ["{PREFIXO_DOS_PALPITES}"]' in regra
-    assert 'type = "Delete"' in regra
-    assert regra.count("condition") == 1 and "created_before" not in regra
-    assert "default     = 30" in variavel
-    assert bucket.count("lifecycle_rule") == 1
+    assert "lifecycle_rule" not in bucket
+    assert "prazo_dos_palpites_dias" not in main
 
 
-def test_limite_de_buscas_e_a_lista_de_nomes_do_job_de_referencias_vem_do_main_tf() -> (
-    None
-):
-    job = _job_do_main_tf("referencias")
-
-    assert 'name  = "LIMITE_DE_BUSCAS_POR_VIDEO"' in job
-    assert "var.limite_de_buscas_por_video" in job
-    assert 'name  = "BUCKET_DECUPAGENS"' in job and 'local.buckets["decupagens"]' in job
+def test_as_etapas_de_referencias_e_comparacao_sairam_da_infra() -> None:
     main = MAIN.read_text()
-    assert re.search(
-        r'referencias = \{ referencias = "roles/storage.objectUser", '
-        r'decupagens = "roles/storage.objectViewer" \}',
-        main,
-    )
+
+    for resto in ("serpapi", "mam-referencias", "mam-comparacao", "SerpAPI"):
+        assert resto not in main, resto
+    assert "secretAccessor" not in main
+    assert "job_de_referencias" not in main and "job_de_comparacao" not in main
 
 
 def test_a_api_le_e_apaga_as_fotos_de_referencia() -> None:
@@ -769,7 +665,6 @@ def test_quem_regrava_o_que_ja_gravou_pode_sobrescrever_no_main_tf() -> None:
         ("web", "aceitos"),
         ("quadros", "decupagens"),
         ("identificacao", "decupagens"),
-        ("comparacao", "decupagens"),
     ]:
         assert papel(conta, bucket) == "roles/storage.objectUser", (conta, bucket)
 

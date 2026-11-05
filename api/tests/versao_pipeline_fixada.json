@@ -1,25 +1,20 @@
 {
-  "versao_pipeline": "2026.11.1",
+  "versao_pipeline": "2026.11.2",
   "manifesto": {
     "esquema": "1.4",
     "modelos": {
       "analise": "gemini-3.5-flash-lite",
       "versao_do_modelo_da_analise": "gemini-3.5-flash-lite",
       "modelo_forte": "gemini-3.8-flash",
-      "referencias": "gemini-3.8-flash",
       "consulta": "gemini-3.5-flash-lite",
       "embedding": "gemini-embedding-001"
     },
     "instrucoes": {
       "analise": "05cca2135f6bcafb763d013ec548c08b6fe2ef568cdb844c57ab1f4111edb830",
       "modelo_forte": "4e0f3949d47638e8a758ecc7a54735da602de50820bcb303e2204c8a37341881",
-      "conferencia_das_referencias": "f439d473fc67ec4c35ee3a35ebe1c4d8ec633ff7bde609b9158115a8fd9f9ab2",
-      "nomes_das_referencias": "560c66c0d3d15899d19e38e4f05d2a10a918719ead527c296393a9bf4a58fabb",
       "consulta": "f814b88a5a7a35ce1d7d7cbdb3832e5e93eecc8309b65a7b70594da8fbc8e74a",
       "conversao_do_inventario": "5c410045cce15863e3cfc1ba89d33dfc95f6397e113e32b12c148282016bc1a1",
-      "olhar_do_inventario": "7d4bae5eed07b9ef7c1a0801cc1074aaf298a9f6b1283d4c5e01900e1f072731",
-      "escolha_da_comparacao": "4e0f8793a72aeb78260395be4b5c76dd93ad03ebf5988fd9affed47761ca78c4",
-      "conferencia_da_comparacao": "0fa012e64d39af75bca8fa59b7c963fd00e19ec86d45a4e8aceb74a89e91c0b5"
+      "olhar_do_inventario": "7d4bae5eed07b9ef7c1a0801cc1074aaf298a9f6b1283d4c5e01900e1f072731"
     },
     "motores": {
       "transcricao": {
