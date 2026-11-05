@@ -18,7 +18,7 @@ Medição do Mac, em São Paulo, 1/11/2026 (`make medir-busca CONSULTAS=100`, 16
 
 Medição de dentro de `southamerica-east1`, 1/11/2026: a mesma medição rodou no Job `mam-indexacao` (execução `mam-indexacao-ln9wg`, 30 consultas, 16 registros, dimensão 256), pelo caminho real do serviço. Deu p50 de 266 ms e p95 de 292 ms; só a Sabrina voltou, e a cor filtrou. Cada consulta é uma requisição, com a conexão reaproveitada. Dos 266 ms, cerca de 121 ms são a ida e volta até `us-east4`, o RTT do Performance Dashboard, e os outros cerca de 145 ms são o próprio serviço, com o embedding da consulta, as buscas por texto e por significado e a fusão. A rede fica abaixo da metade do tempo, e nenhuma das regiões em que o Agent Retrieval existe fica mais perto de São Paulo: a escolha de `us-east4` se mantém. O custo fixo da réplica do índice entra no #122 quando aparecer no faturamento.
 
-A região, como os outros nomes da nuvem, só aparece no `infra/main.tf`, que a entrega ao serviço por variável de ambiente. A consulta em linguagem natural continua indo ao Gemini pelo endpoint global, e a reordenação usa a Ranking API, também fora do Brasil.
+A região, como os outros nomes da nuvem, só aparece nos arquivos `.tf` do módulo `infra/modulos/mam/`, que a entregam ao serviço por variável de ambiente. A consulta em linguagem natural continua indo ao Gemini pelo endpoint global, e a reordenação usa a Ranking API, também fora do Brasil.
 
 Alternativas recusadas:
 - **BigQuery vector search ou Elasticsearch em São Paulo:** manteriam os dados no país, mas sem a busca híbrida, os filtros e a reordenação gerenciados que o plano escolheu.
