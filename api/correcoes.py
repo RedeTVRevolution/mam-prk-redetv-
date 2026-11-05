@@ -2530,7 +2530,18 @@ def _tempos_no_item(item: dict[str, Any], c: Correcao) -> None:
 def _renomear_pessoa(
     resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
 ) -> None:
+    anterior = identidade_do_nome(str(pessoa["nome"]))
     pessoa["nome"], pessoa["origem"] = c.depois, "revisao"
+    # A fala não aponta para a pessoa: o locutor acompanha o nome que ela tinha
+    # agora (não o `c.antes`), para a segunda troca achar o que a primeira deixou.
+    # "Não identificado" é de várias pessoas, então não leva nada.
+    if anterior is not None:
+        for fala in resultado.get("transcricao", []):
+            if (
+                isinstance(fala, dict)
+                and identidade_do_nome(str(fala.get("locutor", ""))) == anterior
+            ):
+                fala["locutor"] = c.depois
     # O nome da revisora vale sobre a conferência do código, feita no nome anterior.
     pessoa["estado_do_nome"] = "confirmado"
     _catalogo_id_na_pessoa(pessoa, c)

@@ -181,7 +181,7 @@ A análise inteira de um Job concluído refeita com outro modelo, sem escaloname
 ### Revisão
 
 **Correção**:
-Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada.
+Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada. A troca de nome de uma pessoa (`pessoa.renomear`) leva junto o locutor das falas da transcrição que tinham o nome que ela tinha na hora (sem acento nem maiúscula; "não identificado" não leva nada), calculado na leitura: desfazer a troca devolve o locutor antigo.
 _Evitar_: edição, ajuste
 
 **Revisão**:
