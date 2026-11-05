@@ -1,4 +1,4 @@
-import { ESTADOS_DO_JOB } from './tema.ts'
+import { ESTADOS_DO_JOB } from './cores.ts'
 
 // O que a API mostra de um Job e os filtros do acervo, que viajam na URL e na chamada.
 

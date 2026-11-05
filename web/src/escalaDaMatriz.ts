@@ -1,6 +1,6 @@
 // A escala de cor da matriz de calor dos relatórios.
 
-import { CORES } from './tema.ts'
+import { CORES } from './cores.ts'
 
 /** O `foco` do tema em vermelho, verde e azul, para a opacidade da célula. */
 const FOCO_RGB = [1, 3, 5].map((i) => parseInt(CORES.foco.slice(i, i + 2), 16)).join(', ')

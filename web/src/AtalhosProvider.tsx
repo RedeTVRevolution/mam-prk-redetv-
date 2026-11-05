@@ -1,62 +1,10 @@
 import { Kbd, Modal, Stack, Table, Text, Title } from '@mantine/core'
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react'
-import { type Atalho, Contexto, emCampoDeTexto, GERAIS } from './atalhos.ts'
+import type { ReactNode } from 'react'
+import { Contexto, useRegistroDeAtalhos } from './atalhos.ts'
 
 /** O registro único de atalhos: ouve o teclado num lugar só e ignora campos de texto. */
 export function AtalhosProvider({ children }: { children: ReactNode }) {
-  const registros = useRef(new Set<() => Atalho[]>())
-  const [aberto, setAberto] = useState(false)
-  const [lista, setLista] = useState<Atalho[]>(GERAIS)
-
-  const juntar = useCallback(
-    () => [...GERAIS, ...[...registros.current].flatMap((r) => r())],
-    [],
-  )
-
-  const mostrarAtalhos = useCallback(() => {
-    setLista(juntar())
-    setAberto(true)
-  }, [juntar])
-
-  const registrar = useCallback((atalhos: () => Atalho[]) => {
-    registros.current.add(atalhos)
-    return () => {
-      registros.current.delete(atalhos)
-    }
-  }, [])
-
-  useEffect(() => {
-    function aoTeclar(e: KeyboardEvent) {
-      if (e.defaultPrevented || e.metaKey || e.altKey) return
-      if (emCampoDeTexto(e.target)) return
-      if (e.key === '?' && !e.ctrlKey) {
-        e.preventDefault()
-        mostrarAtalhos()
-        return
-      }
-      for (const a of juntar()) {
-        if (e.ctrlKey !== !!a.ctrl) continue
-        if (a.executar && (a.casa ? a.casa(e) : a.tecla === e.key)) {
-          e.preventDefault()
-          a.executar(e)
-          return
-        }
-      }
-    }
-    document.addEventListener('keydown', aoTeclar)
-    return () => document.removeEventListener('keydown', aoTeclar)
-  }, [juntar, mostrarAtalhos])
-
-  const valor = useMemo(() => ({ mostrarAtalhos, registrar }), [mostrarAtalhos, registrar])
-  const grupos = new Map<string, Atalho[]>()
-  for (const a of lista) grupos.set(a.grupo, [...(grupos.get(a.grupo) ?? []), a])
+  const { valor, aberto, setAberto, grupos } = useRegistroDeAtalhos()
 
   return (
     <Contexto.Provider value={valor}>

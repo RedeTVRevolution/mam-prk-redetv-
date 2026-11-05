@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 /** Um atalho de teclado: a tela declara a tecla, a ação e o grupo. */
 export interface Atalho {
@@ -54,4 +54,58 @@ export function emCampoDeTexto(alvo: EventTarget | null): boolean {
     alvo.getAttribute('contenteditable') === 'true' ||
     ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo.tagName)
   )
+}
+
+/**
+ * O registro único de atalhos, para o provedor de cada interface: ouve o teclado num lugar só,
+ * ignora campos de texto, e `?` abre a lista (`aberto`, com os atalhos de agora em `lista`).
+ */
+export function useRegistroDeAtalhos() {
+  const registros = useRef(new Set<() => Atalho[]>())
+  const [aberto, setAberto] = useState(false)
+  const [lista, setLista] = useState<Atalho[]>(GERAIS)
+
+  const juntar = useCallback(
+    () => [...GERAIS, ...[...registros.current].flatMap((r) => r())],
+    [],
+  )
+
+  const mostrarAtalhos = useCallback(() => {
+    setLista(juntar())
+    setAberto(true)
+  }, [juntar])
+
+  const registrar = useCallback((atalhos: () => Atalho[]) => {
+    registros.current.add(atalhos)
+    return () => {
+      registros.current.delete(atalhos)
+    }
+  }, [])
+
+  useEffect(() => {
+    function aoTeclar(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.metaKey || e.altKey) return
+      if (emCampoDeTexto(e.target)) return
+      if (e.key === '?' && !e.ctrlKey) {
+        e.preventDefault()
+        mostrarAtalhos()
+        return
+      }
+      for (const a of juntar()) {
+        if (e.ctrlKey !== !!a.ctrl) continue
+        if (a.executar && (a.casa ? a.casa(e) : a.tecla === e.key)) {
+          e.preventDefault()
+          a.executar(e)
+          return
+        }
+      }
+    }
+    document.addEventListener('keydown', aoTeclar)
+    return () => document.removeEventListener('keydown', aoTeclar)
+  }, [juntar, mostrarAtalhos])
+
+  const valor = useMemo(() => ({ mostrarAtalhos, registrar }), [mostrarAtalhos, registrar])
+  const grupos = new Map<string, Atalho[]>()
+  for (const a of lista) grupos.set(a.grupo, [...(grupos.get(a.grupo) ?? []), a])
+  return { valor, aberto, setAberto, grupos }
 }
