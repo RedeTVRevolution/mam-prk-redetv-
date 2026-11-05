@@ -1382,6 +1382,28 @@ def test_para_chave_de_sistema_o_quadro_url_continua_vindo_assinado() -> None:
     )
 
 
+def test_a_chave_de_sistema_nao_assina_os_quadros_dos_videos_cortados_pelo_limite() -> (
+    None
+):
+    m, armazenamento = mundo_de_cem_planos()
+    m.com(
+        job("j2", sistema="legado"),
+        replace(
+            plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+            id="j2:plano:0",
+            job_id="j2",
+            quadro="quadros/plano-0.jpg",
+        ),
+    )
+
+    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
+        "rua", visual=True, sistema="legado", limite=1
+    )
+
+    assert len(r.videos) == 1
+    assert armazenamento.assinaturas == r.videos[0].n_momentos
+
+
 def test_as_assinaturas_da_chave_de_sistema_vao_em_paralelo_ate_o_teto() -> None:
     m, armazenamento = mundo_de_cem_planos()
 
@@ -1410,7 +1432,7 @@ def test_busca_cancelada_no_meio_das_assinaturas_para_de_assinar() -> None:
 
     def assina_e_desiste(job_id: str, caminho: str, validade: timedelta) -> str:
         # A rota passa do prazo na terceira assinatura.
-        if armazenamento.assinaturas == 2:
+        if armazenamento.assinaturas >= 2:
             cancelado.set()
         return assinar(job_id, caminho, validade)
 

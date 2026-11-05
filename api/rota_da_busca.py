@@ -43,8 +43,9 @@ log = logging.getLogger(__name__)
 CONSULTAS_POR_MINUTO = 30
 # Descrição das rotas da busca no OpenAPI, para os sistemas (docs/Plano_MAM.md, "Busca").
 NOTA_DO_QUADRO = (
-    "Cada momento traz `quadro`, o caminho do quadro no vídeo: peça a URL em "
-    "`GET /v1/jobs/{job_id}/quadros/{arquivo}`. O `quadro_url` assinado, que só a chave "
+    "Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): "
+    "peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo "
+    "(`plano-6.jpg`). O `quadro_url` assinado, que só a chave "
     "de sistema recebe, é obsoleto e vai sair da resposta."
 )
 # Acima do teto do modelo, para que o plano B chegue ao usuário antes do 504.

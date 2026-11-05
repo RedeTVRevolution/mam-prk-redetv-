@@ -123,7 +123,8 @@ class Momento(BaseModel):
         },  # só no esquema: `deprecated=True` avisa a cada leitura
         description=(
             "Obsoleto: vai sair da resposta. Use o campo `quadro` e peça a URL em "
-            "`GET /v1/jobs/{job_id}/quadros/{arquivo}`."
+            "`GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo do "
+            "`quadro` (`plano-6.jpg`)."
         ),
     )
     # Caminho do quadro no vídeo (`quadros/plano-6.jpg`): a web pede a URL pela rota do quadro.
@@ -407,7 +408,9 @@ class Busca:
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        videos = self._videos(trechos, job, termos, ordem, sistema, cancelado)[:limite]
+        videos = self._videos(trechos, job, termos, ordem, cancelado)[:limite]
+        if sistema is not None:
+            self._assinar_os_quadros(videos, cancelado)
         vazios = [
             self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
@@ -559,26 +562,25 @@ class Busca:
 
     def _assinar_os_quadros(
         self,
-        pedidos: list[tuple[Momento, str]],
+        videos: list[VideoDoResultado],
         cancelado: threading.Event | None,
     ) -> None:
         """Só a chave de sistema recebe a URL assinada. Cada assinatura é uma ida ao IAM:
         vão em paralelo, até `TETO_DE_ASSINATURAS`, e o cancelamento é conferido antes de
         cada uma."""
 
-        def assinar(pedido: tuple[Momento, str]) -> None:
-            momento, job_id = pedido
+        def assinar(video: VideoDoResultado, momento: Momento) -> None:
             assert momento.quadro is not None
             _conferir(cancelado)
             momento.quadro_url = self._armazenamento.url_do_quadro(
-                job_id, momento.quadro, VALIDADE_DO_QUADRO
+                video.job_id, momento.quadro, VALIDADE_DO_QUADRO
             )
 
+        pedidos = [(v, m) for v in videos for m in v.momentos if m.quadro]
         if not pedidos:
             return
         with ThreadPoolExecutor(max_workers=TETO_DE_ASSINATURAS) as pool:
-            for _ in pool.map(assinar, pedidos):
-                pass
+            list(pool.map(assinar, *zip(*pedidos, strict=True)))
 
     def _videos(
         self,
@@ -586,14 +588,12 @@ class Busca:
         job: Callable[[str], Job | None],
         termos: list[str],
         ordem: Ordem,
-        sistema: str | None,
         cancelado: threading.Event | None,
     ) -> list[VideoDoResultado]:
         por_video: dict[str, list[_Trecho]] = defaultdict(list)
         for t in trechos:
             por_video[t.job_id].append(t)
         videos: list[tuple[int, VideoDoResultado]] = []
-        a_assinar: list[tuple[Momento, str]] = []
         for id, lista in por_video.items():
             _conferir(cancelado)
             j = job(id)
@@ -613,8 +613,6 @@ class Busca:
                 )
                 for t in lista
             ]
-            if sistema is not None:
-                a_assinar.extend((m, id) for m in momentos if m.quadro)
             videos.append(
                 (
                     min(t.posicao for t in lista),
@@ -629,7 +627,6 @@ class Busca:
                     ),
                 )
             )
-        self._assinar_os_quadros(a_assinar, cancelado)
         videos.sort(key=lambda v: (v[0], -v[1].n_momentos))
         if ordem == "data":
             # Estável: na mesma data, fica a relevância; sem data, no fim.
