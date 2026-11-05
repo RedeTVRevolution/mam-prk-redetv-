@@ -127,6 +127,18 @@ output "ip_do_balanceador" {
   value = module.mam.ip_do_balanceador
 }
 
+output "metrica_de_falhas_por_etapa" {
+  value = module.mam.metrica_de_falhas_por_etapa
+}
+
+output "janela_dos_alertas_s" {
+  value = module.mam.janela_dos_alertas_s
+}
+
+output "limite_de_falhas_por_etapa" {
+  value = module.mam.limite_de_falhas_por_etapa
+}
+
 output "url" {
   value = module.mam.url
 }
