@@ -25,12 +25,15 @@ from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
+    NOMES_EM_JSON,
+    SOMA_EM_SQL,
     UNIAO_EM_SQL,
     ConsultaBigQuery,
     ConsultaEmMemoria,
     MomentoDaPessoa,
     PessoaNoRelatorio,
     PessoaNoVideo,
+    pessoa_no_video,
     somar,
 )
 from api.tempo_de_tela import relatorio as relatorio_das_somas
@@ -307,6 +310,38 @@ def test_a_uniao_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
             if s.aparicoes
         }
         assert do_sql == em_python
+
+
+def test_a_soma_em_sql_inteira_da_os_mesmos_numeros_que_a_de_python() -> None:
+    # O SOMA_EM_SQL que vai ao BigQuery roda num SQLite, com o JSON dos nomes (o único
+    # trecho só do BigQuery) trocado pelo do SQLite, e cada linha passa pela mesma leitura
+    # da consulta real: confere a união, as contagens, os nomes e a ordem das colunas.
+    sql = "WITH base AS (SELECT * FROM linhas)\n" + SOMA_EM_SQL.replace(
+        NOMES_EM_JSON, "json_group_array(json_object('nome', nome, 'linhas', linhas))"
+    )
+    assert NOMES_EM_JSON in SOMA_EM_SQL
+    sorteio = random.Random(363)
+    for _ in range(200):
+        momentos = [
+            MomentoDaPessoa(
+                job_id=sorteio.choice(["j1", "j2"]),
+                pessoa_id=sorteio.choice(["c1", "c2"]),
+                nome=sorteio.choice(["Sabrina", "Sabri", ""]),
+                tipo=sorteio.choice(
+                    ["aparicao", "aparicao", "mencao_na_fala", "mencao_no_texto"]
+                ),
+                inicio_ms=(inicio := sorteio.randrange(0, 50)),
+                fim_ms=inicio + sorteio.randrange(0, 15),
+            )
+            for _ in range(sorteio.randrange(1, 25))
+        ]
+        banco = _sqlite_com(momentos)
+        banco.execute("ALTER TABLE base RENAME TO linhas")
+
+        do_sql = [pessoa_no_video(v) for v in banco.execute(sql)]
+
+        assert sorted(do_sql, key=repr) == sorted(somar(momentos), key=repr)
+        assert relatorio_das_somas(do_sql) == relatorio(momentos)
 
 
 def test_a_uniao_em_sql_cola_o_que_se_toca_e_une_o_que_se_sobrepoe() -> None:

@@ -11,6 +11,7 @@ brutas; o que resta é o do resultado somado (uma resposta de até 10 MB).
 
 import json
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Literal, Protocol
@@ -163,35 +164,49 @@ unidas AS (
   GROUP BY job_id, pessoa_id, ilha
 )"""
 
+# Os nomes da pessoa no vídeo, com quantas linhas cada um tem, num texto JSON. É o único
+# trecho só do BigQuery: o teste troca por `json_group_array` e roda o resto num SQLite.
+NOMES_EM_JSON = "TO_JSON_STRING(ARRAY_AGG(STRUCT(nome, linhas)))"
+
 # O que vem depois de `WITH base AS (...)`: uma linha por pessoa e vídeo, com o tempo
-# das aparições unidas, as contagens e os nomes (com quantas linhas cada um tem).
+# das aparições unidas, as contagens e os nomes. As contagens e os nomes saem de uma
+# passada só pela `base` (cada CTE que a lê é mais uma leitura da tabela).
 SOMA_EM_SQL = f""", {UNIAO_EM_SQL},
 tempo AS (
   SELECT job_id, pessoa_id, SUM(fim_ms - inicio_ms) AS tempo_ms, COUNT(*) AS aparicoes
   FROM unidas
   GROUP BY job_id, pessoa_id
 ),
-contagens AS (
-  SELECT job_id, pessoa_id,
-    COUNTIF(tipo = 'mencao_na_fala') AS na_fala,
-    COUNTIF(tipo = 'mencao_no_texto') AS no_texto
+por_nome AS (
+  SELECT job_id, pessoa_id, nome, COUNT(*) AS linhas,
+    SUM(CASE WHEN tipo = 'mencao_na_fala' THEN 1 ELSE 0 END) AS na_fala,
+    SUM(CASE WHEN tipo = 'mencao_no_texto' THEN 1 ELSE 0 END) AS no_texto
   FROM base
-  GROUP BY job_id, pessoa_id
+  GROUP BY job_id, pessoa_id, nome
 ),
-nomes AS (
-  SELECT job_id, pessoa_id, TO_JSON_STRING(ARRAY_AGG(STRUCT(nome, linhas))) AS nomes
-  FROM (
-    SELECT job_id, pessoa_id, nome, COUNT(*) AS linhas
-    FROM base
-    GROUP BY job_id, pessoa_id, nome
-  )
+contagens AS (
+  SELECT job_id, pessoa_id, SUM(na_fala) AS na_fala, SUM(no_texto) AS no_texto,
+    {NOMES_EM_JSON} AS nomes
+  FROM por_nome
   GROUP BY job_id, pessoa_id
 )
 SELECT c.job_id, c.pessoa_id, IFNULL(t.tempo_ms, 0), IFNULL(t.aparicoes, 0),
-  c.na_fala, c.no_texto, n.nomes
+  c.na_fala, c.no_texto, c.nomes
 FROM contagens AS c
-LEFT JOIN tempo AS t ON t.job_id = c.job_id AND t.pessoa_id = c.pessoa_id
-JOIN nomes AS n ON n.job_id = c.job_id AND n.pessoa_id = c.pessoa_id"""
+LEFT JOIN tempo AS t ON t.job_id = c.job_id AND t.pessoa_id = c.pessoa_id"""
+
+
+def pessoa_no_video(v: Sequence[Any]) -> PessoaNoVideo:
+    """Uma linha do `SOMA_EM_SQL`, na ordem das colunas do SELECT final."""
+    return PessoaNoVideo(
+        job_id=v[0],
+        pessoa_id=v[1],
+        nomes={n["nome"]: int(n["linhas"]) for n in json.loads(v[6])},
+        tempo_de_tela_ms=int(v[2]),
+        aparicoes=int(v[3]),
+        mencoes_na_fala=int(v[4]),
+        mencoes_no_texto=int(v[5]),
+    )
 
 
 class ConsultaBigQuery:
@@ -219,18 +234,7 @@ class ConsultaBigQuery:
             condicoes=["p.id IS NOT NULL"],
             depois_da_base=SOMA_EM_SQL,
         )
-        return [
-            PessoaNoVideo(
-                job_id=v[0],
-                pessoa_id=v[1],
-                nomes={n["nome"]: int(n["linhas"]) for n in json.loads(v[6])},
-                tempo_de_tela_ms=int(v[2]),
-                aparicoes=int(v[3]),
-                mencoes_na_fala=int(v[4]),
-                mencoes_no_texto=int(v[5]),
-            )
-            for v in linhas
-        ]
+        return [pessoa_no_video(v) for v in linhas]
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:

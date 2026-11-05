@@ -11,6 +11,7 @@ intervalos das inserções; o Python só monta a resposta.
 
 import json
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Literal, Protocol, get_args
@@ -122,11 +123,33 @@ class ConsultaEmMemoria:
         return somar(self.insercoes(programa, desde, ate, tipo))
 
 
-# O que vem depois de `WITH base AS (...)`: uma linha por marca, tipo e vídeo.
-SOMA_EM_SQL = """SELECT marca, tipo, job_id, COUNT(*), SUM(fim_ms - inicio_ms),
-  TO_JSON_STRING(ARRAY_AGG(STRUCT(inicio_ms, fim_ms) ORDER BY inicio_ms, fim_ms))
+# Os intervalos das inserções, num texto JSON. É o único trecho só do BigQuery: o teste
+# troca por `json_group_array` e roda o resto num SQLite.
+INTERVALOS_EM_JSON = (
+    "TO_JSON_STRING(ARRAY_AGG(STRUCT(inicio_ms, fim_ms) ORDER BY inicio_ms, fim_ms))"
+)
+
+# O que vem depois de `WITH base AS (...)`: uma linha por marca, tipo e vídeo. Os
+# intervalos vêm junto porque a resposta lista as inserções, então o tamanho do resultado
+# ainda cresce com o número delas; o teto que resta é o da resposta do BigQuery (10 MB).
+SOMA_EM_SQL = f"""SELECT marca, tipo, job_id, COUNT(*), SUM(fim_ms - inicio_ms),
+  {INTERVALOS_EM_JSON}
 FROM base
 GROUP BY marca, tipo, job_id"""
+
+
+def insercoes_da_marca(v: Sequence[Any]) -> InsercoesDaMarca:
+    """Uma linha do `SOMA_EM_SQL`, na ordem das colunas do SELECT."""
+    return InsercoesDaMarca(
+        marca=v[0],
+        tipo=v[1],
+        job_id=v[2],
+        insercoes=int(v[3]),
+        tempo_ms=int(v[4]),
+        intervalos=sorted(
+            (int(i["inicio_ms"]), int(i["fim_ms"])) for i in json.loads(v[5])
+        ),
+    )
 
 
 class ConsultaBigQuery:
@@ -166,19 +189,7 @@ class ConsultaBigQuery:
             parametros=parametros,
             depois_da_base=SOMA_EM_SQL,
         )
-        return [
-            InsercoesDaMarca(
-                marca=v[0],
-                tipo=v[1],
-                job_id=v[2],
-                insercoes=int(v[3]),
-                tempo_ms=int(v[4]),
-                intervalos=[
-                    (int(i["inicio_ms"]), int(i["fim_ms"])) for i in json.loads(v[5])
-                ],
-            )
-            for v in linhas
-        ]
+        return [insercoes_da_marca(v) for v in linhas]
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
@@ -232,7 +243,7 @@ def relatorio(somas: list[InsercoesDaMarca]) -> list[MarcaNoRelatorio]:
     """Uma linha por marca, do maior tempo para o menor; o detalhe por tipo segue a ordem
     de `TIPOS_DE_INSERCAO` (um tipo que a decupagem não tem mais, de uma linha antiga, vem
     no fim, para as partes fecharem com o total) e a lista das inserções, a do vídeo e do
-    tempo."""
+    tempo (no empate, a do tipo)."""
     por_marca: dict[str, list[InsercoesDaMarca]] = defaultdict(list)
     for g in somas:
         por_marca[g.marca].append(g)
@@ -247,7 +258,7 @@ def relatorio(somas: list[InsercoesDaMarca]) -> list[MarcaNoRelatorio]:
             for g in dela
             for ini, fim in g.intervalos
         ]
-        lista.sort(key=lambda i: (i.job_id, i.inicio_ms, i.fim_ms))
+        lista.sort(key=lambda i: (i.job_id, i.inicio_ms, i.fim_ms, i.tipo))
         marcas.append(
             MarcaNoRelatorio(
                 marca=marca,

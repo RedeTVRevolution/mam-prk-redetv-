@@ -2,7 +2,9 @@
 
 import csv
 import io
+import random
 import re
+import sqlite3
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -21,12 +23,15 @@ from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import (
+    INTERVALOS_EM_JSON,
+    SOMA_EM_SQL,
     TIPOS_DE_INSERCAO,
     ConsultaBigQuery,
     ConsultaEmMemoria,
     Insercao,
     InsercoesDaMarca,
     MarcaNoRelatorio,
+    insercoes_da_marca,
     somar,
 )
 from api.relatorio_de_marcas import relatorio as relatorio_das_somas
@@ -359,3 +364,37 @@ def test_tipo_que_a_decupagem_nao_tem_mais_entra_no_detalhe_e_fecha_o_total() ->
 
     assert [t.tipo for t in ambev.por_tipo] == ["intervalo", "tipo_antigo"]
     assert sum(t.tempo_ms for t in ambev.por_tipo) == ambev.tempo_ms
+
+
+def test_a_soma_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
+    # O SOMA_EM_SQL que vai ao BigQuery roda num SQLite, com o JSON dos intervalos (o
+    # único trecho só do BigQuery) trocado pelo do SQLite, e cada linha passa pela mesma
+    # leitura da consulta real.
+    sql = SOMA_EM_SQL.replace(
+        INTERVALOS_EM_JSON,
+        "json_group_array(json_object('inicio_ms', inicio_ms, 'fim_ms', fim_ms))",
+    )
+    assert sql != SOMA_EM_SQL
+    sorteio = random.Random(363)
+    for _ in range(100):
+        insercoes = [
+            Insercao(
+                job_id=sorteio.choice(["j1", "j2"]),
+                marca=sorteio.choice(["Ambev", "Natura"]),
+                tipo=sorteio.choice(TIPOS_DE_INSERCAO),
+                inicio_ms=(inicio := sorteio.randrange(0, 50)),
+                fim_ms=inicio + sorteio.randrange(0, 15),
+            )
+            for _ in range(sorteio.randrange(1, 25))
+        ]
+        banco = sqlite3.connect(":memory:")
+        banco.execute("CREATE TABLE base (job_id, marca, tipo, inicio_ms, fim_ms)")
+        banco.executemany(
+            "INSERT INTO base VALUES (?, ?, ?, ?, ?)",
+            [(i.job_id, i.marca, i.tipo, i.inicio_ms, i.fim_ms) for i in insercoes],
+        )
+
+        do_sql = [insercoes_da_marca(v) for v in banco.execute(sql)]
+
+        assert sorted(do_sql, key=repr) == sorted(somar(insercoes), key=repr)
+        assert relatorio_das_somas(do_sql) == relatorio(insercoes)
