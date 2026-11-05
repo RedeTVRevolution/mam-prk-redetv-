@@ -2,6 +2,8 @@
 
 import csv
 import io
+import random
+import sqlite3
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -23,17 +25,26 @@ from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
+    UNIAO_EM_SQL,
     ConsultaBigQuery,
     ConsultaEmMemoria,
     MomentoDaPessoa,
-    relatorio,
+    PessoaNoRelatorio,
+    PessoaNoVideo,
+    somar,
 )
+from api.tempo_de_tela import relatorio as relatorio_das_somas
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
 from api.tests.test_passadas import AUTORIZACAO
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 ROTA = "/v1/relatorios/tempo-de-tela"
+
+
+def relatorio(momentos: list[MomentoDaPessoa]) -> list[PessoaNoRelatorio]:
+    """O relatório de hoje: a soma (que o BigQuery faz) e a montagem."""
+    return relatorio_das_somas(somar(momentos))
 
 
 def _m(job: str, tipo: str, ini: int, fim: int, pessoa: str = "c1") -> MomentoDaPessoa:
@@ -182,32 +193,43 @@ def _linha_do_bq(*valores: str) -> dict[str, Any]:
 CONFIG = ConfigDoBigQuery("proj", "ds", "tab", "regiao")
 
 
-def test_bigquery_pede_so_os_tipos_do_relatorio_com_os_filtros_como_parametros() -> (
+def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_parametros() -> (
     None
 ):
     transporte = Transporte(
         {
             "jobComplete": True,
             "rows": [
-                _linha_do_bq("j1", "c1", "Sabrina", "aparicao", "0", "5000"),
-                _linha_do_bq("j1", "c1", "Sabrina", "mencao_na_fala", "7000", "8000"),
+                _linha_do_bq(
+                    "j1",
+                    "c1",
+                    "5000",
+                    "1",
+                    "2",
+                    "0",
+                    '[{"nome":"Sabrina","linhas":2},{"nome":"Sabri","linhas":1}]',
+                ),
+                _linha_do_bq(
+                    "j2", "c1", "0", "0", "0", "1", '[{"nome":"Sabrina","linhas":1}]'
+                ),
             ],
         }
     )
 
-    momentos = ConsultaBigQuery(CONFIG, transporte).momentos(
+    somas = ConsultaBigQuery(CONFIG, transporte).somas(
         "Jornal", date(2026, 10, 1), date(2026, 10, 31)
     )
 
-    assert momentos == [
-        MomentoDaPessoa("j1", "c1", "Sabrina", "aparicao", 0, 5000),
-        MomentoDaPessoa("j1", "c1", "Sabrina", "mencao_na_fala", 7000, 8000),
+    assert somas == [
+        PessoaNoVideo("j1", "c1", {"Sabrina": 2, "Sabri": 1}, 5000, 1, 2, 0),
+        PessoaNoVideo("j2", "c1", {"Sabrina": 1}, 0, 0, 0, 1),
     ]
     (corpo,) = transporte.corpos
     consulta = corpo["query"]
     assert "`proj.ds.tab`" in consulta
     assert "'aparicao'" in consulta and "'mencao_na_fala'" in consulta
     assert "'plano'" not in consulta
+    assert "GROUP BY" in consulta  # a soma é do BigQuery
     assert corpo["location"] == "regiao"
     parametros = {
         p["name"]: (p["parameterType"]["type"], p["parameterValue"]["value"])
@@ -224,7 +246,7 @@ def test_bigquery_pede_so_os_tipos_do_relatorio_com_os_filtros_como_parametros()
 def test_bigquery_sem_filtros_nao_leva_parametros_e_sem_linhas_devolve_vazio() -> None:
     transporte = Transporte({"jobComplete": True})
 
-    assert ConsultaBigQuery(CONFIG, transporte).momentos(None, None, None) == []
+    assert ConsultaBigQuery(CONFIG, transporte).somas(None, None, None) == []
     assert transporte.corpos[0]["queryParameters"] == []
 
 
@@ -233,7 +255,93 @@ def test_bigquery_resposta_incompleta_ou_cortada_falha_alto() -> None:
 
     for resposta in ({"jobComplete": False}, {"jobComplete": True, "pageToken": "x"}):
         with pytest.raises(RuntimeError):
-            ConsultaBigQuery(CONFIG, Transporte(resposta)).momentos(None, None, None)
+            ConsultaBigQuery(CONFIG, Transporte(resposta)).somas(None, None, None)
+
+
+def _sqlite_com(momentos: list[MomentoDaPessoa]) -> sqlite3.Connection:
+    banco = sqlite3.connect(":memory:")
+    banco.execute(
+        "CREATE TABLE base (job_id, pessoa_id, nome, tipo, inicio_ms, fim_ms)"
+    )
+    banco.executemany(
+        "INSERT INTO base VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (m.job_id, m.pessoa_id, m.nome, m.tipo, m.inicio_ms, m.fim_ms)
+            for m in momentos
+        ],
+    )
+    return banco
+
+
+def test_a_uniao_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
+    # O texto de UNIAO_EM_SQL é o que vai ao BigQuery; só usa SQL que o SQLite também
+    # roda, então o mesmo texto confere a soma contra `somar` em vários conjuntos.
+    sorteio = random.Random(363)
+    for _ in range(200):
+        momentos = [
+            MomentoDaPessoa(
+                job_id=sorteio.choice(["j1", "j2"]),
+                pessoa_id=sorteio.choice(["c1", "c2"]),
+                nome="X",
+                tipo=sorteio.choice(["aparicao", "aparicao", "mencao_na_fala"]),
+                inicio_ms=(inicio := sorteio.randrange(0, 50)),
+                fim_ms=inicio
+                + sorteio.randrange(0, 15),  # inclui duração zero e colados
+            )
+            for _ in range(sorteio.randrange(1, 25))
+        ]
+        banco = _sqlite_com(momentos)
+
+        do_sql = {
+            (j, p): (int(tempo), int(n))
+            for j, p, tempo, n in banco.execute(
+                f"WITH {UNIAO_EM_SQL}\n"
+                "SELECT job_id, pessoa_id, SUM(fim_ms - inicio_ms), COUNT(*) "
+                "FROM unidas GROUP BY job_id, pessoa_id"
+            )
+        }
+
+        em_python = {
+            (s.job_id, s.pessoa_id): (s.tempo_de_tela_ms, s.aparicoes)
+            for s in somar(momentos)
+            if s.aparicoes
+        }
+        assert do_sql == em_python
+
+
+def test_a_uniao_em_sql_cola_o_que_se_toca_e_une_o_que_se_sobrepoe() -> None:
+    banco = _sqlite_com(
+        [
+            _m("j1", "aparicao", 0, 10_000),
+            _m("j1", "aparicao", 5_000, 12_000),  # sobrepõe
+            _m("j1", "aparicao", 12_000, 15_000),  # cola
+            _m("j1", "aparicao", 20_000, 21_000),
+            _m("j1", "aparicao", 1_000, 2_000),  # dentro de outro
+            _m("j2", "aparicao", 0, 10_000),
+        ]
+    )
+
+    unidas = banco.execute(
+        f"WITH {UNIAO_EM_SQL}\nSELECT job_id, inicio_ms, fim_ms FROM unidas "
+        "ORDER BY job_id, inicio_ms"
+    ).fetchall()
+
+    assert unidas == [
+        ("j1", 0, 15_000),
+        ("j1", 20_000, 21_000),
+        ("j2", 0, 10_000),
+    ]
+
+
+def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
+    somas = ConsultaEmMemoria(_copia()).somas(None, None, None)
+
+    por_par = {(s.job_id, s.pessoa_id): s for s in somas}
+    assert por_par[("j1", "c1")] == PessoaNoVideo(
+        "j1", "c1", {"Sabrina": 1}, 1_000, 1, 0, 0
+    )
+    assert por_par[("j3", "c1")].mencoes_na_fala == 1
+    assert len(somas) == 4
 
 
 def _cliente(

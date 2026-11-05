@@ -25,14 +25,22 @@ from api.relatorio_de_marcas import (
     ConsultaBigQuery,
     ConsultaEmMemoria,
     Insercao,
-    relatorio,
+    InsercoesDaMarca,
+    MarcaNoRelatorio,
+    somar,
 )
+from api.relatorio_de_marcas import relatorio as relatorio_das_somas
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
 from api.tests.test_passadas import AUTORIZACAO
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 ROTA = "/v1/relatorios/marcas"
+
+
+def relatorio(insercoes: list[Insercao]) -> list[MarcaNoRelatorio]:
+    """O relatório de hoje: a soma (que o BigQuery faz) e a montagem."""
+    return relatorio_das_somas(somar(insercoes))
 
 
 def _i(job: str, marca: str, tipo: str, ini: int, fim: int) -> Insercao:
@@ -143,20 +151,37 @@ def test_bigquery_pede_so_comerciais_com_marca_e_os_filtros_como_parametros() ->
         {
             "jobComplete": True,
             "rows": [
-                {"f": [{"v": v} for v in ("j1", "Ambev", "intervalo", "0", "30000")]}
+                {
+                    "f": [
+                        {"v": v}
+                        for v in (
+                            "Ambev",
+                            "intervalo",
+                            "j1",
+                            "2",
+                            "35000",
+                            '[{"inicio_ms":0,"fim_ms":30000},{"inicio_ms":40000,"fim_ms":45000}]',
+                        )
+                    ]
+                }
             ],
         }
     )
 
-    achadas = ConsultaBigQuery(CONFIG, transporte).insercoes(
+    achadas = ConsultaBigQuery(CONFIG, transporte).somas(
         "Jornal", date(2026, 10, 1), date(2026, 10, 31), "intervalo"
     )
 
-    assert achadas == [Insercao("j1", "Ambev", "intervalo", 0, 30_000)]
+    assert achadas == [
+        InsercoesDaMarca(
+            "Ambev", "intervalo", "j1", 2, 35_000, [(0, 30_000), (40_000, 45_000)]
+        )
+    ]
     (corpo,) = transporte.corpos
     consulta = corpo["query"]
     assert "`proj.ds.tab`" in consulta and "'comercial'" in consulta
     assert "NULLIF(t.marca, '') IS NOT NULL" in consulta
+    assert "GROUP BY marca, tipo, job_id" in consulta  # a soma é do BigQuery
     parametros = {
         p["name"]: (p["parameterType"]["type"], p["parameterValue"]["value"])
         for p in corpo["queryParameters"]
@@ -174,13 +199,11 @@ def test_bigquery_sem_filtros_nao_leva_parametros_e_resposta_cortada_falha_alto(
     None
 ):
     transporte = Transporte({"jobComplete": True})
-    assert ConsultaBigQuery(CONFIG, transporte).insercoes(None, None, None, None) == []
+    assert ConsultaBigQuery(CONFIG, transporte).somas(None, None, None, None) == []
     assert transporte.corpos[0]["queryParameters"] == []
     for resposta in ({"jobComplete": False}, {"jobComplete": True, "pageToken": "x"}):
         with pytest.raises(RuntimeError):
-            ConsultaBigQuery(CONFIG, Transporte(resposta)).insercoes(
-                None, None, None, None
-            )
+            ConsultaBigQuery(CONFIG, Transporte(resposta)).somas(None, None, None, None)
 
 
 def _cliente(
