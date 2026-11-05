@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
@@ -36,7 +36,7 @@ from api.imagens_hostis import (
     recodificar,
 )
 from api.indice_da_busca import TipoDeRegistro
-from api.jobs import _exige
+from api.jobs import CursorInvalido, _exige
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +142,7 @@ def criar_rotas_da_busca(
 
     @rotas.get("/busca", description=f"Busca por texto. {NOTA_DO_QUADRO}")
     def buscar(
+        resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         q: Annotated[str, Query(min_length=1, max_length=1000)],
         ordem: Ordem = "relevancia",
@@ -157,6 +158,7 @@ def criar_rotas_da_busca(
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
+        cursor: Annotated[str | None, Query(max_length=100)] = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
@@ -173,6 +175,7 @@ def criar_rotas_da_busca(
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
             cancelado=cancelado,
+            cursor=cursor,
             ajustes=Ajustes(
                 evidencias=tuple(dict.fromkeys(evidencias or ())),
                 programa=programa,
@@ -191,6 +194,8 @@ def criar_rotas_da_busca(
             cancelado.set()
             log.warning("busca passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
+        except CursorInvalido:
+            raise HTTPException(422, "Cursor inválido") from None
         registrar_busca(
             chamador,
             len(q),
@@ -207,7 +212,7 @@ def criar_rotas_da_busca(
             tipo=tipo,
             visual=visual,
         )
-        return resultado
+        return _com_cursor(resposta, resultado)
 
     teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
 
@@ -249,6 +254,7 @@ def criar_rotas_da_busca(
 
     @rotas.post("/busca/imagem", description=f"Busca por imagem. {NOTA_DO_QUADRO}")
     def buscar_por_imagem(
+        resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         dados: Annotated[bytes, Depends(foto_enviada)],
         programa: Annotated[str | None, Query(max_length=100)] = None,
@@ -258,6 +264,7 @@ def criar_rotas_da_busca(
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
+        cursor: Annotated[str | None, Query(max_length=100)] = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
@@ -287,6 +294,7 @@ def criar_rotas_da_busca(
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
             cancelado=cancelado,
+            cursor=cursor,
             ajustes=Ajustes(
                 programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
             ),
@@ -298,6 +306,8 @@ def criar_rotas_da_busca(
             cancelado.set()
             log.warning("busca por imagem passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
+        except CursorInvalido:
+            raise HTTPException(422, "Cursor inválido") from None
         except BuscaPorImagemIndisponivel:
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
@@ -312,7 +322,7 @@ def criar_rotas_da_busca(
             ate=ate,
             sem_periodo=sem_periodo,
         )
-        return resultado
+        return _com_cursor(resposta, resultado)
 
     @rotas.get("/busca/parecidos/planos")
     def planos_com_vetor(
@@ -338,12 +348,14 @@ def criar_rotas_da_busca(
         "/busca/parecidos", description=f"Busca de planos parecidos. {NOTA_DO_QUADRO}"
     )
     def buscar_parecidos(
+        resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         job: Annotated[str, Query(min_length=1, max_length=100)],
         plano: Annotated[int, Query(ge=0)],
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
+        cursor: Annotated[str | None, Query(max_length=100)] = None,
     ) -> ResultadoDaBusca:
         sistema, quem = _quem_e(chamador)
         if not limite.consumir(quem):
@@ -357,6 +369,7 @@ def criar_rotas_da_busca(
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
             cancelado=cancelado,
+            cursor=cursor,
         )
         try:
             resultado = futuro.result(timeout=tempo_maximo_s)
@@ -365,15 +378,24 @@ def criar_rotas_da_busca(
             cancelado.set()
             log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
+        except CursorInvalido:
+            raise HTTPException(422, "Cursor inválido") from None
         except PlanoSemVetor:
             raise HTTPException(404, _PLANO_SEM_VETOR) from None
         # Não há consulta: o ponto de partida é o plano de um vídeo.
         registrar_busca(
             chamador, None, None, resultado, job, modo="parecidos", plano=plano
         )
-        return resultado
+        return _com_cursor(resposta, resultado)
 
     return rotas
+
+
+def _com_cursor(resposta: Response, resultado: ResultadoDaBusca) -> ResultadoDaBusca:
+    """O cursor da página seguinte no cabeçalho, como no acervo; some na última página."""
+    if resultado._proximo_cursor:
+        resposta.headers["X-Proximo-Cursor"] = resultado._proximo_cursor
+    return resultado
 
 
 _RECUSA = "Envie uma imagem JPEG ou PNG válida"

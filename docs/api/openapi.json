@@ -2530,7 +2530,7 @@
     "/v1/busca": {
       "get": {
         "summary": "Buscar momentos por texto",
-        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`), `visual` e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
+        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`), `visual` e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última; repita a mesma consulta com ele. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
         "operationId": "buscar_v1_busca_get",
         "parameters": [
           {
@@ -2723,6 +2723,23 @@
               "default": 20,
               "title": "Limite"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -2835,7 +2852,7 @@
             }
           },
           "422": {
-            "description": "O início do período passa do fim. `desde` é depois de `ate`. Troque os dois.\n\nErro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "description": "O início do período passa do fim. `desde` é depois de `ate`. Troque os dois.\n\nErro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.\n\nCursor inválido. O `cursor` não é um vídeo do resultado: use o `X-Proximo-Cursor` da resposta anterior, sem mudar a consulta nem os filtros.",
             "content": {
               "application/json": {
                 "examples": {
@@ -2859,6 +2876,12 @@
                           "input": null
                         }
                       ]
+                    }
+                  },
+                  "Cursor inválido": {
+                    "summary": "Cursor inválido",
+                    "value": {
+                      "detail": "Cursor inválido"
                     }
                   }
                 },
@@ -2923,7 +2946,7 @@
     "/v1/busca/imagem": {
       "post": {
         "summary": "Buscar momentos por imagem",
-        "description": "Acha os planos parecidos com uma foto. O corpo é `multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória: não é guardada. Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
+        "description": "Acha os planos parecidos com uma foto. O corpo é `multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória: não é guardada. Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última; repita a mesma consulta com ele. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
         "operationId": "buscar_por_imagem_v1_busca_imagem_post",
         "parameters": [
           {
@@ -2997,6 +3020,23 @@
               "minimum": 1,
               "default": 20,
               "title": "Limite"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],
@@ -3123,7 +3163,7 @@
             }
           },
           "422": {
-            "description": "O início do período passa do fim. `desde` é depois de `ate`. Troque os dois.\n\nA imagem passa do tamanho máximo. O arquivo passa de 5 MB. Reduza a foto.\n\nA imagem passa do tamanho máximo em pixels. A foto passa de 25 milhões de pixels. Reduza a foto.\n\nEnvie uma imagem JPEG ou PNG válida. O arquivo não é JPEG nem PNG, ou está corrompido, ou o multipart está malformado.\n\nEnvie a imagem no campo arquivo. O multipart não tem o campo `arquivo`.",
+            "description": "O início do período passa do fim. `desde` é depois de `ate`. Troque os dois.\n\nA imagem passa do tamanho máximo. O arquivo passa de 5 MB. Reduza a foto.\n\nA imagem passa do tamanho máximo em pixels. A foto passa de 25 milhões de pixels. Reduza a foto.\n\nEnvie uma imagem JPEG ou PNG válida. O arquivo não é JPEG nem PNG, ou está corrompido, ou o multipart está malformado.\n\nEnvie a imagem no campo arquivo. O multipart não tem o campo `arquivo`.\n\nCursor inválido. O `cursor` não é um vídeo do resultado: use o `X-Proximo-Cursor` da resposta anterior, sem mudar a consulta nem os filtros.",
             "content": {
               "application/json": {
                 "examples": {
@@ -3155,6 +3195,12 @@
                     "summary": "Envie a imagem no campo arquivo",
                     "value": {
                       "detail": "Envie a imagem no campo arquivo"
+                    }
+                  },
+                  "Cursor inválido": {
+                    "summary": "Cursor inválido",
+                    "value": {
+                      "detail": "Cursor inválido"
                     }
                   }
                 },
@@ -3364,7 +3410,7 @@
     "/v1/busca/parecidos": {
       "get": {
         "summary": "Buscar planos parecidos com um plano",
-        "description": "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de 1 a 50 vídeos. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
+        "description": "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de 1 a 50 vídeos. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última; repita a mesma consulta com ele. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
         "operationId": "buscar_parecidos_v1_busca_parecidos_get",
         "parameters": [
           {
@@ -3398,6 +3444,23 @@
               "minimum": 1,
               "default": 20,
               "title": "Limite"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],
@@ -3524,24 +3587,42 @@
             }
           },
           "422": {
-            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.\n\nCursor inválido. O `cursor` não é um vídeo do resultado: use o `X-Proximo-Cursor` da resposta anterior, sem mudar a consulta nem os filtros.",
             "content": {
               "application/json": {
-                "example": {
-                  "detail": [
-                    {
-                      "type": "missing",
-                      "loc": [
-                        "query",
-                        "plano"
-                      ],
-                      "msg": "Field required",
-                      "input": null
+                "examples": {
+                  "Erro de validação": {
+                    "summary": "Erro de validação",
+                    "value": {
+                      "detail": [
+                        {
+                          "type": "missing",
+                          "loc": [
+                            "query",
+                            "plano"
+                          ],
+                          "msg": "Field required",
+                          "input": null
+                        }
+                      ]
                     }
-                  ]
+                  },
+                  "Cursor inválido": {
+                    "summary": "Cursor inválido",
+                    "value": {
+                      "detail": "Cursor inválido"
+                    }
+                  }
                 },
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErroEmTexto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
                 }
               }
             }

@@ -586,6 +586,65 @@ def test_rota_devolve_os_videos_agrupados() -> None:
     assert corpo["videos"][0]["momentos"][0]["motivo"] == "Objeto: vestido vermelho"
 
 
+# --- páginas por cursor (#426) ------------------------------------------------------
+
+
+def cliente_com_videos(n: int, consultas: int) -> TestClient:
+    """`n` vídeos com um vestido cada; `consultas` é quantas vezes o modelo responde."""
+    c, m = cliente(["consulta"], *[pedido(texto_livre="vestido")] * consultas)
+    for i in range(2, n + 1):
+        m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000))
+    return c
+
+
+def pagina_da_busca(
+    c: TestClient, cursor: str | None = None, limite: int = 2
+) -> tuple[list[str], str | None]:
+    params: dict[str, Any] = {"q": "vestido", "limite": limite}
+    if cursor is not None:
+        params["cursor"] = cursor
+    r = c.get("/v1/busca", params=params, headers=AUTORIZACAO)
+    assert r.status_code == 200, r.text
+    return [v["job_id"] for v in r.json()["videos"]], r.headers.get("X-Proximo-Cursor")
+
+
+def test_a_busca_vem_em_paginas_sem_repetir_video_e_a_ultima_sem_cursor() -> None:
+    c = cliente_com_videos(5, consultas=4)
+
+    tudo, sem_proximo = pagina_da_busca(c, limite=50)
+    primeira, cursor = pagina_da_busca(c)
+    assert cursor is not None
+    segunda, cursor = pagina_da_busca(c, cursor)
+    assert cursor is not None
+    terceira, fim = pagina_da_busca(c, cursor)
+
+    assert len(tudo) == 5 and sem_proximo is None
+    assert [len(primeira), len(segunda), len(terceira)] == [2, 2, 1]
+    assert primeira + segunda + terceira == tudo
+    assert fim is None
+
+
+def test_a_mesma_pagina_vem_na_mesma_ordem_entre_chamadas() -> None:
+    c = cliente_com_videos(5, consultas=4)
+
+    primeira = pagina_da_busca(c)
+    assert pagina_da_busca(c) == primeira
+    assert pagina_da_busca(c, primeira[1]) == pagina_da_busca(c, primeira[1])
+
+
+def test_cursor_que_nao_esta_no_resultado_responde_422() -> None:
+    c = cliente_com_videos(3, consultas=1)
+
+    r = c.get(
+        "/v1/busca",
+        params={"q": "vestido", "cursor": "nao-existe"},
+        headers=AUTORIZACAO,
+    )
+
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Cursor inválido"
+
+
 def test_sem_decupagem_ver_a_rota_responde_403() -> None:
     c, _ = cliente([], pedido(texto_livre="vestido"))
     assert (

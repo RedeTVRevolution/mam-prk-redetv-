@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from itertools import zip_longest
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
@@ -37,7 +37,7 @@ from api.indice_da_busca import (
     TipoDeRegistro,
     palavras,
 )
-from api.jobs import Armazenamento, Job, RepositorioDeJobs
+from api.jobs import Armazenamento, CursorInvalido, Job, RepositorioDeJobs
 
 log = logging.getLogger(__name__)
 
@@ -202,6 +202,8 @@ class ResultadoDaBusca(BaseModel):
     plano_b: bool
     facetas: Facetas
     quadros_expiram_em: datetime
+    # A página seguinte (#426): a rota a põe no cabeçalho `X-Proximo-Cursor`, fora do corpo.
+    _proximo_cursor: str | None = PrivateAttr(default=None)
 
 
 def filtros_do_servidor() -> Filtros:
@@ -313,8 +315,10 @@ class Busca:
         imagem: bytes | None = None,
         parecidos: tuple[str, list[float]] | None = None,
         cancelado: threading.Event | None = None,
+        cursor: str | None = None,
     ) -> ResultadoDaBusca:
-        """`imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
+        """`cursor` é o `_proximo_cursor` da página anterior (`CursorInvalido` se não
+        está no resultado). `imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
         só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
         `BuscaPorImagemIndisponivel`. `parecidos` (#271) é o registro de um plano e o
         vetor do quadro dele, já no índice: busca do mesmo modo, sem embedding, e o
@@ -447,7 +451,9 @@ class Busca:
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        videos = self._videos(trechos, job, termos, ordem, cancelado)[:limite]
+        videos, proximo = _pagina(
+            self._videos(trechos, job, termos, ordem, cancelado), limite, cursor
+        )
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
         vazios = [
@@ -465,7 +471,7 @@ class Busca:
             ", plano B" if entendida.plano_b else "",
         )
         agora = self._relogio()
-        return ResultadoDaBusca(
+        resultado = ResultadoDaBusca(
             entendida=Entendida(
                 evidencias=_ligadas(entendida),
                 programa=entendida.programa,
@@ -479,6 +485,8 @@ class Busca:
             facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
         )
+        resultado._proximo_cursor = proximo
+        return resultado
 
     def planos_com_vetor(
         self, job_id: str, sistema: str | None = None
@@ -509,6 +517,7 @@ class Busca:
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
         cancelado: threading.Event | None = None,
+        cursor: str | None = None,
     ) -> ResultadoDaBusca:
         """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271)."""
         vetor = self.planos_com_vetor(job_id, sistema).get(plano)
@@ -521,6 +530,7 @@ class Busca:
             filtros_do_servidor=filtros_do_servidor,
             sistema=sistema,
             cancelado=cancelado,
+            cursor=cursor,
         )
 
     def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:
@@ -695,6 +705,27 @@ class Busca:
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
+
+
+def _pagina(
+    videos: list[VideoDoResultado], limite: int, cursor: str | None
+) -> tuple[list[VideoDoResultado], str | None]:
+    """Como o acervo (`PaginaDeJobs`): o cursor é o último vídeo da página anterior, e o
+    próximo só vem se sobra vídeo depois desta.
+
+    ponytail: cada página refaz a busca (modelo, índice e ranking) e corta a lista; a
+    ordem só se mantém entre páginas se a consulta for entendida do mesmo jeito, e a
+    lista toda segue no teto de `TETO_DE_REGISTROS` registros fundidos.
+    """
+    inicio = 0
+    if cursor is not None:
+        ids = [v.job_id for v in videos]
+        if cursor not in ids:
+            raise CursorInvalido
+        inicio = ids.index(cursor) + 1
+    pagina = videos[inicio : inicio + limite]
+    sobra = len(videos) > inicio + limite
+    return pagina, pagina[-1].job_id if sobra else None
 
 
 def _clausula_visual(
