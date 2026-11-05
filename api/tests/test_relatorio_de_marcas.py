@@ -200,15 +200,16 @@ def test_bigquery_pede_so_comerciais_com_marca_e_os_filtros_como_parametros() ->
     assert "Jornal" not in consulta and "Ambev" not in consulta
 
 
-def test_bigquery_sem_filtros_nao_leva_parametros_e_resposta_cortada_falha_alto() -> (
+def test_bigquery_sem_filtros_nao_leva_parametros_e_resposta_incompleta_falha_alto() -> (
     None
 ):
     transporte = Transporte({"jobComplete": True})
     assert ConsultaBigQuery(CONFIG, transporte).somas(None, None, None, None) == []
     assert transporte.corpos[0]["queryParameters"] == []
-    for resposta in ({"jobComplete": False}, {"jobComplete": True, "pageToken": "x"}):
-        with pytest.raises(RuntimeError):
-            ConsultaBigQuery(CONFIG, Transporte(resposta)).somas(None, None, None, None)
+    with pytest.raises(RuntimeError):
+        ConsultaBigQuery(CONFIG, Transporte({"jobComplete": False})).somas(
+            None, None, None, None
+        )
 
 
 def _cliente(

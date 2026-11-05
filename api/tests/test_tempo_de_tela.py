@@ -253,12 +253,13 @@ def test_bigquery_sem_filtros_nao_leva_parametros_e_sem_linhas_devolve_vazio() -
     assert transporte.corpos[0]["queryParameters"] == []
 
 
-def test_bigquery_resposta_incompleta_ou_cortada_falha_alto() -> None:
+def test_bigquery_resposta_incompleta_falha_alto() -> None:
     import pytest
 
-    for resposta in ({"jobComplete": False}, {"jobComplete": True, "pageToken": "x"}):
-        with pytest.raises(RuntimeError):
-            ConsultaBigQuery(CONFIG, Transporte(resposta)).somas(None, None, None)
+    with pytest.raises(RuntimeError):
+        ConsultaBigQuery(CONFIG, Transporte({"jobComplete": False})).somas(
+            None, None, None
+        )
 
 
 def _sqlite_com(momentos: list[MomentoDaPessoa]) -> sqlite3.Connection:

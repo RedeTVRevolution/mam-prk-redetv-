@@ -5,8 +5,9 @@ Só a aparição (a pessoa visível) soma tempo de tela; as menções entram só
 Aparições da mesma pessoa no mesmo vídeo que se sobrepõem ou se tocam viram uma só.
 A consulta filtra no BigQuery por programa e data de exibição e também soma lá (#363):
 a união dos intervalos é feita em SQL (janelas, "gaps and islands") e o BigQuery devolve
-uma linha por pessoa e vídeo. O Python só junta as linhas na resposta. Sem teto de linhas
-brutas; o que resta é o do resultado somado (uma resposta de até 10 MB).
+uma linha por pessoa e vídeo, em quantas páginas precisar. O Python só junta as linhas na
+resposta. Sem teto de linhas brutas; o que resta é o resultado somado caber na memória da
+instância.
 """
 
 import json

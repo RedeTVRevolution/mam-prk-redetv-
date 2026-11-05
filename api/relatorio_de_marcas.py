@@ -131,7 +131,8 @@ INTERVALOS_EM_JSON = (
 
 # O que vem depois de `WITH base AS (...)`: uma linha por marca, tipo e vídeo. Os
 # intervalos vêm junto porque a resposta lista as inserções, então o tamanho do resultado
-# ainda cresce com o número delas; o teto que resta é o da resposta do BigQuery (10 MB).
+# ainda cresce com o número delas; o teto que resta é a memória da instância (o resultado
+# vem em quantas páginas precisar).
 SOMA_EM_SQL = f"""SELECT marca, tipo, job_id, COUNT(*), SUM(fim_ms - inicio_ms),
   {INTERVALOS_EM_JSON}
 FROM base

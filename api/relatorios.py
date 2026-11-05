@@ -2,8 +2,8 @@
 
 Cada relatório diz quais tipos de linha lê, as colunas que quer e como agrupa. Aqui ficam o
 que é igual em todos: quem pode consultar, o filtro de programa e de data de exibição (no
-BigQuery e na cópia em memória), a leitura da resposta, o CSV e o erro de uma consulta que
-não cabe ou não termina.
+BigQuery e na cópia em memória), a leitura da resposta (todas as páginas), o CSV e o erro
+de uma consulta que não termina.
 """
 
 import csv
@@ -49,7 +49,7 @@ def confere_o_pedido[T](consulta: T | None, desde: date | None, ate: date | None
 
 
 def ou_503[T](consultar: Callable[[], T]) -> T:
-    """Uma consulta que não termina ou não cabe numa resposta vira 503 com o motivo."""
+    """Uma consulta que não termina vira 503 com o motivo."""
     try:
         return consultar()
     except RuntimeError as e:
@@ -151,8 +151,10 @@ def linhas_da_consulta(
     parametros: Sequence[dict[str, Any]] = (),
     o_que: str = "relatório",
 ) -> list[list[Any]]:
-    """Os valores de cada linha, em texto. Uma consulta que não termina ou não cabe numa
-    resposta falha alto com `RuntimeError`."""
+    """Os valores de cada linha, em texto. Uma consulta que não termina no prazo falha alto
+    com `RuntimeError`. O resultado que não cabe numa página (`maxResults` ou o limite de
+    tamanho da resposta) vem nas páginas seguintes (`jobs.getQueryResults`); todas as
+    linhas ficam na memória da instância, que é o teto que resta."""
     resposta = transporte(
         {
             "query": sql,
@@ -165,9 +167,22 @@ def linhas_da_consulta(
     )
     if not resposta.get("jobComplete", False):
         raise RuntimeError(f"a consulta do {o_que} não terminou no prazo")
-    if resposta.get("pageToken"):
-        raise RuntimeError(f"o {o_que} não cabe numa resposta: peça um período menor")
-    return [[campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])]
+    job = resposta.get("jobReference", {})
+    linhas: list[list[Any]] = []
+    while True:
+        linhas += [
+            [campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])
+        ]
+        if not (token := resposta.get("pageToken")):
+            return linhas
+        resposta = transporte(
+            {
+                "jobId": job["jobId"],
+                "location": job["location"],
+                "pageToken": token,
+                "maxResults": 100_000,
+            }
+        )
 
 
 class _ComVideo(Protocol):

@@ -1,8 +1,8 @@
 """A leitura das tabelas resumidas do painel da diretoria (#280, #282, #283).
 
 O painel lê só `uso_por_dia_e_usuario` e `uso_por_dia_e_programa`, nunca a tabela de eventos.
-Os nomes das tabelas vêm do ambiente (o Terraform os monta). Uma consulta que não termina ou
-não cabe numa resposta falha alto com `RuntimeError` (`linhas_da_consulta`).
+Os nomes das tabelas vêm do ambiente (o Terraform os monta). Uma consulta que não termina no
+prazo falha alto com `RuntimeError` (`linhas_da_consulta`, que lê todas as páginas).
 """
 
 from collections.abc import Sequence
