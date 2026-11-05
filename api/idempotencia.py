@@ -5,7 +5,8 @@ A primeira chamada reserva a chave, com o id do Job já escolhido; as repetiçõ
 reserva e devolvem o mesmo Job. A reserva é por quem chama (sistema ou pessoa), então dois
 sistemas com a mesma chave têm Jobs diferentes, e uma chave reusada com outro corpo é erro.
 A reserva vem antes da gravação do Job: se o processo morre entre as duas, a repetição acha
-a reserva sem Job e o grava com o mesmo id.
+a reserva sem Job e o grava com o mesmo id. Depois de gravar, a reserva é marcada: repetição
+de Job na lixeira ou purgado (reserva marcada, sem Job) responde 410.
 """
 
 import hashlib
@@ -29,6 +30,9 @@ class Reserva(BaseModel):
     impressao: str
     criada_em: datetime
     expira_em: datetime
+    # Marcada depois de gravar o Job: reserva marcada sem Job é Job purgado (410); sem
+    # marca e sem Job é queda antes de gravar (a repetição o recria).
+    job_gravado: bool = False
 
 
 class ChaveReusadaComOutroCorpo(Exception):
@@ -43,6 +47,10 @@ class RepositorioDeIdempotencia(Protocol):
         simultâneas com a mesma chave, só uma cria. Devolve a reserva que vale e se foi
         esta chamada que a criou. Reserva vencida conta como inexistente. Levanta
         `ChaveReusadaComOutroCorpo` se a reserva existente tem outra impressão."""
+        ...
+
+    def marcar_job_gravado(self, escopo: str, chave: str) -> None:
+        """Marca a reserva como com o Job gravado. Sem reserva, não faz nada."""
         ...
 
 
@@ -88,3 +96,10 @@ class RepositorioDeIdempotenciaEmMemoria:
             criada = nova_reserva(impressao, job_id, agora)
             self._reservas[id_] = criada
             return criada, True
+
+    def marcar_job_gravado(self, escopo: str, chave: str) -> None:
+        id_ = id_da_reserva(escopo, chave)
+        with self._trava:
+            existente = self._reservas.get(id_)
+            if existente is not None:
+                self._reservas[id_] = existente.model_copy(update={"job_gravado": True})

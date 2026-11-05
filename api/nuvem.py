@@ -477,6 +477,21 @@ class RepositorioDeIdempotenciaFirestore:
         )
         return resultado
 
+    def marcar_job_gravado(self, escopo: str, chave: str) -> None:
+        referencia = self._colecao.document(id_da_reserva(escopo, chave))
+        # As repetições em paralelo leem a reserva enquanto ela é marcada: o Firestore
+        # aborta o `update` por disputa (`Aborted`), e ele é repetido como o `create`.
+        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+            try:
+                referencia.update({"job_gravado": True})
+            except NotFound:
+                return  # a reserva venceu e o TTL a apagou
+            except Aborted:
+                time.sleep(espera_sob_disputa(rodada))
+                continue
+            return
+        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
 
 class RepositorioDeWebhooksFirestore:
     """Um documento por sistema, com o nome do sistema como id."""
