@@ -158,7 +158,7 @@ processa:
                         raise: $${erro_da_leitura}
             # Um Job cancelado continua cancelado (#51), e um que já `falhou` (o Job de validação
             # o derrubou e a API já avisou o fim) fica como está: não avisa duas vezes (#379).
-            - nao_sobrescreve_cancelado:
+            - nao_sobrescreve_job_terminado:
                 switch:
                   - condition: $${antes.fields.estado.stringValue in ["cancelado", "falhou"]}
                     next: encerra_com_falha
@@ -898,8 +898,9 @@ etapa_com_gpu:
                         args:
                           severity: ERROR
                           text: $${"o Job " + job_id + " não foi marcado com " + codigo_da_falha}
-            # Só chega aqui com o Job lido em `analisando`; se a marcação não valeu, o Job não
-            # está `falhou` por este caminho e o aviso não publica nada.
+                        # Sem a marcação, não há falha deste caminho para avisar; se o outro
+                        # ramo levou o Job a `falhou` pela API, ela já avisou (#379).
+                        next: encerra_a_etapa_com_falha
             - avisa_a_falha_da_etapa:
                 call: avisa_o_fim
                 args:

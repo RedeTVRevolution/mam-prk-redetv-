@@ -55,7 +55,6 @@ class Mundo:
             self.webhooks,
             self.publicador,
             self.eventos,
-            lambda: AGORA,
         )
 
 
@@ -76,6 +75,8 @@ def test_a_falha_gravada_pelo_workflow_publica_o_webhook_e_o_evento_de_uso() -> 
     assert (evento.job_id, evento.programa) == ("job-1", "TV Fama")
     assert (evento.estado, evento.codigo_falha) == ("falhou", "arquivo_corrompido")
     assert evento.segundos_de_processamento == 300
+    # A hora é a da falha gravada, não a de quando o aviso roda.
+    assert mensagem.evento.data == evento.quando == AGORA
 
 
 def test_a_mesma_falha_marcada_duas_vezes_publica_uma_vez_so() -> None:
@@ -121,3 +122,5 @@ def test_sem_webhook_o_evento_de_uso_sai_mesmo_assim() -> None:
 def test_o_job_exige_job_id_e_projeto_no_ambiente() -> None:
     assert main({}) == 2
     assert main({"GCP_PROJECT_ID": "p"}) == 2
+    ambiente = {"GCP_PROJECT_ID": "p", "JOB_ID": "j", "PUBSUB_TOPICO_EVENTOS": "t"}
+    assert main(ambiente) == 2

@@ -1135,6 +1135,15 @@ def test_toda_falha_que_o_workflow_grava_chama_o_aviso_do_fim_logo_depois() -> N
     for inicio in patches:
         assert "call: avisa_o_fim" in texto[inicio : inicio + 2400]
     assert 'in ["cancelado", "falhou"]' in texto
+    # A marcação da etapa com GPU que não valeu (o outro ramo mudou o Job) pula o aviso:
+    # se esse ramo levou o Job a `falhou` pela API, ela já avisou.
+    etapa = texto[
+        texto.index(
+            "- registra_o_erro_da_marcacao:", texto.index("marca_a_etapa_como_falha:")
+        ) :
+    ]
+    pulo = etapa.index("next: encerra_a_etapa_com_falha")
+    assert pulo < etapa.index("- avisa_a_falha_da_etapa:")
 
 
 def test_o_aviso_do_fim_roda_o_job_com_job_id_e_o_erro_dele_so_vai_ao_log() -> None:
