@@ -125,6 +125,7 @@ def _novo(**campos: Any) -> dict[str, Any]:
         "tamanho_bytes": 123,
         "tipo": "video/mp4",
         "programa": "TV Fama",
+        "data_exibicao": "2026-10-01",
         **campos,
     }
 

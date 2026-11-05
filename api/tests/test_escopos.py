@@ -19,7 +19,12 @@ from api.tests.test_jobs import ArmazenamentoFalso
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 MAC = MacSimulado({1: b"k1"}, versao_atual=1)
-NOVO_JOB = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+NOVO_JOB = {
+    "nome": "a.mp4",
+    "tamanho_bytes": 10,
+    "tipo": "video/mp4",
+    "data_exibicao": "2026-10-01",
+}
 PESSOA = {"Authorization": "Bearer token-bom"}
 
 

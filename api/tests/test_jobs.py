@@ -98,7 +98,12 @@ class Ambiente:
         )
 
     def criar(self, **corpo: Any) -> Any:
-        padrao = {"nome": "clipe.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
+        padrao = {
+            "nome": "clipe.mp4",
+            "tamanho_bytes": 1000,
+            "tipo": "video/mp4",
+            "data_exibicao": "2026-10-01",
+        }
         return self.cliente.post(
             "/v1/jobs", json={**padrao, **corpo}, headers=AUTORIZACAO
         )
@@ -675,10 +680,20 @@ def test_data_de_exibicao_fica_no_job_e_volta_no_get_e_na_lista() -> None:
     assert job is not None and job.data_exibicao == date(1999, 12, 31)
 
 
-def test_sem_data_de_exibicao_o_campo_vem_nulo() -> None:
-    resposta = Ambiente().criar()
+def test_sem_data_de_exibicao_da_422_e_nao_cria_o_job() -> None:
+    ambiente = Ambiente()
+    corpo = {"nome": "clipe.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
 
-    assert resposta.json()["data_exibicao"] is None
+    resposta = ambiente.cliente.post("/v1/jobs", json=corpo, headers=AUTORIZACAO)
+
+    assert resposta.status_code == 422
+    assert "data_exibicao" in resposta.text
+    assert ambiente.armazenamento.pedidos == []
+    assert ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json() == []
+
+
+def test_data_de_exibicao_nula_da_422() -> None:
+    assert Ambiente().criar(data_exibicao=None).status_code == 422
 
 
 def test_data_de_exibicao_de_hoje_e_aceita_e_a_de_amanha_da_422() -> None:
@@ -799,7 +814,12 @@ def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() 
 
 
 def _criar_com_chave(ambiente: Ambiente, chave: str, **corpo: Any) -> Any:
-    padrao = {"nome": "clipe.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
+    padrao = {
+        "nome": "clipe.mp4",
+        "tamanho_bytes": 1000,
+        "tipo": "video/mp4",
+        "data_exibicao": "2026-10-01",
+    }
     return ambiente.cliente.post(
         "/v1/jobs",
         json={**padrao, **corpo},

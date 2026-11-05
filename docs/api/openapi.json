@@ -253,7 +253,7 @@
             }
           },
           "422": {
-            "description": "Tamanho fora do limite. O `tamanho_bytes` é zero ou passa do máximo (4 GiB). Outros 422 deste pedido: `Data de exibição no futuro`, `Idempotency-Key inválida` e o `Erro de validação` dos campos (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`).",
+            "description": "Tamanho fora do limite. O `tamanho_bytes` é zero ou passa do máximo (4 GiB). Outros 422 deste pedido: `Data de exibição no futuro`, `Idempotency-Key inválida` e o `Erro de validação` dos campos (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`).",
             "content": {
               "application/json": {
                 "example": {
@@ -2231,15 +2231,8 @@
             "title": "Programa"
           },
           "data_exibicao": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "format": "date",
             "title": "Data Exibicao"
           }
         },
@@ -2248,7 +2241,8 @@
         "required": [
           "nome",
           "tamanho_bytes",
-          "tipo"
+          "tipo",
+          "data_exibicao"
         ],
         "title": "NovoJob"
       },
