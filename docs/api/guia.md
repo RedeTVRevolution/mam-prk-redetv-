@@ -126,4 +126,4 @@ Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. 
 
 ## Rotas deste guia
 
-`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem` e `GET /v1/jobs/{job_id}/decupagem/download`.
+`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem`, `GET /v1/jobs/{job_id}/decupagem/download`, `GET /v1/jobs/andamento`, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}`, `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, `GET /v1/objetos/tipos`, `GET /v1/catalogo/pessoas`, `GET /v1/catalogo/marcas`, `GET /v1/busca`, `POST /v1/busca/imagem`, `GET /v1/busca/parecidos/planos`, `GET /v1/busca/parecidos` e `GET /v1/correcoes/catalogo`.

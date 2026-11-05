@@ -92,24 +92,36 @@ _NAO_ACHOU = Erro(
 )
 
 
-def _validacao(onde: str, campo: str, msg: str, entrada: Any) -> Erro:
+def _validacao(
+    tipo: str,
+    onde: str,
+    campo: str,
+    msg: str,
+    entrada: Any,
+    ctx: dict[str, Any] | None = None,
+) -> Erro:
+    """O 422 do FastAPI para um parâmetro; `tipo` e `ctx` são os do Pydantic."""
+    item = {"type": tipo, "loc": [onde, campo], "msg": msg, "input": entrada}
+    if ctx is not None:
+        item["ctx"] = ctx
     return Erro(
         422,
         "Erro de validação",
         "Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) "
         "e `msg` (por quê) em cada item.",
-        exemplo=[
-            {
-                "type": "literal_error",
-                "loc": [onde, campo],
-                "msg": msg,
-                "input": entrada,
-            }
-        ],
+        exemplo=[item],
     )
 
 
-_VALIDACAO = _validacao("query", "versao", "Input should be 'modelo'", "outra")
+_PADRAO_DO_QUADRO = r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$"
+_VALIDACAO = _validacao(
+    "literal_error",
+    "query",
+    "versao",
+    "Input should be 'modelo'",
+    "outra",
+    {"expected": "'modelo'"},
+)
 
 _NAO_CONCLUIDO = Erro(
     409,
@@ -542,7 +554,7 @@ OPERACOES: tuple[Operacao, ...] = (
                 "No máximo 200 ids",
                 "Peça até 200 ids por chamada; divida o resto em outras.",
             ),
-            _validacao("query", "ids", "Field required", None),
+            _validacao("missing", "query", "ids", "Field required", None),
             _INDISPONIVEL,
         ),
     ),
@@ -562,7 +574,12 @@ OPERACOES: tuple[Operacao, ...] = (
             _NAO_ACHOU,
             _NAO_CONCLUIDO,
             _validacao(
-                "path", "arquivo", "String should match pattern '^[A-Za-z0-9]...'", "x"
+                "string_pattern_mismatch",
+                "path",
+                "arquivo",
+                f"String should match pattern '{_PADRAO_DO_QUADRO}'",
+                "x",
+                {"pattern": _PADRAO_DO_QUADRO},
             ),
             _INDISPONIVEL,
         ),
@@ -646,7 +663,12 @@ OPERACOES: tuple[Operacao, ...] = (
         (
             *_sem_chave("ler"),
             _validacao(
-                "query", "q", "String should have at most 100 characters", "x" * 101
+                "string_too_long",
+                "query",
+                "q",
+                "String should have at most 100 characters",
+                "x" * 101,
+                {"max_length": 100},
             ),
             _INDISPONIVEL,
         ),
@@ -670,7 +692,7 @@ OPERACOES: tuple[Operacao, ...] = (
         ],
         (
             *_sem_chave("ler"),
-            _validacao("query", "q", "Field required", None),
+            _validacao("missing", "query", "q", "Field required", None),
             _INDISPONIVEL,
         ),
     ),
@@ -684,7 +706,7 @@ OPERACOES: tuple[Operacao, ...] = (
         [{"id": "marca-1", "nome": "Marca Exemplo", "a_revisar": False}],
         (
             *_sem_chave("ler"),
-            _validacao("query", "q", "Field required", None),
+            _validacao("missing", "query", "q", "Field required", None),
             _INDISPONIVEL,
         ),
     ),
@@ -706,7 +728,7 @@ OPERACOES: tuple[Operacao, ...] = (
         (
             *_sem_chave("ler"),
             _PERIODO_INVERTIDO,
-            _validacao("query", "q", "Field required", None),
+            _validacao("missing", "query", "q", "Field required", None),
             _MUITA_CONSULTA,
             _DEMOROU,
             _INDISPONIVEL,
@@ -790,7 +812,7 @@ OPERACOES: tuple[Operacao, ...] = (
         {"planos": [0, 1, 3, 4]},
         (
             *_sem_chave("ler"),
-            _validacao("query", "job", "Field required", None),
+            _validacao("missing", "query", "job", "Field required", None),
             _DEMOROU,
             _INDISPONIVEL,
         ),
@@ -814,7 +836,7 @@ OPERACOES: tuple[Operacao, ...] = (
                 "antigo, peça ao time do MAM para reindexá-lo.",
                 exemplo="Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado",
             ),
-            _validacao("query", "plano", "Field required", None),
+            _validacao("missing", "query", "plano", "Field required", None),
             _MUITA_CONSULTA,
             _DEMOROU,
             _INDISPONIVEL,

@@ -1239,7 +1239,10 @@
                         "versao"
                       ],
                       "msg": "Input should be 'modelo'",
-                      "input": "outra"
+                      "input": "outra",
+                      "ctx": {
+                        "expected": "'modelo'"
+                      }
                     }
                   ]
                 },
@@ -1533,7 +1536,7 @@
                     "value": {
                       "detail": [
                         {
-                          "type": "literal_error",
+                          "type": "missing",
                           "loc": [
                             "query",
                             "ids"
@@ -1676,13 +1679,16 @@
                 "example": {
                   "detail": [
                     {
-                      "type": "literal_error",
+                      "type": "string_pattern_mismatch",
                       "loc": [
                         "path",
                         "arquivo"
                       ],
-                      "msg": "String should match pattern '^[A-Za-z0-9]...'",
-                      "input": "x"
+                      "msg": "String should match pattern '^[A-Za-z0-9][A-Za-z0-9_-]*\\.jpg$'",
+                      "input": "x",
+                      "ctx": {
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*\\.jpg$"
+                      }
                     }
                   ]
                 },
@@ -2253,13 +2259,16 @@
                 "example": {
                   "detail": [
                     {
-                      "type": "literal_error",
+                      "type": "string_too_long",
                       "loc": [
                         "query",
                         "q"
                       ],
                       "msg": "String should have at most 100 characters",
-                      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                      "ctx": {
+                        "max_length": 100
+                      }
                     }
                   ]
                 },
@@ -2362,7 +2371,7 @@
                 "example": {
                   "detail": [
                     {
-                      "type": "literal_error",
+                      "type": "missing",
                       "loc": [
                         "query",
                         "q"
@@ -2469,7 +2478,7 @@
                 "example": {
                   "detail": [
                     {
-                      "type": "literal_error",
+                      "type": "missing",
                       "loc": [
                         "query",
                         "q"
@@ -2828,7 +2837,7 @@
                     "value": {
                       "detail": [
                         {
-                          "type": "literal_error",
+                          "type": "missing",
                           "loc": [
                             "query",
                             "q"
@@ -3291,7 +3300,7 @@
                 "example": {
                   "detail": [
                     {
-                      "type": "literal_error",
+                      "type": "missing",
                       "loc": [
                         "query",
                         "job"
@@ -3508,7 +3517,7 @@
                 "example": {
                   "detail": [
                     {
-                      "type": "literal_error",
+                      "type": "missing",
                       "loc": [
                         "query",
                         "plano"

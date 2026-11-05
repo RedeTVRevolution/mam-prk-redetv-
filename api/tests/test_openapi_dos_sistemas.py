@@ -150,6 +150,13 @@ def test_o_guia_cita_cada_rota_e_cada_erro_entre_crases() -> None:
             )
 
 
+def test_a_lista_de_rotas_do_guia_e_a_das_operacoes() -> None:
+    lista = GUIA.read_text().split("## Rotas deste guia", 1)[1]
+    citadas = set(re.findall(r"`((?:GET|POST|PUT|DELETE|PATCH) /v1[^`]*)`", lista))
+
+    assert citadas == {f"{o.metodo} {o.caminho}" for o in OPERACOES}
+
+
 def test_o_guia_cita_cada_exemplo_e_cada_exemplo_citado_existe() -> None:
     guia = GUIA.read_text()
     existentes = {
@@ -215,11 +222,16 @@ def test_o_exemplo_de_sucesso_de_cada_rota_vale_no_esquema_da_resposta() -> None
                     ), f"{metodo} {caminho} {status}"
 
 
+def _caminho_de_prova(caminho: str) -> str:
+    """O caminho com o Job `j1` e um quadro válido no lugar dos parâmetros."""
+    caminho = caminho.replace("{arquivo}", "plano-0.jpg")
+    return re.sub(r"\{[^}]+\}", "j1", caminho)
+
+
 def _aceita_a_chave(
     mundo: Mundo, chave: dict[str, str], metodo: str, caminho: str
 ) -> bool:
-    caminho = caminho.replace("{arquivo}", "plano-0.jpg")
-    caminho = re.sub(r"\{[^}]+\}", "j1", caminho)
+    caminho = _caminho_de_prova(caminho)
     argumentos: dict[str, Any] = {"json": {}} if metodo in ("POST", "PUT") else {}
     resposta = mundo.cliente.request(metodo, caminho, headers=chave, **argumentos)
     if resposta.status_code == 401:
@@ -235,7 +247,7 @@ def test_toda_rota_que_aceita_a_chave_esta_documentada_e_so_ela() -> None:
     mundo.job("j1", "sis")
     chave = mundo.chave("sis", *ESCOPOS)
     aceitas: set[tuple[str, str]] = set()
-    sem_chave: set[tuple[str, str]] = set()
+    abertas_sem_chave: set[tuple[str, str]] = set()
     for caminho, metodos in mundo.cliente.app.openapi()["paths"].items():  # type: ignore[attr-defined]
         if not caminho.startswith("/v1"):
             continue
@@ -247,11 +259,9 @@ def test_toda_rota_que_aceita_a_chave_esta_documentada_e_so_ela() -> None:
             if _aceita_a_chave(mundo, chave, metodo.upper(), caminho):
                 aceitas.add((metodo.upper(), caminho))
             else:
-                semchave = mundo.cliente.request(
-                    metodo, re.sub(r"\{[^}]+\}", "j1", caminho)
-                )
-                if semchave.status_code != 401:
-                    sem_chave.add((metodo.upper(), caminho))
+                sem_chave = mundo.cliente.request(metodo, _caminho_de_prova(caminho))
+                if sem_chave.status_code != 401:
+                    abertas_sem_chave.add((metodo.upper(), caminho))
 
-    assert not sem_chave
+    assert not abertas_sem_chave
     assert aceitas == {(o.metodo, o.caminho) for o in OPERACOES}
