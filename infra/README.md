@@ -115,3 +115,37 @@ Os resumos de uso (#280, `modulos/mam/resumos_de_uso.tf` e `.sql`) são quatro t
 ## Chaves de idempotência (#274)
 
 O `POST /v1/jobs` aceita `Idempotency-Key`. A reserva da chave é um documento da coleção `chaves_de_idempotencia` (`api/idempotencia.py`), e a política de TTL de `modulos/mam/idempotencia.tf` apaga o documento 48 h depois (`expira_em`). O TTL do Firestore não é imediato (pode levar até um dia a mais), por isso a API trata a reserva vencida como inexistente. O campo não tem índice próprio.
+
+## Recuperação do Firestore (#355)
+
+O Firestore guarda Jobs, Correções, catálogo, papéis e auditoria. Em `modulos/mam/main.tf` o banco liga a recuperação a um ponto no tempo (PITR, 7 dias), e `modulos/mam/firestore_recuperacao.tf` cria as duas agendas de backup que o Firestore aceita por banco: **diária, guarda 7 dias**, e **semanal (domingo), guarda 14 semanas** (o teto da documentação). Nenhum papel novo para a `mam-terraform`: o `roles/datastore.owner` do wizard cobre as agendas e a mudança do PITR (mudança no lugar, o banco não é recriado).
+
+Conferir depois do `publicar`:
+
+```
+gcloud firestore databases describe --database="(default)" | grep pointInTimeRecoveryEnablement   # POINT_IN_TIME_RECOVERY_ENABLED
+gcloud firestore backups schedules list --database="(default)"                                     # as duas agendas
+```
+
+**Restaurar de um backup** (volta sempre para um **banco novo**, nunca sobrescreve o atual):
+
+```
+gcloud firestore backups list --location=<REGIAO>
+gcloud firestore databases restore --source-backup=projects/<PROJETO>/locations/<REGIAO>/backups/<ID> --destination-database=<BANCO_NOVO>
+```
+
+Depois confira os dados no banco novo e, se for trocar, copie o que faltar para o `(default)` (por exportação e importação) ou aponte a aplicação para o banco novo. O `(default)` tem proteção contra exclusão; o banco novo nasce sem ela.
+
+**Restaurar de um ponto no tempo** (últimos 7 dias, em minutos inteiros): ler ou exportar o estado daquele momento, sem tocar no banco atual.
+
+```
+gcloud firestore export gs://<BUCKET>/<PASTA> --database="(default)" --snapshot-time=2026-11-04T12:00:00Z
+gcloud firestore databases create --database=<BANCO_NOVO> --location=<REGIAO>
+gcloud firestore import gs://<BUCKET>/<PASTA> --database=<BANCO_NOVO>
+```
+
+O `import` pede um banco que já exista, por isso o `create` antes; com a pasta dada no `export`, a exportação fica direto nela, e o `import` recebe a mesma pasta.
+
+Para clonar o banco inteiro naquele ponto, `gcloud firestore databases clone --source-database=projects/<PROJETO>/databases/(default) --snapshot-time=... --destination-database=<BANCO_NOVO>`. O bucket de exportação não é o do Terraform: use um temporário e apague depois. Ensaiar uma restauração no dev ainda não foi feito.
+
+**Custo estimado**: o PITR e os backups cobram armazenamento por GiB-mês (PITR, os dados mais as versões dos últimos 7 dias; cada backup, o tamanho do banco naquele dia, e há até 7 diários e 14 semanais guardados ao mesmo tempo, 21 cópias no pior caso, mais as leituras da restauração quando houver). Para um banco de poucos GiB, como o do dev, isso fica em centavos a poucos dólares por mês; o custo cresce linear com o tamanho do banco. Conferir o tamanho real e o valor no faturamento (aba Custo do painel) depois do primeiro mês.

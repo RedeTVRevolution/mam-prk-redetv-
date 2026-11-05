@@ -450,7 +450,10 @@ resource "google_firestore_database" "mam" {
   location_id             = var.regiao
   type                    = "FIRESTORE_NATIVE"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"
-  depends_on              = [google_project_service.apis]
+  # Recuperação a um ponto no tempo, 7 dias (#355); as agendas de backup estão em
+  # firestore_recuperacao.tf.
+  point_in_time_recovery_enablement = "POINT_IN_TIME_RECOVERY_ENABLED"
+  depends_on                        = [google_project_service.apis]
 }
 
 # Índices compostos da lista de Jobs (GET /v1/jobs, #141): cada combinação não vazia de
