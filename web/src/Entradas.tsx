@@ -33,7 +33,7 @@ import {
 import { etapaDeReprocesso, nomeDaEtapa, partidaDaEtapa } from './etapas.ts'
 import { falhaDaAcao, type Falha } from './falhaDaAcao.ts'
 import { fraseDaFalha } from './falhas.ts'
-import { dataEHora, type EtapaDoJob, type Job } from './jobs.ts'
+import { dataEHora, type EtapaDoJob, type Job, MAXIMO_DO_ANDAMENTO } from './jobs.ts'
 import { relogio } from './linhaDoTempo.ts'
 import { ReprocessarEtapa } from './ReprocessarEtapa.tsx'
 import { enderecoDasEntradas, navegar } from './rotas.ts'
@@ -255,7 +255,7 @@ export default function Entradas({
   podeReprocessar,
   podeEscolherEtapa,
   podeVerSistemas,
-  intervaloMs = 10_000,
+  intervaloMs = 15_000,
 }: {
   api: ClienteDaApi
   filtros: FiltrosDasEntradas
@@ -340,16 +340,20 @@ export default function Entradas({
   const idsEmAndamento = jobs.filter(emAndamento).map((j) => j.id).join(',')
   const atualizando = useRef(false)
   const atualizar = useCallback(async () => {
-    const ids = idsEmAndamento ? idsEmAndamento.split(',') : []
+    const ids = idsEmAndamento ? idsEmAndamento.split(',').slice(0, MAXIMO_DO_ANDAMENTO) : []
     if (ids.length === 0 || document.visibilityState !== 'visible' || atualizando.current) return
     const daVez = geracao.current
     atualizando.current = true
     try {
-      const novos = await Promise.all(ids.map((id) => api.job(id).detalhe()))
+      const novos = await api.andamento(ids)
       if (geracao.current !== daVez) return
       setAtualizacaoFalhou(null)
       setAgora(Date.now())
-      setCarga((c) => (c.tipo === 'pronta' ? { ...c, jobs: c.jobs.map((j) => novos.find((n) => n.id === j.id) ?? j) } : c))
+      // Quem a rota omite (foi para a lixeira ou sumiu) sai da lista.
+      const pedidos = new Set(ids)
+      const doAndamento = new Map(novos.map((n) => [n.id, n]))
+      const atualiza = (j: Job): Job[] => (pedidos.has(j.id) ? (doAndamento.has(j.id) ? [doAndamento.get(j.id)!] : []) : [j])
+      setCarga((c) => (c.tipo === 'pronta' ? { ...c, jobs: c.jobs.flatMap(atualiza) } : c))
     } catch (erro) {
       if (geracao.current === daVez && !(erro instanceof SessaoExpirada)) setAtualizacaoFalhou(codigoDoErro(erro))
     } finally {

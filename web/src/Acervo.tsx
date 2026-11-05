@@ -36,7 +36,7 @@ import MandarParaLixeira from './MandarParaLixeira.tsx'
 import { Quadro } from './Miniatura.tsx'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { fraseDaFalha } from './falhas.ts'
-import { dataDeExibicao, dataEHora, filtrosParaBusca, finalizando, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, type Ordem } from './jobs.ts'
+import { dataDeExibicao, dataEHora, filtrosParaBusca, finalizando, haFiltro, SEM_FILTROS, type FiltrosDoAcervo, type Job, MAXIMO_DO_ANDAMENTO, type Ordem } from './jobs.ts'
 import { tempo } from './linhaDoTempo.ts'
 import { ACERVO, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, ESTADOS_DO_JOB, FINALIZANDO, type EstadoDoJob } from './tema.ts'
@@ -232,7 +232,7 @@ export default function Acervo({
   filtros,
   podeEnviar,
   podeApagar = false,
-  intervaloMs = 5000,
+  intervaloMs = 15_000,
 }: {
   api: ClienteDaApi
   filtros: FiltrosDoAcervo
@@ -328,20 +328,24 @@ export default function Acervo({
   // Com a API lenta, uma rodada não começa enquanto a anterior não volta.
   const atualizando = useRef(false)
   const atualizar = useCallback(async () => {
-    const ids = idsEmAndamento ? idsEmAndamento.split(',') : []
+    const ids = idsEmAndamento ? idsEmAndamento.split(',').slice(0, MAXIMO_DO_ANDAMENTO) : []
     if (ids.length === 0 || document.visibilityState !== 'visible' || atualizando.current) return
     const daVez = geracao.current
     atualizando.current = true
     try {
-      const novos = await Promise.all(ids.map((id) => api.job(id).detalhe()))
+      const novos = await api.andamento(ids)
       if (geracao.current !== daVez) return
       setAtualizacaoFalhou(null)
-      // O detalhe não traz a capa (só a listagem assina a URL): fica a da lista.
-      const comACapa = (j: Job) => {
-        const novo = novos.find((n) => n.id === j.id)
-        return novo ? { ...novo, capa_url: novo.capa_url ?? j.capa_url } : j
+      // O andamento não traz a capa (só a listagem assina a URL): fica a da lista. Quem a
+      // rota omite (foi para a lixeira ou sumiu) sai da lista.
+      const pedidos = new Set(ids)
+      const doAndamento = new Map(novos.map((n) => [n.id, n]))
+      const atualiza = (j: Job): Job[] => {
+        if (!pedidos.has(j.id)) return [j]
+        const novo = doAndamento.get(j.id)
+        return novo ? [{ ...novo, capa_url: j.capa_url }] : []
       }
-      setCarga((c) => (c.tipo === 'pronta' ? { ...c, jobs: c.jobs.map(comACapa) } : c))
+      setCarga((c) => (c.tipo === 'pronta' ? { ...c, jobs: c.jobs.flatMap(atualiza) } : c))
     } catch (erro) {
       if (geracao.current === daVez && !(erro instanceof SessaoExpirada)) {
         setAtualizacaoFalhou(codigoDoErro(erro))

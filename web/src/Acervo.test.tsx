@@ -403,10 +403,13 @@ test('só as linhas em andamento são consultadas de novo, e a lista não é rec
     job({ id: 'b', nome: 'andando.mp4', estado: 'validando' }),
   ]
   const detalhes: string[] = []
+  const pedidos: string[][] = []
   servidor.use(
-    http.get('/v1/jobs/:id', ({ params }) => {
-      detalhes.push(String(params.id))
-      return HttpResponse.json(jobs.find((j) => j.id === params.id))
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      const ids = new URL(request.url).searchParams.get('ids')!.split(',')
+      pedidos.push(ids)
+      detalhes.push(...ids)
+      return HttpResponse.json(jobs.filter((j) => ids.includes(j.id)))
     }),
   )
   await abrir({ intervaloMs: 20 })
@@ -418,6 +421,7 @@ test('só as linhas em andamento são consultadas de novo, e a lista não é rec
   await waitFor(() => expect(within(linha('andando.mp4')).getByText('Concluído')).toBeTruthy())
   expect(new Set(detalhes)).toEqual(new Set(['b']))
   expect(chamadas.length).toBe(listagens)
+  expect(pedidos.every((p) => p.length === 1)).toBe(true)
 })
 
 test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado até a indexação acabar', async () => {
@@ -455,10 +459,13 @@ test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado 
     }),
   ]
   const detalhes: string[] = []
+  const pedidos: string[][] = []
   servidor.use(
-    http.get('/v1/jobs/:id', ({ params }) => {
-      detalhes.push(String(params.id))
-      return HttpResponse.json(jobs.find((j) => j.id === params.id))
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      const ids = new URL(request.url).searchParams.get('ids')!.split(',')
+      pedidos.push(ids)
+      detalhes.push(...ids)
+      return HttpResponse.json(jobs.filter((j) => ids.includes(j.id)))
     }),
   )
   await abrir({ intervaloMs: 20 })
@@ -476,6 +483,8 @@ test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado 
 
   await waitFor(() => expect(within(linha('rodando.mp4')).getByText('Concluído')).toBeTruthy())
   expect(new Set(detalhes)).toEqual(new Set(['a', 'b', 'e']))
+  // Uma rodada, um pedido: os três vão juntos.
+  expect(pedidos.some((p) => p.length === 3)).toBe(true)
 })
 
 test('a consulta de uma linha em andamento mantém a capa da lista', async () => {
@@ -483,10 +492,10 @@ test('a consulta de uma linha em andamento mantém a capa da lista', async () =>
   jobs = [job({ id: 'a', nome: 'rodando.mp4', estado: 'concluido', etapa_atual: 'inventario_de_objetos', indexacao: pendente, capa_url: '/capa-a.jpg' })]
   let consultas = 0
   servidor.use(
-    http.get('/v1/jobs/:id', () => {
+    http.get('/v1/jobs/andamento', () => {
       consultas++
-      // Como a API: o detalhe não assina a capa.
-      return HttpResponse.json({ ...jobs[0], capa_url: null })
+      // Como a API: o andamento não assina a capa.
+      return HttpResponse.json([{ ...jobs[0], capa_url: undefined }])
     }),
   )
   await abrir({ intervaloMs: 20 })
@@ -499,9 +508,9 @@ test('com a aba escondida, ninguém é consultado', async () => {
   jobs = [job({ id: 'b', nome: 'andando.mp4', estado: 'validando' })]
   let consultas = 0
   servidor.use(
-    http.get('/v1/jobs/:id', () => {
+    http.get('/v1/jobs/andamento', () => {
       consultas++
-      return HttpResponse.json(jobs[0])
+      return HttpResponse.json([jobs[0]])
     }),
   )
   const visibilidade = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
@@ -513,6 +522,21 @@ test('com a aba escondida, ninguém é consultado', async () => {
   } finally {
     visibilidade.mockRestore()
   }
+})
+
+test('o vídeo que a rota de andamento omite (lixeira ou sumiu) sai da lista', async () => {
+  jobs = [
+    job({ id: 'a', nome: 'ficou.mp4', estado: 'validando' }),
+    job({ id: 'b', nome: 'sumiu.mp4', estado: 'validando' }),
+  ]
+  servidor.use(
+    http.get('/v1/jobs/andamento', () => HttpResponse.json([{ ...jobs[0], estado: 'concluido' }])),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('sumiu.mp4')
+
+  await waitFor(() => expect(screen.queryByText('sumiu.mp4')).toBeNull())
+  expect(within(linha('ficou.mp4')).getByText('Concluído')).toBeTruthy()
 })
 
 test('sem vídeos, a lista vazia diz isso; com filtros, diz que nenhum casou', async () => {

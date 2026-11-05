@@ -10,7 +10,7 @@ import zlib
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, Self
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
@@ -273,16 +273,19 @@ class EtapaPublica(Etapa):
     nome: NomeDaEtapa
 
 
-class JobPublico(BaseModel):
-    """O que a API mostra de um Job; o SHA-256 e o tamanho ficam no armazenamento."""
+# Quantos ids a rota de andamento aceita por pedido.
+LIMITE_DO_ANDAMENTO = 200
+
+
+class JobResumido(BaseModel):
+    """O que as listagens e o andamento mostram de um Job: sem `cortes_ms`, que só o
+    detalhe traz (uma lista sem teto, de até ~100 KB por vídeo)."""
 
     id: str
     nome: str
     estado: Estado
     codigo_falha: CodigoDeFalha | None
     duracao_s: float | None
-    # Cortes de câmera, em ms: os riscos da régua do Visualizador.
-    cortes_ms: list[int] | None = None
     timecode_origem: str | None = None
     taxa_de_quadros: float | None = None
     # URL assinada, de curta validade, do quadro de capa; só a listagem a preenche.
@@ -300,7 +303,7 @@ class JobPublico(BaseModel):
     atualizado_em: datetime
 
     @classmethod
-    def de(cls, job: Job) -> "JobPublico":
+    def de(cls, job: Job) -> Self:
         campos = set(cls.model_fields) - {"enviado_por", "etapas"}
         enviado_por = (
             EnviadoPor(tipo="sistema", nome=job.sistema)
@@ -313,6 +316,13 @@ class JobPublico(BaseModel):
             etapas=[EtapaPublica(nome=n, **e.model_dump()) for n, e in etapas],
             enviado_por=enviado_por,
         )
+
+
+class JobPublico(JobResumido):
+    """O detalhe de um Job: o resumo mais os cortes de câmera."""
+
+    # Cortes de câmera, em ms: os riscos da régua do Visualizador.
+    cortes_ms: list[int] | None = None
 
 
 def _etag(publico: JobPublico) -> str:
@@ -974,15 +984,15 @@ def criar_rotas(
             url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
-    def _com_capa(job: Job) -> JobPublico:
-        publico = JobPublico.de(job)
+    def _com_capa(job: Job) -> JobResumido:
+        publico = JobResumido.de(job)
         if job.capa is not None:
             publico.capa_url = armazenamento.url_do_quadro(
                 job.id, job.capa, VALIDADE_DA_REPRODUCAO
             )
         return publico
 
-    @rotas.get("", response_model=list[JobPublico])
+    @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         programa: str | None = None,
@@ -1020,6 +1030,35 @@ def criar_rotas(
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
         return JSONResponse(corpo, headers=cabecalhos)
+
+    @rotas.get("/andamento", response_model=list[JobResumido])
+    def andamento(
+        request: Request,
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        ids: Annotated[str, Query(description="Até 200 ids, separados por vírgula")],
+    ) -> Response:
+        """O detalhe de vários Jobs numa leitura só, para a tela atualizar o que está em
+        andamento: sem capa e sem `cortes_ms`. Quem não existe ou não se enxerga é omitido."""
+        pedidos = [i for i in (p.strip() for p in ids.split(",")) if i]
+        if len(pedidos) > LIMITE_DO_ANDAMENTO:
+            raise HTTPException(422, f"No máximo {LIMITE_DO_ANDAMENTO} ids")
+        jobs = repositorio.obter_varios(dict.fromkeys(pedidos))
+        pode_ver_lixeira = isinstance(chamador, Usuario) and _tem_permissao(
+            request, chamador, "lixeira.gerir"
+        )
+        visiveis = [
+            j
+            for j in jobs
+            if (j.lixeira is None or pode_ver_lixeira)
+            and not (isinstance(chamador, Sistema) and j.sistema != chamador.sistema)
+        ]
+        posicao = {id_: n for n, id_ in enumerate(dict.fromkeys(pedidos))}
+        visiveis.sort(key=lambda j: posicao[j.id])
+        corpo = [
+            JobResumido.de(j).model_dump(mode="json", exclude={"capa_url"})
+            for j in visiveis
+        ]
+        return JSONResponse(corpo)
 
     @rotas.get("/{job_id}", response_model=JobPublico)
     def ler(

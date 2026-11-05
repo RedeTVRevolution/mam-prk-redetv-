@@ -279,6 +279,8 @@ export interface ClienteDaApi {
   entradas(filtros: FiltrosDasEntradas, cursor?: string | null): Promise<PaginaDoAcervo>
   /** `GET /v1/admin/auditoria` (exige `auditoria.ver`): só leitura; `cursor` é o `proximo` da página anterior. */
   auditoria(filtros: FiltrosDaAuditoria, limite: number, cursor?: string | null): Promise<PaginaDeAuditoria>
+  /** `GET /v1/jobs/andamento`: o estado atual de até 200 vídeos num pedido só; omite os que não existem ou não se enxerga. */
+  andamento(ids: string[]): Promise<Job[]>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
   /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
@@ -461,6 +463,7 @@ export function criarClienteDaApi(
         proximo: resposta.headers.get('X-Proximo-Cursor'),
       }
     },
+    andamento: (ids) => chamar(`/v1/jobs/andamento?ids=${ids.map(encodeURIComponent).join(',')}`),
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite) => chamar(`/v1/busca?${consultaParaApi(consulta, limite)}`),
