@@ -159,3 +159,9 @@ Passos humanos depois do `publicar`:
 1. `make copiar-para-bigquery` preenche a nova a partir das decupagens. Até rodar, os relatórios do dev saem vazios.
 2. `bq show <dataset>.momentos_por_ano` deve mostrar `YEAR`; o relatório de tempo de tela dá os mesmos números de antes.
 3. Apagar a antiga: pôr `deletion_protection = false` nela, aplicar, tirar do código o recurso `momentos`, o local `tabela_antiga_de_momentos` e o `moved` dele em `infra/main.tf`, e aplicar com `PERMITIR_DESTRUICAO=sim`.
+
+## Programas no Firestore (#338)
+
+Os programas saíram do `api/programas.toml` e viraram a coleção `programas` do Firestore, editada na aba Programas da administração. As contas que leem a coleção já têm `roles/datastore.user`; nenhum papel novo.
+
+Passo humano logo depois do `publicar`, antes de qualquer envio com programa: `make carregar-programas` (lê `docs/migracao/programas-2026-11.toml`). Até rodar, a lista do envio fica vazia, envio com `programa` recebe 422 e os Jobs analisam sem o perfil e sem as pessoas do programa. Rodar de novo não duplica.

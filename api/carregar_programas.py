@@ -4,7 +4,8 @@ Leva para o Firestore o que estava em `programas.toml`: cada programa com o perf
 pessoas, e o papel de cada pessoa vira o papel dela naquele programa. A pessoa que já
 está no catálogo (pelo nome ou apelido) é reaproveitada; as outras entram. Um programa
 que já existe pelo nome fica como está, então rodar de novo não duplica nem desfaz
-edições feitas no formulário. Usa as credenciais da máquina; sem teste automático
+edições feitas no formulário. O casamento é pelo nome: um programa renomeado no
+formulário volta como programa novo se a carga rodar de novo. Usa as credenciais da máquina; sem teste automático
 contra a nuvem (a carga em si é testada com o dublê).
 """
 

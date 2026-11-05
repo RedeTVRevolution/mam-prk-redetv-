@@ -189,7 +189,11 @@ def esquema_da_resposta(programas: Collection[str]) -> dict[str, Any]:
         "type": "string",
         "enum": list(EVIDENCIAS),
     }
-    esquema["properties"]["programa"] = da_lista(sorted(programas))
+    # Sem programa cadastrado (logo depois do deploy do #338, antes da carga), `enum: []`
+    # seria um esquema que nenhum valor de texto satisfaz: o campo fica só `null`.
+    esquema["properties"]["programa"] = (
+        da_lista(sorted(programas)) if programas else {"type": "null"}
+    )
     for definicao in [esquema, objeto]:
         definicao["required"] = list(definicao["properties"])
     return esquema

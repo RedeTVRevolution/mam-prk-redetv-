@@ -76,9 +76,11 @@ corrigir-estado:
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.correcao_de_estado "$(JOB)" "$(ESTADO)" "$(MOTIVO)"
 
-# Carga única dos programas e das pessoas (#338), a partir de um TOML (ARQUIVO=docs/migracao/programas-2026-11.toml); idempotente.
+# Carga única dos programas e das pessoas (#338), a partir de um TOML (padrão: docs/migracao/programas-2026-11.toml); idempotente.
 carregar-programas:
-	uv run --locked python -m api.carregar_programas "$(ARQUIVO)"
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	uv run --locked python -m api.carregar_programas "$(or $(ARQUIVO),docs/migracao/programas-2026-11.toml)"
 
 # Carga inicial do catálogo de marcas (#150), a partir dos comerciais das Decupagens; idempotente.
 carregar-marcas:
