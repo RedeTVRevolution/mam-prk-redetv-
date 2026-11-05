@@ -3,8 +3,7 @@
 import base64
 import json
 import logging
-from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+import time
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
@@ -23,7 +22,6 @@ from api.eventos_de_uso import (
     ErroAoPublicarUso,
     EventoDeUso,
     EventosEmMemoria,
-    EventosEmSegundoPlano,
     EventosPubSub,
     SemEventos,
     registrar,
@@ -201,54 +199,28 @@ def test_registrar_nao_levanta_quando_a_publicacao_falha_e_deixa_o_rastro_no_log
     assert "evento de uso login" in caplog.text
 
 
-class ExecutorNaMao(ThreadPoolExecutor):
-    """Guarda as tarefas e só as roda quando o teste manda."""
+class EventosLentos:
+    """Só entrega o evento depois de um tempo: quem chama espera por ele."""
 
-    def __init__(self) -> None:
-        super().__init__(max_workers=1)
-        self.pendentes: list[tuple[Callable[..., Any], tuple[Any, ...]]] = []
+    def __init__(self, espera: float) -> None:
+        self.espera = espera
+        self.entregues: list[tuple[str, float]] = []
 
-    def submit(
-        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
-    ) -> Future[Any]:
-        self.pendentes.append((fn, args))
-        return Future()
-
-    def rodar(self) -> None:
-        for fn, args in self.pendentes:
-            fn(*args)
-        self.pendentes.clear()
+    def publicar(self, evento: EventoDeUso) -> None:
+        time.sleep(self.espera)
+        self.entregues.append((evento.tipo, time.monotonic()))
 
 
-def _evento() -> EventoDeUso:
-    return EventoDeUso(
-        id="e1", tipo="login", quem_tipo="usuario", quem_id="a", quando=AGORA
-    )
+def test_a_acao_so_responde_depois_de_o_evento_ser_entregue() -> None:
+    eventos = EventosLentos(0.2)
+    mundo = Mundo(eventos=eventos, login_em=AGORA)
 
+    r = mundo.cliente.get("/v1/eu", headers=ANA)
+    respondeu = time.monotonic()
 
-def test_em_segundo_plano_a_publicacao_nao_acontece_na_chamada() -> None:
-    eventos = EventosEmMemoria()
-    executor = ExecutorNaMao()
-    publicador = EventosEmSegundoPlano(eventos, executor)
-
-    publicador.publicar(_evento())
-    assert eventos.publicados == []
-
-    executor.rodar()
-    assert [e.id for e in eventos.publicados] == ["e1"]
-
-
-def test_em_segundo_plano_a_falha_vai_ao_log(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    executor = ExecutorNaMao()
-    publicador = EventosEmSegundoPlano(EventosQueFalham(), executor)
-
-    publicador.publicar(_evento())
-    with caplog.at_level(logging.ERROR):
-        executor.rodar()
-
-    assert "evento de uso login" in caplog.text
+    assert r.status_code == 200
+    [(tipo, entregue_em)] = eventos.entregues
+    assert tipo == "login" and entregue_em <= respondeu
 
 
 def test_o_quando_em_outro_fuso_vira_utc() -> None:

@@ -61,7 +61,6 @@ from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
 from api.eventos_de_uso import (
     Eventos,
-    EventosEmSegundoPlano,
     SemEventos,
     quem_do_chamador,
     registrar,
@@ -696,8 +695,9 @@ if _projeto:
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
-        # O evento de uso sai fora da resposta: o Pub/Sub lento não atrasa a ação.
-        eventos=EventosEmSegundoPlano(eventos_do_ambiente(os.environ)),
+        # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
+        # CPU durante ela. Uma tentativa, com tempo de 5 s; a falha vai ao log.
+        eventos=eventos_do_ambiente(os.environ),
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
         # sistema; listar e revogar funcionam.
