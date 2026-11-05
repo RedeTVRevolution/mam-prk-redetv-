@@ -499,6 +499,11 @@ moved {
 }
 
 moved {
+  from = google_cloud_run_v2_job_iam_member.web_roda_indexacao
+  to   = module.mam.google_cloud_run_v2_job_iam_member.web_roda_indexacao
+}
+
+moved {
   from = google_secret_manager_secret.serpapi
   to   = module.mam.google_secret_manager_secret.serpapi
 }

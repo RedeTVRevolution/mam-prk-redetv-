@@ -957,6 +957,16 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "WORKFLOW_REGIAO"
         value = var.regiao
       }
+      # O Job que o "Aprovar Revisão" dispara (api/nuvem.py). Pelo local, pelo mesmo ciclo
+      # do workflow acima.
+      env {
+        name  = "INDEXACAO_JOB"
+        value = local.job_de_indexacao
+      }
+      env {
+        name  = "INDEXACAO_REGIAO"
+        value = var.regiao
+      }
       env {
         name  = "PURGA_LOGIN_RECENTE_MIN"
         value = tostring(var.minutos_do_login_recente)
@@ -1888,8 +1898,12 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_quadros" {
 # (sem vpc_access), porque o Agent Retrieval é uma API pública; só recebe a Decupagem já
 # pronta, nunca o vídeo. Roda depois dos quadros-chave; a falha dele só fica no estado
 # do Job (indexacao.estado), que `make reindexar` refaz.
+locals {
+  job_de_indexacao = "mam-indexacao"
+}
+
 resource "google_cloud_run_v2_job" "indexacao" {
-  name                = "mam-indexacao"
+  name                = local.job_de_indexacao
   location            = var.regiao
   deletion_protection = false
   template {
@@ -1974,6 +1988,14 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_indexacao" {
   location = google_cloud_run_v2_job.indexacao.location
   role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
+}
+
+# A API roda o Job de indexação quando a pessoa aprova a revisão (#328), com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "web_roda_indexacao" {
+  name     = google_cloud_run_v2_job.indexacao.name
+  location = google_cloud_run_v2_job.indexacao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["web"].member
 }
 
 # Job de referências de rosto (#111, ADR 0005): o único com internet (sem vpc_access),
