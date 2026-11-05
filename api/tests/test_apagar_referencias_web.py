@@ -7,7 +7,7 @@ from api.apagar_referencias_web import (
     Contagem,
     apagar,
     contar,
-    sem_a_fonte_referencia,
+    tirar_a_fonte_referencia,
 )
 from api.catalogo import CatalogoEmMemoria, Rosto
 
@@ -130,5 +130,32 @@ def test_rodar_de_novo_nao_muda_nada() -> None:
 
 
 def test_decupagem_sem_pessoas_nao_muda() -> None:
-    assert sem_a_fonte_referencia({"pessoas": []}) is False
-    assert sem_a_fonte_referencia({}) is False
+    assert tirar_a_fonte_referencia({"pessoas": []}) is False
+    assert tirar_a_fonte_referencia({}) is False
+
+
+def test_nome_que_volta_a_palpite_perde_o_catalogo_id_e_o_da_revisora_fica() -> None:
+    do_modelo = {**_pessoa(["referencia"], "confirmado"), "catalogo_id": "c1"}
+    da_revisora = {**do_modelo, "origem": "revisao"}
+    dados = {"pessoas": [do_modelo, da_revisora]}
+
+    assert tirar_a_fonte_referencia(dados) is True
+
+    assert do_modelo["estado_do_nome"] == "palpite"
+    assert do_modelo["catalogo_id"] is None
+    assert da_revisora["estado_do_nome"] == "confirmado"
+    assert da_revisora["catalogo_id"] == "c1"
+    assert da_revisora["fontes_do_nome"] == []
+
+
+def test_decupagem_que_nao_abre_fica_como_esta_e_o_resto_segue() -> None:
+    c = _cenario()
+    c["decupagens"].decupagens["j0"] = b"{quebrado"
+    c["job_ids"] = ["j0", *c["job_ids"]]
+
+    assert contar(**c).decupagens_com_a_fonte_referencia == 2
+
+    apagar(**c)
+
+    assert c["decupagens"].decupagens["j0"] == b"{quebrado"
+    assert contar(**c) == Contagem(0, 0, 0, 0, 0, 0)

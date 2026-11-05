@@ -17,8 +17,9 @@ from api.comparador import normalizar
 
 class Rosto(BaseModel):
     """Uma referência de rosto ligada à pessoa e de onde ela veio. `referencia` é o
-    objeto da foto no bucket; da busca na web guardam-se também a página, a imagem, a
-    busca e a data (de onde sai a validade)."""
+    objeto da foto no bucket. `origem="web"` e os campos da busca na web (página, imagem,
+    busca e data) só servem para ler os rostos gravados antes do #327, até a migração
+    `make apagar-referencias-web` apagá-los (ADR 0012)."""
 
     origem: Literal["web", "acervo"]
     referencia: str

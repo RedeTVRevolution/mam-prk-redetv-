@@ -821,11 +821,8 @@ class ReferenciasStorage:
         self._cliente = cliente
         self._bucket = bucket
 
-    def gravar(self, objeto: str, jpeg: bytes) -> None:
-        tipo = "application/json" if objeto.endswith(".json") else "image/jpeg"
-        self._cliente.bucket(self._bucket).blob(objeto).upload_from_string(
-            jpeg, content_type=tipo
-        )
+    def contar_prefixo(self, prefixo: str) -> int:
+        return sum(1 for _ in self._cliente.list_blobs(self._bucket, prefix=prefixo))
 
     def apagar(self, objeto: str) -> None:
         try:

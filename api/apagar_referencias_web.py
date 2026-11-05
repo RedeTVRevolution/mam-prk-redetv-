@@ -75,9 +75,10 @@ class Contagem:
         )
 
 
-def sem_a_fonte_referencia(dados: dict[str, Any]) -> bool:
-    """Tira `referencia` de `fontes_do_nome` na Decupagem lida; a pessoa que fica sem
-    fonte e estava confirmada volta a palpite. Diz se mudou alguma pessoa."""
+def tirar_a_fonte_referencia(dados: dict[str, Any]) -> bool:
+    """Tira `referencia` de `fontes_do_nome` na Decupagem lida, mudando `dados`; a pessoa
+    que fica sem fonte e estava confirmada volta a palpite e perde o `catalogo_id` que a
+    confirmação gravou (a da revisora fica como está). Diz se mudou alguma pessoa."""
     mudou = False
     for pessoa in dados.get("pessoas") or []:
         fontes = pessoa.get("fontes_do_nome") if isinstance(pessoa, dict) else None
@@ -87,19 +88,29 @@ def sem_a_fonte_referencia(dados: dict[str, Any]) -> bool:
         if (
             not pessoa["fontes_do_nome"]
             and pessoa.get("estado_do_nome") == "confirmado"
+            and pessoa.get("origem") != "revisao"
         ):
             pessoa["estado_do_nome"] = "palpite"
+            pessoa["catalogo_id"] = None
         mudou = True
     return mudou
 
 
-def _com_a_fonte(conteudo: bytes | None) -> bool:
+def _lida(job_id: str, conteudo: bytes | None) -> dict[str, Any] | None:
+    """A Decupagem gravada; a que não abre fica de fora, com aviso, sem parar a migração."""
     if conteudo is None:
-        return False
+        return None
     try:
-        return sem_a_fonte_referencia(json.loads(conteudo))
+        dados = json.loads(conteudo)
     except ValueError:
-        return False
+        log.warning("decupagem de %s não lida; fica como está", job_id)
+        return None
+    return dados if isinstance(dados, dict) else None
+
+
+def _com_a_fonte(job_id: str, conteudo: bytes | None) -> bool:
+    dados = _lida(job_id, conteudo)
+    return dados is not None and tirar_a_fonte_referencia(dados)
 
 
 def _pessoas_do_catalogo(catalogo: Catalogo) -> list[Any]:
@@ -126,7 +137,7 @@ def contar(
         ),
         sugestoes_de_perfil=sugestoes.contar(),
         decupagens_com_a_fonte_referencia=sum(
-            _com_a_fonte(decupagens.ler(i)) for i in ids
+            _com_a_fonte(i, decupagens.ler(i)) for i in ids
         ),
         registros_da_comparacao=sum(
             decupagens.contar_registros_da_comparacao(i) for i in ids
@@ -151,11 +162,9 @@ def apagar(
             )
     sugestoes.apagar_todas()
     for job_id in job_ids:
-        conteudo = decupagens.ler(job_id)
-        if conteudo is not None:
-            dados = json.loads(conteudo)
-            if sem_a_fonte_referencia(dados):
-                decupagens.gravar(job_id, json.dumps(dados, ensure_ascii=False))
+        dados = _lida(job_id, decupagens.ler(job_id))
+        if dados is not None and tirar_a_fonte_referencia(dados):
+            decupagens.gravar(job_id, json.dumps(dados, ensure_ascii=False))
         decupagens.apagar_registros_da_comparacao(job_id)
 
 
@@ -207,22 +216,12 @@ class DecupagensNoStorage:
                 pass
 
 
-class FotosNoStorage(ReferenciasStorage):
-    def __init__(self, cliente: ClienteStorage, bucket: str) -> None:
-        super().__init__(cliente, bucket)
-        self._lista = cliente
-        self._balde = bucket
-
-    def contar_prefixo(self, prefixo: str) -> int:
-        return sum(1 for _ in self._lista.list_blobs(self._balde, prefix=prefixo))
-
-
 if __name__ == "__main__":
     projeto = os.environ.get("GCP_PROJECT_ID") or sys.exit("defina GCP_PROJECT_ID")
     cliente = firestore.Client(project=projeto)
     storage = ClienteStorage(project=projeto)
     tudo: dict[str, Any] = {
-        "fotos": FotosNoStorage(storage, os.environ["BUCKET_REFERENCIAS"]),
+        "fotos": ReferenciasStorage(storage, os.environ["BUCKET_REFERENCIAS"]),
         "catalogo": CatalogoFirestore(cliente),
         "sugestoes": SugestoesDePerfilFirestore(cliente),
         "decupagens": DecupagensNoStorage(storage, os.environ["BUCKET_DECUPAGENS"]),

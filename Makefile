@@ -88,7 +88,8 @@ carregar-marcas:
 
 # Migração única da retirada das referências na web (#327): apaga as fotos, os rostos
 # `origem=web`, as sugestões de perfil e os registros da comparação, e imprime a contagem
-# antes e depois. Rodar de novo não apaga nada a mais.
+# antes e depois. Rodar de novo não apaga nada a mais. Depois, rode `make copiar-para-bigquery`
+# e `make reindexar`: o nome que voltou a palpite ainda está no tempo de tela e na busca.
 apagar-referencias-web:
 	BUCKET_REFERENCIAS="$${BUCKET_REFERENCIAS:-$$(terraform -chdir=infra output -raw bucket_referencias)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \

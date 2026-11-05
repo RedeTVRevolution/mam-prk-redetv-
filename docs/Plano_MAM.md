@@ -28,7 +28,7 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 | Painel | Indicadores por usuário e totais para a diretoria, dentro da aplicação, com acesso restrito |
 | Acervo | 25 anos processados aos poucos em Batch, com teto mensal de gasto e fila por prioridade |
 
-O Gemini identifica os famosos (inclusive brasileiros) pelo GC, e pela fala, nunca pela memória; o código confere a prova de cada nome, e o nome sem prova fica como palpite ([ADR 0012](adr/0012-sem-referencias-de-rosto-na-web.md), que substitui a [0005](adr/0005-identificacao-por-referencia.md)). Tudo roda no GCP, inclusive o front: a RedeTV não mantém nenhum servidor próprio.
+O Gemini identifica os famosos (inclusive brasileiros) pelo GC e pela fala, nunca pela memória; o código confere a prova de cada nome, e o nome sem prova fica como palpite ([ADR 0012](adr/0012-sem-referencias-de-rosto-na-web.md), que substitui a [0005](adr/0005-identificacao-por-referencia.md)). Tudo roda no GCP, inclusive o front: a RedeTV não mantém nenhum servidor próprio.
 
 ## Escolha do modelo
 
