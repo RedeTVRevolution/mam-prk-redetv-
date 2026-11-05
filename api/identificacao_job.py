@@ -8,7 +8,6 @@ termina bem, para o Workflows seguir.
 """
 
 import os
-from datetime import timedelta
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -21,9 +20,8 @@ from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
 from api.decupagem import Decupagem
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
-from api.jobs import RepositorioDeJobs, agora_utc
+from api.jobs import RepositorioDeJobs
 from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
-from api.nomes_a_buscar import nomes_a_buscar
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -35,8 +33,6 @@ from api.quadros_das_pessoas import extrair_quadros
 from api.sinais import imprimir
 from api.transcricao import Transcricao
 
-VALIDADE_PADRAO_DIAS = 180
-
 
 class DecupagensDaIdentificacao(Protocol):
     def ler_decupagem(self, job_id: str) -> Decupagem | None: ...
@@ -45,24 +41,9 @@ class DecupagensDaIdentificacao(Protocol):
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None: ...
 
-    def gravar_nomes_a_buscar(self, job_id: str, conteudo: str) -> None: ...
-
 
 class TranscricoesDaIdentificacao(Protocol):
     def ler_transcricao(self, job_id: str) -> Transcricao | None: ...
-
-
-def _deixar_os_nomes(
-    job_id: str,
-    decupagens: DecupagensDaIdentificacao,
-    decupagem: Decupagem,
-    programa: str | None,
-    catalogo: Catalogo,
-    validade: timedelta,
-) -> None:
-    """A lista de nomes que o Job de referências busca (#222)."""
-    lista = nomes_a_buscar(decupagem, programa, catalogo, agora_utc(), validade)
-    decupagens.gravar_nomes_a_buscar(job_id, lista.model_dump_json())
 
 
 def executar(
@@ -75,7 +56,6 @@ def executar(
     pasta: Path,
     *,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
-    validade: timedelta = timedelta(days=VALIDADE_PADRAO_DIAS),
 ) -> str:
     """Devolve `ignorado`, `sem_alteracao`, `incompleto` ou `identificado`.
 
@@ -105,14 +85,9 @@ def executar(
                 ao_falhar=falhas.append,
             )
         except (AnaliseFalhou, FalhaNosQuadros):
-            # Sem o modelo forte a Decupagem fica como está, mas os candidatos e os
-            # palpites dela ainda precisam de fotos.
-            _deixar_os_nomes(
-                job_id, decupagens, decupagem, job.programa, catalogo, validade
-            )
+            # Sem o modelo forte a Decupagem fica como está.
             return "sem_alteracao"
         decupagens.gravar_decupagem(job_id, nova.model_dump_json())
-        _deixar_os_nomes(job_id, decupagens, nova, job.programa, catalogo, validade)
         return "incompleto" if falhas else "identificado"
 
     return rodar_etapa(
@@ -140,11 +115,6 @@ def main() -> None:
         Path(os.environ["TMPDIR"]),
         limite_de_pessoas=int(
             os.environ.get("LIMITE_DE_PESSOAS_DO_MODELO_FORTE", LIMITE_DE_PESSOAS)
-        ),
-        validade=timedelta(
-            days=int(
-                os.environ.get("VALIDADE_DAS_REFERENCIAS_DIAS", VALIDADE_PADRAO_DIAS)
-            )
         ),
     )
 

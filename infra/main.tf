@@ -243,6 +243,10 @@ output "bucket_decupagens" {
   value = module.mam.bucket_decupagens
 }
 
+output "bucket_referencias" {
+  value = module.mam.bucket_referencias
+}
+
 output "workflow_regiao" {
   value = module.mam.workflow_regiao
 }
@@ -504,43 +508,13 @@ moved {
 }
 
 moved {
-  from = google_secret_manager_secret.serpapi
-  to   = module.mam.google_secret_manager_secret.serpapi
-}
-
-moved {
-  from = google_secret_manager_secret_iam_member.referencias_le_serpapi
-  to   = module.mam.google_secret_manager_secret_iam_member.referencias_le_serpapi
-}
-
-moved {
-  from = google_cloud_run_v2_job.referencias
-  to   = module.mam.google_cloud_run_v2_job.referencias
-}
-
-moved {
   from = google_cloud_run_v2_job.identificacao
   to   = module.mam.google_cloud_run_v2_job.identificacao
 }
 
 moved {
-  from = google_cloud_run_v2_job.comparacao
-  to   = module.mam.google_cloud_run_v2_job.comparacao
-}
-
-moved {
   from = google_cloud_run_v2_job_iam_member.orquestracao_roda_identificacao
   to   = module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_identificacao
-}
-
-moved {
-  from = google_cloud_run_v2_job_iam_member.orquestracao_roda_referencias
-  to   = module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_referencias
-}
-
-moved {
-  from = google_cloud_run_v2_job_iam_member.orquestracao_roda_comparacao
-  to   = module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_comparacao
 }
 
 moved {

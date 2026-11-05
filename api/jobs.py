@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -105,9 +105,6 @@ TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
 VALIDADE_DO_DOWNLOAD = timedelta(minutes=5)
-# As fotos de referência são dado sensível (LGPD): o link vale pouco.
-VALIDADE_DA_FOTO = timedelta(minutes=5)
-PREFIXO_DAS_FOTOS = "referencias/"
 # O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
 FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
@@ -161,15 +158,15 @@ NomeDaEtapa = Literal[
     "transcricao",
     "leitura_da_tela",
     "analise",
-    # Depois do `concluido`, na ordem do Workflows. As do #112 (identificação,
-    # referências e comparação) aprimoram a Decupagem no lugar (#221).
+    # Depois do `concluido`, na ordem do Workflows. A identificação aprimora a Decupagem
+    # no lugar (#221).
     "identificacao",
-    "referencias",
-    "comparacao",
     "quadros_chave",
     "inventario_de_objetos",
     "indexacao",
 ]
+# Etapas do #112 retiradas no #327; só os Jobs antigos ainda as trazem.
+ETAPAS_QUE_SAIRAM = frozenset({"referencias", "comparacao"})
 ResultadoDaEtapa = Literal["concluida", "falhou"]
 DispositivoDaEtapa = Literal["gpu", "cpu"]
 
@@ -235,6 +232,23 @@ class Job(BaseModel):
     def _data_como_texto(self, data: date | None) -> str | None:
         # O Firestore não guarda `date`; o Pydantic a lê de volta do texto ISO.
         return data.isoformat() if data else None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sem_as_etapas_que_sairam(cls, dados: Any) -> Any:
+        # Jobs gravados antes do #327 trazem as etapas `referencias` e `comparacao`, que
+        # deixaram de existir; elas somem na leitura em vez de derrubar o Job.
+        if not isinstance(dados, dict):
+            return dados
+        dados = dict(dados)
+        etapas = dados.get("etapas")
+        if isinstance(etapas, dict):
+            dados["etapas"] = {
+                n: e for n, e in etapas.items() if n not in ETAPAS_QUE_SAIRAM
+            }
+        if dados.get("etapa_atual") in ETAPAS_QUE_SAIRAM:
+            dados["etapa_atual"] = None
+        return dados
 
 
 def palavras_do_nome(nome: str) -> list[str]:
@@ -350,26 +364,6 @@ class AcessosAoVideo(Protocol):
 class Reproducao(BaseModel):
     url: str
     expira_em: datetime
-
-
-class FotoDoNome(BaseModel):
-    url: str
-    pagina_url: str  # vazia quando a página não é um endereço web
-    dominio: str
-    # Em palavras na tela; `None` quando a comparação foi gravada sem o resultado por foto.
-    resultado: Literal["confere", "nao_confere"] | None
-
-
-class FotosDoNome(BaseModel):
-    fotos: list[FotoDoNome]
-    expira_em: datetime
-
-
-def _pagina_e_dominio(endereco: str) -> tuple[str, str]:
-    partes = urlsplit(endereco)
-    if partes.scheme not in ("http", "https") or not partes.hostname:
-        return "", ""
-    return endereco, partes.hostname.removeprefix("www.")
 
 
 class TipoNaoSuportado(Exception):
@@ -584,14 +578,6 @@ class Armazenamento(Protocol):
         """O JSON da decupagem, em pedaços."""
         ...
 
-    def ler_comparacao(self, job_id: str) -> bytes | None:
-        """Os vereditos da comparação (`<job>.comparacao.json`), ou `None` se não rodou."""
-        ...
-
-    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
-        """URL assinada de leitura de uma foto de referência (objeto do bucket delas)."""
-        ...
-
 
 class RepositorioEmMemoria:
     def __init__(self) -> None:
@@ -701,12 +687,6 @@ class ArmazenamentoIndisponivel:
         raise ServicoIndisponivel
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
-        raise ServicoIndisponivel
-
-    def ler_comparacao(self, job_id: str) -> bytes | None:
-        raise ServicoIndisponivel
-
-    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
 
@@ -1084,49 +1064,6 @@ def criar_rotas(
             job.id, caminho_do_quadro(arquivo), VALIDADE_DA_REPRODUCAO
         )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
-
-    @rotas.get("/{job_id}/pessoas/{pessoa_id}/referencias")
-    def fotos_do_nome(
-        job_id: str,
-        pessoa_id: str,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
-    ) -> JSONResponse:
-        job = obter_concluido(job_id, chamador)
-        bruto = armazenamento.ler_comparacao(job.id)
-        vereditos = json.loads(bruto) if bruto else []
-        veredito = next(
-            (v for v in vereditos if pessoa_id in v.get("pessoas", [])), None
-        )
-        if veredito is None:
-            raise HTTPException(404, "Este nome não tem comparação de rosto")
-        conferem = veredito.get("conferem") or []
-        fotos: list[FotoDoNome] = []
-        for i, foto in enumerate(veredito.get("fotos", [])):
-            objeto = str(foto.get("referencia", ""))
-            # O objeto vem do que o servidor gravou; mesmo assim só assina o das referências.
-            if not objeto.startswith(PREFIXO_DAS_FOTOS) or ".." in objeto:
-                continue
-            pagina, dominio = _pagina_e_dominio(str(foto.get("pagina_url", "")))
-            resultado: Literal["confere", "nao_confere"] | None = (
-                None
-                if i >= len(conferem)
-                else "confere"
-                if conferem[i]
-                else "nao_confere"
-            )
-            fotos.append(
-                FotoDoNome(
-                    url=armazenamento.url_da_foto(objeto, VALIDADE_DA_FOTO),
-                    pagina_url=pagina,
-                    dominio=dominio,
-                    resultado=resultado,
-                )
-            )
-        corpo = FotosDoNome(fotos=fotos, expira_em=relogio() + VALIDADE_DA_FOTO)
-        return JSONResponse(
-            corpo.model_dump(mode="json"),
-            headers={"Cache-Control": "private, no-store"},
-        )
 
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
         cabecalhos = {"Vary": "Accept-Encoding"}

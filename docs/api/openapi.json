@@ -1525,8 +1525,6 @@
               "leitura_da_tela",
               "analise",
               "identificacao",
-              "referencias",
-              "comparacao",
               "quadros_chave",
               "inventario_de_objetos",
               "indexacao"
@@ -1746,8 +1744,6 @@
                   "leitura_da_tela",
                   "analise",
                   "identificacao",
-                  "referencias",
-                  "comparacao",
                   "quadros_chave",
                   "inventario_de_objetos",
                   "indexacao"
@@ -1966,8 +1962,6 @@
                   "leitura_da_tela",
                   "analise",
                   "identificacao",
-                  "referencias",
-                  "comparacao",
                   "quadros_chave",
                   "inventario_de_objetos",
                   "indexacao"

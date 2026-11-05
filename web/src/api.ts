@@ -67,19 +67,6 @@ async function detalhe(resposta: Response): Promise<string> {
 }
 
 /** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
-export interface FotoDoNome {
-  url: string
-  /** Vazia quando a página de origem não é um endereço web. */
-  pagina_url: string
-  dominio: string
-  resultado: 'confere' | 'nao_confere' | null
-}
-
-export interface FotosDoNome {
-  fotos: FotoDoNome[]
-  expira_em: string
-}
-
 export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
 
 /** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
@@ -98,7 +85,6 @@ export interface ClienteDoJob {
   /** O Job contra uma passada, com cada item marcado (igual, difere, só de um lado). */
   comparacao(passadaId: string): Promise<ComparacaoDaPassada>
   /** As fotos de referência que sustentam o nome da pessoa (exige `decupagem.ver`). */
-  fotosDoNome(pessoaId: string): Promise<FotosDoNome>
   /** Avisa que a pessoa começou, segue ou terminou de revisar (exige `decupagem.editar`). */
   pulsoDeRevisao(evento: EventoDeRevisao): Promise<void>
   catalogo(): Promise<CatalogoDeCorrecoes>
@@ -407,7 +393,6 @@ export function criarClienteDaApi(
       baixarDecupagem: async () => (await pedir(`${base}/decupagem/download`)).blob(),
       passadas: () => chamar(`${base}/passadas`),
       comparacao: (passadaId) => chamar(`${base}/passadas/${encodeURIComponent(passadaId)}/comparacao`),
-      fotosDoNome: (pessoaId) => chamar(`${base}/pessoas/${encodeURIComponent(pessoaId)}/referencias`),
       pulsoDeRevisao: async (evento) => {
         await pedir(`${base}/revisao/pulso`, { post: true, corpo: { evento } })
       },

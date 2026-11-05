@@ -4,8 +4,7 @@
 # paralelo a transcrição e a leitura da tela (E1, ADR 0007: cada uma num Job com GPU em
 # `${regiao_gpu}`, com o Job em CPU de `${regiao}` como plano B) e, quando as duas terminam,
 # o Job de análise. Com o Job `concluido`, vêm a
-# identificação (sem internet), as referências (com internet, só nomes) e a comparação (sem
-# internet) (#112), depois os quadros-chave (#115), o inventário de objetos (#244) e a indexação: se um deles falha, o Job
+# identificação (sem internet) (#112), depois os quadros-chave (#115), o inventário de objetos (#244) e a indexação: se um deles falha, o Job
 # de análise já concluiu e a falha só vai ao log e à etapa, e o passo seguinte roda. A análise é um Job, e não uma
 # chamada HTTP, porque passa do teto de 1800 s da chamada do Workflows (#127).
 # Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
@@ -14,7 +13,7 @@
 # ${job_de_objetos_gpu}, ${motor_objetos}, ${job_de_inventario} (o inventário de objetos, #244:
 # o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
 # entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
-# ${job_de_analise}, ${job_de_identificacao}, ${job_de_referencias}, ${job_de_comparacao},
+# ${job_de_analise}, ${job_de_identificacao},
 # ${job_de_quadros}, ${job_de_indexacao}.
 # Toda a execução roda num try: um erro que nenhum passo trata (do próprio Workflows,
 # de um conector, de uma permissão) não deixa o Job preso em `analisando`, que a tela
@@ -106,10 +105,6 @@ processa:
             next: inicia_analise
           - condition: $${etapa_inicial == "identificacao"}
             next: inicia_identificacao
-          - condition: $${etapa_inicial == "referencias"}
-            next: inicia_referencias
-          - condition: $${etapa_inicial == "comparacao"}
-            next: inicia_comparacao
           - condition: $${etapa_inicial == "quadros_chave"}
             next: inicia_quadros_chave
           - condition: $${etapa_inicial == "inventario_de_objetos"}
@@ -343,7 +338,7 @@ processa:
         args:
           name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
         result: depois_da_analise
-    # Identificação, referências, comparação, quadros-chave e indexação só valem com o
+    # Identificação, quadros-chave e indexação só valem com o
     # Job `concluido`; uma análise que derrubou o Job (sai sem erro) não as inicia.
     - so_se_concluido:
         switch:
@@ -386,85 +381,6 @@ processa:
                 args:
                   severity: WARNING
                   text: $${"a identificação falhou para " + job_id}
-                next: inicia_referencias
-    - inicia_referencias:
-        call: marca_inicio
-        args:
-          job_id: $${job_id}
-          etapa: referencias
-    - busca_as_referencias:
-        try:
-          call: googleapis.run.v2.projects.locations.jobs.run
-          args:
-            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_referencias}
-            body:
-              overrides:
-                containerOverrides:
-                  - env:
-                      - name: JOB_ID
-                        value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de referências tem até 1800 s. Único com internet.
-            connector_params:
-              timeout: 2100
-        except:
-          as: e
-          steps:
-            - grava_a_falha_de_referencias:
-                call: marca_fim
-                args:
-                  job_id: $${job_id}
-                  etapa: referencias
-                  falhou_na_execucao: true
-            # O Job já está concluído; sem as fotos de referência a Decupagem segue como estava. A falha
-            # fica na etapa e no log, e o salto evita gravar a etapa por cima como `concluida`.
-            - registra_a_falha_de_referencias:
-                call: sys.log
-                args:
-                  severity: WARNING
-                  text: $${"a busca das referências falhou para " + job_id}
-                next: inicia_comparacao
-    - encerra_referencias:
-        call: marca_fim
-        args:
-          job_id: $${job_id}
-          etapa: referencias
-          falhou_na_execucao: false
-    - inicia_comparacao:
-        call: marca_inicio
-        args:
-          job_id: $${job_id}
-          etapa: comparacao
-    - compara:
-        try:
-          call: googleapis.run.v2.projects.locations.jobs.run
-          args:
-            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_comparacao}
-            body:
-              overrides:
-                containerOverrides:
-                  - env:
-                      - name: JOB_ID
-                        value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de comparação tem até 3600 s. Ele grava o
-            # próprio resultado da etapa, por isso não há `encerra_`.
-            connector_params:
-              timeout: 3900
-        except:
-          as: e
-          steps:
-            - grava_a_falha_de_comparacao:
-                call: marca_fim
-                args:
-                  job_id: $${job_id}
-                  etapa: comparacao
-                  falhou_na_execucao: true
-            # O Job já está concluído; sem a comparação a Decupagem segue como estava. A falha
-            # fica na etapa e no log, e o salto evita gravar a etapa por cima como `concluida`.
-            - registra_a_falha_de_comparacao:
-                call: sys.log
-                args:
-                  severity: WARNING
-                  text: $${"a comparação falhou para " + job_id}
                 next: inicia_quadros_chave
     - inicia_quadros_chave:
         call: marca_inicio

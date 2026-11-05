@@ -44,8 +44,6 @@ export interface JobCriado extends Job {
 // Espelha `ETAPAS_DEPOIS_DO_CONCLUIDO` de `api/ciclo_de_vida.py`: mude as duas juntas.
 const ETAPAS_DEPOIS_DO_CONCLUIDO = [
   'identificacao',
-  'referencias',
-  'comparacao',
   'quadros_chave',
   'inventario_de_objetos',
   'indexacao',
