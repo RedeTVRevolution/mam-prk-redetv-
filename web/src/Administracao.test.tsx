@@ -158,7 +158,7 @@ test('Nova conta cria e avisa para onde foi o link', async () => {
   await abrir('/admin/usuarios')
   await usuario.click(await screen.findByRole('button', { name: 'Nova conta' }))
   const dialogo = await screen.findByRole('dialog')
-  expect(within(dialogo).getByText(/Editor: vê e corrige a decupagem/)).toBeTruthy()
+  expect(within(dialogo).getByText(/Editor: envia vídeos, reprocessa o que falhou e corrige a decupagem/)).toBeTruthy()
   await usuario.type(within(dialogo).getByLabelText('E-mail'), 'bia@redetv.com.br')
   await usuario.type(within(dialogo).getByLabelText('Nome'), 'Bia Souza')
   await usuario.click(within(dialogo).getByRole('checkbox', { name: /Editor/ }))

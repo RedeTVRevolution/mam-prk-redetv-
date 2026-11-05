@@ -54,7 +54,7 @@ export function enderecoDoTempoDeTela(filtros: FiltrosDoRelatorio): string {
   return `${TEMPO_DE_TELA}${filtrosParaEndereco(filtros)}`
 }
 
-/** Para onde `/` leva: o acervo, ou o painel para quem só vê o painel (Diretoria). */
+/** Para onde `/` leva: o acervo, ou o painel para quem só vê o painel (sem `decupagem.ver`). */
 export function telaInicial(permissoes: readonly string[]): string {
   return !permissoes.includes('decupagem.ver') && permissoes.includes('painel.ver') ? PAINEL : ACERVO
 }

@@ -106,7 +106,7 @@ Antes de expandir, um lote-piloto com programas de cada época passa pela mesma 
 | US$ 1.000 | \~3.600 | \~4,2 anos |
 | US$ 2.500 | \~8.900 | \~1,7 ano |
 
-Regras da fila: programas mais pedidos pelos editores primeiro, depois os anos mais recentes para trás; um botão "indexar agora" (papel Operador) passa um programa à frente; o agendador para quando o teto do mês é atingido. A entrada de dados no GCP não é cobrada, mas o envio de \~270 TB de originais (estimativa a 1,5 GB/h) depende da banda da RedeTV; para acelerar, o Transfer Appliance leva os dados fisicamente.
+Regras da fila: programas mais pedidos pelos editores primeiro, depois os anos mais recentes para trás; um botão "indexar agora" (quem tem `video.reprocessar`) passa um programa à frente; o agendador para quando o teto do mês é atingido. A entrada de dados no GCP não é cobrada, mas o envio de \~270 TB de originais (estimativa a 1,5 GB/h) depende da banda da RedeTV; para acelerar, o Transfer Appliance leva os dados fisicamente.
 
 ## Arquitetura serverless
 
@@ -182,11 +182,11 @@ As permissões são granulares e negadas por padrão: cada rota da API confere a
 
 | Papel | Pode |
 | --- | --- |
-| Consulta | Buscar, assistir e ver a decupagem |
-| Operador | Consulta + enviar vídeos, acompanhar e reprocessar |
-| Editor | Consulta + corrigir pessoas, pautas, objetos, comerciais e tempos |
+| Consulta | Buscar, assistir, ver e baixar a decupagem (é o papel da conta nova) |
+| Operador | Igual à Consulta (deixou de enviar e reprocessar no #376) |
+| Editor | Consulta + enviar vídeos, acompanhar, reprocessar o que falhou e corrigir pessoas, pautas, objetos, comerciais e tempos |
 | Curador | Editor + aprovar correções, mesclar pessoas, editar em lote, gerir o catálogo de pessoas e marcas |
-| Diretoria | Painel de indicadores, só leitura |
+| Diretoria | Consulta + painel de indicadores, só leitura |
 | Administrador | Usuários, papéis, chaves de API, configurações e auditoria; só em conta local com MFA |
 
 Exemplos de permissões: `video.enviar`, `decupagem.editar`, `pessoa.mesclar`, `painel.ver`, `usuario.gerir`. Toda mudança de papel fica no histórico de auditoria.
@@ -350,7 +350,7 @@ A interface segue o modelo do Video Indexer: player à esquerda, painel da decup
 
 | Tela | O que tem | Quem acessa |
 | --- | --- | --- |
-| Biblioteca | Lista de vídeos com status de processamento, filtros por programa e data, upload de MP4 | Consulta e Operador |
+| Biblioteca | Lista de vídeos com status de processamento, filtros por programa e data, upload de MP4 (Editor e Curador) | Consulta |
 | Vídeo · Decupagem | Player com painel lateral: pessoas com o quadro de evidência, separando quem aparece de quem é citado, pautas, objetos e cenários com miniaturas, comerciais e marcas, palavras-chave. Cada item tem a barra de ocorrências e os botões "anterior" e "próxima" para pular entre aparições | Consulta |
 | Vídeo · Linha do tempo | Transcrição sincronizada com o player, planos com miniatura, faixas por tipo de ocorrência | Consulta |
 | Busca | Barra de busca por texto ou imagem; resultados agrupados por vídeo, com os momentos e o motivo | Consulta |

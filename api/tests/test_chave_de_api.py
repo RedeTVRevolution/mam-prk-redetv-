@@ -16,6 +16,7 @@ from api.chaves import (
 )
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.papeis import RepositorioDePapeisEmMemoria
 from api.programas import PERFIS
 from api.tests.test_analise import SHA, DecupagensEmMemoria
 from api.tests.test_auth import VerificadorFalso
@@ -44,12 +45,15 @@ def _cliente(
     mac: MacSimulado = MAC_V1,
     jobs: RepositorioEmMemoria | None = None,
 ) -> TestClient:
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("u1", ["editor"])
     return TestClient(
         criar_app(
             VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@b.c")}),
             jobs or RepositorioEmMemoria(),
             ArmazenamentoFalso(),
             chaves=VerificadorDeChaveDeApi(chaves, mac),
+            papeis=papeis,
         )
     )
 
