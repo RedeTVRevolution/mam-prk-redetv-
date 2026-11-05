@@ -12,12 +12,13 @@ import time
 import unicodedata
 from collections import defaultdict
 from collections.abc import Callable, Collection
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from itertools import zip_longest
 from typing import Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.catalogo import Catalogo
 from api.comparador import normalizar
@@ -51,6 +52,9 @@ TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
 JUNCAO_MS = 3_000
 VALIDADE_DO_QUADRO = timedelta(minutes=10)
+# Assinaturas simultâneas para a chave de sistema: cada uma é uma ida ao IAM, e cem
+# momentos em fila passavam dos 15 s da rota.
+TETO_DE_ASSINATURAS = 16
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
 ROTULO_DO_TIPO: dict[str, str] = {
@@ -111,7 +115,18 @@ class Momento(BaseModel):
     fim_ms: int
     motivo: str
     destaques: list[Destaque]
-    quadro_url: str | None  # assinada só para chave de sistema; a web recebe `null`
+    # Assinada só para chave de sistema; a web recebe `null`. Obsoleto: sairá da resposta,
+    # os sistemas pedem a URL pela rota do quadro a partir do campo `quadro`.
+    quadro_url: str | None = Field(
+        json_schema_extra={
+            "deprecated": True
+        },  # só no esquema: `deprecated=True` avisa a cada leitura
+        description=(
+            "Obsoleto: vai sair da resposta. Use o campo `quadro` e peça a URL em "
+            "`GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo do "
+            "`quadro` (`plano-6.jpg`)."
+        ),
+    )
     # Caminho do quadro no vídeo (`quadros/plano-6.jpg`): a web pede a URL pela rota do quadro.
     quadro: str | None = None
 
@@ -393,7 +408,9 @@ class Busca:
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        videos = self._videos(trechos, job, termos, ordem, sistema, cancelado)[:limite]
+        videos = self._videos(trechos, job, termos, ordem, cancelado)[:limite]
+        if sistema is not None:
+            self._assinar_os_quadros(videos, cancelado)
         vazios = [
             self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
@@ -543,19 +560,27 @@ class Busca:
             )
         return clausulas
 
-    def _url_do_quadro(
+    def _assinar_os_quadros(
         self,
-        job_id: str,
-        quadro: str | None,
-        sistema: str | None,
+        videos: list[VideoDoResultado],
         cancelado: threading.Event | None,
-    ) -> str | None:
-        """Só a chave de sistema recebe a URL assinada; cada assinatura é uma ida ao IAM,
-        então o cancelamento é conferido antes de cada uma."""
-        if not quadro or sistema is None:
-            return None
-        _conferir(cancelado)
-        return self._armazenamento.url_do_quadro(job_id, quadro, VALIDADE_DO_QUADRO)
+    ) -> None:
+        """Só a chave de sistema recebe a URL assinada. Cada assinatura é uma ida ao IAM:
+        vão em paralelo, até `TETO_DE_ASSINATURAS`, e o cancelamento é conferido antes de
+        cada uma."""
+
+        def assinar(video: VideoDoResultado, momento: Momento) -> None:
+            assert momento.quadro is not None
+            _conferir(cancelado)
+            momento.quadro_url = self._armazenamento.url_do_quadro(
+                video.job_id, momento.quadro, VALIDADE_DO_QUADRO
+            )
+
+        pedidos = [(v, m) for v in videos for m in v.momentos if m.quadro]
+        if not pedidos:
+            return
+        with ThreadPoolExecutor(max_workers=TETO_DE_ASSINATURAS) as pool:
+            list(pool.map(assinar, *zip(*pedidos, strict=True)))
 
     def _videos(
         self,
@@ -563,7 +588,6 @@ class Busca:
         job: Callable[[str], Job | None],
         termos: list[str],
         ordem: Ordem,
-        sistema: str | None,
         cancelado: threading.Event | None,
     ) -> list[VideoDoResultado]:
         por_video: dict[str, list[_Trecho]] = defaultdict(list)
@@ -585,7 +609,7 @@ class Busca:
                     motivo=t.motivo,
                     destaques=_destaques(t.motivo, termos),
                     quadro=t.quadro,
-                    quadro_url=self._url_do_quadro(id, t.quadro, sistema, cancelado),
+                    quadro_url=None,
                 )
                 for t in lista
             ]
