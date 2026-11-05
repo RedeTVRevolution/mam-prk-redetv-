@@ -765,7 +765,7 @@ test('a aba Objetos lista o inventário dos planos por categoria, sem repetir, e
   const veiculos = within(painel()).getByRole('region', { name: 'veículo do vídeo' })
   expect(within(veiculos).getAllByRole('button').map((b) => b.textContent)).toEqual(['carro azul (azul · BYD)2 planos'])
   const roupas = within(painel()).getByRole('region', { name: 'roupa do vídeo' })
-  expect(within(roupas).getAllByRole('button').map((b) => b.textContent)).toEqual(['blazer preto1 plano', 'camisa1 plano'])
+  expect(within(roupas).getAllByRole('button').map((b) => b.textContent)).toEqual(['camisa1 plano', 'blazer preto1 plano'])
   // Os objetos ligados às pessoas continuam como estão.
   expect(within(painel()).getByRole('button', { name: /^sandália, 2 ocorrências/ })).toBeTruthy()
 })
@@ -782,4 +782,8 @@ test('apontar um objeto do inventário na aba Objetos mostra a caixa, e clicar l
 
   await usuario.click(carro)
   expect(player.currentTime).toBe(200)
+  // Fechar a lista dos planos não mexe no player.
+  player.currentTime = 500
+  await usuario.click(carro)
+  expect(player.currentTime).toBe(500)
 })

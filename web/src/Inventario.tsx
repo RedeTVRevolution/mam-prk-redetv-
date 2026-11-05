@@ -162,8 +162,8 @@ export function QuadroDoObjeto({
 }
 
 /**
- * Um objeto de cena do vídeo inteiro: apontar mostra o quadro com a caixa, clicar leva ao primeiro plano
- * e abre a lista dos planos em que aparece.
+ * Um objeto de cena do vídeo inteiro: apontar mostra o quadro com a caixa; clicar abre a lista dos planos em que
+ * aparece e leva o player ao plano desse quadro (fechar a lista não mexe no player).
  */
 function ObjetoDoVideoNaLista({
   objeto,
@@ -184,8 +184,8 @@ function ObjetoDoVideoNaLista({
         {...eventos}
         aria-expanded={aberto}
         onClick={() => {
-          setAberto((a) => !a)
-          aoSaltar(objeto.planos[0].inicio_ms)
+          if (!aberto) aoSaltar(objeto.planoDaCaixa.inicio_ms)
+          setAberto(!aberto)
         }}
         style={{ display: 'block', textAlign: 'left', padding: '2px 4px' }}
       >
@@ -206,7 +206,7 @@ function ObjetoDoVideoNaLista({
         <Stack gap={0} ml="md">
           {objeto.planos.map((p) => (
             <UnstyledButton
-              key={p.inicio_ms}
+              key={p.id}
               onClick={() => aoSaltar(p.inicio_ms)}
               style={{ textAlign: 'left', padding: '1px 4px' }}
             >

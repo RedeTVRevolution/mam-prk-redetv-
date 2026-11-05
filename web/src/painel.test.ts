@@ -301,3 +301,37 @@ test('o inventário do vídeo ignora acento e caixa no nome e é vazio sem inven
   expect(grupos[0].objetos).toHaveLength(1)
   expect(grupos[0].objetos[0].planos).toHaveLength(2)
 })
+
+test('o inventário do vídeo conta o plano uma vez, leva ao plano da maior caixa e põe o destaque maior primeiro', () => {
+  const cadeira = (quadro: string, largura: number) => ({
+    nome: 'cadeira',
+    categoria: 'movel' as const,
+    caixas: [caixa(quadro, largura)],
+    destaque: 1 as const,
+  })
+  const [moveis] = inventarioDoVideo([
+    {
+      id: 'a',
+      ambiente: 'estúdio',
+      inicio_ms: 0,
+      fim_ms: 5_000,
+      inventario: [cadeira('q-a.jpg', 0.1), cadeira('q-a.jpg', 0.2)],
+    },
+    {
+      id: 'b',
+      ambiente: 'sala',
+      inicio_ms: 5_000,
+      fim_ms: 9_000,
+      inventario: [
+        cadeira('q-b.jpg', 0.5),
+        { nome: 'sofá', categoria: 'movel', caixas: [caixa('q-b.jpg', 0.3)], destaque: 3 },
+      ],
+    },
+  ])
+
+  expect(moveis.objetos.map((o) => o.nome)).toEqual(['sofá', 'cadeira'])
+  const [, cadeiras] = moveis.objetos
+  expect(cadeiras.planos.map((p) => p.id)).toEqual(['a', 'b'])
+  expect(cadeiras.caixa.quadro).toBe('q-b.jpg')
+  expect(cadeiras.planoDaCaixa.id).toBe('b')
+})

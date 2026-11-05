@@ -556,7 +556,7 @@ export function Painel({
 
   const objetos = useMemo(() => objetosDaAba(itens), [itens])
   const inventario = useMemo(() => inventarioDoVideo(decupagem.planos), [decupagem])
-  const objetosDeCena = inventario.reduce((n, g) => n + g.objetos.length, 0)
+  const objetosNaAba = objetos.length + inventario.reduce((n, g) => n + g.objetos.length, 0)
 
   const { aparicoes, mencoes } = useMemo(() => {
     const daAba = itensDaAba(itens, 'pessoas')
@@ -567,7 +567,7 @@ export function Painel({
   const contagens: Record<Exclude<Aba, 'agora'>, number> = {
     pessoas: pessoas.length,
     pautas: pautas.length,
-    objetos: objetos.length + objetosDeCena,
+    objetos: objetosNaAba,
     comerciais: itensDaAba(itens, 'comerciais').length,
     textos: itensDaAba(itens, 'textos').length,
     planos: itensDaAba(itens, 'planos').length,
@@ -798,45 +798,45 @@ export function Painel({
       )
   } else if (aba === 'objetos') {
     conteudo =
-      objetos.length + objetosDeCena === 0 ? (
+      objetosNaAba === 0 ? (
         <Text size="sm" c="dimmed">
           {VAZIO_DA_ABA.objetos}
         </Text>
       ) : (
         <>
-        {objetos.map(({ dados, ocorrencias }) => {
-          const abrir = objetosAbertos.has(dados.id)
-          const quantas = `${ocorrencias.length} ${ocorrencias.length === 1 ? 'ocorrência' : 'ocorrências'}`
-          return (
-            <Stack key={dados.id} gap={2}>
-              <UnstyledButton
-                aria-expanded={abrir}
-                aria-label={`${dados.tipo}, ${quantas}`}
-                onClick={() => alternarObjeto(dados.id)}
-                p="xs"
-              >
-                <Group gap="xs" justify="space-between" wrap="nowrap">
-                  <MiniaturaDoPainel caminho={ocorrencias[0]?.quadro ?? null} urlDoQuadro={urlDoQuadro} />
-                  <Text size="sm" style={{ flex: 1 }}>
-                    {dados.tipo}
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    {quantas}
-                  </Text>
-                </Group>
-              </UnstyledButton>
-              <Box px="xs">
-                <DescricaoDoObjeto dados={dados} aoIrParaDono={irParaDono} />
-              </Box>
-              {abrir && (
-                <Stack gap={2} ml="md">
-                  {lista(ocorrencias, true)}
-                </Stack>
-              )}
-            </Stack>
-          )
-        })}
-        <InventarioDoVideo grupos={inventario} aoSaltar={aoSaltar} aoApontar={aoApontarObjeto ?? (() => {})} />
+          {objetos.map(({ dados, ocorrencias }) => {
+            const abrir = objetosAbertos.has(dados.id)
+            const quantas = `${ocorrencias.length} ${ocorrencias.length === 1 ? 'ocorrência' : 'ocorrências'}`
+            return (
+              <Stack key={dados.id} gap={2}>
+                <UnstyledButton
+                  aria-expanded={abrir}
+                  aria-label={`${dados.tipo}, ${quantas}`}
+                  onClick={() => alternarObjeto(dados.id)}
+                  p="xs"
+                >
+                  <Group gap="xs" justify="space-between" wrap="nowrap">
+                    <MiniaturaDoPainel caminho={ocorrencias[0]?.quadro ?? null} urlDoQuadro={urlDoQuadro} />
+                    <Text size="sm" style={{ flex: 1 }}>
+                      {dados.tipo}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {quantas}
+                    </Text>
+                  </Group>
+                </UnstyledButton>
+                <Box px="xs">
+                  <DescricaoDoObjeto dados={dados} aoIrParaDono={irParaDono} />
+                </Box>
+                {abrir && (
+                  <Stack gap={2} ml="md">
+                    {lista(ocorrencias, true)}
+                  </Stack>
+                )}
+              </Stack>
+            )
+          })}
+          <InventarioDoVideo grupos={inventario} aoSaltar={aoSaltar} aoApontar={aoApontarObjeto ?? (() => {})} />
         </>
       )
   } else {
