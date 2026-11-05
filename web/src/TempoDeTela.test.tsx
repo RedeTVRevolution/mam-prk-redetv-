@@ -181,7 +181,7 @@ test('o gráfico mostra as pessoas e a divisão por tipo da primeira; clicar na 
   await abrir('/relatorios/tempo-de-tela')
 
   const grafico = await screen.findByRole('img', { name: 'Pessoas com mais tempo de tela' })
-  expect(within(grafico).getByText('Sabrina Sato')).toBeTruthy()
+  expect(await within(grafico).findByText('Sabrina Sato')).toBeTruthy()
   expect(within(grafico).getByText('Leo Dias')).toBeTruthy()
   expect(within(grafico).getByText('12min05s')).toBeTruthy()
 
