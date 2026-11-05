@@ -1812,6 +1812,81 @@ def _acrescentar_pessoa(resultado: dict[str, Any], c: Correcao) -> None:
     _acrescentar_aparicao(nova, aparicao)
 
 
+def _com_a_ocorrencia(
+    pessoas: list[dict[str, Any]], pessoa: dict[str, Any], c: Correcao
+) -> dict[str, Any]:
+    """A pessoa que a correção casou, ou, se a ocorrência que ela aponta veio de
+    uma pessoa que a junção por nome vai absorver, a que tem a ocorrência e o
+    mesmo nome de agora."""
+    if _tem_a_ocorrencia(c, pessoa):
+        return pessoa
+    chave = identidade_do_nome(str(pessoa["nome"]))
+    if chave is None:
+        return pessoa
+    return next(
+        (
+            p
+            for p in pessoas
+            if identidade_do_nome(str(p["nome"])) == chave and _tem_a_ocorrencia(c, p)
+        ),
+        pessoa,
+    )
+
+
+def _juntar_as_do_mesmo_nome(
+    resultado: dict[str, Any], renomeadas: dict[int, int]
+) -> None:
+    """Pessoas com o mesmo nome (normalizado) viram uma: a primeira da lista
+    absorve as outras. "Não identificado" nunca junta. Roda no fim de `aplicar`,
+    para cada correção casar pela identidade do modelo, antes de qualquer troca."""
+    grupos: dict[str, list[dict[str, Any]]] = {}
+    for p in _pessoas(resultado):
+        chave = identidade_do_nome(str(p["nome"]))
+        if chave is not None:
+            grupos.setdefault(chave, []).append(p)
+    para: dict[Any, Any] = {}
+    absorvidas: list[dict[str, Any]] = []
+    for membros in grupos.values():
+        if len(membros) < 2:
+            continue
+        base, *outras = membros
+        trocadas = [m for m in membros if id(m) in renomeadas]
+        for outra in outras:
+            for lista in LISTAS:
+                base[lista] = [*base.get(lista, []), *outra.get(lista, [])]
+                _por_inicio(base[lista])
+            base["fontes_do_nome"] = list(
+                dict.fromkeys(
+                    [*base.get("fontes_do_nome", []), *outra.get("fontes_do_nome", [])]
+                )
+            )
+            if outra.get("origem") == "revisao":
+                base["origem"] = "revisao"
+            para[outra.get("id")] = base.get("id")
+            absorvidas.append(outra)
+        if trocadas:
+            nova = max(trocadas, key=lambda m: renomeadas[id(m)])
+            base["origem"] = "revisao"
+            for campo in ("estado_do_nome", "catalogo_id"):
+                if campo in nova:
+                    base[campo] = nova[campo]
+                else:
+                    base.pop(campo, None)
+    if not absorvidas:
+        return
+    resultado["pessoas"] = [
+        p for p in _pessoas(resultado) if not any(p is a for a in absorvidas)
+    ]
+    for pauta in _pautas(resultado):
+        if "pessoas" in pauta:
+            pauta["pessoas"] = list(
+                dict.fromkeys(para.get(i, i) for i in pauta["pessoas"])
+            )
+    for objeto in _objetos(resultado):
+        if objeto.get("pessoa") in para:
+            objeto["pessoa"] = para[objeto["pessoa"]]
+
+
 def aplicar(
     modelo: dict[str, Any], versao: str, correcoes: list[Correcao]
 ) -> dict[str, Any]:
@@ -1849,6 +1924,8 @@ def aplicar(
     # reprocessamentos frequentes ou muitas correções por vídeo.
     reconciliadas = reconciliar(modelo, versao, correcoes)
     esvaziadas: list[dict[str, Any]] = []
+    # Quem recebeu troca de nome, e em que ordem: a junção fica com a mais nova.
+    renomeadas: dict[int, int] = {}
     atendidas = {c.id for c in reconciliadas.atendidas}
     reapontadas = {c.id for c in reconciliadas.casadas}
     da_versao = [
@@ -1887,14 +1964,18 @@ def aplicar(
         ):
             if not casa(c, pessoa, identidade):
                 continue
+            pessoa = _com_a_ocorrencia(pessoas, pessoa, c)
             if c.id in atendidas:
                 if entrada.atender_na_pessoa is not None:
                     entrada.atender_na_pessoa(pessoa, do_modelo, c)
                 continue
             assert entrada.aplicar_na_pessoa is not None
             entrada.aplicar_na_pessoa(resultado, pessoa, c)
+            if c.tipo == "pessoa.renomear":
+                renomeadas[id(pessoa)] = len(renomeadas) + 1
             if entrada.pode_esvaziar:
                 esvaziadas.append(pessoa)
+    _juntar_as_do_mesmo_nome(resultado, renomeadas)
     # A pessoa que ficou sem nenhuma ocorrência some da decupagem, e das pautas.
     sumidas = [e for e in esvaziadas if not any(e[lista] for lista in LISTAS)]
     if sumidas:
