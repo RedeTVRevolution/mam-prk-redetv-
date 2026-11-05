@@ -131,7 +131,7 @@ export function DivisaoEmFaixa({ rotulo, fatias }: { rotulo: string; fatias: Fat
       <Group gap="lg">
         {fatias.map((f) => (
           <Group key={f.nome} gap="xs">
-            <Box w={10} h={10} bg={f.cor} style={{ borderRadius: 2 }} aria-hidden />
+            <Box w={8} h={8} bg={f.cor} style={{ borderRadius: 2 }} aria-hidden />
             <Text size="xs" c={CORES.textoSecundario}>
               {f.nome}
             </Text>
@@ -204,7 +204,7 @@ export function MatrizDeCalor({
                     <UnstyledButton
                       type="button"
                       w="100%"
-                      py={6}
+                      py={4}
                       px="sm"
                       ta="right"
                       aria-label={`${linha}, ${c.nome}: ${celula.texto}`}

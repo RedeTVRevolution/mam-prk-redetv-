@@ -144,12 +144,14 @@ test('Baixar CSV pede o formato csv com os mesmos filtros e entrega o arquivo', 
   clique.mockRestore()
 })
 
-test('sem inserção no filtro, a tela diz isso e não oferece o CSV', async () => {
+test('sem inserção no filtro, a tela diz isso, não oferece o CSV e não há gráfico', async () => {
   resposta = () => HttpResponse.json({ ...RELATORIO, marcas: [] })
   await abrir('/relatorios/marcas')
 
   expect(await screen.findByText('Nenhuma inserção de marca neste filtro.')).toBeTruthy()
   expect((screen.getByRole('button', { name: 'Baixar CSV' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('img', { name: 'Marcas com mais tempo' })).toBeNull()
+  expect(screen.queryByRole('table', { name: 'Tempo por marca e tipo de inserção' })).toBeNull()
 })
 
 test('erro da API mostra o alerta com o código e tenta de novo', async () => {
