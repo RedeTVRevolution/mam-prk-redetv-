@@ -833,7 +833,7 @@ resource "google_bigquery_table" "momentos" {
     field = "data_de_exibicao"
   }
   clustering = ["programa", "job_id"]
-  schema              = local.esquema_dos_momentos
+  schema     = local.esquema_dos_momentos
 }
 
 resource "google_bigquery_dataset_iam_member" "grava_momentos" {

@@ -158,4 +158,4 @@ Passos humanos depois do `publicar`:
 
 1. `make copiar-para-bigquery` preenche a nova a partir das decupagens. Até rodar, os relatórios do dev saem vazios.
 2. `bq show <dataset>.momentos_por_ano` deve mostrar `YEAR`; o relatório de tempo de tela dá os mesmos números de antes.
-3. Apagar a antiga: pôr `deletion_protection = false` nela, aplicar, tirar o recurso `momentos` do código e aplicar com `PERMITIR_DESTRUICAO=sim`.
+3. Apagar a antiga: pôr `deletion_protection = false` nela, aplicar, tirar do código o recurso `momentos`, o local `tabela_antiga_de_momentos` e o `moved` dele em `infra/main.tf`, e aplicar com `PERMITIR_DESTRUICAO=sim`.

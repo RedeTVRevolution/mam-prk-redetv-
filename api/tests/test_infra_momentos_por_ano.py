@@ -26,9 +26,10 @@ def test_o_nome_em_uso_aponta_para_a_nova_e_a_antiga_fica_a_parte() -> None:
     assert re.search(
         r'^\s*tabela_de_momentos\s*=\s*"momentos_por_ano"', TF, re.MULTILINE
     )
-    antiga = _bloco('resource "google_bigquery_table" "momentos"')
-    assert "local.tabela_antiga_de_momentos" in antiga
-    assert "local.tabela_de_momentos" not in antiga
+    # A antiga sai do código depois da cópia (passo humano no infra/README.md).
+    cabecalho = 'resource "google_bigquery_table" "momentos" '
+    if cabecalho in TF:
+        assert "local.tabela_de_momentos" not in _bloco(cabecalho)
 
 
 def test_servicos_jobs_e_output_usam_a_tabela_nova() -> None:
