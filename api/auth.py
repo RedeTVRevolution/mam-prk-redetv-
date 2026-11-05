@@ -8,6 +8,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.papeis import DocumentoDePapeis
+
 PREFIXO_PROTEGIDO = "/v1"
 # Única rota de /v1 sem token: a checagem de saúde do Cloud Run e do deploy.
 CAMINHO_HEALTH = "/v1/health"
@@ -133,7 +135,7 @@ async def _autenticar(request: Request) -> Chamador | None:
         return None
 
 
-async def _documento_de_papeis(request: Request, usuario: Usuario) -> Any:
+async def _documento_de_papeis(request: Request, usuario: Usuario) -> DocumentoDePapeis:
     # Uma leitura por pedido: vale para a marca `desativada` e, guardada em
     # `request.state`, para os papéis das dependências de permissão.
     papeis: Any = request.app.state.papeis

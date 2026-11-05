@@ -10,13 +10,16 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
-from api.catalogo import CatalogoEmMemoria, PessoaDoCatalogo
+from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira, PessoaDoCatalogo
+from api.catalogo_apagado import lido_em_lote
+from api.correcoes import RepositorioDeAprovacaoEmMemoria
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria, MarcaDoCatalogo
 from api.nuvem import AssinaturaPeloIam
 from api.papeis import DocumentoDePapeis, RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
+from api.tests.test_correcoes import BYTES, _novo
 from api.tests.test_jobs import ArmazenamentoFalso
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
@@ -62,9 +65,11 @@ def _cliente(
     catalogo: CatalogoEmMemoria | None = None,
     marcas: CatalogoDeMarcasEmMemoria | None = None,
     armazenamento: ArmazenamentoFalso | None = None,
+    aprovacao: RepositorioDeAprovacaoEmMemoria | None = None,
+    job: Job | None = None,
 ) -> TestClient:
     jobs = RepositorioEmMemoria()
-    jobs.salvar(_job())
+    jobs.salvar(job or _job())
     return TestClient(
         criar_app(
             VerificadorFalso({"admin": Usuario(uid="adm", email="adm@redetv.com")}),
@@ -73,6 +78,7 @@ def _cliente(
             papeis=papeis,
             catalogo=catalogo,
             marcas=marcas,
+            aprovacao=aprovacao,
         )
     )
 
@@ -80,12 +86,27 @@ def _cliente(
 def test_papeis_sao_lidos_uma_vez_por_pedido_mesmo_com_varias_permissoes() -> None:
     papeis = PapeisContados()
     papeis.salvar("adm", ["administrador"])
-    cliente = _cliente(papeis)
+    armazenamento = ArmazenamentoFalso()
+    armazenamento.decupagens["j1"] = [BYTES]
+    na_lixeira = _job().model_copy(
+        update={
+            "lixeira": EnvioParaLixeira(
+                em=BASE, por_uid="adm", por_email="adm@redetv.com", motivo="teste"
+            )
+        }
+    )
+    cliente = _cliente(
+        papeis,
+        armazenamento=armazenamento,
+        aprovacao=RepositorioDeAprovacaoEmMemoria(frozenset({"pessoa.renomear"})),
+        job=na_lixeira,
+    )
 
-    # A rota confere `ler` na dependência e a lixeira do Job: mais de uma permissão.
-    resposta = cliente.get("/v1/jobs/j1", headers=ADMIN)
+    # Três permissões: editar (a dependência), `lixeira.gerir` (o Job está na lixeira)
+    # e `correcao.aprovar` (o tipo da correção espera o Curador).
+    resposta = cliente.post("/v1/jobs/j1/correcoes", json=_novo(), headers=ADMIN)
 
-    assert resposta.status_code == 200
+    assert resposta.status_code == 201
     assert papeis.leituras == 1
 
 
@@ -227,3 +248,25 @@ def test_decupagem_com_30_pessoas_de_10_ids_faz_uma_leitura_em_lote() -> None:
     assert catalogo.individuais == 0
     assert marcas.individuais == 0
     assert all(p["catalogo_id"].startswith("p") for p in resposta.json()["pessoas"])
+
+
+def test_id_apagado_do_lote_nao_volta_a_ser_lido_um_a_um() -> None:
+    lotes: list[list[str]] = []
+    individuais: list[str] = []
+
+    def em_lote(ids: list[str]) -> dict[str, str]:
+        lotes.append(ids)
+        return {"vivo": "Vivo"}
+
+    def obter(id: str) -> str | None:
+        individuais.append(id)
+        return "Destino" if id == "destino" else None
+
+    pessoa = lido_em_lote(["vivo", "apagado"], em_lote, obter)
+
+    for _ in range(30):
+        assert pessoa("vivo") == "Vivo"
+        assert pessoa("apagado") is None
+        assert pessoa("destino") == "Destino"
+    assert lotes == [["vivo", "apagado"]]
+    assert individuais == ["destino"]
