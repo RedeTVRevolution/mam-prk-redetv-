@@ -59,12 +59,12 @@ _Evitar_: lettering
 O texto que o OCR lê no proxy, um quadro por segundo (`api/leitura_da_tela.py`). O OCR só lê de novo quando a imagem muda (`api/mudanca_da_tela.py`, #233): compara com o último quadro lido, em seis faixas horizontais de oito blocos, contra o limiar `LIMIAR_DE_MUDANCA`; o quadro igual repete a leitura, e o formato guardado segue com um quadro por segundo. O detector (`server` ou o leve `mobile`) é o `ARG DETECTOR` da imagem. `make comparar-leituras` compara duas leituras do mesmo vídeo.
 
 **Perfil do programa**:
-Contexto fixo de um programa (apresentadores, repórteres, merchandising frequente), em `api/programas.toml`, que a instrução do modelo recebe quando o Job informa o programa.
+Contexto fixo de um programa (apresentadores, repórteres, merchandising frequente), cadastrado no Firestore (`api/programas.py`) e editado na aba Programas da administração (permissão `programas.editar`: Editor, Curador e Administrador), que a instrução do modelo recebe quando o Job informa o programa.
 
 ### Pessoas e evidência
 
 **Catálogo de pessoas**:
-Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel e apelidos. Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (GC ou fala; que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
+Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel e apelidos. Começou pela carga de `docs/migracao/programas-2026-11.toml` (`make carregar-programas`) e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (GC ou fala; que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
 _Evitar_: base de famosos
 
 **Catálogo de marcas**:

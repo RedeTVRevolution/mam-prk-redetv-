@@ -29,6 +29,9 @@ const ACOES_DA_API = [
   'aprovacao.alterada',
   'painel.aberto',
   'painel.exportado',
+  'programa.criado',
+  'programa.alterado',
+  'programa.apagado',
 ]
 
 interface Registro {

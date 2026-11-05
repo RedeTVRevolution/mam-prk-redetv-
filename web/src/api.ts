@@ -271,6 +271,40 @@ export interface ClienteDaLixeira {
   purgar(tipo: TipoDeItem, id: string, nome: string): Promise<void>
 }
 
+/** Uma pessoa no programa, com o papel que tem nele (`/v1/admin/programas`). */
+export interface PessoaNoPrograma {
+  pessoa_id: string
+  nome: string
+  apelidos: string[]
+  papel: string
+}
+
+export interface ProgramaCadastrado {
+  id: string
+  nome: string
+  perfil: string
+  pessoas: PessoaNoPrograma[]
+}
+
+/** O que o formulário grava: as pessoas vão só com o id e o papel. */
+export interface DadosDoPrograma {
+  nome: string
+  perfil: string
+  pessoas: { pessoa_id: string; papel: string }[]
+}
+
+/** O cadastro de programas (exige `programas.editar`). */
+export interface ClienteDoCadastroDeProgramas {
+  listar(): Promise<ProgramaCadastrado[]>
+  criar(dados: DadosDoPrograma): Promise<ProgramaCadastrado>
+  mudar(id: string, dados: DadosDoPrograma): Promise<ProgramaCadastrado>
+  /** Quantos vídeos já enviados guardam o nome do programa. */
+  impacto(id: string): Promise<{ videos: number }>
+  apagar(id: string): Promise<void>
+  /** A pessoa que ainda não está no catálogo; se o nome já existe devolve a existente. */
+  criarPessoa(nome: string, apelidos: string[]): Promise<PessoaNoPrograma>
+}
+
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
@@ -330,6 +364,7 @@ export interface ClienteDaApi {
   chaves: ClienteDeChaves
   aprovacao: ClienteDeAprovacao
   lixeira: ClienteDaLixeira
+  cadastroDeProgramas: ClienteDoCadastroDeProgramas
   job(id: string): ClienteDoJob
 }
 
@@ -344,7 +379,7 @@ export function criarClienteDaApi(
 ): ClienteDaApi {
   async function pedir(
     caminho: string,
-    opcoes: { post?: true; put?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; apagar?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<Response> {
     const token = await autenticador.token()
     if (!token) {
@@ -356,7 +391,7 @@ export function criarClienteDaApi(
     }
     if (opcoes.corpo !== undefined) headers['Content-Type'] = 'application/json'
     const resposta = await fetch(caminho, {
-      method: opcoes.post ? 'POST' : opcoes.put ? 'PUT' : undefined,
+      method: opcoes.post ? 'POST' : opcoes.put ? 'PUT' : opcoes.apagar ? 'DELETE' : undefined,
       headers,
       // Com `FormData` o navegador monta o Content-Type do multipart, com o limite.
       body: opcoes.formulario ?? (opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo)),
@@ -377,7 +412,7 @@ export function criarClienteDaApi(
 
   async function chamar<T>(
     caminho: string,
-    opcoes: { post?: true; put?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; apagar?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<T> {
     return (await (await pedir(caminho, opcoes)).json()) as T
   }
@@ -554,6 +589,16 @@ export function criarClienteDaApi(
       purgar: async (tipo, id, nome) => {
         await pedir(`${caminhoDaLixeira(tipo, id)}/purgar`, { post: true, corpo: { nome } })
       },
+    },
+    cadastroDeProgramas: {
+      listar: () => chamar('/v1/admin/programas'),
+      criar: (corpo) => chamar('/v1/admin/programas', { post: true, corpo }),
+      mudar: (id, corpo) => chamar(`/v1/admin/programas/${encodeURIComponent(id)}`, { put: true, corpo }),
+      impacto: (id) => chamar(`/v1/admin/programas/${encodeURIComponent(id)}/impacto`),
+      apagar: async (id) => {
+        await pedir(`/v1/admin/programas/${encodeURIComponent(id)}`, { apagar: true })
+      },
+      criarPessoa: (nome, apelidos) => chamar('/v1/admin/programas/pessoas', { post: true, corpo: { nome, apelidos } }),
     },
     job,
   }
