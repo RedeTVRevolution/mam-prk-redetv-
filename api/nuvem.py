@@ -63,6 +63,7 @@ from api.jobs import (
     Job,
     NomeDaEtapa,
     PaginaDeJobs,
+    RepositorioDeJobs,
     ServicoIndisponivel,
     casa_com_o_filtro,
     disposicao_do_nome,
@@ -826,6 +827,32 @@ class ProgramasFirestore:
         resultado: Programa | None = _repetir_sob_disputa(
             trocar_na_transacao, self._cliente
         )
+        return resultado
+
+    def levar_o_nome_ao_job(
+        self, programa_id: str, job_id: str, jobs: RepositorioDeJobs
+    ) -> Job | None:
+        # Os Jobs estão no mesmo Firestore: a transação lê o programa e o Job juntos.
+        if not isinstance(jobs, RepositorioFirestore):
+            raise TypeError("os Jobs precisam estar no Firestore")
+        programa_ref = self._colecao.document(programa_id)
+        job_ref = self._cliente.collection(jobs._colecao.id).document(job_id)
+
+        @firestore.transactional
+        def levar(transacao: Any) -> Job | None:
+            programa = programa_ref.get(transaction=transacao)
+            doc = job_ref.get(transaction=transacao)
+            if not programa.exists or not doc.exists:
+                return None
+            nome = (programa.to_dict() or {})["nome"]
+            job = Job(**(doc.to_dict() or {}))
+            if job.programa == nome:
+                return job
+            novo = job.model_copy(update={"programa": nome})
+            transacao.set(job_ref, novo.model_dump())
+            return novo
+
+        resultado: Job | None = _repetir_sob_disputa(levar, self._cliente)
         return resultado
 
     def apagar(self, id: str) -> None:

@@ -281,21 +281,18 @@ def criar_rotas_dos_programas(
         r = da_troca(programa_id, troca_id)
         if r is None:
             return
-        para = r.nome_novo
         for _ in range(RODADAS):
             for job_id in list(r.pendentes):
                 try:
                     # Antes de mexer no Job: outra troca pode ter tomado o lugar desta.
                     if da_troca(programa_id, troca_id) is None:
                         return
-                    # Reindexa o Job devolvido pela troca (ou relido, se a troca já
-                    # tinha sido feita), nunca um lido antes: ele levaria o nome antigo.
-                    # O pendente herdado de uma troca que falhou pode ter um nome mais
-                    # antigo que `nome_antigo`: vale todo nome que não é o novo.
-                    job = jobs.trocar(
-                        job_id,
-                        lambda j: {"programa": para} if j.programa != para else None,
-                    ) or jobs.obter(job_id)
+                    # O Job recebe o nome que o programa tem agora, lido na mesma
+                    # transação, e não o desta troca: entre a conferência acima e a
+                    # gravação, outra instância pode ter terminado uma troca mais nova.
+                    # Também leva ao nome atual o pendente herdado com um nome mais antigo.
+                    # Reindexa o Job devolvido, nunca um lido antes.
+                    job = programas.levar_o_nome_ao_job(programa_id, job_id, jobs)
                     # Na lixeira também: restaurar não reindexa, e o vídeo voltaria
                     # com o nome antigo na busca e nos relatórios.
                     pronto = job is None or job.estado != "concluido" or reindexar(job)
@@ -440,7 +437,7 @@ def criar_rotas_dos_programas(
     def retomar(
         id: str,
         segundo_plano: BackgroundTasks,
-        _autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
     ) -> ProgramaPublico:
         programa = programas.obter(id)
         if programa is None or programa.renomeacao is None:
@@ -452,8 +449,33 @@ def criar_rotas_dos_programas(
             if r.desde is None or relogio() - r.desde < PRAZO_DA_CONFIRMACAO:
                 raise HTTPException(409, "A troca de nome ainda espera a auditoria")
             # O PUT morreu entre gravar e auditar. O nome novo já vale para todos e não
-            # se sabe se a auditoria chegou a gravar: a troca segue.
+            # se sabe se a auditoria chegou a gravar: quem retoma registra a mudança
+            # (talvez em dobro) e a troca segue; sem o registro, não segue.
             log.warning("troca %s do programa %s retomada sem confirmar", r.id, id)
+            try:
+                auditoria.acrescentar(
+                    RegistroDeAuditoria(
+                        id=uuid.uuid4().hex,
+                        quando=relogio(),
+                        uid=autor.uid,
+                        email=autor.email,
+                        acao="programa.alterado",
+                        alvo_tipo="programa",
+                        alvo_id=id,
+                        alvo_nome=programa.nome,
+                        detalhes={
+                            "recuperacao": "troca de nome vencida, sem confirmar",
+                            "troca": r.id,
+                            "nome_antigo": r.nome_antigo,
+                            "nome_novo": r.nome_novo,
+                        },
+                    )
+                )
+            except Exception:
+                log.exception("auditoria da troca %s retomada falhou", r.id)
+                raise HTTPException(
+                    503, "Auditoria indisponível: tente de novo"
+                ) from None
         retomada = mudar_a_troca(
             id,
             r.id,

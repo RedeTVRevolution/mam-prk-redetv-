@@ -38,8 +38,9 @@ def _cliente(
     armazenamento: ArmazenamentoFalso | None = None,
     indice: IndiceQueFalhaAteConsertar | None = None,
     copia: CopiaEmMemoria | None = None,
+    cadastro: tuple[ProgramasEmMemoria, Catalogo] | None = None,
 ) -> tuple[TestClient, ProgramasEmMemoria, Catalogo]:
-    programas, catalogo = cadastro_com_tv_fama()
+    programas, catalogo = cadastro or cadastro_com_tv_fama()
     repositorio_de_papeis = RepositorioDePapeisEmMemoria()
     repositorio_de_papeis.salvar("u1", papeis)
     cliente = TestClient(
@@ -137,14 +138,25 @@ class Acervo:
             self.armazenamento.decupagens[job.id] = [
                 EXEMPLOS[0].decupagem.model_dump_json().encode()
             ]
-        self.cliente, self.programas, _ = _cliente(
+        self.auditoria = RepositorioDeAuditoriaEmMemoria()
+        self.cliente, self.programas, self.catalogo = self.instancia(self.auditoria)
+        self.id = next(p.id for p in self.programas.listar() if p.nome == "TV Fama")
+
+    def instancia(
+        self,
+        auditoria: RepositorioDeAuditoriaEmMemoria,
+        cadastro: tuple[ProgramasEmMemoria, Catalogo] | None = None,
+    ) -> tuple[TestClient, ProgramasEmMemoria, Catalogo]:
+        """Uma instância da API sobre estes repositórios (outra, com o `cadastro`)."""
+        return _cliente(
             ["editor"],
             self.jobs,
-            armazenamento=self.armazenamento,
-            indice=self.indice,
-            copia=self.copia,
+            auditoria,
+            self.armazenamento,
+            self.indice,
+            self.copia,
+            cadastro,
         )
-        self.id = next(p.id for p in self.programas.listar() if p.nome == "TV Fama")
 
     def renomear(self, nome: str = "Fama Hoje", perfil: str = "") -> Any:
         return self.cliente.put(
@@ -423,12 +435,85 @@ def test_confirmando_velho_e_retomado_e_o_recente_espera() -> None:
     assert acervo.cliente.post(retomar, headers=AUTORIZACAO).status_code == 409
     assert acervo.programa("j1") == "TV Fama"
 
-    # O PUT morreu entre gravar e auditar: depois do prazo, a troca segue.
+    # O PUT morreu entre gravar e auditar: depois do prazo, a troca segue, e quem
+    # retoma registra a mudança (o PUT pode ter morrido antes de registrá-la).
     velho = recente.model_copy(update={"desde": AGORA - timedelta(hours=1)})
     _com_andamento(acervo.programas, velho)
     assert acervo.cliente.post(retomar, headers=AUTORIZACAO).status_code == 200
 
     assert [acervo.programa(j) for j in ("j1", "j2")] == ["Fama Hoje", "Fama Hoje"]
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None and renomeacao.estado == "concluida"
+    registros = acervo.auditoria.consultar(FiltroDeAuditoria(alvo_id=acervo.id))
+    assert [(r.acao, r.uid, r.detalhes) for r in registros.registros] == [
+        (
+            "programa.alterado",
+            "u1",
+            {
+                "recuperacao": "troca de nome vencida, sem confirmar",
+                "troca": velho.id,
+                "nome_antigo": "Antigo",
+                "nome_novo": "Fama Hoje",
+            },
+        )
+    ]
+
+
+def test_confirmando_velho_sem_auditoria_nao_segue() -> None:
+    acervo = Acervo()
+    velho = _andamento(
+        "confirmando", ["j1", "j2"], "Fama Hoje", desde=AGORA - timedelta(hours=1)
+    )
+    _com_andamento(acervo.programas, velho, nome="Fama Hoje")
+    cliente, _, _ = acervo.instancia(
+        _AuditoriaQueFalha(), (acervo.programas, acervo.catalogo)
+    )
+
+    resposta = cliente.post(
+        f"/v1/admin/programas/{acervo.id}/renomear/retomar", headers=AUTORIZACAO
+    )
+
+    assert resposta.status_code == 503
+    assert acervo.programa("j1") == "TV Fama"
+    assert acervo.programas.obter(acervo.id).renomeacao == velho  # type: ignore[union-attr]
+
+
+def test_tarefa_atrasada_em_outra_instancia_nao_volta_o_nome_do_video(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acervo = Acervo()
+    _troca_que_falhou_em_j1(acervo, monkeypatch)
+    # Instância B, sobre os mesmos repositórios.
+    b, _, _ = acervo.instancia(
+        RepositorioDeAuditoriaEmMemoria(), (acervo.programas, acervo.catalogo)
+    )
+    retomar = f"/v1/admin/programas/{acervo.id}/renomear/retomar"
+    trocar = acervo.jobs.trocar
+    intercalados: list[int] = []
+    pausou: list[bool] = []
+
+    def pausa_antes_de_gravar(job_id: str, mudar: Any) -> Any:
+        # A tarefa da instância A já conferiu a troca e vai gravar j1. Enquanto isso,
+        # B termina a troca para "Fama Hoje" e outra troca, para "Fama Já", inteira.
+        if job_id == "j1" and not pausou:
+            pausou.append(True)
+            intercalados.append(b.post(retomar, headers=AUTORIZACAO).status_code)
+            intercalados.append(
+                b.put(
+                    f"/v1/admin/programas/{acervo.id}",
+                    json={"nome": "Fama Já"},
+                    headers=AUTORIZACAO,
+                ).status_code
+            )
+        return trocar(job_id, mudar)
+
+    monkeypatch.setattr(acervo.jobs, "trocar", pausa_antes_de_gravar)
+    acervo.cliente.post(retomar, headers=AUTORIZACAO)
+
+    assert intercalados == [200, 200]
+    assert acervo.programas.obter(acervo.id).nome == "Fama Já"  # type: ignore[union-attr]
+    assert [acervo.programa(j) for j in ("j1", "j2")] == ["Fama Já", "Fama Já"]
+    assert acervo.no_indice("j1") == {"Fama Já"}
     renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
     assert renomeacao is not None and renomeacao.estado == "concluida"
 

@@ -1300,6 +1300,24 @@ class TestProgramasFirestore:
             programas.trocar("p", lambda p: p.model_copy(update={"nome": "outro"}))
         assert programas.obter("p") == gravado
 
+    def test_levar_o_nome_ao_job_grava_o_nome_atual_do_programa(
+        self, programas: ProgramasFirestore, repositorio: RepositorioFirestore
+    ) -> None:
+        programas.salvar(Programa(id="p", nome="Novo"))
+        repositorio.salvar(_job("a", BASE, programa="Antigo"))
+
+        levado = programas.levar_o_nome_ao_job("p", "a", repositorio)
+
+        assert levado is not None and levado.programa == "Novo"
+        assert repositorio.obter("a") == levado
+        assert programas.levar_o_nome_ao_job("p", "a", repositorio) == levado
+        assert programas.levar_o_nome_ao_job("p", "x", repositorio) is None
+        # Programa apagado: o Job fica como está.
+        programas.apagar("p")
+        repositorio.salvar(_job("b", BASE, programa="Antigo"))
+        assert programas.levar_o_nome_ao_job("p", "b", repositorio) is None
+        assert repositorio.obter("b").programa == "Antigo"  # type: ignore[union-attr]
+
     def test_trocar_nao_recria_o_programa_apagado(
         self, programas: ProgramasFirestore
     ) -> None:

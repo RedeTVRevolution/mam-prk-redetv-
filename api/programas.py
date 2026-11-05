@@ -9,11 +9,14 @@ import uuid
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, StringConstraints
 
 from api.catalogo import Catalogo, visivel
+
+if TYPE_CHECKING:  # `api.jobs` importa este módulo
+    from api.jobs import Job, RepositorioDeJobs
 
 LIMITE_DO_NOME_DO_PROGRAMA = 100
 LIMITE_DO_PERFIL = 4000
@@ -96,6 +99,14 @@ class RepositorioDeProgramas(Protocol):
         programa não existe; `NomeEmUso` se o nome novo é de outro."""
         ...
 
+    def levar_o_nome_ao_job(
+        self, programa_id: str, job_id: str, jobs: "RepositorioDeJobs"
+    ) -> "Job | None":
+        """Grava no Job o nome que o programa tem agora, lido junto com o Job (na mesma
+        transação), e devolve o Job; `None` se o programa ou o Job não existem. Uma
+        tarefa atrasada nunca volta o Job a um nome que o programa já deixou."""
+        ...
+
     def apagar(self, id: str) -> None:
         """`ProgramaInexistente` se o id não existe."""
         ...
@@ -137,6 +148,21 @@ class ProgramasEmMemoria:
         self._conferir_nome(novo)
         self._programas[id] = novo
         return novo
+
+    def levar_o_nome_ao_job(
+        self, programa_id: str, job_id: str, jobs: "RepositorioDeJobs"
+    ) -> "Job | None":
+        def mudar(job: "Job") -> dict[str, Any] | None:
+            # Lido na hora de gravar o Job, como na transação do Firestore.
+            programa = self._programas.get(programa_id)
+            if programa is None or job.programa == programa.nome:
+                return None
+            return {"programa": programa.nome}
+
+        trocado = jobs.trocar(job_id, mudar)
+        if trocado is not None or programa_id not in self._programas:
+            return trocado
+        return jobs.obter(job_id)
 
     def apagar(self, id: str) -> None:
         if self._programas.pop(id, None) is None:
