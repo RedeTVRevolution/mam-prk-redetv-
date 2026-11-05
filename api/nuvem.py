@@ -3,6 +3,7 @@
 import json
 import random
 import secrets
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
@@ -70,7 +71,7 @@ from api.jobs import (
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
-from api.papeis import PAPEIS, Papel
+from api.papeis import PAPEIS, DocumentoDePapeis, Papel
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
@@ -98,6 +99,15 @@ COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 _LOTE_DE_LEITURA = 500
+
+
+def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
+    """Os documentos que existem entre os `ids` (sem repetir), lidos em lotes de
+    `_LOTE_DE_LEITURA` com `get_all`."""
+    referencias = [colecao.document(i) for i in dict.fromkeys(ids)]
+    for inicio in range(0, len(referencias), _LOTE_DE_LEITURA):
+        lote = referencias[inicio : inicio + _LOTE_DE_LEITURA]
+        yield from (d for d in cliente.get_all(lote) if d.exists)
 
 
 def objeto_do_proxy(job_id: str) -> str:
@@ -250,16 +260,11 @@ class RepositorioFirestore:
         return Job(**(doc.to_dict() or {})) if doc.exists else None
 
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        referencias = [self._colecao.document(i) for i in dict.fromkeys(job_ids)]
         # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
         # um pedido só com dezenas de milhares de referências arrisca o prazo.
         return [
             Job(**(doc.to_dict() or {}))
-            for inicio in range(0, len(referencias), _LOTE_DE_LEITURA)
-            for doc in self._cliente.get_all(
-                referencias[inicio : inicio + _LOTE_DE_LEITURA]
-            )
-            if doc.exists
+            for doc in _lidos_em_lote(self._cliente, self._colecao, job_ids)
         ]
 
     def listar(self) -> list[Job]:
@@ -497,22 +502,25 @@ class RepositorioDePapeisFirestore:
     ) -> None:
         self._colecao = cliente.collection(colecao)
 
-    def obter(self, uid: str) -> list[Papel] | None:
+    def ler(self, uid: str) -> DocumentoDePapeis:
         doc = self._colecao.document(uid).get()
         dados = (doc.to_dict() or {}) if doc.exists else {}
-        if "papeis" not in dados:
-            # Só a marca `desativada`: a conta segue sem papéis guardados.
-            return None
+        papeis: list[Papel] | None = None
+        # Sem `papeis` (só a marca `desativada`): a conta segue sem papéis guardados.
         # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
-        return [p for p in PAPEIS if p in dados["papeis"]]
+        if "papeis" in dados:
+            papeis = [p for p in PAPEIS if p in dados["papeis"]]
+        return DocumentoDePapeis(uid, dados.get("desativada") is True, papeis)
+
+    def obter(self, uid: str) -> list[Papel] | None:
+        return self.ler(uid).papeis
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         # merge: não apaga a marca `desativada`.
         self._colecao.document(uid).set({"papeis": papeis}, merge=True)
 
     def desativada(self, uid: str) -> bool:
-        doc = self._colecao.document(uid).get()
-        return doc.exists and (doc.to_dict() or {}).get("desativada") is True
+        return self.ler(uid).desativada
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         self._colecao.document(uid).set({"desativada": desativada}, merge=True)
@@ -631,6 +639,7 @@ class CatalogoFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def _gravar(self, pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
@@ -650,6 +659,12 @@ class CatalogoFirestore:
     def obter(self, id: str) -> PessoaDoCatalogo | None:
         doc = self._colecao.document(id).get()
         return self._pessoa(id, doc.to_dict() or {}) if doc.exists else None
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        return {
+            d.id: self._pessoa(d.id, d.to_dict() or {})
+            for d in _lidos_em_lote(self._cliente, self._colecao, ids)
+        }
 
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
         consulta = self._colecao.where(
@@ -742,6 +757,7 @@ class CatalogoDeMarcasFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO_DE_MARCAS
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     @staticmethod
@@ -752,6 +768,12 @@ class CatalogoDeMarcasFirestore:
     def obter(self, id: str) -> MarcaDoCatalogo | None:
         doc = self._colecao.document(id).get()
         return self._marca(id, doc.to_dict() or {}) if doc.exists else None
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
+        return {
+            d.id: self._marca(d.id, d.to_dict() or {})
+            for d in _lidos_em_lote(self._cliente, self._colecao, ids)
+        }
 
     def achar(self, nome: str) -> list[MarcaDoCatalogo]:
         consulta = self._colecao.where(
@@ -1186,17 +1208,41 @@ class DisparoDaIndexacaoNoCloudRun:
             raise ServicoIndisponivel from e
 
 
-def assinatura_pelo_iam() -> dict[str, Any]:
-    """Assinatura pedida ao IAM pela conta do serviço, sem chave em arquivo."""
-    credenciais: Any
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    credenciais.refresh(google.auth.transport.requests.Request())
-    return {
-        "service_account_email": credenciais.service_account_email,
-        "access_token": credenciais.token,
-    }
+class AssinaturaPeloIam:
+    """Assinatura pedida ao IAM pela conta do serviço, sem chave em arquivo. A credencial
+    é uma por processo e só se renova quando expira (`valid`); a trava evita que várias
+    threads (as capas do Acervo assinam em paralelo) renovem ao mesmo tempo."""
+
+    def __init__(
+        self,
+        obter_credenciais: Callable[[], Any] | None = None,
+        requisicao: Callable[[], Any] | None = None,
+    ) -> None:
+        self._obter = obter_credenciais or self._credenciais_do_ambiente
+        self._requisicao = requisicao or google.auth.transport.requests.Request
+        self._credenciais: Any = None
+        self._trava = threading.Lock()
+
+    @staticmethod
+    def _credenciais_do_ambiente() -> Any:
+        credenciais, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        return credenciais
+
+    def __call__(self) -> dict[str, Any]:
+        with self._trava:
+            if self._credenciais is None:
+                self._credenciais = self._obter()
+            if not self._credenciais.valid:
+                self._credenciais.refresh(self._requisicao())
+            return {
+                "service_account_email": self._credenciais.service_account_email,
+                "access_token": self._credenciais.token,
+            }
+
+
+assinatura_pelo_iam = AssinaturaPeloIam()
 
 
 class DecupagensStorage:

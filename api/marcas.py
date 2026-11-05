@@ -38,6 +38,10 @@ class CatalogoDeMarcas(Protocol):
 
     def obter(self, id: str) -> MarcaDoCatalogo | None: ...
 
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
+        """As marcas que existem entre os `ids`, numa leitura em lote."""
+        ...
+
     def achar(self, nome: str) -> list[MarcaDoCatalogo]:
         """As marcas cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
         ...
@@ -74,6 +78,9 @@ class CatalogoDeMarcasEmMemoria:
 
     def obter(self, id: str) -> MarcaDoCatalogo | None:
         return self._marcas.get(id)
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
+        return {i: self._marcas[i] for i in dict.fromkeys(ids) if i in self._marcas}
 
     def achar(self, nome: str) -> list[MarcaDoCatalogo]:
         chave = normalizar(nome)

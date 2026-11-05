@@ -12,6 +12,27 @@ from api.comparador import normalizar
 # O que sustenta um nome "só pelo rosto": sem GC nem fala.
 FONTES_DO_ROSTO = frozenset({"rosto", "referencia"})
 NAO_IDENTIFICADO = "não identificado"
+CATALOGO_ID = "catalogo_id"
+
+
+def ids_do_catalogo(entregue: dict[str, Any], campo: str) -> list[str]:
+    """Os `catalogo_id` distintos de `pessoas` ou `comerciais`, na ordem em que aparecem."""
+    ids = (
+        item.get(CATALOGO_ID) if isinstance(item, dict) else None
+        for item in entregue.get(campo) or []
+    )
+    return list(dict.fromkeys(i for i in ids if isinstance(i, str)))
+
+
+def lido_em_lote[T](
+    ids: list[str],
+    em_lote: Callable[[list[str]], dict[str, T]],
+    obter: Callable[[str], T | None],
+) -> Callable[[str], T | None]:
+    """Um `obter` que serve os `ids` de uma leitura em lote só; o que não veio nela (o
+    destino de uma fusão, por exemplo) cai em `obter`."""
+    lidos = em_lote(ids)
+    return lambda id: lidos[id] if id in lidos else obter(id)
 
 
 def so_o_rosto(fontes: list[str]) -> bool:

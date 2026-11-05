@@ -4,6 +4,7 @@ As permissões ficam na aplicação (um documento por uid), não no token.
 """
 
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Literal, Protocol, get_args
 
 Papel = Literal[
@@ -83,8 +84,22 @@ def papeis_do_usuario(
     return efetivos
 
 
+@dataclass(frozen=True)
+class DocumentoDePapeis:
+    """O documento de papéis de uma conta, lido numa vez só: a marca `desativada` e os
+    papéis guardados (`None`: a conta não tem papéis guardados)."""
+
+    uid: str
+    desativada: bool
+    papeis: list[Papel] | None
+
+
 class RepositorioDePapeis(Protocol):
     """Porta para o Firestore; os testes usam uma versão em memória."""
+
+    def ler(self, uid: str) -> DocumentoDePapeis:
+        """O documento inteiro numa leitura: o middleware lê uma vez por pedido."""
+        ...
 
     def obter(self, uid: str) -> list[Papel] | None: ...
 
@@ -103,6 +118,9 @@ class RepositorioDePapeisEmMemoria:
     def __init__(self) -> None:
         self._papeis: dict[str, list[Papel]] = {}
         self._desativadas: set[str] = set()
+
+    def ler(self, uid: str) -> DocumentoDePapeis:
+        return DocumentoDePapeis(uid, self.desativada(uid), self.obter(uid))
 
     def obter(self, uid: str) -> list[Papel] | None:
         return self._papeis.get(uid)
