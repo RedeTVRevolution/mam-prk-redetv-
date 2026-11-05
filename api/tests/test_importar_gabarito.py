@@ -64,3 +64,22 @@ def test_pasta_sem_csv_e_csv_ruim_dao_erro_sem_gravar(
     assert main([str(ruim), str(tmp_path / "casos")]) == 2
     assert "ruim.csv, linha 3" in capsys.readouterr().err
     assert not (tmp_path / "casos").exists()
+
+
+def test_trecho_novo_no_csv_tira_o_caso_antigo_do_video(tmp_path: Path) -> None:
+    gabarito = _gabarito(tmp_path)
+    casos = tmp_path / "casos"
+    outro = "c" * 64
+    (gabarito / "outro.csv").write_text(
+        f"# sha256: {outro}\ntipo,identidade,inicio,fim\naparicao,Ana,00:10,00:20\n",
+        encoding="utf-8",
+    )
+    importar(gabarito, casos, lambda _: None)
+    (gabarito / "clipe.csv").write_text(
+        CSV.replace("00:00:10", "00:00:05"), encoding="utf-8"
+    )
+
+    [caso, do_outro] = importar(gabarito, casos, lambda _: None)
+
+    assert sorted(c.id for c in ler_casos(casos)) == sorted([caso.id, do_outro.id])
+    assert caso.inicio_ms == 5_000

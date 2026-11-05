@@ -160,13 +160,14 @@ _TEMPO = re.compile(r"^(?:(\d+):(\d{2})|(\d+)):(\d{2})$")
 
 def tempo_ms(texto: str) -> int:
     """`MM:SS` (minutos podem passar de 59) ou `HH:MM:SS` (minutos e segundos de 0 a 59)."""
+    fora_do_formato = ValueError(f"tempo fora do formato MM:SS ou HH:MM:SS: {texto!r}")
     achou = _TEMPO.match(texto.strip())
     if not achou:
-        raise ValueError(f"tempo fora do formato MM:SS ou HH:MM:SS: {texto!r}")
+        raise fora_do_formato
     horas, minutos_com_horas, minutos_sem_horas, segundos = achou.groups()
     minutos = int(minutos_com_horas or minutos_sem_horas)
     if int(segundos) > 59 or (horas is not None and minutos > 59):
-        raise ValueError(f"tempo fora do formato MM:SS ou HH:MM:SS: {texto!r}")
+        raise fora_do_formato
     return ((int(horas or 0) * 60 + minutos) * 60 + int(segundos)) * 1000
 
 

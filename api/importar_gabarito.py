@@ -3,7 +3,8 @@
 Comando: `make importar-gabarito [GABARITO=evals/gabarito] [PASTA=evals/regressao/casos]`.
 Cada `*.csv` da pasta do gabarito (primeira linha `# sha256: <hex>`, depois
 `tipo,identidade,inicio,fim`) vira um caso `anotado`. O id do caso sai do vídeo e do
-trecho, então importar de novo regrava o mesmo arquivo, sem duplicar.
+trecho, então importar de novo regrava o mesmo arquivo, sem duplicar; se o trecho do
+CSV mudou, o caso anotado antigo do mesmo vídeo sai da pasta.
 """
 
 import sys
@@ -11,7 +12,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from api.comparador import ler_gabarito
-from api.regressao import PASTA_DOS_CASOS, Caso, caso_do_gabarito, gravar_caso
+from api.regressao import (
+    PASTA_DOS_CASOS,
+    Caso,
+    caso_do_gabarito,
+    gravar_caso,
+    prefixo_do_caso_anotado,
+)
 
 PASTA_DO_GABARITO = Path("evals/gabarito")
 
@@ -28,12 +35,16 @@ def importar(
         if not itens:
             raise ValueError(f"{arquivo.name}: sem nenhuma linha de gabarito")
         casos.append(caso_do_gabarito(sha256, itens))
+    novos = {c.id for c in casos}
     for caso in casos:
+        for antigo in pasta.glob(f"{prefixo_do_caso_anotado(caso.sha256)}*.json"):
+            if antigo.stem not in novos:
+                antigo.unlink()
         gravar_caso(pasta, caso)
-    separados = sum(c.reservado for c in casos)
+    reservados = sum(c.reservado for c in casos)
     escrever(
         f"{len(casos)} casos gravados em {pasta} "
-        f"({separados} reservados, {len(casos) - separados} para ajuste)"
+        f"({reservados} reservados, {len(casos) - reservados} para ajuste)"
     )
     return casos
 
