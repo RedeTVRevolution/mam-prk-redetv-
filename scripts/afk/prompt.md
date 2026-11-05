@@ -13,7 +13,7 @@ Você trabalha sozinho, sem ninguém olhando, e ninguém responde perguntas dura
 Chame a skill pela ferramenta Skill, com o nome completo. Se ela não estiver disponível, não use outra no lugar: anote em `.afk/progresso.md` que a skill faltou e termine com o status `erro`.
 
 1. Implemente com a skill `mattpocock-skills:tdd`, nos pontos de teste combinados no ticket e na spec.
-2. Rode `make verificar` até passar.
+2. Rode `make verificar` até passar, em primeiro plano, com o prazo do Bash em 600000 ms. Não use segundo plano nem Monitor: um monitor esquecido acorda o agente depois do fim e segura a iteração.
 3. Faça commit. A mensagem começa com `#<N>: `.
 
 Não revise o próprio trabalho: quando você termina com `feito`, o script abre outro agente, com contexto novo, que revisa o ticket inteiro e commita as correções.
