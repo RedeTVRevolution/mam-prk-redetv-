@@ -278,8 +278,9 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
         setAtualizando(false)
       },
       (erro: unknown) => {
-        if (!ativo || erro instanceof SessaoExpirada) return
+        if (!ativo) return
         setAtualizando(false)
+        if (erro instanceof SessaoExpirada) return
         setCarga({ tipo: 'erro', mensagem: mensagemDoErro(erro), codigo: codigoDoErro(erro) })
       },
     )
