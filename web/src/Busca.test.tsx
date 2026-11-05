@@ -274,6 +274,58 @@ test('trocar a ordem refaz a busca com ordem=data', async () => {
   expect(location.search).toBe('?q=sapato&ordem=data')
 })
 
+// Responde à busca só quando `liberar()` é chamada: o que a tela mostra no meio da espera.
+function segurarABusca() {
+  let liberar = () => {}
+  const espera = new Promise<void>((r) => {
+    liberar = r
+  })
+  servidor.use(
+    http.get('/v1/busca', async ({ request }) => {
+      buscas.push(new URL(request.url).searchParams)
+      await espera
+      return HttpResponse.json(resultado({ videos: [video('vB', [momento(1000, 2000, 'Objeto: balão')])] }))
+    }),
+  )
+  return liberar
+}
+
+test('termo novo com resultado na tela mostra o Loader e tira o resultado anterior até a resposta chegar', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=microfone')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const liberar = segurarABusca()
+
+  const caixa = screen.getByRole('textbox', { name: 'Buscar no acervo' })
+  await usuario.clear(caixa)
+  await usuario.type(caixa, 'balão{Enter}')
+
+  expect(await screen.findByRole('status', { name: 'Buscando' })).toBeTruthy()
+  expect(screen.queryByText('3 momentos em 2 vídeos')).toBeNull()
+
+  liberar()
+  expect(await screen.findByText('1 momento em 1 vídeo')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
+})
+
+test('trocar a ordem com resultado na tela mantém a lista e mostra o "atualizando" até a resposta', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=sapato')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const liberar = segurarABusca()
+
+  await usuario.click(screen.getByRole('combobox', { name: 'Ordenar' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Ordenar: Data de exibição' }))
+
+  expect(await screen.findByRole('status', { name: 'Atualizando' })).toBeTruthy()
+  expect(screen.getByText('3 momentos em 2 vídeos')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
+
+  liberar()
+  expect(await screen.findByText('1 momento em 1 vídeo')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Atualizando' })).toBeNull()
+})
+
 test('com o foco noutro campo do Acervo, / vira texto e não pula para a caixa', async () => {
   const usuario = userEvent.setup()
   await abrir('/acervo')

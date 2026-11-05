@@ -240,6 +240,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
   const [limite, setLimite] = useState(VIDEOS_POR_VEZ)
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const [tentativas, setTentativas] = useState(0)
+  const [atualizando, setAtualizando] = useState(false)
   const [programas, setProgramas] = useState<string[]>([])
   const [selecionado, setSelecionado] = useState<number | null>(null)
 
@@ -256,20 +257,30 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     consultaAtual.current = consulta
   })
   const chaveDaBusca = enderecoDaBusca(consulta)
+  const termoDaCarga = useRef<string | null>(null)
   useEffect(() => {
     if (!consultaAtual.current.q) return
     let ativo = true
-    // Cada busca nova recomeça pelo carregamento.
+    // Termo novo recomeça pelo carregamento e tira a lista anterior; filtro, chip, faceta,
+    // ordem e "Mais vídeos" mantêm a lista na tela, com o sinal de "atualizando".
+    const termoNovo = termoDaCarga.current !== consultaAtual.current.q
+    termoDaCarga.current = consultaAtual.current.q
     // oxlint-disable-next-line react/set-state-in-effect
-    setCarga((c) => (c.tipo === 'pronta' ? c : { tipo: 'carregando' }))
+    setCarga((c) => (termoNovo || c.tipo !== 'pronta' ? { tipo: 'carregando' } : c))
+    // oxlint-disable-next-line react/set-state-in-effect
+    setAtualizando(!termoNovo)
     // oxlint-disable-next-line react/set-state-in-effect
     setSelecionado(null)
     api.buscar(consultaAtual.current, limite).then(
       (resultado) => {
-        if (ativo) setCarga({ tipo: 'pronta', resultado })
+        if (!ativo) return
+        setCarga({ tipo: 'pronta', resultado })
+        setAtualizando(false)
       },
       (erro: unknown) => {
-        if (!ativo || erro instanceof SessaoExpirada) return
+        if (!ativo) return
+        setAtualizando(false)
+        if (erro instanceof SessaoExpirada) return
         setCarga({ tipo: 'erro', mensagem: mensagemDoErro(erro), codigo: codigoDoErro(erro) })
       },
     )
@@ -448,6 +459,12 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
         />
       )}
       {carga.tipo === 'carregando' && <Loader role="status" aria-label="Buscando" />}
+      {carga.tipo === 'pronta' && atualizando && (
+        <Group gap="xs" role="status" aria-label="Atualizando">
+          <Loader size="xs" />
+          <Text size="xs" c={CORES.textoSecundario}>Atualizando…</Text>
+        </Group>
+      )}
 
       {resultado && (
         <Group align="flex-start" wrap="nowrap" gap="md">
