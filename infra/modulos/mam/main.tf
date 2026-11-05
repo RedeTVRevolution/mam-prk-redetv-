@@ -869,9 +869,13 @@ resource "google_cloud_run_v2_service" "web" {
       image = var.imagem
       resources {
         limits = {
-          memory = "2Gi"
           cpu    = "1"
+          memory = "2Gi"
         }
+        # CPU só durante os pedidos, o padrão do Cloud Run, que o provider deixa de
+        # aplicar quando o bloco resources é declarado: sem isto a CPU fica sempre
+        # alocada e a cobrança passa a ser por instância ligada (#357).
+        cpu_idle = true
       }
       # Liga o verificador de token do Identity Platform na API (api/main.py).
       env {
