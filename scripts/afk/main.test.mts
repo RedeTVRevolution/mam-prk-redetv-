@@ -132,7 +132,13 @@ case "$1 $2" in
   "pr list")
     echo "pr list" >> "$FAKE/gh.log"
     # Um PR com estado SEM_PERMISSAO faz a leitura falhar, como um token sem "Pull requests: leitura".
-    if jq -e 'any(.[]; .pr == "SEM_PERMISSAO")' "$FAKE/issues.json" > /dev/null; then echo "gh falso: HTTP 403" >&2; exit 1; fi
+    if jq -e 'any(.[]; .pr == "SEM_PERMISSAO")' "$FAKE/issues.json" > /dev/null; then
+      echo "GraphQL: Resource not accessible by personal access token (repository.pullRequests)" >&2; exit 1
+    fi
+    # $FAKE/pr-falha: quantas leituras dos PRs ainda falham por rede.
+    if [ -s "$FAKE/pr-falha" ] && [ "$(cat "$FAKE/pr-falha")" -gt 0 ]; then
+      echo $(($(cat "$FAKE/pr-falha") - 1)) > "$FAKE/pr-falha"; echo "gh falso: falha de rede" >&2; exit 1
+    fi
     jq '[.[] | select(.pr == "MERGED") | {number}]' "$FAKE/issues.json" ;;
   "issue comment")
     echo "comment $3" >> "$FAKE/gh.log"
@@ -177,10 +183,11 @@ const pr = (number: number, estado: "OPEN" | "CLOSED" | "MERGED" | "SEM_PERMISSA
 
 let caso = 0;
 // Roda o loop num repositório novo com as issues e o roteiro do claude dados.
-async function roda(maxIteracoes: number, fila: object[], roteiro: string[], extra: Partial<Config> = {}, notasDeAntes = "") {
+async function roda(maxIteracoes: number, fila: object[], roteiro: string[], extra: Partial<Config> = {}, notasDeAntes = "", arquivos: Record<string, string> = {}) {
   const fake = join(tmp, `caso${++caso}`);
   const repo = join(fake, "repo");
   mkdirSync(repo, { recursive: true });
+  for (const [nome, conteudo] of Object.entries(arquivos)) writeFileSync(join(fake, nome), conteudo);
   writeFileSync(join(fake, "issues.json"), JSON.stringify(fila));
   writeFileSync(join(fake, "roteiro"), roteiro.map((l) => `${l}\n`).join(""));
   writeFileSync(join(fake, "claude.log"), "");
@@ -304,6 +311,23 @@ test("make verificar que estoura o prazo (124) não repete", async () => {
     { verificar: `echo x >> "$FAKE/verificacoes"; exit 124` });
   assert.match(r.notas(), /make verificar falhou depois da iteração; commits da iteração desfeitos/);
   assert.equal(readFileSync(join(process.env.FAKE!, "verificacoes"), "utf8"), "x\n", "uma tentativa só");
+  assert.equal(r.feitos(), "");
+});
+
+test("make verificar vermelho sem teste falhando (lint, tipos) não repete", async () => {
+  const r = await roda(1, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"],
+    { verificar: `echo x >> "$FAKE/verificacoes"; echo "src/x.ts(1,7): error TS2322: Type 'string' is not assignable"; exit 2` });
+  assert.match(r.notas(), /make verificar falhou depois da iteração; commits da iteração desfeitos/);
+  assert.doesNotMatch(r.notas(), /passou ao repetir/);
+  assert.equal(readFileSync(join(process.env.FAKE!, "verificacoes"), "utf8"), "x\n", "uma tentativa só");
+  assert.equal(r.feitos(), "");
+});
+
+test("make verificar com teste falhando duas vezes desfaz, com o log da segunda", async () => {
+  const r = await roda(1, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"],
+    { verificar: `echo x >> "$FAKE/verificacoes"; echo 'FAILED tests/test_x.py::test_y - assert 1 == 2'; false` });
+  assert.match(r.notas(), /commits da iteração desfeitos \(.*\.verificar-repetido\)/);
+  assert.equal(readFileSync(join(process.env.FAKE!, "verificacoes"), "utf8"), "x\nx\n");
   assert.equal(r.feitos(), "");
 });
 
@@ -485,8 +509,19 @@ test("bloqueio por PR sem permissão para ler PRs: anota uma vez e segue com o r
   assert.equal(r.saida, 0);
   assert.equal(r.feitos(), "2 3");
   assert.equal(r.notas().split("não li os PRs mesclados").length - 1, 1, "anota uma vez só");
-  assert.equal(r.ghLog().split("\n").filter((l) => l === "pr list").length, 5, "as 5 tentativas do gh, e não mais");
+  assert.equal(r.ghLog().split("\n").filter((l) => l === "pr list").length, 1, "falta de permissão não repete");
+  assert.doesNotMatch(r.notas(), /nova tentativa/);
+  assert.match(r.notas(), /Resource not accessible by personal access token/);
   assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#1\tespera #7\n");
+});
+
+test("bloqueio por PR com falha de rede ao ler os PRs: repete e libera (#87)", async () => {
+  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent", [], "Bloqueado por: #7"), pr(7, "MERGED")],
+    ["feito 1", "revisa 1"], {}, "", { "pr-falha": "1" });
+  assert.equal(r.feitos(), "1");
+  assert.equal(r.ghLog().split("\n").filter((l) => l === "pr list").length, 2);
+  assert.match(r.notas(), /gh pr list: gh falso: falha de rede; nova tentativa/);
+  assert.doesNotMatch(r.notas(), /não li os PRs mesclados/);
 });
 
 test("sem bloqueio fora das issues, os PRs não são lidos (#87)", async () => {
@@ -593,11 +628,11 @@ test("duas vagas: verde sozinho, vermelho junto", async () => {
 test("duas vagas: make verificar que falha uma vez depois do merge passa ao repetir", async () => {
   const r = await roda(5, doisTickets(), ["junto 1", "revisa 1", "junto 2", "revisa 2"], {
     ...duas,
-    verificar: `test ! -e quebrado && { [ "$(git branch --show-current)" != afk/teste ] || [ -e "$FAKE/ja" ] || { touch "$FAKE/ja"; false; }; }`,
+    verificar: `test ! -e quebrado && { [ "$(git branch --show-current)" != afk/teste ] || [ -e "$FAKE/ja" ] || { touch "$FAKE/ja"; echo 'FAILED tests/test_x.py::test_lento'; false; }; }`,
   });
   assert.equal(r.saida, 0);
   assert.equal(ordenado(r.feitos()), "1 2");
-  assert.match(r.notas(), /make verificar falhou e passou ao repetir/);
+  assert.match(r.notas(), /make verificar falhou e passou ao repetir \(.*\): FAILED tests\/test_x\.py::test_lento/);
   assert.doesNotMatch(r.notas(), /falhou depois do merge/);
 });
 

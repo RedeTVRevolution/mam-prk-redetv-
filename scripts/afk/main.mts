@@ -108,7 +108,8 @@ export async function loop(c: Config): Promise<number> {
   // Fora do clone: o .git dele é do agente, que poderia trocar o remote. O repositório vem do GH_REPO.
   // Uma falha de rede não encerra uma rodada de horas: 5 tentativas, com 30 s, 1, 2 e 4 min entre elas.
   // Com prazo, e sem travar o processo: as outras vagas seguem enquanto o gh roda. Um comentário vai uma
-  // vez só: o GitHub pode tê-lo publicado mesmo quando a resposta não chega.
+  // vez só: o GitHub pode tê-lo publicado mesmo quando a resposta não chega. Falta de permissão do token
+  // não passa com o tempo e também vai uma vez só; o 403 de limite de requisições passa, e segue repetindo.
   const gh = async (...args: string[]) => {
     const tentativas = args[1] === "comment" ? 1 : 5;
     for (let n = 0; ; n++) {
@@ -116,7 +117,8 @@ export async function loop(c: Config): Promise<number> {
         return (await promisify(execFile)("gh", args, { cwd: aqui, encoding: "utf8", timeout: 120_000, maxBuffer: 64 << 20 })).stdout;
       } catch (e) {
         const erro = `gh ${args.slice(0, 2).join(" ")}: ${String((e as any)?.stderr || (e as Error)?.message || e).trim().slice(-300)}`;
-        if (n >= tentativas - 1) throw new Error(erro);
+        const semPermissao = /Resource not accessible|HTTP 403/i.test(erro) && !/rate limit/i.test(erro);
+        if (n >= tentativas - 1 || semPermissao) throw new Error(erro);
         anota(`${erro}; nova tentativa`);
         await new Promise((r) => setTimeout(r, (c.pausaGh ?? 30_000) * 2 ** n));
       }
@@ -211,18 +213,21 @@ export async function loop(c: Config): Promise<number> {
   // Um make verificar vermelho roda de novo uma vez antes de contar: com as vagas dividindo o Mac, os
   // testes da web falham sob carga, cada vez um diferente (rodada de 2026-11-04: 14 de 62, todos no
   // vitest). Vermelho duas vezes é vermelho; o prazo estourado (124) não repete, que seria mais uma hora.
+  // Só repete com um teste falhando (FAIL do vitest, FAILED do pytest): lint, mypy, typecheck e build
+  // não mudam de uma vez para outra, e o vermelho deles desfaz direto.
   // Devolve o log da última tentativa. A nota leva o que falhou na primeira: os logs ficam no clone,
   // que a próxima rodada apaga, e só o progresso.md chega à pasta principal.
   const verifica = async (sb: Vaga, arquivo: string, ticket: string) => {
     const r = await sb.exec(c.verificar);
     writeFileSync(arquivo, r.stdout + r.stderr);
     if (r.exitCode === 0 || r.exitCode === 124) return { verde: r.exitCode === 0, log: arquivo };
+    const falhas = new Set((r.stdout + r.stderr).replace(/\x1b\[[0-9;]*m/g, "").match(/^ *(FAIL|FAILED) .*$/gm)?.map((l) => l.trim().slice(0, 200)));
+    if (!falhas.size) return { verde: false, log: arquivo };
     const repetido = `${arquivo}-repetido`;
     const r2 = await sb.exec(c.verificar);
     writeFileSync(repetido, r2.stdout + r2.stderr);
     if (r2.exitCode !== 0) return { verde: false, log: repetido };
-    const falhas = new Set((r.stdout + r.stderr).replace(/\x1b\[[0-9;]*m/g, "").match(/^ *(FAIL|FAILED) .*$/gm)?.map((l) => l.trim().slice(0, 200)));
-    anota(`#${ticket}: make verificar falhou e passou ao repetir (${arquivo})${falhas.size ? `: ${[...falhas].slice(0, 5).join("; ")}` : ""}`);
+    anota(`#${ticket}: make verificar falhou e passou ao repetir (${arquivo}): ${[...falhas].slice(0, 5).join("; ")}`);
     return { verde: true, log: arquivo };
   };
   // Só o que foi commitado segue adiante.
