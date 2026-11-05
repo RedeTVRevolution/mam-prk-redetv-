@@ -88,7 +88,7 @@ def test_falha_da_execucao_nao_sobrescreve_job_cancelado() -> None:
 
     excecao = texto[texto.index("le_antes_de_marcar:") : texto.index("le_o_job:")]
     releitura = excecao.index("documents.get")
-    condicao = excecao.index('estado.stringValue == "cancelado"')
+    condicao = excecao.index('estado.stringValue in ["cancelado", "falhou"]')
     patch = excecao.index("documents.patch")
     assert releitura < condicao < patch
     # O patch só vale se o documento não mudou desde a releitura.
@@ -1121,3 +1121,39 @@ def test_marca_interrompido_so_derruba_job_em_andamento() -> None:
     assert "updateTime: $${interrompido.updateTime}" in marca
     # A etapa em andamento fecha como `falhou`, para o reprocessar recomeçar dali.
     assert "call: marca_fim" in marca and "falhou_na_execucao: true" in marca
+
+
+def test_toda_falha_que_o_workflow_grava_chama_o_aviso_do_fim_logo_depois() -> None:
+    texto = _texto()
+
+    patches = [
+        m.start()
+        for m in re.finditer(r"documents\.patch", texto)
+        if "stringValue: falhou" in texto[m.start() : m.start() + 900]
+    ]
+    assert len(patches) == 4
+    for inicio in patches:
+        assert "call: avisa_o_fim" in texto[inicio : inicio + 2400]
+    assert 'in ["cancelado", "falhou"]' in texto
+
+
+def test_o_aviso_do_fim_roda_o_job_com_job_id_e_o_erro_dele_so_vai_ao_log() -> None:
+    texto = _texto()
+
+    aviso = texto[texto.index("\navisa_o_fim:") : texto.index("\nmarca_interrompido:")]
+    assert "jobs/${job_de_fim}" in aviso
+    assert "name: JOB_ID" in aviso and "value: $${job_id}" in aviso
+    assert "except:" in aviso and "sys.log" in aviso and "raise" not in aviso
+
+
+def test_o_job_do_aviso_do_fim_e_o_que_o_workflow_roda() -> None:
+    fim = (MODULO / "fim_do_job.tf").read_text()
+
+    assert 'resource "google_cloud_run_v2_job" "fim"' in fim
+    assert '"api.fim_do_job"' in fim
+    for variavel in ("PUBSUB_TOPICO_EVENTOS", "PUBSUB_TOPICO_USO", "GCP_PROJECT_ID"):
+        assert f'"{variavel}"' in fim
+    assert (
+        "job_de_fim             = google_cloud_run_v2_job.fim.name" in MAIN.read_text()
+    )
+    assert "google_cloud_run_v2_job.fim.name" in fim  # o papel de rodar, só para ele

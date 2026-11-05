@@ -592,7 +592,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -631,7 +631,9 @@ locals {
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
     analise     = ["roles/datastore.user", local.papel_vertex_predicao]
-    quadros     = ["roles/datastore.user"]
+    # O aviso do `falhou` que o Workflows grava (#379) lê e marca o Job e lê o webhook.
+    fim     = ["roles/datastore.user"]
+    quadros = ["roles/datastore.user"]
     # Grava o estado da indexação no Job e escreve na coleção da busca (gravar, apagar,
     # consultar e buscar; conferido no #122). A conta `web` tem o mesmo papel, porque
     # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção. O
@@ -2227,6 +2229,7 @@ resource "google_workflows_workflow" "validacao" {
     motor_objetos          = var.motor_objetos
     job_de_inventario      = google_cloud_run_v2_job.inventario.name
     job_de_analise         = google_cloud_run_v2_job.analise.name
+    job_de_fim             = google_cloud_run_v2_job.fim.name
     job_de_identificacao   = google_cloud_run_v2_job.identificacao.name
     job_de_quadros         = google_cloud_run_v2_job.quadros.name
     job_de_indexacao       = google_cloud_run_v2_job.indexacao.name

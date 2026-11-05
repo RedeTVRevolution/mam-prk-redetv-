@@ -235,6 +235,9 @@ class Job(BaseModel):
     etapas: dict[NomeDaEtapa, Etapa] = {}
     # Quantas vezes o Job foi reprocessado a partir da etapa que falhou (#147).
     reprocessamentos: int = 0
+    # Em qual `reprocessamentos` o fim `falhou` deste Job já foi avisado (webhook e evento de
+    # uso) por `api.fim_do_job`, o caminho do `falhou` que o Workflows grava; `None` se nunca.
+    fim_avisado_no_reprocessamento: int | None = None
     # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
     lixeira: EnvioParaLixeira | None = None
     # Os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas
