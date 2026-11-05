@@ -72,12 +72,7 @@ from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
 from api.papeis import PAPEIS, DocumentoDePapeis, Papel
-from api.programas import (
-    NomeEmUso,
-    Programa,
-    ProgramaInexistente,
-    RenomeacaoDoPrograma,
-)
+from api.programas import NomeEmUso, Programa, ProgramaInexistente
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
@@ -780,6 +775,7 @@ class ProgramasFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DOS_PROGRAMAS
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def listar(self) -> list[Programa]:
@@ -792,24 +788,45 @@ class ProgramasFirestore:
         doc = self._colecao.document(id).get()
         return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
 
-    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
+    def _conferir_nome(self, programa: Programa) -> None:
         if any(
             p.id != programa.id and p.nome.casefold() == programa.nome.casefold()
             for p in self.listar()
         ):
             raise NomeEmUso(programa.nome)
+
+    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
+        self._conferir_nome(programa)
         # Com merge, o campo que não vai fica como está: o andamento é da tarefa.
         fora = {"id"} if com_renomeacao else {"id", "renomeacao"}
         self._colecao.document(programa.id).set(
             programa.model_dump(exclude=fora), merge=True
         )
 
-    def gravar_renomeacao(self, id: str, renomeacao: RenomeacaoDoPrograma) -> None:
-        # `update` falha se o documento não existe: não recria um programa apagado.
-        try:
-            self._colecao.document(id).update({"renomeacao": renomeacao.model_dump()})
-        except NotFound:
-            raise ProgramaInexistente(id) from None
+    def trocar(
+        self, id: str, mudar: Callable[[Programa], Programa | None]
+    ) -> Programa | None:
+        # Como `RepositorioFirestore.trocar`: `mudar` decide, e o Firestore pode repeti-la.
+        referencia = self._colecao.document(id)
+
+        @firestore.transactional
+        def trocar_na_transacao(transacao: Any) -> Programa | None:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                return None
+            atual = Programa(id=id, **(doc.to_dict() or {}))
+            novo = mudar(atual)
+            if novo is None:
+                return None
+            if novo.nome.casefold() != atual.nome.casefold():
+                self._conferir_nome(novo)
+            transacao.set(referencia, novo.model_dump(exclude={"id"}))
+            return novo
+
+        resultado: Programa | None = _repetir_sob_disputa(
+            trocar_na_transacao, self._cliente
+        )
+        return resultado
 
     def apagar(self, id: str) -> None:
         if not self._colecao.document(id).get().exists:

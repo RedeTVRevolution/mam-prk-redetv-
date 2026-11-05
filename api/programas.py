@@ -6,8 +6,9 @@ programa; o perfil que o modelo recebe sai do cadastro, nunca de texto livre do 
 """
 
 import uuid
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, StringConstraints
@@ -40,13 +41,19 @@ class VinculoDaPessoa(BaseModel):
 
 
 class RenomeacaoDoPrograma(BaseModel):
-    """A troca do nome nos vídeos (o Job guarda o nome), com os que ainda faltam."""
+    """A troca do nome nos vídeos (o Job guarda o nome), com os que ainda faltam.
 
+    `confirmando`: o nome novo já está gravado, mas a auditoria ainda não; nada mexe nos
+    vídeos até a troca passar a `em_andamento`. `id` separa uma troca da que a substitui.
+    """
+
+    id: str = ""  # sem fábrica: o andamento gravado sem id é lido sempre igual
     nome_antigo: str
     nome_novo: str
     total: int
     pendentes: list[str]  # ids dos Jobs ainda por trocar e reindexar
-    estado: Literal["em_andamento", "concluida", "falhou"]
+    estado: Literal["confirmando", "em_andamento", "concluida", "falhou"]
+    desde: datetime | None = None  # quando a troca foi pedida
 
 
 class Programa(BaseModel):
@@ -81,8 +88,12 @@ class RepositorioDeProgramas(Protocol):
         `com_renomeacao`, o andamento gravado fica como está (a tarefa o muda sozinha)."""
         ...
 
-    def gravar_renomeacao(self, id: str, renomeacao: RenomeacaoDoPrograma) -> None:
-        """Grava só o andamento; `ProgramaInexistente` se o programa sumiu."""
+    def trocar(
+        self, id: str, mudar: Callable[[Programa], Programa | None]
+    ) -> Programa | None:
+        """Lê e grava de uma vez (transação): `mudar` recebe o gravado e devolve o novo,
+        ou `None` para não gravar. Devolve o gravado, ou `None` se nada foi gravado ou o
+        programa não existe; `NomeEmUso` se o nome novo é de outro."""
         ...
 
     def apagar(self, id: str) -> None:
@@ -100,12 +111,15 @@ class ProgramasEmMemoria:
     def obter(self, id: str) -> Programa | None:
         return self._programas.get(id)
 
-    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
+    def _conferir_nome(self, programa: Programa) -> None:
         if any(
             p.id != programa.id and p.nome.casefold() == programa.nome.casefold()
             for p in self._programas.values()
         ):
             raise NomeEmUso(programa.nome)
+
+    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
+        self._conferir_nome(programa)
         if not com_renomeacao:
             atual = self._programas.get(programa.id)
             programa = programa.model_copy(
@@ -113,12 +127,16 @@ class ProgramasEmMemoria:
             )
         self._programas[programa.id] = programa
 
-    def gravar_renomeacao(self, id: str, renomeacao: RenomeacaoDoPrograma) -> None:
-        if id not in self._programas:
-            raise ProgramaInexistente(id)
-        self._programas[id] = self._programas[id].model_copy(
-            update={"renomeacao": renomeacao}
-        )
+    def trocar(
+        self, id: str, mudar: Callable[[Programa], Programa | None]
+    ) -> Programa | None:
+        atual = self._programas.get(id)
+        novo = mudar(atual) if atual is not None else None
+        if novo is None:
+            return None
+        self._conferir_nome(novo)
+        self._programas[id] = novo
+        return novo
 
     def apagar(self, id: str) -> None:
         if self._programas.pop(id, None) is None:

@@ -55,7 +55,7 @@ from api.nuvem import (
     TiposDeObjetoFirestore,
     espera_sob_disputa,
 )
-from api.programas import Programa, ProgramaInexistente, RenomeacaoDoPrograma
+from api.programas import NomeEmUso, Programa, RenomeacaoDoPrograma
 from api.webhook import RegistroDeWebhook
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
@@ -1239,6 +1239,8 @@ class TestCatalogoDeMarcasFirestore:
 
 def _andamento(estado: Any, pendentes: list[str]) -> RenomeacaoDoPrograma:
     return RenomeacaoDoPrograma(
+        id=f"troca-{estado}",
+        desde=BASE,
         nome_antigo="Antigo",
         nome_novo="Novo",
         total=2,
@@ -1257,9 +1259,10 @@ class TestProgramasFirestore:
     def test_salvar_sem_o_andamento_deixa_o_gravado(
         self, programas: ProgramasFirestore
     ) -> None:
-        programas.salvar(Programa(id="p", nome="Novo"))
         concluida = _andamento("concluida", [])
-        programas.gravar_renomeacao("p", concluida)
+        programas.salvar(
+            Programa(id="p", nome="Novo", renomeacao=concluida), com_renomeacao=True
+        )
 
         # A cópia velha do PUT não volta a troca para em andamento.
         programas.salvar(
@@ -1278,14 +1281,32 @@ class TestProgramasFirestore:
         programas.salvar(Programa(id="p", nome="Antigo"), com_renomeacao=True)
         assert programas.obter("p") == Programa(id="p", nome="Antigo")
 
-    def test_gravar_o_andamento_nao_recria_o_programa_apagado(
+    def test_trocar_grava_o_que_mudar_devolve_e_so_isso(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        programas.salvar(Programa(id="p", nome="Novo"))
+        programas.salvar(Programa(id="q", nome="Outro"))
+        andamento = _andamento("em_andamento", ["j1"])
+
+        gravado = programas.trocar(
+            "p", lambda p: p.model_copy(update={"renomeacao": andamento})
+        )
+
+        assert gravado == programas.obter("p")
+        assert gravado == Programa(id="p", nome="Novo", renomeacao=andamento)
+        assert programas.trocar("p", lambda p: None) is None
+        assert programas.obter("p") == gravado
+        with pytest.raises(NomeEmUso):
+            programas.trocar("p", lambda p: p.model_copy(update={"nome": "outro"}))
+        assert programas.obter("p") == gravado
+
+    def test_trocar_nao_recria_o_programa_apagado(
         self, programas: ProgramasFirestore
     ) -> None:
         programas.salvar(Programa(id="p", nome="Novo"))
         programas.apagar("p")
 
-        with pytest.raises(ProgramaInexistente):
-            programas.gravar_renomeacao("p", _andamento("concluida", []))
+        assert programas.trocar("p", lambda p: p) is None
         assert programas.obter("p") is None and programas.listar() == []
 
 
