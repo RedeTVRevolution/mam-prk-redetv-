@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -33,7 +33,7 @@ const PARECIDOS = {
       data_exibicao: '2026-10-21',
       duracao_s: 120,
       n_momentos: 1,
-      momentos: [{ tipo: 'plano', inicio_ms: 20_000, fim_ms: 25_000, motivo: 'Plano: rua molhada', destaques: [], quadro_url: null }],
+      momentos: [{ tipo: 'plano', inicio_ms: 20_000, fim_ms: 25_000, motivo: 'Plano: rua molhada', destaques: [], quadro_url: null, quadro: 'quadros/plano-4.jpg' }],
     },
   ],
   sem_aparicoes: [],
@@ -54,6 +54,10 @@ const servidor = setupServer(
     HttpResponse.json({ id: params.id, nome: `${params.id}.mp4`, estado: 'concluido', codigo_falha: null, duracao_s: 120, criado_em: '2026-10-21T10:00:00Z', indexacao }),
   ),
   http.get('/v1/eu', () => HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br', permissoes: ['decupagem.ver'] })),
+  // A busca não traz URL assinada (#335): o quadro de cada parecido vem da rota do quadro.
+  http.get('/v1/jobs/:id/quadros/:arquivo', ({ params }) =>
+    HttpResponse.json({ url: `https://q.exemplo/${params.id}/${params.arquivo}`, expira_em: '2999-01-01T00:00:00Z' }),
+  ),
   http.get('/v1/busca/parecidos/planos', () => HttpResponse.json({ planos: comVetor })),
   http.get('/v1/busca/parecidos', ({ request }) => {
     parecidos.push(new URL(request.url).searchParams)
@@ -111,7 +115,8 @@ test('o botão aparece só no plano com vetor e leva à grade dos parecidos', as
   expect(parecidos[0].get('job')).toBe('v1')
   expect(parecidos[0].get('plano')).toBe('1')
   const grade = screen.getByRole('list', { name: 'Planos' })
-  expect(within(grade).getByRole('link', { name: 'v2.mp4 em 00:20' })).toBeTruthy()
+  const card = within(grade).getByRole('link', { name: 'v2.mp4 em 00:20' })
+  await waitFor(() => expect(card.querySelector('img')?.getAttribute('src')).toBe('https://q.exemplo/v2/plano-4.jpg'))
 })
 
 test('vídeo sem vetor nos planos não mostra o botão', async () => {

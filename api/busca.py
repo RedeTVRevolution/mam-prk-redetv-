@@ -7,6 +7,7 @@ do usuário só chega ao índice como texto puro.
 """
 
 import logging
+import threading
 import time
 import unicodedata
 from collections import defaultdict
@@ -72,6 +73,10 @@ class EmbeddingDaConsulta(Protocol):
     def vetor_da_imagem(self, jpeg: bytes) -> list[float]: ...
 
 
+class BuscaCancelada(Exception):
+    """A rota desistiu (passou do prazo): o trabalho que sobra para em vez de seguir rodando."""
+
+
 class BuscaPorImagemIndisponivel(Exception):
     """Sem índice do quadro-chave ou sem o embedding: a imagem não vira vetor."""
 
@@ -106,7 +111,9 @@ class Momento(BaseModel):
     fim_ms: int
     motivo: str
     destaques: list[Destaque]
-    quadro_url: str | None
+    quadro_url: str | None  # assinada só para chave de sistema; a web recebe `null`
+    # Caminho do quadro no vídeo (`quadros/plano-6.jpg`): a web pede a URL pela rota do quadro.
+    quadro: str | None = None
 
 
 class VideoDoResultado(BaseModel):
@@ -231,6 +238,11 @@ def _destaques(texto: str, termos: Collection[str]) -> list[Destaque]:
     return [Destaque(inicio=i, fim=f) for i, f in unidos]
 
 
+def _conferir(cancelado: threading.Event | None) -> None:
+    if cancelado is not None and cancelado.is_set():
+        raise BuscaCancelada
+
+
 @dataclass
 class _Trecho:
     job_id: str
@@ -280,6 +292,7 @@ class Busca:
         visual: bool = False,
         imagem: bytes | None = None,
         parecidos: tuple[str, list[float]] | None = None,
+        cancelado: threading.Event | None = None,
     ) -> ResultadoDaBusca:
         """`imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
         só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
@@ -315,6 +328,7 @@ class Busca:
             return jobs[id]
 
         def consultar(c: Consulta) -> list[Registro]:
+            _conferir(cancelado)
             c = replace(
                 c,
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
@@ -375,10 +389,11 @@ class Busca:
                 )
             except Exception:
                 log.exception("ranking indisponível; fica a ordem do índice")
+        _conferir(cancelado)
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        videos = self._videos(trechos, job, termos, ordem)[:limite]
+        videos = self._videos(trechos, job, termos, ordem, sistema, cancelado)[:limite]
         vazios = [
             self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
@@ -434,6 +449,7 @@ class Busca:
         limite: int = VIDEOS_POR_PADRAO,
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
+        cancelado: threading.Event | None = None,
     ) -> ResultadoDaBusca:
         """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271)."""
         vetor = self.planos_com_vetor(job_id, sistema).get(plano)
@@ -445,6 +461,7 @@ class Busca:
             limite=limite,
             filtros_do_servidor=filtros_do_servidor,
             sistema=sistema,
+            cancelado=cancelado,
         )
 
     def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:
@@ -526,18 +543,35 @@ class Busca:
             )
         return clausulas
 
+    def _url_do_quadro(
+        self,
+        job_id: str,
+        quadro: str | None,
+        sistema: str | None,
+        cancelado: threading.Event | None,
+    ) -> str | None:
+        """Só a chave de sistema recebe a URL assinada; cada assinatura é uma ida ao IAM,
+        então o cancelamento é conferido antes de cada uma."""
+        if not quadro or sistema is None:
+            return None
+        _conferir(cancelado)
+        return self._armazenamento.url_do_quadro(job_id, quadro, VALIDADE_DO_QUADRO)
+
     def _videos(
         self,
         trechos: list[_Trecho],
         job: Callable[[str], Job | None],
         termos: list[str],
         ordem: Ordem,
+        sistema: str | None,
+        cancelado: threading.Event | None,
     ) -> list[VideoDoResultado]:
         por_video: dict[str, list[_Trecho]] = defaultdict(list)
         for t in trechos:
             por_video[t.job_id].append(t)
         videos: list[tuple[int, VideoDoResultado]] = []
         for id, lista in por_video.items():
+            _conferir(cancelado)
             j = job(id)
             if j is None:
                 continue
@@ -550,13 +584,8 @@ class Busca:
                     fim_ms=t.fim_ms,
                     motivo=t.motivo,
                     destaques=_destaques(t.motivo, termos),
-                    quadro_url=(
-                        self._armazenamento.url_do_quadro(
-                            id, t.quadro, VALIDADE_DO_QUADRO
-                        )
-                        if t.quadro
-                        else None
-                    ),
+                    quadro=t.quadro,
+                    quadro_url=self._url_do_quadro(id, t.quadro, sistema, cancelado),
                 )
                 for t in lista
             ]

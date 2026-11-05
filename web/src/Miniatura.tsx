@@ -1,5 +1,8 @@
 import { Box, Tooltip } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
+import type { ClienteDaApi } from './api.ts'
+import type { Momento } from './busca.ts'
+import { urlDoQuadroDaBusca } from './quadros.ts'
 
 /** O quadro (16:9) de `url`; sem ele, um retângulo cinza chapado, sem ícone. */
 export function Quadro({ url, largura, altura }: { url: string | null | undefined; largura: number; altura: number }) {
@@ -95,6 +98,64 @@ export function MiniaturaDoPainel({
           <Quadro url={url} largura={64} altura={36} />
         </div>
       </Tooltip>
+    </div>
+  )
+}
+
+/**
+ * O quadro de um momento da busca. A busca não assina URL (#335): a URL vem da rota do quadro, só
+ * quando o momento entra na tela. `quadro_url` preenchido (chave de sistema) vale como está.
+ */
+export function QuadroDoMomento({
+  api,
+  jobId,
+  momento,
+  largura,
+  altura,
+}: {
+  api: ClienteDaApi
+  jobId: string
+  momento: Momento
+  largura: number
+  altura: number
+}) {
+  const raiz = useRef<HTMLDivElement>(null)
+  const [visivel, setVisivel] = useState(typeof IntersectionObserver === 'undefined')
+  const [pedida, setPedida] = useState<{ caminho: string; url: string } | null>(null)
+  const caminho = momento.quadro
+
+  useEffect(() => {
+    const el = raiz.current
+    if (visivel || !el) return
+    const olho = new IntersectionObserver((entradas) => {
+      if (entradas.some((e) => e.isIntersecting)) {
+        setVisivel(true)
+        olho.disconnect()
+      }
+    })
+    olho.observe(el)
+    return () => olho.disconnect()
+  }, [visivel])
+
+  useEffect(() => {
+    if (!visivel || !caminho || momento.quadro_url) return
+    let ativo = true
+    urlDoQuadroDaBusca(api)(jobId, caminho).then(
+      (url) => {
+        if (ativo) setPedida({ caminho, url })
+      },
+      // Sem a URL fica o retângulo: o quadro não é o que a pessoa veio ver.
+      () => undefined,
+    )
+    return () => {
+      ativo = false
+    }
+  }, [api, jobId, caminho, visivel, momento.quadro_url])
+
+  const url = momento.quadro_url ?? (pedida && pedida.caminho === caminho ? pedida.url : null)
+  return (
+    <div ref={raiz} style={{ flex: 'none' }}>
+      <Quadro url={url} largura={largura} altura={altura} />
     </div>
   )
 }

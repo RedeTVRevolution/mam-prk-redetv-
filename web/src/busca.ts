@@ -49,7 +49,10 @@ export interface Momento {
   fim_ms: number
   motivo: string
   destaques: Destaque[]
+  /** URL assinada: só chave de sistema a recebe; a web a pede pela rota do quadro (`quadro`). */
   quadro_url: string | null
+  /** Caminho do quadro no vídeo (`quadros/plano-6.jpg`). */
+  quadro: string | null
 }
 
 export interface VideoDoResultado {

@@ -1,3 +1,4 @@
+import type { ClienteDaApi } from './api.ts'
 import type { Reproducao } from './decupagem.ts'
 
 /** Folga antes do vencimento: uma URL que vence em segundos já não vale. */
@@ -29,4 +30,24 @@ export function criarCacheDeQuadros(
     guardadas.set(caminho, entrada)
     return entrada.url
   }
+}
+
+const dosClientes = new WeakMap<ClienteDaApi, (jobId: string, caminho: string) => Promise<string>>()
+
+/** O cache de quadros da busca: um por cliente da API, com um cache por vídeo (a rota do quadro é do vídeo). */
+export function urlDoQuadroDaBusca(api: ClienteDaApi): (jobId: string, caminho: string) => Promise<string> {
+  let achado = dosClientes.get(api)
+  if (!achado) {
+    const porVideo = new Map<string, (caminho: string) => Promise<string>>()
+    achado = (jobId, caminho) => {
+      let cache = porVideo.get(jobId)
+      if (!cache) {
+        cache = criarCacheDeQuadros((arquivo) => api.job(jobId).quadro(arquivo))
+        porVideo.set(jobId, cache)
+      }
+      return cache(caminho)
+    }
+    dosClientes.set(api, achado)
+  }
+  return achado
 }

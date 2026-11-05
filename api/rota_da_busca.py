@@ -156,6 +156,7 @@ def criar_rotas_da_busca(
         sistema, quem = _quem_e(chamador)
         if not limite.consumir(quem):
             raise HTTPException(429, "Consultas demais; tente em um minuto")
+        cancelado = threading.Event()
         futuro = _executor.submit(
             busca.buscar,
             q,
@@ -164,6 +165,7 @@ def criar_rotas_da_busca(
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
+            cancelado=cancelado,
             ajustes=Ajustes(
                 evidencias=tuple(dict.fromkeys(evidencias or ())),
                 programa=programa,
@@ -179,6 +181,7 @@ def criar_rotas_da_busca(
             resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
+            cancelado.set()
             log.warning("busca passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         registrar_busca(
@@ -268,6 +271,7 @@ def criar_rotas_da_busca(
             raise HTTPException(422, _PIXELS_DEMAIS) from None
         except ImagemRecusada:
             raise HTTPException(422, _RECUSA) from None
+        cancelado = threading.Event()
         futuro = _executor.submit(
             busca.buscar,
             "",
@@ -275,6 +279,7 @@ def criar_rotas_da_busca(
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
+            cancelado=cancelado,
             ajustes=Ajustes(
                 programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
             ),
@@ -283,6 +288,7 @@ def criar_rotas_da_busca(
             resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
+            cancelado.set()
             log.warning("busca por imagem passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         except BuscaPorImagemIndisponivel:
@@ -333,6 +339,7 @@ def criar_rotas_da_busca(
         sistema, quem = _quem_e(chamador)
         if not limite.consumir(quem):
             raise HTTPException(429, "Consultas demais; tente em um minuto")
+        cancelado = threading.Event()
         futuro = _executor.submit(
             busca.buscar_parecidos,
             job,
@@ -340,11 +347,13 @@ def criar_rotas_da_busca(
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
+            cancelado=cancelado,
         )
         try:
             resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
+            cancelado.set()
             log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         except PlanoSemVetor:
