@@ -61,7 +61,13 @@ class Mundo:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         self.agora = BASE
         for id, fontes in (("j1", ["referencia"]), ("j2", ["gc"])):
-            self.jobs.salvar(_job(id))
+            self.jobs.salvar(
+                _job(
+                    id,
+                    pessoas_do_catalogo=[self.ana.id],
+                    marcas_do_catalogo=[self.marca.id],
+                )
+            )
             decupagem = {
                 "pessoas": [_pessoa(self.ana.id, fontes)],
                 "comerciais": [

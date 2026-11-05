@@ -35,6 +35,7 @@ from api.auth import (
 )
 from api.catalogo import Catalogo, EnvioParaLixeira
 from api.catalogo_apagado import com_pessoas_fundidas, sem_catalogo_apagado
+from api.catalogo_dos_jobs import atualizar_catalogo_do_job
 from api.ciclo_de_vida import JaTerminou, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
@@ -225,6 +226,12 @@ class Job(BaseModel):
     reprocessamentos: int = 0
     # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
     lixeira: EnvioParaLixeira | None = None
+    # Os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas
+    # fundidas resolvidas): o impacto de uma pessoa ou marca do catálogo acha os vídeos
+    # por aqui, sem abrir todas as decupagens (#359). Vazios em Job anterior ao campo
+    # até rodar `make preencher-catalogo-dos-jobs`.
+    pessoas_do_catalogo: list[str] = []
+    marcas_do_catalogo: list[str] = []
     criado_em: datetime
     atualizado_em: datetime
 
@@ -457,6 +464,8 @@ class FiltroDeJobs:
     # `None`: os dois (para achar o mesmo arquivo, esteja onde estiver).
     na_lixeira: bool | None = False
     sha256: str | None = None  # só os Jobs do mesmo arquivo
+    pessoa_do_catalogo: str | None = None  # só os vídeos em que a pessoa aparece
+    marca_do_catalogo: str | None = None  # só os vídeos em que a marca aparece
     ordem: Ordem = "enviado"
     limite: int | None = None  # `None`: a lista inteira, sem cursor
     cursor: str | None = None  # id do último Job da página anterior
@@ -484,6 +493,16 @@ def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
     if filtro.na_lixeira is not None and (job.lixeira is not None) != filtro.na_lixeira:
         return False
     if filtro.sha256 is not None and job.sha256 != filtro.sha256:
+        return False
+    if (
+        filtro.pessoa_do_catalogo is not None
+        and filtro.pessoa_do_catalogo not in job.pessoas_do_catalogo
+    ):
+        return False
+    if (
+        filtro.marca_do_catalogo is not None
+        and filtro.marca_do_catalogo not in job.marcas_do_catalogo
+    ):
         return False
     if filtro.programa is not None and job.programa != filtro.programa:
         return False
@@ -1213,7 +1232,14 @@ def criar_rotas(
         modelo, versao_atual = _ler_modelo(job.id)
         correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
         _registrar_correcao(autor, job, correcao)
+        _atualizar_catalogo_do_job(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
+
+    def _atualizar_catalogo_do_job(job: Job) -> None:
+        """Regrava no Job quem aparece na Decupagem entregue; nunca levanta (#359)."""
+        atualizar_catalogo_do_job(
+            job, repositorio, armazenamento, correcoes, catalogo.obter
+        )
 
     def _registrar_correcao(autor: Usuario, job: Job, correcao: Correcao) -> None:
         registrar(
@@ -1282,6 +1308,7 @@ def criar_rotas(
         for correcao in gravadas:
             correcoes.acrescentar(correcao)
             _registrar_correcao(autor, job, correcao)
+        _atualizar_catalogo_do_job(job)
         sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
         return {"id": gravadas[0].id, "ids": [c.id for c in gravadas]}
 
@@ -1337,6 +1364,7 @@ def criar_rotas(
                 " ou não casa com a versão atual",
             ) from None
         _registrar_correcao(autor, job, registro)
+        _atualizar_catalogo_do_job(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/revisao/aprovar", status_code=202)
@@ -1399,6 +1427,7 @@ def criar_rotas(
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
         _registrar_correcao(autor, job, registro)
+        _atualizar_catalogo_do_job(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
@@ -1463,6 +1492,7 @@ def criar_rotas(
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
         _registrar_correcao(autor, job, registro)
+        _atualizar_catalogo_do_job(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/aprovar", status_code=201)

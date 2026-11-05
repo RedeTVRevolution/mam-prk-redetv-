@@ -306,6 +306,35 @@ class TestRepositorioFirestore:
         assert len(repositorio.consultar(filtro).jobs) == 2
         assert lidos["documentos"] == 5
 
+    def test_pessoa_e_marca_do_catalogo_acham_so_os_jobs_certos(
+        self, repositorio: RepositorioFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for i in range(30):
+            repositorio.salvar(_job(f"x{i}", BASE, pessoas_do_catalogo=[f"o{i}"]))
+        repositorio.salvar(
+            _job("a", BASE, pessoas_do_catalogo=["p1", "p2"], marcas_do_catalogo=["m1"])
+        )
+        repositorio.salvar(
+            _job("b", BASE + timedelta(minutes=1), pessoas_do_catalogo=["p1"])
+        )
+        repositorio.salvar(_job("c", BASE, pessoas_do_catalogo=["p2"]))
+        lidos = {"documentos": 0}
+        stream = firestore.Query.stream
+
+        def contar(consulta: firestore.Query, *args: Any, **kwargs: Any) -> Any:
+            for doc in stream(consulta, *args, **kwargs):
+                lidos["documentos"] += 1
+                yield doc
+
+        monkeypatch.setattr(firestore.Query, "stream", contar)
+
+        da_pessoa = repositorio.consultar(FiltroDeJobs(pessoa_do_catalogo="p1"))
+        assert [j.id for j in da_pessoa.jobs] == ["b", "a"]
+        assert lidos["documentos"] == 2
+        da_marca = repositorio.consultar(FiltroDeJobs(marca_do_catalogo="m1"))
+        assert [j.id for j in da_marca.jobs] == ["a"]
+        assert lidos["documentos"] == 3
+
     def test_lixeira_com_outro_filtro_confere_o_resto_em_python(
         self, repositorio: RepositorioFirestore
     ) -> None:

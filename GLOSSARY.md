@@ -205,6 +205,9 @@ Correção de Editor, num tipo que exige aprovação, que espera a decisão de u
 **Juntar e dividir pautas**:
 Tipos de Correção (`pauta.juntar`, valor `{ids, titulo}`; `pauta.dividir`, valor `{em_ms, titulos}`) que mudam a estrutura das pautas, podem exigir aprovação como os outros tipos e reindexam o vídeo. Juntar vale só para pautas que se seguem; dividir, para um corte dentro da pauta. No reprocessar, cada uma é reconciliada com as pautas novas do modelo: se o modelo já fez o mesmo, com os mesmos títulos, a correção está atendida; se fez o mesmo com outros títulos, só os títulos mudam; se não, é reaplicada.
 
+**Catálogo do Job**:
+Os campos `pessoas_do_catalogo` e `marcas_do_catalogo` do Job: os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas fundidas resolvidas) (#359). São gravados ao indexar, a cada Correção que muda a Decupagem entregue e na fusão de pessoas, e é por eles (`array_contains`) que o impacto de mandar uma pessoa ou marca para a lixeira, restaurá-la ou purgá-la acha só os vídeos dela, sem abrir todas as decupagens. Job anterior ao campo só entra no impacto depois de `make preencher-catalogo-dos-jobs`, que preenche os dois campos de todos os Jobs concluídos e pode repetir sem mudar nada.
+
 **Correção não reaplicada**:
 Juntar ou dividir pautas para a qual o reprocessar não achou pauta correspondente. Não se perde: aparece na fila (`/fila`) com `candidatos` vazios, e só pode ser descartada.
 Na tela (modo de catalogação, aba Pautas): `M` marca a pauta em foco, `U` junta as marcadas, `D` divide a pauta em foco no ponto do player; na gaveta, a fila mostra a marca "não reaplicada" com "Refazer à mão" (volta a essas teclas) e Descartar.

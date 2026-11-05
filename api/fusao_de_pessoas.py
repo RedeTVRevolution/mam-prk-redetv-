@@ -23,6 +23,7 @@ from api.catalogo import (
     prefixo_das_fotos,
 )
 from api.catalogo_apagado import com_pessoas_fundidas
+from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.comparador import normalizar
 from api.correcoes import Motivo, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import RepositorioDeJobs, _confere_permissao
@@ -190,6 +191,7 @@ def criar_rotas_da_fusao(
             fotos.apagar(rosto.referencia)
         fotos.apagar_prefixo(prefixo_das_fotos(origem.id))
         pessoas.definir_rostos(origem.id, [])
+        passar_pessoa_nos_jobs(repositorio, origem.id, destino.id)
         ao_fundir()
         return Fundida(
             origem_id=origem.id,
