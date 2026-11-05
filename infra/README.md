@@ -140,8 +140,11 @@ Depois confira os dados no banco novo e, se for trocar, copie o que faltar para 
 
 ```
 gcloud firestore export gs://<BUCKET>/<PASTA> --database="(default)" --snapshot-time=2026-11-04T12:00:00Z
-gcloud firestore import gs://<BUCKET>/<PASTA>/<EXPORT> --database=<BANCO_NOVO>
+gcloud firestore databases create --database=<BANCO_NOVO> --location=<REGIAO>
+gcloud firestore import gs://<BUCKET>/<PASTA> --database=<BANCO_NOVO>
 ```
+
+O `import` pede um banco que já exista, por isso o `create` antes; com a pasta dada no `export`, a exportação fica direto nela, e o `import` recebe a mesma pasta.
 
 Para clonar o banco inteiro naquele ponto, `gcloud firestore databases clone --source-database=projects/<PROJETO>/databases/(default) --snapshot-time=... --destination-database=<BANCO_NOVO>`. O bucket de exportação não é o do Terraform: use um temporário e apague depois. Ensaiar uma restauração no dev ainda não foi feito.
 

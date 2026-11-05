@@ -10,7 +10,9 @@ CATORZE_SEMANAS = 14 * 7 * 24 * 3600
 
 
 def _bloco(cabecalho: str) -> str:
-    return TF[TF.index(cabecalho) :].split("\nresource ")[0].split("\nlocals ")[0]
+    inicio = re.search(rf"^{re.escape(cabecalho)}", TF, re.MULTILINE)
+    assert inicio
+    return TF[inicio.start() : TF.index("\n}\n", inicio.start())]
 
 
 def _agenda(nome: str) -> str:
@@ -18,7 +20,7 @@ def _agenda(nome: str) -> str:
 
 
 def _retencao(bloco: str) -> int:
-    achado = re.search(r'retention\s*=\s*"(\d+)s"', bloco)
+    achado = re.search(r'^\s*retention\s*=\s*"(\d+)s"', bloco, re.MULTILINE)
     assert achado
     return int(achado.group(1))
 
@@ -32,7 +34,11 @@ def test_o_banco_liga_a_recuperacao_a_um_ponto_no_tempo() -> None:
 
 def test_o_banco_continua_protegido_contra_exclusao() -> None:
     banco = _bloco('resource "google_firestore_database" "mam"')
-    assert "DELETE_PROTECTION_ENABLED" in banco
+    assert re.search(
+        r'^\s*delete_protection_state\s*=\s*"DELETE_PROTECTION_ENABLED"',
+        banco,
+        re.MULTILINE,
+    )
 
 
 def test_a_agenda_diaria_guarda_sete_dias() -> None:
@@ -47,10 +53,14 @@ def test_a_agenda_semanal_guarda_catorze_semanas() -> None:
     assert "weekly_recurrence" in bloco
     assert "daily_recurrence" not in bloco
     assert _retencao(bloco) == CATORZE_SEMANAS
+    assert re.search(r'day\s*=\s*"SUNDAY"', bloco)
 
 
 def test_so_ha_duas_agendas_o_maximo_do_firestore() -> None:
-    assert len(re.findall(r'resource "google_firestore_backup_schedule"', TF)) == 2
+    agendas = re.findall(
+        r'^resource "google_firestore_backup_schedule"', TF, re.MULTILINE
+    )
+    assert len(agendas) == 2
 
 
 def test_as_agendas_sao_do_banco_do_modulo() -> None:
