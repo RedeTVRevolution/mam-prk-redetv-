@@ -13,7 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
@@ -28,7 +28,14 @@ from api.custo_do_painel import (
     linhas_do_csv_de_custo,
     relatorio_de_custo,
 )
-from api.jobs import RepositorioDeJobs, ServicoIndisponivel, _confere_permissao
+from api.jobs import (
+    Estado,
+    FiltroDeJobs,
+    Job,
+    RepositorioDeJobs,
+    ServicoIndisponivel,
+    _confere_permissao,
+)
 from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel, RevisaoNoVideo
 from api.relatorios import confere_o_pedido, csv_em_texto, ou_503, resposta_em_csv
 from api.resumos_de_uso import (
@@ -192,6 +199,38 @@ class UsuarioDoFiltro(BaseModel):
 class OpcoesDosFiltros(BaseModel):
     programas: list[str]
     usuarios: list[UsuarioDoFiltro]
+
+
+# Os Jobs ainda em andamento; os terminados ficam de fora (a falha já tem alerta próprio).
+ESTADOS_DA_FILA: tuple[Estado, ...] = ("aguardando_upload", "validando", "analisando")
+assert set(ESTADOS_DA_FILA) | {"concluido", "falhou", "cancelado"} == set(
+    get_args(Estado)
+)
+
+
+class EstadoNaFila(BaseModel):
+    estado: Estado
+    quantidade: int
+    idade_do_mais_antigo_s: int  # desde a criação; 0 sem Job no estado
+
+
+class FilaAgora(BaseModel):
+    por_estado: list[EstadoNaFila]
+
+
+def fila_agora(na_fila: list[Job], agora: datetime) -> FilaAgora:
+    por_estado = []
+    for estado in ESTADOS_DA_FILA:
+        do_estado = [j for j in na_fila if j.estado == estado]
+        idade = max((agora - j.criado_em for j in do_estado), default=timedelta())
+        por_estado.append(
+            EstadoNaFila(
+                estado=estado,
+                quantidade=len(do_estado),
+                idade_do_mais_antigo_s=round(idade.total_seconds()),
+            )
+        )
+    return FilaAgora(por_estado=por_estado)
 
 
 COLUNAS_DO_CSV_DE_ACESSOS = ("dia", "uid", "email", "acessos", "ativo", "ultimo_acesso")
@@ -1026,6 +1065,7 @@ def criar_rotas_do_painel(
     qualidade: QualidadeDoPainel,
     faturamento: FonteDeCusto | None,
     jobs: RepositorioDeJobs,
+    relogio: Callable[[], datetime],
 ) -> APIRouter:
     rotas = APIRouter(prefix="/painel")
 
@@ -1041,6 +1081,17 @@ def criar_rotas_do_painel(
         grupo = escolhe_o_grupo(agrupar, dias)
         resposta.headers["X-Agrupamento"] = grupo
         return grupo
+
+    @rotas.get("/fila", response_model=FilaAgora)
+    def fila(_pessoa: PodeVerOPainel) -> FilaAgora:
+        """Os Jobs em andamento por estado e a idade do mais antigo, lidos na hora (#420).
+        Fica na aba Vídeos, cuja abertura já vai para a auditoria pela rota `/videos`."""
+        na_fila = ou_503(
+            lambda: (
+                jobs.consultar(FiltroDeJobs(estados=frozenset(ESTADOS_DA_FILA))).jobs
+            )
+        )
+        return fila_agora(na_fila, relogio())
 
     @rotas.get("/filtros", response_model=OpcoesDosFiltros)
     def filtros(_pessoa: PodeVerOPainel) -> OpcoesDosFiltros:

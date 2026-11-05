@@ -2,6 +2,7 @@
 
 import csv
 import io
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -16,6 +17,7 @@ from api.chaves import (
     emitir_chave,
 )
 from api.copia_bigquery import _parametro
+from api.jobs import Estado, Job, RepositorioEmMemoria, agora_utc
 from api.main import criar_app
 from api.painel import escolhe_o_grupo, inicio_do_grupo
 from api.papeis import RepositorioDePapeisEmMemoria
@@ -111,6 +113,7 @@ class Mundo:
         qualidade: Any = None,
         faturamento: Any = None,
         jobs: Any = None,
+        relogio: Callable[[], datetime] = agora_utc,
     ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
@@ -129,6 +132,7 @@ class Mundo:
                 qualidade_do_painel=qualidade,
                 faturamento=faturamento,
                 repositorio=jobs,
+                relogio=relogio,
                 contas=ContasDeUsuarioEmMemoria(
                     [
                         ContaDoIdentityPlatform(uid="bia", email="bia@redetv.com.br"),
@@ -148,7 +152,16 @@ def _diretoria() -> Mundo:
 
 @pytest.mark.parametrize(
     "rota",
-    ["/acessos", "/videos", "/buscas", "/revisao", "/api", "/custo", "/filtros"],
+    [
+        "/acessos",
+        "/videos",
+        "/buscas",
+        "/revisao",
+        "/api",
+        "/custo",
+        "/filtros",
+        "/fila",
+    ],
 )
 @pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
 def test_sem_painel_ver_e_403(rota: str, papel: str) -> None:
@@ -785,3 +798,53 @@ def test_agrupamento_com_pontos_demais_e_422_e_nao_grava_a_abertura() -> None:
     assert len(auto.json()["por_dia"]) == 23  # de jan/2025 a nov/2026
     # O CSV não agrupa: sai inteiro, sem 422.
     assert mundo.get("/acessos", agrupar="dia", formato="csv").status_code == 200
+
+
+AGORA = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
+
+
+def _job_ha(id: str, estado: Estado, minutos: float) -> Job:
+    return Job(
+        id=id,
+        nome=f"{id}.mp4",
+        tamanho_bytes=10,
+        sha256="a" * 64,
+        duracao_s=60.0,
+        estado=estado,
+        criado_por="bia",
+        criado_em=AGORA - timedelta(minutes=minutos),
+        atualizado_em=AGORA,
+    )
+
+
+def _fila(*jobs: Job) -> dict[str, dict[str, Any]]:
+    repositorio = RepositorioEmMemoria()
+    for job in jobs:
+        repositorio.salvar(job)
+    resposta = Mundo(["diretoria"], jobs=repositorio, relogio=lambda: AGORA).get(
+        "/fila"
+    )
+    assert resposta.status_code == 200
+    return {e.pop("estado"): e for e in resposta.json()["por_estado"]}
+
+
+def test_fila_conta_por_estado_com_a_idade_do_mais_antigo_sem_os_terminados() -> None:
+    assert _fila(
+        _job_ha("a", "analisando", 30),
+        _job_ha("b", "analisando", 90),
+        _job_ha("c", "validando", 5),
+        _job_ha("d", "concluido", 600),
+        _job_ha("e", "falhou", 600),
+        _job_ha("f", "cancelado", 600),
+    ) == {
+        "aguardando_upload": {"quantidade": 0, "idade_do_mais_antigo_s": 0},
+        "validando": {"quantidade": 1, "idade_do_mais_antigo_s": 300},
+        "analisando": {"quantidade": 2, "idade_do_mais_antigo_s": 5400},
+    }
+
+
+def test_fila_vazia_vem_com_zero_em_cada_estado() -> None:
+    assert _fila() == {
+        e: {"quantidade": 0, "idade_do_mais_antigo_s": 0}
+        for e in ("aguardando_upload", "validando", "analisando")
+    }

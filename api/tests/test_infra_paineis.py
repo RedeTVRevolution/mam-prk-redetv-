@@ -2,11 +2,8 @@
 
 import json
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 
-from api.fila_job import amostrar_a_fila
-from api.jobs import RepositorioEmMemoria
 from api.sinais import registro_do_uso_do_modelo
 
 INFRA = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
@@ -49,15 +46,8 @@ def test_cada_metrica_lida_pelos_paineis_esta_declarada_com_esse_nome() -> None:
     declaradas = set(re.findall(r'name\s+= "mam_(\w+)"', TF))
     # As que nascem de um `for_each` com `name = "mam_${each.key}"`: a chave é o nome.
     tokens = _bloco('resource "google_logging_metric" "tokens_do_modelo"')
-    fila = _bloco('resource "google_logging_metric" "fila"')
     por_chave = set(re.findall(r'"(\w+)"', tokens.split("toset(")[1].split(")")[0]))
-    por_chave |= set(re.findall(r"^\s+(\w+)\s+= \{ extrai", fila, re.MULTILINE))
-    assert por_chave == {
-        "tokens_de_entrada",
-        "tokens_de_saida",
-        "fila_quantidade",
-        "fila_idade",
-    }
+    assert por_chave == {"tokens_de_entrada", "tokens_de_saida"}
     for nome in re.findall(r'"(\w+)"', lidas.group(1)):
         assert nome in declaradas | por_chave, nome
 
@@ -74,33 +64,21 @@ def test_o_custo_usa_o_preco_da_configuracao_e_some_sem_preco() -> None:
     assert "length(var.precos_por_milhao_de_tokens) == 0 ? []" in TF
 
 
-def test_a_fila_loga_o_que_as_metricas_extraem() -> None:
-    metrica = _bloco('resource "google_logging_metric" "fila"')
-    assert 'jsonPayload.evento=\\"fila_de_jobs\\"' in metrica
-    linhas: list[str] = []
-    amostrar_a_fila(RepositorioEmMemoria(), datetime.now(UTC), linhas.append)
-    linha = json.loads(linhas[0])
-    assert linha["evento"] == "fila_de_jobs"
-    for campo in ("quantidade", "idade_do_mais_antigo_s"):
-        assert campo in linha and f'extrai = "{campo}"' in metrica
-    assert "estado" in linha and "EXTRACT(jsonPayload.estado)" in metrica
-    job = _bloco('resource "google_cloud_run_v2_job" "fila"')
-    assert "api.fila_job" in job
-    assert 'google_service_account.mam["fila"]' in job
-    agenda = _bloco('resource "google_cloud_scheduler_job" "fila"')
-    assert "var.agenda_da_fila" in agenda
-
-
-def test_a_fila_e_amostrada_a_cada_5_min_e_o_painel_pega_mais_de_2_amostras() -> None:
-    variavel = _bloco('variable "agenda_da_fila"')
-    assert re.search(r'default\s+= "\*/5 \* \* \* \*"', variavel)
-    painel = TF[TF.index("    fila = [\n") :]
-    painel = painel[: painel.index("\n    ]\n")]
-    janelas = re.findall(r"\[(\d+)m\]", painel)
-    assert len(janelas) == 4
-    # Com 10 min cabem só ~2 amostras e a média fica com buracos (0/0) (#344).
-    assert all(int(j) > 2 * 5 for j in janelas)
-    assert len(set(janelas)) == 1
+def test_o_mam_fila_saiu_e_a_fila_e_lida_na_hora_pelo_painel_da_diretoria() -> None:
+    # #420: a fila vem da rota `/v1/painel/fila`; nada roda de minuto em minuto para ela.
+    for resto in (
+        "mam-fila",
+        "api.fila_job",
+        "agenda_da_fila",
+        'resource "google_cloud_run_v2_job" "fila"',
+        'resource "google_cloud_scheduler_job" "fila"',
+        'resource "google_logging_metric" "fila"',
+        "fila_quantidade",
+        "fila_idade",
+        '"fila"',
+        "MAM · Fila de processamento",
+    ):
+        assert resto not in TF, resto
 
 
 def test_a_falta_de_gpu_e_logada_so_quando_falta_gpu_ou_cota() -> None:
@@ -111,8 +89,8 @@ def test_a_falta_de_gpu_e_logada_so_quando_falta_gpu_ou_cota() -> None:
     assert 'jsonPayload.evento=\\"falta_de_gpu\\"' in metrica
 
 
-def test_os_quatro_paineis_existem_e_o_da_gpu_cobre_os_tres_jobs_com_gpu() -> None:
-    for chave in ("tempo_e_custo", "fila", "erros_da_api", "gpu"):
+def test_os_tres_paineis_existem_e_o_da_gpu_cobre_os_tres_jobs_com_gpu() -> None:
+    for chave in ("tempo_e_custo", "erros_da_api", "gpu"):
         assert re.search(rf"^\s+{chave}\s+= ", TF, re.MULTILINE)
     assert 'resource "google_monitoring_dashboard" "painel"' in TF
     for job in ("transcricao_gpu", "ocr_gpu", "objetos_gpu"):

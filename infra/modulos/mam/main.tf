@@ -301,12 +301,6 @@ variable "precos_por_milhao_de_tokens" {
   default = {}
 }
 
-variable "agenda_da_fila" {
-  description = "Cron (formato do Cloud Scheduler) da amostra da fila de processamento (#288); de 5 em 5 minutos, o Job só conta os Jobs em andamento e loga"
-  type        = string
-  default     = "*/5 * * * *"
-}
-
 variable "agenda_da_purga" {
   description = "Cron (formato do Cloud Scheduler) da purga automática da lixeira (#145); uma vez por dia, de madrugada"
   type        = string
@@ -586,7 +580,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "avaliacao", "purga", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -642,12 +636,10 @@ locals {
     # avaliação da Vertex (`evaluateInstances`): papel sob medida com a predição e a
     # permissão do próprio `evaluateInstances` (#302).
     avaliacao = ["roles/datastore.user", local.papel_vertex_avaliacao]
-    # A amostra da fila (#288) só lê os Jobs do Firestore e escreve no log.
-    fila = ["roles/datastore.user"]
     # A purga automática (#145) apaga o Job e as correções no Firestore e os momentos do índice
     # (como a `web`, quando ela purga à mão).
     purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
-    # O agendador só dispara os Jobs da avaliação, da fila e da purga (papel em cada Job, mais abaixo).
+    # O agendador só dispara os Jobs da avaliação e da purga (papel em cada Job, mais abaixo).
     agendador = []
     # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer", "roles/logging.logWriter"]
@@ -2140,63 +2132,6 @@ resource "google_cloud_scheduler_job" "avaliacao" {
   depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao]
 }
 
-# Amostra da fila de processamento (#288): de 5 em 5 minutos o Job conta os Jobs em
-# andamento por estado e a idade do mais antigo e loga (`api/fila_job.py`); o painel da fila
-# lê esse log. Sem rede da VPC: só fala com o Firestore.
-resource "google_cloud_run_v2_job" "fila" {
-  name                = "mam-fila"
-  location            = var.regiao
-  deletion_protection = false
-  template {
-    parallelism = 1
-    task_count  = 1
-    template {
-      service_account = google_service_account.mam["fila"].email
-      max_retries     = 0
-      # Uma consulta ao Firestore; se falhar, fica para a amostra seguinte, 5 min depois.
-      timeout = "120s"
-      containers {
-        image   = var.imagem_validacao
-        command = ["python"]
-        args    = ["-m", "api.fila_job"]
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        resources {
-          limits = {
-            cpu    = "1"
-            memory = "512Mi"
-          }
-        }
-      }
-    }
-  }
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_cloud_run_v2_job_iam_member" "agendador_roda_fila" {
-  name     = google_cloud_run_v2_job.fila.name
-  location = google_cloud_run_v2_job.fila.location
-  role     = "roles/run.invoker"
-  member   = google_service_account.mam["agendador"].member
-}
-
-resource "google_cloud_scheduler_job" "fila" {
-  name      = "mam-fila-amostra"
-  region    = var.regiao
-  schedule  = var.agenda_da_fila
-  time_zone = var.fuso_da_agenda
-  http_target {
-    http_method = "POST"
-    uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.fila.location}/jobs/${google_cloud_run_v2_job.fila.name}:run"
-    oauth_token {
-      service_account_email = google_service_account.mam["agendador"].email
-    }
-  }
-  depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_fila]
-}
-
 # Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de identificação -> Job de quadros -> Job de indexação.
 locals {
   workflow_validacao = "mam-validacao"
@@ -2703,7 +2638,7 @@ resource "google_monitoring_alert_policy" "desvio_de_programa" {
 }
 
 # Painéis de observabilidade (#288). Cada gráfico lê uma métrica de log (os jobs e o Workflows
-# escrevem uma linha JSON por evento: `api/sinais.py`, `api/fila_job.py`, `marca_fim` e
+# escrevem uma linha JSON por evento: `api/sinais.py`, `marca_fim` e
 # `roda_o_job_com_gpu` do Workflows; os campos e os eventos são o contrato com os filtros
 # abaixo, e um teste confere) ou uma métrica nativa do Cloud Run. As métricas de log em
 # distribuição são lidas em PromQL (`_sum`, `_count`, `_bucket`); o nome é o da métrica com o
@@ -2724,7 +2659,7 @@ locals {
     google_cloud_run_v2_job.objetos_gpu.name,
   ]
   filtro_dos_jobs_com_gpu = "resource.type=\"cloud_run_job\" AND resource.labels.job_name=one_of(${join(",", [for j in local.jobs_com_gpu : "\"${j}\""])})"
-  metrica_de_log          = { for nome in ["duracao_da_etapa", "tokens_de_entrada", "tokens_de_saida", "fila_quantidade", "fila_idade", "falta_de_gpu", "requisicoes_da_api"] : nome => "logging_googleapis_com:user_mam_${nome}" }
+  metrica_de_log          = { for nome in ["duracao_da_etapa", "tokens_de_entrada", "tokens_de_saida", "falta_de_gpu", "requisicoes_da_api"] : nome => "logging_googleapis_com:user_mam_${nome}" }
 
   # US$ na janela, por etapa: soma dos tokens de cada modelo vezes o preço dele (o `or` junta
   # as séries de modelos diferentes antes do `sum`; a etapa que não usou o modelo some).
@@ -2778,28 +2713,6 @@ locals {
         },
       ],
     )
-    fila = [
-      {
-        titulo = "Jobs em cada estado (média das amostras dos últimos 20 min)"
-        series = [
-          {
-            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_sum[20m])) / sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_count[20m]))"
-            legenda = "{{estado}}"
-          },
-        ]
-        unidade = "1"
-      },
-      {
-        titulo = "Idade do Job mais antigo em andamento, por estado (média das amostras dos últimos 20 min)"
-        series = [
-          {
-            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_sum[20m])) / sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_count[20m]))"
-            legenda = "{{estado}}"
-          },
-        ]
-        unidade = "s"
-      },
-    ]
     erros_da_api = [
       {
         titulo = "Requisições com erro, por rota e código"
@@ -2883,7 +2796,6 @@ locals {
   }
   titulos_dos_paineis = {
     tempo_e_custo = "MAM · Tempo e custo por etapa"
-    fila          = "MAM · Fila de processamento"
     erros_da_api  = "MAM · Erros e latência da API"
     gpu           = "MAM · Jobs com GPU"
   }
@@ -2953,40 +2865,6 @@ resource "google_logging_metric" "tokens_do_modelo" {
       num_finite_buckets = 44
       growth_factor      = 1.4
       scale              = 1
-    }
-  }
-  depends_on = [google_project_service.apis]
-}
-
-# A amostra da fila (`api/fila_job.py`): uma linha por estado a cada 5 minutos.
-resource "google_logging_metric" "fila" {
-  for_each = {
-    fila_quantidade = { extrai = "quantidade", unidade = "1" }
-    fila_idade      = { extrai = "idade_do_mais_antigo_s", unidade = "s" }
-  }
-  name            = "mam_${each.key}"
-  description     = "Amostra da fila de processamento (${each.value.extrai}), com o estado como rótulo (#288)"
-  filter          = "${local.filtro_dos_jobs} AND jsonPayload.evento=\"fila_de_jobs\""
-  value_extractor = "EXTRACT(jsonPayload.${each.value.extrai})"
-  metric_descriptor {
-    metric_kind = "DELTA"
-    value_type  = "DISTRIBUTION"
-    unit        = each.value.unidade
-    labels {
-      key         = "estado"
-      value_type  = "STRING"
-      description = "Estado do Job"
-    }
-  }
-  label_extractors = {
-    estado = "EXTRACT(jsonPayload.estado)"
-  }
-  # Só a média é lida (do _sum e do _count); as faixas, de 5000 em 5000, não pesam.
-  bucket_options {
-    linear_buckets {
-      num_finite_buckets = 20
-      width              = 5000
-      offset             = 0
     }
   }
   depends_on = [google_project_service.apis]
@@ -3088,7 +2966,6 @@ resource "google_monitoring_dashboard" "painel" {
   depends_on = [
     google_logging_metric.duracao_da_etapa,
     google_logging_metric.tokens_do_modelo,
-    google_logging_metric.fila,
     google_logging_metric.falta_de_gpu,
     google_logging_metric.requisicoes_da_api,
   ]

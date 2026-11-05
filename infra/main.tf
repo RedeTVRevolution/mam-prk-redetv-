@@ -545,21 +545,6 @@ moved {
 }
 
 moved {
-  from = google_cloud_run_v2_job.fila
-  to   = module.mam.google_cloud_run_v2_job.fila
-}
-
-moved {
-  from = google_cloud_run_v2_job_iam_member.agendador_roda_fila
-  to   = module.mam.google_cloud_run_v2_job_iam_member.agendador_roda_fila
-}
-
-moved {
-  from = google_cloud_scheduler_job.fila
-  to   = module.mam.google_cloud_scheduler_job.fila
-}
-
-moved {
   from = google_workflows_workflow.validacao
   to   = module.mam.google_workflows_workflow.validacao
 }
@@ -657,11 +642,6 @@ moved {
 moved {
   from = google_logging_metric.tokens_do_modelo
   to   = module.mam.google_logging_metric.tokens_do_modelo
-}
-
-moved {
-  from = google_logging_metric.fila
-  to   = module.mam.google_logging_metric.fila
 }
 
 moved {
