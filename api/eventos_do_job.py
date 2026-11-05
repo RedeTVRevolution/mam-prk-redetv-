@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -195,6 +195,9 @@ class RepositorioQuePublicaOFim:
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
 
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        return self._repositorio.obter_varios(job_ids)
+
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
@@ -216,6 +219,31 @@ class RepositorioQuePublicaOFim:
 
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         return self._repositorio.consultar(filtro)
+
+
+def registrar_o_fim(eventos: Eventos, job: Job, agora: datetime) -> None:
+    """O evento de uso `fim_de_processamento` do Job que terminou."""
+    quem: Quem = (
+        ("sistema", job.sistema)
+        if job.sistema is not None
+        else ("usuario", job.criado_por)
+    )
+    registrar(
+        eventos,
+        "fim_de_processamento",
+        quem,
+        agora,
+        job_id=job.id,
+        programa=job.programa,
+        estado=job.estado,
+        codigo_falha=job.codigo_falha,
+        segundos_de_processamento=max(
+            0, round((agora - job.criado_em).total_seconds())
+        ),
+        duracao_do_video_ms=(
+            round(job.duracao_s * 1000) if job.duracao_s is not None else None
+        ),
+    )
 
 
 class RepositorioQueRegistraOFim:
@@ -242,30 +270,15 @@ class RepositorioQueRegistraOFim:
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
 
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        return self._repositorio.obter_varios(job_ids)
+
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
         job = self._repositorio.transitar(job_id, de, mudancas)
         if job is not None and job.estado != de and job.estado in FIM_DE_JOB:
-            quem: Quem = (
-                ("sistema", job.sistema)
-                if job.sistema is not None
-                else ("usuario", job.criado_por)
-            )
-            agora = self._relogio()
-            registrar(
-                self._eventos,
-                "fim_de_processamento",
-                quem,
-                agora,
-                job_id=job.id,
-                programa=job.programa,
-                estado=job.estado,
-                codigo_falha=job.codigo_falha,
-                segundos_de_processamento=max(
-                    0, round((agora - job.criado_em).total_seconds())
-                ),
-            )
+            registrar_o_fim(self._eventos, job, self._relogio())
         return job
 
     def trocar(

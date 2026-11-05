@@ -4,10 +4,14 @@ Lê da cópia no BigQuery (#260) as linhas `comercial`, uma por inserção. Por 
 número de inserções, o tempo (a soma das durações, sem unir sobreposições: uma marca
 incidental durante o merchan conta nas duas) e o número de vídeos; o detalhe por tipo de
 inserção e a lista das inserções, com o vídeo e o tempo, vêm junto. A base (permissão,
-filtros, CSV, erros) é a de `api.relatorios`, a mesma do tempo de tela.
+filtros, CSV, erros) é a de `api.relatorios`, a mesma do tempo de tela. A soma é feita no
+BigQuery (#363): ele devolve uma linha por marca, tipo de inserção e vídeo, com os
+intervalos das inserções; o Python só monta a resposta.
 """
 
+import json
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Literal, Protocol, get_args
@@ -44,19 +48,50 @@ class Insercao:
     fim_ms: int
 
 
+@dataclass(frozen=True)
+class InsercoesDaMarca:
+    """A soma de uma marca, num tipo de inserção, num vídeo: o que o SQL devolve."""
+
+    marca: str
+    tipo: str
+    job_id: str
+    insercoes: int
+    tempo_ms: int
+    intervalos: list[tuple[int, int]]  # início e fim de cada inserção
+
+
 class ConsultaDeInsercoes(Protocol):
-    def insercoes(
+    def somas(
         self,
         programa: str | None,
         desde: date | None,
         ate: date | None,
         tipo: str | None,
-    ) -> list[Insercao]:
-        """As inserções com marca; `desde` e `ate` são datas de exibição, inclusive."""
+    ) -> list[InsercoesDaMarca]:
+        """As inserções com marca, somadas; `desde` e `ate` são datas de exibição,
+        inclusive."""
+
+
+def somar(insercoes: list[Insercao]) -> list[InsercoesDaMarca]:
+    """A soma em Python do que `SOMA_EM_SQL` faz no BigQuery (o dublê e a referência)."""
+    grupos: dict[tuple[str, str, str], list[Insercao]] = defaultdict(list)
+    for i in insercoes:
+        grupos[(i.marca, i.tipo, i.job_id)].append(i)
+    return [
+        InsercoesDaMarca(
+            marca=marca,
+            tipo=tipo,
+            job_id=job_id,
+            insercoes=len(dele),
+            tempo_ms=sum(i.fim_ms - i.inicio_ms for i in dele),
+            intervalos=sorted((i.inicio_ms, i.fim_ms) for i in dele),
+        )
+        for (marca, tipo, job_id), dele in grupos.items()
+    ]
 
 
 class ConsultaEmMemoria:
-    """Dublê da consulta: os mesmos filtros sobre a cópia em memória."""
+    """Dublê da consulta: os mesmos filtros e a mesma soma sobre a cópia em memória."""
 
     def __init__(self, copia: CopiaEmMemoria) -> None:
         self._copia = copia
@@ -78,6 +113,45 @@ class ConsultaEmMemoria:
                 )
         return achadas
 
+    def somas(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+    ) -> list[InsercoesDaMarca]:
+        return somar(self.insercoes(programa, desde, ate, tipo))
+
+
+# Os intervalos das inserções, num texto JSON. É o único trecho só do BigQuery: o teste
+# troca por `json_group_array` e roda o resto num SQLite.
+INTERVALOS_EM_JSON = (
+    "TO_JSON_STRING(ARRAY_AGG(STRUCT(inicio_ms, fim_ms) ORDER BY inicio_ms, fim_ms))"
+)
+
+# O que vem depois de `WITH base AS (...)`: uma linha por marca, tipo e vídeo. Os
+# intervalos vêm junto porque a resposta lista as inserções, então o tamanho do resultado
+# ainda cresce com o número delas; o teto que resta é a memória da instância (o resultado
+# vem em quantas páginas precisar).
+SOMA_EM_SQL = f"""SELECT marca, tipo, job_id, COUNT(*), SUM(fim_ms - inicio_ms),
+  {INTERVALOS_EM_JSON}
+FROM base
+GROUP BY marca, tipo, job_id"""
+
+
+def insercoes_da_marca(v: Sequence[Any]) -> InsercoesDaMarca:
+    """Uma linha do `SOMA_EM_SQL`, na ordem das colunas do SELECT."""
+    return InsercoesDaMarca(
+        marca=v[0],
+        tipo=v[1],
+        job_id=v[2],
+        insercoes=int(v[3]),
+        tempo_ms=int(v[4]),
+        intervalos=sorted(
+            (int(i["inicio_ms"]), int(i["fim_ms"])) for i in json.loads(v[5])
+        ),
+    )
+
 
 class ConsultaBigQuery:
     """A consulta real: REST com o mesmo transporte da cópia."""
@@ -86,13 +160,13 @@ class ConsultaBigQuery:
         self._config = config
         self._transporte = transporte
 
-    def insercoes(
+    def somas(
         self,
         programa: str | None,
         desde: date | None,
         ate: date | None,
         tipo: str | None,
-    ) -> list[Insercao]:
+    ) -> list[InsercoesDaMarca]:
         # Marca ou tipo vazio também fica de fora, como no dublê.
         condicoes = [
             "NULLIF(t.marca, '') IS NOT NULL",
@@ -105,15 +179,18 @@ class ConsultaBigQuery:
         linhas = consultar_no_bigquery(
             self._config,
             self._transporte,
-            colunas="t.job_id, t.marca, t.tipo_de_insercao, t.inicio_ms, t.fim_ms",
+            colunas=(
+                "t.job_id, t.marca, t.tipo_de_insercao AS tipo, t.inicio_ms, t.fim_ms"
+            ),
             tipos=("comercial",),
             programa=programa,
             desde=desde,
             ate=ate,
             condicoes=condicoes,
             parametros=parametros,
+            depois_da_base=SOMA_EM_SQL,
         )
-        return [Insercao(v[0], v[1], v[2], int(v[3]), int(v[4])) for v in linhas]
+        return [insercoes_da_marca(v) for v in linhas]
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
@@ -154,47 +231,43 @@ class RelatorioDeMarcas(BaseModel):
     marcas: list[MarcaNoRelatorio]
 
 
-def _total(tipo: str, itens: list[Insercao]) -> TotalPorTipo:
+def _total(tipo: str, grupos: list[InsercoesDaMarca]) -> TotalPorTipo:
     return TotalPorTipo(
         tipo=tipo,
-        insercoes=len(itens),
-        tempo_ms=sum(i.fim_ms - i.inicio_ms for i in itens),
-        videos=len({i.job_id for i in itens}),
+        insercoes=sum(g.insercoes for g in grupos),
+        tempo_ms=sum(g.tempo_ms for g in grupos),
+        videos=len({g.job_id for g in grupos}),
     )
 
 
-def relatorio(insercoes: list[Insercao]) -> list[MarcaNoRelatorio]:
+def relatorio(somas: list[InsercoesDaMarca]) -> list[MarcaNoRelatorio]:
     """Uma linha por marca, do maior tempo para o menor; o detalhe por tipo segue a ordem
     de `TIPOS_DE_INSERCAO` (um tipo que a decupagem não tem mais, de uma linha antiga, vem
     no fim, para as partes fecharem com o total) e a lista das inserções, a do vídeo e do
-    tempo."""
-    por_marca: dict[str, list[Insercao]] = defaultdict(list)
-    for i in insercoes:
-        por_marca[i.marca].append(i)
+    tempo (no empate, a do tipo)."""
+    por_marca: dict[str, list[InsercoesDaMarca]] = defaultdict(list)
+    for g in somas:
+        por_marca[g.marca].append(g)
     marcas: list[MarcaNoRelatorio] = []
     for marca, dela in por_marca.items():
         total = _total(TIPO_DO_TOTAL, dela)
-        tipos = {i.tipo for i in dela}
+        tipos = {g.tipo for g in dela}
         ordem = [t for t in TIPOS_DE_INSERCAO if t in tipos]
         ordem += sorted(tipos - set(TIPOS_DE_INSERCAO))
+        lista = [
+            InsercaoNoRelatorio(job_id=g.job_id, tipo=g.tipo, inicio_ms=ini, fim_ms=fim)
+            for g in dela
+            for ini, fim in g.intervalos
+        ]
+        lista.sort(key=lambda i: (i.job_id, i.inicio_ms, i.fim_ms, i.tipo))
         marcas.append(
             MarcaNoRelatorio(
                 marca=marca,
                 insercoes=total.insercoes,
                 tempo_ms=total.tempo_ms,
                 videos=total.videos,
-                por_tipo=[_total(t, [i for i in dela if i.tipo == t]) for t in ordem],
-                lista=[
-                    InsercaoNoRelatorio(
-                        job_id=i.job_id,
-                        tipo=i.tipo,
-                        inicio_ms=i.inicio_ms,
-                        fim_ms=i.fim_ms,
-                    )
-                    for i in sorted(
-                        dela, key=lambda i: (i.job_id, i.inicio_ms, i.fim_ms)
-                    )
-                ],
+                por_tipo=[_total(t, [g for g in dela if g.tipo == t]) for t in ordem],
+                lista=lista,
             )
         )
     marcas.sort(key=lambda m: (-m.tempo_ms, m.marca))
@@ -233,7 +306,7 @@ def criar_rotas_das_marcas(
         if tipo is not None and tipo not in TIPOS_DE_INSERCAO:
             raise HTTPException(422, f"Tipo de inserção desconhecido: {tipo}")
         fonte = confere_o_pedido(consulta, desde, ate)
-        achadas = ou_503(lambda: relatorio(fonte.insercoes(programa, desde, ate, tipo)))
+        achadas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate, tipo)))
         if formato == "csv":
             return resposta_em_csv(em_csv(achadas), "marcas.csv")
         poe_o_nome_dos_videos((i for m in achadas for i in m.lista), repositorio)

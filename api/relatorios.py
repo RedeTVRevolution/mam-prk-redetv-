@@ -2,8 +2,8 @@
 
 Cada relatório diz quais tipos de linha lê, as colunas que quer e como agrupa. Aqui ficam o
 que é igual em todos: quem pode consultar, o filtro de programa e de data de exibição (no
-BigQuery e na cópia em memória), a leitura da resposta, o CSV e o erro de uma consulta que
-não cabe ou não termina.
+BigQuery e na cópia em memória), a leitura da resposta (todas as páginas), o CSV e o erro
+de uma consulta que não termina.
 """
 
 import csv
@@ -49,7 +49,7 @@ def confere_o_pedido[T](consulta: T | None, desde: date | None, ate: date | None
 
 
 def ou_503[T](consultar: Callable[[], T]) -> T:
-    """Uma consulta que não termina ou não cabe numa resposta vira 503 com o motivo."""
+    """Uma consulta que não termina vira 503 com o motivo."""
     try:
         return consultar()
     except RuntimeError as e:
@@ -114,11 +114,16 @@ def consultar_no_bigquery(
     unnest_das_pessoas: bool = False,
     condicoes: Sequence[str] = (),
     parametros: Sequence[dict[str, Any]] = (),
+    depois_da_base: str | None = None,
 ) -> list[list[Any]]:
     """As linhas de `tipos` do programa e do período, com os valores como parâmetros.
 
     `colunas` é o que vai no SELECT (a tabela é `t`; com `unnest_das_pessoas`, as pessoas
     da linha são `p`). Devolve o texto de cada coluna, na ordem; o chamador converte.
+
+    Com `depois_da_base`, essas linhas viram a CTE `base` e o texto dado vem logo depois
+    de `WITH base AS (...)`: o BigQuery soma e devolve só o resultado somado. O texto
+    começa com `,` (mais CTEs) ou com o `SELECT` final.
     """
     lista_de_tipos = ", ".join(f"'{t}'" for t in tipos)
     onde = [f"t.tipo IN ({lista_de_tipos})", *condicoes]
@@ -133,12 +138,10 @@ def consultar_no_bigquery(
     tabela = f"`{config.projeto}.{config.dataset}.{config.tabela}` AS t"
     if unnest_das_pessoas:
         tabela += ", UNNEST(t.pessoas) AS p"
-    return linhas_da_consulta(
-        transporte,
-        config.regiao,
-        f"SELECT {colunas}\nFROM {tabela}\nWHERE {' AND '.join(onde)}",
-        parametros,
-    )
+    sql = f"SELECT {colunas}\nFROM {tabela}\nWHERE {' AND '.join(onde)}"
+    if depois_da_base is not None:
+        sql = f"WITH base AS (\n{sql}\n)\n{depois_da_base}"
+    return linhas_da_consulta(transporte, config.regiao, sql, parametros)
 
 
 def linhas_da_consulta(
@@ -148,8 +151,10 @@ def linhas_da_consulta(
     parametros: Sequence[dict[str, Any]] = (),
     o_que: str = "relatório",
 ) -> list[list[Any]]:
-    """Os valores de cada linha, em texto. Uma consulta que não termina ou não cabe numa
-    resposta falha alto com `RuntimeError`."""
+    """Os valores de cada linha, em texto. Uma consulta que não termina no prazo falha alto
+    com `RuntimeError`. O resultado que não cabe numa página (`maxResults` ou o limite de
+    tamanho da resposta) vem nas páginas seguintes (`jobs.getQueryResults`); todas as
+    linhas ficam na memória da instância, que é o teto que resta."""
     resposta = transporte(
         {
             "query": sql,
@@ -162,9 +167,24 @@ def linhas_da_consulta(
     )
     if not resposta.get("jobComplete", False):
         raise RuntimeError(f"a consulta do {o_que} não terminou no prazo")
-    if resposta.get("pageToken"):
-        raise RuntimeError(f"o {o_que} não cabe numa resposta: peça um período menor")
-    return [[campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])]
+    job = resposta.get("jobReference", {})
+    linhas: list[list[Any]] = []
+    while True:
+        linhas += [
+            [campo["v"] for campo in linha["f"]] for linha in resposta.get("rows", [])
+        ]
+        if not (token := resposta.get("pageToken")):
+            return linhas
+        if "jobId" not in job:
+            raise RuntimeError(f"a consulta do {o_que} veio paginada sem o job")
+        resposta = transporte(
+            {
+                "jobId": job["jobId"],
+                "location": job.get("location", regiao),
+                "pageToken": token,
+                "maxResults": 100_000,
+            }
+        )
 
 
 class _ComVideo(Protocol):
@@ -175,14 +195,13 @@ class _ComVideo(Protocol):
 def poe_o_nome_dos_videos(
     itens: Iterable[_ComVideo], repositorio: RepositorioDeJobs
 ) -> None:
-    """Preenche o nome de cada vídeo do JSON, lendo cada Job uma vez só. O vídeo na lixeira
-    fica sem nome: os números do passado não mudam, mas ele some (#144)."""
-    nomes: dict[str, str | None] = {}
+    """Preenche o nome de cada vídeo do JSON, numa leitura em lote dos Jobs. O vídeo na
+    lixeira fica sem nome: os números do passado não mudam, mas ele some (#144)."""
+    itens = list(itens)
+    jobs = repositorio.obter_varios({i.job_id for i in itens})
+    nomes = {j.id: j.nome for j in jobs if j.lixeira is None}
     for item in itens:
-        if item.job_id not in nomes:
-            job = repositorio.obter(item.job_id)
-            nomes[item.job_id] = job.nome if job and job.lixeira is None else None
-        item.nome = nomes[item.job_id]
+        item.nome = nomes.get(item.job_id)
 
 
 def config_e_transporte_do_ambiente(

@@ -229,7 +229,7 @@ Arquivos em `scripts/afk/`: `prompt.md` (o texto que o agente implementador rece
    ```
 
 2. **Dois tokens do GitHub**, ambos *fine-grained* e com acesso só a `RedeTVRevolution/mam-prk-redetv-` (a organização pode precisar aprovar):
-   - `afk-github-agente`, que vai para o contêiner: Issues leitura e escrita, Contents só leitura. Sem escrita em Contents, o agente não consegue fazer push.
+   - `afk-github-agente`, que vai para o contêiner: Issues leitura e escrita, Contents e Pull requests só leitura. Sem escrita em Contents, o agente não consegue fazer push. Pull requests serve para um `Bloqueado por: #N` em que `#N` é um PR mesclado; sem ela, o loop anota (sem novas tentativas) e o ticket segue esperando.
    - `afk-github-script`, que fica no Mac: Contents, Pull requests e Workflows leitura e escrita. Serve para o fetch, o push final e o PR. Sem Workflows em *Read and write*, o GitHub recusa o push de um branch em que o agente mexeu em `.github/workflows/`.
 
    ```sh
@@ -268,17 +268,17 @@ Ele pega o PR aberto mais recente de um branch `afk/*` deste repositório, abert
 
 Cada iteração:
 
-1. Pega o ticket: o que ficou parcial na iteração anterior ou o menor `ready-for-agent` aberto, sem `afk-feito`, com todos os bloqueios resolvidos (dependências nativas e linha `Bloqueado por: #N`). Um bloqueio está resolvido se o bloqueador está fechado ou tem `afk-feito`.
+1. Pega o ticket: o que ficou parcial na iteração anterior ou o menor `ready-for-agent` aberto, sem `afk-feito`, com todos os bloqueios resolvidos (dependências nativas e linha `Bloqueado por: #N`). Um bloqueio está resolvido se o bloqueador está fechado ou tem `afk-feito`, ou se é um PR mesclado (PR aberto ou fechado sem merge segue bloqueando).
 2. Roda o implementador com `prompt.md`: `mattpocock-skills:tdd`, `make verificar` e commit. Descarta o que não foi commitado e lê o fim da resposta (`<ticket>N</ticket>` e `<status>…</status>`).
 3. Se o status é `feito`, roda o revisor com `revisao.md`: um `claude -p` novo, com o modelo de `AFK_MODELO_REVISOR`, que roda `mattpocock-skills:code-review` contra o ticket a partir do commit de antes dele e commita as correções. Descarta de novo o que não foi commitado. O revisor termina com `<revisao>feita</revisao>` ou `<revisao>erro</revisao>`; sem um dos dois, ou cortado, a iteração conta como falha e a próxima retoma o ticket.
-4. Roda `make verificar`, já depois da revisão. Se falhar, desfaz os commits da iteração, os do implementador e os do revisor.
+4. Roda `make verificar`, já depois da revisão. Se falhar com um teste falhando (`FAIL` do vitest ou `FAILED` do pytest), roda de novo uma vez, salvo se o prazo de 1 h estourou: sob carga, os testes da web falham cada vez num teste diferente. Lint, tipos e build vermelhos não repetem. Se passar na segunda, as notas dizem o que falhou na primeira. Se falhar duas vezes, desfaz os commits da iteração, os do implementador e os do revisor.
 5. Age conforme o status:
    - `feito` (e revisão `feita`): o integrador junta o branch do ticket ao do PR e o script põe `afk-feito` no ticket.
    - `parcial`: a próxima iteração continua o ticket.
    - `bloqueado`: o agente comentou a pergunta no ticket e trocou a label para `ready-for-human`. O script tira o trabalho do branch, guarda num branch local `<branch>-bloqueado-N` e segue.
    - `erro`, do implementador ou do revisor: problema do ambiente, como uma skill ausente. O loop para, e o trabalho do ticket sai do branch do PR para `<branch>-parcial-N`.
 
-Com `AFK_VAGAS` acima de 1, o loop toca vários tickets ao mesmo tempo, cada um com as suas iterações. Ele não pega dois tickets da mesma spec juntos (a primeira referência, `#N` ou um `.md`, da seção "Parte de" do ticket). O integrador junta os tickets feitos ao branch do PR, um por vez, com `git merge --no-ff`. Se a árvore do merge difere da ponta do ticket, roda `make verificar` de novo. Se o merge conflita ou fica vermelho, o branch do PR volta a como estava e a iteração seguinte do ticket é de merge: o agente traz o branch do PR para o do ticket, resolve e verifica, sem revisão. Se nem assim entrar, o ticket volta para humano como um bloqueado. As iterações contam para o loop inteiro, e as falhas seguidas, para cada ticket; um erro ou a terceira falha seguida de um ticket param a distribuição de tickets, e cada vaga termina a iteração em que está.
+Com `AFK_VAGAS` acima de 1, o loop toca vários tickets ao mesmo tempo, cada um com as suas iterações. Ele não pega dois tickets da mesma spec juntos (a primeira referência, `#N` ou um `.md`, da seção "Parte de" do ticket). O integrador junta os tickets feitos ao branch do PR, um por vez, com `git merge --no-ff`. Se a árvore do merge difere da ponta do ticket, roda `make verificar` de novo, com a mesma segunda tentativa do portão. Se o merge conflita ou fica vermelho, o branch do PR volta a como estava e a iteração seguinte do ticket é de merge: o agente traz o branch do PR para o do ticket, resolve e verifica, sem revisão. Se nem assim entrar, o ticket volta para humano como um bloqueado. As iterações contam para o loop inteiro, e as falhas seguidas, para cada ticket; um erro ou a terceira falha seguida de um ticket param a distribuição de tickets, e cada vaga termina a iteração em que está.
 
 O loop para sozinho quando a fila esvazia, depois do número de iterações pedido, depois de 3 falhas seguidas (portão vermelho ou iteração sem sinal válido) ou se houver um ticket aberto com `afk-feito`, o que indica um PR anterior sem merge. Um ticket com 3 parciais seguidas volta para humano como um bloqueado. Um ticket em andamento quando o loop para sai do branch do PR e fica num branch local `<branch>-parcial-N`.
 

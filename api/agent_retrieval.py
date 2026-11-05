@@ -309,28 +309,104 @@ def esperar(
         raise RuntimeError(f"operação {operacao.get('name')}: {operacao['error']}")
 
 
+ORIENTACAO_DO_ESQUEMA = (
+    "o PATCH só acrescenta propriedade; apague a coleção, rode "
+    "`make criar-colecao-da-busca` e `make reindexar`"
+)
+
+
+class EsquemaIncompativel(RuntimeError):
+    """A coleção no ar tem campo com tipo diferente ou que sobra: o PATCH não resolve."""
+
+
+def _assinatura(propriedade: dict[str, Any]) -> tuple[Any, Any]:
+    # A API pode devolver outros atributos; só o tipo conta.
+    return propriedade.get("type"), propriedade.get("items", {}).get("type")
+
+
+def _tipo(propriedade: dict[str, Any]) -> str:
+    tipo, itens = _assinatura(propriedade)
+    return f"{tipo}<{itens}>" if itens else str(tipo)
+
+
+def comparar_esquema(
+    config: ConfigDaBusca, no_ar: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """As propriedades do esquema que faltam na coleção `no_ar`. Tipo diferente ou campo
+    que sobra na coleção não se resolve por PATCH: levanta EsquemaIncompativel nomeando o campo."""
+    esperadas = esquema_da_colecao(config)["dataSchema"]["properties"]
+    existentes = no_ar.get("dataSchema", {}).get("properties", {})
+    for campo, propriedade in existentes.items():
+        if campo not in esperadas:
+            raise EsquemaIncompativel(
+                f"coleção {config.colecao}: o campo {campo!r} sobra no esquema; {ORIENTACAO_DO_ESQUEMA}"
+            )
+        if _assinatura(propriedade) != _assinatura(esperadas[campo]):
+            raise EsquemaIncompativel(
+                f"coleção {config.colecao}: o campo {campo!r} é {_tipo(propriedade)} "
+                f"e deveria ser {_tipo(esperadas[campo])}; {ORIENTACAO_DO_ESQUEMA}"
+            )
+    return {c: p for c, p in esperadas.items() if c not in existentes}
+
+
+def conferir_esquema(config: ConfigDaBusca, transporte: Transporte) -> list[str]:
+    """Os campos de `CAMPOS_DE_TEXTO` que faltam no esquema real da coleção."""
+    no_ar = transporte("GET", config.caminho_da_colecao, None)
+    existentes = no_ar.get("dataSchema", {}).get("properties", {})
+    return [c for c in CAMPOS_DE_TEXTO if c not in existentes]
+
+
+def _acrescentar_campos(
+    config: ConfigDaBusca,
+    transporte: Transporte,
+    dormir: Callable[[float], None],
+) -> list[str]:
+    no_ar = transporte("GET", config.caminho_da_colecao, None)
+    faltam = comparar_esquema(config, no_ar)
+    if not faltam:
+        return []
+    # O PATCH com `updateMask=dataSchema` troca o esquema inteiro: parte do que está no ar.
+    esquema = dict(no_ar.get("dataSchema", {"type": "object"}))
+    esquema["properties"] = {**esquema.get("properties", {}), **faltam}
+    operacao = transporte(
+        "PATCH",
+        f"{config.caminho_da_colecao}?updateMask=dataSchema",
+        {"dataSchema": esquema},
+    )
+    esperar(operacao, transporte, dormir)
+    return list(faltam)
+
+
 def criar_colecao(
     config: ConfigDaBusca,
     transporte: Transporte,
     dormir: Callable[[float], None] = sleep,
-) -> None:
+) -> list[str]:
     """Cria a coleção e os índices ANN dela, um depois do outro, esperando cada um
-    ficar pronto; não faz nada no que já existe."""
-    pedidos = [
-        (
+    ficar pronto. Na coleção que já existe, acrescenta por PATCH as propriedades que
+    faltam no esquema (devolvidas; os registros já gravados só são achados depois de
+    `make reindexar`) e para com erro se o tipo difere ou se sobra campo. Não mexe nos
+    índices que já existem."""
+    acrescentados: list[str] = []
+    try:
+        operacao = transporte(
+            "POST",
             f"{config.local}/collections?collectionId={config.colecao}",
             esquema_da_colecao(config),
         )
-    ] + [
-        (f"{config.caminho_da_colecao}/indexes?indexId={indice}", corpo)
-        for indice, corpo in indices_da_colecao(config).items()
-    ]
-    for caminho, corpo in pedidos:
+    except JaExiste:
+        acrescentados = _acrescentar_campos(config, transporte, dormir)
+    else:
+        esperar(operacao, transporte, dormir)
+    for indice, corpo in indices_da_colecao(config).items():
         try:
-            operacao = transporte("POST", caminho, corpo)
+            operacao = transporte(
+                "POST", f"{config.caminho_da_colecao}/indexes?indexId={indice}", corpo
+            )
         except JaExiste:
             continue
         esperar(operacao, transporte, dormir)
+    return acrescentados
 
 
 def apagar_colecao(

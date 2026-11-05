@@ -4,7 +4,9 @@ Cada ação relevante (login, envio, fim de processamento, busca, correção e c
 API) vira um evento no Pub/Sub; uma assinatura do BigQuery o grava na tabela de eventos
 (`infra/modulos/mam/eventos_de_uso.tf`). O evento só leva o id de quem agiu (nunca nome
 nem e-mail) e, na busca, o tamanho da consulta e os filtros, nunca o texto. Falha ao
-publicar não derruba a ação: vai ao log. O Pub/Sub fica atrás da porta `Eventos`.
+publicar não derruba a ação: vai ao log. O evento sai dentro da requisição, antes da
+resposta (o serviço web no Cloud Run só tem CPU durante ela, então uma thread depois
+da resposta podia perder o evento). O Pub/Sub fica atrás da porta `Eventos`.
 """
 
 import base64
@@ -12,7 +14,6 @@ import json
 import logging
 import uuid
 from collections.abc import Callable
-from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
@@ -58,6 +59,9 @@ class EventoDeUso(BaseModel):
     estado: str | None = None
     codigo_falha: str | None = None
     segundos_de_processamento: int | None = None
+    # `fim_de_processamento`: a duração do vídeo, para o painel somar as horas sem ler os
+    # momentos (vazia no fim de um Job que falhou antes de medi-la).
+    duracao_do_video_ms: int | None = None
     # `busca`: só o tamanho da consulta (em caracteres, ou em bytes na busca por
     # imagem; nenhum na de parecidos, que parte de um plano) e os filtros; o texto
     # nunca sai da API.
@@ -102,26 +106,6 @@ class SemEventos:
 
     def publicar(self, evento: EventoDeUso) -> None:
         return None
-
-
-class EventosEmSegundoPlano:
-    """Publica numa thread à parte: a resposta a quem usa não espera o Pub/Sub. A
-    falha, que já não tem a quem voltar, vai ao log."""
-
-    def __init__(self, eventos: Eventos, executor: Executor | None = None) -> None:
-        self._eventos = eventos
-        self._executor = executor or ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="eventos-de-uso"
-        )
-
-    def publicar(self, evento: EventoDeUso) -> None:
-        self._executor.submit(self._publicar, evento)
-
-    def _publicar(self, evento: EventoDeUso) -> None:
-        try:
-            self._eventos.publicar(evento)
-        except Exception:
-            log.exception("não consegui publicar o evento de uso %s", evento.tipo)
 
 
 class ErroAoPublicarUso(Exception):

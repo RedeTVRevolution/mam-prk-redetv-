@@ -7,48 +7,23 @@ corre em memória, sobre uma cópia que vale poucos segundos.
 """
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
-from typing import Annotated, Protocol
+from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, StringConstraints, field_validator
 
-from api.achar_nomes import ComNome, achar_por_prefixo
+from api.achar_nomes import achar_por_prefixo
 from api.auth import Usuario
-from api.catalogo import Catalogo, PessoaDoCatalogo
+from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.correcoes import LIMITE_DO_NOME, _sem_controle
 from api.jobs import _exige, _exige_editar
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
-
-VALIDADE_DA_COPIA = timedelta(seconds=30)
 
 Nome = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME),
 ]
-
-
-class _Catalogavel(ComNome, Protocol):
-    @property
-    def id(self) -> str: ...
-
-
-class _CopiaCurta[T: _Catalogavel]:
-    """A lista do catálogo lida há pouco; um nome acrescentado aqui a descarta."""
-
-    def __init__(self, ler: Callable[[], list[T]], relogio: Callable[[], datetime]):
-        self._ler, self._relogio = ler, relogio
-        self._lida_em: datetime | None = None
-        self._itens: list[T] = []
-
-    def itens(self) -> list[T]:
-        agora = self._relogio()
-        if self._lida_em is None or agora - self._lida_em >= VALIDADE_DA_COPIA:
-            self._itens, self._lida_em = self._ler(), agora
-        return self._itens
-
-    def descartar(self) -> None:
-        self._lida_em = None
 
 
 class PessoaAchada(BaseModel):
@@ -90,12 +65,14 @@ def criar_rotas_do_catalogo(
     marcas: CatalogoDeMarcas,
     relogio: Callable[[], datetime],
     fusao: Callable[[Callable[[], None]], APIRouter],
+    copia_das_pessoas: CopiaCurta[PessoaDoCatalogo] | None = None,
 ) -> APIRouter:
     """`fusao` monta as rotas de fundir pessoas (#209); recebe como descartar a cópia
-    da lista de pessoas, para a fundida sair do autocompletar na hora."""
+    da lista de pessoas, para a fundida sair do autocompletar na hora. `copia_das_pessoas`
+    é a cópia que a busca também usa para resolver nomes."""
     rotas = APIRouter(prefix="/catalogo")
-    copia_das_pessoas = _CopiaCurta(pessoas.todas, relogio)
-    copia_das_marcas = _CopiaCurta(marcas.todas, relogio)
+    copia_das_pessoas = copia_das_pessoas or CopiaCurta(pessoas.todas, relogio)
+    copia_das_marcas = CopiaCurta(marcas.todas, relogio)
 
     def pessoa_achada(p: PessoaDoCatalogo) -> PessoaAchada:
         return PessoaAchada(

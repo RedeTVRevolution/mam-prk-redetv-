@@ -14,11 +14,13 @@
   "dependencies": {
     "@firebase/app": "^0.16.2",
     "@firebase/auth": "^1.13.6",
+    "@mantine/charts": "9.7.4",
     "@mantine/core": "9.7.4",
     "@mantine/hooks": "9.7.4",
     "@tabler/icons-react": "3.50.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "recharts": "3.10.1"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.3",

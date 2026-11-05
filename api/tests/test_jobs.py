@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
 from api.correcoes import versao_do_modelo
+from api.idempotencia import RepositorioDeIdempotenciaEmMemoria
 from api.jobs import (
     Estado,
     Job,
@@ -17,6 +18,7 @@ from api.jobs import (
 )
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.tests.programas_de_teste import cadastro_com_tv_fama
 
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
 INICIO = datetime(2026, 10, 29, 12, 0, tzinfo=UTC)
@@ -84,21 +86,32 @@ class Relogio:
 
 class Ambiente:
     def __init__(self, tamanho_maximo: int = 4 * 1024**3) -> None:
+        self.idempotencia = RepositorioDeIdempotenciaEmMemoria()
         self.repositorio = RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
         self.relogio = Relogio()
+        papeis = RepositorioDePapeisEmMemoria()
+        papeis.salvar("u1", ["editor"])
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(),
+                papeis=papeis,
                 repositorio=self.repositorio,
                 armazenamento=self.armazenamento,
                 tamanho_maximo_bytes=tamanho_maximo,
                 relogio=self.relogio,
+                idempotencia=self.idempotencia,
+                programas=cadastro_com_tv_fama()[0],
             )
         )
 
     def criar(self, **corpo: Any) -> Any:
-        padrao = {"nome": "clipe.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
+        padrao = {
+            "nome": "clipe.mp4",
+            "tamanho_bytes": 1000,
+            "tipo": "video/mp4",
+            "data_exibicao": "2026-10-01",
+        }
         return self.cliente.post(
             "/v1/jobs", json={**padrao, **corpo}, headers=AUTORIZACAO
         )
@@ -207,7 +220,6 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "estado",
         "codigo_falha",
         "duracao_s",
-        "cortes_ms",
         "timecode_origem",
         "taxa_de_quadros",
         "capa_url",
@@ -676,10 +688,20 @@ def test_data_de_exibicao_fica_no_job_e_volta_no_get_e_na_lista() -> None:
     assert job is not None and job.data_exibicao == date(1999, 12, 31)
 
 
-def test_sem_data_de_exibicao_o_campo_vem_nulo() -> None:
-    resposta = Ambiente().criar()
+def test_sem_data_de_exibicao_da_422_e_nao_cria_o_job() -> None:
+    ambiente = Ambiente()
+    corpo = {"nome": "clipe.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
 
-    assert resposta.json()["data_exibicao"] is None
+    resposta = ambiente.cliente.post("/v1/jobs", json=corpo, headers=AUTORIZACAO)
+
+    assert resposta.status_code == 422
+    assert "data_exibicao" in resposta.text
+    assert ambiente.armazenamento.pedidos == []
+    assert ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json() == []
+
+
+def test_data_de_exibicao_nula_da_422() -> None:
+    assert Ambiente().criar(data_exibicao=None).status_code == 422
 
 
 def test_data_de_exibicao_de_hoje_e_aceita_e_a_de_amanha_da_422() -> None:
@@ -800,7 +822,12 @@ def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() 
 
 
 def _criar_com_chave(ambiente: Ambiente, chave: str, **corpo: Any) -> Any:
-    padrao = {"nome": "clipe.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
+    padrao = {
+        "nome": "clipe.mp4",
+        "tamanho_bytes": 1000,
+        "tipo": "video/mp4",
+        "data_exibicao": "2026-10-01",
+    }
     return ambiente.cliente.post(
         "/v1/jobs",
         json={**padrao, **corpo},
@@ -833,6 +860,44 @@ def test_idempotency_key_com_outro_corpo_recebe_409_e_chaves_diferentes_criam_jo
     assert outra.json()["id"] != primeira.json()["id"]
 
 
+def test_idempotency_key_repetida_de_job_na_lixeira_recebe_410() -> None:
+    from api.catalogo import EnvioParaLixeira
+
+    ambiente = Ambiente()
+    primeira = _criar_com_chave(ambiente, "k1")
+    job = ambiente.repositorio.obter(primeira.json()["id"])
+    assert job is not None
+    ambiente.repositorio.salvar(
+        job.model_copy(
+            update={
+                "lixeira": EnvioParaLixeira(
+                    em=datetime(2026, 11, 4, tzinfo=UTC),
+                    por_uid="u1",
+                    por_email="a@b.c",
+                    motivo="teste",
+                )
+            }
+        )
+    )
+
+    repeticao = _criar_com_chave(ambiente, "k1")
+
+    assert repeticao.status_code == 410
+    assert repeticao.json()["detail"] == "Este Job foi apagado"
+
+
+def test_idempotency_key_repetida_de_job_purgado_recebe_410_e_nao_cria_job() -> None:
+    ambiente = Ambiente()
+    primeira = _criar_com_chave(ambiente, "k1")
+    ambiente.repositorio.remover(primeira.json()["id"])
+
+    repeticao = _criar_com_chave(ambiente, "k1")
+
+    assert repeticao.status_code == 410
+    assert ambiente.repositorio.obter(primeira.json()["id"]) is None
+    assert ambiente.repositorio.listar() == []
+
+
 def test_idempotency_key_invalida_recebe_422() -> None:
     ambiente = Ambiente()
 
@@ -847,6 +912,12 @@ def test_repeticao_que_grava_o_job_que_faltou_usa_a_hora_de_agora() -> None:
     ambiente = Ambiente()
     primeira = _criar_com_chave(ambiente, "k1").json()
     del ambiente.repositorio._jobs[primeira["id"]]
+    # Sem a marca de Job gravado: a queda foi antes de gravar.
+    (id_,) = ambiente.idempotencia._reservas
+    reserva = ambiente.idempotencia._reservas[id_]
+    ambiente.idempotencia._reservas[id_] = reserva.model_copy(
+        update={"job_gravado": False}
+    )
     ambiente.relogio.agora = INICIO + timedelta(hours=30)
 
     repeticao = _criar_com_chave(ambiente, "k1")

@@ -10,7 +10,8 @@ no cabeçalho dele. Há três tipos de caso:
              sem limite);
   exatos  -> `teto` momentos citam o termo e, em cada vídeo, vêm antes dos parecidos;
   ausente -> nenhum vídeo (sem `termo` e sem `pertinentes`).
-A consulta só com `pertinentes` (as editoriais do #259) não tem veredito: quem a julga é o aceite.
+A consulta só com `pertinentes` (como as que virão dos casos de uso do plano, #341) não tem
+veredito: quem a julga é o aceite.
 
 O aceite (#258): a média, entre as consultas com anotação de pertinência (`termo` ou
 `pertinentes`), da fração dos 5 primeiros resultados pertinentes, de pelo menos 80%. O relatório
@@ -28,7 +29,13 @@ from typing import Any, cast
 
 from google.cloud import firestore
 
-from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.agent_retrieval import (
+    AgentRetrieval,
+    ConfigDaBusca,
+    Transporte,
+    conferir_esquema,
+    transporte_http,
+)
 from api.busca import (
     Ajustes,
     Busca,
@@ -40,8 +47,8 @@ from api.busca import (
 from api.embedding_do_quadro import embedding_da_busca
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
-from api.nuvem import CatalogoFirestore, RepositorioFirestore
-from api.programas import PERFIS
+from api.nuvem import CatalogoFirestore, ProgramasFirestore, RepositorioFirestore
+from api.programas import NomesDosProgramas
 
 
 @dataclass(frozen=True)
@@ -227,17 +234,33 @@ def _ajustes(caso: Caso) -> Ajustes | None:
     return Ajustes(programa=caso.programa, desde=caso.desde, ate=caso.ate)
 
 
+def esquema_sem_campos(config: ConfigDaBusca, transporte: Transporte) -> str | None:
+    """A mensagem de erro se o esquema real da coleção não tem os campos de texto da busca."""
+    faltam = conferir_esquema(config, transporte)
+    if not faltam:
+        return None
+    campos = ", ".join(repr(c) for c in faltam)
+    return (
+        f"o esquema da coleção não tem o(s) campo(s) {campos}: toda busca por palavra "
+        "voltaria vazia. Rode `make criar-colecao-da-busca` e `make reindexar`."
+    )
+
+
 def main() -> int:
     # O plano B registra a falta do Model Armor a cada consulta; aqui é o esperado.
     logging.getLogger("api.entendimento_da_consulta").setLevel(logging.CRITICAL)
     cliente = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
     config = ConfigDaBusca.do_ambiente(os.environ)
+    transporte = transporte_http()
+    if erro := esquema_sem_campos(config, transporte):
+        print(erro, file=sys.stderr)
+        return 1
     busca = Busca(
         transporte=_SemModelo(),
         catalogo=CatalogoFirestore(cliente),
         armor=_SemModelArmor(),
-        programas=sorted(PERFIS),
-        indice=AgentRetrieval(config, transporte_http()),
+        programas=NomesDosProgramas(ProgramasFirestore(cliente)),
+        indice=AgentRetrieval(config, transporte),
         ranking=RankingEmOrdem(),
         repositorio=RepositorioFirestore(cliente),
         armazenamento=cast(Armazenamento, _SemQuadro()),

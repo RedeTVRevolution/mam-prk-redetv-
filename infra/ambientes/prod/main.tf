@@ -79,7 +79,7 @@ variable "janelas_em_paralelo" {
 variable "espera_gpu_minutos" {
   description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
   type        = number
-  default     = 15
+  default     = 27
 }
 
 variable "limite_de_falhas_por_etapa" {

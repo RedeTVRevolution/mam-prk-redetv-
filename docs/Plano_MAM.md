@@ -106,7 +106,7 @@ Antes de expandir, um lote-piloto com programas de cada época passa pela mesma 
 | US$ 1.000 | \~3.600 | \~4,2 anos |
 | US$ 2.500 | \~8.900 | \~1,7 ano |
 
-Regras da fila: programas mais pedidos pelos editores primeiro, depois os anos mais recentes para trás; um botão "indexar agora" (papel Operador) passa um programa à frente; o agendador para quando o teto do mês é atingido. A entrada de dados no GCP não é cobrada, mas o envio de \~270 TB de originais (estimativa a 1,5 GB/h) depende da banda da RedeTV; para acelerar, o Transfer Appliance leva os dados fisicamente.
+Regras da fila: programas mais pedidos pelos editores primeiro, depois os anos mais recentes para trás; um botão "indexar agora" (quem tem `video.reprocessar`) passa um programa à frente; o agendador para quando o teto do mês é atingido. A entrada de dados no GCP não é cobrada, mas o envio de \~270 TB de originais (estimativa a 1,5 GB/h) depende da banda da RedeTV; para acelerar, o Transfer Appliance leva os dados fisicamente.
 
 ## Arquitetura serverless
 
@@ -182,11 +182,11 @@ As permissões são granulares e negadas por padrão: cada rota da API confere a
 
 | Papel | Pode |
 | --- | --- |
-| Consulta | Buscar, assistir e ver a decupagem |
-| Operador | Consulta + enviar vídeos, acompanhar e reprocessar |
-| Editor | Consulta + corrigir pessoas, pautas, objetos, comerciais e tempos |
+| Consulta | Buscar, assistir, ver e baixar a decupagem (é o papel da conta nova) |
+| Operador | Igual à Consulta (deixou de enviar e reprocessar no #376) |
+| Editor | Consulta + enviar vídeos, acompanhar, reprocessar o que falhou e corrigir pessoas, pautas, objetos, comerciais e tempos |
 | Curador | Editor + aprovar correções, mesclar pessoas, editar em lote, gerir o catálogo de pessoas e marcas |
-| Diretoria | Painel de indicadores, só leitura |
+| Diretoria | Consulta + painel de indicadores, só leitura |
 | Administrador | Usuários, papéis, chaves de API, configurações e auditoria; só em conta local com MFA |
 
 Exemplos de permissões: `video.enviar`, `decupagem.editar`, `pessoa.mesclar`, `painel.ver`, `usuario.gerir`. Toda mudança de papel fica no histórico de auditoria.
@@ -324,6 +324,8 @@ A busca devolve vídeos e, dentro de cada um, os momentos com início, fim, mini
 
 Cada vídeo decupado vira momentos indexados; cada consulta vira filtros e termos, passa pela busca híbrida e pela reordenação, e volta agrupada por vídeo.
 
+**Quadro de cada momento (para os sistemas).** Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`). A URL se pede pela rota do quadro, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`, sem o `quadros/`), e vale por pouco tempo. O campo `quadro_url` (a URL já assinada, que só a chave de sistema recebe) é **obsoleto**: está marcado como `deprecated` no OpenAPI e vai sair da resposta, com aviso antes aos sistemas; quem o usa deve migrar para `quadro` e a rota do quadro. Enquanto ele existe, a busca o assina em paralelo (até 16 chamadas ao mesmo tempo), para uma busca de 100 momentos caber no prazo.
+
 **O que é indexado.** A unidade é o momento: um plano ou um evento da decupagem (aparição de pessoa, menção a pessoa, comercial, fala, pauta). Cada momento tem campos filtráveis (pessoas que aparecem e pessoas citadas, em campos separados; marcas, programa, data de exibição, tipo, externa/estúdio, dia/noite, plano limpo), texto (descrição, fala do trecho, GC lido) e dois vetores: um de texto, gerado pelo próprio Agent Retrieval, e um multimodal do quadro-chave junto com a descrição, gerado pelo Gemini Embedding 2.
 
 | Recurso | Exemplo de consulta | Como funciona |
@@ -348,7 +350,7 @@ A interface segue o modelo do Video Indexer: player à esquerda, painel da decup
 
 | Tela | O que tem | Quem acessa |
 | --- | --- | --- |
-| Biblioteca | Lista de vídeos com status de processamento, filtros por programa e data, upload de MP4 | Consulta e Operador |
+| Biblioteca | Lista de vídeos com status de processamento, filtros por programa e data, upload de MP4 (Editor e Curador) | Consulta |
 | Vídeo · Decupagem | Player com painel lateral: pessoas com o quadro de evidência, separando quem aparece de quem é citado, pautas, objetos e cenários com miniaturas, comerciais e marcas, palavras-chave. Cada item tem a barra de ocorrências e os botões "anterior" e "próxima" para pular entre aparições | Consulta |
 | Vídeo · Linha do tempo | Transcrição sincronizada com o player, planos com miniatura, faixas por tipo de ocorrência | Consulta |
 | Busca | Barra de busca por texto ou imagem; resultados agrupados por vídeo, com os momentos e o motivo | Consulta |
@@ -417,7 +419,7 @@ Cada programa do piloto é aberto no player com as decupagens do 3.5 Flash-Lite 
 | Famosos na imagem | Nomes certos, aparições perdidas, falsos reconhecimentos, "não identificado" correto |
 | Menções a pessoas | Menções certas e perdidas, separadas das aparições |
 | Pautas | Limites e pessoas certos, resumo fiel, continuidade entre janelas |
-| B-roll | Pertinência dos 5 primeiros resultados em 20 consultas; classificação de plano limpo |
+| B-roll | Pertinência dos 5 primeiros resultados nas consultas visuais da sonda (casos de uso do plano, ver E2 e E6); classificação de plano limpo |
 | Comerciais | Inserções perdidas por tipo; confusão com marca incidental ou menção editorial |
 | Timecode | Clique que cai fora do momento e os piores casos |
 | Utilidade | Minutos para localizar e corrigir material, comparados ao processo atual |
@@ -497,11 +499,11 @@ Cada entrega atravessa todas as camadas (front, API, processamento, dados e test
 | --- | --- | --- | --- |
 | **E0 · POC** | Entrar com uma conta local, enviar um vídeo de até 10 min e ver a decupagem no player com o painel da decupagem | Identity Platform com conta local e MFA; front com upload, player e painel; API mínima; validação de MP4 em quarentena; uma chamada ao 3.5 Flash-Lite em Flex; JSON no Storage. Fundação: monorepo, Terraform do `dev`, CI | 5 clipes reais decupados; o clique cai no momento certo; nenhum segredo no repositório |
 | **E1 · Piloto de qualidade** | Cinco programas completos decupados com os cinco requisitos, no player e em JSON exportável | Janelas de análise em paralelo, consolidação, regra de tempos, aparição separada de menção, escalonamento com amostra de controle, A/B com o 3.8 Flash, comparação visual lado a lado, medição de custo e de tempo de revisão | Comparação visual dos dois modelos registrada por requisito; custo real por hora medido; decisão de modelo registrada |
-| **E2 · Busca** | Buscar por assunto, frase dita ou nome e saltar para os momentos | Índice no Agent Retrieval, entendimento da consulta, proteção contra injeção, página de resultados | Em 20 consultas editoriais, ≥80% dos 5 primeiros resultados pertinentes |
+| **E2 · Busca** | Buscar por assunto, frase dita ou nome e saltar para os momentos | Índice no Agent Retrieval, entendimento da consulta, proteção contra injeção, página de resultados | Nas consultas da sonda (`api/consultas_da_sonda.toml`), tiradas do que esta linha promete (assunto, frase dita, nome, filtros), ≥80% dos 5 primeiros resultados pertinentes, medido por `make sondar-busca`. Os editores não escrevem consultas ([#259](https://github.com/RedeTVRevolution/mam-prk-redetv-/issues/259), `wontfix`); o critério de cada uma (`termo` ou `pertinentes`) é escrito pelo time do projeto, o Bruno confere a lista no PR, e o veredito vem do comando |
 | **E3 · Revisão e edição** | Corrigir pessoas, pautas, objetos, comerciais e tempos e ver a correção chegar à busca | Área de revisão, papéis Editor e Curador, correções ancoradas e reconciliadas, estado de indexação, histórico, catálogo de pessoas | Um editor corrige um programa inteiro; reprocessar o programa mantém as correções certas e manda o resto para a fila |
 | **E4 · Famosos com evidência** | Ver o painel de pessoas com o quadro que justifica cada nome, separando aparições de menções, e filtrar por pessoa | Evidências, uso do catálogo, relatório de tempo de tela | Relatório de tempo de tela de um programa conferido, contando só aparições |
 | **E5 · Comerciais e merchandising** | Filtrar e tirar relatório por marca e por tipo de inserção | Taxonomia comercial e relatório | Um dia de programação conferido por um revisor |
-| **E6 · B-roll e busca visual** | Buscar "plano limpo de trânsito à noite" ou enviar uma foto e achar planos parecidos | Flag de plano limpo, vetores multimodais, busca por imagem | Consultas visuais aprovadas pelos editores |
+| **E6 · B-roll e busca visual** | Buscar "plano limpo de trânsito à noite" ou enviar uma foto e achar planos parecidos | Flag de plano limpo, vetores multimodais, busca por imagem | Consultas visuais de texto da sonda (`visual = true`, como "plano limpo de trânsito à noite"), tiradas do que esta linha promete, com ≥80% dos 5 primeiros resultados pertinentes em `make sondar-busca`; sem aprovação dos editores. A sonda só roda consultas de texto: a busca por foto enviada e os planos parecidos continuam no produto, mas ficam fora dessa medida (a [#327](https://github.com/RedeTVRevolution/mam-prk-redetv-/issues/327) retirou só as fotos de referência de pessoas) |
 | **E7 · API para sistemas legados** | O sistema da RedeTV envia vídeos e consulta a decupagem | Chave de API, idempotência, deduplicação autorizada, consulta de status | Teste de caos sem job duplicado; dois sistemas com o mesmo arquivo não veem os jobs um do outro |
 | **E8 · Login RedeTV e permissões completas** | Usuários entram com o login da RedeTV; o administrador gere papéis e escopos por programa | Adaptador para a API do legado, todos os papéis, auditoria; Administrador só em conta local com MFA | Login pelo legado em `staging`; a conta local continua funcionando. Entra quando a API do legado existir |
 | **E9 · Painel da diretoria** | A diretoria acompanha acessos, vídeos e buscas por usuário e no total | Eventos no BigQuery, telas do painel, papel Diretoria | Os números de uma semana batem com os registros |

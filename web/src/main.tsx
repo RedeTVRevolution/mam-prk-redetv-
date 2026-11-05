@@ -1,4 +1,5 @@
 import { MantineProvider } from '@mantine/core'
+import '@mantine/charts/styles.css'
 import '@mantine/core/styles.css'
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'

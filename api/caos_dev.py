@@ -60,6 +60,7 @@ def enviar_clipe(api: ApiNoAr, sistema: str, clipe: Path) -> Relatorio:
         "nome": clipe.name,
         "tamanho_bytes": len(dados),
         "tipo": CORPO["tipo"],
+        "data_exibicao": CORPO["data_exibicao"],
     }
     status, job = api.requisitar("POST", "/jobs", sistema=sistema, corpo=corpo)
     if status != 202:

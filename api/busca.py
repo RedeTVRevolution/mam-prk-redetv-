@@ -7,18 +7,20 @@ do usuário só chega ao índice como texto puro.
 """
 
 import logging
+import threading
 import time
 import unicodedata
 from collections import defaultdict
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from itertools import zip_longest
 from typing import Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from api.catalogo import Catalogo
+from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
     EVIDENCIAS,
@@ -50,6 +52,9 @@ TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
 JUNCAO_MS = 3_000
 VALIDADE_DO_QUADRO = timedelta(minutes=10)
+# Assinaturas simultâneas para a chave de sistema: cada uma é uma ida ao IAM, e cem
+# momentos em fila passavam dos 15 s da rota.
+TETO_DE_ASSINATURAS = 16
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
 ROTULO_DO_TIPO: dict[str, str] = {
@@ -70,6 +75,10 @@ class EmbeddingDaConsulta(Protocol):
     def vetor_do_texto(self, texto: str) -> list[float]: ...
 
     def vetor_da_imagem(self, jpeg: bytes) -> list[float]: ...
+
+
+class BuscaCancelada(Exception):
+    """A rota desistiu (passou do prazo): o trabalho que sobra para em vez de seguir rodando."""
 
 
 class BuscaPorImagemIndisponivel(Exception):
@@ -106,7 +115,20 @@ class Momento(BaseModel):
     fim_ms: int
     motivo: str
     destaques: list[Destaque]
-    quadro_url: str | None
+    # Assinada só para chave de sistema; a web recebe `null`. Obsoleto: sairá da resposta,
+    # os sistemas pedem a URL pela rota do quadro a partir do campo `quadro`.
+    quadro_url: str | None = Field(
+        json_schema_extra={
+            "deprecated": True
+        },  # só no esquema: `deprecated=True` avisa a cada leitura
+        description=(
+            "Obsoleto: vai sair da resposta. Use o campo `quadro` e peça a URL em "
+            "`GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo do "
+            "`quadro` (`plano-6.jpg`)."
+        ),
+    )
+    # Caminho do quadro no vídeo (`quadros/plano-6.jpg`): a web pede a URL pela rota do quadro.
+    quadro: str | None = None
 
 
 class VideoDoResultado(BaseModel):
@@ -231,6 +253,11 @@ def _destaques(texto: str, termos: Collection[str]) -> list[Destaque]:
     return [Destaque(inicio=i, fim=f) for i, f in unidos]
 
 
+def _conferir(cancelado: threading.Event | None) -> None:
+    if cancelado is not None and cancelado.is_set():
+        raise BuscaCancelada
+
+
 @dataclass
 class _Trecho:
     job_id: str
@@ -256,8 +283,13 @@ class Busca:
         armazenamento: Armazenamento,
         relogio: Callable[[], datetime],
         embedding: EmbeddingDaConsulta | None = None,
+        copia_do_catalogo: CopiaCurta[PessoaDoCatalogo] | None = None,
     ) -> None:
         self._embedding = embedding
+        # A mesma cópia do autocompletar, se a aplicação a passa: uma só recarga para todos.
+        self._copia_do_catalogo = copia_do_catalogo or CopiaCurta(
+            catalogo.todas, relogio
+        )
         self._transporte = transporte
         self._catalogo = catalogo
         self._armor = armor
@@ -280,6 +312,7 @@ class Busca:
         visual: bool = False,
         imagem: bytes | None = None,
         parecidos: tuple[str, list[float]] | None = None,
+        cancelado: threading.Event | None = None,
     ) -> ResultadoDaBusca:
         """`imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
         só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
@@ -304,34 +337,55 @@ class Busca:
                     catalogo=self._catalogo,
                     armor=self._armor,
                     programas=self._programas,
+                    todas=self._copia_do_catalogo.itens,
                 ),
                 ajustes or Ajustes(),
             )
         jobs: dict[str, Job | None] = {}
 
+        def carregar_jobs(ids: Iterable[str]) -> None:
+            """Lê numa leitura em lote os Jobs ainda não lidos."""
+            faltam = list(dict.fromkeys(i for i in ids if i not in jobs))
+            if not faltam:
+                return
+            lidos = {j.id: j for j in self._repositorio.obter_varios(faltam)}
+            for i in faltam:
+                jobs[i] = self._visivel_de(lidos.get(i), sistema)
+
         def job(id: str) -> Job | None:
-            if id not in jobs:
-                jobs[id] = self._visivel(id, sistema)
+            carregar_jobs([id])
             return jobs[id]
 
-        def consultar(c: Consulta) -> list[Registro]:
+        def do_indice(c: Consulta) -> list[Registro]:
+            _conferir(cancelado)
             c = replace(
                 c,
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
                 limite=TETO_DE_REGISTROS,
             )
-            return [
-                r for r in self._indice.buscar(c) if r.id != proprio and job(r.job_id)
-            ]
+            return [r for r in self._indice.buscar(c) if r.id != proprio]
+
+        def consultar(c: Consulta) -> list[Registro]:
+            achados = do_indice(c)
+            carregar_jobs(r.job_id for r in achados)
+            return [r for r in achados if job(r.job_id)]
 
         nomes: dict[str, str] = {}
 
+        def carregar_nomes(ids: Iterable[str | None]) -> None:
+            """Lê numa leitura em lote os nomes ainda não lidos; sem pessoa vale `""`."""
+            faltam = list(dict.fromkeys(i for i in ids if i and i not in nomes))
+            if not faltam:
+                return
+            lidas = self._catalogo.obter_varios(faltam)
+            for i in faltam:
+                nomes[i] = lidas[i].nome if i in lidas else ""
+
         def nome(id: str | None) -> str | None:
-            if id and id not in nomes:
-                pessoa = self._catalogo.obter(id)
-                nomes[id] = pessoa.nome if pessoa else ""
+            carregar_nomes([id])
             return nomes.get(id or "") or None
 
+        carregar_nomes([*entendida.pessoas, *(o.dono for o in entendida.objetos)])
         clausulas = self._clausulas(entendida, nome)
         # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
         # entendidos já filtram, e não entram no vetor.
@@ -348,16 +402,30 @@ class Busca:
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
+        # Os Jobs de todas as cláusulas, e depois os nomes dos registros, vêm em lote.
+        brutos = [
+            [do_indice(q) for q in _com_facetas(c.consulta, facetado)]
+            for c in clausulas
+        ]
+        carregar_jobs(
+            r.job_id for da_clausula in brutos for lista in da_clausula for r in lista
+        )
         resultados = [
             [
                 r
                 for r in _intercalar(
-                    [consultar(q) for q in _com_facetas(c.consulta, facetado)]
+                    [[r for r in lista if job(r.job_id)] for lista in da_clausula]
                 )
                 if _casa(r, facetado) and _tem_a_frase(r, entendida.frase_exata)
             ]
-            for c in clausulas
+            for da_clausula in brutos
         ]
+        carregar_nomes(
+            p
+            for da_clausula in resultados
+            for r in da_clausula
+            for p in (*r.pessoas, r.dono)
+        )
         sem_facetas = all(
             x is None for x in (facetado.pessoa, facetado.marca, facetado.tipo)
         )
@@ -375,10 +443,13 @@ class Busca:
                 )
             except Exception:
                 log.exception("ranking indisponível; fica a ordem do índice")
+        _conferir(cancelado)
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        videos = self._videos(trechos, job, termos, ordem)[:limite]
+        videos = self._videos(trechos, job, termos, ordem, cancelado)[:limite]
+        if sistema is not None:
+            self._assinar_os_quadros(videos, cancelado)
         vazios = [
             self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
@@ -419,7 +490,10 @@ class Busca:
 
     def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
         """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
-        achado = self._repositorio.obter(job_id)
+        return self._visivel_de(self._repositorio.obter(job_id), sistema)
+
+    @staticmethod
+    def _visivel_de(achado: Job | None, sistema: str | None) -> Job | None:
         if achado is None or achado.estado != "concluido" or achado.lixeira:
             return None
         if sistema is not None and achado.sistema != sistema:
@@ -434,6 +508,7 @@ class Busca:
         limite: int = VIDEOS_POR_PADRAO,
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
+        cancelado: threading.Event | None = None,
     ) -> ResultadoDaBusca:
         """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271)."""
         vetor = self.planos_com_vetor(job_id, sistema).get(plano)
@@ -445,6 +520,7 @@ class Busca:
             limite=limite,
             filtros_do_servidor=filtros_do_servidor,
             sistema=sistema,
+            cancelado=cancelado,
         )
 
     def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:
@@ -526,18 +602,42 @@ class Busca:
             )
         return clausulas
 
+    def _assinar_os_quadros(
+        self,
+        videos: list[VideoDoResultado],
+        cancelado: threading.Event | None,
+    ) -> None:
+        """Só a chave de sistema recebe a URL assinada. Cada assinatura é uma ida ao IAM:
+        vão em paralelo, até `TETO_DE_ASSINATURAS`, e o cancelamento é conferido antes de
+        cada uma."""
+
+        def assinar(video: VideoDoResultado, momento: Momento) -> None:
+            assert momento.quadro is not None
+            _conferir(cancelado)
+            momento.quadro_url = self._armazenamento.url_do_quadro(
+                video.job_id, momento.quadro, VALIDADE_DO_QUADRO
+            )
+
+        pedidos = [(v, m) for v in videos for m in v.momentos if m.quadro]
+        if not pedidos:
+            return
+        with ThreadPoolExecutor(max_workers=TETO_DE_ASSINATURAS) as pool:
+            list(pool.map(assinar, *zip(*pedidos, strict=True)))
+
     def _videos(
         self,
         trechos: list[_Trecho],
         job: Callable[[str], Job | None],
         termos: list[str],
         ordem: Ordem,
+        cancelado: threading.Event | None,
     ) -> list[VideoDoResultado]:
         por_video: dict[str, list[_Trecho]] = defaultdict(list)
         for t in trechos:
             por_video[t.job_id].append(t)
         videos: list[tuple[int, VideoDoResultado]] = []
         for id, lista in por_video.items():
+            _conferir(cancelado)
             j = job(id)
             if j is None:
                 continue
@@ -550,13 +650,8 @@ class Busca:
                     fim_ms=t.fim_ms,
                     motivo=t.motivo,
                     destaques=_destaques(t.motivo, termos),
-                    quadro_url=(
-                        self._armazenamento.url_do_quadro(
-                            id, t.quadro, VALIDADE_DO_QUADRO
-                        )
-                        if t.quadro
-                        else None
-                    ),
+                    quadro=t.quadro,
+                    quadro_url=None,
                 )
                 for t in lista
             ]

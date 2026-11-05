@@ -110,7 +110,7 @@ class Mundo:
         repo_papeis = RepositorioDePapeisEmMemoria()
         repo_papeis.salvar("u1", papeis)
         repo_papeis.salvar("u2", ["curador"])
-        jobs = RepositorioEmMemoria()
+        self.jobs = jobs = RepositorioEmMemoria()
         jobs.salvar(
             Job(
                 id="j1",

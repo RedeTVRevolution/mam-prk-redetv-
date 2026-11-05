@@ -55,14 +55,14 @@ variable "regiao_gpu" {
 # Falta de GPU ou de cota: a mesma espera vale para o Workflows (#239) e para o teste
 # depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*). O Job com GPU
 # tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
-# anterior vezes `gpu_fator_da_espera`, com teto em `gpu_espera_maxima_s`, até a soma das
-# esperas passar de `espera_gpu_minutos`; o número de tentativas sai dessa conta. Com os
-# padrões: 1, 2, 4, 4 e 4 minutos, seis tentativas em 15 minutos. Só depois disso o Workflows
-# roda o Job em CPU.
+# anterior vezes `gpu_fator_da_espera`, com teto em `gpu_espera_maxima_s`, enquanto a soma
+# das esperas não passa de `espera_gpu_minutos`; o número de tentativas sai dessa conta. Com
+# os padrões: esperas de 1, 2 e seis de 4 minutos, nove tentativas em 27 minutos. Só depois
+# disso o Workflows roda o Job em CPU.
 variable "espera_gpu_minutos" {
   description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
   type        = number
-  default     = 15
+  default     = 27
   validation {
     condition     = floor(var.espera_gpu_minutos) == var.espera_gpu_minutos && var.espera_gpu_minutos >= 0
     error_message = "espera_gpu_minutos é um inteiro a partir de 0 (com 0, a GPU é tentada uma vez só antes da CPU)."
@@ -302,9 +302,9 @@ variable "precos_por_milhao_de_tokens" {
 }
 
 variable "agenda_da_fila" {
-  description = "Cron (formato do Cloud Scheduler) da amostra da fila de processamento (#288); de minuto em minuto, o Job só conta os Jobs em andamento e loga"
+  description = "Cron (formato do Cloud Scheduler) da amostra da fila de processamento (#288); de 5 em 5 minutos, o Job só conta os Jobs em andamento e loga"
   type        = string
-  default     = "* * * * *"
+  default     = "*/5 * * * *"
 }
 
 variable "agenda_da_purga" {
@@ -444,7 +444,10 @@ resource "google_firestore_database" "mam" {
   location_id             = var.regiao
   type                    = "FIRESTORE_NATIVE"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"
-  depends_on              = [google_project_service.apis]
+  # Recuperação a um ponto no tempo, 7 dias (#355); as agendas de backup estão em
+  # firestore_recuperacao.tf.
+  point_in_time_recovery_enablement = "POINT_IN_TIME_RECOVERY_ENABLED"
+  depends_on                        = [google_project_service.apis]
 }
 
 # Índices compostos da lista de Jobs (GET /v1/jobs, #141): cada combinação não vazia de
@@ -583,7 +586,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -622,7 +625,9 @@ locals {
     transcricao = ["roles/datastore.user"]
     ocr         = ["roles/datastore.user"]
     analise     = ["roles/datastore.user", local.papel_vertex_predicao]
-    quadros     = ["roles/datastore.user"]
+    # O aviso do `falhou` que o Workflows grava (#379) lê e marca o Job e lê o webhook.
+    fim     = ["roles/datastore.user"]
+    quadros = ["roles/datastore.user"]
     # Grava o estado da indexação no Job e escreve na coleção da busca (gravar, apagar,
     # consultar e buscar; conferido no #122). A conta `web` tem o mesmo papel, porque
     # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção. O
@@ -778,26 +783,14 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 # no `make copiar-para-bigquery`, e a web, a cada Correção) é dataEditor só no dataset.
 locals {
   dataset_do_bigquery = "mam_decupagens"
-  tabela_de_momentos  = "momentos"
+  # Tabela dividida por dia (#260): fica até a cópia para a por ano (#356) e a remoção à mão.
+  tabela_antiga_de_momentos = "momentos"
+  # Tabela em uso (#356): dividida por ano, em `momentos_por_ano.tf`.
+  tabela_de_momentos = "momentos_por_ano"
 }
 
-resource "google_bigquery_dataset" "decupagens" {
-  dataset_id                 = local.dataset_do_bigquery
-  location                   = var.regiao_do_bigquery
-  delete_contents_on_destroy = false
-  depends_on                 = [google_project_service.apis]
-}
-
-resource "google_bigquery_table" "momentos" {
-  dataset_id          = google_bigquery_dataset.decupagens.dataset_id
-  table_id            = local.tabela_de_momentos
-  deletion_protection = true
-  time_partitioning {
-    type  = "DAY"
-    field = "data_de_exibicao"
-  }
-  clustering = ["programa", "job_id"]
-  schema = jsonencode([
+locals {
+  esquema_dos_momentos = jsonencode([
     { name = "job_id", type = "STRING", mode = "REQUIRED" },
     { name = "programa", type = "STRING", mode = "NULLABLE" },
     { name = "data_de_exibicao", type = "DATE", mode = "NULLABLE" },
@@ -818,6 +811,25 @@ resource "google_bigquery_table" "momentos" {
     { name = "gravado_em", type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "duracao_do_video_ms", type = "INTEGER", mode = "NULLABLE", description = "Duração do vídeo todo, igual em todas as linhas dele; vazia nas copiadas antes do sinal por programa (#287)" },
   ])
+}
+
+resource "google_bigquery_dataset" "decupagens" {
+  dataset_id                 = local.dataset_do_bigquery
+  location                   = var.regiao_do_bigquery
+  delete_contents_on_destroy = false
+  depends_on                 = [google_project_service.apis]
+}
+
+resource "google_bigquery_table" "momentos" {
+  dataset_id          = google_bigquery_dataset.decupagens.dataset_id
+  table_id            = local.tabela_antiga_de_momentos
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "data_de_exibicao"
+  }
+  clustering = ["programa", "job_id"]
+  schema     = local.esquema_dos_momentos
 }
 
 resource "google_bigquery_dataset_iam_member" "grava_momentos" {
@@ -847,11 +859,27 @@ resource "google_cloud_run_v2_service" "web" {
   ingress = local.balanceador ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
   template {
     service_account = google_service_account.mam["web"].email
+    # 40 pedidos por instância, o tamanho do pool de threads do FastAPI (rotas
+    # `def`): acima disso o pedido esperaria na instância em vez de o Cloud Run
+    # abrir outra.
+    max_instance_request_concurrency = 40
     scaling {
-      max_instance_count = 2
+      # Teto de custo do serviço. Sem min_instance_count: o mínimo é 0 e o primeiro
+      # acesso depois de parado paga a partida a frio (decisão do #357).
+      max_instance_count = 10
     }
     containers {
       image = var.imagem
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "2Gi"
+        }
+        # CPU só durante os pedidos, o padrão do Cloud Run, que o provider deixa de
+        # aplicar quando o bloco resources é declarado: sem isto a CPU fica sempre
+        # alocada e a cobrança passa a ser por instância ligada (#357).
+        cpu_idle = true
+      }
       # Liga o verificador de token do Identity Platform na API (api/main.py).
       env {
         name  = "GCP_PROJECT_ID"
@@ -2112,7 +2140,7 @@ resource "google_cloud_scheduler_job" "avaliacao" {
   depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao]
 }
 
-# Amostra da fila de processamento (#288): de minuto em minuto o Job conta os Jobs em
+# Amostra da fila de processamento (#288): de 5 em 5 minutos o Job conta os Jobs em
 # andamento por estado e a idade do mais antigo e loga (`api/fila_job.py`); o painel da fila
 # lê esse log. Sem rede da VPC: só fala com o Firestore.
 resource "google_cloud_run_v2_job" "fila" {
@@ -2125,7 +2153,7 @@ resource "google_cloud_run_v2_job" "fila" {
     template {
       service_account = google_service_account.mam["fila"].email
       max_retries     = 0
-      # Uma consulta ao Firestore; o minuto seguinte refaz a amostra.
+      # Uma consulta ao Firestore; se falhar, fica para a amostra seguinte, 5 min depois.
       timeout = "120s"
       containers {
         image   = var.imagem_validacao
@@ -2195,6 +2223,7 @@ resource "google_workflows_workflow" "validacao" {
     motor_objetos          = var.motor_objetos
     job_de_inventario      = google_cloud_run_v2_job.inventario.name
     job_de_analise         = google_cloud_run_v2_job.analise.name
+    job_de_fim             = google_cloud_run_v2_job.fim.name
     job_de_identificacao   = google_cloud_run_v2_job.identificacao.name
     job_de_quadros         = google_cloud_run_v2_job.quadros.name
     job_de_indexacao       = google_cloud_run_v2_job.indexacao.name
@@ -2751,20 +2780,20 @@ locals {
     )
     fila = [
       {
-        titulo = "Jobs em cada estado (média das amostras do minuto)"
+        titulo = "Jobs em cada estado (média das amostras dos últimos 20 min)"
         series = [
           {
-            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_sum[10m])) / sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_count[10m]))"
+            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_sum[20m])) / sum by (estado) (increase(${local.metrica_de_log["fila_quantidade"]}_count[20m]))"
             legenda = "{{estado}}"
           },
         ]
         unidade = "1"
       },
       {
-        titulo = "Idade do Job mais antigo em andamento, por estado (média das amostras)"
+        titulo = "Idade do Job mais antigo em andamento, por estado (média das amostras dos últimos 20 min)"
         series = [
           {
-            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_sum[10m])) / sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_count[10m]))"
+            promql  = "sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_sum[20m])) / sum by (estado) (increase(${local.metrica_de_log["fila_idade"]}_count[20m]))"
             legenda = "{{estado}}"
           },
         ]
@@ -2929,7 +2958,7 @@ resource "google_logging_metric" "tokens_do_modelo" {
   depends_on = [google_project_service.apis]
 }
 
-# A amostra da fila (`api/fila_job.py`): uma linha por estado por minuto.
+# A amostra da fila (`api/fila_job.py`): uma linha por estado a cada 5 minutos.
 resource "google_logging_metric" "fila" {
   for_each = {
     fila_quantidade = { extrai = "quantidade", unidade = "1" }
@@ -3075,6 +3104,20 @@ output "identity_api_key" {
 output "chave_mac_kms" {
   description = "Nome completo da chave MAC do Cloud KMS: KMS_CHAVE_MAC no `make emitir-chave`"
   value       = google_kms_crypto_key.chaves_de_api.id
+}
+
+# Para o ensaio do alerta de falhas por etapa no wizard (#337): a mesma métrica, janela e limite
+# da política de hoje, sem escrever os nomes no script.
+output "metrica_de_falhas_por_etapa" {
+  value = google_logging_metric.falhas_por_etapa.name
+}
+
+output "janela_dos_alertas_s" {
+  value = local.janela_dos_alertas_s
+}
+
+output "limite_de_falhas_por_etapa" {
+  value = var.limite_de_falhas_por_etapa
 }
 
 # O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.

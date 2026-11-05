@@ -19,14 +19,14 @@ import difflib
 import logging
 import re
 import unicodedata
-from collections.abc import Collection, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from api.catalogo import Catalogo, nomes_de_busca
+from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import CATEGORIAS_DE_OBJETO, CORES_BASE
 from api.gemini import Chamada, ErroHttp, Transporte
@@ -189,7 +189,11 @@ def esquema_da_resposta(programas: Collection[str]) -> dict[str, Any]:
         "type": "string",
         "enum": list(EVIDENCIAS),
     }
-    esquema["properties"]["programa"] = da_lista(sorted(programas))
+    # Sem programa cadastrado (logo depois do deploy do #338, antes da carga), `enum: []`
+    # seria um esquema que nenhum valor de texto satisfaz: o campo fica só `null`.
+    esquema["properties"]["programa"] = (
+        da_lista(sorted(programas)) if programas else {"type": "null"}
+    )
     for definicao in [esquema, objeto]:
         definicao["required"] = list(definicao["properties"])
     return esquema
@@ -208,9 +212,14 @@ def instrucao(programas: Collection[str]) -> str:
     return texto
 
 
-def resolver_nome(nome: str, catalogo: Catalogo) -> str | None:
+def resolver_nome(
+    nome: str,
+    catalogo: Catalogo,
+    todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
+) -> str | None:
     """O `catalogo_id` da pessoa que o nome (ou apelido) designa, inclusive em grafia
-    aproximada; `None` se ninguém bate ou se mais de uma pessoa bate."""
+    aproximada; `None` se ninguém bate ou se mais de uma pessoa bate. `todas` é a lista
+    que a grafia aproximada compara (a cópia curta do catálogo); sem ela, lê o catálogo."""
     chave = normalizar(nome)
     if not chave:
         return None
@@ -219,7 +228,7 @@ def resolver_nome(nome: str, catalogo: Catalogo) -> str | None:
         return exatas[0].id if len(exatas) == 1 else None
     achadas = [
         p.id
-        for p in catalogo.todas()
+        for p in (todas or catalogo.todas)()
         if max(
             (
                 difflib.SequenceMatcher(None, chave, n).ratio()
@@ -259,12 +268,13 @@ def _montar(
     catalogo: Catalogo,
     programas: Collection[str],
     marcas_conhecidas: Collection[str] | None,
+    todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
 ) -> ConsultaEntendida:
     sobra: list[str] = []  # nomes que o catálogo não resolve: viram texto livre
 
     def dono_de(nome: str) -> str | None:
         saneado = sanear(nome, MAXIMO_DO_NOME)
-        achado = resolver_nome(saneado, catalogo)
+        achado = resolver_nome(saneado, catalogo, todas)
         if achado is None and saneado:
             sobra.append(saneado)
         return achado
@@ -321,6 +331,7 @@ def entender(
     programas: Collection[str],
     marcas_conhecidas: Collection[str] | None = None,
     job_id: str = "busca",
+    todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
 ) -> ConsultaEntendida:
     """A consulta estruturada, ou o plano B (texto saneado, sem filtros).
 
@@ -354,4 +365,6 @@ def entender(
     except (ErroHttp, ValueError) as e:
         log.warning("entendimento da consulta falhou (%s); plano B", e)
         return plano_b
-    return _montar(resposta, saneada, frase, catalogo, programas, marcas_conhecidas)
+    return _montar(
+        resposta, saneada, frase, catalogo, programas, marcas_conhecidas, todas
+    )

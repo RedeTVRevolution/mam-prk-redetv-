@@ -5,10 +5,11 @@ dono dos objetos da busca. Os rostos `origem=web` são legado da busca de fotos 
 web, retirada no #327: só a migração `apagar_referencias_web` ainda os lê.
 """
 
+import threading
 import uuid
-from collections.abc import Iterable, Mapping
-from datetime import datetime
-from typing import Any, Literal, Protocol
+from collections.abc import Callable, Iterable
+from datetime import datetime, timedelta
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -95,10 +96,56 @@ def nomes_de_busca(pessoa: PessoaDoCatalogo) -> list[str]:
     return sorted({normalizar(n) for n in [pessoa.nome, *pessoa.apelidos]})
 
 
+VALIDADE_DA_COPIA = timedelta(seconds=30)
+
+
+class CopiaCurta[T]:
+    """A lista de um catálogo lida há pouco, para todos que a pedem (o autocompletar e o
+    entendimento da consulta). Um nome acrescentado a descarta. Quando expira, uma thread
+    só relê; as outras usam a cópia anterior, e só esperam se não há cópia (a primeira
+    leitura, ou depois de `descartar`)."""
+
+    def __init__(self, ler: Callable[[], list[T]], relogio: Callable[[], datetime]):
+        self._ler, self._relogio = ler, relogio
+        self._lida_em: datetime | None = None
+        self._itens: list[T] = []
+        self._geracao = 0
+        self._recarga = threading.Lock()
+
+    def _vale(self) -> bool:
+        lida_em = self._lida_em
+        return lida_em is not None and self._relogio() - lida_em < VALIDADE_DA_COPIA
+
+    def itens(self) -> list[T]:
+        if self._vale():
+            return self._itens
+        # Expirada, mas ainda boa para quem não vai recarregar; descartada, não.
+        if not self._recarga.acquire(blocking=self._lida_em is None):
+            return self._itens
+        try:
+            if not self._vale():
+                geracao, agora = self._geracao, self._relogio()
+                itens = self._ler()
+                # Um `descartar` durante a leitura a deixa velha: lê de novo na próxima.
+                self._itens = itens
+                self._lida_em = agora if geracao == self._geracao else None
+            return self._itens
+        finally:
+            self._recarga.release()
+
+    def descartar(self) -> None:
+        self._geracao += 1
+        self._lida_em = None
+
+
 class Catalogo(Protocol):
     """Porta para o Firestore; os testes usam uma versão em memória."""
 
     def obter(self, id: str) -> PessoaDoCatalogo | None: ...
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        """As pessoas que existem entre os `ids`, numa leitura em lote."""
+        ...
 
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
         """As pessoas (fora da lixeira e não fundidas) cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
@@ -194,6 +241,9 @@ class CatalogoEmMemoria:
     def obter(self, id: str) -> PessoaDoCatalogo | None:
         return self._pessoas.get(id)
 
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        return {i: self._pessoas[i] for i in dict.fromkeys(ids) if i in self._pessoas}
+
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
         chave = normalizar(nome)
         return [p for p in self.todas() if chave in nomes_de_busca(p)]
@@ -273,24 +323,3 @@ class CatalogoEmMemoria:
     def apagar(self, id: str) -> None:
         if self._pessoas.pop(id, None) is None:
             raise PessoaInexistente(id)
-
-
-def _pessoas_dos_programas(
-    programas: Mapping[str, Mapping[str, Any]],
-) -> Iterable[Mapping[str, Any]]:
-    for dados in programas.values():
-        yield from dados.get("pessoas", [])
-
-
-def carregar_programas(
-    catalogo: Catalogo, programas: Mapping[str, Mapping[str, Any]]
-) -> int:
-    """Acrescenta ao catálogo as pessoas do `programas.toml` que ainda não estão
-    nele (pelo nome ou apelido). Idempotente; devolve quantas entraram."""
-    entraram = 0
-    for p in _pessoas_dos_programas(programas):
-        if catalogo.achar(p["nome"]):
-            continue
-        catalogo.acrescentar(p["nome"], p["papel"], list(p.get("apelidos", [])))
-        entraram += 1
-    return entraram

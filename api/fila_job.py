@@ -1,4 +1,4 @@
-"""Cloud Run Job que amostra a fila de processamento no log, uma vez por minuto (#288).
+"""Cloud Run Job que amostra a fila de processamento no log, de 5 em 5 minutos (#288).
 
 O Cloud Scheduler o dispara; ele conta os Jobs ainda em andamento por estado e a idade do
 mais antigo (desde a criação) e loga uma linha JSON por estado (`evento: fila_de_jobs`),

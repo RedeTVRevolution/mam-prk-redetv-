@@ -1,4 +1,4 @@
-import { POR_PAGINA, type Job } from './jobs.ts'
+import { POR_PAGINA, finalizando, type Job } from './jobs.ts'
 import { ESTADOS_DO_JOB } from './tema.ts'
 
 // A aba Entradas da administração: os filtros que viajam na URL e as contas das linhas.
@@ -90,9 +90,9 @@ export function passouDoPeriodo(jobs: Job[], f: FiltrosDasEntradas): boolean {
 
 const EM_ANDAMENTO = ['aguardando_upload', 'validando', 'analisando']
 
-/** Anda: ainda não terminou, ou um vídeo concluído tem uma etapa rodando. */
+/** Anda: ainda não terminou, ou um vídeo concluído tem uma etapa rodando ou entre duas etapas. */
 export function emAndamento(job: Job): boolean {
-  return EM_ANDAMENTO.includes(job.estado) || Boolean(job.etapa_atual)
+  return EM_ANDAMENTO.includes(job.estado) || Boolean(job.etapa_atual) || finalizando(job)
 }
 
 /**

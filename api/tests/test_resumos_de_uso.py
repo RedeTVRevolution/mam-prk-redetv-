@@ -30,7 +30,6 @@ def _banco() -> sqlite3.Connection:
     # As colunas são as do evento (e da tabela, que `test_infra_eventos_de_uso` confere):
     # o SQL que ler uma coluna que o evento não tem falha aqui.
     banco.execute(f"CREATE TABLE eventos_de_uso ({', '.join(COLUNAS)})")
-    banco.execute("CREATE TABLE momentos (job_id, duracao_do_video_ms)")
     return banco
 
 
@@ -52,12 +51,22 @@ def _evento(
     )
 
 
-def _resumir(banco: sqlite3.Connection) -> None:
+TODA_A_HISTORIA = "'2000-01-01T00:00:00+00:00'"
+
+
+def _resumir(banco: sqlite3.Connection, inicio: str = TODA_A_HISTORIA) -> None:
+    """Uma rodada da consulta agendada, com a janela começando em `inicio`."""
     sql = (
         SQL.replace("${prefixo}", "")
         .replace("${tabela_de_eventos}", "eventos_de_uso")
-        .replace("${tabela_de_momentos}", "momentos")
+        .replace("${inicio_da_janela}", inicio)
     )
+    # No BigQuery as tabelas temporárias somem no fim da rodada; aqui, apaga-as.
+    for (nome,) in banco.execute(
+        "SELECT name FROM sqlite_temp_master WHERE name IN ('janela', 'inicio', 'eventos') "
+        "OR name LIKE 'novas\\_%' ESCAPE '\\'"
+    ).fetchall():
+        banco.execute(f"DROP TABLE {nome}")
     # O SQLite não tem CREATE OR REPLACE TABLE: troca por apagar e criar.
     sql = re.sub(
         r"CREATE OR REPLACE TABLE `(\w+)`",
@@ -65,6 +74,14 @@ def _resumir(banco: sqlite3.Connection) -> None:
         sql,
     )
     banco.executescript(sql)
+
+
+def _tabelas_do_sql() -> list[str]:
+    """As tabelas do painel, na ordem do SQL (a de fins já contados é só estado interno)."""
+    nomes = re.findall(
+        r"CREATE (?:OR REPLACE )?TABLE (?:IF NOT EXISTS )?`\$\{prefixo\}(\w+)`", SQL
+    )
+    return [n for n in dict.fromkeys(nomes) if n != "fins_de_processamento_contados"]
 
 
 def _tabela(banco: sqlite3.Connection, nome: str, ordem: str) -> list[dict[str, Any]]:
@@ -150,6 +167,7 @@ def banco() -> sqlite3.Connection:
         programa="Hoje",
         estado="concluido",
         segundos_de_processamento=3600,
+        duracao_do_video_ms=2 * HORA_MS,
     )
     _evento(
         b,
@@ -174,15 +192,12 @@ def banco() -> sqlite3.Connection:
         programa="Fala",
         estado="concluido",
         segundos_de_processamento=1800,
+        duracao_do_video_ms=HORA_MS,
     )
     # Dia 2: 02:00 UTC ainda é dia 1 em São Paulo (-03:00); 03:00 UTC já é o dia 2.
     _evento(b, "e13", "login", "2026-11-02T02:00:00+00:00", "ana")
     _evento(b, "e14", "login", "2026-11-02T03:00:00+00:00", "ana")
     _evento(b, "e15", "busca", "2026-11-02T13:00:00+00:00", "beto")  # sem n_resultados
-    b.executemany(
-        "INSERT INTO momentos VALUES (?, ?)",
-        [("v1", 2 * HORA_MS), ("v1", 2 * HORA_MS), ("v3", HORA_MS)],
-    )
     return b
 
 
@@ -328,6 +343,7 @@ def test_o_job_reprocessado_conta_uma_vez_por_estado_final(
         programa="Hoje",
         estado="concluido",
         segundos_de_processamento=3600,
+        duracao_do_video_ms=2 * HORA_MS,
     )
     _evento(
         banco,
@@ -338,8 +354,8 @@ def test_o_job_reprocessado_conta_uma_vez_por_estado_final(
         job_id="v2",
         programa="Hoje",
         estado="concluido",
+        duracao_do_video_ms=HORA_MS // 2,
     )
-    banco.execute("INSERT INTO momentos VALUES ('v2', ?)", [HORA_MS // 2])
     _resumir(banco)
 
     ana = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0]
@@ -354,9 +370,6 @@ def test_rodar_de_novo_refaz_as_tabelas_sem_somar_em_dobro(
 ) -> None:
     _resumir(banco)
     antes = _tabela(banco, "uso_por_dia", "dia")
-    banco.execute(
-        "DROP TABLE eventos"
-    )  # a tabela temporária de uma rodada não vive na outra
 
     _resumir(banco)
 
@@ -368,7 +381,7 @@ def test_sem_eventos_as_tabelas_ficam_vazias() -> None:
 
     _resumir(banco)
 
-    for nome in re.findall(r"CREATE OR REPLACE TABLE `\$\{prefixo\}(\w+)`", SQL):
+    for nome in _tabelas_do_sql():
         assert banco.execute(f"SELECT COUNT(*) FROM {nome}").fetchone() == (0,)
 
 
@@ -384,17 +397,16 @@ def test_o_terraform_agenda_o_sql_com_a_conta_dos_resumos() -> None:
 
 
 def test_as_tabelas_do_terraform_sao_as_que_o_sql_cria() -> None:
-    criadas = re.findall(r"CREATE OR REPLACE TABLE `\$\{prefixo\}(\w+)`", SQL)
+    criadas = _tabelas_do_sql()
     listadas = re.search(r"resumos_de_uso = \[(.*?)\]", TF, re.DOTALL)
     assert listadas is not None
 
-    assert criadas == re.findall(r'"(\w+)"', listadas.group(1))
+    assert sorted(criadas) == sorted(re.findall(r'"(\w+)"', listadas.group(1)))
 
 
 def test_o_sql_le_as_tabelas_pelos_nomes_que_o_terraform_monta() -> None:
     assert "google_bigquery_table.eventos_de_uso.table_id" in TF
-    assert "google_bigquery_table.momentos.table_id" in TF
-    assert "eventos_de_uso`" not in SQL and "momentos`" not in SQL
+    assert "eventos_de_uso`" not in SQL
 
 
 def test_a_api_do_data_transfer_esta_ligada() -> None:
@@ -402,7 +414,7 @@ def test_a_api_do_data_transfer_esta_ligada() -> None:
 
 
 def test_a_web_recebe_so_tabelas_que_o_sql_cria() -> None:
-    criadas = re.findall(r"CREATE OR REPLACE TABLE `\$\{prefixo\}(\w+)`", SQL)
+    criadas = _tabelas_do_sql()
     da_web = re.search(r"tabelas_do_painel_na_web = \{(.*?)\}", TF, re.DOTALL)
     assert da_web is not None
 
@@ -547,3 +559,111 @@ def test_chamadas_de_api_por_dia_sistema_e_rota(banco: sqlite3.Connection) -> No
         ("cms", "POST", "/v1/jobs"): (4, 1, 1),
         ("cms", "GET", "/v1/jobs/{job_id}"): (1, 0, 0),
     }
+
+
+def test_nenhuma_consulta_dos_resumos_le_os_momentos() -> None:
+    codigo = "\n".join(l for l in SQL.splitlines() if not l.lstrip().startswith("--"))
+    assert "momentos" not in codigo
+    assert "tabela_de_momentos" not in TF and "momentos_por_ano" not in TF
+
+
+def test_o_fim_sem_duracao_conta_zero_hora(banco: sqlite3.Connection) -> None:
+    _evento(
+        banco,
+        "e20",
+        "fim_de_processamento",
+        "2026-11-01T17:00:00+00:00",
+        "ana",
+        job_id="v9",
+        programa="Hoje",
+        estado="concluido",
+        segundos_de_processamento=60,
+    )
+    _resumir(banco)
+
+    ana = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0]
+
+    assert (ana["videos_concluidos"], ana["horas_concluidas"]) == (2, 2.0)
+
+
+def test_a_janela_deixa_os_dias_antigos_como_estao(
+    banco: sqlite3.Connection,
+) -> None:
+    _resumir(banco)
+    antes = {
+        nome: _tabela(banco, nome, "dia")
+        for nome in ("uso_por_dia_e_usuario", "uso_por_dia_e_programa")
+    }
+    # Uma rodada só do dia 2: a tabela de eventos dos dias antigos não é lida (aqui, é
+    # apagada para provar), e as linhas do dia 1 continuam.
+    banco.execute("DELETE FROM eventos_de_uso WHERE quando < '2026-11-02T03:00:00'")
+    _evento(banco, "e30", "login", "2026-11-02T14:00:00+00:00", "ana")
+
+    _resumir(banco, "'2026-11-02T03:00:00+00:00'")
+
+    for nome, linhas in antes.items():
+        assert [r for r in _tabela(banco, nome, "dia") if r["dia"] == "2026-11-01"] == [
+            r for r in linhas if r["dia"] == "2026-11-01"
+        ]
+    dia1, dia2 = _tabela(banco, "uso_por_dia", "dia")
+    assert (dia1["videos_concluidos"], dia1["horas_concluidas"]) == (2, 3.0)
+    assert dia2["acessos"] == 2  # o login do dia 2 e o novo
+    assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["acessos"] == 4
+
+
+def _todas_as_tabelas(banco: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
+    tabelas = {}
+    for nome in _tabelas_do_sql():
+        colunas = [c[1] for c in banco.execute(f"PRAGMA table_info({nome})")]
+        tabelas[nome] = _tabela(banco, nome, ", ".join(colunas))
+    return tabelas
+
+
+def test_rodadas_dia_a_dia_dao_o_mesmo_numero_que_a_historia_inteira(
+    banco: sqlite3.Connection,
+) -> None:
+    _resumir(banco)
+    inteira = _todas_as_tabelas(banco)
+    eventos = banco.execute("SELECT * FROM eventos_de_uso ORDER BY quando").fetchall()
+
+    # Os mesmos eventos chegando em dois dias (de São Paulo), cada rodada vendo só o seu.
+    aos_poucos = _banco()
+    for inicio, fim in (
+        ("2026-11-01T03:00:00+00:00", "2026-11-02T03:00:00+00:00"),
+        ("2026-11-02T03:00:00+00:00", "2026-11-03T03:00:00+00:00"),
+    ):
+        chegaram = [e for e in eventos if inicio <= e[COLUNAS.index("quando")] < fim]
+        aos_poucos.executemany(
+            f"INSERT INTO eventos_de_uso VALUES ({', '.join('?' * len(COLUNAS))})",
+            chegaram,
+        )
+        _resumir(aos_poucos, f"'{inicio}'")
+
+    assert _todas_as_tabelas(aos_poucos) == inteira
+
+
+def test_o_fim_repetido_depois_da_janela_nao_conta_de_novo(
+    banco: sqlite3.Connection,
+) -> None:
+    _resumir(banco)
+    # v1 é reprocessado dias depois e conclui outra vez; a rodada só enxerga o dia 5.
+    _evento(
+        banco,
+        "e40",
+        "fim_de_processamento",
+        "2026-11-05T16:00:00+00:00",
+        "ana",
+        job_id="v1",
+        programa="Hoje",
+        estado="concluido",
+        segundos_de_processamento=60,
+        duracao_do_video_ms=2 * HORA_MS,
+    )
+
+    _resumir(banco, "'2026-11-05T03:00:00+00:00'")
+
+    assert [r["dia"] for r in _tabela(banco, "uso_por_dia", "dia")] == [
+        "2026-11-01",
+        "2026-11-02",
+    ]
+    assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["videos_concluidos"] == 1

@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao caos-dev atualizar-openapi
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery preencher-catalogo-dos-jobs comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi
 
 instalar:
 	uv sync --locked
@@ -76,9 +76,11 @@ corrigir-estado:
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.correcao_de_estado "$(JOB)" "$(ESTADO)" "$(MOTIVO)"
 
-# Carga inicial do catálogo de pessoas (#108), a partir do api/programas.toml; idempotente.
-carregar-catalogo:
-	uv run --locked python -m api.carregar_catalogo
+# Carga única dos programas e das pessoas (#338), a partir de um TOML (padrão: docs/migracao/programas-2026-11.toml); idempotente.
+carregar-programas:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	uv run --locked python -m api.carregar_programas "$(or $(ARQUIVO),docs/migracao/programas-2026-11.toml)"
 
 # Carga inicial do catálogo de marcas (#150), a partir dos comerciais das Decupagens; idempotente.
 carregar-marcas:
@@ -179,6 +181,15 @@ copiar-para-bigquery:
 	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
 	uv run --locked python -m api.copiar_para_bigquery $(JOB)
 
+# Grava em cada Job concluído quem aparece nele (#359): make preencher-catalogo-dos-jobs.
+# Roda no dev depois do deploy: Job sem os campos não entra no impacto da lixeira. Repetir não muda nada.
+preencher-catalogo-dos-jobs:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	uv run --locked python -m api.preencher_catalogo_dos_jobs
+
 # Reprocessa o acervo de propósito (#250): make reprocessar-versao [DE=<versão ou anterior>] [LIMITE=<n>]
 # Lista os Jobs concluídos de versão do pipeline anterior à atual (api/versao_pipeline.py) e o custo
 # estimado (CUSTO_POR_HORA_USD, opcional). Só com CONFIRMAR=1 reprocessa, em lotes, pela análise.
@@ -227,6 +238,10 @@ exportar-regressao:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.regressao "$(PASTA)"
+
+# Casos de regressão do gabarito de famosos em CSV (#353): make importar-gabarito [GABARITO=evals/gabarito] [PASTA=evals/regressao/casos]
+importar-gabarito:
+	uv run --locked python -m api.importar_gabarito "$(GABARITO)" "$(PASTA)"
 
 # Roda uma versão do pipeline no conjunto de regressão e compara com a aprovada (#254):
 # make regressao VERSAO=<versão> [RESERVADOS=1] [PASTA=regressao-da-versao] [CONFIRMAR=1]

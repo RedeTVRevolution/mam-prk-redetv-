@@ -14,12 +14,18 @@ from api.chaves import (
 )
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
+from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 MAC = MacSimulado({1: b"k1"}, versao_atual=1)
-NOVO_JOB = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+NOVO_JOB = {
+    "nome": "a.mp4",
+    "tamanho_bytes": 10,
+    "tipo": "video/mp4",
+    "data_exibicao": "2026-10-01",
+}
 PESSOA = {"Authorization": "Bearer token-bom"}
 
 
@@ -28,12 +34,15 @@ class Mundo:
         self.chaves = RepositorioDeChavesEmMemoria()
         self.jobs = RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
+        papeis = RepositorioDePapeisEmMemoria()
+        papeis.salvar("u1", ["curador"])
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@b.c")}),
                 self.jobs,
                 self.armazenamento,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
+                papeis=papeis,
             )
         )
 

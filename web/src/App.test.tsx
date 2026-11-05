@@ -21,7 +21,7 @@ const servidor = setupServer(
     return HttpResponse.json({
       uid: 'u1',
       email: 'ana@redetv.com.br',
-      papeis: ['consulta', 'operador'],
+      papeis: ['consulta', 'editor'],
       permissoes: ['decupagem.ver', 'video.enviar'],
     })
   }),

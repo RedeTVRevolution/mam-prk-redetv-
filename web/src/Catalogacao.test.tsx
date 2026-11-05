@@ -811,6 +811,69 @@ test('pelo clique: texto e locutor da fala', async () => {
   ])
 })
 
+test('depois de trocar o nome da pessoa, a transcrição mostra o locutor novo', async () => {
+  servidor.use(
+    http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
+      correcoes.push((await request.json()) as Record<string, unknown>)
+      // O servidor leva o locutor das falas junto com o nome.
+      decupagemAtual = {
+        ...DECUPAGEM,
+        pessoas: [{ ...DECUPAGEM.pessoas[0], nome: 'Leão Lobo Filho' }],
+        transcricao: [{ ...DECUPAGEM.transcricao[0], locutor: 'Leão Lobo Filho' }],
+      }
+      return HttpResponse.json({}, { status: 201 })
+    }),
+  )
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
+  await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 1 aparição/ }))
+  await usuario.click(screen.getAllByRole('button', { name: 'Corrigir Leão Lobo' })[0])
+  const formulario = within(await screen.findByRole('form', { name: /Corrigir Leão Lobo/ }))
+  await usuario.clear(formulario.getByLabelText('Nome'))
+  await usuario.type(formulario.getByLabelText('Nome'), 'Leão Lobo Filho')
+  await salvarComOMouse(usuario, formulario)
+  await usuario.click(screen.getByRole('tab', { name: /Transcrição/ }))
+
+  expect(correcoes).toMatchObject([{ tipo: 'pessoa.renomear', valor: 'Leão Lobo Filho' }])
+  expect(await screen.findByText(/Leão Lobo Filho/)).toBeTruthy()
+})
+
+test('depois de trocar o nome para o de outra pessoa, ela aparece uma vez só', async () => {
+  const outra = {
+    ...DECUPAGEM.pessoas[0],
+    id: 'p2',
+    nome: 'não identificado',
+    na_imagem: [{ inicio_ms: 40_000, fim_ms: 45_000, evidencia: 'rosto', papel: 'jurado', visual: 'barba' }],
+    citada_na_fala: [],
+  }
+  decupagemAtual = { ...DECUPAGEM, pessoas: [DECUPAGEM.pessoas[0], outra] }
+  servidor.use(
+    http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
+      correcoes.push((await request.json()) as Record<string, unknown>)
+      // O servidor junta as duas na primeira, com as aparições em ordem.
+      decupagemAtual = {
+        ...DECUPAGEM,
+        pessoas: [{ ...DECUPAGEM.pessoas[0], na_imagem: [...DECUPAGEM.pessoas[0].na_imagem, ...outra.na_imagem] }],
+      }
+      return HttpResponse.json({}, { status: 201 })
+    }),
+  )
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
+  await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
+  await usuario.click(await screen.findByRole('button', { name: /^não identificado, 1 aparição/ }))
+  await usuario.click(screen.getAllByRole('button', { name: 'Corrigir não identificado' })[0])
+  const formulario = within(await screen.findByRole('form', { name: /Corrigir não identificado/ }))
+  await usuario.clear(formulario.getByLabelText('Nome'))
+  await usuario.type(formulario.getByLabelText('Nome'), 'Leão Lobo')
+  await salvarComOMouse(usuario, formulario)
+
+  expect(await screen.findByRole('button', { name: /^Leão Lobo, 2 aparições/ })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /^não identificado, / })).toBeNull()
+  expect(screen.getAllByRole('button', { name: /^Leão Lobo, \d+ aparições?/ })).toHaveLength(1)
+})
+
 test('pelo clique: texto na tela', async () => {
   const { usuario, formulario } = await corrigirPeloLapis(/Textos na tela/, 'Leão Lobo, jurado')
   await usuario.selectOptions(formulario.getByLabelText('Tipo'), 'tarja')

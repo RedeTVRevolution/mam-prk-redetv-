@@ -228,6 +228,19 @@ def test_reindexar_grava_o_video_e_marca_indexado() -> None:
     assert mundo.indexacao()["estado"] == "indexado"
 
 
+def test_reindexar_grava_no_job_quem_do_catalogo_aparece_nele() -> None:
+    modelo = json.loads(json.dumps(MODELO))
+    modelo["pessoas"][0]["catalogo_id"] = "pessoa-1"
+    mundo = Mundo(modelo=modelo)
+    job = mundo.jobs.obter("j1")
+    assert job and job.pessoas_do_catalogo == []
+
+    mundo.reindexar()
+
+    job = mundo.jobs.obter("j1")
+    assert job and job.pessoas_do_catalogo == ["cat-outra", "pessoa-1"]
+
+
 def test_reindexar_duas_vezes_deixa_o_mesmo_conjunto() -> None:
     mundo = Mundo()
     mundo.reindexar()

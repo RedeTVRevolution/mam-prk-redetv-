@@ -34,7 +34,9 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { useState, type CSSProperties, type ReactNode } from 'react'
+import { DivisaoEmFaixa, MatrizDeCalor, RankingEmBarras } from './graficos.tsx'
 import { tempo as tempoEmMs } from './linhaDoTempo.ts'
+import { duracaoLegivel } from './tempoDeTela.ts'
 import {
   contraste,
   CORES,
@@ -1163,6 +1165,59 @@ function Painel() {
   )
 }
 
+function Graficos() {
+  const [escolhida, setEscolhida] = useState<string | null>('Sabrina Sato')
+  const pessoas = [
+    ['Sabrina Sato', 725_000],
+    ['Leo Dias', 45_000],
+    ['Márcio Garcia', 30_000],
+  ] as const
+  return (
+    <Secao titulo="Gráficos">
+      <Parte titulo="Ranking em barras">
+        <RankingEmBarras
+          rotulo="Amostra: pessoas com mais tempo de tela"
+          escolhido={escolhida}
+          aoEscolher={setEscolhida}
+          itens={pessoas.map(([nome, ms]) => ({
+            id: nome,
+            nome,
+            valor: ms,
+            texto: duracaoLegivel(ms),
+            dica: [`Tempo de tela ${duracaoLegivel(ms)}`, '2 vídeos'],
+          }))}
+        />
+      </Parte>
+      <Parte titulo="Divisão por tipo">
+        <DivisaoEmFaixa
+          rotulo="Amostra: divisão por tipo"
+          fatias={[
+            { nome: 'Aparições', valor: 4, cor: CORES_DE_OCORRENCIA.aparicao.cor },
+            { nome: 'Menções na fala', valor: 2, cor: CORES_DE_OCORRENCIA.mencao.cor },
+            { nome: 'Menções no texto', valor: 1, cor: CORES_DE_OCORRENCIA.texto_na_tela.cor },
+          ]}
+        />
+      </Parte>
+      <Parte titulo="Matriz marca por tipo">
+        <MatrizDeCalor
+          rotulo="Amostra: tempo por marca e tipo"
+          tituloDaLinha="Marca"
+          linhas={['Ambev', 'Natura']}
+          colunas={[
+            { id: 'intervalo', nome: 'Intervalo' },
+            { id: 'testemunhal', nome: 'Testemunhal' },
+          ]}
+          celulas={[
+            { linha: 'Ambev', coluna: 'testemunhal', valor: 50_000, texto: '50s' },
+            { linha: 'Natura', coluna: 'intervalo', valor: 5_000, texto: '5s' },
+          ]}
+          aoEscolher={() => {}}
+        />
+      </Parte>
+    </Secao>
+  )
+}
+
 export default function Amostra() {
   return (
     <Box bg={CORES.fundo} mih="100vh">
@@ -1203,6 +1258,7 @@ export default function Amostra() {
         <Acervo />
         <LinhaDoTempo />
         <Painel />
+        <Graficos />
       </Stack>
     </Box>
   )

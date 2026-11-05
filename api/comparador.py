@@ -4,7 +4,7 @@ Uso: `python -m api.comparador GABARITO_DIR DECUPAGENS_DIR`. Os tipos são todas
 categorias da decupagem (`TIPOS`); os casos do conjunto de regressão (`api/regressao.py`)
 usam os mesmos `Item` e `Tipo`. Cada CSV do
 gabarito traz na primeira linha `# sha256: <hex>`, depois o cabeçalho
-`tipo,identidade,inicio,fim` com tempos em `MM:SS`. Cada decupagem é um JSON
+`tipo,identidade,inicio,fim` com tempos em `MM:SS` ou `HH:MM:SS`. Cada decupagem é um JSON
 `*.json`; o clipe é pareado com o gabarito pelo SHA-256 do bloco `video`.
 Código de saída: 0 passou, 1 falhou, 2 entrada inválida.
 """
@@ -155,14 +155,20 @@ def itens_do_modelo(d: Decupagem) -> list[Item]:
     return itens
 
 
-_MMSS = re.compile(r"^(\d+):([0-5]\d)$")
+_TEMPO = re.compile(r"^(?:(\d+):(\d{2})|(\d+)):(\d{2})$")
 
 
 def tempo_ms(texto: str) -> int:
-    achou = _MMSS.match(texto.strip())
+    """`MM:SS` (minutos podem passar de 59) ou `HH:MM:SS` (minutos e segundos de 0 a 59)."""
+    fora_do_formato = ValueError(f"tempo fora do formato MM:SS ou HH:MM:SS: {texto!r}")
+    achou = _TEMPO.match(texto.strip())
     if not achou:
-        raise ValueError(f"tempo fora do formato MM:SS: {texto!r}")
-    return (int(achou[1]) * 60 + int(achou[2])) * 1000
+        raise fora_do_formato
+    horas, minutos_com_horas, minutos_sem_horas, segundos = achou.groups()
+    minutos = int(minutos_com_horas or minutos_sem_horas)
+    if int(segundos) > 59 or (horas is not None and minutos > 59):
+        raise fora_do_formato
+    return ((int(horas or 0) * 60 + minutos) * 60 + int(segundos)) * 1000
 
 
 def ler_gabarito(caminho: Path) -> tuple[str, list[Item]]:

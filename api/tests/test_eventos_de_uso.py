@@ -3,12 +3,12 @@
 import base64
 import json
 import logging
-from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+import time
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from api.auth import Escopo, Usuario
@@ -23,7 +23,6 @@ from api.eventos_de_uso import (
     ErroAoPublicarUso,
     EventoDeUso,
     EventosEmMemoria,
-    EventosEmSegundoPlano,
     EventosPubSub,
     SemEventos,
     registrar,
@@ -36,6 +35,7 @@ from api.eventos_do_job import (
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_aprovacao import CURADOR
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_busca import (
@@ -98,6 +98,7 @@ class Mundo:
                 self.jobs,
                 self.armazenamento,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
+                programas=cadastro_com_tv_fama()[0],
                 papeis=papeis,
                 correcoes=RepositorioDeCorrecoesEmMemoria(),
                 relogio=lambda: self.agora,
@@ -125,6 +126,7 @@ def _novo(**campos: Any) -> dict[str, Any]:
         "tamanho_bytes": 123,
         "tipo": "video/mp4",
         "programa": "TV Fama",
+        "data_exibicao": "2026-10-01",
         **campos,
     }
 
@@ -201,54 +203,26 @@ def test_registrar_nao_levanta_quando_a_publicacao_falha_e_deixa_o_rastro_no_log
     assert "evento de uso login" in caplog.text
 
 
-class ExecutorNaMao(ThreadPoolExecutor):
-    """Guarda as tarefas e só as roda quando o teste manda."""
+class EventosComHora:
+    """Anota a hora em que cada evento chega à porta."""
 
     def __init__(self) -> None:
-        super().__init__(max_workers=1)
-        self.pendentes: list[tuple[Callable[..., Any], tuple[Any, ...]]] = []
+        self.entregues: list[tuple[str, float]] = []
 
-    def submit(
-        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
-    ) -> Future[Any]:
-        self.pendentes.append((fn, args))
-        return Future()
-
-    def rodar(self) -> None:
-        for fn, args in self.pendentes:
-            fn(*args)
-        self.pendentes.clear()
+    def publicar(self, evento: EventoDeUso) -> None:
+        self.entregues.append((evento.tipo, time.monotonic()))
 
 
-def _evento() -> EventoDeUso:
-    return EventoDeUso(
-        id="e1", tipo="login", quem_tipo="usuario", quem_id="a", quando=AGORA
-    )
+def test_a_acao_so_responde_depois_de_o_evento_ser_entregue() -> None:
+    eventos = EventosComHora()
+    mundo = Mundo(eventos=eventos, login_em=AGORA)
 
+    r = mundo.cliente.get("/v1/eu", headers=ANA)
+    respondeu = time.monotonic()
 
-def test_em_segundo_plano_a_publicacao_nao_acontece_na_chamada() -> None:
-    eventos = EventosEmMemoria()
-    executor = ExecutorNaMao()
-    publicador = EventosEmSegundoPlano(eventos, executor)
-
-    publicador.publicar(_evento())
-    assert eventos.publicados == []
-
-    executor.rodar()
-    assert [e.id for e in eventos.publicados] == ["e1"]
-
-
-def test_em_segundo_plano_a_falha_vai_ao_log(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    executor = ExecutorNaMao()
-    publicador = EventosEmSegundoPlano(EventosQueFalham(), executor)
-
-    publicador.publicar(_evento())
-    with caplog.at_level(logging.ERROR):
-        executor.rodar()
-
-    assert "evento de uso login" in caplog.text
+    assert r.status_code == 200
+    [(tipo, entregue_em)] = eventos.entregues
+    assert tipo == "login" and entregue_em <= respondeu
 
 
 def test_o_quando_em_outro_fuso_vira_utc() -> None:
@@ -305,12 +279,22 @@ def test_o_login_nao_leva_o_e_mail() -> None:
     assert "redetv.com.br" not in json.dumps(mundo.eventos.publicados[0].para_json())
 
 
-def test_falha_ao_publicar_o_login_nao_derruba_o_eu() -> None:
-    mundo = Mundo(eventos=EventosQueFalham(), login_em=AGORA)
+class EventosQueEstouramOTempo:
+    def publicar(self, evento: EventoDeUso) -> None:
+        raise requests.Timeout("Pub/Sub não respondeu em 5 s")
 
-    r = mundo.cliente.get("/v1/eu", headers=ANA)
+
+@pytest.mark.parametrize("eventos", [EventosQueFalham(), EventosQueEstouramOTempo()])
+def test_falha_ao_publicar_o_login_nao_derruba_o_eu_e_vai_ao_log(
+    eventos: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    mundo = Mundo(eventos=eventos, login_em=AGORA)
+
+    with caplog.at_level(logging.ERROR):
+        r = mundo.cliente.get("/v1/eu", headers=ANA)
 
     assert r.status_code == 200 and r.json()["uid"] == "ana"
+    assert "evento de uso login" in caplog.text
 
 
 # Envio
@@ -411,6 +395,24 @@ def test_o_fim_leva_quanto_o_job_levou_do_registro_ao_fim() -> None:
     repositorio.transitar("j1", "analisando", {"estado": "concluido"})
 
     assert eventos.publicados[0].segundos_de_processamento == 20 * 60 + 30
+
+
+def test_o_fim_leva_a_duracao_do_video() -> None:
+    eventos = EventosEmMemoria()
+    repositorio = _repositorio_com(_job_em("analisando", duracao_s=1800.5), eventos)
+
+    repositorio.transitar("j1", "analisando", {"estado": "concluido"})
+
+    assert eventos.publicados[0].duracao_do_video_ms == 1_800_500
+
+
+def test_o_fim_sem_duracao_do_job_vai_sem_ela() -> None:
+    eventos = EventosEmMemoria()
+    repositorio = _repositorio_com(_job_em("analisando"), eventos)
+
+    repositorio.transitar("j1", "analisando", {"estado": "falhou"})
+
+    assert eventos.publicados[0].duracao_do_video_ms is None
 
 
 def test_falhar_publica_o_codigo_da_falha_e_o_sistema_dono() -> None:

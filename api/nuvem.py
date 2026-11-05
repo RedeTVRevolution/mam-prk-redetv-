@@ -3,8 +3,9 @@
 import json
 import random
 import secrets
+import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -62,14 +63,23 @@ from api.jobs import (
     Job,
     NomeDaEtapa,
     PaginaDeJobs,
+    RepositorioDeJobs,
     ServicoIndisponivel,
     casa_com_o_filtro,
     disposicao_do_nome,
+    paginar_em_python,
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
-from api.papeis import PAPEIS, Papel
+from api.papeis import PAPEIS, DocumentoDePapeis, Papel
+from api.programas import (
+    NomeEmUso,
+    Programa,
+    ProgramaInexistente,
+    TrocaSubstituida,
+    troca_vale,
+)
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
@@ -87,6 +97,7 @@ COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
+COLECAO_DOS_PROGRAMAS = "programas"
 COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
@@ -96,6 +107,16 @@ COLECAO_DOS_TIPOS_DE_OBJETO = "tipos_de_objeto"
 COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
+_LOTE_DE_LEITURA = 500
+
+
+def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
+    """Os documentos que existem entre os `ids` (sem repetir), lidos em lotes de
+    `_LOTE_DE_LEITURA` com `get_all`."""
+    referencias = [colecao.document(i) for i in dict.fromkeys(ids)]
+    for inicio in range(0, len(referencias), _LOTE_DE_LEITURA):
+        lote = referencias[inicio : inicio + _LOTE_DE_LEITURA]
+        yield from (d for d in cliente.get_all(lote) if d.exists)
 
 
 def objeto_do_proxy(job_id: str) -> str:
@@ -247,6 +268,14 @@ class RepositorioFirestore:
         doc = self._colecao.document(job_id).get()
         return Job(**(doc.to_dict() or {})) if doc.exists else None
 
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
+        # um pedido só com dezenas de milhares de referências arrisca o prazo.
+        return [
+            Job(**(doc.to_dict() or {}))
+            for doc in _lidos_em_lote(self._cliente, self._colecao, job_ids)
+        ]
+
     def listar(self) -> list[Job]:
         docs = self._colecao.order_by(
             "criado_em", direction=firestore.Query.DESCENDING
@@ -258,6 +287,15 @@ class RepositorioFirestore:
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
         # estar no campo da ordem). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
         # Os índices estão no infra/modulos/mam/main.tf.
+        if filtro.sha256 is not None:
+            return self._consultar_pelo_arquivo(filtro)
+        if (
+            filtro.pessoa_do_catalogo is not None
+            or filtro.marca_do_catalogo is not None
+        ):
+            return self._consultar_pelo_catalogo(filtro)
+        if filtro.na_lixeira is True:
+            return self._consultar_a_lixeira(filtro)
         consulta: Any = self._colecao
         if filtro.programa is not None:
             consulta = consulta.where(
@@ -285,6 +323,17 @@ class RepositorioFirestore:
                 consulta = consulta.where(
                     filter=FieldFilter(campo, "<=", filtro.exibicao_ate.isoformat())
                 )
+        return self._ordenar_e_ler(consulta, campo, filtro)
+
+    def _consultar_a_lixeira(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # A ordem é a do envio à lixeira: o Firestore só devolve documentos que têm o
+        # campo da ordem, e fora da lixeira `lixeira` é `null`. Os outros filtros ficam
+        # em `casa_com_o_filtro`, para não pedir índice composto com `lixeira.em`.
+        return self._ordenar_e_ler(self._colecao, "lixeira.em", filtro)
+
+    def _ordenar_e_ler(
+        self, consulta: Any, campo: str, filtro: FiltroDeJobs
+    ) -> PaginaDeJobs:
         # O desempate implícito é o id do documento, na mesma direção da ordem.
         consulta = consulta.order_by(campo, direction=firestore.Query.DESCENDING)
         if filtro.cursor is not None:
@@ -295,6 +344,39 @@ class RepositorioFirestore:
         jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
         return PaginaDeJobs.de(
             (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
+        )
+
+    def _consultar_pelo_catalogo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # Só um `array_contains` (índice automático) vai ao Firestore: lê os vídeos da
+        # pessoa ou da marca, não o acervo. O resto do filtro, a ordem e o cursor ficam
+        # em Python, sem índice composto.
+        if filtro.pessoa_do_catalogo is not None:
+            consulta = self._colecao.where(
+                filter=FieldFilter(
+                    "pessoas_do_catalogo", "array_contains", filtro.pessoa_do_catalogo
+                )
+            )
+        else:
+            consulta = self._colecao.where(
+                filter=FieldFilter(
+                    "marcas_do_catalogo", "array_contains", filtro.marca_do_catalogo
+                )
+            )
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return paginar_em_python(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
+        )
+
+    def _consultar_pelo_arquivo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # Poucos Jobs por arquivo: só a igualdade no `sha256` (índice automático) vai ao
+        # Firestore; o resto do filtro, a ordem e o cursor ficam em Python, sem índice
+        # composto.
+        consulta = self._colecao.where(
+            filter=FieldFilter("sha256", "==", filtro.sha256)
+        )
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return paginar_em_python(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
         )
 
 
@@ -404,6 +486,21 @@ class RepositorioDeIdempotenciaFirestore:
         )
         return resultado
 
+    def marcar_job_gravado(self, escopo: str, chave: str) -> None:
+        referencia = self._colecao.document(id_da_reserva(escopo, chave))
+        # As repetições em paralelo leem a reserva enquanto ela é marcada: o Firestore
+        # aborta o `update` por disputa (`Aborted`), e ele é repetido como o `create`.
+        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+            try:
+                referencia.update({"job_gravado": True})
+            except NotFound:
+                return  # a reserva venceu e o TTL a apagou
+            except Aborted:
+                time.sleep(espera_sob_disputa(rodada))
+                continue
+            return
+        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
 
 class RepositorioDeWebhooksFirestore:
     """Um documento por sistema, com o nome do sistema como id."""
@@ -429,22 +526,25 @@ class RepositorioDePapeisFirestore:
     ) -> None:
         self._colecao = cliente.collection(colecao)
 
-    def obter(self, uid: str) -> list[Papel] | None:
+    def ler(self, uid: str) -> DocumentoDePapeis:
         doc = self._colecao.document(uid).get()
         dados = (doc.to_dict() or {}) if doc.exists else {}
-        if "papeis" not in dados:
-            # Só a marca `desativada`: a conta segue sem papéis guardados.
-            return None
+        papeis: list[Papel] | None = None
+        # Sem `papeis` (só a marca `desativada`): a conta segue sem papéis guardados.
         # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
-        return [p for p in PAPEIS if p in dados["papeis"]]
+        if "papeis" in dados:
+            papeis = [p for p in PAPEIS if p in dados["papeis"]]
+        return DocumentoDePapeis(uid, dados.get("desativada") is True, papeis)
+
+    def obter(self, uid: str) -> list[Papel] | None:
+        return self.ler(uid).papeis
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         # merge: não apaga a marca `desativada`.
         self._colecao.document(uid).set({"papeis": papeis}, merge=True)
 
     def desativada(self, uid: str) -> bool:
-        doc = self._colecao.document(uid).get()
-        return doc.exists and (doc.to_dict() or {}).get("desativada") is True
+        return self.ler(uid).desativada
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         self._colecao.document(uid).set({"desativada": desativada}, merge=True)
@@ -563,6 +663,7 @@ class CatalogoFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def _gravar(self, pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
@@ -582,6 +683,12 @@ class CatalogoFirestore:
     def obter(self, id: str) -> PessoaDoCatalogo | None:
         doc = self._colecao.document(id).get()
         return self._pessoa(id, doc.to_dict() or {}) if doc.exists else None
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        return {
+            d.id: self._pessoa(d.id, d.to_dict() or {})
+            for d in _lidos_em_lote(self._cliente, self._colecao, ids)
+        }
 
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
         consulta = self._colecao.where(
@@ -667,6 +774,105 @@ class CatalogoFirestore:
         referencia.delete()
 
 
+class ProgramasFirestore:
+    """Um documento por programa, com o id estável como chave. O nome é único sem
+    diferença de maiúsculas; a conferência lê antes de gravar, e a tela de edição
+    é de poucas pessoas, então a corrida entre duas gravações é aceita."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DOS_PROGRAMAS
+    ) -> None:
+        self._cliente = cliente
+        self._colecao = cliente.collection(colecao)
+
+    def listar(self) -> list[Programa]:
+        lidos = [
+            Programa(id=d.id, **(d.to_dict() or {})) for d in self._colecao.stream()
+        ]
+        return sorted(lidos, key=lambda p: p.nome.casefold())
+
+    def obter(self, id: str) -> Programa | None:
+        doc = self._colecao.document(id).get()
+        return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
+
+    def _conferir_nome(self, programa: Programa) -> None:
+        if any(
+            p.id != programa.id and p.nome.casefold() == programa.nome.casefold()
+            for p in self.listar()
+        ):
+            raise NomeEmUso(programa.nome)
+
+    def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
+        self._conferir_nome(programa)
+        # Com merge, o campo que não vai fica como está: o andamento é da tarefa.
+        fora = {"id"} if com_renomeacao else {"id", "renomeacao"}
+        self._colecao.document(programa.id).set(
+            programa.model_dump(exclude=fora), merge=True
+        )
+
+    def trocar(
+        self, id: str, mudar: Callable[[Programa], Programa | None]
+    ) -> Programa | None:
+        # Como `RepositorioFirestore.trocar`: `mudar` decide, e o Firestore pode repeti-la.
+        referencia = self._colecao.document(id)
+
+        @firestore.transactional
+        def trocar_na_transacao(transacao: Any) -> Programa | None:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                return None
+            atual = Programa(id=id, **(doc.to_dict() or {}))
+            novo = mudar(atual)
+            if novo is None:
+                return None
+            if novo.nome.casefold() != atual.nome.casefold():
+                self._conferir_nome(novo)
+            transacao.set(referencia, novo.model_dump(exclude={"id"}))
+            return novo
+
+        resultado: Programa | None = _repetir_sob_disputa(
+            trocar_na_transacao, self._cliente
+        )
+        return resultado
+
+    def levar_o_nome_ao_job(
+        self, programa_id: str, troca_id: str, job_id: str, jobs: RepositorioDeJobs
+    ) -> Job | None:
+        # Os Jobs estão no mesmo Firestore: a transação lê o programa e o Job juntos.
+        if not isinstance(jobs, RepositorioFirestore):
+            raise TypeError("os Jobs precisam estar no Firestore")
+        programa_ref = self._colecao.document(programa_id)
+        job_ref = self._cliente.collection(jobs._colecao.id).document(job_id)
+
+        @firestore.transactional
+        def levar(transacao: Any) -> Job | None:
+            lido = programa_ref.get(transaction=transacao)
+            doc = job_ref.get(transaction=transacao)
+            programa = (
+                Programa(id=programa_id, **(lido.to_dict() or {}))
+                if lido.exists
+                else None
+            )
+            if programa is None or not troca_vale(programa, troca_id):
+                raise TrocaSubstituida(troca_id)  # a transação sai sem gravar
+            if not doc.exists:
+                return None
+            job = Job(**(doc.to_dict() or {}))
+            if job.programa == programa.nome:
+                return job
+            novo = job.model_copy(update={"programa": programa.nome})
+            transacao.set(job_ref, novo.model_dump())
+            return novo
+
+        resultado: Job | None = _repetir_sob_disputa(levar, self._cliente)
+        return resultado
+
+    def apagar(self, id: str) -> None:
+        if not self._colecao.document(id).get().exists:
+            raise ProgramaInexistente(id)
+        self._colecao.document(id).delete()
+
+
 class CatalogoDeMarcasFirestore:
     """Um documento por marca, com o id estável como chave. `nomes_de_busca` (nome e
     apelidos normalizados) é o índice de `achar`."""
@@ -674,6 +880,7 @@ class CatalogoDeMarcasFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO_DE_MARCAS
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     @staticmethod
@@ -684,6 +891,12 @@ class CatalogoDeMarcasFirestore:
     def obter(self, id: str) -> MarcaDoCatalogo | None:
         doc = self._colecao.document(id).get()
         return self._marca(id, doc.to_dict() or {}) if doc.exists else None
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
+        return {
+            d.id: self._marca(d.id, d.to_dict() or {})
+            for d in _lidos_em_lote(self._cliente, self._colecao, ids)
+        }
 
     def achar(self, nome: str) -> list[MarcaDoCatalogo]:
         consulta = self._colecao.where(
@@ -856,6 +1069,18 @@ class RepositorioDeCorrecoesFirestore:
         docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
         achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
         return em_ordem(achadas)
+
+    def jobs_com_correcao(
+        self, desde: datetime | None = None, ate: datetime | None = None
+    ) -> set[str]:
+        consulta: Any = self._colecao
+        if desde is not None:
+            consulta = consulta.where(filter=FieldFilter("criada_em", ">=", desde))
+        if ate is not None:
+            consulta = consulta.where(filter=FieldFilter("criada_em", "<", ate))
+        return {
+            (d.to_dict() or {})["job_id"] for d in consulta.select(["job_id"]).stream()
+        }
 
     def purgar(self, job_id: str) -> None:
         for doc in self._colecao.where(
@@ -1106,17 +1331,41 @@ class DisparoDaIndexacaoNoCloudRun:
             raise ServicoIndisponivel from e
 
 
-def assinatura_pelo_iam() -> dict[str, Any]:
-    """Assinatura pedida ao IAM pela conta do serviço, sem chave em arquivo."""
-    credenciais: Any
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    credenciais.refresh(google.auth.transport.requests.Request())
-    return {
-        "service_account_email": credenciais.service_account_email,
-        "access_token": credenciais.token,
-    }
+class AssinaturaPeloIam:
+    """Assinatura pedida ao IAM pela conta do serviço, sem chave em arquivo. A credencial
+    é uma por processo e só se renova quando expira (`valid`); a trava evita que várias
+    threads (as capas do Acervo assinam em paralelo) renovem ao mesmo tempo."""
+
+    def __init__(
+        self,
+        obter_credenciais: Callable[[], Any] | None = None,
+        requisicao: Callable[[], Any] | None = None,
+    ) -> None:
+        self._obter = obter_credenciais or self._credenciais_do_ambiente
+        self._requisicao = requisicao or google.auth.transport.requests.Request
+        self._credenciais: Any = None
+        self._trava = threading.Lock()
+
+    @staticmethod
+    def _credenciais_do_ambiente() -> Any:
+        credenciais, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        return credenciais
+
+    def __call__(self) -> dict[str, Any]:
+        with self._trava:
+            if self._credenciais is None:
+                self._credenciais = self._obter()
+            if not self._credenciais.valid:
+                self._credenciais.refresh(self._requisicao())
+            return {
+                "service_account_email": self._credenciais.service_account_email,
+                "access_token": self._credenciais.token,
+            }
+
+
+assinatura_pelo_iam = AssinaturaPeloIam()
 
 
 class DecupagensStorage:

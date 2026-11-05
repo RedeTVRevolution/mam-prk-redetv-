@@ -149,6 +149,10 @@ async function abrirEnvio(usuario: ReturnType<typeof userEvent.setup>) {
   return screen.findByRole('dialog')
 }
 
+function preencherData(dialogo: ReturnType<typeof within>) {
+  fireEvent.change(dialogo.getByLabelText(/^Data de exibição/), { target: { value: '2026-10-28' } })
+}
+
 const linha = (nome: string) => screen.getByText(nome).closest('tr') as HTMLElement
 const ultimaChamada = () => new URLSearchParams(chamadas[chamadas.length - 1])
 
@@ -403,10 +407,13 @@ test('só as linhas em andamento são consultadas de novo, e a lista não é rec
     job({ id: 'b', nome: 'andando.mp4', estado: 'validando' }),
   ]
   const detalhes: string[] = []
+  const pedidos: string[][] = []
   servidor.use(
-    http.get('/v1/jobs/:id', ({ params }) => {
-      detalhes.push(String(params.id))
-      return HttpResponse.json(jobs.find((j) => j.id === params.id))
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      const ids = new URL(request.url).searchParams.get('ids')!.split(',')
+      pedidos.push(ids)
+      detalhes.push(...ids)
+      return HttpResponse.json(jobs.filter((j) => ids.includes(j.id)))
     }),
   )
   await abrir({ intervaloMs: 20 })
@@ -418,6 +425,7 @@ test('só as linhas em andamento são consultadas de novo, e a lista não é rec
   await waitFor(() => expect(within(linha('andando.mp4')).getByText('Concluído')).toBeTruthy())
   expect(new Set(detalhes)).toEqual(new Set(['b']))
   expect(chamadas.length).toBe(listagens)
+  expect(pedidos.every((p) => p.length === 1)).toBe(true)
 })
 
 test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado até a indexação acabar', async () => {
@@ -455,10 +463,13 @@ test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado 
     }),
   ]
   const detalhes: string[] = []
+  const pedidos: string[][] = []
   servidor.use(
-    http.get('/v1/jobs/:id', ({ params }) => {
-      detalhes.push(String(params.id))
-      return HttpResponse.json(jobs.find((j) => j.id === params.id))
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      const ids = new URL(request.url).searchParams.get('ids')!.split(',')
+      pedidos.push(ids)
+      detalhes.push(...ids)
+      return HttpResponse.json(jobs.filter((j) => ids.includes(j.id)))
     }),
   )
   await abrir({ intervaloMs: 20 })
@@ -476,6 +487,8 @@ test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado 
 
   await waitFor(() => expect(within(linha('rodando.mp4')).getByText('Concluído')).toBeTruthy())
   expect(new Set(detalhes)).toEqual(new Set(['a', 'b', 'e']))
+  // Uma rodada, um pedido: os três vão juntos já na primeira.
+  expect([...pedidos[0]].sort()).toEqual(['a', 'b', 'e'])
 })
 
 test('a consulta de uma linha em andamento mantém a capa da lista', async () => {
@@ -483,10 +496,10 @@ test('a consulta de uma linha em andamento mantém a capa da lista', async () =>
   jobs = [job({ id: 'a', nome: 'rodando.mp4', estado: 'concluido', etapa_atual: 'inventario_de_objetos', indexacao: pendente, capa_url: '/capa-a.jpg' })]
   let consultas = 0
   servidor.use(
-    http.get('/v1/jobs/:id', () => {
+    http.get('/v1/jobs/andamento', () => {
       consultas++
-      // Como a API: o detalhe não assina a capa.
-      return HttpResponse.json({ ...jobs[0], capa_url: null })
+      // Como a API: o andamento não assina a capa.
+      return HttpResponse.json([{ ...jobs[0], capa_url: undefined }])
     }),
   )
   await abrir({ intervaloMs: 20 })
@@ -499,9 +512,10 @@ test('com a aba escondida, ninguém é consultado', async () => {
   jobs = [job({ id: 'b', nome: 'andando.mp4', estado: 'validando' })]
   let consultas = 0
   servidor.use(
-    http.get('/v1/jobs/:id', () => {
-      consultas++
-      return HttpResponse.json(jobs[0])
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      // Sob carga, um pedido atrasado do teste anterior pode cair aqui: só conta o deste.
+      if (new URL(request.url).searchParams.get('ids')!.split(',').includes('b')) consultas++
+      return HttpResponse.json([jobs[0]])
     }),
   )
   const visibilidade = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
@@ -513,6 +527,21 @@ test('com a aba escondida, ninguém é consultado', async () => {
   } finally {
     visibilidade.mockRestore()
   }
+})
+
+test('o vídeo que a rota de andamento omite (lixeira ou sumiu) sai da lista', async () => {
+  jobs = [
+    job({ id: 'a', nome: 'ficou.mp4', estado: 'validando' }),
+    job({ id: 'b', nome: 'sumiu.mp4', estado: 'validando' }),
+  ]
+  servidor.use(
+    http.get('/v1/jobs/andamento', () => HttpResponse.json([{ ...jobs[0], estado: 'concluido' }])),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('sumiu.mp4')
+
+  await waitFor(() => expect(screen.queryByText('sumiu.mp4')).toBeNull())
+  expect(within(linha('ficou.mp4')).getByText('Concluído')).toBeTruthy()
 })
 
 test('sem vídeos, a lista vazia diz isso; com filtros, diz que nenhum casou', async () => {
@@ -573,7 +602,7 @@ test('envia o MP4 com programa e data de exibição, e o vídeo aparece no topo 
 
   await usuario.click(await dialogo.findByRole('combobox', { name: 'Programa' }))
   await usuario.click(await screen.findByRole('option', { name: 'TV Fama' }))
-  fireEvent.change(dialogo.getByLabelText('Data de exibição (opcional)'), { target: { value: '2026-10-28' } })
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect(await dialogo.findByText(/Envio concluído/)).toBeTruthy()
@@ -590,17 +619,39 @@ test('envia o MP4 com programa e data de exibição, e o vídeo aparece no topo 
   expect(within(topo).getByText('Aguardando envio')).toBeTruthy()
 })
 
-test('sem programa nem data, o corpo da criação leva só o arquivo', async () => {
+test('sem data de exibição o envio não chama a API e a tela diz o que falta', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  const dialogo = within(await abrirEnvio(usuario))
+
+  await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
+
+  expect((await dialogo.findByRole('alert')).textContent).toContain('Informe a data de exibição')
+  expect(criacoes).toEqual([])
+  expect(pedacosEnviados).toEqual([])
+
+  preencherData(dialogo)
+  await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
+
+  expect(await dialogo.findByText(/Envio concluído/)).toBeTruthy()
+  expect(dialogo.queryByRole('alert')).toBeNull()
+  expect(criacoes).toHaveLength(1)
+})
+
+test('sem programa, o corpo da criação leva o arquivo e a data', async () => {
   const usuario = userEvent.setup()
   programas = null
   await abrir()
   const dialogo = within(await abrirEnvio(usuario))
 
   expect(dialogo.queryByRole('combobox', { name: 'Programa' })).toBeNull()
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect(await dialogo.findByText(/Envio concluído/)).toBeTruthy()
-  expect(criacoes).toEqual([{ nome: 'enviado.mp4', tamanho_bytes: 64, tipo: 'video/mp4' }])
+  expect(criacoes).toEqual([
+    { nome: 'enviado.mp4', tamanho_bytes: 64, tipo: 'video/mp4', data_exibicao: '2026-10-28' },
+  ])
 })
 
 test('o envio mostra o progresso e trava o arquivo até terminar', async () => {
@@ -616,6 +667,7 @@ test('o envio mostra o progresso e trava o arquivo até terminar', async () => {
   const dialogo = within(await abrirEnvio(usuario))
   const campo = dialogo.getByLabelText('Arquivo MP4') as HTMLInputElement
 
+  preencherData(dialogo)
   await usuario.upload(campo, mp4())
   await dialogo.findByLabelText('Progresso do envio')
 
@@ -633,6 +685,7 @@ test('data de exibição no futuro vira uma mensagem em português com a ação'
   await abrir()
   const dialogo = within(await abrirEnvio(usuario))
 
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect((await dialogo.findByRole('alert')).textContent).toContain('data de exibição não pode ser no futuro')
@@ -644,6 +697,7 @@ test('uma falha ao criar o Job vira mensagem em português', async () => {
   await abrir()
   const dialogo = within(await abrirEnvio(usuario))
 
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect((await dialogo.findByRole('alert')).textContent).toContain('Não foi possível enviar o vídeo')
@@ -653,6 +707,7 @@ test('reabrir o diálogo começa um envio novo, sem o aviso do anterior', async 
   const usuario = userEvent.setup()
   await abrir()
   const dialogo = within(await abrirEnvio(usuario))
+  preencherData(dialogo)
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
   await dialogo.findByText(/Envio concluído/)
 

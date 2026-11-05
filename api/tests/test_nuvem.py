@@ -16,7 +16,7 @@ import pytest
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.api_core.exceptions import Aborted, AlreadyExists
+from google.api_core.exceptions import Aborted, AlreadyExists, NotFound
 from google.auth import credentials as google_credentials
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
@@ -42,6 +42,7 @@ from api.nuvem import (
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
@@ -53,6 +54,12 @@ from api.nuvem import (
     RepositorioFirestore,
     TiposDeObjetoFirestore,
     espera_sob_disputa,
+)
+from api.programas import (
+    NomeEmUso,
+    Programa,
+    RenomeacaoDoPrograma,
+    TrocaSubstituida,
 )
 from api.webhook import RegistroDeWebhook
 
@@ -97,6 +104,28 @@ class TestRepositorioFirestore:
         self, repositorio: RepositorioFirestore
     ) -> None:
         assert repositorio.obter("nao-existe") is None
+
+    def test_obter_varios_le_em_lote_so_os_que_existem(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        for id in ("a", "b", "c"):
+            repositorio.salvar(_job(id, BASE))
+
+        achados = repositorio.obter_varios(["a", "c", "c", "nao-existe"])
+
+        assert sorted(j.id for j in achados) == ["a", "c"]
+        assert repositorio.obter_varios([]) == []
+
+    def test_obter_varios_le_mais_de_um_lote(
+        self, repositorio: RepositorioFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("api.nuvem._LOTE_DE_LEITURA", 2)
+        for id in ("a", "b", "c", "d", "e"):
+            repositorio.salvar(_job(id, BASE))
+
+        achados = repositorio.obter_varios(["e", "d", "c", "b", "a", "x"])
+
+        assert sorted(j.id for j in achados) == ["a", "b", "c", "d", "e"]
 
     def test_remover_apaga_o_job_e_repetir_nao_da_erro(
         self, repositorio: RepositorioFirestore
@@ -234,6 +263,115 @@ class TestRepositorioFirestore:
             "a-novo",
             "a-velho",
         ]
+
+    def test_lixeira_traz_so_os_da_lixeira_do_envio_mais_recente_ao_mais_antigo(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        def lixeira(dias: int) -> EnvioParaLixeira:
+            return EnvioParaLixeira(
+                em=BASE + timedelta(days=dias),
+                por_uid="adm",
+                por_email="ana@redetv.com",
+                motivo="duplicado",
+            )
+
+        repositorio.salvar(_job("fora", BASE))
+        repositorio.salvar(_job("velho", BASE, lixeira=lixeira(1)))
+        repositorio.salvar(_job("novo", BASE - timedelta(days=9), lixeira=lixeira(3)))
+        repositorio.salvar(_job("meio", BASE, lixeira=lixeira(2)))
+
+        ids = [j.id for j in repositorio.consultar(FiltroDeJobs(na_lixeira=True)).jobs]
+
+        assert ids == ["novo", "meio", "velho"]
+        assert [j.id for j in repositorio.consultar(FiltroDeJobs()).jobs] == ["fora"]
+
+    def test_lixeira_e_sha256_leem_so_os_documentos_que_devolvem(
+        self, repositorio: RepositorioFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        for i in range(30):
+            repositorio.salvar(_job(f"x{i}", BASE, sha256=f"{i:064x}"))
+        repositorio.salvar(_job("alvo", BASE, sha256="a" * 64))
+        repositorio.salvar(_job("igual", BASE, sha256="a" * 64))
+        for i in range(3):
+            repositorio.salvar(_job(f"l{i}", BASE, lixeira=envio))
+        lidos = {"documentos": 0}
+        stream = firestore.Query.stream
+
+        def contar(consulta: firestore.Query, *args: Any, **kwargs: Any) -> Any:
+            for doc in stream(consulta, *args, **kwargs):
+                lidos["documentos"] += 1
+                yield doc
+
+        monkeypatch.setattr(firestore.Query, "stream", contar)
+
+        assert len(repositorio.consultar(FiltroDeJobs(na_lixeira=True)).jobs) == 3
+        assert lidos["documentos"] == 3
+        filtro = FiltroDeJobs(sha256="a" * 64, na_lixeira=None)
+        assert len(repositorio.consultar(filtro).jobs) == 2
+        assert lidos["documentos"] == 5
+
+    def test_pessoa_e_marca_do_catalogo_acham_so_os_jobs_certos(
+        self, repositorio: RepositorioFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for i in range(30):
+            repositorio.salvar(_job(f"x{i}", BASE, pessoas_do_catalogo=[f"o{i}"]))
+        repositorio.salvar(
+            _job("a", BASE, pessoas_do_catalogo=["p1", "p2"], marcas_do_catalogo=["m1"])
+        )
+        repositorio.salvar(
+            _job("b", BASE + timedelta(minutes=1), pessoas_do_catalogo=["p1"])
+        )
+        repositorio.salvar(_job("c", BASE, pessoas_do_catalogo=["p2"]))
+        lidos = {"documentos": 0}
+        stream = firestore.Query.stream
+
+        def contar(consulta: firestore.Query, *args: Any, **kwargs: Any) -> Any:
+            for doc in stream(consulta, *args, **kwargs):
+                lidos["documentos"] += 1
+                yield doc
+
+        monkeypatch.setattr(firestore.Query, "stream", contar)
+
+        da_pessoa = repositorio.consultar(FiltroDeJobs(pessoa_do_catalogo="p1"))
+        assert [j.id for j in da_pessoa.jobs] == ["b", "a"]
+        assert lidos["documentos"] == 2
+        da_marca = repositorio.consultar(FiltroDeJobs(marca_do_catalogo="m1"))
+        assert [j.id for j in da_marca.jobs] == ["a"]
+        assert lidos["documentos"] == 3
+
+    def test_lixeira_com_outro_filtro_confere_o_resto_em_python(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        repositorio.salvar(_job("a", BASE, programa="Jornal", lixeira=envio))
+        repositorio.salvar(_job("b", BASE, programa="Outro", lixeira=envio))
+
+        filtro = FiltroDeJobs(na_lixeira=True, programa="Jornal")
+
+        assert [j.id for j in repositorio.consultar(filtro).jobs] == ["a"]
+
+    def test_sha256_traz_so_os_do_mesmo_arquivo_na_lixeira_ou_fora_dela(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        repositorio.salvar(_job("a", BASE, sha256="a" * 64))
+        repositorio.salvar(_job("b", BASE + timedelta(minutes=1), sha256="b" * 64))
+        repositorio.salvar(
+            _job("c", BASE + timedelta(minutes=2), sha256="a" * 64, lixeira=envio)
+        )
+
+        todos = repositorio.consultar(FiltroDeJobs(sha256="a" * 64, na_lixeira=None))
+        so_acervo = repositorio.consultar(FiltroDeJobs(sha256="a" * 64))
+
+        assert [j.id for j in todos.jobs] == ["c", "a"]
+        assert [j.id for j in so_acervo.jobs] == ["a"]
 
 
 def _credencial_local() -> google_credentials.Signing:
@@ -739,6 +877,34 @@ class TestRepositorioDeCorrecoesFirestore:
         assert correcoes.listar("j1") == []
         assert [c.id for c in correcoes.listar("j2")] == ["c3"]
 
+    def test_jobs_com_correcao_respeita_os_limites_do_periodo(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        for id, job_id, minutos in (
+            ("c0", "antes", 9),
+            ("c1", "no_inicio", 10),
+            ("c2", "no_meio", 15),
+            ("c3", "no_fim", 20),
+            ("c4", "depois", 21),
+        ):
+            correcoes.acrescentar(self._correcao(id, job_id, minutos))
+        desde = BASE + timedelta(minutes=10)
+        ate = BASE + timedelta(minutes=20)
+
+        assert correcoes.jobs_com_correcao(desde, ate) == {"no_inicio", "no_meio"}
+        assert correcoes.jobs_com_correcao(desde=desde) == {
+            "no_inicio",
+            "no_meio",
+            "no_fim",
+            "depois",
+        }
+        assert correcoes.jobs_com_correcao(ate=ate) == {
+            "antes",
+            "no_inicio",
+            "no_meio",
+        }
+        assert len(correcoes.jobs_com_correcao()) == 5
+
     @pytest.fixture
     def correcoes(self) -> RepositorioDeCorrecoesFirestore:
         cliente = firestore.Client(project="teste", credentials=_anonima())
@@ -1076,6 +1242,124 @@ class TestCatalogoDeMarcasFirestore:
         assert len(marcas.todas()) == 2
 
 
+def _andamento(estado: Any, pendentes: list[str]) -> RenomeacaoDoPrograma:
+    return RenomeacaoDoPrograma(
+        id=f"troca-{estado}",
+        desde=BASE,
+        nome_antigo="Antigo",
+        nome_novo="Novo",
+        total=2,
+        pendentes=pendentes,
+        estado=estado,
+    )
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestProgramasFirestore:
+    @pytest.fixture
+    def programas(self) -> ProgramasFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return ProgramasFirestore(cliente, colecao=f"programas-{uuid.uuid4().hex}")
+
+    def test_salvar_sem_o_andamento_deixa_o_gravado(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        concluida = _andamento("concluida", [])
+        programas.salvar(
+            Programa(id="p", nome="Novo", renomeacao=concluida), com_renomeacao=True
+        )
+
+        # A cópia velha do PUT não volta a troca para em andamento.
+        programas.salvar(
+            Programa(
+                id="p",
+                nome="Novo",
+                perfil="Revista.",
+                renomeacao=_andamento("em_andamento", ["j1"]),
+            )
+        )
+
+        assert programas.obter("p") == Programa(
+            id="p", nome="Novo", perfil="Revista.", renomeacao=concluida
+        )
+        # O desfazer de uma troca grava o andamento de antes, inclusive nenhum.
+        programas.salvar(Programa(id="p", nome="Antigo"), com_renomeacao=True)
+        assert programas.obter("p") == Programa(id="p", nome="Antigo")
+
+    def test_trocar_grava_o_que_mudar_devolve_e_so_isso(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        programas.salvar(Programa(id="p", nome="Novo"))
+        programas.salvar(Programa(id="q", nome="Outro"))
+        andamento = _andamento("em_andamento", ["j1"])
+
+        gravado = programas.trocar(
+            "p", lambda p: p.model_copy(update={"renomeacao": andamento})
+        )
+
+        assert gravado == programas.obter("p")
+        assert gravado == Programa(id="p", nome="Novo", renomeacao=andamento)
+        assert programas.trocar("p", lambda p: None) is None
+        assert programas.obter("p") == gravado
+        with pytest.raises(NomeEmUso):
+            programas.trocar("p", lambda p: p.model_copy(update={"nome": "outro"}))
+        assert programas.obter("p") == gravado
+
+    def test_levar_o_nome_ao_job_grava_o_nome_com_a_troca_em_andamento(
+        self, programas: ProgramasFirestore, repositorio: RepositorioFirestore
+    ) -> None:
+        andamento = _andamento("em_andamento", ["a"])
+        programas.salvar(
+            Programa(id="p", nome="Novo", renomeacao=andamento), com_renomeacao=True
+        )
+        repositorio.salvar(_job("a", BASE, programa="Antigo"))
+
+        levado = programas.levar_o_nome_ao_job("p", andamento.id, "a", repositorio)
+
+        assert levado is not None and levado.programa == "Novo"
+        assert repositorio.obter("a") == levado
+        assert programas.levar_o_nome_ao_job("p", andamento.id, "a", repositorio) == (
+            levado
+        )
+        assert (
+            programas.levar_o_nome_ao_job("p", andamento.id, "x", repositorio) is None
+        )
+
+    @pytest.mark.parametrize("estado", ["em_andamento", "confirmando", "concluida"])
+    def test_levar_o_nome_ao_job_de_outra_troca_nao_grava(
+        self,
+        programas: ProgramasFirestore,
+        repositorio: RepositorioFirestore,
+        estado: str,
+    ) -> None:
+        # A troca gravada é outra (id diferente) ou a da tarefa fora de andamento.
+        gravada = _andamento(estado, ["a"])
+        da_tarefa = gravada.id if estado != "em_andamento" else "outra"
+        programas.salvar(
+            Programa(id="p", nome="Novo", renomeacao=gravada), com_renomeacao=True
+        )
+        repositorio.salvar(_job("a", BASE, programa="Antigo"))
+
+        with pytest.raises(TrocaSubstituida):
+            programas.levar_o_nome_ao_job("p", da_tarefa, "a", repositorio)
+        assert repositorio.obter("a").programa == "Antigo"  # type: ignore[union-attr]
+
+        # Programa apagado: também não vale mais, e o Job fica como está.
+        programas.apagar("p")
+        with pytest.raises(TrocaSubstituida):
+            programas.levar_o_nome_ao_job("p", gravada.id, "a", repositorio)
+        assert repositorio.obter("a").programa == "Antigo"  # type: ignore[union-attr]
+
+    def test_trocar_nao_recria_o_programa_apagado(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        programas.salvar(Programa(id="p", nome="Novo"))
+        programas.apagar("p")
+
+        assert programas.trocar("p", lambda p: p) is None
+        assert programas.obter("p") is None and programas.listar() == []
+
+
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestTiposDeObjetoFirestore:
     @pytest.fixture
@@ -1283,7 +1567,7 @@ def test_sob_disputa_nao_repete_outro_value_error() -> None:
 
 
 class _ColecaoQueAborta:
-    """`create` aborta as primeiras vezes (documento travado) e depois responde."""
+    """`create` e `update` abortam as primeiras vezes (documento travado) e depois respondem."""
 
     def __init__(self, abortos: int, depois: Exception | None) -> None:
         self._abortos = abortos
@@ -1300,6 +1584,9 @@ class _ColecaoQueAborta:
             raise Aborted("travado")  # type: ignore[no-untyped-call]
         if self._depois is not None:
             raise self._depois
+
+    def update(self, campos: dict[str, Any]) -> None:
+        self.create(campos)
 
 
 def _job_novo() -> Job:
@@ -1330,6 +1617,52 @@ def test_criar_abortado_repete_ate_saber_se_gravou(
     repositorio = RepositorioFirestore(_ClienteSemRede(colecao))  # type: ignore[arg-type]
 
     assert repositorio.criar(_job_novo()) is gravou
+    assert colecao.criacoes == 3
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestRepositorioDeIdempotenciaFirestore:
+    @pytest.fixture
+    def chaves(self) -> RepositorioDeIdempotenciaFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return RepositorioDeIdempotenciaFirestore(
+            cliente, f"idempotencia-{uuid.uuid4().hex}"
+        )
+
+    def test_marca_de_job_gravado_volta_na_repeticao(
+        self, chaves: RepositorioDeIdempotenciaFirestore
+    ) -> None:
+        chaves.reservar("sistema:Legado A", "k1", "imp", "j1", BASE)
+
+        chaves.marcar_job_gravado("sistema:Legado A", "k1")
+
+        reserva, nova = chaves.reservar("sistema:Legado A", "k1", "imp", "j2", BASE)
+        assert (reserva.job_id, reserva.job_gravado, nova) == ("j1", True, False)
+
+    def test_marcar_chave_sem_reserva_nao_falha_nem_cria_reserva(
+        self, chaves: RepositorioDeIdempotenciaFirestore
+    ) -> None:
+        chaves.marcar_job_gravado("sistema:Legado A", "k1")
+
+        reserva, nova = chaves.reservar("sistema:Legado A", "k1", "imp", "j1", BASE)
+        assert (reserva.job_gravado, nova) == (False, True)
+
+
+@pytest.mark.parametrize(
+    "depois",
+    [None, NotFound("vencida")],  # type: ignore[no-untyped-call]
+)
+def test_marca_de_job_gravado_abortada_repete(
+    monkeypatch: pytest.MonkeyPatch, depois: Exception | None
+) -> None:
+    # As repetições em paralelo disputam a reserva; um 500 aqui viria depois de o Job
+    # já estar gravado.
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    colecao = _ColecaoQueAborta(abortos=2, depois=depois)
+    chaves = RepositorioDeIdempotenciaFirestore(_ClienteSemRede(colecao))  # type: ignore[arg-type]
+
+    chaves.marcar_job_gravado("sistema:Legado A", "k1")
+
     assert colecao.criacoes == 3
 
 

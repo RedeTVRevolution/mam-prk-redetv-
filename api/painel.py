@@ -29,7 +29,7 @@ from api.custo_do_painel import (
     relatorio_de_custo,
 )
 from api.jobs import RepositorioDeJobs, ServicoIndisponivel, _confere_permissao
-from api.qualidade_do_painel import QualidadeDoPainel, RevisaoNoVideo
+from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel, RevisaoNoVideo
 from api.relatorios import confere_o_pedido, csv_em_texto, ou_503, resposta_em_csv
 from api.resumos_de_uso import (
     AcessoDoDia,
@@ -1008,8 +1008,10 @@ def criar_rotas_do_painel(
                             emails.get(a.uid, ""),
                             a.acessos,
                             "sim" if a.ativo else "não",
-                            # Em UTC com `Z`, como no JSON.
-                            a.ultimo_acesso.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            # Em São Paulo, com o deslocamento, como o `dia`; o JSON segue em UTC.
+                            a.ultimo_acesso.astimezone(SAO_PAULO).isoformat(
+                                timespec="seconds"
+                            )
                             if a.ultimo_acesso
                             else "",
                         ]

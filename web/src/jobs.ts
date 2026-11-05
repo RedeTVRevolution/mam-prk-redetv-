@@ -10,6 +10,9 @@ export interface EtapaDoJob {
   resultado: 'concluida' | 'falhou' | null
 }
 
+/** Quantos vídeos a rota de andamento aceita por pedido (`LIMITE_DO_ANDAMENTO` em `api/jobs.py`). */
+export const MAXIMO_DO_ANDAMENTO = 200
+
 export interface Job {
   id: string
   nome: string
@@ -20,7 +23,7 @@ export interface Job {
   /** Onde o Job está no índice da busca; `pendente` até a indexação terminar. */
   indexacao?: { estado: string; em: string } | null
   duracao_s?: number | null
-  /** Cortes de câmera, em ms. */
+  /** Cortes de câmera, em ms; só o detalhe do Job traz. */
   cortes_ms?: number[] | null
   /** Timecode do primeiro quadro do arquivo (`HH:MM:SS:FF`, ou `;FF` no drop-frame). */
   timecode_origem?: string | null

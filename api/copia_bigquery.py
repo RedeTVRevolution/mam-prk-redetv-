@@ -162,7 +162,9 @@ class CopiaEmMemoria:
         return sum(len(v) for v in self.por_job.values())
 
 
-# O corpo de um POST em `projects/<projeto>/queries`; devolve a resposta em JSON.
+# O corpo de um POST em `projects/<projeto>/queries` (`jobs.query`); devolve a resposta em
+# JSON. Com `jobId`, é a próxima página de uma consulta (`jobs.getQueryResults`, um GET em
+# `queries/<jobId>`) e o resto do dicionário vai na URL.
 Transporte = Callable[[dict[str, Any]], dict[str, Any]]
 
 
@@ -275,9 +277,13 @@ def transporte_http(projeto: str) -> Transporte:
     sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
 
     def chamar(corpo: dict[str, Any]) -> dict[str, Any]:
-        resposta = sessao.post(
-            f"{URL_BASE}/projects/{projeto}/queries", json=corpo, timeout=150
-        )
+        url = f"{URL_BASE}/projects/{projeto}/queries"
+        if "jobId" in corpo:
+            pagina = dict(corpo)
+            url += f"/{pagina.pop('jobId')}"
+            resposta = sessao.get(url, params=pagina, timeout=150)
+        else:
+            resposta = sessao.post(url, json=corpo, timeout=150)
         if not resposta.ok:
             raise RuntimeError(
                 f"BigQuery: HTTP {resposta.status_code}: {resposta.text[:2000]}"

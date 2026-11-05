@@ -1,15 +1,19 @@
 import { Button, Loader, Stack, Table, Text, Title } from '@mantine/core'
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react'
-import { Fragment, useCallback, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import type { ClienteDaApi } from './api.ts'
+import { DivisaoEmFaixa, RankingEmBarras } from './graficos.tsx'
 import { Link } from './Link.tsx'
 import { AlertaDoCsv, BotaoDeCsv, ErroDoRelatorio, FiltrosDoPeriodo } from './relatorios.tsx'
 import { enderecoDoTempoDeTela, enderecoDoVideo, navegar } from './rotas.ts'
-import { CORES } from './tema.ts'
+import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
 import { useBaixarCsv, useRelatorio } from './useRelatorio.ts'
 import { duracaoLegivel, type FiltrosDoRelatorio, type RelatorioDeTempoDeTela } from './tempoDeTela.ts'
 
 const NUMEROS = { fontVariantNumeric: 'tabular-nums' } as const
+
+/** Quantas pessoas o gráfico mostra; a tabela tem todas. */
+const NO_GRAFICO = 15
 
 /** "Relatórios › Tempo de tela": só aparições somam; as menções ficam em colunas à parte. */
 export default function TempoDeTela({ api, filtros }: { api: ClienteDaApi; filtros: FiltrosDoRelatorio }) {
@@ -23,6 +27,12 @@ export default function TempoDeTela({ api, filtros }: { api: ClienteDaApi; filtr
   }
 
   const pessoas = carga.tipo === 'pronta' ? carga.relatorio.pessoas : []
+  const abertaId = carga.tipo === 'pronta' && aberta?.relatorio === carga.relatorio ? aberta.id : null
+  // Sem linha aberta, a divisão por tipo é a da primeira do ranking.
+  const emFoco = pessoas.find((p) => p.pessoa_id === abertaId) ?? pessoas[0]
+  useEffect(() => {
+    if (abertaId) document.getElementById(`pessoa-${abertaId}`)?.scrollIntoView({ block: 'nearest' })
+  }, [abertaId])
   return (
     <Stack gap="md" maw={1100}>
       <Title order={2} size="h3">
@@ -40,6 +50,39 @@ export default function TempoDeTela({ api, filtros }: { api: ClienteDaApi; filtr
       {carga.tipo === 'pronta' && pessoas.length === 0 && (
         <Text size="sm">Nenhuma pessoa com aparição ou menção neste filtro.</Text>
       )}
+      {carga.tipo === 'pronta' && emFoco && (
+        <Stack gap="lg">
+          <RankingEmBarras
+            rotulo="Pessoas com mais tempo de tela"
+            escolhido={emFoco.pessoa_id}
+            aoEscolher={(id) => setAberta({ relatorio: carga.relatorio, id })}
+            itens={pessoas.slice(0, NO_GRAFICO).map((p) => ({
+              id: p.pessoa_id,
+              nome: p.nome,
+              valor: p.tempo_de_tela_ms,
+              texto: duracaoLegivel(p.tempo_de_tela_ms),
+              dica: [
+                `Tempo de tela ${duracaoLegivel(p.tempo_de_tela_ms)}`,
+                `${p.videos} ${p.videos === 1 ? 'vídeo' : 'vídeos'}`,
+                `${p.aparicoes} ${p.aparicoes === 1 ? 'aparição' : 'aparições'}`,
+              ],
+            }))}
+          />
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              {emFoco.nome}
+            </Text>
+            <DivisaoEmFaixa
+              rotulo={`Divisão por tipo de ${emFoco.nome}`}
+              fatias={[
+                { nome: 'Aparições', valor: emFoco.aparicoes, cor: CORES_DE_OCORRENCIA.aparicao.cor },
+                { nome: 'Menções na fala', valor: emFoco.mencoes_na_fala, cor: CORES_DE_OCORRENCIA.mencao.cor },
+                { nome: 'Menções no texto', valor: emFoco.mencoes_no_texto, cor: CORES_DE_OCORRENCIA.texto_na_tela.cor },
+              ]}
+            />
+          </Stack>
+        </Stack>
+      )}
       {carga.tipo === 'pronta' && pessoas.length > 0 && (
         <Table aria-label="Tempo de tela por pessoa" highlightOnHover>
           <Table.Thead>
@@ -54,10 +97,10 @@ export default function TempoDeTela({ api, filtros }: { api: ClienteDaApi; filtr
           </Table.Thead>
           <Table.Tbody>
             {pessoas.map((p) => {
-              const expandida = aberta?.relatorio === carga.relatorio && aberta.id === p.pessoa_id
+              const expandida = abertaId === p.pessoa_id
               return (
                 <Fragment key={p.pessoa_id}>
-                  <Table.Tr>
+                  <Table.Tr id={`pessoa-${p.pessoa_id}`}>
                     <Table.Td>
                       <Button
                         type="button"

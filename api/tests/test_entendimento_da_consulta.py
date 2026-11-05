@@ -188,6 +188,10 @@ def test_o_esquema_enviado_traz_as_listas_fechadas_e_todo_campo_obrigatorio() ->
     assert set(esquema["required"]) == set(esquema["properties"])
 
 
+def test_sem_programa_cadastrado_o_esquema_nao_leva_enum_vazio() -> None:
+    assert esquema_da_resposta([])["properties"]["programa"] == {"type": "null"}
+
+
 def test_as_categorias_novas_do_esquema_14_entram_no_esquema_enviado() -> None:
     enum = esquema_da_resposta(PROGRAMAS)["$defs"]["_ObjetoDaResposta"]["properties"][
         "categoria"

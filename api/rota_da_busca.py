@@ -41,6 +41,13 @@ from api.jobs import _exige
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+# Descrição das rotas da busca no OpenAPI, para os sistemas (docs/Plano_MAM.md, "Busca").
+NOTA_DO_QUADRO = (
+    "Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): "
+    "peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo "
+    "(`plano-6.jpg`). O `quadro_url` assinado, que só a chave "
+    "de sistema recebe, é obsoleto e vai sair da resposta."
+)
 # Acima do teto do modelo, para que o plano B chegue ao usuário antes do 504.
 TEMPO_MAXIMO_S = TEMPO_DA_CONSULTA_S + 5.0
 
@@ -133,7 +140,7 @@ def criar_rotas_da_busca(
             ],
         )
 
-    @rotas.get("/busca")
+    @rotas.get("/busca", description=f"Busca por texto. {NOTA_DO_QUADRO}")
     def buscar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         q: Annotated[str, Query(min_length=1, max_length=1000)],
@@ -156,6 +163,7 @@ def criar_rotas_da_busca(
         sistema, quem = _quem_e(chamador)
         if not limite.consumir(quem):
             raise HTTPException(429, "Consultas demais; tente em um minuto")
+        cancelado = threading.Event()
         futuro = _executor.submit(
             busca.buscar,
             q,
@@ -164,6 +172,7 @@ def criar_rotas_da_busca(
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
+            cancelado=cancelado,
             ajustes=Ajustes(
                 evidencias=tuple(dict.fromkeys(evidencias or ())),
                 programa=programa,
@@ -179,6 +188,7 @@ def criar_rotas_da_busca(
             resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
+            cancelado.set()
             log.warning("busca passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         registrar_busca(
@@ -237,7 +247,7 @@ def criar_rotas_da_busca(
         finally:
             await formulario.close()
 
-    @rotas.post("/busca/imagem")
+    @rotas.post("/busca/imagem", description=f"Busca por imagem. {NOTA_DO_QUADRO}")
     def buscar_por_imagem(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         dados: Annotated[bytes, Depends(foto_enviada)],
@@ -268,6 +278,7 @@ def criar_rotas_da_busca(
             raise HTTPException(422, _PIXELS_DEMAIS) from None
         except ImagemRecusada:
             raise HTTPException(422, _RECUSA) from None
+        cancelado = threading.Event()
         futuro = _executor.submit(
             busca.buscar,
             "",
@@ -275,6 +286,7 @@ def criar_rotas_da_busca(
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
+            cancelado=cancelado,
             ajustes=Ajustes(
                 programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
             ),
@@ -283,6 +295,7 @@ def criar_rotas_da_busca(
             resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
+            cancelado.set()
             log.warning("busca por imagem passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         except BuscaPorImagemIndisponivel:
@@ -321,7 +334,9 @@ def criar_rotas_da_busca(
             raise HTTPException(504, "A busca demorou demais") from None
         return {"planos": sorted(planos)}
 
-    @rotas.get("/busca/parecidos")
+    @rotas.get(
+        "/busca/parecidos", description=f"Busca de planos parecidos. {NOTA_DO_QUADRO}"
+    )
     def buscar_parecidos(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         job: Annotated[str, Query(min_length=1, max_length=100)],
@@ -333,6 +348,7 @@ def criar_rotas_da_busca(
         sistema, quem = _quem_e(chamador)
         if not limite.consumir(quem):
             raise HTTPException(429, "Consultas demais; tente em um minuto")
+        cancelado = threading.Event()
         futuro = _executor.submit(
             busca.buscar_parecidos,
             job,
@@ -340,20 +356,17 @@ def criar_rotas_da_busca(
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
+            cancelado=cancelado,
         )
         try:
             resultado = futuro.result(timeout=tempo_maximo_s)
         except TempoEsgotado:
             futuro.cancel()
+            cancelado.set()
             log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         except PlanoSemVetor:
-            raise HTTPException(
-                404,
-                "Este plano não tem vetor do quadro (vídeo indexado antes da busca "
-                "por imagem, ou índice do quadro desligado), ou o vídeo não foi "
-                "encontrado",
-            ) from None
+            raise HTTPException(404, _PLANO_SEM_VETOR) from None
         # Não há consulta: o ponto de partida é o plano de um vídeo.
         registrar_busca(
             chamador, None, None, resultado, job, modo="parecidos", plano=plano
@@ -366,3 +379,5 @@ def criar_rotas_da_busca(
 _RECUSA = "Envie uma imagem JPEG ou PNG válida"
 _GRANDE_DEMAIS = "A imagem passa do tamanho máximo"
 _PIXELS_DEMAIS = "A imagem passa do tamanho máximo em pixels"
+# Numa linha só: o teste do OpenAPI dos sistemas procura a mensagem inteira no código.
+_PLANO_SEM_VETOR = "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado"

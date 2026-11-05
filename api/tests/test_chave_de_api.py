@@ -16,7 +16,8 @@ from api.chaves import (
 )
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
-from api.programas import PERFIS
+from api.papeis import RepositorioDePapeisEmMemoria
+from api.tests.programas_de_teste import cadastro_com_tv_fama, perfis_da_tv_fama
 from api.tests.test_analise import SHA, DecupagensEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import BOA, TransporteFalso
@@ -26,7 +27,12 @@ BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 MAC_V1 = MacSimulado({1: b"k1"}, versao_atual=1)
 MAC_V2 = MacSimulado({1: b"k1", 2: b"k2"}, versao_atual=2)
 TODOS: list[Escopo] = ["cancelar", "criar", "ler"]
-NOVO_JOB = {"nome": "a.mp4", "tamanho_bytes": 10, "tipo": "video/mp4"}
+NOVO_JOB = {
+    "nome": "a.mp4",
+    "tamanho_bytes": 10,
+    "tipo": "video/mp4",
+    "data_exibicao": "2026-10-01",
+}
 
 
 def _ambiente(mac: MacSimulado = MAC_V1) -> tuple[RepositorioDeChavesEmMemoria, str]:
@@ -39,12 +45,16 @@ def _cliente(
     mac: MacSimulado = MAC_V1,
     jobs: RepositorioEmMemoria | None = None,
 ) -> TestClient:
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("u1", ["editor"])
     return TestClient(
         criar_app(
             VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@b.c")}),
             jobs or RepositorioEmMemoria(),
             ArmazenamentoFalso(),
             chaves=VerificadorDeChaveDeApi(chaves, mac),
+            papeis=papeis,
+            programas=cadastro_com_tv_fama()[0],
         )
     )
 
@@ -258,10 +268,11 @@ def test_chave_cria_job_com_programa_e_data_e_o_perfil_chega_na_analise() -> Non
         jobs,
         DecupagensEmMemoria("teste-aceitos"),
         transporte,
+        perfis=perfis_da_tv_fama(),
         dormir=lambda _s: None,
         relogio=lambda: BASE,
     )
-    assert PERFIS["TV Fama"] in transporte.chamadas[0].instrucao
+    assert perfis_da_tv_fama()["TV Fama"].texto() in transporte.chamadas[0].instrucao
 
 
 def test_chave_com_programa_fora_do_catalogo_da_422_com_os_validos() -> None:

@@ -38,7 +38,7 @@ from api.auth import (
 )
 from api.busca import Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
 from api.busca_na_nuvem import adaptadores_da_busca
-from api.catalogo import Catalogo, CatalogoEmMemoria
+from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.chaves import (
@@ -61,7 +61,6 @@ from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
 from api.eventos_de_uso import (
     Eventos,
-    EventosEmSegundoPlano,
     SemEventos,
     quem_do_chamador,
     registrar,
@@ -111,6 +110,7 @@ from api.nuvem import (
     DisparoDaIndexacaoNoCloudRun,
     DisparoPeloWorkflows,
     JanelasStorage,
+    ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
@@ -138,7 +138,11 @@ from api.passadas import (
     PassadasStorage,
     criar_rotas_das_passadas,
 )
-from api.programas import PERFIS
+from api.programas import (
+    NomesDosProgramas,
+    ProgramasEmMemoria,
+    RepositorioDeProgramas,
+)
 from api.progresso_das_janelas import JanelasDoJob
 from api.purga import LOGIN_RECENTE_PADRAO, Purga, criar_rotas_da_purga
 from api.qualidade_do_painel import QualidadeDoPainel, QualidadeReal
@@ -173,6 +177,7 @@ from api.rotas_das_chaves import (
     criar_rotas_das_chaves,
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
+from api.rotas_dos_programas import criar_rotas_dos_programas
 from api.sugestoes import (
     RepositorioDeSugestoes,
     RepositorioDeSugestoesEmMemoria,
@@ -295,6 +300,7 @@ def criar_app(
     janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
     marcas: CatalogoDeMarcas | None = None,
+    programas: RepositorioDeProgramas | None = None,
     fotos_de_referencia: FotosDeReferencia | None = None,
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
@@ -411,10 +417,16 @@ def criar_app(
         )
 
     # A chave precisa poder enviar ou ler; só cancelar não tem o que escolher.
-    @v1.get("/programas", dependencies=[Depends(_chave_com_algum("criar", "ler"))])
-    def programas() -> list[str]:
-        """Os programas com perfil, para o envio escolher."""
-        return sorted(PERFIS)
+    # O `operation_id` de antes do #338 (a função não pode se chamar `programas`, o
+    # nome do parâmetro de `criar_app`).
+    @v1.get(
+        "/programas",
+        dependencies=[Depends(_chave_com_algum("criar", "ler"))],
+        operation_id="programas_v1_programas_get",
+    )
+    def lista_de_programas() -> list[str]:
+        """Os programas cadastrados, para o envio escolher."""
+        return sorted(NomesDosProgramas(repositorio_de_programas))
 
     @v1.get("/correcoes/catalogo")
     def tipos_de_correcao(_chamador: ChamadorAutenticado) -> CatalogoDeCorrecoes:
@@ -428,6 +440,7 @@ def criar_app(
     tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    repositorio_de_programas = programas or ProgramasEmMemoria()
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
@@ -442,6 +455,7 @@ def criar_app(
             repositorio_de_aprovacao,
             catalogo_de_pessoas,
             catalogo_de_marcas,
+            repositorio_de_programas,
             repositorio_de_sugestoes,
             disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
@@ -482,6 +496,23 @@ def criar_app(
         )
         return indexacao is not None and indexacao.estado == "indexado"
 
+    def _reindexar_para_o_programa(job: Job) -> bool:
+        """Como na pessoa, e a cópia do BigQuery também precisa ficar: os relatórios
+        são por programa."""
+        if not _reindexar_para_a_renomeacao(job):
+            return False
+        if copia is None:
+            return True
+        atual = repositorio_de_jobs.obter(job.id)
+        return (
+            atual is not None
+            and atual.copia_bigquery is not None
+            and atual.copia_bigquery.estado == "copiado"
+        )
+
+    # Uma cópia das pessoas para o autocompletar e para a busca resolver nomes.
+    copia_das_pessoas = CopiaCurta(catalogo_de_pessoas.todas, relogio)
+
     def _rotas_das_pessoas(descartar: Callable[[], None]) -> APIRouter:
         """Fundir (#209) e renomear em todos os vídeos (#263), sob `/catalogo`."""
         rotas = APIRouter()
@@ -517,6 +548,18 @@ def criar_app(
             catalogo_de_marcas,
             relogio,
             _rotas_das_pessoas,
+            copia_das_pessoas,
+        )
+    )
+    v1.include_router(
+        criar_rotas_dos_programas(
+            repositorio_de_programas,
+            catalogo_de_pessoas,
+            repositorio_de_jobs,
+            repositorio_de_auditoria,
+            relogio,
+            _reindexar_para_o_programa,
+            copia_das_pessoas.descartar,
         )
     )
     v1.include_router(
@@ -525,13 +568,14 @@ def criar_app(
                 transporte=transporte_da_consulta or _SemModelo(),
                 catalogo=catalogo_de_pessoas,
                 armor=armor or _SemModelArmor(),
-                programas=sorted(PERFIS),
+                programas=NomesDosProgramas(repositorio_de_programas),
                 indice=indice_da_busca,
                 ranking=ranking or RankingEmOrdem(),
                 repositorio=repositorio_de_jobs,
                 armazenamento=armazenamento_dos_jobs,
                 relogio=relogio,
                 embedding=embedding_da_consulta,
+                copia_do_catalogo=copia_das_pessoas,
             ),
             relogio,
             busca_por_minuto,
@@ -612,6 +656,7 @@ def criar_app(
             repositorio_de_auditoria,
             relogio,
             login_recente,
+            copia_das_pessoas.descartar,
         )
     )
     v1.include_router(
@@ -690,8 +735,9 @@ if _projeto:
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
-        # O evento de uso sai fora da resposta: o Pub/Sub lento não atrasa a ação.
-        eventos=EventosEmSegundoPlano(eventos_do_ambiente(os.environ)),
+        # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
+        # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
+        eventos=eventos_do_ambiente(os.environ),
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
         # sistema; listar e revogar funcionam.
@@ -726,6 +772,7 @@ if _projeto:
         ),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
+        programas=ProgramasFirestore(firestore.Client(project=_projeto)),
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),

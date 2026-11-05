@@ -68,7 +68,7 @@ class Mundo:
         self.armazenamento = ArmazenamentoFalso()
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         for id in ("j1", "j2"):
-            self.jobs.salvar(_job(id))
+            self.jobs.salvar(_job(id, pessoas_do_catalogo=[self.duplicada.id]))
             self.armazenamento.decupagens[id] = [
                 json.dumps(
                     {"pessoas": [_pessoa(self.duplicada.id, "Sabrina S.")]}
@@ -297,3 +297,13 @@ def test_a_correcao_nao_aponta_para_pessoa_fundida() -> None:
     )
 
     assert resposta.status_code == 422, resposta.text
+
+
+def test_a_fusao_passa_a_origem_para_o_destino_nos_jobs() -> None:
+    mundo = Mundo()
+
+    assert mundo.fundir().status_code == 200
+
+    for id in ("j1", "j2"):
+        job = mundo.jobs.obter(id)
+        assert job and job.pessoas_do_catalogo == [mundo.sabrina.id]

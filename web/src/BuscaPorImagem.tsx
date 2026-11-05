@@ -138,7 +138,7 @@ export function BuscaPorImagem({ api, consulta }: { api: ClienteDaApi; consulta:
               ? 'Nenhum plano parecido. Tire um filtro ou tente outra foto.'
               : `${planos} ${planos === 1 ? 'plano parecido' : 'planos parecidos'} em ${contagemDeVideos(resultado.videos.length)}`}
           </Text>
-          <GradeDePlanos videos={resultado.videos} busca="" />
+          <GradeDePlanos api={api} videos={resultado.videos} busca="" />
         </Stack>
       )}
     </Stack>

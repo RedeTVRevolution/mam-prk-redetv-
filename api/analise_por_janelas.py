@@ -47,6 +47,7 @@ from api.medicao_dos_textos import (
     TOLERANCIA_DE_QUADROS,
     MedicaoDosTextos,
 )
+from api.programas import Perfis
 from api.progresso_das_janelas import JanelaGravada, JanelasDoJob
 from api.sinais import ContagemDaAnalise
 from api.tempos import aplicar_regra_de_tempos
@@ -85,6 +86,7 @@ def analisar_video(
     job_id: str,
     video: Video,
     programa: str | None = None,
+    perfis: Perfis | None = None,
     cortes_ms: Sequence[int] = (),
     fracao_escalonada: float | None = None,
     transcricao: Transcricao | None = None,
@@ -133,7 +135,7 @@ def analisar_video(
     def identificar_pessoas(decupagem: Decupagem) -> Decupagem:
         return identificar(
             decupagem,
-            candidatos=candidatos_do_video(programa, catalogo),
+            candidatos=candidatos_do_video(programa, catalogo, perfis),
             transcricao=transcricao,
             catalogo=catalogo,
             tolerancia_ms=tolerancia_da_fala_ms,
@@ -150,6 +152,7 @@ def analisar_video(
             job_id=job_id,
             video=video,
             programa=programa,
+            perfis=perfis,
             trecho_ms=trecho_ms,
             cortes_ms=cortes_ms,
             modelo=modelo,

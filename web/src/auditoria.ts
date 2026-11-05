@@ -26,6 +26,9 @@ export const FRASE_DA_ACAO = {
   'aprovacao.alterada': 'Mudou a regra de aprovação',
   'painel.aberto': 'Abriu o painel da diretoria',
   'painel.exportado': 'Exportou o painel da diretoria em CSV',
+  'programa.criado': 'Criou o programa',
+  'programa.alterado': 'Alterou o programa',
+  'programa.apagado': 'Apagou o programa',
 } as const
 
 export type AcaoDaAuditoria = keyof typeof FRASE_DA_ACAO

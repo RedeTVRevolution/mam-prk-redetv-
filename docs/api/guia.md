@@ -24,7 +24,7 @@ Toda chamada leva a chave no cabeçalho `X-API-Key`.
 
 ## 2. Registrar o vídeo
 
-`POST /v1/jobs` cria o Job e devolve a `url_de_upload`. Corpo: `nome` (termina em `.mp4`, sem `/`), `tamanho_bytes` (de 1 byte a 4 GiB), `tipo` (sempre `video/mp4`) e, se souber, `programa` e `data_exibicao`. Responde **202**.
+`POST /v1/jobs` cria o Job e devolve a `url_de_upload`. Corpo: `nome` (termina em `.mp4`, sem `/`), `tamanho_bytes` (de 1 byte a 4 GiB), `tipo` (sempre `video/mp4`), `data_exibicao` (obrigatória, texto `AAAA-MM-DD`, nunca depois de hoje em Brasília) e, se souber, `programa`. Responde **202**.
 
 Mande sempre um `Idempotency-Key` (um UUID novo por vídeo): veja o passo 7. Exemplos: `exemplos/curl/2-registrar-o-video.sh` e `exemplos/python/2-registrar-o-video.py`.
 
@@ -69,7 +69,7 @@ Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 
 
 ## 7. Idempotência e novas tentativas
 
-- **Repetir o registro é seguro** com o mesmo `Idempotency-Key` e o mesmo corpo: a resposta é **200** (o primeiro pedido foi 202) com o mesmo Job, sem criar outro. Se o Job ainda aguarda upload, vem uma `url_de_upload` nova. A chave é lembrada por **48 h**. Com o mesmo `Idempotency-Key` e outro corpo, a resposta é 409.
+- **Repetir o registro é seguro** com o mesmo `Idempotency-Key` e o mesmo corpo: a resposta é **200** (o primeiro pedido foi 202) com o mesmo Job, sem criar outro. Se o Job ainda aguarda upload, vem uma `url_de_upload` nova. A chave é lembrada por **48 h**. Com o mesmo `Idempotency-Key` e outro corpo, a resposta é 409. Se o Job foi apagado (lixeira ou purga) dentro das 48 h, a repetição dá **410** e não recria o Job: use uma chave nova.
 - Exemplos: `exemplos/curl/7-repetir-com-idempotencia.sh` e `exemplos/python/7-repetir-com-idempotencia.py`.
 - **Quando repetir:** timeout, queda de conexão e `503`. Espere 1 s, 2 s, 4 s... com um limite. Não repita 4xx (corrija o pedido).
 - Leituras (`GET`) podem ser repetidas sem risco. O `DELETE` repetido de um Job já cancelado responde 409 `Job em cancelado, não cancelável`: o cancelamento já valeu.
@@ -89,16 +89,42 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 409 | `Idempotency-Key já usada com outro corpo` | Use uma chave nova para um pedido novo. |
 | 409 | `Job em <estado>, não concluido` | O Job não terminou ou falhou. Espere o webhook ou consulte o Job. |
 | 409 | `Job em <estado>, não cancelável` | O Job já terminou; não há o que cancelar. |
+| 410 | `Este Job foi apagado` | Repetição com o `Idempotency-Key` de um Job na lixeira ou purgado. Use uma chave nova para enviar de novo. |
 | 415 | `Só video/mp4` | Mande `"tipo": "video/mp4"`. Não recodifique. |
 | 422 | `Tamanho fora do limite` | `tamanho_bytes` é zero ou passa de 4 GiB. |
 | 422 | `Data de exibição no futuro` | `data_exibicao` é depois de hoje (Brasília). |
 | 422 | `Idempotency-Key inválida` | Use um texto simples, como um UUID. |
 | 422 | `Cursor inválido` | Use o `X-Proximo-Cursor` da resposta anterior, sem mudar os filtros. |
-| 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`): leia `loc` e `msg` em `detail`. |
+| 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`): leia `loc` e `msg` em `detail`. |
+| 304 | `Não mudou` | `GET /v1/jobs/{job_id}` com `If-None-Match` igual ao `ETag`: nada mudou, sem corpo. Use a cópia guardada. |
+| 404 | `Passada não encontrada` | O Job não tem essa passada: pegue o id em `GET /v1/jobs/{job_id}/passadas`. |
+| 404 | `Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado` | Escolha um plano de `GET /v1/busca/parecidos/planos`. |
+| 411 | `Envie o tamanho do pedido` | A busca por imagem exige `Content-Length`. |
+| 422 | `No máximo 200 ids` | `GET /v1/jobs/andamento` aceita até 200 ids por chamada. |
+| 422 | `O início do período passa do fim` | Na busca, `desde` é depois de `ate`. |
+| 422 | `A imagem passa do tamanho máximo` | A foto da busca por imagem passa de 5 MB. |
+| 422 | `A imagem passa do tamanho máximo em pixels` | A foto passa de 25 milhões de pixels. |
+| 422 | `Envie uma imagem JPEG ou PNG válida` | O arquivo não é JPEG nem PNG, ou está corrompido. |
+| 422 | `Envie a imagem no campo arquivo` | O multipart da busca por imagem não tem o campo `arquivo`. |
+| 429 | `Consultas demais; tente em um minuto` | As buscas têm limite de 30 por minuto por chave. Espere e repita. |
+| 503 | `A busca por imagem não está disponível agora` | Repita com espera crescente. |
+| 504 | `A busca demorou demais` | Repita; se persistir, simplifique a consulta. |
 | 503 | `Serviço indisponível` | Falha passageira. Repita com espera crescente; no `POST /v1/jobs`, com o mesmo `Idempotency-Key`. |
 
 `<estado>` na mensagem é o estado real do Job, por exemplo `Job em analisando, não concluido`.
 
+## 9. Buscar nos vídeos e ler o catálogo
+
+Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. Cada exemplo abaixo supõe `URL` e `CHAVE` no ambiente; o OpenAPI traz o formato completo das respostas.
+
+- **Buscar por texto:** `GET /v1/busca?q=vestido+azul` devolve vídeos e momentos (`inicio_ms`, `fim_ms`, `motivo` e `quadro`). Filtros: `ev`, `tipo`, `pessoa`, `marca`, `programa`, `desde`, `ate`, `ordem`, `limite`. `curl -H "X-API-Key: $CHAVE" "$URL/v1/busca?q=vestido+azul"`
+- **Buscar por imagem:** `POST /v1/busca/imagem` com o arquivo no campo `arquivo` (multipart). `curl -H "X-API-Key: $CHAVE" -F arquivo=@foto.jpg "$URL/v1/busca/imagem"`
+- **Planos parecidos:** `GET /v1/busca/parecidos/planos?job=<id>` para saber quais planos têm busca e `GET /v1/busca/parecidos?job=<id>&plano=<n>` para buscá-los.
+- **Quadro de um momento:** `GET /v1/jobs/{job_id}/quadros/{arquivo}` devolve a URL do JPEG; `arquivo` é o nome em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`).
+- **Andamento de vários Jobs:** `GET /v1/jobs/andamento?ids=a,b,c` (até 200 ids).
+- **Passadas:** `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}` e `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, para comparar a decupagem de outro modelo com a entregue.
+- **Catálogo e vocabulários:** `GET /v1/catalogo/pessoas?q=`, `GET /v1/catalogo/marcas?q=`, `GET /v1/objetos/tipos` e `GET /v1/correcoes/catalogo` (esta aceita qualquer escopo).
+
 ## Rotas deste guia
 
-`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem` e `GET /v1/jobs/{job_id}/decupagem/download`.
+`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem`, `GET /v1/jobs/{job_id}/decupagem/download`, `GET /v1/jobs/andamento`, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}`, `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, `GET /v1/objetos/tipos`, `GET /v1/catalogo/pessoas`, `GET /v1/catalogo/marcas`, `GET /v1/busca`, `POST /v1/busca/imagem`, `GET /v1/busca/parecidos/planos`, `GET /v1/busca/parecidos` e `GET /v1/correcoes/catalogo`.

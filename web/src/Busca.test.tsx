@@ -15,6 +15,7 @@ const momento = (inicio_ms: number, fim_ms: number, motivo: string, destaques: o
   motivo,
   destaques,
   quadro_url: null as string | null,
+  quadro: null as string | null,
 })
 
 function video(id: string, momentos: ReturnType<typeof momento>[]) {
@@ -49,6 +50,7 @@ function resultado(extra: object = {}) {
 }
 
 const buscas: URLSearchParams[] = []
+const quadrosPedidos: string[] = []
 let resposta: () => Response = () => HttpResponse.json(resultado())
 
 const servidor = setupServer(
@@ -56,6 +58,10 @@ const servidor = setupServer(
   http.get('/v1/jobs', () => HttpResponse.json([])),
   http.get('/v1/programas', () => HttpResponse.json(['TV Fama', 'Leo Dias'])),
   http.get('/v1/jobs/:id', () => new HttpResponse(null, { status: 404 })),
+  http.get('/v1/jobs/:id/quadros/:arquivo', ({ params }) => {
+    quadrosPedidos.push(`${params.id}/${params.arquivo}`)
+    return HttpResponse.json({ url: `https://q.exemplo/${params.id}/${params.arquivo}`, expira_em: '2999-01-01T00:00:00Z' })
+  }),
   http.get('/v1/busca', ({ request }) => {
     buscas.push(new URL(request.url).searchParams)
     return resposta()
@@ -67,6 +73,7 @@ afterEach(() => {
   history.replaceState(null, '', '/')
   servidor.resetHandlers()
   buscas.length = 0
+  quadrosPedidos.length = 0
   resposta = () => HttpResponse.json(resultado())
   cleanup()
 })
@@ -267,6 +274,58 @@ test('trocar a ordem refaz a busca com ordem=data', async () => {
   expect(location.search).toBe('?q=sapato&ordem=data')
 })
 
+// Responde à busca só quando `liberar()` é chamada: o que a tela mostra no meio da espera.
+function segurarABusca() {
+  let liberar = () => {}
+  const espera = new Promise<void>((r) => {
+    liberar = r
+  })
+  servidor.use(
+    http.get('/v1/busca', async ({ request }) => {
+      buscas.push(new URL(request.url).searchParams)
+      await espera
+      return HttpResponse.json(resultado({ videos: [video('vB', [momento(1000, 2000, 'Objeto: balão')])] }))
+    }),
+  )
+  return liberar
+}
+
+test('termo novo com resultado na tela mostra o Loader e tira o resultado anterior até a resposta chegar', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=microfone')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const liberar = segurarABusca()
+
+  const caixa = screen.getByRole('textbox', { name: 'Buscar no acervo' })
+  await usuario.clear(caixa)
+  await usuario.type(caixa, 'balão{Enter}')
+
+  expect(await screen.findByRole('status', { name: 'Buscando' })).toBeTruthy()
+  expect(screen.queryByText('3 momentos em 2 vídeos')).toBeNull()
+
+  liberar()
+  expect(await screen.findByText('1 momento em 1 vídeo')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
+})
+
+test('trocar a ordem com resultado na tela mantém a lista e mostra o "atualizando" até a resposta', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=sapato')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const liberar = segurarABusca()
+
+  await usuario.click(screen.getByRole('combobox', { name: 'Ordenar' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Ordenar: Data de exibição' }))
+
+  expect(await screen.findByRole('status', { name: 'Atualizando' })).toBeTruthy()
+  expect(screen.getByText('3 momentos em 2 vídeos')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
+
+  liberar()
+  expect(await screen.findByText('1 momento em 1 vídeo')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Atualizando' })).toBeNull()
+})
+
 test('com o foco noutro campo do Acervo, / vira texto e não pula para a caixa', async () => {
   const usuario = userEvent.setup()
   await abrir('/acervo')
@@ -432,12 +491,12 @@ const resultadoVisual = (visual: boolean) =>
     entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null, visual },
     videos: [
       video('v1', [
-        { ...momento(724_000, 731_000, 'Plano: rua molhada à noite'), quadro_url: 'https://q.exemplo/a.jpg' },
-        { ...momento(2_462_000, 2_490_000, 'Plano: avenida com trânsito'), quadro_url: 'https://q.exemplo/b.jpg' },
+        { ...momento(724_000, 731_000, 'Plano: rua molhada à noite'), quadro: 'quadros/plano-1.jpg' },
+        { ...momento(2_462_000, 2_490_000, 'Plano: avenida com trânsito'), quadro: 'quadros/plano-2.jpg' },
         // A fala que o texto livre trouxe fica fora da grade, que só mostra planos.
         { ...momento(2_462_000, 2_470_000, 'Fala: a pista estava molhada'), tipo: 'fala' },
       ]),
-      video('v2', [{ ...momento(60_000, 65_000, 'Plano: cruzamento'), quadro_url: 'https://q.exemplo/c.jpg' }]),
+      video('v2', [{ ...momento(60_000, 65_000, 'Plano: cruzamento'), quadro: 'quadros/plano-1.jpg' }]),
     ],
   })
 
@@ -476,7 +535,10 @@ test('no modo visual os planos vêm numa grade de miniaturas que abre o vídeo n
   expect(itens).toHaveLength(3)
   const primeiro = within(itens[0]).getByRole('link', { name: /v1\.mp4.*12:04/ })
   expect(primeiro.getAttribute('href')).toBe('/video/v1?t=724&busca=pista+molhada')
-  expect(itens[0].querySelector('img')?.getAttribute('src')).toBe('https://q.exemplo/a.jpg')
+  // A busca não traz URL assinada: o quadro vem da rota do quadro do vídeo, uma vez por arquivo.
+  await waitFor(() => expect(itens[0].querySelector('img')?.getAttribute('src')).toBe('https://q.exemplo/v1/plano-1.jpg'))
+  expect(itens[2].querySelector('img')?.getAttribute('src')).toBe('https://q.exemplo/v2/plano-1.jpg')
+  expect([...new Set(quadrosPedidos)].toSorted()).toEqual(['v1/plano-1.jpg', 'v1/plano-2.jpg', 'v2/plano-1.jpg'])
   expect(within(itens[0]).getByText('Plano: rua molhada à noite')).toBeTruthy()
   expect(screen.queryByRole('region', { name: 'v1.mp4' })).toBeNull()
 })
@@ -488,4 +550,19 @@ test('modo visual sem o vetor do quadro (índice desligado) avisa e mostra a bus
   expect(await screen.findByText(/busca visual não está disponível/i)).toBeTruthy()
   expect(screen.queryByRole('list', { name: 'Planos' })).toBeNull()
   expect(await screen.findByRole('region', { name: 'v1.mp4' })).toBeTruthy()
+})
+
+test('a lista de resultados mostra o quadro pedido pela rota do quadro', async () => {
+  resposta = () =>
+    HttpResponse.json(
+      resultado({
+        videos: [video('v1', [{ ...momento(724_000, 731_000, 'Plano: rua molhada'), quadro: 'quadros/plano-3.jpg' }])],
+      }),
+    )
+  await abrir('/busca?q=rua')
+
+  const regiao = await screen.findByRole('region', { name: 'v1.mp4' })
+
+  await waitFor(() => expect(regiao.querySelector('img')?.getAttribute('src')).toBe('https://q.exemplo/v1/plano-3.jpg'))
+  expect(quadrosPedidos).toEqual(['v1/plano-3.jpg'])
 })

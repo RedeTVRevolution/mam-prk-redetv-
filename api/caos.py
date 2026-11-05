@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 PARALELISMO = 12
-CORPO = {"nome": "caos.mp4", "tamanho_bytes": 1000, "tipo": "video/mp4"}
+CORPO = {
+    "nome": "caos.mp4",
+    "tamanho_bytes": 1000,
+    "tipo": "video/mp4",
+    "data_exibicao": "2026-10-01",
+}
 
 
 class Api(Protocol):

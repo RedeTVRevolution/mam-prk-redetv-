@@ -176,3 +176,28 @@ test('duração legível e filtros do endereço', () => {
   expect(duracaoLegivel(45_000)).toBe('45s')
   expect(filtrosDoRelatorio('de=ontem&ate=2026-10-31&programa=X')).toEqual({ programa: 'X', de: '', ate: '2026-10-31' })
 })
+
+test('o gráfico mostra as pessoas e a divisão por tipo da primeira; clicar na barra abre a linha da tabela', async () => {
+  await abrir('/relatorios/tempo-de-tela')
+
+  const grafico = await screen.findByRole('img', { name: 'Pessoas com mais tempo de tela' })
+  expect(await within(grafico).findByText('Sabrina Sato')).toBeTruthy()
+  expect(within(grafico).getByText('Leo Dias')).toBeTruthy()
+  expect(within(grafico).getByText('12min05s')).toBeTruthy()
+
+  const divisao = screen.getByRole('img', { name: 'Divisão por tipo de Sabrina Sato' })
+  expect(within(divisao).getByText('Menções na fala').nextElementSibling?.textContent).toBe('2')
+
+  const barras = grafico.querySelectorAll('.recharts-bar-rectangle')
+  fireEvent.click(barras[barras.length - 1].firstElementChild ?? barras[barras.length - 1])
+  expect(await screen.findByRole('table', { name: 'Vídeos de Leo Dias' })).toBeTruthy()
+  expect(screen.getByRole('img', { name: 'Divisão por tipo de Leo Dias' })).toBeTruthy()
+})
+
+test('sem pessoa no filtro, não há gráfico', async () => {
+  resposta = () => HttpResponse.json({ ...RELATORIO, pessoas: [] })
+  await abrir('/relatorios/tempo-de-tela')
+
+  await screen.findByText('Nenhuma pessoa com aparição ou menção neste filtro.')
+  expect(screen.queryByRole('img', { name: 'Pessoas com mais tempo de tela' })).toBeNull()
+})

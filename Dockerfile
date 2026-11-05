@@ -34,7 +34,7 @@ CMD ["python", "-m", "api.validacao_job"]
 # Job de transcrição (#104): `docker build --target transcricao`. Só o faster-whisper e o
 # modelo, sem ffmpeg nem front. O modelo é baixado aqui, na construção, na revisão fixada
 # e conferido pelo SHA-256 de cada arquivo; no ar o Job roda sem internet (HF_HUB_OFFLINE).
-FROM python:3.12-slim-bookworm AS transcricao
+FROM python:3.12-slim-bookworm AS transcricao-base
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 ARG MODELO_REPOSITORIO=dropbox-dash/faster-whisper-large-v3-turbo
 ARG MODELO_REVISAO=0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf
@@ -58,9 +58,13 @@ RUN uv sync --locked --no-dev --group transcricao
 # PyAV instalado, para a imagem não ser construída com versões que não conversam.
 RUN /app/.venv/bin/python -c "import wave; w = wave.open('/tmp/s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(32000)); w.close(); from faster_whisper.audio import decode_audio; assert len(decode_audio('/tmp/s.wav')) == 16000" \
     && rm /tmp/s.wav
+ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
+
+# O alvo `transcricao` e o `transcricao-gpu` partem do `transcricao-base` e acrescentam o código
+# de `api/` cada um do seu jeito: o de CPU leva `api/` inteiro, o de GPU só o que o Job importa.
+FROM transcricao-base AS transcricao
 COPY api/ api/
 USER nobody
-ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.transcricao_job"]
 
 # As amostras do teste dos Jobs com GPU (#238): uns segundos de fala, que o espeak-ng gera
@@ -75,22 +79,69 @@ RUN apt-get update \
     && espeak-ng -v pt-br -s 130 -w /amostras/fala.wav "Bom dia. Bom dia a todos."
 
 # Job de transcrição em GPU (E1, ADR 0007): `docker build --target transcricao-gpu`. Parte do
-# alvo `transcricao` (mesmo modelo, mesma revisão, mesmos hashes, sem baixar de novo) e
+# alvo `transcricao-base` (mesmo modelo, mesma revisão, mesmos hashes, sem baixar de novo) e
 # acrescenta as bibliotecas CUDA 12 e cuDNN 9 que o CTranslate2 4 pede, como rodas do
 # PyPI. O driver (580, CUDA 13) é do Cloud Run, que o monta em /usr/local/nvidia/lib64;
 # um runtime CUDA 12 roda nele. Esta imagem só roda com GPU (`DISPOSITIVO=gpu`).
-FROM transcricao AS transcricao-gpu
-USER root
+FROM transcricao-base AS transcricao-gpu
 RUN uv sync --locked --no-dev --group transcricao --group transcricao-gpu
 COPY --from=amostras /amostras /amostras
 ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/nvidia/lib64 \
     AMOSTRAS=/amostras DISPOSITIVO=gpu
+# Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
+# esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+COPY api/__init__.py \
+     api/auditoria.py \
+     api/auth.py \
+     api/avaliacao.py \
+     api/catalogo.py \
+     api/catalogo_apagado.py \
+     api/catalogo_de_correcoes.py \
+     api/catalogo_dos_jobs.py \
+     api/chaves.py \
+     api/ciclo_de_vida.py \
+     api/comparador.py \
+     api/correcoes.py \
+     api/decupagem.py \
+     api/dispositivo.py \
+     api/espera.py \
+     api/eventos_de_uso.py \
+     api/eventos_do_job.py \
+     api/florence.py \
+     api/gemini.py \
+     api/idempotencia.py \
+     api/identidade.py \
+     api/indice_da_busca.py \
+     api/janelas.py \
+     api/jobs.py \
+     api/leitura_da_tela.py \
+     api/lixeira.py \
+     api/marcas.py \
+     api/nuvem.py \
+     api/paddle.py \
+     api/papeis.py \
+     api/pessoas.py \
+     api/programas.py \
+     api/progresso_das_janelas.py \
+     api/revisao.py \
+     api/sinais.py \
+     api/sugestoes.py \
+     api/teste_dos_jobs.py \
+     api/tipos_de_objeto.py \
+     api/transcricao.py \
+     api/transcricao_job.py \
+     api/transcricao_na_analise.py \
+     api/usuarios.py \
+     api/webhook.py \
+     api/whisper.py \
+     api/rubricas.toml api/
 # A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
 # que o faster-whisper transcreve a amostra em CPU (a mesma conferência do teste depois da
 # publicação, `MODO_TESTE=1`, que lá exige a GPU). Não se confere o driver, a GPU nem o
 # CUDA em uso: isso é do teste depois da publicação e da primeira execução no dev (#240).
 RUN /app/.venv/bin/python -c "import ctypes, ctranslate2; ctypes.CDLL('libcublas.so.12'); ctypes.CDLL('libcudnn.so.9'); from api.teste_dos_jobs import testar_transcricao; raise SystemExit(testar_transcricao('cpu', exigir_gpu=False))"
 USER nobody
+CMD ["python", "-m", "api.transcricao_job"]
 
 # Job de OCR da tela (#106): `docker build --target ocr`. ffmpeg para os quadros, PaddleOCR
 # e os dois modelos, baixados aqui, na construção, nas revisões fixadas e conferidos pelo
@@ -143,7 +194,55 @@ RUN baixar-modelos-ocr "$DETECTOR"
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr-gpu
-COPY api/ api/
+# Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
+# esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+COPY api/__init__.py \
+     api/auditoria.py \
+     api/auth.py \
+     api/avaliacao.py \
+     api/catalogo.py \
+     api/catalogo_apagado.py \
+     api/catalogo_de_correcoes.py \
+     api/catalogo_dos_jobs.py \
+     api/chaves.py \
+     api/ciclo_de_vida.py \
+     api/comparador.py \
+     api/correcoes.py \
+     api/decupagem.py \
+     api/dispositivo.py \
+     api/espera.py \
+     api/eventos_de_uso.py \
+     api/eventos_do_job.py \
+     api/florence.py \
+     api/gemini.py \
+     api/idempotencia.py \
+     api/identidade.py \
+     api/indice_da_busca.py \
+     api/janelas.py \
+     api/jobs.py \
+     api/leitura_da_tela.py \
+     api/lixeira.py \
+     api/marcas.py \
+     api/mudanca_da_tela.py \
+     api/nuvem.py \
+     api/ocr_job.py \
+     api/paddle.py \
+     api/papeis.py \
+     api/pessoas.py \
+     api/programas.py \
+     api/progresso_das_janelas.py \
+     api/quadros.py \
+     api/revisao.py \
+     api/sinais.py \
+     api/sugestoes.py \
+     api/teste_dos_jobs.py \
+     api/tipos_de_objeto.py \
+     api/transcricao.py \
+     api/transcricao_na_analise.py \
+     api/usuarios.py \
+     api/webhook.py \
+     api/whisper.py \
+     api/rubricas.toml api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_cupti/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufft/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufile/lib:/app/.venv/lib/python3.12/site-packages/nvidia/curand/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/app/.venv/lib/python3.12/site-packages/cusparselt/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nccl/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvtx/lib:/usr/local/nvidia/lib64 \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu DETECTOR=$DETECTOR
@@ -195,7 +294,52 @@ RUN mkdir -p /modelo /amostras \
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group objetos
-COPY api/ api/
+# Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
+# esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+COPY api/__init__.py \
+     api/auditoria.py \
+     api/auth.py \
+     api/avaliacao.py \
+     api/catalogo.py \
+     api/catalogo_apagado.py \
+     api/catalogo_de_correcoes.py \
+     api/catalogo_dos_jobs.py \
+     api/chaves.py \
+     api/ciclo_de_vida.py \
+     api/comparador.py \
+     api/correcoes.py \
+     api/decupagem.py \
+     api/dispositivo.py \
+     api/espera.py \
+     api/eventos_de_uso.py \
+     api/florence.py \
+     api/gemini.py \
+     api/idempotencia.py \
+     api/identidade.py \
+     api/indice_da_busca.py \
+     api/janelas.py \
+     api/jobs.py \
+     api/leitura_da_tela.py \
+     api/lixeira.py \
+     api/marcas.py \
+     api/nuvem.py \
+     api/objetos_job.py \
+     api/paddle.py \
+     api/papeis.py \
+     api/pessoas.py \
+     api/programas.py \
+     api/progresso_das_janelas.py \
+     api/revisao.py \
+     api/sinais.py \
+     api/sugestoes.py \
+     api/teste_dos_jobs.py \
+     api/tipos_de_objeto.py \
+     api/transcricao.py \
+     api/transcricao_na_analise.py \
+     api/usuarios.py \
+     api/webhook.py \
+     api/whisper.py \
+     api/rubricas.toml api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib64 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
     PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu

@@ -63,15 +63,20 @@ interface JobComEtapas {
 
 /**
  * De onde "reprocessar o que falhou" recomeçaria este Job (`etapa_de_partida` em
- * api/ciclo_de_vida.py), ou `null` quando não vale: a falha é do arquivo, o vídeo concluído
- * não tem etapa que tenha falhado ou o Job já está andando.
+ * api/ciclo_de_vida.py; mude as duas juntas), ou `null` quando não vale: a falha é do
+ * arquivo, o processamento parou na validação, o vídeo concluído não tem etapa que tenha
+ * falhado ou o Job já está andando.
  */
 export function etapaDeReprocesso(job: JobComEtapas): string | null {
   if (job.estado !== 'falhou' && (job.estado !== 'concluido' || job.etapa_atual)) return null
   const falhas = ORDEM.filter((nome) => job.etapas?.some((e) => e.nome === nome && e.resultado === 'falhou'))
   if (job.estado === 'falhou') {
     if (job.codigo_falha === null || FALHAS_DO_ARQUIVO.includes(job.codigo_falha)) return null
-    const partida = falhas[0] ?? (job.codigo_falha ? ETAPA_DA_FALHA[job.codigo_falha] : undefined)
+    let partida: string | undefined = falhas[0] ?? ETAPA_DA_FALHA[job.codigo_falha]
+    if (!partida && job.codigo_falha === 'processamento_interrompido') {
+      // O Workflows caiu entre duas etapas: recomeça da primeira que não concluiu.
+      partida = ORDEM.find((nome) => !job.etapas?.some((e) => e.nome === nome && e.resultado === 'concluida'))
+    }
     return partida && partida !== 'validacao' ? partida : null
   }
   return falhas[0] && DEPOIS_DO_CONCLUIDO.includes(falhas[0]) ? falhas[0] : null

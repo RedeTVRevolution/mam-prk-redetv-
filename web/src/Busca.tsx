@@ -23,7 +23,7 @@ import { dataDeExibicao } from './jobs.ts'
 import { relogio } from './linhaDoTempo.ts'
 import { guardado, guardarResultado } from './resultadoDaBusca.ts'
 import { BuscaPorImagem } from './BuscaPorImagem.tsx'
-import { Quadro } from './Miniatura.tsx'
+import { QuadroDoMomento } from './Miniatura.tsx'
 import { GradeDePlanos } from './GradeDePlanos.tsx'
 import { enderecoDaBusca, enderecoDoVideo, navegar, seguir } from './rotas.ts'
 import { CORES, CORES_DE_OCORRENCIA } from './tema.ts'
@@ -190,7 +190,8 @@ function PosicaoDosMomentos({ video }: { video: VideoDoResultado }) {
   )
 }
 
-function Linha({ video, momento, selecionado, busca }: {
+function Linha({ api, video, momento, selecionado, busca }: {
+  api: ClienteDaApi
   video: VideoDoResultado
   momento: Momento
   selecionado: boolean
@@ -218,7 +219,7 @@ function Linha({ video, momento, selecionado, busca }: {
           ...(selecionado ? SELECIONADO : {}),
         }}
       >
-        <Quadro url={momento.quadro_url} largura={96} altura={54} />
+        <QuadroDoMomento api={api} jobId={video.job_id} momento={momento} largura={96} altura={54} />
         <Text size="sm" c={CORES.textoSecundario} style={{ ...NUMEROS, flex: 'none' }}>
           {relogio(momento.inicio_ms)}–{relogio(momento.fim_ms)}
         </Text>
@@ -239,6 +240,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
   const [limite, setLimite] = useState(VIDEOS_POR_VEZ)
   const [carga, setCarga] = useState<Carga>({ tipo: 'carregando' })
   const [tentativas, setTentativas] = useState(0)
+  const [atualizando, setAtualizando] = useState(false)
   const [programas, setProgramas] = useState<string[]>([])
   const [selecionado, setSelecionado] = useState<number | null>(null)
 
@@ -255,20 +257,30 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
     consultaAtual.current = consulta
   })
   const chaveDaBusca = enderecoDaBusca(consulta)
+  const termoDaCarga = useRef<string | null>(null)
   useEffect(() => {
     if (!consultaAtual.current.q) return
     let ativo = true
-    // Cada busca nova recomeça pelo carregamento.
+    // Termo novo recomeça pelo carregamento e tira a lista anterior; filtro, chip, faceta,
+    // ordem e "Mais vídeos" mantêm a lista na tela, com o sinal de "atualizando".
+    const termoNovo = termoDaCarga.current !== consultaAtual.current.q
+    termoDaCarga.current = consultaAtual.current.q
     // oxlint-disable-next-line react/set-state-in-effect
-    setCarga((c) => (c.tipo === 'pronta' ? c : { tipo: 'carregando' }))
+    setCarga((c) => (termoNovo || c.tipo !== 'pronta' ? { tipo: 'carregando' } : c))
+    // oxlint-disable-next-line react/set-state-in-effect
+    setAtualizando(!termoNovo)
     // oxlint-disable-next-line react/set-state-in-effect
     setSelecionado(null)
     api.buscar(consultaAtual.current, limite).then(
       (resultado) => {
-        if (ativo) setCarga({ tipo: 'pronta', resultado })
+        if (!ativo) return
+        setCarga({ tipo: 'pronta', resultado })
+        setAtualizando(false)
       },
       (erro: unknown) => {
-        if (!ativo || erro instanceof SessaoExpirada) return
+        if (!ativo) return
+        setAtualizando(false)
+        if (erro instanceof SessaoExpirada) return
         setCarga({ tipo: 'erro', mensagem: mensagemDoErro(erro), codigo: codigoDoErro(erro) })
       },
     )
@@ -447,6 +459,12 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
         />
       )}
       {carga.tipo === 'carregando' && <Loader role="status" aria-label="Buscando" />}
+      {carga.tipo === 'pronta' && atualizando && (
+        <Group gap="xs" role="status" aria-label="Atualizando">
+          <Loader size="xs" />
+          <Text size="xs" c={CORES.textoSecundario}>Atualizando…</Text>
+        </Group>
+      )}
 
       {resultado && (
         <Group align="flex-start" wrap="nowrap" gap="md">
@@ -513,7 +531,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
               <Text c={CORES.textoSecundario}>Nenhum momento encontrado. Tente outras palavras ou tire um filtro.</Text>
             )}
 
-            {visualAtivo && <GradeDePlanos videos={resultado.videos} busca={consulta.q} />}
+            {visualAtivo && <GradeDePlanos api={api} videos={resultado.videos} busca={consulta.q} />}
 
             {!visualAtivo && resultado.videos.map((video) => (
               <Paper key={video.job_id} withBorder bg="dark.6" p="sm" component="section" aria-label={video.nome}>
@@ -536,6 +554,7 @@ export default function Busca({ api, consulta }: { api: ClienteDaApi; consulta: 
                   <div>
                     {video.momentos.map((momento) => (
                       <Linha
+                        api={api}
                         key={momento.inicio_ms}
                         video={video}
                         momento={momento}

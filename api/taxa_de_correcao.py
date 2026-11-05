@@ -121,9 +121,11 @@ def calcular(
         for m in revisao.todas(desde)
         if _no_periodo(m.ultimo_pulso, desde, ate)
     }
+    # Só os vídeos com correção ou pulso no período; o acervo não é percorrido.
+    candidatos = pulsados | correcoes.jobs_com_correcao(desde, ate)
     # (programa, versão, tipo) -> (correções, itens)
     somas: dict[tuple[str | None, str | None, str], tuple[int, int]] = {}
-    for job in repositorio.listar():
+    for job in sorted(repositorio.obter_varios(candidatos), key=lambda j: j.id):
         if job.estado != "concluido" or (programa and job.programa != programa):
             continue
         feitas = correcoes.listar(job.id)
