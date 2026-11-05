@@ -219,7 +219,7 @@ test('a busca global abre com `/` e busca o texto no conteúdo', async () => {
 
   await usuario.keyboard('/')
   const dialogo = await screen.findByRole('dialog', { name: 'Buscar no acervo' })
-  await usuario.type(within(dialogo).getByRole('combobox'), 'Leão Lobo{Enter}')
+  await usuario.type(within(dialogo).getByRole('combobox', { name: 'Buscar no acervo' }), 'Leão Lobo{Enter}')
 
   await waitFor(() => expect(location.pathname).toBe('/busca'))
   expect(new URLSearchParams(location.search).get('q')).toBe('Leão Lobo')
@@ -241,6 +241,12 @@ test('G e uma letra vão à tela, e `?` lista os atalhos', async () => {
   const lista = await screen.findByRole('dialog', { name: 'Atalhos de teclado' })
   expect(within(lista).getByText('Ir para Tempo de tela')).toBeTruthy()
   expect(within(lista).queryByText('Ir para Painel da diretoria')).toBeNull()
+
+  // Com a lista aberta, os atalhos da tela de trás não agem.
+  await usuario.keyboard('gt')
+  expect(location.pathname).toBe('/relatorios/marcas')
+  await usuario.keyboard('{Control>}k{/Control}')
+  expect(screen.queryByRole('dialog', { name: 'Buscar no acervo' })).toBeNull()
 })
 
 test('as consultas saem do cache em 30 s, não voltam ao focar e não repetem o 401', () => {

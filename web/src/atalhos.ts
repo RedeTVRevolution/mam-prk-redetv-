@@ -56,6 +56,13 @@ export function emCampoDeTexto(alvo: EventTarget | null): boolean {
   )
 }
 
+/** Uma janela da interface nova (Radix, com `data-state`) aberta: os atalhos da tela de trás não
+ * agem enquanto ela estiver na frente. As janelas do Mantine ficam de fora de propósito: a Gaveta
+ * da interface atual usa as setas e o Enter do registro com ela aberta. */
+export function haJanelaAberta(): boolean {
+  return !!document.querySelector('[role=dialog][data-state=open], [role=alertdialog][data-state=open]')
+}
+
 /**
  * O registro único de atalhos, para o provedor de cada interface: ouve o teclado num lugar só,
  * ignora campos de texto, e `?` abre a lista (`aberto`, com os atalhos de agora em `lista`).
@@ -85,7 +92,7 @@ export function useRegistroDeAtalhos() {
   useEffect(() => {
     function aoTeclar(e: KeyboardEvent) {
       if (e.defaultPrevented || e.metaKey || e.altKey) return
-      if (emCampoDeTexto(e.target)) return
+      if (emCampoDeTexto(e.target) || haJanelaAberta()) return
       if (e.key === '?' && !e.ctrlKey) {
         e.preventDefault()
         mostrarAtalhos()

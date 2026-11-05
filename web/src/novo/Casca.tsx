@@ -15,7 +15,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import logo from '../assets/redetv-logo.png'
 import { podeAdministrar } from '../administracao.ts'
-import { useAtalhos, useMostrarAtalhos, type Atalho } from '../atalhos.ts'
+import { haJanelaAberta, useAtalhos, useMostrarAtalhos, type Atalho } from '../atalhos.ts'
 import { consultaNova } from '../busca.ts'
 import { NOME_DO_PAPEL } from '../papeis.ts'
 import { ACERVO, ADMIN, enderecoDaBusca, MARCAS, navegar, PAINEL, seguir, TEMPO_DE_TELA, type Rota } from '../rotas.ts'
@@ -233,7 +233,7 @@ export function Casca({ usuario, rota, aoSair, children }: { usuario: Usuario; r
   // Ctrl K e Cmd K abrem a busca até de dentro de um campo; o registro de atalhos ignora o Cmd.
   useEffect(() => {
     function aoTeclar(e: KeyboardEvent) {
-      if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey) && !e.altKey) {
+      if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey) && !e.altKey && !haJanelaAberta()) {
         e.preventDefault()
         setBuscaAberta(true)
       }

@@ -17,7 +17,7 @@ export function CommandDialog({
       <DialogContent mostrarFechar={false} className={cn('top-[15dvh] translate-y-0 gap-0 p-0', className)}>
         <DialogTitle className="sr-only">{titulo}</DialogTitle>
         <DialogDescription className="sr-only">{descricao}</DialogDescription>
-        <CommandPrimitive data-slot="command" className="flex min-h-0 min-w-0 flex-col bg-popover text-popover-foreground">
+        <CommandPrimitive data-slot="command" label={titulo} className="flex min-h-0 min-w-0 flex-col bg-popover text-popover-foreground">
           {children}
         </CommandPrimitive>
       </DialogContent>
