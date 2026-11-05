@@ -18,7 +18,10 @@ case "$*" in
     echo "projects/p/alertPolicies/$forma-$RANDOM" | tee -a "$estado"
     ;;
   *"policies describe"*) cat "$FAKE_DIR"/gravada-*.json ;;
-  *"policies list"*) cat "$estado" ;;
+  *"policies list"*)
+    if [[ -n "${LISTA_FALHA:-}" ]]; then echo "ERROR: permission denied" >&2; exit 1; fi
+    cat "$estado"
+    ;;
   *"policies delete"*)
     nome=$(sed -n 's/.*policies delete \\([^ ]*\\).*/\\1/p' <<<"$*")
     grep -vxF "$nome" "$estado" > "$estado.novo" || true; mv "$estado.novo" "$estado"
@@ -27,6 +30,7 @@ esac
 """
 
 TERRAFORM_FALSO = """#!/usr/bin/env bash
+if [[ -n "${SEM_SAIDAS:-}" ]]; then echo "Error: Output not found" >&2; exit 1; fi
 case "$*" in
   *metrica_de_falhas_por_etapa*) printf 'mam_falhas_por_etapa' ;;
   *janela_dos_alertas_s*) printf '86400s' ;;
@@ -48,7 +52,11 @@ def _biblioteca() -> str:
 
 
 def _rodar(
-    tmp_path: Path, recusa: str, bloco: str | None = None
+    tmp_path: Path,
+    recusa: str,
+    bloco: str | None = None,
+    entrada: str = "y\n\n",
+    **extra: str,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -68,11 +76,12 @@ def _rodar(
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "FAKE_DIR": str(fake),
         "RECUSA": recusa,
+        **extra,
     }
     r = subprocess.run(
         ["bash", str(script)],
         check=False,
-        input="y\n\n",
+        input=entrada,
         text=True,
         capture_output=True,
         env=env,
@@ -140,3 +149,26 @@ def test_nomes_da_nuvem_vem_das_saidas_do_terraform() -> None:
     bloco = _bloco()
     assert "mam_falhas_por_etapa" not in bloco
     assert "output -raw metrica_de_falhas_por_etapa" in bloco
+
+
+def test_sem_as_saidas_do_terraform_pula_a_etapa_sem_derrubar_o_wizard(
+    tmp_path: Path,
+) -> None:
+    r, fake = _rodar(tmp_path, recusa="", SEM_SAIDAS="1")
+    assert r.returncode == 0, r.stderr
+    assert "ainda não tem a métrica" in r.stdout
+    assert not (fake / "chamadas.txt").exists()
+
+
+def test_recusar_o_ensaio_pula_a_etapa_sem_derrubar_o_wizard(tmp_path: Path) -> None:
+    r, fake = _rodar(tmp_path, recusa="", entrada="n\n\n")
+    assert r.returncode == 0, r.stderr
+    assert "Nada foi criado" in r.stdout
+    assert not (fake / "chamadas.txt").exists()
+
+
+def test_listagem_que_falha_nao_diz_que_nada_sobrou(tmp_path: Path) -> None:
+    r, _ = _rodar(tmp_path, recusa="", LISTA_FALHA="1")
+    assert r.returncode == 0, r.stderr
+    assert "nenhuma política" not in r.stdout
+    assert "Não consegui listar" in r.stdout

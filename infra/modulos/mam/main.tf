@@ -3089,7 +3089,6 @@ output "chave_mac_kms" {
   value       = google_kms_crypto_key.chaves_de_api.id
 }
 
-# O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.
 # Para o ensaio do alerta de falhas por etapa no wizard (#337): a mesma métrica, janela e limite
 # da política de hoje, sem escrever os nomes no script.
 output "metrica_de_falhas_por_etapa" {
@@ -3104,6 +3103,7 @@ output "limite_de_falhas_por_etapa" {
   value = var.limite_de_falhas_por_etapa
 }
 
+# O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.
 output "url" {
   value = local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri
 }

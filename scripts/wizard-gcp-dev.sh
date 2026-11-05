@@ -435,80 +435,96 @@ stage "Ensaio do alerta de falhas por etapa com uma condição só (#337, para a
 say "A API de alertas não tem validateOnly e o agente não cria recursos, então crio"
 say "uma política descartável, desabilitada e sem canal de notificação, só para ver"
 say "se a API aceita uma condição que soma o Job e o Workflows. Apago no fim."
-METRICA=$(terraform -chdir=infra output -raw metrica_de_falhas_por_etapa)
-JANELA=$(terraform -chdir=infra output -raw janela_dos_alertas_s)
-LIMITE=$(terraform -chdir=infra output -raw limite_de_falhas_por_etapa)
 PREFIXO_ENSAIO="mam-ensaio-"
-ENSAIO_DIR=$(mktemp -d)
-ENSAIO_CRIADAS=()
-ENSAIO_ACEITA=""
-ENSAIO_GRAVADA=""
 
-# Apaga o que o ensaio criou e tudo o que tiver o prefixo, de um ensaio anterior
-# interrompido; roda no trap, então não pode falhar no meio.
-limpar_ensaio() {
-  local nome
-  for nome in ${ENSAIO_CRIADAS[@]+"${ENSAIO_CRIADAS[@]}"}; do
-    gcloud alpha monitoring policies delete "$nome" --project "$P" --quiet >/dev/null 2>&1 || true
+# ensaiar_alerta cria as políticas descartáveis, mostra a aceita e apaga tudo.
+ensaiar_alerta() {
+  ENSAIO_DIR=$(mktemp -d)
+  ENSAIO_CRIADAS=()
+  ENSAIO_ACEITA=""
+  ENSAIO_GRAVADA=""
+
+  # Apaga o que o ensaio criou e tudo o que tiver o prefixo, de um ensaio anterior
+  # interrompido; roda no trap, então não pode falhar no meio.
+  limpar_ensaio() {
+    local nome
+    for nome in ${ENSAIO_CRIADAS[@]+"${ENSAIO_CRIADAS[@]}"}; do
+      gcloud alpha monitoring policies delete "$nome" --project "$P" --quiet >/dev/null 2>&1 || true
+    done
+    while read -r nome; do
+      [[ -n "$nome" ]] || continue
+      gcloud alpha monitoring policies delete "$nome" --project "$P" --quiet >/dev/null 2>&1 || true
+    done < <(gcloud alpha monitoring policies list --project "$P" \
+      --filter="displayName~^${PREFIXO_ENSAIO}" --format='value(name)' 2>/dev/null || true)
+    rm -rf "$ENSAIO_DIR"
+  }
+  trap limpar_ensaio EXIT
+
+  # politica_do_ensaio FORMA escreve o JSON da política descartável da forma a ou b.
+  politica_do_ensaio() {
+    local forma="$1" arquivo="$ENSAIO_DIR/politica-$1.json" condicao
+    if [[ "$forma" == a ]]; then
+      condicao=$(printf '"conditionThreshold":{"filter":"metric.type=\\"logging.googleapis.com/user/%s\\" AND resource.type = one_of(\\"cloud_run_job\\", \\"workflows.googleapis.com/Workflow\\")","comparison":"COMPARISON_GT","thresholdValue":%s,"duration":"0s","aggregations":[{"alignmentPeriod":"%s","perSeriesAligner":"ALIGN_DELTA","crossSeriesReducer":"REDUCE_SUM","groupByFields":["metric.label.etapa"]}]}' \
+        "$METRICA" "$LIMITE" "$JANELA")
+    else
+      condicao=$(printf '"conditionPrometheusQueryLanguage":{"query":"sum by (etapa) (increase(logging_googleapis_com:user_%s{monitored_resource=~\\"cloud_run_job|workflows.googleapis.com/Workflow\\"}[%s])) > %s","duration":"0s","evaluationInterval":"60s"}' \
+        "$METRICA" "$JANELA" "$LIMITE")
+    fi
+    printf '{"displayName":"%sfalhas-por-etapa-%s","combiner":"OR","enabled":false,"notificationChannels":[],"conditions":[{"displayName":"Ensaio das falhas por etapa (%s)",%s}]}\n' \
+      "$PREFIXO_ENSAIO" "$forma" "$forma" "$condicao" > "$arquivo"
+    printf '%s' "$arquivo"
+  }
+
+  for forma in a b; do
+    arquivo=$(politica_do_ensaio "$forma")
+    say "Forma ($forma): criando ${PREFIXO_ENSAIO}falhas-por-etapa-$forma..."
+    if nome=$(gcloud alpha monitoring policies create --project "$P" \
+          --policy-from-file="$arquivo" --format='value(name)' 2>"$ENSAIO_DIR/erro-$forma.txt"); then
+      ENSAIO_CRIADAS+=("$nome")
+      ENSAIO_ACEITA="$forma"
+      ENSAIO_GRAVADA=$(gcloud alpha monitoring policies describe "$nome" --project "$P" --format=json) \
+        || ENSAIO_GRAVADA="(o describe falhou; a API aceitou este pedido) $(cat "$arquivo")"
+      printf '  %s✓%s a API aceitou a forma (%s)\n' "$GREEN" "$RESET" "$forma"
+      break
+    fi
+    warn "A API recusou a forma ($forma):"
+    sed 's/^/    /' "$ENSAIO_DIR/erro-$forma.txt"
   done
-  while read -r nome; do
-    [[ -n "$nome" ]] || continue
-    gcloud alpha monitoring policies delete "$nome" --project "$P" --quiet >/dev/null 2>&1 || true
-  done < <(gcloud alpha monitoring policies list --project "$P" \
-    --filter="displayName~^${PREFIXO_ENSAIO}" --format='value(name)' 2>/dev/null || true)
-  rm -rf "$ENSAIO_DIR"
-}
-trap limpar_ensaio EXIT
 
-# politica_do_ensaio FORMA escreve o JSON da política descartável da forma a ou b.
-politica_do_ensaio() {
-  local forma="$1" arquivo="$ENSAIO_DIR/politica-$1.json" condicao
-  if [[ "$forma" == a ]]; then
-    condicao=$(printf '"conditionThreshold":{"filter":"metric.type=\\"logging.googleapis.com/user/%s\\" AND resource.type = one_of(\\"cloud_run_job\\", \\"workflows.googleapis.com/Workflow\\")","comparison":"COMPARISON_GT","thresholdValue":%s,"duration":"0s","aggregations":[{"alignmentPeriod":"%s","perSeriesAligner":"ALIGN_DELTA","crossSeriesReducer":"REDUCE_SUM","groupByFields":["metric.label.etapa"]}]}' \
-      "$METRICA" "$LIMITE" "$JANELA")
+  limpar_ensaio
+  trap - EXIT
+  if ! RESTANTES=$(gcloud alpha monitoring policies list --project "$P" \
+      --filter="displayName~^${PREFIXO_ENSAIO}" --format='value(name)'); then
+    warn "Não consegui listar as políticas para conferir a limpeza."
+    SKIPPED+=("Conferir que não sobrou política $PREFIXO_ENSAIO* do ensaio (#337) em $P")
+  elif [[ -z "$RESTANTES" ]]; then
+    printf '  %s✓%s nenhuma política %s* sobrou\n' "$GREEN" "$RESET" "$PREFIXO_ENSAIO"
   else
-    condicao=$(printf '"conditionPrometheusQueryLanguage":{"query":"sum by (etapa) (increase(logging_googleapis_com:user_%s{monitored_resource=~\\"cloud_run_job|workflows.googleapis.com/Workflow\\"}[%s])) > %s","duration":"0s","evaluationInterval":"60s"}' \
-      "$METRICA" "$JANELA" "$LIMITE")
+    warn "Sobrou política do ensaio; apague à mão:"
+    printf '%s\n' "$RESTANTES" | sed 's/^/    /'
+    SKIPPED+=("Apagar as políticas $PREFIXO_ENSAIO* que sobraram do ensaio (#337) em $P")
   fi
-  printf '{"displayName":"%sfalhas-por-etapa-%s","combiner":"OR","enabled":false,"notificationChannels":[],"conditions":[{"displayName":"Ensaio das falhas por etapa (%s)",%s}]}\n' \
-    "$PREFIXO_ENSAIO" "$forma" "$forma" "$condicao" > "$arquivo"
-  printf '%s' "$arquivo"
+
+  if [[ -n "$ENSAIO_ACEITA" ]]; then
+    say "Copie para um comentário na #330: a API aceitou a forma ($ENSAIO_ACEITA) e gravou assim:"
+    printf '\n'; printf '%s\n' "$ENSAIO_GRAVADA" | sed 's/^/    /'; printf '\n'
+  else
+    warn "A API recusou as duas formas. Copie os dois erros acima para a #330."
+    SKIPPED+=("Comentar na #330 que a API recusou as formas (a) e (b) do alerta de falhas por etapa (#337)")
+  fi
 }
 
-confirm "Criar (e apagar em seguida) as políticas descartáveis $PREFIXO_ENSAIO* em $P?" || { warn "Nada foi criado."; exit 1; }
-for forma in a b; do
-  arquivo=$(politica_do_ensaio "$forma")
-  say "Forma ($forma): criando ${PREFIXO_ENSAIO}falhas-por-etapa-$forma..."
-  if nome=$(gcloud alpha monitoring policies create --project "$P" \
-        --policy-from-file="$arquivo" --format='value(name)' 2>"$ENSAIO_DIR/erro-$forma.txt"); then
-    ENSAIO_CRIADAS+=("$nome")
-    ENSAIO_ACEITA="$forma"
-    ENSAIO_GRAVADA=$(gcloud alpha monitoring policies describe "$nome" --project "$P" --format=json 2>&1 || true)
-    printf '  %s✓%s a API aceitou a forma (%s)\n' "$GREEN" "$RESET" "$forma"
-    break
-  fi
-  warn "A API recusou a forma ($forma):"
-  sed 's/^/    /' "$ENSAIO_DIR/erro-$forma.txt"
-done
-
-limpar_ensaio
-trap - EXIT
-RESTANTES=$(gcloud alpha monitoring policies list --project "$P" \
-  --filter="displayName~^${PREFIXO_ENSAIO}" --format='value(name)' 2>/dev/null || true)
-if [[ -z "$RESTANTES" ]]; then
-  printf '  %s✓%s nenhuma política %s* sobrou\n' "$GREEN" "$RESET" "$PREFIXO_ENSAIO"
+# Antes do primeiro deploy (ou de um deploy com estas saídas) o Terraform não as tem.
+if ! { METRICA=$(terraform -chdir=infra output -raw metrica_de_falhas_por_etapa) \
+    && JANELA=$(terraform -chdir=infra output -raw janela_dos_alertas_s) \
+    && LIMITE=$(terraform -chdir=infra output -raw limite_de_falhas_por_etapa); } 2>/dev/null; then
+  warn "O estado do Terraform ainda não tem a métrica, a janela e o limite do alerta; rode o make deploy-dev e esta etapa de novo."
+  SKIPPED+=("Ensaio do alerta de falhas por etapa (#337): rodar a etapa 8 depois do make deploy-dev e comentar na #330")
+elif ! confirm "Criar (e apagar em seguida) as políticas descartáveis $PREFIXO_ENSAIO* em $P?"; then
+  warn "Nada foi criado."
+  SKIPPED+=("Ensaio do alerta de falhas por etapa (#337): rodar a etapa 8 e comentar na #330")
 else
-  warn "Sobrou política do ensaio; apague à mão:"
-  printf '%s\n' "$RESTANTES" | sed 's/^/    /'
-  SKIPPED+=("Apagar as políticas $PREFIXO_ENSAIO* que sobraram do ensaio (#337) em $P")
-fi
-
-if [[ -n "$ENSAIO_ACEITA" ]]; then
-  say "Copie para um comentário na #330: a API aceitou a forma ($ENSAIO_ACEITA) e gravou assim:"
-  printf '\n'; printf '%s\n' "$ENSAIO_GRAVADA" | sed 's/^/    /'; printf '\n'
-else
-  warn "A API recusou as duas formas. Copie os dois erros acima para a #330."
-  SKIPPED+=("Comentar na #330 que a API recusou as formas (a) e (b) do alerta de falhas por etapa (#337)")
+  ensaiar_alerta
 fi
 # ENSAIO_FALHAS_FIM
 pause "Enter para continuar"
