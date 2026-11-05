@@ -228,7 +228,7 @@ Papel com todas as permissões, dado automaticamente aos administradores de emer
 Conta local que recebe o papel Administrador (acesso total), segundo fator obrigatório e alerta a cada login; existe para não depender do login legado.
 
 **Diretoria**:
-Papel só de leitura com a permissão `painel.ver` e mais nada: não vê a decupagem. O Administrador também a tem. Cada abertura de uma aba do painel e cada exportação em CSV grava `painel.aberto` ou `painel.exportado` na auditoria, com quem, quando, a aba e o filtro (`api/painel.py`); a mesma aba com o mesmo filtro aberta de novo pela mesma pessoa em 30 minutos (recarga) não grava outra abertura.
+Papel só de leitura: vê e baixa as decupagens e os vídeos (`decupagem.ver`) e o painel de indicadores (`painel.ver`); não envia nem edita. O Administrador também a tem. Cada abertura de uma aba do painel e cada exportação em CSV grava `painel.aberto` ou `painel.exportado` na auditoria, com quem, quando, a aba e o filtro (`api/painel.py`); a mesma aba com o mesmo filtro aberta de novo pela mesma pessoa em 30 minutos (recarga) não grava outra abertura.
 
 **Papel**:
 Pacote de permissões dado a um usuário, opcionalmente limitado a programas.
