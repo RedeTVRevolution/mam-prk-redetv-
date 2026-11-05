@@ -235,6 +235,86 @@ class TestRepositorioFirestore:
             "a-velho",
         ]
 
+    def test_lixeira_traz_so_os_da_lixeira_do_envio_mais_recente_ao_mais_antigo(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        def lixeira(dias: int) -> EnvioParaLixeira:
+            return EnvioParaLixeira(
+                em=BASE + timedelta(days=dias),
+                por_uid="adm",
+                por_email="ana@redetv.com",
+                motivo="duplicado",
+            )
+
+        repositorio.salvar(_job("fora", BASE))
+        repositorio.salvar(_job("velho", BASE, lixeira=lixeira(1)))
+        repositorio.salvar(_job("novo", BASE - timedelta(days=9), lixeira=lixeira(3)))
+        repositorio.salvar(_job("meio", BASE, lixeira=lixeira(2)))
+
+        ids = [j.id for j in repositorio.consultar(FiltroDeJobs(na_lixeira=True)).jobs]
+
+        assert ids == ["novo", "meio", "velho"]
+        assert [j.id for j in repositorio.consultar(FiltroDeJobs()).jobs] == ["fora"]
+
+    def test_lixeira_e_sha256_leem_so_os_documentos_que_devolvem(
+        self, repositorio: RepositorioFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        for i in range(30):
+            repositorio.salvar(_job(f"x{i}", BASE, sha256=f"{i:064x}"))
+        repositorio.salvar(_job("alvo", BASE, sha256="a" * 64))
+        repositorio.salvar(_job("igual", BASE, sha256="a" * 64))
+        for i in range(3):
+            repositorio.salvar(_job(f"l{i}", BASE, lixeira=envio))
+        lidos = {"documentos": 0}
+        stream = firestore.Query.stream
+
+        def contar(consulta: firestore.Query, *args: Any, **kwargs: Any) -> Any:
+            for doc in stream(consulta, *args, **kwargs):
+                lidos["documentos"] += 1
+                yield doc
+
+        monkeypatch.setattr(firestore.Query, "stream", contar)
+
+        assert len(repositorio.consultar(FiltroDeJobs(na_lixeira=True)).jobs) == 3
+        assert lidos["documentos"] == 3
+        filtro = FiltroDeJobs(sha256="a" * 64, na_lixeira=None)
+        assert len(repositorio.consultar(filtro).jobs) == 2
+        assert lidos["documentos"] == 5
+
+    def test_lixeira_com_outro_filtro_confere_o_resto_em_python(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        repositorio.salvar(_job("a", BASE, programa="Jornal", lixeira=envio))
+        repositorio.salvar(_job("b", BASE, programa="Outro", lixeira=envio))
+
+        filtro = FiltroDeJobs(na_lixeira=True, programa="Jornal")
+
+        assert [j.id for j in repositorio.consultar(filtro).jobs] == ["a"]
+
+    def test_sha256_traz_so_os_do_mesmo_arquivo_na_lixeira_ou_fora_dela(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        repositorio.salvar(_job("a", BASE, sha256="a" * 64))
+        repositorio.salvar(_job("b", BASE + timedelta(minutes=1), sha256="b" * 64))
+        repositorio.salvar(
+            _job("c", BASE + timedelta(minutes=2), sha256="a" * 64, lixeira=envio)
+        )
+
+        todos = repositorio.consultar(FiltroDeJobs(sha256="a" * 64, na_lixeira=None))
+        so_acervo = repositorio.consultar(FiltroDeJobs(sha256="a" * 64))
+
+        assert [j.id for j in todos.jobs] == ["c", "a"]
+        assert [j.id for j in so_acervo.jobs] == ["a"]
+
 
 def _credencial_local() -> google_credentials.Signing:
     chave = rsa.generate_private_key(public_exponent=65537, key_size=2048)

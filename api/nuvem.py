@@ -65,6 +65,7 @@ from api.jobs import (
     ServicoIndisponivel,
     casa_com_o_filtro,
     disposicao_do_nome,
+    paginar_em_python,
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
@@ -258,6 +259,10 @@ class RepositorioFirestore:
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
         # estar no campo da ordem). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
         # Os índices estão no infra/modulos/mam/main.tf.
+        if filtro.sha256 is not None:
+            return self._consultar_pelo_arquivo(filtro)
+        if filtro.na_lixeira is True:
+            return self._consultar_a_lixeira(filtro)
         consulta: Any = self._colecao
         if filtro.programa is not None:
             consulta = consulta.where(
@@ -285,6 +290,17 @@ class RepositorioFirestore:
                 consulta = consulta.where(
                     filter=FieldFilter(campo, "<=", filtro.exibicao_ate.isoformat())
                 )
+        return self._ordenar_e_ler(consulta, campo, filtro)
+
+    def _consultar_a_lixeira(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # A ordem é a do envio à lixeira: o Firestore só devolve documentos que têm o
+        # campo da ordem, e fora da lixeira `lixeira` é `null`. Os outros filtros ficam
+        # em `casa_com_o_filtro`, para não pedir índice composto com `lixeira.em`.
+        return self._ordenar_e_ler(self._colecao, "lixeira.em", filtro)
+
+    def _ordenar_e_ler(
+        self, consulta: Any, campo: str, filtro: FiltroDeJobs
+    ) -> PaginaDeJobs:
         # O desempate implícito é o id do documento, na mesma direção da ordem.
         consulta = consulta.order_by(campo, direction=firestore.Query.DESCENDING)
         if filtro.cursor is not None:
@@ -295,6 +311,18 @@ class RepositorioFirestore:
         jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
         return PaginaDeJobs.de(
             (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
+        )
+
+    def _consultar_pelo_arquivo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # Poucos Jobs por arquivo: só a igualdade no `sha256` (índice automático) vai ao
+        # Firestore; o resto do filtro, a ordem e o cursor ficam em Python, sem índice
+        # composto.
+        consulta = self._colecao.where(
+            filter=FieldFilter("sha256", "==", filtro.sha256)
+        )
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return paginar_em_python(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
         )
 
 

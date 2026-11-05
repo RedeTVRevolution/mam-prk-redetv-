@@ -181,11 +181,7 @@ def calcular_impacto(
     # Os que estão na lixeira também contam: podem ser restaurados e ainda usam o
     # processamento.
     parecidos = (
-        [
-            j
-            for na_lixeira in (False, True)
-            for j in repositorio.consultar(FiltroDeJobs(na_lixeira=na_lixeira)).jobs
-        ]
+        repositorio.consultar(FiltroDeJobs(sha256=job.sha256, na_lixeira=None)).jobs
         if job.sha256 is not None
         else []
     )
