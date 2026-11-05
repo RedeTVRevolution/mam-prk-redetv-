@@ -1,7 +1,7 @@
 import { Group, Stack, Text, Title } from '@mantine/core'
 import { useEffect } from 'react'
 import type { ClienteDaApi } from './api.ts'
-import type { Usuario } from './App.tsx'
+import type { Usuario } from './sessao.ts'
 import { abasPermitidas } from './administracao.ts'
 import { Link } from './Link.tsx'
 import { ACERVO, enderecoDaAba, navegar } from './rotas.ts'

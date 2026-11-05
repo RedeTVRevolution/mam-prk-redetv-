@@ -21,6 +21,7 @@ function desfoques(valor: string): number[] {
 
 test('a varredura acha os arquivos do front', () => {
   expect(arquivos.map((a) => a.nome)).toContain('./tema.ts')
+  expect(arquivos.map((a) => a.nome)).toContain('./novo/index.css')
 })
 
 test.each(arquivos.map((a) => [a.nome, a.codigo]))('%s não usa gradiente', (_nome, codigo) => {
@@ -30,6 +31,20 @@ test.each(arquivos.map((a) => [a.nome, a.codigo]))('%s não usa gradiente', (_no
 
 test.each(arquivos.map((a) => [a.nome, a.codigo]))('%s não tem sombra grande', (_nome, codigo) => {
   for (const [, valor] of codigo.matchAll(/(?:box-shadow|boxShadow)\s*:\s*['"`]?([^;'"`}]+)/g)) {
+    for (const d of desfoques(valor)) expect(d).toBeLessThanOrEqual(MAIOR_DESFOQUE_PX)
+  }
+})
+
+// O mesmo, nas classes do Tailwind da interface nova: gradiente (`bg-linear-to-r`), desfoque de
+// fundo e as sombras do Tailwind (de 3 a 50 px de desfoque). Fica a `shadow-float` do tema.
+test.each(arquivos.map((a) => [a.nome, a.codigo]))('%s não usa gradiente, vidro nem sombra grande do Tailwind', (_nome, codigo) => {
+  expect(codigo).not.toMatch(/\bbg-(linear|radial|conic|gradient)-/)
+  expect(codigo).not.toMatch(/\bbackdrop-blur/)
+  expect(codigo).not.toMatch(/\bshadow-(2xs|xs|sm|md|lg|xl|2xl)\b/)
+  for (const [, valor] of codigo.matchAll(/\bshadow-\[([^\]]+)\]/g)) {
+    for (const d of desfoques(valor.replaceAll('_', ' '))) expect(d).toBeLessThanOrEqual(MAIOR_DESFOQUE_PX)
+  }
+  for (const [, valor] of codigo.matchAll(/--shadow-[\w-]+:\s*([^;]+)/g)) {
     for (const d of desfoques(valor)) expect(d).toBeLessThanOrEqual(MAIOR_DESFOQUE_PX)
   }
 })

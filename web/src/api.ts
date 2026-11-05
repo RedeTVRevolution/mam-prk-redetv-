@@ -1,4 +1,4 @@
-import type { Usuario } from './App.tsx'
+import type { Usuario } from './sessao.ts'
 import type { Autenticador } from './auth/autenticador.ts'
 import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type ResultadoDaBusca } from './busca.ts'
 import type { CatalogoDeCorrecoes } from './catalogo.ts'

@@ -1,7 +1,7 @@
 /** A linha do tempo da Decupagem sem React e sem DOM: tempos, faixas, alças e arrasto. */
 import type { MantineColor } from '@mantine/core'
 import { pessoaDoModelo, type CatalogoDeCorrecoes } from './catalogo.ts'
-import { CORES_DE_OCORRENCIA } from './tema.ts'
+import { CORES_DE_OCORRENCIA } from './cores.ts'
 import type { Decupagem, Objeto } from './decupagem.ts'
 
 /** `ms` em `MM:SS`: trunca os segundos e os minutos passam de 59, sem horas (ADR 0003). */

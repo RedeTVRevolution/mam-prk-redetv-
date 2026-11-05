@@ -1,6 +1,6 @@
 import { nomeDaEtapa } from './etapas.ts'
 import { NOME_DO_PAPEL } from './papeis.ts'
-import { ESTADOS_DO_JOB } from './tema.ts'
+import { ESTADOS_DO_JOB } from './cores.ts'
 
 // A aba Auditoria da administração: a lista fechada de ações, os filtros da URL e os detalhes em frases.
 

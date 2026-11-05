@@ -19,7 +19,7 @@ import {
 import { IconDots, IconPlus, IconSearch } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
 import { SessaoExpirada, type ClienteDaApi, type ContaDaLista } from './api.ts'
-import type { Usuario } from './App.tsx'
+import type { Usuario } from './sessao.ts'
 import { AlertaDeErro } from './AlertaDeErro.tsx'
 import { falhaDaAcao, type Falha } from './falhaDaAcao.ts'
 import { NOME_DO_PAPEL, PAPEIS } from './papeis.ts'

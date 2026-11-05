@@ -1,5 +1,5 @@
 import type { Intervalo } from './linhaDoTempo.ts'
-import type { CORES_DE_OBJETO } from './tema.ts'
+import type { CORES_DE_OBJETO } from './cores.ts'
 
 // Os formatos que a API devolve: a Decupagem, o histórico de correções e a fila de revisão.
 

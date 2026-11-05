@@ -1,5 +1,5 @@
 import { POR_PAGINA, finalizando, type Job } from './jobs.ts'
-import { ESTADOS_DO_JOB } from './tema.ts'
+import { ESTADOS_DO_JOB } from './cores.ts'
 
 // A aba Entradas da administração: os filtros que viajam na URL e as contas das linhas.
 
