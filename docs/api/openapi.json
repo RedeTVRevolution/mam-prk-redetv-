@@ -61,7 +61,7 @@
       "get": {
         "summary": "Programas aceitos",
         "description": "Os nomes de programa que o campo `programa` do envio aceita, em ordem alfabética. Exige um dos escopos `criar` ou `ler`.",
-        "operationId": "lista_de_programas_v1_programas_get",
+        "operationId": "programas_v1_programas_get",
         "responses": {
           "200": {
             "description": "Sucesso",
@@ -72,7 +72,7 @@
                     "type": "string"
                   },
                   "type": "array",
-                  "title": "Response Lista De Programas V1 Programas Get"
+                  "title": "Response Programas V1 Programas Get"
                 },
                 "example": [
                   "TV Fama"

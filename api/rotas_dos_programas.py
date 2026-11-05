@@ -4,31 +4,47 @@ Quem tem `programas.editar` (Editor, Curador e Administrador) cria, edita e apag
 programas, inclui pessoas do catálogo com o papel que têm no programa e cria a
 pessoa que ainda não existe. Toda mudança vai para a auditoria; se o registro não
 for gravado, a mudança é desfeita.
+
+O Job guarda o nome do programa: renomear troca o nome nos vídeos e os reindexa (busca e
+cópia no BigQuery) em segundo plano, com o andamento gravado no programa, como na
+renomeação de pessoa; `retomar` continua de onde parou.
 """
 
+import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+)
 from pydantic import BaseModel, StringConstraints, field_validator
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, visivel
 from api.correcoes import _sem_controle
-from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
+from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs, _confere_permissao
 from api.programas import (
     NomeDoPrograma,
     NomeEmUso,
     PerfilEmTexto,
     Programa,
     ProgramaInexistente,
+    RenomeacaoDoPrograma,
     RepositorioDeProgramas,
     VinculoDaPessoa,
     novo_id,
 )
+from api.renomeacao_de_pessoas import RODADAS, AndamentoDaRenomeacao
+
+log = logging.getLogger(__name__)
 
 LIMITE_DE_APELIDOS = 20
 LIMITE_DO_APELIDO = 100
@@ -54,6 +70,7 @@ class ProgramaPublico(BaseModel):
     nome: str
     perfil: str
     pessoas: list[PessoaNoProgramaPublica]
+    renomeacao: AndamentoDaRenomeacao | None = None
 
 
 class DadosDoPrograma(BaseModel):
@@ -114,7 +131,10 @@ def criar_rotas_dos_programas(
     jobs: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
     relogio: Callable[[], datetime],
+    reindexar: Callable[[Job], bool],
+    ao_criar_pessoa: Callable[[], None],
 ) -> APIRouter:
+    """`reindexar` devolve se o vídeo ficou indexado; `ao_criar_pessoa` descarta a cópia da lista de pessoas."""
     rotas = APIRouter(prefix="/admin/programas")
 
     def publico(programa: Programa) -> ProgramaPublico:
@@ -130,8 +150,21 @@ def criar_rotas_dos_programas(
                         papel=v.papel,
                     )
                 )
+        r = programa.renomeacao
         return ProgramaPublico(
-            id=programa.id, nome=programa.nome, perfil=programa.perfil, pessoas=pessoas
+            id=programa.id,
+            nome=programa.nome,
+            perfil=programa.perfil,
+            pessoas=pessoas,
+            renomeacao=None
+            if r is None
+            else AndamentoDaRenomeacao(
+                estado=r.estado,
+                feitos=r.total - len(r.pendentes),
+                total=r.total,
+                nome_antigo=r.nome_antigo,
+                nome_novo=r.nome_novo,
+            ),
         )
 
     def conferir_pessoas(dados: DadosDoPrograma) -> None:
@@ -154,6 +187,7 @@ def criar_rotas_dos_programas(
         depois: Programa | None,
         desfazer: Callable[[], None],
     ) -> None:
+        sem = {"renomeacao"}
         try:
             auditoria.acrescentar(
                 RegistroDeAuditoria(
@@ -165,9 +199,14 @@ def criar_rotas_dos_programas(
                     alvo_tipo="programa",
                     alvo_id=programa.id,
                     alvo_nome=programa.nome,
+                    # Sem o andamento da troca de nome: a lista de pendentes é longa.
                     detalhes={
-                        "antes": antes.model_dump(mode="json") if antes else None,
-                        "depois": depois.model_dump(mode="json") if depois else None,
+                        "antes": antes.model_dump(mode="json", exclude=sem)
+                        if antes
+                        else None,
+                        "depois": depois.model_dump(mode="json", exclude=sem)
+                        if depois
+                        else None,
                     },
                 )
             )
@@ -176,14 +215,78 @@ def criar_rotas_dos_programas(
             desfazer()
             raise
 
-    def religar_videos(de: str, para: str) -> None:
-        """O Job guarda o nome do programa: renomear leva os vídeos antigos junto."""
-        for job in jobs.listar():
-            if job.programa == de:
-                jobs.trocar(
-                    job.id,
-                    lambda j: {"programa": para} if j.programa == de else None,
-                )
+    def definir_renomeacao(
+        programa_id: str,
+        mudar: Callable[[RenomeacaoDoPrograma], RenomeacaoDoPrograma],
+    ) -> RenomeacaoDoPrograma | None:
+        """Muda o andamento lendo o programa de novo, sem regravar uma cópia velha."""
+        programa = programas.obter(programa_id)
+        if programa is None or programa.renomeacao is None:
+            return None
+        r = mudar(programa.renomeacao)
+        programas.salvar(programa.model_copy(update={"renomeacao": r}))
+        return r
+
+    def tirar_pendente(programa_id: str, job_id: str) -> RenomeacaoDoPrograma | None:
+        return definir_renomeacao(
+            programa_id,
+            lambda r: r.model_copy(
+                update={"pendentes": [i for i in r.pendentes if i != job_id]}
+            ),
+        )
+
+    # Programas com a troca rodando nesta instância: `retomar` não abre uma segunda.
+    em_execucao: set[str] = set()
+
+    def religar_videos(programa_id: str) -> None:
+        """Troca o nome nos vídeos pendentes e os reindexa, em até `RODADAS` rodadas."""
+        if programa_id in em_execucao:
+            return
+        em_execucao.add(programa_id)
+        try:
+            _religar_videos(programa_id)
+        finally:
+            em_execucao.discard(programa_id)
+
+    def _religar_videos(programa_id: str) -> None:
+        r = definir_renomeacao(
+            programa_id, lambda r: r.model_copy(update={"estado": "em_andamento"})
+        )
+        if r is None:
+            return
+        de, para = r.nome_antigo, r.nome_novo
+        for _ in range(RODADAS):
+            for job_id in list(r.pendentes):
+                try:
+                    # Reindexa o Job devolvido pela troca (ou relido, se a troca já
+                    # tinha sido feita), nunca um lido antes: ele levaria o nome antigo.
+                    job = jobs.trocar(
+                        job_id,
+                        lambda j: {"programa": para} if j.programa == de else None,
+                    ) or jobs.obter(job_id)
+                    pronto = (
+                        job is None
+                        or job.estado != "concluido"
+                        or job.lixeira is not None
+                        or reindexar(job)
+                    )
+                except Exception:
+                    log.exception("troca do programa em %s falhou", job_id)
+                    pronto = False
+                if pronto:
+                    tirar_pendente(programa_id, job_id)
+            programa = programas.obter(programa_id)
+            if programa is None or programa.renomeacao is None:
+                return
+            r = programa.renomeacao
+            if not r.pendentes:
+                break
+        definir_renomeacao(
+            programa_id,
+            lambda r: r.model_copy(
+                update={"estado": "falhou" if r.pendentes else "concluida"}
+            ),
+        )
 
     @rotas.get("")
     def listar(
@@ -213,13 +316,23 @@ def criar_rotas_dos_programas(
     def mudar(
         id: str,
         dados: DadosDoPrograma,
+        segundo_plano: BackgroundTasks,
         autor: Annotated[Usuario, Depends(_exige_editar_programas)],
     ) -> ProgramaPublico:
         antes = programas.obter(id)
         if antes is None:
             raise HTTPException(404, "Programa inexistente")
+        renomear = antes.nome != dados.nome
+        if (
+            renomear
+            and antes.renomeacao is not None
+            and antes.renomeacao.estado != "concluida"
+        ):
+            raise HTTPException(
+                409, "A troca de nome anterior ainda não terminou: aguarde ou retome"
+            )
         conferir_pessoas(dados)
-        depois = Programa(id=id, **dados.model_dump())
+        depois = Programa(id=id, **dados.model_dump(), renomeacao=antes.renomeacao)
         gravar(depois)
         registrar(
             "programa.alterado",
@@ -229,9 +342,41 @@ def criar_rotas_dos_programas(
             depois,
             lambda: programas.salvar(antes),
         )
-        if antes.nome != depois.nome:
-            religar_videos(antes.nome, depois.nome)
+        if renomear:
+            # Todos os vídeos com o nome antigo, inclusive os da lixeira.
+            ids = [
+                j.id
+                for j in jobs.consultar(
+                    FiltroDeJobs(programa=antes.nome, na_lixeira=None)
+                ).jobs
+            ]
+            depois = depois.model_copy(
+                update={
+                    "renomeacao": RenomeacaoDoPrograma(
+                        nome_antigo=antes.nome,
+                        nome_novo=depois.nome,
+                        total=len(ids),
+                        pendentes=ids,
+                        estado="em_andamento",
+                    )
+                }
+            )
+            programas.salvar(depois)
+            segundo_plano.add_task(religar_videos, id)
         return publico(depois)
+
+    @rotas.post("/{id}/renomear/retomar")
+    def retomar(
+        id: str,
+        segundo_plano: BackgroundTasks,
+        _autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+    ) -> ProgramaPublico:
+        programa = programas.obter(id)
+        if programa is None or programa.renomeacao is None:
+            raise HTTPException(404, "Nenhuma troca de nome deste programa")
+        if programa.renomeacao.estado != "concluida":
+            segundo_plano.add_task(religar_videos, id)
+        return publico(programa)
 
     @rotas.get("/{id}/impacto")
     def impacto(
@@ -276,8 +421,13 @@ def criar_rotas_dos_programas(
             pessoa = existentes[0]
         else:
             pessoa = catalogo.acrescentar(
-                dados.nome, "", dados.apelidos, autor=autor.email or autor.uid
+                dados.nome,
+                "",
+                dados.apelidos,
+                a_revisar=True,
+                autor=autor.email or autor.uid,
             )
+            ao_criar_pessoa()
         return PessoaNoProgramaPublica(
             pessoa_id=pessoa.id, nome=pessoa.nome, apelidos=pessoa.apelidos, papel=""
         )

@@ -417,7 +417,13 @@ def criar_app(
         )
 
     # A chave precisa poder enviar ou ler; só cancelar não tem o que escolher.
-    @v1.get("/programas", dependencies=[Depends(_chave_com_algum("criar", "ler"))])
+    # O `operation_id` de antes do #338 (a função não pode se chamar `programas`, o
+    # nome do parâmetro de `criar_app`).
+    @v1.get(
+        "/programas",
+        dependencies=[Depends(_chave_com_algum("criar", "ler"))],
+        operation_id="programas_v1_programas_get",
+    )
     def lista_de_programas() -> list[str]:
         """Os programas cadastrados, para o envio escolher."""
         return sorted(NomesDosProgramas(repositorio_de_programas))
@@ -538,6 +544,8 @@ def criar_app(
             repositorio_de_jobs,
             repositorio_de_auditoria,
             relogio,
+            _reindexar_para_a_renomeacao,
+            copia_das_pessoas.descartar,
         )
     )
     v1.include_router(

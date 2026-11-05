@@ -8,7 +8,7 @@ programa; o perfil que o modelo recebe sai do cadastro, nunca de texto livre do 
 import uuid
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Annotated, Protocol
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, StringConstraints
 
@@ -39,11 +39,22 @@ class VinculoDaPessoa(BaseModel):
     papel: PapelNoPrograma = ""
 
 
+class RenomeacaoDoPrograma(BaseModel):
+    """A troca do nome nos vídeos (o Job guarda o nome), com os que ainda faltam."""
+
+    nome_antigo: str
+    nome_novo: str
+    total: int
+    pendentes: list[str]  # ids dos Jobs ainda por trocar e reindexar
+    estado: Literal["em_andamento", "concluida", "falhou"]
+
+
 class Programa(BaseModel):
     id: str
     nome: NomeDoPrograma
     perfil: PerfilEmTexto = ""
     pessoas: list[VinculoDaPessoa] = []
+    renomeacao: RenomeacaoDoPrograma | None = None
 
 
 class ProgramaInexistente(Exception):
