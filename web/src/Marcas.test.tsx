@@ -187,7 +187,7 @@ test('o ranking e o resumo vêm acima da tabela; clicar na barra abre a linha da
   await abrir('/relatorios/marcas')
 
   const ranking = await screen.findByRole('img', { name: 'Marcas com mais tempo' })
-  expect(within(ranking).getByText('Ambev')).toBeTruthy()
+  expect(await within(ranking).findByText('Ambev')).toBeTruthy()
   expect(within(ranking).getByText('55s')).toBeTruthy()
   // Os vídeos do resumo são os distintos: v1 e v2.
   expect(screen.getByText('4 inserções · 1min00s · 2 vídeos')).toBeTruthy()
