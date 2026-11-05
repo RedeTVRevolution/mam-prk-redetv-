@@ -10,7 +10,8 @@ no cabeçalho dele. Há três tipos de caso:
              sem limite);
   exatos  -> `teto` momentos citam o termo e, em cada vídeo, vêm antes dos parecidos;
   ausente -> nenhum vídeo (sem `termo` e sem `pertinentes`).
-A consulta só com `pertinentes` (as dos casos de uso do plano, #341) não tem veredito: quem a julga é o aceite.
+A consulta só com `pertinentes` (como as que virão dos casos de uso do plano, #341) não tem
+veredito: quem a julga é o aceite.
 
 O aceite (#258): a média, entre as consultas com anotação de pertinência (`termo` ou
 `pertinentes`), da fração dos 5 primeiros resultados pertinentes, de pelo menos 80%. O relatório

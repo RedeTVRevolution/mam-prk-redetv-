@@ -14,9 +14,10 @@
 #              [{ job = "<início do id do Job>", de_s = 10, ate_s = 25 }]
 # Pertinente = casa com algum item de `pertinentes` ou cita o `termo`. Consulta sem nenhum
 # dos dois roda e mostra os resultados, mas fica fora da conta do aceite (80% dos 5 primeiros).
-# As consultas vêm dos casos de uso do plano (E2: assunto, frase dita, nome, filtros; E6: consulta
-# visual), escritas pelo time do projeto, e não dos editores (#259 foi `wontfix`, #341). Entram aqui,
-# no mesmo formato; o Bruno confere a lista no PR e o veredito é o do `make sondar-busca`.
+# As consultas do aceite vêm dos casos de uso do plano (E2: assunto, frase dita, nome, filtros;
+# E6: consulta visual de texto), escritas pelo time do projeto, e não dos editores (#259 foi
+# `wontfix`, #341). Entram aqui, no mesmo formato; o Bruno confere a lista no PR e o veredito
+# é o do `make sondar-busca`.
 
 [[consulta]]
 texto = "terno"
