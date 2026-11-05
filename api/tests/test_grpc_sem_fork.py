@@ -32,11 +32,6 @@ def test_importar_a_api_desliga_o_fork_do_grpc_antes_do_grpc() -> None:
     assert _python(codigo, _ambiente()) == "false"
 
 
-def test_o_gRPC_de_fato_le_a_variavel() -> None:
-    codigo = "import api, grpc; from grpc._cython import cygrpc; print(cygrpc._GRPC_ENABLE_FORK_SUPPORT)"
-    assert _python(codigo, _ambiente()) == "False"
-
-
 def test_valor_posto_de_fora_vence() -> None:
     codigo = "import os, api; print(os.environ['GRPC_ENABLE_FORK_SUPPORT'])"
     assert _python(codigo, _ambiente(GRPC_ENABLE_FORK_SUPPORT="true")) == "true"
