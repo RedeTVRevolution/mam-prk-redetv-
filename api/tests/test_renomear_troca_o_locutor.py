@@ -28,6 +28,14 @@ def _renomear(mundo: Mundo, item_id: str, valor: str) -> str:
     return str(resposta.json()["id"])
 
 
+def _dar_a_primeira_fala_a_carla(mundo: Mundo) -> None:
+    valor: dict[str, Any] = {"texto": "Boa noite", "locutor": "Carla Dias"}
+    resposta = mundo.corrigir(
+        tipo="fala.texto", item_id="fal000", valor=json.dumps(valor), versao=VERSAO
+    )
+    assert resposta.status_code == 201
+
+
 def _locutores(mundo: Mundo) -> list[str]:
     return [f["locutor"] for f in mundo.decupagem()["transcricao"]]
 
@@ -77,21 +85,14 @@ def test_duas_trocas_seguidas_levam_as_falas_ate_o_ultimo_nome() -> None:
 def test_correcao_de_fala_depois_da_troca_vale_sobre_ela() -> None:
     mundo = _mundo()
     _renomear(mundo, "pes01", "Alberto")
-    valor: dict[str, Any] = {"texto": "Boa noite", "locutor": "Carla Dias"}
-    resposta = mundo.corrigir(
-        tipo="fala.texto", item_id="fal000", valor=json.dumps(valor), versao=VERSAO
-    )
-    assert resposta.status_code == 201
+    _dar_a_primeira_fala_a_carla(mundo)
 
     assert _locutores(mundo)[:2] == ["Carla Dias", "Alberto"]
 
 
 def test_correcao_de_fala_antes_da_troca_com_outro_locutor_nao_e_tocada() -> None:
     mundo = _mundo()
-    valor: dict[str, Any] = {"texto": "Boa noite", "locutor": "Carla Dias"}
-    mundo.corrigir(
-        tipo="fala.texto", item_id="fal000", valor=json.dumps(valor), versao=VERSAO
-    )
+    _dar_a_primeira_fala_a_carla(mundo)
     mundo.avancar()
 
     _renomear(mundo, "pes01", "Alberto")
