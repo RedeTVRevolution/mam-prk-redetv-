@@ -138,7 +138,17 @@ def test_soma_os_clipes_antes_de_calcular() -> None:
 def test_tempo_mmss() -> None:
     assert tempo_ms("01:05") == 65_000
     assert tempo_ms("10:00") == 600_000
-    for ruim in ["1:5", "00:60", "abc", "-1:00"]:
+    assert tempo_ms("90:00") == 5_400_000  # em MM:SS os minutos passam de 59
+    for ruim in ["1:5", "00:60", "abc", "-1:00", "1:2:3", "00:00:60"]:
+        with pytest.raises(ValueError):
+            tempo_ms(ruim)
+
+
+def test_tempo_hhmmss() -> None:
+    assert tempo_ms("00:01:05") == 65_000
+    assert tempo_ms("1:30:00") == 5_400_000
+    assert tempo_ms("01:59:59") == 7_199_000
+    for ruim in ["00:60:00", "01:00:60", "01:2:03", "00:00:00:00"]:
         with pytest.raises(ValueError):
             tempo_ms(ruim)
 
