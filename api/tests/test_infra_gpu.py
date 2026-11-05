@@ -139,8 +139,8 @@ def test_saidas_para_o_workflows_e_para_o_teste_depois_da_publicacao() -> None:
     assert re.search(r"job_de_ocr_gpu\s+= google_cloud_run_v2_job\.ocr_gpu\.name", MAIN)
 
 
-def test_a_espera_por_falta_de_gpu_tem_15_minutos_e_esperas_de_1_a_4_minutos() -> None:
-    assert re.search(r"default\s+= 15", _bloco('variable "espera_gpu_minutos"'))
+def test_a_espera_por_falta_de_gpu_tem_27_minutos_e_esperas_de_1_a_4_minutos() -> None:
+    assert re.search(r"default\s+= 27", _bloco('variable "espera_gpu_minutos"'))
     assert re.search(r"default\s+= 60", _bloco('variable "gpu_espera_s"'))
     assert re.search(r"default\s+= 2", _bloco('variable "gpu_fator_da_espera"'))
     assert re.search(r"default\s+= 240", _bloco('variable "gpu_espera_maxima_s"'))
