@@ -95,9 +95,34 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | `Idempotency-Key inválida` | Use um texto simples, como um UUID. |
 | 422 | `Cursor inválido` | Use o `X-Proximo-Cursor` da resposta anterior, sem mudar os filtros. |
 | 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`): leia `loc` e `msg` em `detail`. |
+| 304 | `Não mudou` | `GET /v1/jobs/{job_id}` com `If-None-Match` igual ao `ETag`: nada mudou, sem corpo. Use a cópia guardada. |
+| 404 | `Passada não encontrada` | O Job não tem essa passada: pegue o id em `GET /v1/jobs/{job_id}/passadas`. |
+| 404 | `Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado` | Escolha um plano de `GET /v1/busca/parecidos/planos`. |
+| 411 | `Envie o tamanho do pedido` | A busca por imagem exige `Content-Length`. |
+| 422 | `No máximo 200 ids` | `GET /v1/jobs/andamento` aceita até 200 ids por chamada. |
+| 422 | `O início do período passa do fim` | Na busca, `desde` é depois de `ate`. |
+| 422 | `A imagem passa do tamanho máximo` | A foto da busca por imagem passa de 5 MB. |
+| 422 | `A imagem passa do tamanho máximo em pixels` | A foto passa de 25 milhões de pixels. |
+| 422 | `Envie uma imagem JPEG ou PNG válida` | O arquivo não é JPEG nem PNG, ou está corrompido. |
+| 422 | `Envie a imagem no campo arquivo` | O multipart da busca por imagem não tem o campo `arquivo`. |
+| 429 | `Consultas demais; tente em um minuto` | As buscas têm limite de 30 por minuto por chave. Espere e repita. |
+| 503 | `A busca por imagem não está disponível agora` | Repita com espera crescente. |
+| 504 | `A busca demorou demais` | Repita; se persistir, simplifique a consulta. |
 | 503 | `Serviço indisponível` | Falha passageira. Repita com espera crescente; no `POST /v1/jobs`, com o mesmo `Idempotency-Key`. |
 
 `<estado>` na mensagem é o estado real do Job, por exemplo `Job em analisando, não concluido`.
+
+## 9. Buscar nos vídeos e ler o catálogo
+
+Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. Cada exemplo abaixo supõe `URL` e `CHAVE` no ambiente; o OpenAPI traz o formato completo das respostas.
+
+- **Buscar por texto:** `GET /v1/busca?q=vestido+azul` devolve vídeos e momentos (`inicio_ms`, `fim_ms`, `motivo` e `quadro`). Filtros: `ev`, `tipo`, `pessoa`, `marca`, `programa`, `desde`, `ate`, `ordem`, `limite`. `curl -H "X-API-Key: $CHAVE" "$URL/v1/busca?q=vestido+azul"`
+- **Buscar por imagem:** `POST /v1/busca/imagem` com o arquivo no campo `arquivo` (multipart). `curl -H "X-API-Key: $CHAVE" -F arquivo=@foto.jpg "$URL/v1/busca/imagem"`
+- **Planos parecidos:** `GET /v1/busca/parecidos/planos?job=<id>` para saber quais planos têm busca e `GET /v1/busca/parecidos?job=<id>&plano=<n>` para buscá-los.
+- **Quadro de um momento:** `GET /v1/jobs/{job_id}/quadros/{arquivo}` devolve a URL do JPEG; `arquivo` é o nome em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`).
+- **Andamento de vários Jobs:** `GET /v1/jobs/andamento?ids=a,b,c` (até 200 ids).
+- **Passadas:** `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}` e `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, para comparar a decupagem de outro modelo com a entregue.
+- **Catálogo e vocabulários:** `GET /v1/catalogo/pessoas?q=`, `GET /v1/catalogo/marcas?q=`, `GET /v1/objetos/tipos` e `GET /v1/correcoes/catalogo`.
 
 ## Rotas deste guia
 

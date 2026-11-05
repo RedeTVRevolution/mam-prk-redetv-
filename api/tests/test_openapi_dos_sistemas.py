@@ -27,6 +27,14 @@ def _operacoes_do_esquema() -> list[tuple[str, str, dict[str, Any]]]:
     ]
 
 
+def _exemplos_de(resposta: dict[str, Any]) -> list[Any]:
+    """Os exemplos de um erro: um `example`, ou um por nome em `examples`."""
+    conteudo = resposta["content"]["application/json"]
+    if "example" in conteudo:
+        return [conteudo["example"]]
+    return [e["value"] for e in conteudo["examples"].values()]
+
+
 def test_toda_rota_documentada_existe_no_app() -> None:
     do_app = {
         (metodo.upper(), caminho)
@@ -44,7 +52,11 @@ def test_toda_rota_dos_sistemas_tem_descricao_e_exemplo() -> None:
         assert len(operacao.get("description", "")) > 40, onde
         corpo = operacao.get("requestBody")
         if corpo is not None:
-            assert "example" in corpo["content"]["application/json"], onde
+            conteudo = corpo["content"]
+            if "application/json" in conteudo:
+                assert "example" in conteudo["application/json"], onde
+            else:
+                assert "multipart/form-data" in conteudo, onde
         sucesso = [s for s in operacao["responses"] if s.startswith("2")]
         assert sucesso, onde
         for status in sucesso:
@@ -62,8 +74,10 @@ def test_todo_erro_de_cada_rota_tem_exemplo_e_pelo_menos_o_401() -> None:
         for status, resposta in operacao["responses"].items():
             if status.startswith("2"):
                 continue
-            exemplo = resposta["content"]["application/json"]["example"]
-            assert "detail" in exemplo, f"{onde} {status}"
+            if status == "304":
+                continue  # sem corpo
+            for exemplo in _exemplos_de(resposta):
+                assert "detail" in exemplo, f"{onde} {status}"
 
 
 def test_o_openapi_do_repositorio_bate_com_o_gerado() -> None:
@@ -99,6 +113,8 @@ def test_cada_mensagem_de_erro_documentada_existe_no_codigo() -> None:
     padroes = _textos_do_codigo()
     for o in OPERACOES:
         for erro in o.erros:
+            if erro.sem_corpo:
+                continue
             detalhe = erro.corpo["detail"]
             if isinstance(detalhe, list):
                 continue  # a lista da validação vem do FastAPI
@@ -112,12 +128,14 @@ def test_o_esquema_de_cada_erro_aceita_o_exemplo() -> None:
         for status, resposta in operacao["responses"].items():
             if status.startswith("2"):
                 continue
-            conteudo = resposta["content"]["application/json"]
-            refs = json.dumps(conteudo["schema"])
-            em_texto = isinstance(conteudo["example"]["detail"], str)
-            assert (ERRO_EM_TEXTO if em_texto else "HTTPValidationError") in refs, (
-                f"{metodo} {caminho} {status}"
-            )
+            if status == "304":
+                continue
+            refs = json.dumps(resposta["content"]["application/json"]["schema"])
+            for exemplo in _exemplos_de(resposta):
+                em_texto = isinstance(exemplo["detail"], str)
+                assert (ERRO_EM_TEXTO if em_texto else "HTTPValidationError") in refs, (
+                    f"{metodo} {caminho} {status}"
+                )
 
 
 def test_o_guia_cita_cada_rota_e_cada_erro_entre_crases() -> None:

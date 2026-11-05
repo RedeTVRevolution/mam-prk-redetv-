@@ -366,12 +366,7 @@ def criar_rotas_da_busca(
             log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         except PlanoSemVetor:
-            raise HTTPException(
-                404,
-                "Este plano não tem vetor do quadro (vídeo indexado antes da busca "
-                "por imagem, ou índice do quadro desligado), ou o vídeo não foi "
-                "encontrado",
-            ) from None
+            raise HTTPException(404, _PLANO_SEM_VETOR) from None
         # Não há consulta: o ponto de partida é o plano de um vídeo.
         registrar_busca(
             chamador, None, None, resultado, job, modo="parecidos", plano=plano
@@ -384,3 +379,5 @@ def criar_rotas_da_busca(
 _RECUSA = "Envie uma imagem JPEG ou PNG válida"
 _GRANDE_DEMAIS = "A imagem passa do tamanho máximo"
 _PIXELS_DEMAIS = "A imagem passa do tamanho máximo em pixels"
+# Numa linha só: o teste do OpenAPI dos sistemas procura a mensagem inteira no código.
+_PLANO_SEM_VETOR = "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado"

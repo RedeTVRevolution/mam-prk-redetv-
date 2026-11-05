@@ -253,11 +253,46 @@
             }
           },
           "422": {
-            "description": "Tamanho fora do limite. O `tamanho_bytes` é zero ou passa do máximo (4 GiB). Outros 422 deste pedido: `Data de exibição no futuro`, `Idempotency-Key inválida` e o `Erro de validação` dos campos (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`).",
+            "description": "Tamanho fora do limite. O `tamanho_bytes` é zero ou passa do máximo (4 GiB).\n\nData de exibição no futuro. A `data_exibicao` é depois de hoje (Brasília). Mande a data em que o programa foi ao ar.\n\nIdempotency-Key inválida. O cabeçalho `Idempotency-Key` está vazio, passa de 255 caracteres ou tem caractere que não é ASCII imprimível. Use um UUID.\n\nErro de validação. Um campo do corpo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`). Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
             "content": {
               "application/json": {
-                "example": {
-                  "detail": "Tamanho fora do limite"
+                "examples": {
+                  "Tamanho fora do limite": {
+                    "summary": "Tamanho fora do limite",
+                    "value": {
+                      "detail": "Tamanho fora do limite"
+                    }
+                  },
+                  "Data de exibição no futuro": {
+                    "summary": "Data de exibição no futuro",
+                    "value": {
+                      "detail": "Data de exibição no futuro"
+                    }
+                  },
+                  "Idempotency-Key inválida": {
+                    "summary": "Idempotency-Key inválida",
+                    "value": {
+                      "detail": "Idempotency-Key inválida"
+                    }
+                  },
+                  "Erro de validação": {
+                    "summary": "Erro de validação",
+                    "value": {
+                      "detail": [
+                        {
+                          "type": "missing",
+                          "loc": [
+                            "body",
+                            "data_exibicao"
+                          ],
+                          "msg": "Field required",
+                          "input": {
+                            "nome": "TARD_20261103_BLU.mp4"
+                          }
+                        }
+                      ]
+                    }
+                  }
                 },
                 "schema": {
                   "anyOf": [
@@ -581,6 +616,15 @@
               "type": "string",
               "title": "Job Id"
             }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "O `ETag` da última leitura. Se o Job não mudou, a resposta é `304` sem corpo.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -627,6 +671,17 @@
                   },
                   "criado_em": "2026-11-03T21:00:00.000000Z",
                   "atualizado_em": "2026-11-03T21:14:05.120000Z"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Não mudou. O `If-None-Match` casa com o `ETag` atual: nada mudou desde a última leitura e a resposta vem sem corpo. Use a cópia que você guardou.",
+            "headers": {
+              "ETag": {
+                "description": "A versão atual.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -1369,10 +1424,2651 @@
           "sistemas"
         ]
       }
+    },
+    "/v1/jobs/andamento": {
+      "get": {
+        "summary": "Estado de vários Jobs de uma vez",
+        "description": "O estado de até 200 Jobs numa leitura só (`ids` separados por vírgula), para atualizar o que está em andamento sem uma chamada por Job: o mesmo detalhe de `GET /v1/jobs/{job_id}`, sem `capa_url` e sem `cortes_ms`. Id que não existe ou é de outro sistema é omitido da lista, sem erro. Escopo `ler`.",
+        "operationId": "andamento_v1_jobs_andamento_get",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Até 200 ids, separados por vírgula",
+              "title": "Ids"
+            },
+            "description": "Até 200 ids, separados por vírgula"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobResumido"
+                  },
+                  "title": "Response Andamento V1 Jobs Andamento Get"
+                },
+                "example": [
+                  {
+                    "id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
+                    "nome": "TARD_20261103_BLU.mp4",
+                    "estado": "concluido",
+                    "codigo_falha": null,
+                    "duracao_s": 598.4,
+                    "timecode_origem": null,
+                    "taxa_de_quadros": 29.97,
+                    "programa": "TV Fama",
+                    "data_exibicao": "2026-11-03",
+                    "indexacao": null,
+                    "copia_bigquery": null,
+                    "etapa_atual": null,
+                    "etapas": [
+                      {
+                        "inicio": "2026-11-03T21:02:10.000000Z",
+                        "fim": "2026-11-03T21:02:40.000000Z",
+                        "resultado": "concluida",
+                        "dispositivo": null,
+                        "tentativas_gpu": null,
+                        "nome": "validacao"
+                      }
+                    ],
+                    "reprocessamentos": 0,
+                    "enviado_por": {
+                      "tipo": "sistema",
+                      "nome": "sistema-legado"
+                    },
+                    "criado_em": "2026-11-03T21:00:00.000000Z",
+                    "atualizado_em": "2026-11-03T21:14:05.120000Z"
+                  }
+                ]
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No máximo 200 ids. Peça até 200 ids por chamada; divida o resto em outras.\n\nErro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "No máximo 200 ids": {
+                    "summary": "No máximo 200 ids",
+                    "value": {
+                      "detail": "No máximo 200 ids"
+                    }
+                  },
+                  "Erro de validação": {
+                    "summary": "Erro de validação",
+                    "value": {
+                      "detail": [
+                        {
+                          "type": "literal_error",
+                          "loc": [
+                            "query",
+                            "ids"
+                          ],
+                          "msg": "Field required",
+                          "input": null
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErroEmTexto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/quadros/{arquivo}": {
+      "get": {
+        "summary": "URL de um quadro do vídeo",
+        "operationId": "quadro_v1_jobs__job_id__quadros__arquivo__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "arquivo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*\\.jpg$",
+              "title": "Arquivo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reproducao"
+                },
+                "example": {
+                  "url": "https://storage.googleapis.com/BUCKET/...",
+                  "expira_em": "2026-11-03T21:14:05.120000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job não encontrado. O id não existe ou o Job é de outro sistema. Cada chave só enxerga os próprios Jobs.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job em <estado>, não concluido. O Job ainda não terminou (ou falhou). Espere o webhook ou consulte `GET /v1/jobs/{job_id}` até o `estado` ser `concluido`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Job em analisando, não concluido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "literal_error",
+                      "loc": [
+                        "path",
+                        "arquivo"
+                      ],
+                      "msg": "String should match pattern '^[A-Za-z0-9]...'",
+                      "input": "x"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "description": "Uma URL assinada, de 10 minutos, de um quadro JPEG do vídeo. O `arquivo` é o nome que a busca devolve em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`). Só existe com o Job `concluido`. Escopo `ler`.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/passadas": {
+      "get": {
+        "summary": "Listar as passadas do Job",
+        "operationId": "listar_v1_jobs__job_id__passadas_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResumoDaPassada"
+                  },
+                  "title": "Response Listar V1 Jobs  Job Id  Passadas Get"
+                },
+                "example": [
+                  {
+                    "id": "gemini-3.1-pro-20261104",
+                    "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
+                    "modelo": "gemini-3.1-pro",
+                    "criada_em": "2026-11-04T12:00:00.000000Z",
+                    "custo": {
+                      "tokens_de_entrada": 1250000,
+                      "tokens_de_saida": 38000,
+                      "preco_por_milhao_de_entrada": 2.0,
+                      "preco_por_milhao_de_saida": 12.0,
+                      "usd": 2.956
+                    },
+                    "etapas": [
+                      {
+                        "nome": "analise",
+                        "segundos": 212.4
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job não encontrado. O id não existe ou o Job é de outro sistema. Cada chave só enxerga os próprios Jobs.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Job não encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "description": "As passadas do vídeo: análises extras que o time do MAM rodou, com outro modelo, para comparar com a decupagem entregue. Cada item traz o modelo, o custo e o tempo por etapa, sem a decupagem. Do mais antigo ao mais novo; lista vazia se não há. Escopo `ler`.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/passadas/{passada_id}": {
+      "get": {
+        "summary": "Ler uma passada",
+        "operationId": "ler_v1_jobs__job_id__passadas__passada_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "passada_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+              "title": "Passada Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Passada"
+                },
+                "example": {
+                  "id": "gemini-3.1-pro-20261104",
+                  "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
+                  "modelo": "gemini-3.1-pro",
+                  "criada_em": "2026-11-04T12:00:00.000000Z",
+                  "custo": {
+                    "tokens_de_entrada": 1250000,
+                    "tokens_de_saida": 38000,
+                    "preco_por_milhao_de_entrada": 2.0,
+                    "preco_por_milhao_de_saida": 12.0,
+                    "usd": 2.956
+                  },
+                  "etapas": [
+                    {
+                      "nome": "analise",
+                      "segundos": 212.4
+                    }
+                  ],
+                  "decupagem": {
+                    "versao_esquema": "1.4",
+                    "video": {
+                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "duracao_ms": 598400
+                    },
+                    "programa": {
+                      "resumo": "Edição de terça com bastidores e notícias de famosos.",
+                      "blocos": [
+                        {
+                          "inicio_ms": 0,
+                          "fim_ms": 9800,
+                          "titulo": "Abertura"
+                        }
+                      ]
+                    },
+                    "pautas": [
+                      {
+                        "id": "pauta-1",
+                        "inicio_ms": 9800,
+                        "fim_ms": 120000,
+                        "titulo": "Bastidores da novela",
+                        "resumo": "A apresentadora recebe o elenco no estúdio."
+                      }
+                    ],
+                    "pessoas": [
+                      {
+                        "id": "pessoa-1",
+                        "nome": "Fulana de Tal",
+                        "na_imagem": [
+                          {
+                            "inicio_ms": 0,
+                            "fim_ms": 9800,
+                            "evidencia": "rosto"
+                          }
+                        ],
+                        "citada_na_fala": [],
+                        "citada_no_texto": []
+                      }
+                    ],
+                    "planos": [
+                      {
+                        "id": "plano-1",
+                        "inicio_ms": 0,
+                        "fim_ms": 4200,
+                        "ambiente": "estúdio",
+                        "plano_limpo": false
+                      }
+                    ],
+                    "comerciais": [],
+                    "transcricao": [
+                      {
+                        "inicio_ms": 1200,
+                        "fim_ms": 3900,
+                        "locutor": "pessoa-1",
+                        "texto": "Boa noite, bem-vindos ao programa."
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job não encontrado. O id não existe ou o Job é de outro sistema. Cada chave só enxerga os próprios Jobs.\n\nPassada não encontrada. O Job não tem uma passada com esse id: pegue o id em `GET /v1/jobs/{job_id}/passadas`.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "Job não encontrado": {
+                    "summary": "Job não encontrado",
+                    "value": {
+                      "detail": "Job não encontrado"
+                    }
+                  },
+                  "Passada não encontrada": {
+                    "summary": "Passada não encontrada",
+                    "value": {
+                      "detail": "Passada não encontrada"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "description": "Uma passada inteira: o resumo (modelo, custo, etapas) e a Decupagem que ela gerou, no mesmo esquema da entregue. Não recebe correções. Escopo `ler`. O exemplo abaixo está resumido.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/passadas/{passada_id}/comparacao": {
+      "get": {
+        "summary": "Comparar a passada com a decupagem do Job",
+        "operationId": "comparacao_v1_jobs__job_id__passadas__passada_id__comparacao_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "passada_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+              "title": "Passada Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparacaoNaTela"
+                },
+                "example": {
+                  "passada_id": "gemini-3.1-pro-20261104",
+                  "modelo": "gemini-3.1-pro",
+                  "modelo_do_job": "gemini-3.1-flash",
+                  "duracao_ms": 598400,
+                  "a": {
+                    "custo_usd": null,
+                    "custo_por_hora_usd": null,
+                    "tempo_total_s": 180.2,
+                    "etapas": [
+                      {
+                        "nome": "analise",
+                        "segundos": 150.0
+                      }
+                    ]
+                  },
+                  "b": {
+                    "custo_usd": 2.956,
+                    "custo_por_hora_usd": 17.78,
+                    "tempo_total_s": 212.4,
+                    "etapas": [
+                      {
+                        "nome": "analise",
+                        "segundos": 212.4
+                      }
+                    ]
+                  },
+                  "requisitos": [
+                    {
+                      "nome": "famosos",
+                      "a": [
+                        {
+                          "identidade": "pessoa-1",
+                          "inicio_ms": 0,
+                          "fim_ms": 9800,
+                          "detalhe": null,
+                          "marca": "igual",
+                          "motivos": []
+                        }
+                      ],
+                      "b": [
+                        {
+                          "identidade": "pessoa-1",
+                          "inicio_ms": 0,
+                          "fim_ms": 9800,
+                          "detalhe": null,
+                          "marca": "igual",
+                          "motivos": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job não encontrado. O id não existe ou o Job é de outro sistema. Cada chave só enxerga os próprios Jobs.\n\nPassada não encontrada. O Job não tem uma passada com esse id: pegue o id em `GET /v1/jobs/{job_id}/passadas`.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "Job não encontrado": {
+                    "summary": "Job não encontrado",
+                    "value": {
+                      "detail": "Job não encontrado"
+                    }
+                  },
+                  "Passada não encontrada": {
+                    "summary": "Passada não encontrada",
+                    "value": {
+                      "detail": "Passada não encontrada"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Job em <estado>, não concluido. O Job ainda não terminou (ou falhou). Espere o webhook ou consulte `GET /v1/jobs/{job_id}` até o `estado` ser `concluido`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Job em analisando, não concluido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "description": "A decupagem do modelo do Job (lado `a`, sem correções) contra a passada (lado `b`), em seis requisitos (`famosos`, `mencoes`, `pautas`, `broll_limpos`, `broll_descricoes` e `comerciais`). Cada item vem marcado `igual`, `difere` (com os `motivos`) ou `so_aqui`. Traz também o custo e o tempo de cada lado. Só existe com o Job `concluido`. Escopo `ler`. O exemplo abaixo está resumido.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/objetos/tipos": {
+      "get": {
+        "summary": "Tipos de objeto conhecidos",
+        "operationId": "buscar_v1_objetos_tipos_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": "",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TipoDeObjeto"
+                  },
+                  "title": "Response Buscar V1 Objetos Tipos Get"
+                },
+                "example": [
+                  {
+                    "tipo": "camisa",
+                    "ocorrencias": 412
+                  },
+                  {
+                    "tipo": "bolsa",
+                    "ocorrencias": 97
+                  }
+                ]
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "literal_error",
+                      "loc": [
+                        "query",
+                        "q"
+                      ],
+                      "msg": "String should have at most 100 characters",
+                      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "description": "Os tipos de objeto que as decupagens já têm (`camisa`, `bolsa`...), do mais frequente ao menos, com quantas ocorrências cada um. `q` filtra pelo começo do nome; sem `q`, vêm os mais frequentes. Escopo `ler`.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/catalogo/pessoas": {
+      "get": {
+        "summary": "Achar pessoas no catálogo",
+        "operationId": "achar_pessoas_v1_catalogo_pessoas_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PessoaAchada"
+                  },
+                  "title": "Response Achar Pessoas V1 Catalogo Pessoas Get"
+                },
+                "example": [
+                  {
+                    "id": "pessoa-1",
+                    "nome": "Fulana de Tal",
+                    "papel": "apresentadora",
+                    "rotulo": "Fulana de Tal (apresentadora)",
+                    "a_revisar": false
+                  }
+                ]
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "literal_error",
+                      "loc": [
+                        "query",
+                        "q"
+                      ],
+                      "msg": "Field required",
+                      "input": null
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "description": "As pessoas do catálogo cujo nome ou apelido casa com `q` pelo começo das palavras (sem diferença de maiúsculas ou acento, e com tolerância a um erro de digitação), para achar o `id` que se usa na busca. `a_revisar` marca a que ainda espera revisão de um curador. Escopo `ler`.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/catalogo/marcas": {
+      "get": {
+        "summary": "Achar marcas no catálogo",
+        "operationId": "achar_marcas_v1_catalogo_marcas_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MarcaAchada"
+                  },
+                  "title": "Response Achar Marcas V1 Catalogo Marcas Get"
+                },
+                "example": [
+                  {
+                    "id": "marca-1",
+                    "nome": "Marca Exemplo",
+                    "a_revisar": false
+                  }
+                ]
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "literal_error",
+                      "loc": [
+                        "query",
+                        "q"
+                      ],
+                      "msg": "Field required",
+                      "input": null
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "description": "As marcas do catálogo cujo nome ou apelido casa com `q` pelo começo das palavras (sem diferença de maiúsculas ou acento, e com tolerância a um erro de digitação). `a_revisar` marca a que ainda espera revisão de um curador. Escopo `ler`.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/busca": {
+      "get": {
+        "summary": "Buscar momentos por texto",
+        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`), `visual` e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
+        "operationId": "buscar_v1_busca_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "ordem",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "relevancia",
+                "data"
+              ],
+              "type": "string",
+              "default": "relevancia",
+              "title": "Ordem"
+            }
+          },
+          {
+            "name": "ev",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "imagem",
+                      "citada",
+                      "fala",
+                      "gc",
+                      "objeto",
+                      "marca"
+                    ],
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ev"
+            }
+          },
+          {
+            "name": "programa",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Programa"
+            }
+          },
+          {
+            "name": "desde",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desde"
+            }
+          },
+          {
+            "name": "ate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ate"
+            }
+          },
+          {
+            "name": "sem_periodo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Sem Periodo"
+            }
+          },
+          {
+            "name": "pessoa",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pessoa"
+            }
+          },
+          {
+            "name": "marca",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Marca"
+            }
+          },
+          {
+            "name": "tipo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "plano",
+                    "fala",
+                    "texto_na_tela",
+                    "objeto"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tipo"
+            }
+          },
+          {
+            "name": "visual",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Visual"
+            }
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limite"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultadoDaBusca"
+                },
+                "example": {
+                  "entendida": {
+                    "evidencias": [
+                      "imagem",
+                      "citada"
+                    ],
+                    "programa": null,
+                    "desde": null,
+                    "ate": null,
+                    "visual": false
+                  },
+                  "videos": [
+                    {
+                      "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
+                      "nome": "TARD_20261103_BLU.mp4",
+                      "programa": "TV Fama",
+                      "data_exibicao": "2026-11-03",
+                      "duracao_s": 598.4,
+                      "n_momentos": 1,
+                      "momentos": [
+                        {
+                          "tipo": "plano",
+                          "inicio_ms": 9800,
+                          "fim_ms": 14200,
+                          "motivo": "Fulana de Tal recebe o elenco no estúdio.",
+                          "destaques": [
+                            {
+                              "inicio": 0,
+                              "fim": 12
+                            }
+                          ],
+                          "quadro_url": null,
+                          "quadro": "quadros/plano-6.jpg"
+                        }
+                      ]
+                    }
+                  ],
+                  "sem_aparicoes": [],
+                  "plano_b": false,
+                  "facetas": {
+                    "programa": [
+                      {
+                        "valor": "TV Fama",
+                        "rotulo": "TV Fama",
+                        "videos": 1
+                      }
+                    ],
+                    "mes": [
+                      {
+                        "valor": "2026-11",
+                        "rotulo": "novembro de 2026",
+                        "videos": 1
+                      }
+                    ],
+                    "pessoa": [
+                      {
+                        "valor": "pessoa-1",
+                        "rotulo": "Fulana de Tal",
+                        "videos": 1
+                      }
+                    ],
+                    "marca": [],
+                    "tipo": [
+                      {
+                        "valor": "plano",
+                        "rotulo": "plano",
+                        "videos": 1
+                      }
+                    ]
+                  },
+                  "quadros_expiram_em": "2026-11-03T21:14:05.120000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "O início do período passa do fim. `desde` é depois de `ate`. Troque os dois.\n\nErro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "O início do período passa do fim": {
+                    "summary": "O início do período passa do fim",
+                    "value": {
+                      "detail": "O início do período passa do fim"
+                    }
+                  },
+                  "Erro de validação": {
+                    "summary": "Erro de validação",
+                    "value": {
+                      "detail": [
+                        {
+                          "type": "literal_error",
+                          "loc": [
+                            "query",
+                            "q"
+                          ],
+                          "msg": "Field required",
+                          "input": null
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErroEmTexto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Consultas demais; tente em um minuto"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "A busca demorou demais"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/busca/imagem": {
+      "post": {
+        "summary": "Buscar momentos por imagem",
+        "description": "Acha os planos parecidos com uma foto. O corpo é `multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória: não é guardada. Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
+        "operationId": "buscar_por_imagem_v1_busca_imagem_post",
+        "parameters": [
+          {
+            "name": "programa",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Programa"
+            }
+          },
+          {
+            "name": "desde",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desde"
+            }
+          },
+          {
+            "name": "ate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ate"
+            }
+          },
+          {
+            "name": "sem_periodo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Sem Periodo"
+            }
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limite"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultadoDaBusca"
+                },
+                "example": {
+                  "entendida": {
+                    "evidencias": [
+                      "imagem",
+                      "citada"
+                    ],
+                    "programa": null,
+                    "desde": null,
+                    "ate": null,
+                    "visual": false
+                  },
+                  "videos": [
+                    {
+                      "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
+                      "nome": "TARD_20261103_BLU.mp4",
+                      "programa": "TV Fama",
+                      "data_exibicao": "2026-11-03",
+                      "duracao_s": 598.4,
+                      "n_momentos": 1,
+                      "momentos": [
+                        {
+                          "tipo": "plano",
+                          "inicio_ms": 9800,
+                          "fim_ms": 14200,
+                          "motivo": "Fulana de Tal recebe o elenco no estúdio.",
+                          "destaques": [
+                            {
+                              "inicio": 0,
+                              "fim": 12
+                            }
+                          ],
+                          "quadro_url": null,
+                          "quadro": "quadros/plano-6.jpg"
+                        }
+                      ]
+                    }
+                  ],
+                  "sem_aparicoes": [],
+                  "plano_b": false,
+                  "facetas": {
+                    "programa": [
+                      {
+                        "valor": "TV Fama",
+                        "rotulo": "TV Fama",
+                        "videos": 1
+                      }
+                    ],
+                    "mes": [
+                      {
+                        "valor": "2026-11",
+                        "rotulo": "novembro de 2026",
+                        "videos": 1
+                      }
+                    ],
+                    "pessoa": [
+                      {
+                        "valor": "pessoa-1",
+                        "rotulo": "Fulana de Tal",
+                        "videos": 1
+                      }
+                    ],
+                    "marca": [],
+                    "tipo": [
+                      {
+                        "valor": "plano",
+                        "rotulo": "plano",
+                        "videos": 1
+                      }
+                    ]
+                  },
+                  "quadros_expiram_em": "2026-11-03T21:14:05.120000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "411": {
+            "description": "Envie o tamanho do pedido. Mande o cabeçalho `Content-Length` (um cliente comum já manda).",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Envie o tamanho do pedido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "O início do período passa do fim. `desde` é depois de `ate`. Troque os dois.\n\nA imagem passa do tamanho máximo. O arquivo passa de 5 MB. Reduza a foto.\n\nA imagem passa do tamanho máximo em pixels. A foto passa de 25 milhões de pixels. Reduza a foto.\n\nEnvie uma imagem JPEG ou PNG válida. O arquivo não é JPEG nem PNG, ou está corrompido, ou o multipart está malformado.\n\nEnvie a imagem no campo arquivo. O multipart não tem o campo `arquivo`.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "O início do período passa do fim": {
+                    "summary": "O início do período passa do fim",
+                    "value": {
+                      "detail": "O início do período passa do fim"
+                    }
+                  },
+                  "A imagem passa do tamanho máximo": {
+                    "summary": "A imagem passa do tamanho máximo",
+                    "value": {
+                      "detail": "A imagem passa do tamanho máximo"
+                    }
+                  },
+                  "A imagem passa do tamanho máximo em pixels": {
+                    "summary": "A imagem passa do tamanho máximo em pixels",
+                    "value": {
+                      "detail": "A imagem passa do tamanho máximo em pixels"
+                    }
+                  },
+                  "Envie uma imagem JPEG ou PNG válida": {
+                    "summary": "Envie uma imagem JPEG ou PNG válida",
+                    "value": {
+                      "detail": "Envie uma imagem JPEG ou PNG válida"
+                    }
+                  },
+                  "Envie a imagem no campo arquivo": {
+                    "summary": "Envie a imagem no campo arquivo",
+                    "value": {
+                      "detail": "Envie a imagem no campo arquivo"
+                    }
+                  }
+                },
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ErroEmTexto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Consultas demais; tente em um minuto"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A busca por imagem não está disponível agora. O índice de imagens está desligado ou fora do ar. Repita com espera crescente.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "A busca por imagem não está disponível agora"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "A busca demorou demais"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sistemas"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "arquivo": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "A foto: JPEG ou PNG, até 5 MB."
+                  }
+                },
+                "required": [
+                  "arquivo"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/busca/parecidos/planos": {
+      "get": {
+        "summary": "Planos do vídeo que têm busca de parecidos",
+        "description": "Os números dos planos do vídeo (`job`) que têm vetor do quadro: só neles `GET /v1/busca/parecidos` acha algo. Não gasta o limite de consultas por minuto. Escopo `ler`.",
+        "operationId": "planos_com_vetor_v1_busca_parecidos_planos_get",
+        "parameters": [
+          {
+            "name": "job",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "title": "Job"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "title": "Response Planos Com Vetor V1 Busca Parecidos Planos Get"
+                },
+                "example": {
+                  "planos": [
+                    0,
+                    1,
+                    3,
+                    4
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "literal_error",
+                      "loc": [
+                        "query",
+                        "job"
+                      ],
+                      "msg": "Field required",
+                      "input": null
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "A busca demorou demais"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/busca/parecidos": {
+      "get": {
+        "summary": "Buscar planos parecidos com um plano",
+        "description": "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de 1 a 50 vídeos. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
+        "operationId": "buscar_parecidos_v1_busca_parecidos_get",
+        "parameters": [
+          {
+            "name": "job",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "title": "Job"
+            }
+          },
+          {
+            "name": "plano",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Plano"
+            }
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limite"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultadoDaBusca"
+                },
+                "example": {
+                  "entendida": {
+                    "evidencias": [
+                      "imagem",
+                      "citada"
+                    ],
+                    "programa": null,
+                    "desde": null,
+                    "ate": null,
+                    "visual": false
+                  },
+                  "videos": [
+                    {
+                      "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
+                      "nome": "TARD_20261103_BLU.mp4",
+                      "programa": "TV Fama",
+                      "data_exibicao": "2026-11-03",
+                      "duracao_s": 598.4,
+                      "n_momentos": 1,
+                      "momentos": [
+                        {
+                          "tipo": "plano",
+                          "inicio_ms": 9800,
+                          "fim_ms": 14200,
+                          "motivo": "Fulana de Tal recebe o elenco no estúdio.",
+                          "destaques": [
+                            {
+                              "inicio": 0,
+                              "fim": 12
+                            }
+                          ],
+                          "quadro_url": null,
+                          "quadro": "quadros/plano-6.jpg"
+                        }
+                      ]
+                    }
+                  ],
+                  "sem_aparicoes": [],
+                  "plano_b": false,
+                  "facetas": {
+                    "programa": [
+                      {
+                        "valor": "TV Fama",
+                        "rotulo": "TV Fama",
+                        "videos": 1
+                      }
+                    ],
+                    "mes": [
+                      {
+                        "valor": "2026-11",
+                        "rotulo": "novembro de 2026",
+                        "videos": 1
+                      }
+                    ],
+                    "pessoa": [
+                      {
+                        "valor": "pessoa-1",
+                        "rotulo": "Fulana de Tal",
+                        "videos": 1
+                      }
+                    ],
+                    "marca": [],
+                    "tipo": [
+                      {
+                        "valor": "plano",
+                        "rotulo": "plano",
+                        "videos": 1
+                      }
+                    ]
+                  },
+                  "quadros_expiram_em": "2026-11-03T21:14:05.120000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado. Escolha um plano de `GET /v1/busca/parecidos/planos`; se o vídeo é antigo, peça ao time do MAM para reindexá-lo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "literal_error",
+                      "loc": [
+                        "query",
+                        "plano"
+                      ],
+                      "msg": "Field required",
+                      "input": null
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Consultas demais; tente em um minuto"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "A busca demorou demais"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/correcoes/catalogo": {
+      "get": {
+        "summary": "Vocabulários das decupagens",
+        "description": "Os valores que os campos fixos da decupagem aceitam, com o rótulo em português: tipos de comercial e de texto na tela, tons da pauta, fontes do nome, categorias e cores de objeto, relações, e os limites de tamanho dos textos. Serve para ler os códigos que a decupagem traz. `tipos` lista os tipos de Correção que os revisores aplicam; a chave de sistema só lê. Escopo `ler`. O exemplo abaixo está resumido.",
+        "operationId": "tipos_de_correcao_v1_correcoes_catalogo_get",
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogoDeCorrecoes"
+                },
+                "example": {
+                  "tipos": [
+                    {
+                      "valor": "pessoa.renomear",
+                      "rotulo": "Renomear pessoa"
+                    }
+                  ],
+                  "tipos_de_comercial": [
+                    {
+                      "valor": "testemunhal",
+                      "rotulo": "testemunhal"
+                    }
+                  ],
+                  "tipos_de_texto_na_tela": [
+                    {
+                      "valor": "gc",
+                      "rotulo": "gc"
+                    }
+                  ],
+                  "tons_da_pauta": [
+                    {
+                      "valor": "polemico",
+                      "rotulo": "polêmico"
+                    }
+                  ],
+                  "fontes_do_nome": [
+                    {
+                      "valor": "rosto",
+                      "rotulo": "rosto"
+                    }
+                  ],
+                  "categorias_de_objeto": [
+                    {
+                      "valor": "calcado",
+                      "rotulo": "calçado"
+                    }
+                  ],
+                  "cores_base": [
+                    {
+                      "valor": "vermelho",
+                      "rotulo": "vermelho"
+                    }
+                  ],
+                  "relacoes_do_objeto": [
+                    {
+                      "valor": "veste",
+                      "rotulo": "veste"
+                    }
+                  ],
+                  "limites": {
+                    "nome": 200,
+                    "texto": 2000,
+                    "motivo": 500
+                  },
+                  "prefixos": {
+                    "acrescentado": "acr-",
+                    "nao_identificado": "nid-"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sistemas"
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "Aparicao": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "evidencia": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Evidencia",
+            "description": "O que mostra que é essa pessoa."
+          },
+          "papel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Papel",
+            "description": "Papel no trecho: apresentador, repórter, entrevistado, assunto da pauta ou flagrante."
+          },
+          "visual": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual",
+            "description": "Visual de destaque, se relevante (ex.: vestido de gala vermelho)."
+          },
+          "quadro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadro"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "evidencia"
+        ],
+        "title": "Aparicao"
+      },
+      "Bloco": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "titulo": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Titulo"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "titulo"
+        ],
+        "title": "Bloco"
+      },
+      "CaixaDoQuadro": {
+        "properties": {
+          "quadro": {
+            "type": "string",
+            "title": "Quadro"
+          },
+          "x": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X"
+          },
+          "y": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y"
+          },
+          "largura": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Largura"
+          },
+          "altura": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Altura"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quadro",
+          "x",
+          "y",
+          "largura",
+          "altura"
+        ],
+        "title": "CaixaDoQuadro",
+        "description": "Onde o objeto está num quadro do plano, em fração da largura e da altura."
+      },
+      "CatalogoDeCorrecoes": {
+        "properties": {
+          "tipos": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Tipos"
+          },
+          "tipos_de_comercial": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Tipos De Comercial"
+          },
+          "tipos_de_texto_na_tela": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Tipos De Texto Na Tela"
+          },
+          "tons_da_pauta": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Tons Da Pauta"
+          },
+          "fontes_do_nome": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Fontes Do Nome"
+          },
+          "categorias_de_objeto": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Categorias De Objeto"
+          },
+          "cores_base": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Cores Base"
+          },
+          "relacoes_do_objeto": {
+            "items": {
+              "$ref": "#/components/schemas/Opcao"
+            },
+            "type": "array",
+            "title": "Relacoes Do Objeto"
+          },
+          "limites": {
+            "$ref": "#/components/schemas/Limites"
+          },
+          "prefixos": {
+            "$ref": "#/components/schemas/Prefixos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tipos",
+          "tipos_de_comercial",
+          "tipos_de_texto_na_tela",
+          "tons_da_pauta",
+          "fontes_do_nome",
+          "categorias_de_objeto",
+          "cores_base",
+          "relacoes_do_objeto",
+          "limites",
+          "prefixos"
+        ],
+        "title": "CatalogoDeCorrecoes",
+        "description": "Resposta de `GET /v1/correcoes/catalogo`."
+      },
+      "Comercial": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "marca": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Marca"
+          },
+          "catalogo_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogo Id"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "intervalo",
+              "merchan_apresentador",
+              "testemunhal",
+              "produto_em_cena",
+              "patrocinio_vinheta",
+              "sobreposicao_grafica",
+              "marca_incidental",
+              "mencao_editorial"
+            ],
+            "title": "Tipo",
+            "description": "Banner, bug, QR code e chamada de site são sobreposicao_grafica; mencao_editorial é a marca citada sem ação comercial."
+          },
+          "evidencias": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "fala",
+                "logo",
+                "texto_na_tela",
+                "produto"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Evidencias",
+            "description": "O que mostra a ação comercial."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "marca",
+          "tipo",
+          "evidencias"
+        ],
+        "title": "Comercial"
+      },
+      "ComparacaoNaTela": {
+        "properties": {
+          "passada_id": {
+            "type": "string",
+            "title": "Passada Id"
+          },
+          "modelo": {
+            "type": "string",
+            "title": "Modelo"
+          },
+          "modelo_do_job": {
+            "type": "string",
+            "title": "Modelo Do Job"
+          },
+          "duracao_ms": {
+            "type": "integer",
+            "title": "Duracao Ms"
+          },
+          "a": {
+            "$ref": "#/components/schemas/LadoNaTela"
+          },
+          "b": {
+            "$ref": "#/components/schemas/LadoNaTela"
+          },
+          "requisitos": {
+            "items": {
+              "$ref": "#/components/schemas/RequisitoLadoALado"
+            },
+            "type": "array",
+            "title": "Requisitos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "passada_id",
+          "modelo",
+          "modelo_do_job",
+          "duracao_ms",
+          "a",
+          "b",
+          "requisitos"
+        ],
+        "title": "ComparacaoNaTela"
+      },
       "CopiaNoBigQuery": {
         "properties": {
           "estado": {
@@ -1409,6 +4105,406 @@
         ],
         "title": "CopiaNoBigQuery",
         "description": "Onde o Job está na cópia para o BigQuery (#260); falhar não muda o `estado` do Job."
+      },
+      "CorrecaoDaTranscricao": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "original": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Original",
+            "description": "A palavra como a transcrição a escreveu."
+          },
+          "corrigida": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Corrigida",
+            "description": "A palavra corrigida, parecida com a original."
+          },
+          "prova": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Prova",
+            "description": "Texto da tela (GC, tarja, logo, legenda) já registrado em textos_na_tela naquele momento, que contém a palavra corrigida."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "original",
+          "corrigida",
+          "prova"
+        ],
+        "title": "CorrecaoDaTranscricao",
+        "description": "Uma palavra do Whisper que o Gemini corrigiu, com a prova.\n\n`inicio`/`fim` são o momento da palavra; `original` é o que o Whisper\nescreveu e `prova` é um texto da tela, já registrado na análise naquele\nmomento, que contém a palavra corrigida."
+      },
+      "CorrecaoDescartada": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "original": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Original",
+            "description": "A palavra como a transcrição a escreveu."
+          },
+          "corrigida": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Corrigida",
+            "description": "A palavra corrigida, parecida com a original."
+          },
+          "prova": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Prova",
+            "description": "Texto da tela (GC, tarja, logo, legenda) já registrado em textos_na_tela naquele momento, que contém a palavra corrigida."
+          },
+          "motivo": {
+            "type": "string",
+            "enum": [
+              "original_ausente",
+              "sem_prova",
+              "semelhanca_abaixo_do_limiar"
+            ],
+            "title": "Motivo"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "original",
+          "corrigida",
+          "prova",
+          "motivo"
+        ],
+        "title": "CorrecaoDescartada"
+      },
+      "Custo": {
+        "properties": {
+          "tokens_de_entrada": {
+            "type": "integer",
+            "title": "Tokens De Entrada"
+          },
+          "tokens_de_saida": {
+            "type": "integer",
+            "title": "Tokens De Saida"
+          },
+          "preco_por_milhao_de_entrada": {
+            "type": "number",
+            "title": "Preco Por Milhao De Entrada"
+          },
+          "preco_por_milhao_de_saida": {
+            "type": "number",
+            "title": "Preco Por Milhao De Saida"
+          },
+          "usd": {
+            "type": "number",
+            "title": "Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tokens_de_entrada",
+          "tokens_de_saida",
+          "preco_por_milhao_de_entrada",
+          "preco_por_milhao_de_saida",
+          "usd"
+        ],
+        "title": "Custo"
+      },
+      "Decupagem": {
+        "properties": {
+          "versao_esquema": {
+            "type": "string",
+            "enum": [
+              "1.2",
+              "1.3",
+              "1.4"
+            ],
+            "title": "Versao Esquema"
+          },
+          "video": {
+            "$ref": "#/components/schemas/Video"
+          },
+          "programa": {
+            "$ref": "#/components/schemas/Programa"
+          },
+          "pautas": {
+            "items": {
+              "$ref": "#/components/schemas/Pauta"
+            },
+            "type": "array",
+            "title": "Pautas"
+          },
+          "pessoas": {
+            "items": {
+              "$ref": "#/components/schemas/Pessoa"
+            },
+            "type": "array",
+            "title": "Pessoas"
+          },
+          "objetos": {
+            "items": {
+              "$ref": "#/components/schemas/Objeto"
+            },
+            "type": "array",
+            "title": "Objetos",
+            "description": "O que cada pessoa veste, calça, usa e segura, cada peça com os atributos, o dono e os intervalos visíveis.",
+            "default": []
+          },
+          "planos": {
+            "items": {
+              "$ref": "#/components/schemas/Plano"
+            },
+            "type": "array",
+            "title": "Planos"
+          },
+          "comerciais": {
+            "items": {
+              "$ref": "#/components/schemas/Comercial"
+            },
+            "type": "array",
+            "title": "Comerciais"
+          },
+          "transcricao": {
+            "items": {
+              "$ref": "#/components/schemas/Fala"
+            },
+            "type": "array",
+            "title": "Transcricao",
+            "description": "As falas em trechos curtos, um por frase ou troca de quem fala."
+          },
+          "textos_na_tela": {
+            "items": {
+              "$ref": "#/components/schemas/TextoNaTela"
+            },
+            "type": "array",
+            "title": "Textos Na Tela",
+            "description": "GCs, tarjas, legendas, placares, chamadas, logos e QR codes. Cada vez que um texto fica visível é um item, com o início e o fim em que ele está na tela; um GC que sai e volta são dois itens. Nunca estenda o texto até o fim do bloco ou do plano.",
+            "default": []
+          },
+          "correcoes_da_transcricao": {
+            "items": {
+              "$ref": "#/components/schemas/CorrecaoDaTranscricao"
+            },
+            "type": "array",
+            "title": "Correcoes Da Transcricao",
+            "description": "Só quando a instrução traz a transcrição: palavras dela que você corrige, cada uma com a prova de um texto da tela. Sem prova, deixe como está. Nunca troque uma palavra por outra de som diferente.",
+            "default": []
+          },
+          "correcoes_descartadas": {
+            "items": {
+              "$ref": "#/components/schemas/CorrecaoDescartada"
+            },
+            "type": "array",
+            "title": "Correcoes Descartadas",
+            "default": []
+          },
+          "inventario_gerado_por": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GeradorDoInventario"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "versao_pipeline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versao Pipeline"
+          },
+          "manifesto_do_pipeline": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifesto Do Pipeline"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "versao_esquema",
+          "video",
+          "programa",
+          "pautas",
+          "pessoas",
+          "planos",
+          "comerciais",
+          "transcricao"
+        ],
+        "title": "Decupagem"
+      },
+      "Destaque": {
+        "properties": {
+          "inicio": {
+            "type": "integer",
+            "title": "Inicio"
+          },
+          "fim": {
+            "type": "integer",
+            "title": "Fim"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inicio",
+          "fim"
+        ],
+        "title": "Destaque",
+        "description": "Posições `[inicio, fim)` no `motivo`, em caracteres; nunca HTML."
+      },
+      "Entendida": {
+        "properties": {
+          "evidencias": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "imagem",
+                "citada",
+                "fala",
+                "gc",
+                "objeto",
+                "marca"
+              ]
+            },
+            "type": "array",
+            "title": "Evidencias"
+          },
+          "programa": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Programa"
+          },
+          "desde": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desde"
+          },
+          "ate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ate"
+          },
+          "visual": {
+            "type": "boolean",
+            "title": "Visual",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "evidencias",
+          "programa",
+          "desde",
+          "ate"
+        ],
+        "title": "Entendida",
+        "description": "O que a busca usou da consulta: os chips e filtros que a tela mostra ligados."
       },
       "EnviadoPor": {
         "properties": {
@@ -1451,6 +4547,24 @@
         "required": [
           "detail"
         ]
+      },
+      "Etapa": {
+        "properties": {
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "segundos": {
+            "type": "number",
+            "title": "Segundos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nome",
+          "segundos"
+        ],
+        "title": "Etapa"
       },
       "EtapaPublica": {
         "properties": {
@@ -1534,6 +4648,147 @@
         ],
         "title": "EtapaPublica"
       },
+      "Facetas": {
+        "properties": {
+          "programa": {
+            "items": {
+              "$ref": "#/components/schemas/ValorDaFaceta"
+            },
+            "type": "array",
+            "title": "Programa",
+            "default": []
+          },
+          "mes": {
+            "items": {
+              "$ref": "#/components/schemas/ValorDaFaceta"
+            },
+            "type": "array",
+            "title": "Mes",
+            "default": []
+          },
+          "pessoa": {
+            "items": {
+              "$ref": "#/components/schemas/ValorDaFaceta"
+            },
+            "type": "array",
+            "title": "Pessoa",
+            "default": []
+          },
+          "marca": {
+            "items": {
+              "$ref": "#/components/schemas/ValorDaFaceta"
+            },
+            "type": "array",
+            "title": "Marca",
+            "default": []
+          },
+          "tipo": {
+            "items": {
+              "$ref": "#/components/schemas/ValorDaFaceta"
+            },
+            "type": "array",
+            "title": "Tipo",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Facetas",
+        "description": "Contagens por faceta, sobre os candidatos que a busca trouxe (veja `_facetas`)."
+      },
+      "Fala": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "locutor": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Locutor",
+            "description": "Quem fala: nome ou papel."
+          },
+          "texto": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Texto"
+          },
+          "texto_original": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Texto Original"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "locutor",
+          "texto"
+        ],
+        "title": "Fala"
+      },
+      "GeradorDoInventario": {
+        "properties": {
+          "motor": {
+            "type": "string",
+            "enum": [
+              "florence",
+              "gemini"
+            ],
+            "title": "Motor"
+          },
+          "modelo": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Modelo"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "motor",
+          "modelo"
+        ],
+        "title": "GeradorDoInventario"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1583,6 +4838,54 @@
         ],
         "title": "Indexacao",
         "description": "Onde o Job está no índice da busca; uma falha dela não muda o `estado` do Job."
+      },
+      "ItemMarcado": {
+        "properties": {
+          "identidade": {
+            "type": "string",
+            "title": "Identidade"
+          },
+          "inicio_ms": {
+            "type": "integer",
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "title": "Fim Ms"
+          },
+          "detalhe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detalhe"
+          },
+          "marca": {
+            "type": "string",
+            "title": "Marca"
+          },
+          "motivos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Motivos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "identidade",
+          "inicio_ms",
+          "fim_ms",
+          "detalhe",
+          "marca",
+          "motivos"
+        ],
+        "title": "ItemMarcado"
       },
       "JobCriado": {
         "properties": {
@@ -2202,6 +5505,262 @@
         "title": "JobResumido",
         "description": "O que as listagens e o andamento mostram de um Job: sem `cortes_ms`, que só o\ndetalhe traz (uma lista sem teto, de até ~100 KB por vídeo)."
       },
+      "LadoNaTela": {
+        "properties": {
+          "custo_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custo Usd"
+          },
+          "custo_por_hora_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custo Por Hora Usd"
+          },
+          "tempo_total_s": {
+            "type": "number",
+            "title": "Tempo Total S"
+          },
+          "etapas": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Etapas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "custo_usd",
+          "custo_por_hora_usd",
+          "tempo_total_s",
+          "etapas"
+        ],
+        "title": "LadoNaTela"
+      },
+      "Limites": {
+        "properties": {
+          "nome": {
+            "type": "integer",
+            "title": "Nome"
+          },
+          "texto": {
+            "type": "integer",
+            "title": "Texto"
+          },
+          "motivo": {
+            "type": "integer",
+            "title": "Motivo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nome",
+          "texto",
+          "motivo"
+        ],
+        "title": "Limites"
+      },
+      "MarcaAchada": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "a_revisar": {
+            "type": "boolean",
+            "title": "A Revisar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nome",
+          "a_revisar"
+        ],
+        "title": "MarcaAchada"
+      },
+      "MencaoNaFala": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms"
+        ],
+        "title": "MencaoNaFala"
+      },
+      "MencaoNoTexto": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "texto": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Texto",
+            "description": "O texto na tela que cita a pessoa."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "texto"
+        ],
+        "title": "MencaoNoTexto"
+      },
+      "Momento": {
+        "properties": {
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "plano",
+              "fala",
+              "texto_na_tela",
+              "objeto"
+            ],
+            "title": "Tipo"
+          },
+          "inicio_ms": {
+            "type": "integer",
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "title": "Fim Ms"
+          },
+          "motivo": {
+            "type": "string",
+            "title": "Motivo"
+          },
+          "destaques": {
+            "items": {
+              "$ref": "#/components/schemas/Destaque"
+            },
+            "type": "array",
+            "title": "Destaques"
+          },
+          "quadro_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadro Url",
+            "description": "Obsoleto: vai sair da resposta. Use o campo `quadro` e peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo do `quadro` (`plano-6.jpg`).",
+            "deprecated": true
+          },
+          "quadro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadro"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tipo",
+          "inicio_ms",
+          "fim_ms",
+          "motivo",
+          "destaques",
+          "quadro_url"
+        ],
+        "title": "Momento"
+      },
       "NovoJob": {
         "properties": {
           "nome": {
@@ -2246,6 +5805,773 @@
         ],
         "title": "NovoJob"
       },
+      "Objeto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Id"
+          },
+          "categoria": {
+            "type": "string",
+            "enum": [
+              "roupa",
+              "calcado",
+              "acessorio",
+              "na_mao",
+              "em_cena",
+              "veiculo",
+              "outro",
+              "eletronico",
+              "produto",
+              "animal",
+              "alimento",
+              "movel",
+              "decoracao",
+              "instrumento_musical",
+              "utensilio",
+              "documento",
+              "planta",
+              "bebida"
+            ],
+            "title": "Categoria",
+            "description": "O que a coisa é. `em_cena` e `na_mao` só quando nenhuma outra categoria servir."
+          },
+          "tipo": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Tipo",
+            "description": "Texto curto e no singular: \"vestido\", \"sandália\", \"carro\", \"celular\"."
+          },
+          "cor_base": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "vermelho",
+                "laranja",
+                "amarelo",
+                "verde",
+                "azul",
+                "roxo",
+                "rosa",
+                "marrom",
+                "bege",
+                "preto",
+                "branco",
+                "cinza",
+                "dourado",
+                "prateado",
+                "estampado"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Cor Base",
+            "description": "Até 2 cores da lista: é o que a busca filtra."
+          },
+          "cor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cor",
+            "description": "O tom como você vê: \"vinho\", \"azul-marinho\"."
+          },
+          "detalhe": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detalhe"
+          },
+          "marca": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marca",
+            "description": "Só se o logo ou o nome estiver legível na imagem."
+          },
+          "pessoa": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pessoa",
+            "description": "Id de uma pessoa da lista `pessoas`; nulo para objeto em cena."
+          },
+          "relacao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "veste",
+                  "calca",
+                  "usa",
+                  "segura"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relacao",
+            "description": "Como a pessoa se liga ao objeto; nulo sem `pessoa`."
+          },
+          "ocorrencias": {
+            "items": {
+              "$ref": "#/components/schemas/_Intervalo"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Ocorrencias",
+            "description": "Intervalos em que o objeto está visível."
+          },
+          "quadro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadro"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "categoria",
+          "tipo",
+          "cor_base",
+          "ocorrencias"
+        ],
+        "title": "Objeto"
+      },
+      "ObjetoDoInventario": {
+        "properties": {
+          "nome": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Nome"
+          },
+          "categoria": {
+            "type": "string",
+            "enum": [
+              "roupa",
+              "calcado",
+              "acessorio",
+              "na_mao",
+              "em_cena",
+              "veiculo",
+              "outro",
+              "eletronico",
+              "produto",
+              "animal",
+              "alimento",
+              "movel",
+              "decoracao",
+              "instrumento_musical",
+              "utensilio",
+              "documento",
+              "planta",
+              "bebida"
+            ],
+            "title": "Categoria"
+          },
+          "cor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "vermelho",
+                  "laranja",
+                  "amarelo",
+                  "verde",
+                  "azul",
+                  "roxo",
+                  "rosa",
+                  "marrom",
+                  "bege",
+                  "preto",
+                  "branco",
+                  "cinza",
+                  "dourado",
+                  "prateado",
+                  "estampado"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cor"
+          },
+          "marca": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marca"
+          },
+          "caixas": {
+            "items": {
+              "$ref": "#/components/schemas/CaixaDoQuadro"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Caixas"
+          },
+          "destaque": {
+            "type": "integer",
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Destaque"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "nome",
+          "categoria",
+          "caixas",
+          "destaque"
+        ],
+        "title": "ObjetoDoInventario",
+        "description": "Um objeto do plano, em português, com as caixas de cada quadro onde aparece."
+      },
+      "Opcao": {
+        "properties": {
+          "valor": {
+            "type": "string",
+            "title": "Valor"
+          },
+          "rotulo": {
+            "type": "string",
+            "title": "Rotulo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valor",
+          "rotulo"
+        ],
+        "title": "Opcao"
+      },
+      "Passada": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "modelo": {
+            "type": "string",
+            "title": "Modelo"
+          },
+          "criada_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Criada Em"
+          },
+          "custo": {
+            "$ref": "#/components/schemas/Custo"
+          },
+          "etapas": {
+            "items": {
+              "$ref": "#/components/schemas/Etapa"
+            },
+            "type": "array",
+            "title": "Etapas"
+          },
+          "decupagem": {
+            "$ref": "#/components/schemas/Decupagem"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "modelo",
+          "criada_em",
+          "custo",
+          "etapas",
+          "decupagem"
+        ],
+        "title": "Passada"
+      },
+      "Pauta": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Id"
+          },
+          "titulo": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Titulo"
+          },
+          "resumo": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Resumo",
+            "description": "Resumo jornalístico fiel ao mostrado e dito."
+          },
+          "pessoas": {
+            "items": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "type": "array",
+            "title": "Pessoas",
+            "description": "Ids das pessoas envolvidas.",
+            "default": []
+          },
+          "locais": {
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "type": "array",
+            "title": "Locais",
+            "default": []
+          },
+          "tom": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "informativo",
+                  "polemico",
+                  "descontraido",
+                  "exclusivo",
+                  "homenagem",
+                  "analise",
+                  "comercial"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tom",
+            "description": "Tom da pauta. `comercial` é a pauta que é ação comercial ou merchandising, não reportagem."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "id",
+          "titulo",
+          "resumo"
+        ],
+        "title": "Pauta"
+      },
+      "Pessoa": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Id"
+          },
+          "nome": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Nome",
+            "description": "Nome próprio; \"não identificado\" com uma descrição curta quando não há segurança."
+          },
+          "fontes_do_nome": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "rosto",
+                "gc",
+                "fala",
+                "referencia"
+              ]
+            },
+            "type": "array",
+            "title": "Fontes Do Nome",
+            "description": "O que sustenta o nome: rosto, GC ou tarja, fala, referência. Vazia para \"não identificado\".",
+            "default": []
+          },
+          "origem": {
+            "type": "string",
+            "enum": [
+              "modelo",
+              "modelo_forte",
+              "revisao"
+            ],
+            "title": "Origem",
+            "default": "modelo"
+          },
+          "estado_do_nome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "confirmado",
+                  "palpite"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estado Do Nome"
+          },
+          "catalogo_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogo Id"
+          },
+          "na_imagem": {
+            "items": {
+              "$ref": "#/components/schemas/Aparicao"
+            },
+            "type": "array",
+            "title": "Na Imagem",
+            "description": "Aparições: a pessoa visível na imagem. Foto num gráfico, logo ou QR code não é aparição."
+          },
+          "citada_na_fala": {
+            "items": {
+              "$ref": "#/components/schemas/MencaoNaFala"
+            },
+            "type": "array",
+            "title": "Citada Na Fala",
+            "description": "Nome dito na fala sem a pessoa aparecer."
+          },
+          "citada_no_texto": {
+            "items": {
+              "$ref": "#/components/schemas/MencaoNoTexto"
+            },
+            "type": "array",
+            "title": "Citada No Texto",
+            "description": "Nome em texto na tela sem a pessoa aparecer."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "nome",
+          "na_imagem",
+          "citada_na_fala",
+          "citada_no_texto"
+        ],
+        "title": "Pessoa"
+      },
+      "PessoaAchada": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "papel": {
+            "type": "string",
+            "title": "Papel"
+          },
+          "rotulo": {
+            "type": "string",
+            "title": "Rotulo"
+          },
+          "a_revisar": {
+            "type": "boolean",
+            "title": "A Revisar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nome",
+          "papel",
+          "rotulo",
+          "a_revisar"
+        ],
+        "title": "PessoaAchada"
+      },
+      "Plano": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Id"
+          },
+          "ambiente": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Ambiente",
+            "description": "Local: estúdio, aeroporto, estádio, rua…"
+          },
+          "plano_limpo": {
+            "type": "boolean",
+            "title": "Plano Limpo",
+            "description": "Sem texto na tela e sem ninguém falando para a câmera."
+          },
+          "objetos": {
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "type": "array",
+            "title": "Objetos",
+            "description": "Os objetos de destaque do plano.",
+            "default": []
+          },
+          "acao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acao"
+          },
+          "enquadramento": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enquadramento"
+          },
+          "movimento_camera": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Movimento Camera"
+          },
+          "externa": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Externa"
+          },
+          "periodo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dia",
+                  "noite"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periodo"
+          },
+          "quadro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadro"
+          },
+          "quadros": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Quadros",
+            "default": []
+          },
+          "inventario": {
+            "items": {
+              "$ref": "#/components/schemas/ObjetoDoInventario"
+            },
+            "type": "array",
+            "title": "Inventario",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "id",
+          "ambiente",
+          "plano_limpo"
+        ],
+        "title": "Plano"
+      },
+      "Prefixos": {
+        "properties": {
+          "acrescentado": {
+            "type": "string",
+            "title": "Acrescentado"
+          },
+          "nao_identificado": {
+            "type": "string",
+            "title": "Nao Identificado"
+          }
+        },
+        "type": "object",
+        "required": [
+          "acrescentado",
+          "nao_identificado"
+        ],
+        "title": "Prefixos"
+      },
+      "Programa": {
+        "properties": {
+          "resumo": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Resumo"
+          },
+          "blocos": {
+            "items": {
+              "$ref": "#/components/schemas/Bloco"
+            },
+            "type": "array",
+            "title": "Blocos"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "resumo",
+          "blocos"
+        ],
+        "title": "Programa"
+      },
       "Reproducao": {
         "properties": {
           "url": {
@@ -2264,6 +6590,148 @@
           "expira_em"
         ],
         "title": "Reproducao"
+      },
+      "RequisitoLadoALado": {
+        "properties": {
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "a": {
+            "items": {
+              "$ref": "#/components/schemas/ItemMarcado"
+            },
+            "type": "array",
+            "title": "A"
+          },
+          "b": {
+            "items": {
+              "$ref": "#/components/schemas/ItemMarcado"
+            },
+            "type": "array",
+            "title": "B"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nome",
+          "a",
+          "b"
+        ],
+        "title": "RequisitoLadoALado"
+      },
+      "ResultadoDaBusca": {
+        "properties": {
+          "entendida": {
+            "$ref": "#/components/schemas/Entendida"
+          },
+          "videos": {
+            "items": {
+              "$ref": "#/components/schemas/VideoDoResultado"
+            },
+            "type": "array",
+            "title": "Videos"
+          },
+          "sem_aparicoes": {
+            "items": {
+              "$ref": "#/components/schemas/SemAparicao"
+            },
+            "type": "array",
+            "title": "Sem Aparicoes"
+          },
+          "plano_b": {
+            "type": "boolean",
+            "title": "Plano B"
+          },
+          "facetas": {
+            "$ref": "#/components/schemas/Facetas"
+          },
+          "quadros_expiram_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Quadros Expiram Em"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entendida",
+          "videos",
+          "sem_aparicoes",
+          "plano_b",
+          "facetas",
+          "quadros_expiram_em"
+        ],
+        "title": "ResultadoDaBusca"
+      },
+      "ResumoDaPassada": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "modelo": {
+            "type": "string",
+            "title": "Modelo"
+          },
+          "criada_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Criada Em"
+          },
+          "custo": {
+            "$ref": "#/components/schemas/Custo"
+          },
+          "etapas": {
+            "items": {
+              "$ref": "#/components/schemas/Etapa"
+            },
+            "type": "array",
+            "title": "Etapas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "modelo",
+          "criada_em",
+          "custo",
+          "etapas"
+        ],
+        "title": "ResumoDaPassada"
+      },
+      "SemAparicao": {
+        "properties": {
+          "pessoa_id": {
+            "type": "string",
+            "title": "Pessoa Id"
+          },
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "mencoes_na_fala": {
+            "type": "integer",
+            "title": "Mencoes Na Fala"
+          },
+          "mencoes_na_tela": {
+            "type": "integer",
+            "title": "Mencoes Na Tela"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pessoa_id",
+          "nome",
+          "mencoes_na_fala",
+          "mencoes_na_tela"
+        ],
+        "title": "SemAparicao",
+        "description": "A pessoa pedida não aparece na imagem no programa e período pedidos; quantas vezes é citada."
       },
       "Sistema": {
         "properties": {
@@ -2291,6 +6759,103 @@
         ],
         "title": "Sistema",
         "description": "Sistema da RedeTV que chama `/v1` com chave de API."
+      },
+      "TextoNaTela": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "gc",
+              "tarja",
+              "legenda",
+              "placar",
+              "chamada",
+              "logo",
+              "qr_code",
+              "outro"
+            ],
+            "title": "Tipo"
+          },
+          "texto": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Texto",
+            "description": "O texto lido, como aparece."
+          },
+          "medido": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Medido"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms",
+          "tipo",
+          "texto"
+        ],
+        "title": "TextoNaTela",
+        "description": "Cada vez que um texto fica visível é um item, com o início e o fim em que\nele está na tela; um GC que sai e volta são dois itens. Nunca estenda o texto\naté o fim do bloco ou do plano."
+      },
+      "TipoDeObjeto": {
+        "properties": {
+          "tipo": {
+            "type": "string",
+            "title": "Tipo"
+          },
+          "ocorrencias": {
+            "type": "integer",
+            "title": "Ocorrencias"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tipo",
+          "ocorrencias"
+        ],
+        "title": "TipoDeObjeto"
       },
       "UsuarioComPapeis": {
         "properties": {
@@ -2395,6 +6960,187 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ValorDaFaceta": {
+        "properties": {
+          "valor": {
+            "type": "string",
+            "title": "Valor"
+          },
+          "rotulo": {
+            "type": "string",
+            "title": "Rotulo"
+          },
+          "videos": {
+            "type": "integer",
+            "title": "Videos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valor",
+          "rotulo",
+          "videos"
+        ],
+        "title": "ValorDaFaceta",
+        "description": "Um valor da faceta e em quantos vídeos dos candidatos ele aparece."
+      },
+      "Video": {
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          },
+          "duracao_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Duracao Ms"
+          },
+          "fps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fps"
+          },
+          "timecode_origem": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timecode Origem"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sha256",
+          "duracao_ms"
+        ],
+        "title": "Video"
+      },
+      "VideoDoResultado": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "programa": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Programa"
+          },
+          "data_exibicao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Exibicao"
+          },
+          "duracao_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duracao S"
+          },
+          "n_momentos": {
+            "type": "integer",
+            "title": "N Momentos"
+          },
+          "momentos": {
+            "items": {
+              "$ref": "#/components/schemas/Momento"
+            },
+            "type": "array",
+            "title": "Momentos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "nome",
+          "programa",
+          "data_exibicao",
+          "duracao_s",
+          "n_momentos",
+          "momentos"
+        ],
+        "title": "VideoDoResultado"
+      },
+      "_Intervalo": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms"
+        ],
+        "title": "_Intervalo"
       }
     },
     "securitySchemes": {
