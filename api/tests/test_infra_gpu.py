@@ -1,5 +1,6 @@
 """Infraestrutura dos Jobs com GPU (#238): Terraform, build e publicação, sem nuvem."""
 
+import json
 import re
 import shlex
 import subprocess
@@ -244,11 +245,16 @@ def test_job_com_gpu_de_mais_de_uma_hora_declara_beta(nome: str) -> None:
     assert 'launch_stage = "BETA"' in job
 
 
+def _funcao_do_deploy(nome: str) -> str:
+    """Recorta do deploy-dev.sh a definição da função `nome`."""
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    inicio = deploy.index(f"{nome}() {{")
+    return deploy[inicio : deploy.index("\n}\n", inicio) + 3]
+
+
 def _rodar_imagem_do_job(estado: str, describe_falha: bool = False) -> tuple[int, str]:
     """Roda a imagem_do_job do deploy-dev.sh com tf e gc simulados."""
-    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
-    inicio = deploy.index("imagem_do_job() {")
-    funcao = deploy[inicio : deploy.index("\n}\n", inicio) + 3]
+    funcao = _funcao_do_deploy("imagem_do_job")
     script = f"""set -euo pipefail
 tf() {{ [[ $* == "output -raw job_de_ocr_gpu" ]] && echo mam-ocr-gpu; }}
 gc() {{ {"echo 'Cannot find job' >&2; return 1" if describe_falha else 'echo "imagem-de-$4"'}; }}
@@ -278,3 +284,78 @@ def test_job_no_estado_que_o_describe_nao_acha_para_a_publicacao() -> None:
     estado = "module.mam.google_cloud_run_v2_job.ocr_gpu"
     codigo, _ = _rodar_imagem_do_job(estado, describe_falha=True)
     assert codigo != 0
+
+
+_INDICE_COM_ATESTACAO = json.dumps(
+    {
+        "manifests": [
+            {
+                "digest": "sha256:amd64",
+                "platform": {"os": "linux", "architecture": "amd64"},
+            },
+            {
+                "digest": "sha256:atestacao",
+                "platform": {"os": "unknown", "architecture": "unknown"},
+            },
+        ]
+    }
+)
+
+
+def _rodar_digest(manifesto: str, curl_falha: bool = False) -> tuple[int, str]:
+    """Roda o digest do deploy-dev.sh com curl e gc simulados; o registro devolve `manifesto`."""
+    curl = "return 22" if curl_falha else f"echo {shlex.quote(manifesto)}"
+    script = f"""set -euo pipefail
+curl() {{ {curl}; }}
+gc() {{ [[ $1 == auth ]] && echo token || echo sha256:indice; }}
+{_funcao_do_deploy("amd64_do_indice")}
+{_funcao_do_deploy("digest")}
+IMAGEM=$(digest us-east4-docker.pkg.dev/p/r/ocr-gpu:abc123)
+echo "$IMAGEM"
+"""
+    feito = subprocess.run(
+        ["bash", "-c", script], check=False, capture_output=True, text=True
+    )
+    return feito.returncode, feito.stdout.strip()
+
+
+def test_o_digest_publicado_e_o_da_imagem_amd64_e_nao_o_do_indice_com_a_atestacao() -> (
+    None
+):
+    assert _rodar_digest(_INDICE_COM_ATESTACAO) == (
+        0,
+        "us-east4-docker.pkg.dev/p/r/ocr-gpu@sha256:amd64",
+    )
+
+
+def test_imagem_sem_indice_fica_com_o_digest_do_registro() -> None:
+    manifesto = json.dumps({"schemaVersion": 2, "layers": []})
+    assert _rodar_digest(manifesto) == (
+        0,
+        "us-east4-docker.pkg.dev/p/r/ocr-gpu@sha256:indice",
+    )
+
+
+@pytest.mark.parametrize(
+    "manifesto",
+    [
+        "",
+        json.dumps({"manifests": [json.loads(_INDICE_COM_ATESTACAO)["manifests"][1]]}),
+    ],
+    ids=["vazio", "indice-sem-amd64"],
+)
+def test_manifesto_sem_amd64_para_a_publicacao(manifesto: str) -> None:
+    # Cair no digest do índice traria de volta o teste de GPU a cada deploy (#346).
+    codigo, _ = _rodar_digest(manifesto)
+    assert codigo != 0
+
+
+def test_registro_que_nao_responde_para_a_publicacao() -> None:
+    codigo, _ = _rodar_digest(_INDICE_COM_ATESTACAO, curl_falha=True)
+    assert codigo != 0
+
+
+def test_o_comentario_do_deploy_diz_que_mesma_imagem_nao_gera_revisao() -> None:
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    assert "também gere revisão nova" not in deploy
+    assert "nenhuma revisão nova" in deploy
