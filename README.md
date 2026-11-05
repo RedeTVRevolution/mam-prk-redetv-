@@ -104,10 +104,10 @@ Os dois alvos abaixo só rodam com credenciais (ADC de quem roda e o `.env`) e f
 
 **Ligar o índice do quadro-chave no dev (#268).** Ordem: (1) `terraform apply` (a variável `indice_do_quadro_ligado` já é `true`; o `mam-indexacao` e o serviço web já têm o papel de predição da Vertex (`mamVertexPredicao`, #302) e leem os quadros); (2) `make criar-colecao-da-busca`, que cria o índice do quadro sem recriar a coleção; (3) `make reindexar` sem `JOB`, que recalcula o vetor do quadro de todos os planos. Sem o passo 3 os vídeos antigos seguem sem vetor de quadro.
 
-**Reindexar os vídeos que já estão no dev depois do inventário de objetos (#245).** O registro de cada plano passa a levar o inventário inteiro, os objetos de destaque 3 ganham registro próprio e os registros ganham o campo `destaque`, que pesa na ordem (3% por nível acima de 1: +3% no destaque 2, +6% no 3). Vídeo a vídeo:
+**Reindexar os vídeos que já estão no dev depois do inventário de objetos (#245).** O registro de cada plano passa a levar o inventário inteiro, todos os objetos do inventário ganham registro próprio (desde o #334; no #245 eram só os de destaque 3, e a busca por objeto não achava os de destaque 1 e 2) e os registros ganham o campo `destaque`, que pesa na ordem (3% por nível acima de 1: +3% no destaque 2, +6% no 3). Vídeo a vídeo:
 
 - Vídeo **sem inventário** (analisado antes do #244): no Visualizador, "Reprocessar…" a partir de `inventario_de_objetos`, que roda o inventário e depois a indexação. No dev são poucos vídeos; se forem muitos, um laço pela rota do reprocessar (#147).
-- Vídeo **com inventário, mas indexado antes do #245**: `make reindexar` sem `JOB`, que reindexa todos os concluídos.
+- Vídeo **com inventário, mas indexado antes do #245 ou do #334**: `make reindexar` sem `JOB`, que reindexa todos os concluídos.
 - A coleção já criada não muda de esquema: `make criar-colecao-da-busca` é idempotente e deixa como está o que existe. Uma coleção nascida antes deste ticket não declara o campo `destaque`; se o Agent Retrieval recusar (ou ignorar) o campo, recrie a coleção (`apagar_colecao` e `make criar-colecao-da-busca`) e rode `make reindexar`. Ainda não foi conferido se ele aceita campo fora do esquema.
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022), conferido no #122.
