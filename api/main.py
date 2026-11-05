@@ -691,7 +691,6 @@ if _projeto:
             os.environ["BUCKET_QUARENTENA"],
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
-            bucket_de_referencias=os.environ["BUCKET_REFERENCIAS"],
         ),
         papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),

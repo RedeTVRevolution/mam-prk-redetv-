@@ -163,7 +163,7 @@ def test_a_etapa_de_partida_e_a_primeira_que_falhou() -> None:
     assert "indexacao" not in mundo.job().etapas
 
 
-@pytest.mark.parametrize("etapa", ["identificacao", "referencias", "comparacao"])
+@pytest.mark.parametrize("etapa", ["identificacao"])
 def test_etapa_nova_do_112_e_etapa_de_partida(etapa: str) -> None:
     job = _concluido_sem_indexar()
     job.etapas["indexacao"] = _etapa()
@@ -432,8 +432,6 @@ def _concluido_completo() -> Job:
                 "leitura_da_tela",
                 "analise",
                 "identificacao",
-                "referencias",
-                "comparacao",
                 "quadros_chave",
                 "inventario_de_objetos",
                 "indexacao",
@@ -452,15 +450,11 @@ ETAPAS_ESCOLHIDAS = [
 SEGUINTES = {
     "analise": {
         "identificacao",
-        "referencias",
-        "comparacao",
         "quadros_chave",
         "inventario_de_objetos",
         "indexacao",
     },
     "identificacao": {
-        "referencias",
-        "comparacao",
         "quadros_chave",
         "inventario_de_objetos",
         "indexacao",

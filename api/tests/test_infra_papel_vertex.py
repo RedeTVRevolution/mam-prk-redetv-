@@ -43,9 +43,7 @@ def test_cada_conta_da_vertex_tem_o_papel_certo() -> None:
         "web",
         "analise",
         "indexacao",
-        "referencias",
         "identificacao",
-        "comparacao",
         "objetos",
     ):
         linha = re.search(rf"^\s+{conta}\s+= \[(.*)\]$", projeto, re.MULTILINE)

@@ -1,6 +1,5 @@
 """Adaptadores de nuvem da E0: Firestore (Jobs) e Cloud Storage (upload)."""
 
-import hashlib
 import json
 import random
 import secrets
@@ -70,12 +69,10 @@ from api.jobs import (
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
-from api.nomes_a_buscar import NomesABuscar
 from api.papeis import PAPEIS, Papel
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
-from api.rostos_dos_palpites import FotoAusente
 from api.sugestoes import ContagemDoTipo, Decisao, TipoDeSugestao, contar
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
@@ -90,7 +87,6 @@ COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
-COLECAO_DAS_SUGESTOES = "sugestoes_de_perfil"
 COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
@@ -141,14 +137,6 @@ def objeto_do_quadro(job_id: str, caminho: str) -> str:
 
 def objeto_da_copia_limpa(job_id: str) -> str:
     return f"{job_id}/copia_limpa.mp4"
-
-
-def objeto_da_comparacao(job_id: str) -> str:
-    return f"{job_id}.comparacao.json"
-
-
-def objeto_dos_nomes_a_buscar(job_id: str) -> str:
-    return f"{job_id}.nomes_a_buscar.json"
 
 
 TENTATIVAS_SOB_DISPUTA = 8
@@ -826,26 +814,6 @@ class TiposDeObjetoFirestore:
         return [d["tipo"] for d in achados if d.get("total", 0) > 0 and d.get("tipo")]
 
 
-class SugestoesFirestore:
-    """Nomes sugeridos para o perfil de um programa (#111). Um documento por programa
-    e nome, de id estável: sugerir de novo não duplica."""
-
-    def __init__(
-        self, cliente: firestore.Client, colecao: str = COLECAO_DAS_SUGESTOES
-    ) -> None:
-        self._colecao = cliente.collection(colecao)
-
-    def sugerir(self, programa: str, nome: str, busca: str, quando: datetime) -> None:
-        chave = hashlib.sha256(f"{programa}\n{normalizar(nome)}".encode()).hexdigest()
-        self._colecao.document(chave).set(
-            {"programa": programa, "nome": nome, "busca": busca, "quando": quando}
-        )
-
-    def do_programa(self, programa: str) -> list[str]:
-        consulta = self._colecao.where(filter=FieldFilter("programa", "==", programa))
-        return [(d.to_dict() or {})["nome"] for d in consulta.stream()]
-
-
 class ReferenciasStorage:
     """As fotos de referência, no bucket delas (`BUCKET_REFERENCIAS`)."""
 
@@ -871,14 +839,6 @@ class ReferenciasStorage:
                 blob.delete()
             except NotFound:
                 pass
-
-    def ler(self, objeto: str) -> bytes:
-        try:
-            blob = self._cliente.bucket(self._bucket).blob(objeto)
-            conteudo: bytes = blob.download_as_bytes()
-            return conteudo
-        except NotFound as e:
-            raise FotoAusente(objeto) from e
 
 
 class RepositorioDeCorrecoesFirestore:
@@ -1176,42 +1136,6 @@ class DecupagensStorage:
             return False
         return True
 
-    def gravar_comparacao(self, job_id: str, conteudo: str) -> None:
-        self._cliente.bucket(self._decupagens).blob(
-            objeto_da_comparacao(job_id)
-        ).upload_from_string(conteudo, content_type="application/json")
-
-    def ler_comparacao(self, job_id: str) -> bytes | None:
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_comparacao(job_id))
-        try:
-            conteudo: bytes = blob.download_as_bytes()
-            return conteudo
-        except NotFound:
-            return None
-
-    def gravar_nomes_a_buscar(self, job_id: str, conteudo: str) -> None:
-        self._cliente.bucket(self._decupagens).blob(
-            objeto_dos_nomes_a_buscar(job_id)
-        ).upload_from_string(conteudo, content_type="application/json")
-
-
-class NomesABuscarStorage:
-    """A lista de nomes que a identificação deixou para o Job de referências, no bucket
-    das decupagens (só leitura)."""
-
-    def __init__(self, cliente: ClienteStorage, bucket_de_decupagens: str) -> None:
-        self._cliente = cliente
-        self._decupagens = bucket_de_decupagens
-
-    def ler_nomes_a_buscar(self, job_id: str) -> NomesABuscar | None:
-        blob = self._cliente.bucket(self._decupagens).blob(
-            objeto_dos_nomes_a_buscar(job_id)
-        )
-        try:
-            return NomesABuscar.model_validate_json(blob.download_as_bytes())
-        except NotFound:
-            return None
-
 
 class TranscricoesStorage:
     """O áudio e a transcrição, ao lado do proxy no bucket de aceitos."""
@@ -1383,14 +1307,9 @@ class ArquivosNoStorage:
         for bucket in (self._aceitos, self._decupagens):
             for blob in self._cliente.list_blobs(bucket, prefix=f"{job_id}/"):
                 blob.delete()
-        for objeto in (
-            objeto_da_decupagem(job_id),
-            objeto_da_comparacao(job_id),
-            objeto_dos_nomes_a_buscar(job_id),
-        ):
-            blob = self._cliente.bucket(self._decupagens).blob(objeto)
-            if blob.exists():
-                blob.delete()
+        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
+        if blob.exists():
+            blob.delete()
 
 
 class ArmazenamentoStorage:
@@ -1403,10 +1322,8 @@ class ArmazenamentoStorage:
         bucket_de_aceitos: str,
         bucket_de_decupagens: str,
         assinatura: Callable[[], dict[str, Any]] = assinatura_pelo_iam,
-        bucket_de_referencias: str | None = None,
     ) -> None:
         self._cliente = cliente
-        self._referencias = bucket_de_referencias
         self._bucket = bucket_de_quarentena
         self._aceitos = bucket_de_aceitos
         self._decupagens = bucket_de_decupagens
@@ -1473,15 +1390,3 @@ class ArmazenamentoStorage:
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         return self._leitor.abrir_decupagem(job_id)
-
-    def ler_comparacao(self, job_id: str) -> bytes | None:
-        return self._leitor.ler_comparacao(job_id)
-
-    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
-        if self._referencias is None:
-            raise ServicoIndisponivel
-        blob = self._cliente.bucket(self._referencias).blob(objeto)
-        url: str = blob.generate_signed_url(
-            version="v4", expiration=validade, method="GET", **self._assinatura()
-        )
-        return url

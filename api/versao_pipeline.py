@@ -12,20 +12,18 @@ import hashlib
 from typing import Any
 
 from api import (
-    comparacao,
     entendimento_da_consulta,
     florence,
     gemini,
     inventario,
     modelo_forte,
     paddle,
-    referencias,
     whisper,
 )
 from api.agent_retrieval import MODELO_DO_EMBEDDING
 from api.decupagem import VERSAO_ESQUEMA
 
-VERSAO_PIPELINE = "2026.11.1"
+VERSAO_PIPELINE = "2026.11.2"
 
 
 def _hash(texto: str) -> str:
@@ -39,20 +37,15 @@ def manifesto() -> dict[str, Any]:
             "analise": gemini.MODELO,
             "versao_do_modelo_da_analise": gemini.VERSAO_DO_MODELO,
             "modelo_forte": modelo_forte.MODELO_FORTE,
-            "referencias": referencias.MODELO,
             "consulta": entendimento_da_consulta.MODELO_DA_CONSULTA,
             "embedding": MODELO_DO_EMBEDDING,
         },
         "instrucoes": {
             "analise": _hash(gemini.INSTRUCAO),
             "modelo_forte": _hash(modelo_forte.INSTRUCAO),
-            "conferencia_das_referencias": _hash(referencias.INSTRUCAO_DA_CONFERENCIA),
-            "nomes_das_referencias": _hash(referencias.INSTRUCAO_DOS_NOMES),
             "consulta": _hash(entendimento_da_consulta.INSTRUCAO),
             "conversao_do_inventario": _hash(inventario.INSTRUCAO_DA_CONVERSAO),
             "olhar_do_inventario": _hash(inventario.INSTRUCAO_DO_OLHAR),
-            "escolha_da_comparacao": _hash(comparacao.INSTRUCAO_DA_ESCOLHA),
-            "conferencia_da_comparacao": _hash(comparacao.INSTRUCAO_DA_CONFERENCIA),
         },
         "motores": {
             "transcricao": {

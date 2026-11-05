@@ -1,23 +1,21 @@
-"""Jobs da identificação (modelo forte) e da comparação (#112), com dublês em memória.
+"""Job da identificação (modelo forte, #112), com dublês em memória.
 
 O ffmpeg é trocado por `quadros_falsos` e o Gemini, pelo `TransporteFalso`.
 """
 
 import json
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from api import comparacao_job, identificacao_job
+from api import identificacao_job
 from api.catalogo import CatalogoEmMemoria
 from api.decupagem import Decupagem
 from api.gemini import ErroHttp
 from api.jobs import Job, RepositorioEmMemoria
-from api.referencias import SugestoesEmMemoria
-from api.tests.test_comparacao import Cenario, confianca, escolha
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem, gc, pessoa, whisper
 
@@ -30,8 +28,6 @@ class DecupagensEmMemoria:
         self.atual = atual
         self.com_copia = com_copia
         self.gravada: Decupagem | None = None
-        self.comparacao: str | None = None
-        self.nomes: str | None = None
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
         return self.atual
@@ -41,12 +37,6 @@ class DecupagensEmMemoria:
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
         self.gravada = Decupagem.model_validate_json(conteudo)
-
-    def gravar_comparacao(self, job_id: str, conteudo: str) -> None:
-        self.comparacao = conteudo
-
-    def gravar_nomes_a_buscar(self, job_id: str, conteudo: str) -> None:
-        self.nomes = conteudo
 
 
 class TranscricoesEmMemoria:
@@ -78,7 +68,6 @@ def quadros_falsos(monkeypatch: pytest.MonkeyPatch) -> None:
         return [f"quadro-{i}".encode() for i in instantes]
 
     monkeypatch.setattr(identificacao_job, "extrair_quadros", falsos)
-    monkeypatch.setattr(comparacao_job, "extrair_quadros", falsos)
 
 
 def com_gc() -> Decupagem:
@@ -218,107 +207,6 @@ def test_identificacao_de_job_que_nao_esta_concluido_nao_abre_etapa(
     assert job is not None and job.etapas == {} and job.etapa_atual is None
 
 
-def comparar_em(
-    c: Cenario,
-    d: Decupagem | None,
-    *respostas: str | Exception,
-    tmp_path: Path,
-    repo: RepositorioEmMemoria | None = None,
-) -> tuple[str, DecupagensEmMemoria]:
-    decupagens = DecupagensEmMemoria(d)
-    resultado = comparacao_job.executar(
-        "job-1",
-        repo or repositorio(),
-        decupagens,
-        TransporteFalso(*respostas),
-        c.fotos,
-        c.catalogo,
-        SugestoesEmMemoria(),
-        tmp_path,
-        validade=timedelta(days=180),
-        limiar=0.8,
-    )
-    return resultado, decupagens
-
-
-def test_comparacao_regrava_a_decupagem_e_guarda_os_vereditos(tmp_path: Path) -> None:
-    c = Cenario()
-    d = decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
-
-    resultado, decupagens = comparar_em(
-        c,
-        d,
-        escolha("A"),
-        confianca(0.9),
-        confianca(0.9),
-        confianca(0.9),
-        tmp_path=tmp_path,
-    )
-
-    assert resultado == "comparado"
-    assert decupagens.gravada is not None
-    # a ordem dos rótulos é sorteada: A é um dos dois candidatos
-    assert decupagens.gravada.pessoas[0].nome in {"Leão Lobo", "Nelson Rubens"}
-    assert decupagens.comparacao is not None
-    [veredito] = json.loads(decupagens.comparacao)
-    assert veredito["estado"] == "confirmado"
-
-
-def test_comparacao_conclui_a_etapa(tmp_path: Path) -> None:
-    repo = repositorio()
-    d = decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
-
-    comparar_em(
-        Cenario(),
-        d,
-        escolha("A"),
-        confianca(0.9),
-        confianca(0.9),
-        confianca(0.9),
-        tmp_path=tmp_path,
-        repo=repo,
-    )
-
-    assert_etapa(repo, "comparacao", "concluida")
-
-
-def test_falha_do_modelo_na_comparacao_deixa_a_decupagem_e_a_etapa_falhou(
-    tmp_path: Path,
-) -> None:
-    repo = repositorio()
-    d = decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
-
-    resultado, decupagens = comparar_em(
-        Cenario(), d, ErroHttp(400), tmp_path=tmp_path, repo=repo
-    )
-
-    assert resultado == "incompleto"
-    assert decupagens.gravada is not None
-    assert decupagens.gravada.pessoas[0].nome == BARBA
-    assert_etapa(repo, "comparacao", "falhou")
-
-
-def test_comparacao_sem_a_copia_limpa_deixa_a_etapa_falhou(tmp_path: Path) -> None:
-    repo = repositorio()
-    decupagens = DecupagensEmMemoria(decupagem([]), com_copia=False)
-
-    resultado = comparacao_job.executar(
-        "job-1",
-        repo,
-        decupagens,
-        TransporteFalso(),
-        Cenario().fotos,
-        CatalogoEmMemoria(),
-        SugestoesEmMemoria(),
-        tmp_path,
-        validade=timedelta(days=180),
-    )
-
-    assert resultado == "sem_alteracao"
-    assert decupagens.gravada is None
-    assert_etapa(repo, "comparacao", "falhou")
-
-
 def test_erro_inesperado_deixa_a_etapa_falhou_e_sobe(tmp_path: Path) -> None:
     repo = repositorio()
 
@@ -338,34 +226,3 @@ def test_erro_inesperado_deixa_a_etapa_falhou_e_sobe(tmp_path: Path) -> None:
         )
 
     assert_etapa(repo, "identificacao", "falhou")
-
-
-def test_sem_os_vereditos_gravados_a_decupagem_fica_como_estava(tmp_path: Path) -> None:
-    repo = repositorio()
-    c = Cenario()
-
-    class SemAuditoria(DecupagensEmMemoria):
-        def gravar_comparacao(self, job_id: str, conteudo: str) -> None:
-            raise RuntimeError("storage fora")
-
-    decupagens = SemAuditoria(
-        decupagem([pessoa("pes01", BARBA, [(10_000, 40_000)], fontes_do_nome=[])])
-    )
-
-    with pytest.raises(RuntimeError):
-        comparacao_job.executar(
-            "job-1",
-            repo,
-            decupagens,
-            TransporteFalso(
-                escolha("A"), confianca(0.9), confianca(0.9), confianca(0.9)
-            ),
-            c.fotos,
-            c.catalogo,
-            SugestoesEmMemoria(),
-            tmp_path,
-            validade=timedelta(days=180),
-        )
-
-    assert decupagens.gravada is None
-    assert_etapa(repo, "comparacao", "falhou")

@@ -82,12 +82,6 @@ variable "espera_gpu_minutos" {
   default     = 15
 }
 
-variable "limite_de_buscas_por_video" {
-  description = "Buscas no SerpAPI por vídeo no Job de referências"
-  type        = number
-  default     = 12
-}
-
 variable "limite_de_falhas_por_etapa" {
   description = "Falhas por etapa e por origem (Jobs ou Workflows) na janela dos alertas antes de alertar"
   type        = number
@@ -137,7 +131,6 @@ module "mam" {
   ips_da_redetv                = var.ips_da_redetv
   janelas_em_paralelo          = var.janelas_em_paralelo
   espera_gpu_minutos           = var.espera_gpu_minutos
-  limite_de_buscas_por_video   = var.limite_de_buscas_por_video
   limite_de_falhas_por_etapa   = var.limite_de_falhas_por_etapa
 }
 

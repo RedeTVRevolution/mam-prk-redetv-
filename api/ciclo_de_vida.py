@@ -222,8 +222,6 @@ ETAPA_DA_FALHA: dict[CodigoDeFalha, NomeDaEtapa] = {
 # Depois do `concluido`, só estas etapas rodam; a falha de uma não muda o estado do Job.
 ETAPAS_DEPOIS_DO_CONCLUIDO: tuple[NomeDaEtapa, ...] = (
     "identificacao",
-    "referencias",
-    "comparacao",
     "quadros_chave",
     "inventario_de_objetos",
     "indexacao",
