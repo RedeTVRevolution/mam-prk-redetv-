@@ -64,6 +64,7 @@ from api.jobs import (
     PaginaDeJobs,
     ServicoIndisponivel,
     casa_com_o_filtro,
+    chave_de_ordem,
     disposicao_do_nome,
 )
 from api.leitura_da_tela import LeituraDaTela
@@ -275,8 +276,18 @@ class RepositorioFirestore:
             consulta = consulta.where(
                 filter=FieldFilter("palavras", "array_contains", filtro.palavras[0])
             )
-        campo = "criado_em" if filtro.ordem == "enviado" else "data_exibicao"
-        if filtro.ordem == "exibicao":
+        if filtro.sha256 is not None:
+            return self._consultar_pelo_arquivo(filtro, consulta)
+        # Na lixeira a ordem é a do envio a ela: o Firestore só devolve documentos que
+        # têm o campo da ordem, e fora da lixeira `lixeira` é `null`.
+        campo = (
+            "lixeira.em"
+            if filtro.na_lixeira is True
+            else "criado_em"
+            if filtro.ordem == "enviado"
+            else "data_exibicao"
+        )
+        if filtro.ordem == "exibicao" and filtro.na_lixeira is not True:
             if filtro.exibicao_de is not None:
                 consulta = consulta.where(
                     filter=FieldFilter(campo, ">=", filtro.exibicao_de.isoformat())
@@ -296,6 +307,26 @@ class RepositorioFirestore:
         return PaginaDeJobs.de(
             (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
         )
+
+    def _consultar_pelo_arquivo(
+        self, filtro: FiltroDeJobs, consulta: Any
+    ) -> PaginaDeJobs:
+        # Poucos Jobs por arquivo: a igualdade no `sha256` (índice automático) basta, e
+        # a ordem e o cursor ficam em Python, sem índice composto.
+        consulta = consulta.where(filter=FieldFilter("sha256", "==", filtro.sha256))
+        jobs = [
+            j
+            for j in (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+            if casa_com_o_filtro(j, filtro)
+        ]
+        jobs.sort(key=lambda j: chave_de_ordem(j, filtro.ordem), reverse=True)
+        if filtro.cursor is not None:
+            ancora = next((j for j in jobs if j.id == filtro.cursor), None)
+            if ancora is None:
+                raise CursorInvalido
+            corte = chave_de_ordem(ancora, filtro.ordem)
+            jobs = [j for j in jobs if chave_de_ordem(j, filtro.ordem) < corte]
+        return PaginaDeJobs.de(jobs, filtro.limite)
 
 
 class RepositorioDeChavesFirestore:

@@ -453,8 +453,10 @@ class FiltroDeJobs:
     exibicao_ate: date | None = None
     palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
     sistema: str | None = None
-    # `False`: só os Jobs fora da lixeira (o acervo); `True`: só os que estão nela.
-    na_lixeira: bool = False
+    # `False`: só os Jobs fora da lixeira (o acervo); `True`: só os que estão nela;
+    # `None`: os dois (para achar o mesmo arquivo, esteja onde estiver).
+    na_lixeira: bool | None = False
+    sha256: str | None = None  # só os Jobs do mesmo arquivo
     ordem: Ordem = "enviado"
     limite: int | None = None  # `None`: a lista inteira, sem cursor
     cursor: str | None = None  # id do último Job da página anterior
@@ -479,7 +481,9 @@ class PaginaDeJobs:
 
 def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
     """Todos os filtros menos ordem e paginação."""
-    if (job.lixeira is not None) != filtro.na_lixeira:
+    if filtro.na_lixeira is not None and (job.lixeira is not None) != filtro.na_lixeira:
+        return False
+    if filtro.sha256 is not None and job.sha256 != filtro.sha256:
         return False
     if filtro.programa is not None and job.programa != filtro.programa:
         return False
