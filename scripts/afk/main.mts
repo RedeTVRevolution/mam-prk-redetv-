@@ -659,8 +659,11 @@ if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url
   // Só nas vagas: no integrador, os hooks do branch (escritos pelo agente) não rodam. Em todos, o git
   // ignora os refs/replace do agente, que trocariam o conteúdo de um commit no checkout e no merge.
   const hooks = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: ".githooks" };
-  // Com mais de uma vaga, os testes dividem o Mac: medido com duas vagas no make verificar (#22).
-  const divide = vagas > 1 ? { PYTEST_XDIST_AUTO_NUM_WORKERS: "3", VITEST_MAX_WORKERS: "2" } : {};
+  // Com mais de uma vaga, os testes dividem o Mac. Com 3 e 2 processos, as duas vagas somavam de 1,2 a 3
+  // dos 8 CPUs do Docker (rodada de 2026-11-04): cada make verificar ficava lento com a máquina sobrando.
+  const divide = vagas > 1
+    ? { PYTEST_XDIST_AUTO_NUM_WORKERS: e.AFK_PYTEST_PROCESSOS || "6", VITEST_MAX_WORKERS: e.AFK_VITEST_PROCESSOS || "4" }
+    : {};
   const plugin = "/opt/plugins/mattpocock-skills";
   process.exitCode = await loop({
     clone, branch, maxIteracoes: Number(n), vagas,

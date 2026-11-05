@@ -12,7 +12,7 @@ Você trabalha sozinho, sem ninguém olhando, e ninguém responde perguntas dura
 Chame a skill pela ferramenta Skill, com o nome completo. Se ela não estiver disponível, não use outra no lugar (nem o `/code-review` embutido): anote em `.afk/progresso.md` que a skill faltou e termine com `erro`.
 
 1. Revise com a skill `mattpocock-skills:code-review`, passando como ponto fixo o commit de antes do ticket indicado em **Esta iteração** e o ticket como spec.
-2. Corrija o que a revisão apontar, rode `make verificar` até passar e faça um commit novo. A mensagem começa com `#<N>: revisão: `.
+2. Corrija o que a revisão apontar, rode `make verificar` até passar (em primeiro plano, com o prazo do Bash em 600000 ms; sem segundo plano nem Monitor, porque um monitor esquecido acorda o agente depois do fim e segura a iteração) e faça um commit novo. A mensagem começa com `#<N>: revisão: `.
 3. Se decidir não corrigir algum ponto, ou se ele precisar de uma decisão humana, anote em `.afk/progresso.md` o ponto e o motivo. Se não houver nada a corrigir, não faça commit.
 
 ## Regras

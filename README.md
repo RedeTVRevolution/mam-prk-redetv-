@@ -244,7 +244,9 @@ O loop para sozinho quando a fila esvazia, depois do número de iterações pedi
 
 | Variável | Padrão | Para quê |
 |---|---|---|
-| `AFK_VAGAS` | 1 | Tickets ao mesmo tempo, cada um na sua vaga. Com mais de uma, o `make verificar` de cada vaga usa 3 processos no pytest e 2 no vitest |
+| `AFK_VAGAS` | 1 | Tickets ao mesmo tempo, cada um na sua vaga |
+| `AFK_PYTEST_PROCESSOS` | 6 | Com mais de uma vaga, processos do pytest no `make verificar` de cada vaga (com uma, todos os CPUs) |
+| `AFK_VITEST_PROCESSOS` | 4 | Com mais de uma vaga, processos do vitest no `make verificar` de cada vaga (com uma, o padrão do vitest) |
 | `AFK_AVISO_TOKENS` | 120000 | O hook manda o implementador comitar o que está verde, anotar o que falta e sair como `parcial`. O revisor não recebe o aviso, só o corte |
 | `AFK_CORTE_TOKENS` | 140000 | O script mata a iteração e descarta o que não foi commitado |
 | `AFK_MAX_TURNOS` | 300 | `--max-turns` de cada iteração |
