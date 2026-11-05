@@ -71,7 +71,8 @@ def posicao_do_cursor(cursor: str | None) -> int:
         texto = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
     except (binascii.Error, UnicodeDecodeError, ValueError):
         texto = ""
-    if not (texto.isascii() and texto.isdigit()):
+    # Até 9 dígitos: a posição, somada ao limite, cabe folgada no INT64 do BigQuery.
+    if not (texto.isascii() and texto.isdigit() and len(texto) <= 9):
         raise HTTPException(422, "Cursor inválido")
     return int(texto)
 

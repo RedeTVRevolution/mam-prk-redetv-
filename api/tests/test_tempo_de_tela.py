@@ -635,6 +635,7 @@ def test_com_limite_o_csv_vem_inteiro_e_cursor_invalido_e_422() -> None:
         {"limite": 1, "cursor": "lixo"},
         {"limite": 1, "cursor": "LTE"},  # "-1"
         {"limite": 1, "cursor": "wrI"},  # "²", dígito fora do ASCII
+        {"limite": 1, "cursor": "OTk5OTk5OTk5OQ"},  # "9999999999", 10 dígitos
         {"limite": 0},
         {"limite": 101},
     ]
