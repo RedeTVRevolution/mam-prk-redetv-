@@ -1,9 +1,10 @@
-"""O OpenAPI das rotas `/v1` que os sistemas da RedeTV usam (E7, #277).
+"""O OpenAPI das rotas `/v1` que uma chave de API de sistema alcança (E7, #277, #382).
 
 O FastAPI gera o esquema; aqui ficam, por rota, a descrição, os exemplos de pedido e de
 resposta e os erros possíveis, que o FastAPI não sabe. O arquivo publicado
 (`docs/api/openapi.json`) sai de `python -m api.documentacao_dos_sistemas`
-(`make atualizar-openapi`) e um teste confere que ele bate com o gerado.
+(`make atualizar-openapi`) e um teste confere que ele bate com o gerado. Outro teste
+percorre as rotas do app com uma chave e falha se alguma que a aceita não está em `OPERACOES`.
 """
 
 import copy
@@ -32,6 +33,8 @@ class Erro:
     acao: str
     # O `detail` de um caso real, quando `detalhe` tem o que varia; senão, o próprio.
     exemplo: Any = None
+    # Resposta sem corpo (o 304): não há `detail` nem exemplo.
+    sem_corpo: bool = False
 
     @property
     def corpo(self) -> dict[str, Any]:
@@ -49,6 +52,10 @@ class Operacao:
     pedido: Any = None
     # Só quando o código de sucesso não é o 200 do FastAPI por padrão (já vem do esquema).
     status: str | None = None
+    # O corpo `multipart/form-data`, que o FastAPI não enxerga quando a rota o lê à mão.
+    formulario: Any = None
+    # Parâmetros que a rota lê do pedido sem declarar (cabeçalhos como `If-None-Match`).
+    parametros: tuple[dict[str, Any], ...] = ()
 
 
 def _sem_chave(escopo: str | None = None) -> tuple[Erro, ...]:
@@ -83,26 +90,67 @@ _NAO_ACHOU = Erro(
     "Job não encontrado",
     "O id não existe ou o Job é de outro sistema. Cada chave só enxerga os próprios Jobs.",
 )
-_VALIDACAO = Erro(
-    422,
-    "Erro de validação",
-    "Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) "
-    "e `msg` (por quê) em cada item.",
-    exemplo=[
-        {
-            "type": "literal_error",
-            "loc": ["query", "versao"],
-            "msg": "Input should be 'modelo'",
-            "input": "outra",
-        }
-    ],
+
+
+def _validacao(
+    tipo: str,
+    onde: str,
+    campo: str,
+    msg: str,
+    entrada: Any,
+    ctx: dict[str, Any] | None = None,
+) -> Erro:
+    """O 422 do FastAPI para um parâmetro; `tipo` e `ctx` são os do Pydantic."""
+    item = {"type": tipo, "loc": [onde, campo], "msg": msg, "input": entrada}
+    if ctx is not None:
+        item["ctx"] = ctx
+    return Erro(
+        422,
+        "Erro de validação",
+        "Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) "
+        "e `msg` (por quê) em cada item.",
+        exemplo=[item],
+    )
+
+
+_PADRAO_DO_QUADRO = r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$"
+_VALIDACAO = _validacao(
+    "literal_error",
+    "query",
+    "versao",
+    "Input should be 'modelo'",
+    "outra",
+    {"expected": "'modelo'"},
 )
+
 _NAO_CONCLUIDO = Erro(
     409,
     "Job em <estado>, não concluido",
     "O Job ainda não terminou (ou falhou). Espere o webhook ou consulte `GET "
     "/v1/jobs/{job_id}` até o `estado` ser `concluido`.",
     exemplo="Job em analisando, não concluido",
+)
+_NAO_ACHOU_A_PASSADA = Erro(
+    404,
+    "Passada não encontrada",
+    "O Job não tem uma passada com esse id: pegue o id em `GET "
+    "/v1/jobs/{job_id}/passadas`.",
+)
+_MUITA_CONSULTA = Erro(
+    429,
+    "Consultas demais; tente em um minuto",
+    "O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e "
+    "de parecidos dividem o mesmo limite). Espere e repita.",
+)
+_DEMOROU = Erro(
+    504,
+    "A busca demorou demais",
+    "A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
+)
+_PERIODO_INVERTIDO = Erro(
+    422,
+    "O início do período passa do fim",
+    "`desde` é depois de `ate`. Troque os dois.",
 )
 
 _JOB = {
@@ -190,6 +238,86 @@ _DECUPAGEM = {
     ],
 }
 
+_JOB_NO_ANDAMENTO = {
+    k: v for k, v in _JOB.items() if k not in ("cortes_ms", "capa_url")
+}
+
+ID_DA_PASSADA = "gemini-3.1-pro-20261104"
+_RESUMO_DA_PASSADA = {
+    "id": ID_DA_PASSADA,
+    "job_id": ID_DO_JOB,
+    "modelo": "gemini-3.1-pro",
+    "criada_em": "2026-11-04T12:00:00.000000Z",
+    "custo": {
+        "tokens_de_entrada": 1250000,
+        "tokens_de_saida": 38000,
+        "preco_por_milhao_de_entrada": 2.0,
+        "preco_por_milhao_de_saida": 12.0,
+        "usd": 2.956,
+    },
+    "etapas": [{"nome": "analise", "segundos": 212.4}],
+}
+_ITEM_DA_COMPARACAO = {
+    "identidade": "pessoa-1",
+    "inicio_ms": 0,
+    "fim_ms": 9800,
+    "detalhe": None,
+    "marca": "igual",
+    "motivos": [],
+}
+_MOMENTO = {
+    "tipo": "plano",
+    "inicio_ms": 9800,
+    "fim_ms": 14200,
+    "motivo": "Fulana de Tal recebe o elenco no estúdio.",
+    "destaques": [{"inicio": 0, "fim": 12}],
+    "quadro_url": None,
+    "quadro": "quadros/plano-6.jpg",
+}
+_BUSCA = {
+    "entendida": {
+        "evidencias": ["imagem", "citada"],
+        "programa": None,
+        "desde": None,
+        "ate": None,
+        "visual": False,
+    },
+    # `dict(...)`: a chave entre aspas casaria com um nome da busca no checador de nomes.
+    "videos": [
+        dict(  # noqa: C408
+            job_id=ID_DO_JOB,
+            nome="TARD_20261103_BLU.mp4",
+            programa="TV Fama",
+            data_exibicao="2026-11-03",
+            duracao_s=598.4,
+            n_momentos=1,
+            momentos=[_MOMENTO],
+        )
+    ],
+    "sem_aparicoes": [],
+    "plano_b": False,
+    "facetas": {
+        "programa": [{"valor": "TV Fama", "rotulo": "TV Fama", "videos": 1}],
+        "mes": [{"valor": "2026-11", "rotulo": "novembro de 2026", "videos": 1}],
+        "pessoa": [
+            {"valor": "pessoa-1", "rotulo": "Fulana de Tal", "videos": 1},
+        ],
+        "marca": [],
+        "tipo": [{"valor": "plano", "rotulo": "plano", "videos": 1}],
+    },
+    "quadros_expiram_em": INSTANTE,
+}
+_PARAMETROS_DO_PERIODO = (
+    "Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) "
+    "restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição."
+)
+_BUSCA_DO_SISTEMA = (
+    "A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o "
+    "caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET "
+    "/v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O "
+    "`quadro_url` assinado é obsoleto e vai sair da resposta. Escopo `ler`."
+)
+
 OPERACOES: tuple[Operacao, ...] = (
     Operacao(
         "GET",
@@ -259,11 +387,35 @@ OPERACOES: tuple[Operacao, ...] = (
             Erro(
                 422,
                 "Tamanho fora do limite",
-                "O `tamanho_bytes` é zero ou passa do máximo (4 GiB). Outros 422 deste "
-                "pedido: `Data de exibição no futuro`, `Idempotency-Key inválida` e o "
-                "`Erro de validação` dos campos (nome sem `.mp4`, nome com `/`, campo "
-                "desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` "
-                "ausente ou fora de `AAAA-MM-DD`).",
+                "O `tamanho_bytes` é zero ou passa do máximo (4 GiB).",
+            ),
+            Erro(
+                422,
+                "Data de exibição no futuro",
+                "A `data_exibicao` é depois de hoje (Brasília). Mande a data em que o "
+                "programa foi ao ar.",
+            ),
+            Erro(
+                422,
+                "Idempotency-Key inválida",
+                "O cabeçalho `Idempotency-Key` está vazio, passa de 255 caracteres ou "
+                "tem caractere que não é ASCII imprimível. Use um UUID.",
+            ),
+            Erro(
+                422,
+                "Erro de validação",
+                "Um campo do corpo está fora do formato (nome sem `.mp4`, nome com `/`, "
+                "campo desconhecido, `programa` fora de `GET /v1/programas`, "
+                "`data_exibicao` ausente ou fora de `AAAA-MM-DD`). Aqui `detail` é uma "
+                "lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
+                exemplo=[
+                    {
+                        "type": "missing",
+                        "loc": ["body", "data_exibicao"],
+                        "msg": "Field required",
+                        "input": {"nome": "TARD_20261103_BLU.mp4"},
+                    }
+                ],
             ),
             _INDISPONIVEL,
         ),
@@ -301,7 +453,28 @@ OPERACOES: tuple[Operacao, ...] = (
         "mande-o em `If-None-Match` e, se nada mudou, vem `304` sem corpo. "
         "Escopo `ler`.",
         _JOB,
-        (*_sem_chave("ler"), _NAO_ACHOU, _INDISPONIVEL),
+        (
+            *_sem_chave("ler"),
+            Erro(
+                304,
+                "Não mudou",
+                "O `If-None-Match` casa com o `ETag` atual: nada mudou desde a última "
+                "leitura e a resposta vem sem corpo. Use a cópia que você guardou.",
+                sem_corpo=True,
+            ),
+            _NAO_ACHOU,
+            _INDISPONIVEL,
+        ),
+        parametros=(
+            {
+                "name": "If-None-Match",
+                "in": "header",
+                "required": False,
+                "description": "O `ETag` da última leitura. Se o Job não mudou, a "
+                "resposta é `304` sem corpo.",
+                "schema": {"type": "string"},
+            },
+        ),
     ),
     Operacao(
         "DELETE",
@@ -372,6 +545,334 @@ OPERACOES: tuple[Operacao, ...] = (
         _DECUPAGEM,
         (*_sem_chave("ler"), _NAO_ACHOU, _NAO_CONCLUIDO, _INDISPONIVEL),
     ),
+    Operacao(
+        "GET",
+        "/v1/jobs/andamento",
+        "Estado de vários Jobs de uma vez",
+        "O estado de até 200 Jobs numa leitura só (`ids` separados por vírgula), para "
+        "atualizar o que está em andamento sem uma chamada por Job: o mesmo detalhe de "
+        "`GET /v1/jobs/{job_id}`, sem `capa_url` e sem `cortes_ms`. Id que não existe "
+        "ou é de outro sistema é omitido da lista, sem erro. Escopo `ler`.",
+        [_JOB_NO_ANDAMENTO],
+        (
+            *_sem_chave("ler"),
+            Erro(
+                422,
+                "No máximo 200 ids",
+                "Peça até 200 ids por chamada; divida o resto em outras.",
+            ),
+            _validacao("missing", "query", "ids", "Field required", None),
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/jobs/{job_id}/quadros/{arquivo}",
+        "URL de um quadro do vídeo",
+        "Uma URL assinada, de 10 minutos, de um quadro JPEG do vídeo. O `arquivo` é o "
+        "nome que a busca devolve em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`). "
+        "Só existe com o Job `concluido`. Escopo `ler`.",
+        {
+            "url": "https://storage.googleapis.com/BUCKET/...",
+            "expira_em": INSTANTE,
+        },
+        (
+            *_sem_chave("ler"),
+            _NAO_ACHOU,
+            _NAO_CONCLUIDO,
+            _validacao(
+                "string_pattern_mismatch",
+                "path",
+                "arquivo",
+                f"String should match pattern '{_PADRAO_DO_QUADRO}'",
+                "x",
+                {"pattern": _PADRAO_DO_QUADRO},
+            ),
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/jobs/{job_id}/passadas",
+        "Listar as passadas do Job",
+        "As passadas do vídeo: análises extras que o time do MAM rodou, com outro "
+        "modelo, para comparar com a decupagem entregue. Cada item traz o modelo, o "
+        "custo e o tempo por etapa, sem a decupagem. Do mais antigo ao mais novo; "
+        "lista vazia se não há. Escopo `ler`.",
+        [_RESUMO_DA_PASSADA],
+        (*_sem_chave("ler"), _NAO_ACHOU, _INDISPONIVEL),
+    ),
+    Operacao(
+        "GET",
+        "/v1/jobs/{job_id}/passadas/{passada_id}",
+        "Ler uma passada",
+        "Uma passada inteira: o resumo (modelo, custo, etapas) e a Decupagem que ela "
+        "gerou, no mesmo esquema da entregue. Não recebe correções. Escopo `ler`. O "
+        "exemplo abaixo está resumido.",
+        {
+            **_RESUMO_DA_PASSADA,
+            "decupagem": {
+                k: v for k, v in _DECUPAGEM.items() if k != "versao_decupagem"
+            },
+        },
+        (*_sem_chave("ler"), _NAO_ACHOU, _NAO_ACHOU_A_PASSADA, _INDISPONIVEL),
+    ),
+    Operacao(
+        "GET",
+        "/v1/jobs/{job_id}/passadas/{passada_id}/comparacao",
+        "Comparar a passada com a decupagem do Job",
+        "A decupagem do modelo do Job (lado `a`, sem correções) contra a passada (lado "
+        "`b`), em seis requisitos (`famosos`, `mencoes`, `pautas`, `broll_limpos`, "
+        "`broll_descricoes` e `comerciais`). Cada item vem marcado `igual`, `difere` "
+        "(com os `motivos`) ou `so_aqui`. Traz também o custo e o tempo de cada lado. "
+        "Só existe com o Job `concluido`. Escopo `ler`. O exemplo abaixo está resumido.",
+        {
+            "passada_id": ID_DA_PASSADA,
+            "modelo": "gemini-3.1-pro",
+            "modelo_do_job": "gemini-3.1-flash",
+            "duracao_ms": 598400,
+            "a": {
+                "custo_usd": None,
+                "custo_por_hora_usd": None,
+                "tempo_total_s": 180.2,
+                "etapas": [{"nome": "analise", "segundos": 150.0}],
+            },
+            "b": {
+                "custo_usd": 2.956,
+                "custo_por_hora_usd": 17.78,
+                "tempo_total_s": 212.4,
+                "etapas": [{"nome": "analise", "segundos": 212.4}],
+            },
+            "requisitos": [
+                {
+                    "nome": "famosos",
+                    "a": [_ITEM_DA_COMPARACAO],
+                    "b": [_ITEM_DA_COMPARACAO],
+                }
+            ],
+        },
+        (
+            *_sem_chave("ler"),
+            _NAO_ACHOU,
+            _NAO_CONCLUIDO,
+            _NAO_ACHOU_A_PASSADA,
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/objetos/tipos",
+        "Tipos de objeto conhecidos",
+        "Os tipos de objeto que as decupagens já têm (`camisa`, `bolsa`...), do mais "
+        "frequente ao menos, com quantas ocorrências cada um. `q` filtra pelo começo do "
+        "nome; sem `q`, vêm os mais frequentes. Escopo `ler`.",
+        [{"tipo": "camisa", "ocorrencias": 412}, {"tipo": "bolsa", "ocorrencias": 97}],
+        (
+            *_sem_chave("ler"),
+            _validacao(
+                "string_too_long",
+                "query",
+                "q",
+                "String should have at most 100 characters",
+                "x" * 101,
+                {"max_length": 100},
+            ),
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/catalogo/pessoas",
+        "Achar pessoas no catálogo",
+        "As pessoas do catálogo cujo nome ou apelido casa com `q` pelo começo das palavras "
+        "(sem diferença de maiúsculas ou acento, e com tolerância a um erro de digitação), "
+        "para achar o `id` que se usa na busca. "
+        "`a_revisar` marca a que ainda espera revisão de um curador. Escopo `ler`.",
+        [
+            {
+                "id": "pessoa-1",
+                "nome": "Fulana de Tal",
+                "papel": "apresentadora",
+                "rotulo": "Fulana de Tal (apresentadora)",
+                "a_revisar": False,
+            }
+        ],
+        (
+            *_sem_chave("ler"),
+            _validacao("missing", "query", "q", "Field required", None),
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/catalogo/marcas",
+        "Achar marcas no catálogo",
+        "As marcas do catálogo cujo nome ou apelido casa com `q` pelo começo das palavras "
+        "(sem diferença de maiúsculas ou acento, e com tolerância a um erro de digitação). "
+        "`a_revisar` marca a que ainda espera revisão de um curador. Escopo `ler`.",
+        [{"id": "marca-1", "nome": "Marca Exemplo", "a_revisar": False}],
+        (
+            *_sem_chave("ler"),
+            _validacao("missing", "query", "q", "Field required", None),
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/busca",
+        "Buscar momentos por texto",
+        "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e "
+        "marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, "
+        "`citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, "
+        "`texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou "
+        "`data`), `visual` e `limite` (1 a 50 vídeos). "
+        + _PARAMETROS_DO_PERIODO
+        + " "
+        + _BUSCA_DO_SISTEMA
+        + " Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o "
+        "entendimento da consulta falhou e a busca caiu para palavras soltas.",
+        _BUSCA,
+        (
+            *_sem_chave("ler"),
+            _PERIODO_INVERTIDO,
+            _validacao("missing", "query", "q", "Field required", None),
+            _MUITA_CONSULTA,
+            _DEMOROU,
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "POST",
+        "/v1/busca/imagem",
+        "Buscar momentos por imagem",
+        "Acha os planos parecidos com uma foto. O corpo é `multipart/form-data` com o "
+        "arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o "
+        "`Content-Length` é obrigatório). A foto só passa pela memória: não é guardada. "
+        + _PARAMETROS_DO_PERIODO
+        + " "
+        + _BUSCA_DO_SISTEMA
+        + " Divide com a busca por texto o limite de 30 consultas por minuto.",
+        _BUSCA,
+        (
+            *_sem_chave("ler"),
+            Erro(
+                411,
+                "Envie o tamanho do pedido",
+                "Mande o cabeçalho `Content-Length` (um cliente comum já manda).",
+            ),
+            _PERIODO_INVERTIDO,
+            Erro(
+                422,
+                "A imagem passa do tamanho máximo",
+                "O arquivo passa de 5 MB. Reduza a foto.",
+            ),
+            Erro(
+                422,
+                "A imagem passa do tamanho máximo em pixels",
+                "A foto passa de 25 milhões de pixels. Reduza a foto.",
+            ),
+            Erro(
+                422,
+                "Envie uma imagem JPEG ou PNG válida",
+                "O arquivo não é JPEG nem PNG, ou está corrompido, ou o multipart está "
+                "malformado.",
+            ),
+            Erro(
+                422,
+                "Envie a imagem no campo arquivo",
+                "O multipart não tem o campo `arquivo`.",
+            ),
+            _MUITA_CONSULTA,
+            Erro(
+                503,
+                "A busca por imagem não está disponível agora",
+                "O índice de imagens está desligado ou fora do ar. Repita com espera "
+                "crescente.",
+            ),
+            _DEMOROU,
+        ),
+        formulario={
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "arquivo": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "A foto: JPEG ou PNG, até 5 MB.",
+                            }
+                        },
+                        "required": ["arquivo"],
+                    }
+                }
+            },
+        },
+    ),
+    Operacao(
+        "GET",
+        "/v1/busca/parecidos/planos",
+        "Planos do vídeo que têm busca de parecidos",
+        "Os números dos planos do vídeo (`job`) que têm vetor do quadro: só neles "
+        "`GET /v1/busca/parecidos` acha algo. Não gasta o limite de consultas por minuto. Escopo `ler`.",
+        {"planos": [0, 1, 3, 4]},
+        (
+            *_sem_chave("ler"),
+            _validacao("missing", "query", "job", "Field required", None),
+            _DEMOROU,
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/busca/parecidos",
+        "Buscar planos parecidos com um plano",
+        "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do "
+        "vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de "
+        "1 a 50 vídeos. "
+        + _BUSCA_DO_SISTEMA
+        + " Divide com a busca por texto o limite de 30 consultas por minuto.",
+        _BUSCA,
+        (
+            *_sem_chave("ler"),
+            Erro(
+                404,
+                "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado",
+                "Escolha um plano de `GET /v1/busca/parecidos/planos`; se o vídeo é "
+                "antigo, peça ao time do MAM para reindexá-lo.",
+                exemplo="Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado",
+            ),
+            _validacao("missing", "query", "plano", "Field required", None),
+            _MUITA_CONSULTA,
+            _DEMOROU,
+            _INDISPONIVEL,
+        ),
+    ),
+    Operacao(
+        "GET",
+        "/v1/correcoes/catalogo",
+        "Vocabulários das decupagens",
+        "Os valores que os campos fixos da decupagem aceitam, com o rótulo em "
+        "português: tipos de comercial e de texto na tela, tons da pauta, fontes do "
+        "nome, categorias e cores de objeto, relações, e os limites de tamanho dos "
+        "textos. Serve para ler os códigos que a decupagem traz. `tipos` lista os "
+        "tipos de Correção que os revisores aplicam; a chave de sistema só lê. Qualquer "
+        "escopo serve. O exemplo abaixo está resumido.",
+        {
+            "tipos": [{"valor": "pessoa.renomear", "rotulo": "Renomear pessoa"}],
+            "tipos_de_comercial": [{"valor": "testemunhal", "rotulo": "testemunhal"}],
+            "tipos_de_texto_na_tela": [{"valor": "gc", "rotulo": "gc"}],
+            "tons_da_pauta": [{"valor": "polemico", "rotulo": "polêmico"}],
+            "fontes_do_nome": [{"valor": "rosto", "rotulo": "rosto"}],
+            "categorias_de_objeto": [{"valor": "calcado", "rotulo": "calçado"}],
+            "cores_base": [{"valor": "vermelho", "rotulo": "vermelho"}],
+            "relacoes_do_objeto": [{"valor": "veste", "rotulo": "veste"}],
+            "limites": {"nome": 200, "texto": 2000, "motivo": 500},
+            "prefixos": {"acrescentado": "acr-", "nao_identificado": "nid-"},
+        },
+        (*_sem_chave(),),
+    ),
 )
 
 
@@ -380,33 +881,64 @@ def _exemplo_em(resposta: dict[str, Any], exemplo: Any) -> None:
     conteudo["example"] = exemplo
 
 
+def _esquema_do_erro(erros: list[Erro], respostas: dict[str, Any]) -> dict[str, Any]:
+    em_lista = [isinstance(e.exemplo, list) for e in erros]
+    if erros[0].status != 422 or "422" not in respostas:
+        return _REF_DO_ERRO
+    # O mesmo 422 vem em texto (regra da rota) ou em lista (validação do FastAPI).
+    validacao = respostas["422"]["content"]["application/json"]["schema"]
+    if all(em_lista):
+        return validacao  # type: ignore[no-any-return]
+    return {"anyOf": [_REF_DO_ERRO, validacao]}
+
+
+def _resposta_de_erro(erros: list[Erro], respostas: dict[str, Any]) -> dict[str, Any]:
+    resposta: dict[str, Any] = {
+        "description": "\n\n".join(f"{e.detalhe}. {e.acao}" for e in erros)
+    }
+    if erros[0].sem_corpo:
+        # O 304 não leva corpo; o `ETag` segue como na resposta de sucesso.
+        resposta["headers"] = {
+            "ETag": {"description": "A versão atual.", "schema": {"type": "string"}}
+        }
+        return resposta
+    if len(erros) == 1:
+        _exemplo_em(resposta, erros[0].corpo)
+    else:
+        # Vários erros com o mesmo status: um exemplo nomeado para cada.
+        resposta["content"] = {
+            "application/json": {
+                "examples": {
+                    e.detalhe: {"summary": e.detalhe, "value": e.corpo} for e in erros
+                }
+            }
+        }
+    resposta["content"]["application/json"]["schema"] = _esquema_do_erro(
+        erros, respostas
+    )
+    return resposta
+
+
 def _documentar(operacao: dict[str, Any], doc: Operacao) -> None:
     operacao["summary"] = doc.resumo
     operacao["description"] = doc.descricao
     operacao["tags"] = ["sistemas"]
     if doc.pedido is not None:
         operacao["requestBody"]["content"]["application/json"]["example"] = doc.pedido
+    if doc.formulario is not None:
+        operacao["requestBody"] = doc.formulario
+    if doc.parametros:
+        operacao["parameters"] = [*operacao.get("parameters", []), *doc.parametros]
     respostas: dict[str, Any] = operacao["responses"]
     sucesso = doc.status or next(s for s in respostas if s.startswith("2"))
     respostas[sucesso]["description"] = "Sucesso"
     _exemplo_em(respostas[sucesso], doc.resposta)
+    por_status: dict[int, list[Erro]] = {}
     for erro in doc.erros:
-        resposta: dict[str, Any] = {
-            "description": f"{erro.detalhe}. {erro.acao}",
-        }
-        _exemplo_em(resposta, erro.corpo)
-        esquema: dict[str, Any] = _REF_DO_ERRO
-        if erro.status == 422 and "422" in respostas:
-            # O mesmo 422 vem em texto (regra da rota) ou em lista (validação do FastAPI).
-            validacao = respostas["422"]["content"]["application/json"]["schema"]
-            esquema = (
-                validacao
-                if isinstance(erro.exemplo, list)
-                else {"anyOf": [_REF_DO_ERRO, validacao]}
-            )
-        resposta["content"]["application/json"]["schema"] = esquema
-        respostas[str(erro.status)] = resposta
-    if "422" in respostas and not any(e.status == 422 for e in doc.erros):
+        por_status.setdefault(erro.status, []).append(erro)
+    for status, erros in por_status.items():
+        respostas[str(status)] = _resposta_de_erro(erros, respostas)
+    if "422" in respostas and 422 not in por_status:
         del respostas["422"]
     operacao["responses"] = dict(sorted(respostas.items()))
 
