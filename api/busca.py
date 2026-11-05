@@ -543,6 +543,20 @@ class Busca:
             )
         return clausulas
 
+    def _url_do_quadro(
+        self,
+        job_id: str,
+        quadro: str | None,
+        sistema: str | None,
+        cancelado: threading.Event | None,
+    ) -> str | None:
+        """Só a chave de sistema recebe a URL assinada; cada assinatura é uma ida ao IAM,
+        então o cancelamento é conferido antes de cada uma."""
+        if not quadro or sistema is None:
+            return None
+        _conferir(cancelado)
+        return self._armazenamento.url_do_quadro(job_id, quadro, VALIDADE_DO_QUADRO)
+
     def _videos(
         self,
         trechos: list[_Trecho],
@@ -571,13 +585,7 @@ class Busca:
                     motivo=t.motivo,
                     destaques=_destaques(t.motivo, termos),
                     quadro=t.quadro,
-                    quadro_url=(
-                        self._armazenamento.url_do_quadro(
-                            id, t.quadro, VALIDADE_DO_QUADRO
-                        )
-                        if t.quadro and sistema is not None
-                        else None
-                    ),
+                    quadro_url=self._url_do_quadro(id, t.quadro, sistema, cancelado),
                 )
                 for t in lista
             ]

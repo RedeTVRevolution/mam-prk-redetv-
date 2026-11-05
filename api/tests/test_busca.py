@@ -1379,3 +1379,24 @@ def test_busca_cancelada_para_antes_de_consultar_o_indice() -> None:
         m.busca().buscar("pista molhada", cancelado=cancelado)
 
     assert m.indice.consultas == []
+
+
+def test_busca_cancelada_no_meio_das_assinaturas_para_de_assinar() -> None:
+    m, armazenamento = mundo_de_cem_planos()
+    cancelado = threading.Event()
+    assinar = armazenamento.url_do_quadro
+
+    def assina_e_desiste(job_id: str, caminho: str, validade: timedelta) -> str:
+        # A rota passa do prazo na terceira assinatura.
+        if armazenamento.assinaturas == 2:
+            cancelado.set()
+        return assinar(job_id, caminho, validade)
+
+    armazenamento.url_do_quadro = assina_e_desiste  # type: ignore[method-assign]
+
+    with pytest.raises(BuscaCancelada):
+        m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
+            "rua", visual=True, sistema="legado", cancelado=cancelado
+        )
+
+    assert armazenamento.assinaturas == 3
