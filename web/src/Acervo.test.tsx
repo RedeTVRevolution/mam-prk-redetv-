@@ -483,8 +483,8 @@ test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado 
 
   await waitFor(() => expect(within(linha('rodando.mp4')).getByText('Concluído')).toBeTruthy())
   expect(new Set(detalhes)).toEqual(new Set(['a', 'b', 'e']))
-  // Uma rodada, um pedido: os três vão juntos.
-  expect(pedidos.some((p) => p.length === 3)).toBe(true)
+  // Uma rodada, um pedido: os três vão juntos já na primeira.
+  expect([...pedidos[0]].sort()).toEqual(['a', 'b', 'e'])
 })
 
 test('a consulta de uma linha em andamento mantém a capa da lista', async () => {
@@ -508,8 +508,9 @@ test('com a aba escondida, ninguém é consultado', async () => {
   jobs = [job({ id: 'b', nome: 'andando.mp4', estado: 'validando' })]
   let consultas = 0
   servidor.use(
-    http.get('/v1/jobs/andamento', () => {
-      consultas++
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      // Sob carga, um pedido atrasado do teste anterior pode cair aqui: só conta o deste.
+      if (new URL(request.url).searchParams.get('ids')!.split(',').includes('b')) consultas++
       return HttpResponse.json([jobs[0]])
     }),
   )

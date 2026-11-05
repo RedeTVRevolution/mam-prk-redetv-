@@ -472,11 +472,6 @@
                     "estado": "concluido",
                     "codigo_falha": null,
                     "duracao_s": 598.4,
-                    "cortes_ms": [
-                      0,
-                      4200,
-                      9800
-                    ],
                     "timecode_origem": null,
                     "taxa_de_quadros": 29.97,
                     "capa_url": null,
@@ -567,7 +562,7 @@
             }
           }
         },
-        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`.",
+        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`.",
         "tags": [
           "sistemas"
         ]

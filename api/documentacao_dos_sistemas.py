@@ -271,8 +271,8 @@ OPERACOES: tuple[Operacao, ...] = (
         "`exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com "
         "`limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz "
         "o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. "
-        "Escopo `ler`.",
-        [_JOB],
+        "Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`.",
+        [{k: v for k, v in _JOB.items() if k != "cortes_ms"}],
         (
             *_sem_chave("ler"),
             Erro(

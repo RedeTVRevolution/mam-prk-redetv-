@@ -1035,14 +1035,19 @@ def criar_rotas(
     def andamento(
         request: Request,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        ids: Annotated[str, Query(description="Até 200 ids, separados por vírgula")],
+        ids: Annotated[
+            str,
+            Query(description=f"Até {LIMITE_DO_ANDAMENTO} ids, separados por vírgula"),
+        ],
     ) -> Response:
-        """O detalhe de vários Jobs numa leitura só, para a tela atualizar o que está em
-        andamento: sem capa e sem `cortes_ms`. Quem não existe ou não se enxerga é omitido."""
+        """O estado de vários Jobs numa leitura só, para a tela atualizar o que está em
+        andamento: o detalhe sem capa e sem `cortes_ms`. Quem não existe ou não se
+        enxerga é omitido."""
         pedidos = [i for i in (p.strip() for p in ids.split(",")) if i]
         if len(pedidos) > LIMITE_DO_ANDAMENTO:
             raise HTTPException(422, f"No máximo {LIMITE_DO_ANDAMENTO} ids")
-        jobs = repositorio.obter_varios(dict.fromkeys(pedidos))
+        posicao = {id_: n for n, id_ in enumerate(dict.fromkeys(pedidos))}
+        jobs = repositorio.obter_varios(posicao)
         pode_ver_lixeira = isinstance(chamador, Usuario) and _tem_permissao(
             request, chamador, "lixeira.gerir"
         )
@@ -1052,7 +1057,6 @@ def criar_rotas(
             if (j.lixeira is None or pode_ver_lixeira)
             and not (isinstance(chamador, Sistema) and j.sistema != chamador.sistema)
         ]
-        posicao = {id_: n for n, id_ in enumerate(dict.fromkeys(pedidos))}
         visiveis.sort(key=lambda j: posicao[j.id])
         corpo = [
             JobResumido.de(j).model_dump(mode="json", exclude={"capa_url"})
