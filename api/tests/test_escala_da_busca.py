@@ -1,5 +1,6 @@
-"""A busca lê vídeos e nomes em lote e usa uma copia do catálogo, com trava (#364)."""
+"""A busca lê vídeos e nomes em lote e usa uma cópia do catálogo, com trava (#364)."""
 
+import time
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from threading import Barrier, Event, Thread
@@ -101,7 +102,8 @@ def test_cem_registros_de_quarenta_videos_leem_os_jobs_numa_leitura_em_lote() ->
     assert jobs.um_a_um == 0
     assert len(jobs.lotes) == 1
     assert len(set(jobs.lotes[0])) == 40
-    # E os nomes: uma leitura em lote, nenhuma pessoa lida sozinha.
+    # E os nomes: em lote (as pessoas entendidas, depois as dos registros), nenhuma
+    # pessoa lida sozinha.
     assert catalogo.um_a_um == 0
     assert catalogo.lotes <= 2
 
@@ -169,7 +171,11 @@ def _copia_lenta(
     return CopiaCurta(ler, lambda: relogio[0])
 
 
-def _dez_threads(copia: CopiaCurta[int], solta: Event) -> list[list[int]]:
+def _dez_threads(
+    copia: CopiaCurta[int], solta: Event, antes_de_soltar: int = 0
+) -> list[list[int]]:
+    """Dez threads pedem a cópia ao mesmo tempo; a leitura só termina depois que
+    `antes_de_soltar` delas já voltaram."""
     vistas: list[list[int]] = []
     largada = Barrier(10)
 
@@ -180,6 +186,9 @@ def _dez_threads(copia: CopiaCurta[int], solta: Event) -> list[list[int]]:
     threads = [Thread(target=pedir) for _ in range(10)]
     for t in threads:
         t.start()
+    prazo = time.monotonic() + 5
+    while len(vistas) < antes_de_soltar and time.monotonic() < prazo:
+        time.sleep(0.001)
     solta.set()
     for t in threads:
         t.join(10)
@@ -196,11 +205,12 @@ def test_dez_threads_com_a_copia_expirada_causam_uma_recarga_so() -> None:
     relogio[0] = AGORA + VALIDADE_DA_COPIA + timedelta(seconds=1)
     solta.clear()
 
-    vistas = _dez_threads(copia, solta)
+    # A leitura segura a que recarrega até as outras nove voltarem.
+    vistas = _dez_threads(copia, solta, antes_de_soltar=9)
 
     assert len(quantas) == 2
-    # Quem não recarregou usou a copia anterior, sem esperar; nenhuma fica vazia.
-    assert len(vistas) == 10 and all(v in ([1], [2]) for v in vistas)
+    # Quem não recarregou usou a cópia anterior, sem esperar.
+    assert sorted(vistas) == [[1]] * 9 + [[2]]
 
 
 def test_dez_threads_na_primeira_leitura_esperam_uma_so_leitura() -> None:

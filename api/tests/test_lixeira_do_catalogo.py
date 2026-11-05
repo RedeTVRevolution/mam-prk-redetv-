@@ -261,3 +261,21 @@ def test_purga_automatica_aos_30_dias() -> None:
     assert (antes, depois) == (0, 2)
     assert mundo.catalogo.obter(mundo.ana.id) is None
     assert mundo.marcas.obter(mundo.marca.id) is None
+
+
+def test_pessoa_na_lixeira_sai_da_copia_do_catalogo_na_hora() -> None:
+    mundo = Mundo()
+
+    def autocompletar() -> list[str]:
+        achadas = mundo.cliente.get(
+            "/v1/catalogo/pessoas", params={"q": "ana"}, headers=CURADOR
+        ).json()
+        return [p["id"] for p in achadas]
+
+    assert autocompletar() == [mundo.ana.id]  # a cópia é lida aqui
+
+    mundo.enviar("pessoas", mundo.ana.id)
+    assert autocompletar() == []
+
+    mundo.cliente.post(f"{LIXEIRA}/pessoas/{mundo.ana.id}/restaurar", headers=ADMIN)
+    assert autocompletar() == [mundo.ana.id]

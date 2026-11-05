@@ -617,6 +617,7 @@ def criar_app(
             repositorio_de_auditoria,
             relogio,
             login_recente,
+            copia_das_pessoas.descartar,
         )
     )
     v1.include_router(
