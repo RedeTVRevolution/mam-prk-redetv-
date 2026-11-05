@@ -1,23 +1,23 @@
 # Tabelas resumidas do painel da diretoria (#280, E9). Uma consulta agendada do BigQuery
-# (`resumos_de_uso.sql`) refaz `uso_por_dia_e_usuario`, `uso_por_dia`, `uso_por_usuario` e
+# (`resumos_de_uso.sql`) mantém `uso_por_dia_e_usuario`, `uso_por_dia`, `uso_por_usuario` e
 # `uso_por_dia_e_programa`, `correcoes_por_dia` e `chamadas_de_api_por_dia` a partir de `eventos_de_uso` (#279) e as telas do painel (#282 a
 # #285) leem só elas.
 #
 # Por que consulta agendada e não visão materializada: a visão materializada não aceita
-# COUNT(DISTINCT) exato (usuários ativos, dias ativos), função de janela (descartar o evento
-# repetido pelo `id`) nem a junção com os momentos (horas de vídeo). Refazer as tabelas de
-# uma vez também dispensa saber o que mudou.
+# COUNT(DISTINCT) exato (usuários ativos, dias ativos) nem função de janela (descartar o
+# evento repetido pelo `id`).
 #
-# Custo: cada rodada lê a tabela de eventos inteira, duas colunas (`job_id` e
-# `duracao_do_video_ms`) da tabela de momentos inteira e as tabelas da própria rodada (o
-# mínimo é 10 MB por tabela lida). No começo são uns 70 MB por rodada; a cada 10 minutos
-# são ~4.300 rodadas por mês, uns 300 GB contra 1 TiB de consulta grátis por mês. Mas a
-# conta cresce com o acervo: a leitura dos momentos custa ~45 bytes por momento, e com
-# ~5 milhões de momentos copiados cada rodada já lê ~225 MB, ~1 TB por mês. Antes disso é
-# preciso levar a duração no evento de fim de processamento ou guardar uma tabela pequena
-# de duração por Job, e não ler os momentos. Estimado, não medido: conferir na fatura
-# (`faturamento.tf`). O armazenamento fica nos 10 GB grátis.
+# Custo (#380): cada rodada lê só as partições de `eventos_de_uso` da janela (hoje o dia de
+# ontem e o de hoje, em São Paulo), as quatro tabelas por dia que ela troca e a de fins já
+# contados; não lê os momentos (a duração do vídeo vem no evento de fim). Por isso o custo
+# não cresce com o acervo, só com o uso de cada dia. Cada rodada ainda lê o mínimo de 10 MB
+# por tabela. Medir no primeiro `apply` com `bq query --dry_run` (bytes antes e depois).
+# Backfill ou correção de dias antigos: aumente `janela_dos_resumos_em_dias` por uma
+# rodada e volte ao valor normal.
 locals {
+  # Quantos dias para trás (contando o de hoje em São Paulo) cada rodada refaz. O evento chega
+  # em minutos e cai no dia dele; a folga cobre uma rodada que falhou e a virada do dia.
+  janela_dos_resumos_em_dias = 2
   resumos_de_uso = ["uso_por_dia_e_usuario", "uso_por_dia", "uso_por_usuario", "uso_por_dia_e_programa", "correcoes_por_dia", "chamadas_de_api_por_dia"]
   # As que a web lê (PAINEL_TABELA_*): a API do painel não conhece o nome de nenhuma.
   tabelas_do_painel_na_web = {
@@ -28,7 +28,7 @@ locals {
   }
 }
 
-# A conta que roda a consulta: lê os eventos e os momentos e cria as tabelas no dataset.
+# A conta que roda a consulta: lê os eventos e cria as tabelas no dataset.
 resource "google_service_account" "resumos_de_uso" {
   account_id   = "mam-resumos-de-uso"
   display_name = "MAM resumos de uso"
@@ -56,7 +56,7 @@ resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
     query = templatefile("${path.module}/resumos_de_uso.sql", {
       prefixo            = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}."
       tabela_de_eventos  = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.eventos_de_uso.table_id}"
-      tabela_de_momentos = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.momentos_por_ano.table_id}"
+      inicio_da_janela   = "TIMESTAMP(DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL ${local.janela_dos_resumos_em_dias - 1} DAY), 'America/Sao_Paulo')"
     })
   }
   depends_on = [
@@ -64,7 +64,6 @@ resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
     google_project_iam_member.resumos_de_uso_roda_consulta,
     google_bigquery_dataset_iam_member.resumos_de_uso_grava,
     google_bigquery_table.eventos_de_uso,
-    google_bigquery_table.momentos_por_ano,
   ]
 }
 

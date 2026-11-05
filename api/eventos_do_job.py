@@ -271,6 +271,9 @@ class RepositorioQueRegistraOFim:
                 segundos_de_processamento=max(
                     0, round((agora - job.criado_em).total_seconds())
                 ),
+                duracao_do_video_ms=(
+                    round(job.duracao_s * 1000) if job.duracao_s is not None else None
+                ),
             )
         return job
 

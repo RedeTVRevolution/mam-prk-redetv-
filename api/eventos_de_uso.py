@@ -59,6 +59,9 @@ class EventoDeUso(BaseModel):
     estado: str | None = None
     codigo_falha: str | None = None
     segundos_de_processamento: int | None = None
+    # `fim_de_processamento`: a duração do vídeo, para o painel somar as horas sem ler os
+    # momentos (vazia no fim de um Job que falhou antes de medi-la).
+    duracao_do_video_ms: int | None = None
     # `busca`: só o tamanho da consulta (em caracteres, ou em bytes na busca por
     # imagem; nenhum na de parecidos, que parte de um plano) e os filtros; o texto
     # nunca sai da API.

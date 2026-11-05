@@ -395,6 +395,24 @@ def test_o_fim_leva_quanto_o_job_levou_do_registro_ao_fim() -> None:
     assert eventos.publicados[0].segundos_de_processamento == 20 * 60 + 30
 
 
+def test_o_fim_leva_a_duracao_do_video() -> None:
+    eventos = EventosEmMemoria()
+    repositorio = _repositorio_com(_job_em("analisando", duracao_s=1800.5), eventos)
+
+    repositorio.transitar("j1", "analisando", {"estado": "concluido"})
+
+    assert eventos.publicados[0].duracao_do_video_ms == 1_800_500
+
+
+def test_o_fim_sem_duracao_do_job_vai_sem_ela() -> None:
+    eventos = EventosEmMemoria()
+    repositorio = _repositorio_com(_job_em("analisando"), eventos)
+
+    repositorio.transitar("j1", "analisando", {"estado": "falhou"})
+
+    assert eventos.publicados[0].duracao_do_video_ms is None
+
+
 def test_falhar_publica_o_codigo_da_falha_e_o_sistema_dono() -> None:
     eventos = EventosEmMemoria()
     repositorio = _repositorio_com(
