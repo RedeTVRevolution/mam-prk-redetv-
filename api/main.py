@@ -38,7 +38,7 @@ from api.auth import (
 )
 from api.busca import Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
 from api.busca_na_nuvem import adaptadores_da_busca
-from api.catalogo import Catalogo, CatalogoEmMemoria
+from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.chaves import (
@@ -482,6 +482,9 @@ def criar_app(
         )
         return indexacao is not None and indexacao.estado == "indexado"
 
+    # Uma cópia das pessoas para o autocompletar e para a busca resolver nomes.
+    copia_das_pessoas = CopiaCurta(catalogo_de_pessoas.todas, relogio)
+
     def _rotas_das_pessoas(descartar: Callable[[], None]) -> APIRouter:
         """Fundir (#209) e renomear em todos os vídeos (#263), sob `/catalogo`."""
         rotas = APIRouter()
@@ -517,6 +520,7 @@ def criar_app(
             catalogo_de_marcas,
             relogio,
             _rotas_das_pessoas,
+            copia_das_pessoas,
         )
     )
     v1.include_router(
@@ -532,6 +536,7 @@ def criar_app(
                 armazenamento=armazenamento_dos_jobs,
                 relogio=relogio,
                 embedding=embedding_da_consulta,
+                copia_do_catalogo=copia_das_pessoas,
             ),
             relogio,
             busca_por_minuto,

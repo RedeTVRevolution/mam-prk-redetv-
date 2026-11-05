@@ -5,9 +5,10 @@ dono dos objetos da busca. Os rostos `origem=web` são legado da busca de fotos 
 web, retirada no #327: só a migração `apagar_referencias_web` ainda os lê.
 """
 
+import threading
 import uuid
-from collections.abc import Iterable, Mapping
-from datetime import datetime
+from collections.abc import Callable, Iterable, Mapping
+from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
@@ -93,6 +94,48 @@ def visivel(pessoa: PessoaDoCatalogo) -> bool:
 def nomes_de_busca(pessoa: PessoaDoCatalogo) -> list[str]:
     """Nome e apelidos normalizados: o que `achar` compara."""
     return sorted({normalizar(n) for n in [pessoa.nome, *pessoa.apelidos]})
+
+
+VALIDADE_DA_COPIA = timedelta(seconds=30)
+
+
+class CopiaCurta[T]:
+    """A lista de um catálogo lida há pouco, para todos que a pedem (o autocompletar e o
+    entendimento da consulta). Um nome acrescentado a descarta. Quando expira, uma thread
+    só relê; as outras usam a cópia anterior, e só esperam se não há cópia (a primeira
+    leitura, ou depois de `descartar`)."""
+
+    def __init__(self, ler: Callable[[], list[T]], relogio: Callable[[], datetime]):
+        self._ler, self._relogio = ler, relogio
+        self._lida_em: datetime | None = None
+        self._itens: list[T] = []
+        self._geracao = 0
+        self._recarga = threading.Lock()
+
+    def _vale(self) -> bool:
+        lida_em = self._lida_em
+        return lida_em is not None and self._relogio() - lida_em < VALIDADE_DA_COPIA
+
+    def itens(self) -> list[T]:
+        if self._vale():
+            return self._itens
+        # Expirada, mas ainda boa para quem não vai recarregar; descartada, não.
+        if not self._recarga.acquire(blocking=self._lida_em is None):
+            return self._itens
+        try:
+            if not self._vale():
+                geracao, agora = self._geracao, self._relogio()
+                itens = self._ler()
+                # Um `descartar` durante a leitura a deixa velha: lê de novo na próxima.
+                self._itens = itens
+                self._lida_em = agora if geracao == self._geracao else None
+            return self._itens
+        finally:
+            self._recarga.release()
+
+    def descartar(self) -> None:
+        self._geracao += 1
+        self._lida_em = None
 
 
 class Catalogo(Protocol):
