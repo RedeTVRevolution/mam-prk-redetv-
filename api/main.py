@@ -76,6 +76,8 @@ from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
     Armazenamento,
     ArmazenamentoIndisponivel,
+    DisparoDaIndexacao,
+    DisparoDaIndexacaoIndisponivel,
     Job,
     RepositorioDeJobs,
     RepositorioIndisponivel,
@@ -106,6 +108,7 @@ from api.nuvem import (
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     ContasIdentityPlatform,
+    DisparoDaIndexacaoNoCloudRun,
     DisparoPeloWorkflows,
     JanelasStorage,
     ReferenciasStorage,
@@ -288,6 +291,7 @@ def criar_app(
     arquivos: ArquivosDoJob | None = None,
     revisao: RepositorioDeRevisao | None = None,
     disparo: DisparoDoWorkflow | None = None,
+    disparo_da_indexacao: DisparoDaIndexacao | None = None,
     janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
     marcas: CatalogoDeMarcas | None = None,
@@ -439,19 +443,7 @@ def criar_app(
             catalogo_de_pessoas,
             catalogo_de_marcas,
             repositorio_de_sugestoes,
-            lambda job: reindexar(
-                job,
-                repositorio_de_jobs,
-                armazenamento_dos_jobs,
-                repositorio_de_correcoes,
-                indice_da_busca,
-                relogio,
-                copia,
-                embedding,
-                armazenamento_dos_jobs,
-                tipos_de_objeto=tipos_dos_objetos,
-                pessoas=catalogo_de_pessoas.obter,
-            ),
+            disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
             tipos_dos_objetos.conhecidos,
             idempotencia,
@@ -691,7 +683,6 @@ if _projeto:
             os.environ["BUCKET_QUARENTENA"],
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
-            bucket_de_referencias=os.environ["BUCKET_REFERENCIAS"],
         ),
         papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
@@ -726,6 +717,9 @@ if _projeto:
         ),
         disparo=DisparoPeloWorkflows(
             _projeto, os.environ["WORKFLOW_REGIAO"], os.environ["WORKFLOW_VALIDACAO"]
+        ),
+        disparo_da_indexacao=DisparoDaIndexacaoNoCloudRun(
+            _projeto, os.environ["INDEXACAO_REGIAO"], os.environ["INDEXACAO_JOB"]
         ),
         janelas=JanelasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_ACEITOS"]

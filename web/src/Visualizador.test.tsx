@@ -765,7 +765,7 @@ test('aberto com as etapas depois da análise rodando, acompanha até o fim sem 
   // A etapa só termina depois que o teste viu o aviso. Com a consulta a cada 20 ms, um
   // "terminou" já na primeira resposta apagava o aviso antes de o `abrir` voltar.
   let terminou = false
-  const rodando: Partial<Job> = { etapa_atual: 'referencias', indexacao: { estado: 'pendente', em: AGORA } }
+  const rodando: Partial<Job> = { etapa_atual: 'identificacao', indexacao: { estado: 'pendente', em: AGORA } }
   servidor.use(
     http.get('/v1/jobs/j1/decupagem', () => {
       cargas += 1
@@ -780,7 +780,7 @@ test('aberto com as etapas depois da análise rodando, acompanha até o fim sem 
     ),
   )
   await abrir(rodando, null, false, true, 20)
-  expect(await screen.findByText('Referências em andamento.')).toBeTruthy()
+  expect(await screen.findByText('Identificação em andamento.')).toBeTruthy()
   terminou = true
 
   await waitFor(() => expect(screen.queryByText(/em andamento/)).toBeNull())
@@ -799,9 +799,9 @@ test('o "Reprocessar…" fica escondido entre etapas e volta num Job preso, pass
   const haSeteHoras = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
   await abrir(
     {
-      etapa_atual: 'referencias',
+      etapa_atual: 'identificacao',
       indexacao: { estado: 'pendente', em: haSeteHoras },
-      etapas: [{ nome: 'referencias', inicio: haSeteHoras, fim: null, resultado: null }],
+      etapas: [{ nome: 'identificacao', inicio: haSeteHoras, fim: null, resultado: null }],
     },
     null,
     false,
@@ -900,7 +900,7 @@ test('decupagem sem os campos novos (1.1) abre o painel, e sem catálogo a catal
   await abrir({}, null, true)
 
   expect((await screen.findAllByText('Eleição')).length).toBeGreaterThan(0)
-  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
   await usuario.keyboard('{F2}')
 
   expect(screen.queryByRole('textbox', { name: 'Motivo' })).toBeNull()

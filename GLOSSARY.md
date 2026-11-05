@@ -15,7 +15,7 @@ Um pedido de decupagem de um vídeo, do registro ao fim do processamento.
 _Evitar_: tarefa, pedido
 
 **Etapa**:
-Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, identificação, referências, comparação, quadros-chave, indexação, nessa ordem), com início, fim e resultado (`concluida` ou `falhou`). A transcrição e a leitura da tela rodam em paralelo, cada uma num Job com GPU, e a análise só começa quando as duas terminam. Essas duas etapas registram também o `dispositivo` (`gpu` ou `cpu`, se o plano B entrou) e as `tentativas_gpu`. A falha de uma etapa depois do `concluido` não muda o estado do Job.
+Passo do processamento de um Job que o Workflows roda (validação, transcrição, leitura da tela, análise, identificação, quadros-chave, indexação, nessa ordem), com início, fim e resultado (`concluida` ou `falhou`). A transcrição e a leitura da tela rodam em paralelo, cada uma num Job com GPU, e a análise só começa quando as duas terminam. Essas duas etapas registram também o `dispositivo` (`gpu` ou `cpu`, se o plano B entrou) e as `tentativas_gpu`. A falha de uma etapa depois do `concluido` não muda o estado do Job.
 _Evitar_: fase
 
 **Dispositivo**:
@@ -64,7 +64,7 @@ Contexto fixo de um programa (apresentadores, repórteres, merchandising frequen
 ### Pessoas e evidência
 
 **Catálogo de pessoas**:
-Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel, apelidos e as referências de rosto ligadas a ela (origem `web` ou `acervo`). Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
+Dado vivo no Firestore (`api/catalogo.py`) com as pessoas frequentes da emissora, em todos os programas: cada pessoa tem id estável, nome, papel e apelidos. Começa pela carga do `programas.toml` e cresce com as confirmações. A Decupagem aponta para ela por `catalogo_id`, gravado quando a correção de nome da revisora casa com uma só pessoa do catálogo, ou quando o código confirma o nome por uma prova (GC ou fala; que acha a pessoa no catálogo por nome ou apelido, ou a acrescenta).
 _Evitar_: base de famosos
 
 **Catálogo de marcas**:
@@ -91,27 +91,13 @@ _Evitar_: citação como sinônimo de aparição
 O que sustenta uma ocorrência: rosto, GC, fala ou quadro.
 
 **Fonte do nome**:
-A prova que confirma o nome de uma pessoa, conferida pelo código: GC, fala ou referência de rosto. Estar no perfil ou no catálogo torna a pessoa candidata, mas não confirma o nome; o modelo nunca identifica pela memória.
-
-**Referência de rosto**:
-Foto de uma pessoa nomeada, guardada para comparar com o rosto da tela: 3 fotos diferentes por nome, buscadas na web, com a página de origem.
-Quem as busca é o Job `mam-referencias` (`api/referencias_job.py`), o único com internet. Recebe só nomes: `NOMES` e `PROGRAMA`, ou `JOB_ID`, e então lê a lista que o Job de identificação gravou (`<job>.nomes_a_buscar.json`, com os candidatos e os palpites sem referência válida e o programa). Lê a chave do SerpAPI no Secret Manager, trata toda imagem como entrada hostil, guarda no bucket de referências só as que o modelo confere e liga ao catálogo. O nome fora do catálogo (palpite) ganha as fotos sob o prefixo `palpites/` (ver **Fotos de palpite**); o ambíguo não busca. Há um limite de buscas por vídeo (`LIMITE_DE_BUSCAS_POR_VIDEO`), e cada busca leva o rótulo de custo. O `make carregar-catalogo` não apaga os rostos já guardados.
-_Evitar_: galeria facial
-
-**Fotos de palpite**:
-As 3 fotos de referência de um palpite que o catálogo não conhece, guardadas sob `palpites/<nome-normalizado>/` no bucket das referências, com os dados em `rostos.json` ao lado (`api/rostos_dos_palpites.py`). Uma regra de ciclo de vida do bucket apaga só esse prefixo, em 30 dias (`prazo_dos_palpites_dias`). Só o nome que a comparação confirma entra no catálogo, e aí as fotos passam para `referencias/<id>/`.
+A prova que confirma o nome de uma pessoa, conferida pelo código: GC ou fala (conferida no texto original do Whisper). O rosto sozinho não confirma (ADR 0012). Estar no perfil ou no catálogo torna a pessoa candidata, mas não confirma o nome; o modelo nunca identifica pela memória.
 
 **Palpite**:
-Nome que o modelo dá sem prova. Vira nome confirmado se o rosto bater com as 3 referências do nome; senão, é descartado ou fica como não confirmado, fora dos relatórios de tempo de tela.
-
-**Comparação**:
-Passo que compara as pessoas sem nome e os palpites do vídeo com as fotos de referência (`api/comparacao.py`, `comparar`). Primeiro a escolha às cegas: o modelo vê as fotos com rótulos A, B… embaralhados a cada chamada e nunca recebe os nomes; o código traduz o rótulo. Depois a conferência foto a foto: uma chamada por foto, com a confiança de cada uma; o nome só se confirma com as 3 fotos no limiar ou acima. Confirma com `fontes_do_nome=["referencia"]`, liga a pessoa ao catálogo e propõe sugestões para o perfil. O palpite fora do catálogo concorre com as fotos de palpite; ao confirmar, entra no catálogo (o papel vem da aparição). Há um limite de pessoas por vídeo; as que passam dele ficam como palpite não confirmado.
-
-**Veredito**:
-Registro, por pessoa, do que a comparação decidiu (confirmado, palpite descartado, palpite não confirmado ou sem resultado), com as 3 fotos e a confiança de cada uma. Um palpite trocado por outro nome confirmado fica confirmado e marcado como descartado. Serve à auditoria e à tela: a rota `GET /v1/jobs/{id}/pessoas/{pessoa}/referencias` (só com `decupagem.ver`, URLs assinadas de 5 min, sem cache) devolve as fotos do veredito com a página, o domínio e se cada uma confere, para o painel de comparação do Visualizador, aberto pelo selo "Rosto". A `Pessoa` não guarda a prova.
+Nome que o modelo dá sem prova. Fica como não confirmado, fora dos relatórios de tempo de tela, até a prova (GC ou fala) ou o editor confirmar.
 
 **Palpite descartado / palpite não confirmado**:
-Descartado: o nome foi recusado (a escolha apontou outro candidato ou nenhum, ou o nome está ou fica confirmado para outra pessoa do vídeo) e a pessoa volta a "não identificado". Não confirmado: o nome continua palpite porque não há referência para conferir, o limite de pessoas passou ou uma foto ficou abaixo do limiar.
+Descartado: o nome foi recusado (por exemplo, o editor o corrigiu) e a pessoa volta a "não identificado". Não confirmado: o nome continua palpite porque não há GC nem fala com ele.
 
 ### Busca
 
@@ -198,6 +184,9 @@ A análise inteira de um Job concluído refeita com outro modelo, sem escaloname
 Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada.
 _Evitar_: edição, ajuste
 
+**Revisão**:
+O modo de edição do Visualizador (botão **Revisar**, tecla E; #328). Dentro dela, corrigir, aceitar sugestão, desfazer, aprovar ou recusar Correção pendente, descartar e reaplicar da fila só gravam a camada de Correções e respondem na hora: nenhuma rota chama `reindexar`. O botão passa a **Aprovar Revisão** (E de novo), que sai do modo e faz `POST /v1/jobs/{id}/revisao/aprovar` (`editar`): põe `indexacao.estado` em `pendente` e dispara uma vez o Job `mam-indexacao` com `JOB_ID` (`DisparoDaIndexacaoNoCloudRun`, variáveis `INDEXACAO_JOB` e `INDEXACAO_REGIAO`), respondendo 202 sem esperar; se o disparo falha volta ao estado de antes (503). Não há marcador de "índice desatualizado": o histórico já mostra a correção gravada depois da última indexação como `salva` (e `indexando` com a indexação `pendente`), e a tela acompanha o histórico até `indexado`. Sair sem aprovar deixa a busca e o BigQuery como estavam.
+
 **Fusão de pessoas**:
 Juntar duas pessoas do catálogo numa só, o caso comum de nome duplicado (`api/fusao_de_pessoas.py`, #209, permissão `catalogo.fundir` do Curador e do Administrador). `POST /v1/catalogo/pessoas/{origem}/fundir` (destino e motivo) e `GET .../fundir/impacto?destino_id=` (quantos vídeos mudam e quantas fotos saem). A origem não é apagada: guarda `fundida` (destino, quem, quando, motivo) e some das buscas; o destino ganha o nome e os apelidos dela. Nada gravado é reescrito: a leitura das Decupagens troca a origem pelo destino (`com_pessoas_fundidas`). As fotos de rosto da origem são apagadas (LGPD) e a ação `pessoa.fundida` vai para a auditoria. Na tela, "Fundir com…" na linha da pessoa do catálogo, no modo de catalogação.
 
@@ -221,8 +210,8 @@ Juntar ou dividir pautas para a qual o reprocessar não achou pauta corresponden
 Na tela (modo de catalogação, aba Pautas): `M` marca a pauta em foco, `U` junta as marcadas, `D` divide a pauta em foco no ponto do player; na gaveta, a fila mostra a marca "não reaplicada" com "Refazer à mão" (volta a essas teclas) e Descartar.
 
 **Sugestão**:
-Pista do próprio sistema que o editor só confirma (`api/sugestoes.py`, `GET /v1/jobs/{id}/sugestoes`): uma pergunta, o contexto que a sustenta e a correção proposta, no formato das correções. Nunca muda nada sozinha: aceitar cria a correção com o motivo "sugestão confirmada pelo editor" (ou "corrigida", se o editor deu outro nome ou o título da pauta); aceita ou recusada, sai da lista naquele vídeo, mesmo depois de reprocessar e mesmo com a correção pendente. Não confundir com as sugestões para o perfil que a comparação propõe (`sugestoes_de_perfil`). As regras são do servidor: o GC de identificação sobre um "não identificado" (só o tipo `gc` sustenta; a chamada nunca) e o trecho de 30 s ou mais sem pauta. Aceitas e recusadas por tipo ficam em `GET /v1/sugestoes/contagem`.
-_Evitar_: palpite (é o nome que o modelo propõe sem prova, ADR 0005)
+Pista do próprio sistema que o editor só confirma (`api/sugestoes.py`, `GET /v1/jobs/{id}/sugestoes`): uma pergunta, o contexto que a sustenta e a correção proposta, no formato das correções. Nunca muda nada sozinha: aceitar cria a correção com o motivo "sugestão confirmada pelo editor" (ou "corrigida", se o editor deu outro nome ou o título da pauta); aceita ou recusada, sai da lista naquele vídeo, mesmo depois de reprocessar e mesmo com a correção pendente. As regras são do servidor: o GC de identificação sobre um "não identificado" (só o tipo `gc` sustenta; a chamada nunca) e o trecho de 30 s ou mais sem pauta. Aceitas e recusadas por tipo ficam em `GET /v1/sugestoes/contagem`.
+_Evitar_: palpite (é o nome que o modelo propõe sem prova, ADR 0012)
 
 ### Acesso
 
@@ -274,5 +263,5 @@ Nota por rubrica, todo dia, de uma amostra dos vídeos concluídos no dia anteri
 Depois que a indexação copia um vídeo concluído para o BigQuery (`api/sinal_do_programa.py`, #287), os eventos dele (aparições, menções, pautas, comerciais) por hora de vídeo, contados pelas linhas da cópia (cada intervalo de aparição conta um, sem juntar os que se tocam como no tempo de tela), são comparados com a média e o desvio dos últimos N vídeos do mesmo programa, calculados no BigQuery. Fora de K desvios, sai um log `desvio_de_programa` (programa, tipo, valor, média, desvio) que um alerta do Monitoring pega. Programa com menos de N vídeos, ou histórico sem variação, não alerta. Só o vídeo que acabou de concluir é avaliado (não as Correções nem o `make reindexar` em massa).
 
 **Painéis de observabilidade**:
-Quatro painéis do Cloud Monitoring no `infra/modulos/mam/main.tf` (#288): tempo e custo por etapa, fila de processamento, erros e latência da API, e Jobs com GPU. Cada número vem de uma métrica de log (linhas JSON dos Jobs e do Workflows: `duracao_da_etapa`, `uso_do_modelo`, `fila_de_jobs`, `falta_de_gpu`, mais as requisições da API) ou de uma métrica nativa do Cloud Run. Nos tokens e no custo, a etapa é o Job que chamou o modelo, sem o `mam-` (`analise`, `identificacao`, `referencias`, `comparacao`, `inventario`). As requisições da API são só as de `/v1/`, com a rota cortada no recurso (`/v1/jobs`). O custo de uma etapa é a soma dos tokens de cada modelo vezes o preço dele em `precos_por_milhao_de_tokens`; sem preço na configuração só os tokens aparecem. A fila só conta os Jobs em andamento (aguardando upload, validando, analisando), amostrados por minuto pelo Job `mam-fila`, e a idade é desde a criação.
+Quatro painéis do Cloud Monitoring no `infra/modulos/mam/main.tf` (#288): tempo e custo por etapa, fila de processamento, erros e latência da API, e Jobs com GPU. Cada número vem de uma métrica de log (linhas JSON dos Jobs e do Workflows: `duracao_da_etapa`, `uso_do_modelo`, `fila_de_jobs`, `falta_de_gpu`, mais as requisições da API) ou de uma métrica nativa do Cloud Run. Nos tokens e no custo, a etapa é o Job que chamou o modelo, sem o `mam-` (`analise`, `identificacao`, `inventario`). As requisições da API são só as de `/v1/`, com a rota cortada no recurso (`/v1/jobs`). O custo de uma etapa é a soma dos tokens de cada modelo vezes o preço dele em `precos_por_milhao_de_tokens`; sem preço na configuração só os tokens aparecem. A fila só conta os Jobs em andamento (aguardando upload, validando, analisando), amostrados por minuto pelo Job `mam-fila`, e a idade é desde a criação.
 

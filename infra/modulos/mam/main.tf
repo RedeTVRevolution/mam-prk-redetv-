@@ -193,44 +193,8 @@ variable "tolerancia_da_fala_ms" {
   default     = 2000
 }
 
-variable "validade_das_referencias_dias" {
-  description = "Dias em que uma foto de referência da web vale, a contar de quando foi obtida; depois disso é buscada de novo"
-  type        = number
-  default     = 180
-}
-
-variable "prazo_dos_palpites_dias" {
-  description = "Dias até apagar as fotos de um palpite fora do catálogo que não se confirmou (rosto é dado sensível); vale só para o prefixo palpites/ do bucket de referências"
-  type        = number
-  default     = 30
-}
-
-variable "limite_de_buscas_por_video" {
-  description = "Quantas buscas no SerpAPI o Job de referências faz por vídeo; depois disso não busca mais"
-  type        = number
-  default     = 12
-}
-
-variable "referencias_do_acervo" {
-  description = "\"ligado\" liga o uso das referências de rosto do acervo (caminho pronto, desligado por padrão)"
-  type        = string
-  default     = "desligado"
-}
-
 variable "limite_de_pessoas_do_modelo_forte" {
   description = "Quantas pessoas sem nome por vídeo o modelo forte olha (as de mais tempo na imagem primeiro)"
-  type        = number
-  default     = 8
-}
-
-variable "limiar_da_comparacao" {
-  description = "Confiança mínima de cada uma das 3 fotos para a comparação confirmar um nome"
-  type        = number
-  default     = 0.8
-}
-
-variable "limite_de_comparacoes" {
-  description = "Quantas pessoas por vídeo a comparação com as fotos de referência examina; as demais ficam como palpite não confirmado"
   type        = number
   default     = 8
 }
@@ -610,20 +574,6 @@ resource "google_storage_bucket" "mam" {
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
-  # As fotos de um palpite fora do catálogo (#222) são apagadas sozinhas depois do prazo;
-  # as ligadas a uma pessoa do catálogo ficam fora do prefixo e não são apagadas.
-  dynamic "lifecycle_rule" {
-    for_each = each.key == "referencias" ? [1] : []
-    content {
-      condition {
-        age            = var.prazo_dos_palpites_dias
-        matches_prefix = ["palpites/"]
-      }
-      action {
-        type = "Delete"
-      }
-    }
-  }
   # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
   # e só das URLs da aplicação.
   dynamic "cors" {
@@ -639,7 +589,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "referencias", "identificacao", "comparacao", "orquestracao", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "objetos", "avaliacao", "fila", "purga", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -654,7 +604,6 @@ resource "google_service_account" "mam" {
 # conector do Workflows acompanha a execução do Job pela operação, que é do projeto e
 # não do Job; sem ele, o passo `valida` falharia depois de o Job rodar e marcaria um
 # vídeo bom como arquivo_corrompido.
-# A mam-referencias grava as referências no catálogo e chama o Gemini para conferir as fotos.
 locals {
   # Os IDs dos papéis sob medida (papel_vertex.tf). As concessões são escritas pelo
   # ID, e não pelo atributo do recurso: o for_each do iam_member tira as chaves daqui,
@@ -685,12 +634,9 @@ locals {
     # reindexa a cada Correção e busca. Nenhuma das duas cria ou apaga coleção. O
     # embedding automático da coleção roda com a credencial de quem grava ou busca, e não
     # com a do Agent Retrieval: as duas precisam chamar a Vertex (papel sob medida, só a predição).
-    indexacao   = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", local.papel_vertex_predicao, "roles/bigquery.jobUser"]
-    referencias = ["roles/datastore.user", local.papel_vertex_predicao]
-    # Leem o Job, o catálogo e a Decupagem no Firestore e chamam o Gemini; a comparação
-    # também grava as sugestões de perfil.
+    indexacao = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", local.papel_vertex_predicao, "roles/bigquery.jobUser"]
+    # Lê o Job, o catálogo e a Decupagem no Firestore e chama o Gemini.
     identificacao = ["roles/datastore.user", local.papel_vertex_predicao]
-    comparacao    = ["roles/datastore.user", local.papel_vertex_predicao]
     # O Job do inventário chama o Gemini (texto, ou os quadros); não toca o Firestore.
     objetos = [local.papel_vertex_predicao]
     # A avaliação (#255) lê os Jobs, grava as notas no Firestore e chama o serviço de
@@ -730,14 +676,8 @@ locals {
     quadros = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
     # Lê a Decupagem entregue, com os quadros-chave.
     indexacao = { decupagens = "roles/storage.objectViewer" }
-    # Grava as fotos de referência e lê a lista de nomes que a identificação deixou na decupagem.
-    referencias = { referencias = "roles/storage.objectUser", decupagens = "roles/storage.objectViewer" }
     # Lê a cópia limpa e regrava a Decupagem (objectUser, porque a sobrescreve).
     identificacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser" }
-    # Como a identificação, mais as fotos de referência (lê, e passa as fotos do palpite
-    # confirmado para o lugar das do catálogo, apagando as de antes: objectUser); grava
-    # `<job>.comparacao.json`.
-    comparacao = { aceitos = "roles/storage.objectViewer", decupagens = "roles/storage.objectUser", referencias = "roles/storage.objectUser" }
     # Lê a Decupagem e os quadros e grava o resultado do Florence-2 ao lado deles
     # (`<job>/objetos/florence.json`; objectUser, porque o reprocessamento o sobrescreve).
     # Só este bucket: o Job não lê o proxy nem toca o Firestore.
@@ -955,6 +895,16 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "WORKFLOW_REGIAO"
+        value = var.regiao
+      }
+      # O Job que o "Aprovar Revisão" dispara (api/nuvem.py). Pelo local, pelo mesmo ciclo
+      # do workflow acima.
+      env {
+        name  = "INDEXACAO_JOB"
+        value = local.job_de_indexacao
+      }
+      env {
+        name  = "INDEXACAO_REGIAO"
         value = var.regiao
       }
       env {
@@ -1888,8 +1838,12 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_quadros" {
 # (sem vpc_access), porque o Agent Retrieval é uma API pública; só recebe a Decupagem já
 # pronta, nunca o vídeo. Roda depois dos quadros-chave; a falha dele só fica no estado
 # do Job (indexacao.estado), que `make reindexar` refaz.
+locals {
+  job_de_indexacao = "mam-indexacao"
+}
+
 resource "google_cloud_run_v2_job" "indexacao" {
-  name                = "mam-indexacao"
+  name                = local.job_de_indexacao
   location            = var.regiao
   deletion_protection = false
   template {
@@ -1976,80 +1930,12 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_indexacao" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
-# Job de referências de rosto (#111, ADR 0005): o único com internet (sem vpc_access),
-# por isso só recebe nomes (a lista que a identificação deixou para o JOB_ID, ou NOMES em
-# JSON e PROGRAMA) e nunca quadros do vídeo. Busca
-# fotos pelo SerpAPI, o Gemini as confere e as guarda no bucket de referências.
-# A chave do SerpAPI fica no Secret Manager: o Terraform cria o segredo vazio (aditivo,
-# ADR 0002) e a versão com a chave é posta à mão; só este Job a lê.
-resource "google_secret_manager_secret" "serpapi" {
-  secret_id = "mam-serpapi"
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_secret_manager_secret_iam_member" "referencias_le_serpapi" {
-  secret_id = google_secret_manager_secret.serpapi.id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = google_service_account.mam["referencias"].member
-}
-
-resource "google_cloud_run_v2_job" "referencias" {
-  name                = "mam-referencias"
-  location            = var.regiao
-  deletion_protection = false
-  template {
-    parallelism = 1
-    task_count  = 1
-    template {
-      service_account = google_service_account.mam["referencias"].email
-      max_retries     = 0
-      # Poucos nomes por execução: cada um é uma busca, dez miniaturas no máximo e uma chamada ao Gemini.
-      timeout = "1800s"
-      containers {
-        image   = var.imagem
-        command = ["python"]
-        args    = ["-m", "api.referencias_job"]
-        resources {
-          limits = {
-            cpu    = "1"
-            memory = "1Gi"
-          }
-        }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "BUCKET_REFERENCIAS"
-          value = local.buckets["referencias"]
-        }
-        env {
-          name  = "SEGREDO_DO_SERPAPI"
-          value = google_secret_manager_secret.serpapi.id
-        }
-        env {
-          name  = "BUCKET_DECUPAGENS"
-          value = local.buckets["decupagens"]
-        }
-        env {
-          name  = "LIMITE_DE_BUSCAS_POR_VIDEO"
-          value = tostring(var.limite_de_buscas_por_video)
-        }
-        env {
-          name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
-          value = tostring(var.validade_das_referencias_dias)
-        }
-        env {
-          name  = "REFERENCIAS_DO_ACERVO"
-          value = var.referencias_do_acervo
-        }
-      }
-    }
-  }
-  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
+# A API roda o Job de indexação quando a pessoa aprova a revisão (#328), com override de JOB_ID.
+resource "google_cloud_run_v2_job_iam_member" "web_roda_indexacao" {
+  name     = google_cloud_run_v2_job.indexacao.name
+  location = google_cloud_run_v2_job.indexacao.location
+  role     = "roles/run.developer"
+  member   = google_service_account.mam["web"].member
 }
 
 # Job de identificação pelo modelo forte (#221): a imagem da validação (ffmpeg) com outro
@@ -2099,100 +1985,6 @@ resource "google_cloud_run_v2_job" "identificacao" {
           value = tostring(var.limite_de_pessoas_do_modelo_forte)
         }
         env {
-          name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
-          value = tostring(var.validade_das_referencias_dias)
-        }
-        env {
-          name  = "TMPDIR"
-          value = "/saida"
-        }
-        resources {
-          # No volume, só a cópia limpa (até 4 GiB) e os quadros de uma chamada; 6 GiB.
-          # Memória: o volume mais ~1 GiB do ffmpeg e do Python.
-          limits = {
-            cpu    = "2"
-            memory = "8Gi"
-          }
-        }
-        volume_mounts {
-          name       = "saida"
-          mount_path = "/saida"
-        }
-      }
-      volumes {
-        name = "saida"
-        empty_dir {
-          medium     = "MEMORY"
-          size_limit = "6Gi"
-        }
-      }
-    }
-  }
-  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
-}
-
-# Job da comparação com as fotos de referência (#221): como o de identificação, e ainda lê
-# o bucket das referências (as fotos já guardadas pelo `mam-referencias`, que é o único com
-# internet). Regrava a Decupagem e grava os vereditos em `<job>.comparacao.json`.
-# O Workflows o roda depois da análise (parte 4 do #112).
-resource "google_cloud_run_v2_job" "comparacao" {
-  name                = "mam-comparacao"
-  location            = var.regiao
-  deletion_protection = false
-  template {
-    parallelism = 1
-    task_count  = 1
-    template {
-      service_account = google_service_account.mam["comparacao"].email
-      max_retries     = 0
-      # NÃO medido (#135): por pessoa, uma chamada às cegas e 3 conferências foto a foto,
-      # até `limite_de_comparacoes` pessoas; de segundos a ~2 min por pessoa no pior caso.
-      # 3600 s dão folga larga; meça no dev.
-      timeout = "3600s"
-      vpc_access {
-        egress = "ALL_TRAFFIC"
-        network_interfaces {
-          network    = google_compute_network.validacao.id
-          subnetwork = google_compute_subnetwork.validacao.id
-        }
-      }
-      containers {
-        image   = var.imagem_validacao
-        command = ["python"]
-        args    = ["-m", "api.comparacao_job"]
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "BUCKET_ACEITOS"
-          value = local.buckets["aceitos"]
-        }
-        env {
-          name  = "BUCKET_DECUPAGENS"
-          value = local.buckets["decupagens"]
-        }
-        env {
-          name  = "BUCKET_REFERENCIAS"
-          value = local.buckets["referencias"]
-        }
-        env {
-          name  = "LIMIAR_DA_COMPARACAO"
-          value = tostring(var.limiar_da_comparacao)
-        }
-        env {
-          name  = "LIMITE_DE_COMPARACOES"
-          value = tostring(var.limite_de_comparacoes)
-        }
-        env {
-          name  = "VALIDADE_DAS_REFERENCIAS_DIAS"
-          value = tostring(var.validade_das_referencias_dias)
-        }
-        env {
-          name  = "REFERENCIAS_DO_ACERVO"
-          value = var.referencias_do_acervo
-        }
-        env {
           name  = "TMPDIR"
           value = "/saida"
         }
@@ -2225,22 +2017,6 @@ resource "google_cloud_run_v2_job" "comparacao" {
 resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_identificacao" {
   name     = google_cloud_run_v2_job.identificacao.name
   location = google_cloud_run_v2_job.identificacao.location
-  role     = "roles/run.developer"
-  member   = google_service_account.mam["orquestracao"].member
-}
-
-# A orquestração roda o Job de referencias, também com override de JOB_ID.
-resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_referencias" {
-  name     = google_cloud_run_v2_job.referencias.name
-  location = google_cloud_run_v2_job.referencias.location
-  role     = "roles/run.developer"
-  member   = google_service_account.mam["orquestracao"].member
-}
-
-# A orquestração roda o Job de comparacao, também com override de JOB_ID.
-resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_comparacao" {
-  name     = google_cloud_run_v2_job.comparacao.name
-  location = google_cloud_run_v2_job.comparacao.location
   role     = "roles/run.developer"
   member   = google_service_account.mam["orquestracao"].member
 }
@@ -2399,7 +2175,7 @@ resource "google_cloud_scheduler_job" "fila" {
   depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_fila]
 }
 
-# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Jobs de identificação, referências e comparação -> Job de quadros -> Job de indexação.
+# Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de identificação -> Job de quadros -> Job de indexação.
 locals {
   workflow_validacao = "mam-validacao"
 }
@@ -2426,8 +2202,6 @@ resource "google_workflows_workflow" "validacao" {
     job_de_inventario      = google_cloud_run_v2_job.inventario.name
     job_de_analise         = google_cloud_run_v2_job.analise.name
     job_de_identificacao   = google_cloud_run_v2_job.identificacao.name
-    job_de_referencias     = google_cloud_run_v2_job.referencias.name
-    job_de_comparacao      = google_cloud_run_v2_job.comparacao.name
     job_de_quadros         = google_cloud_run_v2_job.quadros.name
     job_de_indexacao       = google_cloud_run_v2_job.indexacao.name
   })
@@ -3421,6 +3195,10 @@ output "bucket_aceitos" {
 
 output "bucket_decupagens" {
   value = local.buckets["decupagens"]
+}
+
+output "bucket_referencias" {
+  value = local.buckets["referencias"]
 }
 
 output "workflow_regiao" {

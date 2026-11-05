@@ -10,6 +10,7 @@ from api import objetos_job, teste_dos_jobs
 from api.decupagem import Decupagem
 from api.florence import (
     NOME_DO_MODELO,
+    Configuracao,
     ObjetoDetectado,
     ObjetosDaDecupagem,
     RegiaoLegendada,
@@ -55,18 +56,29 @@ class DetectorFalso:
     def __init__(self, erro: Exception | None = None) -> None:
         self.erro = erro
         self.tamanhos: list[tuple[int, int]] = []
+        self.lotes: list[int] = []
 
-    def detectar(
-        self, imagem: Image.Image
-    ) -> tuple[list[ObjetoDetectado], list[RegiaoLegendada]]:
+    def detectar_lote(
+        self, imagens: list[Image.Image]
+    ) -> list[tuple[list[ObjetoDetectado], list[RegiaoLegendada]]]:
         if self.erro:
             raise self.erro
-        self.tamanhos.append(imagem.size)
-        caixa = Caixa(x=0.1, y=0.1, largura=0.5, altura=0.5)
-        return (
-            [ObjetoDetectado(rotulo=f"coisa {len(self.tamanhos)}", caixa=caixa)],
-            [RegiaoLegendada(legenda="uma coisa", caixa=caixa)],
-        )
+        self.lotes.append(len(imagens))
+        resultados = []
+        for imagem in imagens:
+            self.tamanhos.append(imagem.size)
+            caixa = Caixa(x=0.1, y=0.1, largura=0.5, altura=0.5)
+            resultados.append(
+                (
+                    [
+                        ObjetoDetectado(
+                            rotulo=f"coisa {len(self.tamanhos)}", caixa=caixa
+                        )
+                    ],
+                    [RegiaoLegendada(legenda="uma coisa", caixa=caixa)],
+                )
+            )
+        return resultados
 
 
 def _armazenamento() -> ObjetosEmMemoria:
@@ -81,6 +93,15 @@ def _armazenamento() -> ObjetosEmMemoria:
     }.items():
         armazenamento.quadros[("j1", caminho)] = _jpeg(*tamanho)
     return armazenamento
+
+
+def _imagem_com(quadrados: list[tuple[int, int, int, int]], fundo: int = 0) -> bytes:
+    imagem = Image.new("RGB", (160, 160), (fundo,) * 3)
+    for x0, y0, x1, y1 in quadrados:
+        imagem.paste((255, 255, 255), (x0, y0, x1, y1))
+    saida = io.BytesIO()
+    imagem.save(saida, format="PNG")
+    return saida.getvalue()
 
 
 def test_grava_um_quadro_por_jpeg_com_o_indice_do_plano() -> None:
@@ -196,3 +217,145 @@ def test_main_em_modo_de_teste_nao_toca_a_nuvem(
         objetos_job.main()
 
     assert saida.value.code == 21
+
+
+def test_com_a_configuracao_padrao_o_lote_e_de_um_quadro() -> None:
+    detector = DetectorFalso()
+    executar("j1", _armazenamento(), detector, configuracao=Configuracao())
+    assert detector.lotes == [1, 1, 1]
+
+
+def test_o_lote_junta_quadros_de_planos_diferentes_e_mantem_a_ordem() -> None:
+    padrao, em_lote = _armazenamento(), _armazenamento()
+    executar("j1", padrao, DetectorFalso())
+    detector = DetectorFalso()
+    executar("j1", em_lote, detector, configuracao=Configuracao(lote=2))
+
+    assert detector.lotes == [2, 1]
+    quadros = em_lote.resultados[("j1", None)].quadros
+    assert [q.caminho for q in quadros] == [
+        q.caminho for q in padrao.resultados[("j1", None)].quadros
+    ]
+    assert [q.objetos[0].rotulo for q in quadros] == ["coisa 1", "coisa 2", "coisa 3"]
+
+
+def test_o_resultado_sem_destino_nao_leva_segundos() -> None:
+    armazenamento = _armazenamento()
+    executar("j1", armazenamento, DetectorFalso())
+    assert armazenamento.resultados[("j1", None)].segundos is None
+
+
+def test_no_destino_alternativo_o_resultado_leva_os_segundos() -> None:
+    armazenamento = _armazenamento()
+    tempos = iter([10.0, 14.5])
+    executar(
+        "j1",
+        armazenamento,
+        DetectorFalso(),
+        destino="m.json",
+        relogio=lambda: next(tempos),
+    )
+    assert armazenamento.resultados[("j1", "m.json")].segundos == 4.5
+
+
+def _com_repetidos() -> ObjetosEmMemoria:
+    armazenamento = ObjetosEmMemoria()
+    armazenamento.decupagens["j1"] = _decupagem(
+        [["a.png", "b.png", "c.png"], ["d.png"]]
+    )
+    armazenamento.quadros[("j1", "a.png")] = _imagem_com([(0, 0, 80, 160)])
+    armazenamento.quadros[("j1", "b.png")] = _imagem_com(
+        [(0, 0, 80, 160)]
+    )  # igual a "a"
+    armazenamento.quadros[("j1", "c.png")] = _imagem_com([(0, 0, 160, 80)])  # outro
+    armazenamento.quadros[("j1", "d.png")] = _imagem_com(
+        [(0, 0, 80, 160)]
+    )  # outro plano
+    return armazenamento
+
+
+def test_quadro_repetido_do_mesmo_plano_reaproveita_o_resultado() -> None:
+    armazenamento, detector = _com_repetidos(), DetectorFalso()
+    executar(
+        "j1", armazenamento, detector, configuracao=Configuracao(pular_repetidos=4)
+    )
+
+    quadros = armazenamento.resultados[("j1", None)].quadros
+    assert detector.lotes == [1, 1, 1]  # "b" não foi para o modelo
+    assert [q.caminho for q in quadros] == ["a.png", "b.png", "c.png", "d.png"]
+    assert quadros[1].objetos == quadros[0].objetos
+    assert quadros[1].caminho == "b.png"
+    assert quadros[3].objetos != quadros[0].objetos  # outro plano: não reaproveita
+
+
+def test_sem_pular_repetidos_todo_quadro_vai_para_o_modelo() -> None:
+    detector = DetectorFalso()
+    executar("j1", _com_repetidos(), detector)
+    assert sum(detector.lotes) == 4
+
+
+def test_repetido_dentro_de_um_lote_aberto_tambem_e_reaproveitado() -> None:
+    armazenamento, detector = _com_repetidos(), DetectorFalso()
+    executar(
+        "j1",
+        armazenamento,
+        detector,
+        configuracao=Configuracao(pular_repetidos=4, lote=8),
+    )
+    assert detector.lotes == [3]
+    quadros = armazenamento.resultados[("j1", None)].quadros
+    assert quadros[1].objetos == quadros[0].objetos
+
+
+def test_o_log_de_progresso_sai_a_cada_n_quadros_e_no_fim(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="api.objetos_job")
+    executar(
+        "j1", _armazenamento(), DetectorFalso(), configuracao=Configuracao(log_a_cada=2)
+    )
+    assert [r.getMessage() for r in caplog.records] == [
+        "Quadros: 2/3",
+        "Quadros: 3/3",
+    ]
+
+
+def test_com_lote_o_progresso_so_conta_o_que_saiu_do_modelo(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="api.objetos_job")
+    executar(
+        "j1",
+        _armazenamento(),
+        DetectorFalso(),
+        configuracao=Configuracao(log_a_cada=1, lote=2),
+    )
+    assert [r.getMessage() for r in caplog.records] == [
+        "Quadros: 2/3",
+        "Quadros: 3/3",
+    ]
+
+
+def test_sem_segundos_o_json_gravado_e_o_de_antes() -> None:
+    cliente = _Cliente()
+    armazenamento = ObjetosStorage(cliente, "decupagens-x")
+    armazenamento.gravar_resultado(
+        "j1", ObjetosDaDecupagem(modelo="m", quadros=[]), None
+    )
+    armazenamento.gravar_resultado(
+        "j1", ObjetosDaDecupagem(modelo="m", quadros=[], segundos=1.5), "alt.json"
+    )
+    assert (
+        "segundos" not in cliente.guardado["decupagens-x/j1/objetos/florence.json"][0]
+    )
+    assert '"segundos":1.5' in cliente.guardado["decupagens-x/alt.json"][0]
+
+
+def test_o_storage_grava_texto_solto_no_bucket_das_decupagens() -> None:
+    cliente = _Cliente()
+    ObjetosStorage(cliente, "decupagens-x").gravar_texto(
+        "j1/objetos/medicao/a.json", "{}"
+    )
+    assert cliente.guardado == {
+        "decupagens-x/j1/objetos/medicao/a.json": ("{}", "application/json")
+    }

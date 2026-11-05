@@ -425,7 +425,7 @@ test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado 
   const haSeteHoras = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
   const pendente = { estado: 'pendente', em: agora }
   jobs = [
-    job({ id: 'a', nome: 'rodando.mp4', estado: 'concluido', etapa_atual: 'referencias', indexacao: pendente }),
+    job({ id: 'a', nome: 'rodando.mp4', estado: 'concluido', etapa_atual: 'identificacao', indexacao: pendente }),
     // Entre duas etapas: sem etapa em andamento, mas a indexação ainda pendente.
     job({ id: 'b', nome: 'entre.mp4', estado: 'concluido', etapa_atual: null, indexacao: pendente }),
     // Uma correção no meio reindexou (tirou o pendente), mas as etapas seguem.
@@ -449,9 +449,9 @@ test('concluído com etapas ainda rodando aparece "Finalizando" e é consultado 
       id: 'd',
       nome: 'preso.mp4',
       estado: 'concluido',
-      etapa_atual: 'referencias',
+      etapa_atual: 'identificacao',
       indexacao: { estado: 'pendente', em: haSeteHoras },
-      etapas: [{ nome: 'referencias', inicio: haSeteHoras }],
+      etapas: [{ nome: 'identificacao', inicio: haSeteHoras }],
     }),
   ]
   const detalhes: string[] = []

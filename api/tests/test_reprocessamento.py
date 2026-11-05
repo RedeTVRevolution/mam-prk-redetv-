@@ -18,7 +18,7 @@ from api.chaves import (
 from api.ciclo_de_vida import NaoReprocessavel, etapa_de_partida, reprocessar
 from api.jobs import Etapa, Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.main import criar_app
-from api.nuvem import DisparoPeloWorkflows
+from api.nuvem import DisparoDaIndexacaoNoCloudRun, DisparoPeloWorkflows
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.progresso_das_janelas import JanelaGravada, JanelasEmMemoria
 from api.reprocessamento import DisparoEmMemoria
@@ -163,7 +163,7 @@ def test_a_etapa_de_partida_e_a_primeira_que_falhou() -> None:
     assert "indexacao" not in mundo.job().etapas
 
 
-@pytest.mark.parametrize("etapa", ["identificacao", "referencias", "comparacao"])
+@pytest.mark.parametrize("etapa", ["identificacao"])
 def test_etapa_nova_do_112_e_etapa_de_partida(etapa: str) -> None:
     job = _concluido_sem_indexar()
     job.etapas["indexacao"] = _etapa()
@@ -421,6 +421,30 @@ def test_o_disparo_que_falha_vira_servico_indisponivel() -> None:
         )
 
 
+def test_o_disparo_da_indexacao_roda_o_job_com_o_job_id_sem_esperar() -> None:
+    sessao = SessaoFalsa()
+
+    DisparoDaIndexacaoNoCloudRun("proj", "regiao-1", "indexador", sessao).iniciar("j1")
+
+    [(url, kwargs)] = sessao.chamadas
+    assert url == (
+        "https://run.googleapis.com/v2/projects/proj/locations/regiao-1"
+        "/jobs/indexador:run"
+    )
+    assert kwargs["json"] == {
+        "overrides": {
+            "containerOverrides": [{"env": [{"name": "JOB_ID", "value": "j1"}]}]
+        }
+    }
+
+
+def test_o_disparo_da_indexacao_que_falha_vira_servico_indisponivel() -> None:
+    with pytest.raises(ServicoIndisponivel):
+        DisparoDaIndexacaoNoCloudRun(
+            "proj", "regiao-1", "indexador", SessaoQueFalha()
+        ).iniciar("j1")
+
+
 def _concluido_completo() -> Job:
     return _job(
         "concluido",
@@ -432,8 +456,6 @@ def _concluido_completo() -> Job:
                 "leitura_da_tela",
                 "analise",
                 "identificacao",
-                "referencias",
-                "comparacao",
                 "quadros_chave",
                 "inventario_de_objetos",
                 "indexacao",
@@ -452,15 +474,11 @@ ETAPAS_ESCOLHIDAS = [
 SEGUINTES = {
     "analise": {
         "identificacao",
-        "referencias",
-        "comparacao",
         "quadros_chave",
         "inventario_de_objetos",
         "indexacao",
     },
     "identificacao": {
-        "referencias",
-        "comparacao",
         "quadros_chave",
         "inventario_de_objetos",
         "indexacao",

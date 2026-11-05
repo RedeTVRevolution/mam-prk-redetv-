@@ -15,6 +15,7 @@ import type {
   CorBase,
   Decupagem,
   ObjetoDoInventario,
+  Plano,
   RelacaoDoObjeto,
 } from './decupagem.ts'
 
@@ -39,8 +40,8 @@ export type TipoDoItem = 'pauta' | 'aparicao' | 'mencao' | 'objeto' | 'comercial
 export interface Selo {
   rotulo: string
   inicio_ms: number | null
-  /** `rosto`: o clique abre a comparação das fotos. `nao_confirmado`: o nome é palpite, sem prova. */
-  tipo?: 'rosto' | 'nao_confirmado'
+  /** `nao_confirmado`: o nome é palpite, sem prova. */
+  tipo?: 'nao_confirmado'
   /** A explicação, em dica. */
   dica?: string
 }
@@ -116,8 +117,7 @@ const escapar = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto', referencia: 'Rosto' }
 
 /**
- * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (os rostos não têm
- * tempo: abrem a comparação). O palpite sem prova leva só o selo "não confirmado".
+ * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (o rosto não tem tempo). O palpite sem prova leva só o selo "não confirmado".
  */
 function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = false): Selo[] {
   if (palpite && fontes.length === 0) {
@@ -128,12 +128,11 @@ function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = fal
   const prova = (trechos: (Intervalo & { texto: string })[]) =>
     trechos.filter((t) => alvo.test(normalizar(t.texto))).sort((a, b) => a.inicio_ms - b.inicio_ms)[0]
       ?.inicio_ms ?? null
-  // `rosto` e `referencia` dão o mesmo selo "Rosto": um só.
+  // `rosto` e a antiga `referencia` (ainda aceita na leitura) dão o mesmo selo "Rosto": um só.
   const unicas = fontes.filter((f, i) => fontes.findIndex((g) => (FONTES[g] ?? g) === (FONTES[f] ?? f)) === i)
   return unicas.map((f) => ({
     rotulo: FONTES[f] ?? f,
     inicio_ms: f === 'gc' ? prova(d.textos_na_tela ?? []) : f === 'fala' ? prova(d.transcricao) : null,
-    ...(f === 'rosto' || f === 'referencia' ? { tipo: 'rosto' as const } : {}),
   }))
 }
 
@@ -180,9 +179,68 @@ export function inventarioPorCategoria(
     .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
 }
 
+const area = (c: CaixaDoQuadro): number => c.largura * c.altura
+
 /** A maior caixa do objeto, a que o player mostra. */
 export const maiorCaixa = (o: ObjetoDoInventario): CaixaDoQuadro =>
-  o.caixas.reduce((a, b) => (b.largura * b.altura > a.largura * a.altura ? b : a))
+  o.caixas.reduce((a, b) => (area(b) > area(a) ? b : a))
+
+type PlanoDoObjeto = Intervalo & { id: string; ambiente: string }
+
+/**
+ * Um objeto de cena do vídeo: o mesmo nome (sem acento nem caixa), categoria e cor de vários planos viram um
+ * item, com os planos em que aparece, como o `unir_repetidos` da API faz dentro do plano (a marca é a primeira).
+ */
+export interface ObjetoDoVideo {
+  chave: string
+  nome: string
+  categoria: CategoriaDeObjeto
+  cor?: CorBase | null
+  marca?: string | null
+  destaque: 1 | 2 | 3
+  /** A maior caixa entre as ocorrências, a que o player mostra. */
+  caixa: CaixaDoQuadro
+  /** O plano da maior caixa: clicar leva a ele, para o player cair na cena que o quadro mostrou. */
+  planoDaCaixa: PlanoDoObjeto
+  planos: PlanoDoObjeto[]
+}
+
+/**
+ * O inventário de todos os planos por categoria (ordem alfabética do nome mostrado), cada objeto uma vez, com o
+ * destaque maior primeiro, como na aba Planos. O objeto sem caixa fica de fora: não há quadro para mostrar.
+ */
+export function inventarioDoVideo(
+  planos: Plano[],
+): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoVideo[] }[] {
+  const porChave = new Map<string, ObjetoDoVideo>()
+  for (const p of planos) {
+    const plano = { id: p.id, ambiente: p.ambiente, inicio_ms: p.inicio_ms, fim_ms: p.fim_ms }
+    for (const o of p.inventario ?? []) {
+      if (o.caixas.length === 0) continue
+      const chave = [nomeNormalizado(o.nome), o.categoria, o.cor ?? ''].join('|')
+      const caixa = maiorCaixa(o)
+      const achado = porChave.get(chave)
+      if (!achado) {
+        const { nome, categoria, cor, marca, destaque } = o
+        porChave.set(chave, { chave, nome, categoria, cor, marca, destaque, caixa, planoDaCaixa: plano, planos: [plano] })
+        continue
+      }
+      if (achado.planos.at(-1)?.id !== p.id) achado.planos.push(plano)
+      achado.marca ||= o.marca
+      if (o.destaque > achado.destaque) achado.destaque = o.destaque
+      if (area(caixa) > area(achado.caixa)) Object.assign(achado, { caixa, planoDaCaixa: plano })
+    }
+  }
+  const grupos = new Map<CategoriaDeObjeto, ObjetoDoVideo[]>()
+  for (const o of porChave.values()) grupos.set(o.categoria, [...(grupos.get(o.categoria) ?? []), o])
+  return [...grupos]
+    .map(([categoria, objetos]) => ({
+      categoria,
+      nome: nomeDaCategoria(categoria),
+      objetos: objetos.sort((a, b) => b.destaque - a.destaque),
+    }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+}
 
 /** A relação do dono com o objeto, como verbo depois do nome ("Mel Breia calça"): não depende do gênero do tipo. */
 const VERBO_DA_RELACAO: Record<RelacaoDoObjeto, string> = {

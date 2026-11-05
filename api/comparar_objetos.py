@@ -248,7 +248,10 @@ class DisparadorDoCloudRun:
         self._sessao = sessao
         self._dormir = dormir
 
-    def rodar(self, job_id: str, destino: str) -> None:
+    def rodar(
+        self, job_id: str, destino: str, ambiente: Mapping[str, str] | None = None
+    ) -> None:
+        """`ambiente` soma variáveis ao Job (as `FLORENCE_*` da medição do #329)."""
         corpo = {
             "overrides": {
                 "containerOverrides": [
@@ -256,6 +259,10 @@ class DisparadorDoCloudRun:
                         "env": [
                             {"name": "JOB_ID", "value": job_id},
                             {"name": "DESTINO_DO_RESULTADO", "value": destino},
+                            *(
+                                {"name": nome, "value": valor}
+                                for nome, valor in (ambiente or {}).items()
+                            ),
                         ]
                     }
                 ]

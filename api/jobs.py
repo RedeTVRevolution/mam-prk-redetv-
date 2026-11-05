@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -105,9 +105,6 @@ TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
 VALIDADE_DO_DOWNLOAD = timedelta(minutes=5)
-# As fotos de referência são dado sensível (LGPD): o link vale pouco.
-VALIDADE_DA_FOTO = timedelta(minutes=5)
-PREFIXO_DAS_FOTOS = "referencias/"
 # O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
 FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
@@ -161,15 +158,15 @@ NomeDaEtapa = Literal[
     "transcricao",
     "leitura_da_tela",
     "analise",
-    # Depois do `concluido`, na ordem do Workflows. As do #112 (identificação,
-    # referências e comparação) aprimoram a Decupagem no lugar (#221).
+    # Depois do `concluido`, na ordem do Workflows. A identificação aprimora a Decupagem
+    # no lugar (#221).
     "identificacao",
-    "referencias",
-    "comparacao",
     "quadros_chave",
     "inventario_de_objetos",
     "indexacao",
 ]
+# Etapas do #112 retiradas no #327; só os Jobs antigos ainda as trazem.
+ETAPAS_QUE_SAIRAM = frozenset({"referencias", "comparacao"})
 ResultadoDaEtapa = Literal["concluida", "falhou"]
 DispositivoDaEtapa = Literal["gpu", "cpu"]
 
@@ -235,6 +232,23 @@ class Job(BaseModel):
     def _data_como_texto(self, data: date | None) -> str | None:
         # O Firestore não guarda `date`; o Pydantic a lê de volta do texto ISO.
         return data.isoformat() if data else None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sem_as_etapas_que_sairam(cls, dados: Any) -> Any:
+        # Jobs gravados antes do #327 trazem as etapas `referencias` e `comparacao`, que
+        # deixaram de existir; elas somem na leitura em vez de derrubar o Job.
+        if not isinstance(dados, dict):
+            return dados
+        dados = dict(dados)
+        etapas = dados.get("etapas")
+        if isinstance(etapas, dict):
+            dados["etapas"] = {
+                n: e for n, e in etapas.items() if n not in ETAPAS_QUE_SAIRAM
+            }
+        if dados.get("etapa_atual") in ETAPAS_QUE_SAIRAM:
+            dados["etapa_atual"] = None
+        return dados
 
 
 def palavras_do_nome(nome: str) -> list[str]:
@@ -352,26 +366,6 @@ class Reproducao(BaseModel):
     expira_em: datetime
 
 
-class FotoDoNome(BaseModel):
-    url: str
-    pagina_url: str  # vazia quando a página não é um endereço web
-    dominio: str
-    # Em palavras na tela; `None` quando a comparação foi gravada sem o resultado por foto.
-    resultado: Literal["confere", "nao_confere"] | None
-
-
-class FotosDoNome(BaseModel):
-    fotos: list[FotoDoNome]
-    expira_em: datetime
-
-
-def _pagina_e_dominio(endereco: str) -> tuple[str, str]:
-    partes = urlsplit(endereco)
-    if partes.scheme not in ("http", "https") or not partes.hostname:
-        return "", ""
-    return endereco, partes.hostname.removeprefix("www.")
-
-
 class TipoNaoSuportado(Exception):
     """Corpo com tipo diferente de video/mp4: vira 415, antes de qualquer 422."""
 
@@ -427,6 +421,18 @@ class NovoJob(BaseModel):
 
 class ServicoIndisponivel(Exception):
     """Porta ainda sem adaptador real."""
+
+
+class DisparoDaIndexacao(Protocol):
+    """Começa a reindexação do vídeo fora do pedido HTTP (Job `mam-indexacao`, com `JOB_ID`).
+    Levanta `ServicoIndisponivel` se não conseguiu."""
+
+    def iniciar(self, job_id: str) -> None: ...
+
+
+class DisparoDaIndexacaoIndisponivel:
+    def iniciar(self, job_id: str) -> None:
+        raise ServicoIndisponivel
 
 
 class CursorInvalido(Exception):
@@ -572,14 +578,6 @@ class Armazenamento(Protocol):
         """O JSON da decupagem, em pedaços."""
         ...
 
-    def ler_comparacao(self, job_id: str) -> bytes | None:
-        """Os vereditos da comparação (`<job>.comparacao.json`), ou `None` se não rodou."""
-        ...
-
-    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
-        """URL assinada de leitura de uma foto de referência (objeto do bucket delas)."""
-        ...
-
 
 class RepositorioEmMemoria:
     def __init__(self) -> None:
@@ -689,12 +687,6 @@ class ArmazenamentoIndisponivel:
         raise ServicoIndisponivel
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
-        raise ServicoIndisponivel
-
-    def ler_comparacao(self, job_id: str) -> bytes | None:
-        raise ServicoIndisponivel
-
-    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
 
@@ -865,7 +857,7 @@ def criar_rotas(
     catalogo: Catalogo,
     marcas: CatalogoDeMarcas,
     sugestoes: RepositorioDeSugestoes,
-    reindexar: Callable[[Job], object],
+    disparo_da_indexacao: DisparoDaIndexacao,
     acessos: AcessosAoVideo,
     tipos_de_objeto: Callable[[], list[str]] = list,
     idempotencia: RepositorioDeIdempotencia | None = None,
@@ -1073,49 +1065,6 @@ def criar_rotas(
         )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
-    @rotas.get("/{job_id}/pessoas/{pessoa_id}/referencias")
-    def fotos_do_nome(
-        job_id: str,
-        pessoa_id: str,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
-    ) -> JSONResponse:
-        job = obter_concluido(job_id, chamador)
-        bruto = armazenamento.ler_comparacao(job.id)
-        vereditos = json.loads(bruto) if bruto else []
-        veredito = next(
-            (v for v in vereditos if pessoa_id in v.get("pessoas", [])), None
-        )
-        if veredito is None:
-            raise HTTPException(404, "Este nome não tem comparação de rosto")
-        conferem = veredito.get("conferem") or []
-        fotos: list[FotoDoNome] = []
-        for i, foto in enumerate(veredito.get("fotos", [])):
-            objeto = str(foto.get("referencia", ""))
-            # O objeto vem do que o servidor gravou; mesmo assim só assina o das referências.
-            if not objeto.startswith(PREFIXO_DAS_FOTOS) or ".." in objeto:
-                continue
-            pagina, dominio = _pagina_e_dominio(str(foto.get("pagina_url", "")))
-            resultado: Literal["confere", "nao_confere"] | None = (
-                None
-                if i >= len(conferem)
-                else "confere"
-                if conferem[i]
-                else "nao_confere"
-            )
-            fotos.append(
-                FotoDoNome(
-                    url=armazenamento.url_da_foto(objeto, VALIDADE_DA_FOTO),
-                    pagina_url=pagina,
-                    dominio=dominio,
-                    resultado=resultado,
-                )
-            )
-        corpo = FotosDoNome(fotos=fotos, expira_em=relogio() + VALIDADE_DA_FOTO)
-        return JSONResponse(
-            corpo.model_dump(mode="json"),
-            headers={"Cache-Control": "private, no-store"},
-        )
-
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
         cabecalhos = {"Vary": "Accept-Encoding"}
         if _aceita_gzip(request.headers.get("accept-encoding", "")):
@@ -1244,9 +1193,6 @@ def criar_rotas(
         modelo, versao_atual = _ler_modelo(job.id)
         correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
         _registrar_correcao(autor, job, correcao)
-        # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
-        if not correcao.exige_aprovacao:
-            reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
 
     def _registrar_correcao(autor: Usuario, job: Job, correcao: Correcao) -> None:
@@ -1317,8 +1263,6 @@ def criar_rotas(
             correcoes.acrescentar(correcao)
             _registrar_correcao(autor, job, correcao)
         sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
-        if any(not c.exige_aprovacao for c in gravadas):
-            reindexar(job)
         return {"id": gravadas[0].id, "ids": [c.id for c in gravadas]}
 
     @rotas.post("/{job_id}/sugestoes/{sugestao_id}/recusar", status_code=204)
@@ -1373,8 +1317,34 @@ def criar_rotas(
                 " ou não casa com a versão atual",
             ) from None
         _registrar_correcao(autor, job, registro)
-        reindexar(job)
         return {"id": registro.id}
+
+    @rotas.post("/{job_id}/revisao/aprovar", status_code=202)
+    def aprovar_revisao(
+        job_id: str,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        """Fecha a revisão: dispara uma reindexação só, em segundo plano. As ações da
+        revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
+        `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, volta
+        ao que era (503), para o `pendente` não ficar preso sem execução nenhuma."""
+        job = obter_concluido(job_id, autor)
+        anterior = job.indexacao
+        if (
+            repositorio.transitar(
+                job.id,
+                "concluido",
+                {"indexacao": Indexacao(estado="pendente", em=relogio())},
+            )
+            is None
+        ):
+            raise HTTPException(409, "O vídeo saiu de concluído")
+        try:
+            disparo_da_indexacao.iniciar(job.id)
+        except Exception:
+            repositorio.transitar(job.id, "concluido", {"indexacao": anterior})
+            raise
+        return {"indexacao": "pendente"}
 
     @rotas.get("/{job_id}/fila")
     def fila_de_revisao(
@@ -1409,7 +1379,6 @@ def criar_rotas(
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
         _registrar_correcao(autor, job, registro)
-        reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
@@ -1474,8 +1443,6 @@ def criar_rotas(
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
         _registrar_correcao(autor, job, registro)
-        if aprovada:
-            reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/aprovar", status_code=201)

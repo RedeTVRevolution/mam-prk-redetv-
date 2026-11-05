@@ -220,12 +220,6 @@ class _SemQuadro:
     def ler_quadro(self, job_id: str, caminho: str) -> bytes:
         raise NotImplementedError("a sonda não abre quadros")
 
-    def ler_comparacao(self, job_id: str) -> bytes | None:
-        return None
-
-    def url_da_foto(self, objeto: str, validade: timedelta) -> str:
-        return objeto
-
 
 def _ajustes(caso: Caso) -> Ajustes | None:
     if caso.programa is None and caso.desde is None and caso.ate is None:
