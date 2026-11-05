@@ -256,6 +256,47 @@ class TestRepositorioFirestore:
         assert ids == ["novo", "meio", "velho"]
         assert [j.id for j in repositorio.consultar(FiltroDeJobs()).jobs] == ["fora"]
 
+    def test_lixeira_e_sha256_leem_so_os_documentos_que_devolvem(
+        self, repositorio: RepositorioFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        for i in range(30):
+            repositorio.salvar(_job(f"x{i}", BASE, sha256=f"{i:064x}"))
+        repositorio.salvar(_job("alvo", BASE, sha256="a" * 64))
+        repositorio.salvar(_job("igual", BASE, sha256="a" * 64))
+        for i in range(3):
+            repositorio.salvar(_job(f"l{i}", BASE, lixeira=envio))
+        lidos = {"documentos": 0}
+        stream = firestore.Query.stream
+
+        def contar(consulta: firestore.Query, *args: Any, **kwargs: Any) -> Any:
+            for doc in stream(consulta, *args, **kwargs):
+                lidos["documentos"] += 1
+                yield doc
+
+        monkeypatch.setattr(firestore.Query, "stream", contar)
+
+        assert len(repositorio.consultar(FiltroDeJobs(na_lixeira=True)).jobs) == 3
+        assert lidos["documentos"] == 3
+        filtro = FiltroDeJobs(sha256="a" * 64, na_lixeira=None)
+        assert len(repositorio.consultar(filtro).jobs) == 2
+        assert lidos["documentos"] == 5
+
+    def test_lixeira_com_outro_filtro_confere_o_resto_em_python(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        envio = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="duplicado"
+        )
+        repositorio.salvar(_job("a", BASE, programa="Jornal", lixeira=envio))
+        repositorio.salvar(_job("b", BASE, programa="Outro", lixeira=envio))
+
+        filtro = FiltroDeJobs(na_lixeira=True, programa="Jornal")
+
+        assert [j.id for j in repositorio.consultar(filtro).jobs] == ["a"]
+
     def test_sha256_traz_so_os_do_mesmo_arquivo_na_lixeira_ou_fora_dela(
         self, repositorio: RepositorioFirestore
     ) -> None:

@@ -508,6 +508,24 @@ def chave_de_ordem(job: Job, ordem: Ordem) -> tuple[Any, ...]:
     return (job.criado_em, job.id)
 
 
+def paginar_em_python(
+    jobs: Iterable[Job], filtro: FiltroDeJobs, obter: Callable[[str], Job | None]
+) -> PaginaDeJobs:
+    """Ordena e pagina Jobs já filtrados; `obter` acha o Job do cursor."""
+    corte = None
+    if filtro.cursor is not None:
+        ancora = obter(filtro.cursor)
+        if ancora is None:
+            raise CursorInvalido
+        corte = chave_de_ordem(ancora, filtro.ordem)
+    ordenados = sorted(
+        (j for j in jobs if corte is None or chave_de_ordem(j, filtro.ordem) < corte),
+        key=lambda j: chave_de_ordem(j, filtro.ordem),
+        reverse=True,
+    )
+    return PaginaDeJobs.de(ordenados, filtro.limite)
+
+
 class RepositorioDeJobs(Protocol):
     """Porta para o Firestore; os testes usam uma versão em memória."""
 
@@ -622,23 +640,11 @@ class RepositorioEmMemoria:
         return sorted(self._jobs.values(), key=lambda j: j.criado_em, reverse=True)
 
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
-        corte = None
-        if filtro.cursor is not None:
-            ancora = self._jobs.get(filtro.cursor)
-            if ancora is None:
-                raise CursorInvalido
-            corte = chave_de_ordem(ancora, filtro.ordem)
-        jobs = sorted(
-            (
-                j
-                for j in self._jobs.values()
-                if casa_com_o_filtro(j, filtro)
-                and (corte is None or chave_de_ordem(j, filtro.ordem) < corte)
-            ),
-            key=lambda j: chave_de_ordem(j, filtro.ordem),
-            reverse=True,
+        return paginar_em_python(
+            (j for j in self._jobs.values() if casa_com_o_filtro(j, filtro)),
+            filtro,
+            self._jobs.get,
         )
-        return PaginaDeJobs.de(jobs, filtro.limite)
 
 
 class RepositorioIndisponivel:
