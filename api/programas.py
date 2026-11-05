@@ -75,6 +75,17 @@ class NomeEmUso(Exception):
     """Já existe outro programa com esse nome."""
 
 
+class TrocaSubstituida(Exception):
+    """A troca de nome não está mais em andamento no programa (outra tomou o lugar, ela
+    terminou ou o programa sumiu): a tarefa dela não escreve mais nada."""
+
+
+def troca_vale(programa: "Programa | None", troca_id: str) -> bool:
+    """O programa existe e a troca `troca_id` é a dele, em andamento."""
+    r = programa.renomeacao if programa else None
+    return r is not None and r.id == troca_id and r.estado == "em_andamento"
+
+
 def novo_id() -> str:
     return uuid.uuid4().hex
 
@@ -100,11 +111,12 @@ class RepositorioDeProgramas(Protocol):
         ...
 
     def levar_o_nome_ao_job(
-        self, programa_id: str, job_id: str, jobs: "RepositorioDeJobs"
+        self, programa_id: str, troca_id: str, job_id: str, jobs: "RepositorioDeJobs"
     ) -> "Job | None":
-        """Grava no Job o nome que o programa tem agora, lido junto com o Job (na mesma
-        transação), e devolve o Job; `None` se o programa ou o Job não existem. Uma
-        tarefa atrasada nunca volta o Job a um nome que o programa já deixou."""
+        """Grava no Job o nome do programa, lido junto com o Job (na mesma transação),
+        se a troca `troca_id` ainda está em andamento nele, e devolve o Job; `None` se o
+        Job não existe. `TrocaSubstituida` (sem gravar nada) se a troca não vale mais:
+        uma tarefa atrasada nunca escreve no Job."""
         ...
 
     def apagar(self, id: str) -> None:
@@ -150,18 +162,22 @@ class ProgramasEmMemoria:
         return novo
 
     def levar_o_nome_ao_job(
-        self, programa_id: str, job_id: str, jobs: "RepositorioDeJobs"
+        self, programa_id: str, troca_id: str, job_id: str, jobs: "RepositorioDeJobs"
     ) -> "Job | None":
         def mudar(job: "Job") -> dict[str, Any] | None:
             # Lido na hora de gravar o Job, como na transação do Firestore.
             programa = self._programas.get(programa_id)
-            if programa is None or job.programa == programa.nome:
-                return None
-            return {"programa": programa.nome}
+            if programa is None or not troca_vale(programa, troca_id):
+                raise TrocaSubstituida(troca_id)
+            return (
+                None if job.programa == programa.nome else {"programa": programa.nome}
+            )
 
         trocado = jobs.trocar(job_id, mudar)
-        if trocado is not None or programa_id not in self._programas:
+        if trocado is not None:
             return trocado
+        if not troca_vale(self._programas.get(programa_id), troca_id):
+            raise TrocaSubstituida(troca_id)
         return jobs.obter(job_id)
 
     def apagar(self, id: str) -> None:

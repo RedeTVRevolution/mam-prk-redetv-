@@ -55,7 +55,12 @@ from api.nuvem import (
     TiposDeObjetoFirestore,
     espera_sob_disputa,
 )
-from api.programas import NomeEmUso, Programa, RenomeacaoDoPrograma
+from api.programas import (
+    NomeEmUso,
+    Programa,
+    RenomeacaoDoPrograma,
+    TrocaSubstituida,
+)
 from api.webhook import RegistroDeWebhook
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
@@ -1300,23 +1305,50 @@ class TestProgramasFirestore:
             programas.trocar("p", lambda p: p.model_copy(update={"nome": "outro"}))
         assert programas.obter("p") == gravado
 
-    def test_levar_o_nome_ao_job_grava_o_nome_atual_do_programa(
+    def test_levar_o_nome_ao_job_grava_o_nome_com_a_troca_em_andamento(
         self, programas: ProgramasFirestore, repositorio: RepositorioFirestore
     ) -> None:
-        programas.salvar(Programa(id="p", nome="Novo"))
+        andamento = _andamento("em_andamento", ["a"])
+        programas.salvar(
+            Programa(id="p", nome="Novo", renomeacao=andamento), com_renomeacao=True
+        )
         repositorio.salvar(_job("a", BASE, programa="Antigo"))
 
-        levado = programas.levar_o_nome_ao_job("p", "a", repositorio)
+        levado = programas.levar_o_nome_ao_job("p", andamento.id, "a", repositorio)
 
         assert levado is not None and levado.programa == "Novo"
         assert repositorio.obter("a") == levado
-        assert programas.levar_o_nome_ao_job("p", "a", repositorio) == levado
-        assert programas.levar_o_nome_ao_job("p", "x", repositorio) is None
-        # Programa apagado: o Job fica como está.
+        assert programas.levar_o_nome_ao_job("p", andamento.id, "a", repositorio) == (
+            levado
+        )
+        assert (
+            programas.levar_o_nome_ao_job("p", andamento.id, "x", repositorio) is None
+        )
+
+    @pytest.mark.parametrize("estado", ["em_andamento", "confirmando", "concluida"])
+    def test_levar_o_nome_ao_job_de_outra_troca_nao_grava(
+        self,
+        programas: ProgramasFirestore,
+        repositorio: RepositorioFirestore,
+        estado: str,
+    ) -> None:
+        # A troca gravada é outra (id diferente) ou a da tarefa fora de andamento.
+        gravada = _andamento(estado, ["a"])
+        da_tarefa = gravada.id if estado != "em_andamento" else "outra"
+        programas.salvar(
+            Programa(id="p", nome="Novo", renomeacao=gravada), com_renomeacao=True
+        )
+        repositorio.salvar(_job("a", BASE, programa="Antigo"))
+
+        with pytest.raises(TrocaSubstituida):
+            programas.levar_o_nome_ao_job("p", da_tarefa, "a", repositorio)
+        assert repositorio.obter("a").programa == "Antigo"  # type: ignore[union-attr]
+
+        # Programa apagado: também não vale mais, e o Job fica como está.
         programas.apagar("p")
-        repositorio.salvar(_job("b", BASE, programa="Antigo"))
-        assert programas.levar_o_nome_ao_job("p", "b", repositorio) is None
-        assert repositorio.obter("b").programa == "Antigo"  # type: ignore[union-attr]
+        with pytest.raises(TrocaSubstituida):
+            programas.levar_o_nome_ao_job("p", gravada.id, "a", repositorio)
+        assert repositorio.obter("a").programa == "Antigo"  # type: ignore[union-attr]
 
     def test_trocar_nao_recria_o_programa_apagado(
         self, programas: ProgramasFirestore

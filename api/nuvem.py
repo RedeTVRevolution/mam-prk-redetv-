@@ -73,7 +73,13 @@ from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
 from api.papeis import PAPEIS, DocumentoDePapeis, Papel
-from api.programas import NomeEmUso, Programa, ProgramaInexistente
+from api.programas import (
+    NomeEmUso,
+    Programa,
+    ProgramaInexistente,
+    TrocaSubstituida,
+    troca_vale,
+)
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
@@ -830,7 +836,7 @@ class ProgramasFirestore:
         return resultado
 
     def levar_o_nome_ao_job(
-        self, programa_id: str, job_id: str, jobs: RepositorioDeJobs
+        self, programa_id: str, troca_id: str, job_id: str, jobs: RepositorioDeJobs
     ) -> Job | None:
         # Os Jobs estão no mesmo Firestore: a transação lê o programa e o Job juntos.
         if not isinstance(jobs, RepositorioFirestore):
@@ -840,15 +846,21 @@ class ProgramasFirestore:
 
         @firestore.transactional
         def levar(transacao: Any) -> Job | None:
-            programa = programa_ref.get(transaction=transacao)
+            lido = programa_ref.get(transaction=transacao)
             doc = job_ref.get(transaction=transacao)
-            if not programa.exists or not doc.exists:
+            programa = (
+                Programa(id=programa_id, **(lido.to_dict() or {}))
+                if lido.exists
+                else None
+            )
+            if programa is None or not troca_vale(programa, troca_id):
+                raise TrocaSubstituida(troca_id)  # a transação sai sem gravar
+            if not doc.exists:
                 return None
-            nome = (programa.to_dict() or {})["nome"]
             job = Job(**(doc.to_dict() or {}))
-            if job.programa == nome:
+            if job.programa == programa.nome:
                 return job
-            novo = job.model_copy(update={"programa": nome})
+            novo = job.model_copy(update={"programa": programa.nome})
             transacao.set(job_ref, novo.model_dump())
             return novo
 

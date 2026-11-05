@@ -478,6 +478,41 @@ def test_confirmando_velho_sem_auditoria_nao_segue() -> None:
     assert acervo.programas.obter(acervo.id).renomeacao == velho  # type: ignore[union-attr]
 
 
+def test_tarefa_atrasada_nao_grava_o_nome_de_uma_troca_que_espera_a_auditoria(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acervo = Acervo()
+    _troca_que_falhou_em_j1(acervo, monkeypatch)
+    b, _, _ = acervo.instancia(
+        RepositorioDeAuditoriaEmMemoria(), (acervo.programas, acervo.catalogo)
+    )
+    retomar = f"/v1/admin/programas/{acervo.id}/renomear/retomar"
+    trocar = acervo.jobs.trocar
+    antes_do_put: list[Any] = []
+
+    def pausa_antes_de_gravar(job_id: str, mudar: Any) -> Any:
+        # A tarefa da instância A já conferiu a troca e vai gravar j1. Enquanto isso, B
+        # termina a troca, e um PUT em B grava "Fama Já" `confirmando` (a auditoria
+        # dele ainda não respondeu).
+        if job_id == "j1" and not antes_do_put:
+            antes_do_put.append(None)
+            assert b.post(retomar, headers=AUTORIZACAO).status_code == 200
+            antes_do_put[0] = acervo.programas.obter(acervo.id)
+            nova = _andamento("confirmando", ["j1", "j2"], "Fama Já", desde=AGORA)
+            _com_andamento(acervo.programas, nova, nome="Fama Já")
+        return trocar(job_id, mudar)
+
+    monkeypatch.setattr(acervo.jobs, "trocar", pausa_antes_de_gravar)
+    acervo.cliente.post(retomar, headers=AUTORIZACAO)
+    # A auditoria de B falha e o PUT desfaz: o programa volta a "Fama Hoje".
+    acervo.programas.salvar(antes_do_put[0], com_renomeacao=True)
+
+    assert acervo.programas.obter(acervo.id) == antes_do_put[0]
+    assert [acervo.programa(j) for j in ("j1", "j2")] == ["Fama Hoje", "Fama Hoje"]
+    assert acervo.no_indice("j1") == {"Fama Hoje"}
+    assert acervo.na_copia("j1") == {"Fama Hoje"}
+
+
 def test_tarefa_atrasada_em_outra_instancia_nao_volta_o_nome_do_video(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

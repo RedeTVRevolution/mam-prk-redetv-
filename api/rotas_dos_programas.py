@@ -45,8 +45,10 @@ from api.programas import (
     ProgramaInexistente,
     RenomeacaoDoPrograma,
     RepositorioDeProgramas,
+    TrocaSubstituida,
     VinculoDaPessoa,
     novo_id,
+    troca_vale,
 )
 from api.renomeacao_de_pessoas import RODADAS, AndamentoDaRenomeacao
 
@@ -248,9 +250,9 @@ def criar_rotas_dos_programas(
     def da_troca(programa_id: str, troca_id: str) -> RenomeacaoDoPrograma | None:
         """O andamento, se ainda é o da troca `troca_id` e está em andamento."""
         programa = programas.obter(programa_id)
-        r = programa.renomeacao if programa else None
-        ok = r is not None and r.id == troca_id and r.estado == "em_andamento"
-        return r if ok else None
+        return (
+            programa.renomeacao if programa and troca_vale(programa, troca_id) else None
+        )
 
     def tirar_pendente(
         programa_id: str, troca_id: str, job_id: str
@@ -287,17 +289,23 @@ def criar_rotas_dos_programas(
                     # Antes de mexer no Job: outra troca pode ter tomado o lugar desta.
                     if da_troca(programa_id, troca_id) is None:
                         return
-                    # O Job recebe o nome que o programa tem agora, lido na mesma
-                    # transação, e não o desta troca: entre a conferência acima e a
-                    # gravação, outra instância pode ter terminado uma troca mais nova.
-                    # Também leva ao nome atual o pendente herdado com um nome mais antigo.
-                    # Reindexa o Job devolvido, nunca um lido antes.
-                    job = programas.levar_o_nome_ao_job(programa_id, job_id, jobs)
+                    # O Job recebe o nome do programa só se esta troca ainda está em
+                    # andamento, conferido na mesma transação: entre a conferência
+                    # acima e a gravação, outra instância pode ter terminado esta troca
+                    # e começado outra. Também leva ao nome atual o pendente herdado
+                    # com um nome mais antigo. Reindexa o Job devolvido, nunca um lido
+                    # antes.
+                    job = programas.levar_o_nome_ao_job(
+                        programa_id, troca_id, job_id, jobs
+                    )
                     # Na lixeira também: restaurar não reindexa, e o vídeo voltaria
                     # com o nome antigo na busca e nos relatórios.
                     pronto = job is None or job.estado != "concluido" or reindexar(job)
                     if pronto and tirar_pendente(programa_id, troca_id, job_id) is None:
                         return  # outra troca, ou o programa foi apagado
+                except TrocaSubstituida:
+                    # Sem tirar pendente nem fechar a troca: ela não é mais desta tarefa.
+                    return
                 except Exception:
                     # O Job fica pendente; a tarefa segue e `retomar` o tenta de novo.
                     log.exception("troca do programa em %s falhou", job_id)
