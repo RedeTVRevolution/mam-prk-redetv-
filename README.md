@@ -104,10 +104,10 @@ Os dois alvos abaixo só rodam com credenciais (ADC de quem roda e o `.env`) e f
 
 **Ligar o índice do quadro-chave no dev (#268).** Ordem: (1) `terraform apply` (a variável `indice_do_quadro_ligado` já é `true`; o `mam-indexacao` e o serviço web já têm o papel de predição da Vertex (`mamVertexPredicao`, #302) e leem os quadros); (2) `make criar-colecao-da-busca`, que cria o índice do quadro sem recriar a coleção; (3) `make reindexar` sem `JOB`, que recalcula o vetor do quadro de todos os planos. Sem o passo 3 os vídeos antigos seguem sem vetor de quadro.
 
-**Reindexar os vídeos que já estão no dev depois do inventário de objetos (#245).** O registro de cada plano passa a levar o inventário inteiro, os objetos de destaque 3 ganham registro próprio e os registros ganham o campo `destaque`, que pesa na ordem (3% por nível acima de 1: +3% no destaque 2, +6% no 3). Vídeo a vídeo:
+**Reindexar os vídeos que já estão no dev depois do inventário de objetos (#245).** O registro de cada plano passa a levar o inventário inteiro, todos os objetos do inventário ganham registro próprio (desde o #334; no #245 eram só os de destaque 3, e a busca por objeto não achava os de destaque 1 e 2) e os registros ganham o campo `destaque`, que pesa na ordem (3% por nível acima de 1: +3% no destaque 2, +6% no 3). Vídeo a vídeo:
 
 - Vídeo **sem inventário** (analisado antes do #244): no Visualizador, "Reprocessar…" a partir de `inventario_de_objetos`, que roda o inventário e depois a indexação. No dev são poucos vídeos; se forem muitos, um laço pela rota do reprocessar (#147).
-- Vídeo **com inventário, mas indexado antes do #245**: `make reindexar` sem `JOB`, que reindexa todos os concluídos.
+- Vídeo **com inventário, mas indexado antes do #245 ou do #334**: `make reindexar` sem `JOB`, que reindexa todos os concluídos.
 - A coleção já criada não muda de esquema: `make criar-colecao-da-busca` é idempotente e deixa como está o que existe. Uma coleção nascida antes deste ticket não declara o campo `destaque`; se o Agent Retrieval recusar (ou ignorar) o campo, recrie a coleção (`apagar_colecao` e `make criar-colecao-da-busca`) e rode `make reindexar`. Ainda não foi conferido se ele aceita campo fora do esquema.
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022), conferido no #122.
@@ -159,6 +159,48 @@ make comparar-passadas JOBS=<id>,<id>,...                            # soma por 
 - Grava `comparacao-passadas/<job>-<passada>.md` e `.json` (em `PASTA=`; vários Jobs viram `piloto-<data>`). O lado A é a decupagem do Job e o B, a passada.
 - Por requisito (famosos, menções, pautas, B-roll em planos limpos e em descrições, comerciais): contagens, itens só de um lado e itens dos dois com diferença de nome, tipo ou marca, ou de tempo acima da tolerância de 2 s. O pareamento é o do `api/comparador.py`. Timecode: erro médio, p95 e quantos pares (inclusive os de nome trocado) passam da tolerância.
 - Custo por hora de vídeo e tempo (por etapa e total) dos dois lados. O preço vem de `PRECOS_DOS_MODELOS` e a data da tabela consultada, de `DATA_DA_TABELA_DE_PRECOS`. O Job não guarda os tokens que gastou: passe-os em `TOKENS_DO_JOB=<job>=<entrada>:<saida>,...` (e o modelo em `MODELO_DO_JOB`, o `MODELO` de `api/gemini.py` por padrão); sem eles, o custo do lado do Job sai "n/d", e a soma de vários Jobs também.
+
+## Variações do Florence-2 e medição na GPU (#329)
+
+O inventário de objetos levou 19 min no FAMA (~2 s por quadro, 421 quadros). O Job com GPU
+(`api/objetos_job.py`) aceita, por variável de ambiente, as mudanças a medir. Sem nenhuma
+delas o resultado é o de antes.
+
+| Variável | Padrão | O que muda |
+|---|---|---|
+| `FLORENCE_FEIXES` | `3` | `num_beams` da geração; `1` é a busca gulosa |
+| `FLORENCE_LOTE` | `1` | quadros por `generate` |
+| `FLORENCE_MAX_TOKENS` | `1024` | `max_new_tokens` |
+| `FLORENCE_LEGENDAS` | `1` | `0` não gera as legendas de região (`<DENSE_REGION_CAPTION>`) |
+| `FLORENCE_PULAR_REPETIDOS` | `0` | distância máxima (de 64 bits) entre os hashes de dois quadros do mesmo plano para o segundo reaproveitar o resultado do primeiro; `0` desliga |
+| `FLORENCE_LOG_A_CADA` | `25` | a cada quantos quadros o Job loga `Quadros: feitos/total` |
+
+O log do Job também diz, cada vez que ela cresce, o tamanho da maior resposta até ali, em
+tokens: a última dessas linhas serve para escolher o `FLORENCE_MAX_TOKENS`.
+
+Para medir, com as credenciais da pessoa (precisa de `MODELO_OBJETOS` no `.env`, o mesmo
+modelo do Job de inventário):
+
+```
+make medir-florence JOB=<id>                          # todas as variações
+make medir-florence JOB=<id> VARIACOES="guloso lote8" # só algumas
+```
+
+O alvo roda o Job com GPU uma vez por variação, sobre os quadros já gravados do Job (a
+variação `hoje`, sem variável, roda sempre primeiro e é a base), converte o bruto com o Gemini
+e guarda, em `<job>/objetos/medicao/<variacao>/` no bucket das decupagens, `bruto.json`,
+`inventario.json` e `medida.json` (tempo por quadro e critério). Nada em `<job>/objetos/florence.json`
+nem na Decupagem é tocado. As variações estão em `api/medir_florence.py` (`VARIACOES`). Uma
+que falha (memória da GPU, por exemplo) aparece como `falhou` na tabela e as outras seguem;
+se a base `hoje` falhar, as outras nem rodam.
+
+A tabela traz o tempo por quadro, quantas vezes mais rápido que `hoje`, os objetos de cena
+(fora `roupa`, `acessorio` e `calcado`) contra os de hoje, a categoria de cena que mais caiu, os
+objetos de destaque 3 que sumiram, o veredito do critério e se bateu a meta (≤ 0,7 s por
+quadro). O critério passa quando os objetos de cena somam pelo menos 90% dos de hoje, nenhuma
+categoria de cena cai mais que isso e nenhum objeto de destaque 3 de hoje some; o objeto é o mesmo se o
+plano, a categoria e o nome (sem acento nem caixa) são iguais. O Gemini não é determinístico:
+repetir a medição pode mexer um pouco nas frações.
 
 ## Cassete do Gemini
 

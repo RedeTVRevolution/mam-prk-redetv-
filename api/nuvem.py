@@ -1282,7 +1282,11 @@ class ObjetosStorage:
         self._cliente.bucket(self._decupagens).blob(
             destino or objeto_do_resultado_dos_objetos(job_id)
         ).upload_from_string(
-            resultado.model_dump_json(), content_type="application/json"
+            # Sem `segundos` (só a medição do #329 os grava), o JSON é o de antes.
+            resultado.model_dump_json(
+                exclude={"segundos"} if resultado.segundos is None else None
+            ),
+            content_type="application/json",
         )
 
     def ler_resultado(
@@ -1300,6 +1304,12 @@ class ObjetosStorage:
         self._cliente.bucket(self._decupagens).blob(
             objeto_da_decupagem(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
+
+    def gravar_texto(self, objeto: str, conteudo: str) -> None:
+        """Um JSON solto no bucket das decupagens (a medição do Florence-2, #329)."""
+        self._cliente.bucket(self._decupagens).blob(objeto).upload_from_string(
+            conteudo, content_type="application/json"
+        )
 
 
 class QuadrosStorage(DecupagensStorage):

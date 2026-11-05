@@ -9,6 +9,8 @@ Firestore; o Workflows decide o que fazer se a execução falhar.
 import io
 import logging
 import os
+import time
+from collections.abc import Callable
 from typing import Protocol
 
 from google.cloud.storage import Client as ClienteStorage
@@ -18,19 +20,26 @@ from api import teste_dos_jobs
 from api.decupagem import Decupagem
 from api.florence import (
     NOME_DO_MODELO,
+    Configuracao,
     DetectorFlorence,
     ObjetoDetectado,
     ObjetosDaDecupagem,
     QuadroDetectado,
     RegiaoLegendada,
+    ler_configuracao,
 )
 from api.nuvem import ObjetosStorage
 
+log = logging.getLogger(__name__)
+
+LADO_DO_HASH = 8
+
+
+Detectado = tuple[list[ObjetoDetectado], list[RegiaoLegendada]]
+
 
 class DetectorDeObjetos(Protocol):
-    def detectar(
-        self, imagem: Image.Image
-    ) -> tuple[list[ObjetoDetectado], list[RegiaoLegendada]]: ...
+    def detectar_lote(self, imagens: list[Image.Image]) -> list[Detectado]: ...
 
 
 class ArmazenamentoDosObjetos(Protocol):
@@ -63,12 +72,40 @@ class ObjetosEmMemoria:
         self.resultados[(job_id, destino)] = resultado
 
 
+def hash_do_quadro(imagem: Image.Image) -> int:
+    """Hash de diferença (dHash) de 64 bits: muda pouco quando o quadro muda pouco."""
+    cinza = imagem.convert("L").resize((LADO_DO_HASH + 1, LADO_DO_HASH))
+    pixels = cinza.tobytes()
+    bits = 0
+    for linha in range(LADO_DO_HASH):
+        for coluna in range(LADO_DO_HASH):
+            a = pixels[linha * (LADO_DO_HASH + 1) + coluna]
+            b = pixels[linha * (LADO_DO_HASH + 1) + coluna + 1]
+            bits = (bits << 1) | int(a > b)
+    return bits
+
+
+def _progresso(feitos: int, total: int, ultimo: int, a_cada: int) -> int:
+    """`feitos` conta só os quadros que já saíram do modelo, não os que esperam no lote."""
+    if feitos == ultimo:
+        return ultimo
+    if feitos == total or feitos // a_cada > ultimo // a_cada:
+        log.info("Quadros: %d/%d", feitos, total)
+        return feitos
+    return ultimo
+
+
 def executar(
     job_id: str,
     armazenamento: ArmazenamentoDosObjetos,
     detector: DetectorDeObjetos,
     destino: str | None = None,
+    configuracao: Configuracao | None = None,
+    relogio: Callable[[], float] = time.monotonic,
 ) -> None:
+    """Com a configuração padrão, um quadro por vez e nenhum pulado, como antes. Em
+    `destino` alternativo (a medição do #329) o resultado leva os segundos gastos."""
+    configuracao = configuracao or Configuracao()
     decupagem = armazenamento.ler_decupagem(job_id)
     if decupagem is None:
         raise RuntimeError(
@@ -81,23 +118,73 @@ def executar(
     ]
     if not pedidos:
         raise RuntimeError(f"A Decupagem do Job {job_id} não tem quadros nos planos.")
-    quadros: list[QuadroDetectado] = []
-    for indice, caminho in pedidos:
+    inicio = relogio()
+    detectados: dict[str, Detectado] = {}
+    tamanhos: dict[str, tuple[int, int]] = {}
+    iguais_a: dict[
+        str, str
+    ] = {}  # quadro repetido -> quadro do mesmo plano que o cobre
+    mantidos: dict[int, list[tuple[int, str]]] = {}  # plano -> (hash, caminho)
+    lote: list[tuple[str, Image.Image]] = []
+    ultimo = 0
+
+    def rodar_lote() -> None:
+        resultados = detector.detectar_lote([imagem for _, imagem in lote])
+        for (caminho, _), resultado in zip(lote, resultados, strict=True):
+            detectados[caminho] = resultado
+        lote.clear()
+
+    for feitos, (indice, caminho) in enumerate(pedidos, start=1):
         with Image.open(io.BytesIO(armazenamento.ler_quadro(job_id, caminho))) as foto:
             imagem = foto.convert("RGB")
-        objetos, regioes = detector.detectar(imagem)
+        tamanhos[caminho] = imagem.size
+        cobre = None
+        if configuracao.pular_repetidos:
+            impressao = hash_do_quadro(imagem)
+            cobre = next(
+                (
+                    c
+                    for h, c in mantidos.get(indice, [])
+                    if (h ^ impressao).bit_count() <= configuracao.pular_repetidos
+                ),
+                None,
+            )
+            if cobre is None:
+                mantidos.setdefault(indice, []).append((impressao, caminho))
+        if cobre is not None:
+            iguais_a[caminho] = cobre
+        else:
+            lote.append((caminho, imagem))
+            if len(lote) >= configuracao.lote:
+                rodar_lote()
+        ultimo = _progresso(
+            feitos - len(lote), len(pedidos), ultimo, configuracao.log_a_cada
+        )
+    if lote:
+        rodar_lote()
+    _progresso(len(pedidos), len(pedidos), ultimo, configuracao.log_a_cada)
+    quadros = []
+    for indice, caminho in pedidos:
+        objetos, regioes = detectados[iguais_a.get(caminho, caminho)]
+        largura, altura = tamanhos[caminho]
         quadros.append(
             QuadroDetectado(
                 plano=indice,
                 caminho=caminho,
-                largura=imagem.width,
-                altura=imagem.height,
+                largura=largura,
+                altura=altura,
                 objetos=objetos,
                 regioes=regioes,
             )
         )
     armazenamento.gravar_resultado(
-        job_id, ObjetosDaDecupagem(modelo=NOME_DO_MODELO, quadros=quadros), destino
+        job_id,
+        ObjetosDaDecupagem(
+            modelo=NOME_DO_MODELO,
+            quadros=quadros,
+            segundos=round(relogio() - inicio, 2) if destino else None,
+        ),
+        destino,
     )
 
 
@@ -109,13 +196,17 @@ def main() -> None:
         # Teste depois da publicação (#238): amostra da imagem, nada no Storage.
         raise SystemExit(teste_dos_jobs.testar_objetos())
     projeto = os.environ["GCP_PROJECT_ID"]
+    configuracao = ler_configuracao()
     executar(
         os.environ["JOB_ID"],
         ObjetosStorage(
             ClienteStorage(project=projeto), os.environ["BUCKET_DECUPAGENS"]
         ),
-        DetectorFlorence.da_pasta(os.environ["PASTA_DO_MODELO"]),
+        DetectorFlorence.da_pasta(
+            os.environ["PASTA_DO_MODELO"], configuracao=configuracao
+        ),
         os.environ.get("DESTINO_DO_RESULTADO") or None,
+        configuracao,
     )
 
 

@@ -778,14 +778,19 @@ def test_so_a_clausula_do_texto_livre_corta_o_significado() -> None:
     }
 
 
-def _por_destaque(destaque: int | None, id: str, inicio: int) -> Registro:
+def _por_destaque(
+    destaque: int | None, id: str, inicio: int, **mudancas: Any
+) -> Registro:
     return objeto(
         id,
         "j1",
         inicio,
         inicio + 1_000,
-        destaque=destaque,
-        texto="carro azul, veículo, objeto de cena",
+        **{
+            "destaque": destaque,
+            "texto": "carro azul, veículo, objeto de cena",
+        }
+        | mudancas,
     )
 
 
@@ -798,6 +803,51 @@ def test_com_a_mesma_relevancia_o_destaque_maior_vem_antes() -> None:
         _por_destaque(3, "alto", 60_000),
     )
     [video] = m.busca().buscar("carro").videos
+    assert [x.inicio_ms for x in video.momentos] == [60_000, 0]
+
+
+def test_objeto_de_destaque_1_e_achado_mesmo_com_outra_categoria_na_consulta() -> None:
+    # A consulta classificou "abajur" como móvel; o inventário o gravou como decoração.
+    abajur = {"categoria": "movel", "tipo": "abajur", "cor_base": None, "pessoa": None}
+    m = Mundo(pedido(objetos=[abajur]))
+    m.com(
+        job("j1"),
+        _por_destaque(
+            1,
+            "a",
+            0,
+            categoria="decoracao",
+            tipo_do_objeto="abajur",
+            texto="abajur, decoração, objeto de cena",
+        ),
+    )
+    [video] = m.busca().buscar("abajur").videos
+    assert [x.inicio_ms for x in video.momentos] == [0]
+
+
+def test_com_o_objeto_pedido_o_destaque_maior_vem_antes() -> None:
+    cadeira = {
+        "categoria": "movel",
+        "tipo": "cadeira",
+        "cor_base": None,
+        "pessoa": None,
+    }
+    m = Mundo(pedido(objetos=[cadeira]))
+    m.com(
+        job("j1"),
+        *(
+            _por_destaque(
+                d,
+                id,
+                inicio,
+                categoria="movel",
+                tipo_do_objeto="cadeira",
+                texto="cadeira, móvel, objeto de cena",
+            )
+            for d, id, inicio in ((1, "baixo", 0), (2, "alto", 60_000))
+        ),
+    )
+    [video] = m.busca().buscar("cadeira").videos
     assert [x.inicio_ms for x in video.momentos] == [60_000, 0]
 
 
