@@ -5,6 +5,7 @@ import logging
 import random
 import threading
 import time
+import zlib
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -716,6 +717,46 @@ def test_o_ranking_so_reordena_os_100_primeiros_e_o_resto_vem_depois() -> None:
 
     assert ranking.recebidos == [TETO_DO_RANKING]
     assert ranqueados == em_ordem[:100][::-1] + em_ordem[100:]
+
+
+def test_destaque_fora_dos_100_ranqueados_nao_passa_a_frente_deles() -> None:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 2)
+    for i in range(1, 151):
+        destaque = 3 if i > 110 else None
+        m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000, destaque=destaque))
+    enviados: list[str] = []
+
+    class RankingEspiao:
+        def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+            enviados.extend(r.job_id for r in registros)
+            return registros
+
+    ranqueados = todas_as_paginas(m.busca(ranking=RankingEspiao()))
+
+    assert len(enviados) == TETO_DO_RANKING
+    assert any(j in enviados for j in ("j111", "j150")) is False
+    assert ranqueados[:100] == enviados
+
+
+@pytest.mark.parametrize(
+    "estrago",
+    [
+        {"conteudo": b"invalido"},
+        {"conteudo": zlib.compress(b"nao e json")},
+        {"conteudo": zlib.compress(b'{"videos": 3}')},
+        {"dono": None},
+    ],
+)
+def test_documento_da_lista_estragado_e_cursor_invalido(
+    estrago: dict[str, Any],
+) -> None:
+    busca, cursor, _ = _cursor_valido()
+    id, _, _ = cursor.partition(".")
+    documento = busca._listas.documentos[id]  # type: ignore[attr-defined]
+    documento.update(estrago)
+
+    with pytest.raises(CursorInvalido):
+        busca.buscar("vestido", cursor=cursor, dono="u1", limite=2)
 
 
 def test_video_que_vai_para_a_lixeira_entre_as_paginas_some_da_seguinte() -> None:

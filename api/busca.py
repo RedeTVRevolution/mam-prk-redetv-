@@ -556,9 +556,18 @@ class Busca:
                     ),
                     *achados[TETO_DO_RANKING:],
                 ]
-                # A ordem do ranking, com o peso do destaque sobre a posição.
+                # A ordem do ranking, com o peso do destaque sobre a posição. O resto, que
+                # não foi ao ranking, fica sempre depois, na ordem do índice: pontos
+                # negativos, sem o peso, para nenhum destaque passar à frente dos 100.
                 posicao = _posicoes_por_pontos(
-                    [(r, 0, _peso(r) / (RRF_K + i + 1)) for i, r in enumerate(achados)]
+                    [
+                        (
+                            r,
+                            0,
+                            _peso(r) / (RRF_K + i + 1) if i < TETO_DO_RANKING else -i,
+                        )
+                        for i, r in enumerate(achados)
+                    ]
                 )
             except Exception:
                 log.exception("ranking indisponível; fica a ordem do índice")
@@ -672,7 +681,11 @@ class Busca:
         if not (_ascii_alnum(id) and posicao.isascii() and posicao.isdigit()):
             raise CursorInvalido
         documento = self._listas.ler(id)
-        lista = ListaDaBusca.do_documento(documento) if documento else None
+        try:
+            lista = ListaDaBusca.do_documento(documento) if documento else None
+        except (zlib.error, ValueError, KeyError, TypeError) as e:
+            # Documento estragado: quem chama refaz a busca, como num cursor vencido.
+            raise CursorInvalido from e
         agora = self._relogio()
         inicio = int(posicao)
         if (
