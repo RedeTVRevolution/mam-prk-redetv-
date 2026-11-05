@@ -43,6 +43,8 @@ Se um hook avisar que o contexto passou do limite, siga o aviso na hora: comite 
 
 Antes de terminar, acrescente ao fim de `.afk/progresso.md`, sem apagar o que já está lá, poucas linhas: o ticket, o que ficou pronto, o que falta, as decisões tomadas e as armadilhas encontradas.
 
+Cada iteração roda num contêiner novo, e só os commits e o `.afk/progresso.md` passam para a próxima: qualquer outro arquivo some, inclusive em `.afk/` (um patch, um rascunho). Divida o trabalho em partes que passam no `make verificar` e comite cada parte pronta; o que não estiver num commit, a próxima iteração refaz.
+
 ## Fim da resposta
 
 Termine a resposta com estas duas linhas:
