@@ -323,6 +323,15 @@ test("make verificar vermelho sem teste falhando (lint, tipos) não repete", asy
   assert.equal(r.feitos(), "");
 });
 
+test("make verificar com Unhandled Errors do vitest ou ERROR do pytest também repete", async () => {
+  for (const linha of ["⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯", "ERROR api/tests/test_x.py::test_y - TimeoutError"]) {
+    const r = await roda(5, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"],
+      { verificar: `test ! -e quebrado && { [ -e "$FAKE/ja" ] || { touch "$FAKE/ja"; echo '${linha}'; false; }; }` });
+    assert.equal(r.feitos(), "1", linha);
+    assert.match(r.notas(), /passou ao repetir/, linha);
+  }
+});
+
 test("make verificar com teste falhando duas vezes desfaz, com o log da segunda", async () => {
   const r = await roda(1, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"],
     { verificar: `echo x >> "$FAKE/verificacoes"; echo 'FAILED tests/test_x.py::test_y - assert 1 == 2'; false` });

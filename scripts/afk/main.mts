@@ -117,7 +117,7 @@ export async function loop(c: Config): Promise<number> {
         return (await promisify(execFile)("gh", args, { cwd: aqui, encoding: "utf8", timeout: 120_000, maxBuffer: 64 << 20 })).stdout;
       } catch (e) {
         const erro = `gh ${args.slice(0, 2).join(" ")}: ${String((e as any)?.stderr || (e as Error)?.message || e).trim().slice(-300)}`;
-        const semPermissao = /Resource not accessible|HTTP 403/i.test(erro) && !/rate limit/i.test(erro);
+        const semPermissao = /Resource not accessible|HTTP 403/i.test(erro) && !/rate limit|abuse/i.test(erro);
         if (n >= tentativas - 1 || semPermissao) throw new Error(erro);
         anota(`${erro}; nova tentativa`);
         await new Promise((r) => setTimeout(r, (c.pausaGh ?? 30_000) * 2 ** n));
@@ -213,15 +213,15 @@ export async function loop(c: Config): Promise<number> {
   // Um make verificar vermelho roda de novo uma vez antes de contar: com as vagas dividindo o Mac, os
   // testes da web falham sob carga, cada vez um diferente (rodada de 2026-11-04: 14 de 62, todos no
   // vitest). Vermelho duas vezes é vermelho; o prazo estourado (124) não repete, que seria mais uma hora.
-  // Só repete com um teste falhando (FAIL do vitest, FAILED do pytest): lint, mypy, typecheck e build
-  // não mudam de uma vez para outra, e o vermelho deles desfaz direto.
+  // Só repete com um teste falhando (FAIL do vitest, FAILED ou ERROR do pytest, os "Unhandled Errors"
+  // do vitest): lint, mypy, typecheck e build não mudam de uma vez para outra, e o vermelho deles desfaz direto.
   // Devolve o log da última tentativa. A nota leva o que falhou na primeira: os logs ficam no clone,
   // que a próxima rodada apaga, e só o progresso.md chega à pasta principal.
   const verifica = async (sb: Vaga, arquivo: string, ticket: string) => {
     const r = await sb.exec(c.verificar);
     writeFileSync(arquivo, r.stdout + r.stderr);
     if (r.exitCode === 0 || r.exitCode === 124) return { verde: r.exitCode === 0, log: arquivo };
-    const falhas = new Set((r.stdout + r.stderr).replace(/\x1b\[[0-9;]*m/g, "").match(/^ *(FAIL|FAILED) .*$/gm)?.map((l) => l.trim().slice(0, 200)));
+    const falhas = new Set((r.stdout + r.stderr).replace(/\x1b\[[0-9;]*m/g, "").match(/^ *(FAIL|FAILED|ERROR) .*$|^.*Unhandled Errors?\b.*$/gm)?.map((l) => l.trim().slice(0, 200)));
     if (!falhas.size) return { verde: false, log: arquivo };
     const repetido = `${arquivo}-repetido`;
     const r2 = await sb.exec(c.verificar);
