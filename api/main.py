@@ -696,7 +696,7 @@ if _projeto:
         auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
         contas=ContasIdentityPlatform(_projeto),
         # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
-        # CPU durante ela. Uma tentativa, com tempo de 5 s; a falha vai ao log.
+        # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
         eventos=eventos_do_ambiente(os.environ),
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de

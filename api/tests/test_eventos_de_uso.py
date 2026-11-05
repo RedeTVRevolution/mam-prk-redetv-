@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from api.auth import Escopo, Usuario
@@ -199,20 +200,18 @@ def test_registrar_nao_levanta_quando_a_publicacao_falha_e_deixa_o_rastro_no_log
     assert "evento de uso login" in caplog.text
 
 
-class EventosLentos:
-    """Só entrega o evento depois de um tempo: quem chama espera por ele."""
+class EventosComHora:
+    """Anota a hora em que cada evento chega à porta."""
 
-    def __init__(self, espera: float) -> None:
-        self.espera = espera
+    def __init__(self) -> None:
         self.entregues: list[tuple[str, float]] = []
 
     def publicar(self, evento: EventoDeUso) -> None:
-        time.sleep(self.espera)
         self.entregues.append((evento.tipo, time.monotonic()))
 
 
 def test_a_acao_so_responde_depois_de_o_evento_ser_entregue() -> None:
-    eventos = EventosLentos(0.2)
+    eventos = EventosComHora()
     mundo = Mundo(eventos=eventos, login_em=AGORA)
 
     r = mundo.cliente.get("/v1/eu", headers=ANA)
@@ -277,12 +276,22 @@ def test_o_login_nao_leva_o_e_mail() -> None:
     assert "redetv.com.br" not in json.dumps(mundo.eventos.publicados[0].para_json())
 
 
-def test_falha_ao_publicar_o_login_nao_derruba_o_eu() -> None:
-    mundo = Mundo(eventos=EventosQueFalham(), login_em=AGORA)
+class EventosQueEstouramOTempo:
+    def publicar(self, evento: EventoDeUso) -> None:
+        raise requests.Timeout("Pub/Sub não respondeu em 5 s")
 
-    r = mundo.cliente.get("/v1/eu", headers=ANA)
+
+@pytest.mark.parametrize("eventos", [EventosQueFalham(), EventosQueEstouramOTempo()])
+def test_falha_ao_publicar_o_login_nao_derruba_o_eu_e_vai_ao_log(
+    eventos: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    mundo = Mundo(eventos=eventos, login_em=AGORA)
+
+    with caplog.at_level(logging.ERROR):
+        r = mundo.cliente.get("/v1/eu", headers=ANA)
 
     assert r.status_code == 200 and r.json()["uid"] == "ana"
+    assert "evento de uso login" in caplog.text
 
 
 # Envio

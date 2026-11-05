@@ -5,8 +5,8 @@ API) vira um evento no Pub/Sub; uma assinatura do BigQuery o grava na tabela de 
 (`infra/modulos/mam/eventos_de_uso.tf`). O evento só leva o id de quem agiu (nunca nome
 nem e-mail) e, na busca, o tamanho da consulta e os filtros, nunca o texto. Falha ao
 publicar não derruba a ação: vai ao log. O evento sai dentro da requisição, antes da
-resposta (a `mam-web` só tem CPU durante ela, então uma thread depois da resposta
-podia perder o evento). O Pub/Sub fica atrás da porta `Eventos`.
+resposta (o serviço web no Cloud Run só tem CPU durante ela, então uma thread depois
+da resposta podia perder o evento). O Pub/Sub fica atrás da porta `Eventos`.
 """
 
 import base64
