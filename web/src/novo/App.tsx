@@ -7,12 +7,14 @@ import { naInterfaceAtual } from '../interface.ts'
 import { ACERVO, seguir, useRota, type Rota } from '../rotas.ts'
 import { useSessao, type Usuario } from '../sessao.ts'
 import { AtalhosProvider } from './Atalhos.tsx'
+import { Acervo } from './acervo/Acervo.tsx'
 import { Casca } from './Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from './consultas.ts'
 import Login from './Login.tsx'
 import { Button } from './ui/button.tsx'
+import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 
-/** O que a área de trabalho mostra. Na fase 1 nenhuma tela migrou: todas levam à interface atual. */
+/** O que a área de trabalho mostra. As telas que ainda não migraram levam à interface atual. */
 function AreaDeTrabalho({ rota }: { rota: Rota }) {
   if (rota.tipo === 'raiz') return null
   if (rota.tipo === 'nao_encontrada') {
@@ -25,6 +27,8 @@ function AreaDeTrabalho({ rota }: { rota: Rota }) {
       </div>
     )
   }
+  if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} />
+  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} />
   return <AindaNaoMigrou />
 }
 
