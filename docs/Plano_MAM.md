@@ -28,7 +28,7 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 | Painel | Indicadores por usuário e totais para a diretoria, dentro da aplicação, com acesso restrito |
 | Acervo | 25 anos processados aos poucos em Batch, com teto mensal de gasto e fila por prioridade |
 
-O Gemini identifica os famosos (inclusive brasileiros) pelo GC, pela fala e pela comparação do rosto com fotos de referência buscadas na web, nunca pela memória; o código confere a prova de cada nome ([ADR 0005](adr/0005-identificacao-por-referencia.md)). Tudo roda no GCP, inclusive o front: a RedeTV não mantém nenhum servidor próprio.
+O Gemini identifica os famosos (inclusive brasileiros) pelo GC, e pela fala, nunca pela memória; o código confere a prova de cada nome, e o nome sem prova fica como palpite ([ADR 0012](adr/0012-sem-referencias-de-rosto-na-web.md), que substitui a [0005](adr/0005-identificacao-por-referencia.md)). Tudo roda no GCP, inclusive o front: a RedeTV não mantém nenhum servidor próprio.
 
 ## Escolha do modelo
 
@@ -62,7 +62,6 @@ O custo tem quatro partes: o variável, por hora de vídeo processada; o fixo, q
 | **Variável** | **Total: US$ 0,43/h × 600 h** | **\~US$ 260/mês** |
 | Fixo | Balanceador, Cloud Armor e IP fixo do NAT (estimativa da revisão, a confirmar na calculadora) | \~US$ 30/mês |
 | Fixo | KMS, Secret Manager, Identity Platform, monitoramento | Poucos dólares |
-| Fixo | SerpAPI para as fotos de referência: US$ 0,01 por busca na conta atual, poucas centenas de buscas por mês com as fotos guardadas; um plano próprio começa em US$ 25/mês | Poucos dólares |
 | Armazenamento | Proxies de reprodução e índice de busca, crescendo todo mês | \~US$ 5 no mês 1, \~US$ 40 no mês 12, \~US$ 85 no mês 36 |
 | Uso | Saída de dados do player (\~0,45 GB por hora assistida) | \~US$ 10/mês para 150 h assistidas |
 | Reserva | Testes, avaliação e reprocessamentos (+10% do variável) | \~US$ 26/mês |
@@ -476,7 +475,6 @@ Nenhuma chave fica no `.env`, no código ou no repositório. As chaves da aplica
 | Senhas dos usuários locais | Identity Platform | O Google guarda e confere; nunca passam pelo nosso banco |
 | Chave para chamar a API de login do legado | Secret Manager, com chave CMEK | Lida em execução só pela conta de serviço do login |
 | Segredo do webhook (HMAC, opcional) | Secret Manager, com chave CMEK | Lido em execução só pela conta de serviço que entrega webhooks |
-| Chave do SerpAPI | Secret Manager, com chave CMEK | Lida em execução só pela conta de serviço do Job que busca as fotos de referência |
 | Acesso do back ao Google (Gemini, Storage, Firestore, KMS) | Nenhuma chave: conta de serviço anexada ao Cloud Run | Tokens curtos emitidos pelo próprio Cloud Run |
 | CI/CD e desenvolvedores → GCP | Nenhuma chave: Workload Identity Federation e impersonação | Token curto por execução ([auth action](https://github.com/google-github-actions/auth)) |
 

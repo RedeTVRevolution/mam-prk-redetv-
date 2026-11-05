@@ -243,6 +243,10 @@ output "bucket_decupagens" {
   value = module.mam.bucket_decupagens
 }
 
+output "bucket_referencias" {
+  value = module.mam.bucket_referencias
+}
+
 output "workflow_regiao" {
   value = module.mam.workflow_regiao
 }

@@ -3175,6 +3175,10 @@ output "bucket_decupagens" {
   value = local.buckets["decupagens"]
 }
 
+output "bucket_referencias" {
+  value = local.buckets["referencias"]
+}
+
 output "workflow_regiao" {
   value = var.regiao
 }

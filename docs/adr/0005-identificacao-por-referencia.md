@@ -1,3 +1,5 @@
+> **Substituída pela [ADR 0012](0012-sem-referencias-de-rosto-na-web.md)** em 3/11/2026: a busca de fotos na web e a comparação de rostos saíram; a regra de que o nome só se confirma por prova conferida pelo código continua.
+
 # Pessoas identificadas por comparação com fotos de referência, nunca pela memória do modelo
 
 Um nome só é confirmado por uma prova que o código confere: o GC com o nome enquanto a pessoa está na imagem; a fala com o nome, conferida no texto original do Whisper; ou o rosto comparado com as 3 fotos de referência daquele nome. Estar no perfil do programa ou no catálogo torna a pessoa candidata, mas não confirma o nome. Nas medições de 30/10/2026, com o clipe2, o 3.8 Flash chamou o Leão Lobo de "Nelson Rubens" em 2 de 3 rodadas, declarando rosto, fala e contexto. O nome veio da memória do modelo, e a "fala" ("O que aconteceu, Nelson?") era alucinação: o Bruno ouviu o trecho, e nele não se diz "Nelson". Aceitar o que o modelo declara repete esse erro.

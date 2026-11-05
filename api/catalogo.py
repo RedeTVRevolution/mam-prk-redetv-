@@ -1,14 +1,13 @@
 """Catálogo de pessoas (E1): dado vivo no Firestore, não configuração.
 
-Cada pessoa tem um id estável, gerado uma vez e nunca reaproveitado. A
-identificação automática (#82) grava nele as referências de rosto e usa o id
-como dono dos objetos da busca.
+Cada pessoa tem um id estável, gerado uma vez e nunca reaproveitado; o id é o
+dono dos objetos da busca. Os rostos `origem=web` são legado da busca de fotos na
+web, retirada no #327: só a migração `apagar_referencias_web` ainda os lê.
 """
 
-import hashlib
 import uuid
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
@@ -161,11 +160,6 @@ def prefixo_das_fotos(pessoa_id: str) -> str:
     return f"referencias/{pessoa_id}/"
 
 
-def objeto_da_foto(pessoa_id: str, jpeg: bytes) -> str:
-    """Onde a foto de referência de uma pessoa do catálogo fica no bucket."""
-    return f"{prefixo_das_fotos(pessoa_id)}{hashlib.sha256(jpeg).hexdigest()[:24]}.jpg"
-
-
 def novo_id() -> str:
     return uuid.uuid4().hex
 
@@ -183,39 +177,6 @@ def corrigida(
             "apelidos": pessoa.apelidos if apelidos is None else list(apelidos),
         }
     )
-
-
-def rostos_que_valem(
-    rostos: Iterable[Rosto],
-    agora: datetime,
-    validade: timedelta,
-    *,
-    com_acervo: bool = False,
-) -> list[Rosto]:
-    """As referências que ainda valem, conferidas na hora de usar: as da web só
-    até `validade` depois da data em que foram obtidas (sem data, não valem); as do
-    acervo só com `com_acervo`, desligado por configuração."""
-    return [
-        r
-        for r in rostos
-        if (r.origem == "acervo" and com_acervo)
-        or (
-            r.origem == "web"
-            and r.obtida_em is not None
-            and agora - r.obtida_em <= validade
-        )
-    ]
-
-
-def rostos_validos(
-    pessoa: PessoaDoCatalogo,
-    agora: datetime,
-    validade: timedelta,
-    *,
-    com_acervo: bool = False,
-) -> list[Rosto]:
-    """As referências da pessoa que ainda valem (veja `rostos_que_valem`)."""
-    return rostos_que_valem(pessoa.rostos, agora, validade, com_acervo=com_acervo)
 
 
 class CatalogoEmMemoria:
