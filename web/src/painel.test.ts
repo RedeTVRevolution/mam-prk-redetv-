@@ -4,6 +4,7 @@ import {
   agora,
   deltaDeRolagem,
   deltaParaUmTerco,
+  inventarioDoVideo,
   itensDoPainel,
   itensDaAba,
   objetosDaAba,
@@ -239,4 +240,98 @@ test('o agora traz os objetos visíveis no tempo, depois das menções', () => {
 test('uma decupagem anterior ao 1.3 não tem objetos', () => {
   const { objetos: _, ...antiga } = D
   expect(itensDoPainel(antiga).some((i) => i.tipo === 'objeto')).toBe(false)
+})
+
+const caixa = (quadro: string, largura: number) => ({ quadro, x: 0.1, y: 0.1, largura, altura: largura })
+
+test('o inventário do vídeo junta o mesmo objeto de vários planos e guarda os planos de cada item', () => {
+  const planos: Decupagem['planos'] = [
+    {
+      id: 'a',
+      ambiente: 'estúdio',
+      inicio_ms: 0,
+      fim_ms: 5_000,
+      inventario: [
+        { nome: 'caneca', categoria: 'utensilio', cor: 'branco', caixas: [caixa('q-a.jpg', 0.1)], destaque: 1 },
+        { nome: 'blazer', categoria: 'roupa', cor: 'preto', marca: 'Zara', caixas: [caixa('q-a.jpg', 0.2)], destaque: 3 },
+      ],
+    },
+    { id: 'b', ambiente: 'cozinha', inicio_ms: 5_000, fim_ms: 9_000 },
+    {
+      id: 'c',
+      ambiente: 'varanda',
+      inicio_ms: 9_000,
+      fim_ms: 12_000,
+      inventario: [
+        { nome: 'caneca', categoria: 'utensilio', cor: 'branco', caixas: [caixa('q-c.jpg', 0.4)], destaque: 2 },
+        { nome: 'caneca', categoria: 'utensilio', cor: 'azul', caixas: [caixa('q-c.jpg', 0.1)], destaque: 1 },
+        { nome: 'blazer', categoria: 'roupa', cor: 'preto', caixas: [caixa('q-c.jpg', 0.1)], destaque: 1 },
+      ],
+    },
+  ]
+
+  const grupos = inventarioDoVideo(planos)
+
+  expect(grupos.map((g) => g.nome)).toEqual(['roupa', 'utensílio'])
+  const [roupa, utensilio] = grupos
+  expect(roupa.objetos).toHaveLength(1)
+  expect(roupa.objetos[0]).toMatchObject({
+    nome: 'blazer',
+    cor: 'preto',
+    marca: 'Zara',
+    planos: [
+      { ambiente: 'estúdio', inicio_ms: 0, fim_ms: 5_000 },
+      { ambiente: 'varanda', inicio_ms: 9_000, fim_ms: 12_000 },
+    ],
+  })
+  expect(utensilio.objetos.map((o) => [o.nome, o.cor, o.planos.length])).toEqual([
+    ['caneca', 'branco', 2],
+    ['caneca', 'azul', 1],
+  ])
+  // A caixa que o player mostra é a maior de todas as ocorrências.
+  expect(utensilio.objetos[0].caixa.quadro).toBe('q-c.jpg')
+})
+
+test('o inventário do vídeo ignora acento e caixa no nome e é vazio sem inventário nos planos', () => {
+  expect(inventarioDoVideo([{ id: 'a', ambiente: 'x', inicio_ms: 0, fim_ms: 1 }])).toEqual([])
+  const grupos = inventarioDoVideo([
+    { id: 'a', ambiente: 'x', inicio_ms: 0, fim_ms: 1, inventario: [{ nome: 'Chapéu', categoria: 'acessorio', caixas: [caixa('q.jpg', 0.1)], destaque: 1 }] },
+    { id: 'b', ambiente: 'y', inicio_ms: 1, fim_ms: 2, inventario: [{ nome: 'chapeu', categoria: 'acessorio', caixas: [caixa('q.jpg', 0.1)], destaque: 1 }] },
+  ])
+  expect(grupos[0].objetos).toHaveLength(1)
+  expect(grupos[0].objetos[0].planos).toHaveLength(2)
+})
+
+test('o inventário do vídeo conta o plano uma vez, leva ao plano da maior caixa e põe o destaque maior primeiro', () => {
+  const cadeira = (quadro: string, largura: number) => ({
+    nome: 'cadeira',
+    categoria: 'movel' as const,
+    caixas: [caixa(quadro, largura)],
+    destaque: 1 as const,
+  })
+  const [moveis] = inventarioDoVideo([
+    {
+      id: 'a',
+      ambiente: 'estúdio',
+      inicio_ms: 0,
+      fim_ms: 5_000,
+      inventario: [cadeira('q-a.jpg', 0.1), cadeira('q-a.jpg', 0.2)],
+    },
+    {
+      id: 'b',
+      ambiente: 'sala',
+      inicio_ms: 5_000,
+      fim_ms: 9_000,
+      inventario: [
+        cadeira('q-b.jpg', 0.5),
+        { nome: 'sofá', categoria: 'movel', caixas: [caixa('q-b.jpg', 0.3)], destaque: 3 },
+      ],
+    },
+  ])
+
+  expect(moveis.objetos.map((o) => o.nome)).toEqual(['sofá', 'cadeira'])
+  const [, cadeiras] = moveis.objetos
+  expect(cadeiras.planos.map((p) => p.id)).toEqual(['a', 'b'])
+  expect(cadeiras.caixa.quadro).toBe('q-b.jpg')
+  expect(cadeiras.planoDaCaixa.id).toBe('b')
 })

@@ -740,3 +740,50 @@ test('o objeto que some apontado (a lista fechada) não deixa o quadro sobre o p
   expect(within(painel()).queryByText('caneca')).toBeNull()
   expect(screen.queryByRole('img', { name: /Quadro com a caixa/ })).toBeNull()
 })
+
+async function abrirObjetosComInventario() {
+  // O mesmo carro em outro plano: um item só, com os dois planos.
+  const planos = [
+    { ...DECUPAGEM.planos[0], inventario: INVENTARIO },
+    { ...DECUPAGEM.planos[1], inventario: [INVENTARIO[1]] },
+  ]
+  servidor.use(
+    http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json({ ...DECUPAGEM, planos })),
+    http.get('/v1/jobs/j1/quadros/:arquivo', ({ params }) =>
+      HttpResponse.json({ url: `https://quadros.test/${params.arquivo}`, expira_em: '2999-01-01T00:00:00Z' }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  const player = await abrir()
+  await usuario.click(aba('Objetos 6'))
+  return { usuario, player }
+}
+
+test('a aba Objetos lista o inventário dos planos por categoria, sem repetir, e a contagem o inclui', async () => {
+  await abrirObjetosComInventario()
+
+  const veiculos = within(painel()).getByRole('region', { name: 'veículo do vídeo' })
+  expect(within(veiculos).getAllByRole('button').map((b) => b.textContent)).toEqual(['carro azul (azul · BYD)2 planos'])
+  const roupas = within(painel()).getByRole('region', { name: 'roupa do vídeo' })
+  expect(within(roupas).getAllByRole('button').map((b) => b.textContent)).toEqual(['camisa1 plano', 'blazer preto1 plano'])
+  // Os objetos ligados às pessoas continuam como estão.
+  expect(within(painel()).getByRole('button', { name: /^sandália, 2 ocorrências/ })).toBeTruthy()
+})
+
+test('apontar um objeto do inventário na aba Objetos mostra a caixa, e clicar leva o player ao plano', async () => {
+  const { usuario, player } = await abrirObjetosComInventario()
+
+  const carro = within(painel()).getByRole('button', { name: /^carro azul/ })
+  await usuario.hover(carro)
+  const quadro = await screen.findByRole('img', { name: 'Quadro com a caixa de carro azul' })
+  expect(quadro.querySelector('image')?.getAttribute('href')).toBe('https://quadros.test/plano-0-1.jpg')
+  await usuario.unhover(carro)
+  expect(screen.queryByRole('img', { name: /Quadro com a caixa/ })).toBeNull()
+
+  await usuario.click(carro)
+  expect(player.currentTime).toBe(200)
+  // Fechar a lista dos planos não mexe no player.
+  player.currentTime = 500
+  await usuario.click(carro)
+  expect(player.currentTime).toBe(500)
+})
