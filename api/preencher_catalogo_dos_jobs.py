@@ -14,7 +14,11 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.catalogo import PessoaDoCatalogo
-from api.catalogo_dos_jobs import entregue_com_fundidas, ids_do_catalogo
+from api.catalogo_dos_jobs import (
+    LeitorDeDecupagem,
+    entregue_com_fundidas,
+    gravar_se_mudou,
+)
 from api.correcoes import RepositorioDeCorrecoes
 from api.jobs import FiltroDeJobs, RepositorioDeJobs
 from api.nuvem import (
@@ -29,11 +33,12 @@ log = logging.getLogger(__name__)
 
 def preencher(
     repositorio: RepositorioDeJobs,
-    decupagens: object,
+    decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pessoas: Callable[[str], PessoaDoCatalogo | None],
 ) -> dict[str, int]:
-    """Devolve quantos Jobs `gravados`, `iguais` e `falhou` (decupagem não lida)."""
+    """Devolve quantos Jobs `gravados`, `iguais` (ou que saíram de `concluido` no meio) e
+    `falhou` (decupagem não lida)."""
     contagem = {"gravados": 0, "iguais": 0, "falhou": 0}
     for job in repositorio.consultar(FiltroDeJobs(na_lixeira=None)).jobs:
         if job.estado != "concluido":
@@ -44,18 +49,9 @@ def preencher(
             log.exception("decupagem de %s não lida", job.id)
             contagem["falhou"] += 1
             continue
-        de_pessoas, de_marcas = ids_do_catalogo(entregue)
-        if (
-            job.pessoas_do_catalogo == de_pessoas
-            and job.marcas_do_catalogo == de_marcas
-        ):
+        if not gravar_se_mudou(repositorio, job.id, entregue):
             contagem["iguais"] += 1
             continue
-        repositorio.transitar(
-            job.id,
-            "concluido",
-            {"pessoas_do_catalogo": de_pessoas, "marcas_do_catalogo": de_marcas},
-        )
         contagem["gravados"] += 1
     return contagem
 

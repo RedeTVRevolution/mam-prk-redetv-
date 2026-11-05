@@ -7,8 +7,8 @@ Correções, a fusão de pessoas) regrava os dois campos; só grava se mudaram.
 
 import json
 import logging
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any, Protocol
 
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_apagado import com_pessoas_fundidas
@@ -18,6 +18,10 @@ if TYPE_CHECKING:
     from api.jobs import Job, RepositorioDeJobs
 
 log = logging.getLogger(__name__)
+
+
+class LeitorDeDecupagem(Protocol):
+    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
 
 
 def ids_do_catalogo(entregue: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -34,30 +38,37 @@ def ids_do_catalogo(entregue: dict[str, Any]) -> tuple[list[str], list[str]]:
     return ids("pessoas"), ids("comerciais")
 
 
+def gravar_se_mudou(
+    repositorio: "RepositorioDeJobs", job_id: str, entregue: dict[str, Any]
+) -> bool:
+    """Grava os dois campos no Job concluído, numa leitura só e atômica; `False` se não
+    mudaram ou se o Job não está mais `concluido`. Levanta a falha do repositório."""
+    pessoas, marcas = ids_do_catalogo(entregue)
+
+    def mudar(job: "Job") -> dict[str, Any] | None:
+        if job.estado != "concluido":
+            return None
+        if job.pessoas_do_catalogo == pessoas and job.marcas_do_catalogo == marcas:
+            return None
+        return {"pessoas_do_catalogo": pessoas, "marcas_do_catalogo": marcas}
+
+    return repositorio.trocar(job_id, mudar) is not None
+
+
 def gravar_catalogo_do_job(
     repositorio: "RepositorioDeJobs", job_id: str, entregue: dict[str, Any]
 ) -> None:
-    """Grava os dois campos no Job concluído, se mudaram. Nunca levanta: uma falha vai ao
-    log, para não transformar em erro uma Correção que já foi gravada."""
-    pessoas, marcas = ids_do_catalogo(entregue)
+    """Como `gravar_se_mudou`, mas nunca levanta: uma falha vai ao log, para não
+    transformar em erro uma Correção que já foi gravada."""
     try:
-        job = repositorio.obter(job_id)
-        if job is None or job.estado != "concluido":
-            return
-        if job.pessoas_do_catalogo == pessoas and job.marcas_do_catalogo == marcas:
-            return
-        repositorio.transitar(
-            job_id,
-            "concluido",
-            {"pessoas_do_catalogo": pessoas, "marcas_do_catalogo": marcas},
-        )
+        gravar_se_mudou(repositorio, job_id, entregue)
     except Exception:
         log.exception("catálogo do Job %s não gravado", job_id)
 
 
 def entregue_com_fundidas(
     job_id: str,
-    decupagens: Any,
+    decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pessoas: Callable[[str], PessoaDoCatalogo | None],
 ) -> dict[str, Any]:
@@ -72,7 +83,7 @@ def entregue_com_fundidas(
 def atualizar_catalogo_do_job(
     job: "Job",
     repositorio: "RepositorioDeJobs",
-    decupagens: Any,
+    decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pessoas: Callable[[str], PessoaDoCatalogo | None],
 ) -> None:
