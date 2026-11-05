@@ -6,6 +6,8 @@ BigQuery e na cópia em memória), a leitura da resposta (todas as páginas), o 
 de uma consulta que não termina.
 """
 
+import base64
+import binascii
 import csv
 import io
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -54,6 +56,45 @@ def ou_503[T](consultar: Callable[[], T]) -> T:
         return consultar()
     except RuntimeError as e:
         raise HTTPException(503, str(e)) from e
+
+
+LIMITE_DA_PAGINA = 100  # o teto de `limite` nas listas paginadas dos relatórios
+
+
+def posicao_do_cursor(cursor: str | None) -> int:
+    """Quantos itens as páginas anteriores já trouxeram. O cursor é opaco para quem chama
+    (a posição em base64): o relatório é uma soma, sem um documento onde ancorar como no
+    acervo. Cursor que não decifra é 422, como lá."""
+    if cursor is None:
+        return 0
+    try:
+        texto = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        texto = ""
+    # Até 9 dígitos: a posição, somada ao limite, cabe folgada no INT64 do BigQuery.
+    if not (texto.isascii() and texto.isdigit() and len(texto) <= 9):
+        raise HTTPException(422, "Cursor inválido")
+    return int(texto)
+
+
+def recorta[T](
+    lidos: list[T], depois: int, limite: int
+) -> tuple[list[T], dict[str, str]]:
+    """A página e o cabeçalho do próximo cursor. `lidos` são até `limite + 1` itens a
+    partir da posição `depois`: o que passa do limite diz que há mais."""
+    if len(lidos) <= limite:
+        return lidos, {}
+    proximo = base64.urlsafe_b64encode(str(depois + limite).encode()).decode()
+    return lidos[:limite], {"X-Proximo-Cursor": proximo.rstrip("=")}
+
+
+def parametros_da_pagina(depois: int, limite: int) -> list[dict[str, Any]]:
+    """As posições da página (`@posicao_de` < posição <= `@posicao_ate`), lendo um além do
+    limite para saber se há mais."""
+    return [
+        _parametro("posicao_de", str(depois), "INT64"),
+        _parametro("posicao_ate", str(depois + limite + 1), "INT64"),
+    ]
 
 
 def _celula(valor: object) -> object:

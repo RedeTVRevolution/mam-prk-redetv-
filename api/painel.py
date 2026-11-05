@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
@@ -43,6 +43,16 @@ from api.usuarios import ContasDeUsuario
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
 Aba = Literal["acessos", "videos", "buscas", "revisao", "api", "custo"]
+Grupo = Literal["dia", "semana", "mes", "trimestre"]
+MAXIMO_DE_PONTOS = 400  # um agrupamento pedido que dê mais pontos que isto é 422
+# Com `agrupar=auto`: o menor grupo que deixa o gráfico com até ~90 pontos. Os dias são
+# do primeiro ao último dia com dados: até 90 dias, por dia; até ~1,5 ano, por semana;
+# até ~7 anos, por mês; depois, por trimestre.
+FAIXAS_DO_AUTO: tuple[tuple[int, Grupo], ...] = (
+    (90, "dia"),
+    (548, "semana"),
+    (2557, "mes"),
+)
 
 log = logging.getLogger(__name__)
 
@@ -215,18 +225,53 @@ def _com_acesso(linhas: list[AcessoDoDia]) -> list[AcessoDoDia]:
     return [a for a in linhas if a.acessos or a.ativo]
 
 
-def _com_os_dias_vazios(por_dia: dict[date, int]) -> dict[date, int]:
-    if not por_dia:
-        return {}
-    primeiro, ultimo = min(por_dia), max(por_dia)
-    return {
-        primeiro + timedelta(days=i): por_dia.get(primeiro + timedelta(days=i), 0)
-        for i in range((ultimo - primeiro).days + 1)
-    }
+def inicio_do_grupo(dia: date, grupo: Grupo) -> date:
+    """O primeiro dia do grupo: a segunda da semana, o dia 1 do mês ou do trimestre."""
+    if grupo == "semana":
+        return dia - timedelta(days=dia.weekday())
+    if grupo == "mes":
+        return dia.replace(day=1)
+    if grupo == "trimestre":
+        return dia.replace(month=(dia.month - 1) // 3 * 3 + 1, day=1)
+    return dia
+
+
+def _agrupar_dias[V](
+    por_dia: dict[date, V], grupo: Grupo, juntar: Callable[[V, V], V]
+) -> dict[date, V]:
+    juntos: dict[date, V] = {}
+    for dia, valor in por_dia.items():
+        g = inicio_do_grupo(dia, grupo)
+        juntos[g] = juntar(juntos[g], valor) if g in juntos else valor
+    return juntos
+
+
+def escolhe_o_grupo(agrupar: Grupo | Literal["auto"], dias: Iterable[date]) -> Grupo:
+    """O grupo dos gráficos por dia. `auto` escolhe pelo tamanho do período com dados; um
+    grupo pedido que dê mais de `MAXIMO_DE_PONTOS` pontos é 422."""
+    dias = list(dias)
+    if agrupar == "auto":
+        tamanho = (max(dias) - min(dias)).days + 1 if dias else 0
+        return next((g for ate, g in FAIXAS_DO_AUTO if tamanho <= ate), "trimestre")
+    pontos = len(_dias_do_intervalo(dias, agrupar))
+    if pontos > MAXIMO_DE_PONTOS:
+        raise HTTPException(
+            422,
+            f"`agrupar={agrupar}` dá {pontos} pontos (o máximo é {MAXIMO_DE_PONTOS}); "
+            "use um grupo maior ou `auto`",
+        )
+    return agrupar
+
+
+def _com_os_dias_vazios(por_dia: dict[date, int], grupo: Grupo) -> dict[date, int]:
+    return {d: por_dia.get(d, 0) for d in _dias_do_intervalo(por_dia, grupo)}
 
 
 def relatorio_de_acessos(
-    linhas: list[AcessoDoDia], emails: dict[str, str], filtro: FiltroDoPainel
+    linhas: list[AcessoDoDia],
+    emails: dict[str, str],
+    filtro: FiltroDoPainel,
+    grupo: Grupo = "dia",
 ) -> RelatorioDeAcessos:
     """Os números do período a partir das linhas por dia e pessoa. Usuário ativo é quem agiu
     (o fim do processamento do vídeo dela não conta: o #280 já o deixou de fora). A primeira
@@ -245,6 +290,9 @@ def relatorio_de_acessos(
             dias_da_pessoa[a.uid] += 1
         if a.ultimo_acesso and (a.uid not in ultimo or a.ultimo_acesso > ultimo[a.uid]):
             ultimo[a.uid] = a.ultimo_acesso
+    # No grupo, os ativos são os distintos dele: quem agiu em três dias conta uma vez.
+    acessos_do_grupo = _agrupar_dias(acessos_do_dia, grupo, int.__add__)
+    ativos_do_grupo = _agrupar_dias(ativos_do_dia, grupo, set.union)
     return RelatorioDeAcessos(
         desde=filtro.desde,
         ate=filtro.ate,
@@ -257,9 +305,9 @@ def relatorio_de_acessos(
             DiaDeAcessos(
                 dia=d,
                 acessos=n,
-                usuarios_ativos=len(ativos_do_dia.get(d, ())),
+                usuarios_ativos=len(ativos_do_grupo.get(d, ())),
             )
-            for d, n in sorted(_com_os_dias_vazios(acessos_do_dia).items())
+            for d, n in sorted(_com_os_dias_vazios(acessos_do_grupo, grupo).items())
         ],
         por_semana=_ativos_por(
             ativos_do_dia, lambda d: d - timedelta(days=d.weekday())
@@ -452,15 +500,19 @@ def _tem_video(u: UsoDoDia) -> bool:
     return bool(u.videos_enviados or u.videos_concluidos or u.videos_falhos)
 
 
-def _dias_do_intervalo(dias: Iterable[date]) -> list[date]:
-    """Do primeiro ao último dia, sem buracos: o gráfico não cola dias distantes."""
+def _dias_do_intervalo(dias: Iterable[date], grupo: Grupo = "dia") -> list[date]:
+    """Do primeiro ao último dia, sem buracos: o gráfico não cola dias distantes. Com um
+    grupo, o primeiro dia de cada grupo do intervalo."""
     dias = list(dias)
     if not dias:
         return []
     primeiro = min(dias)
-    return [
-        primeiro + timedelta(days=i) for i in range((max(dias) - primeiro).days + 1)
-    ]
+    return list(
+        dict.fromkeys(
+            inicio_do_grupo(primeiro + timedelta(days=i), grupo)
+            for i in range((max(dias) - primeiro).days + 1)
+        )
+    )
 
 
 def relatorio_de_videos(
@@ -468,11 +520,12 @@ def relatorio_de_videos(
     por_programa: list[UsoDoDia],
     emails: dict[str, str],
     filtro: FiltroDoPainel,
+    grupo: Grupo = "dia",
 ) -> RelatorioDeVideos:
     """`base` são as linhas do filtro (por programa ou por pessoa, veja `_base_de_uso`);
     `por_programa` são as linhas por programa de um pedido sem filtro de usuário."""
     base = [u for u in base if _tem_video(u)]
-    por_dia = _somas_por(base, lambda u: u.dia)
+    por_dia = _somas_por(base, lambda u: inicio_do_grupo(u.dia, grupo))
     total = _soma(base)
     programas = _somas_por(
         [u for u in por_programa if _tem_video(u) and u.programa is not None],
@@ -486,7 +539,7 @@ def relatorio_de_videos(
         total=NumerosDeVideos(**total.videos()),
         por_dia=[
             DiaDeVideos(dia=d, **por_dia.get(d, _SomaDeUso()).videos())
-            for d in _dias_do_intervalo(por_dia)
+            for d in _dias_do_intervalo(por_dia, grupo)
         ],
         por_programa=[
             ProgramaDeVideos(programa=p, **soma.videos())
@@ -500,17 +553,20 @@ def relatorio_de_videos(
 
 
 def relatorio_de_buscas(
-    base: list[UsoDoDia], emails: dict[str, str], filtro: FiltroDoPainel
+    base: list[UsoDoDia],
+    emails: dict[str, str],
+    filtro: FiltroDoPainel,
+    grupo: Grupo = "dia",
 ) -> RelatorioDeBuscas:
     """Quem busca são só pessoas (o sistema que busca pela API aparece em `por_usuario`,
     mas não conta em `usuarios_que_buscam`)."""
     base = [u for u in base if u.buscas]
     por_programa = filtro.programa is not None
-    por_dia = _somas_por(base, lambda u: u.dia)
+    por_dia = _somas_por(base, lambda u: inicio_do_grupo(u.dia, grupo))
     pessoas_do_dia: dict[date, set[str]] = defaultdict(set)
     for u in base:
         if u.quem_tipo == "usuario" and u.quem_id is not None:
-            pessoas_do_dia[u.dia].add(u.quem_id)
+            pessoas_do_dia[inicio_do_grupo(u.dia, grupo)].add(u.quem_id)
     total = _soma(base)
     return RelatorioDeBuscas(
         desde=filtro.desde,
@@ -533,7 +589,7 @@ def relatorio_de_buscas(
                 if por_programa
                 else len(pessoas_do_dia.get(d, ())),
             )
-            for d in _dias_do_intervalo(por_dia)
+            for d in _dias_do_intervalo(por_dia, grupo)
         ],
         por_usuario=[
             QuemDeBuscas(**quem, **soma.de_buscas())
@@ -679,20 +735,20 @@ class RelatorioDeRevisao(BaseModel):
 
 
 def relatorio_de_correcoes(
-    linhas: list[CorrecaoDoDia], emails: dict[str, str]
+    linhas: list[CorrecaoDoDia], emails: dict[str, str], grupo: Grupo = "dia"
 ) -> CorrecoesNoPeriodo:
     por_dia: dict[date, int] = defaultdict(int)
     por_tipo: dict[str | None, int] = defaultdict(int)
     por_quem: dict[tuple[str, str], int] = defaultdict(int)
     for c in linhas:
-        por_dia[c.dia] += c.correcoes
+        por_dia[inicio_do_grupo(c.dia, grupo)] += c.correcoes
         por_tipo[c.tipo_de_correcao] += c.correcoes
         por_quem[(c.quem_tipo, c.quem_id)] += c.correcoes
     return CorrecoesNoPeriodo(
         total=sum(por_dia.values()),
         por_dia=[
             DiaDeCorrecoes(dia=d, correcoes=por_dia.get(d, 0))
-            for d in _dias_do_intervalo(por_dia)
+            for d in _dias_do_intervalo(por_dia, grupo)
         ],
         por_tipo=[
             TipoDeCorrecoes(tipo=t, correcoes=n)
@@ -898,20 +954,23 @@ def _numeros_de_chamadas(linhas: Iterable[ChamadaDoDia]) -> dict[str, int]:
 
 
 def relatorio_de_api(
-    chamadas: list[ChamadaDoDia], envios: list[UsoDoDia], filtro: FiltroDoPainel
+    chamadas: list[ChamadaDoDia],
+    envios: list[UsoDoDia],
+    filtro: FiltroDoPainel,
+    grupo: Grupo = "dia",
 ) -> RelatorioDeApi:
     """`envios` são as linhas por pessoa ou sistema; só valem as de sistema com vídeo enviado."""
     envios = [u for u in envios if u.quem_tipo == "sistema" and u.videos_enviados]
     enviados_do_dia: dict[date, int] = defaultdict(int)
     enviados_do_sistema: dict[tuple[str, str], int] = defaultdict(int)
     for u in envios:
-        enviados_do_dia[u.dia] += u.videos_enviados
+        enviados_do_dia[inicio_do_grupo(u.dia, grupo)] += u.videos_enviados
         enviados_do_sistema[("sistema", u.quem_id or "")] += u.videos_enviados
     do_dia: dict[date, list[ChamadaDoDia]] = defaultdict(list)
     do_sistema: dict[tuple[str, str], list[ChamadaDoDia]] = defaultdict(list)
     da_rota: dict[tuple[str | None, str | None], list[ChamadaDoDia]] = defaultdict(list)
     for c in chamadas:
-        do_dia[c.dia].append(c)
+        do_dia[inicio_do_grupo(c.dia, grupo)].append(c)
         do_sistema[(c.quem_tipo, c.quem_id)].append(c)
         da_rota[(c.metodo, c.rota)].append(c)
     quem = sorted(
@@ -933,7 +992,7 @@ def relatorio_de_api(
                 videos_enviados=enviados_do_dia.get(d, 0),
                 **_numeros_de_chamadas(do_dia.get(d, [])),
             )
-            for d in _dias_do_intervalo(set(do_dia) | set(enviados_do_dia))
+            for d in _dias_do_intervalo(set(do_dia) | set(enviados_do_dia), grupo)
         ],
         por_sistema=[
             SistemaDeApi.model_validate(
@@ -970,6 +1029,19 @@ def criar_rotas_do_painel(
 ) -> APIRouter:
     rotas = APIRouter(prefix="/painel")
 
+    def _grupo(
+        agrupar: Grupo | Literal["auto"] | None,
+        dias: Iterable[date],
+        resposta: Response,
+    ) -> Grupo:
+        """Sem `agrupar`, por dia como sempre; com ele, o grupo usado vai no cabeçalho
+        `X-Agrupamento` (o `auto` diz qual escolheu). O CSV não agrupa."""
+        if agrupar is None:
+            return "dia"
+        grupo = escolhe_o_grupo(agrupar, dias)
+        resposta.headers["X-Agrupamento"] = grupo
+        return grupo
+
     @rotas.get("/filtros", response_model=OpcoesDosFiltros)
     def filtros(_pessoa: PodeVerOPainel) -> OpcoesDosFiltros:
         """O que a tela oferece nos filtros de programa e de usuário."""
@@ -983,9 +1055,11 @@ def criar_rotas_do_painel(
 
     @rotas.get("/acessos", response_model=RelatorioDeAcessos)
     def acessos(
+        resposta: Response,
         pessoa: PodeVerOPainel,
         filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
         formato: Literal["json", "csv"] = "json",
+        agrupar: Grupo | Literal["auto"] | None = None,
     ) -> RelatorioDeAcessos | object:
         """Logins por dia, usuários ativos (por dia, semana e mês), por usuário e no total. O login não tem programa:
         pedir `programa` é erro, em vez de devolver números que ele não filtrou."""
@@ -1020,14 +1094,17 @@ def criar_rotas_do_painel(
                 ),
                 "acessos.csv",
             )
+        grupo = _grupo(agrupar, (a.dia for a in linhas), resposta)
         acessos_ao_painel.abriu(pessoa, "acessos", filtro)
-        return relatorio_de_acessos(linhas, emails, filtro)
+        return relatorio_de_acessos(linhas, emails, filtro, grupo)
 
     @rotas.get("/videos", response_model=RelatorioDeVideos)
     def videos(
+        resposta: Response,
         pessoa: PodeVerOPainel,
         filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
         formato: Literal["json", "csv"] = "json",
+        agrupar: Grupo | Literal["auto"] | None = None,
     ) -> RelatorioDeVideos | object:
         """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
         programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
@@ -1067,14 +1144,17 @@ def criar_rotas_do_painel(
             )
         else:
             por_programa = []
+        grupo = _grupo(agrupar, (u.dia for u in base if _tem_video(u)), resposta)
         acessos_ao_painel.abriu(pessoa, "videos", filtro)
-        return relatorio_de_videos(base, por_programa, emails, filtro)
+        return relatorio_de_videos(base, por_programa, emails, filtro, grupo)
 
     @rotas.get("/buscas", response_model=RelatorioDeBuscas)
     def buscas(
+        resposta: Response,
         pessoa: PodeVerOPainel,
         filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
         formato: Literal["json", "csv"] = "json",
+        agrupar: Grupo | Literal["auto"] | None = None,
     ) -> RelatorioDeBuscas | object:
         """Buscas, usuários que buscam e buscas sem resultado, por dia e por usuário. A
         busca só tem programa quando foi filtrada por ele. Programa e usuário não se
@@ -1097,14 +1177,17 @@ def criar_rotas_do_painel(
                 ),
                 "buscas.csv",
             )
+        grupo = _grupo(agrupar, (u.dia for u in base if u.buscas), resposta)
         acessos_ao_painel.abriu(pessoa, "buscas", filtro)
-        return relatorio_de_buscas(base, emails, filtro)
+        return relatorio_de_buscas(base, emails, filtro, grupo)
 
     @rotas.get("/revisao", response_model=RelatorioDeRevisao)
     def revisao(
+        resposta: Response,
         pessoa: PodeVerOPainel,
         filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
         formato: Literal["json", "csv"] = "json",
+        agrupar: Grupo | Literal["auto"] | None = None,
     ) -> RelatorioDeRevisao | object:
         """Correções por dia, tipo e usuário; a taxa de correção por tipo e por programa
         (#265); os minutos de revisão por hora de vídeo por pessoa e por programa (#251).
@@ -1139,22 +1222,25 @@ def criar_rotas_do_painel(
                 ),
                 "revisao.csv",
             )
+        grupo = _grupo(agrupar, (c.dia for c in correcoes), resposta)
         acessos_ao_painel.abriu(pessoa, "revisao", filtro)
         return RelatorioDeRevisao(
             desde=filtro.desde,
             ate=filtro.ate,
             programa=filtro.programa,
             usuario=filtro.usuario,
-            correcoes=relatorio_de_correcoes(correcoes, emails),
+            correcoes=relatorio_de_correcoes(correcoes, emails, grupo),
             taxa_de_correcao=taxa_no_painel(taxa),
             tempo_de_revisao=tempo_no_painel(medidas),
         )
 
     @rotas.get("/api", response_model=RelatorioDeApi)
     def api(
+        resposta: Response,
         pessoa: PodeVerOPainel,
         filtro: Annotated[FiltroDoPainel, Depends(filtro_do_painel)],
         formato: Literal["json", "csv"] = "json",
+        agrupar: Grupo | Literal["auto"] | None = None,
     ) -> RelatorioDeApi | object:
         """Chamadas por sistema e por rota, erros e vídeos enviados pela API. A chamada não
         tem programa: pedir `programa` é erro. `usuario` filtra o sistema."""
@@ -1218,8 +1304,10 @@ def criar_rotas_do_painel(
                 ),
                 "api.csv",
             )
+        dias = [c.dia for c in chamadas] + [u.dia for u in envios if u.videos_enviados]
+        grupo = _grupo(agrupar, dias, resposta)
         acessos_ao_painel.abriu(pessoa, "api", filtro)
-        return relatorio_de_api(chamadas, envios, filtro)
+        return relatorio_de_api(chamadas, envios, filtro, grupo)
 
     @rotas.get("/custo", response_model=RelatorioDeCusto)
     def custo(

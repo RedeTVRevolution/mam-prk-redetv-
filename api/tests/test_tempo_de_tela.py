@@ -26,15 +26,21 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
     NOMES_EM_JSON,
+    RANKING_EM_SQL,
     SOMA_EM_SQL,
     UNIAO_EM_SQL,
+    VIDEOS_DA_PESSOA_EM_SQL,
     ConsultaBigQuery,
     ConsultaEmMemoria,
     MomentoDaPessoa,
     PessoaNoRelatorio,
     PessoaNoVideo,
+    pagina_do_ranking,
     pessoa_no_video,
+    ranking_em_python,
     somar,
+    video_da_pessoa,
+    videos_em_python,
 )
 from api.tempo_de_tela import relatorio as relatorio_das_somas
 from api.tests.test_auth import VerificadorFalso
@@ -528,3 +534,217 @@ def test_chave_de_sistema_nao_consulta_o_relatorio() -> None:
     resposta = cliente.get(ROTA, headers={"X-API-Key": emitida.chave})
 
     assert resposta.status_code == 403
+    videos = cliente.get(
+        f"{ROTA}/videos",
+        params={"pessoa_id": "c1"},
+        headers={"X-API-Key": emitida.chave},
+    )
+    assert videos.status_code == 403
+
+
+# Com `limite` (ADR 0014): o ranking paginado, os totais e os vídeos de uma pessoa.
+
+
+def _varias_pessoas() -> CopiaEmMemoria:
+    """c1 com 3 s em dois vídeos; c2 e c3 empatadas com 2 s; c4 só citada."""
+    copia = CopiaEmMemoria()
+
+    def linha(job: str, pessoa: str, tipo: str, fim: int) -> LinhaDoMomento:
+        return LinhaDoMomento(
+            job_id=job,
+            programa="Jornal",
+            data_de_exibicao=date(2026, 10, 1),
+            tipo=tipo,
+            inicio_ms=0,
+            fim_ms=fim,
+            pessoas=[PessoaDoMomento(pessoa, pessoa.upper())],
+        )
+
+    copia.gravar(
+        "j1",
+        [
+            linha("j1", "c1", "aparicao", 1_000),
+            linha("j1", "c3", "aparicao", 2_000),
+            linha("j1", "c4", "mencao_na_fala", 0),
+        ],
+    )
+    copia.gravar(
+        "j2",
+        [linha("j2", "c1", "aparicao", 2_000), linha("j2", "c2", "aparicao", 2_000)],
+    )
+    return copia
+
+
+def test_sem_limite_a_resposta_e_a_de_antes() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_varias_pessoas()))
+
+    resposta = cliente.get(ROTA, params={"cursor": "lixo"}, headers=AUTORIZACAO)
+
+    assert resposta.status_code == 200  # sem `limite`, o cursor não conta
+    assert "X-Proximo-Cursor" not in resposta.headers
+    corpo = resposta.json()
+    assert set(corpo) == {"programa", "desde", "ate", "pessoas"}
+    assert all("por_video" in p for p in corpo["pessoas"])
+    # A ordem de sempre: tempo, nome, id.
+    assert [p["pessoa_id"] for p in corpo["pessoas"]] == ["c1", "c2", "c3", "c4"]
+
+
+def test_com_limite_pagina_o_ranking_com_os_totais_e_sem_os_videos() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_varias_pessoas()))
+
+    primeira = cliente.get(ROTA, params={"limite": 3}, headers=AUTORIZACAO)
+    corpo = primeira.json()
+    segunda = cliente.get(
+        ROTA,
+        params={"limite": 3, "cursor": primeira.headers["X-Proximo-Cursor"]},
+        headers=AUTORIZACAO,
+    )
+
+    assert corpo["total"] == {
+        "pessoas": 4,
+        "tempo_de_tela_ms": 7_000,
+        "videos": 2,
+        "aparicoes": 4,
+        "mencoes_na_fala": 1,
+        "mencoes_no_texto": 0,
+    }
+    assert corpo["pessoas"][0] == {
+        "pessoa_id": "c1",
+        "nome": "C1",
+        "tempo_de_tela_ms": 3_000,
+        "videos": 2,
+        "aparicoes": 2,
+        "mencoes_na_fala": 0,
+        "mencoes_no_texto": 0,
+    }
+    assert "X-Proximo-Cursor" not in segunda.headers
+    assert segunda.json()["total"] == corpo["total"]
+    vistas = [p["pessoa_id"] for r in (corpo, segunda.json()) for p in r["pessoas"]]
+    assert vistas == ["c1", "c2", "c3", "c4"]  # no empate, o id desempata
+
+
+def test_com_limite_o_csv_vem_inteiro_e_cursor_invalido_e_422() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_varias_pessoas()))
+
+    texto = cliente.get(
+        ROTA, params={"limite": 1, "formato": "csv"}, headers=AUTORIZACAO
+    ).text
+
+    assert len(list(csv.DictReader(io.StringIO(texto)))) == 4
+    ruins: list[dict[str, Any]] = [
+        {"limite": 1, "cursor": "lixo"},
+        {"limite": 1, "cursor": "LTE"},  # "-1"
+        {"limite": 1, "cursor": "wrI"},  # "²", dígito fora do ASCII
+        {"limite": 1, "cursor": "OTk5OTk5OTk5OQ"},  # "9999999999", 10 dígitos
+        {"limite": 0},
+        {"limite": 101},
+    ]
+    for params in ruins:
+        assert cliente.get(ROTA, params=params, headers=AUTORIZACAO).status_code == 422
+
+
+def test_os_videos_de_uma_pessoa_vem_paginados_e_com_o_nome() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_varias_pessoas()))
+    rota = f"{ROTA}/videos"
+
+    primeira = cliente.get(
+        rota, params={"pessoa_id": "c1", "limite": 1}, headers=AUTORIZACAO
+    )
+    segunda = cliente.get(
+        rota,
+        params={
+            "pessoa_id": "c1",
+            "limite": 1,
+            "cursor": primeira.headers["X-Proximo-Cursor"],
+        },
+        headers=AUTORIZACAO,
+    )
+
+    assert [v["job_id"] for v in primeira.json()] == ["j2"]  # o maior tempo primeiro
+    assert segunda.json() == [
+        {
+            "job_id": "j1",
+            "nome": "jornal-01.mp4",
+            "tempo_de_tela_ms": 1_000,
+            "aparicoes": 1,
+            "mencoes_na_fala": 0,
+            "mencoes_no_texto": 0,
+        }
+    ]
+    assert "X-Proximo-Cursor" not in segunda.headers
+    vazia = cliente.get(rota, params={"pessoa_id": "c9"}, headers=AUTORIZACAO)
+    assert vazia.json() == []
+    assert cliente.get(rota, headers=AUTORIZACAO).status_code == 422  # sem a pessoa
+    sem_bigquery = _cliente().get(rota, params={"pessoa_id": "c1"}, headers=AUTORIZACAO)
+    assert sem_bigquery.status_code == 503
+
+
+def test_o_ranking_e_os_videos_em_sql_dao_o_mesmo_que_em_python() -> None:
+    # Os SQLs da página rodam num SQLite (com o JSON dos nomes trocado, como na soma) e
+    # passam pela mesma leitura da consulta real; a referência é a versão em Python.
+    def no_sqlite(sql: str, tabela: str) -> str:
+        return f"WITH base AS (SELECT * FROM {tabela})\n" + sql.replace(
+            NOMES_EM_JSON,
+            "json_group_array(json_object('nome', nome, 'linhas', linhas))",
+        )
+
+    sorteio = random.Random(14)
+    for _ in range(100):
+        momentos = [
+            MomentoDaPessoa(
+                job_id=sorteio.choice(["j1", "j2", "j3"]),
+                pessoa_id=(pessoa := sorteio.choice(["c1", "c2", "c3", "c4"])),
+                nome=sorteio.choice([pessoa, pessoa + "x", ""]),
+                tipo=sorteio.choice(["aparicao", "aparicao", "mencao_na_fala"]),
+                inicio_ms=(inicio := sorteio.randrange(0, 50)),
+                fim_ms=inicio + sorteio.randrange(0, 15),
+            )
+            for _ in range(sorteio.randrange(1, 30))
+        ]
+        banco = _sqlite_com(momentos)
+        banco.execute("ALTER TABLE base RENAME TO linhas")
+        depois, limite = sorteio.randrange(0, 4), sorteio.randrange(1, 4)
+        pagina = {"posicao_de": depois, "posicao_ate": depois + limite + 1}
+
+        do_sql = pagina_do_ranking(
+            banco.execute(no_sqlite(RANKING_EM_SQL, "linhas"), pagina).fetchall()
+        )
+        em_python = ranking_em_python(somar(momentos), depois, limite)
+        if do_sql[0]:
+            assert do_sql == em_python
+        else:  # página vazia: os totais vêm zerados
+            assert em_python[0] == []
+
+        pessoa = sorteio.choice(["c1", "c2"])
+        # A condição `p.id = @pessoa_id` da base, aqui como uma visão (sem parâmetro).
+        banco.execute(
+            f"CREATE TEMP VIEW dela AS SELECT * FROM linhas WHERE pessoa_id = '{pessoa}'"
+        )
+        videos = [
+            video_da_pessoa(v)
+            for v in banco.execute(no_sqlite(VIDEOS_DA_PESSOA_EM_SQL, "dela"), pagina)
+        ]
+        assert videos == videos_em_python(somar(momentos), pessoa, depois, limite)
+
+
+def test_bigquery_pede_a_pagina_e_a_pessoa_como_parametros() -> None:
+    transporte = Transporte({"jobComplete": True})
+    consulta = ConsultaBigQuery(CONFIG, transporte)
+
+    assert consulta.ranking(None, None, None, 50, 25) == ranking_em_python([], 0, 1)
+    assert consulta.videos_da_pessoa("c1", None, None, None, 0, 25) == []
+
+    def parametros(corpo: dict[str, Any]) -> dict[str, str]:
+        return {
+            p["name"]: p["parameterValue"]["value"] for p in corpo["queryParameters"]
+        }
+
+    ranking, videos = transporte.corpos
+    assert parametros(ranking) == {"posicao_de": "50", "posicao_ate": "76"}
+    assert "ROW_NUMBER()" in ranking["query"]
+    assert parametros(videos) == {
+        "pessoa_id": "c1",
+        "posicao_de": "0",
+        "posicao_ate": "26",
+    }
+    assert "p.id = @pessoa_id" in videos["query"]
