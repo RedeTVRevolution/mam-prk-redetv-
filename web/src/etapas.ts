@@ -63,8 +63,9 @@ interface JobComEtapas {
 
 /**
  * De onde "reprocessar o que falhou" recomeçaria este Job (`etapa_de_partida` em
- * api/ciclo_de_vida.py), ou `null` quando não vale: a falha é do arquivo, o vídeo concluído
- * não tem etapa que tenha falhado ou o Job já está andando.
+ * api/ciclo_de_vida.py; mude as duas juntas), ou `null` quando não vale: a falha é do
+ * arquivo, o processamento parou na validação, o vídeo concluído não tem etapa que tenha
+ * falhado ou o Job já está andando.
  */
 export function etapaDeReprocesso(job: JobComEtapas): string | null {
   if (job.estado !== 'falhou' && (job.estado !== 'concluido' || job.etapa_atual)) return null
