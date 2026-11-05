@@ -56,7 +56,7 @@ resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
     query = templatefile("${path.module}/resumos_de_uso.sql", {
       prefixo            = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}."
       tabela_de_eventos  = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.eventos_de_uso.table_id}"
-      tabela_de_momentos = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.momentos.table_id}"
+      tabela_de_momentos = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.momentos_por_ano.table_id}"
     })
   }
   depends_on = [
@@ -64,7 +64,7 @@ resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
     google_project_iam_member.resumos_de_uso_roda_consulta,
     google_bigquery_dataset_iam_member.resumos_de_uso_grava,
     google_bigquery_table.eventos_de_uso,
-    google_bigquery_table.momentos,
+    google_bigquery_table.momentos_por_ano,
   ]
 }
 

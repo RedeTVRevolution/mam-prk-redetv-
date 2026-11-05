@@ -149,3 +149,13 @@ O `import` pede um banco que já exista, por isso o `create` antes; com a pasta 
 Para clonar o banco inteiro naquele ponto, `gcloud firestore databases clone --source-database=projects/<PROJETO>/databases/(default) --snapshot-time=... --destination-database=<BANCO_NOVO>`. O bucket de exportação não é o do Terraform: use um temporário e apague depois. Ensaiar uma restauração no dev ainda não foi feito.
 
 **Custo estimado**: o PITR e os backups cobram armazenamento por GiB-mês (PITR, os dados mais as versões dos últimos 7 dias; cada backup, o tamanho do banco naquele dia, e há até 7 diários e 14 semanais guardados ao mesmo tempo, 21 cópias no pior caso, mais as leituras da restauração quando houver). Para um banco de poucos GiB, como o do dev, isso fica em centavos a poucos dólares por mês; o custo cresce linear com o tamanho do banco. Conferir o tamanho real e o valor no faturamento (aba Custo do painel) depois do primeiro mês.
+
+## Momentos por ano no BigQuery (#356)
+
+A tabela de momentos em uso é `momentos_por_ano` (`modulos/mam/momentos_por_ano.tf`), dividida por `YEAR` em `data_de_exibicao`: a por dia chegaria ao teto de 10.000 partições com 25 anos de acervo. Serviços, Jobs e o output `bigquery_tabela` apontam para ela. A antiga `momentos` continua no código, sem uso, até a remoção. Nenhum papel novo (o IAM é por dataset).
+
+Passos humanos depois do `publicar`:
+
+1. `make copiar-para-bigquery` preenche a nova a partir das decupagens. Até rodar, os relatórios do dev saem vazios.
+2. `bq show <dataset>.momentos_por_ano` deve mostrar `YEAR`; o relatório de tempo de tela dá os mesmos números de antes.
+3. Apagar a antiga: pôr `deletion_protection = false` nela, aplicar, tirar do código o recurso `momentos`, o local `tabela_antiga_de_momentos` e o `moved` dele em `infra/main.tf`, e aplicar com `PERMITIR_DESTRUICAO=sim`.
