@@ -57,12 +57,12 @@ variable "regiao_gpu" {
 # tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
 # anterior vezes `gpu_fator_da_espera`, com teto em `gpu_espera_maxima_s`, até a soma das
 # esperas passar de `espera_gpu_minutos`; o número de tentativas sai dessa conta. Com os
-# padrões: 1, 2, 4, 4 e 4 minutos, seis tentativas em 15 minutos. Só depois disso o Workflows
-# roda o Job em CPU.
+# padrões: 1, 2 e depois 4 minutos (teto de 4), nove tentativas em 27 minutos. Só depois
+# disso o Workflows roda o Job em CPU.
 variable "espera_gpu_minutos" {
   description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
   type        = number
-  default     = 15
+  default     = 27
   validation {
     condition     = floor(var.espera_gpu_minutos) == var.espera_gpu_minutos && var.espera_gpu_minutos >= 0
     error_message = "espera_gpu_minutos é um inteiro a partir de 0 (com 0, a GPU é tentada uma vez só antes da CPU)."

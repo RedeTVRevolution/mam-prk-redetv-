@@ -713,11 +713,11 @@ def test_etapas_em_paralelo_nao_se_atropelam_no_etapa_atual() -> None:
     assert "etapa_atual" in _subworkflow(texto, "limpa_a_etapa_atual")
 
 
-def test_espera_total_vem_de_uma_variavel_do_main_tf_com_15_minutos() -> None:
+def test_espera_total_vem_de_uma_variavel_do_main_tf_com_27_minutos() -> None:
     main = MAIN.read_text()
 
     variavel = main.split('variable "espera_gpu_minutos"')[1].split("\n}")[0]
-    assert "default     = 15" in variavel
+    assert "default     = 27" in variavel
     assert re.search(r"gpu_espera_total_s\s+=\s+var\.espera_gpu_minutos \* 60", main)
     texto = _texto()
     assert texto.count("${gpu_espera_total_s}") >= 1
@@ -787,8 +787,8 @@ def test_a_conta_das_tentativas_dos_valores_propostos_e_de_uma_espera_menor() ->
     teto = padrao("gpu_espera_maxima_s")
     total = padrao("espera_gpu_minutos") * 60
 
-    # 60, 120, 240, 240, 240 s: 6 tentativas em 15 minutos.
-    assert _tentativas(total, inicio, fator, teto) == 6
+    # 60, 120 e seis esperas de 240 s: 9 tentativas em 27 minutos.
+    assert _tentativas(total, inicio, fator, teto) == 9
     # Uma espera total menor dá menos tentativas; com zero, uma só antes do plano B.
     assert _tentativas(5 * 60, inicio, fator, teto) == 3
     assert _tentativas(0, inicio, fator, teto) == 1
