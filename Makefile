@@ -91,6 +91,8 @@ carregar-marcas:
 # antes e depois. Rodar de novo não apaga nada a mais. Depois, rode `make copiar-para-bigquery`
 # e `make reindexar`: o nome que voltou a palpite ainda está no tempo de tela e na busca.
 apagar-referencias-web:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	BUCKET_REFERENCIAS="$${BUCKET_REFERENCIAS:-$$(terraform -chdir=infra output -raw bucket_referencias)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.apagar_referencias_web

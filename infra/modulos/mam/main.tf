@@ -253,12 +253,6 @@ variable "fuso_da_agenda" {
   default     = "America/Sao_Paulo"
 }
 
-variable "limiar_de_escalonadas_pct" {
-  description = "Média, na janela do alerta, do percentual de janelas escalonadas para o 3.8 Flash por vídeo, acima da qual o alerta dispara. O plano espera 10 a 15% do tempo; 25% é o dobro do esperado, e a amostra de controle sozinha já é 10%"
-  type        = number
-  default     = 25
-}
-
 variable "limiar_de_nao_identificadas_pct" {
   description = "Média, na janela do alerta, do percentual de pessoas na imagem sem nome por vídeo (antes do modelo forte), acima da qual o alerta dispara. Sem medida do piloto ainda: 50% é um chute largo, a ajustar com os dados reais (#286)"
   type        = number
@@ -2427,12 +2421,6 @@ locals {
     "jsonPayload.evento=\"video_concluido\"",
   ])
   sinais_percentuais = {
-    escalonadas = {
-      campo     = "pct_escalonadas"
-      limiar    = var.limiar_de_escalonadas_pct
-      titulo    = "Janelas escalonadas para o 3.8 Flash acima do limiar"
-      documento = "A média do percentual de janelas reanalisadas pelo 3.8 Flash passou do limiar. Ou a primeira passada está deixando mais dúvidas (modelo ou prompt mudou?), ou a fração da amostra de controle subiu."
-    }
     nao_identificadas = {
       campo     = "pct_nao_identificadas"
       limiar    = var.limiar_de_nao_identificadas_pct
