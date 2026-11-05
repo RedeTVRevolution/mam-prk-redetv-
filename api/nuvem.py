@@ -97,6 +97,7 @@ COLECAO_DOS_TIPOS_DE_OBJETO = "tipos_de_objeto"
 COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
+_LOTE_DE_LEITURA = 500
 
 
 def objeto_do_proxy(job_id: str) -> str:
@@ -250,11 +251,14 @@ class RepositorioFirestore:
 
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         referencias = [self._colecao.document(i) for i in dict.fromkeys(job_ids)]
-        if not referencias:
-            return []
+        # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
+        # um pedido só com dezenas de milhares de referências arrisca o prazo.
         return [
             Job(**(doc.to_dict() or {}))
-            for doc in self._cliente.get_all(referencias)
+            for inicio in range(0, len(referencias), _LOTE_DE_LEITURA)
+            for doc in self._cliente.get_all(
+                referencias[inicio : inicio + _LOTE_DE_LEITURA]
+            )
             if doc.exists
         ]
 

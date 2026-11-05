@@ -109,6 +109,17 @@ class TestRepositorioFirestore:
         assert sorted(j.id for j in achados) == ["a", "c"]
         assert repositorio.obter_varios([]) == []
 
+    def test_obter_varios_le_mais_de_um_lote(
+        self, repositorio: RepositorioFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("api.nuvem._LOTE_DE_LEITURA", 2)
+        for id in ("a", "b", "c", "d", "e"):
+            repositorio.salvar(_job(id, BASE))
+
+        achados = repositorio.obter_varios(["e", "d", "c", "b", "a", "x"])
+
+        assert sorted(j.id for j in achados) == ["a", "b", "c", "d", "e"]
+
     def test_remover_apaga_o_job_e_repetir_nao_da_erro(
         self, repositorio: RepositorioFirestore
     ) -> None:

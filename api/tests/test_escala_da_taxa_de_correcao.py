@@ -5,7 +5,7 @@ período são lidos (e só as decupagens deles). O resultado é o mesmo do cálc
 percorria o acervo, que aqui é refeito como referência."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import timedelta
 from typing import Any
 
@@ -37,7 +37,7 @@ class JobsQueConta(RepositorioEmMemoria):
         self.listagens += 1
         return super().listar()
 
-    def obter_varios(self, job_ids: Any) -> list[Job]:
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         achados = super().obter_varios(job_ids)
         self.lidos += [j.id for j in achados]
         return achados
@@ -140,7 +140,6 @@ def test_o_filtro_de_programa_nao_abre_a_decupagem_de_outro() -> None:
     jobs, decupagens, correcoes, revisao = _acervo()
     jobs.salvar(_job("outro", "Fama"))
     correcoes.acrescentar(_c("c-outro", "outro", _modelo(10, 5), dias=1))
-    decupagens._dados["outro"] = _modelo(10, 5)
 
     calcular(jobs, decupagens, correcoes, revisao, DESDE, ATE, "Jornal")
 
