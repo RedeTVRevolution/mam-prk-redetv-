@@ -787,26 +787,14 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 # no `make copiar-para-bigquery`, e a web, a cada Correção) é dataEditor só no dataset.
 locals {
   dataset_do_bigquery = "mam_decupagens"
-  tabela_de_momentos  = "momentos"
+  # Tabela dividida por dia (#260): fica até a cópia para a por ano (#356) e a remoção à mão.
+  tabela_antiga_de_momentos = "momentos"
+  # Tabela em uso (#356): dividida por ano, em `momentos_por_ano.tf`.
+  tabela_de_momentos = "momentos_por_ano"
 }
 
-resource "google_bigquery_dataset" "decupagens" {
-  dataset_id                 = local.dataset_do_bigquery
-  location                   = var.regiao_do_bigquery
-  delete_contents_on_destroy = false
-  depends_on                 = [google_project_service.apis]
-}
-
-resource "google_bigquery_table" "momentos" {
-  dataset_id          = google_bigquery_dataset.decupagens.dataset_id
-  table_id            = local.tabela_de_momentos
-  deletion_protection = true
-  time_partitioning {
-    type  = "DAY"
-    field = "data_de_exibicao"
-  }
-  clustering = ["programa", "job_id"]
-  schema = jsonencode([
+locals {
+  esquema_dos_momentos = jsonencode([
     { name = "job_id", type = "STRING", mode = "REQUIRED" },
     { name = "programa", type = "STRING", mode = "NULLABLE" },
     { name = "data_de_exibicao", type = "DATE", mode = "NULLABLE" },
@@ -827,6 +815,25 @@ resource "google_bigquery_table" "momentos" {
     { name = "gravado_em", type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "duracao_do_video_ms", type = "INTEGER", mode = "NULLABLE", description = "Duração do vídeo todo, igual em todas as linhas dele; vazia nas copiadas antes do sinal por programa (#287)" },
   ])
+}
+
+resource "google_bigquery_dataset" "decupagens" {
+  dataset_id                 = local.dataset_do_bigquery
+  location                   = var.regiao_do_bigquery
+  delete_contents_on_destroy = false
+  depends_on                 = [google_project_service.apis]
+}
+
+resource "google_bigquery_table" "momentos" {
+  dataset_id          = google_bigquery_dataset.decupagens.dataset_id
+  table_id            = local.tabela_antiga_de_momentos
+  deletion_protection = true
+  time_partitioning {
+    type  = "DAY"
+    field = "data_de_exibicao"
+  }
+  clustering = ["programa", "job_id"]
+  schema              = local.esquema_dos_momentos
 }
 
 resource "google_bigquery_dataset_iam_member" "grava_momentos" {

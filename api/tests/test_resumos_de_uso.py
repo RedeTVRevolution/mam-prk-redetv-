@@ -393,7 +393,7 @@ def test_as_tabelas_do_terraform_sao_as_que_o_sql_cria() -> None:
 
 def test_o_sql_le_as_tabelas_pelos_nomes_que_o_terraform_monta() -> None:
     assert "google_bigquery_table.eventos_de_uso.table_id" in TF
-    assert "google_bigquery_table.momentos.table_id" in TF
+    assert "google_bigquery_table.momentos_por_ano.table_id" in TF
     assert "eventos_de_uso`" not in SQL and "momentos`" not in SQL
 
 
