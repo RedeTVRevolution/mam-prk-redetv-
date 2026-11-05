@@ -28,13 +28,18 @@ def test_operador_e_consulta_mais_enviar_video() -> None:
 
 
 def test_editor_e_consulta_mais_editar() -> None:
-    assert permissoes_de(["editor"]) == {"decupagem.ver", "decupagem.editar"}
+    assert permissoes_de(["editor"]) == {
+        "decupagem.ver",
+        "decupagem.editar",
+        "programas.editar",
+    }
 
 
 def test_curador_e_editor_mais_aprovar_correcao_e_reprocessar_etapa() -> None:
     assert permissoes_de(["curador"]) == {
         "decupagem.ver",
         "decupagem.editar",
+        "programas.editar",
         "correcao.aprovar",
         "video.reprocessar_etapa",
         "catalogo.apagar",
@@ -53,6 +58,7 @@ def test_varios_papeis_somam_permissoes() -> None:
         "video.enviar",
         "video.reprocessar",
         "decupagem.editar",
+        "programas.editar",
     }
 
 

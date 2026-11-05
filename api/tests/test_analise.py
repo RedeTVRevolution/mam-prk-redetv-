@@ -24,7 +24,7 @@ from api.gemini import Chamada, ErroHttp
 from api.jobs import Job, RepositorioDeJobs, RepositorioEmMemoria
 from api.main import criar_app as criar_app_web
 from api.nuvem import ArmazenamentoStorage, DecupagensStorage, RepositorioFirestore
-from api.programas import PERFIS
+from api.tests.programas_de_teste import perfis_da_tv_fama
 from api.tests.test_gemini import BOA, TransporteFalso, resposta_em_mm_ss
 from api.tests.test_nuvem import _credencial_local
 
@@ -101,6 +101,7 @@ def _ambiente(
             decupagens,
             transporte,
             dormir=lambda _s: None,
+            perfis=perfis_da_tv_fama(),
             relogio=lambda: DEPOIS,
         ),
     )
@@ -212,7 +213,10 @@ def test_programa_do_job_leva_o_perfil_a_instrucao() -> None:
 
     _analisar(ambiente, "j8")
 
-    assert PERFIS["TV Fama"] in ambiente.transporte.chamadas[0].instrucao
+    assert (
+        perfis_da_tv_fama()["TV Fama"].texto()
+        in ambiente.transporte.chamadas[0].instrucao
+    )
 
 
 def test_analise_falhou_grava_falhou_sem_decupagem() -> None:
@@ -394,6 +398,7 @@ def test_a_transcricao_do_job_entra_na_instrucao() -> None:
             transporte,
             transcricoes,
             dormir=lambda _s: None,
+            perfis=perfis_da_tv_fama(),
             relogio=lambda: DEPOIS,
         ),
     )

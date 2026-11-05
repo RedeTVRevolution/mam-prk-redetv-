@@ -111,6 +111,7 @@ from api.nuvem import (
     DisparoDaIndexacaoNoCloudRun,
     DisparoPeloWorkflows,
     JanelasStorage,
+    ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
@@ -138,7 +139,11 @@ from api.passadas import (
     PassadasStorage,
     criar_rotas_das_passadas,
 )
-from api.programas import PERFIS
+from api.programas import (
+    NomesDosProgramas,
+    ProgramasEmMemoria,
+    RepositorioDeProgramas,
+)
 from api.progresso_das_janelas import JanelasDoJob
 from api.purga import LOGIN_RECENTE_PADRAO, Purga, criar_rotas_da_purga
 from api.qualidade_do_painel import QualidadeDoPainel, QualidadeReal
@@ -173,6 +178,7 @@ from api.rotas_das_chaves import (
     criar_rotas_das_chaves,
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
+from api.rotas_dos_programas import criar_rotas_dos_programas
 from api.sugestoes import (
     RepositorioDeSugestoes,
     RepositorioDeSugestoesEmMemoria,
@@ -295,6 +301,7 @@ def criar_app(
     janelas: JanelasDoJob | None = None,
     catalogo: Catalogo | None = None,
     marcas: CatalogoDeMarcas | None = None,
+    programas: RepositorioDeProgramas | None = None,
     fotos_de_referencia: FotosDeReferencia | None = None,
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
@@ -412,9 +419,9 @@ def criar_app(
 
     # A chave precisa poder enviar ou ler; só cancelar não tem o que escolher.
     @v1.get("/programas", dependencies=[Depends(_chave_com_algum("criar", "ler"))])
-    def programas() -> list[str]:
-        """Os programas com perfil, para o envio escolher."""
-        return sorted(PERFIS)
+    def lista_de_programas() -> list[str]:
+        """Os programas cadastrados, para o envio escolher."""
+        return sorted(NomesDosProgramas(repositorio_de_programas))
 
     @v1.get("/correcoes/catalogo")
     def tipos_de_correcao(_chamador: ChamadorAutenticado) -> CatalogoDeCorrecoes:
@@ -428,6 +435,7 @@ def criar_app(
     tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    repositorio_de_programas = programas or ProgramasEmMemoria()
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
@@ -442,6 +450,7 @@ def criar_app(
             repositorio_de_aprovacao,
             catalogo_de_pessoas,
             catalogo_de_marcas,
+            repositorio_de_programas,
             repositorio_de_sugestoes,
             disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
@@ -520,12 +529,21 @@ def criar_app(
         )
     )
     v1.include_router(
+        criar_rotas_dos_programas(
+            repositorio_de_programas,
+            catalogo_de_pessoas,
+            repositorio_de_jobs,
+            repositorio_de_auditoria,
+            relogio,
+        )
+    )
+    v1.include_router(
         criar_rotas_da_busca(
             Busca(
                 transporte=transporte_da_consulta or _SemModelo(),
                 catalogo=catalogo_de_pessoas,
                 armor=armor or _SemModelArmor(),
-                programas=sorted(PERFIS),
+                programas=NomesDosProgramas(repositorio_de_programas),
                 indice=indice_da_busca,
                 ranking=ranking or RankingEmOrdem(),
                 repositorio=repositorio_de_jobs,
@@ -726,6 +744,7 @@ if _projeto:
         ),
         catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
         marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
+        programas=ProgramasFirestore(firestore.Client(project=_projeto)),
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),

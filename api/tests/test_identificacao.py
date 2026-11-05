@@ -4,10 +4,11 @@ import json
 from typing import Any
 
 from api.analise_por_janelas import analisar_video
-from api.catalogo import CatalogoEmMemoria, carregar_programas
+from api.catalogo import CatalogoEmMemoria
 from api.decupagem import Decupagem, Video
 from api.identificacao import Candidato, candidatos_do_video, identificar
-from api.programas import DADOS
+from api.programas import PerfilDoPrograma, PessoaDoPerfil, perfis_dos_programas
+from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_correcoes import Mundo
 from api.tests.test_gemini import TransporteFalso
 from api.transcricao import Palavra, Transcricao
@@ -301,15 +302,11 @@ def test_candidatos_unem_perfil_e_catalogo_com_os_apelidos() -> None:
     catalogo.acrescentar("leão lobo", "comentarista", ["Leão"])
     catalogo.acrescentar("Outra Pessoa", "repórter", [])
     perfis = {
-        "TV Fama": {
-            "pessoas": [
-                {
-                    "nome": "Leão Lobo",
-                    "papel": "apresentador",
-                    "apelidos": ["Leãozinho"],
-                }
-            ]
-        }
+        "TV Fama": PerfilDoPrograma(
+            "TV Fama",
+            "",
+            (PessoaDoPerfil("Leão Lobo", "apresentador", ("Leãozinho",)),),
+        )
     }
 
     candidatos = candidatos_do_video("TV Fama", catalogo, perfis)
@@ -361,12 +358,13 @@ def _analisar(nome: str, transcricao: Transcricao, catalogo: CatalogoEmMemoria) 
         programa="TV Fama",
         transcricao=transcricao,
         catalogo=catalogo,
+        perfis=perfis_dos_programas(*cadastro_com_tv_fama(catalogo)),
     )
 
 
 def test_leaozinho_dito_com_o_homem_de_barba_na_imagem_confirma_leao_lobo() -> None:
     catalogo = CatalogoEmMemoria()
-    carregar_programas(catalogo, DADOS)
+    cadastro_com_tv_fama(catalogo)
 
     d = _analisar("Leão Lobo", whisper(("Leãozinho!", 103.5)), catalogo)
 
@@ -383,7 +381,7 @@ def test_leaozinho_dito_com_o_homem_de_barba_na_imagem_confirma_leao_lobo() -> N
 
 def test_nelson_rubens_com_fala_e_contexto_sem_o_nome_no_whisper_vira_palpite() -> None:
     catalogo = CatalogoEmMemoria()
-    carregar_programas(catalogo, DADOS)
+    cadastro_com_tv_fama(catalogo)
 
     d = _analisar(
         "Nelson Rubens",

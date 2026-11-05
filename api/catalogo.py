@@ -6,9 +6,8 @@ web, retirada no #327: só a migração `apagar_referencias_web` ainda os lê.
 """
 
 import uuid
-from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -273,24 +272,3 @@ class CatalogoEmMemoria:
     def apagar(self, id: str) -> None:
         if self._pessoas.pop(id, None) is None:
             raise PessoaInexistente(id)
-
-
-def _pessoas_dos_programas(
-    programas: Mapping[str, Mapping[str, Any]],
-) -> Iterable[Mapping[str, Any]]:
-    for dados in programas.values():
-        yield from dados.get("pessoas", [])
-
-
-def carregar_programas(
-    catalogo: Catalogo, programas: Mapping[str, Mapping[str, Any]]
-) -> int:
-    """Acrescenta ao catálogo as pessoas do `programas.toml` que ainda não estão
-    nele (pelo nome ou apelido). Idempotente; devolve quantas entraram."""
-    entraram = 0
-    for p in _pessoas_dos_programas(programas):
-        if catalogo.achar(p["nome"]):
-            continue
-        catalogo.acrescentar(p["nome"], p["papel"], list(p.get("apelidos", [])))
-        entraram += 1
-    return entraram

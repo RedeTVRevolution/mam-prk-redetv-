@@ -281,7 +281,14 @@ def test_auditoria_que_falha_desfaz_o_envio_e_a_restauracao() -> None:
 
 def test_toda_rota_de_job_em_v1_chama_o_parametro_de_job_id() -> None:
     # A trava `sem_job_na_lixeira` só enxerga `{job_id}`: um Job com outro nome escaparia.
-    fora_do_job = {"uid", "chave_id", "id_do_video", "id_da_pessoa", "id_da_marca"}
+    fora_do_job = {
+        "uid",
+        "chave_id",
+        "id_do_video",
+        "id_da_pessoa",
+        "id_da_marca",
+        "id",
+    }
     app = Mundo().cliente.app
     assert isinstance(app, FastAPI)
     for caminho in app.openapi()["paths"]:

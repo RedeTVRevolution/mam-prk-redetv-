@@ -16,7 +16,7 @@ from api.chaves import (
 )
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
-from api.programas import PERFIS
+from api.tests.programas_de_teste import cadastro_com_tv_fama, perfis_da_tv_fama
 from api.tests.test_analise import SHA, DecupagensEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import BOA, TransporteFalso
@@ -45,6 +45,7 @@ def _cliente(
             jobs or RepositorioEmMemoria(),
             ArmazenamentoFalso(),
             chaves=VerificadorDeChaveDeApi(chaves, mac),
+            programas=cadastro_com_tv_fama()[0],
         )
     )
 
@@ -258,10 +259,11 @@ def test_chave_cria_job_com_programa_e_data_e_o_perfil_chega_na_analise() -> Non
         jobs,
         DecupagensEmMemoria("teste-aceitos"),
         transporte,
+        perfis=perfis_da_tv_fama(),
         dormir=lambda _s: None,
         relogio=lambda: BASE,
     )
-    assert PERFIS["TV Fama"] in transporte.chamadas[0].instrucao
+    assert perfis_da_tv_fama()["TV Fama"].texto() in transporte.chamadas[0].instrucao
 
 
 def test_chave_com_programa_fora_do_catalogo_da_422_com_os_validos() -> None:

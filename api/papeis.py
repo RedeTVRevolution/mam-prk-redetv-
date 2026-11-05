@@ -26,10 +26,13 @@ Permissao = Literal[
     "catalogo.fundir",
     "aprovacao.definir",
     "painel.ver",
+    "programas.editar",
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
-_EDITOR: frozenset[Permissao] = _CONSULTA | frozenset({"decupagem.editar"})
+_EDITOR: frozenset[Permissao] = _CONSULTA | frozenset(
+    {"decupagem.editar", "programas.editar"}
+)
 PERMISSOES_DO_PAPEL: dict[Papel, frozenset[Permissao]] = {
     "consulta": _CONSULTA,
     "operador": _CONSULTA | frozenset({"video.enviar", "video.reprocessar"}),

@@ -40,8 +40,8 @@ from api.busca import (
 from api.embedding_do_quadro import embedding_da_busca
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
-from api.nuvem import CatalogoFirestore, RepositorioFirestore
-from api.programas import PERFIS
+from api.nuvem import CatalogoFirestore, ProgramasFirestore, RepositorioFirestore
+from api.programas import NomesDosProgramas
 
 
 @dataclass(frozen=True)
@@ -236,7 +236,7 @@ def main() -> int:
         transporte=_SemModelo(),
         catalogo=CatalogoFirestore(cliente),
         armor=_SemModelArmor(),
-        programas=sorted(PERFIS),
+        programas=NomesDosProgramas(ProgramasFirestore(cliente)),
         indice=AgentRetrieval(config, transporte_http()),
         ranking=RankingEmOrdem(),
         repositorio=RepositorioFirestore(cliente),

@@ -16,13 +16,12 @@ os apelidos; não confirma nada. O nome sem prova vira palpite.
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from api.catalogo import Catalogo
 from api.comparador import normalizar
 from api.decupagem import Decupagem, FonteDoNome, Pessoa, _Intervalo
 from api.identidade import nao_identificado
-from api.programas import DADOS
+from api.programas import Perfis
 from api.transcricao import Transcricao
 
 TOLERANCIA_DA_FALA_MS = 2000  # a fala e a imagem não se alinham ao quadro
@@ -39,13 +38,14 @@ class Candidato:
 def candidatos_do_video(
     programa: str | None,
     catalogo: Catalogo | None = None,
-    perfis: Mapping[str, Mapping[str, Any]] = DADOS,
+    perfis: Perfis | None = None,
 ) -> list[Candidato]:
     """As pessoas do perfil do programa e as do catálogo, com os apelidos. Quem
     aparece nos dois é um candidato só, com os apelidos unidos."""
+    perfil = (perfis or {}).get(programa or "")
     achados: list[Candidato] = [
-        Candidato(p["nome"], p["papel"], tuple(p.get("apelidos", [])))
-        for p in (perfis.get(programa or "") or {}).get("pessoas", [])
+        Candidato(p.nome, p.papel, p.apelidos)
+        for p in (perfil.pessoas if perfil else ())
     ]
     if catalogo:
         achados += [

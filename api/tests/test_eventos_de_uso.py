@@ -36,6 +36,7 @@ from api.eventos_do_job import (
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_aprovacao import CURADOR
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_busca import (
@@ -98,6 +99,7 @@ class Mundo:
                 self.jobs,
                 self.armazenamento,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
+                programas=cadastro_com_tv_fama()[0],
                 papeis=papeis,
                 correcoes=RepositorioDeCorrecoesEmMemoria(),
                 relogio=lambda: self.agora,

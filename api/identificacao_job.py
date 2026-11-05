@@ -25,9 +25,11 @@ from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
+    ProgramasFirestore,
     RepositorioFirestore,
     TranscricoesStorage,
 )
+from api.programas import Perfis, perfis_dos_programas
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
 from api.sinais import imprimir
@@ -56,6 +58,7 @@ def executar(
     pasta: Path,
     *,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
+    perfis: Perfis | None = None,
 ) -> str:
     """Devolve `ignorado`, `sem_alteracao`, `incompleto` ou `identificado`.
 
@@ -79,6 +82,7 @@ def executar(
                 quadros_em=lambda instantes: extrair_quadros(copia, instantes),
                 job_id=job_id,
                 programa=job.programa,
+                perfis=perfis,
                 transcricao=transcricoes.ler_transcricao(job_id),
                 catalogo=catalogo,
                 limite_de_pessoas=limite_de_pessoas,
@@ -103,6 +107,7 @@ def main() -> None:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
+    catalogo = CatalogoFirestore(firestore.Client(project=projeto))
     executar(
         os.environ["JOB_ID"],
         RepositorioFirestore(firestore.Client(project=projeto)),
@@ -111,8 +116,11 @@ def main() -> None:
         ),
         TransporteVertex(projeto, sessao, imprimir),
         TranscricoesStorage(ClienteStorage(project=projeto), aceitos),
-        CatalogoFirestore(firestore.Client(project=projeto)),
+        catalogo,
         Path(os.environ["TMPDIR"]),
+        perfis=perfis_dos_programas(
+            ProgramasFirestore(firestore.Client(project=projeto)), catalogo
+        ),
         limite_de_pessoas=int(
             os.environ.get("LIMITE_DE_PESSOAS_DO_MODELO_FORTE", LIMITE_DE_PESSOAS)
         ),

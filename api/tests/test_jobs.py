@@ -17,6 +17,7 @@ from api.jobs import (
 )
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.tests.programas_de_teste import cadastro_com_tv_fama
 
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
 INICIO = datetime(2026, 10, 29, 12, 0, tzinfo=UTC)
@@ -94,6 +95,7 @@ class Ambiente:
                 armazenamento=self.armazenamento,
                 tamanho_maximo_bytes=tamanho_maximo,
                 relogio=self.relogio,
+                programas=cadastro_com_tv_fama()[0],
             )
         )
 

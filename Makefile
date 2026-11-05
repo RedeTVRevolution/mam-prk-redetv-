@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao caos-dev atualizar-openapi
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao caos-dev atualizar-openapi
 
 instalar:
 	uv sync --locked
@@ -76,9 +76,9 @@ corrigir-estado:
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.correcao_de_estado "$(JOB)" "$(ESTADO)" "$(MOTIVO)"
 
-# Carga inicial do catálogo de pessoas (#108), a partir do api/programas.toml; idempotente.
-carregar-catalogo:
-	uv run --locked python -m api.carregar_catalogo
+# Carga única dos programas e das pessoas (#338), a partir de um TOML (ARQUIVO=docs/migracao/programas-2026-11.toml); idempotente.
+carregar-programas:
+	uv run --locked python -m api.carregar_programas "$(ARQUIVO)"
 
 # Carga inicial do catálogo de marcas (#150), a partir dos comerciais das Decupagens; idempotente.
 carregar-marcas:

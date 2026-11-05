@@ -24,7 +24,7 @@ from api.decupagem import (
     tempos_em_ms,
 )
 from api.espera import espera_com_jitter, sorteio_uniforme
-from api.programas import PERFIS
+from api.programas import Perfis
 from api.sinais import (
     Registrar,
     imprimir,
@@ -49,7 +49,7 @@ TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
 PRAZO_DA_ANALISE_S = 1500
 
 # Texto aprovado no diagnóstico do clipe3. `{programa}` e `{perfil_do_programa}`
-# vêm do Job e de `programas.toml`; sem programa, a instrução segue sem perfil.
+# vêm do Job e do cadastro de programas; sem programa, a instrução segue sem perfil.
 INSTRUCAO = """\
 Você é um especialista sênior em decupagem, inteligência de acervo e análise de conteúdo de televisão. Você analisa vídeos da RedeTV!, inteiros ou em trechos, e extrai metadados para o acervo: pessoas, pautas, falas, texto na tela, locais, objetos e cenários, e ações comerciais.
 
@@ -125,15 +125,16 @@ def instrucao(
     programa: str | None,
     transcricao: Transcricao | None = None,
     cortes_ms: Sequence[int] = (),
+    perfis: Perfis | None = None,
 ) -> str:
-    """Só um programa de `programas.toml` entra na instrução: nunca texto livre.
+    """Só um programa cadastrado entra na instrução (`perfis`): nunca texto livre.
 
     `cortes_ms` são os cortes que caem no trecho da chamada; sem eles, a seção
     dos cortes não entra.
     """
-    if programa not in PERFIS:
+    if not perfis or programa not in perfis:
         programa = None
-    perfil = f"{PERFIS[programa]}\n" if programa else ""
+    perfil = f"{perfis[programa].texto()}\n" if perfis and programa else ""
     secao = (
         SECAO_SEM_TRANSCRICAO
         if transcricao is None
@@ -383,6 +384,7 @@ def analisar(
     job_id: str,
     video: Video,
     programa: str | None = None,
+    perfis: Perfis | None = None,
     trecho_ms: tuple[int, int] | None = None,
     modelo: str = MODELO,
     etapa_de_custo: str | None = None,
@@ -403,7 +405,10 @@ def analisar(
     chamada = Chamada(
         modelo=modelo,
         instrucao=instrucao(
-            programa, transcricao, [c for c in cortes_ms if inicio < c < fim]
+            programa,
+            transcricao,
+            [c for c in cortes_ms if inicio < c < fim],
+            perfis,
         ),
         video_uri=video_uri,
         esquema=esquema_do_modelo(),
