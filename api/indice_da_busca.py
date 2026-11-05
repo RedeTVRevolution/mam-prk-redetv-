@@ -109,10 +109,6 @@ def _frase(*partes: str | None) -> str | None:
     return texto or None
 
 
-# Os de destaque 1 e 2 ficam só no registro do plano.
-DESTAQUE_COM_REGISTRO_PROPRIO = 3
-
-
 # A categoria como a tela a mostra (`web/src/painel.ts`), para a consulta em português casar.
 NOME_DA_CATEGORIA: dict[CategoriaDeObjeto, str] = {
     "roupa": "roupa",
@@ -215,8 +211,6 @@ def registros_da_decupagem(
             )
         )
         for k, item in enumerate(plano.inventario):
-            if item.destaque < DESTAQUE_COM_REGISTRO_PROPRIO:
-                continue
             registros.append(
                 Registro(
                     id=f"{job_id}:inventario:{n}:{k}",

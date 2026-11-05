@@ -217,22 +217,22 @@ def test_o_plano_com_inventario_leva_todos_os_objetos_no_registro_do_plano() -> 
     assert "carro" not in (outro.descricao or "")
 
 
-def test_so_o_destaque_3_ganha_registro_proprio() -> None:
+def test_todo_objeto_do_inventario_ganha_registro_proprio_com_o_destaque() -> None:
     decupagem = _com_inventario(_decupagem([], [], []))
-    objetos = [
-        r
+    objetos = {
+        r.tipo_do_objeto: r
         for r in registros_da_decupagem("j", decupagem, None, None)
         if r.tipo == "objeto"
-    ]
-    [carro] = objetos
-    assert (carro.destaque, carro.categoria, carro.tipo_do_objeto, carro.cor) == (
-        3,
-        "veiculo",
-        "carro",
-        "azul",
-    )
-    assert (carro.inicio_ms, carro.fim_ms, carro.quadro) == (0, 4_000, "pla1-a.jpg")
-    assert carro.cor_base == ["azul"]
+    }
+    assert {n: (o.destaque, o.categoria) for n, o in objetos.items()} == {
+        "carro": (3, "veiculo"),
+        "microfone": (2, "eletronico"),
+        "livro": (1, "documento"),
+    }
+    for o in objetos.values():
+        assert (o.inicio_ms, o.fim_ms, o.quadro) == (0, 4_000, "pla1-a.jpg")
+    assert objetos["carro"].cor == "azul"
+    assert objetos["carro"].cor_base == ["azul"]
 
 
 def test_o_objeto_de_cena_curto_leva_a_categoria_e_passa_do_piso_de_palavras() -> None:
@@ -240,7 +240,7 @@ def test_o_objeto_de_cena_curto_leva_a_categoria_e_passa_do_piso_de_palavras() -
     [carro] = [
         r
         for r in registros_da_decupagem("j", decupagem, None, None)
-        if r.tipo == "objeto"
+        if r.tipo == "objeto" and r.tipo_do_objeto == "carro"
     ]
     assert carro.texto == "carro azul, veículo, objeto de cena"
     assert len((carro.texto or "").split()) >= 3
@@ -298,14 +298,15 @@ def test_o_registro_proprio_leva_o_quadro_da_maior_caixa() -> None:
         )
         for p in decupagem.planos
     ]
-    [carro] = [
+    objetos = [
         r
         for r in registros_da_decupagem(
             "j", decupagem.model_copy(update={"planos": planos}), None, None
         )
         if r.tipo == "objeto"
     ]
-    assert carro.quadro == "pla1-c.jpg"
+    assert [o.destaque for o in objetos] == [3, 2, 1]
+    assert {o.quadro for o in objetos} == {"pla1-c.jpg"}
 
 
 def test_a_roupa_curta_leva_a_categoria_e_o_dono() -> None:

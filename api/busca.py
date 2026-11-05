@@ -479,6 +479,9 @@ class Busca:
             texto = o.tipo or o.cor_base or o.categoria
             if not texto:
                 continue
+            # Com o nome pedido, a categoria não filtra: a consulta e o inventário podem
+            # classificar o mesmo objeto diferente ("abajur" como móvel ou decoração).
+            categoria = None if o.tipo else o.categoria
             if o.dono:
                 donos.add(o.dono)
             clausulas.append(
@@ -487,7 +490,7 @@ class Busca:
                         filtros=replace(
                             base,
                             tipo="objeto",
-                            categoria=o.categoria,
+                            categoria=categoria,
                             cor_base=o.cor_base,
                             dono=o.dono,
                         ),
