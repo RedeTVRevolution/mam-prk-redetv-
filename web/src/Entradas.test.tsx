@@ -174,6 +174,63 @@ test('Reprocessar só aparece na falha de etapa e no concluído com etapa que fa
   expect(within(arquivo).getByText('Envie o arquivo de novo')).toBeTruthy()
 })
 
+test('processamento interrompido entre etapas: retoma da primeira que não concluiu; na validação, pede o arquivo', async () => {
+  const concluida = (nome: string) => ({ nome, ...ETAPA_OK })
+  jobs = [
+    job({
+      id: 'i1',
+      nome: 'interrompido-na-analise.mp4',
+      estado: 'falhou',
+      codigo_falha: 'processamento_interrompido',
+      etapas: [concluida('validacao'), concluida('transcricao'), concluida('leitura_da_tela')],
+    }),
+    job({
+      id: 'i2',
+      nome: 'interrompido-na-validacao.mp4',
+      estado: 'falhou',
+      codigo_falha: 'processamento_interrompido',
+      etapas: [{ nome: 'validacao', inicio: ETAPA_OK.inicio, fim: null, resultado: null }],
+    }),
+  ]
+  await abrir()
+  const retomavel = await linhaDe('interrompido-na-analise.mp4')
+  expect(within(retomavel).getByRole('button', { name: 'Reprocessar interrompido-na-analise.mp4' })).toBeTruthy()
+  expect(within(retomavel).queryByText('Envie o arquivo de novo')).toBeNull()
+  await userEvent.click(within(retomavel).getByRole('button', { name: 'Reprocessar interrompido-na-analise.mp4' }))
+  expect(screen.getByText('Reprocessar a partir da análise? As etapas já concluídas não são refeitas.')).toBeTruthy()
+  cleanup()
+  await abrir()
+  const reenvio = await linhaDe('interrompido-na-validacao.mp4')
+  expect(within(reenvio).getByText('Envie o arquivo de novo')).toBeTruthy()
+  expect(within(reenvio).queryByRole('button', { name: /^Reprocessar / })).toBeNull()
+})
+
+test('concluído entre duas etapas segue sendo consultado e só libera "Reprocessar…" quando a indexação termina', async () => {
+  const agora = new Date().toISOString()
+  jobs = [
+    job({
+      id: 'g1',
+      nome: 'entre-etapas.mp4',
+      criado_em: agora,
+      atualizado_em: agora,
+      etapa_atual: null,
+      indexacao: { estado: 'pendente', em: agora },
+      etapas: [{ nome: 'analise', inicio: agora, fim: agora, resultado: 'concluida' }],
+    }),
+  ]
+  await abrir({ podeEscolherEtapa: true })
+  const linha = await linhaDe('entre-etapas.mp4')
+  expect(within(linha).queryByRole('button', { name: /a partir de uma etapa/ })).toBeNull()
+  const antes = detalhes.length
+  await waitFor(() => expect(detalhes.length).toBeGreaterThan(antes + 1))
+  jobs = jobs.map((j) => ({
+    ...j,
+    indexacao: { estado: 'indexado', em: agora },
+    etapas: [...(j.etapas ?? []), { nome: 'indexacao', inicio: agora, fim: agora, resultado: 'concluida' as const }],
+  }))
+  await waitFor(() => expect(within(screen.getByRole('row', { name: /entre-etapas.mp4/ })).getByRole('button', { name: /a partir de uma etapa/ })).toBeTruthy())
+})
+
 test('Reprocessar pede confirmação na linha, com a etapa de partida, e a linha passa a em andamento', async () => {
   jobs = [falhaDeEtapa()]
   await abrir()

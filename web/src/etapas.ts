@@ -71,7 +71,11 @@ export function etapaDeReprocesso(job: JobComEtapas): string | null {
   const falhas = ORDEM.filter((nome) => job.etapas?.some((e) => e.nome === nome && e.resultado === 'falhou'))
   if (job.estado === 'falhou') {
     if (job.codigo_falha === null || FALHAS_DO_ARQUIVO.includes(job.codigo_falha)) return null
-    const partida = falhas[0] ?? (job.codigo_falha ? ETAPA_DA_FALHA[job.codigo_falha] : undefined)
+    let partida: string | undefined = falhas[0] ?? ETAPA_DA_FALHA[job.codigo_falha]
+    if (!partida && job.codigo_falha === 'processamento_interrompido') {
+      // O Workflows caiu entre duas etapas: recomeça da primeira que não concluiu.
+      partida = ORDEM.find((nome) => !job.etapas?.some((e) => e.nome === nome && e.resultado === 'concluida'))
+    }
     return partida && partida !== 'validacao' ? partida : null
   }
   return falhas[0] && DEPOIS_DO_CONCLUIDO.includes(falhas[0]) ? falhas[0] : null
