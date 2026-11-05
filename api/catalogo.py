@@ -100,6 +100,10 @@ class Catalogo(Protocol):
 
     def obter(self, id: str) -> PessoaDoCatalogo | None: ...
 
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        """As pessoas que existem entre os `ids`, numa leitura em lote."""
+        ...
+
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
         """As pessoas (fora da lixeira e não fundidas) cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
         ...
@@ -193,6 +197,9 @@ class CatalogoEmMemoria:
 
     def obter(self, id: str) -> PessoaDoCatalogo | None:
         return self._pessoas.get(id)
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        return {i: self._pessoas[i] for i in dict.fromkeys(ids) if i in self._pessoas}
 
     def achar(self, nome: str) -> list[PessoaDoCatalogo]:
         chave = normalizar(nome)

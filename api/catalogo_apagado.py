@@ -12,6 +12,35 @@ from api.comparador import normalizar
 # O que sustenta um nome "só pelo rosto": sem GC nem fala.
 FONTES_DO_ROSTO = frozenset({"rosto", "referencia"})
 NAO_IDENTIFICADO = "não identificado"
+CATALOGO_ID = "catalogo_id"
+
+
+def ids_do_catalogo(entregue: dict[str, Any], campo: str) -> list[str]:
+    """Os `catalogo_id` distintos de `pessoas` ou `comerciais`, na ordem em que aparecem."""
+    ids = (
+        item.get(CATALOGO_ID) if isinstance(item, dict) else None
+        for item in entregue.get(campo) or []
+    )
+    return list(dict.fromkeys(i for i in ids if isinstance(i, str)))
+
+
+def lido_em_lote[T](
+    ids: list[str],
+    em_lote: Callable[[list[str]], dict[str, T]],
+    obter: Callable[[str], T | None],
+) -> Callable[[str], T | None]:
+    """Um `obter` que serve os `ids` de uma leitura em lote só: o id do lote que não veio
+    nela (apagado) é `None`, e o que estava fora do lote (o destino de uma fusão, por
+    exemplo) cai em `obter` uma vez; as respostas ficam guardadas."""
+    lidos: dict[str, T | None] = dict.fromkeys(ids)
+    lidos.update(em_lote(ids))
+
+    def lido(id: str) -> T | None:
+        if id not in lidos:
+            lidos[id] = obter(id)
+        return lidos[id]
+
+    return lido
 
 
 def so_o_rosto(fontes: list[str]) -> bool:
@@ -27,10 +56,10 @@ def sem_catalogo_apagado(
     cujo nome só o rosto sustentava volta a "não identificado"; as confirmadas por GC ou
     fala mantêm o nome; os dois perdem o `catalogo_id`, e a marca mantém o texto."""
     for pessoa in entregue.get("pessoas") or []:
-        id = pessoa.get("catalogo_id") if isinstance(pessoa, dict) else None
+        id = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
         if id is None or pessoa_viva(id):
             continue
-        pessoa.pop("catalogo_id")
+        pessoa.pop(CATALOGO_ID)
         if so_o_rosto(pessoa.get("fontes_do_nome") or []):
             pessoa.update(
                 nome=NAO_IDENTIFICADO,
@@ -39,9 +68,9 @@ def sem_catalogo_apagado(
                 fontes_do_nome=[],
             )
     for comercial in entregue.get("comerciais") or []:
-        id = comercial.get("catalogo_id") if isinstance(comercial, dict) else None
+        id = comercial.get(CATALOGO_ID) if isinstance(comercial, dict) else None
         if id is not None and not marca_viva(id):
-            comercial.pop("catalogo_id")
+            comercial.pop(CATALOGO_ID)
     return entregue
 
 
@@ -55,7 +84,7 @@ def com_pessoas_fundidas(
     que a pessoa teve antes de uma renomeação em todos os vídeos (#263) pelo atual; um
     nome que o editor corrigiu no vídeo para outro fica como está."""
     for pessoa in entregue.get("pessoas") or []:
-        id = pessoa.get("catalogo_id") if isinstance(pessoa, dict) else None
+        id = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
         if id is None:
             continue
         destino = _destino_final(id, obter)
