@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.busca import (
+    TETO_DE_ASSINATURAS,
     Ajustes,
     Busca,
     BuscaCancelada,
@@ -1317,10 +1318,21 @@ class ArmazenamentoQueConta(ArmazenamentoFalso):
     def __init__(self) -> None:
         super().__init__()
         self.assinaturas = 0
+        self.simultaneas = 0
+        self.mais_simultaneas = 0
+        self._trava = threading.Lock()
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
-        self.assinaturas += 1
-        return super().url_do_quadro(job_id, caminho, validade)
+        with self._trava:
+            self.assinaturas += 1
+            self.simultaneas += 1
+            self.mais_simultaneas = max(self.mais_simultaneas, self.simultaneas)
+        time.sleep(0.005)  # a ida ao IAM
+        try:
+            return super().url_do_quadro(job_id, caminho, validade)
+        finally:
+            with self._trava:
+                self.simultaneas -= 1
 
 
 def mundo_de_cem_planos() -> tuple[Mundo, ArmazenamentoQueConta]:
@@ -1370,6 +1382,16 @@ def test_para_chave_de_sistema_o_quadro_url_continua_vindo_assinado() -> None:
     )
 
 
+def test_as_assinaturas_da_chave_de_sistema_vao_em_paralelo_ate_o_teto() -> None:
+    m, armazenamento = mundo_de_cem_planos()
+
+    m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
+        "rua", visual=True, sistema="legado"
+    )
+
+    assert 1 < armazenamento.mais_simultaneas <= TETO_DE_ASSINATURAS
+
+
 def test_busca_cancelada_para_antes_de_consultar_o_indice() -> None:
     m = mundo_visual()
     cancelado = threading.Event()
@@ -1399,4 +1421,14 @@ def test_busca_cancelada_no_meio_das_assinaturas_para_de_assinar() -> None:
             "rua", visual=True, sistema="legado", cancelado=cancelado
         )
 
-    assert armazenamento.assinaturas == 3
+    # As que já tinham começado terminam; as que esperavam na fila não assinam.
+    assert armazenamento.assinaturas < 3 + TETO_DE_ASSINATURAS
+
+
+def test_o_openapi_marca_o_quadro_url_como_obsoleto() -> None:
+    esquema = criar_app().openapi()["components"]["schemas"]["Momento"]
+
+    quadro_url = esquema["properties"]["quadro_url"]
+    assert quadro_url["deprecated"] is True
+    assert "`quadro`" in quadro_url["description"]
+    assert "/v1/jobs/{job_id}/quadros/{arquivo}" in quadro_url["description"]

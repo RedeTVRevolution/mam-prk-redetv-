@@ -12,12 +12,13 @@ import time
 import unicodedata
 from collections import defaultdict
 from collections.abc import Callable, Collection
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from itertools import zip_longest
 from typing import Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.catalogo import Catalogo
 from api.comparador import normalizar
@@ -51,6 +52,9 @@ TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
 JUNCAO_MS = 3_000
 VALIDADE_DO_QUADRO = timedelta(minutes=10)
+# Assinaturas simultâneas para a chave de sistema: cada uma é uma ida ao IAM, e cem
+# momentos em fila passavam dos 15 s da rota.
+TETO_DE_ASSINATURAS = 16
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
 ROTULO_DO_TIPO: dict[str, str] = {
@@ -111,7 +115,17 @@ class Momento(BaseModel):
     fim_ms: int
     motivo: str
     destaques: list[Destaque]
-    quadro_url: str | None  # assinada só para chave de sistema; a web recebe `null`
+    # Assinada só para chave de sistema; a web recebe `null`. Obsoleto: sairá da resposta,
+    # os sistemas pedem a URL pela rota do quadro a partir do campo `quadro`.
+    quadro_url: str | None = Field(
+        json_schema_extra={
+            "deprecated": True
+        },  # só no esquema: `deprecated=True` avisa a cada leitura
+        description=(
+            "Obsoleto: vai sair da resposta. Use o campo `quadro` e peça a URL em "
+            "`GET /v1/jobs/{job_id}/quadros/{arquivo}`."
+        ),
+    )
     # Caminho do quadro no vídeo (`quadros/plano-6.jpg`): a web pede a URL pela rota do quadro.
     quadro: str | None = None
 
@@ -543,19 +557,28 @@ class Busca:
             )
         return clausulas
 
-    def _url_do_quadro(
+    def _assinar_os_quadros(
         self,
-        job_id: str,
-        quadro: str | None,
-        sistema: str | None,
+        pedidos: list[tuple[Momento, str]],
         cancelado: threading.Event | None,
-    ) -> str | None:
-        """Só a chave de sistema recebe a URL assinada; cada assinatura é uma ida ao IAM,
-        então o cancelamento é conferido antes de cada uma."""
-        if not quadro or sistema is None:
-            return None
-        _conferir(cancelado)
-        return self._armazenamento.url_do_quadro(job_id, quadro, VALIDADE_DO_QUADRO)
+    ) -> None:
+        """Só a chave de sistema recebe a URL assinada. Cada assinatura é uma ida ao IAM:
+        vão em paralelo, até `TETO_DE_ASSINATURAS`, e o cancelamento é conferido antes de
+        cada uma."""
+
+        def assinar(pedido: tuple[Momento, str]) -> None:
+            momento, job_id = pedido
+            assert momento.quadro is not None
+            _conferir(cancelado)
+            momento.quadro_url = self._armazenamento.url_do_quadro(
+                job_id, momento.quadro, VALIDADE_DO_QUADRO
+            )
+
+        if not pedidos:
+            return
+        with ThreadPoolExecutor(max_workers=TETO_DE_ASSINATURAS) as pool:
+            for _ in pool.map(assinar, pedidos):
+                pass
 
     def _videos(
         self,
@@ -570,6 +593,7 @@ class Busca:
         for t in trechos:
             por_video[t.job_id].append(t)
         videos: list[tuple[int, VideoDoResultado]] = []
+        a_assinar: list[tuple[Momento, str]] = []
         for id, lista in por_video.items():
             _conferir(cancelado)
             j = job(id)
@@ -585,10 +609,12 @@ class Busca:
                     motivo=t.motivo,
                     destaques=_destaques(t.motivo, termos),
                     quadro=t.quadro,
-                    quadro_url=self._url_do_quadro(id, t.quadro, sistema, cancelado),
+                    quadro_url=None,
                 )
                 for t in lista
             ]
+            if sistema is not None:
+                a_assinar.extend((m, id) for m in momentos if m.quadro)
             videos.append(
                 (
                     min(t.posicao for t in lista),
@@ -603,6 +629,7 @@ class Busca:
                     ),
                 )
             )
+        self._assinar_os_quadros(a_assinar, cancelado)
         videos.sort(key=lambda v: (v[0], -v[1].n_momentos))
         if ordem == "data":
             # Estável: na mesma data, fica a relevância; sem data, no fim.

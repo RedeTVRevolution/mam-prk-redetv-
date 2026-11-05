@@ -324,6 +324,8 @@ A busca devolve vídeos e, dentro de cada um, os momentos com início, fim, mini
 
 Cada vídeo decupado vira momentos indexados; cada consulta vira filtros e termos, passa pela busca híbrida e pela reordenação, e volta agrupada por vídeo.
 
+**Quadro de cada momento (para os sistemas).** Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`). A URL se pede pela rota do quadro, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, e vale por pouco tempo. O campo `quadro_url` (a URL já assinada, que só a chave de sistema recebe) é **obsoleto**: está marcado como `deprecated` no OpenAPI e vai sair da resposta, com aviso antes aos sistemas; quem o usa deve migrar para `quadro` e a rota do quadro. Enquanto ele existe, a busca o assina em paralelo (até 16 chamadas ao mesmo tempo), para uma busca de 100 momentos caber no prazo.
+
 **O que é indexado.** A unidade é o momento: um plano ou um evento da decupagem (aparição de pessoa, menção a pessoa, comercial, fala, pauta). Cada momento tem campos filtráveis (pessoas que aparecem e pessoas citadas, em campos separados; marcas, programa, data de exibição, tipo, externa/estúdio, dia/noite, plano limpo), texto (descrição, fala do trecho, GC lido) e dois vetores: um de texto, gerado pelo próprio Agent Retrieval, e um multimodal do quadro-chave junto com a descrição, gerado pelo Gemini Embedding 2.
 
 | Recurso | Exemplo de consulta | Como funciona |

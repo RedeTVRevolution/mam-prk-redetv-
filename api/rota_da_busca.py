@@ -41,6 +41,12 @@ from api.jobs import _exige
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+# Descrição das rotas da busca no OpenAPI, para os sistemas (docs/Plano_MAM.md, "Busca").
+NOTA_DO_QUADRO = (
+    "Cada momento traz `quadro`, o caminho do quadro no vídeo: peça a URL em "
+    "`GET /v1/jobs/{job_id}/quadros/{arquivo}`. O `quadro_url` assinado, que só a chave "
+    "de sistema recebe, é obsoleto e vai sair da resposta."
+)
 # Acima do teto do modelo, para que o plano B chegue ao usuário antes do 504.
 TEMPO_MAXIMO_S = TEMPO_DA_CONSULTA_S + 5.0
 
@@ -133,7 +139,7 @@ def criar_rotas_da_busca(
             ],
         )
 
-    @rotas.get("/busca")
+    @rotas.get("/busca", description=f"Busca por texto. {NOTA_DO_QUADRO}")
     def buscar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         q: Annotated[str, Query(min_length=1, max_length=1000)],
@@ -240,7 +246,7 @@ def criar_rotas_da_busca(
         finally:
             await formulario.close()
 
-    @rotas.post("/busca/imagem")
+    @rotas.post("/busca/imagem", description=f"Busca por imagem. {NOTA_DO_QUADRO}")
     def buscar_por_imagem(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         dados: Annotated[bytes, Depends(foto_enviada)],
@@ -327,7 +333,9 @@ def criar_rotas_da_busca(
             raise HTTPException(504, "A busca demorou demais") from None
         return {"planos": sorted(planos)}
 
-    @rotas.get("/busca/parecidos")
+    @rotas.get(
+        "/busca/parecidos", description=f"Busca de planos parecidos. {NOTA_DO_QUADRO}"
+    )
     def buscar_parecidos(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         job: Annotated[str, Query(min_length=1, max_length=100)],

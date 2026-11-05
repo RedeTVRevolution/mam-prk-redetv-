@@ -102,7 +102,7 @@ Descartado: o nome foi recusado (por exemplo, o editor o corrigiu) e a pessoa vo
 ### Busca
 
 **Momento**:
-Unidade de busca: um plano ou um evento da decupagem, com início e fim.
+Unidade de busca: um plano ou um evento da decupagem, com início e fim. Na resposta da busca, `quadro` é o caminho do quadro no vídeo, e a URL se pede pela rota do quadro (`GET /v1/jobs/{id}/quadros/{arquivo}`). O `quadro_url` assinado é obsoleto (#336): vem `null` para a web e preenchido só para chave de sistema, assinado em paralelo (`TETO_DE_ASSINATURAS`), até sair da resposta.
 
 **Busca visual**:
 Modo da busca (`GET /v1/busca?visual=true`, botão "Busca visual" na tela, `?modo=visual` na URL): o texto da consulta vira vetor no Gemini Embedding 2 e entra no mesmo RRF, comparado aos vetores dos quadros-chave dos planos (#268), junto da busca por texto e por significado; só planos, mostrados em grade de miniaturas. Fica ligado só por pedido (cada consulta custa uma chamada ao embedding). Com o índice do quadro desligado ou o embedding fora, a busca roda como a comum e a resposta traz `entendida.visual = false`.
