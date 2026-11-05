@@ -461,7 +461,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/JobPublico"
+                    "$ref": "#/components/schemas/JobResumido"
                   },
                   "title": "Response Listar V1 Jobs Get"
                 },
@@ -472,11 +472,6 @@
                     "estado": "concluido",
                     "codigo_falha": null,
                     "duracao_s": 598.4,
-                    "cortes_ms": [
-                      0,
-                      4200,
-                      9800
-                    ],
                     "timecode_origem": null,
                     "taxa_de_quadros": 29.97,
                     "capa_url": null,
@@ -567,7 +562,7 @@
             }
           }
         },
-        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`.",
+        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`.",
         "tags": [
           "sistemas"
         ]
@@ -1644,6 +1639,129 @@
             ],
             "title": "Duracao S"
           },
+          "timecode_origem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timecode Origem"
+          },
+          "taxa_de_quadros": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxa De Quadros"
+          },
+          "capa_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capa Url"
+          },
+          "programa": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Programa"
+          },
+          "data_exibicao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Exibicao"
+          },
+          "indexacao": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Indexacao"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "copia_bigquery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CopiaNoBigQuery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "etapa_atual": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "validacao",
+                  "transcricao",
+                  "leitura_da_tela",
+                  "analise",
+                  "identificacao",
+                  "quadros_chave",
+                  "inventario_de_objetos",
+                  "indexacao"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etapa Atual"
+          },
+          "etapas": {
+            "items": {
+              "$ref": "#/components/schemas/EtapaPublica"
+            },
+            "type": "array",
+            "title": "Etapas",
+            "default": []
+          },
+          "reprocessamentos": {
+            "type": "integer",
+            "title": "Reprocessamentos",
+            "default": 0
+          },
+          "enviado_por": {
+            "$ref": "#/components/schemas/EnviadoPor"
+          },
+          "criado_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Criado Em"
+          },
+          "atualizado_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Atualizado Em"
+          },
           "cortes_ms": {
             "anyOf": [
               {
@@ -1657,6 +1775,87 @@
               }
             ],
             "title": "Cortes Ms"
+          },
+          "url_de_upload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url De Upload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nome",
+          "estado",
+          "codigo_falha",
+          "duracao_s",
+          "enviado_por",
+          "criado_em",
+          "atualizado_em",
+          "url_de_upload"
+        ],
+        "title": "JobCriado"
+      },
+      "JobPublico": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "nome": {
+            "type": "string",
+            "title": "Nome"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "aguardando_upload",
+              "validando",
+              "analisando",
+              "concluido",
+              "falhou",
+              "cancelado"
+            ],
+            "title": "Estado"
+          },
+          "codigo_falha": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "formato_invalido",
+                  "arquivo_corrompido",
+                  "codec_nao_suportado",
+                  "duracao_excedida",
+                  "upload_expirado",
+                  "analise_falhou",
+                  "transcricao_falhou",
+                  "ocr_falhou",
+                  "processamento_interrompido"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codigo Falha"
+          },
+          "duracao_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duracao S"
           },
           "timecode_origem": {
             "anyOf": [
@@ -1781,16 +1980,19 @@
             "format": "date-time",
             "title": "Atualizado Em"
           },
-          "url_de_upload": {
+          "cortes_ms": {
             "anyOf": [
               {
-                "type": "string"
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Url De Upload"
+            "title": "Cortes Ms"
           }
         },
         "type": "object",
@@ -1802,12 +2004,12 @@
           "duracao_s",
           "enviado_por",
           "criado_em",
-          "atualizado_em",
-          "url_de_upload"
+          "atualizado_em"
         ],
-        "title": "JobCriado"
+        "title": "JobPublico",
+        "description": "O detalhe de um Job: o resumo mais os cortes de câmera."
       },
-      "JobPublico": {
+      "JobResumido": {
         "properties": {
           "id": {
             "type": "string",
@@ -1861,20 +2063,6 @@
               }
             ],
             "title": "Duracao S"
-          },
-          "cortes_ms": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cortes Ms"
           },
           "timecode_origem": {
             "anyOf": [
@@ -2011,8 +2199,8 @@
           "criado_em",
           "atualizado_em"
         ],
-        "title": "JobPublico",
-        "description": "O que a API mostra de um Job; o SHA-256 e o tamanho ficam no armazenamento."
+        "title": "JobResumido",
+        "description": "O que as listagens e o andamento mostram de um Job: sem `cortes_ms`, que só o\ndetalhe traz (uma lista sem teto, de até ~100 KB por vídeo)."
       },
       "NovoJob": {
         "properties": {

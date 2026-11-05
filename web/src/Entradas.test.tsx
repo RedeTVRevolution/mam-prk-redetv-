@@ -32,6 +32,7 @@ const ETAPA_OK = { inicio: '2026-10-29T15:01:00Z', fim: '2026-10-29T15:03:05Z', 
 let jobs: Job[] = []
 const consultas: string[] = []
 const detalhes: string[] = []
+const pedidos: string[][] = []
 const reprocessos: { id: string; corpo: unknown }[] = []
 
 const servidor = setupServer(
@@ -41,9 +42,11 @@ const servidor = setupServer(
     const sistema = url.searchParams.get('sistema')
     return HttpResponse.json(jobs.filter((j) => !sistema || j.enviado_por?.nome === sistema))
   }),
-  http.get('/v1/jobs/:id', ({ params }) => {
-    detalhes.push(String(params.id))
-    return HttpResponse.json(jobs.find((j) => j.id === params.id))
+  http.get('/v1/jobs/andamento', ({ request }) => {
+    const ids = new URL(request.url).searchParams.get('ids')!.split(',')
+    pedidos.push(ids)
+    detalhes.push(...ids)
+    return HttpResponse.json(jobs.filter((j) => ids.includes(j.id)))
   }),
   http.get('/v1/admin/chaves', () => new HttpResponse(null, { status: 403 })),
   http.post('/v1/jobs/:id/reprocessar', async ({ params, request }) => {
@@ -70,6 +73,7 @@ afterEach(() => {
   jobs = []
   consultas.length = 0
   detalhes.length = 0
+  pedidos.length = 0
   reprocessos.length = 0
   cleanup()
 })
@@ -282,12 +286,20 @@ test('"Reprocessar…" com etapa só aparece com a permissão, nas linhas conclu
 })
 
 test('atualiza só as linhas em andamento e para com a aba escondida', async () => {
-  jobs = [job({ id: 'p', nome: 'pronto.mp4' }), job({ id: 'a', nome: 'andando.mp4', estado: 'analisando', etapa_atual: 'analise' })]
+  jobs = [
+    job({ id: 'p', nome: 'pronto.mp4' }),
+    job({ id: 'a', nome: 'andando.mp4', estado: 'analisando', etapa_atual: 'analise' }),
+    job({ id: 'b', nome: 'outro.mp4', estado: 'validando', etapa_atual: 'validacao' }),
+  ]
   await abrir()
   await linhaDe('andando.mp4')
-  await waitFor(() => expect(detalhes.length).toBeGreaterThan(1))
-  expect(detalhes).toContain('a')
+  await waitFor(() => expect(pedidos.filter((p) => p.includes('a')).length).toBeGreaterThan(1))
   expect(detalhes).not.toContain('p')
+  // Uma rodada, um pedido, mesmo com mais de um vídeo em andamento (sob carga, um pedido
+  // atrasado do teste anterior pode cair aqui: só contam os deste).
+  const deste = pedidos.filter((p) => p.includes('a') || p.includes('b'))
+  expect(deste.length).toBeGreaterThan(0)
+  expect(deste.every((p) => [...p].sort().join() === 'a,b')).toBe(true)
   Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
   await new Promise((r) => setTimeout(r, 80))
   const antes = detalhes.length

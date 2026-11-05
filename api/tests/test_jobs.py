@@ -207,7 +207,6 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "estado",
         "codigo_falha",
         "duracao_s",
-        "cortes_ms",
         "timecode_origem",
         "taxa_de_quadros",
         "capa_url",
