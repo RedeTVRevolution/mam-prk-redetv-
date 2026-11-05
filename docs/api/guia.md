@@ -69,7 +69,7 @@ Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 
 
 ## 7. Idempotência e novas tentativas
 
-- **Repetir o registro é seguro** com o mesmo `Idempotency-Key` e o mesmo corpo: a resposta é **200** (o primeiro pedido foi 202) com o mesmo Job, sem criar outro. Se o Job ainda aguarda upload, vem uma `url_de_upload` nova. A chave é lembrada por **48 h**. Com o mesmo `Idempotency-Key` e outro corpo, a resposta é 409.
+- **Repetir o registro é seguro** com o mesmo `Idempotency-Key` e o mesmo corpo: a resposta é **200** (o primeiro pedido foi 202) com o mesmo Job, sem criar outro. Se o Job ainda aguarda upload, vem uma `url_de_upload` nova. A chave é lembrada por **48 h**. Com o mesmo `Idempotency-Key` e outro corpo, a resposta é 409. Se o Job foi apagado (lixeira ou purga) dentro das 48 h, a repetição dá **410** e não recria o Job: use uma chave nova.
 - Exemplos: `exemplos/curl/7-repetir-com-idempotencia.sh` e `exemplos/python/7-repetir-com-idempotencia.py`.
 - **Quando repetir:** timeout, queda de conexão e `503`. Espere 1 s, 2 s, 4 s... com um limite. Não repita 4xx (corrija o pedido).
 - Leituras (`GET`) podem ser repetidas sem risco. O `DELETE` repetido de um Job já cancelado responde 409 `Job em cancelado, não cancelável`: o cancelamento já valeu.
@@ -89,6 +89,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 409 | `Idempotency-Key já usada com outro corpo` | Use uma chave nova para um pedido novo. |
 | 409 | `Job em <estado>, não concluido` | O Job não terminou ou falhou. Espere o webhook ou consulte o Job. |
 | 409 | `Job em <estado>, não cancelável` | O Job já terminou; não há o que cancelar. |
+| 410 | `Este Job foi apagado` | Repetição com o `Idempotency-Key` de um Job na lixeira ou purgado. Use uma chave nova para enviar de novo. |
 | 415 | `Só video/mp4` | Mande `"tipo": "video/mp4"`. Não recodifique. |
 | 422 | `Tamanho fora do limite` | `tamanho_bytes` é zero ou passa de 4 GiB. |
 | 422 | `Data de exibição no futuro` | `data_exibicao` é depois de hoje (Brasília). |

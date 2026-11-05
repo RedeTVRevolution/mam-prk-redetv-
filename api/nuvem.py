@@ -477,6 +477,13 @@ class RepositorioDeIdempotenciaFirestore:
         )
         return resultado
 
+    def marcar_job_gravado(self, escopo: str, chave: str) -> None:
+        referencia = self._colecao.document(id_da_reserva(escopo, chave))
+        try:
+            referencia.update({"job_gravado": True})
+        except NotFound:
+            pass  # a reserva venceu e o TTL a apagou
+
 
 class RepositorioDeWebhooksFirestore:
     """Um documento por sistema, com o nome do sistema como id."""

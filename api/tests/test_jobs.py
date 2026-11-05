@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
 from api.correcoes import versao_do_modelo
+from api.idempotencia import RepositorioDeIdempotenciaEmMemoria
 from api.jobs import (
     Estado,
     Job,
@@ -84,6 +85,7 @@ class Relogio:
 
 class Ambiente:
     def __init__(self, tamanho_maximo: int = 4 * 1024**3) -> None:
+        self.idempotencia = RepositorioDeIdempotenciaEmMemoria()
         self.repositorio = RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
         self.relogio = Relogio()
@@ -97,6 +99,7 @@ class Ambiente:
                 armazenamento=self.armazenamento,
                 tamanho_maximo_bytes=tamanho_maximo,
                 relogio=self.relogio,
+                idempotencia=self.idempotencia,
             )
         )
 
@@ -855,6 +858,44 @@ def test_idempotency_key_com_outro_corpo_recebe_409_e_chaves_diferentes_criam_jo
     assert outra.json()["id"] != primeira.json()["id"]
 
 
+def test_idempotency_key_repetida_de_job_na_lixeira_recebe_410() -> None:
+    from api.catalogo import EnvioParaLixeira
+
+    ambiente = Ambiente()
+    primeira = _criar_com_chave(ambiente, "k1")
+    job = ambiente.repositorio.obter(primeira.json()["id"])
+    assert job is not None
+    ambiente.repositorio.salvar(
+        job.model_copy(
+            update={
+                "lixeira": EnvioParaLixeira(
+                    em=datetime(2026, 11, 4, tzinfo=UTC),
+                    por_uid="u1",
+                    por_email="a@b.c",
+                    motivo="teste",
+                )
+            }
+        )
+    )
+
+    repeticao = _criar_com_chave(ambiente, "k1")
+
+    assert repeticao.status_code == 410
+    assert repeticao.json()["detail"] == "Este Job foi apagado"
+
+
+def test_idempotency_key_repetida_de_job_purgado_recebe_410_e_nao_cria_job() -> None:
+    ambiente = Ambiente()
+    primeira = _criar_com_chave(ambiente, "k1")
+    ambiente.repositorio.remover(primeira.json()["id"])
+
+    repeticao = _criar_com_chave(ambiente, "k1")
+
+    assert repeticao.status_code == 410
+    assert ambiente.repositorio.obter(primeira.json()["id"]) is None
+    assert ambiente.repositorio.listar() == []
+
+
 def test_idempotency_key_invalida_recebe_422() -> None:
     ambiente = Ambiente()
 
@@ -869,6 +910,12 @@ def test_repeticao_que_grava_o_job_que_faltou_usa_a_hora_de_agora() -> None:
     ambiente = Ambiente()
     primeira = _criar_com_chave(ambiente, "k1").json()
     del ambiente.repositorio._jobs[primeira["id"]]
+    # Sem a marca de Job gravado: a queda foi antes de gravar.
+    (id_,) = ambiente.idempotencia._reservas
+    reserva = ambiente.idempotencia._reservas[id_]
+    ambiente.idempotencia._reservas[id_] = reserva.model_copy(
+        update={"job_gravado": False}
+    )
     ambiente.relogio.agora = INICIO + timedelta(hours=30)
 
     repeticao = _criar_com_chave(ambiente, "k1")

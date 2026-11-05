@@ -956,7 +956,7 @@ def criar_rotas(
         agora = relogio()
         if novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date():
             raise HTTPException(422, "Data de exibição no futuro")
-        job_id, nova = uuid.uuid4().hex, True
+        job_id, nova, escopo, job_gravado = uuid.uuid4().hex, True, "", False
         if idempotency_key is not None:
             if not (
                 0 < len(idempotency_key) <= TAMANHO_MAXIMO_DA_CHAVE
@@ -983,7 +983,7 @@ def criar_rotas(
             # Só o id vem da reserva: a repetição que grava o Job (o processo caiu entre
             # reservar e gravar) o cria com a hora de agora, para o prazo do upload
             # contar de quando a URL é dada.
-            job_id = reserva.job_id
+            job_id, job_gravado = reserva.job_id, reserva.job_gravado
         job = Job(
             id=job_id,
             nome=novo.nome,
@@ -1002,11 +1002,20 @@ def criar_rotas(
         # documento), e `criar` não regrava: a que chega antes de a primeira gravar não
         # desfaz o estado do Job.
         existente = None if nova else repositorio.obter(job.id)
+        # Repetição de Job apagado: na lixeira, ou purgado (reserva marcada sem Job).
+        if (existente is not None and existente.lixeira is not None) or (
+            existente is None and job_gravado
+        ):
+            raise HTTPException(410, "Este Job foi apagado")
+        criou = existente is None and repositorio.criar(job)
         if existente is not None:
             job = existente
-        elif not repositorio.criar(job):
+        elif not criou:
             job = repositorio.obter(job.id) or job
-        else:
+        # Marca antes de registrar o evento: uma falha no registro não deixa o Job sem marca.
+        if idempotency_key is not None and not job_gravado:
+            chaves_de_idempotencia.marcar_job_gravado(escopo, idempotency_key)
+        if criou:
             registrar(
                 publicador,
                 "envio",

@@ -245,6 +245,13 @@ OPERACOES: tuple[Operacao, ...] = (
                 "Use uma chave nova para um pedido novo; a antiga é lembrada por 48 h.",
             ),
             Erro(
+                410,
+                "Este Job foi apagado",
+                "A repetição com o mesmo `Idempotency-Key` de um Job que foi para a "
+                "lixeira ou foi purgado não devolve nem recria o Job. Para enviar o "
+                "vídeo de novo, use uma chave nova.",
+            ),
+            Erro(
                 415,
                 "Só video/mp4",
                 'Mande `"tipo": "video/mp4"`. Não recodifique o arquivo.',
