@@ -29,7 +29,13 @@ from typing import Any, cast
 
 from google.cloud import firestore
 
-from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.agent_retrieval import (
+    AgentRetrieval,
+    ConfigDaBusca,
+    Transporte,
+    conferir_esquema,
+    transporte_http,
+)
 from api.busca import (
     Ajustes,
     Busca,
@@ -228,17 +234,33 @@ def _ajustes(caso: Caso) -> Ajustes | None:
     return Ajustes(programa=caso.programa, desde=caso.desde, ate=caso.ate)
 
 
+def esquema_sem_campos(config: ConfigDaBusca, transporte: Transporte) -> str | None:
+    """A mensagem de erro se o esquema real da coleção não tem os campos de texto da busca."""
+    faltam = conferir_esquema(config, transporte)
+    if not faltam:
+        return None
+    campos = ", ".join(repr(c) for c in faltam)
+    return (
+        f"o esquema da coleção não tem o(s) campo(s) {campos}: toda busca por palavra "
+        "voltaria vazia. Rode `make criar-colecao-da-busca` e `make reindexar`."
+    )
+
+
 def main() -> int:
     # O plano B registra a falta do Model Armor a cada consulta; aqui é o esperado.
     logging.getLogger("api.entendimento_da_consulta").setLevel(logging.CRITICAL)
     cliente = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
     config = ConfigDaBusca.do_ambiente(os.environ)
+    transporte = transporte_http()
+    if erro := esquema_sem_campos(config, transporte):
+        print(erro, file=sys.stderr)
+        return 1
     busca = Busca(
         transporte=_SemModelo(),
         catalogo=CatalogoFirestore(cliente),
         armor=_SemModelArmor(),
         programas=sorted(PERFIS),
-        indice=AgentRetrieval(config, transporte_http()),
+        indice=AgentRetrieval(config, transporte),
         ranking=RankingEmOrdem(),
         repositorio=RepositorioFirestore(cliente),
         armazenamento=cast(Armazenamento, _SemQuadro()),
