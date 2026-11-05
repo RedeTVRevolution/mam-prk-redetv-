@@ -315,10 +315,8 @@ ORIENTACAO_DO_ESQUEMA = (
 )
 
 
-def _tipo(propriedade: dict[str, Any]) -> str:
-    itens = propriedade.get("items", {}).get("type")
-    tipo = str(propriedade.get("type"))
-    return f"{tipo}<{itens}>" if itens else tipo
+class EsquemaIncompativel(RuntimeError):
+    """A coleção no ar tem campo com tipo diferente ou que sobra: o PATCH não resolve."""
 
 
 def _assinatura(propriedade: dict[str, Any]) -> tuple[Any, Any]:
@@ -326,20 +324,25 @@ def _assinatura(propriedade: dict[str, Any]) -> tuple[Any, Any]:
     return propriedade.get("type"), propriedade.get("items", {}).get("type")
 
 
+def _tipo(propriedade: dict[str, Any]) -> str:
+    tipo, itens = _assinatura(propriedade)
+    return f"{tipo}<{itens}>" if itens else str(tipo)
+
+
 def comparar_esquema(
     config: ConfigDaBusca, no_ar: dict[str, Any]
 ) -> dict[str, dict[str, Any]]:
     """As propriedades do esquema que faltam na coleção `no_ar`. Tipo diferente ou campo
-    que sobra na coleção não se resolve por PATCH: levanta RuntimeError nomeando o campo."""
+    que sobra na coleção não se resolve por PATCH: levanta EsquemaIncompativel nomeando o campo."""
     esperadas = esquema_da_colecao(config)["dataSchema"]["properties"]
     existentes = no_ar.get("dataSchema", {}).get("properties", {})
     for campo, propriedade in existentes.items():
         if campo not in esperadas:
-            raise RuntimeError(
+            raise EsquemaIncompativel(
                 f"coleção {config.colecao}: o campo {campo!r} sobra no esquema; {ORIENTACAO_DO_ESQUEMA}"
             )
         if _assinatura(propriedade) != _assinatura(esperadas[campo]):
-            raise RuntimeError(
+            raise EsquemaIncompativel(
                 f"coleção {config.colecao}: o campo {campo!r} é {_tipo(propriedade)} "
                 f"e deveria ser {_tipo(esperadas[campo])}; {ORIENTACAO_DO_ESQUEMA}"
             )

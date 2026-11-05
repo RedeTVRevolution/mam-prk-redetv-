@@ -7,6 +7,7 @@ import pytest
 from api.agent_retrieval import (
     AgentRetrieval,
     ConfigDaBusca,
+    EsquemaIncompativel,
     JaExiste,
     apagar_colecao,
     conferir_esquema,
@@ -420,12 +421,13 @@ class _ColecaoNoAr:
 
 
 def _esquema_no_ar(**mudancas: Any) -> dict[str, Any]:
+    """O esquema atual com as propriedades trocadas; `None` tira o campo."""
     esquema = esquema_da_colecao(CONFIG)["dataSchema"]
-    propriedades = {
-        c: p for c, p in esquema["properties"].items() if mudancas.get(c, 1) is not None
+    propriedades = {**esquema["properties"], **mudancas}
+    return {
+        **esquema,
+        "properties": {c: p for c, p in propriedades.items() if p is not None},
     }
-    propriedades |= {c: p for c, p in mudancas.items() if p is not None}
-    return {**esquema, "properties": propriedades}
 
 
 def test_criar_colecao_igual_nao_recebe_patch_nem_pede_reindexar() -> None:
@@ -460,14 +462,14 @@ def test_o_patch_preserva_o_que_mais_vier_no_esquema_no_ar() -> None:
 
 def test_campo_com_tipo_diferente_para_com_erro_nomeando_o_campo() -> None:
     transporte = _ColecaoNoAr(_esquema_no_ar(inicio_ms={"type": "string"}))
-    with pytest.raises(RuntimeError, match="inicio_ms.*string.*integer"):
+    with pytest.raises(EsquemaIncompativel, match="inicio_ms.*string.*integer"):
         criar_colecao(CONFIG, transporte, _nao_dorme)
     assert transporte.patches() == []
 
 
 def test_campo_que_sobra_na_colecao_para_com_erro_nomeando_o_campo() -> None:
     transporte = _ColecaoNoAr(_esquema_no_ar(antigo={"type": "string"}))
-    with pytest.raises(RuntimeError, match="antigo"):
+    with pytest.raises(EsquemaIncompativel, match="antigo"):
         criar_colecao(CONFIG, transporte, _nao_dorme)
     assert transporte.patches() == []
 
