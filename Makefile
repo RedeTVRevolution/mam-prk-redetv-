@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao caos-dev atualizar-openapi
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-catalogo carregar-marcas gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao regressao taxa-de-correcao caos-dev atualizar-openapi
 
 instalar:
 	uv sync --locked
@@ -135,6 +135,18 @@ comparar-objetos:
 	REGIAO_GPU="$${REGIAO_GPU:-$$(terraform -chdir=infra output -raw regiao_gpu)}" \
 	JOB_DE_OBJETOS_GPU="$${JOB_DE_OBJETOS_GPU:-$$(terraform -chdir=infra output -raw job_de_objetos_gpu)}" \
 	uv run --locked python -m api.comparar_objetos "$(JOB)" "$(or $(PASTA),comparacao-objetos)"
+
+# Medição das variações do Florence-2 na GPU (#329): make medir-florence JOB=<id> [VARIACOES="guloso lote8"]
+# Roda o Job com GPU uma vez por variação (a base `hoje` sempre), converte com o Gemini e guarda em
+# <job>/objetos/medicao/<variacao>/ sem tocar no inventário do Job; imprime a tabela.
+# MODELO_OBJETOS (no .env ou no ambiente) é o modelo do Gemini que converte o bruto: o mesmo do Job de inventário.
+medir-florence:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	REGIAO_GPU="$${REGIAO_GPU:-$$(terraform -chdir=infra output -raw regiao_gpu)}" \
+	JOB_DE_OBJETOS_GPU="$${JOB_DE_OBJETOS_GPU:-$$(terraform -chdir=infra output -raw job_de_objetos_gpu)}" \
+	uv run --locked python -m api.medir_florence "$(JOB)" $(VARIACOES)
 
 # Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
 # make reindexar [JOB=<id>]. Apaga e regrava o vídeo; repetir dá o mesmo resultado.

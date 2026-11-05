@@ -16,3 +16,5 @@ A etapa `inventario_de_objetos` roda entre `quadros_chave` e `indexacao`. Com o 
 **Cota de GPU:** a etapa usa uma GPU por programa, depois da análise, nunca junto da transcrição e do OCR do mesmo programa. O pico por programa segue em 2 GPUs, e as 10 do pedido do #240 cobrem 5 programas em paralelo.
 
 **Comparação dos motores:** `make comparar-objetos JOB=<id>` dispara o Job do Florence-2 com `DESTINO_DO_RESULTADO` (`<job>/objetos/comparacao-florence.json`, a Decupagem não muda) e roda no computador da pessoa a conversão e cada modelo do Gemini olhando as imagens, guardando por motor o inventário, os tokens, o tempo e o custo.
+
+**Variações do Florence-2 (#329):** feixes, lote, teto de tokens, legendas de região e pulo de quadro repetido são variáveis `FLORENCE_*` do Job com GPU, com o comportamento anterior como padrão. `make medir-florence JOB=<id>` mede cada variação sobre os quadros do Job, em `<job>/objetos/medicao/`, e calcula o critério de qualidade contra a variação `hoje`; ver o README.

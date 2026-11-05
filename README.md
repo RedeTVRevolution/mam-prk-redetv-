@@ -160,6 +160,47 @@ make comparar-passadas JOBS=<id>,<id>,...                            # soma por 
 - Por requisito (famosos, menções, pautas, B-roll em planos limpos e em descrições, comerciais): contagens, itens só de um lado e itens dos dois com diferença de nome, tipo ou marca, ou de tempo acima da tolerância de 2 s. O pareamento é o do `api/comparador.py`. Timecode: erro médio, p95 e quantos pares (inclusive os de nome trocado) passam da tolerância.
 - Custo por hora de vídeo e tempo (por etapa e total) dos dois lados. O preço vem de `PRECOS_DOS_MODELOS` e a data da tabela consultada, de `DATA_DA_TABELA_DE_PRECOS`. O Job não guarda os tokens que gastou: passe-os em `TOKENS_DO_JOB=<job>=<entrada>:<saida>,...` (e o modelo em `MODELO_DO_JOB`, o `MODELO` de `api/gemini.py` por padrão); sem eles, o custo do lado do Job sai "n/d", e a soma de vários Jobs também.
 
+## Variações do Florence-2 e medição na GPU (#329)
+
+O inventário de objetos levou 19 min no FAMA (~2 s por quadro, 421 quadros). O Job com GPU
+(`api/objetos_job.py`) aceita, por variável de ambiente, as mudanças a medir. Sem nenhuma
+delas o resultado é o de antes.
+
+| Variável | Padrão | O que muda |
+|---|---|---|
+| `FLORENCE_FEIXES` | `3` | `num_beams` da geração; `1` é a busca gulosa |
+| `FLORENCE_LOTE` | `1` | quadros por `generate` |
+| `FLORENCE_MAX_TOKENS` | `1024` | `max_new_tokens` |
+| `FLORENCE_LEGENDAS` | `1` | `0` não gera as legendas de região (`<DENSE_REGION_CAPTION>`) |
+| `FLORENCE_PULAR_REPETIDOS` | `0` | distância máxima (de 64 bits) entre os hashes de dois quadros do mesmo plano para o segundo reaproveitar o resultado do primeiro; `0` desliga |
+| `FLORENCE_LOG_A_CADA` | `25` | a cada quantos quadros o Job loga `Quadros: feitos/total` |
+
+O log do Job também diz o tamanho da maior resposta de cada lote, em tokens: serve para
+escolher o `FLORENCE_MAX_TOKENS`.
+
+Para medir, com as credenciais da pessoa (precisa de `MODELO_OBJETOS` no `.env`, o mesmo
+modelo do Job de inventário):
+
+```
+make medir-florence JOB=<id>                          # todas as variações
+make medir-florence JOB=<id> VARIACOES="guloso lote8" # só algumas
+```
+
+O alvo roda o Job com GPU uma vez por variação, sobre os quadros já gravados do Job (a
+variação `hoje`, sem variável, roda sempre primeiro e é a base), converte o bruto com o Gemini
+e guarda, em `<job>/objetos/medicao/<variacao>/` no bucket das decupagens, `bruto.json`,
+`inventario.json` e `medida.json` (tempo por quadro e critério). Nada em `<job>/objetos/florence.json`
+nem na Decupagem é tocado. As variações estão em `api/medir_florence.py` (`VARIACOES`). Uma
+que falha (memória da GPU, por exemplo) aparece como `falhou` na tabela e as outras seguem.
+
+A tabela traz o tempo por quadro, quantas vezes mais rápido que `hoje`, os objetos de cena
+(fora `roupa`, `acessorio` e `calcado`) contra os de hoje, a categoria que mais caiu, os
+objetos de destaque 3 que sumiram, o veredito do critério e se bateu a meta (≤ 0,7 s por
+quadro). O critério passa quando os objetos de cena somam pelo menos 90% dos de hoje, nenhuma
+categoria cai mais que isso e nenhum objeto de destaque 3 de hoje some; o objeto é o mesmo se o
+plano, a categoria e o nome (sem acento nem caixa) são iguais. O Gemini não é determinístico:
+repetir a medição pode mexer um pouco nas frações.
+
 ## Cassete do Gemini
 
 O teste de contrato com o Gemini (`api/tests/test_cassete.py`) roda em todo `make verificar`, sem rede: passa por `analisar` o texto de uma resposta real gravada em `api/tests/cassetes/gemini_sintetico.json` e confere o esquema da decupagem e os invariantes de tempo, nunca o texto exato. O cassete guarda só o modelo, a versão exata que a Vertex informou (`modelVersion`), o bloco `video`, o texto da resposta e o `instrucao_sha256` (SHA-256 da `INSTRUCAO` de `api/gemini.py`), sem cabeçalhos nem credenciais. Mudar uma letra da `INSTRUCAO` muda o hash e derruba o contrato até regravar, com a mensagem de rodar `make gravar-cassetes`; o hash não cobre os perfis e as seções que `instrucao()` encaixa nela. Se a versão gravada for diferente da fixada em `VERSAO_DO_MODELO` (`api/gemini.py`), o contrato falha: o Google trocou o modelo por baixo do nome, e alguém precisa conferir a resposta e atualizar a constante. O teste só percebe ao regravar; entre gravações, nada consulta a Vertex.
