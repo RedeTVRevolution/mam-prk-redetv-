@@ -5,6 +5,7 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import App from './App.tsx'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
+import { fundoDaCelula } from './escalaDaMatriz.ts'
 import { filtrosDeMarcas } from './marcas.ts'
 import { render } from './render-teste.tsx'
 
@@ -143,12 +144,14 @@ test('Baixar CSV pede o formato csv com os mesmos filtros e entrega o arquivo', 
   clique.mockRestore()
 })
 
-test('sem inserção no filtro, a tela diz isso e não oferece o CSV', async () => {
+test('sem inserção no filtro, a tela diz isso, não oferece o CSV e não há gráfico', async () => {
   resposta = () => HttpResponse.json({ ...RELATORIO, marcas: [] })
   await abrir('/relatorios/marcas')
 
   expect(await screen.findByText('Nenhuma inserção de marca neste filtro.')).toBeTruthy()
   expect((screen.getByRole('button', { name: 'Baixar CSV' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('img', { name: 'Marcas com mais tempo' })).toBeNull()
+  expect(screen.queryByRole('table', { name: 'Tempo por marca e tipo de inserção' })).toBeNull()
 })
 
 test('erro da API mostra o alerta com o código e tenta de novo', async () => {
@@ -178,4 +181,41 @@ test('tipo desconhecido no endereço sai dos filtros', () => {
   expect(filtrosDeMarcas('tipo=outdoor&programa=X')).toEqual({ programa: 'X', de: '', ate: '', tipo: '' })
   expect(filtrosDeMarcas('tipo=testemunhal').tipo).toBe('testemunhal')
   expect(filtrosDeMarcas('tipo=toString').tipo).toBe('')
+})
+
+test('o ranking e o resumo vêm acima da tabela; clicar na barra abre a linha da marca', async () => {
+  await abrir('/relatorios/marcas')
+
+  const ranking = await screen.findByRole('img', { name: 'Marcas com mais tempo' })
+  expect(within(ranking).getByText('Ambev')).toBeTruthy()
+  expect(within(ranking).getByText('55s')).toBeTruthy()
+  // Os vídeos do resumo são os distintos: v1 e v2.
+  expect(screen.getByText('4 inserções · 1min00s · 2 vídeos')).toBeTruthy()
+
+  const barras = ranking.querySelectorAll('.recharts-bar-rectangle')
+  fireEvent.click(barras[0].firstElementChild ?? barras[0])
+  expect(await screen.findByRole('table', { name: 'Inserções de Ambev' })).toBeTruthy()
+})
+
+test('a matriz tem uma coluna por tipo com inserção; clicar na célula abre a marca filtrada pelo tipo', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/relatorios/marcas')
+
+  const matriz = await screen.findByRole('table', { name: 'Tempo por marca e tipo de inserção' })
+  const colunas = within(matriz).getAllByRole('columnheader').map((c) => c.textContent)
+  // Só os tipos com inserção no filtro, na ordem da lista de tipos.
+  expect(colunas).toEqual(['Marca', 'Intervalo', 'Merchan com apresentador', 'Sobreposição gráfica'])
+
+  await usuario.click(within(matriz).getByRole('button', { name: 'Ambev, Sobreposição gráfica: 5s' }))
+
+  const lista = screen.getByRole('table', { name: 'Inserções de Ambev' })
+  expect(within(lista).getByRole('link', { name: 'v2' })).toBeTruthy()
+  expect(within(lista).queryByRole('link', { name: 'tv-fama-01.mp4' })).toBeNull()
+  expect(screen.getByText('Só Sobreposição gráfica')).toBeTruthy()
+})
+
+test('a escala da matriz vai de 0 a 60% de opacidade', () => {
+  expect(fundoDaCelula(0, 100)).toBe('transparent')
+  expect(fundoDaCelula(100, 100)).toBe('rgba(56, 113, 220, 0.6)')
+  expect(fundoDaCelula(50, 100)).toBe('rgba(56, 113, 220, 0.3)')
 })
