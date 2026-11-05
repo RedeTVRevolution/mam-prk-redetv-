@@ -2131,7 +2131,7 @@ resource "google_cloud_run_v2_job" "fila" {
     template {
       service_account = google_service_account.mam["fila"].email
       max_retries     = 0
-      # Uma consulta ao Firestore; o minuto seguinte refaz a amostra.
+      # Uma consulta ao Firestore; se falhar, fica para a amostra seguinte, 5 min depois.
       timeout = "120s"
       containers {
         image   = var.imagem_validacao

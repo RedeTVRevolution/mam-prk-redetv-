@@ -91,14 +91,15 @@ def test_a_fila_loga_o_que_as_metricas_extraem() -> None:
     assert "var.agenda_da_fila" in agenda
 
 
-def test_a_fila_e_amostrada_a_cada_5_min_e_o_painel_pega_2_amostras() -> None:
+def test_a_fila_e_amostrada_a_cada_5_min_e_o_painel_pega_mais_de_2_amostras() -> None:
     variavel = _bloco('variable "agenda_da_fila"')
-    assert 'default     = "*/5 * * * *"' in variavel
+    assert re.search(r'default\s+= "\*/5 \* \* \* \*"', variavel)
     painel = TF[TF.index("    fila = [\n") :]
     painel = painel[: painel.index("\n    ]\n")]
     janelas = re.findall(r"\[(\d+)m\]", painel)
     assert len(janelas) == 4
-    assert all(int(j) >= 2 * 5 for j in janelas)
+    # Com 10 min cabem só ~2 amostras e a média fica com buracos (0/0) (#344).
+    assert all(int(j) > 2 * 5 for j in janelas)
     assert len(set(janelas)) == 1
 
 
