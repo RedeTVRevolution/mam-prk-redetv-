@@ -63,7 +63,7 @@ def _resumir(banco: sqlite3.Connection, inicio: str = TODA_A_HISTORIA) -> None:
     )
     # No BigQuery as tabelas temporárias somem no fim da rodada; aqui, apaga-as.
     for (nome,) in banco.execute(
-        "SELECT name FROM sqlite_temp_master WHERE name IN ('janela', 'eventos') "
+        "SELECT name FROM sqlite_temp_master WHERE name IN ('janela', 'inicio', 'eventos') "
         "OR name LIKE 'novas\\_%' ESCAPE '\\'"
     ).fetchall():
         banco.execute(f"DROP TABLE {nome}")
@@ -611,15 +611,35 @@ def test_a_janela_deixa_os_dias_antigos_como_estao(
     assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["acessos"] == 4
 
 
-def test_a_rodada_da_janela_da_o_mesmo_numero_que_a_historia_inteira(
+def _todas_as_tabelas(banco: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
+    tabelas = {}
+    for nome in _tabelas_do_sql():
+        colunas = [c[1] for c in banco.execute(f"PRAGMA table_info({nome})")]
+        tabelas[nome] = _tabela(banco, nome, ", ".join(colunas))
+    return tabelas
+
+
+def test_rodadas_dia_a_dia_dao_o_mesmo_numero_que_a_historia_inteira(
     banco: sqlite3.Connection,
 ) -> None:
     _resumir(banco)
-    inteira = _tabela(banco, "uso_por_dia", "dia")
+    inteira = _todas_as_tabelas(banco)
+    eventos = banco.execute("SELECT * FROM eventos_de_uso ORDER BY quando").fetchall()
 
-    _resumir(banco, "'2026-11-01T03:00:00+00:00'")
+    # Os mesmos eventos chegando em dois dias (de São Paulo), cada rodada vendo só o seu.
+    aos_poucos = _banco()
+    for inicio, fim in (
+        ("2026-11-01T03:00:00+00:00", "2026-11-02T03:00:00+00:00"),
+        ("2026-11-02T03:00:00+00:00", "2026-11-03T03:00:00+00:00"),
+    ):
+        chegaram = [e for e in eventos if inicio <= e[COLUNAS.index("quando")] < fim]
+        aos_poucos.executemany(
+            f"INSERT INTO eventos_de_uso VALUES ({', '.join('?' * len(COLUNAS))})",
+            chegaram,
+        )
+        _resumir(aos_poucos, f"'{inicio}'")
 
-    assert _tabela(banco, "uso_por_dia", "dia") == inteira
+    assert _todas_as_tabelas(aos_poucos) == inteira
 
 
 def test_o_fim_repetido_depois_da_janela_nao_conta_de_novo(

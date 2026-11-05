@@ -35,6 +35,11 @@ FROM (
 )
 WHERE ordem = 1;
 
+-- O primeiro dia que esta rodada refaz, calculado uma vez só e depois da leitura: no
+-- BigQuery cada comando do script avalia `CURRENT_DATE` de novo, e a rodada que atravessa a
+-- meia-noite apagaria menos dias do que leu e somaria o dia de antes em dobro.
+CREATE TEMP TABLE inicio AS SELECT DATE(${inicio_da_janela}, 'America/Sao_Paulo') AS dia;
+
 -- Cada (Job, estado final) com o `id` do fim que vale.
 CREATE TABLE IF NOT EXISTS `${prefixo}fins_de_processamento_contados` AS
 SELECT id, job_id, estado FROM janela WHERE FALSE;
@@ -60,8 +65,11 @@ SELECT
   segundos_de_processamento, n_resultados, tipo_de_correcao, metodo, rota, status,
   COALESCE(duracao_do_video_ms, 0) / 3600000.0 AS horas
 FROM janela
-WHERE tipo <> 'fim_de_processamento'
-  OR id IN (SELECT id FROM `${prefixo}fins_de_processamento_contados`);
+WHERE dia >= (SELECT dia FROM inicio)
+  AND (
+    tipo <> 'fim_de_processamento'
+    OR id IN (SELECT id FROM `${prefixo}fins_de_processamento_contados`)
+  );
 
 -- Um dia, um usuário (ou sistema). As duas tabelas seguintes somam esta. `ativo` diz se
 -- quem é da linha agiu no dia: o fim de processamento é atribuído a quem enviou o vídeo e,
@@ -135,13 +143,13 @@ CREATE TABLE IF NOT EXISTS `${prefixo}chamadas_de_api_por_dia` AS SELECT * FROM 
 
 -- Troca os dias da janela de uma vez, para o painel não ler as tabelas pela metade.
 BEGIN TRANSACTION;
-DELETE FROM `${prefixo}uso_por_dia_e_usuario` WHERE dia >= DATE(${inicio_da_janela}, 'America/Sao_Paulo');
+DELETE FROM `${prefixo}uso_por_dia_e_usuario` WHERE dia >= (SELECT dia FROM inicio);
 INSERT INTO `${prefixo}uso_por_dia_e_usuario` SELECT * FROM novas_uso_por_dia_e_usuario;
-DELETE FROM `${prefixo}uso_por_dia_e_programa` WHERE dia >= DATE(${inicio_da_janela}, 'America/Sao_Paulo');
+DELETE FROM `${prefixo}uso_por_dia_e_programa` WHERE dia >= (SELECT dia FROM inicio);
 INSERT INTO `${prefixo}uso_por_dia_e_programa` SELECT * FROM novas_uso_por_dia_e_programa;
-DELETE FROM `${prefixo}correcoes_por_dia` WHERE dia >= DATE(${inicio_da_janela}, 'America/Sao_Paulo');
+DELETE FROM `${prefixo}correcoes_por_dia` WHERE dia >= (SELECT dia FROM inicio);
 INSERT INTO `${prefixo}correcoes_por_dia` SELECT * FROM novas_correcoes_por_dia;
-DELETE FROM `${prefixo}chamadas_de_api_por_dia` WHERE dia >= DATE(${inicio_da_janela}, 'America/Sao_Paulo');
+DELETE FROM `${prefixo}chamadas_de_api_por_dia` WHERE dia >= (SELECT dia FROM inicio);
 INSERT INTO `${prefixo}chamadas_de_api_por_dia` SELECT * FROM novas_chamadas_de_api_por_dia;
 COMMIT TRANSACTION;
 

@@ -13,7 +13,8 @@
 # não cresce com o acervo, só com o uso de cada dia. Cada rodada ainda lê o mínimo de 10 MB
 # por tabela. Medir no primeiro `apply` com `bq query --dry_run` (bytes antes e depois).
 # Backfill ou correção de dias antigos: aumente `janela_dos_resumos_em_dias` por uma
-# rodada e volte ao valor normal.
+# rodada e volte ao valor normal. Só para dias depois do #380: o fim gravado antes não traz
+# a duração do vídeo, e refazer o dia dele zera as horas que vieram dos momentos.
 locals {
   # Quantos dias para trás (contando o de hoje em São Paulo) cada rodada refaz. O evento chega
   # em minutos e cai no dia dele; a folga cobre uma rodada que falhou e a virada do dia.
