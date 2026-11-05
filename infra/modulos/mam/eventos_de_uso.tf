@@ -2,7 +2,7 @@
 # uma assinatura do BigQuery grava cada mensagem na tabela `eventos_de_uso`, no dataset das
 # decupagens, para o painel da diretoria. A tabela tem as colunas do esquema do tópico.
 locals {
-  quem_publica_uso         = toset(["web", "validacao", "transcricao", "ocr", "analise"])
+  quem_publica_uso         = toset(["web", "validacao", "transcricao", "ocr", "analise", "fim"])
   tabela_de_eventos_de_uso = "eventos_de_uso"
 }
 

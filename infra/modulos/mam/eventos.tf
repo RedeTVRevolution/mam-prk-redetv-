@@ -5,7 +5,7 @@
 locals {
   # Quem termina um Job: validação e análise (e o `falhou` de transcrição e OCR) rodam em Jobs
   # com a própria conta; os de GPU usam a mesma conta dos de CPU.
-  quem_publica_eventos = toset(["validacao", "transcricao", "ocr", "analise"])
+  quem_publica_eventos = toset(["validacao", "transcricao", "ocr", "analise", "fim"])
   # Texto que o token da assinatura leva como audiência; a API confere o mesmo.
   push_audiencia = "mam-webhook-push"
 }

@@ -14,7 +14,7 @@
 # o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
 # entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
 # ${job_de_analise}, ${job_de_identificacao},
-# ${job_de_quadros}, ${job_de_indexacao}.
+# ${job_de_quadros}, ${job_de_indexacao}, ${job_de_fim} (o aviso do `falhou` que o Workflows grava, #379).
 # Toda a execução roda num try: um erro que nenhum passo trata (do próprio Workflows,
 # de um conector, de uma permissão) não deixa o Job preso em `analisando`, que a tela
 # mostra como "Decupando" para sempre e o reprocessar recusa (`marca_interrompido`).
@@ -156,10 +156,11 @@ processa:
                             next: encerra_com_falha
                     - repassa_o_erro_da_releitura:
                         raise: $${erro_da_leitura}
-            # Um Job cancelado continua cancelado (#51).
-            - nao_sobrescreve_cancelado:
+            # Um Job cancelado continua cancelado (#51), e um que já `falhou` (o Job de validação
+            # o derrubou e a API já avisou o fim) fica como está: não avisa duas vezes (#379).
+            - nao_sobrescreve_job_terminado:
                 switch:
-                  - condition: $${antes.fields.estado.stringValue == "cancelado"}
+                  - condition: $${antes.fields.estado.stringValue in ["cancelado", "falhou"]}
                     next: encerra_com_falha
             - marca_como_falhou:
                 call: googleapis.firestore.v1.projects.databases.documents.patch
@@ -178,6 +179,10 @@ processa:
                         stringValue: arquivo_corrompido
                       atualizado_em:
                         timestampValue: $${time.format(sys.now())}
+            - avisa_a_falha_de_validacao:
+                call: avisa_o_fim
+                args:
+                  job_id: $${job_id}
             - encerra_com_falha:
                 raise: $${e}
     - encerra_validacao:
@@ -325,6 +330,10 @@ processa:
                         stringValue: analise_falhou
                       atualizado_em:
                         timestampValue: $${time.format(sys.now())}
+            - avisa_a_falha_da_analise:
+                call: avisa_o_fim
+                args:
+                  job_id: $${job_id}
             - encerra_a_analise_com_falha:
                 raise: $${e}
     - encerra_analise:
@@ -545,6 +554,35 @@ processa:
     - fim:
         return: $${job_id}
 
+# O `falhou` que o Workflows grava não passa pelo repositório da API, que é quem publica o
+# evento de fim de Job (webhook) e o evento de uso (#379). Este Job publica os dois, uma vez
+# por falha (ele mesmo confere o estado do Job e se a falha já foi avisada). Um erro aqui só
+# vai ao log: o aviso nunca esconde o erro que derrubou o Job.
+avisa_o_fim:
+  params: [job_id]
+  steps:
+    - roda_o_job_do_aviso:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_fim}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+        except:
+          as: erro_do_aviso
+          steps:
+            - registra_o_erro_do_aviso:
+                call: sys.log
+                args:
+                  severity: ERROR
+                  text: $${"o fim do Job " + job_id + " não foi avisado"}
+    - fim_do_aviso:
+        return: null
+
 # Um erro que nenhum passo tratou (`main`): o Job que estava em `aguardando_upload` (o erro
 # antes do Job de validação), `validando` ou `analisando` vai a `falhou` com `processamento_interrompido`, e a etapa em andamento fecha como
 # `falhou`, para o reprocessar recomeçar dali. Um Job `concluido` continua `concluido` (a
@@ -594,6 +632,10 @@ marca_interrompido:
                 stringValue: processamento_interrompido
               atualizado_em:
                 timestampValue: $${time.format(sys.now())}
+    - avisa_o_job_interrompido:
+        call: avisa_o_fim
+        args:
+          job_id: $${job_id}
     # Só a etapa ainda aberta: o paralelo fecha as suas sem limpar o `etapa_atual`, e uma
     # transcrição concluída não pode virar `falhou` (o reprocessar refaria horas de GPU).
     - fecha_a_etapa_interrompida:
@@ -856,6 +898,13 @@ etapa_com_gpu:
                         args:
                           severity: ERROR
                           text: $${"o Job " + job_id + " não foi marcado com " + codigo_da_falha}
+                        # Sem a marcação, não há falha deste caminho para avisar; se o outro
+                        # ramo levou o Job a `falhou` pela API, ela já avisou (#379).
+                        next: encerra_a_etapa_com_falha
+            - avisa_a_falha_da_etapa:
+                call: avisa_o_fim
+                args:
+                  job_id: $${job_id}
             - encerra_a_etapa_com_falha:
                 raise: $${e}
     - encerra_a_etapa:
