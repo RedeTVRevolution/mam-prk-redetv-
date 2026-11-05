@@ -1390,17 +1390,21 @@ def criar_rotas(
         """Fecha a revisão: dispara uma reindexação só, em segundo plano. As ações da
         revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
         `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, volta
-        ao que era (503)."""
+        ao que era (503), para o `pendente` não ficar preso sem execução nenhuma."""
         job = obter_concluido(job_id, autor)
         anterior = job.indexacao
-        repositorio.transitar(
-            job.id,
-            "concluido",
-            {"indexacao": Indexacao(estado="pendente", em=relogio())},
-        )
+        if (
+            repositorio.transitar(
+                job.id,
+                "concluido",
+                {"indexacao": Indexacao(estado="pendente", em=relogio())},
+            )
+            is None
+        ):
+            raise HTTPException(409, "O vídeo saiu de concluído")
         try:
             disparo_da_indexacao.iniciar(job.id)
-        except ServicoIndisponivel:
+        except Exception:
             repositorio.transitar(job.id, "concluido", {"indexacao": anterior})
             raise
         return {"indexacao": "pendente"}

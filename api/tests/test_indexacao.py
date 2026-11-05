@@ -1,11 +1,13 @@
 """Indexação da Decupagem entregue no índice da busca (#118)."""
 
+import inspect
 import json
 from datetime import date, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
 
+import api.jobs
 from api.auth import Usuario
 from api.copia_bigquery import CopiaDosMomentos
 from api.correcoes import (
@@ -351,6 +353,29 @@ def test_aprovar_revisao_que_nao_dispara_volta_o_estado_e_da_503() -> None:
     assert mundo.indexacao()["estado"] == "indexado"
 
 
+def test_aprovar_revisao_volta_o_estado_mesmo_com_erro_inesperado_do_disparo() -> None:
+    class DisparoQueQuebra(DisparoFalso):
+        def iniciar(self, job_id: str) -> None:
+            raise RuntimeError("sem credencial")
+
+    mundo = Mundo(disparo=DisparoQueQuebra())
+    mundo.reindexar()
+    cliente = TestClient(mundo.cliente.app, raise_server_exceptions=False)
+
+    resposta = cliente.post("/v1/jobs/j1/revisao/aprovar", headers=AUTORIZACAO)
+
+    assert resposta.status_code == 500
+    assert mundo.indexacao()["estado"] == "indexado"
+
+
+def test_nenhuma_rota_dos_jobs_reindexa_dentro_do_pedido() -> None:
+    # As rotas da revisão (corrigir, aceitar sugestão, desfazer, aprovar ou recusar,
+    # descartar e reaplicar da fila) só gravam Correções: a reindexação é do Job
+    # `mam-indexacao`, que o "Aprovar Revisão" dispara (#328).
+    assert "reindexar" not in inspect.signature(api.jobs.criar_rotas).parameters
+    assert "reindexar" not in inspect.getsource(api.jobs)
+
+
 def test_aprovar_revisao_pede_permissao_de_editar() -> None:
     mundo = Mundo()
     papeis = RepositorioDePapeisEmMemoria()
@@ -552,11 +577,13 @@ def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
         "fim_ms": 4000,
     }
     assert corrigir("objeto.acrescentar", novo).status_code == 201
+    assert mundo.aprovar_revisao().status_code == 202
     mundo.rodar_o_job()
     assert buscar("SA") == [("sandália", 1)]
 
     atributos = {"tipo": "scarpin", "cor_base": MODELO["objetos"][0]["cor_base"]}
     assert corrigir("objeto.atributos", atributos, "obj01").status_code == 201
+    assert mundo.aprovar_revisao().status_code == 202
     mundo.rodar_o_job()
     assert buscar("scar") == [("scarpin", 1)]
     assert buscar("vest") == [("vestido", vestidos - 1)]
