@@ -118,7 +118,8 @@ case $acao in
 esac
 `);
 
-// gh falso: serve $FAKE/issues.json e registra edições e comentários em $FAKE/gh.log.
+// gh falso: serve $FAKE/issues.json e registra edições e comentários em $FAKE/gh.log. Os PRs vão no
+// mesmo arquivo, com o estado em "pr" (pr(9, "MERGED")): a consulta das issues não os vê.
 writeFileSync(join(bin, "gh"), String.raw`#!/usr/bin/env bash
 set -euo pipefail
 case "$1 $2" in
@@ -127,7 +128,12 @@ case "$1 $2" in
     if [ -s "$FAKE/graphql-falha" ] && [ "$(cat "$FAKE/graphql-falha")" -gt 0 ]; then
       echo $(($(cat "$FAKE/graphql-falha") - 1)) > "$FAKE/graphql-falha"; echo "gh falso: falha de rede" >&2; exit 1
     fi
-    jq '[{data: {repository: {issues: {nodes: ., pageInfo: {hasNextPage: false}}}}}]' "$FAKE/issues.json" ;;
+    jq '[{data: {repository: {issues: {nodes: map(select(.pr == null)), pageInfo: {hasNextPage: false}}}}}]' "$FAKE/issues.json" ;;
+  "pr list")
+    echo "pr list" >> "$FAKE/gh.log"
+    # Um PR com estado SEM_PERMISSAO faz a leitura falhar, como um token sem "Pull requests: leitura".
+    if jq -e 'any(.[]; .pr == "SEM_PERMISSAO")' "$FAKE/issues.json" > /dev/null; then echo "gh falso: HTTP 403" >&2; exit 1; fi
+    jq '[.[] | select(.pr == "MERGED") | {number}]' "$FAKE/issues.json" ;;
   "issue comment")
     echo "comment $3" >> "$FAKE/gh.log"
     if [ -s "$FAKE/gh-falha" ] && [[ "$*" == *"$(cat "$FAKE/gh-falha")"* ]]; then echo "gh falso: falha de rede" >&2; exit 1; fi ;;
@@ -166,6 +172,8 @@ const issue = (number: number, state: string, labels: string, bloqueios: number[
   labels: { nodes: labels.split(",").filter(Boolean).map((name) => ({ name })) },
   blockedBy: { nodes: bloqueios.map((n) => ({ number: n })) },
 });
+
+const pr = (number: number, estado: "OPEN" | "CLOSED" | "MERGED" | "SEM_PERMISSAO") => ({ number, pr: estado });
 
 let caso = 0;
 // Roda o loop num repositório novo com as issues e o roteiro do claude dados.
@@ -279,6 +287,24 @@ test("verificação falhando depois do commit", async () => {
   assert.equal(r.rodou().split(";").length, 6, "para depois de 3 falhas seguidas");
   assert.equal(r.saida, 1);
   assert.doesNotMatch(r.ghLog(), /afk-feito/);
+});
+
+test("make verificar que falha uma vez passa ao repetir, e a nota diz o que falhou", async () => {
+  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"],
+    { verificar: `test ! -e quebrado && { [ -e "$FAKE/ja" ] || { touch "$FAKE/ja"; echo ' FAIL  src/X.test.tsx > o teste lento'; false; }; }` });
+  assert.equal(r.saida, 0);
+  assert.equal(r.feitos(), "1");
+  assert.equal(r.rodou(), "feito 1 padrão aviso;revisa 1 opus", "sem iteração a mais");
+  assert.match(r.notas(), /#1: make verificar falhou e passou ao repetir \(.*FAIL {2}src\/X\.test\.tsx > o teste lento/);
+  assert.doesNotMatch(r.notas(), /commits da iteração desfeitos/);
+});
+
+test("make verificar que estoura o prazo (124) não repete", async () => {
+  const r = await roda(1, [issue(1, "OPEN", "ready-for-agent")], ["feito 1", "revisa 1"],
+    { verificar: `echo x >> "$FAKE/verificacoes"; exit 124` });
+  assert.match(r.notas(), /make verificar falhou depois da iteração; commits da iteração desfeitos/);
+  assert.equal(readFileSync(join(process.env.FAKE!, "verificacoes"), "utf8"), "x\n", "uma tentativa só");
+  assert.equal(r.feitos(), "");
 });
 
 test("revisão quebra a verificação", async () => {
@@ -435,6 +461,41 @@ test("fila sem tickets elegíveis", async () => {
   assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#1\tespera #2\n#3\tespera #2\n");
 });
 
+test("bloqueio por PR: mesclado libera, aberto ou fechado sem merge segura (#87)", async () => {
+  const r = await roda(5, [
+    issue(1, "OPEN", "ready-for-agent", [], "Bloqueado por: #7"),
+    issue(2, "OPEN", "ready-for-agent", [], "Bloqueado por: #8"),
+    issue(3, "OPEN", "ready-for-agent", [], "Blocked by: #9"),
+    issue(4, "OPEN", "ready-for-agent", [6]),
+    issue(6, "OPEN", "ready-for-human"),
+    pr(7, "MERGED"), pr(8, "OPEN"), pr(9, "CLOSED"),
+  ], ["feito 1", "revisa 1"]);
+  assert.equal(r.saida, 0);
+  assert.equal(r.feitos(), "1");
+  assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#2\tespera #8\n#3\tespera #9\n#4\tespera #6\n");
+});
+
+test("bloqueio por PR sem permissão para ler PRs: anota uma vez e segue com o resto (#87)", async () => {
+  const r = await roda(5, [
+    issue(1, "OPEN", "ready-for-agent", [], "Bloqueado por: #7"),
+    issue(2, "OPEN", "ready-for-agent"),
+    issue(3, "OPEN", "ready-for-agent"),
+    pr(7, "MERGED"), pr(8, "SEM_PERMISSAO"),
+  ], ["feito 2", "revisa 2", "feito 3", "revisa 3"]);
+  assert.equal(r.saida, 0);
+  assert.equal(r.feitos(), "2 3");
+  assert.equal(r.notas().split("não li os PRs mesclados").length - 1, 1, "anota uma vez só");
+  assert.equal(r.ghLog().split("\n").filter((l) => l === "pr list").length, 5, "as 5 tentativas do gh, e não mais");
+  assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#1\tespera #7\n");
+});
+
+test("sem bloqueio fora das issues, os PRs não são lidos (#87)", async () => {
+  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent"), issue(2, "OPEN", "ready-for-agent", [1])],
+    ["feito 1", "revisa 1", "feito 2", "revisa 2"]);
+  assert.equal(r.feitos(), "1 2");
+  assert.doesNotMatch(r.ghLog(), /pr list/);
+});
+
 test("PR anterior sem merge", async () => {
   const r = await roda(5, [issue(1, "OPEN", "ready-for-agent,afk-feito")], []);
   assert.equal(r.rodou(), "");
@@ -525,6 +586,19 @@ test("duas vagas: verde sozinho, vermelho junto", async () => {
   assert.match(r.notas(), /make verificar falhou depois do merge/);
   assert.equal(r.feitos().split(" ").length, 1);
   assert.ok(!(r.noPR("c1") && r.noPR("c2")), "o merge vermelho sai do branch do PR");
+  const humano = r.feitos() === "1" ? "2" : "1";
+  assert.match(r.ghLog(), new RegExp(`edit ${humano} --remove-label ready-for-agent --add-label ready-for-human`));
+});
+
+test("duas vagas: make verificar que falha uma vez depois do merge passa ao repetir", async () => {
+  const r = await roda(5, doisTickets(), ["junto 1", "revisa 1", "junto 2", "revisa 2"], {
+    ...duas,
+    verificar: `test ! -e quebrado && { [ "$(git branch --show-current)" != afk/teste ] || [ -e "$FAKE/ja" ] || { touch "$FAKE/ja"; false; }; }`,
+  });
+  assert.equal(r.saida, 0);
+  assert.equal(ordenado(r.feitos()), "1 2");
+  assert.match(r.notas(), /make verificar falhou e passou ao repetir/);
+  assert.doesNotMatch(r.notas(), /falhou depois do merge/);
 });
 
 test("duas vagas: make verificar que reescreve um arquivo no integrador não dá alarme falso", async () => {

@@ -129,6 +129,22 @@ export async function loop(c: Config): Promise<number> {
     return 2;
   }
 
+  // Os PRs mesclados resolvem um "Bloqueado por: #N" (#87): a consulta das issues não traz PRs, e as
+  // dependências nativas do GitHub só aceitam issues. PR aberto ou fechado sem merge segue bloqueando.
+  // A leitura pede "Pull requests: leitura" no token; sem ela, falha uma vez na rodada, fica anotado e
+  // quem espera um PR segue esperando, como antes.
+  let semPRs = false;
+  const prsMesclados = async (): Promise<number[]> => {
+    if (semPRs) return [];
+    try {
+      return (JSON.parse(await gh("pr", "list", "--state", "merged", "--limit", "10000", "--json", "number")) as { number: number }[]).map((p) => p.number);
+    } catch (e) {
+      semPRs = true;
+      anota(`não li os PRs mesclados (${String((e as Error)?.message ?? e)}); nesta rodada, quem espera um PR segue esperando`);
+      return [];
+    }
+  };
+
   // Todas as issues, com os bloqueios nativos somados aos da linha "Bloqueado por: #N".
   const issues = async () =>
     (JSON.parse(await gh("api", "graphql", "--paginate", "--slurp", "-F", "owner={owner}", "-F", "name={repo}", "-f", `query=${CONSULTA}`)) as any[])
@@ -164,9 +180,15 @@ export async function loop(c: Config): Promise<number> {
     const todas = await issues();
     const resolvido = new Set(todas.filter((i) => i.state === "CLOSED" || i.labels.includes("afk-feito") || feitos.has(i.number)).map((i) => i.number));
     const specs = new Set([...emAndamento.values()].map((t) => t.spec).filter(Boolean));
-    const fila = todas
+    const candidatos = todas
       .filter((i) => i.state === "OPEN" && i.labels.includes("ready-for-agent") && !i.labels.includes("afk-feito"))
-      .filter((i) => !saidos.has(String(i.number)))
+      .filter((i) => !saidos.has(String(i.number)));
+    // Um bloqueador que não é issue é PR (ou não existe): só então os PRs mesclados são lidos.
+    const issuesDaFila = new Set(todas.map((i) => i.number));
+    if (candidatos.some((i) => i.bloqueios.some((b) => !issuesDaFila.has(b)))) {
+      for (const n of await prsMesclados()) resolvido.add(n);
+    }
+    const fila = candidatos
       .sort((a, b) => a.number - b.number)
       .map((i) => {
         const espera = i.bloqueios.filter((b) => !resolvido.has(b));
@@ -186,6 +208,23 @@ export async function loop(c: Config): Promise<number> {
     return r.stdout.trim();
   };
   const head = async (sb: Vaga) => sha(await git(sb, "git rev-parse HEAD"));
+  // Um make verificar vermelho roda de novo uma vez antes de contar: com as vagas dividindo o Mac, os
+  // testes da web falham sob carga, cada vez um diferente (rodada de 2026-11-04: 14 de 62, todos no
+  // vitest). Vermelho duas vezes é vermelho; o prazo estourado (124) não repete, que seria mais uma hora.
+  // Devolve o log da última tentativa. A nota leva o que falhou na primeira: os logs ficam no clone,
+  // que a próxima rodada apaga, e só o progresso.md chega à pasta principal.
+  const verifica = async (sb: Vaga, arquivo: string, ticket: string) => {
+    const r = await sb.exec(c.verificar);
+    writeFileSync(arquivo, r.stdout + r.stderr);
+    if (r.exitCode === 0 || r.exitCode === 124) return { verde: r.exitCode === 0, log: arquivo };
+    const repetido = `${arquivo}-repetido`;
+    const r2 = await sb.exec(c.verificar);
+    writeFileSync(repetido, r2.stdout + r2.stderr);
+    if (r2.exitCode !== 0) return { verde: false, log: repetido };
+    const falhas = new Set((r.stdout + r.stderr).replace(/\x1b\[[0-9;]*m/g, "").match(/^ *(FAIL|FAILED) .*$/gm)?.map((l) => l.trim().slice(0, 200)));
+    anota(`#${ticket}: make verificar falhou e passou ao repetir (${arquivo})${falhas.size ? `: ${[...falhas].slice(0, 5).join("; ")}` : ""}`);
+    return { verde: true, log: arquivo };
+  };
   // Só o que foi commitado segue adiante.
   const descarta = (sb: Vaga) => git(sb, "git reset -q --hard && git clean -fdq");
 
@@ -389,23 +428,24 @@ export async function loop(c: Config): Promise<number> {
       // iteração cuja vaga não reabriu deixa commits sem portão). Segue adiante o SHA conferido, não a
       // ref do branch do ticket, que o agente pode ter deixado em outro lugar.
       let verde = true;
+      let logDoPortao = `${log}.verificar`;
       const ponta = await head(vaga);
       if (ponta !== t.conferido) {
-        const r = await vaga.exec(c.verificar);
-        writeFileSync(`${log}.verificar`, r.stdout + r.stderr);
-        if (r.exitCode !== 0) {
+        const v = await verifica(vaga, logDoPortao, t.ticket);
+        logDoPortao = v.log;
+        if (!v.verde) {
           await git(vaga, `git reset -q --hard ${t.conferido}`);
           verde = false;
         } else {
           t.conferido = ponta;
         }
       }
-      return { status, verde, motivo, log, ponta: t.conferido };
+      return { status, verde, motivo, log, logDoPortao, ponta: t.conferido };
     } catch (e) {
       // Um erro numa vaga é falha da iteração; as falhas seguidas do ticket param o loop.
       if (e instanceof Parada) throw e;
       const m = String((e as Error)?.message ?? e);
-      return { status: "", verde: true, motivo: e instanceof VagaNaoAbriu ? `a vaga não abriu: ${m}` : `erro na vaga: ${m}`, log, ponta: "" };
+      return { status: "", verde: true, motivo: e instanceof VagaNaoAbriu ? `a vaga não abriu: ${m}` : `erro na vaga: ${m}`, log, logDoPortao: "", ponta: "" };
     } finally {
       // Um erro ao fechar não derruba o loop: o resultado da iteração já está nos commits.
       if (vaga) await fecha(vaga).catch((e) => anota(`#${t.ticket}: a vaga não fechou (${String((e as Error)?.message ?? e)})`));
@@ -467,13 +507,14 @@ export async function loop(c: Config): Promise<number> {
         }
         // Árvore igual à da ponta do ticket: o make verificar da vaga já conferiu exatamente isto.
         if ((await git(integ, `git rev-parse ${feito}^{tree}`)) !== (await git(integ, `git rev-parse ${ponta}^{tree}`))) {
+          const arquivo = `${log}-integracao.verificar`;
           const i = await integ.exec(c.instalar);
-          const r = i.exitCode === 0 ? await integ.exec(c.verificar) : i;
-          writeFileSync(`${log}-integracao.verificar`, r.stdout + r.stderr);
-          if (r.exitCode !== 0) {
+          if (i.exitCode !== 0) writeFileSync(arquivo, i.stdout + i.stderr);
+          const v = i.exitCode === 0 ? await verifica(integ, arquivo, t.ticket) : { verde: false, log: arquivo };
+          if (!v.verde) {
             await volta();
             const oque = i.exitCode === 0 ? "make verificar" : "a instalação";
-            anota(`#${t.ticket}: ${oque} falhou depois do merge (${log}-integracao.verificar)`);
+            anota(`#${t.ticket}: ${oque} falhou depois do merge (${v.log})`);
             return `${oque} falhou depois do merge`;
           }
         }
@@ -531,7 +572,7 @@ export async function loop(c: Config): Promise<number> {
       const i = ++loopa.iteracoes;
       t.iteracoes++;
       anota(`iteração ${i}: #${t.ticket}${t.mesclar ? " (merge)" : ""}`);
-      const { status, verde, motivo, log, ponta } = await itera(t, i);
+      const { status, verde, motivo, log, logDoPortao, ponta } = await itera(t, i);
 
       if (status === "erro") {
         para(2, `#${t.ticket}: erro de ambiente informado pelo agente; o loop para (veja as notas acima e ${log}*)`);
@@ -542,7 +583,7 @@ export async function loop(c: Config): Promise<number> {
       } else if (!verde || !status) {
         t.falhas++;
         anota(`#${t.ticket}: ${!verde
-          ? `make verificar falhou depois da iteração; commits da iteração desfeitos (${log}.verificar)`
+          ? `make verificar falhou depois da iteração; commits da iteração desfeitos (${logDoPortao})`
           : motivo || `iteração terminou sem <ticket>${t.ticket}</ticket> e <status> válidos (${log}.jsonl)`}`);
         if (t.falhas >= c.maxFalhas) para(1, `parada: ${t.falhas} falhas seguidas do #${t.ticket}`);
         continue;
