@@ -14,7 +14,7 @@ A administração é a área do papel Administrador, que só existe em conta loc
 | Ver o que aconteceu | Cloud Audit Logs, fora da aplicação | Tela de auditoria: quem, quando, o quê e o motivo, filtrável por pessoa, vídeo e tipo |
 | Apagar vídeo, pessoa do catálogo ou marca | Não existe (`DELETE /v1/jobs/{id}` só cancela) | Lixeira, descrita abaixo |
 
-O que **não** é do administrador: reprocessar e "indexar agora" são do Operador; aprovar correções, fundir pessoas e manter o catálogo são do Curador; os indicadores são da Diretoria. Os papéis Administrador e Diretoria já existem em `api/papeis.py`.
+O que **não** é do administrador: reprocessar o que falhou é do Editor e do Curador; aprovar correções, fundir pessoas e manter o catálogo são do Curador; os indicadores são da Diretoria. Os papéis Administrador e Diretoria já existem em `api/papeis.py`.
 
 ## Apagar com segurança
 

@@ -56,6 +56,7 @@ resource "google_bigquery_table" "eventos_de_uso" {
     { name = "status", type = "INTEGER", mode = "NULLABLE" },
     { name = "segundos_de_processamento", type = "INTEGER", mode = "NULLABLE", description = "Só no fim de processamento: do registro do Job ao fim" },
     { name = "n_resultados", type = "INTEGER", mode = "NULLABLE", description = "Só na busca: quantos vídeos trouxe; 0 é busca sem resultado" },
+    { name = "duracao_do_video_ms", type = "INTEGER", mode = "NULLABLE", description = "Só no fim de processamento: a duração do vídeo, para o painel somar as horas sem ler os momentos" },
   ])
 }
 

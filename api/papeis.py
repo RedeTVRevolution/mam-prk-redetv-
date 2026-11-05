@@ -30,10 +30,13 @@ Permissao = Literal[
 ]
 
 _CONSULTA: frozenset[Permissao] = frozenset({"decupagem.ver"})
-_EDITOR: frozenset[Permissao] = _CONSULTA | frozenset({"decupagem.editar"})
+_EDITOR: frozenset[Permissao] = _CONSULTA | frozenset(
+    {"decupagem.editar", "video.enviar", "video.reprocessar"}
+)
 PERMISSOES_DO_PAPEL: dict[Papel, frozenset[Permissao]] = {
     "consulta": _CONSULTA,
-    "operador": _CONSULTA | frozenset({"video.enviar", "video.reprocessar"}),
+    # Igual à Consulta: o envio e o reprocessamento são do Editor, do Curador e do Administrador.
+    "operador": _CONSULTA,
     "editor": _EDITOR,
     "curador": _EDITOR
     | frozenset(
@@ -44,14 +47,14 @@ PERMISSOES_DO_PAPEL: dict[Papel, frozenset[Permissao]] = {
             "catalogo.fundir",
         }
     ),
-    # Só leitura do painel de indicadores (E9), nada da decupagem.
-    "diretoria": frozenset({"painel.ver"}),
+    # Vê as decupagens (e baixa) e o painel de indicadores (E9); não envia nem edita.
+    "diretoria": _CONSULTA | frozenset({"painel.ver"}),
     # Do próprio tipo, para uma permissão nova chegar ao Administrador sozinha.
     "administrador": frozenset(get_args(Permissao)),
 }
 
-# Conta sem documento de papéis: o comportamento da E0, para ninguém perder acesso.
-PAPEIS_PADRAO: list[Papel] = ["consulta", "operador"]
+# Conta sem documento de papéis: só vê e baixa; quem envia recebe o Editor de um administrador.
+PAPEIS_PADRAO: list[Papel] = ["consulta"]
 
 
 def permissoes_de(papeis: Iterable[Papel]) -> set[Permissao]:

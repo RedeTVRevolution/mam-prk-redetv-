@@ -29,4 +29,5 @@ message EventoDeUso {
   optional int64 status = 16;
   optional int64 segundos_de_processamento = 17;
   optional int64 n_resultados = 18;
+  optional int64 duracao_do_video_ms = 19;
 }

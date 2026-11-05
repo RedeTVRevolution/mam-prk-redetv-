@@ -79,7 +79,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
     [autenticador, aoSessaoExpirada],
   )
 
-  // `/` vai ao acervo, ou ao painel para quem só vê o painel (Diretoria); o endereço pedido
+  // `/` vai ao acervo, ou ao painel para quem só vê o painel (sem `decupagem.ver`); o endereço pedido
   // antes do login fica como está e abre depois dele.
   const inicio = sessao.tipo === 'ativa' ? telaInicial(sessao.usuario.permissoes) : null
   useEffect(() => {

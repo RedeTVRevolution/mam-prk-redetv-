@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -81,7 +82,10 @@ def _concluido_sem_indexar() -> Job:
 
 
 class Mundo:
-    def __init__(self, job: Job | None, papeis: list[Papel] | None = None) -> None:
+    # `papeis=None` é a conta sem documento de papéis.
+    def __init__(
+        self, job: Job | None, papeis: Sequence[Papel] | None = ("editor",)
+    ) -> None:
         self.jobs = RepositorioEmMemoria()
         if job is not None:
             self.jobs.salvar(job)
@@ -90,7 +94,7 @@ class Mundo:
         self.janelas = JanelasEmMemoria()
         repo_papeis = RepositorioDePapeisEmMemoria()
         if papeis is not None:
-            repo_papeis.salvar("u1", papeis)
+            repo_papeis.salvar("u1", list(papeis))
         chaves = RepositorioDeChavesEmMemoria()
         self.chave = emitir_chave(
             "Playout", frozenset({"criar", "ler", "cancelar"}), MAC, chaves, BASE
@@ -230,16 +234,18 @@ def test_job_inexistente_da_404() -> None:
     assert Mundo(None).reprocessar().status_code == 404
 
 
-@pytest.mark.parametrize("papeis", [["consulta"], ["editor"], ["curador"], []])
-def test_sem_video_reprocessar_da_403(papeis: list[Papel]) -> None:
+@pytest.mark.parametrize(
+    "papeis", [None, ["consulta"], ["operador"], ["diretoria"], []]
+)
+def test_sem_video_reprocessar_da_403(papeis: list[Papel] | None) -> None:
     mundo = Mundo(_falhou_na_analise(), papeis)
 
     assert mundo.reprocessar().status_code == 403
     assert mundo.job().estado == "falhou"
 
 
-@pytest.mark.parametrize("papeis", [None, ["operador"], ["administrador"]])
-def test_operador_e_administrador_reprocessam(papeis: list[Papel] | None) -> None:
+@pytest.mark.parametrize("papeis", [["editor"], ["curador"], ["administrador"]])
+def test_editor_curador_e_administrador_reprocessam(papeis: list[Papel]) -> None:
     assert Mundo(_falhou_na_analise(), papeis).reprocessar().status_code == 202
 
 
@@ -336,10 +342,13 @@ def test_se_o_workflow_nao_dispara_o_job_volta_ao_que_era() -> None:
 def test_sem_disparo_configurado_a_api_responde_503_e_nao_muda_o_job() -> None:
     jobs = RepositorioEmMemoria()
     jobs.salvar(_falhou_na_analise())
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("u1", ["editor"])
     cliente = TestClient(
         criar_app(
             VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@b.c")}),
             jobs,
+            papeis=papeis,
             relogio=lambda: AGORA,
         )
     )
@@ -538,10 +547,10 @@ def test_sem_a_permissao_da_etapa_escolhida_da_403(papeis: list[Papel] | None) -
     assert mundo.disparo.disparos == []
 
 
-def test_curador_sem_etapa_escolhida_nao_reprocessa_o_que_falhou() -> None:
+def test_curador_sem_etapa_escolhida_reprocessa_o_que_falhou() -> None:
     mundo = Mundo(_falhou_na_analise(), ["curador"])
 
-    assert mundo.reprocessar().status_code == 403
+    assert mundo.reprocessar().status_code == 202
 
 
 def test_chave_de_sistema_nao_reprocessa_a_partir_de_etapa_escolhida() -> None:

@@ -65,16 +65,33 @@ def test_quadro_exige_decupagem_ver() -> None:
     assert _mundo([]).get(rota, headers=AUTORIZACAO).status_code == 403
 
 
-@pytest.mark.parametrize("papeis", [None, ["operador"], ["consulta", "operador"]])
-def test_quem_envia_cria_job(papeis: list[Papel] | None) -> None:
+@pytest.mark.parametrize(
+    ("papeis", "envia"),
+    [
+        (None, False),
+        (["consulta"], False),
+        (["operador"], False),
+        (["diretoria"], False),
+        (["editor"], True),
+        (["curador"], True),
+        (["administrador"], True),
+        (["consulta", "editor"], True),
+    ],
+)
+def test_so_editor_curador_e_administrador_criam_job(
+    papeis: list[Papel] | None, envia: bool
+) -> None:
     resposta = _mundo(papeis).post("/v1/jobs", json=NOVO_JOB, headers=AUTORIZACAO)
 
-    assert resposta.status_code == 202
+    assert resposta.status_code == (202 if envia else 403)
 
 
-def test_conta_sem_documento_envia_e_ve_como_na_e0() -> None:
+def test_conta_sem_documento_nao_envia_e_ve_as_decupagens() -> None:
     cliente = _mundo(None)
 
+    assert (
+        cliente.post("/v1/jobs", json=NOVO_JOB, headers=AUTORIZACAO).status_code == 403
+    )
     assert cliente.get("/v1/jobs", headers=AUTORIZACAO).status_code == 200
     assert cliente.get("/v1/jobs/j1", headers=AUTORIZACAO).status_code == 200
     assert cliente.get("/v1/jobs/j1/reproducao", headers=AUTORIZACAO).status_code == 200
@@ -91,10 +108,14 @@ def test_documento_com_lista_vazia_nao_tem_acesso_a_nada() -> None:
     assert cliente.delete("/v1/jobs/j1", headers=AUTORIZACAO).status_code == 403
 
 
-def test_editor_nao_envia_video() -> None:
-    resposta = _mundo(["editor"]).post("/v1/jobs", json=NOVO_JOB, headers=AUTORIZACAO)
+def test_diretoria_ve_e_baixa_decupagem_e_video() -> None:
+    cliente = _mundo(["diretoria"])
 
-    assert resposta.status_code == 403
+    assert cliente.get("/v1/jobs", headers=AUTORIZACAO).status_code == 200
+    assert cliente.get("/v1/jobs/j1", headers=AUTORIZACAO).status_code == 200
+    assert cliente.get("/v1/jobs/j1/reproducao", headers=AUTORIZACAO).status_code == 200
+    assert cliente.get("/v1/jobs/j1/download", headers=AUTORIZACAO).status_code == 200
+    assert cliente.get("/v1/jobs/j1/decupagem", headers=AUTORIZACAO).status_code == 200
 
 
 def test_sem_token_o_401_vem_antes_do_403() -> None:
@@ -119,6 +140,8 @@ def test_eu_devolve_papeis_e_permissoes() -> None:
             "correcao.aprovar",
             "decupagem.editar",
             "decupagem.ver",
+            "video.enviar",
+            "video.reprocessar",
             "video.reprocessar_etapa",
         ],
     }
@@ -127,8 +150,8 @@ def test_eu_devolve_papeis_e_permissoes() -> None:
 def test_eu_sem_documento_mostra_os_papeis_padrao() -> None:
     corpo = _mundo(None).get("/v1/eu", headers=AUTORIZACAO).json()
 
-    assert corpo["papeis"] == ["consulta", "operador"]
-    assert corpo["permissoes"] == ["decupagem.ver", "video.enviar", "video.reprocessar"]
+    assert corpo["papeis"] == ["consulta"]
+    assert corpo["permissoes"] == ["decupagem.ver"]
 
 
 def _mundo_admin(
@@ -201,4 +224,4 @@ def test_email_nao_verificado_nao_vira_administrador() -> None:
 def test_sem_lista_de_admins_o_comportamento_e_o_de_hoje() -> None:
     eu = _mundo_admin(None, None).get("/v1/eu", headers=AUTORIZACAO).json()
 
-    assert eu["papeis"] == ["consulta", "operador"]
+    assert eu["papeis"] == ["consulta"]

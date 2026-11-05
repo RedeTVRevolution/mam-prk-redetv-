@@ -247,7 +247,7 @@ def test_admin_de_emergencia_segue_administrador_apos_trocar_papeis() -> None:
     assert lista["uid-3"] == ["consulta", "administrador"]
     (registro,) = mundo.registros()
     assert registro.detalhes == {
-        "antes": ["consulta", "operador", "administrador"],
+        "antes": ["consulta", "administrador"],
         "depois": ["consulta", "administrador"],
     }
 

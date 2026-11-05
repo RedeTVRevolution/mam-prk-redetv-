@@ -87,9 +87,12 @@ class Ambiente:
         self.repositorio = RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
         self.relogio = Relogio()
+        papeis = RepositorioDePapeisEmMemoria()
+        papeis.salvar("u1", ["editor"])
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(),
+                papeis=papeis,
                 repositorio=self.repositorio,
                 armazenamento=self.armazenamento,
                 tamanho_maximo_bytes=tamanho_maximo,
