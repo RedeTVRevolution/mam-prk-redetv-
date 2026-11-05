@@ -1833,6 +1833,24 @@ def _com_a_ocorrencia(
     )
 
 
+def _do_mesmo_nome(
+    pessoas: list[dict[str, Any]], pessoa: dict[str, Any], c: Correcao
+) -> list[dict[str, Any]]:
+    """As outras pessoas com o nome (normalizado) que `pessoa` tinha antes da
+    correção `c`, se ela vale para a pessoa inteira (sem ocorrência e sem
+    acrescentar nada): a junção por nome as entrega como uma só."""
+    if c.ocorrencia is not None or TIPOS[c.tipo].acrescenta is not None:
+        return []
+    chave = identidade_do_nome(str(pessoa["nome"]))
+    if chave is None:
+        return []
+    return [
+        p
+        for p in pessoas
+        if p is not pessoa and identidade_do_nome(str(p["nome"])) == chave
+    ]
+
+
 def _juntar_as_do_mesmo_nome(
     resultado: dict[str, Any], renomeadas: dict[int, int]
 ) -> None:
@@ -1917,6 +1935,7 @@ def aplicar(
             item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
     identidades = [identidade_da_pessoa(p) for p in pessoas]
+    identidade_no_modelo = {id(p): i for p, i in zip(pessoas, identidades, strict=True)}
     pessoas_do_modelo = [dict(p) for p in pessoas]
     estado = estado_das(correcoes)
     # ponytail: reconciliar a cada leitura relê as pessoas do modelo por
@@ -1959,18 +1978,36 @@ def aplicar(
                 for item in _itens_com_o_id(resultado, c):
                     entrada.atender_no_item(item, c)
             continue
+        aplicadas: set[int] = set()
         for pessoa, identidade, do_modelo in zip(
             pessoas, identidades, pessoas_do_modelo, strict=True
         ):
             if not casa(c, pessoa, identidade):
                 continue
             pessoa = _com_a_ocorrencia(pessoas, pessoa, c)
+            if id(pessoa) in aplicadas:
+                continue
+            assert entrada.aplicar_na_pessoa is not None
+            # A correção da pessoa inteira vale também para as que a junção vai
+            # absorver nela (pelo nome de antes dela): quem corrige vê uma só.
+            juntas = [
+                j
+                for j in _do_mesmo_nome(pessoas, pessoa, c)
+                if not casa(c, j, identidade_no_modelo[id(j)])
+            ]
             if c.id in atendidas:
                 if entrada.atender_na_pessoa is not None:
                     entrada.atender_na_pessoa(pessoa, do_modelo, c)
+            else:
+                entrada.aplicar_na_pessoa(resultado, pessoa, c)
+            aplicadas.add(id(pessoa))
+            for junta in juntas:
+                if id(junta) not in aplicadas:
+                    entrada.aplicar_na_pessoa(resultado, junta, c)
+                    aplicadas.add(id(junta))
+        for pessoa in pessoas:
+            if id(pessoa) not in aplicadas or c.id in atendidas:
                 continue
-            assert entrada.aplicar_na_pessoa is not None
-            entrada.aplicar_na_pessoa(resultado, pessoa, c)
             if c.tipo == "pessoa.renomear":
                 renomeadas[id(pessoa)] = len(renomeadas) + 1
             if entrada.pode_esvaziar:

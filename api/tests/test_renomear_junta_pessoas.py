@@ -129,3 +129,50 @@ def test_duas_pessoas_nao_identificadas_nunca_se_juntam() -> None:
     mundo = _mundo()
 
     assert _nomes(mundo) == ["Alberto", "não identificado", "não identificado"]
+
+
+def test_trocar_de_novo_o_nome_da_pessoa_juntada_leva_a_absorvida_junto() -> None:
+    mundo = _mundo()
+    _renomear_pes05(mundo)
+
+    _corrigir(mundo, "pessoa.renomear", "pes01", "Alberto Souza")
+
+    pessoas = mundo.decupagem()["pessoas"]
+    assert [(p["id"], p["nome"]) for p in pessoas] == [
+        ("pes01", "Alberto Souza"),
+        ("pes06", "não identificado"),
+    ]
+    assert [a["inicio_ms"] for a in pessoas[0]["na_imagem"]] == [1000, 7000]
+
+
+def test_fontes_do_nome_da_pessoa_juntada_valem_para_a_absorvida() -> None:
+    mundo = _mundo()
+    _renomear_pes05(mundo)
+
+    _corrigir(mundo, "pessoa.fontes_do_nome", "pes01", json.dumps(["gc"]))
+
+    [alberto] = [p for p in mundo.decupagem()["pessoas"] if p["id"] == "pes01"]
+    assert alberto["fontes_do_nome"] == ["gc"]
+
+
+def test_a_juncao_fica_com_o_estado_do_nome_da_troca_mais_nova() -> None:
+    mundo = _mundo()
+    _corrigir(mundo, "pessoa.renomear", "pes01", "Alberto Souza")
+    _renomear_pes05(mundo, "Alberto Souza")
+
+    [alberto, _] = mundo.decupagem()["pessoas"]
+    assert alberto["id"] == "pes01"
+    assert alberto["estado_do_nome"] == "confirmado"
+    assert alberto["origem"] == "revisao"
+
+
+def test_trocar_para_nao_identificado_nao_junta() -> None:
+    mundo = _mundo()
+
+    _corrigir(mundo, "pessoa.renomear", "pes01", "não identificado")
+
+    assert [p["id"] for p in mundo.decupagem()["pessoas"]] == [
+        "pes01",
+        "pes05",
+        "pes06",
+    ]
