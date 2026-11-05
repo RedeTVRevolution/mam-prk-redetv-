@@ -81,6 +81,6 @@ O mockup usa J e L como saltos de 10 s, e isso confunde quem vem de um editor de
 
 ## 9. Poucas peças
 
-- Mantine e Tabler, que já estão no projeto. Nenhuma biblioteca de componentes, gráficos ou animação nova sem uma necessidade que essas duas não cubram.
+- Mantine e Tabler, que já estão no projeto. Nenhuma biblioteca de componentes, gráficos ou animação nova sem uma necessidade que essas duas não cubram. A única exceção até aqui são os gráficos dos relatórios e do painel da diretoria: entra o `@mantine/charts` (com o `recharts` que ele exige), que usa o mesmo tema.
 - Tema escuro, como hoje: é o padrão das salas de edição e combina com o vídeo. Tema claro só se alguém pedir.
 - Animação só para orientar (abrir um painel, 150 ms), nunca para enfeitar.

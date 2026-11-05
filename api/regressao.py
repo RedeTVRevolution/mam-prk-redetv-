@@ -143,8 +143,13 @@ class Caso(BaseModel):
         return [e.como_item() for e in self.esperado]
 
 
+def prefixo_do_caso_anotado(sha256: str) -> str:
+    """O começo do id de todo caso anotado do vídeo, qualquer que seja o trecho."""
+    return f"anotado-{sha256[:12]}-"
+
+
 def id_do_caso_anotado(sha256: str, inicio_ms: int, fim_ms: int) -> str:
-    return f"anotado-{sha256[:12]}-{inicio_ms}-{fim_ms}"
+    return f"{prefixo_do_caso_anotado(sha256)}{inicio_ms}-{fim_ms}"
 
 
 def caso_do_gabarito(
