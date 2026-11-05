@@ -295,9 +295,25 @@ def test_csv_tem_uma_linha_por_dia_e_pessoa() -> None:
         "bia@redetv.com.br",
         "2",
         "sim",
-        "2026-11-01T15:00:00Z",
+        "2026-11-01T12:00:00-03:00",
     ]
     assert len(linhas) == 4
+
+
+def test_csv_traz_dia_e_ultimo_acesso_no_mesmo_dia_de_sao_paulo() -> None:
+    # 23h30 em São Paulo já é dia 5 em UTC.
+    tarde = AcessoDoDia(
+        dia=date(2026, 11, 4),
+        uid="bia",
+        acessos=1,
+        ativo=True,
+        ultimo_acesso=datetime(2026, 11, 5, 2, 30, tzinfo=UTC),
+    )
+    mundo = Mundo(["diretoria"], ResumosEmMemoria([tarde], [], []))
+    linha = list(csv.reader(io.StringIO(mundo.get("/acessos", formato="csv").text)))[1]
+
+    assert linha[0] == "2026-11-04"
+    assert linha[5] == "2026-11-04T23:30:00-03:00"
 
 
 def test_abrir_e_baixar_gravam_a_auditoria_com_o_filtro() -> None:
