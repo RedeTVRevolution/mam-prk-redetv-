@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
-from api.auditoria import RepositorioDeAuditoriaEmMemoria
+from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.carregar_programas import carregar
 from api.catalogo import Catalogo, CatalogoEmMemoria
@@ -19,7 +20,9 @@ AUTORIZACAO = {"Authorization": "Bearer token"}
 
 
 def _cliente(
-    papeis: list[Papel], jobs: RepositorioEmMemoria | None = None
+    papeis: list[Papel],
+    jobs: RepositorioEmMemoria | None = None,
+    auditoria: RepositorioDeAuditoriaEmMemoria | None = None,
 ) -> tuple[TestClient, ProgramasEmMemoria, Catalogo]:
     programas, catalogo = cadastro_com_tv_fama()
     repositorio_de_papeis = RepositorioDePapeisEmMemoria()
@@ -32,7 +35,7 @@ def _cliente(
             papeis=repositorio_de_papeis,
             programas=programas,
             catalogo=catalogo,
-            auditoria=RepositorioDeAuditoriaEmMemoria(),
+            auditoria=auditoria or RepositorioDeAuditoriaEmMemoria(),
             relogio=lambda: datetime(2026, 11, 5, tzinfo=UTC),
         )
     )
@@ -110,6 +113,26 @@ def test_renomear_leva_os_videos_antigos_junto() -> None:
     assert jobs.obter("j2").programa == "Outro"  # type: ignore[union-attr]
     impacto = cliente.get(f"/v1/admin/programas/{id}/impacto", headers=AUTORIZACAO)
     assert impacto.json() == {"videos": 1}
+
+
+class _AuditoriaQueFalha(RepositorioDeAuditoriaEmMemoria):
+    def acrescentar(self, registro: RegistroDeAuditoria) -> None:
+        raise RuntimeError("auditoria fora do ar")
+
+
+def test_renomear_sem_auditoria_desfaz_e_nao_toca_nos_videos() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1", programa="TV Fama"))
+    cliente, programas, _ = _cliente(["editor"], jobs, _AuditoriaQueFalha())
+    id = next(p.id for p in programas.listar() if p.nome == "TV Fama")
+
+    with pytest.raises(RuntimeError):
+        cliente.put(
+            f"/v1/admin/programas/{id}", json={"nome": "Fama Hoje"}, headers=AUTORIZACAO
+        )
+
+    assert programas.obter(id).nome == "TV Fama"  # type: ignore[union-attr]
+    assert jobs.obter("j1").programa == "TV Fama"  # type: ignore[union-attr]
 
 
 def test_apagar_deixa_o_nome_nos_videos_antigos() -> None:
