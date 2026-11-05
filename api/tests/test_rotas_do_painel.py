@@ -2,7 +2,7 @@
 
 import csv
 import io
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -17,6 +17,7 @@ from api.chaves import (
 )
 from api.copia_bigquery import _parametro
 from api.main import criar_app
+from api.painel import escolhe_o_grupo, inicio_do_grupo
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.resumos_de_uso import (
     AcessoDoDia,
@@ -700,3 +701,87 @@ def test_correcoes_e_chamadas_no_bigquery_trazem_as_colunas_das_duas_tabelas() -
         _parametro("desde", "2026-11-01", "DATE"),
         _parametro("quem_id", "cms"),
     ]
+
+
+# `agrupar` (ADR 0014): os gráficos por dia viram por semana, mês ou trimestre.
+
+
+@pytest.mark.parametrize(
+    ("dias", "grupo"),
+    [
+        (0, "dia"),
+        (90, "dia"),
+        (91, "semana"),
+        (548, "semana"),
+        (549, "mes"),
+        (2557, "mes"),
+        (2558, "trimestre"),
+        (25 * 366, "trimestre"),
+    ],
+)
+def test_auto_escolhe_o_grupo_pelo_tamanho_do_periodo(dias: int, grupo: str) -> None:
+    inicio = date(2001, 1, 1)
+    periodo = [inicio, inicio + timedelta(days=dias - 1)] if dias else []
+
+    assert escolhe_o_grupo("auto", periodo) == grupo
+
+
+def test_inicio_do_grupo() -> None:
+    quinta = date(2026, 11, 5)
+
+    assert inicio_do_grupo(quinta, "dia") == quinta
+    assert inicio_do_grupo(quinta, "semana") == date(2026, 11, 2)
+    assert inicio_do_grupo(quinta, "mes") == date(2026, 11, 1)
+    assert inicio_do_grupo(quinta, "trimestre") == date(2026, 10, 1)
+    assert inicio_do_grupo(date(2026, 3, 31), "trimestre") == date(2026, 1, 1)
+
+
+def test_sem_agrupar_e_por_dia_como_antes_e_sem_o_cabecalho() -> None:
+    mundo = _diretoria()
+
+    sem = mundo.get("/acessos")
+    por_dia = mundo.get("/acessos", agrupar="dia")
+
+    assert "X-Agrupamento" not in sem.headers
+    assert por_dia.headers["X-Agrupamento"] == "dia"
+    assert sem.json() == por_dia.json()
+
+
+def test_acessos_por_semana_somam_e_contam_cada_ativo_uma_vez() -> None:
+    resposta = _diretoria().get("/acessos", agrupar="semana")
+
+    assert resposta.headers["X-Agrupamento"] == "semana"
+    r = resposta.json()
+    # 01/11 é domingo (semana de 26/10); 02 e 03 são da semana seguinte, só a bia.
+    assert r["por_dia"] == [
+        {"dia": "2026-10-26", "acessos": 3, "usuarios_ativos": 2},
+        {"dia": "2026-11-02", "acessos": 4, "usuarios_ativos": 1},
+    ]
+    assert r["total"] == {"acessos": 7, "usuarios_ativos": 2}
+
+
+def test_videos_e_buscas_agrupados_recalculam_media_e_quem_busca() -> None:
+    mundo = _diretoria()
+
+    videos = mundo.get("/videos", agrupar="mes").json()
+    buscas = mundo.get("/buscas", agrupar="trimestre").json()
+
+    assert videos["por_dia"] == [{"dia": "2026-11-01", **videos["total"]}]
+    assert buscas["por_dia"] == [{"dia": "2026-10-01", **buscas["total"]}]
+    assert buscas["total"]["usuarios_que_buscam"] == 2
+
+
+def test_agrupamento_com_pontos_demais_e_422_e_nao_grava_a_abertura() -> None:
+    resumos = ResumosEmMemoria(
+        [AcessoDoDia(date(2025, 1, 1), "bia", 1, True, None), _acesso(1, "caio", 1)]
+    )
+    mundo = Mundo(["diretoria"], resumos=resumos)
+
+    assert mundo.get("/acessos", agrupar="dia").status_code == 422
+    assert mundo.get("/acessos", agrupar="xpto").status_code == 422
+    assert mundo.auditoria.consultar(FiltroDeAuditoria()).registros == []
+    auto = mundo.get("/acessos", agrupar="auto")
+    assert auto.headers["X-Agrupamento"] == "mes"
+    assert len(auto.json()["por_dia"]) == 23  # de jan/2025 a nov/2026
+    # O CSV não agrupa: sai inteiro, sem 422.
+    assert mundo.get("/acessos", agrupar="dia", formato="csv").status_code == 200

@@ -361,6 +361,25 @@ def test_api_filtra_por_periodo_e_sistema() -> None:
     assert [s["quem_id"] for s in r["por_sistema"]] == ["playout"]
 
 
+def test_revisao_e_api_agrupam_os_dias() -> None:
+    # 01/11 é domingo: a semana de 26/10; o dia 3 já é da semana de 02/11.
+    revisao = _revisao().get("/revisao", agrupar="semana")
+    api = _api().get("/api", agrupar="semana")
+
+    assert revisao.headers["X-Agrupamento"] == api.headers["X-Agrupamento"] == "semana"
+    assert [
+        (d["dia"], d["correcoes"]) for d in revisao.json()["correcoes"]["por_dia"]
+    ] == [
+        ("2026-10-26", 4),
+        ("2026-11-02", 3),
+    ]
+    assert [
+        (d["dia"], d["chamadas"], d["videos_enviados"]) for d in api.json()["por_dia"]
+    ] == [("2026-10-26", 35, 1), ("2026-11-02", 3, 0)]
+    # Sem `agrupar`, o mesmo de antes.
+    assert len(_api().get("/api").json()["por_dia"]) == 3
+
+
 def test_api_com_programa_e_422() -> None:
     assert _api().get("/api", programa="Hoje").status_code == 422
 

@@ -24,14 +24,20 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import (
     INTERVALOS_EM_JSON,
+    LISTA_DA_MARCA_EM_SQL,
+    RANKING_EM_SQL,
     SOMA_EM_SQL,
     TIPOS_DE_INSERCAO,
     ConsultaBigQuery,
     ConsultaEmMemoria,
     Insercao,
+    InsercaoNoRelatorio,
     InsercoesDaMarca,
     MarcaNoRelatorio,
     insercoes_da_marca,
+    lista_em_python,
+    pagina_do_ranking,
+    ranking_em_python,
     somar,
 )
 from api.relatorio_de_marcas import relatorio as relatorio_das_somas
@@ -399,3 +405,154 @@ def test_a_soma_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
 
         assert sorted(do_sql, key=repr) == sorted(somar(insercoes), key=repr)
         assert relatorio_das_somas(do_sql) == relatorio(insercoes)
+
+
+# Com `limite` (ADR 0014): o ranking paginado, os totais e as inserções de uma marca.
+
+
+def test_sem_limite_a_resposta_e_a_de_antes() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia()))
+
+    resposta = cliente.get(ROTA, params={"cursor": "lixo"}, headers=AUTORIZACAO)
+
+    assert resposta.status_code == 200  # sem `limite`, o cursor não conta
+    assert "X-Proximo-Cursor" not in resposta.headers
+    corpo = resposta.json()
+    assert set(corpo) == {"programa", "desde", "ate", "tipo", "marcas"}
+    assert all("lista" in m for m in corpo["marcas"])
+
+
+def test_com_limite_pagina_o_ranking_com_os_totais_e_sem_a_lista() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia()))
+    inteiro = cliente.get(ROTA, headers=AUTORIZACAO).json()["marcas"]
+
+    primeira = cliente.get(ROTA, params={"limite": 1}, headers=AUTORIZACAO)
+    segunda = cliente.get(
+        ROTA,
+        params={"limite": 1, "cursor": primeira.headers["X-Proximo-Cursor"]},
+        headers=AUTORIZACAO,
+    )
+
+    assert primeira.json()["total"] == {
+        "marcas": 2,
+        "insercoes": 4,
+        "tempo_ms": 4_000,
+        "videos": 3,
+    }
+    assert segunda.json()["total"] == primeira.json()["total"]
+    assert "X-Proximo-Cursor" not in segunda.headers
+    paginas = primeira.json()["marcas"] + segunda.json()["marcas"]
+    assert paginas == [{k: v for k, v in m.items() if k != "lista"} for m in inteiro]
+    # O tipo filtra o ranking e o CSV continua inteiro.
+    so_intervalo = cliente.get(
+        ROTA, params={"limite": 5, "tipo": "intervalo"}, headers=AUTORIZACAO
+    ).json()
+    assert so_intervalo["total"]["insercoes"] == 2
+    csv_ = cliente.get(
+        ROTA, params={"limite": 1, "formato": "csv"}, headers=AUTORIZACAO
+    )
+    assert {r["marca"] for r in csv.DictReader(io.StringIO(csv_.text))} == {
+        "Ambev",
+        "Natura",
+    }
+
+
+def test_as_insercoes_de_uma_marca_vem_paginadas_e_com_o_nome() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia()))
+    rota = f"{ROTA}/insercoes"
+    vistas: list[dict[str, Any]] = []
+    params: dict[str, Any] = {"marca": "Ambev", "limite": 2}
+
+    while True:
+        resposta = cliente.get(rota, params=params, headers=AUTORIZACAO)
+        vistas += resposta.json()
+        if "X-Proximo-Cursor" not in resposta.headers:
+            break
+        params["cursor"] = resposta.headers["X-Proximo-Cursor"]
+
+    assert [(i["job_id"], i["nome"]) for i in vistas] == [
+        ("j1", "jornal-01.mp4"),
+        ("j2", None),
+        ("j3", None),
+    ]
+    assert cliente.get(rota, params={"marca": "Nada"}, headers=AUTORIZACAO).json() == []
+    ruins: list[dict[str, Any]] = [
+        {},  # sem a marca
+        {"marca": "Ambev", "tipo": "outro"},
+        {"marca": "Ambev", "cursor": "lixo"},
+        {"marca": "Ambev", "limite": 101},
+    ]
+    for ruim in ruins:
+        assert cliente.get(rota, params=ruim, headers=AUTORIZACAO).status_code == 422
+
+
+def test_o_ranking_e_a_lista_em_sql_dao_o_mesmo_que_em_python() -> None:
+    sorteio = random.Random(14)
+    for _ in range(100):
+        insercoes = [
+            Insercao(
+                job_id=sorteio.choice(["j1", "j2", "j3"]),
+                marca=sorteio.choice(["Ambev", "Natura", "Vivo"]),
+                tipo=sorteio.choice([*TIPOS_DE_INSERCAO, "tipo_antigo"]),
+                inicio_ms=(inicio := sorteio.randrange(0, 50)),
+                fim_ms=inicio + sorteio.randrange(0, 15),
+            )
+            for _ in range(sorteio.randrange(1, 25))
+        ]
+        banco = sqlite3.connect(":memory:")
+        banco.execute("CREATE TABLE linhas (job_id, marca, tipo, inicio_ms, fim_ms)")
+        banco.executemany(
+            "INSERT INTO linhas VALUES (?, ?, ?, ?, ?)",
+            [(i.job_id, i.marca, i.tipo, i.inicio_ms, i.fim_ms) for i in insercoes],
+        )
+        depois, limite = sorteio.randrange(0, 3), sorteio.randrange(1, 3)
+        pagina = {"posicao_de": depois, "posicao_ate": depois + limite + 1}
+
+        do_sql = pagina_do_ranking(
+            banco.execute(
+                f"WITH base AS (SELECT * FROM linhas)\n{RANKING_EM_SQL}", pagina
+            ).fetchall()
+        )
+        em_python = ranking_em_python(somar(insercoes), depois, limite)
+        if do_sql[0]:
+            assert do_sql == em_python
+        else:  # página vazia: os totais vêm zerados
+            assert em_python[0] == []
+
+        marca = sorteio.choice(["Ambev", "Natura"])
+        lista = [
+            InsercaoNoRelatorio(job_id=v[0], tipo=v[1], inicio_ms=v[2], fim_ms=v[3])
+            for v in banco.execute(
+                "WITH base AS (SELECT * FROM linhas WHERE marca = :marca)\n"
+                + LISTA_DA_MARCA_EM_SQL,
+                {**pagina, "marca": marca},
+            )
+        ]
+        assert lista == lista_em_python(somar(insercoes), marca, depois, limite)
+
+
+def test_bigquery_pede_a_pagina_e_a_marca_como_parametros() -> None:
+    transporte = Transporte({"jobComplete": True})
+    consulta = ConsultaBigQuery(CONFIG, transporte)
+
+    assert consulta.ranking(None, None, None, "intervalo", 0, 10)[0] == []
+    assert consulta.lista_da_marca("Ambev", None, None, None, None, 4, 2) == []
+
+    def parametros(corpo: dict[str, Any]) -> dict[str, str]:
+        return {
+            p["name"]: p["parameterValue"]["value"] for p in corpo["queryParameters"]
+        }
+
+    ranking, lista = transporte.corpos
+    assert parametros(ranking) == {
+        "posicao_de": "0",
+        "posicao_ate": "11",
+        "tipo_de_insercao": "intervalo",
+    }
+    assert parametros(lista) == {
+        "marca": "Ambev",
+        "posicao_de": "4",
+        "posicao_ate": "7",
+    }
+    assert "t.marca = @marca" in lista["query"]
+    assert "Ambev" not in lista["query"]
