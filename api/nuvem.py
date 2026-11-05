@@ -4,7 +4,7 @@ import json
 import random
 import secrets
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -97,6 +97,7 @@ COLECAO_DOS_TIPOS_DE_OBJETO = "tipos_de_objeto"
 COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
+_LOTE_DE_LEITURA = 500
 
 
 def objeto_do_proxy(job_id: str) -> str:
@@ -247,6 +248,19 @@ class RepositorioFirestore:
     def obter(self, job_id: str) -> Job | None:
         doc = self._colecao.document(job_id).get()
         return Job(**(doc.to_dict() or {})) if doc.exists else None
+
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        referencias = [self._colecao.document(i) for i in dict.fromkeys(job_ids)]
+        # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
+        # um pedido só com dezenas de milhares de referências arrisca o prazo.
+        return [
+            Job(**(doc.to_dict() or {}))
+            for inicio in range(0, len(referencias), _LOTE_DE_LEITURA)
+            for doc in self._cliente.get_all(
+                referencias[inicio : inicio + _LOTE_DE_LEITURA]
+            )
+            if doc.exists
+        ]
 
     def listar(self) -> list[Job]:
         docs = self._colecao.order_by(
@@ -884,6 +898,18 @@ class RepositorioDeCorrecoesFirestore:
         docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
         achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]
         return em_ordem(achadas)
+
+    def jobs_com_correcao(
+        self, desde: datetime | None = None, ate: datetime | None = None
+    ) -> set[str]:
+        consulta: Any = self._colecao
+        if desde is not None:
+            consulta = consulta.where(filter=FieldFilter("criada_em", ">=", desde))
+        if ate is not None:
+            consulta = consulta.where(filter=FieldFilter("criada_em", "<", ate))
+        return {
+            (d.to_dict() or {})["job_id"] for d in consulta.select(["job_id"]).stream()
+        }
 
     def purgar(self, job_id: str) -> None:
         for doc in self._colecao.where(

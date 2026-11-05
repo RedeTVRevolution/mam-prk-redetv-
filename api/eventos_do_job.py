@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -195,6 +195,9 @@ class RepositorioQuePublicaOFim:
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
 
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        return self._repositorio.obter_varios(job_ids)
+
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
@@ -241,6 +244,9 @@ class RepositorioQueRegistraOFim:
 
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
+
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        return self._repositorio.obter_varios(job_ids)
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
