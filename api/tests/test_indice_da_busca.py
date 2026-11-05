@@ -1,3 +1,5 @@
+from typing import Any
+
 from api.decupagem import CATEGORIAS_DE_OBJETO, Decupagem, ObjetoDoInventario
 from api.exemplos_da_busca import (
     EXEMPLOS,
@@ -277,20 +279,22 @@ def test_toda_categoria_tem_nome_em_portugues() -> None:
 
 def test_o_registro_proprio_leva_o_quadro_da_maior_caixa() -> None:
     decupagem = _com_inventario(_decupagem([], [], []))
-    pequena = {
-        "quadro": "pla1-b.jpg",
-        "x": 0.0,
-        "y": 0.0,
-        "largura": 0.1,
-        "altura": 0.1,
+
+    def caixa(quadro: str, lado: float) -> dict[str, Any]:
+        return {"quadro": quadro, "x": 0.0, "y": 0.0, "largura": lado, "altura": lado}
+
+    # Cada objeto tem a maior caixa num quadro diferente, e nem sempre na mesma posição.
+    caixas = {
+        "carro": [caixa("pla1-b.jpg", 0.1), caixa("pla1-c.jpg", 0.6)],
+        "microfone": [caixa("pla1-d.jpg", 0.6), caixa("pla1-b.jpg", 0.1)],
+        "livro": [caixa("pla1-b.jpg", 0.1), caixa("pla1-e.jpg", 0.3)],
     }
-    grande = {"quadro": "pla1-c.jpg", "x": 0.0, "y": 0.0, "largura": 0.6, "altura": 0.6}
     planos = [
         p.model_copy(
             update={
                 "inventario": [
                     ObjetoDoInventario.model_validate(
-                        {**i.model_dump(), "caixas": [pequena, grande]}
+                        {**i.model_dump(), "caixas": caixas[i.nome]}
                     )
                     for i in p.inventario
                 ]
@@ -298,15 +302,18 @@ def test_o_registro_proprio_leva_o_quadro_da_maior_caixa() -> None:
         )
         for p in decupagem.planos
     ]
-    objetos = [
-        r
+    objetos = {
+        r.tipo_do_objeto: (r.destaque, r.quadro)
         for r in registros_da_decupagem(
             "j", decupagem.model_copy(update={"planos": planos}), None, None
         )
         if r.tipo == "objeto"
-    ]
-    assert [o.destaque for o in objetos] == [3, 2, 1]
-    assert {o.quadro for o in objetos} == {"pla1-c.jpg"}
+    }
+    assert objetos == {
+        "carro": (3, "pla1-c.jpg"),
+        "microfone": (2, "pla1-d.jpg"),
+        "livro": (1, "pla1-e.jpg"),
+    }
 
 
 def test_a_roupa_curta_leva_a_categoria_e_o_dono() -> None:
