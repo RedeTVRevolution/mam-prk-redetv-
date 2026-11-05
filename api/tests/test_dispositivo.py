@@ -156,7 +156,7 @@ def test_alvos_com_gpu_reaproveitam_os_modelos_fixados_dos_alvos_de_cpu() -> Non
     dockerfile = (RAIZ / "Dockerfile").read_text()
 
     transcricao = _alvo(dockerfile, "transcricao-gpu")
-    assert "FROM transcricao AS transcricao-gpu" in dockerfile
+    assert "FROM transcricao-base AS transcricao-gpu" in dockerfile
     assert "--group transcricao-gpu" in transcricao
     assert "DISPOSITIVO=gpu" in transcricao
     assert (

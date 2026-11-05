@@ -82,7 +82,7 @@ def test_o_alvo_instala_o_grupo_objetos_e_confere_em_cpu_antes_do_usuario() -> N
     conferencia = "testar_objetos('cpu', exigir_gpu=False)"
     assert conferencia in ALVO
     assert ALVO.index(conferencia) < ALVO.index("USER nobody")
-    assert ALVO.index("COPY api/") < ALVO.index(conferencia)
+    assert ALVO.index("COPY api/__init__.py") < ALVO.index(conferencia)
 
 
 def test_o_alvo_roda_offline_com_gpu_e_sem_codigo_remoto() -> None:
