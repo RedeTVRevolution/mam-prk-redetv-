@@ -48,10 +48,13 @@ def _fecho(entrada: str) -> set[str]:
 
 def _arquivos_esperados(entrada: str) -> set[str]:
     modulos = _fecho(entrada)
+    # Os arquivos de dados de `api/` (não só `.toml`) que algum módulo do fecho cita pelo nome.
+    textos = [(API / f"{m}.py").read_text() for m in modulos]
     dados = {
-        f"api/{nome}"
-        for modulo in modulos
-        for nome in re.findall(r'"(\w+\.toml)"', (API / f"{modulo}.py").read_text())
+        f"api/{arquivo.name}"
+        for arquivo in API.iterdir()
+        if arquivo.is_file() and arquivo.suffix not in {".py", ".pyc"}
+        if any(f'"{arquivo.name}"' in texto for texto in textos)
     }
     return {f"api/{m}.py" for m in modulos} | dados
 
