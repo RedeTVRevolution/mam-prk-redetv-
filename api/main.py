@@ -599,6 +599,7 @@ def criar_app(
             ),
             faturamento,
             repositorio_de_jobs,
+            relogio,
         )
     )
     v1.include_router(
