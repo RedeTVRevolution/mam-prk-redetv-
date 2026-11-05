@@ -15,6 +15,7 @@ import type {
   CorBase,
   Decupagem,
   ObjetoDoInventario,
+  Plano,
   RelacaoDoObjeto,
 } from './decupagem.ts'
 
@@ -181,6 +182,46 @@ export function inventarioPorCategoria(
 /** A maior caixa do objeto, a que o player mostra. */
 export const maiorCaixa = (o: ObjetoDoInventario): CaixaDoQuadro =>
   o.caixas.reduce((a, b) => (b.largura * b.altura > a.largura * a.altura ? b : a))
+
+/** Um objeto de cena do vídeo: o mesmo nome, categoria e cor de vários planos viram um item, com os planos em que aparece. */
+export interface ObjetoDoVideo {
+  chave: string
+  nome: string
+  categoria: CategoriaDeObjeto
+  cor?: CorBase | null
+  marca?: string | null
+  /** A maior caixa entre as ocorrências, a que o player mostra. */
+  caixa: CaixaDoQuadro
+  planos: (Intervalo & { ambiente: string })[]
+}
+
+/** O inventário de todos os planos por categoria (ordem alfabética do nome mostrado), cada objeto uma vez. */
+export function inventarioDoVideo(
+  planos: Plano[],
+): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoVideo[] }[] {
+  const porChave = new Map<string, ObjetoDoVideo>()
+  for (const p of planos) {
+    for (const o of p.inventario ?? []) {
+      if (o.caixas.length === 0) continue
+      const chave = [nomeNormalizado(o.nome), o.categoria, o.cor ?? ''].join('|')
+      const plano = { ambiente: p.ambiente, inicio_ms: p.inicio_ms, fim_ms: p.fim_ms }
+      const achado = porChave.get(chave)
+      const caixa = maiorCaixa(o)
+      if (!achado) {
+        porChave.set(chave, { chave, nome: o.nome, categoria: o.categoria, cor: o.cor, marca: o.marca, caixa, planos: [plano] })
+        continue
+      }
+      achado.planos.push(plano)
+      achado.marca ||= o.marca
+      if (caixa.largura * caixa.altura > achado.caixa.largura * achado.caixa.altura) achado.caixa = caixa
+    }
+  }
+  const grupos = new Map<CategoriaDeObjeto, ObjetoDoVideo[]>()
+  for (const o of porChave.values()) grupos.set(o.categoria, [...(grupos.get(o.categoria) ?? []), o])
+  return [...grupos]
+    .map(([categoria, objetos]) => ({ categoria, nome: nomeDaCategoria(categoria), objetos }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+}
 
 /** A relação do dono com o objeto, como verbo depois do nome ("Mel Breia calça"): não depende do gênero do tipo. */
 const VERBO_DA_RELACAO: Record<RelacaoDoObjeto, string> = {

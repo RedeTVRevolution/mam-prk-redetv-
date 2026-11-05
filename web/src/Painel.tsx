@@ -2,7 +2,7 @@ import { ActionIcon, Badge, Box, Group, Stack, Text, Tooltip, UnstyledButton, Bu
 import { IconArrowsJoin, IconCut, IconPencil, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAtalhos } from './atalhos.ts'
-import { InventarioDoPlano, type ObjetoApontado } from './Inventario.tsx'
+import { InventarioDoPlano, InventarioDoVideo, type ObjetoApontado } from './Inventario.tsx'
 import { type Marca, ROTULO_NA_BUSCA } from './catalogacao.ts'
 import { MiniaturaDoPainel } from './Miniatura.tsx'
 import { type Intervalo, relogio, SEM_OBJETOS } from './linhaDoTempo.ts'
@@ -18,6 +18,7 @@ import {
   itensDaAba,
   itensDoPainel,
   NAO_IDENTIFICADO,
+  inventarioDoVideo,
   objetosDaAba,
   semDecupagemEm,
   type Selo,
@@ -554,6 +555,8 @@ export function Painel({
   }
 
   const objetos = useMemo(() => objetosDaAba(itens), [itens])
+  const inventario = useMemo(() => inventarioDoVideo(decupagem.planos), [decupagem])
+  const objetosDeCena = inventario.reduce((n, g) => n + g.objetos.length, 0)
 
   const { aparicoes, mencoes } = useMemo(() => {
     const daAba = itensDaAba(itens, 'pessoas')
@@ -564,7 +567,7 @@ export function Painel({
   const contagens: Record<Exclude<Aba, 'agora'>, number> = {
     pessoas: pessoas.length,
     pautas: pautas.length,
-    objetos: objetos.length,
+    objetos: objetos.length + objetosDeCena,
     comerciais: itensDaAba(itens, 'comerciais').length,
     textos: itensDaAba(itens, 'textos').length,
     planos: itensDaAba(itens, 'planos').length,
@@ -795,12 +798,13 @@ export function Painel({
       )
   } else if (aba === 'objetos') {
     conteudo =
-      objetos.length === 0 ? (
+      objetos.length + objetosDeCena === 0 ? (
         <Text size="sm" c="dimmed">
           {VAZIO_DA_ABA.objetos}
         </Text>
       ) : (
-        objetos.map(({ dados, ocorrencias }) => {
+        <>
+        {objetos.map(({ dados, ocorrencias }) => {
           const abrir = objetosAbertos.has(dados.id)
           const quantas = `${ocorrencias.length} ${ocorrencias.length === 1 ? 'ocorrência' : 'ocorrências'}`
           return (
@@ -831,7 +835,9 @@ export function Painel({
               )}
             </Stack>
           )
-        })
+        })}
+        <InventarioDoVideo grupos={inventario} aoSaltar={aoSaltar} aoApontar={aoApontarObjeto ?? (() => {})} />
+        </>
       )
   } else {
     const doTipo = itensDaAba(itens, aba)
