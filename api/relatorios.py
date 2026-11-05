@@ -175,10 +175,12 @@ def linhas_da_consulta(
         ]
         if not (token := resposta.get("pageToken")):
             return linhas
+        if "jobId" not in job:
+            raise RuntimeError(f"a consulta do {o_que} veio paginada sem o job")
         resposta = transporte(
             {
                 "jobId": job["jobId"],
-                "location": job["location"],
+                "location": job.get("location", regiao),
                 "pageToken": token,
                 "maxResults": 100_000,
             }

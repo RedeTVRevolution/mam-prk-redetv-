@@ -2,6 +2,8 @@
 
 from typing import Any
 
+import pytest
+
 from api.relatorios import linhas_da_consulta
 
 
@@ -97,3 +99,10 @@ def test_transporte_http_pede_a_pagina_seguinte_com_get_no_job(
     )
     assert (m2, url2) == ("GET", f"{copia.URL_BASE}/projects/proj/queries/job-1")
     assert kw2["params"] == {"location": "US", "pageToken": "t1"}
+
+
+def test_pagina_sem_o_job_vira_erro_de_consulta_e_nao_key_error() -> None:
+    transporte = Paginas({"jobComplete": True, "rows": [], "pageToken": "t1"})
+
+    with pytest.raises(RuntimeError, match="paginada sem o job"):
+        linhas_da_consulta(transporte, "regiao", "SELECT 1")
