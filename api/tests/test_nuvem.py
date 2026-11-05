@@ -98,6 +98,17 @@ class TestRepositorioFirestore:
     ) -> None:
         assert repositorio.obter("nao-existe") is None
 
+    def test_obter_varios_le_em_lote_so_os_que_existem(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        for id in ("a", "b", "c"):
+            repositorio.salvar(_job(id, BASE))
+
+        achados = repositorio.obter_varios(["a", "c", "c", "nao-existe"])
+
+        assert sorted(j.id for j in achados) == ["a", "c"]
+        assert repositorio.obter_varios([]) == []
+
     def test_remover_apaga_o_job_e_repetir_nao_da_erro(
         self, repositorio: RepositorioFirestore
     ) -> None:
@@ -818,6 +829,34 @@ class TestRepositorioDeCorrecoesFirestore:
 
         assert correcoes.listar("j1") == []
         assert [c.id for c in correcoes.listar("j2")] == ["c3"]
+
+    def test_jobs_com_correcao_respeita_os_limites_do_periodo(
+        self, correcoes: RepositorioDeCorrecoesFirestore
+    ) -> None:
+        for id, job_id, minutos in (
+            ("c0", "antes", 9),
+            ("c1", "no_inicio", 10),
+            ("c2", "no_meio", 15),
+            ("c3", "no_fim", 20),
+            ("c4", "depois", 21),
+        ):
+            correcoes.acrescentar(self._correcao(id, job_id, minutos))
+        desde = BASE + timedelta(minutes=10)
+        ate = BASE + timedelta(minutes=20)
+
+        assert correcoes.jobs_com_correcao(desde, ate) == {"no_inicio", "no_meio"}
+        assert correcoes.jobs_com_correcao(desde=desde) == {
+            "no_inicio",
+            "no_meio",
+            "no_fim",
+            "depois",
+        }
+        assert correcoes.jobs_com_correcao(ate=ate) == {
+            "antes",
+            "no_inicio",
+            "no_meio",
+        }
+        assert len(correcoes.jobs_com_correcao()) == 5
 
     @pytest.fixture
     def correcoes(self) -> RepositorioDeCorrecoesFirestore:

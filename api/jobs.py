@@ -537,6 +537,10 @@ class RepositorioDeJobs(Protocol):
 
     def obter(self, job_id: str) -> Job | None: ...
 
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        """Os Jobs que existem entre `job_ids`, numa leitura em lote, em qualquer ordem."""
+        ...
+
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
@@ -614,6 +618,9 @@ class RepositorioEmMemoria:
     def obter(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        return [self._jobs[i] for i in dict.fromkeys(job_ids) if i in self._jobs]
+
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
@@ -655,6 +662,9 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def obter(self, job_id: str) -> Job | None:
+        raise ServicoIndisponivel
+
+    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         raise ServicoIndisponivel
 
     def transitar(

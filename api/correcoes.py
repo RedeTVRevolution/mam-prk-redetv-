@@ -761,6 +761,13 @@ class RepositorioDeCorrecoes(Protocol):
         """Da mais antiga para a mais recente."""
         ...
 
+    def jobs_com_correcao(
+        self, desde: datetime | None = None, ate: datetime | None = None
+    ) -> set[str]:
+        """Os `job_id` com alguma correção criada em `[desde, ate)`; sem limite, de
+        qualquer data. Sem ler as correções de vídeo nenhum além do necessário."""
+        ...
+
     def purgar(self, job_id: str) -> None:
         """Apaga todas as correções do vídeo. Único caminho que apaga, e só a purga
         (`api.purga`, ADR 0010) o chama."""
@@ -778,6 +785,16 @@ class RepositorioDeCorrecoesEmMemoria:
 
     def listar(self, job_id: str) -> list[Correcao]:
         return em_ordem([c for c in self._correcoes if c.job_id == job_id])
+
+    def jobs_com_correcao(
+        self, desde: datetime | None = None, ate: datetime | None = None
+    ) -> set[str]:
+        return {
+            c.job_id
+            for c in self._correcoes
+            if (desde is None or c.criada_em >= desde)
+            and (ate is None or c.criada_em < ate)
+        }
 
     def purgar(self, job_id: str) -> None:
         self._correcoes = [c for c in self._correcoes if c.job_id != job_id]
