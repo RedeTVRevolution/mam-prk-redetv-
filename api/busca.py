@@ -11,7 +11,7 @@ import threading
 import time
 import unicodedata
 from collections import defaultdict
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
@@ -20,7 +20,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
-from api.catalogo import Catalogo
+from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
     EVIDENCIAS,
@@ -283,8 +283,13 @@ class Busca:
         armazenamento: Armazenamento,
         relogio: Callable[[], datetime],
         embedding: EmbeddingDaConsulta | None = None,
+        copia_do_catalogo: CopiaCurta[PessoaDoCatalogo] | None = None,
     ) -> None:
         self._embedding = embedding
+        # A mesma cópia do autocompletar, se a aplicação a passa: uma só recarga para todos.
+        self._copia_do_catalogo = copia_do_catalogo or CopiaCurta(
+            catalogo.todas, relogio
+        )
         self._transporte = transporte
         self._catalogo = catalogo
         self._armor = armor
@@ -332,35 +337,55 @@ class Busca:
                     catalogo=self._catalogo,
                     armor=self._armor,
                     programas=self._programas,
+                    todas=self._copia_do_catalogo.itens,
                 ),
                 ajustes or Ajustes(),
             )
         jobs: dict[str, Job | None] = {}
 
+        def carregar_jobs(ids: Iterable[str]) -> None:
+            """Lê numa leitura em lote os Jobs ainda não lidos."""
+            faltam = list(dict.fromkeys(i for i in ids if i not in jobs))
+            if not faltam:
+                return
+            lidos = {j.id: j for j in self._repositorio.obter_varios(faltam)}
+            for i in faltam:
+                jobs[i] = self._visivel_de(lidos.get(i), sistema)
+
         def job(id: str) -> Job | None:
-            if id not in jobs:
-                jobs[id] = self._visivel(id, sistema)
+            carregar_jobs([id])
             return jobs[id]
 
-        def consultar(c: Consulta) -> list[Registro]:
+        def do_indice(c: Consulta) -> list[Registro]:
             _conferir(cancelado)
             c = replace(
                 c,
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
                 limite=TETO_DE_REGISTROS,
             )
-            return [
-                r for r in self._indice.buscar(c) if r.id != proprio and job(r.job_id)
-            ]
+            return [r for r in self._indice.buscar(c) if r.id != proprio]
+
+        def consultar(c: Consulta) -> list[Registro]:
+            achados = do_indice(c)
+            carregar_jobs(r.job_id for r in achados)
+            return [r for r in achados if job(r.job_id)]
 
         nomes: dict[str, str] = {}
 
+        def carregar_nomes(ids: Iterable[str | None]) -> None:
+            """Lê numa leitura em lote os nomes ainda não lidos; sem pessoa vale `""`."""
+            faltam = list(dict.fromkeys(i for i in ids if i and i not in nomes))
+            if not faltam:
+                return
+            lidas = self._catalogo.obter_varios(faltam)
+            for i in faltam:
+                nomes[i] = lidas[i].nome if i in lidas else ""
+
         def nome(id: str | None) -> str | None:
-            if id and id not in nomes:
-                pessoa = self._catalogo.obter(id)
-                nomes[id] = pessoa.nome if pessoa else ""
+            carregar_nomes([id])
             return nomes.get(id or "") or None
 
+        carregar_nomes([*entendida.pessoas, *(o.dono for o in entendida.objetos)])
         clausulas = self._clausulas(entendida, nome)
         # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
         # entendidos já filtram, e não entram no vetor.
@@ -377,16 +402,30 @@ class Busca:
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
+        # Os Jobs de todas as cláusulas, e depois os nomes dos registros, vêm em lote.
+        brutos = [
+            [do_indice(q) for q in _com_facetas(c.consulta, facetado)]
+            for c in clausulas
+        ]
+        carregar_jobs(
+            r.job_id for da_clausula in brutos for lista in da_clausula for r in lista
+        )
         resultados = [
             [
                 r
                 for r in _intercalar(
-                    [consultar(q) for q in _com_facetas(c.consulta, facetado)]
+                    [[r for r in lista if job(r.job_id)] for lista in da_clausula]
                 )
                 if _casa(r, facetado) and _tem_a_frase(r, entendida.frase_exata)
             ]
-            for c in clausulas
+            for da_clausula in brutos
         ]
+        carregar_nomes(
+            p
+            for da_clausula in resultados
+            for r in da_clausula
+            for p in (*r.pessoas, r.dono)
+        )
         sem_facetas = all(
             x is None for x in (facetado.pessoa, facetado.marca, facetado.tipo)
         )
@@ -451,7 +490,10 @@ class Busca:
 
     def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
         """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
-        achado = self._repositorio.obter(job_id)
+        return self._visivel_de(self._repositorio.obter(job_id), sistema)
+
+    @staticmethod
+    def _visivel_de(achado: Job | None, sistema: str | None) -> Job | None:
         if achado is None or achado.estado != "concluido" or achado.lixeira:
             return None
         if sistema is not None and achado.sistema != sistema:

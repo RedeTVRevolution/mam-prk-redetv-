@@ -199,8 +199,15 @@ def criar_rotas_da_lixeira_do_catalogo(
     auditoria: RepositorioDeAuditoria,
     relogio: Callable[[], datetime],
     login_recente: timedelta,
+    descartar_pessoas: Callable[[], None] = lambda: None,
 ) -> APIRouter:
+    """`descartar_pessoas` descarta a cópia curta das pessoas (#364): quem entra na
+    lixeira ou sai dela muda o autocompletar e a grafia aproximada da busca na hora."""
     rotas = APIRouter(prefix="/admin/lixeira")
+
+    def lixeira_da_pessoa(id: str, envio: EnvioParaLixeira | None) -> None:
+        pessoas.definir_lixeira(id, envio)
+        descartar_pessoas()
 
     def entregues(filtro: FiltroDeJobs) -> Iterator[dict[str, Any]]:
         return decupagens_entregues(repositorio, correcoes, decupagens, filtro)
@@ -293,7 +300,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         fotos.apagar_prefixo(prefixo_das_fotos(achada.id))
         pessoas.definir_rostos(achada.id, [])
         envio = envio_de(autor, pedido.motivo)
-        pessoas.definir_lixeira(achada.id, envio)
+        lixeira_da_pessoa(achada.id, envio)
         try:
             registrar(
                 "pessoa",
@@ -305,7 +312,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             )
         except Exception:
             # Sem registro a pessoa volta (as fotos, não: já saíram).
-            pessoas.definir_lixeira(achada.id, None)
+            lixeira_da_pessoa(achada.id, None)
             raise
         return item_da_lixeira("pessoa", achada.id, achada.nome, envio, relogio())
 
@@ -344,7 +351,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             raise HTTPException(409, "A pessoa não está na lixeira")
         # As fotos já saíram no envio e não voltam: o registro conta 0 delas.
         impacto = impacto_da_pessoa(achada.id, 0)
-        pessoas.definir_lixeira(achada.id, None)
+        lixeira_da_pessoa(achada.id, None)
         try:
             registrar(
                 "pessoa",
@@ -355,7 +362,7 @@ def criar_rotas_da_lixeira_do_catalogo(
                 autor,
             )
         except Exception:
-            pessoas.definir_lixeira(achada.id, achada.lixeira)
+            lixeira_da_pessoa(achada.id, achada.lixeira)
             raise
         return Restaurado(id=achada.id, nome=achada.nome)
 
