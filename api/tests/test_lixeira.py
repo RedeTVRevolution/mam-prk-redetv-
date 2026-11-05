@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -301,3 +302,27 @@ def test_relatorio_nao_mostra_o_nome_do_video_na_lixeira() -> None:
     poe_o_nome_dos_videos(itens, mundo.jobs)
 
     assert [i.nome for i in itens] == [None, "outro.mp4"]
+
+
+def test_relatorio_le_o_nome_dos_videos_numa_leitura_em_lote() -> None:
+    class Contador(RepositorioEmMemoria):
+        def __init__(self) -> None:
+            super().__init__()
+            self.em_lote: list[set[str]] = []
+
+        def obter(self, job_id: str) -> Job | None:
+            raise AssertionError("um Job por vez")
+
+        def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+            self.em_lote.append(set(job_ids))
+            return super().obter_varios(job_ids)
+
+    jobs = Contador()
+    jobs.salvar(_job("j1", nome="um.mp4"))
+    jobs.salvar(_job("j2", nome="outro.mp4"))
+    itens = [SimpleNamespace(job_id=j, nome=None) for j in ("j1", "j2", "j1", "j9")]
+
+    poe_o_nome_dos_videos(itens, jobs)
+
+    assert jobs.em_lote == [{"j1", "j2", "j9"}]
+    assert [i.nome for i in itens] == ["um.mp4", "outro.mp4", "um.mp4", None]

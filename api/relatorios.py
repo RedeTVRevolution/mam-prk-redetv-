@@ -114,11 +114,16 @@ def consultar_no_bigquery(
     unnest_das_pessoas: bool = False,
     condicoes: Sequence[str] = (),
     parametros: Sequence[dict[str, Any]] = (),
+    depois_da_base: str | None = None,
 ) -> list[list[Any]]:
     """As linhas de `tipos` do programa e do período, com os valores como parâmetros.
 
     `colunas` é o que vai no SELECT (a tabela é `t`; com `unnest_das_pessoas`, as pessoas
     da linha são `p`). Devolve o texto de cada coluna, na ordem; o chamador converte.
+
+    Com `depois_da_base`, essas linhas viram a CTE `base` e o texto dado vem logo depois
+    de `WITH base AS (...)`: o BigQuery soma e devolve só o resultado somado. O texto
+    começa com `,` (mais CTEs) ou com o `SELECT` final.
     """
     lista_de_tipos = ", ".join(f"'{t}'" for t in tipos)
     onde = [f"t.tipo IN ({lista_de_tipos})", *condicoes]
@@ -133,12 +138,10 @@ def consultar_no_bigquery(
     tabela = f"`{config.projeto}.{config.dataset}.{config.tabela}` AS t"
     if unnest_das_pessoas:
         tabela += ", UNNEST(t.pessoas) AS p"
-    return linhas_da_consulta(
-        transporte,
-        config.regiao,
-        f"SELECT {colunas}\nFROM {tabela}\nWHERE {' AND '.join(onde)}",
-        parametros,
-    )
+    sql = f"SELECT {colunas}\nFROM {tabela}\nWHERE {' AND '.join(onde)}"
+    if depois_da_base is not None:
+        sql = f"WITH base AS (\n{sql}\n)\n{depois_da_base}"
+    return linhas_da_consulta(transporte, config.regiao, sql, parametros)
 
 
 def linhas_da_consulta(
@@ -175,14 +178,13 @@ class _ComVideo(Protocol):
 def poe_o_nome_dos_videos(
     itens: Iterable[_ComVideo], repositorio: RepositorioDeJobs
 ) -> None:
-    """Preenche o nome de cada vídeo do JSON, lendo cada Job uma vez só. O vídeo na lixeira
-    fica sem nome: os números do passado não mudam, mas ele some (#144)."""
-    nomes: dict[str, str | None] = {}
+    """Preenche o nome de cada vídeo do JSON, numa leitura em lote dos Jobs. O vídeo na
+    lixeira fica sem nome: os números do passado não mudam, mas ele some (#144)."""
+    itens = list(itens)
+    jobs = repositorio.obter_varios({i.job_id for i in itens})
+    nomes = {j.id: j.nome for j in jobs if j.lixeira is None}
     for item in itens:
-        if item.job_id not in nomes:
-            job = repositorio.obter(item.job_id)
-            nomes[item.job_id] = job.nome if job and job.lixeira is None else None
-        item.nome = nomes[item.job_id]
+        item.nome = nomes.get(item.job_id)
 
 
 def config_e_transporte_do_ambiente(
