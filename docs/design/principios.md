@@ -1,18 +1,20 @@
 # Princípios de design
 
+> **Redesenho em curso (05/11/2026).** A base visual nova é o [MAM_DESIGN_SYSTEM.md](MAM_DESIGN_SYSTEM.md): Tailwind, shadcn/ui, IBM Plex e o acervo também em grade de cartões. Onde ele contradiz este arquivo, ele vale. Os itens abaixo já foram ajustados.
+
 O MAM é ferramenta de trabalho de redação e acervo: o editor passa horas nele, com pressa, procurando um trecho. Estes princípios valem para toda tela e servem de régua na revisão de qualquer PR de interface.
 
 ## 1. Ferramenta, não vitrine
 
 - **Densidade de ferramenta profissional.** Texto de 13–14 px, linhas de tabela de 32–36 px, espaçamento curto. Uma lista de 30 vídeos cabe numa tela sem rolar.
-- **Tabela antes de cartão.** Cartão só onde a imagem é o conteúdo (o resultado da busca, com o quadro do momento). O acervo, a lixeira, os usuários e a auditoria são tabelas.
+- **Tabela ou cartão, conforme o conteúdo.** O acervo pode ser tabela ou grade de cartões, porque a imagem do vídeo ajuda a reconhecê-lo. A lixeira, os usuários e a auditoria continuam tabelas.
 - **Nada de número de vaidade.** Nada de "14 segmentos · 26 pessoas · 44:20" em letra grande no topo. Contagem só onde ajuda a decidir, como ao lado do nome da aba ou da faixa.
 - **Sem selos e rótulos decorativos** ("● VÍDEO ORIGINAL", "PLAYER DE ACERVO", breadcrumb que não navega).
 
 ## 2. Sem cara de interface feita por IA
 
 - **Sem gradiente, brilho, vidro fosco, sombra grande ou borda arredondada demais.** Fundo chapado, bordas de 1 px, cantos de 4–6 px.
-- **Sem emoji nem símbolo tipográfico como ícone** (▦ ♙ ◫ ◈ ♫ ↶). Um conjunto só de ícones, o Tabler, que já está instalado. Ícone sempre com rótulo ou dica, e só onde a função é universal: play, baixar, histórico, fechar.
+- **Sem emoji nem símbolo tipográfico como ícone** (▦ ♙ ◫ ◈ ♫ ↶). Um conjunto só de ícones, o Tabler, que já está instalado. Todo menu, link e botão de ícone tem ícone **e** rótulo: o texto à vista ou numa dica, mais o `aria-label`.
 - **Sem "✨ IA".** Não se anuncia que é IA; mostra-se a **evidência** (GC, fala, rosto) e a origem (modelo ou revisão).
 - **Texto direto**, no vocabulário do [GLOSSARY.md](../../GLOSSARY.md): pauta, aparição, menção, texto na tela. Nada de "insights", "metadados analisados por IA" ou "segmento".
 
@@ -81,6 +83,6 @@ O mockup usa J e L como saltos de 10 s, e isso confunde quem vem de um editor de
 
 ## 9. Poucas peças
 
-- Mantine e Tabler, que já estão no projeto. Nenhuma biblioteca de componentes, gráficos ou animação nova sem uma necessidade que essas duas não cubram. A única exceção até aqui são os gráficos dos relatórios e do painel da diretoria: entra o `@mantine/charts` (com o `recharts` que ele exige), que usa o mesmo tema.
+- Tailwind, shadcn/ui (com o Recharts dos gráficos) e Tabler, como define o [MAM_DESIGN_SYSTEM.md](MAM_DESIGN_SYSTEM.md). Nenhuma biblioteca de componentes, gráficos ou animação além dessas sem uma necessidade que elas não cubram.
 - Tema escuro, como hoje: é o padrão das salas de edição e combina com o vídeo. Tema claro só se alguém pedir.
 - Animação só para orientar (abrir um painel, 150 ms), nunca para enfeitar.
