@@ -900,7 +900,7 @@ test('decupagem sem os campos novos (1.1) abre o painel, e sem catálogo a catal
   await abrir({}, null, true)
 
   expect((await screen.findAllByText('Eleição')).length).toBeGreaterThan(0)
-  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
   await usuario.keyboard('{F2}')
 
   expect(screen.queryByRole('textbox', { name: 'Motivo' })).toBeNull()

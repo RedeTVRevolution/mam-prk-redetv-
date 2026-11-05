@@ -56,6 +56,8 @@ let desfeitas: { id: string; motivo: unknown }[] = []
 let historico: Record<string, unknown>[] = []
 let decupagemAtual: typeof DECUPAGEM = DECUPAGEM
 let pulsos: string[] = []
+let aprovacoesDaRevisao = 0
+let liberarAprovacao: (() => void) | null = null
 
 const servidor = setupServer(
   http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(decupagemAtual)),
@@ -68,6 +70,12 @@ const servidor = setupServer(
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json(historico)),
   http.get('/v1/jobs/j1/fila', () => HttpResponse.json([])),
+  http.post('/v1/jobs/j1/revisao/aprovar', async () => {
+    aprovacoesDaRevisao += 1
+    if (liberarAprovacao === null) return HttpResponse.json({ indexacao: 'pendente' }, { status: 202 })
+    await new Promise<void>((resolver) => (liberarAprovacao = resolver))
+    return HttpResponse.json({ indexacao: 'pendente' }, { status: 202 })
+  }),
   http.post('/v1/jobs/j1/revisao/pulso', async ({ request }) => {
     pulsos.push(((await request.json()) as { evento: string }).evento)
     return new HttpResponse(null, { status: 204 })
@@ -86,6 +94,9 @@ beforeEach(() => {
   correcoes.length = 0
   desfeitas = []
   pulsos = []
+  aprovacoesDaRevisao = 0
+  liberarAprovacao?.()
+  liberarAprovacao = null
   historico = []
   decupagemAtual = DECUPAGEM
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
@@ -144,7 +155,7 @@ test('sem decupagem.editar, E não faz nada e não está na lista do ?', async (
 
   await usuario.keyboard('?')
   const lista = await screen.findByRole('dialog')
-  expect(within(lista).queryByText('Catalogar')).toBeNull()
+  expect(within(lista).queryByText('Revisar')).toBeNull()
   expect(within(lista).queryByText(/catalogação/i)).toBeNull()
 })
 
@@ -154,7 +165,7 @@ test('com decupagem.editar, a lista do ? traz os atalhos da catalogação', asyn
   await usuario.keyboard('?')
   const lista = await screen.findByRole('dialog')
   for (const acao of [
-    /Ligar e desligar o modo de catalogação/,
+    /Revisar o vídeo e, dentro da revisão, aprová-la/,
     /Desfazer a última correção/,
     /Corrigir o item em foco/,
     /Não é isto/,
@@ -230,32 +241,59 @@ test('Ctrl+Z fora do modo de catalogação não desfaz nada', async () => {
   expect(desfeitas).toEqual([])
 })
 
-test('o botão Catalogar liga e desliga o modo como o E, com a dica Catalogar (E)', async () => {
+test('o botão mostra Revisar fora da revisão e Aprovar Revisão dentro, como o E', async () => {
   const usuario = await abrir(true)
-  const botao = screen.getByRole('button', { name: 'Catalogar' })
-  expect(botao.getAttribute('aria-pressed')).toBe('false')
+  const botao = screen.getByRole('button', { name: 'Revisar' })
 
   await usuario.hover(botao)
-  expect(await screen.findByText('Catalogar (E)')).toBeTruthy()
+  expect(await screen.findByText('Revisar (E)')).toBeTruthy()
 
   await usuario.click(botao)
   expect(screen.getByText('Catalogando')).toBeTruthy()
-  expect(botao.getAttribute('aria-pressed')).toBe('true')
+  expect(screen.queryByRole('button', { name: 'Revisar' })).toBeNull()
+  const aprovar = screen.getByRole('button', { name: 'Aprovar Revisão' })
+  await usuario.hover(aprovar)
+  expect(await screen.findByText('Aprovar Revisão (E)')).toBeTruthy()
 
   await usuario.keyboard('e')
   expect(screen.queryByText('Catalogando')).toBeNull()
-  expect(botao.getAttribute('aria-pressed')).toBe('false')
+  expect(screen.getByRole('button', { name: 'Revisar' })).toBeTruthy()
+  await waitFor(() => expect(aprovacoesDaRevisao).toBe(1))
 })
 
-test('sem decupagem.editar, o botão Catalogar não aparece', async () => {
+test('Aprovar Revisão sai do modo na hora, sem esperar a reindexação, e pede uma só', async () => {
+  liberarAprovacao = () => {}
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
+
+  await usuario.click(screen.getByRole('button', { name: 'Aprovar Revisão' }))
+
+  expect(screen.queryByText('Catalogando')).toBeNull()
+  const revisar = screen.getByRole('button', { name: 'Revisar' }) as HTMLButtonElement
+  expect(revisar.disabled).toBe(false)
+  await waitFor(() => expect(aprovacoesDaRevisao).toBe(1))
+  liberarAprovacao?.()
+})
+
+test('depois de aprovar, a tela mostra que o índice está sendo atualizado', async () => {
+  const usuario = await abrir(true)
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
+  historico = [{ ...correcaoDoHistorico('c1', 'ana@redetv.com.br'), na_busca: 'indexando' }]
+
+  await usuario.click(screen.getByRole('button', { name: 'Aprovar Revisão' }))
+
+  expect(await screen.findByText('Atualizando o índice…')).toBeTruthy()
+})
+
+test('sem decupagem.editar, o botão Revisar não aparece', async () => {
   await abrir(false)
-  expect(screen.queryByRole('button', { name: 'Catalogar' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Revisar' })).toBeNull()
 })
 
 test('o botão Desfazer faz o mesmo que o Ctrl+Z, com a dica que mostra Ctrl+Z', async () => {
   historico = [correcaoDoHistorico('c1', 'ana@redetv.com.br')]
   const usuario = await abrir(true)
-  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
 
   const botao = screen.getByRole('button', { name: 'Desfazer' })
   await waitFor(() => expect((botao as HTMLButtonElement).disabled).toBe(false))
@@ -271,7 +309,7 @@ test('o botão Desfazer faz o mesmo que o Ctrl+Z, com a dica que mostra Ctrl+Z',
 test('o botão Desfazer fica desabilitado sem correção do editor para desfazer', async () => {
   historico = [correcaoDoHistorico('c1', 'outro@redetv.com.br')]
   const usuario = await abrir(true)
-  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
 
   const botao = screen.getByRole('button', { name: 'Desfazer' })
   await waitFor(() => expect((botao as HTMLButtonElement).disabled).toBe(true))
@@ -675,7 +713,7 @@ test('a confirmação e o formulário mostram os atalhos nas dicas dos botões',
 /** Abre o formulário pelo lápis da linha, com o mouse: a aba, o modo e o lápis (o `n`-ésimo da aba). */
 async function corrigirPeloLapis(aba: RegExp, titulo: string, n = 0) {
   const usuario = await abrir(true)
-  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
   await usuario.click(screen.getByRole('tab', { name: aba }))
   await usuario.click(screen.getAllByRole('button', { name: `Corrigir ${titulo}` })[n])
   const formulario = within(await screen.findByRole('form', { name: new RegExp(`Corrigir ${titulo}`) }))
@@ -709,7 +747,7 @@ test('pelo clique: tipo do comercial', async () => {
 
 test('pelo clique: papel e visual da aparição, as fontes do nome e a aparição que vira menção', async () => {
   const usuario = await abrir(true)
-  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
   await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
   await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 1 aparição/ }))
   // A aparição vem antes da menção na lista da pessoa.
@@ -739,7 +777,7 @@ test('pelo clique: papel e visual da aparição, as fontes do nome e a apariçã
 
 test('pelo clique: a menção que vira aparição, com a evidência', async () => {
   const usuario = await abrir(true)
-  await usuario.click(screen.getByRole('button', { name: 'Catalogar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Revisar' }))
   await usuario.click(screen.getByRole('tab', { name: /Pessoas/ }))
   await usuario.click(await screen.findByRole('button', { name: /^Leão Lobo, 1 aparição/ }))
   await usuario.click(screen.getAllByRole('button', { name: 'Corrigir Leão Lobo' })[1])

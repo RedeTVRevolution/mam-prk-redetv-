@@ -98,6 +98,8 @@ export interface ClienteDoJob {
   desfazer(correcaoId: string, motivo: string): Promise<void>
   recusar(correcaoId: string, motivo: string): Promise<void>
   aprovar(correcaoId: string): Promise<void>
+  /** `POST /v1/jobs/{id}/revisao/aprovar`: reindexa o vídeo uma vez, em segundo plano (responde 202 na hora). */
+  aprovarRevisao(): Promise<void>
   reaplicar(itemId: string, candidato: string | null, motivo: string): Promise<void>
   descartar(itemId: string, motivo: string): Promise<void>
   /** `POST /v1/jobs/{id}/reprocessar` numa etapa escolhida (exige `video.reprocessar_etapa`). */
@@ -418,6 +420,7 @@ export function criarClienteDaApi(
           corpo: { motivo },
         }),
       aprovar: (correcaoId) => chamar(`${base}/correcoes/${correcaoId}/aprovar`, { post: true }),
+      aprovarRevisao: () => chamar(`${base}/revisao/aprovar`, { post: true }),
       reaplicar: (itemId, candidato, motivo) =>
         chamar(`${base}/fila/${itemId}/reaplicar`, {
           post: true,

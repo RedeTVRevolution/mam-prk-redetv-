@@ -423,6 +423,18 @@ class ServicoIndisponivel(Exception):
     """Porta ainda sem adaptador real."""
 
 
+class DisparoDaIndexacao(Protocol):
+    """Começa a reindexação do vídeo fora do pedido HTTP (Job `mam-indexacao`, com `JOB_ID`).
+    Levanta `ServicoIndisponivel` se não conseguiu."""
+
+    def iniciar(self, job_id: str) -> None: ...
+
+
+class DisparoDaIndexacaoIndisponivel:
+    def iniciar(self, job_id: str) -> None:
+        raise ServicoIndisponivel
+
+
 class CursorInvalido(Exception):
     """O cursor não aponta para um Job que exista."""
 
@@ -845,7 +857,7 @@ def criar_rotas(
     catalogo: Catalogo,
     marcas: CatalogoDeMarcas,
     sugestoes: RepositorioDeSugestoes,
-    reindexar: Callable[[Job], object],
+    disparo_da_indexacao: DisparoDaIndexacao,
     acessos: AcessosAoVideo,
     tipos_de_objeto: Callable[[], list[str]] = list,
     idempotencia: RepositorioDeIdempotencia | None = None,
@@ -1181,9 +1193,6 @@ def criar_rotas(
         modelo, versao_atual = _ler_modelo(job.id)
         correcao = _gravar_correcao(job, modelo, versao_atual, request, novo, autor)
         _registrar_correcao(autor, job, correcao)
-        # Pendente não vale ainda: o índice só muda quando o Curador aprovar.
-        if not correcao.exige_aprovacao:
-            reindexar(job)
         return {"id": correcao.id, "versao_decupagem": versao_atual}
 
     def _registrar_correcao(autor: Usuario, job: Job, correcao: Correcao) -> None:
@@ -1254,8 +1263,6 @@ def criar_rotas(
             correcoes.acrescentar(correcao)
             _registrar_correcao(autor, job, correcao)
         sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
-        if any(not c.exige_aprovacao for c in gravadas):
-            reindexar(job)
         return {"id": gravadas[0].id, "ids": [c.id for c in gravadas]}
 
     @rotas.post("/{job_id}/sugestoes/{sugestao_id}/recusar", status_code=204)
@@ -1310,8 +1317,34 @@ def criar_rotas(
                 " ou não casa com a versão atual",
             ) from None
         _registrar_correcao(autor, job, registro)
-        reindexar(job)
         return {"id": registro.id}
+
+    @rotas.post("/{job_id}/revisao/aprovar", status_code=202)
+    def aprovar_revisao(
+        job_id: str,
+        autor: Annotated[Usuario, Depends(_exige_editar)],
+    ) -> dict[str, str]:
+        """Fecha a revisão: dispara uma reindexação só, em segundo plano. As ações da
+        revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
+        `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, volta
+        ao que era (503), para o `pendente` não ficar preso sem execução nenhuma."""
+        job = obter_concluido(job_id, autor)
+        anterior = job.indexacao
+        if (
+            repositorio.transitar(
+                job.id,
+                "concluido",
+                {"indexacao": Indexacao(estado="pendente", em=relogio())},
+            )
+            is None
+        ):
+            raise HTTPException(409, "O vídeo saiu de concluído")
+        try:
+            disparo_da_indexacao.iniciar(job.id)
+        except Exception:
+            repositorio.transitar(job.id, "concluido", {"indexacao": anterior})
+            raise
+        return {"indexacao": "pendente"}
 
     @rotas.get("/{job_id}/fila")
     def fila_de_revisao(
@@ -1346,7 +1379,6 @@ def criar_rotas(
         except (NaoNaFila, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está mais na fila") from None
         _registrar_correcao(autor, job, registro)
-        reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
@@ -1411,8 +1443,6 @@ def criar_rotas(
         except (NaoPendente, CorrecaoJaExiste):
             raise HTTPException(409, "A correção não está pendente") from None
         _registrar_correcao(autor, job, registro)
-        if aprovada:
-            reindexar(job)
         return {"id": registro.id}
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/aprovar", status_code=201)

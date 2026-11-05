@@ -1,11 +1,13 @@
 """Indexação da Decupagem entregue no índice da busca (#118)."""
 
+import inspect
 import json
 from datetime import date, timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
 
+import api.jobs
 from api.auth import Usuario
 from api.copia_bigquery import CopiaDosMomentos
 from api.correcoes import (
@@ -22,7 +24,7 @@ from api.indice_da_busca import (
     Registro,
     registros_da_decupagem,
 )
-from api.jobs import Indexacao, Job, RepositorioEmMemoria
+from api.jobs import Indexacao, Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_correcoes import BASE
@@ -40,6 +42,29 @@ class JobsQueNaoGravam(RepositorioEmMemoria):
         if "indexacao" in mudancas:
             raise ConnectionError("Firestore fora do ar")
         return super().transitar(job_id, de, mudancas)
+
+
+class DisparoFalso:
+    """O Cloud Run: guarda o pedido; a reindexação roda quando o teste manda (`rodar_o_job`)."""
+
+    def __init__(self, falha: bool = False) -> None:
+        self.pedidos: list[str] = []
+        self.falha = falha
+
+    def iniciar(self, job_id: str) -> None:
+        if self.falha:
+            raise ServicoIndisponivel
+        self.pedidos.append(job_id)
+
+
+class IndiceQueConta(IndiceEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.gravacoes = 0
+
+    def gravar(self, job_id: str, registros: list[Registro]) -> None:
+        self.gravacoes += 1
+        super().gravar(job_id, registros)
 
 
 class IndiceQueFalha(IndiceEmMemoria):
@@ -67,7 +92,9 @@ class Mundo:
         indice: IndiceEmMemoria | None = None,
         copia: CopiaDosMomentos | None = None,
         modelo: dict[str, Any] = MODELO,
+        disparo: DisparoFalso | None = None,
     ) -> None:
+        self.disparo = disparo or DisparoFalso()
         self.indice = indice or IndiceEmMemoria()
         self.tipos = TiposDeObjetoEmMemoria()
         self.copia: Any = copia
@@ -91,6 +118,7 @@ class Mundo:
                 indice=self.indice,
                 tipos_de_objeto=self.tipos,
                 copia=copia,
+                disparo_da_indexacao=self.disparo,
                 relogio=lambda: BASE,
             )
         )
@@ -107,6 +135,13 @@ class Mundo:
             copia=self.copia,
             tipos_de_objeto=self.tipos,
         )
+
+    def aprovar_revisao(self) -> Any:
+        return self.cliente.post("/v1/jobs/j1/revisao/aprovar", headers=AUTORIZACAO)
+
+    def rodar_o_job(self) -> None:
+        """O que o `mam-indexacao` faz quando o disparo o inicia."""
+        self.reindexar()
 
     def corrigir_a_fala(self, texto: str) -> Any:
         versao = versao_do_modelo(json.dumps(MODELO).encode())
@@ -260,45 +295,105 @@ def test_reindexar_todos_pega_so_os_concluidos() -> None:
     assert resultado == {"j1": "indexado"}
 
 
-def test_correcao_aprovada_reindexa_o_video_com_o_texto_novo() -> None:
-    mundo = Mundo()
+def test_correcao_responde_sem_reindexar_e_so_o_aprovar_revisao_atualiza_o_indice() -> (
+    None
+):
+    indice = IndiceQueConta()
+    mundo = Mundo(indice)
     mundo.reindexar()
+    gravacoes = indice.gravacoes
     assert mundo.textos_das_falas() == ["Boa noite a todos"]
 
     resposta = mundo.corrigir_a_fala("Boa noite, Brasil")
 
     assert resposta.status_code == 201
+    assert indice.gravacoes == gravacoes
+    assert mundo.textos_das_falas() == ["Boa noite a todos"]
+    assert mundo.disparo.pedidos == []
+
+    aprovada = mundo.aprovar_revisao()
+    assert aprovada.status_code == 202
+    assert mundo.disparo.pedidos == ["j1"]
+    assert mundo.indexacao()["estado"] == "pendente"
+    mundo.rodar_o_job()
     assert mundo.textos_das_falas() == ["Boa noite, Brasil"]
     assert mundo.indice.total() == 6
     assert mundo.indexacao()["estado"] == "indexado"
 
 
-def test_correcao_pendente_nao_reindexa_ate_ser_aprovada() -> None:
-    mundo = Mundo()
+def test_nenhuma_acao_da_revisao_grava_no_indice() -> None:
+    indice = IndiceQueConta()
+    mundo = Mundo(indice)
     mundo.reindexar()
+    gravacoes = indice.gravacoes
     mundo.aprovacao.definir(frozenset({"fala.texto"}))
 
     cid = mundo.corrigir_a_fala("Boa noite, Brasil").json()["id"]
-
-    assert mundo.textos_das_falas() == ["Boa noite a todos"]
-    resposta = mundo.cliente.post(
+    aprovada = mundo.cliente.post(
         f"/v1/jobs/j1/correcoes/{cid}/aprovar", headers=CURADOR
     )
-    assert resposta.status_code == 201
-    assert mundo.textos_das_falas() == ["Boa noite, Brasil"]
-
-
-def test_falha_do_indice_numa_correcao_nao_derruba_a_correcao() -> None:
-    mundo = Mundo(IndiceQueFalha())
-
-    resposta = mundo.corrigir_a_fala("Boa noite, Brasil")
-
-    assert resposta.status_code == 201
-    assert mundo.indexacao()["estado"] == "falhou"
-    assert (
-        mundo.cliente.get("/v1/jobs/j1", headers=AUTORIZACAO).json()["estado"]
-        == "concluido"
+    desfeita = mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{cid}/desfazer",
+        json={"motivo": "voltei atrás"},
+        headers=AUTORIZACAO,
     )
+
+    assert (aprovada.status_code, desfeita.status_code) == (201, 201)
+    assert indice.gravacoes == gravacoes
+    assert mundo.textos_das_falas() == ["Boa noite a todos"]
+
+
+def test_aprovar_revisao_que_nao_dispara_volta_o_estado_e_da_503() -> None:
+    mundo = Mundo(disparo=DisparoFalso(falha=True))
+    mundo.reindexar()
+
+    resposta = mundo.aprovar_revisao()
+
+    assert resposta.status_code == 503
+    assert mundo.indexacao()["estado"] == "indexado"
+
+
+def test_aprovar_revisao_volta_o_estado_mesmo_com_erro_inesperado_do_disparo() -> None:
+    class DisparoQueQuebra(DisparoFalso):
+        def iniciar(self, job_id: str) -> None:
+            raise RuntimeError("sem credencial")
+
+    mundo = Mundo(disparo=DisparoQueQuebra())
+    mundo.reindexar()
+    cliente = TestClient(mundo.cliente.app, raise_server_exceptions=False)
+
+    resposta = cliente.post("/v1/jobs/j1/revisao/aprovar", headers=AUTORIZACAO)
+
+    assert resposta.status_code == 500
+    assert mundo.indexacao()["estado"] == "indexado"
+
+
+def test_nenhuma_rota_dos_jobs_reindexa_dentro_do_pedido() -> None:
+    # As rotas da revisão (corrigir, aceitar sugestão, desfazer, aprovar ou recusar,
+    # descartar e reaplicar da fila) só gravam Correções: a reindexação é do Job
+    # `mam-indexacao`, que o "Aprovar Revisão" dispara (#328).
+    assert "reindexar" not in inspect.signature(api.jobs.criar_rotas).parameters
+    assert "reindexar" not in inspect.getsource(api.jobs)
+
+
+def test_aprovar_revisao_pede_permissao_de_editar() -> None:
+    mundo = Mundo()
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("u1", ["consulta"])
+    cliente = TestClient(
+        criar_app(
+            _Verificador(),
+            mundo.jobs,
+            mundo.armazenamento,
+            papeis=papeis,
+            disparo_da_indexacao=mundo.disparo,
+        )
+    )
+
+    resposta = cliente.post("/v1/jobs/j1/revisao/aprovar", headers=AUTORIZACAO)
+
+    assert resposta.status_code == 403
+    assert mundo.disparo.pedidos == []
 
 
 def _na_busca(mundo: Mundo) -> list[str]:
@@ -306,9 +401,14 @@ def _na_busca(mundo: Mundo) -> list[str]:
     return [item["na_busca"] for item in historico]
 
 
-def test_correcao_gravada_aparece_na_busca_no_historico() -> None:
+def test_correcao_gravada_so_aparece_na_busca_depois_de_aprovar_a_revisao() -> None:
     mundo = Mundo()
+    mundo.reindexar()
     mundo.corrigir_a_fala("Boa noite, Brasil")
+
+    mundo.aprovar_revisao()
+    assert _na_busca(mundo) == ["indexando"]
+    mundo.rodar_o_job()
 
     assert _na_busca(mundo) == ["na_busca"]
 
@@ -326,6 +426,8 @@ def test_correcao_mostra_indexando_enquanto_a_indexacao_roda() -> None:
 def test_correcao_fica_so_salva_se_a_indexacao_falhou() -> None:
     mundo = Mundo(IndiceQueFalha())
     mundo.corrigir_a_fala("Boa noite, Brasil")
+    mundo.aprovar_revisao()
+    mundo.rodar_o_job()
 
     assert _na_busca(mundo) == ["salva"]
 
@@ -348,9 +450,13 @@ def test_correcao_pendente_de_aprovacao_so_entra_na_busca_depois_de_aprovada() -
     mundo.reindexar()
     mundo.aprovacao.definir(frozenset({"fala.texto"}))
     cid = mundo.corrigir_a_fala("Boa noite, Brasil").json()["id"]
+    mundo.aprovar_revisao()
+    mundo.rodar_o_job()
     assert _na_busca(mundo) == ["salva"]
 
     mundo.cliente.post(f"/v1/jobs/j1/correcoes/{cid}/aprovar", headers=CURADOR)
+    mundo.aprovar_revisao()
+    mundo.rodar_o_job()
 
     assert "na_busca" in _na_busca(mundo)
 
@@ -471,9 +577,13 @@ def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
         "fim_ms": 4000,
     }
     assert corrigir("objeto.acrescentar", novo).status_code == 201
+    assert mundo.aprovar_revisao().status_code == 202
+    mundo.rodar_o_job()
     assert buscar("SA") == [("sandália", 1)]
 
     atributos = {"tipo": "scarpin", "cor_base": MODELO["objetos"][0]["cor_base"]}
     assert corrigir("objeto.atributos", atributos, "obj01").status_code == 201
+    assert mundo.aprovar_revisao().status_code == 202
+    mundo.rodar_o_job()
     assert buscar("scar") == [("scarpin", 1)]
     assert buscar("vest") == [("vestido", vestidos - 1)]

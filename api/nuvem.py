@@ -1071,6 +1071,41 @@ class DisparoPeloWorkflows:
             raise ServicoIndisponivel from e
 
 
+class DisparoDaIndexacaoNoCloudRun:
+    """Roda o Job `mam-indexacao` com `JOB_ID`, pela API REST do Cloud Run, sem esperar
+    o fim: a resposta do `:run` é a operação, e a reindexação segue sozinha."""
+
+    def __init__(self, projeto: str, regiao: str, job: str, sessao: Any = None) -> None:
+        self._url = (
+            f"https://run.googleapis.com/v2/projects/{projeto}/locations/{regiao}"
+            f"/jobs/{job}:run"
+        )
+        self._sessao = sessao
+
+    def _sessao_autenticada(self) -> Any:
+        if self._sessao is None:
+            credenciais, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            sessao: Any = google.auth.transport.requests.AuthorizedSession
+            self._sessao = sessao(credenciais)
+        return self._sessao
+
+    def iniciar(self, job_id: str) -> None:
+        corpo = {
+            "overrides": {
+                "containerOverrides": [{"env": [{"name": "JOB_ID", "value": job_id}]}]
+            }
+        }
+        try:
+            resposta = self._sessao_autenticada().post(
+                self._url, json=corpo, timeout=30
+            )
+            resposta.raise_for_status()
+        except requests.RequestException as e:
+            raise ServicoIndisponivel from e
+
+
 def assinatura_pelo_iam() -> dict[str, Any]:
     """Assinatura pedida ao IAM pela conta do serviço, sem chave em arquivo."""
     credenciais: Any

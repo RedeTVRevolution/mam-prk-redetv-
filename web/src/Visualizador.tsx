@@ -514,11 +514,20 @@ export default function Visualizador({
     setTrecho({ inicio_ms: atualMs, fim_ms: fim })
   }
 
-  /** `E`: liga e desliga o modo; o trecho e as pautas marcados não sobrevivem à saída do modo. */
+  /**
+   * `E`: entra na revisão ou, dentro dela, a aprova. Aprovar sai do modo na hora e pede a
+   * reindexação em segundo plano (#328): a tela não espera por ela, só acompanha o histórico.
+   */
   function alternarCatalogacao() {
     descartarTrecho()
     setPautasMarcadas(new Set())
     setEstrutura(null)
+    if (catalogando) {
+      clienteDoJob.aprovarRevisao().then(
+        () => clienteDoJob.historico().then(setHistorico, () => {}),
+        () => mostrarAviso('Não foi possível atualizar o índice: aprove a revisão de novo.'),
+      )
+    }
     setCatalogando((c) => !c)
   }
 
@@ -850,7 +859,7 @@ export default function Visualizador({
       ? [
           {
             tecla: 'E',
-            acao: 'Ligar e desligar o modo de catalogação',
+            acao: 'Revisar o vídeo e, dentro da revisão, aprová-la',
             grupo: GRUPO_DA_CATALOGACAO,
             casa: (e: KeyboardEvent) => tecla(e, 'e'),
             executar: alternarCatalogacao,
@@ -1481,16 +1490,20 @@ export default function Visualizador({
             <>
           {podeEditar && (
             <Group gap="xs" mb="xs" wrap="nowrap">
-              <Tooltip label="Catalogar (E)">
+              <Tooltip label={catalogando ? 'Aprovar Revisão (E)' : 'Revisar (E)'}>
                 <Button
                   size="compact-sm"
                   variant={catalogando ? 'filled' : 'default'}
-                  aria-pressed={catalogando}
                   onClick={alternarCatalogacao}
                 >
-                  Catalogar
+                  {catalogando ? 'Aprovar Revisão' : 'Revisar'}
                 </Button>
               </Tooltip>
+              {!catalogando && aindaIndexando(historico) && (
+                <Text size="xs" c="dimmed" role="status">
+                  Atualizando o índice…
+                </Text>
+              )}
               {catalogando && (
                 <>
                   <Text size="sm" fw={600}>
