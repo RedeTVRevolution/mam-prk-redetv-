@@ -55,9 +55,9 @@ variable "regiao_gpu" {
 # Falta de GPU ou de cota: a mesma espera vale para o Workflows (#239) e para o teste
 # depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*). O Job com GPU
 # tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
-# anterior vezes `gpu_fator_da_espera`, com teto em `gpu_espera_maxima_s`, até a soma das
-# esperas passar de `espera_gpu_minutos`; o número de tentativas sai dessa conta. Com os
-# padrões: 1, 2 e depois 4 minutos (teto de 4), nove tentativas em 27 minutos. Só depois
+# anterior vezes `gpu_fator_da_espera`, com teto em `gpu_espera_maxima_s`, enquanto a soma
+# das esperas não passa de `espera_gpu_minutos`; o número de tentativas sai dessa conta. Com
+# os padrões: esperas de 1, 2 e seis de 4 minutos, nove tentativas em 27 minutos. Só depois
 # disso o Workflows roda o Job em CPU.
 variable "espera_gpu_minutos" {
   description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
