@@ -176,6 +176,15 @@ def criar_rotas_dos_programas(
             desfazer()
             raise
 
+    def religar_videos(de: str, para: str) -> None:
+        """O Job guarda o nome do programa: renomear leva os vídeos antigos junto."""
+        for job in jobs.listar():
+            if job.programa == de:
+                jobs.trocar(
+                    job.id,
+                    lambda j: {"programa": para} if j.programa == de else None,
+                )
+
     @rotas.get("")
     def listar(
         _autor: Annotated[Usuario, Depends(_exige_editar_programas)],
@@ -220,6 +229,8 @@ def criar_rotas_dos_programas(
             depois,
             lambda: programas.salvar(antes),
         )
+        if antes.nome != depois.nome:
+            religar_videos(antes.nome, depois.nome)
         return publico(depois)
 
     @rotas.get("/{id}/impacto")

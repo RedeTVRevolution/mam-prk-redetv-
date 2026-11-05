@@ -13,12 +13,13 @@ from api.programas import ProgramasEmMemoria, perfis_dos_programas
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
+from api.tests.test_lixeira import _job
 
 AUTORIZACAO = {"Authorization": "Bearer token"}
 
 
 def _cliente(
-    papeis: list[Papel],
+    papeis: list[Papel], jobs: RepositorioEmMemoria | None = None
 ) -> tuple[TestClient, ProgramasEmMemoria, Catalogo]:
     programas, catalogo = cadastro_com_tv_fama()
     repositorio_de_papeis = RepositorioDePapeisEmMemoria()
@@ -26,7 +27,7 @@ def _cliente(
     cliente = TestClient(
         criar_app(
             VerificadorFalso({"token": Usuario(uid="u1", email="a@b.c")}),
-            RepositorioEmMemoria(),
+            jobs or RepositorioEmMemoria(),
             ArmazenamentoFalso(),
             papeis=repositorio_de_papeis,
             programas=programas,
@@ -91,6 +92,36 @@ def test_editor_cria_renomeia_e_apaga_com_auditoria() -> None:
     assert programas.obter(id) is None
     auditoria = cliente.get("/v1/admin/auditoria", headers=AUTORIZACAO)
     assert auditoria.status_code == 403  # o Editor não vê a tela da auditoria
+
+
+def test_renomear_leva_os_videos_antigos_junto() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1", programa="TV Fama"))
+    jobs.salvar(_job("j2", programa="Outro"))
+    cliente, programas, _ = _cliente(["editor"], jobs)
+    id = next(p.id for p in programas.listar() if p.nome == "TV Fama")
+
+    renomeado = cliente.put(
+        f"/v1/admin/programas/{id}", json={"nome": "Fama Hoje"}, headers=AUTORIZACAO
+    )
+
+    assert renomeado.status_code == 200
+    assert jobs.obter("j1").programa == "Fama Hoje"  # type: ignore[union-attr]
+    assert jobs.obter("j2").programa == "Outro"  # type: ignore[union-attr]
+    impacto = cliente.get(f"/v1/admin/programas/{id}/impacto", headers=AUTORIZACAO)
+    assert impacto.json() == {"videos": 1}
+
+
+def test_apagar_deixa_o_nome_nos_videos_antigos() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1", programa="TV Fama"))
+    cliente, programas, _ = _cliente(["editor"], jobs)
+    id = next(p.id for p in programas.listar() if p.nome == "TV Fama")
+
+    cliente.delete(f"/v1/admin/programas/{id}", headers=AUTORIZACAO)
+
+    assert jobs.obter("j1").programa == "TV Fama"  # type: ignore[union-attr]
+    assert "TV Fama" not in cliente.get("/v1/programas", headers=AUTORIZACAO).json()
 
 
 def test_nome_repetido_da_409_e_pessoa_fora_do_catalogo_da_422() -> None:
