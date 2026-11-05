@@ -97,9 +97,22 @@ gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
   --gcs-source-staging-dir "gs://$(tf output -raw bucket_fontes)/fontes" \
   --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_TRANSCRICAO=$TRANSCRICAO,_OCR=$OCR,_CACHE=$CACHE,_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_OBJETOS_GPU=$OBJETOS_GPU,_CACHE_GPU=$CACHE_GPU,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
-# Pelo digest que o Cloud Build enviou, para que um rebuild com o mesmo commit
-# também gere revisão nova. Daqui em diante nada é recompilado.
-digest() { echo "${1%:*}@$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)')"; }
+# Pelo digest da imagem linux/amd64, não pelo do índice OCI que o buildx envia: o índice
+# leva a atestação de proveniência SLSA, com a hora do build, e muda a cada build mesmo com a
+# imagem igual. Mesma imagem, mesmo digest, nenhuma revisão nova e nenhum teste de GPU à toa;
+# a atestação continua no registro. Daqui em diante nada é recompilado.
+amd64_do_indice() { # <digest do índice>; lê o índice (JSON) na entrada; sem índice, o próprio digest
+  local amd64
+  amd64=$(jq -r '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | first // empty')
+  echo "${amd64:-$1}"
+}
+digest() { # <repo:tag>
+  local repo=${1%:*} tag=${1##*:} indice
+  indice=$(curl -fsS -H @<(echo "Authorization: Bearer $(gc auth print-access-token)") \
+    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json' \
+    "https://${repo%%/*}/v2/${repo#*/}/manifests/$tag")
+  echo "$repo@$(amd64_do_indice "$(gc artifacts docker images describe "$1" --format='value(image_summary.digest)')" <<<"$indice")"
+}
 IMAGEM=$(digest "$WEB")
 IMAGEM_VALIDACAO=$(digest "$VALIDACAO")
 IMAGEM_TRANSCRICAO=$(digest "$TRANSCRICAO")

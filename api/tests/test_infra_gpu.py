@@ -1,5 +1,6 @@
 """Infraestrutura dos Jobs com GPU (#238): Terraform, build e publicação, sem nuvem."""
 
+import json
 import re
 import shlex
 import subprocess
@@ -278,3 +279,53 @@ def test_job_no_estado_que_o_describe_nao_acha_para_a_publicacao() -> None:
     estado = "module.mam.google_cloud_run_v2_job.ocr_gpu"
     codigo, _ = _rodar_imagem_do_job(estado, describe_falha=True)
     assert codigo != 0
+
+
+def _amd64_do_indice(indice: str, digest_do_indice: str = "sha256:indice") -> str:
+    """Roda a amd64_do_indice do deploy-dev.sh com o índice na entrada."""
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    inicio = deploy.index("amd64_do_indice() {")
+    funcao = deploy[inicio : deploy.index("\n}\n", inicio) + 3]
+    feito = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -euo pipefail\n{funcao}\namd64_do_indice {digest_do_indice}",
+        ],
+        input=indice,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return feito.stdout.strip()
+
+
+def test_o_digest_publicado_e_o_da_imagem_amd64_e_nao_o_do_indice_com_a_atestacao() -> (
+    None
+):
+    indice = json.dumps(
+        {
+            "manifests": [
+                {
+                    "digest": "sha256:amd64",
+                    "platform": {"os": "linux", "architecture": "amd64"},
+                },
+                {
+                    "digest": "sha256:atestacao",
+                    "platform": {"os": "unknown", "architecture": "unknown"},
+                },
+            ]
+        }
+    )
+    assert _amd64_do_indice(indice) == "sha256:amd64"
+
+
+def test_imagem_sem_indice_fica_com_o_proprio_digest() -> None:
+    manifesto = json.dumps({"schemaVersion": 2, "layers": []})
+    assert _amd64_do_indice(manifesto) == "sha256:indice"
+
+
+def test_o_comentario_do_deploy_diz_que_mesma_imagem_nao_gera_revisao() -> None:
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    assert "também gere revisão nova" not in deploy
+    assert "nenhuma revisão nova" in deploy
