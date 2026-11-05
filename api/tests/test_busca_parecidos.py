@@ -1,5 +1,7 @@
 """Planos parecidos com este (#271): o vetor do quadro já indexado, sem enviar imagem."""
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -118,3 +120,21 @@ def test_a_lista_dos_planos_com_vetor_do_video() -> None:
 
     assert r.status_code == 200
     assert r.json() == {"planos": [1, 2, 3]}
+
+
+def test_os_parecidos_vem_em_paginas_por_cursor_e_cursor_invalido_da_422() -> None:
+    c, m = cliente(["consulta"], embedding_da_consulta=EmbeddingDeTexto([0.0, 0.0]))
+    m.com(job("j1"), plano("j1:plano:1", [1.0, 0.0]))
+    for j in ("j2", "j3"):
+        m.com(job(j), replace(plano(f"{j}:plano:1", [0.9, 0.1]), job_id=j))
+    params: dict[str, str | int] = {"job": "j1", "plano": 1, "limite": 1}
+
+    r1 = c.get(ROTA, params=params, headers=AUTORIZACAO)
+    cursor = r1.headers["X-Proximo-Cursor"]
+    r2 = c.get(ROTA, params=params | {"cursor": cursor}, headers=AUTORIZACAO)
+    ruim = c.get(ROTA, params=params | {"cursor": "nao-existe"}, headers=AUTORIZACAO)
+
+    videos = [r.json()["videos"][0]["job_id"] for r in (r1, r2)]
+    assert sorted(videos) == ["j2", "j3"]
+    assert "X-Proximo-Cursor" not in r2.headers
+    assert ruim.status_code == 422

@@ -93,6 +93,7 @@ COLECAO_DE_JOBS = "jobs"
 COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_IDEMPOTENCIA = "chaves_de_idempotencia"
+COLECAO_DAS_LISTAS_DA_BUSCA = "listas_da_busca"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
@@ -500,6 +501,24 @@ class RepositorioDeIdempotenciaFirestore:
                 continue
             return
         raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
+
+class ListasDaBuscaFirestore:
+    """Um documento por busca paginada (#426); o `expira_em` é o campo da política de TTL."""
+
+    def __init__(
+        self, cliente: firestore.Client, colecao: str = COLECAO_DAS_LISTAS_DA_BUSCA
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def gravar(self, documento: dict[str, Any]) -> str:
+        referencia = self._colecao.document()  # id aleatório de 20 letras e números
+        referencia.set(documento)
+        return str(referencia.id)
+
+    def ler(self, id: str) -> dict[str, Any] | None:
+        doc = self._colecao.document(id).get()
+        return (doc.to_dict() or {}) if doc.exists else None
 
 
 class RepositorioDeWebhooksFirestore:

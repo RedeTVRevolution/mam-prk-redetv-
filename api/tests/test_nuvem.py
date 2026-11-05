@@ -24,6 +24,13 @@ from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
+from api.busca import (
+    Entendida,
+    Facetas,
+    ListaDaBusca,
+    MomentoGuardado,
+    VideoGuardado,
+)
 from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
@@ -42,6 +49,7 @@ from api.nuvem import (
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ListasDaBuscaFirestore,
     ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
@@ -1710,3 +1718,37 @@ def test_troca_da_reserva_vencida_repete_quando_o_firestore_esgota_as_tentativas
 
     assert (reserva.job_id, nova) == ("novo", True)
     assert chamadas == 3
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+def test_a_lista_da_busca_volta_igual_e_id_desconhecido_da_none() -> None:
+    cliente = firestore.Client(project="teste", credentials=_anonima())
+    listas = ListasDaBuscaFirestore(cliente, f"listas-{uuid.uuid4().hex}")
+    lista = ListaDaBusca(
+        dono="u1",
+        impressao="ab" * 32,
+        criado_em=BASE,
+        expira_em=BASE + timedelta(minutes=15),
+        entendida=Entendida(evidencias=["fala"], programa=None, desde=None, ate=None),
+        sem_aparicoes=[],
+        plano_b=False,
+        facetas=Facetas(),
+        termos=["vestido"],
+        videos=[
+            VideoGuardado(
+                job_id="j1",
+                momentos=[
+                    MomentoGuardado(
+                        tipo="fala", inicio_ms=0, fim_ms=1, motivo="Fala", quadro=None
+                    )
+                ],
+            )
+        ],
+    )
+
+    id = listas.gravar(lista.para_documento())
+
+    assert id.isascii() and id.isalnum()
+    lido = listas.ler(id)
+    assert lido is not None and ListaDaBusca.do_documento(lido) == lista
+    assert listas.ler("nao0existe") is None

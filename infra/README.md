@@ -116,6 +116,10 @@ Os resumos de uso (#280, `modulos/mam/resumos_de_uso.tf` e `.sql`) são quatro t
 
 O `POST /v1/jobs` aceita `Idempotency-Key`. A reserva da chave é um documento da coleção `chaves_de_idempotencia` (`api/idempotencia.py`), e a política de TTL de `modulos/mam/idempotencia.tf` apaga o documento 48 h depois (`expira_em`). O TTL do Firestore não é imediato (pode levar até um dia a mais), por isso a API trata a reserva vencida como inexistente. O campo não tem índice próprio.
 
+## Listas da busca paginada (#426)
+
+A 1ª página da busca grava o resultado inteiro, em ordem, num documento da coleção `listas_da_busca` (`api/busca.py`); as páginas seguintes o leem pelo cursor. A política de TTL de `modulos/mam/listas_da_busca.tf` apaga o documento depois do `expira_em` (15 min), e a API trata a lista vencida como inexistente. O campo não tem índice próprio. Nenhum papel novo: a conta da web já tem `roles/datastore.user`, e o `roles/datastore.owner` da `mam-terraform` cobre a política de TTL.
+
 ## Recuperação do Firestore (#355)
 
 O Firestore guarda Jobs, Correções, catálogo, papéis e auditoria. Em `modulos/mam/main.tf` o banco liga a recuperação a um ponto no tempo (PITR, 7 dias), e `modulos/mam/firestore_recuperacao.tf` cria as duas agendas de backup que o Firestore aceita por banco: **diária, guarda 7 dias**, e **semanal (domingo), guarda 14 semanas** (o teto da documentação). Nenhum papel novo para a `mam-terraform`: o `roles/datastore.owner` do wizard cobre as agendas e a mudança do PITR (mudança no lugar, o banco não é recriado).
