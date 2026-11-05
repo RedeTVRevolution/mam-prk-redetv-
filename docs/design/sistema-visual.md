@@ -198,6 +198,18 @@ Os estados de todo componente: **normal**; **hover**, a camada logo acima (`supe
 | Alerta de erro | Variante `light` em `falhou`, ícone, a mensagem em português, o código para o suporte em `textoSecundario` e o botão da ação | Falha de carga ou de envio (P7) |
 | Carregando | `Loader` pequeno na cor de foco, com o que está carregando por escrito | Qualquer espera |
 
+## Gráficos
+
+Os gráficos dos relatórios (Tempo de tela e Marcas) usam o `@mantine/charts`, na mesma versão do `@mantine/core`, e vivem em [`web/src/graficos.tsx`](../../web/src/graficos.tsx). O painel da diretoria reaproveita a base. A tabela de cada tela continua embaixo e é a forma acessível de ler os números (P8); cada gráfico tem `aria-label`.
+
+- **Uma cor para uma série** (P3). O ranking é uma série só: as barras em `foco`; a selecionada e a que está sob o ponteiro em `focoTexto`. Nada de arco-íris por pessoa.
+- **Rótulo direto em vez de eixo.** O nome fica à esquerda da barra, a 13 px; o valor na ponta, em `tabular-nums` e `textoSecundario`. Sem eixo X, sem grade, sem legenda.
+- **A barra tem 20 px de altura e 8 px de vão**, reta do lado do eixo e com 2 px de canto na ponta.
+- **Os tipos têm as cores da linha do tempo** (`CORES_DE_OCORRENCIA`): aparição, menção na fala e menção no texto na divisão por tipo, para quem já viu o Visualizador reconhecer sem legenda.
+- **A dica** abre em `elevada`, com o nome em 600 e os números em `tabular-nums`, em 150 ms. Os gráficos não animam o crescimento das barras (P2, P9).
+- **A matriz marca × tipo** é uma `Table` com o fundo da célula em `foco`, de 0 a 60% de opacidade numa escala só; coluna sem inserção some. Não usa biblioteca.
+- **Sem gradiente**: a linha de evolução por dia, quando entrar, é chapada, com a área a 12%.
+
 ## O que mudou nas telas de hoje
 
 O tema novo vale também para as telas atuais, que só serão redesenhadas depois do portão (#139). Para não contradizer o tema, só mudou o mínimo:
