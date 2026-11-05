@@ -1,14 +1,15 @@
 import { Text } from '@mantine/core'
+import type { ClienteDaApi } from './api.ts'
 import type { VideoDoResultado } from './busca.ts'
 import { relogio } from './linhaDoTempo.ts'
-import { Quadro } from './Miniatura.tsx'
+import { QuadroDoMomento } from './Miniatura.tsx'
 import { enderecoDoVideo, seguir } from './rotas.ts'
 import { CORES } from './tema.ts'
 
 const NUMEROS = { fontVariantNumeric: 'tabular-nums' } as const
 
 /** O modo visual: um card por plano, com a miniatura do quadro-chave, em grade. */
-export function GradeDePlanos({ videos, busca }: { videos: VideoDoResultado[]; busca: string }) {
+export function GradeDePlanos({ api, videos, busca }: { api: ClienteDaApi; videos: VideoDoResultado[]; busca: string }) {
   return (
     <ul
       aria-label="Planos"
@@ -33,7 +34,7 @@ export function GradeDePlanos({ videos, busca }: { videos: VideoDoResultado[]; b
                 data-momento={`${video.job_id}:${momento.inicio_ms}`}
                 style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}
               >
-                <Quadro url={momento.quadro_url} largura={200} altura={113} />
+                <QuadroDoMomento api={api} jobId={video.job_id} momento={momento} largura={200} altura={113} />
                 <Text size="xs" c={CORES.textoSecundario} mt={4} style={NUMEROS}>
                   {[video.programa ?? video.nome, relogio(momento.inicio_ms)].join(' · ')}
                 </Text>

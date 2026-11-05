@@ -2,16 +2,24 @@
 
 import json
 import logging
+import threading
 import time
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
-from api.busca import Ajustes, Busca, EmbeddingDaConsulta, Ranking, RankingEmOrdem
+from api.busca import (
+    Ajustes,
+    Busca,
+    BuscaCancelada,
+    EmbeddingDaConsulta,
+    Ranking,
+    RankingEmOrdem,
+)
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
 from api.eventos_de_uso import Eventos
@@ -174,8 +182,9 @@ def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> No
     momento = video.momentos[0]
     assert (momento.inicio_ms, momento.fim_ms) == (12_000, 19_000)
     assert momento.motivo == "Objeto: vestido vermelho · Sabrina Sato"
-    assert momento.quadro_url is not None
-    assert "quadros/objeto-0.jpg" in momento.quadro_url
+    # Sem chave de sistema (a web), a busca não assina: leva só o caminho do quadro.
+    assert momento.quadro == "quadros/objeto-0.jpg"
+    assert momento.quadro_url is None
 
 
 def test_dois_momentos_a_2_s_pelo_mesmo_motivo_viram_um_trecho_e_a_5_s_ficam_dois() -> (
@@ -1130,7 +1139,7 @@ def test_no_modo_visual_o_vetor_do_quadro_entra_na_fusao() -> None:
     # Nenhuma descrição cita "pista molhada": só o vetor do quadro achou o plano.
     assert [mo.inicio_ms for v in r.videos for mo in v.momentos] == [10_000]
     assert r.entendida.visual is True
-    assert r.videos[0].momentos[0].quadro_url is not None
+    assert r.videos[0].momentos[0].quadro == "quadros/j1:plano:1.jpg"
     com_vetor = [c for c in m.indice.consultas if c.vetor_do_quadro]
     assert com_vetor and all(c.filtros.tipo == "plano" for c in com_vetor)
 
@@ -1302,3 +1311,71 @@ def test_a_frase_continua_filtrando_com_qualquer_chip() -> None:
     _planos(m, *FRASES)
     resultado = buscar(m, '"vestido amarelo"', ajustes=Ajustes(evidencias=("objeto",)))
     assert _achados(resultado) == [0, 1]
+
+
+class ArmazenamentoQueConta(ArmazenamentoFalso):
+    def __init__(self) -> None:
+        super().__init__()
+        self.assinaturas = 0
+
+    def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        self.assinaturas += 1
+        return super().url_do_quadro(job_id, caminho, validade)
+
+
+def mundo_de_cem_planos() -> tuple[Mundo, ArmazenamentoQueConta]:
+    m = Mundo(pedido(texto_livre="rua"))
+    armazenamento = ArmazenamentoQueConta()
+    m.armazenamento = armazenamento
+    m.com(
+        job("j1", sistema="legado"),
+        *[
+            replace(
+                plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+                id=f"j1:plano:{i}",
+                inicio_ms=i * 10_000,
+                fim_ms=i * 10_000 + 500,
+                quadro=f"quadros/plano-{i}.jpg",
+            )
+            for i in range(100)
+        ],
+    )
+    return m, armazenamento
+
+
+def test_para_a_web_a_busca_visual_de_cem_planos_nao_assina_nenhum_quadro() -> None:
+    m, armazenamento = mundo_de_cem_planos()
+
+    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
+        "rua", visual=True, limite=50
+    )
+
+    momentos = [mo for v in r.videos for mo in v.momentos]
+    assert len(momentos) == 100
+    assert armazenamento.assinaturas == 0
+    assert all(mo.quadro and mo.quadro_url is None for mo in momentos)
+
+
+def test_para_chave_de_sistema_o_quadro_url_continua_vindo_assinado() -> None:
+    m, armazenamento = mundo_de_cem_planos()
+
+    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
+        "rua", visual=True, sistema="legado"
+    )
+
+    momentos = [mo for v in r.videos for mo in v.momentos]
+    assert armazenamento.assinaturas == len(momentos) == 100
+    assert all(
+        mo.quadro and mo.quadro_url and mo.quadro in mo.quadro_url for mo in momentos
+    )
+
+
+def test_busca_cancelada_para_antes_de_consultar_o_indice() -> None:
+    m = mundo_visual()
+    cancelado = threading.Event()
+    cancelado.set()
+
+    with pytest.raises(BuscaCancelada):
+        m.busca().buscar("pista molhada", cancelado=cancelado)
+
+    assert m.indice.consultas == []

@@ -62,7 +62,7 @@ export function PlanosParecidos({ api, job, plano }: { api: ClienteDaApi; job: s
               ? 'Nenhum plano parecido.'
               : `${planos} ${planos === 1 ? 'plano parecido' : 'planos parecidos'} em ${contagemDeVideos(resultado.videos.length)}`}
           </Text>
-          <GradeDePlanos videos={resultado.videos} busca="" />
+          <GradeDePlanos api={api} videos={resultado.videos} busca="" />
         </Stack>
       )}
     </Stack>
