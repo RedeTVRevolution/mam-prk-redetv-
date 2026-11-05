@@ -115,8 +115,10 @@ def test_falha_do_bigquery_numa_correcao_nao_derruba_a_correcao() -> None:
     mundo = Mundo(copia=CopiaQueFalha())
 
     resposta = mundo.corrigir_a_fala("outro texto")
-
     assert resposta.status_code == 201
+    mundo.aprovar_revisao()
+    mundo.rodar_o_job()
+
     assert mundo.textos_das_falas() == ["outro texto"]
     job = mundo.jobs.obter("j1")
     assert job and job.copia_bigquery and job.copia_bigquery.estado == "falhou"
@@ -130,6 +132,11 @@ def test_correcao_pela_rota_troca_as_linhas_na_copia() -> None:
     mundo.reindexar()
 
     mundo.corrigir_a_fala("texto da rota")
+    assert "texto da rota" not in [
+        x.texto for x in copia.por_job["j1"] if x.tipo == "fala"
+    ]
+    mundo.aprovar_revisao()
+    mundo.rodar_o_job()
 
     assert "texto da rota" in [x.texto for x in copia.por_job["j1"] if x.tipo == "fala"]
 

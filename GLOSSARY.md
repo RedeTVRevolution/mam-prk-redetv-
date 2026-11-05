@@ -198,6 +198,9 @@ A análise inteira de um Job concluído refeita com outro modelo, sem escaloname
 Alteração humana sobre a saída do modelo, guardada como camada separada, com autor, data e motivo; a saída original nunca é apagada.
 _Evitar_: edição, ajuste
 
+**Revisão**:
+O modo de edição do Visualizador (botão **Revisar**, tecla E; #328). Dentro dela, corrigir, aceitar sugestão, desfazer, aprovar ou recusar Correção pendente, descartar e reaplicar da fila só gravam a camada de Correções e respondem na hora: nenhuma rota chama `reindexar`. O botão passa a **Aprovar Revisão** (E de novo), que sai do modo e faz `POST /v1/jobs/{id}/revisao/aprovar` (`editar`): põe `indexacao.estado` em `pendente` e dispara uma vez o Job `mam-indexacao` com `JOB_ID` (`DisparoDaIndexacaoNoCloudRun`, variáveis `INDEXACAO_JOB` e `INDEXACAO_REGIAO`), respondendo 202 sem esperar; se o disparo falha volta ao estado de antes (503). Não há marcador de "índice desatualizado": o histórico já mostra a correção gravada depois da última indexação como `salva` (e `indexando` com a indexação `pendente`), e a tela acompanha o histórico até `indexado`. Sair sem aprovar deixa a busca e o BigQuery como estavam.
+
 **Fusão de pessoas**:
 Juntar duas pessoas do catálogo numa só, o caso comum de nome duplicado (`api/fusao_de_pessoas.py`, #209, permissão `catalogo.fundir` do Curador e do Administrador). `POST /v1/catalogo/pessoas/{origem}/fundir` (destino e motivo) e `GET .../fundir/impacto?destino_id=` (quantos vídeos mudam e quantas fotos saem). A origem não é apagada: guarda `fundida` (destino, quem, quando, motivo) e some das buscas; o destino ganha o nome e os apelidos dela. Nada gravado é reescrito: a leitura das Decupagens troca a origem pelo destino (`com_pessoas_fundidas`). As fotos de rosto da origem são apagadas (LGPD) e a ação `pessoa.fundida` vai para a auditoria. Na tela, "Fundir com…" na linha da pessoa do catálogo, no modo de catalogação.
 
