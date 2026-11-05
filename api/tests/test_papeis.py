@@ -19,22 +19,21 @@ def test_consulta_so_ve_a_decupagem() -> None:
     assert permissoes_de(["consulta"]) == {"decupagem.ver"}
 
 
-def test_operador_e_consulta_mais_enviar_video() -> None:
-    assert permissoes_de(["operador"]) == {
+def test_operador_fica_igual_a_consulta() -> None:
+    assert permissoes_de(["operador"]) == permissoes_de(["consulta"])
+
+
+def test_editor_e_consulta_mais_editar_enviar_e_reprocessar() -> None:
+    assert permissoes_de(["editor"]) == {
         "decupagem.ver",
+        "decupagem.editar",
         "video.enviar",
         "video.reprocessar",
     }
 
 
-def test_editor_e_consulta_mais_editar() -> None:
-    assert permissoes_de(["editor"]) == {"decupagem.ver", "decupagem.editar"}
-
-
 def test_curador_e_editor_mais_aprovar_correcao_e_reprocessar_etapa() -> None:
-    assert permissoes_de(["curador"]) == {
-        "decupagem.ver",
-        "decupagem.editar",
+    assert permissoes_de(["curador"]) == permissoes_de(["editor"]) | {
         "correcao.aprovar",
         "video.reprocessar_etapa",
         "catalogo.apagar",
@@ -48,11 +47,12 @@ def test_so_o_curador_aprova_correcao() -> None:
 
 
 def test_varios_papeis_somam_permissoes() -> None:
-    assert permissoes_de(["operador", "editor"]) == {
+    assert permissoes_de(["diretoria", "editor"]) == {
         "decupagem.ver",
         "video.enviar",
         "video.reprocessar",
         "decupagem.editar",
+        "painel.ver",
     }
 
 
@@ -60,13 +60,9 @@ def test_sem_papeis_nao_ha_permissao() -> None:
     assert permissoes_de([]) == set()
 
 
-def test_conta_sem_documento_vale_consulta_e_operador() -> None:
-    assert papeis_efetivos(None) == ["consulta", "operador"]
-    assert permissoes_de(papeis_efetivos(None)) == {
-        "decupagem.ver",
-        "video.enviar",
-        "video.reprocessar",
-    }
+def test_conta_sem_documento_so_consulta() -> None:
+    assert papeis_efetivos(None) == ["consulta"]
+    assert permissoes_de(papeis_efetivos(None)) == {"decupagem.ver"}
 
 
 def test_conta_com_documento_usa_so_os_papeis_dele() -> None:
@@ -138,7 +134,7 @@ def test_so_email_verificado_da_lista_vira_administrador(
 def test_administrador_sem_documento_soma_aos_papeis_padrao() -> None:
     papeis = papeis_do_usuario(None, "a@b.c", True, admins_de("a@b.c"))
 
-    assert papeis == ["consulta", "operador", "administrador"]
+    assert papeis == ["consulta", "administrador"]
 
 
 def test_atribuir_aceita_administrador() -> None:
@@ -164,10 +160,13 @@ def test_so_o_administrador_ve_a_auditoria() -> None:
     assert "auditoria.ver" in permissoes_de(["administrador"])
 
 
-def test_so_o_operador_e_o_administrador_reprocessam() -> None:
-    assert "video.reprocessar" not in permissoes_de(["consulta", "editor", "curador"])
-    assert "video.reprocessar" in permissoes_de(["operador"])
-    assert "video.reprocessar" in permissoes_de(["administrador"])
+@pytest.mark.parametrize("permissao", ["video.enviar", "video.reprocessar"])
+def test_so_editor_curador_e_administrador_enviam_e_reprocessam(
+    permissao: Permissao,
+) -> None:
+    com = {p for p, perms in PERMISSOES_DO_PAPEL.items() if permissao in perms}
+
+    assert com == {"editor", "curador", "administrador"}
 
 
 def test_so_curador_e_administrador_reprocessam_a_partir_de_uma_etapa() -> None:
@@ -180,8 +179,8 @@ def test_so_curador_e_administrador_reprocessam_a_partir_de_uma_etapa() -> None:
     assert com == {"curador", "administrador"}
 
 
-def test_diretoria_so_tem_painel_ver() -> None:
-    assert permissoes_de(["diretoria"]) == {"painel.ver"}
+def test_diretoria_ve_a_decupagem_e_o_painel() -> None:
+    assert permissoes_de(["diretoria"]) == {"decupagem.ver", "painel.ver"}
 
 
 def test_so_a_diretoria_e_o_administrador_veem_o_painel() -> None:

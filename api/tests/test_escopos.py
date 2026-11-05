@@ -14,6 +14,7 @@ from api.chaves import (
 )
 from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
+from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 
@@ -33,12 +34,15 @@ class Mundo:
         self.chaves = RepositorioDeChavesEmMemoria()
         self.jobs = RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
+        papeis = RepositorioDePapeisEmMemoria()
+        papeis.salvar("u1", ["curador"])
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@b.c")}),
                 self.jobs,
                 self.armazenamento,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
+                papeis=papeis,
             )
         )
 

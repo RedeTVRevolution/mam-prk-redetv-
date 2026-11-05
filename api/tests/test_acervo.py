@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from api.auth import Usuario
 from api.jobs import Job, RepositorioEmMemoria, palavras_do_nome
 from api.main import criar_app
+from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_escopos import Mundo
 from api.tests.test_jobs import (
     AUTORIZACAO,
@@ -255,9 +256,12 @@ class _SemEmail:
 
 def test_pessoa_sem_email_no_token_tem_nome_nulo() -> None:
     repositorio = RepositorioEmMemoria()
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("u1", ["editor"])
     cliente = TestClient(
         criar_app(
             _SemEmail(),
+            papeis=papeis,
             repositorio=repositorio,
             armazenamento=ArmazenamentoFalso(),
             relogio=Relogio(),
