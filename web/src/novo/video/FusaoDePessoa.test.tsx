@@ -1,9 +1,11 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import catalogo from '../../catalogo.fixture.json'
+import { criarClienteDeConsultas } from '../consultas.ts'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { DECUPAGEM as BASE } from './curadoria-teste.ts'
 
@@ -49,9 +51,9 @@ afterAll(() => servidor.close())
 const inspetor = () => within(screen.getByRole('complementary', { name: 'Inspetor' }))
 const detalhe = () => within(inspetor().getByRole('region', { name: /^Detalhe:/ }))
 
-async function abrir(permissoes: string[]) {
+async function abrir(permissoes: string[], consultas?: QueryClient) {
   const usuario = userEvent.setup()
-  await abrirVideo({ permissoes })
+  await abrirVideo({ permissoes, consultas })
   ;(document.activeElement as HTMLElement).blur()
   await usuario.keyboard('e')
   const secao = inspetor().getByRole('button', { name: /^Pessoas \d+$/ })
@@ -78,6 +80,21 @@ test('Fundir com…: escolhe o destino, vê o efeito e Enter funde com o motivo;
   await waitFor(() => expect(fundidas).toEqual([{ origem: 'cat-leo', corpo: { destino_id: 'cat-leao', motivo: 'nome duplicado' } }]))
   expect(await inspetor().findByRole('region', { name: /^Detalhe: Leão Lobo/ })).toBeTruthy()
   expect(screen.queryByRole('form', { name: /Fundir/ })).toBeNull()
+})
+
+test('fundir invalida a decupagem de todos os vídeos, não só a do vídeo aberto', async () => {
+  const consultas = criarClienteDeConsultas()
+  consultas.setQueryData(['video', 'j2', 'decupagem'], { versao_decupagem: 'v1' })
+  const usuario = await abrir(FUNDIDOR, consultas)
+  await usuario.click(await detalhe().findByRole('button', { name: 'Fundir Leo Lobo com…' }))
+  await usuario.type(screen.getByRole('combobox', { name: 'Fundir com' }), 'leão')
+  await usuario.click(await screen.findByRole('option', { name: 'Leão Lobo (jurado)' }))
+  await screen.findByText(/passa a ser Leão Lobo em 3 vídeos/)
+  expect(consultas.getQueryState(['video', 'j2', 'decupagem'])?.isInvalidated).toBe(false)
+
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(consultas.getQueryState(['video', 'j2', 'decupagem'])?.isInvalidated).toBe(true))
 })
 
 test('o campo só escolhe pessoas que já existem: sem "criar como nova"', async () => {

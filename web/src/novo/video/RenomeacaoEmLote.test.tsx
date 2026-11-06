@@ -1,9 +1,11 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import catalogo from '../../catalogo.fixture.json'
+import { criarClienteDeConsultas } from '../consultas.ts'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { DECUPAGEM as BASE } from './curadoria-teste.ts'
 
@@ -69,9 +71,9 @@ afterAll(() => servidor.close())
 const inspetor = () => within(screen.getByRole('complementary', { name: 'Inspetor' }))
 const detalhe = () => within(inspetor().getByRole('region', { name: /^Detalhe:/ }))
 
-async function abrir(permissoes: string[], revisando = true) {
+async function abrir(permissoes: string[], revisando = true, consultas?: QueryClient) {
   const usuario = userEvent.setup()
-  await abrirVideo({ permissoes, acompanhamentoMs: 5000, indexacaoMs: 2000 })
+  await abrirVideo({ permissoes, acompanhamentoMs: 5000, indexacaoMs: 2000, consultas })
   ;(document.activeElement as HTMLElement).blur()
   if (revisando) await usuario.keyboard('e')
   const secao = inspetor().getByRole('button', { name: /^Pessoas \d+$/ })
@@ -109,6 +111,20 @@ test('mostra a prévia sem mudar nada e, com Enter, renomeia e acompanha a busca
   expect(screen.getByRole('form', { name: /^Renomear .* em todos os vídeos$/ }).contains(document.activeElement)).toBe(true)
   expect(await inspetor().findByRole('region', { name: /^Detalhe: Leão Lobo/ })).toBeTruthy()
   expect(await screen.findByText(/Pronto: Leão Lobo em 3 vídeos/, undefined, { timeout: 4000 })).toBeTruthy()
+}, 20_000)
+
+test('renomear invalida a decupagem de todos os vídeos, não só a do vídeo aberto', async () => {
+  const consultas = criarClienteDeConsultas()
+  consultas.setQueryData(['video', 'j2', 'decupagem'], { versao_decupagem: 'v1' })
+  const usuario = await abrir(APROVADOR, true, consultas)
+  await digitarOutroNome(usuario)
+  await usuario.keyboard('{Enter}')
+  await screen.findByText(/Leo Lobo passa a ser Leão Lobo em 3 vídeos/)
+  expect(consultas.getQueryState(['video', 'j2', 'decupagem'])?.isInvalidated).toBe(false)
+
+  await usuario.keyboard('{Enter}')
+
+  await waitFor(() => expect(consultas.getQueryState(['video', 'j2', 'decupagem'])?.isInvalidated).toBe(true))
 }, 20_000)
 
 test('Esc cancela depois da prévia sem renomear', async () => {

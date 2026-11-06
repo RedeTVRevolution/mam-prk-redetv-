@@ -594,8 +594,13 @@ export function Video({
   }
 
   /** Uma correção, a fusão ou a renomeação mudaram a decupagem: busca de novo, com o histórico. */
-  function recarregar() {
-    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
+  function recarregar(emTodosOsVideos = false) {
+    // Renomear ou fundir uma pessoa muda o nome nas decupagens de todos os vídeos que a citam.
+    void consultas.invalidateQueries(
+      emTodosOsVideos
+        ? { predicate: (q) => q.queryKey[0] === 'video' && q.queryKey[2] === 'decupagem' }
+        : { queryKey: chaveDoVideo(job.id, 'decupagem') },
+    )
     void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
     void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'fila') })
   }
@@ -654,7 +659,7 @@ export function Video({
             limiteDoMotivo={catalogoPronto.limites.motivo}
             aoFundir={() => {
               fecharEdicao()
-              recarregar()
+              recarregar(true)
             }}
             aoCancelar={fecharEdicao}
           />
@@ -663,7 +668,7 @@ export function Video({
       const pessoa = d.pessoas.find((p) => `renomear:${p.id}` === edicao.chave)
       if (pessoa?.catalogo_id)
         conteudoDaEdicao = (
-          <RenomeacaoEmLote pessoaId={pessoa.catalogo_id} nomeAtual={pessoa.nome} renomeacao={api.renomeacao} aoRenomear={recarregar} aoFechar={fecharEdicao} />
+          <RenomeacaoEmLote pessoaId={pessoa.catalogo_id} nomeAtual={pessoa.nome} renomeacao={api.renomeacao} aoRenomear={() => recarregar(true)} aoFechar={fecharEdicao} />
         )
     } else if (edicao.modo === 'acrescentar') {
       const pessoa = d.pessoas.find((p) => `acrescentar:${p.id}` === edicao.chave)
@@ -1045,7 +1050,7 @@ export function Video({
             api={cliente}
             catalogo={catalogo.data ?? null}
             falhaAoCarregar={historico.isError || fila.isError}
-            aoMudar={recarregar}
+            aoMudar={() => recarregar()}
             aoSaltar={saltarAoItemDaCorrecao}
             aoRefazerAMao={refazerPautasAMao}
           />
