@@ -207,17 +207,26 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
   }, [cliente, hash])
 
   // O cursor venceu (15 min na busca) ou a lista dele sumiu: a consulta recomeça da primeira página.
+  // Um 422 de novo sem ter passado da primeira página desde o recomeço seria um laço (a API recusa
+  // o cursor que acabou de dar): fica o erro ao paginar, e "tentar de novo" recomeça.
+  const [semAndar, setSemAndar] = useState<string | null>(null)
+  // Outra consulta, ou esta de novo depois de outra (o teto apagou os cursores): vale o primeiro 422.
+  if (semAndar !== null && (semAndar !== hash || (data && !anterior && (data.pageParams as string[]).some(Boolean)))) setSemAndar(null)
   const vencido = q.error instanceof CursorVencido
-  useEffect(() => {
-    if (!vencido) return
+  const recomeca = vencido && semAndar !== hash
+  const recomecar = () => {
     g.cursores.splice(0, Infinity, '')
     g.tamanhos.length = 0
     esquecerPosicao(cliente)
     setVoltaInicial(0)
     cliente.removeQueries({ queryKey: chave, exact: true })
     setRecomecos((n) => n + 1)
+    setSemAndar(hash)
+  }
+  useEffect(() => {
+    if (recomeca) recomecar()
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [vencido, cliente, hash])
+  }, [recomeca, cliente, hash])
 
   const chegouNaVolta = useCallback(() => {
     esquecerPosicao(cliente)
@@ -225,7 +234,7 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
     setVoltaInicial(0)
   }, [cliente])
 
-  const falhou = q.isError && !vencido
+  const falhou = q.isError && !recomeca
   return {
     chave: hash,
     /** O índice do item a que a tela volta ao montar (0: o topo). */
@@ -240,7 +249,7 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
     paginas: q.data?.pages,
     aoVer,
     // Desligada (`enabled` falso), a consulta fica pendente sem pedir nada: não está carregando.
-    carregando: q.isLoading || vencido,
+    carregando: q.isLoading || recomeca,
     /** A lista da consulta anterior está na tela enquanto esta não chega. */
     atualizando: isPlaceholderData,
     haMais: hasNextPage && !isPlaceholderData,
@@ -249,7 +258,8 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
     erro: falhou && !q.data ? codigoDoErro(q.error) : null,
     erroAoPaginar: falhou && (isFetchNextPageError || isFetchPreviousPageError) ? codigoDoErro(q.error) : null,
     tentarDeNovo: () => {
-      if (isFetchPreviousPageError) void fetchPreviousPage()
+      if (vencido) recomecar()
+      else if (isFetchPreviousPageError) void fetchPreviousPage()
       else if (isFetchNextPageError) void fetchNextPage()
       else void q.refetch()
     },

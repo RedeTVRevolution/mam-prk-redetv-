@@ -127,6 +127,35 @@ test('o 422 de um cursor vencido recomeça a busca do topo, sem mostrar erro', a
   expect(result.current.quantidade).toBe(doTopo)
 })
 
+test('outro 422 logo depois do recomeço vira erro ao paginar; tentar de novo recomeça, e quem andou recomeça sozinho', async () => {
+  const { result } = await montar()
+  // A API recusa o cursor que acabou de dar: recomeçar outra vez seria um laço.
+  vencidos = new Set(['L1.19', 'L2.19'])
+  act(() => result.current.aoVer(15, 20))
+  await waitFor(() => expect(result.current.recomecos).toBe(1))
+  await waitFor(() => expect(result.current.item(0)).not.toBeNull())
+
+  act(() => result.current.aoVer(15, 20))
+  await waitFor(() => expect(result.current.erroAoPaginar).not.toBeNull())
+  expect(result.current.recomecos).toBe(1)
+  expect(result.current.item(0)?.video.job_id).toBe('v0')
+  expect(result.current.carregando).toBe(false)
+  expect(cursoresPedidos).toEqual([null, 'L1.19', null, 'L2.19'])
+
+  // "Tentar de novo" pede o cursor recusado outra vez à toa: recomeça do topo.
+  act(() => result.current.tentarDeNovo())
+  await waitFor(() => expect(result.current.recomecos).toBe(2))
+  await waitFor(() => expect(result.current.item(0)).not.toBeNull())
+  expect(result.current.erroAoPaginar).toBeNull()
+  // Desta vez a lista anda: um 422 mais adiante recomeça sozinho, como o primeiro.
+  await descer(result, 1)
+  vencidos.add('L3.39')
+  act(() => result.current.aoVer(35, 40))
+  await waitFor(() => expect(result.current.recomecos).toBe(3))
+  expect(result.current.erroAoPaginar).toBeNull()
+  expect(cursoresPedidos).toEqual([null, 'L1.19', null, 'L2.19', null, 'L3.19', 'L3.39', null])
+})
+
 test('o mesmo termo com outro chip mantém a lista anterior; termo novo não', async () => {
   const { result, rerender } = await montar()
 
