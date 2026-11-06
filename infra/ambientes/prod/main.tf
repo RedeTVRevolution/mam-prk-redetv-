@@ -235,6 +235,10 @@ output "busca_indice_quadro" {
   value = module.mam.busca_indice_quadro
 }
 
+output "busca_indices_ligados" {
+  value = module.mam.busca_indices_ligados
+}
+
 output "busca_dimensao" {
   value = module.mam.busca_dimensao
 }

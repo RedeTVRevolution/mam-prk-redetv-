@@ -158,24 +158,37 @@ type Origem =
   | { tipo: 'objeto'; objeto: Objeto }
 
 /** O dado da decupagem por trás do item do painel (as chaves seguem a ordem de `itensDoPainel`). */
+// As listas achatadas de cada decupagem, feitas uma vez só: refazê-las a cada item (as marcas
+// percorrem todos) custava O(n²) numa decupagem de milhares de itens. A decupagem nunca muda.
+const achatadas = new WeakMap<Decupagem, ReturnType<typeof achatar>>()
+function achatar(d: Decupagem) {
+  return {
+    aparicoes: d.pessoas.flatMap((pessoa) => pessoa.na_imagem.map((intervalo) => ({ pessoa, intervalo }))),
+    mencoes: [
+      ...d.pessoas.flatMap((pessoa) => pessoa.citada_na_fala.map((intervalo) => ({ pessoa, intervalo, lista: 'citada_na_fala' as const }))),
+      ...d.pessoas.flatMap((pessoa) => pessoa.citada_no_texto.map((intervalo) => ({ pessoa, intervalo, lista: 'citada_no_texto' as const }))),
+    ],
+    objetos: ocorrenciasDosObjetos(d),
+  }
+}
+function listasDe(d: Decupagem) {
+  let l = achatadas.get(d)
+  if (!l) {
+    l = achatar(d)
+    achatadas.set(d, l)
+  }
+  return l
+}
+
 function origemDoItem(d: Decupagem, item: ItemDoPainel): Origem | null {
   const n = Number(item.chave.split('-')[1])
   switch (item.tipo) {
     case 'aparicao': {
-      const todas = d.pessoas.flatMap((pessoa) =>
-        pessoa.na_imagem.map((intervalo) => ({ pessoa, intervalo })),
-      )
+      const todas = listasDe(d).aparicoes
       return todas[n] ? { tipo: 'aparicao', lista: 'na_imagem', ...todas[n] } : null
     }
     case 'mencao': {
-      const todas = [
-        ...d.pessoas.flatMap((pessoa) =>
-          pessoa.citada_na_fala.map((intervalo) => ({ pessoa, intervalo, lista: 'citada_na_fala' })),
-        ),
-        ...d.pessoas.flatMap((pessoa) =>
-          pessoa.citada_no_texto.map((intervalo) => ({ pessoa, intervalo, lista: 'citada_no_texto' })),
-        ),
-      ]
+      const todas = listasDe(d).mencoes
       return todas[n] ? { tipo: 'mencao', ...todas[n] } : null
     }
     case 'pauta':
@@ -191,7 +204,7 @@ function origemDoItem(d: Decupagem, item: ItemDoPainel): Origem | null {
     case 'fala':
       return d.transcricao[n] ? { tipo: 'fala', fala: d.transcricao[n] } : null
     case 'objeto': {
-      const objeto = ocorrenciasDosObjetos(d)[n]?.objeto
+      const objeto = listasDe(d).objetos[n]?.objeto
       return objeto ? { tipo: 'objeto', objeto } : null
     }
     default:
@@ -641,6 +654,7 @@ export function marcasDosItens(
       (h.estado === 'ativa' || h.estado === 'pendente'),
   )
   const marcas: Record<string, Marca> = {}
+  if (vivas.length === 0) return marcas
   for (const item of itens) {
     const id = identidadeDoItem(d, item)
     if (!id) continue
