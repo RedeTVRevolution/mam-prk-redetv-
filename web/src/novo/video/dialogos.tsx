@@ -1,21 +1,48 @@
+import { useQueryClient } from '@tanstack/react-query'
+import type { EtapaEscolhivel } from '../../etapas.ts'
 import type { Job } from '../../jobs.ts'
+import { tirarDoAcervo, trocarNoAcervo } from '../acervo/useAcervo.ts'
+import { MandarParaLixeira } from '../comum/MandarParaLixeira.tsx'
+import { Reprocessar } from '../comum/Reprocessar.tsx'
 
 export type DialogoDoVideo = 'reprocessar' | 'lixeira'
 
 /**
- * Ponto de ligação com a fase 2a, que cria os diálogos de reprocessar e de mandar para a lixeira em
- * `novo/comum/`. O menu do vídeo já abre `aberto`; falta trocar este corpo pelos diálogos.
- *
- * TODO fase-2a: renderizar o diálogo de reprocessar com `aoReprocessar(jobDevolvido, etapa)`, que
- * liga o acompanhamento da tela, e o de lixeira com `aoMandarParaLixeira()`, que volta ao acervo.
+ * Os diálogos do menu do vídeo, os mesmos do acervo. O acervo em cache recebe o Job devolvido ou
+ * perde o vídeo na hora, para não mostrar o vídeo velho enquanto a lista ainda vale.
  */
-export function DialogosDoVideo(props: {
+export function DialogosDoVideo({
+  aberto,
+  job,
+  aoFechar,
+  aoReprocessar,
+  aoMandarParaLixeira,
+}: {
   aberto: DialogoDoVideo | null
   job: Job
   aoFechar: () => void
-  aoReprocessar: (job: Job, etapa: string) => void
+  aoReprocessar: (job: Job, etapa: EtapaEscolhivel) => void
   aoMandarParaLixeira: () => void
 }) {
-  void props
-  return null
+  const cliente = useQueryClient()
+  return (
+    <>
+      <Reprocessar
+        video={aberto === 'reprocessar' ? job : null}
+        aoFechar={aoFechar}
+        aoReprocessar={(novo, etapa) => {
+          trocarNoAcervo(cliente, novo)
+          aoReprocessar(novo, etapa)
+        }}
+      />
+      <MandarParaLixeira
+        video={aberto === 'lixeira' ? job : null}
+        aoFechar={aoFechar}
+        aoMandar={() => {
+          tirarDoAcervo(cliente, new Set([job.id]))
+          aoMandarParaLixeira()
+        }}
+      />
+    </>
+  )
 }

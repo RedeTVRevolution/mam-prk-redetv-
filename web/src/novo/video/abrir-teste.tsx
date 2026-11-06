@@ -1,4 +1,4 @@
-import { QueryClientProvider } from '@tanstack/react-query'
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, expect, vi } from 'vitest'
@@ -61,14 +61,15 @@ export interface Abertura {
   indexacaoMs?: number
   /** Espera o vídeo e a linha do tempo (só com a decupagem pronta). */
   esperarFaixas?: boolean
+  /** O cliente de consultas, para o teste ver ou preparar o cache (o do acervo, por exemplo). */
+  consultas?: QueryClient
 }
 
-export async function abrirVideo({ t = null, permissoes = ['decupagem.ver'], acompanhamentoMs = 5000, indexacaoMs = 2000, esperarFaixas = true }: Abertura = {}) {
+export async function abrirVideo({ t = null, permissoes = ['decupagem.ver'], acompanhamentoMs = 5000, indexacaoMs = 2000, esperarFaixas = true, consultas = criarClienteDeConsultas() }: Abertura = {}) {
   const auth = new AutenticadorFalso([{ email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true }])
   await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
   await auth.confirmarTotp(CODIGO_TOTP_FALSO)
   history.replaceState(null, '', '/video/j1')
-  const consultas = criarClienteDeConsultas()
   render(
     <QueryClientProvider client={consultas}>
       <ContextoDaApi.Provider value={criarClienteDaApi(auth, () => {})}>
