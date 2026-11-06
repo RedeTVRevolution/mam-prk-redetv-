@@ -705,8 +705,10 @@ test('sem programa, o corpo da criação leva o arquivo e a data', async () => {
 
 test('o envio mostra o progresso, trava o arquivo e não fecha até terminar', async () => {
   let liberar = () => {}
+  let chegou = false
   servidor.use(
     http.put(SESSAO, async () => {
+      chegou = true
       await new Promise<void>((resolve) => (liberar = resolve))
       return new HttpResponse(null, { status: 200 })
     }),
@@ -724,9 +726,41 @@ test('o envio mostra o progresso, trava o arquivo e não fecha até terminar', a
   expect(dialogo.queryByRole('button', { name: 'Fechar' })).toBeNull()
   await usuario.keyboard('{Escape}')
   expect(screen.getByRole('dialog')).toBeTruthy()
+  fireEvent.pointerDown(document.body)
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  // A barra aparece antes do PUT: só ele chegando há o que liberar.
+  await waitFor(() => expect(chegou).toBe(true))
   liberar()
   await dialogo.findByText(/Envio concluído/)
   expect(campo.disabled).toBe(false)
+})
+
+test('dois arquivos soltos seguidos criam um Job só', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  const dialogo = within(await abrirEnvio(usuario))
+  preencherData(dialogo)
+  const area = dialogo.getByLabelText('Arquivo MP4').closest('label')!
+
+  fireEvent.drop(area, { dataTransfer: { files: [mp4('um.mp4')] } })
+  fireEvent.drop(area, { dataTransfer: { files: [mp4('dois.mp4')] } })
+
+  await dialogo.findByText(/Envio concluído/)
+  expect(criacoes).toEqual([expect.objectContaining({ nome: 'um.mp4' })])
+})
+
+test('U não abre o envio num campo de texto nem com um menu aberto', async () => {
+  const usuario = userEvent.setup()
+  jobs = [job({ id: 'a', nome: 'um.mp4' })]
+  await abrir()
+  await screen.findByText('um.mp4')
+
+  await usuario.type(screen.getByLabelText('Buscar por nome'), 'u')
+  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de envio' }))
+  await screen.findByRole('menu')
+  await usuario.keyboard('u')
+
+  expect(screen.queryByRole('dialog')).toBeNull()
 })
 
 test('data de exibição no futuro vira uma mensagem em português com a ação', async () => {

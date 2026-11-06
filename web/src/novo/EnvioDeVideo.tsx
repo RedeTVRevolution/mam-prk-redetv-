@@ -1,6 +1,6 @@
 import { IconCircleCheck, IconCloudUpload } from '@tabler/icons-react'
 import { cn } from 'cn'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { hoje, mensagemDoErroDoEnvio, validarArquivo } from '../envio/arquivo.ts'
 import { enviarRetomavel } from '../envio/upload.ts'
 import { Falha } from './comum/Falha.tsx'
@@ -32,9 +32,21 @@ function Corpo({ aoCriar }: { aoCriar: () => void }) {
   const [data, setData] = useState('')
   const [arrastando, setArrastando] = useState(false)
   const enviando = envio.tipo === 'enviando'
+  // Ligada antes do primeiro await: dois arquivos soltos seguidos não criam dois Jobs, e o
+  // diálogo não fecha enquanto o arquivo é conferido (o estado ainda não diz "enviando").
+  const ocupado = useRef(false)
 
   async function escolher(arquivo: File | undefined) {
-    if (!arquivo || enviando) return
+    if (!arquivo || ocupado.current) return
+    ocupado.current = true
+    try {
+      await enviar(arquivo)
+    } finally {
+      ocupado.current = false
+    }
+  }
+
+  async function enviar(arquivo: File) {
     const motivo = await validarArquivo(arquivo)
     if (motivo) return setEnvio({ tipo: 'erro', mensagem: motivo })
     if (!data) return setEnvio({ tipo: 'erro', mensagem: 'Informe a data de exibição antes de escolher o arquivo.' })
@@ -55,7 +67,7 @@ function Corpo({ aoCriar }: { aoCriar: () => void }) {
     }
   }
 
-  const segurar = (e: Event) => enviando && e.preventDefault()
+  const segurar = (e: Event) => ocupado.current && e.preventDefault()
   const campo = 'h-8 w-full rounded-sm border border-strong bg-input px-2 text-sm font-normal disabled:opacity-50'
   return (
     <DialogContent className="sm:max-w-lg" mostrarFechar={!enviando} onEscapeKeyDown={segurar} onPointerDownOutside={segurar} onInteractOutside={segurar}>

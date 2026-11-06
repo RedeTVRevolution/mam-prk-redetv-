@@ -56,11 +56,11 @@ export function emCampoDeTexto(alvo: EventTarget | null): boolean {
   )
 }
 
-/** Uma janela da interface nova (Radix, com `data-state`) aberta: os atalhos da tela de trás não
- * agem enquanto ela estiver na frente. As janelas do Mantine ficam de fora de propósito: a Gaveta
+/** Uma janela ou um menu da interface nova (Radix, com `data-state`) aberto: os atalhos da tela de
+ * trás não agem enquanto ele estiver na frente. As janelas do Mantine ficam de fora de propósito: a Gaveta
  * da interface atual usa as setas e o Enter do registro com ela aberta. */
 export function haJanelaAberta(): boolean {
-  return !!document.querySelector('[role=dialog][data-state=open], [role=alertdialog][data-state=open]')
+  return !!document.querySelector('[role=dialog][data-state=open], [role=alertdialog][data-state=open], [role=menu][data-state=open]')
 }
 
 /**
