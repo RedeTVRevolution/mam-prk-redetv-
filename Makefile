@@ -118,14 +118,15 @@ gravar-cassetes:
 # Nomes da busca (#117): vêm do Terraform (outputs busca_*), salvo se já vierem no ambiente.
 # BUSCA_INDICE_QUADRO vazia, no ambiente ou no output, desliga o índice do quadro-chave.
 # BUSCA_INDICES_LIGADOS=false (o dev, por custo) faz a busca ir sem índice ANN e o
-# criar-colecao-da-busca não criar índice nenhum.
+# criar-colecao-da-busca não criar índice nenhum. Se o output falhar, o valor vira texto
+# inválido e o código para com erro, em vez de assumir true e criar índices caros.
 AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
 	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
 	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
 	BUSCA_COLECAO_DE_MEDIDA="$${BUSCA_COLECAO_DE_MEDIDA:-$$(terraform -chdir=infra output -raw busca_colecao_de_medida)}" \
 	BUSCA_INDICE_DESCRICAO="$${BUSCA_INDICE_DESCRICAO:-$$(terraform -chdir=infra output -raw busca_indice_descricao)}" \
 	BUSCA_INDICE_QUADRO="$${BUSCA_INDICE_QUADRO-$$(terraform -chdir=infra output -raw busca_indice_quadro)}" \
-	BUSCA_INDICES_LIGADOS="$${BUSCA_INDICES_LIGADOS:-$$(terraform -chdir=infra output -raw busca_indices_ligados)}" \
+	BUSCA_INDICES_LIGADOS="$${BUSCA_INDICES_LIGADOS:-$$(terraform -chdir=infra output -raw busca_indices_ligados || echo terraform_output_falhou)}" \
 	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}"
 
 # Coleção de momentos e índices ANN da busca, no Agent Retrieval; idempotente.

@@ -77,6 +77,24 @@ def test_so_o_dev_desliga_os_indices_ann_da_busca() -> None:
     )
 
 
+def test_a_producao_tambem_exporta_o_output_dos_indices_ann_da_busca() -> None:
+    prod = (INFRA / "ambientes" / "prod" / "main.tf").read_text()
+    assert re.search(
+        r'output "busca_indices_ligados" \{\n\s*value = module.mam.busca_indices_ligados\n',
+        prod,
+    )
+
+
+def test_o_make_para_com_erro_se_o_output_dos_indices_falhar() -> None:
+    # Um output que falha não pode virar "true": o make criaria índices caros por engano.
+    linha = next(
+        l
+        for l in (RAIZ / "Makefile").read_text().splitlines()
+        if "BUSCA_INDICES_LIGADOS=" in l and "terraform" in l
+    )
+    assert "|| echo" in linha
+
+
 def test_as_variaveis_sem_padrao_do_modulo_sao_passadas_pela_raiz() -> None:
     raiz = (INFRA / "main.tf").read_text()
     modulo = _texto_do_modulo()
