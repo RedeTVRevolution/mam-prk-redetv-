@@ -179,7 +179,11 @@ export function inventarioPorCategoria(
   inventario: ObjetoDoInventario[],
 ): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoInventario[] }[] {
   const grupos = new Map<CategoriaDeObjeto, ObjetoDoInventario[]>()
-  for (const o of inventario) grupos.set(o.categoria, [...(grupos.get(o.categoria) ?? []), o])
+  for (const o of inventario) {
+    const grupo = grupos.get(o.categoria)
+    if (grupo) grupo.push(o)
+    else grupos.set(o.categoria, [o])
+  }
   return [...grupos]
     .map(([categoria, objetos]) => ({
       categoria,
@@ -242,7 +246,11 @@ export function inventarioDoVideo(
     }
   }
   const grupos = new Map<CategoriaDeObjeto, ObjetoDoVideo[]>()
-  for (const o of porChave.values()) grupos.set(o.categoria, [...(grupos.get(o.categoria) ?? []), o])
+  for (const o of porChave.values()) {
+    const grupo = grupos.get(o.categoria)
+    if (grupo) grupo.push(o)
+    else grupos.set(o.categoria, [o])
+  }
   return [...grupos]
     .map(([categoria, objetos]) => ({
       categoria,

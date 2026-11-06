@@ -357,7 +357,7 @@ export function LinhaDoTempo({
               className="relative h-[18px] cursor-pointer py-0.5"
               onPointerDown={(e) => {
                 // O botão do bloco ativo cobre os blocos sobrepostos a ele: o clique também se resolve pela posição.
-                if ((e.target as Element).closest('[role=slider]')) return
+                if (e.button !== 0 || (e.target as Element).closest('[role=slider]')) return
                 const { ms, folgaMs } = msNoPonteiro(e)
                 if (ms === null) return
                 const bloco = blocoNoTempo(faixa.blocos, ms, folgaMs)
