@@ -391,3 +391,34 @@ test('aba Pessoa com "Citada": acrescenta a aparição e troca para menção na 
   })
   expect(correcoes[1]).not.toHaveProperty('pessoa_do_nome')
 })
+
+test('Descrever o trecho com a comparação aberta fecha a comparação e mostra o campo', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/passadas', () => HttpResponse.json([{ id: 'p1', job_id: 'j1', modelo: 'gemini-3.8-flash', criada_em: '2026-11-02T12:00:00Z', custo: {}, etapas: [] }])),
+    http.get('/v1/jobs/j1/passadas/p1/comparacao', () => HttpResponse.json({ passada_id: 'p1', modelo: 'm', modelo_do_job: 'n', duracao_ms: 60_000, a: { custo_usd: null, custo_por_hora_usd: null, tempo_total_s: 1, etapas: [] }, b: { custo_usd: null, custo_por_hora_usd: null, tempo_total_s: 1, etapas: [] }, requisitos: [] })),
+  )
+  const { usuario } = await trechoPorTeclas(10, 20)
+  await usuario.selectOptions(await screen.findByRole('combobox', { name: 'Comparar com' }), 'p1')
+  await screen.findByRole('complementary', { name: 'Comparação com a passada' })
+
+  await usuario.click(screen.getByRole('button', { name: 'Descrever o trecho' }))
+
+  expect(await screen.findByRole('tablist', { name: 'Tipo do trecho' })).toBeTruthy()
+  expect(screen.queryByRole('complementary', { name: 'Comparação com a passada' })).toBeNull()
+})
+
+test('abrir a correção de um item com o campo do trecho aberto fecha o campo do trecho', async () => {
+  const { usuario } = await trechoPorTeclas(10, 20)
+  const inspetor = within(screen.getByRole('complementary', { name: 'Inspetor' }))
+  await usuario.click(inspetor.getByRole('button', { name: /^Pautas \d+$/ }))
+  await usuario.click(await inspetor.findByRole('button', { name: /^Eleição, 00:00 a 01:00/ }))
+  await inspetor.findByRole('button', { name: 'Corrigir' })
+  ;(document.activeElement as HTMLElement).blur()
+  await usuario.keyboard('a')
+  expect(await screen.findByRole('tablist', { name: 'Tipo do trecho' })).toBeTruthy()
+
+  await usuario.click(inspetor.getByRole('button', { name: 'Corrigir' }))
+
+  await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Tipo do trecho' })).toBeNull())
+  expect(screen.getByText('00:10–00:20')).toBeTruthy()
+})

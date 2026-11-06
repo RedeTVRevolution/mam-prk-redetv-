@@ -385,6 +385,7 @@ export function Video({
       return
     }
     setEstrutura(null)
+    setDescrevendo(false)
     abrirItem(item.chave, false)
     setTemposDaAlca(null)
     setEdicao({ chave: item.chave, modo: 'editar' })
@@ -397,6 +398,7 @@ export function Video({
       return
     }
     setEstrutura(null)
+    setDescrevendo(false)
     abrirItem(item.chave, false)
     setTemposDaAlca(null)
     setEdicao({ chave: item.chave, modo: 'remover' })
@@ -433,6 +435,7 @@ export function Video({
       return
     }
     fecharEdicao()
+    setDescrevendo(false)
     setEstrutura({ modo: 'juntar', pautas: r.pautas })
   }
 
@@ -448,6 +451,7 @@ export function Video({
       return
     }
     fecharEdicao()
+    setDescrevendo(false)
     setEstrutura({ modo: 'dividir', pauta, em_ms: emMs })
   }
 
@@ -503,6 +507,7 @@ export function Video({
     }
     fecharEdicao()
     setEstrutura(null)
+    setComparandoCom(null)
     setInspetorAberto(true)
     setDescrevendo(true)
   }
@@ -685,6 +690,7 @@ export function Video({
   }
 
   const abrirPessoa = (modo: 'fundir' | 'renomear') => (pessoa: string) => {
+    setDescrevendo(false)
     setTemposDaAlca(null)
     setEdicao({ chave: `${modo}:${pessoa}`, modo })
   }
@@ -696,6 +702,7 @@ export function Video({
           corrigir: corrigirItem,
           remover: removerItem,
           acrescentar: (pessoa) => {
+            setDescrevendo(false)
             setTemposDaAlca(null)
             setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
           },
