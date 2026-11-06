@@ -148,6 +148,7 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
       chave={acervo.chave}
       voltaInicial={acervo.voltaInicial}
       chegouNaVolta={acervo.chegouNaVolta}
+      recomecos={acervo.recomecos}
       quantidade={acervo.quantidade}
       aoVer={acervo.aoVer}
       largura={TAMANHOS[tamanho]}

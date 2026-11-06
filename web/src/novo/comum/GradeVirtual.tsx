@@ -15,7 +15,7 @@ export function GradeVirtual({
   chave,
   voltaInicial,
   chegouNaVolta,
-  recomecos = 0,
+  recomecos,
   quantidade,
   aoVer,
   largura: larguraMinima,
@@ -36,7 +36,7 @@ export function GradeVirtual({
   /** A tela chegou à volta (do usePaginas): a consulta recomeça do topo daqui em diante. */
   chegouNaVolta: () => void
   /** Um recomeço da mesma consulta (cursor vencido) também volta ao topo. */
-  recomecos?: number
+  recomecos: number
   quantidade: number
   aoVer: (de: number, ate: number) => void
   /** A largura mínima do cartão. */
