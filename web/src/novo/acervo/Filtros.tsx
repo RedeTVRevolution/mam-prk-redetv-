@@ -60,7 +60,17 @@ export function Faceta({
   return (
     <Popover open={aberto} onOpenChange={setAberto}>
       <Gatilho rotulo={rotulo} Icone={Icone} texto={texto} ativo={valor.length > 0} aoLimpar={() => aoMudar([])} />
-      <PopoverContent align="start" className="w-64 p-0">
+      <PopoverContent
+        align="start"
+        className="w-64 p-0"
+        // Sem o campo de filtro nada é tabulável: o foco vai à raiz do cmdk, que é quem ouve as setas e o Enter.
+        onOpenAutoFocus={(e) => {
+          if (opcoes.length > 8) return
+          e.preventDefault()
+          const conteudo = e.target as HTMLElement
+          conteudo.querySelector<HTMLElement>('[cmdk-root]')?.focus()
+        }}
+      >
         <Command label={rotulo}>
           {opcoes.length > 8 && <CommandInput placeholder={`Filtrar ${rotulo.toLowerCase()}…`} />}
           <CommandList>

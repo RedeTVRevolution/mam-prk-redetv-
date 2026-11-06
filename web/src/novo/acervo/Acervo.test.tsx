@@ -315,6 +315,17 @@ test('cada filtro muda a chamada à API e a URL', async () => {
   expect(location.search).toBe('?programa=TV+Fama&de=2026-10-01&ate=2026-10-31&estado=analisando&estado=falhou')
 })
 
+test('um filtro curto, sem campo de busca, se escolhe só pelo teclado', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+
+  await usuario.click(screen.getByRole('button', { name: 'Estado' }))
+  await screen.findByRole('option', { name: 'Decupando' })
+  await usuario.keyboard('{ArrowDown}{Enter}')
+  await waitFor(() => expect(ultimaChamada().getAll('estado')).toHaveLength(1))
+})
+
 test('abrir a URL com filtros restaura a tela', async () => {
   await abrir({ endereco: '/acervo?q=fama&programa=TV+Fama&de=2026-10-01&ate=2026-10-31&estado=falhou&ordem=exibicao' })
   await screen.findByText('Nenhum vídeo com esses filtros.')

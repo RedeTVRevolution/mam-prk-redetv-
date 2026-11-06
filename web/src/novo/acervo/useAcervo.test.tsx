@@ -113,3 +113,21 @@ test('voltar do vídeo com o cache vencido recomeça na página de onde se saiu'
   expect(cursoresPedidos).toEqual(['j199'])
   expect(result.current.item(199)).toBeNull()
 })
+
+test('a página refeita depois de uma exclusão não repete o vídeo que avançou sobre a seguinte', async () => {
+  const { result } = await montar()
+  await descer(result, 7)
+  // j20 vai para a lixeira: a página 0 refeita vai até o j50, e a 1 (cursor j49) ainda começa nele.
+  const [tirado] = jobs.splice(20, 1)
+  try {
+    act(() => result.current.aoVer(105, 130))
+    await waitFor(() => expect(result.current.item(99)?.id).toBe('j99'))
+    act(() => result.current.aoVer(55, 80))
+    await waitFor(() => expect(result.current.item(0)?.id).toBe('j0'))
+    const ids = result.current.itens.map((j) => j.id)
+    expect(ids).not.toContain('j20')
+    expect(new Set(ids).size).toBe(ids.length)
+  } finally {
+    jobs.splice(20, 0, tirado)
+  }
+})

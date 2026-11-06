@@ -83,7 +83,12 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   const primeira = Math.max(0, params ? lista.indexOf(params[0]) : 0)
   const inicio = primeira * POR_PAGINA
   // As páginas da memória numa lista só: a do andamento e a da lixeira podem ter perdido um vídeo.
-  const itens = useMemo(() => q.data?.pages.flatMap((p) => p.jobs) ?? [], [q.data])
+  // Sem repetir: uma página refeita depois de uma exclusão avança um vídeo sobre a seguinte,
+  // que ainda começa pelo cursor antigo.
+  const itens = useMemo(() => {
+    const vistos = new Set<string>()
+    return (q.data?.pages.flatMap((p) => p.jobs) ?? []).filter((j) => !vistos.has(j.id) && Boolean(vistos.add(j.id)))
+  }, [q.data])
   const quantidade = q.data ? inicio + itens.length + (q.hasNextPage ? 1 : 0) : 0
   const item = useCallback((i: number): Job | null => itens[i - inicio] ?? null, [itens, inicio])
 

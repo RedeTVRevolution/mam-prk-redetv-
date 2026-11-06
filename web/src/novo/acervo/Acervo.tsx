@@ -51,8 +51,23 @@ const ATALHOS: Atalho[] = [
 // A exibição e o tamanho ficam no navegador: voltar do vídeo reabre do mesmo jeito.
 const EXIBICAO = 'mam:acervo:exibicao'
 const TAMANHO = 'mam:acervo:tamanho'
+// Sem armazenamento (modo privado, bloqueado, cota), vale o padrão e a escolha dura só a visita.
+function ler(chave: string) {
+  try {
+    return localStorage.getItem(chave)
+  } catch {
+    return null
+  }
+}
+function guardar(chave: string, valor: string) {
+  try {
+    localStorage.setItem(chave, valor)
+  } catch {
+    // fica só na memória
+  }
+}
 function lerTamanho() {
-  const n = Number(localStorage.getItem(TAMANHO) ?? 1)
+  const n = Number(ler(TAMANHO) ?? 1)
   return Number.isInteger(n) && n >= 0 && n < TAMANHOS.length ? n : 1
 }
 
@@ -90,7 +105,7 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
   const acervo = useAcervo(filtros)
   const falhaDoAndamento = useAndamento(filtros, acervo.itens, intervaloMs)
   const programas = useProgramas()
-  const [lista, setLista] = useState(() => localStorage.getItem(EXIBICAO) === 'lista')
+  const [lista, setLista] = useState(() => ler(EXIBICAO) === 'lista')
   const [tamanho, setTamanho] = useState(lerTamanho)
   const [aviso, setAviso] = useState<string | null>(null)
   const [falha, setFalha] = useState<FalhaDaAcao | null>(null)
@@ -102,11 +117,11 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
   const limpar = () => irPara(SEM_FILTROS)
   const exibirEmLista = (v: boolean) => {
     setLista(v)
-    localStorage.setItem(EXIBICAO, v ? 'lista' : 'grade')
+    guardar(EXIBICAO, v ? 'lista' : 'grade')
   }
   const mudarTamanho = (v: number) => {
     setTamanho(v)
-    localStorage.setItem(TAMANHO, String(v))
+    guardar(TAMANHO, String(v))
   }
 
   async function aoAcao(acao: Acao, job: Job) {
@@ -132,18 +147,18 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
   const rolagem = useRef<HTMLDivElement>(null)
   const cabecalho = useRef<HTMLDivElement>(null)
   const area = useRef<HTMLDivElement>(null)
-  const [medidas, setMedidas] = useState({ largura: 0, margem: 0 })
+  const [medidas, setMedidas] = useState({ largura: 0, margem: 0, topo: 0 })
   useLayoutEffect(() => {
     const el = area.current!
     const ro = new ResizeObserver((entradas) => {
       const daArea = entradas.find((e) => e.target === el)
-      setMedidas((m) => ({ largura: daArea ? daArea.contentRect.width : m.largura, margem: el.offsetTop }))
+      setMedidas((m) => ({ largura: daArea ? daArea.contentRect.width : m.largura, margem: el.offsetTop, topo: cabecalho.current!.offsetHeight }))
     })
     ro.observe(el)
     ro.observe(cabecalho.current!)
     return () => ro.disconnect()
   }, [])
-  const { largura, margem } = medidas
+  const { largura, margem, topo } = medidas
   const minimo = Math.min(largura, TAMANHOS[tamanho])
   const colunas = lista ? 1 : Math.max(1, Math.floor((largura + VAO) / (minimo + VAO)))
   const larguraDoCartao = (largura - (colunas - 1) * VAO) / colunas
@@ -157,6 +172,8 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
     estimateSize: () => (lista ? ALTURA_DA_LINHA : (larguraDoCartao * 9) / 16 + TEXTO_DO_CARTAO + VAO),
     overscan: 3,
     scrollMargin: margem,
+    // O cabeçalho fixo cobre o alto da rolagem: a fileira levada ao topo fica logo abaixo dele.
+    scrollPaddingStart: topo,
   })
   const visiveis = virtual.getVirtualItems() // com as 3 fileiras de folga
   const vistaDe = virtual.range?.startIndex ?? -1 // só as fileiras à vista, sem a folga
