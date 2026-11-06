@@ -101,3 +101,19 @@ test('as sombras do Tailwind saem do tema; fica só a do que flutua', () => {
   expect(css).toMatch(/--shadow-\*:\s*initial/)
   expect([...css.matchAll(/--shadow-([\w-]+):/g)].map(([, nome]) => nome)).toEqual(['float'])
 })
+
+test('as três cores de série dos gráficos existem e passam de 3:1 sobre o painel', () => {
+  for (const serie of ['chart-1', 'chart-2', 'chart-3']) {
+    expect(contraste(cor(serie), cor('background'))).toBeGreaterThanOrEqual(3)
+  }
+  expect([cor('chart-1'), cor('chart-2'), cor('chart-3')]).toEqual(['#d95926', '#c25bd6', '#199e70'])
+})
+
+test('a escala sequencial vai do mais claro (maior valor) ao mais escuro, e o texto de cada passo passa no AA', () => {
+  const passos = [100, 250, 400, 500, 600].map((n) => cor(`seq-${n}`))
+  const luz = passos.map((p) => contraste(p, '#000000'))
+  expect(luz).toEqual([...luz].sort((a, b) => b - a))
+  // O texto da célula: escuro nos três claros, branco nos dois escuros.
+  const texto = [cor('background'), cor('background'), cor('background'), cor('primary-foreground'), cor('primary-foreground')]
+  passos.forEach((p, i) => expect(contraste(texto[i], p)).toBeGreaterThanOrEqual(4.5))
+})
