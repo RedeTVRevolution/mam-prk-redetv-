@@ -35,7 +35,7 @@ function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[]
   if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} permissoes={permissoes} />
   if (rota.tipo === 'busca') return <Busca consulta={rota.consulta} />
   if (rota.tipo === 'parecidos') return <Parecidos key={`${rota.job}:${rota.plano}`} job={rota.job} plano={rota.plano} />
-  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} />
+  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} permissoes={permissoes} />
   if (rota.tipo === 'painel') {
     return (
       <Suspense>
