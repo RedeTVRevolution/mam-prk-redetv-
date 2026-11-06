@@ -1,7 +1,9 @@
 import {
   IconArrowLeft,
+  IconArrowsJoin,
   IconChevronDown,
   IconChevronRight,
+  IconCut,
   IconEdit,
   IconFocus2,
   IconLayoutSidebarRightCollapse,
@@ -59,6 +61,8 @@ export interface AcoesDeCorrecao {
   corrigir: (i: ItemDoPainel) => void
   remover: (i: ItemDoPainel) => void
   acrescentar: (pessoa: string) => void
+  /** Juntar e dividir pautas (só no modo de revisão): marcar para juntar (M) e dividir no ponto do player (D). */
+  pautas?: { marcada: (i: ItemDoPainel) => boolean; alternar: (i: ItemDoPainel) => void; dividir: (i: ItemDoPainel) => void }
   /** "Renomear em todos os vídeos" (Curador) e "Fundir com…": só para a pessoa do catálogo, e só se a permissão deixa. */
   pessoaDoCatalogo: (pessoa: string) => boolean
   renomear?: (pessoa: string) => void
@@ -394,6 +398,7 @@ export function Inspetor({
                                   atual={atual}
                                   selecionado={l.chave === selecionada}
                                   marca={acoes?.marcas?.[l.chave]}
+                                  pautas={l.item.tipo === 'pauta' ? acoes?.pautas : undefined}
                                   urlDoQuadro={urlDoQuadro}
                                   aoAbrir={() => aoAbrir(l.chave, true)}
                                 />
@@ -566,6 +571,7 @@ function ItemDaLista({
   atual,
   selecionado,
   marca,
+  pautas,
   urlDoQuadro,
   aoAbrir,
 }: {
@@ -574,6 +580,7 @@ function ItemDaLista({
   atual: boolean
   selecionado: boolean
   marca?: Marca
+  pautas?: AcoesDeCorrecao['pautas']
   urlDoQuadro: (c: string) => Promise<string>
   aoAbrir: () => void
 }) {
@@ -587,7 +594,7 @@ function ItemDaLista({
         aria-label={nomeDoItem(item)}
         aria-pressed={selecionado}
         onClick={aoAbrir}
-        className={cn('flex w-full items-start gap-2 py-1.5 pr-3 text-left hover:bg-card', recuo ? 'pl-8' : 'pl-3')}
+        className={cn('flex w-full items-start gap-2 py-1.5 pr-3 text-left hover:bg-card', recuo ? 'pl-8' : 'pl-3', pautas && 'pr-16')}
       >
         <span className={cn('mt-0.5 w-12 shrink-0 font-mono text-xs tabular-nums', atual ? 'text-link' : 'text-muted-foreground')}>{relogio(item.inicio_ms)}</span>
         {item.quadro !== undefined && !recuo ? (
@@ -610,6 +617,16 @@ function ItemDaLista({
         </span>
         {marca && <SeloDaMarca marca={marca} />}
       </button>
+      {pautas && (
+        <div className="absolute top-1 right-1 flex">
+          <BotaoDeIcone rotulo={`Marcar ${item.titulo} para juntar`} atalho="M" ativo={pautas.marcada(item)} onClick={() => pautas.alternar(item)}>
+            <IconArrowsJoin size={16} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+          <BotaoDeIcone rotulo={`Dividir ${item.titulo} no ponto do player`} atalho="D" onClick={() => pautas.dividir(item)}>
+            <IconCut size={16} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+        </div>
+      )}
     </div>
   )
 }

@@ -103,7 +103,6 @@ export function FormularioDeCorrecao({
     } else if (
       e.key === 'Enter' &&
       !(e.target instanceof HTMLButtonElement) &&
-      !(e.target instanceof HTMLSelectElement) &&
       !(e.target instanceof HTMLTextAreaElement && e.shiftKey)
     ) {
       e.preventDefault()

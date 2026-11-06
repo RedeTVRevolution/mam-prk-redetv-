@@ -33,7 +33,8 @@ import {
   pedidoDeRemocao,
   podeRemover,
 } from '../../catalogacao.ts'
-import type { Sugestao } from '../../decupagem.ts'
+import type { Pauta, Sugestao } from '../../decupagem.ts'
+import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from '../../pautas.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
 import { naInterfaceAtual } from '../../interface.ts'
 import { dataDeExibicao, finalizando, type Job } from '../../jobs.ts'
@@ -49,7 +50,7 @@ import { Button } from '../ui/button.tsx'
 import { Kbd } from '../ui/kbd.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
-import { AvisoDeFalha, BotaoDeIcone } from './comum.tsx'
+import { AvisoDeFalha, BotaoComDica, BotaoDeIcone } from './comum.tsx'
 import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
 import type { ResumoDaPassada } from '../../passadas.ts'
 import { Sugestoes } from './Sugestoes.tsx'
@@ -131,6 +132,9 @@ export function Video({
   const [falhaDaMidia, setFalhaDaMidia] = useState<string | null>(null)
   const [dialogo, setDialogo] = useState<DialogoDoVideo | null>(null)
   const [comparandoCom, setComparandoCom] = useState<string | null>(null)
+  // Juntar e dividir pautas: os ids marcados e o formulário aberto.
+  const [pautasMarcadas, setPautasMarcadas] = useState<ReadonlySet<string>>(new Set())
+  const [estrutura, setEstrutura] = useState<{ modo: 'juntar'; pautas: Pauta[] } | { modo: 'dividir'; pauta: Pauta; em_ms: number } | null>(null)
 
   const reproducao = useQuery({
     queryKey: chaveDoVideo(job.id, 'reproducao'),
@@ -209,7 +213,11 @@ export function Video({
     catalogo: catalogo.data,
     historico: historico.data,
     mostrarAviso,
-    aoAlternar: () => {},
+    aoAlternar: () => {
+      // Entrar ou sair do modo começa do zero: sem marcas nem formulário da revisão anterior.
+      setPautasMarcadas(new Set())
+      setEstrutura(null)
+    },
   })
 
   // As sugestões do pipeline só aparecem na revisão; a lista vem de novo a cada entrada nela.
@@ -346,6 +354,7 @@ export function Video({
       mostrarAviso('Selecione um item que possa ser corrigido (↑ ↓).')
       return
     }
+    setEstrutura(null)
     abrirItem(item.chave, false)
     setTemposDaAlca(null)
     setEdicao({ chave: item.chave, modo: 'editar' })
@@ -357,9 +366,68 @@ export function Video({
       mostrarAviso('Não há "não é isto" para o item selecionado.')
       return
     }
+    setEstrutura(null)
     abrirItem(item.chave, false)
     setTemposDaAlca(null)
     setEdicao({ chave: item.chave, modo: 'remover' })
+  }
+
+  // ---------- juntar e dividir pautas ----------
+
+  // Depois de recarregar a decupagem, as marcas de pautas que sumiram não contam.
+  const marcadasNaDecupagem = d?.pautas.filter((p) => pautasMarcadas.has(p.id)).length ?? 0
+
+  function pautaDoItem(item: ItemDoPainel | undefined): Pauta | undefined {
+    if (!d || item?.tipo !== 'pauta') return undefined
+    return d.pautas[Number(item.chave.slice('pauta-'.length))]
+  }
+
+  function alternarMarcaDaPauta(item: ItemDoPainel | undefined) {
+    const pauta = pautaDoItem(item)
+    if (!pauta) {
+      mostrarAviso('Selecione a pauta que vai ser marcada (↑ ↓).')
+      return
+    }
+    setPautasMarcadas((marcadas) => {
+      const novas = new Set(marcadas)
+      if (!novas.delete(pauta.id)) novas.add(pauta.id)
+      return novas
+    })
+  }
+
+  function juntarMarcadas() {
+    if (!d) return
+    const r = pautasParaJuntar(d.pautas, pautasMarcadas)
+    if ('aviso' in r) {
+      mostrarAviso(r.aviso)
+      return
+    }
+    fecharEdicao()
+    setEstrutura({ modo: 'juntar', pautas: r.pautas })
+  }
+
+  function dividirPauta(item: ItemDoPainel | undefined) {
+    const pauta = pautaDoItem(item)
+    if (!pauta) {
+      mostrarAviso('Selecione a pauta que vai ser dividida (↑ ↓).')
+      return
+    }
+    const emMs = instante.ms()
+    if (!cabeNaPauta(pauta, emMs)) {
+      mostrarAviso('Leve o vídeo para dentro da pauta em foco para dividir (D).')
+      return
+    }
+    fecharEdicao()
+    setEstrutura({ modo: 'dividir', pauta, em_ms: emMs })
+  }
+
+  async function gravarEstrutura(pedidos: Pedido[], motivo: string): Promise<string | null> {
+    const falha = await gravar(pedidos, motivo)
+    if (!falha) {
+      setPautasMarcadas(new Set())
+      setEstrutura(null)
+    }
+    return falha
   }
 
   /** Uma correção, a fusão ou a renomeação mudaram a decupagem: busca de novo, com o histórico. */
@@ -504,6 +572,16 @@ export function Video({
             setTemposDaAlca(null)
             setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
           },
+          pautas: revisao.revisando
+            ? {
+                marcada: (i) => {
+                  const p = pautaDoItem(i)
+                  return !!p && pautasMarcadas.has(p.id)
+                },
+                alternar: alternarMarcaDaPauta,
+                dividir: dividirPauta,
+              }
+            : undefined,
           pessoaDoCatalogo: (id) => !!d.pessoas.find((p) => p.id === id)?.catalogo_id,
           renomear: revisao.revisando && pode.aprovar ? abrirPessoa('renomear') : undefined,
           fundir: revisao.revisando && pode.fundir ? abrirPessoa('fundir') : undefined,
@@ -563,6 +641,31 @@ export function Video({
             // Ctrl+Shift+Z é o refazer de outros programas: aqui não desfaz.
             casa: (e: KeyboardEvent) => tecla(e, 'z') && !e.shiftKey,
             executar: () => void revisao.desfazer(),
+          },
+        ]
+      : []),
+    ...(revisao.revisando && d && catalogoPronto
+      ? [
+          {
+            tecla: 'M',
+            acao: 'Marcar a pauta em foco para juntar',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'm'),
+            executar: () => alternarMarcaDaPauta(selecionado),
+          },
+          {
+            tecla: 'U',
+            acao: 'Juntar as pautas marcadas',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'u'),
+            executar: juntarMarcadas,
+          },
+          {
+            tecla: 'D',
+            acao: 'Dividir a pauta em foco no ponto do player',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'd'),
+            executar: () => dividirPauta(selecionado),
           },
         ]
       : []),
@@ -745,20 +848,49 @@ export function Video({
             acoes={acoes}
             aviso={aviso}
             acima={
-              revisao.revisando && sugestoes.data ? (
-                <Sugestoes
-                  sugestoes={sugestoes.data}
-                  decupagem={d}
-                  api={cliente}
-                  aoSaltar={saltarParaMs}
-                  aoResolver={(id) => {
-                    consultas.setQueryData(chaveDasSugestoes, (l: Sugestao[] | undefined) => l?.filter((x) => x.id !== id))
-                    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
-                    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
-                  }}
-                  aoFalhar={() => void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })}
-                  aoAvisar={mostrarAviso}
-                />
+              revisao.revisando ? (
+                <>
+                  {sugestoes.data ? (
+                    <Sugestoes
+                      sugestoes={sugestoes.data}
+                      decupagem={d}
+                      api={cliente}
+                      aoSaltar={saltarParaMs}
+                      aoResolver={(id) => {
+                        consultas.setQueryData(chaveDasSugestoes, (l: Sugestao[] | undefined) => l?.filter((x) => x.id !== id))
+                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
+                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
+                      }}
+                      aoFalhar={() => void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })}
+                      aoAvisar={mostrarAviso}
+                    />
+                  ) : null}
+                  {marcadasNaDecupagem > 0 ? (
+                    <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm">
+                      <span className="mr-auto">
+                        {marcadasNaDecupagem} {marcadasNaDecupagem === 1 ? 'pauta marcada' : 'pautas marcadas'} para juntar
+                      </span>
+                      <BotaoComDica dica="U" variant="outline" onClick={juntarMarcadas}>
+                        Juntar as pautas marcadas
+                      </BotaoComDica>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setPautasMarcadas(new Set())}>
+                        Limpar marcas
+                      </Button>
+                    </div>
+                  ) : null}
+                  {catalogoPronto && estrutura ? (
+                    <div className="border-b border-border p-3">
+                      <FormularioDeCorrecao
+                        key={estrutura.modo === 'juntar' ? `juntar:${estrutura.pautas.map((p) => p.id).join('+')}` : `dividir:${estrutura.pauta.id}:${estrutura.em_ms}`}
+                        editor={estrutura.modo === 'juntar' ? editorDeJuncao(estrutura.pautas, catalogoPronto) : editorDeDivisao(estrutura.pauta, estrutura.em_ms, catalogoPronto)}
+                        rotulo={estrutura.modo === 'juntar' ? `Juntar ${estrutura.pautas.length} pautas` : `Dividir ${estrutura.pauta.titulo} em ${relogio(estrutura.em_ms)}`}
+                        limiteDoMotivo={catalogoPronto.limites.motivo}
+                        aoSalvar={gravarEstrutura}
+                        aoCancelar={() => setEstrutura(null)}
+                      />
+                    </div>
+                  ) : null}
+                </>
               ) : null
             }
             indexando={pode.editar && !!historico.data && aindaIndexando(historico.data)}
