@@ -1581,13 +1581,20 @@ class ObjetosStorage:
         )
 
 
+# O navegador guarda o quadro por 1 dia (#410); `private` deixa fora os caches compartilhados.
+# O `make cache-dos-quadros` aplica o mesmo valor aos quadros já gravados.
+CACHE_DO_QUADRO = "private, max-age=86400"
+
+
 class QuadrosStorage(DecupagensStorage):
     """Os JPEGs dos quadros-chave no bucket das decupagens, além da cópia limpa e da Decupagem."""
 
     def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None:
-        self._cliente.bucket(self._decupagens).blob(
+        blob = self._cliente.bucket(self._decupagens).blob(
             objeto_do_quadro(job_id, caminho)
-        ).upload_from_string(jpeg, content_type="image/jpeg")
+        )
+        blob.cache_control = CACHE_DO_QUADRO
+        blob.upload_from_string(jpeg, content_type="image/jpeg")
 
 
 class ArquivosNoStorage:

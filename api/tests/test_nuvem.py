@@ -53,6 +53,7 @@ from api.nuvem import (
     CatalogoFirestore,
     ListasDaBuscaFirestore,
     ProgramasFirestore,
+    QuadrosStorage,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
@@ -593,6 +594,41 @@ def test_upload_reproducao_e_download_assinam_a_cada_pedido() -> None:
         armazenamento.url_de_download("j1", "a.mp4", timedelta(minutes=5))
 
     assert assinatura.vezes == 6
+
+
+def test_gravar_quadro_grava_o_jpeg_com_cache_de_1_dia_so_no_navegador() -> None:
+    gravados: dict[str, tuple[str | None, bytes, str]] = {}
+
+    class Blob:
+        def __init__(self, nome: str) -> None:
+            self.nome = nome
+            self.cache_control: str | None = None
+
+        def upload_from_string(self, conteudo: bytes, content_type: str) -> None:
+            gravados[self.nome] = (self.cache_control, conteudo, content_type)
+
+    class Bucket:
+        def __init__(self, nome: str) -> None:
+            self.nome = nome
+
+        def blob(self, nome: str) -> Blob:
+            return Blob(f"{self.nome}/{nome}")
+
+    class Cliente:
+        def bucket(self, nome: str) -> Bucket:
+            return Bucket(nome)
+
+    quadros = QuadrosStorage(Cliente(), "aceitos", "decupagens")
+
+    quadros.gravar_quadro("j1", "quadros/plano-1.jpg", b"jpeg")
+
+    assert gravados == {
+        "decupagens/j1/quadros/plano-1.jpg": (
+            "private, max-age=86400",
+            b"jpeg",
+            "image/jpeg",
+        )
+    }
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
