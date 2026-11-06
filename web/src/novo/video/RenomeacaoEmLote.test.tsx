@@ -71,7 +71,7 @@ const detalhe = () => within(inspetor().getByRole('region', { name: /^Detalhe:/ 
 
 async function abrir(permissoes: string[], revisando = true) {
   const usuario = userEvent.setup()
-  await abrirVideo({ permissoes, intervalos: { acompanhamentoMs: 5000, indexacaoMs: 2000 } })
+  await abrirVideo({ permissoes, acompanhamentoMs: 5000, indexacaoMs: 2000 })
   ;(document.activeElement as HTMLElement).blur()
   if (revisando) await usuario.keyboard('e')
   const secao = inspetor().getByRole('button', { name: /^Pessoas \d+$/ })
