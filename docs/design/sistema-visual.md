@@ -1,93 +1,60 @@
 # Sistema visual
 
-> **Substituído pelo [MAM_DESIGN_SYSTEM.md](MAM_DESIGN_SYSTEM.md) (05/11/2026).** Este arquivo descreve o tema Mantine das telas de hoje e vale até elas serem refeitas. As cores de tipo e de estado, o azul de foco e as regras de contraste daqui seguem no sistema novo.
+O porquê das decisões visuais da interface do MAM e as regras que os testes guardam. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9).
 
-A referência de toda tela do MAM. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9). Os valores moram em [`web/src/tema.ts`](../../web/src/tema.ts), que é a fonte; este documento explica o porquê. A página de amostra mostra tudo aplicado: no `npm run dev` ou no dev publicado, abra `/amostra` (sem login, só com dados de exemplo).
+As tabelas de cor, tipo, medida, ícone e componente moram no [MAM_DESIGN_SYSTEM.md](MAM_DESIGN_SYSTEM.md), que é a referência. Este arquivo não as repete: explica o que o outro não explica e diz onde a interface construída se afasta dele.
+
+A interface é a de `web/src/novo/` (Tailwind v4 e shadcn/ui; [ADR 0014](../adr/0014-frontend-novo-tailwind-shadcn.md)). Onde está cada valor:
+
+| O quê | Fonte |
+| --- | --- |
+| Cores de superfície, texto, foco e estado; fontes; tamanhos; raios; sombra; cores de gráfico | [`web/src/novo/index.css`](../../web/src/novo/index.css) |
+| Cor de cada tipo de ocorrência, de cada estado do Job (`ESTADOS_DO_JOB`) e de cada cor base de objeto | [`web/src/cores.ts`](../../web/src/cores.ts) |
 
 Os testes que guardam as regras:
 
-- [`tema.test.ts`](../../web/src/tema.test.ts): contraste WCAG de cada par texto/fundo, distinção das cores de tipo na deuteranopia, primário não vermelho, cantos e o âmbar de "Decupando".
-- [`estilo.test.ts`](../../web/src/estilo.test.ts): nenhum gradiente, nenhuma sombra grande, nenhum emoji ou símbolo tipográfico em `web/src`.
+- [`novo/tokens.test.ts`](../../web/src/novo/tokens.test.ts): contraste WCAG de cada par texto/fundo, selos de estado, foco sobre o painel, distinção das sete cores de tipo na deuteranopia, o âmbar de "Decupando", primário diferente do vermelho da marca, raios até 6 px, uma sombra só, cores e escala dos gráficos.
+- [`estilo.test.ts`](../../web/src/estilo.test.ts): em todo arquivo de `web/src`, nenhum gradiente (nem `bg-linear-`), nenhum `backdrop-blur`, nenhuma sombra do Tailwind nem acima de 8 px de desfoque, nenhum emoji ou símbolo tipográfico.
+- [`cores.test.ts`](../../web/src/cores.test.ts): toda cor base do objeto tem a sua cor.
 
 ## Cores
 
-A interface é cinza, e a cor só aparece quando diz alguma coisa (P3). Todo token tem nome de função (`textoSecundario`, `andamento`), nunca de tom. Só tema escuro (P9).
-
-### Neutros
-
-| Token | Valor | Escala do Mantine | Onde |
-| --- | --- | --- | --- |
-| `fundo` | `#141518` | `dark.7` (body) | Fundo da página |
-| `superficie` | `#1B1D21` | `dark.6` | Painel, tabela, campo, botão secundário |
-| `elevada` | `#25272C` | `dark.5` | Menu, diálogo, popover; hover do que está na superfície |
-| `borda` | `#34373D` | `dark.4` | Toda borda de 1 px, divisória de tabela |
-| `texto` | `#E4E6EA` | `dark.0` | Texto principal |
-| `textoSecundario` | `#A0A5AE` | `dark.2` (dimmed) | Metadado, rótulo de faixa, contagem, placeholder |
-| `textoDesabilitado` | `#6E737C` | `dark.3` | Controle desabilitado |
-
-- **Por que três degraus de fundo.** O fundo é o mais escuro, e cada camada acima clareia um pouco. Assim o painel se separa da página sem sombra nem borda grossa (P2), e o vídeo, que é o conteúdo, fica cercado de cinza escuro, como numa sala de edição (P9).
-- **Por que um cinza quase neutro.** Um leve frio (azul muito baixo) evita o cinza "sujo" do monitor, sem virar uma cor que dispute com as de função (P3).
-- **Por que a escala segue a ordem do Mantine.** O Mantine pinta os componentes pelo índice da escala `dark`: 0 é texto, 2 é dimmed, 4 é borda, 7 é body. Trocar a escala inteira faz todo componente, inclusive os das telas de hoje, usar os tokens sem configuração por componente.
-- **Contraste.** Todo texto passa no AA (4,5:1) sobre os três fundos, inclusive o secundário (P8). O desabilitado é isento pela WCAG (1.4.3, componente inativo), mas fica acima de 3:1 para continuar legível. O placeholder não tem essa isenção, porque o campo está ativo: ele usa o texto secundário, e não o tom 3 que o Mantine daria.
-
-| Texto | Valor | Sobre `fundo` | Sobre `superficie` | Sobre `elevada` |
-| --- | --- | --- | --- | --- |
-| Texto | `#E4E6EA` | 14,6 | 13,5 | 12,0 |
-| Texto secundário | `#A0A5AE` | 7,4 | 6,8 | 6,0 |
-| Texto desabilitado | `#6E737C` | 3,8 | 3,5 | 3,1 |
-| Texto de foco (link) | `#78A3F2` | 7,2 | 6,7 | 5,9 |
-| Concluído | `#5CC98A` | 8,8 | 8,2 | 7,2 |
-| Em andamento | `#E5B045` | 9,2 | 8,5 | 7,6 |
-| Falhou | `#F4736A` | 6,5 | 6,0 | 5,3 |
+A interface é cinza, e a cor só aparece quando diz alguma coisa (P3). Só tema escuro (P9). Superfícies, texto e contraste: [MAM_DESIGN_SYSTEM, seção 2.1](MAM_DESIGN_SYSTEM.md). Todo texto, inclusive o secundário, passa no AA (4,5:1) sobre `canvas`, `painel`, `elevado` e `sobreposto` (P8). O texto desabilitado (`subtle`) é isento (WCAG 1.4.3), por isso é só para controle desabilitado. O placeholder usa o texto secundário, porque o campo está ativo.
 
 ### Foco e seleção
 
-| Token | Valor | Onde |
-| --- | --- | --- |
-| `foco` | `#3871DC` | Anel de foco do teclado, item selecionado (a 16% de opacidade), barra de 3 px do item atual, botão primário, faixa de momentos da busca |
-| `focoTexto` | `#78A3F2` | Link e texto na cor de foco |
+Um azul só, `#3871DC`, para o anel do teclado, o botão primário, a barra de 3 px do item atual e o item ativo do trilho (P3). O texto na cor de foco (link, valor de filtro ativo) usa a versão clara, `#82AAF5`. A linha ou o cartão selecionado usa o foco a 16% sobre o painel, já misturado (`#1A2538`). Tabela completa: [seção 2.2](MAM_DESIGN_SYSTEM.md).
 
-- **Um tom só** (P3). O mesmo azul diz "isto é o que está em foco ou escolhido", seja pelo teclado, pelo clique ou pela reprodução.
-- **Por que este azul.** Ele é o único valor que cumpre três papéis de uma vez: o branco sobre ele passa no AA (4,6:1), então serve de fundo do botão primário; e ele próprio tem 3:1 sobre os três fundos (4,0, 3,7 e 3,2), o mínimo da WCAG para um indicador gráfico (1.4.11), então serve de anel e de barra. Mais claro, o texto branco do botão reprova; mais escuro, o anel some sobre a superfície elevada.
-- **O primário é o foco, não um neutro.** `primaryColor: 'foco'`. O Mantine desenha o anel de foco e o botão primário com a cor primária, então essa escolha garante o mesmo azul nos dois sem CSS a mais. Um primário cinza deixaria o botão principal de um diálogo igual ao "Cancelar".
-- **A escala de 10 tons** existe porque o Mantine a exige; o tom 6 é o `foco` e o 4 é o `focoTexto`. Os outros só servem ao Mantine (hover, variante light).
+- **Por que este azul.** Ele cumpre dois papéis ao mesmo tempo. O branco sobre ele passa no AA (4,6:1), então serve de fundo do botão primário. E ele próprio passa de 3:1 sobre `painel`, `elevado` e `sobreposto` (3,9, 3,6 e 3,3), o mínimo da WCAG para um indicador gráfico (1.4.11), então serve de anel e de barra. Mais claro, o texto branco do botão reprova; mais escuro, o anel some sobre a superfície elevada.
+- **O anel nunca encosta em `controle`**, onde o azul dá só 2,9:1. O anel é o contorno global de 2 px com 2 px de afastamento, então fica sobre o painel.
+- **O primário é o foco, não um neutro.** `--color-primary` e `--color-ring` têm o mesmo valor, e o teste confere. Um primário cinza deixaria o botão principal de um diálogo igual ao "Cancelar".
 
 ### Estados
 
-| Estado | Token | Valor | Estados do Job |
-| --- | --- | --- | --- |
-| Concluído | `concluido` | `#5CC98A` | Concluído |
-| Em andamento ou aguardando | `andamento` | `#E5B045` | Aguardando envio, Em quarentena, Decupando |
-| Falhou | `falhou` | `#F4736A` | Falhou |
-| Inerte | `textoSecundario` | `#A0A5AE` | Cancelado |
+| Estado | Cor | Estados do Job |
+| --- | --- | --- |
+| Concluído | `ok` (`#5CC98A`) | Concluído |
+| Em andamento ou aguardando | `andamento` (`#E5B045`) | Aguardando envio, Em quarentena, Decupando, Finalizando |
+| Falhou | `destructive` (`#F4736A`) | Falhou |
+| Inerte | `muted-foreground` | Cancelado |
 
 - **Verde, âmbar, vermelho** (P3): a convenção que o operador já conhece. "Decupando" deixou o azul, que é a cor de foco: um estado nunca pode parecer seleção.
-- **"Aguardando envio" e "Em quarentena" também são âmbar**, porque o princípio junta "em andamento ou aguardando": nos dois casos, o vídeo ainda não está pronto e ninguém precisa agir. A palavra no selo os distingue.
+- **"Aguardando envio" e "Em quarentena" também são âmbar**, porque o vídeo ainda não está pronto e ninguém precisa agir. A palavra no selo os distingue.
+- **"Finalizando" não é um estado da API.** É o Job concluído cujas etapas depois da análise ainda rodam. Aparece em âmbar, como em andamento.
 - **"Cancelado" é cinza**: não terminou nem falhou, e não pede atenção.
-- **Versão para texto e para fundo de selo.** O selo usa a variante `light` do Mantine: a cor do estado no texto, sobre a mesma cor a 10% de opacidade. O texto passa no AA sobre esse fundo, composto sobre a página ou sobre a superfície (o teste confere). Com isso, um só valor por estado serve aos dois usos.
-- **Nunca só cor** (P3): o selo sempre tem a palavra.
+- **Selo:** a cor do estado no texto, sobre a mesma cor a 12%. O teste confere o AA nesse par. Um valor só por estado serve aos dois usos.
+- **Nunca só cor** (P3): o selo leva sempre a palavra e o ícone. Detalhes do selo e do *tally* da miniatura: [seção 2.3](MAM_DESIGN_SYSTEM.md).
 
 ### Tipos de ocorrência
 
-Uma cor fixa por tipo, a mesma na faixa da linha do tempo, no chip de filtro e no marcador do painel (P3).
+Uma cor fixa por tipo, a mesma na faixa da linha do tempo, no chip de filtro e no marcador do inspetor (P3). Os valores estão na [seção 2.5](MAM_DESIGN_SYSTEM.md) e em `CORES_DE_OCORRENCIA`.
 
-| Tipo | Valor | Sobre `fundo` | Sobre `elevada` |
-| --- | --- | --- | --- |
-| Pauta | `#8A9CF5` | 7,1 | 5,8 |
-| Pessoa na imagem (aparição) | `#F5A55A` | 9,1 | 7,4 |
-| Menção | `#F08AAE` | 7,8 | 6,4 |
-| Objeto | `#A0A030` | 6,6 | 5,4 |
-| Comercial e marca | `#D9C2FF` | 11,4 | 9,3 |
-| Fala | `#8E9196` | 5,8 | 4,7 |
-| Texto na tela | `#A8EFC8` | 13,8 | 11,3 |
-| Trecho sem decupagem | Hachurado de `borda` | — | — |
-| Momentos da busca | `foco` | 4,0 | 3,2 |
-
-- **Legíveis como texto.** As sete passam no AA sobre os três fundos. Assim, o chip ligado pode escrever o nome do tipo na cor dele, e nenhuma cor de tipo precisa de regra à parte.
+- **Legíveis como texto.** As sete passam no AA sobre `canvas`, `painel`, `elevado` e `sobreposto`. O chip ligado escreve o nome do tipo na cor dele, e nenhuma cor precisa de regra à parte. Sobre `controle`, a fala cai para 4,3:1, por isso texto de tipo nunca vai sobre `controle`.
 - **Fora do vermelho e do azul de foco.** Nenhum tipo usa o vermelho (que é marca e falha) nem o azul do foco: um bloco de pauta selecionado não pode sumir na cor da seleção. A pauta é um lilás-azulado, mais claro e mais violeta que o foco.
 - **A fala é cinza.** É a faixa mais densa e contínua; em cinza, ela forma o fundo de referência e deixa as outras saltarem.
-- **Planos não têm cor**: saem da linha do tempo no redesenho do Visualizador. Até lá, a tela de hoje desenha a faixa de planos em `dark.3`.
-- **Hachurado** (P5): listras diagonais de 2 px em `borda`, a cada 6 px, sobre todas as faixas. É o único `repeating-linear-gradient` permitido: desenha um padrão, não uma transição de cor.
+- **O plano não é faixa.** Só tem seção no inspetor, em `muted-foreground`.
+- **Hachurado** (P5): o trecho sem decupagem é riscado em diagonal, listras de 2 px a cada 6 px, na cor `border-strong`. É o único `repeating-linear-gradient` permitido: desenha um padrão, não uma transição de cor (o `estilo.test.ts` só aceita esse).
+- **Momentos da busca** na linha do tempo usam o azul do texto de foco (`link`).
 
 **Como a distinção foi conferida.** O teste `as sete cores se distinguem na visão comum e na deuteranopia`:
 
@@ -96,128 +63,85 @@ Uma cor fixa por tipo, a mesma na faixa da linha do tempo, no chip de filtro e n
 3. mede a distância euclidiana entre todo par no Oklab (Ottosson, 2020), um espaço em que distância acompanha a diferença percebida;
 4. exige pelo menos 0,10 entre qualquer par, na visão comum e na simulada.
 
-O limiar de percepção no Oklab fica perto de 0,02; 0,10 é uma diferença que se vê de relance num bloco pequeno. Resultado: o par mais próximo na visão comum é pauta/fala, com 0,137; na deuteranopia, menção/fala, com 0,104. Para comparar, as cores de hoje (tons padrão do Mantine) ficam perto de 0,01 entre menções e planos na deuteranopia, o que equivale a cores iguais. Na protanopia, que o ticket não cobre, o par mais próximo é menção/fala, com 0,046: distinguíveis lado a lado, mas não de relance. Como a cor nunca é a única pista (cada faixa tem nome e cada bloco, nome acessível), isso fica registrado como limite conhecido.
+O limiar de percepção no Oklab fica perto de 0,02; 0,10 é uma diferença que se vê de relance num bloco pequeno. Resultado: o par mais próximo na visão comum é pauta/fala, com 0,137; na deuteranopia, menção/fala, com 0,104. Na protanopia, que nenhum teste cobre, o par mais próximo é menção/fala, com 0,046: distinguíveis lado a lado, mas não de relance. Como a cor nunca é a única pista (cada faixa tem ícone e nome, e cada bloco, nome acessível), isso fica registrado como limite conhecido.
 
 Sete tons distinguíveis na deuteranopia, todos com AA sobre fundo escuro, sem vermelho e sem o azul do foco: o espaço é apertado, e as cores saíram de uma busca numérica sob essas restrições, ajustada à mão depois. Quem trocar uma cor precisa rodar o teste.
 
 ### Cor do objeto
 
-`CORES_DE_OBJETO`, no `tema.ts`, dá uma cor a cada valor de `cor_base` do Objeto (esquema 1.3): `vermelho`, `laranja`, `amarelo`, `verde`, `azul`, `roxo`, `rosa`, `marrom`, `bege`, `preto`, `branco`, `cinza`, `dourado`, `prateado` e `estampado`. É a única exceção à regra de nomear o token pela função e não pelo tom, porque aqui o tom é o dado: a chave é o valor do esquema e a cor representa a peça que aparece no vídeo, não a interface. Por isso, ela é diferente da cor do tipo de ocorrência `Objeto`.
+`CORES_DE_OBJETO`, em `cores.ts`, dá uma cor a cada valor de `cor_base` do Objeto (esquema 1.3): `vermelho`, `laranja`, `amarelo`, `verde`, `azul`, `roxo`, `rosa`, `marrom`, `bege`, `preto`, `branco`, `cinza`, `dourado`, `prateado` e `estampado`. É a única exceção à regra de nomear a cor pela função e não pelo tom, porque aqui o tom é o dado: a chave é o valor do esquema, e a cor representa a peça que aparece no vídeo, não a interface. Por isso, ela é diferente da cor do tipo de ocorrência `Objeto`.
 
-- **Só no quadradinho de 10 px** da lista de objetos, com borda de 1 px em `textoSecundario`, que separa o `preto` do fundo. Nunca vira texto, fundo nem faixa.
-- **Sempre com a palavra** (P3): o tom em palavras ("vermelho vivo") ou, sem ele, as cores base. O teste confere que a palavra ao lado nomeia a cor do quadradinho.
-- **`estampado` não tem uma cor só**: usa o cinza do `textoSecundario`, e a palavra diz o resto.
+- **Só no quadradinho de 10 px** da lista de objetos do inspetor, no máximo dois por objeto, com borda de 1 px em `muted-foreground`, que separa o `preto` do fundo. Nunca vira texto, fundo nem faixa.
+- **Sempre com a palavra** (P3): o tom em palavras ("dourado e preto") ao lado. O quadradinho é `aria-hidden`, e o teste do inspetor confere isso e a palavra.
+- **`estampado` não tem uma cor só**: usa o cinza do texto secundário, e a palavra diz o resto.
 
 ### Marca RedeTV
 
-| Token | Valor | Onde |
-| --- | --- | --- |
-| `marca` | `#E03131` | Só no logotipo |
+`marca` (`#E03131`) é só do logotipo. Na TV, vermelho quer dizer "no ar" ou erro (P3). Ele não aparece em botão, destaque, faixa nem fundo. Hoje o logotipo é a imagem `web/src/assets/redetv-logo.png`, e nenhuma classe usa o token. O vermelho de erro é outro, `destructive`, e vale para tudo o que diz "deu ou vai dar errado": o selo "Falhou", o alerta de erro, o campo inválido e o botão de perigo.
 
-Na TV, vermelho quer dizer "no ar" ou erro (P3). Ele não aparece em botão, destaque, faixa nem fundo. O vermelho de erro é outro token, `falhou`, e vale para tudo o que diz "deu ou vai dar errado": o selo "Falhou", o alerta de erro, a mensagem de campo inválido e o botão de perigo.
-
-**Duas variáveis fora da escala.** O Mantine pinta a mensagem de campo inválido com `--mantine-color-error`, que seria o `red.8` (3,7:1 sobre a superfície, abaixo do AA), e o placeholder com `--mantine-color-placeholder`, que seria o tom de desabilitado. O `variaveis` do `tema.ts` aponta a primeira para `falhou` e a segunda para `textoSecundario`. O teste confere o contraste dessas variáveis, que são as que o campo de fato usa.
+O botão de perigo é **contornado**, nunca cheio: o branco sobre `#F4736A` dá menos de 3:1, abaixo do AA. O `button.tsx` já traz a variante certa (`destructive`).
 
 ## Tipografia
 
-| Papel | Valor | Por quê |
-| --- | --- | --- |
-| Família de texto | `system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif` | A do sistema: zero download, zero dependência de rede e a renderização que o usuário já conhece. Fonte da web custaria peso e um pedido a mais sem ganho para uma ferramenta (P9) |
-| Família monoespaçada | `ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace` | Só no timecode de origem (`01:12:04:15`) e em códigos para o suporte, em que cada caractere conta |
-| Algarismos | `font-variant-numeric: tabular-nums` | Em todo tempo e número de tabela: `11:11` e `48:08` ocupam a mesma largura, e as colunas se alinham (P5) |
+IBM Plex Sans (400, 500 e 600) para a interface e IBM Plex Mono (400) para timecode e duração, onde cada caractere conta. As duas vêm do `@fontsource`, só o subconjunto latino, empacotadas no build: nenhum pedido a outro servidor. Escala e regras: [seção 3](MAM_DESIGN_SYSTEM.md).
 
-| Tamanho | Valor | Uso |
-| --- | --- | --- |
-| `xs` | 12 px | Rótulo de faixa, metadado, selo, contagem |
-| `sm` | 13 px | Tabela, painel, botão, item de lista |
-| `md` | 14 px | Texto corrido, campo, padrão do `body` |
-| `lg` | 16 px | Pouco uso: destaque dentro de diálogo |
-| `xl` | 18 px | Reservado |
+- **Padrão de 13 px** no `body` (`text-sm`), inclusive na transcrição e na lista de falas do inspetor. O 14 (`text-base`) aparece no texto de diálogo e na ficha do item do inspetor (P1). Título de página 20 px (`text-xl`) e de diálogo 16 (`text-lg`), em 600; título de painel é 13 px e o do inspetor, 12. Título nomeia a seção, não faz manchete.
+- **Algarismos tabulares em todo o `body`**: `11:11` e `48:08` ocupam a mesma largura, e as colunas se alinham (P5).
+- **600 no máximo.** O 700 "acende" demais no escuro.
+- **Frase normal sempre**, sem caixa alta em rótulo, aba ou cabeçalho.
 
-- **Texto de 13–14 px** (P1). O padrão do `body` é 14; o que é denso (tabela, painel) usa 13.
-- **Títulos pequenos**: `h1` 20 px, `h2` 18, `h3` 16, `h4` 14, `h5` 13 e `h6` 12. Título nomeia a seção, não faz manchete (P1).
-- **Dois pesos**: 400 para texto e 600 para título, cabeçalho de tabela e selo. Negrito 700 não entra: em fundo escuro, ele "acende" demais.
-- **Alturas de linha**: 1,35 (`xs`), 1,4 (`sm`), 1,45 (`md`) e 1,5 (`lg` e `xl`). Curtas, porque quase todo texto é de uma linha; o texto corrido do `md` ainda respira.
+## Forma e movimento
 
-## Espaçamentos
-
-Base de 4 px. Todo espaçamento é múltiplo de 4, para tudo se alinhar sem conta.
-
-| Token | Valor | Onde |
-| --- | --- | --- |
-| `xs` | 4 px | Entre ícone e rótulo; dentro de selo |
-| `sm` | 8 px | Dentro de componente; entre itens de um grupo |
-| `md` | 12 px | Entre componentes |
-| `lg` | 16 px | Margem da página; entre blocos |
-| `xl` | 24 px | Entre seções |
-
-Valores curtos (P1): uma ferramenta de trabalho cabe na tela antes de rolar.
-
-## Densidade
-
-| Medida | Valor | Por quê |
-| --- | --- | --- |
-| Linha de tabela | 32 px + 1 px de borda | 6 px + linha de 20 px + 6 px. Padrão do `Table` no tema (P1) |
-| Barra fixa | 44 px, no máximo | Fica sempre na tela; cada pixel a mais sai do conteúdo |
-| 30 vídeos sem rolar | 44 + 33 (cabeçalho) + 30 × 33 = 1067 px | Cabe numa tela de 1080 px de altura (P1) |
-| Faixa da linha do tempo | 14 px, com 6 px entre faixas | As sete faixas e a régua de 20 px somam 160 px: o player continua dominante (P4) |
-| Botão e campo | 36 px (`sm`); 30 px (`xs`) em barra de ferramentas e confirmação na linha | O alvo de clique continua confortável |
-
-## Forma
-
-- **Bordas de 1 px**, em `borda`.
-- **Cantos de 4–6 px** (P2): raio padrão `sm` = 4 px (botão, campo, selo, chip), `md` = 6 px (painel, diálogo). Os tamanhos `lg` e `xl` do tema também valem 6 px, para nenhum componente passar disso; o bloco da linha do tempo usa 2 px (`xs`), porque é pequeno.
-- **Sombra só para separar o que flutua** (menu, diálogo), com no máximo 8 px de desfoque. Nada de sombra grande, gradiente, brilho ou vidro fosco (P2). O `estilo.test.ts` procura `linear-`, `radial-` e `conic-gradient` e `box-shadow` com mais de 8 px de desfoque.
-- **Animação só para orientar** (P9): 150 ms ao abrir um menu, um popover ou um diálogo (o tema baixa o diálogo dos 200 ms do Mantine). Nada pulsa, nada brilha.
-- **Ícones**: só os do Tabler, sempre com rótulo ou dica (P2). Nada de emoji nem símbolo tipográfico; o teste procura caracteres pictográficos, de formas geométricas (`▦ ◫ ●`), símbolos diversos e dingbats.
+- **Bordas de 1 px**, em `border`; contorno de campo e chip em `border-strong`. Painéis encaixados se separam por uma costura de 1 px, sem sombra (P2).
+- **Cantos por hierarquia, nenhum acima de 6 px** (P2): 0 no painel encaixado, 2 px (`xs`) em bloco da linha do tempo, selo e barra; 4 px (`sm`) em botão, campo, chip e cartão; 6 px (`md`) no que flutua. Os nomes `lg` e acima do shadcn também valem 6 px. O círculo (`rounded-full`) aparece em peça pequena: avatar, marcador, polegar do slider, interruptor.
+- **Uma sombra só**, `shadow-float` (`0 4px 8px`), para menu, popover, dica e diálogo. As sombras do Tailwind foram desligadas no tema. Nada de gradiente, brilho ou vidro fosco (P2). O fundo do diálogo é `bg-black/60`, chapado.
+- **Animação só para orientar** (P9): 150 ms ao abrir menu, popover, diálogo e trilho. Com `prefers-reduced-motion`, tudo vira troca imediata. Só giram o ícone de "Decupando" e o de carregando.
+- **Ícones**: só os do Tabler, com `stroke` 1,75 como regra; o estado vazio usa 1,5 e os selos usam 2. Sempre com rótulo à vista ou dica (P2). Nada de emoji nem símbolo tipográfico; o teste procura pictogramas, formas geométricas (`▦ ◫ ●`), símbolos diversos e dingbats.
 
 ## Componentes
 
-Os estados de todo componente: **normal**; **hover**, a camada logo acima (`superficie` vira `elevada`) ou o tom 7 da cor; **foco**, com anel de 2 px em `foco` e 2 px de afastamento; **desabilitado**, com fundo `superficie` e texto `textoDesabilitado`; e **selecionado**, com `foco` a 16%. A amostra desenha hover e foco parados, para avaliar sem mouse.
+Os componentes são os do shadcn/ui, em `web/src/novo/ui/`, ajustados ao tema. O catálogo está na [seção 12](MAM_DESIGN_SYSTEM.md); aqui ficam as regras de uso que o código segue.
 
-| Componente | Como | Quando |
+| Componente | Regra | Onde no código |
 | --- | --- | --- |
-| Botão primário | Fundo `foco`, texto branco | A ação principal de um diálogo ou formulário; no máximo um por bloco. **Nunca vermelho** |
-| Botão secundário | Variante `default`: fundo `superficie`, borda, texto | Cancelar, ações secundárias |
-| Botão de perigo | Variante `outline` na cor `falhou` | Ação destrutiva (apagar, descartar), sempre com confirmação. Contornado, não cheio: o perigo se vê sem gritar |
-| Botão de ícone | `ActionIcon` `subtle`, cinza, **sempre com dica** e `aria-label` | Função universal: tocar, baixar, histórico, fechar, mais ações |
-| Campo de texto | Fundo `superficie`, borda, rótulo acima; erro em `falhou` abaixo, com a ação | Todo dado digitado |
-| Campo de busca | Ícone de lupa, placeholder "Buscar no acervo…" e a tecla `/` à direita | Barra fixa; `/` o foca de qualquer tela (P6) |
-| Select | O mesmo campo, com lista | Escolha fechada: programa, papel |
-| Chip de filtro | Desligado: contorno cinza. Ligado: contorno e texto na cor do tipo, com marca de seleção | Filtro de tipo, estado, programa. A marca de seleção é a pista que não depende de cor |
-| Selo de estado | Variante `light`, palavra sempre, sem caixa alta | Estado do Job, origem (revisado) |
-| Selo "não confirmado" | Contorno em `textoSecundario` | Pessoa ou sugestão que ninguém confirmou ainda (P5) |
-| Tabela densa | Linha de 32 px; cabeçalho em 600; hover um degrau mais claro; selecionada com `foco` a 16% e barra de 3 px; ordenação com seta e `aria-sort`; ação da linha num botão de ícone na última coluna | Acervo, lixeira, usuários, auditoria (P1) |
-| Abas com contagem | Contagem em `textoSecundario` ao lado do nome | Painel do Visualizador. A contagem ajuda a decidir; zero aparece como zero |
-| Item de lista do painel | Marcador de 8 px na cor do tipo, tempo em `tabular-nums`, texto. **Selecionado**: `foco` a 16%. **Atual**: barra de 3 px em `foco` à esquerda e fundo `elevada`, nunca um bloco colorido; `aria-current` | Pautas, pessoas, objetos, falas |
-| Faixa da linha do tempo | Bloco na cor do tipo, cantos de 2 px, 1 px de vão entre blocos encostados; **selecionado** com anel de foco; trecho sem decupagem hachurado sobre todas as faixas; cursor de 2 px em `texto`; riscos de corte de 1 × 6 px na régua; nome acessível com quem e quando ("Aparição de Leão Lobo, 03:31 a 04:21") | Visualizador (P5, P8) |
-| Menu | Fundo `elevada`, borda, sombra pequena; item desabilitado em `textoDesabilitado` | Ações de uma ocorrência |
-| Diálogo | Fundo `elevada`, centralizado; primário à direita, secundário ao lado | Corrigir, confirmar o que não cabe na linha |
-| Confirmação na própria linha | A pergunta com o tempo, botão de perigo e "Cancelar", no lugar da linha | Apagar uma ocorrência sem abrir diálogo |
-| Dica | `Tooltip` com 300 ms de espera | Todo botão de ícone; código interno de erro |
-| Tecla (`Kbd`) e lista do `?` | `Kbd` pequeno; a lista é uma tabela de duas colunas, tecla e ação, na ordem de [principios.md](principios.md) | Campo de busca, a lista de atalhos (P6) |
-| Estado vazio | Uma frase que diz que está vazio e outra que diz por quê ou o que fazer | Aba sem itens, busca sem resultado (P7) |
-| Alerta de erro | Variante `light` em `falhou`, ícone, a mensagem em português, o código para o suporte em `textoSecundario` e o botão da ação | Falha de carga ou de envio (P7) |
-| Carregando | `Loader` pequeno na cor de foco, com o que está carregando por escrito | Qualquer espera |
+| Botão primário | Fundo `primary`, texto branco; a ação principal do diálogo ou formulário, no máximo uma por bloco. Nunca vermelho | `ui/button.tsx`, variante `default` |
+| Botão secundário e de ícone | `secondary` (Cancelar, ações secundárias) e `ghost` (ícone, cinza). Todo botão de ícone tem dica e `aria-label` | `ui/button.tsx`, `size-7` |
+| Botão de perigo | Contornado em `destructive`, sempre com confirmação | `ui/button.tsx`, variante `destructive` |
+| Campo | Fundo `input`, borda `border-strong`, rótulo acima | `admin/comum.tsx` (`CAMPO`), nativo (`<select>`, `<input type="date">`) |
+| Busca | A barra de 40 px mostra "Buscar no acervo…" e a tecla `/`; `/` ou `Ctrl K` abre a paleta de comandos, não foca o campo (P6) | `Casca.tsx` |
+| Chip de faixa | Desligado: contorno `border-strong`, texto cinza. Ligado: contorno e nome na cor do tipo. Sempre ícone e contagem; `aria-pressed` | `video/LinhaDoTempo.tsx` (`ChipsDasFaixas`) |
+| Selo de estado | Cor do estado a 12%, ícone e palavra, sem caixa alta | `comum/SeloDeEstado.tsx` |
+| Selo "não confirmado" | Contorno `border-strong`, texto cinza, com dica: pessoa ou sugestão que ninguém confirmou (P5) | `video/Inspetor.tsx` |
+| Tabela | Cabeçalho e linha de 32 px; hover um degrau mais claro; linha aberta em `selected`. Só na Administração e nos relatórios. Não ordena por coluna | `admin/comum.tsx` (`TABELA`) |
+| Item atual do inspetor | Barra de 3 px em `primary` à esquerda e fundo `card`, nunca um bloco colorido; `aria-current`. **Selecionado**: `selected` | `video/Inspetor.tsx` (`ATUAL`) |
+| Seção do inspetor | Cabeçalho de 36 px com o ícone na cor do tipo, o nome e a contagem (zero aparece como zero); abre e fecha com `aria-expanded` | `video/Inspetor.tsx` |
+| Faixa da linha do tempo | Bloco de 14 px na cor do tipo, 4 px entre faixas, cantos de 2 px; selecionado com anel de foco; cursor de 2 px em `foreground`; riscos de corte na régua; nome acessível com quem e quando ("Aparição de Leão Lobo, 03:31 a 04:21") (P5, P8) | `video/LinhaDoTempo.tsx`, `linhaDoTempo.ts` |
+| Menu e diálogo | `popover`, borda, `shadow-float`; no diálogo, o primário à direita e o "Cancelar" ao lado. Perigo usa `Dialog` com o botão contornado | `ui/dropdown-menu.tsx`, `ui/dialog.tsx` |
+| Confirmação na própria linha | A pergunta, "Cancelar" (Esc) e o botão de perigo (Enter), no próprio detalhe ou na própria linha. Remover uma ocorrência e descartar uma correção não abrem diálogo | `video/Correcao.tsx`, `video/Gaveta.tsx` |
+| Dica | `Tooltip` com 300 ms de espera, o rótulo e a tecla | `ui/tooltip.tsx` |
+| Atalhos | `?` abre o diálogo com a lista agrupada, tecla (`Kbd`) e ação, na ordem de [principios.md](principios.md) | `Atalhos.tsx` |
+| Estado vazio | Uma frase que diz que está vazio e outra que diz o que fazer; o botão da saída quando houver (P7) | `acervo/Acervo.tsx`, `admin/comum.tsx` (`Vazio`) |
+| Alerta de erro | Fundo `destructive` a 12%, ícone, a mensagem em português, o código para o suporte em cinza e "Tentar de novo" (P7) | `comum/Falha.tsx` |
+| Carregando | `IconLoader2` girando e `role="status"` com o que carrega no `aria-label` (ou por escrito, no diálogo). O esqueleto do acervo fica parado, sem cintilar | `admin/comum.tsx`, `acervo/Video.tsx` |
 
 ## Gráficos
 
-Os gráficos dos relatórios (Tempo de tela e Marcas) usam o `@mantine/charts`, na mesma versão do `@mantine/core`, e vivem em [`web/src/graficos.tsx`](../../web/src/graficos.tsx). O painel da diretoria (#282 a #285) vai reaproveitar a base. A tabela de cada tela continua embaixo e é a forma acessível de ler os números (P8); cada gráfico tem `aria-label`.
+Regras e escala de cor: [seções 2.6 e 11](MAM_DESIGN_SYSTEM.md). Cada gráfico tem um botão que troca entre o gráfico e a tabela, que é a forma acessível de ler os números (P8) (`GraficoOuTabela`, `painel/pecas.tsx`). Cada gráfico tem `aria-label`.
 
-- **Uma cor para uma série** (P3). O ranking é uma série só: as barras em `foco`; a selecionada e a que está sob o ponteiro em `focoTexto`. Nada de arco-íris por pessoa.
-- **Rótulo direto em vez de eixo.** O nome fica à esquerda da barra, a 13 px; o valor na ponta, em `tabular-nums` e `textoSecundario`. Sem eixo X, sem grade, sem legenda. O gráfico que precisar de eixo ou grade os desenha em `borda`, com o texto em `textoSecundario`.
-- **A barra tem 20 px de altura e 8 px de vão**, reta do lado do eixo e com 2 px de canto na ponta.
-- **Os tipos têm as cores da linha do tempo** (`CORES_DE_OCORRENCIA`): aparição, menção na fala e menção no texto na divisão por tipo, para quem já viu o Visualizador reconhecer sem legenda.
-- **A dica** abre em `elevada`, com o nome em 600 e os números em `tabular-nums`, em 150 ms. Os gráficos não animam o crescimento das barras (P2, P9).
-- **A matriz marca × tipo** é uma `Table` com o fundo da célula em `foco`, de 0 a 60% de opacidade numa escala só; coluna sem inserção some. Não usa biblioteca.
-- **Sem gradiente**: a linha de evolução por dia, quando entrar, é chapada, com a área a 12%.
+- **Uma cor para uma série** (P3). O ranking é uma série só: barras em `primary`; a que está sob o ponteiro ou escolhida, em `link`. Nada de arco-íris por pessoa.
+- **As cores de série não são as de tipo.** As de tipo foram feitas para ler como texto e são claras demais para preencher área. A divisão por tipo do Tempo de tela usa `chart-1`, `chart-2` e `chart-3`.
+- **Magnitude** (a matriz marca × tipo) usa a escala sequencial `seq-100` a `seq-600`, do azul de foco: no escuro, o maior valor é o mais claro. O texto de cada passo passa no AA (o teste confere).
+- **Recharts** só em `painel/pecas.tsx`. O `Ranking` de lá serve ao Painel da diretoria, ao Tempo de tela e a Marcas (as 15 maiores): barras horizontais de 16 px com 8 px entre elas, canto de 2 px na ponta. O Painel tem ainda a série no tempo em barra ou linha, com até ~90 pontos já somados pelo servidor. Sem eixo X no ranking; grade horizontal em `border`; texto de eixo em `muted-foreground`. Dica em `popover`. Os gráficos não animam (P2, P9).
+- **Feito em CSS, sem biblioteca:** a divisão por tipo do Tempo de tela e a barrinha de cada linha da tabela, de até 48 px (`relatorios/comuns.tsx`).
 
-## O que mudou nas telas de hoje
+## Onde a interface construída difere do MAM_DESIGN_SYSTEM
 
-O tema novo vale também para as telas atuais, que só serão redesenhadas depois do portão (#139). Para não contradizer o tema, só mudou o mínimo:
+O MAM_DESIGN_SYSTEM descreve as três opções do protótipo; a opção B Galeria virou o `web/`, e algumas medidas mudaram no caminho. Valem as da interface construída, até alguém decidir o contrário:
 
-- os botões "Salvar", o slider do player, o indicador de carregamento e a barra de envio deixaram o vermelho e usam o primário;
-- a fala atual ganhou a barra de 3 px e `aria-current`, no lugar do bloco vermelho;
-- o tempo do player perdeu o vermelho e ganhou `tabular-nums`;
-- "Decupando" ficou âmbar;
-- o painel do login perdeu o gradiente e ficou chapado.
+- **Fontes:** só Plex Sans e Plex Mono, de `@fontsource` (`index.css`). Não há a Sans Condensed, nem a Mono 500, nem o `<link>` do Google Fonts.
+- **Hachurado** em `border-strong`, não em `border` (`video/LinhaDoTempo.tsx`).
+- **Acervo:** grade de cartões (4 tamanhos, de 200 a 420 px de largura mínima) ou lista de linhas de 80 px com miniatura, sem colunas e sem ordenação por coluna. Ordena por data de envio ou de exibição (`acervo/Acervo.tsx`). Os filtros (Programa, Estado, Período) ficam em linha no cabeçalho, sem painel lateral. O cartão não mostra a barra de presença nem percorre os quadros ao passar o mouse. A barra de presença existe só nas linhas de pessoa do inspetor.
+- **Inspetor:** 400 px (420 a partir de `xl`), de largura fixa, sem arrastar. Abaixo de `lg` ele vira um bloco empilhado de 80% da altura da tela, não um `Sheet` (`video/Inspetor.tsx`).
+- **Placeholder dos campos da Administração** em `subtle` (`admin/comum.tsx`, `CAMPO`), abaixo do AA sobre `input`. A regra é o texto secundário; a troca está pendente.
+- **Sem Data Table (TanStack Table), Sonner nem AlertDialog.** As tabelas são HTML simples. O aviso de ação é um `role="status"` na própria tela, e o diálogo de perigo é um `Dialog`.
+- **Tempo de tela e Marcas** não têm mapa de calor de pessoa × vídeo. Além do ranking das 15 maiores, a tabela completa vem de 50 em 50 com cursor.
