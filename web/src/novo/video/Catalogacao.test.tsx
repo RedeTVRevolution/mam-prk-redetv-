@@ -148,14 +148,25 @@ test('Ctrl+Z fora do modo de catalogação não desfaz nada', async () => {
 })
 
 test('um segundo Ctrl+Z enquanto o primeiro anda não manda outro pedido', async () => {
+  let liberar: () => void = () => {}
+  const segurada = new Promise<void>((resolver) => (liberar = resolver))
+  servidor.use(
+    http.post('/v1/jobs/j1/correcoes/:id/desfazer', async ({ params }) => {
+      desfeitas.push({ id: String(params.id), motivo: null })
+      await segurada
+      return HttpResponse.json({}, { status: 201 })
+    }),
+  )
   historico = [correcaoDoHistorico('c1', 'ana@redetv.com.br')]
   const usuario = await abrir()
   await usuario.keyboard('e')
 
-  await usuario.keyboard('{Control>}zz{/Control}')
-
+  await usuario.keyboard('{Control>}z{/Control}')
   await waitFor(() => expect(desfeitas).toHaveLength(1))
+  await usuario.keyboard('{Control>}z{/Control}')
   await new Promise((r) => setTimeout(r, 50))
+  liberar()
+
   expect(desfeitas).toHaveLength(1)
 })
 

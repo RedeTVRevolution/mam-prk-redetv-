@@ -33,6 +33,7 @@ import {
   pedidoDeRemocao,
   podeRemover,
 } from '../../catalogacao.ts'
+import type { Sugestao } from '../../decupagem.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
 import { naInterfaceAtual } from '../../interface.ts'
 import { dataDeExibicao, finalizando, type Job } from '../../jobs.ts'
@@ -49,6 +50,7 @@ import { Kbd } from '../ui/kbd.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { AvisoDeFalha, BotaoDeIcone } from './comum.tsx'
+import { Sugestoes } from './Sugestoes.tsx'
 import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './Correcao.tsx'
@@ -191,6 +193,17 @@ export function Video({
     historico: historico.data,
     mostrarAviso,
     aoAlternar: () => {},
+  })
+
+  // As sugestões do pipeline só aparecem na revisão; a lista vem de novo a cada entrada nela.
+  const chaveDasSugestoes = chaveDoVideo(job.id, 'sugestoes')
+  const sugestoes = useQuery({
+    queryKey: chaveDasSugestoes,
+    queryFn: () => cliente.sugestoes(),
+    enabled: revisao.revisando && !!d,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
   })
 
   // Outro `?t=` no mesmo vídeo salta o player.
@@ -678,6 +691,23 @@ export function Video({
             urlDoQuadro={urlDoQuadro}
             acoes={acoes}
             aviso={aviso}
+            acima={
+              revisao.revisando && sugestoes.data ? (
+                <Sugestoes
+                  sugestoes={sugestoes.data}
+                  decupagem={d}
+                  api={cliente}
+                  aoSaltar={saltarParaMs}
+                  aoResolver={(id) => {
+                    consultas.setQueryData(chaveDasSugestoes, (l: Sugestao[] | undefined) => l?.filter((x) => x.id !== id))
+                    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
+                    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
+                  }}
+                  aoFalhar={() => void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })}
+                  aoAvisar={mostrarAviso}
+                />
+              ) : null
+            }
             indexando={pode.editar && !!historico.data && aindaIndexando(historico.data)}
             aoRecolher={() => setInspetorAberto(false)}
           />

@@ -181,6 +181,7 @@ export function Inspetor({
   urlDoQuadro,
   acoes,
   aviso,
+  acima,
   indexando,
   aoRecolher,
 }: {
@@ -203,6 +204,8 @@ export function Inspetor({
   urlDoQuadro: (caminho: string) => Promise<string>
   acoes?: AcoesDeCorrecao
   aviso: string | null
+  /** O que a revisão põe acima do "Agora": as sugestões, as pautas marcadas. */
+  acima?: ReactNode
   indexando: boolean
   aoRecolher: () => void
 }) {
@@ -312,6 +315,7 @@ export function Inspetor({
         </p>
       ) : (
         <>
+          {acima}
           <Agora decupagem={d} porTipo={porTipo} instante={instante} duracaoMs={duracaoMs} urlDoQuadro={urlDoQuadro} aoAbrir={aoAbrir} />
           {detalhe && selecionado ? (
             <Detalhe

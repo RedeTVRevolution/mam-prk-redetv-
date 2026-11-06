@@ -11,10 +11,10 @@ import { Button } from '../ui/button.tsx'
 // A mesma regra do `FormularioDeCorrecao.tsx` da interface atual (o `Editor` do `catalogacao.ts`),
 // com os campos em Tailwind: Enter salva e Esc cancela, sem diálogo.
 
-const CAMPO =
+export const CAMPO =
   'h-8 w-full min-w-0 rounded-sm border border-strong bg-input px-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary'
 
-function Rotulo({ texto, children }: { texto: string; children: ReactNode }) {
+export function Rotulo({ texto, children }: { texto: string; children: ReactNode }) {
   return (
     <label className="grid gap-1 text-xs font-medium">
       <span>{texto}</span>
@@ -288,7 +288,7 @@ const MINIMO_DE_LETRAS = 2
  * escolhem, Shift+Enter (ou o clique na última linha) usa o texto digitado como nome novo, "a revisar".
  * Escolher do catálogo devolve o id junto com o nome. O tipo de objeto só sugere: não há nome a criar.
  */
-function CampoDeNome({
+export function CampoDeNome({
   rotulo,
   catalogo,
   limite,
