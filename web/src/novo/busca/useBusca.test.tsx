@@ -8,7 +8,7 @@ import { criarClienteDaApi } from '../../api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
 import { consultaNova } from '../../busca.ts'
 import { ContextoDaApi, criarClienteDeConsultas } from '../consultas.ts'
-import { useBusca, type PedidoDaBusca } from './useBusca.ts'
+import { useBusca, useEntrandoNaBusca, type PedidoDaBusca } from './useBusca.ts'
 
 // 160 vídeos com um momento cada: 8 páginas de 20.
 const videos = Array.from({ length: 160 }, (_, i) => ({
@@ -24,8 +24,16 @@ const VAZIO = { programa: [], mes: [], pessoa: [], marca: [], tipo: [] }
 const cursoresPedidos: (string | null)[] = []
 // Os cursores que a API não aceita mais (vencidos): a resposta é 422.
 let vencidos = new Set<string>()
+// Os concluídos que o aviso do #404 lê: `pendente` é um vídeo ainda entrando na busca.
+let indexacoes: string[] = []
 
 const servidor = setupServer(
+  http.get('/v1/jobs', () => {
+    const agora = new Date().toISOString()
+    return HttpResponse.json(
+      indexacoes.map((estado, i) => ({ id: `j${i}`, nome: `j${i}.mp4`, estado: 'concluido', codigo_falha: null, criado_em: agora, atualizado_em: agora, indexacao: { estado, em: agora } })),
+    )
+  }),
   http.get('/v1/busca', ({ request }) => {
     const p = new URL(request.url).searchParams
     const cursor = p.get('cursor')
@@ -46,12 +54,13 @@ afterEach(() => {
   servidor.resetHandlers()
   cursoresPedidos.length = 0
   vencidos = new Set()
+  indexacoes = []
 })
 afterAll(() => servidor.close())
 
 const TEXTO: PedidoDaBusca = { tipo: 'texto', consulta: consultaNova('x') }
 
-async function montar(pedido: PedidoDaBusca = TEXTO) {
+async function envolvedor() {
   const auth = new AutenticadorFalso([{ email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true }])
   await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
   await auth.confirmarTotp(CODIGO_TOTP_FALSO)
@@ -62,6 +71,11 @@ async function montar(pedido: PedidoDaBusca = TEXTO) {
       <ContextoDaApi.Provider value={api}>{children}</ContextoDaApi.Provider>
     </QueryClientProvider>
   )
+  return { envolver, consultas }
+}
+
+async function montar(pedido: PedidoDaBusca = TEXTO) {
+  const { envolver, consultas } = await envolvedor()
   const r = renderHook((p: PedidoDaBusca) => useBusca(p), { wrapper: envolver, initialProps: pedido })
   await waitFor(() => expect(r.result.current.quantidade).toBeGreaterThan(0))
   return { ...r, consultas }
@@ -121,4 +135,14 @@ test('o mesmo termo com outro chip mantém a lista anterior; termo novo não', a
   rerender({ tipo: 'texto', consulta: consultaNova('y') })
   expect(result.current.carregando).toBe(true)
   expect(result.current.quantidade).toBe(0)
+})
+
+test('sem vídeo entrando, o aviso do #404 ainda confere de tempos em tempos e aparece para o que entrar depois', async () => {
+  indexacoes = ['indexado']
+  const { envolver } = await envolvedor()
+  const { result } = renderHook(() => useEntrandoNaBusca(20, 40), { wrapper: envolver })
+  await waitFor(() => expect(result.current).toBe(0))
+
+  indexacoes = ['indexado', 'pendente']
+  await waitFor(() => expect(result.current).toBe(1))
 })
