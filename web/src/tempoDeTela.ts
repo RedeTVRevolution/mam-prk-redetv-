@@ -9,7 +9,7 @@ export interface VideoDaPessoa {
   mencoes_no_texto: number
 }
 
-export interface PessoaNoRelatorio {
+export interface PessoaResumida {
   pessoa_id: string
   nome: string
   tempo_de_tela_ms: number
@@ -17,8 +17,41 @@ export interface PessoaNoRelatorio {
   aparicoes: number
   mencoes_na_fala: number
   mencoes_no_texto: number
+}
+
+export interface PessoaNoRelatorio extends PessoaResumida {
   por_video: VideoDaPessoa[]
 }
+
+/** O período inteiro, não só a página: os números dos cartões. */
+export interface TotalDoTempoDeTela {
+  pessoas: number
+  tempo_de_tela_ms: number
+  videos: number
+  aparicoes: number
+  mencoes_na_fala: number
+  mencoes_no_texto: number
+}
+
+/** Uma página do ranking (`limite` na API), sem os vídeos; `proximo` é o cursor da seguinte. */
+export interface PaginaDoTempoDeTela {
+  programa: string | null
+  desde: string | null
+  ate: string | null
+  total: TotalDoTempoDeTela
+  pessoas: PessoaResumida[]
+  proximo: string | null
+}
+
+/** Uma página dos vídeos de uma pessoa. */
+export interface PaginaDeVideos {
+  videos: VideoDaPessoa[]
+  proximo: string | null
+}
+
+/** Pessoas por página do ranking e vídeos por página do detalhe (o teto da API é 100). */
+export const POR_PAGINA_DO_RANKING = 50
+export const POR_PAGINA_DO_DETALHE = 25
 
 export interface RelatorioDeTempoDeTela {
   programa: string | null
