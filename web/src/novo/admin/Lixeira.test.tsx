@@ -5,6 +5,7 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import App from '../App.tsx'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
+import { comAlturaNaRolagem } from './teste.ts'
 
 interface Item {
   tipo: string
@@ -56,6 +57,7 @@ const servidor = setupServer(
   }),
 )
 
+comAlturaNaRolagem()
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => {
   history.replaceState(null, '', '/')
@@ -179,4 +181,15 @@ test('a volta do login avisa quando o item já saiu da lixeira', async () => {
   expect(await screen.findByText('O item que você ia purgar não está mais na lixeira.')).toBeTruthy()
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(sessionStorage.getItem('mam:purga-pendente')).toBeNull()
+})
+
+test('uma lixeira de centenas de itens põe no DOM só as linhas à vista', async () => {
+  lista = Array.from({ length: 400 }, (_, i) => ({ ...itens()[1]!, id: `p${i}`, nome: `Pessoa ${i}` }))
+  await abrir()
+  const tabela = await screen.findByRole('table', { name: 'Lixeira' })
+  expect(within(tabela).getByText('Pessoa 0')).toBeTruthy()
+  const linhas = within(tabela).getAllByRole('row').length
+  expect(linhas).toBeGreaterThan(20)
+  expect(linhas).toBeLessThan(150)
+  expect(screen.getByText('400 itens')).toBeTruthy()
 })
