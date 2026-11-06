@@ -677,6 +677,19 @@ resource "google_storage_bucket" "mam" {
       max_age_seconds = 3600
     }
   }
+  # Os quadros e as capas (decupagens) são lidos pelo service worker do cache de imagens
+  # (fase 6 da migração do web/), que refaz o pedido em modo cors para conferir o status e o
+  # tamanho antes de guardar. Sem este CORS o worker não guarda nada, e as imagens seguem
+  # pela rede como antes. Só GET e só das URLs da aplicação.
+  dynamic "cors" {
+    for_each = each.key == "decupagens" ? [1] : []
+    content {
+      origin          = local.origens_da_aplicacao
+      method          = ["GET"]
+      response_header = ["Content-Type"]
+      max_age_seconds = 3600
+    }
+  }
   depends_on = [google_project_service.apis]
 }
 

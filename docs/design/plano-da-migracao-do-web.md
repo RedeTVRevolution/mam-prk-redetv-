@@ -43,6 +43,8 @@ Decisão no ADR 0014 (5/11/2026). Origem: o protótipo `prototipos/redesenho`, o
 - O pulso da sessão de revisão.
 
 **6. Cache de imagens.** Depois dos #408, #409 e #410 (capas com URL estável e `Cache-Control`), o service worker guarda os quadros com uma chave sem a assinatura e limpa o cache no logout.
+- Feito: `web/src/sw.ts` (publicado em `/sw.js`, escopo `/`, sem dependência nova) guarda só o GET de `<img>` para URL assinada do Storage, com chave sem os `X-Goog-*`, teto de 500 imagens de até 1 MB e vida de 1 dia (a do `Cache-Control`). As regras e os testes estão em `web/src/cacheDeImagens.ts`; o `sair` da sessão, comum às duas interfaces, apaga o cache.
+- O worker refaz o pedido em modo `cors` para conferir status e tipo antes de guardar (uma resposta opaca esconderia um 403). Por isso o bucket `decupagens` ganha CORS de GET no Terraform, que o Bruno aplica. Sem ele o worker anota a recusa por 1 h e as imagens seguem pela rede, como antes.
 
 **7. Troca.**
 - A interface nova vira o padrão.

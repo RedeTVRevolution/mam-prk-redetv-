@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import App from './App.tsx'
 import { ContaBloqueada } from './auth/autenticador.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
+import { NOME_DO_CACHE } from './cacheDeImagens.ts'
 
 const chamadas: { url: string; autorizacao: string | null }[] = []
 
@@ -34,6 +35,7 @@ afterEach(() => {
   history.replaceState(null, '', '/')
   servidor.resetHandlers()
   chamadas.length = 0
+  vi.unstubAllGlobals()
   cleanup()
 })
 afterAll(() => servidor.close())
@@ -198,6 +200,8 @@ test('fechar o modal do autenticador volta ao início do login', async () => {
 test('o botão sair volta ao login e apaga a sessão', async () => {
   const usuario = userEvent.setup()
   const auth = autenticador()
+  const apagar = vi.fn(async () => true)
+  vi.stubGlobal('caches', { delete: apagar })
   render(<App autenticador={auth} />)
   await screen.findByLabelText(/^E-mail/)
   await preencherSenha(usuario)
@@ -208,6 +212,8 @@ test('o botão sair volta ao login e apaga a sessão', async () => {
   expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
   expect(await auth.token()).toBeNull()
+  // O cache de imagens some junto com a sessão.
+  expect(apagar).toHaveBeenCalledWith(NOME_DO_CACHE)
 })
 
 test('sessão já existente abre direto no Acervo', async () => {

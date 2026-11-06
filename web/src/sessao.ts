@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { criarClienteDaApi, SessaoExpirada } from './api.ts'
 import type { Autenticador } from './auth/autenticador.ts'
+import { limparCacheDeImagens } from './cacheDeImagens.ts'
 import { navegar, telaInicial, useRota } from './rotas.ts'
 
 export interface Usuario {
@@ -29,6 +30,8 @@ export function useSessao(autenticador: Autenticador, pausada = false) {
   const rota = useRota()
 
   const sair = useCallback(async () => {
+    // Antes da saída: mesmo que o SDK falhe, a próxima pessoa do navegador não herda os quadros.
+    await limparCacheDeImagens()
     await autenticador.sair()
     setSessao({ tipo: 'sem_sessao' })
     setSaidas((n) => n + 1)
