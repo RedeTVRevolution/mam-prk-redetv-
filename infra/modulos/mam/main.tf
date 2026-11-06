@@ -1,7 +1,7 @@
 # Infraestrutura de um ambiente do MAM (E0, #8; módulo desde #292). O ambiente chama
 # este módulo (infra/main.tf para o dev); o backend e o provider ficam lá. O dev é aplicado
 # por `make deploy-dev`, à mão ou no CD (#71), que impersona a conta mam-terraform. No IAM do projeto, só
-# google_project_iam_member, que é aditivo (ADR 0002).
+# google_project_iam_member, que é aditivo, e o audit config do Artifact Registry (ADR 0002).
 
 terraform {
   required_version = ">= 1.9"
@@ -188,6 +188,19 @@ variable "ips_da_redetv" {
 variable "imagem" {
   description = "Imagem do serviço, de preferência pelo digest"
   type        = string
+}
+
+# Limpeza do Artifact Registry: cada imagem guarda os últimos builds e o resto sai. Dois e não
+# um: os Jobs com GPU puxam a imagem a cada execução, e se o build sobe uma imagem nova e o
+# deploy falha, o Job segue com a anterior, que tem de continuar no registro.
+variable "builds_de_imagem_guardados" {
+  description = "Quantos builds de cada imagem os repositórios do Artifact Registry guardam; os mais antigos são apagados"
+  type        = number
+  default     = 2
+  validation {
+    condition     = var.builds_de_imagem_guardados >= 2
+    error_message = "Guarde ao menos 2 builds: com 1, um deploy que falha depois do build deixa o Job sem a imagem que usa."
+  }
 }
 
 variable "janelas_em_paralelo" {
@@ -426,21 +439,90 @@ resource "google_project_service" "apis" {
   disable_on_destroy = false
 }
 
+# Limpeza (as mesmas regras no mam_gpu), feita pelo Google em segundo plano, em até ~1 dia:
+# - Cada build grava até 3 versões por imagem: o índice OCI com a tag do commit, o manifesto
+#   amd64 (o digest que o serviço e os Jobs usam, amd64_do_indice no scripts/deploy-dev.sh) e a
+#   atestação. As 3 x N mais recentes de cada imagem contêm os índices dos N últimos builds, e o
+#   Artifact Registry não apaga manifesto referenciado por um índice guardado: o amd64 de um build
+#   sem mudança, reaproveitado de um build antigo, fica pelo índice novo.
+# - O cache das camadas (docker-bake.hcl) é uma tag fixa por alvo no pacote `cache`, sobrescrita a
+#   cada build: a versão com tag fica sempre; as que perderam a tag saem.
+# - KEEP vence DELETE: o resto, com ou sem tag, sai quando a versão tem mais de 14 dias desde
+#   que foi criada (não desde o último uso). O registro não sabe o que o Cloud Run usa: se dois
+#   deploys seguidos falham no teste de GPU, o testar-jobs-gpu.sh volta os Jobs a um build que já
+#   saiu dos N últimos e, se ele tiver mais de 14 dias, sai do registro em até ~1 dia.
+# - Ensaio: com limpeza_so_ensaia, o Google só registra o que apagaria (BatchDeleteVersions com
+#   validateOnly no log Data Access, ligado no limpeza_de_imagens.tf). Antes de desligar o ensaio, proteger o build
+#   da volta (uma tag que um KEEP guarde) e conferir a contagem de um ciclo, que leva até ~1 dia.
+locals {
+  versoes_guardadas_por_imagem = 3 * var.builds_de_imagem_guardados
+  idade_minima_para_apagar     = "1209600s"
+  limpeza_so_ensaia            = true
+}
+
 resource "google_artifact_registry_repository" "mam" {
-  repository_id = "mam"
-  location      = var.regiao
-  format        = "DOCKER"
-  depends_on    = [google_project_service.apis]
+  repository_id          = "mam"
+  location               = var.regiao
+  format                 = "DOCKER"
+  depends_on             = [google_project_service.apis]
+  cleanup_policy_dry_run = local.limpeza_so_ensaia
+  cleanup_policies {
+    id     = "guarda-os-ultimos-builds"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = local.versoes_guardadas_por_imagem
+    }
+  }
+  cleanup_policies {
+    id     = "guarda-o-cache"
+    action = "KEEP"
+    condition {
+      tag_state             = "TAGGED"
+      package_name_prefixes = ["cache"]
+    }
+  }
+  cleanup_policies {
+    id     = "apaga-o-resto"
+    action = "DELETE"
+    condition {
+      tag_state  = "ANY"
+      older_than = local.idade_minima_para_apagar
+    }
+  }
 }
 
 # As imagens com GPU (e o cache das camadas delas) ficam na região da GPU: o Cloud Run baixa
 # a imagem de uma instância que sobe em us-east4, e o BuildKit, ao enviar a imagem, não
 # reenvia as camadas que o cache já pôs no mesmo repositório.
 resource "google_artifact_registry_repository" "mam_gpu" {
-  repository_id = "mam-gpu"
-  location      = var.regiao_gpu
-  format        = "DOCKER"
-  depends_on    = [google_project_service.apis]
+  repository_id          = "mam-gpu"
+  location               = var.regiao_gpu
+  format                 = "DOCKER"
+  depends_on             = [google_project_service.apis]
+  cleanup_policy_dry_run = local.limpeza_so_ensaia
+  cleanup_policies {
+    id     = "guarda-os-ultimos-builds"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = local.versoes_guardadas_por_imagem
+    }
+  }
+  cleanup_policies {
+    id     = "guarda-o-cache"
+    action = "KEEP"
+    condition {
+      tag_state             = "TAGGED"
+      package_name_prefixes = ["cache"]
+    }
+  }
+  cleanup_policies {
+    id     = "apaga-o-resto"
+    action = "DELETE"
+    condition {
+      tag_state  = "ANY"
+      older_than = local.idade_minima_para_apagar
+    }
+  }
 }
 
 resource "google_firestore_database" "mam" {
