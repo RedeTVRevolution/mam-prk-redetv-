@@ -218,10 +218,20 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
     }
     chaveVista.current = chave
   }, [chave])
-  // A lista recomeçou (um envio novo a refaz do zero): o topo, onde o vídeo novo aparece.
+  // A lista recomeçou (um envio novo a refaz do zero): o topo, onde o vídeo novo aparece. Se a
+  // volta ainda não tinha chegado, ela fica para trás (senão a grade esperaria a fileira dela).
+  const jaCarregou = useRef(false)
   useEffect(() => {
-    if (carregando && rolagem.current) rolagem.current.scrollTop = 0
-  }, [carregando])
+    if (!carregando) {
+      jaCarregou.current = true
+      return
+    }
+    if (jaCarregou.current && volta.current) {
+      volta.current = 0
+      chegouNaVolta()
+    }
+    if (rolagem.current) rolagem.current.scrollTop = 0
+  }, [carregando, chegouNaVolta])
 
   // As setas andam entre os vídeos; a fileira de destino entra na tela antes do foco.
   function aoTeclar(e: KeyboardEvent<HTMLDivElement>) {
