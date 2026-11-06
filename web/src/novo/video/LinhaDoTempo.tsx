@@ -367,10 +367,10 @@ export function LinhaDoTempo({
                 const { ms, folgaMs, caixa } = msNoPonteiro(e)
                 const bloco = ms === null ? null : blocoNoTempo(faixa.blocos, ms, folgaMs)
                 const x = e.clientX - caixa.left
+                // Lido agora: o `currentTarget` do evento já não existe quando o React roda o atualizador.
+                const y = e.currentTarget.offsetTop
                 const nome = bloco?.nome ?? null
-                setDica((atual) =>
-                  nome === null ? null : atual?.nome === nome && atual.y === e.currentTarget.offsetTop ? atual : { x, y: e.currentTarget.offsetTop, direita: x > caixa.width / 2, nome },
-                )
+                setDica((atual) => (nome === null ? null : atual?.nome === nome && atual.y === y ? atual : { x, y, direita: x > caixa.width / 2, nome }))
               }}
               onPointerLeave={() => setDica(null)}
             >

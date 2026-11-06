@@ -299,13 +299,15 @@ export function Inspetor({
               acoes={acoes}
             />
           ) : (
-            // Nada aqui encolhe abaixo do conteúdo: a seção aberta guarda o mínimo da lista, e o inspetor rola.
-            <div className="flex flex-1 flex-col">
+            // A seção aberta tem um mínimo explícito (cabeçalho, barra e 8rem de lista): ela não passa por
+            // cima das de baixo, e o inspetor rola quando falta altura. Um mínimo pelo conteúdo valeria a
+            // lista inteira, e a lista virtual desenharia todas as linhas.
+            <div className="flex min-h-0 flex-1 flex-col">
               {SECOES.map((s) => {
                 const { Icone, cor } = TIPOS[s.tipo]
                 const aberta = secao === s.chave
                 return (
-                  <section key={s.chave} aria-label={s.rotulo} className={cn('flex flex-col border-b', aberta && 'flex-1')}>
+                  <section key={s.chave} aria-label={s.rotulo} className={cn('flex flex-col border-b', aberta && 'min-h-52 flex-1')}>
                     <button
                       type="button"
                       aria-expanded={aberta}

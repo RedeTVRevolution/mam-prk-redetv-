@@ -119,20 +119,30 @@ const FONTES: Record<string, string> = { gc: 'GC', fala: 'Fala', rosto: 'Rosto',
 /**
  * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (o rosto não tem tempo). O palpite sem prova leva só o selo "não confirmado".
  */
-function selosDoNome(nome: string, fontes: string[], d: Decupagem, palpite = false): Selo[] {
+/** Um texto da decupagem já sem acento nem caixa, para procurar os nomes nele. */
+type TextoNormalizado = { inicio_ms: number; texto: string }
+
+const normalizados = (trechos: (Intervalo & { texto: string })[]): TextoNormalizado[] =>
+  trechos.map((t) => ({ inicio_ms: t.inicio_ms, texto: normalizar(t.texto) })).sort((a, b) => a.inicio_ms - b.inicio_ms)
+
+/**
+ * Os selos do nome, com o tempo do primeiro GC ou fala que cita a pessoa (o rosto não tem tempo). O palpite sem prova
+ * leva só o selo "não confirmado". `textos` e `falas` vêm normalizados e em ordem de tempo, uma vez por decupagem.
+ */
+function selosDoNome(nome: string, fontes: string[], textos: TextoNormalizado[], falas: TextoNormalizado[], palpite = false): Selo[] {
   if (palpite && fontes.length === 0) {
     return [{ rotulo: 'não confirmado', inicio_ms: null, tipo: 'nao_confirmado', dica: DICA_DO_NAO_CONFIRMADO }]
   }
   // O nome inteiro, entre limites de palavra: "Ana" não casa com "MARIANA".
-  const alvo = new RegExp(`(^|[^\\p{L}\\p{N}])${escapar(normalizar(nome))}($|[^\\p{L}\\p{N}])`, 'u')
-  const prova = (trechos: (Intervalo & { texto: string })[]) =>
-    trechos.filter((t) => alvo.test(normalizar(t.texto))).sort((a, b) => a.inicio_ms - b.inicio_ms)[0]
-      ?.inicio_ms ?? null
+  const procurado = normalizar(nome)
+  const alvo = new RegExp(`(^|[^\\p{L}\\p{N}])${escapar(procurado)}($|[^\\p{L}\\p{N}])`, 'u')
+  // O `includes` descarta de graça quase todo texto; a expressão só confere os limites da palavra.
+  const prova = (trechos: TextoNormalizado[]) => trechos.find((t) => t.texto.includes(procurado) && alvo.test(t.texto))?.inicio_ms ?? null
   // `rosto` e a antiga `referencia` (ainda aceita na leitura) dão o mesmo selo "Rosto": um só.
   const unicas = fontes.filter((f, i) => fontes.findIndex((g) => (FONTES[g] ?? g) === (FONTES[f] ?? f)) === i)
   return unicas.map((f) => ({
     rotulo: FONTES[f] ?? f,
-    inicio_ms: f === 'gc' ? prova(d.textos_na_tela ?? []) : f === 'fala' ? prova(d.transcricao) : null,
+    inicio_ms: f === 'gc' ? prova(textos) : f === 'fala' ? prova(falas) : null,
   }))
 }
 
@@ -272,9 +282,14 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
   )
   let a = 0
   let m = 0
+  // Os textos e as falas se normalizam uma vez para todas as pessoas, não uma vez por pessoa.
+  let textos: TextoNormalizado[] | null = null
+  let falas: TextoNormalizado[] | null = null
   for (const p of d.pessoas) {
     const sem = SEM_NOME.test(p.nome)
-    const selos = sem ? [] : selosDoNome(p.nome, p.fontes_do_nome ?? [], d, p.estado_do_nome === 'palpite')
+    textos ??= normalizados(d.textos_na_tela ?? [])
+    falas ??= normalizados(d.transcricao)
+    const selos = sem ? [] : selosDoNome(p.nome, p.fontes_do_nome ?? [], textos, falas, p.estado_do_nome === 'palpite')
     for (const x of p.na_imagem) {
       const apoio = [x.papel, x.visual].filter(Boolean).join(' · ')
       itens.push({
