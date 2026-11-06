@@ -345,7 +345,7 @@ test('os atalhos do trecho estão na lista do ?', async () => {
 
 test('com a gaveta aberta, Esc fecha a gaveta e deixa o trecho', async () => {
   const { usuario } = await trechoPorTeclas(10, 20)
-  await usuario.click(screen.getByRole('button', { name: 'Histórico' }))
+  await usuario.click(screen.getByRole('button', { name: /^Histórico/ }))
   await screen.findByRole('complementary', { name: 'Correções do vídeo' })
   await usuario.keyboard('{Escape}')
   await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Correções do vídeo' })).toBeNull())

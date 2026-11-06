@@ -48,6 +48,12 @@ export function RenomeacaoEmLote({
 
   useEffect(() => raiz.current?.querySelector('input')?.focus(), [])
 
+  // Com o andamento, o campo e o botão que tinham o foco saem: o foco vai para a mensagem de andamento.
+  const comAndamento = andamento !== null
+  useEffect(() => {
+    if (comAndamento) raiz.current?.querySelector<HTMLElement>('[role=status]')?.focus()
+  }, [comAndamento])
+
   // Enquanto a busca é atualizada, pergunta de tempos em tempos até terminar ou falhar.
   const acompanhando = andamento?.estado === 'em_andamento'
   useEffect(() => {
@@ -129,7 +135,7 @@ export function RenomeacaoEmLote({
       )}
       {impacto && !andamento && <p className="text-xs">{efeito(impacto)}</p>}
       {andamento && (
-        <p role="status" className="text-xs">
+        <p role="status" tabIndex={-1} className="text-xs outline-none">
           {frase(andamento)}
         </p>
       )}

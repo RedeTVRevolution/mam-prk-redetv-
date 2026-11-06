@@ -20,7 +20,7 @@ import {
 } from '@tabler/icons-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from 'cn'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { codigoDoErro, ConflitoNaApi, PedidoInvalido, SessaoExpirada } from '../../api.ts'
 import { useAtalhos } from '../../atalhos.ts'
 import { filtrosDeQuemAcessou } from '../../auditoria.ts'
@@ -139,6 +139,9 @@ export function Video({
   const [falhaDaMidia, setFalhaDaMidia] = useState<string | null>(null)
   const [dialogo, setDialogo] = useState<DialogoDoVideo | null>(null)
   const [comparandoCom, setComparandoCom] = useState<string | null>(null)
+  // Quem abriu a gaveta e a comparação: ao fecharem, o foco volta para lá, e não para o body.
+  const botaoDoHistorico = useRef<HTMLButtonElement>(null)
+  const seletorDePassada = useRef<HTMLSelectElement>(null)
   // A gaveta das correções toma o lugar do inspetor; a aba em que ficou vale para a próxima abertura.
   const [gavetaAberta, setGavetaAberta] = useState(false)
   const [abaDaGaveta, setAbaDaGaveta] = useState<AbaDaGaveta>('historico')
@@ -897,6 +900,8 @@ export function Video({
             }}
             gavetaAberta={gavetaAberta}
             aResolver={aResolver}
+            refDoHistorico={botaoDoHistorico}
+            refDoSeletor={seletorDePassada}
             aoAlternarGaveta={alternarGaveta}
             aoAbrirDialogo={setDialogo}
           />
@@ -1021,12 +1026,19 @@ export function Video({
           )}
         </section>
         {comparandoCom ? (
-          <ComparacaoDePassada api={cliente} id={job.id} passadaId={comparandoCom} aoSaltar={saltarParaMs} aoFechar={() => setComparandoCom(null)} />
+          <ComparacaoDePassada api={cliente} id={job.id} passadaId={comparandoCom} aoSaltar={saltarParaMs} aoFechar={() => {
+              setComparandoCom(null)
+              seletorDePassada.current?.focus()
+            }}
+          />
         ) : gavetaAberta && pode.editar ? (
           <Gaveta
             aba={abaDaGaveta}
             aoTrocarAba={setAbaDaGaveta}
-            aoFechar={() => setGavetaAberta(false)}
+            aoFechar={() => {
+              setGavetaAberta(false)
+              botaoDoHistorico.current?.focus()
+            }}
             historico={historico.data ?? []}
             fila={fila.data ?? []}
             podeAprovar={pode.aprovar}
@@ -1155,6 +1167,8 @@ function BarraDoVideo({
   aoComparar,
   gavetaAberta,
   aResolver,
+  refDoHistorico,
+  refDoSeletor,
   aoAlternarGaveta,
   aoAbrirDialogo,
 }: {
@@ -1169,6 +1183,8 @@ function BarraDoVideo({
   aoComparar: (id: string | null) => void
   gavetaAberta: boolean
   aResolver: number
+  refDoHistorico: Ref<HTMLButtonElement>
+  refDoSeletor: Ref<HTMLSelectElement>
   aoAlternarGaveta: () => void
   aoAbrirDialogo: (d: DialogoDoVideo) => void
 }) {
@@ -1216,13 +1232,20 @@ function BarraDoVideo({
           )}
         </div>
         <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
-          {passadas.length > 0 && <SeletorDePassada passadas={passadas} valor={comparandoCom} aoEscolher={aoComparar} />}
+          {passadas.length > 0 && <SeletorDePassada ref={refDoSeletor} passadas={passadas} valor={comparandoCom} aoEscolher={aoComparar} />}
           {pode.editar && concluido && <ControlesDaRevisao revisao={revisao} />}
           {pode.editar && concluido && (
-            <BotaoDeIcone rotulo="Histórico" ativo={gavetaAberta} className="relative" onClick={aoAlternarGaveta}>
+            <BotaoDeIcone
+              ref={refDoHistorico}
+              rotulo="Histórico"
+              aria-label={aResolver > 0 ? `Histórico, ${aResolver} a resolver` : 'Histórico'}
+              ativo={gavetaAberta}
+              className="relative"
+              onClick={aoAlternarGaveta}
+            >
               <IconHistory size={18} stroke={1.75} aria-hidden />
               {aResolver > 0 && (
-                <span role="img" aria-label={`${aResolver} a resolver`} className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-andamento px-1 text-[10px] leading-none font-semibold text-background">
+                <span aria-hidden className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-andamento px-1 text-[10px] leading-none font-semibold text-background">
                   {aResolver}
                 </span>
               )}

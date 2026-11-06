@@ -75,8 +75,9 @@ test('o botão Histórico abre a gaveta no lugar do inspetor, e a contagem vem d
   historico = [correcaoDoHistorico('c1', 'bia@redetv.com.br', 'pendente')]
   const { usuario } = await abrir(['decupagem.editar', 'correcao.aprovar'])
 
-  const botao = await screen.findByRole('button', { name: 'Histórico' })
-  expect((await within(botao).findByRole('img', { name: '1 a resolver' })).textContent).toBe('1')
+  // A contagem faz parte do nome acessível do botão, não só do selo.
+  const botao = await screen.findByRole('button', { name: 'Histórico, 1 a resolver' })
+  expect(botao.textContent).toBe('1')
   await usuario.click(botao)
 
   expect(botao.getAttribute('aria-pressed')).toBe('true')
@@ -89,11 +90,27 @@ test('o botão Histórico abre a gaveta no lugar do inspetor, e a contagem vem d
   expect(screen.getByRole('complementary', { name: 'Inspetor' })).toBeTruthy()
 })
 
+test('fechar a gaveta pelo botão ou pelo Esc devolve o foco ao botão Histórico', async () => {
+  const { usuario } = await abrir()
+  const botao = await screen.findByRole('button', { name: /^Histórico/ })
+
+  await usuario.click(botao)
+  await usuario.click(gaveta().getByRole('button', { name: 'Fechar' }))
+  expect(document.activeElement).toBe(botao)
+
+  ;(document.activeElement as HTMLElement).blur()
+  await usuario.click(botao)
+  ;(document.activeElement as HTMLElement).blur()
+  await usuario.keyboard('{Escape}')
+  expect(screen.queryByRole('complementary', { name: 'Correções do vídeo' })).toBeNull()
+  expect(document.activeElement).toBe(botao)
+})
+
 test('clicar numa correção da gaveta salta o player ao item', async () => {
   historico = [correcaoDoHistorico('c1', 'bia@redetv.com.br')]
   const { usuario, player } = await abrir()
 
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   await usuario.click(await gaveta().findByRole('button', { name: /^Saltar ao item/ }))
 
   expect(player.currentTime).toBe(10)
@@ -102,7 +119,7 @@ test('clicar numa correção da gaveta salta o player ao item', async () => {
 test('sem decupagem.editar não há botão Histórico nem pedido de histórico ou fila', async () => {
   await abrir(['decupagem.ver'])
 
-  expect(screen.queryByRole('button', { name: 'Histórico' })).toBeNull()
+  expect(screen.queryByRole('button', { name: /^Histórico/ })).toBeNull()
   expect(pedidos).toEqual({ historico: 0, fila: 0 })
 })
 
@@ -110,7 +127,7 @@ test('com a gaveta aberta, as setas e o Enter são dela', async () => {
   const comercial = { ...correcaoDoHistorico('c2', 'bia@redetv.com.br', 'ativa', 'comercial.marca'), item_id: 'c1', ancora: { versao: 'v1', tipo_do_item: 'comercial' } }
   historico = [correcaoDoHistorico('c1', 'bia@redetv.com.br'), comercial]
   const { usuario, player } = await abrir()
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   await gaveta().findAllByRole('button', { name: /^Saltar ao item/ })
 
   // O foco no corpo da página: o Enter não é de nenhum botão.
@@ -124,7 +141,7 @@ test('com a gaveta aberta, as setas e o Enter são dela', async () => {
 test('Refazer à mão, fora do modo de revisão, liga o modo e deixa marcar as pautas', async () => {
   fila = [FILA_ESTRUTURAL]
   const { usuario } = await abrir()
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   await usuario.click(await gaveta().findByRole('tab', { name: /Fila de revisão/ }))
 
   await usuario.click(await gaveta().findByRole('button', { name: 'Refazer à mão' }))
@@ -139,7 +156,7 @@ test('Refazer à mão com o inspetor recolhido traz a lista de pautas de volta',
   fila = [FILA_ESTRUTURAL]
   const { usuario } = await abrir()
   await usuario.click(within(screen.getByRole('complementary', { name: 'Inspetor' })).getByRole('button', { name: 'Recolher o inspetor' }))
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   await usuario.click(await gaveta().findByRole('tab', { name: /Fila de revisão/ }))
 
   await usuario.click(await gaveta().findByRole('button', { name: 'Refazer à mão' }))
@@ -154,7 +171,7 @@ test('o F2 com a gaveta aberta traz o formulário de volta ao inspetor', async (
   if (secao.getAttribute('aria-expanded') !== 'true') await usuario.click(secao)
   await usuario.click(await screen.findByRole('button', { name: /^Eleição, / }))
   await usuario.keyboard('{Escape}')
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   expect(screen.queryByRole('complementary', { name: 'Inspetor' })).toBeNull()
   ;(document.activeElement as HTMLElement).blur()
 
@@ -168,7 +185,7 @@ test('um histórico longo mostra 100 correções por vez, e "Mostrar mais" acres
   historico = Array.from({ length: 130 }, (_, i) => ({ ...correcaoDoHistorico(`c${i}`, 'bia@redetv.com.br'), depois_legivel: `Pessoa ${i}` }))
   const { usuario } = await abrir()
 
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   await gaveta().findAllByRole('button', { name: /^Saltar ao item/ })
   expect(gaveta().getAllByRole('button', { name: /^Saltar ao item/ })).toHaveLength(100)
 
@@ -181,7 +198,7 @@ test('um histórico longo mostra 100 correções por vez, e "Mostrar mais" acres
 test('a seta para baixo além das 100 primeiras mostra a seguinte', async () => {
   historico = Array.from({ length: 130 }, (_, i) => ({ ...correcaoDoHistorico(`c${i}`, 'bia@redetv.com.br'), depois_legivel: `Pessoa ${i}` }))
   const { usuario } = await abrir()
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   await gaveta().findAllByRole('button', { name: /^Saltar ao item/ })
 
   for (let i = 0; i < 100; i++) await usuario.keyboard('{ArrowDown}')
@@ -193,7 +210,7 @@ test('uma decupagem nova (reprocessar) traz o histórico e a fila de novo; a mes
   const consultas = criarClienteDeConsultas()
   const usuario = userEvent.setup()
   await abrirVideo({ permissoes: ['decupagem.editar'], consultas })
-  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
   await waitFor(() => expect(pedidos).toMatchObject({ historico: 1, fila: 1 }))
 
   // A mesma versão, recarregada: o histórico e a fila já estão em dia.

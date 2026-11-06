@@ -175,6 +175,14 @@ test('a comparação toma o lugar do inspetor; "Fechar a comparação" o devolve
   expect((screen.getByRole('combobox', { name: 'Comparar com' }) as HTMLSelectElement).value).toBe('')
 })
 
+test('"Fechar a comparação" devolve o foco ao seletor "Comparar com"', async () => {
+  await compararComPassada()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Fechar a comparação' }))
+
+  expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Comparar com' }))
+})
+
 test('a falha ao carregar a comparação mostra o código e "Tentar de novo"', async () => {
   comparacao = () => new HttpResponse(null, { status: 500 })
   await abrirVideo()

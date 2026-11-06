@@ -105,6 +105,8 @@ test('mostra a prévia sem mudar nada e, com Enter, renomeia e acompanha a busca
 
   await waitFor(() => expect(pedidos[1]).toEqual({ id: 'cat-leo', corpo: { nome: 'Leão Lobo', previa: false } }))
   expect(await screen.findByText('Atualizando a busca: 1 de 3 vídeos.')).toBeTruthy()
+  // O campo e o botão sumiram: o foco fica no formulário (o Esc ainda o fecha), não no body.
+  expect(screen.getByRole('form', { name: /^Renomear .* em todos os vídeos$/ }).contains(document.activeElement)).toBe(true)
   expect(await inspetor().findByRole('region', { name: /^Detalhe: Leão Lobo/ })).toBeTruthy()
   expect(await screen.findByText(/Pronto: Leão Lobo em 3 vídeos/, undefined, { timeout: 4000 })).toBeTruthy()
 }, 20_000)

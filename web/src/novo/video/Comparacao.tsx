@@ -1,6 +1,6 @@
 import { IconX } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { type Ref, useState } from 'react'
 import { type ClienteDoJob, codigoDoErro, SessaoExpirada } from '../../api.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import type { ComparacaoDaPassada, ItemMarcado, ResumoDaPassada } from '../../passadas.ts'
@@ -20,9 +20,10 @@ const TITULOS: Record<string, string> = {
 const DATA = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
 /** O seletor "Comparar com": o valor vazio volta ao inspetor de sempre. */
-export function SeletorDePassada({ passadas, valor, aoEscolher }: { passadas: ResumoDaPassada[]; valor: string | null; aoEscolher: (id: string | null) => void }) {
+export function SeletorDePassada({ passadas, valor, aoEscolher, ref }: { passadas: ResumoDaPassada[]; valor: string | null; aoEscolher: (id: string | null) => void; ref?: Ref<HTMLSelectElement> }) {
   return (
     <select
+      ref={ref}
       aria-label="Comparar com"
       value={valor ?? ''}
       onChange={(e) => aoEscolher(e.currentTarget.value || null)}
