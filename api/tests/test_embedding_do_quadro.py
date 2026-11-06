@@ -148,8 +148,14 @@ def test_sem_busca_ou_sem_indice_do_quadro_nao_ha_embedding() -> None:
     assert embedding_da_busca(_config(None)) is None
 
 
-def test_sem_os_indices_ann_o_vetor_do_quadro_continua_calculado() -> None:
+def test_sem_os_indices_ann_o_vetor_do_quadro_continua_calculado(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # O dev roda sem índice ANN por custo (ADR 0006), e a busca por imagem segue.
+    # O transporte falso evita pedir credencial do Google, que o CI não tem.
+    monkeypatch.setattr(
+        embedding_do_quadro, "transporte_http", lambda: lambda url, corpo: {}
+    )
     assert embedding_da_busca(_config("q", indices_ligados=False)) is not None
 
 
