@@ -86,3 +86,20 @@ test('vídeo ainda não indexado não mostra o botão nem consulta os vetores', 
   expect(agora.queryByRole('button', { name: BOTAO })).toBeNull()
   expect(consultas).toBe(0)
 })
+
+test('pelo detalhe de cada plano na seção Planos, o botão também aparece só no que tem vetor', async () => {
+  const usuario = userEvent.setup()
+  await abrirVideo()
+  const inspetor = within(screen.getByRole('complementary', { name: 'Inspetor' }))
+  await usuario.click(inspetor.getByRole('button', { name: /^Planos \d+$/ }))
+
+  await usuario.click(await inspetor.findByRole('button', { name: /^ambiente pl0/ }))
+  await inspetor.findByRole('region', { name: 'Detalhe: ambiente pl0' })
+  expect(inspetor.queryByRole('button', { name: BOTAO })).toBeNull()
+  await usuario.keyboard('{Escape}')
+
+  await usuario.click(await inspetor.findByRole('button', { name: /^ambiente pl1/ }))
+  const detalhe = within(await inspetor.findByRole('region', { name: 'Detalhe: ambiente pl1' }))
+  await usuario.click(detalhe.getByRole('button', { name: BOTAO }))
+  expect(location.pathname + location.search).toBe('/busca/parecidos?job=j1&plano=1')
+})

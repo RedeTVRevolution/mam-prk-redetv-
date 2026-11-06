@@ -342,6 +342,10 @@ export function Inspetor({
               aoTocarTrecho={aoTocarTrecho}
               aoAbrir={aoAbrir}
               urlDoQuadro={urlDoQuadro}
+              aoBuscarParecidos={(() => {
+                const n = selecionado.tipo === 'plano' ? /^plano-(\d+)$/.exec(selecionado.chave)?.[1] : undefined
+                return n !== undefined && planosParecidos?.comVetor.has(Number(n)) ? () => planosParecidos.abrir(Number(n)) : undefined
+              })()}
               acoes={acoes}
             />
           ) : (
@@ -1005,6 +1009,7 @@ function Detalhe({
   aoTocarTrecho,
   aoAbrir,
   urlDoQuadro,
+  aoBuscarParecidos,
   acoes,
 }: {
   item: ItemDoPainel
@@ -1014,6 +1019,8 @@ function Detalhe({
   aoTocarTrecho: (i: Intervalo) => void
   aoAbrir: (chave: string, saltar: boolean) => void
   urlDoQuadro: (c: string) => Promise<string>
+  /** Só no plano com vetor do quadro indexado. */
+  aoBuscarParecidos?: () => void
   acoes?: AcoesDeCorrecao
 }) {
   const tipo = tipoDaChave(item.chave)
@@ -1093,6 +1100,11 @@ function Detalhe({
           <Button type="button" onClick={() => aoTocarTrecho(item)}>
             <IconPlayerPlay size={16} aria-hidden /> Tocar o trecho
           </Button>
+          {aoBuscarParecidos && (
+            <Button type="button" variant="secondary" onClick={aoBuscarParecidos}>
+              <IconSearch size={16} stroke={1.75} aria-hidden /> Planos parecidos com este
+            </Button>
+          )}
           {acoes?.podeCorrigir(item) && (
             <Button type="button" variant="secondary" aria-pressed={edicao?.chave === item.chave} onClick={() => acoes.corrigir(item)}>
               <IconEdit size={16} stroke={1.75} aria-hidden /> Corrigir
