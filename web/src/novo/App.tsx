@@ -7,13 +7,15 @@ import { naInterfaceAtual } from '../interface.ts'
 import { ACERVO, seguir, useRota, type Rota } from '../rotas.ts'
 import { useSessao, type Usuario } from '../sessao.ts'
 import { AtalhosProvider } from './Atalhos.tsx'
+import { Acervo } from './acervo/Acervo.tsx'
 import { Casca } from './Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from './consultas.ts'
 import Login from './Login.tsx'
 import { Button } from './ui/button.tsx'
+import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 
-/** O que a área de trabalho mostra. Na fase 1 nenhuma tela migrou: todas levam à interface atual. */
-function AreaDeTrabalho({ rota }: { rota: Rota }) {
+/** O que a área de trabalho mostra. As telas que ainda não migraram levam à interface atual. */
+function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[] }) {
   if (rota.tipo === 'raiz') return null
   if (rota.tipo === 'nao_encontrada') {
     return (
@@ -25,6 +27,8 @@ function AreaDeTrabalho({ rota }: { rota: Rota }) {
       </div>
     )
   }
+  if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} permissoes={permissoes} />
+  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} />
   return <AindaNaoMigrou />
 }
 
@@ -47,7 +51,7 @@ function SessaoAtiva({ api, usuario, rota, aoSair }: { api: ClienteDaApi; usuari
     <QueryClientProvider client={consultas}>
       <ContextoDaApi.Provider value={api}>
         <Casca usuario={usuario} rota={rota} aoSair={aoSair}>
-          <AreaDeTrabalho rota={rota} />
+          <AreaDeTrabalho rota={rota} permissoes={usuario.permissoes} />
         </Casca>
       </ContextoDaApi.Provider>
     </QueryClientProvider>

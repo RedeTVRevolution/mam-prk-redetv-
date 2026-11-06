@@ -1,6 +1,7 @@
 import {
   IconBadgeTm,
   IconChartBar,
+  IconCloudUpload,
   IconKeyboard,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -12,6 +13,7 @@ import {
   IconUserScan,
   type Icon,
 } from '@tabler/icons-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import logo from '../assets/redetv-logo.png'
 import { podeAdministrar } from '../administracao.ts'
@@ -20,6 +22,8 @@ import { consultaNova } from '../busca.ts'
 import { NOME_DO_PAPEL } from '../papeis.ts'
 import { ACERVO, ADMIN, enderecoDaBusca, MARCAS, navegar, PAINEL, seguir, TEMPO_DE_TELA, type Rota } from '../rotas.ts'
 import type { Usuario } from '../sessao.ts'
+import { EnvioDeVideo } from './EnvioDeVideo.tsx'
+import { Button } from './ui/button.tsx'
 import {
   CommandDialog,
   CommandEmpty,
@@ -206,6 +210,9 @@ const ESPERA_DO_G_MS = 1200
 /** A casca da interface nova: barra de 40 px, trilho, busca global e atalhos. Só a área de trabalho muda. */
 export function Casca({ usuario, rota, aoSair, children }: { usuario: Usuario; rota: Rota; aoSair: () => void; children: ReactNode }) {
   const [buscaAberta, setBuscaAberta] = useState(false)
+  const [envioAberto, setEnvioAberto] = useState(false)
+  const podeEnviar = usuario.permissoes.includes('video.enviar')
+  const consultas = useQueryClient()
   const mostrarAtalhos = useMostrarAtalhos()
   const grupos = gruposDoTrilho(usuario.permissoes)
   const destinos = grupos.flat()
@@ -214,6 +221,7 @@ export function Casca({ usuario, rota, aoSair, children }: { usuario: Usuario; r
   const ultimoG = useRef(0)
   const atalhos: Atalho[] = [
     { tecla: '/', acao: 'Buscar', grupo: 'Em toda tela', executar: () => setBuscaAberta(true) },
+    ...(podeEnviar ? [{ tecla: 'U', acao: 'Enviar vídeo', grupo: 'Em toda tela', casa: (e: KeyboardEvent) => e.key.toLowerCase() === 'u', executar: () => setEnvioAberto(true) }] : []),
     { tecla: 'G', acao: 'Começa um atalho de navegação', grupo: 'Navegação', casa: (e) => e.key.toLowerCase() === 'g', executar: () => (ultimoG.current = Date.now()) },
     ...destinos
       .filter((d) => d.letra)
@@ -264,6 +272,19 @@ export function Casca({ usuario, rota, aoSair, children }: { usuario: Usuario; r
             </span>
             <Kbd className="hidden sm:inline-flex">/</Kbd>
           </button>
+          {podeEnviar && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" size="sm" onClick={() => setEnvioAberto(true)} aria-label="Enviar vídeo" className="shrink-0">
+                  <IconCloudUpload stroke={1.75} aria-hidden />
+                  <span className="hidden lg:inline">Enviar vídeo</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Enviar vídeo <Kbd>U</Kbd>
+              </TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -309,6 +330,8 @@ export function Casca({ usuario, rota, aoSair, children }: { usuario: Usuario; r
           <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-canvas">{children}</main>
         </div>
         <BuscaGlobal aberta={buscaAberta} aoMudar={setBuscaAberta} destinos={destinos} />
+        {/* O vídeo novo entra no topo: o acervo recomeça da primeira página. */}
+        {podeEnviar && <EnvioDeVideo aberto={envioAberto} aoMudar={setEnvioAberto} aoCriar={() => void consultas.resetQueries({ queryKey: ['acervo'] })} />}
       </SidebarProvider>
     </TooltipProvider>
   )

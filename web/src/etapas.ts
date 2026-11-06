@@ -81,3 +81,27 @@ export function etapaDeReprocesso(job: JobComEtapas): string | null {
   }
   return falhas[0] && DEPOIS_DO_CONCLUIDO.includes(falhas[0]) ? falhas[0] : null
 }
+
+/** As etapas que o Curador pode escolher num vídeo concluído, na ordem em que rodam. */
+export const ETAPAS_ESCOLHIVEIS = [
+  { valor: 'analise', refaz: 'Refaz a decupagem inteira com o modelo, nas instruções de hoje.' },
+  {
+    valor: 'identificacao',
+    refaz: 'Tenta de novo nomear as pessoas sem nome, busca as fotos e compara os rostos.',
+  },
+  { valor: 'quadros_chave', refaz: 'Extrai de novo os quadros das miniaturas.' },
+  {
+    valor: 'inventario_de_objetos',
+    refaz: 'Lista de novo os objetos de cada plano e atualiza o índice da busca.',
+  },
+  { valor: 'indexacao', refaz: 'Atualiza o índice da busca com a decupagem atual.' },
+] as const
+
+export type EtapaEscolhivel = (typeof ETAPAS_ESCOLHIVEIS)[number]['valor']
+
+/** O que reprocessar a partir de `etapa` faz com a Decupagem, na pergunta de confirmação. */
+export function impactoDoReprocessamento(etapa: EtapaEscolhivel): string {
+  return etapa === 'analise'
+    ? 'Reprocessar a partir da análise? A Decupagem fica indisponível até a nova análise terminar, e as etapas seguintes rodam de novo.'
+    : `Reprocessar a partir da etapa ${nomeDaEtapa(etapa)}? Ela e as etapas seguintes rodam de novo; a Decupagem continua disponível.`
+}

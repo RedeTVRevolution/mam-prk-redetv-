@@ -1,9 +1,9 @@
 import { Alert, Button, FileButton, Modal, Progress, Select, Stack, Text, TextInput } from '@mantine/core'
 import { IconAlertTriangle, IconUpload } from '@tabler/icons-react'
 import { useRef, useState } from 'react'
-import { type ClienteDaApi, PedidoInvalido } from './api.ts'
+import type { ClienteDaApi } from './api.ts'
 import { CORES } from './tema.ts'
-import { validarArquivo } from './envio/arquivo.ts'
+import { hoje, mensagemDoErroDoEnvio, validarArquivo } from './envio/arquivo.ts'
 import { enviarRetomavel } from './envio/upload.ts'
 
 type Envio =
@@ -11,18 +11,6 @@ type Envio =
   | { tipo: 'enviando'; fracao: number }
   | { tipo: 'concluido' }
   | { tipo: 'erro'; mensagem: string }
-
-/** Hoje, no fuso da emissora: a API recusa data de exibição no futuro. */
-function hoje(): string {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
-}
-
-function mensagemDoErro(erro: unknown): string {
-  if (erro instanceof PedidoInvalido && erro.message === 'Data de exibição no futuro') {
-    return 'A data de exibição não pode ser no futuro. Corrija a data e envie de novo.'
-  }
-  return 'Não foi possível enviar o vídeo. Tente de novo.'
-}
 
 /** O diálogo de envio: programa e data de exibição antes, o arquivo por último (ele inicia o envio). */
 export default function EnvioDeVideo({
@@ -81,7 +69,7 @@ export default function EnvioDeVideo({
       })
       setEnvio({ tipo: 'concluido' })
     } catch (erro) {
-      setEnvio({ tipo: 'erro', mensagem: mensagemDoErro(erro) })
+      setEnvio({ tipo: 'erro', mensagem: mensagemDoErroDoEnvio(erro) })
     }
   }
 
