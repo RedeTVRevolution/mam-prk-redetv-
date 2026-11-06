@@ -23,9 +23,11 @@ import {
   contem,
   type DadosDoObjeto,
   type ItemDoPainel,
+  inventarioDoVideo,
   itensPorTipo,
   NAO_IDENTIFICADO,
   nomeNormalizado,
+  type ObjetoDoVideo,
   objetosDaAba,
   semDecupagemEm,
   type Selo,
@@ -67,8 +69,14 @@ type Linha =
   | { tipo: 'item'; chave: string; item: ItemDoPainel; recuo: boolean }
   | { tipo: 'pessoa'; chave: string; id: string; nome: string; apoio: string | null; aparicoes: ItemDoPainel[]; aberta: boolean }
   | { tipo: 'objeto'; chave: string; dados: DadosDoObjeto; ocorrencias: ItemDoPainel[]; aberta: boolean }
+  // O inventário dos planos: a categoria, o objeto (que abre os planos em que aparece) e o plano.
+  | { tipo: 'categoria'; chave: string; nome: string }
+  | { tipo: 'inventario'; chave: string; objeto: ObjetoDoVideo; aberta: boolean }
+  | { tipo: 'plano'; chave: string; plano: ObjetoDoVideo['planos'][number] }
 
-const ALTURA_ESTIMADA: Record<Linha['tipo'], number> = { item: 44, pessoa: 52, objeto: 60 }
+type Inventario = ReturnType<typeof inventarioDoVideo>
+
+const ALTURA_ESTIMADA: Record<Linha['tipo'], number> = { item: 44, pessoa: 52, objeto: 60, categoria: 28, inventario: 52, plano: 32 }
 
 const tempos = (i: Intervalo): string => `${relogio(i.inicio_ms)}–${relogio(i.fim_ms)}`
 
@@ -94,6 +102,7 @@ function linhasDaSecao(
   secao: Secao,
   d: Decupagem,
   porTipo: Map<string, ItemDoPainel[]>,
+  inventario: Inventario,
   abertas: ReadonlySet<string>,
   filtro: string,
 ): Linha[] {
@@ -120,6 +129,16 @@ function linhasDaSecao(
       linhas.push({ tipo: 'objeto', chave: `objeto:${o.dados.id}`, dados: o.dados, ocorrencias: o.ocorrencias, aberta })
       if (aberta) linhas.push(...o.ocorrencias.map((x) => item(x, true)))
     }
+    for (const g of inventario) {
+      const objetos = g.objetos.filter((o) => casa(`${o.nome} ${o.cor ?? ''} ${o.marca ?? ''} ${g.nome}`, filtro))
+      if (objetos.length > 0) linhas.push({ tipo: 'categoria', chave: `categoria:${g.categoria}`, nome: g.nome })
+      for (const o of objetos) {
+        const chave = `inventario:${o.chave}`
+        const aberta = abertas.has(chave)
+        linhas.push({ tipo: 'inventario', chave, objeto: o, aberta })
+        if (aberta) linhas.push(...o.planos.map((plano): Linha => ({ tipo: 'plano', chave: `${chave}:${plano.id}`, plano })))
+      }
+    }
     return linhas
   }
   const tipo = SECOES.find((s) => s.chave === secao)?.tipo ?? 'pauta'
@@ -131,7 +150,9 @@ function linhasDaSecao(
 /** O tempo está numa linha: o item, ou uma das ocorrências da pessoa ou do objeto. */
 function linhaNoTempo(l: Linha, ms: number): boolean {
   if (l.tipo === 'item') return contem(l.item, ms)
-  return (l.tipo === 'pessoa' ? l.aparicoes : l.ocorrencias).some((i) => contem(i, ms))
+  if (l.tipo === 'categoria') return false
+  if (l.tipo === 'plano') return contem(l.plano, ms)
+  return (l.tipo === 'pessoa' ? l.aparicoes : l.tipo === 'objeto' ? l.ocorrencias : l.objeto.planos).some((i) => contem(i, ms))
 }
 
 /** O que a lista mede no jsdom e num painel ainda sem altura: uma janela de 600 px, para desenhar as primeiras linhas. */
@@ -186,6 +207,7 @@ export function Inspetor({
   aoRecolher: () => void
 }) {
   const porTipo = useMemo(() => itensPorTipo(itens), [itens])
+  const inventario = useMemo(() => (d ? inventarioDoVideo(d.planos) : []), [d])
   const [abertas, setAbertas] = useState<ReadonlySet<string>>(new Set())
   const [filtro, setFiltro] = useState('')
   const [seguir, setSeguir] = useState(true)
@@ -201,8 +223,8 @@ export function Inspetor({
 
   const filtroNormalizado = nomeNormalizado(filtro)
   const linhas = useMemo(
-    () => (d && secao ? linhasDaSecao(secao, d, porTipo, abertas, filtroNormalizado) : []),
-    [d, secao, porTipo, abertas, filtroNormalizado],
+    () => (d && secao ? linhasDaSecao(secao, d, porTipo, inventario, abertas, filtroNormalizado) : []),
+    [d, secao, porTipo, inventario, abertas, filtroNormalizado],
   )
   const navegaveis = useMemo(() => linhas.flatMap((l) => (l.tipo === 'item' ? [l.chave] : [])), [linhas])
 
@@ -259,7 +281,7 @@ export function Inspetor({
 
   const contagem = (s: Secao): number => {
     if (s === 'pessoas') return new Set((porTipo.get('aparicao') ?? []).map((i) => i.pessoa)).size
-    if (s === 'objetos') return new Set((porTipo.get('objeto') ?? []).map((i) => i.objeto?.id)).size
+    if (s === 'objetos') return new Set((porTipo.get('objeto') ?? []).map((i) => i.objeto?.id)).size + inventario.reduce((n, g) => n + g.objetos.length, 0)
     return porTipo.get(SECOES.find((x) => x.chave === s)?.tipo ?? '')?.length ?? 0
   }
 
@@ -369,8 +391,28 @@ export function Inspetor({
                                 />
                               ) : l.tipo === 'pessoa' ? (
                                 <LinhaDaPessoa linha={l} atual={atual} duracaoMs={duracaoMs} urlDoQuadro={urlDoQuadro} aoAlternar={() => alternarGrupo(l.chave)} />
-                              ) : (
+                              ) : l.tipo === 'objeto' ? (
                                 <LinhaDoObjeto linha={l} atual={atual} urlDoQuadro={urlDoQuadro} aoAlternar={() => alternarGrupo(l.chave)} />
+                              ) : l.tipo === 'categoria' ? (
+                                <h3 className="border-b border-border/60 px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground">{l.nome} nos planos</h3>
+                              ) : l.tipo === 'inventario' ? (
+                                <LinhaDoInventario
+                                  linha={l}
+                                  atual={atual}
+                                  urlDoQuadro={urlDoQuadro}
+                                  aoAlternar={() => {
+                                    if (!l.aberta) aoSaltar(l.objeto.planoDaCaixa.inicio_ms)
+                                    alternarGrupo(l.chave)
+                                  }}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => aoSaltar(l.plano.inicio_ms)}
+                                  className={cn('relative flex w-full border-b border-border/60 py-1.5 pr-3 pl-8 text-left text-xs text-muted-foreground hover:bg-card', atual && ATUAL)}
+                                >
+                                  {`${l.plano.ambiente} · ${relogio(l.plano.inicio_ms)}`}
+                                </button>
                               )
                             }
                           />
@@ -423,7 +465,7 @@ function Lista({
   const conjunto = useMemo(() => new Set(atuais.split('\n')), [atuais])
   // Com o grupo aberto, a lista vai à ocorrência atual, não ao cabeçalho, que fica no tempo do grupo
   // inteiro; com ele fechado, vai ao cabeçalho.
-  const ocorrenciaAtual = linhas.findIndex((l) => conjunto.has(l.chave) && !(l.tipo !== 'item' && l.aberta))
+  const ocorrenciaAtual = linhas.findIndex((l) => conjunto.has(l.chave) && !('aberta' in l && l.aberta))
   const primeiraAtual = ocorrenciaAtual >= 0 ? ocorrenciaAtual : linhas.findIndex((l) => conjunto.has(l.chave))
 
   useEffect(() => {
@@ -663,6 +705,41 @@ function LinhaDoObjeto({
       </span>
       <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{quantas}</span>
       <IconChevronRight size={14} aria-hidden className={cn('mt-1 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', linha.aberta && 'rotate-90')} />
+    </button>
+  )
+}
+
+/** O objeto do inventário dos planos: abrir lista os planos em que aparece e leva o player ao da maior caixa. */
+function LinhaDoInventario({
+  linha,
+  atual,
+  urlDoQuadro,
+  aoAlternar,
+}: {
+  linha: Extract<Linha, { tipo: 'inventario' }>
+  atual: boolean
+  urlDoQuadro: (c: string) => Promise<string>
+  aoAlternar: () => void
+}) {
+  const { objeto } = linha
+  const detalhes = [objeto.cor, objeto.marca].filter(Boolean).join(' · ')
+  const nome = detalhes ? `${objeto.nome} (${detalhes})` : objeto.nome
+  const quantos = `${objeto.planos.length} ${objeto.planos.length === 1 ? 'plano' : 'planos'}`
+  return (
+    <button
+      type="button"
+      aria-expanded={linha.aberta}
+      aria-label={`${nome}, ${quantos}`}
+      onClick={aoAlternar}
+      className={cn('relative flex w-full items-center gap-2 border-b border-border/60 px-3 py-1.5 text-left hover:bg-card', atual && ATUAL)}
+    >
+      <Miniatura caminho={objeto.caixa.quadro} urlDoQuadro={urlDoQuadro} className="h-9 w-16" />
+      <span className="min-w-0 flex-1 truncate text-sm">
+        {objeto.nome}
+        {detalhes && <span className="text-xs text-muted-foreground"> ({detalhes})</span>}
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{quantos}</span>
+      <IconChevronRight size={14} aria-hidden className={cn('shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', linha.aberta && 'rotate-90')} />
     </button>
   )
 }

@@ -594,3 +594,52 @@ test('o palpite não confirmado leva o selo em texto ao lado do nome, na pessoa,
   await usuario.hover(within(pessoa).getByText('não confirmado'))
   expect((await screen.findAllByText(/não achou prova/)).length).toBeGreaterThan(0)
 })
+
+const CAIXA_PEQUENA = { quadro: 'quadros/plano-0-0.jpg', x: 0.5, y: 0.5, largura: 0.1, altura: 0.1 }
+const CAIXA_GRANDE = { quadro: 'quadros/plano-0-1.jpg', x: 0.1, y: 0.2, largura: 0.3, altura: 0.4 }
+const INVENTARIO = [
+  { nome: 'caneca', categoria: 'utensilio', caixas: [CAIXA_PEQUENA], destaque: 1 },
+  { nome: 'carro azul', categoria: 'veiculo', cor: 'azul', marca: 'BYD', caixas: [CAIXA_PEQUENA, CAIXA_GRANDE], destaque: 3 },
+  { nome: 'blazer preto', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 2 },
+  { nome: 'camisa', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 3 },
+]
+
+test('Objetos lista o inventário dos planos por categoria, sem repetir, a contagem o inclui, e o objeto leva aos planos', async () => {
+  // O mesmo carro em outro plano: um item só, com os dois planos.
+  decupagem = {
+    ...DECUPAGEM,
+    planos: [
+      { ...DECUPAGEM.planos[0], inventario: INVENTARIO },
+      { ...DECUPAGEM.planos[1], inventario: [INVENTARIO[1]] },
+    ],
+  }
+  const player = await abrirVideo()
+  expect(inspetor().getByRole('button', { name: 'Objetos 6' })).toBeTruthy()
+  const usuario = await abrirSecao('Objetos')
+  const objetos = lista('Objetos')
+
+  expect(objetos.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['roupa nos planos', 'utensílio nos planos', 'veículo nos planos'])
+  // O destaque maior vem primeiro dentro da categoria; os objetos ligados às pessoas continuam como estão.
+  expect(objetos.getAllByRole('button', { name: /plano/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
+    'camisa, 1 plano',
+    'blazer preto, 1 plano',
+    'caneca, 1 plano',
+    'carro azul (azul · BYD), 2 planos',
+  ])
+  expect(objetos.getByRole('button', { name: 'sandália, 2 ocorrências' })).toBeTruthy()
+
+  // Abrir leva o player ao plano da maior caixa e lista os planos; fechar não mexe no player.
+  const carro = objetos.getByRole('button', { name: 'carro azul (azul · BYD), 2 planos' })
+  await usuario.click(carro)
+  expect(player.currentTime).toBe(200)
+  await usuario.click(objetos.getByRole('button', { name: 'Externa · 12:04' }))
+  expect(player.currentTime).toBe(724)
+  expect(objetos.getByRole('button', { name: 'Estúdio · 03:20' })).toBeTruthy()
+  await usuario.click(carro)
+  expect(player.currentTime).toBe(724)
+  expect(objetos.queryByRole('button', { name: 'Externa · 12:04' })).toBeNull()
+
+  await usuario.type(inspetor().getByRole('textbox', { name: 'Filtrar objetos' }), 'byd')
+  expect(objetos.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['veículo nos planos'])
+  expect(objetos.queryByRole('button', { name: /^camisa/ })).toBeNull()
+})
