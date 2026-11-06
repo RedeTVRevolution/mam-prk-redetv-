@@ -172,6 +172,7 @@ const medirComFolga: typeof observeElementRect = (instancia, aviso) =>
  * por vez, com filtro e "seguir a reprodução". Clicar num item abre o detalhe no próprio inspetor.
  */
 export function Inspetor({
+  escEDoTrecho = false,
   decupagem: d,
   carregando,
   itens,
@@ -193,6 +194,8 @@ export function Inspetor({
   indexando,
   aoRecolher,
 }: {
+  /** Um trecho marcado fica com o Esc: o detalhe só volta à lista no Esc seguinte. */
+  escEDoTrecho?: boolean
   decupagem: Decupagem | undefined
   carregando: boolean
   itens: ItemDoPainel[]
@@ -285,7 +288,7 @@ export function Inspetor({
       tecla: 'Esc',
       acao: 'No inspetor: voltar do detalhe à lista',
       grupo: GRUPO,
-      casa: (e) => e.key === 'Escape' && detalhe,
+      casa: (e) => e.key === 'Escape' && detalhe && !escEDoTrecho,
       executar: aoFecharDetalhe,
     },
   ])

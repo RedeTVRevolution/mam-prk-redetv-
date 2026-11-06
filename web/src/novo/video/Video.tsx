@@ -544,6 +544,9 @@ export function Video({
   const trechoNaLinha: TrechoMarcado | null =
     revisao.revisando && trecho ? { ...trecho, aoMover: moverBordaDoTrecho, aoSalvar: () => salvarDoTrecho.current?.(), aoDescartar: descartarTrecho } : null
 
+  // Com um trecho marcado, o Esc é dele (e vence o do detalhe do inspetor): a ordem de registro não decide.
+  const escEDoTrecho = revisao.revisando && !!d && !!catalogoPronto && !gavetaAberta && trecho !== null && !descrevendo && !estrutura
+
   // ---------- gaveta das correções ----------
 
   // O número do botão é o que a pessoa pode resolver: a fila e, para quem aprova, as pendentes.
@@ -840,7 +843,7 @@ export function Video({
             tecla: 'Esc',
             acao: 'Descartar o trecho marcado',
             grupo: GRUPO_DA_CATALOGACAO,
-            casa: (e: KeyboardEvent) => e.key === 'Escape' && !gavetaAberta && trecho !== null && !descrevendo && !estrutura,
+            casa: (e: KeyboardEvent) => e.key === 'Escape' && escEDoTrecho,
             executar: descartarTrecho,
           },
         ]
@@ -1036,6 +1039,7 @@ export function Video({
           />
         ) : inspetorAberto ? (
           <Inspetor
+            escEDoTrecho={escEDoTrecho}
             decupagem={d}
             carregando={concluido && decupagem.isPending}
             itens={itens}

@@ -422,3 +422,19 @@ test('abrir a correção de um item com o campo do trecho aberto fecha o campo d
   await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Tipo do trecho' })).toBeNull())
   expect(screen.getByText('00:10–00:20')).toBeTruthy()
 })
+
+test('com o detalhe de um item aberto, o primeiro Esc descarta o trecho e o segundo volta à lista', async () => {
+  const { usuario } = await trechoPorTeclas(10, 20)
+  const inspetor = within(screen.getByRole('complementary', { name: 'Inspetor' }))
+  await usuario.click(inspetor.getByRole('button', { name: /^Pautas \d+$/ }))
+  await usuario.click(await inspetor.findByRole('button', { name: /^Eleição, 00:00 a 01:00/ }))
+  await inspetor.findByRole('region', { name: /^Detalhe:/ })
+  ;(document.activeElement as HTMLElement).blur()
+
+  await usuario.keyboard('{Escape}')
+
+  expect(screen.queryByText('00:10–00:20')).toBeNull()
+  expect(inspetor.getByRole('region', { name: /^Detalhe:/ })).toBeTruthy()
+  await usuario.keyboard('{Escape}')
+  expect(inspetor.queryByRole('region', { name: /^Detalhe:/ })).toBeNull()
+})
