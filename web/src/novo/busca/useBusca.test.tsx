@@ -51,6 +51,9 @@ const servidor = setupServer(
       { headers: ha ? { 'X-Proximo-Cursor': `L${lista}.${inicio + pagina.length - 1}` } : {} },
     )
   }),
+  http.get('/v1/busca/parecidos', () =>
+    HttpResponse.json({ entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null, visual: true }, videos: [], sem_aparicoes: [], plano_b: false, facetas: VAZIO }),
+  ),
 )
 
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
@@ -125,6 +128,18 @@ test('o vídeo que vai para a lixeira sai da busca, e o reprocessado troca de da
   expect(result.current.item(0)?.video).toMatchObject({ job_id: 'v0', programa: 'TV Fama', data_exibicao: '2026-10-21', duracao_s: 60 })
   // Os momentos ficam os da busca.
   expect(result.current.item(0)?.momento.inicio_ms).toBe(0)
+})
+
+test('abrir os parecidos de um vídeo aberto da busca não apaga a busca do cache', async () => {
+  const { result, rerender, consultas } = await montar()
+  await descer(result, 1)
+
+  rerender({ tipo: 'parecidos', job: 'v3', plano: 2 })
+  await waitFor(() => expect(result.current.carregando).toBe(false))
+  rerender(TEXTO)
+
+  expect(result.current.item(20)?.video.job_id).toBe('v20')
+  expect(consultas.getQueryCache().findAll({ queryKey: ['parecidos'] })).toHaveLength(1)
 })
 
 test('o 422 de um cursor vencido recomeça a busca do topo, sem mostrar erro', async () => {

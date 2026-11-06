@@ -45,7 +45,8 @@ const chaveDa = (pedido: PedidoDaBusca | null): QueryKey => {
   if (!pedido) return ['busca', 'nada']
   if (pedido.tipo === 'texto') return ['busca', 'texto', pedido.consulta.q, consultaParaApi(pedido.consulta, VIDEOS_POR_PAGINA)]
   if (pedido.tipo === 'imagem') return ['busca', 'imagem', pedido.id, consultaDaImagemParaApi(pedido.consulta, PLANOS_POR_PAGINA)]
-  return ['busca', 'parecidos', pedido.job, pedido.plano]
+  // Fora do prefixo da busca: abrir os parecidos não apaga a busca do cache nem a posição dela.
+  return ['parecidos', pedido.job, pedido.plano]
 }
 
 /**
@@ -74,7 +75,7 @@ export function useBusca(pedido: PedidoDaBusca | null) {
     paginasNaMemoria: 0,
     enabled: pedido !== null,
     retry: false,
-    manterAnterior: (anterior) => termo !== null && anterior[1] === 'texto' && anterior[2] === termo,
+    manterAnterior: (anterior) => termo !== null && anterior[0] === 'busca' && anterior[1] === 'texto' && anterior[2] === termo,
   })
 }
 

@@ -449,9 +449,9 @@ test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, parecid
   cleanup()
   lembrarPosicao(consultas, chave, 120)
 
-  // Do vídeo para os parecidos, outra lista (da busca), e a volta ao vídeo: ela guarda a posição dela.
+  // Do vídeo para os parecidos, outra lista, e a volta ao vídeo: ela guarda a posição dela.
   const parecidos = renderHook(
-    () => usePaginas({ chave: ['busca', 'parecidos'], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
+    () => usePaginas({ chave: ['parecidos', 'v1', 3], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
     { wrapper: ({ children }) => <QueryClientProvider client={consultas}>{children}</QueryClientProvider> },
   )
   await waitFor(() => expect(parecidos.result.current.quantidade).toBe(2))
