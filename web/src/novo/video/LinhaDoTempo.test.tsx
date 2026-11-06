@@ -124,6 +124,34 @@ test('clicar num bloco salta o player ao início, seleciona e abre o detalhe na 
   expect(screen.getByRole('region', { name: 'Detalhe: Bastidores do Miss Bumbum' })).toBeTruthy()
 })
 
+test('com aparições sobrepostas, o clique no bloco ativo abre a que está sob o ponteiro, como a dica', async () => {
+  decupagem = {
+    ...DECUPAGEM,
+    pessoas: [
+      { id: 'pA', nome: 'Ana Longa', na_imagem: [{ inicio_ms: 0, fim_ms: 60_000, evidencia: 'rosto' }], citada_na_fala: [], citada_no_texto: [] },
+      { id: 'pB', nome: 'Bia Curta', na_imagem: [{ inicio_ms: 20_000, fim_ms: 30_000, evidencia: 'rosto' }], citada_na_fala: [], citada_no_texto: [] },
+    ],
+  }
+  const player = await abrirVideo()
+  const pessoas = faixa('Pessoas 2')
+  medir(pessoas)
+  const x = (s: number) => 100 + (s / 2959) * 1000
+
+  // Em 50 s só há a Ana: o bloco ativo passa a ser o dela, de 0 a 60 s, e cobre o da Bia.
+  fireEvent.pointerDown(pessoas, { clientX: x(50), pointerId: 1 })
+  const ativo = within(pessoas).getByRole('button')
+  expect(ativo.getAttribute('aria-label')).toBe('Aparição de Ana Longa, 00:00 a 01:00')
+
+  fireEvent.pointerMove(ativo, { clientX: x(25) })
+  expect(screen.getByRole('tooltip').textContent).toBe('Aparição de Bia Curta, 00:20 a 00:30')
+  fireEvent.pointerDown(ativo, { clientX: x(25), pointerId: 1 })
+  fireEvent.click(ativo, { clientX: x(25), detail: 1 })
+
+  expect(player.currentTime).toBe(20)
+  expect(within(pessoas).getByRole('button').getAttribute('aria-label')).toBe('Aparição de Bia Curta, 00:20 a 00:30')
+  expect(within(pessoas).getByRole('button').getAttribute('aria-pressed')).toBe('true')
+})
+
 test('clicar fora dos blocos salta o player ao ponteiro, sem selecionar', async () => {
   const player = await abrirVideo()
   const comerciais = faixa('Comerciais 1')

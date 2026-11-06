@@ -356,7 +356,8 @@ export function LinhaDoTempo({
               tabIndex={faixa.blocos.length === 0 ? 0 : undefined}
               className="relative h-[18px] cursor-pointer py-0.5"
               onPointerDown={(e) => {
-                if ((e.target as Element).closest('button, [role=slider]')) return
+                // O botão do bloco ativo cobre os blocos sobrepostos a ele: o clique também se resolve pela posição.
+                if ((e.target as Element).closest('[role=slider]')) return
                 const { ms, folgaMs } = msNoPonteiro(e)
                 if (ms === null) return
                 const bloco = blocoNoTempo(faixa.blocos, ms, folgaMs)
@@ -427,7 +428,8 @@ export function LinhaDoTempo({
                     className="absolute inset-y-0 z-10 min-w-1 rounded-xs focus-visible:outline-2 focus-visible:outline-offset-1"
                     style={{ left: pct(posicaoDoBloco(ativo, duracaoMs).esquerda), width: pct(posicaoDoBloco(ativo, duracaoMs).largura) }}
                     onKeyDown={(e) => aoTeclarNoBloco(e, faixa, ativo.chave)}
-                    onClick={() => aoSelecionar(ativo.chave)}
+                    // Só o Enter e o Espaço (`detail` 0): o ponteiro já selecionou no `pointerdown` da faixa.
+                    onClick={(e) => e.detail === 0 && aoSelecionar(ativo.chave)}
                   />
                 )}
                 {comAlcas &&
