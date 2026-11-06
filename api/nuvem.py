@@ -1710,6 +1710,9 @@ class ArmazenamentoStorage:
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         """A mesma URL para o mesmo quadro dentro da janela; um quadro regravado no meio
         dela aparece antigo até a janela virar (aceito no #409)."""
+        # ponytail: o lru_cache não junta dois pedidos simultâneos do mesmo quadro ainda fora
+        # do cache: os dois assinam, e um guarda a URL. Custa uma ida a mais ao IAM e um download
+        # a mais no navegador, só na primeira carga. Trava por chave se a medição no dev pedir.
         janela = self._relogio().timestamp() // JANELA_DA_URL_DO_QUADRO.total_seconds()
         return self._quadro_na_janela(job_id, caminho, validade, janela)
 
