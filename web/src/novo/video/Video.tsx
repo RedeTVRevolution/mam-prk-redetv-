@@ -1243,11 +1243,10 @@ function BarraDoVideo({
                 </DropdownMenuItem>
               )}
               {(podeReprocessar || podeApagar) && <DropdownMenuSeparator />}
-              {/* Revisão, histórico, trecho, sugestões e comparação de passadas chegam na fase 5. */}
               <DropdownMenuItem asChild>
                 <a href={naInterfaceAtual()}>
                   <IconExternalLink size={16} stroke={1.75} aria-hidden />
-                  {pode.editar ? 'Revisar e ver o histórico na interface atual' : 'Abrir na interface atual'}
+                  Abrir na interface atual
                 </a>
               </DropdownMenuItem>
             </DropdownMenuContent>
