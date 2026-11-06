@@ -985,6 +985,9 @@ resource "google_cloud_run_v2_service" "web" {
         # aplicar quando o bloco resources é declarado: sem isto a CPU fica sempre
         # alocada e a cobrança passa a ser por instância ligada (#357).
         cpu_idle = true
+        # CPU extra só durante a partida a frio (minScale 0), para encurtar os
+        # 7 a 9 s até o primeiro pedido; depois volta a 1 vCPU (#432).
+        startup_cpu_boost = true
       }
       # Liga o verificador de token do Identity Platform na API (api/main.py).
       env {
