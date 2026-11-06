@@ -231,56 +231,8 @@ variable "limite_de_pessoas_do_modelo_forte" {
   default     = 8
 }
 
-variable "regiao_da_avaliacao" {
-  description = "Região do serviço de avaliação da Vertex (evaluateInstances é regional, não global)"
-  type        = string
-  default     = "us-central1"
-}
-
-variable "modelo_do_juiz" {
-  description = "Modelo juiz da avaliação por rubrica (#255); confira no console se a região o oferece"
-  type        = string
-  default     = "gemini-2.5-flash"
-}
-
-variable "fracao_da_avaliacao" {
-  description = "Fração dos vídeos concluídos no dia que a avaliação por rubrica examina (no mínimo 1 por programa)"
-  type        = number
-  default     = 0.1
-}
-
-variable "limiar_da_avaliacao" {
-  description = "Nota média (0 a 100) de um requisito abaixo da qual a avaliação grava o log de queda"
-  type        = number
-  default     = 60
-}
-
-variable "queda_maxima_da_avaliacao" {
-  description = "Pontos que a média de um requisito pode cair da média dos dias anteriores antes do log de queda"
-  type        = number
-  default     = 10
-}
-
-variable "janela_da_avaliacao_dias" {
-  description = "Quantos dias anteriores formam a média de comparação da queda"
-  type        = number
-  default     = 7
-}
-
-variable "preco_por_mil_caracteres_da_avaliacao" {
-  description = "US$ por mil caracteres do serviço de avaliação, para o custo estimado no log; vazio: não estima (preço não confirmado, #255)"
-  type        = string
-  default     = ""
-}
-
-variable "agenda_da_avaliacao" {
-  description = "Cron (formato do Cloud Scheduler) da avaliação diária; roda depois da meia-noite e avalia o dia anterior"
-  type        = string
-  default     = "30 0 * * *"
-}
-
 variable "fuso_da_agenda" {
-  description = "Fuso da agenda da avaliação e do dia que ela avalia"
+  description = "Fuso da agenda da purga diária da lixeira"
   type        = string
   default     = "America/Sao_Paulo"
 }
@@ -440,7 +392,7 @@ resource "google_project_service" "apis" {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "run.googleapis.com",
-    "cloudscheduler.googleapis.com", # agendamento diário da avaliação por rubrica (#255)
+    "cloudscheduler.googleapis.com", # agendamento diário da purga da lixeira (#145)
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
   ])
@@ -694,7 +646,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "avaliacao", "purga", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "purga", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -714,10 +666,8 @@ locals {
   # ID, e não pelo atributo do recurso: o for_each do iam_member tira as chaves daqui,
   # e elas têm de ser conhecidas no plan (o depends_on do iam_member garante que o
   # papel existe antes da concessão).
-  id_do_papel_vertex_predicao  = "mamVertexPredicao"
-  id_do_papel_vertex_avaliacao = "mamVertexAvaliacao"
-  papel_vertex_predicao        = "projects/${var.projeto}/roles/${local.id_do_papel_vertex_predicao}"
-  papel_vertex_avaliacao       = "projects/${var.projeto}/roles/${local.id_do_papel_vertex_avaliacao}"
+  id_do_papel_vertex_predicao = "mamVertexPredicao"
+  papel_vertex_predicao       = "projects/${var.projeto}/roles/${local.id_do_papel_vertex_predicao}"
 
   papeis_no_projeto = {
     # `workflows.invoker` é só iniciar execuções (o reprocessar do #147), e o projeto tem
@@ -746,14 +696,10 @@ locals {
     identificacao = ["roles/datastore.user", local.papel_vertex_predicao]
     # O Job do inventário chama o Gemini (texto, ou os quadros); não toca o Firestore.
     objetos = [local.papel_vertex_predicao]
-    # A avaliação (#255) lê os Jobs, grava as notas no Firestore e chama o serviço de
-    # avaliação da Vertex (`evaluateInstances`): papel sob medida com a predição e a
-    # permissão do próprio `evaluateInstances` (#302).
-    avaliacao = ["roles/datastore.user", local.papel_vertex_avaliacao]
     # A purga automática (#145) apaga o Job e as correções no Firestore e os momentos do índice
     # (como a `web`, quando ela purga à mão).
     purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
-    # O agendador só dispara os Jobs da avaliação e da purga (papel em cada Job, mais abaixo).
+    # O agendador só dispara o Job da purga (papel no próprio Job, em purga.tf).
     agendador = []
     # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer", "roles/logging.logWriter"]
@@ -789,8 +735,6 @@ locals {
     # O Job em CPU do inventário (#244) usa a mesma conta: lê o resultado e os quadros e
     # regrava a Decupagem com o inventário no mesmo bucket.
     objetos = { decupagens = "roles/storage.objectUser" }
-    # Só lê a Decupagem.
-    avaliacao = { decupagens = "roles/storage.objectViewer" }
     # Apaga os arquivos do vídeo purgado: cópia limpa, proxy, janelas, decupagem e quadros.
     purga = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
   }
@@ -800,13 +744,10 @@ resource "google_project_iam_member" "mam" {
   for_each = { for p in flatten([
     for sa, papeis in local.papeis_no_projeto : [for papel in papeis : { sa = sa, papel = papel }]
   ]) : "${p.sa}:${p.papel}" => p }
-  project = var.projeto
-  role    = each.value.papel
-  member  = google_service_account.mam[each.value.sa].member
-  depends_on = [
-    google_project_iam_custom_role.vertex_predicao,
-    google_project_iam_custom_role.vertex_avaliacao,
-  ]
+  project    = var.projeto
+  role       = each.value.papel
+  member     = google_service_account.mam[each.value.sa].member
+  depends_on = [google_project_iam_custom_role.vertex_predicao]
 }
 
 resource "google_storage_bucket_iam_member" "mam" {
@@ -2164,103 +2105,6 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_identificacao" 
   member   = google_service_account.mam["orquestracao"].member
 }
 
-# Avaliação diária por rubrica (#255): o Job lê a amostra do dia e grava as notas; o
-# Cloud Scheduler o dispara todo dia. Sem rede da VPC: só fala com APIs do Google.
-resource "google_cloud_run_v2_job" "avaliacao" {
-  name                = "mam-avaliacao"
-  location            = var.regiao
-  deletion_protection = false
-  template {
-    parallelism = 1
-    task_count  = 1
-    template {
-      service_account = google_service_account.mam["avaliacao"].email
-      max_retries     = 0
-      # NÃO medido: 5 chamadas ao juiz por vídeo sorteado; 1800 s dão folga larga.
-      timeout = "1800s"
-      containers {
-        image   = var.imagem_validacao
-        command = ["python"]
-        args    = ["-m", "api.avaliacao_job"]
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "REGIAO_DA_AVALIACAO"
-          value = var.regiao_da_avaliacao
-        }
-        env {
-          name  = "MODELO_DO_JUIZ"
-          value = var.modelo_do_juiz
-        }
-        env {
-          name  = "BUCKET_ACEITOS"
-          value = local.buckets["aceitos"]
-        }
-        env {
-          name  = "BUCKET_DECUPAGENS"
-          value = local.buckets["decupagens"]
-        }
-        env {
-          name  = "FUSO_DA_AVALIACAO"
-          value = var.fuso_da_agenda
-        }
-        env {
-          name  = "FRACAO_DA_AVALIACAO"
-          value = tostring(var.fracao_da_avaliacao)
-        }
-        env {
-          name  = "LIMIAR_DA_AVALIACAO"
-          value = tostring(var.limiar_da_avaliacao)
-        }
-        env {
-          name  = "QUEDA_MAXIMA_DA_AVALIACAO"
-          value = tostring(var.queda_maxima_da_avaliacao)
-        }
-        env {
-          name  = "JANELA_DA_AVALIACAO_DIAS"
-          value = tostring(var.janela_da_avaliacao_dias)
-        }
-        env {
-          name  = "PRECO_POR_MIL_CARACTERES"
-          value = var.preco_por_mil_caracteres_da_avaliacao
-        }
-        resources {
-          limits = {
-            cpu    = "1"
-            memory = "1Gi"
-          }
-        }
-      }
-    }
-  }
-  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
-}
-
-# O agendador só pode rodar este Job.
-resource "google_cloud_run_v2_job_iam_member" "agendador_roda_avaliacao" {
-  name     = google_cloud_run_v2_job.avaliacao.name
-  location = google_cloud_run_v2_job.avaliacao.location
-  role     = "roles/run.invoker"
-  member   = google_service_account.mam["agendador"].member
-}
-
-resource "google_cloud_scheduler_job" "avaliacao" {
-  name      = "mam-avaliacao-diaria"
-  region    = var.regiao
-  schedule  = var.agenda_da_avaliacao
-  time_zone = var.fuso_da_agenda
-  http_target {
-    http_method = "POST"
-    uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.avaliacao.location}/jobs/${google_cloud_run_v2_job.avaliacao.name}:run"
-    oauth_token {
-      service_account_email = google_service_account.mam["agendador"].email
-    }
-  }
-  depends_on = [google_project_service.apis, google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao]
-}
-
 # Quarentena -> Eventarc -> Workflows -> Job de validação -> Job de transcrição -> Job de OCR -> Job de análise -> Job de identificação -> Job de quadros -> Job de indexação.
 locals {
   workflow_validacao = "mam-validacao"
@@ -2472,7 +2316,7 @@ resource "google_monitoring_alert_policy" "login_admin_emergencia" {
 }
 
 # Sinais de qualidade em produção (#286). Os jobs escrevem uma linha JSON por evento
-# (`api/sinais.py`; a queda da avaliação sai de `api/avaliacao.py`) e o Cloud Run a lê como
+# (`api/sinais.py`) e o Cloud Run a lê como
 # `jsonPayload`; a falha da execução de uma etapa sai do Workflows (`marca_fim`). Os nomes
 # dos campos e dos eventos são o contrato com o código: mudar um lá pede mudar o filtro
 # aqui (um teste confere). Cada percentual vira uma métrica de distribuição, e o alerta
@@ -2553,29 +2397,6 @@ resource "google_logging_metric" "falhas_por_etapa" {
   }
   label_extractors = {
     etapa = "EXTRACT(jsonPayload.etapa)"
-  }
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_logging_metric" "queda_da_avaliacao" {
-  name        = "mam_queda_da_avaliacao"
-  description = "Quedas da avaliação por rubrica (#255), com o requisito como rótulo"
-  filter = join(" AND ", [
-    "resource.type=\"cloud_run_job\"",
-    "jsonPayload.evento=\"queda_de_qualidade\"",
-  ])
-  metric_descriptor {
-    metric_kind = "DELTA"
-    value_type  = "INT64"
-    unit        = "1"
-    labels {
-      key         = "requisito"
-      value_type  = "STRING"
-      description = "Requisito da rubrica que caiu"
-    }
-  }
-  label_extractors = {
-    requisito = "EXTRACT(jsonPayload.requisito)"
   }
   depends_on = [google_project_service.apis]
 }
@@ -2703,35 +2524,6 @@ resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   notification_channels = local.canais_de_alerta
   documentation {
     content = "Uma etapa do processamento falhou mais vezes do que o limite na janela; o rótulo `etapa` diz qual. O log `falha_de_etapa` traz o job e o motivo."
-  }
-  # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
-  depends_on = [time_sleep.metricas_dos_alertas]
-}
-
-resource "google_monitoring_alert_policy" "queda_da_avaliacao" {
-  display_name = "Queda na avaliação por rubrica"
-  combiner     = "OR"
-  conditions {
-    display_name = "Queda na avaliação por rubrica"
-    condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.queda_da_avaliacao.name}\" AND resource.type=\"cloud_run_job\""
-      comparison      = "COMPARISON_GT"
-      threshold_value = 0
-      duration        = "0s"
-      aggregations {
-        alignment_period     = local.janela_dos_alertas_s
-        per_series_aligner   = "ALIGN_DELTA"
-        cross_series_reducer = "REDUCE_SUM"
-        group_by_fields      = ["metric.label.requisito"]
-      }
-    }
-  }
-  alert_strategy {
-    auto_close = "1800s"
-  }
-  notification_channels = local.canais_de_alerta
-  documentation {
-    content = "A avaliação diária por rubrica (#255) achou um requisito abaixo do limiar ou em queda frente à média dos dias anteriores. O rótulo `requisito` diz qual; o log `queda_de_qualidade` traz as notas."
   }
   # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
   depends_on = [time_sleep.metricas_dos_alertas]

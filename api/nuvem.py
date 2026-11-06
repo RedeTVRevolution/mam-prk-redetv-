@@ -7,7 +7,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -32,7 +32,6 @@ from api.auditoria import (
 from api.auditoria import (
     pagina_de as pagina_da_auditoria,
 )
-from api.avaliacao import Avaliacao
 from api.catalogo import (
     EnvioParaLixeira,
     FusaoDaPessoa,
@@ -105,7 +104,6 @@ COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
 COLECAO_DA_REVISAO = "tempo_de_revisao"
-COLECAO_DAS_AVALIACOES = "avaliacoes"
 COLECAO_DOS_TIPOS_DE_OBJETO = "tipos_de_objeto"
 COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
@@ -1252,31 +1250,6 @@ class RepositorioDeRevisaoFirestore:
             (Medida(**(d.to_dict() or {})) for d in consulta.stream()),
             key=lambda m: (m.job_id, m.email),
         )
-
-
-class RepositorioDeAvaliacoesFirestore:
-    """Um documento por vídeo e dia (`<dia>:<job>`), da avaliação por rubrica (#255)."""
-
-    def __init__(
-        self, cliente: firestore.Client, colecao: str = COLECAO_DAS_AVALIACOES
-    ) -> None:
-        self._colecao = cliente.collection(colecao)
-
-    def gravar(self, avaliacao: Avaliacao) -> None:
-        self._colecao.document(f"{avaliacao.dia.isoformat()}:{avaliacao.job_id}").set(
-            avaliacao.model_dump(mode="json")
-        )
-
-    def do_dia(self, dia: date) -> list[Avaliacao]:
-        return self.entre(dia, dia)
-
-    def entre(self, de: date, ate: date) -> list[Avaliacao]:
-        docs = (
-            self._colecao.where(filter=FieldFilter("dia", ">=", de.isoformat()))
-            .where(filter=FieldFilter("dia", "<=", ate.isoformat()))
-            .stream()
-        )
-        return [Avaliacao(**(d.to_dict() or {})) for d in docs]
 
 
 class DisparoPeloWorkflows:

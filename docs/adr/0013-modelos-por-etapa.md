@@ -10,7 +10,8 @@ Em 5/11/2026, o Bruno decidiu os modelos de cada etapa da decupagem. A regra ger
 | Entendimento da consulta da busca, e o termo da foto na busca por imagem (ADR 0015) | Gemini 3.5 Flash-Lite | Standard (texto; imagem na foto) | `MODELO_DA_CONSULTA` em `api/entendimento_da_consulta.py` |
 | Vetores da busca | `gemini-embedding-001` no texto e `gemini-embedding-2` no quadro | — | `MODELO_DO_EMBEDDING` em `api/agent_retrieval.py`; `api/embedding_do_quadro.py` (ADR 0006) |
 | Transcrição e leitura da tela | faster-whisper large-v3-turbo e PaddleOCR, na GPU, com CPU como plano B | — | ADR 0007 |
-| Juiz da avaliação por rubrica | Gemini 2.5 Flash | Standard (texto) | `modelo_do_juiz` no Terraform |
+
+**Sem juiz automático.** A avaliação diária por rubrica (#255) saiu em 6/11/2026 (#407): a qualidade do dia a dia fica com a conferência dos curadores, que o Bruno considera muito melhor que a do Gemini. O juiz nunca chegou a funcionar no dev (o `gemini-2.5-flash` dava 404 no serviço de avaliação).
 
 **O escalonamento fica desligado.** O código sabe reanalisar as janelas com dúvida e uma amostra delas (`api/escalonamento.py`), mas a análise do Job não passa `fracao_escalonada` (`api/analise.py`). E a reanálise, se fosse ligada, repetiria a mesma chamada da primeira passada: o mesmo modelo, o mesmo proxy e 1 quadro por segundo (`api/analise_por_janelas.py`). Hoje o 3.8 Flash só entra na decupagem pelo modelo forte. O alerta `limiar_de_escalonadas_pct`, que ficava sempre em zero, foi removido em 5/11/2026; se o escalonamento for ligado, o campo `pct_escalonadas` do log `video_concluido` continua lá para um alerta novo.
 

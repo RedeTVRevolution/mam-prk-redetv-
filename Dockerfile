@@ -93,7 +93,6 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/a
 COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
-     api/avaliacao.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -108,7 +107,6 @@ COPY api/__init__.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
-     api/gemini.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
@@ -130,11 +128,9 @@ COPY api/__init__.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/transcricao_job.py \
-     api/transcricao_na_analise.py \
      api/usuarios.py \
      api/webhook.py \
-     api/whisper.py \
-     api/rubricas.toml api/
+     api/whisper.py api/
 # A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
 # que o faster-whisper transcreve a amostra em CPU (a mesma conferência do teste depois da
 # publicação, `MODO_TESTE=1`, que lá exige a GPU). Não se confere o driver, a GPU nem o
@@ -199,7 +195,6 @@ RUN uv sync --locked --no-dev --group ocr-gpu
 COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
-     api/avaliacao.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -214,7 +209,6 @@ COPY api/__init__.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
-     api/gemini.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
@@ -238,11 +232,9 @@ COPY api/__init__.py \
      api/teste_dos_jobs.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
-     api/transcricao_na_analise.py \
      api/usuarios.py \
      api/webhook.py \
-     api/whisper.py \
-     api/rubricas.toml api/
+     api/whisper.py api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_cupti/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufft/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufile/lib:/app/.venv/lib/python3.12/site-packages/nvidia/curand/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/app/.venv/lib/python3.12/site-packages/cusparselt/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nccl/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvtx/lib:/usr/local/nvidia/lib64 \
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu DETECTOR=$DETECTOR
@@ -299,7 +291,6 @@ RUN uv sync --locked --no-dev --group objetos
 COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
-     api/avaliacao.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -313,7 +304,6 @@ COPY api/__init__.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/florence.py \
-     api/gemini.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
@@ -335,11 +325,9 @@ COPY api/__init__.py \
      api/teste_dos_jobs.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
-     api/transcricao_na_analise.py \
      api/usuarios.py \
      api/webhook.py \
-     api/whisper.py \
-     api/rubricas.toml api/
+     api/whisper.py api/
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib64 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
     PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu

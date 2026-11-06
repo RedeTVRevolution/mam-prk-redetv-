@@ -124,7 +124,7 @@ O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cl
 | Firestore | Estado dos jobs, chaves de idempotência, índice de hashes | Transações e expiração automática (TTL) |
 | Cloud Storage | Originais, janelas temporárias, decupagens | Montado via FUSE nos jobs, sem copiar o original; janelas apagadas por regra de ciclo de vida |
 | Eventarc e Pub/Sub | Disparo do job e eventos de webhook | Desacopla API e processamento |
-| Agent Platform | Gemini em Flex (vídeo), Standard (texto e imagens) e Batch, rótulos de custo, avaliação | Metade do preço no vídeo do dia a dia, resposta em segundos nas chamadas sem vídeo, 50% de desconto no acervo e custo por vídeo |
+| Agent Platform | Gemini em Flex (vídeo), Standard (texto e imagens) e Batch, rótulos de custo | Metade do preço no vídeo do dia a dia, resposta em segundos nas chamadas sem vídeo, 50% de desconto no acervo e custo por vídeo |
 | Identity Platform | Login de usuários, contas locais, MFA | Gerenciado; gratuito até 49.999 usuários ativos por mês |
 | BigQuery | Eventos de uso, painel da diretoria, relatórios | Consulta barata sobre todo o histórico |
 | Cloud Run (Job de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Várias janelas ao mesmo tempo numa execução, sem o teto de 1800 s da chamada HTTP do Workflows |
@@ -406,7 +406,7 @@ Como funciona: cada ação (login, envio, fim de processamento, busca, correçã
 A qualidade é provada no piloto, por conferência visual do Bruno no player, e vigiada todo dia por sinais automáticos. Os programas do piloto viram o conjunto de regressão: nenhuma troca de modelo ou prompt entra sem que a decupagem nova seja comparada lado a lado com a aprovada no piloto.
 
 - **Sinais automáticos.** Percentual de janelas escaladas para o 3.8 Flash, de pessoas "não identificadas", de respostas fora do esquema e eventos por hora fora da média do programa. Alertas no Cloud Monitoring.
-- **Avaliação automática.** O [serviço de avaliação do Agent Platform](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/evaluation-overview) roda métricas por rubrica sobre a amostra de controle, para detectar queda antes que o usuário perceba.
+- **Conferência dos curadores.** A qualidade do dia a dia é vigiada pelos curadores, que revisam as decupagens. A avaliação automática por rubrica do Agent Platform saiu em 6/11/2026 (ADR 0013).
 - **Versões fixas.** Modelo e prompt fixados por versão no `versao_pipeline`; uma versão nova permite reprocessar o acervo de propósito.
 - **Amostra de controle** (desligada por ora, ADR 0013). Sinal automático de qualidade: uma fração aleatória de janelas passa também pelo 3.8 Flash; a diferença entre as duas passadas mede, ao longo do tempo, o que a primeira deixa de ver.
 

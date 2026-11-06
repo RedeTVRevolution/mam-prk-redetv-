@@ -10,7 +10,6 @@ resource "time_sleep" "metricas_dos_alertas" {
       [
         google_logging_metric.respostas_fora_do_esquema.name,
         google_logging_metric.falhas_por_etapa.name,
-        google_logging_metric.queda_da_avaliacao.name,
         google_logging_metric.desvio_de_programa.name,
       ],
     ))
