@@ -116,6 +116,15 @@ variable "dimensao_dos_vetores" {
   default     = 256
 }
 
+# A cota `vectorsearch.googleapis.com/data_object_writes` da coleção de momentos, lida no
+# Service Usage do dev (#411). Vale para a coleção inteira; a indexação grava abaixo dela
+# (BUSCA_COTA_DE_ESCRITA) e, no 429 de dois vídeos juntos, espera e tenta de novo.
+variable "cota_de_escrita_da_busca" {
+  description = "Objetos por minuto que a coleção da busca aceita gravar"
+  type        = number
+  default     = 3000
+}
+
 # O índice ANN do quadro-chave está ligado no dev desde o #268 (ADR 0006): cada índice
 # cobra réplicas por hora, e com a variável em false o código não calcula o vetor do
 # quadro. Ligar só cria o índice (make criar-colecao-da-busca, depois do apply).
@@ -1929,6 +1938,10 @@ resource "google_cloud_run_v2_job" "indexacao" {
           value = tostring(var.dimensao_dos_vetores)
         }
         env {
+          name  = "BUSCA_COTA_DE_ESCRITA"
+          value = tostring(var.cota_de_escrita_da_busca)
+        }
+        env {
           name  = "BIGQUERY_DATASET"
           value = local.dataset_do_bigquery
         }
@@ -3108,6 +3121,11 @@ output "busca_indices_ligados" {
 
 output "busca_dimensao" {
   value = var.dimensao_dos_vetores
+}
+
+# O ritmo do `make reindexar`, o mesmo do Job de indexação.
+output "busca_cota_de_escrita" {
+  value = var.cota_de_escrita_da_busca
 }
 
 # O corte do serviço, para o make sondar-busca ver o mesmo que o dev.

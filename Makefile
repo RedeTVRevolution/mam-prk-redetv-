@@ -120,6 +120,8 @@ gravar-cassetes:
 # BUSCA_INDICES_LIGADOS=false (o dev, por custo) faz a busca ir sem índice ANN e o
 # criar-colecao-da-busca não criar índice nenhum. Se o output falhar, o valor vira texto
 # inválido e o código para com erro, em vez de assumir true e criar índices caros.
+# BUSCA_COTA_DE_ESCRITA vazia (output ainda não aplicado) grava sem ritmo, só com a nova
+# tentativa no 429 (#411).
 AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
 	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
 	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
@@ -127,7 +129,8 @@ AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
 	BUSCA_INDICE_DESCRICAO="$${BUSCA_INDICE_DESCRICAO:-$$(terraform -chdir=infra output -raw busca_indice_descricao)}" \
 	BUSCA_INDICE_QUADRO="$${BUSCA_INDICE_QUADRO-$$(terraform -chdir=infra output -raw busca_indice_quadro)}" \
 	BUSCA_INDICES_LIGADOS="$${BUSCA_INDICES_LIGADOS:-$$(terraform -chdir=infra output -raw busca_indices_ligados || echo terraform_output_falhou)}" \
-	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}"
+	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}" \
+	BUSCA_COTA_DE_ESCRITA="$${BUSCA_COTA_DE_ESCRITA:-$$(terraform -chdir=infra output -raw busca_cota_de_escrita)}"
 
 # Coleção de momentos e índices ANN da busca, no Agent Retrieval; idempotente.
 criar-colecao-da-busca:

@@ -247,6 +247,10 @@ output "busca_dimensao" {
   value = module.mam.busca_dimensao
 }
 
+output "busca_cota_de_escrita" {
+  value = module.mam.busca_cota_de_escrita
+}
+
 output "busca_distancia_maxima" {
   value = module.mam.busca_distancia_maxima
 }
