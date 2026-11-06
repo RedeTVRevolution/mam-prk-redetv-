@@ -5,7 +5,7 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
-import { DECUPAGEM as BASE } from './curadoria-teste.ts'
+import { correcaoDoHistorico, DECUPAGEM as BASE } from './curadoria-teste.ts'
 
 // A paridade da seção Sugestões com o Sugestoes.test.tsx da interface atual.
 
@@ -293,4 +293,28 @@ test('aceitar uma sugestão recarrega a decupagem', async () => {
   const antes = cargas
   await usuario.keyboard('s')
   await waitFor(() => expect(cargas).toBeGreaterThan(antes))
+})
+
+test('aceitar com S e desfazer com Ctrl+Z traz a sugestão de volta', async () => {
+  let historico: object[] = []
+  servidor.use(
+    http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json(historico)),
+    http.post('/v1/jobs/j1/correcoes/:id/desfazer', () => {
+      historico = []
+      lista = SUGESTOES()
+      return HttpResponse.json({ id: 'c2' }, { status: 201 })
+    }),
+    http.post('/v1/jobs/j1/sugestoes/:id/aceitar', ({ params }) => {
+      lista = lista.filter((x) => x.id !== params.id)
+      historico = [correcaoDoHistorico('c1', 'ana@redetv.com.br')]
+      return HttpResponse.json({ id: 'c1', ids: ['c1'] }, { status: 201 })
+    }),
+  )
+  const { usuario } = await catalogar()
+  await usuario.keyboard('s')
+  await screen.findByRole('button', { name: /Sugestões \(1\)/ })
+
+  await usuario.keyboard('{Control>}z{/Control}')
+
+  expect(await screen.findByRole('button', { name: /Sugestões \(2\)/ })).toBeTruthy()
 })

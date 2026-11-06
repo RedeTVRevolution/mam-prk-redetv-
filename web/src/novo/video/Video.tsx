@@ -260,6 +260,25 @@ export function Video({
     refetchOnWindowFocus: false,
   })
 
+  // Uma decupagem de outra versão (reprocessar) deixa velhos o histórico, a fila, as passadas e as
+  // comparações, que valem para sempre no cache: pergunta de novo. Recarregar a mesma versão não custa nada.
+  const versaoAnterior = useRef(d?.versao_decupagem)
+  useEffect(() => {
+    if (!d) return
+    if (versaoAnterior.current !== undefined && versaoAnterior.current !== d.versao_decupagem) {
+      for (const parte of ['historico', 'fila', 'passadas', 'comparacao']) void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, parte) })
+    }
+    versaoAnterior.current = d.versao_decupagem
+  }, [d, consultas, job.id])
+
+  // Toda mudança do histórico (corrigir, desfazer com Ctrl+Z, aceitar uma sugestão, decidir na gaveta) pode
+  // trazer de volta ou tirar uma sugestão: a lista vem de novo, sem cada caminho ter de lembrar disso.
+  const historicoAnterior = useRef(historico.data)
+  useEffect(() => {
+    if (historicoAnterior.current && historicoAnterior.current !== historico.data) void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })
+    if (historico.data) historicoAnterior.current = historico.data
+  }, [historico.data, consultas, chaveDasSugestoes])
+
   // Outro `?t=` no mesmo vídeo salta o player.
   const tAnterior = useRef(t)
   useEffect(() => {

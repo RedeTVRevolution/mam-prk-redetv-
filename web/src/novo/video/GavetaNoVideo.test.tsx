@@ -4,19 +4,22 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import catalogo from '../../catalogo.fixture.json'
+import { criarClienteDeConsultas } from '../consultas.ts'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { correcaoDoHistorico, DECUPAGEM } from './curadoria-teste.ts'
+import { chaveDoVideo } from './tipos.ts'
 
 // A gaveta dentro da tela do vídeo: o botão Histórico, o salto ao item e o "Refazer à mão".
 
 let historico: object[] = []
+let decupagemAtual: object = DECUPAGEM
 let fila: object[] = []
 const pedidos = { historico: 0, fila: 0 }
 
 const servidor = setupServer(
   ...rotasDoVideo(
     () => ({ duracao_s: 120, cortes_ms: [] }),
-    () => DECUPAGEM,
+    () => decupagemAtual,
   ),
   http.get('/v1/eu', () => HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br', permissoes: ['decupagem.editar'] })),
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
@@ -40,6 +43,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   historico = []
   fila = []
+  decupagemAtual = DECUPAGEM
   pedidos.historico = 0
   pedidos.fila = 0
 })
@@ -171,4 +175,25 @@ test('a seta para baixo além das 100 primeiras mostra a seguinte', async () => 
   for (let i = 0; i < 100; i++) await usuario.keyboard('{ArrowDown}')
 
   expect(gaveta().getAllByRole('button', { name: /^Saltar ao item/ })).toHaveLength(101)
+})
+
+test('uma decupagem nova (reprocessar) traz o histórico e a fila de novo; a mesma decupagem recarregada não', async () => {
+  const consultas = criarClienteDeConsultas()
+  const usuario = userEvent.setup()
+  await abrirVideo({ permissoes: ['decupagem.editar'], consultas })
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await waitFor(() => expect(pedidos).toMatchObject({ historico: 1, fila: 1 }))
+
+  // A mesma versão, recarregada: o histórico e a fila já estão em dia.
+  await consultas.invalidateQueries({ queryKey: chaveDoVideo('j1', 'decupagem') })
+  await new Promise((r) => setTimeout(r, 100))
+  expect(pedidos).toMatchObject({ historico: 1, fila: 1 })
+
+  // A análise nova grava outra versão da decupagem, com a fila nova.
+  decupagemAtual = { ...DECUPAGEM, versao_decupagem: 'v2' }
+  fila = [{ id: 'f9', tipo: 'pauta.juntar', autor_email: 'bia@redetv.com.br', criada_em: '2026-10-30T15:00:00Z', motivo: 'm', antes: null, depois: '{}', antes_legivel: 'A', depois_legivel: 'B', candidatos: [] }]
+  await consultas.invalidateQueries({ queryKey: chaveDoVideo('j1', 'decupagem') })
+
+  await waitFor(() => expect(pedidos).toMatchObject({ historico: 2, fila: 2 }))
+  expect(await gaveta().findByRole('tab', { name: 'Fila de revisão (1)' })).toBeTruthy()
 })
