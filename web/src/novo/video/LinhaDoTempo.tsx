@@ -307,6 +307,7 @@ export function LinhaDoTempo({
           ref={regua}
           className="relative h-5 cursor-pointer touch-none border-b border-strong/60"
           onPointerDown={(e) => {
+            if (e.button !== 0) return
             arrastando.current = true
             e.currentTarget.setPointerCapture?.(e.pointerId)
             naRegua(e)

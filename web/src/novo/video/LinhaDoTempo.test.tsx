@@ -163,6 +163,21 @@ test('clicar fora dos blocos salta o player ao ponteiro, sem selecionar', async 
   expect(within(comerciais).getByRole('button').getAttribute('aria-pressed')).toBe('false')
 })
 
+test('o botão direito e o do meio não saltam nem selecionam, na faixa e na régua', async () => {
+  const player = await abrirVideo()
+  const pautas = faixa('Pautas 3')
+  medir(pautas)
+  const regua = document.querySelector('[data-regua]') as HTMLElement
+  medir(regua)
+  const antes = player.currentTime
+
+  fireEvent.pointerDown(pautas, { clientX: 100 + (780 / 2959) * 1000, pointerId: 1, button: 2 })
+  fireEvent.pointerDown(regua, { clientX: 600, pointerId: 1, button: 1 })
+
+  expect(player.currentTime).toBe(antes)
+  expect(within(pautas).getByRole('button').getAttribute('aria-pressed')).toBe('false')
+})
+
 test('clicar e arrastar na régua salta o player ao tempo do ponteiro', async () => {
   const player = await abrirVideo()
   const regua = document.querySelector('[data-regua]') as HTMLElement

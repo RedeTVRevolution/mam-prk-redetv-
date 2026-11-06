@@ -516,9 +516,9 @@ test('o agrupamento por tipo é linear: 30 mil itens em pouco tempo, cada lista 
   const itens = Array.from({ length: 30_000 }, (_, i) => ({ tipo: i % 3 ? 'fala' : 'texto', chave: `x${i}`, inicio_ms: 30_000 - i, fim_ms: 30_001 - i }) as ItemDoPainel)
   const inicio = performance.now()
   const mapa = itensPorTipo(itens)
-  // Com a cópia da lista a cada item, eram 1,4 s; linear, uns poucos milissegundos.
-  // A versão quadrática passa de 1 s; a folga é para a máquina carregada.
-  expect(performance.now() - inicio).toBeLessThan(800)
+  // Com a cópia da lista a cada item, cerca de 470 ms por chamada; linear, menos de 2 ms.
+  // O teto separa as duas com folga para a máquina carregada.
+  expect(performance.now() - inicio).toBeLessThan(150)
   expect(mapa.get('fala')?.length).toBe(20_000)
   const falas = mapa.get('fala') ?? []
   expect(falas.every((f, i) => i === 0 || falas[i - 1].inicio_ms <= f.inicio_ms)).toBe(true)
