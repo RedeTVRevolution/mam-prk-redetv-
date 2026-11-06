@@ -54,6 +54,8 @@ import { Sugestoes } from './Sugestoes.tsx'
 import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './Correcao.tsx'
+import { FusaoDePessoa } from './FusaoDePessoa.tsx'
+import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
 import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
@@ -64,6 +66,10 @@ export interface Permissoes {
   reprocessar: boolean
   verAuditoria: boolean
   apagar: boolean
+  /** `correcao.aprovar`: o Curador (renomear em todos os vídeos). */
+  aprovar: boolean
+  /** `catalogo.fundir`. */
+  fundir: boolean
 }
 
 const VELOCIDADES = [1, 2, 4]
@@ -86,7 +92,7 @@ function tocar(player: HTMLVideoElement) {
   Promise.resolve(player.play()).catch(() => {})
 }
 
-type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' }
+type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fundir' | 'renomear' }
 
 /**
  * O vídeo aberto: o `<video>` com o proxy assinado, as barras, a linha do tempo e o inspetor. O
@@ -345,14 +351,16 @@ export function Video({
     setEdicao({ chave: item.chave, modo: 'remover' })
   }
 
+  /** Uma correção, a fusão ou a renomeação mudaram a decupagem: busca de novo, com o histórico. */
+  function recarregar() {
+    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
+    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
+  }
+
   /** Grava os pedidos em sequência com o motivo; devolve o erro que fica no formulário, ou `null`. */
   async function gravar(pedidos: Pedido[], motivo: string): Promise<string | null> {
     if (!d) return null
     let gravadas = 0
-    const recarregar = () => {
-      void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
-      void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
-    }
     try {
       let versao = d.versao_decupagem
       for (const { pessoa_do_nome, ...p } of pedidos) {
@@ -392,7 +400,29 @@ export function Video({
   let alcas: AlcasDaCorrecao | null = null
   if (d && catalogoPronto && edicao) {
     const item = itens.find((i) => i.chave === edicao.chave)
-    if (edicao.modo === 'acrescentar') {
+    if (edicao.modo === 'fundir') {
+      const pessoa = d.pessoas.find((p) => `fundir:${p.id}` === edicao.chave)
+      if (pessoa?.catalogo_id)
+        conteudoDaEdicao = (
+          <FusaoDePessoa
+            origemId={pessoa.catalogo_id}
+            nomeDaOrigem={pessoa.nome}
+            fusao={api.fusao}
+            limiteDoMotivo={catalogoPronto.limites.motivo}
+            aoFundir={() => {
+              fecharEdicao()
+              recarregar()
+            }}
+            aoCancelar={fecharEdicao}
+          />
+        )
+    } else if (edicao.modo === 'renomear') {
+      const pessoa = d.pessoas.find((p) => `renomear:${p.id}` === edicao.chave)
+      if (pessoa?.catalogo_id)
+        conteudoDaEdicao = (
+          <RenomeacaoEmLote pessoaId={pessoa.catalogo_id} nomeAtual={pessoa.nome} renomeacao={api.renomeacao} aoRenomear={recarregar} aoFechar={fecharEdicao} />
+        )
+    } else if (edicao.modo === 'acrescentar') {
       const pessoa = d.pessoas.find((p) => `acrescentar:${p.id}` === edicao.chave)
       if (pessoa)
         conteudoDaEdicao = (
@@ -448,6 +478,10 @@ export function Video({
     }
   }
 
+  const abrirPessoa = (modo: 'fundir' | 'renomear') => (pessoa: string) => {
+    setTemposDaAlca(null)
+    setEdicao({ chave: `${modo}:${pessoa}`, modo })
+  }
   const acoes: AcoesDeCorrecao | undefined =
     d && catalogoPronto
       ? {
@@ -459,6 +493,9 @@ export function Video({
             setTemposDaAlca(null)
             setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
           },
+          pessoaDoCatalogo: (id) => !!d.pessoas.find((p) => p.id === id)?.catalogo_id,
+          renomear: revisao.revisando && pode.aprovar ? abrirPessoa('renomear') : undefined,
+          fundir: revisao.revisando && pode.fundir ? abrirPessoa('fundir') : undefined,
           edicao: edicao && conteudoDaEdicao ? { chave: edicao.chave, conteudo: conteudoDaEdicao } : null,
           marcas,
         }

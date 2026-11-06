@@ -292,12 +292,15 @@ export function CampoDeNome({
   rotulo,
   catalogo,
   limite,
+  soDoCatalogo = false,
   valor,
   aoMudar,
 }: {
   rotulo: string
   catalogo: CatalogoDeNomes
   limite?: number
+  /** Só escolhe um nome que já existe: sem "criar como nova" (a fusão, por exemplo). */
+  soDoCatalogo?: boolean
   valor: string
   /** `id` é o do catálogo, ou vazio quando o texto é só digitado. */
   aoMudar: (nome: string, id: string) => void
@@ -311,7 +314,7 @@ export function CampoDeNome({
   const [criando, setCriando] = useState(false)
   const ultimaBusca = useRef(0)
   const nomeNovo = valor.trim()
-  const soSugere = catalogo === 'tipos_de_objeto'
+  const soSugere = catalogo === 'tipos_de_objeto' || soDoCatalogo
   const comLista = aberta && nomes !== null && nomeNovo.length >= MINIMO_DE_LETRAS
 
   async function buscar(texto: string) {
@@ -330,7 +333,7 @@ export function CampoDeNome({
     } catch {
       if (busca !== ultimaBusca.current) return
       setAchados([])
-      setErro(`Não foi possível consultar ${soSugere ? 'os tipos' : 'o catálogo'}. Pode seguir com o texto digitado.`)
+      setErro(`Não foi possível consultar ${catalogo === 'tipos_de_objeto' ? 'os tipos' : 'o catálogo'}. ${soDoCatalogo ? 'Tente de novo.' : 'Pode seguir com o texto digitado.'}`)
       setAberta(true)
     }
   }

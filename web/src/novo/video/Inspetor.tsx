@@ -59,6 +59,10 @@ export interface AcoesDeCorrecao {
   corrigir: (i: ItemDoPainel) => void
   remover: (i: ItemDoPainel) => void
   acrescentar: (pessoa: string) => void
+  /** "Renomear em todos os vídeos" (Curador) e "Fundir com…": só para a pessoa do catálogo, e só se a permissão deixa. */
+  pessoaDoCatalogo: (pessoa: string) => boolean
+  renomear?: (pessoa: string) => void
+  fundir?: (pessoa: string) => void
   /** O formulário (ou a confirmação) aberto: a chave do item, ou `acrescentar:<pessoa>`. */
   edicao: { chave: string; conteudo: ReactNode } | null
   /** "aguardando o Curador", "indexando", "na busca", por chave de item. */
@@ -982,7 +986,10 @@ function Detalhe({
   const { Icone, cor } = TIPOS[tipo]
   const rotuloDoTipo = SECOES.find((s) => s.tipo === tipo)?.rotulo ?? ''
   const marca = acoes?.marcas?.[item.chave]
-  const edicao = acoes?.edicao && (acoes.edicao.chave === item.chave || acoes.edicao.chave === `acrescentar:${item.pessoa}`) ? acoes.edicao : null
+  const edicao =
+    acoes?.edicao && (acoes.edicao.chave === item.chave || (item.pessoa && ['acrescentar', 'fundir', 'renomear'].some((m) => acoes.edicao?.chave === `${m}:${item.pessoa}`)))
+      ? acoes.edicao
+      : null
   const { dono } = item.objeto ?? {}
   // O dono do objeto: abre a primeira aparição dele.
   const irParaDono = (pessoa: string) => {
@@ -1065,6 +1072,16 @@ function Detalhe({
           {acoes && item.tipo === 'aparicao' && item.pessoa && (
             <Button type="button" variant="secondary" onClick={() => acoes.acrescentar(item.pessoa as string)}>
               <IconPlus size={16} stroke={1.75} aria-hidden /> {`Acrescentar aparição de ${item.titulo}`}
+            </Button>
+          )}
+          {item.tipo === 'aparicao' && item.pessoa && acoes?.renomear && acoes.pessoaDoCatalogo(item.pessoa) && edicao?.chave !== `renomear:${item.pessoa}` && (
+            <Button type="button" variant="secondary" aria-label={`Renomear ${item.titulo} em todos os vídeos`} onClick={() => acoes.renomear?.(item.pessoa as string)}>
+              Renomear em todos os vídeos
+            </Button>
+          )}
+          {item.tipo === 'aparicao' && item.pessoa && acoes?.fundir && acoes.pessoaDoCatalogo(item.pessoa) && edicao?.chave !== `fundir:${item.pessoa}` && (
+            <Button type="button" variant="secondary" aria-label={`Fundir ${item.titulo} com…`} onClick={() => acoes.fundir?.(item.pessoa as string)}>
+              Fundir com…
             </Button>
           )}
         </div>
