@@ -224,6 +224,9 @@ test('a lista longa desenha só as linhas à vista e guarda todas as páginas, t
   tabela = await screen.findByRole('table', { name: 'Auditoria' })
   await waitFor(() => expect(within(tabela).getAllByRole('row')[1]!.textContent).toContain('video-0.mp4'))
   expect(screen.queryByRole('button', { name: 'Carregar anteriores' })).toBeNull()
+  // Voltar logo não refaz as sete páginas, uma depois da outra.
+  await new Promise((r) => setTimeout(r, 50))
+  expect(consultas).toHaveLength(7)
 })
 
 test('a aba é só de leitura: nenhum botão de editar ou apagar', async () => {

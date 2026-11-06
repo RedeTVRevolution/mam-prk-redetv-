@@ -22,6 +22,8 @@ export function useListaPorCursor<P extends { proximo: string | null }>(queryKey
   return useInfiniteQuery({
     queryKey,
     enabled,
+    // Voltar à aba refaria todas as páginas, uma depois da outra; por 30 s fica o cache.
+    staleTime: 30_000,
     initialPageParam: '',
     queryFn: ({ pageParam }) => buscar(pageParam || null),
     getNextPageParam: (ultima) => ultima.proximo ?? undefined,
