@@ -94,7 +94,7 @@ def test_emails_nao_listam_de_novo_dentro_do_ttl_e_listam_depois() -> None:
     assert contas.listagens == 2
 
 
-def test_emails_com_falha_seguram_a_ultima_lista_por_pouco_tempo_e_tentam_de_novo() -> None:
+def test_falha_nos_emails_vale_10_s_e_guarda_a_ultima_lista() -> None:
     contas, agora = ContasQueContam(), [0.0]
     emails = EmailsDasContas(contas, espera_na_falha=10, relogio=lambda: agora[0])
     contas.falha = True
