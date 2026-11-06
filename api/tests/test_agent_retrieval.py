@@ -299,6 +299,37 @@ def test_o_mesmo_texto_e_embutido_uma_vez_so() -> None:
     assert len(transporte.chamadas) == 2
 
 
+def test_outra_thread_limpando_o_cache_no_meio_nao_derruba_a_busca() -> None:
+    class Limpa(dict[str, list[float]]):
+        """Outra thread chama `clear()` entre o `in` e a leitura."""
+
+        def __contains__(self, chave: object) -> bool:
+            self.clear()
+            return True
+
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    adaptador._vetores = Limpa()
+    assert adaptador.vetor_da_consulta("a") == [0.5] * 256
+
+
+def test_o_cache_do_embedding_guarda_no_maximo_256_textos() -> None:
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    for n in range(256):
+        adaptador.vetor_da_consulta(f"t{n}")
+    adaptador.vetor_da_consulta("t0")  # ainda guardado: sem chamada nova
+    assert len(transporte.chamadas) == 256
+    adaptador.vetor_da_consulta("t256")  # passou do limite: o cache recomeça
+    assert len(adaptador._vetores) == 1
+    adaptador.vetor_da_consulta("t0")  # foi esquecido: chama de novo
+    assert len(transporte.chamadas) == 258
+
+
 def test_embedding_da_consulta_de_outra_dimensao_levanta() -> None:
     transporte = TransporteFalso({"predictions": [{"embeddings": {"values": [0.5]}}]})
     with pytest.raises(ValueError, match="dimensão"):

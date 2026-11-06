@@ -600,10 +600,13 @@ class AgentRetrieval:
 
     def vetor_da_consulta(self, texto: str) -> list[float]:
         """O embedding da consulta, o mesmo modelo, tarefa e dimensão com que o
-        `semanticSearch` o calcula, na região da busca. Medido no dev: reproduz o vetor
-        guardado de um texto idêntico com cosseno 1,0."""
-        if texto in self._vetores:
-            return self._vetores[texto]
+        `semanticSearch` o calcula, na região da busca. Medido no dev (5/11/2026): a
+        distância de cada posição do top-50 coincide com a do ANN. Sem retry: a chamada
+        tem cota regional e um 429 sobe como erro da busca."""
+        # `get`, não `in` e depois `[]`: outra thread pode limpar o cache no meio.
+        guardado = self._vetores.get(texto)
+        if guardado is not None:
+            return guardado
         resposta = self._transporte(
             "POST",
             f"https://{self._config.regiao}-aiplatform.googleapis.com/v1/projects/"
