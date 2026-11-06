@@ -412,7 +412,10 @@ function Lista({
   // As linhas no tempo do vídeo, numa string: a lista só renderiza de novo quando elas mudam.
   const atuais = useNoInstante(instante, (ms) => linhas.filter((l) => linhaNoTempo(l, ms)).map((l) => l.chave).join('\n'))
   const conjunto = useMemo(() => new Set(atuais.split('\n')), [atuais])
-  const primeiraAtual = linhas.findIndex((l) => conjunto.has(l.chave))
+  // Com o grupo aberto, a lista vai à ocorrência atual, não ao cabeçalho, que fica no tempo do grupo
+  // inteiro; com ele fechado, vai ao cabeçalho.
+  const ocorrenciaAtual = linhas.findIndex((l) => conjunto.has(l.chave) && !(l.tipo !== 'item' && l.aberta))
+  const primeiraAtual = ocorrenciaAtual >= 0 ? ocorrenciaAtual : linhas.findIndex((l) => conjunto.has(l.chave))
 
   useEffect(() => {
     if (seguir && primeiraAtual >= 0) virtual.scrollToIndex(primeiraAtual, { align: centro ? 'center' : 'auto' })

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, onTestFinished, test, vi } from 'vitest'
 import { type ItemDoPainel, itensPorTipo } from '../../painel.ts'
 import { abrirVideo, irPara, pauseMock, playMock, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
@@ -521,4 +521,45 @@ test('o agrupamento por tipo é linear: 30 mil itens em pouco tempo, cada lista 
   expect(mapa.get('fala')?.length).toBe(20_000)
   const falas = mapa.get('fala') ?? []
   expect(falas.every((f, i) => i === 0 || falas[i - 1].inicio_ms <= f.inicio_ms)).toBe(true)
+})
+
+test('seguindo a reprodução com a pessoa aberta, a lista vai à ocorrência atual, mesmo longe da anterior no mesmo grupo', async () => {
+  // O jsdom não rola: o scrollTo grava a posição e avisa, como o navegador.
+  const scrollTo = vi.fn(function (this: HTMLElement, o: ScrollToOptions) {
+    Object.defineProperty(this, 'scrollTop', { value: o.top ?? 0, configurable: true })
+    this.dispatchEvent(new Event('scroll'))
+  })
+  HTMLElement.prototype.scrollTo = scrollTo as unknown as typeof HTMLElement.prototype.scrollTo
+  // Cada linha com 40 px e a rolagem com folga: sem medidas, a lista virtual não sabe onde cada linha está
+  // nem até onde pode rolar.
+  const medida = vi.spyOn(HTMLLIElement.prototype, 'offsetHeight', 'get').mockReturnValue(40)
+  const folga = vi.spyOn(HTMLDivElement.prototype, 'scrollHeight', 'get').mockReturnValue(100_000)
+  onTestFinished(() => {
+    medida.mockRestore()
+    folga.mockRestore()
+    // @ts-expect-error o jsdom não define a API
+    delete HTMLElement.prototype.scrollTo
+  })
+  decupagem = {
+    ...VAZIA,
+    pessoas: [
+      {
+        id: 'p1',
+        nome: 'Ana Muitas',
+        fontes_do_nome: ['gc'],
+        na_imagem: Array.from({ length: 60 }, (_, i) => ({ inicio_ms: i * 30_000, fim_ms: i * 30_000 + 10_000, evidencia: 'rosto' })),
+        citada_na_fala: [],
+        citada_no_texto: [],
+      },
+    ],
+  }
+  const player = await abrirVideo({ esperarFaixas: false })
+  const usuario = userEvent.setup()
+  await usuario.click(await lista('Pessoas').findByRole('button', { name: 'Ana Muitas, 60 aparições' }))
+  irPara(player, 5)
+  expect(lista('Pessoas').getByRole('button', { name: 'Ana Muitas, 00:00 a 00:10' })).toBeTruthy()
+
+  irPara(player, 1505)
+
+  expect(await lista('Pessoas').findByRole('button', { name: 'Ana Muitas, 25:00 a 25:10' })).toBeTruthy()
 })
