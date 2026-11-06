@@ -17,6 +17,7 @@ from api.entendimento_da_consulta import (
     esquema_da_resposta,
     sanear,
     separar_aspas,
+    termo_da_foto,
 )
 from api.gemini import ErroHttp
 from api.tests.test_gemini import TransporteFalso
@@ -353,3 +354,43 @@ def test_marca_so_entra_se_estiver_no_catalogo_de_marcas() -> None:
     assert sem.marcas == () and sem.texto_livre == "Nike"
     com, _ = rodar("camiseta Nike", pedido(marcas=["nike"]), marcas_conhecidas=["Nike"])
     assert com.marcas == ("Nike",)
+
+
+# --- o termo da foto (#443) -----------------------------------------------------------
+
+
+def test_a_foto_vai_ao_modelo_da_consulta_e_volta_um_termo_saneado() -> None:
+    transporte = TransporteFalso(json.dumps({"termo": "  <microfone>   azul "}))
+
+    termo = termo_da_foto(b"jpeg", transporte=transporte)
+
+    assert termo == "microfone azul"
+    [chamada] = transporte.chamadas
+    assert chamada.modelo == "gemini-3.5-flash-lite"
+    assert chamada.imagens == (b"jpeg",) and chamada.video_uri == ""
+    assert chamada.ferramentas == () and chamada.timeout_s == TEMPO_DA_CONSULTA_S
+    assert chamada.rotulos["etapa"] == "descricao_da_foto"
+    assert (
+        "nome do objeto" in chamada.instrucao and "no máximo uma" in chamada.instrucao
+    )
+    assert set(chamada.esquema["properties"]) == {"termo"}
+
+
+def test_o_termo_da_foto_e_cortado() -> None:
+    termo = termo_da_foto(
+        b"jpeg", transporte=TransporteFalso(json.dumps({"termo": "x" * 500}))
+    )
+    assert len(termo) == 60
+
+
+@pytest.mark.parametrize("resposta", ["não é json", json.dumps({"outro": "x"})])
+def test_resposta_fora_do_esquema_levanta_value_error(resposta: str) -> None:
+    with pytest.raises(ValueError):
+        termo_da_foto(b"jpeg", transporte=TransporteFalso(resposta))
+
+
+def test_falha_do_modelo_sobe_sem_nova_tentativa() -> None:
+    transporte = TransporteFalso(ErroHttp(503), json.dumps({"termo": "x"}))
+    with pytest.raises(ErroHttp):
+        termo_da_foto(b"jpeg", transporte=transporte)
+    assert len(transporte.chamadas) == 1

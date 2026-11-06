@@ -44,8 +44,8 @@ def test_os_vizinhos_vem_pelo_vetor_e_o_proprio_plano_fica_de_fora() -> None:
     corpo = r.json()
     assert inicios(corpo) == [20_000, 30_000]
     assert corpo["entendida"]["visual"] is True
-    # Nenhuma imagem nem texto vai ao embedding: o vetor já estava no índice.
-    assert embedding.imagens == [] and embedding.textos == []
+    # Nenhum texto vai ao embedding: o vetor já estava no índice.
+    assert embedding.textos == []
 
 
 def test_plano_sem_vetor_responde_404_com_mensagem_clara() -> None:

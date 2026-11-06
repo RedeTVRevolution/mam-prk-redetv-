@@ -2759,7 +2759,8 @@
                     "programa": null,
                     "desde": null,
                     "ate": null,
-                    "visual": false
+                    "visual": false,
+                    "termo_da_foto": null
                   },
                   "videos": [
                     {
@@ -2946,7 +2947,7 @@
     "/v1/busca/imagem": {
       "post": {
         "summary": "Buscar momentos por imagem",
-        "description": "Acha os planos parecidos com uma foto. O corpo é `multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória: não é guardada. Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
+        "description": "Acha os momentos do objeto que aparece na foto: o modelo da consulta dá o nome do objeto (e no máximo uma característica) e a busca segue como se esse termo tivesse sido digitado; o termo vem em `entendida.termo_da_foto`. O corpo é `multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória e pelo modelo: não é guardada. Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
         "operationId": "buscar_por_imagem_v1_busca_imagem_post",
         "parameters": [
           {
@@ -3057,7 +3058,8 @@
                     "programa": null,
                     "desde": null,
                     "ate": null,
-                    "visual": false
+                    "visual": false,
+                    "termo_da_foto": null
                   },
                   "videos": [
                     {
@@ -3231,7 +3233,7 @@
             }
           },
           "503": {
-            "description": "A busca por imagem não está disponível agora. O índice de imagens está desligado ou fora do ar. Repita com espera crescente.",
+            "description": "A busca por imagem não está disponível agora. O modelo que descreve a foto está desligado ou fora do ar, ou não achou objeto na foto. Repita com espera crescente ou tente outra foto.",
             "content": {
               "application/json": {
                 "example": {
@@ -3481,7 +3483,8 @@
                     "programa": null,
                     "desde": null,
                     "ate": null,
-                    "visual": false
+                    "visual": false,
+                    "termo_da_foto": null
                   },
                   "videos": [
                     {
@@ -4597,6 +4600,17 @@
             "type": "boolean",
             "title": "Visual",
             "default": false
+          },
+          "termo_da_foto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Termo Da Foto"
           }
         },
         "type": "object",

@@ -302,12 +302,15 @@ def criar_rotas_da_busca(
                 programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
             ),
         )
+        # Dois passos do modelo em série (descrever a foto e entender o termo), cada um com o
+        # seu teto: o prazo cobre os dois, para o plano B do entendimento chegar antes do 504.
+        prazo_s = tempo_maximo_s + TEMPO_DA_CONSULTA_S
         try:
-            resultado = futuro.result(timeout=tempo_maximo_s)
+            resultado = futuro.result(timeout=prazo_s)
         except TempoEsgotado:
             futuro.cancel()
             cancelado.set()
-            log.warning("busca por imagem passou de %.1f s", tempo_maximo_s)
+            log.warning("busca por imagem passou de %.1f s", prazo_s)
             raise HTTPException(504, "A busca demorou demais") from None
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None

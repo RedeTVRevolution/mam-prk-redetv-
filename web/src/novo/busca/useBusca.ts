@@ -5,7 +5,7 @@ import { finalizando, SEM_FILTROS, type Job } from '../../jobs.ts'
 import { useApi } from '../consultas.ts'
 import { usePaginas } from '../paginas.ts'
 
-/** Vídeos por página na busca por texto (o padrão da API) e planos na por imagem e nos parecidos. */
+/** Vídeos por página na busca por texto e na por foto (o padrão da API) e planos nos parecidos. */
 const VIDEOS_POR_PAGINA = 20
 const PLANOS_POR_PAGINA = 50
 /**
@@ -33,7 +33,8 @@ function cenasDa(pagina: PaginaDaBusca, soPlanos: boolean): Cena[] {
     video.momentos.flatMap((momento, i) => (soPlanos && momento.tipo !== 'plano' ? [] : [{ chave: `${video.job_id}:${i}`, video, momento }])),
   )
 }
-// Na busca visual com o vetor do quadro, só os planos; a por imagem e os parecidos são só de planos.
+// Na busca visual com o vetor do quadro, só os planos; os parecidos são só de planos. A por foto
+// é a busca comum pelo termo que o modelo deu, com momentos de todos os tipos.
 const soPlanosNa = (p: PaginaDaBusca) => p.entendida.visual === true
 const cenasDaBusca = (ps: PaginaDaBusca[]) => ps.flatMap((p) => cenasDa(p, soPlanosNa(p)))
 const tamanhoNaBusca = (p: PaginaDaBusca) => cenasDa(p, soPlanosNa(p)).length
@@ -44,7 +45,7 @@ const proximoDaBusca = (p: PaginaDaBusca) => p.proximo
 const chaveDa = (pedido: PedidoDaBusca | null): QueryKey => {
   if (!pedido) return ['busca', 'nada']
   if (pedido.tipo === 'texto') return ['busca', 'texto', pedido.consulta.q, consultaParaApi(pedido.consulta, VIDEOS_POR_PAGINA)]
-  if (pedido.tipo === 'imagem') return ['busca', 'imagem', pedido.id, consultaDaImagemParaApi(pedido.consulta, PLANOS_POR_PAGINA)]
+  if (pedido.tipo === 'imagem') return ['busca', 'imagem', pedido.id, consultaDaImagemParaApi(pedido.consulta, VIDEOS_POR_PAGINA)]
   // Fora do prefixo da busca: abrir os parecidos não apaga a busca do cache nem a posição dela.
   return ['parecidos', pedido.job, pedido.plano]
 }
@@ -62,12 +63,12 @@ export function useBusca(pedido: PedidoDaBusca | null) {
     chave,
     pedir: (cursor) => {
       if (pedido?.tipo === 'texto') return api.buscar(pedido.consulta, VIDEOS_POR_PAGINA, cursor)
-      if (pedido?.tipo === 'imagem') return api.buscarPorImagem(pedido.foto, pedido.consulta, PLANOS_POR_PAGINA, cursor)
+      if (pedido?.tipo === 'imagem') return api.buscarPorImagem(pedido.foto, pedido.consulta, VIDEOS_POR_PAGINA, cursor)
       return api.buscarParecidos(pedido!.job, pedido!.plano, PLANOS_POR_PAGINA, cursor)
     },
     proximo: proximoDaBusca,
-    itens: pedido?.tipo === 'texto' ? cenasDaBusca : cenasDosPlanos,
-    tamanho: pedido?.tipo === 'texto' ? tamanhoNaBusca : tamanhoNosPlanos,
+    itens: pedido?.tipo === 'parecidos' ? cenasDosPlanos : cenasDaBusca,
+    tamanho: pedido?.tipo === 'parecidos' ? tamanhoNosPlanos : tamanhoNaBusca,
     staleTime: Infinity,
     gcTime: VALIDADE,
     // Todas as páginas ficam: a API corta em 500 vídeos (25 páginas de 20). Sem página tirada do

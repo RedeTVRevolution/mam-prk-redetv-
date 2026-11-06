@@ -288,6 +288,7 @@ _BUSCA = {
         "desde": None,
         "ate": None,
         "visual": False,
+        "termo_da_foto": None,
     },
     # `dict(...)`: a chave entre aspas casaria com um nome da busca no checador de nomes.
     "videos": [
@@ -756,9 +757,12 @@ OPERACOES: tuple[Operacao, ...] = (
         "POST",
         "/v1/busca/imagem",
         "Buscar momentos por imagem",
-        "Acha os planos parecidos com uma foto. O corpo é `multipart/form-data` com o "
-        "arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o "
-        "`Content-Length` é obrigatório). A foto só passa pela memória: não é guardada. "
+        "Acha os momentos do objeto que aparece na foto: o modelo da consulta dá o nome do "
+        "objeto (e no máximo uma característica) e a busca segue como se esse termo tivesse "
+        "sido digitado; o termo vem em `entendida.termo_da_foto`. O corpo é "
+        "`multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 "
+        "milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória "
+        "e pelo modelo: não é guardada. "
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
@@ -798,8 +802,8 @@ OPERACOES: tuple[Operacao, ...] = (
             Erro(
                 503,
                 "A busca por imagem não está disponível agora",
-                "O índice de imagens está desligado ou fora do ar. Repita com espera "
-                "crescente.",
+                "O modelo que descreve a foto está desligado ou fora do ar, ou não achou "
+                "objeto na foto. Repita com espera crescente ou tente outra foto.",
             ),
             _DEMOROU,
         ),

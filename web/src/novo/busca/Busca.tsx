@@ -264,7 +264,7 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
       <GradeDaBusca
         pedido={pedido}
         termo={foto ? '' : consulta.q}
-        semPedido={<p className="p-8 text-center text-muted-foreground">Escreva acima o que procurar no acervo, ou arraste uma foto (JPEG ou PNG) para achar planos parecidos.</p>}
+        semPedido={<p className="p-8 text-center text-muted-foreground">Escreva acima o que procurar no acervo, ou arraste a foto de um objeto (JPEG ou PNG) para achar onde ele aparece.</p>}
         cabecalho={(busca) => {
           const pagina = busca.paginas?.[0]
           const entendida = pagina?.entendida
@@ -331,6 +331,11 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                 <div className="flex min-w-0 items-center gap-2 text-sm">
                   <IconPhotoSearch size={16} className="shrink-0 text-muted-foreground" aria-hidden />
                   <span className="min-w-0 truncate">{foto.arquivo.name}</span>
+                  {entendida?.termo_da_foto && (
+                    <span className="shrink-0 text-muted-foreground">
+                      Buscando por: <strong className="font-medium text-foreground">{entendida.termo_da_foto}</strong>
+                    </span>
+                  )}
                   <Button type="button" variant="ghost" size="sm" onClick={() => setFoto(null)} className="text-link">
                     <IconX stroke={1.75} aria-hidden /> Limpar
                   </Button>
@@ -444,12 +449,14 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
         }}
         vazio={(busca) =>
           foto ? (
-            <p role="status">Nenhum plano parecido. Tire um filtro ou tente outra foto.</p>
+            <p role="status">
+              Nenhum momento encontrado{busca.paginas?.[0]?.entendida.termo_da_foto && ` para “${busca.paginas[0].entendida.termo_da_foto}”`}. Tire um filtro, tente outra foto ou digite o que procura.
+            </p>
           ) : busca.paginas?.[0]?.sem_aparicoes.length ? null : (
             <p>Nenhum momento encontrado para “{consulta.q}”. Tente outras palavras ou tire um filtro.</p>
           )
         }
-        contagem={(busca) => contagemDaGrade(busca, foto ? contagemDePlanos : contagemDeMomentos)}
+        contagem={(busca) => contagemDaGrade(busca, contagemDeMomentos)}
       />
     </div>
   )

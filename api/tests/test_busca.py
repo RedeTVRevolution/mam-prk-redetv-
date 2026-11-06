@@ -33,7 +33,11 @@ from api.busca import (
     VideoGuardado,
 )
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
-from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S, ModelArmorEmMemoria
+from api.entendimento_da_consulta import (
+    TEMPO_DA_CONSULTA_S,
+    ModelArmor,
+    ModelArmorEmMemoria,
+)
 from api.eventos_de_uso import Eventos
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
@@ -134,12 +138,13 @@ class Mundo:
         ranking: Ranking | None = None,
         embedding: EmbeddingDaConsulta | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
+        armor: ModelArmor | None = None,
     ) -> Busca:
         return Busca(
             embedding=embedding,
             transporte=self.transporte,
             catalogo=self.catalogo,
-            armor=ModelArmorEmMemoria(),
+            armor=armor or ModelArmorEmMemoria(),
             programas=PROGRAMAS,
             indice=self.indice,
             ranking=ranking or RankingEmOrdem(),
@@ -558,7 +563,7 @@ def test_o_teto_de_videos_corta_o_resultado() -> None:
 
 def cliente(
     papeis: list[Papel] | None = None,
-    *respostas: str,
+    *respostas: str | Exception,
     maximo_por_minuto: int = 30,
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     indice: IndiceEmMemoria | None = None,
@@ -1409,13 +1414,6 @@ class EmbeddingDeTexto:
     def __init__(self, vetor: list[float] | Exception) -> None:
         self.vetor = vetor
         self.textos: list[str] = []
-        self.imagens: list[bytes] = []
-
-    def vetor_da_imagem(self, jpeg: bytes) -> list[float]:
-        self.imagens.append(jpeg)
-        if isinstance(self.vetor, Exception):
-            raise self.vetor
-        return self.vetor
 
     def vetor_do_texto(self, texto: str) -> list[float]:
         self.textos.append(texto)

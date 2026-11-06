@@ -1,4 +1,4 @@
-"""O vetor multimodal do quadro-chave de cada plano, para a busca por imagem (#268).
+"""O vetor multimodal do quadro-chave de cada plano, para a busca de parecidos e a visual (#268).
 
 O Gemini Embedding 2 recebe o quadro (JPEG) e a descrição do plano e devolve um vetor só,
 na dimensão da coleção. Só o registro de plano leva o vetor; sem quadro, ou se o quadro
@@ -57,19 +57,6 @@ class GeminiEmbedding:
     def vetor_do_texto(self, texto: str) -> list[float]:
         """O vetor da consulta de texto, no mesmo espaço dos vetores dos quadros (#269)."""
         return self._embutir([{"text": texto}])
-
-    def vetor_da_imagem(self, jpeg: bytes) -> list[float]:
-        """O vetor da foto enviada na busca por imagem (#270): só a imagem, sem descrição."""
-        return self._embutir(
-            [
-                {
-                    "inlineData": {
-                        "mimeType": "image/jpeg",
-                        "data": base64.b64encode(jpeg).decode(),
-                    }
-                }
-            ]
-        )
 
     def _embutir(self, partes: list[dict[str, Any]]) -> list[float]:
         url = (

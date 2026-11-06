@@ -107,7 +107,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | `Envie uma imagem JPEG ou PNG válida` | O arquivo não é JPEG nem PNG, ou está corrompido. |
 | 422 | `Envie a imagem no campo arquivo` | O multipart da busca por imagem não tem o campo `arquivo`. |
 | 429 | `Consultas demais; tente em um minuto` | As buscas têm limite de 30 por minuto por chave. Espere e repita. |
-| 503 | `A busca por imagem não está disponível agora` | Repita com espera crescente. |
+| 503 | `A busca por imagem não está disponível agora` | O modelo que descreve a foto está fora, ou não achou objeto nela. Repita com espera crescente ou tente outra foto. |
 | 504 | `A busca demorou demais` | Repita; se persistir, simplifique a consulta. |
 | 503 | `Serviço indisponível` | Falha passageira. Repita com espera crescente; no `POST /v1/jobs`, com o mesmo `Idempotency-Key`. |
 
@@ -118,7 +118,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. Cada exemplo abaixo supõe `URL` e `CHAVE` no ambiente; o OpenAPI traz o formato completo das respostas.
 
 - **Buscar por texto:** `GET /v1/busca?q=vestido+azul` devolve vídeos e momentos (`inicio_ms`, `fim_ms`, `motivo` e `quadro`). Filtros: `ev`, `tipo`, `pessoa`, `marca`, `programa`, `desde`, `ate`, `ordem`, `limite`. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte (vale também na busca por imagem e nos parecidos), some na última e vale 15 min, na mesma consulta e com os mesmos filtros. `curl -H "X-API-Key: $CHAVE" "$URL/v1/busca?q=vestido+azul"`
-- **Buscar por imagem:** `POST /v1/busca/imagem` com o arquivo no campo `arquivo` (multipart). `curl -H "X-API-Key: $CHAVE" -F arquivo=@foto.jpg "$URL/v1/busca/imagem"`
+- **Buscar por imagem:** `POST /v1/busca/imagem` com o arquivo no campo `arquivo` (multipart). O modelo diz o objeto da foto (`entendida.termo_da_foto`) e a busca segue como se esse termo tivesse sido digitado. `curl -H "X-API-Key: $CHAVE" -F arquivo=@foto.jpg "$URL/v1/busca/imagem"`
 - **Planos parecidos:** `GET /v1/busca/parecidos/planos?job=<id>` para saber quais planos têm busca e `GET /v1/busca/parecidos?job=<id>&plano=<n>` para buscá-los.
 - **Quadro de um momento:** `GET /v1/jobs/{job_id}/quadros/{arquivo}` devolve a URL do JPEG; `arquivo` é o nome em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`).
 - **Andamento de vários Jobs:** `GET /v1/jobs/andamento?ids=a,b,c` (até 200 ids).
