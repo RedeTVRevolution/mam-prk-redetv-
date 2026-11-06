@@ -43,7 +43,8 @@ export function Faceta({
 }: {
   rotulo: string
   Icone: Icon
-  opcoes: { valor: string; rotulo: string }[]
+  /** `contagem`: em quantos vídeos o valor aparece (as facetas da busca). */
+  opcoes: { valor: string; rotulo: string; contagem?: number }[]
   valor: string[]
   aoMudar: (valor: string[]) => void
   unico?: boolean
@@ -84,6 +85,7 @@ export function Faceta({
                       {marcado && <IconCheck size={12} stroke={2.5} />}
                     </span>
                     <span className="flex-1 truncate">{o.rotulo}</span>
+                    {o.contagem !== undefined && <span className="text-xs text-muted-foreground tabular-nums">{o.contagem}</span>}
                   </CommandItem>
                 )
               })}
