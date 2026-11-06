@@ -11,6 +11,7 @@ import binascii
 import csv
 import io
 from collections.abc import Callable, Iterable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Annotated, Any, Protocol
 
@@ -56,6 +57,15 @@ def ou_503[T](consultar: Callable[[], T]) -> T:
         return consultar()
     except RuntimeError as e:
         raise HTTPException(503, str(e)) from e
+
+
+def em_paralelo(*chamadas: Callable[[], Any]) -> tuple[Any, ...]:
+    """Roda as leituras independentes ao mesmo tempo e devolve os resultados na ordem dadas.
+    Espera todas; se mais de uma falhar, levanta o erro da primeira da lista. Só para
+    leituras: a escrita da auditoria fica síncrona, fora daqui."""
+    with ThreadPoolExecutor(len(chamadas)) as pool:
+        futuros = [pool.submit(c) for c in chamadas]
+    return tuple(f.result() for f in futuros)
 
 
 LIMITE_DA_PAGINA = 100  # o teto de `limite` nas listas paginadas dos relatórios
@@ -201,6 +211,9 @@ def linhas_da_consulta(
             "query": sql,
             "useLegacySql": False,
             "location": regiao,
+            # Sem job quando o resultado cabe na resposta (~0,2 s a menos por consulta). Se
+            # paginar, o BigQuery cria o job e devolve `jobReference` e `pageToken`.
+            "jobCreationMode": "JOB_CREATION_OPTIONAL",
             "timeoutMs": 60_000,
             "maxResults": 100_000,
             "queryParameters": list(parametros),

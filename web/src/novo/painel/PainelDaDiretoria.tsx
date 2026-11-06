@@ -291,6 +291,10 @@ export default function PainelDaDiretoria({
     queryKey: ["painel", aba, filtros, grupo],
     queryFn: () => definicao.buscar(api, filtros, agrupar),
     enabled: bloqueio === null,
+    // Voltar a uma aba já vista (com o mesmo filtro) não refaz a chamada por um minuto.
+    staleTime: 60_000,
+    // O gcTime padrão (30 s, consultas.ts) tiraria a aba do cache antes do minuto.
+    gcTime: 60_000,
     retry: (falhas, erro) =>
       !(erro instanceof SessaoExpirada) &&
       !(erro instanceof PedidoInvalido) &&

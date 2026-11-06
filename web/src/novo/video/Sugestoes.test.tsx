@@ -118,9 +118,9 @@ test('S aceita a sugestão em foco, ela some e a contagem diminui; a linha diz a
   expect(await screen.findByText('Vale para as 2 aparições de Leão Lobo neste vídeo.')).toBeTruthy()
 })
 
-test('N recusa a sugestão em foco', async () => {
+test('X recusa a sugestão em foco', async () => {
   const { usuario } = await catalogar()
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   await waitFor(() => expect(recusadas).toEqual(['s1']))
   await screen.findByRole('button', { name: /Sugestões \(1\)/ })
 })
@@ -136,7 +136,7 @@ test('↑ ↓ trocam a sugestão em foco e S aceita a escolhida', async () => {
 test('clicar numa sugestão a põe em foco para as teclas', async () => {
   const { usuario } = await catalogar()
   await usuario.click(screen.getByText('Acrescentar vestido vermelho?'))
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   await waitFor(() => expect(recusadas).toEqual(['s2']))
 })
 
@@ -162,7 +162,7 @@ test('R, nome digitado e Enter aceitam; Esc cancela sem aceitar', async () => {
   await waitFor(() => expect(aceitas).toEqual([{ id: 's1', corpo: { valor: 'Ana' } }]))
 })
 
-test('os botões Aceitar e Recusar fazem o mesmo que S e N', async () => {
+test('os botões Aceitar e Recusar fazem o mesmo que S e X', async () => {
   const { usuario } = await catalogar()
   await usuario.click(within(screen.getByRole('group', { name: 'É Leão Lobo?' })).getByRole('button', { name: 'Aceitar' }))
   await waitFor(() => expect(aceitas.map((a) => a.id)).toEqual(['s1']))
@@ -208,9 +208,9 @@ test('a seção recolhe e abre', async () => {
   expect(screen.getByText('É Leão Lobo?')).toBeTruthy()
 })
 
-test('fora do modo de catalogação não há seção, e S, N e R não fazem nada', async () => {
+test('fora do modo de catalogação não há seção, e S, X e R não fazem nada', async () => {
   const { usuario } = await abrir()
-  await usuario.keyboard('snr')
+  await usuario.keyboard('sxr')
   expect(screen.queryByText('É Leão Lobo?')).toBeNull()
   expect(screen.queryByRole('button', { name: /Sugestões/ })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Aceitar' })).toBeNull()
@@ -227,7 +227,7 @@ test('sem sugestões a seção não aparece', async () => {
   expect(screen.queryByRole('button', { name: /Sugestões/ })).toBeNull()
 })
 
-test('S, N, R e as setas da seção aparecem na lista de atalhos', async () => {
+test('S, X, R e as setas da seção aparecem na lista de atalhos', async () => {
   const { usuario } = await catalogar()
   await usuario.keyboard('?')
   const grupo = within(within(await screen.findByRole('dialog')).getByRole('region', { name: 'Sugestões' }))
@@ -257,7 +257,7 @@ test('a sugestão que já foi decidida avisa e sai da lista', async () => {
 test('uma falha da API diz o que fazer e dá o código para o suporte', async () => {
   servidor.use(http.post('/v1/jobs/j1/sugestoes/:id/recusar', () => new HttpResponse(null, { status: 500 })))
   const { usuario } = await catalogar()
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   const alerta = await screen.findByRole('alert')
   expect(alerta.textContent).toContain('Não foi possível recusar a sugestão. Tente de novo.')
   expect(alerta.textContent).toContain('Código para o suporte: http_500')
@@ -272,7 +272,7 @@ test('o foco segue a sugestão, não a posição, quando a lista vem de novo em 
   )
   const { usuario } = await catalogar()
   await usuario.click(screen.getByText('Acrescentar vestido vermelho?'))
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   await screen.findByRole('alert')
   // A lista veio de novo invertida: a sugestão escolhida agora é a primeira.
   await waitFor(() =>

@@ -123,6 +123,12 @@ class Mundo:
             if resumos == "padrao"
             else resumos
         )
+        self.contas = ContasDeUsuarioEmMemoria(
+            [
+                ContaDoIdentityPlatform(uid="bia", email="bia@redetv.com.br"),
+                ContaDoIdentityPlatform(uid="caio", email="caio@redetv.com.br"),
+            ]
+        )
         self.cliente = TestClient(
             criar_app(
                 verificador=VerificadorFalso({"ana": ANA}),
@@ -133,12 +139,7 @@ class Mundo:
                 faturamento=faturamento,
                 repositorio=jobs,
                 relogio=relogio,
-                contas=ContasDeUsuarioEmMemoria(
-                    [
-                        ContaDoIdentityPlatform(uid="bia", email="bia@redetv.com.br"),
-                        ContaDoIdentityPlatform(uid="caio", email="caio@redetv.com.br"),
-                    ]
-                ),
+                contas=self.contas,
             )
         )
 

@@ -656,6 +656,20 @@ test("as abas do painel levam de uma para outra", async () => {
   ).toBe("true");
 });
 
+test("voltar a uma aba já vista não refaz a chamada", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/painel/acessos");
+  await tabela("Acessos por dia");
+  await usuario.click(screen.getByRole("tab", { name: "Buscas" }));
+  await tabela("Buscas por dia");
+
+  await usuario.click(screen.getByRole("tab", { name: "Acessos" }));
+
+  await tabela("Acessos por dia");
+  // Contam só os pedidos de JSON de cada aba; a fila e os filtros vão por outra rota.
+  expect(pedidos).toHaveLength(2);
+});
+
 test("a aba Revisão mostra correções, taxa e minutos de revisão", async () => {
   await abrir("/painel/revisao");
 

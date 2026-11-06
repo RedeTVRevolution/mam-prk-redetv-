@@ -8,6 +8,8 @@ abertura; filtro novo, sim: é outra coisa vista. As rotas leem só as tabelas r
 """
 
 import logging
+import threading
+import time
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
@@ -37,7 +39,13 @@ from api.jobs import (
     _confere_permissao,
 )
 from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel, RevisaoNoVideo
-from api.relatorios import confere_o_pedido, csv_em_texto, ou_503, resposta_em_csv
+from api.relatorios import (
+    confere_o_pedido,
+    csv_em_texto,
+    em_paralelo,
+    ou_503,
+    resposta_em_csv,
+)
 from api.resumos_de_uso import (
     AcessoDoDia,
     ChamadaDoDia,
@@ -236,13 +244,40 @@ def fila_agora(na_fila: list[Job], agora: datetime) -> FilaAgora:
 COLUNAS_DO_CSV_DE_ACESSOS = ("dia", "uid", "email", "acessos", "ativo", "ultimo_acesso")
 
 
-def _emails(contas: ContasDeUsuario) -> dict[str, str]:
-    """Uid -> e-mail das contas; sem a lista, o painel mostra só o uid."""
-    try:
-        return {c.uid: c.email for c in contas.listar()}
-    except Exception:
-        log.exception("Falha ao listar as contas para o painel")
-        return {}
+class EmailsDasContas:
+    """Uid -> e-mail das contas, lembrado por `validade` segundos nesta instância: listar as
+    contas no Identity Platform custa ~0,3 s por requisição. Uma conta nova leva até esse
+    tempo para aparecer com e-mail. Se a listagem falha, vale a última lista boa (ou nenhuma:
+    o painel mostra só o uid) por `espera_na_falha` segundos, para os pedidos que esperavam a
+    trava não repetirem, um atrás do outro, o timeout do Identity Platform."""
+
+    def __init__(
+        self,
+        contas: ContasDeUsuario,
+        validade: float = 60.0,
+        espera_na_falha: float = 10.0,
+        relogio: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._contas = contas
+        self._validade = validade
+        self._espera_na_falha = espera_na_falha
+        self._relogio = relogio
+        self._trava = threading.Lock()
+        self._emails: dict[str, str] = {}
+        self._vence_em: float | None = None
+
+    def __call__(self) -> dict[str, str]:
+        # A trava segura a leitura inteira: quem chega junto espera uma só listagem.
+        with self._trava:
+            if self._vence_em is None or self._relogio() >= self._vence_em:
+                try:
+                    self._emails = {c.uid: c.email for c in self._contas.listar()}
+                except Exception:
+                    log.exception("Falha ao listar as contas para o painel")
+                    self._vence_em = self._relogio() + self._espera_na_falha
+                else:
+                    self._vence_em = self._relogio() + self._validade
+            return dict(self._emails)
 
 
 def _ativos_por(
@@ -1068,6 +1103,7 @@ def criar_rotas_do_painel(
     relogio: Callable[[], datetime],
 ) -> APIRouter:
     rotas = APIRouter(prefix="/painel")
+    emails_das_contas = EmailsDasContas(contas)
 
     def _grupo(
         agrupar: Grupo | Literal["auto"] | None,
@@ -1097,8 +1133,9 @@ def criar_rotas_do_painel(
     def filtros(_pessoa: PodeVerOPainel) -> OpcoesDosFiltros:
         """O que a tela oferece nos filtros de programa e de usuário."""
         fonte = confere_o_pedido(resumos, None, None)
-        programas, uids = ou_503(lambda: (fonte.programas(), fonte.usuarios()))
-        emails = _emails(contas)
+        programas, uids, emails = ou_503(
+            lambda: em_paralelo(fonte.programas, fonte.usuarios, emails_das_contas)
+        )
         return OpcoesDosFiltros(
             programas=programas,
             usuarios=[UsuarioDoFiltro(uid=u, email=emails.get(u)) for u in uids],
@@ -1120,7 +1157,7 @@ def criar_rotas_do_painel(
         linhas = _com_acesso(
             ou_503(lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario))
         )
-        emails = _emails(contas)
+        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "acessos", filtro)
             return resposta_em_csv(
@@ -1160,8 +1197,19 @@ def criar_rotas_do_painel(
         """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
         programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        base = _base_de_uso(fonte, filtro)
-        emails = _emails(contas)
+        # O CSV não tem a tabela por programa; com `programa` ela é a própria base.
+        com_tabela_por_programa = (
+            formato == "json" and filtro.programa is None and filtro.usuario is None
+        )
+        base, por_programa, emails = em_paralelo(
+            lambda: _base_de_uso(fonte, filtro),
+            lambda: (
+                ou_503(lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, None))
+                if com_tabela_por_programa
+                else []
+            ),
+            emails_das_contas,
+        )
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "videos", filtro)
             return resposta_em_csv(
@@ -1189,12 +1237,6 @@ def criar_rotas_do_painel(
             )
         if filtro.programa is not None:
             por_programa = base
-        elif filtro.usuario is None:
-            por_programa = ou_503(
-                lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, None)
-            )
-        else:
-            por_programa = []
         grupo = _grupo(agrupar, (u.dia for u in base if _tem_video(u)), resposta)
         acessos_ao_painel.abriu(pessoa, "videos", filtro)
         return relatorio_de_videos(base, por_programa, emails, filtro, grupo)
@@ -1212,7 +1254,7 @@ def criar_rotas_do_painel(
         combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
         base = _base_de_uso(fonte, filtro)
-        emails = _emails(contas)
+        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "buscas", filtro)
             return resposta_em_csv(
@@ -1263,7 +1305,7 @@ def criar_rotas_do_painel(
                 filtro.desde, filtro.ate, filtro.programa, filtro.usuario
             )
         )
-        emails = _emails(contas)
+        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "revisao", filtro)
             return resposta_em_csv(
@@ -1298,16 +1340,13 @@ def criar_rotas_do_painel(
         if filtro.programa is not None:
             raise HTTPException(422, "As chamadas de API não têm programa")
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        chamadas = ou_503(
-            lambda: fonte.chamadas(filtro.desde, filtro.ate, filtro.usuario)
-        )
-        envios = [
-            u
-            for u in ou_503(
-                lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario)
+        chamadas, uso = ou_503(
+            lambda: em_paralelo(
+                lambda: fonte.chamadas(filtro.desde, filtro.ate, filtro.usuario),
+                lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario),
             )
-            if u.quem_tipo == "sistema"
-        ]
+        )
+        envios = [u for u in uso if u.quem_tipo == "sistema"]
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "api", filtro)
             return resposta_em_csv(
@@ -1380,7 +1419,7 @@ def criar_rotas_do_painel(
                 filtro.usuario,
             )
         )
-        emails = _emails(contas)
+        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "custo", filtro)
             return resposta_em_csv(
