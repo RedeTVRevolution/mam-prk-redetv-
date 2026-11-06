@@ -32,7 +32,7 @@ function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[]
     )
   }
   if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} permissoes={permissoes} />
-  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} />
+  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} permissoes={permissoes} />
   if (rota.tipo === 'painel') {
     return (
       <Suspense>
