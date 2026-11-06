@@ -112,13 +112,42 @@ jobs:
           tar xzf gitleaks.tar.gz gitleaks
       - run: ./gitleaks git --redact --no-banner
 
+  # Diz ao `publicar` se o push mudou algo que vai para a nuvem (scripts/vai-para-a-nuvem.sh):
+  # um push só de documentação não monta imagem nem roda o apply. Não entra no ruleset da main.
+  # Na dúvida, publica: sem base conhecida (primeiro push do branch, push forçado) ou com o
+  # passo caído, o `pula` fica vazio e o `publicar` roda.
+  mudou-o-deploy:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-26.04
+    outputs:
+      pula: ${{ steps.mudou.outputs.pula }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: mudou
+        continue-on-error: true
+        env:
+          BASE: ${{ github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "Sem base conhecida; publica."; exit 0
+          fi
+          MUDOU=$(git -c core.quotePath=false diff --name-only "$BASE" "$GITHUB_SHA")
+          if scripts/vai-para-a-nuvem.sh <<<"$MUDOU"; then
+            echo "Muda o que vai para a nuvem; publica."
+          else
+            echo "pula=1" >> "$GITHUB_OUTPUT"
+            echo "Nada do que vai para a nuvem mudou; o publicar fica pulado."
+          fi
+
   # CD (#71): com o CI verde num push na main, publica no dev pelo mesmo `make
   # deploy-dev` de quem publica à mão. Sem chave: o GitHub entra por federação e
   # impersona a mam-terraform. Os nomes vêm das variáveis do repositório (README).
   publicar:
     # Sem as variáveis (configuração única do README), o job é pulado, e não falha.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.WORKLOAD_IDENTITY_PROVIDER != ''
-    needs: [backend, web, imagem, terraform, loop-afk, gitleaks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.WORKLOAD_IDENTITY_PROVIDER != '' && needs.mudou-o-deploy.outputs.pula != '1'
+    needs: [backend, web, imagem, terraform, loop-afk, gitleaks, mudou-o-deploy]
     runs-on: ubuntu-26.04
     # Um deploy por vez: o estado do Terraform e a tag do commit não se disputam. A
     # fila não garante a ordem, então o passo `ponta` garante que nunca se volta atrás.
@@ -141,14 +170,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Só publica a ponta da main: um commit já superado, cujo CI terminou depois
-      # do seguinte, publicaria código antigo por cima. O run da ponta publica.
+      # do seguinte, publicaria código antigo por cima. O run da ponta publica. Se o que
+      # veio depois não vai para a nuvem (só documentação), o run da ponta fica pulado
+      # (mudou-o-deploy), e este publica: o que vai para a nuvem é igual ao da ponta.
       - id: ponta
         run: |
           git fetch -q origin main
-          if [ "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA" ]; then
+          PONTA=$(git rev-parse FETCH_HEAD)
+          DEPOIS=$(git -c core.quotePath=false diff --name-only "$GITHUB_SHA" "$PONTA")
+          if [ "$PONTA" = "$GITHUB_SHA" ] || ! scripts/vai-para-a-nuvem.sh <<<"$DEPOIS"; then
             echo publica=1 >> "$GITHUB_OUTPUT"
           else
-            echo "Superado por $(git rev-parse --short FETCH_HEAD) na main; não publica."
+            echo "Superado por $(git rev-parse --short "$PONTA") na main; não publica."
           fi
       # Sem service_account: o token federado só serve para impersonar a mam-terraform.
       # Este job publica, então as actions de terceiros vão pelo SHA, não pela tag.
