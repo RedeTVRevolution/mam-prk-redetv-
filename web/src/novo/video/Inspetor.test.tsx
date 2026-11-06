@@ -563,3 +563,34 @@ test('seguindo a reprodução com a pessoa aberta, a lista vai à ocorrência at
 
   expect(await lista('Pessoas').findByRole('button', { name: 'Ana Muitas, 25:00 a 25:10' })).toBeTruthy()
 })
+
+test('o palpite não confirmado leva o selo em texto ao lado do nome, na pessoa, nas aparições e no Agora, com a dica e nenhuma porcentagem', async () => {
+  decupagem = {
+    ...VAZIA,
+    pessoas: [
+      {
+        id: 'p1',
+        nome: 'Leão Lobo',
+        fontes_do_nome: [],
+        estado_do_nome: 'palpite',
+        na_imagem: [{ inicio_ms: 211_000, fim_ms: 261_000, evidencia: 'rosto', quadro: 'quadros/aparicao-0-0.jpg' }],
+        citada_na_fala: [],
+        citada_no_texto: [],
+      },
+    ],
+  }
+  const usuario = userEvent.setup()
+  const player = await abrirVideo({ esperarFaixas: false })
+  irPara(player, 222)
+
+  const pessoa = await lista('Pessoas').findByRole('button', { name: 'Leão Lobo, não confirmado, 1 aparição' })
+  expect(within(pessoa).getByText('não confirmado')).toBeTruthy()
+  expect(within(agora().getByRole('button', { name: /^Leão Lobo/ })).getByText('não confirmado')).toBeTruthy()
+  await usuario.click(pessoa)
+  const aparicao = lista('Pessoas').getByRole('button', { name: 'Leão Lobo, não confirmado, 03:31 a 04:21' })
+  expect(within(aparicao).getByText('não confirmado')).toBeTruthy()
+  expect(screen.getByRole('complementary', { name: 'Inspetor' }).textContent).not.toMatch(/\d\s*%/)
+
+  await usuario.hover(within(pessoa).getByText('não confirmado'))
+  expect((await screen.findAllByText(/não achou prova/)).length).toBeGreaterThan(0)
+})

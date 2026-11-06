@@ -72,10 +72,19 @@ const ALTURA_ESTIMADA: Record<Linha['tipo'], number> = { item: 44, pessoa: 52, o
 
 const tempos = (i: Intervalo): string => `${relogio(i.inicio_ms)}–${relogio(i.fim_ms)}`
 
+/** O selo do palpite sem prova, quando o nome é um. */
+const naoConfirmado = (selos: Selo[]): Selo | undefined => selos.find((s) => s.tipo === 'nao_confirmado')
+
+/** O nome e, no palpite, ", não confirmado": o leitor de tela ouve o selo junto do nome. */
+const comSelo = (titulo: string, selos: Selo[]): string => {
+  const selo = naoConfirmado(selos)
+  return selo ? `${titulo}, ${selo.rotulo}` : titulo
+}
+
 const nomeDoItem = (i: ItemDoPainel): string =>
   i.tipo === 'fala'
     ? `${i.linhas[0] ? `${i.linhas[0]}: ` : ''}${i.titulo}, ${relogio(i.inicio_ms)}`
-    : `${i.titulo}, ${relogio(i.inicio_ms)} a ${relogio(i.fim_ms)}`
+    : `${comSelo(i.titulo, i.selos)}, ${relogio(i.inicio_ms)} a ${relogio(i.fim_ms)}`
 
 const casa = (texto: string, filtro: string) => !filtro || nomeNormalizado(texto).includes(filtro)
 const textoDoItem = (i: ItemDoPainel) => [i.titulo, i.rotulo ?? '', ...i.linhas].join(' ')
@@ -540,6 +549,7 @@ function ItemDaLista({
           <span className={cn('block text-sm leading-snug', item.tipo === 'fala' ? 'line-clamp-3' : 'truncate', item.titulo === NAO_IDENTIFICADO && 'text-muted-foreground italic')}>
             {item.tipo === 'texto' && item.rotulo && <span className="mr-1.5 text-xs font-medium text-muted-foreground">{item.rotulo}</span>}
             {item.titulo}
+            {item.tipo === 'aparicao' && <SeloNaLinha selos={item.selos} className="ml-1.5" />}
           </span>
           {apoio.map((l) => (
             <span key={l} className={cn('block text-xs text-muted-foreground', item.tipo === 'pauta' ? 'line-clamp-2' : 'truncate')}>
@@ -585,13 +595,16 @@ function LinhaDaPessoa({
     <button
       type="button"
       aria-expanded={linha.aberta}
-      aria-label={`${linha.nome}, ${quantas}`}
+      aria-label={`${comSelo(linha.nome, linha.aparicoes[0].selos)}, ${quantas}`}
       onClick={aoAlternar}
       className={cn('relative flex w-full items-center gap-2 border-b border-border/60 px-3 py-1.5 text-left hover:bg-card', atual && ATUAL)}
     >
       <Miniatura caminho={linha.aparicoes.find((a) => a.quadro)?.quadro} urlDoQuadro={urlDoQuadro} className="size-9 rounded-sm" />
       <span className="min-w-0 flex-1">
-        <span className={cn('block truncate text-sm font-medium', semNome && 'font-normal text-muted-foreground italic')}>{linha.nome}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className={cn('truncate text-sm font-medium', semNome && 'font-normal text-muted-foreground italic')}>{linha.nome}</span>
+          <SeloNaLinha selos={linha.aparicoes[0].selos} />
+        </span>
         {linha.apoio && <span className="block truncate text-xs text-muted-foreground">{linha.apoio}</span>}
         <Presenca ocorrencias={linha.aparicoes} duracaoMs={duracaoMs} />
       </span>
@@ -749,6 +762,7 @@ function Agora({
               >
                 <Miniatura caminho={p.quadro} urlDoQuadro={urlDoQuadro} className="h-full w-11 rounded-l-sm rounded-r-none" />
                 <span className={cn('max-w-36 truncate', p.titulo === NAO_IDENTIFICADO && 'text-muted-foreground italic')}>{p.titulo}</span>
+                <SeloNaLinha selos={p.selos} />
               </button>
             ))}
           </div>
@@ -820,6 +834,25 @@ function Agora({
 }
 
 // ---------- detalhe ----------
+
+/**
+ * O "não confirmado" ao lado do nome, dentro do botão da linha: só texto, com a dica no ponteiro. O foco
+ * fica no botão, que já diz o selo no nome; a dica pelo teclado está no selo do detalhe.
+ */
+function SeloNaLinha({ selos, className }: { selos: Selo[]; className?: string }) {
+  const selo = naoConfirmado(selos)
+  if (!selo) return null
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={cn('inline-flex h-4 shrink-0 items-center rounded-xs border border-strong px-1 text-2xs whitespace-nowrap text-muted-foreground', className)}>
+          {selo.rotulo}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent collisionPadding={8} className="max-w-64">{selo.dica}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 function SeloDaProva({ selo, aoSaltar }: { selo: Selo; aoSaltar: (ms: number) => void }) {
   const base = 'inline-flex h-5 items-center rounded-xs border border-strong px-1.5 text-xs'
