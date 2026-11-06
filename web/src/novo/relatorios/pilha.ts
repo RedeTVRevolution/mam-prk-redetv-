@@ -13,11 +13,17 @@ const COMECO = (chave: string): Estado => ({ chave, cursores: [""], aberta: null
 /**
  * A página da tabela e a linha aberta. A página é a pilha dos cursores já percorridos (o do topo
  * é o da página atual, "" a primeira), então voltar não guarda nada além disso. Quando a `chave`
- * (os filtros) muda, tudo recomeça, sem efeito: o estado de outra chave nem é lido.
+ * (os filtros) muda, tudo recomeça, sem efeito.
  */
 export function useTabelaPaginada(chave: string) {
-  const [estado, definir] = useState<Estado>(COMECO(chave));
-  const atual = estado.chave === chave ? estado : COMECO(chave);
+  const [estado, definir] = useState<Estado>(() => COMECO(chave));
+  let atual = estado;
+  if (estado.chave !== chave) {
+    // Grava o recomeço (ajuste durante o render, sem efeito): só mascarar o estado velho
+    // faria A → B → A voltar à página e à linha aberta de A.
+    atual = COMECO(chave);
+    definir(atual);
+  }
   return {
     cursor: atual.cursores[atual.cursores.length - 1],
     pagina: atual.cursores.length,
