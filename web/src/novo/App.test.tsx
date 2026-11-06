@@ -160,19 +160,19 @@ test('quem só vê o painel começa nele', async () => {
 })
 
 test('a tela que não migrou leva à mesma URL na interface atual', async () => {
-  history.replaceState(null, '', '/relatorios/marcas?de=2026-01-01')
+  permissoes = ['decupagem.ver', 'usuarios.gerir']
+  history.replaceState(null, '', '/admin/usuarios?x=1')
   const usuario = userEvent.setup()
   render(<App autenticador={await comSessao()} />)
 
   const link = await screen.findByRole('link', { name: /Abrir na interface atual/ })
-  expect(link.getAttribute('href')).toBe('/relatorios/marcas?de=2026-01-01&interface=atual')
+  expect(link.getAttribute('href')).toBe('/admin/usuarios?x=1&interface=atual')
 
-  // O trilho navega sem recarregar, e o link acompanha.
-  await usuario.click(trilho().getByRole('link', { name: 'Tempo de tela' }))
-  expect(location.pathname).toBe('/relatorios/tempo-de-tela')
-  expect(screen.getByRole('link', { name: /Abrir na interface atual/ }).getAttribute('href')).toBe(
-    '/relatorios/tempo-de-tela?interface=atual',
-  )
+  // Quem navega sem recarregar leva o link junto: o trilho vai ao acervo e a Administração volta.
+  await usuario.click(trilho().getByRole('link', { name: 'Acervo' }))
+  await usuario.click(trilho().getByRole('link', { name: 'Administração' }))
+  expect(location.pathname).toBe('/admin')
+  expect(screen.getByRole('link', { name: /Abrir na interface atual/ }).getAttribute('href')).toBe('/admin?interface=atual')
 })
 
 test('sair pelo menu da conta volta ao login e apaga a sessão', async () => {

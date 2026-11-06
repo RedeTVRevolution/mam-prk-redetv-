@@ -16,6 +16,7 @@ import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 
 // Cada tela chega no próprio pedaço: os gráficos não pesam na casca.
 const PainelDaDiretoria = lazy(() => import('./painel/PainelDaDiretoria.tsx'))
+const TempoDeTela = lazy(() => import('./relatorios/TempoDeTela.tsx'))
 
 /** O que a área de trabalho mostra. As telas que ainda não migraram levam à interface atual. */
 function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[] }) {
@@ -37,6 +38,13 @@ function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[]
     return (
       <Suspense>
         <PainelDaDiretoria aba={rota.aba} filtros={rota.filtros} />
+      </Suspense>
+    )
+  }
+  if (rota.tipo === 'tempo_de_tela') {
+    return (
+      <Suspense>
+        <TempoDeTela filtros={rota.filtros} />
       </Suspense>
     )
   }
