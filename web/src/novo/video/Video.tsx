@@ -6,6 +6,7 @@ import {
   IconExternalLink,
   IconEye,
   IconFileDownload,
+  IconHistory,
   IconLayoutSidebarRightExpand,
   IconLink,
   IconMaximize,
@@ -27,13 +28,14 @@ import {
   aindaIndexando,
   editorDeNovaAparicao,
   editorDoItem,
+  itemDaCorrecao,
   marcasDosItens,
   motivoDaRemocao,
   type Pedido,
   pedidoDeRemocao,
   podeRemover,
 } from '../../catalogacao.ts'
-import type { Pauta, Sugestao } from '../../decupagem.ts'
+import type { ItemDoHistorico, Pauta, Sugestao } from '../../decupagem.ts'
 import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from '../../pautas.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
 import { naInterfaceAtual } from '../../interface.ts'
@@ -52,6 +54,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { AvisoDeFalha, BotaoComDica, BotaoDeIcone } from './comum.tsx'
 import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
+import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import type { ResumoDaPassada } from '../../passadas.ts'
 import { Sugestoes } from './Sugestoes.tsx'
 import { type Revisao, useRevisao } from './useRevisao.ts'
@@ -132,6 +135,9 @@ export function Video({
   const [falhaDaMidia, setFalhaDaMidia] = useState<string | null>(null)
   const [dialogo, setDialogo] = useState<DialogoDoVideo | null>(null)
   const [comparandoCom, setComparandoCom] = useState<string | null>(null)
+  // A gaveta das correções toma o lugar do inspetor; a aba em que ficou vale para a próxima abertura.
+  const [gavetaAberta, setGavetaAberta] = useState(false)
+  const [abaDaGaveta, setAbaDaGaveta] = useState<AbaDaGaveta>('historico')
   // Juntar e dividir pautas: os ids marcados e o formulário aberto.
   const [pautasMarcadas, setPautasMarcadas] = useState<ReadonlySet<string>>(new Set())
   const [estrutura, setEstrutura] = useState<{ modo: 'juntar'; pautas: Pauta[] } | { modo: 'dividir'; pauta: Pauta; em_ms: number } | null>(null)
@@ -175,6 +181,15 @@ export function Video({
     retry: false,
     staleTime: Infinity,
     refetchInterval: (q) => (q.state.data && aindaIndexando(q.state.data) ? intervaloDaIndexacaoMs : false),
+  })
+
+  // A fila das correções que não casaram depois de reprocessar: um pedido à parte, para o histórico não depender dela.
+  const fila = useQuery({
+    queryKey: chaveDoVideo(job.id, 'fila'),
+    queryFn: () => cliente.fila(),
+    enabled: pode.editar && !!d,
+    retry: false,
+    staleTime: Infinity,
   })
 
   const itens = useMemo(() => (d ? itensDoPainel(d) : []), [d])
@@ -341,6 +356,7 @@ export function Video({
     setSecao(SECAO_DO_TIPO[tipoDaChave(chave)])
     setDetalhe(true)
     setInspetorAberto(true)
+    setGavetaAberta(false)
     const item = itens.find((i) => i.chave === chave)
     if (saltar && item) saltarParaMs(item.inicio_ms)
   }
@@ -430,10 +446,47 @@ export function Video({
     return falha
   }
 
+  // ---------- gaveta das correções ----------
+
+  // O número do botão é o que a pessoa pode resolver: a fila e, para quem aprova, as pendentes.
+  const aResolver = (fila.data?.length ?? 0) + (pode.aprovar ? (historico.data?.filter((h) => h.estado === 'pendente').length ?? 0) : 0)
+
+  // Os formulários moram no inspetor: abrir um deles (F2, Del, juntar, dividir, renomear…) traz o inspetor de volta.
+  const comFormulario = !!(edicao || estrutura)
+  const [tinhaFormulario, setTinhaFormulario] = useState(false)
+  if (comFormulario !== tinhaFormulario) {
+    setTinhaFormulario(comFormulario)
+    if (comFormulario) setGavetaAberta(false)
+  }
+
+  function alternarGaveta() {
+    setComparandoCom(null)
+    setGavetaAberta((a) => !a)
+  }
+
+  /** Da gaveta ao inspetor: seleciona o item da correção, abre a seção dele e salta o player. */
+  function saltarAoItemDaCorrecao(correcao: ItemDoHistorico): boolean {
+    const item = d ? itemDaCorrecao(d, itens, correcao) : undefined
+    if (!item) return false
+    selecionar(item.chave)
+    setSecao(SECAO_DO_TIPO[tipoDaChave(item.chave)])
+    saltarParaMs(item.inicio_ms)
+    return true
+  }
+
+  /** "Refazer à mão" na fila: fecha a gaveta e leva à lista de pautas, no modo de revisão. */
+  function refazerPautasAMao() {
+    setGavetaAberta(false)
+    setSecao('pautas')
+    if (!revisao.revisando) revisao.alternar()
+    mostrarAviso('Marque as pautas (M) e junte (U), ou divida (D).')
+  }
+
   /** Uma correção, a fusão ou a renomeação mudaram a decupagem: busca de novo, com o histórico. */
   function recarregar() {
     void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
     void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
+    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'fila') })
   }
 
   /** Grava os pedidos em sequência com o motivo; devolve o erro que fica no formulário, ou `null`. */
@@ -712,7 +765,13 @@ export function Video({
             revisao={revisao}
             passadas={passadas.data ?? []}
             comparandoCom={comparandoCom}
-            aoComparar={setComparandoCom}
+            aoComparar={(id) => {
+              setGavetaAberta(false)
+              setComparandoCom(id)
+            }}
+            gavetaAberta={gavetaAberta}
+            aResolver={aResolver}
+            aoAlternarGaveta={alternarGaveta}
             aoAbrirDialogo={setDialogo}
           />
           {job.etapa_atual && (job.estado === 'analisando' || finalizando(job)) && (
@@ -825,6 +884,21 @@ export function Video({
         </section>
         {comparandoCom ? (
           <ComparacaoDePassada api={cliente} id={job.id} passadaId={comparandoCom} aoSaltar={saltarParaMs} aoFechar={() => setComparandoCom(null)} />
+        ) : gavetaAberta && pode.editar ? (
+          <Gaveta
+            aba={abaDaGaveta}
+            aoTrocarAba={setAbaDaGaveta}
+            aoFechar={() => setGavetaAberta(false)}
+            historico={historico.data ?? []}
+            fila={fila.data ?? []}
+            podeAprovar={pode.aprovar}
+            api={cliente}
+            catalogo={catalogo.data ?? null}
+            falhaAoCarregar={historico.isError || fila.isError}
+            aoMudar={recarregar}
+            aoSaltar={saltarAoItemDaCorrecao}
+            aoRefazerAMao={refazerPautasAMao}
+          />
         ) : inspetorAberto ? (
           <Inspetor
             decupagem={d}
@@ -870,7 +944,7 @@ export function Video({
                       <span className="mr-auto">
                         {marcadasNaDecupagem} {marcadasNaDecupagem === 1 ? 'pauta marcada' : 'pautas marcadas'} para juntar
                       </span>
-                      <BotaoComDica dica="U" variant="outline" onClick={juntarMarcadas}>
+                      <BotaoComDica dica="U" variant="secondary" onClick={juntarMarcadas}>
                         Juntar as pautas marcadas
                       </BotaoComDica>
                       <Button type="button" size="sm" variant="ghost" onClick={() => setPautasMarcadas(new Set())}>
@@ -930,6 +1004,9 @@ function BarraDoVideo({
   passadas,
   comparandoCom,
   aoComparar,
+  gavetaAberta,
+  aResolver,
+  aoAlternarGaveta,
   aoAbrirDialogo,
 }: {
   job: Job
@@ -941,6 +1018,9 @@ function BarraDoVideo({
   passadas: ResumoDaPassada[]
   comparandoCom: string | null
   aoComparar: (id: string | null) => void
+  gavetaAberta: boolean
+  aResolver: number
+  aoAlternarGaveta: () => void
   aoAbrirDialogo: (d: DialogoDoVideo) => void
 }) {
   const api = useApi()
@@ -989,6 +1069,16 @@ function BarraDoVideo({
         <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
           {passadas.length > 0 && <SeletorDePassada passadas={passadas} valor={comparandoCom} aoEscolher={aoComparar} />}
           {pode.editar && concluido && <ControlesDaRevisao revisao={revisao} />}
+          {pode.editar && concluido && (
+            <BotaoDeIcone rotulo="Histórico" ativo={gavetaAberta} className="relative" onClick={aoAlternarGaveta}>
+              <IconHistory size={18} stroke={1.75} aria-hidden />
+              {aResolver > 0 && (
+                <span role="img" aria-label={`${aResolver} a resolver`} className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-andamento px-1 text-[10px] leading-none font-semibold text-background">
+                  {aResolver}
+                </span>
+              )}
+            </BotaoDeIcone>
+          )}
           {concluido && (
             <BotaoDeIcone rotulo="Baixar vídeo" aria-busy={baixando === 'video'} disabled={baixando === 'video'} onClick={() => void baixar('video')}>
               <IconDownload size={18} stroke={1.75} aria-hidden />
