@@ -24,6 +24,8 @@ const VAZIO = { programa: [], mes: [], pessoa: [], marca: [], tipo: [] }
 const cursoresPedidos: (string | null)[] = []
 // Os cursores que a API não aceita mais (vencidos): a resposta é 422.
 let vencidos = new Set<string>()
+// Como na API: cada busca sem cursor guarda uma lista nova, e o cursor (`L1.19`) leva o id dela.
+let listas = 0
 // Os concluídos que o aviso do #404 lê: `pendente` é um vídeo ainda entrando na busca.
 let indexacoes: string[] = []
 
@@ -39,12 +41,13 @@ const servidor = setupServer(
     const cursor = p.get('cursor')
     cursoresPedidos.push(cursor)
     if (cursor && vencidos.has(cursor)) return HttpResponse.json({ detail: 'Cursor inválido' }, { status: 422 })
-    const inicio = cursor ? Number(cursor.slice(1)) + 1 : 0
+    const [lista, ultimo] = cursor ? cursor.slice(1).split('.').map(Number) : [++listas, -1]
+    const inicio = ultimo + 1
     const pagina = videos.slice(inicio, inicio + Number(p.get('limite')))
     const ha = inicio + pagina.length < videos.length
     return HttpResponse.json(
       { entendida: { evidencias: ['fala'], programa: null, desde: null, ate: null }, videos: pagina, sem_aparicoes: [], plano_b: false, facetas: VAZIO },
-      { headers: ha ? { 'X-Proximo-Cursor': `c${inicio + pagina.length - 1}` } : {} },
+      { headers: ha ? { 'X-Proximo-Cursor': `L${lista}.${inicio + pagina.length - 1}` } : {} },
     )
   }),
 )
@@ -54,6 +57,7 @@ afterEach(() => {
   servidor.resetHandlers()
   cursoresPedidos.length = 0
   vencidos = new Set()
+  listas = 0
   indexacoes = []
 })
 afterAll(() => servidor.close())
@@ -88,37 +92,36 @@ async function descer(r: Awaited<ReturnType<typeof montar>>['result'], ate: numb
   }
 }
 
-test('desce pelo X-Proximo-Cursor com 6 páginas na memória e sobe pelos cursores guardados', async () => {
-  const { result } = await montar()
+test('desce pelo X-Proximo-Cursor com todas as páginas na memória; subir não refaz a busca', async () => {
+  const { result, consultas } = await montar()
   await descer(result, 7)
 
   expect(result.current.item(159)?.video.job_id).toBe('v159')
   expect(result.current.haMais).toBe(false)
-  // As páginas 0 e 1 saíram da memória: o lugar delas fica, sem a cena.
-  expect(result.current.item(39)).toBeNull()
-  expect(result.current.primeiraNaMemoria).toBe(false)
-  expect(cursoresPedidos).toEqual([null, 'c19', 'c39', 'c59', 'c79', 'c99', 'c119', 'c139'])
+  expect(cursoresPedidos).toEqual([null, 'L1.19', 'L1.39', 'L1.59', 'L1.79', 'L1.99', 'L1.119', 'L1.139'])
+  // A API corta em 500 vídeos (25 páginas): nenhuma sai da memória, e não há página antes da 0.
+  expect(result.current.item(0)?.video.job_id).toBe('v0')
+  expect(result.current.primeiraNaMemoria).toBe(true)
 
   cursoresPedidos.length = 0
-  act(() => result.current.aoVer(42, 50))
-  await waitFor(() => expect(result.current.item(39)?.video.job_id).toBe('v39'))
-  expect(cursoresPedidos).toEqual(['c19'])
   act(() => result.current.aoVer(22, 30))
-  await waitFor(() => expect(result.current.item(0)?.video.job_id).toBe('v0'))
-  expect(cursoresPedidos).toEqual(['c19', null])
-  expect(result.current.primeiraNaMemoria).toBe(true)
+  act(() => result.current.aoVer(0, 10))
+  await new Promise((r) => setTimeout(r, 50))
+  expect(cursoresPedidos).toEqual([])
+  // Fica no cache pela validade da busca, não pelos 30 s das outras consultas.
+  expect(consultas.getQueryCache().findAll({ queryKey: ['busca'] })[0].options.gcTime).toBe(5 * 60_000)
 })
 
 test('o 422 de um cursor vencido recomeça a busca do topo, sem mostrar erro', async () => {
   const { result } = await montar()
   const doTopo = result.current.quantidade
-  vencidos = new Set(['c19'])
+  vencidos = new Set(['L1.19'])
 
   act(() => result.current.aoVer(15, 20))
 
   await waitFor(() => expect(result.current.recomecos).toBe(1))
   await waitFor(() => expect(result.current.item(0)?.video.job_id).toBe('v0'))
-  expect(cursoresPedidos).toEqual([null, 'c19', null])
+  expect(cursoresPedidos).toEqual([null, 'L1.19', null])
   expect(result.current.erro).toBeNull()
   expect(result.current.erroAoPaginar).toBeNull()
   expect(result.current.quantidade).toBe(doTopo)

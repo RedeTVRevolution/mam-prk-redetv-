@@ -94,6 +94,10 @@ export interface OpcoesDasPaginas<P, I> {
   /** Quantos itens a página ocupa na lista: o lugar das páginas que saíram da memória. */
   tamanho: (pagina: P) => number
   staleTime?: number
+  /** Quanto a consulta fica no cache depois de sair da tela; sem ele, os 30 s do cliente. */
+  gcTime?: number
+  /** Páginas na memória; `0`, todas (a lista da API já tem teto). */
+  paginasNaMemoria?: number
   enabled?: boolean
   /** A busca não se repete sozinha: um 429 ou um 504 repetido só piora. */
   retry?: false
@@ -142,8 +146,9 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
       const n = lista.indexOf(primeiroParam)
       return n > 0 ? lista[n - 1] : undefined
     },
-    maxPages: PAGINAS_NA_MEMORIA,
+    maxPages: opcoes.paginasNaMemoria ?? PAGINAS_NA_MEMORIA,
     staleTime: opcoes.staleTime,
+    ...(opcoes.gcTime !== undefined && { gcTime: opcoes.gcTime }),
     enabled: opcoes.enabled,
     ...(opcoes.retry === false && { retry: false }),
     // Um recomeço da mesma consulta não mostra as páginas de antes, com os cursores vencidos.

@@ -8,7 +8,11 @@ import { usePaginas } from '../paginas.ts'
 /** Vídeos por página na busca por texto (o padrão da API) e planos na por imagem e nos parecidos. */
 const VIDEOS_POR_PAGINA = 20
 const PLANOS_POR_PAGINA = 50
-/** O cursor da busca vale 15 min: voltar do vídeo dentro de 5 não refaz a busca. */
+/**
+ * A busca fica 5 min no cache depois de sair da tela (o cursor vale 15): voltar do vídeo nesse
+ * tempo não a refaz. Enquanto está no cache, não se refaz sozinha: refazer pediria de novo todas
+ * as páginas da memória, contra o limite de buscas por minuto.
+ */
 const VALIDADE = 5 * 60_000
 
 /** Uma cena da grade: um momento, com o vídeo dele. */
@@ -63,7 +67,11 @@ export function useBusca(pedido: PedidoDaBusca | null) {
     proximo: proximoDaBusca,
     itens: pedido?.tipo === 'texto' ? cenasDaBusca : cenasDosPlanos,
     tamanho: pedido?.tipo === 'texto' ? tamanhoNaBusca : tamanhoNosPlanos,
-    staleTime: VALIDADE,
+    staleTime: Infinity,
+    gcTime: VALIDADE,
+    // Todas as páginas ficam: a API corta em 500 vídeos (25 páginas de 20). Sem página tirada do
+    // alto, subir não pede a primeira de novo, que abriria uma lista nova na API (outro cursor).
+    paginasNaMemoria: 0,
     enabled: pedido !== null,
     retry: false,
     manterAnterior: (anterior) => termo !== null && anterior[1] === 'texto' && anterior[2] === termo,
