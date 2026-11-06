@@ -80,6 +80,8 @@ export function ChipsDasFaixas({
 }
 
 /** O bloco sob o ponteiro: o mais curto que cobre o tempo (com a folga), num laço só sobre os blocos em ordem. */
+// ponytail: laço linear a cada pointermove (2.500 falas custaram até 68 ms com a CPU 4×); se uma faixa
+// passar de ~10 mil blocos, buscar o início por bisseção no `inicio_ms`, que já vem em ordem.
 function blocoNoTempo(blocos: BlocoDaFaixa[], ms: number, folgaMs: number): BlocoDaFaixa | null {
   let achado: BlocoDaFaixa | null = null
   for (const b of blocos) {

@@ -710,7 +710,7 @@ function BarraDoVideo({
                   Pipeline {versaoDoPipeline ?? 'anterior à versão'}
                 </span>
               </TooltipTrigger>
-              <TooltipContent className="max-w-md font-mono whitespace-pre-wrap">
+              <TooltipContent collisionPadding={8} className="max-w-md font-mono whitespace-pre-wrap">
                 {manifesto ? JSON.stringify(manifesto, null, 1) : 'Decupagem feita antes da versão fixa do pipeline'}
               </TooltipContent>
             </Tooltip>
@@ -739,7 +739,7 @@ function BarraDoVideo({
                   <IconEye size={18} stroke={1.75} aria-hidden />
                 </a>
               </TooltipTrigger>
-              <TooltipContent>Quem acessou</TooltipContent>
+              <TooltipContent collisionPadding={8}>Quem acessou</TooltipContent>
             </Tooltip>
           )}
           <DropdownMenu>
@@ -755,7 +755,7 @@ function BarraDoVideo({
                   </button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent>Mais ações</TooltipContent>
+              <TooltipContent collisionPadding={8}>Mais ações</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" className="w-64">
               {podeReprocessar && (
@@ -870,7 +870,7 @@ function Transporte({
             {tocando ? <IconPlayerPause size={18} stroke={2} aria-hidden /> : <IconPlayerPlay size={18} stroke={2} aria-hidden />}
           </button>
         </TooltipTrigger>
-        <TooltipContent>{tocando ? 'Pausar' : 'Tocar'} (Espaço)</TooltipContent>
+        <TooltipContent collisionPadding={8}>{tocando ? 'Pausar' : 'Tocar'} (Espaço)</TooltipContent>
       </Tooltip>
       <BotaoDeIcone rotulo="Avançar 5 s" atalho="Shift →" onClick={() => aoSaltar(SALTO_LONGO_S)}>
         <IconArrowForwardUp size={18} stroke={1.75} aria-hidden />
@@ -906,7 +906,7 @@ function Transporte({
               {`TC ${tc}`}
             </button>
           </TooltipTrigger>
-          <TooltipContent>Copiar o timecode de origem</TooltipContent>
+          <TooltipContent collisionPadding={8}>Copiar o timecode de origem</TooltipContent>
         </Tooltip>
       )}
       <span role="status" className="ml-2 shrink-0 text-xs whitespace-nowrap text-muted-foreground">

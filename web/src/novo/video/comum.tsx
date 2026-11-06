@@ -31,7 +31,7 @@ export function BotaoDeIcone({
           {children}
         </button>
       </TooltipTrigger>
-      <TooltipContent>
+      <TooltipContent collisionPadding={8}>
         {rotulo}
         {atalho && <Kbd>{atalho}</Kbd>}
       </TooltipContent>

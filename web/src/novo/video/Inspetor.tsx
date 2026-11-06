@@ -832,7 +832,7 @@ function SeloDaProva({ selo, aoSaltar }: { selo: Selo; aoSaltar: (ms: number) =>
             {selo.rotulo}
           </span>
         </TooltipTrigger>
-        <TooltipContent className="max-w-64">{selo.dica}</TooltipContent>
+        <TooltipContent collisionPadding={8} className="max-w-64">{selo.dica}</TooltipContent>
       </Tooltip>
     )
   }
