@@ -67,9 +67,12 @@ export function consultaDasEntradas(f: FiltrosDasEntradas, cursor: string | null
   return p.toString()
 }
 
+// Um formatador só: o `toLocaleDateString` com fuso monta um a cada chamada, e a lista chama por linha a cada desenho.
+const DIA_EM_SAO_PAULO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' })
+
 /** O dia do envio em São Paulo, `AAAA-MM-DD`. */
 function diaDoEnvio(job: Job): string {
-  return new Date(job.criado_em).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+  return DIA_EM_SAO_PAULO.format(new Date(job.criado_em))
 }
 
 /**
@@ -78,6 +81,7 @@ function diaDoEnvio(job: Job): string {
  */
 export function casaComOsFiltrosDoCliente(job: Job, f: FiltrosDasEntradas): boolean {
   if (f.por === 'pessoas' && job.enviado_por?.tipo !== 'pessoa') return false
+  if (!f.de && !f.ate) return true
   const dia = diaDoEnvio(job)
   return (!f.de || dia >= f.de) && (!f.ate || dia <= f.ate)
 }
