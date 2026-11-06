@@ -44,9 +44,12 @@ import { criarCacheDeQuadros } from '../../quadros.ts'
 import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useApi } from '../consultas.ts'
+import { Button } from '../ui/button.tsx'
+import { Kbd } from '../ui/kbd.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { AvisoDeFalha, BotaoDeIcone } from './comum.tsx'
+import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './Correcao.tsx'
 import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
@@ -71,6 +74,7 @@ const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
 const GRUPO_DO_INSPETOR = 'Inspetor'
 const GRUPO_DA_CORRECAO = 'Correção'
+const GRUPO_DA_CATALOGACAO = 'Catalogação'
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 const tecla = (e: KeyboardEvent, ...teclas: string[]): boolean => teclas.includes(e.key.toLowerCase())
@@ -178,6 +182,16 @@ export function Video({
     clearTimeout(fimDoAviso.current)
     fimDoAviso.current = setTimeout(() => setAviso(null), AVISO_MS)
   }
+
+  const revisao = useRevisao({
+    id: job.id,
+    pode: pode.editar,
+    decupagemPronta: !!d,
+    catalogo: catalogo.data,
+    historico: historico.data,
+    mostrarAviso,
+    aoAlternar: () => {},
+  })
 
   // Outro `?t=` no mesmo vídeo salta o player.
   const tAnterior = useRef(t)
@@ -471,6 +485,26 @@ export function Video({
       casa: (e) => e.key === ']',
       executar: () => setInspetorAberto((a) => !a),
     },
+    ...(pode.editar
+      ? [
+          {
+            tecla: 'E',
+            acao: 'Revisar o vídeo e, dentro da revisão, aprová-la',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'e'),
+            executar: revisao.alternar,
+          },
+          {
+            tecla: 'Ctrl + Z',
+            acao: 'Desfazer a última correção sua neste vídeo',
+            grupo: GRUPO_DA_CATALOGACAO,
+            ctrl: true,
+            // Ctrl+Shift+Z é o refazer de outros programas: aqui não desfaz.
+            casa: (e: KeyboardEvent) => tecla(e, 'z') && !e.shiftKey,
+            executar: () => void revisao.desfazer(),
+          },
+        ]
+      : []),
     ...(d && catalogoPronto
       ? [
           {
@@ -511,6 +545,7 @@ export function Video({
             versaoDoPipeline={d ? (d.versao_pipeline ?? null) : undefined}
             manifesto={d?.manifesto_do_pipeline}
             pode={pode}
+            revisao={revisao}
             aoAbrirDialogo={setDialogo}
           />
           {job.etapa_atual && (job.estado === 'analisando' || finalizando(job)) && (
@@ -676,6 +711,7 @@ function BarraDoVideo({
   versaoDoPipeline,
   manifesto,
   pode,
+  revisao,
   aoAbrirDialogo,
 }: {
   job: Job
@@ -683,6 +719,7 @@ function BarraDoVideo({
   versaoDoPipeline: string | null | undefined
   manifesto: unknown
   pode: Permissoes
+  revisao: Revisao
   aoAbrirDialogo: (d: DialogoDoVideo) => void
 }) {
   const api = useApi()
@@ -729,6 +766,7 @@ function BarraDoVideo({
           )}
         </div>
         <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
+          {pode.editar && concluido && <ControlesDaRevisao revisao={revisao} />}
           {concluido && (
             <BotaoDeIcone rotulo="Baixar vídeo" aria-busy={baixando === 'video'} disabled={baixando === 'video'} onClick={() => void baixar('video')}>
               <IconDownload size={18} stroke={1.75} aria-hidden />
@@ -801,6 +839,34 @@ function BarraDoVideo({
         />
       )}
     </>
+  )
+}
+
+/** Revisar (E) e, dentro da revisão, o que só ela tem: Catalogando, Desfazer (Ctrl+Z) e Aprovar Revisão (E). */
+function ControlesDaRevisao({ revisao }: { revisao: Revisao }) {
+  const { revisando } = revisao
+  return (
+    <div className="mr-1 flex shrink-0 items-center gap-1">
+      {revisando && (
+        <>
+          <span className="hidden text-xs font-semibold text-andamento sm:inline">Catalogando</span>
+          <BotaoDeIcone rotulo="Desfazer" atalho="Ctrl+Z" disabled={!revisao.temParaDesfazer} onClick={() => void revisao.desfazer()}>
+            <IconArrowBackUp size={18} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+        </>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="sm" variant={revisando ? 'default' : 'secondary'} onClick={revisao.alternar}>
+            {revisando ? 'Aprovar Revisão' : 'Revisar'}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent collisionPadding={8}>
+          {revisando ? 'Aprovar Revisão' : 'Revisar'}
+          <Kbd>E</Kbd>
+        </TooltipContent>
+      </Tooltip>
+    </div>
   )
 }
 
