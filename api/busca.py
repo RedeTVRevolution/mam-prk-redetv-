@@ -31,8 +31,9 @@ from api.entendimento_da_consulta import (
     ConsultaEntendida,
     ModelArmor,
     entender,
+    termo_da_foto,
 )
-from api.gemini import Transporte
+from api.gemini import ErroHttp, Transporte
 from api.indice_da_busca import (
     Consulta,
     Filtros,
@@ -96,15 +97,13 @@ class EmbeddingDaConsulta(Protocol):
 
     def vetor_do_texto(self, texto: str) -> list[float]: ...
 
-    def vetor_da_imagem(self, jpeg: bytes) -> list[float]: ...
-
 
 class BuscaCancelada(Exception):
     """A rota desistiu (passou do prazo): o trabalho que sobra para em vez de seguir rodando."""
 
 
 class BuscaPorImagemIndisponivel(Exception):
-    """Sem índice do quadro-chave ou sem o embedding: a imagem não vira vetor."""
+    """O modelo da consulta está fora ou não achou objeto na foto: a imagem não vira termo."""
 
 
 class PlanoSemVetor(Exception):
@@ -182,6 +181,9 @@ class Entendida(BaseModel):
     # A busca usou o vetor do quadro. Falso no modo visual quando o índice do quadro está
     # desligado ou o embedding falhou: a tela avisa que veio a busca comum.
     visual: bool = False
+    # Só na busca por foto (#443): o termo que o modelo deu para o objeto e que a busca usou,
+    # como se tivesse sido digitado. A tela o mostra para a pessoa poder refinar digitando.
+    termo_da_foto: str | None = None
 
 
 @dataclass(frozen=True)
@@ -420,14 +422,17 @@ class Busca:
         e corta a página, sem modelo, índice nem ranking (`CursorInvalido` se a lista não
         existe, venceu, é de outro dono ou de outra consulta).
 
-        `imagem` (JPEG já regravado, #270) busca pelo vetor do quadro, sem entender texto:
-        só os filtros de `ajustes` valem; sem embedding ou se ele falhar, levanta
-        `BuscaPorImagemIndisponivel`. `parecidos` (#271) é o registro de um plano e o
-        vetor do quadro dele, já no índice: busca do mesmo modo, sem embedding, e o
-        próprio registro fica fora."""
+        `imagem` (JPEG já regravado, #270): o modelo da consulta dá o termo do objeto da
+        foto (#443) e a busca segue como se a pessoa o tivesse digitado, com o mesmo
+        entendimento, Model Armor e ranking; só os filtros de `ajustes` valem. Sem o modelo,
+        se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
+        digitado não há plano B. `parecidos` (#271) é o registro de um plano e o vetor do
+        quadro dele, já no índice: busca pelo vetor, sem entender texto, e o próprio
+        registro fica fora."""
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
-        vetor_da_imagem = None
+        vetor_do_plano = None
+        termo_da_foto = None
         proprio = parecidos[0] if parecidos else None
         impressao = _impressao(
             texto=texto,
@@ -444,12 +449,12 @@ class Busca:
                 cursor, limite, dono, impressao, sistema, cancelado
             )
         if parecidos is not None:
-            vetor_da_imagem = parecidos[1]
-            entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
-        elif imagem is not None:
-            vetor_da_imagem = self._vetor_da_imagem(imagem)
+            vetor_do_plano = parecidos[1]
             entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
         else:
+            if imagem is not None:
+                _conferir(cancelado)
+                texto = termo_da_foto = self._termo_da_foto(imagem)
             entendida = _ajustada(
                 entender(
                     texto,
@@ -511,8 +516,8 @@ class Busca:
         # entendidos já filtram, e não entram no vetor.
         consulta_visual = _texto_da_busca(entendida) or texto
         vetor = (
-            vetor_da_imagem
-            if vetor_da_imagem is not None
+            vetor_do_plano
+            if vetor_do_plano is not None
             else self._vetor_da_consulta(consulta_visual)
             if visual
             else None
@@ -607,6 +612,7 @@ class Busca:
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
                 visual=vetor is not None,
+                termo_da_foto=entendida.saneada if termo_da_foto else None,
             ),
             videos=videos,
             sem_aparicoes=vazios,
@@ -794,14 +800,15 @@ class Busca:
             dono=dono,
         )
 
-    def _vetor_da_imagem(self, jpeg: bytes) -> list[float]:
-        if self._embedding is None:
-            raise BuscaPorImagemIndisponivel
+    def _termo_da_foto(self, jpeg: bytes) -> str:
         try:
-            return self._embedding.vetor_da_imagem(jpeg)
-        except Exception as e:
-            log.exception("vetor da imagem não calculado")
+            termo = termo_da_foto(jpeg, transporte=self._transporte)
+        except (ErroHttp, ValueError) as e:
+            log.warning("termo da foto não obtido (%s)", e)
             raise BuscaPorImagemIndisponivel from e
+        if not termo:
+            raise BuscaPorImagemIndisponivel
+        return termo
 
     def _vetor_da_consulta(self, texto: str) -> list[float] | None:
         """`None` sem embedding (índice do quadro desligado) ou se ele falhar: busca comum."""

@@ -45,6 +45,9 @@ function resultado(extra: object = {}) {
 }
 
 const plano = (inicio_ms: number, motivo: string, quadro: string) => ({ ...momento(inicio_ms, inicio_ms + 5_000, motivo), tipo: 'plano', quadro })
+const DA_FOTO = resultado({
+  entendida: { evidencias: ['imagem', 'objeto'], programa: null, desde: null, ate: null, visual: false, termo_da_foto: 'sandália vermelha' },
+})
 const PLANOS = resultado({
   entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null, visual: true },
   videos: [video('v1', [plano(724_000, 'Plano: rua molhada', 'quadros/plano-1.jpg'), plano(60_000, 'Plano: estúdio', 'quadros/plano-2.jpg')])],
@@ -63,7 +66,7 @@ const quadrosPedidos: string[] = []
 const fotos: { params: URLSearchParams; arquivo: File | null }[] = []
 const parecidos: URLSearchParams[] = []
 let resposta: () => Response = () => HttpResponse.json(resultado())
-let respostaDaFoto: () => Response = () => HttpResponse.json(PLANOS)
+let respostaDaFoto: () => Response = () => HttpResponse.json(DA_FOTO)
 let respostaDosParecidos: () => Response = () => HttpResponse.json(PLANOS)
 let jobs: JobApi[] = []
 let pedidosDoAcervo: URLSearchParams[] = []
@@ -117,7 +120,7 @@ afterEach(() => {
   jobs = []
   pedidosDoAcervo = []
   resposta = () => HttpResponse.json(resultado())
-  respostaDaFoto = () => HttpResponse.json(PLANOS)
+  respostaDaFoto = () => HttpResponse.json(DA_FOTO)
   respostaDosParecidos = () => HttpResponse.json(PLANOS)
 })
 afterAll(() => {
@@ -558,15 +561,18 @@ test('com tudo indexado (ou a indexação que falhou) não há aviso (#404)', as
 
 // A busca por imagem
 
-test('escolher a foto manda o arquivo em multipart e mostra a grade de planos', async () => {
+test('escolher a foto manda o arquivo em multipart e mostra as cenas e o termo que o modelo deu', async () => {
   const usuario = userEvent.setup()
   await abrir('/busca')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
 
-  expect(await screen.findByText('2 planos parecidos em 1 vídeo')).toBeTruthy()
+  expect(await screen.findByText('3 momentos em 2 vídeos')).toBeTruthy()
   expect(fotos).toHaveLength(1)
   expect(fotos[0].arquivo?.size).toBe(4)
-  expect(fotos[0].params.get('limite')).toBe('50')
+  expect(fotos[0].params.get('limite')).toBe('20')
+  expect(screen.getByText(/Buscando por:/).textContent).toBe('Buscando por: sandália vermelha')
+  // Como na busca por texto, voltam momentos de todos os tipos, não só planos.
+  expect(screen.getByText(/aquele sapato vermelho/)).toBeTruthy()
   // A grade abre o vídeo sem o termo.
   expect(screen.getByRole('link', { name: /^v1\.mp4 em 12:04$/ }).getAttribute('href')).toBe('/video/v1?t=724')
   expect(screen.getByText('pista.png')).toBeTruthy()
@@ -578,7 +584,7 @@ test('arrastar a foto para a página também busca', async () => {
   fireEvent.dragOver(alvo, { dataTransfer: { types: ['Files'], files: [] } })
   fireEvent.drop(alvo, { dataTransfer: { types: ['Files'], files: [foto()] } })
 
-  expect(await screen.findByText('2 planos parecidos em 1 vídeo')).toBeTruthy()
+  expect(await screen.findByText('3 momentos em 2 vídeos')).toBeTruthy()
   expect(fotos).toHaveLength(1)
 })
 
@@ -587,7 +593,7 @@ test('o programa e o período da tela vão junto, e mudar o filtro busca de novo
   await abrir('/busca?q=pista&programa=TV+Fama&ano=2026')
   await screen.findByText('3 momentos em 2 vídeos')
   await usuario.upload(screen.getByLabelText('Foto para buscar'), foto())
-  await screen.findByText('2 planos parecidos em 1 vídeo')
+  await screen.findByText('3 momentos em 2 vídeos')
   expect(fotos[0].params.get('programa')).toBe('TV Fama')
   expect(fotos[0].params.get('desde')).toBe('2026-01-01')
   expect(fotos[0].params.get('ate')).toBe('2026-12-31')
@@ -612,7 +618,7 @@ test('tipo ou tamanho errado: a mensagem da API aparece em português', async ()
   expect((await screen.findByRole('alert')).textContent).toContain('Envie uma imagem JPEG ou PNG válida')
 })
 
-test('com o índice do quadro fora a tela diz que a busca por imagem não está disponível', async () => {
+test('com o modelo da consulta fora a tela diz que a busca por imagem não está disponível', async () => {
   respostaDaFoto = () => HttpResponse.json({ detail: 'x' }, { status: 503 })
   const usuario = userEvent.setup()
   await abrir('/busca')
@@ -621,16 +627,16 @@ test('com o índice do quadro fora a tela diz que a busca por imagem não está 
   expect((await screen.findByRole('alert')).textContent).toContain('A busca por imagem não está disponível agora')
 })
 
-test('sem planos parecidos a tela avisa, e Limpar esquece a foto', async () => {
-  respostaDaFoto = () => HttpResponse.json({ ...PLANOS, videos: [] })
+test('sem momentos para o termo a tela avisa, e Limpar esquece a foto', async () => {
+  respostaDaFoto = () => HttpResponse.json({ ...DA_FOTO, videos: [] })
   const usuario = userEvent.setup()
   await abrir('/busca')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
 
-  expect((await screen.findByRole('status')).textContent).toContain('Nenhum plano parecido. Tire um filtro ou tente outra foto.')
+  expect((await screen.findByRole('status')).textContent).toContain('Nenhum momento encontrado para “sandália vermelha”. Tire um filtro, tente outra foto ou digite o que procura.')
 
   await usuario.click(screen.getByRole('button', { name: 'Limpar' }))
-  expect(screen.queryByText(/Nenhum plano parecido/)).toBeNull()
+  expect(screen.queryByText(/Nenhum momento encontrado/)).toBeNull()
   expect(screen.queryByText('pista.png')).toBeNull()
   expect(screen.getByText(/Escreva acima/)).toBeTruthy()
 })
@@ -639,7 +645,7 @@ test('um texto novo depois da foto sai da foto e busca o texto', async () => {
   const usuario = userEvent.setup()
   await abrir('/busca')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
-  await screen.findByText('2 planos parecidos em 1 vídeo')
+  await screen.findByText('3 momentos em 2 vídeos')
 
   await usuario.type(screen.getByRole('searchbox', { name: 'Buscar no conteúdo' }), 'pista{Enter}')
 
@@ -654,7 +660,7 @@ test('Enter com o mesmo texto da URL depois da foto também sai da foto e busca 
   await abrir('/busca?q=pista')
   await screen.findByText('3 momentos em 2 vídeos')
   await usuario.upload(screen.getByLabelText('Foto para buscar'), foto())
-  await screen.findByText('2 planos parecidos em 1 vídeo')
+  await screen.findByText('3 momentos em 2 vídeos')
 
   await usuario.type(screen.getByRole('searchbox', { name: 'Buscar no conteúdo' }), '{Enter}')
 

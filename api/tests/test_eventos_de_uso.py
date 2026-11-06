@@ -41,9 +41,9 @@ from api.tests.test_auth import VerificadorFalso
 from api.tests.test_busca import (
     AUTORIZACAO as AUTORIZACAO_DA_BUSCA,
 )
-from api.tests.test_busca import EmbeddingDeTexto, job, pedido, plano
 from api.tests.test_busca import cliente as cliente_da_busca
-from api.tests.test_busca_por_imagem import com_planos, enviar, foto
+from api.tests.test_busca import job, pedido, plano
+from api.tests.test_busca_por_imagem import com_vestido, enviar, foto
 from api.tests.test_correcoes import AUTORIZACAO as AUTORIZACAO_DAS_CORRECOES
 from api.tests.test_correcoes import BYTES, MODELO, VERSAO, _pessoa
 from api.tests.test_correcoes import Mundo as MundoDasCorrecoes
@@ -521,7 +521,7 @@ def test_a_busca_publica_o_tamanho_e_os_filtros_e_nunca_o_texto() -> None:
 
 def test_a_busca_por_imagem_publica_so_o_tamanho_da_foto() -> None:
     eventos = EventosEmMemoria()
-    c, _ = com_planos(EmbeddingDeTexto([1.0, 0.0]), eventos=eventos)
+    c, _ = com_vestido(eventos=eventos)
     dados = foto("PNG")
 
     r = enviar(c, dados, programa="TV Fama")

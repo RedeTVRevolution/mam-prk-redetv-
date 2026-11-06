@@ -232,7 +232,7 @@ A busca híbrida tem três portas de injeção: o prompt que interpreta a consul
 | Filtro forjado (campos ou operadores injetados) | O servidor monta os filtros a partir de campos tipados, com nomes e operadores fixos no código; pessoas e marcas só entram se existirem no catálogo; o resto é descartado |
 | Fuga de escopo | Os filtros de permissão do usuário são acrescentados pelo servidor depois do Gemini e não podem ser sobrescritos |
 | Sintaxe de palavras-chave (curingas, operadores) | Termos tratados como texto puro, operadores removidos, número de termos limitado |
-| Busca por imagem | Só JPEG ou PNG, tamanho limitado, imagem regravada antes de virar vetor |
+| Busca por imagem | Só JPEG ou PNG, tamanho limitado, imagem regravada antes de ir ao modelo |
 | XSS nos destaques | Trechos destacados devolvidos como posições no texto, nunca como HTML |
 | Abuso de volume | Limite de consultas por usuário, tempo máximo por consulta e teto de resultados |
 

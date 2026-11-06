@@ -90,6 +90,8 @@ export interface ResultadoDaBusca {
     ate: string | null
     /** A busca usou o vetor do quadro; falso no modo visual quando o índice do quadro está fora. */
     visual?: boolean
+    /** Só na busca por foto: o termo que o modelo deu para o objeto e que a busca usou. */
+    termo_da_foto?: string | null
   }
   videos: VideoDoResultado[]
   sem_aparicoes: SemAparicao[]
