@@ -519,62 +519,66 @@ export function Video({
               {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
             </p>
           )}
-          <div ref={moldura} className="relative flex aspect-video shrink-0 bg-black lg:aspect-auto lg:min-h-32 lg:flex-1 lg:shrink">
-            {erroDoPlayer && !sessaoCaiu ? (
-              <AvisoDeFalha
-                className="m-auto max-w-sm"
-                mensagem="Não foi possível carregar o vídeo. Tente de novo em instantes."
-                codigo={erroDoPlayer}
-                aoTentar={() => {
-                  setFalhaDaMidia(null)
-                  void reproducao.refetch()
-                }}
-              />
-            ) : (
-              <video
-                ref={player}
-                src={reproducao.data?.url}
-                aria-label="Player"
-                className="size-full min-h-0 object-contain"
-                onClick={alternar}
-                onError={aoFalharOPlayer}
-                onLoadedMetadata={(e) => {
-                  const el = e.currentTarget
-                  if (Number.isFinite(el.duration)) setDuracaoMs(el.duration * 1000)
-                  if (retomarEm.current !== null) {
-                    el.currentTime = retomarEm.current
-                    retomarEm.current = null
-                  }
-                  instante.definir(el.currentTime * 1000)
-                }}
-                onTimeUpdate={(e) => aoAtualizarOTempo(e.currentTarget)}
-                onPlay={() => setTocando(true)}
-                onPause={() => {
-                  setTocando(false)
-                  gravarNoEndereco()
-                }}
-                onSeeked={gravarNoEndereco}
-                onRateChange={(e) => setVelocidade(e.currentTarget.playbackRate)}
-              />
-            )}
+          {/* O vídeo não tem `controls`: a tela cheia leva o transporte junto. Fora dela, `contents` deixa
+              a moldura e o transporte no layout da seção, com o mesmo tamanho. */}
+          <div ref={moldura} className="contents [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:bg-background">
+            <div className="relative flex aspect-video shrink-0 bg-black lg:aspect-auto lg:min-h-32 lg:flex-1 lg:shrink [:fullscreen>&]:aspect-auto [:fullscreen>&]:min-h-0 [:fullscreen>&]:flex-1">
+              {erroDoPlayer && !sessaoCaiu ? (
+                <AvisoDeFalha
+                  className="m-auto max-w-sm"
+                  mensagem="Não foi possível carregar o vídeo. Tente de novo em instantes."
+                  codigo={erroDoPlayer}
+                  aoTentar={() => {
+                    setFalhaDaMidia(null)
+                    void reproducao.refetch()
+                  }}
+                />
+              ) : (
+                <video
+                  ref={player}
+                  src={reproducao.data?.url}
+                  aria-label="Player"
+                  className="size-full min-h-0 object-contain"
+                  onClick={alternar}
+                  onError={aoFalharOPlayer}
+                  onLoadedMetadata={(e) => {
+                    const el = e.currentTarget
+                    if (Number.isFinite(el.duration)) setDuracaoMs(el.duration * 1000)
+                    if (retomarEm.current !== null) {
+                      el.currentTime = retomarEm.current
+                      retomarEm.current = null
+                    }
+                    instante.definir(el.currentTime * 1000)
+                  }}
+                  onTimeUpdate={(e) => aoAtualizarOTempo(e.currentTarget)}
+                  onPlay={() => setTocando(true)}
+                  onPause={() => {
+                    setTocando(false)
+                    gravarNoEndereco()
+                  }}
+                  onSeeked={gravarNoEndereco}
+                  onRateChange={(e) => setVelocidade(e.currentTarget.playbackRate)}
+                />
+              )}
+            </div>
+            <Transporte
+              job={job}
+              instante={instante}
+              duracaoMs={duracaoMs}
+              tocando={tocando}
+              velocidade={velocidade}
+              aoSilenciar={(mudo) => {
+                if (player.current) player.current.muted = mudo
+              }}
+              aoMudarVolume={(volume) => {
+                if (player.current) player.current.volume = volume
+              }}
+              aoAlternar={alternar}
+              aoSaltar={(passo) => saltarPara((player.current?.currentTime ?? 0) + passo)}
+              aoMudarVelocidade={mudarVelocidade}
+              aoTelaCheia={telaCheia}
+            />
           </div>
-          <Transporte
-            job={job}
-            instante={instante}
-            duracaoMs={duracaoMs}
-            tocando={tocando}
-            velocidade={velocidade}
-            aoSilenciar={(mudo) => {
-              if (player.current) player.current.muted = mudo
-            }}
-            aoMudarVolume={(volume) => {
-              if (player.current) player.current.volume = volume
-            }}
-            aoAlternar={alternar}
-            aoSaltar={(passo) => saltarPara((player.current?.currentTime ?? 0) + passo)}
-            aoMudarVelocidade={mudarVelocidade}
-            aoTelaCheia={telaCheia}
-          />
           {decupagem.isError && !(decupagem.error instanceof SessaoExpirada) && (
             <AvisoDeFalha
               className="m-2 shrink-0"

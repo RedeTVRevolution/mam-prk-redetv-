@@ -178,6 +178,10 @@ test('F e o botão alternam a tela cheia', async () => {
   await usuario.click(screen.getByRole('button', { name: 'Tela cheia' }))
 
   expect(pedir).toHaveBeenCalledTimes(2)
+  // Em tela cheia o vídeo não tem `controls`: o transporte entra junto, no mesmo elemento.
+  const emTelaCheia = pedir.mock.contexts[0] as HTMLElement
+  expect(emTelaCheia.contains(screen.getByLabelText('Player'))).toBe(true)
+  for (const nome of ['Tocar', 'Tela cheia', 'Silenciar']) expect(emTelaCheia.contains(screen.getByRole('button', { name: nome }))).toBe(true)
   // @ts-expect-error o jsdom não define a API
   delete HTMLElement.prototype.requestFullscreen
 })
