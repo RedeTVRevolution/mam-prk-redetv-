@@ -36,6 +36,8 @@ from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.idempotencia import nova_reserva
 from api.jobs import (
+    JANELA_DA_URL_DO_QUADRO,
+    VALIDADE_DA_IMAGEM,
     CursorInvalido,
     FiltroDeJobs,
     Job,
@@ -51,6 +53,7 @@ from api.nuvem import (
     CatalogoFirestore,
     ListasDaBuscaFirestore,
     ProgramasFirestore,
+    QuadrosStorage,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
@@ -526,6 +529,106 @@ def test_url_de_download_devolve_a_copia_limpa_como_anexo_com_o_nome(
     resposta = requests.get(f"{EMULADOR_STORAGE}{partes.path}?{partes.query}")
     assert resposta.status_code == 200
     assert resposta.content == b"copia-bytes"
+
+
+class AssinaturaQueConta:
+    """A credencial local de teste, contando quantas vezes alguém assinou."""
+
+    def __init__(self) -> None:
+        self.vezes = 0
+        self._credencial = _credencial_local()
+
+    def __call__(self) -> dict[str, Any]:
+        self.vezes += 1
+        return {"credentials": self._credencial}
+
+
+def _armazenamento_que_conta(
+    agora: list[datetime],
+) -> tuple[ArmazenamentoStorage, AssinaturaQueConta]:
+    assinatura = AssinaturaQueConta()
+    armazenamento = ArmazenamentoStorage(
+        ClienteStorage(project="teste", credentials=_anonima()),
+        "teste-quarentena",
+        "teste-aceitos",
+        "teste-decupagens",
+        assinatura=assinatura,
+        relogio=lambda: agora[0],
+    )
+    return armazenamento, assinatura
+
+
+def test_duas_listagens_na_mesma_hora_assinam_cada_capa_uma_vez() -> None:
+    agora = [datetime(2026, 11, 5, 14, 5, tzinfo=UTC)]
+    armazenamento, assinatura = _armazenamento_que_conta(agora)
+    capas = [("j1", "quadros/plano-1.jpg"), ("j2", "quadros/plano-1.jpg")]
+
+    primeira = [armazenamento.url_do_quadro(*c, VALIDADE_DA_IMAGEM) for c in capas]
+    agora[0] = datetime(2026, 11, 5, 14, 59, tzinfo=UTC)
+    segunda = [armazenamento.url_do_quadro(*c, VALIDADE_DA_IMAGEM) for c in capas]
+
+    assert assinatura.vezes == 2
+    assert primeira == segunda
+    assert parse_qs(urlparse(primeira[0]).query)["X-Goog-Expires"] == ["28800"]
+
+    agora[0] = datetime(2026, 11, 5, 15, 0, 1, tzinfo=UTC)
+    for c in capas:
+        armazenamento.url_do_quadro(*c, VALIDADE_DA_IMAGEM)
+
+    assert assinatura.vezes == 4
+
+
+def test_a_janela_da_url_do_quadro_e_menor_que_a_validade_da_imagem() -> None:
+    # A URL entregue no fim da janela ainda tem de valer horas, não minutos.
+    assert JANELA_DA_URL_DO_QUADRO < VALIDADE_DA_IMAGEM
+
+
+def test_upload_reproducao_e_download_assinam_a_cada_pedido() -> None:
+    armazenamento, assinatura = _armazenamento_que_conta(
+        [datetime(2026, 11, 5, 14, 5, tzinfo=UTC)]
+    )
+
+    for _ in range(2):
+        armazenamento.url_de_upload("j1", 10, "video/mp4")
+        armazenamento.url_de_reproducao("j1", timedelta(minutes=10))
+        armazenamento.url_de_download("j1", "a.mp4", timedelta(minutes=5))
+
+    assert assinatura.vezes == 6
+
+
+def test_gravar_quadro_grava_o_jpeg_com_cache_de_1_dia_so_no_navegador() -> None:
+    gravados: dict[str, tuple[str | None, bytes, str]] = {}
+
+    class Blob:
+        def __init__(self, nome: str) -> None:
+            self.nome = nome
+            self.cache_control: str | None = None
+
+        def upload_from_string(self, conteudo: bytes, content_type: str) -> None:
+            gravados[self.nome] = (self.cache_control, conteudo, content_type)
+
+    class Bucket:
+        def __init__(self, nome: str) -> None:
+            self.nome = nome
+
+        def blob(self, nome: str) -> Blob:
+            return Blob(f"{self.nome}/{nome}")
+
+    class Cliente:
+        def bucket(self, nome: str) -> Bucket:
+            return Bucket(nome)
+
+    quadros = QuadrosStorage(Cliente(), "aceitos", "decupagens")
+
+    quadros.gravar_quadro("j1", "quadros/plano-1.jpg", b"jpeg")
+
+    assert gravados == {
+        "decupagens/j1/quadros/plano-1.jpg": (
+            "private, max-age=86400",
+            b"jpeg",
+            "image/jpeg",
+        )
+    }
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")

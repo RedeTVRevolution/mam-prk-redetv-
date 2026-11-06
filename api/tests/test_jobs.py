@@ -335,7 +335,7 @@ def _job_com_estado(ambiente: Ambiente, estado: Estado) -> str:
     return job.id
 
 
-def test_reproducao_devolve_link_assinado_e_quando_expira() -> None:
+def test_reproducao_continua_com_link_de_10_min() -> None:
     ambiente = Ambiente()
     job_id = _job_com_estado(ambiente, "concluido")
 
@@ -350,7 +350,7 @@ def test_reproducao_devolve_link_assinado_e_quando_expira() -> None:
     }
 
 
-def test_quadro_devolve_link_assinado_do_jpeg_e_quando_expira() -> None:
+def test_quadro_devolve_link_assinado_do_jpeg_valido_por_8_h() -> None:
     ambiente = Ambiente()
     job_id = _job_com_estado(ambiente, "concluido")
 
@@ -360,8 +360,8 @@ def test_quadro_devolve_link_assinado_do_jpeg_e_quando_expira() -> None:
 
     assert resposta.status_code == 200
     assert resposta.json() == {
-        "url": "https://storage.exemplo/quadros/j1/quadros/plano-0.jpg?validade=600",
-        "expira_em": "2026-10-29T12:10:00Z",
+        "url": "https://storage.exemplo/quadros/j1/quadros/plano-0.jpg?validade=28800",
+        "expira_em": "2026-10-29T19:00:00Z",
     }
 
 
@@ -770,7 +770,7 @@ def _job_com_capa(ambiente: Ambiente, job_id: str, capa: str | None) -> None:
     )
 
 
-def test_listagem_traz_a_url_assinada_da_capa_e_job_sem_capa_traz_null() -> None:
+def test_listagem_traz_a_capa_assinada_por_8_h_e_job_sem_capa_traz_null() -> None:
     ambiente = Ambiente()
     _job_com_capa(ambiente, "com", "quadros/plano-1.jpg")
     _job_com_capa(ambiente, "sem", None)
@@ -779,7 +779,7 @@ def test_listagem_traz_a_url_assinada_da_capa_e_job_sem_capa_traz_null() -> None
 
     urls = {j["id"]: j["capa_url"] for j in lista}
     assert urls == {
-        "com": "https://storage.exemplo/quadros/com/quadros/plano-1.jpg?validade=600",
+        "com": "https://storage.exemplo/quadros/com/quadros/plano-1.jpg?validade=28800",
         "sem": None,
     }
 

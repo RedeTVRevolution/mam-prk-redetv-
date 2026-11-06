@@ -41,7 +41,14 @@ from api.indice_da_busca import (
     TipoDeRegistro,
     palavras,
 )
-from api.jobs import Armazenamento, CursorInvalido, Job, RepositorioDeJobs
+from api.jobs import (
+    VALIDADE_DA_IMAGEM,
+    VALIDADE_INFORMADA_DA_IMAGEM,
+    Armazenamento,
+    CursorInvalido,
+    Job,
+    RepositorioDeJobs,
+)
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +74,6 @@ TETO_DA_LISTA_BYTES = 800_000
 TETO_DE_VIDEOS = 50
 VIDEOS_POR_PADRAO = 20
 JUNCAO_MS = 3_000
-VALIDADE_DO_QUADRO = timedelta(minutes=10)
 # Assinaturas simultâneas para a chave de sistema: cada uma é uma ida ao IAM, e cem
 # momentos em fila passavam dos 15 s da rota.
 TETO_DE_ASSINATURAS = 16
@@ -606,7 +612,7 @@ class Busca:
             sem_aparicoes=vazios,
             plano_b=entendida.plano_b,
             facetas=_facetas([r for r, _, _ in fundidos], nome),
-            quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
+            quadros_expiram_em=agora + VALIDADE_INFORMADA_DA_IMAGEM,
         )
         if len(todos) > limite:
             resultado._proximo_cursor = self._guardar(
@@ -734,7 +740,7 @@ class Busca:
             sem_aparicoes=lista.sem_aparicoes,
             plano_b=lista.plano_b,
             facetas=lista.facetas,
-            quadros_expiram_em=agora + VALIDADE_DO_QUADRO,
+            quadros_expiram_em=agora + VALIDADE_INFORMADA_DA_IMAGEM,
         )
         if fim < len(lista.videos):
             resultado._proximo_cursor = f"{id}.{fim}"
@@ -880,7 +886,7 @@ class Busca:
             assert momento.quadro is not None
             _conferir(cancelado)
             momento.quadro_url = self._armazenamento.url_do_quadro(
-                video.job_id, momento.quadro, VALIDADE_DO_QUADRO
+                video.job_id, momento.quadro, VALIDADE_DA_IMAGEM
             )
 
         pedidos = [(v, m) for v in videos for m in v.momentos if m.quadro]

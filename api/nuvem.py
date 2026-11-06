@@ -1,5 +1,6 @@
 """Adaptadores de nuvem da E0: Firestore (Jobs) e Cloud Storage (upload)."""
 
+import functools
 import json
 import random
 import secrets
@@ -56,6 +57,7 @@ from api.idempotencia import (
     nova_reserva,
 )
 from api.jobs import (
+    JANELA_DA_URL_DO_QUADRO,
     PRAZO_DO_UPLOAD,
     CursorInvalido,
     Estado,
@@ -1580,13 +1582,20 @@ class ObjetosStorage:
         )
 
 
+# O navegador guarda o quadro por 1 dia (#410); `private` deixa fora os caches compartilhados.
+# O `make cache-dos-quadros` aplica o mesmo valor aos quadros já gravados.
+CACHE_DO_QUADRO = "private, max-age=86400"
+
+
 class QuadrosStorage(DecupagensStorage):
     """Os JPEGs dos quadros-chave no bucket das decupagens, além da cópia limpa e da Decupagem."""
 
     def gravar_quadro(self, job_id: str, caminho: str, jpeg: bytes) -> None:
-        self._cliente.bucket(self._decupagens).blob(
+        blob = self._cliente.bucket(self._decupagens).blob(
             objeto_do_quadro(job_id, caminho)
-        ).upload_from_string(jpeg, content_type="image/jpeg")
+        )
+        blob.cache_control = CACHE_DO_QUADRO
+        blob.upload_from_string(jpeg, content_type="image/jpeg")
 
 
 class ArquivosNoStorage:
@@ -1622,6 +1631,10 @@ class ArquivosNoStorage:
             blob.delete()
 
 
+# Quadros guardados por instância: uns 50 por página da grade, com folga para o acervo.
+QUADROS_ASSINADOS_GUARDADOS = 4096
+
+
 class ArmazenamentoStorage:
     """Upload, cancelamento do upload, reprodução e leitura da decupagem."""
 
@@ -1632,6 +1645,7 @@ class ArmazenamentoStorage:
         bucket_de_aceitos: str,
         bucket_de_decupagens: str,
         assinatura: Callable[[], dict[str, Any]] = assinatura_pelo_iam,
+        relogio: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._cliente = cliente
         self._bucket = bucket_de_quarentena
@@ -1641,6 +1655,10 @@ class ArmazenamentoStorage:
             cliente, bucket_de_aceitos, bucket_de_decupagens
         )
         self._assinatura = assinatura
+        self._relogio = relogio
+        self._quadro_na_janela = functools.lru_cache(QUADROS_ASSINADOS_GUARDADOS)(
+            self._assinar_quadro
+        )
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
         blob = self._cliente.bucket(self._bucket).blob(job_id)
@@ -1690,6 +1708,17 @@ class ArmazenamentoStorage:
         )
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        """A mesma URL para o mesmo quadro dentro da janela; um quadro regravado no meio
+        dela aparece antigo até a janela virar (aceito no #409)."""
+        # ponytail: o lru_cache não junta dois pedidos simultâneos do mesmo quadro ainda fora
+        # do cache: os dois assinam, e um guarda a URL. Custa uma ida a mais ao IAM e um download
+        # a mais no navegador, só na primeira carga. Trava por chave se a medição no dev pedir.
+        janela = self._relogio().timestamp() // JANELA_DA_URL_DO_QUADRO.total_seconds()
+        return self._quadro_na_janela(job_id, caminho, validade, janela)
+
+    def _assinar_quadro(
+        self, job_id: str, caminho: str, validade: timedelta, janela: float
+    ) -> str:
         blob = self._cliente.bucket(self._decupagens).blob(
             objeto_do_quadro(job_id, caminho)
         )
