@@ -1,4 +1,4 @@
-import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { onlineManager, QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -105,6 +105,7 @@ afterEach(() => {
   jobs = []
   statusDaLista = 200
   cursorVencido = null
+  onlineManager.setOnline(true)
   programas = ['TV Fama']
   criacoes.length = 0
   chamadas.length = 0
@@ -428,6 +429,20 @@ test('o 422 do cursor da volta recomeça do topo, e rolar segue pedindo a págin
   expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null])
   rolar(2000)
   await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null, 'j49']))
+})
+
+test('sem rede, o acervo mostra o esqueleto, não a lista vazia, e carrega quando a rede volta', async () => {
+  jobs = [job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' })]
+  onlineManager.setOnline(false)
+  await abrir()
+  expect(await screen.findByRole('status', { name: 'Carregando o acervo' })).toBeTruthy()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
+  expect(chamadas).toEqual([])
+
+  act(() => onlineManager.setOnline(true))
+  expect(await screen.findByText('pronto.mp4')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Carregando o acervo' })).toBeNull()
 })
 
 test('grade ou lista fica guardada no navegador', async () => {

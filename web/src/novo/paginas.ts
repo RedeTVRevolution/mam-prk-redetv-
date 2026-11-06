@@ -249,7 +249,8 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
     paginas: q.data?.pages,
     aoVer,
     // Desligada (`enabled` falso), a consulta fica pendente sem pedir nada: não está carregando.
-    carregando: q.isLoading || recomeca,
+    // Pausada sem rede, está: o esqueleto fica até a rede voltar, em vez da lista vazia.
+    carregando: (q.isPending && opcoes.enabled !== false) || recomeca,
     /** A lista da consulta anterior está na tela enquanto esta não chega. */
     atualizando: isPlaceholderData,
     haMais: hasNextPage && !isPlaceholderData,
