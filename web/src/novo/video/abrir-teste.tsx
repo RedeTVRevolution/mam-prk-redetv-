@@ -58,6 +58,8 @@ export function simularPlayer() {
 
 export interface Abertura {
   t?: number | null
+  /** O texto da busca de onde o vídeo foi aberto (`?busca=`). */
+  busca?: string | null
   permissoes?: string[]
   acompanhamentoMs?: number
   indexacaoMs?: number
@@ -67,7 +69,7 @@ export interface Abertura {
   consultas?: QueryClient
 }
 
-export async function abrirVideo({ t = null, permissoes = ['decupagem.ver'], acompanhamentoMs = 5000, indexacaoMs = 2000, esperarFaixas = true, consultas = criarClienteDeConsultas() }: Abertura = {}) {
+export async function abrirVideo({ t = null, busca = null, permissoes = ['decupagem.ver'], acompanhamentoMs = 5000, indexacaoMs = 2000, esperarFaixas = true, consultas = criarClienteDeConsultas() }: Abertura = {}) {
   const auth = new AutenticadorFalso([{ email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true }])
   await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
   await auth.confirmarTotp(CODIGO_TOTP_FALSO)
@@ -78,7 +80,7 @@ export async function abrirVideo({ t = null, permissoes = ['decupagem.ver'], aco
         <AtalhosProvider>
           <TooltipProvider>
             <input aria-label="Campo" />
-            <TelaDoVideo id="j1" t={t} permissoes={permissoes} intervalos={{ acompanhamentoMs, indexacaoMs }} />
+            <TelaDoVideo id="j1" t={t} busca={busca} permissoes={permissoes} intervalos={{ acompanhamentoMs, indexacaoMs }} />
           </TooltipProvider>
         </AtalhosProvider>
       </ContextoDaApi.Provider>

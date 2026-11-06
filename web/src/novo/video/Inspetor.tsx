@@ -45,6 +45,7 @@ import { type Instante, useNoInstante } from './instante.ts'
 const SECOES: { chave: Secao; rotulo: string; tipo: TipoDaFaixa; vazio: string }[] = [
   { chave: 'pessoas', rotulo: 'Pessoas', tipo: 'aparicao', vazio: 'Nenhuma pessoa na imagem neste vídeo.' },
   { chave: 'pautas', rotulo: 'Pautas', tipo: 'pauta', vazio: 'Nenhuma pauta neste vídeo.' },
+  { chave: 'planos', rotulo: 'Planos', tipo: 'plano', vazio: 'Nenhum plano neste vídeo.' },
   { chave: 'objetos', rotulo: 'Objetos', tipo: 'objeto', vazio: SEM_OBJETOS },
   { chave: 'comerciais', rotulo: 'Comerciais', tipo: 'comercial', vazio: 'Nenhum comercial neste vídeo.' },
   { chave: 'textos', rotulo: 'Textos na tela', tipo: 'texto', vazio: 'Nenhum texto na tela neste vídeo.' },
@@ -188,6 +189,7 @@ export function Inspetor({
   aoSaltar,
   aoTocarTrecho,
   urlDoQuadro,
+  planosParecidos,
   acoes,
   aviso,
   acima,
@@ -213,6 +215,8 @@ export function Inspetor({
   aoSaltar: (ms: number) => void
   aoTocarTrecho: (i: Intervalo) => void
   urlDoQuadro: (caminho: string) => Promise<string>
+  /** Os planos com vetor do quadro indexado e a busca dos parecidos (#271); sem vetor, sem botão. */
+  planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
   acoes?: AcoesDeCorrecao
   aviso: string | null
   /** O que a revisão põe acima do "Agora": as sugestões, as pautas marcadas. */
@@ -327,7 +331,7 @@ export function Inspetor({
       ) : (
         <>
           {acima}
-          <Agora decupagem={d} porTipo={porTipo} instante={instante} duracaoMs={duracaoMs} urlDoQuadro={urlDoQuadro} aoAbrir={aoAbrir} />
+          <Agora decupagem={d} porTipo={porTipo} instante={instante} duracaoMs={duracaoMs} urlDoQuadro={urlDoQuadro} aoAbrir={aoAbrir} planosParecidos={planosParecidos} />
           {detalhe && selecionado ? (
             <Detalhe
               key={selecionado.chave}
@@ -808,6 +812,7 @@ function Agora({
   duracaoMs,
   urlDoQuadro,
   aoAbrir,
+  planosParecidos,
 }: {
   decupagem: Decupagem
   porTipo: Map<string, ItemDoPainel[]>
@@ -815,6 +820,7 @@ function Agora({
   duracaoMs: number
   urlDoQuadro: (c: string) => Promise<string>
   aoAbrir: (chave: string, saltar: boolean) => void
+  planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
 }) {
   const chaves = useNoInstante(instante, (ms) => chavesDoAgora(decupagem, porTipo, duracaoMs, ms))
   const porChave = useMemo(() => new Map([...porTipo.values()].flat().map((i) => [i.chave, i])), [porTipo])
@@ -823,6 +829,9 @@ function Agora({
   const pauta = porChave.get(lista[0])
   const vazio = lista[0].startsWith('vazio:') ? lista[0].split(':').slice(1).map(Number) : null
   const plano = doTipo('plano')[0]
+  // O número do plano no vídeo; os parecidos só valem onde o quadro tem vetor indexado (#271).
+  const numeroDoPlano = plano ? /^plano-(\d+)$/.exec(plano.chave)?.[1] : undefined
+  const parecidos = numeroDoPlano !== undefined && planosParecidos?.comVetor.has(Number(numeroDoPlano)) ? () => planosParecidos.abrir(Number(numeroDoPlano)) : null
   const pessoas = doTipo('aparicao')
   const mencoes = doTipo('mencao')
   const objetos = doTipo('objeto')
@@ -852,6 +861,11 @@ function Agora({
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
             <IconMovie size={12} stroke={1.75} aria-hidden />
             {plano.linhas[0] ? `${plano.titulo}, ${plano.linhas[0]}` : plano.titulo}
+            {parecidos && (
+              <button type="button" onClick={parecidos} className="ml-1 text-link hover:underline">
+                Planos parecidos com este
+              </button>
+            )}
           </p>
         )}
       </LinhaDoAgora>

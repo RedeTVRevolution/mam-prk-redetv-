@@ -24,11 +24,14 @@ const INTERVALOS: Intervalos = { acompanhamentoMs: 5000, indexacaoMs: 2000 }
 export function TelaDoVideo({
   id,
   t,
+  busca = null,
   permissoes,
   intervalos = INTERVALOS,
 }: {
   id: string
   t: number | null
+  /** O texto da busca de onde a pessoa chegou (`?busca=`). */
+  busca?: string | null
   permissoes: readonly string[]
   intervalos?: Intervalos
 }) {
@@ -92,6 +95,7 @@ export function TelaDoVideo({
     <Video
       job={consulta.data}
       t={t}
+      busca={busca}
       pode={permissoesDoVideo(permissoes)}
       reprocessou={reprocessou}
       aoReprocessar={aoReprocessar}

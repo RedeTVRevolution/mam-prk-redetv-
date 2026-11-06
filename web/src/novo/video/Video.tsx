@@ -46,8 +46,10 @@ import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relog
 import { ESTADOS_QUE_VAO_PARA_A_LIXEIRA } from '../../lixeira.ts'
 import { NomesDoCatalogo } from '../../nomesDoCatalogo.ts'
 import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.ts'
+import { consultaNova } from '../../busca.ts'
 import { criarCacheDeQuadros } from '../../quadros.ts'
-import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
+import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBusca } from '../../resultadoDaBusca.ts'
+import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, enderecoDosParecidos, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
 import { useApi } from '../consultas.ts'
@@ -87,12 +89,16 @@ const SALTO_CURTO_S = 1
 const SALTO_LONGO_S = 5
 const AVISO_CURTO_MS = 1500
 const AVISO_MS = 5000
+// O resultado refeito quando a sessão não o guardou: o teto de vídeos da página de busca.
+const VIDEOS_DO_RESULTADO = 50
 
 const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
 const GRUPO_DO_INSPETOR = 'Inspetor'
 const GRUPO_DA_CORRECAO = 'Correção'
 const GRUPO_DA_CATALOGACAO = 'Catalogação'
+const GRUPO_DA_BUSCA = 'Busca'
+const SEM_PLANOS: ReadonlySet<number> = new Set()
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 const tecla = (e: KeyboardEvent, ...teclas: string[]): boolean => teclas.includes(e.key.toLowerCase())
@@ -111,6 +117,7 @@ type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fun
 export function Video({
   job,
   t,
+  busca,
   pode,
   reprocessou,
   aoReprocessar,
@@ -118,6 +125,8 @@ export function Video({
 }: {
   job: Job
   t: number | null
+  /** O texto da busca de onde a pessoa chegou: ele liga a faixa "Busca" e o N. */
+  busca: string | null
   pode: Permissoes
   reprocessou: boolean
   aoReprocessar: (job: Job, etapa: string) => void
@@ -203,6 +212,37 @@ export function Video({
     retry: false,
     staleTime: Infinity,
   })
+
+  // Os planos com vetor do quadro indexado (#271): só neles "Planos parecidos" aparece. Vídeo
+  // antigo, índice desligado ou falha da consulta: nenhum botão.
+  const planosComVetor = useQuery({
+    queryKey: chaveDoVideo(job.id, 'planos-com-vetor'),
+    queryFn: async () => new Set(await api.planosComVetor(job.id)),
+    enabled: job.indexacao?.estado === 'indexado',
+    retry: false,
+    staleTime: Infinity,
+  })
+
+  // O resultado da busca de onde a pessoa veio: o da sessão, ou a busca refeita. Sem busca no
+  // endereço, a faixa e o N somem. Fora do cache ao sair do vídeo: o próximo vídeo lê a sessão de novo.
+  const resultadoDaBusca = useQuery({
+    queryKey: ['busca-de-origem', busca],
+    queryFn: async () => {
+      const guardada = busca ? lerResultado(busca) : null
+      if (guardada || !busca) return guardada
+      const videos = guardado((await api.buscar(consultaNova(busca), VIDEOS_DO_RESULTADO)).videos)
+      guardarResultado(busca, videos)
+      return videos
+    },
+    enabled: !!busca,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+  })
+  const momentosDaBusca = useMemo(
+    () => resultadoDaBusca.data?.find((v) => v.job_id === job.id)?.momentos ?? [],
+    [resultadoDaBusca.data, job.id],
+  )
 
   const itens = useMemo(() => (d ? itensDoPainel(d) : []), [d])
   const faixas = useMemo(() => (d ? faixasDoVisualizador(d) : null), [d])
@@ -296,7 +336,6 @@ export function Video({
   /** O endereço copiado da barra é sempre o do momento atual, sem entrada nova no histórico. */
   function gravarNoEndereco() {
     if (!player.current) return
-    const busca = new URLSearchParams(location.search).get('busca')
     history.replaceState(history.state, '', enderecoDoVideo(job.id, Math.floor(player.current.currentTime), busca))
   }
 
@@ -309,6 +348,35 @@ export function Video({
     instante.definir(el.currentTime * 1000)
   }
   const saltarParaMs = (ms: number) => saltarPara(ms / 1000)
+
+  /** N e Shift+N: o momento seguinte ou anterior do resultado, também entre vídeos. */
+  function passarDeMomento(passo: 1 | -1) {
+    if (!busca) return
+    const videos = resultadoDaBusca.data
+    if (!videos) {
+      mostrarAviso(
+        resultadoDaBusca.isError
+          ? `A busca não carregou. Volte à busca e abra o vídeo de novo (código ${codigoDoErro(resultadoDaBusca.error)}).`
+          : 'A busca ainda está carregando.',
+      )
+      return
+    }
+    const destino = passoNoResultado(videos, job.id, (player.current?.currentTime ?? 0) * 1000, passo)
+    if (!destino) {
+      mostrarAviso(
+        videos.some((v) => v.job_id === job.id)
+          ? `Este é o ${passo === 1 ? 'último' : 'primeiro'} momento da busca.`
+          : 'Este vídeo não está no resultado da busca.',
+      )
+      return
+    }
+    if (destino.job_id === job.id) saltarPara(destino.inicio_ms / 1000)
+    else navegar(enderecoDoVideo(destino.job_id, destino.inicio_ms / 1000, busca))
+  }
+
+  function fecharBusca() {
+    navegar(enderecoDoVideo(job.id, player.current?.currentTime ?? t), { substituir: true })
+  }
 
   function mudarVelocidade(v: number) {
     if (player.current) player.current.playbackRate = v
@@ -788,6 +856,25 @@ export function Video({
     { tecla: 'F', acao: 'Tela cheia', grupo: GRUPO, casa: (e) => tecla(e, 'f'), executar: telaCheia },
     { tecla: '← →', acao: 'Numa faixa: passar de ocorrência (o player não anda)', grupo: GRUPO_DA_LINHA },
     { tecla: 'Enter', acao: 'Numa faixa: saltar à ocorrência', grupo: GRUPO_DA_LINHA },
+    ...(busca
+      ? [
+          {
+            tecla: 'N',
+            acao: 'Ir ao momento seguinte da busca, também no vídeo seguinte do resultado',
+            grupo: GRUPO_DA_BUSCA,
+            // Na revisão com sugestões abertas, o N é do "recusar".
+            casa: (e: KeyboardEvent) => tecla(e, 'n') && !e.shiftKey && !(revisao.revisando && (sugestoes.data?.length ?? 0) > 0),
+            executar: () => passarDeMomento(1),
+          },
+          {
+            tecla: 'Shift + N',
+            acao: 'Ir ao momento anterior da busca, também no vídeo anterior do resultado',
+            grupo: GRUPO_DA_BUSCA,
+            casa: (e: KeyboardEvent) => tecla(e, 'n') && e.shiftKey,
+            executar: () => passarDeMomento(-1),
+          },
+        ]
+      : []),
     {
       tecla: ']',
       acao: 'Recolher e abrir o inspetor',
@@ -1024,6 +1111,7 @@ export function Video({
                 selecionada={selecionada}
                 alcas={alcas}
                 trecho={trechoNaLinha}
+                busca={busca && momentosDaBusca.length > 0 ? { rotulo: rotuloDaBusca(busca, momentosDaBusca.length), momentos: momentosDaBusca, aoFechar: fecharBusca } : null}
                 aoSaltar={saltarParaMs}
                 aoSelecionar={(chave) => abrirItem(chave, true)}
               />
@@ -1075,6 +1163,7 @@ export function Video({
             aoSaltar={saltarParaMs}
             aoTocarTrecho={tocarTrecho}
             urlDoQuadro={urlDoQuadro}
+            planosParecidos={{ comVetor: planosComVetor.data ?? SEM_PLANOS, abrir: (plano) => navegar(enderecoDosParecidos(job.id, plano)) }}
             acoes={acoes}
             aviso={aviso}
             acima={

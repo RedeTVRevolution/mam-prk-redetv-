@@ -17,9 +17,10 @@ import {
   trechosSemPauta,
   vizinhoNaFaixa,
 } from '../../linhaDoTempo.ts'
-import { IconSelector } from '@tabler/icons-react'
+import { IconSelector, IconX } from '@tabler/icons-react'
 import { TIPOS, type TipoDaFaixa } from './tipos.ts'
-import type { Instante } from './instante.ts'
+import { type Instante, useNoInstante } from './instante.ts'
+import { type MomentoGuardado, momentoAtual } from '../../resultadoDaBusca.ts'
 
 /** As alças de tempo do item em correção: os tempos de agora e o que fazer quando se movem. */
 export interface AlcasDaCorrecao {
@@ -43,6 +44,15 @@ export interface TrechoMarcado {
   aoSalvar: () => void
   /** Esc na alça descarta o trecho. */
   aoDescartar: () => void
+}
+
+/** Os momentos do resultado da busca de onde a pessoa chegou, neste vídeo. */
+export interface BuscaNaLinha {
+  /** "Busca: sapato vermelho (4)". */
+  rotulo: string
+  momentos: MomentoGuardado[]
+  /** Tira a busca do endereço: a faixa e o N somem. */
+  aoFechar: () => void
 }
 
 // O trecho sem pauta: listras de 2 px a cada 6 px em `linha` (MAM_DESIGN_SYSTEM 2.5).
@@ -240,6 +250,33 @@ function FaixaDoTrecho({ trecho, duracaoMs }: { trecho: TrechoMarcado; duracaoMs
   )
 }
 
+/** A faixa da busca: um bloco por momento, com o motivo como nome e o do instante atual em destaque. */
+function FaixaDaBusca({ busca, duracaoMs, instante, aoSaltar }: { busca: BuscaNaLinha; duracaoMs: number; instante: Instante; aoSaltar: (ms: number) => void }) {
+  const atual = useNoInstante(instante, (ms) => momentoAtual(busca.momentos, ms))
+  return (
+    <div role="group" aria-label={busca.rotulo} className="relative h-[18px] py-0.5">
+      <div className="relative size-full">
+        {busca.momentos.map((m, i) => {
+          const { esquerda, largura } = posicaoDoBloco(m, duracaoMs)
+          return (
+            <button
+              key={m.inicio_ms}
+              type="button"
+              data-momento-da-busca={m.inicio_ms}
+              aria-label={m.motivo}
+              aria-pressed={atual === i}
+              title={m.motivo}
+              onClick={() => aoSaltar(m.inicio_ms)}
+              className={cn('absolute inset-y-0 min-w-1 rounded-xs border border-background bg-link', atual === i && 'z-10 outline-2 outline-offset-1 outline-ring')}
+              style={{ left: pct(esquerda), width: pct(largura) }}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /** A largura de um algarismo do IBM Plex Mono em 11 px, para os rótulos da régua não se encostarem. */
 const PX_POR_ALGARISMO = 6.7
 
@@ -269,6 +306,7 @@ export function LinhaDoTempo({
   selecionada,
   alcas,
   trecho,
+  busca,
   aoSaltar,
   aoSelecionar,
 }: {
@@ -280,6 +318,8 @@ export function LinhaDoTempo({
   alcas: AlcasDaCorrecao | null
   /** O trecho marcado na revisão; sem ele não há a faixa. */
   trecho?: TrechoMarcado | null
+  /** O resultado da busca de origem neste vídeo; sem ele não há a faixa. */
+  busca?: BuscaNaLinha | null
   aoSaltar: (ms: number) => void
   aoSelecionar: (chave: string) => void
 }) {
@@ -333,187 +373,203 @@ export function LinhaDoTempo({
   const cortes = riscosDeCorte(cortesMs, duracaoMs)
 
   return (
-    <div className="flex shrink-0 border-t pb-1 text-xs select-none">
-      <div className="w-9 shrink-0 border-r sm:w-32" aria-hidden>
-        <div className="h-5 border-b border-strong/60" />
-        {trecho && (
-          <div className="flex h-[18px] items-center gap-1.5 px-2" title="Trecho">
-            <IconSelector size={14} stroke={1.75} className="shrink-0 text-link" />
-            <span className="hidden flex-1 truncate text-muted-foreground sm:inline">Trecho</span>
-          </div>
-        )}
-        {faixas.map((f) => {
-          const { Icone, cor } = TIPOS[f.chave as TipoDaFaixa]
-          return (
-            <div key={f.chave} className="flex h-[18px] items-center gap-1.5 px-2" title={f.rotulo}>
-              <Icone size={14} stroke={1.75} className="shrink-0" style={{ color: cor }} />
-              <span className="hidden flex-1 truncate text-muted-foreground sm:inline">{f.rotulo}</span>
-              <span className="hidden text-muted-foreground tabular-nums sm:inline">{f.blocos.length}</span>
-            </div>
-          )
-        })}
-      </div>
-      <div className="relative min-w-0 flex-1">
-        <div
-          data-regua=""
-          ref={regua}
-          className="relative h-5 cursor-pointer touch-none border-b border-strong/60"
-          onPointerDown={(e) => {
-            if (e.button !== 0) return
-            arrastando.current = true
-            e.currentTarget.setPointerCapture?.(e.pointerId)
-            naRegua(e)
-          }}
-          onPointerMove={(e) => {
-            if (arrastando.current) naRegua(e)
-          }}
-          onPointerUp={() => {
-            arrastando.current = false
-          }}
-          onPointerCancel={() => {
-            arrastando.current = false
-          }}
-        >
-          {marcas.map((m, i) => (
-            <span
-              key={m.ms}
-              className={cn('pointer-events-none absolute top-0 h-full border-strong', m.noFim ? 'border-r' : 'border-l')}
-              style={m.noFim ? { right: 0 } : { left: pct(m.percentual) }}
-            >
-              {rotuloCabe(m, i) && <span className="mx-1 font-mono text-2xs text-muted-foreground tabular-nums">{m.rotulo}</span>}
-            </span>
-          ))}
-          <svg
-            aria-hidden
-            data-cortes={cortes.length}
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-1.5 w-full"
-            viewBox="0 0 100 1"
-            preserveAspectRatio="none"
-          >
-            <path d={cortes.map((p) => `M${p} 0v1`).join('')} stroke="var(--color-muted-foreground)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-          </svg>
+    <div className="shrink-0 border-t pb-1 text-xs select-none">
+      {busca && (
+        <div className="flex h-7 items-center gap-2 px-2">
+          <span className="min-w-0 truncate font-medium text-link">{busca.rotulo}</span>
+          <button type="button" onClick={busca.aoFechar} className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+            <IconX size={12} stroke={1.75} aria-hidden /> Fechar busca
+          </button>
         </div>
-        {trecho && <FaixaDoTrecho trecho={trecho} duracaoMs={duracaoMs} />}
-        {faixas.map((faixa) => {
-          const { cor } = TIPOS[faixa.chave as TipoDaFaixa]
-          const selecionado = faixa.blocos.find((b) => b.chave === selecionada)
-          const ativo =
-            faixa.blocos.find((b) => b.chave === ativos[faixa.chave]) ?? selecionado ?? faixa.blocos[0]
-          const comAlcas = alcas && faixa.blocos.some((b) => b.chave === alcas.chave) ? alcas : null
-          const rotulo = `${faixa.rotulo} ${faixa.blocos.length}`
-          return (
-            <div
-              key={faixa.chave}
-              role="group"
-              aria-label={rotulo}
-              // A faixa sem blocos ainda é uma parada de Tab.
-              tabIndex={faixa.blocos.length === 0 ? 0 : undefined}
-              className="relative h-[18px] cursor-pointer py-0.5"
-              onPointerDown={(e) => {
-                // O botão do bloco ativo cobre os blocos sobrepostos a ele: o clique também se resolve pela posição.
-                if (e.button !== 0 || (e.target as Element).closest('[role=slider]')) return
-                const { ms, folgaMs } = msNoPonteiro(e)
-                if (ms === null) return
-                const bloco = blocoNoTempo(faixa.blocos, ms, folgaMs)
-                if (bloco) {
-                  setAtivos((a) => ({ ...a, [faixa.chave]: bloco.chave }))
-                  aoSelecionar(bloco.chave)
-                } else aoSaltar(ms)
-              }}
-              onPointerMove={(e) => {
-                const { ms, folgaMs, caixa } = msNoPonteiro(e)
-                const bloco = ms === null ? null : blocoNoTempo(faixa.blocos, ms, folgaMs)
-                const x = e.clientX - caixa.left
-                // Lido agora: o `currentTarget` do evento já não existe quando o React roda o atualizador.
-                const y = e.currentTarget.offsetTop
-                const nome = bloco?.nome ?? null
-                setDica((atual) => (nome === null ? null : atual?.nome === nome && atual.y === y ? atual : { x, y, direita: x > caixa.width / 2, nome }))
-              }}
-              onPointerLeave={() => setDica(null)}
-            >
-              <div className="relative size-full">
-                <TracosDaFaixa blocos={faixa.blocos} duracaoMs={duracaoMs} cor={cor} separar={faixa.chave === 'pauta'} opaca={faixa.chave !== 'fala'} />
-                {faixa.chave === 'pauta' &&
-                  semPauta.map((t) => {
-                    const nome = `Sem decupagem, ${relogio(t.inicio_ms)}–${relogio(t.fim_ms)}`
-                    const { esquerda, largura } = posicaoDoBloco(t, duracaoMs)
-                    return (
-                      <div
-                        key={t.inicio_ms}
-                        role="img"
-                        aria-label={nome}
-                        title={nome}
-                        className="absolute inset-y-0 rounded-xs"
-                        style={{ left: pct(esquerda), width: pct(largura), background: HACHURA }}
-                      />
-                    )
-                  })}
-                {faixa.chave === 'pauta' &&
-                  faixa.blocos.map((b) => {
-                    const { esquerda, largura } = posicaoDoBloco(b, duracaoMs)
-                    if (largura / 100 < PAUTA_COM_TITULO) return null
-                    return (
-                      <span
-                        key={b.chave}
-                        aria-hidden
-                        className="pointer-events-none absolute inset-y-0 truncate px-1 text-2xs leading-[14px] font-medium text-black/80"
-                        style={{ left: pct(esquerda), width: pct(largura) }}
-                      >
-                        {b.nome.replace(/^Pauta: /, '').replace(/, [\d:]+ a [\d:]+$/, '')}
-                      </span>
-                    )
-                  })}
-                {faixa.blocos.length === 0 && faixa.vazio && (
-                  <span className="absolute inset-y-0 left-1 leading-[14px] text-muted-foreground">{faixa.vazio}</span>
-                )}
-                {selecionado && (
-                  <span
-                    aria-hidden
-                    data-selecionado=""
-                    className="pointer-events-none absolute -inset-y-0.5 z-10 min-w-1 rounded-xs outline-2 outline-offset-1 outline-ring"
-                    style={{ left: pct(posicaoDoBloco(selecionado, duracaoMs).esquerda), width: pct(posicaoDoBloco(selecionado, duracaoMs).largura) }}
-                  />
-                )}
-                {ativo && (
-                  <button
-                    type="button"
-                    aria-label={ativo.nome}
-                    aria-pressed={ativo.chave === selecionada}
-                    className="absolute inset-y-0 z-10 min-w-1 rounded-xs focus-visible:outline-2 focus-visible:outline-offset-1"
-                    style={{ left: pct(posicaoDoBloco(ativo, duracaoMs).esquerda), width: pct(posicaoDoBloco(ativo, duracaoMs).largura) }}
-                    onKeyDown={(e) => aoTeclarNoBloco(e, faixa, ativo.chave)}
-                    // Só o Enter e o Espaço (`detail` 0): o ponteiro já selecionou no `pointerdown` da faixa.
-                    onClick={(e) => e.detail === 0 && aoSelecionar(ativo.chave)}
-                  />
-                )}
-                {comAlcas &&
-                  (() => {
-                    const limites = limitesDasAlcas(comAlcas, duracaoMs, duracaoMs)
-                    const comum = { duracaoMs, aoMover: comAlcas.aoMover, aoSalvar: comAlcas.aoSalvar, aoDescartar: comAlcas.aoDescartar }
-                    return (
-                      <>
-                        <AlcaDoTempo rotulo="Início do item" borda="inicio" ms={comAlcas.inicio_ms} limites={limites.inicio} {...comum} />
-                        <AlcaDoTempo rotulo="Fim do item" borda="fim" ms={comAlcas.fim_ms} limites={limites.fim} {...comum} />
-                      </>
-                    )
-                  })()}
-              </div>
+      )}
+      <div className="flex">
+        <div className="w-9 shrink-0 border-r sm:w-32" aria-hidden>
+          <div className="h-5 border-b border-strong/60" />
+          {busca && (
+            <div className="flex h-[18px] items-center gap-1.5 px-2" title="Busca">
+              <span className="hidden flex-1 truncate font-medium text-link sm:inline">Busca</span>
             </div>
-          )
-        })}
-        <div ref={cursor} aria-hidden data-cursor="" className="pointer-events-none absolute inset-y-0 z-30 w-0.5 -translate-x-1/2 bg-foreground" />
-        {dica && (
+          )}
+          {trecho && (
+            <div className="flex h-[18px] items-center gap-1.5 px-2" title="Trecho">
+              <IconSelector size={14} stroke={1.75} className="shrink-0 text-link" />
+              <span className="hidden flex-1 truncate text-muted-foreground sm:inline">Trecho</span>
+            </div>
+          )}
+          {faixas.map((f) => {
+            const { Icone, cor } = TIPOS[f.chave as TipoDaFaixa]
+            return (
+              <div key={f.chave} className="flex h-[18px] items-center gap-1.5 px-2" title={f.rotulo}>
+                <Icone size={14} stroke={1.75} className="shrink-0" style={{ color: cor }} />
+                <span className="hidden flex-1 truncate text-muted-foreground sm:inline">{f.rotulo}</span>
+                <span className="hidden text-muted-foreground tabular-nums sm:inline">{f.blocos.length}</span>
+              </div>
+            )
+          })}
+        </div>
+        <div className="relative min-w-0 flex-1">
           <div
-            role="tooltip"
-            className={cn(
-              'pointer-events-none absolute z-40 max-w-80 -translate-y-full truncate rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-float',
-              dica.direita && '-translate-x-full',
-            )}
-            style={{ left: dica.x, top: dica.y - 2 }}
+            data-regua=""
+            ref={regua}
+            className="relative h-5 cursor-pointer touch-none border-b border-strong/60"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return
+              arrastando.current = true
+              e.currentTarget.setPointerCapture?.(e.pointerId)
+              naRegua(e)
+            }}
+            onPointerMove={(e) => {
+              if (arrastando.current) naRegua(e)
+            }}
+            onPointerUp={() => {
+              arrastando.current = false
+            }}
+            onPointerCancel={() => {
+              arrastando.current = false
+            }}
           >
-            {dica.nome}
+            {marcas.map((m, i) => (
+              <span
+                key={m.ms}
+                className={cn('pointer-events-none absolute top-0 h-full border-strong', m.noFim ? 'border-r' : 'border-l')}
+                style={m.noFim ? { right: 0 } : { left: pct(m.percentual) }}
+              >
+                {rotuloCabe(m, i) && <span className="mx-1 font-mono text-2xs text-muted-foreground tabular-nums">{m.rotulo}</span>}
+              </span>
+            ))}
+            <svg
+              aria-hidden
+              data-cortes={cortes.length}
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-1.5 w-full"
+              viewBox="0 0 100 1"
+              preserveAspectRatio="none"
+            >
+              <path d={cortes.map((p) => `M${p} 0v1`).join('')} stroke="var(--color-muted-foreground)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            </svg>
           </div>
-        )}
+          {busca && <FaixaDaBusca busca={busca} duracaoMs={duracaoMs} instante={instante} aoSaltar={aoSaltar} />}
+          {trecho && <FaixaDoTrecho trecho={trecho} duracaoMs={duracaoMs} />}
+          {faixas.map((faixa) => {
+            const { cor } = TIPOS[faixa.chave as TipoDaFaixa]
+            const selecionado = faixa.blocos.find((b) => b.chave === selecionada)
+            const ativo =
+              faixa.blocos.find((b) => b.chave === ativos[faixa.chave]) ?? selecionado ?? faixa.blocos[0]
+            const comAlcas = alcas && faixa.blocos.some((b) => b.chave === alcas.chave) ? alcas : null
+            const rotulo = `${faixa.rotulo} ${faixa.blocos.length}`
+            return (
+              <div
+                key={faixa.chave}
+                role="group"
+                aria-label={rotulo}
+                // A faixa sem blocos ainda é uma parada de Tab.
+                tabIndex={faixa.blocos.length === 0 ? 0 : undefined}
+                className="relative h-[18px] cursor-pointer py-0.5"
+                onPointerDown={(e) => {
+                  // O botão do bloco ativo cobre os blocos sobrepostos a ele: o clique também se resolve pela posição.
+                  if (e.button !== 0 || (e.target as Element).closest('[role=slider]')) return
+                  const { ms, folgaMs } = msNoPonteiro(e)
+                  if (ms === null) return
+                  const bloco = blocoNoTempo(faixa.blocos, ms, folgaMs)
+                  if (bloco) {
+                    setAtivos((a) => ({ ...a, [faixa.chave]: bloco.chave }))
+                    aoSelecionar(bloco.chave)
+                  } else aoSaltar(ms)
+                }}
+                onPointerMove={(e) => {
+                  const { ms, folgaMs, caixa } = msNoPonteiro(e)
+                  const bloco = ms === null ? null : blocoNoTempo(faixa.blocos, ms, folgaMs)
+                  const x = e.clientX - caixa.left
+                  // Lido agora: o `currentTarget` do evento já não existe quando o React roda o atualizador.
+                  const y = e.currentTarget.offsetTop
+                  const nome = bloco?.nome ?? null
+                  setDica((atual) => (nome === null ? null : atual?.nome === nome && atual.y === y ? atual : { x, y, direita: x > caixa.width / 2, nome }))
+                }}
+                onPointerLeave={() => setDica(null)}
+              >
+                <div className="relative size-full">
+                  <TracosDaFaixa blocos={faixa.blocos} duracaoMs={duracaoMs} cor={cor} separar={faixa.chave === 'pauta'} opaca={faixa.chave !== 'fala'} />
+                  {faixa.chave === 'pauta' &&
+                    semPauta.map((t) => {
+                      const nome = `Sem decupagem, ${relogio(t.inicio_ms)}–${relogio(t.fim_ms)}`
+                      const { esquerda, largura } = posicaoDoBloco(t, duracaoMs)
+                      return (
+                        <div
+                          key={t.inicio_ms}
+                          role="img"
+                          aria-label={nome}
+                          title={nome}
+                          className="absolute inset-y-0 rounded-xs"
+                          style={{ left: pct(esquerda), width: pct(largura), background: HACHURA }}
+                        />
+                      )
+                    })}
+                  {faixa.chave === 'pauta' &&
+                    faixa.blocos.map((b) => {
+                      const { esquerda, largura } = posicaoDoBloco(b, duracaoMs)
+                      if (largura / 100 < PAUTA_COM_TITULO) return null
+                      return (
+                        <span
+                          key={b.chave}
+                          aria-hidden
+                          className="pointer-events-none absolute inset-y-0 truncate px-1 text-2xs leading-[14px] font-medium text-black/80"
+                          style={{ left: pct(esquerda), width: pct(largura) }}
+                        >
+                          {b.nome.replace(/^Pauta: /, '').replace(/, [\d:]+ a [\d:]+$/, '')}
+                        </span>
+                      )
+                    })}
+                  {faixa.blocos.length === 0 && faixa.vazio && (
+                    <span className="absolute inset-y-0 left-1 leading-[14px] text-muted-foreground">{faixa.vazio}</span>
+                  )}
+                  {selecionado && (
+                    <span
+                      aria-hidden
+                      data-selecionado=""
+                      className="pointer-events-none absolute -inset-y-0.5 z-10 min-w-1 rounded-xs outline-2 outline-offset-1 outline-ring"
+                      style={{ left: pct(posicaoDoBloco(selecionado, duracaoMs).esquerda), width: pct(posicaoDoBloco(selecionado, duracaoMs).largura) }}
+                    />
+                  )}
+                  {ativo && (
+                    <button
+                      type="button"
+                      aria-label={ativo.nome}
+                      aria-pressed={ativo.chave === selecionada}
+                      className="absolute inset-y-0 z-10 min-w-1 rounded-xs focus-visible:outline-2 focus-visible:outline-offset-1"
+                      style={{ left: pct(posicaoDoBloco(ativo, duracaoMs).esquerda), width: pct(posicaoDoBloco(ativo, duracaoMs).largura) }}
+                      onKeyDown={(e) => aoTeclarNoBloco(e, faixa, ativo.chave)}
+                      // Só o Enter e o Espaço (`detail` 0): o ponteiro já selecionou no `pointerdown` da faixa.
+                      onClick={(e) => e.detail === 0 && aoSelecionar(ativo.chave)}
+                    />
+                  )}
+                  {comAlcas &&
+                    (() => {
+                      const limites = limitesDasAlcas(comAlcas, duracaoMs, duracaoMs)
+                      const comum = { duracaoMs, aoMover: comAlcas.aoMover, aoSalvar: comAlcas.aoSalvar, aoDescartar: comAlcas.aoDescartar }
+                      return (
+                        <>
+                          <AlcaDoTempo rotulo="Início do item" borda="inicio" ms={comAlcas.inicio_ms} limites={limites.inicio} {...comum} />
+                          <AlcaDoTempo rotulo="Fim do item" borda="fim" ms={comAlcas.fim_ms} limites={limites.fim} {...comum} />
+                        </>
+                      )
+                    })()}
+                </div>
+              </div>
+            )
+          })}
+          <div ref={cursor} aria-hidden data-cursor="" className="pointer-events-none absolute inset-y-0 z-30 w-0.5 -translate-x-1/2 bg-foreground" />
+          {dica && (
+            <div
+              role="tooltip"
+              className={cn(
+                'pointer-events-none absolute z-40 max-w-80 -translate-y-full truncate rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-float',
+                dica.direita && '-translate-x-full',
+              )}
+              style={{ left: dica.x, top: dica.y - 2 }}
+            >
+              {dica.nome}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
