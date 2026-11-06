@@ -23,6 +23,7 @@ import {
   contem,
   type DadosDoObjeto,
   type ItemDoPainel,
+  itensPorTipo,
   NAO_IDENTIFICADO,
   nomeNormalizado,
   objetosDaAba,
@@ -175,12 +176,7 @@ export function Inspetor({
   indexando: boolean
   aoRecolher: () => void
 }) {
-  const porTipo = useMemo(() => {
-    const mapa = new Map<string, ItemDoPainel[]>()
-    for (const i of itens) mapa.set(i.tipo, [...(mapa.get(i.tipo) ?? []), i])
-    for (const lista of mapa.values()) lista.sort((a, b) => a.inicio_ms - b.inicio_ms || a.fim_ms - b.fim_ms)
-    return mapa
-  }, [itens])
+  const porTipo = useMemo(() => itensPorTipo(itens), [itens])
   const [abertas, setAbertas] = useState<ReadonlySet<string>>(new Set())
   const [filtro, setFiltro] = useState('')
   const [seguir, setSeguir] = useState(true)

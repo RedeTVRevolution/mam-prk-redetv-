@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { type ItemDoPainel, itensPorTipo } from '../../painel.ts'
 import { abrirVideo, irPara, pauseMock, playMock, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
 // A paridade do inspetor com o Painel.test.tsx e o Miniaturas.test.tsx da interface atual.
@@ -509,4 +510,15 @@ test('as linhas pedem a URL do quadro delas; a sem quadro não pede nada; o deta
   await usuario.click(detalhe().getByRole('button', { name: 'Voltar à lista' }))
   await abrirSecao('Objetos')
   await waitFor(() => expect(quadrosPedidos).toContain('objeto-0.jpg'))
+})
+
+test('o agrupamento por tipo é linear: 30 mil itens em pouco tempo, cada lista em ordem de tempo', () => {
+  const itens = Array.from({ length: 30_000 }, (_, i) => ({ tipo: i % 3 ? 'fala' : 'texto', chave: `x${i}`, inicio_ms: 30_000 - i, fim_ms: 30_001 - i }) as ItemDoPainel)
+  const inicio = performance.now()
+  const mapa = itensPorTipo(itens)
+  // Com a cópia da lista a cada item, eram 1,4 s; linear, uns poucos milissegundos.
+  expect(performance.now() - inicio).toBeLessThan(250)
+  expect(mapa.get('fala')?.length).toBe(20_000)
+  const falas = mapa.get('fala') ?? []
+  expect(falas.every((f, i) => i === 0 || falas[i - 1].inicio_ms <= f.inicio_ms)).toBe(true)
 })

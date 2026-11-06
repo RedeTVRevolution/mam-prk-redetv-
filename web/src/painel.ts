@@ -427,6 +427,18 @@ export function itensDaAba(itens: ItemDoPainel[], aba: Exclude<Aba, 'agora'>): I
   return TIPOS_DA_ABA[aba].flatMap((t) => itens.filter((i) => i.tipo === t).sort(ordem))
 }
 
+/** Os itens por tipo, cada lista em ordem de tempo. */
+export function itensPorTipo(itens: ItemDoPainel[]): Map<string, ItemDoPainel[]> {
+  const mapa = new Map<string, ItemDoPainel[]>()
+  for (const i of itens) {
+    const lista = mapa.get(i.tipo)
+    if (lista) lista.push(i)
+    else mapa.set(i.tipo, [i])
+  }
+  for (const lista of mapa.values()) lista.sort((a, b) => a.inicio_ms - b.inicio_ms || a.fim_ms - b.fim_ms)
+  return mapa
+}
+
 /** Os objetos da aba, em ordem do primeiro tempo, cada um com as suas ocorrências em ordem de tempo. */
 export function objetosDaAba(itens: ItemDoPainel[]): { dados: DadosDoObjeto; ocorrencias: ItemDoPainel[] }[] {
   const porId = new Map<string, { dados: DadosDoObjeto; ocorrencias: ItemDoPainel[] }>()
