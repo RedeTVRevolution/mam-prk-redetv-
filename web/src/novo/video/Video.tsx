@@ -50,6 +50,8 @@ import { Kbd } from '../ui/kbd.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { AvisoDeFalha, BotaoDeIcone } from './comum.tsx'
+import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
+import type { ResumoDaPassada } from '../../passadas.ts'
 import { Sugestoes } from './Sugestoes.tsx'
 import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
@@ -128,6 +130,7 @@ export function Video({
   const [velocidade, setVelocidade] = useState(1)
   const [falhaDaMidia, setFalhaDaMidia] = useState<string | null>(null)
   const [dialogo, setDialogo] = useState<DialogoDoVideo | null>(null)
+  const [comparandoCom, setComparandoCom] = useState<string | null>(null)
 
   const reproducao = useQuery({
     queryKey: chaveDoVideo(job.id, 'reproducao'),
@@ -152,6 +155,14 @@ export function Video({
     staleTime: Infinity,
   })
   const d = decupagem.data
+  // As passadas de comparação: lista vazia quando não há, ou quando a pessoa não pode vê-las.
+  const passadas = useQuery({
+    queryKey: chaveDoVideo(job.id, 'passadas'),
+    queryFn: () => cliente.passadas(),
+    enabled: concluido,
+    retry: false,
+    staleTime: Infinity,
+  })
   // Uma correção nova entra no índice depois de gravada: pergunta de novo até ela confirmar.
   const historico = useQuery({
     queryKey: chaveDoVideo(job.id, 'historico'),
@@ -596,6 +607,9 @@ export function Video({
             manifesto={d?.manifesto_do_pipeline}
             pode={pode}
             revisao={revisao}
+            passadas={passadas.data ?? []}
+            comparandoCom={comparandoCom}
+            aoComparar={setComparandoCom}
             aoAbrirDialogo={setDialogo}
           />
           {job.etapa_atual && (job.estado === 'analisando' || finalizando(job)) && (
@@ -706,7 +720,9 @@ export function Video({
             </>
           )}
         </section>
-        {inspetorAberto ? (
+        {comparandoCom ? (
+          <ComparacaoDePassada api={cliente} id={job.id} passadaId={comparandoCom} aoSaltar={saltarParaMs} aoFechar={() => setComparandoCom(null)} />
+        ) : inspetorAberto ? (
           <Inspetor
             decupagem={d}
             carregando={concluido && decupagem.isPending}
@@ -779,6 +795,9 @@ function BarraDoVideo({
   manifesto,
   pode,
   revisao,
+  passadas,
+  comparandoCom,
+  aoComparar,
   aoAbrirDialogo,
 }: {
   job: Job
@@ -787,6 +806,9 @@ function BarraDoVideo({
   manifesto: unknown
   pode: Permissoes
   revisao: Revisao
+  passadas: ResumoDaPassada[]
+  comparandoCom: string | null
+  aoComparar: (id: string | null) => void
   aoAbrirDialogo: (d: DialogoDoVideo) => void
 }) {
   const api = useApi()
@@ -833,6 +855,7 @@ function BarraDoVideo({
           )}
         </div>
         <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
+          {passadas.length > 0 && <SeletorDePassada passadas={passadas} valor={comparandoCom} aoEscolher={aoComparar} />}
           {pode.editar && concluido && <ControlesDaRevisao revisao={revisao} />}
           {concluido && (
             <BotaoDeIcone rotulo="Baixar vídeo" aria-busy={baixando === 'video'} disabled={baixando === 'video'} onClick={() => void baixar('video')}>
