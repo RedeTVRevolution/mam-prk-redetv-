@@ -583,6 +583,14 @@ export function Video({
               aoTentar={() => void decupagem.refetch()}
             />
           )}
+          {catalogo.isError && !(catalogo.error instanceof SessaoExpirada) && (
+            <AvisoDeFalha
+              className="m-2 shrink-0"
+              mensagem="Não foi possível carregar as opções de correção; corrigir fica indisponível. Tente de novo em instantes."
+              codigo={codigoDoErro(catalogo.error)}
+              aoTentar={() => void catalogo.refetch()}
+            />
+          )}
           {faixas && visiveis && (
             <>
               <ChipsDasFaixas

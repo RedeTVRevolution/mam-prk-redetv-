@@ -170,13 +170,20 @@ test('sem decupagem.editar, ou sem o catálogo, não há o que corrigir', async 
   expect(screen.queryByRole('form')).toBeNull()
   cleanup()
 
-  servidor.use(http.get('/v1/correcoes/catalogo', () => new HttpResponse(null, { status: 503 })))
+  let falhar = true
+  servidor.use(http.get('/v1/correcoes/catalogo', () => (falhar ? new HttpResponse(null, { status: 503 }) : HttpResponse.json(catalogo))))
   await abrirVideo({ permissoes: ['decupagem.editar'] })
   await usuario.click(inspetor().getByRole('button', { name: /^Pautas \d+$/ }))
   await usuario.click(inspetor().getByRole('button', { name: /^Eleição, 00:00/ }))
   await usuario.keyboard('{F2}')
   expect(detalhe().queryByRole('button', { name: 'Corrigir' })).toBeNull()
   expect(screen.queryByRole('form')).toBeNull()
+
+  // A falha do catálogo avisa, e o "Tentar de novo" traz a correção de volta.
+  const aviso = (await screen.findByText(/Não foi possível carregar as opções de correção/)).closest<HTMLElement>('[role="alert"]')!
+  falhar = false
+  await usuario.click(within(aviso).getByRole('button', { name: 'Tentar de novo' }))
+  expect(await detalhe().findByRole('button', { name: 'Corrigir' })).toBeTruthy()
 })
 
 test('F2 sem item selecionado avisa', async () => {
