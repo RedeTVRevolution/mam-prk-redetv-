@@ -63,6 +63,20 @@ def test_cada_output_do_modulo_sai_na_raiz_para_o_make_e_o_deploy() -> None:
         )
 
 
+def test_so_o_dev_desliga_os_indices_ann_da_busca() -> None:
+    # Na produção o KNN chegaria ao teto de 100 mil registros em dias (ADR 0006).
+    dev = (INFRA / "main.tf").read_text()
+    prod = (INFRA / "ambientes" / "prod" / "main.tf").read_text()
+    modulo = (MODULO / "main.tf").read_text()
+
+    assert re.search(r"^\s*indices_da_busca_ligados\s*= false$", dev, re.MULTILINE)
+    assert "indices_da_busca_ligados" not in prod
+    assert re.search(
+        r'variable "indices_da_busca_ligados" \{\n\s*type\s*= bool\n\s*default = true\n',
+        modulo,
+    )
+
+
 def test_as_variaveis_sem_padrao_do_modulo_sao_passadas_pela_raiz() -> None:
     raiz = (INFRA / "main.tf").read_text()
     modulo = _texto_do_modulo()

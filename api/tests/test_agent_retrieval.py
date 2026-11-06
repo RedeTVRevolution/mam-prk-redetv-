@@ -49,6 +49,43 @@ def test_config_vem_so_do_ambiente() -> None:
     assert sem_quadro.indice_do_quadro is None
 
 
+@pytest.mark.parametrize(
+    ("valor", "ligados"),
+    [(None, True), ("", True), ("true", True), ("false", False), ("FALSE", False)],
+)
+def test_os_indices_ann_vem_do_ambiente_e_sem_a_variavel_ficam_ligados(
+    valor: str | None, ligados: bool
+) -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+    }
+    if valor is not None:
+        ambiente["BUSCA_INDICES_LIGADOS"] = valor
+    config = ConfigDaBusca.do_ambiente(ambiente)
+    assert config.indices_ligados is ligados
+    # Desligar os índices não desliga o vetor do quadro.
+    assert config.indice_do_quadro == "q"
+
+
+def test_valor_estranho_nos_indices_ann_levanta() -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+        "BUSCA_INDICES_LIGADOS": "0",
+    }
+    with pytest.raises(ValueError, match="BUSCA_INDICES_LIGADOS"):
+        ConfigDaBusca.do_ambiente(ambiente)
+
+
 SEM_QUADRO = ConfigDaBusca("proj-x", "reg-y", "col-z", "ind-d", None, 256)
 
 
@@ -158,6 +195,47 @@ def test_toda_busca_por_vetor_leva_o_index_hint_do_indice_ann_do_seu_campo() -> 
         }
     # A busca por texto não é KNN: não usa índice de vetor.
     assert "searchHint" not in buscas["textSearch"]
+
+
+SEM_INDICES = replace(CONFIG, indices_ligados=False)
+
+
+@pytest.mark.parametrize(
+    "consulta",
+    [
+        Consulta(texto="a", significado="b", vetor_do_quadro=[0.0]),
+        Consulta(significado="b", filtros=Filtros(tipo="fala")),
+        Consulta(vetor_do_quadro=[0.0]),
+        Consulta(texto="a", significado="b", cortar_significado=True),
+    ],
+)
+def test_sem_os_indices_ann_nenhuma_busca_leva_search_hint(consulta: Consulta) -> None:
+    pedido = pedido_de_busca(SEM_INDICES, consulta)
+    assert "searchHint" not in str(pedido)
+    assert "indexHint" not in str(pedido) and "targetRecall" not in str(pedido)
+    for busca in _buscas(pedido).values():
+        assert busca["topK"] == consulta.limite
+
+
+def test_sem_os_indices_ann_a_busca_por_quadro_continua_aceita() -> None:
+    pedido = pedido_de_busca(SEM_INDICES, Consulta(vetor_do_quadro=[0.1, 0.2]))
+    assert _buscas(pedido)["vectorSearch"] == {
+        "topK": 20,
+        "outputFields": {"dataFields": ["*"]},
+        "searchField": "quadro_vetor",
+        "vector": {"values": [0.1, 0.2]},
+    }
+
+
+def test_sem_os_indices_ann_a_colecao_nasce_sem_indice() -> None:
+    assert indices_da_colecao(SEM_INDICES) == {}
+    transporte = TransporteFalso({"name": "op", "done": True})
+    criar_colecao(SEM_INDICES, transporte, _nao_dorme)
+    [(metodo, caminho, _)] = transporte.chamadas
+    assert (metodo, caminho) == (
+        "POST",
+        "projects/proj-x/locations/reg-y/collections?collectionId=col-z",
+    )
 
 
 def test_so_filtros_nao_e_busca() -> None:

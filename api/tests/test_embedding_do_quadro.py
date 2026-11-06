@@ -129,7 +129,9 @@ def test_resposta_sem_a_dimensao_pedida_e_erro() -> None:
         GeminiEmbedding("proj", 2, transporte).vetor(JPEG, "x")
 
 
-def _config(indice_do_quadro: str | None) -> ConfigDaBusca:
+def _config(
+    indice_do_quadro: str | None, indices_ligados: bool = True
+) -> ConfigDaBusca:
     return ConfigDaBusca(
         projeto="proj",
         regiao="us-central1",
@@ -137,12 +139,18 @@ def _config(indice_do_quadro: str | None) -> ConfigDaBusca:
         indice_da_descricao="d",
         indice_do_quadro=indice_do_quadro,
         dimensao=256,
+        indices_ligados=indices_ligados,
     )
 
 
 def test_sem_busca_ou_sem_indice_do_quadro_nao_ha_embedding() -> None:
     assert embedding_da_busca(None) is None
     assert embedding_da_busca(_config(None)) is None
+
+
+def test_sem_os_indices_ann_o_vetor_do_quadro_continua_calculado() -> None:
+    # O dev roda sem índice ANN por custo (ADR 0006), e a busca por imagem segue.
+    assert embedding_da_busca(_config("q", indices_ligados=False)) is not None
 
 
 def test_com_o_indice_do_quadro_o_embedding_usa_o_projeto_e_a_dimensao_da_busca(

@@ -23,3 +23,11 @@ A região, como os outros nomes da nuvem, só aparece nos arquivos `.tf` do mód
 Alternativas recusadas:
 - **BigQuery vector search ou Elasticsearch em São Paulo:** manteriam os dados no país, mas sem a busca híbrida, os filtros e a reordenação gerenciados que o plano escolheu.
 - **`us-central1`:** a região padrão de muitos produtos, mas mais longe de São Paulo que `us-east4`.
+
+## O dev sem os índices ANN dedicados, por custo (5/11/2026)
+
+Em 5/11/2026, o Bruno decidiu desligar no dev os dois índices ANN da coleção, o da descrição e o do quadro-chave. Cada um tem uma réplica dedicada e, juntos, custavam cerca de R$ 571 por mês fixos. Era o valor da réplica que faltava registrar acima. A variável `indices_da_busca_ligados` do módulo (padrão `true`) passa a `false` na raiz do dev e chega ao código como `BUSCA_INDICES_LIGADOS`. Desligada, as buscas por vetor vão sem `searchHint`, pelo KNN, e o `make criar-colecao-da-busca` não cria índice. A busca por quadro continua presa ao `indice_do_quadro_ligado`, que é outra chave.
+
+A escolha do ANN, acima, foi pelo teto de 100 mil registros do KNN, e não pela latência. No dev, com 11.724 registros, 25 consultas (híbrida, com filtro `tipo` e só pelo vetor do quadro) devolveram os mesmos 20 resultados com e sem a dica de índice, com p50 de cerca de 950 ms nos dois casos.
+
+O teto continua valendo. Na produção, o índice é obrigatório antes dos 100 mil registros: com cerca de 30 mil por dia, ela chegaria lá em uns 3 dias, e por isso fica com os índices. O dev chega ao teto com cerca de 65 h de vídeo. Antes disso, é preciso ligar a variável, aplicar o Terraform e rodar o `make criar-colecao-da-busca`.

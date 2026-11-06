@@ -5,7 +5,8 @@ Projeto, região, coleção, índices e dimensão chegam por variável de ambien
 `Transporte`: aqui moram a montagem dos pedidos e a leitura das respostas, testadas sem
 rede. Cada vetor tem o seu índice ANN (um índice cobre um só campo de vetor), implantado
 junto com a coleção, e toda busca por vetor leva o `searchHint.indexHint` dele, porque o
-KNN sem índice aceita no máximo 100 mil registros.
+KNN sem índice aceita no máximo 100 mil registros. Com `BUSCA_INDICES_LIGADOS=false` (o
+dev, por custo) não há índice ANN: a coleção nasce sem eles e a busca vai pelo KNN.
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022),
 conferido no #122.
@@ -76,14 +77,23 @@ class ConfigDaBusca:
     # "Tchau,") ficam perto de qualquer consulta. None: sem corte.
     distancia_maxima: float | None = None
     palavras_minimas: int = 0
+    # False: sem índice ANN nenhum (o dev, por custo; ADR 0006). As buscas por vetor vão
+    # sem `searchHint`, pelo KNN, que aceita até 100 mil registros. O vetor do quadro e a
+    # busca por quadro continuam presos a `indice_do_quadro`.
+    indices_ligados: bool = True
 
     @classmethod
     def do_ambiente(cls, ambiente: Mapping[str, str]) -> "ConfigDaBusca":
         """Levanta `KeyError` se faltar uma variável: sem ela a busca não tem onde ir.
-        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave. O corte
+        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave.
+        `BUSCA_INDICES_LIGADOS=false` desliga os índices ANN; ausente ou vazia, ficam
+        ligados, e outro valor que não `true` ou `false` levanta `ValueError`. O corte
         (`BUSCA_DISTANCIA_MAXIMA`, `BUSCA_PALAVRAS_MINIMAS`) só o serviço e o
         `make sondar-busca` recebem."""
         distancia = ambiente.get("BUSCA_DISTANCIA_MAXIMA")
+        ligados = (ambiente.get("BUSCA_INDICES_LIGADOS") or "true").strip().lower()
+        if ligados not in ("true", "false"):
+            raise ValueError(f"BUSCA_INDICES_LIGADOS inválida: {ligados!r}")
         return cls(
             projeto=ambiente["GCP_PROJECT_ID"],
             regiao=ambiente["BUSCA_REGIAO"],
@@ -93,6 +103,7 @@ class ConfigDaBusca:
             dimensao=int(ambiente["BUSCA_DIMENSAO"]),
             distancia_maxima=float(distancia) if distancia else None,
             palavras_minimas=int(ambiente.get("BUSCA_PALAVRAS_MINIMAS") or 0),
+            indices_ligados=ligados == "true",
         )
 
     @property
@@ -105,7 +116,9 @@ class ConfigDaBusca:
 
     @property
     def indices(self) -> dict[str, str]:
-        """O id do índice ANN de cada campo de vetor ligado."""
+        """O id do índice ANN de cada campo de vetor ligado; nenhum sem `indices_ligados`."""
+        if not self.indices_ligados:
+            return {}
         indices = {CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao}
         if self.indice_do_quadro is not None:
             indices[CAMPO_DO_VETOR_DO_QUADRO] = self.indice_do_quadro
@@ -155,8 +168,9 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
     """O corpo do `batchSearch`: filtros, texto, significado e vetor, fundidos por RRF.
 
     As buscas por vetor (significado e quadro) levam o `indexHint` do índice ANN do seu
-    campo; a busca por texto não é KNN e não usa índice de vetor. Só filtros não é busca:
-    levanta `ValueError`.
+    campo, salvo com os índices desligados (`indices_ligados`): aí vão sem `searchHint`,
+    pelo KNN. A busca por texto não é KNN e não usa índice de vetor. Só filtros não é
+    busca: levanta `ValueError`.
     """
     comum: dict[str, Any] = {
         "topK": consulta.limite,
@@ -167,6 +181,8 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
         comum["filter"] = filtro
 
     def no_indice(campo: str) -> dict[str, Any]:
+        if not config.indices_ligados:
+            return {**comum, "searchField": campo}
         return {
             **comum,
             "searchField": campo,
@@ -194,7 +210,8 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
         )
     if consulta.vetor_do_quadro is not None:
         if config.indice_do_quadro is None:
-            # Sem o índice, a busca cairia no KNN, limitado a 100 mil registros.
+            # Desligado, nenhum vetor de quadro é calculado na indexação
+            # (`embedding_da_busca`): não há o que achar.
             raise ValueError("o índice do quadro-chave está desligado")
         buscas.append(
             {
@@ -268,7 +285,8 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
 
 
 def indices_da_colecao(config: ConfigDaBusca) -> dict[str, dict[str, Any]]:
-    """O corpo de cada índice ANN, pelo id: um campo de vetor, os de filtro e os guardados."""
+    """O corpo de cada índice ANN, pelo id: um campo de vetor, os de filtro e os guardados.
+    Vazio com os índices desligados (`indices_ligados`)."""
     propriedades = esquema_da_colecao(config)["dataSchema"]["properties"]
     guardados = [p for p in propriedades if p != "significado"]
     return {
