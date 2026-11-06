@@ -39,8 +39,8 @@ REGISTROS_POR_LOTE = 200
 # relógio daqui e o do serviço (#411).
 FRACAO_DA_COTA = 0.9
 # As esperas, em segundos, antes de cada nova tentativa no 429 (cota esgotada): 315 s no
-# total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só as chamadas
-# da gravação e da purga tentam de novo; a busca do usuário não espera.
+# total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só nos Jobs
+# (`tentar_no_429`) e só as chamadas da gravação e da purga; a busca nunca espera.
 ESPERAS_NO_429_S = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0, 60.0)
 COM_NOVA_TENTATIVA = (
     "dataObjects:batchCreate",
@@ -119,6 +119,9 @@ class ConfigDaBusca:
         ligados = (ambiente.get("BUSCA_INDICES_LIGADOS") or "true").strip().lower()
         if ligados not in ("true", "false"):
             raise ValueError(f"BUSCA_INDICES_LIGADOS inválida: {ligados!r}")
+        if cota and int(cota) <= 0:
+            # Gravaria um lote por minuto, sem aviso.
+            raise ValueError(f"BUSCA_COTA_DE_ESCRITA inválida: {cota!r}")
         return cls(
             projeto=ambiente["GCP_PROJECT_ID"],
             regiao=ambiente["BUSCA_REGIAO"],
@@ -569,11 +572,16 @@ class AgentRetrieval:
         self,
         config: ConfigDaBusca,
         transporte: Transporte,
+        *,
+        tentar_no_429: bool = False,
         dormir: Callable[[float], None] = sleep,
         relogio: Callable[[], float] = monotonic,
     ) -> None:
+        """`tentar_no_429` só nos Jobs (indexação, `make reindexar`, purga): o serviço
+        web não segura a thread da busca esperando a cota, e o 429 volta na hora."""
         self._config = config
         self._transporte = transporte
+        self._tentar_no_429 = tentar_no_429
         self._dormir = dormir
         self._relogio = relogio
         # Os lotes do `gravar` no último minuto, (quando, objetos): o ritmo vale entre os
@@ -584,10 +592,12 @@ class AgentRetrieval:
         self._vetores: dict[str, list[float]] = {}
 
     def _chamar(self, caminho: str, corpo: dict[str, Any]) -> dict[str, Any]:
-        """No 429, as chamadas de `COM_NOVA_TENTATIVA` esperam e tentam de novo: a cota
-        de escrita é da coleção, e dois vídeos indexando juntos a dividem (#411)."""
+        """Com `tentar_no_429`, as chamadas de `COM_NOVA_TENTATIVA` esperam e tentam de
+        novo no 429: a cota de escrita é da coleção, e dois vídeos indexando juntos a
+        dividem (#411)."""
         url = f"{self._config.caminho_da_colecao}/{caminho}"
-        esperas = ESPERAS_NO_429_S if caminho in COM_NOVA_TENTATIVA else ()
+        tenta = self._tentar_no_429 and caminho in COM_NOVA_TENTATIVA
+        esperas = ESPERAS_NO_429_S if tenta else ()
         for espera in esperas:
             try:
                 return self._transporte("POST", url, corpo)
@@ -638,17 +648,26 @@ class AgentRetrieval:
         for i in range(0, len(registros), REGISTROS_POR_LOTE):
             pedacos = registros[i : i + REGISTROS_POR_LOTE]
             self._no_ritmo(len(pedacos))
+            corpo = {"requests": [_criacao(r) for r in pedacos]}
             try:
-                self._chamar(
-                    "dataObjects:batchCreate",
-                    {"requests": [_criacao(r) for r in pedacos]},
-                )
+                self._chamar("dataObjects:batchCreate", corpo)
             except JaExiste:
-                # O `apagar` acima tirou o vídeo: o 409 é o lote desta gravação, reenviado
-                # depois de uma resposta perdida, e já gravado (#411).
+                # Parte do lote já está lá: reenviado depois de uma resposta perdida,
+                # gravado em parte, ou de outra indexação do mesmo vídeo (os ids são
+                # fixos). Sai pelos nomes e entra inteiro, uma vez; outro 409 sobe (#411).
                 log.warning(
-                    "lote %d de %s já gravado (409)", i // REGISTROS_POR_LOTE, job_id
+                    "lote %d de %s: 409, apagando e criando de novo",
+                    i // REGISTROS_POR_LOTE,
+                    job_id,
                 )
+                colecao = self._config.caminho_da_colecao
+                nomes = [
+                    {"name": f"{colecao}/dataObjects/{c['dataObjectId']}"}
+                    for c in corpo["requests"]
+                ]
+                self._chamar("dataObjects:batchDelete", {"requests": nomes})
+                self._no_ritmo(len(pedacos))
+                self._chamar("dataObjects:batchCreate", corpo)
         if not self._config.indices_ligados:
             self._avisar_do_teto_do_knn()
 

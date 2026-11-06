@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -853,6 +854,22 @@ class _Relogio:
         self.agora += segundos
 
 
+def _indice(
+    transporte: Any,
+    relogio: _Relogio,
+    config: ConfigDaBusca = CONFIG,
+    tentar_no_429: bool = True,
+) -> AgentRetrieval:
+    """O adaptador como o Job de indexação o monta, com o relógio falso."""
+    return AgentRetrieval(
+        config,
+        transporte,
+        tentar_no_429=tentar_no_429,
+        dormir=relogio.dormir,
+        relogio=relogio,
+    )
+
+
 def test_cota_de_escrita_vem_do_ambiente_e_sem_ela_nao_ha_ritmo() -> None:
     ambiente = {
         "GCP_PROJECT_ID": "p",
@@ -868,6 +885,10 @@ def test_cota_de_escrita_vem_do_ambiente_e_sem_ela_nao_ha_ritmo() -> None:
     assert ConfigDaBusca.do_ambiente(vazia).cota_de_escrita is None
     com_cota = ambiente | {"BUSCA_COTA_DE_ESCRITA": "3000"}
     assert ConfigDaBusca.do_ambiente(com_cota).cota_de_escrita == 3000
+    # Zero ou negativa gravaria um lote por minuto, sem aviso: para com erro.
+    for invalida in ("0", "-1"):
+        with pytest.raises(ValueError, match="BUSCA_COTA_DE_ESCRITA"):
+            ConfigDaBusca.do_ambiente(ambiente | {"BUSCA_COTA_DE_ESCRITA": invalida})
 
 
 def test_gravar_no_429_espera_e_reenvia_o_lote() -> None:
@@ -885,29 +906,48 @@ def test_gravar_no_429_espera_e_reenvia_o_lote() -> None:
                 raise CotaEsgotada(caminho)
         return transporte(metodo, caminho, corpo)
 
-    AgentRetrieval(CONFIG, com_um_429, relogio.dormir, relogio).gravar(
-        "j", _registros(3)
-    )
+    _indice(com_um_429, relogio).gravar("j", _registros(3))
     criados = [c for _, c, _ in transporte.chamadas if c.endswith(":batchCreate")]
     assert (lotes, len(criados)) == (2, 1)
     assert relogio.esperas and relogio.esperas[0] > 0
 
 
+def _sempre_429(
+    metodo: str, caminho: str, corpo: dict[str, Any] | None
+) -> dict[str, Any]:
+    raise CotaEsgotada(caminho)
+
+
 def test_esperas_no_429_crescem_e_cabem_no_timeout_do_job() -> None:
     relogio = _Relogio()
-
-    def sempre_429(
-        metodo: str, caminho: str, corpo: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        raise CotaEsgotada(caminho)
-
     with pytest.raises(CotaEsgotada):
-        AgentRetrieval(CONFIG, sempre_429, relogio.dormir, relogio).apagar("j")
+        _indice(_sempre_429, relogio).apagar("j")
     esperas = relogio.esperas
     assert len(esperas) > 1
     assert esperas == sorted(esperas) and esperas[-1] > esperas[0]
-    # O Job mam-indexacao tem 1800 s (infra/modulos/mam/main.tf); uma chamada não o come.
-    assert sum(esperas) < 600
+    # Os Jobs de indexação e de purga têm 1800 s (infra/modulos/mam/): as esperas de
+    # uma chamada sozinha cabem neles.
+    assert sum(esperas) < 1800
+
+
+@pytest.mark.parametrize(
+    "operacao",
+    [
+        lambda i: i.gravar("j", _registros(1)),
+        lambda i: i.apagar("j"),
+        lambda i: i.vetores_dos_planos("j"),
+    ],
+    ids=["gravar", "apagar", "vetores_dos_planos"],
+)
+def test_sem_tentar_no_429_o_erro_sobe_na_hora(
+    operacao: Callable[[AgentRetrieval], object],
+) -> None:
+    # O serviço web (a busca, os planos parecidos, a purga do admin) não segura a
+    # thread esperando a cota: o 429 volta como erro do pedido.
+    relogio = _Relogio()
+    with pytest.raises(CotaEsgotada):
+        operacao(AgentRetrieval(CONFIG, _sempre_429, dormir=relogio.dormir))
+    assert relogio.esperas == []
 
 
 @pytest.mark.parametrize("operacao", [":query", ":batchDelete"])
@@ -925,45 +965,74 @@ def test_apagar_tambem_tenta_de_novo_no_429(operacao: str) -> None:
             raise CotaEsgotada(caminho)
         return next(r for o, r in respostas.items() if caminho.endswith(o))
 
-    AgentRetrieval(CONFIG, com_um_429, relogio.dormir, relogio).apagar("j")
+    _indice(com_um_429, relogio).apagar("j")
     assert falhou and relogio.esperas
 
 
 def test_a_busca_do_usuario_nao_espera_no_429() -> None:
     relogio = _Relogio()
-
-    def sempre_429(
-        metodo: str, caminho: str, corpo: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        raise CotaEsgotada(caminho)
-
     with pytest.raises(CotaEsgotada):
-        AgentRetrieval(CONFIG, sempre_429, relogio.dormir, relogio).buscar(
-            Consulta(texto="x")
-        )
+        _indice(_sempre_429, relogio).buscar(Consulta(texto="x"))
     assert relogio.esperas == []
 
 
-def test_lote_repetido_que_volta_com_409_conta_como_gravado() -> None:
-    relogio = _Relogio()
-    lotes = 0
+def _com_409(*erros: Exception) -> tuple[TransporteFalso, Any]:
+    """Transporte cujos `batchCreate` levantam `erros`, em ordem, e depois gravam."""
+    falso = TransporteFalso()
+    fila = list(erros)
 
-    def resposta_perdida(
+    def transporte(
         metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> dict[str, Any]:
-        nonlocal lotes
-        if caminho.endswith(":batchCreate"):
-            lotes += 1
-            if lotes == 1:
-                raise CotaEsgotada(caminho)
-            if lotes == 2:
-                raise JaExiste(caminho)
+        falso(metodo, caminho, corpo)
+        if caminho.endswith(":batchCreate") and fila:
+            raise fila.pop(0)
         return {}
 
-    AgentRetrieval(CONFIG, resposta_perdida, relogio.dormir, relogio).gravar(
-        "j", _registros(250)
-    )
-    assert lotes == 3  # o segundo lote seguiu depois do 409 do primeiro
+    return falso, transporte
+
+
+def _operacoes(falso: TransporteFalso) -> list[str]:
+    return [c.rsplit(":", 1)[1] for _, c, _ in falso.chamadas]
+
+
+@pytest.mark.parametrize(
+    "erros",
+    [(JaExiste("x"),), (CotaEsgotada("x"), JaExiste("x"))],
+    ids=["409 na primeira tentativa", "429 e depois 409"],
+)
+def test_lote_que_volta_com_409_e_apagado_pelos_nomes_e_criado_de_novo(
+    erros: tuple[Exception, ...],
+) -> None:
+    falso, transporte = _com_409(*erros)
+    _indice(transporte, _Relogio()).gravar("j", _registros(250))
+    # O 409 pode ser lote gravado em parte ou de outra indexação do mesmo vídeo: o
+    # lote sai pelos nomes e entra inteiro, na versão desta gravação.
+    recusadas = ["batchCreate"] * len(erros)
+    # ... e o segundo lote (50 registros) segue normal.
+    assert _operacoes(falso) == [
+        "query",
+        *recusadas,
+        "batchDelete",
+        "batchCreate",
+        "batchCreate",
+    ]
+    _, _, apagados = next(c for c in falso.chamadas if c[1].endswith(":batchDelete"))
+    colecao = "projects/proj-x/locations/reg-y/collections/col-z"
+    assert apagados == {
+        "requests": [
+            {"name": f"{colecao}/dataObjects/m-j-fala-{i}"} for i in range(200)
+        ]
+    }
+    _, _, recriado = falso.chamadas[-2]
+    assert recriado is not None and len(recriado["requests"]) == 200
+
+
+def test_segundo_409_do_mesmo_lote_sobe() -> None:
+    falso, transporte = _com_409(JaExiste("x"), JaExiste("x"))
+    with pytest.raises(JaExiste):
+        _indice(transporte, _Relogio()).gravar("j", _registros(3))
+    assert _operacoes(falso) == ["query", "batchCreate", "batchDelete", "batchCreate"]
 
 
 def _anota_os_lotes(relogio: _Relogio, envios: list[tuple[float, int]]) -> Any:
@@ -986,9 +1055,9 @@ def test_ritmo_nenhuma_janela_de_60_s_passa_da_cota() -> None:
     relogio = _Relogio()
     envios: list[tuple[float, int]] = []
     config = replace(CONFIG, cota_de_escrita=3000)
-    AgentRetrieval(
-        config, _anota_os_lotes(relogio, envios), relogio.dormir, relogio
-    ).gravar("j", _registros(5000))
+    _indice(_anota_os_lotes(relogio, envios), relogio, config).gravar(
+        "j", _registros(5000)
+    )
     assert sum(n for _, n in envios) == 5000
     _nenhuma_janela_de_60_s_passa(envios, 3000)
     # Abaixo da cota, sem parar à toa: 25 lotes em menos de 2 minutos e meio.
@@ -998,11 +1067,8 @@ def test_ritmo_nenhuma_janela_de_60_s_passa_da_cota() -> None:
 def test_ritmo_vale_entre_videos_gravados_no_mesmo_processo() -> None:
     relogio = _Relogio()
     envios: list[tuple[float, int]] = []
-    indice = AgentRetrieval(
-        replace(CONFIG, cota_de_escrita=3000),
-        _anota_os_lotes(relogio, envios),
-        relogio.dormir,
-        relogio,
+    indice = _indice(
+        _anota_os_lotes(relogio, envios), relogio, replace(CONFIG, cota_de_escrita=3000)
     )
     indice.gravar("a", _registros(2000))
     indice.gravar("b", _registros(2000))

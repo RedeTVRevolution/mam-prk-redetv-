@@ -201,7 +201,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         repositorio,
         RepositorioDeCorrecoesFirestore(cliente),
         ArquivosNoStorage(ClienteStorage(project=projeto), aceitos, decupagens),
-        AgentRetrieval(busca, transporte_http()) if busca else None,
+        AgentRetrieval(busca, transporte_http(), tentar_no_429=True) if busca else None,
         RepositorioDeAuditoriaFirestore(cliente),
         agora_utc,
     )
