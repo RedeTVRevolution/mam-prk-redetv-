@@ -6,6 +6,7 @@ import {
   IconExternalLink,
   IconEye,
   IconFileDownload,
+  IconHistory,
   IconLayoutSidebarRightExpand,
   IconLink,
   IconMaximize,
@@ -13,12 +14,13 @@ import {
   IconPlayerPlay,
   IconRefresh,
   IconTrash,
+  IconX,
   IconVolume,
   IconVolumeOff,
 } from '@tabler/icons-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from 'cn'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { codigoDoErro, ConflitoNaApi, PedidoInvalido, SessaoExpirada } from '../../api.ts'
 import { useAtalhos } from '../../atalhos.ts'
 import { filtrosDeQuemAcessou } from '../../auditoria.ts'
@@ -27,12 +29,16 @@ import {
   aindaIndexando,
   editorDeNovaAparicao,
   editorDoItem,
+  itemDaCorrecao,
   marcasDosItens,
   motivoDaRemocao,
   type Pedido,
   pedidoDeRemocao,
   podeRemover,
 } from '../../catalogacao.ts'
+import type { ItemDoHistorico, Pauta, Sugestao } from '../../decupagem.ts'
+import { ABAS_DO_TRECHO } from '../../trecho.ts'
+import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from '../../pautas.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
 import { naInterfaceAtual } from '../../interface.ts'
 import { dataDeExibicao, finalizando, type Job } from '../../jobs.ts'
@@ -43,22 +49,37 @@ import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.
 import { criarCacheDeQuadros } from '../../quadros.ts'
 import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
+import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
 import { useApi } from '../consultas.ts'
+import { Button } from '../ui/button.tsx'
+import { Kbd } from '../ui/kbd.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
-import { AvisoDeFalha, BotaoDeIcone } from './comum.tsx'
+import { AvisoDeFalha, BotaoComDica, BotaoDeIcone } from './comum.tsx'
+import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
+import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
+import type { ResumoDaPassada } from '../../passadas.ts'
+import { Sugestoes } from './Sugestoes.tsx'
+import { FormularioDoTrecho } from './Trecho.tsx'
+import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './Correcao.tsx'
+import { FusaoDePessoa } from './FusaoDePessoa.tsx'
+import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
 import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
-import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo } from './LinhaDoTempo.tsx'
+import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo, type TrechoMarcado } from './LinhaDoTempo.tsx'
 
 export interface Permissoes {
   editar: boolean
   reprocessar: boolean
   verAuditoria: boolean
   apagar: boolean
+  /** `correcao.aprovar`: o Curador (renomear em todos os vídeos). */
+  aprovar: boolean
+  /** `catalogo.fundir`. */
+  fundir: boolean
 }
 
 const VELOCIDADES = [1, 2, 4]
@@ -71,6 +92,7 @@ const GRUPO = 'Player'
 const GRUPO_DA_LINHA = 'Linha do tempo'
 const GRUPO_DO_INSPETOR = 'Inspetor'
 const GRUPO_DA_CORRECAO = 'Correção'
+const GRUPO_DA_CATALOGACAO = 'Catalogação'
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 const tecla = (e: KeyboardEvent, ...teclas: string[]): boolean => teclas.includes(e.key.toLowerCase())
@@ -80,7 +102,7 @@ function tocar(player: HTMLVideoElement) {
   Promise.resolve(player.play()).catch(() => {})
 }
 
-type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' }
+type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fundir' | 'renomear' }
 
 /**
  * O vídeo aberto: o `<video>` com o proxy assinado, as barras, a linha do tempo e o inspetor. O
@@ -116,6 +138,21 @@ export function Video({
   const [velocidade, setVelocidade] = useState(1)
   const [falhaDaMidia, setFalhaDaMidia] = useState<string | null>(null)
   const [dialogo, setDialogo] = useState<DialogoDoVideo | null>(null)
+  const [comparandoCom, setComparandoCom] = useState<string | null>(null)
+  // Quem abriu a gaveta e a comparação: ao fecharem, o foco volta para lá, e não para o body.
+  const botaoDoHistorico = useRef<HTMLButtonElement>(null)
+  const seletorDePassada = useRef<HTMLSelectElement>(null)
+  // A gaveta das correções toma o lugar do inspetor; a aba em que ficou vale para a próxima abertura.
+  const [gavetaAberta, setGavetaAberta] = useState(false)
+  const [abaDaGaveta, setAbaDaGaveta] = useState<AbaDaGaveta>('historico')
+  // Juntar e dividir pautas: os ids marcados e o formulário aberto.
+  const [pautasMarcadas, setPautasMarcadas] = useState<ReadonlySet<string>>(new Set())
+  const [estrutura, setEstrutura] = useState<{ modo: 'juntar'; pautas: Pauta[] } | { modo: 'dividir'; pauta: Pauta; em_ms: number } | null>(null)
+
+  // O trecho marcado com I e O; `descrevendo` abre o campo único com o tipo em abas.
+  const [trecho, setTrecho] = useState<{ inicio_ms: number; fim_ms: number | null } | null>(null)
+  const [descrevendo, setDescrevendo] = useState(false)
+  const salvarDoTrecho = useRef<(() => void) | null>(null)
 
   const reproducao = useQuery({
     queryKey: chaveDoVideo(job.id, 'reproducao'),
@@ -140,6 +177,14 @@ export function Video({
     staleTime: Infinity,
   })
   const d = decupagem.data
+  // As passadas de comparação: lista vazia quando não há, ou quando a pessoa não pode vê-las.
+  const passadas = useQuery({
+    queryKey: chaveDoVideo(job.id, 'passadas'),
+    queryFn: () => cliente.passadas(),
+    enabled: concluido,
+    retry: false,
+    staleTime: Infinity,
+  })
   // Uma correção nova entra no índice depois de gravada: pergunta de novo até ela confirmar.
   const historico = useQuery({
     queryKey: chaveDoVideo(job.id, 'historico'),
@@ -148,6 +193,15 @@ export function Video({
     retry: false,
     staleTime: Infinity,
     refetchInterval: (q) => (q.state.data && aindaIndexando(q.state.data) ? intervaloDaIndexacaoMs : false),
+  })
+
+  // A fila das correções que não casaram depois de reprocessar: um pedido à parte, para o histórico não depender dela.
+  const fila = useQuery({
+    queryKey: chaveDoVideo(job.id, 'fila'),
+    queryFn: () => cliente.fila(),
+    enabled: pode.editar && !!d,
+    retry: false,
+    staleTime: Infinity,
   })
 
   const itens = useMemo(() => (d ? itensDoPainel(d) : []), [d])
@@ -178,6 +232,55 @@ export function Video({
     clearTimeout(fimDoAviso.current)
     fimDoAviso.current = setTimeout(() => setAviso(null), AVISO_MS)
   }
+
+  const revisao = useRevisao({
+    id: job.id,
+    pode: pode.editar,
+    decupagemPronta: !!d,
+    catalogo: catalogo.data,
+    historico: historico.data,
+    mostrarAviso,
+    aoAlternar: () => {
+      // Entrar ou sair do modo começa do zero: sem marcas nem formulário da revisão anterior.
+      setPautasMarcadas(new Set())
+      setEstrutura(null)
+      setTrecho(null)
+      setDescrevendo(false)
+    },
+  })
+
+  // A sessão de revisão (#251) vale no modo de revisão; a pessoa não vê nada dela.
+  useSessaoDeRevisao(cliente, pode.editar && revisao.revisando, tocando)
+
+  // As sugestões do pipeline só aparecem na revisão; a lista vem de novo a cada entrada nela.
+  const chaveDasSugestoes = chaveDoVideo(job.id, 'sugestoes')
+  const sugestoes = useQuery({
+    queryKey: chaveDasSugestoes,
+    queryFn: () => cliente.sugestoes(),
+    enabled: revisao.revisando && !!d,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  })
+
+  // Uma decupagem de outra versão (reprocessar) deixa velhos o histórico, a fila, as passadas e as
+  // comparações, que valem para sempre no cache: pergunta de novo. Recarregar a mesma versão não custa nada.
+  const versaoAnterior = useRef(d?.versao_decupagem)
+  useEffect(() => {
+    if (!d) return
+    if (versaoAnterior.current !== undefined && versaoAnterior.current !== d.versao_decupagem) {
+      for (const parte of ['historico', 'fila', 'passadas', 'comparacao']) void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, parte) })
+    }
+    versaoAnterior.current = d.versao_decupagem
+  }, [d, consultas, job.id])
+
+  // Toda mudança do histórico (corrigir, desfazer com Ctrl+Z, aceitar uma sugestão, decidir na gaveta) pode
+  // trazer de volta ou tirar uma sugestão: a lista vem de novo, sem cada caminho ter de lembrar disso.
+  const historicoAnterior = useRef(historico.data)
+  useEffect(() => {
+    if (historicoAnterior.current && historicoAnterior.current !== historico.data) void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })
+    if (historico.data) historicoAnterior.current = historico.data
+  }, [historico.data, consultas, chaveDasSugestoes])
 
   // Outro `?t=` no mesmo vídeo salta o player.
   const tAnterior = useRef(t)
@@ -289,6 +392,7 @@ export function Video({
     setSecao(SECAO_DO_TIPO[tipoDaChave(chave)])
     setDetalhe(true)
     setInspetorAberto(true)
+    setGavetaAberta(false)
     const item = itens.find((i) => i.chave === chave)
     if (saltar && item) saltarParaMs(item.inicio_ms)
   }
@@ -302,6 +406,8 @@ export function Video({
       mostrarAviso('Selecione um item que possa ser corrigido (↑ ↓).')
       return
     }
+    setEstrutura(null)
+    setDescrevendo(false)
     abrirItem(item.chave, false)
     setTemposDaAlca(null)
     setEdicao({ chave: item.chave, modo: 'editar' })
@@ -313,19 +419,196 @@ export function Video({
       mostrarAviso('Não há "não é isto" para o item selecionado.')
       return
     }
+    setEstrutura(null)
+    setDescrevendo(false)
     abrirItem(item.chave, false)
     setTemposDaAlca(null)
     setEdicao({ chave: item.chave, modo: 'remover' })
+  }
+
+  // ---------- juntar e dividir pautas ----------
+
+  // Depois de recarregar a decupagem, as marcas de pautas que sumiram não contam.
+  const marcadasNaDecupagem = d?.pautas.filter((p) => pautasMarcadas.has(p.id)).length ?? 0
+
+  function pautaDoItem(item: ItemDoPainel | undefined): Pauta | undefined {
+    if (!d || item?.tipo !== 'pauta') return undefined
+    return d.pautas[Number(item.chave.slice('pauta-'.length))]
+  }
+
+  function alternarMarcaDaPauta(item: ItemDoPainel | undefined) {
+    const pauta = pautaDoItem(item)
+    if (!pauta) {
+      mostrarAviso('Selecione a pauta que vai ser marcada (↑ ↓).')
+      return
+    }
+    setPautasMarcadas((marcadas) => {
+      const novas = new Set(marcadas)
+      if (!novas.delete(pauta.id)) novas.add(pauta.id)
+      return novas
+    })
+  }
+
+  function juntarMarcadas() {
+    if (!d) return
+    const r = pautasParaJuntar(d.pautas, pautasMarcadas)
+    if ('aviso' in r) {
+      mostrarAviso(r.aviso)
+      return
+    }
+    fecharEdicao()
+    setDescrevendo(false)
+    setEstrutura({ modo: 'juntar', pautas: r.pautas })
+  }
+
+  function dividirPauta(item: ItemDoPainel | undefined) {
+    const pauta = pautaDoItem(item)
+    if (!pauta) {
+      mostrarAviso('Selecione a pauta que vai ser dividida (↑ ↓).')
+      return
+    }
+    const emMs = instante.ms()
+    if (!cabeNaPauta(pauta, emMs)) {
+      mostrarAviso('Leve o vídeo para dentro da pauta em foco para dividir (D).')
+      return
+    }
+    fecharEdicao()
+    setDescrevendo(false)
+    setEstrutura({ modo: 'dividir', pauta, em_ms: emMs })
+  }
+
+  async function gravarEstrutura(pedidos: Pedido[], motivo: string): Promise<string | null> {
+    const falha = await gravar(pedidos, motivo)
+    if (!falha) {
+      setPautasMarcadas(new Set())
+      setEstrutura(null)
+    }
+    return falha
+  }
+
+  // ---------- trecho marcado (I, O, A) ----------
+
+  function descartarTrecho() {
+    setTrecho(null)
+    setDescrevendo(false)
+  }
+
+  /** `I`: a entrada do trecho no tempo atual; uma saída que ficaria antes dela sai, e o campo fecha. */
+  function marcarEntrada() {
+    if (!revisao.revisando) return
+    const agora = instante.ms()
+    const fim = trecho?.fim_ms != null && trecho.fim_ms >= agora ? trecho.fim_ms : null
+    if (trecho?.fim_ms != null && fim === null) {
+      setDescrevendo(false)
+      mostrarAviso('A entrada passou da saída: marque a saída de novo (O).')
+    }
+    setTrecho({ inicio_ms: agora, fim_ms: fim })
+  }
+
+  /** `O`: a saída do trecho no tempo atual, depois da entrada. */
+  function marcarSaida() {
+    if (!revisao.revisando) return
+    if (!trecho) {
+      mostrarAviso('Marque a entrada antes (I).')
+      return
+    }
+    const agora = instante.ms()
+    if (agora < trecho.inicio_ms) {
+      mostrarAviso('A saída fica depois da entrada: avance o vídeo e marque de novo (O).')
+      return
+    }
+    setTrecho({ inicio_ms: trecho.inicio_ms, fim_ms: agora })
+  }
+
+  /** `A`: abre o campo do trecho marcado (entrada e saída). */
+  function descreverTrecho() {
+    if (!revisao.revisando || !catalogoPronto) return
+    if (trecho?.fim_ms == null) {
+      mostrarAviso('Marque a entrada e a saída do trecho antes (I e O).')
+      return
+    }
+    fecharEdicao()
+    setEstrutura(null)
+    setComparandoCom(null)
+    setInspetorAberto(true)
+    setDescrevendo(true)
+  }
+
+  /** Grava a correção do trecho; com ela gravada, o trecho some. */
+  async function gravarTrecho(pedidos: Pedido[], motivo: string): Promise<string | null> {
+    const falha = await gravar(pedidos, motivo)
+    if (!falha) descartarTrecho()
+    return falha
+  }
+
+  const moverBordaDoTrecho = (borda: Borda, ms: number) =>
+    setTrecho((t) => (t ? { ...t, [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms } : t))
+  const trechoDoFormulario = useMemo(() => ({ inicio_ms: trecho?.inicio_ms ?? 0, fim_ms: trecho?.fim_ms ?? 0 }), [trecho?.inicio_ms, trecho?.fim_ms])
+  const trechoNaLinha: TrechoMarcado | null =
+    revisao.revisando && trecho ? { ...trecho, aoMover: moverBordaDoTrecho, aoSalvar: () => salvarDoTrecho.current?.(), aoDescartar: descartarTrecho } : null
+
+  // Com um trecho marcado, o Esc é dele (e vence o do detalhe do inspetor): a ordem de registro não decide.
+  const escEDoTrecho = revisao.revisando && !!d && !!catalogoPronto && !gavetaAberta && trecho !== null && !descrevendo && !estrutura
+
+  // ---------- gaveta das correções ----------
+
+  // O número do botão é o que a pessoa pode resolver: a fila e, para quem aprova, as pendentes.
+  const aResolver = (fila.data?.length ?? 0) + (pode.aprovar ? (historico.data?.filter((h) => h.estado === 'pendente').length ?? 0) : 0)
+
+  // Os formulários moram no inspetor: abrir um deles (F2, Del, juntar, dividir, renomear…) traz o inspetor de volta.
+  const comFormulario = !!(edicao || estrutura || descrevendo)
+  const [tinhaFormulario, setTinhaFormulario] = useState(false)
+  if (comFormulario !== tinhaFormulario) {
+    setTinhaFormulario(comFormulario)
+    if (comFormulario) {
+      // O formulário mora no inspetor: com a comparação aberta ou o inspetor recolhido, ele ficaria invisível.
+      setGavetaAberta(false)
+      setComparandoCom(null)
+      setInspetorAberto(true)
+    }
+  }
+
+  function alternarGaveta() {
+    setComparandoCom(null)
+    setGavetaAberta((a) => !a)
+  }
+
+  /** Da gaveta ao inspetor: seleciona o item da correção, abre a seção dele e salta o player. */
+  function saltarAoItemDaCorrecao(correcao: ItemDoHistorico): boolean {
+    const item = d ? itemDaCorrecao(d, itens, correcao) : undefined
+    if (!item) return false
+    selecionar(item.chave)
+    setSecao(SECAO_DO_TIPO[tipoDaChave(item.chave)])
+    saltarParaMs(item.inicio_ms)
+    return true
+  }
+
+  /** "Refazer à mão" na fila: fecha a gaveta e leva à lista de pautas, no modo de revisão. */
+  function refazerPautasAMao() {
+    setGavetaAberta(false)
+    setComparandoCom(null)
+    setInspetorAberto(true)
+    setSecao('pautas')
+    if (!revisao.revisando) revisao.alternar()
+    mostrarAviso('Marque as pautas (M) e junte (U), ou divida (D).')
+  }
+
+  /** Uma correção, a fusão ou a renomeação mudaram a decupagem: busca de novo, com o histórico. */
+  function recarregar(emTodosOsVideos = false) {
+    // Renomear ou fundir uma pessoa muda o nome nas decupagens de todos os vídeos que a citam.
+    void consultas.invalidateQueries(
+      emTodosOsVideos
+        ? { predicate: (q) => q.queryKey[0] === 'video' && q.queryKey[2] === 'decupagem' }
+        : { queryKey: chaveDoVideo(job.id, 'decupagem') },
+    )
+    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
+    void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'fila') })
   }
 
   /** Grava os pedidos em sequência com o motivo; devolve o erro que fica no formulário, ou `null`. */
   async function gravar(pedidos: Pedido[], motivo: string): Promise<string | null> {
     if (!d) return null
     let gravadas = 0
-    const recarregar = () => {
-      void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
-      void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
-    }
     try {
       let versao = d.versao_decupagem
       for (const { pessoa_do_nome, ...p } of pedidos) {
@@ -365,7 +648,29 @@ export function Video({
   let alcas: AlcasDaCorrecao | null = null
   if (d && catalogoPronto && edicao) {
     const item = itens.find((i) => i.chave === edicao.chave)
-    if (edicao.modo === 'acrescentar') {
+    if (edicao.modo === 'fundir') {
+      const pessoa = d.pessoas.find((p) => `fundir:${p.id}` === edicao.chave)
+      if (pessoa?.catalogo_id)
+        conteudoDaEdicao = (
+          <FusaoDePessoa
+            origemId={pessoa.catalogo_id}
+            nomeDaOrigem={pessoa.nome}
+            fusao={api.fusao}
+            limiteDoMotivo={catalogoPronto.limites.motivo}
+            aoFundir={() => {
+              fecharEdicao()
+              recarregar(true)
+            }}
+            aoCancelar={fecharEdicao}
+          />
+        )
+    } else if (edicao.modo === 'renomear') {
+      const pessoa = d.pessoas.find((p) => `renomear:${p.id}` === edicao.chave)
+      if (pessoa?.catalogo_id)
+        conteudoDaEdicao = (
+          <RenomeacaoEmLote pessoaId={pessoa.catalogo_id} nomeAtual={pessoa.nome} renomeacao={api.renomeacao} aoRenomear={() => recarregar(true)} aoFechar={fecharEdicao} />
+        )
+    } else if (edicao.modo === 'acrescentar') {
       const pessoa = d.pessoas.find((p) => `acrescentar:${p.id}` === edicao.chave)
       if (pessoa)
         conteudoDaEdicao = (
@@ -421,6 +726,11 @@ export function Video({
     }
   }
 
+  const abrirPessoa = (modo: 'fundir' | 'renomear') => (pessoa: string) => {
+    setDescrevendo(false)
+    setTemposDaAlca(null)
+    setEdicao({ chave: `${modo}:${pessoa}`, modo })
+  }
   const acoes: AcoesDeCorrecao | undefined =
     d && catalogoPronto
       ? {
@@ -429,9 +739,23 @@ export function Video({
           corrigir: corrigirItem,
           remover: removerItem,
           acrescentar: (pessoa) => {
+            setDescrevendo(false)
             setTemposDaAlca(null)
             setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
           },
+          pautas: revisao.revisando
+            ? {
+                marcada: (i) => {
+                  const p = pautaDoItem(i)
+                  return !!p && pautasMarcadas.has(p.id)
+                },
+                alternar: alternarMarcaDaPauta,
+                dividir: dividirPauta,
+              }
+            : undefined,
+          pessoaDoCatalogo: (id) => !!d.pessoas.find((p) => p.id === id)?.catalogo_id,
+          renomear: revisao.revisando && pode.aprovar ? abrirPessoa('renomear') : undefined,
+          fundir: revisao.revisando && pode.fundir ? abrirPessoa('fundir') : undefined,
           edicao: edicao && conteudoDaEdicao ? { chave: edicao.chave, conteudo: conteudoDaEdicao } : null,
           marcas,
         }
@@ -471,6 +795,67 @@ export function Video({
       casa: (e) => e.key === ']',
       executar: () => setInspetorAberto((a) => !a),
     },
+    ...(pode.editar
+      ? [
+          {
+            tecla: 'E',
+            acao: 'Revisar o vídeo e, dentro da revisão, aprová-la',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'e'),
+            executar: revisao.alternar,
+          },
+          {
+            tecla: 'Ctrl + Z',
+            acao: 'Desfazer a última correção sua neste vídeo',
+            grupo: GRUPO_DA_CATALOGACAO,
+            ctrl: true,
+            // Ctrl+Shift+Z é o refazer de outros programas: aqui não desfaz.
+            casa: (e: KeyboardEvent) => tecla(e, 'z') && !e.shiftKey,
+            executar: () => void revisao.desfazer(),
+          },
+        ]
+      : []),
+    ...(revisao.revisando && d && catalogoPronto
+      ? [
+          {
+            tecla: 'M',
+            acao: 'Marcar a pauta em foco para juntar',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'm'),
+            executar: () => alternarMarcaDaPauta(selecionado),
+          },
+          {
+            tecla: 'U',
+            acao: 'Juntar as pautas marcadas',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'u'),
+            executar: juntarMarcadas,
+          },
+          {
+            tecla: 'D',
+            acao: 'Dividir a pauta em foco no ponto do player',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => tecla(e, 'd'),
+            executar: () => dividirPauta(selecionado),
+          },
+        ]
+      : []),
+    ...(revisao.revisando && d
+      ? [
+          { tecla: 'I', acao: 'Marcar a entrada do trecho no tempo atual', grupo: GRUPO_DA_CATALOGACAO, casa: (e: KeyboardEvent) => tecla(e, 'i'), executar: marcarEntrada },
+          { tecla: 'O', acao: 'Marcar a saída do trecho no tempo atual', grupo: GRUPO_DA_CATALOGACAO, casa: (e: KeyboardEvent) => tecla(e, 'o'), executar: marcarSaida },
+          { tecla: 'A', acao: 'Descrever o trecho marcado', grupo: GRUPO_DA_CATALOGACAO, casa: (e: KeyboardEvent) => tecla(e, 'a'), executar: descreverTrecho },
+          ...ABAS_DO_TRECHO.map((a) => ({ tecla: a.tecla, acao: `No campo do trecho: o tipo ${a.rotulo}`, grupo: GRUPO_DA_CATALOGACAO })),
+          { tecla: 'Shift + Enter', acao: 'Num campo de nome: criar o nome digitado no catálogo, a revisar', grupo: GRUPO_DA_CATALOGACAO },
+          {
+            tecla: 'Esc',
+            acao: 'Descartar o trecho marcado',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => e.key === 'Escape' && escEDoTrecho,
+            executar: descartarTrecho,
+          },
+        ]
+      : []),
     ...(d && catalogoPronto
       ? [
           {
@@ -511,6 +896,18 @@ export function Video({
             versaoDoPipeline={d ? (d.versao_pipeline ?? null) : undefined}
             manifesto={d?.manifesto_do_pipeline}
             pode={pode}
+            revisao={revisao}
+            passadas={passadas.data ?? []}
+            comparandoCom={comparandoCom}
+            aoComparar={(id) => {
+              setGavetaAberta(false)
+              setComparandoCom(id)
+            }}
+            gavetaAberta={gavetaAberta}
+            aResolver={aResolver}
+            refDoHistorico={botaoDoHistorico}
+            refDoSeletor={seletorDePassada}
+            aoAlternarGaveta={alternarGaveta}
             aoAbrirDialogo={setDialogo}
           />
           {job.etapa_atual && (job.estado === 'analisando' || finalizando(job)) && (
@@ -577,6 +974,17 @@ export function Video({
               aoSaltar={(passo) => saltarPara((player.current?.currentTime ?? 0) + passo)}
               aoMudarVelocidade={mudarVelocidade}
               aoTelaCheia={telaCheia}
+              ferramentas={
+                revisao.revisando ? (
+                  <FerramentasDoTrecho
+                    completo={trecho?.fim_ms != null}
+                    aoMarcarEntrada={marcarEntrada}
+                    aoMarcarSaida={marcarSaida}
+                    aoDescrever={descreverTrecho}
+                    aoDescartar={descartarTrecho}
+                  />
+                ) : null
+              }
             />
           </div>
           {decupagem.isError && !(decupagem.error instanceof SessaoExpirada) && (
@@ -615,14 +1023,40 @@ export function Video({
                 instante={instante}
                 selecionada={selecionada}
                 alcas={alcas}
+                trecho={trechoNaLinha}
                 aoSaltar={saltarParaMs}
                 aoSelecionar={(chave) => abrirItem(chave, true)}
               />
             </>
           )}
         </section>
-        {inspetorAberto ? (
+        {comparandoCom ? (
+          <ComparacaoDePassada api={cliente} id={job.id} passadaId={comparandoCom} aoSaltar={saltarParaMs} aoFechar={() => {
+              setComparandoCom(null)
+              seletorDePassada.current?.focus()
+            }}
+          />
+        ) : gavetaAberta && pode.editar ? (
+          <Gaveta
+            aba={abaDaGaveta}
+            aoTrocarAba={setAbaDaGaveta}
+            aoFechar={() => {
+              setGavetaAberta(false)
+              botaoDoHistorico.current?.focus()
+            }}
+            historico={historico.data ?? []}
+            fila={fila.data ?? []}
+            podeAprovar={pode.aprovar}
+            api={cliente}
+            catalogo={catalogo.data ?? null}
+            falhaAoCarregar={historico.isError || fila.isError}
+            aoMudar={() => recarregar()}
+            aoSaltar={saltarAoItemDaCorrecao}
+            aoRefazerAMao={refazerPautasAMao}
+          />
+        ) : inspetorAberto ? (
           <Inspetor
+            escEDoTrecho={escEDoTrecho}
             decupagem={d}
             carregando={concluido && decupagem.isPending}
             itens={itens}
@@ -643,6 +1077,62 @@ export function Video({
             urlDoQuadro={urlDoQuadro}
             acoes={acoes}
             aviso={aviso}
+            acima={
+              revisao.revisando ? (
+                <>
+                  {sugestoes.data ? (
+                    <Sugestoes
+                      sugestoes={sugestoes.data}
+                      decupagem={d}
+                      api={cliente}
+                      aoSaltar={saltarParaMs}
+                      aoResolver={(id) => {
+                        consultas.setQueryData(chaveDasSugestoes, (l: Sugestao[] | undefined) => l?.filter((x) => x.id !== id))
+                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
+                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
+                      }}
+                      aoFalhar={() => void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })}
+                      aoAvisar={mostrarAviso}
+                    />
+                  ) : null}
+                  {marcadasNaDecupagem > 0 ? (
+                    <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm">
+                      <span className="mr-auto">
+                        {marcadasNaDecupagem} {marcadasNaDecupagem === 1 ? 'pauta marcada' : 'pautas marcadas'} para juntar
+                      </span>
+                      <BotaoComDica dica="U" variant="secondary" onClick={juntarMarcadas}>
+                        Juntar as pautas marcadas
+                      </BotaoComDica>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setPautasMarcadas(new Set())}>
+                        Limpar marcas
+                      </Button>
+                    </div>
+                  ) : null}
+                  {catalogoPronto && d && descrevendo && trecho?.fim_ms != null ? (
+                    <FormularioDoTrecho
+                      trecho={trechoDoFormulario}
+                      catalogo={catalogoPronto}
+                      pessoas={d.pessoas}
+                      salvarRef={salvarDoTrecho}
+                      aoSalvar={gravarTrecho}
+                      aoCancelar={() => setDescrevendo(false)}
+                    />
+                  ) : null}
+                  {catalogoPronto && estrutura ? (
+                    <div className="border-b border-border p-3">
+                      <FormularioDeCorrecao
+                        key={estrutura.modo === 'juntar' ? `juntar:${estrutura.pautas.map((p) => p.id).join('+')}` : `dividir:${estrutura.pauta.id}:${estrutura.em_ms}`}
+                        editor={estrutura.modo === 'juntar' ? editorDeJuncao(estrutura.pautas, catalogoPronto) : editorDeDivisao(estrutura.pauta, estrutura.em_ms, catalogoPronto)}
+                        rotulo={estrutura.modo === 'juntar' ? `Juntar ${estrutura.pautas.length} pautas` : `Dividir ${estrutura.pauta.titulo} em ${relogio(estrutura.em_ms)}`}
+                        limiteDoMotivo={catalogoPronto.limites.motivo}
+                        aoSalvar={gravarEstrutura}
+                        aoCancelar={() => setEstrutura(null)}
+                      />
+                    </div>
+                  ) : null}
+                </>
+              ) : null
+            }
             indexando={pode.editar && !!historico.data && aindaIndexando(historico.data)}
             aoRecolher={() => setInspetorAberto(false)}
           />
@@ -676,6 +1166,15 @@ function BarraDoVideo({
   versaoDoPipeline,
   manifesto,
   pode,
+  revisao,
+  passadas,
+  comparandoCom,
+  aoComparar,
+  gavetaAberta,
+  aResolver,
+  refDoHistorico,
+  refDoSeletor,
+  aoAlternarGaveta,
   aoAbrirDialogo,
 }: {
   job: Job
@@ -683,6 +1182,15 @@ function BarraDoVideo({
   versaoDoPipeline: string | null | undefined
   manifesto: unknown
   pode: Permissoes
+  revisao: Revisao
+  passadas: ResumoDaPassada[]
+  comparandoCom: string | null
+  aoComparar: (id: string | null) => void
+  gavetaAberta: boolean
+  aResolver: number
+  refDoHistorico: Ref<HTMLButtonElement>
+  refDoSeletor: Ref<HTMLSelectElement>
+  aoAlternarGaveta: () => void
   aoAbrirDialogo: (d: DialogoDoVideo) => void
 }) {
   const api = useApi()
@@ -729,6 +1237,25 @@ function BarraDoVideo({
           )}
         </div>
         <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
+          {passadas.length > 0 && <SeletorDePassada ref={refDoSeletor} passadas={passadas} valor={comparandoCom} aoEscolher={aoComparar} />}
+          {pode.editar && concluido && <ControlesDaRevisao revisao={revisao} />}
+          {pode.editar && concluido && (
+            <BotaoDeIcone
+              ref={refDoHistorico}
+              rotulo="Histórico"
+              aria-label={aResolver > 0 ? `Histórico, ${aResolver} a resolver` : 'Histórico'}
+              ativo={gavetaAberta}
+              className="relative"
+              onClick={aoAlternarGaveta}
+            >
+              <IconHistory size={18} stroke={1.75} aria-hidden />
+              {aResolver > 0 && (
+                <span aria-hidden className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-andamento px-1 text-[10px] leading-none font-semibold text-background">
+                  {aResolver}
+                </span>
+              )}
+            </BotaoDeIcone>
+          )}
           {concluido && (
             <BotaoDeIcone rotulo="Baixar vídeo" aria-busy={baixando === 'video'} disabled={baixando === 'video'} onClick={() => void baixar('video')}>
               <IconDownload size={18} stroke={1.75} aria-hidden />
@@ -781,11 +1308,10 @@ function BarraDoVideo({
                 </DropdownMenuItem>
               )}
               {(podeReprocessar || podeApagar) && <DropdownMenuSeparator />}
-              {/* Revisão, histórico, trecho, sugestões e comparação de passadas chegam na fase 5. */}
               <DropdownMenuItem asChild>
                 <a href={naInterfaceAtual()}>
                   <IconExternalLink size={16} stroke={1.75} aria-hidden />
-                  {pode.editar ? 'Revisar e ver o histórico na interface atual' : 'Abrir na interface atual'}
+                  Abrir na interface atual
                 </a>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -804,7 +1330,71 @@ function BarraDoVideo({
   )
 }
 
+/** Revisar (E) e, dentro da revisão, o que só ela tem: Catalogando, Desfazer (Ctrl+Z) e Aprovar Revisão (E). */
+function ControlesDaRevisao({ revisao }: { revisao: Revisao }) {
+  const { revisando } = revisao
+  return (
+    <div className="mr-1 flex shrink-0 items-center gap-1">
+      {revisando && (
+        <>
+          <span className="hidden text-xs font-semibold text-andamento sm:inline">Catalogando</span>
+          <BotaoDeIcone rotulo="Desfazer" atalho="Ctrl+Z" disabled={!revisao.temParaDesfazer} onClick={() => void revisao.desfazer()}>
+            <IconArrowBackUp size={18} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+        </>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="sm" variant={revisando ? 'default' : 'secondary'} onClick={revisao.alternar}>
+            {revisando ? 'Aprovar Revisão' : 'Revisar'}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent collisionPadding={8}>
+          {revisando ? 'Aprovar Revisão' : 'Revisar'}
+          <Kbd>E</Kbd>
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  )
+}
+
 // ---------- transporte ----------
+
+/** O trecho marcado com I e O: entrada e saída; com as duas, descrever (A) e descartar (Esc). */
+function FerramentasDoTrecho({
+  completo,
+  aoMarcarEntrada,
+  aoMarcarSaida,
+  aoDescrever,
+  aoDescartar,
+}: {
+  completo: boolean
+  aoMarcarEntrada: () => void
+  aoMarcarSaida: () => void
+  aoDescrever: () => void
+  aoDescartar: () => void
+}) {
+  return (
+    <div role="group" aria-label="Ferramentas do trecho" className="mr-1 flex shrink-0 items-center gap-1">
+      <BotaoComDica dica="I" variant="secondary" aria-label="Marcar entrada" onClick={aoMarcarEntrada}>
+        Entrada
+      </BotaoComDica>
+      <BotaoComDica dica="O" variant="secondary" aria-label="Marcar saída" onClick={aoMarcarSaida}>
+        Saída
+      </BotaoComDica>
+      {completo && (
+        <>
+          <BotaoComDica dica="A" aria-label="Descrever o trecho" onClick={aoDescrever}>
+            Descrever
+          </BotaoComDica>
+          <BotaoDeIcone rotulo="Descartar o trecho" atalho="Esc" onClick={aoDescartar}>
+            <IconX size={18} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+        </>
+      )}
+    </div>
+  )
+}
 
 /** O relógio do player, que se renderiza sozinho a cada segundo. */
 function Relogio({ instante, duracaoMs }: { instante: Instante; duracaoMs: number }) {
@@ -828,6 +1418,7 @@ function Transporte({
   aoSaltar,
   aoMudarVelocidade,
   aoTelaCheia,
+  ferramentas,
 }: {
   job: Job
   instante: Instante
@@ -840,6 +1431,8 @@ function Transporte({
   aoSaltar: (segundos: number) => void
   aoMudarVelocidade: (v: number) => void
   aoTelaCheia: () => void
+  /** O que só a revisão tem na barra: as ferramentas do trecho. */
+  ferramentas?: ReactNode
 }) {
   const fps = job.taxa_de_quadros ?? null
   const origem = job.timecode_origem ?? null
@@ -925,6 +1518,7 @@ function Transporte({
         {copiado ?? ''}
       </span>
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        {ferramentas}
         <BotaoDeIcone rotulo="Copiar o link neste tempo" onClick={() => void copiar(link(), 'Link copiado')}>
           <IconLink size={18} stroke={1.75} aria-hidden />
         </BotaoDeIcone>
@@ -949,7 +1543,8 @@ function Transporte({
             aoMudarVolume(v)
             setVolume(v)
           }}
-          className="hidden w-20 accent-primary lg:block"
+          // Com as ferramentas do trecho na barra, o controle de volume só cabe em tela larga (o mudo fica).
+          className={cn('hidden w-20 accent-primary', ferramentas ? '2xl:block' : 'lg:block')}
         />
         <BotaoDeIcone rotulo="Tela cheia" atalho="F" onClick={aoTelaCheia}>
           <IconMaximize size={18} stroke={1.75} aria-hidden />

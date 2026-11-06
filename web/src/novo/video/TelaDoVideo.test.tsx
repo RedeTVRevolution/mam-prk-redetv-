@@ -452,10 +452,10 @@ test('"Mandar para a lixeira…" só com lixeira.gerir e com o vídeo fora do pr
   expect(within(await menu()).queryByRole('menuitem', { name: /lixeira/ })).toBeNull()
 })
 
-test('o menu leva à interface atual para revisar e ver o histórico', async () => {
+test('o menu leva à interface atual, com o mesmo nome para quem edita', async () => {
   await abrirVideo({ permissoes: ['decupagem.editar'] })
   servidor.use(http.get('/v1/correcoes/catalogo', () => HttpResponse.json({})))
-  const link = within(await menu()).getByRole('menuitem', { name: /Revisar e ver o histórico na interface atual/ })
+  const link = within(await menu()).getByRole('menuitem', { name: 'Abrir na interface atual' })
   expect(link.getAttribute('href')).toBe('/video/j1?interface=atual')
 })
 

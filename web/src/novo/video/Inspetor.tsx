@@ -1,7 +1,9 @@
 import {
   IconArrowLeft,
+  IconArrowsJoin,
   IconChevronDown,
   IconChevronRight,
+  IconCut,
   IconEdit,
   IconFocus2,
   IconLayoutSidebarRightCollapse,
@@ -59,6 +61,12 @@ export interface AcoesDeCorrecao {
   corrigir: (i: ItemDoPainel) => void
   remover: (i: ItemDoPainel) => void
   acrescentar: (pessoa: string) => void
+  /** Juntar e dividir pautas (só no modo de revisão): marcar para juntar (M) e dividir no ponto do player (D). */
+  pautas?: { marcada: (i: ItemDoPainel) => boolean; alternar: (i: ItemDoPainel) => void; dividir: (i: ItemDoPainel) => void }
+  /** "Renomear em todos os vídeos" (Curador) e "Fundir com…": só para a pessoa do catálogo, e só se a permissão deixa. */
+  pessoaDoCatalogo: (pessoa: string) => boolean
+  renomear?: (pessoa: string) => void
+  fundir?: (pessoa: string) => void
   /** O formulário (ou a confirmação) aberto: a chave do item, ou `acrescentar:<pessoa>`. */
   edicao: { chave: string; conteudo: ReactNode } | null
   /** "aguardando o Curador", "indexando", "na busca", por chave de item. */
@@ -164,6 +172,7 @@ const medirComFolga: typeof observeElementRect = (instancia, aviso) =>
  * por vez, com filtro e "seguir a reprodução". Clicar num item abre o detalhe no próprio inspetor.
  */
 export function Inspetor({
+  escEDoTrecho = false,
   decupagem: d,
   carregando,
   itens,
@@ -181,9 +190,12 @@ export function Inspetor({
   urlDoQuadro,
   acoes,
   aviso,
+  acima,
   indexando,
   aoRecolher,
 }: {
+  /** Um trecho marcado fica com o Esc: o detalhe só volta à lista no Esc seguinte. */
+  escEDoTrecho?: boolean
   decupagem: Decupagem | undefined
   carregando: boolean
   itens: ItemDoPainel[]
@@ -203,6 +215,8 @@ export function Inspetor({
   urlDoQuadro: (caminho: string) => Promise<string>
   acoes?: AcoesDeCorrecao
   aviso: string | null
+  /** O que a revisão põe acima do "Agora": as sugestões, as pautas marcadas. */
+  acima?: ReactNode
   indexando: boolean
   aoRecolher: () => void
 }) {
@@ -274,7 +288,7 @@ export function Inspetor({
       tecla: 'Esc',
       acao: 'No inspetor: voltar do detalhe à lista',
       grupo: GRUPO,
-      casa: (e) => e.key === 'Escape' && detalhe,
+      casa: (e) => e.key === 'Escape' && detalhe && !escEDoTrecho,
       executar: aoFecharDetalhe,
     },
   ])
@@ -312,6 +326,7 @@ export function Inspetor({
         </p>
       ) : (
         <>
+          {acima}
           <Agora decupagem={d} porTipo={porTipo} instante={instante} duracaoMs={duracaoMs} urlDoQuadro={urlDoQuadro} aoAbrir={aoAbrir} />
           {detalhe && selecionado ? (
             <Detalhe
@@ -386,6 +401,7 @@ export function Inspetor({
                                   atual={atual}
                                   selecionado={l.chave === selecionada}
                                   marca={acoes?.marcas?.[l.chave]}
+                                  pautas={l.item.tipo === 'pauta' ? acoes?.pautas : undefined}
                                   urlDoQuadro={urlDoQuadro}
                                   aoAbrir={() => aoAbrir(l.chave, true)}
                                 />
@@ -558,6 +574,7 @@ function ItemDaLista({
   atual,
   selecionado,
   marca,
+  pautas,
   urlDoQuadro,
   aoAbrir,
 }: {
@@ -566,6 +583,7 @@ function ItemDaLista({
   atual: boolean
   selecionado: boolean
   marca?: Marca
+  pautas?: AcoesDeCorrecao['pautas']
   urlDoQuadro: (c: string) => Promise<string>
   aoAbrir: () => void
 }) {
@@ -579,7 +597,7 @@ function ItemDaLista({
         aria-label={nomeDoItem(item)}
         aria-pressed={selecionado}
         onClick={aoAbrir}
-        className={cn('flex w-full items-start gap-2 py-1.5 pr-3 text-left hover:bg-card', recuo ? 'pl-8' : 'pl-3')}
+        className={cn('flex w-full items-start gap-2 py-1.5 pr-3 text-left hover:bg-card', recuo ? 'pl-8' : 'pl-3', pautas && 'pr-16')}
       >
         <span className={cn('mt-0.5 w-12 shrink-0 font-mono text-xs tabular-nums', atual ? 'text-link' : 'text-muted-foreground')}>{relogio(item.inicio_ms)}</span>
         {item.quadro !== undefined && !recuo ? (
@@ -602,6 +620,16 @@ function ItemDaLista({
         </span>
         {marca && <SeloDaMarca marca={marca} />}
       </button>
+      {pautas && (
+        <div className="absolute top-1 right-1 flex">
+          <BotaoDeIcone rotulo={`Marcar ${item.titulo} para juntar`} atalho="M" ativo={pautas.marcada(item)} onClick={() => pautas.alternar(item)}>
+            <IconArrowsJoin size={16} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+          <BotaoDeIcone rotulo={`Dividir ${item.titulo} no ponto do player`} atalho="D" onClick={() => pautas.dividir(item)}>
+            <IconCut size={16} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+        </div>
+      )}
     </div>
   )
 }
@@ -978,7 +1006,10 @@ function Detalhe({
   const { Icone, cor } = TIPOS[tipo]
   const rotuloDoTipo = SECOES.find((s) => s.tipo === tipo)?.rotulo ?? ''
   const marca = acoes?.marcas?.[item.chave]
-  const edicao = acoes?.edicao && (acoes.edicao.chave === item.chave || acoes.edicao.chave === `acrescentar:${item.pessoa}`) ? acoes.edicao : null
+  const edicao =
+    acoes?.edicao && (acoes.edicao.chave === item.chave || (item.pessoa && ['acrescentar', 'fundir', 'renomear'].some((m) => acoes.edicao?.chave === `${m}:${item.pessoa}`)))
+      ? acoes.edicao
+      : null
   const { dono } = item.objeto ?? {}
   // O dono do objeto: abre a primeira aparição dele.
   const irParaDono = (pessoa: string) => {
@@ -1061,6 +1092,16 @@ function Detalhe({
           {acoes && item.tipo === 'aparicao' && item.pessoa && (
             <Button type="button" variant="secondary" onClick={() => acoes.acrescentar(item.pessoa as string)}>
               <IconPlus size={16} stroke={1.75} aria-hidden /> {`Acrescentar aparição de ${item.titulo}`}
+            </Button>
+          )}
+          {item.tipo === 'aparicao' && item.pessoa && acoes?.renomear && acoes.pessoaDoCatalogo(item.pessoa) && edicao?.chave !== `renomear:${item.pessoa}` && (
+            <Button type="button" variant="secondary" aria-label={`Renomear ${item.titulo} em todos os vídeos`} onClick={() => acoes.renomear?.(item.pessoa as string)}>
+              Renomear em todos os vídeos
+            </Button>
+          )}
+          {item.tipo === 'aparicao' && item.pessoa && acoes?.fundir && acoes.pessoaDoCatalogo(item.pessoa) && edicao?.chave !== `fundir:${item.pessoa}` && (
+            <Button type="button" variant="secondary" aria-label={`Fundir ${item.titulo} com…`} onClick={() => acoes.fundir?.(item.pessoa as string)}>
+              Fundir com…
             </Button>
           )}
         </div>
