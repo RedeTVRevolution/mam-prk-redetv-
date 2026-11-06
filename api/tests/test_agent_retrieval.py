@@ -1001,38 +1001,27 @@ def _operacoes(falso: TransporteFalso) -> list[str]:
     [(JaExiste("x"),), (CotaEsgotada("x"), JaExiste("x"))],
     ids=["409 na primeira tentativa", "429 e depois 409"],
 )
-def test_lote_que_volta_com_409_e_apagado_pelos_nomes_e_criado_de_novo(
-    erros: tuple[Exception, ...],
-) -> None:
+def test_409_apaga_o_video_e_grava_tudo_de_novo(erros: tuple[Exception, ...]) -> None:
     falso, transporte = _com_409(*erros)
     _indice(transporte, _Relogio()).gravar("j", _registros(250))
     # O 409 pode ser lote gravado em parte ou de outra indexação do mesmo vídeo: o
-    # lote sai pelos nomes e entra inteiro, na versão desta gravação.
+    # `apagar` tira só o que existe (query + batchDelete) e o vídeo entra inteiro.
     recusadas = ["batchCreate"] * len(erros)
-    # ... e o segundo lote (50 registros) segue normal.
     assert _operacoes(falso) == [
         "query",
         *recusadas,
-        "batchDelete",
+        "query",
         "batchCreate",
         "batchCreate",
     ]
-    _, _, apagados = next(c for c in falso.chamadas if c[1].endswith(":batchDelete"))
-    colecao = "projects/proj-x/locations/reg-y/collections/col-z"
-    assert apagados == {
-        "requests": [
-            {"name": f"{colecao}/dataObjects/m-j-fala-{i}"} for i in range(200)
-        ]
-    }
-    _, _, recriado = falso.chamadas[-2]
-    assert recriado is not None and len(recriado["requests"]) == 200
+    assert [len(c["requests"]) for _, _, c in falso.chamadas[-2:] if c] == [200, 50]
 
 
-def test_segundo_409_do_mesmo_lote_sobe() -> None:
+def test_409_de_novo_depois_de_regravar_sobe() -> None:
     falso, transporte = _com_409(JaExiste("x"), JaExiste("x"))
     with pytest.raises(JaExiste):
         _indice(transporte, _Relogio()).gravar("j", _registros(3))
-    assert _operacoes(falso) == ["query", "batchCreate", "batchDelete", "batchCreate"]
+    assert _operacoes(falso) == ["query", "batchCreate", "query", "batchCreate"]
 
 
 def _anota_os_lotes(relogio: _Relogio, envios: list[tuple[float, int]]) -> Any:

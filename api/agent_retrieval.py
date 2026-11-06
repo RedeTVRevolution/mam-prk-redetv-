@@ -644,32 +644,25 @@ class AgentRetrieval:
             )
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
+        try:
+            self._gravar_uma_vez(job_id, registros)
+        except JaExiste:
+            # Um lote já estava lá: reenviado depois de uma resposta perdida, gravado em
+            # parte, ou de outra indexação do mesmo vídeo (os ids são fixos). O `apagar`
+            # tira só o que existe; o vídeo entra de novo inteiro, uma vez (#411).
+            log.warning("%s: 409 na gravação, apagando e gravando de novo", job_id)
+            self._gravar_uma_vez(job_id, registros)
+        if not self._config.indices_ligados:
+            self._avisar_do_teto_do_knn()
+
+    def _gravar_uma_vez(self, job_id: str, registros: list[Registro]) -> None:
         self.apagar(job_id)
         for i in range(0, len(registros), REGISTROS_POR_LOTE):
             pedacos = registros[i : i + REGISTROS_POR_LOTE]
             self._no_ritmo(len(pedacos))
-            corpo = {"requests": [_criacao(r) for r in pedacos]}
-            try:
-                self._chamar("dataObjects:batchCreate", corpo)
-            except JaExiste:
-                # Parte do lote já está lá: reenviado depois de uma resposta perdida,
-                # gravado em parte, ou de outra indexação do mesmo vídeo (os ids são
-                # fixos). Sai pelos nomes e entra inteiro, uma vez; outro 409 sobe (#411).
-                log.warning(
-                    "lote %d de %s: 409, apagando e criando de novo",
-                    i // REGISTROS_POR_LOTE,
-                    job_id,
-                )
-                colecao = self._config.caminho_da_colecao
-                nomes = [
-                    {"name": f"{colecao}/dataObjects/{c['dataObjectId']}"}
-                    for c in corpo["requests"]
-                ]
-                self._chamar("dataObjects:batchDelete", {"requests": nomes})
-                self._no_ritmo(len(pedacos))
-                self._chamar("dataObjects:batchCreate", corpo)
-        if not self._config.indices_ligados:
-            self._avisar_do_teto_do_knn()
+            self._chamar(
+                "dataObjects:batchCreate", {"requests": [_criacao(r) for r in pedacos]}
+            )
 
     def _avisar_do_teto_do_knn(self) -> None:
         """Sem índice ANN a busca é KNN, que recusa mais de 100 mil registros: o aviso vem
