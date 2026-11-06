@@ -1,5 +1,6 @@
 """Adaptadores de nuvem da E0: Firestore (Jobs) e Cloud Storage (upload)."""
 
+import functools
 import json
 import random
 import secrets
@@ -1622,6 +1623,14 @@ class ArquivosNoStorage:
             blob.delete()
 
 
+# A URL assinada de um quadro se repete dentro da hora cheia (#409): o navegador reaproveita
+# a capa já baixada e a listagem não vai ao IAM. Tem de ser bem menor que VALIDADE_DA_IMAGEM:
+# a URL entregue no fim da janela ainda vale a diferença.
+JANELA_DA_URL_DO_QUADRO = timedelta(hours=1)
+# Quadros guardados por instância: uns 50 por página da grade, com folga para o acervo.
+QUADROS_ASSINADOS_GUARDADOS = 4096
+
+
 class ArmazenamentoStorage:
     """Upload, cancelamento do upload, reprodução e leitura da decupagem."""
 
@@ -1632,6 +1641,7 @@ class ArmazenamentoStorage:
         bucket_de_aceitos: str,
         bucket_de_decupagens: str,
         assinatura: Callable[[], dict[str, Any]] = assinatura_pelo_iam,
+        relogio: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._cliente = cliente
         self._bucket = bucket_de_quarentena
@@ -1641,6 +1651,10 @@ class ArmazenamentoStorage:
             cliente, bucket_de_aceitos, bucket_de_decupagens
         )
         self._assinatura = assinatura
+        self._relogio = relogio
+        self._quadro_na_janela = functools.lru_cache(QUADROS_ASSINADOS_GUARDADOS)(
+            self._assinar_quadro
+        )
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
         blob = self._cliente.bucket(self._bucket).blob(job_id)
@@ -1690,6 +1704,14 @@ class ArmazenamentoStorage:
         )
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
+        """A mesma URL para o mesmo quadro dentro da janela; um quadro regravado no meio
+        dela aparece antigo até a janela virar (aceito no #409)."""
+        janela = self._relogio().timestamp() // JANELA_DA_URL_DO_QUADRO.total_seconds()
+        return self._quadro_na_janela(job_id, caminho, validade, janela)
+
+    def _assinar_quadro(
+        self, job_id: str, caminho: str, validade: timedelta, janela: float
+    ) -> str:
         blob = self._cliente.bucket(self._decupagens).blob(
             objeto_do_quadro(job_id, caminho)
         )
