@@ -261,7 +261,7 @@ export function Inspetor({
   return (
     <aside
       aria-label="Inspetor"
-      className="flex h-[80dvh] w-full shrink-0 flex-col bg-background lg:h-auto lg:min-h-0 lg:w-[400px] lg:overflow-y-auto xl:w-[420px]"
+      className="flex h-[80dvh] w-full shrink-0 flex-col overflow-y-auto bg-background lg:h-auto lg:min-h-0 lg:w-[400px] xl:w-[420px]"
     >
       <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-card px-3">
         <h2 className="min-w-0 flex-1 truncate text-xs font-semibold">Inspetor</h2>
@@ -299,12 +299,13 @@ export function Inspetor({
               acoes={acoes}
             />
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col">
+            // Nada aqui encolhe abaixo do conteúdo: a seção aberta guarda o mínimo da lista, e o inspetor rola.
+            <div className="flex flex-1 flex-col">
               {SECOES.map((s) => {
                 const { Icone, cor } = TIPOS[s.tipo]
                 const aberta = secao === s.chave
                 return (
-                  <section key={s.chave} aria-label={s.rotulo} className={cn('flex flex-col border-b', aberta && 'min-h-0 flex-1')}>
+                  <section key={s.chave} aria-label={s.rotulo} className={cn('flex flex-col border-b', aberta && 'flex-1')}>
                     <button
                       type="button"
                       aria-expanded={aberta}
@@ -874,7 +875,7 @@ function Detalhe({
     if (primeira) aoAbrir(primeira.chave, true)
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:overflow-y-auto" role="region" aria-label={`Detalhe: ${item.titulo}`}>
+    <div className="flex flex-col" role="region" aria-label={`Detalhe: ${item.titulo}`}>
       <div className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
         <BotaoDeIcone rotulo="Voltar à lista" atalho="Esc" onClick={aoVoltar}>
           <IconArrowLeft size={18} stroke={1.75} aria-hidden />

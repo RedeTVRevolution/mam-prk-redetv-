@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { memo, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { memo, type KeyboardEvent, type PointerEvent, type RefObject, useEffect, useRef, useState } from 'react'
 import {
   type BlocoDaFaixa,
   type Borda,
@@ -195,6 +195,22 @@ function AlcaDoTempo({
 
 const pct = (n: number) => `${n}%`
 
+/** A largura de um algarismo do IBM Plex Mono em 11 px, para os rótulos da régua não se encostarem. */
+const PX_POR_ALGARISMO = 6.7
+
+/** A largura do elemento, que muda com a janela; 0 enquanto não se mede (e no jsdom). */
+function useLargura(ref: RefObject<HTMLElement | null>): number {
+  const [largura, setLargura] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observador = new ResizeObserver(() => setLargura(el.clientWidth))
+    observador.observe(el)
+    return () => observador.disconnect()
+  }, [ref])
+  return largura
+}
+
 /**
  * A linha do tempo: a régua com os cortes, uma faixa por tipo ligado e o cursor. Cada faixa é uma
  * parada de Tab só: o botão do bloco ativo, que ← → trocam e Enter abre. O cursor anda sem
@@ -220,6 +236,8 @@ export function LinhaDoTempo({
   aoSelecionar: (chave: string) => void
 }) {
   const cursor = useRef<HTMLDivElement>(null)
+  const regua = useRef<HTMLDivElement>(null)
+  const largura = useLargura(regua)
   const arrastando = useRef(false)
   // O bloco que tem a parada de Tab em cada faixa.
   const [ativos, setAtivos] = useState<Record<string, string>>({})
@@ -251,6 +269,17 @@ export function LinhaDoTempo({
     setAtivos((a) => ({ ...a, [faixa.chave]: vizinhoNaFaixa(faixa.blocos, atual, e.key === 'ArrowRight' ? 1 : -1) }))
   }
 
+  // Numa régua estreita os rótulos pulam marcas, e nenhum encosta no do fim do vídeo.
+  const marcas = marcasDaRegua(duracaoMs)
+  const larguraDoRotulo = (texto: string) => texto.length * PX_POR_ALGARISMO + 8
+  const fim = marcas.at(-1)
+  const espaco = marcas.length > 1 ? (largura * marcas[1].percentual) / 100 : largura
+  const pulo = espaco > 0 ? Math.ceil((larguraDoRotulo(marcas[0]?.rotulo ?? '') + 4) / espaco) : 1
+  const rotuloCabe = (m: (typeof marcas)[number], i: number) =>
+    m.noFim ||
+    largura === 0 ||
+    (i % pulo === 0 && (largura * m.percentual) / 100 + larguraDoRotulo(m.rotulo) + 4 <= largura - larguraDoRotulo(fim?.rotulo ?? ''))
+
   const pautas = faixas.find((f) => f.chave === 'pauta')
   const semPauta = pautas ? trechosSemPauta(pautas.blocos, duracaoMs) : []
   const cortes = riscosDeCorte(cortesMs, duracaoMs)
@@ -273,6 +302,7 @@ export function LinhaDoTempo({
       <div className="relative min-w-0 flex-1">
         <div
           data-regua=""
+          ref={regua}
           className="relative h-5 cursor-pointer touch-none border-b border-strong/60"
           onPointerDown={(e) => {
             arrastando.current = true
@@ -289,13 +319,13 @@ export function LinhaDoTempo({
             arrastando.current = false
           }}
         >
-          {marcasDaRegua(duracaoMs).map((m) => (
+          {marcas.map((m, i) => (
             <span
               key={m.ms}
               className={cn('pointer-events-none absolute top-0 h-full border-strong', m.noFim ? 'border-r' : 'border-l')}
               style={m.noFim ? { right: 0 } : { left: pct(m.percentual) }}
             >
-              <span className="mx-1 font-mono text-2xs text-muted-foreground tabular-nums">{m.rotulo}</span>
+              {rotuloCabe(m, i) && <span className="mx-1 font-mono text-2xs text-muted-foreground tabular-nums">{m.rotulo}</span>}
             </span>
           ))}
           <svg
