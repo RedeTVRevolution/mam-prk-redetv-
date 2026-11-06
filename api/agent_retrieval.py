@@ -544,6 +544,9 @@ class AgentRetrieval:
     def __init__(self, config: ConfigDaBusca, transporte: Transporte) -> None:
         self._config = config
         self._transporte = transporte
+        # Uma busca do usuário repete o mesmo texto em várias cláusulas (a livre e a de cada
+        # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
+        self._vetores: dict[str, list[float]] = {}
 
     def _chamar(self, caminho: str, corpo: dict[str, Any]) -> dict[str, Any]:
         return self._transporte(
@@ -599,6 +602,8 @@ class AgentRetrieval:
         """O embedding da consulta, o mesmo modelo, tarefa e dimensão com que o
         `semanticSearch` o calcula, na região da busca. Medido no dev: reproduz o vetor
         guardado de um texto idêntico com cosseno 1,0."""
+        if texto in self._vetores:
+            return self._vetores[texto]
         resposta = self._transporte(
             "POST",
             f"https://{self._config.regiao}-aiplatform.googleapis.com/v1/projects/"
@@ -615,6 +620,9 @@ class AgentRetrieval:
                 f"o embedding veio com dimensão {len(valores)}, e a coleção tem "
                 f"{self._config.dimensao}"
             )
+        if len(self._vetores) >= 256:
+            self._vetores.clear()
+        self._vetores[texto] = valores
         return valores
 
     def buscar(self, consulta: Consulta) -> list[Registro]:

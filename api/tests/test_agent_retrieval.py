@@ -289,6 +289,16 @@ def test_com_os_indices_ann_buscar_nao_calcula_embedding() -> None:
     assert caminho.endswith("/dataObjects:batchSearch")
 
 
+def test_o_mesmo_texto_e_embutido_uma_vez_so() -> None:
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    assert adaptador.vetor_da_consulta("a") == adaptador.vetor_da_consulta("a")
+    adaptador.vetor_da_consulta("b")
+    assert len(transporte.chamadas) == 2
+
+
 def test_embedding_da_consulta_de_outra_dimensao_levanta() -> None:
     transporte = TransporteFalso({"predictions": [{"embeddings": {"values": [0.5]}}]})
     with pytest.raises(ValueError, match="dimensão"):
