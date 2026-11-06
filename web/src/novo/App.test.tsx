@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
-import { SessaoExpirada } from '../api.ts'
+import { PedidoInvalido, SessaoExpirada } from '../api.ts'
 import { ContaBloqueada } from '../auth/autenticador.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../auth/falso.ts'
 import { AutenticadorIndisponivel } from '../auth/indisponivel.ts'
@@ -255,6 +255,7 @@ test('as consultas saem do cache em 30 s, não voltam ao focar e não repetem o 
   expect(queries?.refetchOnWindowFocus).toBe(false)
   const repetir = queries?.retry as (falhas: number, erro: Error) => boolean
   expect(repetir(0, new SessaoExpirada())).toBe(false)
+  expect(repetir(0, new PedidoInvalido('Cursor inválido'))).toBe(false)
   expect(repetir(0, new Error('rede'))).toBe(true)
   expect(repetir(2, new Error('rede'))).toBe(false)
 })
