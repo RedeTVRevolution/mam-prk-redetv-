@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, useQuery } from '@tanstack/react-query'
 import { createContext, useContext } from 'react'
 import { SessaoExpirada, type ClienteDaApi } from '../api.ts'
 
@@ -26,4 +26,10 @@ export function useApi(): ClienteDaApi {
   const api = useContext(ContextoDaApi)
   if (!api) throw new Error('Falta o ContextoDaApi.')
   return api
+}
+
+/** Os programas cadastrados, para o envio e o filtro do acervo. */
+export function useProgramas(): string[] {
+  const api = useApi()
+  return useQuery({ queryKey: ['programas'], queryFn: () => api.programas(), staleTime: 5 * 60_000 }).data ?? []
 }

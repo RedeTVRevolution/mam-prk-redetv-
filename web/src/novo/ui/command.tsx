@@ -5,6 +5,16 @@ import { cn } from 'cn'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './dialog.tsx'
 
 // shadcn/ui (cmdk), com os cantos e as cores do design system.
+export function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
+  return (
+    <CommandPrimitive
+      data-slot="command"
+      className={cn('flex size-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground', className)}
+      {...props}
+    />
+  )
+}
+
 export function CommandDialog({
   titulo,
   descricao,

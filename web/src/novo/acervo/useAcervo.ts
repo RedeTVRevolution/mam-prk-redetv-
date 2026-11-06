@@ -38,6 +38,11 @@ export function lembrarPosicao(chave: string, indice: number) {
   posicaoAoSair = { chave, indice }
 }
 
+/** Depois de voltar ao lugar: daqui em diante a consulta recomeça do topo (um envio novo, por exemplo). */
+export function esquecerPosicao() {
+  posicaoAoSair = null
+}
+
 /** O índice a que voltar, se a última saída foi desta mesma consulta. */
 export function posicaoDaVolta(chave: string): number {
   return posicaoAoSair?.chave === chave ? posicaoAoSair.indice : 0
@@ -116,6 +121,13 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
       else void q.refetch()
     },
   }
+}
+
+/** Põe o Job que a API devolveu (um reprocessamento) no lugar do da lista, com a capa da lista. */
+export function trocarNoAcervo(cliente: QueryClient, novo: Job) {
+  cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
+    d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.map((j) => (j.id === novo.id ? { ...novo, capa_url: j.capa_url } : j)) })) },
+  )
 }
 
 /** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo. */
