@@ -212,9 +212,10 @@ export function Video({
   })
 
   // Os planos com vetor do quadro indexado (#271): só neles "Planos parecidos" aparece. Vídeo
-  // antigo, índice desligado ou falha da consulta: nenhum botão.
+  // antigo, índice desligado ou falha da consulta: nenhum botão. O instante da indexação entra na
+  // chave: depois de reprocessar, a lista velha não vale para a nova.
   const planosComVetor = useQuery({
-    queryKey: chaveDoVideo(job.id, 'planos-com-vetor'),
+    queryKey: chaveDoVideo(job.id, 'planos-com-vetor', job.indexacao?.em ?? ''),
     queryFn: async () => new Set(await api.planosComVetor(job.id)),
     enabled: job.indexacao?.estado === 'indexado',
     retry: false,

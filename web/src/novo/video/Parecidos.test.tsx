@@ -5,6 +5,8 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import type { Job } from '../../jobs.ts'
 import { abrirVideo, irPara, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
+import { criarClienteDeConsultas } from '../consultas.ts'
+import { chaveDoVideo } from './tipos.ts'
 
 // A paridade do botão "Planos parecidos" com o ParecidosNoVisualizador.test.tsx da interface antiga.
 // A grade que ele abre (/busca/parecidos) é testada em busca/Busca.test.tsx.
@@ -85,6 +87,24 @@ test('vídeo ainda não indexado não mostra o botão nem consulta os vetores', 
 
   expect(agora.queryByRole('button', { name: BOTAO })).toBeNull()
   expect(consultas).toBe(0)
+})
+
+test('depois de reprocessar, a nova indexação refaz a lista dos planos com vetor', async () => {
+  // O cliente de consultas sobrevive: o job volta indexado em outro instante, com outros vetores.
+  const consultasDoApp = criarClienteDeConsultas()
+  irPara(await abrirVideo({ consultas: consultasDoApp }), 11)
+  await within(screen.getByRole('region', { name: 'Agora no vídeo' })).findByRole('button', { name: BOTAO })
+  cleanup()
+
+  // O reprocessamento termina: o job vem de novo da API, indexado em outro instante.
+  consultasDoApp.removeQueries({ queryKey: chaveDoVideo('j1', 'job') })
+  job = { indexacao: { estado: 'indexado', em: '2026-10-22T10:00:00Z' } }
+  comVetor = [0]
+  irPara(await abrirVideo({ consultas: consultasDoApp }), 11)
+  await waitFor(() => expect(consultas).toBe(2))
+  const agora = within(screen.getByRole('region', { name: 'Agora no vídeo' }))
+  await agora.findByText(/ambiente pl1/)
+  expect(agora.queryByRole('button', { name: BOTAO })).toBeNull()
 })
 
 test('pelo detalhe de cada plano na seção Planos, o botão também aparece só no que tem vetor', async () => {
