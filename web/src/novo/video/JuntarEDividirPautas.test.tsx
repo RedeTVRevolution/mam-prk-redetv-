@@ -278,3 +278,32 @@ test('F2 com a junção aberta troca um formulário pelo outro', async () => {
   await waitFor(() => expect(screen.queryByRole('form', { name: 'Juntar 2 pautas' })).toBeNull())
   expect(await screen.findByRole('form', { name: /Corrigir Debate/ })).toBeTruthy()
 })
+
+test('D e U com o inspetor recolhido ou a comparação aberta trazem o inspetor com o formulário', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/passadas', () => HttpResponse.json([{ id: 'p1', job_id: 'j1', modelo: 'gemini-3.8-flash', criada_em: '2026-11-02T12:00:00Z', custo: {}, etapas: [] }])),
+    http.get('/v1/jobs/j1/passadas/p1/comparacao', () => HttpResponse.json({ passada_id: 'p1', modelo: 'm', modelo_do_job: 'n', duracao_ms: 60_000, a: { custo_usd: null, custo_por_hora_usd: null, tempo_total_s: 1, etapas: [] }, b: { custo_usd: null, custo_por_hora_usd: null, tempo_total_s: 1, etapas: [] }, requisitos: [] })),
+  )
+  const { usuario, player } = await abrir()
+  await usuario.click(await linha('Debate'))
+  irPara(player, 45)
+  await usuario.keyboard('m')
+  await usuario.keyboard('{Escape}')
+  await usuario.click(await linha('Abertura'))
+  await usuario.keyboard('m')
+
+  // Inspetor recolhido: o U abre o formulário no inspetor.
+  await usuario.click(inspetor().getByRole('button', { name: 'Recolher o inspetor' }))
+  await usuario.keyboard('u')
+  expect(await screen.findByRole('form', { name: 'Juntar 2 pautas' })).toBeTruthy()
+  await usuario.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('form', { name: 'Juntar 2 pautas' })).toBeNull())
+
+  // Comparação aberta: o U a fecha e mostra o formulário.
+  await usuario.selectOptions(await screen.findByRole('combobox', { name: 'Comparar com' }), 'p1')
+  await screen.findByRole('complementary', { name: 'Comparação com a passada' })
+  ;(document.activeElement as HTMLElement).blur()
+  await usuario.keyboard('u')
+  expect(await screen.findByRole('form', { name: 'Juntar 2 pautas' })).toBeTruthy()
+  expect(screen.queryByRole('complementary', { name: 'Comparação com a passada' })).toBeNull()
+})

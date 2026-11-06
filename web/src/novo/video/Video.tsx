@@ -554,7 +554,12 @@ export function Video({
   const [tinhaFormulario, setTinhaFormulario] = useState(false)
   if (comFormulario !== tinhaFormulario) {
     setTinhaFormulario(comFormulario)
-    if (comFormulario) setGavetaAberta(false)
+    if (comFormulario) {
+      // O formulário mora no inspetor: com a comparação aberta ou o inspetor recolhido, ele ficaria invisível.
+      setGavetaAberta(false)
+      setComparandoCom(null)
+      setInspetorAberto(true)
+    }
   }
 
   function alternarGaveta() {
@@ -575,6 +580,8 @@ export function Video({
   /** "Refazer à mão" na fila: fecha a gaveta e leva à lista de pautas, no modo de revisão. */
   function refazerPautasAMao() {
     setGavetaAberta(false)
+    setComparandoCom(null)
+    setInspetorAberto(true)
     setSecao('pautas')
     if (!revisao.revisando) revisao.alternar()
     mostrarAviso('Marque as pautas (M) e junte (U), ou divida (D).')

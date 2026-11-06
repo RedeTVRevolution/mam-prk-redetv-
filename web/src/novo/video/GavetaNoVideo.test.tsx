@@ -135,6 +135,18 @@ test('Refazer à mão, fora do modo de revisão, liga o modo e deixa marcar as p
   expect(await screen.findByText('1 pauta marcada para juntar')).toBeTruthy()
 })
 
+test('Refazer à mão com o inspetor recolhido traz a lista de pautas de volta', async () => {
+  fila = [FILA_ESTRUTURAL]
+  const { usuario } = await abrir()
+  await usuario.click(within(screen.getByRole('complementary', { name: 'Inspetor' })).getByRole('button', { name: 'Recolher o inspetor' }))
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await usuario.click(await gaveta().findByRole('tab', { name: /Fila de revisão/ }))
+
+  await usuario.click(await gaveta().findByRole('button', { name: 'Refazer à mão' }))
+
+  expect(await screen.findByRole('button', { name: 'Marcar Eleição para juntar' })).toBeTruthy()
+})
+
 test('o F2 com a gaveta aberta traz o formulário de volta ao inspetor', async () => {
   const { usuario } = await abrir()
   await usuario.keyboard('e')
