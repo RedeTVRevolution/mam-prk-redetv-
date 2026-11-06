@@ -649,6 +649,20 @@ test('um texto novo depois da foto sai da foto e busca o texto', async () => {
   expect(fotos).toHaveLength(1)
 })
 
+test('Enter com o mesmo texto da URL depois da foto também sai da foto e busca o texto', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=pista')
+  await screen.findByText('3 momentos em 2 vídeos')
+  await usuario.upload(screen.getByLabelText('Foto para buscar'), foto())
+  await screen.findByText('2 planos parecidos em 1 vídeo')
+
+  await usuario.type(screen.getByRole('searchbox', { name: 'Buscar no conteúdo' }), '{Enter}')
+
+  expect(await screen.findByText('3 momentos em 2 vídeos')).toBeTruthy()
+  expect(screen.queryByText('pista.png')).toBeNull()
+  expect(fotos).toHaveLength(1)
+})
+
 // Os planos parecidos
 
 test('os planos parecidos vêm em grade, com a volta ao vídeo', async () => {

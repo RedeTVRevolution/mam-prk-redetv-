@@ -292,7 +292,10 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                   className="relative w-full max-w-md min-w-0 sm:w-auto sm:flex-1"
                   onSubmit={(e) => {
                     e.preventDefault()
-                    if (texto.trim()) navegar(enderecoDaBusca(consultaNova(texto.trim())))
+                    if (!texto.trim()) return
+                    // O mesmo texto da URL não muda a consulta: a foto sai aqui.
+                    setFoto(null)
+                    navegar(enderecoDaBusca(consultaNova(texto.trim())))
                   }}
                 >
                   <IconSearch size={16} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground" aria-hidden />
