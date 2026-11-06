@@ -31,7 +31,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenu
 import { Slider } from '../ui/slider.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { BuscaPorNome, Faceta, Periodo } from './Filtros.tsx'
-import { esquecerPosicao, lembrarPosicao, tirarDoAcervo, trocarNoAcervo, useAcervo, useAndamento } from './useAcervo.ts'
+import { lembrarPosicao, tirarDoAcervo, trocarNoAcervo, useAcervo, useAndamento } from './useAcervo.ts'
 import { Cartao, Esqueleto, Linha, type Acao } from './Video.tsx'
 
 /** A largura mínima do cartão em cada passo do controle de tamanho. */
@@ -180,7 +180,7 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
   const vistaAte = virtual.range?.endIndex ?? -1
   const primeira = visiveis[0]?.index ?? 0
   const ultima = visiveis[visiveis.length - 1]?.index ?? 0
-  const { aoVer, chave, voltaInicial, carregando } = acervo
+  const { aoVer, chave, voltaInicial, carregando, chegouNaVolta } = acervo
 
   // Voltar do vídeo: pelo índice e não pelos pixels, porque as colunas podem ser outras na volta.
   const volta = useRef(voltaInicial)
@@ -192,11 +192,11 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
       const alvo = Math.floor(volta.current / colunas)
       if (!largura || alvo < vistaDe || alvo > vistaAte) return
       volta.current = 0
-      esquecerPosicao(cliente)
+      chegouNaVolta()
     }
     aoVer(primeira * colunas, (ultima + 1) * colunas - 1)
     noTopo.current = Math.max(0, vistaDe) * colunas
-  }, [primeira, ultima, vistaDe, vistaAte, colunas, largura, fileiras, aoVer, cliente])
+  }, [primeira, ultima, vistaDe, vistaAte, colunas, largura, fileiras, aoVer, chegouNaVolta])
   const rolouAteVolta = useRef(false)
   useEffect(() => {
     const alvo = Math.floor(volta.current / colunas)

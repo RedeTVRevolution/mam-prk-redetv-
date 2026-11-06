@@ -176,3 +176,33 @@ test('uma página menor (vídeo para a lixeira) que sai da memória não desloca
   expect(result.current.item(100)?.id).toBe('j101')
   expect(result.current.item(300)?.id).toBe('j301')
 })
+
+async function voltarA210() {
+  const primeiro = await montar()
+  await descer(primeiro.result, 4)
+  lembrarPosicao(primeiro.consultas, primeiro.result.current.chave, 210)
+  primeiro.unmount()
+  primeiro.consultas.removeQueries({ queryKey: ['acervo'] })
+  const r = renderHook((f: FiltrosDoAcervo) => useAcervo(f), { wrapper: primeiro.envolver, initialProps: SEM_FILTROS })
+  await waitFor(() => expect(r.result.current.item(210)?.id).toBe('j210'))
+  return { ...r, consultas: primeiro.consultas }
+}
+
+test('depois da volta, ir a outro filtro e voltar começa do topo', async () => {
+  const { result, rerender } = await voltarA210()
+  rerender({ ...SEM_FILTROS, estado: ['falhou'] })
+  await waitFor(() => expect(result.current.quantidade).toBe(10))
+  cursoresPedidos.length = 0
+  rerender(SEM_FILTROS)
+  await waitFor(() => expect(result.current.item(0)?.id).toBe('j0'))
+  expect(cursoresPedidos).toEqual([null])
+})
+
+test('a lista refeita por um envio, depois da volta, começa do topo', async () => {
+  const { result, consultas } = await voltarA210()
+  act(() => result.current.chegouNaVolta())
+  cursoresPedidos.length = 0
+  await act(() => consultas.resetQueries({ queryKey: ['acervo'] }))
+  await waitFor(() => expect(result.current.item(0)?.id).toBe('j0'))
+  expect(cursoresPedidos[0]).toBeNull()
+})

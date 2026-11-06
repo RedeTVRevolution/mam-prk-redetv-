@@ -51,7 +51,7 @@ export function lembrarPosicao(cliente: QueryClient, chave: string, indice: numb
 }
 
 /** Depois de voltar ao lugar: daqui em diante a consulta recomeça do topo (um envio novo, por exemplo). */
-export function esquecerPosicao(cliente: QueryClient) {
+function esquecerPosicao(cliente: QueryClient) {
   doCliente(cliente).posicao = null
 }
 
@@ -91,15 +91,15 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   const hash = hashKey(chave)
   const g = guardadosDa(cliente, hash)
   const lista = g.cursores
-  // Calculada uma vez, na montagem: a consulta e a tela recomeçam do mesmo lugar.
-  const [montagem] = useState(() => ({ hash, ...volta(cliente, hash, g) }))
-  // Outro filtro depois da montagem começa do topo.
-  const inicial = montagem.hash === hash ? montagem : { indice: 0, cursor: '' }
+  // O índice da volta é o da montagem (a tela rola até ele uma vez). O cursor inicial se calcula a
+  // cada vez: depois de `esquecerPosicao` (um envio refaz a lista) ou de outro filtro e volta, ele
+  // é o do topo.
+  const [voltaInicial, setVoltaInicial] = useState(() => volta(cliente, hash, g).indice)
   const q = useInfiniteQuery({
     queryKey: chave,
     queryFn: ({ pageParam }) => api.acervo(filtros, pageParam),
     // Volta do vídeo com o cache já vencido: recomeça na página do vídeo de onde se saiu.
-    initialPageParam: inicial.cursor,
+    initialPageParam: volta(cliente, hash, g).cursor,
     getNextPageParam: (ultima: PaginaDoAcervo, _todas, ultimoParam: string) => {
       if (!ultima.proximo) return undefined
       const n = lista.indexOf(ultimoParam)
@@ -170,10 +170,18 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
     for (const outra of consultas.keys()) if (outra !== hash) consultas.delete(outra)
   }, [cliente, hash])
 
+  const chegouNaVolta = useCallback(() => {
+    esquecerPosicao(cliente)
+    // Redesenha com as opções novas: o `resetQueries` do envio usa o `initialPageParam` da última.
+    setVoltaInicial(0)
+  }, [cliente, setVoltaInicial])
+
   return {
     chave: hash,
     /** O índice do vídeo a que a tela volta ao montar (0: o topo). */
-    voltaInicial: inicial.indice,
+    voltaInicial,
+    /** A tela chegou à volta: a consulta recomeça do topo daqui em diante (o envio refaz a lista). */
+    chegouNaVolta,
     quantidade,
     item,
     itens,
