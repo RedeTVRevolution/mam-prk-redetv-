@@ -229,6 +229,13 @@ test('a lista longa desenha só as linhas à vista e guarda todas as páginas, t
   expect(consultas).toHaveLength(7)
 })
 
+test('um cursor vazio no cabeçalho encerra a lista: a primeira página não se repete', async () => {
+  servidor.use(http.get('/v1/admin/auditoria', () => HttpResponse.json(registros(), { headers: { 'X-Proximo-Cursor': '' } })))
+  await abrir()
+  await linhaDe('TV Fama')
+  expect(screen.queryByRole('button', { name: 'Carregar mais' })).toBeNull()
+})
+
 test('a aba é só de leitura: nenhum botão de editar ou apagar', async () => {
   const usuario = userEvent.setup()
   await abrir()

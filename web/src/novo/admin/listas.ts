@@ -26,7 +26,7 @@ export function useListaPorCursor<P extends { proximo: string | null }>(queryKey
     staleTime: 30_000,
     initialPageParam: '',
     queryFn: ({ pageParam }) => buscar(pageParam || null),
-    getNextPageParam: (ultima) => ultima.proximo ?? undefined,
+    getNextPageParam: (ultima) => ultima.proximo || undefined,
   })
 }
 
