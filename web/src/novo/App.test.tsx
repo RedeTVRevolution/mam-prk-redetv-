@@ -160,19 +160,12 @@ test('quem só vê o painel começa nele', async () => {
 })
 
 test('a tela que não migrou leva à mesma URL na interface atual', async () => {
-  permissoes = ['decupagem.ver', 'usuarios.gerir']
-  history.replaceState(null, '', '/admin/usuarios?x=1')
-  const usuario = userEvent.setup()
+  // Com relatórios e administração migrados, só a amostra do sistema visual sobra.
+  history.replaceState(null, '', '/amostra?x=1')
   render(<App autenticador={await comSessao()} />)
 
   const link = await screen.findByRole('link', { name: /Abrir na interface atual/ })
-  expect(link.getAttribute('href')).toBe('/admin/usuarios?x=1&interface=atual')
-
-  // Quem navega sem recarregar leva o link junto: o trilho vai ao acervo e a Administração volta.
-  await usuario.click(trilho().getByRole('link', { name: 'Acervo' }))
-  await usuario.click(trilho().getByRole('link', { name: 'Administração' }))
-  expect(location.pathname).toBe('/admin')
-  expect(screen.getByRole('link', { name: /Abrir na interface atual/ }).getAttribute('href')).toBe('/admin?interface=atual')
+  expect(link.getAttribute('href')).toBe('/amostra?x=1&interface=atual')
 })
 
 test('sair pelo menu da conta volta ao login e apaga a sessão', async () => {
