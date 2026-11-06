@@ -7,6 +7,7 @@ import pytest
 from api.agent_retrieval import (
     AgentRetrieval,
     ConfigDaBusca,
+    CotaEsgotada,
     EsquemaIncompativel,
     JaExiste,
     apagar_colecao,
@@ -17,6 +18,7 @@ from api.agent_retrieval import (
     filtro_do_pedido,
     indices_da_colecao,
     pedido_de_busca,
+    transporte_http,
 )
 from api.indice_da_busca import Consulta, Filtros, Registro
 
@@ -827,3 +829,201 @@ def test_o_destaque_vai_ao_indice_e_volta_na_busca() -> None:
     )
     [achado] = AgentRetrieval(CONFIG, transporte).buscar(Consulta(texto="carro"))
     assert achado.destaque == 3
+
+
+def _registros(n: int) -> list[Registro]:
+    return [
+        Registro(id=f"j:fala:{i}", tipo="fala", job_id="j", inicio_ms=i, fim_ms=i + 1)
+        for i in range(n)
+    ]
+
+
+class _Relogio:
+    """Relógio falso: dormir avança o tempo, sem esperar de verdade."""
+
+    def __init__(self) -> None:
+        self.agora = 0.0
+        self.esperas: list[float] = []
+
+    def __call__(self) -> float:
+        return self.agora
+
+    def dormir(self, segundos: float) -> None:
+        self.esperas.append(segundos)
+        self.agora += segundos
+
+
+def test_cota_de_escrita_vem_do_ambiente_e_sem_ela_nao_ha_ritmo() -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+    }
+    assert ConfigDaBusca.do_ambiente(ambiente).cota_de_escrita is None
+    # Vazia (o output do Terraform que o make ainda não acha): sem ritmo também.
+    vazia = ambiente | {"BUSCA_COTA_DE_ESCRITA": ""}
+    assert ConfigDaBusca.do_ambiente(vazia).cota_de_escrita is None
+    com_cota = ambiente | {"BUSCA_COTA_DE_ESCRITA": "3000"}
+    assert ConfigDaBusca.do_ambiente(com_cota).cota_de_escrita == 3000
+
+
+def test_gravar_no_429_espera_e_reenvia_o_lote() -> None:
+    relogio = _Relogio()
+    transporte = TransporteFalso()
+    lotes = 0
+
+    def com_um_429(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        nonlocal lotes
+        if caminho.endswith(":batchCreate"):
+            lotes += 1
+            if lotes == 1:
+                raise CotaEsgotada(caminho)
+        return transporte(metodo, caminho, corpo)
+
+    AgentRetrieval(CONFIG, com_um_429, relogio.dormir, relogio).gravar(
+        "j", _registros(3)
+    )
+    criados = [c for _, c, _ in transporte.chamadas if c.endswith(":batchCreate")]
+    assert (lotes, len(criados)) == (2, 1)
+    assert relogio.esperas and relogio.esperas[0] > 0
+
+
+def test_esperas_no_429_crescem_e_cabem_no_timeout_do_job() -> None:
+    relogio = _Relogio()
+
+    def sempre_429(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        raise CotaEsgotada(caminho)
+
+    with pytest.raises(CotaEsgotada):
+        AgentRetrieval(CONFIG, sempre_429, relogio.dormir, relogio).apagar("j")
+    esperas = relogio.esperas
+    assert len(esperas) > 1
+    assert esperas == sorted(esperas) and esperas[-1] > esperas[0]
+    # O Job mam-indexacao tem 1800 s (infra/modulos/mam/main.tf); uma chamada não o come.
+    assert sum(esperas) < 600
+
+
+@pytest.mark.parametrize("operacao", [":query", ":batchDelete"])
+def test_apagar_tambem_tenta_de_novo_no_429(operacao: str) -> None:
+    relogio = _Relogio()
+    respostas = {":query": {"dataObjects": [{"name": "n"}]}, ":batchDelete": {}}
+    falhou = False
+
+    def com_um_429(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        nonlocal falhou
+        if caminho.endswith(operacao) and not falhou:
+            falhou = True
+            raise CotaEsgotada(caminho)
+        return next(r for o, r in respostas.items() if caminho.endswith(o))
+
+    AgentRetrieval(CONFIG, com_um_429, relogio.dormir, relogio).apagar("j")
+    assert falhou and relogio.esperas
+
+
+def test_a_busca_do_usuario_nao_espera_no_429() -> None:
+    relogio = _Relogio()
+
+    def sempre_429(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        raise CotaEsgotada(caminho)
+
+    with pytest.raises(CotaEsgotada):
+        AgentRetrieval(CONFIG, sempre_429, relogio.dormir, relogio).buscar(
+            Consulta(texto="x")
+        )
+    assert relogio.esperas == []
+
+
+def test_lote_repetido_que_volta_com_409_conta_como_gravado() -> None:
+    relogio = _Relogio()
+    lotes = 0
+
+    def resposta_perdida(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        nonlocal lotes
+        if caminho.endswith(":batchCreate"):
+            lotes += 1
+            if lotes == 1:
+                raise CotaEsgotada(caminho)
+            if lotes == 2:
+                raise JaExiste(caminho)
+        return {}
+
+    AgentRetrieval(CONFIG, resposta_perdida, relogio.dormir, relogio).gravar(
+        "j", _registros(250)
+    )
+    assert lotes == 3  # o segundo lote seguiu depois do 409 do primeiro
+
+
+def _anota_os_lotes(relogio: _Relogio, envios: list[tuple[float, int]]) -> Any:
+    def anota(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        if caminho.endswith(":batchCreate") and corpo is not None:
+            envios.append((relogio.agora, len(corpo["requests"])))
+        return {}
+
+    return anota
+
+
+def _nenhuma_janela_de_60_s_passa(envios: list[tuple[float, int]], cota: int) -> None:
+    for inicio, _ in envios:
+        assert sum(n for t, n in envios if inicio <= t < inicio + 60) <= cota
+
+
+def test_ritmo_nenhuma_janela_de_60_s_passa_da_cota() -> None:
+    relogio = _Relogio()
+    envios: list[tuple[float, int]] = []
+    config = replace(CONFIG, cota_de_escrita=3000)
+    AgentRetrieval(
+        config, _anota_os_lotes(relogio, envios), relogio.dormir, relogio
+    ).gravar("j", _registros(5000))
+    assert sum(n for _, n in envios) == 5000
+    _nenhuma_janela_de_60_s_passa(envios, 3000)
+    # Abaixo da cota, sem parar à toa: 25 lotes em menos de 2 minutos e meio.
+    assert envios[-1][0] < 150
+
+
+def test_ritmo_vale_entre_videos_gravados_no_mesmo_processo() -> None:
+    relogio = _Relogio()
+    envios: list[tuple[float, int]] = []
+    indice = AgentRetrieval(
+        replace(CONFIG, cota_de_escrita=3000),
+        _anota_os_lotes(relogio, envios),
+        relogio.dormir,
+        relogio,
+    )
+    indice.gravar("a", _registros(2000))
+    indice.gravar("b", _registros(2000))
+    _nenhuma_janela_de_60_s_passa(envios, 3000)
+
+
+def test_transporte_http_levanta_cota_esgotada_no_429(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Resposta:
+        status_code = 429
+        ok = False
+        text = "RESOURCE_EXHAUSTED"
+
+    class Sessao:
+        def __init__(self, _: object) -> None: ...
+
+        def request(self, *_: object, **__: object) -> Resposta:
+            return Resposta()
+
+    monkeypatch.setattr("google.auth.default", lambda scopes: (None, None))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
+    with pytest.raises(CotaEsgotada, match="429"):
+        transporte_http()("POST", "x:batchCreate", {})

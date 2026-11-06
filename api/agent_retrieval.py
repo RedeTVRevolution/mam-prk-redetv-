@@ -14,10 +14,11 @@ conferido no #122.
 """
 
 import logging
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
-from time import sleep
+from time import monotonic, sleep
 from typing import Any, Protocol
 
 import google.auth
@@ -33,6 +34,19 @@ RECALL_ALVO = 0.95
 # O KNN aceita até 100 mil registros; a gravação avisa ao passar deste limite (sem índice).
 AVISO_DO_TETO_DO_KNN = 80_000
 REGISTROS_POR_LOTE = 200
+# O `gravar` escreve até esta fração da cota de escrita da coleção (`cota_de_escrita`):
+# com 3.000 objetos por minuto, 13 lotes de 200. A folga cobre a diferença entre o
+# relógio daqui e o do serviço (#411).
+FRACAO_DA_COTA = 0.9
+# As esperas, em segundos, antes de cada nova tentativa no 429 (cota esgotada): 315 s no
+# total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só as chamadas
+# da gravação e da purga tentam de novo; a busca do usuário não espera.
+ESPERAS_NO_429_S = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0, 60.0)
+COM_NOVA_TENTATIVA = (
+    "dataObjects:batchCreate",
+    "dataObjects:batchDelete",
+    "dataObjects:query",
+)
 # O máximo de nomes por `batchDelete` e de objetos por página do `query`.
 OBJETOS_POR_PAGINA = 1000
 # O embedding automático da descrição: texto multilíngue, reduzido à dimensão da coleção.
@@ -87,6 +101,9 @@ class ConfigDaBusca:
     # sem `searchHint`, pelo KNN, que aceita até 100 mil registros. O vetor do quadro e a
     # busca por quadro continuam presos a `indice_do_quadro`.
     indices_ligados: bool = True
+    # A cota `data_object_writes` da coleção, em objetos por minuto, que vale para todos
+    # os vídeos gravando juntos. None: o `gravar` não segura o ritmo (#411).
+    cota_de_escrita: int | None = None
 
     @classmethod
     def do_ambiente(cls, ambiente: Mapping[str, str]) -> "ConfigDaBusca":
@@ -95,8 +112,10 @@ class ConfigDaBusca:
         `BUSCA_INDICES_LIGADOS=false` desliga os índices ANN; ausente ou vazia, ficam
         ligados, e outro valor que não `true` ou `false` levanta `ValueError`. O corte
         (`BUSCA_DISTANCIA_MAXIMA`, `BUSCA_PALAVRAS_MINIMAS`) só o serviço e o
-        `make sondar-busca` recebem."""
+        `make sondar-busca` recebem. `BUSCA_COTA_DE_ESCRITA` só quem grava; ausente ou
+        vazia, sem ritmo."""
         distancia = ambiente.get("BUSCA_DISTANCIA_MAXIMA")
+        cota = ambiente.get("BUSCA_COTA_DE_ESCRITA")
         ligados = (ambiente.get("BUSCA_INDICES_LIGADOS") or "true").strip().lower()
         if ligados not in ("true", "false"):
             raise ValueError(f"BUSCA_INDICES_LIGADOS inválida: {ligados!r}")
@@ -110,6 +129,7 @@ class ConfigDaBusca:
             distancia_maxima=float(distancia) if distancia else None,
             palavras_minimas=int(ambiente.get("BUSCA_PALAVRAS_MINIMAS") or 0),
             indices_ligados=ligados == "true",
+            cota_de_escrita=int(cota) if cota else None,
         )
 
     @property
@@ -346,6 +366,10 @@ class JaExiste(Exception):
     """O transporte levanta quando a coleção ou o índice já existe (HTTP 409)."""
 
 
+class CotaEsgotada(RuntimeError):
+    """O transporte levanta no HTTP 429 (RESOURCE_EXHAUSTED): a cota esgotou por ora."""
+
+
 def esperar(
     operacao: dict[str, Any],
     transporte: Transporte,
@@ -541,17 +565,54 @@ def _criacao(r: Registro) -> dict[str, Any]:
 
 
 class AgentRetrieval:
-    def __init__(self, config: ConfigDaBusca, transporte: Transporte) -> None:
+    def __init__(
+        self,
+        config: ConfigDaBusca,
+        transporte: Transporte,
+        dormir: Callable[[float], None] = sleep,
+        relogio: Callable[[], float] = monotonic,
+    ) -> None:
         self._config = config
         self._transporte = transporte
+        self._dormir = dormir
+        self._relogio = relogio
+        # Os lotes do `gravar` no último minuto, (quando, objetos): o ritmo vale entre os
+        # vídeos que o mesmo processo grava (o `make reindexar` de todos).
+        self._escritas: deque[tuple[float, int]] = deque()
         # Uma busca do usuário repete o mesmo texto em várias cláusulas (a livre e a de cada
         # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
         self._vetores: dict[str, list[float]] = {}
 
     def _chamar(self, caminho: str, corpo: dict[str, Any]) -> dict[str, Any]:
-        return self._transporte(
-            "POST", f"{self._config.caminho_da_colecao}/{caminho}", corpo
-        )
+        """No 429, as chamadas de `COM_NOVA_TENTATIVA` esperam e tentam de novo: a cota
+        de escrita é da coleção, e dois vídeos indexando juntos a dividem (#411)."""
+        url = f"{self._config.caminho_da_colecao}/{caminho}"
+        esperas = ESPERAS_NO_429_S if caminho in COM_NOVA_TENTATIVA else ()
+        for espera in esperas:
+            try:
+                return self._transporte("POST", url, corpo)
+            except CotaEsgotada:
+                log.warning(
+                    "%s: cota esgotada, nova tentativa em %.0f s", caminho, espera
+                )
+                self._dormir(espera)
+        return self._transporte("POST", url, corpo)
+
+    def _no_ritmo(self, objetos: int) -> None:
+        """Espera até os objetos gravados nos últimos 60 s, mais estes, caberem na fração
+        `FRACAO_DA_COTA` da cota de escrita. Sem cota configurada, não espera."""
+        if self._config.cota_de_escrita is None:
+            return
+        limite = self._config.cota_de_escrita * FRACAO_DA_COTA
+        while True:
+            agora = self._relogio()
+            while self._escritas and self._escritas[0][0] <= agora - 60:
+                self._escritas.popleft()
+            gravados = sum(n for _, n in self._escritas)
+            if not self._escritas or gravados + objetos <= limite:
+                self._escritas.append((agora, objetos))
+                return
+            self._dormir(self._escritas[0][0] + 60 - agora)
 
     def apagar(self, job_id: str) -> None:
         """O `batchDelete` só aceita nomes: junta os do vídeo, página a página, e apaga."""
@@ -576,9 +637,18 @@ class AgentRetrieval:
         self.apagar(job_id)
         for i in range(0, len(registros), REGISTROS_POR_LOTE):
             pedacos = registros[i : i + REGISTROS_POR_LOTE]
-            self._chamar(
-                "dataObjects:batchCreate", {"requests": [_criacao(r) for r in pedacos]}
-            )
+            self._no_ritmo(len(pedacos))
+            try:
+                self._chamar(
+                    "dataObjects:batchCreate",
+                    {"requests": [_criacao(r) for r in pedacos]},
+                )
+            except JaExiste:
+                # O `apagar` acima tirou o vídeo: o 409 é o lote desta gravação, reenviado
+                # depois de uma resposta perdida, e já gravado (#411).
+                log.warning(
+                    "lote %d de %s já gravado (409)", i // REGISTROS_POR_LOTE, job_id
+                )
         if not self._config.indices_ligados:
             self._avisar_do_teto_do_knn()
 
@@ -721,6 +791,8 @@ def transporte_http() -> Transporte:
         )
         if resposta.status_code == 409:
             raise JaExiste(caminho)
+        if resposta.status_code == 429:
+            raise CotaEsgotada(f"{metodo} {caminho}: HTTP 429: {resposta.text[:2000]}")
         if not resposta.ok:
             # A mensagem do serviço diz qual campo ele recusou.
             raise RuntimeError(
