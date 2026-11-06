@@ -579,7 +579,7 @@ OPERACOES: tuple[Operacao, ...] = (
         "GET",
         "/v1/jobs/{job_id}/quadros/{arquivo}",
         "URL de um quadro do vídeo",
-        "Uma URL assinada, de 10 minutos, de um quadro JPEG do vídeo. O `arquivo` é o "
+        "Uma URL assinada, de 8 horas, de um quadro JPEG do vídeo. O `arquivo` é o "
         "nome que a busca devolve em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`). "
         "Só existe com o Job `concluido`. Escopo `ler`.",
         {

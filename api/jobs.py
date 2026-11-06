@@ -113,6 +113,8 @@ TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
 PRAZO_DO_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
 VALIDADE_DO_DOWNLOAD = timedelta(minutes=5)
+# Capas e quadros (#408): um turno de trabalho, para a grade não pedir uma imagem já vencida.
+VALIDADE_DA_IMAGEM = timedelta(hours=8)
 # O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
 FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
@@ -1036,7 +1038,7 @@ def criar_rotas(
         publico = JobResumido.de(job)
         if job.capa is not None:
             publico.capa_url = armazenamento.url_do_quadro(
-                job.id, job.capa, VALIDADE_DA_REPRODUCAO
+                job.id, job.capa, VALIDADE_DA_IMAGEM
             )
         return publico
 
@@ -1175,9 +1177,9 @@ def criar_rotas(
     ) -> Reproducao:
         job = obter_concluido(job_id, chamador)
         url = armazenamento.url_do_quadro(
-            job.id, caminho_do_quadro(arquivo), VALIDADE_DA_REPRODUCAO
+            job.id, caminho_do_quadro(arquivo), VALIDADE_DA_IMAGEM
         )
-        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
+        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_IMAGEM)
 
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
         cabecalhos = {"Vary": "Accept-Encoding"}

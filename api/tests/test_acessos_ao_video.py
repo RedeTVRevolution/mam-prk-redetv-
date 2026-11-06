@@ -96,6 +96,9 @@ def test_baixar_o_video_devolve_a_copia_limpa_com_o_nome_e_grava_video_baixado()
         "https://storage.exemplo/copia-limpa/j1?nome=Programa"
     )
     assert "nome=Programa Ação.mp4&" in corpo["url"]
+    # A validade do vídeo não muda com a das imagens (#408): 5 min.
+    assert corpo["url"].endswith("&validade=300")
+    assert corpo["expira_em"] == "2026-11-01T12:05:00Z"
     [registro] = mundo.registros("video.baixado")
     assert (registro.uid, registro.email) == ("ana", "ana@redetv.com.br")
     assert (registro.alvo_id, registro.alvo_nome) == ("j1", "Programa Ação.mp4")
