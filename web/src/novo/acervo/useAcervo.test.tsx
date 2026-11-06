@@ -8,7 +8,7 @@ import { criarClienteDaApi } from '../../api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
 import { SEM_FILTROS, type FiltrosDoAcervo } from '../../jobs.ts'
 import { ContextoDaApi, criarClienteDeConsultas } from '../consultas.ts'
-import { lembrarPosicao, useAcervo } from './useAcervo.ts'
+import { lembrarPosicao, tirarDoAcervo, useAcervo } from './useAcervo.ts'
 
 // 400 vídeos: 8 páginas de 50.
 const jobs = Array.from({ length: 400 }, (_, i) => ({
@@ -102,7 +102,7 @@ test('trocar o filtro descarta na hora a consulta de antes', async () => {
 test('voltar do vídeo com o cache vencido recomeça na página de onde se saiu', async () => {
   const primeiro = await montar()
   await descer(primeiro.result, 4)
-  lembrarPosicao(primeiro.result.current.chave, 210)
+  lembrarPosicao(primeiro.consultas, primeiro.result.current.chave, 210)
   primeiro.unmount()
   // O mesmo cliente de consultas, sem a consulta (o gcTime passou).
   primeiro.consultas.removeQueries({ queryKey: ['acervo'] })
@@ -130,4 +130,49 @@ test('a página refeita depois de uma exclusão não repete o vídeo que avanço
   } finally {
     jobs.splice(20, 0, tirado)
   }
+})
+
+test('a posição de outro login, ou de uma página sem cursor guardado, não vira volta', async () => {
+  const antes = await montar()
+  await descer(antes.result, 5)
+  lembrarPosicao(antes.consultas, antes.result.current.chave, 250)
+  antes.unmount()
+
+  // Outro login: outro cliente de consultas, sem os cursores do anterior.
+  const depois = await montar()
+  expect(depois.result.current.voltaInicial).toBe(0)
+  // O mesmo cliente, com a posição numa página que ele nunca viu: sem cursor, volta ao topo.
+  lembrarPosicao(depois.consultas, depois.result.current.chave, 250)
+  depois.unmount()
+  const { result } = renderHook(() => useAcervo(SEM_FILTROS), { wrapper: depois.envolver })
+  expect(result.current.voltaInicial).toBe(0)
+})
+
+test('vídeos novos no topo não fazem sumir os da emenda ao subir', async () => {
+  const { result } = await montar()
+  await descer(result, 7)
+  const novos = ['n0', 'n1', 'n2'].map((id) => ({ ...jobs[0], id }))
+  jobs.unshift(...novos)
+  try {
+    act(() => result.current.aoVer(105, 130))
+    await waitFor(() => expect(result.current.item(99)).not.toBeNull())
+    act(() => result.current.aoVer(55, 80))
+    await waitFor(() => expect(result.current.item(0)?.id).toBe('n0'))
+    await waitFor(() => expect(result.current.itens.map((j) => j.id)).toEqual(expect.arrayContaining(['j46', 'j47', 'j48', 'j49', 'j50'])))
+    const ids = result.current.itens.map((j) => j.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  } finally {
+    jobs.splice(0, novos.length)
+  }
+})
+
+test('uma página menor (vídeo para a lixeira) que sai da memória não desloca os índices', async () => {
+  const { result, consultas } = await montar()
+  await descer(result, 5)
+  act(() => tirarDoAcervo(consultas, new Set(['j20'])))
+  await waitFor(() => expect(result.current.item(100)?.id).toBe('j101'))
+  await descer(result, 6)
+  expect(result.current.item(0)).toBeNull()
+  expect(result.current.item(100)?.id).toBe('j101')
+  expect(result.current.item(300)?.id).toBe('j301')
 })

@@ -31,7 +31,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenu
 import { Slider } from '../ui/slider.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { BuscaPorNome, Faceta, Periodo } from './Filtros.tsx'
-import { esquecerPosicao, lembrarPosicao, posicaoDaVolta, tirarDoAcervo, trocarNoAcervo, useAcervo, useAndamento } from './useAcervo.ts'
+import { esquecerPosicao, lembrarPosicao, tirarDoAcervo, trocarNoAcervo, useAcervo, useAndamento } from './useAcervo.ts'
 import { Cartao, Esqueleto, Linha, type Acao } from './Video.tsx'
 
 /** A largura mínima do cartão em cada passo do controle de tamanho. */
@@ -180,10 +180,9 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
   const vistaAte = virtual.range?.endIndex ?? -1
   const primeira = visiveis[0]?.index ?? 0
   const ultima = visiveis[visiveis.length - 1]?.index ?? 0
-  const { aoVer, chave } = acervo
+  const { aoVer, chave, voltaInicial, carregando } = acervo
 
   // Voltar do vídeo: pelo índice e não pelos pixels, porque as colunas podem ser outras na volta.
-  const [voltaInicial] = useState(() => posicaoDaVolta(chave))
   const volta = useRef(voltaInicial)
   const noTopo = useRef(0)
   useEffect(() => {
@@ -193,11 +192,11 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
       const alvo = Math.floor(volta.current / colunas)
       if (!largura || alvo < vistaDe || alvo > vistaAte) return
       volta.current = 0
-      esquecerPosicao()
+      esquecerPosicao(cliente)
     }
     aoVer(primeira * colunas, (ultima + 1) * colunas - 1)
     noTopo.current = Math.max(0, vistaDe) * colunas
-  }, [primeira, ultima, vistaDe, vistaAte, colunas, largura, fileiras, aoVer])
+  }, [primeira, ultima, vistaDe, vistaAte, colunas, largura, fileiras, aoVer, cliente])
   const rolouAteVolta = useRef(false)
   useEffect(() => {
     const alvo = Math.floor(volta.current / colunas)
@@ -205,7 +204,7 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
     virtual.scrollToIndex(alvo, { align: 'start' })
     rolouAteVolta.current = true
   }, [largura, colunas, fileiras, virtual])
-  useEffect(() => () => lembrarPosicao(chave, noTopo.current), [chave])
+  useEffect(() => () => lembrarPosicao(cliente, chave, noTopo.current), [cliente, chave])
   // Mudou a forma das fileiras (colunas, largura, lista): as alturas guardadas não valem mais.
   useEffect(() => {
     virtual.measure()
@@ -213,9 +212,16 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
   // Outro filtro ou outra ordem começa do topo.
   const chaveVista = useRef(chave)
   useEffect(() => {
-    if (chaveVista.current !== chave && rolagem.current) rolagem.current.scrollTop = 0
+    if (chaveVista.current !== chave) {
+      volta.current = 0
+      if (rolagem.current) rolagem.current.scrollTop = 0
+    }
     chaveVista.current = chave
   }, [chave])
+  // A lista recomeçou (um envio novo a refaz do zero): o topo, onde o vídeo novo aparece.
+  useEffect(() => {
+    if (carregando && rolagem.current) rolagem.current.scrollTop = 0
+  }, [carregando])
 
   // As setas andam entre os vídeos; a fileira de destino entra na tela antes do foco.
   function aoTeclar(e: KeyboardEvent<HTMLDivElement>) {

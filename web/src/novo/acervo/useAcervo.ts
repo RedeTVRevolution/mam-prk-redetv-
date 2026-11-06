@@ -1,5 +1,5 @@
 import { hashKey, useInfiniteQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { codigoDoErro, SessaoExpirada } from '../../api.ts'
 import { ESTADOS_DO_JOB } from '../../cores.ts'
 import { finalizando, MAXIMO_DO_ANDAMENTO, POR_PAGINA, type FiltrosDoAcervo, type Job, type PaginaDoAcervo } from '../../jobs.ts'
@@ -16,36 +16,67 @@ const NAO_TERMINAIS = Object.keys(ESTADOS_DO_JOB).filter((e) => e !== 'concluido
 export const chaveDoAcervo = (filtros: FiltrosDoAcervo) => ['acervo', filtros] as const
 
 /**
- * O cursor de cada página por onde a consulta passou, na ordem: a página n se pede com o da
- * posição n, e a primeira com `''` (o `null` faria o TanStack achar que não há página antes).
- * A API só tem cursor para frente; para voltar, o navegador usa o que guardou (uns 100 bytes
- * por página). Fica fora do cache: a volta do vídeo depois do `gcTime` recomeça da página certa.
+ * O cursor de cada página por onde a consulta passou, na ordem, e quantos vídeos ela mostrava: a
+ * página n se pede com o da posição n, e a primeira com `''` (o `null` faria o TanStack achar que
+ * não há página antes). A API só tem cursor para frente; para voltar, o navegador usa o que
+ * guardou (uns 100 bytes por página). Fica fora do cache: a volta do vídeo depois do `gcTime`
+ * recomeça da página certa. Tudo por cliente de consultas, um por login, como a posição da volta.
  */
-const cursores = new WeakMap<QueryClient, Map<string, string[]>>()
+interface Guardados {
+  cursores: string[]
+  tamanhos: number[]
+}
+interface DoCliente {
+  consultas: Map<string, Guardados>
+  /** Onde o acervo estava ao sair (abrir um vídeo): o primeiro vídeo à vista, pelo índice. */
+  posicao: { chave: string; indice: number } | null
+}
+const porCliente = new WeakMap<QueryClient, DoCliente>()
 
-function cursoresDa(cliente: QueryClient, hash: string): string[] {
-  let doCliente = cursores.get(cliente)
-  if (!doCliente) cursores.set(cliente, (doCliente = new Map()))
-  let lista = doCliente.get(hash)
-  if (!lista) doCliente.set(hash, (lista = ['']))
-  return lista
+function doCliente(cliente: QueryClient): DoCliente {
+  let d = porCliente.get(cliente)
+  if (!d) porCliente.set(cliente, (d = { consultas: new Map(), posicao: null }))
+  return d
 }
 
-/** Onde o acervo estava ao sair (abrir um vídeo): o primeiro vídeo à vista, pelo índice. */
-let posicaoAoSair: { chave: string; indice: number } | null = null
+function guardadosDa(cliente: QueryClient, hash: string): Guardados {
+  const { consultas } = doCliente(cliente)
+  let g = consultas.get(hash)
+  if (!g) consultas.set(hash, (g = { cursores: [''], tamanhos: [] }))
+  return g
+}
 
-export function lembrarPosicao(chave: string, indice: number) {
-  posicaoAoSair = { chave, indice }
+export function lembrarPosicao(cliente: QueryClient, chave: string, indice: number) {
+  doCliente(cliente).posicao = { chave, indice }
 }
 
 /** Depois de voltar ao lugar: daqui em diante a consulta recomeça do topo (um envio novo, por exemplo). */
-export function esquecerPosicao() {
-  posicaoAoSair = null
+export function esquecerPosicao(cliente: QueryClient) {
+  doCliente(cliente).posicao = null
 }
 
-/** O índice a que voltar, se a última saída foi desta mesma consulta. */
-export function posicaoDaVolta(chave: string): number {
-  return posicaoAoSair?.chave === chave ? posicaoAoSair.indice : 0
+/** Onde começa a página `n`: a soma dos vídeos das de antes, todas já vistas (só se chega a ela descendo). */
+const inicioDa = (tamanhos: number[], n: number) => {
+  let soma = 0
+  for (let i = 0; i < n; i++) soma += tamanhos[i] ?? POR_PAGINA
+  return soma
+}
+
+/** A página onde está o vídeo `indice`, pelos tamanhos guardados; `-1` se passa das já vistas. */
+function paginaDo(tamanhos: number[], indice: number): number {
+  let soma = 0
+  for (let n = 0; n < tamanhos.length; n++) {
+    soma += tamanhos[n]
+    if (indice < soma) return n
+  }
+  return -1
+}
+
+/** O índice a que voltar e a página dele, se a última saída foi desta consulta e o cursor dela ainda está guardado. */
+function volta(cliente: QueryClient, hash: string, g: Guardados): { indice: number; cursor: string } {
+  const p = doCliente(cliente).posicao
+  const n = p?.chave === hash ? paginaDo(g.tamanhos, p.indice) : -1
+  return n >= 0 && g.cursores[n] !== undefined ? { indice: p!.indice, cursor: g.cursores[n] } : { indice: 0, cursor: '' }
 }
 
 /**
@@ -58,16 +89,24 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   const cliente = useQueryClient()
   const chave = chaveDoAcervo(filtros)
   const hash = hashKey(chave)
-  const lista = cursoresDa(cliente, hash)
+  const g = guardadosDa(cliente, hash)
+  const lista = g.cursores
+  // Calculada uma vez, na montagem: a consulta e a tela recomeçam do mesmo lugar.
+  const [montagem] = useState(() => ({ hash, ...volta(cliente, hash, g) }))
+  // Outro filtro depois da montagem começa do topo.
+  const inicial = montagem.hash === hash ? montagem : { indice: 0, cursor: '' }
   const q = useInfiniteQuery({
     queryKey: chave,
     queryFn: ({ pageParam }) => api.acervo(filtros, pageParam),
     // Volta do vídeo com o cache já vencido: recomeça na página do vídeo de onde se saiu.
-    initialPageParam: lista[Math.floor(posicaoDaVolta(hash) / POR_PAGINA)] ?? '',
+    initialPageParam: inicial.cursor,
     getNextPageParam: (ultima: PaginaDoAcervo, _todas, ultimoParam: string) => {
       if (!ultima.proximo) return undefined
       const n = lista.indexOf(ultimoParam)
-      if (n >= 0 && lista[n + 1] !== ultima.proximo) lista.splice(n + 1, Infinity, ultima.proximo)
+      if (n >= 0 && lista[n + 1] !== ultima.proximo) {
+        lista.splice(n + 1, Infinity, ultima.proximo)
+        g.tamanhos.splice(n + 1, Infinity)
+      }
       return ultima.proximo
     },
     getPreviousPageParam: (_primeira, _todas, primeiroParam: string) => {
@@ -81,7 +120,7 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
 
   const params = q.data?.pageParams as string[] | undefined
   const primeira = Math.max(0, params ? lista.indexOf(params[0]) : 0)
-  const inicio = primeira * POR_PAGINA
+  const inicio = inicioDa(g.tamanhos, primeira)
   // As páginas da memória numa lista só: a do andamento e a da lixeira podem ter perdido um vídeo.
   // Sem repetir: uma página refeita depois de uma exclusão avança um vídeo sobre a seguinte,
   // que ainda começa pelo cursor antigo.
@@ -91,6 +130,26 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   }, [q.data])
   const quantidade = q.data ? inicio + itens.length + (q.hasNextPage ? 1 : 0) : 0
   const item = useCallback((i: number): Job | null => itens[i - inicio] ?? null, [itens, inicio])
+
+  // Quantos vídeos cada página da memória mostra, já sem os que saíram aqui (lixeira, andamento):
+  // é o lugar que ela ocupa depois de sair da memória, e os índices à vista não andam.
+  useEffect(() => {
+    q.data?.pages.forEach((p, i) => (g.tamanhos[primeira + i] = p.jobs.length))
+  }, [q.data, g, primeira])
+
+  // Um vídeo novo no topo (ou na página do meio, na ordem por exibição) empurra os outros: a página
+  // de antes, pedida de novo ao subir, termina em outro cursor e a seguinte não emenda mais. Daí
+  // se pede tudo de novo a partir da primeira da memória, encadeando os cursores; uma vez por
+  // resultado, para não rodar em círculo.
+  const conferido = useRef<unknown>(null)
+  const { refetch } = q
+  useEffect(() => {
+    const d = q.data
+    if (!d || q.isFetching || conferido.current === d) return
+    conferido.current = d
+    const pp = d.pageParams as string[]
+    if (d.pages.some((p, i) => i + 1 < pp.length && p.proximo !== pp[i + 1])) void refetch()
+  }, [q.data, q.isFetching, refetch])
 
   const { fetchNextPage, fetchPreviousPage, hasNextPage, isFetching, isFetchNextPageError, isFetchPreviousPageError } = q
   const aoVer = useCallback(
@@ -107,12 +166,14 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   // inteiro no cache somando mais 300 vídeos. Os cursores dela saem junto.
   useEffect(() => {
     cliente.removeQueries({ queryKey: ['acervo'], type: 'inactive', predicate: (c) => c.queryHash !== hash })
-    const doCliente = cursores.get(cliente)
-    for (const outra of doCliente?.keys() ?? []) if (outra !== hash) doCliente!.delete(outra)
+    const { consultas } = doCliente(cliente)
+    for (const outra of consultas.keys()) if (outra !== hash) consultas.delete(outra)
   }, [cliente, hash])
 
   return {
     chave: hash,
+    /** O índice do vídeo a que a tela volta ao montar (0: o topo). */
+    voltaInicial: inicial.indice,
     quantidade,
     item,
     itens,
