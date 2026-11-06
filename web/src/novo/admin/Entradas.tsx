@@ -328,9 +328,9 @@ export default function Entradas({
   // O relógio da tela anda com a lista: cada atualização dela grava a hora.
   const agora = lista.dataUpdatedAt
 
-  // A capa fica a da lista: o andamento e o reprocessamento não trazem capa_url.
+  // Sem capa na resposta, fica a da lista: o andamento e o reprocessamento não trazem capa_url.
   const trocar = (troca: (j: Job) => Job[]) =>
-    consultas.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.flatMap((j) => troca(j).map((n) => ({ ...n, capa_url: j.capa_url }))) })) })
+    consultas.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.flatMap((j) => troca(j).map((n) => ({ ...n, capa_url: n.capa_url ?? j.capa_url }))) })) })
 
   // Só as linhas em andamento são consultadas de novo, num pedido só, e só com a aba à vista
   // (o TanStack para o intervalo com a aba escondida).
