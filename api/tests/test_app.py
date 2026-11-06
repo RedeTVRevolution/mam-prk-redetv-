@@ -53,3 +53,19 @@ def test_arquivo_do_build_e_servido_como_arquivo(tmp_path: Path) -> None:
 
 def test_arquivo_inexistente_de_assets_continua_404(tmp_path: Path) -> None:
     assert _app_com_build(tmp_path).get("/assets/nao-existe.js").status_code == 404
+
+
+def test_service_worker_na_raiz_e_servido_como_javascript(tmp_path: Path) -> None:
+    # O cache de imagens (web/src/sw.ts) sai em /sw.js: o navegador só o aceita como JavaScript
+    # (não como o index.html do fallback), e na raiz ele tem o escopo `/` sem cabeçalho extra.
+    cliente = _app_com_build(tmp_path)
+    (tmp_path / "sw.js").write_text("self.addEventListener('fetch', () => {})")
+
+    resposta = cliente.get("/sw.js")
+
+    assert resposta.status_code == 200
+    assert resposta.headers["content-type"].split(";")[0] in {
+        "text/javascript",
+        "application/javascript",
+    }
+    assert resposta.text.startswith("self.addEventListener")

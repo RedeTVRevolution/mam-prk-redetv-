@@ -2,10 +2,11 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { PedidoInvalido, SessaoExpirada } from '../api.ts'
 import { ContaBloqueada } from '../auth/autenticador.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../auth/falso.ts'
+import { NOME_DO_CACHE } from '../cacheDeImagens.ts'
 import { AutenticadorIndisponivel } from '../auth/indisponivel.ts'
 import App from './App.tsx'
 import { criarClienteDeConsultas } from './consultas.ts'
@@ -27,6 +28,7 @@ const servidor = setupServer(
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   history.replaceState(null, '', '/')
   servidor.resetHandlers()
   chamadas.length = 0
@@ -171,6 +173,8 @@ test('a tela que não migrou leva à mesma URL na interface atual', async () => 
 test('sair pelo menu da conta volta ao login e apaga a sessão', async () => {
   const usuario = userEvent.setup()
   const auth = await comSessao()
+  const apagar = vi.fn(async () => true)
+  vi.stubGlobal('caches', { delete: apagar })
   render(<App autenticador={auth} />)
 
   await usuario.click(await screen.findByRole('button', { name: `Conta: ${ANA}` }))
@@ -179,6 +183,8 @@ test('sair pelo menu da conta volta ao login e apaga a sessão', async () => {
 
   expect(await screen.findByLabelText(/^E-mail/)).toBeTruthy()
   expect(await auth.token()).toBeNull()
+  // O cache de imagens some junto com a sessão.
+  expect(apagar).toHaveBeenCalledWith(NOME_DO_CACHE)
 })
 
 test('a sessão expirada (401) leva ao login, e o login seguinte entra', async () => {
