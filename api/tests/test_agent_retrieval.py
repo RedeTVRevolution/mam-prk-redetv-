@@ -49,6 +49,43 @@ def test_config_vem_so_do_ambiente() -> None:
     assert sem_quadro.indice_do_quadro is None
 
 
+@pytest.mark.parametrize(
+    ("valor", "ligados"),
+    [(None, True), ("", True), ("true", True), ("false", False), ("FALSE", False)],
+)
+def test_os_indices_ann_vem_do_ambiente_e_sem_a_variavel_ficam_ligados(
+    valor: str | None, ligados: bool
+) -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+    }
+    if valor is not None:
+        ambiente["BUSCA_INDICES_LIGADOS"] = valor
+    config = ConfigDaBusca.do_ambiente(ambiente)
+    assert config.indices_ligados is ligados
+    # Desligar os índices não desliga o vetor do quadro.
+    assert config.indice_do_quadro == "q"
+
+
+def test_valor_estranho_nos_indices_ann_levanta() -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+        "BUSCA_INDICES_LIGADOS": "0",
+    }
+    with pytest.raises(ValueError, match="BUSCA_INDICES_LIGADOS"):
+        ConfigDaBusca.do_ambiente(ambiente)
+
+
 SEM_QUADRO = ConfigDaBusca("proj-x", "reg-y", "col-z", "ind-d", None, 256)
 
 
@@ -158,6 +195,189 @@ def test_toda_busca_por_vetor_leva_o_index_hint_do_indice_ann_do_seu_campo() -> 
         }
     # A busca por texto não é KNN: não usa índice de vetor.
     assert "searchHint" not in buscas["textSearch"]
+
+
+SEM_INDICES = replace(CONFIG, indices_ligados=False)
+
+
+VETOR_DA_CONSULTA = [0.5, 0.25]
+
+
+@pytest.mark.parametrize(
+    "consulta",
+    [
+        Consulta(texto="a", significado="b", vetor_do_quadro=[0.0]),
+        Consulta(significado="b", filtros=Filtros(tipo="fala")),
+        Consulta(vetor_do_quadro=[0.0]),
+        Consulta(texto="a", significado="b", cortar_significado=True),
+    ],
+)
+def test_sem_os_indices_ann_toda_busca_por_vetor_vai_pelo_knn_em_cosseno(
+    consulta: Consulta,
+) -> None:
+    pedido = pedido_de_busca(SEM_INDICES, consulta, VETOR_DA_CONSULTA)
+    assert "indexHint" not in str(pedido) and "targetRecall" not in str(pedido)
+    assert "semanticSearch" not in str(pedido)
+    buscas = [b for b in pedido["searches"] if "textSearch" not in b]
+    assert buscas
+    for busca in buscas:
+        [corpo] = busca.values()
+        assert corpo["searchHint"] == {"knnHint": {}}
+        assert corpo["distanceMetric"] == "COSINE_DISTANCE"
+        assert corpo["topK"] == consulta.limite
+    assert "searchHint" not in _buscas(pedido).get("textSearch", {})
+
+
+def test_sem_os_indices_ann_o_significado_vai_como_vetor_da_consulta() -> None:
+    pedido = pedido_de_busca(
+        SEM_INDICES, Consulta(significado="vestido"), VETOR_DA_CONSULTA
+    )
+    assert _buscas(pedido)["vectorSearch"] == {
+        "topK": 20,
+        "outputFields": {"dataFields": ["*"]},
+        "searchField": "descricao_vetor",
+        "searchHint": {"knnHint": {}},
+        "distanceMetric": "COSINE_DISTANCE",
+        "vector": {"values": VETOR_DA_CONSULTA},
+    }
+    with pytest.raises(ValueError, match="vetor da consulta"):
+        pedido_de_busca(SEM_INDICES, Consulta(significado="vestido"))
+
+
+def test_sem_os_indices_ann_a_busca_por_quadro_continua_aceita() -> None:
+    pedido = pedido_de_busca(SEM_INDICES, Consulta(vetor_do_quadro=[0.1, 0.2]))
+    assert _buscas(pedido)["vectorSearch"] == {
+        "topK": 20,
+        "outputFields": {"dataFields": ["*"]},
+        "searchField": "quadro_vetor",
+        "searchHint": {"knnHint": {}},
+        "distanceMetric": "COSINE_DISTANCE",
+        "vector": {"values": [0.1, 0.2]},
+    }
+
+
+def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busca() -> (
+    None
+):
+    transporte = TransporteFalso(
+        {
+            "predictions": [{"embeddings": {"values": [0.5] * 256}}],
+            "results": [],
+        }
+    )
+    AgentRetrieval(SEM_INDICES, transporte).buscar(
+        Consulta(texto="vestido", significado="vestido")
+    )
+    [(_, url, corpo), (_, caminho, busca)] = transporte.chamadas
+    assert url == (
+        "https://reg-y-aiplatform.googleapis.com/v1/projects/proj-x/locations/reg-y/"
+        "publishers/google/models/gemini-embedding-001:predict"
+    )
+    assert corpo == {
+        "instances": [{"content": "vestido", "task_type": "RETRIEVAL_QUERY"}],
+        "parameters": {"outputDimensionality": 256},
+    }
+    assert caminho.endswith("/dataObjects:batchSearch")
+    assert busca is not None
+    assert busca["searches"][1]["vectorSearch"]["vector"] == {"values": [0.5] * 256}
+
+
+def test_com_os_indices_ann_buscar_nao_calcula_embedding() -> None:
+    transporte = TransporteFalso({"results": []})
+    AgentRetrieval(CONFIG, transporte).buscar(Consulta(significado="vestido"))
+    [(_, caminho, _)] = transporte.chamadas
+    assert caminho.endswith("/dataObjects:batchSearch")
+
+
+def test_o_mesmo_texto_e_embutido_uma_vez_so() -> None:
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    assert adaptador.vetor_da_consulta("a") == adaptador.vetor_da_consulta("a")
+    adaptador.vetor_da_consulta("b")
+    assert len(transporte.chamadas) == 2
+
+
+def test_outra_thread_limpando_o_cache_no_meio_nao_derruba_a_busca() -> None:
+    class Limpa(dict[str, list[float]]):
+        """Outra thread chama `clear()` entre o `in` e a leitura."""
+
+        def __contains__(self, chave: object) -> bool:
+            self.clear()
+            return True
+
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    adaptador._vetores = Limpa()
+    assert adaptador.vetor_da_consulta("a") == [0.5] * 256
+
+
+def test_o_cache_do_embedding_guarda_no_maximo_256_textos() -> None:
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    for n in range(256):
+        adaptador.vetor_da_consulta(f"t{n}")
+    adaptador.vetor_da_consulta("t0")  # ainda guardado: sem chamada nova
+    assert len(transporte.chamadas) == 256
+    adaptador.vetor_da_consulta("t256")  # passou do limite: o cache recomeça
+    assert len(adaptador._vetores) == 1
+    adaptador.vetor_da_consulta("t0")  # foi esquecido: chama de novo
+    assert len(transporte.chamadas) == 258
+
+
+def test_embedding_da_consulta_de_outra_dimensao_levanta() -> None:
+    transporte = TransporteFalso({"predictions": [{"embeddings": {"values": [0.5]}}]})
+    with pytest.raises(ValueError, match="dimensão"):
+        AgentRetrieval(SEM_INDICES, transporte).vetor_da_consulta("x")
+
+
+@pytest.mark.parametrize(
+    ("config", "registros", "avisa"),
+    [
+        (SEM_INDICES, 80_001, True),
+        (SEM_INDICES, 80_000, False),
+        (CONFIG, 80_001, False),
+    ],
+)
+def test_sem_os_indices_ann_gravar_avisa_perto_do_teto_do_knn(
+    config: ConfigDaBusca,
+    registros: int,
+    avisa: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transporte = TransporteFalso({"aggregateResults": [{"count": registros}]})
+    AgentRetrieval(config, transporte).gravar("j", [])
+    avisos = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert bool(avisos) is avisa
+    if avisa:
+        assert "100 mil" in avisos[0].getMessage()
+
+
+def test_falha_da_contagem_nao_derruba_a_gravacao() -> None:
+    def transporte(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        if caminho.endswith(":aggregate"):
+            raise RuntimeError("fora do ar")
+        return {}
+
+    AgentRetrieval(SEM_INDICES, transporte).gravar("j", [])
+
+
+def test_sem_os_indices_ann_a_colecao_nasce_sem_indice() -> None:
+    assert indices_da_colecao(SEM_INDICES) == {}
+    transporte = TransporteFalso({"name": "op", "done": True})
+    criar_colecao(SEM_INDICES, transporte, _nao_dorme)
+    [(metodo, caminho, _)] = transporte.chamadas
+    assert (metodo, caminho) == (
+        "POST",
+        "projects/proj-x/locations/reg-y/collections?collectionId=col-z",
+    )
 
 
 def test_so_filtros_nao_e_busca() -> None:

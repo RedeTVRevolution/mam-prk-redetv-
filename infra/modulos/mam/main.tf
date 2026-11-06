@@ -124,6 +124,16 @@ variable "indice_do_quadro_ligado" {
   default = true
 }
 
+# Os índices ANN da coleção (um por vetor, com réplica dedicada cobrada por hora). Em
+# false a busca vai pelo KNN, sem índice, que aceita no máximo 100 mil registros: o dev
+# roda assim por custo (ADR 0006); a produção fica com eles. Os índices não são recursos
+# do Terraform: desligar só para de usá-los, e apagar os que existem é à mão (README);
+# ligar é aplicar e rodar o make criar-colecao-da-busca.
+variable "indices_da_busca_ligados" {
+  type    = bool
+  default = true
+}
+
 # O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima
 # e o mínimo de palavras do registro. Calibrados em 3 vídeos do dev; mudar aqui e aplicar.
 variable "busca_distancia_maxima" {
@@ -940,6 +950,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_INDICE_QUADRO"
         value = local.indice_do_quadro_em_uso
+      }
+      env {
+        name  = "BUSCA_INDICES_LIGADOS"
+        value = tostring(var.indices_da_busca_ligados)
       }
       env {
         name  = "BUSCA_DIMENSAO"
@@ -1905,6 +1919,10 @@ resource "google_cloud_run_v2_job" "indexacao" {
         env {
           name  = "BUSCA_INDICE_QUADRO"
           value = local.indice_do_quadro_em_uso
+        }
+        env {
+          name  = "BUSCA_INDICES_LIGADOS"
+          value = tostring(var.indices_da_busca_ligados)
         }
         env {
           name  = "BUSCA_DIMENSAO"
@@ -3082,6 +3100,10 @@ output "busca_indice_descricao" {
 
 output "busca_indice_quadro" {
   value = local.indice_do_quadro_em_uso
+}
+
+output "busca_indices_ligados" {
+  value = var.indices_da_busca_ligados
 }
 
 output "busca_dimensao" {
