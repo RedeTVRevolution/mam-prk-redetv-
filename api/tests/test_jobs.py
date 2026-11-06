@@ -361,7 +361,7 @@ def test_quadro_devolve_link_assinado_do_jpeg_valido_por_8_h() -> None:
     assert resposta.status_code == 200
     assert resposta.json() == {
         "url": "https://storage.exemplo/quadros/j1/quadros/plano-0.jpg?validade=28800",
-        "expira_em": "2026-10-29T20:00:00Z",
+        "expira_em": "2026-10-29T19:00:00Z",
     }
 
 

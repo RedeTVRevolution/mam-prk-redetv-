@@ -1710,7 +1710,8 @@ def test_os_quadros_da_busca_saem_assinados_por_8_h() -> None:
     momentos = [mo for v in r.videos for mo in v.momentos]
     assert momentos
     assert all(str(mo.quadro_url).endswith("?validade=28800") for mo in momentos)
-    assert r.quadros_expiram_em == BASE + timedelta(hours=8)
+    # A URL vale 8 h, mas pode ter sido assinada até 1 h antes (#409): informa 7 h.
+    assert r.quadros_expiram_em == BASE + timedelta(hours=7)
 
 
 def test_a_chave_de_sistema_nao_assina_os_quadros_dos_videos_cortados_pelo_limite() -> (

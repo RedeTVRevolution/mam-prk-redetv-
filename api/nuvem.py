@@ -57,6 +57,7 @@ from api.idempotencia import (
     nova_reserva,
 )
 from api.jobs import (
+    JANELA_DA_URL_DO_QUADRO,
     PRAZO_DO_UPLOAD,
     CursorInvalido,
     Estado,
@@ -1630,10 +1631,6 @@ class ArquivosNoStorage:
             blob.delete()
 
 
-# A URL assinada de um quadro se repete dentro da hora cheia (#409): o navegador reaproveita
-# a capa já baixada e a listagem não vai ao IAM. Tem de ser bem menor que VALIDADE_DA_IMAGEM:
-# a URL entregue no fim da janela ainda vale a diferença.
-JANELA_DA_URL_DO_QUADRO = timedelta(hours=1)
 # Quadros guardados por instância: uns 50 por página da grade, com folga para o acervo.
 QUADROS_ASSINADOS_GUARDADOS = 4096
 

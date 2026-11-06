@@ -43,6 +43,7 @@ from api.indice_da_busca import (
 )
 from api.jobs import (
     VALIDADE_DA_IMAGEM,
+    VALIDADE_INFORMADA_DA_IMAGEM,
     Armazenamento,
     CursorInvalido,
     Job,
@@ -611,7 +612,7 @@ class Busca:
             sem_aparicoes=vazios,
             plano_b=entendida.plano_b,
             facetas=_facetas([r for r, _, _ in fundidos], nome),
-            quadros_expiram_em=agora + VALIDADE_DA_IMAGEM,
+            quadros_expiram_em=agora + VALIDADE_INFORMADA_DA_IMAGEM,
         )
         if len(todos) > limite:
             resultado._proximo_cursor = self._guardar(
@@ -739,7 +740,7 @@ class Busca:
             sem_aparicoes=lista.sem_aparicoes,
             plano_b=lista.plano_b,
             facetas=lista.facetas,
-            quadros_expiram_em=agora + VALIDADE_DA_IMAGEM,
+            quadros_expiram_em=agora + VALIDADE_INFORMADA_DA_IMAGEM,
         )
         if fim < len(lista.videos):
             resultado._proximo_cursor = f"{id}.{fim}"
