@@ -315,7 +315,7 @@ export function Inspetor({
                       className={cn('flex h-9 shrink-0 items-center gap-2 px-3 text-left text-sm font-medium hover:bg-card', aberta && 'bg-card')}
                     >
                       <Icone size={16} stroke={1.75} style={{ color: cor }} aria-hidden />
-                      {s.rotulo}
+                      {s.rotulo}{' '}
                       <span className="font-normal text-muted-foreground tabular-nums">{contagem(s.chave)}</span>
                       <IconChevronDown size={16} aria-hidden className={cn('ml-auto text-muted-foreground transition-transform motion-reduce:transition-none', aberta && 'rotate-180')} />
                     </button>
