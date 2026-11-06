@@ -17,7 +17,7 @@ Nenhum valor real de projeto vai no código: cada ambiente tem um `exemplo.tfvar
 | Projeto, região, nomes de bucket | a regra de nomes (`<projeto>-<sufixo>`) | projeto e região (variáveis) | a organização de projetos e pastas (#296) |
 | Estado | bucket GCS, um por projeto | prefixo (`dev`, `prod`) | — |
 | Imagens | um digest por componente | o digest publicado em cada projeto | quando prod recebe imagem (promoção a partir do dev) |
-| Tamanhos e limites | os padrões do módulo | `janelas_em_paralelo`, `espera_gpu_minutos`, `limite_de_falhas_por_etapa` (prod igual ao dev até o piloto medir) | os valores finais de prod, depois do piloto |
+| Tamanhos e limites | os padrões do módulo | `janelas_em_paralelo`, `espera_gpu_minutos`, `limite_de_falhas_por_etapa`, `builds_de_imagem_guardados` (builds de cada imagem que o Artifact Registry guarda, padrão 2) (prod igual ao dev até o piloto medir) | os valores finais de prod, depois do piloto |
 | Domínio e balanceador | o código (`modulos/mam/balanceador.tf`) | `dominio` (vazio: sem balanceador) | o domínio de cada ambiente |
 | Identity Platform | `import` da config do projeto | o projeto importado (`var.projeto`) | — |
 | Aplicação | — | só o dev aplica; sem CD para prod | quando criar os ambientes |

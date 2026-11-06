@@ -70,6 +70,18 @@ async function detalhe(resposta: Response): Promise<string> {
   return `Falha ${resposta.status}`
 }
 
+/** Uma página da busca: o próximo cursor vem no cabeçalho e some na última (#426). */
+export type PaginaDaBusca = ResultadoDaBusca & { proximo?: string | null }
+
+function comCursor(query: string, cursor: string | null | undefined): string {
+  return cursor ? `${query}&${new URLSearchParams({ cursor })}` : query
+}
+
+async function paginaDaBusca(pedido: Promise<Response>): Promise<PaginaDaBusca> {
+  const resposta = await pedido
+  return { ...((await resposta.json()) as ResultadoDaBusca), proximo: resposta.headers.get('X-Proximo-Cursor') }
+}
+
 /** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
 export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
 
@@ -321,12 +333,15 @@ export interface ClienteDaApi {
   andamento(ids: string[]): Promise<Job[]>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
-  /** `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. */
-  buscar(consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
+  /**
+   * `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. `cursor` é o `proximo` da
+   * página anterior (vale 15 min, só para a mesma consulta; vencido, a API responde 422).
+   */
+  buscar(consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
   /** `POST /v1/busca/imagem`: a foto é a consulta; só programa e período da `consulta` valem. */
-  buscarPorImagem(foto: File, consulta: ConsultaDaBusca, limite: number): Promise<ResultadoDaBusca>
+  buscarPorImagem(foto: File, consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
   /** `GET /v1/busca/parecidos`: os planos mais próximos do quadro de um plano (o próprio fica fora). */
-  buscarParecidos(job: string, plano: number, limite: number): Promise<ResultadoDaBusca>
+  buscarParecidos(job: string, plano: number, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
   /** `GET /v1/busca/parecidos/planos`: os números dos planos do vídeo com vetor do quadro indexado. */
   planosComVetor(job: string): Promise<number[]>
   /** `GET /v1/relatorios/tempo-de-tela`: tempo de tela por pessoa, contando só aparições. */
@@ -526,14 +541,14 @@ export function criarClienteDaApi(
     andamento: (ids) => chamar(`/v1/jobs/andamento?ids=${ids.map(encodeURIComponent).join(',')}`),
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
-    buscar: (consulta, limite) => chamar(`/v1/busca?${consultaParaApi(consulta, limite)}`),
-    buscarPorImagem: (foto, consulta, limite) => {
+    buscar: (consulta, limite, cursor) => paginaDaBusca(pedir(`/v1/busca?${comCursor(consultaParaApi(consulta, limite), cursor)}`)),
+    buscarPorImagem: (foto, consulta, limite, cursor) => {
       const formulario = new FormData()
       formulario.append('arquivo', foto)
-      return chamar(`/v1/busca/imagem?${consultaDaImagemParaApi(consulta, limite)}`, { post: true, formulario })
+      return paginaDaBusca(pedir(`/v1/busca/imagem?${comCursor(consultaDaImagemParaApi(consulta, limite), cursor)}`, { post: true, formulario }))
     },
-    buscarParecidos: (job, plano, limite) =>
-      chamar(`/v1/busca/parecidos?${new URLSearchParams({ job, plano: String(plano), limite: String(limite) })}`),
+    buscarParecidos: (job, plano, limite, cursor) =>
+      paginaDaBusca(pedir(`/v1/busca/parecidos?${comCursor(String(new URLSearchParams({ job, plano: String(plano), limite: String(limite) })), cursor)}`)),
     planosComVetor: async (job) =>
       (await chamar<{ planos: number[] }>(`/v1/busca/parecidos/planos?${new URLSearchParams({ job })}`)).planos,
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),

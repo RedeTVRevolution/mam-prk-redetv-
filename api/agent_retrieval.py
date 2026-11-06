@@ -5,16 +5,20 @@ Projeto, região, coleção, índices e dimensão chegam por variável de ambien
 `Transporte`: aqui moram a montagem dos pedidos e a leitura das respostas, testadas sem
 rede. Cada vetor tem o seu índice ANN (um índice cobre um só campo de vetor), implantado
 junto com a coleção, e toda busca por vetor leva o `searchHint.indexHint` dele, porque o
-KNN sem índice aceita no máximo 100 mil registros.
+KNN sem índice aceita no máximo 100 mil registros. Com `BUSCA_INDICES_LIGADOS=false` (o
+dev, por custo) não há índice ANN: a coleção nasce sem eles e a busca vai pelo KNN
+(`knnHint` explícito, cosseno), com o embedding da consulta calculado aqui.
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022),
 conferido no #122.
 """
 
+import logging
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
-from time import sleep
+from time import monotonic, sleep
 from typing import Any, Protocol
 
 import google.auth
@@ -23,9 +27,26 @@ import google.auth.transport.requests
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 
+log = logging.getLogger(__name__)
+
 URL_BASE = "https://vectorsearch.googleapis.com/v1beta"
 RECALL_ALVO = 0.95
+# O KNN aceita até 100 mil registros; a gravação avisa ao passar deste limite (sem índice).
+AVISO_DO_TETO_DO_KNN = 80_000
 REGISTROS_POR_LOTE = 200
+# O `gravar` escreve até esta fração da cota de escrita da coleção (`cota_de_escrita`):
+# com 3.000 objetos por minuto, 13 lotes de 200. A folga cobre a diferença entre o
+# relógio daqui e o do serviço (#411).
+FRACAO_DA_COTA = 0.9
+# As esperas, em segundos, antes de cada nova tentativa no 429 (cota esgotada): 315 s no
+# total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só nos Jobs
+# (`tentar_no_429`) e só as chamadas da gravação e da purga; a busca nunca espera.
+ESPERAS_NO_429_S = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0, 60.0)
+COM_NOVA_TENTATIVA = (
+    "dataObjects:batchCreate",
+    "dataObjects:batchDelete",
+    "dataObjects:query",
+)
 # O máximo de nomes por `batchDelete` e de objetos por página do `query`.
 OBJETOS_POR_PAGINA = 1000
 # O embedding automático da descrição: texto multilíngue, reduzido à dimensão da coleção.
@@ -58,7 +79,7 @@ class Transporte(Protocol):
     def __call__(
         self, metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> dict[str, Any]:
-        """Uma chamada REST; `caminho` é relativo à URL base."""
+        """Uma chamada REST; `caminho` é relativo à URL base, salvo se for uma URL inteira."""
         ...
 
 
@@ -76,14 +97,31 @@ class ConfigDaBusca:
     # "Tchau,") ficam perto de qualquer consulta. None: sem corte.
     distancia_maxima: float | None = None
     palavras_minimas: int = 0
+    # False: sem índice ANN nenhum (o dev, por custo; ADR 0006). As buscas por vetor vão
+    # sem `searchHint`, pelo KNN, que aceita até 100 mil registros. O vetor do quadro e a
+    # busca por quadro continuam presos a `indice_do_quadro`.
+    indices_ligados: bool = True
+    # A cota `data_object_writes` da coleção, em objetos por minuto, que vale para todos
+    # os vídeos gravando juntos. None: o `gravar` não segura o ritmo (#411).
+    cota_de_escrita: int | None = None
 
     @classmethod
     def do_ambiente(cls, ambiente: Mapping[str, str]) -> "ConfigDaBusca":
         """Levanta `KeyError` se faltar uma variável: sem ela a busca não tem onde ir.
-        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave. O corte
+        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave.
+        `BUSCA_INDICES_LIGADOS=false` desliga os índices ANN; ausente ou vazia, ficam
+        ligados, e outro valor que não `true` ou `false` levanta `ValueError`. O corte
         (`BUSCA_DISTANCIA_MAXIMA`, `BUSCA_PALAVRAS_MINIMAS`) só o serviço e o
-        `make sondar-busca` recebem."""
+        `make sondar-busca` recebem. `BUSCA_COTA_DE_ESCRITA` só quem grava; ausente ou
+        vazia, sem ritmo."""
         distancia = ambiente.get("BUSCA_DISTANCIA_MAXIMA")
+        cota = ambiente.get("BUSCA_COTA_DE_ESCRITA")
+        ligados = (ambiente.get("BUSCA_INDICES_LIGADOS") or "true").strip().lower()
+        if ligados not in ("true", "false"):
+            raise ValueError(f"BUSCA_INDICES_LIGADOS inválida: {ligados!r}")
+        if cota and int(cota) <= 0:
+            # Gravaria um lote por minuto, sem aviso.
+            raise ValueError(f"BUSCA_COTA_DE_ESCRITA inválida: {cota!r}")
         return cls(
             projeto=ambiente["GCP_PROJECT_ID"],
             regiao=ambiente["BUSCA_REGIAO"],
@@ -93,6 +131,8 @@ class ConfigDaBusca:
             dimensao=int(ambiente["BUSCA_DIMENSAO"]),
             distancia_maxima=float(distancia) if distancia else None,
             palavras_minimas=int(ambiente.get("BUSCA_PALAVRAS_MINIMAS") or 0),
+            indices_ligados=ligados == "true",
+            cota_de_escrita=int(cota) if cota else None,
         )
 
     @property
@@ -105,7 +145,9 @@ class ConfigDaBusca:
 
     @property
     def indices(self) -> dict[str, str]:
-        """O id do índice ANN de cada campo de vetor ligado."""
+        """O id do índice ANN de cada campo de vetor ligado; nenhum sem `indices_ligados`."""
+        if not self.indices_ligados:
+            return {}
         indices = {CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao}
         if self.indice_do_quadro is not None:
             indices[CAMPO_DO_VETOR_DO_QUADRO] = self.indice_do_quadro
@@ -151,12 +193,22 @@ def filtro_do_pedido(f: Filtros) -> dict[str, Any] | None:
     return {"$and": condicoes} if condicoes else None
 
 
-def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]:
+def pedido_de_busca(
+    config: ConfigDaBusca,
+    consulta: Consulta,
+    vetor_do_significado: list[float] | None = None,
+) -> dict[str, Any]:
     """O corpo do `batchSearch`: filtros, texto, significado e vetor, fundidos por RRF.
 
     As buscas por vetor (significado e quadro) levam o `indexHint` do índice ANN do seu
-    campo; a busca por texto não é KNN e não usa índice de vetor. Só filtros não é busca:
-    levanta `ValueError`.
+    campo. Com os índices desligados (`indices_ligados`) vão pelo KNN, com `knnHint`
+    explícito (o serviço usaria um índice que ainda existisse) e `COSINE_DISTANCE` (o
+    padrão do KNN é o produto escalar, que não serve a vetores sem norma 1). O
+    `semanticSearch` não aceita `distanceMetric` e no KNN ordena por produto escalar: o
+    significado vai então como `vectorSearch` com `vetor_do_significado`, o embedding da
+    consulta (`AgentRetrieval.vetor_da_consulta`), obrigatório nesse caso. A busca por
+    texto não é KNN e não usa índice de vetor. Só filtros não é busca: levanta
+    `ValueError`.
     """
     comum: dict[str, Any] = {
         "topK": consulta.limite,
@@ -167,6 +219,13 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
         comum["filter"] = filtro
 
     def no_indice(campo: str) -> dict[str, Any]:
+        if not config.indices_ligados:
+            return {
+                **comum,
+                "searchField": campo,
+                "searchHint": {"knnHint": {}},
+                "distanceMetric": "COSINE_DISTANCE",
+            }
         return {
             **comum,
             "searchField": campo,
@@ -182,7 +241,20 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
     if consulta.texto:
         texto = {"text": normalizar(consulta.texto), "fields": CAMPOS_DE_TEXTO}
         buscas.append({"textSearch": {**comum, "structuredQuery": {"text": texto}}})
-    if consulta.significado:
+    if consulta.significado and not config.indices_ligados:
+        if vetor_do_significado is None:
+            raise ValueError(
+                "sem os índices ANN, o significado pede o vetor da consulta"
+            )
+        buscas.append(
+            {
+                "vectorSearch": {
+                    **no_indice(CAMPO_DO_VETOR_DA_DESCRICAO),
+                    "vector": {"values": vetor_do_significado},
+                }
+            }
+        )
+    elif consulta.significado:
         buscas.append(
             {
                 "semanticSearch": {
@@ -194,7 +266,8 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
         )
     if consulta.vetor_do_quadro is not None:
         if config.indice_do_quadro is None:
-            # Sem o índice, a busca cairia no KNN, limitado a 100 mil registros.
+            # Desligado, nenhum vetor de quadro é calculado na indexação
+            # (`embedding_da_busca`): não há o que achar.
             raise ValueError("o índice do quadro-chave está desligado")
         buscas.append(
             {
@@ -268,7 +341,8 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
 
 
 def indices_da_colecao(config: ConfigDaBusca) -> dict[str, dict[str, Any]]:
-    """O corpo de cada índice ANN, pelo id: um campo de vetor, os de filtro e os guardados."""
+    """O corpo de cada índice ANN, pelo id: um campo de vetor, os de filtro e os guardados.
+    Vazio com os índices desligados (`indices_ligados`)."""
     propriedades = esquema_da_colecao(config)["dataSchema"]["properties"]
     guardados = [p for p in propriedades if p != "significado"]
     return {
@@ -293,6 +367,10 @@ def indices_da_colecao(config: ConfigDaBusca) -> dict[str, dict[str, Any]]:
 
 class JaExiste(Exception):
     """O transporte levanta quando a coleção ou o índice já existe (HTTP 409)."""
+
+
+class CotaEsgotada(RuntimeError):
+    """O transporte levanta no HTTP 429 (RESOURCE_EXHAUSTED): a cota esgotou por ora."""
 
 
 def esperar(
@@ -490,14 +568,61 @@ def _criacao(r: Registro) -> dict[str, Any]:
 
 
 class AgentRetrieval:
-    def __init__(self, config: ConfigDaBusca, transporte: Transporte) -> None:
+    def __init__(
+        self,
+        config: ConfigDaBusca,
+        transporte: Transporte,
+        *,
+        tentar_no_429: bool = False,
+        dormir: Callable[[float], None] = sleep,
+        relogio: Callable[[], float] = monotonic,
+    ) -> None:
+        """`tentar_no_429` só nos Jobs (indexação, `make reindexar`, purga): o serviço
+        web não segura a thread da busca esperando a cota, e o 429 volta na hora."""
         self._config = config
         self._transporte = transporte
+        self._tentar_no_429 = tentar_no_429
+        self._dormir = dormir
+        self._relogio = relogio
+        # Os lotes do `gravar` no último minuto, (quando, objetos): o ritmo vale entre os
+        # vídeos que o mesmo processo grava (o `make reindexar` de todos).
+        self._escritas: deque[tuple[float, int]] = deque()
+        # Uma busca do usuário repete o mesmo texto em várias cláusulas (a livre e a de cada
+        # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
+        self._vetores: dict[str, list[float]] = {}
 
     def _chamar(self, caminho: str, corpo: dict[str, Any]) -> dict[str, Any]:
-        return self._transporte(
-            "POST", f"{self._config.caminho_da_colecao}/{caminho}", corpo
-        )
+        """Com `tentar_no_429`, as chamadas de `COM_NOVA_TENTATIVA` esperam e tentam de
+        novo no 429: a cota de escrita é da coleção, e dois vídeos indexando juntos a
+        dividem (#411)."""
+        url = f"{self._config.caminho_da_colecao}/{caminho}"
+        tenta = self._tentar_no_429 and caminho in COM_NOVA_TENTATIVA
+        esperas = ESPERAS_NO_429_S if tenta else ()
+        for espera in esperas:
+            try:
+                return self._transporte("POST", url, corpo)
+            except CotaEsgotada:
+                log.warning(
+                    "%s: cota esgotada, nova tentativa em %.0f s", caminho, espera
+                )
+                self._dormir(espera)
+        return self._transporte("POST", url, corpo)
+
+    def _no_ritmo(self, objetos: int) -> None:
+        """Espera até os objetos gravados nos últimos 60 s, mais estes, caberem na fração
+        `FRACAO_DA_COTA` da cota de escrita. Sem cota configurada, não espera."""
+        if self._config.cota_de_escrita is None:
+            return
+        limite = self._config.cota_de_escrita * FRACAO_DA_COTA
+        while True:
+            agora = self._relogio()
+            while self._escritas and self._escritas[0][0] <= agora - 60:
+                self._escritas.popleft()
+            gravados = sum(n for _, n in self._escritas)
+            if not self._escritas or gravados + objetos <= limite:
+                self._escritas.append((agora, objetos))
+                return
+            self._dormir(self._escritas[0][0] + 60 - agora)
 
     def apagar(self, job_id: str) -> None:
         """O `batchDelete` só aceita nomes: junta os do vídeo, página a página, e apaga."""
@@ -519,16 +644,81 @@ class AgentRetrieval:
             )
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
+        try:
+            self._gravar_uma_vez(job_id, registros)
+        except JaExiste:
+            # Um lote já estava lá: reenviado depois de uma resposta perdida, gravado em
+            # parte, ou de outra indexação do mesmo vídeo (os ids são fixos). O `apagar`
+            # tira só o que existe; o vídeo entra de novo inteiro, uma vez (#411).
+            log.warning("%s: 409 na gravação, apagando e gravando de novo", job_id)
+            self._gravar_uma_vez(job_id, registros)
+        if not self._config.indices_ligados:
+            self._avisar_do_teto_do_knn()
+
+    def _gravar_uma_vez(self, job_id: str, registros: list[Registro]) -> None:
         self.apagar(job_id)
         for i in range(0, len(registros), REGISTROS_POR_LOTE):
             pedacos = registros[i : i + REGISTROS_POR_LOTE]
+            self._no_ritmo(len(pedacos))
             self._chamar(
                 "dataObjects:batchCreate", {"requests": [_criacao(r) for r in pedacos]}
             )
 
+    def _avisar_do_teto_do_knn(self) -> None:
+        """Sem índice ANN a busca é KNN, que recusa mais de 100 mil registros: o aviso vem
+        antes. Uma falha da contagem não pode derrubar a indexação."""
+        try:
+            registros = self.total()
+        except Exception:
+            log.exception("contagem da coleção para o aviso do teto do KNN falhou")
+            return
+        if registros > AVISO_DO_TETO_DO_KNN:
+            log.warning(
+                "a coleção tem %d registros e o KNN, sem índice ANN, aceita no máximo "
+                "100 mil: ligue indices_da_busca_ligados, aplique e rode o "
+                "make criar-colecao-da-busca antes de chegar lá",
+                registros,
+            )
+
+    def vetor_da_consulta(self, texto: str) -> list[float]:
+        """O embedding da consulta, o mesmo modelo, tarefa e dimensão com que o
+        `semanticSearch` o calcula, na região da busca. Medido no dev (5/11/2026): a
+        distância de cada posição do top-50 coincide com a do ANN. Sem retry: a chamada
+        tem cota regional e um 429 sobe como erro da busca."""
+        # `get`, não `in` e depois `[]`: outra thread pode limpar o cache no meio.
+        guardado = self._vetores.get(texto)
+        if guardado is not None:
+            return guardado
+        resposta = self._transporte(
+            "POST",
+            f"https://{self._config.regiao}-aiplatform.googleapis.com/v1/projects/"
+            f"{self._config.projeto}/locations/{self._config.regiao}/publishers/google/"
+            f"models/{MODELO_DO_EMBEDDING}:predict",
+            {
+                "instances": [{"content": texto, "task_type": "RETRIEVAL_QUERY"}],
+                "parameters": {"outputDimensionality": self._config.dimensao},
+            },
+        )
+        valores = [float(v) for v in resposta["predictions"][0]["embeddings"]["values"]]
+        if len(valores) != self._config.dimensao:
+            raise ValueError(
+                f"o embedding veio com dimensão {len(valores)}, e a coleção tem "
+                f"{self._config.dimensao}"
+            )
+        if len(self._vetores) >= 256:
+            self._vetores.clear()
+        self._vetores[texto] = valores
+        return valores
+
     def buscar(self, consulta: Consulta) -> list[Registro]:
+        # Sem índice ANN a consulta vira vetor aqui (`pedido_de_busca`).
+        vetor = (
+            self.vetor_da_consulta(consulta.significado)
+            if consulta.significado and not self._config.indices_ligados
+            else None
+        )
         resposta = self._chamar(
-            "dataObjects:batchSearch", pedido_de_busca(self._config, consulta)
+            "dataObjects:batchSearch", pedido_de_busca(self._config, consulta, vetor)
         )
         # Uma lista de resultados por busca; com o RRF, uma lista só, já fundida.
         registros = [
@@ -606,11 +796,15 @@ def transporte_http() -> Transporte:
     def chamar(
         metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> dict[str, Any]:
+        # `caminho` é relativo à URL base, salvo o embedding da consulta (outro serviço).
+        url = caminho if caminho.startswith("https://") else f"{URL_BASE}/{caminho}"
         resposta = sessao.request(  # type: ignore[no-untyped-call]
-            metodo, f"{URL_BASE}/{caminho}", json=corpo, timeout=60
+            metodo, url, json=corpo, timeout=60
         )
         if resposta.status_code == 409:
             raise JaExiste(caminho)
+        if resposta.status_code == 429:
+            raise CotaEsgotada(f"{metodo} {caminho}: HTTP 429: {resposta.text[:2000]}")
         if not resposta.ok:
             # A mensagem do serviço diz qual campo ele recusou.
             raise RuntimeError(

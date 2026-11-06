@@ -8,8 +8,10 @@ import { ACERVO, seguir, useRota, type Rota } from '../rotas.ts'
 import { useSessao, type Usuario } from '../sessao.ts'
 import { AtalhosProvider } from './Atalhos.tsx'
 import { Acervo } from './acervo/Acervo.tsx'
+import { Busca, Parecidos } from './busca/Busca.tsx'
 import { Casca } from './Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from './consultas.ts'
+import Administracao from './admin/Administracao.tsx'
 import Login from './Login.tsx'
 import { Button } from './ui/button.tsx'
 import { TelaDoVideo } from './video/TelaDoVideo.tsx'
@@ -20,10 +22,12 @@ const TempoDeTela = lazy(() => import('./relatorios/TempoDeTela.tsx'))
 const Marcas = lazy(() => import('./relatorios/Marcas.tsx'))
 
 /** O que a área de trabalho mostra. As telas que ainda não migraram levam à interface atual. */
-function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[] }) {
+function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuario; aoSair: () => void }) {
   if (rota.tipo === 'raiz') return null
+  // O login recente que a purga pede passa pela saída: a Lixeira guarda o pedido e o reabre na volta.
+  if (rota.tipo === 'admin') return <Administracao aba={rota.aba} busca={rota.busca} usuario={usuario} aoEntrarDeNovo={aoSair} />
   // O front só esconde o painel; quem barra é a API.
-  if (rota.tipo === 'nao_encontrada' || (rota.tipo === 'painel' && !permissoes.includes('painel.ver'))) {
+  if (rota.tipo === 'nao_encontrada' || (rota.tipo === 'painel' && !usuario.permissoes.includes('painel.ver'))) {
     return (
       <div className="m-auto grid justify-items-center gap-2 p-8 text-center">
         <p>Página não encontrada.</p>
@@ -33,8 +37,10 @@ function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[]
       </div>
     )
   }
-  if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} permissoes={permissoes} />
-  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} />
+  if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} permissoes={usuario.permissoes} />
+  if (rota.tipo === 'busca') return <Busca consulta={rota.consulta} />
+  if (rota.tipo === 'parecidos') return <Parecidos key={`${rota.job}:${rota.plano}`} job={rota.job} plano={rota.plano} />
+  if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} permissoes={usuario.permissoes} />
   if (rota.tipo === 'painel') {
     return (
       <Suspense>
@@ -78,7 +84,7 @@ function SessaoAtiva({ api, usuario, rota, aoSair }: { api: ClienteDaApi; usuari
     <QueryClientProvider client={consultas}>
       <ContextoDaApi.Provider value={api}>
         <Casca usuario={usuario} rota={rota} aoSair={aoSair}>
-          <AreaDeTrabalho rota={rota} permissoes={usuario.permissoes} />
+          <AreaDeTrabalho rota={rota} usuario={usuario} aoSair={aoSair} />
         </Casca>
       </ContextoDaApi.Provider>
     </QueryClientProvider>

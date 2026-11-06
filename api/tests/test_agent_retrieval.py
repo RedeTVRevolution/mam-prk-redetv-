@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -7,6 +8,7 @@ import pytest
 from api.agent_retrieval import (
     AgentRetrieval,
     ConfigDaBusca,
+    CotaEsgotada,
     EsquemaIncompativel,
     JaExiste,
     apagar_colecao,
@@ -17,6 +19,7 @@ from api.agent_retrieval import (
     filtro_do_pedido,
     indices_da_colecao,
     pedido_de_busca,
+    transporte_http,
 )
 from api.indice_da_busca import Consulta, Filtros, Registro
 
@@ -47,6 +50,43 @@ def test_config_vem_so_do_ambiente() -> None:
     # Vazio desliga o índice do quadro-chave (ADR 0006).
     sem_quadro = ConfigDaBusca.do_ambiente(ambiente | {"BUSCA_INDICE_QUADRO": ""})
     assert sem_quadro.indice_do_quadro is None
+
+
+@pytest.mark.parametrize(
+    ("valor", "ligados"),
+    [(None, True), ("", True), ("true", True), ("false", False), ("FALSE", False)],
+)
+def test_os_indices_ann_vem_do_ambiente_e_sem_a_variavel_ficam_ligados(
+    valor: str | None, ligados: bool
+) -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+    }
+    if valor is not None:
+        ambiente["BUSCA_INDICES_LIGADOS"] = valor
+    config = ConfigDaBusca.do_ambiente(ambiente)
+    assert config.indices_ligados is ligados
+    # Desligar os índices não desliga o vetor do quadro.
+    assert config.indice_do_quadro == "q"
+
+
+def test_valor_estranho_nos_indices_ann_levanta() -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+        "BUSCA_INDICES_LIGADOS": "0",
+    }
+    with pytest.raises(ValueError, match="BUSCA_INDICES_LIGADOS"):
+        ConfigDaBusca.do_ambiente(ambiente)
 
 
 SEM_QUADRO = ConfigDaBusca("proj-x", "reg-y", "col-z", "ind-d", None, 256)
@@ -158,6 +198,189 @@ def test_toda_busca_por_vetor_leva_o_index_hint_do_indice_ann_do_seu_campo() -> 
         }
     # A busca por texto não é KNN: não usa índice de vetor.
     assert "searchHint" not in buscas["textSearch"]
+
+
+SEM_INDICES = replace(CONFIG, indices_ligados=False)
+
+
+VETOR_DA_CONSULTA = [0.5, 0.25]
+
+
+@pytest.mark.parametrize(
+    "consulta",
+    [
+        Consulta(texto="a", significado="b", vetor_do_quadro=[0.0]),
+        Consulta(significado="b", filtros=Filtros(tipo="fala")),
+        Consulta(vetor_do_quadro=[0.0]),
+        Consulta(texto="a", significado="b", cortar_significado=True),
+    ],
+)
+def test_sem_os_indices_ann_toda_busca_por_vetor_vai_pelo_knn_em_cosseno(
+    consulta: Consulta,
+) -> None:
+    pedido = pedido_de_busca(SEM_INDICES, consulta, VETOR_DA_CONSULTA)
+    assert "indexHint" not in str(pedido) and "targetRecall" not in str(pedido)
+    assert "semanticSearch" not in str(pedido)
+    buscas = [b for b in pedido["searches"] if "textSearch" not in b]
+    assert buscas
+    for busca in buscas:
+        [corpo] = busca.values()
+        assert corpo["searchHint"] == {"knnHint": {}}
+        assert corpo["distanceMetric"] == "COSINE_DISTANCE"
+        assert corpo["topK"] == consulta.limite
+    assert "searchHint" not in _buscas(pedido).get("textSearch", {})
+
+
+def test_sem_os_indices_ann_o_significado_vai_como_vetor_da_consulta() -> None:
+    pedido = pedido_de_busca(
+        SEM_INDICES, Consulta(significado="vestido"), VETOR_DA_CONSULTA
+    )
+    assert _buscas(pedido)["vectorSearch"] == {
+        "topK": 20,
+        "outputFields": {"dataFields": ["*"]},
+        "searchField": "descricao_vetor",
+        "searchHint": {"knnHint": {}},
+        "distanceMetric": "COSINE_DISTANCE",
+        "vector": {"values": VETOR_DA_CONSULTA},
+    }
+    with pytest.raises(ValueError, match="vetor da consulta"):
+        pedido_de_busca(SEM_INDICES, Consulta(significado="vestido"))
+
+
+def test_sem_os_indices_ann_a_busca_por_quadro_continua_aceita() -> None:
+    pedido = pedido_de_busca(SEM_INDICES, Consulta(vetor_do_quadro=[0.1, 0.2]))
+    assert _buscas(pedido)["vectorSearch"] == {
+        "topK": 20,
+        "outputFields": {"dataFields": ["*"]},
+        "searchField": "quadro_vetor",
+        "searchHint": {"knnHint": {}},
+        "distanceMetric": "COSINE_DISTANCE",
+        "vector": {"values": [0.1, 0.2]},
+    }
+
+
+def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busca() -> (
+    None
+):
+    transporte = TransporteFalso(
+        {
+            "predictions": [{"embeddings": {"values": [0.5] * 256}}],
+            "results": [],
+        }
+    )
+    AgentRetrieval(SEM_INDICES, transporte).buscar(
+        Consulta(texto="vestido", significado="vestido")
+    )
+    [(_, url, corpo), (_, caminho, busca)] = transporte.chamadas
+    assert url == (
+        "https://reg-y-aiplatform.googleapis.com/v1/projects/proj-x/locations/reg-y/"
+        "publishers/google/models/gemini-embedding-001:predict"
+    )
+    assert corpo == {
+        "instances": [{"content": "vestido", "task_type": "RETRIEVAL_QUERY"}],
+        "parameters": {"outputDimensionality": 256},
+    }
+    assert caminho.endswith("/dataObjects:batchSearch")
+    assert busca is not None
+    assert busca["searches"][1]["vectorSearch"]["vector"] == {"values": [0.5] * 256}
+
+
+def test_com_os_indices_ann_buscar_nao_calcula_embedding() -> None:
+    transporte = TransporteFalso({"results": []})
+    AgentRetrieval(CONFIG, transporte).buscar(Consulta(significado="vestido"))
+    [(_, caminho, _)] = transporte.chamadas
+    assert caminho.endswith("/dataObjects:batchSearch")
+
+
+def test_o_mesmo_texto_e_embutido_uma_vez_so() -> None:
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    assert adaptador.vetor_da_consulta("a") == adaptador.vetor_da_consulta("a")
+    adaptador.vetor_da_consulta("b")
+    assert len(transporte.chamadas) == 2
+
+
+def test_outra_thread_limpando_o_cache_no_meio_nao_derruba_a_busca() -> None:
+    class Limpa(dict[str, list[float]]):
+        """Outra thread chama `clear()` entre o `in` e a leitura."""
+
+        def __contains__(self, chave: object) -> bool:
+            self.clear()
+            return True
+
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    adaptador._vetores = Limpa()
+    assert adaptador.vetor_da_consulta("a") == [0.5] * 256
+
+
+def test_o_cache_do_embedding_guarda_no_maximo_256_textos() -> None:
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    for n in range(256):
+        adaptador.vetor_da_consulta(f"t{n}")
+    adaptador.vetor_da_consulta("t0")  # ainda guardado: sem chamada nova
+    assert len(transporte.chamadas) == 256
+    adaptador.vetor_da_consulta("t256")  # passou do limite: o cache recomeça
+    assert len(adaptador._vetores) == 1
+    adaptador.vetor_da_consulta("t0")  # foi esquecido: chama de novo
+    assert len(transporte.chamadas) == 258
+
+
+def test_embedding_da_consulta_de_outra_dimensao_levanta() -> None:
+    transporte = TransporteFalso({"predictions": [{"embeddings": {"values": [0.5]}}]})
+    with pytest.raises(ValueError, match="dimensão"):
+        AgentRetrieval(SEM_INDICES, transporte).vetor_da_consulta("x")
+
+
+@pytest.mark.parametrize(
+    ("config", "registros", "avisa"),
+    [
+        (SEM_INDICES, 80_001, True),
+        (SEM_INDICES, 80_000, False),
+        (CONFIG, 80_001, False),
+    ],
+)
+def test_sem_os_indices_ann_gravar_avisa_perto_do_teto_do_knn(
+    config: ConfigDaBusca,
+    registros: int,
+    avisa: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transporte = TransporteFalso({"aggregateResults": [{"count": registros}]})
+    AgentRetrieval(config, transporte).gravar("j", [])
+    avisos = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert bool(avisos) is avisa
+    if avisa:
+        assert "100 mil" in avisos[0].getMessage()
+
+
+def test_falha_da_contagem_nao_derruba_a_gravacao() -> None:
+    def transporte(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        if caminho.endswith(":aggregate"):
+            raise RuntimeError("fora do ar")
+        return {}
+
+    AgentRetrieval(SEM_INDICES, transporte).gravar("j", [])
+
+
+def test_sem_os_indices_ann_a_colecao_nasce_sem_indice() -> None:
+    assert indices_da_colecao(SEM_INDICES) == {}
+    transporte = TransporteFalso({"name": "op", "done": True})
+    criar_colecao(SEM_INDICES, transporte, _nao_dorme)
+    [(metodo, caminho, _)] = transporte.chamadas
+    assert (metodo, caminho) == (
+        "POST",
+        "projects/proj-x/locations/reg-y/collections?collectionId=col-z",
+    )
 
 
 def test_so_filtros_nao_e_busca() -> None:
@@ -607,3 +830,255 @@ def test_o_destaque_vai_ao_indice_e_volta_na_busca() -> None:
     )
     [achado] = AgentRetrieval(CONFIG, transporte).buscar(Consulta(texto="carro"))
     assert achado.destaque == 3
+
+
+def _registros(n: int) -> list[Registro]:
+    return [
+        Registro(id=f"j:fala:{i}", tipo="fala", job_id="j", inicio_ms=i, fim_ms=i + 1)
+        for i in range(n)
+    ]
+
+
+class _Relogio:
+    """Relógio falso: dormir avança o tempo, sem esperar de verdade."""
+
+    def __init__(self) -> None:
+        self.agora = 0.0
+        self.esperas: list[float] = []
+
+    def __call__(self) -> float:
+        return self.agora
+
+    def dormir(self, segundos: float) -> None:
+        self.esperas.append(segundos)
+        self.agora += segundos
+
+
+def _indice(
+    transporte: Any,
+    relogio: _Relogio,
+    config: ConfigDaBusca = CONFIG,
+    tentar_no_429: bool = True,
+) -> AgentRetrieval:
+    """O adaptador como o Job de indexação o monta, com o relógio falso."""
+    return AgentRetrieval(
+        config,
+        transporte,
+        tentar_no_429=tentar_no_429,
+        dormir=relogio.dormir,
+        relogio=relogio,
+    )
+
+
+def test_cota_de_escrita_vem_do_ambiente_e_sem_ela_nao_ha_ritmo() -> None:
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        "BUSCA_INDICE_DESCRICAO": "d",
+        "BUSCA_INDICE_QUADRO": "q",
+        "BUSCA_DIMENSAO": "128",
+    }
+    assert ConfigDaBusca.do_ambiente(ambiente).cota_de_escrita is None
+    # Vazia (o output do Terraform que o make ainda não acha): sem ritmo também.
+    vazia = ambiente | {"BUSCA_COTA_DE_ESCRITA": ""}
+    assert ConfigDaBusca.do_ambiente(vazia).cota_de_escrita is None
+    com_cota = ambiente | {"BUSCA_COTA_DE_ESCRITA": "3000"}
+    assert ConfigDaBusca.do_ambiente(com_cota).cota_de_escrita == 3000
+    # Zero ou negativa gravaria um lote por minuto, sem aviso: para com erro.
+    for invalida in ("0", "-1"):
+        with pytest.raises(ValueError, match="BUSCA_COTA_DE_ESCRITA"):
+            ConfigDaBusca.do_ambiente(ambiente | {"BUSCA_COTA_DE_ESCRITA": invalida})
+
+
+def test_gravar_no_429_espera_e_reenvia_o_lote() -> None:
+    relogio = _Relogio()
+    transporte = TransporteFalso()
+    lotes = 0
+
+    def com_um_429(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        nonlocal lotes
+        if caminho.endswith(":batchCreate"):
+            lotes += 1
+            if lotes == 1:
+                raise CotaEsgotada(caminho)
+        return transporte(metodo, caminho, corpo)
+
+    _indice(com_um_429, relogio).gravar("j", _registros(3))
+    criados = [c for _, c, _ in transporte.chamadas if c.endswith(":batchCreate")]
+    assert (lotes, len(criados)) == (2, 1)
+    assert relogio.esperas and relogio.esperas[0] > 0
+
+
+def _sempre_429(
+    metodo: str, caminho: str, corpo: dict[str, Any] | None
+) -> dict[str, Any]:
+    raise CotaEsgotada(caminho)
+
+
+def test_esperas_no_429_crescem_e_cabem_no_timeout_do_job() -> None:
+    relogio = _Relogio()
+    with pytest.raises(CotaEsgotada):
+        _indice(_sempre_429, relogio).apagar("j")
+    esperas = relogio.esperas
+    assert len(esperas) > 1
+    assert esperas == sorted(esperas) and esperas[-1] > esperas[0]
+    # Os Jobs de indexação e de purga têm 1800 s (infra/modulos/mam/): as esperas de
+    # uma chamada sozinha cabem neles.
+    assert sum(esperas) < 1800
+
+
+@pytest.mark.parametrize(
+    "operacao",
+    [
+        lambda i: i.gravar("j", _registros(1)),
+        lambda i: i.apagar("j"),
+        lambda i: i.vetores_dos_planos("j"),
+    ],
+    ids=["gravar", "apagar", "vetores_dos_planos"],
+)
+def test_sem_tentar_no_429_o_erro_sobe_na_hora(
+    operacao: Callable[[AgentRetrieval], object],
+) -> None:
+    # O serviço web (a busca, os planos parecidos, a purga do admin) não segura a
+    # thread esperando a cota: o 429 volta como erro do pedido.
+    relogio = _Relogio()
+    with pytest.raises(CotaEsgotada):
+        operacao(AgentRetrieval(CONFIG, _sempre_429, dormir=relogio.dormir))
+    assert relogio.esperas == []
+
+
+@pytest.mark.parametrize("operacao", [":query", ":batchDelete"])
+def test_apagar_tambem_tenta_de_novo_no_429(operacao: str) -> None:
+    relogio = _Relogio()
+    respostas = {":query": {"dataObjects": [{"name": "n"}]}, ":batchDelete": {}}
+    falhou = False
+
+    def com_um_429(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        nonlocal falhou
+        if caminho.endswith(operacao) and not falhou:
+            falhou = True
+            raise CotaEsgotada(caminho)
+        return next(r for o, r in respostas.items() if caminho.endswith(o))
+
+    _indice(com_um_429, relogio).apagar("j")
+    assert falhou and relogio.esperas
+
+
+def test_a_busca_do_usuario_nao_espera_no_429() -> None:
+    relogio = _Relogio()
+    with pytest.raises(CotaEsgotada):
+        _indice(_sempre_429, relogio).buscar(Consulta(texto="x"))
+    assert relogio.esperas == []
+
+
+def _com_409(*erros: Exception) -> tuple[TransporteFalso, Any]:
+    """Transporte cujos `batchCreate` levantam `erros`, em ordem, e depois gravam."""
+    falso = TransporteFalso()
+    fila = list(erros)
+
+    def transporte(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        falso(metodo, caminho, corpo)
+        if caminho.endswith(":batchCreate") and fila:
+            raise fila.pop(0)
+        return {}
+
+    return falso, transporte
+
+
+def _operacoes(falso: TransporteFalso) -> list[str]:
+    return [c.rsplit(":", 1)[1] for _, c, _ in falso.chamadas]
+
+
+@pytest.mark.parametrize(
+    "erros",
+    [(JaExiste("x"),), (CotaEsgotada("x"), JaExiste("x"))],
+    ids=["409 na primeira tentativa", "429 e depois 409"],
+)
+def test_409_apaga_o_video_e_grava_tudo_de_novo(erros: tuple[Exception, ...]) -> None:
+    falso, transporte = _com_409(*erros)
+    _indice(transporte, _Relogio()).gravar("j", _registros(250))
+    # O 409 pode ser lote gravado em parte ou de outra indexação do mesmo vídeo: o
+    # `apagar` tira só o que existe (query + batchDelete) e o vídeo entra inteiro.
+    recusadas = ["batchCreate"] * len(erros)
+    assert _operacoes(falso) == [
+        "query",
+        *recusadas,
+        "query",
+        "batchCreate",
+        "batchCreate",
+    ]
+    assert [len(c["requests"]) for _, _, c in falso.chamadas[-2:] if c] == [200, 50]
+
+
+def test_409_de_novo_depois_de_regravar_sobe() -> None:
+    falso, transporte = _com_409(JaExiste("x"), JaExiste("x"))
+    with pytest.raises(JaExiste):
+        _indice(transporte, _Relogio()).gravar("j", _registros(3))
+    assert _operacoes(falso) == ["query", "batchCreate", "query", "batchCreate"]
+
+
+def _anota_os_lotes(relogio: _Relogio, envios: list[tuple[float, int]]) -> Any:
+    def anota(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        if caminho.endswith(":batchCreate") and corpo is not None:
+            envios.append((relogio.agora, len(corpo["requests"])))
+        return {}
+
+    return anota
+
+
+def _nenhuma_janela_de_60_s_passa(envios: list[tuple[float, int]], cota: int) -> None:
+    for inicio, _ in envios:
+        assert sum(n for t, n in envios if inicio <= t < inicio + 60) <= cota
+
+
+def test_ritmo_nenhuma_janela_de_60_s_passa_da_cota() -> None:
+    relogio = _Relogio()
+    envios: list[tuple[float, int]] = []
+    config = replace(CONFIG, cota_de_escrita=3000)
+    _indice(_anota_os_lotes(relogio, envios), relogio, config).gravar(
+        "j", _registros(5000)
+    )
+    assert sum(n for _, n in envios) == 5000
+    _nenhuma_janela_de_60_s_passa(envios, 3000)
+    # Abaixo da cota, sem parar à toa: 25 lotes em menos de 2 minutos e meio.
+    assert envios[-1][0] < 150
+
+
+def test_ritmo_vale_entre_videos_gravados_no_mesmo_processo() -> None:
+    relogio = _Relogio()
+    envios: list[tuple[float, int]] = []
+    indice = _indice(
+        _anota_os_lotes(relogio, envios), relogio, replace(CONFIG, cota_de_escrita=3000)
+    )
+    indice.gravar("a", _registros(2000))
+    indice.gravar("b", _registros(2000))
+    _nenhuma_janela_de_60_s_passa(envios, 3000)
+
+
+def test_transporte_http_levanta_cota_esgotada_no_429(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Resposta:
+        status_code = 429
+        ok = False
+        text = "RESOURCE_EXHAUSTED"
+
+    class Sessao:
+        def __init__(self, _: object) -> None: ...
+
+        def request(self, *_: object, **__: object) -> Resposta:
+            return Resposta()
+
+    monkeypatch.setattr("google.auth.default", lambda scopes: (None, None))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
+    with pytest.raises(CotaEsgotada, match="429"):
+        transporte_http()("POST", "x:batchCreate", {})

@@ -290,7 +290,7 @@ def main(argv: list[str]) -> int:
         RepositorioFirestore(firestore_),
         decupagens,
         RepositorioDeCorrecoesFirestore(firestore_),
-        AgentRetrieval(busca, transporte_http()),
+        AgentRetrieval(busca, transporte_http(), tentar_no_429=True),
         copia_do_ambiente(os.environ),
         embedding=embedding_da_busca(busca),
         quadros=decupagens,

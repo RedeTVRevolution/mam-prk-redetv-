@@ -112,6 +112,10 @@ module "mam" {
   waf_ativo                    = var.waf_ativo
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
+
+  # Sem os índices ANN dedicados no dev, por custo (~R$ 571/mês os dois; ADR 0006): a
+  # busca vai pelo KNN, que aceita até 100 mil registros. A produção fica com eles.
+  indices_da_busca_ligados = false
 }
 
 output "identity_api_key" {
@@ -235,8 +239,16 @@ output "busca_indice_quadro" {
   value = module.mam.busca_indice_quadro
 }
 
+output "busca_indices_ligados" {
+  value = module.mam.busca_indices_ligados
+}
+
 output "busca_dimensao" {
   value = module.mam.busca_dimensao
+}
+
+output "busca_cota_de_escrita" {
+  value = module.mam.busca_cota_de_escrita
 }
 
 output "busca_distancia_maxima" {

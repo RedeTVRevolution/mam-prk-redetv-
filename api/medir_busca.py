@@ -7,6 +7,12 @@ Cada dimensão pede uma coleção própria (a dimensão dos vetores é fixa na c
 configuração (`BUSCA_DIMENSAO`) é usada como está; cada uma das outras, uma de cada vez,
 ganha a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` (o nome vem do `infra/modulos/mam/main.tf`) com
 os seus índices, apagada no fim com tudo o que tiver dentro, mesmo se a medição falhar.
+
+A medição herda `BUSCA_INDICES_LIGADOS`: com `false` (o dev) a coleção nasce sem índice e a
+latência é a do KNN, com o `predict` do embedding da consulta; só com `true` mede o índice
+ANN. O embedding é guardado por texto, e por isso cada repetição medida leva um significado
+novo (a frase mais o número da repetição), como uma busca nova do usuário. Nenhum dos dois casos diz nada sobre a qualidade do resultado: a comparação ANN
+contra KNN pede o índice no ar ao lado do KNN, como a de 5/11/2026 (ADR 0006).
 """
 
 import os
@@ -54,13 +60,15 @@ def percentil(tempos: list[float], p: int) -> float:
     return ordenados[posicao - 1]
 
 
-def _consulta(vetor: list[float] | None = None, cor: str = "vermelho") -> Consulta:
+def _consulta(
+    vetor: list[float] | None = None, cor: str = "vermelho", significado: str = CONSULTA
+) -> Consulta:
     """ "vestido vermelho da Sabrina Sato" como o entendimento da consulta a entregaria:
     filtros exatos, o texto que sobra e o significado da frase inteira."""
     return Consulta(
         filtros=Filtros(tipo="objeto", categoria="roupa", cor_base=cor, dono=SABRINA),
         texto="vestido",
-        significado=CONSULTA,
+        significado=significado,
         vetor_do_quadro=vetor,
         limite=10,
     )
@@ -87,9 +95,11 @@ def medir(
         )
         cor_filtra = not indice.buscar(_consulta(vetor, cor="azul"))
         tempos: list[float] = []
-        for _ in range(consultas):
+        for n in range(consultas):
+            # Texto novo a cada vez: sem índice ANN, o embedding é guardado por texto.
+            consulta = _consulta(vetor, significado=f"{CONSULTA} {n}")
             inicio = relogio()
-            indice.buscar(_consulta(vetor))
+            indice.buscar(consulta)
             tempos.append(relogio() - inicio)
         return Medicao(dimensao, registros, so_a_sabrina, cor_filtra, tempos)
     finally:
@@ -131,6 +141,7 @@ def main(argumentos: list[str]) -> int:
         finally:
             if temporaria:
                 apagar_colecao(alvo, transporte)
+    print("modo:", "índice ANN" if config.indices_ligados else "KNN, sem índice")
     print(tabela(medicoes))
     return 0 if all(m.so_o_objeto_da_sabrina and m.cor_filtra for m in medicoes) else 1
 

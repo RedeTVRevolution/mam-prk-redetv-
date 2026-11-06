@@ -15,7 +15,7 @@ export function nomeDaEtapa(etapa: string): string {
 }
 
 /** As etapas do Job, na ordem em que rodam (a de `NomeDaEtapa` em api/jobs.py). */
-const ORDEM = [
+export const ORDEM = [
   'validacao',
   'transcricao',
   'leitura_da_tela',
