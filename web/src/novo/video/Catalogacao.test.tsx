@@ -14,9 +14,14 @@ import { correcaoDoHistorico, DECUPAGEM } from './curadoria-teste.ts'
 let desfeitas: { id: string; motivo: unknown }[] = []
 let historico: Record<string, unknown>[] = []
 let aprovacoesDaRevisao = 0
+let pulsos: string[] = []
 let liberarAprovacao: (() => void) | null = null
 
 const servidor = setupServer(
+  http.post('/v1/jobs/j1/revisao/pulso', async ({ request }) => {
+    pulsos.push(((await request.json()) as { evento: string }).evento)
+    return new HttpResponse(null, { status: 204 })
+  }),
   ...rotasDoVideo(
     () => ({ duracao_s: 120, cortes_ms: [] }),
     () => DECUPAGEM,
@@ -39,6 +44,7 @@ simularPlayer()
 beforeEach(() => {
   desfeitas = []
   aprovacoesDaRevisao = 0
+  pulsos = []
   liberarAprovacao?.()
   liberarAprovacao = null
   historico = []
@@ -68,6 +74,17 @@ test('E liga e desliga o modo de catalogação, só para quem edita', async () =
 
   await usuario.keyboard('e')
   expect(screen.queryByText('Catalogando')).toBeNull()
+})
+
+test('o modo de catalogação abre a sessão de revisão e sair do modo a fecha', async () => {
+  const usuario = await abrir()
+  expect(pulsos).toEqual([])
+
+  await usuario.keyboard('e')
+  await waitFor(() => expect(pulsos).toEqual(['inicio']))
+
+  await usuario.keyboard('e')
+  await waitFor(() => expect(pulsos).toEqual(['inicio', 'fim']))
 })
 
 test('sem decupagem.editar, E não faz nada e não está na lista do ?', async () => {

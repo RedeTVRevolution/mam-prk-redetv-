@@ -49,6 +49,7 @@ import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.
 import { criarCacheDeQuadros } from '../../quadros.ts'
 import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
+import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Kbd } from '../ui/kbd.tsx'
@@ -244,6 +245,9 @@ export function Video({
       setDescrevendo(false)
     },
   })
+
+  // A sessão de revisão (#251) vale no modo de revisão; a pessoa não vê nada dela.
+  useSessaoDeRevisao(cliente, pode.editar && revisao.revisando, tocando)
 
   // As sugestões do pipeline só aparecem na revisão; a lista vem de novo a cada entrada nela.
   const chaveDasSugestoes = chaveDoVideo(job.id, 'sugestoes')
