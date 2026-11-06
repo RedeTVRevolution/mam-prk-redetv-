@@ -631,7 +631,7 @@ test('sem planos parecidos a tela avisa, e Limpar esquece a foto', async () => {
   expect(screen.getByText(/Escreva acima/)).toBeTruthy()
 })
 
-test('digitar uma consulta depois de escolher a foto não perde a foto nem a grade', async () => {
+test('um texto novo depois da foto sai da foto e busca o texto', async () => {
   const usuario = userEvent.setup()
   await abrir('/busca')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
@@ -639,9 +639,9 @@ test('digitar uma consulta depois de escolher a foto não perde a foto nem a gra
 
   await usuario.type(screen.getByRole('searchbox', { name: 'Buscar no conteúdo' }), 'pista{Enter}')
 
-  await waitFor(() => expect(location.search).toContain('q=pista'))
-  expect(screen.getByText('pista.png')).toBeTruthy()
-  expect(screen.getByText('2 planos parecidos em 1 vídeo')).toBeTruthy()
+  expect(await screen.findByText('3 momentos em 2 vídeos')).toBeTruthy()
+  expect(buscas.map((p) => p.get('q'))).toEqual(['pista'])
+  expect(screen.queryByText('pista.png')).toBeNull()
   expect(fotos).toHaveLength(1)
 })
 

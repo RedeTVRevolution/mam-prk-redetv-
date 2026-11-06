@@ -216,7 +216,7 @@ function contagemDaGrade(busca: ReturnType<typeof useBusca>, deCenas: (n: number
 
 /**
  * A página `/busca` da interface nova: o estado todo na URL e as cenas em grade (#400). A foto da
- * busca por imagem fica na memória da página, não na URL, e vale até "Limpar".
+ * busca por imagem fica na memória da página, não na URL, e vale até "Limpar" ou até um texto novo.
  */
 export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
   const [foto, setFoto] = useState<{ arquivo: File; id: number } | null>(null)
@@ -225,9 +225,11 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
   const programas = useProgramas()
   const [texto, setTexto] = useState(consulta.q)
   const [termoVisto, setTermoVisto] = useState(consulta.q)
+  // Um texto novo (desta caixa ou da busca do topo) sai da foto e busca o texto.
   if (termoVisto !== consulta.q) {
     setTermoVisto(consulta.q)
     setTexto(consulta.q)
+    setFoto(null)
   }
 
   const pedido: PedidoDaBusca | null = foto
