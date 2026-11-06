@@ -11,7 +11,10 @@ import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Iniciais, TABELA, TopoDaAba, Vazio } from './comum.tsx'
+import { useColunasVisiveis } from './listas.ts'
 
+// Em que ponto cada coluna aparece; `null`, sempre.
+const COLUNAS = [null, null, 'lg', null, null] as const
 const TODOS = ''
 const CHAVE = ['admin', 'usuarios']
 
@@ -149,6 +152,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
   const api = useApi()
   const consultas = useQueryClient()
   const carga = useQuery({ queryKey: CHAVE, queryFn: () => api.usuarios.listar() })
+  const colunas = useColunasVisiveis(COLUNAS)
   const [busca, setBusca] = useState('')
   const [papel, setPapel] = useState(TODOS)
   const [situacao, setSituacao] = useState(TODOS)
@@ -319,7 +323,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                       if (e.key === 'Escape') setDesativando(null)
                     }}
                   >
-                    <td colSpan={5} className={CELULA}>
+                    <td colSpan={colunas}className={CELULA}>
                       <div className="flex flex-wrap items-center gap-2 py-1">
                         <span>{`Desativar ${c.nome}? A conta sai na hora. Enter confirma`}</span>
                         <Button

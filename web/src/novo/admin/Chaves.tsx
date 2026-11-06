@@ -9,6 +9,10 @@ import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
+import { useColunasVisiveis } from './listas.ts'
+
+// Em que ponto cada coluna aparece; `null`, sempre.
+const COLUNAS = [null, null, 'md', 'sm', null, null] as const
 
 // A mesma chave das Entradas, que tiram daqui os sistemas do filtro.
 const CHAVE = ['admin', 'chaves']
@@ -142,6 +146,7 @@ export default function Chaves() {
   const api = useApi()
   const consultas = useQueryClient()
   const carga = useQuery({ queryKey: CHAVE, queryFn: () => api.chaves.listar() })
+  const colunas = useColunasVisiveis(COLUNAS)
   const [emitindo, setEmitindo] = useState(false)
   const [revogando, setRevogando] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -222,7 +227,7 @@ export default function Chaves() {
                   </tr>
                   {revogando === c.id && (
                     <tr className="bg-destructive/12" onKeyDown={(e) => e.key === 'Escape' && setRevogando(null)}>
-                      <td colSpan={6} className={CELULA}>
+                      <td colSpan={colunas}className={CELULA}>
                         <div className="flex flex-wrap items-center gap-2 py-1">
                           <span>{`Revogar a chave de ${c.sistema}? Ela para de funcionar na hora.`}</span>
                           <Button type="button" size="sm" variant="destructive" autoFocus aria-label="Confirmar revogação" onClick={() => void revogar(c)}>
