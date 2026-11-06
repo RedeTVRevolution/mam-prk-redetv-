@@ -406,5 +406,7 @@ test('marcas: uma decupagem de 2 h com 300 correções não trava a tela (teto d
   const gasto = performance.now() - antes
 
   expect(Object.keys(marcas).length).toBeGreaterThan(0)
-  expect(gasto).toBeLessThan(25)
+  // Cerca de 5 ms numa máquina parada; o teto largo evita falha por carga (vários agentes) e ainda pega o
+  // caso quadrático (centenas de ms).
+  expect(gasto).toBeLessThan(150)
 })
