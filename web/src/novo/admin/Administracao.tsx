@@ -7,7 +7,9 @@ import type { Usuario } from '../../sessao.ts'
 import { filtrosDaAuditoria } from '../../auditoria.ts'
 import { filtrosDasEntradas } from '../../entradas.ts'
 import Auditoria from './Auditoria.tsx'
+import Chaves from './Chaves.tsx'
 import Entradas from './Entradas.tsx'
+import RegrasDeAprovacao from './RegrasDeAprovacao.tsx'
 import Usuarios from './Usuarios.tsx'
 
 const ICONE: Record<string, Icon> = {
@@ -34,6 +36,8 @@ function Conteudo({ aba, busca, usuario, aoEntrarDeNovo }: { aba: Aba['aba']; bu
     )
   }
   if (aba === 'usuarios') return <Usuarios eu={usuario} />
+  if (aba === 'chaves') return <Chaves />
+  if (aba === 'aprovacao') return <RegrasDeAprovacao />
   if (aba === 'auditoria') return <Auditoria filtros={filtrosDaAuditoria(busca)} />
   return null
 }
