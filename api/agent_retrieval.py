@@ -6,12 +6,14 @@ Projeto, região, coleção, índices e dimensão chegam por variável de ambien
 rede. Cada vetor tem o seu índice ANN (um índice cobre um só campo de vetor), implantado
 junto com a coleção, e toda busca por vetor leva o `searchHint.indexHint` dele, porque o
 KNN sem índice aceita no máximo 100 mil registros. Com `BUSCA_INDICES_LIGADOS=false` (o
-dev, por custo) não há índice ANN: a coleção nasce sem eles e a busca vai pelo KNN.
+dev, por custo) não há índice ANN: a coleção nasce sem eles e a busca vai pelo KNN
+(`knnHint` explícito, cosseno), com o embedding da consulta calculado aqui.
 
 Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 20261022),
 conferido no #122.
 """
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -24,8 +26,12 @@ import google.auth.transport.requests
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 
+log = logging.getLogger(__name__)
+
 URL_BASE = "https://vectorsearch.googleapis.com/v1beta"
 RECALL_ALVO = 0.95
+# O KNN aceita até 100 mil registros; a gravação avisa ao passar deste limite (sem índice).
+AVISO_DO_TETO_DO_KNN = 80_000
 REGISTROS_POR_LOTE = 200
 # O máximo de nomes por `batchDelete` e de objetos por página do `query`.
 OBJETOS_POR_PAGINA = 1000
@@ -59,7 +65,7 @@ class Transporte(Protocol):
     def __call__(
         self, metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> dict[str, Any]:
-        """Uma chamada REST; `caminho` é relativo à URL base."""
+        """Uma chamada REST; `caminho` é relativo à URL base, salvo se for uma URL inteira."""
         ...
 
 
@@ -164,13 +170,22 @@ def filtro_do_pedido(f: Filtros) -> dict[str, Any] | None:
     return {"$and": condicoes} if condicoes else None
 
 
-def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]:
+def pedido_de_busca(
+    config: ConfigDaBusca,
+    consulta: Consulta,
+    vetor_do_significado: list[float] | None = None,
+) -> dict[str, Any]:
     """O corpo do `batchSearch`: filtros, texto, significado e vetor, fundidos por RRF.
 
     As buscas por vetor (significado e quadro) levam o `indexHint` do índice ANN do seu
-    campo, salvo com os índices desligados (`indices_ligados`): aí vão sem `searchHint`,
-    pelo KNN. A busca por texto não é KNN e não usa índice de vetor. Só filtros não é
-    busca: levanta `ValueError`.
+    campo. Com os índices desligados (`indices_ligados`) vão pelo KNN, com `knnHint`
+    explícito (o serviço usaria um índice que ainda existisse) e `COSINE_DISTANCE` (o
+    padrão do KNN é o produto escalar, que não serve a vetores sem norma 1). O
+    `semanticSearch` não aceita `distanceMetric` e no KNN ordena por produto escalar: o
+    significado vai então como `vectorSearch` com `vetor_do_significado`, o embedding da
+    consulta (`AgentRetrieval.vetor_da_consulta`), obrigatório nesse caso. A busca por
+    texto não é KNN e não usa índice de vetor. Só filtros não é busca: levanta
+    `ValueError`.
     """
     comum: dict[str, Any] = {
         "topK": consulta.limite,
@@ -182,7 +197,12 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
 
     def no_indice(campo: str) -> dict[str, Any]:
         if not config.indices_ligados:
-            return {**comum, "searchField": campo}
+            return {
+                **comum,
+                "searchField": campo,
+                "searchHint": {"knnHint": {}},
+                "distanceMetric": "COSINE_DISTANCE",
+            }
         return {
             **comum,
             "searchField": campo,
@@ -198,7 +218,20 @@ def pedido_de_busca(config: ConfigDaBusca, consulta: Consulta) -> dict[str, Any]
     if consulta.texto:
         texto = {"text": normalizar(consulta.texto), "fields": CAMPOS_DE_TEXTO}
         buscas.append({"textSearch": {**comum, "structuredQuery": {"text": texto}}})
-    if consulta.significado:
+    if consulta.significado and not config.indices_ligados:
+        if vetor_do_significado is None:
+            raise ValueError(
+                "sem os índices ANN, o significado pede o vetor da consulta"
+            )
+        buscas.append(
+            {
+                "vectorSearch": {
+                    **no_indice(CAMPO_DO_VETOR_DA_DESCRICAO),
+                    "vector": {"values": vetor_do_significado},
+                }
+            }
+        )
+    elif consulta.significado:
         buscas.append(
             {
                 "semanticSearch": {
@@ -543,10 +576,56 @@ class AgentRetrieval:
             self._chamar(
                 "dataObjects:batchCreate", {"requests": [_criacao(r) for r in pedacos]}
             )
+        if not self._config.indices_ligados:
+            self._avisar_do_teto_do_knn()
+
+    def _avisar_do_teto_do_knn(self) -> None:
+        """Sem índice ANN a busca é KNN, que recusa mais de 100 mil registros: o aviso vem
+        antes. Uma falha da contagem não pode derrubar a indexação."""
+        try:
+            registros = self.total()
+        except Exception:
+            log.exception("contagem da coleção para o aviso do teto do KNN falhou")
+            return
+        if registros > AVISO_DO_TETO_DO_KNN:
+            log.warning(
+                "a coleção tem %d registros e o KNN, sem índice ANN, aceita no máximo "
+                "100 mil: ligue indices_da_busca_ligados, aplique e rode o "
+                "make criar-colecao-da-busca antes de chegar lá",
+                registros,
+            )
+
+    def vetor_da_consulta(self, texto: str) -> list[float]:
+        """O embedding da consulta, o mesmo modelo, tarefa e dimensão com que o
+        `semanticSearch` o calcula, na região da busca. Medido no dev: reproduz o vetor
+        guardado de um texto idêntico com cosseno 1,0."""
+        resposta = self._transporte(
+            "POST",
+            f"https://{self._config.regiao}-aiplatform.googleapis.com/v1/projects/"
+            f"{self._config.projeto}/locations/{self._config.regiao}/publishers/google/"
+            f"models/{MODELO_DO_EMBEDDING}:predict",
+            {
+                "instances": [{"content": texto, "task_type": "RETRIEVAL_QUERY"}],
+                "parameters": {"outputDimensionality": self._config.dimensao},
+            },
+        )
+        valores = [float(v) for v in resposta["predictions"][0]["embeddings"]["values"]]
+        if len(valores) != self._config.dimensao:
+            raise ValueError(
+                f"o embedding veio com dimensão {len(valores)}, e a coleção tem "
+                f"{self._config.dimensao}"
+            )
+        return valores
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
+        # Sem índice ANN a consulta vira vetor aqui (`pedido_de_busca`).
+        vetor = (
+            self.vetor_da_consulta(consulta.significado)
+            if consulta.significado and not self._config.indices_ligados
+            else None
+        )
         resposta = self._chamar(
-            "dataObjects:batchSearch", pedido_de_busca(self._config, consulta)
+            "dataObjects:batchSearch", pedido_de_busca(self._config, consulta, vetor)
         )
         # Uma lista de resultados por busca; com o RRF, uma lista só, já fundida.
         registros = [
@@ -624,8 +703,10 @@ def transporte_http() -> Transporte:
     def chamar(
         metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> dict[str, Any]:
+        # `caminho` é relativo à URL base, salvo o embedding da consulta (outro serviço).
+        url = caminho if caminho.startswith("https://") else f"{URL_BASE}/{caminho}"
         resposta = sessao.request(  # type: ignore[no-untyped-call]
-            metodo, f"{URL_BASE}/{caminho}", json=corpo, timeout=60
+            metodo, url, json=corpo, timeout=60
         )
         if resposta.status_code == 409:
             raise JaExiste(caminho)
