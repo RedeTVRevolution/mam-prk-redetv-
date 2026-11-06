@@ -106,6 +106,12 @@ variable "ips_da_redetv" {
   default     = []
 }
 
+variable "builds_de_imagem_guardados" {
+  description = "Quantos builds de cada imagem o Artifact Registry guarda; os mais antigos são apagados"
+  type        = number
+  default     = 2
+}
+
 variable "dominio" {
   description = "Domínio do MAM. Vazio: sem balanceador e o endereço é o run.app; preenchido: nasce o balanceador HTTPS (#294)"
   type        = string
@@ -132,6 +138,7 @@ module "mam" {
   janelas_em_paralelo          = var.janelas_em_paralelo
   espera_gpu_minutos           = var.espera_gpu_minutos
   limite_de_falhas_por_etapa   = var.limite_de_falhas_por_etapa
+  builds_de_imagem_guardados   = var.builds_de_imagem_guardados
 }
 
 output "identity_api_key" {

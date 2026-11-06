@@ -8,6 +8,7 @@ import { ACERVO, seguir, useRota, type Rota } from '../rotas.ts'
 import { useSessao, type Usuario } from '../sessao.ts'
 import { AtalhosProvider } from './Atalhos.tsx'
 import { Acervo } from './acervo/Acervo.tsx'
+import { Busca, Parecidos } from './busca/Busca.tsx'
 import { Casca } from './Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from './consultas.ts'
 import Administracao from './admin/Administracao.tsx'
@@ -35,6 +36,8 @@ function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuari
     )
   }
   if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} permissoes={usuario.permissoes} />
+  if (rota.tipo === 'busca') return <Busca consulta={rota.consulta} />
+  if (rota.tipo === 'parecidos') return <Parecidos key={`${rota.job}:${rota.plano}`} job={rota.job} plano={rota.plano} />
   if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} permissoes={usuario.permissoes} />
   if (rota.tipo === 'painel') {
     return (

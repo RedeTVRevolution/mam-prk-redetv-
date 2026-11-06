@@ -1,5 +1,5 @@
-import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { onlineManager, QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -11,6 +11,8 @@ import { AtalhosProvider } from '../Atalhos.tsx'
 import { Casca } from '../Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from '../consultas.ts'
 import { Acervo } from './Acervo.tsx'
+import { usePaginas } from '../paginas.ts'
+import { lembrarPosicao } from './useAcervo.ts'
 
 interface JobApi {
   id: string
@@ -47,6 +49,8 @@ function job(extra: Partial<JobApi>): JobApi {
 
 let jobs: JobApi[] = []
 let statusDaLista = 200
+// O cursor que a API não aceita mais (a lista dele venceu): 422.
+let cursorVencido: string | null = null
 let programas: string[] | null = ['TV Fama']
 const criacoes: unknown[] = []
 const chamadas: string[] = []
@@ -60,6 +64,7 @@ const servidor = setupServer(
     chamadas.push(url.search)
     if (statusDaLista !== 200) return new HttpResponse(null, { status: statusDaLista })
     const cursor = url.searchParams.get('cursor')
+    if (cursor && cursor === cursorVencido) return HttpResponse.json({ detail: 'Cursor inválido' }, { status: 422 })
     const limite = Number(url.searchParams.get('limite'))
     const inicio = cursor ? jobs.findIndex((j) => j.id === cursor) + 1 : 0
     const pagina = jobs.slice(inicio, inicio + limite)
@@ -100,6 +105,8 @@ afterEach(() => {
   servidor.resetHandlers()
   jobs = []
   statusDaLista = 200
+  cursorVencido = null
+  onlineManager.setOnline(true)
   programas = ['TV Fama']
   criacoes.length = 0
   chamadas.length = 0
@@ -127,9 +134,9 @@ function Tela({ permissoes, intervaloMs }: { permissoes: string[]; intervaloMs?:
   )
 }
 
-async function abrir(opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void; permissoes?: string[]; endereco?: string } = {}) {
+async function abrir(opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => void; permissoes?: string[]; endereco?: string; consultas?: QueryClient } = {}) {
   history.replaceState(null, '', opcoes.endereco ?? '/acervo')
-  const consultas = criarClienteDeConsultas()
+  const consultas = opcoes.consultas ?? criarClienteDeConsultas()
   // Sem a espera entre as tentativas: a falha aparece já.
   consultas.setDefaultOptions({ queries: { ...consultas.getDefaultOptions().queries, retryDelay: 0 } })
   const api = criarClienteDaApi(await comSessao(), opcoes.aoSessaoExpirada ?? (() => {}))
@@ -142,6 +149,7 @@ async function abrir(opcoes: { intervaloMs?: number; aoSessaoExpirada?: () => vo
       </QueryClientProvider>
     </AtalhosProvider>,
   )
+  return consultas
 }
 
 async function abrirEnvio(usuario: ReturnType<typeof userEvent.setup>) {
@@ -394,6 +402,82 @@ test('rolar até o fim traz a página seguinte, pelo cursor, e para na última',
   expect(await screen.findByText('video-54.mp4')).toBeTruthy()
   expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual([null, 'j49'])
   expect(document.querySelectorAll('[data-esqueleto]').length).toBe(0)
+})
+
+test('o 422 do cursor da volta recomeça do topo, e rolar segue pedindo a página seguinte', async () => {
+  jobs = Array.from({ length: 160 }, (_, i) => job({ id: `j${i}`, nome: `video-${i}.mp4`, estado: 'concluido' }))
+  const consultas = await abrir()
+  await screen.findByText('video-0.mp4')
+  const rolar = (px: number) => {
+    const rolagem = screen.getAllByText(/^video-\d+\.mp4$/)[0].closest('.overflow-y-auto') as HTMLElement
+    rolagem.scrollTop = px
+    fireEvent.scroll(rolagem)
+  }
+  rolar(2000)
+  await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toContain('j49'))
+  rolar(4500)
+  await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toContain('j99'))
+  const chave = consultas.getQueryCache().findAll({ queryKey: ['acervo'] })[0].queryHash
+  cleanup()
+  // Saiu para o vídeo 120 (página do cursor j99); na volta o cache venceu, e a lista do cursor também.
+  lembrarPosicao(consultas, chave, 120)
+  consultas.removeQueries({ queryKey: ['acervo'] })
+  cursorVencido = 'j99'
+  chamadas.length = 0
+
+  await abrir({ consultas })
+  await screen.findByText('video-0.mp4')
+  expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null])
+  rolar(2000)
+  await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null, 'j49']))
+})
+
+test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, parecidos, volta, volta)', async () => {
+  jobs = Array.from({ length: 160 }, (_, i) => job({ id: `j${i}`, nome: `video-${i}.mp4`, estado: 'concluido' }))
+  const consultas = await abrir()
+  await screen.findByText('video-0.mp4')
+  const rolar = (px: number) => {
+    const rolagem = screen.getAllByText(/^video-\d+\.mp4$/)[0].closest('.overflow-y-auto') as HTMLElement
+    rolagem.scrollTop = px
+    fireEvent.scroll(rolagem)
+  }
+  rolar(2000)
+  await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toContain('j49'))
+  rolar(4500)
+  await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toContain('j99'))
+  const chave = consultas.getQueryCache().findAll({ queryKey: ['acervo'] })[0].queryHash
+  cleanup()
+  lembrarPosicao(consultas, chave, 120)
+
+  // Do vídeo para os parecidos, outra lista, e a volta ao vídeo: ela guarda a posição dela.
+  const parecidos = renderHook(
+    () => usePaginas({ chave: ['parecidos', 'v1', 3], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
+    { wrapper: ({ children }) => <QueryClientProvider client={consultas}>{children}</QueryClientProvider> },
+  )
+  await waitFor(() => expect(parecidos.result.current.quantidade).toBe(2))
+  lembrarPosicao(consultas, parecidos.result.current.chave, 1)
+  parecidos.unmount()
+
+  // De volta ao acervo, com o cache vencido: recomeça na página do vídeo 120 (o jsdom não rola até ela).
+  consultas.removeQueries({ queryKey: ['acervo'] })
+  chamadas.length = 0
+  await abrir({ consultas })
+  await waitFor(() => expect(chamadas.length).toBeGreaterThan(0))
+  expect(new URLSearchParams(chamadas[0]).get('cursor')).toBe('j99')
+})
+
+test('sem rede, o acervo mostra o esqueleto, não a lista vazia, e carrega quando a rede volta', async () => {
+  jobs = [job({ id: 'a', nome: 'pronto.mp4', estado: 'concluido' })]
+  onlineManager.setOnline(false)
+  await abrir()
+  expect(await screen.findByRole('status', { name: 'Carregando o acervo' })).toBeTruthy()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(screen.queryByText('Nenhum vídeo enviado ainda.')).toBeNull()
+  expect(chamadas).toEqual([])
+
+  act(() => onlineManager.setOnline(true))
+  expect(await screen.findByText('pronto.mp4')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Carregando o acervo' })).toBeNull()
 })
 
 test('grade ou lista fica guardada no navegador', async () => {
