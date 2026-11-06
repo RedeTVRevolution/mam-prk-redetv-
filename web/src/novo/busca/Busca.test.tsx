@@ -202,10 +202,14 @@ test('Enter na caixa da página vai a /busca?q= com a consulta nova', async () =
   await waitFor(() => expect(buscas.at(-1)?.get('q')).toBe('sapato vermelho'))
 })
 
-test('sem termo a tela diz o que fazer e não busca', async () => {
+test('sem termo a tela diz o que fazer e não busca, nem confere o aviso do #404', async () => {
+  jobs = [job('a', 'pendente')]
   await abrir('/busca')
   expect(await screen.findByText(/Escreva acima o que procurar/)).toBeTruthy()
+  await new Promise((r) => setTimeout(r, 50))
   expect(buscas).toHaveLength(0)
+  expect(pedidosDoAcervo).toHaveLength(0)
+  expect(screen.queryByText(/entrando na busca/)).toBeNull()
 })
 
 test('os chips ligados são os entendidos; mudar um refaz a busca pela URL', async () => {

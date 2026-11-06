@@ -82,16 +82,18 @@ export function useBusca(pedido: PedidoDaBusca | null) {
 /**
  * Quantos vídeos ainda estão entrando na busca (#404): a regra do selo "Finalizando". Confere a
  * cada `intervaloMs` enquanto houver algum (o aviso some quando a indexação termina) e a cada
- * `ociosoMs` quando não há (o vídeo que termina depois também avisa).
+ * `ociosoMs` quando não há (o vídeo que termina depois também avisa). Só confere com `ativo`
+ * (há o que buscar); desligado, devolve 0.
  * ponytail: só os 50 concluídos mais recentes; um vídeo finalizando mais antigo que eles não conta.
  */
-export function useEntrandoNaBusca(intervaloMs = 15_000, ociosoMs = 60_000): number {
+export function useEntrandoNaBusca(ativo: boolean, intervaloMs = 15_000, ociosoMs = 60_000): number {
   const api = useApi()
   const contar = (jobs: Job[] | undefined) => (jobs ?? []).filter((j) => finalizando(j)).length
   const q = useQuery({
     queryKey: ['entrando-na-busca'],
     queryFn: () => api.acervo({ ...SEM_FILTROS, estado: ['concluido'] }),
     refetchInterval: (c) => (contar(c.state.data?.jobs) > 0 ? intervaloMs : ociosoMs),
+    enabled: ativo,
   })
-  return contar(q.data?.jobs)
+  return ativo ? contar(q.data?.jobs) : 0
 }

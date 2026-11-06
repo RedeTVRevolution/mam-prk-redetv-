@@ -202,7 +202,7 @@ test('o mesmo termo com outro chip mantém a lista anterior; termo novo não', a
 test('sem vídeo entrando, o aviso do #404 ainda confere de tempos em tempos e aparece para o que entrar depois', async () => {
   indexacoes = ['indexado']
   const { envolver } = await envolvedor()
-  const { result } = renderHook(() => useEntrandoNaBusca(20, 40), { wrapper: envolver })
+  const { result } = renderHook(() => useEntrandoNaBusca(true, 20, 40), { wrapper: envolver })
   await waitFor(() => expect(result.current).toBe(0))
 
   indexacoes = ['indexado', 'pendente']

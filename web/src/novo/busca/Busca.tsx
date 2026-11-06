@@ -125,7 +125,7 @@ function GradeDaBusca({
   contagem: (busca: ReturnType<typeof useBusca>) => string
 }) {
   const busca = useBusca(pedido)
-  const entrando = useEntrandoNaBusca()
+  const entrando = useEntrandoNaBusca(pedido !== null)
   const tipo = pedido?.tipo ?? 'texto'
 
   // O vídeo aberto daqui percorre este resultado com N e Shift+N.
