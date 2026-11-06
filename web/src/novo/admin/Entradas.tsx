@@ -234,7 +234,7 @@ function ConfirmarReprocesso({ job, etapa, aoConfirmar, aoCancelar }: { job: Job
 }
 
 /** A escolha da etapa e do motivo, na própria linha: o Job que a API devolve vai a `aoReprocessar`. */
-function ReprocessarEtapa({ job, aoReprocessar, aoCancelar }: { job: Job; aoReprocessar: (novo: Job, etapa: string) => void; aoCancelar: () => void }) {
+function ReprocessarEtapa({ job, aoReprocessar, aoCancelar }: { job: Job; aoReprocessar: (novo: Job, etapa: string) => Promise<void>; aoCancelar: () => void }) {
   const api = useApi()
   const [etapa, setEtapa] = useState<string>(ETAPAS_ESCOLHIVEIS[0].valor)
   const [motivo, setMotivo] = useState('')
@@ -245,7 +245,7 @@ function ReprocessarEtapa({ job, aoReprocessar, aoCancelar }: { job: Job; aoRepr
     setEnviando(true)
     setFalha(null)
     try {
-      aoReprocessar(await api.job(job.id).reprocessar(etapa, motivo.trim()), etapa)
+      await aoReprocessar(await api.job(job.id).reprocessar(etapa, motivo.trim()), etapa)
     } catch (e) {
       if (e instanceof SessaoExpirada) return
       setFalha(
@@ -364,7 +364,10 @@ export default function Entradas({
   const pronta = lista.data !== undefined
   const emAndamentoAgora = jobs.filter(emAndamento).length
 
-  function trocarJob(novo: Job, etapa: string) {
+  async function trocarJob(novo: Job, etapa: string) {
+    // Um GET da lista no ar (a volta à aba, o "Carregar mais") traria a linha de antes e a desfaria.
+    // Só aqui: no andamento, cancelar a cada rodada impediria a lista longa de terminar.
+    await consultas.cancelQueries({ queryKey: chave, exact: true })
     trocar((j) => [j.id === novo.id ? novo : j])
     setPedido(null)
     setAviso(`${novo.nome} voltou a ser processado a partir ${partidaDaEtapa(etapa)}.`)

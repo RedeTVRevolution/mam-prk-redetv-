@@ -255,6 +255,32 @@ test('Reprocessar pede confirmação na linha, com a etapa de partida, e a linha
   expect(within(linha).queryByText(/Não foi possível ler/)).toBeNull()
 })
 
+test('a página que ainda vinha do servidor não desfaz o reprocessamento feito no meio', async () => {
+  jobs = [falhaDeEtapa()]
+  // O "Carregar mais" fica preso até o reprocessamento terminar: o TanStack junta a página nova às
+  // páginas de quando o pedido saiu, com a linha ainda em falha.
+  let soltar: () => void = () => {}
+  const preso = new Promise<void>((r) => (soltar = r))
+  servidor.use(
+    http.get('/v1/jobs', async ({ request }) => {
+      if (!new URL(request.url).searchParams.get('cursor')) return HttpResponse.json([falhaDeEtapa()], { headers: { 'X-Proximo-Cursor': 'c2' } })
+      await preso
+      return HttpResponse.json([job({ id: 'z', nome: 'outro.mp4' })])
+    }),
+  )
+  const usuario = userEvent.setup()
+  await abrir()
+  await linhaDe('falhou-na-tela.mp4')
+  await usuario.click(screen.getByRole('button', { name: 'Carregar mais' }))
+  await usuario.click(screen.getByRole('button', { name: 'Reprocessar falhou-na-tela.mp4' }))
+  await usuario.click(screen.getAllByRole('button', { name: 'Reprocessar' }).at(-1)!)
+  expect(await within(await linhaDe('falhou-na-tela.mp4')).findByText('Leitura da tela')).toBeTruthy()
+  soltar()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(within(await linhaDe('falhou-na-tela.mp4')).getByText('Leitura da tela')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Reprocessar falhou-na-tela.mp4' })).toBeNull()
+})
+
 test('no vídeo concluído, o Reprocessar continua concluído e mostra a etapa em andamento', async () => {
   jobs = [job({ nome: 'c.mp4', etapas: [{ nome: 'quadros_chave', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] })]
   await abrir()
