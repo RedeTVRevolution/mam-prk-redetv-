@@ -1,4 +1,6 @@
+import tomllib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -764,3 +766,33 @@ def test_carga_unica_e_idempotente_e_poe_o_papel_no_vinculo() -> None:
     texto = perfis_dos_programas(programas, catalogo)["TV Fama"].texto()
     assert "- Leão Lobo, apresentador." in texto
     assert '- Ana, repórter; também chamado de "Aninha".' in texto
+
+
+def test_carga_do_toml_de_migracao_cria_os_17_sem_duplicar_pessoa() -> None:
+    caminho = Path(__file__).parents[2] / "docs/migracao/programas-2026-11.toml"
+    dados = tomllib.loads(caminho.read_text())
+    programas, catalogo = ProgramasEmMemoria(), CatalogoEmMemoria()
+    pelo_nome = catalogo.acrescentar("Sonia Abrao", "", [])
+    pelo_apelido = catalogo.acrescentar("Fulana", "", ["Nath Finanças"])
+
+    primeira = carregar(programas, catalogo, dados)
+    superpop = next(p for p in programas.listar() if p.nome == "SuperPop")
+    programas.salvar(superpop.model_copy(update={"perfil": "Editado no formulário."}))
+    segunda = carregar(programas, catalogo, dados)
+
+    # 22 nomes distintos no toml; dois já estavam no catálogo.
+    assert (primeira, segunda) == ((17, 20), (0, 0))
+    assert len(programas.listar()) == 17 and len(catalogo.todas()) == 22
+    por_nome = {p.nome: p for p in programas.listar()}
+    assert por_nome["SuperPop"].perfil == "Editado no formulário."
+    assert por_nome["A Tarde é Sua"].pessoas[0].pessoa_id == pelo_nome.id
+    assert por_nome["Dinheiro na Conta"].pessoas[0].pessoa_id == pelo_apelido.id
+    for um, outro in [
+        ("Brasil do Povo", "Vizinhos em Guerra"),
+        ("Madrugada Animada", "Para Aqui!"),
+    ]:
+        assert por_nome[um].pessoas == por_nome[outro].pessoas
+    assert [v.papel for v in por_nome["Bola na Rede"].pessoas] == [
+        "apresentador",
+        *["comentarista"] * 4,
+    ]
