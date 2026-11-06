@@ -87,3 +87,28 @@ def test_o_publicar_espera_o_mudou_o_deploy_e_confere_o_que_veio_depois() -> Non
     publicar = CI[CI.index("\n  publicar:\n") :]
     assert "needs.mudou-o-deploy.outputs.pula != '1'" in publicar
     assert "scripts/vai-para-a-nuvem.sh" in publicar
+
+
+def test_mover_codigo_para_docs_publica(tmp_path: Path) -> None:
+    # Com renomeação, o diff só mostra o destino (docs/x.py) e esconderia a
+    # saída de api/x.py da imagem; por isso os dois diffs usam --no-renames.
+    assert CI.count("diff --no-renames --name-only") == 2
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(tmp_path), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    git("init", "-q")
+    (tmp_path / "api").mkdir()
+    (tmp_path / "api" / "x.py").write_text("print('oi')\n")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "a")
+    (tmp_path / "docs").mkdir()
+    git("mv", "api/x.py", "docs/x.py")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "b")
+    mudou = git("diff", "--no-renames", "--name-only", "HEAD~1", "HEAD").split()
+    assert _vai_para_a_nuvem(*mudou)

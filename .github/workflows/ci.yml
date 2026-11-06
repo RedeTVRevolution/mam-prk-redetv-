@@ -133,7 +133,7 @@ jobs:
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "Sem base conhecida; publica."; exit 0
           fi
-          MUDOU=$(git -c core.quotePath=false diff --name-only "$BASE" "$GITHUB_SHA")
+          MUDOU=$(git -c core.quotePath=false diff --no-renames --name-only "$BASE" "$GITHUB_SHA")
           if scripts/vai-para-a-nuvem.sh <<<"$MUDOU"; then
             echo "Muda o que vai para a nuvem; publica."
           else
@@ -177,7 +177,7 @@ jobs:
         run: |
           git fetch -q origin main
           PONTA=$(git rev-parse FETCH_HEAD)
-          DEPOIS=$(git -c core.quotePath=false diff --name-only "$GITHUB_SHA" "$PONTA")
+          DEPOIS=$(git -c core.quotePath=false diff --no-renames --name-only "$GITHUB_SHA" "$PONTA")
           if [ "$PONTA" = "$GITHUB_SHA" ] || ! scripts/vai-para-a-nuvem.sh <<<"$DEPOIS"; then
             echo publica=1 >> "$GITHUB_OUTPUT"
           else
