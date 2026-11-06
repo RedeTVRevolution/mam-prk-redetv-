@@ -145,3 +145,72 @@ test('as operações do Job montam o caminho e o corpo', async () => {
     'reaplicar {"item_id":"p2","motivo":"certo"}',
   ])
 })
+
+test('o ranking do tempo de tela pede uma página com o cursor e devolve o próximo do cabeçalho', async () => {
+  const pedidos: URLSearchParams[] = []
+  const corpo = { programa: null, desde: null, ate: null, total: {}, pessoas: [] }
+  servidor.use(
+    http.get('/v1/relatorios/tempo-de-tela', ({ request }) => {
+      const p = new URL(request.url).searchParams
+      pedidos.push(p)
+      return HttpResponse.json(corpo, p.get('cursor') ? {} : { headers: { 'X-Proximo-Cursor': 'NTA' } })
+    }),
+  )
+  const { api } = await cliente()
+  const filtros = { programa: 'TV Fama', de: '2026-10-01', ate: '' }
+
+  const primeira = await api.rankingDoTempoDeTela(filtros)
+  const segunda = await api.rankingDoTempoDeTela(filtros, 'NTA')
+
+  expect([primeira.proximo, segunda.proximo]).toEqual(['NTA', null])
+  expect(pedidos[0].get('limite')).toBe('50')
+  expect(pedidos[0].get('cursor')).toBeNull()
+  expect(pedidos[0].get('programa')).toBe('TV Fama')
+  expect(pedidos[0].get('desde')).toBe('2026-10-01')
+  expect(pedidos[1].get('cursor')).toBe('NTA')
+})
+
+test('os vídeos de uma pessoa vêm de /tempo-de-tela/videos, com o mesmo filtro e o cursor', async () => {
+  const pedidos: URLSearchParams[] = []
+  servidor.use(
+    http.get('/v1/relatorios/tempo-de-tela/videos', ({ request }) => {
+      pedidos.push(new URL(request.url).searchParams)
+      return HttpResponse.json([{ job_id: 'v1' }], { headers: { 'X-Proximo-Cursor': 'MjU' } })
+    }),
+  )
+  const { api } = await cliente()
+
+  const pagina = await api.videosDaPessoa({ programa: '', de: '', ate: '2026-10-31' }, 'c1', 'MjU')
+
+  expect(pagina).toEqual({ videos: [{ job_id: 'v1' }], proximo: 'MjU' })
+  expect(pedidos[0].get('pessoa_id')).toBe('c1')
+  expect(pedidos[0].get('ate')).toBe('2026-10-31')
+  expect(pedidos[0].get('cursor')).toBe('MjU')
+  expect(pedidos[0].get('limite')).toBe('25')
+})
+
+test('o ranking de marcas leva o tipo, e as inserções de uma marca, o tipo da célula', async () => {
+  const pedidos: URLSearchParams[] = []
+  servidor.use(
+    http.get('/v1/relatorios/marcas', ({ request }) => {
+      pedidos.push(new URL(request.url).searchParams)
+      return HttpResponse.json({ marcas: [] })
+    }),
+    http.get('/v1/relatorios/marcas/insercoes', ({ request }) => {
+      pedidos.push(new URL(request.url).searchParams)
+      return HttpResponse.json([], { headers: { 'X-Proximo-Cursor': 'MjU' } })
+    }),
+  )
+  const { api } = await cliente()
+  const filtros = { programa: '', de: '', ate: '', tipo: 'intervalo' }
+
+  expect((await api.rankingDeMarcas(filtros)).proximo).toBeNull()
+  const lista = await api.insercoesDaMarca(filtros, 'Ambev', 'testemunhal')
+
+  expect(pedidos[0].get('tipo')).toBe('intervalo')
+  expect(pedidos[0].get('limite')).toBe('50')
+  expect(pedidos[1].get('marca')).toBe('Ambev')
+  expect(pedidos[1].get('tipo')).toBe('testemunhal')
+  expect(pedidos[1].get('limite')).toBe('25')
+  expect(lista).toEqual({ insercoes: [], proximo: 'MjU' })
+})

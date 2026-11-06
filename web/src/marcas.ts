@@ -17,13 +17,41 @@ export interface TotalPorTipo {
   videos: number
 }
 
-export interface MarcaNoRelatorio {
+export interface MarcaResumida {
   marca: string
   insercoes: number
   tempo_ms: number
   videos: number
   por_tipo: TotalPorTipo[]
+}
+
+export interface MarcaNoRelatorio extends MarcaResumida {
   lista: InsercaoNoRelatorio[]
+}
+
+/** O período inteiro, não só a página: os números dos cartões. */
+export interface TotalDasMarcas {
+  marcas: number
+  insercoes: number
+  tempo_ms: number
+  videos: number
+}
+
+/** Uma página do ranking (`limite` na API), sem a lista das inserções; `proximo` é o cursor da seguinte. */
+export interface PaginaDeMarcas {
+  programa: string | null
+  desde: string | null
+  ate: string | null
+  tipo: string | null
+  total: TotalDasMarcas
+  marcas: MarcaResumida[]
+  proximo: string | null
+}
+
+/** Uma página das inserções de uma marca. */
+export interface PaginaDeInsercoes {
+  insercoes: InsercaoNoRelatorio[]
+  proximo: string | null
 }
 
 export interface RelatorioDeMarcas {

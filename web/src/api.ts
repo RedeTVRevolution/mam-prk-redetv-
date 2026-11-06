@@ -5,8 +5,8 @@ import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import { consultaDaAuditoria, type FiltrosDaAuditoria, type PaginaDeAuditoria, type RegistroDeAuditoria } from './auditoria.ts'
 import { consultaDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosParaApi, type FiltrosDoAcervo, type Job, type JobCriado, type PaginaDoAcervo } from './jobs.ts'
-import type { FiltrosDeMarcas, RelatorioDeMarcas } from './marcas.ts'
-import type { FiltrosDoRelatorio, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
+import type { FiltrosDeMarcas, PaginaDeInsercoes, PaginaDeMarcas, RelatorioDeMarcas } from './marcas.ts'
+import type { FiltrosDoRelatorio, PaginaDeVideos, PaginaDoTempoDeTela, RelatorioDeTempoDeTela } from './tempoDeTela.ts'
 import {
   parametrosDoPainel,
   type Agrupado,
@@ -22,7 +22,7 @@ import {
   type RelatorioDeRevisao,
   type RelatorioDeVideos,
 } from './painelDaDiretoria.ts'
-import { parametrosDoRelatorio } from './tempoDeTela.ts'
+import { parametrosDoRelatorio, POR_PAGINA_DO_DETALHE, POR_PAGINA_DO_RANKING } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
 import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
 
@@ -333,6 +333,10 @@ export interface ClienteDaApi {
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
   tempoDeTelaEmCsv(filtros: FiltrosDoRelatorio): Promise<Blob>
+  /** Uma página do ranking do tempo de tela, com os totais do período; `cursor` é o `proximo` da página anterior. */
+  rankingDoTempoDeTela(filtros: FiltrosDoRelatorio, cursor?: string): Promise<PaginaDoTempoDeTela>
+  /** Os vídeos de uma pessoa no mesmo filtro, só quando a linha é aberta; uma página por vez. */
+  videosDaPessoa(filtros: FiltrosDoRelatorio, pessoaId: string, cursor?: string): Promise<PaginaDeVideos>
   /** `GET /v1/painel/filtros` (exige `painel.ver`): programas e usuários que os filtros do painel oferecem. */
   opcoesDoPainel(): Promise<OpcoesDoPainel>
   /** `GET /v1/painel/fila` (exige `painel.ver`): os Jobs em andamento por estado e a idade do mais antigo, lidos na hora. */
@@ -365,6 +369,10 @@ export interface ClienteDaApi {
   marcas(filtros: FiltrosDeMarcas): Promise<RelatorioDeMarcas>
   /** O mesmo relatório em CSV. */
   marcasEmCsv(filtros: FiltrosDeMarcas): Promise<Blob>
+  /** Uma página do ranking de marcas, com os totais do período; `cursor` é o `proximo` da página anterior. */
+  rankingDeMarcas(filtros: FiltrosDeMarcas, cursor?: string): Promise<PaginaDeMarcas>
+  /** As inserções de uma marca no mesmo filtro (`tipo` estreita só a lista), só quando a linha é aberta. */
+  insercoesDaMarca(filtros: FiltrosDeMarcas, marca: string, tipo?: string, cursor?: string): Promise<PaginaDeInsercoes>
   nomes: ClienteDeNomes
   fusao: ClienteDaFusao
   renomeacao: ClienteDaRenomeacao
@@ -531,6 +539,16 @@ export function criarClienteDaApi(
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
     tempoDeTelaEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),
+    rankingDoTempoDeTela: async (filtros, cursor = '') => {
+      const extras = { limite: String(POR_PAGINA_DO_RANKING), cursor }
+      const resposta = await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, undefined, extras)}`)
+      return { ...(await resposta.json()), proximo: resposta.headers.get('X-Proximo-Cursor') }
+    },
+    videosDaPessoa: async (filtros, pessoaId, cursor = '') => {
+      const extras = { pessoa_id: pessoaId, limite: String(POR_PAGINA_DO_DETALHE), cursor }
+      const resposta = await pedir(`/v1/relatorios/tempo-de-tela/videos?${parametrosDoRelatorio(filtros, undefined, extras)}`)
+      return { videos: await resposta.json(), proximo: resposta.headers.get('X-Proximo-Cursor') }
+    },
     opcoesDoPainel: () => chamar('/v1/painel/filtros'),
     filaDoPainel: () => chamar('/v1/painel/fila'),
     acessosDoPainel: (filtros, agrupar) => doPainel('acessos', filtros, { semPrograma: true, agrupar }),
@@ -549,6 +567,16 @@ export function criarClienteDaApi(
     marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
     marcasEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),
+    rankingDeMarcas: async (filtros, cursor = '') => {
+      const extras = { tipo: filtros.tipo, limite: String(POR_PAGINA_DO_RANKING), cursor }
+      const resposta = await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, extras)}`)
+      return { ...(await resposta.json()), proximo: resposta.headers.get('X-Proximo-Cursor') }
+    },
+    insercoesDaMarca: async (filtros, marca, tipo = filtros.tipo, cursor = '') => {
+      const extras = { marca, tipo, limite: String(POR_PAGINA_DO_DETALHE), cursor }
+      const resposta = await pedir(`/v1/relatorios/marcas/insercoes?${parametrosDoRelatorio(filtros, undefined, extras)}`)
+      return { insercoes: await resposta.json(), proximo: resposta.headers.get('X-Proximo-Cursor') }
+    },
     nomes: {
       achar: async (catalogo, q) => {
         if (catalogo !== 'tipos_de_objeto') return chamar(`/v1/catalogo/${catalogo}?q=${encodeURIComponent(q)}`)
