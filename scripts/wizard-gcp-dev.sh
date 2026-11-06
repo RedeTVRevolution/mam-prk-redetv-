@@ -271,7 +271,7 @@ if ! gcloud iam service-accounts describe "$SA_EMAIL" --project "$P" >/dev/null 
 fi
 # Sem owner, só o que o Terraform usa. projectIamAdmin entra porque Gemini,
 # Firestore, logs e Eventarc só têm papéis no nível do projeto; o Terraform só
-# usa google_project_iam_member (ADR 0002). iam.workloadIdentityPoolAdmin e
+# usa google_project_iam_member e um audit config (ADR 0002). iam.workloadIdentityPoolAdmin e
 # cloudbuild.builds.editor são do CD (#71): a federação com o GitHub e o envio
 # ao Cloud Build.
 # Papel dado à mão à mam-terraform entra aqui no mesmo dia.

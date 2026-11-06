@@ -1,7 +1,7 @@
 # Infraestrutura de um ambiente do MAM (E0, #8; módulo desde #292). O ambiente chama
 # este módulo (infra/main.tf para o dev); o backend e o provider ficam lá. O dev é aplicado
 # por `make deploy-dev`, à mão ou no CD (#71), que impersona a conta mam-terraform. No IAM do projeto, só
-# google_project_iam_member, que é aditivo (ADR 0002).
+# google_project_iam_member, que é aditivo, e o audit config do Artifact Registry (ADR 0002).
 
 terraform {
   required_version = ">= 1.9"
@@ -452,7 +452,8 @@ locals {
 
 # O resultado do ensaio da limpeza só aparece no log Data Access (DATA_WRITE), que vem desligado.
 # Ele também registra os envios de imagem do CD (estimativa: alguns MB por mês, longe dos 50 GiB
-# grátis do Logging). Pode voltar a ser desligado depois que o ensaio for conferido.
+# grátis do Logging). Ele manda só no bloco de auditoria desse serviço (ADR 0002). Para desligar
+# depois do ensaio, tirar o recurso: o plano mostra um delete e pede PERMITIR_DESTRUICAO=sim.
 resource "google_project_iam_audit_config" "artifact_registry" {
   project = var.projeto
   service = "artifactregistry.googleapis.com"
