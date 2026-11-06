@@ -311,6 +311,17 @@ test('atualiza só as linhas em andamento e para com a aba escondida', async () 
   expect(detalhes.length).toBe(antes)
 })
 
+test('a atualização do andamento, que vem sem capa, não apaga a capa da linha', async () => {
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'analisando', etapa_atual: 'analise', capa_url: '/capa-a.jpg' })]
+  // Como a API: o GET /v1/jobs/andamento não traz capa_url.
+  servidor.use(http.get('/v1/jobs/andamento', () => HttpResponse.json([{ ...jobs[0], etapa_atual: 'transcricao', capa_url: undefined }])))
+  await abrir()
+  const linha = await linhaDe('andando.mp4')
+  expect(linha.querySelector('img')?.getAttribute('src')).toBe('/capa-a.jpg')
+  await waitFor(() => expect(within(linha).getByText('Transcrição')).toBeTruthy())
+  expect(linha.querySelector('img')?.getAttribute('src')).toBe('/capa-a.jpg')
+})
+
 test('a linha mostra a capa, o estado com ícone e a régua das etapas; o filtro de estado vai à API', async () => {
   jobs = [
     job({ capa_url: 'https://exemplo.invalid/capa.jpg', etapas: [{ nome: 'validacao', ...ETAPA_OK }, { nome: 'transcricao', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
