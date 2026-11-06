@@ -1,6 +1,13 @@
 import { IconChartBar, IconTable } from "@tabler/icons-react";
 import { cn } from "cn";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Bar,
   BarChart,
@@ -91,6 +98,8 @@ export function Indicador({
 export interface LinhaDaTabela {
   chave: string;
   celulas: ReactNode[];
+  /** Uma linha a mais, sob esta, na largura da tabela (o detalhe que abre). */
+  detalhe?: ReactNode;
 }
 
 /** Tabela de números: a primeira coluna é o nome, as outras alinham à direita. Larga demais, rola dentro da caixa. */
@@ -130,24 +139,35 @@ export function Tabela({
         </thead>
         <tbody>
           {linhas.map((l) => (
-            <tr
-              key={l.chave}
-              className="h-8 border-b border-border/60 last:border-b-0 hover:bg-card"
-            >
-              {l.celulas.map((c, i) => (
-                <td
-                  key={i}
-                  className={cn(
-                    "px-2 first:pl-0 last:pr-0",
-                    i === 0
-                      ? "min-w-32 text-left [overflow-wrap:anywhere]"
-                      : "text-right whitespace-nowrap",
-                  )}
-                >
-                  {c}
-                </td>
-              ))}
-            </tr>
+            <Fragment key={l.chave}>
+              <tr
+                className={cn(
+                  "h-8 hover:bg-card",
+                  !l.detalhe && "border-b border-border/60 last:border-b-0",
+                )}
+              >
+                {l.celulas.map((c, i) => (
+                  <td
+                    key={i}
+                    className={cn(
+                      "px-2 first:pl-0 last:pr-0",
+                      i === 0
+                        ? "min-w-32 text-left [overflow-wrap:anywhere]"
+                        : "text-right whitespace-nowrap",
+                    )}
+                  >
+                    {c}
+                  </td>
+                ))}
+              </tr>
+              {l.detalhe && (
+                <tr className="border-b border-border/60 last:border-b-0">
+                  <td colSpan={colunas.length} className="pb-3 pl-3">
+                    {l.detalhe}
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -379,15 +399,28 @@ export function Ranking({
   rotulo,
   dados,
   formato = numero,
+  escolhido,
+  aoEscolher,
 }: {
   rotulo: string;
-  dados: { nome: string; valor: number }[];
+  dados: { id?: string; nome: string; valor: number }[];
   formato?: (n: number) => string;
+  /** A barra em destaque (a linha aberta na tabela) e o que o clique numa barra faz; os dois juntos. */
+  escolhido?: string | null;
+  aoEscolher?: (id: string) => void;
 }) {
   const [ref, visivel] = useVisivel();
   const primeiros = [...dados]
     .sort((a, b) => b.valor - a.valor)
-    .slice(0, MAIS_NO_RANKING);
+    .slice(0, MAIS_NO_RANKING)
+    // A cor vai no dado: o recharts pinta a barra com o `fill` de cada item.
+    .map((d) => ({
+      ...d,
+      fill:
+        d.id !== undefined && d.id === escolhido
+          ? "var(--color-link)"
+          : "var(--color-primary)",
+    }));
   const resumo = `${rotulo}: ${primeiros.map((d) => `${d.nome}, ${formato(d.valor)}`).join("; ")}`;
   return (
     <div
@@ -435,6 +468,10 @@ export function Ranking({
               radius={[0, 2, 2, 0]}
               barSize={ALTURA_DA_BARRA}
               isAnimationActive={false}
+              cursor={aoEscolher ? "pointer" : undefined}
+              onClick={(d: { id?: string }) =>
+                d.id !== undefined && aoEscolher?.(d.id)
+              }
             >
               <LabelList
                 dataKey="valor"

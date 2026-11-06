@@ -160,19 +160,12 @@ test('quem só vê o painel começa nele', async () => {
 })
 
 test('a tela que não migrou leva à mesma URL na interface atual', async () => {
-  history.replaceState(null, '', '/relatorios/marcas?de=2026-01-01')
-  const usuario = userEvent.setup()
+  // Com relatórios e administração migrados, só a amostra do sistema visual sobra.
+  history.replaceState(null, '', '/amostra?x=1')
   render(<App autenticador={await comSessao()} />)
 
   const link = await screen.findByRole('link', { name: /Abrir na interface atual/ })
-  expect(link.getAttribute('href')).toBe('/relatorios/marcas?de=2026-01-01&interface=atual')
-
-  // O trilho navega sem recarregar, e o link acompanha.
-  await usuario.click(trilho().getByRole('link', { name: 'Tempo de tela' }))
-  expect(location.pathname).toBe('/relatorios/tempo-de-tela')
-  expect(screen.getByRole('link', { name: /Abrir na interface atual/ }).getAttribute('href')).toBe(
-    '/relatorios/tempo-de-tela?interface=atual',
-  )
+  expect(link.getAttribute('href')).toBe('/amostra?x=1&interface=atual')
 })
 
 test('sair pelo menu da conta volta ao login e apaga a sessão', async () => {

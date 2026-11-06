@@ -100,6 +100,16 @@
   --color-andamento: #e5b045;
   --color-marca: #e03131;
 
+  /* Gráficos (MAM_DESIGN_SYSTEM 2.6): três séries, e a escala sequencial do azul de foco (o maior valor é o mais claro). */
+  --color-chart-1: #d95926;
+  --color-chart-2: #c25bd6;
+  --color-chart-3: #199e70;
+  --color-seq-100: #cde2fb;
+  --color-seq-250: #86b6ef;
+  --color-seq-400: #3987e5;
+  --color-seq-500: #256abf;
+  --color-seq-600: #184f95;
+
   --color-sidebar: #141619;
   --color-sidebar-foreground: #e8eaed;
   --color-sidebar-primary: #3871dc;

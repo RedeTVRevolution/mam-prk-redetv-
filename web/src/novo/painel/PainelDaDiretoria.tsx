@@ -1,9 +1,7 @@
 import {
-  IconAlertTriangle,
   IconApi,
   IconChartBar,
   IconCoin,
-  IconDownload,
   IconEdit,
   IconLogin2,
   IconMovie,
@@ -39,9 +37,10 @@ import {
   type RelatorioDeVideos,
 } from "../../painelDaDiretoria.ts";
 import { enderecoDoPainel, navegar } from "../../rotas.ts";
-import { useBaixarCsv } from "../../useRelatorio.ts";
+import { Falha } from "../comum/Falha.tsx";
+import { CAMPO, mensagemDoErro } from "../comum/relatorio.ts";
+import { BaixarCsv, Campo } from "../comum/relatorio.tsx";
 import { useApi } from "../consultas.ts";
-import { Button } from "../ui/button.tsx";
 import {
   Acessos,
   Api,
@@ -138,27 +137,6 @@ const AGRUPAMENTOS: { valor: PedidoDeAgrupamento; rotulo: string }[] = [
   { valor: "trimestre", rotulo: "Por trimestre" },
 ];
 
-const CAMPO =
-  "h-8 rounded-sm border border-strong bg-input px-2 text-sm disabled:cursor-not-allowed disabled:opacity-50";
-
-function Campo({
-  rotulo,
-  children,
-}: {
-  rotulo: string;
-  children: (id: string) => ReactNode;
-}) {
-  const id = useId();
-  return (
-    <div className="grid min-w-0 gap-1">
-      <label htmlFor={id} className="text-xs text-muted-foreground">
-        {rotulo}
-      </label>
-      {children(id)}
-    </div>
-  );
-}
-
 function Filtros({
   filtros,
   comPrograma,
@@ -252,45 +230,6 @@ function Filtros({
   );
 }
 
-function Alerta({
-  mensagem,
-  codigo,
-  aoTentar,
-}: {
-  mensagem: string;
-  codigo: string;
-  aoTentar?: () => void;
-}) {
-  return (
-    <div
-      role="alert"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-sm border border-destructive/40 bg-destructive/12 px-3 py-2 text-sm"
-    >
-      <IconAlertTriangle
-        size={16}
-        stroke={1.75}
-        className="shrink-0 text-destructive"
-        aria-hidden
-      />
-      <span className="text-destructive">{mensagem}</span>
-      <span className="text-xs text-muted-foreground">
-        Código para o suporte: {codigo}
-      </span>
-      {aoTentar && (
-        <Button type="button" size="sm" variant="secondary" onClick={aoTentar}>
-          Tentar de novo
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function mensagemDoErro(erro: unknown) {
-  return erro instanceof PedidoInvalido
-    ? erro.message
-    : "Não foi possível montar o relatório agora. Tente de novo.";
-}
-
 /** Troca de aba sem empilhar no histórico, como na interface atual; com modificador, abre noutra aba do navegador. */
 function trocarDeAba(e: MouseEvent<HTMLAnchorElement>, destino: string) {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
@@ -320,40 +259,6 @@ function moverComTeclado(e: KeyboardEvent<HTMLDivElement>) {
   const alvo = abas[destinos[e.key] % abas.length];
   alvo.focus();
   navegar(alvo.getAttribute("href") ?? "", { substituir: true });
-}
-
-/** O CSV da aba. Montado com `key` pela aba, a falha (ou um pedido ainda no ar) não passa para a próxima. */
-function BaixarCsv({
-  arquivo,
-  pedir,
-  desligado,
-}: {
-  arquivo: string;
-  pedir: () => Promise<Blob>;
-  desligado: boolean;
-}) {
-  const csv = useBaixarCsv(arquivo, pedir);
-  return (
-    <>
-      <Button
-        type="button"
-        variant="secondary"
-        className="ml-auto"
-        disabled={desligado}
-        onClick={() => void csv.baixar()}
-      >
-        <IconDownload size={16} stroke={1.75} aria-hidden /> Baixar CSV
-      </Button>
-      {csv.falhou && (
-        <div className="basis-full">
-          <Alerta
-            mensagem="Não foi possível baixar o CSV agora."
-            codigo="csv"
-          />
-        </div>
-      )}
-    </>
-  );
 }
 
 /** O painel da diretoria (`/painel/<aba>`): filtros no endereço, uma aba por relatório, CSV em cada uma. */
@@ -493,7 +398,7 @@ export default function PainelDaDiretoria({
 
         {aba === "videos" && <FilaAgora />}
         {bloqueio && (
-          <Alerta mensagem={bloqueio.mensagem} codigo={bloqueio.codigo} />
+          <Falha mensagem={bloqueio.mensagem} codigo={bloqueio.codigo} />
         )}
         {!bloqueio && relatorio.isPending && (
           <p
@@ -505,7 +410,7 @@ export default function PainelDaDiretoria({
           </p>
         )}
         {!bloqueio && relatorio.isError && (
-          <Alerta
+          <Falha
             mensagem={mensagemDoErro(relatorio.error)}
             codigo={codigoDoErro(relatorio.error)}
             aoTentar={() => void relatorio.refetch()}
