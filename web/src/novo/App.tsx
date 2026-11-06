@@ -1,6 +1,6 @@
 import { IconAlertTriangle, IconExternalLink } from '@tabler/icons-react'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import type { ClienteDaApi } from '../api.ts'
 import type { Autenticador } from '../auth/autenticador.ts'
 import { naInterfaceAtual } from '../interface.ts'
@@ -14,10 +14,14 @@ import Login from './Login.tsx'
 import { Button } from './ui/button.tsx'
 import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 
+// Cada tela chega no próprio pedaço: os gráficos não pesam na casca.
+const PainelDaDiretoria = lazy(() => import('./painel/PainelDaDiretoria.tsx'))
+
 /** O que a área de trabalho mostra. As telas que ainda não migraram levam à interface atual. */
 function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[] }) {
   if (rota.tipo === 'raiz') return null
-  if (rota.tipo === 'nao_encontrada') {
+  // O front só esconde o painel; quem barra é a API.
+  if (rota.tipo === 'nao_encontrada' || (rota.tipo === 'painel' && !permissoes.includes('painel.ver'))) {
     return (
       <div className="m-auto grid justify-items-center gap-2 p-8 text-center">
         <p>Página não encontrada.</p>
@@ -29,6 +33,13 @@ function AreaDeTrabalho({ rota, permissoes }: { rota: Rota; permissoes: string[]
   }
   if (rota.tipo === 'acervo') return <Acervo filtros={rota.filtros} permissoes={permissoes} />
   if (rota.tipo === 'video') return <TelaDoVideo key={rota.id} id={rota.id} t={rota.t} />
+  if (rota.tipo === 'painel') {
+    return (
+      <Suspense>
+        <PainelDaDiretoria aba={rota.aba} filtros={rota.filtros} />
+      </Suspense>
+    )
+  }
   return <AindaNaoMigrou />
 }
 
