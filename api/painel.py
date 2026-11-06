@@ -247,17 +247,20 @@ COLUNAS_DO_CSV_DE_ACESSOS = ("dia", "uid", "email", "acessos", "ativo", "ultimo_
 class EmailsDasContas:
     """Uid -> e-mail das contas, lembrado por `validade` segundos nesta instância: listar as
     contas no Identity Platform custa ~0,3 s por requisição. Uma conta nova leva até esse
-    tempo para aparecer com e-mail. Sem a lista, o painel mostra só o uid (e a falha não
-    fica guardada: a próxima requisição tenta de novo)."""
+    tempo para aparecer com e-mail. Se a listagem falha, vale a última lista boa (ou nenhuma:
+    o painel mostra só o uid) por `espera_na_falha` segundos, para os pedidos que esperavam a
+    trava não repetirem, um atrás do outro, o timeout do Identity Platform."""
 
     def __init__(
         self,
         contas: ContasDeUsuario,
         validade: float = 60.0,
+        espera_na_falha: float = 10.0,
         relogio: Callable[[], float] = time.monotonic,
     ) -> None:
         self._contas = contas
         self._validade = validade
+        self._espera_na_falha = espera_na_falha
         self._relogio = relogio
         self._trava = threading.Lock()
         self._emails: dict[str, str] = {}
@@ -271,8 +274,9 @@ class EmailsDasContas:
                     self._emails = {c.uid: c.email for c in self._contas.listar()}
                 except Exception:
                     log.exception("Falha ao listar as contas para o painel")
-                    return {}
-                self._vence_em = self._relogio() + self._validade
+                    self._vence_em = self._relogio() + self._espera_na_falha
+                else:
+                    self._vence_em = self._relogio() + self._validade
             return dict(self._emails)
 
 

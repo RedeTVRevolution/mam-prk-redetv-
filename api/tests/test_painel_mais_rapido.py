@@ -94,16 +94,23 @@ def test_emails_nao_listam_de_novo_dentro_do_ttl_e_listam_depois() -> None:
     assert contas.listagens == 2
 
 
-def test_emails_com_falha_vazio_e_nao_fica_guardado() -> None:
-    contas = ContasQueContam()
-    emails = EmailsDasContas(contas, relogio=lambda: 0.0)
+def test_emails_com_falha_seguram_a_ultima_lista_por_pouco_tempo_e_tentam_de_novo() -> None:
+    contas, agora = ContasQueContam(), [0.0]
+    emails = EmailsDasContas(contas, espera_na_falha=10, relogio=lambda: agora[0])
     contas.falha = True
 
     assert emails() == {}
+    assert emails() == {}  # quem esperava a trava não lista de novo
+    assert contas.listagens == 1
 
+    agora[0] = 10.0
     contas.falha = False
     assert emails() == {"bia": "bia@redetv.com.br"}
-    assert contas.listagens == 2
+
+    agora[0] = 70.0
+    contas.falha = True
+    assert emails() == {"bia": "bia@redetv.com.br"}  # vale a última lista boa
+    assert contas.listagens == 3
 
 
 # --- as rotas ----------------------------------------------------------------------------
