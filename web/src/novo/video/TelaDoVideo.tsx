@@ -109,5 +109,7 @@ function permissoesDoVideo(p: readonly string[]): Permissoes {
     reprocessar: p.includes('video.reprocessar_etapa'),
     verAuditoria: p.includes('auditoria.ver'),
     apagar: p.includes('lixeira.gerir'),
+    aprovar: p.includes('correcao.aprovar'),
+    fundir: p.includes('catalogo.fundir'),
   }
 }

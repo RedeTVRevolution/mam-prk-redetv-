@@ -66,3 +66,17 @@ export function AvisoDeFalha({
     </div>
   )
 }
+
+/** Botão de texto com a tecla na dica (Enter, Esc): a mesma dica dos ícones. */
+export function BotaoComDica({ dica, ...props }: { dica: string } & ComponentProps<typeof Button>) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type="button" size="sm" {...props} />
+      </TooltipTrigger>
+      <TooltipContent collisionPadding={8}>
+        <Kbd>{dica}</Kbd>
+      </TooltipContent>
+    </Tooltip>
+  )
+}

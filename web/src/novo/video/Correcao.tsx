@@ -11,10 +11,10 @@ import { Button } from '../ui/button.tsx'
 // A mesma regra do `FormularioDeCorrecao.tsx` da interface atual (o `Editor` do `catalogacao.ts`),
 // com os campos em Tailwind: Enter salva e Esc cancela, sem diálogo.
 
-const CAMPO =
+export const CAMPO =
   'h-8 w-full min-w-0 rounded-sm border border-strong bg-input px-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary'
 
-function Rotulo({ texto, children }: { texto: string; children: ReactNode }) {
+export function Rotulo({ texto, children }: { texto: string; children: ReactNode }) {
   return (
     <label className="grid gap-1 text-xs font-medium">
       <span>{texto}</span>
@@ -103,7 +103,6 @@ export function FormularioDeCorrecao({
     } else if (
       e.key === 'Enter' &&
       !(e.target instanceof HTMLButtonElement) &&
-      !(e.target instanceof HTMLSelectElement) &&
       !(e.target instanceof HTMLTextAreaElement && e.shiftKey)
     ) {
       e.preventDefault()
@@ -288,16 +287,19 @@ const MINIMO_DE_LETRAS = 2
  * escolhem, Shift+Enter (ou o clique na última linha) usa o texto digitado como nome novo, "a revisar".
  * Escolher do catálogo devolve o id junto com o nome. O tipo de objeto só sugere: não há nome a criar.
  */
-function CampoDeNome({
+export function CampoDeNome({
   rotulo,
   catalogo,
   limite,
+  soDoCatalogo = false,
   valor,
   aoMudar,
 }: {
   rotulo: string
   catalogo: CatalogoDeNomes
   limite?: number
+  /** Só escolhe um nome que já existe: sem "criar como nova" (a fusão, por exemplo). */
+  soDoCatalogo?: boolean
   valor: string
   /** `id` é o do catálogo, ou vazio quando o texto é só digitado. */
   aoMudar: (nome: string, id: string) => void
@@ -311,7 +313,7 @@ function CampoDeNome({
   const [criando, setCriando] = useState(false)
   const ultimaBusca = useRef(0)
   const nomeNovo = valor.trim()
-  const soSugere = catalogo === 'tipos_de_objeto'
+  const soSugere = catalogo === 'tipos_de_objeto' || soDoCatalogo
   const comLista = aberta && nomes !== null && nomeNovo.length >= MINIMO_DE_LETRAS
 
   async function buscar(texto: string) {
@@ -330,7 +332,7 @@ function CampoDeNome({
     } catch {
       if (busca !== ultimaBusca.current) return
       setAchados([])
-      setErro(`Não foi possível consultar ${soSugere ? 'os tipos' : 'o catálogo'}. Pode seguir com o texto digitado.`)
+      setErro(`Não foi possível consultar ${catalogo === 'tipos_de_objeto' ? 'os tipos' : 'o catálogo'}. ${soDoCatalogo ? 'Tente de novo.' : 'Pode seguir com o texto digitado.'}`)
       setAberta(true)
     }
   }
