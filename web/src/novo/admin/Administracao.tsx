@@ -9,6 +9,7 @@ import { filtrosDasEntradas } from '../../entradas.ts'
 import Auditoria from './Auditoria.tsx'
 import Chaves from './Chaves.tsx'
 import Entradas from './Entradas.tsx'
+import Lixeira from './Lixeira.tsx'
 import Programas from './Programas.tsx'
 import RegrasDeAprovacao from './RegrasDeAprovacao.tsx'
 import Usuarios from './Usuarios.tsx'
@@ -24,7 +25,6 @@ const ICONE: Record<string, Icon> = {
 }
 
 function Conteudo({ aba, busca, usuario, aoEntrarDeNovo }: { aba: Aba['aba']; busca: string; usuario: Usuario; aoEntrarDeNovo: () => void }) {
-  void aoEntrarDeNovo
   const pode = (p: string) => usuario.permissoes.includes(p)
   if (aba === 'entradas') {
     return (
@@ -40,6 +40,7 @@ function Conteudo({ aba, busca, usuario, aoEntrarDeNovo }: { aba: Aba['aba']; bu
   if (aba === 'chaves') return <Chaves />
   if (aba === 'aprovacao') return <RegrasDeAprovacao />
   if (aba === 'programas') return <Programas />
+  if (aba === 'lixeira') return <Lixeira aoEntrarDeNovo={aoEntrarDeNovo} />
   if (aba === 'auditoria') return <Auditoria filtros={filtrosDaAuditoria(busca)} />
   return null
 }
