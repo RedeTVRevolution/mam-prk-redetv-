@@ -132,6 +132,8 @@ const servidor = setupServer(
 )
 
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
+// A tela é carregada sob demanda; sob carga, a primeira importação passava de 1 s e o primeiro teste falhava.
+beforeAll(() => import('./PainelDaDiretoria.tsx'))
 afterEach(() => {
   cleanup()
   history.replaceState(null, '', '/')
