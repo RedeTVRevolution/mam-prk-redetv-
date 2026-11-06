@@ -165,6 +165,9 @@ export function filtrosParaApi(f: FiltrosDoAcervo, cursor: string | null): strin
 /** O instante como `DD/MM/AAAA HH:MM`, em São Paulo (o dia dos filtros por período). */
 export function dataEHora(iso: string): string {
   const d = new Date(iso)
-  const hora = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
-  return `${d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} ${hora}`
+  return `${DATA_EM_SAO_PAULO.format(d)} ${HORA_EM_SAO_PAULO.format(d)}`
 }
+
+// Formatadores feitos uma vez: o `toLocale…String` com fuso monta um a cada chamada, e as listas chamam por linha.
+const DATA_EM_SAO_PAULO = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' })
+const HORA_EM_SAO_PAULO = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
