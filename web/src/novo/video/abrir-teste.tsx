@@ -34,6 +34,8 @@ export function rotasDoVideo(job: () => Partial<Job>, decupagem: () => object) {
     http.get('/v1/jobs/j1', () => HttpResponse.json({ ...JOB, ...job() })),
     http.get('/v1/jobs/j1/reproducao', () => HttpResponse.json(REPRODUCAO)),
     http.get('/v1/jobs/j1/decupagem', () => HttpResponse.json(decupagem())),
+    // O pulso da sessão de revisão (#251): quem quiser contá-lo declara o próprio handler antes destas rotas.
+    http.post('/v1/jobs/j1/revisao/pulso', () => new HttpResponse(null, { status: 204 })),
   ]
 }
 

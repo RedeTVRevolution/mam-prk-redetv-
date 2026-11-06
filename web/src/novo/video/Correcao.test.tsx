@@ -549,3 +549,29 @@ test('os atalhos da correção estão na lista do ?, só para quem edita', async
   await screen.findByRole('dialog')
   expect(screen.queryByRole('region', { name: 'Correção' })).toBeNull()
 })
+
+test('F2 com o inspetor recolhido abre o inspetor com o formulário', async () => {
+  const usuario = await abrirPauta()
+  await usuario.click(inspetor().getByRole('button', { name: 'Recolher o inspetor' }))
+  expect(screen.queryByRole('complementary', { name: 'Inspetor' })).toBeNull()
+
+  await usuario.keyboard('{F2}')
+
+  expect(await screen.findByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
+})
+
+test('F2 e Del com a comparação aberta fecham a comparação e mostram o formulário', async () => {
+  servidor.use(
+    http.get('/v1/jobs/j1/passadas', () => HttpResponse.json([{ id: 'p1', job_id: 'j1', modelo: 'gemini-3.8-flash', criada_em: '2026-11-02T12:00:00Z', custo: {}, etapas: [] }])),
+    http.get('/v1/jobs/j1/passadas/p1/comparacao', () => HttpResponse.json({ passada_id: 'p1', modelo: 'm', modelo_do_job: 'n', duracao_ms: 60_000, a: { custo_usd: null, custo_por_hora_usd: null, tempo_total_s: 1, etapas: [] }, b: { custo_usd: null, custo_por_hora_usd: null, tempo_total_s: 1, etapas: [] }, requisitos: [] })),
+  )
+  const usuario = await abrirPauta()
+  await usuario.selectOptions(await screen.findByRole('combobox', { name: 'Comparar com' }), 'p1')
+  await screen.findByRole('complementary', { name: 'Comparação com a passada' })
+  ;(document.activeElement as HTMLElement).blur()
+
+  await usuario.keyboard('{F2}')
+
+  expect(await screen.findByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
+  expect(screen.queryByRole('complementary', { name: 'Comparação com a passada' })).toBeNull()
+})

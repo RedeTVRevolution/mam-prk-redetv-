@@ -17,6 +17,7 @@ import {
   trechosSemPauta,
   vizinhoNaFaixa,
 } from '../../linhaDoTempo.ts'
+import { IconSelector } from '@tabler/icons-react'
 import { TIPOS, type TipoDaFaixa } from './tipos.ts'
 import type { Instante } from './instante.ts'
 
@@ -29,6 +30,18 @@ export interface AlcasDaCorrecao {
   /** Enter na alça grava os tempos, como no formulário. */
   aoSalvar: () => void
   /** Esc na alça descarta. */
+  aoDescartar: () => void
+}
+
+/** O trecho marcado com I e O: a faixa "Trecho" logo abaixo da régua, com as alças dos dois lados. */
+export interface TrechoMarcado {
+  inicio_ms: number
+  /** Sem a saída marcada (só o `I`), a faixa mostra a entrada e as alças esperam. */
+  fim_ms: number | null
+  aoMover: (borda: Borda, ms: number) => void
+  /** Enter na alça grava, como no formulário. */
+  aoSalvar: () => void
+  /** Esc na alça descarta o trecho. */
   aoDescartar: () => void
 }
 
@@ -197,6 +210,36 @@ function AlcaDoTempo({
 
 const pct = (n: number) => `${n}%`
 
+/** A faixa do trecho marcado: o bloco (com a saída), os tempos e as alças. */
+function FaixaDoTrecho({ trecho, duracaoMs }: { trecho: TrechoMarcado; duracaoMs: number }) {
+  const { inicio_ms: inicio, fim_ms: fim } = trecho
+  const limites = limitesDasAlcas({ inicio_ms: inicio, fim_ms: fim ?? inicio }, duracaoMs, duracaoMs)
+  const tempos = `${relogio(inicio)}–${fim === null ? '…' : relogio(fim)}`
+  const comum = { duracaoMs, aoMover: trecho.aoMover, aoSalvar: trecho.aoSalvar, aoDescartar: trecho.aoDescartar }
+  return (
+    <div role="group" aria-label="Trecho" className="relative h-[18px] py-0.5">
+      <div className="relative size-full">
+        {fim !== null && (
+          <div
+            data-trecho=""
+            className="absolute inset-y-0 min-w-1 rounded-xs border border-link bg-link/20"
+            style={{ left: pct(posicaoDoBloco({ inicio_ms: inicio, fim_ms: fim }, duracaoMs).esquerda), width: pct(posicaoDoBloco({ inicio_ms: inicio, fim_ms: fim }, duracaoMs).largura) }}
+          />
+        )}
+        <span
+          aria-label={`Trecho ${tempos}`}
+          className="pointer-events-none absolute inset-y-0 ml-2 font-mono text-2xs leading-[14px] whitespace-nowrap tabular-nums"
+          style={{ left: pct(percentualDoTempo(inicio, duracaoMs)) }}
+        >
+          {tempos}
+        </span>
+        <AlcaDoTempo rotulo="Início do trecho" borda="inicio" ms={inicio} limites={limites.inicio} {...comum} />
+        {fim !== null && <AlcaDoTempo rotulo="Fim do trecho" borda="fim" ms={fim} limites={limites.fim} {...comum} />}
+      </div>
+    </div>
+  )
+}
+
 /** A largura de um algarismo do IBM Plex Mono em 11 px, para os rótulos da régua não se encostarem. */
 const PX_POR_ALGARISMO = 6.7
 
@@ -225,6 +268,7 @@ export function LinhaDoTempo({
   instante,
   selecionada,
   alcas,
+  trecho,
   aoSaltar,
   aoSelecionar,
 }: {
@@ -234,6 +278,8 @@ export function LinhaDoTempo({
   instante: Instante
   selecionada: string | null
   alcas: AlcasDaCorrecao | null
+  /** O trecho marcado na revisão; sem ele não há a faixa. */
+  trecho?: TrechoMarcado | null
   aoSaltar: (ms: number) => void
   aoSelecionar: (chave: string) => void
 }) {
@@ -290,6 +336,12 @@ export function LinhaDoTempo({
     <div className="flex shrink-0 border-t pb-1 text-xs select-none">
       <div className="w-9 shrink-0 border-r sm:w-32" aria-hidden>
         <div className="h-5 border-b border-strong/60" />
+        {trecho && (
+          <div className="flex h-[18px] items-center gap-1.5 px-2" title="Trecho">
+            <IconSelector size={14} stroke={1.75} className="shrink-0 text-link" />
+            <span className="hidden flex-1 truncate text-muted-foreground sm:inline">Trecho</span>
+          </div>
+        )}
         {faixas.map((f) => {
           const { Icone, cor } = TIPOS[f.chave as TipoDaFaixa]
           return (
@@ -341,6 +393,7 @@ export function LinhaDoTempo({
             <path d={cortes.map((p) => `M${p} 0v1`).join('')} stroke="var(--color-muted-foreground)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
           </svg>
         </div>
+        {trecho && <FaixaDoTrecho trecho={trecho} duracaoMs={duracaoMs} />}
         {faixas.map((faixa) => {
           const { cor } = TIPOS[faixa.chave as TipoDaFaixa]
           const selecionado = faixa.blocos.find((b) => b.chave === selecionada)

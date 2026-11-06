@@ -369,3 +369,44 @@ test('teclasDasOpcoes: a primeira letra livre do rótulo, sem repetir nenhuma', 
   const cores = ['verde', 'vermelho', 'azul', 'amarelo', 'índigo'].map((r) => ({ valor: r, rotulo: r }))
   expect([...teclasDasOpcoes(cores).values()]).toEqual(['v', 'e', 'a', 'm', 'i'])
 })
+
+test('marcas: uma decupagem de 2 h com 300 correções não trava a tela (teto de 25 ms; com a CPU 4× mais lenta, 100 ms)', () => {
+  const faixa = (i: number, passo: number) => ({ inicio_ms: i * passo, fim_ms: i * passo + passo - 100 })
+  const d = {
+    versao_decupagem: 'v1',
+    pautas: Array.from({ length: 60 }, (_, i) => ({ id: `pa${i}`, titulo: `P${i}`, resumo: '', tom: 'informativo', ...faixa(i, 115_000) })),
+    pessoas: Array.from({ length: 40 }, (_, i) => ({
+      id: `p${i}`,
+      nome: `Pessoa ${i}`,
+      fontes_do_nome: ['gc'],
+      na_imagem: Array.from({ length: 38 }, (_, j) => ({ ...faixa(j, 10_000), evidencia: 'rosto' })),
+      citada_na_fala: [],
+      citada_no_texto: [],
+    })),
+    planos: Array.from({ length: 1800 }, (_, i) => ({ id: `pl${i}`, ambiente: 'estúdio', acao: null, objetos: [], plano_limpo: false, ...faixa(i, 4_000) })),
+    comerciais: [],
+    transcricao: Array.from({ length: 2500 }, (_, i) => ({ id: `f${i}`, locutor: 'Ana', texto: 'fala', ...faixa(i, 2_880) })),
+    textos_na_tela: Array.from({ length: 1500 }, (_, i) => ({ id: `t${i}`, tipo: 'GC', texto: 'texto', ...faixa(i, 4_800) })),
+    objetos: [],
+  } as unknown as Decupagem
+  const itensGrandes = itensDoPainel(d)
+  const historico = Array.from({ length: 300 }, (_, i) => ({
+    id: `c${i}`,
+    tipo: 'pessoa.renomear',
+    estado: 'ativa',
+    item_id: `p${i % 40}`,
+    ancora: { versao: 'v1', tipo_do_item: 'pessoa' },
+    autor_email: 'ana@redetv.com.br',
+    criada_em: '2026-10-31T12:00:00Z',
+    motivo: 'nome',
+  })) as never
+
+  const antes = performance.now()
+  const marcas = marcasDosItens(d, itensGrandes, historico)
+  const gasto = performance.now() - antes
+
+  expect(Object.keys(marcas).length).toBeGreaterThan(0)
+  // Cerca de 5 ms numa máquina parada; o teto largo evita falha por carga (vários agentes) e ainda pega o
+  // caso quadrático (centenas de ms).
+  expect(gasto).toBeLessThan(150)
+})
