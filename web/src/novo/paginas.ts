@@ -22,41 +22,40 @@ interface Guardados {
   cursores: string[]
   tamanhos: number[]
 }
-interface DoCliente {
-  prefixos: Map<unknown, Map<string, Guardados>>
-  /** Onde a lista estava ao sair (abrir um vídeo): o primeiro item à vista, pelo índice. */
+interface DoPrefixo {
+  consultas: Map<string, Guardados>
+  /**
+   * Onde a lista estava ao sair (abrir um vídeo): o primeiro item à vista, pelo índice. Uma por
+   * prefixo: acervo, vídeo, parecidos, volta e volta encontra o acervo onde estava.
+   */
   posicao: { chave: string; indice: number } | null
 }
 // Por cliente, como o cache: os cursores e a posição de outro cliente (outra sessão) não valem aqui.
-const guardados = new WeakMap<QueryClient, DoCliente>()
+const guardados = new WeakMap<QueryClient, Map<unknown, DoPrefixo>>()
 
-function doCliente(cliente: QueryClient): DoCliente {
-  let d = guardados.get(cliente)
-  if (!d) guardados.set(cliente, (d = { prefixos: new Map(), posicao: null }))
+function doPrefixo(cliente: QueryClient, prefixo: unknown): DoPrefixo {
+  let prefixos = guardados.get(cliente)
+  if (!prefixos) guardados.set(cliente, (prefixos = new Map()))
+  let d = prefixos.get(prefixo)
+  if (!d) prefixos.set(prefixo, (d = { consultas: new Map(), posicao: null }))
   return d
 }
 
-function guardadosDo(cliente: QueryClient, prefixo: unknown): Map<string, Guardados> {
-  const { prefixos } = doCliente(cliente)
-  let doPrefixo = prefixos.get(prefixo)
-  if (!doPrefixo) prefixos.set(prefixo, (doPrefixo = new Map()))
-  return doPrefixo
-}
-
 function guardadosDa(cliente: QueryClient, prefixo: unknown, hash: string): Guardados {
-  const doPrefixo = guardadosDo(cliente, prefixo)
-  let g = doPrefixo.get(hash)
-  if (!g) doPrefixo.set(hash, (g = { cursores: [''], tamanhos: [] }))
+  const { consultas } = doPrefixo(cliente, prefixo)
+  let g = consultas.get(hash)
+  if (!g) consultas.set(hash, (g = { cursores: [''], tamanhos: [] }))
   return g
 }
 
+/** `chave` é o hash de uma consulta já na tela: ela diz o prefixo. */
 export function lembrarPosicao(cliente: QueryClient, chave: string, indice: number) {
-  doCliente(cliente).posicao = { chave, indice }
+  for (const d of guardados.get(cliente)?.values() ?? []) if (d.consultas.has(chave)) d.posicao = { chave, indice }
 }
 
 /** Depois de voltar ao lugar: daqui em diante a consulta recomeça do topo (um envio novo, por exemplo). */
-function esquecerPosicao(cliente: QueryClient) {
-  doCliente(cliente).posicao = null
+function esquecerPosicao(cliente: QueryClient, prefixo: unknown) {
+  doPrefixo(cliente, prefixo).posicao = null
 }
 
 /** Onde começa a página `n`: a soma dos itens das de antes, todas já vistas (só se chega a ela descendo). */
@@ -77,8 +76,8 @@ function paginaDo(tamanhos: number[], indice: number): number {
 }
 
 /** O índice a que voltar e a página dele, se a última saída foi desta consulta e o cursor dela ainda está guardado. */
-function volta(cliente: QueryClient, hash: string, g: Guardados): { indice: number; cursor: string } {
-  const p = doCliente(cliente).posicao
+function volta(cliente: QueryClient, prefixo: unknown, hash: string, g: Guardados): { indice: number; cursor: string } {
+  const p = doPrefixo(cliente, prefixo).posicao
   const n = p?.chave === hash ? paginaDo(g.tamanhos, p.indice) : -1
   return n >= 0 && g.cursores[n] !== undefined ? { indice: p!.indice, cursor: g.cursores[n] } : { indice: 0, cursor: '' }
 }
@@ -120,7 +119,7 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
   // O índice da volta é o da montagem (a tela rola até ele uma vez). O cursor inicial se calcula a
   // cada vez: depois de `esquecerPosicao` (um envio refaz a lista) ou de outro filtro e volta, ele
   // é o do topo.
-  const [voltaInicial, setVoltaInicial] = useState(() => volta(cliente, hash, g).indice)
+  const [voltaInicial, setVoltaInicial] = useState(() => volta(cliente, chave[0], hash, g).indice)
   const q = useInfiniteQuery({
     queryKey: chave,
     queryFn: async ({ pageParam }) => {
@@ -131,7 +130,7 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
       }
     },
     // Volta do vídeo com o cache já vencido: recomeça na página do item de onde se saiu.
-    initialPageParam: volta(cliente, hash, g).cursor,
+    initialPageParam: volta(cliente, chave[0], hash, g).cursor,
     getNextPageParam: (ultima: P, _todas, ultimoParam: string) => {
       const seguinte = proximo(ultima)
       if (!seguinte) return undefined
@@ -200,8 +199,8 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
   // inteiro no cache somando mais páginas. Os cursores dela saem junto.
   useEffect(() => {
     cliente.removeQueries({ queryKey: [chave[0]], type: 'inactive', predicate: (c) => c.queryHash !== hash })
-    const doPrefixo = guardadosDo(cliente, chave[0])
-    for (const outra of doPrefixo.keys()) if (outra !== hash) doPrefixo.delete(outra)
+    const { consultas } = doPrefixo(cliente, chave[0])
+    for (const outra of consultas.keys()) if (outra !== hash) consultas.delete(outra)
     // `chave` entra pelo hash.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [cliente, hash])
@@ -217,7 +216,7 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
   const recomecar = () => {
     g.cursores.splice(0, Infinity, '')
     g.tamanhos.length = 0
-    esquecerPosicao(cliente)
+    esquecerPosicao(cliente, chave[0])
     setVoltaInicial(0)
     cliente.removeQueries({ queryKey: chave, exact: true })
     setRecomecos((n) => n + 1)
@@ -228,11 +227,12 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [recomeca, cliente, hash])
 
+  const prefixo = chave[0]
   const chegouNaVolta = useCallback(() => {
-    esquecerPosicao(cliente)
+    esquecerPosicao(cliente, prefixo)
     // Redesenha com as opções novas: o `resetQueries` do envio usa o `initialPageParam` da última.
     setVoltaInicial(0)
-  }, [cliente])
+  }, [cliente, prefixo])
 
   const falhou = q.isError && !recomeca
   return {

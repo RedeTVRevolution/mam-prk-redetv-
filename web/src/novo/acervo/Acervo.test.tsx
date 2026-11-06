@@ -1,5 +1,5 @@
 import { onlineManager, QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -11,6 +11,7 @@ import { AtalhosProvider } from '../Atalhos.tsx'
 import { Casca } from '../Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from '../consultas.ts'
 import { Acervo } from './Acervo.tsx'
+import { usePaginas } from '../paginas.ts'
 import { lembrarPosicao } from './useAcervo.ts'
 
 interface JobApi {
@@ -429,6 +430,40 @@ test('o 422 do cursor da volta recomeça do topo, e rolar segue pedindo a págin
   expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null])
   rolar(2000)
   await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null, 'j49']))
+})
+
+test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, parecidos, volta, volta)', async () => {
+  jobs = Array.from({ length: 160 }, (_, i) => job({ id: `j${i}`, nome: `video-${i}.mp4`, estado: 'concluido' }))
+  const consultas = await abrir()
+  await screen.findByText('video-0.mp4')
+  const rolar = (px: number) => {
+    const rolagem = screen.getAllByText(/^video-\d+\.mp4$/)[0].closest('.overflow-y-auto') as HTMLElement
+    rolagem.scrollTop = px
+    fireEvent.scroll(rolagem)
+  }
+  rolar(2000)
+  await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toContain('j49'))
+  rolar(4500)
+  await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toContain('j99'))
+  const chave = consultas.getQueryCache().findAll({ queryKey: ['acervo'] })[0].queryHash
+  cleanup()
+  lembrarPosicao(consultas, chave, 120)
+
+  // Do vídeo para os parecidos, outra lista (da busca), e a volta ao vídeo: ela guarda a posição dela.
+  const parecidos = renderHook(
+    () => usePaginas({ chave: ['busca', 'parecidos'], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
+    { wrapper: ({ children }) => <QueryClientProvider client={consultas}>{children}</QueryClientProvider> },
+  )
+  await waitFor(() => expect(parecidos.result.current.quantidade).toBe(2))
+  lembrarPosicao(consultas, parecidos.result.current.chave, 1)
+  parecidos.unmount()
+
+  // De volta ao acervo, com o cache vencido: recomeça na página do vídeo 120 (o jsdom não rola até ela).
+  consultas.removeQueries({ queryKey: ['acervo'] })
+  chamadas.length = 0
+  await abrir({ consultas })
+  await waitFor(() => expect(chamadas.length).toBeGreaterThan(0))
+  expect(new URLSearchParams(chamadas[0]).get('cursor')).toBe('j99')
 })
 
 test('sem rede, o acervo mostra o esqueleto, não a lista vazia, e carrega quando a rede volta', async () => {
