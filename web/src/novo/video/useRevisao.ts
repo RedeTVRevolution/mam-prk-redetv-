@@ -42,7 +42,11 @@ export function useRevisao({
   const temParaDesfazer = !!historico && !!doEditor(historico)
 
   function alternar() {
-    if (!pode || !decupagemPronta) return
+    if (!pode) return
+    if (!decupagemPronta) {
+      mostrarAviso('Espere a decupagem carregar para revisar ou aprovar a revisão.')
+      return
+    }
     aoAlternar()
     if (revisando)
       cliente.aprovarRevisao().then(

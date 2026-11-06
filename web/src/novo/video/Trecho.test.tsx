@@ -438,3 +438,15 @@ test('com o detalhe de um item aberto, o primeiro Esc descarta o trecho e o segu
   await usuario.keyboard('{Escape}')
   expect(inspetor.queryByRole('region', { name: /^Detalhe:/ })).toBeNull()
 })
+
+test('E e o botão Revisar, com a decupagem ainda sem chegar, avisam em vez de não fazer nada', async () => {
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => new Promise(() => {})))
+  const usuario = userEvent.setup()
+  await abrirVideo({ permissoes: ['decupagem.editar'], esperarFaixas: false })
+  ;(document.activeElement as HTMLElement).blur()
+
+  await usuario.keyboard('e')
+
+  expect(await screen.findByText('Espere a decupagem carregar para revisar ou aprovar a revisão.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Revisar' })).toBeTruthy()
+})
