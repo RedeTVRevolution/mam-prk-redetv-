@@ -118,9 +118,9 @@ test('S aceita a sugestão em foco, ela some e a contagem diminui; a linha diz a
   expect(await screen.findByText('Vale para as 2 aparições de Leão Lobo neste vídeo.')).toBeTruthy()
 })
 
-test('N recusa a sugestão em foco', async () => {
+test('X recusa a sugestão em foco', async () => {
   const { usuario } = await catalogar()
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   await waitFor(() => expect(recusadas).toEqual(['s1']))
   await screen.findByRole('button', { name: /Sugestões \(1\)/ })
 })
@@ -136,7 +136,7 @@ test('↑ ↓ trocam a sugestão em foco e S aceita a escolhida', async () => {
 test('clicar numa sugestão a põe em foco para as teclas', async () => {
   const { usuario } = await catalogar()
   await usuario.click(screen.getByText('Acrescentar vestido vermelho?'))
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   await waitFor(() => expect(recusadas).toEqual(['s2']))
 })
 
@@ -257,7 +257,7 @@ test('a sugestão que já foi decidida avisa e sai da lista', async () => {
 test('uma falha da API diz o que fazer e dá o código para o suporte', async () => {
   servidor.use(http.post('/v1/jobs/j1/sugestoes/:id/recusar', () => new HttpResponse(null, { status: 500 })))
   const { usuario } = await catalogar()
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   const alerta = await screen.findByRole('alert')
   expect(alerta.textContent).toContain('Não foi possível recusar a sugestão. Tente de novo.')
   expect(alerta.textContent).toContain('Código para o suporte: http_500')
@@ -272,7 +272,7 @@ test('o foco segue a sugestão, não a posição, quando a lista vem de novo em 
   )
   const { usuario } = await catalogar()
   await usuario.click(screen.getByText('Acrescentar vestido vermelho?'))
-  await usuario.keyboard('n')
+  await usuario.keyboard('x')
   await screen.findByRole('alert')
   // A lista veio de novo invertida: a sugestão escolhida agora é a primeira.
   await waitFor(() =>

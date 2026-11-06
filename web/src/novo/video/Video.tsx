@@ -861,8 +861,7 @@ export function Video({
             tecla: 'N',
             acao: 'Ir ao momento seguinte da busca, também no vídeo seguinte do resultado',
             grupo: GRUPO_DA_BUSCA,
-            // Na revisão com sugestões abertas, o N é do "recusar".
-            casa: (e: KeyboardEvent) => tecla(e, 'n') && !e.shiftKey && !(revisao.revisando && (sugestoes.data?.length ?? 0) > 0),
+            casa: (e: KeyboardEvent) => tecla(e, 'n') && !e.shiftKey,
             executar: () => passarDeMomento(1),
           },
           {

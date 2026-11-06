@@ -38,7 +38,7 @@ function falhaAoDecidir(e: unknown, acao: 'aceitar' | 'recusar'): { mensagem: st
 
 /**
  * A seção "Sugestões (N)" do modo de revisão: cada uma é uma pergunta, o trecho e o contexto, e se resolve
- * com `S` (aceita), `N` (recusa) e `R` (outro nome, com autocompletar) ou pelos botões. Trata qualquer tipo
+ * com `S` (aceita), `X` (recusa) e `R` (outro nome, com autocompletar) ou pelos botões. Trata qualquer tipo
  * pelo formato da rota; só olha o tipo da correção proposta para escolher o catálogo do campo.
  *
  * O `N` é desta seção enquanto ela existe: o atalho de "próximo momento da busca" não pode casar com
@@ -103,7 +103,7 @@ export function Sugestoes({
 
   const atalhos: Atalho[] = [
     { tecla: 'S', acao: 'Sugestão em foco: aceitar', grupo: GRUPO, casa: (e) => teclaDe(e, 's'), executar: () => void decidir(emFoco, 'aceitar') },
-    { tecla: 'N', acao: 'Sugestão em foco: recusar', grupo: GRUPO, casa: (e) => teclaDe(e, 'n'), executar: () => void decidir(emFoco, 'recusar') },
+    { tecla: 'X', acao: 'Sugestão em foco: recusar', grupo: GRUPO, casa: (e) => teclaDe(e, 'x'), executar: () => void decidir(emFoco, 'recusar') },
     {
       tecla: 'R',
       acao: 'Sugestão em foco: outro nome',
@@ -215,7 +215,7 @@ export function Sugestoes({
                   <BotaoDeIcone rotulo="Aceitar" atalho="S" disabled={ocupada} onClick={() => void decidir(s, 'aceitar')}>
                     <IconCheck size={16} stroke={1.75} aria-hidden />
                   </BotaoDeIcone>
-                  <BotaoDeIcone rotulo="Recusar" atalho="N" disabled={ocupada} onClick={() => void decidir(s, 'recusar')}>
+                  <BotaoDeIcone rotulo="Recusar" atalho="X" disabled={ocupada} onClick={() => void decidir(s, 'recusar')}>
                     <IconX size={16} stroke={1.75} aria-hidden />
                   </BotaoDeIcone>
                   <BotaoDeIcone rotulo="Outro nome" atalho="R" onClick={() => pedirOutroNome(s)}>
