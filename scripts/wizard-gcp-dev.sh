@@ -293,7 +293,7 @@ PAPEIS_DA_TERRAFORM=(
   roles/iam.workloadIdentityPoolAdmin
   roles/cloudbuild.builds.editor
   roles/secretmanager.admin # apaga o segredo do SerpAPI que saiu do Terraform (#327); depois do publicar que o remove, o papel pode sair
-  roles/cloudscheduler.admin # agendamento diário da avaliação por rubrica (#255)
+  roles/cloudscheduler.admin # agendamento diário da purga da lixeira (#145)
   roles/bigquery.admin # dataset, tabelas e IAM no dataset do BigQuery (#260, #279, #280, #285)
   roles/cloudkms.admin # key ring, chave MAC do hash das chaves de API e IAM na chave (#272)
   roles/pubsub.admin # tópicos, assinaturas e fila de mensagens mortas (#273, #279)

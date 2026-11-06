@@ -542,21 +542,6 @@ moved {
 }
 
 moved {
-  from = google_cloud_run_v2_job.avaliacao
-  to   = module.mam.google_cloud_run_v2_job.avaliacao
-}
-
-moved {
-  from = google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao
-  to   = module.mam.google_cloud_run_v2_job_iam_member.agendador_roda_avaliacao
-}
-
-moved {
-  from = google_cloud_scheduler_job.avaliacao
-  to   = module.mam.google_cloud_scheduler_job.avaliacao
-}
-
-moved {
   from = google_workflows_workflow.validacao
   to   = module.mam.google_workflows_workflow.validacao
 }
@@ -612,11 +597,6 @@ moved {
 }
 
 moved {
-  from = google_logging_metric.queda_da_avaliacao
-  to   = module.mam.google_logging_metric.queda_da_avaliacao
-}
-
-moved {
   from = google_logging_metric.desvio_de_programa
   to   = module.mam.google_logging_metric.desvio_de_programa
 }
@@ -634,11 +614,6 @@ moved {
 moved {
   from = google_monitoring_alert_policy.falhas_por_etapa
   to   = module.mam.google_monitoring_alert_policy.falhas_por_etapa
-}
-
-moved {
-  from = google_monitoring_alert_policy.queda_da_avaliacao
-  to   = module.mam.google_monitoring_alert_policy.queda_da_avaliacao
 }
 
 moved {

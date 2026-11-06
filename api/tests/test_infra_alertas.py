@@ -2,10 +2,8 @@
 
 import json
 import re
-from datetime import date
 from pathlib import Path
 
-from api.avaliacao import Queda, registro_da_queda
 from api.decupagem import Decupagem
 from api.sinais import (
     ContagemDaAnalise,
@@ -57,17 +55,6 @@ def test_o_filtro_de_cada_sinal_casa_o_evento_que_o_codigo_loga() -> None:
     assert 'jsonPayload.evento=\\"video_concluido\\"' in TF
     assert "falha_de_etapa" in registro_da_falha_de_etapa("analise", "j", "m")
     assert 'jsonPayload.evento=\\"falha_de_etapa\\"' in TF
-    queda = json.loads(
-        registro_da_queda(
-            Queda(requisito="r", media=1, motivo="queda_na_semana", limiar=2),
-            date(2026, 11, 1),
-            {},
-        )
-    )
-    assert queda["requisito"] == "r"
-    metrica = _bloco('resource "google_logging_metric" "queda_da_avaliacao"')
-    assert f'jsonPayload.evento=\\"{queda["evento"]}\\"' in metrica
-    assert "EXTRACT(jsonPayload.requisito)" in metrica
 
 
 def test_a_falha_por_etapa_vira_um_rotulo_da_metrica() -> None:
@@ -146,7 +133,7 @@ def test_o_job_de_indexacao_recebe_n_e_k_do_sinal_por_programa() -> None:
 def test_todo_alerta_de_metrica_restringe_o_resource_type() -> None:
     # A API recusa a condição de alerta sem resource.type no filtro (deploy de 2026-11-03).
     filtros = re.findall(r'filter\s+= "(metric\.type=.*)"', TF)
-    assert len(filtros) >= 5
+    assert len(filtros) >= 4
     for filtro in filtros:
         assert "resource.type=" in filtro, filtro
 

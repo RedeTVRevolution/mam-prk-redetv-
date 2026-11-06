@@ -30,13 +30,6 @@ def test_o_papel_de_predicao_so_tem_a_predicao() -> None:
     assert _permissoes("vertex_predicao") == ["aiplatform.endpoints.predict"]
 
 
-def test_o_papel_da_avaliacao_soma_so_o_evaluate_instances() -> None:
-    assert _permissoes("vertex_avaliacao") == [
-        "aiplatform.endpoints.predict",
-        "aiplatform.locations.evaluateInstances",
-    ]
-
-
 def test_cada_conta_da_vertex_tem_o_papel_certo() -> None:
     projeto = TF[TF.index("papeis_no_projeto = {") : TF.index("papeis_nos_buckets")]
     for conta in (
@@ -49,35 +42,26 @@ def test_cada_conta_da_vertex_tem_o_papel_certo() -> None:
         linha = re.search(rf"^\s+{conta}\s+= \[(.*)\]$", projeto, re.MULTILINE)
         assert linha, conta
         assert "local.papel_vertex_predicao" in linha.group(1), conta
-        assert "local.papel_vertex_avaliacao" not in linha.group(1), conta
-    avaliacao = re.search(r"^\s+avaliacao\s+= \[(.*)\]$", projeto, re.MULTILINE)
-    assert avaliacao
-    assert "local.papel_vertex_avaliacao" in avaliacao.group(1)
-    assert "local.papel_vertex_predicao" not in avaliacao.group(1)
 
 
-def test_as_concessoes_esperam_os_papeis_e_as_chaves_sao_conhecidas_no_plan() -> None:
-    for papel, id_do_papel in (
-        ("vertex_predicao", "mamVertexPredicao"),
-        ("vertex_avaliacao", "mamVertexAvaliacao"),
-    ):
-        assert re.search(
-            rf'^\s+id_do_papel_{papel}\s+= "{id_do_papel}"$', TF, re.MULTILINE
-        )
-        assert re.search(
-            rf'^\s+papel_{papel}\s+= "projects/\$\{{var\.projeto\}}/roles/'
-            rf'\$\{{local\.id_do_papel_{papel}\}}"$',
-            TF,
-            re.MULTILINE,
-        ), papel
-        recurso = _bloco(f'resource "google_project_iam_custom_role" "{papel}"')
-        assert f"role_id     = local.id_do_papel_{papel}\n" in recurso, papel
+def test_as_concessoes_esperam_o_papel_e_as_chaves_sao_conhecidas_no_plan() -> None:
+    assert re.search(
+        r'^\s+id_do_papel_vertex_predicao\s+= "mamVertexPredicao"$', TF, re.MULTILINE
+    )
+    assert re.search(
+        r'^\s+papel_vertex_predicao\s+= "projects/\$\{var\.projeto\}/roles/'
+        r'\$\{local\.id_do_papel_vertex_predicao\}"$',
+        TF,
+        re.MULTILINE,
+    )
+    recurso = _bloco('resource "google_project_iam_custom_role" "vertex_predicao"')
+    assert "role_id     = local.id_do_papel_vertex_predicao\n" in recurso
     bloco = _bloco('resource "google_project_iam_member" "mam"')
     assert "google_project_iam_custom_role.vertex_predicao" in bloco
-    assert "google_project_iam_custom_role.vertex_avaliacao" in bloco
+    assert "vertex_avaliacao" not in TF
 
 
 def test_a_adr_descreve_o_papel_sob_medida() -> None:
     adr = ADR.read_text()
-    assert "mamVertexPredicao" in adr and "mamVertexAvaliacao" in adr
+    assert "mamVertexPredicao" in adr and "mamVertexAvaliacao" not in adr
     assert "Antes da produção, essas contas passam" not in adr
