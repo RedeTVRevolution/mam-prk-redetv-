@@ -34,7 +34,7 @@ export function TelaDoVideo({
 }) {
   const api = useApi()
   const consultas = useQueryClient()
-  // Aberto com as etapas depois da análise rodando, a tela já acompanha até o fim.
+  // Aberto com a análise ou as etapas depois dela rodando, a tela já acompanha até o fim.
   const [acompanhando, setAcompanhando] = useState<boolean | null>(null)
   const [reprocessou, setReprocessou] = useState(false)
   const consulta = useQuery({
@@ -46,7 +46,7 @@ export function TelaDoVideo({
   })
   const job = consulta.data
 
-  if (job && acompanhando === null) setAcompanhando(finalizando(job))
+  if (job && acompanhando === null) setAcompanhando(emAndamento(job))
   const andando = job ? emAndamento(job) : false
   useEffect(() => {
     if (!acompanhando || andando) return

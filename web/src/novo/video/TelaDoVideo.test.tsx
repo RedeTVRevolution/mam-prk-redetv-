@@ -477,6 +477,17 @@ test('aberto com as etapas depois da análise rodando, acompanha até o fim e re
   expect(within(await menu()).getByRole('menuitem', { name: /Reprocessar…/ })).toBeTruthy()
 })
 
+test('aberto com a análise rodando, acompanha até o fim e mostra a decupagem', async () => {
+  let terminou = false
+  servidor.use(http.get('/v1/jobs/j1', () => HttpResponse.json(terminou ? JOB : { ...JOB, estado: 'analisando', etapa_atual: 'analise' })))
+  await abrirVideo({ acompanhamentoMs: 20, esperarFaixas: false })
+  expect(await screen.findByText(/Análise em andamento/)).toBeTruthy()
+  terminou = true
+
+  expect(await screen.findByRole('group', { name: /^Pautas \d+$/ })).toBeTruthy()
+  expect(screen.queryByText(/em andamento/)).toBeNull()
+})
+
 test('um Job preso há horas volta a oferecer "Reprocessar…", sem dizer que está em andamento', async () => {
   const haSeteHoras = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
   job = {
