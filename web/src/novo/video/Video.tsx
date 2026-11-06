@@ -14,6 +14,7 @@ import {
   IconPlayerPlay,
   IconRefresh,
   IconTrash,
+  IconX,
   IconVolume,
   IconVolumeOff,
 } from '@tabler/icons-react'
@@ -36,6 +37,7 @@ import {
   podeRemover,
 } from '../../catalogacao.ts'
 import type { ItemDoHistorico, Pauta, Sugestao } from '../../decupagem.ts'
+import { ABAS_DO_TRECHO } from '../../trecho.ts'
 import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from '../../pautas.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
 import { naInterfaceAtual } from '../../interface.ts'
@@ -57,6 +59,7 @@ import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import type { ResumoDaPassada } from '../../passadas.ts'
 import { Sugestoes } from './Sugestoes.tsx'
+import { FormularioDoTrecho } from './Trecho.tsx'
 import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
 import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './Correcao.tsx'
@@ -65,7 +68,7 @@ import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
 import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
-import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo } from './LinhaDoTempo.tsx'
+import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo, type TrechoMarcado } from './LinhaDoTempo.tsx'
 
 export interface Permissoes {
   editar: boolean
@@ -141,6 +144,11 @@ export function Video({
   // Juntar e dividir pautas: os ids marcados e o formulário aberto.
   const [pautasMarcadas, setPautasMarcadas] = useState<ReadonlySet<string>>(new Set())
   const [estrutura, setEstrutura] = useState<{ modo: 'juntar'; pautas: Pauta[] } | { modo: 'dividir'; pauta: Pauta; em_ms: number } | null>(null)
+
+  // O trecho marcado com I e O; `descrevendo` abre o campo único com o tipo em abas.
+  const [trecho, setTrecho] = useState<{ inicio_ms: number; fim_ms: number | null } | null>(null)
+  const [descrevendo, setDescrevendo] = useState(false)
+  const salvarDoTrecho = useRef<(() => void) | null>(null)
 
   const reproducao = useQuery({
     queryKey: chaveDoVideo(job.id, 'reproducao'),
@@ -232,6 +240,8 @@ export function Video({
       // Entrar ou sair do modo começa do zero: sem marcas nem formulário da revisão anterior.
       setPautasMarcadas(new Set())
       setEstrutura(null)
+      setTrecho(null)
+      setDescrevendo(false)
     },
   })
 
@@ -446,13 +456,73 @@ export function Video({
     return falha
   }
 
+  // ---------- trecho marcado (I, O, A) ----------
+
+  function descartarTrecho() {
+    setTrecho(null)
+    setDescrevendo(false)
+  }
+
+  /** `I`: a entrada do trecho no tempo atual; uma saída que ficaria antes dela sai, e o campo fecha. */
+  function marcarEntrada() {
+    if (!revisao.revisando) return
+    const agora = instante.ms()
+    const fim = trecho?.fim_ms != null && trecho.fim_ms >= agora ? trecho.fim_ms : null
+    if (trecho?.fim_ms != null && fim === null) {
+      setDescrevendo(false)
+      mostrarAviso('A entrada passou da saída: marque a saída de novo (O).')
+    }
+    setTrecho({ inicio_ms: agora, fim_ms: fim })
+  }
+
+  /** `O`: a saída do trecho no tempo atual, depois da entrada. */
+  function marcarSaida() {
+    if (!revisao.revisando) return
+    if (!trecho) {
+      mostrarAviso('Marque a entrada antes (I).')
+      return
+    }
+    const agora = instante.ms()
+    if (agora < trecho.inicio_ms) {
+      mostrarAviso('A saída fica depois da entrada: avance o vídeo e marque de novo (O).')
+      return
+    }
+    setTrecho({ inicio_ms: trecho.inicio_ms, fim_ms: agora })
+  }
+
+  /** `A`: abre o campo do trecho marcado (entrada e saída). */
+  function descreverTrecho() {
+    if (!revisao.revisando || !catalogoPronto) return
+    if (trecho?.fim_ms == null) {
+      mostrarAviso('Marque a entrada e a saída do trecho antes (I e O).')
+      return
+    }
+    fecharEdicao()
+    setEstrutura(null)
+    setInspetorAberto(true)
+    setDescrevendo(true)
+  }
+
+  /** Grava a correção do trecho; com ela gravada, o trecho some. */
+  async function gravarTrecho(pedidos: Pedido[], motivo: string): Promise<string | null> {
+    const falha = await gravar(pedidos, motivo)
+    if (!falha) descartarTrecho()
+    return falha
+  }
+
+  const moverBordaDoTrecho = (borda: Borda, ms: number) =>
+    setTrecho((t) => (t ? { ...t, [borda === 'inicio' ? 'inicio_ms' : 'fim_ms']: ms } : t))
+  const trechoDoFormulario = useMemo(() => ({ inicio_ms: trecho?.inicio_ms ?? 0, fim_ms: trecho?.fim_ms ?? 0 }), [trecho?.inicio_ms, trecho?.fim_ms])
+  const trechoNaLinha: TrechoMarcado | null =
+    revisao.revisando && trecho ? { ...trecho, aoMover: moverBordaDoTrecho, aoSalvar: () => salvarDoTrecho.current?.(), aoDescartar: descartarTrecho } : null
+
   // ---------- gaveta das correções ----------
 
   // O número do botão é o que a pessoa pode resolver: a fila e, para quem aprova, as pendentes.
   const aResolver = (fila.data?.length ?? 0) + (pode.aprovar ? (historico.data?.filter((h) => h.estado === 'pendente').length ?? 0) : 0)
 
   // Os formulários moram no inspetor: abrir um deles (F2, Del, juntar, dividir, renomear…) traz o inspetor de volta.
-  const comFormulario = !!(edicao || estrutura)
+  const comFormulario = !!(edicao || estrutura || descrevendo)
   const [tinhaFormulario, setTinhaFormulario] = useState(false)
   if (comFormulario !== tinhaFormulario) {
     setTinhaFormulario(comFormulario)
@@ -722,6 +792,22 @@ export function Video({
           },
         ]
       : []),
+    ...(revisao.revisando && d
+      ? [
+          { tecla: 'I', acao: 'Marcar a entrada do trecho no tempo atual', grupo: GRUPO_DA_CATALOGACAO, casa: (e: KeyboardEvent) => tecla(e, 'i'), executar: marcarEntrada },
+          { tecla: 'O', acao: 'Marcar a saída do trecho no tempo atual', grupo: GRUPO_DA_CATALOGACAO, casa: (e: KeyboardEvent) => tecla(e, 'o'), executar: marcarSaida },
+          { tecla: 'A', acao: 'Descrever o trecho marcado', grupo: GRUPO_DA_CATALOGACAO, casa: (e: KeyboardEvent) => tecla(e, 'a'), executar: descreverTrecho },
+          ...ABAS_DO_TRECHO.map((a) => ({ tecla: a.tecla, acao: `No campo do trecho: o tipo ${a.rotulo}`, grupo: GRUPO_DA_CATALOGACAO })),
+          { tecla: 'Shift + Enter', acao: 'Num campo de nome: criar o nome digitado no catálogo, a revisar', grupo: GRUPO_DA_CATALOGACAO },
+          {
+            tecla: 'Esc',
+            acao: 'Descartar o trecho marcado',
+            grupo: GRUPO_DA_CATALOGACAO,
+            casa: (e: KeyboardEvent) => e.key === 'Escape' && !gavetaAberta && trecho !== null && !descrevendo && !estrutura,
+            executar: descartarTrecho,
+          },
+        ]
+      : []),
     ...(d && catalogoPronto
       ? [
           {
@@ -838,6 +924,17 @@ export function Video({
               aoSaltar={(passo) => saltarPara((player.current?.currentTime ?? 0) + passo)}
               aoMudarVelocidade={mudarVelocidade}
               aoTelaCheia={telaCheia}
+              ferramentas={
+                revisao.revisando ? (
+                  <FerramentasDoTrecho
+                    completo={trecho?.fim_ms != null}
+                    aoMarcarEntrada={marcarEntrada}
+                    aoMarcarSaida={marcarSaida}
+                    aoDescrever={descreverTrecho}
+                    aoDescartar={descartarTrecho}
+                  />
+                ) : null
+              }
             />
           </div>
           {decupagem.isError && !(decupagem.error instanceof SessaoExpirada) && (
@@ -876,6 +973,7 @@ export function Video({
                 instante={instante}
                 selecionada={selecionada}
                 alcas={alcas}
+                trecho={trechoNaLinha}
                 aoSaltar={saltarParaMs}
                 aoSelecionar={(chave) => abrirItem(chave, true)}
               />
@@ -951,6 +1049,16 @@ export function Video({
                         Limpar marcas
                       </Button>
                     </div>
+                  ) : null}
+                  {catalogoPronto && d && descrevendo && trecho?.fim_ms != null ? (
+                    <FormularioDoTrecho
+                      trecho={trechoDoFormulario}
+                      catalogo={catalogoPronto}
+                      pessoas={d.pessoas}
+                      salvarRef={salvarDoTrecho}
+                      aoSalvar={gravarTrecho}
+                      aoCancelar={() => setDescrevendo(false)}
+                    />
                   ) : null}
                   {catalogoPronto && estrutura ? (
                     <div className="border-b border-border p-3">
@@ -1184,6 +1292,42 @@ function ControlesDaRevisao({ revisao }: { revisao: Revisao }) {
 
 // ---------- transporte ----------
 
+/** O trecho marcado com I e O: entrada e saída; com as duas, descrever (A) e descartar (Esc). */
+function FerramentasDoTrecho({
+  completo,
+  aoMarcarEntrada,
+  aoMarcarSaida,
+  aoDescrever,
+  aoDescartar,
+}: {
+  completo: boolean
+  aoMarcarEntrada: () => void
+  aoMarcarSaida: () => void
+  aoDescrever: () => void
+  aoDescartar: () => void
+}) {
+  return (
+    <div role="group" aria-label="Ferramentas do trecho" className="mr-1 flex shrink-0 items-center gap-1">
+      <BotaoComDica dica="I" variant="secondary" aria-label="Marcar entrada" onClick={aoMarcarEntrada}>
+        Entrada
+      </BotaoComDica>
+      <BotaoComDica dica="O" variant="secondary" aria-label="Marcar saída" onClick={aoMarcarSaida}>
+        Saída
+      </BotaoComDica>
+      {completo && (
+        <>
+          <BotaoComDica dica="A" aria-label="Descrever o trecho" onClick={aoDescrever}>
+            Descrever
+          </BotaoComDica>
+          <BotaoDeIcone rotulo="Descartar o trecho" atalho="Esc" onClick={aoDescartar}>
+            <IconX size={18} stroke={1.75} aria-hidden />
+          </BotaoDeIcone>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** O relógio do player, que se renderiza sozinho a cada segundo. */
 function Relogio({ instante, duracaoMs }: { instante: Instante; duracaoMs: number }) {
   const agora = useNoInstante(instante, relogio)
@@ -1206,6 +1350,7 @@ function Transporte({
   aoSaltar,
   aoMudarVelocidade,
   aoTelaCheia,
+  ferramentas,
 }: {
   job: Job
   instante: Instante
@@ -1218,6 +1363,8 @@ function Transporte({
   aoSaltar: (segundos: number) => void
   aoMudarVelocidade: (v: number) => void
   aoTelaCheia: () => void
+  /** O que só a revisão tem na barra: as ferramentas do trecho. */
+  ferramentas?: ReactNode
 }) {
   const fps = job.taxa_de_quadros ?? null
   const origem = job.timecode_origem ?? null
@@ -1303,6 +1450,7 @@ function Transporte({
         {copiado ?? ''}
       </span>
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        {ferramentas}
         <BotaoDeIcone rotulo="Copiar o link neste tempo" onClick={() => void copiar(link(), 'Link copiado')}>
           <IconLink size={18} stroke={1.75} aria-hidden />
         </BotaoDeIcone>
