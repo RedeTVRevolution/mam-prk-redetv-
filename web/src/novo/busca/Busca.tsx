@@ -205,11 +205,13 @@ function GradeDaBusca({
 
 const contagemDePlanos = (n: number) => (n === 1 ? '1 plano parecido' : `${n} planos parecidos`)
 function contagemDaGrade(busca: ReturnType<typeof useBusca>, deCenas: (n: number) => string): string {
-  if (busca.haMais) return `Mais de ${deCenas(busca.quantidade)}`
+  // A quantidade conta um lugar a mais enquanto houver a página seguinte (o que a pede).
+  const n = busca.quantidade - (busca.haMais ? 1 : 0)
+  if (busca.haMais) return `Mais de ${deCenas(n)}`
   // Com as páginas do alto fora da memória, os vídeos de lá não se contam mais.
-  if (!busca.primeiraNaMemoria) return deCenas(busca.quantidade)
+  if (!busca.primeiraNaMemoria) return deCenas(n)
   const videos = busca.paginas?.reduce((n, p) => n + p.videos.length, 0) ?? 0
-  return `${deCenas(busca.quantidade)} em ${contagemDeVideos(videos)}`
+  return `${deCenas(n)} em ${contagemDeVideos(videos)}`
 }
 
 /**
