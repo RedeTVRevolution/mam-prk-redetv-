@@ -1,8 +1,10 @@
 import { IconX } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { type ClienteDoJob, codigoDoErro, SessaoExpirada } from '../../api.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import type { ComparacaoDaPassada, ItemMarcado, ResumoDaPassada } from '../../passadas.ts'
+import { Button } from '../ui/button.tsx'
 import { AvisoDeFalha, BotaoDeIcone } from './comum.tsx'
 import { chaveDoVideo } from './tipos.ts'
 
@@ -44,11 +46,15 @@ function marcaDoItem(i: ItemMarcado): string | null {
   return null
 }
 
+// Quantos itens de cada lado existem de uma vez: com milhares, a tela passaria de 3 mil elementos.
+const POR_VEZ = 30
+
 function Lado({ rotulo, itens, aoSaltar }: { rotulo: string; itens: ItemMarcado[]; aoSaltar: (ms: number) => void }) {
+  const [mostrados, setMostrados] = useState(POR_VEZ)
   if (itens.length === 0) return <p className="text-xs text-muted-foreground">Nada</p>
   return (
     <div className="grid gap-0.5">
-      {itens.map((i) => {
+      {itens.slice(0, mostrados).map((i) => {
         const marca = marcaDoItem(i)
         return (
           <button
@@ -68,6 +74,11 @@ function Lado({ rotulo, itens, aoSaltar }: { rotulo: string; itens: ItemMarcado[
           </button>
         )
       })}
+      {itens.length > mostrados && (
+        <Button type="button" size="sm" variant="secondary" className="justify-self-center" onClick={() => setMostrados(mostrados + POR_VEZ)}>
+          {`Mostrar mais ${Math.min(POR_VEZ, itens.length - mostrados)}`}
+        </Button>
+      )}
     </div>
   )
 }

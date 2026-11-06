@@ -147,3 +147,28 @@ test('o F2 com a gaveta aberta traz o formulário de volta ao inspetor', async (
   expect(await screen.findByRole('form', { name: 'Corrigir Eleição' })).toBeTruthy()
   expect(screen.queryByRole('complementary', { name: 'Correções do vídeo' })).toBeNull()
 })
+
+test('um histórico longo mostra 100 correções por vez, e "Mostrar mais" acrescenta o resto', async () => {
+  historico = Array.from({ length: 130 }, (_, i) => ({ ...correcaoDoHistorico(`c${i}`, 'bia@redetv.com.br'), depois_legivel: `Pessoa ${i}` }))
+  const { usuario } = await abrir()
+
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await gaveta().findAllByRole('button', { name: /^Saltar ao item/ })
+  expect(gaveta().getAllByRole('button', { name: /^Saltar ao item/ })).toHaveLength(100)
+
+  await usuario.click(gaveta().getByRole('button', { name: 'Mostrar mais 30' }))
+
+  expect(gaveta().getAllByRole('button', { name: /^Saltar ao item/ })).toHaveLength(130)
+  expect(gaveta().queryByRole('button', { name: /^Mostrar mais/ })).toBeNull()
+})
+
+test('a seta para baixo além das 100 primeiras mostra a seguinte', async () => {
+  historico = Array.from({ length: 130 }, (_, i) => ({ ...correcaoDoHistorico(`c${i}`, 'bia@redetv.com.br'), depois_legivel: `Pessoa ${i}` }))
+  const { usuario } = await abrir()
+  await usuario.click(await screen.findByRole('button', { name: 'Histórico' }))
+  await gaveta().findAllByRole('button', { name: /^Saltar ao item/ })
+
+  for (let i = 0; i < 100; i++) await usuario.keyboard('{ArrowDown}')
+
+  expect(gaveta().getAllByRole('button', { name: /^Saltar ao item/ })).toHaveLength(101)
+})

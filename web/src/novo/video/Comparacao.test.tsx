@@ -187,3 +187,15 @@ test('a falha ao carregar a comparação mostra o código e "Tentar de novo"', a
 
   expect(await screen.findByRole('region', { name: 'Decupagem da passada' })).toBeTruthy()
 })
+
+test('uma lista longa mostra 30 itens por lado, e "Mostrar mais" acrescenta o resto', async () => {
+  const muitos = Array.from({ length: 40 }, (_, i) => item(`Item ${i}`, i * 20_000, 'igual'))
+  comparacao = () => HttpResponse.json({ ...COMPARACAO, requisitos: [{ nome: 'pautas', a: muitos, b: [] }] })
+  const { job } = await compararComPassada()
+
+  expect(within(job).getAllByRole('button', { name: /^Job: Item/ })).toHaveLength(30)
+  await userEvent.click(within(job).getByRole('button', { name: 'Mostrar mais 10' }))
+
+  expect(within(job).getAllByRole('button', { name: /^Job: Item/ })).toHaveLength(40)
+  expect(within(job).queryByRole('button', { name: /^Mostrar mais/ })).toBeNull()
+})

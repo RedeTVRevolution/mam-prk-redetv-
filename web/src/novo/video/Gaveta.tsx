@@ -20,6 +20,18 @@ const MOTIVO_DE_DESFAZER = 'correção desfeita pelo editor'
 const MOTIVO_DE_REAPLICAR = 'correção reaplicada pelo editor'
 const MOTIVO_DE_DESCARTAR = 'correção descartada pelo editor'
 
+// Quantas linhas das listas longas existem de uma vez: com centenas, o painel passaria de 3 mil elementos.
+const POR_VEZ = 100
+
+function MostrarMais({ total, mostrados, aoMostrar }: { total: number; mostrados: number; aoMostrar: () => void }) {
+  if (total <= mostrados) return null
+  return (
+    <Button type="button" size="sm" variant="secondary" className="justify-self-center" onClick={aoMostrar}>
+      {`Mostrar mais ${Math.min(POR_VEZ, total - mostrados)}`}
+    </Button>
+  )
+}
+
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
 const COR_DO_ESTADO: Record<ItemDoHistorico['estado'], string> = {
@@ -146,6 +158,7 @@ export function Gaveta({
 }) {
   const pendentes = historico.filter((h) => h.estado === 'pendente')
   const [selecionado, setSelecionado] = useState(0)
+  const [mostrados, setMostrados] = useState(POR_VEZ)
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [recusando, setRecusando] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -153,6 +166,8 @@ export function Gaveta({
   const lista = useRef<HTMLDivElement>(null)
   const rotulo = (tipo: string) => (catalogo ? rotuloDe(catalogo.tipos, tipo) : tipo)
   const indice = Math.min(selecionado, Math.max(historico.length - 1, 0))
+  // A linha selecionada (pelas setas) sempre existe, mesmo além do que "Mostrar mais" já abriu.
+  const doHistorico = Math.max(mostrados, indice + 1)
   const limiteDoMotivo = catalogo?.limites.motivo
 
   // A linha selecionada fica à vista ao mover a seleção.
@@ -285,7 +300,7 @@ export function Gaveta({
           )}
           <Tabs.Content value="historico" className="grid gap-2">
             {historico.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma correção ainda.</p>}
-            {historico.map((c, i) => (
+            {historico.slice(0, doHistorico).map((c, i) => (
               <div key={c.id} data-selecionada={i === indice} className={cn(CARTAO, i === indice && 'border-primary')}>
                 <button
                   type="button"
@@ -308,6 +323,7 @@ export function Gaveta({
                 )}
               </div>
             ))}
+            <MostrarMais total={historico.length} mostrados={doHistorico} aoMostrar={() => setMostrados(doHistorico + POR_VEZ)} />
           </Tabs.Content>
           <Tabs.Content value="fila" className="grid gap-2">
             {fila.length === 0 && <p className="text-sm text-muted-foreground">Nada na fila.</p>}
@@ -340,7 +356,7 @@ export function Gaveta({
           {podeAprovar && (
             <Tabs.Content value="aprovacao" className="grid gap-2">
               {pendentes.length === 0 && <p className="text-sm text-muted-foreground">Nada aguardando o Curador.</p>}
-              {pendentes.map((c) => (
+              {pendentes.slice(0, mostrados).map((c) => (
                 <div key={c.id} className={CARTAO}>
                   <CabecalhoDaCorrecao item={c} rotulo={rotulo(c.tipo)} />
                   <AntesEDepois item={c} />
@@ -361,6 +377,7 @@ export function Gaveta({
                   )}
                 </div>
               ))}
+              <MostrarMais total={pendentes.length} mostrados={mostrados} aoMostrar={() => setMostrados(mostrados + POR_VEZ)} />
             </Tabs.Content>
           )}
         </div>
