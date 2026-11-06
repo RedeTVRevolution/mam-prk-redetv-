@@ -36,10 +36,11 @@ import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { Aba, CABECALHO, CAMPO, CELULA, Carregando, Erro, Folga, LINHA_CLICAVEL, TABELA, TopoDaAba, Vazio } from './comum.tsx'
-import { useLinhasVirtuais, useListaPorCursor } from './listas.ts'
+import { useColunasVisiveis, useLinhasVirtuais, useListaPorCursor } from './listas.ts'
 
 const POR_PAGINA = 50
-const COLUNAS = 5
+// Em que ponto cada coluna aparece; `null`, sempre.
+const COLUNAS = [null, 'md', null, null, 'lg'] as const
 const ATALHOS: Atalho[] = [{ tecla: 'Enter', acao: 'Na tabela: mostrar ou esconder os detalhes da linha', grupo: 'Auditoria' }]
 
 /** O tipo do evento, pelo começo da ação: o ícone de 16 px e o nome na dica. */
@@ -111,6 +112,7 @@ export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) 
 
   const registros = lista.data?.pages.flatMap((p) => p.registros) ?? []
   const { tabela, itens, antes, depois, medir } = useLinhasVirtuais(registros.length, rolagem, (i) => registros[i]?.id ?? String(i))
+  const colunas = useColunasVisiveis(COLUNAS)
   const mudar = (parte: Partial<FiltrosDaAuditoria>) => irPara({ ...filtros, ...parte })
   const alternar = (id: string) => setAbertas((atuais) => (atuais.includes(id) ? atuais.filter((a) => a !== id) : [...atuais, id]))
   // Com a página seguinte em falha, a lista carregada continua na tela, com o erro embaixo.
@@ -171,7 +173,7 @@ export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) 
               <th className={cn(CABECALHO, 'hidden w-[18%] lg:table-cell')}>Motivo</th>
             </tr>
           </thead>
-          <Folga altura={antes} colunas={COLUNAS} />
+          <Folga altura={antes} colunas={colunas} />
           {itens.map((item) => {
             const r = registros[item.index]!
             const aberta = abertas.includes(r.id)
@@ -196,7 +198,7 @@ export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) 
                 </tr>
                 {aberta && (
                   <tr className="bg-card">
-                    <td colSpan={COLUNAS} className="border-b px-2 py-1">
+                    <td colSpan={colunas} className="border-b px-2 py-1">
                       <Detalhes registro={r} />
                     </td>
                   </tr>
@@ -204,7 +206,7 @@ export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) 
               </tbody>
             )
           })}
-          <Folga altura={depois} colunas={COLUNAS} />
+          <Folga altura={depois} colunas={colunas} />
         </table>
       )}
       {pronta && lista.isFetchNextPageError && (

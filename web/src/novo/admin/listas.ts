@@ -1,6 +1,6 @@
 import { useInfiniteQuery, type QueryKey } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 
 /** Páginas de 50 na memória, no máximo (ADR 0014): 300 linhas. */
 export const TETO_DE_PAGINAS = 6
@@ -61,4 +61,25 @@ export function useLinhasVirtuais(total: number, rolagem: RefObject<HTMLElement 
   const antes = itens.length ? itens[0]!.start - margem : 0
   const depois = itens.length ? virtual.getTotalSize() - (itens.at(-1)!.end - margem) : 0
   return { tabela, itens, antes, depois, medir: virtual.measureElement }
+}
+
+// Os pontos do Tailwind (sm, md, lg) em que uma coluna escondida no celular aparece.
+const PONTOS = ['sm', 'md', 'lg'] as const
+const CONSULTAS = ['(min-width: 40rem)', '(min-width: 48rem)', '(min-width: 64rem)']
+
+function assinarPontos(aviso: () => void) {
+  const consultas = CONSULTAS.map((c) => matchMedia(c))
+  for (const c of consultas) c.addEventListener('change', aviso)
+  return () => consultas.forEach((c) => c.removeEventListener('change', aviso))
+}
+
+const pontosAtingidos = () => CONSULTAS.filter((c) => matchMedia(c).matches).length
+
+/**
+ * Quantas colunas a tabela mostra agora; `null` é a coluna que aparece sempre. Um `colSpan` maior
+ * que isso cria colunas vazias que, na tabela fixa, dividem a largura com as de verdade.
+ */
+export function useColunasVisiveis(colunas: readonly ((typeof PONTOS)[number] | null)[]): number {
+  const nivel = useSyncExternalStore(assinarPontos, pontosAtingidos)
+  return colunas.filter((c) => c === null || PONTOS.indexOf(c) < nivel).length
 }

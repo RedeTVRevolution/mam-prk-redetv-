@@ -40,10 +40,11 @@ import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Folga, LINHA_CLICAVEL, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
-import { useLinhasVirtuais, useListaPorCursor } from './listas.ts'
+import { useColunasVisiveis, useLinhasVirtuais, useListaPorCursor } from './listas.ts'
 
 const ESTADOS = Object.keys(ESTADOS_DO_JOB) as EstadoDoJob[]
-const COLUNAS = 5
+// Em que ponto cada coluna aparece; `null`, sempre.
+const COLUNAS = ['sm', null, 'md', 'sm', null] as const
 const ATALHOS: Atalho[] = [{ tecla: 'Enter', acao: 'Na tabela: mostrar ou esconder as etapas da linha', grupo: 'Entradas' }]
 
 const ICONE_DO_ESTADO: Record<EstadoDoJob, { Icone: Icon; tom: 'ok' | 'andamento' | 'falha' | 'neutro' }> = {
@@ -358,6 +359,7 @@ export default function Entradas({
   const visiveis = jobs.filter((j) => casaComOsFiltrosDoCliente(j, filtros))
   const haMais = lista.hasNextPage && !passouDoPeriodo(jobs, filtros)
   const { tabela, itens, antes, depois, medir } = useLinhasVirtuais(visiveis.length, rolagem, (i) => visiveis[i]?.id ?? String(i))
+  const colunas = useColunasVisiveis(COLUNAS)
   const pronta = lista.data !== undefined
   const emAndamentoAgora = jobs.filter(emAndamento).length
 
@@ -450,7 +452,7 @@ export default function Entradas({
               </th>
             </tr>
           </thead>
-          <Folga altura={antes} colunas={COLUNAS} />
+          <Folga altura={antes} colunas={colunas} />
           {itens.map((item) => {
             const job = visiveis[item.index]!
             const aberta = abertas.includes(job.id)
@@ -511,14 +513,14 @@ export default function Entradas({
                 </tr>
                 {aberta && (
                   <tr className="bg-card">
-                    <td colSpan={COLUNAS} className="border-b px-2 py-2">
+                    <td colSpan={colunas} className="border-b px-2 py-2">
                       <EtapasDoJob job={job} agora={agora} />
                     </td>
                   </tr>
                 )}
                 {doPedido === 'falha' && partida && (
                   <tr>
-                    <td colSpan={COLUNAS} className="border-b px-2">
+                    <td colSpan={colunas} className="border-b px-2">
                       <ConfirmarReprocesso
                         job={job}
                         etapa={partida}
@@ -530,7 +532,7 @@ export default function Entradas({
                 )}
                 {doPedido === 'etapa' && (
                   <tr>
-                    <td colSpan={COLUNAS} className="border-b px-2">
+                    <td colSpan={colunas} className="border-b px-2">
                       <ReprocessarEtapa job={job} aoCancelar={() => setPedido(null)} aoReprocessar={trocarJob} />
                     </td>
                   </tr>
@@ -538,7 +540,7 @@ export default function Entradas({
               </tbody>
             )
           })}
-          <Folga altura={depois} colunas={COLUNAS} />
+          <Folga altura={depois} colunas={colunas} />
         </table>
       )}
       {pronta && haMais && (
