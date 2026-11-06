@@ -639,7 +639,9 @@ export const ROTULO_NA_BUSCA: Record<EstadoNaBusca, string> = {
 export const aindaIndexando = (historico: ItemDoHistorico[]): boolean =>
   historico.some((h) => (h.estado === 'ativa' || h.estado === 'aprovada') && h.na_busca === 'indexando')
 
-const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+// Um formatador só: `toLocaleString` cria um a cada chamada, e as marcas chamam a quantidade de aparições.
+const FORMATO = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'America/Sao_Paulo' })
+const quando = (iso: string) => FORMATO.format(new Date(iso))
 
 /** As marcas por chave de item: só valem as correções da decupagem aberta que ainda estão de pé. */
 export function marcasDosItens(
@@ -655,11 +657,17 @@ export function marcasDosItens(
   )
   const marcas: Record<string, Marca> = {}
   if (vivas.length === 0) return marcas
+  // Agrupadas uma vez só, na ordem do histórico: filtrar `vivas` a cada item custava O(itens × correções).
+  const porItem = new Map<string, ItemDoHistorico[]>()
+  for (const h of vivas) {
+    const chave = `${h.ancora.tipo_do_item}:${h.item_id}`
+    porItem.set(chave, [...(porItem.get(chave) ?? []), h])
+  }
   for (const item of itens) {
     const id = identidadeDoItem(d, item)
     if (!id) continue
-    const doItem = vivas.filter((h) => h.item_id === id.item_id && h.ancora.tipo_do_item === id.tipo_do_item)
-    if (doItem.length === 0) continue
+    const doItem = porItem.get(`${id.tipo_do_item}:${id.item_id}`)
+    if (!doItem) continue
     // O histórico vem da mais recente à mais antiga.
     const ultima = doItem.find((h) => h.estado === 'pendente') ?? doItem[0]
     marcas[item.chave] = {
