@@ -151,3 +151,29 @@ test('revogar pede confirmação na linha, atualiza a situação e mantém a cha
   expect(await within(await linhaDe('sistema-x')).findByText('Revogada em 03/11/2026')).toBeTruthy()
   expect(chamadas[0]?.caminho).toBe('/v1/admin/chaves/k1/revogar')
 })
+
+test('a lista que ainda vinha do servidor não desfaz a revogação feita no meio', async () => {
+  eu = { ...GESTOR, permissoes: [...GESTOR.permissoes, 'aprovacao.definir'] }
+  const usuario = userEvent.setup()
+  await abrir('/admin/chaves')
+  await linhaDe('sistema-x')
+  // Ao voltar à aba, o cache mostra a lista e um GET sai de novo; este fica preso até a revogação terminar.
+  let soltar: () => void = () => {}
+  const preso = new Promise<void>((r) => (soltar = r))
+  servidor.use(
+    http.get('/v1/admin/aprovacao', () => HttpResponse.json([])),
+    http.get('/v1/admin/chaves', async () => {
+      const antes = chaves()
+      await preso
+      return HttpResponse.json(antes)
+    }),
+  )
+  await usuario.click(screen.getByRole('link', { name: 'Regras de aprovação' }))
+  await usuario.click(await screen.findByRole('link', { name: 'Sistemas e chaves' }))
+  await usuario.click(within(await linhaDe('sistema-x')).getByRole('button', { name: 'Revogar a chave de sistema-x' }))
+  await usuario.click(screen.getByRole('button', { name: 'Confirmar revogação' }))
+  expect(await within(await linhaDe('sistema-x')).findByText('Revogada em 03/11/2026')).toBeTruthy()
+  soltar()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(within(await linhaDe('sistema-x')).getByText('Revogada em 03/11/2026')).toBeTruthy()
+})

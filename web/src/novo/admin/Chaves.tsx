@@ -9,7 +9,7 @@ import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
-import { useColunasVisiveis } from './listas.ts'
+import { gravarNaLista, useColunasVisiveis } from './listas.ts'
 
 // Em que ponto cada coluna aparece; `null`, sempre.
 const COLUNAS = [null, null, 'md', 'sm', null, null] as const
@@ -152,7 +152,7 @@ export default function Chaves() {
   const [aviso, setAviso] = useState<string | null>(null)
   const [falha, setFalha] = useState<Falha | null>(null)
   const chaves = carga.data ?? []
-  const gravar = (mudar: (atuais: ChaveDaLista[]) => ChaveDaLista[]) => consultas.setQueryData<ChaveDaLista[]>(CHAVE, (atuais) => mudar(atuais ?? []))
+  const gravar = (mudar: (atuais: ChaveDaLista[]) => ChaveDaLista[]) => gravarNaLista(consultas, CHAVE, mudar)
 
   async function revogar(chave: ChaveDaLista) {
     setRevogando(null)
@@ -160,7 +160,7 @@ export default function Chaves() {
     setFalha(null)
     try {
       const nova = await api.chaves.revogar(chave.id)
-      gravar((atuais) => atuais.map((c) => (c.id === nova.id ? nova : c)))
+      await gravar((atuais) => atuais.map((c) => (c.id === nova.id ? nova : c)))
       setAviso(`A chave de ${chave.sistema} foi revogada.`)
     } catch (erro) {
       if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro, `Não foi possível revogar a chave de ${chave.sistema}. Tente de novo.`))
@@ -251,7 +251,7 @@ export default function Chaves() {
           aoFechar={() => setEmitindo(false)}
           aoEmitir={async (corpo) => {
             const { chave, ...registro } = await api.chaves.emitir(corpo)
-            gravar((atuais) => [registro, ...atuais])
+            await gravar((atuais) => [registro, ...atuais])
             setFalha(null)
             setAviso(null)
             return chave

@@ -102,6 +102,32 @@ test('se a rota falha, a chave fica como estava e a tela avisa', async () => {
   expect((screen.getByRole('switch', { name: 'Exigir aprovação para Renomear pessoa' }) as HTMLInputElement).checked).toBe(false)
 })
 
+test('a lista que ainda vinha do servidor não desfaz a regra mudada no meio', async () => {
+  eu = { ...ADMIN, permissoes: [...ADMIN.permissoes, 'chaves.gerir'] }
+  const usuario = userEvent.setup()
+  await abrir('/admin/aprovacao')
+  await screen.findByRole('switch', { name: 'Exigir aprovação para Renomear pessoa' })
+  // Ao voltar à aba, o cache mostra as regras e um GET sai de novo; este fica preso até a mudança terminar.
+  let soltar: () => void = () => {}
+  const preso = new Promise<void>((r) => (soltar = r))
+  servidor.use(
+    http.get('/v1/admin/chaves', () => HttpResponse.json([])),
+    http.get('/v1/admin/aprovacao', async () => {
+      const antes = regras()
+      await preso
+      return HttpResponse.json(antes)
+    }),
+  )
+  await usuario.click(screen.getByRole('link', { name: 'Sistemas e chaves' }))
+  await usuario.click(await screen.findByRole('link', { name: 'Regras de aprovação' }))
+  const chave = () => screen.getByRole('switch', { name: 'Exigir aprovação para Renomear pessoa' }) as HTMLInputElement
+  await usuario.click(await screen.findByRole('switch', { name: 'Exigir aprovação para Renomear pessoa' }))
+  await waitFor(() => expect(chave().checked).toBe(true))
+  soltar()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(chave().checked).toBe(true)
+})
+
 test('sem aprovacao.definir a aba não existe, mesmo para o Curador', async () => {
   eu = CURADOR
   await abrir('/admin/aprovacao')

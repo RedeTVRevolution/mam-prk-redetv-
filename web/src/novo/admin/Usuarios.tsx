@@ -11,7 +11,7 @@ import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Iniciais, TABELA, TopoDaAba, Vazio } from './comum.tsx'
-import { useColunasVisiveis } from './listas.ts'
+import { gravarNaLista, useColunasVisiveis } from './listas.ts'
 
 // Em que ponto cada coluna aparece; `null`, sempre.
 const COLUNAS = [null, null, 'lg', null, null] as const
@@ -165,7 +165,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
   const focoNaConfirmacao = useRef(false)
 
   const contas = carga.data ?? []
-  const mudarLista = (mudanca: (atuais: ContaDaLista[]) => ContaDaLista[]) => consultas.setQueryData<ContaDaLista[]>(CHAVE, (atuais) => mudanca(atuais ?? []))
+  const mudarLista = (mudanca: (atuais: ContaDaLista[]) => ContaDaLista[]) => gravarNaLista(consultas, CHAVE, mudanca)
   const trocar = (nova: ContaDaLista) => mudarLista((atuais) => atuais.map((c) => (c.uid === nova.uid ? nova : c)))
 
   /** Roda uma ação da linha: sucesso avisa, falha mostra a mensagem sem derrubar a tela. */
@@ -289,7 +289,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                           <DropdownMenuItem
                             onSelect={() =>
                               void agir(async () => {
-                                trocar(await api.usuarios.reativar(c.uid))
+                                await trocar(await api.usuarios.reativar(c.uid))
                                 return `${c.nome} foi reativada.`
                               })
                             }
@@ -335,7 +335,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                           onClick={() => {
                             setDesativando(null)
                             void agir(async () => {
-                              trocar(await api.usuarios.desativar(c.uid))
+                              await trocar(await api.usuarios.desativar(c.uid))
                               return `${c.nome} foi desativada e saiu do sistema.`
                             })
                           }}
@@ -359,7 +359,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
           aoFechar={() => setCriando(false)}
           aoSalvar={async (corpo) => {
             const nova = await api.usuarios.criar(corpo)
-            mudarLista((atuais) => [...atuais, nova])
+            await mudarLista((atuais) => [...atuais, nova])
             setCriando(false)
             setFalha(null)
             setAviso(`Conta criada. O link para definir a senha foi enviado para ${nova.email}.`)
@@ -373,7 +373,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
           propria={emEdicao.uid === eu.uid}
           aoFechar={() => setEditando(null)}
           aoSalvar={async (papeis) => {
-            trocar(await api.usuarios.trocarPapeis(emEdicao.uid, papeis))
+            await trocar(await api.usuarios.trocarPapeis(emEdicao.uid, papeis))
             setEditando(null)
             setFalha(null)
             setAviso(`Papéis de ${emEdicao.nome} atualizados.`)

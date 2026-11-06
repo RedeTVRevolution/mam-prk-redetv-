@@ -254,3 +254,30 @@ test('403 da API mostra a mensagem de permissão sem quebrar a tela', async () =
   expect(await screen.findByText('Você não tem permissão para isto.')).toBeTruthy()
   expect(screen.getByRole('table', { name: 'Usuários' })).toBeTruthy()
 })
+
+test('a lista que ainda vinha do servidor não desfaz a desativação feita no meio', async () => {
+  eu = { ...ADMIN, permissoes: [...ADMIN.permissoes, 'chaves.gerir'] }
+  const usuario = userEvent.setup()
+  await abrir('/admin/usuarios')
+  await linhaDe('Rui Prado')
+  // Ao voltar à aba, o cache mostra a lista e um GET sai de novo; este fica preso até a desativação terminar.
+  let soltar: () => void = () => {}
+  const preso = new Promise<void>((r) => (soltar = r))
+  servidor.use(
+    http.get('/v1/admin/chaves', () => HttpResponse.json([])),
+    http.get('/v1/admin/usuarios', async () => {
+      const antes = contas()
+      await preso
+      return HttpResponse.json(antes)
+    }),
+  )
+  await usuario.click(screen.getByRole('link', { name: 'Sistemas e chaves' }))
+  await usuario.click(await screen.findByRole('link', { name: 'Usuários' }))
+  await abrirMenu(usuario, 'Rui Prado')
+  await usuario.click(await screen.findByRole('menuitem', { name: 'Desativar' }))
+  await usuario.click(await screen.findByRole('button', { name: 'Confirmar desativação' }))
+  await within(await linhaDe('Rui Prado')).findByText('Desativada')
+  soltar()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(within(await linhaDe('Rui Prado')).getByText('Desativada')).toBeTruthy()
+})

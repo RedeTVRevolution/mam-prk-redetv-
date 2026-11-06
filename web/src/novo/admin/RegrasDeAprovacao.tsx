@@ -6,6 +6,7 @@ import { SessaoExpirada, codigoDoErro, type RegraDeAprovacao } from '../../api.t
 import { falhaDaAcao, type Falha } from '../../falhaDaAcao.ts'
 import { useApi } from '../consultas.ts'
 import { Aba, CABECALHO, CELULA, Carregando, Erro, TABELA, TopoDaAba, Vazio } from './comum.tsx'
+import { gravarNaLista } from './listas.ts'
 
 const CHAVE = ['admin', 'aprovacao']
 
@@ -26,7 +27,8 @@ export default function RegrasDeAprovacao() {
     setMudando(regra.tipo)
     setFalha(null)
     try {
-      consultas.setQueryData(CHAVE, await api.aprovacao.mudar(regra.tipo, exige))
+      const novas = await api.aprovacao.mudar(regra.tipo, exige)
+      await gravarNaLista(consultas, CHAVE, () => novas)
     } catch (erro) {
       if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro, `Não foi possível mudar a regra de ${regra.nome}. Tente de novo.`))
     } finally {

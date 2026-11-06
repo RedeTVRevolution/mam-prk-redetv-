@@ -10,7 +10,7 @@ import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Folga, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
-import { useColunasVisiveis, useLinhasVirtuais } from './listas.ts'
+import { gravarNaLista, useColunasVisiveis, useLinhasVirtuais } from './listas.ts'
 
 const CHAVE = ['admin', 'lixeira']
 const TUDO = ''
@@ -173,8 +173,8 @@ export default function Lixeira({ aoEntrarDeNovo }: { aoEntrarDeNovo: () => void
   const { tabela, itens: linhas, antes, depois, medir } = useLinhasVirtuais(visiveis.length, rolagem, (i) => (visiveis[i] ? chaveDo(visiveis[i]) : String(i)))
   const colunas = useColunasVisiveis(COLUNAS)
 
-  function tirarDaLista(item: ItemDaLixeira, frase: string) {
-    consultas.setQueryData<ItemDaLixeira[]>(CHAVE, (atuais) => (atuais ?? []).filter((i) => chaveDo(i) !== chaveDo(item)))
+  async function tirarDaLista(item: ItemDaLixeira, frase: string) {
+    await gravarNaLista<ItemDaLixeira[]>(consultas, CHAVE, (atuais) => atuais.filter((i) => chaveDo(i) !== chaveDo(item)))
     setAviso(frase)
   }
 
@@ -184,7 +184,7 @@ export default function Lixeira({ aoEntrarDeNovo }: { aoEntrarDeNovo: () => void
     setFalha(null)
     try {
       await api.lixeira.restaurar(item.tipo as TipoDeItem, item.id)
-      tirarDaLista(item, `${item.nome} voltou.`)
+      await tirarDaLista(item, `${item.nome} voltou.`)
     } catch (erro) {
       if (!(erro instanceof SessaoExpirada)) setFalha(falhaDaAcao(erro, `Não foi possível restaurar ${item.nome}. Tente de novo.`))
     }
@@ -304,7 +304,7 @@ export default function Lixeira({ aoEntrarDeNovo }: { aoEntrarDeNovo: () => void
           item={purgando}
           aoFechar={() => setPurgando(null)}
           aoPurgar={() => {
-            tirarDaLista(purgando, `${purgando.nome} saiu de vez da lixeira.`)
+            void tirarDaLista(purgando, `${purgando.nome} saiu de vez da lixeira.`)
             setPurgando(null)
           }}
           aoEntrarDeNovo={aoEntrarDeNovo}

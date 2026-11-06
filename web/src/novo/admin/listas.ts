@@ -1,6 +1,16 @@
-import { useInfiniteQuery, type QueryKey } from '@tanstack/react-query'
+import { useInfiniteQuery, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
+
+/**
+ * Põe no cache o que uma ação acabou de mudar. Antes, cancela o GET da lista que ainda está no ar:
+ * ele traria a lista de antes da ação e a desfaria na tela. Sem lista ainda, busca de novo.
+ */
+export async function gravarNaLista<T>(consultas: QueryClient, queryKey: QueryKey, mudar: (atual: T) => T) {
+  await consultas.cancelQueries({ queryKey, exact: true })
+  if (consultas.getQueryData(queryKey) === undefined) return consultas.invalidateQueries({ queryKey, exact: true })
+  consultas.setQueryData<T>(queryKey, (atual) => mudar(atual!))
+}
 
 /** Páginas de 50 na memória, no máximo (ADR 0014): 300 linhas. */
 export const TETO_DE_PAGINAS = 6

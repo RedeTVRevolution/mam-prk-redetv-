@@ -128,6 +128,34 @@ test('restaurar pede confirmação na própria linha', async () => {
   expect(screen.queryByRole('row', { name: /Sabrina/ })).toBeNull()
 })
 
+test('a lista que ainda vinha do servidor não devolve à tela o item restaurado no meio', async () => {
+  servidor.use(
+    http.get('/v1/eu', () => HttpResponse.json({ ...ADMIN, permissoes: [...ADMIN.permissoes, 'chaves.gerir'] })),
+    http.get('/v1/admin/chaves', () => HttpResponse.json([])),
+  )
+  const usuario = userEvent.setup()
+  await abrir()
+  await linhaDe('Sabrina')
+  // Ao voltar à aba, o cache mostra a lista e um GET sai de novo; este fica preso até a restauração terminar.
+  let soltar: () => void = () => {}
+  const preso = new Promise<void>((r) => (soltar = r))
+  servidor.use(
+    http.get('/v1/admin/lixeira', async () => {
+      const antes = itens()
+      await preso
+      return HttpResponse.json(antes)
+    }),
+  )
+  await usuario.click(screen.getByRole('link', { name: 'Sistemas e chaves' }))
+  await usuario.click(await screen.findByRole('link', { name: 'Lixeira' }))
+  await usuario.click(within(await linhaDe('Sabrina')).getByRole('button', { name: /^Restaurar/ }))
+  await usuario.click(await screen.findByRole('button', { name: 'Confirmar restauração' }))
+  expect(await screen.findByText(/Sabrina S\. voltou/)).toBeTruthy()
+  soltar()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(screen.queryByRole('row', { name: /Sabrina/ })).toBeNull()
+})
+
 test('Purgar só habilita com o nome exato e mostra o impacto', async () => {
   const usuario = userEvent.setup()
   await abrir()
