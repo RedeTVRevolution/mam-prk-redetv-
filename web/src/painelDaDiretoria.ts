@@ -61,14 +61,38 @@ export function programaEUsuarioJuntos(f: FiltrosDoPainel): boolean {
  * A query de `GET /v1/painel/...`. Os acessos não têm programa: a API recusa o pedido com
  * `programa`, então a aba Acessos pede sem ele (`semPrograma`).
  */
-export function parametrosDoPainel(f: FiltrosDoPainel, opcoes: { csv?: boolean; semPrograma?: boolean } = {}): string {
+export function parametrosDoPainel(
+  f: FiltrosDoPainel,
+  opcoes: { csv?: boolean; semPrograma?: boolean; agrupar?: PedidoDeAgrupamento } = {},
+): string {
   const p = new URLSearchParams()
   if (f.programa && !opcoes.semPrograma) p.set('programa', f.programa)
   if (f.usuario) p.set('usuario', f.usuario)
   if (f.de) p.set('desde', f.de)
   if (f.ate) p.set('ate', f.ate)
   if (opcoes.csv) p.set('formato', 'csv')
+  if (opcoes.agrupar) p.set('agrupar', opcoes.agrupar)
   return p.toString()
+}
+
+/**
+ * O grupo dos gráficos no tempo (#428): com `agrupar`, o `por_dia` da resposta vem somado por
+ * grupo e o `dia` é o primeiro dia dele; o `auto` escolhe pelo tamanho do período (até ~90 pontos).
+ */
+export type Agrupamento = 'dia' | 'semana' | 'mes' | 'trimestre'
+export type PedidoDeAgrupamento = Agrupamento | 'auto'
+export type Agrupado<T> = T & { agrupamento: Agrupamento }
+
+/** Os Jobs em andamento num estado, lidos na hora (`GET /v1/painel/fila`, #420). */
+export interface EstadoNaFila {
+  estado: 'aguardando_upload' | 'validando' | 'analisando'
+  quantidade: number
+  /** Desde a criação do Job; 0 sem Job no estado. */
+  idade_do_mais_antigo_s: number
+}
+
+export interface FilaAgora {
+  por_estado: EstadoNaFila[]
 }
 
 /** Um item de `GET /v1/painel/filtros`: quem aparece no filtro de usuário. */
@@ -348,4 +372,18 @@ export function taxaLegivel(taxa: number | null): string {
 /** Minutos com uma casa e vírgula: "12,5". */
 export function minutosLegiveis(minutos: number): string {
   return minutos.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })
+}
+
+/** O nome do grupo depois de "por": "Logins por semana". */
+export const NOME_DO_GRUPO: Record<Agrupamento, string> = { dia: 'dia', semana: 'semana', mes: 'mês', trimestre: 'trimestre' }
+
+/** A coluna do grupo na tabela: o grupo é nomeado pelo primeiro dia dele. */
+export const COLUNA_DO_GRUPO: Record<Agrupamento, string> = { dia: 'Dia', semana: 'Semana de', mes: 'Mês', trimestre: 'Trimestre' }
+
+/** O grupo que começa em `inicio` (`AAAA-MM-DD`), na tabela ("02/11/2026", "11/2026", "4º tri. 2026") ou, curto, no eixo do gráfico. */
+export function rotuloDoGrupo(inicio: string, grupo: Agrupamento, curto = false): string {
+  const [ano, mes, dia] = inicio.split('-')
+  if (grupo === 'mes') return curto ? `${mes}/${ano.slice(2)}` : `${mes}/${ano}`
+  if (grupo === 'trimestre') return `${Math.floor((Number(mes) - 1) / 3) + 1}º tri. ${curto ? ano.slice(2) : ano}`
+  return curto ? `${dia}/${mes}` : `${dia}/${mes}/${ano}`
 }
