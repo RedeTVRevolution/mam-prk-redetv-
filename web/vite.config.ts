@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config'
 process.env.TZ = 'America/Sao_Paulo'
 
 export default defineConfig({
-  // O Tailwind só age no CSS que o importa: o da interface nova (src/novo/index.css).
+  // O Tailwind age no CSS que o importa (src/novo/index.css).
   plugins: [react(), tailwindcss()],
   // O teste do mapa de falhas lê o `api/jobs.py`, fora da pasta do front: só a pasta da API é liberada, não a raiz.
   server: { fs: { allow: ['.', '../api'] } },

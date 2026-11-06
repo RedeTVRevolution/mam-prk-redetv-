@@ -16,6 +16,8 @@ O design vale pelo `docs/design/MAM_DESIGN_SYSTEM.md`. O plano das fases está e
 
 Cada interface traz o próprio CSS no próprio pedaço do build. Assim o reset do Tailwind nunca encontra o CSS do Mantine na mesma página. As URLs, a API, o login e o deploy não mudam. Na última fase a nova vira o padrão, e a atual e o Mantine são apagados.
 
+*Atualização de 6/11/2026 (fase 7, feita):* a escolha por `?interface=` deixou de existir. O `main.tsx` carrega só a interface nova, e a atual, o Mantine, a `/amostra` e os testes das telas antigas foram apagados.
+
 **Reaproveitar a camada de dados.** A interface nova usa o mesmo `api.ts`, o mesmo `auth/`, o mesmo `rotas.ts` (History API, com os mesmos endereços: um link já mandado continua abrindo) e os módulos de regra (`catalogacao.ts`, `pautas.ts`, `timecode.ts`, `linhaDoTempo.ts` e outros), com os testes deles. Só a camada de tela é nova, em `web/src/novo/`.
 
 **Memória e CPU.** São regras para toda tela nova:
