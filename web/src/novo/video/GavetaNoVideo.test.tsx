@@ -204,7 +204,8 @@ test('a seta para baixo além das 100 primeiras mostra a seguinte', async () => 
   for (let i = 0; i < 100; i++) await usuario.keyboard('{ArrowDown}')
 
   expect(gaveta().getAllByRole('button', { name: /^Saltar ao item/ })).toHaveLength(101)
-})
+  // 100 teclas pelo userEvent passam de 5 s no runner do CI.
+}, 20_000)
 
 test('uma decupagem nova (reprocessar) traz o histórico e a fila de novo; a mesma decupagem recarregada não', async () => {
   const consultas = criarClienteDeConsultas()
