@@ -4,9 +4,11 @@ import { useEffect } from 'react'
 import { abasPermitidas, type Aba } from '../../administracao.ts'
 import { ACERVO, enderecoDaAba, navegar, seguir } from '../../rotas.ts'
 import type { Usuario } from '../../sessao.ts'
+import { filtrosDaAuditoria } from '../../auditoria.ts'
+import Auditoria from './Auditoria.tsx'
 import Usuarios from './Usuarios.tsx'
 
-const ICONE: Record<Aba['aba'], Icon> = {
+const ICONE: Record<string, Icon> = {
   entradas: IconInbox,
   usuarios: IconUsers,
   chaves: IconKey,
@@ -17,9 +19,9 @@ const ICONE: Record<Aba['aba'], Icon> = {
 }
 
 function Conteudo({ aba, busca, usuario, aoEntrarDeNovo }: { aba: Aba['aba']; busca: string; usuario: Usuario; aoEntrarDeNovo: () => void }) {
-  void busca
   void aoEntrarDeNovo
   if (aba === 'usuarios') return <Usuarios eu={usuario} />
+  if (aba === 'auditoria') return <Auditoria filtros={filtrosDaAuditoria(busca)} />
   return null
 }
 
@@ -54,7 +56,7 @@ export default function Administracao({ aba, busca, usuario, aoEntrarDeNovo }: {
           <ul className="flex min-w-max gap-1">
             {permitidas.map((a) => {
               const ativa = a === atual
-              const Icone = ICONE[a.aba]
+              const Icone = ICONE[a.aba] ?? IconSettings
               const endereco = enderecoDaAba(a.aba)
               return (
                 <li key={a.aba}>
