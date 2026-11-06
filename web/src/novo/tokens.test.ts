@@ -61,7 +61,7 @@ test('os selos de estado passam no AA: a cor sobre ela mesma a 12%', () => {
   }
 })
 
-test('os sete tipos de ocorrência têm token, com os valores da interface atual', () => {
+test('os sete tipos de ocorrência têm token, com os valores da interface antiga', () => {
   expect(Object.keys(TOKEN_DO_TIPO).sort()).toEqual(
     ['aparicao', 'comercial', 'fala', 'mencao', 'objeto', 'pauta', 'texto_na_tela'].sort(),
   )
@@ -80,7 +80,7 @@ test('as sete cores se distinguem na visão comum e na deuteranopia', () => {
   expect(menorDistancia(cores, deuteranopia)).toBeGreaterThanOrEqual(0.1)
 })
 
-test('"Decupando" é âmbar, a cor de em andamento, a mesma da interface atual', () => {
+test('"Decupando" é âmbar, a cor de em andamento, a mesma da interface antiga', () => {
   expect(cor('andamento').toLowerCase()).toBe(CORES.andamento.toLowerCase())
   expect(matiz(cor('andamento'))).toBeGreaterThan(30)
   expect(matiz(cor('andamento'))).toBeLessThan(60)

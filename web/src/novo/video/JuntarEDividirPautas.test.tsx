@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vi
 import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, irPara, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
-// A paridade de juntar e dividir pautas com o JuntarEDividirPautas.test.tsx da interface atual.
+// A paridade de juntar e dividir pautas com o JuntarEDividirPautas.test.tsx da interface antiga.
 
 const pauta = (id: string, titulo: string, inicio_ms: number, fim_ms: number) => ({ id, titulo, resumo: 'Resumo', tom: 'informativo', inicio_ms, fim_ms })
 

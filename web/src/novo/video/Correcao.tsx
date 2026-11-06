@@ -8,7 +8,7 @@ import { type Intervalo, relogio } from '../../linhaDoTempo.ts'
 import { NomesDoCatalogo } from '../../nomesDoCatalogo.ts'
 import { Button } from '../ui/button.tsx'
 
-// A mesma regra do `FormularioDeCorrecao.tsx` da interface atual (o `Editor` do `catalogacao.ts`),
+// A mesma regra do `FormularioDeCorrecao.tsx` da interface antiga (o `Editor` do `catalogacao.ts`),
 // com os campos em Tailwind: Enter salva e Esc cancela, sem diálogo.
 
 export const CAMPO =

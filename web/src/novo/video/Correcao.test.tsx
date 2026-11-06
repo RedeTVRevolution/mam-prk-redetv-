@@ -7,7 +7,7 @@ import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
 // A paridade da correção com o Catalogacao.test.tsx, o Trecho.test.tsx (o campo de nome) e o
-// BuscaNoVisualizador.test.tsx (as marcas da correção) da interface atual. Sem o modo de
+// BuscaNoVisualizador.test.tsx (as marcas da correção) da interface antiga. Sem o modo de
 // catalogação (fase 5): quem tem decupagem.editar corrige pelo detalhe do item, com F2 e Del.
 
 const DECUPAGEM = {
@@ -23,7 +23,7 @@ const DECUPAGEM = {
       citada_no_texto: [],
     },
   ],
-  planos: [],
+  planos: [{ id: 'pl1', ambiente: 'estúdio', plano_limpo: false, inicio_ms: 5_000, fim_ms: 9_000 }],
   comerciais: [{ id: 'c1', marca: 'Marca X', tipo: 'intervalo', inicio_ms: 40_000, fim_ms: 50_000 }],
   transcricao: [{ id: 'f1', locutor: 'Ana', texto: 'Boa noite', inicio_ms: 0, fim_ms: 3_000 }],
   textos_na_tela: [],
@@ -238,6 +238,18 @@ test('pelo clique: resumo e tom da pauta', async () => {
     ['pauta.resumo', 'Debate na TV'],
     ['pauta.tom', 'polemico'],
   ])
+})
+
+test('pelo clique: descrição do plano e plano limpo', async () => {
+  const usuario = await abrirItem('Planos', /^estúdio/)
+  await usuario.click(detalhe().getByRole('button', { name: 'Corrigir' }))
+  const formulario = within(await screen.findByRole('form', { name: /Corrigir estúdio/ }))
+  await usuario.type(formulario.getByLabelText('Objetos (separados por vírgula)'), 'mesa, copo')
+  await usuario.click(formulario.getByRole('checkbox', { name: 'Plano limpo' }))
+  await usuario.click(formulario.getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(2))
+  expect(correcoes.map((c) => c.tipo)).toEqual(['plano.descricao', 'plano.limpo'])
 })
 
 test('pelo clique: tipo do comercial', async () => {

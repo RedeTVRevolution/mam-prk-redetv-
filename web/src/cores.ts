@@ -1,5 +1,5 @@
-// Os tokens da interface atual, sem o Mantine: as regras (jobs.ts, auditoria.ts, …) os usam,
-// e a interface nova importa as regras sem levar o Mantine junto (ADR 0014).
+// As cores que as regras (jobs.ts, auditoria.ts, …) devolvem por estado e por tipo. As da tela são
+// os tokens de `novo/index.css`.
 
 // Os tokens do docs/design/sistema-visual.md, que explica cada escolha. Nome de função,
 // nunca de tom: quem usa pede "texto secundário", não "cinza 2".
@@ -21,12 +21,6 @@ export const CORES = {
   // Só no logotipo.
   marca: '#E03131',
 } as const
-
-/** Trecho sem decupagem: listras, não uma transição de cor. */
-export const HACHURADO = `repeating-linear-gradient(135deg, ${CORES.borda} 0 2px, transparent 2px 6px)`
-
-/** A barra fixa do topo: no máximo 44 px. */
-export const ALTURA_DA_BARRA = 44
 
 // O selo usa a cor do estado como texto, sobre a mesma cor a 10% (variante light).
 export const ESTADOS_DO_JOB = {
@@ -77,8 +71,6 @@ export const CORES_DE_OBJETO = {
   // Sem uma cor só: o cinza do texto secundário.
   estampado: CORES.textoSecundario,
 } as const
-
-export type TipoDeOcorrencia = keyof typeof CORES_DE_OCORRENCIA
 
 function luminancia(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => {

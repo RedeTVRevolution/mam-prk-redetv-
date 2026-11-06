@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import type { Job } from '../../jobs.ts'
 import { abrirVideo, irPara, JOB, pauseMock, playMock, REPRODUCAO, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
-// A paridade do player com o Visualizador.test.tsx da interface atual.
+// A paridade do player com o Visualizador.test.tsx da interface antiga.
 
 const DECUPAGEM = {
   pautas: [
@@ -430,7 +430,7 @@ async function menu() {
 
 test('o menu leva a "Reprocessar…" só com a permissão e o vídeo concluído fora das etapas', async () => {
   await abrirVideo()
-  expect(within(await menu()).queryByRole('menuitem', { name: /Reprocessar/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Mais ações' })).toBeNull()
   cleanup()
 
   await abrirVideo({ permissoes: ['video.reprocessar_etapa'] })
@@ -439,7 +439,7 @@ test('o menu leva a "Reprocessar…" só com a permissão e o vídeo concluído 
 
   job = { etapa_atual: null, indexacao: { estado: 'pendente', em: AGORA } }
   await abrirVideo({ permissoes: ['video.reprocessar_etapa'] })
-  expect(within(await menu()).queryByRole('menuitem', { name: /Reprocessar/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Mais ações' })).toBeNull()
 })
 
 test('"Mandar para a lixeira…" só com lixeira.gerir e com o vídeo fora do processamento', async () => {
@@ -449,14 +449,12 @@ test('"Mandar para a lixeira…" só com lixeira.gerir e com o vídeo fora do pr
 
   job = { estado: 'analisando' }
   await abrirVideo({ permissoes: ['lixeira.gerir'], esperarFaixas: false })
-  expect(within(await menu()).queryByRole('menuitem', { name: /lixeira/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Mais ações' })).toBeNull()
 })
 
-test('o menu leva à interface atual, com o mesmo nome para quem edita', async () => {
+test('sem Reprocessar nem lixeira, não há menu "Mais ações"', async () => {
   await abrirVideo({ permissoes: ['decupagem.editar'] })
-  servidor.use(http.get('/v1/correcoes/catalogo', () => HttpResponse.json({})))
-  const link = within(await menu()).getByRole('menuitem', { name: 'Abrir na interface atual' })
-  expect(link.getAttribute('href')).toBe('/video/j1?interface=atual')
+  expect(screen.queryByRole('button', { name: 'Mais ações' })).toBeNull()
 })
 
 test('aberto com as etapas depois da análise rodando, acompanha até o fim e recarrega a decupagem', async () => {

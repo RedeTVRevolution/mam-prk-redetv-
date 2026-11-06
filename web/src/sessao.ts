@@ -20,10 +20,10 @@ export type Sessao =
   | { tipo: 'ativa'; usuario: Usuario }
 
 /**
- * A sessão das duas interfaces: confere o `GET /v1/eu`, leva `/` à tela inicial e trata o 401 de
- * qualquer tela num lugar só. `pausada` não confere nada (a `/amostra`, que abre sem login).
+ * A sessão: confere o `GET /v1/eu`, leva `/` à tela inicial e trata o 401 de qualquer tela num
+ * lugar só.
  */
-export function useSessao(autenticador: Autenticador, pausada = false) {
+export function useSessao(autenticador: Autenticador) {
   const [sessao, setSessao] = useState<Sessao>({ tipo: 'verificando' })
   // Muda a cada saída, para o login recomeçar do zero (inclusive após um 401 logo depois do TOTP).
   const [saidas, setSaidas] = useState(0)
@@ -69,11 +69,10 @@ export function useSessao(autenticador: Autenticador, pausada = false) {
   }, [api])
 
   useEffect(() => {
-    if (pausada) return
     // Sincroniza com o SDK de login, um sistema externo.
     // oxlint-disable-next-line react/set-state-in-effect
     void verificar()
-  }, [verificar, pausada])
+  }, [verificar])
 
   const reverificar = useCallback(() => {
     expirou.current = false

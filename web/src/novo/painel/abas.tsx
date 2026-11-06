@@ -26,7 +26,7 @@ import { useApi } from '../consultas.ts'
 import { chaveDeQuem, nomeDeQuem, nomeDoPrograma, numero, quantos, revisaoVazia, tempoMedio } from './formato.ts'
 import { GraficoOuTabela, Indicador, Indicadores, Ranking, Secao, SerieNoTempo, Tabela, type LinhaDaTabela } from './pecas.tsx'
 
-// O conteúdo de cada aba do painel: os mesmos números e tabelas da interface atual, com o gráfico
+// O conteúdo de cada aba do painel: os mesmos números e tabelas da interface antiga, com o gráfico
 // ao lado de cada tabela (séries no tempo em barra, quebras em ranking das 15 maiores).
 
 function Vazio({ texto }: { texto: string }) {

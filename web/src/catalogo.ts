@@ -1,5 +1,3 @@
-import { createContext, useContext } from 'react'
-
 export interface Opcao {
   valor: string
   rotulo: string
@@ -19,20 +17,9 @@ export interface CatalogoDeCorrecoes {
   prefixos: { acrescentado: string; nao_identificado: string }
 }
 
-export const ContextoDoCatalogo = createContext<CatalogoDeCorrecoes | null>(null)
-
-export function useCatalogo(): CatalogoDeCorrecoes {
-  const catalogo = useContext(ContextoDoCatalogo)
-  if (!catalogo) throw new Error('Sem catálogo de correções: falta o provedor')
-  return catalogo
-}
-
 /** O rótulo do valor; um valor fora da lista (Decupagem gravada antes dela) sai como veio. */
 export const rotuloDe = (opcoes: Opcao[], valor: string): string =>
   opcoes.find((o) => o.valor === valor)?.rotulo ?? valor
-
-export const comoSelect = (opcoes: Opcao[]) =>
-  opcoes.map((o) => ({ value: o.valor, label: o.rotulo }))
 
 /** As pessoas que a revisão cria não existem no JSON do modelo: só se desfazem. */
 export const pessoaDoModelo = (catalogo: CatalogoDeCorrecoes, p: { id: string }): boolean =>

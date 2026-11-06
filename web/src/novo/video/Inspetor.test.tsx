@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, expect, onTestFinished, test, vi } from
 import { type ItemDoPainel, itensPorTipo } from '../../painel.ts'
 import { abrirVideo, irPara, pauseMock, playMock, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
-// A paridade do inspetor com o Painel.test.tsx e o Miniaturas.test.tsx da interface atual.
+// A paridade do inspetor com o Painel.test.tsx e o Miniaturas.test.tsx da interface antiga.
 
 const DECUPAGEM = {
   pautas: [
@@ -114,7 +114,7 @@ async function abrirSecao(nome: string) {
 test('as seções trazem a contagem ao lado do nome, e Pessoas começa aberta', async () => {
   await abrirVideo()
 
-  for (const nome of ['Pessoas 2', 'Pautas 3', 'Objetos 2', 'Comerciais 1', 'Textos na tela 1', 'Menções 1', 'Falas 2']) {
+  for (const nome of ['Pessoas 2', 'Pautas 3', 'Planos 2', 'Objetos 2', 'Comerciais 1', 'Textos na tela 1', 'Menções 1', 'Falas 2']) {
     expect(secao(new RegExp(`^${nome}$`))).toBeTruthy()
   }
   expect(secao(/^Pessoas 2$/).getAttribute('aria-expanded')).toBe('true')
@@ -233,7 +233,11 @@ test('Ctrl+→ e Ctrl+← trocam de seção; o player não anda', async () => {
   await usuario.keyboard('{Control>}{ArrowRight}{/Control}')
   expect(secao(/^Pautas 3$/).getAttribute('aria-expanded')).toBe('true')
   await usuario.keyboard('{Control>}{ArrowRight}{/Control}')
+  expect(secao(/^Planos 2$/).getAttribute('aria-expanded')).toBe('true')
+  await usuario.keyboard('{Control>}{ArrowRight}{/Control}')
   expect(secao(/^Objetos 2$/).getAttribute('aria-expanded')).toBe('true')
+  await usuario.keyboard('{Control>}{ArrowLeft}{/Control}')
+  expect(secao(/^Planos 2$/).getAttribute('aria-expanded')).toBe('true')
   await usuario.keyboard('{Control>}{ArrowLeft}{/Control}')
   expect(secao(/^Pautas 3$/).getAttribute('aria-expanded')).toBe('true')
   expect(player.currentTime).toBe(20)

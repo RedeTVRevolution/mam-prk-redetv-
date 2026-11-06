@@ -7,7 +7,7 @@ import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { DECUPAGEM } from './curadoria-teste.ts'
 
 // A paridade de "Comparar com" (comparação de passadas, só leitura) com o ComparacaoDePassadas.test.tsx
-// da interface atual.
+// da interface antiga.
 
 const item = (identidade: string, inicio_ms: number, marca: string, motivos: string[] = [], detalhe: string | null = null) => ({
   identidade,

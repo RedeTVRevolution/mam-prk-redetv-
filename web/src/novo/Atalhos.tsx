@@ -4,7 +4,7 @@ import { Contexto, useRegistroDeAtalhos } from '../atalhos.ts'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog.tsx'
 import { Kbd } from './ui/kbd.tsx'
 
-/** O mesmo registro de atalhos da interface atual (`atalhos.ts`), com a lista no diálogo novo. */
+/** O registro de atalhos (`atalhos.ts`), com a lista no diálogo. */
 export function AtalhosProvider({ children }: { children: ReactNode }) {
   const { valor, aberto, setAberto, grupos } = useRegistroDeAtalhos()
   return (

@@ -71,7 +71,7 @@ const MARCAS_D: Destino = { endereco: MARCAS, rotulo: 'Marcas', Icone: IconBadge
 const PAINEL_D: Destino = { endereco: PAINEL, rotulo: 'Painel da diretoria', Icone: IconChartBar, letra: 'p', ativo: (r) => r.tipo === 'painel' }
 const ADMIN_D: Destino = { endereco: ADMIN, rotulo: 'Administração', Icone: IconSettings, letra: 'd', ativo: (r) => r.tipo === 'admin' }
 
-/** Os grupos do trilho, com os mesmos critérios da barra da interface atual (o front só esconde; quem barra é a API). */
+/** Os grupos do trilho, com os mesmos critérios da barra da interface antiga (o front só esconde; quem barra é a API). */
 function gruposDoTrilho(permissoes: string[]): Destino[][] {
   return [
     [ACERVO_D, BUSCA_D],

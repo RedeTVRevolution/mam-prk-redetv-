@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vi
 import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, irPara, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
-// A paridade do trecho marcado (I, O, A) com o Trecho.test.tsx da interface atual.
+// A paridade do trecho marcado (I, O, A) com o Trecho.test.tsx da interface antiga.
 
 const DECUPAGEM = {
   versao_decupagem: 'v1',

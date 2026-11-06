@@ -8,7 +8,7 @@ import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { correcaoDoHistorico, DECUPAGEM } from './curadoria-teste.ts'
 
 // A paridade do modo de catalogação (Revisar, Aprovar Revisão, Ctrl+Z e Desfazer) com o
-// Catalogacao.test.tsx da interface atual. Decisão da fase 5: corrigir (F2 e Del) segue valendo
+// Catalogacao.test.tsx da interface antiga. Decisão da fase 5: corrigir (F2 e Del) segue valendo
 // fora do modo, como na fase 2b; o modo guarda o que só a revisão faz.
 
 let desfeitas: { id: string; motivo: unknown }[] = []

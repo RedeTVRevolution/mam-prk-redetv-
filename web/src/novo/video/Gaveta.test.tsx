@@ -11,7 +11,7 @@ import { AtalhosProvider } from '../Atalhos.tsx'
 import { TooltipProvider } from '../ui/tooltip.tsx'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 
-// A paridade da gaveta (histórico, fila e aprovação) com o Gaveta.test.tsx da interface atual.
+// A paridade da gaveta (histórico, fila e aprovação) com o Gaveta.test.tsx da interface antiga.
 
 /** Os pedidos que a gaveta fez, pelo HTTP: caminho e corpo. */
 let pedidos: { caminho: string; corpo: unknown }[] = []

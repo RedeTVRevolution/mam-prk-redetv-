@@ -26,7 +26,7 @@ if [[ -n ${GCP_PROJECT_ID:-} ]]; then
 fi
 
 if grep -rnIE "$padrao" api web/src --exclude-dir=tests --exclude-dir=__pycache__ \
-  --exclude='*.test.*' --exclude=setup-testes.ts --exclude=render-teste.tsx; then
+  --exclude='*.test.*' --exclude=setup-testes.ts; then
   echo "Nome de recurso da nuvem escrito no código (acima): leia da configuração." >&2
   exit 1
 fi

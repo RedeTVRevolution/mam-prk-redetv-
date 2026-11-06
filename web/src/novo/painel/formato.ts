@@ -1,7 +1,7 @@
 import type { NumerosDeVideos, RelatorioDeRevisao } from '../../painelDaDiretoria.ts'
 import { duracaoLegivel } from '../../tempoDeTela.ts'
 
-// Os textos e formatos do painel da diretoria, os mesmos da interface atual (PainelDaDiretoria.tsx).
+// Os textos e formatos do painel da diretoria, os mesmos da interface antiga (PainelDaDiretoria.tsx).
 
 export const numero = (n: number) => n.toLocaleString('pt-BR')
 

@@ -170,29 +170,6 @@ const NOME_DA_CATEGORIA: Record<CategoriaDeObjeto, string> = {
 /** O nome da categoria como a tela mostra. */
 export const nomeDaCategoria = (c: CategoriaDeObjeto): string => NOME_DA_CATEGORIA[c] ?? c
 
-/** Os objetos de destaque mais alto (3) do inventário, na ordem em que estão. */
-export const inventarioDeDestaque = (inventario: ObjetoDoInventario[]): ObjetoDoInventario[] =>
-  inventario.filter((o) => o.destaque === 3)
-
-/** O inventário inteiro por categoria (ordem alfabética do nome mostrado), com o destaque maior primeiro. */
-export function inventarioPorCategoria(
-  inventario: ObjetoDoInventario[],
-): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoInventario[] }[] {
-  const grupos = new Map<CategoriaDeObjeto, ObjetoDoInventario[]>()
-  for (const o of inventario) {
-    const grupo = grupos.get(o.categoria)
-    if (grupo) grupo.push(o)
-    else grupos.set(o.categoria, [o])
-  }
-  return [...grupos]
-    .map(([categoria, objetos]) => ({
-      categoria,
-      nome: nomeDaCategoria(categoria),
-      objetos: [...objetos].sort((a, b) => b.destaque - a.destaque),
-    }))
-    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
-}
-
 const area = (c: CaixaDoQuadro): number => c.largura * c.altura
 
 /** A maior caixa do objeto, a que o player mostra. */

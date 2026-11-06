@@ -5,7 +5,7 @@ Decisão no ADR 0014 (5/11/2026). Origem: o protótipo `prototipos/redesenho`, o
 ## Como cada fase é feita
 
 - Um PR por fase, a partir da `main`, com o CI verde. Quem mescla é o Bruno.
-- A interface nova fica em `web/src/novo/` e é ligada com `?interface=nova`. A atual continua sendo o padrão até a fase 7.
+- A interface nova fica em `web/src/novo/` e é ligada com `?interface=nova`. A atual continua sendo o padrão até a fase 7 (feita: `?interface=` não existe mais).
 - Toda tela é testada em 1280, 1024 e 390 px. Toda lista longa tem a memória medida no build de produção, com a CPU 4× mais lenta. A meta é menos de 200 MB, menos de 3 mil elementos na página e nenhuma tarefa acima de 200 ms.
 - Todo código novo ou alterado passa por revisão independente antes do push.
 - Os testes da tela são vitest, com testing-library e msw, como os de hoje. A regra de cada tela antiga que já tem teste ganha o mesmo teste na nova.
@@ -50,6 +50,9 @@ Decisão no ADR 0014 (5/11/2026). Origem: o protótipo `prototipos/redesenho`, o
 - A interface nova vira o padrão.
 - A atual, o Mantine, a `/amostra` e os testes das telas antigas são apagados.
 - O `make verificar` e o `checar-nomes-da-nuvem.sh` passam a olhar só a nova.
+- Feito: o `main.tsx` carrega só a nova (`web/src/novo/`, sem `?interface=`); as telas da atual, os testes delas, a `/amostra`, o `interface.ts` e o `tema.ts` foram apagados (80 arquivos, uns 23 mil linhas); `@mantine/charts`, `@mantine/core` e `@mantine/hooks` saíram do `package.json`. Ficam, compartilhados, o `api.ts`, o `rotas.ts`, o `sessao.ts`, o `cacheDeImagens.ts` e os módulos de regra com os testes deles. O `checar-nomes-da-nuvem.sh` e o `make verificar-web` não mudaram de comando: como a atual saiu de `web/src/`, eles já olham só a nova.
+- Antes de apagar, o inventário de paridade achou três funções que só a atual tinha, e elas foram para a nova: o vídeo aberto pela busca (faixa Busca, N, Shift+N e Fechar busca), o botão "Planos parecidos com este" e a seção Planos do inspetor (por onde se corrige a descrição e o plano limpo).
+- Sugestão, não feita: mover `web/src/novo/` para `web/src/` (o nome `novo` ficou sem sentido). É um diff gigante sem ganho funcional; vale como PR à parte, só de `git mv`.
 
 ## Fora deste plano
 

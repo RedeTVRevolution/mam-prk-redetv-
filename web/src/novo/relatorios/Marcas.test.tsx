@@ -7,7 +7,7 @@ import { AutenticadorFalso, CODIGO_TOTP_FALSO } from "../../auth/falso.ts";
 import { filtrosDeMarcas } from "../../marcas.ts";
 import App from "../App.tsx";
 
-// Os casos de src/Marcas.test.tsx (interface atual) na interface nova, mais a paginação por
+// Os casos de src/Marcas.test.tsx (interface antiga) na interface nova, mais a paginação por
 // cursor e as inserções que só vêm quando a marca abre.
 
 const AMBEV = {

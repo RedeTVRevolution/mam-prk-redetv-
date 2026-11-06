@@ -13,7 +13,7 @@ type Etapa = Exclude<ResultadoDaSenha, { tipo: 'logado' }> | { tipo: 'senha' }
 
 const DIGITOS_DO_CODIGO = 6
 
-// As mesmas mensagens do Login.tsx da interface atual.
+// As mesmas mensagens do Login.tsx da interface antiga.
 function mensagemDeErro(falha: unknown) {
   return falha instanceof CredencialInvalida
     ? 'Credenciais inválidas. Confira os dados e tente de novo.'
