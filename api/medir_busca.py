@@ -7,6 +7,11 @@ Cada dimensão pede uma coleção própria (a dimensão dos vetores é fixa na c
 configuração (`BUSCA_DIMENSAO`) é usada como está; cada uma das outras, uma de cada vez,
 ganha a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` (o nome vem do `infra/modulos/mam/main.tf`) com
 os seus índices, apagada no fim com tudo o que tiver dentro, mesmo se a medição falhar.
+
+A medição herda `BUSCA_INDICES_LIGADOS`: com `false` (o dev) a coleção nasce sem índice e a
+latência é a do KNN, com o embedding da consulta calculado a cada busca; só com `true` mede o
+índice ANN. Nenhum dos dois casos diz nada sobre a qualidade do resultado: a comparação ANN
+contra KNN pede o índice no ar ao lado do KNN, como a de 5/11/2026 (ADR 0006).
 """
 
 import os
@@ -131,6 +136,7 @@ def main(argumentos: list[str]) -> int:
         finally:
             if temporaria:
                 apagar_colecao(alvo, transporte)
+    print("modo:", "índice ANN" if config.indices_ligados else "KNN, sem índice")
     print(tabela(medicoes))
     return 0 if all(m.so_o_objeto_da_sabrina and m.cor_filtra for m in medicoes) else 1
 
