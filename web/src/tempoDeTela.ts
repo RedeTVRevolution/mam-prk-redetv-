@@ -66,7 +66,6 @@ export interface FiltrosDoRelatorio {
   ate: string
 }
 
-export const SEM_FILTROS_DO_RELATORIO: FiltrosDoRelatorio = { programa: '', de: '', ate: '' }
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/
 

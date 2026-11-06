@@ -7,7 +7,7 @@ import { guardarResultado } from '../../resultadoDaBusca.ts'
 import { abrirVideo, irPara, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
 // A paridade do vídeo aberto pela busca (faixa "Busca", N, Shift+N e "Fechar busca") com o
-// BuscaNoVisualizador.test.tsx da interface atual. O vídeo da tela é o j1; o j2 é o seguinte do resultado.
+// BuscaNoVisualizador.test.tsx da interface antiga. O vídeo da tela é o j1; o j2 é o seguinte do resultado.
 
 const DECUPAGEM = {
   versao_decupagem: 'v1',

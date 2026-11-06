@@ -1,4 +1,4 @@
-// O jsdom não tem estas APIs, que o Mantine usa.
+// O jsdom não tem o `matchMedia`, que a interface (a barra lateral, por exemplo) consulta.
 window.matchMedia ??= (consulta: string) =>
   ({
     matches: false,
@@ -25,5 +25,5 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 }
 
-// O Select do Mantine rola até a opção ativa.
+// O jsdom não rola: as telas chamam `scrollIntoView` na linha ativa das listas.
 window.HTMLElement.prototype.scrollIntoView ??= () => {}

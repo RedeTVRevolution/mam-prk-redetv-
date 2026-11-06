@@ -161,15 +161,6 @@ test('quem só vê o painel começa nele', async () => {
   await waitFor(() => expect(location.pathname).toBe('/painel'))
 })
 
-test('a tela que não migrou leva à mesma URL na interface atual', async () => {
-  // Com relatórios e administração migrados, só a amostra do sistema visual sobra.
-  history.replaceState(null, '', '/amostra?x=1')
-  render(<App autenticador={await comSessao()} />)
-
-  const link = await screen.findByRole('link', { name: /Abrir na interface atual/ })
-  expect(link.getAttribute('href')).toBe('/amostra?x=1&interface=atual')
-})
-
 test('sair pelo menu da conta volta ao login e apaga a sessão', async () => {
   const usuario = userEvent.setup()
   const auth = await comSessao()

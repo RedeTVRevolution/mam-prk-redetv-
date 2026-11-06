@@ -7,7 +7,7 @@ import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { correcaoDoHistorico, DECUPAGEM as BASE } from './curadoria-teste.ts'
 
-// A paridade da seção Sugestões com o Sugestoes.test.tsx da interface atual.
+// A paridade da seção Sugestões com o Sugestoes.test.tsx da interface antiga.
 
 const DECUPAGEM = {
   ...BASE,

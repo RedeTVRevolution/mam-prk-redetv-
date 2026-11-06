@@ -5,7 +5,7 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import { type ClienteDoJob, criarClienteDaApi } from './api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from './auth/falso.ts'
-import { render } from './render-teste.tsx'
+import { render } from '@testing-library/react'
 import { useSessaoDeRevisao } from './useSessaoDeRevisao.ts'
 
 let eventos: string[] = []

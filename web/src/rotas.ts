@@ -25,7 +25,6 @@ export type Rota =
   | { tipo: 'marcas'; filtros: FiltrosDeMarcas }
   | { tipo: 'painel'; aba: AbaDoPainel; filtros: FiltrosDoPainel }
   | { tipo: 'admin'; aba: string | null; busca: string }
-  | { tipo: 'amostra' }
   | { tipo: 'nao_encontrada' }
 
 export const ACERVO = '/acervo'
@@ -117,7 +116,6 @@ export function lerRota(caminho: string, busca = ''): Rota {
     if (aba) return { tipo: 'painel', aba, filtros: filtrosDoPainel(busca) }
   }
   if (partes[0] === 'admin' && partes.length <= 2) return { tipo: 'admin', aba: partes[1] ?? null, busca }
-  if (partes.length === 1 && partes[0] === 'amostra') return { tipo: 'amostra' }
   if (partes.length === 2 && partes[0] === 'video') {
     try {
       return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca), busca: new URLSearchParams(busca).get('busca') || null }

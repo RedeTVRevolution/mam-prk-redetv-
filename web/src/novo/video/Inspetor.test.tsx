@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, expect, onTestFinished, test, vi } from
 import { type ItemDoPainel, itensPorTipo } from '../../painel.ts'
 import { abrirVideo, irPara, pauseMock, playMock, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
-// A paridade do inspetor com o Painel.test.tsx e o Miniaturas.test.tsx da interface atual.
+// A paridade do inspetor com o Painel.test.tsx e o Miniaturas.test.tsx da interface antiga.
 
 const DECUPAGEM = {
   pautas: [

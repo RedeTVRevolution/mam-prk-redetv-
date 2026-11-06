@@ -27,7 +27,6 @@ export interface FiltrosDoPainel {
   ate: string
 }
 
-export const SEM_FILTROS_DO_PAINEL: FiltrosDoPainel = { programa: '', usuario: '', de: '', ate: '' }
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/
 
@@ -136,18 +135,6 @@ export interface RelatorioDeAcessos {
   por_semana: AtivosNoPeriodo[]
   por_mes: AtivosNoPeriodo[]
   por_usuario: UsuarioDeAcessos[]
-}
-
-/** "03/11" para `2026-11-03`. */
-export function diaCurto(dia: string): string {
-  const [, mes, d] = dia.split('-')
-  return `${d}/${mes}`
-}
-
-/** "11/2026" para `2026-11-01`. */
-export function mesCurto(dia: string): string {
-  const [ano, mes] = dia.split('-')
-  return `${mes}/${ano}`
 }
 
 /** Os números de vídeos de um recorte. O tempo médio é o de processamento dos concluídos, vazio sem nenhum. */

@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vi
 import type { Job } from '../../jobs.ts'
 import { abrirVideo, irPara, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
-// A paridade do botão "Planos parecidos" com o ParecidosNoVisualizador.test.tsx da interface atual.
+// A paridade do botão "Planos parecidos" com o ParecidosNoVisualizador.test.tsx da interface antiga.
 // A grade que ele abre (/busca/parecidos) é testada em busca/Busca.test.tsx.
 
 const plano = (id: string, inicio_ms: number) => ({ id, ambiente: `ambiente ${id}`, plano_limpo: false, inicio_ms, fim_ms: inicio_ms + 5_000 })

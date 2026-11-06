@@ -5,7 +5,7 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { abrirVideo, irPara, medir, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
-// A paridade da linha do tempo com o Visualizador.test.tsx e o Painel.test.tsx da interface atual.
+// A paridade da linha do tempo com o Visualizador.test.tsx e o Painel.test.tsx da interface antiga.
 
 const DECUPAGEM = {
   pautas: [

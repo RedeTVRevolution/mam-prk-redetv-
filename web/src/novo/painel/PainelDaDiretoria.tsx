@@ -230,7 +230,7 @@ function Filtros({
   );
 }
 
-/** Troca de aba sem empilhar no histórico, como na interface atual; com modificador, abre noutra aba do navegador. */
+/** Troca de aba sem empilhar no histórico, como na interface antiga; com modificador, abre noutra aba do navegador. */
 function trocarDeAba(e: MouseEvent<HTMLAnchorElement>, destino: string) {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
     return;
@@ -240,7 +240,7 @@ function trocarDeAba(e: MouseEvent<HTMLAnchorElement>, destino: string) {
 
 /**
  * As setas, Home e End movem o foco entre as abas e já abrem a escolhida, como nas abas da
- * interface atual; só a aba ativa entra na ordem do Tab (tabindex móvel).
+ * interface antiga; só a aba ativa entra na ordem do Tab (tabindex móvel).
  */
 function moverComTeclado(e: KeyboardEvent<HTMLDivElement>) {
   const abas = [

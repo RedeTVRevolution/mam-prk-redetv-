@@ -3,7 +3,6 @@ import {
   IconArrowForwardUp,
   IconDots,
   IconDownload,
-  IconExternalLink,
   IconEye,
   IconFileDownload,
   IconHistory,
@@ -40,7 +39,6 @@ import type { ItemDoHistorico, Pauta, Sugestao } from '../../decupagem.ts'
 import { ABAS_DO_TRECHO } from '../../trecho.ts'
 import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from '../../pautas.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
-import { naInterfaceAtual } from '../../interface.ts'
 import { dataDeExibicao, finalizando, type Job } from '../../jobs.ts'
 import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relogio } from '../../linhaDoTempo.ts'
 import { ESTADOS_QUE_VAO_PARA_A_LIXEIRA } from '../../lixeira.ts'
@@ -55,7 +53,7 @@ import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Kbd } from '../ui/kbd.tsx'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { AvisoDeFalha, BotaoComDica, BotaoDeIcone } from './comum.tsx'
 import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
@@ -1370,41 +1368,36 @@ function BarraDoVideo({
               <TooltipContent collisionPadding={8}>Quem acessou</TooltipContent>
             </Tooltip>
           )}
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Mais ações"
-                    className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <IconDots size={18} stroke={1.75} aria-hidden />
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent collisionPadding={8}>Mais ações</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-64">
-              {podeReprocessar && (
-                <DropdownMenuItem onSelect={() => aoAbrirDialogo('reprocessar')}>
-                  <IconRefresh size={16} stroke={1.75} aria-hidden /> Reprocessar…
-                </DropdownMenuItem>
-              )}
-              {podeApagar && (
-                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => aoAbrirDialogo('lixeira')}>
-                  <IconTrash size={16} stroke={1.75} aria-hidden /> Mandar para a lixeira…
-                </DropdownMenuItem>
-              )}
-              {(podeReprocessar || podeApagar) && <DropdownMenuSeparator />}
-              <DropdownMenuItem asChild>
-                <a href={naInterfaceAtual()}>
-                  <IconExternalLink size={16} stroke={1.75} aria-hidden />
-                  Abrir na interface atual
-                </a>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {(podeReprocessar || podeApagar) && (
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Mais ações"
+                      className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <IconDots size={18} stroke={1.75} aria-hidden />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent collisionPadding={8}>Mais ações</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="w-64">
+                {podeReprocessar && (
+                  <DropdownMenuItem onSelect={() => aoAbrirDialogo('reprocessar')}>
+                    <IconRefresh size={16} stroke={1.75} aria-hidden /> Reprocessar…
+                  </DropdownMenuItem>
+                )}
+                {podeApagar && (
+                  <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => aoAbrirDialogo('lixeira')}>
+                    <IconTrash size={16} stroke={1.75} aria-hidden /> Mandar para a lixeira…
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
       {falha && (

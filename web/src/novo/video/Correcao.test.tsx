@@ -7,7 +7,7 @@ import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
 // A paridade da correção com o Catalogacao.test.tsx, o Trecho.test.tsx (o campo de nome) e o
-// BuscaNoVisualizador.test.tsx (as marcas da correção) da interface atual. Sem o modo de
+// BuscaNoVisualizador.test.tsx (as marcas da correção) da interface antiga. Sem o modo de
 // catalogação (fase 5): quem tem decupagem.editar corrige pelo detalhe do item, com F2 e Del.
 
 const DECUPAGEM = {

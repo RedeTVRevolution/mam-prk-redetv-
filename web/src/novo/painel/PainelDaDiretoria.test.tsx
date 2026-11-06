@@ -13,7 +13,7 @@ import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from "../../auth/falso.ts";
 import App from "../App.tsx";
 
-// Os mesmos casos de src/PainelDaDiretoria.test.tsx (interface atual), na interface nova; as
+// Os mesmos casos de src/PainelDaDiretoria.test.tsx (interface antiga), na interface nova; as
 // tabelas ficam atrás do "Tabela" de cada seção, e o gráfico vem primeiro.
 
 const RELATORIO = {

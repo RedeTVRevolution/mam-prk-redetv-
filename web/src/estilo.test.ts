@@ -1,5 +1,4 @@
 import { expect, test } from 'vitest'
-import { tema } from './tema.ts'
 
 // O que o docs/design/principios.md proíbe, procurado no código do front (fora dos testes).
 const fontes = import.meta.glob<string>(['./**/*.{ts,tsx,css}', '!./**/*.test.{ts,tsx}'], {
@@ -20,7 +19,7 @@ function desfoques(valor: string): number[] {
 }
 
 test('a varredura acha os arquivos do front', () => {
-  expect(arquivos.map((a) => a.nome)).toContain('./tema.ts')
+  expect(arquivos.map((a) => a.nome)).toContain('./main.tsx')
   expect(arquivos.map((a) => a.nome)).toContain('./novo/index.css')
 })
 
@@ -35,7 +34,7 @@ test.each(arquivos.map((a) => [a.nome, a.codigo]))('%s não tem sombra grande', 
   }
 })
 
-// O mesmo, nas classes do Tailwind da interface nova: gradiente (`bg-linear-to-r`), desfoque de
+// O mesmo, nas classes do Tailwind: gradiente (`bg-linear-to-r`), desfoque de
 // fundo e as sombras do Tailwind (de 3 a 50 px de desfoque). Fica a `shadow-float` do tema.
 test.each(arquivos.map((a) => [a.nome, a.codigo]))('%s não usa gradiente, vidro nem sombra grande do Tailwind', (_nome, codigo) => {
   expect(codigo).not.toMatch(/\bbg-(linear|radial|conic|gradient)-/)
@@ -46,12 +45,6 @@ test.each(arquivos.map((a) => [a.nome, a.codigo]))('%s não usa gradiente, vidro
   }
   for (const [, valor] of codigo.matchAll(/--shadow-[\w-]+:\s*([^;]+)/g)) {
     for (const d of desfoques(valor)) expect(d).toBeLessThanOrEqual(MAIOR_DESFOQUE_PX)
-  }
-})
-
-test('as sombras do tema são pequenas', () => {
-  for (const valor of Object.values(tema.shadows ?? {})) {
-    for (const d of desfoques(valor ?? '')) expect(d).toBeLessThanOrEqual(MAIOR_DESFOQUE_PX)
   }
 })
 

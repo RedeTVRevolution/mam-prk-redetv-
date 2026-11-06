@@ -7,7 +7,7 @@ import { AutenticadorFalso, CODIGO_TOTP_FALSO } from "../../auth/falso.ts";
 import { duracaoLegivel, filtrosDoRelatorio } from "../../tempoDeTela.ts";
 import App from "../App.tsx";
 
-// Os casos de src/TempoDeTela.test.tsx (interface atual) na interface nova, mais a paginação por
+// Os casos de src/TempoDeTela.test.tsx (interface antiga) na interface nova, mais a paginação por
 // cursor e o detalhe que só vem quando a linha abre.
 
 const video = (job_id: string, nome: string | null, tempo_de_tela_ms: number) => ({

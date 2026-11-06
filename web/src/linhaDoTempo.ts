@@ -1,5 +1,4 @@
 /** A linha do tempo da Decupagem sem React e sem DOM: tempos, faixas, alças e arrasto. */
-import type { MantineColor } from '@mantine/core'
 import { pessoaDoModelo, type CatalogoDeCorrecoes } from './catalogo.ts'
 import { CORES_DE_OCORRENCIA } from './cores.ts'
 import type { Decupagem, Objeto } from './decupagem.ts'
@@ -61,7 +60,7 @@ export interface Ocorrencia extends Intervalo {
 
 export interface Faixa {
   nome: string
-  cor: MantineColor
+  cor: string
   ocorrencias: Ocorrencia[]
 }
 

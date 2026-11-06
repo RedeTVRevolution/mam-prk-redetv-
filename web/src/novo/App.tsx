@@ -1,9 +1,8 @@
-import { IconAlertTriangle, IconExternalLink } from '@tabler/icons-react'
+import { IconAlertTriangle } from '@tabler/icons-react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { lazy, Suspense, useState } from 'react'
 import type { ClienteDaApi } from '../api.ts'
 import type { Autenticador } from '../auth/autenticador.ts'
-import { naInterfaceAtual } from '../interface.ts'
 import { ACERVO, seguir, useRota, type Rota } from '../rotas.ts'
 import { useSessao, type Usuario } from '../sessao.ts'
 import { AtalhosProvider } from './Atalhos.tsx'
@@ -21,7 +20,7 @@ const PainelDaDiretoria = lazy(() => import('./painel/PainelDaDiretoria.tsx'))
 const TempoDeTela = lazy(() => import('./relatorios/TempoDeTela.tsx'))
 const Marcas = lazy(() => import('./relatorios/Marcas.tsx'))
 
-/** O que a área de trabalho mostra. As telas que ainda não migraram levam à interface atual. */
+/** O que a área de trabalho mostra. */
 function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuario; aoSair: () => void }) {
   if (rota.tipo === 'raiz') return null
   // O login recente que a purga pede passa pela saída: a Lixeira guarda o pedido e o reabre na volta.
@@ -55,25 +54,10 @@ function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuari
       </Suspense>
     )
   }
-  if (rota.tipo === 'marcas') {
-    return (
-      <Suspense>
-        <Marcas filtros={rota.filtros} />
-      </Suspense>
-    )
-  }
-  return <AindaNaoMigrou />
-}
-
-function AindaNaoMigrou() {
   return (
-    <div className="m-auto grid max-w-md justify-items-center gap-2 p-8 text-center">
-      <p>Esta tela ainda não chegou à interface nova.</p>
-      {/* Um link de verdade: só a carga da página troca a interface. */}
-      <a href={naInterfaceAtual()} className="flex items-center gap-1 text-link hover:underline">
-        <IconExternalLink size={16} stroke={1.75} aria-hidden /> Abrir na interface atual
-      </a>
-    </div>
+    <Suspense>
+      <Marcas filtros={rota.filtros} />
+    </Suspense>
   )
 }
 
@@ -93,17 +77,8 @@ function SessaoAtiva({ api, usuario, rota, aoSair }: { api: ClienteDaApi; usuari
 
 function Telas({ autenticador }: { autenticador: Autenticador }) {
   const rota = useRota()
-  // A amostra do sistema visual é da interface atual e abre sem login.
-  const naAmostra = rota.tipo === 'amostra'
-  const { sessao, saidas, api, sair, reverificar } = useSessao(autenticador, naAmostra)
+  const { sessao, saidas, api, sair, reverificar } = useSessao(autenticador)
 
-  if (naAmostra) {
-    return (
-      <div className="flex min-h-dvh">
-        <AindaNaoMigrou />
-      </div>
-    )
-  }
   if (sessao.tipo === 'verificando') {
     return (
       <p role="status" className="grid min-h-dvh place-items-center text-muted-foreground">

@@ -9,7 +9,7 @@ import { criarClienteDeConsultas } from '../consultas.ts'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { DECUPAGEM as BASE } from './curadoria-teste.ts'
 
-// A paridade de "Fundir com…" com o FusaoDePessoa.test.tsx da interface atual.
+// A paridade de "Fundir com…" com o FusaoDePessoa.test.tsx da interface antiga.
 
 const DECUPAGEM = (nome: string, catalogoId: string) => ({ ...BASE, pessoas: [{ ...BASE.pessoas[0], nome, catalogo_id: catalogoId }] })
 

@@ -11,7 +11,7 @@ type Envio = { tipo: 'parado' } | { tipo: 'enviando'; fracao: number } | { tipo:
 
 /**
  * O envio: programa e data de exibição antes, o arquivo por último (ele inicia o envio). As
- * regras são as da interface atual: o MP4 é conferido antes de chamar a API, sem data não se
+ * regras são as da interface antiga: o MP4 é conferido antes de chamar a API, sem data não se
  * envia, e o Job já existe (`aoCriar`) enquanto o upload segue.
  */
 export function EnvioDeVideo({ aberto, aoMudar, aoCriar }: { aberto: boolean; aoMudar: (aberto: boolean) => void; aoCriar: () => void }) {
