@@ -167,6 +167,19 @@ test('depois da recusa de CORS, nem tenta o pedido cors até a espera passar', a
   expect(buscar).toHaveBeenCalledWith(original.url, { mode: 'cors', credentials: 'omit' })
 })
 
+test('a recusa anotada (ou a falta de rede) não esconde o que já está guardado', async () => {
+  const { dependencias, buscar } = montar(() => imagem(10))
+  await responderImagem(pedido(`${QUADRO}?${ASSINATURA}`), dependencias)
+  // Sem rede, um quadro que ainda não está no cache falha e anota a recusa.
+  buscar.mockRejectedValue(new TypeError('Failed to fetch'))
+  await expect(responderImagem(pedido(`${QUADRO}.outro?${ASSINATURA}`), dependencias)).rejects.toThrow()
+  buscar.mockClear()
+
+  const deNovo = await responderImagem(pedido(`${QUADRO}?${ASSINATURA.replace('abc123', 'nova')}`), dependencias)
+  expect(buscar).not.toHaveBeenCalled()
+  expect((await deNovo.arrayBuffer()).byteLength).toBe(10)
+})
+
 test('falha ao gravar (cota cheia) não impede a imagem', async () => {
   const { dependencias, cache } = montar(() => imagem(10))
   cache.put = async () => {

@@ -107,10 +107,11 @@ export async function responderImagem(
   dependencias: DependenciasDoCache,
 ): Promise<Response> {
   const { cache, buscar, agora } = dependencias
-  if (await recentes(cache, CHAVE_SEM_CORS, agora(), ESPERA_SEM_CORS_MS)) return buscar(pedido)
   const chave = chaveSemAssinatura(pedido.url)
   const guardada = await recentes(cache, chave, agora(), IDADE_MAXIMA_MS)
   if (guardada) return guardada
+  // A recusa anotada só pula o pedido cors: o que já está guardado segue valendo (sem rede, inclusive).
+  if (await recentes(cache, CHAVE_SEM_CORS, agora(), ESPERA_SEM_CORS_MS)) return buscar(pedido)
   await cache.delete(chave)
   let resposta: Response
   try {
