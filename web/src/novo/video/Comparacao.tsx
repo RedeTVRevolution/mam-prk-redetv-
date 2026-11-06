@@ -26,7 +26,7 @@ export function SeletorDePassada({ passadas, valor, aoEscolher }: { passadas: Re
       aria-label="Comparar com"
       value={valor ?? ''}
       onChange={(e) => aoEscolher(e.currentTarget.value || null)}
-      className="h-7 w-28 min-w-0 rounded-sm border border-strong bg-input px-1.5 text-xs text-foreground focus:border-primary sm:w-44"
+      className="h-7 w-28 min-w-0 rounded-sm border border-strong bg-input px-1.5 text-xs text-foreground focus:border-primary 2xl:w-44"
     >
       <option value="">Comparar com</option>
       {passadas.map((p) => (

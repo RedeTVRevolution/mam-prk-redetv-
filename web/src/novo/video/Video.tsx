@@ -1478,7 +1478,8 @@ function Transporte({
             aoMudarVolume(v)
             setVolume(v)
           }}
-          className="hidden w-20 accent-primary lg:block"
+          // Com as ferramentas do trecho na barra, o controle de volume só cabe em tela larga (o mudo fica).
+          className={cn('hidden w-20 accent-primary', ferramentas ? '2xl:block' : 'lg:block')}
         />
         <BotaoDeIcone rotulo="Tela cheia" atalho="F" onClick={aoTelaCheia}>
           <IconMaximize size={18} stroke={1.75} aria-hidden />
