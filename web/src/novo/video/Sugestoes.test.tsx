@@ -162,7 +162,7 @@ test('R, nome digitado e Enter aceitam; Esc cancela sem aceitar', async () => {
   await waitFor(() => expect(aceitas).toEqual([{ id: 's1', corpo: { valor: 'Ana' } }]))
 })
 
-test('os botões Aceitar e Recusar fazem o mesmo que S e N', async () => {
+test('os botões Aceitar e Recusar fazem o mesmo que S e X', async () => {
   const { usuario } = await catalogar()
   await usuario.click(within(screen.getByRole('group', { name: 'É Leão Lobo?' })).getByRole('button', { name: 'Aceitar' }))
   await waitFor(() => expect(aceitas.map((a) => a.id)).toEqual(['s1']))
@@ -208,9 +208,9 @@ test('a seção recolhe e abre', async () => {
   expect(screen.getByText('É Leão Lobo?')).toBeTruthy()
 })
 
-test('fora do modo de catalogação não há seção, e S, N e R não fazem nada', async () => {
+test('fora do modo de catalogação não há seção, e S, X e R não fazem nada', async () => {
   const { usuario } = await abrir()
-  await usuario.keyboard('snr')
+  await usuario.keyboard('sxr')
   expect(screen.queryByText('É Leão Lobo?')).toBeNull()
   expect(screen.queryByRole('button', { name: /Sugestões/ })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Aceitar' })).toBeNull()
@@ -227,7 +227,7 @@ test('sem sugestões a seção não aparece', async () => {
   expect(screen.queryByRole('button', { name: /Sugestões/ })).toBeNull()
 })
 
-test('S, N, R e as setas da seção aparecem na lista de atalhos', async () => {
+test('S, X, R e as setas da seção aparecem na lista de atalhos', async () => {
   const { usuario } = await catalogar()
   await usuario.keyboard('?')
   const grupo = within(within(await screen.findByRole('dialog')).getByRole('region', { name: 'Sugestões' }))

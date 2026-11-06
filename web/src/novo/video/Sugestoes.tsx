@@ -40,9 +40,6 @@ function falhaAoDecidir(e: unknown, acao: 'aceitar' | 'recusar'): { mensagem: st
  * A seção "Sugestões (N)" do modo de revisão: cada uma é uma pergunta, o trecho e o contexto, e se resolve
  * com `S` (aceita), `X` (recusa) e `R` (outro nome, com autocompletar) ou pelos botões. Trata qualquer tipo
  * pelo formato da rota; só olha o tipo da correção proposta para escolher o catálogo do campo.
- *
- * O `N` é desta seção enquanto ela existe: o atalho de "próximo momento da busca" não pode casar com
- * o modo de revisão ligado e com sugestões na lista.
  */
 export function Sugestoes({
   sugestoes,
