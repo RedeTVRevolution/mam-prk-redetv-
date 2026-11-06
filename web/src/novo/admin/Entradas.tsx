@@ -430,13 +430,6 @@ export default function Entradas({
               : 'Nenhum vídeo com esses filtros.'}
         </Vazio>
       )}
-      {pronta && lista.hasPreviousPage && (
-        <div className="flex justify-center">
-          <Button type="button" variant="secondary" size="sm" disabled={lista.isFetchingPreviousPage} onClick={() => void lista.fetchPreviousPage()}>
-            Carregar anteriores
-          </Button>
-        </div>
-      )}
       {pronta && visiveis.length > 0 && (
         <table ref={tabela} aria-label="Entradas" className={TABELA}>
           <thead>

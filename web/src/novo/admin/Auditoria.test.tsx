@@ -203,8 +203,9 @@ test('"Carregar mais" traz a página seguinte com o cursor', async () => {
   expect(screen.queryByRole('button', { name: 'Carregar mais' })).toBeNull()
 })
 
-test('a lista longa desenha só as linhas à vista e guarda no máximo 6 páginas, voltando com o cursor guardado', async () => {
+test('a lista longa desenha só as linhas à vista e guarda todas as páginas, também ao voltar à aba', async () => {
   const usuario = userEvent.setup()
+  servidor.use(http.get('/v1/eu', () => HttpResponse.json({ ...ADMIN, permissoes: [...ADMIN.permissoes, 'chaves.gerir'] })), http.get('/v1/admin/chaves', () => HttpResponse.json([])))
   lista = Array.from({ length: 400 }, (_, i) => ({ ...registros()[0]!, id: `r${i}`, alvo_nome: `video-${i}.mp4` }))
   await abrir()
   await linhaDe('video-0.mp4')
@@ -212,13 +213,16 @@ test('a lista longa desenha só as linhas à vista e guarda no máximo 6 página
     await usuario.click(screen.getByRole('button', { name: 'Carregar mais' }))
     await waitFor(() => expect(consultas).toHaveLength(n))
   }
-  // Sete páginas pedidas, seis na memória: a primeira saiu, e volta pelo botão de cima.
-  const tabela = await screen.findByRole('table', { name: 'Auditoria' })
-  await waitFor(() => expect(within(tabela).getAllByRole('row')[1]!.textContent).toContain('video-50.mp4'))
+  // Sete páginas pedidas, sete na memória: a lista é virtual, então o DOM continua pequeno.
+  let tabela = await screen.findByRole('table', { name: 'Auditoria' })
+  expect(within(tabela).getAllByRole('row')[1]!.textContent).toContain('video-0.mp4')
   expect(within(tabela).getAllByRole('row').length).toBeLessThan(100)
-  await usuario.click(screen.getByRole('button', { name: 'Carregar anteriores' }))
+  expect(screen.queryByRole('button', { name: 'Carregar anteriores' })).toBeNull()
+  // Sair e voltar com o cache vivo: o começo continua lá.
+  await usuario.click(screen.getByRole('link', { name: 'Sistemas e chaves' }))
+  await usuario.click(await screen.findByRole('link', { name: 'Auditoria' }))
+  tabela = await screen.findByRole('table', { name: 'Auditoria' })
   await waitFor(() => expect(within(tabela).getAllByRole('row')[1]!.textContent).toContain('video-0.mp4'))
-  expect(consultas.at(-1)!.get('cursor')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Carregar anteriores' })).toBeNull()
 })
 

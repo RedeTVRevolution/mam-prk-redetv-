@@ -101,7 +101,7 @@ function irPara(filtros: FiltrosDaAuditoria) {
   navegar(enderecoDaAuditoria(filtros), { substituir: true })
 }
 
-/** `/admin/auditoria`: o que a administração fez, só de leitura. Pagina por cursor, com teto na memória. */
+/** `/admin/auditoria`: o que a administração fez, só de leitura. Pagina por cursor; a tabela é virtual. */
 export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) {
   const api = useApi()
   const invertido = periodoInvertido(filtros)
@@ -154,13 +154,6 @@ export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) 
       )}
       {pronta && registros.length === 0 && (
         <Vazio Icone={IconHistory}>{haFiltroDaAuditoria(filtros) ? 'Nenhum registro com esses filtros.' : 'Nenhum registro ainda.'}</Vazio>
-      )}
-      {pronta && lista.hasPreviousPage && (
-        <div className="flex justify-center">
-          <Button type="button" variant="secondary" size="sm" disabled={lista.isFetchingPreviousPage} onClick={() => void lista.fetchPreviousPage()}>
-            Carregar anteriores
-          </Button>
-        </div>
       )}
       {pronta && registros.length > 0 && (
         <table ref={tabela} aria-label="Auditoria" className={TABELA}>

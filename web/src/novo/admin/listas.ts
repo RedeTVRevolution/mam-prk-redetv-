@@ -12,33 +12,19 @@ export async function gravarNaLista<T>(consultas: QueryClient, queryKey: QueryKe
   consultas.setQueryData<T>(queryKey, (atual) => mudar(atual!))
 }
 
-/** Páginas de 50 na memória, no máximo (ADR 0014): 300 linhas. */
-export const TETO_DE_PAGINAS = 6
-
 /**
- * Uma lista da API que pagina por cursor, com teto de páginas na memória. A página que sai pelo
- * começo volta com "Carregar anteriores": o navegador guarda, de cada cursor, o que veio antes dele
- * (a API só sabe ir para a frente). O cursor da primeira página é ''.
+ * Uma lista da API que pagina por cursor, só para a frente. Todas as páginas pedidas ficam na
+ * memória: a tabela é virtual, então o DOM fica pequeno, e a medição com 20 páginas cabe nas metas
+ * do ADR 0014. O cursor da primeira página é ''.
  */
-export function useListaPorCursor<P extends { proximo: string | null }>(
-  queryKey: QueryKey,
-  buscar: (cursor: string | null) => Promise<P>,
-  enabled = true,
-) {
-  const anteriores = useRef(new Map<string, string>())
-  const prefixo = JSON.stringify(queryKey)
+// ponytail: sem teto de páginas; se alguém carregar centenas de páginas e a memória pesar, portar o teto com cursores por QueryClient do novo/acervo/useAcervo.ts.
+export function useListaPorCursor<P extends { proximo: string | null }>(queryKey: QueryKey, buscar: (cursor: string | null) => Promise<P>, enabled = true) {
   return useInfiniteQuery({
     queryKey,
     enabled,
     initialPageParam: '',
     queryFn: ({ pageParam }) => buscar(pageParam || null),
-    getNextPageParam: (ultima, _todas, cursor) => {
-      if (!ultima.proximo) return undefined
-      anteriores.current.set(`${prefixo}|${ultima.proximo}`, cursor)
-      return ultima.proximo
-    },
-    getPreviousPageParam: (_primeira, _todas, cursor) => (cursor === '' ? undefined : anteriores.current.get(`${prefixo}|${cursor}`)),
-    maxPages: TETO_DE_PAGINAS,
+    getNextPageParam: (ultima) => ultima.proximo ?? undefined,
   })
 }
 
