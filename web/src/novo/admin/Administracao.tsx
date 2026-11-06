@@ -5,7 +5,9 @@ import { abasPermitidas, type Aba } from '../../administracao.ts'
 import { ACERVO, enderecoDaAba, navegar, seguir } from '../../rotas.ts'
 import type { Usuario } from '../../sessao.ts'
 import { filtrosDaAuditoria } from '../../auditoria.ts'
+import { filtrosDasEntradas } from '../../entradas.ts'
 import Auditoria from './Auditoria.tsx'
+import Entradas from './Entradas.tsx'
 import Usuarios from './Usuarios.tsx'
 
 const ICONE: Record<string, Icon> = {
@@ -20,6 +22,17 @@ const ICONE: Record<string, Icon> = {
 
 function Conteudo({ aba, busca, usuario, aoEntrarDeNovo }: { aba: Aba['aba']; busca: string; usuario: Usuario; aoEntrarDeNovo: () => void }) {
   void aoEntrarDeNovo
+  const pode = (p: string) => usuario.permissoes.includes(p)
+  if (aba === 'entradas') {
+    return (
+      <Entradas
+        filtros={filtrosDasEntradas(busca)}
+        podeReprocessar={pode('video.reprocessar')}
+        podeEscolherEtapa={pode('video.reprocessar_etapa')}
+        podeVerSistemas={pode('chaves.gerir')}
+      />
+    )
+  }
   if (aba === 'usuarios') return <Usuarios eu={usuario} />
   if (aba === 'auditoria') return <Auditoria filtros={filtrosDaAuditoria(busca)} />
   return null

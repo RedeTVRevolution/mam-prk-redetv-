@@ -80,6 +80,23 @@ export function Aviso({ children }: { children: ReactNode }) {
   )
 }
 
+const TOM = {
+  ok: 'bg-ok/12 text-ok',
+  andamento: 'bg-andamento/12 text-andamento',
+  falha: 'bg-destructive/12 text-destructive',
+  neutro: 'bg-input text-muted-foreground',
+} as const
+
+/** O selo de estado: ícone e palavra na cor do estado, sobre a mesma cor a 12%. */
+export function Selo({ tom, Icone, children }: { tom: keyof typeof TOM; Icone?: Icon; children: ReactNode }) {
+  return (
+    <span className={cn('inline-flex h-5 shrink-0 items-center gap-1 rounded-xs px-1.5 text-xs whitespace-nowrap', TOM[tom])}>
+      {Icone && <Icone size={12} stroke={2} aria-hidden />}
+      {children}
+    </span>
+  )
+}
+
 /** As iniciais do nome, para o círculo de 24 px. */
 function iniciais(nome: string): string {
   const partes = nome.trim().split(/[\s.@_-]+/).filter(Boolean)
