@@ -442,24 +442,12 @@ resource "google_project_service" "apis" {
 #   deploys seguidos falham no teste de GPU, o testar-jobs-gpu.sh volta os Jobs a um build que já
 #   saiu dos N últimos e, se ele tiver mais de 14 dias, sai do registro em até ~1 dia.
 # - Ensaio: com limpeza_so_ensaia, o Google só registra o que apagaria (BatchDeleteVersions com
-#   validateOnly no log Data Access, ligado abaixo). Antes de desligar o ensaio, proteger o build
+#   validateOnly no log Data Access, ligado no limpeza_de_imagens.tf). Antes de desligar o ensaio, proteger o build
 #   da volta (uma tag que um KEEP guarde) e conferir a contagem de um ciclo, que leva até ~1 dia.
 locals {
   versoes_guardadas_por_imagem = 3 * var.builds_de_imagem_guardados
   idade_minima_para_apagar     = "1209600s"
   limpeza_so_ensaia            = true
-}
-
-# O resultado do ensaio da limpeza só aparece no log Data Access (DATA_WRITE), que vem desligado.
-# Ele também registra os envios de imagem do CD (estimativa: alguns MB por mês, longe dos 50 GiB
-# grátis do Logging). Ele manda só no bloco de auditoria desse serviço (ADR 0002). Para desligar
-# depois do ensaio, tirar o recurso: o plano mostra um delete e pede PERMITIR_DESTRUICAO=sim.
-resource "google_project_iam_audit_config" "artifact_registry" {
-  project = var.projeto
-  service = "artifactregistry.googleapis.com"
-  audit_log_config {
-    log_type = "DATA_WRITE"
-  }
 }
 
 resource "google_artifact_registry_repository" "mam" {
