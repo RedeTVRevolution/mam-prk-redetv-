@@ -65,7 +65,7 @@ export interface LinhaDaTabela {
 }
 
 /** Tabela de números: a primeira coluna é o nome, as outras alinham à direita. Larga demais, rola dentro da caixa. */
-export function Tabela({ rotulo, colunas, linhas, minimo = 320 }: { rotulo: string; colunas: string[]; linhas: LinhaDaTabela[]; minimo?: number }) {
+export function Tabela({ rotulo, colunas, linhas, minimo = colunas.length * 104 }: { rotulo: string; colunas: string[]; linhas: LinhaDaTabela[]; minimo?: number }) {
   return (
     <div className="overflow-x-auto">
       <table aria-label={rotulo} className="w-full text-sm" style={{ minWidth: minimo }}>
@@ -82,7 +82,7 @@ export function Tabela({ rotulo, colunas, linhas, minimo = 320 }: { rotulo: stri
           {linhas.map((l) => (
             <tr key={l.chave} className="h-8 border-b border-border/60 last:border-b-0 hover:bg-card">
               {l.celulas.map((c, i) => (
-                <td key={i} className={cn('px-2 first:pl-0 last:pr-0', i === 0 ? 'text-left break-all' : 'text-right whitespace-nowrap')}>
+                <td key={i} className={cn('px-2 first:pl-0 last:pr-0', i === 0 ? 'min-w-32 text-left [overflow-wrap:anywhere]' : 'text-right whitespace-nowrap')}>
                   {c}
                 </td>
               ))}
@@ -142,6 +142,9 @@ export function GraficoOuTabela({
 
 const TICK = { fill: 'var(--color-muted-foreground)', fontSize: 11 }
 
+/** O eixo do valor em forma curta ("1,2 mil"); a dica e a tabela dão o número inteiro. */
+const curto = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 })
+
 /** A dica do gráfico: o nome em 600 e o número, sobre a superfície sobreposta. */
 function Dica({ titulo, valor }: { titulo: string; valor: string }) {
   return (
@@ -181,7 +184,7 @@ export function SerieNoTempo<T extends PontoNoTempo>({
     <>
       <CartesianGrid vertical={false} stroke="var(--color-border)" />
       <XAxis dataKey="dia" tickLine={false} axisLine={false} minTickGap={16} tick={TICK} tickFormatter={(d: string) => rotuloDoGrupo(d, agrupamento, true)} />
-      <YAxis width={44} tickLine={false} axisLine={false} tick={TICK} tickFormatter={(n: number) => formato(n)} />
+      <YAxis width={48} tickLine={false} axisLine={false} tick={TICK} tickFormatter={(n: number) => curto.format(n)} />
       <Tooltip
         cursor={forma === 'barra' ? { fill: 'var(--color-card)' } : { stroke: 'var(--color-strong)' }}
         isAnimationActive={false}
@@ -226,11 +229,11 @@ export function Ranking({ rotulo, dados, formato = numero }: { rotulo: string; d
           <YAxis
             type="category"
             dataKey="nome"
-            width={128}
+            width={150}
             tickLine={false}
             axisLine={false}
             tick={{ fill: 'var(--color-foreground)', fontSize: 12 }}
-            tickFormatter={(n: string) => (n.length > 20 ? `${n.slice(0, 19)}…` : n)}
+            tickFormatter={(n: string) => (n.length > 19 ? `${n.slice(0, 18)}…` : n)}
           />
           <Tooltip
             cursor={{ fill: 'var(--color-card)' }}

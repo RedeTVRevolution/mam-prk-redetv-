@@ -221,7 +221,7 @@ export default function PainelDaDiretoria({ aba, filtros }: { aba: AbaDoPainel; 
         <h1 className="text-xl font-semibold">Painel da diretoria</h1>
       </div>
 
-      <div role="tablist" aria-label="Abas do painel" className="flex overflow-x-auto border-b">
+      <div role="tablist" aria-label="Abas do painel" className="grid grid-cols-3 border-b sm:flex">
         {ABAS_DO_PAINEL.map((a) => {
           const Icone = ICONES[a.chave]
           const ativa = a.chave === aba
@@ -235,7 +235,7 @@ export default function PainelDaDiretoria({ aba, filtros }: { aba: AbaDoPainel; 
               href={destino}
               onClick={(e) => trocarDeAba(e, destino)}
               className={cn(
-                'relative flex h-9 shrink-0 items-center gap-1.5 px-3 text-sm whitespace-nowrap',
+                'relative flex h-9 shrink-0 items-center gap-1.5 px-2 text-sm whitespace-nowrap sm:px-3',
                 ativa ? 'font-semibold text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-primary' : 'text-muted-foreground hover:text-foreground',
               )}
             >
