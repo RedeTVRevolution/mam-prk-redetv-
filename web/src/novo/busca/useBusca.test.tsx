@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import { criarClienteDaApi } from '../../api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
 import { consultaNova } from '../../busca.ts'
+import { tirarDoAcervo, trocarNoAcervo } from '../acervo/useAcervo.ts'
 import { ContextoDaApi, criarClienteDeConsultas } from '../consultas.ts'
 import { useBusca, useEntrandoNaBusca, type PedidoDaBusca } from './useBusca.ts'
 
@@ -110,6 +111,20 @@ test('desce pelo X-Proximo-Cursor com todas as páginas na memória; subir não 
   expect(cursoresPedidos).toEqual([])
   // Fica no cache pela validade da busca, não pelos 30 s das outras consultas.
   expect(consultas.getQueryCache().findAll({ queryKey: ['busca'] })[0].options.gcTime).toBe(5 * 60_000)
+})
+
+test('o vídeo que vai para a lixeira sai da busca, e o reprocessado troca de dados nela', async () => {
+  const { result, consultas } = await montar()
+
+  act(() => tirarDoAcervo(consultas, new Set(['v1'])))
+  await waitFor(() => expect(result.current.item(1)?.video.job_id).toBe('v2'))
+
+  const reprocessado = { id: 'v0', nome: 'renomeado.mp4', estado: 'transcrevendo', codigo_falha: null, programa: 'TV Fama', data_exibicao: '2026-10-21', duracao_s: 60, criado_em: '2026-10-29T15:00:00Z' }
+  act(() => trocarNoAcervo(consultas, reprocessado))
+  await waitFor(() => expect(result.current.item(0)?.video.nome).toBe('renomeado.mp4'))
+  expect(result.current.item(0)?.video).toMatchObject({ job_id: 'v0', programa: 'TV Fama', data_exibicao: '2026-10-21', duracao_s: 60 })
+  // Os momentos ficam os da busca.
+  expect(result.current.item(0)?.momento.inicio_ms).toBe(0)
 })
 
 test('o 422 de um cursor vencido recomeça a busca do topo, sem mostrar erro', async () => {

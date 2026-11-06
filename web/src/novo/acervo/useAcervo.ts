@@ -1,6 +1,6 @@
 import { hashKey, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { codigoDoErro, SessaoExpirada } from '../../api.ts'
+import { codigoDoErro, SessaoExpirada, type PaginaDaBusca } from '../../api.ts'
 import { ESTADOS_DO_JOB } from '../../cores.ts'
 import { finalizando, MAXIMO_DO_ANDAMENTO, type FiltrosDoAcervo, type Job, type PaginaDoAcervo } from '../../jobs.ts'
 import { useApi } from '../consultas.ts'
@@ -41,17 +41,27 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   })
 }
 
-/** Põe o Job que a API devolveu (um reprocessamento) no lugar do da lista, com a capa da lista. */
+/**
+ * Põe o Job que a API devolveu (um reprocessamento) no lugar do da lista, com a capa da lista. Na
+ * busca, o vídeo leva os dados novos e fica com os momentos que a busca achou.
+ */
 export function trocarNoAcervo(cliente: QueryClient, novo: Job) {
   cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
     d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.map((j) => (j.id === novo.id ? { ...novo, capa_url: j.capa_url } : j)) })) },
   )
+  const { nome, programa = null, data_exibicao = null, duracao_s = null } = novo
+  cliente.setQueriesData<InfiniteData<PaginaDaBusca>>({ queryKey: ['busca'] }, (d) =>
+    d && { ...d, pages: d.pages.map((p) => ({ ...p, videos: p.videos.map((v) => (v.job_id === novo.id ? { ...v, nome, programa, data_exibicao, duracao_s } : v)) })) },
+  )
 }
 
-/** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo. */
+/** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo; da busca também. */
 export function tirarDoAcervo(cliente: QueryClient, ids: Set<string>) {
   cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
     d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.filter((j) => !ids.has(j.id)) })) },
+  )
+  cliente.setQueriesData<InfiniteData<PaginaDaBusca>>({ queryKey: ['busca'] }, (d) =>
+    d && { ...d, pages: d.pages.map((p) => ({ ...p, videos: p.videos.filter((v) => !ids.has(v.job_id)) })) },
   )
 }
 
