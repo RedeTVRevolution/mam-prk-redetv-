@@ -1,47 +1,64 @@
 """Singular e plural em português, só pelas regras simples (#405): a busca trata
 "microfone" e "microfones" como a mesma palavra, sem depender do índice."""
 
-import unicodedata
+import re
 
+from api.comparador import normalizar
 
-def _sem_acento(palavra: str) -> str:
-    return "".join(
-        c
-        for c in unicodedata.normalize("NFKD", palavra)
-        if not unicodedata.combining(c)
-    ).casefold()
+# Com e sem acento, para valer também o que se digita sem eles ("pais" é de pai, "país" fica).
+_INVARIAVEIS = {
+    "mais", "menos", "seis", "dois", "três", "tres", "cais", "deus", "país",
+    "lápis", "lapis", "ônibus", "onibus", "tênis", "tenis", "vírus", "virus",
+    "atlas", "pires", "simples", "oásis", "oasis", "tórax", "torax",
+}  # fmt: skip
+# Plurais que as regras erram, com o singular certo.
+_IRREGULARES = {
+    "mães": "mãe", "maes": "mãe", "reis": "rei", "leis": "lei", "bois": "boi",
+    "pais": "pai", "heróis": "herói", "herois": "herói", "meses": "mês",
+    "países": "país", "paises": "país", "gases": "gás",
+}  # fmt: skip
+_REGRAS = (
+    ("ões", "ão"), ("ães", "ão"), ("ãos", "ão"), ("oes", "ao"), ("ns", "m"),
+    ("éis", "el"), ("eis", "el"), ("óis", "ol"), ("ois", "ol"),
+    ("ais", "al"), ("uis", "ul"), ("res", "r"), ("zes", "z"), ("s", ""),
+)  # fmt: skip
 
 
 def singular(palavra: str) -> str:
     """O singular pelas regras simples; palavra curta ou sem plural fica como está."""
     p = palavra.casefold()
-    if len(p) <= 3:
+    if len(p) <= 3 or p in _INVARIAVEIS:
         return p
-    for fim, troca in (("ões", "ão"), ("ães", "ão"), ("ãos", "ão"), ("ns", "m")):
+    if p in _IRREGULARES:
+        return _IRREGULARES[p]
+    for fim, troca in _REGRAS:
         if p.endswith(fim):
             return p[: -len(fim)] + troca
-    if p.endswith(("res", "zes")):
-        return p[:-2]
-    if p.endswith(("ais", "eis", "uis", "óis")):
-        return p[:-2] + "l"
-    if p.endswith("s"):
-        return p[:-1]
     return p
 
 
-def _plurais(singular: str) -> set[str]:
-    if singular.endswith("ão"):
-        base = singular[:-2]
+def _plurais(s: str) -> set[str]:
+    irregulares = {p for p, sing in _IRREGULARES.items() if sing == s}
+    if irregulares or s in _INVARIAVEIS:
+        return irregulares
+    if s.endswith("ão"):
+        base = s[:-2]
         return {base + "ões", base + "ães", base + "ãos"}
-    if singular.endswith("l"):
-        return {singular[:-1] + "is"}
-    if singular.endswith("m"):
-        return {singular[:-1] + "ns"}
-    if singular.endswith(("r", "z")):
-        return {singular + "es"}
-    if singular.endswith("s"):
+    if s.endswith("ao"):
+        return {s[:-2] + "oes"}
+    if s.endswith("el"):
+        return {s[:-2] + "éis"}
+    if s.endswith("ol"):
+        return {s[:-2] + "óis"}
+    if s.endswith("l"):
+        return {s[:-1] + "is"}
+    if s.endswith("m"):
+        return {s[:-1] + "ns"}
+    if s.endswith(("r", "z")):
+        return {s + "es"}
+    if s.endswith("s"):
         return set()
-    return {singular + "s"}
+    return {s + "s"}
 
 
 def formas(palavra: str) -> set[str]:
@@ -54,14 +71,15 @@ def formas(palavra: str) -> set[str]:
 
 def mesma_palavra(a: str, b: str) -> bool:
     """Iguais no número, sem acento nem maiúscula."""
-    return _sem_acento(singular(a)) == _sem_acento(singular(b))
+    return normalizar(singular(a)) == normalizar(singular(b))
 
 
 def com_as_formas(texto: str) -> str:
-    """O texto com cada palavra seguida das outras formas dela, para o índice."""
+    """O texto com cada palavra seguida das outras formas dela, para o índice;
+    a pontuação fica de fora, que o índice não a usa."""
     saida: list[str] = []
     vistas: set[str] = set()
-    for palavra in texto.split():
+    for palavra in re.findall(r"\w+", texto):
         for forma in [palavra, *sorted(formas(palavra) - {palavra.casefold()})]:
             if forma.casefold() not in vistas:
                 vistas.add(forma.casefold())
