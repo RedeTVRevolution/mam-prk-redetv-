@@ -176,9 +176,11 @@ def _grao(chaves: list[str]) -> str:
     colunas = ", ".join(chaves)
     return (
         f"SELECT '{nome}' AS grao, {colunas + ', ' if chaves else ''}{vazias + ', ' if vazias else ''}"
-        "SUM(ativo_s) AS ativo_s,"
-        " SUM(IF(duracao_s IS NOT NULL, ativo_s, 0)) AS ativo_com_duracao_s,"
-        " COUNT(*) AS videos, SUM(IFNULL(duracao_s, 0)) / 3600 AS horas\n"
+        # Sem GROUP BY, o total volta uma linha mesmo sem medida no período, com as somas
+        # NULL: o IFNULL as faz 0, como no agregado em memória.
+        "IFNULL(SUM(ativo_s), 0) AS ativo_s,"
+        " IFNULL(SUM(IF(duracao_s IS NOT NULL, ativo_s, 0)), 0) AS ativo_com_duracao_s,"
+        " COUNT(*) AS videos, IFNULL(SUM(duracao_s), 0) / 3600 AS horas\n"
         "FROM (SELECT job_id"
         f"{', ' + colunas if chaves else ''}, SUM(ativo_s) AS ativo_s,"
         " MAX(duracao_s) AS duracao_s FROM por_video"
@@ -229,7 +231,7 @@ class RevisaoBigQuery:
         jobs = f"`{c.projeto}.{c.dataset}.{c.tabela_dos_jobs}`"
         sql = (
             "WITH por_video AS (\n"
-            "  SELECT r.job_id, r.uid, r.email, j.programa, r.ativo_s,\n"
+            "  SELECT r.job_id, r.uid, IFNULL(r.email, '') AS email, j.programa, r.ativo_s,\n"
             "    IF(IFNULL(j.duracao_ms, 0) > 0, j.duracao_ms / 1000,"
             " NULLIF(IFNULL(r.duracao_s, 0), 0)) AS duracao_s\n"
             f"  FROM {revisao} AS r JOIN {jobs} AS j ON j.id = r.job_id\n"

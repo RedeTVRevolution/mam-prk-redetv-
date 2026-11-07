@@ -251,11 +251,29 @@ def test_nenhuma_rota_do_painel_le_a_colecao_jobs() -> None:
         tempo_de_revisao=RevisaoBigQuery(CONFIG, _Transporte([])),
     )
 
-    for rota in (
-        "/acessos", "/videos", "/buscas", "/revisao", "/api", "/filtros", "/custo",
-    ):  # fmt: skip
+    # As rotas saem do app: uma rota nova do painel entra no teste sem ninguém lembrar.
+    rotas = [
+        caminho.removeprefix("/v1/painel")
+        for caminho, metodos in mundo.cliente.get("/openapi.json")
+        .json()["paths"]
+        .items()
+        if caminho.startswith("/v1/painel/") and "get" in metodos
+    ]
+    assert {"/revisao", "/custo", "/fila"} <= set(rotas)
+    for rota in rotas:
         assert mundo.get(rota).status_code == 200, rota
     assert mundo.get("/revisao", formato="csv").status_code == 200
+
+
+def test_periodo_sem_medidas_da_zero_e_nao_erro() -> None:
+    # O BigQuery devolve a linha do total mesmo sem medida, com as somas que não têm IFNULL
+    # vindo NULL; a consulta as zera.
+    transporte = _Transporte([["total", None, None, None, "0", "0", "0", "0"]])
+
+    tempo = RevisaoBigQuery(CONFIG, transporte).tempo(None, None, None, None)
+
+    assert tempo == agregar([])
+    assert "IFNULL(SUM(ativo_s), 0) AS ativo_s" in transporte.corpos[0]["query"]
 
 
 def test_cada_pulso_vai_para_a_tabela_e_a_tabela_guarda_a_mais_nova() -> None:
