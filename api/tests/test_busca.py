@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.busca import (
+    CONCORRENCIA_DO_INDICE,
     TETO_DA_LISTA_BYTES,
     TETO_DE_ASSINATURAS,
     TETO_DE_REGISTROS,
@@ -205,6 +206,63 @@ def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> No
     assert momento.quadro == "quadros/objeto-0.jpg"
     assert momento.quadro_url is None
     assert resultado.sem_aparicoes == []
+
+
+def _mundo_de_varias_clausulas() -> Mundo:
+    chapeu = {**VESTIDO, "tipo": "chapéu", "cor_base": "azul"}
+    m = Mundo(pedido(pessoas=["Sabrina Sato"], objetos=[VESTIDO, chapeu]))
+    m.com(
+        job("j1"),
+        objeto("j1:objeto:0", "j1", 12_000, 19_000, dono=m.sabrina),
+        objeto(
+            "j1:objeto:1",
+            "j1",
+            40_000,
+            50_000,
+            dono=m.sabrina,
+            tipo_do_objeto="chapéu",
+            cor_base=["azul"],
+        ),
+    )
+    return m
+
+
+def test_as_clausulas_vao_ao_indice_ao_mesmo_tempo_e_com_limite() -> None:
+    class IndiceLento(IndiceEspia):
+        def __init__(self) -> None:
+            super().__init__()
+            self.em_voo = 0
+            self.pico = 0
+            self.trava = threading.Lock()
+            self.dupla = threading.Barrier(2, timeout=5)
+
+        def buscar(self, consulta: Consulta) -> list[Registro]:
+            with self.trava:
+                self.em_voo += 1
+                self.pico = max(self.pico, self.em_voo)
+            try:
+                if len(self.consultas) < 2:  # a dupla só passa se as duas estão em voo
+                    self.dupla.wait()
+                return super().buscar(consulta)
+            finally:
+                with self.trava:
+                    self.em_voo -= 1
+
+    m = _mundo_de_varias_clausulas()
+    m.indice = IndiceLento()
+    m.com(job("j1"))
+    buscar(m)
+    assert 2 <= m.indice.pico <= CONCORRENCIA_DO_INDICE
+
+
+def test_o_resultado_em_paralelo_e_o_da_execucao_em_serie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    em_paralelo = buscar(_mundo_de_varias_clausulas())
+    monkeypatch.setattr("api.busca.CONCORRENCIA_DO_INDICE", 1)
+    em_serie = buscar(_mundo_de_varias_clausulas())
+    assert em_paralelo.videos == em_serie.videos
+    assert em_paralelo.sem_aparicoes == em_serie.sem_aparicoes
 
 
 def test_dois_momentos_a_2_s_pelo_mesmo_motivo_viram_um_trecho_e_a_5_s_ficam_dois() -> (
