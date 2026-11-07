@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import api.jobs
 from api.auth import Usuario
+from api.catalogo import EnvioParaLixeira
 from api.copia_bigquery import CopiaDosMomentos
 from api.correcoes import (
     RepositorioDeAprovacaoEmMemoria,
@@ -306,6 +307,21 @@ def test_reindexar_todos_pega_so_os_concluidos() -> None:
     )
 
     assert resultado == {"j1": "indexado"}
+
+
+def test_reindexar_todos_so_marca_a_lixeira_no_concluido_que_esta_nela() -> None:
+    mundo = Mundo()
+    mundo.reindexar()
+    envio = EnvioParaLixeira(em=BASE, por_uid="u1", por_email="u@x", motivo="x")
+    mundo.jobs.salvar(_job().model_copy(update={"lixeira": envio}))
+
+    resultado = reindexar_jobs(
+        None, mundo.jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    )
+
+    assert resultado == {"j1": "na_lixeira"}
+    assert mundo.indice.total() == 6
+    assert all(r.na_lixeira for r in mundo.indice.buscar(Consulta(limite=100)))
 
 
 def test_correcao_responde_sem_reindexar_e_so_o_aprovar_revisao_atualiza_o_indice() -> (

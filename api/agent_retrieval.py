@@ -622,6 +622,15 @@ def _canonico(dados: dict[str, Any]) -> dict[str, Any]:
     return saida
 
 
+def _inteiros(dados: dict[str, Any]) -> dict[str, Any]:
+    """Os dados lidos com o número inteiro que voltou como float de novo inteiro, para
+    gravá-los de volta como estavam."""
+    return {
+        campo: int(valor) if isinstance(valor, float) and valor.is_integer() else valor
+        for campo, valor in dados.items()
+    }
+
+
 def montar_plano(
     novos: list[Registro], lidos: list[dict[str, Any]]
 ) -> PlanoDeReindexacao:
@@ -799,12 +808,13 @@ class AgentRetrieval:
         """Põe `na_lixeira` nos objetos do vídeo (#482), só nos que ainda não têm esse
         valor (o objeto de antes do campo conta como diferente). O `batchUpdate` troca o
         `data` inteiro, então cada pedido leva os dados lidos com o campo novo; o vetor
-        não se recalcula. Cada lote passa pelo orçamento da cota (#460)."""
+        não se recalcula. O número inteiro que voltou como float volta inteiro (o esquema
+        o declara `integer`). Cada lote passa pelo orçamento da cota (#460)."""
         pedidos = [
             {
                 "dataObject": {
                     "name": nome,
-                    "data": dados | {"na_lixeira": na_lixeira},
+                    "data": _inteiros(dados) | {"na_lixeira": na_lixeira},
                 },
                 "updateMask": "data",
             }

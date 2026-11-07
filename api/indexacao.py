@@ -227,7 +227,9 @@ def reindexar_jobs(
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
-    Um id que não existe sai como `inexistente`.
+    Um id que não existe sai como `inexistente`. Sem `ids`, o concluído que está na
+    lixeira não se reindexa: só ganha `na_lixeira` nos objetos que ainda não o têm
+    (#482), e sai como `na_lixeira`.
     """
     resultado: dict[str, str] = {}
     if ids:
@@ -238,11 +240,17 @@ def reindexar_jobs(
             else:
                 jobs.append(job)
     else:
-        jobs = [
-            j
-            for j in repositorio.listar()
-            if j.estado == "concluido" and j.lixeira is None
-        ]
+        concluidos = [j for j in repositorio.listar() if j.estado == "concluido"]
+        jobs = [j for j in concluidos if j.lixeira is None]
+        for job in concluidos:
+            if job.lixeira is None:
+                continue
+            try:
+                indice.marcar_lixeira(job.id, True)
+                resultado[job.id] = "na_lixeira"
+            except Exception:
+                log.exception("lixeira no índice da busca falhou para %s", job.id)
+                resultado[job.id] = "falhou"
     for job in jobs:
         nova = reindexar(
             job,

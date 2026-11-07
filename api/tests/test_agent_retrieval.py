@@ -1521,6 +1521,16 @@ def test_marcar_lixeira_marca_o_objeto_de_antes_do_campo() -> None:
     assert all(d["na_lixeira"] is False for d in colecao.objetos.values())
 
 
+def test_marcar_lixeira_devolve_inteiro_o_numero_que_voltou_como_float() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(1))
+    for dados in colecao.objetos.values():
+        dados["inicio_ms"] = float(dados["inicio_ms"])
+    indice.marcar_lixeira("j", True)
+    assert all(type(d["inicio_ms"]) is int for d in colecao.objetos.values())
+
+
 def test_marcar_lixeira_divide_em_lotes_e_reserva_a_cota() -> None:
     colecao = _ColecaoEmMemoria()
     relogio = _Relogio()
