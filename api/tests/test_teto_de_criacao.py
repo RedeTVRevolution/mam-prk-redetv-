@@ -125,3 +125,26 @@ def test_job_do_sistema_nao_conta_no_teto_de_pessoa() -> None:
     mundo.ja_criados("sistema:Legado", 2, timedelta(minutes=1))
 
     assert mundo.criar(PESSOA) == 202
+
+
+def test_repeticao_de_job_ja_criado_nao_e_barrada_pelo_teto() -> None:
+    mundo = Mundo()
+    chave = mundo.chave("Legado")
+    ultimo = {**chave, "Idempotency-Key": "ultimo"}
+
+    assert [mundo.criar(chave) for _ in range(2)] == [202, 202]
+    assert mundo.criar(ultimo) == 202
+    assert mundo.criar(ultimo) == 200
+    assert len(mundo.jobs.listar()) == 3
+
+
+def test_repeticao_barrada_pelo_teto_cria_o_job_depois_da_espera() -> None:
+    mundo = Mundo()
+    mundo.ja_criados("sistema:Legado", 3, timedelta(minutes=5))
+    chave = {**mundo.chave("Legado"), "Idempotency-Key": "barrado"}
+
+    assert mundo.criar(chave) == 429
+    assert mundo.criar(chave) == 429
+    mundo.agora = AGORA + timedelta(hours=1)
+    assert mundo.criar(chave) == 200
+    assert len(mundo.jobs.listar()) == 4

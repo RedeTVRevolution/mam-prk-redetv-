@@ -284,7 +284,7 @@ class RepositorioFirestore:
         return [Job(**(doc.to_dict() or {})) for doc in docs]
 
     def contar_criados(self, criado_por: str, desde: datetime) -> int:
-        # Índice composto `criado_por` + `criado_em` em infra/modulos/mam/main.tf (#371).
+        # Índice composto `criado_por` + `criado_em` em infra/modulos/mam/teto_de_criacao.tf (#371).
         consulta: Any = self._colecao.where(
             filter=FieldFilter("criado_por", "==", criado_por)
         ).where(filter=FieldFilter("criado_em", ">=", desde))

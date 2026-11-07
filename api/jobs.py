@@ -998,16 +998,6 @@ def criar_rotas(
         else:
             criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
-        teto = (
-            TETO_POR_HORA_DO_SISTEMA if sistema is not None else TETO_POR_HORA_DA_PESSOA
-        )
-        if repositorio.contar_criados(criado_por, agora - JANELA_DO_TETO) >= teto:
-            # O pior caso: quando o Job mais antigo da janela sai dela, abre uma vaga.
-            raise HTTPException(
-                429,
-                f"Teto de {teto} Jobs por hora atingido",
-                headers={"Retry-After": str(int(JANELA_DO_TETO.total_seconds()))},
-            )
         if novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date():
             raise HTTPException(422, "Data de exibição no futuro")
         job_id, nova, escopo, job_gravado = uuid.uuid4().hex, True, "", False
@@ -1061,6 +1051,22 @@ def criar_rotas(
             existente is None and job_gravado
         ):
             raise HTTPException(410, "Este Job foi apagado")
+        # O teto só barra Job novo: a repetição de um Job que já existe devolve o mesmo
+        # Job, e a reserva feita aqui deixa a repetição depois da espera criá-lo.
+        if existente is None:
+            teto = (
+                TETO_POR_HORA_DO_SISTEMA
+                if sistema is not None
+                else TETO_POR_HORA_DA_PESSOA
+            )
+            if repositorio.contar_criados(criado_por, agora - JANELA_DO_TETO) >= teto:
+                # 3600 s é o limite de cima: a vaga abre quando o Job mais antigo da
+                # janela sai dela, o que pode ser antes.
+                raise HTTPException(
+                    429,
+                    f"Teto de {teto} Jobs por hora atingido",
+                    headers={"Retry-After": str(int(JANELA_DO_TETO.total_seconds()))},
+                )
         criou = existente is None and repositorio.criar(job)
         if existente is not None:
             job = existente
