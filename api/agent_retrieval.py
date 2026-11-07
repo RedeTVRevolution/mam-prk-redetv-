@@ -17,7 +17,7 @@ import hashlib
 import logging
 import re
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
 from time import sleep, time
@@ -557,6 +557,72 @@ def _criacao(r: Registro) -> dict[str, Any]:
     return {"dataObjectId": _id_do_objeto(r.id), "dataObject": objeto}
 
 
+@dataclass(frozen=True)
+class PlanoDeReindexacao:
+    """O que muda no índice de um vídeo (#418): ids dos registros a apagar, registros a
+    criar (inclui os de `significado` novo), registros a atualizar só em `data`, e ids
+    dos planos que precisam do vetor do quadro novo."""
+
+    criar: list[Registro]
+    apagar: list[str]
+    atualizar: list[Registro]
+    planos_com_quadro_novo: list[str]
+
+    @property
+    def vazio(self) -> bool:
+        return not (self.criar or self.apagar or self.atualizar)
+
+
+def _canonico(dados: dict[str, Any]) -> dict[str, Any]:
+    """Os dados de um objeto prontos para comparar: campo ausente vale `None` (sai, e a
+    lista vazia também, que o índice pode não devolver), número inteiro que voltou como
+    float vira int, lista não depende da ordem."""
+    saida: dict[str, Any] = {}
+    for campo, valor in dados.items():
+        if valor is None or valor == []:
+            continue
+        if isinstance(valor, float) and valor.is_integer():
+            valor = int(valor)
+        elif isinstance(valor, list):
+            valor = sorted(valor)
+        saida[campo] = valor
+    return saida
+
+
+def montar_plano(
+    novos: list[Registro], lidos: list[dict[str, Any]]
+) -> PlanoDeReindexacao:
+    """Compara os registros novos com os dados lidos do índice, por id. Função pura.
+
+    Id novo cria; id que sumiu apaga; `significado` diferente apaga e cria (o
+    `batchUpdate` não recalcula o embedding automático); outro campo diferente
+    atualiza; igual não faz nada. `data_de_exibicao` é comparada em dias, como no
+    índice."""
+    antes = {d["id"]: _canonico(d) for d in lidos}
+    criar: list[Registro] = []
+    atualizar: list[Registro] = []
+    quadro_novo: list[str] = []
+    vistos: set[str] = set()
+    for r in novos:
+        vistos.add(r.id)
+        agora = _canonico(_dados(r))
+        velho = antes.get(r.id)
+        if velho is None or velho.get("significado") != agora["significado"]:
+            criar.append(r)
+        elif velho != agora:
+            atualizar.append(r)
+        if r.tipo == "plano" and (
+            velho is None
+            or velho.get("quadro") != agora.get("quadro")
+            or velho.get("descricao") != agora.get("descricao")
+        ):
+            quadro_novo.append(r.id)
+    # `criar` com id já lido (significado novo) também apaga o velho antes.
+    apagar = [i for i in antes if i not in vistos]
+    apagar += [r.id for r in criar if r.id in antes]
+    return PlanoDeReindexacao(criar, apagar, atualizar, quadro_novo)
+
+
 class AgentRetrieval:
     def __init__(
         self,
@@ -649,19 +715,33 @@ class AgentRetrieval:
                 return
             self._dormir(self._escritas[0][0] + 60 - agora)
 
-    def apagar(self, job_id: str) -> None:
-        """O `batchDelete` só aceita nomes: junta os do vídeo, página a página, e apaga."""
+    def _objetos_do_video(
+        self, job_id: str, campos: list[str] | None = None
+    ) -> Iterator[dict[str, Any]]:
+        """Os objetos do vídeo, página a página pelo `dataObjects:query`; com `campos`, cada
+        um traz esses campos de `data`."""
         pedido: dict[str, Any] = {
             "filter": {"job_id": {"$eq": job_id}},
             "pageSize": OBJETOS_POR_PAGINA,
         }
-        nomes: list[str] = []
+        if campos is not None:
+            pedido["outputFields"] = {"dataFields": campos}
         while True:
             pagina = self._chamar("dataObjects:query", pedido, esperar=True)
-            nomes += [o["name"] for o in pagina.get("dataObjects", [])]
+            yield from pagina.get("dataObjects", [])
             if not pagina.get("nextPageToken"):
-                break
+                return
             pedido = pedido | {"pageToken": pagina["nextPageToken"]}
+
+    def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
+        """Os dados de todos os objetos do vídeo, só com os campos do esquema da coleção:
+        um campo fora do `dataSchema` dá HTTP 400 no `query`. Os vetores não voltam."""
+        campos = list(esquema_da_colecao(self._config)["dataSchema"]["properties"])
+        return [o["data"] for o in self._objetos_do_video(job_id, campos)]
+
+    def apagar(self, job_id: str) -> None:
+        """O `batchDelete` só aceita nomes: junta os do vídeo, página a página, e apaga."""
+        nomes = [o["name"] for o in self._objetos_do_video(job_id)]
         for i in range(0, len(nomes), OBJETOS_POR_PAGINA):
             lote = nomes[i : i + OBJETOS_POR_PAGINA]
             self._reservar(len(lote))
