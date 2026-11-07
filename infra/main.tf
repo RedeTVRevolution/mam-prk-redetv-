@@ -219,6 +219,10 @@ output "bigquery_regiao" {
   value = module.mam.bigquery_regiao
 }
 
+output "bigquery_tabela_de_jobs" {
+  value = module.mam.bigquery_tabela_de_jobs
+}
+
 output "busca_regiao" {
   value = module.mam.busca_regiao
 }

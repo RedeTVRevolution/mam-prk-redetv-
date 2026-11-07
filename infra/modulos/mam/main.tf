@@ -854,6 +854,8 @@ locals {
   tabela_antiga_de_momentos = "momentos"
   # Tabela em uso (#356): dividida por ano, em `momentos_por_ano.tf`.
   tabela_de_momentos = "momentos_por_ano"
+  # Tabela dos Jobs do painel (#454), em `jobs_do_painel.tf`.
+  tabela_de_jobs_do_painel = "jobs_do_painel"
 }
 
 locals {
