@@ -56,11 +56,14 @@ def test_a_agenda_semanal_guarda_catorze_semanas() -> None:
     assert re.search(r'day\s*=\s*"SUNDAY"', bloco)
 
 
-def test_so_ha_duas_agendas_o_maximo_do_firestore() -> None:
-    agendas = re.findall(
-        r'^resource "google_firestore_backup_schedule"', TF, re.MULTILINE
+def test_so_ha_duas_agendas_por_banco_o_maximo_do_firestore() -> None:
+    bancos = re.findall(
+        r'^resource "google_firestore_backup_schedule" "\w+" \{\n\s*database\s*= (\S+)',
+        TF,
+        re.MULTILINE,
     )
-    assert len(agendas) == 2
+    assert len(bancos) == 4
+    assert all(bancos.count(banco) == 2 for banco in bancos)
 
 
 def test_as_agendas_sao_do_banco_do_modulo() -> None:
