@@ -1,23 +1,16 @@
 """A fonte da aba Revisão do painel (#284): tempo de revisão por período, programa e pessoa,
 e o período de São Paulo repassado à taxa de correção."""
 
-from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.jobs import Job, RepositorioEmMemoria
 from api.qualidade_do_painel import QualidadeReal
 from api.revisao import Pulso, RepositorioDeRevisaoEmMemoria
 from api.revisao_do_painel import RevisaoEmMemoria
+from api.taxa_do_painel import TaxaEmMemoria
 
 AGORA = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
-
-
-class SemDecupagens:
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
-        raise AssertionError("não devia ler a decupagem")
-        yield b""
 
 
 def _job(id: str, programa: str | None, duracao_s: float | None = None) -> Job:
@@ -62,13 +55,7 @@ def _qualidade(
         jobs.salvar(_job("v2", "Fala"))
     revisao = RepositorioDeRevisaoEmMemoria()
     return (
-        QualidadeReal(
-            jobs,
-            SemDecupagens(),
-            RepositorioDeCorrecoesEmMemoria(),
-            revisao,
-            RevisaoEmMemoria(revisao, jobs),
-        ),
+        QualidadeReal(TaxaEmMemoria(), RevisaoEmMemoria(revisao, jobs)),
         revisao,
     )
 
@@ -110,10 +97,10 @@ def test_o_periodo_e_de_dias_de_sao_paulo() -> None:
     assert n(date(2026, 11, 2), date(2026, 11, 2)) == 1
 
 
-def test_a_taxa_de_correcao_do_periodo_e_calculada_pelo_modulo_da_taxa() -> None:
+def test_a_taxa_de_correcao_do_periodo_vem_da_tabela_diaria() -> None:
     qualidade, _ = _qualidade()
 
-    # Nenhuma correção nem pulso: nenhuma decupagem é lida (`SemDecupagens` falharia).
+    # Tabela vazia: sem linhas.
     assert (
         qualidade.taxa_de_correcao(date(2026, 11, 1), date(2026, 11, 30), "Hoje") == []
     )

@@ -1140,6 +1140,11 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "BIGQUERY_TABELA_DE_REVISAO"
         value = local.tabela_de_revisao_do_painel
       }
+      # A tabela da taxa de correção por dia, que a aba Revisão soma (taxa_diaria.tf, #468).
+      env {
+        name  = "BIGQUERY_TABELA_DA_TAXA"
+        value = local.tabela_da_taxa_de_correcao
+      }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
         value = tostring(var.busca_distancia_maxima)

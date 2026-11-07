@@ -2,9 +2,9 @@
 correção (#265), que vive no Firestore e no Storage, e o tempo de revisão (#251), agregado no
 BigQuery (`api/revisao_do_painel.py`, #467).
 
-O período chega em dias de São Paulo, os dois inclusive, e vira `[desde, ate)` em UTC. A
-taxa de correção lê a decupagem de cada Job com correção ou pulso no período: é a consulta
-mais cara do painel e só a aba Revisão a faz.
+O período chega em dias de São Paulo, os dois inclusive. O tempo de revisão vira `[desde, ate)`
+em UTC; a taxa de correção soma as linhas diárias da tabela (`api/taxa_do_painel.py`, #468),
+sem ler decupagem nem correção.
 """
 
 from dataclasses import dataclass
@@ -12,17 +12,14 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from api.correcoes import RepositorioDeCorrecoes
-from api.jobs import RepositorioDeJobs
-from api.reprocessar_versao import LeitorDeDecupagem
-from api.revisao import RepositorioDeRevisao
 from api.revisao_do_painel import (
     RevisaoAgregada,
     RevisaoNoVideo,
     TempoDeRevisao,
     agregar,
 )
-from api.taxa_de_correcao import LinhaDaTaxa, calcular
+from api.taxa_de_correcao import LinhaDaTaxa
+from api.taxa_do_painel import LeitorDaTaxa
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
@@ -57,31 +54,16 @@ def _periodo(
 class QualidadeReal:
     def __init__(
         self,
-        jobs: RepositorioDeJobs,
-        decupagens: LeitorDeDecupagem,
-        correcoes: RepositorioDeCorrecoes,
-        revisao: RepositorioDeRevisao,
+        taxa: LeitorDaTaxa,
         tempo: TempoDeRevisao,
     ) -> None:
-        self._jobs = jobs
+        self._taxa = taxa
         self._tempo = tempo
-        self._decupagens = decupagens
-        self._correcoes = correcoes
-        self._revisao = revisao
 
     def taxa_de_correcao(
         self, desde: date | None, ate: date | None, programa: str | None
     ) -> list[LinhaDaTaxa]:
-        inicio, fim = _periodo(desde, ate)
-        return calcular(
-            self._jobs,
-            self._decupagens,
-            self._correcoes,
-            self._revisao,
-            inicio,
-            fim,
-            programa,
-        )
+        return self._taxa.somar(desde, ate, programa)
 
     def tempo_de_revisao(
         self,
