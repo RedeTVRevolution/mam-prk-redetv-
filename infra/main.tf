@@ -338,6 +338,11 @@ moved {
 }
 
 moved {
+  from = google_firestore_index.acervo_por_mes
+  to   = module.mam.google_firestore_index.acervo_por_mes
+}
+
+moved {
   from = google_firestore_index.auditoria
   to   = module.mam.google_firestore_index.auditoria
 }

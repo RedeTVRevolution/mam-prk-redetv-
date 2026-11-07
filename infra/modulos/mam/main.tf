@@ -135,6 +135,13 @@ variable "indices_da_busca_ligados" {
   default = true
 }
 
+# A lista de vídeos por envio filtra o período por `mes_exibicao` no Firestore (#479). Só
+# ligar depois de `make gravar-mes-nos-jobs`: o Job antigo sem o campo some do filtro.
+variable "listagem_por_mes" {
+  type    = bool
+  default = false
+}
+
 # O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima
 # e o mínimo de palavras do registro. Calibrados em 3 vídeos do dev; mudar aqui e aplicar.
 variable "busca_distancia_maxima" {
@@ -555,6 +562,40 @@ resource "google_firestore_index" "acervo" {
   }
   fields {
     field_path = each.value.ordem
+    order      = "DESCENDING"
+  }
+}
+
+# Os mesmos filtros com `mes_exibicao` (`in`) e a ordem por envio, para o período na lista
+# por envio (#479): cada combinação, inclusive só o mês.
+locals {
+  indices_do_acervo_por_mes = {
+    for n in range(0, 16) : tostring(n) => [
+      for j, campo in local.campos_do_acervo : campo
+      if floor(n / pow(2, j)) % 2 == 1
+    ]
+  }
+}
+
+resource "google_firestore_index" "acervo_por_mes" {
+  for_each   = local.indices_do_acervo_por_mes
+  database   = google_firestore_database.mam.name
+  collection = "jobs"
+
+  dynamic "fields" {
+    for_each = each.value
+    content {
+      field_path   = fields.value
+      order        = fields.value == "palavras" ? null : "ASCENDING"
+      array_config = fields.value == "palavras" ? "CONTAINS" : null
+    }
+  }
+  fields {
+    field_path = "mes_exibicao"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "criado_em"
     order      = "DESCENDING"
   }
 }
@@ -1071,6 +1112,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_INDICES_LIGADOS"
         value = tostring(var.indices_da_busca_ligados)
+      }
+      env {
+        name  = "LISTAGEM_POR_MES"
+        value = tostring(var.listagem_por_mes)
       }
       env {
         name  = "BUSCA_DIMENSAO"

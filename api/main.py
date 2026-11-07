@@ -809,7 +809,11 @@ if _projeto:
     )
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
-        RepositorioFirestore(firestore.Client(project=_projeto)),
+        RepositorioFirestore(
+            firestore.Client(project=_projeto),
+            listagem_por_mes=os.environ.get("LISTAGEM_POR_MES", "false").lower()
+            == "true",
+        ),
         ArmazenamentoStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_QUARENTENA"],

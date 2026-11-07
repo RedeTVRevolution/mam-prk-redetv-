@@ -8,7 +8,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -196,12 +196,53 @@ def _repetir_sob_disputa[T](
     raise ServicoIndisponivel("Firestore disputado: tente de novo")
 
 
+# Limites do Firestore depois de expandir a consulta em forma normal disjuntiva:
+# disjunções (o produto dos `in`) e componentes (filtros e ordenações de todas elas).
+MAXIMO_DE_DISJUNCOES = 30
+MAXIMO_DE_COMPONENTES = 100
+
+
+def meses_do_periodo(de: date, ate: date) -> list[str]:
+    """Os meses (`AAAA-MM`) que o período toca, do primeiro ao último."""
+    meses, ano, mes = [], de.year, de.month
+    while (ano, mes) <= (ate.year, ate.month):
+        meses.append(f"{ano:04d}-{mes:02d}")
+        ano, mes = (ano + 1, 1) if mes == 12 else (ano, mes + 1)
+    return meses
+
+
+def meses_para_o_firestore(filtro: FiltroDeJobs) -> list[str] | None:
+    """Os meses do período, se a consulta com `mes_exibicao in [...]` cabe nos limites do
+    Firestore; `None` se faltar uma ponta do período ou algum limite estourar (a lista cai
+    então no filtro de datas em Python)."""
+    if filtro.exibicao_de is None or filtro.exibicao_ate is None:
+        return None
+    meses = meses_do_periodo(filtro.exibicao_de, filtro.exibicao_ate)
+    disjuncoes = len(meses) * max(1, len(filtro.estados))
+    filtros = (
+        (filtro.programa is not None)
+        + (filtro.sistema is not None)
+        + bool(filtro.estados)
+        + bool(filtro.palavras)
+        + 1  # mes_exibicao
+    )
+    componentes = disjuncoes * (filtros + 1)  # mais a ordem por `criado_em`
+    if disjuncoes > MAXIMO_DE_DISJUNCOES or componentes > MAXIMO_DE_COMPONENTES:
+        return None
+    return meses
+
+
 class RepositorioFirestore:
     def __init__(
-        self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
+        self,
+        cliente: firestore.Client,
+        colecao: str = COLECAO_DE_JOBS,
+        listagem_por_mes: bool = False,
     ) -> None:
         self._cliente = cliente
         self._colecao = cliente.collection(colecao)
+        # Só depois de `make gravar-mes-nos-jobs`: Job sem `mes_exibicao` some do filtro.
+        self._listagem_por_mes = listagem_por_mes
 
     def salvar(self, job: Job) -> None:
         self._colecao.document(job.id).set(job.model_dump())
@@ -297,7 +338,8 @@ class RepositorioFirestore:
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
-        # estar no campo da ordem). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
+        # estar no campo da ordem; na ordem por envio, com `listagem_por_mes`, os meses do
+        # período em `mes_exibicao`). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
         # Os índices estão no infra/modulos/mam/main.tf.
         if filtro.sha256 is not None:
             return self._consultar_pelo_arquivo(filtro)
@@ -335,6 +377,9 @@ class RepositorioFirestore:
                 consulta = consulta.where(
                     filter=FieldFilter(campo, "<=", filtro.exibicao_ate.isoformat())
                 )
+        elif self._listagem_por_mes and (meses := meses_para_o_firestore(filtro)):
+            # Igualdade aceita a ordem por `criado_em`; o dia exato fica em `casa_com_o_filtro`.
+            consulta = consulta.where(filter=FieldFilter("mes_exibicao", "in", meses))
         return self._ordenar_e_ler(consulta, campo, filtro)
 
     def _consultar_a_lixeira(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
