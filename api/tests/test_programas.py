@@ -866,3 +866,44 @@ def test_put_preserva_o_vinculo_da_pessoa_na_lixeira_e_restaurar_devolve() -> No
         (leao.id, "apresentador ou comentarista")
     }
     assert len(depois["pessoas"]) == 4
+
+
+def test_fundida_num_destino_na_lixeira_fica_escondida_e_volta_como_o_destino() -> None:
+    cliente, programas, catalogo = _cliente(["editor"])
+    leao = catalogo.achar("Leão Lobo")[0]
+    outro = catalogo.acrescentar("Leão Lobo", "", [])
+    catalogo.definir_fusao(
+        leao.id,
+        FusaoDaPessoa(
+            destino_id=outro.id,
+            em=datetime(2026, 11, 6, tzinfo=UTC),
+            por_uid="u",
+            por_email="u@b.c",
+            motivo="duplicada",
+        ),
+    )
+    catalogo.definir_lixeira(outro.id, _envio())
+    tela = cliente.get("/v1/admin/programas", headers=AUTORIZACAO).json()[0]
+    assert len(tela["pessoas"]) == 3
+
+    resposta = cliente.put(
+        "/v1/admin/programas/tv-fama",
+        json={
+            "nome": "TV Fama",
+            "perfil": "Novo texto",
+            "pessoas": [
+                {"pessoa_id": p["pessoa_id"], "papel": p["papel"]}
+                for p in tela["pessoas"]
+            ],
+        },
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 200
+    assert leao.id in [v.pessoa_id for v in programas.obter("tv-fama").pessoas]  # type: ignore[union-attr]
+
+    catalogo.definir_lixeira(outro.id, None)
+    depois = cliente.get("/v1/admin/programas", headers=AUTORIZACAO).json()[0]
+    assert (outro.id, "apresentador ou comentarista") in {
+        (p["pessoa_id"], p["papel"]) for p in depois["pessoas"]
+    }
+    assert len(depois["pessoas"]) == 4
