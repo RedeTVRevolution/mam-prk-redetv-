@@ -203,6 +203,7 @@ def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> No
     # Sem chave de sistema (a web), a busca não assina: leva só o caminho do quadro.
     assert momento.quadro == "quadros/objeto-0.jpg"
     assert momento.quadro_url is None
+    assert resultado.sem_aparicoes == []
 
 
 def test_dois_momentos_a_2_s_pelo_mesmo_motivo_viram_um_trecho_e_a_5_s_ficam_dois() -> (
@@ -477,6 +478,38 @@ def test_pessoa_fora_do_catalogo_em_consulta_composta_volta_vazia_com_aviso() ->
     (vazio,) = resultado.sem_aparicoes
     assert (vazio.pessoa_id, vazio.nome) == (None, "Fulano")
     assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (2, 0)
+
+
+def test_ver_as_mencoes_de_um_nome_fora_do_catalogo_traz_a_fala() -> None:
+    fulano = {**VESTIDO, "pessoa": "Fulano"}
+    m = Mundo(pedido(pessoas=["Fulano"], objetos=[fulano]))
+    m.com(
+        job("j1"),
+        objeto("j1:objeto:0", "j1", 0, 1_000, dono="outra"),
+        _fala("f1", "o Fulano chegou"),
+    )
+
+    resultado = buscar(
+        m,
+        "Fulano de vestido vermelho",
+        ajustes=Ajustes(evidencias=("imagem", "citada", "fala")),
+    )
+
+    assert [mo.motivo for v in resultado.videos for mo in v.momentos] == [
+        "Fala: 'o Fulano chegou'"
+    ]
+
+
+def test_nome_fora_do_catalogo_no_modo_visual_nao_calcula_o_vetor() -> None:
+    m = mundo_visual(pedido(pessoas=["Fulano"], texto_livre="pista molhada"))
+    embedding = EmbeddingDeTexto([1.0, 0.0])
+
+    r = m.busca(embedding=embedding).buscar("Fulano na pista molhada", visual=True)
+
+    assert r.videos == [] and [s.nome for s in r.sem_aparicoes] == ["Fulano"]
+    assert embedding.textos == []
+    # Não foi a busca visual que falhou: a tela não avisa que veio a comum.
+    assert r.entendida.visual is True
 
 
 def test_objeto_sem_pessoa_continua_trazendo_os_momentos() -> None:
