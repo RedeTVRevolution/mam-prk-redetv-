@@ -250,7 +250,7 @@ variable "limiar_de_fora_do_esquema" {
 }
 
 variable "limite_de_falhas_por_etapa" {
-  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa e para cada origem em separado (as falhas tratadas pelos Jobs e as execuções que caíram no Workflows não se somam)"
+  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa, somadas as duas origens (as falhas tratadas pelos Jobs e as execuções que caíram no Workflows)"
   type        = number
   default     = 3
 }
@@ -2495,26 +2495,21 @@ resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   display_name = "Falhas de uma etapa acima do limite"
   combiner     = "OR"
   # O filtro de um alerta precisa de um resource.type (a API recusa sem ele), e a métrica
-  # vem de dois: uma condição para cada, e o limite vale por origem. Somar as duas pediria
-  # um filtro com one_of ou PromQL, não validados na API (deploy de 2026-11-03).
-  dynamic "conditions" {
-    for_each = {
-      Jobs      = "cloud_run_job"
-      Workflows = "workflows.googleapis.com/Workflow"
-    }
-    content {
-      display_name = "Falhas de uma etapa acima do limite (${conditions.key})"
-      condition_threshold {
-        filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\" AND resource.type=\"${conditions.value}\""
-        comparison      = "COMPARISON_GT"
-        threshold_value = var.limite_de_falhas_por_etapa
-        duration        = "0s"
-        aggregations {
-          alignment_period     = local.janela_dos_alertas_s
-          per_series_aligner   = "ALIGN_DELTA"
-          cross_series_reducer = "REDUCE_SUM"
-          group_by_fields      = ["metric.label.etapa"]
-        }
+  # vem de dois: o Job (falha tratada) e o Workflows (execução que caiu). Uma condição só,
+  # com one_of no filtro, soma as duas origens; a API aceitou essa forma no ensaio de
+  # 2026-11-05 (a em PromQL foi recusada).
+  conditions {
+    display_name = "Falhas de uma etapa acima do limite"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\" AND resource.type = one_of(\"cloud_run_job\", \"workflows.googleapis.com/Workflow\")"
+      comparison      = "COMPARISON_GT"
+      threshold_value = var.limite_de_falhas_por_etapa
+      duration        = "0s"
+      aggregations {
+        alignment_period     = local.janela_dos_alertas_s
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["metric.label.etapa"]
       }
     }
   }
