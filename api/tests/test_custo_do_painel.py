@@ -273,6 +273,41 @@ def test_o_csv_traz_uma_linha_por_mes_programa_e_dono_e_uma_por_mes_e_servico_se
     ]
 
 
+def test_custo_liquido_de_fracao_de_centavo_vira_zero_sem_sinal_no_relatorio_e_no_csv() -> (
+    None
+):
+    # O crédito supera o custo por arredondamento: o líquido do mês é negativo de fração de centavo.
+    linhas = [
+        _linha(date(2026, 11, 1), "j1", -0.0003, "referencias"),
+        _linha(date(2026, 11, 1), None, -0.0001, servico="Vertex AI Search"),
+    ]
+    mundo = _mundo(linhas=linhas)
+
+    resposta = mundo.get("/custo")
+    r = resposta.json()
+
+    assert r["por_mes"][0]["custo"] == 0
+    assert r["por_mes"][0]["custo_dos_jobs"] == 0
+    assert r["por_mes"][0]["custo_sem_dono"] == 0
+    assert r["total"]["custo"] == 0
+    assert r["por_etapa"][0]["custo"] == 0
+    assert r["sem_dono_por_servico"][0]["custo"] == 0
+    # O custo por hora segue em quatro casas (a tela o arredonda para centavos ao escrever).
+    for campo in ("custo", "custo_dos_jobs", "custo_sem_dono"):
+        assert f'"{campo}":-0' not in resposta.text
+    texto = mundo.get("/custo", formato="csv").text
+    assert "-0" not in texto
+    assert [x["custo"] for x in csv.DictReader(io.StringIO(texto))] == ["0.0", "0.0"]
+
+
+def test_o_custo_e_arredondado_para_centavos() -> None:
+    linhas = [_linha(date(2026, 11, 1), None, 1.2349, servico="Vertex AI Search")]
+
+    r = _mundo(linhas=linhas).get("/custo").json()
+
+    assert r["total"]["custo"] == 1.23
+
+
 def test_o_csv_respeita_os_filtros_e_vai_para_a_auditoria() -> None:
     mundo = _mundo()
 

@@ -301,7 +301,7 @@ export function SerieNoTempo<T extends PontoNoTempo>({
         tickLine={false}
         axisLine={false}
         tick={TICK}
-        tickFormatter={(n: number) => curto.format(n)}
+        tickFormatter={(n: number) => curto.format(n === 0 ? 0 : n)}
       />
       <Tooltip
         cursor={

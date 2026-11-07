@@ -336,8 +336,14 @@ export interface RelatorioDeCusto {
   sem_dono_por_servico: { servico: string | null; custo: number }[]
 }
 
+/** O custo em centavos, sem sinal no zero: abaixo de meio centavo, em módulo, vira 0 (nunca −0). Gráfico e texto passam por aqui. */
+export function emCentavos(valor: number): number {
+  return Math.round(valor * 100) / 100 + 0
+}
+
 /** O custo com duas casas e a moeda da exportação: "R$ 12,50" (BRL) ou "12,50 USD". */
-export function custoLegivel(valor: number, moeda: string | null): string {
+export function custoLegivel(bruto: number, moeda: string | null): string {
+  const valor = emCentavos(bruto)
   if (moeda === 'BRL') return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   const numero = valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return moeda ? `${numero} ${moeda}` : numero

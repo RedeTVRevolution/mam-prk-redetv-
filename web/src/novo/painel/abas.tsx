@@ -6,6 +6,7 @@ import {
   COLUNA_DO_GRUPO,
   NOME_DO_GRUPO,
   custoLegivel,
+  emCentavos,
   horasDeVideo,
   minutosLegiveis,
   rotuloDoGrupo,
@@ -455,7 +456,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             serie="Custo"
             agrupamento="mes"
             dias={meses}
-            valor={(m) => m.custo}
+            valor={(m) => emCentavos(m.custo)}
             formato={valor}
             colunas={['Custo', 'Custo dos vídeos', 'Custo sem dono', 'Vídeos', 'Horas de vídeo', 'Custo por hora']}
             celulas={(m) => [valor(m.custo), valor(m.custo_dos_jobs), valor(m.custo_sem_dono), numero(m.videos), horasDeVideo(m.horas_de_video), porHora(m.custo_por_hora)]}

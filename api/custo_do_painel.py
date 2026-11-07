@@ -423,6 +423,13 @@ COLUNAS_DO_CSV_DE_CUSTO = (
 )
 
 
+def centavos(valor: float) -> float:
+    """O custo em centavos, sem sinal no zero: o líquido dos créditos pode ser um negativo de fração
+    de centavo, e `round(-0.0003, 2)` dá `-0.0`, que o painel escreveria "-R$ 0,00". Todo custo que
+    sai daqui (relatório e CSV) passa por esta função."""
+    return round(valor, 2) + 0.0
+
+
 def _por_hora(custo: float, horas: float) -> float | None:
     return round(custo / horas, 4) if horas > 0 else None
 
@@ -431,7 +438,7 @@ def _numeros(linhas: Sequence[CustoDosJobs]) -> dict[str, Any]:
     custo = sum(c.custo for c in linhas)
     horas = sum(c.horas for c in linhas)
     return {
-        "custo": round(custo, 4),
+        "custo": centavos(custo),
         "videos": sum(c.videos for c in linhas),
         "horas_de_video": round(horas, 4),
         "custo_por_hora": _por_hora(custo, horas),
@@ -469,9 +476,9 @@ def relatorio_de_custo(
         dos_jobs = sum(c.custo for c in jobs)
         sem = sum(s.custo for s in sem_dono)
         return numeros | {
-            "custo": round(dos_jobs + sem, 4),
-            "custo_dos_jobs": round(dos_jobs, 4),
-            "custo_sem_dono": round(sem, 4),
+            "custo": centavos(dos_jobs + sem),
+            "custo_dos_jobs": centavos(dos_jobs),
+            "custo_sem_dono": centavos(sem),
         }
 
     do_quem: dict[Quem, list[CustoDosJobs]] = defaultdict(list)
@@ -507,11 +514,11 @@ def relatorio_de_custo(
             )
         ],
         por_etapa=[
-            EtapaDeCusto(etapa=e.etapa, custo=round(e.custo, 4))
+            EtapaDeCusto(etapa=e.etapa, custo=centavos(e.custo))
             for e in sorted(base.por_etapa, key=lambda e: (-e.custo, e.etapa))
         ],
         sem_dono_por_servico=[
-            ServicoSemDono(servico=s, custo=round(v, 4))
+            ServicoSemDono(servico=s, custo=centavos(v))
             for s, v in sorted(por_servico.items(), key=lambda i: (-i[1], i[0] or ""))
         ],
     )
@@ -535,12 +542,12 @@ def linhas_do_csv_de_custo(
                 c.programa or "",
                 "",
                 round(c.horas, 4),
-                round(c.custo, 4),
+                centavos(c.custo),
             ]
         )
     por_mes_e_servico: dict[tuple[str, str], float] = defaultdict(float)
     for s in base.sem_dono:
         por_mes_e_servico[(s.mes, s.servico or "")] += s.custo
     for (mes, servico), custo in sorted(por_mes_e_servico.items()):
-        linhas.append([mes, "sem_dono", "", "", "", servico, "", round(custo, 4)])
+        linhas.append([mes, "sem_dono", "", "", "", servico, "", centavos(custo)])
     return linhas
