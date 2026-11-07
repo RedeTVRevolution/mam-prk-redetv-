@@ -41,6 +41,8 @@ from api.jobs import CursorInvalido, _exige
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+# O plano limita o texto da busca (docs/Plano_MAM.md); o campo do front tem o mesmo teto.
+TAMANHO_DA_CONSULTA = 300
 # Descrição das rotas da busca no OpenAPI, para os sistemas (docs/Plano_MAM.md, "Busca").
 NOTA_DO_QUADRO = (
     "Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): "
@@ -144,7 +146,7 @@ def criar_rotas_da_busca(
     def buscar(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        q: Annotated[str, Query(min_length=1, max_length=1000)],
+        q: Annotated[str, Query(min_length=1, max_length=TAMANHO_DA_CONSULTA)],
         ordem: Ordem = "relevancia",
         evidencias: Annotated[list[EvidenciaDaBusca] | None, Query(alias="ev")] = None,
         programa: Annotated[str | None, Query(max_length=100)] = None,

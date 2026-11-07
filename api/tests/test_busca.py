@@ -1075,6 +1075,14 @@ def test_sem_periodo_tira_o_periodo_entendido() -> None:
     assert resultado.entendida.desde is None
 
 
+def test_consulta_de_ate_300_caracteres_passa_e_de_301_responde_422() -> None:
+    c, _ = cliente(["consulta"], pedido(texto_livre="a"))
+    ok = c.get("/v1/busca", params={"q": "a" * 300}, headers=AUTORIZACAO)
+    longa = c.get("/v1/busca", params={"q": "a" * 301}, headers=AUTORIZACAO)
+    assert ok.status_code == 200
+    assert longa.status_code == 422
+
+
 def test_periodo_com_inicio_depois_do_fim_responde_422() -> None:
     c, _ = cliente(["consulta"], pedido(texto_livre="vestido"))
     r = c.get(

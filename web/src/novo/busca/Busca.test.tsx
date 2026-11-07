@@ -191,6 +191,14 @@ test('a URL reproduz a busca: q, ev, programa, ano e ordem vão à API', async (
   expect(p.get('limite')).toBe('20')
 })
 
+test('a caixa da busca aceita no máximo 300 caracteres, como a API', async () => {
+  await abrir('/busca?q=sapato&ev=fala')
+  await screen.findByText('3 momentos em 2 vídeos')
+
+  const caixa = screen.getByRole('searchbox', { name: 'Buscar no conteúdo' })
+  expect((caixa as HTMLInputElement).maxLength).toBe(300)
+})
+
 test('Enter na caixa da página vai a /busca?q= com a consulta nova', async () => {
   const usuario = userEvent.setup()
   await abrir('/busca?q=sapato&ev=fala')

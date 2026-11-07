@@ -218,6 +218,9 @@ function contagemDaGrade(busca: ReturnType<typeof useBusca>, deCenas: (n: number
  * A página `/busca` da interface nova: o estado todo na URL e as cenas em grade (#400). A foto da
  * busca por imagem fica na memória da página, não na URL, e vale até "Limpar" ou até um texto novo.
  */
+// Mesmo teto da API (`q` com mais de 300 caracteres dá 422).
+const TAMANHO_DA_CONSULTA = 300
+
 export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
   const [foto, setFoto] = useState<{ arquivo: File; id: number } | null>(null)
   const [arrastando, setArrastando] = useState(false)
@@ -301,6 +304,7 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                   <IconSearch size={16} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground" aria-hidden />
                   <input
                     type="search"
+                    maxLength={TAMANHO_DA_CONSULTA}
                     aria-label="Buscar no conteúdo"
                     placeholder="Falas, textos da tela, planos…"
                     value={texto}
