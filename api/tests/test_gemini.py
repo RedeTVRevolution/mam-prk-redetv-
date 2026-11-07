@@ -1,6 +1,8 @@
 import json
+import re
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -668,6 +670,28 @@ def test_o_modo_vem_do_campo_da_chamada_e_nao_do_conteudo() -> None:
 
 def test_a_chamada_nasce_em_flex() -> None:
     assert _chamada().modo == MODO_FLEX
+
+
+def test_so_a_busca_e_a_identificacao_pedem_standard() -> None:
+    """Toda chamada ao Gemini sai em Flex (#402, #471), menos estas duas (ADR 0004).
+
+    Procura o nome da constante e o texto do modo, em qualquer forma de escrever
+    (`gemini.MODO_STANDARD`, `"standard"`), em todo `api/` fora dos testes.
+    `gemini.py` define o modo e `versao_pipeline.py` só o registra.
+    """
+    api = Path(__file__).parents[1]
+    pedem = {
+        str(arquivo.relative_to(api))
+        for arquivo in api.rglob("*.py")
+        if "tests" not in arquivo.relative_to(api).parts
+        and re.search(
+            r"MODO_STANDARD|[\"']standard[\"']", arquivo.read_text(encoding="utf-8")
+        )
+    }
+    assert pedem - {"gemini.py", "versao_pipeline.py"} == {
+        "entendimento_da_consulta.py",
+        "modelo_forte.py",
+    }
 
 
 def test_instrucao_traz_os_cortes_em_mmss_e_sem_cortes_nao_traz_a_secao() -> None:
