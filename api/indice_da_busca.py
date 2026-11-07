@@ -65,6 +65,8 @@ class Filtros:
     pessoa: str | None = None  # uma das pessoas na imagem
     marca: str | None = None
     relacao: str | None = None
+    sistema: str | None = None  # só os vídeos desse sistema (#483)
+    na_lixeira: bool | None = None  # `False` tira os da lixeira do teto (#483)
     exibido_desde: date | None = None
     exibido_ate: date | None = None
 
@@ -89,6 +91,14 @@ class IndiceDaBusca(Protocol):
 
     def marcar_lixeira(self, job_id: str, na_lixeira: bool) -> None:
         """Põe `na_lixeira` em todos os registros do vídeo, sem trocar o resto."""
+        ...
+
+    def preencher_filtros(
+        self, job_id: str, sistema: str | None, na_lixeira: bool
+    ) -> int:
+        """Dá `sistema` e `na_lixeira` aos registros do vídeo que ainda não têm o campo
+        (#483), sem tocar no que já tem valor nem refazer o vetor. Devolve quantos mudou;
+        repetir devolve 0."""
         ...
 
     def buscar(self, consulta: Consulta) -> list[Registro]: ...
@@ -319,6 +329,8 @@ def _casa(r: Registro, f: Filtros) -> bool:
         and (f.pessoa is None or f.pessoa in r.pessoas)
         and (f.marca is None or r.marca == f.marca)
         and (f.relacao is None or r.relacao == f.relacao)
+        and (f.sistema is None or r.sistema == f.sistema)
+        and (f.na_lixeira is None or r.na_lixeira == f.na_lixeira)
         and (
             f.exibido_desde is None
             or (
@@ -349,6 +361,21 @@ class IndiceEmMemoria:
             self._por_job[job_id] = [
                 replace(r, na_lixeira=na_lixeira) for r in self._por_job[job_id]
             ]
+
+    def preencher_filtros(
+        self, job_id: str, sistema: str | None, na_lixeira: bool
+    ) -> int:
+        # Aqui o registro sempre tem `na_lixeira` (o padrão é `False`), então só o `sistema`
+        # pode faltar; o valor que já está lá fica, como no índice real.
+        antigos = self._por_job.get(job_id, [])
+        novos = [
+            replace(r, sistema=sistema)
+            if sistema is not None and r.sistema is None
+            else r
+            for r in antigos
+        ]
+        self._por_job[job_id] = novos
+        return sum(a is not n for a, n in zip(antigos, novos, strict=True))
 
     def total(self) -> int:
         return sum(len(r) for r in self._por_job.values())

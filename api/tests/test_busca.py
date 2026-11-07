@@ -30,6 +30,7 @@ from api.busca import (
     Ranking,
     RankingEmOrdem,
     VideoGuardado,
+    filtros_do_servidor,
 )
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
@@ -152,7 +153,10 @@ class Mundo:
 
     def com(self, j: Job, *registros: Registro) -> None:
         self.jobs.salvar(j)
-        self.indice.gravar(j.id, list(registros))
+        # Como a indexação: o objeto leva o sistema do Job (#483).
+        self.indice.gravar(
+            j.id, [replace(r, sistema=r.sistema or j.sistema) for r in registros]
+        )
 
 
 def buscar(m: Mundo, texto: str = "vestido vermelho da Sabrina Sato", **kw: Any) -> Any:
@@ -1851,3 +1855,69 @@ def test_frase_exata_com_o_numero_trocado_ainda_vale() -> None:
         ),
     )
     assert [v.job_id for v in buscar(m, '"promoção imperdível"').videos] == ["j1"]
+
+
+def test_video_na_lixeira_do_indice_nao_ocupa_o_teto_de_registros() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    envio = EnvioParaLixeira(
+        em=datetime(2026, 11, 2, tzinfo=UTC),
+        por_uid="adm",
+        por_email="adm@redetv.com",
+        motivo="duplicado",
+    )
+    m.com(
+        job("lixo", lixeira=envio),
+        *[objeto(f"l{i}", "lixo", i, i + 1, na_lixeira=True) for i in range(600)],
+    )
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+
+    resultado = m.busca().buscar("vestido", filtros_do_servidor=filtros_do_servidor())
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    assert {c.filtros.na_lixeira for c in m.indice.consultas} == {False}
+
+
+def test_o_filtro_do_indice_so_tira_inelegiveis_a_regra_segue_no_job() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    envio = EnvioParaLixeira(
+        em=datetime(2026, 11, 2, tzinfo=UTC),
+        por_uid="adm",
+        por_email="adm@redetv.com",
+        motivo="duplicado",
+    )
+    # O objeto ainda diz `na_lixeira=False` (o Job foi para a lixeira e o índice atrasou).
+    m.com(job("j1", lixeira=envio), objeto("a", "j1", 0, 1_000, na_lixeira=False))
+    m.com(job("j2"), objeto("b", "j2", 0, 1_000))
+
+    resultado = m.busca().buscar("vestido", filtros_do_servidor=filtros_do_servidor())
+
+    assert [v.job_id for v in resultado.videos] == ["j2"]
+
+
+def test_chave_de_sistema_filtra_o_sistema_no_indice_e_o_resultado_nao_muda() -> None:
+    m = Mundo(pedido(texto_livre="vestido"), pedido(texto_livre="vestido"))
+    m.com(job("j1", sistema="outro"), objeto("a", "j1", 0, 1_000, sistema="outro"))
+    m.com(job("j2", sistema="legado"), objeto("b", "j2", 0, 1_000, sistema="legado"))
+
+    resultado = m.busca().buscar("vestido", sistema="outro")
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    assert {c.filtros.sistema for c in m.indice.consultas} == {"outro"}
+
+    # A web (sem sistema) não filtra por ele e vê os dois.
+    m.indice.consultas.clear()
+    todos = m.busca().buscar("vestido")
+    assert {v.job_id for v in todos.videos} == {"j1", "j2"}
+    assert {c.filtros.sistema for c in m.indice.consultas} == {None}
+
+
+def test_sem_nada_inelegivel_o_resultado_e_o_mesmo_com_e_sem_o_filtro() -> None:
+    def rodar(filtros: Filtros | None) -> list[str]:
+        m = Mundo(pedido(texto_livre="vestido"))
+        for i in range(3):
+            m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000))
+        return [
+            v.job_id
+            for v in m.busca().buscar("vestido", filtros_do_servidor=filtros).videos
+        ]
+
+    assert rodar(filtros_do_servidor()) == rodar(Filtros())

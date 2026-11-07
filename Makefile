@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs recalcular-pessoas-dos-jobs gravar-mes-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -188,6 +188,13 @@ reindexar:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.indexacao $(JOB)
+
+# Dá `sistema` e `na_lixeira` aos objetos antigos da busca (#483): make preencher-filtros-da-busca.
+# Roda no dev depois de recriar o índice com os `filterFields` novos e ANTES de publicar a busca com
+# o filtro: objeto sem `na_lixeira` não casa com o filtro, e o acervo antigo some da busca.
+# Idempotente e retomável (só escreve o que falta), dentro da cota de escrita (#460).
+preencher-filtros-da-busca:
+	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.preencher_filtros_da_busca
 
 # Copia no BigQuery (#260) as decupagens dos Jobs concluídos, ou a de um Job: make copiar-para-bigquery [JOB=<id>].
 # Troca as linhas do vídeo; repetir dá o mesmo resultado. Nomes vêm do Terraform, salvo se já vierem no ambiente.

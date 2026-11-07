@@ -42,6 +42,7 @@ from api.busca import (
     Momento,
     RankingEmOrdem,
     VideoDoResultado,
+    filtros_do_servidor,
 )
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
@@ -255,7 +256,11 @@ def main() -> int:
     falhas = 0
     medidas: list[tuple[Caso, float | None]] = []
     for caso in CASOS:
-        resultado = busca.buscar(caso.consulta, ajustes=_ajustes(caso))
+        resultado = busca.buscar(
+            caso.consulta,
+            ajustes=_ajustes(caso),
+            filtros_do_servidor=filtros_do_servidor(),
+        )
         videos = resultado.videos
         total = sum(v.n_momentos for v in videos)
         print(f"\n### {caso.consulta!r}: {total} momentos em {len(videos)} vídeos")
