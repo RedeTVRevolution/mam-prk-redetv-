@@ -285,6 +285,12 @@ variable "precos_por_milhao_de_tokens" {
   default = {}
 }
 
+variable "dias_do_original_na_quarentena" {
+  description = "Depois de quantos dias o original some da quarentena (#369); a sessão retomável vale até 7 dias, então o objeto de uma sessão aberta tarde ainda é apagado"
+  type        = number
+  default     = 7
+}
+
 variable "agenda_da_purga" {
   description = "Cron (formato do Cloud Scheduler) da purga automática da lixeira (#145); uma vez por dia, de madrugada"
   type        = string
@@ -618,6 +624,19 @@ resource "google_storage_bucket" "mam" {
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
+  # O original só vive na quarentena até a validação (que o apaga, aceito ou recusado). Quem
+  # sobra é o que chegou por uma sessão retomável aberta depois de o Job expirar (#369).
+  dynamic "lifecycle_rule" {
+    for_each = each.key == "quarentena" ? [1] : []
+    content {
+      condition {
+        age = var.dias_do_original_na_quarentena
+      }
+      action {
+        type = "Delete"
+      }
+    }
+  }
   # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
   # e só das URLs da aplicação.
   dynamic "cors" {
@@ -625,7 +644,7 @@ resource "google_storage_bucket" "mam" {
     content {
       origin          = local.origens_da_aplicacao
       method          = ["POST", "PUT"]
-      response_header = ["Content-Type", "Content-Range", "x-goog-resumable", "x-upload-content-length", "Location", "Range"]
+      response_header = ["Content-Type", "Content-Range", "x-goog-resumable", "x-goog-if-generation-match", "x-upload-content-length", "Location", "Range"]
       max_age_seconds = 3600
     }
   }
@@ -736,7 +755,8 @@ locals {
     # regrava a Decupagem com o inventário no mesmo bucket.
     objetos = { decupagens = "roles/storage.objectUser" }
     # Apaga os arquivos do vídeo purgado: cópia limpa, proxy, janelas, decupagem e quadros.
-    purga = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
+    # A varredura diária também expira o upload abandonado e apaga o objeto dele da quarentena (#369).
+    purga = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
   }
 }
 

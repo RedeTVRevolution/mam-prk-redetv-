@@ -26,7 +26,14 @@ from api.bancos import cliente_da_colecao
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import RepositorioDeCorrecoes
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs, agora_utc
+from api.jobs import (
+    Armazenamento,
+    FiltroDeJobs,
+    Job,
+    RepositorioDeJobs,
+    agora_utc,
+    expirar_uploads,
+)
 from api.lixeira import (
     PRAZO_DA_PURGA,
     ArquivosDoImpacto,
@@ -39,6 +46,7 @@ from api.lixeira import (
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
+    ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
@@ -187,9 +195,29 @@ def criar_rotas_da_purga(
     return rotas
 
 
+def rodar_a_varredura_diaria(
+    repositorio: RepositorioDeJobs,
+    purga: Purga,
+    armazenamento: Armazenamento,
+    purgar_catalogo: Callable[[], int],
+    agora: datetime,
+) -> None:
+    """O que o agendador diário faz: expira uploads abandonados (#369), purga vídeos e catálogo."""
+    try:
+        expirados = expirar_uploads(repositorio, armazenamento, agora)
+        log.info("varredura diária: %d upload(s) expirado(s)", len(expirados))
+    except Exception:
+        # Não segura a purga: a varredura de amanhã tenta de novo.
+        log.exception("a expiração dos uploads falhou")
+    purgados = purgar_vencidas(repositorio, purga, agora)
+    log.info("purga automática: %d vídeo(s) purgado(s)", len(purgados))
+    log.info("purga automática: %d item(ns) do catálogo purgado(s)", purgar_catalogo())
+
+
 def main(ambiente: Mapping[str, str] = os.environ) -> int:
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
+        quarentena = exigir_do_ambiente(ambiente, "BUCKET_QUARENTENA")
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
         decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
     except FaltaNoAmbiente as e:
@@ -208,15 +236,20 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         RepositorioDeAuditoriaFirestore(banco_de_seguranca),
         agora_utc,
     )
-    purgados = purgar_vencidas(repositorio, purga, agora_utc())
-    log.info("purga automática: %d vídeo(s) purgado(s)", len(purgados))
-    no_catalogo = purgar_catalogo_vencido(
-        CatalogoFirestore(cliente),
-        CatalogoDeMarcasFirestore(cliente),
-        RepositorioDeAuditoriaFirestore(banco_de_seguranca),
+    rodar_a_varredura_diaria(
+        repositorio,
+        purga,
+        ArmazenamentoStorage(
+            ClienteStorage(project=projeto), quarentena, aceitos, decupagens
+        ),
+        lambda: purgar_catalogo_vencido(
+            CatalogoFirestore(cliente),
+            CatalogoDeMarcasFirestore(cliente),
+            RepositorioDeAuditoriaFirestore(banco_de_seguranca),
+            agora_utc(),
+        ),
         agora_utc(),
     )
-    log.info("purga automática: %d item(ns) do catálogo purgado(s)", no_catalogo)
     return 0
 
 

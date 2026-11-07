@@ -84,6 +84,7 @@ class _Parou(Exception):
 
 AMBIENTE_DO_ENTRYPOINT = {
     "GCP_PROJECT_ID": "proj",
+    "BUCKET_QUARENTENA": "q",
     "BUCKET_ACEITOS": "a",
     "BUCKET_DECUPAGENS": "d",
     "WORKFLOW_REGIAO": "r",

@@ -39,6 +39,7 @@ function responderPedaco(request: Request) {
 const servidor = setupServer(
   http.post(URL_ASSINADA, ({ request }) => {
     expect(request.headers.get('x-goog-resumable')).toBe('start')
+    expect(request.headers.get('x-goog-if-generation-match')).toBe('0')
     expect(request.headers.get('x-upload-content-length')).toBe(String(arquivo.size))
     inicios += 1
     return new HttpResponse(null, { status: 201, headers: { Location: SESSAO } })

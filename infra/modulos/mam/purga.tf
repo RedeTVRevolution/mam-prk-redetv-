@@ -27,6 +27,10 @@ resource "google_cloud_run_v2_job" "purga" {
           value = var.projeto
         }
         env {
+          name  = "BUCKET_QUARENTENA"
+          value = local.buckets["quarentena"]
+        }
+        env {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }

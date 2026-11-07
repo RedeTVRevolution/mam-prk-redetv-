@@ -356,8 +356,9 @@ OPERACOES: tuple[Operacao, ...] = (
         "/v1/jobs",
         "Registrar um vídeo",
         "Registra o pedido de decupagem de um MP4 e devolve o Job em "
-        "`aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 24 h, "
-        "que abre um upload retomável no Cloud Storage (veja o guia). Escopo `criar`.\n\n"
+        "`aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 15 min, "
+        "que abre um upload retomável no Cloud Storage (veja o guia); o `POST` que abre a sessão "
+        "leva o cabeçalho `x-goog-if-generation-match: 0`. Escopo `criar`.\n\n"
         "O cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o "
         "pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo "
         "Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já "

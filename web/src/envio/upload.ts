@@ -43,6 +43,8 @@ export async function enviarRetomavel(
     method: 'POST',
     headers: {
       'x-goog-resumable': 'start',
+      // Objeto escrito uma vez só: a URL assina este cabeçalho (#369).
+      'x-goog-if-generation-match': '0',
       'Content-Type': arquivo.type,
       // Tamanho declarado: a URL assinada pode prender a sessão a ele.
       'x-upload-content-length': String(total),

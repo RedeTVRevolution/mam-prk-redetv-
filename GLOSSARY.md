@@ -137,7 +137,7 @@ Algo detectado num momento: pessoa, marca, objeto ou pauta.
 ### Arquivos
 
 **Quarentena**:
-Lugar onde um vídeo enviado espera a validação; nada é processado a partir dela.
+Lugar onde um vídeo enviado espera a validação; nada é processado a partir dela. A validação apaga o original, aceito ou recusado; o que sobra (o que chegou por uma sessão de upload retomável depois de o Job expirar) some pelo ciclo de vida do bucket em 7 dias (`dias_do_original_na_quarentena`, #369). A URL assinada que abre a sessão vale 15 min e exige `x-goog-if-generation-match: 0`, então o objeto é escrito uma vez só.
 
 **Cópia limpa**:
 O MP4 aceito pela quarentena, regravado só com as faixas de vídeo e áudio (as faixas de dados, como a de timecode, ficam de fora), sem metadados e sem recodificar. É dele que todo o processamento parte.
@@ -200,7 +200,7 @@ Trocar o nome de uma pessoa do catálogo em todos os vídeos de uma vez (`api/re
 Primeiro tempo de apagar um item (`api/lixeira.py`, `/v1/admin/lixeira`, #144, [ADR 0010](docs/adr/0010-lixeira-e-purga.md)): o vídeo ganha `Job.lixeira` (quando, quem, motivo) e some da lista, da busca e das rotas do Job para quem não é Administrador, mas nada é apagado e restaurar volta tudo. Só Job `concluido`, `falhou` ou `cancelado`. Cada envio e restauração vai para a auditoria com o impacto. Vale também para pessoa e marca do catálogo (#151, permissão `catalogo.apagar` do Curador e do Administrador; restaurar e purgar só do Administrador): a pessoa perde as fotos de rosto já no envio e, nas decupagens, o nome confirmado só pelo rosto vira "não identificado"; a marca mantém o texto e perde o vínculo.
 
 **Purga**:
-Segundo tempo de apagar: 30 dias depois do envio à lixeira, ou antes por decisão do Administrador, um processo próprio apaga de fato (única exceção à regra de que correções e saída do modelo nunca são apagadas) e deixa o registro na auditoria.
+Segundo tempo de apagar: 30 dias depois do envio à lixeira, ou antes por decisão do Administrador, um processo próprio apaga de fato (única exceção à regra de que correções e saída do modelo nunca são apagadas) e deixa o registro na auditoria. O mesmo Job diário (`api/purga.py`, `rodar_a_varredura_diaria`) antes expira os uploads abandonados (#369): o Job em `aguardando_upload` há 24 h vai a `falhou` com `upload_expirado` e o objeto dele sai da quarentena; uma falha nisso não segura a purga.
 
 **Correção pendente**:
 Correção de Editor, num tipo que exige aprovação, que espera a decisão de um Curador; fica no histórico e fora da decupagem entregue até ser aprovada (passa a valer) ou recusada (nunca vale). Quais tipos exigem aprovação é a **regra de aprovação**, que o Administrador liga e desliga por tipo na aba "Regras de aprovação" da Administração (`/v1/admin/aprovacao`, #264): a mudança vale na hora para as correções novas, as pendentes continuam pendentes, e cada mudança grava `aprovacao.alterada` na auditoria.

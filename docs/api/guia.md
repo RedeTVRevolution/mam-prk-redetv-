@@ -34,11 +34,11 @@ O `programa` vem do seu sistema, nunca dos metadados do arquivo (`title` e `arti
 
 O MAM **não busca** o arquivo: quem envia é você, pela `url_de_upload` (ADR 0011). O sistema interno da RedeTV não sai para a internet, então o caminho é um **serviço intermediário**, com acesso à internet, que pega o vídeo no sistema interno e o envia.
 
-- É um **upload retomável** do Cloud Storage: um `POST` abre a sessão (cabeçalhos `x-goog-resumable: start` e `x-upload-content-length`; a resposta traz o `Location` da sessão) e um `PUT` nesse endereço manda os bytes. A URL não usa a sua chave de API.
+- É um **upload retomável** do Cloud Storage: um `POST` abre a sessão (cabeçalhos `x-goog-resumable: start`, `x-goog-if-generation-match: 0` e `x-upload-content-length`; a resposta traz o `Location` da sessão) e um `PUT` nesse endereço manda os bytes. A URL não usa a sua chave de API.
 - Se a conexão cair, pergunte quanto já chegou com `PUT` vazio e `Content-Range: bytes */TOTAL` (resposta 308 com `Range: bytes=0-N`) e mande o resto com `Content-Range: bytes N+1-FIM/TOTAL`.
 - Envie com **nome `.mp4` e `tipo` `video/mp4`**, sem recodificar. Os arquivos da RedeTV são MP4 com extensão `.mov` (H.264 1280x720, 29,97 fps, AAC estéreo 48 kHz): só troque o nome. Outro `tipo` dá 415.
 - Em `prod`, o upload só é aceito a partir dos **IPs da RedeTV**: o serviço intermediário precisa sair por eles.
-- A URL vale por um prazo; passado ele, o Job falha com `upload_expirado`.
+- A URL só serve para **abrir** a sessão e vale **15 minutos**: abra logo depois de registrar o vídeo. O `x-goog-if-generation-match: 0` é obrigatório (sem ele o `POST` leva 403) e garante que o objeto é escrito uma vez só: um segundo envio para o mesmo Job é recusado. A sessão aberta segue valendo, mas o Job sem upload completo em 24 h falha com `upload_expirado` e o objeto é apagado.
 - A `timecode_origem` das decupagens da RedeTV não é o timecode da fita: a faixa `tmcd` desses arquivos vem zerada.
 
 Exemplos: `exemplos/curl/3-enviar-o-video.sh` e `exemplos/python/3-enviar-o-video.py`. Quando o arquivo chega, o Job passa a `validando` sozinho.

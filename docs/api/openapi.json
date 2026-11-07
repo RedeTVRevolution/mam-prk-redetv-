@@ -334,7 +334,7 @@
             }
           }
         },
-        "description": "Registra o pedido de decupagem de um MP4 e devolve o Job em `aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 24 h, que abre um upload retomável no Cloud Storage (veja o guia). Escopo `criar`.\n\nO cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já foi feito. A mesma chave com outro corpo dá 409. A chave vale por sistema.\n\nO `nome` termina em `.mp4` e o `tipo` é sempre `video/mp4`; arquivos `.mov` não são aceitos, mesmo com conteúdo MP4: envie com nome `.mp4`.",
+        "description": "Registra o pedido de decupagem de um MP4 e devolve o Job em `aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 15 min, que abre um upload retomável no Cloud Storage (veja o guia); o `POST` que abre a sessão leva o cabeçalho `x-goog-if-generation-match: 0`. Escopo `criar`.\n\nO cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já foi feito. A mesma chave com outro corpo dá 409. A chave vale por sistema.\n\nO `nome` termina em `.mp4` e o `tipo` é sempre `video/mp4`; arquivos `.mov` não são aceitos, mesmo com conteúdo MP4: envie com nome `.mp4`.",
         "tags": [
           "sistemas"
         ]

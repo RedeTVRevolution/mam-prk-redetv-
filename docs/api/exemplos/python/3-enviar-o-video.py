@@ -19,6 +19,7 @@ sessao = requests.post(
     headers={
         "Content-Type": "video/mp4",
         "x-goog-resumable": "start",
+        "x-goog-if-generation-match": "0",
         "x-upload-content-length": str(tamanho),
     },
     timeout=60,
