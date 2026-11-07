@@ -13,6 +13,7 @@ def _celula(valor: object) -> object:
 
 
 def csv_em_texto(colunas: Sequence[str], linhas: Sequence[Sequence[object]]) -> str:
+    """O CSV com cabeçalho; cada célula passa por `_celula`."""
     saida = io.StringIO()
     escritor = csv.writer(saida, lineterminator="\n")
     escritor.writerow(colunas)
