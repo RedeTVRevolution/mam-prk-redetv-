@@ -1,6 +1,6 @@
 """Autocompletar de nomes (#150): a busca do catálogo de pessoas e do de marcas.
 
-Corre em memória sobre o catálogo inteiro, que é pequeno. Sem diferença de acento
+Corre em memória sobre o catálogo, que é pequeno. Sem diferença de acento
 nem de maiúscula; cada termo digitado tem de começar uma palavra do nome (ou de um
 apelido); termos de 5 letras ou mais aceitam um erro de digitação (uma letra a
 mais, a menos, trocada, ou duas vizinhas trocadas).
@@ -8,7 +8,7 @@ mais, a menos, trocada, ou duas vizinhas trocadas).
 Os casamentos exatos vêm de um índice por palavra (#485): lista ordenada de (palavra,
 posição do item, variante), consultada com `bisect` pelo prefixo de cada termo, sem
 varrer o catálogo. Só quando os exatos não enchem o limite e algum termo aceita erro de
-digitação o catálogo é percorrido, para completar com os aproximados.
+digitação o resto do catálogo é percorrido, para completar com os aproximados.
 """
 
 from bisect import bisect_left
@@ -81,6 +81,14 @@ class Indexado[T: ComNome]:
         self.nomes = [self.nome, *(normalizar(a) for a in item.apelidos)]
 
 
+def _custo_minimo[T: ComNome](termos: list[str], indexado: Indexado[T]) -> int | None:
+    """O menor custo dos termos entre o nome e os apelidos; `None` se nenhum casa."""
+    custos = [
+        c for nome in indexado.nomes if (c := _custo_no_nome(termos, nome)) is not None
+    ]
+    return min(custos) if custos else None
+
+
 class ListaIndexada[T: ComNome](list[Indexado[T]]):
     """Os itens indexados de uma cópia, mais o índice por palavra (#485): entradas
     `(palavra, posição do item, variante)` em ordem; a variante 0 é o nome, as outras os apelidos."""
@@ -98,9 +106,12 @@ class ListaIndexada[T: ComNome](list[Indexado[T]]):
         """Posições dos itens com uma variante em que todos os termos começam uma palavra."""
         comuns: set[tuple[int, int]] | None = None
         for termo in termos:
-            de = bisect_left(self.palavras, (termo,))
-            ate = bisect_left(self.palavras, (termo + "\U0010ffff",), de)
-            casam = {(p, v) for _, p, v in self.palavras[de:ate]}
+            casam: set[tuple[int, int]] = set()
+            for i in range(bisect_left(self.palavras, (termo,)), len(self.palavras)):
+                palavra, posicao, variante = self.palavras[i]
+                if not palavra.startswith(termo):
+                    break
+                casam.add((posicao, variante))
             comuns = casam if comuns is None else comuns & casam
             if not comuns:
                 return set()
@@ -139,17 +150,23 @@ def achar_por_prefixo[T: ComNome](
     if isinstance(itens, ListaIndexada):
         exatos = sorted(itens.posicoes_exatas(termos), key=lambda p: (itens[p].nome, p))
         aceita_erro = any(len(t) >= TAMANHO_PARA_ACEITAR_ERRO for t in termos)
-        if len(exatos) >= limite or not aceita_erro:
+        if 0 <= limite <= len(exatos) or not aceita_erro:
             return [itens[p].item for p in exatos[:limite]]
+        ja_achados = set(exatos)
+        aproximados = [
+            (custo, indexado.nome, indexado.item)
+            for posicao, indexado in enumerate(itens)
+            if posicao not in ja_achados
+            and (custo := _custo_minimo(termos, indexado)) is not None
+        ]
+        aproximados.sort(key=lambda a: (a[0], a[1]))
+        juntos = [itens[p].item for p in exatos] + [item for _, _, item in aproximados]
+        return juntos[:limite]
     achados: list[tuple[int, str, T]] = []
     for entrada in itens:
         indexado = entrada if isinstance(entrada, Indexado) else Indexado(entrada)
-        custos = [
-            c
-            for nome in indexado.nomes
-            if (c := _custo_no_nome(termos, nome)) is not None
-        ]
-        if custos:
-            achados.append((min(custos), indexado.nome, indexado.item))
+        custo = _custo_minimo(termos, indexado)
+        if custo is not None:
+            achados.append((custo, indexado.nome, indexado.item))
     achados.sort(key=lambda a: (a[0], a[1]))
     return [item for _, _, item in achados[:limite]]

@@ -1,4 +1,5 @@
-"""#484: o autocompletar acha o mesmo de antes e normaliza os nomes uma vez por cópia."""
+"""#484 e #485: o autocompletar acha o mesmo de antes, normaliza os nomes uma vez por cópia
+e tira os exatos do índice por palavra."""
 
 import random
 
@@ -164,3 +165,32 @@ def test_exatos_nao_percorrem_o_catalogo(monkeypatch: pytest.MonkeyPatch) -> Non
     assert [i.nome for i in achar_por_prefixo(indice, "pes 04")] == [
         f"Pessoa 04{d}" for d in range(10)
     ]
+
+
+def test_exatos_que_nao_enchem_o_limite_nao_sao_recalculados(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    itens = [_Item("Sabrina Souza", []), _Item("Sabrine Lima", []), _Item("Bruno", [])]
+    indice = IndiceDeNomes[_Item]().de(itens)
+    esperado = _antigo(itens, "sabrina")
+    vistos: list[str] = []
+    custo_original = achar_nomes._custo_no_nome
+
+    def contando(termos: list[str], nome: str) -> int | None:
+        vistos.append(nome)
+        return custo_original(termos, nome)
+
+    monkeypatch.setattr(achar_nomes, "_custo_no_nome", contando)
+    assert achar_por_prefixo(indice, "sabrina") == esperado
+    assert [i.nome for i in esperado] == ["Sabrina Souza", "Sabrine Lima"]
+    assert "sabrina souza" not in vistos
+
+
+@pytest.mark.parametrize("limite", [0, 1, -1])
+def test_limites_de_borda_iguais_ao_antigo(limite: int) -> None:
+    itens = _catalogo()
+    indice = IndiceDeNomes[_Item]().de(itens)
+    for consulta in ("sa", "sabri", "lu ia sa"):
+        assert achar_por_prefixo(indice, consulta, limite) == _antigo(
+            itens, consulta, limite
+        )
