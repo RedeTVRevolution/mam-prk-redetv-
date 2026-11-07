@@ -11,7 +11,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import requests
 
@@ -47,8 +47,9 @@ TIMEOUT_DO_FLEX_S = 600  # o Flex pode demorar; o servidor também desiste aos 6
 TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
 # Como a Vertex cobra e atende a chamada. Flex é o padrão do processamento (#402); quem tem
 # gente esperando na tela (a busca) ou o cache implícito (a identificação, #414) pede Standard.
-MODO_FLEX = "flex"
-MODO_STANDARD = "standard"
+Modo = Literal["flex", "standard"]
+MODO_FLEX: Modo = "flex"
+MODO_STANDARD: Modo = "standard"
 # Prazo de cada janela: uma tentativa só começa se cabe inteira nele. O `timeout` do
 # Job de análise (infra/modulos/mam/main.tf) é dimensionado por ele; se mudar, refaça aquela conta.
 PRAZO_DA_ANALISE_S = 1500
@@ -178,7 +179,7 @@ class Chamada:
     # Texto no lugar do vídeo (extração de nomes do Job de referências, `video_uri` vazio).
     texto: str = ""
     # O modo vem deste campo, não do conteúdo: Flex por padrão, Standard só quando pedido.
-    modo: str = MODO_FLEX
+    modo: Modo = MODO_FLEX
     # Quanto o transporte espera a resposta; a busca, interativa, espera bem menos.
     timeout_s: float = TIMEOUT_DA_REDE_S
 

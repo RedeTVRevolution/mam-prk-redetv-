@@ -170,10 +170,14 @@ def _lotes[T](itens: Sequence[T], tamanho: int) -> list[list[T]]:
 def _em_paralelo[T, R](
     itens: Sequence[T], chamar: Callable[[T], R], paralelismo: int
 ) -> list[R]:
-    """`chamar` em cada item, até `paralelismo` ao mesmo tempo, na ordem dos itens. A
-    primeira falha sobe, depois de as chamadas em andamento terminarem."""
-    with ThreadPoolExecutor(max_workers=max(paralelismo, 1)) as pool:
+    """`chamar` em cada item, até `paralelismo` ao mesmo tempo, na ordem dos itens. Na
+    primeira falha, os itens que ainda não começaram são cancelados (cada um custaria até
+    um prazo inteiro do Flex) e a falha sobe depois de as chamadas em andamento terminarem."""
+    pool = ThreadPoolExecutor(max_workers=max(paralelismo, 1))
+    try:
         return list(pool.map(chamar, itens))
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 def _validar_convertida(texto: str) -> RespostaConvertida:

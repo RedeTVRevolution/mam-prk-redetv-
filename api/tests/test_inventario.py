@@ -1,6 +1,7 @@
 """Conversão do resultado do Florence-2 e motor Gemini para o inventário (#244)."""
 
 import json
+import threading
 from typing import Any
 
 import pytest
@@ -12,7 +13,7 @@ from api.florence import (
     QuadroDetectado,
     RegiaoLegendada,
 )
-from api.gemini import AnaliseFalhou
+from api.gemini import AnaliseFalhou, Chamada
 from api.inventario import (
     aplicar_inventario,
     converter_do_florence,
@@ -403,10 +404,6 @@ def test_plano_sem_quadros_nao_gera_chamada() -> None:
 
 
 def test_os_lotes_vao_ao_gemini_ao_mesmo_tempo_e_o_resultado_segue_a_ordem() -> None:
-    import threading
-
-    from api.gemini import Chamada
-
     quadros = bruto(
         *[
             quadro(
@@ -439,3 +436,35 @@ def test_os_lotes_vao_ao_gemini_ao_mesmo_tempo_e_o_resultado_segue_a_ordem() -> 
     )
 
     assert sorted(inventarios) == [0, 1, 2, 3]
+
+
+def test_uma_falha_cancela_os_lotes_que_ainda_nao_comecaram() -> None:
+    quadros = bruto(
+        *[
+            quadro(
+                i,
+                f"q/{i}.jpg",
+                objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+            )
+            for i in range(4)
+        ]
+    )
+    chamadas: list[Chamada] = []
+
+    class TransporteQueFalha:
+        def gerar(self, chamada: Chamada) -> str:
+            chamadas.append(chamada)
+            raise AnaliseFalhou("sem capacidade")
+
+    with pytest.raises(AnaliseFalhou):
+        converter_do_florence(
+            decupagem(*[[f"q/{i}.jpg"] for i in range(4)]),
+            quadros,
+            transporte=TransporteQueFalha(),
+            modelo="m",
+            job_id="j1",
+            planos_por_lote=1,
+            paralelismo=1,
+        )
+
+    assert len(chamadas) == 1
