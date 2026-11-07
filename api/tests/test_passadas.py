@@ -117,6 +117,12 @@ def test_a_chamada_usa_o_modelo_pedido_e_o_rotulo_de_custo_proprio() -> None:
     assert chamada.rotulos == {"job_id": "j1", "etapa": ETAPA_DE_CUSTO}
 
 
+def test_a_chamada_da_passada_vai_em_flex() -> None:
+    _, _, transporte = _rodar()
+
+    assert [c.modo for c in transporte.chamadas] == ["flex"]
+
+
 class _Blob:
     def __init__(self, cliente: "_StorageFalso", bucket: str, nome: str) -> None:
         self._cliente, self._chave = cliente, (bucket, nome)

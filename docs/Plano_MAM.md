@@ -4,12 +4,12 @@ Oct 27, 2026 · @RedeTV!
 
 ## Resumo
 
-A decupagem entra em produção como serviço serverless para \~20 h de vídeo por dia. O processamento custa cerca de US$ 0,43 por hora de vídeo; somando custos fixos, armazenamento e uso, a operação fica em \~US$ 340/mês no início e \~US$ 415/mês no terceiro ano (estimativa, a medir no piloto). O plano anterior custava US$ 2,50–4,00 por hora só de modelo. A queda vem de duas escolhas: Gemini 3.5 Flash-Lite como modelo de volume e vídeo em resolução padrão, com o 3.8 Flash só nas pessoas sem nome ([ADR 0013](adr/0013-modelos-por-etapa.md)). As chamadas ao Gemini com vídeo saem no modo Flex, pela metade do preço do Standard, ao custo de esperar de 1 a 15 min por chamada; as só com texto ou imagens saem no Standard ([ADR 0004](adr/0004-gemini-flex-no-video.md)).
+A decupagem entra em produção como serviço serverless para \~20 h de vídeo por dia. O processamento custa cerca de US$ 0,43 por hora de vídeo; somando custos fixos, armazenamento e uso, a operação fica em \~US$ 340/mês no início e \~US$ 415/mês no terceiro ano (estimativa, a medir no piloto). O plano anterior custava US$ 2,50–4,00 por hora só de modelo. A queda vem de duas escolhas: Gemini 3.5 Flash-Lite como modelo de volume e vídeo em resolução padrão, com o 3.8 Flash só nas pessoas sem nome ([ADR 0013](adr/0013-modelos-por-etapa.md)). Toda chamada do processamento ao Gemini sai no modo Flex, pela metade do preço do Standard, ao custo de esperar de 1 a 15 min por chamada; só a identificação das pessoas sem nome (com cache) e a busca, que a pessoa espera na tela, saem no Standard ([ADR 0004](adr/0004-gemini-flex-no-video.md)).
 
 | Decisão | Escolha |
 | --- | --- |
 | Modelo | Gemini 3.5 Flash-Lite em todo o vídeo; Gemini 3.8 Flash só nas pessoas sem nome (modelo forte). O escalonamento das dúvidas e da amostra de controle está desligado por ora ([ADR 0013](adr/0013-modelos-por-etapa.md)) |
-| Consumo | Flex nas chamadas com vídeo e Standard nas só com texto ou imagens ([ADR 0004](adr/0004-gemini-flex-no-video.md)); Batch, com 50% de desconto, para o acervo histórico |
+| Consumo | Flex em toda chamada do processamento; Standard na identificação (com cache) e na busca ([ADR 0004](adr/0004-gemini-flex-no-video.md)); Batch, com 50% de desconto, para o acervo histórico |
 | Arquitetura | 100% serverless: Cloud Run (front, API e jobs), Workflows, Firestore, Cloud Storage, Eventarc, Pub/Sub |
 | API | REST assíncrona: cria o job, consulta o status, baixa o JSON completo; webhook opcional |
 | Segurança | Produção acessível só pela rede da RedeTV; chave de API por sistema; login pelo Identity Platform; Cloud Armor e IAM, sem VPC-SC ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)) |
@@ -43,7 +43,7 @@ O Gemini 3.5 Flash-Lite é o melhor custo para decupar o vídeo inteiro: custa c
 | Gemini 3.8 Flash | 1,50 / 7,50 (metade até 31/12/2026) | \~1,14 | 87,1% ([model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/)) | Pessoas sem nome (modelo forte) e referência do piloto |
 | Gemini 4 Argon | Batch 2,00 / 10,00 (a partir de 01/12/2026) | \~1,53 (Batch) | 91,7% | Não usar no volume |
 
-Premissas do custo por hora: preços Standard do endpoint global ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); a seção Custo usa a metade, o preço do Flex, modo das chamadas com vídeo ([ADR 0004](adr/0004-gemini-flex-no-video.md)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com raciocínio baixo. No dev, em 30/10/2026, o clipe2 (5 min) custou \~US$ 0,02 no Flash-Lite em Standard, ou \~US$ 0,24 por hora, dentro da estimativa. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
+Premissas do custo por hora: preços Standard do endpoint global ([tabela](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)); a seção Custo usa a metade, o preço do Flex, modo de toda chamada do processamento, menos a identificação ([ADR 0004](adr/0004-gemini-flex-no-video.md)); resolução padrão de 70 tokens por quadro a 1 fps e áudio a 25 tokens/s ([media resolution](https://ai.google.dev/gemini-api/docs/media-resolution)); 7% de sobreposição entre janelas; \~60 mil tokens de saída por hora, já com raciocínio baixo. No dev, em 30/10/2026, o clipe2 (5 min) custou \~US$ 0,02 no Flash-Lite em Standard, ou \~US$ 0,24 por hora, dentro da estimativa. Modelos em preview (3 Flash, 3.1 Pro) ficaram de fora.
 
 Não há benchmark público de vídeo longo para o 3.5 Flash-Lite. Por isso a escolha é confirmada no piloto da E1: cinco programas completos e variados, processados inteiros pelos dois modelos, sem depender das dúvidas do primeiro, e comparados visualmente lado a lado no player (ver Qualidade em produção). Se o Flash-Lite ficar aquém só em famosos, apenas a detecção de pessoas sobe para o 3.8 Flash.
 
@@ -70,7 +70,7 @@ O custo tem quatro partes: o variável, por hora de vídeo processada; o fixo, q
 | --- | --- | --- | --- |
 | **Total estimado** | **\~US$ 340** | **\~US$ 370** | **\~US$ 415** |
 
-Não é orçamento fechado: o piloto (E1) mede o consumo real por etapa e por tentativa, a taxa de escalonamento e a latência. O Flex custa \~US$ 200/mês a menos que o Standard: \~US$ 90 na passada de volume, \~US$ 90 no escalonamento e o resto na reserva. A análise roda num Cloud Run Job (#127), que paga CPU parada durante a espera do Flex; o piloto mede esse custo. O desconto de 50% do 3.8 Flash até 31/12/2026 não entra na conta.
+Não é orçamento fechado: o piloto (E1) mede o consumo real por etapa e por tentativa, a taxa de escalonamento e a latência. O Flex custa \~US$ 200/mês a menos que o Standard na análise (o inventário, as referências e as chamadas de comparação em Flex, no #402, tiram mais ~US$ 340/mês da estimativa de ~US$ 1,26/h medida no dev, ficando em ~US$ 0,70/h ou menos): \~US$ 90 na passada de volume, \~US$ 90 no escalonamento e o resto na reserva. A análise roda num Cloud Run Job (#127), que paga CPU parada durante a espera do Flex; o piloto mede esse custo. O desconto de 50% do 3.8 Flash até 31/12/2026 não entra na conta.
 
 De onde vem a economia:
 
@@ -124,7 +124,7 @@ O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cl
 | Firestore | Estado dos jobs, chaves de idempotência, índice de hashes | Transações e expiração automática (TTL) |
 | Cloud Storage | Originais, janelas temporárias, decupagens | Montado via FUSE nos jobs, sem copiar o original; janelas apagadas por regra de ciclo de vida |
 | Eventarc e Pub/Sub | Disparo do job e eventos de webhook | Desacopla API e processamento |
-| Agent Platform | Gemini em Flex (vídeo), Standard (texto e imagens) e Batch, rótulos de custo | Metade do preço no vídeo do dia a dia, resposta em segundos nas chamadas sem vídeo, 50% de desconto no acervo e custo por vídeo |
+| Agent Platform | Gemini em Flex (processamento), Standard (identificação e busca) e Batch, rótulos de custo | Metade do preço no processamento do dia a dia, resposta em segundos na busca, 50% de desconto no acervo e custo por vídeo |
 | Identity Platform | Login de usuários, contas locais, MFA | Gerenciado; gratuito até 49.999 usuários ativos por mês |
 | BigQuery | Eventos de uso, painel da diretoria, relatórios | Consulta barata sobre todo o histórico |
 | Cloud Run (Job de análise) | Uma chamada ao Gemini por janela de análise, inclusive o escalonamento | Várias janelas ao mesmo tempo numa execução, sem o teto de 1800 s da chamada HTTP do Workflows |
@@ -545,7 +545,7 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 | Decisão | Alternativa descartada | Motivo |
 | --- | --- | --- |
 | Gemini 3.5 Flash-Lite no volume, 3.8 Flash só nas pessoas sem nome | Tudo no 3.8 Flash ou no Argon | Cerca de 1/4 do custo ([ADR 0013](adr/0013-modelos-por-etapa.md)) |
-| Gemini em Flex nas chamadas com vídeo ([ADR 0004](adr/0004-gemini-flex-no-video.md)) | Standard, pelo dobro do preço | Metade do preço; em 03/11/2026, a análise inteira levou de 47 s (clipe3) a 10 min 41 s (FAMA), e nos clipes a demora até a decupagem completa veio das etapas seguintes |
+| Gemini em Flex em toda chamada do processamento, menos a identificação ([ADR 0004](adr/0004-gemini-flex-no-video.md)) | Standard, pelo dobro do preço | Metade do preço; em 03/11/2026, a análise inteira levou de 47 s (clipe3) a 10 min 41 s (FAMA), e nos clipes a demora até a decupagem completa veio das etapas seguintes |
 | Serverless: Cloud Run, Workflows, Firestore | GKE ou VMs | Sem custo ocioso e sem cluster para operar |
 | Python único no back, TypeScript no front | Duas linguagens no back | SDK oficial e esquemas compartilhados |
 | API assíncrona com webhook | API síncrona | Vídeos de horas |
@@ -584,7 +584,7 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 - [ ] IPs de saída da RedeTV, para liberar no Cloud Armor; e se o legado aceita chamadas do IP fixo do GCP.
 - [ ] Quem recebe cada papel no início (administradores, editores, diretoria).
 - [ ] O sistema legado consegue receber webhook, ou só consulta status? Depende de o serviço intermediário da [ADR 0011](adr/0011-envio-por-url-assinada.md) aceitar chamadas de fora.
-- [x] Prazo aceitável entre o fim da gravação e a decupagem pronta; decide Flex ou Standard. Flex nas chamadas com vídeo, pela [ADR 0004](adr/0004-gemini-flex-no-video.md).
+- [x] Prazo aceitável entre o fim da gravação e a decupagem pronta; decide Flex ou Standard. Flex em toda chamada do processamento, menos a identificação, pela [ADR 0004](adr/0004-gemini-flex-no-video.md).
 - [ ] Banda de internet disponível para enviar os vídeos, no dia a dia e no acervo.
 - [ ] Teto mensal para o acervo e ordem de prioridade dos programas.
 - [ ] Quantas horas tem, de fato, cada ano do acervo.

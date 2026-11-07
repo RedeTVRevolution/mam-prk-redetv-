@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -668,6 +669,17 @@ def test_o_modo_vem_do_campo_da_chamada_e_nao_do_conteudo() -> None:
 
 def test_a_chamada_nasce_em_flex() -> None:
     assert _chamada().modo == MODO_FLEX
+
+
+def test_so_a_busca_e_a_identificacao_pedem_standard() -> None:
+    """Toda chamada ao Gemini sai em Flex (#402, #471), menos estas duas (ADR 0004)."""
+    api = Path(__file__).parents[1]
+    pedem = {
+        arquivo.name
+        for arquivo in api.glob("*.py")
+        if "modo=MODO_STANDARD" in arquivo.read_text(encoding="utf-8")
+    }
+    assert pedem == {"entendimento_da_consulta.py", "modelo_forte.py"}
 
 
 def test_instrucao_traz_os_cortes_em_mmss_e_sem_cortes_nao_traz_a_secao() -> None:

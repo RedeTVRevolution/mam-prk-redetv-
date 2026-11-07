@@ -122,6 +122,12 @@ def test_o_gemini_recebe_as_imagens_e_a_conversao_so_texto(tmp_path: Path) -> No
     ]
 
 
+def test_as_chamadas_da_comparacao_vao_em_flex(tmp_path: Path) -> None:
+    *_, transporte = _rodar(tmp_path)
+
+    assert {c.modo for c in transporte.chamadas} == {"flex"}
+
+
 def test_nao_grava_na_decupagem(tmp_path: Path) -> None:
     _, armazem, _, _ = _rodar(tmp_path)
 
