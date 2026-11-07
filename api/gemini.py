@@ -301,15 +301,15 @@ class TransporteVertex:
         self.versao_do_modelo = dados.get("modelVersion", "")
         uso = dados.get("usageMetadata") or {}
         entrada = uso.get("promptTokenCount", 0)
-        resposta_de_tokens = uso.get("candidatesTokenCount", 0)
+        tokens_da_resposta = uso.get("candidatesTokenCount", 0)
         raciocinio = uso.get("thoughtsTokenCount", 0)
         self.tokens_de_entrada += entrada
-        self.tokens_de_saida += resposta_de_tokens + raciocinio
+        self.tokens_de_saida += tokens_da_resposta + raciocinio
         self._registrar(
             registro_do_uso_do_modelo(
                 chamada.modelo,
                 entrada,
-                resposta_de_tokens,
+                tokens_da_resposta,
                 raciocinio,
                 uso.get("cachedContentTokenCount", 0),
                 uso.get("trafficType", ""),
