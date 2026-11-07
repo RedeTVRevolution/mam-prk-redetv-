@@ -12,7 +12,7 @@ A decupagem entra em produção como serviço serverless para \~20 h de vídeo p
 | Consumo | Flex nas chamadas com vídeo e Standard nas só com texto ou imagens ([ADR 0004](adr/0004-gemini-flex-no-video.md)); Batch, com 50% de desconto, para o acervo histórico |
 | Arquitetura | 100% serverless: Cloud Run (front, API e jobs), Workflows, Firestore, Cloud Storage, Eventarc, Pub/Sub |
 | API | REST assíncrona: cria o job, consulta o status, baixa o JSON completo; webhook opcional |
-| Segurança | Produção acessível só pela rede da RedeTV; chave de API por sistema; login pelo Identity Platform; Cloud Armor e VPC Service Controls |
+| Segurança | Produção acessível só pela rede da RedeTV; chave de API por sistema; login pelo Identity Platform; Cloud Armor e IAM, sem VPC-SC ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)) |
 | Duplicidade | `Idempotency-Key` por requisição; SHA-256 conferido depois do upload evita processar o mesmo arquivo duas vezes, sem dar acesso à decupagem de outro sistema |
 | Vídeos longos | Janelas de análise de 5 min em paralelo; qualquer duração, uma resposta única |
 | Fora do escopo | Video Intelligence, Cloud Vision |
@@ -154,10 +154,10 @@ Controles de segurança:
 - **Rotação e revogação.** Até duas chaves ativas por sistema, para trocar sem parada; revogar vale na hora.
 - **Assinatura opcional.** Se o sistema conseguir calcular HMAC-SHA256, assina cada requisição com data e hash do corpo, o que impede reaproveitar uma requisição capturada.
 - **Status em vez de webhook.** Sistemas legados raramente recebem chamadas de fora; o padrão é consultar o status com `ETag`. O webhook assinado fica opcional.
-- **Produção só pela rede da RedeTV.** Em `prod`, o Cloud Armor só aceita front, API e chaves de API a partir dos IPs de saída da emissora: uma senha ou chave vazada não funciona de fora. Em `dev` e `staging` não há restrição de IP, para permitir trabalho remoto; ali o acesso exige conta local com MFA.
+- **Produção só pela rede da RedeTV.** Em `prod`, o Cloud Armor só aceita front, API e chaves de API a partir dos IPs de saída da emissora: uma senha ou chave vazada não funciona de fora. Enquanto o dev não vira produção não há restrição de IP, para permitir trabalho remoto; ali o acesso exige conta local com MFA. Quem está fora entra por VPN ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)).
 - **Borda protegida.** O Cloud Run aceita tráfego só do balanceador; HTTPS com certificado gerenciado; Cloud Armor com regras WAF e limite de requisições ([rate limiting](https://docs.cloud.google.com/armor/docs/rate-limiting-overview)). Pessoas e sistemas entram pelo mesmo balanceador: o front exige sessão do Identity Platform e os sistemas usam `/v1` com chave de API.
-- **Upload e player direto no Storage.** As URLs assinadas não passam pelo balanceador nem pelo Cloud Armor. Em `prod`, o perímetro VPC Service Controls tem um nível de acesso com os IPs da RedeTV, que libera upload e reprodução só de lá ([VPC-SC e Cloud Storage](https://docs.cloud.google.com/vpc-service-controls/docs/supported-products#cloud-storage)); o caminho é testado de uma máquina real da RedeTV, inclusive o bloqueio de fora. A URL assinada vale 15 min para iniciar o envio, mas a sessão de upload retomável pode durar até uma semana ([upload retomável](https://docs.cloud.google.com/storage/docs/performing-resumable-uploads)); por isso o job expira em 24 h sem upload completo e a sessão é cancelada. O link de reprodução expira em minutos.
-- **Dados fechados.** Buckets privados com acesso uniforme; perímetro VPC Service Controls em Storage, Agent Platform, Firestore e BigQuery, para que uma credencial vazada não tire dados do projeto.
+- **Upload e player direto no Storage.** As URLs assinadas não passam pelo balanceador nem pelo Cloud Armor. Sem VPC-SC (o projeto não está numa organização), elas valem de qualquer IP enquanto não expiram: é um risco aceito, com as mitigações da [ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md). A URL assinada vale 15 min para iniciar o envio, mas a sessão de upload retomável pode durar até uma semana ([upload retomável](https://docs.cloud.google.com/storage/docs/performing-resumable-uploads)); por isso o job expira em 24 h sem upload completo e a sessão é cancelada. O link de reprodução expira em minutos.
+- **Dados fechados.** Buckets privados com acesso uniforme e nenhuma chave de conta de serviço. Sem perímetro VPC-SC, uma credencial ou Job comprometido alcança as APIs do Google; os riscos aceitos e as mitigações estão na [ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md).
 - **Menor privilégio.** Uma conta de serviço por componente (API, login, validação, análise, consolidação), cada uma só com o que usa.
 - **Entradas hostis.** Só MP4 válido, conferido em quarentena; toda entrada validada; busca protegida contra injeção. Detalhes em Entradas hostis.
 - **Auditoria.** Cloud Audit Logs, logs do balanceador, uso de cada chave de API e de cada chave do KMS.
@@ -174,7 +174,7 @@ O login de pessoas usa o Identity Platform, o serviço de identidade do Google C
 | Administrador de emergência | Conta local criada por um script de instalação, com link para definir a senha enviado ao e-mail do responsável; MFA obrigatório; cada login dispara alerta. São duas, para não haver ponto único de falha | Desde a E0 |
 | Login RedeTV | Nossa tela recebe login e senha; um serviço no Cloud Run consulta a API do legado por HTTPS e, se o login for válido, emite um token próprio do Identity Platform. A senha não é guardada nem vai para log | Quando a API do legado existir; liga por configuração, sem mudar o front |
 
-**MFA no login RedeTV.** O login por token próprio do Identity Platform não aceita o MFA nativo por aplicativo ([documentação](https://firebase.google.com/docs/auth/web/totp-mfa)). Para manter simples e seguro: quem entra pelo login RedeTV não tem segundo fator, mas só acessa a produção a partir dos IPs da emissora, com bloqueio por tentativas e sessão de 8 h; o papel Administrador fica restrito a contas locais com MFA. Em `dev` e `staging`, só entram contas locais com MFA.
+**MFA no login RedeTV.** O login por token próprio do Identity Platform não aceita o MFA nativo por aplicativo ([documentação](https://firebase.google.com/docs/auth/web/totp-mfa)). Para manter simples e seguro: quem entra pelo login RedeTV não tem segundo fator, mas só acessa a produção a partir dos IPs da emissora, com bloqueio por tentativas e sessão de 8 h; o papel Administrador fica restrito a contas locais com MFA. Enquanto o dev não vira produção, só entram contas locais com MFA.
 
 O que pedir ao dev do legado: uma rota que recebe login e senha e devolve id, nome, e-mail e se a conta está ativa; HTTPS; limite de tentativas; e uma forma de o nosso serviço se identificar. Do nosso lado, a chave para chamar essa API fica no Secret Manager, e as chamadas saem de um IP fixo do GCP (Cloud NAT), que o legado pode liberar. O Identity Platform é gratuito até 49.999 usuários ativos por mês em login por e-mail ([preços](https://cloud.google.com/identity-platform/pricing)).
 
@@ -453,16 +453,16 @@ Quase tudo é testado sem o GCP; só a integração final precisa da nuvem. O ca
 
 O ciclo TDD (vermelho, verde, refatorar) vale integralmente para o domínio e os adaptadores. Para as partes que dependem do Gemini, o teste escrito primeiro é um invariante ou uma métrica: "todo evento cai dentro da duração", "o clipe-ouro 3 tem a apresentadora entre 00:42 e 01:10". O prompt muda até o teste passar.
 
-**Três projetos GCP.** `dev` (ambientes efêmeros e testes), `staging` (homologação com vídeos reais) e `prod`. A mesma imagem de contêiner, identificada pelo digest, é promovida de um para o outro; nada é recompilado no caminho.
+**Só dev e produção, sem staging.** O dev vira produção, num projeto fora de organização ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)). A imagem de contêiner é identificada pelo digest; nada é recompilado no caminho.
 
 **Pipeline de CI/CD** (GitHub Free, Cloud Build e Cloud Deploy):
 
 1. Lint, tipos e testes unitários, sem GCP.
 2. Build das imagens no Artifact Registry e testes de integração com emuladores.
 3. Terraform cria o ambiente efêmero do PR e roda os testes ponta a ponta e os de contrato.
-4. Merge na `main` publica em `staging`; aprovação no Cloud Deploy leva a `prod` com tráfego gradual entre revisões. Até a E10, o merge na `main` publica no `dev`: o Cloud Build constrói as imagens, e o Terraform as publica pelo digest (#71).
+4. Merge na `main` publica no `dev`, que vira produção; a aprovação no Cloud Deploy leva a tráfego gradual entre revisões. Até a E10: o Cloud Build constrói as imagens, e o Terraform as publica pelo digest (#71).
 
-**Limites do GitHub Free.** Em repositório privado, o plano Free dá 2.000 minutos de Actions por mês e não tem ambientes com aprovação nem proteção de branch aplicada ([GitHub](https://docs.github.com/actions/reference/environments)). Por isso o Actions roda só lint e testes unitários; build de imagens, integração e ponta a ponta rodam no Cloud Build, disparado pelo GitHub, com 2.500 minutos grátis por mês ([preços](https://cloud.google.com/build/pricing)); a aprovação para produção fica no Cloud Deploy. O próprio pipeline garante que nada sem testes verdes chega a `staging` ou `prod`.
+**Limites do GitHub Free.** Em repositório privado, o plano Free dá 2.000 minutos de Actions por mês e não tem ambientes com aprovação nem proteção de branch aplicada ([GitHub](https://docs.github.com/actions/reference/environments)). Por isso o Actions roda só lint e testes unitários; build de imagens, integração e ponta a ponta rodam no Cloud Build, disparado pelo GitHub, com 2.500 minutos grátis por mês ([preços](https://cloud.google.com/build/pricing)); a aprovação para produção fica no Cloud Deploy. O próprio pipeline garante que nada sem testes verdes chega ao ambiente publicado.
 
 **No notebook do desenvolvedor.** Testes unitários e `docker compose up` para os emuladores cobrem o dia a dia. Para tocar o GCP real, o desenvolvedor sobe o seu próprio ambiente efêmero com o mesmo comando do PR (`make preview`). Custos de dev controlados por alerta de orçamento, clipes curtos nas chamadas reais e expiração automática dos recursos efêmeros.
 
@@ -505,12 +505,12 @@ Cada entrega atravessa todas as camadas (front, API, processamento, dados e test
 | **E5 · Comerciais e merchandising** | Filtrar e tirar relatório por marca e por tipo de inserção | Taxonomia comercial e relatório | Um dia de programação conferido por um revisor |
 | **E6 · B-roll e busca visual** | Buscar "plano limpo de trânsito à noite" ou enviar uma foto e achar planos parecidos | Flag de plano limpo, vetores multimodais, busca por imagem | Consultas visuais de texto da sonda (`visual = true`, como "plano limpo de trânsito à noite"), tiradas do que esta linha promete, com ≥80% dos 5 primeiros resultados pertinentes em `make sondar-busca`; sem aprovação dos editores. A sonda só roda consultas de texto: a busca por foto enviada e os planos parecidos continuam no produto, mas ficam fora dessa medida (a [#327](https://github.com/RedeTVRevolution/mam-prk-redetv-/issues/327) retirou só as fotos de referência de pessoas) |
 | **E7 · API para sistemas legados** | O sistema da RedeTV envia vídeos e consulta a decupagem | Chave de API, idempotência, deduplicação autorizada, consulta de status | Teste de caos sem job duplicado; dois sistemas com o mesmo arquivo não veem os jobs um do outro |
-| **E8 · Login RedeTV e permissões completas** | Usuários entram com o login da RedeTV; o administrador gere papéis e escopos por programa | Adaptador para a API do legado, todos os papéis, auditoria; Administrador só em conta local com MFA | Login pelo legado em `staging`; a conta local continua funcionando. Entra quando a API do legado existir |
+| **E8 · Login RedeTV e permissões completas** | Usuários entram com o login da RedeTV; o administrador gere papéis e escopos por programa | Adaptador para a API do legado, todos os papéis, auditoria; Administrador só em conta local com MFA | Login pelo legado no `dev`; a conta local continua funcionando. Entra quando a API do legado existir |
 | **E9 · Painel da diretoria** | A diretoria acompanha acessos, vídeos e buscas por usuário e no total | Eventos no BigQuery, telas do painel, papel Diretoria | Os números de uma semana batem com os registros |
-| **E10 · Produção** | Operação diária de 20 h com alertas, acessível só pela rede da RedeTV | Balanceador, Cloud Armor com os IPs da emissora, VPC-SC com nível de acesso para upload e player, observabilidade, teste de carga | Upload e player funcionam de uma máquina da RedeTV e são bloqueados de fora; uma semana em paralelo ao processo atual sem incidente bloqueante |
+| **E10 · Produção** | Operação diária de 20 h com alertas, acessível só pela rede da RedeTV | Balanceador, Cloud Armor com os IPs da emissora, observabilidade, teste de carga | Front, API e chaves só respondem aos IPs da RedeTV (quem está fora entra por VPN); uma semana em paralelo ao processo atual sem incidente bloqueante |
 | **E11 · Acervo histórico** | Programas antigos aparecendo na busca | Lote-piloto por época com a comparação visual da E1; depois Batch com fila por prioridade e teto mensal | Lote-piloto aprovado na comparação visual e dentro do teto |
 
-A segurança de base (IAM, buckets privados, nenhum segredo) vale desde a E0; o VPC-SC entra em modo de teste a partir da E4 e é aplicado na E10. Cada entrega vira um conjunto de tickets verticais pequenos no `/to-tickets`.
+A segurança de base (IAM, buckets privados, nenhum segredo) vale desde a E0; o Cloud Armor com os IPs da RedeTV é aplicado na E10 (sem VPC-SC, [ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)). Cada entrega vira um conjunto de tickets verticais pequenos no `/to-tickets`.
 
 ### Recorte da E0 (grill de 29/10/2026)
 
@@ -518,7 +518,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 
 | Tema | Decisão na E0 |
 | --- | --- |
-| Projeto GCP | Projeto `dev` novo na organização da RedeTV, com billing da RedeTV e alerta de orçamento; `staging` e `prod` ficam fora |
+| Projeto GCP | Projeto `dev` novo, sem organização, com billing da RedeTV e alerta de orçamento; vira a produção, sem staging ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)) |
 | Região | Tudo em `southamerica-east1`; o Gemini usa o endpoint global, coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
 | Hospedagem | Um único serviço Cloud Run: o FastAPI serve a API e o build do React. Sem balanceador nem Cloud Armor; o front ganha serviço próprio quando o balanceador entrar (E10) |
 | Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → Job de análise → decupagem no Storage |
@@ -566,7 +566,7 @@ Esta seção é a entrada do grill: decisões já tomadas, para serem desafiadas
 | Chamada ao Gemini num serviço com concorrência | Uma tarefa de Job por janela | O Job pagaria CPU parada esperando o Gemini |
 | Amostra de controle no 3.8 Flash | Escalonar só por dúvida | Mede o que o modelo nem percebeu |
 | Piloto completo na E1, com comparação visual lado a lado | A/B depois da busca e da edição | Prova o valor da IA antes de investir no produto |
-| Produção só pelos IPs da RedeTV; dev e staging abertos, com MFA | Restringir também o desenvolvimento | Permite trabalho remoto sem abrir a produção |
+| Produção só pelos IPs da RedeTV (quem está fora entra por VPN); sem VPC-SC nem staging ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)) | Organização do GCP com perímetro VPC-SC e um projeto de staging | Sem organização e com custo menor; os riscos aceitos estão na ADR |
 | Login RedeTV sem MFA, compensado pelo IP; Administrador só em conta local com MFA | Criar um segundo fator próprio para o login legado | Simples e seguro; o token próprio não aceita o MFA nativo |
 
 **Perguntas em aberto**
