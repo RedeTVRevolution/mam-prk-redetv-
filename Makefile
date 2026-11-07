@@ -180,7 +180,7 @@ medir-florence:
 	uv run --locked python -m api.medir_florence "$(JOB)" $(VARIACOES)
 
 # Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
-# make reindexar [JOB=<id>]. Apaga e regrava o vídeo; repetir dá o mesmo resultado.
+# make reindexar [JOB=<id>]. Grava só o que mudou no vídeo; repetir dá o mesmo resultado.
 reindexar:
 	$(AMBIENTE_DA_BUSCA) \
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
