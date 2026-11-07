@@ -79,9 +79,9 @@ JUNCAO_MS = 3_000
 # Assinaturas simultâneas para a chave de sistema: cada uma é uma ida ao IAM, e cem
 # momentos em fila passavam dos 15 s da rota.
 TETO_DE_ASSINATURAS = 16
-# Consultas ao índice simultâneas numa busca. Pequeno de propósito: o executor da rota
-# tem 8 workers numa instância de 1 vCPU, e cada busca já ocupa um deles.
-CONCORRENCIA_DO_INDICE = 3
+# Consultas ao índice simultâneas numa busca. Pequeno de propósito: cada busca já ocupa
+# um worker do executor da rota, numa instância de 1 vCPU.
+TETO_DE_CONSULTAS_AO_INDICE = 3
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
 ROTULO_DO_TIPO: dict[str, str] = {
@@ -515,18 +515,19 @@ class Busca:
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
         # Os Jobs de todas as cláusulas, e depois os nomes dos registros, vêm em lote.
-        # As consultas vão ao índice juntas, no máximo `CONCORRENCIA_DO_INDICE` de cada vez;
-        # cada uma segue com a sua fusão (RRF), e a ordem de antes é a dos resultados.
+        # As consultas vão ao índice juntas, no máximo `TETO_DE_CONSULTAS_AO_INDICE` de cada
+        # vez; cada uma segue com a sua fusão (RRF), e a ordem de antes é a dos resultados.
+        # Se uma falha, o erro sobe sem esperar as que ainda nem saíram.
         por_clausula = [_com_facetas(c.consulta, facetado) for c in clausulas]
         planas = [q for qs in por_clausula for q in qs]
-        if len(planas) > 1:
-            with ThreadPoolExecutor(
-                max_workers=min(CONCORRENCIA_DO_INDICE, len(planas))
-            ) as pool:
-                achados_planos = list(pool.map(do_indice, planas))
-        else:
-            achados_planos = [do_indice(q) for q in planas]
-        entregues = iter(achados_planos)
+        with ThreadPoolExecutor(
+            max_workers=max(1, min(TETO_DE_CONSULTAS_AO_INDICE, len(planas)))
+        ) as pool:
+            try:
+                entregues = iter(list(pool.map(do_indice, planas)))
+            except BaseException:
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
         brutos = [[next(entregues) for _ in qs] for qs in por_clausula]
         carregar_jobs(
             r.job_id for da_clausula in brutos for lista in da_clausula for r in lista

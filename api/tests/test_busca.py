@@ -16,9 +16,9 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.busca import (
-    CONCORRENCIA_DO_INDICE,
     TETO_DA_LISTA_BYTES,
     TETO_DE_ASSINATURAS,
+    TETO_DE_CONSULTAS_AO_INDICE,
     TETO_DE_REGISTROS,
     TETO_DO_RANKING,
     Ajustes,
@@ -208,61 +208,90 @@ def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> No
     assert resultado.sem_aparicoes == []
 
 
-def _mundo_de_varias_clausulas() -> Mundo:
-    chapeu = {**VESTIDO, "tipo": "chapéu", "cor_base": "azul"}
-    m = Mundo(pedido(pessoas=["Sabrina Sato"], objetos=[VESTIDO, chapeu]))
+OUTROS_OBJETOS = [("chapéu", "azul"), ("bolsa", "preto"), ("sapato", "branco")]
+
+
+def _mundo_de_varias_clausulas(indice: IndiceEspia | None = None) -> Mundo:
+    """Quatro cláusulas, uma consulta ao índice cada: mais que o teto."""
+    outros = [{**VESTIDO, "tipo": t, "cor_base": c} for t, c in OUTROS_OBJETOS]
+    m = Mundo(pedido(pessoas=["Sabrina Sato"], objetos=[VESTIDO, *outros]))
+    m.indice = indice or m.indice
+    dos_outros = [
+        objeto(
+            f"j{n % 2 + 1}:objeto:{n + 1}",
+            f"j{n % 2 + 1}",
+            40_000 + 20_000 * n,
+            50_000 + 20_000 * n,
+            dono=m.sabrina,
+            tipo_do_objeto=t,
+            cor_base=[c],
+            cor=c,
+            texto=f"{t} {c}",
+        )
+        for n, (t, c) in enumerate(OUTROS_OBJETOS)
+    ]
     m.com(
         job("j1"),
         objeto("j1:objeto:0", "j1", 12_000, 19_000, dono=m.sabrina),
-        objeto(
-            "j1:objeto:1",
-            "j1",
-            40_000,
-            50_000,
-            dono=m.sabrina,
-            tipo_do_objeto="chapéu",
-            cor_base=["azul"],
-        ),
+        *(r for r in dos_outros if r.job_id == "j1"),
     )
+    m.com(job("j2"), *(r for r in dos_outros if r.job_id == "j2"))
     return m
 
 
 def test_as_clausulas_vao_ao_indice_ao_mesmo_tempo_e_com_limite() -> None:
     class IndiceLento(IndiceEspia):
+        """As primeiras consultas só passam quando o teto inteiro está em voo."""
+
         def __init__(self) -> None:
             super().__init__()
             self.em_voo = 0
             self.pico = 0
+            self.chegadas = 0
             self.trava = threading.Lock()
-            self.dupla = threading.Barrier(2, timeout=5)
+            self.turma = threading.Barrier(TETO_DE_CONSULTAS_AO_INDICE, timeout=5)
 
         def buscar(self, consulta: Consulta) -> list[Registro]:
             with self.trava:
                 self.em_voo += 1
                 self.pico = max(self.pico, self.em_voo)
+                self.chegadas += 1
+                da_turma = self.chegadas <= TETO_DE_CONSULTAS_AO_INDICE
             try:
-                if len(self.consultas) < 2:  # a dupla só passa se as duas estão em voo
-                    self.dupla.wait()
+                if da_turma:
+                    self.turma.wait()
                 return super().buscar(consulta)
             finally:
                 with self.trava:
                     self.em_voo -= 1
 
-    m = _mundo_de_varias_clausulas()
-    m.indice = IndiceLento()
-    m.com(job("j1"))
-    buscar(m)
-    assert 2 <= m.indice.pico <= CONCORRENCIA_DO_INDICE
+    lento = IndiceLento()
+    resultado = buscar(_mundo_de_varias_clausulas(lento))
+    assert len(lento.consultas) > TETO_DE_CONSULTAS_AO_INDICE
+    assert lento.pico == TETO_DE_CONSULTAS_AO_INDICE
+    assert resultado.videos
 
 
 def test_o_resultado_em_paralelo_e_o_da_execucao_em_serie(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     em_paralelo = buscar(_mundo_de_varias_clausulas())
-    monkeypatch.setattr("api.busca.CONCORRENCIA_DO_INDICE", 1)
+    monkeypatch.setattr("api.busca.TETO_DE_CONSULTAS_AO_INDICE", 1)
     em_serie = buscar(_mundo_de_varias_clausulas())
+    assert [v.n_momentos for v in em_paralelo.videos] == [3, 1]
     assert em_paralelo.videos == em_serie.videos
     assert em_paralelo.sem_aparicoes == em_serie.sem_aparicoes
+
+
+def test_se_uma_consulta_ao_indice_falha_o_erro_sobe_como_em_serie() -> None:
+    class IndiceQueFalha(IndiceEspia):
+        def buscar(self, consulta: Consulta) -> list[Registro]:
+            super().buscar(consulta)
+            raise RuntimeError("índice fora do ar")
+
+    indice = IndiceQueFalha()
+    with pytest.raises(RuntimeError, match="índice fora do ar"):
+        buscar(_mundo_de_varias_clausulas(indice))
 
 
 def test_dois_momentos_a_2_s_pelo_mesmo_motivo_viram_um_trecho_e_a_5_s_ficam_dois() -> (

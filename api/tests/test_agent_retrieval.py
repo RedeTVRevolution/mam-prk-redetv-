@@ -261,6 +261,41 @@ def test_o_mesmo_texto_e_embutido_uma_vez_so() -> None:
     assert len(transporte.chamadas) == 2
 
 
+def test_duas_clausulas_juntas_com_o_mesmo_texto_embutem_uma_vez_so() -> None:
+    entrou = threading.Event()
+    solta = threading.Event()
+
+    class TransporteLento(TransporteFalso):
+        def __call__(
+            self, metodo: str, caminho: str, corpo: dict[str, Any] | None
+        ) -> dict[str, Any]:
+            entrou.set()
+            solta.wait(timeout=5)
+            return super().__call__(metodo, caminho, corpo)
+
+    transporte = TransporteLento(
+        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+    )
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    vetores: list[list[float]] = []
+    primeira = threading.Thread(
+        target=lambda: vetores.append(adaptador.vetor_da_consulta("a"))
+    )
+    segunda = threading.Thread(
+        target=lambda: vetores.append(adaptador.vetor_da_consulta("a"))
+    )
+    primeira.start()
+    assert entrou.wait(timeout=5)
+    segunda.start()
+    segunda.join(timeout=0.1)  # a segunda chega e espera a primeira
+    solta.set()
+    primeira.join(timeout=5)
+    segunda.join(timeout=5)
+    assert vetores == [[0.5] * 256] * 2
+    assert len(transporte.chamadas) == 1
+    assert adaptador._embutindo == {}
+
+
 def test_outra_thread_limpando_o_cache_no_meio_nao_derruba_a_busca() -> None:
     class Limpa(dict[str, list[float]]):
         """Outra thread chama `clear()` entre o `in` e a leitura."""
