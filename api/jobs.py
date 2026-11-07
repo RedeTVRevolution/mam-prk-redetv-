@@ -322,7 +322,7 @@ class JobResumido(BaseModel):
     duracao_s: float | None
     timecode_origem: str | None = None
     taxa_de_quadros: float | None = None
-    # URL assinada, de curta validade, do quadro de capa; só a listagem a preenche.
+    # URL assinada, de curta validade, do quadro de capa; a listagem e o detalhe a preenchem, o andamento não.
     capa_url: str | None = None
     programa: str | None = None
     data_exibicao: date | None = None
@@ -1052,12 +1052,14 @@ def criar_rotas(
             url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
+    def _url_da_capa(job: Job) -> str | None:
+        if job.capa is None:
+            return None
+        return armazenamento.url_do_quadro(job.id, job.capa, VALIDADE_DA_IMAGEM)
+
     def _com_capa(job: Job) -> JobResumido:
         publico = JobResumido.de(job)
-        if job.capa is not None:
-            publico.capa_url = armazenamento.url_do_quadro(
-                job.id, job.capa, VALIDADE_DA_IMAGEM
-            )
+        publico.capa_url = _url_da_capa(job)
         return publico
 
     @rotas.get("", response_model=list[JobResumido])
@@ -1143,6 +1145,7 @@ def criar_rotas(
     ) -> Response:
         job = _enxerga(chamador, repositorio.obter(job_id))
         publico = JobPublico.de(job)
+        publico.capa_url = _url_da_capa(job)
         etag = _etag(publico)
         cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"}
         if _casa_etag(request.headers.get("if-none-match"), etag):

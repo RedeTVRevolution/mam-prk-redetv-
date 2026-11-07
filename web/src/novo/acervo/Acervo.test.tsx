@@ -565,6 +565,53 @@ test('a consulta de um vídeo em andamento mantém a capa da lista', async () =>
   expect(document.querySelector('img[src="/capa-a.jpg"]')).toBeTruthy()
 })
 
+test('o vídeo que termina sem capa na lista ganha a capa do detalhe, sem recarregar a lista', async () => {
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'validando' })]
+  const detalhes: string[] = []
+  servidor.use(
+    andamentoQueConta([]),
+    http.get('/v1/jobs/a', () => {
+      detalhes.push('a')
+      return HttpResponse.json({ ...jobs[0], capa_url: '/capa-a.jpg' })
+    }),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('andando.mp4')
+  const listagens = chamadas.length
+
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'concluido' })]
+
+  await waitFor(() => expect(document.querySelector('img[src="/capa-a.jpg"]')).toBeTruthy())
+  expect(detalhes).toEqual(['a'])
+  expect(chamadas.length).toBe(listagens)
+})
+
+test('o vídeo que termina sem capa (falhou) não repete o pedido do detalhe', async () => {
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'validando' })]
+  let detalhes = 0
+  let rodadas = 0
+  servidor.use(
+    http.get('/v1/jobs/andamento', () => {
+      rodadas++
+      return HttpResponse.json(jobs)
+    }),
+    http.get('/v1/jobs/a', () => {
+      detalhes++
+      return HttpResponse.json({ ...jobs[0], capa_url: null })
+    }),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('andando.mp4')
+
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'falhou', codigo_falha: 'erro_interno' })]
+
+  await waitFor(() => expect(detalhes).toBe(1))
+  const antes = rodadas
+  await new Promise((r) => setTimeout(r, 100))
+  expect(detalhes).toBe(1)
+  expect(rodadas).toBe(antes)
+})
+
 test('com a aba escondida, ninguém é consultado', async () => {
   jobs = [job({ id: 'b', nome: 'andando.mp4', estado: 'validando' })]
   let consultas = 0
