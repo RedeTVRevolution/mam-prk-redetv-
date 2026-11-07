@@ -552,6 +552,11 @@ def _id_do_objeto(id: str) -> str:
     return "m-" + hashlib.sha256(id.encode()).hexdigest()[:40]
 
 
+def _nome_vale(nome: str, dados: dict[str, Any]) -> bool:
+    """O objeto lido tem o nome que o id dele dá hoje."""
+    return nome.rsplit("/", 1)[-1] == _id_do_objeto(dados["id"])
+
+
 def _criacao(r: Registro) -> dict[str, Any]:
     objeto: dict[str, Any] = {"data": _dados(r)}
     return {"dataObjectId": _id_do_objeto(r.id), "dataObject": objeto}
@@ -733,46 +738,77 @@ class AgentRetrieval:
                 return
             pedido = pedido | {"pageToken": pagina["nextPageToken"]}
 
-    def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
-        """Os dados de todos os objetos do vídeo, só com os campos do esquema da coleção:
-        um campo fora do `dataSchema` dá HTTP 400 no `query`. Os vetores não voltam."""
+    def _ler_com_nomes(self, job_id: str) -> list[tuple[str, dict[str, Any]]]:
+        """Nome e dados de todos os objetos do vídeo, só com os campos do esquema da
+        coleção: um campo fora do `dataSchema` dá HTTP 400 no `query`. Os vetores não
+        voltam."""
         campos = list(esquema_da_colecao(self._config)["dataSchema"]["properties"])
-        return [o["data"] for o in self._objetos_do_video(job_id, campos)]
+        return [(o["name"], o["data"]) for o in self._objetos_do_video(job_id, campos)]
+
+    def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
+        """Os dados de todos os objetos do vídeo (ver `_ler_com_nomes`)."""
+        return [dados for _, dados in self._ler_com_nomes(job_id)]
+
+    def _escrever(
+        self, operacao: str, pedidos: list[dict[str, Any]], lote: int
+    ) -> None:
+        """Manda os pedidos em lotes de até `lote`, cada um reservado antes no orçamento
+        da cota (#460)."""
+        for i in range(0, len(pedidos), lote):
+            pedacos = pedidos[i : i + lote]
+            self._reservar(len(pedacos))
+            self._chamar(f"dataObjects:{operacao}", {"requests": pedacos}, esperar=True)
+
+    def _apagar_nomes(self, nomes: list[str]) -> None:
+        """O `batchDelete` só aceita nomes, em lotes de até `OBJETOS_POR_PAGINA`."""
+        self._escrever("batchDelete", [{"name": n} for n in nomes], OBJETOS_POR_PAGINA)
 
     def apagar(self, job_id: str) -> None:
-        """O `batchDelete` só aceita nomes: junta os do vídeo, página a página, e apaga."""
-        nomes = [o["name"] for o in self._objetos_do_video(job_id)]
-        for i in range(0, len(nomes), OBJETOS_POR_PAGINA):
-            lote = nomes[i : i + OBJETOS_POR_PAGINA]
-            self._reservar(len(lote))
-            self._chamar(
-                "dataObjects:batchDelete",
-                {"requests": [{"name": n} for n in lote]},
-                esperar=True,
-            )
+        """Apaga o vídeo inteiro: junta os nomes, página a página, e apaga em lote."""
+        self._apagar_nomes([o["name"] for o in self._objetos_do_video(job_id)])
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
+        """Grava só o que mudou (#418): lê o índice do vídeo, compara com `registros` e
+        aplica o plano (`montar_plano`). Interrompida no meio, uma nova rodada compara
+        de novo com o índice e termina o trabalho."""
         try:
             self._gravar_uma_vez(job_id, registros)
         except JaExiste:
-            # Um lote já estava lá: reenviado depois de uma resposta perdida, gravado em
-            # parte, ou de outra indexação do mesmo vídeo (os ids são fixos). O `apagar`
-            # tira só o que existe; o vídeo entra de novo inteiro, uma vez (#411).
-            log.warning("%s: 409 na gravação, apagando e gravando de novo", job_id)
+            # Um lote já estava lá: reenviado depois de uma resposta perdida, ou de outra
+            # indexação do mesmo vídeo (os ids são fixos). Lê o índice de novo, que agora
+            # tem esse lote, e compara outra vez (#411).
+            log.warning("%s: 409 na gravação, comparando com o índice de novo", job_id)
             self._gravar_uma_vez(job_id, registros)
         if not self._config.indices_ligados:
             self._avisar_do_teto_do_knn()
 
     def _gravar_uma_vez(self, job_id: str, registros: list[Registro]) -> None:
-        self.apagar(job_id)
-        for i in range(0, len(registros), REGISTROS_POR_LOTE):
-            pedacos = registros[i : i + REGISTROS_POR_LOTE]
-            self._reservar(len(pedacos))
-            self._chamar(
-                "dataObjects:batchCreate",
-                {"requests": [_criacao(r) for r in pedacos]},
-                esperar=True,
-            )
+        # Só vale como lido o objeto com o nome que o id dele dá hoje: o que tem outro
+        # nome (o id antigo, ou o resumo de `_id_do_objeto`) é lixo e sai, e o registro
+        # dele entra pelo nome certo. Dois objetos com o mesmo `data.id` não se confundem.
+        nome_do_id: dict[str, str] = {}
+        validos: list[dict[str, Any]] = []
+        lixo: list[str] = []
+        for nome, dados in self._ler_com_nomes(job_id):
+            if _nome_vale(nome, dados):
+                nome_do_id[dados["id"]] = nome
+                validos.append(dados)
+            else:
+                lixo.append(nome)
+        plano = montar_plano(registros, validos)
+        self._apagar_nomes(lixo + [nome_do_id[i] for i in plano.apagar])
+        self._escrever(
+            "batchCreate", [_criacao(r) for r in plano.criar], REGISTROS_POR_LOTE
+        )
+        self._escrever(
+            "batchUpdate",
+            [self._atualizacao(r) for r in plano.atualizar],
+            OBJETOS_POR_PAGINA,
+        )
+
+    def _atualizacao(self, r: Registro) -> dict[str, Any]:
+        nome = f"{self._config.caminho_da_colecao}/dataObjects/{_id_do_objeto(r.id)}"
+        return {"dataObject": {"name": nome, "data": _dados(r)}, "updateMask": "data"}
 
     def _avisar_do_teto_do_knn(self) -> None:
         """Sem índice ANN a busca é KNN, que recusa mais de 100 mil registros: o aviso vem

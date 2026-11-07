@@ -455,13 +455,13 @@ def test_o_pedido_de_texto_vai_normalizado_ao_campo_normalizado(consulta: str) -
     }
 
 
-def test_gravar_apaga_antes_os_registros_do_video() -> None:
+def test_gravar_comeca_lendo_o_indice_do_video() -> None:
     transporte = TransporteFalso()
     AgentRetrieval(CONFIG, transporte).gravar("j", [])
     [(metodo, caminho, corpo)] = transporte.chamadas
     assert metodo == "POST"
     assert caminho.endswith("/dataObjects:query")
-    assert corpo == {"filter": {"job_id": {"$eq": "j"}}, "pageSize": 1000}
+    assert corpo is not None and corpo["filter"] == {"job_id": {"$eq": "j"}}
 
 
 def test_apagar_consulta_os_nomes_pagina_a_pagina_e_apaga_em_lote() -> None:
@@ -1099,12 +1099,16 @@ def test_orcamento_dois_indices_juntos_nao_passam_da_fracao_da_cota() -> None:
 def test_orcamento_conta_a_apagada_junto_com_a_criada() -> None:
     relogio = _Relogio()
     orcamento = _OrcamentoFalso()
-    nomes = [{"name": f"c/dataObjects/{n}"} for n in range(1500)]
+    # Nome que não é o do id: lixo de uma indexação antiga, que a gravação apaga.
+    lixo = [
+        {"name": f"c/dataObjects/velho-{n}", "data": _lido(_reg(f"j:fala:v{n}"))}
+        for n in range(1500)
+    ]
 
     def transporte(
         metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> dict[str, Any]:
-        return {"dataObjects": nomes} if caminho.endswith(":query") else {}
+        return {"dataObjects": lixo} if caminho.endswith(":query") else {}
 
     AgentRetrieval(
         replace(CONFIG, cota_de_escrita=3000),
@@ -1266,8 +1270,11 @@ def test_ler_indice_pede_so_os_campos_do_esquema_e_pagina() -> None:
     r1, r2 = _reg("j:fala:fal000", texto="a"), _reg("j:fala:fal001", texto="b")
     respostas = iter(
         [
-            {"dataObjects": [{"data": _lido(r1)}], "nextPageToken": "p2"},
-            {"dataObjects": [{"data": _lido(r2)}]},
+            {
+                "dataObjects": [{"name": "c/dataObjects/a", "data": _lido(r1)}],
+                "nextPageToken": "p2",
+            },
+            {"dataObjects": [{"name": "c/dataObjects/b", "data": _lido(r2)}]},
         ]
     )
     transporte = TransporteFalso()
@@ -1280,3 +1287,180 @@ def test_ler_indice_pede_so_os_campos_do_esquema_e_pagina() -> None:
     campos = corpo1["outputFields"]["dataFields"]
     assert campos == list(esquema_da_colecao(CONFIG)["dataSchema"]["properties"])
     assert corpo2["pageToken"] == "p2"
+
+
+class _ColecaoEmMemoria:
+    """A coleção como o serviço a trata, por nome: `query` pagina por vídeo, `batchCreate`
+    recusa nome que existe (409), `batchUpdate` troca o `data`. `falhar_em` leva a
+    operação (ou qualquer uma, com `*`) a levantar depois de `n` chamadas dela, para
+    simular uma queda no meio."""
+
+    def __init__(self) -> None:
+        self.objetos: dict[str, dict[str, Any]] = {}
+        self.escritos = 0
+        self.operacoes: list[str] = []
+        self.falhar_em: tuple[str, int] | None = None
+
+    def __call__(
+        self, metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        assert corpo is not None
+        operacao = caminho.rsplit(":", 1)[1]
+        if self.falhar_em and (
+            (
+                self.falhar_em[0] == operacao
+                and self.operacoes.count(operacao) >= self.falhar_em[1]
+            )
+            or (self.falhar_em[0] == "*" and len(self.operacoes) >= self.falhar_em[1])
+        ):
+            self.falhar_em = None
+            raise RuntimeError("queda no meio")
+        self.operacoes.append(operacao)
+        colecao = caminho.rsplit("/dataObjects", 1)[0]
+        if operacao == "query":
+            job = corpo["filter"]["job_id"]["$eq"]
+            achados = [
+                {"name": n, "data": d}
+                for n, d in self.objetos.items()
+                if d["job_id"] == job
+            ]
+            return {"dataObjects": achados}
+        if operacao == "batchCreate":
+            for r in corpo["requests"]:
+                nome = f"{colecao}/dataObjects/{r['dataObjectId']}"
+                if nome in self.objetos:
+                    raise JaExiste(nome)
+                self.objetos[nome] = r["dataObject"]["data"]
+                self.escritos += 1
+        elif operacao == "batchDelete":
+            for r in corpo["requests"]:
+                del self.objetos[r["name"]]
+                self.escritos += 1
+        elif operacao == "batchUpdate":
+            for r in corpo["requests"]:
+                assert r["updateMask"] == "data"
+                self.objetos[r["dataObject"]["name"]] = r["dataObject"]["data"]
+                self.escritos += 1
+        return {}
+
+
+def _video(n: int, **mudancas: Any) -> list[Registro]:
+    """Um vídeo de `n` falas e `n` planos; `mudancas` troca campos de alguns ids."""
+    registros = [_reg(f"j:fala:f{i}", texto=f"fala {i}") for i in range(n)]
+    registros += [
+        _reg(f"j:plano:p{i}", "plano", descricao=f"plano {i}", quadro=f"q{i}")
+        for i in range(n)
+    ]
+    return [replace(r, **mudancas.get(r.id, {})) for r in registros]
+
+
+def test_revisao_com_10_correcoes_grava_no_maximo_50_objetos() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(500))
+    assert len(colecao.objetos) == 1000
+    colecao.escritos = 0
+    # 10 correções: 5 mudam o texto de uma fala (apaga e cria) e 5 mudam só as pessoas.
+    mudancas = {f"j:fala:f{i}": {"texto": f"corrigida {i}"} for i in range(5)} | {
+        f"j:fala:f{i}": {"pessoas": ["maria"]} for i in range(5, 10)
+    }
+    indice.gravar("j", _video(500, **mudancas))
+    assert colecao.escritos == 5 * 2 + 5 <= 50
+    assert len(colecao.objetos) == 1000
+
+
+def test_gravar_de_novo_sem_mudanca_so_le() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(3))
+    colecao.operacoes.clear()
+    indice.gravar("j", _video(3))
+    assert colecao.operacoes == ["query"]
+
+
+def test_gravar_apaga_o_que_sumiu_e_o_objeto_de_nome_que_nao_e_o_do_id() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(2))
+    colecao.objetos["c/dataObjects/antigo"] = _lido(_reg("j:fala:f0", texto="fala 0"))
+    colecao.objetos["c/dataObjects/outro"] = _lido(_reg("j:fala:velha"))
+    indice.gravar("j", _video(2)[1:])
+    ids = sorted(d["id"] for d in colecao.objetos.values())
+    assert ids == ["j:fala:f1", "j:plano:p0", "j:plano:p1"]
+    assert all("/m-j-" in n for n in colecao.objetos)
+
+
+@pytest.mark.parametrize("operacao", ["batchDelete", "batchCreate", "batchUpdate"])
+def test_falha_no_meio_e_nova_rodada_chegam_ao_mesmo_indice(operacao: str) -> None:
+    mudancas = {
+        "j:fala:f0": {"texto": "corrigida"},
+        "j:fala:f1": {"pessoas": ["maria"]},
+        "j:plano:p2": {"descricao": "outro plano"},
+    }
+    novo = _video(3, **mudancas)[1:]  # f0 some
+
+    sem_falha = _ColecaoEmMemoria()
+    _indice(sem_falha, _Relogio()).gravar("j", _video(3))
+    _indice(sem_falha, _Relogio()).gravar("j", novo)
+
+    com_falha = _ColecaoEmMemoria()
+    indice = _indice(com_falha, _Relogio())
+    indice.gravar("j", _video(3))
+    com_falha.falhar_em = (operacao, com_falha.operacoes.count(operacao))
+    with pytest.raises(RuntimeError, match="queda"):
+        indice.gravar("j", novo)
+    indice.gravar("j", novo)
+    assert com_falha.objetos == sem_falha.objetos
+
+
+@pytest.mark.parametrize("queda", range(1, 4))
+def test_queda_no_meio_so_tira_da_busca_o_que_muda_de_significado(queda: int) -> None:
+    # f0 muda o texto (apaga e cria), f1 só as pessoas (atualiza), f2 sai, p3 é novo:
+    # query, batchDelete, batchCreate, batchUpdate. Só f0 pode faltar depois da queda.
+    mudancas = {"j:fala:f0": {"texto": "corrigida"}, "j:fala:f1": {"pessoas": ["m"]}}
+    novo = [r for r in _video(4, **mudancas) if r.id not in ("j:fala:f2", "j:fala:f3")]
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(3))
+    antes = {d["id"] for d in colecao.objetos.values()}
+    colecao.falhar_em = ("*", len(colecao.operacoes) + queda)
+    with pytest.raises(RuntimeError, match="queda"):
+        indice.gravar("j", novo)
+    depois = {d["id"] for d in colecao.objetos.values()}
+    fica = antes & {r.id for r in novo}
+    assert fica - depois <= {"j:fala:f0"}
+    indice.gravar("j", novo)
+    assert {d["id"] for d in colecao.objetos.values()} == {r.id for r in novo}
+
+
+def test_as_atualizacoes_tambem_passam_pelo_orcamento() -> None:
+    relogio = _Relogio()
+    orcamento = _OrcamentoFalso()
+    colecao = _ColecaoEmMemoria()
+    config = replace(CONFIG, cota_de_escrita=3000)
+
+    def indice() -> AgentRetrieval:
+        return AgentRetrieval(
+            config,
+            colecao,
+            dormir=relogio.dormir,
+            relogio=relogio,
+            orcamento=orcamento,
+        )
+
+    indice().gravar("j", _video(5))
+    assert [n for _, n in orcamento.historico] == [10]
+    pessoas = {f"j:fala:f{i}": {"pessoas": ["maria"]} for i in range(5)}
+    indice().gravar("j", _video(5, **pessoas))
+    assert colecao.operacoes[-1] == "batchUpdate"
+    assert [n for _, n in orcamento.historico] == [10, 5]
+
+
+def test_atualizacoes_vao_em_lotes_de_ate_1000() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(1200)[:1200])
+    pessoas = {f"j:fala:f{i}": {"pessoas": ["maria"]} for i in range(1200)}
+    colecao.operacoes.clear()
+    indice.gravar("j", _video(1200, **pessoas)[:1200])
+    assert colecao.operacoes == ["query", "batchUpdate", "batchUpdate"]

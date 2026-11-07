@@ -1,6 +1,8 @@
 """Indexa a Decupagem entregue de um Job no índice da busca (#118).
 
-O vídeo inteiro é apagado e regravado a cada vez, então repetir dá o mesmo resultado.
+Só o que mudou vai ao índice (#418): `AgentRetrieval.gravar` lê o que o vídeo tem lá, compara com
+a Decupagem e apaga, cria ou atualiza só a diferença. Repetir dá o mesmo resultado, e uma
+queda no meio termina na rodada seguinte, porque a comparação parte do índice.
 Roda ao fim da análise (Job `mam-indexacao`, depois dos quadros-chave), a cada Correção
 que passa a valer (`api.jobs`) e sob demanda (`make reindexar`). O estado vai no Job
 (`indexacao`); uma falha dela só fica ali e nunca muda o `estado` do Job.
