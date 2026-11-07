@@ -102,6 +102,9 @@ export interface ResultadoDaBusca {
 
 const IDS_DE_EVIDENCIA: string[] = EVIDENCIAS.map((e) => e.id)
 
+/** O teto do texto da busca: a API dá 422 com mais que isso (#372). */
+export const TAMANHO_DA_CONSULTA = 300
+
 /** A busca de um texto novo: chips e filtros voltam ao que a API entender. */
 export function consultaNova(q: string): ConsultaDaBusca {
   return {

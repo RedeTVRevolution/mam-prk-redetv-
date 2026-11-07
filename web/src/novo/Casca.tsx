@@ -18,7 +18,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import logo from '../assets/redetv-logo.png'
 import { podeAdministrar } from '../administracao.ts'
 import { haJanelaAberta, useAtalhos, useMostrarAtalhos, type Atalho } from '../atalhos.ts'
-import { consultaNova } from '../busca.ts'
+import { consultaNova, TAMANHO_DA_CONSULTA } from '../busca.ts'
 import { NOME_DO_PAPEL } from '../papeis.ts'
 import { ACERVO, ADMIN, enderecoDaBusca, MARCAS, navegar, PAINEL, seguir, TEMPO_DE_TELA, type Rota } from '../rotas.ts'
 import type { Usuario } from '../sessao.ts'
@@ -165,7 +165,7 @@ function BuscaGlobal({ aberta, aoMudar, destinos }: { aberta: boolean; aoMudar: 
   const q = texto.trim()
   return (
     <CommandDialog open={aberta} onOpenChange={aoMudar} titulo="Buscar no acervo" descricao="Busca no conteúdo e atalhos para as telas" className="sm:max-w-2xl">
-      <CommandInput placeholder="Buscar nas falas, nos textos da tela e nos planos…" value={texto} onValueChange={setTexto} />
+      <CommandInput placeholder="Buscar nas falas, nos textos da tela e nos planos…" maxLength={TAMANHO_DA_CONSULTA} value={texto} onValueChange={setTexto} />
       <CommandList>
         <CommandEmpty>Nenhuma tela com esse nome.</CommandEmpty>
         {q && (

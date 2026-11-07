@@ -23,6 +23,7 @@ import {
   contagemDeMomentos,
   contagemDeVideos,
   EVIDENCIAS,
+  TAMANHO_DA_CONSULTA,
   type ConsultaDaBusca,
   type Evidencia,
   type NomeDaFaceta,
@@ -301,6 +302,7 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                   <IconSearch size={16} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground" aria-hidden />
                   <input
                     type="search"
+                    maxLength={TAMANHO_DA_CONSULTA}
                     aria-label="Buscar no conteúdo"
                     placeholder="Falas, textos da tela, planos…"
                     value={texto}

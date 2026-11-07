@@ -216,6 +216,17 @@ test('a busca global abre com `/` e busca o texto no conteúdo', async () => {
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
+test('a caixa da busca global aceita no máximo 300 caracteres, como a API', async () => {
+  const usuario = userEvent.setup()
+  render(<App autenticador={await comSessao()} />)
+  await screen.findByRole('navigation', { name: 'Principal' })
+
+  await usuario.keyboard('/')
+  const dialogo = await screen.findByRole('dialog', { name: 'Buscar no acervo' })
+  const caixa = within(dialogo).getByRole('combobox', { name: 'Buscar no acervo' }) as HTMLInputElement
+  expect(caixa.maxLength).toBe(300)
+})
+
 test('G e uma letra vão à tela, e `?` lista os atalhos', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={await comSessao()} />)
