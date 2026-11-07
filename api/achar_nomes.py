@@ -4,8 +4,14 @@ Corre em memória sobre o catálogo inteiro, que é pequeno. Sem diferença de a
 nem de maiúscula; cada termo digitado tem de começar uma palavra do nome (ou de um
 apelido); termos de 5 letras ou mais aceitam um erro de digitação (uma letra a
 mais, a menos, trocada, ou duas vizinhas trocadas).
+
+Os casamentos exatos vêm de um índice por palavra (#485): lista ordenada de (palavra,
+posição do item, variante), consultada com `bisect` pelo prefixo de cada termo, sem
+varrer o catálogo. Só quando os exatos não enchem o limite e algum termo aceita erro de
+digitação o catálogo é percorrido, para completar com os aproximados.
 """
 
+from bisect import bisect_left
 from collections.abc import Iterable
 from typing import Protocol
 
@@ -75,19 +81,45 @@ class Indexado[T: ComNome]:
         self.nomes = [self.nome, *(normalizar(a) for a in item.apelidos)]
 
 
+class ListaIndexada[T: ComNome](list[Indexado[T]]):
+    """Os itens indexados de uma cópia, mais o índice por palavra (#485): entradas
+    `(palavra, posição do item, variante)` em ordem; a variante 0 é o nome, as outras os apelidos."""
+
+    def __init__(self, itens: Iterable[T]) -> None:
+        super().__init__(Indexado(i) for i in itens)
+        self.palavras = sorted(
+            (palavra, posicao, variante)
+            for posicao, indexado in enumerate(self)
+            for variante, nome in enumerate(indexado.nomes)
+            for palavra in set(nome.split())
+        )
+
+    def posicoes_exatas(self, termos: list[str]) -> set[int]:
+        """Posições dos itens com uma variante em que todos os termos começam uma palavra."""
+        comuns: set[tuple[int, int]] | None = None
+        for termo in termos:
+            de = bisect_left(self.palavras, (termo,))
+            ate = bisect_left(self.palavras, (termo + "\U0010ffff",), de)
+            casam = {(p, v) for _, p, v in self.palavras[de:ate]}
+            comuns = casam if comuns is None else comuns & casam
+            if not comuns:
+                return set()
+        return {p for p, _ in comuns or ()}
+
+
 class IndiceDeNomes[T: ComNome]:
-    """Os nomes normalizados de uma cópia do catálogo, calculados uma vez por cópia.
-    `de` recebe a lista que a `CopiaCurta` devolve: enquanto for a mesma lista, reaproveita;
-    uma cópia nova (outra lista) refaz o índice."""
+    """Os nomes normalizados e o índice por palavra de uma cópia do catálogo, calculados
+    uma vez por cópia. `de` recebe a lista que a `CopiaCurta` devolve: enquanto for a
+    mesma lista, reaproveita; uma cópia nova (outra lista) refaz o índice."""
 
     def __init__(self) -> None:
-        self._atual: tuple[list[T], list[Indexado[T]]] | None = None
+        self._atual: tuple[list[T], ListaIndexada[T]] | None = None
 
-    def de(self, itens: list[T]) -> list[Indexado[T]]:
+    def de(self, itens: list[T]) -> ListaIndexada[T]:
         atual = self._atual
         if atual is not None and atual[0] is itens:
             return atual[1]
-        indexados = [Indexado(i) for i in itens]
+        indexados = ListaIndexada(itens)
         self._atual = (itens, indexados)
         return indexados
 
@@ -99,10 +131,16 @@ def achar_por_prefixo[T: ComNome](
 ) -> list[T]:
     """Até `limite` itens que a consulta casa no nome ou nos apelidos: primeiro os sem
     erro de digitação, depois os com; dentro de cada grupo, por nome. Com `IndiceDeNomes`
-    os nomes não são normalizados de novo a cada pedido."""
+    os nomes não são normalizados de novo a cada pedido, e os exatos vêm do índice por
+    palavra; sem ele (itens crus) tudo é percorrido."""
     termos = normalizar(consulta).split()
     if not termos:
         return []
+    if isinstance(itens, ListaIndexada):
+        exatos = sorted(itens.posicoes_exatas(termos), key=lambda p: (itens[p].nome, p))
+        aceita_erro = any(len(t) >= TAMANHO_PARA_ACEITAR_ERRO for t in termos)
+        if len(exatos) >= limite or not aceita_erro:
+            return [itens[p].item for p in exatos[:limite]]
     achados: list[tuple[int, str, T]] = []
     for entrada in itens:
         indexado = entrada if isinstance(entrada, Indexado) else Indexado(entrada)

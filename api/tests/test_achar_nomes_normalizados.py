@@ -120,3 +120,47 @@ def test_copia_nova_refaz_o_indice() -> None:
     assert [i.nome for i in achar_por_prefixo(indice.de(antes), "ana")] == ["Ana Souza"]
     depois = [_Item("Beatriz", [])]
     assert achar_por_prefixo(indice.de(depois), "ana") == []
+
+
+@pytest.mark.parametrize(
+    "consulta",
+    ["sa", "na", "to lu", "sabri", "sobrenome", "ia to", "lu ia sa", "jose", "sana na"],
+)
+def test_indice_por_palavra_acha_o_mesmo_com_muitos_exatos(consulta: str) -> None:
+    itens = _catalogo()
+    indice = IndiceDeNomes[_Item]()
+    for limite in (3, LIMITE_DO_AUTOCOMPLETAR, 500):
+        assert achar_por_prefixo(indice.de(itens), consulta, limite) == _antigo(
+            itens, consulta, limite
+        )
+
+
+def test_sobrenome_e_apelido_e_mesma_variante() -> None:
+    itens = [
+        _Item("Ana Souza", ["Aninha Lima"]),
+        _Item("Beatriz Lima", []),
+        _Item("Lima Barreto", ["Souza Ana"]),
+    ]
+    indice = IndiceDeNomes[_Item]().de(itens)
+    assert [i.nome for i in achar_por_prefixo(indice, "lima")] == [
+        "Ana Souza",
+        "Beatriz Lima",
+        "Lima Barreto",
+    ]
+    # "ana" e "lima" não estão na mesma variante de "Ana Souza" (nome) — mas estão no apelido.
+    assert achar_por_prefixo(indice, "ana lima") == _antigo(itens, "ana lima")
+    assert achar_por_prefixo(indice, "beatriz souza") == []
+
+
+def test_exatos_nao_percorrem_o_catalogo(monkeypatch: pytest.MonkeyPatch) -> None:
+    itens = [_Item(f"Pessoa {i:03}", []) for i in range(50)]
+    indice = IndiceDeNomes[_Item]().de(itens)
+
+    def proibido(*_: object) -> int:
+        raise AssertionError("percorreu o catálogo")
+
+    monkeypatch.setattr(achar_nomes, "_custo_no_nome", proibido)
+    assert len(achar_por_prefixo(indice, "pessoa")) == LIMITE_DO_AUTOCOMPLETAR
+    assert [i.nome for i in achar_por_prefixo(indice, "pes 04")] == [
+        f"Pessoa 04{d}" for d in range(10)
+    ]
