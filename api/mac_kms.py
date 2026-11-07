@@ -6,20 +6,27 @@ manual: criar uma versão nova no KMS (README); a mais alta ativa passa a ser a 
 """
 
 import base64
+import hashlib
 import time
 import urllib.parse
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
 
+from api.cache_curto import CacheCurto
 from api.chaves import Mac, MacSimulado
 from api.jobs import ServicoIndisponivel
 
 URL_BASE = "https://cloudkms.googleapis.com/v1"
 # Quanto tempo a versão atual fica guardada: evita uma ida ao KMS por requisição.
 VALIDADE_DA_VERSAO_S = 300.0
+# Quanto tempo um `macVerify` positivo fica guardado (#491) e quantos cabem. A revogação
+# não espera esse prazo: o registro da chave é lido em todo pedido. Desligar uma versão
+# no KMS espera: a chave que já conferiu vale até o prazo acabar em cada instância.
+VALIDADE_DO_MAC_S = 300.0
+MAXIMO_DO_MAC = 1024
 
 # (método, caminho a partir de /v1, corpo) -> (status HTTP, resposta em JSON)
 Transporte = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
@@ -36,6 +43,10 @@ def _erro(status: int, resposta: dict[str, Any]) -> ErroDoKms:
     )
 
 
+class _NaoConfere(Exception):
+    """Faz o resultado negativo escapar do cache, que só guarda o positivo."""
+
+
 class MacKms:
     def __init__(
         self,
@@ -43,6 +54,8 @@ class MacKms:
         transporte: Transporte,
         relogio: Callable[[], float] = time.monotonic,
         validade_s: float = VALIDADE_DA_VERSAO_S,
+        validade_do_mac_s: float = VALIDADE_DO_MAC_S,
+        maximo_do_mac: int = MAXIMO_DO_MAC,
     ) -> None:
         # `projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>`
         self._chave = chave
@@ -50,6 +63,7 @@ class MacKms:
         self._relogio = relogio
         self._validade_s = validade_s
         self._versao: tuple[int, float] | None = None
+        self._conferidos = CacheCurto(validade_do_mac_s, maximo_do_mac, relogio)
 
     @property
     def versao_atual(self) -> int:
@@ -97,6 +111,17 @@ class MacKms:
         return base64.b64decode(resposta["mac"])
 
     def verificar(self, versao: int, mensagem: bytes, mac: bytes) -> bool:
+        """Só o positivo é guardado, por versão, hash da mensagem (o segredo nunca fica
+        na memória) e MAC; segredo errado sempre vai ao KMS."""
+        chave = (versao, hashlib.sha256(mensagem).digest(), mac)
+        try:
+            return self._conferidos.obter(
+                chave, lambda: self._conferir(versao, mensagem, mac)
+            )
+        except _NaoConfere:
+            return False
+
+    def _conferir(self, versao: int, mensagem: bytes, mac: bytes) -> Literal[True]:
         resposta = self._pedir(
             versao,
             "macVerify",
@@ -105,7 +130,9 @@ class MacKms:
                 "mac": base64.b64encode(mac).decode(),
             },
         )
-        return bool(resposta.get("success"))
+        if not resposta.get("success"):
+            raise _NaoConfere
+        return True
 
 
 def transporte_do_kms() -> Transporte:

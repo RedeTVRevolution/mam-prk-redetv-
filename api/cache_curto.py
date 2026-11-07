@@ -1,4 +1,5 @@
-"""Cache curto em memória, por instância, para o painel e os relatórios (#453).
+"""Cache curto em memória, por instância: painel e relatórios (#453), entendimento da
+busca e `macVerify` positivo do KMS (#491).
 
 Sem infraestrutura nova: cada instância do Cloud Run guarda as respostas por chave de filtro
 e as joga fora depois de `validade` segundos. Dado recém-gravado aparece em no máximo esse
