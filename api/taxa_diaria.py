@@ -7,7 +7,7 @@ versão do pipeline e tipo de correção, com `correcoes` e `itens`. A segunda p
 painel somar os dias.
 
 A regra é a de hoje, não uma cópia: `linhas_do_dia` chama `calcular_com_itens` sobre o período
-`[dia, dia + 1)` (UTC, como o painel), então vale o mesmo `_em_vigor_no_periodo`, a versão da
+`[dia, dia + 1)` em dia de São Paulo (o do período do painel, `api/qualidade_do_painel.py`), então vale o mesmo `_em_vigor_no_periodo`, a versão da
 decupagem e só os Jobs concluídos. A diferença é a fonte dos itens: o objeto pequeno que a
 decupagem ganha ao ser gravada (`api/itens_da_decupagem.py`), em vez do JSON inteiro.
 
@@ -28,6 +28,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 from google.api_core.exceptions import NotFound
 from google.cloud import firestore
@@ -56,6 +57,7 @@ log = logging.getLogger(__name__)
 DIAS_RECENTES = 2
 DIAS_POR_MERGE = 100
 DIAS_DA_CARGA_INICIAL = 365
+SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 __all__ = [
     "ConfigDaTaxa",
@@ -142,8 +144,10 @@ class TabelaDaTaxaEmMemoria:
 
 
 def _periodo_do_dia(dia: date) -> tuple[datetime, datetime]:
-    inicio = datetime.combine(dia, time.min, UTC)
-    return inicio, inicio + timedelta(days=1)
+    return (
+        datetime.combine(dia, time.min, SAO_PAULO).astimezone(UTC),
+        datetime.combine(dia + timedelta(days=1), time.min, SAO_PAULO).astimezone(UTC),
+    )
 
 
 def linhas_do_dia(
@@ -329,7 +333,7 @@ def main(argumentos: list[str]) -> int:
         )
         print(f"{preencher_itens(jobs, decupagens, itens)} contagens gravadas")
     gravadas = atualizar(
-        dias_recentes(datetime.now(UTC).date(), quantos),
+        dias_recentes(datetime.now(SAO_PAULO).date(), quantos),
         jobs,
         itens,
         RepositorioDeCorrecoesFirestore(banco),

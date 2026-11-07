@@ -3,7 +3,7 @@
 # para 10 mil vídeos, contra o timeout de 300 s). Agora um Job agendado (`api/taxa_diaria.py`)
 # refaz os últimos dias nesta tabela, e a parte 2 (#468) faz o painel só somar dias.
 #
-# Gatilho: Cloud Scheduler a cada hora, refazendo hoje e ontem (UTC). Os dados da conta estão em
+# Gatilho: Cloud Scheduler a cada hora, refazendo hoje e ontem (dia de São Paulo, o do painel). Os dados da conta estão em
 # três lugares (correções e revisão no Firestore, Job concluído, contagem no Storage) e são
 # gravados por vários processos (a API, a web, os Jobs do Cloud Run e o Workflows); ligar cada
 # um a uma atualização pediria um tópico novo e o código de publicar em todos. A hora de
@@ -22,7 +22,7 @@ resource "google_bigquery_table" "taxa_de_correcao_por_dia" {
     field = "dia"
   }
   schema = jsonencode([
-    { name = "dia", type = "DATE", mode = "REQUIRED", description = "Dia UTC; partição da tabela" },
+    { name = "dia", type = "DATE", mode = "REQUIRED", description = "Dia de São Paulo; partição da tabela" },
     { name = "programa", type = "STRING", mode = "NULLABLE" },
     { name = "versao_pipeline", type = "STRING", mode = "NULLABLE", description = "Nulo na decupagem anterior à versão" },
     { name = "tipo", type = "STRING", mode = "REQUIRED", description = "Tipo de correção (pessoa.renomear, pauta.titulo...)" },

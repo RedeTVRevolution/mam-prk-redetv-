@@ -99,8 +99,6 @@ COLECAO_DE_IDEMPOTENCIA = "chaves_de_idempotencia"
 COLECAO_DAS_LISTAS_DA_BUSCA = "listas_da_busca"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
-log = logging.getLogger(__name__)
-
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
 COLECAO_DOS_PROGRAMAS = "programas"
@@ -113,6 +111,8 @@ COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 _LOTE_DE_LEITURA = 500
+
+log = logging.getLogger(__name__)
 
 
 def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:

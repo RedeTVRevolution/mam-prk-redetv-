@@ -11,6 +11,7 @@ import pytest
 
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.jobs import ServicoIndisponivel
+from api.qualidade_do_painel import _periodo
 from api.taxa_de_correcao import calcular
 from api.taxa_diaria import (
     ConfigDaTaxa,
@@ -40,9 +41,9 @@ def _mundo_com_itens() -> Any:
     return jobs, decupagens, itens, correcoes, revisao
 
 
-def _dia(d: date) -> tuple[datetime, datetime]:
-    inicio = datetime(d.year, d.month, d.day, tzinfo=UTC)
-    return inicio, inicio + timedelta(days=1)
+def _dia(d: date) -> tuple[datetime | None, datetime | None]:
+    """O período que o painel pede para o dia `d` (dia de São Paulo)."""
+    return _periodo(d, d)
 
 
 def _somar(linhas: list[LinhaDiaria]) -> dict[tuple[Any, ...], tuple[int, int]]:
@@ -104,6 +105,29 @@ def test_o_caso_de_hoje_tem_correcao_pendente_aprovada_e_reprocessada() -> None:
     assert contagem(-10, "pessoa.nao_e") == 0  # e não no da criação
     assert contagem(3, "pessoa.fontes_do_nome") == 0  # pendente
     assert contagem(4, "pessoa.renomear") == 0  # reprocessada: JSON de outra versão
+
+
+def test_o_dia_e_o_de_sao_paulo_como_o_do_painel() -> None:
+    """Às 22h de São Paulo já é o dia seguinte em UTC: a correção conta no dia de São Paulo,
+    senão somar dias nunca daria o período que o painel pede."""
+    jobs, decupagens, itens, correcoes, revisao = _mundo_com_itens()
+    tarde = datetime(2026, 11, 3, 1, 0, tzinfo=UTC)  # 22h de 02/11 em São Paulo
+    correcoes.acrescentar(
+        _c("z", "j3", decupagens._dados["j3"], dias=0).model_copy(
+            update={"criada_em": tarde}
+        )
+    )
+
+    def do_fama(d: date) -> int:
+        linhas = linhas_do_dia(d, jobs, itens, correcoes, revisao)
+        return sum(
+            x.correcoes
+            for x in linhas
+            if x.programa == "Fama" and x.tipo == "pessoa.renomear"
+        )
+
+    assert do_fama(date(2026, 11, 2)) == 1
+    assert do_fama(date(2026, 11, 3)) == 0
 
 
 def test_as_linhas_trazem_o_dia_o_programa_a_versao_e_so_jobs_concluidos() -> None:
