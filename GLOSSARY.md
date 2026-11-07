@@ -178,6 +178,9 @@ Identidade de uma decupagem: o arquivo, a versão do pipeline e as opções que 
 **Versão do pipeline**:
 Nome curto (`2026.11.1`) mais o manifesto do que ele fixa: o modelo de cada etapa, o hash de cada instrução, a versão do esquema e os motores de transcrição, OCR e objetos (`api/versao_pipeline.py`). Cada Decupagem nova grava `versao_pipeline` e `manifesto_do_pipeline`; a anterior, sem o campo, é "anterior à versão". Mudar modelo, instrução, esquema ou motor exige mudar a versão (um teste cobra), e a versão nova permite reprocessar o acervo de propósito (`make reprocessar-versao`).
 
+**Limpeza das imagens**:
+Política do Artifact Registry nos repositórios `mam` e `mam-gpu` (`infra/modulos/mam/main.tf`, #456), ligada de verdade: guarda as 3 x N versões mais recentes de cada imagem, o cache das camadas com tag e as versões com a tag `em-uso` ou `volta`, e apaga o resto com mais de 14 dias. O `scripts/deploy-dev.sh` move as tags: `em-uso` nas sete imagens que o apply publica e `volta` no digest que os Jobs com GPU tinham antes, o que o `testar-jobs-gpu.sh` restaura se o teste falha. `make conferir-limpeza-de-imagens` (`api/limpeza_de_imagens.py`) só lê: simula as regras sobre as versões do registro e as imagens que o Cloud Run usa, e sai com 1 se apagaria uma versão em uso ou a da volta.
+
 **Chave de idempotência**:
 Identificador de uma intenção de envio do cliente, reutilizado em todas as repetições dessa intenção. No `POST /v1/jobs` vai no cabeçalho `Idempotency-Key` (`api/idempotencia.py`): a primeira chamada cria o Job (202) e as repetições devolvem o mesmo Job (200), por 48 h. A reserva é de quem chama: o mesmo texto em outro sistema é outra chave, e a mesma chave com outro corpo dá 409. Repetição de Job na lixeira ou purgado dá 410 `Este Job foi apagado`: a reserva ganha `job_gravado` depois de gravar o Job, e reserva marcada sem Job é Job purgado.
 

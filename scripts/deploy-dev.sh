@@ -92,6 +92,20 @@ imagem_do_job() { # <recurso no módulo> <output com o nome do Job>
 TRANSCRICAO_GPU_ANTES=$(imagem_do_job transcricao_gpu job_de_transcricao_gpu)
 OCR_GPU_ANTES=$(imagem_do_job ocr_gpu job_de_ocr_gpu)
 OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu job_de_objetos_gpu)
+# A limpeza do registro (#456) guarda por tag o que o Cloud Run usa e o que o teste de GPU pode
+# restaurar: `volta` no digest que os Jobs com GPU têm agora, posta antes do build para o build
+# novo nunca encontrar a anterior sem proteção, e `em-uso` (mais abaixo) no que o apply publica.
+# A tag se move: a imagem que perde as duas volta às regras comuns (infra/modulos/mam/main.tf).
+LIMPEZA=$(tf output -json limpeza_de_imagens)
+TAG_EM_USO=$(jq -r .tag_do_build_em_uso <<<"$LIMPEZA")
+TAG_DA_VOLTA=$(jq -r .tag_da_volta <<<"$LIMPEZA")
+marcar() { # <repo/imagem@digest> <tag>: põe a tag no digest, movendo-a se já está em outro
+  [[ $1 == *@sha256:* ]] || { echo "Imagem sem digest, não dá para pôr a tag $2: $1" >&2; return 1; }
+  gc artifacts docker tags add "$1" "${1%@*}:$2"
+}
+for imagem in "$TRANSCRICAO_GPU_ANTES" "$OCR_GPU_ANTES" "$OBJETOS_GPU_ANTES"; do
+  [[ -z $imagem ]] || marcar "$imagem" "$TAG_DA_VOLTA"
+done
 # O Cloud Build constrói, em paralelo e com cache, e envia as sete imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
@@ -136,6 +150,12 @@ scripts/aplicar-sem-destruir.sh -var "imagem=$IMAGEM" -var "imagem_validacao=$IM
   -var "imagem_transcricao=$IMAGEM_TRANSCRICAO" -var "imagem_ocr=$IMAGEM_OCR" \
   -var "imagem_transcricao_gpu=$IMAGEM_TRANSCRICAO_GPU" -var "imagem_ocr_gpu=$IMAGEM_OCR_GPU" \
   -var "imagem_objetos=$IMAGEM_OBJETOS"
+
+# O que o apply acabou de publicar está em uso: as sete imagens, pelo digest que o Cloud Run usa.
+for imagem in "$IMAGEM" "$IMAGEM_VALIDACAO" "$IMAGEM_TRANSCRICAO" "$IMAGEM_OCR" \
+  "$IMAGEM_TRANSCRICAO_GPU" "$IMAGEM_OCR_GPU" "$IMAGEM_OBJETOS"; do
+  marcar "$imagem" "$TAG_EM_USO"
+done
 
 # Teste dos Jobs com GPU (#238), só dos que mudaram: se não passar, o script volta os Jobs
 # para a imagem anterior e esta publicação falha, e o Workflows não manda vídeo para uma
