@@ -25,6 +25,7 @@ from api.nuvem import (
     CatalogoFirestore,
     ReferenciasStorage,
     RepositorioFirestore,
+    _gravar_os_itens,
     objeto_da_decupagem,
 )
 
@@ -201,6 +202,7 @@ class DecupagensNoStorage:
         self._cliente.bucket(self._bucket).blob(
             objeto_da_decupagem(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
+        _gravar_os_itens(self._cliente, self._bucket, job_id, conteudo)
 
     def contar_registros_da_comparacao(self, job_id: str) -> int:
         return sum(

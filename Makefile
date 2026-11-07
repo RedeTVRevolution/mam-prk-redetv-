@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs preencher-jobs-do-painel preencher-revisao-do-painel comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -241,6 +241,20 @@ preencher-revisao-do-painel:
 	BIGQUERY_TABELA_DE_REVISAO="$${BIGQUERY_TABELA_DE_REVISAO:-$$(terraform -chdir=infra output -raw bigquery_tabela_de_revisao)}" \
 	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
 	uv run --locked python -m api.revisao_do_painel
+
+# Grava a contagem de itens das decupagens que ainda não a têm e refaz o último ano na tabela da
+# taxa de correção por dia (#455): make preencher-taxa-diaria [DIAS=<n>]. Roda uma vez no dev depois
+# do apply, e de novo depois de `make reprocessar-versao` (o reprocessamento muda dias antigos; a
+# execução agendada só refaz hoje e ontem). Repetir dá o mesmo resultado.
+preencher-taxa-diaria:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
+	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	BIGQUERY_DATASET="$${BIGQUERY_DATASET:-$$(terraform -chdir=infra output -raw bigquery_dataset)}" \
+	BIGQUERY_TABELA_DA_TAXA="$${BIGQUERY_TABELA_DA_TAXA:-$$(terraform -chdir=infra output -raw bigquery_tabela_da_taxa)}" \
+	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
+	uv run --locked python -m api.taxa_diaria PREENCHER $(DIAS)
 
 # Reprocessa o acervo de propósito (#250): make reprocessar-versao [DE=<versão ou anterior>] [LIMITE=<n>]
 # Lista os Jobs concluídos de versão do pipeline anterior à atual (api/versao_pipeline.py) e o custo

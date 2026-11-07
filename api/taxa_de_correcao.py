@@ -23,13 +23,12 @@ A taxa é `None` se o denominador é zero. Ambiente do comando: `GCP_PROJECT_ID`
 `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`.
 """
 
-import json
 import logging
 import os
 import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Annotated, Any, get_args
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud import firestore
@@ -40,15 +39,12 @@ from api.auth import ChamadorAutenticado, Usuario
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import (
     CORRIGIVEIS,
-    TIPOS,
     Correcao,
     RepositorioDeCorrecoes,
-    TipoDoItem,
-    _itens,
     estado_das,
-    versao_do_modelo,
 )
 from api.csv_seguro import csv_em_texto
+from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.jobs import (
     RepositorioDeJobs,
     ServicoIndisponivel,
@@ -70,6 +66,7 @@ __all__ = [
     "COLUNAS_DO_CSV",
     "LinhaDaTaxa",
     "calcular",
+    "calcular_com_itens",
     "criar_rotas_da_qualidade",
     "em_csv",
     "main",
@@ -94,15 +91,13 @@ class LinhaDaTaxa(BaseModel):
     taxa_de_correcao: float | None
 
 
-def _itens_do_tipo(modelo: dict[str, Any], tipo: str) -> int:
-    """Quantos itens do tipo do item que a correção do `tipo` corrige."""
-    do_item = TIPOS[tipo].tipo_do_item
-    tipos = get_args(TipoDoItem) if do_item is None else (do_item,)
-    return sum(len(_itens(modelo, t)) for t in tipos)
-
-
 def _no_periodo(quando: datetime, desde: datetime | None, ate: datetime | None) -> bool:
     return (desde is None or quando >= desde) and (ate is None or quando < ate)
+
+
+def _itens_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> ItensDaDecupagem:
+    """A contagem tirada da decupagem inteira (o caminho de hoje do painel)."""
+    return contar_itens(b"".join(decupagens.abrir_decupagem(job_id)))
 
 
 def calcular(
@@ -115,6 +110,29 @@ def calcular(
     programa: str | None = None,
 ) -> list[LinhaDaTaxa]:
     """As linhas do período `[desde, ate)`, em ordem de programa, versão e tipo."""
+    return calcular_com_itens(
+        repositorio,
+        lambda job_id: _itens_da_decupagem(decupagens, job_id),
+        correcoes,
+        revisao,
+        desde,
+        ate,
+        programa,
+    )
+
+
+def calcular_com_itens(
+    repositorio: RepositorioDeJobs,
+    itens_do_job: Callable[[str], ItensDaDecupagem],
+    correcoes: RepositorioDeCorrecoes,
+    revisao: RepositorioDeRevisao,
+    desde: datetime | None = None,
+    ate: datetime | None = None,
+    programa: str | None = None,
+) -> list[LinhaDaTaxa]:
+    """O mesmo cálculo, com a contagem de itens vinda de `itens_do_job` (a decupagem
+    inteira, ou o objeto de contagem gravado com ela, #455). `itens_do_job` levanta
+    `ServicoIndisponivel`, `ValueError`, `KeyError` ou `TypeError` se não lê."""
     pulsados = {
         m.job_id
         for m in revisao.todas(desde)
@@ -134,23 +152,17 @@ def calcular(
         ):
             continue
         try:
-            conteudo = b"".join(decupagens.abrir_decupagem(job.id))
-            modelo = json.loads(conteudo)
-            if not isinstance(modelo, dict):
-                raise TypeError("a decupagem não é um objeto")
-            versao_pipeline = modelo.get("versao_pipeline")
-            if not isinstance(versao_pipeline, str):
-                versao_pipeline = None
-            vigor = _em_vigor_no_periodo(feitas, versao_do_modelo(conteudo), desde, ate)
+            contagem = itens_do_job(job.id)
+            vigor = _em_vigor_no_periodo(feitas, contagem.versao_do_modelo, desde, ate)
             do_job = {
-                tipo: (sum(c.tipo == tipo for c in vigor), _itens_do_tipo(modelo, tipo))
+                tipo: (sum(c.tipo == tipo for c in vigor), contagem.itens[tipo])
                 for tipo in CORRIGIVEIS
             }
         except (ServicoIndisponivel, ValueError, KeyError, TypeError):
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
             continue
         for tipo, (n, itens) in do_job.items():
-            chave = (job.programa, versao_pipeline or None, tipo)
+            chave = (job.programa, contagem.versao_pipeline or None, tipo)
             antes = somas.get(chave, (0, 0))
             somas[chave] = (antes[0] + n, antes[1] + itens)
     return [
