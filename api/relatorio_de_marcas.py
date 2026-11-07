@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from api.cache_curto import CacheCurto
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
 from api.decupagem import Comercial
 from api.jobs import RepositorioDeJobs
@@ -407,6 +408,67 @@ def pagina_do_ranking(
     return list(marcas.values()), TotalDasMarcas(
         **dict(zip(TotalDasMarcas.model_fields, totais, strict=True))
     )
+
+
+class ConsultaComCache:
+    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking inteiro, a página, a
+    lista de uma marca e o CSV saem dela, sem consultar o BigQuery de novo."""
+
+    def __init__(self, consulta: ConsultaDeInsercoes, cache: CacheCurto) -> None:
+        self._consulta = consulta
+        self._cache = cache
+
+    def somas(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+    ) -> list[InsercoesDaMarca]:
+        return self._cache.obter(
+            ("marcas", programa, desde, ate, tipo),
+            lambda: self._consulta.somas(programa, desde, ate, tipo),
+        )
+
+    def _ranking_inteiro(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
+        def calcular() -> "tuple[list[MarcaResumida], TotalDasMarcas]":
+            somas = self.somas(programa, desde, ate, tipo)
+            return ranking_em_python(somas, 0, len(somas))
+
+        return self._cache.obter(
+            ("marcas-ranking", programa, desde, ate, tipo), calcular
+        )
+
+    def ranking(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+        depois: int,
+        limite: int,
+    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
+        todas, total = self._ranking_inteiro(programa, desde, ate, tipo)
+        return todas[depois : depois + limite + 1], total
+
+    def lista_da_marca(
+        self,
+        marca: str,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+        depois: int,
+        limite: int,
+    ) -> "list[InsercaoNoRelatorio]":
+        somas = self.somas(programa, desde, ate, tipo)
+        return lista_em_python(somas, marca, depois, limite)
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:

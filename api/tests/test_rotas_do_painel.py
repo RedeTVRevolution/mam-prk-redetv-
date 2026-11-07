@@ -114,6 +114,7 @@ class Mundo:
         faturamento: Any = None,
         jobs: Any = None,
         relogio: Callable[[], datetime] = agora_utc,
+        cache_do_painel: Any = None,
     ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
@@ -140,6 +141,7 @@ class Mundo:
                 repositorio=jobs,
                 relogio=relogio,
                 contas=self.contas,
+                cache_do_painel=cache_do_painel,
             )
         )
 

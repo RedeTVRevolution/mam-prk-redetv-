@@ -21,6 +21,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from api.cache_curto import CacheCurto
 from api.copia_bigquery import (
     TIPOS_DAS_PESSOAS,
     ConfigDoBigQuery,
@@ -456,6 +457,57 @@ def video_da_pessoa(v: Sequence[Any]) -> "VideoDaPessoa":
         mencoes_na_fala=int(v[3]),
         mencoes_no_texto=int(v[4]),
     )
+
+
+class ConsultaComCache:
+    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking inteiro, a página, a
+    pessoa expandida e o CSV saem dela, sem consultar o BigQuery de novo."""
+
+    def __init__(self, consulta: ConsultaDeMomentos, cache: CacheCurto) -> None:
+        self._consulta = consulta
+        self._cache = cache
+
+    def somas(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        return self._cache.obter(
+            ("tempo-de-tela", programa, desde, ate),
+            lambda: self._consulta.somas(programa, desde, ate),
+        )
+
+    def _ranking_inteiro(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
+        def calcular() -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
+            somas = self.somas(programa, desde, ate)
+            return ranking_em_python(somas, 0, len(somas))
+
+        return self._cache.obter(
+            ("tempo-de-tela-ranking", programa, desde, ate), calcular
+        )
+
+    def ranking(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        depois: int,
+        limite: int,
+    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
+        todas, total = self._ranking_inteiro(programa, desde, ate)
+        return todas[depois : depois + limite + 1], total
+
+    def videos_da_pessoa(
+        self,
+        pessoa_id: str,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        depois: int,
+        limite: int,
+    ) -> "list[VideoDaPessoa]":
+        somas = self.somas(programa, desde, ate)
+        return videos_em_python(somas, pessoa_id, depois, limite)
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:

@@ -31,6 +31,7 @@ from api.tempo_de_tela import (
     UNIAO_EM_SQL,
     VIDEOS_DA_PESSOA_EM_SQL,
     ConsultaBigQuery,
+    ConsultaDeMomentos,
     ConsultaEmMemoria,
     MomentoDaPessoa,
     PessoaNoRelatorio,
@@ -387,7 +388,7 @@ def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
 
 
 def _cliente(
-    papel: str = "consulta", consulta: ConsultaEmMemoria | None = None
+    papel: str = "consulta", consulta: ConsultaDeMomentos | None = None
 ) -> TestClient:
     jobs = RepositorioEmMemoria()
     jobs.salvar(
