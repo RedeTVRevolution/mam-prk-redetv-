@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
@@ -285,17 +286,39 @@ def test_a_varredura_diaria_expira_o_upload_abandonado_e_ainda_purga() -> None:
     assert mundo.jobs.obter("j1") is None
 
 
-def test_a_varredura_diaria_purga_mesmo_se_a_expiracao_falha() -> None:
+def test_a_varredura_diaria_purga_mesmo_se_a_expiracao_falha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     mundo = Mundo(_na_lixeira("j1", em=AGORA - timedelta(days=31)))
 
-    class Quebrado(ArmazenamentoFalso):
-        def cancelar_upload(self, job_id: str) -> None:
-            raise RuntimeError("storage fora")
+    def listar_quebrado() -> list[Job]:
+        raise RuntimeError("firestore fora")
 
-    mundo.jobs.salvar(
-        _job("j3", estado="aguardando_upload", criado_em=AGORA - timedelta(hours=25))
+    monkeypatch.setattr(mundo.jobs, "listar", listar_quebrado)
+
+    rodar_a_varredura_diaria(
+        mundo.jobs, mundo.purga(), ArmazenamentoFalso(), lambda: 0, AGORA
     )
 
-    rodar_a_varredura_diaria(mundo.jobs, mundo.purga(), Quebrado(), lambda: 0, AGORA)
-
     assert mundo.jobs.obter("j1") is None
+
+
+def test_a_falha_ao_apagar_um_upload_nao_segura_a_expiracao_dos_outros() -> None:
+    class QuebraNoPrimeiro(ArmazenamentoFalso):
+        def cancelar_upload(self, job_id: str) -> None:
+            if job_id == "j3":
+                raise RuntimeError("storage fora")
+            super().cancelar_upload(job_id)
+
+    mundo = Mundo(
+        _job("j3", estado="aguardando_upload", criado_em=AGORA - timedelta(hours=25)),
+        _job("j4", estado="aguardando_upload", criado_em=AGORA - timedelta(hours=26)),
+    )
+    armazenamento = QuebraNoPrimeiro()
+
+    rodar_a_varredura_diaria(mundo.jobs, mundo.purga(), armazenamento, lambda: 0, AGORA)
+
+    assert armazenamento.cancelados == ["j4"]
+    for job_id in ("j3", "j4"):
+        job = mundo.jobs.obter(job_id)
+        assert job is not None and job.codigo_falha == "upload_expirado"

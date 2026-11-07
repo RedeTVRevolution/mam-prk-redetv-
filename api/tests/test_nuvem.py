@@ -449,7 +449,10 @@ def test_url_de_upload_vale_15_minutos_e_assina_o_objeto_escrito_uma_vez(
 
 class _StorageDeUmaGeracao:
     """Modelo do Storage para a abertura da sessão: só aceita o `POST` que o cabeçalho assinado
-    cobre e, com `x-goog-if-generation-match: 0`, recusa (412) objeto que já existe."""
+    cobre e, com `x-goog-if-generation-match: 0`, recusa (412) objeto que já existe.
+
+    Não é o emulador porque ele ignora a pré-condição: no fake-gcs-server um segundo upload
+    retomável com `ifGenerationMatch=0` sobrescreve o objeto (conferido na revisão do #369)."""
 
     def __init__(self, url: str) -> None:
         self.assinados = set(

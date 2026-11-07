@@ -3,6 +3,7 @@
 import hashlib
 import itertools
 import json
+import logging
 import re
 import unicodedata
 import uuid
@@ -110,6 +111,8 @@ from api.sugestoes import (
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
+log = logging.getLogger(__name__)
+
 # A URL que abre a sessão de upload (#369): curta, para não valer como credencial guardada.
 # A sessão aberta continua valendo até o Job expirar (ou até 7 dias, o limite do Storage).
 PRAZO_DA_URL_DE_UPLOAD = timedelta(minutes=15)
@@ -776,8 +779,12 @@ def expirar_uploads(
             agora,
             codigo_falha="upload_expirado",
         ):
-            armazenamento.cancelar_upload(job.id)
             expirados.append(job.id)
+            try:
+                armazenamento.cancelar_upload(job.id)
+            except Exception:
+                # Não segura os outros Jobs: o ciclo de vida da quarentena apaga o objeto.
+                log.exception("não consegui apagar o upload do Job %s", job.id)
     return expirados
 
 

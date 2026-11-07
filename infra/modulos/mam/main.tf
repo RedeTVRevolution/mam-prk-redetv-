@@ -624,8 +624,6 @@ resource "google_storage_bucket" "mam" {
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
-  # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
-  # e só das URLs da aplicação.
   # O original só vive na quarentena até a validação (que o apaga, aceito ou recusado). Quem
   # sobra é o que chegou por uma sessão retomável aberta depois de o Job expirar (#369).
   dynamic "lifecycle_rule" {
@@ -639,6 +637,8 @@ resource "google_storage_bucket" "mam" {
       }
     }
   }
+  # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
+  # e só das URLs da aplicação.
   dynamic "cors" {
     for_each = each.key == "quarentena" ? [1] : []
     content {
