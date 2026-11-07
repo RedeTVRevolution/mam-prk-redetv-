@@ -431,6 +431,8 @@ class Reproducao(BaseModel):
 
 
 ARQUIVO_DO_QUADRO = r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$"
+# O id do Job no corpo do lote: sem "/", que o Firestore leria como caminho e derrubaria o lote.
+ID_DO_JOB_NO_LOTE = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
 # Quadros por pedido em lote (#481): uma página da busca tem bem menos.
 LIMITE_DE_QUADROS_EM_LOTE = 100
 
@@ -438,7 +440,7 @@ LIMITE_DE_QUADROS_EM_LOTE = 100
 class ParDeQuadro(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    job: str
+    job: Annotated[str, StringConstraints(pattern=ID_DO_JOB_NO_LOTE)]
     arquivo: Annotated[str, StringConstraints(pattern=ARQUIVO_DO_QUADRO)]
 
 
@@ -955,11 +957,14 @@ def _tem_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> b
 
 def _enxerga(chamador: Chamador, job: Job | None) -> Job:
     """O job, ou 404 se não existe ou é de outro sistema (ou de uma pessoa), para uma chave."""
-    if job is None or (
-        isinstance(chamador, Sistema) and job.sistema != chamador.sistema
-    ):
+    if job is None or _de_outro_sistema(chamador, job):
         raise HTTPException(404, "Job não encontrado")
     return job
+
+
+def _de_outro_sistema(chamador: Chamador, job: Job) -> bool:
+    """Se a chave de sistema não enxerga o Job (é de outro sistema ou de uma pessoa)."""
+    return isinstance(chamador, Sistema) and job.sistema != chamador.sistema
 
 
 class AceiteDaSugestao(BaseModel):
@@ -1203,7 +1208,7 @@ def criar_rotas(
             j
             for j in jobs
             if (j.lixeira is None or pode_ver_lixeira)
-            and not (isinstance(chamador, Sistema) and j.sistema != chamador.sistema)
+            and not _de_outro_sistema(chamador, j)
         ]
         visiveis.sort(key=lambda j: posicao[j.id])
         corpo = [
@@ -1227,10 +1232,11 @@ def criar_rotas(
             return Response(status_code=304, headers=cabecalhos)
         return JSONResponse(publico.model_dump(mode="json"), headers=cabecalhos)
 
-    def obter_concluido(
-        job_id: str, chamador: Chamador, lido: Job | None = None
-    ) -> Job:
-        job = _enxerga(chamador, lido or repositorio.obter(job_id))
+    def obter_concluido(job_id: str, chamador: Chamador) -> Job:
+        return _concluido(chamador, repositorio.obter(job_id))
+
+    def _concluido(chamador: Chamador, lido: Job | None) -> Job:
+        job = _enxerga(chamador, lido)
         if job.estado != "concluido":
             raise HTTPException(409, f"Job em {job.estado}, não concluido")
         return job
@@ -1289,9 +1295,7 @@ def criar_rotas(
                 job is not None
                 and job.estado == "concluido"
                 and job.lixeira is None
-                and not (
-                    isinstance(chamador, Sistema) and job.sistema != chamador.sistema
-                )
+                and not _de_outro_sistema(chamador, job)
             )
             url = (
                 armazenamento.url_do_quadro(
@@ -1317,10 +1321,11 @@ def criar_rotas(
         request: Request,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
     ) -> Reproducao:
-        # O Job que a dependência da lixeira já leu neste pedido.
-        job = obter_concluido(
-            job_id, chamador, getattr(request.state, "job_lido", None)
-        )
+        # O Job que a dependência da lixeira já leu neste pedido (None se não existe).
+        if hasattr(request.state, "job_lido"):
+            job = _concluido(chamador, request.state.job_lido)
+        else:
+            job = obter_concluido(job_id, chamador)
         url = armazenamento.url_do_quadro(
             job.id, caminho_do_quadro(arquivo), VALIDADE_DA_IMAGEM
         )

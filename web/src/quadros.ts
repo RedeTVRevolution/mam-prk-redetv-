@@ -50,19 +50,22 @@ export function urlDoQuadroDaBusca(api: ClienteDaApi): (jobId: string, caminho: 
     const enviar = async () => {
       const lote = fila
       fila = []
-      for (let i = 0; i < lote.length; i += PARES_POR_PEDIDO) {
-        const pedaco = lote.slice(i, i + PARES_POR_PEDIDO)
-        try {
-          const respostas = await api.quadros(pedaco.map((e) => e.par))
-          for (const espera of pedaco) {
-            const r = respostas.find((q) => q.job === espera.par.job && q.arquivo === espera.par.arquivo)
-            if (r?.url && r.expira_em) espera.resolver({ url: r.url, expira_em: r.expira_em })
-            else espera.recusar(new Error('Quadro indisponível'))
+      const pedacos: Espera[][] = []
+      for (let i = 0; i < lote.length; i += PARES_POR_PEDIDO) pedacos.push(lote.slice(i, i + PARES_POR_PEDIDO))
+      await Promise.all(
+        pedacos.map(async (pedaco) => {
+          try {
+            const respostas = new Map((await api.quadros(pedaco.map((e) => e.par))).map((q) => [`${q.job}/${q.arquivo}`, q]))
+            for (const espera of pedaco) {
+              const r = respostas.get(`${espera.par.job}/${espera.par.arquivo}`)
+              if (r?.url && r.expira_em) espera.resolver({ url: r.url, expira_em: r.expira_em })
+              else espera.recusar(new Error('Quadro indisponível'))
+            }
+          } catch (erro) {
+            for (const espera of pedaco) espera.recusar(erro)
           }
-        } catch (erro) {
-          for (const espera of pedaco) espera.recusar(erro)
-        }
-      }
+        }),
+      )
     }
     const caches = new Map<string, (caminho: string) => Promise<string>>()
     achado = (jobId, caminho) => {

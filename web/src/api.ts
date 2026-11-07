@@ -549,7 +549,7 @@ export function criarClienteDaApi(
       }
     },
     andamento: (ids) => chamar(`/v1/jobs/andamento?ids=${ids.map(encodeURIComponent).join(',')}`),
-    quadros: async (pares) => (await chamar<QuadroDoLote[]>('/v1/jobs/quadros', { post: true, corpo: { quadros: pares } })),
+    quadros: (pares) => chamar('/v1/jobs/quadros', { post: true, corpo: { quadros: pares } }),
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite, cursor) => paginaDaBusca(pedir(`/v1/busca?${comCursor(consultaParaApi(consulta, limite), cursor)}`)),

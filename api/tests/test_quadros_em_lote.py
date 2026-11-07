@@ -104,6 +104,14 @@ def test_arquivo_fora_do_formato_e_422() -> None:
     assert _pedir(mundo, [_par("j1", "../x.jpg")]).status_code == 422
 
 
+def test_id_de_job_fora_do_formato_e_422() -> None:
+    # Com "/", o Firestore leria o id como caminho e derrubaria o lote com 500.
+    mundo = Mundo()
+
+    for job in ["a/b", "", "../x"]:
+        assert _pedir(mundo, [_par(job)]).status_code == 422
+
+
 def test_exige_o_escopo_de_ler_e_a_autenticacao() -> None:
     mundo = Mundo()
 
@@ -120,3 +128,15 @@ def test_a_rota_unitaria_le_o_job_uma_vez() -> None:
 
     assert resposta.status_code == 200
     assert lidos == ["j1"]
+
+
+def test_a_rota_unitaria_le_uma_vez_o_job_que_nao_existe() -> None:
+    mundo = Mundo()
+    lidos = _contar_leituras(mundo)
+
+    resposta = mundo.cliente.get(
+        "/v1/jobs/fantasma/quadros/plano-0.jpg", headers=EDITOR
+    )
+
+    assert resposta.status_code == 404
+    assert lidos == ["fantasma"]
