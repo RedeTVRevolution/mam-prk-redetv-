@@ -70,7 +70,7 @@ O custo tem quatro partes: o variável, por hora de vídeo processada; o fixo, q
 | --- | --- | --- | --- |
 | **Total estimado** | **\~US$ 340** | **\~US$ 370** | **\~US$ 415** |
 
-Não é orçamento fechado: o piloto (E1) mede o consumo real por etapa e por tentativa, a taxa de escalonamento e a latência. O Flex custa \~US$ 200/mês a menos que o Standard na análise (o inventário, as referências e as chamadas de comparação em Flex, no #402, tiram mais ~US$ 340/mês da estimativa de ~US$ 1,26/h medida no dev, ficando em ~US$ 0,70/h ou menos): \~US$ 90 na passada de volume, \~US$ 90 no escalonamento e o resto na reserva. A análise roda num Cloud Run Job (#127), que paga CPU parada durante a espera do Flex; o piloto mede esse custo. O desconto de 50% do 3.8 Flash até 31/12/2026 não entra na conta.
+Não é orçamento fechado: o piloto (E1) mede o consumo real por etapa e por tentativa, a taxa de escalonamento e a latência. O Flex na análise custa \~US$ 200/mês a menos que o Standard: \~US$ 90 na passada de volume, \~US$ 90 no escalonamento e o resto na reserva. Levar também o inventário, as referências e as chamadas de comparação para o Flex (#402) baixa o \~US$ 1,26/h medido no dev para \~US$ 1,01/h, \~US$ 150/mês a menos com 600 h ([ADR 0004](adr/0004-gemini-flex-no-video.md)). A análise roda num Cloud Run Job (#127), que paga CPU parada durante a espera do Flex; o piloto mede esse custo. O desconto de 50% do 3.8 Flash até 31/12/2026 não entra na conta.
 
 De onde vem a economia:
 
