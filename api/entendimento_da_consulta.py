@@ -380,7 +380,9 @@ def entender(
     except Exception:  # sem veredito do Model Armor, o modelo não é chamado
         log.exception("Model Armor sem veredito; a consulta vai pelo plano B")
         return plano_b
-    programas = tuple(programas)  # lidos uma vez: chave, instrução, esquema e _montar
+    # Lidos uma vez: chave, instrução, esquema e _montar. O `iter` evita que `tuple` chame
+    # `len` antes de iterar (em `NomesDosProgramas`, cada uma é uma leitura).
+    programas = tuple(iter(programas))
 
     def perguntar() -> _Resposta:
         chamada = Chamada(

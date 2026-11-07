@@ -6,7 +6,7 @@ import random
 import threading
 import time
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -45,6 +45,7 @@ from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import CursorInvalido, Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
+from api.programas import NomesDosProgramas, Programa, ProgramasEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import TransporteFalso
@@ -139,12 +140,13 @@ class Mundo:
         ranking: Ranking | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
         armor: ModelArmor | None = None,
+        programas: Collection[str] = PROGRAMAS,
     ) -> Busca:
         return Busca(
             transporte=self.transporte,
             catalogo=self.catalogo,
             armor=armor or ModelArmorEmMemoria(),
-            programas=PROGRAMAS,
+            programas=programas,
             indice=self.indice,
             ranking=ranking or RankingEmOrdem(),
             repositorio=self.jobs,
@@ -162,6 +164,23 @@ class Mundo:
 
 def buscar(m: Mundo, texto: str = "vestido vermelho da Sabrina Sato", **kw: Any) -> Any:
     return m.busca().buscar(texto, **kw)
+
+
+def test_uma_busca_le_a_colecao_de_programas_uma_vez() -> None:
+    class ProgramasContados(ProgramasEmMemoria):
+        leituras = 0
+
+        def listar(self) -> list[Programa]:
+            self.leituras += 1
+            return super().listar()
+
+    repositorio = ProgramasContados(
+        [Programa(id=f"p{i}", nome=n, perfil="") for i, n in enumerate(PROGRAMAS)]
+    )
+    m = Mundo(pedido(texto_livre="vestido"))
+    busca = m.busca(programas=NomesDosProgramas(repositorio))
+    busca.buscar("vestido vermelho da Sabrina Sato")
+    assert repositorio.leituras == 1
 
 
 def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> None:
