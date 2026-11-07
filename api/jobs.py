@@ -1168,7 +1168,10 @@ def criar_rotas(
         ordem: Ordem = "enviado",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_MAXIMO)] = None,
         cursor: str | None = None,
+        capa: bool = True,
     ) -> Response:
+        """`capa=false` não assina as capas e tira o `capa_url` da resposta; a seleção dos
+        Jobs é a mesma (quem só conta, como o aviso "Finalizando" da busca)."""
         if isinstance(chamador, Sistema):
             # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
             if sistema not in (None, chamador.sistema):
@@ -1190,10 +1193,16 @@ def criar_rotas(
             pagina = repositorio.consultar(filtro)
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
-        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
-            publicos = list(assinando.map(_com_capa, pagina.jobs))
-        corpo = [p.model_dump(mode="json") for p in publicos]
+        if capa:
+            # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
+            with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+                publicos = list(assinando.map(_com_capa, pagina.jobs))
+            corpo = [p.model_dump(mode="json") for p in publicos]
+        else:
+            corpo = [
+                JobResumido.de(j).model_dump(mode="json", exclude={"capa_url"})
+                for j in pagina.jobs
+            ]
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
