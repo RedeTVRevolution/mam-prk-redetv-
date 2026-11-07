@@ -430,6 +430,31 @@ class Reproducao(BaseModel):
     expira_em: datetime
 
 
+ARQUIVO_DO_QUADRO = r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$"
+# Quadros por pedido em lote (#481): uma página da busca tem bem menos.
+LIMITE_DE_QUADROS_EM_LOTE = 100
+
+
+class ParDeQuadro(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job: str
+    arquivo: Annotated[str, StringConstraints(pattern=ARQUIVO_DO_QUADRO)]
+
+
+class PedidoDeQuadros(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quadros: Annotated[list[ParDeQuadro], Field(max_length=LIMITE_DE_QUADROS_EM_LOTE)]
+
+
+class QuadroDoLote(BaseModel):
+    job: str
+    arquivo: str
+    url: str | None
+    expira_em: datetime | None
+
+
 class TipoNaoSuportado(Exception):
     """Corpo com tipo diferente de video/mp4: vira 415, antes de qualquer 422."""
 
@@ -1202,8 +1227,10 @@ def criar_rotas(
             return Response(status_code=304, headers=cabecalhos)
         return JSONResponse(publico.model_dump(mode="json"), headers=cabecalhos)
 
-    def obter_concluido(job_id: str, chamador: Chamador) -> Job:
-        job = _enxerga(chamador, repositorio.obter(job_id))
+    def obter_concluido(
+        job_id: str, chamador: Chamador, lido: Job | None = None
+    ) -> Job:
+        job = _enxerga(chamador, lido or repositorio.obter(job_id))
         if job.estado != "concluido":
             raise HTTPException(409, f"Job em {job.estado}, não concluido")
         return job
@@ -1240,13 +1267,60 @@ def criar_rotas(
         acessos.baixou(chamador, job, "video.baixado")
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
 
+    @rotas.post("/quadros")
+    def quadros_em_lote(
+        pedido: PedidoDeQuadros,
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> list[QuadroDoLote]:
+        """As URLs assinadas dos quadros de uma página da busca, numa chamada só: cada Job
+        é lido uma vez e o papel, uma vez. O par de Job que não existe, não se enxerga, está
+        na lixeira ou não concluiu volta sem URL, sem derrubar o lote."""
+        jobs = {
+            j.id: j
+            for j in repositorio.obter_varios(
+                dict.fromkeys(p.job for p in pedido.quadros)
+            )
+        }
+        expira_em = relogio() + VALIDADE_INFORMADA_DA_IMAGEM
+        resposta: list[QuadroDoLote] = []
+        for par in pedido.quadros:
+            job = jobs.get(par.job)
+            visivel = (
+                job is not None
+                and job.estado == "concluido"
+                and job.lixeira is None
+                and not (
+                    isinstance(chamador, Sistema) and job.sistema != chamador.sistema
+                )
+            )
+            url = (
+                armazenamento.url_do_quadro(
+                    par.job, caminho_do_quadro(par.arquivo), VALIDADE_DA_IMAGEM
+                )
+                if visivel
+                else None
+            )
+            resposta.append(
+                QuadroDoLote(
+                    job=par.job,
+                    arquivo=par.arquivo,
+                    url=url,
+                    expira_em=expira_em if url else None,
+                )
+            )
+        return resposta
+
     @rotas.get("/{job_id}/quadros/{arquivo}")
     def quadro(
         job_id: str,
-        arquivo: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$")],
+        arquivo: Annotated[str, Path(pattern=ARQUIVO_DO_QUADRO)],
+        request: Request,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
     ) -> Reproducao:
-        job = obter_concluido(job_id, chamador)
+        # O Job que a dependência da lixeira já leu neste pedido.
+        job = obter_concluido(
+            job_id, chamador, getattr(request.state, "job_lido", None)
+        )
         url = armazenamento.url_do_quadro(
             job.id, caminho_do_quadro(arquivo), VALIDADE_DA_IMAGEM
         )

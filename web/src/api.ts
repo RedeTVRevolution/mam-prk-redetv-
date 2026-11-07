@@ -85,6 +85,18 @@ async function paginaDaBusca(pedido: Promise<Response>): Promise<PaginaDaBusca> 
 /** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
 export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
 
+/** Um quadro pedido em lote: o vídeo e o arquivo (`plano-0.jpg`). */
+export interface ParDeQuadro {
+  job: string
+  arquivo: string
+}
+
+/** A resposta do lote para um par: sem `url` (e sem `expira_em`) quando o quadro não pode ser dado. */
+export interface QuadroDoLote extends ParDeQuadro {
+  url: string | null
+  expira_em: string | null
+}
+
 /** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
@@ -331,6 +343,8 @@ export interface ClienteDaApi {
   auditoria(filtros: FiltrosDaAuditoria, limite: number, cursor?: string | null): Promise<PaginaDeAuditoria>
   /** `GET /v1/jobs/andamento`: o estado atual de até 200 vídeos num pedido só; omite os que não existem ou não se enxerga. */
   andamento(ids: string[]): Promise<Job[]>
+  /** `POST /v1/jobs/quadros`: as URLs assinadas dos quadros de uma página da busca (até 100 pares); `url` vem nula se o vídeo não existe, está na lixeira ou não concluiu. */
+  quadros(pares: ParDeQuadro[]): Promise<QuadroDoLote[]>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
   /**
@@ -535,6 +549,7 @@ export function criarClienteDaApi(
       }
     },
     andamento: (ids) => chamar(`/v1/jobs/andamento?ids=${ids.map(encodeURIComponent).join(',')}`),
+    quadros: async (pares) => (await chamar<QuadroDoLote[]>('/v1/jobs/quadros', { post: true, corpo: { quadros: pares } })),
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite, cursor) => paginaDaBusca(pedir(`/v1/busca?${comCursor(consultaParaApi(consulta, limite), cursor)}`)),

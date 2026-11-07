@@ -107,13 +107,15 @@ def sem_job_na_lixeira(
     repositorio: RepositorioDeJobs,
 ) -> Callable[[Request, ChamadorAutenticado], None]:
     """Dependência de `/v1`: toda rota com `{job_id}` dá 404 ao Job na lixeira, menos ao
-    Administrador, que o lê para conferir e restaurar."""
+    Administrador, que o lê para conferir e restaurar. O Job lido fica em
+    `request.state.job_lido`, para a rota não ler de novo."""
 
     def verificar(request: Request, chamador: ChamadorAutenticado) -> None:
         job_id = request.path_params.get("job_id")
         if job_id is None:
             return
         job = repositorio.obter(job_id)
+        request.state.job_lido = job
         if job is None or job.lixeira is None:
             return
         if isinstance(chamador, Usuario) and _tem_permissao(

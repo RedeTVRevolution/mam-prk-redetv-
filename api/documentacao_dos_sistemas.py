@@ -611,6 +611,53 @@ OPERACOES: tuple[Operacao, ...] = (
         ),
     ),
     Operacao(
+        "POST",
+        "/v1/jobs/quadros",
+        "URLs de vários quadros de uma vez",
+        "As URLs assinadas de até 100 quadros (pares `job` e `arquivo`, o nome que a busca "
+        "devolve em `quadro`) numa chamada só, no lugar de uma por quadro. Cada Job é lido "
+        "uma vez. Job que não existe, é de outro sistema, está na lixeira ou ainda não "
+        "`concluiu` volta com `url` e `expira_em` nulos, sem derrubar o lote. Escopo `ler`.",
+        [
+            {
+                "job": "6f1c2a",
+                "arquivo": "plano-6.jpg",
+                "url": "https://storage.googleapis.com/BUCKET/...",
+                "expira_em": INSTANTE,
+            },
+            {
+                "job": "fantasma",
+                "arquivo": "plano-0.jpg",
+                "url": None,
+                "expira_em": None,
+            },
+        ],
+        (
+            *_sem_chave("ler"),
+            Erro(
+                422,
+                "Erro de validação",
+                "Mais de 100 pares, ou um `arquivo` fora do formato. Aqui `detail` é uma "
+                "lista: leia `loc` e `msg`. Peça até 100 pares por chamada.",
+                exemplo=[
+                    {
+                        "type": "too_long",
+                        "loc": ["body", "quadros"],
+                        "msg": "List should have at most 100 items after validation, not 101",
+                        "input": "[...]",
+                        "ctx": {
+                            "field_type": "List",
+                            "max_length": 100,
+                            "actual_length": 101,
+                        },
+                    }
+                ],
+            ),
+            _INDISPONIVEL,
+        ),
+        pedido={"quadros": [{"job": "6f1c2a", "arquivo": "plano-6.jpg"}]},
+    ),
+    Operacao(
         "GET",
         "/v1/jobs/{job_id}/passadas",
         "Listar as passadas do Job",

@@ -63,6 +63,7 @@ const job = (id: string, indexacao: string | null): JobApi => ({ id, estado: 'co
 
 const buscas: URLSearchParams[] = []
 const quadrosPedidos: string[] = []
+const pedidosDeQuadros: number[] = []
 const fotos: { params: URLSearchParams; arquivo: File | null }[] = []
 let resposta: () => Response = () => HttpResponse.json(resultado())
 let respostaDaFoto: () => Response = () => HttpResponse.json(DA_FOTO)
@@ -75,9 +76,11 @@ const servidor = setupServer(
     return HttpResponse.json(jobs.map((j) => ({ nome: `${j.id}.mp4`, codigo_falha: null, criado_em: agora(), atualizado_em: agora(), ...j })))
   }),
   http.get('/v1/programas', () => HttpResponse.json(['TV Fama', 'Leo Dias'])),
-  http.get('/v1/jobs/:id/quadros/:arquivo', ({ params }) => {
-    quadrosPedidos.push(`${params.id}/${params.arquivo}`)
-    return HttpResponse.json({ url: `https://q.exemplo/${params.id}/${params.arquivo}`, expira_em: '2999-01-01T00:00:00Z' })
+  http.post('/v1/jobs/quadros', async ({ request }) => {
+    const { quadros } = (await request.json()) as { quadros: { job: string; arquivo: string }[] }
+    pedidosDeQuadros.push(quadros.length)
+    for (const q of quadros) quadrosPedidos.push(`${q.job}/${q.arquivo}`)
+    return HttpResponse.json(quadros.map((q) => ({ ...q, url: `https://q.exemplo/${q.job}/${q.arquivo}`, expira_em: '2999-01-01T00:00:00Z' })))
   }),
   http.get('/v1/busca', ({ request }) => {
     buscas.push(new URL(request.url).searchParams)
@@ -109,6 +112,7 @@ afterEach(() => {
   servidor.resetHandlers()
   buscas.length = 0
   quadrosPedidos.length = 0
+  pedidosDeQuadros.length = 0
   fotos.length = 0
   jobs = []
   pedidosDoAcervo = []
@@ -496,6 +500,15 @@ test('o quadro vem da rota do quadro do vídeo, uma vez por arquivo', async () =
   const primeira = cena(/em 12:04/)
   await waitFor(() => expect(primeira.querySelector('img')?.getAttribute('src')).toBe('https://q.exemplo/v1/plano-1.jpg'))
   expect([...new Set(quadrosPedidos)].toSorted()).toEqual(['v1/plano-1.jpg', 'v1/plano-2.jpg'])
+})
+
+test('os quadros da página saem numa requisição só (#481)', async () => {
+  resposta = () => HttpResponse.json(PLANOS)
+  await abrir('/busca?q=rua')
+  await screen.findByText('2 momentos em 1 vídeo')
+
+  await waitFor(() => expect(cena(/em 12:04/).querySelector('img')).not.toBeNull())
+  expect(pedidosDeQuadros).toEqual([2])
 })
 
 test('rolar até o fim traz a página seguinte pelo X-Proximo-Cursor (#426)', async () => {
