@@ -627,6 +627,26 @@ def test_transporte_vertex_manda_imagens_no_lugar_do_video() -> None:
     assert pedido["headers"] == {}
 
 
+def test_o_texto_da_chamada_vai_antes_das_imagens() -> None:
+    sessao = SessaoFalsa(_ok("{}"))
+
+    TransporteVertex("p", sessao).gerar(
+        replace(
+            _chamada(),
+            video_uri="",
+            imagens=(b"\xff\xd8abc",),
+            texto="a pessoa",
+            modo=MODO_STANDARD,
+        )
+    )
+
+    partes = sessao.pedidos[0]["json"]["contents"][0]["parts"]
+    assert partes == [
+        {"text": "a pessoa"},
+        {"inlineData": {"mimeType": "image/jpeg", "data": "/9hhYmM="}},
+    ]
+
+
 def test_o_modo_vem_do_campo_da_chamada_e_nao_do_conteudo() -> None:
     for conteudo in (
         {},

@@ -174,7 +174,7 @@ class Chamada:
     # do arquivo; sem ele, o vídeo inteiro. O modelo conta os tempos do arquivo.
     trecho_ms: tuple[int, int] | None = None
     # JPEGs que seguem no lugar do vídeo (identificação pelo modelo forte, `video_uri`
-    # vazio). Com `imagens`, o texto segue as imagens.
+    # vazio). Com `imagens`, o texto vem antes delas.
     imagens: tuple[bytes, ...] = ()
     # Texto no lugar do vídeo (extração de nomes do Job de referências, `video_uri` vazio).
     texto: str = ""
@@ -244,7 +244,9 @@ class TransporteVertex:
         )
         partes_do_pedido: list[dict[str, Any]]
         if chamada.imagens or chamada.texto:
-            partes_do_pedido = [
+            # O texto antes das imagens: o que é de cada chamada fica por último.
+            partes_do_pedido = [{"text": chamada.texto}] if chamada.texto else []
+            partes_do_pedido += [
                 {
                     "inlineData": {
                         "mimeType": "image/jpeg",
@@ -253,8 +255,6 @@ class TransporteVertex:
                 }
                 for imagem in chamada.imagens
             ]
-            if chamada.texto:
-                partes_do_pedido.append({"text": chamada.texto})
         else:
             metadados: dict[str, Any] = {"fps": 1}
             if chamada.trecho_ms is not None:

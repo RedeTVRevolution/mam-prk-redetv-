@@ -177,13 +177,47 @@ def test_a_instrucao_traz_todas_as_pistas_do_video() -> None:
         transcricao=whisper(("Leãozinho!", 103.0), ("verdade", 104.0)),
     )
 
-    texto = transporte.chamadas[0].instrucao
+    chamada = transporte.chamadas[0]
+    texto = chamada.instrucao + chamada.texto
     assert "homem de barba" in texto  # a descrição do modelo barato
     assert "[01:43] Leãozinho! verdade" in texto  # a transcrição inteira
     assert "(gc) Leão Lobo, comentarista" in texto  # textos da tela e GCs
     assert "00:10–00:20" in texto  # as aparições
     assert "Leãozinho" in texto  # candidatos do perfil, com os apelidos
     assert "Nunca identifique pela memória" in texto
+
+
+def test_duas_pessoas_do_mesmo_video_comecam_pelo_mesmo_bloco_fixo() -> None:
+    d = decupagem(
+        [
+            pessoa("pes01", BARBA, [(10_000, 20_000)]),
+            pessoa("pes02", "não identificado, mulher loira", [(30_000, 50_000)]),
+        ],
+        [gc("Leão Lobo, comentarista", 12_000, 18_000)],
+    )
+    transporte = TransporteFalso(
+        resposta("nao_identificado"), resposta("nao_identificado")
+    )
+
+    olhar(
+        d,
+        transporte,
+        programa="TV Fama",
+        perfis=perfis_da_tv_fama(),
+        transcricao=whisper(("Leãozinho!", 103.0)),
+    )
+
+    a, b = transporte.chamadas
+    assert a.instrucao == b.instrucao  # o bloco fixo, do mesmo tamanho nas duas
+    assert "(gc) Leão Lobo, comentarista" in a.instrucao
+    assert "[01:43] Leãozinho!" in a.instrucao
+    assert "Nunca identifique pela memória" in a.instrucao
+    # o que é da pessoa vai depois, fora do bloco fixo
+    assert "homem de barba" not in a.instrucao
+    # a de mais tempo na imagem primeiro
+    assert "mulher loira" in a.texto and "homem de barba" in b.texto
+    assert "00:30–00:50" in a.texto and "00:10–00:20" in b.texto
+    assert a.texto != b.texto
 
 
 def test_nome_com_prova_conferida_e_confirmado() -> None:
