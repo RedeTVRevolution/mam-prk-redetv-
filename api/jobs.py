@@ -247,6 +247,11 @@ class Job(BaseModel):
     palavras: list[str] = []
     # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
     data_exibicao: date | None = None
+    # Mês de `data_exibicao` (`AAAA-MM`), sempre derivado dela ao montar o Job: a lista por
+    # envio filtra o período por aqui no Firestore, onde um intervalo em `data_exibicao`
+    # não cabe com a ordem por `criado_em` (#479). `None` sem data; em Job anterior ao
+    # campo, só `make gravar-mes-nos-jobs` o grava.
+    mes_exibicao: str | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
     indexacao: Indexacao | None = None
     # `None` até a primeira cópia (e onde o BigQuery não está configurado).
@@ -285,6 +290,11 @@ class Job(BaseModel):
         if not isinstance(dados, dict):
             return dados
         dados = dict(dados)
+        data = dados.get("data_exibicao")
+        if isinstance(data, date | str):
+            dados["mes_exibicao"] = (
+                data.isoformat()[:7] if isinstance(data, date) else data[:7]
+            )
         etapas = dados.get("etapas")
         if isinstance(etapas, dict):
             dados["etapas"] = {

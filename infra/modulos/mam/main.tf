@@ -135,6 +135,13 @@ variable "indices_da_busca_ligados" {
   default = true
 }
 
+# A lista de vídeos por envio filtra o período por `mes_exibicao` no Firestore (#479). Só
+# ligar depois de `make gravar-mes-nos-jobs`: o Job antigo sem o campo some do filtro.
+variable "listagem_por_mes" {
+  type    = bool
+  default = false
+}
+
 # O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima
 # e o mínimo de palavras do registro. Calibrados em 3 vídeos do dev; mudar aqui e aplicar.
 variable "busca_distancia_maxima" {
@@ -1071,6 +1078,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_INDICES_LIGADOS"
         value = tostring(var.indices_da_busca_ligados)
+      }
+      env {
+        name  = "LISTAGEM_POR_MES"
+        value = tostring(var.listagem_por_mes)
       }
       env {
         name  = "BUSCA_DIMENSAO"

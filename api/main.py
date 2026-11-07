@@ -133,6 +133,7 @@ from api.nuvem import (
     RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
+    listagem_por_mes_do_ambiente,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
 from api.painel import AcessosAoPainel, criar_rotas_do_painel
@@ -810,7 +811,10 @@ if _projeto:
     )
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
-        RepositorioFirestore(firestore.Client(project=_projeto)),
+        RepositorioFirestore(
+            firestore.Client(project=_projeto),
+            listagem_por_mes=listagem_por_mes_do_ambiente(os.environ),
+        ),
         ArmazenamentoStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_QUARENTENA"],
