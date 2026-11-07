@@ -29,6 +29,7 @@ from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
     EVIDENCIAS,
+    CacheDoEntendimento,
     ConsultaEntendida,
     ModelArmor,
     entender,
@@ -396,6 +397,7 @@ class Busca:
         self._repositorio = repositorio
         self._armazenamento = armazenamento
         self._relogio = relogio
+        self._entendimentos = CacheDoEntendimento()
 
     def buscar(
         self,
@@ -450,6 +452,8 @@ class Busca:
                 armor=self._armor,
                 programas=self._programas,
                 todas=self._copia_do_catalogo.itens,
+                cache=self._entendimentos,
+                dono=dono,
             ),
             ajustes or Ajustes(),
         )

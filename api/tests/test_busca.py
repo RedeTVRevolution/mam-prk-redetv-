@@ -2008,3 +2008,16 @@ def test_sem_nada_inelegivel_o_resultado_e_o_mesmo_com_e_sem_o_filtro() -> None:
         ]
 
     assert rodar(filtros_do_servidor()) == rodar(Filtros())
+
+
+def test_faceta_nova_nao_chama_o_modelo_de_novo_e_o_armor_sim() -> None:
+    armor = ModelArmorEmMemoria()
+    m = Mundo(pedido(texto_livre="vestido"), pedido(texto_livre="vestido"))
+    busca = m.busca(armor=armor)
+
+    busca.buscar("vestido", dono="ana")
+    busca.buscar("vestido", dono="ana", ajustes=Ajustes(marca="Adidas"))
+    busca.buscar("vestido", dono="bia")  # outra pessoa: não acerta o cache
+
+    assert len(m.transporte.chamadas) == 2
+    assert armor.consultas == ["vestido"] * 3

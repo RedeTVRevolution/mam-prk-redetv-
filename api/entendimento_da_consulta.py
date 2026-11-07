@@ -23,7 +23,10 @@ interativa: uma chamada só, sem novas tentativas, com `TEMPO_DA_CONSULTA_S` de 
 import difflib
 import logging
 import re
+import threading
+import time
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import date
@@ -48,6 +51,10 @@ TEMPO_DA_CONSULTA_S = 10.0  # depois disso, o plano B
 MAXIMO_DO_NOME = 40  # tipo do objeto, nome de pessoa ou de marca
 MAXIMO_DA_FRASE = 120
 SEMELHANCA_DO_NOME = 0.85
+VALIDADE_DO_ENTENDIMENTO_S = (
+    300.0  # 5 min: o que a web também guarda das combinações vistas
+)
+TETO_DO_ENTENDIMENTO = 500  # respostas guardadas por instância (LRU): poucos KB cada
 
 Evidencia = Literal["imagem", "citada", "fala", "gc"]
 EVIDENCIAS: tuple[Evidencia, ...] = ("imagem", "citada", "fala", "gc")
@@ -280,6 +287,48 @@ def _validar(texto: str) -> _Resposta:
         raise ValueError("resposta fora do esquema") from e
 
 
+class CacheDoEntendimento:
+    """A resposta validada do Flash-Lite, na memória do processo (#489): validade curta e
+    tamanho máximo (LRU). Sem Redis nem armazenamento externo (custo fixo).
+
+    Só guarda a resposta do modelo, nunca o `ConsultaEntendida`: nomes de pessoas e
+    programas são resolvidos de novo a cada pedido (pessoa fundida ou na lixeira). A chave
+    leva o dono: o resultado nunca passa de um usuário a outro."""
+
+    def __init__(
+        self,
+        *,
+        validade_s: float = VALIDADE_DO_ENTENDIMENTO_S,
+        teto: int = TETO_DO_ENTENDIMENTO,
+        relogio: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._validade_s = validade_s
+        self._teto = teto
+        self._relogio = relogio
+        self._guardadas: OrderedDict[tuple[str, ...], tuple[float, _Resposta]] = (
+            OrderedDict()
+        )
+        self._trava = threading.Lock()
+
+    def obter(self, chave: tuple[str, ...]) -> _Resposta | None:
+        with self._trava:
+            item = self._guardadas.get(chave)
+            if item is None:
+                return None
+            if self._relogio() >= item[0]:
+                del self._guardadas[chave]
+                return None
+            self._guardadas.move_to_end(chave)
+            return item[1]
+
+    def guardar(self, chave: tuple[str, ...], resposta: _Resposta) -> None:
+        with self._trava:
+            self._guardadas[chave] = (self._relogio() + self._validade_s, resposta)
+            self._guardadas.move_to_end(chave)
+            while len(self._guardadas) > self._teto:
+                self._guardadas.popitem(last=False)
+
+
 def _montar(
     resposta: _Resposta,
     saneada: str,
@@ -354,8 +403,14 @@ def entender(
     marcas_conhecidas: Collection[str] | None = None,
     job_id: str = "busca",
     todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
+    cache: CacheDoEntendimento | None = None,
+    dono: str = "",
 ) -> ConsultaEntendida:
     """A consulta estruturada, ou o plano B (texto saneado, sem filtros).
+
+    Com `cache` e `dono`, a resposta do modelo vem da memória se a mesma pessoa já fez a
+    mesma consulta há pouco (#489): o Model Armor roda sempre, antes; falha e resposta
+    inválida não são guardadas. Sem `dono` não há cache: a chave precisa da pessoa.
 
     `marcas_conhecidas` é o catálogo de marcas: sem ele, nenhuma marca vira filtro e
     todas caem no texto livre (não existe catálogo de marcas ainda).
@@ -373,6 +428,12 @@ def entender(
     except Exception:  # sem veredito do Model Armor, o modelo não é chamado
         log.exception("Model Armor sem veredito; a consulta vai pelo plano B")
         return plano_b
+    chave = (dono, saneada, *sorted(programas))
+    resposta = cache.obter(chave) if cache is not None and dono else None
+    if resposta is not None:
+        return _montar(
+            resposta, saneada, frase, catalogo, programas, marcas_conhecidas, todas
+        )
     chamada = Chamada(
         modelo=MODELO_DA_CONSULTA,
         instrucao=instrucao(programas),
@@ -388,6 +449,8 @@ def entender(
     except (ErroHttp, ValueError) as e:
         log.warning("entendimento da consulta falhou (%s); plano B", e)
         return plano_b
+    if cache is not None and dono:
+        cache.guardar(chave, resposta)
     return _montar(
         resposta, saneada, frase, catalogo, programas, marcas_conhecidas, todas
     )

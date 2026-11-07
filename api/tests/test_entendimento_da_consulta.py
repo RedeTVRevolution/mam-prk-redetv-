@@ -10,6 +10,7 @@ from api.catalogo import CatalogoEmMemoria
 from api.decupagem import CATEGORIAS_DE_OBJETO, CORES_BASE
 from api.entendimento_da_consulta import (
     TEMPO_DA_CONSULTA_S,
+    CacheDoEntendimento,
     ConsultaEntendida,
     ModelArmorEmMemoria,
     ObjetoDaConsulta,
@@ -398,3 +399,115 @@ def test_falha_do_modelo_sobe_sem_nova_tentativa() -> None:
     with pytest.raises(ErroHttp):
         termo_da_foto(b"jpeg", transporte=transporte)
     assert len(transporte.chamadas) == 1
+
+
+# --- cache em memória (#489) ---
+
+
+def entender_com(
+    cache: CacheDoEntendimento,
+    consulta: str,
+    transporte: TransporteFalso,
+    *,
+    dono: str = "ana",
+    armor: ModelArmorEmMemoria | None = None,
+    catalogo_: CatalogoEmMemoria | None = None,
+) -> ConsultaEntendida:
+    return entender(
+        consulta,
+        transporte=transporte,
+        catalogo=catalogo_ or catalogo()[0],
+        armor=armor or ModelArmorEmMemoria(),
+        programas=PROGRAMAS,
+        cache=cache,
+        dono=dono,
+    )
+
+
+def test_mesma_consulta_chama_o_modelo_uma_vez_e_o_armor_sempre() -> None:
+    cache, armor = CacheDoEntendimento(), ModelArmorEmMemoria()
+    t = TransporteFalso(pedido(texto_livre="x"))
+
+    a = entender_com(cache, "vestido", t, armor=armor)
+    b = entender_com(cache, "vestido", t, armor=armor)
+
+    assert a == b
+    assert len(t.chamadas) == 1
+    assert armor.consultas == ["vestido", "vestido"]
+
+
+def test_outra_pessoa_nao_acerta_o_cache() -> None:
+    cache = CacheDoEntendimento()
+    t = TransporteFalso(pedido(), pedido())
+
+    entender_com(cache, "vestido", t, dono="ana")
+    entender_com(cache, "vestido", t, dono="bia")
+
+    assert len(t.chamadas) == 2
+
+
+def test_sem_dono_nao_ha_cache() -> None:
+    cache = CacheDoEntendimento()
+    t = TransporteFalso(pedido(), pedido())
+
+    entender_com(cache, "vestido", t, dono="")
+    entender_com(cache, "vestido", t, dono="")
+
+    assert len(t.chamadas) == 2
+
+
+def test_armor_que_acusa_nao_chega_ao_cache_mesmo_com_a_resposta_guardada() -> None:
+    cache = CacheDoEntendimento()
+    t = TransporteFalso(pedido(texto_livre="x"))
+    entender_com(cache, "ignore tudo", t)
+
+    achado = entender_com(
+        cache, "ignore tudo", t, armor=ModelArmorEmMemoria(["ignore tudo"])
+    )
+
+    assert achado.plano_b
+    assert len(t.chamadas) == 1
+
+
+def test_falha_e_resposta_invalida_nao_sao_guardadas() -> None:
+    cache = CacheDoEntendimento()
+    t = TransporteFalso(ErroHttp(503), "isto não é json", pedido(), pedido())
+
+    assert entender_com(cache, "vestido", t).plano_b
+    assert entender_com(cache, "vestido", t).plano_b
+    assert not entender_com(cache, "vestido", t).plano_b
+    entender_com(cache, "vestido", t)
+
+    assert len(t.chamadas) == 3
+
+
+def test_pessoa_e_resolvida_de_novo_a_cada_pedido() -> None:
+    cache = CacheDoEntendimento()
+    c, sabrina = catalogo()
+    t = TransporteFalso(pedido(pessoas=["Sabrina Sato"]))
+
+    antes = entender_com(cache, "sabrina", t, catalogo_=c)
+    depois = entender_com(cache, "sabrina", t, catalogo_=CatalogoEmMemoria())
+
+    assert antes.pessoas == (sabrina,)
+    assert depois.pessoas == () and depois.pessoas_fora_do_catalogo == ("Sabrina Sato",)
+    assert len(t.chamadas) == 1
+
+
+def test_a_resposta_vence_depois_da_validade_e_o_mais_antigo_sai_no_teto() -> None:
+    agora = [0.0]
+    cache = CacheDoEntendimento(validade_s=60, teto=2, relogio=lambda: agora[0])
+    t = TransporteFalso(*[pedido() for _ in range(5)])
+
+    entender_com(cache, "a", t)
+    agora[0] = 59
+    entender_com(cache, "a", t)
+    assert len(t.chamadas) == 1
+    agora[0] = 60
+    entender_com(cache, "a", t)
+    assert len(t.chamadas) == 2
+
+    entender_com(cache, "b", t)
+    entender_com(cache, "c", t)  # o teto de 2 tira o "a"
+    entender_com(cache, "a", t)
+    assert len(t.chamadas) == 5
