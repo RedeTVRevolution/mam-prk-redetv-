@@ -97,16 +97,32 @@ def registro_da_falha_de_etapa(etapa: str, job_id: str, motivo: str) -> str:
     )
 
 
-def registro_do_uso_do_modelo(modelo: str, entrada: int, saida: int) -> str:
+def registro_do_uso_do_modelo(
+    modelo: str,
+    entrada: int,
+    resposta: int,
+    raciocinio: int = 0,
+    entrada_em_cache: int = 0,
+    modo: str = "",
+    etapa: str | None = None,
+) -> str:
     """Uma linha por chamada ao modelo: a etapa é o Job que a escreve (`resource.labels.job_name`),
-    e o custo dos painéis é a soma dos tokens vezes o preço do modelo (#288)."""
-    return json.dumps(
-        {
-            "severity": "INFO",
-            "evento": "uso_do_modelo",
-            "modelo": modelo,
-            "tokens_de_entrada": entrada,
-            "tokens_de_saida": saida,
-        },
-        ensure_ascii=False,
-    )
+    e o custo dos painéis é a soma dos tokens vezes o preço do modelo (#288).
+
+    `tokens_de_saida` segue sendo resposta + raciocínio (o que o painel lê); os campos
+    separados deixam medir o raciocínio, o cache e o modo (`trafficType`, `ON_DEMAND_FLEX`
+    no Flex). Fora de um Job (a busca, na API) a etapa vai no próprio registro."""
+    registro: dict[str, object] = {
+        "severity": "INFO",
+        "evento": "uso_do_modelo",
+        "modelo": modelo,
+        "tokens_de_entrada": entrada,
+        "tokens_de_saida": resposta + raciocinio,
+        "tokens_de_resposta": resposta,
+        "tokens_de_raciocinio": raciocinio,
+        "tokens_de_entrada_em_cache": entrada_em_cache,
+        "modo": modo,
+    }
+    if etapa is not None:
+        registro["etapa"] = etapa
+    return json.dumps(registro, ensure_ascii=False)

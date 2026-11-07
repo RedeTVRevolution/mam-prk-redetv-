@@ -472,18 +472,81 @@ def test_transporte_vertex_loga_o_uso_de_cada_chamada_com_o_modelo() -> None:
             "modelo": "gemini-3.5-flash-lite",
             "tokens_de_entrada": 100,
             "tokens_de_saida": 25,
+            "tokens_de_resposta": 20,
+            "tokens_de_raciocinio": 5,
+            "tokens_de_entrada_em_cache": 0,
+            "modo": "",
         }
     ]
 
 
-def test_transporte_vertex_sem_registrar_nao_loga_nada(
+def test_transporte_vertex_separa_raciocinio_cache_e_modo_no_registro() -> None:
+    corpo = {
+        "candidates": [],
+        "usageMetadata": {
+            "promptTokenCount": 100,
+            "candidatesTokenCount": 20,
+            "thoughtsTokenCount": 5,
+            "cachedContentTokenCount": 60,
+            "trafficType": "ON_DEMAND_FLEX",
+        },
+    }
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p", SessaoFalsa(RespostaFalsa(200, corpo)), registrar=linhas.append
+    )
+
+    transporte.gerar(_chamada())
+
+    registro = json.loads(linhas[0])
+    assert registro["tokens_de_entrada"] == 100
+    assert registro["tokens_de_resposta"] == 20
+    assert registro["tokens_de_raciocinio"] == 5
+    assert registro["tokens_de_entrada_em_cache"] == 60
+    assert registro["modo"] == "ON_DEMAND_FLEX"
+    assert (
+        registro["tokens_de_saida"] == 25
+    )  # o que o painel já lê: resposta + raciocínio
+
+
+def test_transporte_vertex_sem_metadados_de_uso_registra_zeros_e_modo_vazio() -> None:
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p",
+        SessaoFalsa(RespostaFalsa(200, {"candidates": []})),
+        registrar=linhas.append,
+    )
+
+    transporte.gerar(_chamada())
+
+    registro = json.loads(linhas[0])
+    assert registro["tokens_de_raciocinio"] == 0
+    assert registro["tokens_de_entrada_em_cache"] == 0
+    assert registro["modo"] == ""
+
+
+def test_transporte_vertex_com_etapa_poe_a_etapa_no_registro() -> None:
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p",
+        SessaoFalsa(RespostaFalsa(200, {"candidates": []})),
+        registrar=linhas.append,
+        etapa="busca",
+    )
+
+    transporte.gerar(_chamada())
+
+    assert json.loads(linhas[0])["etapa"] == "busca"
+
+
+def test_transporte_vertex_sem_registrar_loga_no_stdout(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     corpo = {"candidates": [], "usageMetadata": {"promptTokenCount": 1}}
 
     TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo))).gerar(_chamada())
 
-    assert capsys.readouterr().out == ""
+    assert json.loads(capsys.readouterr().out)["evento"] == "uso_do_modelo"
 
 
 @pytest.mark.parametrize("status", [429, 500, 503])
