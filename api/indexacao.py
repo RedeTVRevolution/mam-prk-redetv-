@@ -26,11 +26,6 @@ from api.catalogo_dos_jobs import gravar_catalogo_do_job
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
-from api.embedding_do_quadro import (
-    EmbeddingDoQuadro,
-    com_vetores_do_quadro,
-    embedding_da_busca,
-)
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
 from api.jobs import (
     CopiaNoBigQuery,
@@ -57,10 +52,6 @@ log = logging.getLogger(__name__)
 
 class LeitorDeDecupagem(Protocol):
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
-
-
-class LeitorDeQuadros(Protocol):
-    def ler_quadro(self, job_id: str, caminho: str) -> bytes: ...
 
 
 def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, Any]:
@@ -137,8 +128,6 @@ def reindexar(
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime] = agora_utc,
     copia: CopiaDosMomentos | None = None,
-    embedding: EmbeddingDoQuadro | None = None,
-    quadros: LeitorDeQuadros | None = None,
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
     pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
@@ -146,8 +135,7 @@ def reindexar(
     """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
 
     Nunca levanta por falha do índice ou da cópia: cada uma fica no seu estado no Job, e
-    uma não impede a outra. Com `embedding` e `quadros` (o índice do quadro-chave ligado,
-    ADR 0006), cada plano com quadro leva o vetor multimodal. `None` se o Job não está
+    uma não impede a outra. `None` se o Job não está
     `concluido` (não há Decupagem). Com `sinal`, o vídeo copiado é comparado com o histórico
     do programa (#287); o sinal também nunca levanta. Com `tipos_de_objeto`, os tipos dos
     objetos da Decupagem entram na lista do autocompletar (#308); falha só vai ao log.
@@ -184,12 +172,6 @@ def reindexar(
             registros = registros_da_decupagem(
                 job.id, decupagem, job.programa, job.data_exibicao
             )
-            if embedding and quadros:
-                registros = com_vetores_do_quadro(
-                    registros,
-                    lambda caminho: quadros.ler_quadro(job.id, caminho),
-                    embedding,
-                )
             indice.gravar(job.id, registros)
             estado = "indexado"
         except Exception:
@@ -230,8 +212,6 @@ def reindexar_jobs(
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     copia: CopiaDosMomentos | None = None,
-    embedding: EmbeddingDoQuadro | None = None,
-    quadros: LeitorDeQuadros | None = None,
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
     pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
@@ -262,8 +242,6 @@ def reindexar_jobs(
             correcoes,
             indice,
             copia=copia,
-            embedding=embedding,
-            quadros=quadros,
             sinal=sinal,
             tipos_de_objeto=tipos_de_objeto,
             pessoas=pessoas,
@@ -298,8 +276,6 @@ def main(argv: list[str]) -> int:
             orcamento=OrcamentoFirestore(firestore_),
         ),
         copia_do_ambiente(os.environ),
-        embedding=embedding_da_busca(busca),
-        quadros=decupagens,
         sinal=sinal,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
         pessoas=CatalogoFirestore(firestore_).obter,

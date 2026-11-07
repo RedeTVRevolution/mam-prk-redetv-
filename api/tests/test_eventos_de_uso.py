@@ -42,7 +42,7 @@ from api.tests.test_busca import (
     AUTORIZACAO as AUTORIZACAO_DA_BUSCA,
 )
 from api.tests.test_busca import cliente as cliente_da_busca
-from api.tests.test_busca import job, pedido, plano
+from api.tests.test_busca import pedido
 from api.tests.test_busca_por_imagem import com_vestido, enviar, foto
 from api.tests.test_correcoes import AUTORIZACAO as AUTORIZACAO_DAS_CORRECOES
 from api.tests.test_correcoes import BYTES, MODELO, VERSAO, _pessoa
@@ -532,30 +532,6 @@ def test_a_busca_por_imagem_publica_so_o_tamanho_da_foto() -> None:
     assert evento.programa == "TV Fama"
     assert ("modo", "imagem") in {(f.nome, f.valor) for f in evento.filtros}
     assert "dados" not in json.dumps(evento.para_json())
-
-
-def test_a_busca_de_parecidos_publica_o_video_e_o_plano_sem_tamanho() -> None:
-    eventos = EventosEmMemoria()
-    c, m = cliente_da_busca(["consulta"], eventos=eventos)
-    m.com(job("j2"), plano("j2:plano:1", [1.0, 0.0], "rua escura"))
-
-    r = c.get(
-        "/v1/busca/parecidos",
-        params={"job": "j2", "plano": 1},
-        headers=AUTORIZACAO_DA_BUSCA,
-    )
-
-    assert r.status_code == 200, r.text
-    [evento] = eventos.publicados
-    assert (evento.tipo, evento.job_id, evento.tamanho_da_consulta) == (
-        "busca",
-        "j2",
-        None,
-    )
-    assert {(f.nome, f.valor) for f in evento.filtros} == {
-        ("modo", "parecidos"),
-        ("plano", "1"),
-    }
 
 
 def test_a_busca_recusada_nao_publica() -> None:

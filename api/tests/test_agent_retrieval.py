@@ -31,7 +31,6 @@ CONFIG = ConfigDaBusca(
     regiao="reg-y",
     colecao="col-z",
     indice_da_descricao="ind-d",
-    indice_do_quadro="ind-q",
     dimensao=256,
 )
 
@@ -42,17 +41,11 @@ def test_config_vem_so_do_ambiente() -> None:
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
         "BUSCA_INDICE_DESCRICAO": "d",
-        "BUSCA_INDICE_QUADRO": "q",
         "BUSCA_DIMENSAO": "128",
     }
-    assert ConfigDaBusca.do_ambiente(ambiente) == ConfigDaBusca(
-        "p", "r", "c", "d", "q", 128
-    )
+    assert ConfigDaBusca.do_ambiente(ambiente) == ConfigDaBusca("p", "r", "c", "d", 128)
     with pytest.raises(KeyError):
         ConfigDaBusca.do_ambiente({})
-    # Vazio desliga o índice do quadro-chave (ADR 0006).
-    sem_quadro = ConfigDaBusca.do_ambiente(ambiente | {"BUSCA_INDICE_QUADRO": ""})
-    assert sem_quadro.indice_do_quadro is None
 
 
 @pytest.mark.parametrize(
@@ -67,15 +60,12 @@ def test_os_indices_ann_vem_do_ambiente_e_sem_a_variavel_ficam_ligados(
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
         "BUSCA_INDICE_DESCRICAO": "d",
-        "BUSCA_INDICE_QUADRO": "q",
         "BUSCA_DIMENSAO": "128",
     }
     if valor is not None:
         ambiente["BUSCA_INDICES_LIGADOS"] = valor
     config = ConfigDaBusca.do_ambiente(ambiente)
     assert config.indices_ligados is ligados
-    # Desligar os índices não desliga o vetor do quadro.
-    assert config.indice_do_quadro == "q"
 
 
 def test_valor_estranho_nos_indices_ann_levanta() -> None:
@@ -84,32 +74,11 @@ def test_valor_estranho_nos_indices_ann_levanta() -> None:
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
         "BUSCA_INDICE_DESCRICAO": "d",
-        "BUSCA_INDICE_QUADRO": "q",
         "BUSCA_DIMENSAO": "128",
         "BUSCA_INDICES_LIGADOS": "0",
     }
     with pytest.raises(ValueError, match="BUSCA_INDICES_LIGADOS"):
         ConfigDaBusca.do_ambiente(ambiente)
-
-
-SEM_QUADRO = ConfigDaBusca("proj-x", "reg-y", "col-z", "ind-d", None, 256)
-
-
-def test_sem_o_indice_do_quadro_a_colecao_nasce_so_com_o_da_descricao() -> None:
-    transporte = TransporteFalso({"name": "op", "done": True})
-    criar_colecao(SEM_QUADRO, transporte, _nao_dorme)
-    [(_, _, colecao), (_, c2, corpo2)] = transporte.chamadas
-    assert c2.endswith("indexes?indexId=ind-d")
-    assert corpo2 is not None and corpo2["indexField"] == "descricao_vetor"
-    # O campo do vetor do quadro continua na coleção: ligar o índice depois não a recria.
-    assert colecao is not None and "quadro_vetor" in colecao["vectorSchema"]
-
-
-def test_sem_o_indice_do_quadro_a_busca_por_quadro_e_recusada() -> None:
-    with pytest.raises(ValueError):
-        pedido_de_busca(SEM_QUADRO, Consulta(texto="a", vetor_do_quadro=[0.0]))
-    pedido = pedido_de_busca(SEM_QUADRO, Consulta(texto="a", significado="b"))
-    assert set(_buscas(pedido)) == {"textSearch", "semanticSearch"}
 
 
 def test_filtro_composto_junta_todos_os_campos_com_and() -> None:
@@ -149,56 +118,51 @@ def _buscas(pedido: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {next(iter(b)): b[next(iter(b))] for b in pedido["searches"]}
 
 
-def test_pedido_hibrido_leva_texto_significado_vetor_e_rrf() -> None:
+def test_pedido_hibrido_leva_texto_significado_e_rrf() -> None:
     pedido = pedido_de_busca(
         CONFIG,
         Consulta(
             filtros=Filtros(tipo="plano"),
             texto="vestido vermelho",
             significado="mulher de vestido de gala",
-            vetor_do_quadro=[0.1, 0.2],
             limite=7,
         ),
     )
     buscas = _buscas(pedido)
-    assert set(buscas) == {"textSearch", "semanticSearch", "vectorSearch"}
+    assert set(buscas) == {"textSearch", "semanticSearch"}
     assert buscas["textSearch"]["structuredQuery"] == {
         "text": {"text": "vestido vermelho", "fields": ["texto_da_busca"]}
     }
     assert buscas["semanticSearch"]["searchText"] == "mulher de vestido de gala"
     assert buscas["semanticSearch"]["searchField"] == "descricao_vetor"
-    assert buscas["vectorSearch"]["vector"] == {"values": [0.1, 0.2]}
-    assert buscas["vectorSearch"]["searchField"] == "quadro_vetor"
     assert all(b["topK"] == 7 for b in buscas.values())
     assert all(b["outputFields"] == {"dataFields": ["*"]} for b in buscas.values())
     filtro = {"$and": [{"tipo": {"$eq": "plano"}}]}
     assert all(b["filter"] == filtro for b in buscas.values())
     assert pedido["combine"] == {
-        "ranker": {"rrf": {"weights": [1.0, 1.0, 1.0]}},
+        "ranker": {"rrf": {"weights": [1.0, 1.0]}},
         "topK": 7,
         "outputFields": {"dataFields": ["*"]},
     }
 
 
-def test_toda_busca_por_vetor_leva_o_index_hint_do_indice_ann_do_seu_campo() -> None:
+def test_a_busca_por_significado_leva_o_index_hint_do_indice_ann_da_descricao() -> None:
     pedido = pedido_de_busca(
         CONFIG,
         Consulta(
             texto="a",
             significado="b",
-            vetor_do_quadro=[0.0],
             filtros=Filtros(tipo="fala"),
         ),
     )
     colecao = "projects/proj-x/locations/reg-y/collections/col-z"
     buscas = _buscas(pedido)
-    for chave, indice in (("semanticSearch", "ind-d"), ("vectorSearch", "ind-q")):
-        assert buscas[chave]["searchHint"] == {
-            "indexHint": {
-                "name": f"{colecao}/indexes/{indice}",
-                "denseScannParams": {"targetRecall": 0.95},
-            }
+    assert buscas["semanticSearch"]["searchHint"] == {
+        "indexHint": {
+            "name": f"{colecao}/indexes/ind-d",
+            "denseScannParams": {"targetRecall": 0.95},
         }
+    }
     # A busca por texto não é KNN: não usa índice de vetor.
     assert "searchHint" not in buscas["textSearch"]
 
@@ -212,9 +176,8 @@ VETOR_DA_CONSULTA = [0.5, 0.25]
 @pytest.mark.parametrize(
     "consulta",
     [
-        Consulta(texto="a", significado="b", vetor_do_quadro=[0.0]),
+        Consulta(texto="a", significado="b"),
         Consulta(significado="b", filtros=Filtros(tipo="fala")),
-        Consulta(vetor_do_quadro=[0.0]),
         Consulta(texto="a", significado="b", cortar_significado=True),
     ],
 )
@@ -248,18 +211,6 @@ def test_sem_os_indices_ann_o_significado_vai_como_vetor_da_consulta() -> None:
     }
     with pytest.raises(ValueError, match="vetor da consulta"):
         pedido_de_busca(SEM_INDICES, Consulta(significado="vestido"))
-
-
-def test_sem_os_indices_ann_a_busca_por_quadro_continua_aceita() -> None:
-    pedido = pedido_de_busca(SEM_INDICES, Consulta(vetor_do_quadro=[0.1, 0.2]))
-    assert _buscas(pedido)["vectorSearch"] == {
-        "topK": 20,
-        "outputFields": {"dataFields": ["*"]},
-        "searchField": "quadro_vetor",
-        "searchHint": {"knnHint": {}},
-        "distanceMetric": "COSINE_DISTANCE",
-        "vector": {"values": [0.1, 0.2]},
-    }
 
 
 def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busca() -> (
@@ -400,7 +351,7 @@ def test_uma_busca_so_nao_leva_rrf() -> None:
 def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
     esquema = esquema_da_colecao(CONFIG)
     vetores = esquema["vectorSchema"]
-    assert vetores["quadro_vetor"]["denseVector"]["dimensions"] == 256
+    assert "quadro_vetor" not in vetores
     assert vetores["descricao_vetor"]["denseVector"]["dimensions"] == 256
     embedding = vetores["descricao_vetor"]["denseVector"]["vertexEmbeddingConfig"]
     assert embedding["modelId"] and embedding["taskType"] == "RETRIEVAL_DOCUMENT"
@@ -411,7 +362,6 @@ def test_esquema_da_colecao_tem_a_dimensao_e_os_campos_de_filtro() -> None:
     indices = indices_da_colecao(CONFIG)
     assert {i: c["indexField"] for i, c in indices.items()} == {
         "ind-d": "descricao_vetor",
-        "ind-q": "quadro_vetor",
     }
     for corpo in indices.values():
         assert {"tipo", "cor_base", "dono", "categoria", "pessoas"} <= set(
@@ -531,33 +481,6 @@ def test_apagar_consulta_os_nomes_pagina_a_pagina_e_apaga_em_lote() -> None:
     assert corpo3 == {"requests": [{"name": n} for n in nomes]}
 
 
-def test_vetores_dos_planos_le_o_vetor_do_quadro_pagina_a_pagina() -> None:
-    def plano(n: int, vetor: list[float] | None) -> dict[str, Any]:
-        objeto: dict[str, Any] = {"data": {"id": f"j:plano:{n}"}}
-        if vetor:
-            objeto["vectors"] = {"quadro_vetor": {"dense": {"values": vetor}}}
-        return objeto
-
-    respostas = iter(
-        [
-            {
-                "dataObjects": [plano(0, [1.0, 0.0]), plano(1, None)],
-                "nextPageToken": "p",
-            },
-            {"dataObjects": [plano(2, [0.0, 1.0])]},
-        ]
-    )
-    transporte = TransporteFalso()
-    vetores = AgentRetrieval(
-        CONFIG, _Sequencia(transporte, respostas)
-    ).vetores_dos_planos("j")
-    assert vetores == {0: [1.0, 0.0], 2: [0.0, 1.0]}
-    [(_, _, corpo1), (_, _, corpo2)] = transporte.chamadas
-    assert corpo1 is not None and corpo2 is not None
-    assert corpo1["outputFields"]["vectorFields"] == ["quadro_vetor"]
-    assert corpo2["pageToken"] == "p"
-
-
 def test_total_soma_a_contagem_do_aggregate() -> None:
     transporte = TransporteFalso({"aggregateResults": [{"count": 16}]})
     assert AgentRetrieval(CONFIG, transporte).total() == 16
@@ -570,18 +493,16 @@ def _nao_dorme(_: float) -> None:
     pass
 
 
-def test_criar_colecao_cria_a_colecao_e_um_indice_ann_por_vetor() -> None:
+def test_criar_colecao_cria_a_colecao_e_so_o_indice_ann_da_descricao() -> None:
     transporte = TransporteFalso({"name": "op", "done": True})
     criar_colecao(CONFIG, transporte, _nao_dorme)
-    [(m1, c1, corpo1), (m2, c2, corpo2), (m3, c3, corpo3)] = transporte.chamadas
+    [(m1, c1, corpo1), (m2, c2, corpo2)] = transporte.chamadas
     base = "projects/proj-x/locations/reg-y/collections"
     assert (m1, c1) == ("POST", f"{base}?collectionId=col-z")
     assert corpo1 is not None and corpo1["dataSchema"]["properties"]["dono"]
     assert (m2, c2) == ("POST", f"{base}/col-z/indexes?indexId=ind-d")
-    assert (m3, c3) == ("POST", f"{base}/col-z/indexes?indexId=ind-q")
     assert corpo2 is not None and corpo2["indexField"] == "descricao_vetor"
-    assert corpo3 is not None and corpo3["indexField"] == "quadro_vetor"
-    assert "dono" in corpo2["filterFields"] and "dono" in corpo3["filterFields"]
+    assert "dono" in corpo2["filterFields"]
 
 
 def test_criar_colecao_espera_cada_operacao_antes_da_seguinte() -> None:
@@ -589,8 +510,7 @@ def test_criar_colecao_espera_cada_operacao_antes_da_seguinte() -> None:
         [
             {"name": "op-colecao", "done": False},
             {"name": "op-colecao", "done": True},
-            {"name": "op-d"},
-            {"name": "op-q", "done": True},
+            {"name": "op-d", "done": True},
         ]
     )
     transporte = TransporteFalso()
@@ -600,7 +520,6 @@ def test_criar_colecao_espera_cada_operacao_antes_da_seguinte() -> None:
         ("POST", "collections?collectionId=col-z"),
         ("GET", "op-colecao"),
         ("POST", "indexes?indexId=ind-d"),
-        ("POST", "indexes?indexId=ind-q"),
     ]
     assert len(esperas) == 1
 
@@ -804,7 +723,6 @@ def test_corte_vem_do_ambiente_e_sem_ele_nao_ha_corte() -> None:
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
         "BUSCA_INDICE_DESCRICAO": "d",
-        "BUSCA_INDICE_QUADRO": "q",
         "BUSCA_DIMENSAO": "128",
     }
     sem_corte = ConfigDaBusca.do_ambiente(ambiente)
@@ -879,7 +797,6 @@ def test_cota_de_escrita_vem_do_ambiente_e_sem_ela_nao_ha_ritmo() -> None:
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
         "BUSCA_INDICE_DESCRICAO": "d",
-        "BUSCA_INDICE_QUADRO": "q",
         "BUSCA_DIMENSAO": "128",
     }
     assert ConfigDaBusca.do_ambiente(ambiente).cota_de_escrita is None
@@ -938,14 +855,13 @@ def test_esperas_no_429_crescem_e_cabem_no_timeout_do_job() -> None:
     [
         lambda i: i.gravar("j", _registros(1)),
         lambda i: i.apagar("j"),
-        lambda i: i.vetores_dos_planos("j"),
     ],
-    ids=["gravar", "apagar", "vetores_dos_planos"],
+    ids=["gravar", "apagar"],
 )
 def test_sem_tentar_no_429_o_erro_sobe_na_hora(
     operacao: Callable[[AgentRetrieval], object],
 ) -> None:
-    # O serviço web (a busca, os planos parecidos, a purga do admin) não segura a
+    # O serviço web (a busca, a purga do admin) não segura a
     # thread esperando a cota: o 429 volta como erro do pedido.
     relogio = _Relogio()
     with pytest.raises(CotaEsgotada):
@@ -976,17 +892,16 @@ def test_apagar_tambem_tenta_de_novo_no_429(operacao: str) -> None:
     ("operacao", "espera"),
     [
         (lambda i: i.buscar(Consulta(texto="x")), False),
-        (lambda i: i.vetores_dos_planos("j"), False),
         (lambda i: i.gravar("j", _registros(1)), True),
         (lambda i: i.apagar("j"), True),
     ],
-    ids=["buscar", "vetores_dos_planos", "gravar", "apagar"],
+    ids=["buscar", "gravar", "apagar"],
 )
 def test_com_tentar_no_429_so_a_gravacao_e_a_apagada_esperam(
     operacao: Callable[[AgentRetrieval], object], espera: bool
 ) -> None:
     # O mam-web cria o índice com `tentar_no_429`: a reindexação e a purga esperam, mas
-    # a busca e os planos parecidos (também um `query`) ficam sem esperar.
+    # a busca (também um `query`) fica sem esperar.
     relogio = _Relogio()
     with pytest.raises(CotaEsgotada):
         operacao(_indice(_sempre_429, relogio, tentar_no_429=True))

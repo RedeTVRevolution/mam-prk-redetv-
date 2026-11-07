@@ -23,7 +23,6 @@ from api.busca import (
     Ajustes,
     Busca,
     BuscaCancelada,
-    EmbeddingDaConsulta,
     Entendida,
     Facetas,
     ListaDaBusca,
@@ -136,12 +135,10 @@ class Mundo:
     def busca(
         self,
         ranking: Ranking | None = None,
-        embedding: EmbeddingDaConsulta | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
         armor: ModelArmor | None = None,
     ) -> Busca:
         return Busca(
-            embedding=embedding,
             transporte=self.transporte,
             catalogo=self.catalogo,
             armor=armor or ModelArmorEmMemoria(),
@@ -500,18 +497,6 @@ def test_ver_as_mencoes_de_um_nome_fora_do_catalogo_traz_a_fala() -> None:
     ]
 
 
-def test_nome_fora_do_catalogo_no_modo_visual_nao_calcula_o_vetor() -> None:
-    m = mundo_visual(pedido(pessoas=["Fulano"], texto_livre="pista molhada"))
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-
-    r = m.busca(embedding=embedding).buscar("Fulano na pista molhada", visual=True)
-
-    assert r.videos == [] and [s.nome for s in r.sem_aparicoes] == ["Fulano"]
-    assert embedding.textos == []
-    # Não foi a busca visual que falhou: a tela não avisa que veio a comum.
-    assert r.entendida.visual is True
-
-
 def test_objeto_sem_pessoa_continua_trazendo_os_momentos() -> None:
     sem_dono = {**VESTIDO, "pessoa": None}
     m = Mundo(pedido(objetos=[sem_dono]))
@@ -643,7 +628,6 @@ def cliente(
     maximo_por_minuto: int = 30,
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     indice: IndiceEmMemoria | None = None,
-    embedding_da_consulta: EmbeddingDaConsulta | None = None,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     eventos: Eventos | None = None,
 ) -> tuple[TestClient, Mundo]:
@@ -663,7 +647,6 @@ def cliente(
         armor=ModelArmorEmMemoria(),
         busca_por_minuto=maximo_por_minuto,
         tempo_maximo_da_busca_s=tempo_maximo_s,
-        embedding_da_consulta=embedding_da_consulta,
         limites_da_imagem=limites_da_imagem,
         eventos=eventos,
     )
@@ -1494,19 +1477,7 @@ def test_a_rota_devolve_facetas_com_e_sem_filtro() -> None:
     )
 
 
-class EmbeddingDeTexto:
-    def __init__(self, vetor: list[float] | Exception) -> None:
-        self.vetor = vetor
-        self.textos: list[str] = []
-
-    def vetor_do_texto(self, texto: str) -> list[float]:
-        self.textos.append(texto)
-        if isinstance(self.vetor, Exception):
-            raise self.vetor
-        return self.vetor
-
-
-def plano(id: str, vetor: list[float] | None, descricao: str = "plano") -> Registro:
+def plano(id: str, descricao: str = "plano") -> Registro:
     return Registro(
         id=id,
         tipo="plano",
@@ -1515,90 +1486,17 @@ def plano(id: str, vetor: list[float] | None, descricao: str = "plano") -> Regis
         fim_ms=int(id[-1]) * 10_000 + 5_000,
         descricao=descricao,
         quadro=f"quadros/{id}.jpg",
-        vetor_do_quadro=vetor,
     )
 
 
-def mundo_visual(*respostas: str) -> Mundo:
+def mundo_de_planos(*respostas: str) -> Mundo:
     m = Mundo(*(respostas or (pedido(texto_livre="pista molhada"),) * 4))
     m.com(
         job("j1"),
-        plano("j1:plano:1", [1.0, 0.0], "rua escura"),
-        plano("j1:plano:2", [0.0, 1.0], "estúdio"),
-        plano("j1:plano:3", None, "sem vetor"),
+        plano("j1:plano:1", "rua escura"),
+        plano("j1:plano:2", "estúdio"),
     )
     return m
-
-
-def test_no_modo_visual_o_vetor_do_quadro_entra_na_fusao() -> None:
-    m = mundo_visual()
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-
-    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
-
-    assert embedding.textos == ["pista molhada"]
-    # Nenhuma descrição cita "pista molhada": só o vetor do quadro achou o plano.
-    assert [mo.inicio_ms for v in r.videos for mo in v.momentos] == [10_000]
-    assert r.entendida.visual is True
-    assert r.videos[0].momentos[0].quadro == "quadros/j1:plano:1.jpg"
-    com_vetor = [c for c in m.indice.consultas if c.vetor_do_quadro]
-    assert com_vetor and all(c.filtros.tipo == "plano" for c in com_vetor)
-
-
-def test_sem_o_modo_visual_nao_ha_vetor_nem_chamada_ao_embedding() -> None:
-    m = mundo_visual()
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-
-    r = m.busca(embedding=embedding).buscar("pista molhada")
-
-    assert embedding.textos == []
-    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
-    assert r.entendida.visual is False
-
-
-@pytest.mark.parametrize("embedding", [None, EmbeddingDeTexto(ConnectionError("x"))])
-def test_indice_desligado_ou_embedding_fora_a_busca_fica_como_hoje(
-    embedding: EmbeddingDeTexto | None,
-) -> None:
-    m = mundo_visual()
-    esperado = buscar(mundo_visual(), "pista molhada")
-
-    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
-
-    assert r.entendida.visual is False
-    assert r.videos == esperado.videos
-    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
-
-
-@pytest.mark.parametrize("visual", [True, False])
-def test_a_rota_leva_o_modo_visual_a_busca(visual: bool) -> None:
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-    c, m = cliente(
-        ["consulta"],
-        *[pedido(texto_livre="pista molhada")] * 2,
-        embedding_da_consulta=embedding,
-    )
-    m.com(job("j1"), plano("j1:plano:1", [1.0, 0.0]))
-    params = {"q": "pista molhada"} | ({"visual": "true"} if visual else {})
-
-    resposta = c.get("/v1/busca", params=params, headers=AUTORIZACAO)
-
-    assert resposta.status_code == 200
-    assert resposta.json()["entendida"]["visual"] is visual
-    assert embedding.textos == (["pista molhada"] if visual else [])
-    if visual:
-        assert resposta.json()["videos"][0]["momentos"][0]["tipo"] == "plano"
-
-
-def test_o_vetor_sai_do_texto_livre_e_a_clausula_visual_so_leva_o_vetor() -> None:
-    m = mundo_visual(pedido(texto_livre="pista molhada", programa="TV Fama"))
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-
-    m.busca(embedding=embedding).buscar("pista molhada no TV Fama", visual=True)
-
-    assert embedding.textos == ["pista molhada"]
-    [visual] = [c for c in m.indice.consultas if c.vetor_do_quadro]
-    assert visual.texto is None and visual.significado is None
 
 
 def _planos(m: Mundo, *descricoes: str) -> None:
@@ -1746,7 +1644,7 @@ def mundo_de_cem_planos() -> tuple[Mundo, ArmazenamentoQueConta]:
         job("j1", sistema="legado"),
         *[
             replace(
-                plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+                plano("j1:plano:1", "rua escura"),
                 id=f"j1:plano:{i}",
                 inicio_ms=i * 10_000,
                 fim_ms=i * 10_000 + 500,
@@ -1758,12 +1656,10 @@ def mundo_de_cem_planos() -> tuple[Mundo, ArmazenamentoQueConta]:
     return m, armazenamento
 
 
-def test_para_a_web_a_busca_visual_de_cem_planos_nao_assina_nenhum_quadro() -> None:
+def test_para_a_web_a_busca_de_cem_planos_nao_assina_nenhum_quadro() -> None:
     m, armazenamento = mundo_de_cem_planos()
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, limite=50
-    )
+    r = m.busca().buscar("rua", limite=50)
 
     momentos = [mo for v in r.videos for mo in v.momentos]
     assert len(momentos) == 100
@@ -1774,9 +1670,7 @@ def test_para_a_web_a_busca_visual_de_cem_planos_nao_assina_nenhum_quadro() -> N
 def test_para_chave_de_sistema_o_quadro_url_continua_vindo_assinado() -> None:
     m, armazenamento = mundo_de_cem_planos()
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado"
-    )
+    r = m.busca().buscar("rua", sistema="legado")
 
     momentos = [mo for v in r.videos for mo in v.momentos]
     assert armazenamento.assinaturas == len(momentos) == 100
@@ -1788,9 +1682,7 @@ def test_para_chave_de_sistema_o_quadro_url_continua_vindo_assinado() -> None:
 def test_os_quadros_da_busca_saem_assinados_por_8_h() -> None:
     m, _ = mundo_de_cem_planos()
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado"
-    )
+    r = m.busca().buscar("rua", sistema="legado")
 
     momentos = [mo for v in r.videos for mo in v.momentos]
     assert momentos
@@ -1806,16 +1698,14 @@ def test_a_chave_de_sistema_nao_assina_os_quadros_dos_videos_cortados_pelo_limit
     m.com(
         job("j2", sistema="legado"),
         replace(
-            plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+            plano("j1:plano:1", "rua escura"),
             id="j2:plano:0",
             job_id="j2",
             quadro="quadros/plano-0.jpg",
         ),
     )
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado", limite=1
-    )
+    r = m.busca().buscar("rua", sistema="legado", limite=1)
 
     assert len(r.videos) == 1
     assert armazenamento.assinaturas == r.videos[0].n_momentos
@@ -1824,15 +1714,13 @@ def test_a_chave_de_sistema_nao_assina_os_quadros_dos_videos_cortados_pelo_limit
 def test_as_assinaturas_da_chave_de_sistema_vao_em_paralelo_ate_o_teto() -> None:
     m, armazenamento = mundo_de_cem_planos()
 
-    m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado"
-    )
+    m.busca().buscar("rua", sistema="legado")
 
     assert 1 < armazenamento.mais_simultaneas <= TETO_DE_ASSINATURAS
 
 
 def test_busca_cancelada_para_antes_de_consultar_o_indice() -> None:
-    m = mundo_visual()
+    m = mundo_de_planos()
     cancelado = threading.Event()
     cancelado.set()
 
@@ -1856,9 +1744,7 @@ def test_busca_cancelada_no_meio_das_assinaturas_para_de_assinar() -> None:
     armazenamento.url_do_quadro = assina_e_desiste  # type: ignore[method-assign]
 
     with pytest.raises(BuscaCancelada):
-        m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-            "rua", visual=True, sistema="legado", cancelado=cancelado
-        )
+        m.busca().buscar("rua", sistema="legado", cancelado=cancelado)
 
     # As que já tinham começado terminam; as que esperavam na fila não assinam.
     assert armazenamento.assinaturas < 3 + TETO_DE_ASSINATURAS

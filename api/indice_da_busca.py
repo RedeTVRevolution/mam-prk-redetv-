@@ -4,7 +4,6 @@ O adaptador do Agent Retrieval mora em `agent_retrieval.py`; o dublê em memóri
 implementa os filtros exatos e o texto, e é o que os testes usam.
 """
 
-import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -47,8 +46,6 @@ class Registro:
     quadro: str | None = None  # o JPEG do momento; leva o vetor do quadro-chave
     # De 1 a 3, só no objeto do inventário (#245); pesa na ordem dos resultados.
     destaque: int | None = None
-    # Gemini Embedding 2 sobre o quadro; só em plano, e só quando o chamador o calculou.
-    vetor_do_quadro: list[float] | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -74,8 +71,6 @@ class Consulta:
     texto: str | None = None
     # Texto para a busca por significado na descrição (embedding automático).
     significado: str | None = None
-    # Vetor do quadro-chave da consulta (Gemini Embedding 2), na dimensão da coleção.
-    vetor_do_quadro: list[float] | None = None
     limite: int = 20
     # O que vem só da busca por significado passa pelo corte da configuração; o que a
     # busca por texto acha fica. Falso quando o significado só leva os filtros ao índice.
@@ -92,10 +87,6 @@ class IndiceDaBusca(Protocol):
 
     def total(self) -> int:
         """Quantos registros há no índice, de todos os vídeos."""
-        ...
-
-    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
-        """O vetor do quadro de cada plano do vídeo que o tem, pelo número do plano (#271)."""
         ...
 
 
@@ -340,41 +331,16 @@ class IndiceEmMemoria:
     def total(self) -> int:
         return sum(len(r) for r in self._por_job.values())
 
-    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
-        return {
-            int(r.id.rsplit(":", 1)[1]): r.vetor_do_quadro
-            for r in self._por_job.get(job_id, [])
-            if r.tipo == "plano" and r.vetor_do_quadro
-        }
-
     def buscar(self, consulta: Consulta) -> list[Registro]:
         da_consulta = palavras(consulta.texto) if consulta.texto else []
-        so_vetor = consulta.vetor_do_quadro is not None and not (
-            consulta.texto or consulta.significado
-        )
         achados: list[Registro] = []
-        parecidos: list[tuple[float, Registro]] = []
         for registros in self._por_job.values():
             for r in registros:
                 if not _casa(r, consulta.filtros):
                     continue
-                if consulta.vetor_do_quadro is not None and r.vetor_do_quadro:
-                    # Como o índice real, a união da busca por texto e a por vetor.
-                    proximidade = _cosseno(consulta.vetor_do_quadro, r.vetor_do_quadro)
-                    if proximidade > 0:
-                        parecidos.append((proximidade, r))
                 palavras_do_registro = set(palavras(_frase(r.texto, r.descricao) or ""))
-                if not so_vetor and (
-                    not da_consulta
-                    or any(p in palavras_do_registro for p in da_consulta)
+                if not da_consulta or any(
+                    p in palavras_do_registro for p in da_consulta
                 ):
                     achados.append(r)
-        parecidos.sort(key=lambda p: -p[0])
-        ids = {r.id for r in achados}
-        achados += [r for _, r in parecidos if r.id not in ids]
         return achados[: consulta.limite]
-
-
-def _cosseno(a: list[float], b: list[float]) -> float:
-    norma = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-    return sum(x * y for x, y in zip(a, b, strict=True)) / norma if norma else 0.0

@@ -63,7 +63,7 @@ class EventoDeUso(BaseModel):
     # momentos (vazia no fim de um Job que falhou antes de medi-la).
     duracao_do_video_ms: int | None = None
     # `busca`: só o tamanho da consulta (em caracteres, ou em bytes na busca por
-    # imagem; nenhum na de parecidos, que parte de um plano) e os filtros; o texto
+    # imagem) e os filtros; o texto
     # nunca sai da API.
     tamanho_da_consulta: int | None = None
     # `busca`: quantos vídeos a busca trouxe (0 é busca sem resultado).

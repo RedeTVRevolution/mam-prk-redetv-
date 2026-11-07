@@ -74,9 +74,7 @@ def test_png_com_extensao_jpg_e_aceito_pelo_conteudo_e_busca_o_termo_do_modelo()
     assert corpo.pop("quadros_expiram_em") and esperada.pop("quadros_expiram_em")
     assert corpo == esperada
     assert corpo["videos"][0]["momentos"][0]["motivo"] == "Objeto: vestido vermelho"
-    # Sem o vetor da foto nem o modo visual: busca comum, e só duas chamadas ao modelo.
-    assert corpo["entendida"]["visual"] is False
-    assert not [c for c in m.indice.consultas if c.vetor_do_quadro]
+    # Só duas chamadas ao modelo: a descrição da foto e o entendimento.
     [descricao, entendimento] = m.transporte.chamadas
     assert descricao.modelo == MODELO_DA_CONSULTA and descricao.video_uri == ""
     assert len(descricao.imagens) == 1 and descricao.ferramentas == ()
@@ -222,25 +220,17 @@ def test_sem_modelo_da_consulta_responde_503() -> None:
     ],
     ids=["modelo-fora", "fora-do-json", "fora-do-esquema", "termo-vazio"],
 )
-def test_modelo_fora_ou_sem_objeto_na_foto_responde_503_sem_cair_no_vetor(
+def test_modelo_fora_ou_sem_objeto_na_foto_responde_503_sem_plano_b(
     falha: str | Exception,
 ) -> None:
-    embedding = EmbeddingDeFoto()
-    c, m = com_vestido(falha, embedding_da_consulta=embedding)
+    c, m = com_vestido(falha)
 
     r = enviar(c, foto())
 
     assert r.status_code == 503
     assert r.json()["detail"] == "A busca por imagem não está disponível agora"
-    # Nenhum plano B pelo vetor: nem o entendimento nem o índice foram chamados.
+    # Nenhum plano B: nem o entendimento nem o índice foram chamados.
     assert len(m.transporte.chamadas) == 1 and m.indice.consultas == []
-
-
-class EmbeddingDeFoto:
-    """Falha se a busca por foto voltar a pedir vetor ao embedding."""
-
-    def vetor_do_texto(self, texto: str) -> list[float]:
-        raise AssertionError("a foto não vira vetor")
 
 
 def test_a_busca_por_foto_levanta_indisponivel_sem_termo() -> None:

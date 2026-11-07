@@ -60,16 +60,13 @@ def percentil(tempos: list[float], p: int) -> float:
     return ordenados[posicao - 1]
 
 
-def _consulta(
-    vetor: list[float] | None = None, cor: str = "vermelho", significado: str = CONSULTA
-) -> Consulta:
+def _consulta(cor: str = "vermelho", significado: str = CONSULTA) -> Consulta:
     """ "vestido vermelho da Sabrina Sato" como o entendimento da consulta a entregaria:
     filtros exatos, o texto que sobra e o significado da frase inteira."""
     return Consulta(
         filtros=Filtros(tipo="objeto", categoria="roupa", cor_base=cor, dono=SABRINA),
         texto="vestido",
         significado=significado,
-        vetor_do_quadro=vetor,
         limite=10,
     )
 
@@ -79,7 +76,6 @@ def medir(
     dimensao: int,
     consultas: int,
     relogio: Callable[[], float] = perf_counter,
-    vetor: list[float] | None = None,
 ) -> Medicao:
     """Indexa os exemplos, mede `consultas` buscas e apaga os exemplos no fim."""
     if consultas < 1:
@@ -88,16 +84,16 @@ def medir(
         for exemplo in EXEMPLOS:
             indice.gravar(exemplo.job_id, exemplo.registros())
         registros = indice.total()
-        achados = indice.buscar(_consulta(vetor))
+        achados = indice.buscar(_consulta())
         so_a_sabrina = len(achados) == 1 and (
             (achados[0].job_id, achados[0].dono, achados[0].cor_base)
             == ("ex-sabrina", SABRINA, ["vermelho"])
         )
-        cor_filtra = not indice.buscar(_consulta(vetor, cor="azul"))
+        cor_filtra = not indice.buscar(_consulta(cor="azul"))
         tempos: list[float] = []
         for n in range(consultas):
             # Texto novo a cada vez: sem índice ANN, o embedding é guardado por texto.
-            consulta = _consulta(vetor, significado=f"{CONSULTA} {n}")
+            consulta = _consulta(significado=f"{CONSULTA} {n}")
             inicio = relogio()
             indice.buscar(consulta)
             tempos.append(relogio() - inicio)
