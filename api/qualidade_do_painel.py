@@ -1,5 +1,5 @@
 """O que a aba Revisão do painel da diretoria lê além das tabelas resumidas (#284): a taxa de
-correção (#265), que vive no Firestore e no Storage, e o tempo de revisão (#251), agregado no
+correção (#265), somada da tabela diária no BigQuery, e o tempo de revisão (#251), agregado no
 BigQuery (`api/revisao_do_painel.py`, #467).
 
 O período chega em dias de São Paulo, os dois inclusive. O tempo de revisão vira `[desde, ate)`

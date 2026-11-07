@@ -119,6 +119,9 @@ class Mundo:
         cache_do_painel: Any = None,
         revisao: Any = None,
         tempo_de_revisao: Any = None,
+        armazenamento: Any = None,
+        correcoes: Any = None,
+        taxa_de_correcao: Any = None,
     ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
@@ -150,6 +153,9 @@ class Mundo:
                 cache_do_painel=cache_do_painel,
                 revisao=revisao,
                 tempo_de_revisao=tempo_de_revisao,
+                armazenamento=armazenamento,
+                correcoes=correcoes,
+                taxa_de_correcao=taxa_de_correcao,
             )
         )
 

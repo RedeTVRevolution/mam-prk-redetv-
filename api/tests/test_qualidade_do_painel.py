@@ -1,5 +1,5 @@
 """A fonte da aba Revisão do painel (#284): tempo de revisão por período, programa e pessoa,
-e o período de São Paulo repassado à taxa de correção."""
+e a taxa de correção lida da tabela diária (#468)."""
 
 from datetime import UTC, date, datetime, timedelta
 from typing import Any

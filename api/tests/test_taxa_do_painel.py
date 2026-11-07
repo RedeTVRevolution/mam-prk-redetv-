@@ -1,9 +1,12 @@
 """A taxa de correção do painel lida da tabela diária (#468, parte 2 de 2)."""
 
+from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from api.jobs import ArmazenamentoIndisponivel
+from api.painel import taxa_no_painel
 from api.qualidade_do_painel import QualidadeReal, _periodo
 from api.revisao_do_painel import RevisaoEmMemoria
 from api.taxa_de_correcao import calcular, em_csv
@@ -15,6 +18,7 @@ from api.taxa_diaria import (
     dias_recentes,
 )
 from api.taxa_do_painel import TaxaBigQuery, TaxaEmMemoria, taxa_do_ambiente
+from api.tests.test_rotas_do_painel import Mundo
 from api.tests.test_taxa_diaria import DIA, _caso_de_hoje
 
 MAM = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
@@ -110,6 +114,37 @@ def test_o_painel_so_precisa_da_tabela_nao_de_decupagem_nem_de_correcoes() -> No
     fonte = (Path(__file__).parents[1] / "taxa_do_painel.py").read_text()
     for lido_de_longe in ("abrir_decupagem", "calcular(", "DecupagensStorage"):
         assert lido_de_longe not in fonte.split('"""', 2)[2]
+
+
+class _StorageQueNaoPodeSerLido(ArmazenamentoIndisponivel):
+    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        raise AssertionError("o painel não pode baixar decupagem")
+
+
+def test_a_aba_revisao_mostra_a_taxa_sem_baixar_decupagem() -> None:
+    """A rota inteira, com correções e pulsos no Firestore em memória: o Storage falha se for
+    chamado."""
+    tabela, caso = _tabela_do_caso_de_hoje()
+    jobs, _, _, correcoes, revisao = caso
+    mundo = Mundo(
+        ["diretoria"],
+        jobs=jobs,
+        revisao=revisao,
+        correcoes=correcoes,
+        armazenamento=_StorageQueNaoPodeSerLido(),
+        taxa_de_correcao=TaxaEmMemoria(tabela),
+    )
+    desde, ate = DIA + timedelta(days=3), DIA + timedelta(days=13)
+
+    resposta = mundo.get("/revisao", desde=desde.isoformat(), ate=ate.isoformat())
+
+    assert resposta.status_code == 200
+    por_tipo = resposta.json()["taxa_de_correcao"]["por_tipo"]
+    assert por_tipo
+    assert por_tipo == [
+        {"tipo": t.tipo, "correcoes": t.correcoes, "itens": t.itens, "taxa": t.taxa}
+        for t in taxa_no_painel(_antigo(caso, desde, ate)).por_tipo
+    ]
 
 
 def _vazios_da_revisao() -> tuple[Any, Any]:
