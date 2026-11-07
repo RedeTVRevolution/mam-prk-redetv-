@@ -205,6 +205,7 @@ from api.sugestoes import (
     criar_rotas_da_contagem,
 )
 from api.taxa_de_correcao import criar_rotas_da_qualidade
+from api.taxa_do_painel import LeitorDaTaxa, TaxaEmMemoria, taxa_do_ambiente
 from api.tempo_de_tela import ConsultaComCache as TempoDeTelaComCache
 from api.tempo_de_tela import (
     ConsultaDeMomentos,
@@ -353,6 +354,7 @@ def criar_app(
     qualidade_do_painel: QualidadeDoPainel | None = None,
     faturamento: FonteDeCusto | None = None,
     tempo_de_revisao: TempoDeRevisao | None = None,
+    taxa_de_correcao: LeitorDaTaxa | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     cache_do_painel: CacheCurto | None = None,
     passadas: LeituraDePassadas | None = None,
@@ -656,10 +658,7 @@ def criar_app(
             AcessosAoPainel(repositorio_de_auditoria, relogio),
             qualidade_do_painel
             or QualidadeReal(
-                repositorio_de_jobs,
-                armazenamento_dos_jobs,
-                repositorio_de_correcoes,
-                repositorio_da_revisao,
+                taxa_de_correcao or TaxaEmMemoria(),
                 tempo_de_revisao
                 or RevisaoEmMemoria(repositorio_da_revisao, repositorio_de_jobs),
             ),
@@ -903,6 +902,7 @@ if _projeto:
         resumos_de_uso=resumos_do_ambiente(os.environ),
         faturamento=faturamento_do_ambiente(os.environ),
         tempo_de_revisao=revisao_do_ambiente(os.environ),
+        taxa_de_correcao=taxa_do_ambiente(os.environ),
         relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
         cache_do_painel=CacheCurto(),
         passadas=PassadasStorage(
