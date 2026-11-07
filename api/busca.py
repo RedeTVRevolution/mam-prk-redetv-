@@ -25,6 +25,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
@@ -84,6 +85,10 @@ TETO_DE_ASSINATURAS = 16
 TETO_DE_CONSULTAS_AO_INDICE = 3
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
+# Entendimento da consulta (Flash-Lite) guardado por pessoa e consulta (#489): uma faceta
+# ou ordem nova não paga o modelo de novo. O Model Armor roda sempre.
+VALIDADE_DO_ENTENDIMENTO_S = 300.0  # 5 min, o que a web guarda das combinações vistas
+TETO_DO_ENTENDIMENTO = 500  # respostas por instância (LRU), poucos KB cada
 ROTULO_DO_TIPO: dict[str, str] = {
     "plano": "Plano",
     "fala": "Fala",
@@ -396,6 +401,9 @@ class Busca:
         self._repositorio = repositorio
         self._armazenamento = armazenamento
         self._relogio = relogio
+        self._entendimentos = CacheCurto(
+            VALIDADE_DO_ENTENDIMENTO_S, TETO_DO_ENTENDIMENTO
+        )
 
     def buscar(
         self,
@@ -450,6 +458,8 @@ class Busca:
                 armor=self._armor,
                 programas=self._programas,
                 todas=self._copia_do_catalogo.itens,
+                cache=self._entendimentos,
+                dono=dono,
             ),
             ajustes or Ajustes(),
         )

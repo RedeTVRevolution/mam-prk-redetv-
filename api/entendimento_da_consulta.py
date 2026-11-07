@@ -31,6 +31,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import CATEGORIAS_DE_OBJETO, CORES_BASE
@@ -354,8 +355,14 @@ def entender(
     marcas_conhecidas: Collection[str] | None = None,
     job_id: str = "busca",
     todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
+    cache: CacheCurto | None = None,
+    dono: str = "",
 ) -> ConsultaEntendida:
     """A consulta estruturada, ou o plano B (texto saneado, sem filtros).
+
+    Com `cache` e `dono`, a resposta do modelo vem da memória se a mesma pessoa já fez a
+    mesma consulta há pouco (#489): o Model Armor roda sempre, antes; falha e resposta
+    inválida não são guardadas. Sem `dono` não há cache: a chave precisa da pessoa.
 
     `marcas_conhecidas` é o catálogo de marcas: sem ele, nenhuma marca vira filtro e
     todas caem no texto livre (não existe catálogo de marcas ainda).
@@ -373,18 +380,28 @@ def entender(
     except Exception:  # sem veredito do Model Armor, o modelo não é chamado
         log.exception("Model Armor sem veredito; a consulta vai pelo plano B")
         return plano_b
-    chamada = Chamada(
-        modelo=MODELO_DA_CONSULTA,
-        instrucao=instrucao(programas),
-        video_uri="",
-        esquema=esquema_da_resposta(programas),
-        rotulos={"etapa": ETAPA, "job_id": job_id},
-        texto=f"<consulta>{saneada}</consulta>",
-        timeout_s=TEMPO_DA_CONSULTA_S,
-        modo=MODO_STANDARD,
-    )
+    programas = tuple(programas)  # lidos uma vez: chave, instrução, esquema e _montar
+
+    def perguntar() -> _Resposta:
+        chamada = Chamada(
+            modelo=MODELO_DA_CONSULTA,
+            instrucao=instrucao(programas),
+            video_uri="",
+            esquema=esquema_da_resposta(programas),
+            rotulos={"etapa": ETAPA, "job_id": job_id},
+            texto=f"<consulta>{saneada}</consulta>",
+            timeout_s=TEMPO_DA_CONSULTA_S,
+            modo=MODO_STANDARD,
+        )
+        return _validar(transporte.gerar(chamada))
+
     try:
-        resposta = _validar(transporte.gerar(chamada))
+        if cache is not None and dono:
+            # a resposta validada do modelo, nunca a ConsultaEntendida: o _montar
+            # resolve de novo pessoas e programas (fundida, na lixeira)
+            resposta = cache.obter((dono, saneada, *sorted(programas)), perguntar)
+        else:
+            resposta = perguntar()
     except (ErroHttp, ValueError) as e:
         log.warning("entendimento da consulta falhou (%s); plano B", e)
         return plano_b
