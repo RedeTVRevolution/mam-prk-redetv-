@@ -29,9 +29,12 @@ let vencidos = new Set<string>()
 let listas = 0
 // Os concluídos que o aviso do #404 lê: `pendente` é um vídeo ainda entrando na busca.
 let indexacoes: string[] = []
+// A query de cada chamada ao acervo (o aviso do #486 pede `capa=false`).
+const consultasDoAcervo: string[] = []
 
 const servidor = setupServer(
-  http.get('/v1/jobs', () => {
+  http.get('/v1/jobs', ({ request }) => {
+    consultasDoAcervo.push(new URL(request.url).search)
     const agora = new Date().toISOString()
     return HttpResponse.json(
       indexacoes.map((estado, i) => ({ id: `j${i}`, nome: `j${i}.mp4`, estado: 'concluido', codigo_falha: null, criado_em: agora, atualizado_em: agora, indexacao: { estado, em: agora } })),
@@ -192,4 +195,19 @@ test('sem vídeo entrando, o aviso do #404 ainda confere de tempos em tempos e a
 
   indexacoes = ['indexado', 'pendente']
   await waitFor(() => expect(result.current).toBe(1))
+})
+
+test('o aviso do #404 pede a lista sem capas (#486) e conta só os concluídos finalizando', async () => {
+  indexacoes = ['indexado', 'pendente', 'pendente']
+  consultasDoAcervo.length = 0
+  const { envolver } = await envolvedor()
+  const { result } = renderHook(() => useEntrandoNaBusca(true, 20, 40), { wrapper: envolver })
+  await waitFor(() => expect(result.current).toBe(2))
+
+  expect(consultasDoAcervo.length).toBeGreaterThan(0)
+  for (const q of consultasDoAcervo) {
+    const p = new URLSearchParams(q)
+    expect(p.get('capa')).toBe('false')
+    expect(p.getAll('estado')).toEqual(['concluido'])
+  }
 })

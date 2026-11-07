@@ -1156,6 +1156,9 @@ def criar_rotas(
         publico.capa_url = _url_da_capa(job)
         return publico
 
+    def _sem_capa(job: Job) -> dict[str, Any]:
+        return JobResumido.de(job).model_dump(mode="json", exclude={"capa_url"})
+
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
@@ -1168,6 +1171,7 @@ def criar_rotas(
         ordem: Ordem = "enviado",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_MAXIMO)] = None,
         cursor: str | None = None,
+        capa: bool = True,
     ) -> Response:
         if isinstance(chamador, Sistema):
             # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
@@ -1190,10 +1194,14 @@ def criar_rotas(
             pagina = repositorio.consultar(filtro)
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
-        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
-            publicos = list(assinando.map(_com_capa, pagina.jobs))
-        corpo = [p.model_dump(mode="json") for p in publicos]
+        if capa:
+            # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
+            with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+                publicos = list(assinando.map(_com_capa, pagina.jobs))
+            corpo = [p.model_dump(mode="json") for p in publicos]
+        else:
+            # Quem só conta (o aviso "Finalizando" da busca) não paga as assinaturas.
+            corpo = [_sem_capa(j) for j in pagina.jobs]
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
@@ -1226,10 +1234,7 @@ def criar_rotas(
             and not _de_outro_sistema(chamador, j)
         ]
         visiveis.sort(key=lambda j: posicao[j.id])
-        corpo = [
-            JobResumido.de(j).model_dump(mode="json", exclude={"capa_url"})
-            for j in visiveis
-        ]
+        corpo = [_sem_capa(j) for j in visiveis]
         return JSONResponse(corpo)
 
     @rotas.get("/{job_id}", response_model=JobPublico)

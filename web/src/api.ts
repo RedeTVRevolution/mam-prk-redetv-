@@ -336,7 +336,7 @@ export interface ClienteDoCadastroDeProgramas {
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
-  acervo(filtros: FiltrosDoAcervo, cursor?: string | null): Promise<PaginaDoAcervo>
+  acervo(filtros: FiltrosDoAcervo, cursor?: string | null, opcoes?: { capa?: boolean }): Promise<PaginaDoAcervo>
   /** Uma página dos vídeos que entraram, de pessoas e de sistemas; a API só filtra sistema e estado. */
   entradas(filtros: FiltrosDasEntradas, cursor?: string | null): Promise<PaginaDoAcervo>
   /** `GET /v1/admin/auditoria` (exige `auditoria.ver`): só leitura; `cursor` é o `proximo` da página anterior. */
@@ -527,8 +527,10 @@ export function criarClienteDaApi(
 
   return {
     eu: () => chamar('/v1/eu'),
-    acervo: async (filtros, cursor = null) => {
-      const resposta = await pedir(`/v1/jobs?${filtrosParaApi(filtros, cursor)}`)
+    acervo: async (filtros, cursor = null, opcoes = {}) => {
+      // `capa=false`: a API não assina as capas (quem só conta os vídeos não as usa).
+      const sufixo = opcoes.capa === false ? '&capa=false' : ''
+      const resposta = await pedir(`/v1/jobs?${filtrosParaApi(filtros, cursor)}${sufixo}`)
       return {
         jobs: (await resposta.json()) as Job[],
         proximo: resposta.headers.get('X-Proximo-Cursor'),

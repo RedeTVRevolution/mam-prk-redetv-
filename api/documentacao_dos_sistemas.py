@@ -450,7 +450,9 @@ OPERACOES: tuple[Operacao, ...] = (
         "`exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com "
         "`limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz "
         "o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. "
-        "Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`.",
+        "Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`. "
+        "Com `capa=false` a seleção é a mesma, mas sem `capa_url` (as capas não são "
+        "assinadas): serve para quem só conta os Jobs.",
         [{k: v for k, v in _JOB.items() if k != "cortes_ms"}],
         (
             *_sem_chave("ler"),
