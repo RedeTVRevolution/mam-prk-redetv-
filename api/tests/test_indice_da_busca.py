@@ -363,3 +363,14 @@ def test_fala_e_texto_sem_id_ganham_o_id_que_a_entrega_daria() -> None:
     ids = [r.id for r in registros_da_decupagem("j", decupagem, "p", None)]
 
     assert "j:fala:fal000" in ids and "j:texto:txt000" in ids
+
+
+def test_registros_levam_o_sistema_e_a_lixeira_do_video() -> None:
+    exemplo = EXEMPLOS[0]
+    registros = registros_da_decupagem(
+        exemplo.job_id, exemplo.decupagem, None, None, "Playout", True
+    )
+    assert registros
+    assert {(r.sistema, r.na_lixeira) for r in registros} == {("Playout", True)}
+    padrao = registros_da_decupagem(exemplo.job_id, exemplo.decupagem, None, None)
+    assert {(r.sistema, r.na_lixeira) for r in padrao} == {(None, False)}

@@ -174,7 +174,12 @@ def reindexar(
                 log.exception("tipos de objeto de %s não registrados", job.id)
         try:
             registros = registros_da_decupagem(
-                job.id, decupagem, job.programa, job.data_exibicao
+                job.id,
+                decupagem,
+                job.programa,
+                job.data_exibicao,
+                job.sistema,
+                job.lixeira is not None,
             )
             indice.gravar(job.id, registros)
             estado = "indexado"

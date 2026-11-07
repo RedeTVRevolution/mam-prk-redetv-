@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from api.agent_retrieval import (
+    CAMPOS_DE_FILTRO,
     FRACAO_DA_COTA,
     AgentRetrieval,
     ConfigDaBusca,
@@ -14,12 +15,14 @@ from api.agent_retrieval import (
     EsquemaIncompativel,
     JaExiste,
     _criacao,
+    _registro,
     apagar_colecao,
     conferir_esquema,
     criar_colecao,
     esperar,
     esquema_da_colecao,
     filtro_do_pedido,
+    indices_com_filtros_diferentes,
     indices_da_colecao,
     montar_plano,
     pedido_de_busca,
@@ -1464,3 +1467,90 @@ def test_atualizacoes_vao_em_lotes_de_ate_1000() -> None:
     colecao.operacoes.clear()
     indice.gravar("j", _video(1200, **pessoas)[:1200])
     assert colecao.operacoes == ["query", "batchUpdate", "batchUpdate"]
+
+
+def test_objeto_novo_leva_sistema_e_lixeira_e_o_esquema_e_o_filtro_os_declaram() -> (
+    None
+):
+    r = _reg("j:fala:f0", texto="oi", sistema="Playout")
+    dados = _lido(r)
+    assert dados["sistema"] == "Playout" and dados["na_lixeira"] is False
+    # Sem sistema, o campo fica fora; a lixeira vai sempre, falsa inclusive.
+    sem = _lido(_reg("j:fala:f1", texto="oi"))
+    assert "sistema" not in sem and sem["na_lixeira"] is False
+    propriedades = esquema_da_colecao(CONFIG)["dataSchema"]["properties"]
+    assert propriedades["sistema"] == {"type": "string"}
+    assert propriedades["na_lixeira"] == {"type": "boolean"}
+    assert {"sistema", "na_lixeira"} <= set(CAMPOS_DE_FILTRO)
+    assert _registro(dados) == r
+
+
+def test_marcar_lixeira_atualiza_so_os_objetos_do_video_que_mudam() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(3))
+    outro = [_reg("k:fala:f0", texto="x", job_id="k")]
+    indice.gravar("k", outro)
+
+    colecao.operacoes.clear()
+    indice.marcar_lixeira("j", True)
+    assert colecao.operacoes == ["query", "batchUpdate"]
+    assert {
+        d["na_lixeira"] for d in colecao.objetos.values() if d["job_id"] == "j"
+    } == {True}
+    assert [
+        d["na_lixeira"] for d in colecao.objetos.values() if d["job_id"] == "k"
+    ] == [False]
+
+    # De novo: nada a escrever. E o resto dos dados fica como estava.
+    colecao.operacoes.clear()
+    indice.marcar_lixeira("j", True)
+    assert colecao.operacoes == ["query"]
+    indice.marcar_lixeira("j", False)
+    restaurado = {d["id"]: d for d in colecao.objetos.values() if d["job_id"] == "j"}
+    assert restaurado == {r.id: _lido(r) for r in _video(3)}
+
+
+def test_marcar_lixeira_marca_o_objeto_de_antes_do_campo() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(1))
+    for dados in colecao.objetos.values():
+        del dados["na_lixeira"]
+    indice.marcar_lixeira("j", False)
+    assert all(d["na_lixeira"] is False for d in colecao.objetos.values())
+
+
+def test_marcar_lixeira_divide_em_lotes_e_reserva_a_cota() -> None:
+    colecao = _ColecaoEmMemoria()
+    relogio = _Relogio()
+    config = replace(CONFIG, cota_de_escrita=3000)
+    indice = _indice(colecao, relogio, config)
+    indice.gravar("j", _video(800))  # 1.600 objetos
+    colecao.operacoes.clear()
+    antes = relogio.agora
+    indice.marcar_lixeira("j", True)
+    assert colecao.operacoes.count("batchUpdate") == 2  # lotes de 1.000
+    assert relogio.agora > antes  # 1.600 + 1.600 passam de 90% da cota por minuto
+
+
+def test_o_indice_que_ja_existe_com_outros_filtros_e_apontado_sem_apagar_nada() -> None:
+    class Transporte:
+        def __init__(self, filtros: list[str] | None) -> None:
+            self.filtros = filtros
+            self.chamadas: list[str] = []
+
+        def __call__(
+            self, metodo: str, caminho: str, corpo: dict[str, Any] | None
+        ) -> dict[str, Any]:
+            self.chamadas.append(metodo)
+            return {} if self.filtros is None else {"filterFields": self.filtros}
+
+    antigos = [c for c in CAMPOS_DE_FILTRO if c not in ("sistema", "na_lixeira")]
+    antigo = Transporte(antigos)
+    assert indices_com_filtros_diferentes(CONFIG, antigo) == {
+        "ind-d": ["sistema", "na_lixeira"]
+    }
+    assert set(antigo.chamadas) == {"GET"}
+    assert indices_com_filtros_diferentes(CONFIG, Transporte(CAMPOS_DE_FILTRO)) == {}
+    assert indices_com_filtros_diferentes(CONFIG, Transporte(None)) == {}

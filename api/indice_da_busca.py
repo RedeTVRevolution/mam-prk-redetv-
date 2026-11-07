@@ -5,7 +5,7 @@ implementa os filtros exatos e o texto, e é o que os testes usam.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Literal, Protocol
 
@@ -46,6 +46,10 @@ class Registro:
     quadro: str | None = None  # o JPEG do momento, para a grade da busca
     # De 1 a 3, só no objeto do inventário (#245); pesa na ordem dos resultados.
     destaque: int | None = None
+    # O sistema dono do vídeo e se ele está na lixeira, para a busca filtrar no índice, antes
+    # do teto de registros (#482). Mudar a lixeira não reindexa: `marcar_lixeira`.
+    sistema: str | None = None
+    na_lixeira: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,10 @@ class IndiceDaBusca(Protocol):
         """Os registros do vídeo; os que já havia dele saem."""
 
     def apagar(self, job_id: str) -> None: ...
+
+    def marcar_lixeira(self, job_id: str, na_lixeira: bool) -> None:
+        """Põe `na_lixeira` em todos os registros do vídeo, sem trocar o resto."""
+        ...
 
     def buscar(self, consulta: Consulta) -> list[Registro]: ...
 
@@ -148,6 +156,8 @@ def registros_da_decupagem(
     decupagem: Decupagem,
     programa: str | None,
     data_de_exibicao: date | None,
+    sistema: str | None = None,
+    na_lixeira: bool = False,
 ) -> list[Registro]:
     """Os registros do índice de uma Decupagem.
 
@@ -161,6 +171,8 @@ def registros_da_decupagem(
         "job_id": job_id,
         "programa": programa,
         "data_de_exibicao": data_de_exibicao,
+        "sistema": sistema,
+        "na_lixeira": na_lixeira,
     }
     catalogo = {p.id: p.catalogo_id for p in decupagem.pessoas}
 
@@ -331,6 +343,12 @@ class IndiceEmMemoria:
 
     def apagar(self, job_id: str) -> None:
         self._por_job.pop(job_id, None)
+
+    def marcar_lixeira(self, job_id: str, na_lixeira: bool) -> None:
+        if job_id in self._por_job:
+            self._por_job[job_id] = [
+                replace(r, na_lixeira=na_lixeira) for r in self._por_job[job_id]
+            ]
 
     def total(self) -> int:
         return sum(len(r) for r in self._por_job.values())

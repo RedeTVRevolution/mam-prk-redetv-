@@ -704,6 +704,7 @@ def criar_app(
             relogio,
             catalogo_de_pessoas,
             catalogo_de_marcas,
+            indice_da_busca,
         )
     )
     v1.include_router(

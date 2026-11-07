@@ -4,6 +4,7 @@ A lixeira não apaga nada: o Job só ganha `lixeira` (quando, quem, por quê) e 
 não é Administrador. Quem apaga de fato é a purga, depois de 30 dias (ADR 0010).
 """
 
+import logging
 import math
 import uuid
 from collections.abc import Callable
@@ -17,6 +18,7 @@ from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoes
+from api.indice_da_busca import IndiceDaBusca
 from api.jobs import (
     FiltroDeJobs,
     Job,
@@ -25,6 +27,8 @@ from api.jobs import (
     _tem_permissao,
 )
 from api.marcas import CatalogoDeMarcas
+
+log = logging.getLogger(__name__)
 
 PRAZO_DA_PURGA = timedelta(days=30)
 MOTIVO_MAXIMO = 500
@@ -211,6 +215,7 @@ def criar_rotas_da_lixeira(
     relogio: Callable[[], datetime],
     pessoas: Catalogo,
     marcas: CatalogoDeMarcas,
+    indice: IndiceDaBusca,
 ) -> APIRouter:
     # O parâmetro não se chama `job_id`: a dependência `sem_job_na_lixeira` esconderia
     # da própria lixeira o Job que ela precisa mostrar.
@@ -246,6 +251,26 @@ def criar_rotas_da_lixeira(
                 detalhes=impacto.model_dump(mode="json"),
             )
         )
+
+    def marcar_no_indice(job_id: str, na_lixeira: bool) -> None:
+        """Põe o campo de lixeira nos objetos do vídeo no índice da busca (#482). Quem
+        falha leva o chamador a desfazer a mudança do Job (503): o índice e o Job não
+        divergem, e repetir é seguro (só escreve o que ainda não tem o valor)."""
+        try:
+            indice.marcar_lixeira(job_id, na_lixeira)
+        except Exception:
+            log.exception("lixeira no índice da busca falhou para %s", job_id)
+            raise HTTPException(
+                503, "O índice da busca não respondeu: tente de novo"
+            ) from None
+
+    def desmarcar_no_indice(job_id: str, na_lixeira: bool) -> None:
+        """Devolve o índice ao que era; a falha só vai ao log (a próxima tentativa ou
+        reindexação acerta)."""
+        try:
+            indice.marcar_lixeira(job_id, na_lixeira)
+        except Exception:
+            log.exception("lixeira no índice da busca não desfeita para %s", job_id)
 
     @rotas.get("")
     def listar(
@@ -307,10 +332,16 @@ def criar_rotas_da_lixeira(
         if repositorio.trocar(job.id, mudar) is None:
             raise HTTPException(409, "O vídeo mudou de estado: tente de novo")
         try:
+            marcar_no_indice(job.id, True)
+        except HTTPException:
+            repositorio.trocar(job.id, lambda _: {"lixeira": None})
+            raise
+        try:
             registrar(pessoa, "item.para_lixeira", job, pedido.motivo, impacto)
         except Exception:
             # Sem registro, o vídeo volta: o histórico de apagamentos não pode ter buraco.
             repositorio.trocar(job.id, lambda _: {"lixeira": None})
+            desmarcar_no_indice(job.id, False)
             raise
         return _item(job, envio, relogio())
 
@@ -331,9 +362,15 @@ def criar_rotas_da_lixeira(
         ):
             raise HTTPException(409, "O vídeo não está na lixeira")
         try:
+            marcar_no_indice(job.id, False)
+        except HTTPException:
+            repositorio.trocar(job.id, lambda _: {"lixeira": envio})
+            raise
+        try:
             registrar(pessoa, "item.restaurado", job, envio.motivo, impacto)
         except Exception:
             repositorio.trocar(job.id, lambda _: {"lixeira": envio})
+            desmarcar_no_indice(job.id, True)
             raise
         return JobRestaurado(id=job.id, nome=job.nome)
 
