@@ -237,3 +237,16 @@ def test_a_lista_do_acervo_pede_so_os_campos_da_lista() -> None:
     )
     assert lista.jobs[0].cortes_ms is None
     assert inteira.jobs[0].cortes_ms == [1, 2]
+
+
+def test_os_campos_da_lista_cobrem_o_job_resumido_e_os_obrigatorios_do_job() -> None:
+    # Um campo novo no `JobResumido` que não entre no `select()` chegaria vazio na lista.
+    from api.jobs import JobResumido
+    from api.nuvem import _CAMPOS_DA_LISTA
+
+    do_resumo = set(JobResumido.model_fields) - {"enviado_por", "capa_url"}
+    obrigatorios = {n for n, c in Job.model_fields.items() if c.is_required()}
+
+    assert do_resumo | obrigatorios | {"capa", "sistema", "criado_por_email"} <= (
+        _CAMPOS_DA_LISTA
+    )

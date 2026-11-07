@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import quote
 
 import google.auth
@@ -429,15 +429,14 @@ class RepositorioFirestore:
             # Lista inteira: o consumidor interno não segue cursor, então não há teto.
             jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
             return PaginaDeJobs([j for j in jobs if casa_com_o_filtro(j, filtro)])
-        return self._ler_em_lotes(consulta, filtro)
+        return self._ler_em_lotes(consulta, filtro, filtro.limite)
 
     @staticmethod
-    def _ler_em_lotes(consulta: Any, filtro: FiltroDeJobs) -> PaginaDeJobs:
+    def _ler_em_lotes(consulta: Any, filtro: FiltroDeJobs, limite: int) -> PaginaDeJobs:
         # Lotes com `.limit()` até haver um aprovado além da página (a prova de que há mais).
         # O cursor é o último candidato examinado que fica na página, aprovado ou não: o
         # próximo pedido recomeça logo depois dele, sem pular nem repetir. No teto, devolve
         # o que tem (talvez nada) e o cursor do último examinado.
-        limite = cast(int, filtro.limite)
         aprovados: list[Job] = []
         examinados = 0
         ultimo_id: str | None = None
