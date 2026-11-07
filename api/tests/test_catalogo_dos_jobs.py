@@ -155,6 +155,38 @@ def test_a_carga_preenche_os_jobs_antigos_e_repetir_nao_muda_nada() -> None:
     assert {j.id: j for j in repositorio.listar()} == depois
 
 
+def test_a_reconciliacao_le_em_paginas_e_acha_o_job_sem_o_campo() -> None:
+    catalogo = CatalogoEmMemoria()
+    repositorio = RepositorioEmMemoria()
+    armazenamento = ArmazenamentoFalso()
+    for i in range(5):
+        repositorio.salvar(_job(f"j{i}"))  # nenhum tem o campo: a gravação falhou
+        armazenamento.decupagens[f"j{i}"] = [_decupagem("p1", None)]
+    consultas: list[int | None] = []
+    consultar = repositorio.consultar
+
+    def contando(filtro: FiltroDeJobs) -> Any:
+        consultas.append(filtro.limite)
+        return consultar(filtro)
+
+    repositorio.consultar = contando  # type: ignore[method-assign]
+
+    def rodar() -> dict[str, int]:
+        return preencher(
+            repositorio,
+            armazenamento,
+            RepositorioDeCorrecoesEmMemoria(),
+            catalogo.obter,
+            por_lote=2,
+        )
+
+    assert rodar() == {"gravados": 5, "iguais": 0, "falhou": 0}
+    assert consultas == [2, 2, 2]
+    achados = repositorio.consultar(FiltroDeJobs(pessoa_do_catalogo="p1")).jobs
+    assert sorted(j.id for j in achados) == [f"j{i}" for i in range(5)]
+    assert rodar() == {"gravados": 0, "iguais": 5, "falhou": 0}
+
+
 def test_a_consulta_por_pessoa_e_marca_acha_so_os_jobs_certos() -> None:
     repositorio = RepositorioEmMemoria()
     repositorio.salvar(_job("a", pessoas_do_catalogo=["p1"], marcas_do_catalogo=["m1"]))

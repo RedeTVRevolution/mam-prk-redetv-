@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, RenomeacaoDaPessoa
+from api.catalogo_dos_jobs import ids_do_catalogo
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar_jobs
@@ -58,13 +59,13 @@ class Mundo:
             ("j2", EXEMPLOS[0]),
             ("j3", EXEMPLOS[1]),
         ):
-            self.jobs.salvar(_job(id))
             modelo = json.loads(exemplo.decupagem.model_dump_json())
             for pessoa in modelo["pessoas"]:
                 pessoa["catalogo_id"] = {
                     "cat-sabrina-sato": self.sabrina.id,
                     "cat-outra": self.outra.id,
                 }[pessoa["catalogo_id"]]
+            self.jobs.salvar(_job(id, pessoas_do_catalogo=ids_do_catalogo(modelo)[0]))
             self.armazenamento.decupagens[id] = [json.dumps(modelo).encode()]
         papeis = RepositorioDePapeisEmMemoria()
         papeis.salvar("cur", ["curador"])
@@ -110,6 +111,25 @@ class Mundo:
         corpo = self.cliente.get(f"/v1/jobs/{job_id}/decupagem", headers=CURADOR).json()
         nome: str = next(p["nome"] for p in corpo["pessoas"] if p["id"] == "pes01")
         return nome
+
+
+def test_a_previa_abre_so_as_decupagens_da_pessoa() -> None:
+    mundo = Mundo()
+    for i in range(50):
+        mundo.jobs.salvar(_job(f"x{i}"))
+    abertas: list[str] = []
+    abrir = mundo.armazenamento.abrir_decupagem
+
+    def contando(job_id: str) -> Any:
+        abertas.append(job_id)
+        return abrir(job_id)
+
+    mundo.armazenamento.abrir_decupagem = contando  # type: ignore[method-assign]
+
+    resposta = mundo.renomear(previa=True)
+
+    assert resposta.json()["videos"] == 2
+    assert sorted(abertas) == ["j1", "j2"]
 
 
 def test_a_previa_conta_videos_e_momentos_sem_mudar_nada() -> None:
