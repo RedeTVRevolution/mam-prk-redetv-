@@ -1292,7 +1292,8 @@ def test_ler_indice_pede_so_os_campos_do_esquema_e_pagina() -> None:
 class _ColecaoEmMemoria:
     """A coleção como o serviço a trata, por nome: `query` pagina por vídeo, `batchCreate`
     recusa nome que existe (409), `batchUpdate` troca o `data`. `falhar_em` leva a
-    operação a levantar depois de `n` chamadas dela, para simular uma queda no meio."""
+    operação (ou qualquer uma, com `*`) a levantar depois de `n` chamadas dela, para
+    simular uma queda no meio."""
 
     def __init__(self) -> None:
         self.objetos: dict[str, dict[str, Any]] = {}
@@ -1305,10 +1306,12 @@ class _ColecaoEmMemoria:
     ) -> dict[str, Any]:
         assert corpo is not None
         operacao = caminho.rsplit(":", 1)[1]
-        if (
-            self.falhar_em
-            and self.falhar_em[0] == operacao
-            and self.operacoes.count(operacao) >= self.falhar_em[1]
+        if self.falhar_em and (
+            (
+                self.falhar_em[0] == operacao
+                and self.operacoes.count(operacao) >= self.falhar_em[1]
+            )
+            or (self.falhar_em[0] == "*" and len(self.operacoes) >= self.falhar_em[1])
         ):
             self.falhar_em = None
             raise RuntimeError("queda no meio")
@@ -1408,6 +1411,26 @@ def test_falha_no_meio_e_nova_rodada_chegam_ao_mesmo_indice(operacao: str) -> No
         indice.gravar("j", novo)
     indice.gravar("j", novo)
     assert com_falha.objetos == sem_falha.objetos
+
+
+@pytest.mark.parametrize("queda", range(1, 4))
+def test_queda_no_meio_so_tira_da_busca_o_que_muda_de_significado(queda: int) -> None:
+    # f0 muda o texto (apaga e cria), f1 só as pessoas (atualiza), f2 sai, p3 é novo:
+    # query, batchDelete, batchCreate, batchUpdate. Só f0 pode faltar depois da queda.
+    mudancas = {"j:fala:f0": {"texto": "corrigida"}, "j:fala:f1": {"pessoas": ["m"]}}
+    novo = [r for r in _video(4, **mudancas) if r.id not in ("j:fala:f2", "j:fala:f3")]
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(3))
+    antes = {d["id"] for d in colecao.objetos.values()}
+    colecao.falhar_em = ("*", len(colecao.operacoes) + queda)
+    with pytest.raises(RuntimeError, match="queda"):
+        indice.gravar("j", novo)
+    depois = {d["id"] for d in colecao.objetos.values()}
+    fica = antes & {r.id for r in novo}
+    assert fica - depois <= {"j:fala:f0"}
+    indice.gravar("j", novo)
+    assert {d["id"] for d in colecao.objetos.values()} == {r.id for r in novo}
 
 
 def test_as_atualizacoes_tambem_passam_pelo_orcamento() -> None:

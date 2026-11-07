@@ -749,16 +749,19 @@ class AgentRetrieval:
         """Os dados de todos os objetos do vídeo (ver `_ler_com_nomes`)."""
         return [dados for _, dados in self._ler_com_nomes(job_id)]
 
+    def _escrever(
+        self, operacao: str, pedidos: list[dict[str, Any]], lote: int
+    ) -> None:
+        """Manda os pedidos em lotes de até `lote`, cada um reservado antes no orçamento
+        da cota (#460)."""
+        for i in range(0, len(pedidos), lote):
+            pedacos = pedidos[i : i + lote]
+            self._reservar(len(pedacos))
+            self._chamar(f"dataObjects:{operacao}", {"requests": pedacos}, esperar=True)
+
     def _apagar_nomes(self, nomes: list[str]) -> None:
         """O `batchDelete` só aceita nomes, em lotes de até `OBJETOS_POR_PAGINA`."""
-        for i in range(0, len(nomes), OBJETOS_POR_PAGINA):
-            lote = nomes[i : i + OBJETOS_POR_PAGINA]
-            self._reservar(len(lote))
-            self._chamar(
-                "dataObjects:batchDelete",
-                {"requests": [{"name": n} for n in lote]},
-                esperar=True,
-            )
+        self._escrever("batchDelete", [{"name": n} for n in nomes], OBJETOS_POR_PAGINA)
 
     def apagar(self, job_id: str) -> None:
         """Apaga o vídeo inteiro: junta os nomes, página a página, e apaga em lote."""
@@ -780,32 +783,28 @@ class AgentRetrieval:
             self._avisar_do_teto_do_knn()
 
     def _gravar_uma_vez(self, job_id: str, registros: list[Registro]) -> None:
-        lidos = self._ler_com_nomes(job_id)
         # Só vale como lido o objeto com o nome que o id dele dá hoje: o que tem outro
         # nome (o id antigo, ou o resumo de `_id_do_objeto`) é lixo e sai, e o registro
         # dele entra pelo nome certo. Dois objetos com o mesmo `data.id` não se confundem.
-        validos = [d for n, d in lidos if _nome_vale(n, d)]
-        lixo = [n for n, d in lidos if not _nome_vale(n, d)]
+        nome_do_id: dict[str, str] = {}
+        validos: list[dict[str, Any]] = []
+        lixo: list[str] = []
+        for nome, dados in self._ler_com_nomes(job_id):
+            if _nome_vale(nome, dados):
+                nome_do_id[dados["id"]] = nome
+                validos.append(dados)
+            else:
+                lixo.append(nome)
         plano = montar_plano(registros, validos)
-        sai = set(plano.apagar)
-        nomes = lixo + [n for n, d in lidos if _nome_vale(n, d) and d["id"] in sai]
-        self._apagar_nomes(nomes)
-        for i in range(0, len(plano.criar), REGISTROS_POR_LOTE):
-            pedacos = plano.criar[i : i + REGISTROS_POR_LOTE]
-            self._reservar(len(pedacos))
-            self._chamar(
-                "dataObjects:batchCreate",
-                {"requests": [_criacao(r) for r in pedacos]},
-                esperar=True,
-            )
-        for i in range(0, len(plano.atualizar), OBJETOS_POR_PAGINA):
-            pedacos = plano.atualizar[i : i + OBJETOS_POR_PAGINA]
-            self._reservar(len(pedacos))
-            self._chamar(
-                "dataObjects:batchUpdate",
-                {"requests": [self._atualizacao(r) for r in pedacos]},
-                esperar=True,
-            )
+        self._apagar_nomes(lixo + [nome_do_id[i] for i in plano.apagar])
+        self._escrever(
+            "batchCreate", [_criacao(r) for r in plano.criar], REGISTROS_POR_LOTE
+        )
+        self._escrever(
+            "batchUpdate",
+            [self._atualizacao(r) for r in plano.atualizar],
+            OBJETOS_POR_PAGINA,
+        )
 
     def _atualizacao(self, r: Registro) -> dict[str, Any]:
         nome = f"{self._config.caminho_da_colecao}/dataObjects/{_id_do_objeto(r.id)}"
