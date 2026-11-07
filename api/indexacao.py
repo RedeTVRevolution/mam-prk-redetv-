@@ -17,6 +17,7 @@ import uuid
 from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import datetime
+from functools import partial
 from typing import Any, NamedTuple, Protocol, get_args
 
 from google.cloud import firestore
@@ -262,8 +263,10 @@ def reindexar(
             tipos_de_objeto,
             pessoas,
         )
-        try:
-            fechado = fechar_a_rodada(
+        # Sem fechar, a vez fica presa até `PRAZO_DA_RODADA` e a tela em "Finalizando".
+        fechado = _duas_tentativas(
+            partial(
+                fechar_a_rodada,
                 repositorio,
                 job.id,
                 rodada_id,
@@ -271,29 +274,32 @@ def reindexar(
                 indexado=resultado.indexacao.estado == "indexado",
                 indexacao=resultado.indexacao,
                 agora=relogio(),
-            )
-        except Exception:
-            log.exception("rodada de %s não fechada", job.id)
-            fechado = None
+            ),
+            f"rodada de {job.id} não fechada",
+        )
         if fechado is None or fechado.rodada_da_indexacao is None:
             break
         atual = fechado
     if programas is not None:
-        # Uma segunda tentativa: sem ela, uma queda passageira deixaria o vídeo pendente
-        # (a tela só o resolve com o `retomar`).
-        for tentativa in (1, 2):
-            try:
-                terminar_o_pendente(
-                    programas, job.id, atual.programa, resultado.completo
-                )
-                break
-            except Exception:
-                log.exception(
-                    "troca de nome do programa não atualizada para %s (tentativa %d)",
-                    job.id,
-                    tentativa,
-                )
+        # Sem a segunda tentativa, uma queda passageira deixaria o vídeo pendente (a tela
+        # só o resolve com o `retomar`).
+        _duas_tentativas(
+            lambda: terminar_o_pendente(
+                programas, job.id, atual.programa, resultado.completo
+            ),
+            f"troca de nome do programa não atualizada para {job.id}",
+        )
     return fechado.indexacao if fechado else None
+
+
+def _duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
+    """`acao()`, tentada de novo uma vez se levanta; `None` (e o log) se as duas falham."""
+    for tentativa in (1, 2):
+        try:
+            return acao()
+        except Exception:
+            log.exception("%s (tentativa %d)", falha, tentativa)
+    return None
 
 
 def reindexar_jobs(

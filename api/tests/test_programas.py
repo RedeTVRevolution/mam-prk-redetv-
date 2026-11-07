@@ -310,14 +310,32 @@ def test_renomear_o_programa_em_tres_videos_da_tres_pedidos_e_zera_os_pendentes(
     assert (renomeacao.estado, renomeacao.pendentes) == ("concluida", [])
 
 
+def test_video_que_sai_de_concluido_antes_do_pedido_sai_dos_pendentes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acervo = Acervo()
+    # Reprocessado entre levar o nome ao Job e pedir a indexação: o pedido não vale.
+    monkeypatch.setattr(
+        "api.rotas_dos_programas.pedir_indexacao",
+        lambda jobs, job_id, agora: None,
+    )
+
+    acervo.renomear()
+
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None
+    assert (renomeacao.estado, renomeacao.pendentes) == ("concluida", [])
+
+
 def test_indice_fora_do_ar_deixa_pendente_e_retomar_termina() -> None:
     acervo = Acervo()
     acervo.indice.quebrado = True
 
     acervo.renomear()
 
-    # O disparo falso roda na hora: a primeira falha põe a troca em `falhou` e a tarefa para
-    # (na nuvem o `mam-indexacao` termina depois, e o laço já acabou); `retomar` segue.
+    # O disparo falso roda a indexação depois da resposta, com o laço já terminado: o nome
+    # chegou aos Jobs, e a falha do índice põe a troca em `falhou`; `retomar` segue.
+    assert acervo.programa("j1") == "Fama Hoje"
     renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
     assert renomeacao is not None
     assert (renomeacao.estado, set(renomeacao.pendentes)) == ("falhou", {"j1", "j2"})

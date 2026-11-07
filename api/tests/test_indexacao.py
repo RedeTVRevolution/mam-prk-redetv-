@@ -312,6 +312,37 @@ def test_falha_ao_gravar_o_estado_nao_derruba_nem_impede_a_indexacao() -> None:
     assert mundo.indice.total() == 6
 
 
+class JobsQueFalhamUmaVezAoFechar(RepositorioEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.falhas = 0
+
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        def falha_a_primeira(job: Job) -> dict[str, Any] | None:
+            mudancas: dict[str, Any] | None = mudar(job)
+            if mudancas and "versao_indexada" in mudancas and not self.falhas:
+                self.falhas += 1
+                raise ConnectionError("Firestore fora do ar")
+            return mudancas
+
+        return super().trocar(job_id, falha_a_primeira)
+
+
+def test_queda_passageira_ao_fechar_a_rodada_nao_prende_a_vez() -> None:
+    mundo = Mundo()
+    jobs = JobsQueFalhamUmaVezAoFechar()
+    jobs.salvar(_job())
+
+    indexacao = reindexar(
+        _job(), jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    )
+
+    job = jobs.obter("j1")
+    assert jobs.falhas == 1 and job
+    assert indexacao is not None and indexacao.estado == "indexado"
+    assert (job.versao_indexada, job.rodada_da_indexacao) == (1, None)
+
+
 def test_reindexar_todos_pega_so_os_concluidos() -> None:
     mundo = Mundo()
     mundo.jobs.salvar(_job("j2", "analisando"))
@@ -766,8 +797,8 @@ def test_rodada_vencida_e_substituida_e_a_antiga_nao_fecha() -> None:
     )
 
     job = jobs.obter("j1")
-    assert antiga is None and job
-    assert (job.versao_indexada, job.rodada_da_indexacao.id) == (0, "b")  # type: ignore[union-attr]
+    assert antiga is None and job and job.rodada_da_indexacao
+    assert (job.versao_indexada, job.rodada_da_indexacao.id) == (0, "b")
 
 
 def test_pedido_so_vale_em_job_concluido() -> None:

@@ -292,15 +292,21 @@ def criar_rotas_dos_programas(
                 # herdado com um nome mais antigo. Na lixeira também: restaurar não
                 # indexa, e o vídeo voltaria com o nome antigo na busca e nos relatórios.
                 job = programas.levar_o_nome_ao_job(programa_id, troca_id, job_id, jobs)
-                if job is None or job.estado != "concluido":
+                # Sem Job concluído (inexistente, ou saiu de `concluido` agora há pouco)
+                # não há indexação a esperar: o pendente sai já, senão a troca não fecha.
+                if (
+                    job is None
+                    or job.estado != "concluido"
+                    or pedir_indexacao(jobs, job_id, relogio()) is None
+                ):
                     if tirar_pendente(programa_id, troca_id, job_id) is None:
                         return  # outra troca, ou o programa foi apagado
                     continue
-                if pedir_indexacao(jobs, job_id, relogio()) is None:
-                    continue
                 disparo.iniciar(job_id)
             except TrocaSubstituida:
-                # Sem tirar pendente: a troca não é mais desta tarefa.
+                # Sem tirar pendente: a troca não é mais desta tarefa (outra a substituiu,
+                # ou o `mam-indexacao` de um vídeo já falhou e a pôs em `falhou`: o
+                # `retomar` segue dos que sobraram).
                 return
             except Exception:
                 # O Job fica pendente; a tarefa segue e `retomar` o tenta de novo.

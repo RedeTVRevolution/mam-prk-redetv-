@@ -1623,8 +1623,9 @@ def criar_rotas(
     ) -> dict[str, str]:
         """Fecha a revisão: pede a indexação e a dispara em segundo plano. As ações da
         revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
-        `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, volta
-        ao que era (503), para o `pendente` não ficar preso sem execução nenhuma."""
+        `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, a
+        `indexacao` volta ao que era (503), para o `pendente` não ficar preso sem execução
+        nenhuma. A `versao_pedida` fica: o próximo disparo (ou uma rodada em curso) a atende."""
         job = obter_concluido(job_id, autor)
         anterior = job.indexacao
         if pedir_indexacao(repositorio, job.id, relogio()) is None:
