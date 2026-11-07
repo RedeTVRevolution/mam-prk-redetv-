@@ -4,6 +4,7 @@ import { cn } from 'cn'
 import { useId, useState, type KeyboardEvent } from 'react'
 import { SessaoExpirada, codigoDoErro, type DadosDoPrograma, type NomeDoCatalogo, type PessoaNoPrograma, type ProgramaCadastrado } from '../../api.ts'
 import { falhaDaAcao, type Falha } from '../../falhaDaAcao.ts'
+import { useValorAtrasado } from '../../useValorAtrasado.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
@@ -22,10 +23,12 @@ function PessoaDoCatalogo({ valor, aoDigitar, aoEscolher }: { valor: string; aoD
   const [aberta, setAberta] = useState(true)
   const [ativo, setAtivo] = useState(-1)
   const texto = valor.trim()
+  // A consulta sai depois da pausa na digitação (#484); até a resposta chegar, a lista é a do texto anterior.
+  const textoDaBusca = useValorAtrasado(texto)
   const busca = useQuery({
-    queryKey: ['admin', 'nomes', 'pessoas', texto],
-    queryFn: () => api.nomes.achar('pessoas', texto),
-    enabled: texto.length >= MINIMO_DE_LETRAS,
+    queryKey: ['admin', 'nomes', 'pessoas', textoDaBusca],
+    queryFn: () => api.nomes.achar('pessoas', textoDaBusca),
+    enabled: textoDaBusca.length >= MINIMO_DE_LETRAS,
     placeholderData: keepPreviousData,
   })
   const achados = busca.data ?? []

@@ -13,7 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, StringConstraints, field_validator
 
-from api.achar_nomes import achar_por_prefixo
+from api.achar_nomes import IndiceDeNomes, achar_por_prefixo
 from api.auth import Usuario
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.correcoes import LIMITE_DO_NOME, _sem_controle
@@ -73,6 +73,9 @@ def criar_rotas_do_catalogo(
     rotas = APIRouter(prefix="/catalogo")
     copia_das_pessoas = copia_das_pessoas or CopiaCurta(pessoas.todas, relogio)
     copia_das_marcas = CopiaCurta(marcas.todas, relogio)
+    # Os nomes normalizados valem por cópia: uma cópia nova refaz o índice (#484).
+    indice_das_pessoas = IndiceDeNomes[PessoaDoCatalogo]()
+    indice_das_marcas = IndiceDeNomes[MarcaDoCatalogo]()
 
     def pessoa_achada(p: PessoaDoCatalogo) -> PessoaAchada:
         return PessoaAchada(
@@ -90,7 +93,7 @@ def criar_rotas_do_catalogo(
     def achar_pessoas(
         q: Annotated[str, Query(max_length=LIMITE_DO_NOME)],
     ) -> list[PessoaAchada]:
-        achadas = achar_por_prefixo(copia_das_pessoas.itens(), q)
+        achadas = achar_por_prefixo(indice_das_pessoas.de(copia_das_pessoas.itens()), q)
         return [pessoa_achada(p) for p in achadas]
 
     @rotas.post("/pessoas")
@@ -117,7 +120,7 @@ def criar_rotas_do_catalogo(
     def achar_marcas(
         q: Annotated[str, Query(max_length=LIMITE_DO_NOME)],
     ) -> list[MarcaAchada]:
-        achadas = achar_por_prefixo(copia_das_marcas.itens(), q)
+        achadas = achar_por_prefixo(indice_das_marcas.de(copia_das_marcas.itens()), q)
         return [marca_achada(m) for m in achadas]
 
     @rotas.post("/marcas")
