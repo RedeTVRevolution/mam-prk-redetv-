@@ -26,7 +26,7 @@ from api.catalogo_apagado import com_pessoas_fundidas
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.comparador import normalizar
 from api.correcoes import Motivo, RepositorioDeCorrecoes, _sem_controle
-from api.jobs import RepositorioDeJobs, _confere_permissao
+from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
 from api.lixeira_do_catalogo import (
     FotosDeReferencia,
     LeituraDeDecupagens,
@@ -104,7 +104,12 @@ def criar_rotas_da_fusao(
     def contar(origem_id: str) -> tuple[int, int]:
         """Vídeos e aparições que a origem leva, inclusive os de quem já foi fundido nela."""
         videos = aparicoes = 0
-        for entregue in decupagens_entregues(repositorio, correcoes, decupagens):
+        for entregue in decupagens_entregues(
+            repositorio,
+            correcoes,
+            decupagens,
+            FiltroDeJobs(pessoa_do_catalogo=origem_id),
+        ):
             decupagem = com_pessoas_fundidas(entregue, pessoas.obter)
             nelas = [
                 p
