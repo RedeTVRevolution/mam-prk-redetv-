@@ -14,7 +14,7 @@ resource "google_firestore_database" "seguranca" {
   depends_on                        = [google_project_service.apis]
 }
 
-# Os mesmos índices no banco de segurança. Os do `(default)` (acima) ficam até a migração da
+# Os mesmos índices no banco de segurança. Os do `(default)` (main.tf) ficam até a migração da
 # auditoria (#368, parte 3): trocar o banco do recurso antigo o destruiria.
 resource "google_firestore_index" "auditoria_na_seguranca" {
   for_each   = local.indices_da_auditoria
@@ -31,5 +31,23 @@ resource "google_firestore_index" "auditoria_na_seguranca" {
   fields {
     field_path = "quando"
     order      = "DESCENDING"
+  }
+}
+
+# As mesmas agendas de backup do `(default)` (firestore_recuperacao.tf): o limite de duas é
+# por banco, e a auditoria e os papéis precisam voltar tanto quanto o resto.
+resource "google_firestore_backup_schedule" "diaria_na_seguranca" {
+  database  = google_firestore_database.seguranca.name
+  retention = "604800s" # 7 dias
+
+  daily_recurrence {}
+}
+
+resource "google_firestore_backup_schedule" "semanal_na_seguranca" {
+  database  = google_firestore_database.seguranca.name
+  retention = "8467200s" # 14 semanas
+
+  weekly_recurrence {
+    day = "SUNDAY"
   }
 }

@@ -793,7 +793,6 @@ locals {
 # purga.py e os comandos do Makefile (rodados por pessoa, com a conta dela).
 locals {
   contas_no_banco_de_seguranca = ["web", "purga"]
-  papel_do_firestore           = "roles/datastore.user"
 }
 
 resource "google_project_iam_member" "mam" {
@@ -805,7 +804,7 @@ resource "google_project_iam_member" "mam" {
   member  = google_service_account.mam[each.value.sa].member
 
   dynamic "condition" {
-    for_each = each.value.papel == local.papel_do_firestore && !contains(local.contas_no_banco_de_seguranca, each.value.sa) ? [1] : []
+    for_each = each.value.papel == "roles/datastore.user" && !contains(local.contas_no_banco_de_seguranca, each.value.sa) ? [1] : []
     content {
       title      = "so-o-banco-default"
       expression = "resource.name == \"projects/${var.projeto}/databases/${google_firestore_database.mam.name}\""

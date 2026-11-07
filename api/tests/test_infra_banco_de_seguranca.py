@@ -72,9 +72,8 @@ def test_so_a_web_e_a_purga_tem_datastore_user_sem_condicao() -> None:
     iam = _bloco('resource "google_project_iam_member" "mam"')
 
     assert 'contas_no_banco_de_seguranca = ["web", "purga"]' in TF
-    assert "each.value.papel == local.papel_do_firestore" in iam
+    assert 'each.value.papel == "roles/datastore.user"' in iam
     assert "!contains(local.contas_no_banco_de_seguranca, each.value.sa)" in iam
-    assert 'papel_do_firestore           = "roles/datastore.user"' in TF
     # A condição limita ao banco `(default)` e não cita o banco de segurança.
     assert (
         'resource.name == \\"projects/${var.projeto}/databases/'
@@ -103,3 +102,15 @@ def test_o_indice_da_auditoria_nasce_no_banco_novo_e_o_antigo_fica() -> None:
 
     assert "database   = google_firestore_database.seguranca.name" in novo
     assert "database   = google_firestore_database.mam.name" in antigo
+
+
+def test_o_banco_de_seguranca_tem_as_mesmas_agendas_de_backup() -> None:
+    for nome in ("diaria_na_seguranca", "semanal_na_seguranca"):
+        agenda = _bloco(f'resource "google_firestore_backup_schedule" "{nome}"')
+        assert "database  = google_firestore_database.seguranca.name" in agenda
+    diaria = _bloco('resource "google_firestore_backup_schedule" "diaria_na_seguranca"')
+    semanal = _bloco(
+        'resource "google_firestore_backup_schedule" "semanal_na_seguranca"'
+    )
+    assert "daily_recurrence" in diaria and '"604800s"' in diaria
+    assert "weekly_recurrence" in semanal and '"8467200s"' in semanal
