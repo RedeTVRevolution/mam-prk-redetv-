@@ -45,8 +45,10 @@ FRACAO_DA_COTA = 0.9
 # tempo. Se um dia não couber: pedir cota maior (`cota_de_escrita_da_busca`) ou subir o
 # `timeout` do Job.
 # As esperas, em segundos, antes de cada nova tentativa no 429 (cota esgotada): 315 s no
-# total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só quem
-# grava (`tentar_no_429`) e só as chamadas da gravação e da apagada; a busca nunca espera.
+# total por chamada, dentro dos 1800 s do Job de indexação e do de purga, mas não dos
+# 300 s do pedido do mam-web: lá, a purga da rota pode estourar o `timeout` com 429
+# seguido. Só quem grava (`tentar_no_429`) e só as chamadas da gravação e da apagada; a
+# busca nunca espera.
 ESPERAS_NO_429_S = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0, 60.0)
 # O máximo de nomes por `batchDelete` e de objetos por página do `query`.
 OBJETOS_POR_PAGINA = 1000
@@ -580,7 +582,7 @@ class AgentRetrieval:
         orcamento: Orcamento | None = None,
     ) -> None:
         """`tentar_no_429` em quem grava e apaga (indexação, `make reindexar`, purga e,
-        no serviço web, a reindexação e a purga, que rodam fora do pedido da busca). Só
+        no serviço web, a reindexação e a purga, que não são o pedido da busca). Só
         `gravar` e `apagar` esperam; a busca e os planos parecidos nunca, e o 429 volta
         na hora.
         `orcamento` é o orçamento de escrita compartilhado entre os processos (#460); o

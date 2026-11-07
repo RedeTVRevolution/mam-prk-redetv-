@@ -875,8 +875,8 @@ if _projeto:
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),
         sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
-        # A reindexação e a purga do web rodam fora do pedido da busca e esperam a cota
-        # de escrita; a busca e os planos parecidos nunca esperam (`AgentRetrieval`).
+        # A reindexação (em `BackgroundTasks`) e a purga (no pedido da rota) esperam a
+        # cota de escrita; a busca e os planos parecidos nunca esperam (`AgentRetrieval`).
         indice=(
             AgentRetrieval(
                 _busca,
