@@ -49,7 +49,7 @@ def manifesto() -> dict[str, Any]:
         },
         "instrucoes": {
             "analise": _hash(gemini.INSTRUCAO),
-            "modelo_forte": _hash(modelo_forte.INSTRUCAO),
+            "modelo_forte": _hash(modelo_forte.INSTRUCAO + modelo_forte.PESSOA),
             "consulta": _hash(entendimento_da_consulta.INSTRUCAO),
             "conversao_do_inventario": _hash(inventario.INSTRUCAO_DA_CONVERSAO),
             "olhar_do_inventario": _hash(inventario.INSTRUCAO_DO_OLHAR),
