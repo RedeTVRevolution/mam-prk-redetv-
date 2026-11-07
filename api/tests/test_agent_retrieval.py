@@ -1223,6 +1223,10 @@ def test_plano_compara_float_none_dias_e_listas_fora_de_ordem() -> None:
     lido["inicio_ms"] = 0.0
     lido["destaque"] = 2.0
     lido["marca"] = None  # ausente no novo vale como None
+    sem_listas = _reg("j:fala:fal000", texto="a")
+    lido_sem_listas = _lido(sem_listas)
+    del lido_sem_listas["pessoas"], lido_sem_listas["cor_base"]  # o índice omite []
+    assert montar_plano([sem_listas], [lido_sem_listas]).vazio
     assert lido["data_de_exibicao"] == 20260102
     assert montar_plano([r], [lido]).vazio
     # Um dia diferente é mudança de verdade.
@@ -1238,17 +1242,23 @@ def test_plano_diz_quais_planos_precisam_do_vetor_do_quadro() -> None:
     quadro = plano("j:plano:p2", "q2")
     texto = plano("j:plano:p3", "q3")
     pessoas = replace(plano("j:plano:p4", "q4"), pessoas=["x"])
+    # Sem descrição o `significado` cai no tipo, igual ao da descrição "plano" de antes.
+    sem_descricao = replace(plano("j:plano:p5", "q5"), descricao=None)
     lidos = [
         _lido(igual),
         _lido(plano("j:plano:p2", "velho")),
         _lido(plano("j:plano:p3", "q3", "outra descrição")),
         _lido(plano("j:plano:p4", "q4")),
+        _lido(plano("j:plano:p5", "q5", "plano")),
     ]
-    resultado = montar_plano([igual, novo, quadro, texto, pessoas], lidos)
+    resultado = montar_plano(
+        [igual, novo, quadro, texto, pessoas, sem_descricao], lidos
+    )
     assert resultado.planos_com_quadro_novo == [
         "j:plano:p1",
         "j:plano:p2",
         "j:plano:p3",
+        "j:plano:p5",
     ]
 
 

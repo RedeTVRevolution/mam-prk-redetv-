@@ -17,7 +17,7 @@ import hashlib
 import logging
 import re
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
 from time import sleep, time
@@ -574,11 +574,12 @@ class PlanoDeReindexacao:
 
 
 def _canonico(dados: dict[str, Any]) -> dict[str, Any]:
-    """Os dados de um objeto prontos para comparar: campo ausente vale `None` (sai),
-    número inteiro que voltou como float vira int, lista não depende da ordem."""
+    """Os dados de um objeto prontos para comparar: campo ausente vale `None` (sai, e a
+    lista vazia também, que o índice pode não devolver), número inteiro que voltou como
+    float vira int, lista não depende da ordem."""
     saida: dict[str, Any] = {}
     for campo, valor in dados.items():
-        if valor is None:
+        if valor is None or valor == []:
             continue
         if isinstance(valor, float) and valor.is_integer():
             valor = int(valor)
@@ -613,7 +614,7 @@ def montar_plano(
         if r.tipo == "plano" and (
             velho is None
             or velho.get("quadro") != agora.get("quadro")
-            or velho.get("significado") != agora["significado"]
+            or velho.get("descricao") != agora.get("descricao")
         ):
             quadro_novo.append(r.id)
     # `criar` com id já lido (significado novo) também apaga o velho antes.
@@ -714,37 +715,33 @@ class AgentRetrieval:
                 return
             self._dormir(self._escritas[0][0] + 60 - agora)
 
-    def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
-        """Os dados de todos os objetos do vídeo, página a página, só com os campos do
-        esquema da coleção: um campo fora do `dataSchema` dá HTTP 400 no `query`. Os
-        vetores não voltam."""
-        campos = list(esquema_da_colecao(self._config)["dataSchema"]["properties"])
+    def _objetos_do_video(
+        self, job_id: str, campos: list[str] | None = None
+    ) -> Iterator[dict[str, Any]]:
+        """Os objetos do vídeo, página a página pelo `dataObjects:query`; com `campos`, cada
+        um traz esses campos de `data`."""
         pedido: dict[str, Any] = {
             "filter": {"job_id": {"$eq": job_id}},
             "pageSize": OBJETOS_POR_PAGINA,
-            "outputFields": {"dataFields": campos},
         }
-        dados: list[dict[str, Any]] = []
+        if campos is not None:
+            pedido["outputFields"] = {"dataFields": campos}
         while True:
-            pagina = self._chamar("dataObjects:query", pedido)
-            dados += [o["data"] for o in pagina.get("dataObjects", [])]
+            pagina = self._chamar("dataObjects:query", pedido, esperar=True)
+            yield from pagina.get("dataObjects", [])
             if not pagina.get("nextPageToken"):
-                return dados
+                return
             pedido = pedido | {"pageToken": pagina["nextPageToken"]}
+
+    def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
+        """Os dados de todos os objetos do vídeo, só com os campos do esquema da coleção:
+        um campo fora do `dataSchema` dá HTTP 400 no `query`. Os vetores não voltam."""
+        campos = list(esquema_da_colecao(self._config)["dataSchema"]["properties"])
+        return [o["data"] for o in self._objetos_do_video(job_id, campos)]
 
     def apagar(self, job_id: str) -> None:
         """O `batchDelete` só aceita nomes: junta os do vídeo, página a página, e apaga."""
-        pedido: dict[str, Any] = {
-            "filter": {"job_id": {"$eq": job_id}},
-            "pageSize": OBJETOS_POR_PAGINA,
-        }
-        nomes: list[str] = []
-        while True:
-            pagina = self._chamar("dataObjects:query", pedido, esperar=True)
-            nomes += [o["name"] for o in pagina.get("dataObjects", [])]
-            if not pagina.get("nextPageToken"):
-                break
-            pedido = pedido | {"pageToken": pagina["nextPageToken"]}
+        nomes = [o["name"] for o in self._objetos_do_video(job_id)]
         for i in range(0, len(nomes), OBJETOS_POR_PAGINA):
             lote = nomes[i : i + OBJETOS_POR_PAGINA]
             self._reservar(len(lote))
