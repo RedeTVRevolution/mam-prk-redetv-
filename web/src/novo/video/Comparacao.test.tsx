@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
+import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 import { DECUPAGEM } from './curadoria-teste.ts'
 
@@ -230,4 +231,21 @@ test('sem a comparação, a coluna do vídeo e o inspetor ficam lado a lado a pa
 
   const video = screen.getByRole('region', { name: 'Vídeo' })
   expect(video.parentElement!.className).toMatch(/(^|\s)lg:flex-row/)
+})
+
+test('na revisão, o controle de volume volta de 1024 a 1279 px só com a comparação embaixo', async () => {
+  servidor.use(
+    http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
+    http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json([])),
+  )
+  await abrirVideo({ permissoes: ['decupagem.ver', 'decupagem.editar'] })
+  await userEvent.click(screen.getByRole('button', { name: 'Revisar' }))
+  const volume = screen.getByRole('slider', { name: 'Volume', hidden: true })
+  // Sem a comparação, o inspetor divide a largura e a barra só tem lugar para o mudo até `2xl`.
+  expect(volume.className).not.toMatch(/(^|\s)lg:block/)
+
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Comparar com' }), 'p1')
+  expect(volume.className).toMatch(/(^|\s)lg:block/)
+  expect(volume.className).toContain('xl:hidden')
+  expect(volume.className).toContain('2xl:block')
 })
