@@ -13,7 +13,7 @@ from pathlib import Path
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
-from api import teste_dos_jobs
+from api import log_estruturado, teste_dos_jobs
 from api.ciclo_de_vida import transitar
 from api.eventos_do_job import jobs_do_ambiente
 from api.jobs import RepositorioDeJobs
@@ -55,7 +55,7 @@ def executar(
 
 def main() -> None:
     # O log do Job diz em qual dispositivo rodou (`api.whisper`, `api.paddle`, em INFO).
-    logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
+    log_estruturado.configurar(logging.WARNING)
     logging.getLogger("api").setLevel(logging.INFO)
     if teste_dos_jobs.ativo():
         # Teste depois da publicação (#238): amostra da imagem, nada no Storage nem no Firestore.

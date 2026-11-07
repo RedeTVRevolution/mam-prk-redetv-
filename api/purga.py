@@ -19,6 +19,7 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict
 
+from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
@@ -224,7 +225,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    logging.basicConfig(level=logging.INFO)
+    log_estruturado.configurar(logging.INFO)
     cliente = firestore.Client(project=projeto)
     banco_de_seguranca = cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
