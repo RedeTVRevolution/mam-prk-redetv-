@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery preencher-catalogo-dos-jobs preencher-jobs-do-painel comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs preencher-jobs-do-painel comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -200,6 +200,15 @@ copiar-para-bigquery:
 	BIGQUERY_TABELA="$${BIGQUERY_TABELA:-$$(terraform -chdir=infra output -raw bigquery_tabela)}" \
 	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
 	uv run --locked python -m api.copiar_para_bigquery $(JOB)
+
+# Copia papéis, chaves e auditoria do (default) para o banco de segurança (#465); não apaga a origem.
+# Rodar no dev depois do terraform apply e ANTES de o deploy ligar FIRESTORE_BANCO_DE_SEGURANCA nos
+# serviços (README). Repetir não duplica nada.
+migrar-banco-de-seguranca:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
+	uv run --locked python -m api.migrar_banco_de_seguranca
 
 # Grava em cada Job concluído quem aparece nele (#359): make preencher-catalogo-dos-jobs.
 # Roda no dev depois do deploy: Job sem os campos não entra no impacto da lixeira. Repetir não muda nada.
