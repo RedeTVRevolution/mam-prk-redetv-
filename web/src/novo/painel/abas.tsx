@@ -468,7 +468,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             titulo="Custo por usuário"
             itens={relatorio.por_quem}
             nome={nomeDeQuem}
-            valor={(q) => q.custo}
+            valor={(q) => emCentavos(q.custo)}
             formato={valor}
             chave={chaveDeQuem}
             colunas={['Usuário', 'Custo', 'Vídeos', 'Horas de vídeo', 'Custo por hora']}
@@ -480,7 +480,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             titulo="Custo por etapa"
             itens={relatorio.por_etapa}
             nome={(e) => e.etapa}
-            valor={(e) => e.custo}
+            valor={(e) => emCentavos(e.custo)}
             formato={valor}
             chave={(e) => e.etapa}
             colunas={['Etapa', 'Custo']}
@@ -492,7 +492,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             titulo="Custo sem dono por serviço"
             itens={relatorio.sem_dono_por_servico}
             nome={(s) => s.servico ?? 'Sem serviço'}
-            valor={(s) => s.custo}
+            valor={(s) => emCentavos(s.custo)}
             formato={valor}
             chave={(s) => s.servico ?? ''}
             colunas={['Serviço', 'Custo']}

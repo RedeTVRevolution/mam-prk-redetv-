@@ -431,7 +431,7 @@ def centavos(valor: float) -> float:
 
 
 def _por_hora(custo: float, horas: float) -> float | None:
-    return round(custo / horas, 4) if horas > 0 else None
+    return round(custo / horas, 4) + 0.0 if horas > 0 else None
 
 
 def _numeros(linhas: Sequence[CustoDosJobs]) -> dict[str, Any]:

@@ -292,7 +292,7 @@ def test_custo_liquido_de_fracao_de_centavo_vira_zero_sem_sinal_no_relatorio_e_n
     assert r["total"]["custo"] == 0
     assert r["por_etapa"][0]["custo"] == 0
     assert r["sem_dono_por_servico"][0]["custo"] == 0
-    # O custo por hora segue em quatro casas (a tela o arredonda para centavos ao escrever).
+    # O custo por hora segue em quatro casas (a tela o arredonda para centavos ao escrever): fica fora.
     for campo in ("custo", "custo_dos_jobs", "custo_sem_dono"):
         assert f'"{campo}":-0' not in resposta.text
     texto = mundo.get("/custo", formato="csv").text
