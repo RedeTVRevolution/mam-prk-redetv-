@@ -4,7 +4,7 @@
 -- vídeo e dia do fim). O Job reprocessado traz um fim novo, que vale sobre o anterior. Os
 -- Jobs anteriores aos eventos entram uma vez por `make preencher-jobs-do-painel`. A tabela
 -- é criada pelo Terraform (particionada pelo dia de `criado_em` e agrupada por programa e
--- id); `${prefixo}` é o prefixo `projeto.dataset.`, `${tabela_de_eventos}` o nome inteiro
+-- id); `${tabela}` é o nome inteiro desta tabela, `${tabela_de_eventos}` o nome inteiro
 -- da tabela de eventos e `${inicio_da_janela}` o começo (TIMESTAMP) do período que pode ter
 -- mudado. Os testes rodam este arquivo no SQLite, por isso só há SQL comum aos dois.
 --
@@ -67,12 +67,12 @@ FROM (
 ) AS j
 LEFT JOIN do_envio AS e ON e.job_id = j.job_id
 LEFT JOIN do_fim AS f ON f.job_id = j.job_id
-LEFT JOIN `${prefixo}jobs_do_painel` AS a ON a.id = j.job_id;
+LEFT JOIN `${tabela}` AS a ON a.id = j.job_id;
 
 -- Troca as linhas dos Jobs da rodada de uma vez, para o painel não ler a tabela pela metade.
 BEGIN TRANSACTION;
-DELETE FROM `${prefixo}jobs_do_painel` WHERE id IN (SELECT id FROM novos);
-INSERT INTO `${prefixo}jobs_do_painel`
+DELETE FROM `${tabela}` WHERE id IN (SELECT id FROM novos);
+INSERT INTO `${tabela}`
   (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em, concluido_em, atualizado_em)
 SELECT id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em, concluido_em, atualizado_em
 FROM novos;

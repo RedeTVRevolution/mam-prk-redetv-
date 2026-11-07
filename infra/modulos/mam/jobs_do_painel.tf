@@ -28,7 +28,7 @@ resource "google_bigquery_table" "jobs_do_painel" {
     { name = "duracao_ms", type = "INTEGER", mode = "NULLABLE", description = "Duração do vídeo; vazia no Job que falhou antes de medi-la" },
     { name = "quem_tipo", type = "STRING", mode = "NULLABLE", description = "Dono do Job: usuario ou sistema" },
     { name = "quem_id", type = "STRING", mode = "NULLABLE", description = "uid ou nome do sistema; nunca nome nem e-mail" },
-    { name = "estado", type = "STRING", mode = "REQUIRED", description = "em_andamento até o fim; depois concluido ou falhou (o preenchimento dos Jobs antigos traz o estado do Job)" },
+    { name = "estado", type = "STRING", mode = "REQUIRED", description = "em_andamento até o fim; depois concluido ou falhou (o preenchimento dos Jobs antigos traz também cancelado)" },
     { name = "criado_em", type = "TIMESTAMP", mode = "REQUIRED", description = "Do envio; partição da tabela" },
     { name = "concluido_em", type = "TIMESTAMP", mode = "NULLABLE", description = "Do último fim de processamento (um reprocessamento o troca)" },
     { name = "atualizado_em", type = "TIMESTAMP", mode = "REQUIRED" },
@@ -43,7 +43,7 @@ resource "google_bigquery_data_transfer_config" "jobs_do_painel" {
   service_account_name = google_service_account.resumos_de_uso.email
   params = {
     query = templatefile("${path.module}/jobs_do_painel.sql", {
-      prefixo           = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}."
+      tabela            = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.jobs_do_painel.table_id}"
       tabela_de_eventos = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.eventos_de_uso.table_id}"
       inicio_da_janela  = "TIMESTAMP(DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL ${local.janela_dos_resumos_em_dias - 1} DAY), 'America/Sao_Paulo')"
     })

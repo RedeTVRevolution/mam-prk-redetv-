@@ -38,18 +38,22 @@ class LinhaDoJob:
     atualizado_em: datetime
 
 
+ESTADOS_DE_FIM = ("concluido", "falhou", "cancelado")
+
+
 def linha_do_job(job: Job) -> LinhaDoJob:
     """Os campos que a Revisão e o Custo usam. O dono é o sistema, ou quem criou o Job
-    (o mesmo `quem` do evento de uso); `concluido_em` só existe depois do fim."""
+    (o mesmo `quem` do evento de uso); `concluido_em` só existe depois do fim. O estado
+    segue o vocabulário da consulta agendada: antes do fim, `em_andamento`."""
     sistema = job.sistema is not None
-    fim = job.estado in ("concluido", "falhou")
+    fim = job.estado in ESTADOS_DE_FIM
     return LinhaDoJob(
         id=job.id,
         programa=job.programa,
         duracao_ms=round(job.duracao_s * 1000) if job.duracao_s is not None else None,
         quem_tipo="sistema" if sistema else "usuario",
         quem_id=job.sistema if job.sistema is not None else job.criado_por,
-        estado=job.estado,
+        estado=job.estado if fim else "em_andamento",
         criado_em=job.criado_em,
         concluido_em=job.atualizado_em if fim else None,
         atualizado_em=job.atualizado_em,
@@ -178,10 +182,9 @@ def preencher(
 
 
 def main() -> int:
-    projeto = os.environ["GCP_PROJECT_ID"]
     config = ConfigDaTabelaDeJobs.do_ambiente(os.environ)
     total = preencher(
-        RepositorioFirestore(firestore.Client(project=projeto)),
+        RepositorioFirestore(firestore.Client(project=config.projeto)),
         TabelaBigQuery(config, transporte_http(config.projeto)),
     )
     print(f"{total} Jobs gravados")

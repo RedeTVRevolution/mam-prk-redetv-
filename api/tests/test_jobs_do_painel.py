@@ -67,7 +67,7 @@ def _rodar(
     banco: sqlite3.Connection, inicio: str = "'2000-01-01T00:00:00+00:00'"
 ) -> None:
     sql = (
-        SQL.replace("${prefixo}", "")
+        SQL.replace("${tabela}", "jobs_do_painel")
         .replace("${tabela_de_eventos}", "eventos_de_uso")
         .replace("${inicio_da_janela}", inicio)
     )
@@ -283,8 +283,16 @@ def test_a_linha_do_job_de_sistema_em_andamento_nao_tem_conclusao() -> None:
     linha = linha_do_job(_job(sistema="cms", estado="analisando", duracao_s=None))
 
     assert (linha.quem_tipo, linha.quem_id) == ("sistema", "cms")
+    assert linha.estado == "em_andamento"
     assert linha.concluido_em is None
     assert linha.duracao_ms is None
+
+
+def test_a_linha_do_job_cancelado_fecha_com_o_estado_dele() -> None:
+    linha = linha_do_job(_job(estado="cancelado"))
+
+    assert linha.estado == "cancelado"
+    assert linha.concluido_em == linha.atualizado_em
 
 
 class _TabelaQueContaLotes(TabelaEmMemoria):
