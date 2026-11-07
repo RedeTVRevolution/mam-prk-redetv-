@@ -129,6 +129,16 @@ VALIDADE_INFORMADA_DA_IMAGEM = VALIDADE_DA_IMAGEM - JANELA_DA_URL_DO_QUADRO
 # O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
 FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
+# Teto de Jobs criados por hora (#371), contado no Firestore, então vale para todas as
+# instâncias: uma chave vazada ou um sistema em laço não gasta GPU e Gemini sem limite.
+# ponytail: o acervo em lote (#297) manda ~120 vídeos por dia, ~5 por hora de média; 200 por
+# hora dá folga para ele despejar o dia inteiro de uma vez e ainda custa no máximo ~200
+# vídeos por hora de um sistema com defeito. Pessoa envia à mão: 30 por hora é um vídeo a
+# cada 2 minutos, mais que qualquer editor consegue subir.
+TETO_POR_HORA_DO_SISTEMA = 200
+TETO_POR_HORA_DA_PESSOA = 30
+JANELA_DO_TETO = timedelta(hours=1)
+
 Estado = Literal[
     "aguardando_upload",
     "validando",
@@ -623,6 +633,10 @@ class RepositorioDeJobs(Protocol):
         """Filtra, ordena e pagina. Levanta `CursorInvalido` se o cursor não existe."""
         ...
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        """Quantos Jobs `criado_por` criou de `desde` em diante (lixeira inclusive)."""
+        ...
+
 
 class Armazenamento(Protocol):
     """Porta para o Cloud Storage; os testes usam uma versão falsa."""
@@ -702,6 +716,13 @@ class RepositorioEmMemoria:
             self._jobs.get,
         )
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        return sum(
+            1
+            for j in self._jobs.values()
+            if j.criado_por == criado_por and j.criado_em >= desde
+        )
+
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
@@ -733,6 +754,9 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        raise ServicoIndisponivel
+
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
         raise ServicoIndisponivel
 
 
@@ -974,6 +998,16 @@ def criar_rotas(
         else:
             criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
+        teto = (
+            TETO_POR_HORA_DO_SISTEMA if sistema is not None else TETO_POR_HORA_DA_PESSOA
+        )
+        if repositorio.contar_criados(criado_por, agora - JANELA_DO_TETO) >= teto:
+            # O pior caso: quando o Job mais antigo da janela sai dela, abre uma vaga.
+            raise HTTPException(
+                429,
+                f"Teto de {teto} Jobs por hora atingido",
+                headers={"Retry-After": str(int(JANELA_DO_TETO.total_seconds()))},
+            )
         if novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date():
             raise HTTPException(422, "Data de exibição no futuro")
         job_id, nova, escopo, job_gravado = uuid.uuid4().hex, True, "", False

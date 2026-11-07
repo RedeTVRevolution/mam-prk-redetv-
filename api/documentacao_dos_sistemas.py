@@ -392,6 +392,14 @@ OPERACOES: tuple[Operacao, ...] = (
                 "vídeo de novo, use uma chave nova.",
             ),
             Erro(
+                429,
+                "Teto de 200 Jobs por hora atingido",
+                "A chave criou 200 Jobs na última hora (o teto de uma pessoa é 30). O "
+                "cabeçalho `Retry-After` traz os segundos de espera (3600, o pior caso): "
+                "espere esse tempo, mande menos vídeos por hora e repita com o mesmo "
+                "`Idempotency-Key`.",
+            ),
+            Erro(
                 415,
                 "Só video/mp4",
                 'Mande `"tipo": "video/mp4"`. Não recodifique o arquivo.',

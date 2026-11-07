@@ -320,6 +320,19 @@
               }
             }
           },
+          "429": {
+            "description": "Teto de 200 Jobs por hora atingido. A chave criou 200 Jobs na última hora (o teto de uma pessoa é 30). O cabeçalho `Retry-After` traz os segundos de espera (3600, o pior caso): espere esse tempo, mande menos vídeos por hora e repita com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Teto de 200 Jobs por hora atingido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
             "content": {

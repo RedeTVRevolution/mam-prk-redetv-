@@ -106,6 +106,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | `A imagem passa do tamanho máximo em pixels` | A foto passa de 25 milhões de pixels. |
 | 422 | `Envie uma imagem JPEG ou PNG válida` | O arquivo não é JPEG nem PNG, ou está corrompido. |
 | 422 | `Envie a imagem no campo arquivo` | O multipart da busca por imagem não tem o campo `arquivo`. |
+| 429 | `Teto de 200 Jobs por hora atingido` | A chave criou 200 Jobs na última hora (o teto de uma pessoa é 30). Espere os segundos do cabeçalho `Retry-After` (3600, o pior caso), mande menos vídeos por hora e repita com o mesmo `Idempotency-Key`. |
 | 429 | `Consultas demais; tente em um minuto` | As buscas têm limite de 30 por minuto por chave. Espere e repita. |
 | 503 | `A busca por imagem não está disponível agora` | O modelo que descreve a foto está fora, ou não achou objeto nela. Repita com espera crescente ou tente outra foto. |
 | 504 | `A busca demorou demais` | Repita; se persistir, simplifique a consulta. |
