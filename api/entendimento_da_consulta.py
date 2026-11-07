@@ -34,7 +34,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import CATEGORIAS_DE_OBJETO, CORES_BASE
-from api.gemini import Chamada, ErroHttp, Transporte
+from api.gemini import MODO_STANDARD, Chamada, ErroHttp, Transporte
 
 log = logging.getLogger(__name__)
 
@@ -381,6 +381,7 @@ def entender(
         rotulos={"etapa": ETAPA, "job_id": job_id},
         texto=f"<consulta>{saneada}</consulta>",
         timeout_s=TEMPO_DA_CONSULTA_S,
+        modo=MODO_STANDARD,
     )
     try:
         resposta = _validar(transporte.gerar(chamada))
@@ -407,6 +408,7 @@ def termo_da_foto(jpeg: bytes, *, transporte: Transporte, job_id: str = "busca")
         imagens=(jpeg,),
         texto="Qual é o objeto?",
         timeout_s=TEMPO_DA_CONSULTA_S,
+        modo=MODO_STANDARD,
     )
     try:
         termo = _TermoDaFoto.model_validate_json(transporte.gerar(chamada)).termo

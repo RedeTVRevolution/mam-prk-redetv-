@@ -1695,11 +1695,13 @@ resource "google_cloud_run_v2_job" "inventario" {
       service_account = google_service_account.mam["objetos"].email
       max_retries     = 0
       # NÃO medido: lotes de 20 planos (florence, só texto) ou de 4 planos com imagens
-      # (gemini), ~190 planos por hora de vídeo; segundos por chamada. Um programa de 4 h
-      # são ~760 planos: ~40 chamadas no florence, ~190 no gemini; a ~30 s cada no pior caso
-      # são ~1,6 h no gemini, então 3600 s só cobrem o florence com folga: o motor gemini
-      # precisa do timeout medido no dev.
-      timeout = "3600s"
+      # (gemini), ~190 planos por hora de vídeo. As chamadas vão em Flex (#402), de 1 a
+      # 15 min cada, 8 ao mesmo tempo (`PARALELISMO_DO_INVENTARIO`); cada lote desiste no
+      # prazo de 1500 s (`PRAZO_DA_ANALISE_S`). Pior caso do florence num programa de 4 h:
+      # ~38 chamadas = 5 rodadas de 1500 s = 7500 s; 9000 s dão folga. Em série seriam
+      # 38 x 15 min = 9,5 h. O motor gemini (~190 chamadas em 4 h, 24 rodadas) não cabe
+      # nesse tempo: o padrão é o florence (`motor_objetos`); medir no dev antes de trocar.
+      timeout = "9000s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {

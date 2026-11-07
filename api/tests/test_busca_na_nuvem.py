@@ -12,7 +12,7 @@ from api.busca_na_nuvem import (
     VeredictoIndefinido,
     adaptadores_da_busca,
 )
-from api.gemini import Chamada, ErroHttp, TransporteVertex
+from api.gemini import MODO_STANDARD, Chamada, ErroHttp, TransporteVertex
 from api.indice_da_busca import Registro
 from api.tests.test_gemini import RespostaFalsa, RespostaSemJson, SessaoFalsa
 
@@ -248,6 +248,7 @@ def test_a_consulta_vai_em_standard_sem_os_cabecalhos_do_flex() -> None:
         rotulos={},
         texto="<consulta>x</consulta>",
         timeout_s=10,
+        modo=MODO_STANDARD,
     )
 
     TransporteVertex("proj", sessao).gerar(chamada)
