@@ -9,6 +9,7 @@ do usuário só chega ao índice como texto puro.
 import hashlib
 import json
 import logging
+import re
 import secrets
 import threading
 import time
@@ -40,7 +41,6 @@ from api.indice_da_busca import (
     IndiceDaBusca,
     Registro,
     TipoDeRegistro,
-    palavras,
 )
 from api.jobs import (
     VALIDADE_DA_IMAGEM,
@@ -50,6 +50,7 @@ from api.jobs import (
     Job,
     RepositorioDeJobs,
 )
+from api.numero import com_as_formas, mesma_palavra, singular
 
 log = logging.getLogger(__name__)
 
@@ -338,11 +339,17 @@ def _sem_acento(texto: str) -> str:
 def _destaques(texto: str, termos: Collection[str]) -> list[Destaque]:
     palheiro = _sem_acento(texto)
     achados: list[tuple[int, int]] = []
-    for termo in {_sem_acento(t) for t in termos if len(t.strip()) >= 2}:
+    for original in {t for t in termos if len(t.strip()) >= 2}:
+        termo = _sem_acento(original)
         i = palheiro.find(termo)
         while i != -1:
             achados.append((i, i + len(termo)))
             i = palheiro.find(termo, i + len(termo))
+        # A mesma palavra no outro número ("microfone" × "microfones", "avião" × "aviões").
+        if " " not in original.strip():
+            for achado in re.finditer(r"\w+", texto):
+                if mesma_palavra(achado.group(), original):
+                    achados.append((achado.start(), achado.end()))
     unidos: list[list[int]] = []
     for inicio, fim in sorted(achados):
         if unidos and inicio <= unidos[-1][1]:
@@ -865,7 +872,7 @@ class Busca:
                             cor_base=o.cor_base,
                             dono=o.dono,
                         ),
-                        texto=texto,
+                        texto=com_as_formas(texto),
                     ),
                     lambda r: _motivo(r, nome),
                 )
@@ -888,7 +895,7 @@ class Busca:
                 _Clausula(
                     Consulta(
                         filtros=base,
-                        texto=livre,
+                        texto=com_as_formas(livre),
                         significado=livre,
                         cortar_significado=True,
                     ),
@@ -1163,7 +1170,11 @@ def _texto_da_busca(e: ConsultaEntendida) -> str:
 
 def _contem(texto: str, frase: str) -> bool:
     """A frase inteira no texto, com as palavras juntas e na ordem, sem acento nem maiúscula."""
-    return f" {' '.join(palavras(frase))} " in f" {' '.join(palavras(texto))} "
+    return f" {_no_singular(frase)} " in f" {_no_singular(texto)} "
+
+
+def _no_singular(texto: str) -> str:
+    return " ".join(normalizar(singular(p)) for p in re.findall(r"\w+", texto))
 
 
 def _tem_a_frase(r: Registro, frase: str | None) -> bool:
