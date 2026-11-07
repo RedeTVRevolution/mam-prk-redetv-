@@ -596,7 +596,6 @@ def criar_app(
                 armazenamento_dos_jobs,
                 repositorio_de_auditoria,
                 relogio,
-                _reindexar_para_a_renomeacao,
                 descartar,
             )
         )
@@ -760,7 +759,9 @@ def criar_app(
         )
     )
     v1.include_router(
-        criar_rotas_do_tempo_de_tela(tempo_de_tela, repositorio_de_jobs, relogio)
+        criar_rotas_do_tempo_de_tela(
+            tempo_de_tela, repositorio_de_jobs, relogio, catalogo_de_pessoas
+        )
     )
     v1.include_router(
         criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs, relogio)

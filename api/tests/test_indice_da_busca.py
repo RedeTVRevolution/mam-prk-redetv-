@@ -1,3 +1,5 @@
+import json
+from dataclasses import asdict
 from typing import Any
 
 from api.decupagem import CATEGORIAS_DE_OBJETO, Decupagem, ObjetoDoInventario
@@ -316,31 +318,30 @@ def test_o_registro_proprio_leva_o_quadro_da_maior_caixa() -> None:
     }
 
 
-def test_a_roupa_curta_leva_a_categoria_e_o_dono() -> None:
+def test_a_roupa_curta_leva_a_categoria_e_o_dono_sem_o_nome_dele() -> None:
     blazer = _objeto("obj01", "roupa", "blazer", "preto", "pes01", 1_000)
     decupagem = _decupagem(
         [_pessoa("pes01", "Flávia Noronha", "cat-flavia", 0, 4_000)], [blazer], []
     )
-    [roupa] = [
-        r
-        for r in registros_da_decupagem("j", decupagem, None, None)
-        if r.tipo == "objeto"
-    ]
-    assert roupa.texto == "blazer preto, roupa, de Flávia Noronha"
+    registros = registros_da_decupagem("j", decupagem, None, None)
+    [roupa] = [r for r in registros if r.tipo == "objeto"]
+    assert roupa.texto == "blazer preto, roupa, de pessoa"
+    assert roupa.dono == "cat-flavia"
     assert len((roupa.texto or "").split()) >= 3
+    # Nenhum campo do índice leva o nome: renomear no catálogo não muda registro algum.
+    assert "Flávia" not in json.dumps([asdict(r) for r in registros], default=str)
 
 
-def test_pessoa_nao_identificada_nao_vira_dono_no_texto() -> None:
+def test_o_texto_do_objeto_nao_muda_com_o_nome_da_pessoa() -> None:
     blazer = _objeto("obj01", "roupa", "blazer", "preto", "pes01", 1_000)
-    decupagem = _decupagem(
-        [_pessoa("pes01", "não identificado", "cat-x", 0, 4_000)], [blazer], []
-    )
-    [roupa] = [
-        r
-        for r in registros_da_decupagem("j", decupagem, None, None)
-        if r.tipo == "objeto"
-    ]
-    assert roupa.texto == "blazer preto, roupa, de pessoa não identificada"
+
+    def registros(nome: str) -> list[Registro]:
+        decupagem = _decupagem(
+            [_pessoa("pes01", nome, "cat-flavia", 0, 4_000)], [blazer], []
+        )
+        return registros_da_decupagem("j", decupagem, None, None)
+
+    assert registros("Flávia Noronha") == registros("Flávia Noronha Silva")
 
 
 def test_decupagem_sem_inventario_segue_como_antes() -> None:

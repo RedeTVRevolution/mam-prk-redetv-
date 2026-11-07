@@ -1,7 +1,6 @@
 """Renomear uma pessoa em todos os vídeos de uma vez (#263)."""
 
 import json
-import re
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -25,12 +24,17 @@ EDITOR = {"Authorization": "Bearer editor"}
 
 
 class IndiceQueFalhaAteConsertar(IndiceEmMemoria):
+    """Também conta as gravações: renomear uma pessoa não pode gravar o índice. A falha
+    é usada pelo teste de renomear programa."""
+
     def __init__(self) -> None:
         super().__init__()
         self.falhas_restantes = 0
         self.quebrado = False
+        self.gravacoes = 0
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
+        self.gravacoes += 1
         if self.quebrado or self.falhas_restantes > 0:
             self.falhas_restantes = max(0, self.falhas_restantes - 1)
             raise ConnectionError("índice fora do ar")
@@ -126,7 +130,7 @@ def test_a_previa_conta_videos_e_momentos_sem_mudar_nada() -> None:
     assert mundo.auditoria.consultar(FiltroDeAuditoria()).registros == []
 
 
-def test_renomear_troca_no_catalogo_nas_decupagens_e_no_indice() -> None:
+def test_renomear_troca_no_catalogo_e_nas_decupagens_sem_reindexar() -> None:
     mundo = Mundo()
 
     resposta = mundo.renomear()
@@ -136,11 +140,7 @@ def test_renomear_troca_no_catalogo_nas_decupagens_e_no_indice() -> None:
     assert mundo.catalogo.obter(mundo.sabrina.id).nome == "Sabrina Sato Silva"  # type: ignore[union-attr]
     for job in ("j1", "j2"):
         assert mundo.nome_na_decupagem(job) == "Sabrina Sato Silva"
-        assert any("Sabrina Sato Silva" in t for t in mundo.indice.donos(job))
-        assert not any(
-            re.search("Sabrina Sato(?! Silva)", t) for t in mundo.indice.donos(job)
-        )
-    assert "j3" not in mundo.indice._por_job
+    assert mundo.indice.gravacoes == 0
     assert mundo.andamento().json() == {
         "estado": "concluida",
         "feitos": 2,
@@ -176,7 +176,7 @@ def test_o_nome_antigo_fica_como_apelido_para_a_busca() -> None:
     assert achada.nome == "Sabrina Sato Silva"
 
 
-def test_reindexar_todos_depois_mantem_o_nome_novo() -> None:
+def test_reindexar_depois_da_renomeacao_nao_poe_o_nome_no_indice() -> None:
     mundo = Mundo()
     mundo.renomear()
 
@@ -189,10 +189,7 @@ def test_reindexar_todos_depois_mantem_o_nome_novo() -> None:
         pessoas=mundo.catalogo.obter,
     )
 
-    assert any("Sabrina Sato Silva" in t for t in mundo.indice.donos("j1"))
-    assert not any(
-        re.search("Sabrina Sato(?! Silva)", t) for t in mundo.indice.donos("j1")
-    )
+    assert not any("Sabrina" in t for t in mundo.indice.donos("j1"))
 
 
 def test_pessoa_inexistente_e_404_e_fundida_e_422() -> None:
@@ -281,39 +278,6 @@ def test_nome_de_outra_pessoa_ou_igual_ao_atual_e_422() -> None:
     assert mundo.renomear("Sabrina Sato").status_code == 422
     assert mundo.renomear("  ").status_code == 422
     assert mundo.auditoria.consultar(FiltroDeAuditoria()).registros == []
-
-
-def test_a_reindexacao_e_refeita_depois_de_uma_falha() -> None:
-    mundo = Mundo()
-    mundo.indice.falhas_restantes = 1
-
-    mundo.renomear()
-
-    assert mundo.andamento().json()["estado"] == "concluida"
-    for job in ("j1", "j2"):
-        assert any("Sabrina Sato Silva" in t for t in mundo.indice.donos(job))
-
-
-def test_se_o_indice_nao_volta_o_nome_ja_vale_e_retomar_termina() -> None:
-    mundo = Mundo()
-    mundo.indice.quebrado = True
-
-    mundo.renomear()
-
-    andamento = mundo.andamento().json()
-    assert andamento["estado"] == "falhou" and andamento["feitos"] == 0
-    # Catálogo e decupagens já concordam: só o índice ficou para trás.
-    assert mundo.catalogo.obter(mundo.sabrina.id).nome == "Sabrina Sato Silva"  # type: ignore[union-attr]
-    assert mundo.nome_na_decupagem("j1") == "Sabrina Sato Silva"
-
-    mundo.indice.quebrado = False
-    retomada = mundo.cliente.post(
-        f"/v1/catalogo/pessoas/{mundo.sabrina.id}/renomear/retomar", headers=CURADOR
-    )
-
-    assert retomada.status_code == 200, retomada.text
-    assert mundo.andamento().json()["estado"] == "concluida"
-    assert any("Sabrina Sato Silva" in t for t in mundo.indice.donos("j1"))
 
 
 def test_andamento_de_pessoa_que_nunca_foi_renomeada_e_404() -> None:
