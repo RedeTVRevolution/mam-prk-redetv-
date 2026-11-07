@@ -154,13 +154,13 @@ Controles de segurança:
 - **Rotação e revogação.** Até duas chaves ativas por sistema, para trocar sem parada; revogar vale na hora.
 - **Assinatura opcional.** Se o sistema conseguir calcular HMAC-SHA256, assina cada requisição com data e hash do corpo, o que impede reaproveitar uma requisição capturada.
 - **Status em vez de webhook.** Sistemas legados raramente recebem chamadas de fora; o padrão é consultar o status com `ETag`. O webhook assinado fica opcional.
-- **Produção só pela rede da RedeTV.** Em `prod`, o Cloud Armor só aceita front, API e chaves de API a partir dos IPs de saída da emissora: uma senha ou chave vazada não funciona de fora. Enquanto o dev não vira produção não há restrição de IP, para permitir trabalho remoto; ali o acesso exige conta local com MFA. Quem está fora entra por VPN ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)).
+- **Produção só pela rede da RedeTV.** Em produção, o Cloud Armor só aceita front, API e chaves de API a partir dos IPs de saída da emissora: uma senha ou chave vazada não funciona de fora. Enquanto o dev não vira produção, não há restrição de IP, para permitir trabalho remoto, e o acesso exige conta local com MFA. Quem está fora entra por VPN ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)).
 - **Borda protegida.** O Cloud Run aceita tráfego só do balanceador; HTTPS com certificado gerenciado; Cloud Armor com regras WAF e limite de requisições ([rate limiting](https://docs.cloud.google.com/armor/docs/rate-limiting-overview)). Pessoas e sistemas entram pelo mesmo balanceador: o front exige sessão do Identity Platform e os sistemas usam `/v1` com chave de API.
 - **Upload e player direto no Storage.** As URLs assinadas não passam pelo balanceador nem pelo Cloud Armor. Sem VPC-SC (o projeto não está numa organização), elas valem de qualquer IP enquanto não expiram: é um risco aceito, com as mitigações da [ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md). A URL assinada vale 15 min para iniciar o envio, mas a sessão de upload retomável pode durar até uma semana ([upload retomável](https://docs.cloud.google.com/storage/docs/performing-resumable-uploads)); por isso o job expira em 24 h sem upload completo e a sessão é cancelada. O link de reprodução expira em minutos.
 - **Dados fechados.** Buckets privados com acesso uniforme e nenhuma chave de conta de serviço. Sem perímetro VPC-SC, uma credencial ou Job comprometido alcança as APIs do Google; os riscos aceitos e as mitigações estão na [ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md).
 - **Menor privilégio.** Uma conta de serviço por componente (API, login, validação, análise, consolidação), cada uma só com o que usa.
 - **Entradas hostis.** Só MP4 válido, conferido em quarentena; toda entrada validada; busca protegida contra injeção. Detalhes em Entradas hostis.
-- **Auditoria.** Cloud Audit Logs, logs do balanceador, uso de cada chave de API e de cada chave do KMS.
+- **Auditoria.** Cloud Audit Logs de administração, logs do balanceador, auditoria da aplicação, uso de cada chave de API e de cada chave do KMS. Os registros de acesso a dados (Data Access logs) ficam desligados, pelo custo (#370): é um risco aceito na [ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md).
 
 O Apigee gerenciaria chaves e cotas de API, mas só compensa se a API for aberta a muitos parceiros. Para os poucos sistemas da RedeTV, a verificação de chave na própria API basta.
 
@@ -460,7 +460,7 @@ O ciclo TDD (vermelho, verde, refatorar) vale integralmente para o domínio e os
 1. Lint, tipos e testes unitários, sem GCP.
 2. Build das imagens no Artifact Registry e testes de integração com emuladores.
 3. Terraform cria o ambiente efêmero do PR e roda os testes ponta a ponta e os de contrato.
-4. Merge na `main` publica no `dev`, que vira produção; a aprovação no Cloud Deploy leva a tráfego gradual entre revisões. Até a E10: o Cloud Build constrói as imagens, e o Terraform as publica pelo digest (#71).
+4. Merge na `main` publica no `dev`, que vira produção: o Cloud Build constrói as imagens, e o Terraform as publica pelo digest (#71). A aprovação no Cloud Deploy, com tráfego gradual entre revisões, fica para a E10.
 
 **Limites do GitHub Free.** Em repositório privado, o plano Free dá 2.000 minutos de Actions por mês e não tem ambientes com aprovação nem proteção de branch aplicada ([GitHub](https://docs.github.com/actions/reference/environments)). Por isso o Actions roda só lint e testes unitários; build de imagens, integração e ponta a ponta rodam no Cloud Build, disparado pelo GitHub, com 2.500 minutos grátis por mês ([preços](https://cloud.google.com/build/pricing)); a aprovação para produção fica no Cloud Deploy. O próprio pipeline garante que nada sem testes verdes chega ao ambiente publicado.
 
@@ -486,7 +486,7 @@ Nenhuma chave fica no `.env`, no código ou no repositório. As chaves da aplica
 
 Travas para que isso continue verdade:
 
-- Política de organização `iam.disableServiceAccountKeyCreation` ativa, impedindo chaves JSON de conta de serviço ([blog do Google](https://cloud.google.com/blog/products/identity-security/enabling-keyless-authentication-from-github-actions)).
+- Nenhuma chave JSON de conta de serviço, por disciplina: sem organização, não há a política `iam.disableServiceAccountKeyCreation` para impedi-las ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md); [blog do Google](https://cloud.google.com/blog/products/identity-security/enabling-keyless-authentication-from-github-actions)).
 - Varredura de segredos com gitleaks no pre-commit e no CI (a proteção de push do GitHub não existe em repositório privado no plano Free).
 - Permissão de assinar em cada chave do KMS só para a conta de serviço que precisa dela.
 - Estado do Terraform num bucket com acesso restrito ao pipeline.

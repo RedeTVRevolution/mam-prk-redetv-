@@ -14,7 +14,7 @@ Nenhum valor real de projeto vai no código: cada ambiente tem um `exemplo.tfvar
 | Assunto | Igual nos dois | Muda por ambiente | Depende de decisão |
 | --- | --- | --- | --- |
 | Recursos | todos os de `modulos/mam` | nada | — |
-| Projeto, região, nomes de bucket | a regra de nomes (`<projeto>-<sufixo>`) | projeto e região (variáveis) | a organização de projetos e pastas (#296) |
+| Projeto, região, nomes de bucket | a regra de nomes (`<projeto>-<sufixo>`) | projeto e região (variáveis) | — (sem organização, #296 e [ADR 0016](../docs/adr/0016-sem-organizacao-dev-vira-producao.md)) |
 | Estado | bucket GCS, um por projeto | prefixo (`dev`, `prod`) | — |
 | Imagens | um digest por componente | o digest publicado em cada projeto | quando prod recebe imagem (promoção a partir do dev) |
 | Tamanhos e limites | os padrões do módulo | `janelas_em_paralelo`, `espera_gpu_minutos`, `limite_de_falhas_por_etapa`, `builds_de_imagem_guardados` (builds de cada imagem que o Artifact Registry guarda, padrão 2) (prod igual ao dev até o piloto medir) | os valores finais de prod, depois do piloto |
@@ -26,7 +26,7 @@ Nenhum valor real de projeto vai no código: cada ambiente tem um `exemplo.tfvar
 
 Lista para o wizard (uma vez por projeto, igual ao `scripts/wizard-gcp-dev.sh` do dev):
 
-- [ ] O projeto do GCP, com faturamento (a organização é decisão do #296).
+- [ ] O projeto do GCP, com faturamento, fora de organização ([ADR 0016](../docs/adr/0016-sem-organizacao-dev-vira-producao.md)).
 - [ ] A conta `mam-terraform` no projeto, com os papéis de `PAPEIS_DA_TERRAFORM` no wizard (lista abaixo).
 - [ ] O bucket do estado do Terraform, criado antes do primeiro `init`.
 - [ ] O Identity Platform inicializado pelo Owner (etapa 7 do wizard), antes do primeiro apply.
