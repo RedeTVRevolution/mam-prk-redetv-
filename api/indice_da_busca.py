@@ -365,11 +365,12 @@ class IndiceEmMemoria:
     def preencher_filtros(
         self, job_id: str, sistema: str | None, na_lixeira: bool
     ) -> int:
-        # Aqui o registro sempre tem os dois campos: só muda o que difere do Job.
+        # Aqui o registro sempre tem `na_lixeira` (o padrão é `False`), então só o `sistema`
+        # pode faltar; o valor que já está lá fica, como no índice real.
         antigos = self._por_job.get(job_id, [])
         novos = [
-            replace(r, sistema=sistema, na_lixeira=na_lixeira)
-            if (r.sistema, r.na_lixeira) != (sistema, na_lixeira)
+            replace(r, sistema=sistema)
+            if sistema is not None and r.sistema is None
             else r
             for r in antigos
         ]
