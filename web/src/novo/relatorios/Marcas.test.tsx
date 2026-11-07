@@ -5,6 +5,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from "../../auth/falso.ts";
 import { filtrosDeMarcas } from "../../marcas.ts";
+import { periodoPadrao } from "../../periodoPadrao.ts";
 import App from "../App.tsx";
 
 // Os casos de src/Marcas.test.tsx (interface antiga) na interface nova, mais a paginação por
@@ -231,6 +232,8 @@ test("Baixar CSV pede o formato csv com os mesmos filtros e entrega o arquivo", 
   await waitFor(() => expect(clique).toHaveBeenCalled());
   const csv = pedidos.find((p) => p.get("formato") === "csv");
   expect(csv?.get("programa")).toBe("TV Fama");
+  // Sem período no endereço, o CSV leva o padrão, como a tela.
+  expect([csv?.get("desde"), csv?.get("ate")]).toEqual([periodoPadrao().de, periodoPadrao().ate]);
   expect(csv?.get("tipo")).toBe("intervalo");
   // O CSV vem inteiro: não leva limite nem cursor.
   expect(csv?.get("limite")).toBeNull();

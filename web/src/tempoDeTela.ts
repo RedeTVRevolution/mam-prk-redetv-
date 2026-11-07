@@ -75,7 +75,7 @@ export function filtrosDoRelatorio(busca: string): FiltrosDoRelatorio {
   return { programa: p.get('programa') ?? '', ...periodoDoEndereco(p) }
 }
 
-/** A query do endereço da tela (vazia sem filtros); `extras` são os filtros próprios de cada relatório. */
+/** A query do endereço da tela (o período vai sempre, vazio inclusive, para não cair no padrão); `extras` são os filtros próprios de cada relatório. */
 export function filtrosParaEndereco(f: FiltrosDoRelatorio, extras: Record<string, string> = {}): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)

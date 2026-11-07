@@ -36,7 +36,7 @@ export function filtrosDoPainel(busca: string): FiltrosDoPainel {
   return { programa: p.get('programa') ?? '', usuario: p.get('usuario') ?? '', ...periodoDoEndereco(p) }
 }
 
-/** A query do endereço da tela (vazia sem filtros). */
+/** A query do endereço da tela (o período vai sempre, vazio inclusive, para não cair no padrão). */
 export function filtrosParaEnderecoDoPainel(f: FiltrosDoPainel): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)

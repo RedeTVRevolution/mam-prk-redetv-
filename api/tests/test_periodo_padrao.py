@@ -36,7 +36,7 @@ def test_o_padrao_e_de_hoje_menos_6_dias_ate_hoje_no_dia_de_sao_paulo() -> None:
 
 
 def test_a_web_usa_o_mesmo_numero_de_dias() -> None:
-    fonte = Path("web/src/periodoPadrao.ts").read_text()
+    fonte = (Path(__file__).parents[2] / "web" / "src" / "periodoPadrao.ts").read_text()
     achado = re.search(r"DIAS_DO_PERIODO_PADRAO = (\d+)", fonte)
     assert achado and int(achado.group(1)) == DIAS_DO_PERIODO_PADRAO
 
