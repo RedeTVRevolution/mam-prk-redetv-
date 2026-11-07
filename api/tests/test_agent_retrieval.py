@@ -1,6 +1,6 @@
 import threading
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import date
 from typing import Any
 
@@ -8,6 +8,7 @@ import pytest
 
 from api.agent_retrieval import (
     CAMPOS_DE_FILTRO,
+    CAMPOS_DO_REGISTRO,
     FRACAO_DA_COTA,
     AgentRetrieval,
     ConfigDaBusca,
@@ -141,13 +142,15 @@ def test_pedido_hibrido_leva_texto_significado_e_rrf() -> None:
     assert buscas["semanticSearch"]["searchText"] == "mulher de vestido de gala"
     assert buscas["semanticSearch"]["searchField"] == "descricao_vetor"
     assert all(b["topK"] == 7 for b in buscas.values())
-    assert all(b["outputFields"] == {"dataFields": ["*"]} for b in buscas.values())
+    assert all(
+        b["outputFields"] == {"dataFields": CAMPOS_DO_REGISTRO} for b in buscas.values()
+    )
     filtro = {"$and": [{"tipo": {"$eq": "plano"}}]}
     assert all(b["filter"] == filtro for b in buscas.values())
     assert pedido["combine"] == {
         "ranker": {"rrf": {"weights": [1.0, 1.0]}},
         "topK": 7,
-        "outputFields": {"dataFields": ["*"]},
+        "outputFields": {"dataFields": CAMPOS_DO_REGISTRO},
     }
 
 
@@ -208,7 +211,7 @@ def test_sem_os_indices_ann_o_significado_vai_como_vetor_da_consulta() -> None:
     )
     assert _buscas(pedido)["vectorSearch"] == {
         "topK": 20,
-        "outputFields": {"dataFields": ["*"]},
+        "outputFields": {"dataFields": CAMPOS_DO_REGISTRO},
         "searchField": "descricao_vetor",
         "searchHint": {"knnHint": {}},
         "distanceMetric": "COSINE_DISTANCE",
@@ -459,6 +462,15 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     }
     [achado] = adaptador.buscar(Consulta(texto="vestido", filtros=Filtros(dono="c")))
     assert achado == registro
+
+
+def test_a_consulta_pede_so_os_campos_do_registro_e_nunca_todos() -> None:
+    pedido = pedido_de_busca(CONFIG, Consulta(texto="vestido", significado="gala"))
+    campos = [b["outputFields"]["dataFields"] for b in _buscas(pedido).values()]
+    campos.append(pedido["combine"]["outputFields"]["dataFields"])
+    assert all(c == CAMPOS_DO_REGISTRO and "*" not in c for c in campos)
+    # Cada campo do Registro volta na consulta; só o que a indexação usa fica de fora.
+    assert set(CAMPOS_DO_REGISTRO) == {f.name for f in fields(Registro)}
 
 
 def test_o_registro_leva_a_copia_do_texto_sem_acento_nem_maiuscula() -> None:

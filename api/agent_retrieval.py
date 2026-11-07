@@ -64,6 +64,31 @@ CAMPO_DO_VETOR_DA_DESCRICAO = "descricao_vetor"
 # maiúscula, porque o `textSearch` compara com o texto gravado como está. A consulta
 # vai normalizada também.
 CAMPO_DO_TEXTO_DA_BUSCA = "texto_da_busca"
+# O que `_registro` lê de cada resultado; `significado` e `texto_da_busca` só servem à
+# indexação e ficam de fora para a consulta trazer menos bytes.
+CAMPOS_DO_REGISTRO = [
+    "id",
+    "tipo",
+    "job_id",
+    "inicio_ms",
+    "fim_ms",
+    "programa",
+    "data_de_exibicao",
+    "pessoas",
+    "categoria",
+    "tipo_do_objeto",
+    "cor_base",
+    "cor",
+    "marca",
+    "dono",
+    "relacao",
+    "texto",
+    "descricao",
+    "quadro",
+    "destaque",
+    "sistema",
+    "na_lixeira",
+]
 CAMPOS_DE_TEXTO = [CAMPO_DO_TEXTO_DA_BUSCA]
 # Declarados nos índices na criação: são eles que filtram junto com a busca.
 CAMPOS_DE_FILTRO = [
@@ -214,7 +239,7 @@ def pedido_de_busca(
     """
     comum: dict[str, Any] = {
         "topK": consulta.limite,
-        "outputFields": {"dataFields": ["*"]},
+        "outputFields": {"dataFields": CAMPOS_DO_REGISTRO},
     }
     filtro = filtro_do_pedido(consulta.filtros)
     if filtro is not None:
