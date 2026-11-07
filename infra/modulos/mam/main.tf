@@ -2497,7 +2497,7 @@ resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   # O filtro de um alerta precisa de um resource.type (a API recusa sem ele), e a métrica
   # vem de dois: o Job (falha tratada) e o Workflows (execução que caiu). Uma condição só,
   # com one_of no filtro, soma as duas origens; a API aceitou essa forma no ensaio de
-  # 2026-11-05 (a em PromQL foi recusada).
+  # 2026-11-05 (a forma (b), em PromQL, foi recusada).
   conditions {
     display_name = "Falhas de uma etapa acima do limite"
     condition_threshold {
