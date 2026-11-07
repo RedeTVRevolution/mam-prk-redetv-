@@ -252,7 +252,7 @@ Pacote de permissões dado a um usuário, opcionalmente limitado a programas.
 _Evitar_: perfil, grupo
 
 **Chave de API**:
-Credencial de um sistema consumidor da RedeTV, nunca de uma pessoa.
+Credencial de um sistema consumidor da RedeTV, nunca de uma pessoa. O registro da chave é lido em todo pedido, então a revogação vale no pedido seguinte. Só a conferência positiva do segredo no KMS fica guardada, em memória, por 5 minutos e no máximo 1024 por instância, pela versão da chave MAC e pelo hash do segredo, nunca o segredo (#491); o segredo errado vai ao KMS toda vez. Desligar uma versão da chave MAC no KMS só recusa a chave que já conferiu depois desses 5 minutos.
 
 **Texto como dado**:
 Regra para todo texto que entra pela API (corpo, consulta, id de caminho e os cabeçalhos que ela lê): tem tamanho máximo e não traz caractere de controle; só o texto livre (motivo, observação) aceita quebra de linha e tabulação. Id que vira documento ou objeto não tem `/`, `\` nem `..`. A API recusa com 422, e os adaptadores do Firestore e do Storage conferem o id de novo.

@@ -10,7 +10,7 @@ import hashlib
 import time
 import urllib.parse
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
@@ -23,7 +23,8 @@ URL_BASE = "https://cloudkms.googleapis.com/v1"
 # Quanto tempo a versão atual fica guardada: evita uma ida ao KMS por requisição.
 VALIDADE_DA_VERSAO_S = 300.0
 # Quanto tempo um `macVerify` positivo fica guardado (#491) e quantos cabem. A revogação
-# não espera esse prazo: o registro da chave é lido em todo pedido.
+# não espera esse prazo: o registro da chave é lido em todo pedido. Desligar uma versão
+# no KMS espera: a chave que já conferiu vale até o prazo acabar em cada instância.
 VALIDADE_DO_MAC_S = 300.0
 MAXIMO_DO_MAC = 1024
 
@@ -120,7 +121,7 @@ class MacKms:
         except _NaoConfere:
             return False
 
-    def _conferir(self, versao: int, mensagem: bytes, mac: bytes) -> bool:
+    def _conferir(self, versao: int, mensagem: bytes, mac: bytes) -> Literal[True]:
         resposta = self._pedir(
             versao,
             "macVerify",
