@@ -1,5 +1,7 @@
 # Arquitetura de informação
 
+> **Saiu** em 6/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
+
 As telas do MAM, o caminho entre elas e, para cada uma, o que já existe no código, o que existe sem tela e o que falta. A referência é o código da `main` em 30/10/2026 (`web/src/`, `api/`) e a navegação no dev com uma conta de papéis padrão (Consulta + Operador). Os prints estão em [`prints/app/`](prints/app/).
 
 ## Mapa

@@ -1,5 +1,7 @@
 # Sistema visual
 
+> **Saiu** em 6/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
+
 O porquê das decisões visuais da interface do MAM e as regras que os testes guardam. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9).
 
 As tabelas de cor, tipo, medida, ícone e componente moram no [MAM_DESIGN_SYSTEM.md](MAM_DESIGN_SYSTEM.md), que é a referência. Este arquivo não as repete: explica o que o outro não explica e diz onde a interface construída se afasta dele.

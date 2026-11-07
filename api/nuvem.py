@@ -87,7 +87,6 @@ from api.programas import (
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
-from api.sugestoes import ContagemDoTipo, Decisao, TipoDeSugestao, contar
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
 from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
@@ -116,7 +115,6 @@ COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
 COLECAO_DOS_PROGRAMAS = "programas"
-COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
 COLECAO_DA_REVISAO = "tempo_de_revisao"
@@ -1154,12 +1152,6 @@ class TiposDeObjetoFirestore:
         vivos.sort(key=lambda d: (-d["total"], d["chave"]))
         return [{"tipo": d["tipo"], "ocorrencias": d["total"]} for d in vivos[:limite]]
 
-    def conhecidos(self) -> list[str]:
-        """A coleção inteira: a busca corta em `TETO_DA_BUSCA_DE_TIPOS` pela ordem da
-        chave, e a regra das sugestões precisa de todos."""
-        achados = (d.to_dict() or {} for d in self._colecao.stream())
-        return [d["tipo"] for d in achados if d.get("total", 0) > 0 and d.get("tipo")]
-
 
 class ReferenciasStorage:
     """As fotos de referência, no bucket delas (`BUCKET_REFERENCIAS`)."""
@@ -1221,38 +1213,6 @@ class RepositorioDeCorrecoesFirestore:
             filter=FieldFilter("job_id", "==", job_id)
         ).stream():
             doc.reference.delete()
-
-
-class RepositorioDeSugestoesFirestore:
-    """Uma decisão do editor por vídeo e sugestão (a chave é `<job>:<sugestão>`): decidir
-    de novo a mesma sugestão troca a decisão, não soma outra."""
-
-    def __init__(
-        self,
-        cliente: firestore.Client,
-        colecao: str = COLECAO_DAS_DECISOES_DE_SUGESTAO,
-    ) -> None:
-        self._colecao = cliente.collection(colecao)
-
-    def registrar(
-        self, job_id: str, sugestao_id: str, tipo: TipoDeSugestao, decisao: Decisao
-    ) -> None:
-        self._colecao.document(f"{job_id}:{sugestao_id}").set(
-            {
-                "job_id": job_id,
-                "sugestao_id": sugestao_id,
-                "tipo": tipo,
-                "decisao": decisao,
-            }
-        )
-
-    def decididas(self, job_id: str) -> set[str]:
-        consulta = self._colecao.where(filter=FieldFilter("job_id", "==", job_id))
-        return {(d.to_dict() or {})["sugestao_id"] for d in consulta.stream()}
-
-    def contagem(self) -> dict[str, ContagemDoTipo]:
-        docs = [d.to_dict() or {} for d in self._colecao.stream()]
-        return contar((d["tipo"], d["decisao"]) for d in docs)
 
 
 class RepositorioDeAprovacaoFirestore:

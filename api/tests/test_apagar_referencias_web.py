@@ -23,14 +23,14 @@ class _Fotos:
         self.objetos = {o for o in self.objetos if not o.startswith(prefixo)}
 
 
-class _Sugestoes:
+class _PerfisPropostos:
     def __init__(self, n: int) -> None:
         self.n = n
 
     def contar(self) -> int:
         return self.n
 
-    def apagar_todas(self) -> None:
+    def apagar_todos(self) -> None:
         self.n = 0
 
 
@@ -71,7 +71,7 @@ def _cenario() -> dict[str, Any]:
             "referencias/x/a.jpg", "referencias/x/b.jpg", "palpites/j/1.jpg"
         ),
         "catalogo": catalogo,
-        "sugestoes": _Sugestoes(3),
+        "perfis_propostos": _PerfisPropostos(3),
         "decupagens": _Decupagens(
             {
                 "j1": {"pessoas": [_pessoa(["referencia"], "confirmado")]},

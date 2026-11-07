@@ -444,7 +444,7 @@ def test_aprovar_revisao_volta_o_estado_mesmo_com_erro_inesperado_do_disparo() -
 
 
 def test_nenhuma_rota_dos_jobs_reindexa_dentro_do_pedido() -> None:
-    # As rotas da revisão (corrigir, aceitar sugestão, desfazer, aprovar ou recusar,
+    # As rotas da revisão (corrigir, desfazer, aprovar ou recusar,
     # descartar e reaplicar da fila) só gravam Correções: a reindexação é do Job
     # `mam-indexacao`, que o "Aprovar Revisão" dispara (#328).
     assert "reindexar" not in inspect.signature(api.jobs.criar_rotas).parameters

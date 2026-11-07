@@ -123,7 +123,7 @@ def test_video_na_lixeira_some_para_editor_e_sistema_mas_o_administrador_le() ->
 
     assert mundo.cliente.get("/v1/jobs", headers=EDITOR).json() == []
     assert mundo.cliente.get("/v1/jobs", headers=mundo.chave).json() == []
-    for rota in ("", "/decupagem", "/reproducao", "/correcoes", "/fila", "/sugestoes"):
+    for rota in ("", "/decupagem", "/reproducao", "/correcoes", "/fila"):
         for quem in (EDITOR, mundo.chave):
             assert (
                 mundo.cliente.get(f"/v1/jobs/j1{rota}", headers=quem).status_code == 404

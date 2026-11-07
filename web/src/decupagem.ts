@@ -229,22 +229,3 @@ export interface ItemDaFila {
   }[]
 }
 
-/** Uma correção proposta por uma sugestão, no formato do `POST /v1/jobs/{id}/correcoes`. */
-export interface PropostaDaSugestao {
-  tipo: string
-  item_id: string
-  valor: string
-  catalogo_id?: string | null
-}
-
-/** Uma sugestão que o editor confirma (`GET /v1/jobs/{id}/sugestoes`); a tela a trata pelo formato, sem conhecer o tipo. */
-export interface Sugestao {
-  id: string
-  tipo: string
-  inicio_ms: number
-  fim_ms: number
-  pergunta: string
-  contexto: string
-  correcao: PropostaDaSugestao
-  depois: PropostaDaSugestao[]
-}

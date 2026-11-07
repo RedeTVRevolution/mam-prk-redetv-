@@ -40,10 +40,8 @@ from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
-from api.sugestoes import RepositorioDeSugestoesEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
-from api.tipos_de_objeto import TiposDeObjetoEmMemoria
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 AUTORIZACAO = {"Authorization": "Bearer token-bom"}
@@ -129,8 +127,6 @@ class Mundo:
         self.chaves = RepositorioDeChavesEmMemoria()
         self.catalogo = CatalogoEmMemoria()
         self.marcas = CatalogoDeMarcasEmMemoria()
-        self.sugestoes = RepositorioDeSugestoesEmMemoria()
-        self.tipos_de_objeto = TiposDeObjetoEmMemoria()
         self.agora = BASE
         self.cliente = TestClient(
             criar_app(
@@ -147,8 +143,6 @@ class Mundo:
                 aprovacao=self.aprovacao,
                 catalogo=self.catalogo,
                 marcas=self.marcas,
-                sugestoes=self.sugestoes,
-                tipos_de_objeto=self.tipos_de_objeto,
                 chaves=VerificadorDeChaveDeApi(self.chaves, MAC),
                 relogio=lambda: self.agora,
                 eventos=eventos,

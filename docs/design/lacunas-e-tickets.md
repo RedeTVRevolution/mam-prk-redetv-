@@ -1,5 +1,7 @@
 # Lacunas e tickets propostos
 
+> **Saiu** em 6/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
+
 As lacunas que a pesquisa encontrou e os tickets para cobri-las, em ordem de prioridade. Os primeiros melhoram a decupagem e viabilizam a busca. **Nenhum ticket foi criado**: esta lista é a proposta para revisão.
 
 ## Lacunas
