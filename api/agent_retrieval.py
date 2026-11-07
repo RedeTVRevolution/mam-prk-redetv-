@@ -57,7 +57,6 @@ MODELO_DO_EMBEDDING = "gemini-embedding-001"
 # Réplicas de cada índice ANN, cobradas por hora: uma basta para a PoC.
 REPLICAS_DO_INDICE = 1
 CAMPO_DO_VETOR_DA_DESCRICAO = "descricao_vetor"
-CAMPO_DO_VETOR_DO_QUADRO = "quadro_vetor"
 # Onde a busca por texto procura: a cópia de `texto` e `descricao` sem acento nem
 # maiúscula, porque o `textSearch` compara com o texto gravado como está. A consulta
 # vai normalizada também.
@@ -92,8 +91,6 @@ class ConfigDaBusca:
     regiao: str
     colecao: str
     indice_da_descricao: str
-    # None: o índice do quadro-chave está desligado (ADR 0006), e a busca por quadro também.
-    indice_do_quadro: str | None
     dimensao: int
     # O corte do que vem só da busca por significado (`Consulta.cortar_significado`): a
     # distância de cosseno máxima e o mínimo de palavras do registro. Falas curtas ("ok.",
@@ -101,8 +98,7 @@ class ConfigDaBusca:
     distancia_maxima: float | None = None
     palavras_minimas: int = 0
     # False: sem índice ANN nenhum (o dev, por custo; ADR 0006). As buscas por vetor vão
-    # sem `searchHint`, pelo KNN, que aceita até 100 mil registros. O vetor do quadro e a
-    # busca por quadro continuam presos a `indice_do_quadro`.
+    # sem `searchHint`, pelo KNN, que aceita até 100 mil registros.
     indices_ligados: bool = True
     # A cota `data_object_writes` da coleção, em objetos por minuto, que vale para todos
     # os vídeos gravando juntos. None: o `gravar` não segura o ritmo (#411).
@@ -111,7 +107,6 @@ class ConfigDaBusca:
     @classmethod
     def do_ambiente(cls, ambiente: Mapping[str, str]) -> "ConfigDaBusca":
         """Levanta `KeyError` se faltar uma variável: sem ela a busca não tem onde ir.
-        `BUSCA_INDICE_QUADRO` vazia desliga o índice do quadro-chave.
         `BUSCA_INDICES_LIGADOS=false` desliga os índices ANN; ausente ou vazia, ficam
         ligados, e outro valor que não `true` ou `false` levanta `ValueError`. O corte
         (`BUSCA_DISTANCIA_MAXIMA`, `BUSCA_PALAVRAS_MINIMAS`) só o serviço e o
@@ -130,7 +125,6 @@ class ConfigDaBusca:
             regiao=ambiente["BUSCA_REGIAO"],
             colecao=ambiente["BUSCA_COLECAO"],
             indice_da_descricao=ambiente["BUSCA_INDICE_DESCRICAO"],
-            indice_do_quadro=ambiente["BUSCA_INDICE_QUADRO"] or None,
             dimensao=int(ambiente["BUSCA_DIMENSAO"]),
             distancia_maxima=float(distancia) if distancia else None,
             palavras_minimas=int(ambiente.get("BUSCA_PALAVRAS_MINIMAS") or 0),
@@ -151,10 +145,7 @@ class ConfigDaBusca:
         """O id do índice ANN de cada campo de vetor ligado; nenhum sem `indices_ligados`."""
         if not self.indices_ligados:
             return {}
-        indices = {CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao}
-        if self.indice_do_quadro is not None:
-            indices[CAMPO_DO_VETOR_DO_QUADRO] = self.indice_do_quadro
-        return indices
+        return {CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao}
 
     def caminho_do_indice(self, campo: str) -> str:
         return f"{self.caminho_da_colecao}/indexes/{self.indices[campo]}"
@@ -201,10 +192,10 @@ def pedido_de_busca(
     consulta: Consulta,
     vetor_do_significado: list[float] | None = None,
 ) -> dict[str, Any]:
-    """O corpo do `batchSearch`: filtros, texto, significado e vetor, fundidos por RRF.
+    """O corpo do `batchSearch`: filtros, texto e significado, fundidos por RRF.
 
-    As buscas por vetor (significado e quadro) levam o `indexHint` do índice ANN do seu
-    campo. Com os índices desligados (`indices_ligados`) vão pelo KNN, com `knnHint`
+    A busca por significado leva o `indexHint` do índice ANN da descrição. Com os
+    índices desligados (`indices_ligados`) vai pelo KNN, com `knnHint`
     explícito (o serviço usaria um índice que ainda existisse) e `COSINE_DISTANCE` (o
     padrão do KNN é o produto escalar, que não serve a vetores sem norma 1). O
     `semanticSearch` não aceita `distanceMetric` e no KNN ordena por produto escalar: o
@@ -267,21 +258,8 @@ def pedido_de_busca(
                 }
             }
         )
-    if consulta.vetor_do_quadro is not None:
-        if config.indice_do_quadro is None:
-            # Desligado, nenhum vetor de quadro é calculado na indexação
-            # (`embedding_da_busca`): não há o que achar.
-            raise ValueError("o índice do quadro-chave está desligado")
-        buscas.append(
-            {
-                "vectorSearch": {
-                    **no_indice(CAMPO_DO_VETOR_DO_QUADRO),
-                    "vector": {"values": consulta.vetor_do_quadro},
-                }
-            }
-        )
     if not buscas:
-        raise ValueError("a busca precisa de texto, significado ou vetor do quadro")
+        raise ValueError("a busca precisa de texto ou significado")
     pedido: dict[str, Any] = {"searches": buscas}
     if consulta.cortar_significado:
         # A distância de cada busca, mesmo depois da fusão: é ela que o corte lê.
@@ -338,7 +316,6 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
                     },
                 }
             },
-            CAMPO_DO_VETOR_DO_QUADRO: {"denseVector": {"dimensions": config.dimensao}},
         },
     }
 
@@ -561,10 +538,6 @@ def _registro(dados: dict[str, Any]) -> Registro:
 
 def _criacao(r: Registro) -> dict[str, Any]:
     objeto: dict[str, Any] = {"data": _dados(r)}
-    if r.vetor_do_quadro is not None:
-        objeto["vectors"] = {
-            CAMPO_DO_VETOR_DO_QUADRO: {"dense": {"values": r.vetor_do_quadro}}
-        }
     # O id do objeto é RFC 1035: começa por letra (o job_id pode começar por dígito) e
     # não aceita ":".
     return {"dataObjectId": "m-" + r.id.replace(":", "-"), "dataObject": objeto}
@@ -583,7 +556,7 @@ class AgentRetrieval:
     ) -> None:
         """`tentar_no_429` em quem grava e apaga (indexação, `make reindexar`, purga e,
         no serviço web, a reindexação e a purga, que não são o pedido da busca). Só
-        `gravar` e `apagar` esperam; a busca e os planos parecidos nunca, e o 429 volta
+        `gravar` e `apagar` esperam; a busca nunca, e o 429 volta
         na hora.
         `orcamento` é o orçamento de escrita compartilhado entre os processos (#460); o
         relógio é o de parede, o mesmo para todos."""
@@ -795,34 +768,6 @@ class AgentRetrieval:
         ) and len(
             (r.descricao or r.texto or "").split()
         ) >= self._config.palavras_minimas
-
-    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
-        """Os planos do vídeo com o vetor do quadro, lidos página a página (#271)."""
-        pedido: dict[str, Any] = {
-            "filter": {
-                "$and": [{"job_id": {"$eq": job_id}}, {"tipo": {"$eq": "plano"}}]
-            },
-            "outputFields": {
-                "dataFields": ["id"],
-                "vectorFields": [CAMPO_DO_VETOR_DO_QUADRO],
-            },
-            "pageSize": OBJETOS_POR_PAGINA,
-        }
-        vetores: dict[int, list[float]] = {}
-        while True:
-            pagina = self._chamar("dataObjects:query", pedido)
-            for o in pagina.get("dataObjects", []):
-                valores = (
-                    o.get("vectors", {})
-                    .get(CAMPO_DO_VETOR_DO_QUADRO, {})
-                    .get("dense", {})
-                ).get("values")
-                if valores:
-                    n = int(o["data"]["id"].rsplit(":", 1)[1])
-                    vetores[n] = [float(v) for v in valores]
-            if not pagina.get("nextPageToken"):
-                return vetores
-            pedido = pedido | {"pageToken": pagina["nextPageToken"]}
 
     def total(self) -> int:
         resposta = self._chamar("dataObjects:aggregate", {"aggregate": "COUNT"})

@@ -432,7 +432,7 @@ test('o 422 do cursor da volta recomeça do topo, e rolar segue pedindo a págin
   await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null, 'j49']))
 })
 
-test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, parecidos, volta, volta)', async () => {
+test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, outra lista, volta, volta)', async () => {
   jobs = Array.from({ length: 160 }, (_, i) => job({ id: `j${i}`, nome: `video-${i}.mp4`, estado: 'concluido' }))
   const consultas = await abrir()
   await screen.findByText('video-0.mp4')
@@ -449,14 +449,14 @@ test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, parecid
   cleanup()
   lembrarPosicao(consultas, chave, 120)
 
-  // Do vídeo para os parecidos, outra lista, e a volta ao vídeo: ela guarda a posição dela.
-  const parecidos = renderHook(
-    () => usePaginas({ chave: ['parecidos', 'v1', 3], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
+  // Do vídeo para outra lista, e a volta ao vídeo: ela guarda a posição dela.
+  const outra = renderHook(
+    () => usePaginas({ chave: ['outra', 'v1', 3], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
     { wrapper: ({ children }) => <QueryClientProvider client={consultas}>{children}</QueryClientProvider> },
   )
-  await waitFor(() => expect(parecidos.result.current.quantidade).toBe(2))
-  lembrarPosicao(consultas, parecidos.result.current.chave, 1)
-  parecidos.unmount()
+  await waitFor(() => expect(outra.result.current.quantidade).toBe(2))
+  lembrarPosicao(consultas, outra.result.current.chave, 1)
+  outra.unmount()
 
   // De volta ao acervo, com o cache vencido: recomeça na página do vídeo 120 (o jsdom não rola até ela).
   consultas.removeQueries({ queryKey: ['acervo'] })

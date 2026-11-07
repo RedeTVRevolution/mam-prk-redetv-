@@ -2543,7 +2543,7 @@
     "/v1/busca": {
       "get": {
         "summary": "Buscar momentos por texto",
-        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`), `visual` e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
+        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`) e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
         "operationId": "buscar_v1_busca_get",
         "parameters": [
           {
@@ -2716,16 +2716,6 @@
             }
           },
           {
-            "name": "visual",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Visual"
-            }
-          },
-          {
             "name": "limite",
             "in": "query",
             "required": false,
@@ -2772,7 +2762,6 @@
                     "programa": null,
                     "desde": null,
                     "ate": null,
-                    "visual": false,
                     "termo_da_foto": null
                   },
                   "videos": [
@@ -2913,7 +2902,7 @@
             }
           },
           "429": {
-            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
+            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem dividem o mesmo limite). Espere e repita.",
             "content": {
               "application/json": {
                 "example": {
@@ -3071,7 +3060,6 @@
                     "programa": null,
                     "desde": null,
                     "ate": null,
-                    "visual": false,
                     "termo_da_foto": null
                   },
                   "videos": [
@@ -3233,7 +3221,7 @@
             }
           },
           "429": {
-            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
+            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem dividem o mesmo limite). Espere e repita.",
             "content": {
               "application/json": {
                 "example": {
@@ -3295,397 +3283,6 @@
             }
           }
         }
-      }
-    },
-    "/v1/busca/parecidos/planos": {
-      "get": {
-        "summary": "Planos do vídeo que têm busca de parecidos",
-        "description": "Os números dos planos do vídeo (`job`) que têm vetor do quadro: só neles `GET /v1/busca/parecidos` acha algo. Não gasta o limite de consultas por minuto. Escopo `ler`.",
-        "operationId": "planos_com_vetor_v1_busca_parecidos_planos_get",
-        "parameters": [
-          {
-            "name": "job",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 100,
-              "title": "Job"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Sucesso",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "array",
-                    "items": {
-                      "type": "integer"
-                    }
-                  },
-                  "title": "Response Planos Com Vetor V1 Busca Parecidos Planos Get"
-                },
-                "example": {
-                  "planos": [
-                    0,
-                    1,
-                    3,
-                    4
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Not authenticated"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Chave sem o escopo ler"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": [
-                    {
-                      "type": "missing",
-                      "loc": [
-                        "query",
-                        "job"
-                      ],
-                      "msg": "Field required",
-                      "input": null
-                    }
-                  ]
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Serviço indisponível"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "504": {
-            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "A busca demorou demais"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          }
-        },
-        "tags": [
-          "sistemas"
-        ]
-      }
-    },
-    "/v1/busca/parecidos": {
-      "get": {
-        "summary": "Buscar planos parecidos com um plano",
-        "description": "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de 1 a 50 vídeos. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
-        "operationId": "buscar_parecidos_v1_busca_parecidos_get",
-        "parameters": [
-          {
-            "name": "job",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 100,
-              "title": "Job"
-            }
-          },
-          {
-            "name": "plano",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "title": "Plano"
-            }
-          },
-          {
-            "name": "limite",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 50,
-              "minimum": 1,
-              "default": 20,
-              "title": "Limite"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 100
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Sucesso",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResultadoDaBusca"
-                },
-                "example": {
-                  "entendida": {
-                    "evidencias": [
-                      "imagem",
-                      "citada"
-                    ],
-                    "programa": null,
-                    "desde": null,
-                    "ate": null,
-                    "visual": false,
-                    "termo_da_foto": null
-                  },
-                  "videos": [
-                    {
-                      "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
-                      "nome": "TARD_20261103_BLU.mp4",
-                      "programa": "TV Fama",
-                      "data_exibicao": "2026-11-03",
-                      "duracao_s": 598.4,
-                      "n_momentos": 1,
-                      "momentos": [
-                        {
-                          "tipo": "plano",
-                          "inicio_ms": 9800,
-                          "fim_ms": 14200,
-                          "motivo": "Fulana de Tal recebe o elenco no estúdio.",
-                          "destaques": [
-                            {
-                              "inicio": 0,
-                              "fim": 12
-                            }
-                          ],
-                          "quadro_url": null,
-                          "quadro": "quadros/plano-6.jpg"
-                        }
-                      ]
-                    }
-                  ],
-                  "sem_aparicoes": [],
-                  "plano_b": false,
-                  "facetas": {
-                    "programa": [
-                      {
-                        "valor": "TV Fama",
-                        "rotulo": "TV Fama",
-                        "videos": 1
-                      }
-                    ],
-                    "mes": [
-                      {
-                        "valor": "2026-11",
-                        "rotulo": "novembro de 2026",
-                        "videos": 1
-                      }
-                    ],
-                    "pessoa": [
-                      {
-                        "valor": "pessoa-1",
-                        "rotulo": "Fulana de Tal",
-                        "videos": 1
-                      }
-                    ],
-                    "marca": [],
-                    "tipo": [
-                      {
-                        "valor": "plano",
-                        "rotulo": "plano",
-                        "videos": 1
-                      }
-                    ]
-                  },
-                  "quadros_expiram_em": "2026-11-03T21:14:05.120000Z"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Not authenticated"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Chave sem o escopo ler"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado. Escolha um plano de `GET /v1/busca/parecidos/planos`; se o vídeo é antigo, peça ao time do MAM para reindexá-lo.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.\n\nCursor inválido. O `cursor` foi alterado, venceu (vale 15 min), é de outra chave ou de outra consulta: use o `X-Proximo-Cursor` da resposta anterior com a mesma consulta e os mesmos filtros, ou refaça a busca sem `cursor`.",
-            "content": {
-              "application/json": {
-                "examples": {
-                  "Erro de validação": {
-                    "summary": "Erro de validação",
-                    "value": {
-                      "detail": [
-                        {
-                          "type": "missing",
-                          "loc": [
-                            "query",
-                            "plano"
-                          ],
-                          "msg": "Field required",
-                          "input": null
-                        }
-                      ]
-                    }
-                  },
-                  "Cursor inválido": {
-                    "summary": "Cursor inválido",
-                    "value": {
-                      "detail": "Cursor inválido"
-                    }
-                  }
-                },
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ErroEmTexto"
-                    },
-                    {
-                      "$ref": "#/components/schemas/HTTPValidationError"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Consultas demais; tente em um minuto"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Serviço indisponível"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "504": {
-            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "A busca demorou demais"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          }
-        },
-        "tags": [
-          "sistemas"
-        ]
       }
     },
     "/v1/correcoes/catalogo": {
@@ -4608,11 +4205,6 @@
               }
             ],
             "title": "Ate"
-          },
-          "visual": {
-            "type": "boolean",
-            "title": "Visual",
-            "default": false
           },
           "termo_da_foto": {
             "anyOf": [

@@ -139,8 +139,8 @@ _NAO_ACHOU_A_PASSADA = Erro(
 _MUITA_CONSULTA = Erro(
     429,
     "Consultas demais; tente em um minuto",
-    "O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e "
-    "de parecidos dividem o mesmo limite). Espere e repita.",
+    "O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem "
+    "dividem o mesmo limite). Espere e repita.",
 )
 _DEMOROU = Erro(
     504,
@@ -287,7 +287,6 @@ _BUSCA = {
         "programa": None,
         "desde": None,
         "ate": None,
-        "visual": False,
         "termo_da_foto": None,
     },
     # `dict(...)`: a chave entre aspas casaria com um nome da busca no checador de nomes.
@@ -745,7 +744,7 @@ OPERACOES: tuple[Operacao, ...] = (
         "marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, "
         "`citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, "
         "`texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou "
-        "`data`), `visual` e `limite` (1 a 50 vídeos). "
+        "`data`) e `limite` (1 a 50 vídeos). "
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
@@ -834,46 +833,6 @@ OPERACOES: tuple[Operacao, ...] = (
                 }
             },
         },
-    ),
-    Operacao(
-        "GET",
-        "/v1/busca/parecidos/planos",
-        "Planos do vídeo que têm busca de parecidos",
-        "Os números dos planos do vídeo (`job`) que têm vetor do quadro: só neles "
-        "`GET /v1/busca/parecidos` acha algo. Não gasta o limite de consultas por minuto. Escopo `ler`.",
-        {"planos": [0, 1, 3, 4]},
-        (
-            *_sem_chave("ler"),
-            _validacao("missing", "query", "job", "Field required", None),
-            _DEMOROU,
-            _INDISPONIVEL,
-        ),
-    ),
-    Operacao(
-        "GET",
-        "/v1/busca/parecidos",
-        "Buscar planos parecidos com um plano",
-        "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do "
-        "vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de "
-        "1 a 50 vídeos. "
-        + _BUSCA_DO_SISTEMA
-        + " Divide com a busca por texto o limite de 30 consultas por minuto.",
-        _BUSCA,
-        (
-            *_sem_chave("ler"),
-            Erro(
-                404,
-                "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado",
-                "Escolha um plano de `GET /v1/busca/parecidos/planos`; se o vídeo é "
-                "antigo, peça ao time do MAM para reindexá-lo.",
-                exemplo="Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado",
-            ),
-            _validacao("missing", "query", "plano", "Field required", None),
-            _CURSOR_DA_BUSCA,
-            _MUITA_CONSULTA,
-            _DEMOROU,
-            _INDISPONIVEL,
-        ),
     ),
     Operacao(
         "GET",

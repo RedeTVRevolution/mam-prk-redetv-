@@ -39,7 +39,6 @@ from api.auth import (
 from api.bancos import cliente_da_colecao
 from api.busca import (
     Busca,
-    EmbeddingDaConsulta,
     ListasDaBusca,
     Ranking,
     RankingEmOrdem,
@@ -65,7 +64,6 @@ from api.correcoes import (
 )
 from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.decupagem import Decupagem
-from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
 from api.eventos_de_uso import (
     Eventos,
@@ -347,8 +345,6 @@ def criar_app(
     sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
-    embedding: EmbeddingDoQuadro | None = None,
-    embedding_da_consulta: EmbeddingDaConsulta | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
     resumos_de_uso: ResumosDeUso | None = None,
@@ -555,8 +551,6 @@ def criar_app(
             indice_da_busca,
             relogio,
             copia,
-            embedding,
-            armazenamento_dos_jobs,
             tipos_de_objeto=tipos_dos_objetos,
             pessoas=catalogo_de_pessoas.obter,
         )
@@ -640,7 +634,6 @@ def criar_app(
                 repositorio=repositorio_de_jobs,
                 armazenamento=armazenamento_dos_jobs,
                 relogio=relogio,
-                embedding=embedding_da_consulta,
                 copia_do_catalogo=copia_das_pessoas,
                 listas=listas_da_busca,
             ),
@@ -814,7 +807,6 @@ if _projeto:
     _busca = (
         ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
     )
-    _embedding = embedding_da_busca(_busca)
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(firestore.Client(project=_projeto)),
@@ -878,7 +870,7 @@ if _projeto:
         ),
         sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
         # A reindexação (em `BackgroundTasks`) e a purga (no pedido da rota) esperam a
-        # cota de escrita; a busca e os planos parecidos nunca esperam (`AgentRetrieval`).
+        # cota de escrita; a busca nunca espera (`AgentRetrieval`).
         indice=(
             AgentRetrieval(
                 _busca,
@@ -890,8 +882,6 @@ if _projeto:
             else None
         ),
         copia=copia_do_ambiente(os.environ),
-        embedding=_embedding,
-        embedding_da_consulta=_embedding,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore.Client(project=_projeto)),
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(

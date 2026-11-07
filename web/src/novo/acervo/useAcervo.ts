@@ -42,11 +42,9 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   })
 }
 
-/** Muda os vídeos das páginas da busca e dos parecidos na memória. */
+/** Muda os vídeos das páginas da busca na memória. */
 function nasBuscas(cliente: QueryClient, mudar: (videos: VideoDoResultado[]) => VideoDoResultado[]) {
-  for (const prefixo of ['busca', 'parecidos']) {
-    cliente.setQueriesData<InfiniteData<PaginaDaBusca>>({ queryKey: [prefixo] }, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, videos: mudar(p.videos) })) })
-  }
+  cliente.setQueriesData<InfiniteData<PaginaDaBusca>>({ queryKey: ['busca'] }, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, videos: mudar(p.videos) })) })
 }
 
 /** Muda os Jobs de cada página do acervo na memória. */
@@ -56,7 +54,7 @@ function nasPaginas(d: InfiniteData<PaginaDoAcervo> | undefined, mudar: (jobs: J
 
 /**
  * Põe o Job que a API devolveu (um reprocessamento) no lugar do da lista, com a capa da lista. Na
- * busca e nos parecidos, o vídeo leva os dados novos e fica com os momentos que a busca achou.
+ * busca, o vídeo leva os dados novos e fica com os momentos que a busca achou.
  */
 export function trocarNoAcervo(cliente: QueryClient, novo: Job) {
   cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
@@ -66,7 +64,7 @@ export function trocarNoAcervo(cliente: QueryClient, novo: Job) {
   nasBuscas(cliente, (videos) => videos.map((v) => (v.job_id === novo.id ? { ...v, nome, programa, data_exibicao, duracao_s } : v)))
 }
 
-/** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo; da busca e dos parecidos também. */
+/** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo; da busca também. */
 export function tirarDoAcervo(cliente: QueryClient, ids: Set<string>) {
   cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) => nasPaginas(d, (jobs) => jobs.filter((j) => !ids.has(j.id))))
   nasBuscas(cliente, (videos) => videos.filter((v) => !ids.has(v.job_id)))

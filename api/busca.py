@@ -93,22 +93,12 @@ Ordem = Literal["relevancia", "data"]
 EvidenciaDaBusca = Literal["imagem", "citada", "fala", "gc", "objeto", "marca"]
 
 
-class EmbeddingDaConsulta(Protocol):
-    """Porta do embedding multimodal: o texto da consulta vira vetor no espaço dos quadros."""
-
-    def vetor_do_texto(self, texto: str) -> list[float]: ...
-
-
 class BuscaCancelada(Exception):
     """A rota desistiu (passou do prazo): o trabalho que sobra para em vez de seguir rodando."""
 
 
 class BuscaPorImagemIndisponivel(Exception):
     """O modelo da consulta está fora ou não achou objeto na foto: a imagem não vira termo."""
-
-
-class PlanoSemVetor(Exception):
-    """O plano não existe, o vídeo não é visível, ou o quadro do plano não tem vetor."""
 
 
 class Ranking(Protocol):
@@ -132,7 +122,7 @@ class Destaque(BaseModel):
 
 
 class Momento(BaseModel):
-    tipo: TipoDeRegistro  # a grade da busca visual mostra só os planos
+    tipo: TipoDeRegistro  # o tipo do registro: plano, objeto, pessoa...
     inicio_ms: int
     fim_ms: int
     motivo: str
@@ -179,9 +169,6 @@ class Entendida(BaseModel):
     programa: str | None
     desde: date | None
     ate: date | None
-    # A busca usou o vetor do quadro. Falso no modo visual quando o índice do quadro está
-    # desligado ou o embedding falhou: a tela avisa que veio a busca comum.
-    visual: bool = False
     # Só na busca por foto (#443): o termo que o modelo deu para o objeto e que a busca usou,
     # como se tivesse sido digitado. A tela o mostra para a pessoa poder refinar digitando.
     termo_da_foto: str | None = None
@@ -388,11 +375,9 @@ class Busca:
         repositorio: RepositorioDeJobs,
         armazenamento: Armazenamento,
         relogio: Callable[[], datetime],
-        embedding: EmbeddingDaConsulta | None = None,
         copia_do_catalogo: CopiaCurta[PessoaDoCatalogo] | None = None,
         listas: ListasDaBusca | None = None,
     ) -> None:
-        self._embedding = embedding
         self._listas = listas or ListasDaBuscaEmMemoria()
         # A mesma cópia do autocompletar, se a aplicação a passa: uma só recarga para todos.
         self._copia_do_catalogo = copia_do_catalogo or CopiaCurta(
@@ -417,9 +402,7 @@ class Busca:
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
         ajustes: Ajustes | None = None,
-        visual: bool = False,
         imagem: bytes | None = None,
-        parecidos: tuple[str, list[float]] | None = None,
         cancelado: threading.Event | None = None,
         cursor: str | None = None,
         dono: str = "",
@@ -433,20 +416,14 @@ class Busca:
         foto (#443) e a busca segue como se a pessoa o tivesse digitado, com o mesmo
         entendimento, Model Armor e ranking; só os filtros de `ajustes` valem. Sem o modelo,
         se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
-        digitado não há plano B. `parecidos` (#271) é o registro de um plano e o vetor do
-        quadro dele, já no índice: busca pelo vetor, sem entender texto, e o próprio
-        registro fica fora."""
+        digitado não há plano B."""
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
-        vetor_do_plano = None
         termo_da_foto = None
-        proprio = parecidos[0] if parecidos else None
         impressao = _impressao(
             texto=texto,
             ordem=ordem,
-            visual=visual,
             imagem=hashlib.sha256(imagem).hexdigest() if imagem is not None else None,
-            parecidos=proprio,
             sistema=sistema,
             ajustes=asdict(ajustes or Ajustes()),
             filtros=asdict(impostos),
@@ -455,24 +432,20 @@ class Busca:
             return self._pagina_seguinte(
                 cursor, limite, dono, impressao, sistema, cancelado
             )
-        if parecidos is not None:
-            vetor_do_plano = parecidos[1]
-            entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
-        else:
-            if imagem is not None:
-                _conferir(cancelado)
-                texto = termo_da_foto = self._termo_da_foto(imagem)
-            entendida = _ajustada(
-                entender(
-                    texto,
-                    transporte=self._transporte,
-                    catalogo=self._catalogo,
-                    armor=self._armor,
-                    programas=self._programas,
-                    todas=self._copia_do_catalogo.itens,
-                ),
-                ajustes or Ajustes(),
-            )
+        if imagem is not None:
+            _conferir(cancelado)
+            texto = termo_da_foto = self._termo_da_foto(imagem)
+        entendida = _ajustada(
+            entender(
+                texto,
+                transporte=self._transporte,
+                catalogo=self._catalogo,
+                armor=self._armor,
+                programas=self._programas,
+                todas=self._copia_do_catalogo.itens,
+            ),
+            ajustes or Ajustes(),
+        )
         jobs: dict[str, Job | None] = {}
 
         def carregar_jobs(ids: Iterable[str]) -> None:
@@ -495,7 +468,7 @@ class Busca:
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
                 limite=TETO_DE_REGISTROS,
             )
-            return [r for r in self._indice.buscar(c) if r.id != proprio]
+            return self._indice.buscar(c)
 
         def consultar(c: Consulta) -> list[Registro]:
             achados = do_indice(c)
@@ -529,23 +502,8 @@ class Busca:
                 for quem in fora
                 for c in _clausulas_das_mencoes(quem, entendida, base, nome)
             ]
-            # Sem cláusula de imagem, o vetor não é calculado; não é a busca visual que falhou.
-            usou_o_vetor = visual or vetor_do_plano is not None
         else:
             clausulas = self._clausulas(entendida, nome)
-            # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
-            # entendidos já filtram, e não entram no vetor.
-            consulta_visual = _texto_da_busca(entendida) or texto
-            vetor = (
-                vetor_do_plano
-                if vetor_do_plano is not None
-                else self._vetor_da_consulta(consulta_visual)
-                if visual
-                else None
-            )
-            if vetor is not None:
-                clausulas.append(_clausula_visual(entendida, vetor, nome))
-            usou_o_vetor = vetor is not None
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
@@ -635,7 +593,6 @@ class Busca:
                 programa=entendida.programa,
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
-                visual=usou_o_vetor,
                 termo_da_foto=entendida.saneada if termo_da_foto else None,
             ),
             videos=videos,
@@ -776,14 +733,6 @@ class Busca:
             resultado._proximo_cursor = f"{id}.{fim}"
         return resultado
 
-    def planos_com_vetor(
-        self, job_id: str, sistema: str | None = None
-    ) -> dict[int, list[float]]:
-        """Os vetores do quadro dos planos de um vídeo concluído (e do sistema do chamador)."""
-        if self._visivel(job_id, sistema) is None:
-            return {}
-        return self._indice.vetores_dos_planos(job_id)
-
     def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
         """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
         return self._visivel_de(self._repositorio.obter(job_id), sistema)
@@ -796,34 +745,6 @@ class Busca:
             return None
         return achado
 
-    def buscar_parecidos(
-        self,
-        job_id: str,
-        plano: int,
-        *,
-        limite: int = VIDEOS_POR_PADRAO,
-        filtros_do_servidor: Filtros | None = None,
-        sistema: str | None = None,
-        cancelado: threading.Event | None = None,
-        cursor: str | None = None,
-        dono: str = "",
-    ) -> ResultadoDaBusca:
-        """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271).
-        Com `cursor`, a página vem da lista guardada, sem ler o vetor no índice."""
-        vetor = [] if cursor else self.planos_com_vetor(job_id, sistema).get(plano)
-        if vetor is None:
-            raise PlanoSemVetor
-        return self.buscar(
-            "",
-            parecidos=(f"{job_id}:plano:{plano}", vetor),
-            limite=limite,
-            filtros_do_servidor=filtros_do_servidor,
-            sistema=sistema,
-            cancelado=cancelado,
-            cursor=cursor,
-            dono=dono,
-        )
-
     def _termo_da_foto(self, jpeg: bytes) -> str:
         try:
             termo = termo_da_foto(jpeg, transporte=self._transporte)
@@ -833,16 +754,6 @@ class Busca:
         if not termo:
             raise BuscaPorImagemIndisponivel
         return termo
-
-    def _vetor_da_consulta(self, texto: str) -> list[float] | None:
-        """`None` sem embedding (índice do quadro desligado) ou se ele falhar: busca comum."""
-        if self._embedding is None:
-            return None
-        try:
-            return self._embedding.vetor_do_texto(texto)
-        except Exception:
-            log.exception("vetor da consulta não calculado; fica a busca comum")
-            return None
 
     def _clausulas(
         self,
@@ -996,23 +907,6 @@ class Busca:
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
-
-
-def _clausula_visual(
-    e: ConsultaEntendida,
-    vetor: list[float],
-    nome: Callable[[str | None], str | None],
-) -> _Clausula:
-    """Os planos só pelo vetor do quadro, como mais uma lista do mesmo RRF.
-
-    O texto e o significado já vêm da cláusula do texto livre: repeti-los aqui contaria
-    duas vezes os planos que a descrição acha. As demais cláusulas seguem como na busca
-    comum (pessoas e objetos pedidos continuam filtrando).
-    """
-    return _Clausula(
-        Consulta(filtros=replace(_base(e), tipo="plano"), vetor_do_quadro=vetor),
-        lambda r: _motivo(r, nome),
-    )
 
 
 def _casa(r: Registro, a: Ajustes) -> bool:

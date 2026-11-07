@@ -9,7 +9,7 @@ Job do painel (a busca usa `busca`; o Job criado há poucos minutos, que a tabel
 ainda não tem), e o custo fixo (a réplica do índice, os
 serviços de rede) entram como custo **sem dono**, no mês em que foram cobrados. Os Jobs do
 Cloud Run não levam o id do Job: o Cloud Run não deixa rotular cada execução, então o custo
-deles cai aqui também, e o dos embeddings (quadros-chave e busca visual), que vão sem rótulo.
+deles cai aqui também, e o dos embeddings, que vão sem rótulo.
 
 O custo de um Job conta no mês em que o Job foi criado (dia de São Paulo), e o filtro de
 período compara esse dia; o custo sem dono conta no dia em que foi cobrado. Com filtro de

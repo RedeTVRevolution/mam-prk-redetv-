@@ -41,7 +41,7 @@ Na imagem ✓   Citada   Fala   GC   Objeto ✓   Marca     Programa ▾  Ano �
 | `Sabrina Sato de vestido vermelho` | Pessoa + objeto, **ligados**: o vestido é da Sabrina | Só os momentos em que é ela que usa o vestido vermelho, e não alguém ao lado |
 | `"promoção imperdível"` | Frase exata na fala | Momentos da transcrição com a frase, com o trecho destacado por posição no texto |
 | `Ultrafarma` | Marca do catálogo | Comerciais e merchandising por tipo, mais a marca incidental e a marca em objeto |
-| `trânsito à noite` | Conceito visual | Planos pela descrição e pelo vetor multimodal do quadro (E6) |
+| `trânsito à noite` | Conceito visual | Planos pela descrição (o vetor multimodal do quadro saiu no #476) |
 
 ### Por trás da tela
 

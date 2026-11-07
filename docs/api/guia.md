@@ -98,7 +98,6 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`): leia `loc` e `msg` em `detail`. |
 | 304 | `Não mudou` | `GET /v1/jobs/{job_id}` com `If-None-Match` igual ao `ETag`: nada mudou, sem corpo. Use a cópia guardada. |
 | 404 | `Passada não encontrada` | O Job não tem essa passada: pegue o id em `GET /v1/jobs/{job_id}/passadas`. |
-| 404 | `Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado` | Escolha um plano de `GET /v1/busca/parecidos/planos`. |
 | 411 | `Envie o tamanho do pedido` | A busca por imagem exige `Content-Length`. |
 | 422 | `No máximo 200 ids` | `GET /v1/jobs/andamento` aceita até 200 ids por chamada. |
 | 422 | `O início do período passa do fim` | Na busca, `desde` é depois de `ate`. |
@@ -118,9 +117,8 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 
 Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. Cada exemplo abaixo supõe `URL` e `CHAVE` no ambiente; o OpenAPI traz o formato completo das respostas.
 
-- **Buscar por texto:** `GET /v1/busca?q=vestido+azul` devolve vídeos e momentos (`inicio_ms`, `fim_ms`, `motivo` e `quadro`). Filtros: `ev`, `tipo`, `pessoa`, `marca`, `programa`, `desde`, `ate`, `ordem`, `limite`. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte (vale também na busca por imagem e nos parecidos), some na última e vale 15 min, na mesma consulta e com os mesmos filtros. `curl -H "X-API-Key: $CHAVE" "$URL/v1/busca?q=vestido+azul"`
+- **Buscar por texto:** `GET /v1/busca?q=vestido+azul` devolve vídeos e momentos (`inicio_ms`, `fim_ms`, `motivo` e `quadro`). Filtros: `ev`, `tipo`, `pessoa`, `marca`, `programa`, `desde`, `ate`, `ordem`, `limite`. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte (vale também na busca por imagem), some na última e vale 15 min, na mesma consulta e com os mesmos filtros. `curl -H "X-API-Key: $CHAVE" "$URL/v1/busca?q=vestido+azul"`
 - **Buscar por imagem:** `POST /v1/busca/imagem` com o arquivo no campo `arquivo` (multipart). O modelo diz o objeto da foto (`entendida.termo_da_foto`) e a busca segue como se esse termo tivesse sido digitado. `curl -H "X-API-Key: $CHAVE" -F arquivo=@foto.jpg "$URL/v1/busca/imagem"`
-- **Planos parecidos:** `GET /v1/busca/parecidos/planos?job=<id>` para saber quais planos têm busca e `GET /v1/busca/parecidos?job=<id>&plano=<n>` para buscá-los.
 - **Quadro de um momento:** `GET /v1/jobs/{job_id}/quadros/{arquivo}` devolve a URL do JPEG; `arquivo` é o nome em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`).
 - **Andamento de vários Jobs:** `GET /v1/jobs/andamento?ids=a,b,c` (até 200 ids).
 - **Passadas:** `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}` e `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, para comparar a decupagem de outro modelo com a entregue.
@@ -128,4 +126,4 @@ Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. 
 
 ## Rotas deste guia
 
-`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem`, `GET /v1/jobs/{job_id}/decupagem/download`, `GET /v1/jobs/andamento`, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}`, `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, `GET /v1/objetos/tipos`, `GET /v1/catalogo/pessoas`, `GET /v1/catalogo/marcas`, `GET /v1/busca`, `POST /v1/busca/imagem`, `GET /v1/busca/parecidos/planos`, `GET /v1/busca/parecidos` e `GET /v1/correcoes/catalogo`.
+`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem`, `GET /v1/jobs/{job_id}/decupagem/download`, `GET /v1/jobs/andamento`, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}`, `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, `GET /v1/objetos/tipos`, `GET /v1/catalogo/pessoas`, `GET /v1/catalogo/marcas`, `GET /v1/busca`, `POST /v1/busca/imagem` e `GET /v1/correcoes/catalogo`.

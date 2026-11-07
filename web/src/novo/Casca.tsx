@@ -65,7 +65,7 @@ interface Destino {
 }
 
 const ACERVO_D: Destino = { endereco: ACERVO, rotulo: 'Acervo', Icone: IconMovie, letra: 'a', ativo: (r) => r.tipo === 'acervo' || r.tipo === 'video' }
-const BUSCA_D: Destino = { endereco: '/busca', rotulo: 'Busca', Icone: IconSearch, ativo: (r) => r.tipo === 'busca' || r.tipo === 'parecidos' }
+const BUSCA_D: Destino = { endereco: '/busca', rotulo: 'Busca', Icone: IconSearch, ativo: (r) => r.tipo === 'busca' }
 const TEMPO_D: Destino = { endereco: TEMPO_DE_TELA, rotulo: 'Tempo de tela', Icone: IconUserScan, letra: 't', ativo: (r) => r.tipo === 'tempo_de_tela' }
 const MARCAS_D: Destino = { endereco: MARCAS, rotulo: 'Marcas', Icone: IconBadgeTm, letra: 'm', ativo: (r) => r.tipo === 'marcas' }
 const PAINEL_D: Destino = { endereco: PAINEL, rotulo: 'Painel da diretoria', Icone: IconChartBar, letra: 'p', ativo: (r) => r.tipo === 'painel' }

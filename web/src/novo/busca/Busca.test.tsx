@@ -11,7 +11,7 @@ import { useRota } from '../../rotas.ts'
 import { AtalhosProvider } from '../Atalhos.tsx'
 import { Casca } from '../Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from '../consultas.ts'
-import { Busca, Parecidos } from './Busca.tsx'
+import { Busca } from './Busca.tsx'
 
 const momento = (inicio_ms: number, fim_ms: number, motivo: string, destaques: object[] = []) => ({
   tipo: 'objeto' as string,
@@ -46,10 +46,10 @@ function resultado(extra: object = {}) {
 
 const plano = (inicio_ms: number, motivo: string, quadro: string) => ({ ...momento(inicio_ms, inicio_ms + 5_000, motivo), tipo: 'plano', quadro })
 const DA_FOTO = resultado({
-  entendida: { evidencias: ['imagem', 'objeto'], programa: null, desde: null, ate: null, visual: false, termo_da_foto: 'sandália vermelha' },
+  entendida: { evidencias: ['imagem', 'objeto'], programa: null, desde: null, ate: null, termo_da_foto: 'sandália vermelha' },
 })
 const PLANOS = resultado({
-  entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null, visual: true },
+  entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null },
   videos: [video('v1', [plano(724_000, 'Plano: rua molhada', 'quadros/plano-1.jpg'), plano(60_000, 'Plano: estúdio', 'quadros/plano-2.jpg')])],
 })
 
@@ -64,10 +64,8 @@ const job = (id: string, indexacao: string | null): JobApi => ({ id, estado: 'co
 const buscas: URLSearchParams[] = []
 const quadrosPedidos: string[] = []
 const fotos: { params: URLSearchParams; arquivo: File | null }[] = []
-const parecidos: URLSearchParams[] = []
 let resposta: () => Response = () => HttpResponse.json(resultado())
 let respostaDaFoto: () => Response = () => HttpResponse.json(DA_FOTO)
-let respostaDosParecidos: () => Response = () => HttpResponse.json(PLANOS)
 let jobs: JobApi[] = []
 let pedidosDoAcervo: URLSearchParams[] = []
 
@@ -88,10 +86,6 @@ const servidor = setupServer(
   http.post('/v1/busca/imagem', async ({ request }) => {
     fotos.push({ params: new URL(request.url).searchParams, arquivo: (await request.formData()).get('arquivo') as File | null })
     return respostaDaFoto()
-  }),
-  http.get('/v1/busca/parecidos', ({ request }) => {
-    parecidos.push(new URL(request.url).searchParams)
-    return respostaDosParecidos()
   }),
 )
 
@@ -116,12 +110,10 @@ afterEach(() => {
   buscas.length = 0
   quadrosPedidos.length = 0
   fotos.length = 0
-  parecidos.length = 0
   jobs = []
   pedidosDoAcervo = []
   resposta = () => HttpResponse.json(resultado())
   respostaDaFoto = () => HttpResponse.json(DA_FOTO)
-  respostaDosParecidos = () => HttpResponse.json(PLANOS)
 })
 afterAll(() => {
   servidor.close()
@@ -134,7 +126,6 @@ function Tela() {
   return (
     <Casca usuario={{ uid: 'u1', email: 'ana@redetv.com.br', papeis: [], permissoes: ['decupagem.ver'] }} rota={rota} aoSair={() => {}}>
       {rota.tipo === 'busca' && <Busca consulta={rota.consulta} />}
-      {rota.tipo === 'parecidos' && <Parecidos job={rota.job} plano={rota.plano} />}
     </Casca>
   )
 }
@@ -497,35 +488,6 @@ test('as facetas de mês, pessoa, marca e tipo vão à API; o X as tira', async 
   await waitFor(() => expect(buscas.at(-1)?.get('marca')).toBeNull())
 })
 
-test('o botão "Busca visual" liga o modo pela URL, e só os planos ficam na grade', async () => {
-  const usuario = userEvent.setup()
-  await abrir('/busca?q=pista+molhada')
-  await screen.findByText('3 momentos em 2 vídeos')
-  expect(buscas[0].has('visual')).toBe(false)
-  resposta = () =>
-    HttpResponse.json({
-      ...PLANOS,
-      // A fala que o texto livre trouxe fica fora da grade.
-      videos: [video('v1', [...PLANOS.videos[0].momentos, { ...momento(5_000, 6_000, 'Fala: a pista'), tipo: 'fala' }])],
-    })
-
-  await usuario.click(screen.getByRole('button', { name: 'Busca visual' }))
-
-  expect(location.search).toBe('?q=pista+molhada&modo=visual')
-  await waitFor(() => expect(buscas.at(-1)?.get('visual')).toBe('true'))
-  expect(await screen.findByText('2 momentos em 1 vídeo')).toBeTruthy()
-  expect(screen.queryByText('Fala: a pista')).toBeNull()
-  expect(screen.getByRole('button', { name: 'Busca visual' }).getAttribute('aria-pressed')).toBe('true')
-})
-
-test('modo visual sem o vetor do quadro avisa e mostra a busca comum', async () => {
-  resposta = () => HttpResponse.json(resultado({ entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null, visual: false } }))
-  await abrir('/busca?q=pista&modo=visual')
-
-  expect(await screen.findByText(/busca visual não está disponível/i)).toBeTruthy()
-  expect(screen.getByText('3 momentos em 2 vídeos')).toBeTruthy()
-})
-
 test('o quadro vem da rota do quadro do vídeo, uma vez por arquivo', async () => {
   resposta = () => HttpResponse.json(PLANOS)
   await abrir('/busca?q=rua')
@@ -683,29 +645,4 @@ test('Enter com o mesmo texto da URL depois da foto também sai da foto e busca 
   expect(await screen.findByText('3 momentos em 2 vídeos')).toBeTruthy()
   expect(screen.queryByText('pista.png')).toBeNull()
   expect(fotos).toHaveLength(1)
-})
-
-// Os planos parecidos
-
-test('os planos parecidos vêm em grade, com a volta ao vídeo', async () => {
-  await abrir('/busca/parecidos?job=v9&plano=3')
-
-  expect(await screen.findByText('2 planos parecidos em 1 vídeo')).toBeTruthy()
-  expect(parecidos[0].get('job')).toBe('v9')
-  expect(parecidos[0].get('plano')).toBe('3')
-  expect(parecidos[0].get('limite')).toBe('50')
-  expect(screen.getByRole('link', { name: 'Voltar ao vídeo' }).getAttribute('href')).toBe('/video/v9')
-  expect(screen.getByRole('link', { name: /^v1\.mp4 em 12:04$/ }).getAttribute('href')).toBe('/video/v1?t=724')
-})
-
-test('plano sem vetor do quadro: o 404 tem mensagem própria', async () => {
-  respostaDosParecidos = () => new HttpResponse(null, { status: 404 })
-  await abrir('/busca/parecidos?job=v9&plano=3')
-  expect((await screen.findByRole('alert')).textContent).toContain('Este plano não tem vetor do quadro')
-})
-
-test('sem planos parecidos a tela diz isso', async () => {
-  respostaDosParecidos = () => HttpResponse.json({ ...PLANOS, videos: [] })
-  await abrir('/busca/parecidos?job=v9&plano=3')
-  expect(await screen.findByText('Nenhum plano parecido.')).toBeTruthy()
 })

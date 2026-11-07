@@ -16,7 +16,7 @@ export class CursorVencido extends PedidoInvalido {}
  * página n se pede com o da posição n, e a primeira com `''` (o `null` faria o TanStack achar que
  * não há página antes). A API só tem cursor para frente; para voltar, o navegador usa o que
  * guardou (uns 100 bytes por página). Fica fora do cache: a volta do vídeo depois do `gcTime`
- * recomeça da página certa. Um mapa por prefixo da chave (`acervo`, `busca`, `parecidos`).
+ * recomeça da página certa. Um mapa por prefixo da chave (`acervo`, `busca`).
  */
 interface Guardados {
   cursores: string[]
@@ -26,7 +26,7 @@ interface DoPrefixo {
   consultas: Map<string, Guardados>
   /**
    * Onde a lista estava ao sair (abrir um vídeo): o primeiro item à vista, pelo índice. Uma por
-   * prefixo: acervo, vídeo, parecidos, volta e volta encontra o acervo onde estava.
+   * prefixo: acervo, vídeo, volta e volta encontra o acervo onde estava.
    */
   posicao: { chave: string; indice: number } | null
 }
@@ -83,7 +83,7 @@ function volta(cliente: QueryClient, prefixo: unknown, hash: string, g: Guardado
 }
 
 export interface OpcoesDasPaginas<P, I> {
-  /** O primeiro elemento é o prefixo (`acervo`, `busca`, `parecidos`). */
+  /** O primeiro elemento é o prefixo (`acervo`, `busca`). */
   chave: QueryKey
   /** Uma página; `''` é a primeira. */
   pedir: (cursor: string) => Promise<P>
