@@ -5,7 +5,8 @@ linhas já agregadas (mês × programa × dono), sem ler a coleção `jobs`.
 
 Cada chamada ao Gemini leva o rótulo `job_id` (e, fora a análise principal, `etapa`); é por ele
 que o custo vira custo de um Job. O que não tem rótulo, ou tem um `job_id` que não é de nenhum
-Job (a busca usa `busca`; o vídeo purgado some), e o custo fixo (a réplica do índice, os
+Job do painel (a busca usa `busca`; o Job criado há poucos minutos, que a tabela dos Jobs
+ainda não tem), e o custo fixo (a réplica do índice, os
 serviços de rede) entram como custo **sem dono**, no mês em que foram cobrados. Os Jobs do
 Cloud Run não levam o id do Job: o Cloud Run não deixa rotular cada execução, então o custo
 deles cai aqui também, e o dos embeddings (quadros-chave e busca visual), que vão sem rótulo.
@@ -190,8 +191,8 @@ class ConfigDoFaturamento:
     dataset: str
     tabela: str
     regiao: str
-    dataset_dos_jobs: str = ""
-    tabela_dos_jobs: str = ""
+    dataset_dos_jobs: str
+    tabela_dos_jobs: str
 
     @classmethod
     def do_ambiente(cls, ambiente: Any) -> "ConfigDoFaturamento":
@@ -224,7 +225,8 @@ class FaturamentoBigQuery:
 
     def consulta(self, filtro: FiltroDeCusto) -> tuple[str, list[dict[str, Any]]]:
         c = self._config
-        dia = "DATE(usage_start_time, 'America/Sao_Paulo')"
+        fuso = f"'{SAO_PAULO.key}'"
+        dia = f"DATE(usage_start_time, {fuso})"
         parametros: list[dict[str, Any]] = []
         onde_do_faturamento = "TRUE"
         # O período do Job vem do instante de criação, que é a partição da tabela dos Jobs.
@@ -233,13 +235,12 @@ class FaturamentoBigQuery:
         if filtro.desde is not None:
             parametros.append(_parametro("desde", filtro.desde.isoformat(), "DATE"))
             onde_do_faturamento = f"{dia} >= @desde"
-            onde_do_job.append("j.criado_em >= TIMESTAMP(@desde, 'America/Sao_Paulo')")
+            onde_do_job.append(f"j.criado_em >= TIMESTAMP(@desde, {fuso})")
             onde_do_custo_sem_dono.append("l.dia >= @desde")
         if filtro.ate is not None:
             parametros.append(_parametro("ate", filtro.ate.isoformat(), "DATE"))
             onde_do_job.append(
-                "j.criado_em < TIMESTAMP(DATE_ADD(@ate, INTERVAL 1 DAY),"
-                " 'America/Sao_Paulo')"
+                f"j.criado_em < TIMESTAMP(DATE_ADD(@ate, INTERVAL 1 DAY), {fuso})"
             )
             onde_do_custo_sem_dono.append("l.dia <= @ate")
         if filtro.programa is not None:
@@ -250,7 +251,7 @@ class FaturamentoBigQuery:
             onde_do_job.append("j.quem_id = @usuario")
         jobs = f"`{c.projeto}.{c.dataset_dos_jobs}.{c.tabela_dos_jobs}`"
         mes = "FORMAT_DATE('%Y-%m', {})"
-        data_do_job = "DATE(j.criado_em, 'America/Sao_Paulo')"
+        data_do_job = f"DATE(j.criado_em, {fuso})"
         # As colunas das quatro partes são as mesmas: tipo, mes, programa, quem_tipo, quem_id,
         # rotulo (etapa ou serviço), custo, videos, horas, moeda.
         partes = [
@@ -263,7 +264,8 @@ class FaturamentoBigQuery:
                 "FROM por_job GROUP BY mes, programa, quem_tipo, quem_id, moeda"
             ),
             (
-                "SELECT 'etapa', NULL, NULL, NULL, NULL, IFNULL(etapa, 'analise')"
+                "SELECT 'etapa', NULL, NULL, NULL, NULL, IFNULL(NULLIF(etapa, ''),"
+                f" '{ETAPA_DA_ANALISE}')"
                 " AS rotulo, SUM(custo), 0, 0.0, moeda\n"
                 "FROM dos_jobs GROUP BY rotulo, moeda"
             ),

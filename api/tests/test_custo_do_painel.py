@@ -392,6 +392,8 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
     assert "JOIN `proj.decupagens.tabela_de_jobs` AS j ON j.id = l.job_id" in sql
     assert "GROUP BY" in sql and "SUM(" in sql
     assert "key = 'job_id'" in sql and "key = 'etapa'" in sql
+    # A etapa vazia é a análise principal, como a sem rótulo.
+    assert "IFNULL(NULLIF(etapa, ''), 'analise')" in sql
     # O custo é o líquido dos créditos e o dia é o de São Paulo.
     assert "credits" in sql and "America/Sao_Paulo" in sql
     assert [p["name"] for p in corpo["queryParameters"]] == ["desde"]
