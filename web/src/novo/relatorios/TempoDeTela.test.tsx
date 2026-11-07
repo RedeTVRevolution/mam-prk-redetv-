@@ -339,3 +339,28 @@ test("o gráfico alterna com a tabela dos mesmos números", async () => {
   ]);
   expect(within(secao).queryByRole("img")).toBeNull();
 });
+
+test("ao abrir sem filtro, o período é os últimos 7 dias, na tela e no pedido; o histórico inteiro continua à escolha", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-07T15:00:00Z"));
+  try {
+    await abrir("/relatorios/tempo-de-tela");
+
+    expect(((await screen.findByLabelText("Exibido de")) as HTMLInputElement).value).toBe("2026-11-01");
+    expect((screen.getByLabelText("Exibido até") as HTMLInputElement).value).toBe("2026-11-07");
+    await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
+    expect(pedidos[0].get("desde")).toBe("2026-11-01");
+    expect(pedidos[0].get("ate")).toBe("2026-11-07");
+
+    cleanup();
+    pedidos.length = 0;
+    await abrir("/relatorios/tempo-de-tela?de=&ate=");
+
+    expect(((await screen.findByLabelText("Exibido de")) as HTMLInputElement).value).toBe("");
+    await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
+    expect(pedidos[0].get("desde")).toBe("");
+    expect(pedidos[0].get("ate")).toBe("");
+  } finally {
+    vi.useRealTimers();
+  }
+});

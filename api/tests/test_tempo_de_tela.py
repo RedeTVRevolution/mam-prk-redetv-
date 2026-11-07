@@ -4,6 +4,7 @@ import csv
 import io
 import random
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -21,7 +22,7 @@ from api.copia_bigquery import (
     LinhaDoMomento,
     PessoaDoMomento,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import Job, RepositorioEmMemoria, agora_utc
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
@@ -44,6 +45,7 @@ from api.tempo_de_tela import (
     videos_em_python,
 )
 from api.tempo_de_tela import relatorio as relatorio_das_somas
+from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
 from api.tests.test_passadas import AUTORIZACAO
@@ -388,7 +390,9 @@ def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
 
 
 def _cliente(
-    papel: str = "consulta", consulta: ConsultaDeMomentos | None = None
+    papel: str = "consulta",
+    consulta: ConsultaDeMomentos | None = None,
+    relogio: Callable[[], datetime] | None = None,
 ) -> TestClient:
     jobs = RepositorioEmMemoria()
     jobs.salvar(
@@ -406,14 +410,15 @@ def _cliente(
     )
     papeis = RepositorioDePapeisEmMemoria()
     papeis.salvar("u1", [papel])  # type: ignore[list-item]
-    return TestClient(
-        criar_app(
-            VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@redetv.com.br")}),
-            jobs,
-            papeis=papeis,
-            tempo_de_tela=consulta,
-        )
+    app = criar_app(
+        VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@redetv.com.br")}),
+        jobs,
+        papeis=papeis,
+        tempo_de_tela=consulta,
+        relogio=relogio or agora_utc,
     )
+    # Com relógio, o teste é do período padrão: o cliente comum não pede o histórico inteiro.
+    return TestClient(app) if relogio else ClienteSemPeriodoPadrao(app)
 
 
 def test_rota_devolve_a_tabela_com_os_videos_de_cada_pessoa() -> None:
@@ -523,7 +528,7 @@ def test_programa_vazio_e_todos_os_programas() -> None:
 def test_chave_de_sistema_nao_consulta_o_relatorio() -> None:
     chaves = RepositorioDeChavesEmMemoria()
     emitida = emitir_chave("Playout", frozenset({"ler"}), MAC, chaves, BASE)
-    cliente = TestClient(
+    cliente = ClienteSemPeriodoPadrao(
         criar_app(
             VerificadorFalso({}),
             RepositorioEmMemoria(),

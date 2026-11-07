@@ -5,6 +5,7 @@ import io
 import random
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from api.chaves import (
     emitir_chave,
 )
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, LinhaDoMomento
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import Job, RepositorioEmMemoria, agora_utc
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import (
@@ -42,6 +43,7 @@ from api.relatorio_de_marcas import (
     somar,
 )
 from api.relatorio_de_marcas import relatorio as relatorio_das_somas
+from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
 from api.tests.test_passadas import AUTORIZACAO
@@ -220,7 +222,9 @@ def test_bigquery_sem_filtros_nao_leva_parametros_e_resposta_incompleta_falha_al
 
 
 def _cliente(
-    papel: str = "consulta", consulta: ConsultaDeInsercoes | None = None
+    papel: str = "consulta",
+    consulta: ConsultaDeInsercoes | None = None,
+    relogio: Callable[[], datetime] | None = None,
 ) -> TestClient:
     jobs = RepositorioEmMemoria()
     jobs.salvar(
@@ -238,14 +242,15 @@ def _cliente(
     )
     papeis = RepositorioDePapeisEmMemoria()
     papeis.salvar("u1", [papel])  # type: ignore[list-item]
-    return TestClient(
-        criar_app(
-            VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@redetv.com.br")}),
-            jobs,
-            papeis=papeis,
-            relatorio_de_marcas=consulta,
-        )
+    app = criar_app(
+        VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@redetv.com.br")}),
+        jobs,
+        papeis=papeis,
+        relatorio_de_marcas=consulta,
+        relogio=relogio or agora_utc,
     )
+    # Com relógio, o teste é do período padrão: o cliente comum não pede o histórico inteiro.
+    return TestClient(app) if relogio else ClienteSemPeriodoPadrao(app)
 
 
 def test_rota_devolve_a_tabela_por_marca_com_as_insercoes_e_o_nome_do_video() -> None:

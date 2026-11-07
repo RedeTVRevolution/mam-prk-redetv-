@@ -1,6 +1,7 @@
 import { nomeDaEtapa } from './etapas.ts'
 import { NOME_DO_PAPEL } from './papeis.ts'
 import { ESTADOS_DO_JOB } from './cores.ts'
+import { periodoDoEndereco, poePeriodoNoEndereco } from './periodoPadrao.ts'
 
 // A aba Auditoria da administração: a lista fechada de ações, os filtros da URL e os detalhes em frases.
 
@@ -80,8 +81,6 @@ export interface FiltrosDaAuditoria {
 
 export const SEM_FILTROS_DA_AUDITORIA: FiltrosDaAuditoria = { pessoa: '', alvo: '', acao: '', de: '', ate: '' }
 
-const DATA = /^\d{4}-\d{2}-\d{2}$/
-
 /** "De" depois de "Até": a API recusa, então a tela avisa sem consultar. */
 export function periodoInvertido(f: { de: string; ate: string }): boolean {
   return Boolean(f.de && f.ate && f.de > f.ate)
@@ -106,22 +105,20 @@ function acaoDoFiltro(acoes: Set<string>): string {
 
 export function filtrosDaAuditoria(busca: string): FiltrosDaAuditoria {
   const p = new URLSearchParams(busca)
-  const data = (nome: string) => (DATA.test(p.get(nome) ?? '') ? p.get(nome)! : '')
   const acoes = new Set((p.get('acao') ?? '').split(',').filter((a) => Object.hasOwn(FRASE_DA_ACAO, a)))
   return {
     pessoa: p.get('pessoa') ?? '',
     alvo: p.get('alvo') ?? '',
     acao: acaoDoFiltro(acoes),
-    de: data('de'),
-    ate: data('ate'),
+    ...periodoDoEndereco(p),
   }
 }
 
 export function filtrosParaEnderecoDaAuditoria(f: FiltrosDaAuditoria): string {
   const p = new URLSearchParams()
-  for (const [chave, valor] of Object.entries(f)) if (valor) p.set(chave, valor)
-  const texto = p.toString()
-  return texto ? `?${texto}` : ''
+  for (const [chave, valor] of Object.entries(f)) if (valor && chave !== 'de' && chave !== 'ate') p.set(chave, valor)
+  poePeriodoNoEndereco(p, f)
+  return `?${p}`
 }
 
 /** A query de `GET /v1/admin/auditoria`; o período vira o dia inteiro, em São Paulo (UTC-3, sem horário de verão). */

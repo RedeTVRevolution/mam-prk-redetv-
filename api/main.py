@@ -755,8 +755,12 @@ def criar_app(
             repositorio_da_revisao,
         )
     )
-    v1.include_router(criar_rotas_do_tempo_de_tela(tempo_de_tela, repositorio_de_jobs))
-    v1.include_router(criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs))
+    v1.include_router(
+        criar_rotas_do_tempo_de_tela(tempo_de_tela, repositorio_de_jobs, relogio)
+    )
+    v1.include_router(
+        criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs, relogio)
+    )
     # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
     app.include_router(
         v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]

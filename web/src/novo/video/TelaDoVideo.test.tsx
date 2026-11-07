@@ -378,7 +378,7 @@ test('"Quem acessou" só aparece com auditoria.ver e leva à Auditoria filtrada 
 
   await abrirVideo({ permissoes: ['auditoria.ver'] })
   expect(screen.getByRole('link', { name: 'Quem acessou' }).getAttribute('href')).toBe(
-    '/admin/auditoria?alvo=j1&acao=video.aberto%2Cvideo.baixado%2Cdecupagem.baixada',
+    '/admin/auditoria?alvo=j1&acao=video.aberto%2Cvideo.baixado%2Cdecupagem.baixada&de=&ate=',
   )
 })
 
