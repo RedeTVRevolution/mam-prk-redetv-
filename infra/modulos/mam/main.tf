@@ -691,7 +691,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "purga", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "purga", "taxa", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -744,6 +744,9 @@ locals {
     # A purga automática (#145) apaga o Job e as correções no Firestore e os momentos do índice
     # (como a `web`, quando ela purga à mão).
     purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
+    # O Job da taxa por dia (#455) lê Jobs, correções e revisão no Firestore e roda o MERGE na
+    # tabela (`bigquery.jobUser`; o acesso aos dados é só no dataset, mais abaixo).
+    taxa = ["roles/datastore.user", "roles/bigquery.jobUser"]
     # O agendador só dispara o Job da purga (papel no próprio Job, em purga.tf).
     agendador = []
     # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
@@ -783,6 +786,8 @@ locals {
     # Apaga os arquivos do vídeo purgado: cópia limpa, proxy, janelas, decupagem e quadros.
     # A varredura diária também expira o upload abandonado e apaga o objeto dele da quarentena (#369).
     purga = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
+    # Lê a contagem de itens que a decupagem deixa ao lado dela (#455).
+    taxa = { decupagens = "roles/storage.objectViewer" }
   }
 }
 
@@ -906,6 +911,8 @@ locals {
   tabela_de_jobs_do_painel = "jobs_do_painel"
   # Tabela das medidas de revisão do painel (#467), em `revisao_do_painel.tf`.
   tabela_de_revisao_do_painel = "revisao_do_painel"
+  # Tabela da taxa de correção por dia (#455), em `taxa_diaria.tf`.
+  tabela_da_taxa_de_correcao = "taxa_de_correcao_por_dia"
 }
 
 locals {
@@ -951,8 +958,9 @@ resource "google_bigquery_table" "momentos" {
   schema     = local.esquema_dos_momentos
 }
 
+# A `taxa` (#455) troca as linhas da tabela diária da taxa de correção.
 resource "google_bigquery_dataset_iam_member" "grava_momentos" {
-  for_each   = toset(["indexacao", "web"])
+  for_each   = toset(["indexacao", "web", "taxa"])
   dataset_id = google_bigquery_dataset.decupagens.dataset_id
   role       = "roles/bigquery.dataEditor"
   member     = google_service_account.mam[each.key].member

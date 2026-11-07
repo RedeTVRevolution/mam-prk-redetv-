@@ -231,6 +231,10 @@ output "bigquery_tabela_de_revisao" {
   value = module.mam.bigquery_tabela_de_revisao
 }
 
+output "bigquery_tabela_da_taxa" {
+  value = module.mam.bigquery_tabela_da_taxa
+}
+
 output "busca_regiao" {
   value = module.mam.busca_regiao
 }

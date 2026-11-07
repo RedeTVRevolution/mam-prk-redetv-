@@ -2,6 +2,7 @@
 
 import functools
 import json
+import logging
 import random
 import secrets
 import threading
@@ -55,6 +56,7 @@ from api.idempotencia import (
     id_da_reserva,
     nova_reserva,
 )
+from api.itens_da_decupagem import contar_itens, objeto_dos_itens
 from api.jobs import (
     JANELA_DA_URL_DO_QUADRO,
     PRAZO_DA_URL_DE_UPLOAD,
@@ -97,6 +99,8 @@ COLECAO_DE_IDEMPOTENCIA = "chaves_de_idempotencia"
 COLECAO_DAS_LISTAS_DA_BUSCA = "listas_da_busca"
 COLECAO_DE_PAPEIS = "papeis_de_usuarios"
 COLECAO_DE_CORRECOES = "correcoes"
+log = logging.getLogger(__name__)
+
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
 COLECAO_DOS_PROGRAMAS = "programas"
@@ -1369,6 +1373,21 @@ class AssinaturaPeloIam:
 assinatura_pelo_iam = AssinaturaPeloIam()
 
 
+def _gravar_os_itens(
+    cliente: ClienteStorage, bucket: str, job_id: str, conteudo: str
+) -> None:
+    """A contagem de itens por tipo (#455) vai junto com a decupagem e é refeita a cada
+    gravação, reprocessamento incluído. Decupagem ilegível fica sem contagem: a taxa a pula."""
+    try:
+        itens = contar_itens(conteudo.encode())
+    except (ValueError, TypeError, KeyError):
+        log.warning("decupagem de %s sem contagem de itens: ilegível", job_id)
+        return
+    cliente.bucket(bucket).blob(objeto_dos_itens(job_id)).upload_from_string(
+        itens.em_json(), content_type="application/json"
+    )
+
+
 class DecupagensStorage:
     """A Decupagem no Cloud Storage e o proxy que o Gemini lê: o mesmo adaptador grava e lê."""
 
@@ -1386,6 +1405,7 @@ class DecupagensStorage:
         self._cliente.bucket(self._decupagens).blob(
             objeto_da_decupagem(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
+        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
@@ -1554,6 +1574,7 @@ class ObjetosStorage:
         self._cliente.bucket(self._decupagens).blob(
             objeto_da_decupagem(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
+        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
 
     def gravar_texto(self, objeto: str, conteudo: str) -> None:
         """Um JSON solto no bucket das decupagens (a medição do Florence-2, #329)."""
