@@ -26,9 +26,10 @@ from api.cache_curto import CacheCurto
 from api.csv_seguro import csv_em_texto
 from api.custo_do_painel import (
     COLUNAS_DO_CSV_DE_CUSTO,
+    FiltroDeCusto,
     FonteDeCusto,
     RelatorioDeCusto,
-    base_de_custo,
+    confere_a_moeda,
     linhas_do_csv_de_custo,
     relatorio_de_custo,
 )
@@ -1474,13 +1475,12 @@ def criar_rotas_do_painel(
         base = ou_503(
             lambda: lido(
                 ("custo", *_chave(filtro)),
-                lambda: base_de_custo(
-                    fonte.custos(filtro.desde),
-                    jobs.listar(),
-                    filtro.desde,
-                    filtro.ate,
-                    filtro.programa,
-                    filtro.usuario,
+                lambda: confere_a_moeda(
+                    fonte.custos(
+                        FiltroDeCusto(
+                            filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+                        )
+                    )
                 ),
             )
         )

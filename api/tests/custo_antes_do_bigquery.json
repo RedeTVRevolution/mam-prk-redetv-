@@ -1,0 +1,381 @@
+[
+ {
+  "filtro": [
+   null,
+   null,
+   null,
+   null
+  ],
+  "relatorio": {
+   "ate": null,
+   "desde": null,
+   "moeda": "BRL",
+   "por_etapa": [
+    {
+     "custo": 6.75,
+     "etapa": "analise"
+    },
+    {
+     "custo": 0.5,
+     "etapa": "referencias"
+    }
+   ],
+   "por_mes": [
+    {
+     "custo": 17.55,
+     "custo_dos_jobs": 7.25,
+     "custo_por_hora": 2.0714,
+     "custo_sem_dono": 10.3,
+     "horas_de_video": 3.5,
+     "mes": "2026-11",
+     "videos": 3
+    },
+    {
+     "custo": 5.0,
+     "custo_dos_jobs": 0.0,
+     "custo_por_hora": null,
+     "custo_sem_dono": 5.0,
+     "horas_de_video": 0.0,
+     "mes": "2026-12",
+     "videos": 0
+    }
+   ],
+   "por_quem": [
+    {
+     "custo": 5.25,
+     "custo_por_hora": 1.75,
+     "email": "bia@redetv.com.br",
+     "horas_de_video": 3.0,
+     "quem_id": "bia",
+     "quem_tipo": "usuario",
+     "videos": 2
+    },
+    {
+     "custo": 2.0,
+     "custo_por_hora": 4.0,
+     "email": null,
+     "horas_de_video": 0.5,
+     "quem_id": "Playout",
+     "quem_tipo": "sistema",
+     "videos": 1
+    }
+   ],
+   "programa": null,
+   "sem_dono_por_servico": [
+    {
+     "custo": 15.0,
+     "servico": "Vertex AI Search"
+    },
+    {
+     "custo": 0.3,
+     "servico": "Vertex AI"
+    }
+   ],
+   "total": {
+    "custo": 22.55,
+    "custo_dos_jobs": 7.25,
+    "custo_por_hora": 2.0714,
+    "custo_sem_dono": 15.3,
+    "horas_de_video": 3.5,
+    "videos": 3
+   },
+   "usuario": null
+  }
+ },
+ {
+  "filtro": [
+   "2026-11-02",
+   "2026-11-30",
+   null,
+   null
+  ],
+  "relatorio": {
+   "ate": "2026-11-30",
+   "desde": "2026-11-02",
+   "moeda": "BRL",
+   "por_etapa": [
+    {
+     "custo": 5.5,
+     "etapa": "analise"
+    }
+   ],
+   "por_mes": [
+    {
+     "custo": 5.6,
+     "custo_dos_jobs": 5.5,
+     "custo_por_hora": 2.2,
+     "custo_sem_dono": 0.1,
+     "horas_de_video": 2.5,
+     "mes": "2026-11",
+     "videos": 2
+    }
+   ],
+   "por_quem": [
+    {
+     "custo": 3.5,
+     "custo_por_hora": 1.75,
+     "email": "bia@redetv.com.br",
+     "horas_de_video": 2.0,
+     "quem_id": "bia",
+     "quem_tipo": "usuario",
+     "videos": 1
+    },
+    {
+     "custo": 2.0,
+     "custo_por_hora": 4.0,
+     "email": null,
+     "horas_de_video": 0.5,
+     "quem_id": "Playout",
+     "quem_tipo": "sistema",
+     "videos": 1
+    }
+   ],
+   "programa": null,
+   "sem_dono_por_servico": [
+    {
+     "custo": 0.1,
+     "servico": "Vertex AI"
+    }
+   ],
+   "total": {
+    "custo": 5.6,
+    "custo_dos_jobs": 5.5,
+    "custo_por_hora": 2.2,
+    "custo_sem_dono": 0.1,
+    "horas_de_video": 2.5,
+    "videos": 2
+   },
+   "usuario": null
+  }
+ },
+ {
+  "filtro": [
+   null,
+   null,
+   "Hoje",
+   null
+  ],
+  "relatorio": {
+   "ate": null,
+   "desde": null,
+   "moeda": "BRL",
+   "por_etapa": [
+    {
+     "custo": 6.25,
+     "etapa": "analise"
+    },
+    {
+     "custo": 0.5,
+     "etapa": "referencias"
+    }
+   ],
+   "por_mes": [
+    {
+     "custo": 6.75,
+     "custo_dos_jobs": 6.75,
+     "custo_por_hora": 1.9286,
+     "custo_sem_dono": 0.0,
+     "horas_de_video": 3.5,
+     "mes": "2026-11",
+     "videos": 3
+    }
+   ],
+   "por_quem": [
+    {
+     "custo": 4.75,
+     "custo_por_hora": 1.5833,
+     "email": "bia@redetv.com.br",
+     "horas_de_video": 3.0,
+     "quem_id": "bia",
+     "quem_tipo": "usuario",
+     "videos": 2
+    },
+    {
+     "custo": 2.0,
+     "custo_por_hora": 4.0,
+     "email": null,
+     "horas_de_video": 0.5,
+     "quem_id": "Playout",
+     "quem_tipo": "sistema",
+     "videos": 1
+    }
+   ],
+   "programa": "Hoje",
+   "sem_dono_por_servico": [],
+   "total": {
+    "custo": 6.75,
+    "custo_dos_jobs": 6.75,
+    "custo_por_hora": 1.9286,
+    "custo_sem_dono": 0.0,
+    "horas_de_video": 3.5,
+    "videos": 3
+   },
+   "usuario": null
+  }
+ },
+ {
+  "filtro": [
+   null,
+   null,
+   null,
+   "Playout"
+  ],
+  "relatorio": {
+   "ate": null,
+   "desde": null,
+   "moeda": "BRL",
+   "por_etapa": [
+    {
+     "custo": 2.0,
+     "etapa": "analise"
+    }
+   ],
+   "por_mes": [
+    {
+     "custo": 2.0,
+     "custo_dos_jobs": 2.0,
+     "custo_por_hora": 4.0,
+     "custo_sem_dono": 0.0,
+     "horas_de_video": 0.5,
+     "mes": "2026-11",
+     "videos": 1
+    }
+   ],
+   "por_quem": [
+    {
+     "custo": 2.0,
+     "custo_por_hora": 4.0,
+     "email": null,
+     "horas_de_video": 0.5,
+     "quem_id": "Playout",
+     "quem_tipo": "sistema",
+     "videos": 1
+    }
+   ],
+   "programa": null,
+   "sem_dono_por_servico": [],
+   "total": {
+    "custo": 2.0,
+    "custo_dos_jobs": 2.0,
+    "custo_por_hora": 4.0,
+    "custo_sem_dono": 0.0,
+    "horas_de_video": 0.5,
+    "videos": 1
+   },
+   "usuario": "Playout"
+  }
+ },
+ {
+  "filtro": [
+   "2026-11-02",
+   "2026-11-02",
+   null,
+   null
+  ],
+  "relatorio": {
+   "ate": "2026-11-02",
+   "desde": "2026-11-02",
+   "moeda": "BRL",
+   "por_etapa": [
+    {
+     "custo": 2.0,
+     "etapa": "analise"
+    }
+   ],
+   "por_mes": [
+    {
+     "custo": 2.1,
+     "custo_dos_jobs": 2.0,
+     "custo_por_hora": 4.0,
+     "custo_sem_dono": 0.1,
+     "horas_de_video": 0.5,
+     "mes": "2026-11",
+     "videos": 1
+    }
+   ],
+   "por_quem": [
+    {
+     "custo": 2.0,
+     "custo_por_hora": 4.0,
+     "email": null,
+     "horas_de_video": 0.5,
+     "quem_id": "Playout",
+     "quem_tipo": "sistema",
+     "videos": 1
+    }
+   ],
+   "programa": null,
+   "sem_dono_por_servico": [
+    {
+     "custo": 0.1,
+     "servico": "Vertex AI"
+    }
+   ],
+   "total": {
+    "custo": 2.1,
+    "custo_dos_jobs": 2.0,
+    "custo_por_hora": 4.0,
+    "custo_sem_dono": 0.1,
+    "horas_de_video": 0.5,
+    "videos": 1
+   },
+   "usuario": null
+  }
+ },
+ {
+  "filtro": [
+   null,
+   null,
+   "Hoje",
+   "bia"
+  ],
+  "relatorio": {
+   "ate": null,
+   "desde": null,
+   "moeda": "BRL",
+   "por_etapa": [
+    {
+     "custo": 4.25,
+     "etapa": "analise"
+    },
+    {
+     "custo": 0.5,
+     "etapa": "referencias"
+    }
+   ],
+   "por_mes": [
+    {
+     "custo": 4.75,
+     "custo_dos_jobs": 4.75,
+     "custo_por_hora": 1.5833,
+     "custo_sem_dono": 0.0,
+     "horas_de_video": 3.0,
+     "mes": "2026-11",
+     "videos": 2
+    }
+   ],
+   "por_quem": [
+    {
+     "custo": 4.75,
+     "custo_por_hora": 1.5833,
+     "email": "bia@redetv.com.br",
+     "horas_de_video": 3.0,
+     "quem_id": "bia",
+     "quem_tipo": "usuario",
+     "videos": 2
+    }
+   ],
+   "programa": "Hoje",
+   "sem_dono_por_servico": [],
+   "total": {
+    "custo": 4.75,
+    "custo_dos_jobs": 4.75,
+    "custo_por_hora": 1.5833,
+    "custo_sem_dono": 0.0,
+    "horas_de_video": 3.0,
+    "videos": 2
+   },
+   "usuario": "bia"
+  }
+ }
+]

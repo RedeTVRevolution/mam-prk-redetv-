@@ -3,16 +3,23 @@
 
 import csv
 import io
+import json
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
 from api.auditoria import FiltroDeAuditoria
 from api.custo_do_painel import (
+    BaseDeCusto,
     ConfigDoFaturamento,
+    CustoDaEtapa,
     CustoDoDia,
+    CustoDosJobs,
     CustoEmMemoria,
+    CustoSemDono,
     FaturamentoBigQuery,
-    cruzar_com_os_jobs,
+    FiltroDeCusto,
+    relatorio_de_custo,
 )
 from api.jobs import Estado, Job, RepositorioEmMemoria
 from api.tests.test_rotas_do_painel import Mundo
@@ -92,31 +99,37 @@ LINHAS = [
 def _mundo(
     papeis: list[str] | None = None, linhas: list[CustoDoDia] | None = None
 ) -> Mundo:
-    repositorio = RepositorioEmMemoria()
-    for j in JOBS:
-        repositorio.salvar(j)
     return Mundo(
         papeis or ["diretoria"],
-        faturamento=CustoEmMemoria(LINHAS if linhas is None else linhas),
-        jobs=repositorio,
+        faturamento=CustoEmMemoria(LINHAS if linhas is None else linhas, JOBS),
+        jobs=_JobsSemListar(),
     )
 
 
-def test_o_cruzamento_poe_cada_linha_no_job_do_rotulo() -> None:
-    cruzado = cruzar_com_os_jobs(LINHAS, JOBS)
+class _JobsSemListar(RepositorioEmMemoria):
+    """O Custo não lê a coleção `jobs` (#466): quem chamar `listar` falha o teste."""
 
-    assert {i: c.por_etapa for i, c in cruzado.dos_jobs.items()} == {
-        "j1": {"analise": 1.25, "referencias": 0.5},
-        "j2": {"analise": 2.0},
-        "j3": {"analise": 0.5},
-        "j4": {"analise": 3.0},
-    }
-    assert [(s.job_id, s.custo) for s in cruzado.sem_dono] == [
-        (None, 10.0),
-        ("busca", 0.1),
-        ("sumiu", 0.2),
-        (None, 5.0),
-    ]
+    def listar(self) -> Any:
+        raise AssertionError("o Custo não pode ler a coleção jobs")
+
+
+def test_o_resultado_e_o_mesmo_do_calculo_antigo_que_lia_todos_os_jobs() -> None:
+    """`custo_antes_do_bigquery.json` guarda o que o cálculo de antes (`jobs.listar()` e o
+    cruzamento em Python) dava para estes Jobs e linhas, com seis filtros."""
+    casos = json.loads(
+        (Path(__file__).parent / "custo_antes_do_bigquery.json").read_text()
+    )
+    fonte = CustoEmMemoria(LINHAS, JOBS)
+
+    for caso in casos:
+        d, a, programa, usuario = caso["filtro"]
+        desde = date.fromisoformat(d) if d else None
+        ate = date.fromisoformat(a) if a else None
+        base = fonte.custos(FiltroDeCusto(desde, ate, programa, usuario))
+        relatorio = relatorio_de_custo(
+            base, {"bia": "bia@redetv.com.br"}, desde, ate, programa, usuario
+        )
+        assert relatorio.model_dump(mode="json") == caso["relatorio"], caso["filtro"]
 
 
 def test_o_total_junta_os_jobs_e_o_custo_sem_dono() -> None:
@@ -231,31 +244,32 @@ def test_sem_nenhuma_linha_o_relatorio_vem_vazio() -> None:
     assert r["total"]["custo_por_hora"] is None
 
 
-def test_o_csv_traz_uma_linha_por_job_e_uma_por_mes_e_servico_sem_dono() -> None:
+def test_o_csv_traz_uma_linha_por_mes_programa_e_dono_e_uma_por_mes_e_servico_sem_dono() -> (
+    None
+):
     resposta = _mundo().get("/custo", formato="csv")
 
     assert resposta.status_code == 200
     assert "custo.csv" in resposta.headers["content-disposition"]
     linhas = list(csv.DictReader(io.StringIO(resposta.text)))
     jobs = [
-        (r["job_id"], r["quem_id"], r["horas_de_video"], r["custo"])
+        (r["mes"], r["programa"], r["quem_id"], r["horas_de_video"], r["custo"])
         for r in linhas
-        if r["job_id"]
+        if r["quem_tipo"] != "sem_dono"
     ]
     assert jobs == [
-        ("j1", "bia", "1.0", "1.75"),
-        ("j2", "Playout", "0.5", "2.0"),
-        ("j3", "bia", "0.0", "0.5"),
-        ("j4", "bia", "2.0", "3.0"),
+        ("2026-11", "Fala", "bia", "0.0", "0.5"),
+        ("2026-11", "Hoje", "Playout", "0.5", "2.0"),
+        ("2026-11", "Hoje", "bia", "3.0", "4.75"),
     ]
     assert [
-        (r["mes"], r["quem_tipo"], r["detalhe"], r["custo"])
+        (r["mes"], r["detalhe"], r["custo"])
         for r in linhas
-        if not r["job_id"]
+        if r["quem_tipo"] == "sem_dono"
     ] == [
-        ("2026-11", "sem_dono", "Vertex AI", "0.3"),
-        ("2026-11", "sem_dono", "Vertex AI Search", "10.0"),
-        ("2026-12", "sem_dono", "Vertex AI Search", "5.0"),
+        ("2026-11", "Vertex AI", "0.3"),
+        ("2026-11", "Vertex AI Search", "10.0"),
+        ("2026-12", "Vertex AI Search", "5.0"),
     ]
 
 
@@ -265,7 +279,7 @@ def test_o_csv_respeita_os_filtros_e_vai_para_a_auditoria() -> None:
     resposta = mundo.get("/custo", programa="Fala", formato="csv")
 
     linhas = list(csv.DictReader(io.StringIO(resposta.text)))
-    assert [r["job_id"] for r in linhas] == ["j3"]
+    assert [(r["programa"], r["custo"]) for r in linhas] == [("Fala", "0.5")]
     registro = mundo.auditoria.consultar(FiltroDeAuditoria()).registros[0]
     assert registro.acao == "painel.exportado"
     assert registro.detalhes == {"aba": "custo", "filtro": {"programa": "Fala"}}
@@ -294,38 +308,127 @@ class _Transporte:
         }
 
 
-def test_a_consulta_le_o_faturamento_na_regiao_do_painel() -> None:
-    transporte = _Transporte(
+# tipo, mes, programa, quem_tipo, quem_id, rotulo, custo, videos, horas, moeda
+def _fonte(linhas: list[list[Any]]) -> tuple[FaturamentoBigQuery, _Transporte]:
+    transporte = _Transporte(linhas)
+    config = ConfigDoFaturamento(
+        "proj",
+        "fat",
+        "gcp_billing_export_resource_v1_*",
+        "regiao-x",
+        "decupagens",
+        "tabela_de_jobs",
+    )
+    return FaturamentoBigQuery(config, transporte), transporte
+
+
+def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None:
+    fonte, transporte = _fonte(
         [
-            ["2026-11-01", "j1", "referencias", "Vertex AI", "1.5", "BRL"],
-            ["2026-11-01", None, None, None, "10", "BRL"],
+            [
+                "jobs",
+                "2026-11",
+                "Hoje",
+                "usuario",
+                "bia",
+                None,
+                "1.75",
+                "1",
+                "1.0",
+                "BRL",
+            ],
+            [
+                "jobs",
+                "2026-11",
+                None,
+                "sistema",
+                "Playout",
+                None,
+                "2",
+                "1",
+                "0.5",
+                "BRL",
+            ],
+            ["etapa", None, None, None, None, "analise", "3.25", "0", "0", "BRL"],
+            ["etapa", None, None, None, None, "referencias", "0.5", "0", "0", "BRL"],
+            [
+                "sem_dono",
+                "2026-11",
+                None,
+                None,
+                None,
+                "Vertex AI",
+                "10",
+                "0",
+                "0",
+                "BRL",
+            ],
+            ["sem_dono", "2026-11", None, None, None, None, "1", "0", "0", "BRL"],
+            ["moeda", None, None, None, None, None, "0", "0", "0", "BRL"],
         ]
     )
-    fonte = FaturamentoBigQuery(
-        ConfigDoFaturamento(
-            "proj", "fat", "gcp_billing_export_resource_v1_*", "regiao-x"
-        ),
-        transporte,
-    )
 
-    linhas = fonte.custos(date(2026, 11, 1))
+    base = fonte.custos(FiltroDeCusto(date(2026, 11, 1), None, None, None))
 
-    assert linhas == [
-        CustoDoDia(date(2026, 11, 1), "j1", "referencias", "Vertex AI", 1.5, "BRL"),
-        CustoDoDia(date(2026, 11, 1), None, None, None, 10.0, "BRL"),
+    assert base.dos_jobs == [
+        CustoDosJobs("2026-11", "Hoje", "usuario", "bia", 1.75, 1, 1.0),
+        CustoDosJobs("2026-11", None, "sistema", "Playout", 2.0, 1, 0.5),
     ]
+    assert base.por_etapa == [
+        CustoDaEtapa("analise", 3.25),
+        CustoDaEtapa("referencias", 0.5),
+    ]
+    assert base.sem_dono == [
+        CustoSemDono("2026-11", "Vertex AI", 10.0),
+        CustoSemDono("2026-11", None, 1.0),
+    ]
+    assert base.moedas == {"BRL"}
+    # Uma consulta só, na região do painel, sobre as duas tabelas: a soma não passa pela API.
+    assert len(transporte.corpos) == 1
     corpo = transporte.corpos[0]
     assert corpo["location"] == "regiao-x"
-    assert "`proj.fat.gcp_billing_export_resource_v1_*`" in corpo["query"]
-    assert "key = 'job_id'" in corpo["query"] and "key = 'etapa'" in corpo["query"]
+    sql = corpo["query"]
+    assert "`proj.fat.gcp_billing_export_resource_v1_*`" in sql
+    assert "JOIN `proj.decupagens.tabela_de_jobs` AS j ON j.id = l.job_id" in sql
+    assert "GROUP BY" in sql and "SUM(" in sql
+    assert "key = 'job_id'" in sql and "key = 'etapa'" in sql
+    # A etapa vazia é a análise principal, como a sem rótulo.
+    assert "IFNULL(NULLIF(etapa, ''), 'analise')" in sql
     # O custo é o líquido dos créditos e o dia é o de São Paulo.
-    assert "credits" in corpo["query"] and "America/Sao_Paulo" in corpo["query"]
+    assert "credits" in sql and "America/Sao_Paulo" in sql
+    assert [p["name"] for p in corpo["queryParameters"]] == ["desde"]
     assert corpo["queryParameters"][0]["parameterValue"] == {"value": "2026-11-01"}
 
 
-def test_sem_desde_a_consulta_nao_filtra_o_dia() -> None:
-    transporte = _Transporte([])
-    fonte = FaturamentoBigQuery(ConfigDoFaturamento("p", "d", "t", "r"), transporte)
+def test_os_filtros_vao_como_parametros_e_o_sem_dono_so_vem_sem_programa_nem_usuario() -> (
+    None
+):
+    fonte, transporte = _fonte([])
 
-    assert fonte.custos(None) == []
+    fonte.custos(FiltroDeCusto(date(2026, 11, 1), date(2026, 11, 30), None, None))
+    fonte.custos(
+        FiltroDeCusto(date(2026, 11, 1), date(2026, 11, 30), "Hoje' OR 1=1", "bia")
+    )
+
+    sem_filtro, com_filtro = transporte.corpos
+    assert [p["name"] for p in sem_filtro["queryParameters"]] == ["desde", "ate"]
+    assert "'sem_dono'" in sem_filtro["query"]
+    assert [p["name"] for p in com_filtro["queryParameters"]] == [
+        "desde",
+        "ate",
+        "programa",
+        "usuario",
+    ]
+    assert "j.programa = @programa" in com_filtro["query"]
+    assert "j.quem_id = @usuario" in com_filtro["query"]
+    assert "OR 1=1" not in com_filtro["query"]
+    assert "'sem_dono'" not in com_filtro["query"]
+
+
+def test_sem_periodo_a_consulta_nao_filtra_o_dia() -> None:
+    fonte, transporte = _fonte([])
+
+    base = fonte.custos(FiltroDeCusto(None, None, None, None))
+
+    assert base == BaseDeCusto([], [], [], frozenset())
     assert transporte.corpos[0]["queryParameters"] == []
