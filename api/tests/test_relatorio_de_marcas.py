@@ -29,6 +29,7 @@ from api.relatorio_de_marcas import (
     SOMA_EM_SQL,
     TIPOS_DE_INSERCAO,
     ConsultaBigQuery,
+    ConsultaDeInsercoes,
     ConsultaEmMemoria,
     Insercao,
     InsercaoNoRelatorio,
@@ -219,7 +220,7 @@ def test_bigquery_sem_filtros_nao_leva_parametros_e_resposta_incompleta_falha_al
 
 
 def _cliente(
-    papel: str = "consulta", consulta: ConsultaEmMemoria | None = None
+    papel: str = "consulta", consulta: ConsultaDeInsercoes | None = None
 ) -> TestClient:
     jobs = RepositorioEmMemoria()
     jobs.salvar(

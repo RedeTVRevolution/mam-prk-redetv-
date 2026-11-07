@@ -45,6 +45,7 @@ from api.busca import (
     RankingEmOrdem,
 )
 from api.busca_na_nuvem import adaptadores_da_busca
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
@@ -157,6 +158,7 @@ from api.programas import (
 from api.progresso_das_janelas import JanelasDoJob
 from api.purga import LOGIN_RECENTE_PADRAO, Purga, criar_rotas_da_purga
 from api.qualidade_do_painel import QualidadeDoPainel, QualidadeReal
+from api.relatorio_de_marcas import ConsultaComCache as MarcasComCache
 from api.relatorio_de_marcas import (
     ConsultaDeInsercoes,
     criar_rotas_das_marcas,
@@ -195,6 +197,7 @@ from api.sugestoes import (
     criar_rotas_da_contagem,
 )
 from api.taxa_de_correcao import criar_rotas_da_qualidade
+from api.tempo_de_tela import ConsultaComCache as TempoDeTelaComCache
 from api.tempo_de_tela import (
     ConsultaDeMomentos,
     consulta_do_ambiente,
@@ -342,6 +345,7 @@ def criar_app(
     qualidade_do_painel: QualidadeDoPainel | None = None,
     faturamento: FonteDeCusto | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
+    cache_do_painel: CacheCurto | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
@@ -651,6 +655,7 @@ def criar_app(
             faturamento,
             repositorio_de_jobs,
             relogio,
+            cache_do_painel,
         )
     )
     v1.include_router(
@@ -766,6 +771,15 @@ def criar_app(
 
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
+
+
+def _com_cache[C, R](
+    consulta: C | None, envolver: Callable[[C, CacheCurto], R]
+) -> R | None:
+    """A consulta do BigQuery com o cache curto de uma instância (#453); `None` fica `None`."""
+    return envolver(consulta, CacheCurto()) if consulta else None
+
+
 if _projeto:
     _adaptadores = adaptadores_da_busca(os.environ)
     _busca = (
@@ -847,10 +861,11 @@ if _projeto:
                 os.environ.get("BUSCA_IMAGEM_MAX_PIXELS") or LimitesDaImagem.max_pixels
             ),
         ),
-        tempo_de_tela=consulta_do_ambiente(os.environ),
+        tempo_de_tela=_com_cache(consulta_do_ambiente(os.environ), TempoDeTelaComCache),
         resumos_de_uso=resumos_do_ambiente(os.environ),
         faturamento=faturamento_do_ambiente(os.environ),
-        relatorio_de_marcas=marcas_do_ambiente(os.environ),
+        relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
+        cache_do_painel=CacheCurto(),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],

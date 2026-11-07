@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
+from api.cache_curto import CacheCurto
 from api.custo_do_painel import (
     COLUNAS_DO_CSV_DE_CUSTO,
     FonteDeCusto,
@@ -672,7 +673,16 @@ def relatorio_de_buscas(
     )
 
 
-def _base_de_uso(fonte: ResumosDeUso, filtro: FiltroDoPainel) -> list[UsoDoDia]:
+def _chave(filtro: FiltroDoPainel) -> tuple[object, ...]:
+    """O que muda a resposta de uma rota: período, programa e usuário."""
+    return (filtro.desde, filtro.ate, filtro.programa, filtro.usuario)
+
+
+def _base_de_uso(
+    fonte: ResumosDeUso,
+    filtro: FiltroDoPainel,
+    lido: Callable[..., list[UsoDoDia]],
+) -> list[UsoDoDia]:
     """As linhas do filtro: da tabela por programa se pediu programa, senão da por pessoa.
     As duas não se cruzam: pedir os dois é erro, em vez de devolver números que um dos
     filtros não aplicou."""
@@ -680,9 +690,19 @@ def _base_de_uso(fonte: ResumosDeUso, filtro: FiltroDoPainel) -> list[UsoDoDia]:
         raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
     if filtro.programa is not None:
         return ou_503(
-            lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, filtro.programa)
+            lambda: lido(
+                ("uso_por_programa", filtro.desde, filtro.ate, filtro.programa),
+                lambda: fonte.uso_por_programa(
+                    filtro.desde, filtro.ate, filtro.programa
+                ),
+            )
         )
-    return ou_503(lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario))
+    return ou_503(
+        lambda: lido(
+            ("uso_por_quem", filtro.desde, filtro.ate, filtro.usuario),
+            lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario),
+        )
+    )
 
 
 def _linha_do_csv(
@@ -1101,9 +1121,16 @@ def criar_rotas_do_painel(
     faturamento: FonteDeCusto | None,
     jobs: RepositorioDeJobs,
     relogio: Callable[[], datetime],
+    cache: CacheCurto | None = None,
 ) -> APIRouter:
+    """Com `cache`, as leituras de cada rota ficam lembradas por chave de filtro (#453): a
+    mesma resposta serve ao JSON e ao CSV, e a auditoria de acesso segue gravando cada
+    abertura, porque ela fica fora da leitura."""
     rotas = APIRouter(prefix="/painel")
     emails_das_contas = EmailsDasContas(contas)
+
+    def lido[T](chave: tuple[object, ...], ler: Callable[[], T]) -> T:
+        return cache.obter(chave, ler) if cache else ler()
 
     def _grupo(
         agrupar: Grupo | Literal["auto"] | None,
@@ -1134,7 +1161,11 @@ def criar_rotas_do_painel(
         """O que a tela oferece nos filtros de programa e de usuário."""
         fonte = confere_o_pedido(resumos, None, None)
         programas, uids, emails = ou_503(
-            lambda: em_paralelo(fonte.programas, fonte.usuarios, emails_das_contas)
+            lambda: em_paralelo(
+                lambda: lido(("filtros", "programas"), fonte.programas),
+                lambda: lido(("filtros", "usuarios"), fonte.usuarios),
+                emails_das_contas,
+            )
         )
         return OpcoesDosFiltros(
             programas=programas,
@@ -1155,7 +1186,12 @@ def criar_rotas_do_painel(
             raise HTTPException(422, "Os acessos não têm programa")
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
         linhas = _com_acesso(
-            ou_503(lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario))
+            ou_503(
+                lambda: lido(
+                    ("acessos", *_chave(filtro)),
+                    lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario),
+                )
+            )
         )
         emails = emails_das_contas()
         if formato == "csv":
@@ -1202,9 +1238,14 @@ def criar_rotas_do_painel(
             formato == "json" and filtro.programa is None and filtro.usuario is None
         )
         base, por_programa, emails = em_paralelo(
-            lambda: _base_de_uso(fonte, filtro),
+            lambda: _base_de_uso(fonte, filtro, lido),
             lambda: (
-                ou_503(lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, None))
+                ou_503(
+                    lambda: lido(
+                        ("uso_por_programa", filtro.desde, filtro.ate),
+                        lambda: fonte.uso_por_programa(filtro.desde, filtro.ate, None),
+                    )
+                )
                 if com_tabela_por_programa
                 else []
             ),
@@ -1253,7 +1294,7 @@ def criar_rotas_do_painel(
         busca só tem programa quando foi filtrada por ele. Programa e usuário não se
         combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        base = _base_de_uso(fonte, filtro)
+        base = _base_de_uso(fonte, filtro, lido)
         emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "buscas", filtro)
@@ -1287,22 +1328,31 @@ def criar_rotas_do_painel(
         Os filtros se cruzam; a taxa não tem pessoa e vem vazia com filtro de usuário."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
         correcoes = ou_503(
-            lambda: fonte.correcoes(
-                filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+            lambda: lido(
+                ("correcoes", *_chave(filtro)),
+                lambda: fonte.correcoes(
+                    filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+                ),
             )
         )
         taxa = (
             []
             if filtro.usuario is not None
             else ou_503(
-                lambda: qualidade.taxa_de_correcao(
-                    filtro.desde, filtro.ate, filtro.programa
+                lambda: lido(
+                    ("taxa", filtro.desde, filtro.ate, filtro.programa),
+                    lambda: qualidade.taxa_de_correcao(
+                        filtro.desde, filtro.ate, filtro.programa
+                    ),
                 )
             )
         )
         medidas = ou_503(
-            lambda: qualidade.tempo_de_revisao(
-                filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+            lambda: lido(
+                ("tempo_de_revisao", *_chave(filtro)),
+                lambda: qualidade.tempo_de_revisao(
+                    filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+                ),
             )
         )
         emails = emails_das_contas()
@@ -1342,8 +1392,16 @@ def criar_rotas_do_painel(
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
         chamadas, uso = ou_503(
             lambda: em_paralelo(
-                lambda: fonte.chamadas(filtro.desde, filtro.ate, filtro.usuario),
-                lambda: fonte.uso_por_quem(filtro.desde, filtro.ate, filtro.usuario),
+                lambda: lido(
+                    ("chamadas", filtro.desde, filtro.ate, filtro.usuario),
+                    lambda: fonte.chamadas(filtro.desde, filtro.ate, filtro.usuario),
+                ),
+                lambda: lido(
+                    ("uso_por_quem", filtro.desde, filtro.ate, filtro.usuario),
+                    lambda: fonte.uso_por_quem(
+                        filtro.desde, filtro.ate, filtro.usuario
+                    ),
+                ),
             )
         )
         envios = [u for u in uso if u.quem_tipo == "sistema"]
@@ -1410,13 +1468,16 @@ def criar_rotas_do_painel(
         entra sem filtro de programa ou de usuário."""
         fonte = confere_o_pedido(faturamento, filtro.desde, filtro.ate)
         base = ou_503(
-            lambda: base_de_custo(
-                fonte.custos(filtro.desde),
-                jobs.listar(),
-                filtro.desde,
-                filtro.ate,
-                filtro.programa,
-                filtro.usuario,
+            lambda: lido(
+                ("custo", *_chave(filtro)),
+                lambda: base_de_custo(
+                    fonte.custos(filtro.desde),
+                    jobs.listar(),
+                    filtro.desde,
+                    filtro.ate,
+                    filtro.programa,
+                    filtro.usuario,
+                ),
             )
         )
         emails = emails_das_contas()
