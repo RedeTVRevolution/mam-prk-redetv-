@@ -63,6 +63,7 @@ def transitar(
     cortes_ms: Sequence[int] | None = None,
     timecode_origem: str | None = None,
     taxa_de_quadros: float | None = None,
+    versao_pipeline: str | None = None,
 ) -> Job | None:
     """O Job já em `para`, ou `None` se ele não estava mais em `de`."""
     if para not in TRANSICOES[de]:
@@ -85,6 +86,8 @@ def transitar(
         mudancas["timecode_origem"] = timecode_origem
     if taxa_de_quadros is not None:
         mudancas["taxa_de_quadros"] = taxa_de_quadros
+    if versao_pipeline is not None:
+        mudancas["versao_pipeline"] = versao_pipeline
     return repositorio.transitar(job_id, de, mudancas)
 
 
@@ -420,6 +423,9 @@ def corrigir_estado(
                 "Sem decupagem completa guardada, o Job não pode voltar a concluído"
             )
         mudancas["codigo_falha"] = None
+        # A versão do Job pode ser de antes de um reprocessar que não concluiu: sem ela, o
+        # `make reprocessar-versao` lê a da decupagem (#494).
+        mudancas["versao_pipeline"] = None
         return mudancas
 
     depois = repositorio.trocar(job_id, mudar)
@@ -436,7 +442,7 @@ def desfazer_correcao(
     def mudar(job: Job) -> dict[str, Any] | None:
         if (job.estado, job.atualizado_em) != (depois.estado, depois.atualizado_em):
             return None
-        voltam = ("estado", "codigo_falha", "etapas")
+        voltam = ("estado", "codigo_falha", "etapas", "versao_pipeline")
         return {
             **{campo: getattr(antes, campo) for campo in voltam},
             "atualizado_em": agora,

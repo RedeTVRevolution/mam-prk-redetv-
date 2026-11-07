@@ -27,6 +27,7 @@ from api.nuvem import ArmazenamentoStorage, DecupagensStorage, RepositorioFirest
 from api.tests.programas_de_teste import perfis_da_tv_fama
 from api.tests.test_gemini import BOA, TransporteFalso, resposta_em_mm_ss
 from api.tests.test_nuvem import _credencial_local
+from api.versao_pipeline import VERSAO_PIPELINE
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
 EMULADOR_STORAGE = os.environ.get("STORAGE_EMULATOR_HOST")
@@ -126,6 +127,18 @@ def test_sucesso_grava_a_decupagem_e_leva_o_job_a_concluido() -> None:
     chamada = ambiente.transporte.chamadas[0]
     assert chamada.video_uri == "gs://teste-aceitos/j1/proxy.mp4"
     assert chamada.rotulos == {"job_id": "j1"}
+
+
+def test_o_job_concluido_leva_a_versao_do_pipeline_da_decupagem() -> None:
+    ambiente = _ambiente(BOA)
+    ambiente.registrar("j1")
+
+    _analisar(ambiente, "j1")
+
+    gravada = Decupagem.model_validate_json(ambiente.decupagens.gravadas["j1"])
+    assert (
+        ambiente.job("j1").versao_pipeline == gravada.versao_pipeline == VERSAO_PIPELINE
+    )
 
 
 def test_timecode_de_origem_do_job_vai_ao_bloco_video() -> None:

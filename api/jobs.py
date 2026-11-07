@@ -250,6 +250,11 @@ class Job(BaseModel):
     # não cabe com a ordem por `criado_em` (#479). `None` sem data; em Job anterior ao
     # campo, só `make gravar-mes-nos-jobs` o grava.
     mes_exibicao: str | None = None
+    # A `versao_pipeline` da Decupagem, gravada ao concluir a análise: o reprocessar por versão
+    # lê daqui, sem abrir as decupagens (#494). `anterior` se a decupagem não tem o campo.
+    # `None` até concluir, depois de uma correção à mão para concluído e em Job anterior ao
+    # campo, até `make gravar-versao-nos-jobs`.
+    versao_pipeline: str | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
     indexacao: Indexacao | None = None
     # Quantas vezes se pediu a indexação do vídeo e até qual pedido ela já chegou (#419): aprovar a

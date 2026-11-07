@@ -151,7 +151,14 @@ def executar(
         }
     )
     decupagens.gravar_decupagem(job.id, decupagem.model_dump_json())
-    if transitar(repositorio, job.id, "analisando", "concluido", relogio()):
+    if transitar(
+        repositorio,
+        job.id,
+        "analisando",
+        "concluido",
+        relogio(),
+        versao_pipeline=VERSAO_PIPELINE,
+    ):
         registrar(
             registro_do_video_concluido(job.id, job.programa, decupagem, contagem)
         )
