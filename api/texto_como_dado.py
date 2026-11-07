@@ -14,16 +14,21 @@ from pydantic import AfterValidator, StringConstraints
 
 # Controle C0 e C1 (inclui NUL e DEL). O `Texto` deixa passar tabulação, `\n` e `\r`.
 _CONTROLE = r"\x00-\x1f\x7f-\x9f"
+_CONTROLE_SALVO_QUEBRA = r"\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f"
 _CONTROLE_DA_LINHA = re.compile(f"[{_CONTROLE}]")
-_CONTROLE_DO_TEXTO = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+_CONTROLE_DO_TEXTO = re.compile(f"[{_CONTROLE_SALVO_QUEBRA}]")
 
 PADRAO_DA_LINHA = f"^[^{_CONTROLE}]*$"
-PADRAO_DO_TEXTO = r"^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]*$"
+PADRAO_DO_TEXTO = f"^[^{_CONTROLE_SALVO_QUEBRA}]*$"
 
 TAMANHO_MAXIMO_DO_ID = 200
 # Teto de qualquer parâmetro de consulta; cada um tem o seu, bem menor (a lista de ids do
 # andamento é a maior).
 TAMANHO_MAXIMO_DO_PARAMETRO = 10_000
+# Parâmetros de consulta que a rota usa como id de documento, além dos `*_id`: o cursor das
+# listagens paginadas (o id do último documento, ou uma posição) e a lista do andamento.
+_CONSULTAS_COM_ID = {"cursor"}
+_CONSULTAS_COM_IDS = {"ids"}
 
 
 def Linha(
@@ -72,7 +77,7 @@ def id_seguro(valor: str) -> bool:
         and "/" not in valor
         and "\\" not in valor
         and ".." not in valor
-        and valor not in {".", ".."}
+        and valor != "."
         and not tem_controle(valor)
     )
 
@@ -86,16 +91,22 @@ def conferir_ids_e_consultas(request: Request) -> None:
     for nome, valor in request.query_params.multi_items():
         if len(valor) > TAMANHO_MAXIMO_DO_PARAMETRO or tem_controle(valor):
             raise HTTPException(422, f"parâmetro de consulta inválido: {nome}")
-        # `?destino_id=` e afins: id que a rota usa como o de um documento.
-        if nome.endswith("_id") and not id_seguro(valor):
+        # `?destino_id=`, `?cursor=` e afins: id que a rota usa como o de um documento.
+        if (nome.endswith("_id") or nome in _CONSULTAS_COM_ID) and not id_seguro(valor):
+            raise HTTPException(422, f"parâmetro de consulta inválido: {nome}")
+        if nome in _CONSULTAS_COM_IDS and not all(
+            id_seguro(i) for i in (p.strip() for p in valor.split(",")) if i
+        ):
             raise HTTPException(422, f"parâmetro de consulta inválido: {nome}")
 
 
-def _id_ou_erro(valor: str) -> str:
+def id_conferido(valor: str) -> str:
+    """O próprio `valor`, se é um id seguro; senão `ValueError`. Os adaptadores do Firestore e
+    do Storage a chamam de novo (defesa em profundidade: a API já recusou com 422)."""
     if not id_seguro(valor):
         raise ValueError("id inválido: sem barra, '..' nem caractere de controle")
     return valor
 
 
 # Para o id que vem no corpo e vira documento ou objeto: `Annotated[str, Linha(64, min_length=1), ID_SEGURO]`.
-ID_SEGURO = AfterValidator(_id_ou_erro)
+ID_SEGURO = AfterValidator(id_conferido)

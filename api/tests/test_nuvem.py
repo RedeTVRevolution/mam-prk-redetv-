@@ -1921,6 +1921,7 @@ class _ColecaoQueNaoDeveSerTocada:
 def test_adaptadores_recusam_id_que_sai_do_proprio_nivel(ruim: str) -> None:
     from api.nuvem import (
         _documento,
+        _lidos_em_lote,
         objeto_da_copia_limpa,
         objeto_da_decupagem,
         objeto_do_quadro,
@@ -1934,6 +1935,8 @@ def test_adaptadores_recusam_id_que_sai_do_proprio_nivel(ruim: str) -> None:
         objeto_da_copia_limpa(ruim)
     with pytest.raises(ValueError):
         objeto_do_quadro(ruim, "quadros/a.jpg")
+    with pytest.raises(ValueError):
+        list(_lidos_em_lote(None, _ColecaoQueNaoDeveSerTocada(), [ruim]))
 
 
 def test_objeto_do_quadro_recusa_caminho_que_sobe() -> None:
@@ -1941,4 +1944,6 @@ def test_objeto_do_quadro_recusa_caminho_que_sobe() -> None:
 
     with pytest.raises(ValueError):
         objeto_do_quadro("job-1", "../outro/a.jpg")
+    with pytest.raises(ValueError):
+        objeto_do_quadro("job-1", "quadros/a\x00.jpg")
     assert objeto_do_quadro("job-1", "quadros/a.jpg") == "job-1/quadros/a.jpg"

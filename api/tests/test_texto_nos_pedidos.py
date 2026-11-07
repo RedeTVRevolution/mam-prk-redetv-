@@ -123,7 +123,7 @@ def test_nome_com_quebra_de_linha_volta_422_e_a_observacao_aceita() -> None:
     )
 
     assert nome.status_code == 422
-    assert motivo.status_code != 422  # 404: a pessoa não existe; o texto passou
+    assert motivo.status_code == 404  # a pessoa não existe; o texto passou
 
 
 def test_motivo_com_controle_volta_422() -> None:
@@ -165,8 +165,7 @@ def test_id_no_caminho_e_recusado_antes_do_repositorio(id_ruim: str) -> None:
     leitura = mundo.cliente.get(f"/v1/jobs/{id_ruim}", headers=CURADOR)
     remocao = mundo.cliente.delete(f"/v1/jobs/{id_ruim}", headers=CURADOR)
 
-    assert leitura.status_code in (404, 422)
-    assert remocao.status_code in (404, 422)
+    assert [leitura.status_code, remocao.status_code] == [422, 422]
     assert mundo.jobs.consultados == []
 
 
@@ -175,8 +174,39 @@ def test_id_com_barra_nao_chega_ao_repositorio() -> None:
 
     resposta = mundo.cliente.get("/v1/jobs/a%2Fb", headers=CURADOR)
 
-    assert resposta.status_code in (404, 422)
+    # A barra decodificada separa o caminho: nenhuma rota casa, e o id nem é lido.
+    assert resposta.status_code == 404
     assert mundo.jobs.consultados == []
+
+
+@pytest.mark.parametrize(
+    "parametros",
+    [{"ids": "j1,a/b"}, {"ids": "a..b"}, {"cursor": "a/b"}, {"cursor": "a\\b"}],
+)
+def test_ids_e_cursor_da_consulta_sao_recusados_com_422(
+    parametros: dict[str, str],
+) -> None:
+    mundo = Mundo()
+    caminho = "/v1/jobs/andamento" if "ids" in parametros else "/v1/jobs"
+
+    resposta = mundo.cliente.get(caminho, params=parametros, headers=CURADOR)
+
+    assert resposta.status_code == 422
+
+
+def test_cursor_e_ids_normais_passam() -> None:
+    mundo = Mundo()
+
+    andamento = mundo.cliente.get(
+        "/v1/jobs/andamento", params={"ids": "j1, j-2"}, headers=CURADOR
+    )
+    listagem = mundo.cliente.get(
+        "/v1/jobs", params={"limite": 10, "cursor": "abc.20"}, headers=CURADOR
+    )
+
+    assert andamento.status_code == 200
+    # Passou da conferência: quem recusa é a rota, porque o Job do cursor não existe.
+    assert listagem.json() == {"detail": "Cursor inválido"}
 
 
 def test_id_normal_segue_para_o_repositorio() -> None:

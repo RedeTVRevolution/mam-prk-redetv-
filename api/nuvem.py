@@ -87,7 +87,7 @@ from api.programas import (
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
-from api.texto_como_dado import id_seguro
+from api.texto_como_dado import id_conferido, tem_controle
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
 from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
@@ -128,16 +128,9 @@ _LOTE_DE_LEITURA = 500
 log = logging.getLogger(__name__)
 
 
-def _id_conferido(id: str) -> str:
-    """Defesa em profundidade: o id que vira documento ou objeto não sai do próprio nível
-    (a API já recusa antes, com 422)."""
-    if not id_seguro(id):
-        raise ValueError("id inválido para documento ou objeto")
-    return id
-
-
 def _documento(colecao: Any, id: str) -> Any:
-    return colecao.document(_id_conferido(id))
+    """O documento `id` da coleção; o id não sai do próprio nível (`ValueError`)."""
+    return colecao.document(id_conferido(id))
 
 
 def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
@@ -150,19 +143,19 @@ def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[A
 
 
 def objeto_do_proxy(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}/proxy.mp4"
+    return f"{id_conferido(job_id)}/proxy.mp4"
 
 
 def objeto_do_audio(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}/audio.wav"
+    return f"{id_conferido(job_id)}/audio.wav"
 
 
 def objeto_da_transcricao(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}/transcricao.json"
+    return f"{id_conferido(job_id)}/transcricao.json"
 
 
 def prefixo_das_janelas(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}/janelas/"
+    return f"{id_conferido(job_id)}/janelas/"
 
 
 def objeto_da_janela(job_id: str, indice: int) -> str:
@@ -170,26 +163,32 @@ def objeto_da_janela(job_id: str, indice: int) -> str:
 
 
 def objeto_da_leitura_da_tela(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}/leitura_da_tela.json"
+    return f"{id_conferido(job_id)}/leitura_da_tela.json"
 
 
 def objeto_do_resultado_dos_objetos(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}/objetos/florence.json"
+    return f"{id_conferido(job_id)}/objetos/florence.json"
 
 
 def objeto_da_decupagem(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}.json"
+    return f"{id_conferido(job_id)}.json"
 
 
 def objeto_do_quadro(job_id: str, caminho: str) -> str:
     """`caminho` é o do campo `quadro` da Decupagem (`quadros/plano-0.jpg`)."""
-    if ".." in caminho or caminho.startswith("/") or "\\" in caminho:
+    if (
+        not caminho
+        or ".." in caminho
+        or caminho.startswith("/")
+        or "\\" in caminho
+        or tem_controle(caminho)
+    ):
         raise ValueError("caminho de quadro inválido")
-    return f"{_id_conferido(job_id)}/{caminho}"
+    return f"{id_conferido(job_id)}/{caminho}"
 
 
 def objeto_da_copia_limpa(job_id: str) -> str:
-    return f"{_id_conferido(job_id)}/copia_limpa.mp4"
+    return f"{id_conferido(job_id)}/copia_limpa.mp4"
 
 
 TENTATIVAS_SOB_DISPUTA = 8
@@ -989,7 +988,7 @@ class ProgramasFirestore:
         if not isinstance(jobs, RepositorioFirestore):
             raise TypeError("os Jobs precisam estar no Firestore")
         programa_ref = _documento(self._colecao, programa_id)
-        job_ref = self._cliente.collection(jobs._colecao.id).document(job_id)
+        job_ref = _documento(self._cliente.collection(jobs._colecao.id), job_id)
 
         @firestore.transactional
         def levar(transacao: Any) -> Job | None:
@@ -1313,7 +1312,10 @@ class RepositorioDeRevisaoFirestore:
         self._colecao = cliente.collection(colecao)
 
     def aplicar(self, pulso: Pulso, limite_s: float) -> Medida:
-        referencia = _documento(self._colecao, f"{pulso.job_id}:{pulso.uid}")
+        # Cada parte conferida à parte: juntas podem passar do teto de um id só.
+        referencia = self._colecao.document(
+            f"{id_conferido(pulso.job_id)}:{id_conferido(pulso.uid)}"
+        )
 
         @firestore.transactional
         def gravar(transacao: Any) -> Medida:
@@ -1741,7 +1743,7 @@ class ArmazenamentoStorage:
         )
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
-        blob = self._cliente.bucket(self._bucket).blob(job_id)
+        blob = self._cliente.bucket(self._bucket).blob(id_conferido(job_id))
         url: str = blob.generate_signed_url(
             version="v4",
             expiration=PRAZO_DA_URL_DE_UPLOAD,
@@ -1760,7 +1762,7 @@ class ArmazenamentoStorage:
     def cancelar_upload(self, job_id: str) -> None:
         """Apaga o objeto do Job da quarentena; o upload pode nem ter começado."""
         try:
-            self._cliente.bucket(self._bucket).blob(job_id).delete()
+            self._cliente.bucket(self._bucket).blob(id_conferido(job_id)).delete()
         except NotFound:
             pass
 
