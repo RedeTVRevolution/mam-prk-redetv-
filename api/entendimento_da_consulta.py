@@ -7,7 +7,8 @@ código desconfia de tudo o que volta. As barreiras da "Busca sem injeção" (pl
 - o Model Armor (porta `ModelArmor`) acusa injeção antes do modelo;
 - a consulta vai na mensagem do usuário, entre `<consulta>`, como dado; a instrução diz isso;
 - só valem campos e valores das listas: categoria, cor, evidência e programa fora da lista
-  são descartados; pessoa só entra se o código a resolve no catálogo (senão vira texto livre);
+  são descartados; pessoa só entra se o código a resolve no catálogo (senão vira texto livre e a busca
+  responde "nenhuma aparição" a ela);
   a frase exata precisa estar na própria consulta.
 
 A busca por foto (#443) descreve o objeto da foto em um termo curto (`termo_da_foto`) e segue
@@ -120,6 +121,9 @@ class ConsultaEntendida:
     marcas: tuple[str, ...] = ()
     frase_exata: str | None = None
     texto_livre: str = ""
+    # Os nomes de pessoa que o modelo apontou e o catálogo não resolve: a busca responde
+    # "nenhuma aparição" a eles, em vez de devolver o que as outras cláusulas acham.
+    pessoas_fora_do_catalogo: tuple[str, ...] = ()
     evidencias: tuple[Evidencia, ...] = ()
     programa: str | None = None
     exibido_desde: date | None = None
@@ -286,12 +290,14 @@ def _montar(
     todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
 ) -> ConsultaEntendida:
     sobra: list[str] = []  # nomes que o catálogo não resolve: viram texto livre
+    fora: list[str] = []  # os de pessoa, que a busca responde como sem aparição
 
     def dono_de(nome: str) -> str | None:
         saneado = sanear(nome, MAXIMO_DO_NOME)
         achado = resolver_nome(saneado, catalogo, todas)
         if achado is None and saneado:
             sobra.append(saneado)
+            fora.append(saneado)
         return achado
 
     pessoas = [
@@ -330,6 +336,7 @@ def _montar(
         marcas=tuple(_unicos(marcas)),
         frase_exata=frase,
         texto_livre=livre,
+        pessoas_fora_do_catalogo=tuple(_unicos(fora)),
         evidencias=tuple(e for e in EVIDENCIAS if e in resposta.evidencias),
         programa=resposta.programa if resposta.programa in programas else None,
         exibido_desde=desde,

@@ -126,6 +126,7 @@ def test_nome_sem_id_em_pessoas_e_no_dono_vai_uma_vez_ao_texto_livre() -> None:
         pedido(pessoas=["Fulana"], objetos=[{**VESTIDO, "pessoa": "Fulana"}]),
     )
     assert achado.texto_livre == "Fulana"
+    assert achado.pessoas_fora_do_catalogo == ("Fulana",)
 
 
 def test_objeto_sem_atributo_valido_cai_mas_o_dono_fica_como_pessoa() -> None:
@@ -352,6 +353,7 @@ def test_programa_periodo_e_evidencias_validos() -> None:
 def test_marca_so_entra_se_estiver_no_catalogo_de_marcas() -> None:
     sem, _ = rodar("camiseta Nike", pedido(marcas=["Nike"]))
     assert sem.marcas == () and sem.texto_livre == "Nike"
+    assert sem.pessoas_fora_do_catalogo == ()  # marca não é pessoa
     com, _ = rodar("camiseta Nike", pedido(marcas=["nike"]), marcas_conhecidas=["Nike"])
     assert com.marcas == ("Nike",)
 

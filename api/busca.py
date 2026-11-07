@@ -165,7 +165,7 @@ class VideoDoResultado(BaseModel):
 class SemAparicao(BaseModel):
     """A pessoa pedida não aparece na imagem no programa e período pedidos; quantas vezes é citada."""
 
-    pessoa_id: str
+    pessoa_id: str | None  # `None`: o nome que o catálogo não resolve
     nome: str
     mencoes_na_fala: int
     mencoes_na_tela: int
@@ -511,19 +511,34 @@ class Busca:
             return nomes.get(id or "") or None
 
         carregar_nomes([*entendida.pessoas, *(o.dono for o in entendida.objetos)])
-        clausulas = self._clausulas(entendida, nome)
-        # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
-        # entendidos já filtram, e não entram no vetor.
-        consulta_visual = _texto_da_busca(entendida) or texto
-        vetor = (
-            vetor_do_plano
-            if vetor_do_plano is not None
-            else self._vetor_da_consulta(consulta_visual)
-            if visual
-            else None
-        )
-        if vetor is not None:
-            clausulas.append(_clausula_visual(entendida, vetor, nome))
+        fora = entendida.pessoas_fora_do_catalogo
+        if fora:
+            # Pessoa que o catálogo não resolve não tem como aparecer: as outras cláusulas
+            # ("vestido vermelho") trariam o de outra pessoa como se fosse dela. Ficam só
+            # as menções do nome, se pedidas ("Ver as menções" liga Citada e Fala).
+            base = _base(entendida)
+            clausulas = [
+                c
+                for quem in fora
+                for c in _clausulas_das_mencoes(quem, entendida, base, nome)
+            ]
+            # Sem cláusula de imagem, o vetor não é calculado; não é a busca visual que falhou.
+            usou_o_vetor = visual or vetor_do_plano is not None
+        else:
+            clausulas = self._clausulas(entendida, nome)
+            # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
+            # entendidos já filtram, e não entram no vetor.
+            consulta_visual = _texto_da_busca(entendida) or texto
+            vetor = (
+                vetor_do_plano
+                if vetor_do_plano is not None
+                else self._vetor_da_consulta(consulta_visual)
+                if visual
+                else None
+            )
+            if vetor is not None:
+                clausulas.append(_clausula_visual(entendida, vetor, nome))
+            usou_o_vetor = vetor is not None
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
@@ -591,12 +606,14 @@ class Busca:
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
         vazios = [
-            self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
+            self._sem_aparicao(
+                nome(c.pessoa_na_imagem) or "", c.pessoa_na_imagem, entendida, consultar
+            )
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
             # "Nenhuma aparição" fala do acervo, não do que a faceta deixou.
             if c.pessoa_na_imagem
             and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
-        ]
+        ] + [self._sem_aparicao(quem, None, entendida, consultar) for quem in fora]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas%s",
             (time.perf_counter() - inicio) * 1000,
@@ -611,7 +628,7 @@ class Busca:
                 programa=entendida.programa,
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
-                visual=vetor is not None,
+                visual=usou_o_vetor,
                 termo_da_foto=entendida.saneada if termo_da_foto else None,
             ),
             videos=videos,
@@ -955,13 +972,12 @@ class Busca:
 
     def _sem_aparicao(
         self,
-        pessoa: str,
+        quem: str,
+        pessoa: str | None,
         e: ConsultaEntendida,
         consultar: Callable[[Consulta], list[Registro]],
-        nome: Callable[[str | None], str | None],
     ) -> SemAparicao:
         """Quantas vezes a pessoa sem aparição é citada, no mesmo programa e período."""
-        quem = nome(pessoa) or ""
         base = _base(e)
         na_fala = consultar(Consulta(filtros=replace(base, tipo="fala"), texto=quem))
         na_tela = consultar(
@@ -1179,20 +1195,33 @@ def _clausulas_da_pessoa(
             )
         )
     if quem:
-        if "fala" in evidencias or "citada" in evidencias:
-            clausulas.append(
-                _Clausula(
-                    Consulta(filtros=replace(base, tipo="fala"), texto=quem),
-                    lambda r: _motivo(r, nome),
-                )
+        clausulas.extend(_clausulas_das_mencoes(quem, e, base, nome))
+    return clausulas
+
+
+def _clausulas_das_mencoes(
+    quem: str,
+    e: ConsultaEntendida,
+    base: Filtros,
+    nome: Callable[[str | None], str | None],
+) -> list[_Clausula]:
+    """O nome na fala e no texto na tela, quando as evidências pedidas os incluem."""
+    evidencias = _evidencias(e)
+    clausulas: list[_Clausula] = []
+    if "fala" in evidencias or "citada" in evidencias:
+        clausulas.append(
+            _Clausula(
+                Consulta(filtros=replace(base, tipo="fala"), texto=quem),
+                lambda r: _motivo(r, nome),
             )
-        if "gc" in evidencias or "citada" in evidencias:
-            clausulas.append(
-                _Clausula(
-                    Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem),
-                    lambda r: _motivo(r, nome),
-                )
+        )
+    if "gc" in evidencias or "citada" in evidencias:
+        clausulas.append(
+            _Clausula(
+                Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem),
+                lambda r: _motivo(r, nome),
             )
+        )
     return clausulas
 
 

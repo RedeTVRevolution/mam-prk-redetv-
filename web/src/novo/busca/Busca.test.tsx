@@ -301,6 +301,14 @@ test('o vídeo aberto daqui recebe o resultado para andar com N e Shift+N', asyn
   await waitFor(() => expect(lerResultado('sapato')?.map((v) => v.job_id)).toEqual(['v1', 'v2']))
 })
 
+test('o vazio de um nome fora do catálogo mostra o aviso com o nome digitado', async () => {
+  resposta = () => HttpResponse.json(resultado({ videos: [], sem_aparicoes: [{ pessoa_id: null, nome: 'Fulano', mencoes_na_fala: 0, mencoes_na_tela: 0 }] }))
+  await abrir('/busca?q=Fulano+de+vestido+vermelho')
+
+  expect(await screen.findByText('Nenhuma aparição de Fulano.')).toBeTruthy()
+  expect(screen.queryByText(/Nenhum momento encontrado/)).toBeNull()
+})
+
 test('o vazio honesto traz a contagem de menções e o botão liga Citada e Fala', async () => {
   const usuario = userEvent.setup()
   resposta = () => HttpResponse.json(resultado({ videos: [], sem_aparicoes: [{ pessoa_id: 'p1', nome: 'Sabrina Sato', mencoes_na_fala: 12, mencoes_na_tela: 0 }] }))

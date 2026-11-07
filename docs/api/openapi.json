@@ -6824,7 +6824,14 @@
       "SemAparicao": {
         "properties": {
           "pessoa_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Pessoa Id"
           },
           "nome": {
