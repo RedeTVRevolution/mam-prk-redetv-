@@ -1,5 +1,5 @@
 {
-  "versao_pipeline": "2026.11.4",
+  "versao_pipeline": "2026.11.5",
   "manifesto": {
     "esquema": "1.4",
     "modelos": {
@@ -16,7 +16,7 @@
       "consulta": "standard"
     },
     "instrucoes": {
-      "analise": "05cca2135f6bcafb763d013ec548c08b6fe2ef568cdb844c57ab1f4111edb830",
+      "analise": "f8775705d01572aadd035499d98d16d1bc3b4d8f1c7cbb06c2d498acbd267e25",
       "modelo_forte": "1edbfac302a335b2a276cd8dd0773de93d9346cf6fbcc7c8cc0486adeda6c3bf",
       "consulta": "f814b88a5a7a35ce1d7d7cbdb3832e5e93eecc8309b65a7b70594da8fbc8e74a",
       "conversao_do_inventario": "5c410045cce15863e3cfc1ba89d33dfc95f6397e113e32b12c148282016bc1a1",
