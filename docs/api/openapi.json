@@ -1744,6 +1744,131 @@
         ]
       }
     },
+    "/v1/jobs/quadros": {
+      "post": {
+        "summary": "URLs de vários quadros de uma vez",
+        "description": "As URLs assinadas de até 100 quadros (pares `job` e `arquivo`, o nome que a busca devolve em `quadro`) numa chamada só, no lugar de uma por quadro. Cada Job é lido uma vez. Job que não existe, é de outro sistema, está na lixeira ou ainda não `concluiu` volta com `url` e `expira_em` nulos, sem derrubar o lote. Escopo `ler`.",
+        "operationId": "quadros_em_lote_v1_jobs_quadros_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoDeQuadros"
+              },
+              "example": {
+                "quadros": [
+                  {
+                    "job": "6f1c2a",
+                    "arquivo": "plano-6.jpg"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuadroDoLote"
+                  },
+                  "type": "array",
+                  "title": "Response Quadros Em Lote V1 Jobs Quadros Post"
+                },
+                "example": [
+                  {
+                    "job": "6f1c2a",
+                    "arquivo": "plano-6.jpg",
+                    "url": "https://storage.googleapis.com/BUCKET/...",
+                    "expira_em": "2026-11-03T21:14:05.120000Z"
+                  },
+                  {
+                    "job": "fantasma",
+                    "arquivo": "plano-0.jpg",
+                    "url": null,
+                    "expira_em": null
+                  }
+                ]
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Mais de 100 pares, ou um `arquivo` fora do formato. Aqui `detail` é uma lista: leia `loc` e `msg`. Peça até 100 pares por chamada.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "too_long",
+                      "loc": [
+                        "body",
+                        "quadros"
+                      ],
+                      "msg": "List should have at most 100 items after validation, not 101",
+                      "input": "[...]",
+                      "ctx": {
+                        "field_type": "List",
+                        "max_length": 100,
+                        "actual_length": 101
+                      }
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
     "/v1/jobs/{job_id}/passadas": {
       "get": {
         "summary": "Listar as passadas do Job",
@@ -5807,6 +5932,27 @@
         ],
         "title": "Opcao"
       },
+      "ParDeQuadro": {
+        "properties": {
+          "job": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "title": "Job"
+          },
+          "arquivo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*\\.jpg$",
+            "title": "Arquivo"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job",
+          "arquivo"
+        ],
+        "title": "ParDeQuadro"
+      },
       "Passada": {
         "properties": {
           "id": {
@@ -5955,6 +6101,24 @@
           "resumo"
         ],
         "title": "Pauta"
+      },
+      "PedidoDeQuadros": {
+        "properties": {
+          "quadros": {
+            "items": {
+              "$ref": "#/components/schemas/ParDeQuadro"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Quadros"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quadros"
+        ],
+        "title": "PedidoDeQuadros"
       },
       "Pessoa": {
         "properties": {
@@ -6293,6 +6457,49 @@
           "blocos"
         ],
         "title": "Programa"
+      },
+      "QuadroDoLote": {
+        "properties": {
+          "job": {
+            "type": "string",
+            "title": "Job"
+          },
+          "arquivo": {
+            "type": "string",
+            "title": "Arquivo"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "expira_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expira Em"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "arquivo",
+          "url",
+          "expira_em"
+        ],
+        "title": "QuadroDoLote"
       },
       "Reproducao": {
         "properties": {
