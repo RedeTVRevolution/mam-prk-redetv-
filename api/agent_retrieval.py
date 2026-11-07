@@ -76,6 +76,8 @@ CAMPOS_DE_FILTRO = [
     "dono",
     "marca",
     "relacao",
+    "sistema",
+    "na_lixeira",
 ]
 
 
@@ -280,6 +282,7 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
     texto = {"type": "string"}
     lista = {"type": "array", "items": {"type": "string"}}
     numero = {"type": "integer"}
+    booleano = {"type": "boolean"}
     propriedades: dict[str, Any] = {
         "id": texto,
         "tipo": texto,
@@ -301,6 +304,8 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
         CAMPO_DO_TEXTO_DA_BUSCA: texto,
         "quadro": texto,
         "destaque": numero,
+        "sistema": texto,
+        "na_lixeira": booleano,
         # Só para o embedding automático, que recusa registro sem texto: a descrição do
         # plano ou o texto da fala, do texto na tela ou do objeto (ADR 0006).
         "significado": texto,
@@ -437,6 +442,25 @@ def _acrescentar_campos(
     return list(faltam)
 
 
+def indices_com_filtros_diferentes(
+    config: ConfigDaBusca, transporte: Transporte
+) -> dict[str, list[str]]:
+    """Os índices ANN que já existem com `filterFields` diferentes dos de `CAMPOS_DE_FILTRO`,
+    com os campos que faltam neles. Os `filterFields` são fixados na criação e o PATCH não
+    os muda: o índice precisa ser recriado, o que fica para quem roda (nada se apaga
+    aqui). Índice sem `filterFields` na resposta, não conta."""
+    divergentes: dict[str, list[str]] = {}
+    for indice in indices_da_colecao(config):
+        no_ar = transporte("GET", f"{config.caminho_da_colecao}/indexes/{indice}", None)
+        filtros = no_ar.get("filterFields")
+        if filtros is None:
+            continue
+        faltam = [c for c in CAMPOS_DE_FILTRO if c not in filtros]
+        if faltam:
+            divergentes[indice] = faltam
+    return divergentes
+
+
 def criar_colecao(
     config: ConfigDaBusca,
     transporte: Transporte,
@@ -488,6 +512,7 @@ def _dados(r: Registro) -> dict[str, Any]:
         "fim_ms": r.fim_ms,
         "pessoas": r.pessoas,
         "cor_base": r.cor_base,
+        "na_lixeira": r.na_lixeira,
         # Nunca vazio: o tipo é o último recurso.
         "significado": r.descricao or r.texto or r.tipo,
     }
@@ -504,6 +529,7 @@ def _dados(r: Registro) -> dict[str, Any]:
         "descricao": r.descricao,
         "quadro": r.quadro,
         "destaque": r.destaque,
+        "sistema": r.sistema,
     }
     # O que a tela mostra fica em `texto` e `descricao`; esta é só para o `textSearch`.
     if r.texto or r.descricao:
@@ -535,6 +561,8 @@ def _registro(dados: dict[str, Any]) -> Registro:
         descricao=dados.get("descricao"),
         quadro=dados.get("quadro"),
         destaque=dados.get("destaque"),
+        sistema=dados.get("sistema"),
+        na_lixeira=bool(dados.get("na_lixeira", False)),
     )
 
 
@@ -592,6 +620,15 @@ def _canonico(dados: dict[str, Any]) -> dict[str, Any]:
             valor = sorted(valor)
         saida[campo] = valor
     return saida
+
+
+def _inteiros(dados: dict[str, Any]) -> dict[str, Any]:
+    """Os dados lidos com o número inteiro que voltou como float de novo inteiro, para
+    gravá-los de volta como estavam."""
+    return {
+        campo: int(valor) if isinstance(valor, float) and valor.is_integer() else valor
+        for campo, valor in dados.items()
+    }
 
 
 def montar_plano(
@@ -766,6 +803,25 @@ class AgentRetrieval:
     def apagar(self, job_id: str) -> None:
         """Apaga o vídeo inteiro: junta os nomes, página a página, e apaga em lote."""
         self._apagar_nomes([o["name"] for o in self._objetos_do_video(job_id)])
+
+    def marcar_lixeira(self, job_id: str, na_lixeira: bool) -> None:
+        """Põe `na_lixeira` nos objetos do vídeo (#482), só nos que ainda não têm esse
+        valor (o objeto de antes do campo conta como diferente). O `batchUpdate` troca o
+        `data` inteiro, então cada pedido leva os dados lidos com o campo novo; o vetor
+        não se recalcula. O número inteiro que voltou como float volta inteiro (o esquema
+        o declara `integer`). Cada lote passa pelo orçamento da cota (#460)."""
+        pedidos = [
+            {
+                "dataObject": {
+                    "name": nome,
+                    "data": _inteiros(dados) | {"na_lixeira": na_lixeira},
+                },
+                "updateMask": "data",
+            }
+            for nome, dados in self._ler_com_nomes(job_id)
+            if dados.get("na_lixeira") is not na_lixeira
+        ]
+        self._escrever("batchUpdate", pedidos, OBJETOS_POR_PAGINA)
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
         """Grava só o que mudou (#418): lê o índice do vídeo, compara com `registros` e
