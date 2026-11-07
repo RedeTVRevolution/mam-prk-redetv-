@@ -171,6 +171,10 @@ output "repositorio_gpu" {
   value = module.mam.repositorio_gpu
 }
 
+output "limpeza_de_imagens" {
+  value = module.mam.limpeza_de_imagens
+}
+
 output "regiao_gpu" {
   value = module.mam.regiao_gpu
 }

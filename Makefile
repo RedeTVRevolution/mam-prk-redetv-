@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery preencher-catalogo-dos-jobs comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery preencher-catalogo-dos-jobs comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -284,3 +284,9 @@ caos-dev:
 # O OpenAPI dos sistemas (#277) em docs/api/openapi.json; um teste do `make verificar` confere que bate.
 atualizar-openapi:
 	uv run --locked python -m api.documentacao_dos_sistemas
+
+# Simula a limpeza do Artifact Registry sem apagar nada (#456): o que seria apagado, o que fica, e
+# o build em uso e o da volta marcados; sai com 1 se apagaria um deles. Pede o gcloud (só leitura)
+# e o terraform init feito, como no deploy-dev (CLOUDSDK_ACTIVE_CONFIG_NAME=mam-dev).
+conferir-limpeza-de-imagens:
+	uv run --locked python -m api.limpeza_de_imagens

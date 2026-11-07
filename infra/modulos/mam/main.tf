@@ -415,16 +415,24 @@ resource "google_project_service" "apis" {
 # - O cache das camadas (docker-bake.hcl) é uma tag fixa por alvo no pacote `cache`, sobrescrita a
 #   cada build: a versão com tag fica sempre; as que perderam a tag saem.
 # - KEEP vence DELETE: o resto, com ou sem tag, sai quando a versão tem mais de 14 dias desde
-#   que foi criada (não desde o último uso). O registro não sabe o que o Cloud Run usa: se dois
-#   deploys seguidos falham no teste de GPU, o testar-jobs-gpu.sh volta os Jobs a um build que já
-#   saiu dos N últimos e, se ele tiver mais de 14 dias, sai do registro em até ~1 dia.
+#   que foi criada (não desde o último uso). O registro não sabe o que o Cloud Run usa, então o
+#   scripts/deploy-dev.sh põe duas tags no digest amd64 de cada imagem (tags_protegidas): `em-uso`
+#   no build que o serviço e os Jobs usam depois do apply, e `volta` no build que os Jobs com GPU
+#   tinham antes dele, o que o testar-jobs-gpu.sh restaura se o teste de GPU falha. Um KEEP guarda
+#   o que tem uma dessas tags, por mais velho que seja ou por mais que já tenha saído dos N
+#   últimos. A tag se move a cada deploy; o build que perdeu as duas volta às regras comuns.
+# - Antes de mexer nas regras ou na idade, `make conferir-limpeza-de-imagens` (só lê) simula as
+#   regras sobre as versões que existem e diz o que seria apagado; sai com 1 se apagasse uma
+#   versão em uso ou a da volta. Ele lê as regras do output limpeza_de_imagens, as mesmas daqui.
 # - Ensaio: com limpeza_so_ensaia, o Google só registra o que apagaria (BatchDeleteVersions com
-#   validateOnly no log Data Access, ligado no limpeza_de_imagens.tf). Antes de desligar o ensaio, proteger o build
-#   da volta (uma tag que um KEEP guarde) e conferir a contagem de um ciclo, que leva até ~1 dia.
+#   validateOnly no log Data Access, ligado no limpeza_de_imagens.tf). Ligada de verdade desde o
+#   #456; para voltar ao ensaio basta trocar o valor, sem recriar o repositório.
 locals {
   versoes_guardadas_por_imagem = 3 * var.builds_de_imagem_guardados
   idade_minima_para_apagar     = "1209600s"
-  limpeza_so_ensaia            = true
+  limpeza_so_ensaia            = false
+  pacotes_do_cache             = ["cache"]
+  tags_protegidas              = ["em-uso", "volta"]
 }
 
 resource "google_artifact_registry_repository" "mam" {
@@ -445,7 +453,15 @@ resource "google_artifact_registry_repository" "mam" {
     action = "KEEP"
     condition {
       tag_state             = "TAGGED"
-      package_name_prefixes = ["cache"]
+      package_name_prefixes = local.pacotes_do_cache
+    }
+  }
+  cleanup_policies {
+    id     = "guarda-o-build-em-uso-e-o-da-volta"
+    action = "KEEP"
+    condition {
+      tag_state    = "TAGGED"
+      tag_prefixes = local.tags_protegidas
     }
   }
   cleanup_policies {
@@ -479,7 +495,15 @@ resource "google_artifact_registry_repository" "mam_gpu" {
     action = "KEEP"
     condition {
       tag_state             = "TAGGED"
-      package_name_prefixes = ["cache"]
+      package_name_prefixes = local.pacotes_do_cache
+    }
+  }
+  cleanup_policies {
+    id     = "guarda-o-build-em-uso-e-o-da-volta"
+    action = "KEEP"
+    condition {
+      tag_state    = "TAGGED"
+      tag_prefixes = local.tags_protegidas
     }
   }
   cleanup_policies {
@@ -2949,6 +2973,19 @@ output "repositorio" {
 # Para o deploy-dev: o repositório das imagens com GPU, que guarda também o cache delas.
 output "repositorio_gpu" {
   value = "${var.regiao_gpu}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam_gpu.repository_id}"
+}
+
+# As regras da limpeza das imagens, para o deploy-dev (as tags que ele põe) e para o
+# `make conferir-limpeza-de-imagens`, que as simula sem apagar nada (#456).
+output "limpeza_de_imagens" {
+  value = {
+    manter_ultimas      = local.versoes_guardadas_por_imagem
+    idade_minima_s      = tonumber(trimsuffix(local.idade_minima_para_apagar, "s"))
+    pacotes_do_cache    = local.pacotes_do_cache
+    tags_protegidas     = local.tags_protegidas
+    tag_do_build_em_uso = local.tags_protegidas[0]
+    tag_da_volta        = local.tags_protegidas[1]
+  }
 }
 
 # Para o Workflows (#239) e para o teste dos Jobs com GPU depois da publicação.
