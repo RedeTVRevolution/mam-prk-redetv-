@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery preencher-catalogo-dos-jobs comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery preencher-catalogo-dos-jobs preencher-jobs-do-painel comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -204,6 +204,17 @@ preencher-catalogo-dos-jobs:
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.preencher_catalogo_dos_jobs
+
+# Grava na tabela dos Jobs do painel (#454) os Jobs que já existem: make preencher-jobs-do-painel.
+# Roda uma vez no dev depois do apply: a consulta agendada só vê os Jobs com evento de uso. Repetir
+# troca as linhas pelo id e dá o mesmo resultado. Depois, confira a contagem com a da coleção `jobs`.
+preencher-jobs-do-painel:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	BIGQUERY_DATASET="$${BIGQUERY_DATASET:-$$(terraform -chdir=infra output -raw bigquery_dataset)}" \
+	BIGQUERY_TABELA_DE_JOBS="$${BIGQUERY_TABELA_DE_JOBS:-$$(terraform -chdir=infra output -raw bigquery_tabela_de_jobs)}" \
+	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
+	uv run --locked python -m api.jobs_do_painel
 
 # Reprocessa o acervo de propósito (#250): make reprocessar-versao [DE=<versão ou anterior>] [LIMITE=<n>]
 # Lista os Jobs concluídos de versão do pipeline anterior à atual (api/versao_pipeline.py) e o custo
