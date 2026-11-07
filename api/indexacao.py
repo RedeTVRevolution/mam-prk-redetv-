@@ -58,8 +58,9 @@ class LeitorDeDecupagem(Protocol):
 def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, Any]:
     """`dados` sem o que o esquema da Decupagem não tem.
 
-    A decupagem entregue traz marcas de leitura (`origem`, o `id` posicional) que o
-    esquema do modelo, estrito, recusa e que o índice não usa.
+    A decupagem entregue traz marcas de leitura (`origem`, o `id` posicional do
+    comercial) que o esquema do modelo, estrito, recusa e que o índice não usa. O `id`
+    de fala e de texto na tela fica: o índice o usa no id do registro (#418).
     """
     podado: dict[str, Any] = {}
     for nome, valor in dados.items():

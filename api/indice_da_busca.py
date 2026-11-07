@@ -16,6 +16,7 @@ from api.decupagem import (
     ObjetoDoInventario,
     Pessoa,
     _Intervalo,
+    id_posicional,
 )
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
@@ -151,7 +152,10 @@ def registros_da_decupagem(
     """Os registros do índice de uma Decupagem.
 
     Pessoa e dono vão pelo `catalogo_id`; quem não tem não entra nas listas (a busca por
-    pessoa só acha quem o catálogo conhece).
+    pessoa só acha quem o catálogo conhece). O id do registro leva o id do item da
+    Decupagem (`fal###`, `txt###`, plano, objeto, o da correção no item acrescentado), não
+    a posição: corrigir uma fala não muda o id das outras (#418). A ocorrência do objeto
+    e o item do inventário seguem pelo índice `k`.
     """
     base: dict[str, Any] = {
         "job_id": job_id,
@@ -180,10 +184,10 @@ def registros_da_decupagem(
         return DONO_PESSOA if id in ids else SEM_DONO
 
     registros: list[Registro] = []
-    for n, plano in enumerate(decupagem.planos):
+    for plano in decupagem.planos:
         registros.append(
             Registro(
-                id=f"{job_id}:plano:{n}",
+                id=f"{job_id}:plano:{plano.id}",
                 tipo="plano",
                 inicio_ms=plano.inicio_ms,
                 fim_ms=plano.fim_ms,
@@ -201,7 +205,7 @@ def registros_da_decupagem(
         for k, item in enumerate(plano.inventario):
             registros.append(
                 Registro(
-                    id=f"{job_id}:inventario:{n}:{k}",
+                    id=f"{job_id}:inventario:{plano.id}:{k}",
                     tipo="objeto",
                     inicio_ms=plano.inicio_ms,
                     fim_ms=plano.fim_ms,
@@ -222,9 +226,11 @@ def registros_da_decupagem(
                 )
             )
     for n, fala in enumerate(decupagem.transcricao):
+        # Sem id, a decupagem não passou pela entrega: o id é o que ela daria.
+        fala_id = fala.id or id_posicional("transcricao", n)
         registros.append(
             Registro(
-                id=f"{job_id}:fala:{n}",
+                id=f"{job_id}:fala:{fala_id}",
                 tipo="fala",
                 inicio_ms=fala.inicio_ms,
                 fim_ms=fala.fim_ms,
@@ -235,9 +241,10 @@ def registros_da_decupagem(
             )
         )
     for n, texto in enumerate(decupagem.textos_na_tela):
+        texto_id = texto.id or id_posicional("textos_na_tela", n)
         registros.append(
             Registro(
-                id=f"{job_id}:texto:{n}",
+                id=f"{job_id}:texto:{texto_id}",
                 tipo="texto_na_tela",
                 inicio_ms=texto.inicio_ms,
                 fim_ms=texto.fim_ms,
@@ -247,13 +254,13 @@ def registros_da_decupagem(
                 **base,
             )
         )
-    for n, objeto in enumerate(decupagem.objetos):
+    for objeto in decupagem.objetos:
         # Cada ocorrência é um momento: um registro do primeiro ao último aparecimento
         # viraria um bloco que aponta para o lugar errado.
         for k, ocorrencia in enumerate(objeto.ocorrencias):
             registros.append(
                 Registro(
-                    id=f"{job_id}:objeto:{n}:{k}",
+                    id=f"{job_id}:objeto:{objeto.id}:{k}",
                     tipo="objeto",
                     inicio_ms=ocorrencia.inicio_ms,
                     fim_ms=ocorrencia.fim_ms,

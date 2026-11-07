@@ -569,3 +569,96 @@ def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
     mundo.rodar_o_job()
     assert buscar("scar") == [("scarpin", 1)]
     assert buscar("vest") == [("vestido", vestidos - 1)]
+
+
+def _ids_do_indice(mundo: Mundo, tipo: str) -> list[str]:
+    achados = mundo.indice.buscar(Consulta(filtros=Filtros(tipo=tipo)))  # type: ignore[arg-type]
+    return sorted(r.id for r in achados)
+
+
+def test_registros_usam_os_ids_do_item_e_nao_a_posicao() -> None:
+    modelo = json.loads(json.dumps(MODELO))
+    modelo["transcricao"].append({**modelo["transcricao"][0], "texto": "Segunda fala"})
+    modelo["textos_na_tela"].append({**modelo["textos_na_tela"][0], "texto": "Outro"})
+    mundo = Mundo(modelo=modelo)
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    resposta = mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "texto_na_tela.acrescentar",
+            "valor": json.dumps(
+                {"inicio_ms": 100, "fim_ms": 900, "tipo": "logo", "texto": "Novo"}
+            ),
+            "motivo": "faltou",
+            "versao": versao,
+        },
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 201
+
+    mundo.reindexar()
+
+    planos = [p["id"] for p in modelo["planos"]]
+    assert _ids_do_indice(mundo, "plano") == sorted(f"j1:plano:{i}" for i in planos)
+    assert _ids_do_indice(mundo, "fala") == ["j1:fala:fal000", "j1:fala:fal001"]
+    acrescentado = f"j1:texto:acr-{resposta.json()['id']}"
+    assert _ids_do_indice(mundo, "texto_na_tela") == sorted(
+        ["j1:texto:txt000", "j1:texto:txt001", acrescentado]
+    )
+    ids_de_objeto = {o["id"] for o in modelo["objetos"]}
+    assert ids_de_objeto
+    for r in mundo.indice.buscar(Consulta(filtros=Filtros(tipo="objeto"))):
+        if ":objeto:" in r.id:
+            assert r.id.split(":")[2] in ids_de_objeto
+
+
+def test_corrigir_uma_fala_nao_muda_o_id_das_outras() -> None:
+    modelo = json.loads(json.dumps(MODELO))
+    modelo["transcricao"].append({**modelo["transcricao"][0], "texto": "Segunda fala"})
+    mundo = Mundo(modelo=modelo)
+    mundo.reindexar()
+    antes = _ids_do_indice(mundo, "fala")
+
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "fala.texto",
+            "item_id": "fal000",
+            "valor": json.dumps({"texto": "Corrigida", "locutor": "Apresentadora"}),
+            "motivo": "ouvi de novo",
+            "versao": versao,
+        },
+        headers=AUTORIZACAO,
+    )
+    mundo.reindexar()
+
+    assert _ids_do_indice(mundo, "fala") == antes
+    assert "Corrigida" in mundo.textos_das_falas()
+
+
+def test_tirar_o_primeiro_objeto_nao_muda_o_id_do_outro() -> None:
+    # Não há correção que remova fala ou texto; a única que remove item é a do objeto.
+    modelo = json.loads(json.dumps(MODELO))
+    primeiro, segundo = (o["id"] for o in modelo["objetos"])
+    mundo = Mundo(modelo=modelo)
+    mundo.reindexar()
+    do_segundo = [i for i in _ids_do_indice(mundo, "objeto") if f":{segundo}:" in i]
+    assert do_segundo
+
+    resposta = mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "objeto.nao_existe",
+            "item_id": primeiro,
+            "valor": "nao_existe",
+            "motivo": "não está na imagem",
+            "versao": versao_do_modelo(json.dumps(modelo).encode()),
+        },
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 201
+    mundo.reindexar()
+
+    objetos = [i for i in _ids_do_indice(mundo, "objeto") if ":objeto:" in i]
+    assert objetos == do_segundo

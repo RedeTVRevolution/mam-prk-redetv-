@@ -13,7 +13,9 @@ Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 202610
 conferido no #122.
 """
 
+import hashlib
 import logging
+import re
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -536,11 +538,23 @@ def _registro(dados: dict[str, Any]) -> Registro:
     )
 
 
+_RFC_1035 = re.compile(r"[a-z]([-a-z0-9]{0,61}[a-z0-9])?")
+
+
+def _id_do_objeto(id: str) -> str:
+    """O id do objeto é RFC 1035: começa por letra (o job_id pode começar por dígito),
+    tem até 63 caracteres e não aceita ":". O id do registro com o id de uma correção
+    (`acr-` e 32 hex) passa disso: vira um resumo, o mesmo a cada indexação. O id lógico
+    fica em `data.id`."""
+    nome = "m-" + id.replace(":", "-")
+    if _RFC_1035.fullmatch(nome):
+        return nome
+    return "m-" + hashlib.sha256(id.encode()).hexdigest()[:40]
+
+
 def _criacao(r: Registro) -> dict[str, Any]:
     objeto: dict[str, Any] = {"data": _dados(r)}
-    # O id do objeto é RFC 1035: começa por letra (o job_id pode começar por dígito) e
-    # não aceita ":".
-    return {"dataObjectId": "m-" + r.id.replace(":", "-"), "dataObject": objeto}
+    return {"dataObjectId": _id_do_objeto(r.id), "dataObject": objeto}
 
 
 class AgentRetrieval:

@@ -13,6 +13,7 @@ from api.agent_retrieval import (
     CotaEsgotada,
     EsquemaIncompativel,
     JaExiste,
+    _criacao,
     apagar_colecao,
     conferir_esquema,
     criar_colecao,
@@ -1146,3 +1147,20 @@ def test_reserva_espera_o_bastante_para_o_lote_caber() -> None:
     assert mantidas == reservas and espera == 30.0
     mantidas, espera = reservar_na_janela(reservas, 1000, 2700, 70.0)
     assert espera == 0 and mantidas == [(20.0, 500), (70.0, 1000)]
+
+
+def test_id_do_objeto_com_id_de_correcao_cabe_nos_63_caracteres_do_rfc_1035() -> None:
+    longo = (
+        "0123456789abcdef0123456789abcdef:texto:acr-0123456789abcdef0123456789abcdef"
+    )
+    curto = "j:fala:fal001"
+
+    pedidos = [
+        _criacao(Registro(id=i, tipo="fala", job_id="j", inicio_ms=0, fim_ms=1))
+        for i in (longo, longo, curto)
+    ]
+
+    ids = [p["dataObjectId"] for p in pedidos]
+    assert ids[0] == ids[1] != "m-" + longo.replace(":", "-")
+    assert len(ids[0]) <= 63 and ids[0][0] == "m"
+    assert ids[2] == "m-j-fala-fal001"

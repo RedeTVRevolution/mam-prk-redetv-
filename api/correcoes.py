@@ -29,6 +29,7 @@ from api import catalogo_de_correcoes as textos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import (
+    PREFIXO_POSICIONAL,
     CategoriaDeObjeto,
     Comercial,
     CorBase,
@@ -38,6 +39,7 @@ from api.decupagem import (
     RelacaoDoObjeto,
     TextoNaTela,
     TomDaPauta,
+    id_posicional,
 )
 from api.identidade import (
     identidade_do_comercial as _identidade_do_comercial,
@@ -851,25 +853,13 @@ def _objetos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [o for o in modelo.get("objetos", []) if isinstance(o, dict)]
 
 
-# Comerciais, falas e textos na tela não têm id no esquema: o id é a posição.
-_PREFIXO_POSICIONAL = {
-    "comerciais": "com",
-    "transcricao": "fal",
-    "textos_na_tela": "txt",
-}
-
-
-def _id_posicional(chave: str, n: int) -> str:
-    return f"{_PREFIXO_POSICIONAL[chave]}{n:03d}"
-
-
 def _com_ids_posicionais(modelo: dict[str, Any], chave: str) -> list[dict[str, Any]]:
     """Os itens de `chave` (cópias) com o id da posição no JSON do modelo.
 
     O que já traz id (decupagem entregue) o mantém.
     """
     return [
-        {"id": _id_posicional(chave, n), **item}
+        {"id": id_posicional(chave, n), **item}
         for n, item in enumerate(modelo.get(chave, []))
         if isinstance(item, dict)
     ]
@@ -1941,10 +1931,10 @@ def aplicar(
     pessoas = _pessoas(resultado)
     # Os ids posicionais saem da posição no modelo, antes de qualquer correção.
     posicionais = []
-    for chave in _PREFIXO_POSICIONAL:
+    for chave in PREFIXO_POSICIONAL:
         for n, real in enumerate(resultado.get(chave, [])):
             if isinstance(real, dict):
-                real["id"] = _id_posicional(chave, n)
+                real["id"] = id_posicional(chave, n)
                 posicionais.append(real)
     for item in [*pessoas, *_pautas(resultado), *_planos(resultado), *posicionais]:
         # O nome confirmado pelo código (`modelo_forte`) segue como o modelo gravou.
