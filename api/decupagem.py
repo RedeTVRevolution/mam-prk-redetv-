@@ -307,8 +307,10 @@ class Comercial(_Intervalo):
         "marca_incidental",
         "mencao_editorial",
     ] = Field(
-        description="Banner, bug, QR code e chamada de site são "
-        "sobreposicao_grafica; mencao_editorial é a marca citada sem ação comercial."
+        description="Banner, bug e QR code de anunciante, e chamada de site que "
+        "divulga anunciante, são sobreposicao_grafica; @ ou nome de pessoa nunca é "
+        "marca; o nome ou o site do próprio programa e da emissora é "
+        "mencao_editorial; mencao_editorial é a marca citada sem ação comercial."
     )
     evidencias: list[EvidenciaDoComercial] = Field(
         min_length=1, description="O que mostra a ação comercial."

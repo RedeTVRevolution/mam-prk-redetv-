@@ -1,5 +1,5 @@
 {
-  "versao_pipeline": "2026.11.2",
+  "versao_pipeline": "2026.11.3",
   "manifesto": {
     "esquema": "1.4",
     "modelos": {
@@ -10,7 +10,7 @@
       "embedding": "gemini-embedding-001"
     },
     "instrucoes": {
-      "analise": "05cca2135f6bcafb763d013ec548c08b6fe2ef568cdb844c57ab1f4111edb830",
+      "analise": "f8775705d01572aadd035499d98d16d1bc3b4d8f1c7cbb06c2d498acbd267e25",
       "modelo_forte": "4e0f3949d47638e8a758ecc7a54735da602de50820bcb303e2204c8a37341881",
       "consulta": "f814b88a5a7a35ce1d7d7cbdb3832e5e93eecc8309b65a7b70594da8fbc8e74a",
       "conversao_do_inventario": "5c410045cce15863e3cfc1ba89d33dfc95f6397e113e32b12c148282016bc1a1",

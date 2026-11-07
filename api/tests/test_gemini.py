@@ -643,3 +643,17 @@ def test_a_janela_leva_so_os_cortes_dentro_do_trecho() -> None:
 def test_cortes_no_mesmo_segundo_viram_um_tempo_so() -> None:
     texto = instrucao(None, cortes_ms=[6_100, 6_900, 8_000])
     assert "(MM:SS): 00:06, 00:08." in texto
+
+
+def test_instrucao_diz_que_arroba_e_nome_de_pessoa_nao_sao_marca() -> None:
+    """#434: o modelo registrava o @ do apresentador como comercial."""
+    t = TransporteFalso(BOA)
+    analisar(t, video_uri=VIDEO, job_id=JOB, video=VIDEO_CONFIAVEL)
+    texto = t.chamadas[0].instrucao
+    assert "@ ou nome de pessoa nunca é marca" in texto
+    assert "só é comercial quando divulga um anunciante" in texto
+    assert "mencao_editorial" in texto
+    descricao = t.chamadas[0].esquema["$defs"]["Comercial"]["properties"]["tipo"][
+        "description"
+    ]
+    assert "nunca é marca" in descricao

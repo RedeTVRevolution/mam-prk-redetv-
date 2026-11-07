@@ -27,6 +27,7 @@ from functools import partial
 from threading import Event
 
 from api.catalogo import Catalogo
+from api.comparador import normalizar
 from api.consolidacao import consolidar
 from api.decupagem import Decupagem, Video
 from api.escalonamento import janelas_a_escalonar
@@ -77,6 +78,22 @@ def _em_paralelo[T](tarefas: Sequence[Callable[[], T]], maximo: int) -> list[T]:
         if erro and not isinstance(erro, CancelledError):
             raise erro
     return [f.result() for f in futuros]
+
+
+def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
+    """Tira o comercial cuja marca é o nome de uma pessoa da mesma Decupagem (#434).
+
+    O modelo registra o @ do apresentador na tela como comercial, com o nome dele em
+    `marca`. A correção do editor (`correcoes.py`) não passa por aqui, de propósito.
+    """
+    nomes = {normalizar(p.nome) for p in decupagem.pessoas}
+    return decupagem.model_copy(
+        update={
+            "comerciais": [
+                c for c in decupagem.comerciais if normalizar(c.marca) not in nomes
+            ]
+        }
+    )
 
 
 def analisar_video(
@@ -133,12 +150,14 @@ def analisar_video(
         return medicao.medir(decupagem, trecho_ms) if medicao else decupagem
 
     def identificar_pessoas(decupagem: Decupagem) -> Decupagem:
-        return identificar(
-            decupagem,
-            candidatos=candidatos_do_video(programa, catalogo, perfis),
-            transcricao=transcricao,
-            catalogo=catalogo,
-            tolerancia_ms=tolerancia_da_fala_ms,
+        return sem_comercial_de_pessoa(
+            identificar(
+                decupagem,
+                candidatos=candidatos_do_video(programa, catalogo, perfis),
+                transcricao=transcricao,
+                catalogo=catalogo,
+                tolerancia_ms=tolerancia_da_fala_ms,
+            )
         )
 
     def passo(trecho_ms: tuple[int, int] | None) -> Decupagem:

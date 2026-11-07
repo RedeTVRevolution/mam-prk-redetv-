@@ -95,6 +95,9 @@ REGRAS GERAIS
 {secao_dos_cortes}
 7. COMERCIAIS E MERCHANDISING
 - Registre toda ação comercial: merchandising do apresentador, testemunhal, produto em cena, banner, bug, QR code, chamada de site e intervalo comercial.
+- @ ou nome de pessoa nunca é marca: o @ de rede social do apresentador e o nome dele na tela não são ação comercial.
+- Chamada de site ou de rede social só é comercial quando divulga um anunciante.
+- O nome ou o site do próprio programa e da emissora não é anúncio: registre como mencao_editorial.
 - Para cada uma: marca, tipo, início, fim e evidência (fala, logo ou texto na tela).
 - Distinga ação comercial de menção editorial a uma marca.
 """
