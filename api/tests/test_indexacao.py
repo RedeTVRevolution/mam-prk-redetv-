@@ -9,6 +9,12 @@ from fastapi.testclient import TestClient
 
 import api.jobs
 from api.auth import Usuario
+from api.ciclo_de_vida import (
+    PRAZO_DA_RODADA,
+    fechar_a_rodada,
+    pedir_indexacao,
+    tomar_a_rodada,
+)
 from api.copia_bigquery import CopiaDosMomentos
 from api.correcoes import (
     RepositorioDeAprovacaoEmMemoria,
@@ -42,6 +48,15 @@ class JobsQueNaoGravam(RepositorioEmMemoria):
         if "indexacao" in mudancas:
             raise ConnectionError("Firestore fora do ar")
         return super().transitar(job_id, de, mudancas)
+
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        def sem_gravar_o_estado(job: Job) -> dict[str, Any] | None:
+            mudancas: dict[str, Any] | None = mudar(job)
+            if mudancas and "indexacao" in mudancas:
+                raise ConnectionError("Firestore fora do ar")
+            return mudancas
+
+        return super().trocar(job_id, sem_gravar_o_estado)
 
 
 class DisparoFalso:
@@ -295,6 +310,37 @@ def test_falha_ao_gravar_o_estado_nao_derruba_nem_impede_a_indexacao() -> None:
         is None
     )
     assert mundo.indice.total() == 6
+
+
+class JobsQueFalhamUmaVezAoFechar(RepositorioEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.falhas = 0
+
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        def falha_a_primeira(job: Job) -> dict[str, Any] | None:
+            mudancas: dict[str, Any] | None = mudar(job)
+            if mudancas and "versao_indexada" in mudancas and not self.falhas:
+                self.falhas += 1
+                raise ConnectionError("Firestore fora do ar")
+            return mudancas
+
+        return super().trocar(job_id, falha_a_primeira)
+
+
+def test_queda_passageira_ao_fechar_a_rodada_nao_prende_a_vez() -> None:
+    mundo = Mundo()
+    jobs = JobsQueFalhamUmaVezAoFechar()
+    jobs.salvar(_job())
+
+    indexacao = reindexar(
+        _job(), jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    )
+
+    job = jobs.obter("j1")
+    assert jobs.falhas == 1 and job
+    assert indexacao is not None and indexacao.estado == "indexado"
+    assert (job.versao_indexada, job.rodada_da_indexacao) == (1, None)
 
 
 def test_reindexar_todos_pega_so_os_concluidos() -> None:
@@ -662,3 +708,102 @@ def test_tirar_o_primeiro_objeto_nao_muda_o_id_do_outro() -> None:
 
     objetos = [i for i in _ids_do_indice(mundo, "objeto") if ":objeto:" in i]
     assert objetos == do_segundo
+
+
+class IndiceQuePedeDuranteAGravacao(IndiceQueConta):
+    """Na primeira gravação chega um pedido novo, como uma aprovação no meio da rodada."""
+
+    def __init__(self, pedir: Any) -> None:
+        super().__init__()
+        self._pedir = pedir
+
+    def gravar(self, job_id: str, registros: list[Registro]) -> None:
+        super().gravar(job_id, registros)
+        if self.gravacoes == 1:
+            self._pedir()
+
+
+def _indexar(mundo: Mundo, so_se_pedida: bool = True) -> Indexacao | None:
+    job = mundo.jobs.obter("j1")
+    assert job
+    return reindexar(
+        job,
+        mundo.jobs,
+        mundo.armazenamento,
+        mundo.correcoes,
+        mundo.indice,
+        so_se_pedida=so_se_pedida,
+    )
+
+
+def test_dois_pedidos_seguidos_dao_uma_rodada_com_a_versao_final() -> None:
+    indice = IndiceQueConta()
+    mundo = Mundo(indice=indice)
+    pedir_indexacao(mundo.jobs, "j1", BASE)
+    pedir_indexacao(mundo.jobs, "j1", BASE)
+
+    primeira = _indexar(mundo)
+    segunda = _indexar(mundo)
+
+    job = mundo.jobs.obter("j1")
+    assert job
+    assert primeira and primeira.estado == "indexado"
+    assert segunda is None  # nada mais pedido: o segundo disparo não indexa
+    assert indice.gravacoes == 1
+    assert (job.versao_pedida, job.versao_indexada) == (2, 2)
+    assert job.rodada_da_indexacao is None
+
+
+def test_pedido_durante_a_rodada_e_atendido_na_volta_sem_rodada_paralela() -> None:
+    outras: list[Indexacao | None] = []
+    mundos: list[Mundo] = []
+
+    def pedir_e_disparar() -> None:
+        pedir_indexacao(mundos[0].jobs, "j1", BASE)
+        # O disparo do pedido novo chega com a vez tomada: não grava nada.
+        outras.append(_indexar(mundos[0]))
+
+    indice = IndiceQuePedeDuranteAGravacao(pedir_e_disparar)
+    mundo = Mundo(indice=indice)
+    mundos.append(mundo)
+    pedir_indexacao(mundo.jobs, "j1", BASE)
+
+    resultado = _indexar(mundo)
+
+    job = mundo.jobs.obter("j1")
+    assert job
+    assert resultado and resultado.estado == "indexado"
+    assert outras == [None]
+    assert indice.gravacoes == 2
+    assert (job.versao_pedida, job.versao_indexada) == (2, 2)
+    assert job.rodada_da_indexacao is None
+
+
+def test_rodada_vencida_e_substituida_e_a_antiga_nao_fecha() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job())
+    assert tomar_a_rodada(jobs, "j1", BASE, "a")
+    assert tomar_a_rodada(jobs, "j1", BASE + timedelta(minutes=10), "b") is None
+
+    assert tomar_a_rodada(jobs, "j1", BASE + PRAZO_DA_RODADA, "b")
+    antiga = fechar_a_rodada(
+        jobs,
+        "j1",
+        "a",
+        1,
+        indexado=True,
+        indexacao=Indexacao(estado="indexado", em=BASE),
+        agora=BASE + PRAZO_DA_RODADA,
+    )
+
+    job = jobs.obter("j1")
+    assert antiga is None and job and job.rodada_da_indexacao
+    assert (job.versao_indexada, job.rodada_da_indexacao.id) == (0, "b")
+
+
+def test_pedido_so_vale_em_job_concluido() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j2", "analisando"))
+
+    assert pedir_indexacao(jobs, "j2", BASE) is None
+    assert tomar_a_rodada(jobs, "j2", BASE, "a") is None

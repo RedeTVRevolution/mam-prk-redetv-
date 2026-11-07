@@ -3,8 +3,9 @@
 Só o que mudou vai ao índice (#418): `AgentRetrieval.gravar` lê o que o vídeo tem lá, compara com
 a Decupagem e apaga, cria ou atualiza só a diferença. Repetir dá o mesmo resultado, e uma
 queda no meio termina na rodada seguinte, porque a comparação parte do índice.
-Roda ao fim da análise (Job `mam-indexacao`, depois dos quadros-chave), a cada Correção
-que passa a valer (`api.jobs`) e sob demanda (`make reindexar`). O estado vai no Job
+Roda ao fim da análise (Job `mam-indexacao`, depois dos quadros-chave), a cada pedido
+(aprovar a revisão, trocar o programa: só sobem a `versao_pedida` do Job, #419) e sob
+demanda (`make reindexar`); uma execução por vez, a que toma a vez, indexa até a versão pedida. O estado vai no Job
 (`indexacao`); uma falha dela só fica ali e nunca muda o `estado` do Job.
 """
 
@@ -12,10 +13,12 @@ import json
 import logging
 import os
 import sys
+import uuid
 from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import datetime
-from typing import Any, Protocol, get_args
+from functools import partial
+from typing import Any, NamedTuple, Protocol, get_args
 
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
@@ -26,6 +29,7 @@ from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_apagado import com_pessoas_fundidas
 from api.catalogo_dos_jobs import gravar_catalogo_do_job
+from api.ciclo_de_vida import fechar_a_rodada, tomar_a_rodada
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.decupagem import Decupagem
@@ -42,11 +46,13 @@ from api.jobs import (
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
+    ProgramasFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
+from api.programas import RepositorioDeProgramas, terminar_o_pendente
 from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 from api.tipos_de_objeto import TiposDeObjeto
 
@@ -124,28 +130,25 @@ def decupagem_do_job(
     return Decupagem.model_validate(_so_o_esquema(Decupagem, entregue))
 
 
-def reindexar(
+class _Resultado(NamedTuple):
+    indexacao: Indexacao
+    completo: bool  # indexado e, se há cópia, copiado
+
+
+def _uma_rodada(
     job: Job,
     repositorio: RepositorioDeJobs,
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
-    relogio: Callable[[], datetime] = agora_utc,
-    copia: CopiaDosMomentos | None = None,
-    sinal: SinalDoPrograma | None = None,
-    tipos_de_objeto: TiposDeObjeto | None = None,
-    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
-) -> Indexacao | None:
-    """Regrava o vídeo no índice (e na cópia do BigQuery) e devolve o estado da indexação.
-
-    Nunca levanta por falha do índice ou da cópia: cada uma fica no seu estado no Job, e
-    uma não impede a outra. `None` se o Job não está
-    `concluido` (não há Decupagem). Com `sinal`, o vídeo copiado é comparado com o histórico
-    do programa (#287); o sinal também nunca levanta. Com `tipos_de_objeto`, os tipos dos
-    objetos da Decupagem entram na lista do autocompletar (#308); falha só vai ao log.
-    """
-    if job.estado != "concluido":
-        return None
+    relogio: Callable[[], datetime],
+    copia: CopiaDosMomentos | None,
+    sinal: SinalDoPrograma | None,
+    tipos_de_objeto: TiposDeObjeto | None,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None,
+) -> _Resultado:
+    """Uma passada pelo índice e pela cópia com o `job` lido agora. Não grava o estado final
+    da indexação: quem fecha a rodada o grava. Nunca levanta por falha do índice ou da cópia."""
     inicio = relogio()
     _registrar(
         repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio)
@@ -203,10 +206,100 @@ def reindexar(
             "copia_bigquery",
             CopiaNoBigQuery(estado=estado_da_copia, em=fim, desde=inicio),
         )
-    atual = _registrar(
-        repositorio, job.id, "indexacao", Indexacao(estado=estado, em=fim, desde=inicio)
+    return _Resultado(
+        Indexacao(estado=estado, em=fim, desde=inicio),
+        estado == "indexado" and (not copia or estado_da_copia == "copiado"),
     )
-    return atual.indexacao if atual else None
+
+
+def reindexar(
+    job: Job,
+    repositorio: RepositorioDeJobs,
+    decupagens: LeitorDeDecupagem,
+    correcoes: RepositorioDeCorrecoes,
+    indice: IndiceDaBusca,
+    relogio: Callable[[], datetime] = agora_utc,
+    copia: CopiaDosMomentos | None = None,
+    sinal: SinalDoPrograma | None = None,
+    tipos_de_objeto: TiposDeObjeto | None = None,
+    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
+    programas: RepositorioDeProgramas | None = None,
+    so_se_pedida: bool = False,
+) -> Indexacao | None:
+    """Indexa o vídeo (e a cópia do BigQuery) até alcançar a `versao_pedida` e devolve o
+    estado da indexação (#419).
+
+    Toma a vez de indexar o vídeo: se outra execução a tem, ou, com `so_se_pedida`, se nada
+    foi pedido, devolve `None` sem gravar. O que se pedir durante a rodada é atendido na
+    volta, por esta mesma execução. Nunca levanta por falha do índice ou da cópia: cada uma
+    fica no seu estado no Job. `None` também se o Job não está `concluido`. Com `sinal`, o
+    vídeo copiado é comparado com o histórico do programa (#287); com `tipos_de_objeto`, os
+    tipos dos objetos entram no autocompletar (#308); os dois só vão ao log se falham. Com
+    `programas`, o vídeo sai dos pendentes da troca de nome do programa ao terminar.
+    """
+    rodada_id = uuid.uuid4().hex
+    try:
+        atual = tomar_a_rodada(
+            repositorio, job.id, relogio(), rodada_id, so_se_pedida=so_se_pedida
+        )
+    except Exception:
+        log.exception("vez de indexar %s não tomada", job.id)
+        return None
+    if atual is None:
+        return None
+    fechado: Job | None = None
+    resultado: _Resultado
+    while True:
+        alvo = atual.versao_pedida
+        resultado = _uma_rodada(
+            atual,
+            repositorio,
+            decupagens,
+            correcoes,
+            indice,
+            relogio,
+            copia,
+            sinal,
+            tipos_de_objeto,
+            pessoas,
+        )
+        # Sem fechar, a vez fica presa até `PRAZO_DA_RODADA` e a tela em "Finalizando".
+        fechado = _duas_tentativas(
+            partial(
+                fechar_a_rodada,
+                repositorio,
+                job.id,
+                rodada_id,
+                alvo,
+                indexado=resultado.indexacao.estado == "indexado",
+                indexacao=resultado.indexacao,
+                agora=relogio(),
+            ),
+            f"rodada de {job.id} não fechada",
+        )
+        if fechado is None or fechado.rodada_da_indexacao is None:
+            break
+        atual = fechado
+    if programas is not None:
+        # Sem a segunda tentativa, uma queda passageira deixaria o vídeo pendente (a tela
+        # só o resolve com o `retomar`).
+        _duas_tentativas(
+            lambda: terminar_o_pendente(
+                programas, job.id, atual.programa, resultado.completo
+            ),
+            f"troca de nome do programa não atualizada para {job.id}",
+        )
+    return fechado.indexacao if fechado else None
+
+
+def _duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
+    """`acao()`, tentada de novo uma vez se levanta; `None` (e o log) se as duas falham."""
+    for tentativa in (1, 2):
+        try:
+            return acao()
+        except Exception:
+            log.exception("%s (tentativa %d)", falha, tentativa)
+    return None
 
 
 def reindexar_jobs(
@@ -219,6 +312,8 @@ def reindexar_jobs(
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
     pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
+    programas: RepositorioDeProgramas | None = None,
+    so_se_pedida: bool = False,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -249,6 +344,8 @@ def reindexar_jobs(
             sinal=sinal,
             tipos_de_objeto=tipos_de_objeto,
             pessoas=pessoas,
+            programas=programas,
+            so_se_pedida=so_se_pedida,
         )
         resultado[job.id] = nova.estado if nova else "ignorado"
     return resultado
@@ -283,6 +380,10 @@ def main(argv: list[str]) -> int:
         sinal=sinal,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
         pessoas=CatalogoFirestore(firestore_).obter,
+        programas=ProgramasFirestore(firestore_),
+        # Disparado pelo Workflows/API (JOB_ID, sem argv) só indexa o que se pediu; o
+        # `make reindexar` sempre indexa.
+        so_se_pedida=not argv and "JOB_ID" in os.environ,
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")

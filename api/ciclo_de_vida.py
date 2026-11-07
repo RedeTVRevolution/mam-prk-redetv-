@@ -9,7 +9,7 @@ no meio do caminho).
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from api.sinais import Registrar, imprimir, registro_da_falha_de_etapa
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from api.jobs import (
         CodigoDeFalha,
         Estado,
+        Indexacao,
         Job,
         NomeDaEtapa,
         RepositorioDeJobs,
@@ -473,3 +474,109 @@ def desfazer_reprocessamento(
         }
 
     return repositorio.trocar(antes.id, mudar)
+
+
+# Uma rodada que passou disso sem fechar caiu (o Job `mam-indexacao` morre em 30 min): a
+# seguinte a substitui.
+PRAZO_DA_RODADA = timedelta(minutes=40)
+
+
+def pedir_indexacao(
+    repositorio: RepositorioDeJobs, job_id: str, agora: datetime
+) -> Job | None:
+    """Incrementa a `versao_pedida` do Job concluído e põe a indexação em `pendente` (#419).
+
+    Quem pede (aprovar a revisão, trocar o nome do programa) dispara o `mam-indexacao` depois.
+    `None` se o Job não existe ou saiu de `concluido`.
+    """
+
+    def mudar(job: Job) -> dict[str, Any] | None:
+        from api.jobs import Indexacao
+
+        if job.estado != "concluido":
+            return None
+        return {
+            "versao_pedida": max(job.versao_pedida, job.versao_indexada) + 1,
+            "indexacao": Indexacao(estado="pendente", em=agora),
+        }
+
+    return repositorio.trocar(job_id, mudar)
+
+
+def tomar_a_rodada(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    agora: datetime,
+    rodada_id: str,
+    *,
+    so_se_pedida: bool = False,
+) -> Job | None:
+    """Toma a vez de indexar o vídeo e devolve o Job lido, com a `versao_pedida` a alcançar.
+
+    `None`, sem gravar nada, se o Job não está `concluido`, se outra execução está indexando
+    (ela pega na volta o que se pediu depois) ou, com `so_se_pedida`, se não há pedido
+    pendente: `indexacao` em `pendente` (o fim da análise) ou `versao_pedida` à frente da
+    `versao_indexada`. Sem `so_se_pedida` (`make reindexar`), sempre há uma versão a mais.
+    """
+
+    def mudar(job: Job) -> dict[str, Any] | None:
+        from api.jobs import RodadaDaIndexacao
+
+        if job.estado != "concluido":
+            return None
+        r = job.rodada_da_indexacao
+        if r is not None and agora - r.em < PRAZO_DA_RODADA:
+            return None
+        pedida = job.versao_pedida > job.versao_indexada or (
+            job.indexacao is not None and job.indexacao.estado == "pendente"
+        )
+        if so_se_pedida and not pedida:
+            return None
+        return {
+            "versao_pedida": max(job.versao_pedida, job.versao_indexada + 1),
+            "rodada_da_indexacao": RodadaDaIndexacao(id=rodada_id, em=agora),
+        }
+
+    return repositorio.trocar(job_id, mudar)
+
+
+def fechar_a_rodada(
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    rodada_id: str,
+    alvo: int,
+    *,
+    indexado: bool,
+    indexacao: Indexacao,
+    agora: datetime,
+) -> Job | None:
+    """Fecha a rodada de `rodada_id`, que mirava `alvo`; devolve o Job gravado.
+
+    Com `indexado`, a `versao_indexada` chega a `alvo`; se pediram mais enquanto isso, a
+    rodada segue aberta (`rodada_da_indexacao` não vem vazia) e a `indexacao` continua
+    `pendente`: quem chamou indexa de novo. Sem `indexado`, ou sem pedido novo, solta a vez e
+    grava `indexacao`. `None` se a rodada não é mais desta execução (venceu e outra tomou) ou
+    o Job sumiu.
+    """
+
+    def mudar(job: Job) -> dict[str, Any] | None:
+        from api.jobs import RodadaDaIndexacao
+
+        r = job.rodada_da_indexacao
+        if r is None or r.id != rodada_id:
+            return None
+        if not indexado:
+            return {"rodada_da_indexacao": None, "indexacao": indexacao}
+        indexada = max(job.versao_indexada, alvo)
+        if job.versao_pedida > indexada:
+            return {
+                "versao_indexada": indexada,
+                "rodada_da_indexacao": RodadaDaIndexacao(id=rodada_id, em=agora),
+            }
+        return {
+            "versao_indexada": indexada,
+            "rodada_da_indexacao": None,
+            "indexacao": indexacao,
+        }
+
+    return repositorio.trocar(job_id, mudar)

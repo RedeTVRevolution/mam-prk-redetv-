@@ -35,8 +35,14 @@ from pydantic import BaseModel, StringConstraints, field_validator
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, visivel
+from api.ciclo_de_vida import pedir_indexacao
 from api.correcoes import _sem_controle
-from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs, _confere_permissao
+from api.jobs import (
+    DisparoDaIndexacao,
+    FiltroDeJobs,
+    RepositorioDeJobs,
+    _confere_permissao,
+)
 from api.programas import (
     NomeDoPrograma,
     NomeEmUso,
@@ -62,8 +68,6 @@ LIMITE_DE_PESSOAS_NO_PROGRAMA = 200
 # auditar: o serviço web não passa do tempo padrão do Cloud Run (300 s), com folga.
 PRAZO_DA_CONFIRMACAO = timedelta(minutes=15)
 EM_CURSO = ("confirmando", "em_andamento")
-# Rodadas sobre os vídeos que falharam antes de desistir (a pessoa pode retomar).
-RODADAS = 3
 
 Apelido = Annotated[
     str,
@@ -146,11 +150,11 @@ def criar_rotas_dos_programas(
     jobs: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
     relogio: Callable[[], datetime],
-    reindexar: Callable[[Job], bool],
+    disparo: DisparoDaIndexacao,
     ao_criar_pessoa: Callable[[], None],
 ) -> APIRouter:
-    """`reindexar` devolve se o vídeo ficou no índice e na cópia; `ao_criar_pessoa`
-    descarta a cópia da lista de pessoas."""
+    """`disparo` começa o `mam-indexacao` do vídeo; `ao_criar_pessoa` descarta a cópia da
+    lista de pessoas."""
     rotas = APIRouter(prefix="/admin/programas")
 
     def publico(programa: Programa) -> ProgramaPublico:
@@ -267,62 +271,57 @@ def criar_rotas_dos_programas(
             ),
         )
 
-    # Trocas rodando nesta instância: `retomar` não abre uma segunda da mesma.
-    em_execucao: set[str] = set()
-
     def religar_videos(programa_id: str, troca_id: str) -> None:
-        """Troca o nome nos vídeos pendentes e os reindexa, em até `RODADAS` rodadas."""
-        if troca_id in em_execucao:
-            return
-        em_execucao.add(troca_id)
-        try:
-            _religar_videos(programa_id, troca_id)
-        finally:
-            em_execucao.discard(troca_id)
+        """Leva o nome novo a cada vídeo pendente e pede a indexação dele (#419).
 
-    def _religar_videos(programa_id: str, troca_id: str) -> None:
+        O pendente só sai quando o `mam-indexacao` alcança a versão pedida do vídeo
+        (`terminar_o_pendente`), que fecha a troca ao zerar. Quem falha no disparo fica
+        pendente para o `retomar`.
+        """
         r = da_troca(programa_id, troca_id)
         if r is None:
             return
-        for _ in range(RODADAS):
-            for job_id in list(r.pendentes):
-                try:
-                    # Antes de mexer no Job: outra troca pode ter tomado o lugar desta.
-                    if da_troca(programa_id, troca_id) is None:
-                        return
-                    # O Job recebe o nome do programa só se esta troca ainda está em
-                    # andamento, conferido na mesma transação: entre a conferência
-                    # acima e a gravação, outra instância pode ter terminado esta troca
-                    # e começado outra. Também leva ao nome atual o pendente herdado
-                    # com um nome mais antigo. Reindexa o Job devolvido, nunca um lido
-                    # antes.
-                    job = programas.levar_o_nome_ao_job(
-                        programa_id, troca_id, job_id, jobs
-                    )
-                    # Na lixeira também: restaurar não reindexa, e o vídeo voltaria
-                    # com o nome antigo na busca e nos relatórios.
-                    pronto = job is None or job.estado != "concluido" or reindexar(job)
-                    if pronto and tirar_pendente(programa_id, troca_id, job_id) is None:
-                        return  # outra troca, ou o programa foi apagado
-                except TrocaSubstituida:
-                    # Sem tirar pendente nem fechar a troca: ela não é mais desta tarefa.
+        falhou = False
+        for job_id in list(r.pendentes):
+            try:
+                # Antes de mexer no Job: outra troca pode ter tomado o lugar desta.
+                if da_troca(programa_id, troca_id) is None:
                     return
-                except Exception:
-                    # O Job fica pendente; a tarefa segue e `retomar` o tenta de novo.
-                    log.exception("troca do programa em %s falhou", job_id)
-            r = da_troca(programa_id, troca_id)
-            if r is None:
+                # O Job recebe o nome do programa só se esta troca ainda está em andamento,
+                # conferido na mesma transação. Também leva ao nome atual o pendente
+                # herdado com um nome mais antigo. Na lixeira também: restaurar não
+                # indexa, e o vídeo voltaria com o nome antigo na busca e nos relatórios.
+                job = programas.levar_o_nome_ao_job(programa_id, troca_id, job_id, jobs)
+                # Sem Job concluído (inexistente, ou saiu de `concluido` agora há pouco)
+                # não há indexação a esperar: o pendente sai já, senão a troca não fecha.
+                if (
+                    job is None
+                    or job.estado != "concluido"
+                    or pedir_indexacao(jobs, job_id, relogio()) is None
+                ):
+                    if tirar_pendente(programa_id, troca_id, job_id) is None:
+                        return  # outra troca, ou o programa foi apagado
+                    continue
+                disparo.iniciar(job_id)
+            except TrocaSubstituida:
+                # Sem tirar pendente: a troca não é mais desta tarefa (outra a substituiu,
+                # ou o `mam-indexacao` de um vídeo já falhou e a pôs em `falhou`: o
+                # `retomar` segue dos que sobraram).
                 return
-            if not r.pendentes:
-                break
-        mudar_a_troca(
-            programa_id,
-            troca_id,
-            ("em_andamento",),
-            lambda r: r.model_copy(
-                update={"estado": "falhou" if r.pendentes else "concluida"}
-            ),
-        )
+            except Exception:
+                # O Job fica pendente; a tarefa segue e `retomar` o tenta de novo.
+                falhou = True
+                log.exception("troca do programa em %s falhou", job_id)
+        r = da_troca(programa_id, troca_id)
+        if r is not None and (falhou or not r.pendentes):
+            mudar_a_troca(
+                programa_id,
+                troca_id,
+                ("em_andamento",),
+                lambda r: r.model_copy(
+                    update={"estado": "falhou" if r.pendentes else "concluida"}
+                ),
+            )
 
     @rotas.get("")
     def listar(

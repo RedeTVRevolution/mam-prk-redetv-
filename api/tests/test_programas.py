@@ -1,4 +1,5 @@
 import tomllib
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,10 @@ from api.catalogo import (
     FusaoDaPessoa,
 )
 from api.copia_bigquery import CopiaEmMemoria
+from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.exemplos_da_busca import EXEMPLOS
+from api.indexacao import reindexar
+from api.indice_da_busca import IndiceDaBusca
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
@@ -38,6 +42,64 @@ from api.tests.test_renomeacao_de_pessoas import IndiceQueFalhaAteConsertar
 AUTORIZACAO = {"Authorization": "Bearer token"}
 
 
+class DisparoNaHora:
+    """O `mam-indexacao` rodando na hora, sobre os mesmos repositórios da API (#419)."""
+
+    def __init__(
+        self,
+        jobs: RepositorioEmMemoria,
+        armazenamento: ArmazenamentoFalso,
+        indice: IndiceDaBusca,
+        copia: CopiaEmMemoria | None,
+        programas: ProgramasEmMemoria,
+        catalogo: Catalogo,
+        relogio: Callable[[], datetime],
+    ) -> None:
+        self.argumentos = (
+            jobs,
+            armazenamento,
+            RepositorioDeCorrecoesEmMemoria(),
+            indice,
+        )
+        self.copia = copia
+        self.programas = programas
+        self.catalogo = catalogo
+        self.relogio = relogio
+        self.pedidos: list[str] = []
+
+    def iniciar(self, job_id: str) -> None:
+        self.pedidos.append(job_id)
+
+    def rodar(self) -> None:
+        """Roda o que se pediu, depois da resposta, como o Job da nuvem."""
+        while self.pedidos:
+            self._rodar(self.pedidos.pop(0))
+
+    def _rodar(self, job_id: str) -> None:
+        job = self.argumentos[0].obter(job_id)
+        assert job is not None
+        reindexar(
+            job,
+            *self.argumentos,
+            relogio=self.relogio,
+            copia=self.copia,
+            pessoas=self.catalogo.obter,
+            programas=self.programas,
+            so_se_pedida=True,
+        )
+
+
+class ClienteQueIndexa(TestClient):
+    """Depois de cada resposta, roda as indexações que ela pediu."""
+
+    disparo: DisparoNaHora
+
+    def request(self, *args: Any, **kwargs: Any) -> Any:
+        resposta = super().request(*args, **kwargs)
+        self.disparo.rodar()
+        return resposta
+
+
 def _cliente(
     papeis: list[Papel],
     jobs: RepositorioEmMemoria | None = None,
@@ -48,22 +110,31 @@ def _cliente(
     cadastro: tuple[ProgramasEmMemoria, Catalogo] | None = None,
 ) -> tuple[TestClient, ProgramasEmMemoria, Catalogo]:
     programas, catalogo = cadastro or cadastro_com_tv_fama()
+    jobs = jobs or RepositorioEmMemoria()
+    armazenamento = armazenamento or ArmazenamentoFalso()
+    indice = indice or IndiceQueFalhaAteConsertar()
+    relogio = lambda: datetime(2026, 11, 5, tzinfo=UTC)
     repositorio_de_papeis = RepositorioDePapeisEmMemoria()
     repositorio_de_papeis.salvar("u1", papeis)
-    cliente = TestClient(
+    disparo = DisparoNaHora(
+        jobs, armazenamento, indice, copia, programas, catalogo, relogio
+    )
+    cliente = ClienteQueIndexa(
         criar_app(
             VerificadorFalso({"token": Usuario(uid="u1", email="a@b.c")}),
-            jobs or RepositorioEmMemoria(),
-            armazenamento or ArmazenamentoFalso(),
+            jobs,
+            armazenamento,
             papeis=repositorio_de_papeis,
             indice=indice,
             copia=copia,
             programas=programas,
             catalogo=catalogo,
             auditoria=auditoria or RepositorioDeAuditoriaEmMemoria(),
-            relogio=lambda: datetime(2026, 11, 5, tzinfo=UTC),
+            disparo_da_indexacao=disparo,
+            relogio=relogio,
         )
     )
+    cliente.disparo = disparo
     return cliente, programas, catalogo
 
 
@@ -213,12 +284,57 @@ def test_renomear_troca_o_nome_nos_videos_e_reindexa() -> None:
     assert impacto.json() == {"videos": 1}
 
 
+def test_renomear_o_programa_em_tres_videos_da_tres_pedidos_e_zera_os_pendentes() -> (
+    None
+):
+    acervo = Acervo()
+    acervo.jobs.salvar(_job("j4", programa="TV Fama"))
+    acervo.armazenamento.decupagens["j4"] = acervo.armazenamento.decupagens["j1"]
+    disparo = acervo.cliente.disparo  # type: ignore[attr-defined]
+    pedidos: list[str] = []
+    iniciar = disparo.iniciar
+
+    def iniciar_e_anotar(job_id: str) -> None:
+        pedidos.append(job_id)
+        iniciar(job_id)
+
+    disparo.iniciar = iniciar_e_anotar
+
+    acervo.renomear()
+
+    assert sorted(pedidos) == ["j1", "j2", "j4"]
+    versoes = [acervo.jobs.obter(j).versao_indexada for j in ("j1", "j2", "j4")]  # type: ignore[union-attr]
+    assert versoes == [1, 1, 1]
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None
+    assert (renomeacao.estado, renomeacao.pendentes) == ("concluida", [])
+
+
+def test_video_que_sai_de_concluido_antes_do_pedido_sai_dos_pendentes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acervo = Acervo()
+    # Reprocessado entre levar o nome ao Job e pedir a indexação: o pedido não vale.
+    monkeypatch.setattr(
+        "api.rotas_dos_programas.pedir_indexacao",
+        lambda jobs, job_id, agora: None,
+    )
+
+    acervo.renomear()
+
+    renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
+    assert renomeacao is not None
+    assert (renomeacao.estado, renomeacao.pendentes) == ("concluida", [])
+
+
 def test_indice_fora_do_ar_deixa_pendente_e_retomar_termina() -> None:
     acervo = Acervo()
     acervo.indice.quebrado = True
 
     acervo.renomear()
 
+    # O disparo falso roda a indexação depois da resposta, com o laço já terminado: o nome
+    # chegou aos Jobs, e a falha do índice põe a troca em `falhou`; `retomar` segue.
     assert acervo.programa("j1") == "Fama Hoje"
     renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
     assert renomeacao is not None
@@ -232,6 +348,7 @@ def test_indice_fora_do_ar_deixa_pendente_e_retomar_termina() -> None:
     )
 
     assert retomado.status_code == 200
+    assert acervo.programa("j1") == "Fama Hoje"
     assert acervo.no_indice("j1") == {"Fama Hoje"}
     renomeacao = acervo.programas.obter(acervo.id).renomeacao  # type: ignore[union-attr]
     assert renomeacao is not None
