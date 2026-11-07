@@ -220,6 +220,9 @@ class RepositorioQuePublicaOFim:
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         return self._repositorio.consultar(filtro)
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        return self._repositorio.contar_criados(criado_por, desde)
+
 
 def registrar_o_fim(eventos: Eventos, job: Job, agora: datetime) -> None:
     """O evento de uso `fim_de_processamento` do Job que terminou."""
@@ -294,6 +297,9 @@ class RepositorioQueRegistraOFim:
 
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         return self._repositorio.consultar(filtro)
+
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        return self._repositorio.contar_criados(criado_por, desde)
 
 
 def eventos_do_ambiente(

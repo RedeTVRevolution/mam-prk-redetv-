@@ -283,6 +283,13 @@ class RepositorioFirestore:
         ).stream()
         return [Job(**(doc.to_dict() or {})) for doc in docs]
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        # Índice composto `criado_por` + `criado_em` em infra/modulos/mam/teto_de_criacao.tf (#371).
+        consulta: Any = self._colecao.where(
+            filter=FieldFilter("criado_por", "==", criado_por)
+        ).where(filter=FieldFilter("criado_em", ">=", desde))
+        return int(consulta.count().get()[0][0].value)
+
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
