@@ -494,7 +494,7 @@ def test_comercial_cuja_marca_e_pessoa_da_decupagem_sai_e_marca_de_verdade_fica(
 ):
     """O @ do apresentador na tela não é anúncio (#434)."""
     curto = Video(sha256="d" * 64, duracao_ms=60_000)
-    transporte = TransporteFalso(_boa_com_comerciais("FULANA", "Marca Real"))
+    transporte = TransporteFalso(_boa_com_comerciais("FULÁNA", "Marca Real"))
 
     d = analisar_video(transporte, video_uri=URI, job_id="j", video=curto)
 

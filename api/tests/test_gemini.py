@@ -652,7 +652,7 @@ def test_instrucao_diz_que_arroba_e_nome_de_pessoa_nao_sao_marca() -> None:
     texto = t.chamadas[0].instrucao
     assert "@ ou nome de pessoa nunca é marca" in texto
     assert "só é comercial quando divulga um anunciante" in texto
-    assert "mencao_editorial" in texto
+    assert "próprio programa e da emissora não é anúncio" in texto
     descricao = t.chamadas[0].esquema["$defs"]["Comercial"]["properties"]["tipo"][
         "description"
     ]
