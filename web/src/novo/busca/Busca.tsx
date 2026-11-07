@@ -23,6 +23,7 @@ import {
   contagemDeMomentos,
   contagemDeVideos,
   EVIDENCIAS,
+  TAMANHO_DA_CONSULTA,
   type ConsultaDaBusca,
   type Evidencia,
   type NomeDaFaceta,
@@ -218,9 +219,6 @@ function contagemDaGrade(busca: ReturnType<typeof useBusca>, deCenas: (n: number
  * A página `/busca` da interface nova: o estado todo na URL e as cenas em grade (#400). A foto da
  * busca por imagem fica na memória da página, não na URL, e vale até "Limpar" ou até um texto novo.
  */
-// Mesmo teto da API (`q` com mais de 300 caracteres dá 422).
-const TAMANHO_DA_CONSULTA = 300
-
 export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
   const [foto, setFoto] = useState<{ arquivo: File; id: number } | null>(null)
   const [arrastando, setArrastando] = useState(false)

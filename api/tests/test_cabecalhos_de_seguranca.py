@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 from api.main import CABECALHOS_DE_SEGURANCA, criar_app
@@ -38,12 +39,27 @@ def test_toda_resposta_traz_os_quatro_cabecalhos(
     }
 
 
-def test_erro_404_da_api_traz_os_cabecalhos(cliente: TestClient) -> None:
-    resposta = cliente.get("/v1/nao-existe")
+def test_erro_404_traz_os_cabecalhos(cliente: TestClient) -> None:
+    resposta = cliente.get("/assets/nao-existe.js")
 
-    assert resposta.status_code in {401, 404}
-    assert resposta.headers["X-Content-Type-Options"] == "nosniff"
-    assert "Content-Security-Policy" in resposta.headers
+    assert resposta.status_code == 404
+    for nome, valor in CABECALHOS_DE_SEGURANCA.items():
+        assert resposta.headers[nome] == valor, nome
+
+
+def test_erro_500_nao_tratado_traz_os_cabecalhos(tmp_path: Path) -> None:
+    rotas = APIRouter()
+
+    @rotas.get("/interno/quebra")
+    def _quebra() -> None:
+        raise RuntimeError("quebrou")
+
+    app = criar_app(pasta_web=tmp_path, rotas_do_push=rotas)
+    resposta = TestClient(app, raise_server_exceptions=False).get("/interno/quebra")
+
+    assert resposta.status_code == 500
+    for nome, valor in CABECALHOS_DE_SEGURANCA.items():
+        assert resposta.headers[nome] == valor, nome
 
 
 def test_valores_combinados() -> None:

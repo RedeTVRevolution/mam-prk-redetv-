@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
@@ -369,6 +369,15 @@ def criar_app(
     def _tipo_errado(_request: Request, _erro: TipoNaoSuportado) -> JSONResponse:
         return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
 
+    # O erro que ninguém tratou não passa pelos middlewares: quem responde é o
+    # `ServerErrorMiddleware`, por fora deles, e o 500 sairia sem os cabeçalhos de
+    # segurança (#372). A exceção continua subindo para o log.
+    @app.exception_handler(Exception)
+    def _erro_interno(_request: Request, _erro: Exception) -> PlainTextResponse:
+        return PlainTextResponse(
+            "Internal Server Error", status_code=500, headers=CABECALHOS_DE_SEGURANCA
+        )
+
     app.state.verificador = verificador or _SemVerificador()
     # Com repositório e chave MAC, a API confere as chaves emitidas por ela mesma.
     if chaves is None and repositorio_de_chaves and mac:
@@ -407,7 +416,8 @@ def criar_app(
     app.middleware("http")(_registrar_chamada_de_api)
     app.middleware("http")(exigir_autenticacao)
 
-    # O último registrado é o mais externo: pega também o 401 da autenticação e os erros.
+    # O último registrado é o mais externo: pega também o 401 da autenticação e os erros
+    # que viram resposta dentro do app; o 500 de exceção não tratada é o `_erro_interno`.
     async def _cabecalhos_de_seguranca(
         request: Request, seguinte: Callable[[Request], Awaitable[Response]]
     ) -> Response:
