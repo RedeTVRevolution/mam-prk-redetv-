@@ -217,7 +217,7 @@ export function Inspetor({
   urlDoQuadro: (caminho: string) => Promise<string>
   acoes?: AcoesDeCorrecao
   aviso: string | null
-  /** O que a revisão põe acima do "Agora": as sugestões, as pautas marcadas. */
+  /** O que a revisão põe acima do "Agora": as pautas marcadas. */
   acima?: ReactNode
   indexando: boolean
   aoRecolher: () => void

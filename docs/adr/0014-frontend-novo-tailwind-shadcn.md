@@ -45,3 +45,5 @@ Gráfico no tempo agrupa por dia, semana, mês ou trimestre, conforme o período
 - Com as duas interfaces na mesma aplicação, cada fase vai ao ar sem mexer no que os usuários usam, e dá para testar a nova no dev com dados reais antes da troca.
 - O Mantine e o Tailwind na mesma página brigam pelo reset do CSS. O `import()` dinâmico separa os dois sem precisar de um segundo build, de outra rota no FastAPI ou de outro serviço.
 - No `web/` atual, os relatórios devolvem tudo: todas as pessoas com todos os vídeos, e cada inserção de marca. Com 25 anos de acervo, isso lota a instância e o navegador. Cortar no servidor é o que limita os dois.
+
+Saiu em 06/11/2026 (decisão do Bruno): as sugestões ao editor (identificar pessoa, pauta do trecho, objeto do visual), as rotas, o painel e a contagem (#487). O item "sugestões" da lista acima não será migrado.

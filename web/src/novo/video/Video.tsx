@@ -35,7 +35,7 @@ import {
   pedidoDeRemocao,
   podeRemover,
 } from '../../catalogacao.ts'
-import type { ItemDoHistorico, Pauta, Sugestao } from '../../decupagem.ts'
+import type { ItemDoHistorico, Pauta } from '../../decupagem.ts'
 import { ABAS_DO_TRECHO } from '../../trecho.ts'
 import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from '../../pautas.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
@@ -60,7 +60,6 @@ import { AvisoDeFalha, BotaoComDica, BotaoDeIcone } from './comum.tsx'
 import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import type { ResumoDaPassada } from '../../passadas.ts'
-import { Sugestoes } from './Sugestoes.tsx'
 import { FormularioDoTrecho } from './Trecho.tsx'
 import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
@@ -280,17 +279,6 @@ export function Video({
   // A sessão de revisão (#251) vale no modo de revisão; a pessoa não vê nada dela.
   useSessaoDeRevisao(cliente, pode.editar && revisao.revisando, tocando)
 
-  // As sugestões do pipeline só aparecem na revisão; a lista vem de novo a cada entrada nela.
-  const chaveDasSugestoes = chaveDoVideo(job.id, 'sugestoes')
-  const sugestoes = useQuery({
-    queryKey: chaveDasSugestoes,
-    queryFn: () => cliente.sugestoes(),
-    enabled: revisao.revisando && !!d,
-    retry: false,
-    staleTime: 0,
-    refetchOnWindowFocus: false,
-  })
-
   // Uma decupagem de outra versão (reprocessar) deixa velhos o histórico, a fila, as passadas e as
   // comparações, que valem para sempre no cache: pergunta de novo. Recarregar a mesma versão não custa nada.
   const versaoAnterior = useRef(d?.versao_decupagem)
@@ -301,14 +289,6 @@ export function Video({
     }
     versaoAnterior.current = d.versao_decupagem
   }, [d, consultas, job.id])
-
-  // Toda mudança do histórico (corrigir, desfazer com Ctrl+Z, aceitar uma sugestão, decidir na gaveta) pode
-  // trazer de volta ou tirar uma sugestão: a lista vem de novo, sem cada caminho ter de lembrar disso.
-  const historicoAnterior = useRef(historico.data)
-  useEffect(() => {
-    if (historicoAnterior.current && historicoAnterior.current !== historico.data) void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })
-    if (historico.data) historicoAnterior.current = historico.data
-  }, [historico.data, consultas, chaveDasSugestoes])
 
   // Outro `?t=` no mesmo vídeo salta o player.
   const tAnterior = useRef(t)
@@ -1156,21 +1136,6 @@ export function Video({
             acima={
               revisao.revisando ? (
                 <>
-                  {sugestoes.data ? (
-                    <Sugestoes
-                      sugestoes={sugestoes.data}
-                      decupagem={d}
-                      api={cliente}
-                      aoSaltar={saltarParaMs}
-                      aoResolver={(id) => {
-                        consultas.setQueryData(chaveDasSugestoes, (l: Sugestao[] | undefined) => l?.filter((x) => x.id !== id))
-                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
-                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
-                      }}
-                      aoFalhar={() => void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })}
-                      aoAvisar={mostrarAviso}
-                    />
-                  ) : null}
                   {marcadasNaDecupagem > 0 ? (
                     <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm">
                       <span className="mr-auto">

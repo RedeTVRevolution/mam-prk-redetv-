@@ -102,7 +102,7 @@ carregar-marcas:
 	uv run --locked python -m api.carregar_marcas
 
 # Migração única da retirada das referências na web (#327): apaga as fotos, os rostos
-# `origem=web`, as sugestões de perfil e os registros da comparação, e imprime a contagem
+# `origem=web` e os registros da comparação, e imprime a contagem
 # antes e depois. Rodar de novo não apaga nada a mais. Depois, rode `make copiar-para-bigquery`
 # e `make reindexar`: o nome que voltou a palpite ainda está no tempo de tela e na busca.
 apagar-referencias-web:

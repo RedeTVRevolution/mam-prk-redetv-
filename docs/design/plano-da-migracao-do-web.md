@@ -1,5 +1,7 @@
 # Plano da migração do `web/` para a interface nova
 
+> Saiu em 06/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
+
 Decisão no ADR 0014 (5/11/2026). Origem: o protótipo `prototipos/redesenho`, opção B Galeria, aprovado pelo Bruno. O design segue o `docs/design/MAM_DESIGN_SYSTEM.md`.
 
 ## Como cada fase é feita

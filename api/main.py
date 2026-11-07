@@ -87,7 +87,6 @@ from api.jobs import (
     ServicoIndisponivel,
     TipoNaoSuportado,
     _chave_com_algum,
-    _exige_aprovar,
     agora_utc,
     criar_rotas,
     papeis_da_pessoa,
@@ -128,7 +127,6 @@ from api.nuvem import (
     RepositorioDeIdempotenciaFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeRevisaoFirestore,
-    RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
     listagem_por_mes_do_ambiente,
@@ -197,11 +195,6 @@ from api.rotas_das_chaves import (
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
 from api.rotas_dos_programas import criar_rotas_dos_programas
-from api.sugestoes import (
-    RepositorioDeSugestoes,
-    RepositorioDeSugestoesEmMemoria,
-    criar_rotas_da_contagem,
-)
 from api.taxa_de_correcao import criar_rotas_da_qualidade
 from api.taxa_do_painel import LeitorDaTaxa, TaxaEmMemoria, taxa_do_ambiente
 from api.tempo_de_tela import ConsultaComCache as TempoDeTelaComCache
@@ -341,7 +334,6 @@ def criar_app(
     marcas: CatalogoDeMarcas | None = None,
     programas: RepositorioDeProgramas | None = None,
     fotos_de_referencia: FotosDeReferencia | None = None,
-    sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
@@ -503,7 +495,6 @@ def criar_app(
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
     repositorio_de_programas = programas or ProgramasEmMemoria()
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
-    repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
     repositorio_de_aprovacao = aprovacao or RepositorioDeAprovacaoEmMemoria()
     v1.include_router(
@@ -517,10 +508,8 @@ def criar_app(
             catalogo_de_pessoas,
             catalogo_de_marcas,
             repositorio_de_programas,
-            repositorio_de_sugestoes,
             disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
-            tipos_dos_objetos.conhecidos,
             idempotencia,
             publicador,
         )
@@ -539,7 +528,6 @@ def criar_app(
         )
     )
     v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
-    v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
 
     # Uma cópia das pessoas para o autocompletar e para a busca resolver nomes.
     copia_das_pessoas = CopiaCurta(catalogo_de_pessoas.todas, relogio)
@@ -844,7 +832,6 @@ if _projeto:
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),
-        sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
         # A reindexação (em `BackgroundTasks`) e a purga (no pedido da rota) esperam a
         # cota de escrita; a busca nunca espera (`AgentRetrieval`).
         indice=(

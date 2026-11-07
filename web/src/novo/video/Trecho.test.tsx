@@ -41,7 +41,6 @@ const servidor = setupServer(
   http.get('/v1/eu', () => HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br', permissoes: ['decupagem.editar'] })),
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json([])),
-  http.get('/v1/jobs/j1/sugestoes', () => HttpResponse.json([])),
   http.post('/v1/jobs/j1/revisao/aprovar', () => HttpResponse.json({ indexacao: 'pendente' }, { status: 202 })),
   http.get('/v1/catalogo/pessoas', ({ request }) => {
     consultas.push(new URL(request.url).searchParams.get('q') ?? '')

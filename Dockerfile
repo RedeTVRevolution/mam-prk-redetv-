@@ -126,7 +126,6 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/revisao.py \
      api/sinais.py \
-     api/sugestoes.py \
      api/teste_dos_jobs.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
@@ -234,7 +233,6 @@ COPY api/__init__.py \
      api/quadros.py \
      api/revisao.py \
      api/sinais.py \
-     api/sugestoes.py \
      api/teste_dos_jobs.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
@@ -330,7 +328,6 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/revisao.py \
      api/sinais.py \
-     api/sugestoes.py \
      api/teste_dos_jobs.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
