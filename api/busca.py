@@ -165,7 +165,7 @@ class VideoDoResultado(BaseModel):
 class SemAparicao(BaseModel):
     """A pessoa pedida não aparece na imagem no programa e período pedidos; quantas vezes é citada."""
 
-    pessoa_id: str
+    pessoa_id: str | None  # `None`: o nome que o catálogo não resolve
     nome: str
     mencoes_na_fala: int
     mencoes_na_tela: int
@@ -511,7 +511,13 @@ class Busca:
             return nomes.get(id or "") or None
 
         carregar_nomes([*entendida.pessoas, *(o.dono for o in entendida.objetos)])
-        clausulas = self._clausulas(entendida, nome)
+        # Pessoa que o catálogo não resolve não tem como aparecer: as outras cláusulas
+        # ("vestido vermelho") trariam o de outra pessoa como se fosse dela.
+        clausulas = (
+            []
+            if entendida.pessoas_fora_do_catalogo
+            else self._clausulas(entendida, nome)
+        )
         # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
         # entendidos já filtram, e não entram no vetor.
         consulta_visual = _texto_da_busca(entendida) or texto
@@ -522,7 +528,7 @@ class Busca:
             if visual
             else None
         )
-        if vetor is not None:
+        if vetor is not None and not entendida.pessoas_fora_do_catalogo:
             clausulas.append(_clausula_visual(entendida, vetor, nome))
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
@@ -591,11 +597,16 @@ class Busca:
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
         vazios = [
-            self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
+            self._sem_aparicao(
+                nome(c.pessoa_na_imagem) or "", c.pessoa_na_imagem, entendida, consultar
+            )
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
             # "Nenhuma aparição" fala do acervo, não do que a faceta deixou.
             if c.pessoa_na_imagem
             and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
+        ] + [
+            self._sem_aparicao(quem, None, entendida, consultar)
+            for quem in entendida.pessoas_fora_do_catalogo
         ]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas%s",
@@ -955,13 +966,12 @@ class Busca:
 
     def _sem_aparicao(
         self,
-        pessoa: str,
+        quem: str,
+        pessoa: str | None,
         e: ConsultaEntendida,
         consultar: Callable[[Consulta], list[Registro]],
-        nome: Callable[[str | None], str | None],
     ) -> SemAparicao:
         """Quantas vezes a pessoa sem aparição é citada, no mesmo programa e período."""
-        quem = nome(pessoa) or ""
         base = _base(e)
         na_fala = consultar(Consulta(filtros=replace(base, tipo="fala"), texto=quem))
         na_tela = consultar(

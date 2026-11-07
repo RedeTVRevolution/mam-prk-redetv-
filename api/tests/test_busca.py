@@ -447,6 +447,49 @@ def test_sem_aparicoes_diz_quantas_mencoes_ha_na_fala_e_na_tela() -> None:
     )
 
 
+def test_pessoa_fora_do_catalogo_em_consulta_composta_volta_vazia_com_aviso() -> None:
+    fulano = {**VESTIDO, "pessoa": "Fulano"}
+    m = Mundo(pedido(pessoas=["Fulano"], objetos=[fulano]))
+    m.com(
+        job("j1"),
+        objeto("j1:objeto:0", "j1", 0, 1_000, dono="outra"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="o Fulano chegou",
+        ),
+        Registro(
+            id="f2",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=5_000,
+            fim_ms=6_000,
+            texto="Fulano de novo",
+        ),
+    )
+
+    resultado = buscar(m, "Fulano de vestido vermelho")
+
+    assert resultado.videos == []
+    (vazio,) = resultado.sem_aparicoes
+    assert (vazio.pessoa_id, vazio.nome) == (None, "Fulano")
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (2, 0)
+
+
+def test_objeto_sem_pessoa_continua_trazendo_os_momentos() -> None:
+    sem_dono = {**VESTIDO, "pessoa": None}
+    m = Mundo(pedido(objetos=[sem_dono]))
+    m.com(job("j1"), objeto("j1:objeto:0", "j1", 0, 1_000, dono="outra"))
+
+    resultado = buscar(m, "vestido vermelho")
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    assert resultado.sem_aparicoes == []
+
+
 def test_sem_aparicoes_vem_mesmo_com_outros_resultados_e_no_programa_pedido() -> None:
     m = Mundo(
         pedido(pessoas=["Sabrina Sato"], programa="Leo Dias", texto_livre="praia")

@@ -66,7 +66,8 @@ export interface VideoDoResultado {
 }
 
 export interface SemAparicao {
-  pessoa_id: string
+  /** `null`: o nome que o catálogo não resolve. */
+  pessoa_id: string | null
   nome: string
   mencoes_na_fala: number
   mencoes_na_tela: number

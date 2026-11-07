@@ -429,7 +429,7 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
           return (
             <>
               {pagina.sem_aparicoes.map((s) => (
-                <p key={s.pessoa_id} className="flex flex-wrap items-center gap-2 text-sm">
+                <p key={s.pessoa_id ?? s.nome} className="flex flex-wrap items-center gap-2 text-sm">
                   <span>
                     Nenhuma aparição de {s.nome}.{s.mencoes_na_fala > 0 && ` ${contagemDeMencoes(s.mencoes_na_fala)} na fala.`}
                     {s.mencoes_na_tela > 0 && ` ${contagemDeMencoes(s.mencoes_na_tela)} na tela.`}
