@@ -36,6 +36,7 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
+from api.bancos import cliente_da_colecao
 from api.busca import (
     Busca,
     EmbeddingDaConsulta,
@@ -108,6 +109,9 @@ from api.lixeira_do_catalogo import (
 from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
+    COLECAO_DA_AUDITORIA,
+    COLECAO_DE_CHAVES,
+    COLECAO_DE_PAPEIS,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
@@ -739,11 +743,15 @@ if _projeto:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
+        papeis=RepositorioDePapeisFirestore(
+            cliente_da_colecao(_projeto, COLECAO_DE_PAPEIS)
+        ),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
-        auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
+        auditoria=RepositorioDeAuditoriaFirestore(
+            cliente_da_colecao(_projeto, COLECAO_DA_AUDITORIA)
+        ),
         contas=ContasIdentityPlatform(_projeto),
         # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
         # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
@@ -756,7 +764,7 @@ if _projeto:
         ),
         listas_da_busca=ListasDaBuscaFirestore(firestore.Client(project=_projeto)),
         repositorio_de_chaves=RepositorioDeChavesFirestore(
-            firestore.Client(project=_projeto)
+            cliente_da_colecao(_projeto, COLECAO_DE_CHAVES)
         ),
         arquivos=ArquivosNoStorage(
             ClienteStorage(project=_projeto),

@@ -9,9 +9,9 @@ import sys
 
 import google.auth
 import google.auth.transport.requests
-from google.cloud import firestore
 
-from api.nuvem import RepositorioDePapeisFirestore
+from api.bancos import cliente_da_colecao
+from api.nuvem import COLECAO_DE_PAPEIS, RepositorioDePapeisFirestore
 from api.papeis import ContaNaoEncontrada, atribuir_papeis_main
 
 
@@ -38,7 +38,9 @@ if __name__ == "__main__":
     sys.exit(
         atribuir_papeis_main(
             sys.argv[1:],
-            RepositorioDePapeisFirestore(firestore.Client(project=projeto)),
+            RepositorioDePapeisFirestore(
+                cliente_da_colecao(projeto, COLECAO_DE_PAPEIS)
+            ),
             lambda email: achar_uid(projeto, email),
         )
     )
