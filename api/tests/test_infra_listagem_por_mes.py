@@ -3,7 +3,10 @@
 import re
 from pathlib import Path
 
-TF = (Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "main.tf").read_text()
+MODULO = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
+TF = "\n".join(
+    (MODULO / nome).read_text() for nome in ("main.tf", "listagem_por_mes.tf")
+)
 SEM_COMENTARIOS = "\n".join(
     linha for linha in TF.splitlines() if not linha.strip().startswith("#")
 )

@@ -566,40 +566,6 @@ resource "google_firestore_index" "acervo" {
   }
 }
 
-# Os mesmos filtros com `mes_exibicao` (`in`) e a ordem por envio, para o período na lista
-# por envio (#479): cada combinação, inclusive só o mês.
-locals {
-  indices_do_acervo_por_mes = {
-    for n in range(0, 16) : tostring(n) => [
-      for j, campo in local.campos_do_acervo : campo
-      if floor(n / pow(2, j)) % 2 == 1
-    ]
-  }
-}
-
-resource "google_firestore_index" "acervo_por_mes" {
-  for_each   = local.indices_do_acervo_por_mes
-  database   = google_firestore_database.mam.name
-  collection = "jobs"
-
-  dynamic "fields" {
-    for_each = each.value
-    content {
-      field_path   = fields.value
-      order        = fields.value == "palavras" ? null : "ASCENDING"
-      array_config = fields.value == "palavras" ? "CONTAINS" : null
-    }
-  }
-  fields {
-    field_path = "mes_exibicao"
-    order      = "ASCENDING"
-  }
-  fields {
-    field_path = "criado_em"
-    order      = "DESCENDING"
-  }
-}
-
 # Índices compostos da auditoria (GET /v1/admin/auditoria, #140): cada combinação não
 # vazia de pessoa (`uid` ou `email`), alvo e ação, com o período e a ordem em `quando`.
 # A coleção só recebe acréscimos.

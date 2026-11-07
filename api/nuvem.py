@@ -226,10 +226,21 @@ def meses_para_o_firestore(filtro: FiltroDeJobs) -> list[str] | None:
         + bool(filtro.palavras)
         + 1  # mes_exibicao
     )
-    componentes = disjuncoes * (filtros + 1)  # mais a ordem por `criado_em`
+    # Mais a ordem por `criado_em` e o desempate implícito pelo id: contar os dois deixa
+    # folga, e errar para menos faria o Firestore recusar a lista.
+    componentes = disjuncoes * (filtros + 2)
     if disjuncoes > MAXIMO_DE_DISJUNCOES or componentes > MAXIMO_DE_COMPONENTES:
         return None
     return meses
+
+
+def listagem_por_mes_do_ambiente(ambiente: Mapping[str, str]) -> bool:
+    """`LISTAGEM_POR_MES`: ausente ou vazia, desligada; outro valor que não `true` ou
+    `false` levanta `ValueError`, em vez de deixar a lista no caminho de hoje sem aviso."""
+    valor = (ambiente.get("LISTAGEM_POR_MES") or "false").strip().lower()
+    if valor not in ("true", "false"):
+        raise ValueError(f"LISTAGEM_POR_MES inválida: {valor!r}")
+    return valor == "true"
 
 
 class RepositorioFirestore:
@@ -340,7 +351,7 @@ class RepositorioFirestore:
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
         # estar no campo da ordem; na ordem por envio, com `listagem_por_mes`, os meses do
         # período em `mes_exibicao`). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
-        # Os índices estão no infra/modulos/mam/main.tf.
+        # Os índices estão no infra/modulos/mam/main.tf e no listagem_por_mes.tf.
         if filtro.sha256 is not None:
             return self._consultar_pelo_arquivo(filtro)
         if (

@@ -12,6 +12,7 @@ from api.gravar_mes_nos_jobs import gravar
 from api.jobs import FiltroDeJobs, Job, PaginaDeJobs
 from api.nuvem import (
     RepositorioFirestore,
+    listagem_por_mes_do_ambiente,
     meses_do_periodo,
     meses_para_o_firestore,
 )
@@ -111,9 +112,27 @@ class TestLimitesDoFirestore:
         assert meses_para_o_firestore(filtro) is None
 
     def test_cabe_no_limite_de_componentes(self) -> None:
-        # 3 meses × 2 estados × (programa, estado, mês + ordem) = 6 × 4 = 24.
+        # 3 meses × 2 estados × (programa, estado, mês + ordem + id) = 6 × 5 = 30.
         filtro = _filtro(estados=frozenset({"concluido", "falhou"}), programa="TV Fama")
         assert meses_para_o_firestore(filtro) == ["2026-08", "2026-09", "2026-10"]
+
+
+@pytest.mark.parametrize(
+    ("ambiente", "ligada"),
+    [
+        ({}, False),
+        ({"LISTAGEM_POR_MES": ""}, False),
+        ({"LISTAGEM_POR_MES": "false"}, False),
+        ({"LISTAGEM_POR_MES": " True "}, True),
+    ],
+)
+def test_variavel_do_ambiente(ambiente: dict[str, str], ligada: bool) -> None:
+    assert listagem_por_mes_do_ambiente(ambiente) is ligada
+
+
+def test_variavel_com_valor_errado_levanta() -> None:
+    with pytest.raises(ValueError, match="LISTAGEM_POR_MES"):
+        listagem_por_mes_do_ambiente({"LISTAGEM_POR_MES": "ture"})
 
 
 class TestConsulta:
