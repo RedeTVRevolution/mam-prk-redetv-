@@ -12,7 +12,7 @@ from api.jobs import Job, RepositorioEmMemoria
 from api.lixeira import ArquivosContados, ArquivosEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
-from api.purga import Purga, purgar_vencidas
+from api.purga import Purga, purgar_vencidas, rodar_a_varredura_diaria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 from api.tests.test_lixeira import BASE, _correcao, _job
@@ -262,3 +262,40 @@ def test_a_purga_automatica_segue_quando_uma_falha() -> None:
 
     assert purgados == ["j2"]
     assert mundo.jobs.obter("j1") is not None
+
+
+def test_a_varredura_diaria_expira_o_upload_abandonado_e_ainda_purga() -> None:
+    abandonado = _job(
+        "j3", estado="aguardando_upload", criado_em=AGORA - timedelta(hours=25)
+    )
+    recente = _job(
+        "j4", estado="aguardando_upload", criado_em=AGORA - timedelta(hours=2)
+    )
+    mundo = Mundo(_na_lixeira("j1", em=AGORA - timedelta(days=31)), abandonado, recente)
+    armazenamento = ArmazenamentoFalso()
+
+    rodar_a_varredura_diaria(mundo.jobs, mundo.purga(), armazenamento, lambda: 0, AGORA)
+
+    assert armazenamento.cancelados == ["j3"]
+    expirado = mundo.jobs.obter("j3")
+    assert expirado is not None
+    assert (expirado.estado, expirado.codigo_falha) == ("falhou", "upload_expirado")
+    recente_depois = mundo.jobs.obter("j4")
+    assert recente_depois is not None and recente_depois.estado == "aguardando_upload"
+    assert mundo.jobs.obter("j1") is None
+
+
+def test_a_varredura_diaria_purga_mesmo_se_a_expiracao_falha() -> None:
+    mundo = Mundo(_na_lixeira("j1", em=AGORA - timedelta(days=31)))
+
+    class Quebrado(ArmazenamentoFalso):
+        def cancelar_upload(self, job_id: str) -> None:
+            raise RuntimeError("storage fora")
+
+    mundo.jobs.salvar(
+        _job("j3", estado="aguardando_upload", criado_em=AGORA - timedelta(hours=25))
+    )
+
+    rodar_a_varredura_diaria(mundo.jobs, mundo.purga(), Quebrado(), lambda: 0, AGORA)
+
+    assert mundo.jobs.obter("j1") is None

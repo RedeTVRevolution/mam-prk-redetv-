@@ -57,7 +57,7 @@ from api.idempotencia import (
 )
 from api.jobs import (
     JANELA_DA_URL_DO_QUADRO,
-    PRAZO_DO_UPLOAD,
+    PRAZO_DA_URL_DE_UPLOAD,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
@@ -1637,10 +1637,12 @@ class ArmazenamentoStorage:
         blob = self._cliente.bucket(self._bucket).blob(job_id)
         url: str = blob.generate_signed_url(
             version="v4",
-            expiration=PRAZO_DO_UPLOAD,
+            expiration=PRAZO_DA_URL_DE_UPLOAD,
             method="POST",
             content_type=tipo,
             headers={
+                # Objeto escrito uma vez só (#369): com o objeto já existente, a abertura leva 412.
+                "x-goog-if-generation-match": "0",
                 "x-goog-resumable": "start",
                 "x-upload-content-length": str(tamanho_bytes),
             },

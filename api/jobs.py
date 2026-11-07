@@ -110,7 +110,10 @@ from api.sugestoes import (
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
-PRAZO_DO_UPLOAD = timedelta(hours=24)
+# A URL que abre a sessão de upload (#369): curta, para não valer como credencial guardada.
+# A sessão aberta continua valendo até o Job expirar (ou até 7 dias, o limite do Storage).
+PRAZO_DA_URL_DE_UPLOAD = timedelta(minutes=15)
+PRAZO_DO_JOB_SEM_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
 VALIDADE_DO_DOWNLOAD = timedelta(minutes=5)
 # Capas e quadros (#408): um turno de trabalho, para a grade não pedir uma imagem já vencida.
@@ -759,7 +762,10 @@ def expirar_uploads(
     """Falha os Jobs sem upload completo há 24 h ou mais e cancela a sessão de upload."""
     expirados: list[str] = []
     for job in repositorio.listar():
-        if job.estado != "aguardando_upload" or agora - job.criado_em < PRAZO_DO_UPLOAD:
+        if (
+            job.estado != "aguardando_upload"
+            or agora - job.criado_em < PRAZO_DO_JOB_SEM_UPLOAD
+        ):
             continue
         # Primeiro a transição: se o Job andou nesse meio-tempo, o upload é dele.
         if transitar(

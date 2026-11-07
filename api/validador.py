@@ -23,6 +23,7 @@ DURACAO_MINIMA_S = 1.0
 DURACAO_MAXIMA_S = 4 * 3600.0
 TEMPO_LIMITE_S = 7200
 NOME_DO_AUDIO = "audio.wav"
+DEMUXERS_ACEITOS = "mov,mp4,m4a,3gp,3g2,mj2"
 TAXA_DO_AUDIO_HZ = 16_000
 # HH:MM:SS:FF, ou HH:MM:SS;FF no drop-frame.
 FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2}")
@@ -84,7 +85,7 @@ def _sondar(entrada: Path) -> dict[str, Any]:
         [
             "ffprobe", "-v", "error",
             "-protocol_whitelist", "file",
-            "-f", "mov,mp4,m4a,3gp,3g2,mj2",
+            "-f", DEMUXERS_ACEITOS,
             "-show_streams", "-show_format", "-of", "json",
             str(entrada),
         ]
@@ -174,10 +175,12 @@ def validar(
     copia = saida / "copia_limpa.mp4"
     proxy = saida / "proxy.mp4"
     comum = ["ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y"]
+    # Mesmo demuxer do ffprobe: o ffmpeg não escolhe o formato pelo conteúdo do original.
+    entrada_mp4 = ["-f", DEMUXERS_ACEITOS]
     # Regravação sem recodificar: só vídeo e áudio, sem metadados nem capítulos.
     regravar = _executar(
         [
-            *comum, "-i", str(entrada),
+            *comum, *entrada_mp4, "-i", str(entrada),
             "-map", "0:v", "-map", "0:a?",
             "-c", "copy", "-map_metadata", "-1", "-map_chapters", "-1",
             "-movflags", "+faststart", str(copia),
@@ -186,7 +189,8 @@ def validar(
     # Decodifica o arquivo inteiro e gera o proxy na mesma passada.
     gerar_proxy = _executar(
         [
-            *comum, "-xerror", "-err_detect", "explode", "-i", str(entrada),
+            *comum, "-xerror", "-err_detect", "explode",
+            *entrada_mp4, "-i", str(entrada),
             "-map", "0:v", "-map", "0:a?",
             # veryfast: no clipe2, 41% mais rápido que o medium e SSIM de 0,986 contra 0,990.
             "-vf", "scale=-2:480", "-c:v", "libx264", "-preset", "veryfast",
