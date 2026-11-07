@@ -1156,6 +1156,9 @@ def criar_rotas(
         publico.capa_url = _url_da_capa(job)
         return publico
 
+    def _sem_capa(job: Job) -> dict[str, Any]:
+        return JobResumido.de(job).model_dump(mode="json", exclude={"capa_url"})
+
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
@@ -1170,8 +1173,6 @@ def criar_rotas(
         cursor: str | None = None,
         capa: bool = True,
     ) -> Response:
-        """`capa=false` não assina as capas e tira o `capa_url` da resposta; a seleção dos
-        Jobs é a mesma (quem só conta, como o aviso "Finalizando" da busca)."""
         if isinstance(chamador, Sistema):
             # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
             if sistema not in (None, chamador.sistema):
@@ -1199,10 +1200,8 @@ def criar_rotas(
                 publicos = list(assinando.map(_com_capa, pagina.jobs))
             corpo = [p.model_dump(mode="json") for p in publicos]
         else:
-            corpo = [
-                JobResumido.de(j).model_dump(mode="json", exclude={"capa_url"})
-                for j in pagina.jobs
-            ]
+            # Quem só conta (o aviso "Finalizando" da busca) não paga as assinaturas.
+            corpo = [_sem_capa(j) for j in pagina.jobs]
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
@@ -1235,10 +1234,7 @@ def criar_rotas(
             and not _de_outro_sistema(chamador, j)
         ]
         visiveis.sort(key=lambda j: posicao[j.id])
-        corpo = [
-            JobResumido.de(j).model_dump(mode="json", exclude={"capa_url"})
-            for j in visiveis
-        ]
+        corpo = [_sem_capa(j) for j in visiveis]
         return JSONResponse(corpo)
 
     @rotas.get("/{job_id}", response_model=JobPublico)

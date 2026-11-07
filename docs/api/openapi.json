@@ -354,7 +354,6 @@
       },
       "get": {
         "summary": "Listar os Jobs do sistema",
-        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`.",
         "operationId": "listar_v1_jobs_get",
         "parameters": [
           {
@@ -634,6 +633,7 @@
             }
           }
         },
+        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`. Com `capa=false` a seleção é a mesma, mas sem `capa_url` (as capas não são assinadas): serve para quem só conta os Jobs.",
         "tags": [
           "sistemas"
         ]
