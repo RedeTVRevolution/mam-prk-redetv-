@@ -199,7 +199,9 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
     from google.cloud import firestore
     from google.cloud.storage import Client as ClienteStorage
 
+    from api.bancos import cliente_da_colecao
     from api.nuvem import (
+        COLECAO_DA_AUDITORIA,
         DecupagensStorage,
         RepositorioDeAuditoriaFirestore,
         RepositorioFirestore,
@@ -216,7 +218,9 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
     return main(
         argumentos,
         RepositorioFirestore(banco),
-        RepositorioDeAuditoriaFirestore(banco),
+        RepositorioDeAuditoriaFirestore(
+            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA)
+        ),
         DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
     )
 

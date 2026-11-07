@@ -8,11 +8,10 @@ o Terraform dá como `chave_mac_kms`) ou, sem ela, de uma chave simulada
 import os
 import sys
 
-from google.cloud import firestore
-
+from api.bancos import cliente_da_colecao
 from api.chaves import main
 from api.mac_kms import mac_do_ambiente
-from api.nuvem import RepositorioDeChavesFirestore
+from api.nuvem import COLECAO_DE_CHAVES, RepositorioDeChavesFirestore
 
 if __name__ == "__main__":
     projeto = os.environ.get("GCP_PROJECT_ID")
@@ -26,6 +25,8 @@ if __name__ == "__main__":
         main(
             sys.argv[1:],
             mac,
-            RepositorioDeChavesFirestore(firestore.Client(project=projeto)),
+            RepositorioDeChavesFirestore(
+                cliente_da_colecao(projeto, COLECAO_DE_CHAVES)
+            ),
         )
     )

@@ -25,10 +25,12 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.auditoria import RepositorioDeAuditoria
+from api.bancos import cliente_da_colecao
 from api.ciclo_de_vida import NaoReprocessavel
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.jobs import Job, RepositorioDeJobs, ServicoIndisponivel, agora_utc
 from api.nuvem import (
+    COLECAO_DA_AUDITORIA,
     DecupagensStorage,
     DisparoPeloWorkflows,
     JanelasStorage,
@@ -196,7 +198,9 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     reprocessar_versao(
         RepositorioFirestore(banco),
         DecupagensStorage(cliente, aceitos, decupagens),
-        RepositorioDeAuditoriaFirestore(banco),
+        RepositorioDeAuditoriaFirestore(
+            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA)
+        ),
         DisparoPeloWorkflows(projeto, regiao, workflow),
         JanelasStorage(cliente, aceitos),
         de=de,
