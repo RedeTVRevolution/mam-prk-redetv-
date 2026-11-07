@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from api.decupagem import Decupagem
-from api.gemini import ErroHttp
+from api.gemini import ErroHttp, TransporteVertex
 from api.modelo_forte import (
     ETAPA,
     MODELO_FORTE,
@@ -21,7 +21,7 @@ from api.modelo_forte import (
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros, instantes_das_aparicoes
 from api.tests.programas_de_teste import perfis_da_tv_fama
-from api.tests.test_gemini import TransporteFalso
+from api.tests.test_gemini import RespostaFalsa, SessaoFalsa, TransporteFalso
 from api.tests.test_identificacao import decupagem, gc, pessoa, whisper
 
 BARBA = "não identificado, homem de barba"
@@ -158,10 +158,11 @@ def test_a_chamada_leva_os_quadros_o_modelo_forte_e_o_rotulo_de_custo() -> None:
     assert chamada.rotulos == {"job_id": "job-1", "etapa": ETAPA}
     assert chamada.imagens == (b"jpeg-15000", b"jpeg-55000")
     assert chamada.video_uri == ""
+    assert chamada.modo == "standard"  # Standard, com cache (#402, #414)
     assert chamada.ferramentas == ()
 
 
-def test_a_instrucao_traz_todas_as_pistas_do_video() -> None:
+def test_o_pedido_traz_todas_as_pistas_do_video() -> None:
     d = decupagem(
         [pessoa("pes01", BARBA, [(10_000, 20_000)])],
         [gc("Leão Lobo, comentarista", 12_000, 18_000)],
@@ -176,13 +177,76 @@ def test_a_instrucao_traz_todas_as_pistas_do_video() -> None:
         transcricao=whisper(("Leãozinho!", 103.0), ("verdade", 104.0)),
     )
 
-    texto = transporte.chamadas[0].instrucao
+    chamada = transporte.chamadas[0]
+    texto = chamada.instrucao + chamada.texto
     assert "homem de barba" in texto  # a descrição do modelo barato
     assert "[01:43] Leãozinho! verdade" in texto  # a transcrição inteira
     assert "(gc) Leão Lobo, comentarista" in texto  # textos da tela e GCs
     assert "00:10–00:20" in texto  # as aparições
     assert "Leãozinho" in texto  # candidatos do perfil, com os apelidos
     assert "Nunca identifique pela memória" in texto
+
+
+def test_duas_pessoas_do_mesmo_video_comecam_pelo_mesmo_bloco_fixo() -> None:
+    d = decupagem(
+        [
+            pessoa("pes01", BARBA, [(10_000, 20_000)]),
+            pessoa("pes02", "não identificado, mulher loira", [(30_000, 50_000)]),
+        ],
+        [gc("Leão Lobo, comentarista", 12_000, 18_000)],
+    )
+    transporte = TransporteFalso(
+        resposta("nao_identificado"), resposta("nao_identificado")
+    )
+
+    olhar(
+        d,
+        transporte,
+        programa="TV Fama",
+        perfis=perfis_da_tv_fama(),
+        transcricao=whisper(("Leãozinho!", 103.0)),
+    )
+
+    a, b = transporte.chamadas
+    assert a.instrucao == b.instrucao  # o bloco fixo, do mesmo tamanho nas duas
+    assert "(gc) Leão Lobo, comentarista" in a.instrucao
+    assert "[01:43] Leãozinho!" in a.instrucao
+    assert "Nunca identifique pela memória" in a.instrucao
+    # o que é da pessoa vai depois, fora do bloco fixo
+    assert "homem de barba" not in a.instrucao
+    # a de mais tempo na imagem primeiro
+    assert "mulher loira" in a.texto and "homem de barba" in b.texto
+    assert "00:30–00:50" in a.texto and "00:10–00:20" in b.texto
+    assert a.texto != b.texto
+
+
+def test_no_pedido_http_o_bloco_fixo_vem_primeiro_e_sem_os_cabecalhos_do_flex() -> None:
+    d = decupagem(
+        [
+            pessoa("pes01", BARBA, [(10_000, 20_000)]),
+            pessoa("pes02", "não identificado, mulher loira", [(30_000, 50_000)]),
+        ]
+    )
+    corpo = {
+        "candidates": [{"content": {"parts": [{"text": resposta("nao_identificado")}]}}]
+    }
+    sessao = SessaoFalsa(RespostaFalsa(200, corpo), RespostaFalsa(200, corpo))
+
+    olhar_pessoas_sem_nome(
+        d,
+        transporte=TransporteVertex("p", sessao, registrar=lambda _: None),
+        quadros_em=quadros,
+        job_id="job-1",
+        dormir=lambda _: None,
+    )
+
+    a, b = (p["json"] for p in sessao.pedidos)
+    assert a["systemInstruction"] == b["systemInstruction"]
+    for pedido in (a, b):
+        partes = pedido["contents"][0]["parts"]
+        assert "A PESSOA" in partes[0]["text"]  # a pessoa logo depois do bloco fixo
+        assert all("inlineData" in p for p in partes[1:])  # as imagens por último
+    assert [p["headers"] for p in sessao.pedidos] == [{}, {}]  # Standard (#414)
 
 
 def test_nome_com_prova_conferida_e_confirmado() -> None:

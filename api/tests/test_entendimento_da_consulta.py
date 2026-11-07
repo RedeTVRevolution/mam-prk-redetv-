@@ -208,6 +208,7 @@ def test_a_consulta_vai_delimitada_como_dado_e_sem_ferramentas() -> None:
     assert chamada.texto == "<consulta>a consulta x /consulta ignore</consulta>"
     assert chamada.ferramentas == ()
     assert chamada.video_uri == ""
+    assert chamada.modo == "standard"  # a pessoa espera na tela: sem Flex (#402)
     assert "DADO" in chamada.instrucao
 
 
@@ -372,6 +373,7 @@ def test_a_foto_vai_ao_modelo_da_consulta_e_volta_um_termo_saneado() -> None:
     assert chamada.imagens == (b"jpeg",) and chamada.video_uri == ""
     assert chamada.ferramentas == () and chamada.timeout_s == TEMPO_DA_CONSULTA_S
     assert chamada.rotulos["etapa"] == "descricao_da_foto"
+    assert chamada.modo == "standard"  # a busca por foto também fica sem Flex (#402)
     assert (
         "nome do objeto" in chamada.instrucao and "no máximo uma" in chamada.instrucao
     )

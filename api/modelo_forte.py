@@ -23,7 +23,13 @@ from api.catalogo import Catalogo
 from api.comparador import normalizar
 from api.decupagem import FORMATO_DO_TEMPO, Decupagem, Pessoa, Rotulo, em_mm_ss
 from api.espera import sorteio_uniforme
-from api.gemini import AnaliseFalhou, Chamada, Transporte, gerar_validado
+from api.gemini import (
+    MODO_STANDARD,
+    AnaliseFalhou,
+    Chamada,
+    Transporte,
+    gerar_validado,
+)
 from api.identidade import nao_identificado
 from api.identificacao import (
     TOLERANCIA_DA_FALA_MS,
@@ -59,16 +65,20 @@ PROGRAMA: {programa}
 CANDIDATOS (nome, papel, apelidos)
 {candidatos}
 
-A PESSOA
-Descrição da primeira análise: {descricao}
-Aparições (MM:SS): {aparicoes}
-Os quadros anexos foram tirados das aparições mais longas, nos instantes (MM:SS): {instantes}
-
 TEXTOS NA TELA E GCs
 {textos}
 
 TRANSCRIÇÃO AUTOMÁTICA (Whisper)
 {transcricao}
+"""
+
+# O que é da pessoa vai depois do bloco fixo do vídeo (`INSTRUCAO`), e as imagens por
+# último: o cache implícito só pega o começo igual do pedido (#414).
+PESSOA = """\
+A PESSOA
+Descrição da primeira análise: {descricao}
+Aparições (MM:SS): {aparicoes}
+Os quadros anexos foram tirados das aparições mais longas, nos instantes (MM:SS): {instantes}
 """
 
 
@@ -137,18 +147,22 @@ def agrupar(decupagem: Decupagem) -> list[Grupo]:
     return sorted(achados, key=lambda g: g.na_imagem_ms, reverse=True)
 
 
+def _preencher(modelo: str, valores: dict[str, str]) -> str:
+    # `str.replace` e não `format`: a transcrição e os textos da tela têm chaves à vontade.
+    texto = modelo
+    for chave, valor in valores.items():
+        texto = texto.replace("{" + chave + "}", valor)
+    return texto
+
+
 def _instrucao(
-    grupo: Grupo,
-    instantes: Sequence[int],
     decupagem: Decupagem,
     programa: str | None,
     candidatos: Sequence[Candidato],
     transcricao: Transcricao | None,
     perfis: Perfis | None = None,
 ) -> str:
-    aparicoes = sorted(
-        (a.inicio_ms, a.fim_ms) for p in grupo.pessoas for a in p.na_imagem
-    )
+    """O bloco fixo do vídeo: igual em todas as chamadas dele (#414)."""
     textos = "\n".join(
         f"[{em_mm_ss(t.inicio_ms)}–{em_mm_ss(t.fim_ms)}] ({t.tipo}) {t.texto}"
         for t in decupagem.textos_na_tela
@@ -158,23 +172,38 @@ def _instrucao(
         for c in candidatos
     )
     perfil_de = perfis or {}
-    # `str.replace` e não `format`: a transcrição e os textos da tela têm chaves à vontade.
-    valores = {
-        "programa": programa if programa and programa in perfil_de else "não informado",
-        "perfil": perfil_de[programa].texto() + "\n"
-        if programa and programa in perfil_de
-        else "",
-        "candidatos": lista or "(nenhum)",
-        "descricao": re.sub(r"\s+", " ", grupo.pessoas[0].nome),
-        "aparicoes": ", ".join(f"{em_mm_ss(i)}–{em_mm_ss(f)}" for i, f in aparicoes),
-        "instantes": ", ".join(em_mm_ss(i) for i in instantes),
-        "textos": textos or "(nenhum)",
-        "transcricao": transcricao.em_linhas() if transcricao else "(sem transcrição)",
-    }
-    texto = INSTRUCAO
-    for chave, valor in valores.items():
-        texto = texto.replace("{" + chave + "}", valor)
-    return texto
+    return _preencher(
+        INSTRUCAO,
+        {
+            "programa": programa
+            if programa and programa in perfil_de
+            else "não informado",
+            "perfil": perfil_de[programa].texto() + "\n"
+            if programa and programa in perfil_de
+            else "",
+            "candidatos": lista or "(nenhum)",
+            "textos": textos or "(nenhum)",
+            "transcricao": transcricao.em_linhas()
+            if transcricao
+            else "(sem transcrição)",
+        },
+    )
+
+
+def _texto_da_pessoa(grupo: Grupo, instantes: Sequence[int]) -> str:
+    aparicoes = sorted(
+        (a.inicio_ms, a.fim_ms) for p in grupo.pessoas for a in p.na_imagem
+    )
+    return _preencher(
+        PESSOA,
+        {
+            "descricao": re.sub(r"\s+", " ", grupo.pessoas[0].nome),
+            "aparicoes": ", ".join(
+                f"{em_mm_ss(i)}–{em_mm_ss(f)}" for i, f in aparicoes
+            ),
+            "instantes": ", ".join(em_mm_ss(i) for i in instantes),
+        },
+    )
 
 
 def _validar(texto: str) -> RespostaDaPessoa:
@@ -206,6 +235,7 @@ def olhar_pessoas_sem_nome(
     falha, continua "não identificado" (e `ao_falhar` recebe o erro). `quadros_em` tira
     os JPEGs dos instantes (ms) da cópia limpa."""
     candidatos = candidatos_do_video(programa, catalogo, perfis)
+    instrucao = _instrucao(decupagem, programa, candidatos, transcricao, perfis)
     nomes: dict[str, str] = {}
     grupo_de: dict[str, str] = {}
     for grupo in agrupar(decupagem)[: max(limite_de_pessoas, 0)]:
@@ -215,19 +245,13 @@ def olhar_pessoas_sem_nome(
         try:
             chamada = Chamada(
                 modelo=MODELO_FORTE,
-                instrucao=_instrucao(
-                    grupo,
-                    instantes,
-                    decupagem,
-                    programa,
-                    candidatos,
-                    transcricao,
-                    perfis,
-                ),
+                instrucao=instrucao,
+                texto=_texto_da_pessoa(grupo, instantes),
                 video_uri="",
                 esquema=esquema_da_resposta(),
                 rotulos={"job_id": job_id, "etapa": ETAPA},
                 imagens=tuple(quadros_em(instantes)),
+                modo=MODO_STANDARD,  # Standard, com cache (#414)
             )
             resposta = gerar_validado(
                 transporte,

@@ -7,10 +7,11 @@ tentativas, dentro de um prazo total. Esgotadas as tentativas ou o prazo, levant
 
 import base64
 import json
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import requests
 
@@ -44,6 +45,11 @@ BACKOFF_BASE_S = 1.0
 BACKOFF_TETO_S = 60.0
 TIMEOUT_DO_FLEX_S = 600  # o Flex pode demorar; o servidor também desiste aos 600 s
 TIMEOUT_DA_REDE_S = TIMEOUT_DO_FLEX_S + 30
+# Como a Vertex cobra e atende a chamada. Flex é o padrão do processamento (#402); quem tem
+# gente esperando na tela (a busca) ou o cache implícito (a identificação, #414) pede Standard.
+Modo = Literal["flex", "standard"]
+MODO_FLEX: Modo = "flex"
+MODO_STANDARD: Modo = "standard"
 # Prazo de cada janela: uma tentativa só começa se cabe inteira nele. O `timeout` do
 # Job de análise (infra/modulos/mam/main.tf) é dimensionado por ele; se mudar, refaça aquela conta.
 PRAZO_DA_ANALISE_S = 1500
@@ -171,11 +177,12 @@ class Chamada:
     # do arquivo; sem ele, o vídeo inteiro. O modelo conta os tempos do arquivo.
     trecho_ms: tuple[int, int] | None = None
     # JPEGs que seguem no lugar do vídeo (identificação pelo modelo forte, `video_uri`
-    # vazio); essa chamada é Standard, sem o Flex da análise por janelas.
+    # vazio). Com `imagens`, o texto vem antes delas.
     imagens: tuple[bytes, ...] = ()
-    # Texto no lugar do vídeo (extração de nomes do Job de referências, `video_uri`
-    # vazio); também Standard. Com `imagens`, o texto segue as imagens.
+    # Texto no lugar do vídeo (extração de nomes do Job de referências, `video_uri` vazio).
     texto: str = ""
+    # O modo vem deste campo, não do conteúdo: Flex por padrão, Standard só quando pedido.
+    modo: Modo = MODO_FLEX
     # Quanto o transporte espera a resposta; a busca, interativa, espera bem menos.
     timeout_s: float = TIMEOUT_DA_REDE_S
 
@@ -212,7 +219,7 @@ class SessaoHttp(Protocol):
 
 
 class TransporteVertex:
-    """REST na Vertex AI, endpoint global (ADR 0001): Flex no vídeo, Standard com texto ou imagens."""
+    """REST na Vertex AI, endpoint global (ADR 0001): Flex por padrão, Standard quando a `Chamada` pede."""
 
     def __init__(
         self,
@@ -230,6 +237,7 @@ class TransporteVertex:
         # Somados desde a criação do transporte; só a comparação dos motores os lê.
         self.tokens_de_entrada = 0
         self.tokens_de_saida = 0
+        self._trava = threading.Lock()  # o inventário chama em paralelo
 
     def gerar(self, chamada: Chamada) -> str:
         url = (
@@ -239,7 +247,9 @@ class TransporteVertex:
         )
         partes_do_pedido: list[dict[str, Any]]
         if chamada.imagens or chamada.texto:
-            partes_do_pedido = [
+            # O texto antes das imagens: o que é de cada chamada fica por último.
+            partes_do_pedido = [{"text": chamada.texto}] if chamada.texto else []
+            partes_do_pedido += [
                 {
                     "inlineData": {
                         "mimeType": "image/jpeg",
@@ -248,8 +258,6 @@ class TransporteVertex:
                 }
                 for imagem in chamada.imagens
             ]
-            if chamada.texto:
-                partes_do_pedido.append({"text": chamada.texto})
         else:
             metadados: dict[str, Any] = {"fps": 1}
             if chamada.trecho_ms is not None:
@@ -282,7 +290,7 @@ class TransporteVertex:
         # Só Flex, sem Provisioned Throughput antes (doc "Flex PayGo" da Vertex).
         cabecalhos = (
             {}
-            if chamada.imagens or chamada.texto
+            if chamada.modo == MODO_STANDARD
             else {
                 "X-Vertex-AI-LLM-Request-Type": "shared",
                 "X-Vertex-AI-LLM-Shared-Request-Type": "flex",
@@ -306,8 +314,9 @@ class TransporteVertex:
         entrada = uso.get("promptTokenCount", 0)
         tokens_da_resposta = uso.get("candidatesTokenCount", 0)
         raciocinio = uso.get("thoughtsTokenCount", 0)
-        self.tokens_de_entrada += entrada
-        self.tokens_de_saida += tokens_da_resposta + raciocinio
+        with self._trava:
+            self.tokens_de_entrada += entrada
+            self.tokens_de_saida += tokens_da_resposta + raciocinio
         self._registrar(
             registro_do_uso_do_modelo(
                 chamada.modelo,

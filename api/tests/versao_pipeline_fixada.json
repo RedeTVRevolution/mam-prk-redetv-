@@ -1,5 +1,5 @@
 {
-  "versao_pipeline": "2026.11.3",
+  "versao_pipeline": "2026.11.5",
   "manifesto": {
     "esquema": "1.4",
     "modelos": {
@@ -9,9 +9,15 @@
       "consulta": "gemini-3.5-flash-lite",
       "embedding": "gemini-embedding-001"
     },
+    "modos": {
+      "analise": "flex",
+      "inventario": "flex",
+      "modelo_forte": "standard",
+      "consulta": "standard"
+    },
     "instrucoes": {
       "analise": "f8775705d01572aadd035499d98d16d1bc3b4d8f1c7cbb06c2d498acbd267e25",
-      "modelo_forte": "4e0f3949d47638e8a758ecc7a54735da602de50820bcb303e2204c8a37341881",
+      "modelo_forte": "1edbfac302a335b2a276cd8dd0773de93d9346cf6fbcc7c8cc0486adeda6c3bf",
       "consulta": "f814b88a5a7a35ce1d7d7cbdb3832e5e93eecc8309b65a7b70594da8fbc8e74a",
       "conversao_do_inventario": "5c410045cce15863e3cfc1ba89d33dfc95f6397e113e32b12c148282016bc1a1",
       "olhar_do_inventario": "7d4bae5eed07b9ef7c1a0801cc1074aaf298a9f6b1283d4c5e01900e1f072731"

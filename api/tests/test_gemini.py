@@ -8,6 +8,8 @@ import requests
 
 from api.decupagem import Video, esquema_do_modelo
 from api.gemini import (
+    MODO_FLEX,
+    MODO_STANDARD,
     PRAZO_DA_ANALISE_S,
     TIMEOUT_DA_REDE_S,
     AnaliseFalhou,
@@ -604,11 +606,16 @@ def test_resposta_200_que_nao_e_json_vira_erro_repetivel() -> None:
     assert e.value.status == 502
 
 
-def test_transporte_vertex_manda_imagens_no_lugar_do_video_e_sem_flex() -> None:
+def test_transporte_vertex_manda_imagens_no_lugar_do_video() -> None:
     sessao = SessaoFalsa(_ok("{}"))
 
     TransporteVertex("p", sessao).gerar(
-        replace(_chamada(), video_uri="", imagens=(b"\xff\xd8abc", b"\xff\xd8def"))
+        replace(
+            _chamada(),
+            video_uri="",
+            imagens=(b"\xff\xd8abc", b"\xff\xd8def"),
+            modo=MODO_STANDARD,
+        )
     )
 
     pedido = sessao.pedidos[0]
@@ -618,6 +625,49 @@ def test_transporte_vertex_manda_imagens_no_lugar_do_video_e_sem_flex() -> None:
         {"inlineData": {"mimeType": "image/jpeg", "data": "/9hkZWY="}},
     ]
     assert pedido["headers"] == {}
+
+
+def test_o_texto_da_chamada_vai_antes_das_imagens() -> None:
+    sessao = SessaoFalsa(_ok("{}"))
+
+    TransporteVertex("p", sessao).gerar(
+        replace(
+            _chamada(),
+            video_uri="",
+            imagens=(b"\xff\xd8abc",),
+            texto="a pessoa",
+            modo=MODO_STANDARD,
+        )
+    )
+
+    partes = sessao.pedidos[0]["json"]["contents"][0]["parts"]
+    assert partes == [
+        {"text": "a pessoa"},
+        {"inlineData": {"mimeType": "image/jpeg", "data": "/9hhYmM="}},
+    ]
+
+
+def test_o_modo_vem_do_campo_da_chamada_e_nao_do_conteudo() -> None:
+    for conteudo in (
+        {},
+        {"texto": "só texto"},
+        {"video_uri": "", "imagens": (b"\xff\xd8a",)},
+        {"video_uri": "", "imagens": (b"\xff\xd8a",), "texto": "t"},
+    ):
+        sessao = SessaoFalsa(_ok("{}"))
+        TransporteVertex("p", sessao).gerar(replace(_chamada(), **conteudo))
+        cabecalhos = sessao.pedidos[0]["headers"]
+        assert cabecalhos["X-Vertex-AI-LLM-Shared-Request-Type"] == "flex"
+
+        sessao = SessaoFalsa(_ok("{}"))
+        TransporteVertex("p", sessao).gerar(
+            replace(_chamada(), modo=MODO_STANDARD, **conteudo)
+        )
+        assert sessao.pedidos[0]["headers"] == {}
+
+
+def test_a_chamada_nasce_em_flex() -> None:
+    assert _chamada().modo == MODO_FLEX
 
 
 def test_instrucao_traz_os_cortes_em_mmss_e_sem_cortes_nao_traz_a_secao() -> None:
