@@ -8,8 +8,6 @@ de uma consulta que não termina.
 
 import base64
 import binascii
-import csv
-import io
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -105,22 +103,6 @@ def parametros_da_pagina(depois: int, limite: int) -> list[dict[str, Any]]:
         _parametro("posicao_de", str(depois), "INT64"),
         _parametro("posicao_ate", str(depois + limite + 1), "INT64"),
     ]
-
-
-def _celula(valor: object) -> object:
-    """Texto que começa como fórmula não vira fórmula na planilha."""
-    if isinstance(valor, str) and valor[:1] in ("=", "+", "-", "@", "\t", "\r"):
-        return f"'{valor}"
-    return valor
-
-
-def csv_em_texto(colunas: Sequence[str], linhas: Sequence[Sequence[object]]) -> str:
-    saida = io.StringIO()
-    escritor = csv.writer(saida, lineterminator="\n")
-    escritor.writerow(colunas)
-    for linha in linhas:
-        escritor.writerow([_celula(v) for v in linha])
-    return saida.getvalue()
 
 
 def resposta_em_csv(texto: str, arquivo: str) -> Response:
