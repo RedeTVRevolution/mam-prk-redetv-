@@ -54,6 +54,7 @@ from api.nuvem import (
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
+from api.orcamento_de_escrita import OrcamentoFirestore
 
 log = logging.getLogger(__name__)
 
@@ -232,7 +233,16 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         repositorio,
         RepositorioDeCorrecoesFirestore(cliente),
         ArquivosNoStorage(ClienteStorage(project=projeto), aceitos, decupagens),
-        AgentRetrieval(busca, transporte_http(), tentar_no_429=True) if busca else None,
+        (
+            AgentRetrieval(
+                busca,
+                transporte_http(),
+                tentar_no_429=True,
+                orcamento=OrcamentoFirestore(cliente),
+            )
+            if busca
+            else None
+        ),
         RepositorioDeAuditoriaFirestore(banco_de_seguranca),
         agora_utc,
     )
