@@ -784,6 +784,20 @@ def test_listagem_traz_a_capa_assinada_por_8_h_e_job_sem_capa_traz_null() -> Non
     }
 
 
+def test_detalhe_traz_a_capa_assinada_e_job_sem_capa_traz_null() -> None:
+    ambiente = Ambiente()
+    _job_com_capa(ambiente, "com", "quadros/plano-1.jpg")
+    _job_com_capa(ambiente, "sem", None)
+
+    com = ambiente.cliente.get("/v1/jobs/com", headers=AUTORIZACAO).json()
+    sem = ambiente.cliente.get("/v1/jobs/sem", headers=AUTORIZACAO).json()
+
+    assert com["capa_url"] == (
+        "https://storage.exemplo/quadros/com/quadros/plano-1.jpg?validade=28800"
+    )
+    assert sem["capa_url"] is None
+
+
 def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
     repositorio = RepositorioEmMemoria()
     armazenamento = ArmazenamentoFalso()

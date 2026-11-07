@@ -1,5 +1,5 @@
 import { hashKey, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { codigoDoErro, SessaoExpirada, type PaginaDaBusca } from '../../api.ts'
 import type { VideoDoResultado } from '../../busca.ts'
 import { ESTADOS_DO_JOB } from '../../cores.ts'
@@ -78,6 +78,8 @@ export function useAndamento(filtros: FiltrosDoAcervo, itens: Job[], intervaloMs
   const api = useApi()
   const cliente = useQueryClient()
   const [falha, setFalha] = useState<string | null>(null)
+  // Os vídeos cujo detalhe já foi pedido por terminarem sem capa na lista: um pedido só por vídeo.
+  const capaPedida = useRef(new Set<string>())
   const ids = itens
     .filter((j) => NAO_TERMINAIS.includes(j.estado) || finalizando(j))
     .slice(0, MAXIMO_DO_ANDAMENTO)
@@ -98,14 +100,28 @@ export function useAndamento(filtros: FiltrosDoAcervo, itens: Job[], intervaloMs
         const novos = new Map((await api.andamento([...pedidos])).map((n) => [n.id, n]))
         if (!ativo) return
         setFalha(null)
-        // O andamento não traz a capa (só a listagem assina a URL): fica a da lista. Quem a rota
-        // omite (foi para a lixeira ou sumiu) sai.
+        // O andamento não traz a capa (só a listagem e o detalhe assinam a URL): fica a da lista.
+        // Quem a rota omite (foi para a lixeira ou sumiu) sai.
         const atualiza = (j: Job): Job[] => {
           if (!pedidos.has(j.id)) return [j]
           const novo = novos.get(j.id)
           return novo ? [{ ...novo, capa_url: j.capa_url }] : []
         }
+        const antes = cliente.getQueryData<InfiniteData<PaginaDoAcervo>>(chave)
+        const semCapa = new Set(antes?.pages.flatMap((p) => p.jobs).filter((j) => !j.capa_url).map((j) => j.id))
         cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.flatMap(atualiza) })) })
+        // Saiu do andamento sem capa na lista: ela nasce durante o processamento, então o detalhe, que a traz, é pedido uma vez.
+        for (const n of novos.values()) {
+          if (NAO_TERMINAIS.includes(n.estado) || finalizando(n) || !semCapa.has(n.id) || capaPedida.current.has(n.id)) continue
+          capaPedida.current.add(n.id)
+          void api.job(n.id).detalhe().then(
+            (d) => {
+              if (!d.capa_url) return
+              cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (p) => p && { ...p, pages: p.pages.map((pg) => ({ ...pg, jobs: pg.jobs.map((j) => (j.id === d.id && !j.capa_url ? { ...j, capa_url: d.capa_url } : j)) })) })
+            },
+            () => {},
+          )
+        }
       } catch (erro) {
         if (ativo && !(erro instanceof SessaoExpirada)) setFalha(codigoDoErro(erro))
       } finally {
