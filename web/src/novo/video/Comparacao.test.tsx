@@ -207,3 +207,27 @@ test('uma lista longa mostra 30 itens por lado, e "Mostrar mais" acrescenta o re
   expect(within(job).getAllByRole('button', { name: /^Job: Item/ })).toHaveLength(40)
   expect(within(job).queryByRole('button', { name: /^Mostrar mais/ })).toBeNull()
 })
+
+test('de 1024 a 1279 px a comparação abre embaixo do vídeo e de 1280 px em diante ao lado', async () => {
+  const { player } = await compararComPassada()
+
+  const comparacao = screen.getByRole('complementary', { name: 'Comparação com a passada' })
+  const coluna = comparacao.parentElement!
+  // O jsdom não aplica CSS: confere-se a regra dos breakpoints. A coluna só vira linha em `xl`.
+  expect(coluna.className).toContain('xl:flex-row')
+  expect(coluna.className).not.toMatch(/(^|\s)lg:flex-row/)
+  expect(comparacao.className).toContain('lg:h-[45%]')
+  expect(comparacao.className).toContain('xl:w-[62%]')
+  expect(comparacao.className).not.toContain('lg:w-[62%]')
+  // O vídeo e o cabeçalho ficam na coluna do vídeo, que a comparação não cobre.
+  const video = screen.getByRole('region', { name: 'Vídeo' })
+  expect(video.contains(comparacao)).toBe(false)
+  expect(video.contains(player)).toBe(true)
+})
+
+test('sem a comparação, a coluna do vídeo e o inspetor ficam lado a lado a partir de 1024 px', async () => {
+  await abrirVideo()
+
+  const video = screen.getByRole('region', { name: 'Vídeo' })
+  expect(video.parentElement!.className).toMatch(/(^|\s)lg:flex-row/)
+})
