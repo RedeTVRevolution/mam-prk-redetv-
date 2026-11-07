@@ -10,6 +10,8 @@ Decupagem automática do acervo de vídeo da RedeTV com IA: descrever o que apar
 Documento que descreve o conteúdo de um vídeo com tempos: pessoas, pautas, planos, comerciais e transcrição.
 _Evitar_: resultado, insights
 
+**Texto como dado**: todo texto que entra pela API (corpo, consulta, cabeçalho, id de caminho) tem tamanho máximo e não traz caractere de controle; id que vira documento ou objeto não tem `/`, `\` nem `..`. A API recusa com 422 (`api/texto_como_dado.py`) e os adaptadores de nuvem conferem de novo, com `ValueError`.
+
 **Job**:
 Um pedido de decupagem de um vídeo, do registro ao fim do processamento.
 _Evitar_: tarefa, pedido

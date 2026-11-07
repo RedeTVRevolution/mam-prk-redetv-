@@ -87,6 +87,7 @@ from api.programas import (
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
+from api.texto_como_dado import id_seguro
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
 from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
@@ -127,29 +128,41 @@ _LOTE_DE_LEITURA = 500
 log = logging.getLogger(__name__)
 
 
+def _id_conferido(id: str) -> str:
+    """Defesa em profundidade: o id que vira documento ou objeto não sai do próprio nível
+    (a API já recusa antes, com 422)."""
+    if not id_seguro(id):
+        raise ValueError("id inválido para documento ou objeto")
+    return id
+
+
+def _documento(colecao: Any, id: str) -> Any:
+    return colecao.document(_id_conferido(id))
+
+
 def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
     """Os documentos que existem entre os `ids` (sem repetir), lidos em lotes de
     `_LOTE_DE_LEITURA` com `get_all`."""
-    referencias = [colecao.document(i) for i in dict.fromkeys(ids)]
+    referencias = [_documento(colecao, i) for i in dict.fromkeys(ids)]
     for inicio in range(0, len(referencias), _LOTE_DE_LEITURA):
         lote = referencias[inicio : inicio + _LOTE_DE_LEITURA]
         yield from (d for d in cliente.get_all(lote) if d.exists)
 
 
 def objeto_do_proxy(job_id: str) -> str:
-    return f"{job_id}/proxy.mp4"
+    return f"{_id_conferido(job_id)}/proxy.mp4"
 
 
 def objeto_do_audio(job_id: str) -> str:
-    return f"{job_id}/audio.wav"
+    return f"{_id_conferido(job_id)}/audio.wav"
 
 
 def objeto_da_transcricao(job_id: str) -> str:
-    return f"{job_id}/transcricao.json"
+    return f"{_id_conferido(job_id)}/transcricao.json"
 
 
 def prefixo_das_janelas(job_id: str) -> str:
-    return f"{job_id}/janelas/"
+    return f"{_id_conferido(job_id)}/janelas/"
 
 
 def objeto_da_janela(job_id: str, indice: int) -> str:
@@ -157,24 +170,26 @@ def objeto_da_janela(job_id: str, indice: int) -> str:
 
 
 def objeto_da_leitura_da_tela(job_id: str) -> str:
-    return f"{job_id}/leitura_da_tela.json"
+    return f"{_id_conferido(job_id)}/leitura_da_tela.json"
 
 
 def objeto_do_resultado_dos_objetos(job_id: str) -> str:
-    return f"{job_id}/objetos/florence.json"
+    return f"{_id_conferido(job_id)}/objetos/florence.json"
 
 
 def objeto_da_decupagem(job_id: str) -> str:
-    return f"{job_id}.json"
+    return f"{_id_conferido(job_id)}.json"
 
 
 def objeto_do_quadro(job_id: str, caminho: str) -> str:
     """`caminho` é o do campo `quadro` da Decupagem (`quadros/plano-0.jpg`)."""
-    return f"{job_id}/{caminho}"
+    if ".." in caminho or caminho.startswith("/") or "\\" in caminho:
+        raise ValueError("caminho de quadro inválido")
+    return f"{_id_conferido(job_id)}/{caminho}"
 
 
 def objeto_da_copia_limpa(job_id: str) -> str:
-    return f"{job_id}/copia_limpa.mp4"
+    return f"{_id_conferido(job_id)}/copia_limpa.mp4"
 
 
 TENTATIVAS_SOB_DISPUTA = 8
@@ -268,7 +283,7 @@ class RepositorioFirestore:
         self._listagem_por_mes = listagem_por_mes
 
     def salvar(self, job: Job) -> None:
-        self._colecao.document(job.id).set(job.model_dump())
+        _documento(self._colecao, job.id).set(job.model_dump())
 
     def criar(self, job: Job) -> bool:
         # `Aborted` não diz que outro gravou: o documento estava travado e o `create`
@@ -276,7 +291,7 @@ class RepositorioFirestore:
         # (`AlreadyExists` para os outros).
         for rodada in range(TENTATIVAS_SOB_DISPUTA):
             try:
-                self._colecao.document(job.id).create(job.model_dump())
+                _documento(self._colecao, job.id).create(job.model_dump())
             except AlreadyExists:
                 return False
             except Aborted:
@@ -293,7 +308,7 @@ class RepositorioFirestore:
     ) -> Job | None:
         # Lê, confere a origem e grava na mesma transação: um cancelamento que
         # chegue no meio faz o Firestore repetir a transação, que então vê o novo estado.
-        referencia = self._colecao.document(job_id)
+        referencia = _documento(self._colecao, job_id)
 
         @firestore.transactional
         def trocar(transacao: Any) -> Job | None:
@@ -313,7 +328,7 @@ class RepositorioFirestore:
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:
         # Como `transitar`, mas quem decide é `mudar`, que o Firestore pode repetir.
-        referencia = self._colecao.document(job_id)
+        referencia = _documento(self._colecao, job_id)
 
         @firestore.transactional
         def trocar_na_transacao(transacao: Any) -> Job | None:
@@ -331,10 +346,10 @@ class RepositorioFirestore:
         return self._sob_disputa(trocar_na_transacao)
 
     def remover(self, job_id: str) -> None:
-        self._colecao.document(job_id).delete()
+        _documento(self._colecao, job_id).delete()
 
     def obter(self, job_id: str) -> Job | None:
-        doc = self._colecao.document(job_id).get()
+        doc = _documento(self._colecao, job_id).get()
         return Job(**(doc.to_dict() or {})) if doc.exists else None
 
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
@@ -417,7 +432,7 @@ class RepositorioFirestore:
         # O desempate implícito é o id do documento, na mesma direção da ordem.
         consulta = consulta.order_by(campo, direction=firestore.Query.DESCENDING)
         if filtro.cursor is not None:
-            ancora = self._colecao.document(filtro.cursor).get()
+            ancora = _documento(self._colecao, filtro.cursor).get()
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
@@ -502,10 +517,10 @@ class RepositorioDeChavesFirestore:
         self._colecao = cliente.collection(colecao)
 
     def salvar(self, registro: RegistroDeChave) -> None:
-        self._colecao.document(registro.id).set(registro.model_dump())
+        _documento(self._colecao, registro.id).set(registro.model_dump())
 
     def obter(self, chave_id: str) -> RegistroDeChave | None:
-        doc = self._colecao.document(chave_id).get()
+        doc = _documento(self._colecao, chave_id).get()
         return RegistroDeChave(**(doc.to_dict() or {})) if doc.exists else None
 
     def listar_por_sistema(self, sistema: str) -> list[RegistroDeChave]:
@@ -538,7 +553,7 @@ class RepositorioDeChavesFirestore:
             ]
             if len(ativas) >= maximo_ativas:
                 raise LimiteDeChavesAtivas(registro.sistema)
-            transacao.set(self._colecao.document(registro.id), registro.model_dump())
+            transacao.set(_documento(self._colecao, registro.id), registro.model_dump())
 
         gravar(self._cliente.transaction())
 
@@ -630,7 +645,7 @@ class ListasDaBuscaFirestore:
         return str(referencia.id)
 
     def ler(self, id: str) -> dict[str, Any] | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return (doc.to_dict() or {}) if doc.exists else None
 
 
@@ -643,10 +658,10 @@ class RepositorioDeWebhooksFirestore:
         self._colecao = cliente.collection(colecao)
 
     def salvar(self, registro: RegistroDeWebhook) -> None:
-        self._colecao.document(registro.sistema).set(registro.model_dump())
+        _documento(self._colecao, registro.sistema).set(registro.model_dump())
 
     def obter(self, sistema: str) -> RegistroDeWebhook | None:
-        doc = self._colecao.document(sistema).get()
+        doc = _documento(self._colecao, sistema).get()
         return RegistroDeWebhook(**(doc.to_dict() or {})) if doc.exists else None
 
 
@@ -659,7 +674,7 @@ class RepositorioDePapeisFirestore:
         self._colecao = cliente.collection(colecao)
 
     def ler(self, uid: str) -> DocumentoDePapeis:
-        doc = self._colecao.document(uid).get()
+        doc = _documento(self._colecao, uid).get()
         dados = (doc.to_dict() or {}) if doc.exists else {}
         papeis: list[Papel] | None = None
         # Sem `papeis` (só a marca `desativada`): a conta segue sem papéis guardados.
@@ -673,13 +688,13 @@ class RepositorioDePapeisFirestore:
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         # merge: não apaga a marca `desativada`.
-        self._colecao.document(uid).set({"papeis": papeis}, merge=True)
+        _documento(self._colecao, uid).set({"papeis": papeis}, merge=True)
 
     def desativada(self, uid: str) -> bool:
         return self.ler(uid).desativada
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
-        self._colecao.document(uid).set({"desativada": desativada}, merge=True)
+        _documento(self._colecao, uid).set({"desativada": desativada}, merge=True)
 
 
 class ContasIdentityPlatform:
@@ -799,7 +814,7 @@ class CatalogoFirestore:
         self._colecao = cliente.collection(colecao)
 
     def _gravar(self, pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
-        self._colecao.document(pessoa.id).set(
+        _documento(self._colecao, pessoa.id).set(
             {
                 **pessoa.model_dump(exclude={"id"}),
                 "nomes_de_busca": nomes_de_busca(pessoa),
@@ -813,7 +828,7 @@ class CatalogoFirestore:
         return PessoaDoCatalogo(id=id, **dados)
 
     def obter(self, id: str) -> PessoaDoCatalogo | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return self._pessoa(id, doc.to_dict() or {}) if doc.exists else None
 
     def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
@@ -900,7 +915,7 @@ class CatalogoFirestore:
         return self._gravar(atual.model_copy(update={"rostos": list(rostos)}))
 
     def apagar(self, id: str) -> None:
-        referencia = self._colecao.document(id)
+        referencia = _documento(self._colecao, id)
         if not referencia.get().exists:
             raise PessoaInexistente(id)
         referencia.delete()
@@ -924,7 +939,7 @@ class ProgramasFirestore:
         return sorted(lidos, key=lambda p: p.nome.casefold())
 
     def obter(self, id: str) -> Programa | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
 
     def _conferir_nome(self, programa: Programa) -> None:
@@ -938,7 +953,7 @@ class ProgramasFirestore:
         self._conferir_nome(programa)
         # Com merge, o campo que não vai fica como está: o andamento é da tarefa.
         fora = {"id"} if com_renomeacao else {"id", "renomeacao"}
-        self._colecao.document(programa.id).set(
+        _documento(self._colecao, programa.id).set(
             programa.model_dump(exclude=fora), merge=True
         )
 
@@ -946,7 +961,7 @@ class ProgramasFirestore:
         self, id: str, mudar: Callable[[Programa], Programa | None]
     ) -> Programa | None:
         # Como `RepositorioFirestore.trocar`: `mudar` decide, e o Firestore pode repeti-la.
-        referencia = self._colecao.document(id)
+        referencia = _documento(self._colecao, id)
 
         @firestore.transactional
         def trocar_na_transacao(transacao: Any) -> Programa | None:
@@ -973,7 +988,7 @@ class ProgramasFirestore:
         # Os Jobs estão no mesmo Firestore: a transação lê o programa e o Job juntos.
         if not isinstance(jobs, RepositorioFirestore):
             raise TypeError("os Jobs precisam estar no Firestore")
-        programa_ref = self._colecao.document(programa_id)
+        programa_ref = _documento(self._colecao, programa_id)
         job_ref = self._cliente.collection(jobs._colecao.id).document(job_id)
 
         @firestore.transactional
@@ -1000,9 +1015,9 @@ class ProgramasFirestore:
         return resultado
 
     def apagar(self, id: str) -> None:
-        if not self._colecao.document(id).get().exists:
+        if not _documento(self._colecao, id).get().exists:
             raise ProgramaInexistente(id)
-        self._colecao.document(id).delete()
+        _documento(self._colecao, id).delete()
 
 
 class CatalogoDeMarcasFirestore:
@@ -1021,7 +1036,7 @@ class CatalogoDeMarcasFirestore:
         return MarcaDoCatalogo(id=id, **dados)
 
     def obter(self, id: str) -> MarcaDoCatalogo | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return self._marca(id, doc.to_dict() or {}) if doc.exists else None
 
     def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
@@ -1047,7 +1062,7 @@ class CatalogoDeMarcasFirestore:
         return [m for m in self._lidas() if m.lixeira is not None]
 
     def _gravar(self, marca: MarcaDoCatalogo) -> MarcaDoCatalogo:
-        self._colecao.document(marca.id).set(
+        _documento(self._colecao, marca.id).set(
             {
                 **marca.model_dump(exclude={"id"}),
                 "nomes_de_busca": nomes_de_busca_da_marca(marca),
@@ -1064,7 +1079,7 @@ class CatalogoDeMarcasFirestore:
         return self._gravar(atual.model_copy(update={"lixeira": envio}))
 
     def apagar(self, id: str) -> None:
-        referencia = self._colecao.document(id)
+        referencia = _documento(self._colecao, id)
         if not referencia.get().exists:
             raise MarcaInexistente(id)
         referencia.delete()
@@ -1110,7 +1125,7 @@ class TiposDeObjetoFirestore:
 
     def registrar(self, job_id: str, contagens: Mapping[str, int]) -> None:
         novas = somar_por_chave(contagens)
-        referencia = self._por_job.document(job_id)
+        referencia = _documento(self._por_job, job_id)
 
         # Ler a contribuição antiga e aplicar o delta na mesma transação: dois reindexares
         # do mesmo job ao mesmo tempo não somam a diferença duas vezes.
@@ -1187,7 +1202,7 @@ class RepositorioDeCorrecoesFirestore:
 
     def acrescentar(self, correcao: Correcao) -> None:
         try:
-            self._colecao.document(correcao.id).create(correcao.model_dump())
+            _documento(self._colecao, correcao.id).create(correcao.model_dump())
         except AlreadyExists:
             raise CorrecaoJaExiste(correcao.id) from None
 
@@ -1248,7 +1263,7 @@ class RepositorioDeAuditoriaFirestore:
         self._colecao = cliente.collection(colecao)
 
     def acrescentar(self, registro: RegistroDeAuditoria) -> None:
-        self._colecao.document(registro.id).create(registro.model_dump())
+        _documento(self._colecao, registro.id).create(registro.model_dump())
 
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
         # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os
@@ -1275,7 +1290,7 @@ class RepositorioDeAuditoriaFirestore:
         # O desempate implícito é o id do documento, na mesma direção da ordem.
         consulta = consulta.order_by("quando", direction=firestore.Query.DESCENDING)
         if filtro.cursor is not None:
-            ancora = self._colecao.document(filtro.cursor).get()
+            ancora = _documento(self._colecao, filtro.cursor).get()
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
@@ -1298,7 +1313,7 @@ class RepositorioDeRevisaoFirestore:
         self._colecao = cliente.collection(colecao)
 
     def aplicar(self, pulso: Pulso, limite_s: float) -> Medida:
-        referencia = self._colecao.document(f"{pulso.job_id}:{pulso.uid}")
+        referencia = _documento(self._colecao, f"{pulso.job_id}:{pulso.uid}")
 
         @firestore.transactional
         def gravar(transacao: Any) -> Medida:
