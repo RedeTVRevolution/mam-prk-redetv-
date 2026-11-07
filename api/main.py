@@ -177,6 +177,13 @@ from api.revisao import (
     RepositorioDeRevisaoEmMemoria,
     criar_rotas_da_revisao,
 )
+from api.revisao_do_painel import (
+    RepositorioDeRevisaoEspelhado,
+    RevisaoEmMemoria,
+    TempoDeRevisao,
+    revisao_do_ambiente,
+    tabela_do_ambiente,
+)
 from api.rota_da_busca import (
     CONSULTAS_POR_MINUTO,
     LIMITES_DA_IMAGEM,
@@ -344,6 +351,7 @@ def criar_app(
     resumos_de_uso: ResumosDeUso | None = None,
     qualidade_do_painel: QualidadeDoPainel | None = None,
     faturamento: FonteDeCusto | None = None,
+    tempo_de_revisao: TempoDeRevisao | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     cache_do_painel: CacheCurto | None = None,
     passadas: LeituraDePassadas | None = None,
@@ -651,6 +659,8 @@ def criar_app(
                 armazenamento_dos_jobs,
                 repositorio_de_correcoes,
                 repositorio_da_revisao,
+                tempo_de_revisao
+                or RevisaoEmMemoria(repositorio_da_revisao, repositorio_de_jobs),
             ),
             faturamento,
             repositorio_de_jobs,
@@ -777,6 +787,18 @@ def criar_app(
 _projeto = os.environ.get("GCP_PROJECT_ID")
 
 
+def _revisao_espelhada(banco: firestore.Client) -> RepositorioDeRevisao:
+    """O Firestore da revisão com cada medida copiada para a tabela do painel (#467); sem a
+    tabela configurada, o repositório puro."""
+    repositorio = RepositorioDeRevisaoFirestore(banco)
+    tabela = tabela_do_ambiente(os.environ)
+    return (
+        repositorio
+        if tabela is None
+        else RepositorioDeRevisaoEspelhado(repositorio, tabela)
+    )
+
+
 def _com_cache[C, R](
     consulta: C | None, envolver: Callable[[C, CacheCurto], R]
 ) -> R | None:
@@ -828,7 +850,7 @@ if _projeto:
             os.environ["BUCKET_DECUPAGENS"],
         ),
         mac=mac_do_ambiente(os.environ),
-        revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
+        revisao=_revisao_espelhada(firestore.Client(project=_projeto)),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
             or LOGIN_RECENTE_PADRAO / timedelta(minutes=1)
@@ -868,6 +890,7 @@ if _projeto:
         tempo_de_tela=_com_cache(consulta_do_ambiente(os.environ), TempoDeTelaComCache),
         resumos_de_uso=resumos_do_ambiente(os.environ),
         faturamento=faturamento_do_ambiente(os.environ),
+        tempo_de_revisao=revisao_do_ambiente(os.environ),
         relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
         cache_do_painel=CacheCurto(),
         passadas=PassadasStorage(

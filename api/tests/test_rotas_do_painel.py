@@ -117,6 +117,8 @@ class Mundo:
         relogio: Callable[[], datetime] = agora_utc,
         periodo_padrao: bool = False,
         cache_do_painel: Any = None,
+        revisao: Any = None,
+        tempo_de_revisao: Any = None,
     ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
@@ -146,6 +148,8 @@ class Mundo:
                 relogio=relogio,
                 contas=self.contas,
                 cache_do_painel=cache_do_painel,
+                revisao=revisao,
+                tempo_de_revisao=tempo_de_revisao,
             )
         )
 

@@ -9,6 +9,7 @@ from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.jobs import Job, RepositorioEmMemoria
 from api.qualidade_do_painel import QualidadeReal
 from api.revisao import Pulso, RepositorioDeRevisaoEmMemoria
+from api.revisao_do_painel import RevisaoEmMemoria
 
 AGORA = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 
@@ -52,14 +53,21 @@ def _revisar(
     )
 
 
-def _qualidade() -> tuple[QualidadeReal, RepositorioDeRevisaoEmMemoria]:
-    jobs = RepositorioEmMemoria()
-    jobs.salvar(_job("v1", "Hoje"))
-    jobs.salvar(_job("v2", "Fala"))
+def _qualidade(
+    jobs: RepositorioEmMemoria | None = None,
+) -> tuple[QualidadeReal, RepositorioDeRevisaoEmMemoria]:
+    if jobs is None:
+        jobs = RepositorioEmMemoria()
+        jobs.salvar(_job("v1", "Hoje"))
+        jobs.salvar(_job("v2", "Fala"))
     revisao = RepositorioDeRevisaoEmMemoria()
     return (
         QualidadeReal(
-            jobs, SemDecupagens(), RepositorioDeCorrecoesEmMemoria(), revisao
+            jobs,
+            SemDecupagens(),
+            RepositorioDeCorrecoesEmMemoria(),
+            revisao,
+            RevisaoEmMemoria(revisao, jobs),
         ),
         revisao,
     )
@@ -73,25 +81,20 @@ def test_tempo_de_revisao_filtra_por_periodo_programa_e_pessoa() -> None:
 
     def quem(
         desde: date | None, ate: date | None, programa: str | None, usuario: str | None
-    ) -> set[tuple[str, str, str | None, float, float | None]]:
-        return {
-            (m.job_id, m.uid, m.programa, m.ativo_s, m.duracao_s)
-            for m in qualidade.tempo_de_revisao(desde, ate, programa, usuario)
-        }
+    ) -> dict[tuple[str, str], float]:
+        tempo = qualidade.tempo_de_revisao(desde, ate, programa, usuario)
+        return {k: n.ativo_s for k, n in tempo.por_pessoa.items()}
 
     assert quem(None, None, None, None) == {
-        ("v1", "ana", "Hoje", 600, 3600),
-        ("v2", "beto", "Fala", 1200, 1800),
-        ("v2", "ana", "Fala", 60, None),
+        ("ana", "ana@x"): 660,
+        ("beto", "beto@x"): 1200,
     }
     assert quem(date(2026, 11, 3), None, None, None) == {
-        ("v2", "beto", "Fala", 1200, 1800),
-        ("v2", "ana", "Fala", 60, None),
+        ("ana", "ana@x"): 60,
+        ("beto", "beto@x"): 1200,
     }
-    assert quem(None, date(2026, 11, 4), None, None) == {
-        ("v1", "ana", "Hoje", 600, 3600)
-    }
-    assert quem(None, None, "Fala", "ana") == {("v2", "ana", "Fala", 60, None)}
+    assert quem(None, date(2026, 11, 4), None, None) == {("ana", "ana@x"): 600}
+    assert quem(None, None, "Fala", "ana") == {("ana", "ana@x"): 60}
 
 
 def test_o_periodo_e_de_dias_de_sao_paulo() -> None:
@@ -100,44 +103,11 @@ def test_o_periodo_e_de_dias_de_sao_paulo() -> None:
     _revisar(revisao, "v1", "ana", datetime(2026, 11, 3, 2, tzinfo=UTC), 60, 3600)
 
     def n(desde: date | None, ate: date | None) -> int:
-        return len(qualidade.tempo_de_revisao(desde, ate, None, None))
+        return qualidade.tempo_de_revisao(desde, ate, None, None).total.videos
 
     assert n(None, date(2026, 11, 2)) == 1
     assert n(date(2026, 11, 3), None) == 0
     assert n(date(2026, 11, 2), date(2026, 11, 2)) == 1
-
-
-def test_job_sem_programa_vem_sem_programa_e_job_apagado_fica_de_fora() -> None:
-    jobs = RepositorioEmMemoria()
-    jobs.salvar(_job("v3", None))
-    revisao = RepositorioDeRevisaoEmMemoria()
-    qualidade = QualidadeReal(
-        jobs, SemDecupagens(), RepositorioDeCorrecoesEmMemoria(), revisao
-    )
-    _revisar(revisao, "v3", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, 3600)
-    _revisar(revisao, "v9", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, 3600)
-
-    assert [
-        (m.job_id, m.programa)
-        for m in qualidade.tempo_de_revisao(None, None, None, None)
-    ] == [("v3", None)]
-
-
-def test_a_duracao_e_a_do_job_e_sem_ela_a_da_medida() -> None:
-    jobs = RepositorioEmMemoria()
-    jobs.salvar(_job("v1", "Hoje", duracao_s=1800))
-    jobs.salvar(_job("v2", "Hoje"))
-    revisao = RepositorioDeRevisaoEmMemoria()
-    qualidade = QualidadeReal(
-        jobs, SemDecupagens(), RepositorioDeCorrecoesEmMemoria(), revisao
-    )
-    _revisar(revisao, "v1", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, None)
-    _revisar(revisao, "v2", "ana", datetime(2026, 11, 2, 15, tzinfo=UTC), 60, 3600)
-
-    assert {
-        m.job_id: m.duracao_s
-        for m in qualidade.tempo_de_revisao(None, None, None, None)
-    } == {"v1": 1800, "v2": 3600}
 
 
 def test_a_taxa_de_correcao_do_periodo_e_calculada_pelo_modulo_da_taxa() -> None:

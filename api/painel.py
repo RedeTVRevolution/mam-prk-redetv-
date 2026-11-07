@@ -42,7 +42,7 @@ from api.jobs import (
     _confere_permissao,
 )
 from api.periodo_padrao import Periodo, dependencia_do_periodo
-from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel, RevisaoNoVideo
+from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel
 from api.relatorios import (
     confere_o_pedido,
     em_paralelo,
@@ -56,6 +56,7 @@ from api.resumos_de_uso import (
     ResumosDeUso,
     UsoDoDia,
 )
+from api.revisao_do_painel import NumerosAgregados, RevisaoAgregada
 from api.taxa_de_correcao import LinhaDaTaxa
 from api.usuarios import ContasDeUsuario
 
@@ -881,50 +882,35 @@ def taxa_no_painel(linhas: list[LinhaDaTaxa]) -> TaxaDeCorrecaoNoPainel:
     )
 
 
-def _numeros_de_revisao(medidas: list[RevisaoNoVideo]) -> dict[str, Any]:
-    """Os minutos de revisão dos vídeos dados. A duração é a do vídeo (a maior que alguma
-    medida trouxe) e conta uma vez, mesmo revisado por mais de uma pessoa."""
-    duracao: dict[str, float] = {}
-    for m in medidas:
-        if m.duracao_s:
-            duracao[m.job_id] = max(duracao.get(m.job_id, 0), m.duracao_s)
-    ativo_s = sum(m.ativo_s for m in medidas)
-    ativo_com_duracao_s = sum(m.ativo_s for m in medidas if m.job_id in duracao)
-    horas = sum(duracao.values()) / 3600
+def _numeros_de_revisao(n: NumerosAgregados) -> dict[str, Any]:
+    """Os minutos de revisão de um grupo. A duração é a do vídeo e conta uma vez, mesmo
+    revisado por mais de uma pessoa (quem agrega já cuidou disso)."""
     return NumerosDeRevisao(
-        minutos=round(ativo_s / 60, 2),
-        videos=len({m.job_id for m in medidas}),
-        horas_de_video=round(horas, 2),
+        minutos=round(n.ativo_s / 60, 2),
+        videos=n.videos,
+        horas_de_video=round(n.horas, 2),
         minutos_por_hora_de_video=(
-            round(ativo_com_duracao_s / 60 / horas, 2) if horas else None
+            round(n.ativo_com_duracao_s / 60 / n.horas, 2) if n.horas else None
         ),
     ).model_dump()
 
 
-def _agrupar[C](
-    medidas: list[RevisaoNoVideo], chave: Callable[[RevisaoNoVideo], C]
-) -> dict[C, list[RevisaoNoVideo]]:
-    grupos: dict[C, list[RevisaoNoVideo]] = defaultdict(list)
-    for m in medidas:
-        grupos[chave(m)].append(m)
-    return grupos
-
-
-def tempo_no_painel(medidas: list[RevisaoNoVideo]) -> TempoDeRevisaoNoPainel:
-    pessoas = _agrupar(medidas, lambda m: (m.uid, m.email))
-    programas = _agrupar(medidas, lambda m: m.programa)
+def tempo_no_painel(tempo: RevisaoAgregada) -> TempoDeRevisaoNoPainel:
     return TempoDeRevisaoNoPainel(
-        total=NumerosDeRevisao(**_numeros_de_revisao(medidas)),
+        total=NumerosDeRevisao(**_numeros_de_revisao(tempo.total)),
         por_pessoa=[
             PessoaNaRevisaoDoPainel(uid=uid, email=email, **numeros)
             for (uid, email), numeros in sorted(
-                ((quem, _numeros_de_revisao(ms)) for quem, ms in pessoas.items()),
+                (
+                    (quem, _numeros_de_revisao(n))
+                    for quem, n in tempo.por_pessoa.items()
+                ),
                 key=lambda i: (-i[1]["minutos"], i[0][1]),
             )
         ],
         por_programa=[
-            ProgramaNaRevisao(programa=p, **_numeros_de_revisao(ms))
-            for p, ms in sorted(programas.items(), key=lambda i: i[0] or "")
+            ProgramaNaRevisao(programa=p, **_numeros_de_revisao(n))
+            for p, n in sorted(tempo.por_programa.items(), key=lambda i: i[0] or "")
         ],
     )
 
@@ -932,7 +918,7 @@ def tempo_no_painel(medidas: list[RevisaoNoVideo]) -> TempoDeRevisaoNoPainel:
 def _linhas_do_csv_de_revisao(
     correcoes: list[CorrecaoDoDia],
     taxa: list[LinhaDaTaxa],
-    medidas: list[RevisaoNoVideo],
+    tempo: RevisaoAgregada,
     emails: dict[str, str],
 ) -> list[list[object]]:
     """Uma tabela só, com a coluna `indicador`: as correções por dia, pessoa, programa e
@@ -978,10 +964,8 @@ def _linhas_do_csv_de_revisao(
             ]
             + [""] * 3
         )
-    for (uid, email, programa), ms in sorted(
-        _agrupar(medidas, lambda m: (m.uid, m.email, m.programa or "")).items()
-    ):
-        n = _numeros_de_revisao(ms)
+    for (uid, email, programa), numeros in sorted(tempo.por_pessoa_e_programa.items()):
+        n = _numeros_de_revisao(numeros)
         por_hora = n["minutos_por_hora_de_video"]
         linhas.append(
             ["tempo", "", uid, email, programa, "", "", "", ""]
@@ -1352,7 +1336,7 @@ def criar_rotas_do_painel(
                 )
             )
         )
-        medidas = ou_503(
+        tempo = ou_503(
             lambda: lido(
                 ("tempo_de_revisao", *_chave(filtro)),
                 lambda: qualidade.tempo_de_revisao(
@@ -1366,7 +1350,7 @@ def criar_rotas_do_painel(
             return resposta_em_csv(
                 csv_em_texto(
                     COLUNAS_DO_CSV_DE_REVISAO,
-                    _linhas_do_csv_de_revisao(correcoes, taxa, medidas, emails),
+                    _linhas_do_csv_de_revisao(correcoes, taxa, tempo, emails),
                 ),
                 "revisao.csv",
             )
@@ -1379,7 +1363,7 @@ def criar_rotas_do_painel(
             usuario=filtro.usuario,
             correcoes=relatorio_de_correcoes(correcoes, emails, grupo),
             taxa_de_correcao=taxa_no_painel(taxa),
-            tempo_de_revisao=tempo_no_painel(medidas),
+            tempo_de_revisao=tempo_no_painel(tempo),
         )
 
     @rotas.get("/api", response_model=RelatorioDeApi)
