@@ -21,6 +21,7 @@ from api.agent_retrieval import (
     esquema_da_colecao,
     filtro_do_pedido,
     indices_da_colecao,
+    montar_plano,
     pedido_de_busca,
     transporte_http,
 )
@@ -1164,3 +1165,108 @@ def test_id_do_objeto_com_id_de_correcao_cabe_nos_63_caracteres_do_rfc_1035() ->
     assert ids[0] == ids[1] != "m-" + longo.replace(":", "-")
     assert len(ids[0]) <= 63 and ids[0][0] == "m"
     assert ids[2] == "m-j-fala-fal001"
+
+
+def _reg(id: str, tipo: str = "fala", **campos: Any) -> Registro:
+    base: dict[str, Any] = {"job_id": "j", "inicio_ms": 0, "fim_ms": 10}
+    return Registro(id=id, tipo=tipo, **(base | campos))  # type: ignore[arg-type]
+
+
+def _lido(r: Registro) -> dict[str, Any]:
+    return dict(_criacao(r)["dataObject"]["data"])
+
+
+def test_plano_id_novo_cria_e_id_que_sumiu_apaga() -> None:
+    velho, novo = _reg("j:fala:fal000", texto="a"), _reg("j:fala:fal001", texto="b")
+    plano = montar_plano([novo], [_lido(velho)])
+    assert plano.criar == [novo]
+    assert plano.apagar == [velho.id]
+    assert plano.atualizar == []
+
+
+def test_plano_igual_nao_faz_nada() -> None:
+    r = _reg("j:fala:fal000", texto="a", pessoas=["x", "y"], programa="p")
+    assert montar_plano([r], [_lido(r)]).vazio
+
+
+def test_plano_mudar_o_texto_da_fala_apaga_e_cria() -> None:
+    antes = _reg("j:fala:fal000", texto="a")
+    depois = _reg("j:fala:fal000", texto="b")
+    plano = montar_plano([depois], [_lido(antes)])
+    assert (plano.criar, plano.apagar, plano.atualizar) == (
+        [depois],
+        [depois.id],
+        [],
+    )
+
+
+def test_plano_mudar_so_as_pessoas_atualiza() -> None:
+    antes = _reg("j:fala:fal000", texto="a", pessoas=["x"])
+    depois = _reg("j:fala:fal000", texto="a", pessoas=["x", "y"])
+    plano = montar_plano([depois], [_lido(antes)])
+    assert (plano.criar, plano.apagar, plano.atualizar) == ([], [], [depois])
+
+
+def test_plano_compara_float_none_dias_e_listas_fora_de_ordem() -> None:
+    r = _reg(
+        "j:objeto:o1:0",
+        "objeto",
+        descricao="d",
+        pessoas=["a", "b"],
+        cor_base=["azul", "verde"],
+        data_de_exibicao=date(2026, 1, 2),
+        destaque=2,
+    )
+    lido = _lido(r)
+    lido["pessoas"] = ["b", "a"]
+    lido["cor_base"] = ["verde", "azul"]
+    lido["inicio_ms"] = 0.0
+    lido["destaque"] = 2.0
+    lido["marca"] = None  # ausente no novo vale como None
+    assert lido["data_de_exibicao"] == 20260102
+    assert montar_plano([r], [lido]).vazio
+    # Um dia diferente é mudança de verdade.
+    outro = replace(r, data_de_exibicao=date(2026, 1, 3))
+    assert montar_plano([outro], [lido]).atualizar == [outro]
+
+
+def test_plano_diz_quais_planos_precisam_do_vetor_do_quadro() -> None:
+    def plano(id: str, quadro: str, descricao: str = "d") -> Registro:
+        return _reg(id, "plano", descricao=descricao, quadro=quadro)
+
+    igual, novo = plano("j:plano:p0", "q0"), plano("j:plano:p1", "q1")
+    quadro = plano("j:plano:p2", "q2")
+    texto = plano("j:plano:p3", "q3")
+    pessoas = replace(plano("j:plano:p4", "q4"), pessoas=["x"])
+    lidos = [
+        _lido(igual),
+        _lido(plano("j:plano:p2", "velho")),
+        _lido(plano("j:plano:p3", "q3", "outra descrição")),
+        _lido(plano("j:plano:p4", "q4")),
+    ]
+    resultado = montar_plano([igual, novo, quadro, texto, pessoas], lidos)
+    assert resultado.planos_com_quadro_novo == [
+        "j:plano:p1",
+        "j:plano:p2",
+        "j:plano:p3",
+    ]
+
+
+def test_ler_indice_pede_so_os_campos_do_esquema_e_pagina() -> None:
+    r1, r2 = _reg("j:fala:fal000", texto="a"), _reg("j:fala:fal001", texto="b")
+    respostas = iter(
+        [
+            {"dataObjects": [{"data": _lido(r1)}], "nextPageToken": "p2"},
+            {"dataObjects": [{"data": _lido(r2)}]},
+        ]
+    )
+    transporte = TransporteFalso()
+    lidos = AgentRetrieval(CONFIG, _Sequencia(transporte, respostas)).ler_indice("j")
+    assert [d["id"] for d in lidos] == [r1.id, r2.id]
+    [(_, caminho, corpo1), (_, _, corpo2)] = transporte.chamadas
+    assert caminho.endswith("/dataObjects:query")
+    assert corpo1 is not None and corpo2 is not None
+    assert corpo1["filter"] == {"job_id": {"$eq": "j"}}
+    campos = corpo1["outputFields"]["dataFields"]
+    assert campos == list(esquema_da_colecao(CONFIG)["dataSchema"]["properties"])
+    assert corpo2["pageToken"] == "p2"
