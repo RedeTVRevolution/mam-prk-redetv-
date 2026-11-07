@@ -83,7 +83,7 @@ variable "espera_gpu_minutos" {
 }
 
 variable "limite_de_falhas_por_etapa" {
-  description = "Falhas por etapa e por origem (Jobs ou Workflows) na janela dos alertas antes de alertar"
+  description = "Falhas por etapa, somando as origens (Jobs e Workflows), na janela dos alertas antes de alertar"
   type        = number
   default     = 3
 }
