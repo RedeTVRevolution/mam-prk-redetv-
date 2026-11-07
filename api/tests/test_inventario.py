@@ -103,6 +103,7 @@ def test_a_conversao_e_uma_chamada_so_de_texto_sem_imagem() -> None:
     assert chamada.modelo == "m"
     assert chamada.rotulos["etapa"] == "inventario_de_objetos"
     assert chamada.rotulos["job_id"] == "j1"
+    assert chamada.modo == "flex"
     assert "couch" in chamada.instrucao + chamada.texto
     assert "português" in chamada.instrucao
 
@@ -253,6 +254,7 @@ def test_planos_em_lotes_uma_chamada_por_lote() -> None:
         modelo="m",
         job_id="j1",
         planos_por_lote=2,
+        paralelismo=1,  # a fila de respostas do fake é por ordem de chamada
     )
 
     assert len(transporte.chamadas) == 3
@@ -398,3 +400,42 @@ def test_plano_sem_quadros_nao_gera_chamada() -> None:
 
     assert inventarios == {0: []}
     assert transporte.chamadas == []
+
+
+def test_os_lotes_vao_ao_gemini_ao_mesmo_tempo_e_o_resultado_segue_a_ordem() -> None:
+    import threading
+
+    from api.gemini import Chamada
+
+    quadros = bruto(
+        *[
+            quadro(
+                i,
+                f"q/{i}.jpg",
+                objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+            )
+            for i in range(4)
+        ]
+    )
+    # Cada chamada espera a outra: em série, a barreira estoura o prazo.
+    barreira = threading.Barrier(2, timeout=5)
+
+    class TransporteEmParalelo:
+        def gerar(self, chamada: Chamada) -> str:
+            barreira.wait()
+            plano = int(chamada.texto.split()[1])
+            return resposta(
+                {"plano": plano, "objetos": [convertido("vaso", [f"p{plano}q0o0"])]}
+            )
+
+    inventarios = converter_do_florence(
+        decupagem(*[[f"q/{i}.jpg"] for i in range(4)]),
+        quadros,
+        transporte=TransporteEmParalelo(),
+        modelo="m",
+        job_id="j1",
+        planos_por_lote=2,
+        paralelismo=2,
+    )
+
+    assert sorted(inventarios) == [0, 1, 2, 3]

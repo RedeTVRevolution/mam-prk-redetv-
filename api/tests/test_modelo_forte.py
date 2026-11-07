@@ -158,6 +158,7 @@ def test_a_chamada_leva_os_quadros_o_modelo_forte_e_o_rotulo_de_custo() -> None:
     assert chamada.rotulos == {"job_id": "job-1", "etapa": ETAPA}
     assert chamada.imagens == (b"jpeg-15000", b"jpeg-55000")
     assert chamada.video_uri == ""
+    assert chamada.modo == "standard"  # Standard, com cache (#402, #414)
     assert chamada.ferramentas == ()
 
 

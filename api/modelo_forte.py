@@ -23,7 +23,13 @@ from api.catalogo import Catalogo
 from api.comparador import normalizar
 from api.decupagem import FORMATO_DO_TEMPO, Decupagem, Pessoa, Rotulo, em_mm_ss
 from api.espera import sorteio_uniforme
-from api.gemini import AnaliseFalhou, Chamada, Transporte, gerar_validado
+from api.gemini import (
+    MODO_STANDARD,
+    AnaliseFalhou,
+    Chamada,
+    Transporte,
+    gerar_validado,
+)
 from api.identidade import nao_identificado
 from api.identificacao import (
     TOLERANCIA_DA_FALA_MS,
@@ -228,6 +234,7 @@ def olhar_pessoas_sem_nome(
                 esquema=esquema_da_resposta(),
                 rotulos={"job_id": job_id, "etapa": ETAPA},
                 imagens=tuple(quadros_em(instantes)),
+                modo=MODO_STANDARD,  # Standard, com cache (#414)
             )
             resposta = gerar_validado(
                 transporte,
