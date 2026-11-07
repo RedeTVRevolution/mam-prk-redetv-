@@ -47,6 +47,7 @@ from api.identidade import (
 from api.identidade import identidade_do_nome, nao_identificado
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.pessoas import LISTAS
+from api.texto_como_dado import ID_SEGURO, Linha, Texto
 
 TipoNovo = Literal[
     "pessoa.renomear",
@@ -177,7 +178,7 @@ class Correcao(BaseModel):
 
 Motivo = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_MOTIVO),
+    Texto(LIMITE_DO_MOTIVO, min_length=1, strip=True),
 ]
 
 
@@ -633,9 +634,9 @@ class NovaCorrecao(BaseModel):
     ocorrencia: Ocorrencia | None = None
     # O id da pessoa ou da marca do catálogo que o nome novo é (`pessoa.renomear` e
     # `comercial.marca`); o servidor confere que existe e que o nome é o dela.
-    catalogo_id: Annotated[str, StringConstraints(max_length=64)] | None = None
+    catalogo_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO] | None = None
     # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
-    item_id: Annotated[str, StringConstraints(max_length=40)] = ""
+    item_id: Annotated[str, Linha(40)] = ""
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
     # esquema; `comercial.acrescentar`: o JSON do comercial; `pessoa.nao_e`:
     # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
@@ -648,14 +649,9 @@ class NovaCorrecao(BaseModel):
     # fim_ms, tipo, texto}; `pauta.acrescentar`: o JSON {titulo, resumo?, tom,
     # inicio_ms, fim_ms}; `pauta.juntar`: o JSON {ids, titulo}, com o `item_id` da
     # primeira; `pauta.dividir`: o JSON {em_ms, titulos: [primeira, segunda]}.
-    valor: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_JSON
-        ),
-    ]
+    valor: Annotated[str, Texto(LIMITE_DO_JSON, min_length=1, strip=True)]
     motivo: Motivo
-    versao: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    versao: Annotated[str, Linha(64, min_length=1)]
 
     _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
 
@@ -707,7 +703,7 @@ class NovaRecusa(NovaResolucao):
 class NovaReaplicacao(NovaResolucao):
     """Corpo de `POST /v1/jobs/{id}/fila/{cid}/reaplicar`."""
 
-    item_id: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+    item_id: Annotated[str, Linha(40, min_length=1)]
 
 
 class RepositorioDeAprovacao(Protocol):

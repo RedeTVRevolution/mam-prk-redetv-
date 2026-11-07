@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel
 
 from api.catalogo import Catalogo, PessoaDoCatalogo, visivel
 from api.catalogo_apagado import destino_final
+from api.texto_como_dado import ID_SEGURO, Linha, Texto
 
 if TYPE_CHECKING:  # `api.jobs` importa este módulo
     from api.jobs import Job, RepositorioDeJobs
@@ -25,22 +26,16 @@ LIMITE_DO_PAPEL = 100
 
 NomeDoPrograma = Annotated[
     str,
-    StringConstraints(
-        strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME_DO_PROGRAMA
-    ),
+    Linha(LIMITE_DO_NOME_DO_PROGRAMA, min_length=1, strip=True),
 ]
-PerfilEmTexto = Annotated[
-    str, StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_PERFIL)
-]
-PapelNoPrograma = Annotated[
-    str, StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_PAPEL)
-]
+PerfilEmTexto = Annotated[str, Texto(LIMITE_DO_PERFIL, strip=True)]
+PapelNoPrograma = Annotated[str, Linha(LIMITE_DO_PAPEL, strip=True)]
 
 
 class VinculoDaPessoa(BaseModel):
     """A pessoa do catálogo no programa e o que ela faz ali."""
 
-    pessoa_id: str
+    pessoa_id: Annotated[str, Linha(200, min_length=1), ID_SEGURO]
     papel: PapelNoPrograma = ""
 
 

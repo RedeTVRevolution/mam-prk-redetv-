@@ -8,9 +8,10 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Annotated, NamedTuple
 
-from fastapi import HTTPException, Query
+from fastapi import HTTPException
 
 from api.qualidade_do_painel import SAO_PAULO
+from api.texto_como_dado import LinhaDaConsulta
 
 DIAS_DO_PERIODO_PADRAO = 7
 
@@ -46,11 +47,14 @@ def dependencia_do_periodo(
     def periodo(
         desde: Annotated[
             str | None,
-            Query(
-                description="Dia (AAAA-MM-DD); sem `desde` nem `ate`, os últimos 7 dias"
+            LinhaDaConsulta(
+                10,
+                description="Dia (AAAA-MM-DD); sem `desde` nem `ate`, os últimos 7 dias",
             ),
         ] = None,
-        ate: Annotated[str | None, Query(description="Dia (AAAA-MM-DD)")] = None,
+        ate: Annotated[
+            str | None, LinhaDaConsulta(10, description="Dia (AAAA-MM-DD)")
+        ] = None,
     ) -> Periodo:
         if desde is None and ate is None:
             return periodo_padrao(relogio())

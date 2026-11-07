@@ -97,6 +97,7 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import RepositorioDeProgramas
+from api.texto_como_dado import PADRAO_DA_LINHA, Linha, LinhaDaConsulta
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
@@ -444,8 +445,10 @@ LIMITE_DE_QUADROS_EM_LOTE = 100
 class ParDeQuadro(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    job: Annotated[str, StringConstraints(pattern=ID_DO_JOB_NO_LOTE)]
-    arquivo: Annotated[str, StringConstraints(pattern=ARQUIVO_DO_QUADRO)]
+    job: Annotated[str, StringConstraints(pattern=ID_DO_JOB_NO_LOTE, max_length=128)]
+    arquivo: Annotated[
+        str, StringConstraints(pattern=ARQUIVO_DO_QUADRO, max_length=200)
+    ]
 
 
 class PedidoDeQuadros(BaseModel):
@@ -468,10 +471,12 @@ class TipoNaoSuportado(Exception):
 class NovoJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    nome: Annotated[str, StringConstraints(min_length=1, max_length=255)]
+    nome: Annotated[str, Linha(255, min_length=1)]
     tamanho_bytes: Annotated[int, Field(strict=True)]
     tipo: Literal["video/mp4"]
-    programa: str | None = None  # o nome de um programa cadastrado
+    programa: Annotated[str, Linha(100)] | None = (
+        None  # o nome de um programa cadastrado
+    )
     # Obrigatória (#365): a tabela de momentos é dividida por ela.
     data_exibicao: date
 
@@ -995,7 +1000,9 @@ def criar_rotas(
         novo: NovoJob,
         chamador: Annotated[Chamador, Depends(_exige("criar"))],
         resposta: Response,
-        idempotency_key: Annotated[str | None, Header()] = None,
+        idempotency_key: Annotated[
+            str | None, Header(max_length=200, pattern=PADRAO_DA_LINHA)
+        ] = None,
     ) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
@@ -1122,15 +1129,15 @@ def criar_rotas(
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        programa: str | None = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
         exibicao_ate: date | None = None,
-        q: str | None = None,
-        sistema: str | None = None,
+        q: Annotated[str | None, LinhaDaConsulta(300)] = None,
+        sistema: Annotated[str | None, LinhaDaConsulta(100)] = None,
         ordem: Ordem = "enviado",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_MAXIMO)] = None,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
         capa: bool = True,
     ) -> Response:
         if isinstance(chamador, Sistema):
@@ -1173,7 +1180,10 @@ def criar_rotas(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         ids: Annotated[
             str,
-            Query(description=f"Até {LIMITE_DO_ANDAMENTO} ids, separados por vírgula"),
+            LinhaDaConsulta(
+                8000,
+                description=f"Até {LIMITE_DO_ANDAMENTO} ids, separados por vírgula",
+            ),
         ],
     ) -> Response:
         """O estado de vários Jobs numa leitura só, para a tela atualizar o que está em

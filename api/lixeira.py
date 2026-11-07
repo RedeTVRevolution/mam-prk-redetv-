@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
@@ -27,6 +27,7 @@ from api.jobs import (
     _tem_permissao,
 )
 from api.marcas import CatalogoDeMarcas
+from api.texto_como_dado import Texto
 
 log = logging.getLogger(__name__)
 
@@ -99,12 +100,7 @@ class ItemDaLixeira(BaseModel):
 class Envio(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    motivo: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=MOTIVO_MAXIMO
-        ),
-    ]
+    motivo: Annotated[str, Texto(MOTIVO_MAXIMO, min_length=1, strip=True)]
 
 
 def sem_job_na_lixeira(

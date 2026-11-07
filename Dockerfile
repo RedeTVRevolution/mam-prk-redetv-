@@ -127,6 +127,7 @@ COPY api/__init__.py \
      api/revisao.py \
      api/sinais.py \
      api/teste_dos_jobs.py \
+     api/texto_como_dado.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/transcricao_job.py \
@@ -234,6 +235,7 @@ COPY api/__init__.py \
      api/revisao.py \
      api/sinais.py \
      api/teste_dos_jobs.py \
+     api/texto_como_dado.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/usuarios.py \
@@ -329,6 +331,7 @@ COPY api/__init__.py \
      api/revisao.py \
      api/sinais.py \
      api/teste_dos_jobs.py \
+     api/texto_como_dado.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/usuarios.py \

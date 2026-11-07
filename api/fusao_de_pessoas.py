@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, StringConstraints, field_validator
+from pydantic import BaseModel, field_validator
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
@@ -32,10 +32,11 @@ from api.lixeira_do_catalogo import (
     LeituraDeDecupagens,
     decupagens_entregues,
 )
+from api.texto_como_dado import ID_SEGURO, Linha, LinhaDaConsulta
 
 
 class PedidoDeFusao(BaseModel):
-    destino_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    destino_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO]
     motivo: Motivo
 
     _sem_controle_no_motivo = field_validator("motivo")(_sem_controle)
@@ -123,7 +124,7 @@ def criar_rotas_da_fusao(
     @rotas.get("/pessoas/{id_da_pessoa}/fundir/impacto")
     def impacto(
         id_da_pessoa: str,
-        destino_id: str,
+        destino_id: Annotated[str, LinhaDaConsulta(64, min_length=1)],
         _autor: Annotated[Usuario, Depends(_exige_fundir)],
     ) -> ImpactoDaFusao:
         origem, destino = origem_e_destino(id_da_pessoa, destino_id)

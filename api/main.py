@@ -203,6 +203,7 @@ from api.tempo_de_tela import (
     consulta_do_ambiente,
     criar_rotas_do_tempo_de_tela,
 )
+from api.texto_como_dado import conferir_ids_e_consultas
 from api.tipos_de_objeto import (
     TiposDeObjeto,
     TiposDeObjetoEmMemoria,
@@ -362,7 +363,7 @@ def criar_app(
     eventos: Eventos | None = None,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
-    app = FastAPI(title="MAM RedeTV")
+    app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
     @app.exception_handler(ServicoIndisponivel)
     def _indisponivel(_request: Request, _erro: ServicoIndisponivel) -> JSONResponse:

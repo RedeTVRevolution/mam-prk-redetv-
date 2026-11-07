@@ -30,7 +30,7 @@ from fastapi import (
     Request,
     Response,
 )
-from pydantic import BaseModel, StringConstraints, field_validator
+from pydantic import BaseModel, field_validator
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
@@ -58,6 +58,7 @@ from api.programas import (
     troca_vale,
 )
 from api.renomeacao_de_pessoas import AndamentoDaRenomeacao
+from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
 
@@ -71,9 +72,7 @@ EM_CURSO = ("confirmando", "em_andamento")
 
 Apelido = Annotated[
     str,
-    StringConstraints(
-        strip_whitespace=True, min_length=1, max_length=LIMITE_DO_APELIDO
-    ),
+    Linha(LIMITE_DO_APELIDO, min_length=1, strip=True),
 ]
 
 

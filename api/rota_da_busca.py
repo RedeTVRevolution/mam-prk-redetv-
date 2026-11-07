@@ -36,6 +36,7 @@ from api.imagens_hostis import (
 )
 from api.indice_da_busca import TipoDeRegistro
 from api.jobs import CursorInvalido, _exige
+from api.texto_como_dado import LinhaDaConsulta
 
 log = logging.getLogger(__name__)
 
@@ -143,20 +144,20 @@ def criar_rotas_da_busca(
     def buscar(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        q: Annotated[str, Query(min_length=1, max_length=TAMANHO_DA_CONSULTA)],
+        q: Annotated[str, LinhaDaConsulta(TAMANHO_DA_CONSULTA, min_length=1)],
         ordem: Ordem = "relevancia",
         evidencias: Annotated[list[EvidenciaDaBusca] | None, Query(alias="ev")] = None,
-        programa: Annotated[str | None, Query(max_length=100)] = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
         sem_periodo: bool = False,
-        pessoa: Annotated[str | None, Query(max_length=100)] = None,
-        marca: Annotated[str | None, Query(max_length=100)] = None,
+        pessoa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        marca: Annotated[str | None, LinhaDaConsulta(100)] = None,
         tipo: TipoDeRegistro | None = None,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
-        cursor: Annotated[str | None, Query(max_length=100)] = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
@@ -255,14 +256,14 @@ def criar_rotas_da_busca(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         dados: Annotated[bytes, Depends(foto_enviada)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
         sem_periodo: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
-        cursor: Annotated[str | None, Query(max_length=100)] = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")

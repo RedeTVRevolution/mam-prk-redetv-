@@ -3,11 +3,12 @@
 from collections.abc import Mapping
 from typing import Annotated, Protocol, TypedDict
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from api.auth import Chamador
 from api.comparador import normalizar
 from api.jobs import _exige
+from api.texto_como_dado import LinhaDaConsulta
 
 LIMITE_PADRAO = 10
 
@@ -63,7 +64,7 @@ def criar_rotas_dos_tipos_de_objeto(tipos: TiposDeObjeto) -> APIRouter:
     @rotas.get("/objetos/tipos")
     def buscar(
         _chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        q: Annotated[str, Query(max_length=100)] = "",
+        q: Annotated[str, LinhaDaConsulta(100)] = "",
     ) -> list[TipoDeObjeto]:
         return tipos.buscar(q, LIMITE_PADRAO)
 
