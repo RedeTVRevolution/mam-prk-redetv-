@@ -16,6 +16,7 @@ quando este Job roda.
 Ambiente: `GCP_PROJECT_ID`, `JOB_ID`, `PUBSUB_TOPICO_EVENTOS` e `PUBSUB_TOPICO_USO`.
 """
 
+import logging
 import os
 import sys
 from collections.abc import Mapping
@@ -23,6 +24,7 @@ from typing import Any
 
 from google.cloud import firestore
 
+from api import log_estruturado
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.eventos_de_uso import Eventos
 from api.eventos_do_job import (
@@ -87,4 +89,6 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     sys.exit(main())

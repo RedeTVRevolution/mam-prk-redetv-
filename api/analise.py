@@ -22,6 +22,7 @@ from google.auth.transport.requests import AuthorizedSession
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api import log_estruturado
 from api.analise_por_janelas import analisar_video
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import transitar
@@ -189,4 +190,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     main()

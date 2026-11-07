@@ -1,8 +1,8 @@
 """Log em JSON, uma linha por registro (#475).
 
-O texto de quem usa (consulta, nome, correção) nunca é concatenado na mensagem: vai como
-argumento do registro, e o formatador o põe num campo do JSON, com a quebra de linha
-escapada. Assim um texto com `\\n` não forja outra linha de log.
+O texto de quem usa (consulta, nome, correção) vai como argumento do registro (`%s`), nunca
+montado com f-string, e sai dentro do campo `message` do JSON, com a quebra de linha
+escapada pelo `json.dumps`. Assim um texto com `\\n` não forja outra linha de log.
 """
 
 import json

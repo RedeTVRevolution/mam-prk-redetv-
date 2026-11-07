@@ -8,6 +8,7 @@ ambiente (`MOTOR_OBJETOS`, `MODELO_OBJETOS`). Uma falha sobe: o Workflows marca 
 como `falhou` e a indexação roda mesmo assim, sem inventário.
 """
 
+import logging
 import os
 import time
 from collections.abc import Callable, Mapping
@@ -18,6 +19,7 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
+from api import log_estruturado
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex
@@ -125,4 +127,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     main()
