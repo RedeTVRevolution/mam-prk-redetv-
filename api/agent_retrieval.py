@@ -19,7 +19,7 @@ import re
 import threading
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date
 from time import sleep, time
 from typing import Any, Protocol
@@ -64,6 +64,10 @@ CAMPO_DO_VETOR_DA_DESCRICAO = "descricao_vetor"
 # maiúscula, porque o `textSearch` compara com o texto gravado como está. A consulta
 # vai normalizada também.
 CAMPO_DO_TEXTO_DA_BUSCA = "texto_da_busca"
+# O que `_registro` lê de cada resultado: os campos do Registro. `significado` e
+# `texto_da_busca` só servem à indexação e ficam de fora para a consulta trazer menos
+# bytes.
+CAMPOS_DO_REGISTRO = [campo.name for campo in fields(Registro)]
 CAMPOS_DE_TEXTO = [CAMPO_DO_TEXTO_DA_BUSCA]
 # Declarados nos índices na criação: são eles que filtram junto com a busca.
 CAMPOS_DE_FILTRO = [
@@ -214,7 +218,7 @@ def pedido_de_busca(
     """
     comum: dict[str, Any] = {
         "topK": consulta.limite,
-        "outputFields": {"dataFields": ["*"]},
+        "outputFields": {"dataFields": CAMPOS_DO_REGISTRO},
     }
     filtro = filtro_do_pedido(consulta.filtros)
     if filtro is not None:
