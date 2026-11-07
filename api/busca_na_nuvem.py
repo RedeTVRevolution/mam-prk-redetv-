@@ -167,7 +167,9 @@ def adaptadores_da_busca(
     ligado_ao_armor = bool(modelo and regiao)
     return AdaptadoresDaBusca(
         transporte_da_consulta=(
-            TransporteVertex(projeto, sessao_http()) if ligado_ao_armor else None
+            TransporteVertex(projeto, sessao_http(), etapa="busca")
+            if ligado_ao_armor
+            else None
         ),
         armor=(
             ModelArmorReal(projeto, cast(str, regiao), cast(str, modelo), sessao_http())

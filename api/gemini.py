@@ -215,12 +215,14 @@ class TransporteVertex:
         self,
         projeto: str,
         sessao: SessaoHttp,
-        registrar: Registrar | None = None,
+        registrar: Registrar = imprimir,
+        etapa: str | None = None,
     ) -> None:
         self._projeto = projeto
         self._sessao = sessao
-        # Quem liga o log (os Jobs do processamento) recebe uma linha de uso por chamada.
+        # Toda chamada deixa uma linha de uso; `etapa` só vai no registro de quem não é Job.
         self._registrar = registrar
+        self._etapa = etapa
         self.versao_do_modelo = ""  # a da última resposta; só o cassete a lê
         # Somados desde a criação do transporte; só a comparação dos motores os lê.
         self.tokens_de_entrada = 0
@@ -299,11 +301,21 @@ class TransporteVertex:
         self.versao_do_modelo = dados.get("modelVersion", "")
         uso = dados.get("usageMetadata") or {}
         entrada = uso.get("promptTokenCount", 0)
-        saida = uso.get("candidatesTokenCount", 0) + uso.get("thoughtsTokenCount", 0)
+        tokens_da_resposta = uso.get("candidatesTokenCount", 0)
+        raciocinio = uso.get("thoughtsTokenCount", 0)
         self.tokens_de_entrada += entrada
-        self.tokens_de_saida += saida
-        if self._registrar is not None:
-            self._registrar(registro_do_uso_do_modelo(chamada.modelo, entrada, saida))
+        self.tokens_de_saida += tokens_da_resposta + raciocinio
+        self._registrar(
+            registro_do_uso_do_modelo(
+                chamada.modelo,
+                entrada,
+                tokens_da_resposta,
+                raciocinio,
+                uso.get("cachedContentTokenCount", 0),
+                uso.get("trafficType", ""),
+                self._etapa,
+            )
+        )
         partes = (
             (dados.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         )

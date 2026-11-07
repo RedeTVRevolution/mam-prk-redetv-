@@ -1,5 +1,6 @@
 """Adaptadores do Model Armor e da Ranking e a montagem pelo ambiente, sem rede."""
 
+import json
 from typing import Any
 
 import pytest
@@ -206,6 +207,33 @@ def test_model_armor_e_modelo_entram_juntos_e_a_ranking_sozinha() -> None:
         {"GCP_PROJECT_ID": "proj", "MODEL_ARMOR_MODELO": "m"}, lambda: SessaoFalsa()
     )
     assert meio.armor is None and meio.transporte_da_consulta is None
+
+
+def test_a_consulta_registra_o_uso_do_modelo_com_a_etapa_busca(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    corpo = {
+        "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 3,
+            "thoughtsTokenCount": 2,
+        },
+    }
+    adaptadores = adaptadores_da_busca(
+        AMBIENTE, lambda: SessaoFalsa(RespostaFalsa(200, corpo))
+    )
+    assert adaptadores.transporte_da_consulta is not None
+    chamada = Chamada(
+        modelo="m", instrucao="i", video_uri="", esquema={}, rotulos={}, texto="oi"
+    )
+
+    adaptadores.transporte_da_consulta.gerar(chamada)
+
+    registro = json.loads(capsys.readouterr().out)
+    assert registro["evento"] == "uso_do_modelo"
+    assert registro["etapa"] == "busca"
+    assert registro["tokens_de_raciocinio"] == 2
 
 
 def test_a_consulta_vai_em_standard_sem_os_cabecalhos_do_flex() -> None:
