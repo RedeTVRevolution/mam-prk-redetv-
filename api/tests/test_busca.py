@@ -1704,7 +1704,10 @@ def test_a_frase_nao_se_repete_quando_o_modelo_a_poe_no_texto_livre() -> None:
     m = Mundo(pedido(texto_livre="Vestido Amarelo"))
     _planos(m, *FRASES)
     buscar(m, '"vestido amarelo"')
-    assert {c.texto for c in m.indice.consultas if c.texto} == {"Vestido Amarelo"}
+    # A frase não entra duas vezes; cada palavra vai com o outro número dela (#405).
+    assert {c.texto for c in m.indice.consultas if c.texto} == {
+        "Vestido vestidos Amarelo amarelos"
+    }
 
 
 def test_a_frase_continua_filtrando_com_qualquer_chip() -> None:
@@ -1868,3 +1871,97 @@ def test_o_openapi_marca_o_quadro_url_como_obsoleto() -> None:
     assert quadro_url["deprecated"] is True
     assert "`quadro`" in quadro_url["description"]
     assert "/v1/jobs/{job_id}/quadros/{arquivo}" in quadro_url["description"]
+
+
+# Singular e plural dão o mesmo resultado (#405).
+PARES_DE_NUMERO = [
+    ("microfone", "microfones", "microfone", "microfones"),
+    ("cadeira", "cadeiras", "cadeira", "cadeiras"),
+    ("vestido vermelho", "vestidos vermelhos", "vestido", "vestidos"),
+]
+
+
+@pytest.mark.parametrize("singular, plural, tipo, tipo_plural", PARES_DE_NUMERO)
+@pytest.mark.parametrize("no_indice", ["singular", "plural"])
+@pytest.mark.parametrize("pedida", ["singular", "plural"])
+def test_objeto_pedido_no_singular_ou_no_plural_acha_o_mesmo_momento(
+    singular: str,
+    plural: str,
+    tipo: str,
+    tipo_plural: str,
+    no_indice: str,
+    pedida: str,
+) -> None:
+    na_consulta = tipo if pedida == "singular" else tipo_plural
+    no_registro = tipo if no_indice == "singular" else tipo_plural
+    consulta = singular if pedida == "singular" else plural
+    m = Mundo(
+        pedido(
+            objetos=[{"categoria": "produto", "tipo": na_consulta}],
+            evidencias=["objeto"],
+        )
+    )
+    m.com(
+        job("j1"),
+        objeto(
+            "j1:objeto:0",
+            "j1",
+            1_000,
+            2_000,
+            categoria="produto",
+            tipo_do_objeto=no_registro,
+            cor_base=[],
+            cor=None,
+            texto=no_registro,
+        ),
+    )
+    assert [v.job_id for v in buscar(m, consulta).videos] == ["j1"]
+
+
+@pytest.mark.parametrize(
+    "pedida, no_texto",
+    [
+        ("promoção", "A promoções da semana"),
+        ("promoções", "Veja a promoção da semana"),
+        ("animais", "Cada animal come"),
+        ("mulher", "As mulheres falaram"),
+        ("homens", "O homem falou"),
+    ],
+)
+def test_texto_livre_no_singular_ou_plural_acha_a_fala_e_destaca_as_duas_formas(
+    pedida: str, no_texto: str
+) -> None:
+    m = Mundo(pedido(texto_livre=pedida))
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto=no_texto,
+        ),
+    )
+    momento = buscar(m, pedida).videos[0].momentos[0]
+    destacado = " ".join(momento.motivo[d.inicio : d.fim] for d in momento.destaques)
+    palavra_do_texto = next(
+        p for p in no_texto.split() if p.lower()[:4] == pedida.lower()[:4]
+    )
+    assert destacado == palavra_do_texto
+
+
+def test_frase_exata_com_o_numero_trocado_ainda_vale() -> None:
+    m = Mundo(pedido(frase_exata="promoção imperdível"))
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="Todas as promoções imperdíveis",
+        ),
+    )
+    assert [v.job_id for v in buscar(m, '"promoção imperdível"').videos] == ["j1"]
