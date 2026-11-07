@@ -18,7 +18,7 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
-from time import monotonic, sleep
+from time import sleep, time
 from typing import Any, Protocol
 
 import google.auth
@@ -26,6 +26,7 @@ import google.auth.transport.requests
 
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
+from api.orcamento_de_escrita import Orcamento
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,11 @@ REGISTROS_POR_LOTE = 200
 # com 3.000 objetos por minuto, 13 lotes de 200. A folga cobre a diferença entre o
 # relógio daqui e o do serviço (#411).
 FRACAO_DA_COTA = 0.9
+# ponytail: o Job `mam-indexacao` tem `timeout` de 1800 s e o orçamento deixa passar 2.700
+# objetos por minuto (cota 3.000 x FRACAO_DA_COTA); descontadas as esperas e as chamadas,
+# o pior caso cabe em cerca de 78 mil objetos na fila juntos, ~25 vídeos de 2 h ao mesmo
+# tempo. Se um dia não couber: pedir cota maior (`cota_de_escrita_da_busca`) ou subir o
+# `timeout` do Job.
 # As esperas, em segundos, antes de cada nova tentativa no 429 (cota esgotada): 315 s no
 # total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só nos Jobs
 # (`tentar_no_429`) e só as chamadas da gravação e da purga; a busca nunca espera.
@@ -575,17 +581,22 @@ class AgentRetrieval:
         *,
         tentar_no_429: bool = False,
         dormir: Callable[[float], None] = sleep,
-        relogio: Callable[[], float] = monotonic,
+        relogio: Callable[[], float] = time,
+        orcamento: Orcamento | None = None,
     ) -> None:
         """`tentar_no_429` só nos Jobs (indexação, `make reindexar`, purga): o serviço
-        web não segura a thread da busca esperando a cota, e o 429 volta na hora."""
+        web não segura a thread da busca esperando a cota, e o 429 volta na hora.
+        `orcamento` é o orçamento de escrita compartilhado entre os processos (#460); o
+        relógio é o de parede, o mesmo para todos."""
         self._config = config
         self._transporte = transporte
         self._tentar_no_429 = tentar_no_429
         self._dormir = dormir
         self._relogio = relogio
-        # Os lotes do `gravar` no último minuto, (quando, objetos): o ritmo vale entre os
-        # vídeos que o mesmo processo grava (o `make reindexar` de todos).
+        self._orcamento = orcamento
+        # Os lotes que este processo gravou no último minuto, (quando, objetos): o ritmo
+        # local, que vale entre os vídeos do mesmo processo (o `make reindexar` de todos)
+        # e é o que segura se o orçamento compartilhado falha.
         self._escritas: deque[tuple[float, int]] = deque()
         # Uma busca do usuário repete o mesmo texto em várias cláusulas (a livre e a de cada
         # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
@@ -607,6 +618,32 @@ class AgentRetrieval:
                 )
                 self._dormir(espera)
         return self._transporte("POST", url, corpo)
+
+    def _reservar(self, objetos: int) -> None:
+        """Reserva os objetos de um lote de escrita (criar ou apagar) no orçamento
+        compartilhado e espera a vez. Se o Firestore falha, avisa e cai no ritmo local."""
+        cota = self._config.cota_de_escrita
+        if cota is None:
+            return
+        if self._orcamento is not None:
+            try:
+                while True:
+                    espera = self._orcamento.reservar(
+                        self._config.colecao,
+                        objetos,
+                        cota * FRACAO_DA_COTA,
+                        self._relogio(),
+                    )
+                    if not espera:
+                        self._escritas.append((self._relogio(), objetos))
+                        return
+                    self._dormir(espera)
+            except Exception:
+                log.warning(
+                    "orçamento de escrita fora do ar, seguindo pelo ritmo local",
+                    exc_info=True,
+                )
+        self._no_ritmo(objetos)
 
     def _no_ritmo(self, objetos: int) -> None:
         """Espera até os objetos gravados nos últimos 60 s, mais estes, caberem na fração
@@ -639,6 +676,7 @@ class AgentRetrieval:
             pedido = pedido | {"pageToken": pagina["nextPageToken"]}
         for i in range(0, len(nomes), OBJETOS_POR_PAGINA):
             lote = nomes[i : i + OBJETOS_POR_PAGINA]
+            self._reservar(len(lote))
             self._chamar(
                 "dataObjects:batchDelete", {"requests": [{"name": n} for n in lote]}
             )
@@ -659,7 +697,7 @@ class AgentRetrieval:
         self.apagar(job_id)
         for i in range(0, len(registros), REGISTROS_POR_LOTE):
             pedacos = registros[i : i + REGISTROS_POR_LOTE]
-            self._no_ritmo(len(pedacos))
+            self._reservar(len(pedacos))
             self._chamar(
                 "dataObjects:batchCreate", {"requests": [_criacao(r) for r in pedacos]}
             )

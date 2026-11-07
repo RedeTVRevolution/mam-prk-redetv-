@@ -48,6 +48,7 @@ from api.nuvem import (
     RepositorioFirestore,
     TiposDeObjetoFirestore,
 )
+from api.orcamento_de_escrita import OrcamentoFirestore
 from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 from api.tipos_de_objeto import TiposDeObjeto
 
@@ -290,7 +291,12 @@ def main(argv: list[str]) -> int:
         RepositorioFirestore(firestore_),
         decupagens,
         RepositorioDeCorrecoesFirestore(firestore_),
-        AgentRetrieval(busca, transporte_http(), tentar_no_429=True),
+        AgentRetrieval(
+            busca,
+            transporte_http(),
+            tentar_no_429=True,
+            orcamento=OrcamentoFirestore(firestore_),
+        ),
         copia_do_ambiente(os.environ),
         embedding=embedding_da_busca(busca),
         quadros=decupagens,
