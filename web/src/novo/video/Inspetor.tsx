@@ -41,6 +41,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { BotaoDeIcone } from './comum.tsx'
 import { type Secao, TIPOS, type TipoDaFaixa, tipoDaChave } from './tipos.ts'
 import { type Instante, useNoInstante } from './instante.ts'
+import { urlSegura } from '../../urlSegura.ts'
 
 const SECOES: { chave: Secao; rotulo: string; tipo: TipoDaFaixa; vazio: string }[] = [
   { chave: 'pessoas', rotulo: 'Pessoas', tipo: 'aparicao', vazio: 'Nenhuma pessoa na imagem neste vídeo.' },
@@ -554,7 +555,7 @@ function Miniatura({ caminho, urlDoQuadro, className }: { caminho: string | null
       ativo = false
     }
   }, [caminho, urlDoQuadro])
-  const url = achada && achada.caminho === caminho ? achada.url : null
+  const url = achada && achada.caminho === caminho ? urlSegura(achada.url) : null
   return (
     <span aria-hidden className={cn('block shrink-0 overflow-hidden rounded-xs bg-input', className)}>
       {url && <img src={url} alt="" loading="lazy" className="size-full object-cover" />}

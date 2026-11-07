@@ -70,6 +70,7 @@ import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
 import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
 import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo, type TrechoMarcado } from './LinhaDoTempo.tsx'
+import { urlSegura } from '../../urlSegura.ts'
 
 export interface Permissoes {
   editar: boolean
@@ -1018,7 +1019,7 @@ export function Video({
               ) : (
                 <video
                   ref={player}
-                  src={reproducao.data?.url}
+                  src={urlSegura(reproducao.data?.url) ?? undefined}
                   aria-label="Player"
                   className="size-full min-h-0 object-contain"
                   onClick={alternar}

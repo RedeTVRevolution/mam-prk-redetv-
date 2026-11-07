@@ -10,6 +10,7 @@ import { podeIrParaALixeira, podeReprocessar } from '../comum/regras.ts'
 import { SeloDeEstado } from '../comum/SeloDeEstado.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
+import { urlSegura } from '../../urlSegura.ts'
 
 export type Acao = 'copiar' | 'baixar' | 'reprocessar' | 'lixeira'
 export interface PropsDoVideo {
@@ -35,7 +36,8 @@ function aoClicar(job: Job) {
 function Miniatura({ job }: { job: Job }) {
   const [falhou, setFalhou] = useState<string | null>(null)
   const e = estadoDoVideo(job)
-  const url = job.capa_url && job.capa_url !== falhou ? job.capa_url : null
+  const capa = urlSegura(job.capa_url)
+  const url = capa && capa !== falhou ? capa : null
   const quadro = (
     <span className="relative block aspect-video w-full overflow-hidden bg-canvas">
       {e.tom !== 'ok' && <span aria-hidden className={cn('absolute inset-x-0 top-0 z-10 h-[3px]', TALLY[e.tom])} />}

@@ -41,6 +41,7 @@ import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Folga, LINHA_CLICAVEL, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
 import { useColunasVisiveis, useLinhasVirtuais, useListaPorCursor } from './listas.ts'
+import { urlSegura } from '../../urlSegura.ts'
 
 const ESTADOS = Object.keys(ESTADOS_DO_JOB) as EstadoDoJob[]
 // Em que ponto cada coluna aparece; `null`, sempre.
@@ -186,14 +187,15 @@ function EstadoDaLinha({ job }: { job: Job }) {
 }
 
 function Miniatura({ job }: { job: Job }) {
-  if (!job.capa_url) {
+  const capa = urlSegura(job.capa_url)
+  if (!capa) {
     return (
       <span className="grid aspect-video w-[76px] place-items-center rounded-xs bg-input text-subtle">
         <IconMovie size={16} stroke={1.5} aria-hidden />
       </span>
     )
   }
-  return <img src={job.capa_url} alt="" loading="lazy" decoding="async" className="aspect-video w-[76px] rounded-xs bg-input object-cover" />
+  return <img src={capa} alt="" loading="lazy" decoding="async" className="aspect-video w-[76px] rounded-xs bg-input object-cover" />
 }
 
 function ConfirmarReprocesso({ job, etapa, aoConfirmar, aoCancelar }: { job: Job; etapa: string; aoConfirmar: (motivo: string) => Promise<void>; aoCancelar: () => void }) {

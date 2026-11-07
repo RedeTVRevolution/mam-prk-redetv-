@@ -9,6 +9,7 @@ import { urlDoQuadroDaBusca } from '../../quadros.ts'
 import { enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { useApi } from '../consultas.ts'
 import type { Cena as DadosDaCena } from './useBusca.ts'
+import { urlSegura } from '../../urlSegura.ts'
 
 /** A altura do cartão abaixo do quadro 16:9, para a estimativa antes de medir. */
 export const TEXTO_DA_CENA = 90
@@ -34,7 +35,7 @@ function Quadro({ job, momento }: { job: string; momento: Momento }) {
     retry: false,
   })
   const [falhou, setFalhou] = useState<string | null>(null)
-  const url = momento.quadro_url ?? pedida.data ?? null
+  const url = urlSegura(momento.quadro_url ?? pedida.data)
   const tipo = TIPOS[momento.tipo]
   return (
     <span className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-canvas">

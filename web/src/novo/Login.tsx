@@ -8,6 +8,7 @@ import {
   type ResultadoDaSenha,
 } from '../auth/autenticador.ts'
 import { Button } from './ui/button.tsx'
+import { urlSegura } from '../urlSegura.ts'
 
 type Etapa = Exclude<ResultadoDaSenha, { tipo: 'logado' }> | { tipo: 'senha' }
 
@@ -158,9 +159,11 @@ export default function Login({ autenticador, aoEntrar }: { autenticador: Autent
                   >
                     {etapa.segredo}
                   </code>
-                  <a href={etapa.uri} className="flex items-center gap-1 justify-self-start text-sm text-link hover:underline">
-                    <IconExternalLink size={16} stroke={1.75} aria-hidden /> Abrir no aplicativo autenticador
-                  </a>
+                  {urlSegura(etapa.uri) && (
+                    <a href={urlSegura(etapa.uri)!} className="flex items-center gap-1 justify-self-start text-sm text-link hover:underline">
+                      <IconExternalLink size={16} stroke={1.75} aria-hidden /> Abrir no aplicativo autenticador
+                    </a>
+                  )}
                 </div>
               )}
               <label className="grid gap-1 text-xs font-medium">
