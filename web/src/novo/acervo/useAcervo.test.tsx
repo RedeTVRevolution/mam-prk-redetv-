@@ -206,3 +206,19 @@ test('a lista refeita por um envio, depois da volta, começa do topo', async () 
   await waitFor(() => expect(result.current.item(0)?.id).toBe('j0'))
   expect(cursoresPedidos[0]).toBeNull()
 })
+
+test('uma página vazia com cursor (o teto da API) é seguida sozinha até chegar um vídeo', async () => {
+  servidor.use(
+    http.get('/v1/jobs', ({ request }) => {
+      const cursor = new URL(request.url).searchParams.get('cursor')
+      cursoresPedidos.push(cursor)
+      if (!cursor) return HttpResponse.json([], { headers: { 'X-Proximo-Cursor': 'vazio-1' } })
+      if (cursor === 'vazio-1') return HttpResponse.json([], { headers: { 'X-Proximo-Cursor': 'vazio-2' } })
+      return HttpResponse.json(jobs.slice(0, 3))
+    }),
+  )
+  const { result } = await montar()
+
+  await waitFor(() => expect(result.current.itens.map((j) => j.id)).toEqual(['j0', 'j1', 'j2']))
+  expect(cursoresPedidos).toEqual([null, 'vazio-1', 'vazio-2'])
+})

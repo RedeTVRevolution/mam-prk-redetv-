@@ -195,6 +195,13 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [data, anterior, isFetching, proximo])
 
+  // A API pode devolver uma página vazia com cursor (o teto de candidatos examinados chegou antes
+  // do primeiro aprovado): a tela não tem item para rolar até ele, então o cursor é seguido aqui.
+  const ultimaVazia = !!data && !anterior && data.pages.length > 0 && tamanho(data.pages[data.pages.length - 1]) === 0
+  useEffect(() => {
+    if (ultimaVazia && hasNextPage && !isFetching && !isFetchNextPageError) void fetchNextPage({ cancelRefetch: false })
+  }, [ultimaVazia, hasNextPage, isFetching, isFetchNextPageError, fetchNextPage, data])
+
   // O teto vale por consulta: a de outro filtro ou outra ordem sai já, em vez de ficar o gcTime
   // inteiro no cache somando mais páginas. Os cursores dela saem junto.
   useEffect(() => {

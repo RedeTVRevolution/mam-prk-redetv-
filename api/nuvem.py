@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import google.auth
@@ -60,6 +60,7 @@ from api.itens_da_decupagem import contar_itens, objeto_dos_itens
 from api.jobs import (
     JANELA_DA_URL_DO_QUADRO,
     PRAZO_DA_URL_DE_UPLOAD,
+    TETO_DE_CANDIDATOS,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
@@ -93,6 +94,19 @@ from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
+# O que a lista do acervo lê do Job: os campos do `JobResumido` (menos `enviado_por`, que vem
+# de `sistema` e `criado_por_email`), os obrigatórios do `Job` e os que `casa_com_o_filtro`
+# confere (#480). Fica de fora o que pesa: `cortes_ms`, os catálogos e o `sha256`.
+_CAMPOS_DA_LISTA = frozenset(
+    {
+        "id", "nome", "tamanho_bytes", "estado", "criado_por", "criado_em", "atualizado_em",
+        "codigo_falha", "duracao_s", "timecode_origem", "taxa_de_quadros", "capa", "programa",
+        "data_exibicao", "indexacao", "copia_bigquery", "etapa_atual", "etapas",
+        "reprocessamentos", "criado_por_email", "sistema", "palavras", "lixeira",
+    }
+)  # fmt: skip
+# Candidatos mínimos por leitura quando a página já está cheia e falta achar o próximo aprovado.
+LOTE_MINIMO_DE_CANDIDATOS = 25
 COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_IDEMPOTENCIA = "chaves_de_idempotencia"
@@ -409,10 +423,45 @@ class RepositorioFirestore:
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
-        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
-        return PaginaDeJobs.de(
-            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
-        )
+        if filtro.so_os_da_lista:
+            consulta = consulta.select(sorted(_CAMPOS_DA_LISTA | {campo.split(".")[0]}))
+        if filtro.limite is None:
+            # Lista inteira: o consumidor interno não segue cursor, então não há teto.
+            jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+            return PaginaDeJobs([j for j in jobs if casa_com_o_filtro(j, filtro)])
+        return self._ler_em_lotes(consulta, filtro)
+
+    @staticmethod
+    def _ler_em_lotes(consulta: Any, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # Lotes com `.limit()` até haver um aprovado além da página (a prova de que há mais).
+        # O cursor é o último candidato examinado que fica na página, aprovado ou não: o
+        # próximo pedido recomeça logo depois dele, sem pular nem repetir. No teto, devolve
+        # o que tem (talvez nada) e o cursor do último examinado.
+        limite = cast(int, filtro.limite)
+        aprovados: list[Job] = []
+        examinados = 0
+        ultimo_id: str | None = None
+        ultimo_doc: Any = None
+        while examinados < TETO_DE_CANDIDATOS:
+            pedir = min(
+                max(limite + 1 - len(aprovados), LOTE_MINIMO_DE_CANDIDATOS),
+                TETO_DE_CANDIDATOS - examinados,
+            )
+            corrente = (
+                consulta if ultimo_doc is None else consulta.start_after(ultimo_doc)
+            )
+            docs = list(corrente.limit(pedir).stream())
+            for doc in docs:
+                job = Job(**(doc.to_dict() or {}))
+                if casa_com_o_filtro(job, filtro):
+                    if len(aprovados) == limite:
+                        return PaginaDeJobs(aprovados, ultimo_id)
+                    aprovados.append(job)
+                ultimo_id, ultimo_doc = job.id, doc
+                examinados += 1
+            if len(docs) < pedir:
+                return PaginaDeJobs(aprovados)
+        return PaginaDeJobs(aprovados, ultimo_id)
 
     def _consultar_pelo_catalogo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # Só um `array_contains` (índice automático) vai ao Firestore: lê os vídeos da
