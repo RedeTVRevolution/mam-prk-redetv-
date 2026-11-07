@@ -213,9 +213,6 @@ class _SemQuadro:
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return caminho
 
-    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        raise NotImplementedError("a sonda não abre quadros")
-
 
 def _ajustes(caso: Caso) -> Ajustes | None:
     if caso.programa is None and caso.desde is None and caso.ate is None:

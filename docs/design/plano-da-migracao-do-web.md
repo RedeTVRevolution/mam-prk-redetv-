@@ -29,7 +29,7 @@ Decisão no ADR 0014 (5/11/2026). Origem: o protótipo `prototipos/redesenho`, o
 
 **3. Busca e relatórios.**
 - A busca em mosaico na grade (#400), com cursor (#426; para trás, o navegador guarda os cursores, como no acervo) e o aviso de vídeos ainda entrando (#404).
-- A busca por imagem e os planos parecidos.
+- A busca por imagem e os planos parecidos (os parecidos saíram no #476).
 - Tempo de tela e Marcas. Backend: os N primeiros com cursor e o detalhe por vídeo só quando aberto.
 
 **4. Painel e Administração.**
@@ -51,7 +51,7 @@ Decisão no ADR 0014 (5/11/2026). Origem: o protótipo `prototipos/redesenho`, o
 - A atual, o Mantine, a `/amostra` e os testes das telas antigas são apagados.
 - O `make verificar` e o `checar-nomes-da-nuvem.sh` passam a olhar só a nova.
 - Feito: o `main.tsx` carrega só a nova (`web/src/novo/`, sem `?interface=`); as telas da atual, os testes delas, a `/amostra`, o `interface.ts` e o `tema.ts` foram apagados (80 arquivos, uns 23 mil linhas); `@mantine/charts`, `@mantine/core` e `@mantine/hooks` saíram do `package.json`. Ficam, compartilhados, o `api.ts`, o `rotas.ts`, o `sessao.ts`, o `cacheDeImagens.ts` e os módulos de regra com os testes deles. O `checar-nomes-da-nuvem.sh` e o `make verificar-web` não mudaram de comando: como a atual saiu de `web/src/`, eles já olham só a nova.
-- Antes de apagar, o inventário de paridade achou três funções que só a atual tinha, e elas foram para a nova: o vídeo aberto pela busca (faixa Busca, N, Shift+N e Fechar busca), o botão "Planos parecidos com este" e a seção Planos do inspetor (por onde se corrige a descrição e o plano limpo).
+- Antes de apagar, o inventário de paridade achou três funções que só a atual tinha, e elas foram para a nova: o vídeo aberto pela busca (faixa Busca, N, Shift+N e Fechar busca), o botão "Planos parecidos com este" (removido no #476) e a seção Planos do inspetor (por onde se corrige a descrição e o plano limpo).
 - Sugestão, não feita: mover `web/src/novo/` para `web/src/` (o nome `novo` ficou sem sentido). É um diff gigante sem ganho funcional; vale como PR à parte, só de `git mv`.
 
 ## Fora deste plano

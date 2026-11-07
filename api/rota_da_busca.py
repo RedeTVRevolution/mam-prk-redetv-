@@ -128,7 +128,6 @@ def criar_rotas_da_busca(
             "busca",
             quem_do_chamador(chamador),
             relogio(),
-            job_id=None,
             programa=programa,
             tamanho_da_consulta=tamanho,
             n_resultados=len(resultado.videos),

@@ -37,7 +37,7 @@ Cada busca por foto faz duas chamadas ao Flash-Lite em série: uma com a imagem 
 
 ## O que continua
 
-Em 6/11/2026 o Bruno decidiu tirar também o vetor do quadro, a busca visual por texto (`visual`) e os planos parecidos (`GET /v1/busca/parecidos`), por serem ruins e desnecessários (#476). Não sobra vetor de imagem: só `vetor_do_texto` (a descrição) fica, e a busca por foto, que já passava só pelo texto, segue igual. O texto acima, sobre o que ficaria, é o histórico dessa ADR.
+Em 6/11/2026 o Bruno decidiu tirar também o vetor do quadro, a busca visual por texto (`visual`) e os planos parecidos (`GET /v1/busca/parecidos`), por serem ruins e desnecessários (#476). Não sobra vetor de imagem: só o vetor da descrição fica (o embedding automático do campo `significado`, ou `AgentRetrieval.vetor_da_consulta` sem o índice ANN), e a busca por foto, que já passava só pelo texto, segue igual.
 
 ## O que não foi medido
 

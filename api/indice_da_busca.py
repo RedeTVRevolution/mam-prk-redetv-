@@ -43,7 +43,7 @@ class Registro:
     # Fala, texto na tela ou a frase do objeto: o que a busca por texto lê.
     texto: str | None = None
     descricao: str | None = None  # o plano; leva o vetor da descrição
-    quadro: str | None = None  # o JPEG do momento; leva o vetor do quadro-chave
+    quadro: str | None = None  # o JPEG do momento, para a grade da busca
     # De 1 a 3, só no objeto do inventário (#245); pesa na ordem dos resultados.
     destaque: int | None = None
 
