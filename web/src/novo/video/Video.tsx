@@ -50,6 +50,7 @@ import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBus
 import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, enderecoDosParecidos, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Kbd } from '../ui/kbd.tsx'
@@ -1018,7 +1019,7 @@ export function Video({
               ) : (
                 <video
                   ref={player}
-                  src={reproducao.data?.url}
+                  src={urlSegura(reproducao.data?.url) ?? undefined}
                   aria-label="Player"
                   className="size-full min-h-0 object-contain"
                   onClick={alternar}

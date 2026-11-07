@@ -36,6 +36,7 @@ import {
   textoDoSemDecupagem,
   vizinhoNoPainel,
 } from '../../painel.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { BotaoDeIcone } from './comum.tsx'
@@ -554,7 +555,7 @@ function Miniatura({ caminho, urlDoQuadro, className }: { caminho: string | null
       ativo = false
     }
   }, [caminho, urlDoQuadro])
-  const url = achada && achada.caminho === caminho ? achada.url : null
+  const url = achada && achada.caminho === caminho ? urlSegura(achada.url) : null
   return (
     <span aria-hidden className={cn('block shrink-0 overflow-hidden rounded-xs bg-input', className)}>
       {url && <img src={url} alt="" loading="lazy" className="size-full object-cover" />}

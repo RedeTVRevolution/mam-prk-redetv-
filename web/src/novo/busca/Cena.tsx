@@ -7,6 +7,7 @@ import { dataDeExibicao } from '../../jobs.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import { urlDoQuadroDaBusca } from '../../quadros.ts'
 import { enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
 import type { Cena as DadosDaCena } from './useBusca.ts'
 
@@ -34,7 +35,7 @@ function Quadro({ job, momento }: { job: string; momento: Momento }) {
     retry: false,
   })
   const [falhou, setFalhou] = useState<string | null>(null)
-  const url = momento.quadro_url ?? pedida.data ?? null
+  const url = urlSegura(momento.quadro_url ?? pedida.data)
   const tipo = TIPOS[momento.tipo]
   return (
     <span className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-canvas">

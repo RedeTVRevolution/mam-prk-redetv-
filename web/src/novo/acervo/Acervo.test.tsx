@@ -565,6 +565,13 @@ test('a consulta de um vídeo em andamento mantém a capa da lista', async () =>
   expect(document.querySelector('img[src="/capa-a.jpg"]')).toBeTruthy()
 })
 
+test.each(['javascript:alert(1)', 'data:image/svg+xml,<svg/>', 'http://exemplo.com/capa.jpg'])('a capa %s não vira imagem', async (capa) => {
+  jobs = [job({ id: 'a', nome: 'suja.mp4', estado: 'concluido', capa_url: capa })]
+  await abrir()
+  await screen.findByText('suja.mp4')
+  expect(document.querySelector('img[src^="javascript:"], img[src^="data:"], img[src^="http:"]')).toBeNull()
+})
+
 test('o vídeo que termina sem capa na lista ganha a capa do detalhe, sem recarregar a lista', async () => {
   jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'validando' })]
   const detalhes: string[] = []
