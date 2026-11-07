@@ -1119,6 +1119,11 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "FATURAMENTO_TABELA"
         value = "gcp_billing_export_resource_v1_*"
       }
+      # A tabela dos Jobs que a consulta do custo junta com o faturamento (jobs_do_painel.tf, #466).
+      env {
+        name  = "BIGQUERY_TABELA_DE_JOBS"
+        value = local.tabela_de_jobs_do_painel
+      }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
         value = tostring(var.busca_distancia_maxima)

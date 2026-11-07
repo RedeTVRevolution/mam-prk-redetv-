@@ -9,7 +9,7 @@ import pytest
 
 from api.auditoria import FiltroDeAuditoria
 from api.cache_curto import CacheCurto
-from api.custo_do_painel import CustoEmMemoria
+from api.custo_do_painel import CustoEmMemoria, FiltroDeCusto
 from api.jobs import RepositorioEmMemoria
 from api.qualidade_do_painel import QualidadeEmMemoria
 from api.relatorio_de_marcas import ConsultaComCache as MarcasComCache
@@ -193,9 +193,9 @@ class CustoQueConta(CustoEmMemoria):
         super().__init__()
         self.consultas = 0
 
-    def custos(self, desde: date | None) -> Any:
+    def custos(self, filtro: FiltroDeCusto) -> Any:
         self.consultas += 1
-        return super().custos(desde)
+        return super().custos(filtro)
 
 
 def test_segunda_chamada_igual_do_custo_nao_consulta_de_novo() -> None:
