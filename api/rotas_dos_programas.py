@@ -51,7 +51,7 @@ from api.programas import (
     pessoas_do_programa,
     troca_vale,
 )
-from api.renomeacao_de_pessoas import RODADAS, AndamentoDaRenomeacao
+from api.renomeacao_de_pessoas import AndamentoDaRenomeacao
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ LIMITE_DE_PESSOAS_NO_PROGRAMA = 200
 # auditar: o serviço web não passa do tempo padrão do Cloud Run (300 s), com folga.
 PRAZO_DA_CONFIRMACAO = timedelta(minutes=15)
 EM_CURSO = ("confirmando", "em_andamento")
+# Rodadas sobre os vídeos que falharam antes de desistir (a pessoa pode retomar).
+RODADAS = 3
 
 Apelido = Annotated[
     str,

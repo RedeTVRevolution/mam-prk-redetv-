@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
+from api.catalogo import Catalogo
 from api.copia_bigquery import (
     TIPOS_DAS_PESSOAS,
     ConfigDoBigQuery,
@@ -573,7 +574,8 @@ def relatorio(somas: list[PessoaNoVideo]) -> list[PessoaNoRelatorio]:
     """Uma linha por pessoa, do maior tempo de tela para o menor.
 
     A pessoa é o id do catálogo; o nome é o que mais aparece nas linhas dela (um vídeo
-    copiado antes de uma correção de grafia não parte a pessoa em duas).
+    copiado antes de uma correção de grafia não parte a pessoa em duas). A rota troca
+    esse nome pelo do catálogo (`com_nomes_do_catalogo`, #417).
     """
     por_pessoa: dict[str, list[PessoaNoVideo]] = defaultdict(list)
     for s in somas:
@@ -629,10 +631,29 @@ def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
     )
 
 
+def com_nomes_do_catalogo[P: PessoaResumida](
+    pessoas: list[P], catalogo: Catalogo | None
+) -> list[P]:
+    """O nome de cada pessoa vem do catálogo, numa leitura em lote (#417): a cópia no
+    BigQuery não guarda o nome, então renomear no catálogo vale na hora. Quem o catálogo
+    não conhece fica com o que a cópia trouxe. Devolve cópias: o ranking guardado no cache
+    não muda."""
+    if catalogo is None or not pessoas:
+        return pessoas
+    do_catalogo = catalogo.obter_varios(p.pessoa_id for p in pessoas)
+    return [
+        p.model_copy(update={"nome": do_catalogo[p.pessoa_id].nome})
+        if p.pessoa_id in do_catalogo
+        else p
+        for p in pessoas
+    ]
+
+
 def criar_rotas_do_tempo_de_tela(
     consulta: ConsultaDeMomentos | None,
     repositorio: RepositorioDeJobs,
     relogio: Callable[[], datetime] = agora_em_sao_paulo,
+    catalogo: Catalogo | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
@@ -663,11 +684,14 @@ def criar_rotas_do_tempo_de_tela(
                 lambda: fonte.ranking(programa, desde, ate, depois, limite)
             )
             pagina, cabecalhos = recorta(lidas, depois, limite)
+            pagina = com_nomes_do_catalogo(pagina, catalogo)
             corpo = RankingDoTempoDeTela(
                 programa=programa, desde=desde, ate=ate, total=total, pessoas=pagina
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
         pessoas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate)))
+        pessoas = com_nomes_do_catalogo(pessoas, catalogo)
+        pessoas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.nome, p.pessoa_id))
         if formato == "csv":
             return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
         poe_o_nome_dos_videos((v for p in pessoas for v in p.por_video), repositorio)

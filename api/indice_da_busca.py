@@ -17,7 +17,6 @@ from api.decupagem import (
     Pessoa,
     _Intervalo,
 )
-from api.identidade import nao_identificado
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
 
@@ -121,13 +120,14 @@ NOME_DA_CATEGORIA: dict[CategoriaDeObjeto, str] = {
     "planta": "planta",
     "bebida": "bebida",
 }
-# O dono de quem não tem nome, e o do objeto sem pessoa.
-DONO_SEM_NOME = "de pessoa não identificada"
+# O dono do objeto que tem pessoa e o do objeto sem pessoa. O nome da pessoa não entra no
+# índice (#417): renomear no catálogo não pede reindexar, e a tela lê o nome do catálogo.
+DONO_PESSOA = "de pessoa"
 SEM_DONO = "objeto de cena"
 
 
 def _texto_curto(peca: str | None, categoria: CategoriaDeObjeto, dono: str) -> str:
-    """A peça, a categoria e o dono ("blazer preto, roupa, de Flávia Noronha"; sem
+    """A peça, a categoria e o dono ("blazer preto, roupa, de pessoa"; sem
     dono, "objeto de cena"): um objeto de uma palavra passa do piso de palavras da
     busca por significado."""
     return ", ".join(p for p in (peca, NOME_DA_CATEGORIA[categoria], dono) if p)
@@ -174,13 +174,10 @@ def registros_da_decupagem(
                 return plano.quadro
         return None
 
-    nomes = {p.id: p.nome for p in decupagem.pessoas}
+    ids = {p.id for p in decupagem.pessoas}
 
     def dono(id: str | None) -> str:
-        nome = nomes.get(id) if id else None
-        if nome is None:
-            return SEM_DONO
-        return DONO_SEM_NOME if nao_identificado(nome) else f"de {nome}"
+        return DONO_PESSOA if id in ids else SEM_DONO
 
     registros: list[Registro] = []
     for n, plano in enumerate(decupagem.planos):

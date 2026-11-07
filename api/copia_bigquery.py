@@ -23,7 +23,9 @@ URL_BASE = "https://bigquery.googleapis.com/bigquery/v2"
 @dataclass(frozen=True)
 class PessoaDoMomento:
     id: str
-    nome: str
+    # O nome não é gravado (#417): o relatório lê o nome do catálogo pelo `id`. A coluna
+    # fica na tabela e vem vazia.
+    nome: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,11 +62,6 @@ def linhas_da_decupagem(
     data_de_exibicao: date | None,
     gravado_em: datetime,
 ) -> list[LinhaDoMomento]:
-    nomes = {p.catalogo_id: p.nome for p in decupagem.pessoas if p.catalogo_id}
-
-    def pessoa(catalogo_id: str) -> PessoaDoMomento:
-        return PessoaDoMomento(catalogo_id, nomes.get(catalogo_id, ""))
-
     base: dict[str, Any] = {
         "job_id": job_id,
         "programa": programa,
@@ -78,7 +75,9 @@ def linhas_da_decupagem(
             tipo=r.tipo,
             inicio_ms=r.inicio_ms,
             fim_ms=r.fim_ms,
-            pessoas=[pessoa(i) for i in (r.pessoas or ([r.dono] if r.dono else []))],
+            pessoas=[
+                PessoaDoMomento(i) for i in (r.pessoas or ([r.dono] if r.dono else []))
+            ],
             marca=r.marca,
             texto=r.texto or r.descricao,
             **base,
@@ -127,7 +126,7 @@ def _linhas_das_pessoas(
     for p in decupagem.pessoas:
         if not p.catalogo_id or p.estado_do_nome != "confirmado":
             continue
-        dona = [PessoaDoMomento(p.catalogo_id, p.nome)]
+        dona = [PessoaDoMomento(p.catalogo_id)]
         intervalos_por_tipo: tuple[Sequence[Any], ...] = (
             p.na_imagem,
             p.citada_na_fala,
