@@ -6,6 +6,7 @@ import { type CampoDoEditor, type Editor, idDoNome, teclasDasOpcoes, type Valor 
 import type { Opcao } from '../../catalogo.ts'
 import { type Intervalo, relogio } from '../../linhaDoTempo.ts'
 import { NomesDoCatalogo } from '../../nomesDoCatalogo.ts'
+import { ATRASO_DO_AUTOCOMPLETAR_MS } from '../../useValorAtrasado.ts'
 import { Button } from '../ui/button.tsx'
 
 // A mesma regra do `FormularioDeCorrecao.tsx` da interface antiga (o `Editor` do `catalogacao.ts`),
@@ -312,9 +313,23 @@ export function CampoDeNome({
   const [erro, setErro] = useState<string | null>(null)
   const [criando, setCriando] = useState(false)
   const ultimaBusca = useRef(0)
+  const espera = useRef<ReturnType<typeof setTimeout>>(undefined)
   const nomeNovo = valor.trim()
   const soSugere = catalogo === 'tipos_de_objeto' || soDoCatalogo
   const comLista = aberta && nomes !== null && nomeNovo.length >= MINIMO_DE_LETRAS
+
+  useEffect(() => () => clearTimeout(espera.current), [])
+
+  // Digitar rápido consulta uma vez só, depois da pausa (#484): cada tecla cancela a espera e a consulta em curso.
+  function pedir(texto: string) {
+    clearTimeout(espera.current)
+    if (texto.trim().length < MINIMO_DE_LETRAS) {
+      void buscar(texto)
+      return
+    }
+    ultimaBusca.current++
+    espera.current = setTimeout(() => void buscar(texto), ATRASO_DO_AUTOCOMPLETAR_MS)
+  }
 
   async function buscar(texto: string) {
     const busca = ++ultimaBusca.current
@@ -338,6 +353,7 @@ export function CampoDeNome({
   }
 
   function escolher(n: NomeDoCatalogo) {
+    clearTimeout(espera.current)
     ultimaBusca.current++
     setAberta(false)
     aoMudar(n.nome, n.id)
@@ -345,6 +361,7 @@ export function CampoDeNome({
 
   async function criar() {
     if (!nomes || criando || nomeNovo.length === 0) return
+    clearTimeout(espera.current)
     ultimaBusca.current++
     setCriando(true)
     try {
@@ -399,7 +416,7 @@ export function CampoDeNome({
           aria-activedescendant={comLista && ativo >= 0 ? `${lista}-${ativo}` : undefined}
           onChange={(e) => {
             aoMudar(e.currentTarget.value, '')
-            void buscar(e.currentTarget.value)
+            pedir(e.currentTarget.value)
           }}
           onKeyDown={aoTeclar}
         />

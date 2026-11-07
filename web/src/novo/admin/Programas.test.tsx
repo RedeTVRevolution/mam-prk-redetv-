@@ -64,6 +64,22 @@ test('quem só consulta não vê a administração', async () => {
   expect(await screen.findByText('Página não encontrada.')).toBeTruthy()
 })
 
+test('digitar rápido no campo de pessoa consulta o catálogo uma vez só, depois da pausa', async () => {
+  const consultas: string[] = []
+  servidor.use(
+    http.get('/v1/catalogo/pessoas', ({ request }) => {
+      consultas.push(new URL(request.url).searchParams.get('q') ?? '')
+      return HttpResponse.json([{ id: 'x2', nome: 'Sabrina Sato', rotulo: 'Sabrina Sato', a_revisar: false }])
+    }),
+  )
+  const u = userEvent.setup()
+  await abrir()
+  await u.click(await screen.findByRole('button', { name: 'Novo programa' }))
+  await u.type(screen.getByRole('combobox', { name: 'Incluir pessoa do catálogo' }), 'Sabrin')
+  await screen.findByRole('option', { name: 'Sabrina Sato' })
+  expect(consultas).toEqual(['Sabrin'])
+})
+
 test('cria um programa com uma pessoa do catálogo e o papel dela', async () => {
   const u = userEvent.setup()
   await abrir()

@@ -476,6 +476,15 @@ test('o nome: 2 letras consultam o catálogo; ↓ e Enter escolhem, e o Enter se
   expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.renomear', item_id: 'p1', valor: 'Sabrina Sato', catalogo_id: 'cat-sabrina' })
 })
 
+test('o nome: digitar rápido consulta o catálogo uma vez só, depois da pausa', async () => {
+  const { usuario, nome } = await renomearLeao()
+
+  await usuario.type(nome, 'sabrin')
+  await screen.findByRole('option', { name: 'Sabrina Sato (apresentadora)' })
+
+  expect(consultas).toEqual(['sabrin'])
+})
+
 test('o nome: uma letra não consulta; o texto digitado sem escolher não manda catalogo_id', async () => {
   const { usuario, nome, formulario } = await renomearLeao()
 

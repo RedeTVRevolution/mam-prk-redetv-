@@ -64,22 +64,54 @@ def _custo_no_nome(termos: list[str], nome: str) -> int | None:
     return total
 
 
+class Indexado[T: ComNome]:
+    """Um item com o nome e os apelidos já normalizados (#484)."""
+
+    __slots__ = ("item", "nome", "nomes")
+
+    def __init__(self, item: T) -> None:
+        self.item = item
+        self.nome = normalizar(item.nome)
+        self.nomes = [self.nome, *(normalizar(a) for a in item.apelidos)]
+
+
+class IndiceDeNomes[T: ComNome]:
+    """Os nomes normalizados de uma cópia do catálogo, calculados uma vez por cópia.
+    `de` recebe a lista que a `CopiaCurta` devolve: enquanto for a mesma lista, reaproveita;
+    uma cópia nova (outra lista) refaz o índice."""
+
+    def __init__(self) -> None:
+        self._atual: tuple[list[T], list[Indexado[T]]] | None = None
+
+    def de(self, itens: list[T]) -> list[Indexado[T]]:
+        atual = self._atual
+        if atual is not None and atual[0] is itens:
+            return atual[1]
+        indexados = [Indexado(i) for i in itens]
+        self._atual = (itens, indexados)
+        return indexados
+
+
 def achar_por_prefixo[T: ComNome](
-    itens: Iterable[T], consulta: str, limite: int = LIMITE_DO_AUTOCOMPLETAR
+    itens: Iterable[T] | Iterable[Indexado[T]],
+    consulta: str,
+    limite: int = LIMITE_DO_AUTOCOMPLETAR,
 ) -> list[T]:
     """Até `limite` itens que a consulta casa no nome ou nos apelidos: primeiro os sem
-    erro de digitação, depois os com; dentro de cada grupo, por nome."""
+    erro de digitação, depois os com; dentro de cada grupo, por nome. Com `IndiceDeNomes`
+    os nomes não são normalizados de novo a cada pedido."""
     termos = normalizar(consulta).split()
     if not termos:
         return []
     achados: list[tuple[int, str, T]] = []
-    for item in itens:
+    for entrada in itens:
+        indexado = entrada if isinstance(entrada, Indexado) else Indexado(entrada)
         custos = [
             c
-            for nome in (item.nome, *item.apelidos)
-            if (c := _custo_no_nome(termos, normalizar(nome))) is not None
+            for nome in indexado.nomes
+            if (c := _custo_no_nome(termos, nome)) is not None
         ]
         if custos:
-            achados.append((min(custos), normalizar(item.nome), item))
+            achados.append((min(custos), indexado.nome, indexado.item))
     achados.sort(key=lambda a: (a[0], a[1]))
     return [item for _, _, item in achados[:limite]]
