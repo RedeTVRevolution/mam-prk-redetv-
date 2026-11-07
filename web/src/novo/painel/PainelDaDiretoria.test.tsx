@@ -846,6 +846,34 @@ test("a aba Custo mostra o total, o mês, o usuário, a etapa e o custo sem dono
   ).toBe(true);
 });
 
+test("a aba Custo escreve R$ 0,00, sem sinal, para um líquido de fração de centavo negativa", async () => {
+  const TINHA = -0.0003;
+  servidor.use(
+    relatorio("custo", () =>
+      HttpResponse.json({
+        ...CUSTO,
+        total: { ...CUSTO.total, custo: TINHA, custo_dos_jobs: TINHA, custo_sem_dono: TINHA, custo_por_hora: TINHA },
+        por_mes: [
+          { ...CUSTO.por_mes[0], custo: TINHA, custo_dos_jobs: TINHA, custo_sem_dono: TINHA, custo_por_hora: TINHA },
+        ],
+      }),
+    ),
+  );
+  await abrir("/painel/custo");
+
+  expect(linhasDe(await tabela("Custo por mês"))[0].filter((c) => c.startsWith("R$"))).toEqual([
+    REAL("0,00"),
+    REAL("0,00"),
+    REAL("0,00"),
+    REAL("0,00"),
+  ]);
+  for (const rotulo of ["Custo dos vídeos", "Custo sem dono", "Custo por hora de vídeo"]) {
+    const indicador = screen.getAllByText(rotulo).find((e) => e.tagName === "P");
+    expect(indicador?.nextSibling?.textContent).toBe(REAL("0,00"));
+  }
+  expect(document.body.textContent).not.toMatch(/-\s*R\$|-0/);
+});
+
 test("Baixar CSV na aba Custo pede o formato csv", async () => {
   const usuario = userEvent.setup();
   const { clique } = simularDownload();

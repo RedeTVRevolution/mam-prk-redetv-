@@ -6,6 +6,7 @@ import {
   COLUNA_DO_GRUPO,
   NOME_DO_GRUPO,
   custoLegivel,
+  emCentavos,
   horasDeVideo,
   minutosLegiveis,
   rotuloDoGrupo,
@@ -455,7 +456,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             serie="Custo"
             agrupamento="mes"
             dias={meses}
-            valor={(m) => m.custo}
+            valor={(m) => emCentavos(m.custo)}
             formato={valor}
             colunas={['Custo', 'Custo dos vídeos', 'Custo sem dono', 'Vídeos', 'Horas de vídeo', 'Custo por hora']}
             celulas={(m) => [valor(m.custo), valor(m.custo_dos_jobs), valor(m.custo_sem_dono), numero(m.videos), horasDeVideo(m.horas_de_video), porHora(m.custo_por_hora)]}
@@ -467,7 +468,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             titulo="Custo por usuário"
             itens={relatorio.por_quem}
             nome={nomeDeQuem}
-            valor={(q) => q.custo}
+            valor={(q) => emCentavos(q.custo)}
             formato={valor}
             chave={chaveDeQuem}
             colunas={['Usuário', 'Custo', 'Vídeos', 'Horas de vídeo', 'Custo por hora']}
@@ -479,7 +480,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             titulo="Custo por etapa"
             itens={relatorio.por_etapa}
             nome={(e) => e.etapa}
-            valor={(e) => e.custo}
+            valor={(e) => emCentavos(e.custo)}
             formato={valor}
             chave={(e) => e.etapa}
             colunas={['Etapa', 'Custo']}
@@ -491,7 +492,7 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
             titulo="Custo sem dono por serviço"
             itens={relatorio.sem_dono_por_servico}
             nome={(s) => s.servico ?? 'Sem serviço'}
-            valor={(s) => s.custo}
+            valor={(s) => emCentavos(s.custo)}
             formato={valor}
             chave={(s) => s.servico ?? ''}
             colunas={['Serviço', 'Custo']}
