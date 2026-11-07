@@ -27,6 +27,10 @@ resource "google_cloud_run_v2_job" "purga" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO_DE_SEGURANCA"
+          value = local.banco_de_seguranca
+        }
+        env {
           name  = "BUCKET_QUARENTENA"
           value = local.buckets["quarentena"]
         }

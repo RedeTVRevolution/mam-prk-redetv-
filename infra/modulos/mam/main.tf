@@ -786,13 +786,36 @@ locals {
   }
 }
 
+# `datastore.user` vale para todos os bancos do projeto. Só a `web` (papéis, chaves, auditoria)
+# e a `purga` (auditoria) entram no banco de segurança (#464); as outras contas recebem o
+# papel com condição IAM limitada ao `(default)`. Quem grava papéis, chaves ou auditoria
+# (grep de COLECAO_DE_PAPEIS/COLECAO_DE_CHAVES/COLECAO_DA_AUDITORIA em api/): main.py (web),
+# purga.py e os comandos do Makefile (rodados por pessoa, com a conta dela).
+locals {
+  contas_no_banco_de_seguranca = ["web", "purga"]
+  papel_do_firestore           = "roles/datastore.user"
+}
+
 resource "google_project_iam_member" "mam" {
   for_each = { for p in flatten([
     for sa, papeis in local.papeis_no_projeto : [for papel in papeis : { sa = sa, papel = papel }]
   ]) : "${p.sa}:${p.papel}" => p }
-  project    = var.projeto
-  role       = each.value.papel
-  member     = google_service_account.mam[each.value.sa].member
+  project = var.projeto
+  role    = each.value.papel
+  member  = google_service_account.mam[each.value.sa].member
+
+  dynamic "condition" {
+    for_each = each.value.papel == local.papel_do_firestore && !contains(local.contas_no_banco_de_seguranca, each.value.sa) ? [1] : []
+    content {
+      title      = "so-o-banco-default"
+      expression = "resource.name == \"projects/${var.projeto}/databases/${google_firestore_database.mam.name}\""
+    }
+  }
+
+  # A condição troca o recurso: o novo entra antes de o antigo sair, sem janela sem acesso.
+  lifecycle {
+    create_before_destroy = true
+  }
   depends_on = [google_project_iam_custom_role.vertex_predicao]
 }
 
@@ -982,6 +1005,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
+      }
+      env {
+        name  = "FIRESTORE_BANCO_DE_SEGURANCA"
+        value = local.banco_de_seguranca
       }
       # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
       env {
@@ -3083,6 +3110,10 @@ output "busca_distancia_maxima" {
 
 output "busca_palavras_minimas" {
   value = var.busca_palavras_minimas
+}
+
+output "banco_de_seguranca" {
+  value = local.banco_de_seguranca
 }
 
 output "bucket_aceitos" {

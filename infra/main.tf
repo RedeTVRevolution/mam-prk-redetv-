@@ -267,6 +267,10 @@ output "busca_palavras_minimas" {
   value = module.mam.busca_palavras_minimas
 }
 
+output "banco_de_seguranca" {
+  value = module.mam.banco_de_seguranca
+}
+
 output "bucket_aceitos" {
   value = module.mam.bucket_aceitos
 }
