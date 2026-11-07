@@ -904,6 +904,8 @@ locals {
   tabela_de_momentos = "momentos_por_ano"
   # Tabela dos Jobs do painel (#454), em `jobs_do_painel.tf`.
   tabela_de_jobs_do_painel = "jobs_do_painel"
+  # Tabela das medidas de revisão do painel (#467), em `revisao_do_painel.tf`.
+  tabela_de_revisao_do_painel = "revisao_do_painel"
 }
 
 locals {
@@ -1123,6 +1125,12 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BIGQUERY_TABELA_DE_JOBS"
         value = local.tabela_de_jobs_do_painel
+      }
+      # A tabela das medidas de revisão: a web grava a cada pulso e a aba Revisão a agrega
+      # junto com a dos Jobs (revisao_do_painel.tf, #467).
+      env {
+        name  = "BIGQUERY_TABELA_DE_REVISAO"
+        value = local.tabela_de_revisao_do_painel
       }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
