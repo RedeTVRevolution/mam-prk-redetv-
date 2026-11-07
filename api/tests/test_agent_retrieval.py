@@ -1,3 +1,4 @@
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
@@ -6,6 +7,7 @@ from typing import Any
 import pytest
 
 from api.agent_retrieval import (
+    FRACAO_DA_COTA,
     AgentRetrieval,
     ConfigDaBusca,
     CotaEsgotada,
@@ -22,6 +24,7 @@ from api.agent_retrieval import (
     transporte_http,
 )
 from api.indice_da_busca import Consulta, Filtros, Registro
+from api.orcamento_de_escrita import reservar_na_janela
 
 CONFIG = ConfigDaBusca(
     projeto="proj-x",
@@ -1082,3 +1085,128 @@ def test_transporte_http_levanta_cota_esgotada_no_429(
     monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
     with pytest.raises(CotaEsgotada, match="429"):
         transporte_http()("POST", "x:batchCreate", {})
+
+
+class _OrcamentoFalso:
+    """O orçamento do Firestore, em memória: a transação vira um `Lock`."""
+
+    def __init__(self) -> None:
+        self.reservas: list[tuple[float, int]] = []
+        self.historico: list[tuple[float, int]] = []
+        self.trava = threading.Lock()
+
+    def reservar(
+        self, colecao: str, objetos: int, limite: float, agora: float
+    ) -> float:
+        with self.trava:
+            self.reservas, espera = reservar_na_janela(
+                self.reservas, objetos, limite, agora
+            )
+            if not espera:
+                self.historico.append((agora, objetos))
+            return espera
+
+
+class _RelogioDeVarias(_Relogio):
+    """Relógio falso para vários fios: avançar é uma conta só, sob trava."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trava = threading.Lock()
+
+    def dormir(self, segundos: float) -> None:
+        with self.trava:
+            super().dormir(segundos)
+
+
+def _reservado_em_janelas(orcamento: _OrcamentoFalso) -> int:
+    """O maior total reservado numa janela de 60 s, pela hora de cada reserva."""
+    ts = orcamento.historico
+    return max(sum(n for u, n in ts if t <= u < t + 60) for t, _ in ts)
+
+
+def test_orcamento_dois_indices_juntos_nao_passam_da_fracao_da_cota() -> None:
+    relogio = _RelogioDeVarias()
+    orcamento = _OrcamentoFalso()
+
+    def transporte(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        return {}
+
+    config = replace(CONFIG, cota_de_escrita=3000)
+
+    def indice() -> AgentRetrieval:
+        return AgentRetrieval(
+            config,
+            transporte,
+            tentar_no_429=True,
+            dormir=relogio.dormir,
+            relogio=relogio,
+            orcamento=orcamento,
+        )
+
+    fios = [
+        threading.Thread(target=indice().gravar, args=(nome, _registros(5000)))
+        for nome in ("a", "b")
+    ]
+    for fio in fios:
+        fio.start()
+    for fio in fios:
+        fio.join()
+    assert sum(n for _, n in orcamento.historico) == 10_000
+    assert _reservado_em_janelas(orcamento) <= 3000 * FRACAO_DA_COTA
+
+
+def test_orcamento_conta_a_apagada_junto_com_a_criada() -> None:
+    relogio = _Relogio()
+    orcamento = _OrcamentoFalso()
+    nomes = [{"name": f"c/dataObjects/{n}"} for n in range(1500)]
+
+    def transporte(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        return {"dataObjects": nomes} if caminho.endswith(":query") else {}
+
+    AgentRetrieval(
+        replace(CONFIG, cota_de_escrita=3000),
+        transporte,
+        dormir=relogio.dormir,
+        relogio=relogio,
+        orcamento=orcamento,
+    ).gravar("j", _registros(400))
+    # 1.000 + 500 apagados e 200 + 200 criados: tudo passa pela mesma conta.
+    assert [n for _, n in orcamento.historico] == [1000, 500, 200, 200]
+
+
+def test_orcamento_fora_do_ar_grava_pelo_ritmo_local_e_avisa(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class Quebrado:
+        def reservar(
+            self, colecao: str, objetos: int, limite: float, agora: float
+        ) -> float:
+            raise RuntimeError("firestore fora do ar")
+
+    relogio = _Relogio()
+    envios: list[tuple[float, int]] = []
+    with caplog.at_level("WARNING"):
+        AgentRetrieval(
+            replace(CONFIG, cota_de_escrita=3000),
+            _anota_os_lotes(relogio, envios),
+            dormir=relogio.dormir,
+            relogio=relogio,
+            orcamento=Quebrado(),
+        ).gravar("j", _registros(5000))
+    assert sum(n for _, n in envios) == 5000
+    _nenhuma_janela_de_60_s_passa(envios, 3000)
+    assert "orçamento de escrita fora do ar" in caplog.text
+
+
+def test_reserva_espera_o_bastante_para_o_lote_caber() -> None:
+    reservas = [(0.0, 1000), (10.0, 1000), (20.0, 500)]
+    # Com 2.500 na janela, 1.000 não cabem em 2.700; basta a mais antiga sair.
+    mantidas, espera = reservar_na_janela(reservas, 1000, 2700, 30.0)
+    assert mantidas == reservas and espera == 30.0
+    mantidas, espera = reservar_na_janela(reservas, 1000, 2700, 70.0)
+    assert espera == 0 and mantidas == [(20.0, 500), (70.0, 1000)]
