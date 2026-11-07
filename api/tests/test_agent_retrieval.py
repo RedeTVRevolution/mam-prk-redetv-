@@ -1,6 +1,6 @@
 import threading
 from collections.abc import Callable
-from dataclasses import fields, replace
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -457,9 +457,11 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     assert pedido["dataObject"]["data"]["data_de_exibicao"] == 20260102
     assert pedido["dataObject"]["data"]["significado"] == "objeto"
 
-    transporte.resposta = {
-        "results": [{"results": [{"dataObject": pedido["dataObject"]}]}]
-    }
+    # O índice devolve só os campos pedidos: o Registro volta inteiro mesmo assim.
+    gravado = pedido["dataObject"]["data"]
+    data = {c: v for c, v in gravado.items() if c in CAMPOS_DO_REGISTRO}
+    assert data != gravado
+    transporte.resposta = {"results": [{"results": [{"dataObject": {"data": data}}]}]}
     [achado] = adaptador.buscar(Consulta(texto="vestido", filtros=Filtros(dono="c")))
     assert achado == registro
 
@@ -468,9 +470,9 @@ def test_a_consulta_pede_so_os_campos_do_registro_e_nunca_todos() -> None:
     pedido = pedido_de_busca(CONFIG, Consulta(texto="vestido", significado="gala"))
     campos = [b["outputFields"]["dataFields"] for b in _buscas(pedido).values()]
     campos.append(pedido["combine"]["outputFields"]["dataFields"])
-    assert all(c == CAMPOS_DO_REGISTRO and "*" not in c for c in campos)
-    # Cada campo do Registro volta na consulta; só o que a indexação usa fica de fora.
-    assert set(CAMPOS_DO_REGISTRO) == {f.name for f in fields(Registro)}
+    assert all(c == CAMPOS_DO_REGISTRO for c in campos)
+    assert "*" not in CAMPOS_DO_REGISTRO
+    assert not {"significado", "texto_da_busca"} & set(CAMPOS_DO_REGISTRO)
 
 
 def test_o_registro_leva_a_copia_do_texto_sem_acento_nem_maiuscula() -> None:
