@@ -126,19 +126,10 @@ variable "cota_de_escrita_da_busca" {
   default     = 3000
 }
 
-# O índice ANN do quadro-chave está ligado no dev desde o #268 (ADR 0006): cada índice
-# cobra réplicas por hora, e com a variável em false o código não calcula o vetor do
-# quadro. Ligar só cria o índice (make criar-colecao-da-busca, depois do apply).
-variable "indice_do_quadro_ligado" {
-  type    = bool
-  default = true
-}
-
-# Os índices ANN da coleção (um por vetor, com réplica dedicada cobrada por hora). Em
-# false a busca vai pelo KNN, sem índice, que aceita no máximo 100 mil registros: o dev
-# roda assim por custo (ADR 0006); a produção fica com eles. Os índices não são recursos
-# do Terraform: desligar só para de usá-los, e apagar os que existem é à mão (README);
-# ligar é aplicar e rodar o make criar-colecao-da-busca.
+# O índice ANN da descrição (réplica dedicada, cobrada por hora). Em false a busca vai
+# pelo KNN, sem índice, que aceita no máximo 100 mil registros (ADR 0006). O índice não é
+# recurso do Terraform: desligar só para de usá-lo, e apagá-lo é à mão (README); ligar é
+# aplicar e rodar o make criar-colecao-da-busca.
 variable "indices_da_busca_ligados" {
   type    = bool
   default = true
@@ -609,7 +600,7 @@ locals {
   buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
 }
 
-# A coleção de momentos da busca (#117) e os índices ANN dela (um por campo de vetor)
+# A coleção de momentos da busca (#117) e o índice ANN dela
 # nascem no `make criar-colecao-da-busca` (idempotente), porque o provedor do Terraform
 # ainda não tem o recurso. Este é o único lugar que monta os nomes; o código os recebe
 # por BUSCA_*. A coleção de medida é a temporária do `make medir-busca`.
@@ -617,9 +608,6 @@ locals {
   colecao_da_busca           = "momentos"
   colecao_de_medida_da_busca = "momentos-medida"
   indice_da_descricao        = "momentos-descricao-ann"
-  indice_do_quadro           = "momentos-quadro-ann"
-  # Vazio desliga o índice do quadro-chave no código (BUSCA_INDICE_QUADRO).
-  indice_do_quadro_em_uso = var.indice_do_quadro_ligado ? local.indice_do_quadro : ""
   # O modelo do Model Armor e a configuração da Ranking API (a padrão, que já existe no
   # projeto) chegam ao serviço por MODEL_ARMOR_* e RANKING_CONFIG (#232).
   modelo_do_model_armor = "consulta-da-busca"
@@ -1079,10 +1067,6 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_INDICE_DESCRICAO"
         value = local.indice_da_descricao
-      }
-      env {
-        name  = "BUSCA_INDICE_QUADRO"
-        value = local.indice_do_quadro_em_uso
       }
       env {
         name  = "BUSCA_INDICES_LIGADOS"
@@ -2070,10 +2054,6 @@ resource "google_cloud_run_v2_job" "indexacao" {
         env {
           name  = "BUSCA_INDICE_DESCRICAO"
           value = local.indice_da_descricao
-        }
-        env {
-          name  = "BUSCA_INDICE_QUADRO"
-          value = local.indice_do_quadro_em_uso
         }
         env {
           name  = "BUSCA_INDICES_LIGADOS"
@@ -3114,10 +3094,6 @@ output "busca_colecao_de_medida" {
 
 output "busca_indice_descricao" {
   value = local.indice_da_descricao
-}
-
-output "busca_indice_quadro" {
-  value = local.indice_do_quadro_em_uso
 }
 
 output "busca_indices_ligados" {

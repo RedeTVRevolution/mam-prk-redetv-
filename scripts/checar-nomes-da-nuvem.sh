@@ -14,9 +14,9 @@ if [[ -z $sufixos ]]; then
   exit 1
 fi
 padrao="mam-redetv-[a-z0-9]|-($sufixos|tfstate|fontes)([^a-z0-9-]|$)"
-busca=$(sed -nE -e 's/^ *(colecao_da_busca|colecao_de_medida_da_busca|indice_da_descricao|indice_do_quadro) *= *"(.*)"$/\2/p' \
+busca=$(sed -nE -e 's/^ *(colecao_da_busca|colecao_de_medida_da_busca|indice_da_descricao) *= *"(.*)"$/\2/p' \
   -e '/^variable "regiao_da_busca"/,/^}/s/^ *default *= *"(.*)"$/\1/p' infra/modulos/mam/main.tf | paste -sd '|' -)
-if [[ $(tr '|' '\n' <<<"$busca" | grep -c .) -ne 5 ]]; then
+if [[ $(tr '|' '\n' <<<"$busca" | grep -c .) -ne 4 ]]; then
   echo "checar-nomes-da-nuvem: nomes da busca não encontrados em infra/modulos/mam/main.tf" >&2
   exit 1
 fi

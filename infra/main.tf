@@ -113,9 +113,9 @@ module "mam" {
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
 
-  # Sem os índices ANN dedicados no dev, por custo (~R$ 571/mês os dois; ADR 0006): a
-  # busca vai pelo KNN, que aceita até 100 mil registros. A produção fica com eles.
-  indices_da_busca_ligados = false
+  # O índice ANN da descrição (~R$ 290/mês; ADR 0006): o KNN sem índice aceita só 100 mil
+  # registros, uns 44 h de vídeo.
+  indices_da_busca_ligados = true
 }
 
 output "identity_api_key" {
@@ -249,10 +249,6 @@ output "busca_colecao_de_medida" {
 
 output "busca_indice_descricao" {
   value = module.mam.busca_indice_descricao
-}
-
-output "busca_indice_quadro" {
-  value = module.mam.busca_indice_quadro
 }
 
 output "busca_indices_ligados" {
