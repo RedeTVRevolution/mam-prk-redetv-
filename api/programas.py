@@ -60,6 +60,10 @@ class RenomeacaoDoPrograma(BaseModel):
     desde: datetime | None = None  # quando a troca foi pedida
 
 
+# Estados em que a troca ainda tem vídeo por indexar.
+TROCA_ABERTA = ("em_andamento", "falhou")
+
+
 class Programa(BaseModel):
     id: str
     nome: NomeDoPrograma
@@ -89,6 +93,39 @@ def troca_vale(programa: "Programa | None", troca_id: str) -> bool:
 
 def novo_id() -> str:
     return uuid.uuid4().hex
+
+
+def terminar_o_pendente(
+    programas: "RepositorioDeProgramas", job_id: str, ok: bool
+) -> None:
+    """O `mam-indexacao` alcançou a versão pedida do vídeo (#419): tira `job_id` dos pendentes
+    de toda troca de nome que o espera, e fecha a troca (`concluida`) quando não sobra nenhum.
+    Com `ok` falso a troca vai a `falhou`, para a tela oferecer o `retomar`; um pendente que
+    depois indexa ainda sai e pode fechá-la."""
+    for programa in programas.listar():
+        r = programa.renomeacao
+        if r is None or job_id not in r.pendentes or r.estado not in TROCA_ABERTA:
+            continue
+
+        def condicional(atual: Programa, troca_id: str = r.id) -> Programa | None:
+            lida = atual.renomeacao
+            if lida is None or lida.id != troca_id or job_id not in lida.pendentes:
+                return None
+            if not ok:
+                if lida.estado != "em_andamento":
+                    return None
+                novo = lida.model_copy(update={"estado": "falhou"})
+            else:
+                pendentes = [i for i in lida.pendentes if i != job_id]
+                novo = lida.model_copy(
+                    update={
+                        "pendentes": pendentes,
+                        "estado": "concluida" if not pendentes else lida.estado,
+                    }
+                )
+            return atual.model_copy(update={"renomeacao": novo})
+
+        programas.trocar(programa.id, condicional)
 
 
 class RepositorioDeProgramas(Protocol):

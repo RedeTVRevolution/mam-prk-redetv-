@@ -177,6 +177,14 @@ class Indexacao(BaseModel):
     desde: datetime | None = None
 
 
+class RodadaDaIndexacao(BaseModel):
+    """A execução que está indexando o vídeo agora (#419): quem a toma é a única que grava no
+    índice, e o `id` separa a dela de uma que a substituiu depois de `em` vencer."""
+
+    id: str
+    em: datetime
+
+
 EstadoDaCopia = Literal["pendente", "copiado", "falhou"]
 
 
@@ -254,6 +262,13 @@ class Job(BaseModel):
     mes_exibicao: str | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
     indexacao: Indexacao | None = None
+    # Quantas vezes se pediu a indexação do vídeo e até qual pedido ela já chegou (#419): aprovar a
+    # revisão, trocar o nome do programa e o `make` da indexação só incrementam `versao_pedida`; o
+    # `mam-indexacao` reindexa até `versao_indexada` alcançá-la. Zero nos dois em Job anterior.
+    versao_pedida: int = 0
+    versao_indexada: int = 0
+    # `None` sem execução indexando; ver `api.ciclo_de_vida.tomar_a_rodada`.
+    rodada_da_indexacao: RodadaDaIndexacao | None = None
     # `None` até a primeira cópia (e onde o BigQuery não está configurado).
     copia_bigquery: CopiaNoBigQuery | None = None
     # A etapa em andamento; `None` entre etapas, com o Job parado e em Job anterior ao campo.
