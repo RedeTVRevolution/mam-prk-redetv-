@@ -87,7 +87,7 @@ def com_pessoas_fundidas(
         id = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
         if id is None:
             continue
-        destino = _destino_final(id, obter)
+        destino = destino_final(id, obter)
         if destino is not None:
             pessoa.update(nome=destino.nome, catalogo_id=destino.id)
             continue
@@ -99,7 +99,7 @@ def com_pessoas_fundidas(
     return entregue
 
 
-def _destino_final(
+def destino_final(
     id: str, obter: Callable[[str], PessoaDoCatalogo | None]
 ) -> PessoaDoCatalogo | None:
     """O destino em que a pessoa acabou fundida, ou `None` se ela não foi fundida."""

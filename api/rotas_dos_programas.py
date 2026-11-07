@@ -48,6 +48,7 @@ from api.programas import (
     TrocaSubstituida,
     VinculoDaPessoa,
     novo_id,
+    pessoas_do_programa,
     troca_vale,
 )
 from api.renomeacao_de_pessoas import RODADAS, AndamentoDaRenomeacao
@@ -151,18 +152,16 @@ def criar_rotas_dos_programas(
     rotas = APIRouter(prefix="/admin/programas")
 
     def publico(programa: Programa) -> ProgramaPublico:
-        pessoas: list[PessoaNoProgramaPublica] = []
-        for v in programa.pessoas:
-            pessoa = catalogo.obter(v.pessoa_id)
-            if pessoa is not None and visivel(pessoa):
-                pessoas.append(
-                    PessoaNoProgramaPublica(
-                        pessoa_id=pessoa.id,
-                        nome=pessoa.nome,
-                        apelidos=pessoa.apelidos,
-                        papel=v.papel,
-                    )
-                )
+        visiveis, _ = pessoas_do_programa(programa, catalogo)
+        pessoas = [
+            PessoaNoProgramaPublica(
+                pessoa_id=pessoa.id,
+                nome=pessoa.nome,
+                apelidos=pessoa.apelidos,
+                papel=papel,
+            )
+            for pessoa, papel in visiveis
+        ]
         r = programa.renomeacao
         return ProgramaPublico(
             id=programa.id,
@@ -360,6 +359,10 @@ def criar_rotas_dos_programas(
         anterior = antes.renomeacao
         conferir_pessoas(dados)
         depois = Programa(id=id, **dados.model_dump(), renomeacao=anterior)
+        # A tela só vê as pessoas visíveis: o vínculo com quem está na lixeira não sai
+        # no salvar (restaurar a pessoa o devolve, com o mesmo papel).
+        _, escondidos = pessoas_do_programa(antes, catalogo)
+        depois.pessoas = [*depois.pessoas, *escondidos]
         if antes.nome == dados.nome:
             # Sem troca de nome, o andamento não muda.
             gravar(depois)
