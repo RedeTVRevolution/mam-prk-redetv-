@@ -20,8 +20,10 @@ BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 class Decupagens:
     def __init__(self, versoes: dict[str, str | None]) -> None:
         self._versoes = versoes
+        self.abertas: list[str] = []
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+        self.abertas.append(job_id)
         if job_id not in self._versoes:
             raise ServicoIndisponivel
         versao = self._versoes[job_id]
@@ -165,6 +167,54 @@ def test_decupagem_ilegivel_fica_de_fora() -> None:
     mundo.rodar(confirmar=True)
 
     assert [d[0] for d in mundo.disparo.disparos] == ["outra", "sem-campo"]
+
+
+def _com_a_versao_no_job(mundo: Mundo) -> None:
+    for job in mundo.jobs.listar():
+        versao = mundo.decupagens._versoes[job.id]
+        mundo.jobs.salvar(job.model_copy(update={"versao_pipeline": versao}))
+    mundo.decupagens.abertas.clear()
+
+
+def test_job_com_a_versao_gravada_nao_abre_a_decupagem() -> None:
+    mundo = _mundo()
+    _com_a_versao_no_job(mundo)
+
+    escolhidos = escolher(mundo.jobs, mundo.decupagens, None, None)
+
+    assert [c.job_id for c in escolhidos] == ["antigo", "outra", "sem-campo"]
+    assert [c.versao for c in escolhidos] == ["2026.10.1", "2026.10.2", "anterior"]
+    assert mundo.decupagens.abertas == [
+        "sem-campo"
+    ]  # o Job sem versão é o desconhecido
+
+
+def test_job_sem_o_campo_nao_some_e_a_versao_vem_da_decupagem() -> None:
+    mundo = _mundo()
+    for id in ("antigo", "vigente"):
+        job = mundo.jobs.obter(id)
+        assert job is not None
+        mundo.jobs.salvar(
+            job.model_copy(update={"versao_pipeline": mundo.decupagens._versoes[id]})
+        )
+    mundo.decupagens.abertas.clear()
+
+    escolhidos = escolher(mundo.jobs, mundo.decupagens, None, None)
+
+    assert [c.job_id for c in escolhidos] == ["antigo", "outra", "sem-campo"]
+    assert sorted(mundo.decupagens.abertas) == ["outra", "sem-campo"]
+
+
+def test_a_lista_dos_jobs_vem_em_paginas_e_sem_lixeira() -> None:
+    mundo = _mundo()
+    _com_a_versao_no_job(mundo)
+    outras = [_job(f"x{i}", dia=10 + i) for i in range(5)]
+    for j in outras:
+        mundo.jobs.salvar(j.model_copy(update={"versao_pipeline": "2026.10.1"}))
+
+    escolhidos = escolher(mundo.jobs, mundo.decupagens, "2026.10.1", None, pagina=2)
+
+    assert [c.job_id for c in escolhidos] == ["antigo"] + [f"x{i}" for i in range(5)]
 
 
 def test_escolher_nao_muda_a_ordem_nem_passa_do_limite() -> None:
