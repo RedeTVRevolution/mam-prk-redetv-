@@ -498,6 +498,9 @@ class CursorInvalido(Exception):
 
 Ordem = Literal["enviado", "exibicao"]
 LIMITE_MAXIMO = 200
+# Candidatos que um pedido paginado examina no Firestore antes de devolver a página que
+# tiver, com o cursor (pode vir vazia); só vale com `limite`.
+TETO_DE_CANDIDATOS = 2000
 
 
 @dataclass(frozen=True)
@@ -517,8 +520,11 @@ class FiltroDeJobs:
     pessoa_do_catalogo: str | None = None  # só os vídeos em que a pessoa aparece
     marca_do_catalogo: str | None = None  # só os vídeos em que a marca aparece
     ordem: Ordem = "enviado"
-    limite: int | None = None  # `None`: a lista inteira, sem cursor
-    cursor: str | None = None  # id do último Job da página anterior
+    limite: int | None = None  # `None`: a lista inteira, sem cursor e sem teto
+    cursor: str | None = None  # id do último Job examinado na página anterior
+    # Só a lista do acervo: lê os campos do `JobResumido` (e os que o filtro confere), não o
+    # Job inteiro. O Job vem incompleto, então quem o regrava não pode pedir isto (#480).
+    so_os_da_lista: bool = False
 
 
 @dataclass(frozen=True)
@@ -1133,6 +1139,7 @@ def criar_rotas(
             ordem=ordem,
             limite=limite,
             cursor=cursor,
+            so_os_da_lista=True,
         )
         try:
             pagina = repositorio.consultar(filtro)
