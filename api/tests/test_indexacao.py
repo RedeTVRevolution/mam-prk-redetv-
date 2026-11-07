@@ -635,3 +635,30 @@ def test_corrigir_uma_fala_nao_muda_o_id_das_outras() -> None:
 
     assert _ids_do_indice(mundo, "fala") == antes
     assert "Corrigida" in mundo.textos_das_falas()
+
+
+def test_tirar_o_primeiro_objeto_nao_muda_o_id_do_outro() -> None:
+    # Não há correção que remova fala ou texto; a única que remove item é a do objeto.
+    modelo = json.loads(json.dumps(MODELO))
+    primeiro, segundo = (o["id"] for o in modelo["objetos"])
+    mundo = Mundo(modelo=modelo)
+    mundo.reindexar()
+    do_segundo = [i for i in _ids_do_indice(mundo, "objeto") if f":{segundo}:" in i]
+    assert do_segundo
+
+    resposta = mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "objeto.nao_existe",
+            "item_id": primeiro,
+            "valor": "nao_existe",
+            "motivo": "não está na imagem",
+            "versao": versao_do_modelo(json.dumps(modelo).encode()),
+        },
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 201
+    mundo.reindexar()
+
+    objetos = [i for i in _ids_do_indice(mundo, "objeto") if ":objeto:" in i]
+    assert objetos == do_segundo

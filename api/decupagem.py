@@ -317,6 +317,19 @@ class Comercial(_Intervalo):
     )
 
 
+# Comerciais, falas e textos na tela não têm id no esquema do modelo: o servidor dá o da
+# posição no JSON do modelo, antes das correções (`api/correcoes.py`).
+PREFIXO_POSICIONAL = {
+    "comerciais": "com",
+    "transcricao": "fal",
+    "textos_na_tela": "txt",
+}
+
+
+def id_posicional(chave: str, n: int) -> str:
+    return f"{PREFIXO_POSICIONAL[chave]}{n:03d}"
+
+
 class Fala(_Intervalo):
     # O id posicional (`fal###`) ou o da correção que a acrescentou; o servidor grava
     # (#418), o modelo não conhece e o índice da busca o usa no id do registro. Fora do

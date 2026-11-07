@@ -16,6 +16,7 @@ from api.decupagem import (
     ObjetoDoInventario,
     Pessoa,
     _Intervalo,
+    id_posicional,
 )
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
@@ -225,9 +226,11 @@ def registros_da_decupagem(
                 )
             )
     for n, fala in enumerate(decupagem.transcricao):
+        # Sem id, a decupagem não passou pela entrega: o id é o que ela daria.
+        fala_id = fala.id or id_posicional("transcricao", n)
         registros.append(
             Registro(
-                id=f"{job_id}:fala:{fala.id or n}",
+                id=f"{job_id}:fala:{fala_id}",
                 tipo="fala",
                 inicio_ms=fala.inicio_ms,
                 fim_ms=fala.fim_ms,
@@ -238,9 +241,10 @@ def registros_da_decupagem(
             )
         )
     for n, texto in enumerate(decupagem.textos_na_tela):
+        texto_id = texto.id or id_posicional("textos_na_tela", n)
         registros.append(
             Registro(
-                id=f"{job_id}:texto:{texto.id or n}",
+                id=f"{job_id}:texto:{texto_id}",
                 tipo="texto_na_tela",
                 inicio_ms=texto.inicio_ms,
                 fim_ms=texto.fim_ms,

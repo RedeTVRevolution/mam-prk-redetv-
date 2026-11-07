@@ -353,3 +353,13 @@ def test_decupagem_sem_inventario_segue_como_antes() -> None:
         "estúdio",
         "bastidor",
     ]
+
+
+def test_fala_e_texto_sem_id_ganham_o_id_que_a_entrega_daria() -> None:
+    decupagem = EXEMPLOS[0].decupagem
+    assert decupagem.transcricao and decupagem.textos_na_tela
+    assert decupagem.transcricao[0].id is None
+
+    ids = [r.id for r in registros_da_decupagem("j", decupagem, "p", None)]
+
+    assert "j:fala:fal000" in ids and "j:texto:txt000" in ids
