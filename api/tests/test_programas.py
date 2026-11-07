@@ -13,7 +13,12 @@ from api.auditoria import (
 )
 from api.auth import Usuario
 from api.carregar_programas import carregar
-from api.catalogo import Catalogo, CatalogoEmMemoria, EnvioParaLixeira
+from api.catalogo import (
+    Catalogo,
+    CatalogoEmMemoria,
+    EnvioParaLixeira,
+    FusaoDaPessoa,
+)
 from api.copia_bigquery import CopiaEmMemoria
 from api.exemplos_da_busca import EXEMPLOS
 from api.jobs import RepositorioEmMemoria
@@ -796,3 +801,68 @@ def test_carga_do_toml_de_migracao_cria_os_17_sem_duplicar_pessoa() -> None:
         "apresentador",
         *["comentarista"] * 4,
     ]
+
+
+def _envio() -> EnvioParaLixeira:
+    return EnvioParaLixeira(
+        em=datetime(2026, 11, 6, tzinfo=UTC), por_uid="u", por_email="u@b.c", motivo="x"
+    )
+
+
+def test_pessoa_fundida_segue_o_destino_no_perfil_e_na_tela() -> None:
+    cliente, programas, catalogo = _cliente(["editor"])
+    leao = catalogo.achar("Leão Lobo")[0]
+    outro = catalogo.acrescentar("Leão Lobo", "", [])
+    catalogo.definir_fusao(
+        leao.id,
+        FusaoDaPessoa(
+            destino_id=outro.id,
+            em=datetime(2026, 11, 6, tzinfo=UTC),
+            por_uid="u",
+            por_email="u@b.c",
+            motivo="duplicada",
+        ),
+    )
+
+    tela = cliente.get("/v1/admin/programas", headers=AUTORIZACAO).json()[0]
+    perfil = perfis_dos_programas(programas, catalogo)["TV Fama"]
+
+    assert outro.id in [p["pessoa_id"] for p in tela["pessoas"]]
+    assert leao.id not in [p["pessoa_id"] for p in tela["pessoas"]]
+    assert len(tela["pessoas"]) == 4
+    assert [p.papel for p in perfil.pessoas if p.nome == "Leão Lobo"] == [
+        "apresentador ou comentarista"
+    ]
+    # O gravado não é reescrito.
+    assert leao.id in [v.pessoa_id for v in programas.obter("tv-fama").pessoas]  # type: ignore[union-attr]
+
+
+def test_put_preserva_o_vinculo_da_pessoa_na_lixeira_e_restaurar_devolve() -> None:
+    cliente, _, catalogo = _cliente(["editor"])
+    leao = catalogo.achar("Leão Lobo")[0]
+    catalogo.definir_lixeira(leao.id, _envio())
+    tela = cliente.get("/v1/admin/programas", headers=AUTORIZACAO).json()[0]
+    assert leao.id not in [p["pessoa_id"] for p in tela["pessoas"]]
+
+    # Um Editor muda só o perfil: a tela devolve as pessoas que viu.
+    resposta = cliente.put(
+        "/v1/admin/programas/tv-fama",
+        json={
+            "nome": "TV Fama",
+            "perfil": "Novo texto",
+            "pessoas": [
+                {"pessoa_id": p["pessoa_id"], "papel": p["papel"]}
+                for p in tela["pessoas"]
+            ],
+        },
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 200
+
+    catalogo.definir_lixeira(leao.id, None)
+    depois = cliente.get("/v1/admin/programas", headers=AUTORIZACAO).json()[0]
+    assert depois["perfil"] == "Novo texto"
+    assert {(p["pessoa_id"], p["papel"]) for p in depois["pessoas"]} >= {
+        (leao.id, "apresentador ou comentarista")
+    }
+    assert len(depois["pessoas"]) == 4

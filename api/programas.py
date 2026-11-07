@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, StringConstraints
 
-from api.catalogo import Catalogo, visivel
+from api.catalogo import Catalogo, PessoaDoCatalogo, visivel
+from api.catalogo_apagado import destino_final
 
 if TYPE_CHECKING:  # `api.jobs` importa este módulo
     from api.jobs import Job, RepositorioDeJobs
@@ -218,22 +219,46 @@ class PerfilDoPrograma:
 Perfis = Mapping[str, PerfilDoPrograma]
 
 
+def pessoas_do_programa(
+    programa: Programa, catalogo: Catalogo
+) -> tuple[list[tuple[PessoaDoCatalogo, str]], list[VinculoDaPessoa]]:
+    """As pessoas do programa como o catálogo está agora (#425): `(visíveis, escondidos)`.
+
+    O vínculo com pessoa fundida segue o destino na leitura (como `com_pessoas_fundidas`):
+    nada gravado é reescrito, e a mesma pessoa vinda de dois vínculos aparece uma vez, com
+    o primeiro papel. O vínculo cuja pessoa (ou o destino dela) está na lixeira fica
+    escondido, mas continua gravado: o `PUT` o preserva e restaurar a pessoa o devolve.
+    Pessoa que saiu do catálogo (purga) não é nem uma coisa nem outra."""
+    visiveis: dict[str, tuple[PessoaDoCatalogo, str]] = {}
+    escondidos: list[VinculoDaPessoa] = []
+    for vinculo in programa.pessoas:
+        pessoa = destino_final(vinculo.pessoa_id, catalogo.obter) or catalogo.obter(
+            vinculo.pessoa_id
+        )
+        if pessoa is None:
+            continue
+        if visivel(pessoa):
+            visiveis.setdefault(pessoa.id, (pessoa, vinculo.papel))
+        elif pessoa.lixeira is not None:
+            escondidos.append(vinculo)
+    return list(visiveis.values()), escondidos
+
+
 def perfis_dos_programas(
     repositorio: RepositorioDeProgramas, catalogo: Catalogo
 ) -> Perfis:
     """Os programas cadastrados agora, pelo nome, com as pessoas lidas do catálogo.
-    Quem está na lixeira ou foi fundida em outra não entra."""
+    Quem está na lixeira não entra; quem foi fundida em outra entra como o destino."""
     perfis: dict[str, PerfilDoPrograma] = {}
     for programa in repositorio.listar():
-        pessoas: list[PessoaDoPerfil] = []
-        for vinculo in programa.pessoas:
-            pessoa = catalogo.obter(vinculo.pessoa_id)
-            if pessoa is not None and visivel(pessoa):
-                pessoas.append(
-                    PessoaDoPerfil(pessoa.nome, vinculo.papel, tuple(pessoa.apelidos))
-                )
+        visiveis, _ = pessoas_do_programa(programa, catalogo)
         perfis[programa.nome] = PerfilDoPrograma(
-            programa.nome, programa.perfil, tuple(pessoas)
+            programa.nome,
+            programa.perfil,
+            tuple(
+                PessoaDoPerfil(pessoa.nome, papel, tuple(pessoa.apelidos))
+                for pessoa, papel in visiveis
+            ),
         )
     return perfis
 
