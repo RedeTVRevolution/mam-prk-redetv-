@@ -75,7 +75,6 @@ from api.eventos_do_job import eventos_do_ambiente
 from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.idempotencia import RepositorioDeIdempotencia
-from api.indexacao import reindexar
 from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
@@ -83,7 +82,6 @@ from api.jobs import (
     ArmazenamentoIndisponivel,
     DisparoDaIndexacao,
     DisparoDaIndexacaoIndisponivel,
-    Job,
     RepositorioDeJobs,
     RepositorioIndisponivel,
     ServicoIndisponivel,
@@ -543,34 +541,6 @@ def criar_app(
     v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
 
-    def _reindexar_o_job(job: Job) -> bool:
-        indexacao = reindexar(
-            job,
-            repositorio_de_jobs,
-            armazenamento_dos_jobs,
-            repositorio_de_correcoes,
-            indice_da_busca,
-            relogio,
-            copia,
-            tipos_de_objeto=tipos_dos_objetos,
-            pessoas=catalogo_de_pessoas.obter,
-        )
-        return indexacao is not None and indexacao.estado == "indexado"
-
-    def _reindexar_para_o_programa(job: Job) -> bool:
-        """Reindexa, e a cópia do BigQuery também precisa ficar: os relatórios são por
-        programa."""
-        if not _reindexar_o_job(job):
-            return False
-        if copia is None:
-            return True
-        atual = repositorio_de_jobs.obter(job.id)
-        return (
-            atual is not None
-            and atual.copia_bigquery is not None
-            and atual.copia_bigquery.estado == "copiado"
-        )
-
     # Uma cópia das pessoas para o autocompletar e para a busca resolver nomes.
     copia_das_pessoas = CopiaCurta(catalogo_de_pessoas.todas, relogio)
 
@@ -618,7 +588,7 @@ def criar_app(
             repositorio_de_jobs,
             repositorio_de_auditoria,
             relogio,
-            _reindexar_para_o_programa,
+            disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             copia_das_pessoas.descartar,
         )
     )

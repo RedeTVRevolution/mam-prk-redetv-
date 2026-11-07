@@ -181,6 +181,8 @@ medir-florence:
 
 # Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
 # make reindexar [JOB=<id>]. Grava só o que mudou no vídeo; repetir dá o mesmo resultado.
+# Sempre indexa (os disparos pelo JOB_ID só indexam o que foi pedido, #419), mas respeita a
+# vez de quem já está indexando o vídeo.
 reindexar:
 	$(AMBIENTE_DA_BUSCA) \
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \

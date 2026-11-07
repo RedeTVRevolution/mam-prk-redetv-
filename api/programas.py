@@ -96,15 +96,21 @@ def novo_id() -> str:
 
 
 def terminar_o_pendente(
-    programas: "RepositorioDeProgramas", job_id: str, ok: bool
+    programas: "RepositorioDeProgramas", job_id: str, nome: str | None, ok: bool
 ) -> None:
     """O `mam-indexacao` alcançou a versão pedida do vídeo (#419): tira `job_id` dos pendentes
     de toda troca de nome que o espera, e fecha a troca (`concluida`) quando não sobra nenhum.
     Com `ok` falso a troca vai a `falhou`, para a tela oferecer o `retomar`; um pendente que
-    depois indexa ainda sai e pode fechá-la."""
+    depois indexa ainda sai e pode fechá-la. `nome` é o programa com que o vídeo foi indexado:
+    só termina a troca que leva a esse nome (uma troca mais nova ainda espera a sua rodada)."""
     for programa in programas.listar():
         r = programa.renomeacao
-        if r is None or job_id not in r.pendentes or r.estado not in TROCA_ABERTA:
+        if (
+            r is None
+            or job_id not in r.pendentes
+            or r.estado not in TROCA_ABERTA
+            or r.nome_novo != nome
+        ):
             continue
 
         def condicional(atual: Programa, troca_id: str = r.id) -> Programa | None:

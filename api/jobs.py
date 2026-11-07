@@ -43,7 +43,7 @@ from api.catalogo_apagado import (
     sem_catalogo_apagado,
 )
 from api.catalogo_dos_jobs import atualizar_catalogo_do_job
-from api.ciclo_de_vida import JaTerminou, transitar
+from api.ciclo_de_vida import JaTerminou, pedir_indexacao, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
     LIMITE_DO_NOME,
@@ -1621,20 +1621,13 @@ def criar_rotas(
         job_id: str,
         autor: Annotated[Usuario, Depends(_exige_editar)],
     ) -> dict[str, str]:
-        """Fecha a revisão: dispara uma reindexação só, em segundo plano. As ações da
+        """Fecha a revisão: pede a indexação e a dispara em segundo plano. As ações da
         revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
         `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, volta
         ao que era (503), para o `pendente` não ficar preso sem execução nenhuma."""
         job = obter_concluido(job_id, autor)
         anterior = job.indexacao
-        if (
-            repositorio.transitar(
-                job.id,
-                "concluido",
-                {"indexacao": Indexacao(estado="pendente", em=relogio())},
-            )
-            is None
-        ):
+        if pedir_indexacao(repositorio, job.id, relogio()) is None:
             raise HTTPException(409, "O vídeo saiu de concluído")
         try:
             disparo_da_indexacao.iniciar(job.id)
