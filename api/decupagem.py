@@ -307,15 +307,35 @@ class Comercial(_Intervalo):
         "marca_incidental",
         "mencao_editorial",
     ] = Field(
-        description="Banner, bug, QR code e chamada de site são "
-        "sobreposicao_grafica; mencao_editorial é a marca citada sem ação comercial."
+        description="Banner, bug e QR code de anunciante, e chamada de site que "
+        "divulga anunciante, são sobreposicao_grafica; @ ou nome de pessoa nunca é "
+        "marca; o nome ou o site do próprio programa e da emissora é "
+        "mencao_editorial; mencao_editorial é a marca citada sem ação comercial."
     )
     evidencias: list[EvidenciaDoComercial] = Field(
         min_length=1, description="O que mostra a ação comercial."
     )
 
 
+# Comerciais, falas e textos na tela não têm id no esquema do modelo: o servidor dá o da
+# posição no JSON do modelo, antes das correções (`api/correcoes.py`).
+PREFIXO_POSICIONAL = {
+    "comerciais": "com",
+    "transcricao": "fal",
+    "textos_na_tela": "txt",
+}
+
+
+def id_posicional(chave: str, n: int) -> str:
+    return f"{PREFIXO_POSICIONAL[chave]}{n:03d}"
+
+
 class Fala(_Intervalo):
+    # O id posicional (`fal###`) ou o da correção que a acrescentou; o servidor grava
+    # (#418), o modelo não conhece e o índice da busca o usa no id do registro. Fora do
+    # `model_dump`: a decupagem gravada pela análise não ganha `"id": null`, que passaria
+    # por cima do id posicional.
+    id: Id | None = Field(default=None, exclude=True)
     locutor: Rotulo = Field(description="Quem fala: nome ou papel.")
     texto: Texto
     # O texto do Whisper, sem as correções do Gemini; só quando há transcrição.
@@ -352,6 +372,8 @@ class TextoNaTela(_Intervalo):
     ele está na tela; um GC que sai e volta são dois itens. Nunca estenda o texto
     até o fim do bloco ou do plano."""
 
+    # O id posicional (`txt###`) ou o da correção; só do servidor, como o da `Fala`.
+    id: Id | None = Field(default=None, exclude=True)
     tipo: Literal[
         "gc", "tarja", "legenda", "placar", "chamada", "logo", "qr_code", "outro"
     ]
@@ -516,6 +538,9 @@ def esquema_do_modelo() -> dict[str, Any]:
     # O inventário é do servidor: as definições dele saem junto com o campo.
     for nome in ("CaixaDoQuadro", "ObjetoDoInventario", "GeradorDoInventario"):
         del esquema["$defs"][nome]
+    # O id de fala e de texto na tela é do servidor, mas pauta e plano têm id do modelo.
+    for nome in ("Fala", "TextoNaTela"):
+        del esquema["$defs"][nome]["properties"]["id"]
     for definicao in [esquema, *esquema["$defs"].values()]:
         propriedades = definicao.get("properties", {})
         intervalo = "inicio_ms" in propriedades

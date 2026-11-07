@@ -147,6 +147,18 @@ def test_devolve_a_concluido_com_decupagem_completa() -> None:
     assert registro.detalhes == {"de": "falhou", "para": "concluido"}
 
 
+def test_devolver_a_concluido_esquece_a_versao_do_job() -> None:
+    # A análise de um reprocessar pode ter gravado a decupagem nova sem concluir o Job:
+    # sem a versão antiga no Job, o reprocessar por versão lê a da decupagem (#494).
+    mundo = Mundo(
+        _job("falhou", codigo_falha="analise_falhou", versao_pipeline="2026.10.1"),
+        decupagem=True,
+    )
+
+    assert mundo.corrigir("concluido").status_code == 200
+    assert mundo.job().versao_pipeline is None
+
+
 def test_concluido_sem_decupagem_e_recusado() -> None:
     mundo = Mundo(_job("falhou", codigo_falha="analise_falhou"))
     mundo.armazenamento.decupagens_indisponiveis = True  # o objeto não existe

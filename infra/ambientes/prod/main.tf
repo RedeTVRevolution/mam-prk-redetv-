@@ -83,7 +83,7 @@ variable "espera_gpu_minutos" {
 }
 
 variable "limite_de_falhas_por_etapa" {
-  description = "Falhas por etapa e por origem (Jobs ou Workflows) na janela dos alertas antes de alertar"
+  description = "Falhas por etapa, somando as origens (Jobs e Workflows), na janela dos alertas antes de alertar"
   type        = number
   default     = 3
 }
@@ -238,10 +238,6 @@ output "busca_indice_descricao" {
   value = module.mam.busca_indice_descricao
 }
 
-output "busca_indice_quadro" {
-  value = module.mam.busca_indice_quadro
-}
-
 output "busca_indices_ligados" {
   value = module.mam.busca_indices_ligados
 }
@@ -260,6 +256,10 @@ output "busca_distancia_maxima" {
 
 output "busca_palavras_minimas" {
   value = module.mam.busca_palavras_minimas
+}
+
+output "banco_de_seguranca" {
+  value = module.mam.banco_de_seguranca
 }
 
 output "bucket_aceitos" {

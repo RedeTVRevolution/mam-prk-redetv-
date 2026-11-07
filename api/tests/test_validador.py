@@ -398,3 +398,29 @@ def test_falha_ao_separar_o_audio_recusa_e_apaga_a_copia_e_o_proxy(
 
     assert _recusa(entrada, tmp_path) == "arquivo_corrompido"
     assert list((tmp_path / "saida").iterdir()) == []
+
+
+def test_os_dois_ffmpeg_que_leem_o_original_forcam_o_demuxer_do_ffprobe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entrada = _padrao_da_redetv(tmp_path / "video.mp4")
+    assert "data" in _faixas(entrada)  # a trilha tmcd da RedeTV
+    comandos: list[list[str]] = []
+    executar = validador._executar
+
+    def espiar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
+        comandos.append(args)
+        return executar(args)
+
+    monkeypatch.setattr(validador, "_executar", espiar)
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    assert aceito.timecode_origem == "01:00:00:00"
+    lendo_o_original = [c for c in comandos if str(entrada) in c]
+    assert {c[0] for c in lendo_o_original} == {"ffprobe", "ffmpeg"}
+    assert len([c for c in lendo_o_original if c[0] == "ffmpeg"]) == 2
+    for comando in lendo_o_original:
+        assert comando[comando.index("-f") + 1] == "mov,mp4,m4a,3gp,3g2,mj2"
+        if comando[0] == "ffmpeg":
+            assert comando.index("-f") < comando.index("-i")

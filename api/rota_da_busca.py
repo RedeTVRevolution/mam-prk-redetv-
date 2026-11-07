@@ -23,7 +23,6 @@ from api.busca import (
     BuscaPorImagemIndisponivel,
     EvidenciaDaBusca,
     Ordem,
-    PlanoSemVetor,
     ResultadoDaBusca,
     filtros_do_servidor,
 )
@@ -37,10 +36,13 @@ from api.imagens_hostis import (
 )
 from api.indice_da_busca import TipoDeRegistro
 from api.jobs import CursorInvalido, _exige
+from api.texto_como_dado import LinhaDaConsulta
 
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+# O plano limita o texto da busca (docs/Plano_MAM.md); o campo do front tem o mesmo teto.
+TAMANHO_DA_CONSULTA = 300
 # Descrição das rotas da busca no OpenAPI, para os sistemas (docs/Plano_MAM.md, "Busca").
 NOTA_DO_QUADRO = (
     "Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): "
@@ -119,7 +121,6 @@ def criar_rotas_da_busca(
         tamanho: int | None,
         programa: str | None,
         resultado: ResultadoDaBusca,
-        job_id: str | None = None,
         **filtros: object,
     ) -> None:
         """Só o tamanho da consulta e os filtros que a pessoa pôs; o texto fica aqui."""
@@ -128,7 +129,6 @@ def criar_rotas_da_busca(
             "busca",
             quem_do_chamador(chamador),
             relogio(),
-            job_id=job_id,
             programa=programa,
             tamanho_da_consulta=tamanho,
             n_resultados=len(resultado.videos),
@@ -144,21 +144,20 @@ def criar_rotas_da_busca(
     def buscar(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        q: Annotated[str, Query(min_length=1, max_length=1000)],
+        q: Annotated[str, LinhaDaConsulta(TAMANHO_DA_CONSULTA, min_length=1)],
         ordem: Ordem = "relevancia",
         evidencias: Annotated[list[EvidenciaDaBusca] | None, Query(alias="ev")] = None,
-        programa: Annotated[str | None, Query(max_length=100)] = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
         sem_periodo: bool = False,
-        pessoa: Annotated[str | None, Query(max_length=100)] = None,
-        marca: Annotated[str | None, Query(max_length=100)] = None,
+        pessoa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        marca: Annotated[str | None, LinhaDaConsulta(100)] = None,
         tipo: TipoDeRegistro | None = None,
-        visual: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
-        cursor: Annotated[str | None, Query(max_length=100)] = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
@@ -170,7 +169,6 @@ def criar_rotas_da_busca(
             busca.buscar,
             q,
             ordem=ordem,
-            visual=visual,
             limite=limite_de_videos,
             filtros_do_servidor=filtros_do_servidor(),
             sistema=sistema,
@@ -212,7 +210,6 @@ def criar_rotas_da_busca(
                 pessoa=pessoa,
                 marca=marca,
                 tipo=tipo,
-                visual=visual,
             )
         return _com_cursor(resposta, resultado)
 
@@ -259,14 +256,14 @@ def criar_rotas_da_busca(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         dados: Annotated[bytes, Depends(foto_enviada)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
         sem_periodo: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
-        cursor: Annotated[str | None, Query(max_length=100)] = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
@@ -331,72 +328,6 @@ def criar_rotas_da_busca(
             )
         return _com_cursor(resposta, resultado)
 
-    @rotas.get("/busca/parecidos/planos")
-    def planos_com_vetor(
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        job: Annotated[str, Query(min_length=1, max_length=100)],
-    ) -> dict[str, list[int]]:
-        """Os planos do vídeo que têm vetor do quadro: só neles "parecidos" aparece.
-
-        Não gasta o limite de consultas por minuto: o Visualizador a chama ao abrir
-        cada vídeo, e isso não deve tirar a vez das buscas de quem está ali.
-        """
-        sistema, _ = _quem_e(chamador)
-        futuro = _executor.submit(busca.planos_com_vetor, job, sistema)
-        try:
-            planos = futuro.result(timeout=tempo_maximo_s)
-        except TempoEsgotado:
-            futuro.cancel()
-            log.warning("lista dos planos com vetor passou de %.1f s", tempo_maximo_s)
-            raise HTTPException(504, "A busca demorou demais") from None
-        return {"planos": sorted(planos)}
-
-    @rotas.get(
-        "/busca/parecidos", description=f"Busca de planos parecidos. {NOTA_DO_QUADRO}"
-    )
-    def buscar_parecidos(
-        resposta: Response,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        job: Annotated[str, Query(min_length=1, max_length=100)],
-        plano: Annotated[int, Query(ge=0)],
-        limite_de_videos: Annotated[
-            int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
-        ] = VIDEOS_POR_PADRAO,
-        cursor: Annotated[str | None, Query(max_length=100)] = None,
-    ) -> ResultadoDaBusca:
-        sistema, quem = _quem_e(chamador)
-        if not limite.consumir(quem):
-            raise HTTPException(429, "Consultas demais; tente em um minuto")
-        cancelado = threading.Event()
-        futuro = _executor.submit(
-            busca.buscar_parecidos,
-            job,
-            plano,
-            limite=limite_de_videos,
-            filtros_do_servidor=filtros_do_servidor(),
-            sistema=sistema,
-            cancelado=cancelado,
-            cursor=cursor,
-            dono=quem,
-        )
-        try:
-            resultado = futuro.result(timeout=tempo_maximo_s)
-        except TempoEsgotado:
-            futuro.cancel()
-            cancelado.set()
-            log.warning("busca de parecidos passou de %.1f s", tempo_maximo_s)
-            raise HTTPException(504, "A busca demorou demais") from None
-        except CursorInvalido:
-            raise HTTPException(422, "Cursor inválido") from None
-        except PlanoSemVetor:
-            raise HTTPException(404, _PLANO_SEM_VETOR) from None
-        # Não há consulta: o ponto de partida é o plano de um vídeo.
-        if cursor is None:  # a página seguinte não conta como busca nova
-            registrar_busca(
-                chamador, None, None, resultado, job, modo="parecidos", plano=plano
-            )
-        return _com_cursor(resposta, resultado)
-
     return rotas
 
 
@@ -410,5 +341,3 @@ def _com_cursor(resposta: Response, resultado: ResultadoDaBusca) -> ResultadoDaB
 _RECUSA = "Envie uma imagem JPEG ou PNG válida"
 _GRANDE_DEMAIS = "A imagem passa do tamanho máximo"
 _PIXELS_DEMAIS = "A imagem passa do tamanho máximo em pixels"
-# Numa linha só: o teste do OpenAPI dos sistemas procura a mensagem inteira no código.
-_PLANO_SEM_VETOR = "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado"

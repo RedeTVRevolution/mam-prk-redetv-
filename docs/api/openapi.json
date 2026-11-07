@@ -137,7 +137,9 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -320,6 +322,19 @@
               }
             }
           },
+          "429": {
+            "description": "Teto de 200 Jobs por hora atingido. A chave criou 200 Jobs na última hora (o teto de uma pessoa é 30). O cabeçalho `Retry-After` traz os segundos de espera (3600, o pior caso): espere esse tempo, mande menos vídeos por hora e repita com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Teto de 200 Jobs por hora atingido"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
             "content": {
@@ -334,7 +349,7 @@
             }
           }
         },
-        "description": "Registra o pedido de decupagem de um MP4 e devolve o Job em `aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 24 h, que abre um upload retomável no Cloud Storage (veja o guia). Escopo `criar`.\n\nO cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já foi feito. A mesma chave com outro corpo dá 409. A chave vale por sistema.\n\nO `nome` termina em `.mp4` e o `tipo` é sempre `video/mp4`; arquivos `.mov` não são aceitos, mesmo com conteúdo MP4: envie com nome `.mp4`.",
+        "description": "Registra o pedido de decupagem de um MP4 e devolve o Job em `aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 15 min, que abre um upload retomável no Cloud Storage (veja o guia); o `POST` que abre a sessão leva o cabeçalho `x-goog-if-generation-match: 0`. Escopo `criar`.\n\nO cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já foi feito. A mesma chave com outro corpo dá 409. A chave vale por sistema.\n\nO `nome` termina em `.mp4` e o `tipo` é sempre `video/mp4`; arquivos `.mov` não são aceitos, mesmo com conteúdo MP4: envie com nome `.mp4`.",
         "tags": [
           "sistemas"
         ]
@@ -350,7 +365,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -427,7 +445,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 300,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -443,7 +464,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -491,13 +515,26 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 500,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "name": "capa",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Capa"
             }
           }
         ],
@@ -610,7 +647,7 @@
             }
           }
         },
-        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`.",
+        "description": "Lista os Jobs da chave (nunca os de outro sistema), do mais recente ao mais antigo, com filtros opcionais: `programa`, `estado` (repetível), `exibicao_de`, `exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com `limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`. Com `capa=false` a seleção é a mesma, mas sem `capa_url` (as capas não são assinadas): serve para quem só conta os Jobs.",
         "tags": [
           "sistemas"
         ]
@@ -1453,6 +1490,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 0,
+              "maxLength": 8000,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "description": "Até 200 ids, separados por vírgula",
               "title": "Ids"
             },
@@ -1726,6 +1766,131 @@
           }
         },
         "description": "Uma URL assinada de um quadro JPEG do vídeo, válida até o `expira_em` (7 horas ou mais). O `arquivo` é o nome que a busca devolve em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`). Só existe com o Job `concluido`. Escopo `ler`.",
+        "tags": [
+          "sistemas"
+        ]
+      }
+    },
+    "/v1/jobs/quadros": {
+      "post": {
+        "summary": "URLs de vários quadros de uma vez",
+        "description": "As URLs assinadas de até 100 quadros (pares `job` e `arquivo`, o nome que a busca devolve em `quadro`) numa chamada só, no lugar de uma por quadro. Cada Job é lido uma vez. Job que não existe, é de outro sistema, está na lixeira ou ainda não `concluiu` volta com `url` e `expira_em` nulos, sem derrubar o lote. Escopo `ler`.",
+        "operationId": "quadros_em_lote_v1_jobs_quadros_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoDeQuadros"
+              },
+              "example": {
+                "quadros": [
+                  {
+                    "job": "6f1c2a",
+                    "arquivo": "plano-6.jpg"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuadroDoLote"
+                  },
+                  "type": "array",
+                  "title": "Response Quadros Em Lote V1 Jobs Quadros Post"
+                },
+                "example": [
+                  {
+                    "job": "6f1c2a",
+                    "arquivo": "plano-6.jpg",
+                    "url": "https://storage.googleapis.com/BUCKET/...",
+                    "expira_em": "2026-11-03T21:14:05.120000Z"
+                  },
+                  {
+                    "job": "fantasma",
+                    "arquivo": "plano-0.jpg",
+                    "url": null,
+                    "expira_em": null
+                  }
+                ]
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Not authenticated"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Chave sem o escopo ler"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação. Mais de 100 pares, ou um `arquivo` fora do formato. Aqui `detail` é uma lista: leia `loc` e `msg`. Peça até 100 pares por chamada.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": [
+                    {
+                      "type": "too_long",
+                      "loc": [
+                        "body",
+                        "quadros"
+                      ],
+                      "msg": "List should have at most 100 items after validation, not 101",
+                      "input": "[...]",
+                      "ctx": {
+                        "field_type": "List",
+                        "max_length": 100,
+                        "actual_length": 101
+                      }
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Serviço indisponível"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErroEmTexto"
+                }
+              }
+            }
+          }
+        },
         "tags": [
           "sistemas"
         ]
@@ -2208,7 +2373,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 0,
               "maxLength": 100,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "default": "",
               "title": "Q"
             }
@@ -2322,7 +2489,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 0,
               "maxLength": 200,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "title": "Q"
             }
           }
@@ -2431,7 +2600,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 0,
               "maxLength": 200,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "title": "Q"
             }
           }
@@ -2530,7 +2701,7 @@
     "/v1/busca": {
       "get": {
         "summary": "Buscar momentos por texto",
-        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`), `visual` e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
+        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`) e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
         "operationId": "buscar_v1_busca_get",
         "parameters": [
           {
@@ -2540,7 +2711,8 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 1000,
+              "maxLength": 300,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "title": "Q"
             }
           },
@@ -2593,7 +2765,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -2654,7 +2828,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -2671,7 +2847,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -2703,16 +2881,6 @@
             }
           },
           {
-            "name": "visual",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Visual"
-            }
-          },
-          {
             "name": "limite",
             "in": "query",
             "required": false,
@@ -2732,7 +2900,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -2759,7 +2929,6 @@
                     "programa": null,
                     "desde": null,
                     "ate": null,
-                    "visual": false,
                     "termo_da_foto": null
                   },
                   "videos": [
@@ -2900,7 +3069,7 @@
             }
           },
           "429": {
-            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
+            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem dividem o mesmo limite). Espere e repita.",
             "content": {
               "application/json": {
                 "example": {
@@ -2958,7 +3127,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -3031,7 +3202,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -3058,7 +3231,6 @@
                     "programa": null,
                     "desde": null,
                     "ate": null,
-                    "visual": false,
                     "termo_da_foto": null
                   },
                   "videos": [
@@ -3220,7 +3392,7 @@
             }
           },
           "429": {
-            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
+            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem dividem o mesmo limite). Espere e repita.",
             "content": {
               "application/json": {
                 "example": {
@@ -3282,397 +3454,6 @@
             }
           }
         }
-      }
-    },
-    "/v1/busca/parecidos/planos": {
-      "get": {
-        "summary": "Planos do vídeo que têm busca de parecidos",
-        "description": "Os números dos planos do vídeo (`job`) que têm vetor do quadro: só neles `GET /v1/busca/parecidos` acha algo. Não gasta o limite de consultas por minuto. Escopo `ler`.",
-        "operationId": "planos_com_vetor_v1_busca_parecidos_planos_get",
-        "parameters": [
-          {
-            "name": "job",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 100,
-              "title": "Job"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Sucesso",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "array",
-                    "items": {
-                      "type": "integer"
-                    }
-                  },
-                  "title": "Response Planos Com Vetor V1 Busca Parecidos Planos Get"
-                },
-                "example": {
-                  "planos": [
-                    0,
-                    1,
-                    3,
-                    4
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Not authenticated"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Chave sem o escopo ler"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": [
-                    {
-                      "type": "missing",
-                      "loc": [
-                        "query",
-                        "job"
-                      ],
-                      "msg": "Field required",
-                      "input": null
-                    }
-                  ]
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Serviço indisponível"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "504": {
-            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "A busca demorou demais"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          }
-        },
-        "tags": [
-          "sistemas"
-        ]
-      }
-    },
-    "/v1/busca/parecidos": {
-      "get": {
-        "summary": "Buscar planos parecidos com um plano",
-        "description": "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de 1 a 50 vídeos. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
-        "operationId": "buscar_parecidos_v1_busca_parecidos_get",
-        "parameters": [
-          {
-            "name": "job",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 100,
-              "title": "Job"
-            }
-          },
-          {
-            "name": "plano",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "title": "Plano"
-            }
-          },
-          {
-            "name": "limite",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 50,
-              "minimum": 1,
-              "default": 20,
-              "title": "Limite"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 100
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Sucesso",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResultadoDaBusca"
-                },
-                "example": {
-                  "entendida": {
-                    "evidencias": [
-                      "imagem",
-                      "citada"
-                    ],
-                    "programa": null,
-                    "desde": null,
-                    "ate": null,
-                    "visual": false,
-                    "termo_da_foto": null
-                  },
-                  "videos": [
-                    {
-                      "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b",
-                      "nome": "TARD_20261103_BLU.mp4",
-                      "programa": "TV Fama",
-                      "data_exibicao": "2026-11-03",
-                      "duracao_s": 598.4,
-                      "n_momentos": 1,
-                      "momentos": [
-                        {
-                          "tipo": "plano",
-                          "inicio_ms": 9800,
-                          "fim_ms": 14200,
-                          "motivo": "Fulana de Tal recebe o elenco no estúdio.",
-                          "destaques": [
-                            {
-                              "inicio": 0,
-                              "fim": 12
-                            }
-                          ],
-                          "quadro_url": null,
-                          "quadro": "quadros/plano-6.jpg"
-                        }
-                      ]
-                    }
-                  ],
-                  "sem_aparicoes": [],
-                  "plano_b": false,
-                  "facetas": {
-                    "programa": [
-                      {
-                        "valor": "TV Fama",
-                        "rotulo": "TV Fama",
-                        "videos": 1
-                      }
-                    ],
-                    "mes": [
-                      {
-                        "valor": "2026-11",
-                        "rotulo": "novembro de 2026",
-                        "videos": 1
-                      }
-                    ],
-                    "pessoa": [
-                      {
-                        "valor": "pessoa-1",
-                        "rotulo": "Fulana de Tal",
-                        "videos": 1
-                      }
-                    ],
-                    "marca": [],
-                    "tipo": [
-                      {
-                        "valor": "plano",
-                        "rotulo": "plano",
-                        "videos": 1
-                      }
-                    ]
-                  },
-                  "quadros_expiram_em": "2026-11-03T21:14:05.120000Z"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Not authenticated. Mande a chave no cabeçalho `X-API-Key`. Chave inexistente, revogada ou com erro de digitação também dá 401.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Not authenticated"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Chave sem o escopo ler. A chave não pode `ler`. Peça uma chave com esse escopo.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Chave sem o escopo ler"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado. Escolha um plano de `GET /v1/busca/parecidos/planos`; se o vídeo é antigo, peça ao time do MAM para reindexá-lo.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Erro de validação. Um parâmetro está fora do formato. Aqui `detail` é uma lista: leia `loc` (onde) e `msg` (por quê) em cada item.\n\nCursor inválido. O `cursor` foi alterado, venceu (vale 15 min), é de outra chave ou de outra consulta: use o `X-Proximo-Cursor` da resposta anterior com a mesma consulta e os mesmos filtros, ou refaça a busca sem `cursor`.",
-            "content": {
-              "application/json": {
-                "examples": {
-                  "Erro de validação": {
-                    "summary": "Erro de validação",
-                    "value": {
-                      "detail": [
-                        {
-                          "type": "missing",
-                          "loc": [
-                            "query",
-                            "plano"
-                          ],
-                          "msg": "Field required",
-                          "input": null
-                        }
-                      ]
-                    }
-                  },
-                  "Cursor inválido": {
-                    "summary": "Cursor inválido",
-                    "value": {
-                      "detail": "Cursor inválido"
-                    }
-                  }
-                },
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ErroEmTexto"
-                    },
-                    {
-                      "$ref": "#/components/schemas/HTTPValidationError"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Consultas demais; tente em um minuto. O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e de parecidos dividem o mesmo limite). Espere e repita.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Consultas demais; tente em um minuto"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Serviço indisponível. Falha passageira de um serviço de apoio. Repita com espera crescente (1 s, 2 s, 4 s...); a repetição é segura nas rotas de leitura e, no `POST /v1/jobs`, com o mesmo `Idempotency-Key`.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "Serviço indisponível"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          },
-          "504": {
-            "description": "A busca demorou demais. A busca passou do tempo máximo. Repita; se persistir, simplifique a consulta.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "detail": "A busca demorou demais"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErroEmTexto"
-                }
-              }
-            }
-          }
-        },
-        "tags": [
-          "sistemas"
-        ]
       }
     },
     "/v1/correcoes/catalogo": {
@@ -4102,7 +3883,7 @@
               "mencao_editorial"
             ],
             "title": "Tipo",
-            "description": "Banner, bug, QR code e chamada de site são sobreposicao_grafica; mencao_editorial é a marca citada sem ação comercial."
+            "description": "Banner, bug e QR code de anunciante, e chamada de site que divulga anunciante, são sobreposicao_grafica; @ ou nome de pessoa nunca é marca; o nome ou o site do próprio programa e da emissora é mencao_editorial; mencao_editorial é a marca citada sem ação comercial."
           },
           "evidencias": {
             "items": {
@@ -4595,11 +4376,6 @@
               }
             ],
             "title": "Ate"
-          },
-          "visual": {
-            "type": "boolean",
-            "title": "Visual",
-            "default": false
           },
           "termo_da_foto": {
             "anyOf": [
@@ -5884,6 +5660,7 @@
             "type": "string",
             "maxLength": 255,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
             "title": "Nome"
           },
           "tamanho_bytes": {
@@ -5898,7 +5675,10 @@
           "programa": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 0,
+                "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
               },
               {
                 "type": "null"
@@ -6202,6 +5982,29 @@
         ],
         "title": "Opcao"
       },
+      "ParDeQuadro": {
+        "properties": {
+          "job": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "title": "Job"
+          },
+          "arquivo": {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*\\.jpg$",
+            "title": "Arquivo"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job",
+          "arquivo"
+        ],
+        "title": "ParDeQuadro"
+      },
       "Passada": {
         "properties": {
           "id": {
@@ -6350,6 +6153,24 @@
           "resumo"
         ],
         "title": "Pauta"
+      },
+      "PedidoDeQuadros": {
+        "properties": {
+          "quadros": {
+            "items": {
+              "$ref": "#/components/schemas/ParDeQuadro"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Quadros"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quadros"
+        ],
+        "title": "PedidoDeQuadros"
       },
       "Pessoa": {
         "properties": {
@@ -6689,6 +6510,49 @@
         ],
         "title": "Programa"
       },
+      "QuadroDoLote": {
+        "properties": {
+          "job": {
+            "type": "string",
+            "title": "Job"
+          },
+          "arquivo": {
+            "type": "string",
+            "title": "Arquivo"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "expira_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expira Em"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "arquivo",
+          "url",
+          "expira_em"
+        ],
+        "title": "QuadroDoLote"
+      },
       "Reproducao": {
         "properties": {
           "url": {
@@ -6824,7 +6688,14 @@
       "SemAparicao": {
         "properties": {
           "pessoa_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Pessoa Id"
           },
           "nome": {

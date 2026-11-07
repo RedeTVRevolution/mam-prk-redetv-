@@ -2,12 +2,13 @@
 
 import functools
 import json
+import logging
 import random
 import secrets
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -55,9 +56,11 @@ from api.idempotencia import (
     id_da_reserva,
     nova_reserva,
 )
+from api.itens_da_decupagem import contar_itens, objeto_dos_itens
 from api.jobs import (
     JANELA_DA_URL_DO_QUADRO,
-    PRAZO_DO_UPLOAD,
+    PRAZO_DA_URL_DE_UPLOAD,
+    TETO_DE_CANDIDATOS,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
@@ -84,13 +87,26 @@ from api.programas import (
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
-from api.sugestoes import ContagemDoTipo, Decisao, TipoDeSugestao, contar
+from api.texto_como_dado import id_conferido, tem_controle
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
 from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
+# O que a lista do acervo lê do Job: os campos do `JobResumido` (menos `enviado_por`, que vem
+# de `sistema` e `criado_por_email`), os obrigatórios do `Job` e os que `casa_com_o_filtro`
+# confere (#480). Fica de fora o que pesa: `cortes_ms`, os catálogos e o `sha256`.
+_CAMPOS_DA_LISTA = frozenset(
+    {
+        "id", "nome", "tamanho_bytes", "estado", "criado_por", "criado_em", "atualizado_em",
+        "codigo_falha", "duracao_s", "timecode_origem", "taxa_de_quadros", "capa", "programa",
+        "data_exibicao", "indexacao", "copia_bigquery", "etapa_atual", "etapas",
+        "reprocessamentos", "criado_por_email", "sistema", "palavras", "lixeira",
+    }
+)  # fmt: skip
+# Candidatos mínimos por leitura quando a página já está cheia e falta achar o próximo aprovado.
+LOTE_MINIMO_DE_CANDIDATOS = 25
 COLECAO_DE_CHAVES = "chaves_de_api"
 COLECAO_DE_WEBHOOKS = "webhooks"
 COLECAO_DE_IDEMPOTENCIA = "chaves_de_idempotencia"
@@ -100,7 +116,6 @@ COLECAO_DE_CORRECOES = "correcoes"
 COLECAO_DO_CATALOGO = "catalogo_de_pessoas"
 COLECAO_DO_CATALOGO_DE_MARCAS = "catalogo_de_marcas"
 COLECAO_DOS_PROGRAMAS = "programas"
-COLECAO_DAS_DECISOES_DE_SUGESTAO = "decisoes_de_sugestao"
 COLECAO_DE_CONFIGURACAO = "configuracao"
 COLECAO_DA_AUDITORIA = "auditoria"
 COLECAO_DA_REVISAO = "tempo_de_revisao"
@@ -110,30 +125,37 @@ DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 _LOTE_DE_LEITURA = 500
 
+log = logging.getLogger(__name__)
+
+
+def _documento(colecao: Any, id: str) -> Any:
+    """O documento `id` da coleção; o id não sai do próprio nível (`ValueError`)."""
+    return colecao.document(id_conferido(id))
+
 
 def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
     """Os documentos que existem entre os `ids` (sem repetir), lidos em lotes de
     `_LOTE_DE_LEITURA` com `get_all`."""
-    referencias = [colecao.document(i) for i in dict.fromkeys(ids)]
+    referencias = [_documento(colecao, i) for i in dict.fromkeys(ids)]
     for inicio in range(0, len(referencias), _LOTE_DE_LEITURA):
         lote = referencias[inicio : inicio + _LOTE_DE_LEITURA]
         yield from (d for d in cliente.get_all(lote) if d.exists)
 
 
 def objeto_do_proxy(job_id: str) -> str:
-    return f"{job_id}/proxy.mp4"
+    return f"{id_conferido(job_id)}/proxy.mp4"
 
 
 def objeto_do_audio(job_id: str) -> str:
-    return f"{job_id}/audio.wav"
+    return f"{id_conferido(job_id)}/audio.wav"
 
 
 def objeto_da_transcricao(job_id: str) -> str:
-    return f"{job_id}/transcricao.json"
+    return f"{id_conferido(job_id)}/transcricao.json"
 
 
 def prefixo_das_janelas(job_id: str) -> str:
-    return f"{job_id}/janelas/"
+    return f"{id_conferido(job_id)}/janelas/"
 
 
 def objeto_da_janela(job_id: str, indice: int) -> str:
@@ -141,24 +163,32 @@ def objeto_da_janela(job_id: str, indice: int) -> str:
 
 
 def objeto_da_leitura_da_tela(job_id: str) -> str:
-    return f"{job_id}/leitura_da_tela.json"
+    return f"{id_conferido(job_id)}/leitura_da_tela.json"
 
 
 def objeto_do_resultado_dos_objetos(job_id: str) -> str:
-    return f"{job_id}/objetos/florence.json"
+    return f"{id_conferido(job_id)}/objetos/florence.json"
 
 
 def objeto_da_decupagem(job_id: str) -> str:
-    return f"{job_id}.json"
+    return f"{id_conferido(job_id)}.json"
 
 
 def objeto_do_quadro(job_id: str, caminho: str) -> str:
     """`caminho` é o do campo `quadro` da Decupagem (`quadros/plano-0.jpg`)."""
-    return f"{job_id}/{caminho}"
+    if (
+        not caminho
+        or ".." in caminho
+        or caminho.startswith("/")
+        or "\\" in caminho
+        or tem_controle(caminho)
+    ):
+        raise ValueError("caminho de quadro inválido")
+    return f"{id_conferido(job_id)}/{caminho}"
 
 
 def objeto_da_copia_limpa(job_id: str) -> str:
-    return f"{job_id}/copia_limpa.mp4"
+    return f"{id_conferido(job_id)}/copia_limpa.mp4"
 
 
 TENTATIVAS_SOB_DISPUTA = 8
@@ -192,15 +222,67 @@ def _repetir_sob_disputa[T](
     raise ServicoIndisponivel("Firestore disputado: tente de novo")
 
 
+# Limites do Firestore depois de expandir a consulta em forma normal disjuntiva:
+# disjunções (o produto dos `in`) e componentes (filtros e ordenações de todas elas).
+MAXIMO_DE_DISJUNCOES = 30
+MAXIMO_DE_COMPONENTES = 100
+
+
+def meses_do_periodo(de: date, ate: date) -> list[str]:
+    """Os meses (`AAAA-MM`) que o período toca, do primeiro ao último."""
+    meses, ano, mes = [], de.year, de.month
+    while (ano, mes) <= (ate.year, ate.month):
+        meses.append(f"{ano:04d}-{mes:02d}")
+        ano, mes = (ano + 1, 1) if mes == 12 else (ano, mes + 1)
+    return meses
+
+
+def meses_para_o_firestore(filtro: FiltroDeJobs) -> list[str] | None:
+    """Os meses do período, se a consulta com `mes_exibicao in [...]` cabe nos limites do
+    Firestore; `None` se faltar uma ponta do período ou algum limite estourar (a lista cai
+    então no filtro de datas em Python)."""
+    if filtro.exibicao_de is None or filtro.exibicao_ate is None:
+        return None
+    meses = meses_do_periodo(filtro.exibicao_de, filtro.exibicao_ate)
+    disjuncoes = len(meses) * max(1, len(filtro.estados))
+    filtros = (
+        (filtro.programa is not None)
+        + (filtro.sistema is not None)
+        + bool(filtro.estados)
+        + bool(filtro.palavras)
+        + 1  # mes_exibicao
+    )
+    # Mais a ordem por `criado_em` e o desempate implícito pelo id: contar os dois deixa
+    # folga, e errar para menos faria o Firestore recusar a lista.
+    componentes = disjuncoes * (filtros + 2)
+    if disjuncoes > MAXIMO_DE_DISJUNCOES or componentes > MAXIMO_DE_COMPONENTES:
+        return None
+    return meses
+
+
+def listagem_por_mes_do_ambiente(ambiente: Mapping[str, str]) -> bool:
+    """`LISTAGEM_POR_MES`: ausente ou vazia, desligada; outro valor que não `true` ou
+    `false` levanta `ValueError`, em vez de deixar a lista no caminho de hoje sem aviso."""
+    valor = (ambiente.get("LISTAGEM_POR_MES") or "false").strip().lower()
+    if valor not in ("true", "false"):
+        raise ValueError(f"LISTAGEM_POR_MES inválida: {valor!r}")
+    return valor == "true"
+
+
 class RepositorioFirestore:
     def __init__(
-        self, cliente: firestore.Client, colecao: str = COLECAO_DE_JOBS
+        self,
+        cliente: firestore.Client,
+        colecao: str = COLECAO_DE_JOBS,
+        listagem_por_mes: bool = False,
     ) -> None:
         self._cliente = cliente
         self._colecao = cliente.collection(colecao)
+        # Só depois de `make gravar-mes-nos-jobs`: Job sem `mes_exibicao` some do filtro.
+        self._listagem_por_mes = listagem_por_mes
 
     def salvar(self, job: Job) -> None:
-        self._colecao.document(job.id).set(job.model_dump())
+        _documento(self._colecao, job.id).set(job.model_dump())
 
     def criar(self, job: Job) -> bool:
         # `Aborted` não diz que outro gravou: o documento estava travado e o `create`
@@ -208,7 +290,7 @@ class RepositorioFirestore:
         # (`AlreadyExists` para os outros).
         for rodada in range(TENTATIVAS_SOB_DISPUTA):
             try:
-                self._colecao.document(job.id).create(job.model_dump())
+                _documento(self._colecao, job.id).create(job.model_dump())
             except AlreadyExists:
                 return False
             except Aborted:
@@ -225,7 +307,7 @@ class RepositorioFirestore:
     ) -> Job | None:
         # Lê, confere a origem e grava na mesma transação: um cancelamento que
         # chegue no meio faz o Firestore repetir a transação, que então vê o novo estado.
-        referencia = self._colecao.document(job_id)
+        referencia = _documento(self._colecao, job_id)
 
         @firestore.transactional
         def trocar(transacao: Any) -> Job | None:
@@ -245,7 +327,7 @@ class RepositorioFirestore:
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:
         # Como `transitar`, mas quem decide é `mudar`, que o Firestore pode repetir.
-        referencia = self._colecao.document(job_id)
+        referencia = _documento(self._colecao, job_id)
 
         @firestore.transactional
         def trocar_na_transacao(transacao: Any) -> Job | None:
@@ -263,10 +345,10 @@ class RepositorioFirestore:
         return self._sob_disputa(trocar_na_transacao)
 
     def remover(self, job_id: str) -> None:
-        self._colecao.document(job_id).delete()
+        _documento(self._colecao, job_id).delete()
 
     def obter(self, job_id: str) -> Job | None:
-        doc = self._colecao.document(job_id).get()
+        doc = _documento(self._colecao, job_id).get()
         return Job(**(doc.to_dict() or {})) if doc.exists else None
 
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
@@ -283,11 +365,19 @@ class RepositorioFirestore:
         ).stream()
         return [Job(**(doc.to_dict() or {})) for doc in docs]
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        # Índice composto `criado_por` + `criado_em` em infra/modulos/mam/teto_de_criacao.tf (#371).
+        consulta: Any = self._colecao.where(
+            filter=FieldFilter("criado_por", "==", criado_por)
+        ).where(filter=FieldFilter("criado_em", ">=", desde))
+        return int(consulta.count().get()[0][0].value)
+
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
-        # estar no campo da ordem). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
-        # Os índices estão no infra/modulos/mam/main.tf.
+        # estar no campo da ordem; na ordem por envio, com `listagem_por_mes`, os meses do
+        # período em `mes_exibicao`). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
+        # Os índices estão no infra/modulos/mam/main.tf e no listagem_por_mes.tf.
         if filtro.sha256 is not None:
             return self._consultar_pelo_arquivo(filtro)
         if (
@@ -324,6 +414,9 @@ class RepositorioFirestore:
                 consulta = consulta.where(
                     filter=FieldFilter(campo, "<=", filtro.exibicao_ate.isoformat())
                 )
+        elif self._listagem_por_mes and (meses := meses_para_o_firestore(filtro)):
+            # Igualdade aceita a ordem por `criado_em`; o dia exato fica em `casa_com_o_filtro`.
+            consulta = consulta.where(filter=FieldFilter("mes_exibicao", "in", meses))
         return self._ordenar_e_ler(consulta, campo, filtro)
 
     def _consultar_a_lixeira(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
@@ -338,14 +431,48 @@ class RepositorioFirestore:
         # O desempate implícito é o id do documento, na mesma direção da ordem.
         consulta = consulta.order_by(campo, direction=firestore.Query.DESCENDING)
         if filtro.cursor is not None:
-            ancora = self._colecao.document(filtro.cursor).get()
+            ancora = _documento(self._colecao, filtro.cursor).get()
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
-        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
-        return PaginaDeJobs.de(
-            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro.limite
-        )
+        if filtro.so_os_da_lista:
+            consulta = consulta.select(sorted(_CAMPOS_DA_LISTA | {campo.split(".")[0]}))
+        if filtro.limite is None:
+            # Lista inteira: o consumidor interno não segue cursor, então não há teto.
+            jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+            return PaginaDeJobs([j for j in jobs if casa_com_o_filtro(j, filtro)])
+        return self._ler_em_lotes(consulta, filtro, filtro.limite)
+
+    @staticmethod
+    def _ler_em_lotes(consulta: Any, filtro: FiltroDeJobs, limite: int) -> PaginaDeJobs:
+        # Lotes com `.limit()` até haver um aprovado além da página (a prova de que há mais).
+        # O cursor é o último candidato examinado que fica na página, aprovado ou não: o
+        # próximo pedido recomeça logo depois dele, sem pular nem repetir. No teto, devolve
+        # o que tem (talvez nada) e o cursor do último examinado.
+        aprovados: list[Job] = []
+        examinados = 0
+        ultimo_id: str | None = None
+        ultimo_doc: Any = None
+        while examinados < TETO_DE_CANDIDATOS:
+            pedir = min(
+                max(limite + 1 - len(aprovados), LOTE_MINIMO_DE_CANDIDATOS),
+                TETO_DE_CANDIDATOS - examinados,
+            )
+            corrente = (
+                consulta if ultimo_doc is None else consulta.start_after(ultimo_doc)
+            )
+            docs = list(corrente.limit(pedir).stream())
+            for doc in docs:
+                job = Job(**(doc.to_dict() or {}))
+                if casa_com_o_filtro(job, filtro):
+                    if len(aprovados) == limite:
+                        return PaginaDeJobs(aprovados, ultimo_id)
+                    aprovados.append(job)
+                ultimo_id, ultimo_doc = job.id, doc
+                examinados += 1
+            if len(docs) < pedir:
+                return PaginaDeJobs(aprovados)
+        return PaginaDeJobs(aprovados, ultimo_id)
 
     def _consultar_pelo_catalogo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # Só um `array_contains` (índice automático) vai ao Firestore: lê os vídeos da
@@ -389,10 +516,10 @@ class RepositorioDeChavesFirestore:
         self._colecao = cliente.collection(colecao)
 
     def salvar(self, registro: RegistroDeChave) -> None:
-        self._colecao.document(registro.id).set(registro.model_dump())
+        _documento(self._colecao, registro.id).set(registro.model_dump())
 
     def obter(self, chave_id: str) -> RegistroDeChave | None:
-        doc = self._colecao.document(chave_id).get()
+        doc = _documento(self._colecao, chave_id).get()
         return RegistroDeChave(**(doc.to_dict() or {})) if doc.exists else None
 
     def listar_por_sistema(self, sistema: str) -> list[RegistroDeChave]:
@@ -425,7 +552,7 @@ class RepositorioDeChavesFirestore:
             ]
             if len(ativas) >= maximo_ativas:
                 raise LimiteDeChavesAtivas(registro.sistema)
-            transacao.set(self._colecao.document(registro.id), registro.model_dump())
+            transacao.set(_documento(self._colecao, registro.id), registro.model_dump())
 
         gravar(self._cliente.transaction())
 
@@ -517,7 +644,7 @@ class ListasDaBuscaFirestore:
         return str(referencia.id)
 
     def ler(self, id: str) -> dict[str, Any] | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return (doc.to_dict() or {}) if doc.exists else None
 
 
@@ -530,10 +657,10 @@ class RepositorioDeWebhooksFirestore:
         self._colecao = cliente.collection(colecao)
 
     def salvar(self, registro: RegistroDeWebhook) -> None:
-        self._colecao.document(registro.sistema).set(registro.model_dump())
+        _documento(self._colecao, registro.sistema).set(registro.model_dump())
 
     def obter(self, sistema: str) -> RegistroDeWebhook | None:
-        doc = self._colecao.document(sistema).get()
+        doc = _documento(self._colecao, sistema).get()
         return RegistroDeWebhook(**(doc.to_dict() or {})) if doc.exists else None
 
 
@@ -546,7 +673,7 @@ class RepositorioDePapeisFirestore:
         self._colecao = cliente.collection(colecao)
 
     def ler(self, uid: str) -> DocumentoDePapeis:
-        doc = self._colecao.document(uid).get()
+        doc = _documento(self._colecao, uid).get()
         dados = (doc.to_dict() or {}) if doc.exists else {}
         papeis: list[Papel] | None = None
         # Sem `papeis` (só a marca `desativada`): a conta segue sem papéis guardados.
@@ -560,13 +687,13 @@ class RepositorioDePapeisFirestore:
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         # merge: não apaga a marca `desativada`.
-        self._colecao.document(uid).set({"papeis": papeis}, merge=True)
+        _documento(self._colecao, uid).set({"papeis": papeis}, merge=True)
 
     def desativada(self, uid: str) -> bool:
         return self.ler(uid).desativada
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
-        self._colecao.document(uid).set({"desativada": desativada}, merge=True)
+        _documento(self._colecao, uid).set({"desativada": desativada}, merge=True)
 
 
 class ContasIdentityPlatform:
@@ -686,7 +813,7 @@ class CatalogoFirestore:
         self._colecao = cliente.collection(colecao)
 
     def _gravar(self, pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
-        self._colecao.document(pessoa.id).set(
+        _documento(self._colecao, pessoa.id).set(
             {
                 **pessoa.model_dump(exclude={"id"}),
                 "nomes_de_busca": nomes_de_busca(pessoa),
@@ -700,7 +827,7 @@ class CatalogoFirestore:
         return PessoaDoCatalogo(id=id, **dados)
 
     def obter(self, id: str) -> PessoaDoCatalogo | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return self._pessoa(id, doc.to_dict() or {}) if doc.exists else None
 
     def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
@@ -787,7 +914,7 @@ class CatalogoFirestore:
         return self._gravar(atual.model_copy(update={"rostos": list(rostos)}))
 
     def apagar(self, id: str) -> None:
-        referencia = self._colecao.document(id)
+        referencia = _documento(self._colecao, id)
         if not referencia.get().exists:
             raise PessoaInexistente(id)
         referencia.delete()
@@ -811,7 +938,7 @@ class ProgramasFirestore:
         return sorted(lidos, key=lambda p: p.nome.casefold())
 
     def obter(self, id: str) -> Programa | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
 
     def _conferir_nome(self, programa: Programa) -> None:
@@ -825,7 +952,7 @@ class ProgramasFirestore:
         self._conferir_nome(programa)
         # Com merge, o campo que não vai fica como está: o andamento é da tarefa.
         fora = {"id"} if com_renomeacao else {"id", "renomeacao"}
-        self._colecao.document(programa.id).set(
+        _documento(self._colecao, programa.id).set(
             programa.model_dump(exclude=fora), merge=True
         )
 
@@ -833,7 +960,7 @@ class ProgramasFirestore:
         self, id: str, mudar: Callable[[Programa], Programa | None]
     ) -> Programa | None:
         # Como `RepositorioFirestore.trocar`: `mudar` decide, e o Firestore pode repeti-la.
-        referencia = self._colecao.document(id)
+        referencia = _documento(self._colecao, id)
 
         @firestore.transactional
         def trocar_na_transacao(transacao: Any) -> Programa | None:
@@ -860,8 +987,8 @@ class ProgramasFirestore:
         # Os Jobs estão no mesmo Firestore: a transação lê o programa e o Job juntos.
         if not isinstance(jobs, RepositorioFirestore):
             raise TypeError("os Jobs precisam estar no Firestore")
-        programa_ref = self._colecao.document(programa_id)
-        job_ref = self._cliente.collection(jobs._colecao.id).document(job_id)
+        programa_ref = _documento(self._colecao, programa_id)
+        job_ref = _documento(self._cliente.collection(jobs._colecao.id), job_id)
 
         @firestore.transactional
         def levar(transacao: Any) -> Job | None:
@@ -887,9 +1014,9 @@ class ProgramasFirestore:
         return resultado
 
     def apagar(self, id: str) -> None:
-        if not self._colecao.document(id).get().exists:
+        if not _documento(self._colecao, id).get().exists:
             raise ProgramaInexistente(id)
-        self._colecao.document(id).delete()
+        _documento(self._colecao, id).delete()
 
 
 class CatalogoDeMarcasFirestore:
@@ -908,7 +1035,7 @@ class CatalogoDeMarcasFirestore:
         return MarcaDoCatalogo(id=id, **dados)
 
     def obter(self, id: str) -> MarcaDoCatalogo | None:
-        doc = self._colecao.document(id).get()
+        doc = _documento(self._colecao, id).get()
         return self._marca(id, doc.to_dict() or {}) if doc.exists else None
 
     def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
@@ -934,7 +1061,7 @@ class CatalogoDeMarcasFirestore:
         return [m for m in self._lidas() if m.lixeira is not None]
 
     def _gravar(self, marca: MarcaDoCatalogo) -> MarcaDoCatalogo:
-        self._colecao.document(marca.id).set(
+        _documento(self._colecao, marca.id).set(
             {
                 **marca.model_dump(exclude={"id"}),
                 "nomes_de_busca": nomes_de_busca_da_marca(marca),
@@ -951,7 +1078,7 @@ class CatalogoDeMarcasFirestore:
         return self._gravar(atual.model_copy(update={"lixeira": envio}))
 
     def apagar(self, id: str) -> None:
-        referencia = self._colecao.document(id)
+        referencia = _documento(self._colecao, id)
         if not referencia.get().exists:
             raise MarcaInexistente(id)
         referencia.delete()
@@ -997,7 +1124,7 @@ class TiposDeObjetoFirestore:
 
     def registrar(self, job_id: str, contagens: Mapping[str, int]) -> None:
         novas = somar_por_chave(contagens)
-        referencia = self._por_job.document(job_id)
+        referencia = _documento(self._por_job, job_id)
 
         # Ler a contribuição antiga e aplicar o delta na mesma transação: dois reindexares
         # do mesmo job ao mesmo tempo não somam a diferença duas vezes.
@@ -1039,12 +1166,6 @@ class TiposDeObjetoFirestore:
         vivos.sort(key=lambda d: (-d["total"], d["chave"]))
         return [{"tipo": d["tipo"], "ocorrencias": d["total"]} for d in vivos[:limite]]
 
-    def conhecidos(self) -> list[str]:
-        """A coleção inteira: a busca corta em `TETO_DA_BUSCA_DE_TIPOS` pela ordem da
-        chave, e a regra das sugestões precisa de todos."""
-        achados = (d.to_dict() or {} for d in self._colecao.stream())
-        return [d["tipo"] for d in achados if d.get("total", 0) > 0 and d.get("tipo")]
-
 
 class ReferenciasStorage:
     """As fotos de referência, no bucket delas (`BUCKET_REFERENCIAS`)."""
@@ -1080,7 +1201,7 @@ class RepositorioDeCorrecoesFirestore:
 
     def acrescentar(self, correcao: Correcao) -> None:
         try:
-            self._colecao.document(correcao.id).create(correcao.model_dump())
+            _documento(self._colecao, correcao.id).create(correcao.model_dump())
         except AlreadyExists:
             raise CorrecaoJaExiste(correcao.id) from None
 
@@ -1106,38 +1227,6 @@ class RepositorioDeCorrecoesFirestore:
             filter=FieldFilter("job_id", "==", job_id)
         ).stream():
             doc.reference.delete()
-
-
-class RepositorioDeSugestoesFirestore:
-    """Uma decisão do editor por vídeo e sugestão (a chave é `<job>:<sugestão>`): decidir
-    de novo a mesma sugestão troca a decisão, não soma outra."""
-
-    def __init__(
-        self,
-        cliente: firestore.Client,
-        colecao: str = COLECAO_DAS_DECISOES_DE_SUGESTAO,
-    ) -> None:
-        self._colecao = cliente.collection(colecao)
-
-    def registrar(
-        self, job_id: str, sugestao_id: str, tipo: TipoDeSugestao, decisao: Decisao
-    ) -> None:
-        self._colecao.document(f"{job_id}:{sugestao_id}").set(
-            {
-                "job_id": job_id,
-                "sugestao_id": sugestao_id,
-                "tipo": tipo,
-                "decisao": decisao,
-            }
-        )
-
-    def decididas(self, job_id: str) -> set[str]:
-        consulta = self._colecao.where(filter=FieldFilter("job_id", "==", job_id))
-        return {(d.to_dict() or {})["sugestao_id"] for d in consulta.stream()}
-
-    def contagem(self) -> dict[str, ContagemDoTipo]:
-        docs = [d.to_dict() or {} for d in self._colecao.stream()]
-        return contar((d["tipo"], d["decisao"]) for d in docs)
 
 
 class RepositorioDeAprovacaoFirestore:
@@ -1173,7 +1262,7 @@ class RepositorioDeAuditoriaFirestore:
         self._colecao = cliente.collection(colecao)
 
     def acrescentar(self, registro: RegistroDeAuditoria) -> None:
-        self._colecao.document(registro.id).create(registro.model_dump())
+        _documento(self._colecao, registro.id).create(registro.model_dump())
 
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
         # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os
@@ -1200,7 +1289,7 @@ class RepositorioDeAuditoriaFirestore:
         # O desempate implícito é o id do documento, na mesma direção da ordem.
         consulta = consulta.order_by("quando", direction=firestore.Query.DESCENDING)
         if filtro.cursor is not None:
-            ancora = self._colecao.document(filtro.cursor).get()
+            ancora = _documento(self._colecao, filtro.cursor).get()
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
@@ -1223,7 +1312,10 @@ class RepositorioDeRevisaoFirestore:
         self._colecao = cliente.collection(colecao)
 
     def aplicar(self, pulso: Pulso, limite_s: float) -> Medida:
-        referencia = self._colecao.document(f"{pulso.job_id}:{pulso.uid}")
+        # Cada parte conferida à parte: juntas podem passar do teto de um id só.
+        referencia = self._colecao.document(
+            f"{id_conferido(pulso.job_id)}:{id_conferido(pulso.uid)}"
+        )
 
         @firestore.transactional
         def gravar(transacao: Any) -> Medida:
@@ -1362,6 +1454,21 @@ class AssinaturaPeloIam:
 assinatura_pelo_iam = AssinaturaPeloIam()
 
 
+def _gravar_os_itens(
+    cliente: ClienteStorage, bucket: str, job_id: str, conteudo: str
+) -> None:
+    """A contagem de itens por tipo (#455) vai junto com a decupagem e é refeita a cada
+    gravação, reprocessamento incluído. Decupagem ilegível fica sem contagem: a taxa a pula."""
+    try:
+        itens = contar_itens(conteudo.encode())
+    except (ValueError, TypeError, KeyError):
+        log.warning("decupagem de %s sem contagem de itens: ilegível", job_id)
+        return
+    cliente.bucket(bucket).blob(objeto_dos_itens(job_id)).upload_from_string(
+        itens.em_json(), content_type="application/json"
+    )
+
+
 class DecupagensStorage:
     """A Decupagem no Cloud Storage e o proxy que o Gemini lê: o mesmo adaptador grava e lê."""
 
@@ -1379,6 +1486,7 @@ class DecupagensStorage:
         self._cliente.bucket(self._decupagens).blob(
             objeto_da_decupagem(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
+        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
@@ -1547,6 +1655,7 @@ class ObjetosStorage:
         self._cliente.bucket(self._decupagens).blob(
             objeto_da_decupagem(job_id)
         ).upload_from_string(conteudo, content_type="application/json")
+        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
 
     def gravar_texto(self, objeto: str, conteudo: str) -> None:
         """Um JSON solto no bucket das decupagens (a medição do Florence-2, #329)."""
@@ -1634,13 +1743,15 @@ class ArmazenamentoStorage:
         )
 
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
-        blob = self._cliente.bucket(self._bucket).blob(job_id)
+        blob = self._cliente.bucket(self._bucket).blob(id_conferido(job_id))
         url: str = blob.generate_signed_url(
             version="v4",
-            expiration=PRAZO_DO_UPLOAD,
+            expiration=PRAZO_DA_URL_DE_UPLOAD,
             method="POST",
             content_type=tipo,
             headers={
+                # Objeto escrito uma vez só (#369): com o objeto já existente, a abertura leva 412.
+                "x-goog-if-generation-match": "0",
                 "x-goog-resumable": "start",
                 "x-upload-content-length": str(tamanho_bytes),
             },
@@ -1651,7 +1762,7 @@ class ArmazenamentoStorage:
     def cancelar_upload(self, job_id: str) -> None:
         """Apaga o objeto do Job da quarentena; o upload pode nem ter começado."""
         try:
-            self._cliente.bucket(self._bucket).blob(job_id).delete()
+            self._cliente.bucket(self._bucket).blob(id_conferido(job_id)).delete()
         except NotFound:
             pass
 

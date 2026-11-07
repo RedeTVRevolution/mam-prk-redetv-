@@ -10,6 +10,7 @@ from api.copia_bigquery import (
     CopiaEmMemoria,
     LinhaDoMomento,
     PessoaDoMomento,
+    _json_da_linha,
     linhas_da_decupagem,
 )
 from api.copiar_para_bigquery import copiar_jobs
@@ -58,7 +59,9 @@ def test_uma_linha_por_momento_com_pessoa_marca_e_texto() -> None:
     assert all(x.job_id == "j1" and x.programa == "Exemplo" for x in linhas)
     assert all(x.data_de_exibicao == DIA for x in linhas)
     com_pessoa = [x for x in linhas if x.pessoas]
-    assert com_pessoa and all(p.id and p.nome for x in com_pessoa for p in x.pessoas)
+    assert com_pessoa and all(
+        p.id and not p.nome for x in com_pessoa for p in x.pessoas
+    )
     for c, linha in zip(decupagem.comerciais, por_tipo["comercial"], strict=True):
         assert (linha.marca, linha.tipo_de_insercao) == (c.marca, c.tipo)
         assert (linha.inicio_ms, linha.fim_ms) == (c.inicio_ms, c.fim_ms)
@@ -237,9 +240,28 @@ def test_aparicoes_e_mencoes_viram_linhas_separadas_por_pessoa() -> None:
         for x in linhas
         if x.tipo in ("aparicao", "mencao_na_fala", "mencao_no_texto")
     }
-    dona = PessoaDoMomento("c1", "Sabrina Sato")
+    dona = PessoaDoMomento("c1")
     assert das_pessoas == {
         ("aparicao", 1000, 4000, (dona,)),
         ("mencao_na_fala", 5000, 6000, (dona,)),
         ("mencao_no_texto", 7000, 8000, (dona,)),
     }
+
+
+def test_as_linhas_nao_levam_o_nome_da_pessoa() -> None:
+    pessoa = Pessoa(
+        id="p1",
+        nome="Sabrina Sato",
+        catalogo_id="c1",
+        estado_do_nome="confirmado",
+        na_imagem=[Aparicao(inicio_ms=1000, fim_ms=4000, evidencia="rosto")],
+        citada_na_fala=[],
+        citada_no_texto=[],
+    )
+    decupagem = DECUPAGEM.model_copy(update={"pessoas": [pessoa]})
+
+    linhas = linhas_da_decupagem("j1", decupagem, "Exemplo", DIA, BASE)
+
+    assert any(x.pessoas for x in linhas)
+    assert "Sabrina" not in json.dumps([_json_da_linha(x) for x in linhas])
+    assert all(p.nome == "" for x in linhas for p in x.pessoas)

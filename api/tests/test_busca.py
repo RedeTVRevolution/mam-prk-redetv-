@@ -6,7 +6,7 @@ import random
 import threading
 import time
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -18,12 +18,12 @@ from api.auth import Usuario
 from api.busca import (
     TETO_DA_LISTA_BYTES,
     TETO_DE_ASSINATURAS,
+    TETO_DE_CONSULTAS_AO_INDICE,
     TETO_DE_REGISTROS,
     TETO_DO_RANKING,
     Ajustes,
     Busca,
     BuscaCancelada,
-    EmbeddingDaConsulta,
     Entendida,
     Facetas,
     ListaDaBusca,
@@ -31,6 +31,7 @@ from api.busca import (
     Ranking,
     RankingEmOrdem,
     VideoGuardado,
+    filtros_do_servidor,
 )
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
@@ -44,6 +45,7 @@ from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import CursorInvalido, Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
+from api.programas import NomesDosProgramas, Programa, ProgramasEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import TransporteFalso
@@ -136,16 +138,15 @@ class Mundo:
     def busca(
         self,
         ranking: Ranking | None = None,
-        embedding: EmbeddingDaConsulta | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
         armor: ModelArmor | None = None,
+        programas: Collection[str] = PROGRAMAS,
     ) -> Busca:
         return Busca(
-            embedding=embedding,
             transporte=self.transporte,
             catalogo=self.catalogo,
             armor=armor or ModelArmorEmMemoria(),
-            programas=PROGRAMAS,
+            programas=programas,
             indice=self.indice,
             ranking=ranking or RankingEmOrdem(),
             repositorio=self.jobs,
@@ -155,11 +156,31 @@ class Mundo:
 
     def com(self, j: Job, *registros: Registro) -> None:
         self.jobs.salvar(j)
-        self.indice.gravar(j.id, list(registros))
+        # Como a indexação: o objeto leva o sistema do Job (#483).
+        self.indice.gravar(
+            j.id, [replace(r, sistema=r.sistema or j.sistema) for r in registros]
+        )
 
 
 def buscar(m: Mundo, texto: str = "vestido vermelho da Sabrina Sato", **kw: Any) -> Any:
     return m.busca().buscar(texto, **kw)
+
+
+def test_uma_busca_le_a_colecao_de_programas_uma_vez() -> None:
+    class ProgramasContados(ProgramasEmMemoria):
+        leituras = 0
+
+        def listar(self) -> list[Programa]:
+            self.leituras += 1
+            return super().listar()
+
+    repositorio = ProgramasContados(
+        [Programa(id=f"p{i}", nome=n, perfil="") for i, n in enumerate(PROGRAMAS)]
+    )
+    m = Mundo(pedido(texto_livre="vestido"))
+    busca = m.busca(programas=NomesDosProgramas(repositorio))
+    busca.buscar("vestido vermelho da Sabrina Sato")
+    assert repositorio.leituras == 1
 
 
 def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> None:
@@ -203,6 +224,93 @@ def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> No
     # Sem chave de sistema (a web), a busca não assina: leva só o caminho do quadro.
     assert momento.quadro == "quadros/objeto-0.jpg"
     assert momento.quadro_url is None
+    assert resultado.sem_aparicoes == []
+
+
+OUTROS_OBJETOS = [("chapéu", "azul"), ("bolsa", "preto"), ("sapato", "branco")]
+
+
+def _mundo_de_varias_clausulas(indice: IndiceEspia | None = None) -> Mundo:
+    """Quatro cláusulas, uma consulta ao índice cada: mais que o teto."""
+    outros = [{**VESTIDO, "tipo": t, "cor_base": c} for t, c in OUTROS_OBJETOS]
+    m = Mundo(pedido(pessoas=["Sabrina Sato"], objetos=[VESTIDO, *outros]))
+    m.indice = indice or m.indice
+    dos_outros = [
+        objeto(
+            f"j{n % 2 + 1}:objeto:{n + 1}",
+            f"j{n % 2 + 1}",
+            40_000 + 20_000 * n,
+            50_000 + 20_000 * n,
+            dono=m.sabrina,
+            tipo_do_objeto=t,
+            cor_base=[c],
+            cor=c,
+            texto=f"{t} {c}",
+        )
+        for n, (t, c) in enumerate(OUTROS_OBJETOS)
+    ]
+    m.com(
+        job("j1"),
+        objeto("j1:objeto:0", "j1", 12_000, 19_000, dono=m.sabrina),
+        *(r for r in dos_outros if r.job_id == "j1"),
+    )
+    m.com(job("j2"), *(r for r in dos_outros if r.job_id == "j2"))
+    return m
+
+
+def test_as_clausulas_vao_ao_indice_ao_mesmo_tempo_e_com_limite() -> None:
+    class IndiceLento(IndiceEspia):
+        """As primeiras consultas só passam quando o teto inteiro está em voo."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.em_voo = 0
+            self.pico = 0
+            self.chegadas = 0
+            self.trava = threading.Lock()
+            self.turma = threading.Barrier(TETO_DE_CONSULTAS_AO_INDICE, timeout=5)
+
+        def buscar(self, consulta: Consulta) -> list[Registro]:
+            with self.trava:
+                self.em_voo += 1
+                self.pico = max(self.pico, self.em_voo)
+                self.chegadas += 1
+                da_turma = self.chegadas <= TETO_DE_CONSULTAS_AO_INDICE
+            try:
+                if da_turma:
+                    self.turma.wait()
+                return super().buscar(consulta)
+            finally:
+                with self.trava:
+                    self.em_voo -= 1
+
+    lento = IndiceLento()
+    resultado = buscar(_mundo_de_varias_clausulas(lento))
+    assert len(lento.consultas) > TETO_DE_CONSULTAS_AO_INDICE
+    assert lento.pico == TETO_DE_CONSULTAS_AO_INDICE
+    assert resultado.videos
+
+
+def test_o_resultado_em_paralelo_e_o_da_execucao_em_serie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    em_paralelo = buscar(_mundo_de_varias_clausulas())
+    monkeypatch.setattr("api.busca.TETO_DE_CONSULTAS_AO_INDICE", 1)
+    em_serie = buscar(_mundo_de_varias_clausulas())
+    assert [v.n_momentos for v in em_paralelo.videos] == [3, 1]
+    assert em_paralelo.videos == em_serie.videos
+    assert em_paralelo.sem_aparicoes == em_serie.sem_aparicoes
+
+
+def test_se_uma_consulta_ao_indice_falha_o_erro_sobe_como_em_serie() -> None:
+    class IndiceQueFalha(IndiceEspia):
+        def buscar(self, consulta: Consulta) -> list[Registro]:
+            super().buscar(consulta)
+            raise RuntimeError("índice fora do ar")
+
+    indice = IndiceQueFalha()
+    with pytest.raises(RuntimeError, match="índice fora do ar"):
+        buscar(_mundo_de_varias_clausulas(indice))
 
 
 def test_dois_momentos_a_2_s_pelo_mesmo_motivo_viram_um_trecho_e_a_5_s_ficam_dois() -> (
@@ -447,6 +555,69 @@ def test_sem_aparicoes_diz_quantas_mencoes_ha_na_fala_e_na_tela() -> None:
     )
 
 
+def test_pessoa_fora_do_catalogo_em_consulta_composta_volta_vazia_com_aviso() -> None:
+    fulano = {**VESTIDO, "pessoa": "Fulano"}
+    m = Mundo(pedido(pessoas=["Fulano"], objetos=[fulano]))
+    m.com(
+        job("j1"),
+        objeto("j1:objeto:0", "j1", 0, 1_000, dono="outra"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="o Fulano chegou",
+        ),
+        Registro(
+            id="f2",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=5_000,
+            fim_ms=6_000,
+            texto="Fulano de novo",
+        ),
+    )
+
+    resultado = buscar(m, "Fulano de vestido vermelho")
+
+    assert resultado.videos == []
+    (vazio,) = resultado.sem_aparicoes
+    assert (vazio.pessoa_id, vazio.nome) == (None, "Fulano")
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (2, 0)
+
+
+def test_ver_as_mencoes_de_um_nome_fora_do_catalogo_traz_a_fala() -> None:
+    fulano = {**VESTIDO, "pessoa": "Fulano"}
+    m = Mundo(pedido(pessoas=["Fulano"], objetos=[fulano]))
+    m.com(
+        job("j1"),
+        objeto("j1:objeto:0", "j1", 0, 1_000, dono="outra"),
+        _fala("f1", "o Fulano chegou"),
+    )
+
+    resultado = buscar(
+        m,
+        "Fulano de vestido vermelho",
+        ajustes=Ajustes(evidencias=("imagem", "citada", "fala")),
+    )
+
+    assert [mo.motivo for v in resultado.videos for mo in v.momentos] == [
+        "Fala: 'o Fulano chegou'"
+    ]
+
+
+def test_objeto_sem_pessoa_continua_trazendo_os_momentos() -> None:
+    sem_dono = {**VESTIDO, "pessoa": None}
+    m = Mundo(pedido(objetos=[sem_dono]))
+    m.com(job("j1"), objeto("j1:objeto:0", "j1", 0, 1_000, dono="outra"))
+
+    resultado = buscar(m, "vestido vermelho")
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    assert resultado.sem_aparicoes == []
+
+
 def test_sem_aparicoes_vem_mesmo_com_outros_resultados_e_no_programa_pedido() -> None:
     m = Mundo(
         pedido(pessoas=["Sabrina Sato"], programa="Leo Dias", texto_livre="praia")
@@ -567,7 +738,6 @@ def cliente(
     maximo_por_minuto: int = 30,
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     indice: IndiceEmMemoria | None = None,
-    embedding_da_consulta: EmbeddingDaConsulta | None = None,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     eventos: Eventos | None = None,
 ) -> tuple[TestClient, Mundo]:
@@ -587,7 +757,6 @@ def cliente(
         armor=ModelArmorEmMemoria(),
         busca_por_minuto=maximo_por_minuto,
         tempo_maximo_da_busca_s=tempo_maximo_s,
-        embedding_da_consulta=embedding_da_consulta,
         limites_da_imagem=limites_da_imagem,
         eventos=eventos,
     )
@@ -1075,6 +1244,14 @@ def test_sem_periodo_tira_o_periodo_entendido() -> None:
     assert resultado.entendida.desde is None
 
 
+def test_consulta_de_ate_300_caracteres_passa_e_de_301_responde_422() -> None:
+    c, _ = cliente(["consulta"], pedido(texto_livre="a"))
+    ok = c.get("/v1/busca", params={"q": "a" * 300}, headers=AUTORIZACAO)
+    longa = c.get("/v1/busca", params={"q": "a" * 301}, headers=AUTORIZACAO)
+    assert ok.status_code == 200
+    assert longa.status_code == 422
+
+
 def test_periodo_com_inicio_depois_do_fim_responde_422() -> None:
     c, _ = cliente(["consulta"], pedido(texto_livre="vestido"))
     r = c.get(
@@ -1410,19 +1587,7 @@ def test_a_rota_devolve_facetas_com_e_sem_filtro() -> None:
     )
 
 
-class EmbeddingDeTexto:
-    def __init__(self, vetor: list[float] | Exception) -> None:
-        self.vetor = vetor
-        self.textos: list[str] = []
-
-    def vetor_do_texto(self, texto: str) -> list[float]:
-        self.textos.append(texto)
-        if isinstance(self.vetor, Exception):
-            raise self.vetor
-        return self.vetor
-
-
-def plano(id: str, vetor: list[float] | None, descricao: str = "plano") -> Registro:
+def plano(id: str, descricao: str = "plano") -> Registro:
     return Registro(
         id=id,
         tipo="plano",
@@ -1431,90 +1596,17 @@ def plano(id: str, vetor: list[float] | None, descricao: str = "plano") -> Regis
         fim_ms=int(id[-1]) * 10_000 + 5_000,
         descricao=descricao,
         quadro=f"quadros/{id}.jpg",
-        vetor_do_quadro=vetor,
     )
 
 
-def mundo_visual(*respostas: str) -> Mundo:
+def mundo_de_planos(*respostas: str) -> Mundo:
     m = Mundo(*(respostas or (pedido(texto_livre="pista molhada"),) * 4))
     m.com(
         job("j1"),
-        plano("j1:plano:1", [1.0, 0.0], "rua escura"),
-        plano("j1:plano:2", [0.0, 1.0], "estúdio"),
-        plano("j1:plano:3", None, "sem vetor"),
+        plano("j1:plano:1", "rua escura"),
+        plano("j1:plano:2", "estúdio"),
     )
     return m
-
-
-def test_no_modo_visual_o_vetor_do_quadro_entra_na_fusao() -> None:
-    m = mundo_visual()
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-
-    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
-
-    assert embedding.textos == ["pista molhada"]
-    # Nenhuma descrição cita "pista molhada": só o vetor do quadro achou o plano.
-    assert [mo.inicio_ms for v in r.videos for mo in v.momentos] == [10_000]
-    assert r.entendida.visual is True
-    assert r.videos[0].momentos[0].quadro == "quadros/j1:plano:1.jpg"
-    com_vetor = [c for c in m.indice.consultas if c.vetor_do_quadro]
-    assert com_vetor and all(c.filtros.tipo == "plano" for c in com_vetor)
-
-
-def test_sem_o_modo_visual_nao_ha_vetor_nem_chamada_ao_embedding() -> None:
-    m = mundo_visual()
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-
-    r = m.busca(embedding=embedding).buscar("pista molhada")
-
-    assert embedding.textos == []
-    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
-    assert r.entendida.visual is False
-
-
-@pytest.mark.parametrize("embedding", [None, EmbeddingDeTexto(ConnectionError("x"))])
-def test_indice_desligado_ou_embedding_fora_a_busca_fica_como_hoje(
-    embedding: EmbeddingDeTexto | None,
-) -> None:
-    m = mundo_visual()
-    esperado = buscar(mundo_visual(), "pista molhada")
-
-    r = m.busca(embedding=embedding).buscar("pista molhada", visual=True)
-
-    assert r.entendida.visual is False
-    assert r.videos == esperado.videos
-    assert all(c.vetor_do_quadro is None for c in m.indice.consultas)
-
-
-@pytest.mark.parametrize("visual", [True, False])
-def test_a_rota_leva_o_modo_visual_a_busca(visual: bool) -> None:
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-    c, m = cliente(
-        ["consulta"],
-        *[pedido(texto_livre="pista molhada")] * 2,
-        embedding_da_consulta=embedding,
-    )
-    m.com(job("j1"), plano("j1:plano:1", [1.0, 0.0]))
-    params = {"q": "pista molhada"} | ({"visual": "true"} if visual else {})
-
-    resposta = c.get("/v1/busca", params=params, headers=AUTORIZACAO)
-
-    assert resposta.status_code == 200
-    assert resposta.json()["entendida"]["visual"] is visual
-    assert embedding.textos == (["pista molhada"] if visual else [])
-    if visual:
-        assert resposta.json()["videos"][0]["momentos"][0]["tipo"] == "plano"
-
-
-def test_o_vetor_sai_do_texto_livre_e_a_clausula_visual_so_leva_o_vetor() -> None:
-    m = mundo_visual(pedido(texto_livre="pista molhada", programa="TV Fama"))
-    embedding = EmbeddingDeTexto([1.0, 0.0])
-
-    m.busca(embedding=embedding).buscar("pista molhada no TV Fama", visual=True)
-
-    assert embedding.textos == ["pista molhada"]
-    [visual] = [c for c in m.indice.consultas if c.vetor_do_quadro]
-    assert visual.texto is None and visual.significado is None
 
 
 def _planos(m: Mundo, *descricoes: str) -> None:
@@ -1620,7 +1712,10 @@ def test_a_frase_nao_se_repete_quando_o_modelo_a_poe_no_texto_livre() -> None:
     m = Mundo(pedido(texto_livre="Vestido Amarelo"))
     _planos(m, *FRASES)
     buscar(m, '"vestido amarelo"')
-    assert {c.texto for c in m.indice.consultas if c.texto} == {"Vestido Amarelo"}
+    # A frase não entra duas vezes; cada palavra vai com o outro número dela (#405).
+    assert {c.texto for c in m.indice.consultas if c.texto} == {
+        "Vestido vestidos Amarelo amarelos"
+    }
 
 
 def test_a_frase_continua_filtrando_com_qualquer_chip() -> None:
@@ -1659,7 +1754,7 @@ def mundo_de_cem_planos() -> tuple[Mundo, ArmazenamentoQueConta]:
         job("j1", sistema="legado"),
         *[
             replace(
-                plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+                plano("j1:plano:1", "rua escura"),
                 id=f"j1:plano:{i}",
                 inicio_ms=i * 10_000,
                 fim_ms=i * 10_000 + 500,
@@ -1671,12 +1766,10 @@ def mundo_de_cem_planos() -> tuple[Mundo, ArmazenamentoQueConta]:
     return m, armazenamento
 
 
-def test_para_a_web_a_busca_visual_de_cem_planos_nao_assina_nenhum_quadro() -> None:
+def test_para_a_web_a_busca_de_cem_planos_nao_assina_nenhum_quadro() -> None:
     m, armazenamento = mundo_de_cem_planos()
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, limite=50
-    )
+    r = m.busca().buscar("rua", limite=50)
 
     momentos = [mo for v in r.videos for mo in v.momentos]
     assert len(momentos) == 100
@@ -1687,9 +1780,7 @@ def test_para_a_web_a_busca_visual_de_cem_planos_nao_assina_nenhum_quadro() -> N
 def test_para_chave_de_sistema_o_quadro_url_continua_vindo_assinado() -> None:
     m, armazenamento = mundo_de_cem_planos()
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado"
-    )
+    r = m.busca().buscar("rua", sistema="legado")
 
     momentos = [mo for v in r.videos for mo in v.momentos]
     assert armazenamento.assinaturas == len(momentos) == 100
@@ -1701,9 +1792,7 @@ def test_para_chave_de_sistema_o_quadro_url_continua_vindo_assinado() -> None:
 def test_os_quadros_da_busca_saem_assinados_por_8_h() -> None:
     m, _ = mundo_de_cem_planos()
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado"
-    )
+    r = m.busca().buscar("rua", sistema="legado")
 
     momentos = [mo for v in r.videos for mo in v.momentos]
     assert momentos
@@ -1719,16 +1808,14 @@ def test_a_chave_de_sistema_nao_assina_os_quadros_dos_videos_cortados_pelo_limit
     m.com(
         job("j2", sistema="legado"),
         replace(
-            plano("j1:plano:1", [1.0, 0.0], "rua escura"),
+            plano("j1:plano:1", "rua escura"),
             id="j2:plano:0",
             job_id="j2",
             quadro="quadros/plano-0.jpg",
         ),
     )
 
-    r = m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado", limite=1
-    )
+    r = m.busca().buscar("rua", sistema="legado", limite=1)
 
     assert len(r.videos) == 1
     assert armazenamento.assinaturas == r.videos[0].n_momentos
@@ -1737,15 +1824,13 @@ def test_a_chave_de_sistema_nao_assina_os_quadros_dos_videos_cortados_pelo_limit
 def test_as_assinaturas_da_chave_de_sistema_vao_em_paralelo_ate_o_teto() -> None:
     m, armazenamento = mundo_de_cem_planos()
 
-    m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-        "rua", visual=True, sistema="legado"
-    )
+    m.busca().buscar("rua", sistema="legado")
 
     assert 1 < armazenamento.mais_simultaneas <= TETO_DE_ASSINATURAS
 
 
 def test_busca_cancelada_para_antes_de_consultar_o_indice() -> None:
-    m = mundo_visual()
+    m = mundo_de_planos()
     cancelado = threading.Event()
     cancelado.set()
 
@@ -1769,9 +1854,7 @@ def test_busca_cancelada_no_meio_das_assinaturas_para_de_assinar() -> None:
     armazenamento.url_do_quadro = assina_e_desiste  # type: ignore[method-assign]
 
     with pytest.raises(BuscaCancelada):
-        m.busca(embedding=EmbeddingDeTexto([1.0, 0.0])).buscar(
-            "rua", visual=True, sistema="legado", cancelado=cancelado
-        )
+        m.busca().buscar("rua", sistema="legado", cancelado=cancelado)
 
     # As que já tinham começado terminam; as que esperavam na fila não assinam.
     assert armazenamento.assinaturas < 3 + TETO_DE_ASSINATURAS
@@ -1784,3 +1867,176 @@ def test_o_openapi_marca_o_quadro_url_como_obsoleto() -> None:
     assert quadro_url["deprecated"] is True
     assert "`quadro`" in quadro_url["description"]
     assert "/v1/jobs/{job_id}/quadros/{arquivo}" in quadro_url["description"]
+
+
+# Singular e plural dão o mesmo resultado (#405).
+PARES_DE_NUMERO = [
+    ("microfone", "microfones", "microfone", "microfones"),
+    ("cadeira", "cadeiras", "cadeira", "cadeiras"),
+    ("vestido vermelho", "vestidos vermelhos", "vestido", "vestidos"),
+]
+
+
+@pytest.mark.parametrize("singular, plural, tipo, tipo_plural", PARES_DE_NUMERO)
+@pytest.mark.parametrize("no_indice", ["singular", "plural"])
+@pytest.mark.parametrize("pedida", ["singular", "plural"])
+def test_objeto_pedido_no_singular_ou_no_plural_acha_o_mesmo_momento(
+    singular: str,
+    plural: str,
+    tipo: str,
+    tipo_plural: str,
+    no_indice: str,
+    pedida: str,
+) -> None:
+    na_consulta = tipo if pedida == "singular" else tipo_plural
+    no_registro = tipo if no_indice == "singular" else tipo_plural
+    consulta = singular if pedida == "singular" else plural
+    m = Mundo(
+        pedido(
+            objetos=[{"categoria": "produto", "tipo": na_consulta}],
+            evidencias=["objeto"],
+        )
+    )
+    m.com(
+        job("j1"),
+        objeto(
+            "j1:objeto:0",
+            "j1",
+            1_000,
+            2_000,
+            categoria="produto",
+            tipo_do_objeto=no_registro,
+            cor_base=[],
+            cor=None,
+            texto=no_registro,
+        ),
+    )
+    assert [v.job_id for v in buscar(m, consulta).videos] == ["j1"]
+
+
+@pytest.mark.parametrize(
+    "pedida, no_texto",
+    [
+        ("promoção", "A promoções da semana"),
+        ("promoções", "Veja a promoção da semana"),
+        ("animais", "Cada animal come"),
+        ("mulher", "As mulheres falaram"),
+        ("homens", "O homem falou"),
+    ],
+)
+def test_texto_livre_no_singular_ou_plural_acha_a_fala_e_destaca_as_duas_formas(
+    pedida: str, no_texto: str
+) -> None:
+    m = Mundo(pedido(texto_livre=pedida))
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto=no_texto,
+        ),
+    )
+    momento = buscar(m, pedida).videos[0].momentos[0]
+    destacado = " ".join(momento.motivo[d.inicio : d.fim] for d in momento.destaques)
+    palavra_do_texto = next(
+        p for p in no_texto.split() if p.lower()[:4] == pedida.lower()[:4]
+    )
+    assert destacado == palavra_do_texto
+
+
+def test_frase_exata_com_o_numero_trocado_ainda_vale() -> None:
+    m = Mundo(pedido(frase_exata="promoção imperdível"))
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="Todas as promoções imperdíveis",
+        ),
+    )
+    assert [v.job_id for v in buscar(m, '"promoção imperdível"').videos] == ["j1"]
+
+
+def test_video_na_lixeira_do_indice_nao_ocupa_o_teto_de_registros() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    envio = EnvioParaLixeira(
+        em=datetime(2026, 11, 2, tzinfo=UTC),
+        por_uid="adm",
+        por_email="adm@redetv.com",
+        motivo="duplicado",
+    )
+    m.com(
+        job("lixo", lixeira=envio),
+        *[objeto(f"l{i}", "lixo", i, i + 1, na_lixeira=True) for i in range(600)],
+    )
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+
+    resultado = m.busca().buscar("vestido", filtros_do_servidor=filtros_do_servidor())
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    assert {c.filtros.na_lixeira for c in m.indice.consultas} == {False}
+
+
+def test_o_filtro_do_indice_so_tira_inelegiveis_a_regra_segue_no_job() -> None:
+    m = Mundo(pedido(texto_livre="vestido"))
+    envio = EnvioParaLixeira(
+        em=datetime(2026, 11, 2, tzinfo=UTC),
+        por_uid="adm",
+        por_email="adm@redetv.com",
+        motivo="duplicado",
+    )
+    # O objeto ainda diz `na_lixeira=False` (o Job foi para a lixeira e o índice atrasou).
+    m.com(job("j1", lixeira=envio), objeto("a", "j1", 0, 1_000, na_lixeira=False))
+    m.com(job("j2"), objeto("b", "j2", 0, 1_000))
+
+    resultado = m.busca().buscar("vestido", filtros_do_servidor=filtros_do_servidor())
+
+    assert [v.job_id for v in resultado.videos] == ["j2"]
+
+
+def test_chave_de_sistema_filtra_o_sistema_no_indice_e_o_resultado_nao_muda() -> None:
+    m = Mundo(pedido(texto_livre="vestido"), pedido(texto_livre="vestido"))
+    m.com(job("j1", sistema="outro"), objeto("a", "j1", 0, 1_000, sistema="outro"))
+    m.com(job("j2", sistema="legado"), objeto("b", "j2", 0, 1_000, sistema="legado"))
+
+    resultado = m.busca().buscar("vestido", sistema="outro")
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    assert {c.filtros.sistema for c in m.indice.consultas} == {"outro"}
+
+    # A web (sem sistema) não filtra por ele e vê os dois.
+    m.indice.consultas.clear()
+    todos = m.busca().buscar("vestido")
+    assert {v.job_id for v in todos.videos} == {"j1", "j2"}
+    assert {c.filtros.sistema for c in m.indice.consultas} == {None}
+
+
+def test_sem_nada_inelegivel_o_resultado_e_o_mesmo_com_e_sem_o_filtro() -> None:
+    def rodar(filtros: Filtros | None) -> list[str]:
+        m = Mundo(pedido(texto_livre="vestido"))
+        for i in range(3):
+            m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000))
+        return [
+            v.job_id
+            for v in m.busca().buscar("vestido", filtros_do_servidor=filtros).videos
+        ]
+
+    assert rodar(filtros_do_servidor()) == rodar(Filtros())
+
+
+def test_faceta_nova_nao_chama_o_modelo_de_novo_e_o_armor_sim() -> None:
+    armor = ModelArmorEmMemoria()
+    m = Mundo(pedido(texto_livre="vestido"), pedido(texto_livre="vestido"))
+    busca = m.busca(armor=armor)
+
+    busca.buscar("vestido", dono="ana")
+    busca.buscar("vestido", dono="ana", ajustes=Ajustes(marca="Adidas"))
+    busca.buscar("vestido", dono="bia")  # outra pessoa: não acerta o cache
+
+    assert len(m.transporte.chamadas) == 2
+    assert armor.consultas == ["vestido"] * 3

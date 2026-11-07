@@ -239,6 +239,28 @@ def test_o_impacto_conta_videos_aparicoes_e_fotos_sem_mudar_nada() -> None:
     assert origem and origem.fundida is None
 
 
+def test_o_impacto_da_fusao_abre_so_as_decupagens_da_pessoa() -> None:
+    mundo = Mundo()
+    for i in range(50):
+        mundo.jobs.salvar(_job(f"x{i}"))
+    abertas: list[str] = []
+    abrir = mundo.armazenamento.abrir_decupagem
+
+    def contando(job_id: str) -> Any:
+        abertas.append(job_id)
+        return abrir(job_id)
+
+    mundo.armazenamento.abrir_decupagem = contando  # type: ignore[method-assign]
+
+    mundo.cliente.get(
+        f"/v1/catalogo/pessoas/{mundo.duplicada.id}/fundir/impacto",
+        params={"destino_id": mundo.sabrina.id},
+        headers=CURADOR,
+    )
+
+    assert sorted(abertas) == ["j1", "j2"]
+
+
 def test_o_motivo_vai_ate_o_limite_das_correcoes() -> None:
     mundo = Mundo()
 

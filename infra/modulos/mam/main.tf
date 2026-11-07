@@ -118,29 +118,28 @@ variable "dimensao_dos_vetores" {
 
 # A cota `vectorsearch.googleapis.com/data_object_writes` da coleção de momentos, lida no
 # Service Usage do dev (#411). Vale para a coleção inteira; a indexação grava abaixo dela
-# (BUSCA_COTA_DE_ESCRITA) e, no 429 de dois vídeos juntos, espera e tenta de novo.
+# (BUSCA_COTA_DE_ESCRITA, também no mam-web e no mam-purga) e, no 429 de dois vídeos
+# juntos, espera e tenta de novo.
 variable "cota_de_escrita_da_busca" {
   description = "Objetos por minuto que a coleção da busca aceita gravar"
   type        = number
   default     = 3000
 }
 
-# O índice ANN do quadro-chave está ligado no dev desde o #268 (ADR 0006): cada índice
-# cobra réplicas por hora, e com a variável em false o código não calcula o vetor do
-# quadro. Ligar só cria o índice (make criar-colecao-da-busca, depois do apply).
-variable "indice_do_quadro_ligado" {
+# O índice ANN da descrição (réplica dedicada, cobrada por hora). Em false a busca vai
+# pelo KNN, sem índice, que aceita no máximo 100 mil registros (ADR 0006). O índice não é
+# recurso do Terraform: desligar só para de usá-lo, e apagá-lo é à mão (README); ligar é
+# aplicar e rodar o make criar-colecao-da-busca.
+variable "indices_da_busca_ligados" {
   type    = bool
   default = true
 }
 
-# Os índices ANN da coleção (um por vetor, com réplica dedicada cobrada por hora). Em
-# false a busca vai pelo KNN, sem índice, que aceita no máximo 100 mil registros: o dev
-# roda assim por custo (ADR 0006); a produção fica com eles. Os índices não são recursos
-# do Terraform: desligar só para de usá-los, e apagar os que existem é à mão (README);
-# ligar é aplicar e rodar o make criar-colecao-da-busca.
-variable "indices_da_busca_ligados" {
+# A lista de vídeos por envio filtra o período por `mes_exibicao` no Firestore (#479). Só
+# ligar depois de `make gravar-mes-nos-jobs`: o Job antigo sem o campo some do filtro.
+variable "listagem_por_mes" {
   type    = bool
-  default = true
+  default = false
 }
 
 # O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima
@@ -250,7 +249,7 @@ variable "limiar_de_fora_do_esquema" {
 }
 
 variable "limite_de_falhas_por_etapa" {
-  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa e para cada origem em separado (as falhas tratadas pelos Jobs e as execuções que caíram no Workflows não se somam)"
+  description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa, somadas as duas origens (as falhas tratadas pelos Jobs e as execuções que caíram no Workflows)"
   type        = number
   default     = 3
 }
@@ -283,6 +282,12 @@ variable "precos_por_milhao_de_tokens" {
     saida   = number
   }))
   default = {}
+}
+
+variable "dias_do_original_na_quarentena" {
+  description = "Depois de quantos dias o original some da quarentena (#369); a sessão retomável vale até 7 dias, então o objeto de uma sessão aberta tarde ainda é apagado"
+  type        = number
+  default     = 7
 }
 
 variable "agenda_da_purga" {
@@ -409,16 +414,26 @@ resource "google_project_service" "apis" {
 # - O cache das camadas (docker-bake.hcl) é uma tag fixa por alvo no pacote `cache`, sobrescrita a
 #   cada build: a versão com tag fica sempre; as que perderam a tag saem.
 # - KEEP vence DELETE: o resto, com ou sem tag, sai quando a versão tem mais de 14 dias desde
-#   que foi criada (não desde o último uso). O registro não sabe o que o Cloud Run usa: se dois
-#   deploys seguidos falham no teste de GPU, o testar-jobs-gpu.sh volta os Jobs a um build que já
-#   saiu dos N últimos e, se ele tiver mais de 14 dias, sai do registro em até ~1 dia.
+#   que foi criada (não desde o último uso). O registro não sabe o que o Cloud Run usa, então o
+#   scripts/deploy-dev.sh põe duas tags no digest amd64 de cada imagem (tags_protegidas): `em-uso`
+#   no build que o serviço e os Jobs usam depois do apply, e `volta` no build que os Jobs com GPU
+#   tinham antes dele, o que o testar-jobs-gpu.sh restaura se o teste de GPU falha. Um KEEP guarda
+#   o que tem uma dessas tags, por mais velho que seja ou por mais que já tenha saído dos N
+#   últimos. A tag se move a cada deploy; o build que perdeu as duas volta às regras comuns.
+# - Antes de mexer nas regras ou na idade, `make conferir-limpeza-de-imagens` (só lê) simula as
+#   regras sobre as versões que existem e diz o que seria apagado; sai com 1 se apagasse uma
+#   versão em uso ou a da volta. Ele lê as regras do output limpeza_de_imagens, as mesmas daqui.
 # - Ensaio: com limpeza_so_ensaia, o Google só registra o que apagaria (BatchDeleteVersions com
-#   validateOnly no log Data Access, ligado no limpeza_de_imagens.tf). Antes de desligar o ensaio, proteger o build
-#   da volta (uma tag que um KEEP guarde) e conferir a contagem de um ciclo, que leva até ~1 dia.
+#   validateOnly no log Data Access, ligado no limpeza_de_imagens.tf). Ligada de verdade desde o
+#   #456; para voltar ao ensaio basta trocar o valor, sem recriar o repositório.
 locals {
   versoes_guardadas_por_imagem = 3 * var.builds_de_imagem_guardados
   idade_minima_para_apagar     = "1209600s"
-  limpeza_so_ensaia            = true
+  limpeza_so_ensaia            = false
+  pacotes_do_cache             = ["cache"]
+  tag_do_build_em_uso          = "em-uso"
+  tag_da_volta                 = "volta"
+  tags_protegidas              = [local.tag_do_build_em_uso, local.tag_da_volta]
 }
 
 resource "google_artifact_registry_repository" "mam" {
@@ -439,7 +454,15 @@ resource "google_artifact_registry_repository" "mam" {
     action = "KEEP"
     condition {
       tag_state             = "TAGGED"
-      package_name_prefixes = ["cache"]
+      package_name_prefixes = local.pacotes_do_cache
+    }
+  }
+  cleanup_policies {
+    id     = "guarda-o-build-em-uso-e-o-da-volta"
+    action = "KEEP"
+    condition {
+      tag_state    = "TAGGED"
+      tag_prefixes = local.tags_protegidas
     }
   }
   cleanup_policies {
@@ -473,7 +496,15 @@ resource "google_artifact_registry_repository" "mam_gpu" {
     action = "KEEP"
     condition {
       tag_state             = "TAGGED"
-      package_name_prefixes = ["cache"]
+      package_name_prefixes = local.pacotes_do_cache
+    }
+  }
+  cleanup_policies {
+    id     = "guarda-o-build-em-uso-e-o-da-volta"
+    action = "KEEP"
+    condition {
+      tag_state    = "TAGGED"
+      tag_prefixes = local.tags_protegidas
     }
   }
   cleanup_policies {
@@ -576,7 +607,7 @@ locals {
   buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
 }
 
-# A coleção de momentos da busca (#117) e os índices ANN dela (um por campo de vetor)
+# A coleção de momentos da busca (#117) e o índice ANN dela
 # nascem no `make criar-colecao-da-busca` (idempotente), porque o provedor do Terraform
 # ainda não tem o recurso. Este é o único lugar que monta os nomes; o código os recebe
 # por BUSCA_*. A coleção de medida é a temporária do `make medir-busca`.
@@ -584,9 +615,6 @@ locals {
   colecao_da_busca           = "momentos"
   colecao_de_medida_da_busca = "momentos-medida"
   indice_da_descricao        = "momentos-descricao-ann"
-  indice_do_quadro           = "momentos-quadro-ann"
-  # Vazio desliga o índice do quadro-chave no código (BUSCA_INDICE_QUADRO).
-  indice_do_quadro_em_uso = var.indice_do_quadro_ligado ? local.indice_do_quadro : ""
   # O modelo do Model Armor e a configuração da Ranking API (a padrão, que já existe no
   # projeto) chegam ao serviço por MODEL_ARMOR_* e RANKING_CONFIG (#232).
   modelo_do_model_armor = "consulta-da-busca"
@@ -618,6 +646,19 @@ resource "google_storage_bucket" "mam" {
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
+  # O original só vive na quarentena até a validação (que o apaga, aceito ou recusado). Quem
+  # sobra é o que chegou por uma sessão retomável aberta depois de o Job expirar (#369).
+  dynamic "lifecycle_rule" {
+    for_each = each.key == "quarentena" ? [1] : []
+    content {
+      condition {
+        age = var.dias_do_original_na_quarentena
+      }
+      action {
+        type = "Delete"
+      }
+    }
+  }
   # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
   # e só das URLs da aplicação.
   dynamic "cors" {
@@ -625,7 +666,7 @@ resource "google_storage_bucket" "mam" {
     content {
       origin          = local.origens_da_aplicacao
       method          = ["POST", "PUT"]
-      response_header = ["Content-Type", "Content-Range", "x-goog-resumable", "x-upload-content-length", "Location", "Range"]
+      response_header = ["Content-Type", "Content-Range", "x-goog-resumable", "x-goog-if-generation-match", "x-upload-content-length", "Location", "Range"]
       max_age_seconds = 3600
     }
   }
@@ -646,7 +687,7 @@ resource "google_storage_bucket" "mam" {
 }
 
 resource "google_service_account" "mam" {
-  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "purga", "agendador", "build"])
+  for_each     = toset(["web", "validacao", "transcricao", "ocr", "analise", "quadros", "indexacao", "identificacao", "orquestracao", "fim", "objetos", "purga", "taxa", "agendador", "build"])
   account_id   = "mam-${each.key}"
   display_name = "MAM ${each.key}"
 }
@@ -699,6 +740,9 @@ locals {
     # A purga automática (#145) apaga o Job e as correções no Firestore e os momentos do índice
     # (como a `web`, quando ela purga à mão).
     purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
+    # O Job da taxa por dia (#455) lê Jobs, correções e revisão no Firestore e roda o MERGE na
+    # tabela (`bigquery.jobUser`; o acesso aos dados é só no dataset, mais abaixo).
+    taxa = ["roles/datastore.user", "roles/bigquery.jobUser"]
     # O agendador só dispara o Job da purga (papel no próprio Job, em purga.tf).
     agendador = []
     # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
@@ -736,17 +780,42 @@ locals {
     # regrava a Decupagem com o inventário no mesmo bucket.
     objetos = { decupagens = "roles/storage.objectUser" }
     # Apaga os arquivos do vídeo purgado: cópia limpa, proxy, janelas, decupagem e quadros.
-    purga = { aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
+    # A varredura diária também expira o upload abandonado e apaga o objeto dele da quarentena (#369).
+    purga = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
+    # Lê a contagem de itens que a decupagem deixa ao lado dela (#455).
+    taxa = { decupagens = "roles/storage.objectViewer" }
   }
+}
+
+# `datastore.user` vale para todos os bancos do projeto. Só a `web` (papéis, chaves, auditoria)
+# e a `purga` (auditoria) entram no banco de segurança (#464); as outras contas recebem o
+# papel com condição IAM limitada ao `(default)`. Quem grava papéis, chaves ou auditoria
+# (grep de COLECAO_DE_PAPEIS/COLECAO_DE_CHAVES/COLECAO_DA_AUDITORIA em api/): main.py (web),
+# purga.py e os comandos do Makefile (rodados por pessoa, com a conta dela).
+locals {
+  contas_no_banco_de_seguranca = ["web", "purga"]
 }
 
 resource "google_project_iam_member" "mam" {
   for_each = { for p in flatten([
     for sa, papeis in local.papeis_no_projeto : [for papel in papeis : { sa = sa, papel = papel }]
   ]) : "${p.sa}:${p.papel}" => p }
-  project    = var.projeto
-  role       = each.value.papel
-  member     = google_service_account.mam[each.value.sa].member
+  project = var.projeto
+  role    = each.value.papel
+  member  = google_service_account.mam[each.value.sa].member
+
+  dynamic "condition" {
+    for_each = each.value.papel == "roles/datastore.user" && !contains(local.contas_no_banco_de_seguranca, each.value.sa) ? [1] : []
+    content {
+      title      = "so-o-banco-default"
+      expression = "resource.name == \"projects/${var.projeto}/databases/${google_firestore_database.mam.name}\""
+    }
+  }
+
+  # A condição troca o recurso: o novo entra antes de o antigo sair, sem janela sem acesso.
+  lifecycle {
+    create_before_destroy = true
+  }
   depends_on = [google_project_iam_custom_role.vertex_predicao]
 }
 
@@ -834,6 +903,12 @@ locals {
   tabela_antiga_de_momentos = "momentos"
   # Tabela em uso (#356): dividida por ano, em `momentos_por_ano.tf`.
   tabela_de_momentos = "momentos_por_ano"
+  # Tabela dos Jobs do painel (#454), em `jobs_do_painel.tf`.
+  tabela_de_jobs_do_painel = "jobs_do_painel"
+  # Tabela das medidas de revisão do painel (#467), em `revisao_do_painel.tf`.
+  tabela_de_revisao_do_painel = "revisao_do_painel"
+  # Tabela da taxa de correção por dia (#455), em `taxa_diaria.tf`.
+  tabela_da_taxa_de_correcao = "taxa_de_correcao_por_dia"
 }
 
 locals {
@@ -879,8 +954,9 @@ resource "google_bigquery_table" "momentos" {
   schema     = local.esquema_dos_momentos
 }
 
+# A `taxa` (#455) troca as linhas da tabela diária da taxa de correção.
 resource "google_bigquery_dataset_iam_member" "grava_momentos" {
-  for_each   = toset(["indexacao", "web"])
+  for_each   = toset(["indexacao", "web", "taxa"])
   dataset_id = google_bigquery_dataset.decupagens.dataset_id
   role       = "roles/bigquery.dataEditor"
   member     = google_service_account.mam[each.key].member
@@ -934,6 +1010,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "GCP_PROJECT_ID"
         value = var.projeto
+      }
+      env {
+        name  = "FIRESTORE_BANCO_DE_SEGURANCA"
+        value = local.banco_de_seguranca
       }
       # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
       env {
@@ -996,16 +1076,20 @@ resource "google_cloud_run_v2_service" "web" {
         value = local.indice_da_descricao
       }
       env {
-        name  = "BUSCA_INDICE_QUADRO"
-        value = local.indice_do_quadro_em_uso
-      }
-      env {
         name  = "BUSCA_INDICES_LIGADOS"
         value = tostring(var.indices_da_busca_ligados)
       }
       env {
+        name  = "LISTAGEM_POR_MES"
+        value = tostring(var.listagem_por_mes)
+      }
+      env {
         name  = "BUSCA_DIMENSAO"
         value = tostring(var.dimensao_dos_vetores)
+      }
+      env {
+        name  = "BUSCA_COTA_DE_ESCRITA"
+        value = tostring(var.cota_de_escrita_da_busca)
       }
       env {
         name  = "BIGQUERY_DATASET"
@@ -1044,6 +1128,22 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "FATURAMENTO_TABELA"
         value = "gcp_billing_export_resource_v1_*"
+      }
+      # A tabela dos Jobs que a consulta do custo junta com o faturamento (jobs_do_painel.tf, #466).
+      env {
+        name  = "BIGQUERY_TABELA_DE_JOBS"
+        value = local.tabela_de_jobs_do_painel
+      }
+      # A tabela das medidas de revisão: a web grava a cada pulso e a aba Revisão a agrega
+      # junto com a dos Jobs (revisao_do_painel.tf, #467).
+      env {
+        name  = "BIGQUERY_TABELA_DE_REVISAO"
+        value = local.tabela_de_revisao_do_painel
+      }
+      # A tabela da taxa de correção por dia, que a aba Revisão soma (taxa_diaria.tf, #468).
+      env {
+        name  = "BIGQUERY_TABELA_DA_TAXA"
+        value = local.tabela_da_taxa_de_correcao
       }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
@@ -1675,11 +1775,13 @@ resource "google_cloud_run_v2_job" "inventario" {
       service_account = google_service_account.mam["objetos"].email
       max_retries     = 0
       # NÃO medido: lotes de 20 planos (florence, só texto) ou de 4 planos com imagens
-      # (gemini), ~190 planos por hora de vídeo; segundos por chamada. Um programa de 4 h
-      # são ~760 planos: ~40 chamadas no florence, ~190 no gemini; a ~30 s cada no pior caso
-      # são ~1,6 h no gemini, então 3600 s só cobrem o florence com folga: o motor gemini
-      # precisa do timeout medido no dev.
-      timeout = "3600s"
+      # (gemini), ~190 planos por hora de vídeo. As chamadas vão em Flex (#402), de 1 a
+      # 15 min cada, 8 ao mesmo tempo (`PARALELISMO_DO_INVENTARIO`); cada lote desiste no
+      # prazo de 1500 s (`PRAZO_DA_ANALISE_S`). Pior caso do florence num programa de 4 h:
+      # ~38 chamadas = 5 rodadas de 1500 s = 7500 s; 9000 s dão folga. Em série seriam
+      # 38 x 15 min = 9,5 h. O motor gemini (~190 chamadas em 4 h, 24 rodadas) não cabe
+      # nesse tempo: o padrão é o florence (`motor_objetos`); medir no dev antes de trocar.
+      timeout = "9000s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -1963,10 +2065,6 @@ resource "google_cloud_run_v2_job" "indexacao" {
         env {
           name  = "BUSCA_INDICE_DESCRICAO"
           value = local.indice_da_descricao
-        }
-        env {
-          name  = "BUSCA_INDICE_QUADRO"
-          value = local.indice_do_quadro_em_uso
         }
         env {
           name  = "BUSCA_INDICES_LIGADOS"
@@ -2495,26 +2593,21 @@ resource "google_monitoring_alert_policy" "falhas_por_etapa" {
   display_name = "Falhas de uma etapa acima do limite"
   combiner     = "OR"
   # O filtro de um alerta precisa de um resource.type (a API recusa sem ele), e a métrica
-  # vem de dois: uma condição para cada, e o limite vale por origem. Somar as duas pediria
-  # um filtro com one_of ou PromQL, não validados na API (deploy de 2026-11-03).
-  dynamic "conditions" {
-    for_each = {
-      Jobs      = "cloud_run_job"
-      Workflows = "workflows.googleapis.com/Workflow"
-    }
-    content {
-      display_name = "Falhas de uma etapa acima do limite (${conditions.key})"
-      condition_threshold {
-        filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\" AND resource.type=\"${conditions.value}\""
-        comparison      = "COMPARISON_GT"
-        threshold_value = var.limite_de_falhas_por_etapa
-        duration        = "0s"
-        aggregations {
-          alignment_period     = local.janela_dos_alertas_s
-          per_series_aligner   = "ALIGN_DELTA"
-          cross_series_reducer = "REDUCE_SUM"
-          group_by_fields      = ["metric.label.etapa"]
-        }
+  # vem de dois: o Job (falha tratada) e o Workflows (execução que caiu). Uma condição só,
+  # com one_of no filtro, soma as duas origens; a API aceitou essa forma no ensaio de
+  # 2026-11-05 (a forma (b), em PromQL, foi recusada).
+  conditions {
+    display_name = "Falhas de uma etapa acima do limite"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.falhas_por_etapa.name}\" AND resource.type = one_of(\"cloud_run_job\", \"workflows.googleapis.com/Workflow\")"
+      comparison      = "COMPARISON_GT"
+      threshold_value = var.limite_de_falhas_por_etapa
+      duration        = "0s"
+      aggregations {
+        alignment_period     = local.janela_dos_alertas_s
+        per_series_aligner   = "ALIGN_DELTA"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields      = ["metric.label.etapa"]
       }
     }
   }
@@ -2934,6 +3027,19 @@ output "repositorio_gpu" {
   value = "${var.regiao_gpu}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam_gpu.repository_id}"
 }
 
+# As regras da limpeza das imagens, para o deploy-dev (as tags que ele põe) e para o
+# `make conferir-limpeza-de-imagens`, que as simula sem apagar nada (#456).
+output "limpeza_de_imagens" {
+  value = {
+    manter_ultimas      = local.versoes_guardadas_por_imagem
+    idade_minima_s      = tonumber(trimsuffix(local.idade_minima_para_apagar, "s"))
+    pacotes_do_cache    = local.pacotes_do_cache
+    tags_protegidas     = local.tags_protegidas
+    tag_do_build_em_uso = local.tag_do_build_em_uso
+    tag_da_volta        = local.tag_da_volta
+  }
+}
+
 # Para o Workflows (#239) e para o teste dos Jobs com GPU depois da publicação.
 output "regiao_gpu" {
   value = var.regiao_gpu
@@ -3001,10 +3107,6 @@ output "busca_indice_descricao" {
   value = local.indice_da_descricao
 }
 
-output "busca_indice_quadro" {
-  value = local.indice_do_quadro_em_uso
-}
-
 output "busca_indices_ligados" {
   value = var.indices_da_busca_ligados
 }
@@ -3025,6 +3127,10 @@ output "busca_distancia_maxima" {
 
 output "busca_palavras_minimas" {
   value = var.busca_palavras_minimas
+}
+
+output "banco_de_seguranca" {
+  value = local.banco_de_seguranca
 }
 
 output "bucket_aceitos" {

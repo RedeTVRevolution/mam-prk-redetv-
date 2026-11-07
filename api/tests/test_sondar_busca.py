@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from api.agent_retrieval import CAMPOS_DE_TEXTO, ConfigDaBusca
-from api.busca import Entendida, Momento, VideoDoResultado
+from api.busca import Momento, VideoDoResultado
 from api.sondar_busca import (
     ARQUIVO_DAS_CONSULTAS,
     CASOS,
@@ -11,7 +11,6 @@ from api.sondar_busca import (
     Trecho,
     esquema_sem_campos,
     ler_casos,
-    modo_atendido,
     pertinencia,
     primeiros_resultados,
     relatorio_do_aceite,
@@ -236,34 +235,8 @@ def test_o_arquivo_do_repositorio_esta_no_lugar_combinado() -> None:
     assert ler_casos(ARQUIVO_DAS_CONSULTAS) == CASOS
 
 
-def test_ler_casos_le_o_modo_visual_e_o_arquivo_traz_consultas_visuais(
-    tmp_path: Path,
-) -> None:
-    [caso] = ler_casos(
-        _arquivo(
-            tmp_path,
-            '[[consulta]]\ntexto = "pista molhada"\ntermo = "pista"\nvisual = true\n',
-        )
-    )
-    assert caso.visual
-    assert not Caso("terno", "terno").visual
-    assert any(c.visual for c in CASOS)
-
-
-def test_consulta_visual_que_caiu_na_busca_comum_fica_vermelha() -> None:
-    def entendida(visual: bool) -> Entendida:
-        return Entendida(
-            evidencias=[], programa=None, desde=None, ate=None, visual=visual
-        )
-
-    visual = Caso("pista molhada", "pista", visual=True)
-    assert modo_atendido(visual, entendida(True))
-    assert not modo_atendido(visual, entendida(False))
-    assert modo_atendido(Caso("terno", "terno"), entendida(False))
-
-
 def test_esquema_sem_campo_de_texto_falha_nomeando_o_campo() -> None:
-    config = ConfigDaBusca("p", "r", "c", "d", None, 128)
+    config = ConfigDaBusca("p", "r", "c", "d", 128)
     sem_campos = {"dataSchema": {"properties": {"texto": {"type": "string"}}}}
     com_campos = {
         "dataSchema": {"properties": {c: {"type": "string"} for c in CAMPOS_DE_TEXTO}}

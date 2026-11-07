@@ -1,14 +1,14 @@
 """Os tipos de objeto já vistos nas Decupagens (#308), para o autocompletar da correção."""
 
-import sys
 from collections.abc import Mapping
 from typing import Annotated, Protocol, TypedDict
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from api.auth import Chamador
 from api.comparador import normalizar
 from api.jobs import _exige
+from api.texto_como_dado import LinhaDaConsulta
 
 LIMITE_PADRAO = 10
 
@@ -25,9 +25,6 @@ class TiposDeObjeto(Protocol):
     def buscar(self, q: str, limite: int = LIMITE_PADRAO) -> list[TipoDeObjeto]:
         """Os tipos cuja chave `normalizar(tipo)` começa por `normalizar(q)`, dos mais
         ocorridos para os menos."""
-
-    def conhecidos(self) -> list[str]:
-        """Todos os tipos ainda vistos em algum job, sem o teto da busca (#154)."""
 
 
 def somar_por_chave(contagens: Mapping[str, int]) -> dict[str, tuple[str, int]]:
@@ -60,9 +57,6 @@ class TiposDeObjetoEmMemoria:
         ordenados = sorted(totais.items(), key=lambda kv: (-kv[1][1], kv[0]))
         return [{"tipo": t, "ocorrencias": n} for _, (t, n) in ordenados[:limite]]
 
-    def conhecidos(self) -> list[str]:
-        return [t["tipo"] for t in self.buscar("", sys.maxsize)]
-
 
 def criar_rotas_dos_tipos_de_objeto(tipos: TiposDeObjeto) -> APIRouter:
     rotas = APIRouter()
@@ -70,7 +64,7 @@ def criar_rotas_dos_tipos_de_objeto(tipos: TiposDeObjeto) -> APIRouter:
     @rotas.get("/objetos/tipos")
     def buscar(
         _chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        q: Annotated[str, Query(max_length=100)] = "",
+        q: Annotated[str, LinhaDaConsulta(100)] = "",
     ) -> list[TipoDeObjeto]:
         return tipos.buscar(q, LIMITE_PADRAO)
 

@@ -7,11 +7,13 @@ from typing import Any
 
 import pytest
 
+from api.auth import ChaveInvalida
 from api.chaves import (
     MacSimulado,
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
     emitir_chave,
+    revogar_chave,
 )
 from api.jobs import ServicoIndisponivel, agora_utc
 from api.mac_kms import ErroDoKms, MacKms, mac_do_ambiente
@@ -219,3 +221,84 @@ def test_chave_que_confere_vale_mesmo_se_o_kms_falha_na_troca_de_versao() -> Non
 
     assert sistema.sistema == "Legado"
     assert repositorio.obter(emitida.registro.id) == emitida.registro
+
+
+def _pedidos_de_macverify(kms: KmsFalso) -> int:
+    return sum(1 for _, c, _ in kms.pedidos if c.endswith(":macVerify"))
+
+
+def test_macverify_positivo_do_mesmo_segredo_vai_ao_kms_uma_vez() -> None:
+    kms = KmsFalso({1: b"k1"})
+    mac = MacKms(CHAVE, kms)
+    certo = hmac.digest(b"k1", b"x", sha256)
+
+    assert mac.verificar(1, b"x", certo) is True
+    assert mac.verificar(1, b"x", certo) is True
+    assert _pedidos_de_macverify(kms) == 1
+
+
+def test_segredo_errado_sempre_chama_o_kms() -> None:
+    kms = KmsFalso({1: b"k1"})
+    mac = MacKms(CHAVE, kms)
+    certo = hmac.digest(b"k1", b"x", sha256)
+
+    assert mac.verificar(1, b"x", certo) is True
+    assert mac.verificar(1, b"errado", certo) is False
+    assert mac.verificar(1, b"errado", certo) is False
+    assert _pedidos_de_macverify(kms) == 3
+
+
+def test_resultado_positivo_vale_por_versao_e_expira() -> None:
+    kms = KmsFalso({1: b"k1", 2: b"k1"})
+    agora = [0.0]
+    mac = MacKms(CHAVE, kms, relogio=lambda: agora[0], validade_do_mac_s=60.0)
+    certo = hmac.digest(b"k1", b"x", sha256)
+
+    mac.verificar(1, b"x", certo)
+    mac.verificar(2, b"x", certo)
+    assert _pedidos_de_macverify(kms) == 2
+    agora[0] = 61.0
+    mac.verificar(1, b"x", certo)
+    assert _pedidos_de_macverify(kms) == 3
+
+
+def test_o_cache_do_mac_tem_tamanho_maximo() -> None:
+    # Com 2 lugares, o terceiro positivo tira o "a" da memória.
+    kms = KmsFalso({1: b"k1"})
+    mac = MacKms(CHAVE, kms, maximo_do_mac=2)
+    for m in (b"a", b"b", b"c"):
+        mac.verificar(1, m, hmac.digest(b"k1", m, sha256))
+    mac.verificar(1, b"a", hmac.digest(b"k1", b"a", sha256))
+    assert _pedidos_de_macverify(kms) == 4
+
+
+def test_chave_revogada_e_recusada_no_pedido_seguinte_mesmo_com_o_mac_guardado() -> (
+    None
+):
+    kms = KmsFalso({1: b"k1"})
+    repositorio = RepositorioDeChavesEmMemoria()
+    mac = MacKms(CHAVE, kms)
+    emitida = emitir_chave("Legado", ["ler"], mac, repositorio, agora_utc())
+    verificador = VerificadorDeChaveDeApi(repositorio, mac)
+
+    assert verificador.verificar(emitida.chave).sistema == "Legado"
+    assert verificador.verificar(emitida.chave).sistema == "Legado"
+    assert _pedidos_de_macverify(kms) == 1
+    revogar_chave(emitida.registro.id, repositorio, agora_utc())
+
+    with pytest.raises(ChaveInvalida):
+        verificador.verificar(emitida.chave)
+
+
+def test_segredo_errado_de_um_id_valido_vai_ao_kms_a_cada_pedido() -> None:
+    kms = KmsFalso({1: b"k1"})
+    repositorio = RepositorioDeChavesEmMemoria()
+    mac = MacKms(CHAVE, kms)
+    emitida = emitir_chave("Legado", ["ler"], mac, repositorio, agora_utc())
+    verificador = VerificadorDeChaveDeApi(repositorio, mac)
+    errada = emitida.chave.rsplit(".", 1)[0] + ".errado"
+
+    for _ in range(2):
+        with pytest.raises(ChaveInvalida):
+            verificador.verificar(errada)
+    assert _pedidos_de_macverify(kms) == 2

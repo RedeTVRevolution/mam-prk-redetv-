@@ -432,7 +432,7 @@ test('o 422 do cursor da volta recomeça do topo, e rolar segue pedindo a págin
   await waitFor(() => expect(chamadas.map((c) => new URLSearchParams(c).get('cursor'))).toEqual(['j99', null, 'j49']))
 })
 
-test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, parecidos, volta, volta)', async () => {
+test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, outra lista, volta, volta)', async () => {
   jobs = Array.from({ length: 160 }, (_, i) => job({ id: `j${i}`, nome: `video-${i}.mp4`, estado: 'concluido' }))
   const consultas = await abrir()
   await screen.findByText('video-0.mp4')
@@ -449,14 +449,14 @@ test('a volta do acervo sobrevive a outra lista no meio (acervo, vídeo, parecid
   cleanup()
   lembrarPosicao(consultas, chave, 120)
 
-  // Do vídeo para os parecidos, outra lista, e a volta ao vídeo: ela guarda a posição dela.
-  const parecidos = renderHook(
-    () => usePaginas({ chave: ['parecidos', 'v1', 3], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
+  // Do vídeo para outra lista, e a volta ao vídeo: ela guarda a posição dela.
+  const outra = renderHook(
+    () => usePaginas({ chave: ['outra', 'v1', 3], pedir: async () => [1, 2], proximo: () => null, itens: (ps: number[][]) => ps.flat(), tamanho: (p: number[]) => p.length }),
     { wrapper: ({ children }) => <QueryClientProvider client={consultas}>{children}</QueryClientProvider> },
   )
-  await waitFor(() => expect(parecidos.result.current.quantidade).toBe(2))
-  lembrarPosicao(consultas, parecidos.result.current.chave, 1)
-  parecidos.unmount()
+  await waitFor(() => expect(outra.result.current.quantidade).toBe(2))
+  lembrarPosicao(consultas, outra.result.current.chave, 1)
+  outra.unmount()
 
   // De volta ao acervo, com o cache vencido: recomeça na página do vídeo 120 (o jsdom não rola até ela).
   consultas.removeQueries({ queryKey: ['acervo'] })
@@ -563,6 +563,60 @@ test('a consulta de um vídeo em andamento mantém a capa da lista', async () =>
   await screen.findByText('rodando.mp4')
   await waitFor(() => expect(consultas).toBeGreaterThan(1))
   expect(document.querySelector('img[src="/capa-a.jpg"]')).toBeTruthy()
+})
+
+test.each(['javascript:alert(1)', 'data:image/svg+xml,<svg/>', 'http://exemplo.com/capa.jpg'])('a capa %s não vira imagem', async (capa) => {
+  jobs = [job({ id: 'a', nome: 'suja.mp4', estado: 'concluido', capa_url: capa })]
+  await abrir()
+  await screen.findByText('suja.mp4')
+  expect(document.querySelector('img[src^="javascript:"], img[src^="data:"], img[src^="http:"]')).toBeNull()
+})
+
+test('o vídeo que termina sem capa na lista ganha a capa do detalhe, sem recarregar a lista', async () => {
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'validando' })]
+  const detalhes: string[] = []
+  servidor.use(
+    andamentoQueConta([]),
+    http.get('/v1/jobs/a', () => {
+      detalhes.push('a')
+      return HttpResponse.json({ ...jobs[0], capa_url: '/capa-a.jpg' })
+    }),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('andando.mp4')
+  const listagens = chamadas.length
+
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'concluido' })]
+
+  await waitFor(() => expect(document.querySelector('img[src="/capa-a.jpg"]')).toBeTruthy())
+  expect(detalhes).toEqual(['a'])
+  expect(chamadas.length).toBe(listagens)
+})
+
+test('o vídeo que termina sem capa (falhou) não repete o pedido do detalhe', async () => {
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'validando' })]
+  let detalhes = 0
+  let rodadas = 0
+  servidor.use(
+    http.get('/v1/jobs/andamento', () => {
+      rodadas++
+      return HttpResponse.json(jobs)
+    }),
+    http.get('/v1/jobs/a', () => {
+      detalhes++
+      return HttpResponse.json({ ...jobs[0], capa_url: null })
+    }),
+  )
+  await abrir({ intervaloMs: 20 })
+  await screen.findByText('andando.mp4')
+
+  jobs = [job({ id: 'a', nome: 'andando.mp4', estado: 'falhou', codigo_falha: 'erro_interno' })]
+
+  await waitFor(() => expect(detalhes).toBe(1))
+  const antes = rodadas
+  await new Promise((r) => setTimeout(r, 100))
+  expect(detalhes).toBe(1)
+  expect(rodadas).toBe(antes)
 })
 
 test('com a aba escondida, ninguém é consultado', async () => {

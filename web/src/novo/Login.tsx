@@ -7,6 +7,7 @@ import {
   type Autenticador,
   type ResultadoDaSenha,
 } from '../auth/autenticador.ts'
+import { urlSegura } from '../urlSegura.ts'
 import { Button } from './ui/button.tsx'
 
 type Etapa = Exclude<ResultadoDaSenha, { tipo: 'logado' }> | { tipo: 'senha' }
@@ -40,6 +41,8 @@ export default function Login({ autenticador, aoEntrar }: { autenticador: Autent
   const [erro, setErro] = useState<string | null>(null)
   const [codigo, setCodigo] = useState('')
   const [verSenha, setVerSenha] = useState(false)
+  // `otpauth:` não é https nem caminho da aplicação: hoje o link não aparece e o segredo fica para digitar.
+  const uriDoAutenticador = etapa.tipo === 'precisa_cadastro_totp' ? urlSegura(etapa.uri) : null
 
   function voltarAoInicio() {
     setEtapa({ tipo: 'senha' })
@@ -158,9 +161,11 @@ export default function Login({ autenticador, aoEntrar }: { autenticador: Autent
                   >
                     {etapa.segredo}
                   </code>
-                  <a href={etapa.uri} className="flex items-center gap-1 justify-self-start text-sm text-link hover:underline">
-                    <IconExternalLink size={16} stroke={1.75} aria-hidden /> Abrir no aplicativo autenticador
-                  </a>
+                  {uriDoAutenticador && (
+                    <a href={uriDoAutenticador} className="flex items-center gap-1 justify-self-start text-sm text-link hover:underline">
+                      <IconExternalLink size={16} stroke={1.75} aria-hidden /> Abrir no aplicativo autenticador
+                    </a>
+                  )}
                 </div>
               )}
               <label className="grid gap-1 text-xs font-medium">

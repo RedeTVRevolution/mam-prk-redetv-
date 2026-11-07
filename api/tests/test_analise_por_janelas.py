@@ -480,3 +480,33 @@ def test_apagar_o_progresso_faz_a_nova_analise_chamar_o_gemini_em_todas_as_janel
 
     assert len(nova.chamadas) == 30
     assert set(janelas.ler("outro")) == {0}
+
+
+def _boa_com_comerciais(*marcas: str) -> str:
+    dados = json.loads(BOA)
+    modelo = dados["comerciais"][0]
+    dados["comerciais"] = [{**modelo, "marca": m} for m in marcas]
+    return json.dumps(dados)
+
+
+def test_comercial_cuja_marca_e_pessoa_da_decupagem_sai_e_marca_de_verdade_fica() -> (
+    None
+):
+    """O @ do apresentador na tela não é anúncio (#434)."""
+    curto = Video(sha256="d" * 64, duracao_ms=60_000)
+    transporte = TransporteFalso(_boa_com_comerciais("FULÁNA", "Marca Real"))
+
+    d = analisar_video(transporte, video_uri=URI, job_id="j", video=curto)
+
+    assert [p.nome for p in d.pessoas] == ["Fulana"]
+    assert [c.marca for c in d.comerciais] == ["Marca Real"]
+
+
+def test_nas_janelas_o_comercial_com_nome_de_pessoa_tambem_sai() -> None:
+    def por_trecho(inicio: int, fim: int) -> str:
+        return _boa_com_comerciais("Fulana", "Marca Real")
+
+    d = _decupar(ModeloFalso(por_trecho))
+
+    assert {p.nome for p in d.pessoas} == {"Fulana"}
+    assert {c.marca for c in d.comerciais} == {"Marca Real"}

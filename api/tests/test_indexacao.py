@@ -9,6 +9,13 @@ from fastapi.testclient import TestClient
 
 import api.jobs
 from api.auth import Usuario
+from api.catalogo import EnvioParaLixeira
+from api.ciclo_de_vida import (
+    PRAZO_DA_RODADA,
+    fechar_a_rodada,
+    pedir_indexacao,
+    tomar_a_rodada,
+)
 from api.copia_bigquery import CopiaDosMomentos
 from api.correcoes import (
     RepositorioDeAprovacaoEmMemoria,
@@ -42,6 +49,15 @@ class JobsQueNaoGravam(RepositorioEmMemoria):
         if "indexacao" in mudancas:
             raise ConnectionError("Firestore fora do ar")
         return super().transitar(job_id, de, mudancas)
+
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        def sem_gravar_o_estado(job: Job) -> dict[str, Any] | None:
+            mudancas: dict[str, Any] | None = mudar(job)
+            if mudancas and "indexacao" in mudancas:
+                raise ConnectionError("Firestore fora do ar")
+            return mudancas
+
+        return super().trocar(job_id, sem_gravar_o_estado)
 
 
 class DisparoFalso:
@@ -297,6 +313,37 @@ def test_falha_ao_gravar_o_estado_nao_derruba_nem_impede_a_indexacao() -> None:
     assert mundo.indice.total() == 6
 
 
+class JobsQueFalhamUmaVezAoFechar(RepositorioEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.falhas = 0
+
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        def falha_a_primeira(job: Job) -> dict[str, Any] | None:
+            mudancas: dict[str, Any] | None = mudar(job)
+            if mudancas and "versao_indexada" in mudancas and not self.falhas:
+                self.falhas += 1
+                raise ConnectionError("Firestore fora do ar")
+            return mudancas
+
+        return super().trocar(job_id, falha_a_primeira)
+
+
+def test_queda_passageira_ao_fechar_a_rodada_nao_prende_a_vez() -> None:
+    mundo = Mundo()
+    jobs = JobsQueFalhamUmaVezAoFechar()
+    jobs.salvar(_job())
+
+    indexacao = reindexar(
+        _job(), jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    )
+
+    job = jobs.obter("j1")
+    assert jobs.falhas == 1 and job
+    assert indexacao is not None and indexacao.estado == "indexado"
+    assert (job.versao_indexada, job.rodada_da_indexacao) == (1, None)
+
+
 def test_reindexar_todos_pega_so_os_concluidos() -> None:
     mundo = Mundo()
     mundo.jobs.salvar(_job("j2", "analisando"))
@@ -306,6 +353,21 @@ def test_reindexar_todos_pega_so_os_concluidos() -> None:
     )
 
     assert resultado == {"j1": "indexado"}
+
+
+def test_reindexar_todos_so_marca_a_lixeira_no_concluido_que_esta_nela() -> None:
+    mundo = Mundo()
+    mundo.reindexar()
+    envio = EnvioParaLixeira(em=BASE, por_uid="u1", por_email="u@x", motivo="x")
+    mundo.jobs.salvar(_job().model_copy(update={"lixeira": envio}))
+
+    resultado = reindexar_jobs(
+        None, mundo.jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    )
+
+    assert resultado == {"j1": "na_lixeira"}
+    assert mundo.indice.total() == 6
+    assert all(r.na_lixeira for r in mundo.indice.buscar(Consulta(limite=100)))
 
 
 def test_correcao_responde_sem_reindexar_e_so_o_aprovar_revisao_atualiza_o_indice() -> (
@@ -382,7 +444,7 @@ def test_aprovar_revisao_volta_o_estado_mesmo_com_erro_inesperado_do_disparo() -
 
 
 def test_nenhuma_rota_dos_jobs_reindexa_dentro_do_pedido() -> None:
-    # As rotas da revisão (corrigir, aceitar sugestão, desfazer, aprovar ou recusar,
+    # As rotas da revisão (corrigir, desfazer, aprovar ou recusar,
     # descartar e reaplicar da fila) só gravam Correções: a reindexação é do Job
     # `mam-indexacao`, que o "Aprovar Revisão" dispara (#328).
     assert "reindexar" not in inspect.signature(api.jobs.criar_rotas).parameters
@@ -472,37 +534,6 @@ def test_correcao_pendente_de_aprovacao_so_entra_na_busca_depois_de_aprovada() -
     mundo.rodar_o_job()
 
     assert "na_busca" in _na_busca(mundo)
-
-
-class _EmbeddingFalso:
-    def vetor(self, jpeg: bytes, descricao: str) -> list[float]:
-        return [1.0, 0.0]
-
-
-def test_reindexar_com_embedding_grava_o_vetor_so_nos_planos_com_quadro() -> None:
-    mundo = Mundo()
-    modelo: dict[str, Any] = json.loads(json.dumps(MODELO))
-    modelo["planos"][0]["quadro"] = "quadros/plano-0.jpg"
-    mundo.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
-    mundo.armazenamento.quadros[("j1", "quadros/plano-0.jpg")] = b"jpeg"
-    job = mundo.jobs.obter("j1")
-    assert job
-
-    reindexar(
-        job,
-        mundo.jobs,
-        mundo.armazenamento,
-        mundo.correcoes,
-        mundo.indice,
-        embedding=_EmbeddingFalso(),
-        quadros=mundo.armazenamento,
-    )
-
-    achados = mundo.indice.buscar(Consulta(limite=100))
-    com_vetor = [r for r in achados if r.vetor_do_quadro]
-    assert [r.tipo for r in com_vetor] == ["plano"]
-    assert mundo.indexacao()["estado"] == "indexado"
-    assert len([r for r in achados if r.tipo == "plano"]) == 2
 
 
 def _modelo_com_sandalia_e_scarpin() -> dict[str, Any]:
@@ -600,3 +631,195 @@ def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
     mundo.rodar_o_job()
     assert buscar("scar") == [("scarpin", 1)]
     assert buscar("vest") == [("vestido", vestidos - 1)]
+
+
+def _ids_do_indice(mundo: Mundo, tipo: str) -> list[str]:
+    achados = mundo.indice.buscar(Consulta(filtros=Filtros(tipo=tipo)))  # type: ignore[arg-type]
+    return sorted(r.id for r in achados)
+
+
+def test_registros_usam_os_ids_do_item_e_nao_a_posicao() -> None:
+    modelo = json.loads(json.dumps(MODELO))
+    modelo["transcricao"].append({**modelo["transcricao"][0], "texto": "Segunda fala"})
+    modelo["textos_na_tela"].append({**modelo["textos_na_tela"][0], "texto": "Outro"})
+    mundo = Mundo(modelo=modelo)
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    resposta = mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "texto_na_tela.acrescentar",
+            "valor": json.dumps(
+                {"inicio_ms": 100, "fim_ms": 900, "tipo": "logo", "texto": "Novo"}
+            ),
+            "motivo": "faltou",
+            "versao": versao,
+        },
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 201
+
+    mundo.reindexar()
+
+    planos = [p["id"] for p in modelo["planos"]]
+    assert _ids_do_indice(mundo, "plano") == sorted(f"j1:plano:{i}" for i in planos)
+    assert _ids_do_indice(mundo, "fala") == ["j1:fala:fal000", "j1:fala:fal001"]
+    acrescentado = f"j1:texto:acr-{resposta.json()['id']}"
+    assert _ids_do_indice(mundo, "texto_na_tela") == sorted(
+        ["j1:texto:txt000", "j1:texto:txt001", acrescentado]
+    )
+    ids_de_objeto = {o["id"] for o in modelo["objetos"]}
+    assert ids_de_objeto
+    for r in mundo.indice.buscar(Consulta(filtros=Filtros(tipo="objeto"))):
+        if ":objeto:" in r.id:
+            assert r.id.split(":")[2] in ids_de_objeto
+
+
+def test_corrigir_uma_fala_nao_muda_o_id_das_outras() -> None:
+    modelo = json.loads(json.dumps(MODELO))
+    modelo["transcricao"].append({**modelo["transcricao"][0], "texto": "Segunda fala"})
+    mundo = Mundo(modelo=modelo)
+    mundo.reindexar()
+    antes = _ids_do_indice(mundo, "fala")
+
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "fala.texto",
+            "item_id": "fal000",
+            "valor": json.dumps({"texto": "Corrigida", "locutor": "Apresentadora"}),
+            "motivo": "ouvi de novo",
+            "versao": versao,
+        },
+        headers=AUTORIZACAO,
+    )
+    mundo.reindexar()
+
+    assert _ids_do_indice(mundo, "fala") == antes
+    assert "Corrigida" in mundo.textos_das_falas()
+
+
+def test_tirar_o_primeiro_objeto_nao_muda_o_id_do_outro() -> None:
+    # Não há correção que remova fala ou texto; a única que remove item é a do objeto.
+    modelo = json.loads(json.dumps(MODELO))
+    primeiro, segundo = (o["id"] for o in modelo["objetos"])
+    mundo = Mundo(modelo=modelo)
+    mundo.reindexar()
+    do_segundo = [i for i in _ids_do_indice(mundo, "objeto") if f":{segundo}:" in i]
+    assert do_segundo
+
+    resposta = mundo.cliente.post(
+        "/v1/jobs/j1/correcoes",
+        json={
+            "tipo": "objeto.nao_existe",
+            "item_id": primeiro,
+            "valor": "nao_existe",
+            "motivo": "não está na imagem",
+            "versao": versao_do_modelo(json.dumps(modelo).encode()),
+        },
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 201
+    mundo.reindexar()
+
+    objetos = [i for i in _ids_do_indice(mundo, "objeto") if ":objeto:" in i]
+    assert objetos == do_segundo
+
+
+class IndiceQuePedeDuranteAGravacao(IndiceQueConta):
+    """Na primeira gravação chega um pedido novo, como uma aprovação no meio da rodada."""
+
+    def __init__(self, pedir: Any) -> None:
+        super().__init__()
+        self._pedir = pedir
+
+    def gravar(self, job_id: str, registros: list[Registro]) -> None:
+        super().gravar(job_id, registros)
+        if self.gravacoes == 1:
+            self._pedir()
+
+
+def _indexar(mundo: Mundo, so_se_pedida: bool = True) -> Indexacao | None:
+    job = mundo.jobs.obter("j1")
+    assert job
+    return reindexar(
+        job,
+        mundo.jobs,
+        mundo.armazenamento,
+        mundo.correcoes,
+        mundo.indice,
+        so_se_pedida=so_se_pedida,
+    )
+
+
+def test_dois_pedidos_seguidos_dao_uma_rodada_com_a_versao_final() -> None:
+    indice = IndiceQueConta()
+    mundo = Mundo(indice=indice)
+    pedir_indexacao(mundo.jobs, "j1", BASE)
+    pedir_indexacao(mundo.jobs, "j1", BASE)
+
+    primeira = _indexar(mundo)
+    segunda = _indexar(mundo)
+
+    job = mundo.jobs.obter("j1")
+    assert job
+    assert primeira and primeira.estado == "indexado"
+    assert segunda is None  # nada mais pedido: o segundo disparo não indexa
+    assert indice.gravacoes == 1
+    assert (job.versao_pedida, job.versao_indexada) == (2, 2)
+    assert job.rodada_da_indexacao is None
+
+
+def test_pedido_durante_a_rodada_e_atendido_na_volta_sem_rodada_paralela() -> None:
+    outras: list[Indexacao | None] = []
+    mundos: list[Mundo] = []
+
+    def pedir_e_disparar() -> None:
+        pedir_indexacao(mundos[0].jobs, "j1", BASE)
+        # O disparo do pedido novo chega com a vez tomada: não grava nada.
+        outras.append(_indexar(mundos[0]))
+
+    indice = IndiceQuePedeDuranteAGravacao(pedir_e_disparar)
+    mundo = Mundo(indice=indice)
+    mundos.append(mundo)
+    pedir_indexacao(mundo.jobs, "j1", BASE)
+
+    resultado = _indexar(mundo)
+
+    job = mundo.jobs.obter("j1")
+    assert job
+    assert resultado and resultado.estado == "indexado"
+    assert outras == [None]
+    assert indice.gravacoes == 2
+    assert (job.versao_pedida, job.versao_indexada) == (2, 2)
+    assert job.rodada_da_indexacao is None
+
+
+def test_rodada_vencida_e_substituida_e_a_antiga_nao_fecha() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job())
+    assert tomar_a_rodada(jobs, "j1", BASE, "a")
+    assert tomar_a_rodada(jobs, "j1", BASE + timedelta(minutes=10), "b") is None
+
+    assert tomar_a_rodada(jobs, "j1", BASE + PRAZO_DA_RODADA, "b")
+    antiga = fechar_a_rodada(
+        jobs,
+        "j1",
+        "a",
+        1,
+        indexado=True,
+        indexacao=Indexacao(estado="indexado", em=BASE),
+        agora=BASE + PRAZO_DA_RODADA,
+    )
+
+    job = jobs.obter("j1")
+    assert antiga is None and job and job.rodada_da_indexacao
+    assert (job.versao_indexada, job.rodada_da_indexacao.id) == (0, "b")
+
+
+def test_pedido_so_vale_em_job_concluido() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j2", "analisando"))
+
+    assert pedir_indexacao(jobs, "j2", BASE) is None
+    assert tomar_a_rodada(jobs, "j2", BASE, "a") is None

@@ -1,3 +1,5 @@
+> **As sugestões saíram** em 6/11/2026 (decisão do Bruno, #487): identificar pessoa, pauta do trecho e objeto do visual, com as rotas, o painel e a contagem. O item "sugestões" da lista abaixo não será migrado.
+
 # Frontend novo: Tailwind e shadcn no lugar do Mantine, trocado por fases
 
 Em 5/11/2026, o Bruno aprovou o protótipo do redesenho (`prototipos/redesenho`, opção B Galeria) para virar o `web/` de produção. Ele também decidiu:

@@ -30,6 +30,7 @@ from api.resumos_de_uso import (
     ResumosEmMemoria,
     UsoDoDia,
 )
+from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
 from api.usuarios import ContaDoIdentityPlatform, ContasDeUsuarioEmMemoria
@@ -114,6 +115,13 @@ class Mundo:
         faturamento: Any = None,
         jobs: Any = None,
         relogio: Callable[[], datetime] = agora_utc,
+        periodo_padrao: bool = False,
+        cache_do_painel: Any = None,
+        revisao: Any = None,
+        tempo_de_revisao: Any = None,
+        armazenamento: Any = None,
+        correcoes: Any = None,
+        taxa_de_correcao: Any = None,
     ) -> None:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         repo = RepositorioDePapeisEmMemoria()
@@ -129,7 +137,9 @@ class Mundo:
                 ContaDoIdentityPlatform(uid="caio", email="caio@redetv.com.br"),
             ]
         )
-        self.cliente = TestClient(
+        # `periodo_padrao`: o teste é do período padrão, então o cliente não pede o histórico inteiro.
+        classe = TestClient if periodo_padrao else ClienteSemPeriodoPadrao
+        self.cliente = classe(
             criar_app(
                 verificador=VerificadorFalso({"ana": ANA}),
                 papeis=repo,
@@ -140,6 +150,12 @@ class Mundo:
                 repositorio=jobs,
                 relogio=relogio,
                 contas=self.contas,
+                cache_do_painel=cache_do_painel,
+                revisao=revisao,
+                tempo_de_revisao=tempo_de_revisao,
+                armazenamento=armazenamento,
+                correcoes=correcoes,
+                taxa_de_correcao=taxa_de_correcao,
             )
         )
 

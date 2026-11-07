@@ -31,7 +31,6 @@ const servidor = setupServer(
     pedidos.fila += 1
     return HttpResponse.json(fila)
   }),
-  http.get('/v1/jobs/j1/sugestoes', () => HttpResponse.json([])),
   http.post('/v1/jobs/j1/revisao/aprovar', () => HttpResponse.json({ indexacao: 'pendente' }, { status: 202 })),
 )
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))

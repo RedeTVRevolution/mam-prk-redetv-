@@ -7,6 +7,7 @@ texto em português.
 import copy
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -54,6 +55,11 @@ ETAPA = "inventario_de_objetos"  # o rótulo de custo de cada chamada
 # chamadas). Com imagens, cada plano leva 2 ou 3 JPEGs em resolução cheia: lotes menores.
 PLANOS_POR_LOTE_DO_FLORENCE = 20
 PLANOS_POR_LOTE_DO_GEMINI = 4
+
+# Chamadas ao Gemini em andamento ao mesmo tempo. No Flex cada uma pode levar até 15 min
+# (#402): em série, ~23 chamadas por vídeo estourariam o `timeout` do Job; com 8, são
+# ~3 rodadas. Mais que isso arrisca 429 (falta de capacidade do Flex).
+PARALELISMO_DO_INVENTARIO = 8
 
 Inventarios = dict[int, list[ObjetoDoInventario]]
 
@@ -159,6 +165,19 @@ Você faz o inventário dos objetos de cena de cada plano de um vídeo de televi
 
 def _lotes[T](itens: Sequence[T], tamanho: int) -> list[list[T]]:
     return [list(itens[i : i + tamanho]) for i in range(0, len(itens), max(tamanho, 1))]
+
+
+def _em_paralelo[T, R](
+    itens: Sequence[T], chamar: Callable[[T], R], paralelismo: int
+) -> list[R]:
+    """`chamar` em cada item, até `paralelismo` ao mesmo tempo, na ordem dos itens. Na
+    primeira falha, os itens que ainda não começaram são cancelados (cada um custaria até
+    um prazo inteiro do Flex) e a falha sobe depois de as chamadas em andamento terminarem."""
+    pool = ThreadPoolExecutor(max_workers=max(paralelismo, 1))
+    try:
+        return list(pool.map(chamar, itens))
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 def _validar_convertida(texto: str) -> RespostaConvertida:
@@ -268,6 +287,7 @@ def converter_do_florence(
     modelo: str,
     job_id: str,
     planos_por_lote: int = PLANOS_POR_LOTE_DO_FLORENCE,
+    paralelismo: int = PARALELISMO_DO_INVENTARIO,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
@@ -280,10 +300,12 @@ def converter_do_florence(
         por_plano.setdefault(q.plano, []).append(q)
     inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
     esquema = _esquema(RespostaConvertida)
-    for lote in _lotes(
+    lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
-    ):
-        resposta = gerar_validado(
+    )
+    respostas = _em_paralelo(
+        lotes,
+        lambda lote: gerar_validado(
             transporte,
             _chamada(
                 modelo,
@@ -296,7 +318,10 @@ def converter_do_florence(
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,
-        )
+        ),
+        paralelismo,
+    )
+    for lote, resposta in zip(lotes, respostas, strict=True):
         for do_plano in resposta.planos:
             if do_plano.plano not in lote:
                 continue
@@ -333,6 +358,7 @@ def olhar_com_gemini(
     job_id: str,
     quadro_de: Callable[[str], bytes],
     planos_por_lote: int = PLANOS_POR_LOTE_DO_GEMINI,
+    paralelismo: int = PARALELISMO_DO_INVENTARIO,
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
@@ -342,7 +368,8 @@ def olhar_com_gemini(
     inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
     esquema = _esquema(RespostaVista)
     com_quadros = [i for i, p in enumerate(decupagem.planos) if p.quadros]
-    for lote in _lotes(com_quadros, planos_por_lote):
+
+    def olhar(lote: list[int]) -> RespostaVista:
         imagens: list[bytes] = []
         linhas: list[str] = []
         for i in lote:
@@ -353,7 +380,7 @@ def olhar_com_gemini(
                 f"PLANO {i} ({em_mm_ss(p.inicio_ms)}–{em_mm_ss(p.fim_ms)}): quadros 0 a "
                 f"{len(p.quadros) - 1} = imagens {primeira} a {len(imagens)}"
             )
-        resposta = gerar_validado(
+        return gerar_validado(
             transporte,
             _chamada(
                 modelo,
@@ -368,6 +395,11 @@ def olhar_com_gemini(
             sortear=sortear,
             relogio=relogio,
         )
+
+    lotes = _lotes(com_quadros, planos_por_lote)
+    for lote, resposta in zip(
+        lotes, _em_paralelo(lotes, olhar, paralelismo), strict=True
+    ):
         for do_plano in resposta.planos:
             if do_plano.plano not in lote:
                 continue

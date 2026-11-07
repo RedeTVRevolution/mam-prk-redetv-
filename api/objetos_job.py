@@ -16,7 +16,7 @@ from typing import Protocol
 from google.cloud.storage import Client as ClienteStorage
 from PIL import Image
 
-from api import teste_dos_jobs
+from api import log_estruturado, teste_dos_jobs
 from api.decupagem import Decupagem
 from api.florence import (
     NOME_DO_MODELO,
@@ -190,7 +190,7 @@ def executar(
 
 def main() -> None:
     # O log do Job diz em qual dispositivo rodou (`api.florence`, em INFO).
-    logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
+    log_estruturado.configurar(logging.WARNING)
     logging.getLogger("api").setLevel(logging.INFO)
     if teste_dos_jobs.ativo():
         # Teste depois da publicação (#238): amostra da imagem, nada no Storage.

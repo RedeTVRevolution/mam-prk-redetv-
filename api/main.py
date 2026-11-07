@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
@@ -36,14 +36,15 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
+from api.bancos import cliente_da_colecao
 from api.busca import (
     Busca,
-    EmbeddingDaConsulta,
     ListasDaBusca,
     Ranking,
     RankingEmOrdem,
 )
 from api.busca_na_nuvem import adaptadores_da_busca
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
 from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
@@ -63,7 +64,6 @@ from api.correcoes import (
 )
 from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.decupagem import Decupagem
-from api.embedding_do_quadro import EmbeddingDoQuadro, embedding_da_busca
 from api.entendimento_da_consulta import ModelArmor
 from api.eventos_de_uso import (
     Eventos,
@@ -75,7 +75,6 @@ from api.eventos_do_job import eventos_do_ambiente
 from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.idempotencia import RepositorioDeIdempotencia
-from api.indexacao import reindexar
 from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
     TAMANHO_MAXIMO_PADRAO_BYTES,
@@ -83,13 +82,11 @@ from api.jobs import (
     ArmazenamentoIndisponivel,
     DisparoDaIndexacao,
     DisparoDaIndexacaoIndisponivel,
-    Job,
     RepositorioDeJobs,
     RepositorioIndisponivel,
     ServicoIndisponivel,
     TipoNaoSuportado,
     _chave_com_algum,
-    _exige_aprovar,
     agora_utc,
     criar_rotas,
     papeis_da_pessoa,
@@ -105,9 +102,13 @@ from api.lixeira_do_catalogo import (
     FotosEmMemoria,
     criar_rotas_da_lixeira_do_catalogo,
 )
+from api.log_estruturado import configurar as configurar_o_log
 from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
+    COLECAO_DA_AUDITORIA,
+    COLECAO_DE_CHAVES,
+    COLECAO_DE_PAPEIS,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
@@ -126,10 +127,11 @@ from api.nuvem import (
     RepositorioDeIdempotenciaFirestore,
     RepositorioDePapeisFirestore,
     RepositorioDeRevisaoFirestore,
-    RepositorioDeSugestoesFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
+    listagem_por_mes_do_ambiente,
 )
+from api.orcamento_de_escrita import OrcamentoFirestore
 from api.painel import AcessosAoPainel, criar_rotas_do_painel
 from api.papeis import (
     Papel,
@@ -153,6 +155,7 @@ from api.programas import (
 from api.progresso_das_janelas import JanelasDoJob
 from api.purga import LOGIN_RECENTE_PADRAO, Purga, criar_rotas_da_purga
 from api.qualidade_do_painel import QualidadeDoPainel, QualidadeReal
+from api.relatorio_de_marcas import ConsultaComCache as MarcasComCache
 from api.relatorio_de_marcas import (
     ConsultaDeInsercoes,
     criar_rotas_das_marcas,
@@ -171,6 +174,13 @@ from api.revisao import (
     RepositorioDeRevisaoEmMemoria,
     criar_rotas_da_revisao,
 )
+from api.revisao_do_painel import (
+    RepositorioDeRevisaoEspelhado,
+    RevisaoEmMemoria,
+    TempoDeRevisao,
+    revisao_do_ambiente,
+    tabela_do_ambiente,
+)
 from api.rota_da_busca import (
     CONSULTAS_POR_MINUTO,
     LIMITES_DA_IMAGEM,
@@ -185,17 +195,15 @@ from api.rotas_das_chaves import (
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
 from api.rotas_dos_programas import criar_rotas_dos_programas
-from api.sugestoes import (
-    RepositorioDeSugestoes,
-    RepositorioDeSugestoesEmMemoria,
-    criar_rotas_da_contagem,
-)
 from api.taxa_de_correcao import criar_rotas_da_qualidade
+from api.taxa_do_painel import LeitorDaTaxa, TaxaEmMemoria, taxa_do_ambiente
+from api.tempo_de_tela import ConsultaComCache as TempoDeTelaComCache
 from api.tempo_de_tela import (
     ConsultaDeMomentos,
     consulta_do_ambiente,
     criar_rotas_do_tempo_de_tela,
 )
+from api.texto_como_dado import conferir_ids_e_consultas
 from api.tipos_de_objeto import (
     TiposDeObjeto,
     TiposDeObjetoEmMemoria,
@@ -255,6 +263,24 @@ class _FrontComEnderecos(StaticFiles):
             return await super().get_response("index.html", scope)
 
 
+# Cabeçalhos de segurança de toda resposta (#372). O Storage está em `img-src` (capas e
+# quadros), `media-src` (o vídeo do Visualizador) e `connect-src` (o service worker das
+# capas e o envio); o Identity Platform, no login e na renovação do token.
+_STORAGE = "https://storage.googleapis.com"
+CABECALHOS_DE_SEGURANCA = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        f"img-src 'self' {_STORAGE}; "
+        f"media-src 'self' {_STORAGE}; "
+        f"connect-src 'self' {_STORAGE} https://identitytoolkit.googleapis.com "
+        "https://securetoken.googleapis.com; "
+        "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Strict-Transport-Security": "max-age=31536000",
+}
+
 # A rota da chamada de API que não casou com nenhuma rota da API.
 ROTA_DESCONHECIDA = "(sem rota)"
 
@@ -309,17 +335,17 @@ def criar_app(
     marcas: CatalogoDeMarcas | None = None,
     programas: RepositorioDeProgramas | None = None,
     fotos_de_referencia: FotosDeReferencia | None = None,
-    sugestoes: RepositorioDeSugestoes | None = None,
     indice: IndiceDaBusca | None = None,
     copia: CopiaDosMomentos | None = None,
-    embedding: EmbeddingDoQuadro | None = None,
-    embedding_da_consulta: EmbeddingDaConsulta | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
     tempo_de_tela: ConsultaDeMomentos | None = None,
     resumos_de_uso: ResumosDeUso | None = None,
     qualidade_do_painel: QualidadeDoPainel | None = None,
     faturamento: FonteDeCusto | None = None,
+    tempo_de_revisao: TempoDeRevisao | None = None,
+    taxa_de_correcao: LeitorDaTaxa | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
+    cache_do_painel: CacheCurto | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     armor: ModelArmor | None = None,
@@ -337,7 +363,7 @@ def criar_app(
     eventos: Eventos | None = None,
     pasta_web: Path = PASTA_WEB,
 ) -> FastAPI:
-    app = FastAPI(title="MAM RedeTV")
+    app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
     @app.exception_handler(ServicoIndisponivel)
     def _indisponivel(_request: Request, _erro: ServicoIndisponivel) -> JSONResponse:
@@ -346,6 +372,15 @@ def criar_app(
     @app.exception_handler(TipoNaoSuportado)
     def _tipo_errado(_request: Request, _erro: TipoNaoSuportado) -> JSONResponse:
         return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
+
+    # O erro que ninguém tratou não passa pelos middlewares: quem responde é o
+    # `ServerErrorMiddleware`, por fora deles, e o 500 sairia sem os cabeçalhos de
+    # segurança (#372). A exceção continua subindo para o log.
+    @app.exception_handler(Exception)
+    def _erro_interno(_request: Request, _erro: Exception) -> PlainTextResponse:
+        return PlainTextResponse(
+            "Internal Server Error", status_code=500, headers=CABECALHOS_DE_SEGURANCA
+        )
 
     app.state.verificador = verificador or _SemVerificador()
     # Com repositório e chave MAC, a API confere as chaves emitidas por ela mesma.
@@ -384,6 +419,17 @@ def criar_app(
 
     app.middleware("http")(_registrar_chamada_de_api)
     app.middleware("http")(exigir_autenticacao)
+
+    # O último registrado é o mais externo: pega também o 401 da autenticação e os erros
+    # que viram resposta dentro do app; o 500 de exceção não tratada é o `_erro_interno`.
+    async def _cabecalhos_de_seguranca(
+        request: Request, seguinte: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        resposta = await seguinte(request)
+        resposta.headers.update(CABECALHOS_DE_SEGURANCA)
+        return resposta
+
+    app.middleware("http")(_cabecalhos_de_seguranca)
 
     def _registrar_login(pessoa: Usuario) -> None:
         """O que a API vê do login: a primeira chamada de `/eu` depois dele, que o front
@@ -450,7 +496,6 @@ def criar_app(
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
     repositorio_de_programas = programas or ProgramasEmMemoria()
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
-    repositorio_de_sugestoes = sugestoes or RepositorioDeSugestoesEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
     repositorio_de_aprovacao = aprovacao or RepositorioDeAprovacaoEmMemoria()
     v1.include_router(
@@ -464,10 +509,8 @@ def criar_app(
             catalogo_de_pessoas,
             catalogo_de_marcas,
             repositorio_de_programas,
-            repositorio_de_sugestoes,
             disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
-            tipos_dos_objetos.conhecidos,
             idempotencia,
             publicador,
         )
@@ -486,37 +529,6 @@ def criar_app(
         )
     )
     v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
-    v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
-
-    def _reindexar_para_a_renomeacao(job: Job) -> bool:
-        indexacao = reindexar(
-            job,
-            repositorio_de_jobs,
-            armazenamento_dos_jobs,
-            repositorio_de_correcoes,
-            indice_da_busca,
-            relogio,
-            copia,
-            embedding,
-            armazenamento_dos_jobs,
-            tipos_de_objeto=tipos_dos_objetos,
-            pessoas=catalogo_de_pessoas.obter,
-        )
-        return indexacao is not None and indexacao.estado == "indexado"
-
-    def _reindexar_para_o_programa(job: Job) -> bool:
-        """Como na pessoa, e a cópia do BigQuery também precisa ficar: os relatórios
-        são por programa."""
-        if not _reindexar_para_a_renomeacao(job):
-            return False
-        if copia is None:
-            return True
-        atual = repositorio_de_jobs.obter(job.id)
-        return (
-            atual is not None
-            and atual.copia_bigquery is not None
-            and atual.copia_bigquery.estado == "copiado"
-        )
 
     # Uma cópia das pessoas para o autocompletar e para a busca resolver nomes.
     copia_das_pessoas = CopiaCurta(catalogo_de_pessoas.todas, relogio)
@@ -544,7 +556,6 @@ def criar_app(
                 armazenamento_dos_jobs,
                 repositorio_de_auditoria,
                 relogio,
-                _reindexar_para_a_renomeacao,
                 descartar,
             )
         )
@@ -566,7 +577,7 @@ def criar_app(
             repositorio_de_jobs,
             repositorio_de_auditoria,
             relogio,
-            _reindexar_para_o_programa,
+            disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             copia_das_pessoas.descartar,
         )
     )
@@ -582,7 +593,6 @@ def criar_app(
                 repositorio=repositorio_de_jobs,
                 armazenamento=armazenamento_dos_jobs,
                 relogio=relogio,
-                embedding=embedding_da_consulta,
                 copia_do_catalogo=copia_das_pessoas,
                 listas=listas_da_busca,
             ),
@@ -601,14 +611,14 @@ def criar_app(
             AcessosAoPainel(repositorio_de_auditoria, relogio),
             qualidade_do_painel
             or QualidadeReal(
-                repositorio_de_jobs,
-                armazenamento_dos_jobs,
-                repositorio_de_correcoes,
-                repositorio_da_revisao,
+                taxa_de_correcao or TaxaEmMemoria(),
+                tempo_de_revisao
+                or RevisaoEmMemoria(repositorio_da_revisao, repositorio_de_jobs),
             ),
             faturamento,
             repositorio_de_jobs,
             relogio,
+            cache_do_painel,
         )
     )
     v1.include_router(
@@ -653,6 +663,7 @@ def criar_app(
             relogio,
             catalogo_de_pessoas,
             catalogo_de_marcas,
+            indice_da_busca,
         )
     )
     v1.include_router(
@@ -708,8 +719,14 @@ def criar_app(
             repositorio_da_revisao,
         )
     )
-    v1.include_router(criar_rotas_do_tempo_de_tela(tempo_de_tela, repositorio_de_jobs))
-    v1.include_router(criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs))
+    v1.include_router(
+        criar_rotas_do_tempo_de_tela(
+            tempo_de_tela, repositorio_de_jobs, relogio, catalogo_de_pessoas
+        )
+    )
+    v1.include_router(
+        criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs, relogio)
+    )
     # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
     app.include_router(
         v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]
@@ -724,26 +741,55 @@ def criar_app(
 
 # No Cloud Run, o Terraform define o projeto; fora dele, a API nega todo token.
 _projeto = os.environ.get("GCP_PROJECT_ID")
+
+
+def _revisao_espelhada(banco: firestore.Client) -> RepositorioDeRevisao:
+    """O Firestore da revisão com cada medida copiada para a tabela do painel (#467); sem a
+    tabela configurada, o repositório puro."""
+    repositorio = RepositorioDeRevisaoFirestore(banco)
+    tabela = tabela_do_ambiente(os.environ)
+    return (
+        repositorio
+        if tabela is None
+        else RepositorioDeRevisaoEspelhado(repositorio, tabela)
+    )
+
+
+def _com_cache[C, R](
+    consulta: C | None, envolver: Callable[[C, CacheCurto], R]
+) -> R | None:
+    """A consulta do BigQuery com o cache curto de uma instância (#453); `None` fica `None`."""
+    return envolver(consulta, CacheCurto()) if consulta else None
+
+
+configurar_o_log()
+
 if _projeto:
     _adaptadores = adaptadores_da_busca(os.environ)
     _busca = (
         ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
     )
-    _embedding = embedding_da_busca(_busca)
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
-        RepositorioFirestore(firestore.Client(project=_projeto)),
+        RepositorioFirestore(
+            firestore.Client(project=_projeto),
+            listagem_por_mes=listagem_por_mes_do_ambiente(os.environ),
+        ),
         ArmazenamentoStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_QUARENTENA"],
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        papeis=RepositorioDePapeisFirestore(firestore.Client(project=_projeto)),
+        papeis=RepositorioDePapeisFirestore(
+            cliente_da_colecao(_projeto, COLECAO_DE_PAPEIS)
+        ),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
         correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
         aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
-        auditoria=RepositorioDeAuditoriaFirestore(firestore.Client(project=_projeto)),
+        auditoria=RepositorioDeAuditoriaFirestore(
+            cliente_da_colecao(_projeto, COLECAO_DA_AUDITORIA)
+        ),
         contas=ContasIdentityPlatform(_projeto),
         # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
         # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
@@ -756,7 +802,7 @@ if _projeto:
         ),
         listas_da_busca=ListasDaBuscaFirestore(firestore.Client(project=_projeto)),
         repositorio_de_chaves=RepositorioDeChavesFirestore(
-            firestore.Client(project=_projeto)
+            cliente_da_colecao(_projeto, COLECAO_DE_CHAVES)
         ),
         arquivos=ArquivosNoStorage(
             ClienteStorage(project=_projeto),
@@ -764,7 +810,7 @@ if _projeto:
             os.environ["BUCKET_DECUPAGENS"],
         ),
         mac=mac_do_ambiente(os.environ),
-        revisao=RepositorioDeRevisaoFirestore(firestore.Client(project=_projeto)),
+        revisao=_revisao_espelhada(firestore.Client(project=_projeto)),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
             or LOGIN_RECENTE_PADRAO / timedelta(minutes=1)
@@ -787,11 +833,19 @@ if _projeto:
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),
-        sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
-        indice=AgentRetrieval(_busca, transporte_http()) if _busca else None,
+        # A reindexação (em `BackgroundTasks`) e a purga (no pedido da rota) esperam a
+        # cota de escrita; a busca nunca espera (`AgentRetrieval`).
+        indice=(
+            AgentRetrieval(
+                _busca,
+                transporte_http(),
+                tentar_no_429=True,
+                orcamento=OrcamentoFirestore(firestore.Client(project=_projeto)),
+            )
+            if _busca
+            else None
+        ),
         copia=copia_do_ambiente(os.environ),
-        embedding=_embedding,
-        embedding_da_consulta=_embedding,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore.Client(project=_projeto)),
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(
@@ -801,10 +855,13 @@ if _projeto:
                 os.environ.get("BUSCA_IMAGEM_MAX_PIXELS") or LimitesDaImagem.max_pixels
             ),
         ),
-        tempo_de_tela=consulta_do_ambiente(os.environ),
+        tempo_de_tela=_com_cache(consulta_do_ambiente(os.environ), TempoDeTelaComCache),
         resumos_de_uso=resumos_do_ambiente(os.environ),
         faturamento=faturamento_do_ambiente(os.environ),
-        relatorio_de_marcas=marcas_do_ambiente(os.environ),
+        tempo_de_revisao=revisao_do_ambiente(os.environ),
+        taxa_de_correcao=taxa_do_ambiente(os.environ),
+        relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
+        cache_do_painel=CacheCurto(),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],

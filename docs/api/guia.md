@@ -34,11 +34,11 @@ O `programa` vem do seu sistema, nunca dos metadados do arquivo (`title` e `arti
 
 O MAM **não busca** o arquivo: quem envia é você, pela `url_de_upload` (ADR 0011). O sistema interno da RedeTV não sai para a internet, então o caminho é um **serviço intermediário**, com acesso à internet, que pega o vídeo no sistema interno e o envia.
 
-- É um **upload retomável** do Cloud Storage: um `POST` abre a sessão (cabeçalhos `x-goog-resumable: start` e `x-upload-content-length`; a resposta traz o `Location` da sessão) e um `PUT` nesse endereço manda os bytes. A URL não usa a sua chave de API.
+- É um **upload retomável** do Cloud Storage: um `POST` abre a sessão (cabeçalhos `x-goog-resumable: start`, `x-goog-if-generation-match: 0` e `x-upload-content-length`; a resposta traz o `Location` da sessão) e um `PUT` nesse endereço manda os bytes. A URL não usa a sua chave de API.
 - Se a conexão cair, pergunte quanto já chegou com `PUT` vazio e `Content-Range: bytes */TOTAL` (resposta 308 com `Range: bytes=0-N`) e mande o resto com `Content-Range: bytes N+1-FIM/TOTAL`.
 - Envie com **nome `.mp4` e `tipo` `video/mp4`**, sem recodificar. Os arquivos da RedeTV são MP4 com extensão `.mov` (H.264 1280x720, 29,97 fps, AAC estéreo 48 kHz): só troque o nome. Outro `tipo` dá 415.
 - Em `prod`, o upload só é aceito a partir dos **IPs da RedeTV**: o serviço intermediário precisa sair por eles.
-- A URL vale por um prazo; passado ele, o Job falha com `upload_expirado`.
+- A URL só serve para **abrir** a sessão e vale **15 minutos**: abra logo depois de registrar o vídeo. O `x-goog-if-generation-match: 0` é obrigatório (sem ele o `POST` leva 403) e garante que o objeto é escrito uma vez só: um segundo envio para o mesmo Job é recusado. A sessão aberta segue valendo, mas o Job sem upload completo em 24 h falha com `upload_expirado` e o objeto é apagado.
 - A `timecode_origem` das decupagens da RedeTV não é o timecode da fita: a faixa `tmcd` desses arquivos vem zerada.
 
 Exemplos: `exemplos/curl/3-enviar-o-video.sh` e `exemplos/python/3-enviar-o-video.py`. Quando o arquivo chega, o Job passa a `validando` sozinho.
@@ -98,7 +98,6 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | lista de erros (`Erro de validação`) | Um campo está fora do formato (nome sem `.mp4`, nome com `/`, campo desconhecido, `programa` fora de `GET /v1/programas`, `data_exibicao` ausente ou fora de `AAAA-MM-DD`): leia `loc` e `msg` em `detail`. |
 | 304 | `Não mudou` | `GET /v1/jobs/{job_id}` com `If-None-Match` igual ao `ETag`: nada mudou, sem corpo. Use a cópia guardada. |
 | 404 | `Passada não encontrada` | O Job não tem essa passada: pegue o id em `GET /v1/jobs/{job_id}/passadas`. |
-| 404 | `Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado` | Escolha um plano de `GET /v1/busca/parecidos/planos`. |
 | 411 | `Envie o tamanho do pedido` | A busca por imagem exige `Content-Length`. |
 | 422 | `No máximo 200 ids` | `GET /v1/jobs/andamento` aceita até 200 ids por chamada. |
 | 422 | `O início do período passa do fim` | Na busca, `desde` é depois de `ate`. |
@@ -106,6 +105,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | `A imagem passa do tamanho máximo em pixels` | A foto passa de 25 milhões de pixels. |
 | 422 | `Envie uma imagem JPEG ou PNG válida` | O arquivo não é JPEG nem PNG, ou está corrompido. |
 | 422 | `Envie a imagem no campo arquivo` | O multipart da busca por imagem não tem o campo `arquivo`. |
+| 429 | `Teto de 200 Jobs por hora atingido` | A chave criou 200 Jobs na última hora (o teto de uma pessoa é 30). Espere os segundos do cabeçalho `Retry-After` (3600, o pior caso), mande menos vídeos por hora e repita com o mesmo `Idempotency-Key`. |
 | 429 | `Consultas demais; tente em um minuto` | As buscas têm limite de 30 por minuto por chave. Espere e repita. |
 | 503 | `A busca por imagem não está disponível agora` | O modelo que descreve a foto está fora, ou não achou objeto nela. Repita com espera crescente ou tente outra foto. |
 | 504 | `A busca demorou demais` | Repita; se persistir, simplifique a consulta. |
@@ -117,14 +117,13 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 
 Com o escopo `ler`, a chave também busca, só nos vídeos do próprio sistema. Cada exemplo abaixo supõe `URL` e `CHAVE` no ambiente; o OpenAPI traz o formato completo das respostas.
 
-- **Buscar por texto:** `GET /v1/busca?q=vestido+azul` devolve vídeos e momentos (`inicio_ms`, `fim_ms`, `motivo` e `quadro`). Filtros: `ev`, `tipo`, `pessoa`, `marca`, `programa`, `desde`, `ate`, `ordem`, `limite`. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte (vale também na busca por imagem e nos parecidos), some na última e vale 15 min, na mesma consulta e com os mesmos filtros. `curl -H "X-API-Key: $CHAVE" "$URL/v1/busca?q=vestido+azul"`
+- **Buscar por texto:** `GET /v1/busca?q=vestido+azul` devolve vídeos e momentos (`inicio_ms`, `fim_ms`, `motivo` e `quadro`). Filtros: `ev`, `tipo`, `pessoa`, `marca`, `programa`, `desde`, `ate`, `ordem`, `limite`. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte (vale também na busca por imagem), some na última e vale 15 min, na mesma consulta e com os mesmos filtros. `curl -H "X-API-Key: $CHAVE" "$URL/v1/busca?q=vestido+azul"`
 - **Buscar por imagem:** `POST /v1/busca/imagem` com o arquivo no campo `arquivo` (multipart). O modelo diz o objeto da foto (`entendida.termo_da_foto`) e a busca segue como se esse termo tivesse sido digitado. `curl -H "X-API-Key: $CHAVE" -F arquivo=@foto.jpg "$URL/v1/busca/imagem"`
-- **Planos parecidos:** `GET /v1/busca/parecidos/planos?job=<id>` para saber quais planos têm busca e `GET /v1/busca/parecidos?job=<id>&plano=<n>` para buscá-los.
-- **Quadro de um momento:** `GET /v1/jobs/{job_id}/quadros/{arquivo}` devolve a URL do JPEG; `arquivo` é o nome em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`).
+- **Quadro de um momento:** `GET /v1/jobs/{job_id}/quadros/{arquivo}` devolve a URL do JPEG; `arquivo` é o nome em `quadro` (`quadros/plano-6.jpg` vira `plano-6.jpg`). Para os quadros de uma página inteira, `POST /v1/jobs/quadros` recebe até 100 pares `{job, arquivo}` e devolve as URLs numa chamada só; o par sem quadro a dar (Job inexistente, de outro sistema, na lixeira ou ainda não concluído) volta com `url` nula.
 - **Andamento de vários Jobs:** `GET /v1/jobs/andamento?ids=a,b,c` (até 200 ids).
 - **Passadas:** `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}` e `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, para comparar a decupagem de outro modelo com a entregue.
 - **Catálogo e vocabulários:** `GET /v1/catalogo/pessoas?q=`, `GET /v1/catalogo/marcas?q=`, `GET /v1/objetos/tipos` e `GET /v1/correcoes/catalogo` (esta aceita qualquer escopo).
 
 ## Rotas deste guia
 
-`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem`, `GET /v1/jobs/{job_id}/decupagem/download`, `GET /v1/jobs/andamento`, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}`, `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, `GET /v1/objetos/tipos`, `GET /v1/catalogo/pessoas`, `GET /v1/catalogo/marcas`, `GET /v1/busca`, `POST /v1/busca/imagem`, `GET /v1/busca/parecidos/planos`, `GET /v1/busca/parecidos` e `GET /v1/correcoes/catalogo`.
+`GET /v1/eu`, `GET /v1/programas`, `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{job_id}`, `DELETE /v1/jobs/{job_id}`, `GET /v1/jobs/{job_id}/reproducao`, `GET /v1/jobs/{job_id}/download`, `GET /v1/jobs/{job_id}/decupagem`, `GET /v1/jobs/{job_id}/decupagem/download`, `GET /v1/jobs/andamento`, `GET /v1/jobs/{job_id}/quadros/{arquivo}`, `POST /v1/jobs/quadros`, `GET /v1/jobs/{job_id}/passadas`, `GET /v1/jobs/{job_id}/passadas/{passada_id}`, `GET /v1/jobs/{job_id}/passadas/{passada_id}/comparacao`, `GET /v1/objetos/tipos`, `GET /v1/catalogo/pessoas`, `GET /v1/catalogo/marcas`, `GET /v1/busca`, `POST /v1/busca/imagem` e `GET /v1/correcoes/catalogo`.

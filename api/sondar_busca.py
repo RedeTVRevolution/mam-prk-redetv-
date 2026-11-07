@@ -39,12 +39,11 @@ from api.agent_retrieval import (
 from api.busca import (
     Ajustes,
     Busca,
-    Entendida,
     Momento,
     RankingEmOrdem,
     VideoDoResultado,
+    filtros_do_servidor,
 )
-from api.embedding_do_quadro import embedding_da_busca
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
 from api.nuvem import CatalogoFirestore, ProgramasFirestore, RepositorioFirestore
@@ -66,7 +65,6 @@ class Caso:
     termo: str | None = None  # None: nada nos vídeos fala disso
     teto: int = 0  # 0: sem limite
     exatos: bool = False
-    visual: bool = False  # o modo visual: o vetor do quadro entra na fusão (#269)
     programa: str | None = None
     desde: date | None = None
     ate: date | None = None
@@ -85,7 +83,6 @@ _CAMPOS = {
     "termo",
     "teto",
     "exatos",
-    "visual",
     "programa",
     "desde",
     "ate",
@@ -122,7 +119,6 @@ def ler_casos(arquivo: Path = ARQUIVO_DAS_CONSULTAS) -> list[Caso]:
             termo=None if termo is None else termo.lower(),
             teto=dado.get("teto", 0),
             exatos=dado.get("exatos", False),
-            visual=dado.get("visual", False),
             programa=dado.get("programa"),
             desde=_data(dado, "desde", texto),
             ate=_data(dado, "ate", texto),
@@ -200,12 +196,6 @@ def veredito(caso: Caso, videos: list[VideoDoResultado]) -> bool | None:
     )
 
 
-def modo_atendido(caso: Caso, entendida: Entendida) -> bool:
-    """A consulta visual que caiu na busca comum (índice ou embedding fora) fica vermelha:
-    senão o texto sozinho a deixaria verde, sem medir o vetor do quadro."""
-    return not caso.visual or entendida.visual
-
-
 # O plano B do dev: o `criar_app` de `api/main.py` não recebe modelo nem Model Armor.
 # Importar o `api.main` montaria o app, que pede o ambiente inteiro.
 class _SemModelo:
@@ -223,9 +213,6 @@ class _SemQuadro:
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return caminho
-
-    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        raise NotImplementedError("a sonda não abre quadros")
 
 
 def _ajustes(caso: Caso) -> Ajustes | None:
@@ -265,13 +252,14 @@ def main() -> int:
         repositorio=RepositorioFirestore(cliente),
         armazenamento=cast(Armazenamento, _SemQuadro()),
         relogio=lambda: datetime.now(UTC),
-        embedding=embedding_da_busca(config),
     )
     falhas = 0
     medidas: list[tuple[Caso, float | None]] = []
     for caso in CASOS:
         resultado = busca.buscar(
-            caso.consulta, ajustes=_ajustes(caso), visual=caso.visual
+            caso.consulta,
+            ajustes=_ajustes(caso),
+            filtros_do_servidor=filtros_do_servidor(),
         )
         videos = resultado.videos
         total = sum(v.n_momentos for v in videos)
@@ -281,9 +269,6 @@ def main() -> int:
             for m in v.momentos[:8]:
                 print(f"     {m.inicio_ms / 1000:7.1f}s {m.motivo[:80]}")
         ok = veredito(caso, videos)
-        if not modo_atendido(caso, resultado.entendida):
-            print("  sem o vetor do quadro: a busca visual caiu na comum")
-            ok = False
         falhas += ok is False
         fracao = pertinencia(caso, videos)
         medidas.append((caso, fracao))

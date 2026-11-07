@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Annotated, Protocol, cast, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
@@ -38,6 +38,7 @@ from api.jobs import (
     _confere_permissao,
     agora_utc,
 )
+from api.texto_como_dado import Texto
 
 SISTEMA = "corrigir-estado"
 MOTIVO_MAXIMO = 500
@@ -104,12 +105,7 @@ class PedidoDeCorrecao(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     estado: DestinoDaCorrecao
-    motivo: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=MOTIVO_MAXIMO
-        ),
-    ]
+    motivo: Annotated[str, Texto(MOTIVO_MAXIMO, min_length=1, strip=True)]
 
 
 def _exige_corrigir_estado(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -199,7 +195,9 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
     from google.cloud import firestore
     from google.cloud.storage import Client as ClienteStorage
 
+    from api.bancos import cliente_da_colecao
     from api.nuvem import (
+        COLECAO_DA_AUDITORIA,
         DecupagensStorage,
         RepositorioDeAuditoriaFirestore,
         RepositorioFirestore,
@@ -216,7 +214,9 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
     return main(
         argumentos,
         RepositorioFirestore(banco),
-        RepositorioDeAuditoriaFirestore(banco),
+        RepositorioDeAuditoriaFirestore(
+            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
+        ),
         DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
     )
 

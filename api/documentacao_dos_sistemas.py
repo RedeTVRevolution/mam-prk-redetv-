@@ -139,8 +139,8 @@ _NAO_ACHOU_A_PASSADA = Erro(
 _MUITA_CONSULTA = Erro(
     429,
     "Consultas demais; tente em um minuto",
-    "O limite é de 30 consultas por minuto por chave (a busca por texto, por imagem e "
-    "de parecidos dividem o mesmo limite). Espere e repita.",
+    "O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem "
+    "dividem o mesmo limite). Espere e repita.",
 )
 _DEMOROU = Erro(
     504,
@@ -287,7 +287,6 @@ _BUSCA = {
         "programa": None,
         "desde": None,
         "ate": None,
-        "visual": False,
         "termo_da_foto": None,
     },
     # `dict(...)`: a chave entre aspas casaria com um nome da busca no checador de nomes.
@@ -356,8 +355,9 @@ OPERACOES: tuple[Operacao, ...] = (
         "/v1/jobs",
         "Registrar um vídeo",
         "Registra o pedido de decupagem de um MP4 e devolve o Job em "
-        "`aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 24 h, "
-        "que abre um upload retomável no Cloud Storage (veja o guia). Escopo `criar`.\n\n"
+        "`aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 15 min, "
+        "que abre um upload retomável no Cloud Storage (veja o guia); o `POST` que abre a sessão "
+        "leva o cabeçalho `x-goog-if-generation-match: 0`. Escopo `criar`.\n\n"
         "O cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o "
         "pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo "
         "Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já "
@@ -389,6 +389,14 @@ OPERACOES: tuple[Operacao, ...] = (
                 "A repetição com o mesmo `Idempotency-Key` de um Job que foi para a "
                 "lixeira ou foi purgado não devolve nem recria o Job. Para enviar o "
                 "vídeo de novo, use uma chave nova.",
+            ),
+            Erro(
+                429,
+                "Teto de 200 Jobs por hora atingido",
+                "A chave criou 200 Jobs na última hora (o teto de uma pessoa é 30). O "
+                "cabeçalho `Retry-After` traz os segundos de espera (3600, o pior caso): "
+                "espere esse tempo, mande menos vídeos por hora e repita com o mesmo "
+                "`Idempotency-Key`.",
             ),
             Erro(
                 415,
@@ -442,7 +450,9 @@ OPERACOES: tuple[Operacao, ...] = (
         "`exibicao_ate`, `q` (palavras do nome), `ordem` (`enviado` ou `exibicao`). Com "
         "`limite` (1 a 200) a lista vem em páginas: o cabeçalho `X-Proximo-Cursor` traz "
         "o `cursor` da página seguinte e some na última. Sem `limite`, vem tudo. "
-        "Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`.",
+        "Escopo `ler`. A lista não traz `cortes_ms`: só `GET /v1/jobs/{job_id}`. "
+        "Com `capa=false` a seleção é a mesma, mas sem `capa_url` (as capas não são "
+        "assinadas): serve para quem só conta os Jobs.",
         [{k: v for k, v in _JOB.items() if k != "cortes_ms"}],
         (
             *_sem_chave("ler"),
@@ -603,6 +613,53 @@ OPERACOES: tuple[Operacao, ...] = (
         ),
     ),
     Operacao(
+        "POST",
+        "/v1/jobs/quadros",
+        "URLs de vários quadros de uma vez",
+        "As URLs assinadas de até 100 quadros (pares `job` e `arquivo`, o nome que a busca "
+        "devolve em `quadro`) numa chamada só, no lugar de uma por quadro. Cada Job é lido "
+        "uma vez. Job que não existe, é de outro sistema, está na lixeira ou ainda não "
+        "`concluiu` volta com `url` e `expira_em` nulos, sem derrubar o lote. Escopo `ler`.",
+        [
+            {
+                "job": "6f1c2a",
+                "arquivo": "plano-6.jpg",
+                "url": "https://storage.googleapis.com/BUCKET/...",
+                "expira_em": INSTANTE,
+            },
+            {
+                "job": "fantasma",
+                "arquivo": "plano-0.jpg",
+                "url": None,
+                "expira_em": None,
+            },
+        ],
+        (
+            *_sem_chave("ler"),
+            Erro(
+                422,
+                "Erro de validação",
+                "Mais de 100 pares, ou um `arquivo` fora do formato. Aqui `detail` é uma "
+                "lista: leia `loc` e `msg`. Peça até 100 pares por chamada.",
+                exemplo=[
+                    {
+                        "type": "too_long",
+                        "loc": ["body", "quadros"],
+                        "msg": "List should have at most 100 items after validation, not 101",
+                        "input": "[...]",
+                        "ctx": {
+                            "field_type": "List",
+                            "max_length": 100,
+                            "actual_length": 101,
+                        },
+                    }
+                ],
+            ),
+            _INDISPONIVEL,
+        ),
+        pedido={"quadros": [{"job": "6f1c2a", "arquivo": "plano-6.jpg"}]},
+    ),
+    Operacao(
         "GET",
         "/v1/jobs/{job_id}/passadas",
         "Listar as passadas do Job",
@@ -736,7 +793,7 @@ OPERACOES: tuple[Operacao, ...] = (
         "marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, "
         "`citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, "
         "`texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou "
-        "`data`), `visual` e `limite` (1 a 50 vídeos). "
+        "`data`) e `limite` (1 a 50 vídeos). "
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
@@ -825,46 +882,6 @@ OPERACOES: tuple[Operacao, ...] = (
                 }
             },
         },
-    ),
-    Operacao(
-        "GET",
-        "/v1/busca/parecidos/planos",
-        "Planos do vídeo que têm busca de parecidos",
-        "Os números dos planos do vídeo (`job`) que têm vetor do quadro: só neles "
-        "`GET /v1/busca/parecidos` acha algo. Não gasta o limite de consultas por minuto. Escopo `ler`.",
-        {"planos": [0, 1, 3, 4]},
-        (
-            *_sem_chave("ler"),
-            _validacao("missing", "query", "job", "Field required", None),
-            _DEMOROU,
-            _INDISPONIVEL,
-        ),
-    ),
-    Operacao(
-        "GET",
-        "/v1/busca/parecidos",
-        "Buscar planos parecidos com um plano",
-        "Acha, nos vídeos do sistema, os planos parecidos com o plano `plano` do "
-        "vídeo `job` (o número vem de `GET /v1/busca/parecidos/planos`). `limite` vai de "
-        "1 a 50 vídeos. "
-        + _BUSCA_DO_SISTEMA
-        + " Divide com a busca por texto o limite de 30 consultas por minuto.",
-        _BUSCA,
-        (
-            *_sem_chave("ler"),
-            Erro(
-                404,
-                "Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado",
-                "Escolha um plano de `GET /v1/busca/parecidos/planos`; se o vídeo é "
-                "antigo, peça ao time do MAM para reindexá-lo.",
-                exemplo="Este plano não tem vetor do quadro (vídeo indexado antes da busca por imagem, ou índice do quadro desligado), ou o vídeo não foi encontrado",
-            ),
-            _validacao("missing", "query", "plano", "Field required", None),
-            _CURSOR_DA_BUSCA,
-            _MUITA_CONSULTA,
-            _DEMOROU,
-            _INDISPONIVEL,
-        ),
     ),
     Operacao(
         "GET",

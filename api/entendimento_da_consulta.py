@@ -7,7 +7,8 @@ código desconfia de tudo o que volta. As barreiras da "Busca sem injeção" (pl
 - o Model Armor (porta `ModelArmor`) acusa injeção antes do modelo;
 - a consulta vai na mensagem do usuário, entre `<consulta>`, como dado; a instrução diz isso;
 - só valem campos e valores das listas: categoria, cor, evidência e programa fora da lista
-  são descartados; pessoa só entra se o código a resolve no catálogo (senão vira texto livre);
+  são descartados; pessoa só entra se o código a resolve no catálogo (senão vira texto livre e a busca
+  responde "nenhuma aparição" a ela);
   a frase exata precisa estar na própria consulta.
 
 A busca por foto (#443) descreve o objeto da foto em um termo curto (`termo_da_foto`) e segue
@@ -30,10 +31,11 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import CATEGORIAS_DE_OBJETO, CORES_BASE
-from api.gemini import Chamada, ErroHttp, Transporte
+from api.gemini import MODO_STANDARD, Chamada, ErroHttp, Transporte
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +122,9 @@ class ConsultaEntendida:
     marcas: tuple[str, ...] = ()
     frase_exata: str | None = None
     texto_livre: str = ""
+    # Os nomes de pessoa que o modelo apontou e o catálogo não resolve: a busca responde
+    # "nenhuma aparição" a eles, em vez de devolver o que as outras cláusulas acham.
+    pessoas_fora_do_catalogo: tuple[str, ...] = ()
     evidencias: tuple[Evidencia, ...] = ()
     programa: str | None = None
     exibido_desde: date | None = None
@@ -286,12 +291,14 @@ def _montar(
     todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
 ) -> ConsultaEntendida:
     sobra: list[str] = []  # nomes que o catálogo não resolve: viram texto livre
+    fora: list[str] = []  # os de pessoa, que a busca responde como sem aparição
 
     def dono_de(nome: str) -> str | None:
         saneado = sanear(nome, MAXIMO_DO_NOME)
         achado = resolver_nome(saneado, catalogo, todas)
         if achado is None and saneado:
             sobra.append(saneado)
+            fora.append(saneado)
         return achado
 
     pessoas = [
@@ -330,6 +337,7 @@ def _montar(
         marcas=tuple(_unicos(marcas)),
         frase_exata=frase,
         texto_livre=livre,
+        pessoas_fora_do_catalogo=tuple(_unicos(fora)),
         evidencias=tuple(e for e in EVIDENCIAS if e in resposta.evidencias),
         programa=resposta.programa if resposta.programa in programas else None,
         exibido_desde=desde,
@@ -347,8 +355,14 @@ def entender(
     marcas_conhecidas: Collection[str] | None = None,
     job_id: str = "busca",
     todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
+    cache: CacheCurto | None = None,
+    dono: str = "",
 ) -> ConsultaEntendida:
     """A consulta estruturada, ou o plano B (texto saneado, sem filtros).
+
+    Com `cache` e `dono`, a resposta do modelo vem da memória se a mesma pessoa já fez a
+    mesma consulta há pouco (#489): o Model Armor roda sempre, antes; falha e resposta
+    inválida não são guardadas. Sem `dono` não há cache: a chave precisa da pessoa.
 
     `marcas_conhecidas` é o catálogo de marcas: sem ele, nenhuma marca vira filtro e
     todas caem no texto livre (não existe catálogo de marcas ainda).
@@ -366,17 +380,30 @@ def entender(
     except Exception:  # sem veredito do Model Armor, o modelo não é chamado
         log.exception("Model Armor sem veredito; a consulta vai pelo plano B")
         return plano_b
-    chamada = Chamada(
-        modelo=MODELO_DA_CONSULTA,
-        instrucao=instrucao(programas),
-        video_uri="",
-        esquema=esquema_da_resposta(programas),
-        rotulos={"etapa": ETAPA, "job_id": job_id},
-        texto=f"<consulta>{saneada}</consulta>",
-        timeout_s=TEMPO_DA_CONSULTA_S,
-    )
+    # Lidos uma vez: chave, instrução, esquema e _montar. O `iter` evita que `tuple` chame
+    # `len` antes de iterar (em `NomesDosProgramas`, cada uma é uma leitura).
+    programas = tuple(iter(programas))
+
+    def perguntar() -> _Resposta:
+        chamada = Chamada(
+            modelo=MODELO_DA_CONSULTA,
+            instrucao=instrucao(programas),
+            video_uri="",
+            esquema=esquema_da_resposta(programas),
+            rotulos={"etapa": ETAPA, "job_id": job_id},
+            texto=f"<consulta>{saneada}</consulta>",
+            timeout_s=TEMPO_DA_CONSULTA_S,
+            modo=MODO_STANDARD,
+        )
+        return _validar(transporte.gerar(chamada))
+
     try:
-        resposta = _validar(transporte.gerar(chamada))
+        if cache is not None and dono:
+            # a resposta validada do modelo, nunca a ConsultaEntendida: o _montar
+            # resolve de novo pessoas e programas (fundida, na lixeira)
+            resposta = cache.obter((dono, saneada, *sorted(programas)), perguntar)
+        else:
+            resposta = perguntar()
     except (ErroHttp, ValueError) as e:
         log.warning("entendimento da consulta falhou (%s); plano B", e)
         return plano_b
@@ -400,6 +427,7 @@ def termo_da_foto(jpeg: bytes, *, transporte: Transporte, job_id: str = "busca")
         imagens=(jpeg,),
         texto="Qual é o objeto?",
         timeout_s=TEMPO_DA_CONSULTA_S,
+        modo=MODO_STANDARD,
     )
     try:
         termo = _TermoDaFoto.model_validate_json(transporte.gerar(chamada)).termo

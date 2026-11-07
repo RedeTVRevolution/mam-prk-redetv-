@@ -21,9 +21,9 @@ variables {
 run "plano" {
   command = plan
 
-  # O dev roda sem os índices ANN dedicados, por custo (ADR 0006).
+  # O dev roda com o índice ANN da descrição (ADR 0006).
   assert {
-    condition     = output.busca_indices_ligados == false
-    error_message = "O dev deve rodar com indices_da_busca_ligados = false."
+    condition     = output.busca_indices_ligados == true
+    error_message = "O dev deve rodar com indices_da_busca_ligados = true."
   }
 }

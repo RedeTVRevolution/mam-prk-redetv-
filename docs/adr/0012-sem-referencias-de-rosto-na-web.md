@@ -1,3 +1,5 @@
+> **As sugestões ao editor saíram** em 6/11/2026 (decisão do Bruno, #487): identificar pessoa, pauta do trecho e objeto do visual, com as rotas, o painel e a contagem. A migração abaixo continua apagando as sugestões de perfil da comparação, que são outra coisa.
+
 # Sem fotos de referência da web nem comparação de rostos
 
 Substitui a [ADR 0005](0005-identificacao-por-referencia.md). Em 3/11/2026, o Bruno decidiu abandonar a busca de fotos de referência na web e a comparação de rostos com essas fotos.

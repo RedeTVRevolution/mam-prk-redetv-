@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
 import App from '../App.tsx'
 import { comAlturaNaRolagem } from './teste.ts'
@@ -245,7 +245,7 @@ test('a aba é só de leitura: nenhum botão de editar ou apagar', async () => {
 
 test('sem registro, diz que não há', async () => {
   lista = []
-  await abrir()
+  await abrir('/admin/auditoria?de=&ate=')
   expect(await screen.findByText('Nenhum registro ainda.')).toBeTruthy()
 })
 
@@ -272,4 +272,29 @@ test('com "De" depois de "Até", avisa e não consulta a API', async () => {
   await abrir('/admin/auditoria?de=2026-10-28&ate=2026-10-27')
   expect(await screen.findByText(/"De" é depois da data em "Até"/)).toBeTruthy()
   expect(consultas).toEqual([])
+})
+
+test('ao abrir sem filtro, o período é os últimos 7 dias; o histórico inteiro continua à escolha', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-07T15:00:00Z'))
+  try {
+    await abrir()
+
+    expect(((await screen.findByLabelText('De')) as HTMLInputElement).value).toBe('2026-11-01')
+    expect((screen.getByLabelText('Até') as HTMLInputElement).value).toBe('2026-11-07')
+    await waitFor(() => expect(consultas.length).toBeGreaterThan(0))
+    expect(consultas[0]!.get('de')).toBe('2026-11-01T00:00:00-03:00')
+    expect(consultas[0]!.get('ate')).toBe('2026-11-07T23:59:59.999-03:00')
+
+    cleanup()
+    consultas.length = 0
+    await abrir('/admin/auditoria?de=&ate=')
+
+    expect(((await screen.findByLabelText('De')) as HTMLInputElement).value).toBe('')
+    await waitFor(() => expect(consultas.length).toBeGreaterThan(0))
+    expect(consultas[0]!.has('de')).toBe(false)
+    expect(consultas[0]!.has('ate')).toBe(false)
+  } finally {
+    vi.useRealTimers()
+  }
 })

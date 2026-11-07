@@ -20,6 +20,7 @@ from api.correcoes import (
     Correcao,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.indice_da_busca import IndiceEmMemoria, Registro
 from api.jobs import Job, RepositorioEmMemoria
 from api.lixeira import ArquivosContados, ArquivosEmMemoria
 from api.main import criar_app
@@ -78,6 +79,7 @@ class Mundo:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
         self.arquivos = ArquivosEmMemoria()
+        self.indice = IndiceEmMemoria()
         papeis = RepositorioDePapeisEmMemoria()
         papeis.salvar("adm", ["administrador"])
         papeis.salvar("ed", ["editor"])
@@ -102,6 +104,7 @@ class Mundo:
                 correcoes=self.correcoes,
                 auditoria=self.auditoria,
                 arquivos=self.arquivos,
+                indice=self.indice,
                 relogio=lambda: self.agora,
             )
         )
@@ -120,7 +123,7 @@ def test_video_na_lixeira_some_para_editor_e_sistema_mas_o_administrador_le() ->
 
     assert mundo.cliente.get("/v1/jobs", headers=EDITOR).json() == []
     assert mundo.cliente.get("/v1/jobs", headers=mundo.chave).json() == []
-    for rota in ("", "/decupagem", "/reproducao", "/correcoes", "/fila", "/sugestoes"):
+    for rota in ("", "/decupagem", "/reproducao", "/correcoes", "/fila"):
         for quem in (EDITOR, mundo.chave):
             assert (
                 mundo.cliente.get(f"/v1/jobs/j1{rota}", headers=quem).status_code == 404
@@ -333,3 +336,64 @@ def test_relatorio_le_o_nome_dos_videos_numa_leitura_em_lote() -> None:
 
     assert jobs.em_lote == [{"j1", "j2", "j9"}]
     assert [i.nome for i in itens] == ["um.mp4", "outro.mp4", "um.mp4", None]
+
+
+def _momento(id: str, job_id: str = "j1") -> Registro:
+    return Registro(
+        id=id, tipo="fala", job_id=job_id, inicio_ms=0, fim_ms=1, texto="oi"
+    )
+
+
+def _na_lixeira(mundo: Mundo, job_id: str = "j1") -> list[bool]:
+    return [r.na_lixeira for r in mundo.indice._por_job[job_id]]
+
+
+def test_lixeira_e_restauracao_atualizam_os_objetos_do_video_no_indice() -> None:
+    mundo = Mundo(_job("j1"), _job("j2"))
+    mundo.indice.gravar("j1", [_momento("a"), _momento("b")])
+    mundo.indice.gravar("j2", [_momento("c", "j2")])
+
+    assert mundo.enviar().status_code == 201
+    assert _na_lixeira(mundo) == [True, True]
+    assert _na_lixeira(mundo, "j2") == [False]
+
+    assert (
+        mundo.cliente.post(f"{ROTA_DO_VIDEO}/restaurar", headers=ADMIN).status_code
+        == 200
+    )
+    assert _na_lixeira(mundo) == [False, False]
+
+
+def test_indice_que_falha_desfaz_o_envio_e_a_restauracao_com_503() -> None:
+    mundo = Mundo()
+    mundo.indice.gravar("j1", [_momento("a")])
+
+    def falhar(job_id: str, na_lixeira: bool) -> None:
+        raise RuntimeError("índice fora do ar")
+
+    original = mundo.indice.marcar_lixeira
+    mundo.indice.marcar_lixeira = falhar  # type: ignore[method-assign]
+    assert mundo.enviar().status_code == 503
+    assert mundo.jobs.obter("j1").lixeira is None  # type: ignore[union-attr]
+    assert mundo.registros() == []
+
+    mundo.indice.marcar_lixeira = original  # type: ignore[method-assign]
+    mundo.enviar()
+    mundo.indice.marcar_lixeira = falhar  # type: ignore[method-assign]
+    resposta = mundo.cliente.post(f"{ROTA_DO_VIDEO}/restaurar", headers=ADMIN)
+    assert resposta.status_code == 503
+    assert mundo.jobs.obter("j1").lixeira is not None  # type: ignore[union-attr]
+
+
+def test_auditoria_que_falha_devolve_o_indice_ao_que_era() -> None:
+    mundo = Mundo()
+    mundo.indice.gravar("j1", [_momento("a")])
+
+    def falhar(_registro: Any) -> None:
+        raise RuntimeError("auditoria fora do ar")
+
+    mundo.auditoria.acrescentar = falhar  # type: ignore[assignment]
+    cliente = TestClient(mundo.cliente.app, raise_server_exceptions=False)
+    resposta = cliente.post(ROTA_DO_VIDEO, json={"motivo": "x"}, headers=ADMIN)
+    assert resposta.status_code == 500
+    assert _na_lixeira(mundo) == [False]

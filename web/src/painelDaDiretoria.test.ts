@@ -19,8 +19,8 @@ test('programaEUsuarioJuntos só vale com os dois', () => {
 
 test('o agrupamento só vai à API quando pedido', () => {
   const f = { programa: '', usuario: 'u1', de: '2026-01-01', ate: '' }
-  expect(parametrosDoPainel(f)).toBe('usuario=u1&desde=2026-01-01')
-  expect(parametrosDoPainel(f, { agrupar: 'auto' })).toBe('usuario=u1&desde=2026-01-01&agrupar=auto')
+  expect(parametrosDoPainel(f)).toBe('usuario=u1&desde=2026-01-01&ate=')
+  expect(parametrosDoPainel(f, { agrupar: 'auto' })).toBe('usuario=u1&desde=2026-01-01&ate=&agrupar=auto')
 })
 
 test('rotuloDoGrupo nomeia o grupo pelo primeiro dia, na tabela e no eixo', () => {

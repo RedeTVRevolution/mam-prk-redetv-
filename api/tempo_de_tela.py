@@ -12,15 +12,17 @@ instância.
 
 import json
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from api.cache_curto import CacheCurto
+from api.catalogo import Catalogo
 from api.copia_bigquery import (
     TIPOS_DAS_PESSOAS,
     ConfigDoBigQuery,
@@ -28,14 +30,15 @@ from api.copia_bigquery import (
     Transporte,
     _parametro,
 )
+from api.csv_seguro import csv_em_texto
 from api.jobs import RepositorioDeJobs
+from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
-    csv_em_texto,
     linhas_da_copia,
     ou_503,
     parametros_da_pagina,
@@ -44,6 +47,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
+from api.texto_como_dado import LinhaDaConsulta
 
 TIPOS_DO_RELATORIO = TIPOS_DAS_PESSOAS
 COLUNAS_DO_CSV = (
@@ -458,6 +462,57 @@ def video_da_pessoa(v: Sequence[Any]) -> "VideoDaPessoa":
     )
 
 
+class ConsultaComCache:
+    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking inteiro, a página, a
+    pessoa expandida e o CSV saem dela, sem consultar o BigQuery de novo."""
+
+    def __init__(self, consulta: ConsultaDeMomentos, cache: CacheCurto) -> None:
+        self._consulta = consulta
+        self._cache = cache
+
+    def somas(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        return self._cache.obter(
+            ("tempo-de-tela", programa, desde, ate),
+            lambda: self._consulta.somas(programa, desde, ate),
+        )
+
+    def _ranking_inteiro(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
+        def calcular() -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
+            somas = self.somas(programa, desde, ate)
+            return ranking_em_python(somas, 0, len(somas))
+
+        return self._cache.obter(
+            ("tempo-de-tela-ranking", programa, desde, ate), calcular
+        )
+
+    def ranking(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        depois: int,
+        limite: int,
+    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
+        todas, total = self._ranking_inteiro(programa, desde, ate)
+        return todas[depois : depois + limite + 1], total
+
+    def videos_da_pessoa(
+        self,
+        pessoa_id: str,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        depois: int,
+        limite: int,
+    ) -> "list[VideoDaPessoa]":
+        somas = self.somas(programa, desde, ate)
+        return videos_em_python(somas, pessoa_id, depois, limite)
+
+
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
     """A consulta configurada, ou `None` se o ambiente não diz onde a cópia mora."""
     onde = config_e_transporte_do_ambiente(ambiente)
@@ -520,7 +575,8 @@ def relatorio(somas: list[PessoaNoVideo]) -> list[PessoaNoRelatorio]:
     """Uma linha por pessoa, do maior tempo de tela para o menor.
 
     A pessoa é o id do catálogo; o nome é o que mais aparece nas linhas dela (um vídeo
-    copiado antes de uma correção de grafia não parte a pessoa em duas).
+    copiado antes de uma correção de grafia não parte a pessoa em duas). A rota troca
+    esse nome pelo do catálogo (`com_nomes_do_catalogo`, #417).
     """
     por_pessoa: dict[str, list[PessoaNoVideo]] = defaultdict(list)
     for s in somas:
@@ -576,10 +632,32 @@ def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
     )
 
 
+def com_nomes_do_catalogo[P: PessoaResumida](
+    pessoas: list[P], catalogo: Catalogo | None
+) -> list[P]:
+    """O nome de cada pessoa vem do catálogo, numa leitura em lote (#417): a cópia no
+    BigQuery não guarda o nome, então renomear no catálogo vale na hora. Quem o catálogo
+    não conhece fica com o que a cópia trouxe. Devolve cópias: o ranking guardado no cache
+    não muda."""
+    if catalogo is None or not pessoas:
+        return pessoas
+    do_catalogo = catalogo.obter_varios(p.pessoa_id for p in pessoas)
+    return [
+        p.model_copy(update={"nome": do_catalogo[p.pessoa_id].nome})
+        if p.pessoa_id in do_catalogo
+        else p
+        for p in pessoas
+    ]
+
+
 def criar_rotas_do_tempo_de_tela(
-    consulta: ConsultaDeMomentos | None, repositorio: RepositorioDeJobs
+    consulta: ConsultaDeMomentos | None,
+    repositorio: RepositorioDeJobs,
+    relogio: Callable[[], datetime] = agora_em_sao_paulo,
+    catalogo: Catalogo | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
+    no_periodo = dependencia_do_periodo(relogio)
 
     @rotas.get(
         "/tempo-de-tela",
@@ -587,12 +665,11 @@ def criar_rotas_do_tempo_de_tela(
     )
     def tempo_de_tela(
         _pessoa: PodeVerORelatorio,
-        programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> Any:
         """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa
         (ou com `programa=` vazio), todos. Com `limite`, uma página do ranking (sem os
@@ -600,6 +677,7 @@ def criar_rotas_do_tempo_de_tela(
         os vídeos de uma pessoa ficam em `/tempo-de-tela/videos`. O CSV vem sempre
         inteiro."""
         programa = programa or None
+        desde, ate = periodo
         fonte = confere_o_pedido(consulta, desde, ate)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
@@ -607,11 +685,14 @@ def criar_rotas_do_tempo_de_tela(
                 lambda: fonte.ranking(programa, desde, ate, depois, limite)
             )
             pagina, cabecalhos = recorta(lidas, depois, limite)
+            pagina = com_nomes_do_catalogo(pagina, catalogo)
             corpo = RankingDoTempoDeTela(
                 programa=programa, desde=desde, ate=ate, total=total, pessoas=pagina
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
         pessoas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate)))
+        pessoas = com_nomes_do_catalogo(pessoas, catalogo)
+        pessoas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.nome, p.pessoa_id))
         if formato == "csv":
             return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
         poe_o_nome_dos_videos((v for p in pessoas for v in p.por_video), repositorio)
@@ -622,16 +703,16 @@ def criar_rotas_do_tempo_de_tela(
     @rotas.get("/tempo-de-tela/videos", response_model=list[VideoDaPessoa])
     def videos_da_pessoa(
         _pessoa: PodeVerORelatorio,
-        pessoa_id: Annotated[str, Query(min_length=1, max_length=200)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
+        pessoa_id: Annotated[str, LinhaDaConsulta(200, min_length=1)],
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         """Os vídeos de uma pessoa no mesmo filtro do relatório, do maior tempo para o
         menor, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
         programa = programa or None
+        desde, ate = periodo
         fonte = confere_o_pedido(consulta, desde, ate)
         depois = posicao_do_cursor(cursor)
         lidos = ou_503(

@@ -1,5 +1,7 @@
 # Benchmark enxuto de MAMs
 
+> **Saiu** em 6/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
+
 Pesquisa de 30/10/2026 em Azure AI Video Indexer, iconik, Frame.io, CatDV, Veritone e Twelve Labs, só em quatro áreas: busca, visualizador, catalogação manual e administração. O objetivo era ver como cada um resolve o básico de forma simples, e não listar todas as funções. Cada padrão traz a decisão à luz das premissas: decupagem e busca em primeiro lugar, ferramenta simples, acervo de 25 anos.
 
 **Limites das fontes**

@@ -35,7 +35,7 @@ import {
   pedidoDeRemocao,
   podeRemover,
 } from '../../catalogacao.ts'
-import type { ItemDoHistorico, Pauta, Sugestao } from '../../decupagem.ts'
+import type { ItemDoHistorico, Pauta } from '../../decupagem.ts'
 import { ABAS_DO_TRECHO } from '../../trecho.ts'
 import { cabeNaPauta, editorDeDivisao, editorDeJuncao, pautasParaJuntar } from '../../pautas.ts'
 import { nomeDaEtapa } from '../../etapas.ts'
@@ -47,9 +47,10 @@ import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.
 import { consultaNova } from '../../busca.ts'
 import { criarCacheDeQuadros } from '../../quadros.ts'
 import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBusca } from '../../resultadoDaBusca.ts'
-import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, enderecoDosParecidos, navegar, seguir } from '../../rotas.ts'
+import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Kbd } from '../ui/kbd.tsx'
@@ -59,7 +60,6 @@ import { AvisoDeFalha, BotaoComDica, BotaoDeIcone } from './comum.tsx'
 import { ComparacaoDePassada, SeletorDePassada } from './Comparacao.tsx'
 import { type AbaDaGaveta, Gaveta } from './Gaveta.tsx'
 import type { ResumoDaPassada } from '../../passadas.ts'
-import { Sugestoes } from './Sugestoes.tsx'
 import { FormularioDoTrecho } from './Trecho.tsx'
 import { type Revisao, useRevisao } from './useRevisao.ts'
 import { chaveDoVideo, FAIXAS_DE_INICIO, SECAO_DO_TIPO, type Secao, tipoDaChave } from './tipos.ts'
@@ -96,7 +96,6 @@ const GRUPO_DO_INSPETOR = 'Inspetor'
 const GRUPO_DA_CORRECAO = 'Correção'
 const GRUPO_DA_CATALOGACAO = 'Catalogação'
 const GRUPO_DA_BUSCA = 'Busca'
-const SEM_PLANOS: ReadonlySet<number> = new Set()
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 const tecla = (e: KeyboardEvent, ...teclas: string[]): boolean => teclas.includes(e.key.toLowerCase())
@@ -211,17 +210,6 @@ export function Video({
     staleTime: Infinity,
   })
 
-  // Os planos com vetor do quadro indexado (#271): só neles "Planos parecidos" aparece. Vídeo
-  // antigo, índice desligado ou falha da consulta: nenhum botão. O instante da indexação entra na
-  // chave: depois de reprocessar, a lista velha não vale para a nova.
-  const planosComVetor = useQuery({
-    queryKey: chaveDoVideo(job.id, 'planos-com-vetor', job.indexacao?.em ?? ''),
-    queryFn: async () => new Set(await api.planosComVetor(job.id)),
-    enabled: job.indexacao?.estado === 'indexado',
-    retry: false,
-    staleTime: Infinity,
-  })
-
   // O resultado da busca de onde a pessoa veio: o da sessão, ou a busca refeita. Sem busca no
   // endereço, a faixa e o N somem. Fora do cache ao sair do vídeo: o próximo vídeo lê a sessão de novo.
   const resultadoDaBusca = useQuery({
@@ -291,17 +279,6 @@ export function Video({
   // A sessão de revisão (#251) vale no modo de revisão; a pessoa não vê nada dela.
   useSessaoDeRevisao(cliente, pode.editar && revisao.revisando, tocando)
 
-  // As sugestões do pipeline só aparecem na revisão; a lista vem de novo a cada entrada nela.
-  const chaveDasSugestoes = chaveDoVideo(job.id, 'sugestoes')
-  const sugestoes = useQuery({
-    queryKey: chaveDasSugestoes,
-    queryFn: () => cliente.sugestoes(),
-    enabled: revisao.revisando && !!d,
-    retry: false,
-    staleTime: 0,
-    refetchOnWindowFocus: false,
-  })
-
   // Uma decupagem de outra versão (reprocessar) deixa velhos o histórico, a fila, as passadas e as
   // comparações, que valem para sempre no cache: pergunta de novo. Recarregar a mesma versão não custa nada.
   const versaoAnterior = useRef(d?.versao_decupagem)
@@ -312,14 +289,6 @@ export function Video({
     }
     versaoAnterior.current = d.versao_decupagem
   }, [d, consultas, job.id])
-
-  // Toda mudança do histórico (corrigir, desfazer com Ctrl+Z, aceitar uma sugestão, decidir na gaveta) pode
-  // trazer de volta ou tirar uma sugestão: a lista vem de novo, sem cada caminho ter de lembrar disso.
-  const historicoAnterior = useRef(historico.data)
-  useEffect(() => {
-    if (historicoAnterior.current && historicoAnterior.current !== historico.data) void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })
-    if (historico.data) historicoAnterior.current = historico.data
-  }, [historico.data, consultas, chaveDasSugestoes])
 
   // Outro `?t=` no mesmo vídeo salta o player.
   const tAnterior = useRef(t)
@@ -974,7 +943,7 @@ export function Video({
 
   return (
     <NomesDoCatalogo.Provider value={api.nomes}>
-      <div className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto bg-canvas lg:flex-row lg:overflow-hidden">
+      <div className={cn('flex min-h-0 flex-1 flex-col gap-px overflow-y-auto bg-canvas lg:overflow-hidden', comparandoCom ? 'xl:flex-row' : 'lg:flex-row')}>
         <section aria-label="Vídeo" className="flex min-w-0 shrink-0 flex-col bg-background lg:min-h-0 lg:flex-1 lg:shrink lg:overflow-y-auto">
           <BarraDoVideo
             job={job}
@@ -1018,7 +987,7 @@ export function Video({
               ) : (
                 <video
                   ref={player}
-                  src={reproducao.data?.url}
+                  src={urlSegura(reproducao.data?.url) ?? undefined}
                   aria-label="Player"
                   className="size-full min-h-0 object-contain"
                   onClick={alternar}
@@ -1059,6 +1028,7 @@ export function Video({
               aoSaltar={(passo) => saltarPara((player.current?.currentTime ?? 0) + passo)}
               aoMudarVelocidade={mudarVelocidade}
               aoTelaCheia={telaCheia}
+              comparando={comparandoCom !== null}
               ferramentas={
                 revisao.revisando ? (
                   <FerramentasDoTrecho
@@ -1161,27 +1131,11 @@ export function Video({
             aoSaltar={saltarParaMs}
             aoTocarTrecho={tocarTrecho}
             urlDoQuadro={urlDoQuadro}
-            planosParecidos={{ comVetor: planosComVetor.data ?? SEM_PLANOS, abrir: (plano) => navegar(enderecoDosParecidos(job.id, plano)) }}
             acoes={acoes}
             aviso={aviso}
             acima={
               revisao.revisando ? (
                 <>
-                  {sugestoes.data ? (
-                    <Sugestoes
-                      sugestoes={sugestoes.data}
-                      decupagem={d}
-                      api={cliente}
-                      aoSaltar={saltarParaMs}
-                      aoResolver={(id) => {
-                        consultas.setQueryData(chaveDasSugestoes, (l: Sugestao[] | undefined) => l?.filter((x) => x.id !== id))
-                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'decupagem') })
-                        void consultas.invalidateQueries({ queryKey: chaveDoVideo(job.id, 'historico') })
-                      }}
-                      aoFalhar={() => void consultas.invalidateQueries({ queryKey: chaveDasSugestoes })}
-                      aoAvisar={mostrarAviso}
-                    />
-                  ) : null}
                   {marcadasNaDecupagem > 0 ? (
                     <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm">
                       <span className="mr-auto">
@@ -1500,6 +1454,7 @@ function Transporte({
   aoSaltar,
   aoMudarVelocidade,
   aoTelaCheia,
+  comparando,
   ferramentas,
 }: {
   job: Job
@@ -1513,6 +1468,8 @@ function Transporte({
   aoSaltar: (segundos: number) => void
   aoMudarVelocidade: (v: number) => void
   aoTelaCheia: () => void
+  /** A comparação está aberta: de 1024 a 1279 px ela fica embaixo e o vídeo ocupa a largura toda. */
+  comparando?: boolean
   /** O que só a revisão tem na barra: as ferramentas do trecho. */
   ferramentas?: ReactNode
 }) {
@@ -1625,8 +1582,9 @@ function Transporte({
             aoMudarVolume(v)
             setVolume(v)
           }}
-          // Com as ferramentas do trecho na barra, o controle de volume só cabe em tela larga (o mudo fica).
-          className={cn('hidden w-20 accent-primary', ferramentas ? '2xl:block' : 'lg:block')}
+          // Com as ferramentas do trecho na barra, o controle de volume só cabe em tela larga (o mudo fica);
+          // com a comparação embaixo (lg a xl) a barra tem a largura toda e o controle volta.
+          className={cn('hidden w-20 accent-primary', !ferramentas ? 'lg:block' : comparando ? 'lg:block xl:hidden 2xl:block' : '2xl:block')}
         />
         <BotaoDeIcone rotulo="Tela cheia" atalho="F" onClick={aoTelaCheia}>
           <IconMaximize size={18} stroke={1.75} aria-hidden />

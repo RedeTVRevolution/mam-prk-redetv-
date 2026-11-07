@@ -784,7 +784,37 @@ def test_listagem_traz_a_capa_assinada_por_8_h_e_job_sem_capa_traz_null() -> Non
     }
 
 
-def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
+def test_listagem_com_capa_falsa_nao_assina_e_traz_os_mesmos_jobs() -> None:
+    ambiente = Ambiente()
+    _job_com_capa(ambiente, "com", "quadros/plano-1.jpg")
+    _job_com_capa(ambiente, "sem", None)
+
+    com_capa = ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json()
+    resposta = ambiente.cliente.get("/v1/jobs?capa=false", headers=AUTORIZACAO)
+
+    sem_capa = resposta.json()
+    assert all("capa_url" not in j for j in sem_capa)
+    assert [j["id"] for j in sem_capa] == [j["id"] for j in com_capa]
+    assert [
+        {k: v for k, v in j.items() if k != "capa_url"} for j in com_capa
+    ] == sem_capa
+
+
+def test_detalhe_traz_a_capa_assinada_e_job_sem_capa_traz_null() -> None:
+    ambiente = Ambiente()
+    _job_com_capa(ambiente, "com", "quadros/plano-1.jpg")
+    _job_com_capa(ambiente, "sem", None)
+
+    com = ambiente.cliente.get("/v1/jobs/com", headers=AUTORIZACAO).json()
+    sem = ambiente.cliente.get("/v1/jobs/sem", headers=AUTORIZACAO).json()
+
+    assert com["capa_url"] == (
+        "https://storage.exemplo/quadros/com/quadros/plano-1.jpg?validade=28800"
+    )
+    assert sem["capa_url"] is None
+
+
+def test_lista_e_detalhe_sem_decupagem_ver_dao_403_sem_assinar_a_capa() -> None:
     repositorio = RepositorioEmMemoria()
     armazenamento = ArmazenamentoFalso()
     papeis = RepositorioDePapeisEmMemoria()
@@ -800,10 +830,11 @@ def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
         )
     )  # fmt: skip
 
-    resposta = cliente.get("/v1/jobs", headers=AUTORIZACAO)
+    for caminho in ("/v1/jobs", "/v1/jobs/com"):
+        resposta = cliente.get(caminho, headers=AUTORIZACAO)
 
-    assert resposta.status_code == 403
-    assert "capa_url" not in resposta.text
+        assert resposta.status_code == 403
+        assert "capa_url" not in resposta.text
 
 
 def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() -> None:

@@ -7,8 +7,6 @@ não conta, e um pulso que não passa da fronteira (outra aba da mesma pessoa) n
 Um `inicio` logo depois de um `fim` (a pessoa saiu e voltou) também abre outra sessão.
 """
 
-import csv
-import io
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
@@ -17,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import AwareDatetime, BaseModel
 
 from api.auth import ChamadorAutenticado, Usuario
+from api.csv_seguro import csv_em_texto
 from api.jobs import (
     RepositorioDeJobs,
     _confere_permissao,
@@ -239,12 +238,10 @@ COLUNAS_DO_CSV = (
 
 
 def relatorio_em_csv(medidas: list[Medida]) -> str:
-    saida = io.StringIO()
-    escritor = csv.writer(saida, lineterminator="\n")
-    escritor.writerow(COLUNAS_DO_CSV)
+    linhas: list[list[object]] = []
     for m in medidas:
         por_hora = minutos_por_hora_de_video(m.ativo_s, m.duracao_s)
-        escritor.writerow(
+        linhas.append(
             [
                 m.job_id,
                 m.email,
@@ -255,4 +252,4 @@ def relatorio_em_csv(medidas: list[Medida]) -> str:
                 "" if por_hora is None else por_hora,
             ]
         )
-    return saida.getvalue()
+    return csv_em_texto(COLUNAS_DO_CSV, linhas)

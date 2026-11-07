@@ -84,14 +84,15 @@ test('senha e código abrem a casca, com o token na API, e `/` vai ao acervo', a
   expect(trilho().getByRole('link', { name: 'Acervo' }).getAttribute('aria-current')).toBe('page')
 })
 
-test('o primeiro acesso cadastra o autenticador com o segredo e o link', async () => {
+test('o primeiro acesso cadastra o autenticador com o segredo', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={autenticador(false)} />)
 
   await preencherSenha(usuario)
 
   expect((await screen.findByLabelText('Segredo do autenticador')).textContent).toBe('SEGREDOFALSO')
-  expect(screen.getByRole('link', { name: /Abrir no aplicativo autenticador/ }).getAttribute('href')).toBe('otpauth://totp/MAM')
+  // `otpauth:` não é https nem caminho da aplicação: o link não é renderizado, o segredo fica para digitar.
+  expect(screen.queryByRole('link', { name: /Abrir no aplicativo autenticador/ })).toBeNull()
   await confirmar(usuario)
   expect(await screen.findByRole('navigation', { name: 'Principal' })).toBeTruthy()
 })
@@ -216,6 +217,17 @@ test('a busca global abre com `/` e busca o texto no conteúdo', async () => {
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
+test('a caixa da busca global aceita no máximo 300 caracteres, como a API', async () => {
+  const usuario = userEvent.setup()
+  render(<App autenticador={await comSessao()} />)
+  await screen.findByRole('navigation', { name: 'Principal' })
+
+  await usuario.keyboard('/')
+  const dialogo = await screen.findByRole('dialog', { name: 'Buscar no acervo' })
+  const caixa = within(dialogo).getByRole('combobox', { name: 'Buscar no acervo' }) as HTMLInputElement
+  expect(caixa.maxLength).toBe(300)
+})
+
 test('G e uma letra vão à tela, e `?` lista os atalhos', async () => {
   const usuario = userEvent.setup()
   render(<App autenticador={await comSessao()} />)
@@ -248,4 +260,21 @@ test('as consultas saem do cache em 30 s, não voltam ao focar e não repetem o 
   expect(repetir(0, new PedidoInvalido('Cursor inválido'))).toBe(false)
   expect(repetir(0, new Error('rede'))).toBe(true)
   expect(repetir(2, new Error('rede'))).toBe(false)
+})
+
+test.each(['javascript:alert(1)', 'data:text/html,<b>x</b>'])('o passo do Login com %s não vira link', async (uri) => {
+  class ComUriDeFora extends AutenticadorFalso {
+    override async entrar(email: string, senha: string) {
+      const r = await super.entrar(email, senha)
+      return r.tipo === 'precisa_cadastro_totp' ? { ...r, uri } : r
+    }
+  }
+  const usuario = userEvent.setup()
+  render(<App autenticador={new ComUriDeFora([{ email: ANA, senha: 'senha-forte-1', totpCadastrado: false }])} />)
+
+  await preencherSenha(usuario)
+
+  expect(await screen.findByLabelText('Segredo do autenticador')).toBeTruthy()
+  expect(screen.queryByRole('link', { name: /Abrir no aplicativo autenticador/ })).toBeNull()
+  expect(document.querySelector('a[href^="javascript:"], a[href^="data:"]')).toBeNull()
 })

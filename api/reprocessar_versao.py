@@ -1,6 +1,6 @@
 """Reprocessar o acervo de propósito (#250): `make reprocessar-versao`.
 
-Lista os Jobs concluídos cuja decupagem é de uma `versao_pipeline` diferente da atual
+Lista os Jobs concluídos de uma `versao_pipeline` (gravada no Job, #494) diferente da atual
 (`api/versao_pipeline.py`) e, com `CONFIRMAR=1`, reprocessa cada um pela análise, pelo
 mesmo caminho da rota do reprocessar (#147, #235): Job, auditoria e Workflows. Sem
 `CONFIRMAR=1`, só mostra a lista e o custo estimado.
@@ -25,10 +25,18 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.auditoria import RepositorioDeAuditoria
+from api.bancos import cliente_da_colecao
 from api.ciclo_de_vida import NaoReprocessavel
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
-from api.jobs import Job, RepositorioDeJobs, ServicoIndisponivel, agora_utc
+from api.jobs import (
+    FiltroDeJobs,
+    Job,
+    RepositorioDeJobs,
+    ServicoIndisponivel,
+    agora_utc,
+)
 from api.nuvem import (
+    COLECAO_DA_AUDITORIA,
     DecupagensStorage,
     DisparoPeloWorkflows,
     JanelasStorage,
@@ -46,8 +54,9 @@ SISTEMA = "reprocessar-versao"
 MOTIVO = "versão nova do pipeline"
 LOTE = 5
 PAUSA_ENTRE_LOTES_S = 60.0
+TAMANHO_DA_PAGINA = 500
 
-__all__ = ["escolher", "main", "reprocessar_versao"]
+__all__ = ["escolher", "main", "reprocessar_versao", "versao_da_decupagem"]
 
 
 class LeitorDeDecupagem(Protocol):
@@ -62,7 +71,7 @@ class Candidato:
     duracao_s: float | None
 
 
-def _versao_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> str | None:
+def versao_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> str | None:
     """A `versao_pipeline` gravada, `ANTERIOR` se não há o campo, `None` se não leu."""
     try:
         dados = json.loads(b"".join(decupagens.abrir_decupagem(job_id)))
@@ -72,26 +81,45 @@ def _versao_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> str | No
     return str(dados.get("versao_pipeline") or ANTERIOR)
 
 
+def _concluidos(
+    repositorio: RepositorioDeJobs, tamanho_da_pagina: int
+) -> Iterator[Job]:
+    """Os Jobs concluídos fora da lixeira, página a página, sem baixar decupagem."""
+    cursor: str | None = None
+    while True:
+        lida = repositorio.consultar(
+            FiltroDeJobs(
+                estados=frozenset({"concluido"}),
+                limite=tamanho_da_pagina,
+                cursor=cursor,
+            )
+        )
+        yield from lida.jobs
+        cursor = lida.proximo_cursor
+        if cursor is None:
+            return
+
+
 def escolher(
     repositorio: RepositorioDeJobs,
     decupagens: LeitorDeDecupagem,
     de: str | None,
     limite: int | None,
+    tamanho_da_pagina: int = TAMANHO_DA_PAGINA,
 ) -> list[Candidato]:
-    """Os Jobs concluídos de versão anterior, do mais antigo ao mais novo, até `limite`."""
+    """Os Jobs concluídos de versão anterior, do mais antigo ao mais novo, até `limite`.
+
+    A versão vem do Job (#494). Só o Job sem o campo (anterior a `make gravar-versao-nos-jobs`)
+    abre a decupagem, e continua na lista como versão desconhecida se ela não for lida.
+    """
     concluidos = sorted(
-        (
-            j
-            for j in repositorio.listar()
-            if j.estado == "concluido" and j.lixeira is None
-        ),
-        key=lambda j: (j.criado_em, j.id),
+        _concluidos(repositorio, tamanho_da_pagina), key=lambda j: (j.criado_em, j.id)
     )
     escolhidos: list[Candidato] = []
     for job in concluidos:
         if limite is not None and len(escolhidos) >= limite:
             break
-        versao = _versao_da_decupagem(decupagens, job.id)
+        versao = job.versao_pipeline or versao_da_decupagem(decupagens, job.id)
         if versao is None or versao == VERSAO_PIPELINE:
             continue
         if de is not None and versao != de:
@@ -196,7 +224,9 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     reprocessar_versao(
         RepositorioFirestore(banco),
         DecupagensStorage(cliente, aceitos, decupagens),
-        RepositorioDeAuditoriaFirestore(banco),
+        RepositorioDeAuditoriaFirestore(
+            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
+        ),
         DisparoPeloWorkflows(projeto, regiao, workflow),
         JanelasStorage(cliente, aceitos),
         de=de,

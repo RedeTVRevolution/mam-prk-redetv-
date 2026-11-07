@@ -1,9 +1,10 @@
 """O que a aba Revisão do painel da diretoria lê além das tabelas resumidas (#284): a taxa de
-correção (#265) e o tempo de revisão (#251), que vivem no Firestore e no Storage.
+correção (#265), somada da tabela diária no BigQuery, e o tempo de revisão (#251), agregado no
+BigQuery (`api/revisao_do_painel.py`, #467).
 
-O período chega em dias de São Paulo, os dois inclusive, e vira `[desde, ate)` em UTC. A
-taxa de correção lê a decupagem de cada Job com correção ou pulso no período: é a consulta
-mais cara do painel e só a aba Revisão a faz.
+O período chega em dias de São Paulo, os dois inclusive. O tempo de revisão vira `[desde, ate)`
+em UTC; a taxa de correção soma as linhas diárias da tabela (`api/taxa_do_painel.py`, #468),
+sem ler decupagem nem correção.
 """
 
 from dataclasses import dataclass
@@ -11,27 +12,16 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from api.correcoes import RepositorioDeCorrecoes
-from api.jobs import RepositorioDeJobs
-from api.reprocessar_versao import LeitorDeDecupagem
-from api.revisao import RepositorioDeRevisao
-from api.taxa_de_correcao import LinhaDaTaxa, calcular
+from api.revisao_do_painel import (
+    RevisaoAgregada,
+    RevisaoNoVideo,
+    TempoDeRevisao,
+    agregar,
+)
+from api.taxa_de_correcao import LinhaDaTaxa
+from api.taxa_do_painel import LeitorDaTaxa
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
-
-
-@dataclass(frozen=True)
-class RevisaoNoVideo:
-    """O tempo ativo de uma pessoa num vídeo (o acumulado dela nele, não só o do período: a
-    medida guarda só o total), o programa do Job e a duração do vídeo (a do Job, como no
-    `GET /v1/jobs/{id}/revisao`; sem ela, a que a medida trouxe)."""
-
-    job_id: str
-    uid: str
-    email: str
-    programa: str | None
-    ativo_s: float
-    duracao_s: float | None
 
 
 class QualidadeDoPainel(Protocol):
@@ -46,8 +36,8 @@ class QualidadeDoPainel(Protocol):
         ate: date | None,
         programa: str | None,
         usuario: str | None,
-    ) -> list[RevisaoNoVideo]:
-        """Uma linha por pessoa e vídeo cujo último pulso é do período."""
+    ) -> RevisaoAgregada:
+        """O tempo dos vídeos cujo último pulso é do período, já agrupado."""
 
 
 def _periodo(
@@ -64,29 +54,16 @@ def _periodo(
 class QualidadeReal:
     def __init__(
         self,
-        jobs: RepositorioDeJobs,
-        decupagens: LeitorDeDecupagem,
-        correcoes: RepositorioDeCorrecoes,
-        revisao: RepositorioDeRevisao,
+        taxa: LeitorDaTaxa,
+        tempo: TempoDeRevisao,
     ) -> None:
-        self._jobs = jobs
-        self._decupagens = decupagens
-        self._correcoes = correcoes
-        self._revisao = revisao
+        self._taxa = taxa
+        self._tempo = tempo
 
     def taxa_de_correcao(
         self, desde: date | None, ate: date | None, programa: str | None
     ) -> list[LinhaDaTaxa]:
-        inicio, fim = _periodo(desde, ate)
-        return calcular(
-            self._jobs,
-            self._decupagens,
-            self._correcoes,
-            self._revisao,
-            inicio,
-            fim,
-            programa,
-        )
+        return self._taxa.somar(desde, ate, programa)
 
     def tempo_de_revisao(
         self,
@@ -94,24 +71,9 @@ class QualidadeReal:
         ate: date | None,
         programa: str | None,
         usuario: str | None,
-    ) -> list[RevisaoNoVideo]:
+    ) -> RevisaoAgregada:
         inicio, fim = _periodo(desde, ate)
-        jobs = {j.id: j for j in self._jobs.listar()}
-        return [
-            RevisaoNoVideo(
-                m.job_id,
-                m.uid,
-                m.email,
-                jobs[m.job_id].programa,
-                m.ativo_s,
-                jobs[m.job_id].duracao_s or m.duracao_s,
-            )
-            for m in self._revisao.todas(inicio)
-            if m.job_id in jobs
-            and (fim is None or m.ultimo_pulso < fim)
-            and (programa is None or jobs[m.job_id].programa == programa)
-            and (usuario is None or m.uid == usuario)
-        ]
+        return self._tempo.tempo(inicio, fim, programa, usuario)
 
 
 @dataclass
@@ -132,10 +94,12 @@ class QualidadeEmMemoria:
         ate: date | None,
         programa: str | None,
         usuario: str | None,
-    ) -> list[RevisaoNoVideo]:
-        return [
-            t
-            for t in self.tempos
-            if (programa is None or t.programa == programa)
-            and (usuario is None or t.uid == usuario)
-        ]
+    ) -> RevisaoAgregada:
+        return agregar(
+            [
+                t
+                for t in self.tempos
+                if (programa is None or t.programa == programa)
+                and (usuario is None or t.uid == usuario)
+            ]
+        )

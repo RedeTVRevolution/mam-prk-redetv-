@@ -1,5 +1,7 @@
 # Sistema visual
 
+> **Saiu** em 6/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
+
 O porquê das decisões visuais da interface do MAM e as regras que os testes guardam. Cada decisão aplica um item dos [princípios](principios.md), citado entre parênteses (P1 a P9).
 
 As tabelas de cor, tipo, medida, ícone e componente moram no [MAM_DESIGN_SYSTEM.md](MAM_DESIGN_SYSTEM.md), que é a referência. Este arquivo não as repete: explica o que o outro não explica e diz onde a interface construída se afasta dele.
@@ -142,6 +144,7 @@ O MAM_DESIGN_SYSTEM descreve as três opções do protótipo; a opção B Galeri
 - **Hachurado** em `border-strong`, não em `border` (`video/LinhaDoTempo.tsx`).
 - **Acervo:** grade de cartões (4 tamanhos, de 200 a 420 px de largura mínima) ou lista de linhas de 80 px com miniatura, sem colunas e sem ordenação por coluna. Ordena por data de envio ou de exibição (`acervo/Acervo.tsx`). Os filtros (Programa, Estado, Período) ficam em linha no cabeçalho, sem painel lateral. O cartão não mostra a barra de presença nem percorre os quadros ao passar o mouse. A barra de presença existe só nas linhas de pessoa do inspetor.
 - **Inspetor:** 400 px (420 a partir de `xl`), de largura fixa, sem arrastar. Abaixo de `lg` ele vira um bloco empilhado de 80% da altura da tela, não um `Sheet` (`video/Inspetor.tsx`).
+- **Comparação com a passada** (toma o lugar do inspetor): ao lado do vídeo, com 62% da largura, só a partir de `xl`; de `lg` a `xl` fica embaixo do vídeo, em largura total e 45% da altura, para o cabeçalho e o transporte do vídeo não perderem largura (`video/Comparacao.tsx`). Nessa faixa o controle de volume volta à barra mesmo com a revisão ligada.
 - **Placeholder dos campos da Administração** em `subtle` (`admin/comum.tsx`, `CAMPO`), abaixo do AA sobre `input`. A regra é o texto secundário; a troca está pendente.
 - **Sem Data Table (TanStack Table), Sonner nem AlertDialog.** As tabelas são HTML simples. O aviso de ação é um `role="status"` na própria tela, e o diálogo de perigo é um `Dialog`.
 - **Tempo de tela e Marcas** não têm mapa de calor de pessoa × vídeo. Além do ranking das 15 maiores, a tabela completa vem de 50 em 50 com cursor.

@@ -18,7 +18,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import logo from '../assets/redetv-logo.png'
 import { podeAdministrar } from '../administracao.ts'
 import { haJanelaAberta, useAtalhos, useMostrarAtalhos, type Atalho } from '../atalhos.ts'
-import { consultaNova } from '../busca.ts'
+import { consultaNova, TAMANHO_DA_CONSULTA } from '../busca.ts'
 import { NOME_DO_PAPEL } from '../papeis.ts'
 import { ACERVO, ADMIN, enderecoDaBusca, MARCAS, navegar, PAINEL, seguir, TEMPO_DE_TELA, type Rota } from '../rotas.ts'
 import type { Usuario } from '../sessao.ts'
@@ -65,7 +65,7 @@ interface Destino {
 }
 
 const ACERVO_D: Destino = { endereco: ACERVO, rotulo: 'Acervo', Icone: IconMovie, letra: 'a', ativo: (r) => r.tipo === 'acervo' || r.tipo === 'video' }
-const BUSCA_D: Destino = { endereco: '/busca', rotulo: 'Busca', Icone: IconSearch, ativo: (r) => r.tipo === 'busca' || r.tipo === 'parecidos' }
+const BUSCA_D: Destino = { endereco: '/busca', rotulo: 'Busca', Icone: IconSearch, ativo: (r) => r.tipo === 'busca' }
 const TEMPO_D: Destino = { endereco: TEMPO_DE_TELA, rotulo: 'Tempo de tela', Icone: IconUserScan, letra: 't', ativo: (r) => r.tipo === 'tempo_de_tela' }
 const MARCAS_D: Destino = { endereco: MARCAS, rotulo: 'Marcas', Icone: IconBadgeTm, letra: 'm', ativo: (r) => r.tipo === 'marcas' }
 const PAINEL_D: Destino = { endereco: PAINEL, rotulo: 'Painel da diretoria', Icone: IconChartBar, letra: 'p', ativo: (r) => r.tipo === 'painel' }
@@ -165,7 +165,7 @@ function BuscaGlobal({ aberta, aoMudar, destinos }: { aberta: boolean; aoMudar: 
   const q = texto.trim()
   return (
     <CommandDialog open={aberta} onOpenChange={aoMudar} titulo="Buscar no acervo" descricao="Busca no conteúdo e atalhos para as telas" className="sm:max-w-2xl">
-      <CommandInput placeholder="Buscar nas falas, nos textos da tela e nos planos…" value={texto} onValueChange={setTexto} />
+      <CommandInput placeholder="Buscar nas falas, nos textos da tela e nos planos…" maxLength={TAMANHO_DA_CONSULTA} value={texto} onValueChange={setTexto} />
       <CommandList>
         <CommandEmpty>Nenhuma tela com esse nome.</CommandEmpty>
         {q && (

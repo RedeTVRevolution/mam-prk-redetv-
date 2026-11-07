@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
@@ -31,6 +31,7 @@ from api.jobs import (
     _confere_permissao,
 )
 from api.progresso_das_janelas import JanelasDoJob
+from api.texto_como_dado import Linha, Texto
 
 
 class DisparoDoWorkflow(Protocol):
@@ -57,11 +58,9 @@ class DisparoIndisponivel:
 class PedidoDeReprocessamento(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    motivo: (
-        Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] | None
-    ) = None
+    motivo: Annotated[str, Texto(500, strip=True)] | None = None
     # Só num Job concluído; a lista das etapas permitidas é do ciclo de vida (409).
-    etapa: str | None = None
+    etapa: Annotated[str, Linha(40)] | None = None
 
 
 def _exige_pessoa(chamador: ChamadorAutenticado) -> Usuario:

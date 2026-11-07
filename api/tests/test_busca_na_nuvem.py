@@ -1,5 +1,6 @@
 """Adaptadores do Model Armor e da Ranking e a montagem pelo ambiente, sem rede."""
 
+import json
 from typing import Any
 
 import pytest
@@ -11,7 +12,7 @@ from api.busca_na_nuvem import (
     VeredictoIndefinido,
     adaptadores_da_busca,
 )
-from api.gemini import Chamada, ErroHttp, TransporteVertex
+from api.gemini import MODO_STANDARD, Chamada, ErroHttp, TransporteVertex
 from api.indice_da_busca import Registro
 from api.tests.test_gemini import RespostaFalsa, RespostaSemJson, SessaoFalsa
 
@@ -208,6 +209,33 @@ def test_model_armor_e_modelo_entram_juntos_e_a_ranking_sozinha() -> None:
     assert meio.armor is None and meio.transporte_da_consulta is None
 
 
+def test_a_consulta_registra_o_uso_do_modelo_com_a_etapa_busca(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    corpo = {
+        "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 3,
+            "thoughtsTokenCount": 2,
+        },
+    }
+    adaptadores = adaptadores_da_busca(
+        AMBIENTE, lambda: SessaoFalsa(RespostaFalsa(200, corpo))
+    )
+    assert adaptadores.transporte_da_consulta is not None
+    chamada = Chamada(
+        modelo="m", instrucao="i", video_uri="", esquema={}, rotulos={}, texto="oi"
+    )
+
+    adaptadores.transporte_da_consulta.gerar(chamada)
+
+    registro = json.loads(capsys.readouterr().out)
+    assert registro["evento"] == "uso_do_modelo"
+    assert registro["etapa"] == "busca"
+    assert registro["tokens_de_raciocinio"] == 2
+
+
 def test_a_consulta_vai_em_standard_sem_os_cabecalhos_do_flex() -> None:
     sessao = SessaoFalsa(
         RespostaFalsa(200, {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]})
@@ -220,6 +248,7 @@ def test_a_consulta_vai_em_standard_sem_os_cabecalhos_do_flex() -> None:
         rotulos={},
         texto="<consulta>x</consulta>",
         timeout_s=10,
+        modo=MODO_STANDARD,
     )
 
     TransporteVertex("proj", sessao).gerar(chamada)

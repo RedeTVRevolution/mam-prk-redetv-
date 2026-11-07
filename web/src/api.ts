@@ -24,7 +24,7 @@ import {
 } from './painelDaDiretoria.ts'
 import { parametrosDoRelatorio, POR_PAGINA_DO_DETALHE, POR_PAGINA_DO_RANKING } from './tempoDeTela.ts'
 import type { ComparacaoDaPassada, ResumoDaPassada } from './passadas.ts'
-import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao, Sugestao } from './decupagem.ts'
+import type { Decupagem, ItemDaFila, ItemDoHistorico, Reproducao } from './decupagem.ts'
 
 /** 401 ou sessão sem token. O cliente já avisou quem o criou; quem chama só não mostra erro. */
 export class SessaoExpirada extends Error {}
@@ -85,6 +85,18 @@ async function paginaDaBusca(pedido: Promise<Response>): Promise<PaginaDaBusca> 
 /** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
 export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
 
+/** Um quadro pedido em lote: o vídeo e o arquivo (`plano-0.jpg`). */
+export interface ParDeQuadro {
+  job: string
+  arquivo: string
+}
+
+/** A resposta do lote para um par: sem `url` (e sem `expira_em`) quando o quadro não pode ser dado. */
+export interface QuadroDoLote extends ParDeQuadro {
+  url: string | null
+  expira_em: string | null
+}
+
 /** Um Job visto pela API: a única porta da tela do vídeo para `/v1/jobs/{id}/...`. */
 export interface ClienteDoJob {
   detalhe(): Promise<Job>
@@ -107,10 +119,6 @@ export interface ClienteDoJob {
   historico(): Promise<ItemDoHistorico[]>
   fila(): Promise<ItemDaFila[]>
   corrigir(corpo: object): Promise<void>
-  sugestoes(): Promise<Sugestao[]>
-  /** Aceita a sugestão; `valor` é o "outro nome" (ou o título) do editor. */
-  aceitarSugestao(sugestaoId: string, valor?: string): Promise<void>
-  recusarSugestao(sugestaoId: string): Promise<void>
   desfazer(correcaoId: string, motivo: string): Promise<void>
   recusar(correcaoId: string, motivo: string): Promise<void>
   aprovar(correcaoId: string): Promise<void>
@@ -324,13 +332,15 @@ export interface ClienteDoCadastroDeProgramas {
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
-  acervo(filtros: FiltrosDoAcervo, cursor?: string | null): Promise<PaginaDoAcervo>
+  acervo(filtros: FiltrosDoAcervo, cursor?: string | null, opcoes?: { capa?: boolean }): Promise<PaginaDoAcervo>
   /** Uma página dos vídeos que entraram, de pessoas e de sistemas; a API só filtra sistema e estado. */
   entradas(filtros: FiltrosDasEntradas, cursor?: string | null): Promise<PaginaDoAcervo>
   /** `GET /v1/admin/auditoria` (exige `auditoria.ver`): só leitura; `cursor` é o `proximo` da página anterior. */
   auditoria(filtros: FiltrosDaAuditoria, limite: number, cursor?: string | null): Promise<PaginaDeAuditoria>
   /** `GET /v1/jobs/andamento`: o estado atual de até 200 vídeos num pedido só; omite os que não existem ou não se enxerga. */
   andamento(ids: string[]): Promise<Job[]>
+  /** `POST /v1/jobs/quadros`: as URLs assinadas dos quadros de uma página da busca (até 100 pares); `url` vem nula se o vídeo não existe, está na lixeira ou não concluiu. */
+  quadros(pares: ParDeQuadro[]): Promise<QuadroDoLote[]>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
   /**
@@ -340,10 +350,6 @@ export interface ClienteDaApi {
   buscar(consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
   /** `POST /v1/busca/imagem`: a foto é a consulta; só programa e período da `consulta` valem. */
   buscarPorImagem(foto: File, consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
-  /** `GET /v1/busca/parecidos`: os planos mais próximos do quadro de um plano (o próprio fica fora). */
-  buscarParecidos(job: string, plano: number, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
-  /** `GET /v1/busca/parecidos/planos`: os números dos planos do vídeo com vetor do quadro indexado. */
-  planosComVetor(job: string): Promise<number[]>
   /** `GET /v1/relatorios/tempo-de-tela`: tempo de tela por pessoa, contando só aparições. */
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
@@ -477,15 +483,6 @@ export function criarClienteDaApi(
       historico: () => chamar(`${base}/correcoes`),
       fila: () => chamar(`${base}/fila`),
       corrigir: (corpo) => chamar(`${base}/correcoes`, { post: true, corpo }),
-      sugestoes: () => chamar(`${base}/sugestoes`),
-      aceitarSugestao: (sugestaoId, valor) =>
-        chamar(`${base}/sugestoes/${sugestaoId}/aceitar`, {
-          post: true,
-          corpo: valor === undefined ? undefined : { valor },
-        }),
-      recusarSugestao: async (sugestaoId) => {
-        await pedir(`${base}/sugestoes/${sugestaoId}/recusar`, { post: true })
-      },
       desfazer: (correcaoId, motivo) =>
         chamar(`${base}/correcoes/${correcaoId}/desfazer`, {
           post: true,
@@ -517,8 +514,10 @@ export function criarClienteDaApi(
 
   return {
     eu: () => chamar('/v1/eu'),
-    acervo: async (filtros, cursor = null) => {
-      const resposta = await pedir(`/v1/jobs?${filtrosParaApi(filtros, cursor)}`)
+    acervo: async (filtros, cursor = null, opcoes = {}) => {
+      // `capa=false`: a API não assina as capas (quem só conta os vídeos não as usa).
+      const sufixo = opcoes.capa === false ? '&capa=false' : ''
+      const resposta = await pedir(`/v1/jobs?${filtrosParaApi(filtros, cursor)}${sufixo}`)
       return {
         jobs: (await resposta.json()) as Job[],
         proximo: resposta.headers.get('X-Proximo-Cursor'),
@@ -539,6 +538,7 @@ export function criarClienteDaApi(
       }
     },
     andamento: (ids) => chamar(`/v1/jobs/andamento?ids=${ids.map(encodeURIComponent).join(',')}`),
+    quadros: (pares) => chamar('/v1/jobs/quadros', { post: true, corpo: { quadros: pares } }),
     criarJob: (corpo) => chamar('/v1/jobs', { post: true, corpo }),
     programas: () => chamar('/v1/programas'),
     buscar: (consulta, limite, cursor) => paginaDaBusca(pedir(`/v1/busca?${comCursor(consultaParaApi(consulta, limite), cursor)}`)),
@@ -547,10 +547,6 @@ export function criarClienteDaApi(
       formulario.append('arquivo', foto)
       return paginaDaBusca(pedir(`/v1/busca/imagem?${comCursor(consultaDaImagemParaApi(consulta, limite), cursor)}`, { post: true, formulario }))
     },
-    buscarParecidos: (job, plano, limite, cursor) =>
-      paginaDaBusca(pedir(`/v1/busca/parecidos?${comCursor(String(new URLSearchParams({ job, plano: String(plano), limite: String(limite) })), cursor)}`)),
-    planosComVetor: async (job) =>
-      (await chamar<{ planos: number[] }>(`/v1/busca/parecidos/planos?${new URLSearchParams({ job })}`)).planos,
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
     tempoDeTelaEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),

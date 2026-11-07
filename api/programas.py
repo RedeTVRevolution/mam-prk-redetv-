@@ -11,9 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel
 
-from api.catalogo import Catalogo, visivel
+from api.catalogo import Catalogo, PessoaDoCatalogo, visivel
+from api.catalogo_apagado import destino_final
+from api.texto_como_dado import ID_SEGURO, Linha, Texto
 
 if TYPE_CHECKING:  # `api.jobs` importa este módulo
     from api.jobs import Job, RepositorioDeJobs
@@ -24,22 +26,16 @@ LIMITE_DO_PAPEL = 100
 
 NomeDoPrograma = Annotated[
     str,
-    StringConstraints(
-        strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME_DO_PROGRAMA
-    ),
+    Linha(LIMITE_DO_NOME_DO_PROGRAMA, min_length=1, strip=True),
 ]
-PerfilEmTexto = Annotated[
-    str, StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_PERFIL)
-]
-PapelNoPrograma = Annotated[
-    str, StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_PAPEL)
-]
+PerfilEmTexto = Annotated[str, Texto(LIMITE_DO_PERFIL, strip=True)]
+PapelNoPrograma = Annotated[str, Linha(LIMITE_DO_PAPEL, strip=True)]
 
 
 class VinculoDaPessoa(BaseModel):
     """A pessoa do catálogo no programa e o que ela faz ali."""
 
-    pessoa_id: str
+    pessoa_id: Annotated[str, Linha(200, min_length=1), ID_SEGURO]
     papel: PapelNoPrograma = ""
 
 
@@ -57,6 +53,10 @@ class RenomeacaoDoPrograma(BaseModel):
     pendentes: list[str]  # ids dos Jobs ainda por trocar e reindexar
     estado: Literal["confirmando", "em_andamento", "concluida", "falhou"]
     desde: datetime | None = None  # quando a troca foi pedida
+
+
+# Estados em que a troca ainda tem vídeo por indexar.
+TROCA_ABERTA = ("em_andamento", "falhou")
 
 
 class Programa(BaseModel):
@@ -88,6 +88,45 @@ def troca_vale(programa: "Programa | None", troca_id: str) -> bool:
 
 def novo_id() -> str:
     return uuid.uuid4().hex
+
+
+def terminar_o_pendente(
+    programas: "RepositorioDeProgramas", job_id: str, nome: str | None, ok: bool
+) -> None:
+    """O `mam-indexacao` alcançou a versão pedida do vídeo (#419): tira `job_id` dos pendentes
+    de toda troca de nome que o espera, e fecha a troca (`concluida`) quando não sobra nenhum.
+    Com `ok` falso a troca vai a `falhou`, para a tela oferecer o `retomar`; um pendente que
+    depois indexa ainda sai e pode fechá-la. `nome` é o programa com que o vídeo foi indexado:
+    só termina a troca que leva a esse nome (uma troca mais nova ainda espera a sua rodada)."""
+    for programa in programas.listar():
+        r = programa.renomeacao
+        if (
+            r is None
+            or job_id not in r.pendentes
+            or r.estado not in TROCA_ABERTA
+            or r.nome_novo != nome
+        ):
+            continue
+
+        def condicional(atual: Programa, troca_id: str = r.id) -> Programa | None:
+            lida = atual.renomeacao
+            if lida is None or lida.id != troca_id or job_id not in lida.pendentes:
+                return None
+            if not ok:
+                if lida.estado != "em_andamento":
+                    return None
+                novo = lida.model_copy(update={"estado": "falhou"})
+            else:
+                pendentes = [i for i in lida.pendentes if i != job_id]
+                novo = lida.model_copy(
+                    update={
+                        "pendentes": pendentes,
+                        "estado": "concluida" if not pendentes else lida.estado,
+                    }
+                )
+            return atual.model_copy(update={"renomeacao": novo})
+
+        programas.trocar(programa.id, condicional)
 
 
 class RepositorioDeProgramas(Protocol):
@@ -218,22 +257,46 @@ class PerfilDoPrograma:
 Perfis = Mapping[str, PerfilDoPrograma]
 
 
+def pessoas_do_programa(
+    programa: Programa, catalogo: Catalogo
+) -> tuple[list[tuple[PessoaDoCatalogo, str]], list[VinculoDaPessoa]]:
+    """As pessoas do programa como o catálogo está agora (#425): `(visíveis, escondidos)`.
+
+    O vínculo com pessoa fundida segue o destino na leitura (como `com_pessoas_fundidas`):
+    nada gravado é reescrito, e a mesma pessoa vinda de dois vínculos aparece uma vez, com
+    o primeiro papel. O vínculo cuja pessoa (ou o destino dela) está na lixeira fica
+    escondido, mas continua gravado: o `PUT` o preserva e restaurar a pessoa o devolve.
+    Pessoa que saiu do catálogo (purga) não é nem uma coisa nem outra."""
+    visiveis: dict[str, tuple[PessoaDoCatalogo, str]] = {}
+    escondidos: list[VinculoDaPessoa] = []
+    for vinculo in programa.pessoas:
+        pessoa = destino_final(vinculo.pessoa_id, catalogo.obter) or catalogo.obter(
+            vinculo.pessoa_id
+        )
+        if pessoa is None:
+            continue
+        if visivel(pessoa):
+            visiveis.setdefault(pessoa.id, (pessoa, vinculo.papel))
+        elif pessoa.lixeira is not None:
+            escondidos.append(vinculo)
+    return list(visiveis.values()), escondidos
+
+
 def perfis_dos_programas(
     repositorio: RepositorioDeProgramas, catalogo: Catalogo
 ) -> Perfis:
     """Os programas cadastrados agora, pelo nome, com as pessoas lidas do catálogo.
-    Quem está na lixeira ou foi fundida em outra não entra."""
+    Quem está na lixeira não entra; quem foi fundida em outra entra como o destino."""
     perfis: dict[str, PerfilDoPrograma] = {}
     for programa in repositorio.listar():
-        pessoas: list[PessoaDoPerfil] = []
-        for vinculo in programa.pessoas:
-            pessoa = catalogo.obter(vinculo.pessoa_id)
-            if pessoa is not None and visivel(pessoa):
-                pessoas.append(
-                    PessoaDoPerfil(pessoa.nome, vinculo.papel, tuple(pessoa.apelidos))
-                )
+        visiveis, _ = pessoas_do_programa(programa, catalogo)
         perfis[programa.nome] = PerfilDoPrograma(
-            programa.nome, programa.perfil, tuple(pessoas)
+            programa.nome,
+            programa.perfil,
+            tuple(
+                PessoaDoPerfil(pessoa.nome, papel, tuple(pessoa.apelidos))
+                for pessoa, papel in visiveis
+            ),
         )
     return perfis
 

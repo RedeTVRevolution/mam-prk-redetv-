@@ -36,6 +36,7 @@ import { fraseDaFalha } from '../../falhas.ts'
 import { dataEHora, MAXIMO_DO_ANDAMENTO, type EtapaDoJob, type Job, type PaginaDoAcervo } from '../../jobs.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import { enderecoDasEntradas, navegar } from '../../rotas.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
@@ -186,14 +187,15 @@ function EstadoDaLinha({ job }: { job: Job }) {
 }
 
 function Miniatura({ job }: { job: Job }) {
-  if (!job.capa_url) {
+  const capa = urlSegura(job.capa_url)
+  if (!capa) {
     return (
       <span className="grid aspect-video w-[76px] place-items-center rounded-xs bg-input text-subtle">
         <IconMovie size={16} stroke={1.5} aria-hidden />
       </span>
     )
   }
-  return <img src={job.capa_url} alt="" loading="lazy" decoding="async" className="aspect-video w-[76px] rounded-xs bg-input object-cover" />
+  return <img src={capa} alt="" loading="lazy" decoding="async" className="aspect-video w-[76px] rounded-xs bg-input object-cover" />
 }
 
 function ConfirmarReprocesso({ job, etapa, aoConfirmar, aoCancelar }: { job: Job; etapa: string; aoConfirmar: (motivo: string) => Promise<void>; aoCancelar: () => void }) {

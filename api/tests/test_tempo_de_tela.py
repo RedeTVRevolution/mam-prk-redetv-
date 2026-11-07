@@ -4,12 +4,15 @@ import csv
 import io
 import random
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
+from api.cache_curto import CacheCurto
+from api.catalogo import CatalogoEmMemoria
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -21,7 +24,7 @@ from api.copia_bigquery import (
     LinhaDoMomento,
     PessoaDoMomento,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import Job, RepositorioEmMemoria, agora_utc
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
@@ -31,6 +34,7 @@ from api.tempo_de_tela import (
     UNIAO_EM_SQL,
     VIDEOS_DA_PESSOA_EM_SQL,
     ConsultaBigQuery,
+    ConsultaDeMomentos,
     ConsultaEmMemoria,
     MomentoDaPessoa,
     PessoaNoRelatorio,
@@ -42,7 +46,9 @@ from api.tempo_de_tela import (
     video_da_pessoa,
     videos_em_python,
 )
+from api.tempo_de_tela import ConsultaComCache as ComCache
 from api.tempo_de_tela import relatorio as relatorio_das_somas
+from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
 from api.tests.test_passadas import AUTORIZACAO
@@ -387,7 +393,10 @@ def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
 
 
 def _cliente(
-    papel: str = "consulta", consulta: ConsultaEmMemoria | None = None
+    papel: str = "consulta",
+    consulta: ConsultaDeMomentos | None = None,
+    relogio: Callable[[], datetime] | None = None,
+    catalogo: CatalogoEmMemoria | None = None,
 ) -> TestClient:
     jobs = RepositorioEmMemoria()
     jobs.salvar(
@@ -405,14 +414,16 @@ def _cliente(
     )
     papeis = RepositorioDePapeisEmMemoria()
     papeis.salvar("u1", [papel])  # type: ignore[list-item]
-    return TestClient(
-        criar_app(
-            VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@redetv.com.br")}),
-            jobs,
-            papeis=papeis,
-            tempo_de_tela=consulta,
-        )
+    app = criar_app(
+        VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@redetv.com.br")}),
+        jobs,
+        papeis=papeis,
+        tempo_de_tela=consulta,
+        catalogo=catalogo,
+        relogio=relogio or agora_utc,
     )
+    # Com relógio, o teste é do período padrão: o cliente comum não pede o histórico inteiro.
+    return TestClient(app) if relogio else ClienteSemPeriodoPadrao(app)
 
 
 def test_rota_devolve_a_tabela_com_os_videos_de_cada_pessoa() -> None:
@@ -522,7 +533,7 @@ def test_programa_vazio_e_todos_os_programas() -> None:
 def test_chave_de_sistema_nao_consulta_o_relatorio() -> None:
     chaves = RepositorioDeChavesEmMemoria()
     emitida = emitir_chave("Playout", frozenset({"ler"}), MAC, chaves, BASE)
-    cliente = TestClient(
+    cliente = ClienteSemPeriodoPadrao(
         criar_app(
             VerificadorFalso({}),
             RepositorioEmMemoria(),
@@ -748,3 +759,72 @@ def test_bigquery_pede_a_pagina_e_a_pessoa_como_parametros() -> None:
         "posicao_ate": "26",
     }
     assert "p.id = @pessoa_id" in videos["query"]
+
+
+def test_o_nome_do_relatorio_vem_do_catalogo_inclusive_depois_de_renomear() -> None:
+    catalogo = CatalogoEmMemoria()
+    ana = catalogo.acrescentar("Ana Souza", "apresentadora", [])
+    bia = catalogo.acrescentar("Bia Lima", "", [])
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            LinhaDoMomento(
+                job_id="j1",
+                programa="Jornal",
+                data_de_exibicao=date(2026, 10, 1),
+                tipo="aparicao",
+                inicio_ms=0,
+                fim_ms=fim,
+                pessoas=[PessoaDoMomento(quem.id)],  # a cópia não grava o nome
+            )
+            for quem, fim in ((ana, 2_000), (bia, 1_000))
+        ],
+    )
+    cliente = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
+
+    def nomes(**params: Any) -> list[str]:
+        corpo = cliente.get(ROTA, params=params, headers=AUTORIZACAO).json()
+        return [p["nome"] for p in corpo["pessoas"]]
+
+    assert nomes() == ["Ana Souza", "Bia Lima"]
+    assert nomes(limite=10) == ["Ana Souza", "Bia Lima"]
+
+    catalogo.corrigir(ana.id, nome="Ana Souza Pereira", apelidos=[])
+
+    assert nomes() == ["Ana Souza Pereira", "Bia Lima"]
+    assert nomes(limite=10) == ["Ana Souza Pereira", "Bia Lima"]
+    csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO).text
+    assert "Ana Souza Pereira" in csv_
+
+
+def test_o_nome_do_catalogo_nao_suja_o_ranking_guardado_no_cache() -> None:
+    catalogo = CatalogoEmMemoria()
+    ana = catalogo.acrescentar("Ana", "", [])
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            LinhaDoMomento(
+                job_id="j1",
+                programa="Jornal",
+                data_de_exibicao=date(2026, 10, 1),
+                tipo="aparicao",
+                inicio_ms=0,
+                fim_ms=1_000,
+                pessoas=[PessoaDoMomento(ana.id, "Antigo")],
+            )
+        ],
+    )
+    cache = CacheCurto()
+    cliente = _cliente(
+        consulta=ComCache(ConsultaEmMemoria(copia), cache), catalogo=catalogo
+    )
+
+    def nome() -> str:
+        corpo = cliente.get(ROTA, params={"limite": 5}, headers=AUTORIZACAO).json()
+        return str(corpo["pessoas"][0]["nome"])
+
+    assert nome() == "Ana"
+    catalogo.corrigir(ana.id, nome="Ana Maria", apelidos=[])
+    assert nome() == "Ana Maria"

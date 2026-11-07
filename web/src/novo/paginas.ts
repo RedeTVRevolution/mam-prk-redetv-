@@ -16,7 +16,7 @@ export class CursorVencido extends PedidoInvalido {}
  * página n se pede com o da posição n, e a primeira com `''` (o `null` faria o TanStack achar que
  * não há página antes). A API só tem cursor para frente; para voltar, o navegador usa o que
  * guardou (uns 100 bytes por página). Fica fora do cache: a volta do vídeo depois do `gcTime`
- * recomeça da página certa. Um mapa por prefixo da chave (`acervo`, `busca`, `parecidos`).
+ * recomeça da página certa. Um mapa por prefixo da chave (`acervo`, `busca`).
  */
 interface Guardados {
   cursores: string[]
@@ -26,7 +26,7 @@ interface DoPrefixo {
   consultas: Map<string, Guardados>
   /**
    * Onde a lista estava ao sair (abrir um vídeo): o primeiro item à vista, pelo índice. Uma por
-   * prefixo: acervo, vídeo, parecidos, volta e volta encontra o acervo onde estava.
+   * prefixo: acervo, vídeo, volta e volta encontra o acervo onde estava.
    */
   posicao: { chave: string; indice: number } | null
 }
@@ -83,7 +83,7 @@ function volta(cliente: QueryClient, prefixo: unknown, hash: string, g: Guardado
 }
 
 export interface OpcoesDasPaginas<P, I> {
-  /** O primeiro elemento é o prefixo (`acervo`, `busca`, `parecidos`). */
+  /** O primeiro elemento é o prefixo (`acervo`, `busca`). */
   chave: QueryKey
   /** Uma página; `''` é a primeira. */
   pedir: (cursor: string) => Promise<P>
@@ -194,6 +194,14 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
     if (data.pages.some((p, i) => i + 1 < params.length && (proximo(p) ?? undefined) !== params[i + 1])) void q.refetch()
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [data, anterior, isFetching, proximo])
+
+  // A API pode devolver uma página vazia com cursor (o teto de candidatos examinados chegou antes
+  // do primeiro aprovado): a tela não tem item para rolar até ele, então o cursor é seguido aqui.
+  const ultimaVazia = !!data && !anterior && data.pages.length > 0 && tamanho(data.pages[data.pages.length - 1]) === 0
+  // `data` fica nas deps: com duas páginas vazias seguidas, só ele muda entre uma e a outra.
+  useEffect(() => {
+    if (ultimaVazia && hasNextPage && !isFetching && !isFetchNextPageError) void fetchNextPage({ cancelRefetch: false })
+  }, [ultimaVazia, hasNextPage, isFetching, isFetchNextPageError, fetchNextPage, data])
 
   // O teto vale por consulta: a de outro filtro ou outra ordem sai já, em vez de ficar o gcTime
   // inteiro no cache somando mais páginas. Os cursores dela saem junto.

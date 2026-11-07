@@ -101,6 +101,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/comparador.py \
      api/correcoes.py \
+     api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/espera.py \
@@ -110,10 +111,12 @@ COPY api/__init__.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
+     api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/log_estruturado.py \
      api/marcas.py \
      api/nuvem.py \
      api/paddle.py \
@@ -123,8 +126,8 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/revisao.py \
      api/sinais.py \
-     api/sugestoes.py \
      api/teste_dos_jobs.py \
+     api/texto_como_dado.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/transcricao_job.py \
@@ -203,6 +206,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/comparador.py \
      api/correcoes.py \
+     api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/espera.py \
@@ -212,10 +216,12 @@ COPY api/__init__.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
+     api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/log_estruturado.py \
      api/marcas.py \
      api/mudanca_da_tela.py \
      api/nuvem.py \
@@ -228,8 +234,8 @@ COPY api/__init__.py \
      api/quadros.py \
      api/revisao.py \
      api/sinais.py \
-     api/sugestoes.py \
      api/teste_dos_jobs.py \
+     api/texto_como_dado.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/usuarios.py \
@@ -299,6 +305,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/comparador.py \
      api/correcoes.py \
+     api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/espera.py \
@@ -307,10 +314,12 @@ COPY api/__init__.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
+     api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/log_estruturado.py \
      api/marcas.py \
      api/nuvem.py \
      api/objetos_job.py \
@@ -321,8 +330,8 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/revisao.py \
      api/sinais.py \
-     api/sugestoes.py \
      api/teste_dos_jobs.py \
+     api/texto_como_dado.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/usuarios.py \

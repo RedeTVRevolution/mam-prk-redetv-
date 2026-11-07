@@ -1,6 +1,8 @@
 import json
+import re
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -8,6 +10,8 @@ import requests
 
 from api.decupagem import Video, esquema_do_modelo
 from api.gemini import (
+    MODO_FLEX,
+    MODO_STANDARD,
     PRAZO_DA_ANALISE_S,
     TIMEOUT_DA_REDE_S,
     AnaliseFalhou,
@@ -472,18 +476,81 @@ def test_transporte_vertex_loga_o_uso_de_cada_chamada_com_o_modelo() -> None:
             "modelo": "gemini-3.5-flash-lite",
             "tokens_de_entrada": 100,
             "tokens_de_saida": 25,
+            "tokens_de_resposta": 20,
+            "tokens_de_raciocinio": 5,
+            "tokens_de_entrada_em_cache": 0,
+            "modo": "",
         }
     ]
 
 
-def test_transporte_vertex_sem_registrar_nao_loga_nada(
+def test_transporte_vertex_separa_raciocinio_cache_e_modo_no_registro() -> None:
+    corpo = {
+        "candidates": [],
+        "usageMetadata": {
+            "promptTokenCount": 100,
+            "candidatesTokenCount": 20,
+            "thoughtsTokenCount": 5,
+            "cachedContentTokenCount": 60,
+            "trafficType": "ON_DEMAND_FLEX",
+        },
+    }
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p", SessaoFalsa(RespostaFalsa(200, corpo)), registrar=linhas.append
+    )
+
+    transporte.gerar(_chamada())
+
+    registro = json.loads(linhas[0])
+    assert registro["tokens_de_entrada"] == 100
+    assert registro["tokens_de_resposta"] == 20
+    assert registro["tokens_de_raciocinio"] == 5
+    assert registro["tokens_de_entrada_em_cache"] == 60
+    assert registro["modo"] == "ON_DEMAND_FLEX"
+    assert (
+        registro["tokens_de_saida"] == 25
+    )  # o que o painel já lê: resposta + raciocínio
+
+
+def test_transporte_vertex_sem_metadados_de_uso_registra_zeros_e_modo_vazio() -> None:
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p",
+        SessaoFalsa(RespostaFalsa(200, {"candidates": []})),
+        registrar=linhas.append,
+    )
+
+    transporte.gerar(_chamada())
+
+    registro = json.loads(linhas[0])
+    assert registro["tokens_de_raciocinio"] == 0
+    assert registro["tokens_de_entrada_em_cache"] == 0
+    assert registro["modo"] == ""
+
+
+def test_transporte_vertex_com_etapa_poe_a_etapa_no_registro() -> None:
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p",
+        SessaoFalsa(RespostaFalsa(200, {"candidates": []})),
+        registrar=linhas.append,
+        etapa="busca",
+    )
+
+    transporte.gerar(_chamada())
+
+    assert json.loads(linhas[0])["etapa"] == "busca"
+
+
+def test_transporte_vertex_sem_registrar_loga_no_stdout(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     corpo = {"candidates": [], "usageMetadata": {"promptTokenCount": 1}}
 
     TransporteVertex("p", SessaoFalsa(RespostaFalsa(200, corpo))).gerar(_chamada())
 
-    assert capsys.readouterr().out == ""
+    assert json.loads(capsys.readouterr().out)["evento"] == "uso_do_modelo"
 
 
 @pytest.mark.parametrize("status", [429, 500, 503])
@@ -541,11 +608,16 @@ def test_resposta_200_que_nao_e_json_vira_erro_repetivel() -> None:
     assert e.value.status == 502
 
 
-def test_transporte_vertex_manda_imagens_no_lugar_do_video_e_sem_flex() -> None:
+def test_transporte_vertex_manda_imagens_no_lugar_do_video() -> None:
     sessao = SessaoFalsa(_ok("{}"))
 
     TransporteVertex("p", sessao).gerar(
-        replace(_chamada(), video_uri="", imagens=(b"\xff\xd8abc", b"\xff\xd8def"))
+        replace(
+            _chamada(),
+            video_uri="",
+            imagens=(b"\xff\xd8abc", b"\xff\xd8def"),
+            modo=MODO_STANDARD,
+        )
     )
 
     pedido = sessao.pedidos[0]
@@ -555,6 +627,71 @@ def test_transporte_vertex_manda_imagens_no_lugar_do_video_e_sem_flex() -> None:
         {"inlineData": {"mimeType": "image/jpeg", "data": "/9hkZWY="}},
     ]
     assert pedido["headers"] == {}
+
+
+def test_o_texto_da_chamada_vai_antes_das_imagens() -> None:
+    sessao = SessaoFalsa(_ok("{}"))
+
+    TransporteVertex("p", sessao).gerar(
+        replace(
+            _chamada(),
+            video_uri="",
+            imagens=(b"\xff\xd8abc",),
+            texto="a pessoa",
+            modo=MODO_STANDARD,
+        )
+    )
+
+    partes = sessao.pedidos[0]["json"]["contents"][0]["parts"]
+    assert partes == [
+        {"text": "a pessoa"},
+        {"inlineData": {"mimeType": "image/jpeg", "data": "/9hhYmM="}},
+    ]
+
+
+def test_o_modo_vem_do_campo_da_chamada_e_nao_do_conteudo() -> None:
+    for conteudo in (
+        {},
+        {"texto": "só texto"},
+        {"video_uri": "", "imagens": (b"\xff\xd8a",)},
+        {"video_uri": "", "imagens": (b"\xff\xd8a",), "texto": "t"},
+    ):
+        sessao = SessaoFalsa(_ok("{}"))
+        TransporteVertex("p", sessao).gerar(replace(_chamada(), **conteudo))
+        cabecalhos = sessao.pedidos[0]["headers"]
+        assert cabecalhos["X-Vertex-AI-LLM-Shared-Request-Type"] == "flex"
+
+        sessao = SessaoFalsa(_ok("{}"))
+        TransporteVertex("p", sessao).gerar(
+            replace(_chamada(), modo=MODO_STANDARD, **conteudo)
+        )
+        assert sessao.pedidos[0]["headers"] == {}
+
+
+def test_a_chamada_nasce_em_flex() -> None:
+    assert _chamada().modo == MODO_FLEX
+
+
+def test_so_a_busca_e_a_identificacao_pedem_standard() -> None:
+    """Toda chamada ao Gemini sai em Flex (#402, #471), menos estas duas (ADR 0004).
+
+    Procura o nome da constante e o texto do modo, em qualquer forma de escrever
+    (`gemini.MODO_STANDARD`, `"standard"`), em todo `api/` fora dos testes.
+    `gemini.py` define o modo e `versao_pipeline.py` só o registra.
+    """
+    api = Path(__file__).parents[1]
+    pedem = {
+        str(arquivo.relative_to(api))
+        for arquivo in api.rglob("*.py")
+        if "tests" not in arquivo.relative_to(api).parts
+        and re.search(
+            r"MODO_STANDARD|[\"']standard[\"']", arquivo.read_text(encoding="utf-8")
+        )
+    }
+    assert pedem - {"gemini.py", "versao_pipeline.py"} == {
+        "entendimento_da_consulta.py",
+        "modelo_forte.py",
+    }
 
 
 def test_instrucao_traz_os_cortes_em_mmss_e_sem_cortes_nao_traz_a_secao() -> None:
@@ -580,3 +717,17 @@ def test_a_janela_leva_so_os_cortes_dentro_do_trecho() -> None:
 def test_cortes_no_mesmo_segundo_viram_um_tempo_so() -> None:
     texto = instrucao(None, cortes_ms=[6_100, 6_900, 8_000])
     assert "(MM:SS): 00:06, 00:08." in texto
+
+
+def test_instrucao_diz_que_arroba_e_nome_de_pessoa_nao_sao_marca() -> None:
+    """#434: o modelo registrava o @ do apresentador como comercial."""
+    t = TransporteFalso(BOA)
+    analisar(t, video_uri=VIDEO, job_id=JOB, video=VIDEO_CONFIAVEL)
+    texto = t.chamadas[0].instrucao
+    assert "@ ou nome de pessoa nunca é marca" in texto
+    assert "só é comercial quando divulga um anunciante" in texto
+    assert "próprio programa e da emissora não é anúncio" in texto
+    descricao = t.chamadas[0].esquema["$defs"]["Comercial"]["properties"]["tipo"][
+        "description"
+    ]
+    assert "nunca é marca" in descricao

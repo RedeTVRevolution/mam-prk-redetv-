@@ -5,6 +5,7 @@ montado como volume só de leitura, e a saída vai para um volume em memória.
 O Eventarc entrega pelo menos uma vez, então um evento repetido não faz nada.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from google.cloud import firestore
 from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 
+from api import log_estruturado
 from api.ciclo_de_vida import transitar
 from api.cortes import LIMIAR_PADRAO
 from api.eventos_do_job import jobs_do_ambiente
@@ -103,4 +105,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     main()

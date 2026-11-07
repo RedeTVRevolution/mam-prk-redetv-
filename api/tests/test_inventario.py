@@ -1,6 +1,7 @@
 """Conversão do resultado do Florence-2 e motor Gemini para o inventário (#244)."""
 
 import json
+import threading
 from typing import Any
 
 import pytest
@@ -12,7 +13,7 @@ from api.florence import (
     QuadroDetectado,
     RegiaoLegendada,
 )
-from api.gemini import AnaliseFalhou
+from api.gemini import AnaliseFalhou, Chamada
 from api.inventario import (
     aplicar_inventario,
     converter_do_florence,
@@ -103,6 +104,7 @@ def test_a_conversao_e_uma_chamada_so_de_texto_sem_imagem() -> None:
     assert chamada.modelo == "m"
     assert chamada.rotulos["etapa"] == "inventario_de_objetos"
     assert chamada.rotulos["job_id"] == "j1"
+    assert chamada.modo == "flex"
     assert "couch" in chamada.instrucao + chamada.texto
     assert "português" in chamada.instrucao
 
@@ -253,6 +255,7 @@ def test_planos_em_lotes_uma_chamada_por_lote() -> None:
         modelo="m",
         job_id="j1",
         planos_por_lote=2,
+        paralelismo=1,  # a fila de respostas do fake é por ordem de chamada
     )
 
     assert len(transporte.chamadas) == 3
@@ -398,3 +401,70 @@ def test_plano_sem_quadros_nao_gera_chamada() -> None:
 
     assert inventarios == {0: []}
     assert transporte.chamadas == []
+
+
+def test_os_lotes_vao_ao_gemini_ao_mesmo_tempo_e_o_resultado_segue_a_ordem() -> None:
+    quadros = bruto(
+        *[
+            quadro(
+                i,
+                f"q/{i}.jpg",
+                objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+            )
+            for i in range(4)
+        ]
+    )
+    # Cada chamada espera a outra: em série, a barreira estoura o prazo.
+    barreira = threading.Barrier(2, timeout=5)
+
+    class TransporteEmParalelo:
+        def gerar(self, chamada: Chamada) -> str:
+            barreira.wait()
+            plano = int(chamada.texto.split()[1])
+            return resposta(
+                {"plano": plano, "objetos": [convertido("vaso", [f"p{plano}q0o0"])]}
+            )
+
+    inventarios = converter_do_florence(
+        decupagem(*[[f"q/{i}.jpg"] for i in range(4)]),
+        quadros,
+        transporte=TransporteEmParalelo(),
+        modelo="m",
+        job_id="j1",
+        planos_por_lote=2,
+        paralelismo=2,
+    )
+
+    assert sorted(inventarios) == [0, 1, 2, 3]
+
+
+def test_uma_falha_cancela_os_lotes_que_ainda_nao_comecaram() -> None:
+    quadros = bruto(
+        *[
+            quadro(
+                i,
+                f"q/{i}.jpg",
+                objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+            )
+            for i in range(4)
+        ]
+    )
+    chamadas: list[Chamada] = []
+
+    class TransporteQueFalha:
+        def gerar(self, chamada: Chamada) -> str:
+            chamadas.append(chamada)
+            raise AnaliseFalhou("sem capacidade")
+
+    with pytest.raises(AnaliseFalhou):
+        converter_do_florence(
+            decupagem(*[[f"q/{i}.jpg"] for i in range(4)]),
+            quadros,
+            transporte=TransporteQueFalha(),
+            modelo="m",
+            job_id="j1",
+            planos_por_lote=1,
+            paralelismo=1,
+        )
+
+    assert len(chamadas) == 1

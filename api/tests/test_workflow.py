@@ -275,7 +275,7 @@ def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
     assert "vpc_access" not in job
     assert 'args    = ["-m", "api.indexacao"]' in job
     assert "max_retries     = 0" in job
-    assert "BUSCA_COLECAO" in job and "BUSCA_INDICE_QUADRO" in job
+    assert "BUSCA_COLECAO" in job and "BUSCA_INDICE_DESCRICAO" in job
     assert re.search(
         r"job_de_indexacao\s+= google_cloud_run_v2_job\.indexacao\.name", main
     )
@@ -620,7 +620,12 @@ def test_o_bucket_das_referencias_nao_tem_regra_de_ciclo_de_vida() -> None:
         "\nresource "
     )[0]
 
-    assert "lifecycle_rule" not in bucket
+    # A única regra de ciclo de vida é a do original na quarentena (#369).
+    assert bucket.count("lifecycle_rule") == 1
+    assert (
+        'for_each = each.key == "quarentena" ? [1] : []'
+        in bucket.split('dynamic "lifecycle_rule"')[1].split("content")[0]
+    )
     assert "prazo_dos_palpites_dias" not in main
 
 

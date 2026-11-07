@@ -10,6 +10,7 @@ URL_DE_UPLOAD=$(jq -r .url_de_upload job.json)
 SESSAO=$(curl --fail-with-body -sS -i -X POST "$URL_DE_UPLOAD" \
   -H "Content-Type: video/mp4" \
   -H "x-goog-resumable: start" \
+  -H "x-goog-if-generation-match: 0" \
   -H "x-upload-content-length: $TAMANHO" \
   -H "Content-Length: 0")
 DESTINO=$(printf '%s' "$SESSAO" | awk 'tolower($1) == "location:" {print $2}' | tr -d '\r')

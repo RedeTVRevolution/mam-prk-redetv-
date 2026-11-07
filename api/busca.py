@@ -9,6 +9,7 @@ do usuário só chega ao índice como texto puro.
 import hashlib
 import json
 import logging
+import re
 import secrets
 import threading
 import time
@@ -24,6 +25,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
@@ -40,7 +42,6 @@ from api.indice_da_busca import (
     IndiceDaBusca,
     Registro,
     TipoDeRegistro,
-    palavras,
 )
 from api.jobs import (
     VALIDADE_DA_IMAGEM,
@@ -50,6 +51,7 @@ from api.jobs import (
     Job,
     RepositorioDeJobs,
 )
+from api.numero import com_as_formas, mesma_palavra, singular
 
 log = logging.getLogger(__name__)
 
@@ -78,8 +80,15 @@ JUNCAO_MS = 3_000
 # Assinaturas simultâneas para a chave de sistema: cada uma é uma ida ao IAM, e cem
 # momentos em fila passavam dos 15 s da rota.
 TETO_DE_ASSINATURAS = 16
+# Consultas ao índice simultâneas numa busca. Pequeno de propósito: cada busca já ocupa
+# um worker do executor da rota, numa instância de 1 vCPU.
+TETO_DE_CONSULTAS_AO_INDICE = 3
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
+# Entendimento da consulta (Flash-Lite) guardado por pessoa e consulta (#489): uma faceta
+# ou ordem nova não paga o modelo de novo. O Model Armor roda sempre.
+VALIDADE_DO_ENTENDIMENTO_S = 300.0  # 5 min, o que a web guarda das combinações vistas
+TETO_DO_ENTENDIMENTO = 500  # respostas por instância (LRU), poucos KB cada
 ROTULO_DO_TIPO: dict[str, str] = {
     "plano": "Plano",
     "fala": "Fala",
@@ -92,22 +101,12 @@ Ordem = Literal["relevancia", "data"]
 EvidenciaDaBusca = Literal["imagem", "citada", "fala", "gc", "objeto", "marca"]
 
 
-class EmbeddingDaConsulta(Protocol):
-    """Porta do embedding multimodal: o texto da consulta vira vetor no espaço dos quadros."""
-
-    def vetor_do_texto(self, texto: str) -> list[float]: ...
-
-
 class BuscaCancelada(Exception):
     """A rota desistiu (passou do prazo): o trabalho que sobra para em vez de seguir rodando."""
 
 
 class BuscaPorImagemIndisponivel(Exception):
     """O modelo da consulta está fora ou não achou objeto na foto: a imagem não vira termo."""
-
-
-class PlanoSemVetor(Exception):
-    """O plano não existe, o vídeo não é visível, ou o quadro do plano não tem vetor."""
 
 
 class Ranking(Protocol):
@@ -131,7 +130,7 @@ class Destaque(BaseModel):
 
 
 class Momento(BaseModel):
-    tipo: TipoDeRegistro  # a grade da busca visual mostra só os planos
+    tipo: TipoDeRegistro  # o tipo do registro: plano, objeto, pessoa...
     inicio_ms: int
     fim_ms: int
     motivo: str
@@ -165,7 +164,7 @@ class VideoDoResultado(BaseModel):
 class SemAparicao(BaseModel):
     """A pessoa pedida não aparece na imagem no programa e período pedidos; quantas vezes é citada."""
 
-    pessoa_id: str
+    pessoa_id: str | None  # `None`: o nome que o catálogo não resolve
     nome: str
     mencoes_na_fala: int
     mencoes_na_tela: int
@@ -178,9 +177,6 @@ class Entendida(BaseModel):
     programa: str | None
     desde: date | None
     ate: date | None
-    # A busca usou o vetor do quadro. Falso no modo visual quando o índice do quadro está
-    # desligado ou o embedding falhou: a tela avisa que veio a busca comum.
-    visual: bool = False
     # Só na busca por foto (#443): o termo que o modelo deu para o objeto e que a busca usou,
     # como se tivesse sido digitado. A tela o mostra para a pessoa poder refinar digitando.
     termo_da_foto: str | None = None
@@ -306,10 +302,11 @@ class ListasDaBuscaEmMemoria:
 def filtros_do_servidor() -> Filtros:
     """Os filtros que o servidor impõe a toda busca, acima da consulta.
 
-    Hoje nenhum campo do índice carrega a permissão. O vídeo na lixeira (#144) sai pelo Job:
-    `Busca` descarta o vídeo cujo Job não está concluído ou está na lixeira.
+    O vídeo na lixeira (#144) fica fora do índice por `na_lixeira=False`, para não ocupar o
+    teto de registros (#483); a regra de verdade segue no Job: `Busca` descarta o vídeo cujo
+    Job não está concluído ou está na lixeira, e o de outro sistema.
     """
-    return Filtros()
+    return Filtros(na_lixeira=False)
 
 
 def com_filtros_do_servidor(da_consulta: Filtros, do_servidor: Filtros) -> Filtros:
@@ -338,11 +335,17 @@ def _sem_acento(texto: str) -> str:
 def _destaques(texto: str, termos: Collection[str]) -> list[Destaque]:
     palheiro = _sem_acento(texto)
     achados: list[tuple[int, int]] = []
-    for termo in {_sem_acento(t) for t in termos if len(t.strip()) >= 2}:
+    for original in {t for t in termos if len(t.strip()) >= 2}:
+        termo = _sem_acento(original)
         i = palheiro.find(termo)
         while i != -1:
             achados.append((i, i + len(termo)))
             i = palheiro.find(termo, i + len(termo))
+        # A mesma palavra no outro número ("microfone" × "microfones", "avião" × "aviões").
+        if " " not in original.strip():
+            for achado in re.finditer(r"\w+", texto):
+                if mesma_palavra(achado.group(), original):
+                    achados.append((achado.start(), achado.end()))
     unidos: list[list[int]] = []
     for inicio, fim in sorted(achados):
         if unidos and inicio <= unidos[-1][1]:
@@ -381,11 +384,9 @@ class Busca:
         repositorio: RepositorioDeJobs,
         armazenamento: Armazenamento,
         relogio: Callable[[], datetime],
-        embedding: EmbeddingDaConsulta | None = None,
         copia_do_catalogo: CopiaCurta[PessoaDoCatalogo] | None = None,
         listas: ListasDaBusca | None = None,
     ) -> None:
-        self._embedding = embedding
         self._listas = listas or ListasDaBuscaEmMemoria()
         # A mesma cópia do autocompletar, se a aplicação a passa: uma só recarga para todos.
         self._copia_do_catalogo = copia_do_catalogo or CopiaCurta(
@@ -400,6 +401,9 @@ class Busca:
         self._repositorio = repositorio
         self._armazenamento = armazenamento
         self._relogio = relogio
+        self._entendimentos = CacheCurto(
+            VALIDADE_DO_ENTENDIMENTO_S, TETO_DO_ENTENDIMENTO
+        )
 
     def buscar(
         self,
@@ -410,9 +414,7 @@ class Busca:
         filtros_do_servidor: Filtros | None = None,
         sistema: str | None = None,
         ajustes: Ajustes | None = None,
-        visual: bool = False,
         imagem: bytes | None = None,
-        parecidos: tuple[str, list[float]] | None = None,
         cancelado: threading.Event | None = None,
         cursor: str | None = None,
         dono: str = "",
@@ -426,20 +428,17 @@ class Busca:
         foto (#443) e a busca segue como se a pessoa o tivesse digitado, com o mesmo
         entendimento, Model Armor e ranking; só os filtros de `ajustes` valem. Sem o modelo,
         se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
-        digitado não há plano B. `parecidos` (#271) é o registro de um plano e o vetor do
-        quadro dele, já no índice: busca pelo vetor, sem entender texto, e o próprio
-        registro fica fora."""
+        digitado não há plano B."""
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
-        vetor_do_plano = None
+        if sistema is not None:
+            # O filtro do índice só tira inelegíveis do teto; `_visivel_de` decide.
+            impostos = replace(impostos, sistema=sistema)
         termo_da_foto = None
-        proprio = parecidos[0] if parecidos else None
         impressao = _impressao(
             texto=texto,
             ordem=ordem,
-            visual=visual,
             imagem=hashlib.sha256(imagem).hexdigest() if imagem is not None else None,
-            parecidos=proprio,
             sistema=sistema,
             ajustes=asdict(ajustes or Ajustes()),
             filtros=asdict(impostos),
@@ -448,24 +447,22 @@ class Busca:
             return self._pagina_seguinte(
                 cursor, limite, dono, impressao, sistema, cancelado
             )
-        if parecidos is not None:
-            vetor_do_plano = parecidos[1]
-            entendida = _ajustada(ConsultaEntendida(saneada=""), ajustes or Ajustes())
-        else:
-            if imagem is not None:
-                _conferir(cancelado)
-                texto = termo_da_foto = self._termo_da_foto(imagem)
-            entendida = _ajustada(
-                entender(
-                    texto,
-                    transporte=self._transporte,
-                    catalogo=self._catalogo,
-                    armor=self._armor,
-                    programas=self._programas,
-                    todas=self._copia_do_catalogo.itens,
-                ),
-                ajustes or Ajustes(),
-            )
+        if imagem is not None:
+            _conferir(cancelado)
+            texto = termo_da_foto = self._termo_da_foto(imagem)
+        entendida = _ajustada(
+            entender(
+                texto,
+                transporte=self._transporte,
+                catalogo=self._catalogo,
+                armor=self._armor,
+                programas=self._programas,
+                todas=self._copia_do_catalogo.itens,
+                cache=self._entendimentos,
+                dono=dono,
+            ),
+            ajustes or Ajustes(),
+        )
         jobs: dict[str, Job | None] = {}
 
         def carregar_jobs(ids: Iterable[str]) -> None:
@@ -488,7 +485,7 @@ class Busca:
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
                 limite=TETO_DE_REGISTROS,
             )
-            return [r for r in self._indice.buscar(c) if r.id != proprio]
+            return self._indice.buscar(c)
 
         def consultar(c: Consulta) -> list[Registro]:
             achados = do_indice(c)
@@ -511,27 +508,37 @@ class Busca:
             return nomes.get(id or "") or None
 
         carregar_nomes([*entendida.pessoas, *(o.dono for o in entendida.objetos)])
-        clausulas = self._clausulas(entendida, nome)
-        # O vetor sai do mesmo texto livre das outras cláusulas: programa e período
-        # entendidos já filtram, e não entram no vetor.
-        consulta_visual = _texto_da_busca(entendida) or texto
-        vetor = (
-            vetor_do_plano
-            if vetor_do_plano is not None
-            else self._vetor_da_consulta(consulta_visual)
-            if visual
-            else None
-        )
-        if vetor is not None:
-            clausulas.append(_clausula_visual(entendida, vetor, nome))
+        fora = entendida.pessoas_fora_do_catalogo
+        if fora:
+            # Pessoa que o catálogo não resolve não tem como aparecer: as outras cláusulas
+            # ("vestido vermelho") trariam o de outra pessoa como se fosse dela. Ficam só
+            # as menções do nome, se pedidas ("Ver as menções" liga Citada e Fala).
+            base = _base(entendida)
+            clausulas = [
+                c
+                for quem in fora
+                for c in _clausulas_das_mencoes(quem, entendida, base, nome)
+            ]
+        else:
+            clausulas = self._clausulas(entendida, nome)
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
         # Os Jobs de todas as cláusulas, e depois os nomes dos registros, vêm em lote.
-        brutos = [
-            [do_indice(q) for q in _com_facetas(c.consulta, facetado)]
-            for c in clausulas
-        ]
+        # As consultas vão ao índice juntas, no máximo `TETO_DE_CONSULTAS_AO_INDICE` de cada
+        # vez; cada uma segue com a sua fusão (RRF), e a ordem de antes é a dos resultados.
+        # Se uma falha, o erro sobe sem esperar as que ainda nem saíram.
+        por_clausula = [_com_facetas(c.consulta, facetado) for c in clausulas]
+        planas = [q for qs in por_clausula for q in qs]
+        with ThreadPoolExecutor(
+            max_workers=max(1, min(TETO_DE_CONSULTAS_AO_INDICE, len(planas)))
+        ) as pool:
+            try:
+                entregues = iter(list(pool.map(do_indice, planas)))
+            except BaseException:
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
+        brutos = [[next(entregues) for _ in qs] for qs in por_clausula]
         carregar_jobs(
             r.job_id for da_clausula in brutos for lista in da_clausula for r in lista
         )
@@ -591,12 +598,14 @@ class Busca:
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
         vazios = [
-            self._sem_aparicao(c.pessoa_na_imagem, entendida, consultar, nome)
+            self._sem_aparicao(
+                nome(c.pessoa_na_imagem) or "", c.pessoa_na_imagem, entendida, consultar
+            )
             for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
             # "Nenhuma aparição" fala do acervo, não do que a faceta deixou.
             if c.pessoa_na_imagem
             and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
-        ]
+        ] + [self._sem_aparicao(quem, None, entendida, consultar) for quem in fora]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas%s",
             (time.perf_counter() - inicio) * 1000,
@@ -611,7 +620,6 @@ class Busca:
                 programa=entendida.programa,
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
-                visual=vetor is not None,
                 termo_da_foto=entendida.saneada if termo_da_foto else None,
             ),
             videos=videos,
@@ -752,14 +760,6 @@ class Busca:
             resultado._proximo_cursor = f"{id}.{fim}"
         return resultado
 
-    def planos_com_vetor(
-        self, job_id: str, sistema: str | None = None
-    ) -> dict[int, list[float]]:
-        """Os vetores do quadro dos planos de um vídeo concluído (e do sistema do chamador)."""
-        if self._visivel(job_id, sistema) is None:
-            return {}
-        return self._indice.vetores_dos_planos(job_id)
-
     def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
         """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
         return self._visivel_de(self._repositorio.obter(job_id), sistema)
@@ -772,34 +772,6 @@ class Busca:
             return None
         return achado
 
-    def buscar_parecidos(
-        self,
-        job_id: str,
-        plano: int,
-        *,
-        limite: int = VIDEOS_POR_PADRAO,
-        filtros_do_servidor: Filtros | None = None,
-        sistema: str | None = None,
-        cancelado: threading.Event | None = None,
-        cursor: str | None = None,
-        dono: str = "",
-    ) -> ResultadoDaBusca:
-        """Os planos mais próximos do quadro de um plano, pelo vetor já indexado (#271).
-        Com `cursor`, a página vem da lista guardada, sem ler o vetor no índice."""
-        vetor = [] if cursor else self.planos_com_vetor(job_id, sistema).get(plano)
-        if vetor is None:
-            raise PlanoSemVetor
-        return self.buscar(
-            "",
-            parecidos=(f"{job_id}:plano:{plano}", vetor),
-            limite=limite,
-            filtros_do_servidor=filtros_do_servidor,
-            sistema=sistema,
-            cancelado=cancelado,
-            cursor=cursor,
-            dono=dono,
-        )
-
     def _termo_da_foto(self, jpeg: bytes) -> str:
         try:
             termo = termo_da_foto(jpeg, transporte=self._transporte)
@@ -809,16 +781,6 @@ class Busca:
         if not termo:
             raise BuscaPorImagemIndisponivel
         return termo
-
-    def _vetor_da_consulta(self, texto: str) -> list[float] | None:
-        """`None` sem embedding (índice do quadro desligado) ou se ele falhar: busca comum."""
-        if self._embedding is None:
-            return None
-        try:
-            return self._embedding.vetor_do_texto(texto)
-        except Exception:
-            log.exception("vetor da consulta não calculado; fica a busca comum")
-            return None
 
     def _clausulas(
         self,
@@ -848,7 +810,7 @@ class Busca:
                             cor_base=o.cor_base,
                             dono=o.dono,
                         ),
-                        texto=texto,
+                        texto=com_as_formas(texto),
                     ),
                     lambda r: _motivo(r, nome),
                 )
@@ -871,7 +833,7 @@ class Busca:
                 _Clausula(
                     Consulta(
                         filtros=base,
-                        texto=livre,
+                        texto=com_as_formas(livre),
                         significado=livre,
                         cortar_significado=True,
                     ),
@@ -955,13 +917,12 @@ class Busca:
 
     def _sem_aparicao(
         self,
-        pessoa: str,
+        quem: str,
+        pessoa: str | None,
         e: ConsultaEntendida,
         consultar: Callable[[Consulta], list[Registro]],
-        nome: Callable[[str | None], str | None],
     ) -> SemAparicao:
         """Quantas vezes a pessoa sem aparição é citada, no mesmo programa e período."""
-        quem = nome(pessoa) or ""
         base = _base(e)
         na_fala = consultar(Consulta(filtros=replace(base, tipo="fala"), texto=quem))
         na_tela = consultar(
@@ -973,23 +934,6 @@ class Busca:
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
-
-
-def _clausula_visual(
-    e: ConsultaEntendida,
-    vetor: list[float],
-    nome: Callable[[str | None], str | None],
-) -> _Clausula:
-    """Os planos só pelo vetor do quadro, como mais uma lista do mesmo RRF.
-
-    O texto e o significado já vêm da cláusula do texto livre: repeti-los aqui contaria
-    duas vezes os planos que a descrição acha. As demais cláusulas seguem como na busca
-    comum (pessoas e objetos pedidos continuam filtrando).
-    """
-    return _Clausula(
-        Consulta(filtros=replace(_base(e), tipo="plano"), vetor_do_quadro=vetor),
-        lambda r: _motivo(r, nome),
-    )
 
 
 def _casa(r: Registro, a: Ajustes) -> bool:
@@ -1147,7 +1091,11 @@ def _texto_da_busca(e: ConsultaEntendida) -> str:
 
 def _contem(texto: str, frase: str) -> bool:
     """A frase inteira no texto, com as palavras juntas e na ordem, sem acento nem maiúscula."""
-    return f" {' '.join(palavras(frase))} " in f" {' '.join(palavras(texto))} "
+    return f" {_no_singular(frase)} " in f" {_no_singular(texto)} "
+
+
+def _no_singular(texto: str) -> str:
+    return " ".join(normalizar(singular(p)) for p in re.findall(r"\w+", texto))
 
 
 def _tem_a_frase(r: Registro, frase: str | None) -> bool:
@@ -1179,20 +1127,33 @@ def _clausulas_da_pessoa(
             )
         )
     if quem:
-        if "fala" in evidencias or "citada" in evidencias:
-            clausulas.append(
-                _Clausula(
-                    Consulta(filtros=replace(base, tipo="fala"), texto=quem),
-                    lambda r: _motivo(r, nome),
-                )
+        clausulas.extend(_clausulas_das_mencoes(quem, e, base, nome))
+    return clausulas
+
+
+def _clausulas_das_mencoes(
+    quem: str,
+    e: ConsultaEntendida,
+    base: Filtros,
+    nome: Callable[[str | None], str | None],
+) -> list[_Clausula]:
+    """O nome na fala e no texto na tela, quando as evidências pedidas os incluem."""
+    evidencias = _evidencias(e)
+    clausulas: list[_Clausula] = []
+    if "fala" in evidencias or "citada" in evidencias:
+        clausulas.append(
+            _Clausula(
+                Consulta(filtros=replace(base, tipo="fala"), texto=quem),
+                lambda r: _motivo(r, nome),
             )
-        if "gc" in evidencias or "citada" in evidencias:
-            clausulas.append(
-                _Clausula(
-                    Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem),
-                    lambda r: _motivo(r, nome),
-                )
+        )
+    if "gc" in evidencias or "citada" in evidencias:
+        clausulas.append(
+            _Clausula(
+                Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem),
+                lambda r: _motivo(r, nome),
             )
+        )
     return clausulas
 
 

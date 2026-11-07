@@ -435,6 +435,68 @@ def test_url_de_upload_prende_tipo_e_tamanho_declarados(
     assert "teste-quarentena" in url
 
 
+def test_url_de_upload_vale_15_minutos_e_assina_o_objeto_escrito_uma_vez(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    url = armazenamento.url_de_upload("job1", 123456, "video/mp4")
+
+    consulta = parse_qs(urlparse(url).query)
+    assert consulta["X-Goog-Expires"] == ["900"]
+    assert "x-goog-if-generation-match" in consulta["X-Goog-SignedHeaders"][0].split(
+        ";"
+    )
+
+
+class _StorageDeUmaGeracao:
+    """Modelo do Storage para a abertura da sessão: só aceita o `POST` que o cabeçalho assinado
+    cobre e, com `x-goog-if-generation-match: 0`, recusa (412) objeto que já existe.
+
+    Não é o emulador porque ele ignora a pré-condição: no fake-gcs-server um segundo upload
+    retomável com `ifGenerationMatch=0` sobrescreve o objeto (conferido na revisão do #369)."""
+
+    def __init__(self, url: str) -> None:
+        self.assinados = set(
+            parse_qs(urlparse(url).query)["X-Goog-SignedHeaders"][0].split(";")
+        )
+        self.objetos: set[str] = set()
+
+    def abrir(self, objeto: str, cabecalhos: dict[str, str]) -> int:
+        if not {nome.lower() for nome in cabecalhos} >= self.assinados - {"host"}:
+            return 403
+        if (
+            cabecalhos.get("x-goog-if-generation-match") == "0"
+            and objeto in self.objetos
+        ):
+            return 412
+        return 200
+
+    def concluir(self, objeto: str) -> None:
+        self.objetos.add(objeto)
+
+
+def test_segundo_envio_para_o_mesmo_objeto_e_recusado(
+    armazenamento: ArmazenamentoStorage,
+) -> None:
+    url = armazenamento.url_de_upload("job1", 5, "video/mp4")
+    storage = _StorageDeUmaGeracao(url)
+    cabecalhos = {
+        "content-type": "video/mp4",
+        "x-goog-resumable": "start",
+        "x-goog-if-generation-match": "0",
+        "x-upload-content-length": "5",
+    }
+
+    assert storage.abrir("job1", cabecalhos) == 200
+    storage.concluir("job1")
+
+    assert storage.abrir("job1", cabecalhos) == 412
+    # Sem o cabeçalho a assinatura não confere: não dá para abrir sessão para sobrescrever.
+    sem_o_cabecalho = {
+        k: v for k, v in cabecalhos.items() if k != "x-goog-if-generation-match"
+    }
+    assert storage.abrir("job1", sem_o_cabecalho) == 403
+
+
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
 def test_cancelar_upload_apaga_o_objeto_da_quarentena(
     armazenamento: ArmazenamentoStorage,
@@ -469,6 +531,7 @@ def test_url_de_upload_inicia_upload_retomavel_no_emulador(
         headers={
             "Content-Type": "video/mp4",
             "x-goog-resumable": "start",
+            "x-goog-if-generation-match": "0",
             "x-upload-content-length": "5",
         },
     )
@@ -1512,14 +1575,6 @@ class TestTiposDeObjetoFirestore:
 
         assert [t["tipo"] for t in achados] == ["sandália", "saia"]
 
-    def test_conhecidos_traz_todos_os_vivos_sem_o_teto_da_busca(
-        self, tipos: TiposDeObjetoFirestore
-    ) -> None:
-        tipos.registrar("j1", {"sapato": 1, "saia": 2})
-        tipos.registrar("j1", {"saia": 2})
-
-        assert tipos.conhecidos() == ["saia"]
-
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestRepositorioDeAuditoriaFirestore:
@@ -1855,3 +1910,40 @@ def test_a_lista_da_busca_volta_igual_e_id_desconhecido_da_none() -> None:
     lido = listas.ler(id)
     assert lido is not None and ListaDaBusca.do_documento(lido) == lista
     assert listas.ler("nao0existe") is None
+
+
+class _ColecaoQueNaoDeveSerTocada:
+    def document(self, *_a: Any) -> Any:
+        raise AssertionError("o id ruim chegou ao Firestore")
+
+
+@pytest.mark.parametrize("ruim", ["../x", "a/b", "a\\b", "", "a\nb", "x" * 300, ".."])
+def test_adaptadores_recusam_id_que_sai_do_proprio_nivel(ruim: str) -> None:
+    from api.nuvem import (
+        _documento,
+        _lidos_em_lote,
+        objeto_da_copia_limpa,
+        objeto_da_decupagem,
+        objeto_do_quadro,
+    )
+
+    with pytest.raises(ValueError):
+        _documento(_ColecaoQueNaoDeveSerTocada(), ruim)
+    with pytest.raises(ValueError):
+        objeto_da_decupagem(ruim)
+    with pytest.raises(ValueError):
+        objeto_da_copia_limpa(ruim)
+    with pytest.raises(ValueError):
+        objeto_do_quadro(ruim, "quadros/a.jpg")
+    with pytest.raises(ValueError):
+        list(_lidos_em_lote(None, _ColecaoQueNaoDeveSerTocada(), [ruim]))
+
+
+def test_objeto_do_quadro_recusa_caminho_que_sobe() -> None:
+    from api.nuvem import objeto_do_quadro
+
+    with pytest.raises(ValueError):
+        objeto_do_quadro("job-1", "../outro/a.jpg")
+    with pytest.raises(ValueError):
+        objeto_do_quadro("job-1", "quadros/a\x00.jpg")
+    assert objeto_do_quadro("job-1", "quadros/a.jpg") == "job-1/quadros/a.jpg"

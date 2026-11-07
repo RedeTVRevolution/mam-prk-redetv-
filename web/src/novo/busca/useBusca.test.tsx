@@ -29,9 +29,12 @@ let vencidos = new Set<string>()
 let listas = 0
 // Os concluídos que o aviso do #404 lê: `pendente` é um vídeo ainda entrando na busca.
 let indexacoes: string[] = []
+// A query de cada chamada ao acervo (o aviso do #486 pede `capa=false`).
+const consultasDoAcervo: string[] = []
 
 const servidor = setupServer(
-  http.get('/v1/jobs', () => {
+  http.get('/v1/jobs', ({ request }) => {
+    consultasDoAcervo.push(new URL(request.url).search)
     const agora = new Date().toISOString()
     return HttpResponse.json(
       indexacoes.map((estado, i) => ({ id: `j${i}`, nome: `j${i}.mp4`, estado: 'concluido', codigo_falha: null, criado_em: agora, atualizado_em: agora, indexacao: { estado, em: agora } })),
@@ -51,16 +54,6 @@ const servidor = setupServer(
       { headers: ha ? { 'X-Proximo-Cursor': `L${lista}.${inicio + pagina.length - 1}` } : {} },
     )
   }),
-  // Os parecidos: três vídeos com um plano cada.
-  http.get('/v1/busca/parecidos', () =>
-    HttpResponse.json({
-      entendida: { evidencias: ['imagem'], programa: null, desde: null, ate: null, visual: true },
-      videos: videos.slice(0, 3).map((v) => ({ ...v, momentos: v.momentos.map((m) => ({ ...m, tipo: 'plano' })) })),
-      sem_aparicoes: [],
-      plano_b: false,
-      facetas: VAZIO,
-    }),
-  ),
 )
 
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
@@ -137,28 +130,6 @@ test('o vídeo que vai para a lixeira sai da busca, e o reprocessado troca de da
   expect(result.current.item(0)?.momento.inicio_ms).toBe(0)
 })
 
-test('nos parecidos, o vídeo que vai para a lixeira sai, e o reprocessado troca de dados', async () => {
-  const { result, consultas } = await montar({ tipo: 'parecidos', job: 'v9', plano: 2 })
-
-  act(() => tirarDoAcervo(consultas, new Set(['v1'])))
-  await waitFor(() => expect(result.current.item(1)?.video.job_id).toBe('v2'))
-
-  act(() => trocarNoAcervo(consultas, { id: 'v0', nome: 'renomeado.mp4', estado: 'transcrevendo', codigo_falha: null, criado_em: '2026-10-29T15:00:00Z' }))
-  await waitFor(() => expect(result.current.item(0)?.video.nome).toBe('renomeado.mp4'))
-})
-
-test('abrir os parecidos de um vídeo aberto da busca não apaga a busca do cache', async () => {
-  const { result, rerender, consultas } = await montar()
-  await descer(result, 1)
-
-  rerender({ tipo: 'parecidos', job: 'v3', plano: 2 })
-  await waitFor(() => expect(result.current.carregando).toBe(false))
-  rerender(TEXTO)
-
-  expect(result.current.item(20)?.video.job_id).toBe('v20')
-  expect(consultas.getQueryCache().findAll({ queryKey: ['parecidos'] })).toHaveLength(1)
-})
-
 test('o 422 de um cursor vencido recomeça a busca do topo, sem mostrar erro', async () => {
   const { result } = await montar()
   const doTopo = result.current.quantidade
@@ -224,4 +195,19 @@ test('sem vídeo entrando, o aviso do #404 ainda confere de tempos em tempos e a
 
   indexacoes = ['indexado', 'pendente']
   await waitFor(() => expect(result.current).toBe(1))
+})
+
+test('o aviso do #404 pede a lista sem capas (#486) e conta só os concluídos finalizando', async () => {
+  indexacoes = ['indexado', 'pendente', 'pendente']
+  consultasDoAcervo.length = 0
+  const { envolver } = await envolvedor()
+  const { result } = renderHook(() => useEntrandoNaBusca(true, 20, 40), { wrapper: envolver })
+  await waitFor(() => expect(result.current).toBe(2))
+
+  expect(consultasDoAcervo.length).toBeGreaterThan(0)
+  for (const q of consultasDoAcervo) {
+    const p = new URLSearchParams(q)
+    expect(p.get('capa')).toBe('false')
+    expect(p.getAll('estado')).toEqual(['concluido'])
+  }
 })

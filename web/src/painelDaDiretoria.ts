@@ -1,6 +1,8 @@
 // O painel da diretoria (E9): o que a API devolve, os filtros comuns (que viajam na URL e na chamada)
 // e as abas. Não confundir com `painel.ts`, o painel da decupagem no Visualizador.
 
+import { periodoDoEndereco, poePeriodoNaConsulta, poePeriodoNoEndereco } from './periodoPadrao.ts'
+
 export type AbaDoPainel = 'acessos' | 'videos' | 'buscas' | 'revisao' | 'api' | 'custo'
 
 export const ABAS_DO_PAINEL: { chave: AbaDoPainel; rotulo: string }[] = [
@@ -28,27 +30,19 @@ export interface FiltrosDoPainel {
 }
 
 
-const DATA = /^\d{4}-\d{2}-\d{2}$/
-
 /** Os filtros da query do endereço; data malformada de um link editado à mão sai. */
 export function filtrosDoPainel(busca: string): FiltrosDoPainel {
   const p = new URLSearchParams(busca)
-  const data = (nome: string) => {
-    const valor = p.get(nome) ?? ''
-    return DATA.test(valor) ? valor : ''
-  }
-  return { programa: p.get('programa') ?? '', usuario: p.get('usuario') ?? '', de: data('de'), ate: data('ate') }
+  return { programa: p.get('programa') ?? '', usuario: p.get('usuario') ?? '', ...periodoDoEndereco(p) }
 }
 
-/** A query do endereço da tela (vazia sem filtros). */
+/** A query do endereço da tela (o período vai sempre, vazio inclusive, para não cair no padrão). */
 export function filtrosParaEnderecoDoPainel(f: FiltrosDoPainel): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)
   if (f.usuario) p.set('usuario', f.usuario)
-  if (f.de) p.set('de', f.de)
-  if (f.ate) p.set('ate', f.ate)
-  const query = p.toString()
-  return query ? `?${query}` : ''
+  poePeriodoNoEndereco(p, f)
+  return `?${p}`
 }
 
 /** Vídeos e Buscas leem tabelas que não se cruzam: a API recusa programa e usuário juntos (422). */
@@ -67,8 +61,7 @@ export function parametrosDoPainel(
   const p = new URLSearchParams()
   if (f.programa && !opcoes.semPrograma) p.set('programa', f.programa)
   if (f.usuario) p.set('usuario', f.usuario)
-  if (f.de) p.set('desde', f.de)
-  if (f.ate) p.set('ate', f.ate)
+  poePeriodoNaConsulta(p, f)
   if (opcoes.csv) p.set('formato', 'csv')
   if (opcoes.agrupar) p.set('agrupar', opcoes.agrupar)
   return p.toString()
@@ -343,8 +336,14 @@ export interface RelatorioDeCusto {
   sem_dono_por_servico: { servico: string | null; custo: number }[]
 }
 
+/** O custo em centavos, sem sinal no zero: abaixo de meio centavo, em módulo, vira 0 (nunca −0). Gráfico e texto passam por aqui. */
+export function emCentavos(valor: number): number {
+  return Math.round(valor * 100) / 100 + 0
+}
+
 /** O custo com duas casas e a moeda da exportação: "R$ 12,50" (BRL) ou "12,50 USD". */
-export function custoLegivel(valor: number, moeda: string | null): string {
+export function custoLegivel(bruto: number, moeda: string | null): string {
+  const valor = emCentavos(bruto)
   if (moeda === 'BRL') return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   const numero = valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return moeda ? `${numero} ${moeda}` : numero

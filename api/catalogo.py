@@ -50,9 +50,9 @@ class FusaoDaPessoa(BaseModel):
 
 
 class RenomeacaoDaPessoa(BaseModel):
-    """A última renomeação em todos os vídeos (#263): de onde veio o nome e o andamento da
-    reindexação. `pendentes` são os vídeos que ainda faltam reindexar; a troca é refeita
-    até esvaziar. `nomes_anteriores` guarda todos os nomes que a pessoa já teve."""
+    """A última renomeação em todos os vídeos (#263): de onde veio o nome e o andamento.
+    Desde o #417 nasce `concluida`, sem `pendentes`: o índice não guarda o
+    nome. `nomes_anteriores` guarda todos os nomes que a pessoa já teve."""
 
     nome_antigo: str
     nome_novo: str

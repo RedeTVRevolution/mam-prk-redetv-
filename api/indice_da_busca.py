@@ -4,9 +4,8 @@ O adaptador do Agent Retrieval mora em `agent_retrieval.py`; o dublê em memóri
 implementa os filtros exatos e o texto, e é o que os testes usam.
 """
 
-import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Literal, Protocol
 
@@ -17,8 +16,8 @@ from api.decupagem import (
     ObjetoDoInventario,
     Pessoa,
     _Intervalo,
+    id_posicional,
 )
-from api.identidade import nao_identificado
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
 
@@ -44,11 +43,13 @@ class Registro:
     # Fala, texto na tela ou a frase do objeto: o que a busca por texto lê.
     texto: str | None = None
     descricao: str | None = None  # o plano; leva o vetor da descrição
-    quadro: str | None = None  # o JPEG do momento; leva o vetor do quadro-chave
+    quadro: str | None = None  # o JPEG do momento, para a grade da busca
     # De 1 a 3, só no objeto do inventário (#245); pesa na ordem dos resultados.
     destaque: int | None = None
-    # Gemini Embedding 2 sobre o quadro; só em plano, e só quando o chamador o calculou.
-    vetor_do_quadro: list[float] | None = field(default=None, compare=False, repr=False)
+    # O sistema dono do vídeo e se ele está na lixeira, para a busca filtrar no índice, antes
+    # do teto de registros (#482). Mudar a lixeira não reindexa: `marcar_lixeira`.
+    sistema: str | None = None
+    na_lixeira: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,8 @@ class Filtros:
     pessoa: str | None = None  # uma das pessoas na imagem
     marca: str | None = None
     relacao: str | None = None
+    sistema: str | None = None  # só os vídeos desse sistema (#483)
+    na_lixeira: bool | None = None  # `False` tira os da lixeira do teto (#483)
     exibido_desde: date | None = None
     exibido_ate: date | None = None
 
@@ -74,8 +77,6 @@ class Consulta:
     texto: str | None = None
     # Texto para a busca por significado na descrição (embedding automático).
     significado: str | None = None
-    # Vetor do quadro-chave da consulta (Gemini Embedding 2), na dimensão da coleção.
-    vetor_do_quadro: list[float] | None = None
     limite: int = 20
     # O que vem só da busca por significado passa pelo corte da configuração; o que a
     # busca por texto acha fica. Falso quando o significado só leva os filtros ao índice.
@@ -88,14 +89,22 @@ class IndiceDaBusca(Protocol):
 
     def apagar(self, job_id: str) -> None: ...
 
+    def marcar_lixeira(self, job_id: str, na_lixeira: bool) -> None:
+        """Põe `na_lixeira` em todos os registros do vídeo, sem trocar o resto."""
+        ...
+
+    def preencher_filtros(
+        self, job_id: str, sistema: str | None, na_lixeira: bool
+    ) -> int:
+        """Dá `sistema` e `na_lixeira` aos registros do vídeo que ainda não têm o campo
+        (#483), sem tocar no que já tem valor nem refazer o vetor. Devolve quantos mudou;
+        repetir devolve 0."""
+        ...
+
     def buscar(self, consulta: Consulta) -> list[Registro]: ...
 
     def total(self) -> int:
         """Quantos registros há no índice, de todos os vídeos."""
-        ...
-
-    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
-        """O vetor do quadro de cada plano do vídeo que o tem, pelo número do plano (#271)."""
         ...
 
 
@@ -130,13 +139,14 @@ NOME_DA_CATEGORIA: dict[CategoriaDeObjeto, str] = {
     "planta": "planta",
     "bebida": "bebida",
 }
-# O dono de quem não tem nome, e o do objeto sem pessoa.
-DONO_SEM_NOME = "de pessoa não identificada"
+# O dono do objeto que tem pessoa e o do objeto sem pessoa. O nome da pessoa não entra no
+# índice (#417): renomear no catálogo não pede reindexar, e a tela lê o nome do catálogo.
+DONO_PESSOA = "de pessoa"
 SEM_DONO = "objeto de cena"
 
 
 def _texto_curto(peca: str | None, categoria: CategoriaDeObjeto, dono: str) -> str:
-    """A peça, a categoria e o dono ("blazer preto, roupa, de Flávia Noronha"; sem
+    """A peça, a categoria e o dono ("blazer preto, roupa, de pessoa"; sem
     dono, "objeto de cena"): um objeto de uma palavra passa do piso de palavras da
     busca por significado."""
     return ", ".join(p for p in (peca, NOME_DA_CATEGORIA[categoria], dono) if p)
@@ -156,16 +166,23 @@ def registros_da_decupagem(
     decupagem: Decupagem,
     programa: str | None,
     data_de_exibicao: date | None,
+    sistema: str | None = None,
+    na_lixeira: bool = False,
 ) -> list[Registro]:
     """Os registros do índice de uma Decupagem.
 
     Pessoa e dono vão pelo `catalogo_id`; quem não tem não entra nas listas (a busca por
-    pessoa só acha quem o catálogo conhece).
+    pessoa só acha quem o catálogo conhece). O id do registro leva o id do item da
+    Decupagem (`fal###`, `txt###`, plano, objeto, o da correção no item acrescentado), não
+    a posição: corrigir uma fala não muda o id das outras (#418). A ocorrência do objeto
+    e o item do inventário seguem pelo índice `k`.
     """
     base: dict[str, Any] = {
         "job_id": job_id,
         "programa": programa,
         "data_de_exibicao": data_de_exibicao,
+        "sistema": sistema,
+        "na_lixeira": na_lixeira,
     }
     catalogo = {p.id: p.catalogo_id for p in decupagem.pessoas}
 
@@ -183,19 +200,16 @@ def registros_da_decupagem(
                 return plano.quadro
         return None
 
-    nomes = {p.id: p.nome for p in decupagem.pessoas}
+    ids = {p.id for p in decupagem.pessoas}
 
     def dono(id: str | None) -> str:
-        nome = nomes.get(id) if id else None
-        if nome is None:
-            return SEM_DONO
-        return DONO_SEM_NOME if nao_identificado(nome) else f"de {nome}"
+        return DONO_PESSOA if id in ids else SEM_DONO
 
     registros: list[Registro] = []
-    for n, plano in enumerate(decupagem.planos):
+    for plano in decupagem.planos:
         registros.append(
             Registro(
-                id=f"{job_id}:plano:{n}",
+                id=f"{job_id}:plano:{plano.id}",
                 tipo="plano",
                 inicio_ms=plano.inicio_ms,
                 fim_ms=plano.fim_ms,
@@ -213,7 +227,7 @@ def registros_da_decupagem(
         for k, item in enumerate(plano.inventario):
             registros.append(
                 Registro(
-                    id=f"{job_id}:inventario:{n}:{k}",
+                    id=f"{job_id}:inventario:{plano.id}:{k}",
                     tipo="objeto",
                     inicio_ms=plano.inicio_ms,
                     fim_ms=plano.fim_ms,
@@ -234,9 +248,11 @@ def registros_da_decupagem(
                 )
             )
     for n, fala in enumerate(decupagem.transcricao):
+        # Sem id, a decupagem não passou pela entrega: o id é o que ela daria.
+        fala_id = fala.id or id_posicional("transcricao", n)
         registros.append(
             Registro(
-                id=f"{job_id}:fala:{n}",
+                id=f"{job_id}:fala:{fala_id}",
                 tipo="fala",
                 inicio_ms=fala.inicio_ms,
                 fim_ms=fala.fim_ms,
@@ -247,9 +263,10 @@ def registros_da_decupagem(
             )
         )
     for n, texto in enumerate(decupagem.textos_na_tela):
+        texto_id = texto.id or id_posicional("textos_na_tela", n)
         registros.append(
             Registro(
-                id=f"{job_id}:texto:{n}",
+                id=f"{job_id}:texto:{texto_id}",
                 tipo="texto_na_tela",
                 inicio_ms=texto.inicio_ms,
                 fim_ms=texto.fim_ms,
@@ -259,13 +276,13 @@ def registros_da_decupagem(
                 **base,
             )
         )
-    for n, objeto in enumerate(decupagem.objetos):
+    for objeto in decupagem.objetos:
         # Cada ocorrência é um momento: um registro do primeiro ao último aparecimento
         # viraria um bloco que aponta para o lugar errado.
         for k, ocorrencia in enumerate(objeto.ocorrencias):
             registros.append(
                 Registro(
-                    id=f"{job_id}:objeto:{n}:{k}",
+                    id=f"{job_id}:objeto:{objeto.id}:{k}",
                     tipo="objeto",
                     inicio_ms=ocorrencia.inicio_ms,
                     fim_ms=ocorrencia.fim_ms,
@@ -312,6 +329,8 @@ def _casa(r: Registro, f: Filtros) -> bool:
         and (f.pessoa is None or f.pessoa in r.pessoas)
         and (f.marca is None or r.marca == f.marca)
         and (f.relacao is None or r.relacao == f.relacao)
+        and (f.sistema is None or r.sistema == f.sistema)
+        and (f.na_lixeira is None or r.na_lixeira == f.na_lixeira)
         and (
             f.exibido_desde is None
             or (
@@ -337,44 +356,40 @@ class IndiceEmMemoria:
     def apagar(self, job_id: str) -> None:
         self._por_job.pop(job_id, None)
 
+    def marcar_lixeira(self, job_id: str, na_lixeira: bool) -> None:
+        if job_id in self._por_job:
+            self._por_job[job_id] = [
+                replace(r, na_lixeira=na_lixeira) for r in self._por_job[job_id]
+            ]
+
+    def preencher_filtros(
+        self, job_id: str, sistema: str | None, na_lixeira: bool
+    ) -> int:
+        # Aqui o registro sempre tem `na_lixeira` (o padrão é `False`), então só o `sistema`
+        # pode faltar; o valor que já está lá fica, como no índice real.
+        antigos = self._por_job.get(job_id, [])
+        novos = [
+            replace(r, sistema=sistema)
+            if sistema is not None and r.sistema is None
+            else r
+            for r in antigos
+        ]
+        self._por_job[job_id] = novos
+        return sum(a is not n for a, n in zip(antigos, novos, strict=True))
+
     def total(self) -> int:
         return sum(len(r) for r in self._por_job.values())
 
-    def vetores_dos_planos(self, job_id: str) -> dict[int, list[float]]:
-        return {
-            int(r.id.rsplit(":", 1)[1]): r.vetor_do_quadro
-            for r in self._por_job.get(job_id, [])
-            if r.tipo == "plano" and r.vetor_do_quadro
-        }
-
     def buscar(self, consulta: Consulta) -> list[Registro]:
         da_consulta = palavras(consulta.texto) if consulta.texto else []
-        so_vetor = consulta.vetor_do_quadro is not None and not (
-            consulta.texto or consulta.significado
-        )
         achados: list[Registro] = []
-        parecidos: list[tuple[float, Registro]] = []
         for registros in self._por_job.values():
             for r in registros:
                 if not _casa(r, consulta.filtros):
                     continue
-                if consulta.vetor_do_quadro is not None and r.vetor_do_quadro:
-                    # Como o índice real, a união da busca por texto e a por vetor.
-                    proximidade = _cosseno(consulta.vetor_do_quadro, r.vetor_do_quadro)
-                    if proximidade > 0:
-                        parecidos.append((proximidade, r))
                 palavras_do_registro = set(palavras(_frase(r.texto, r.descricao) or ""))
-                if not so_vetor and (
-                    not da_consulta
-                    or any(p in palavras_do_registro for p in da_consulta)
+                if not da_consulta or any(
+                    p in palavras_do_registro for p in da_consulta
                 ):
                     achados.append(r)
-        parecidos.sort(key=lambda p: -p[0])
-        ids = {r.id for r in achados}
-        achados += [r for _, r in parecidos if r.id not in ids]
         return achados[: consulta.limite]
-
-
-def _cosseno(a: list[float], b: list[float]) -> float:
-    norma = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-    return sum(x * y for x, y in zip(a, b, strict=True)) / norma if norma else 0.0

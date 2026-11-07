@@ -76,10 +76,13 @@ def test_a_execucao_que_falha_em_qualquer_etapa_loga_pelo_workflows() -> None:
     metrica = _bloco('resource "google_logging_metric" "falhas_por_etapa"')
     assert 'resource.type=\\"workflows.googleapis.com/Workflow\\"' in metrica
     politica = _bloco('resource "google_monitoring_alert_policy" "falhas_por_etapa"')
-    # Uma condição por origem: só cloud_run_job perderia as falhas do Workflows.
-    assert 'Jobs      = "cloud_run_job"' in politica
-    assert 'Workflows = "workflows.googleapis.com/Workflow"' in politica
-    assert 'resource.type=\\"${conditions.value}\\"' in politica
+    # Uma condição só, somando as duas origens: o limite vale para a soma.
+    assert politica.count("condition_threshold") == 1
+    assert "dynamic" not in politica
+    assert (
+        'resource.type = one_of(\\"cloud_run_job\\", \\"workflows.googleapis.com/Workflow\\")'
+        in politica
+    )
 
 
 def test_os_limiares_sao_variaveis_com_descricao() -> None:
@@ -135,7 +138,7 @@ def test_todo_alerta_de_metrica_restringe_o_resource_type() -> None:
     filtros = re.findall(r'filter\s+= "(metric\.type=.*)"', TF)
     assert len(filtros) >= 4
     for filtro in filtros:
-        assert "resource.type=" in filtro, filtro
+        assert re.search(r"resource\.type\s*=", filtro), filtro
 
 
 def test_o_alerta_do_percentual_nao_usa_align_mean_na_distribuicao() -> None:

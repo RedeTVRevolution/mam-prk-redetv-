@@ -71,6 +71,7 @@ def enviar_clipe(api: ApiNoAr, sistema: str, clipe: Path) -> Relatorio:
         headers={
             "Content-Type": str(corpo["tipo"]),
             "x-goog-resumable": "start",
+            "x-goog-if-generation-match": "0",
             "x-upload-content-length": str(len(dados)),
         },
         timeout=60,

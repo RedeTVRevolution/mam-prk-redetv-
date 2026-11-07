@@ -11,25 +11,27 @@ intervalos das inserções; o Python só monta a resposta.
 
 import json
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, Protocol, get_args
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from api.cache_curto import CacheCurto
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
+from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.jobs import RepositorioDeJobs
+from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
-    csv_em_texto,
     linhas_da_copia,
     ou_503,
     parametros_da_pagina,
@@ -38,6 +40,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
+from api.texto_como_dado import LinhaDaConsulta
 
 TIPOS_DE_INSERCAO: tuple[str, ...] = get_args(Comercial.model_fields["tipo"].annotation)
 COLUNAS_DO_CSV = ("marca", "tipo", "insercoes", "tempo_ms", "videos")
@@ -409,6 +412,67 @@ def pagina_do_ranking(
     )
 
 
+class ConsultaComCache:
+    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking inteiro, a página, a
+    lista de uma marca e o CSV saem dela, sem consultar o BigQuery de novo."""
+
+    def __init__(self, consulta: ConsultaDeInsercoes, cache: CacheCurto) -> None:
+        self._consulta = consulta
+        self._cache = cache
+
+    def somas(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+    ) -> list[InsercoesDaMarca]:
+        return self._cache.obter(
+            ("marcas", programa, desde, ate, tipo),
+            lambda: self._consulta.somas(programa, desde, ate, tipo),
+        )
+
+    def _ranking_inteiro(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
+        def calcular() -> "tuple[list[MarcaResumida], TotalDasMarcas]":
+            somas = self.somas(programa, desde, ate, tipo)
+            return ranking_em_python(somas, 0, len(somas))
+
+        return self._cache.obter(
+            ("marcas-ranking", programa, desde, ate, tipo), calcular
+        )
+
+    def ranking(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+        depois: int,
+        limite: int,
+    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
+        todas, total = self._ranking_inteiro(programa, desde, ate, tipo)
+        return todas[depois : depois + limite + 1], total
+
+    def lista_da_marca(
+        self,
+        marca: str,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+        depois: int,
+        limite: int,
+    ) -> "list[InsercaoNoRelatorio]":
+        somas = self.somas(programa, desde, ate, tipo)
+        return lista_em_python(somas, marca, depois, limite)
+
+
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
     """A consulta configurada, ou `None` se o ambiente não diz onde a cópia mora."""
     onde = config_e_transporte_do_ambiente(ambiente)
@@ -529,9 +593,12 @@ def em_csv(marcas: list[MarcaNoRelatorio]) -> str:
 
 
 def criar_rotas_das_marcas(
-    consulta: ConsultaDeInsercoes | None, repositorio: RepositorioDeJobs
+    consulta: ConsultaDeInsercoes | None,
+    repositorio: RepositorioDeJobs,
+    relogio: Callable[[], datetime] = agora_em_sao_paulo,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
+    no_periodo = dependencia_do_periodo(relogio)
 
     def _confere(
         programa: str | None, desde: date | None, ate: date | None, tipo: str | None
@@ -543,13 +610,12 @@ def criar_rotas_das_marcas(
     @rotas.get("/marcas", response_model=RelatorioDeMarcas | RankingDeMarcas)
     def marcas(
         _pessoa: PodeVerORelatorio,
-        programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
-        tipo: Annotated[str | None, Query(max_length=40)] = None,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        tipo: Annotated[str | None, LinhaDaConsulta(40)] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> Any:
         """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa (ou com
         `programa=` vazio) e sem tipo (ou vazio), todos. Com `limite`, uma página do
@@ -558,6 +624,7 @@ def criar_rotas_das_marcas(
         `/marcas/insercoes`. O CSV vem sempre inteiro."""
         programa = programa or None
         tipo = tipo or None
+        desde, ate = periodo
         fonte = _confere(programa, desde, ate, tipo)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
@@ -585,18 +652,18 @@ def criar_rotas_das_marcas(
     @rotas.get("/marcas/insercoes", response_model=list[InsercaoNoRelatorio])
     def lista_da_marca(
         _pessoa: PodeVerORelatorio,
-        marca: Annotated[str, Query(min_length=1, max_length=200)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
-        tipo: Annotated[str | None, Query(max_length=40)] = None,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
+        marca: Annotated[str, LinhaDaConsulta(200, min_length=1)],
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        tipo: Annotated[str | None, LinhaDaConsulta(40)] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         """As inserções de uma marca no mesmo filtro do relatório, na ordem do vídeo e do
         tempo, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
         programa = programa or None
         tipo = tipo or None
+        desde, ate = periodo
         fonte = _confere(programa, desde, ate, tipo)
         depois = posicao_do_cursor(cursor)
         lidas = ou_503(

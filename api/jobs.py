@@ -3,6 +3,7 @@
 import hashlib
 import itertools
 import json
+import logging
 import re
 import unicodedata
 import uuid
@@ -21,7 +22,6 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
-    ValidationError,
     field_serializer,
     field_validator,
     model_validator,
@@ -42,10 +42,9 @@ from api.catalogo_apagado import (
     sem_catalogo_apagado,
 )
 from api.catalogo_dos_jobs import atualizar_catalogo_do_job
-from api.ciclo_de_vida import JaTerminou, transitar
+from api.ciclo_de_vida import JaTerminou, pedir_indexacao, transitar
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
-    LIMITE_DO_NOME,
     Autoria,
     CatalogoIdInvalido,
     Correcao,
@@ -98,19 +97,16 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import RepositorioDeProgramas
-from api.sugestoes import (
-    MOTIVO_CONFIRMADA,
-    MOTIVO_CORRIGIDA,
-    Proposta,
-    RepositorioDeSugestoes,
-    Sugestao,
-    com_o_valor_do_editor,
-    sugestoes_abertas,
-)
+from api.texto_como_dado import PADRAO_DA_LINHA, Linha, LinhaDaConsulta
 
 TIPO_DO_VIDEO = "video/mp4"
 TAMANHO_MAXIMO_PADRAO_BYTES = 4 * 1024**3
-PRAZO_DO_UPLOAD = timedelta(hours=24)
+log = logging.getLogger(__name__)
+
+# A URL que abre a sessão de upload (#369): curta, para não valer como credencial guardada.
+# A sessão aberta continua valendo até o Job expirar (ou até 7 dias, o limite do Storage).
+PRAZO_DA_URL_DE_UPLOAD = timedelta(minutes=15)
+PRAZO_DO_JOB_SEM_UPLOAD = timedelta(hours=24)
 VALIDADE_DA_REPRODUCAO = timedelta(minutes=10)
 VALIDADE_DO_DOWNLOAD = timedelta(minutes=5)
 # Capas e quadros (#408): um turno de trabalho, para a grade não pedir uma imagem já vencida.
@@ -122,6 +118,16 @@ JANELA_DA_URL_DO_QUADRO = timedelta(hours=1)
 VALIDADE_INFORMADA_DA_IMAGEM = VALIDADE_DA_IMAGEM - JANELA_DA_URL_DO_QUADRO
 # O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
 FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
+
+# Teto de Jobs criados por hora (#371), contado no Firestore, então vale para todas as
+# instâncias: uma chave vazada ou um sistema em laço não gasta GPU e Gemini sem limite.
+# ponytail: o acervo em lote (#297) manda ~120 vídeos por dia, ~5 por hora de média; 200 por
+# hora dá folga para ele despejar o dia inteiro de uma vez e ainda custa no máximo ~200
+# vídeos por hora de um sistema com defeito. Pessoa envia à mão: 30 por hora é um vídeo a
+# cada 2 minutos, mais que qualquer editor consegue subir.
+TETO_POR_HORA_DO_SISTEMA = 200
+TETO_POR_HORA_DA_PESSOA = 30
+JANELA_DO_TETO = timedelta(hours=1)
 
 Estado = Literal[
     "aguardando_upload",
@@ -159,6 +165,14 @@ class Indexacao(BaseModel):
     em: datetime
     # O começo da rodada que terminou em `em`: o que foi gravado até aqui entrou nela.
     desde: datetime | None = None
+
+
+class RodadaDaIndexacao(BaseModel):
+    """A execução que está indexando o vídeo agora (#419): quem a toma é a única que grava no
+    índice, e o `id` separa a dela de uma que a substituiu depois de `em` vencer."""
+
+    id: str
+    em: datetime
 
 
 EstadoDaCopia = Literal["pendente", "copiado", "falhou"]
@@ -231,8 +245,25 @@ class Job(BaseModel):
     palavras: list[str] = []
     # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
     data_exibicao: date | None = None
+    # Mês de `data_exibicao` (`AAAA-MM`), sempre derivado dela ao montar o Job: a lista por
+    # envio filtra o período por aqui no Firestore, onde um intervalo em `data_exibicao`
+    # não cabe com a ordem por `criado_em` (#479). `None` sem data; em Job anterior ao
+    # campo, só `make gravar-mes-nos-jobs` o grava.
+    mes_exibicao: str | None = None
+    # A `versao_pipeline` da Decupagem, gravada ao concluir a análise: o reprocessar por versão
+    # lê daqui, sem abrir as decupagens (#494). `anterior` se a decupagem não tem o campo.
+    # `None` até concluir, depois de uma correção à mão para concluído e em Job anterior ao
+    # campo, até `make gravar-versao-nos-jobs`.
+    versao_pipeline: str | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).
     indexacao: Indexacao | None = None
+    # Quantas vezes se pediu a indexação do vídeo e até qual pedido ela já chegou (#419): aprovar a
+    # revisão, trocar o nome do programa e o `make` da indexação só incrementam `versao_pedida`; o
+    # `mam-indexacao` reindexa até `versao_indexada` alcançá-la. Zero nos dois em Job anterior.
+    versao_pedida: int = 0
+    versao_indexada: int = 0
+    # `None` sem execução indexando; ver `api.ciclo_de_vida.tomar_a_rodada`.
+    rodada_da_indexacao: RodadaDaIndexacao | None = None
     # `None` até a primeira cópia (e onde o BigQuery não está configurado).
     copia_bigquery: CopiaNoBigQuery | None = None
     # A etapa em andamento; `None` entre etapas, com o Job parado e em Job anterior ao campo.
@@ -269,6 +300,11 @@ class Job(BaseModel):
         if not isinstance(dados, dict):
             return dados
         dados = dict(dados)
+        data = dados.get("data_exibicao")
+        if isinstance(data, date | str):
+            dados["mes_exibicao"] = (
+                data.isoformat()[:7] if isinstance(data, date) else data[:7]
+            )
         etapas = dados.get("etapas")
         if isinstance(etapas, dict):
             dados["etapas"] = {
@@ -316,7 +352,7 @@ class JobResumido(BaseModel):
     duracao_s: float | None
     timecode_origem: str | None = None
     taxa_de_quadros: float | None = None
-    # URL assinada, de curta validade, do quadro de capa; só a listagem a preenche.
+    # URL assinada, de curta validade, do quadro de capa; a listagem e o detalhe a preenchem, o andamento não.
     capa_url: str | None = None
     programa: str | None = None
     data_exibicao: date | None = None
@@ -404,6 +440,35 @@ class Reproducao(BaseModel):
     expira_em: datetime
 
 
+ARQUIVO_DO_QUADRO = r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$"
+# O id do Job no corpo do lote: sem "/", que o Firestore leria como caminho e derrubaria o lote.
+ID_DO_JOB_NO_LOTE = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
+# Quadros por pedido em lote (#481): uma página da busca tem bem menos.
+LIMITE_DE_QUADROS_EM_LOTE = 100
+
+
+class ParDeQuadro(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job: Annotated[str, StringConstraints(pattern=ID_DO_JOB_NO_LOTE, max_length=128)]
+    arquivo: Annotated[
+        str, StringConstraints(pattern=ARQUIVO_DO_QUADRO, max_length=200)
+    ]
+
+
+class PedidoDeQuadros(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quadros: Annotated[list[ParDeQuadro], Field(max_length=LIMITE_DE_QUADROS_EM_LOTE)]
+
+
+class QuadroDoLote(BaseModel):
+    job: str
+    arquivo: str
+    url: str | None
+    expira_em: datetime | None
+
+
 class TipoNaoSuportado(Exception):
     """Corpo com tipo diferente de video/mp4: vira 415, antes de qualquer 422."""
 
@@ -411,10 +476,12 @@ class TipoNaoSuportado(Exception):
 class NovoJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    nome: Annotated[str, StringConstraints(min_length=1, max_length=255)]
+    nome: Annotated[str, Linha(255, min_length=1)]
     tamanho_bytes: Annotated[int, Field(strict=True)]
     tipo: Literal["video/mp4"]
-    programa: str | None = None  # o nome de um programa cadastrado
+    programa: Annotated[str, Linha(100)] | None = (
+        None  # o nome de um programa cadastrado
+    )
     # Obrigatória (#365): a tabela de momentos é dividida por ela.
     data_exibicao: date
 
@@ -472,6 +539,9 @@ class CursorInvalido(Exception):
 
 Ordem = Literal["enviado", "exibicao"]
 LIMITE_MAXIMO = 200
+# Candidatos que um pedido paginado examina no Firestore antes de devolver a página que
+# tiver, com o cursor (pode vir vazia); só vale com `limite`.
+TETO_DE_CANDIDATOS = 2000
 
 
 @dataclass(frozen=True)
@@ -491,8 +561,11 @@ class FiltroDeJobs:
     pessoa_do_catalogo: str | None = None  # só os vídeos em que a pessoa aparece
     marca_do_catalogo: str | None = None  # só os vídeos em que a marca aparece
     ordem: Ordem = "enviado"
-    limite: int | None = None  # `None`: a lista inteira, sem cursor
-    cursor: str | None = None  # id do último Job da página anterior
+    limite: int | None = None  # `None`: a lista inteira, sem cursor e sem teto
+    cursor: str | None = None  # id do último Job examinado na página anterior
+    # Só a lista do acervo: lê os campos do `JobResumido` (e os que o filtro confere), não o
+    # Job inteiro. O Job vem incompleto, então quem o regrava não pode pedir isto (#480).
+    so_os_da_lista: bool = False
 
 
 @dataclass(frozen=True)
@@ -617,6 +690,10 @@ class RepositorioDeJobs(Protocol):
         """Filtra, ordena e pagina. Levanta `CursorInvalido` se o cursor não existe."""
         ...
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        """Quantos Jobs `criado_por` criou de `desde` em diante (lixeira inclusive)."""
+        ...
+
 
 class Armazenamento(Protocol):
     """Porta para o Cloud Storage; os testes usam uma versão falsa."""
@@ -637,10 +714,6 @@ class Armazenamento(Protocol):
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         """URL assinada de leitura do JPEG de `caminho` (o campo `quadro` da Decupagem)."""
-        ...
-
-    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        """O JPEG de `caminho`, para o vetor multimodal da indexação (#268)."""
         ...
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
@@ -696,6 +769,13 @@ class RepositorioEmMemoria:
             self._jobs.get,
         )
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        return sum(
+            1
+            for j in self._jobs.values()
+            if j.criado_por == criado_por and j.criado_em >= desde
+        )
+
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
@@ -729,6 +809,9 @@ class RepositorioIndisponivel:
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         raise ServicoIndisponivel
 
+    def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        raise ServicoIndisponivel
+
 
 class ArmazenamentoIndisponivel:
     def url_de_upload(self, job_id: str, tamanho_bytes: int, tipo: str) -> str:
@@ -746,9 +829,6 @@ class ArmazenamentoIndisponivel:
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         raise ServicoIndisponivel
 
-    def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        raise ServicoIndisponivel
-
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         raise ServicoIndisponivel
 
@@ -759,7 +839,10 @@ def expirar_uploads(
     """Falha os Jobs sem upload completo há 24 h ou mais e cancela a sessão de upload."""
     expirados: list[str] = []
     for job in repositorio.listar():
-        if job.estado != "aguardando_upload" or agora - job.criado_em < PRAZO_DO_UPLOAD:
+        if (
+            job.estado != "aguardando_upload"
+            or agora - job.criado_em < PRAZO_DO_JOB_SEM_UPLOAD
+        ):
             continue
         # Primeiro a transição: se o Job andou nesse meio-tempo, o upload é dele.
         if transitar(
@@ -770,8 +853,12 @@ def expirar_uploads(
             agora,
             codigo_falha="upload_expirado",
         ):
-            armazenamento.cancelar_upload(job.id)
             expirados.append(job.id)
+            try:
+                armazenamento.cancelar_upload(job.id)
+            except Exception:
+                # Não segura os outros Jobs: o ciclo de vida da quarentena apaga o objeto.
+                log.exception("não consegui apagar o upload do Job %s", job.id)
     return expirados
 
 
@@ -884,38 +971,14 @@ def _tem_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> b
 
 def _enxerga(chamador: Chamador, job: Job | None) -> Job:
     """O job, ou 404 se não existe ou é de outro sistema (ou de uma pessoa), para uma chave."""
-    if job is None or (
-        isinstance(chamador, Sistema) and job.sistema != chamador.sistema
-    ):
+    if job is None or _de_outro_sistema(chamador, job):
         raise HTTPException(404, "Job não encontrado")
     return job
 
 
-class AceiteDaSugestao(BaseModel):
-    """Corpo opcional do aceite: o "outro nome" (ou o título da pauta) do editor."""
-
-    valor: (
-        Annotated[
-            str,
-            StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_NOME),
-        ]
-        | None
-    ) = None
-
-
-def _correcao_da_proposta(proposta: Proposta, motivo: str, versao: str) -> NovaCorrecao:
-    try:
-        return NovaCorrecao(
-            tipo=proposta.tipo,
-            item_id=proposta.item_id,
-            valor=proposta.valor,
-            catalogo_id=proposta.catalogo_id,
-            ocorrencia=proposta.ocorrencia,
-            motivo=motivo,
-            versao=versao,
-        )
-    except ValidationError as erro:
-        raise HTTPException(422, "Valor inválido para a correção proposta") from erro
+def _de_outro_sistema(chamador: Chamador, job: Job) -> bool:
+    """Se a chave de sistema não enxerga o Job (é de outro sistema ou de uma pessoa)."""
+    return isinstance(chamador, Sistema) and job.sistema != chamador.sistema
 
 
 def criar_rotas(
@@ -928,10 +991,8 @@ def criar_rotas(
     catalogo: Catalogo,
     marcas: CatalogoDeMarcas,
     programas: RepositorioDeProgramas,
-    sugestoes: RepositorioDeSugestoes,
     disparo_da_indexacao: DisparoDaIndexacao,
     acessos: AcessosAoVideo,
-    tipos_de_objeto: Callable[[], list[str]] = list,
     idempotencia: RepositorioDeIdempotencia | None = None,
     eventos: Eventos | None = None,
 ) -> APIRouter:
@@ -944,7 +1005,9 @@ def criar_rotas(
         novo: NovoJob,
         chamador: Annotated[Chamador, Depends(_exige("criar"))],
         resposta: Response,
-        idempotency_key: Annotated[str | None, Header()] = None,
+        idempotency_key: Annotated[
+            str | None, Header(max_length=200, pattern=PADRAO_DA_LINHA)
+        ] = None,
     ) -> JobCriado:
         if not 0 < novo.tamanho_bytes <= tamanho_maximo_bytes:
             raise HTTPException(422, "Tamanho fora do limite")
@@ -1014,6 +1077,22 @@ def criar_rotas(
             existente is None and job_gravado
         ):
             raise HTTPException(410, "Este Job foi apagado")
+        # O teto só barra Job novo: a repetição de um Job que já existe devolve o mesmo
+        # Job, e a reserva feita aqui deixa a repetição depois da espera criá-lo.
+        if existente is None:
+            teto = (
+                TETO_POR_HORA_DO_SISTEMA
+                if sistema is not None
+                else TETO_POR_HORA_DA_PESSOA
+            )
+            if repositorio.contar_criados(criado_por, agora - JANELA_DO_TETO) >= teto:
+                # 3600 s é o limite de cima: a vaga abre quando o Job mais antigo da
+                # janela sai dela, o que pode ser antes.
+                raise HTTPException(
+                    429,
+                    f"Teto de {teto} Jobs por hora atingido",
+                    headers={"Retry-After": str(int(JANELA_DO_TETO.total_seconds()))},
+                )
         criou = existente is None and repositorio.criar(job)
         if existente is not None:
             job = existente
@@ -1039,26 +1118,32 @@ def criar_rotas(
             url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
+    def _url_da_capa(job: Job) -> str | None:
+        if job.capa is None:
+            return None
+        return armazenamento.url_do_quadro(job.id, job.capa, VALIDADE_DA_IMAGEM)
+
     def _com_capa(job: Job) -> JobResumido:
         publico = JobResumido.de(job)
-        if job.capa is not None:
-            publico.capa_url = armazenamento.url_do_quadro(
-                job.id, job.capa, VALIDADE_DA_IMAGEM
-            )
+        publico.capa_url = _url_da_capa(job)
         return publico
+
+    def _sem_capa(job: Job) -> dict[str, Any]:
+        return JobResumido.de(job).model_dump(mode="json", exclude={"capa_url"})
 
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        programa: str | None = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
         exibicao_ate: date | None = None,
-        q: str | None = None,
-        sistema: str | None = None,
+        q: Annotated[str | None, LinhaDaConsulta(300)] = None,
+        sistema: Annotated[str | None, LinhaDaConsulta(100)] = None,
         ordem: Ordem = "enviado",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_MAXIMO)] = None,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
+        capa: bool = True,
     ) -> Response:
         if isinstance(chamador, Sistema):
             # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
@@ -1075,15 +1160,20 @@ def criar_rotas(
             ordem=ordem,
             limite=limite,
             cursor=cursor,
+            so_os_da_lista=True,
         )
         try:
             pagina = repositorio.consultar(filtro)
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
-        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
-            publicos = list(assinando.map(_com_capa, pagina.jobs))
-        corpo = [p.model_dump(mode="json") for p in publicos]
+        if capa:
+            # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
+            with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+                publicos = list(assinando.map(_com_capa, pagina.jobs))
+            corpo = [p.model_dump(mode="json") for p in publicos]
+        else:
+            # Quem só conta (o aviso "Finalizando" da busca) não paga as assinaturas.
+            corpo = [_sem_capa(j) for j in pagina.jobs]
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
@@ -1095,7 +1185,10 @@ def criar_rotas(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         ids: Annotated[
             str,
-            Query(description=f"Até {LIMITE_DO_ANDAMENTO} ids, separados por vírgula"),
+            LinhaDaConsulta(
+                8000,
+                description=f"Até {LIMITE_DO_ANDAMENTO} ids, separados por vírgula",
+            ),
         ],
     ) -> Response:
         """O estado de vários Jobs numa leitura só, para a tela atualizar o que está em
@@ -1113,13 +1206,10 @@ def criar_rotas(
             j
             for j in jobs
             if (j.lixeira is None or pode_ver_lixeira)
-            and not (isinstance(chamador, Sistema) and j.sistema != chamador.sistema)
+            and not _de_outro_sistema(chamador, j)
         ]
         visiveis.sort(key=lambda j: posicao[j.id])
-        corpo = [
-            JobResumido.de(j).model_dump(mode="json", exclude={"capa_url"})
-            for j in visiveis
-        ]
+        corpo = [_sem_capa(j) for j in visiveis]
         return JSONResponse(corpo)
 
     @rotas.get("/{job_id}", response_model=JobPublico)
@@ -1130,6 +1220,7 @@ def criar_rotas(
     ) -> Response:
         job = _enxerga(chamador, repositorio.obter(job_id))
         publico = JobPublico.de(job)
+        publico.capa_url = _url_da_capa(job)
         etag = _etag(publico)
         cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"}
         if _casa_etag(request.headers.get("if-none-match"), etag):
@@ -1137,7 +1228,10 @@ def criar_rotas(
         return JSONResponse(publico.model_dump(mode="json"), headers=cabecalhos)
 
     def obter_concluido(job_id: str, chamador: Chamador) -> Job:
-        job = _enxerga(chamador, repositorio.obter(job_id))
+        return _concluido(chamador, repositorio.obter(job_id))
+
+    def _concluido(chamador: Chamador, lido: Job | None) -> Job:
+        job = _enxerga(chamador, lido)
         if job.estado != "concluido":
             raise HTTPException(409, f"Job em {job.estado}, não concluido")
         return job
@@ -1174,13 +1268,59 @@ def criar_rotas(
         acessos.baixou(chamador, job, "video.baixado")
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
 
+    @rotas.post("/quadros")
+    def quadros_em_lote(
+        pedido: PedidoDeQuadros,
+        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+    ) -> list[QuadroDoLote]:
+        """As URLs assinadas dos quadros de uma página da busca, numa chamada só: cada Job
+        é lido uma vez e o papel, uma vez. O par de Job que não existe, não se enxerga, está
+        na lixeira ou não concluiu volta sem URL, sem derrubar o lote."""
+        jobs = {
+            j.id: j
+            for j in repositorio.obter_varios(
+                dict.fromkeys(p.job for p in pedido.quadros)
+            )
+        }
+        expira_em = relogio() + VALIDADE_INFORMADA_DA_IMAGEM
+        resposta: list[QuadroDoLote] = []
+        for par in pedido.quadros:
+            job = jobs.get(par.job)
+            visivel = (
+                job is not None
+                and job.estado == "concluido"
+                and job.lixeira is None
+                and not _de_outro_sistema(chamador, job)
+            )
+            url = (
+                armazenamento.url_do_quadro(
+                    par.job, caminho_do_quadro(par.arquivo), VALIDADE_DA_IMAGEM
+                )
+                if visivel
+                else None
+            )
+            resposta.append(
+                QuadroDoLote(
+                    job=par.job,
+                    arquivo=par.arquivo,
+                    url=url,
+                    expira_em=expira_em if url else None,
+                )
+            )
+        return resposta
+
     @rotas.get("/{job_id}/quadros/{arquivo}")
     def quadro(
         job_id: str,
-        arquivo: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$")],
+        arquivo: Annotated[str, Path(pattern=ARQUIVO_DO_QUADRO)],
+        request: Request,
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
     ) -> Reproducao:
-        job = obter_concluido(job_id, chamador)
+        # O Job que a dependência da lixeira já leu neste pedido (None se não existe).
+        if hasattr(request.state, "job_lido"):
+            job = _concluido(chamador, request.state.job_lido)
+        else:
+            job = obter_concluido(job_id, chamador)
         url = armazenamento.url_do_quadro(
             job.id, caminho_do_quadro(arquivo), VALIDADE_DA_IMAGEM
         )
@@ -1341,77 +1481,6 @@ def criar_rotas(
             tipo_de_correcao=correcao.tipo,
         )
 
-    def _sugestoes_abertas(
-        job: Job,
-    ) -> tuple[list[Sugestao], dict[str, Any], str]:
-        modelo, versao_atual = _ler_modelo(job.id)
-        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
-        abertas = sugestoes_abertas(
-            entregue, catalogo, sugestoes.decididas(job.id), tipos_de_objeto
-        )
-        return abertas, modelo, versao_atual
-
-    def _a_sugestao(abertas: list[Sugestao], sugestao_id: str) -> Sugestao:
-        achada = next((s for s in abertas if s.id == sugestao_id), None)
-        if achada is None:
-            raise HTTPException(404, "Sugestão não encontrada")
-        return achada
-
-    @rotas.get("/{job_id}/sugestoes")
-    def sugestoes_do_video(
-        job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
-    ) -> list[Sugestao]:
-        return _sugestoes_abertas(obter_concluido(job_id, autor))[0]
-
-    @rotas.post("/{job_id}/sugestoes/{sugestao_id}/aceitar", status_code=201)
-    def aceitar_sugestao(
-        job_id: str,
-        sugestao_id: str,
-        request: Request,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
-        corpo: AceiteDaSugestao | None = None,
-    ) -> dict[str, Any]:
-        job = obter_concluido(job_id, autor)
-        abertas, modelo, versao_atual = _sugestoes_abertas(job)
-        sugestao = _a_sugestao(abertas, sugestao_id)
-        valor = corpo.valor if corpo else None
-        if valor is not None:
-            if not valor:
-                raise HTTPException(422, "O valor não pode ser vazio")
-            sugestao = com_o_valor_do_editor(sugestao, valor)
-        elif sugestao.tipo == "pauta_do_trecho":
-            raise HTTPException(422, "A pauta pede um título")
-        motivo = MOTIVO_CORRIGIDA if valor is not None else MOTIVO_CONFIRMADA
-        # Confere todas antes de gravar a primeira: o aceite não fica pela metade.
-        gravadas = [
-            _conferir_correcao(
-                job,
-                modelo,
-                versao_atual,
-                request,
-                _correcao_da_proposta(proposta, motivo, versao_atual),
-                autor,
-            )
-            for proposta in [sugestao.correcao, *sugestao.depois]
-        ]
-        for correcao in gravadas:
-            correcoes.acrescentar(correcao)
-            _registrar_correcao(autor, job, correcao)
-        _atualizar_catalogo_do_job(job)
-        sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "aceita")
-        return {"id": gravadas[0].id, "ids": [c.id for c in gravadas]}
-
-    @rotas.post("/{job_id}/sugestoes/{sugestao_id}/recusar", status_code=204)
-    def recusar_sugestao(
-        job_id: str,
-        sugestao_id: str,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
-    ) -> Response:
-        job = obter_concluido(job_id, autor)
-        sugestao = _a_sugestao(_sugestoes_abertas(job)[0], sugestao_id)
-        sugestoes.registrar(job.id, sugestao.id, sugestao.tipo, "recusada")
-        return Response(status_code=204)
-
     @rotas.get("/{job_id}/correcoes")
     def historico_de_correcoes(
         job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
@@ -1461,20 +1530,14 @@ def criar_rotas(
         job_id: str,
         autor: Annotated[Usuario, Depends(_exige_editar)],
     ) -> dict[str, str]:
-        """Fecha a revisão: dispara uma reindexação só, em segundo plano. As ações da
+        """Fecha a revisão: pede a indexação e a dispara em segundo plano. As ações da
         revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
-        `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, volta
-        ao que era (503), para o `pendente` não ficar preso sem execução nenhuma."""
+        `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, a
+        `indexacao` volta ao que era (503), para o `pendente` não ficar preso sem execução
+        nenhuma. A `versao_pedida` fica: o próximo disparo (ou uma rodada em curso) a atende."""
         job = obter_concluido(job_id, autor)
         anterior = job.indexacao
-        if (
-            repositorio.transitar(
-                job.id,
-                "concluido",
-                {"indexacao": Indexacao(estado="pendente", em=relogio())},
-            )
-            is None
-        ):
+        if pedir_indexacao(repositorio, job.id, relogio()) is None:
             raise HTTPException(409, "O vídeo saiu de concluído")
         try:
             disparo_da_indexacao.iniciar(job.id)

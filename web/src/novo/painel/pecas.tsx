@@ -243,10 +243,12 @@ export function GraficoOuTabela({
 
 const TICK = { fill: "var(--color-muted-foreground)", fontSize: 11 };
 
-/** O eixo do valor em forma curta ("1,2 mil"); a dica e a tabela dão o número inteiro. */
+/** O eixo do valor em forma curta ("1,2 mil"); a dica e a tabela dão o número inteiro. Sem sinal no
+ * que arredonda a zero: um tick de -0,0025 escreve "0", nunca "-0". */
 const curto = new Intl.NumberFormat("pt-BR", {
   notation: "compact",
   maximumFractionDigits: 1,
+  signDisplay: "negative",
 });
 
 /** A dica do gráfico: o nome em 600 e o número, sobre a superfície sobreposta. */

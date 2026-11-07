@@ -12,7 +12,7 @@ import {
 
 /**
  * As faixas da linha do tempo, na ordem do `faixasDoVisualizador`; a chave é o prefixo das chaves dos itens.
- * O plano não é faixa: só tem seção no inspetor (a lista, a correção e os parecidos).
+ * O plano não é faixa: só tem seção no inspetor (a lista e a correção).
  */
 export type TipoDaFaixa = 'pauta' | 'aparicao' | 'mencao' | 'objeto' | 'comercial' | 'texto' | 'fala' | 'plano'
 

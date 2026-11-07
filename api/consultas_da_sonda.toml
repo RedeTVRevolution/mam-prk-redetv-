@@ -4,8 +4,6 @@
 #              (sem distinguir maiúsculas). Sem termo nem `pertinentes`, o caso `ausente` pede
 #              que nenhum vídeo volte; só com `pertinentes`, não há veredito, só o aceite.
 #   teto       (opcional) máximo de momentos no todo; sem ele, sem limite
-#   visual     (opcional) o modo visual da busca (#269): o vetor do quadro-chave entra na fusão;
-#              sem o índice do quadro a consulta roda como a comum
 #   exatos     (opcional) os que citam o termo vêm antes dos parecidos, e são `teto` (pede os dois)
 #   programa, desde, ate   (opcional) filtros da consulta, como a tela os põe (datas sem aspas:
 #              desde = 2024-05-01)
@@ -15,7 +13,7 @@
 # Pertinente = casa com algum item de `pertinentes` ou cita o `termo`. Consulta sem nenhum
 # dos dois roda e mostra os resultados, mas fica fora da conta do aceite (80% dos 5 primeiros).
 # As consultas do aceite vêm dos casos de uso do plano (E2: assunto, frase dita, nome, filtros;
-# E6: consulta visual de texto), escritas pelo time do projeto, e não dos editores (#259 foi
+# E6: consulta por descrição), escritas pelo time do projeto, e não dos editores (#259 foi
 # `wontfix`, #341). Entram aqui, no mesmo formato; o Bruno confere a lista no PR e o veredito
 # é o do `make sondar-busca`.
 
@@ -118,4 +116,3 @@ texto = "xyzzy"
 texto = "pessoa de terno em estúdio"
 termo = "terno"
 teto = 30
-visual = true

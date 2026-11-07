@@ -27,6 +27,14 @@ resource "google_cloud_run_v2_job" "purga" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO_DE_SEGURANCA"
+          value = local.banco_de_seguranca
+        }
+        env {
+          name  = "BUCKET_QUARENTENA"
+          value = local.buckets["quarentena"]
+        }
+        env {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }
@@ -47,16 +55,16 @@ resource "google_cloud_run_v2_job" "purga" {
           value = local.indice_da_descricao
         }
         env {
-          name  = "BUSCA_INDICE_QUADRO"
-          value = local.indice_do_quadro_em_uso
-        }
-        env {
           name  = "BUSCA_INDICES_LIGADOS"
           value = tostring(var.indices_da_busca_ligados)
         }
         env {
           name  = "BUSCA_DIMENSAO"
           value = tostring(var.dimensao_dos_vetores)
+        }
+        env {
+          name  = "BUSCA_COTA_DE_ESCRITA"
+          value = tostring(var.cota_de_escrita_da_busca)
         }
       }
     }

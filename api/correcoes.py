@@ -29,6 +29,7 @@ from api import catalogo_de_correcoes as textos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import (
+    PREFIXO_POSICIONAL,
     CategoriaDeObjeto,
     Comercial,
     CorBase,
@@ -38,6 +39,7 @@ from api.decupagem import (
     RelacaoDoObjeto,
     TextoNaTela,
     TomDaPauta,
+    id_posicional,
 )
 from api.identidade import (
     identidade_do_comercial as _identidade_do_comercial,
@@ -45,6 +47,7 @@ from api.identidade import (
 from api.identidade import identidade_do_nome, nao_identificado
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.pessoas import LISTAS
+from api.texto_como_dado import ID_SEGURO, Linha, Texto
 
 TipoNovo = Literal[
     "pessoa.renomear",
@@ -175,7 +178,7 @@ class Correcao(BaseModel):
 
 Motivo = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_MOTIVO),
+    Texto(LIMITE_DO_MOTIVO, min_length=1, strip=True),
 ]
 
 
@@ -631,9 +634,9 @@ class NovaCorrecao(BaseModel):
     ocorrencia: Ocorrencia | None = None
     # O id da pessoa ou da marca do catálogo que o nome novo é (`pessoa.renomear` e
     # `comercial.marca`); o servidor confere que existe e que o nome é o dela.
-    catalogo_id: Annotated[str, StringConstraints(max_length=64)] | None = None
+    catalogo_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO] | None = None
     # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
-    item_id: Annotated[str, StringConstraints(max_length=40)] = ""
+    item_id: Annotated[str, Linha(40)] = ""
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
     # esquema; `comercial.acrescentar`: o JSON do comercial; `pessoa.nao_e`:
     # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
@@ -646,14 +649,9 @@ class NovaCorrecao(BaseModel):
     # fim_ms, tipo, texto}; `pauta.acrescentar`: o JSON {titulo, resumo?, tom,
     # inicio_ms, fim_ms}; `pauta.juntar`: o JSON {ids, titulo}, com o `item_id` da
     # primeira; `pauta.dividir`: o JSON {em_ms, titulos: [primeira, segunda]}.
-    valor: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_JSON
-        ),
-    ]
+    valor: Annotated[str, Texto(LIMITE_DO_JSON, min_length=1, strip=True)]
     motivo: Motivo
-    versao: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    versao: Annotated[str, Linha(64, min_length=1)]
 
     _motivo_sem_controle = field_validator("motivo")(_sem_controle_salvo_quebra)
 
@@ -705,7 +703,7 @@ class NovaRecusa(NovaResolucao):
 class NovaReaplicacao(NovaResolucao):
     """Corpo de `POST /v1/jobs/{id}/fila/{cid}/reaplicar`."""
 
-    item_id: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+    item_id: Annotated[str, Linha(40, min_length=1)]
 
 
 class RepositorioDeAprovacao(Protocol):
@@ -851,25 +849,13 @@ def _objetos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [o for o in modelo.get("objetos", []) if isinstance(o, dict)]
 
 
-# Comerciais, falas e textos na tela não têm id no esquema: o id é a posição.
-_PREFIXO_POSICIONAL = {
-    "comerciais": "com",
-    "transcricao": "fal",
-    "textos_na_tela": "txt",
-}
-
-
-def _id_posicional(chave: str, n: int) -> str:
-    return f"{_PREFIXO_POSICIONAL[chave]}{n:03d}"
-
-
 def _com_ids_posicionais(modelo: dict[str, Any], chave: str) -> list[dict[str, Any]]:
     """Os itens de `chave` (cópias) com o id da posição no JSON do modelo.
 
     O que já traz id (decupagem entregue) o mantém.
     """
     return [
-        {"id": _id_posicional(chave, n), **item}
+        {"id": id_posicional(chave, n), **item}
         for n, item in enumerate(modelo.get(chave, []))
         if isinstance(item, dict)
     ]
@@ -1941,10 +1927,10 @@ def aplicar(
     pessoas = _pessoas(resultado)
     # Os ids posicionais saem da posição no modelo, antes de qualquer correção.
     posicionais = []
-    for chave in _PREFIXO_POSICIONAL:
+    for chave in PREFIXO_POSICIONAL:
         for n, real in enumerate(resultado.get(chave, [])):
             if isinstance(real, dict):
-                real["id"] = _id_posicional(chave, n)
+                real["id"] = id_posicional(chave, n)
                 posicionais.append(real)
     for item in [*pessoas, *_pautas(resultado), *_planos(resultado), *posicionais]:
         # O nome confirmado pelo código (`modelo_forte`) segue como o modelo gravou.

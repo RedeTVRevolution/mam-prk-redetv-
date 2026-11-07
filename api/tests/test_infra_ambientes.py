@@ -63,13 +63,13 @@ def test_cada_output_do_modulo_sai_na_raiz_para_o_make_e_o_deploy() -> None:
         )
 
 
-def test_so_o_dev_desliga_os_indices_ann_da_busca() -> None:
-    # Na produção o KNN chegaria ao teto de 100 mil registros em dias (ADR 0006).
+def test_o_dev_e_a_producao_ligam_o_indice_ann_da_busca() -> None:
+    # Sem o índice o KNN chega ao teto de 100 mil registros (ADR 0006); a produção usa o padrão.
     dev = (INFRA / "main.tf").read_text()
     prod = (INFRA / "ambientes" / "prod" / "main.tf").read_text()
     modulo = (MODULO / "main.tf").read_text()
 
-    assert re.search(r"^\s*indices_da_busca_ligados\s*= false$", dev, re.MULTILINE)
+    assert re.search(r"^\s*indices_da_busca_ligados\s*= true$", dev, re.MULTILINE)
     assert "indices_da_busca_ligados" not in prod
     assert re.search(
         r'variable "indices_da_busca_ligados" \{\n\s*type\s*= bool\n\s*default = true\n',

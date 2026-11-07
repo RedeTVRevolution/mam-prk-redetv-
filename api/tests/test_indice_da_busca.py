@@ -1,3 +1,5 @@
+import json
+from dataclasses import asdict
 from typing import Any
 
 from api.decupagem import CATEGORIAS_DE_OBJETO, Decupagem, ObjetoDoInventario
@@ -158,8 +160,8 @@ def test_cada_ocorrencia_do_objeto_e_um_registro_com_os_seus_tempos() -> None:
     ]
     # A primeira ocorrência leva o quadro do objeto; as outras, o do plano em que começam.
     assert [(r.id, r.inicio_ms, r.fim_ms, r.quadro) for r in objetos] == [
-        ("j:objeto:0:0", 0, 1_000, "obj01.jpg"),
-        ("j:objeto:0:1", 5_000, 6_000, "pla2.jpg"),
+        ("j:objeto:obj01:0", 0, 1_000, "obj01.jpg"),
+        ("j:objeto:obj01:1", 5_000, 6_000, "pla2.jpg"),
     ]
 
 
@@ -316,31 +318,30 @@ def test_o_registro_proprio_leva_o_quadro_da_maior_caixa() -> None:
     }
 
 
-def test_a_roupa_curta_leva_a_categoria_e_o_dono() -> None:
+def test_a_roupa_curta_leva_a_categoria_e_o_dono_sem_o_nome_dele() -> None:
     blazer = _objeto("obj01", "roupa", "blazer", "preto", "pes01", 1_000)
     decupagem = _decupagem(
         [_pessoa("pes01", "Flávia Noronha", "cat-flavia", 0, 4_000)], [blazer], []
     )
-    [roupa] = [
-        r
-        for r in registros_da_decupagem("j", decupagem, None, None)
-        if r.tipo == "objeto"
-    ]
-    assert roupa.texto == "blazer preto, roupa, de Flávia Noronha"
+    registros = registros_da_decupagem("j", decupagem, None, None)
+    [roupa] = [r for r in registros if r.tipo == "objeto"]
+    assert roupa.texto == "blazer preto, roupa, de pessoa"
+    assert roupa.dono == "cat-flavia"
     assert len((roupa.texto or "").split()) >= 3
+    # Nenhum campo do índice leva o nome: renomear no catálogo não muda registro algum.
+    assert "Flávia" not in json.dumps([asdict(r) for r in registros], default=str)
 
 
-def test_pessoa_nao_identificada_nao_vira_dono_no_texto() -> None:
+def test_o_texto_do_objeto_nao_muda_com_o_nome_da_pessoa() -> None:
     blazer = _objeto("obj01", "roupa", "blazer", "preto", "pes01", 1_000)
-    decupagem = _decupagem(
-        [_pessoa("pes01", "não identificado", "cat-x", 0, 4_000)], [blazer], []
-    )
-    [roupa] = [
-        r
-        for r in registros_da_decupagem("j", decupagem, None, None)
-        if r.tipo == "objeto"
-    ]
-    assert roupa.texto == "blazer preto, roupa, de pessoa não identificada"
+
+    def registros(nome: str) -> list[Registro]:
+        decupagem = _decupagem(
+            [_pessoa("pes01", nome, "cat-flavia", 0, 4_000)], [blazer], []
+        )
+        return registros_da_decupagem("j", decupagem, None, None)
+
+    assert registros("Flávia Noronha") == registros("Flávia Noronha Silva")
 
 
 def test_decupagem_sem_inventario_segue_como_antes() -> None:
@@ -354,24 +355,22 @@ def test_decupagem_sem_inventario_segue_como_antes() -> None:
     ]
 
 
-def test_o_indice_em_memoria_busca_pelo_vetor_do_quadro() -> None:
-    def plano(id: str, vetor: list[float] | None) -> Registro:
-        return Registro(
-            id=id,
-            tipo="plano",
-            job_id="j1",
-            inicio_ms=0,
-            fim_ms=1,
-            descricao="x",
-            vetor_do_quadro=vetor,
-        )
+def test_fala_e_texto_sem_id_ganham_o_id_que_a_entrega_daria() -> None:
+    decupagem = EXEMPLOS[0].decupagem
+    assert decupagem.transcricao and decupagem.textos_na_tela
+    assert decupagem.transcricao[0].id is None
 
-    indice = IndiceEmMemoria()
-    indice.gravar(
-        "j1", [plano("a", [0.0, 1.0]), plano("b", [1.0, 0.1]), plano("c", None)]
+    ids = [r.id for r in registros_da_decupagem("j", decupagem, "p", None)]
+
+    assert "j:fala:fal000" in ids and "j:texto:txt000" in ids
+
+
+def test_registros_levam_o_sistema_e_a_lixeira_do_video() -> None:
+    exemplo = EXEMPLOS[0]
+    registros = registros_da_decupagem(
+        exemplo.job_id, exemplo.decupagem, None, None, "Playout", True
     )
-
-    achados = indice.buscar(Consulta(vetor_do_quadro=[1.0, 0.0]))
-
-    # Só quem tem vetor e aponta para o mesmo lado; o mais perto primeiro.
-    assert [r.id for r in achados] == ["b"]
+    assert registros
+    assert {(r.sistema, r.na_lixeira) for r in registros} == {("Playout", True)}
+    padrao = registros_da_decupagem(exemplo.job_id, exemplo.decupagem, None, None)
+    assert {(r.sistema, r.na_lixeira) for r in padrao} == {(None, False)}

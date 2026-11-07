@@ -1,5 +1,5 @@
 import { hashKey, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { codigoDoErro, SessaoExpirada, type PaginaDaBusca } from '../../api.ts'
 import type { VideoDoResultado } from '../../busca.ts'
 import { ESTADOS_DO_JOB } from '../../cores.ts'
@@ -42,30 +42,31 @@ export function useAcervo(filtros: FiltrosDoAcervo) {
   })
 }
 
-/** Muda os vídeos das páginas da busca e dos parecidos na memória. */
+/** Muda os vídeos das páginas da busca na memória. */
 function nasBuscas(cliente: QueryClient, mudar: (videos: VideoDoResultado[]) => VideoDoResultado[]) {
-  for (const prefixo of ['busca', 'parecidos']) {
-    cliente.setQueriesData<InfiniteData<PaginaDaBusca>>({ queryKey: [prefixo] }, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, videos: mudar(p.videos) })) })
-  }
+  cliente.setQueriesData<InfiniteData<PaginaDaBusca>>({ queryKey: ['busca'] }, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, videos: mudar(p.videos) })) })
+}
+
+/** Muda os Jobs de cada página do acervo na memória. */
+function nasPaginas(d: InfiniteData<PaginaDoAcervo> | undefined, mudar: (jobs: Job[]) => Job[]) {
+  return d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: mudar(p.jobs) })) }
 }
 
 /**
  * Põe o Job que a API devolveu (um reprocessamento) no lugar do da lista, com a capa da lista. Na
- * busca e nos parecidos, o vídeo leva os dados novos e fica com os momentos que a busca achou.
+ * busca, o vídeo leva os dados novos e fica com os momentos que a busca achou.
  */
 export function trocarNoAcervo(cliente: QueryClient, novo: Job) {
   cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
-    d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.map((j) => (j.id === novo.id ? { ...novo, capa_url: j.capa_url } : j)) })) },
+    nasPaginas(d, (jobs) => jobs.map((j) => (j.id === novo.id ? { ...novo, capa_url: j.capa_url } : j))),
   )
   const { nome, programa = null, data_exibicao = null, duracao_s = null } = novo
   nasBuscas(cliente, (videos) => videos.map((v) => (v.job_id === novo.id ? { ...v, nome, programa, data_exibicao, duracao_s } : v)))
 }
 
-/** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo; da busca e dos parecidos também. */
+/** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo; da busca também. */
 export function tirarDoAcervo(cliente: QueryClient, ids: Set<string>) {
-  cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
-    d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.filter((j) => !ids.has(j.id)) })) },
-  )
+  cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) => nasPaginas(d, (jobs) => jobs.filter((j) => !ids.has(j.id))))
   nasBuscas(cliente, (videos) => videos.filter((v) => !ids.has(v.job_id)))
 }
 
@@ -78,6 +79,8 @@ export function useAndamento(filtros: FiltrosDoAcervo, itens: Job[], intervaloMs
   const api = useApi()
   const cliente = useQueryClient()
   const [falha, setFalha] = useState<string | null>(null)
+  // Os vídeos cujo detalhe já foi pedido por terminarem sem capa na lista: um pedido só por vídeo.
+  const capaPedida = useRef(new Set<string>())
   const ids = itens
     .filter((j) => NAO_TERMINAIS.includes(j.estado) || finalizando(j))
     .slice(0, MAXIMO_DO_ANDAMENTO)
@@ -98,14 +101,29 @@ export function useAndamento(filtros: FiltrosDoAcervo, itens: Job[], intervaloMs
         const novos = new Map((await api.andamento([...pedidos])).map((n) => [n.id, n]))
         if (!ativo) return
         setFalha(null)
-        // O andamento não traz a capa (só a listagem assina a URL): fica a da lista. Quem a rota
-        // omite (foi para a lixeira ou sumiu) sai.
+        // O andamento não traz a capa (só a listagem e o detalhe assinam a URL): fica a da lista.
+        // Quem a rota omite (foi para a lixeira ou sumiu) sai.
         const atualiza = (j: Job): Job[] => {
           if (!pedidos.has(j.id)) return [j]
           const novo = novos.get(j.id)
           return novo ? [{ ...novo, capa_url: j.capa_url }] : []
         }
-        cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.flatMap(atualiza) })) })
+        const antes = cliente.getQueryData<InfiniteData<PaginaDoAcervo>>(chave)
+        const semCapa = new Set(antes?.pages.flatMap((p) => p.jobs).filter((j) => !j.capa_url).map((j) => j.id))
+        cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => nasPaginas(d, (jobs) => jobs.flatMap(atualiza)))
+        // Saiu do andamento sem capa na lista: ela nasce durante o processamento, então o detalhe, que a traz, é pedido uma vez.
+        for (const n of novos.values()) {
+          if (NAO_TERMINAIS.includes(n.estado) || finalizando(n) || !semCapa.has(n.id) || capaPedida.current.has(n.id)) continue
+          // Sem olhar `ativo`: o vídeo sair do andamento muda os ids e desmonta este efeito antes da resposta.
+          capaPedida.current.add(n.id)
+          void api.job(n.id).detalhe().then(
+            ({ id, capa_url }) => {
+              if (!capa_url) return
+              cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => nasPaginas(d, (jobs) => jobs.map((j) => (j.id === id && !j.capa_url ? { ...j, capa_url } : j))))
+            },
+            () => {},
+          )
+        }
       } catch (erro) {
         if (ativo && !(erro instanceof SessaoExpirada)) setFalha(codigoDoErro(erro))
       } finally {

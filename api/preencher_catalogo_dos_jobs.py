@@ -2,7 +2,9 @@
 
 Calcula `pessoas_do_catalogo` e `marcas_do_catalogo` de todos os Jobs concluídos (os da
 lixeira também) a partir da Decupagem entregue. É uma passada única de linha de comando,
-então lê o acervo inteiro. Só grava o Job que mudou: repetir não muda nada.
+que lê os Jobs em páginas (`POR_LOTE`) e só grava o que mudou: repetir não muda nada.
+Também reconcilia o Job que ficou sem o campo porque a gravação do #359 falhou
+(`make recalcular-pessoas-dos-jobs`, #478).
 """
 
 import logging
@@ -30,29 +32,40 @@ from api.nuvem import (
 
 log = logging.getLogger(__name__)
 
+POR_LOTE = 500
+
 
 def preencher(
     repositorio: RepositorioDeJobs,
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pessoas: Callable[[str], PessoaDoCatalogo | None],
+    por_lote: int = POR_LOTE,
 ) -> dict[str, int]:
     """Devolve quantos Jobs `gravados`, `iguais` (ou que saíram de `concluido` no meio) e
     `falhou` (decupagem não lida)."""
     contagem = {"gravados": 0, "iguais": 0, "falhou": 0}
-    for job in repositorio.consultar(FiltroDeJobs(na_lixeira=None)).jobs:
-        if job.estado != "concluido":
-            continue
-        try:
-            entregue = entregue_com_fundidas(job.id, decupagens, correcoes, pessoas)
-        except Exception:
-            log.exception("decupagem de %s não lida", job.id)
-            contagem["falhou"] += 1
-            continue
-        if not gravar_se_mudou(repositorio, job.id, entregue):
-            contagem["iguais"] += 1
-            continue
-        contagem["gravados"] += 1
+    cursor: str | None = None
+    while True:
+        pagina = repositorio.consultar(
+            FiltroDeJobs(na_lixeira=None, limite=por_lote, cursor=cursor)
+        )
+        for job in pagina.jobs:
+            if job.estado != "concluido":
+                continue
+            try:
+                entregue = entregue_com_fundidas(job.id, decupagens, correcoes, pessoas)
+            except Exception:
+                log.exception("decupagem de %s não lida", job.id)
+                contagem["falhou"] += 1
+                continue
+            if not gravar_se_mudou(repositorio, job.id, entregue):
+                contagem["iguais"] += 1
+                continue
+            contagem["gravados"] += 1
+        cursor = pagina.proximo_cursor
+        if cursor is None:
+            break
     return contagem
 
 
