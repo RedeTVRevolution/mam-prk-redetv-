@@ -12,12 +12,12 @@ instância.
 
 import json
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -31,6 +31,7 @@ from api.copia_bigquery import (
 )
 from api.csv_seguro import csv_em_texto
 from api.jobs import RepositorioDeJobs
+from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
@@ -629,9 +630,12 @@ def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
 
 
 def criar_rotas_do_tempo_de_tela(
-    consulta: ConsultaDeMomentos | None, repositorio: RepositorioDeJobs
+    consulta: ConsultaDeMomentos | None,
+    repositorio: RepositorioDeJobs,
+    relogio: Callable[[], datetime] = agora_em_sao_paulo,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
+    no_periodo = dependencia_do_periodo(relogio)
 
     @rotas.get(
         "/tempo-de-tela",
@@ -639,9 +643,8 @@ def criar_rotas_do_tempo_de_tela(
     )
     def tempo_de_tela(
         _pessoa: PodeVerORelatorio,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
         programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
         cursor: str | None = None,
@@ -652,6 +655,7 @@ def criar_rotas_do_tempo_de_tela(
         os vídeos de uma pessoa ficam em `/tempo-de-tela/videos`. O CSV vem sempre
         inteiro."""
         programa = programa or None
+        desde, ate = periodo
         fonte = confere_o_pedido(consulta, desde, ate)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
@@ -674,16 +678,16 @@ def criar_rotas_do_tempo_de_tela(
     @rotas.get("/tempo-de-tela/videos", response_model=list[VideoDaPessoa])
     def videos_da_pessoa(
         _pessoa: PodeVerORelatorio,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
         pessoa_id: Annotated[str, Query(min_length=1, max_length=200)],
         programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
         cursor: str | None = None,
     ) -> JSONResponse:
         """Os vídeos de uma pessoa no mesmo filtro do relatório, do maior tempo para o
         menor, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
         programa = programa or None
+        desde, ate = periodo
         fonte = confere_o_pedido(consulta, desde, ate)
         depois = posicao_do_cursor(cursor)
         lidos = ou_503(

@@ -11,12 +11,12 @@ intervalos das inserções; o Python só monta a resposta.
 
 import json
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, Protocol, get_args
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -25,6 +25,7 @@ from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _pa
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.jobs import RepositorioDeJobs
+from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
@@ -591,9 +592,12 @@ def em_csv(marcas: list[MarcaNoRelatorio]) -> str:
 
 
 def criar_rotas_das_marcas(
-    consulta: ConsultaDeInsercoes | None, repositorio: RepositorioDeJobs
+    consulta: ConsultaDeInsercoes | None,
+    repositorio: RepositorioDeJobs,
+    relogio: Callable[[], datetime] = agora_em_sao_paulo,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
+    no_periodo = dependencia_do_periodo(relogio)
 
     def _confere(
         programa: str | None, desde: date | None, ate: date | None, tipo: str | None
@@ -605,9 +609,8 @@ def criar_rotas_das_marcas(
     @rotas.get("/marcas", response_model=RelatorioDeMarcas | RankingDeMarcas)
     def marcas(
         _pessoa: PodeVerORelatorio,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
         programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
         tipo: Annotated[str | None, Query(max_length=40)] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
@@ -620,6 +623,7 @@ def criar_rotas_das_marcas(
         `/marcas/insercoes`. O CSV vem sempre inteiro."""
         programa = programa or None
         tipo = tipo or None
+        desde, ate = periodo
         fonte = _confere(programa, desde, ate, tipo)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
@@ -647,10 +651,9 @@ def criar_rotas_das_marcas(
     @rotas.get("/marcas/insercoes", response_model=list[InsercaoNoRelatorio])
     def lista_da_marca(
         _pessoa: PodeVerORelatorio,
+        periodo: Annotated[Periodo, Depends(no_periodo)],
         marca: Annotated[str, Query(min_length=1, max_length=200)],
         programa: Annotated[str | None, Query(max_length=100)] = None,
-        desde: date | None = None,
-        ate: date | None = None,
         tipo: Annotated[str | None, Query(max_length=40)] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
         cursor: str | None = None,
@@ -659,6 +662,7 @@ def criar_rotas_das_marcas(
         tempo, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
         programa = programa or None
         tipo = tipo or None
+        desde, ate = periodo
         fonte = _confere(programa, desde, ate, tipo)
         depois = posicao_do_cursor(cursor)
         lidas = ou_503(

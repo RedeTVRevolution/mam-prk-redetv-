@@ -5,6 +5,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from "../../auth/falso.ts";
 import { duracaoLegivel, filtrosDoRelatorio } from "../../tempoDeTela.ts";
+import { periodoPadrao } from "../../periodoPadrao.ts";
 import App from "../App.tsx";
 
 // Os casos de src/TempoDeTela.test.tsx (interface antiga) na interface nova, mais a paginação por
@@ -259,6 +260,8 @@ test("Baixar CSV pede o formato csv com os mesmos filtros e entrega o arquivo", 
   await waitFor(() => expect(clique).toHaveBeenCalled());
   const csv = pedidos.find((p) => p.get("formato") === "csv");
   expect(csv?.get("programa")).toBe("TV Fama");
+  // Sem período no endereço, o CSV leva o padrão, como a tela.
+  expect([csv?.get("desde"), csv?.get("ate")]).toEqual([periodoPadrao().de, periodoPadrao().ate]);
   // O CSV vem inteiro: não leva limite nem cursor.
   expect(csv?.get("limite")).toBeNull();
   expect(csv?.get("cursor")).toBeNull();
@@ -338,4 +341,29 @@ test("o gráfico alterna com a tabela dos mesmos números", async () => {
     ["Leo Dias", "45s"],
   ]);
   expect(within(secao).queryByRole("img")).toBeNull();
+});
+
+test("ao abrir sem filtro, o período é os últimos 7 dias, na tela e no pedido; o histórico inteiro continua à escolha", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-07T15:00:00Z"));
+  try {
+    await abrir("/relatorios/tempo-de-tela");
+
+    expect(((await screen.findByLabelText("Exibido de")) as HTMLInputElement).value).toBe("2026-11-01");
+    expect((screen.getByLabelText("Exibido até") as HTMLInputElement).value).toBe("2026-11-07");
+    await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
+    expect(pedidos[0].get("desde")).toBe("2026-11-01");
+    expect(pedidos[0].get("ate")).toBe("2026-11-07");
+
+    cleanup();
+    pedidos.length = 0;
+    await abrir("/relatorios/tempo-de-tela?de=&ate=");
+
+    expect(((await screen.findByLabelText("Exibido de")) as HTMLInputElement).value).toBe("");
+    await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
+    expect(pedidos[0].get("desde")).toBe("");
+    expect(pedidos[0].get("ate")).toBe("");
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -1,5 +1,7 @@
 // O relatório de tempo de tela: o que a API devolve e os filtros, que viajam na URL e na chamada.
 
+import { periodoDoEndereco, poePeriodoNaConsulta, poePeriodoNoEndereco } from './periodoPadrao.ts'
+
 export interface VideoDaPessoa {
   job_id: string
   nome: string | null
@@ -67,27 +69,19 @@ export interface FiltrosDoRelatorio {
 }
 
 
-const DATA = /^\d{4}-\d{2}-\d{2}$/
-
 /** Os filtros da query do endereço; data malformada de um link editado à mão sai. */
 export function filtrosDoRelatorio(busca: string): FiltrosDoRelatorio {
   const p = new URLSearchParams(busca)
-  const data = (nome: string) => {
-    const valor = p.get(nome) ?? ''
-    return DATA.test(valor) ? valor : ''
-  }
-  return { programa: p.get('programa') ?? '', de: data('de'), ate: data('ate') }
+  return { programa: p.get('programa') ?? '', ...periodoDoEndereco(p) }
 }
 
-/** A query do endereço da tela (vazia sem filtros); `extras` são os filtros próprios de cada relatório. */
+/** A query do endereço da tela (o período vai sempre, vazio inclusive, para não cair no padrão); `extras` são os filtros próprios de cada relatório. */
 export function filtrosParaEndereco(f: FiltrosDoRelatorio, extras: Record<string, string> = {}): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)
-  if (f.de) p.set('de', f.de)
-  if (f.ate) p.set('ate', f.ate)
+  poePeriodoNoEndereco(p, f)
   for (const [nome, valor] of Object.entries(extras)) if (valor) p.set(nome, valor)
-  const query = p.toString()
-  return query ? `?${query}` : ''
+  return `?${p}`
 }
 
 /** A query de `GET /v1/relatorios/...` para estes filtros (`extras`: os próprios de cada relatório). */
@@ -98,8 +92,7 @@ export function parametrosDoRelatorio(
 ): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)
-  if (f.de) p.set('desde', f.de)
-  if (f.ate) p.set('ate', f.ate)
+  poePeriodoNaConsulta(p, f)
   for (const [nome, valor] of Object.entries(extras)) if (valor) p.set(nome, valor)
   if (formato) p.set('formato', formato)
   return p.toString()

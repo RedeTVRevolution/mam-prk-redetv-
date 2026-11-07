@@ -954,3 +954,28 @@ test("a falha do CSV numa aba não aparece na outra, nem quando o pedido termina
   await screen.findByRole("region", { name: "Custo por mês" });
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+test("ao abrir sem filtro, o período é os últimos 7 dias, na tela e no pedido; o histórico inteiro continua à escolha", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-07T15:00:00Z"));
+  try {
+    await abrir("/painel/acessos");
+
+    expect(((await screen.findByLabelText("De")) as HTMLInputElement).value).toBe("2026-11-01");
+    expect((screen.getByLabelText("Até") as HTMLInputElement).value).toBe("2026-11-07");
+    await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
+    expect(pedidos[0].get("desde")).toBe("2026-11-01");
+    expect(pedidos[0].get("ate")).toBe("2026-11-07");
+
+    cleanup();
+    pedidos.length = 0;
+    await abrir("/painel/acessos?de=&ate=");
+
+    expect(((await screen.findByLabelText("De")) as HTMLInputElement).value).toBe("");
+    await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
+    expect(pedidos[0].get("desde")).toBe("");
+    expect(pedidos[0].get("ate")).toBe("");
+  } finally {
+    vi.useRealTimers();
+  }
+});

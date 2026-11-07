@@ -40,6 +40,7 @@ from api.jobs import (
     ServicoIndisponivel,
     _confere_permissao,
 )
+from api.periodo_padrao import Periodo, dependencia_do_periodo
 from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel, RevisaoNoVideo
 from api.relatorios import (
     confere_o_pedido,
@@ -93,17 +94,6 @@ class FiltroDoPainel(BaseModel):
     def aplicado(self) -> dict[str, str]:
         """Só o que foi pedido, em texto: é o que vai para a auditoria."""
         return self.model_dump(mode="json", exclude_none=True)
-
-
-def filtro_do_painel(
-    desde: date | None = None,
-    ate: date | None = None,
-    programa: Annotated[str | None, Query(max_length=100)] = None,
-    usuario: Annotated[str | None, Query(max_length=128)] = None,
-) -> FiltroDoPainel:
-    return FiltroDoPainel(
-        desde=desde, ate=ate, programa=programa or None, usuario=usuario or None
-    )
 
 
 class AcessosAoPainel:
@@ -1127,6 +1117,20 @@ def criar_rotas_do_painel(
     mesma resposta serve ao JSON e ao CSV, e a auditoria de acesso segue gravando cada
     abertura, porque ela fica fora da leitura."""
     rotas = APIRouter(prefix="/painel")
+    no_periodo = dependencia_do_periodo(relogio)
+
+    def filtro_do_painel(
+        periodo: Annotated[Periodo, Depends(no_periodo)],
+        programa: Annotated[str | None, Query(max_length=100)] = None,
+        usuario: Annotated[str | None, Query(max_length=128)] = None,
+    ) -> FiltroDoPainel:
+        return FiltroDoPainel(
+            desde=periodo.desde,
+            ate=periodo.ate,
+            programa=programa or None,
+            usuario=usuario or None,
+        )
+
     emails_das_contas = EmailsDasContas(contas)
 
     def lido[T](chave: tuple[object, ...], ler: Callable[[], T]) -> T:
