@@ -542,7 +542,7 @@ def criar_app(
     v1.include_router(criar_rotas_dos_tipos_de_objeto(tipos_dos_objetos))
     v1.include_router(criar_rotas_da_contagem(repositorio_de_sugestoes, _exige_aprovar))
 
-    def _reindexar_para_a_renomeacao(job: Job) -> bool:
+    def _reindexar_o_job(job: Job) -> bool:
         indexacao = reindexar(
             job,
             repositorio_de_jobs,
@@ -557,9 +557,9 @@ def criar_app(
         return indexacao is not None and indexacao.estado == "indexado"
 
     def _reindexar_para_o_programa(job: Job) -> bool:
-        """Como na pessoa, e a cópia do BigQuery também precisa ficar: os relatórios
-        são por programa."""
-        if not _reindexar_para_a_renomeacao(job):
+        """Reindexa, e a cópia do BigQuery também precisa ficar: os relatórios são por
+        programa."""
+        if not _reindexar_o_job(job):
             return False
         if copia is None:
             return True

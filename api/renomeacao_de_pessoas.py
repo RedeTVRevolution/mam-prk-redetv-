@@ -25,10 +25,6 @@ from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import RepositorioDeJobs, _confere_permissao
 from api.lixeira_do_catalogo import LeituraDeDecupagens, decupagens_dos_jobs
 
-# Rodadas sobre os vídeos que falharam antes de desistir; a renomeação de programa ainda
-# reindexa, e a de pessoa não (#417).
-RODADAS = 3
-
 
 class PedidoDeRenomeacao(BaseModel):
     nome: Annotated[

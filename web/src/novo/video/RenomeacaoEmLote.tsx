@@ -13,14 +13,15 @@ function efeito(i: ImpactoDaRenomeacao): string {
 }
 
 function frase(a: AndamentoDaRenomeacao): string {
-  if (a.estado === 'concluida') return `Pronto: ${a.nome_novo} em ${plural(a.total, 'vídeo', 'vídeos')}, busca atualizada.`
+  if (a.estado === 'concluida') return `Pronto: ${a.nome_novo} em ${plural(a.total, 'vídeo', 'vídeos')}.`
   if (a.estado === 'falhou') return `A busca ainda tem o nome antigo em ${plural(a.total - a.feitos, 'vídeo', 'vídeos')}. O nome novo já vale nas decupagens.`
   return `Atualizando a busca: ${a.feitos} de ${a.total} vídeos.`
 }
 
 /**
  * "Renomear em todos os vídeos" (Curador): o nome novo, a prévia do efeito, a confirmação com Enter e o
- * andamento da reindexação, com "Tentar de novo" se ela não terminou.
+ * andamento. Desde o #417 a renomeação já nasce concluída; o andamento e o "Tentar de novo" só aparecem
+ * numa renomeação antiga que ficou presa.
  */
 export function RenomeacaoEmLote({
   pessoaId,

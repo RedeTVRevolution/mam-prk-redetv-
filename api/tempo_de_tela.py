@@ -574,7 +574,8 @@ def relatorio(somas: list[PessoaNoVideo]) -> list[PessoaNoRelatorio]:
     """Uma linha por pessoa, do maior tempo de tela para o menor.
 
     A pessoa é o id do catálogo; o nome é o que mais aparece nas linhas dela (um vídeo
-    copiado antes de uma correção de grafia não parte a pessoa em duas).
+    copiado antes de uma correção de grafia não parte a pessoa em duas). A rota troca
+    esse nome pelo do catálogo (`com_nomes_do_catalogo`, #417).
     """
     por_pessoa: dict[str, list[PessoaNoVideo]] = defaultdict(list)
     for s in somas:
