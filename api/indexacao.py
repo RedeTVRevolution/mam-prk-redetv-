@@ -58,7 +58,7 @@ class LeitorDeDecupagem(Protocol):
 def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, Any]:
     """`dados` sem o que o esquema da Decupagem não tem.
 
-    A decupagem entregue traz marcas de leitura (`origem`, o `id` posicional) que o
+    A decupagem entregue traz marcas de leitura (`origem`) que o
     esquema do modelo, estrito, recusa e que o índice não usa.
     """
     podado: dict[str, Any] = {}

@@ -160,8 +160,8 @@ def test_cada_ocorrencia_do_objeto_e_um_registro_com_os_seus_tempos() -> None:
     ]
     # A primeira ocorrência leva o quadro do objeto; as outras, o do plano em que começam.
     assert [(r.id, r.inicio_ms, r.fim_ms, r.quadro) for r in objetos] == [
-        ("j:objeto:0:0", 0, 1_000, "obj01.jpg"),
-        ("j:objeto:0:1", 5_000, 6_000, "pla2.jpg"),
+        ("j:objeto:obj01:0", 0, 1_000, "obj01.jpg"),
+        ("j:objeto:obj01:1", 5_000, 6_000, "pla2.jpg"),
     ]
 
 
