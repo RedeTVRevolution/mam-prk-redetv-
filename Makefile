@@ -219,7 +219,8 @@ preencher-catalogo-dos-jobs:
 
 # Recalcula `pessoas_do_catalogo` de cada Job concluído (#478): make recalcular-pessoas-dos-jobs.
 # Roda no dev depois do deploy: Job sem o campo não entra no impacto da fusão e da renomeação.
-# Em páginas; repetir não muda nada. É a mesma passada do preencher-catalogo-dos-jobs.
+# Em páginas; repetir não muda nada. É a mesma passada do preencher-catalogo-dos-jobs. Se um Job
+# for apagado no meio (lixeira esvaziada), o cursor fica inválido e a passada aborta: rodar de novo.
 recalcular-pessoas-dos-jobs:
 	$(MAKE) preencher-catalogo-dos-jobs
 
