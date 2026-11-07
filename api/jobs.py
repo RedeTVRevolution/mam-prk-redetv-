@@ -251,7 +251,8 @@ class Job(BaseModel):
     # campo, só `make gravar-mes-nos-jobs` o grava.
     mes_exibicao: str | None = None
     # A `versao_pipeline` da Decupagem, gravada ao concluir a análise: o reprocessar por versão
-    # lê daqui, sem abrir as decupagens (#494). `None` até concluir e em Job anterior ao
+    # lê daqui, sem abrir as decupagens (#494). `anterior` se a decupagem não tem o campo.
+    # `None` até concluir, depois de uma correção à mão para concluído e em Job anterior ao
     # campo, até `make gravar-versao-nos-jobs`.
     versao_pipeline: str | None = None
     # `None` até o Job concluir (e em Job anterior ao campo).

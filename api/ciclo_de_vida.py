@@ -423,6 +423,9 @@ def corrigir_estado(
                 "Sem decupagem completa guardada, o Job não pode voltar a concluído"
             )
         mudancas["codigo_falha"] = None
+        # A versão do Job pode ser de antes de um reprocessar que não concluiu: sem ela, o
+        # `make reprocessar-versao` lê a da decupagem (#494).
+        mudancas["versao_pipeline"] = None
         return mudancas
 
     depois = repositorio.trocar(job_id, mudar)
@@ -439,7 +442,7 @@ def desfazer_correcao(
     def mudar(job: Job) -> dict[str, Any] | None:
         if (job.estado, job.atualizado_em) != (depois.estado, depois.atualizado_em):
             return None
-        voltam = ("estado", "codigo_falha", "etapas")
+        voltam = ("estado", "codigo_falha", "etapas", "versao_pipeline")
         return {
             **{campo: getattr(antes, campo) for campo in voltam},
             "atualizado_em": agora,

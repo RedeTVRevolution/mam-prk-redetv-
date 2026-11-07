@@ -184,9 +184,8 @@ def test_job_com_a_versao_gravada_nao_abre_a_decupagem() -> None:
 
     assert [c.job_id for c in escolhidos] == ["antigo", "outra", "sem-campo"]
     assert [c.versao for c in escolhidos] == ["2026.10.1", "2026.10.2", "anterior"]
-    assert mundo.decupagens.abertas == [
-        "sem-campo"
-    ]  # o Job sem versão é o desconhecido
+    # Só o Job sem versão (antes da carga) abre a decupagem.
+    assert mundo.decupagens.abertas == ["sem-campo"]
 
 
 def test_job_sem_o_campo_nao_some_e_a_versao_vem_da_decupagem() -> None:
@@ -212,7 +211,9 @@ def test_a_lista_dos_jobs_vem_em_paginas_e_sem_lixeira() -> None:
     for j in outras:
         mundo.jobs.salvar(j.model_copy(update={"versao_pipeline": "2026.10.1"}))
 
-    escolhidos = escolher(mundo.jobs, mundo.decupagens, "2026.10.1", None, pagina=2)
+    escolhidos = escolher(
+        mundo.jobs, mundo.decupagens, "2026.10.1", None, tamanho_da_pagina=2
+    )
 
     assert [c.job_id for c in escolhidos] == ["antigo"] + [f"x{i}" for i in range(5)]
 

@@ -104,11 +104,13 @@ def test_grava_a_versao_da_decupagem_so_nos_concluidos_que_nao_a_tem() -> None:
 
     contagem = gravar(_Colecao(_docs()), cliente, decupagens)
 
+    # A decupagem sem a versão grava `anterior`; a ilegível não grava nada.
     assert cliente.gravados == {
         "antigo": {"versao_pipeline": "2026.10.1"},
         "outro": {"versao_pipeline": "2026.10.2"},
+        "sem-campo": {"versao_pipeline": "anterior"},
     }
-    assert contagem == {"gravados": 2, "iguais": 1, "sem_versao": 1, "nao_lidos": 1}
+    assert contagem == {"gravados": 3, "iguais": 1, "sem_versao": 1, "nao_lidos": 1}
     # O Job que já tem a versão e o que ainda anda não abrem a decupagem.
     assert sorted(decupagens.abertas) == ["antigo", "ilegivel", "outro", "sem-campo"]
 
@@ -123,8 +125,8 @@ def test_repetir_nao_grava_nem_baixa_de_novo() -> None:
 
     segunda = gravar(_Colecao(docs), _Cliente(), decupagens)
 
-    assert segunda["gravados"] == 0 and segunda["iguais"] == 3
-    assert sorted(decupagens.abertas) == ["ilegivel", "sem-campo"]
+    assert segunda["gravados"] == 0 and segunda["iguais"] == 4
+    assert decupagens.abertas == ["ilegivel"]
 
 
 def test_grava_em_lotes(monkeypatch: pytest.MonkeyPatch) -> None:

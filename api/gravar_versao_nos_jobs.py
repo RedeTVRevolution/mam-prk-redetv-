@@ -2,9 +2,10 @@
 
 Grava `versao_pipeline` no Job concluído que ainda não a tem, lendo-a da decupagem (os da
 lixeira também). Passada única de linha de comando, em lotes: baixa cada decupagem uma
-vez, só dos Jobs sem o campo, então repetir não muda nada. Job cuja decupagem não tem a
-versão (anterior ao campo) ou não foi lida fica como está, e `make reprocessar-versao` o
-trata como de versão desconhecida.
+vez, só dos Jobs sem o campo, então repetir não muda nada. A decupagem sem a versão
+(anterior ao campo) grava `anterior` no Job, que é como `make reprocessar-versao` já a
+chama, para ele não abrir de novo essa decupagem a cada rodada. Job cuja decupagem não foi
+lida fica como está, e `make reprocessar-versao` ainda a abre.
 
 Ambiente: `GCP_PROJECT_ID`, `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`.
 """
@@ -25,8 +26,8 @@ LOTE = 400  # o limite do Firestore é 500 gravações por lote
 
 
 def gravar(colecao: Any, cliente: Any, decupagens: LeitorDeDecupagem) -> dict[str, int]:
-    """Devolve quantos Jobs `gravados`, `iguais` (já tinham a versão), `sem_versao` (a
-    decupagem não a tem) e `nao_lidos` (a decupagem não foi lida)."""
+    """Devolve quantos Jobs `gravados`, `iguais` (já tinham a versão), `sem_versao` (dos
+    gravados, os que levaram `anterior`) e `nao_lidos` (a decupagem não foi lida)."""
     contagem = {"gravados": 0, "iguais": 0, "sem_versao": 0, "nao_lidos": 0}
     a_gravar: list[tuple[Any, str]] = []
     for doc in colecao.stream():
@@ -39,10 +40,10 @@ def gravar(colecao: Any, cliente: Any, decupagens: LeitorDeDecupagem) -> dict[st
         versao = versao_da_decupagem(decupagens, job.id)
         if versao is None:
             contagem["nao_lidos"] += 1
-        elif versao == ANTERIOR:
+            continue
+        if versao == ANTERIOR:
             contagem["sem_versao"] += 1
-        else:
-            a_gravar.append((doc.reference, versao))
+        a_gravar.append((doc.reference, versao))
     for lote in batched(a_gravar, LOTE):
         escrita = cliente.batch()
         for referencia, versao in lote:

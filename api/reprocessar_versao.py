@@ -1,6 +1,6 @@
 """Reprocessar o acervo de propósito (#250): `make reprocessar-versao`.
 
-Lista os Jobs concluídos cuja `versao_pipeline` (gravada no Job, #494) é de uma `versao_pipeline` diferente da atual
+Lista os Jobs concluídos de uma `versao_pipeline` (gravada no Job, #494) diferente da atual
 (`api/versao_pipeline.py`) e, com `CONFIRMAR=1`, reprocessa cada um pela análise, pelo
 mesmo caminho da rota do reprocessar (#147, #235): Job, auditoria e Workflows. Sem
 `CONFIRMAR=1`, só mostra a lista e o custo estimado.
@@ -81,12 +81,18 @@ def versao_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> str | Non
     return str(dados.get("versao_pipeline") or ANTERIOR)
 
 
-def _concluidos(repositorio: RepositorioDeJobs, pagina: int) -> Iterator[Job]:
-    """Os Jobs concluídos fora da lixeira, em páginas de `pagina`, sem baixar decupagem."""
+def _concluidos(
+    repositorio: RepositorioDeJobs, tamanho_da_pagina: int
+) -> Iterator[Job]:
+    """Os Jobs concluídos fora da lixeira, página a página, sem baixar decupagem."""
     cursor: str | None = None
     while True:
         lida = repositorio.consultar(
-            FiltroDeJobs(estados=frozenset({"concluido"}), limite=pagina, cursor=cursor)
+            FiltroDeJobs(
+                estados=frozenset({"concluido"}),
+                limite=tamanho_da_pagina,
+                cursor=cursor,
+            )
         )
         yield from lida.jobs
         cursor = lida.proximo_cursor
@@ -99,7 +105,7 @@ def escolher(
     decupagens: LeitorDeDecupagem,
     de: str | None,
     limite: int | None,
-    pagina: int = TAMANHO_DA_PAGINA,
+    tamanho_da_pagina: int = TAMANHO_DA_PAGINA,
 ) -> list[Candidato]:
     """Os Jobs concluídos de versão anterior, do mais antigo ao mais novo, até `limite`.
 
@@ -107,7 +113,7 @@ def escolher(
     abre a decupagem, e continua na lista como versão desconhecida se ela não for lida.
     """
     concluidos = sorted(
-        _concluidos(repositorio, pagina), key=lambda j: (j.criado_em, j.id)
+        _concluidos(repositorio, tamanho_da_pagina), key=lambda j: (j.criado_em, j.id)
     )
     escolhidos: list[Candidato] = []
     for job in concluidos:
