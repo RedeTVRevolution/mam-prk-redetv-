@@ -197,7 +197,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         return 2
     logging.basicConfig(level=logging.INFO)
     cliente = firestore.Client(project=projeto)
-    auditoria_no_banco = cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA)
+    banco_de_seguranca = cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
     repositorio = RepositorioFirestore(cliente)
     purga = Purga(
@@ -205,7 +205,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         RepositorioDeCorrecoesFirestore(cliente),
         ArquivosNoStorage(ClienteStorage(project=projeto), aceitos, decupagens),
         AgentRetrieval(busca, transporte_http(), tentar_no_429=True) if busca else None,
-        RepositorioDeAuditoriaFirestore(auditoria_no_banco),
+        RepositorioDeAuditoriaFirestore(banco_de_seguranca),
         agora_utc,
     )
     purgados = purgar_vencidas(repositorio, purga, agora_utc())
@@ -213,7 +213,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     no_catalogo = purgar_catalogo_vencido(
         CatalogoFirestore(cliente),
         CatalogoDeMarcasFirestore(cliente),
-        RepositorioDeAuditoriaFirestore(auditoria_no_banco),
+        RepositorioDeAuditoriaFirestore(banco_de_seguranca),
         agora_utc(),
     )
     log.info("purga automática: %d item(ns) do catálogo purgado(s)", no_catalogo)

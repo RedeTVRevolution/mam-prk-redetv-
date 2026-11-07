@@ -199,7 +199,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
         RepositorioFirestore(banco),
         DecupagensStorage(cliente, aceitos, decupagens),
         RepositorioDeAuditoriaFirestore(
-            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA)
+            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
         ),
         DisparoPeloWorkflows(projeto, regiao, workflow),
         JanelasStorage(cliente, aceitos),

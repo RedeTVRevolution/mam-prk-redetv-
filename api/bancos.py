@@ -2,7 +2,7 @@
 
 Papéis, chaves de API e auditoria ficam num banco só de segurança, fora do alcance dos
 Jobs que abrem conteúdo hostil. O nome do banco vem de `FIRESTORE_BANCO_DE_SEGURANCA`
-(o Terraform o entrega aos serviços); sem a variável, tudo fica no `(default)`.
+(o Terraform da #464 a entrega aos serviços); sem a variável, tudo fica no `(default)`.
 """
 
 import os

@@ -219,7 +219,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
         argumentos,
         RepositorioFirestore(banco),
         RepositorioDeAuditoriaFirestore(
-            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA)
+            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
         ),
         DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
     )
