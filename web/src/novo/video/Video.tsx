@@ -974,7 +974,7 @@ export function Video({
 
   return (
     <NomesDoCatalogo.Provider value={api.nomes}>
-      <div className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto bg-canvas lg:flex-row lg:overflow-hidden">
+      <div className={cn('flex min-h-0 flex-1 flex-col gap-px overflow-y-auto bg-canvas lg:overflow-hidden', comparandoCom ? 'xl:flex-row' : 'lg:flex-row')}>
         <section aria-label="Vídeo" className="flex min-w-0 shrink-0 flex-col bg-background lg:min-h-0 lg:flex-1 lg:shrink lg:overflow-y-auto">
           <BarraDoVideo
             job={job}
@@ -1059,6 +1059,7 @@ export function Video({
               aoSaltar={(passo) => saltarPara((player.current?.currentTime ?? 0) + passo)}
               aoMudarVelocidade={mudarVelocidade}
               aoTelaCheia={telaCheia}
+              comparando={comparandoCom !== null}
               ferramentas={
                 revisao.revisando ? (
                   <FerramentasDoTrecho
@@ -1500,6 +1501,7 @@ function Transporte({
   aoSaltar,
   aoMudarVelocidade,
   aoTelaCheia,
+  comparando,
   ferramentas,
 }: {
   job: Job
@@ -1513,6 +1515,8 @@ function Transporte({
   aoSaltar: (segundos: number) => void
   aoMudarVelocidade: (v: number) => void
   aoTelaCheia: () => void
+  /** A comparação está aberta: de 1024 a 1279 px ela fica embaixo e o vídeo ocupa a largura toda. */
+  comparando?: boolean
   /** O que só a revisão tem na barra: as ferramentas do trecho. */
   ferramentas?: ReactNode
 }) {
@@ -1625,8 +1629,9 @@ function Transporte({
             aoMudarVolume(v)
             setVolume(v)
           }}
-          // Com as ferramentas do trecho na barra, o controle de volume só cabe em tela larga (o mudo fica).
-          className={cn('hidden w-20 accent-primary', ferramentas ? '2xl:block' : 'lg:block')}
+          // Com as ferramentas do trecho na barra, o controle de volume só cabe em tela larga (o mudo fica);
+          // com a comparação embaixo (lg a xl) a barra tem a largura toda e o controle volta.
+          className={cn('hidden w-20 accent-primary', !ferramentas ? 'lg:block' : comparando ? 'lg:block xl:hidden 2xl:block' : '2xl:block')}
         />
         <BotaoDeIcone rotulo="Tela cheia" atalho="F" onClick={aoTelaCheia}>
           <IconMaximize size={18} stroke={1.75} aria-hidden />

@@ -100,6 +100,8 @@ function Requisitos({ c, lado, rotulo, aoSaltar }: { c: ComparacaoDaPassada; lad
 /**
  * As duas decupagens do mesmo vídeo lado a lado: a do Job (à esquerda) e a da passada. Só leitura:
  * clicar num item leva o player ao início dele, e nada aqui corrige a passada. Toma o lugar do inspetor.
+ * Em 1280 px ou mais fica ao lado do vídeo (62%); de 1024 a 1279 px fica embaixo, em largura total, para
+ * o cabeçalho e o transporte do vídeo não perderem largura.
  */
 export function ComparacaoDePassada({ api, id, passadaId, aoSaltar, aoFechar }: { api: ClienteDoJob; id: string; passadaId: string; aoSaltar: (ms: number) => void; aoFechar: () => void }) {
   const consulta = useQuery({
@@ -110,7 +112,7 @@ export function ComparacaoDePassada({ api, id, passadaId, aoSaltar, aoFechar }: 
   })
   const c = consulta.data
   return (
-    <aside aria-label="Comparação com a passada" className="flex h-[80dvh] w-full shrink-0 flex-col overflow-y-auto bg-background lg:h-auto lg:min-h-0 lg:w-[62%]">
+    <aside aria-label="Comparação com a passada" className="flex h-[80dvh] w-full shrink-0 flex-col overflow-y-auto bg-background lg:h-[45%] lg:min-h-0 xl:h-auto xl:w-[62%]">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-card px-3">
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium">Comparação com a passada</h2>
         <BotaoDeIcone rotulo="Fechar a comparação" onClick={aoFechar}>
