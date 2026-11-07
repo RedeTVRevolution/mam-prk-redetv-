@@ -96,9 +96,11 @@ OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu job_de_objetos_gpu)
 # restaurar: `volta` no digest que os Jobs com GPU têm agora, posta antes do build para o build
 # novo nunca encontrar a anterior sem proteção, e `em-uso` (mais abaixo) no que o apply publica.
 # A tag se move: a imagem que perde as duas volta às regras comuns (infra/modulos/mam/main.tf).
-TAG_EM_USO=$(tf output -json limpeza_de_imagens | jq -r .tag_do_build_em_uso)
-TAG_DA_VOLTA=$(tf output -json limpeza_de_imagens | jq -r .tag_da_volta)
+LIMPEZA=$(tf output -json limpeza_de_imagens)
+TAG_EM_USO=$(jq -r .tag_do_build_em_uso <<<"$LIMPEZA")
+TAG_DA_VOLTA=$(jq -r .tag_da_volta <<<"$LIMPEZA")
 marcar() { # <repo/imagem@digest> <tag>: põe a tag no digest, movendo-a se já está em outro
+  [[ $1 == *@sha256:* ]] || { echo "Imagem sem digest, não dá para pôr a tag $2: $1" >&2; return 1; }
   gc artifacts docker tags add "$1" "${1%@*}:$2"
 }
 for imagem in "$TRANSCRICAO_GPU_ANTES" "$OCR_GPU_ANTES" "$OBJETOS_GPU_ANTES"; do

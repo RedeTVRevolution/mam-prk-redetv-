@@ -3,7 +3,8 @@
 `make conferir-limpeza-de-imagens` lista as versões dos repositórios `mam` e `mam-gpu`, as imagens
 que o Cloud Run usa agora e aplica as regras do Terraform (output `limpeza_de_imagens`): mostra o
 que seria apagado e o que fica. Sai com 1 se a limpeza apagaria uma versão em uso ou a da volta
-(a tag `volta`, posta pelo scripts/deploy-dev.sh no build que o testar-jobs-gpu.sh restauraria).
+(a tag `volta`, posta pelo scripts/deploy-dev.sh no build que o testar-jobs-gpu.sh restauraria),
+e com 2 se não consegue conferir (sem o output, ou nenhuma imagem em uso achada no Cloud Run).
 Nada aqui escreve na nuvem: só `gcloud ... list/describe` e `terraform output`.
 """
 
@@ -11,6 +12,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,7 +78,7 @@ def simular(
     versoes: Sequence[Versao],
     regras: Regras,
     agora: datetime,
-    em_uso: set[tuple[str, str]] = frozenset(),  # type: ignore[assignment]
+    em_uso: AbstractSet[tuple[str, str]] = frozenset(),
 ) -> Simulacao:
     """Aplica as regras como o Google: KEEP vence DELETE; o resto apaga com mais de N s.
 
@@ -93,16 +95,17 @@ def simular(
             (repositorio, pacote, v.digest) for v in recentes[: regras.manter_ultimas]
         }
 
+    dias = _dias(regras.idade_minima_s)
     vereditos = []
     for v in versoes:
-        motivo = _guarda(v, regras, ultimas)
+        motivo = _motivo_para_guardar(v, regras, ultimas)
         apagar = motivo is None
         if apagar:
             idade = (agora - v.criada_em).total_seconds()
             if idade <= regras.idade_minima_s:
-                apagar, motivo = False, "tem menos de 14 dias: a regra não alcança"
+                apagar, motivo = False, f"tem menos de {dias}: a regra não alcança"
             else:
-                motivo = "sem regra que a guarde e com mais de 14 dias"
+                motivo = f"sem regra que a guarde e com mais de {dias}"
         vereditos.append(
             Veredito(
                 versao=v,
@@ -115,7 +118,13 @@ def simular(
     return Simulacao(vereditos)
 
 
-def _guarda(
+def _dias(segundos: int) -> str:
+    """A idade mínima no texto do relatório: `14 dias`, ou em horas se não fecha um dia."""
+    dias, resto = divmod(segundos, 86400)
+    return f"{dias} dias" if not resto else f"{segundos / 3600:g} h"
+
+
+def _motivo_para_guardar(
     v: Versao, regras: Regras, ultimas: set[tuple[str, str, str]]
 ) -> str | None:
     """O motivo da regra KEEP que guarda a versão, ou None se nenhuma a guarda."""
@@ -181,7 +190,7 @@ def versoes_do_gcloud(
     for item in itens:
         tags = item.get("tags") or ()
         if isinstance(tags, str):
-            tags = [t for t in tags.split(",") if t]
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
         versoes.append(
             Versao(
                 repositorio=repositorio,
@@ -224,7 +233,14 @@ def main(
     agora: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
     saida = ler(["terraform", f"-chdir={RAIZ / 'infra'}", "output", "-json"])
-    assert isinstance(saida, dict)
+    if not isinstance(saida, dict) or "limpeza_de_imagens" not in saida:
+        # O output nasce no apply do #456. Até 12/11 nenhuma versão tem 14 dias, então na
+        # primeira vez a conferência roda logo depois do deploy, antes de a regra alcançar algo.
+        print(
+            "ERRO: o estado do Terraform não tem o output limpeza_de_imagens: ele só existe "
+            "depois do deploy que liga a limpeza (#456). Rode o deploy-dev e confira em seguida."
+        )
+        return 2
     regras = Regras.do_terraform(saida["limpeza_de_imagens"]["value"])
     repositorios = [saida["repositorio"]["value"], saida["repositorio_gpu"]["value"]]
     versoes: list[Versao] = []
@@ -234,7 +250,10 @@ def main(
             ["gcloud", "artifacts", "docker", "images", "list", repositorio,
              "--include-tags", "--format=json"]
         )  # fmt: skip
-        assert isinstance(itens, list)
+        if not isinstance(itens, list):
+            raise TypeError(
+                f"o gcloud não devolveu uma lista de versões de {repositorio}"
+            )
         versoes += versoes_do_gcloud(repositorio, itens)
         # O host do repositório é `<região>-docker.pkg.dev`: o Cloud Run está nessa região.
         regiao = repositorio.split("-docker.pkg.dev")[0]
@@ -242,9 +261,18 @@ def main(
             lidos = ler(
                 ["gcloud", "run", tipo, "list", "--region", regiao, "--format=json"]
             )
-            assert isinstance(lidos, list)
+            if not isinstance(lidos, list):
+                raise TypeError(f"o gcloud não devolveu uma lista de {tipo}")
             recursos += lidos
     em_uso = em_uso_do_cloud_run(repositorios, recursos)
+    if not em_uso:
+        # Sem nada em uso, nada estaria em risco e a conferência passaria à toa: projeto errado
+        # (outra config do gcloud ativa) ou o Cloud Run fora da região do repositório.
+        print(
+            "ERRO: nenhum serviço nem Job do Cloud Run usa imagem destes repositórios. "
+            "Confira o projeto da config do gcloud (CLOUDSDK_ACTIVE_CONFIG_NAME=mam-dev)."
+        )
+        return 2
     simulacao = simular(versoes, regras, agora(), em_uso)
     print(relatorio(simulacao))
     return 1 if simulacao.em_risco else 0

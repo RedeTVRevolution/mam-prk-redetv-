@@ -287,6 +287,6 @@ atualizar-openapi:
 
 # Simula a limpeza do Artifact Registry sem apagar nada (#456): o que seria apagado, o que fica, e
 # o build em uso e o da volta marcados; sai com 1 se apagaria um deles. Pede o gcloud (só leitura)
-# e o terraform init feito, como no deploy-dev (CLOUDSDK_ACTIVE_CONFIG_NAME=mam-dev).
+# e o terraform init feito; usa a config gcloud do MAM (mam-dev), como o deploy-dev.
 conferir-limpeza-de-imagens:
-	uv run --locked python -m api.limpeza_de_imagens
+	CLOUDSDK_ACTIVE_CONFIG_NAME="$${CLOUDSDK_ACTIVE_CONFIG_NAME:-mam-dev}" uv run --locked python -m api.limpeza_de_imagens

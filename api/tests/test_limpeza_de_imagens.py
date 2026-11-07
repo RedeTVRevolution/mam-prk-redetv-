@@ -17,6 +17,20 @@ REGRAS = Regras(
     tags_protegidas=("em-uso", "volta"),
     tag_da_volta="volta",
 )
+# O `terraform output -json` com o que a conferência lê.
+SAIDA_DO_TERRAFORM = {
+    "limpeza_de_imagens": {
+        "value": {
+            "manter_ultimas": 3,
+            "idade_minima_s": 14 * 86400,
+            "pacotes_do_cache": ["cache"],
+            "tags_protegidas": ["em-uso", "volta"],
+            "tag_da_volta": "volta",
+        }
+    },
+    "repositorio": {"value": "southamerica-east1-docker.pkg.dev/p/mam"},
+    "repositorio_gpu": {"value": REPO},
+}
 
 
 def _versao(
@@ -101,7 +115,7 @@ def test_le_o_json_do_gcloud_e_as_imagens_em_uso_do_cloud_run() -> None:
             "package": f"{REPO}/transcricao-gpu",
             "version": "sha256:a",
             "createTime": "2026-10-29T10:00:00.123Z",
-            "tags": "volta,em-uso",
+            "tags": "volta, em-uso",
         },
         {
             "package": f"{REPO}/cache",
@@ -145,23 +159,10 @@ def test_le_o_json_do_gcloud_e_as_imagens_em_uso_do_cloud_run() -> None:
 def test_main_sai_com_1_se_apagaria_versao_em_uso(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    saida = {
-        "limpeza_de_imagens": {
-            "value": {
-                "manter_ultimas": 3,
-                "idade_minima_s": 14 * 86400,
-                "pacotes_do_cache": ["cache"],
-                "tags_protegidas": ["em-uso", "volta"],
-                "tag_da_volta": "volta",
-            }
-        },
-        "repositorio": {"value": "southamerica-east1-docker.pkg.dev/p/mam"},
-        "repositorio_gpu": {"value": REPO},
-    }
 
     def ler(comando: list[str]) -> object:
         if comando[0] == "terraform":
-            return saida
+            return SAIDA_DO_TERRAFORM
         if comando[:3] == ["gcloud", "artifacts", "docker"]:
             if comando[5] != REPO:
                 return []
@@ -179,3 +180,28 @@ def test_main_sai_com_1_se_apagaria_versao_em_uso(
     texto = capsys.readouterr().out
     assert codigo == 1
     assert "ERRO" in texto and "sha256:0" in texto
+
+
+def test_main_sem_o_output_da_limpeza_sai_com_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert limpeza.main(lambda comando: {}, lambda: AGORA) == 2
+    assert "limpeza_de_imagens" in capsys.readouterr().out
+
+
+def test_main_sem_imagem_em_uso_no_cloud_run_sai_com_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Outra config do gcloud ativa lê o Cloud Run de outro projeto: nada em uso não é aprovação."""
+
+    def ler(comando: list[str]) -> object:
+        return SAIDA_DO_TERRAFORM if comando[0] == "terraform" else []
+
+    assert limpeza.main(ler, lambda: AGORA) == 2
+    assert "nenhum serviço nem Job" in capsys.readouterr().out
+
+
+def test_o_motivo_diz_a_idade_das_regras() -> None:
+    regras = Regras(3, 7 * 86400, ("cache",), ("em-uso", "volta"), "volta")
+    s = simular(_versoes(), regras, AGORA)
+    assert _veredito(s, "sha256:velha").motivo.endswith("mais de 7 dias")

@@ -432,7 +432,9 @@ locals {
   idade_minima_para_apagar     = "1209600s"
   limpeza_so_ensaia            = false
   pacotes_do_cache             = ["cache"]
-  tags_protegidas              = ["em-uso", "volta"]
+  tag_do_build_em_uso          = "em-uso"
+  tag_da_volta                 = "volta"
+  tags_protegidas              = [local.tag_do_build_em_uso, local.tag_da_volta]
 }
 
 resource "google_artifact_registry_repository" "mam" {
@@ -2983,8 +2985,8 @@ output "limpeza_de_imagens" {
     idade_minima_s      = tonumber(trimsuffix(local.idade_minima_para_apagar, "s"))
     pacotes_do_cache    = local.pacotes_do_cache
     tags_protegidas     = local.tags_protegidas
-    tag_do_build_em_uso = local.tags_protegidas[0]
-    tag_da_volta        = local.tags_protegidas[1]
+    tag_do_build_em_uso = local.tag_do_build_em_uso
+    tag_da_volta        = local.tag_da_volta
   }
 }
 
