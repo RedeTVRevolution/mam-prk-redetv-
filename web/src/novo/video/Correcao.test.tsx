@@ -485,6 +485,19 @@ test('o nome: digitar rápido consulta o catálogo uma vez só, depois da pausa'
   expect(consultas).toEqual(['sabrin'])
 })
 
+test('o nome: a tecla seguinte desmarca o item, e o Enter na pausa não escolhe um nome de outro texto', async () => {
+  const { usuario, nome } = await renomearLeao()
+
+  await usuario.type(nome, 'sabrin')
+  await screen.findByRole('option', { name: 'Sabrina Sato (apresentadora)' })
+  await usuario.keyboard('{ArrowDown}')
+  await usuario.type(nome, 'x{Enter}')
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({ valor: 'sabrinx' })
+  expect(correcoes[0]).not.toHaveProperty('catalogo_id')
+})
+
 test('o nome: uma letra não consulta; o texto digitado sem escolher não manda catalogo_id', async () => {
   const { usuario, nome, formulario } = await renomearLeao()
 

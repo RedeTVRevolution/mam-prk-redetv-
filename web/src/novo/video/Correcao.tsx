@@ -320,9 +320,11 @@ export function CampoDeNome({
 
   useEffect(() => () => clearTimeout(espera.current), [])
 
-  // Digitar rápido consulta uma vez só, depois da pausa (#484): cada tecla cancela a espera e a consulta em curso.
+  // Digitar rápido consulta uma vez só, depois da pausa (#484): cada tecla cancela a espera e descarta a resposta da
+  // consulta em curso. A lista de antes fica à vista, mas sem item marcado: o Enter não escolhe um nome de outro texto.
   function pedir(texto: string) {
     clearTimeout(espera.current)
+    setAtivo(-1)
     if (texto.trim().length < MINIMO_DE_LETRAS) {
       void buscar(texto)
       return

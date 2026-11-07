@@ -23,7 +23,7 @@ function PessoaDoCatalogo({ valor, aoDigitar, aoEscolher }: { valor: string; aoD
   const [aberta, setAberta] = useState(true)
   const [ativo, setAtivo] = useState(-1)
   const texto = valor.trim()
-  // A consulta sai depois da pausa na digitação (#484); a lista só abre com o texto atual.
+  // A consulta sai depois da pausa na digitação (#484); até a resposta chegar, a lista é a do texto anterior.
   const textoDaBusca = useValorAtrasado(texto)
   const busca = useQuery({
     queryKey: ['admin', 'nomes', 'pessoas', textoDaBusca],
