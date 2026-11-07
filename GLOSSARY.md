@@ -254,6 +254,9 @@ _Evitar_: perfil, grupo
 **Chave de API**:
 Credencial de um sistema consumidor da RedeTV, nunca de uma pessoa.
 
+**Texto como dado**:
+Regra para todo texto que entra pela API (corpo, consulta, id de caminho e os cabeçalhos que ela lê): tem tamanho máximo e não traz caractere de controle; só o texto livre (motivo, observação) aceita quebra de linha e tabulação. Id que vira documento ou objeto não tem `/`, `\` nem `..`. A API recusa com 422, e os adaptadores do Firestore e do Storage conferem o id de novo.
+
 **Resultado bruto do Florence-2**:
 O `florence.json` que o Job de objetos grava em `<job>/objetos/`, com, por quadro-chave de cada plano, os objetos detectados (rótulo e caixa normalizada de 0 a 1) e as regiões com legenda, mais o modelo e a revisão. É a matéria-prima do inventário de objetos de cena; ainda não é a lista `objetos` da Decupagem.
 

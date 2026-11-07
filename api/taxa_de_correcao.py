@@ -59,6 +59,7 @@ from api.nuvem import (
 )
 from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
+from api.texto_como_dado import LinhaDaConsulta
 
 log = logging.getLogger(__name__)
 
@@ -258,7 +259,7 @@ def criar_rotas_da_qualidade(
         _pessoa: Annotated[Usuario, Depends(_exige_ver_a_taxa)],
         desde: date | None = None,
         ate: date | None = None,
-        programa: str | None = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
     ) -> TaxaDeCorrecao:
         """`desde` e `ate` são dias (UTC), os dois inclusive."""
         try:

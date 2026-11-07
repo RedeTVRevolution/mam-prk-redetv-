@@ -1910,3 +1910,40 @@ def test_a_lista_da_busca_volta_igual_e_id_desconhecido_da_none() -> None:
     lido = listas.ler(id)
     assert lido is not None and ListaDaBusca.do_documento(lido) == lista
     assert listas.ler("nao0existe") is None
+
+
+class _ColecaoQueNaoDeveSerTocada:
+    def document(self, *_a: Any) -> Any:
+        raise AssertionError("o id ruim chegou ao Firestore")
+
+
+@pytest.mark.parametrize("ruim", ["../x", "a/b", "a\\b", "", "a\nb", "x" * 300, ".."])
+def test_adaptadores_recusam_id_que_sai_do_proprio_nivel(ruim: str) -> None:
+    from api.nuvem import (
+        _documento,
+        _lidos_em_lote,
+        objeto_da_copia_limpa,
+        objeto_da_decupagem,
+        objeto_do_quadro,
+    )
+
+    with pytest.raises(ValueError):
+        _documento(_ColecaoQueNaoDeveSerTocada(), ruim)
+    with pytest.raises(ValueError):
+        objeto_da_decupagem(ruim)
+    with pytest.raises(ValueError):
+        objeto_da_copia_limpa(ruim)
+    with pytest.raises(ValueError):
+        objeto_do_quadro(ruim, "quadros/a.jpg")
+    with pytest.raises(ValueError):
+        list(_lidos_em_lote(None, _ColecaoQueNaoDeveSerTocada(), [ruim]))
+
+
+def test_objeto_do_quadro_recusa_caminho_que_sobe() -> None:
+    from api.nuvem import objeto_do_quadro
+
+    with pytest.raises(ValueError):
+        objeto_do_quadro("job-1", "../outro/a.jpg")
+    with pytest.raises(ValueError):
+        objeto_do_quadro("job-1", "quadros/a\x00.jpg")
+    assert objeto_do_quadro("job-1", "quadros/a.jpg") == "job-1/quadros/a.jpg"

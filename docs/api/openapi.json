@@ -137,7 +137,9 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -363,7 +365,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -440,7 +445,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 300,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -456,7 +464,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -504,7 +515,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 0,
+                  "maxLength": 500,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -1476,6 +1490,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 0,
+              "maxLength": 8000,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "description": "Até 200 ids, separados por vírgula",
               "title": "Ids"
             },
@@ -2356,7 +2373,9 @@
             "required": false,
             "schema": {
               "type": "string",
+              "minLength": 0,
               "maxLength": 100,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "default": "",
               "title": "Q"
             }
@@ -2470,7 +2489,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 0,
               "maxLength": 200,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "title": "Q"
             }
           }
@@ -2579,7 +2600,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 0,
               "maxLength": 200,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "title": "Q"
             }
           }
@@ -2689,6 +2712,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 300,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
               "title": "Q"
             }
           },
@@ -2741,7 +2765,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -2802,7 +2828,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -2819,7 +2847,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -2870,7 +2900,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -3095,7 +3127,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -3168,7 +3202,9 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 100
+                  "minLength": 0,
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                 },
                 {
                   "type": "null"
@@ -5624,6 +5660,7 @@
             "type": "string",
             "maxLength": 255,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
             "title": "Nome"
           },
           "tamanho_bytes": {
@@ -5638,7 +5675,10 @@
           "programa": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 0,
+                "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
               },
               {
                 "type": "null"
@@ -5946,11 +5986,13 @@
         "properties": {
           "job": {
             "type": "string",
+            "maxLength": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
             "title": "Job"
           },
           "arquivo": {
             "type": "string",
+            "maxLength": 200,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*\\.jpg$",
             "title": "Arquivo"
           }

@@ -14,6 +14,7 @@ from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 
 from api.auth import ChamadorAutenticado, Usuario
 from api.jobs import CursorInvalido, _confere_permissao
+from api.texto_como_dado import LinhaDaConsulta
 
 # Cada ticket que grava uma ação nova a acrescenta a esta lista.
 Acao = Literal[
@@ -176,13 +177,13 @@ def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
     @rotas.get("")
     def listar(
         _pessoa: Annotated[Usuario, Depends(_exige_ver)],
-        pessoa: str | None = None,
-        alvo: str | None = None,
+        pessoa: Annotated[str | None, LinhaDaConsulta(254)] = None,
+        alvo: Annotated[str | None, LinhaDaConsulta(200)] = None,
         acao: Annotated[list[Acao] | None, Query()] = None,
         de: AwareDatetime | None = None,
         ate: AwareDatetime | None = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_MAXIMO)] = LIMITE_PADRAO,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         if de is not None and ate is not None and de > ate:
             raise HTTPException(422, "Período invertido: `de` depois de `ate`")

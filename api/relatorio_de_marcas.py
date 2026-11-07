@@ -40,6 +40,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
+from api.texto_como_dado import LinhaDaConsulta
 
 TIPOS_DE_INSERCAO: tuple[str, ...] = get_args(Comercial.model_fields["tipo"].annotation)
 COLUNAS_DO_CSV = ("marca", "tipo", "insercoes", "tempo_ms", "videos")
@@ -610,11 +611,11 @@ def criar_rotas_das_marcas(
     def marcas(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
-        tipo: Annotated[str | None, Query(max_length=40)] = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        tipo: Annotated[str | None, LinhaDaConsulta(40)] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> Any:
         """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa (ou com
         `programa=` vazio) e sem tipo (ou vazio), todos. Com `limite`, uma página do
@@ -652,11 +653,11 @@ def criar_rotas_das_marcas(
     def lista_da_marca(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
-        marca: Annotated[str, Query(min_length=1, max_length=200)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
-        tipo: Annotated[str | None, Query(max_length=40)] = None,
+        marca: Annotated[str, LinhaDaConsulta(200, min_length=1)],
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        tipo: Annotated[str | None, LinhaDaConsulta(40)] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         """As inserções de uma marca no mesmo filtro do relatório, na ordem do vídeo e do
         tempo, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""

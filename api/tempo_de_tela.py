@@ -47,6 +47,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
+from api.texto_como_dado import LinhaDaConsulta
 
 TIPOS_DO_RELATORIO = TIPOS_DAS_PESSOAS
 COLUNAS_DO_CSV = (
@@ -665,10 +666,10 @@ def criar_rotas_do_tempo_de_tela(
     def tempo_de_tela(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> Any:
         """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa
         (ou com `programa=` vazio), todos. Com `limite`, uma página do ranking (sem os
@@ -703,10 +704,10 @@ def criar_rotas_do_tempo_de_tela(
     def videos_da_pessoa(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
-        pessoa_id: Annotated[str, Query(min_length=1, max_length=200)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
+        pessoa_id: Annotated[str, LinhaDaConsulta(200, min_length=1)],
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
-        cursor: str | None = None,
+        cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         """Os vídeos de uma pessoa no mesmo filtro do relatório, do maior tempo para o
         menor, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""

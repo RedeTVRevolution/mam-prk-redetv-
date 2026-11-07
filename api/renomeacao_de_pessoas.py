@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, StringConstraints, field_validator
+from pydantic import BaseModel, field_validator
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
@@ -24,15 +24,11 @@ from api.comparador import normalizar
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
 from api.lixeira_do_catalogo import LeituraDeDecupagens, decupagens_dos_jobs
+from api.texto_como_dado import Linha
 
 
 class PedidoDeRenomeacao(BaseModel):
-    nome: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-        ),
-    ]
+    nome: Annotated[str, Linha(LIMITE_DO_NOME, min_length=1, strip=True)]
     previa: bool = False
 
     _sem_controle_no_nome = field_validator("nome")(_sem_controle)

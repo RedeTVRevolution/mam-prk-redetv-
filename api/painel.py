@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
@@ -58,6 +58,7 @@ from api.resumos_de_uso import (
 )
 from api.revisao_do_painel import NumerosAgregados, RevisaoAgregada
 from api.taxa_de_correcao import LinhaDaTaxa
+from api.texto_como_dado import LinhaDaConsulta
 from api.usuarios import ContasDeUsuario
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
@@ -1106,8 +1107,8 @@ def criar_rotas_do_painel(
 
     def filtro_do_painel(
         periodo: Annotated[Periodo, Depends(no_periodo)],
-        programa: Annotated[str | None, Query(max_length=100)] = None,
-        usuario: Annotated[str | None, Query(max_length=128)] = None,
+        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        usuario: Annotated[str | None, LinhaDaConsulta(128)] = None,
     ) -> FiltroDoPainel:
         return FiltroDoPainel(
             desde=periodo.desde,

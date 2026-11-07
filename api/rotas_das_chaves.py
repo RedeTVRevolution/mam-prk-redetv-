@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Escopo, Usuario
@@ -24,6 +24,7 @@ from api.chaves import (
     revogar_chave,
 )
 from api.jobs import ServicoIndisponivel, _confere_permissao
+from api.texto_como_dado import Linha
 
 SISTEMA_MAXIMO = 100
 
@@ -72,12 +73,7 @@ class ChaveDaLista(BaseModel):
 class NovaChave(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sistema: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=SISTEMA_MAXIMO
-        ),
-    ]
+    sistema: Annotated[str, Linha(SISTEMA_MAXIMO, min_length=1, strip=True)]
     escopos: Annotated[list[Escopo], Field(min_length=1)]
 
 

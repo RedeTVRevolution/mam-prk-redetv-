@@ -31,8 +31,10 @@ from api.papeis import (
     papeis_do_usuario,
     papeis_efetivos,
 )
+from api.texto_como_dado import Linha
 
 NOME_MAXIMO = 200
+EMAIL_MAXIMO = 254  # o teto de um endereço (RFC 5321)
 
 
 class ContaDoIdentityPlatform(BaseModel):
@@ -146,12 +148,14 @@ class NovoUsuario(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: Annotated[
-        str, StringConstraints(strip_whitespace=True, pattern=r"^[^@\s]+@[^@\s]+$")
-    ]
-    nome: Annotated[
         str,
-        StringConstraints(strip_whitespace=True, min_length=1, max_length=NOME_MAXIMO),
+        StringConstraints(
+            strip_whitespace=True,
+            max_length=EMAIL_MAXIMO,
+            pattern=r"^[^@\s\x00-\x1f\x7f-\x9f]+@[^@\s\x00-\x1f\x7f-\x9f]+$",
+        ),
     ]
+    nome: Annotated[str, Linha(NOME_MAXIMO, min_length=1, strip=True)]
     papeis: PapeisPedidos
 
 

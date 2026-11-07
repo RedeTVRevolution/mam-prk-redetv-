@@ -56,6 +56,7 @@ from api.nuvem import (
     RepositorioFirestore,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
+from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ class PedidoDePurga(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # O nome do arquivo, digitado: a prova de que a pessoa sabe o que está apagando.
-    nome: str
+    nome: Annotated[str, Linha(255)]
 
 
 class VideoPurgado(BaseModel):

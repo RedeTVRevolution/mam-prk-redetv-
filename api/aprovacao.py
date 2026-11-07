@@ -17,6 +17,7 @@ from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.correcoes import CORRIGIVEIS, RepositorioDeAprovacao, rotulos_dos_tipos
 from api.jobs import _confere_permissao
+from api.texto_como_dado import Linha
 
 
 class RegraDeAprovacao(BaseModel):
@@ -29,7 +30,7 @@ class RegraDeAprovacao(BaseModel):
 class MudancaDaRegra(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tipo: str
+    tipo: Annotated[str, Linha(60, min_length=1)]
     exige_aprovacao: bool
 
 
