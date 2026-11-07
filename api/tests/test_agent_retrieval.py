@@ -1564,3 +1564,84 @@ def test_o_indice_que_ja_existe_com_outros_filtros_e_apontado_sem_apagar_nada() 
     assert set(antigo.chamadas) == {"GET"}
     assert indices_com_filtros_diferentes(CONFIG, Transporte(CAMPOS_DE_FILTRO)) == {}
     assert indices_com_filtros_diferentes(CONFIG, Transporte(None)) == {}
+
+
+def test_o_filtro_do_pedido_leva_sistema_e_lixeira() -> None:
+    filtro = filtro_do_pedido(Filtros(sistema="Playout", na_lixeira=False))
+    assert filtro == {
+        "$and": [
+            {"sistema": {"$eq": "Playout"}},
+            {"na_lixeira": {"$eq": False}},
+        ]
+    }
+
+
+def _sem_os_campos(colecao: _ColecaoEmMemoria) -> None:
+    for dados in colecao.objetos.values():
+        dados.pop("na_lixeira", None)
+        dados.pop("sistema", None)
+
+
+def test_preencher_filtros_da_aos_antigos_so_o_que_falta_e_repetir_nao_escreve() -> (
+    None
+):
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(3))
+    indice.gravar("k", [_reg("k:fala:f0", texto="x", job_id="k")])
+    _sem_os_campos(colecao)
+    antes_de_k = [dict(d) for d in colecao.objetos.values() if d["job_id"] == "k"]
+
+    colecao.operacoes.clear()
+    assert indice.preencher_filtros("j", "Playout", True) == 6
+    assert colecao.operacoes == ["query", "batchUpdate"]
+    do_j = [d for d in colecao.objetos.values() if d["job_id"] == "j"]
+    assert {(d["sistema"], d["na_lixeira"]) for d in do_j} == {("Playout", True)}
+    # O resto dos dados não muda, nem o `significado` (o vetor não se refaz).
+    assert {d["id"]: d for d in do_j} == {
+        r.id: _lido(replace(r, sistema="Playout", na_lixeira=True)) for r in _video(3)
+    }
+    assert [d for d in colecao.objetos.values() if d["job_id"] == "k"] == antes_de_k
+
+    colecao.operacoes.clear()
+    assert indice.preencher_filtros("j", "Playout", True) == 0
+    assert colecao.operacoes == ["query"]
+
+
+def test_preencher_filtros_nao_troca_o_valor_que_a_lixeira_ja_pos() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(2))
+    for dados in colecao.objetos.values():
+        dados.pop("sistema", None)
+    assert indice.preencher_filtros("j", None, True) == 0
+    assert all(d["na_lixeira"] is False for d in colecao.objetos.values())
+    # Job sem sistema: o campo não é escrito, e a carga não o procura de novo.
+    assert all("sistema" not in d for d in colecao.objetos.values())
+
+
+def test_preencher_filtros_e_retomavel_depois_de_uma_queda() -> None:
+    colecao = _ColecaoEmMemoria()
+    indice = _indice(colecao, _Relogio())
+    indice.gravar("j", _video(5))
+    _sem_os_campos(colecao)
+    # Uma carga que parou no meio: metade dos objetos já tem os campos.
+    for i, dados in enumerate(colecao.objetos.values()):
+        if i % 2:
+            dados["na_lixeira"] = False
+            dados["sistema"] = "Playout"
+    faltam = sum("na_lixeira" not in d for d in colecao.objetos.values())
+    assert indice.preencher_filtros("j", "Playout", False) == faltam == 5
+    assert all(d["na_lixeira"] is False for d in colecao.objetos.values())
+
+
+def test_preencher_filtros_reserva_a_cota_de_escrita() -> None:
+    colecao = _ColecaoEmMemoria()
+    relogio = _Relogio()
+    config = replace(CONFIG, cota_de_escrita=3000)
+    indice = _indice(colecao, relogio, config)
+    indice.gravar("j", _video(800))
+    _sem_os_campos(colecao)
+    antes = relogio.agora
+    indice.preencher_filtros("j", "Playout", False)
+    assert relogio.agora > antes

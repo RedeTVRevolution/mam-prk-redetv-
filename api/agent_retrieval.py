@@ -184,6 +184,9 @@ def filtro_do_pedido(f: Filtros) -> dict[str, Any] | None:
         condicoes.append({"pessoas": {"$in": [f.pessoa]}})
     igual("marca", f.marca)
     igual("relacao", f.relacao)
+    igual("sistema", f.sistema)
+    if f.na_lixeira is not None:
+        condicoes.append({"na_lixeira": {"$eq": f.na_lixeira}})
     if f.exibido_desde is not None:
         condicoes.append({"data_de_exibicao": {"$gte": _dia(f.exibido_desde)}})
     if f.exibido_ate is not None:
@@ -822,6 +825,32 @@ class AgentRetrieval:
             if dados.get("na_lixeira") is not na_lixeira
         ]
         self._escrever("batchUpdate", pedidos, OBJETOS_POR_PAGINA)
+
+    def preencher_filtros(
+        self, job_id: str, sistema: str | None, na_lixeira: bool
+    ) -> int:
+        """Dá `sistema` e `na_lixeira` (#483) só aos objetos do vídeo que não têm o campo
+        (o `sistema` só se o Job tem); o que já tem valor fica, porque a lixeira o mantém
+        em dia. O `batchUpdate` troca o `data` inteiro, então cada pedido leva os dados
+        lidos com o campo novo; `significado` não muda, e por isso o embedding automático
+        não se refaz (o `batchUpdate` não o recalcula). Cada lote passa pelo orçamento da
+        cota (#460) e uma carga interrompida recomeça só com o que falta."""
+        pedidos = []
+        for nome, dados in self._ler_com_nomes(job_id):
+            novos: dict[str, Any] = {}
+            if "na_lixeira" not in dados:
+                novos["na_lixeira"] = na_lixeira
+            if sistema is not None and "sistema" not in dados:
+                novos["sistema"] = sistema
+            if novos:
+                pedidos.append(
+                    {
+                        "dataObject": {"name": nome, "data": _inteiros(dados) | novos},
+                        "updateMask": "data",
+                    }
+                )
+        self._escrever("batchUpdate", pedidos, OBJETOS_POR_PAGINA)
+        return len(pedidos)
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
         """Grava só o que mudou (#418): lê o índice do vídeo, compara com `registros` e

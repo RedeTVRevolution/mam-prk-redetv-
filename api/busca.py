@@ -294,10 +294,11 @@ class ListasDaBuscaEmMemoria:
 def filtros_do_servidor() -> Filtros:
     """Os filtros que o servidor impõe a toda busca, acima da consulta.
 
-    Hoje nenhum campo do índice carrega a permissão. O vídeo na lixeira (#144) sai pelo Job:
-    `Busca` descarta o vídeo cujo Job não está concluído ou está na lixeira.
+    O vídeo na lixeira (#144) fica fora do índice por `na_lixeira=False`, para não ocupar o
+    teto de registros (#483); a regra de verdade segue no Job: `Busca` descarta o vídeo cujo
+    Job não está concluído ou está na lixeira, e o de outro sistema.
     """
-    return Filtros()
+    return Filtros(na_lixeira=False)
 
 
 def com_filtros_do_servidor(da_consulta: Filtros, do_servidor: Filtros) -> Filtros:
@@ -419,6 +420,9 @@ class Busca:
         digitado não há plano B."""
         inicio = time.perf_counter()
         impostos = filtros_do_servidor or Filtros()
+        if sistema is not None:
+            # O filtro do índice só tira inelegíveis do teto; `_visivel_de` decide.
+            impostos = replace(impostos, sistema=sistema)
         termo_da_foto = None
         impressao = _impressao(
             texto=texto,
