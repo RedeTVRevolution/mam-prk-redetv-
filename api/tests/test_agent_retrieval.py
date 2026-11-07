@@ -972,6 +972,27 @@ def test_apagar_tambem_tenta_de_novo_no_429(operacao: str) -> None:
     assert falhou and relogio.esperas
 
 
+@pytest.mark.parametrize(
+    ("operacao", "espera"),
+    [
+        (lambda i: i.buscar(Consulta(texto="x")), False),
+        (lambda i: i.vetores_dos_planos("j"), False),
+        (lambda i: i.gravar("j", _registros(1)), True),
+        (lambda i: i.apagar("j"), True),
+    ],
+    ids=["buscar", "vetores_dos_planos", "gravar", "apagar"],
+)
+def test_com_tentar_no_429_so_a_gravacao_e_a_apagada_esperam(
+    operacao: Callable[[AgentRetrieval], object], espera: bool
+) -> None:
+    # O mam-web cria o índice com `tentar_no_429`: a reindexação e a purga esperam, mas
+    # a busca e os planos parecidos (também um `query`) ficam sem esperar.
+    relogio = _Relogio()
+    with pytest.raises(CotaEsgotada):
+        operacao(_indice(_sempre_429, relogio, tentar_no_429=True))
+    assert bool(relogio.esperas) is espera
+
+
 def test_a_busca_do_usuario_nao_espera_no_429() -> None:
     relogio = _Relogio()
     with pytest.raises(CotaEsgotada):

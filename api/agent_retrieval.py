@@ -45,14 +45,9 @@ FRACAO_DA_COTA = 0.9
 # tempo. Se um dia não couber: pedir cota maior (`cota_de_escrita_da_busca`) ou subir o
 # `timeout` do Job.
 # As esperas, em segundos, antes de cada nova tentativa no 429 (cota esgotada): 315 s no
-# total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só nos Jobs
-# (`tentar_no_429`) e só as chamadas da gravação e da purga; a busca nunca espera.
+# total por chamada, dentro dos 1800 s do Job de indexação e do de purga. Só quem
+# grava (`tentar_no_429`) e só as chamadas da gravação e da apagada; a busca nunca espera.
 ESPERAS_NO_429_S = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0, 60.0)
-COM_NOVA_TENTATIVA = (
-    "dataObjects:batchCreate",
-    "dataObjects:batchDelete",
-    "dataObjects:query",
-)
 # O máximo de nomes por `batchDelete` e de objetos por página do `query`.
 OBJETOS_POR_PAGINA = 1000
 # O embedding automático da descrição: texto multilíngue, reduzido à dimensão da coleção.
@@ -584,8 +579,10 @@ class AgentRetrieval:
         relogio: Callable[[], float] = time,
         orcamento: Orcamento | None = None,
     ) -> None:
-        """`tentar_no_429` só nos Jobs (indexação, `make reindexar`, purga): o serviço
-        web não segura a thread da busca esperando a cota, e o 429 volta na hora.
+        """`tentar_no_429` em quem grava e apaga (indexação, `make reindexar`, purga e,
+        no serviço web, a reindexação e a purga, que rodam fora do pedido da busca). Só
+        `gravar` e `apagar` esperam; a busca e os planos parecidos nunca, e o 429 volta
+        na hora.
         `orcamento` é o orçamento de escrita compartilhado entre os processos (#460); o
         relógio é o de parede, o mesmo para todos."""
         self._config = config
@@ -602,12 +599,14 @@ class AgentRetrieval:
         # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
         self._vetores: dict[str, list[float]] = {}
 
-    def _chamar(self, caminho: str, corpo: dict[str, Any]) -> dict[str, Any]:
-        """Com `tentar_no_429`, as chamadas de `COM_NOVA_TENTATIVA` esperam e tentam de
-        novo no 429: a cota de escrita é da coleção, e dois vídeos indexando juntos a
-        dividem (#411)."""
+    def _chamar(
+        self, caminho: str, corpo: dict[str, Any], *, esperar: bool = False
+    ) -> dict[str, Any]:
+        """Com `tentar_no_429` e `esperar` (as chamadas da gravação e da apagada), espera
+        e tenta de novo no 429: a cota de escrita é da coleção, e dois vídeos indexando
+        juntos a dividem (#411)."""
         url = f"{self._config.caminho_da_colecao}/{caminho}"
-        tenta = self._tentar_no_429 and caminho in COM_NOVA_TENTATIVA
+        tenta = self._tentar_no_429 and esperar
         esperas = ESPERAS_NO_429_S if tenta else ()
         for espera in esperas:
             try:
@@ -669,7 +668,7 @@ class AgentRetrieval:
         }
         nomes: list[str] = []
         while True:
-            pagina = self._chamar("dataObjects:query", pedido)
+            pagina = self._chamar("dataObjects:query", pedido, esperar=True)
             nomes += [o["name"] for o in pagina.get("dataObjects", [])]
             if not pagina.get("nextPageToken"):
                 break
@@ -678,7 +677,9 @@ class AgentRetrieval:
             lote = nomes[i : i + OBJETOS_POR_PAGINA]
             self._reservar(len(lote))
             self._chamar(
-                "dataObjects:batchDelete", {"requests": [{"name": n} for n in lote]}
+                "dataObjects:batchDelete",
+                {"requests": [{"name": n} for n in lote]},
+                esperar=True,
             )
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
@@ -699,7 +700,9 @@ class AgentRetrieval:
             pedacos = registros[i : i + REGISTROS_POR_LOTE]
             self._reservar(len(pedacos))
             self._chamar(
-                "dataObjects:batchCreate", {"requests": [_criacao(r) for r in pedacos]}
+                "dataObjects:batchCreate",
+                {"requests": [_criacao(r) for r in pedacos]},
+                esperar=True,
             )
 
     def _avisar_do_teto_do_knn(self) -> None:

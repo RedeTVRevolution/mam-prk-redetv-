@@ -135,6 +135,7 @@ from api.nuvem import (
     RepositorioFirestore,
     TiposDeObjetoFirestore,
 )
+from api.orcamento_de_escrita import OrcamentoFirestore
 from api.painel import AcessosAoPainel, criar_rotas_do_painel
 from api.papeis import (
     Papel,
@@ -874,7 +875,18 @@ if _projeto:
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),
         sugestoes=RepositorioDeSugestoesFirestore(firestore.Client(project=_projeto)),
-        indice=AgentRetrieval(_busca, transporte_http()) if _busca else None,
+        # A reindexação e a purga do web rodam fora do pedido da busca e esperam a cota
+        # de escrita; a busca e os planos parecidos nunca esperam (`AgentRetrieval`).
+        indice=(
+            AgentRetrieval(
+                _busca,
+                transporte_http(),
+                tentar_no_429=True,
+                orcamento=OrcamentoFirestore(firestore.Client(project=_projeto)),
+            )
+            if _busca
+            else None
+        ),
         copia=copia_do_ambiente(os.environ),
         embedding=_embedding,
         embedding_da_consulta=_embedding,

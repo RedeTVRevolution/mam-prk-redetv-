@@ -66,6 +66,10 @@ resource "google_cloud_run_v2_job" "purga" {
           name  = "BUSCA_DIMENSAO"
           value = tostring(var.dimensao_dos_vetores)
         }
+        env {
+          name  = "BUSCA_COTA_DE_ESCRITA"
+          value = tostring(var.cota_de_escrita_da_busca)
+        }
       }
     }
   }
