@@ -47,7 +47,7 @@ import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.
 import { consultaNova } from '../../busca.ts'
 import { criarCacheDeQuadros } from '../../quadros.ts'
 import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBusca } from '../../resultadoDaBusca.ts'
-import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, enderecoDosParecidos, navegar, seguir } from '../../rotas.ts'
+import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
 import { useApi } from '../consultas.ts'
@@ -96,7 +96,6 @@ const GRUPO_DO_INSPETOR = 'Inspetor'
 const GRUPO_DA_CORRECAO = 'Correção'
 const GRUPO_DA_CATALOGACAO = 'Catalogação'
 const GRUPO_DA_BUSCA = 'Busca'
-const SEM_PLANOS: ReadonlySet<number> = new Set()
 
 /** O evento é de uma destas teclas (letras sem diferença de caixa). */
 const tecla = (e: KeyboardEvent, ...teclas: string[]): boolean => teclas.includes(e.key.toLowerCase())
@@ -207,17 +206,6 @@ export function Video({
     queryKey: chaveDoVideo(job.id, 'fila'),
     queryFn: () => cliente.fila(),
     enabled: pode.editar && !!d,
-    retry: false,
-    staleTime: Infinity,
-  })
-
-  // Os planos com vetor do quadro indexado (#271): só neles "Planos parecidos" aparece. Vídeo
-  // antigo, índice desligado ou falha da consulta: nenhum botão. O instante da indexação entra na
-  // chave: depois de reprocessar, a lista velha não vale para a nova.
-  const planosComVetor = useQuery({
-    queryKey: chaveDoVideo(job.id, 'planos-com-vetor', job.indexacao?.em ?? ''),
-    queryFn: async () => new Set(await api.planosComVetor(job.id)),
-    enabled: job.indexacao?.estado === 'indexado',
     retry: false,
     staleTime: Infinity,
   })
@@ -1162,7 +1150,6 @@ export function Video({
             aoSaltar={saltarParaMs}
             aoTocarTrecho={tocarTrecho}
             urlDoQuadro={urlDoQuadro}
-            planosParecidos={{ comVetor: planosComVetor.data ?? SEM_PLANOS, abrir: (plano) => navegar(enderecoDosParecidos(job.id, plano)) }}
             acoes={acoes}
             aviso={aviso}
             acima={

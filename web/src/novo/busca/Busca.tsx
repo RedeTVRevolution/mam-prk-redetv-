@@ -1,11 +1,9 @@
 import {
-  IconArrowLeft,
   IconBroadcast,
   IconCalendarEvent,
   IconCategory,
   IconCheck,
   IconChevronDown,
-  IconEye,
   IconPhotoSearch,
   IconSearch,
   IconSortDescending,
@@ -15,7 +13,7 @@ import {
 } from '@tabler/icons-react'
 import { cn } from 'cn'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { FalhaNaApi, NaoEncontrado, PedidoInvalido, SessaoExpirada } from '../../api.ts'
+import { FalhaNaApi, PedidoInvalido, SessaoExpirada } from '../../api.ts'
 import { useAtalhos } from '../../atalhos.ts'
 import {
   consultaNova,
@@ -33,7 +31,7 @@ import {
 } from '../../busca.ts'
 import { dataDeExibicao } from '../../jobs.ts'
 import { guardado, guardarResultado } from '../../resultadoDaBusca.ts'
-import { enderecoDaBusca, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
+import { enderecoDaBusca, navegar } from '../../rotas.ts'
 import { Falha } from '../comum/Falha.tsx'
 import { GradeVirtual } from '../comum/GradeVirtual.tsx'
 import { useProgramas } from '../consultas.ts'
@@ -64,12 +62,11 @@ const FACETAS: { nome: Exclude<NomeDaFaceta, 'programa'>; rotulo: string; Icone:
 ]
 
 type Tipo = PedidoDaBusca['tipo']
-const CARREGANDO: Record<Tipo, string> = { texto: 'Buscando', imagem: 'Buscando pela imagem', parecidos: 'Buscando planos parecidos' }
+const CARREGANDO: Record<Tipo, string> = { texto: 'Buscando', imagem: 'Buscando pela imagem' }
 
 function mensagemDoErro(tipo: Tipo, erro: unknown): string {
   // Na foto, a API explica o tipo e o tamanho errados em português.
   if (tipo === 'imagem' && erro instanceof PedidoInvalido) return erro.message
-  if (tipo === 'parecidos' && erro instanceof NaoEncontrado) return 'Este plano não tem vetor do quadro, então não dá para achar parecidos.'
   const status = erro instanceof FalhaNaApi ? erro.status : 0
   if (status === 429) return 'Muitas buscas seguidas. Espere alguns segundos.'
   if (tipo === 'imagem' && status === 503) return 'A busca por imagem não está disponível agora.'
@@ -104,7 +101,7 @@ function Alternar({ ligado, desabilitado, cor, aoAlternar, children }: { ligado:
 }
 
 /**
- * A grade de cenas de uma busca (texto, foto ou parecidos), paginada por cursor, com o aviso dos
+ * A grade de cenas de uma busca (texto ou foto), paginada por cursor, com o aviso dos
  * vídeos que ainda estão entrando no índice (#404). O cabeçalho e os avisos próprios vêm de quem chama.
  */
 function GradeDaBusca({
@@ -204,7 +201,6 @@ function GradeDaBusca({
   )
 }
 
-const contagemDePlanos = (n: number) => (n === 1 ? '1 plano parecido' : `${n} planos parecidos`)
 function contagemDaGrade(busca: ReturnType<typeof useBusca>, deCenas: (n: number) => string): string {
   // A quantidade conta um lugar a mais enquanto houver a página seguinte (o que a pede).
   const n = busca.quantidade - (busca.haMais ? 1 : 0)
@@ -361,9 +357,6 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                           </Alternar>
                         ))}
                       </div>
-                      <Alternar ligado={consulta.modo === 'visual'} cor="border-primary/60 text-link" aoAlternar={() => mudar({ modo: consulta.modo === 'visual' ? 'texto' : 'visual' })}>
-                        <IconEye size={16} stroke={1.75} aria-hidden /> Busca visual
-                      </Alternar>
                     </>
                   )}
                   <Faceta
@@ -443,9 +436,6 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                   )}
                 </p>
               ))}
-              {consulta.modo === 'visual' && !pagina.entendida.visual && (
-                <p className="text-sm text-muted-foreground">A busca visual não está disponível agora; mostrando a busca comum.</p>
-              )}
             </>
           )
         }}
@@ -461,26 +451,5 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
         contagem={(busca) => contagemDaGrade(busca, contagemDeMomentos)}
       />
     </div>
-  )
-}
-
-/** "Planos parecidos com este" (#271): a grade dos planos mais próximos do quadro, sem enviar imagem. */
-export function Parecidos({ job, plano }: { job: string; plano: number }) {
-  const voltar = enderecoDoVideo(job)
-  return (
-    <GradeDaBusca
-      pedido={{ tipo: 'parecidos', job, plano }}
-      termo=""
-      cabecalho={() => (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <a href={voltar} onClick={(e) => seguir(e, voltar)} className="flex items-center gap-1 rounded-xs text-sm text-link hover:underline">
-            <IconArrowLeft size={16} stroke={1.75} aria-hidden /> Voltar ao vídeo
-          </a>
-          <h1 className="text-xl font-semibold">Planos parecidos</h1>
-        </div>
-      )}
-      vazio={() => <p role="status">Nenhum plano parecido.</p>}
-      contagem={(busca) => contagemDaGrade(busca, contagemDePlanos)}
-    />
   )
 }

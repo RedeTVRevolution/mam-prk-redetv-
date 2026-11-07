@@ -189,7 +189,6 @@ export function Inspetor({
   aoSaltar,
   aoTocarTrecho,
   urlDoQuadro,
-  planosParecidos,
   acoes,
   aviso,
   acima,
@@ -215,8 +214,6 @@ export function Inspetor({
   aoSaltar: (ms: number) => void
   aoTocarTrecho: (i: Intervalo) => void
   urlDoQuadro: (caminho: string) => Promise<string>
-  /** Os planos com vetor do quadro indexado e a busca dos parecidos (#271); sem vetor, sem botão. */
-  planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
   acoes?: AcoesDeCorrecao
   aviso: string | null
   /** O que a revisão põe acima do "Agora": as sugestões, as pautas marcadas. */
@@ -331,7 +328,7 @@ export function Inspetor({
       ) : (
         <>
           {acima}
-          <Agora decupagem={d} porTipo={porTipo} instante={instante} duracaoMs={duracaoMs} urlDoQuadro={urlDoQuadro} aoAbrir={aoAbrir} planosParecidos={planosParecidos} />
+          <Agora decupagem={d} porTipo={porTipo} instante={instante} duracaoMs={duracaoMs} urlDoQuadro={urlDoQuadro} aoAbrir={aoAbrir} />
           {detalhe && selecionado ? (
             <Detalhe
               key={selecionado.chave}
@@ -342,10 +339,6 @@ export function Inspetor({
               aoTocarTrecho={aoTocarTrecho}
               aoAbrir={aoAbrir}
               urlDoQuadro={urlDoQuadro}
-              aoBuscarParecidos={(() => {
-                const n = selecionado.tipo === 'plano' ? /^plano-(\d+)$/.exec(selecionado.chave)?.[1] : undefined
-                return n !== undefined && planosParecidos?.comVetor.has(Number(n)) ? () => planosParecidos.abrir(Number(n)) : undefined
-              })()}
               acoes={acoes}
             />
           ) : (
@@ -816,7 +809,6 @@ function Agora({
   duracaoMs,
   urlDoQuadro,
   aoAbrir,
-  planosParecidos,
 }: {
   decupagem: Decupagem
   porTipo: Map<string, ItemDoPainel[]>
@@ -824,7 +816,6 @@ function Agora({
   duracaoMs: number
   urlDoQuadro: (c: string) => Promise<string>
   aoAbrir: (chave: string, saltar: boolean) => void
-  planosParecidos?: { comVetor: ReadonlySet<number>; abrir: (plano: number) => void }
 }) {
   const chaves = useNoInstante(instante, (ms) => chavesDoAgora(decupagem, porTipo, duracaoMs, ms))
   const porChave = useMemo(() => new Map([...porTipo.values()].flat().map((i) => [i.chave, i])), [porTipo])
@@ -833,9 +824,6 @@ function Agora({
   const pauta = porChave.get(lista[0])
   const vazio = lista[0].startsWith('vazio:') ? lista[0].split(':').slice(1).map(Number) : null
   const plano = doTipo('plano')[0]
-  // O número do plano no vídeo; os parecidos só valem onde o quadro tem vetor indexado (#271).
-  const numeroDoPlano = plano ? /^plano-(\d+)$/.exec(plano.chave)?.[1] : undefined
-  const parecidos = numeroDoPlano !== undefined && planosParecidos?.comVetor.has(Number(numeroDoPlano)) ? () => planosParecidos.abrir(Number(numeroDoPlano)) : null
   const pessoas = doTipo('aparicao')
   const mencoes = doTipo('mencao')
   const objetos = doTipo('objeto')
@@ -865,11 +853,6 @@ function Agora({
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
             <IconMovie size={12} stroke={1.75} aria-hidden />
             {plano.linhas[0] ? `${plano.titulo}, ${plano.linhas[0]}` : plano.titulo}
-            {parecidos && (
-              <button type="button" onClick={parecidos} className="ml-1 text-link hover:underline">
-                Planos parecidos com este
-              </button>
-            )}
           </p>
         )}
       </LinhaDoAgora>
@@ -1009,7 +992,6 @@ function Detalhe({
   aoTocarTrecho,
   aoAbrir,
   urlDoQuadro,
-  aoBuscarParecidos,
   acoes,
 }: {
   item: ItemDoPainel
@@ -1019,8 +1001,6 @@ function Detalhe({
   aoTocarTrecho: (i: Intervalo) => void
   aoAbrir: (chave: string, saltar: boolean) => void
   urlDoQuadro: (c: string) => Promise<string>
-  /** Só no plano com vetor do quadro indexado. */
-  aoBuscarParecidos?: () => void
   acoes?: AcoesDeCorrecao
 }) {
   const tipo = tipoDaChave(item.chave)
@@ -1100,11 +1080,6 @@ function Detalhe({
           <Button type="button" onClick={() => aoTocarTrecho(item)}>
             <IconPlayerPlay size={16} aria-hidden /> Tocar o trecho
           </Button>
-          {aoBuscarParecidos && (
-            <Button type="button" variant="secondary" onClick={aoBuscarParecidos}>
-              <IconSearch size={16} stroke={1.75} aria-hidden /> Planos parecidos com este
-            </Button>
-          )}
           {acoes?.podeCorrigir(item) && (
             <Button type="button" variant="secondary" aria-pressed={edicao?.chave === item.chave} onClick={() => acoes.corrigir(item)}>
               <IconEdit size={16} stroke={1.75} aria-hidden /> Corrigir

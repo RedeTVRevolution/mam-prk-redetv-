@@ -340,10 +340,6 @@ export interface ClienteDaApi {
   buscar(consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
   /** `POST /v1/busca/imagem`: a foto é a consulta; só programa e período da `consulta` valem. */
   buscarPorImagem(foto: File, consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
-  /** `GET /v1/busca/parecidos`: os planos mais próximos do quadro de um plano (o próprio fica fora). */
-  buscarParecidos(job: string, plano: number, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
-  /** `GET /v1/busca/parecidos/planos`: os números dos planos do vídeo com vetor do quadro indexado. */
-  planosComVetor(job: string): Promise<number[]>
   /** `GET /v1/relatorios/tempo-de-tela`: tempo de tela por pessoa, contando só aparições. */
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
@@ -547,10 +543,6 @@ export function criarClienteDaApi(
       formulario.append('arquivo', foto)
       return paginaDaBusca(pedir(`/v1/busca/imagem?${comCursor(consultaDaImagemParaApi(consulta, limite), cursor)}`, { post: true, formulario }))
     },
-    buscarParecidos: (job, plano, limite, cursor) =>
-      paginaDaBusca(pedir(`/v1/busca/parecidos?${comCursor(String(new URLSearchParams({ job, plano: String(plano), limite: String(limite) })), cursor)}`)),
-    planosComVetor: async (job) =>
-      (await chamar<{ planos: number[] }>(`/v1/busca/parecidos/planos?${new URLSearchParams({ job })}`)).planos,
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
     tempoDeTelaEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros, 'csv')}`)).blob(),
