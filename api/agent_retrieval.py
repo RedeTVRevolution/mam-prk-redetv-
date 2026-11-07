@@ -16,6 +16,7 @@ conferido no #122.
 import hashlib
 import logging
 import re
+import threading
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -698,6 +699,10 @@ class AgentRetrieval:
         # Uma busca do usuário repete o mesmo texto em várias cláusulas (a livre e a de cada
         # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
         self._vetores: dict[str, list[float]] = {}
+        # As cláusulas vão ao índice juntas (#488): quem pede um texto que outra thread já
+        # está embutindo espera por ele, em vez de pagar a mesma chamada de novo.
+        self._embutindo: dict[str, threading.Lock] = {}
+        self._trava_do_embutindo = threading.Lock()
 
     def _chamar(
         self, caminho: str, corpo: dict[str, Any], *, esperar: bool = False
@@ -920,6 +925,20 @@ class AgentRetrieval:
         guardado = self._vetores.get(texto)
         if guardado is not None:
             return guardado
+        with self._trava_do_embutindo:
+            trava = self._embutindo.setdefault(texto, threading.Lock())
+        try:
+            with trava:
+                guardado = self._vetores.get(texto)
+                if guardado is not None:
+                    return guardado
+                return self._embutir(texto)
+        finally:
+            with self._trava_do_embutindo:
+                self._embutindo.pop(texto, None)
+
+    def _embutir(self, texto: str) -> list[float]:
+        """Chama o modelo de embedding e guarda o vetor no cache."""
         resposta = self._transporte(
             "POST",
             f"https://{self._config.regiao}-aiplatform.googleapis.com/v1/projects/"
