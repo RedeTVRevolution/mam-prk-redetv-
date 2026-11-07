@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.cache_curto import CacheCurto
+from api.csv_seguro import csv_em_texto
 from api.custo_do_painel import (
     COLUNAS_DO_CSV_DE_CUSTO,
     FonteDeCusto,
@@ -42,7 +43,6 @@ from api.jobs import (
 from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel, RevisaoNoVideo
 from api.relatorios import (
     confere_o_pedido,
-    csv_em_texto,
     em_paralelo,
     ou_503,
     resposta_em_csv,

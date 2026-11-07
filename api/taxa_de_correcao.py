@@ -23,8 +23,6 @@ A taxa é `None` se o denominador é zero. Ambiente do comando: `GCP_PROJECT_ID`
 `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`.
 """
 
-import csv
-import io
 import json
 import logging
 import os
@@ -50,6 +48,7 @@ from api.correcoes import (
     estado_das,
     versao_do_modelo,
 )
+from api.csv_seguro import csv_em_texto
 from api.jobs import (
     RepositorioDeJobs,
     ServicoIndisponivel,
@@ -190,11 +189,9 @@ def _em_vigor_no_periodo(
 
 
 def em_csv(linhas: list[LinhaDaTaxa]) -> str:
-    saida = io.StringIO()
-    escritor = csv.writer(saida, lineterminator="\n")
-    escritor.writerow(COLUNAS_DO_CSV)
-    for linha in linhas:
-        escritor.writerow(
+    return csv_em_texto(
+        COLUNAS_DO_CSV,
+        [
             [
                 linha.programa or "",
                 linha.versao_pipeline or "",
@@ -203,8 +200,9 @@ def em_csv(linhas: list[LinhaDaTaxa]) -> str:
                 linha.itens,
                 "" if linha.taxa_de_correcao is None else linha.taxa_de_correcao,
             ]
-        )
-    return saida.getvalue()
+            for linha in linhas
+        ],
+    )
 
 
 def _periodo(

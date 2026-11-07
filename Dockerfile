@@ -101,6 +101,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/comparador.py \
      api/correcoes.py \
+     api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/espera.py \
@@ -203,6 +204,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/comparador.py \
      api/correcoes.py \
+     api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/espera.py \
@@ -299,6 +301,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/comparador.py \
      api/correcoes.py \
+     api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/espera.py \

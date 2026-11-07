@@ -29,6 +29,7 @@ from api.copia_bigquery import (
     Transporte,
     _parametro,
 )
+from api.csv_seguro import csv_em_texto
 from api.jobs import RepositorioDeJobs
 from api.relatorios import (
     LIMITE_DA_PAGINA,
@@ -36,7 +37,6 @@ from api.relatorios import (
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
-    csv_em_texto,
     linhas_da_copia,
     ou_503,
     parametros_da_pagina,

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
+from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.jobs import RepositorioDeJobs
 from api.relatorios import (
@@ -30,7 +31,6 @@ from api.relatorios import (
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
-    csv_em_texto,
     linhas_da_copia,
     ou_503,
     parametros_da_pagina,
