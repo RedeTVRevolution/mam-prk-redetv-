@@ -49,13 +49,18 @@ function nasBuscas(cliente: QueryClient, mudar: (videos: VideoDoResultado[]) => 
   }
 }
 
+/** Muda os Jobs de cada página do acervo na memória. */
+function nasPaginas(d: InfiniteData<PaginaDoAcervo> | undefined, mudar: (jobs: Job[]) => Job[]) {
+  return d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: mudar(p.jobs) })) }
+}
+
 /**
  * Põe o Job que a API devolveu (um reprocessamento) no lugar do da lista, com a capa da lista. Na
  * busca e nos parecidos, o vídeo leva os dados novos e fica com os momentos que a busca achou.
  */
 export function trocarNoAcervo(cliente: QueryClient, novo: Job) {
   cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
-    d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.map((j) => (j.id === novo.id ? { ...novo, capa_url: j.capa_url } : j)) })) },
+    nasPaginas(d, (jobs) => jobs.map((j) => (j.id === novo.id ? { ...novo, capa_url: j.capa_url } : j))),
   )
   const { nome, programa = null, data_exibicao = null, duracao_s = null } = novo
   nasBuscas(cliente, (videos) => videos.map((v) => (v.job_id === novo.id ? { ...v, nome, programa, data_exibicao, duracao_s } : v)))
@@ -63,9 +68,7 @@ export function trocarNoAcervo(cliente: QueryClient, novo: Job) {
 
 /** Tira um vídeo das páginas da memória (foi para a lixeira ou sumiu), sem pedir a lista de novo; da busca e dos parecidos também. */
 export function tirarDoAcervo(cliente: QueryClient, ids: Set<string>) {
-  cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) =>
-    d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.filter((j) => !ids.has(j.id)) })) },
-  )
+  cliente.setQueriesData<InfiniteData<PaginaDoAcervo>>({ queryKey: ['acervo'] }, (d) => nasPaginas(d, (jobs) => jobs.filter((j) => !ids.has(j.id))))
   nasBuscas(cliente, (videos) => videos.filter((v) => !ids.has(v.job_id)))
 }
 
@@ -109,15 +112,16 @@ export function useAndamento(filtros: FiltrosDoAcervo, itens: Job[], intervaloMs
         }
         const antes = cliente.getQueryData<InfiniteData<PaginaDoAcervo>>(chave)
         const semCapa = new Set(antes?.pages.flatMap((p) => p.jobs).filter((j) => !j.capa_url).map((j) => j.id))
-        cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, jobs: p.jobs.flatMap(atualiza) })) })
+        cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => nasPaginas(d, (jobs) => jobs.flatMap(atualiza)))
         // Saiu do andamento sem capa na lista: ela nasce durante o processamento, então o detalhe, que a traz, é pedido uma vez.
         for (const n of novos.values()) {
           if (NAO_TERMINAIS.includes(n.estado) || finalizando(n) || !semCapa.has(n.id) || capaPedida.current.has(n.id)) continue
+          // Sem olhar `ativo`: o vídeo sair do andamento muda os ids e desmonta este efeito antes da resposta.
           capaPedida.current.add(n.id)
           void api.job(n.id).detalhe().then(
-            (d) => {
-              if (!d.capa_url) return
-              cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (p) => p && { ...p, pages: p.pages.map((pg) => ({ ...pg, jobs: pg.jobs.map((j) => (j.id === d.id && !j.capa_url ? { ...j, capa_url: d.capa_url } : j)) })) })
+            ({ id, capa_url }) => {
+              if (!capa_url) return
+              cliente.setQueryData<InfiniteData<PaginaDoAcervo>>(chave, (d) => nasPaginas(d, (jobs) => jobs.map((j) => (j.id === id && !j.capa_url ? { ...j, capa_url } : j))))
             },
             () => {},
           )

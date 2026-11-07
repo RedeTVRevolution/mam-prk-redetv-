@@ -1052,12 +1052,14 @@ def criar_rotas(
             url = armazenamento.url_de_upload(job.id, job.tamanho_bytes, novo.tipo)
         return JobCriado(**JobPublico.de(job).model_dump(), url_de_upload=url)
 
+    def _url_da_capa(job: Job) -> str | None:
+        if job.capa is None:
+            return None
+        return armazenamento.url_do_quadro(job.id, job.capa, VALIDADE_DA_IMAGEM)
+
     def _com_capa(job: Job) -> JobResumido:
         publico = JobResumido.de(job)
-        if job.capa is not None:
-            publico.capa_url = armazenamento.url_do_quadro(
-                job.id, job.capa, VALIDADE_DA_IMAGEM
-            )
+        publico.capa_url = _url_da_capa(job)
         return publico
 
     @rotas.get("", response_model=list[JobResumido])
@@ -1143,7 +1145,7 @@ def criar_rotas(
     ) -> Response:
         job = _enxerga(chamador, repositorio.obter(job_id))
         publico = JobPublico.de(job)
-        publico.capa_url = _com_capa(job).capa_url
+        publico.capa_url = _url_da_capa(job)
         etag = _etag(publico)
         cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"}
         if _casa_etag(request.headers.get("if-none-match"), etag):

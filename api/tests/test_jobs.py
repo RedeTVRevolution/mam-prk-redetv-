@@ -798,7 +798,7 @@ def test_detalhe_traz_a_capa_assinada_e_job_sem_capa_traz_null() -> None:
     assert sem["capa_url"] is None
 
 
-def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
+def test_lista_e_detalhe_sem_decupagem_ver_dao_403_sem_assinar_a_capa() -> None:
     repositorio = RepositorioEmMemoria()
     armazenamento = ArmazenamentoFalso()
     papeis = RepositorioDePapeisEmMemoria()
@@ -814,10 +814,11 @@ def test_listagem_sem_decupagem_ver_responde_403_e_nao_assina_a_capa() -> None:
         )
     )  # fmt: skip
 
-    resposta = cliente.get("/v1/jobs", headers=AUTORIZACAO)
+    for caminho in ("/v1/jobs", "/v1/jobs/com"):
+        resposta = cliente.get(caminho, headers=AUTORIZACAO)
 
-    assert resposta.status_code == 403
-    assert "capa_url" not in resposta.text
+        assert resposta.status_code == 403
+        assert "capa_url" not in resposta.text
 
 
 def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() -> None:
