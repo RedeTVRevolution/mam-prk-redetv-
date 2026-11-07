@@ -1,3 +1,5 @@
+> **As sugestões ao editor saíram** em 6/11/2026 (decisão do Bruno, #487): identificar pessoa, pauta do trecho e objeto do visual, com as rotas, o painel e a contagem. A migração abaixo continua apagando as sugestões de perfil da comparação, que são outra coisa.
+
 # Sem fotos de referência da web nem comparação de rostos
 
 Substitui a [ADR 0005](0005-identificacao-por-referencia.md). Em 3/11/2026, o Bruno decidiu abandonar a busca de fotos de referência na web e a comparação de rostos com essas fotos.
@@ -11,5 +13,3 @@ Substitui a [ADR 0005](0005-identificacao-por-referencia.md). Em 3/11/2026, o Br
 **A perda funcional:** a pessoa sem GC nem fala com o nome fica "não identificado" ou palpite.
 
 **Os dados biométricos saem junto (LGPD, art. 11).** A migração única `make apagar-referencias-web` (`api/apagar_referencias_web.py`) apaga `referencias/` e `palpites/` do bucket de referências, os rostos `origem=web` do catálogo, as sugestões de perfil, os objetos `<job>.comparacao.json` e `<job>.nomes_a_buscar.json` e a fonte `referencia` das Decupagens (o nome que só tinha essa prova volta a palpite). Imprime a contagem antes e depois; rodar de novo não muda nada.
-
-Saiu em 06/11/2026 (decisão do Bruno): as sugestões ao editor (identificar pessoa, pauta do trecho, objeto do visual), as rotas, o painel e a contagem (#487). A migração `make apagar-referencias-web` deixou de apagar as sugestões de perfil.

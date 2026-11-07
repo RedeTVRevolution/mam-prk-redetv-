@@ -23,6 +23,17 @@ class _Fotos:
         self.objetos = {o for o in self.objetos if not o.startswith(prefixo)}
 
 
+class _PerfisPropostos:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def contar(self) -> int:
+        return self.n
+
+    def apagar_todos(self) -> None:
+        self.n = 0
+
+
 class _Decupagens:
     def __init__(self, decupagens: dict[str, dict[str, Any]], registros: set[str]):
         self.decupagens = {k: json.dumps(v).encode() for k, v in decupagens.items()}
@@ -60,6 +71,7 @@ def _cenario() -> dict[str, Any]:
             "referencias/x/a.jpg", "referencias/x/b.jpg", "palpites/j/1.jpg"
         ),
         "catalogo": catalogo,
+        "perfis_propostos": _PerfisPropostos(3),
         "decupagens": _Decupagens(
             {
                 "j1": {"pessoas": [_pessoa(["referencia"], "confirmado")]},
@@ -75,11 +87,11 @@ def _cenario() -> dict[str, Any]:
 def test_conta_antes_e_depois() -> None:
     c = _cenario()
 
-    assert contar(**c) == Contagem(2, 1, 1, 2, 3)
+    assert contar(**c) == Contagem(2, 1, 1, 3, 2, 3)
 
     apagar(**c)
 
-    assert contar(**c) == Contagem(0, 0, 0, 0, 0)
+    assert contar(**c) == Contagem(0, 0, 0, 0, 0, 0)
 
 
 def test_so_o_rosto_da_web_sai_do_catalogo() -> None:
@@ -146,4 +158,4 @@ def test_decupagem_que_nao_abre_fica_como_esta_e_o_resto_segue() -> None:
     apagar(**c)
 
     assert c["decupagens"].decupagens["j0"] == b"{quebrado"
-    assert contar(**c) == Contagem(0, 0, 0, 0, 0)
+    assert contar(**c) == Contagem(0, 0, 0, 0, 0, 0)

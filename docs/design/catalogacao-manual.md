@@ -42,7 +42,7 @@ O que pesa hoje:
 
 ### 2. Sugestões que o editor confirma com uma tecla
 
-> Saiu em 06/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
+> **Saiu** em 6/11/2026 (decisão do Bruno, #487): as sugestões, o painel de sugestões e a contagem por tipo. O que está abaixo sobre elas é histórico.
 
 O sistema já tem pistas que o editor só precisa confirmar. Cada sugestão aparece no topo do painel, com o trecho, e se resolve com `S` (sim), `N` (não) ou `R` (outro nome, com autocompletar). Uma sugestão aceita vira a correção correspondente, com o motivo preenchido ("sugestão confirmada pelo editor"). O motivo continua existindo, como manda o glossário, mas o editor não precisa escrevê-lo.
 
