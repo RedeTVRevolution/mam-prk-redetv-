@@ -1,16 +1,16 @@
 """Migração das coleções de segurança para o banco novo (#465): `make migrar-banco-de-seguranca`.
 
 Copia `papeis_de_usuarios`, `chaves_de_api` e `auditoria` do `(default)` para o banco de
-segurança (#368), com os mesmos ids e campos. Cada documento é regravado no mesmo id, então
-repetir não duplica nada. Não apaga a origem: as cópias antigas saem num ticket à parte,
-depois da conferência das contagens.
+segurança (#368), com os mesmos ids e campos. Só grava os ids que o destino ainda não tem:
+repetir não duplica nada, e rodar de novo depois do deploy não desfaz o que os serviços já
+gravaram no banco novo (uma chave revogada ali não volta a valer). Não apaga a origem: as
+cópias antigas saem num ticket à parte, depois da conferência das contagens.
 """
 
-import logging
 import os
 import sys
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 from google.cloud import firestore
 
@@ -21,52 +21,67 @@ from api.bancos import (
     cliente_da_colecao,
 )
 
-log = logging.getLogger(__name__)
-
 LOTE = 400
 
 
-def migrar_colecao(origem: Any, destino: Any, colecao: str) -> dict[str, int]:
-    """Copia a `colecao` de `origem` para `destino`; devolve as contagens nos dois bancos."""
+class Contagem(NamedTuple):
+    origem: int
+    destino: int
+    copiados: int
+    faltando: int
+
+
+def migrar_colecao(origem: Any, destino: Any, colecao: str) -> Contagem:
+    """Copia para `destino` os documentos da `colecao` que ele ainda não tem."""
+    ja_no_destino = _ids(destino, colecao)
     lote = destino.batch()
-    pendentes = 0
+    pendentes = copiados = 0
     for documento in origem.collection(colecao).stream():
+        if documento.id in ja_no_destino:
+            continue
         lote.set(
             destino.collection(colecao).document(documento.id), documento.to_dict()
         )
         pendentes += 1
+        copiados += 1
         if pendentes == LOTE:
             lote.commit()
             lote = destino.batch()
             pendentes = 0
     if pendentes:
         lote.commit()
-    return {
-        "origem": _contar(origem, colecao),
-        "destino": _contar(destino, colecao),
-    }
+    ids_na_origem, ids_no_destino = _ids(origem, colecao), _ids(destino, colecao)
+    return Contagem(
+        origem=len(ids_na_origem),
+        destino=len(ids_no_destino),
+        copiados=copiados,
+        faltando=len(ids_na_origem - ids_no_destino),
+    )
 
 
-def _contar(cliente: Any, colecao: str) -> int:
-    return sum(1 for _ in cliente.collection(colecao).select([]).stream())
+def _ids(cliente: Any, colecao: str) -> set[str]:
+    return {doc.id for doc in cliente.collection(colecao).select([]).stream()}
 
 
 def migrar(
     projeto: str,
     ambiente: Mapping[str, str],
     fabrica: Callable[..., Any] = firestore.Client,
-) -> dict[str, dict[str, int]]:
+) -> dict[str, Contagem]:
     """Migra as três coleções. Recusa se o banco de segurança é o próprio `(default)`."""
-    resultado: dict[str, dict[str, int]] = {}
+    if any(
+        banco_da_colecao(c, ambiente) == BANCO_PADRAO for c in COLECOES_DE_SEGURANCA
+    ):
+        raise ValueError(
+            "FIRESTORE_BANCO_DE_SEGURANCA vazia ou igual a (default): nada a migrar"
+        )
     origem = fabrica(project=projeto, database=BANCO_PADRAO)
-    for colecao in sorted(COLECOES_DE_SEGURANCA):
-        if banco_da_colecao(colecao, ambiente) == BANCO_PADRAO:
-            raise ValueError(
-                "FIRESTORE_BANCO_DE_SEGURANCA vazia ou igual a (default): nada a migrar"
-            )
-        destino = cliente_da_colecao(projeto, colecao, ambiente, fabrica)
-        resultado[colecao] = migrar_colecao(origem, destino, colecao)
-    return resultado
+    return {
+        colecao: migrar_colecao(
+            origem, cliente_da_colecao(projeto, colecao, ambiente, fabrica), colecao
+        )
+        for colecao in sorted(COLECOES_DE_SEGURANCA)
+    }
 
 
 def main() -> int:
@@ -75,11 +90,12 @@ def main() -> int:
     except ValueError as erro:
         print(erro, file=sys.stderr)
         return 2
-    divergiu = False
-    for colecao, contagem in resultado.items():
-        print(f"{colecao}: origem {contagem['origem']}, destino {contagem['destino']}")
-        divergiu = divergiu or contagem["destino"] < contagem["origem"]
-    return 1 if divergiu else 0
+    for colecao, c in resultado.items():
+        print(
+            f"{colecao}: origem {c.origem}, destino {c.destino}, "
+            f"copiados agora {c.copiados}, faltando no destino {c.faltando}"
+        )
+    return 1 if any(c.faltando for c in resultado.values()) else 0
 
 
 if __name__ == "__main__":
