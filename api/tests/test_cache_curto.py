@@ -9,6 +9,9 @@ import pytest
 
 from api.auditoria import FiltroDeAuditoria
 from api.cache_curto import CacheCurto
+from api.custo_do_painel import CustoEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.qualidade_do_painel import QualidadeEmMemoria
 from api.relatorio_de_marcas import ConsultaComCache as MarcasComCache
 from api.relatorio_de_marcas import ConsultaEmMemoria as MarcasEmMemoria
 from api.resumos_de_uso import ResumosEmMemoria
@@ -118,19 +121,57 @@ class ResumosQueContam(ResumosEmMemoria):
         self.consultas += 1
         return super().uso_por_programa(*a, **k)
 
+    def correcoes(self, *a: Any, **k: Any) -> Any:
+        self.consultas += 1
+        return super().correcoes(*a, **k)
 
-@pytest.mark.parametrize("rota", ["/acessos", "/videos", "/buscas"])
+    def chamadas(self, *a: Any, **k: Any) -> Any:
+        self.consultas += 1
+        return super().chamadas(*a, **k)
+
+    def programas(self) -> list[str]:
+        self.consultas += 1
+        return super().programas()
+
+    def usuarios(self) -> list[str]:
+        self.consultas += 1
+        return super().usuarios()
+
+
+class QualidadeQueConta(QualidadeEmMemoria):
+    def __init__(self, resumos: ResumosQueContam) -> None:
+        super().__init__([], [])
+        self.resumos = resumos
+
+    def taxa_de_correcao(self, *a: Any, **k: Any) -> Any:
+        self.resumos.consultas += 1
+        return super().taxa_de_correcao(*a, **k)
+
+    def tempo_de_revisao(self, *a: Any, **k: Any) -> Any:
+        self.resumos.consultas += 1
+        return super().tempo_de_revisao(*a, **k)
+
+
+@pytest.mark.parametrize(
+    "rota", ["/acessos", "/videos", "/buscas", "/revisao", "/api", "/filtros"]
+)
 @pytest.mark.parametrize("params", [{}, {"formato": "csv"}])
 def test_segunda_chamada_igual_nao_consulta_de_novo(
     rota: str, params: dict[str, str]
 ) -> None:
     resumos = ResumosQueContam()
-    mundo = Mundo(["diretoria"], resumos=resumos, cache_do_painel=CacheCurto())
+    mundo = Mundo(
+        ["diretoria"],
+        resumos=resumos,
+        qualidade=QualidadeQueConta(resumos),
+        cache_do_painel=CacheCurto(),
+    )
 
     primeira = mundo.get(rota, **params)
     consultas = resumos.consultas
     segunda = mundo.get(rota, **params)
 
+    assert primeira.status_code == 200
     assert consultas > 0
     assert resumos.consultas == consultas
     assert segunda.text == primeira.text
@@ -145,6 +186,35 @@ def test_o_json_e_o_csv_do_mesmo_filtro_dividem_a_consulta() -> None:
     mundo.get("/buscas", formato="csv")
 
     assert resumos.consultas == consultas
+
+
+class CustoQueConta(CustoEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.consultas = 0
+
+    def custos(self, desde: date | None) -> Any:
+        self.consultas += 1
+        return super().custos(desde)
+
+
+def test_segunda_chamada_igual_do_custo_nao_consulta_de_novo() -> None:
+    faturamento = CustoQueConta()
+    mundo = Mundo(
+        ["diretoria"],
+        faturamento=faturamento,
+        jobs=RepositorioEmMemoria(),
+        cache_do_painel=CacheCurto(),
+    )
+
+    respostas = [
+        mundo.get("/custo"),
+        mundo.get("/custo"),
+        mundo.get("/custo", formato="csv"),
+    ]
+
+    assert [r.status_code for r in respostas] == [200, 200, 200]
+    assert faturamento.consultas == 1
 
 
 def test_filtro_diferente_consulta_de_novo() -> None:
