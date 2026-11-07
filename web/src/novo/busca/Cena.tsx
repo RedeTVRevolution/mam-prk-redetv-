@@ -7,9 +7,9 @@ import { dataDeExibicao } from '../../jobs.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import { urlDoQuadroDaBusca } from '../../quadros.ts'
 import { enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
 import type { Cena as DadosDaCena } from './useBusca.ts'
-import { urlSegura } from '../../urlSegura.ts'
 
 /** A altura do cartão abaixo do quadro 16:9, para a estimativa antes de medir. */
 export const TEXTO_DA_CENA = 90

@@ -50,6 +50,7 @@ import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBus
 import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, enderecoDosParecidos, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Kbd } from '../ui/kbd.tsx'
@@ -70,7 +71,6 @@ import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
 import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
 import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo, type TrechoMarcado } from './LinhaDoTempo.tsx'
-import { urlSegura } from '../../urlSegura.ts'
 
 export interface Permissoes {
   editar: boolean

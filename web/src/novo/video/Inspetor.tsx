@@ -36,12 +36,12 @@ import {
   textoDoSemDecupagem,
   vizinhoNoPainel,
 } from '../../painel.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { BotaoDeIcone } from './comum.tsx'
 import { type Secao, TIPOS, type TipoDaFaixa, tipoDaChave } from './tipos.ts'
 import { type Instante, useNoInstante } from './instante.ts'
-import { urlSegura } from '../../urlSegura.ts'
 
 const SECOES: { chave: Secao; rotulo: string; tipo: TipoDaFaixa; vazio: string }[] = [
   { chave: 'pessoas', rotulo: 'Pessoas', tipo: 'aparicao', vazio: 'Nenhuma pessoa na imagem neste vídeo.' },

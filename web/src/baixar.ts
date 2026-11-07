@@ -5,10 +5,13 @@ export function baixarDecupagem(nome: string, arquivo: Blob) {
   baixarArquivo(`${nome.replace(/\.mp4$/i, '')}.decupagem.json`, arquivo)
 }
 
-/** Inicia o download por uma URL assinada (`Content-Disposition: attachment`), sem sair da página. */
+/**
+ * Inicia o download por uma URL assinada (`Content-Disposition: attachment`), sem sair da página.
+ * Endereço recusado pela `urlSegura` vira erro, para a tela mostrar a falha em vez de não fazer nada.
+ */
 export function baixarPelaUrl(url: string) {
   const segura = urlSegura(url)
-  if (!segura) return
+  if (!segura) throw new Error('endereço de download recusado')
   const ancora = document.createElement('a')
   ancora.href = segura
   ancora.download = ''

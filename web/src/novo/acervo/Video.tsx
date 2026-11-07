@@ -5,12 +5,12 @@ import { fraseDaFalha } from '../../falhas.ts'
 import { dataDeExibicao, dataEHora, type Job } from '../../jobs.ts'
 import { tempo } from '../../linhaDoTempo.ts'
 import { enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { estadoDoVideo, TALLY } from '../comum/estado.ts'
 import { podeIrParaALixeira, podeReprocessar } from '../comum/regras.ts'
 import { SeloDeEstado } from '../comum/SeloDeEstado.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
-import { urlSegura } from '../../urlSegura.ts'
 
 export type Acao = 'copiar' | 'baixar' | 'reprocessar' | 'lixeira'
 export interface PropsDoVideo {

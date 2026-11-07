@@ -36,12 +36,12 @@ import { fraseDaFalha } from '../../falhas.ts'
 import { dataEHora, MAXIMO_DO_ANDAMENTO, type EtapaDoJob, type Job, type PaginaDoAcervo } from '../../jobs.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import { enderecoDasEntradas, navegar } from '../../rotas.ts'
+import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Folga, LINHA_CLICAVEL, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
 import { useColunasVisiveis, useLinhasVirtuais, useListaPorCursor } from './listas.ts'
-import { urlSegura } from '../../urlSegura.ts'
 
 const ESTADOS = Object.keys(ESTADOS_DO_JOB) as EstadoDoJob[]
 // Em que ponto cada coluna aparece; `null`, sempre.
