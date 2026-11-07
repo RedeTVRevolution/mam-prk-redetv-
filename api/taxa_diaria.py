@@ -34,6 +34,7 @@ from google.api_core.exceptions import NotFound
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api import log_estruturado
 from api.copia_bigquery import Transporte, _parametro, transporte_http
 from api.correcoes import RepositorioDeCorrecoes
 from api.itens_da_decupagem import (
@@ -345,4 +346,6 @@ def main(argumentos: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     sys.exit(main(sys.argv[1:]))

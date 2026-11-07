@@ -116,6 +116,7 @@ COPY api/__init__.py \
      api/jobs.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/log_estruturado.py \
      api/marcas.py \
      api/nuvem.py \
      api/paddle.py \
@@ -220,6 +221,7 @@ COPY api/__init__.py \
      api/jobs.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/log_estruturado.py \
      api/marcas.py \
      api/mudanca_da_tela.py \
      api/nuvem.py \
@@ -317,6 +319,7 @@ COPY api/__init__.py \
      api/jobs.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/log_estruturado.py \
      api/marcas.py \
      api/nuvem.py \
      api/objetos_job.py \

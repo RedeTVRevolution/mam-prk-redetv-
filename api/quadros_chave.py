@@ -9,6 +9,7 @@ ffmpeg da imagem da validação, e tira cada quadro como os do modelo forte
 """
 
 import io
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -18,6 +19,7 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from PIL import Image, ImageStat
 
+from api import log_estruturado
 from api.decupagem import Decupagem, caminho_do_quadro
 from api.jobs import RepositorioDeJobs
 from api.nuvem import QuadrosStorage, RepositorioFirestore
@@ -186,4 +188,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     main()

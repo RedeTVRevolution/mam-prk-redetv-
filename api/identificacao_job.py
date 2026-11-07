@@ -7,6 +7,7 @@ sem ela, sem a cópia limpa ou com uma falha do modelo, ela fica como está e a 
 termina bem, para o Workflows seguir.
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -16,6 +17,7 @@ from google.auth.transport.requests import AuthorizedSession
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api import log_estruturado
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
 from api.decupagem import Decupagem
@@ -128,4 +130,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     main()

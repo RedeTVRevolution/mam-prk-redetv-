@@ -19,6 +19,7 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
+from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_apagado import com_pessoas_fundidas
@@ -310,4 +311,6 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # Sem isto o Python cai no manejador padrão, em texto puro (#475).
+    log_estruturado.configurar(logging.WARNING)
     sys.exit(main(sys.argv[1:]))

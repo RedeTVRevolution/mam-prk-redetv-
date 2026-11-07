@@ -107,6 +107,7 @@ from api.lixeira_do_catalogo import (
     FotosEmMemoria,
     criar_rotas_da_lixeira_do_catalogo,
 )
+from api.log_estruturado import configurar as configurar_o_log
 from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.nuvem import (
@@ -805,6 +806,8 @@ def _com_cache[C, R](
     """A consulta do BigQuery com o cache curto de uma instância (#453); `None` fica `None`."""
     return envolver(consulta, CacheCurto()) if consulta else None
 
+
+configurar_o_log()
 
 if _projeto:
     _adaptadores = adaptadores_da_busca(os.environ)
