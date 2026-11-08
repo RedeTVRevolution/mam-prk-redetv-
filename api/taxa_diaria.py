@@ -277,7 +277,7 @@ USING (
     CAST(JSON_VALUE(l, '$.itens') AS INT64) AS itens
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
 ) AS s
-ON t.dia IN UNNEST(ARRAY(SELECT DATE(d) FROM UNNEST(JSON_VALUE_ARRAY(PARSE_JSON(@dias))) AS d))
+ON t.dia IN UNNEST(@dias)
   AND t.dia = s.dia
   AND t.programa IS NOT DISTINCT FROM s.programa
   AND t.versao_pipeline IS NOT DISTINCT FROM s.versao_pipeline
@@ -286,7 +286,7 @@ WHEN MATCHED THEN UPDATE SET correcoes = s.correcoes, itens = s.itens
 WHEN NOT MATCHED BY TARGET THEN INSERT (dia, programa, versao_pipeline, tipo, correcoes, itens)
 VALUES (s.dia, s.programa, s.versao_pipeline, s.tipo, s.correcoes, s.itens)
 WHEN NOT MATCHED BY SOURCE
-  AND t.dia IN UNNEST(ARRAY(SELECT DATE(d) FROM UNNEST(JSON_VALUE_ARRAY(PARSE_JSON(@dias))) AS d))
+  AND t.dia IN UNNEST(@dias)
 THEN DELETE
 """
         resposta = self._transporte(
@@ -300,7 +300,17 @@ THEN DELETE
                         "linhas",
                         json.dumps([_json_da_linha(x) for x in linhas]),
                     ),
-                    _parametro("dias", json.dumps([d.isoformat() for d in dias])),
+                    # ARRAY<DATE> e não JSON: o BigQuery recusa subconsulta no ON do MERGE.
+                    {
+                        "name": "dias",
+                        "parameterType": {
+                            "type": "ARRAY",
+                            "arrayType": {"type": "DATE"},
+                        },
+                        "parameterValue": {
+                            "arrayValues": [{"value": d.isoformat()} for d in dias]
+                        },
+                    },
                 ],
             }
         )
