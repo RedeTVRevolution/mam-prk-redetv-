@@ -1718,12 +1718,19 @@ class ArquivosNoStorage:
         )
 
     def apagar(self, job_id: str) -> None:
+        # A regra de 7 dias do bucket pode apagar a cópia limpa ou o áudio entre a
+        # listagem e o `delete()`: o objeto que sumiu já está apagado (#502).
         for bucket in (self._aceitos, self._decupagens):
             for blob in self._cliente.list_blobs(bucket, prefix=f"{job_id}/"):
-                blob.delete()
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        if blob.exists():
-            blob.delete()
+                try:
+                    blob.delete()
+                except NotFound:
+                    pass
+        for objeto in (objeto_da_decupagem(job_id), f"{job_id}.comparacao.json"):
+            try:
+                self._cliente.bucket(self._decupagens).blob(objeto).delete()
+            except NotFound:
+                pass
 
 
 # Quadros guardados por instância: uns 50 por página da grade, com folga para o acervo.
@@ -1787,7 +1794,7 @@ class ArmazenamentoStorage:
         return url
 
     def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
-        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
         url: str = blob.generate_signed_url(
             version="v4",
             expiration=validade,

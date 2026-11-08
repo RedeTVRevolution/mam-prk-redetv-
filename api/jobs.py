@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import PurePath
 from typing import Annotated, Any, Literal, Protocol, Self
 from urllib.parse import quote
 
@@ -42,7 +43,12 @@ from api.catalogo_apagado import (
     sem_catalogo_apagado,
 )
 from api.catalogo_dos_jobs import atualizar_catalogo_do_job
-from api.ciclo_de_vida import JaTerminou, pedir_indexacao, transitar
+from api.ciclo_de_vida import (
+    PRAZO_DO_REPROCESSAMENTO,
+    JaTerminou,
+    pedir_indexacao,
+    transitar,
+)
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
     Autoria,
@@ -366,6 +372,7 @@ class JobResumido(BaseModel):
     reprocessamentos: int = 0
     inicio_da_passada: datetime | None = None
     enviado_por: EnviadoPor
+    reprocessavel_ate: datetime
     criado_em: datetime
     atualizado_em: datetime
 
@@ -382,6 +389,7 @@ class JobResumido(BaseModel):
             **job.model_dump(include=campos),
             etapas=[EtapaPublica(nome=n, **e.model_dump()) for n, e in etapas],
             enviado_por=enviado_por,
+            reprocessavel_ate=job.criado_em + PRAZO_DO_REPROCESSAMENTO,
         )
 
 
@@ -442,6 +450,13 @@ class AcessosAoVideo(Protocol):
 class Reproducao(BaseModel):
     url: str
     expira_em: datetime
+
+
+class DownloadDoVideo(Reproducao):
+    aviso: str = (
+        "A cópia em alta resolução está no arquivo da RedeTV. "
+        "Este download é a versão de 480p processada pelo MAM."
+    )
 
 
 ARQUIVO_DO_QUADRO = r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$"
@@ -717,7 +732,7 @@ class Armazenamento(Protocol):
         ...
 
     def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
-        """URL assinada de leitura da cópia limpa, que o navegador baixa como `nome`."""
+        """URL assinada de leitura do proxy 480p, que o navegador baixa como `nome`."""
         ...
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
@@ -1309,12 +1324,13 @@ def criar_rotas(
     @rotas.get("/{job_id}/download")
     def baixar_video(
         job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
-    ) -> Reproducao:
+    ) -> DownloadDoVideo:
         job = obter_concluido(job_id, chamador)
-        url = armazenamento.url_de_download(job.id, job.nome, VALIDADE_DO_DOWNLOAD)
+        nome = f"{PurePath(job.nome).stem}.480p.mp4"
+        url = armazenamento.url_de_download(job.id, nome, VALIDADE_DO_DOWNLOAD)
         # O registro vem antes da resposta: sem ele a URL não sai (503).
         acessos.baixou(chamador, job, "video.baixado")
-        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
+        return DownloadDoVideo(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
 
     @rotas.post("/quadros")
     def quadros_em_lote(

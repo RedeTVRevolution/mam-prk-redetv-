@@ -40,6 +40,7 @@ export interface Job {
   reprocessamentos?: number
   /** Início da passada atual; ausente em Job anterior ao campo. */
   inicio_da_passada?: string | null
+  reprocessavel_ate: string
   criado_em: string
   atualizado_em?: string
 }

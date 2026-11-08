@@ -196,6 +196,7 @@
                     "nome": "sistema-legado"
                   },
                   "criado_em": "2026-11-03T21:14:05.120000Z",
+                  "reprocessavel_ate": "2026-11-10T21:14:05.120000Z",
                   "atualizado_em": "2026-11-03T21:14:05.120000Z",
                   "url_de_upload": "https://storage.googleapis.com/BUCKET/5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Signature=..."
                 }
@@ -581,6 +582,7 @@
                       "nome": "sistema-legado"
                     },
                     "criado_em": "2026-11-03T21:00:00.000000Z",
+                    "reprocessavel_ate": "2026-11-10T21:00:00.000000Z",
                     "atualizado_em": "2026-11-03T21:14:05.120000Z"
                   }
                 ]
@@ -720,6 +722,7 @@
                     "nome": "sistema-legado"
                   },
                   "criado_em": "2026-11-03T21:00:00.000000Z",
+                  "reprocessavel_ate": "2026-11-10T21:00:00.000000Z",
                   "atualizado_em": "2026-11-03T21:14:05.120000Z"
                 }
               }
@@ -842,6 +845,7 @@
                     "nome": "sistema-legado"
                   },
                   "criado_em": "2026-11-03T21:00:00.000000Z",
+                  "reprocessavel_ate": "2026-11-10T21:00:00.000000Z",
                   "atualizado_em": "2026-11-03T21:14:05.120000Z"
                 }
               }
@@ -1042,11 +1046,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Reproducao"
+                  "$ref": "#/components/schemas/DownloadDoVideo"
                 },
                 "example": {
                   "url": "https://storage.googleapis.com/BUCKET/...",
-                  "expira_em": "2026-11-03T21:14:05.120000Z"
+                  "expira_em": "2026-11-03T21:14:05.120000Z",
+                  "aviso": "A cópia em alta resolução está no arquivo da RedeTV. Este download é a versão de 480p processada pelo MAM."
                 }
               }
             }
@@ -1117,7 +1122,7 @@
             }
           }
         },
-        "description": "Uma URL assinada, de 5 minutos, da cópia limpa do vídeo, com o nome original do arquivo. Só existe com o Job `concluido`; cada pedido fica na auditoria. Escopo `ler`.",
+        "description": "Uma URL assinada, de 5 minutos, do proxy de 480p, com o nome do arquivo sem extensão seguido de `.480p.mp4`. A resposta traz o aviso de que a cópia em alta resolução está no arquivo da RedeTV. Só existe com o Job `concluido`; cada pedido fica na auditoria antes da resposta. Escopo `ler`.",
         "tags": [
           "sistemas"
         ]
@@ -1541,6 +1546,7 @@
                       "nome": "sistema-legado"
                     },
                     "criado_em": "2026-11-03T21:00:00.000000Z",
+                    "reprocessavel_ate": "2026-11-10T21:00:00.000000Z",
                     "atualizado_em": "2026-11-03T21:14:05.120000Z"
                   }
                 ]
@@ -4325,6 +4331,30 @@
         "title": "Destaque",
         "description": "Posições `[inicio, fim)` no `motivo`, em caracteres; nunca HTML."
       },
+      "DownloadDoVideo": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "expira_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expira Em"
+          },
+          "aviso": {
+            "type": "string",
+            "title": "Aviso",
+            "default": "A cópia em alta resolução está no arquivo da RedeTV. Este download é a versão de 480p processada pelo MAM."
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expira_em"
+        ],
+        "title": "DownloadDoVideo"
+      },
       "Entendida": {
         "properties": {
           "evidencias": {
@@ -4960,6 +4990,11 @@
           "enviado_por": {
             "$ref": "#/components/schemas/EnviadoPor"
           },
+          "reprocessavel_ate": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reprocessavel Ate"
+          },
           "criado_em": {
             "type": "string",
             "format": "date-time",
@@ -5015,6 +5050,7 @@
           "codigo_falha",
           "duracao_s",
           "enviado_por",
+          "reprocessavel_ate",
           "criado_em",
           "atualizado_em",
           "url_de_upload"
@@ -5201,6 +5237,11 @@
           "enviado_por": {
             "$ref": "#/components/schemas/EnviadoPor"
           },
+          "reprocessavel_ate": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reprocessavel Ate"
+          },
           "criado_em": {
             "type": "string",
             "format": "date-time",
@@ -5245,6 +5286,7 @@
           "codigo_falha",
           "duracao_s",
           "enviado_por",
+          "reprocessavel_ate",
           "criado_em",
           "atualizado_em"
         ],
@@ -5431,6 +5473,11 @@
           "enviado_por": {
             "$ref": "#/components/schemas/EnviadoPor"
           },
+          "reprocessavel_ate": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reprocessavel Ate"
+          },
           "criado_em": {
             "type": "string",
             "format": "date-time",
@@ -5450,6 +5497,7 @@
           "codigo_falha",
           "duracao_s",
           "enviado_por",
+          "reprocessavel_ate",
           "criado_em",
           "atualizado_em"
         ],

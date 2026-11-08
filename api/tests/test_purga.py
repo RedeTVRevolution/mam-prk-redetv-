@@ -94,10 +94,14 @@ class Mundo:
         )
 
 
-def test_depois_da_purga_nao_sobra_arquivo_correcao_nem_job_mas_a_auditoria_fica() -> (
-    None
-):
+@pytest.mark.parametrize("copia_limpa", [0, 1])
+def test_depois_da_purga_nao_sobra_arquivo_correcao_nem_job_mas_a_auditoria_fica(
+    copia_limpa: int,
+) -> None:
     mundo = Mundo()
+    mundo.arquivos.por_job["j1"] = ArquivosContados(
+        decupagem=1, copia_limpa=copia_limpa, proxy=1, quadros=3
+    )
 
     resposta = mundo.purgar()
 
@@ -118,7 +122,11 @@ def test_depois_da_purga_nao_sobra_arquivo_correcao_nem_job_mas_a_auditoria_fica
     assert registro.motivo == "duplicado"
     assert registro.detalhes["correcoes"] == 2
     assert registro.detalhes["decupagem"] == 1
-    assert registro.detalhes["arquivos"] == {"copia_limpa": 1, "proxy": 1, "quadros": 3}
+    assert registro.detalhes["arquivos"] == {
+        "copia_limpa": copia_limpa,
+        "proxy": 1,
+        "quadros": 3,
+    }
     assert registro.detalhes["conteudo_compartilhado"] is False
 
 

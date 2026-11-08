@@ -694,3 +694,30 @@ def test_dois_pedidos_de_etapa_escolhida_so_um_passa() -> None:
     segundo = mundo.reprocessar(etapa="analise", motivo="x")
 
     assert (primeiro.status_code, segundo.status_code) == (202, 409)
+
+
+@pytest.mark.parametrize("escolhida", [False, True])
+@pytest.mark.parametrize("idade_horas", [167, 168])
+def test_reprocessamento_fecha_exatamente_sete_dias_apos_o_envio(
+    escolhida: bool, idade_horas: int
+) -> None:
+    job = _job("concluido") if escolhida else _falhou_na_analise()
+    job.criado_em = AGORA - timedelta(hours=idade_horas)
+    mundo = Mundo(job, papeis=("curador",))
+
+    resposta = (
+        mundo.reprocessar(etapa="analise", motivo="Refazer")
+        if escolhida
+        else mundo.reprocessar()
+    )
+
+    assert resposta.status_code == (202 if idade_horas < 168 else 409)
+    if idade_horas == 168:
+        assert resposta.json()["detail"] == (
+            "O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: "
+            "a cópia em alta resolução e o áudio não ficam guardados no MAM. "
+            "Para reprocessar, envie o vídeo de novo a partir do arquivo da RedeTV."
+        )
+        assert mundo.job() == job
+        assert mundo.disparo.disparos == []
+        assert mundo.auditoria.consultar(FiltroDeAuditoria()).registros == []

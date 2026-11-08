@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Entradas from './Entradas.tsx'
 import { AtalhosProvider } from '../Atalhos.tsx'
@@ -23,6 +23,7 @@ function job(extra: Partial<Job>): Job {
     codigo_falha: null,
     programa: null,
     enviado_por: { tipo: 'pessoa', nome: 'ana@redetv.com.br' },
+    reprocessavel_ate: '2999-01-01T00:00:00Z',
     criado_em: '2026-10-29T15:00:00Z',
     atualizado_em: '2026-10-29T15:10:00Z',
     ...extra,
@@ -79,6 +80,7 @@ afterEach(() => {
   pedidos.length = 0
   reprocessos.length = 0
   cleanup()
+  vi.restoreAllMocks()
 })
 afterAll(() => servidor.close())
 
@@ -381,4 +383,45 @@ test('a linha mostra a capa, o estado com ícone e a régua das etapas; o filtro
   await userEvent.click(within(screen.getByRole('group', { name: 'Estado' })).getByRole('button', { name: 'Falhou' }))
   await waitFor(() => expect(consultas.at(-1)).toContain('estado=falhou'))
   expect(location.search).toBe('?estado=falhou')
+})
+
+
+test('o prazo vencido desabilita reprocessar falhas e escolher etapas com explicação', async () => {
+  jobs = [
+    job({ id: 'f', nome: 'falhou.mp4', estado: 'falhou', codigo_falha: 'analise_falhou', reprocessavel_ate: '2000-01-01T00:00:00Z' }),
+    job({ id: 'c', nome: 'concluido.mp4', reprocessavel_ate: '2000-01-01T00:00:00Z' }),
+  ]
+  await abrir({ podeEscolherEtapa: true })
+
+  for (const nome of ['Reprocessar falhou.mp4', 'Reprocessar concluido.mp4 a partir de uma etapa']) {
+    const botao = await screen.findByRole('button', { name: nome }) as HTMLButtonElement
+    expect(botao.disabled).toBe(true)
+    const explicacao = document.getElementById(botao.getAttribute('aria-describedby')!)!
+    expect(explicacao.textContent).toBe('O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: a cópia em alta resolução e o áudio não ficam guardados no MAM. Para reprocessar, envie o vídeo de novo a partir do arquivo da RedeTV.')
+    await userEvent.click(botao)
+  }
+  expect(reprocessos).toEqual([])
+})
+
+test.each(['falhou', 'concluido'] as const)('não abre o reprocessamento se o prazo venceu com a tela aberta (%s)', async (estado) => {
+  const agora = Date.now()
+  jobs = [1000, 2000].map((prazo, i) => job({ id: `j${i}`, nome: `clipe${i}.mp4`, estado, codigo_falha: estado === 'falhou' ? 'analise_falhou' : null, reprocessavel_ate: new Date(agora + prazo).toISOString() }))
+  await abrir({ podeEscolherEtapa: true })
+  const botao = await screen.findByRole('button', { name: /^Reprocessar clipe0.mp4/ }) as HTMLButtonElement
+  expect(botao.disabled).toBe(false)
+  vi.spyOn(Date, 'now').mockReturnValue(agora + 1000)
+
+  await userEvent.click(botao)
+
+  expect(botao.disabled).toBe(true)
+  expect(document.getElementById(botao.getAttribute('aria-describedby')!)?.textContent).toContain('O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou')
+  expect(screen.queryByLabelText(/^Motivo/)).toBeNull()
+  expect(reprocessos).toEqual([])
+
+  const segundo = screen.getByRole('button', { name: /^Reprocessar clipe1.mp4/ }) as HTMLButtonElement
+  expect(segundo.disabled).toBe(false)
+  vi.mocked(Date.now).mockReturnValue(agora + 2000)
+  await userEvent.click(segundo)
+  expect(segundo.disabled).toBe(true)
+  expect(screen.queryByLabelText(/^Motivo/)).toBeNull()
 })

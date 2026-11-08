@@ -659,6 +659,19 @@ resource "google_storage_bucket" "mam" {
       }
     }
   }
+  # Manter age = 7 em acordo com PRAZO_DO_REPROCESSAMENTO (api/ciclo_de_vida.py).
+  dynamic "lifecycle_rule" {
+    for_each = each.key == "aceitos" ? [1] : []
+    content {
+      condition {
+        age            = 7
+        matches_suffix = ["copia_limpa.mp4", "audio.wav"]
+      }
+      action {
+        type = "Delete"
+      }
+    }
+  }
   # Só a quarentena recebe upload do navegador (retomável, direto no Storage),
   # e só das URLs da aplicação.
   dynamic "cors" {
