@@ -27,6 +27,35 @@ resource "google_cloud_run_v2_job" "purga" {
           value = var.projeto
         }
         env {
+          name  = "BIGQUERY_DATASET"
+          value = local.dataset_do_bigquery
+        }
+        env {
+          name  = "BIGQUERY_REGIAO"
+          value = var.regiao_do_bigquery
+        }
+        env {
+          name  = "BIGQUERY_TABELA"
+          value = local.tabela_de_momentos
+        }
+        # Remover junto com a tabela antiga, depois da migração.
+        env {
+          name  = "BIGQUERY_TABELA_ANTIGA"
+          value = local.tabela_antiga_de_momentos
+        }
+        env {
+          name  = "BIGQUERY_TABELA_DE_JOBS"
+          value = local.tabela_de_jobs_do_painel
+        }
+        env {
+          name  = "BIGQUERY_TABELA_DE_REVISAO"
+          value = local.tabela_de_revisao_do_painel
+        }
+        env {
+          name  = "BIGQUERY_TABELA_DE_EVENTOS"
+          value = local.tabela_de_eventos_de_uso
+        }
+        env {
           name  = "FIRESTORE_BANCO_DE_SEGURANCA"
           value = local.banco_de_seguranca
         }

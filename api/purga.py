@@ -1,4 +1,4 @@
-"""Purga dos vídeos na lixeira (E8): a única coisa que apaga de verdade (ADR 0010).
+"""Purga dos vídeos na lixeira (E8): apaga todo o vídeo (ADR 0010).
 
 A manual vem de `POST /v1/admin/lixeira/videos/{id}/purgar`, só do Administrador, com o
 nome do arquivo digitado e um login com MFA recente. A automática é o Cloud Run Job
@@ -26,6 +26,7 @@ from api.auth import Usuario
 from api.bancos import cliente_da_colecao
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import RepositorioDeCorrecoes
+from api.dados_da_purga import dados_do_ambiente
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import (
     Armazenamento,
@@ -37,7 +38,6 @@ from api.jobs import (
 )
 from api.lixeira import (
     PRAZO_DA_PURGA,
-    ArquivosDoImpacto,
     ArquivosDoJob,
     ImpactoDoVideo,
     _exige_gerir,
@@ -77,6 +77,7 @@ class Purga:
         indice: IndiceDaBusca | None,
         auditoria: RepositorioDeAuditoria,
         relogio: Callable[[], datetime],
+        apagar_dados: Callable[[str], None] | None = None,
     ) -> None:
         self._repositorio = repositorio
         self._correcoes = correcoes
@@ -84,6 +85,7 @@ class Purga:
         self._indice = indice
         self._auditoria = auditoria
         self._relogio = relogio
+        self._apagar_dados = apagar_dados
 
     def impacto(self, job: Job) -> ImpactoDoVideo:
         return calcular_impacto(job, self._repositorio, self._correcoes, self._arquivos)
@@ -98,19 +100,6 @@ class Purga:
         if job is None or job.lixeira is None:
             raise NaoEstaNaLixeira(job_id)
         impacto = self.impacto(job)
-        # Com outro Job na mesma chave de conteúdo, o processamento continua para ele.
-        compartilhado = bool(impacto.outros_jobs)
-        if compartilhado:
-            # Os números são do que se apaga: a decupagem e os arquivos ficam.
-            impacto = impacto.model_copy(
-                update={
-                    "decupagem": 0,
-                    "arquivos": ArquivosDoImpacto(copia_limpa=0, proxy=0, quadros=0),
-                }
-            )
-        detalhes = impacto.model_dump(mode="json") | {
-            "conteudo_compartilhado": compartilhado
-        }
         self._auditoria.acrescentar(
             RegistroDeAuditoria(
                 id=uuid.uuid4().hex,
@@ -123,14 +112,16 @@ class Purga:
                 alvo_id=job.id,
                 alvo_nome=job.nome,
                 motivo=job.lixeira.motivo,
-                detalhes=detalhes,
+                detalhes=impacto.model_dump(mode="json"),
             )
         )
+        if self._apagar_dados is not None:
+            self._apagar_dados(job.id)
         self._correcoes.purgar(job.id)
-        if not compartilhado:
-            self._arquivos.apagar(job.id)
-            if self._indice is not None:
-                self._indice.apagar(job.id)
+        # Cada Job tem os próprios arquivos e trechos, mesmo com SHA-256 igual.
+        self._arquivos.apagar(job.id)
+        if self._indice is not None:
+            self._indice.apagar(job.id)
         self._repositorio.remover(job.id)
 
 
@@ -247,6 +238,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         ),
         RepositorioDeAuditoriaFirestore(banco_de_seguranca),
         agora_utc,
+        apagar_dados=dados_do_ambiente(cliente, ambiente).apagar,
     )
     rodar_a_varredura_diaria(
         repositorio,

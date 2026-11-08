@@ -8,8 +8,14 @@
 -- da tabela de eventos e `${inicio_da_janela}` o começo (TIMESTAMP) do período que pode ter
 -- mudado. Os testes rodam este arquivo no SQLite, por isso só há SQL comum aos dois.
 --
--- Cada rodada lê só as partições da janela e só as linhas dos Jobs que tiveram evento nela.
+-- Cada rodada refaz só os Jobs com evento na janela. Os marcadores de purga são lidos
+-- sem janela, para recusar também eventos atrasados de um vídeo já purgado.
 -- Uma linha já gravada mantém o que a janela não traz (dono, criação, duração).
+-- A purga grava o marcador e apaga a linha na mesma transação. A trava vem antes da
+-- leitura: uma rodada concorrente falha em vez de reinserir uma fotografia anterior.
+BEGIN TRANSACTION;
+DELETE FROM `${tabela}` WHERE FALSE;
+
 CREATE TEMP TABLE janela AS
 SELECT id, quando, tipo, quem_tipo, quem_id, programa, estado, job_id, duracao_do_video_ms
 FROM (
@@ -20,6 +26,10 @@ FROM (
   WHERE u.quando >= ${inicio_da_janela}
     AND u.tipo IN ('envio', 'fim_de_processamento')
     AND u.job_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM `${tabela_de_eventos}` AS p
+      WHERE p.tipo = 'purga' AND p.job_id = u.job_id
+    )
 )
 WHERE ordem = 1;
 
@@ -70,7 +80,6 @@ LEFT JOIN do_fim AS f ON f.job_id = j.job_id
 LEFT JOIN `${tabela}` AS a ON a.id = j.job_id;
 
 -- Troca as linhas dos Jobs da rodada de uma vez, para o painel não ler a tabela pela metade.
-BEGIN TRANSACTION;
 DELETE FROM `${tabela}` WHERE id IN (SELECT id FROM novos);
 INSERT INTO `${tabela}`
   (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em, concluido_em, atualizado_em)

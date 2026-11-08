@@ -750,9 +750,8 @@ locals {
     identificacao = ["roles/datastore.user", local.papel_vertex_predicao]
     # O Job do inventário chama o Gemini (texto, ou os quadros); não toca o Firestore.
     objetos = [local.papel_vertex_predicao]
-    # A purga automática (#145) apaga o Job e as correções no Firestore e os momentos do índice
-    # (como a `web`, quando ela purga à mão).
-    purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter"]
+    # A purga apaga os dados do vídeo no Firestore, índice e BigQuery (#504).
+    purga = ["roles/datastore.user", "roles/vectorsearch.dataObjectWriter", "roles/bigquery.jobUser"]
     # O Job da taxa por dia (#455) lê Jobs, correções e revisão no Firestore e roda o MERGE na
     # tabela (`bigquery.jobUser`; o acesso aos dados é só no dataset, mais abaixo).
     taxa = ["roles/datastore.user", "roles/bigquery.jobUser"]
@@ -967,9 +966,9 @@ resource "google_bigquery_table" "momentos" {
   schema     = local.esquema_dos_momentos
 }
 
-# A `taxa` (#455) troca as linhas da tabela diária da taxa de correção.
+# A `taxa` (#455) troca as linhas diárias; a `purga` (#504) apaga as linhas do vídeo.
 resource "google_bigquery_dataset_iam_member" "grava_momentos" {
-  for_each   = toset(["indexacao", "web", "taxa"])
+  for_each   = toset(["indexacao", "web", "taxa", "purga"])
   dataset_id = google_bigquery_dataset.decupagens.dataset_id
   role       = "roles/bigquery.dataEditor"
   member     = google_service_account.mam[each.key].member
@@ -1111,6 +1110,15 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BIGQUERY_TABELA"
         value = local.tabela_de_momentos
+      }
+      # Remover esta variável junto com a tabela antiga, depois da migração.
+      env {
+        name  = "BIGQUERY_TABELA_ANTIGA"
+        value = local.tabela_antiga_de_momentos
+      }
+      env {
+        name  = "BIGQUERY_TABELA_DE_EVENTOS"
+        value = local.tabela_de_eventos_de_uso
       }
       env {
         name  = "BIGQUERY_REGIAO"

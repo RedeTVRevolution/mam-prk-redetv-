@@ -7,6 +7,9 @@ nem e-mail) e, na busca, o tamanho da consulta e os filtros, nunca o texto. Falh
 publicar não derruba a ação: vai ao log. O evento sai dentro da requisição, antes da
 resposta (o serviço web no Cloud Run só tem CPU durante ela, então uma thread depois
 da resposta podia perder o evento). O Pub/Sub fica atrás da porta `Eventos`.
+
+O marcador `purga` é a exceção: `api/dados_da_purga.py` o insere diretamente no BigQuery,
+na transação que apaga as linhas, e exige confirmação antes de remover o Job (#504).
 """
 
 import base64
@@ -24,7 +27,13 @@ from api.auth import Chamador, Sistema
 log = logging.getLogger(__name__)
 
 TipoDeEvento = Literal[
-    "login", "envio", "fim_de_processamento", "busca", "correcao", "chamada_de_api"
+    "login",
+    "envio",
+    "fim_de_processamento",
+    "busca",
+    "correcao",
+    "chamada_de_api",
+    "purga",
 ]
 Quem = tuple[Literal["usuario", "sistema"], str]
 

@@ -1163,6 +1163,14 @@ class TiposDeObjetoFirestore:
 
         trocar(self._cliente.transaction())
 
+    def purgar(self, job_id: str) -> bool:
+        """Subtrai a contribuição antes de apagar; repetir não subtrai duas vezes."""
+        referencia = _documento(self._por_job, job_id)
+        existia = referencia.get().exists
+        self.registrar(job_id, {})
+        referencia.delete()
+        return bool(existia)
+
     def buscar(self, q: str, limite: int = LIMITE_PADRAO) -> list[TipoDeObjeto]:
         prefixo = normalizar(q)
         consulta = self._colecao.where(filter=FieldFilter("chave", ">=", prefixo))
