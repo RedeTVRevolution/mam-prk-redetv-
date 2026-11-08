@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, onTestFinished, test, vi } from 'vitest'
+import type { ParDeQuadro } from '../../api.ts'
 import { type ItemDoPainel, itensPorTipo } from '../../painel.ts'
 import { abrirVideo, irPara, pauseMock, playMock, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
@@ -78,9 +79,10 @@ let decupagem: object = DECUPAGEM
 const quadrosPedidos: string[] = []
 const servidor = setupServer(
   ...rotasDoVideo(() => ({ timecode_origem: null, taxa_de_quadros: null, cortes_ms: [] }), () => decupagem),
-  http.get('/v1/jobs/j1/quadros/:arquivo', ({ params }) => {
-    quadrosPedidos.push(String(params.arquivo))
-    return HttpResponse.json({ url: `https://exemplo.test/${String(params.arquivo)}`, expira_em: '2999-01-01T00:00:00Z' })
+  http.post('/v1/jobs/quadros', async ({ request }) => {
+    const { quadros } = (await request.json()) as { quadros: ParDeQuadro[] }
+    quadrosPedidos.push(...quadros.map((q) => q.arquivo))
+    return HttpResponse.json(quadros.map((q) => ({ ...q, url: `https://exemplo.test/${q.arquivo}`, expira_em: '2999-01-01T00:00:00Z' })))
   }),
 )
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))

@@ -45,7 +45,7 @@ import { ESTADOS_QUE_VAO_PARA_A_LIXEIRA } from '../../lixeira.ts'
 import { NomesDoCatalogo } from '../../nomesDoCatalogo.ts'
 import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.ts'
 import { consultaNova } from '../../busca.ts'
-import { criarCacheDeQuadros } from '../../quadros.ts'
+import { criarCacheDeQuadros, urlDoQuadroDaBusca } from '../../quadros.ts'
 import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBusca } from '../../resultadoDaBusca.ts'
 import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
@@ -238,8 +238,13 @@ export function Video({
     () => (d && historico.data ? marcasDosItens(d, itens, historico.data) : undefined),
     [d, itens, historico.data],
   )
-  // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
-  const urlDoQuadro = useMemo(() => criarCacheDeQuadros((arquivo) => cliente.quadro(arquivo)), [cliente])
+  // O mesmo cache da busca, por cliente e Job, sobrevive à remontagem do inspetor.
+  const urlDoQuadro = useMemo(() => {
+    const url = urlDoQuadroDaBusca(api)
+    // O lote omite vídeos na lixeira; o endpoint individual permite ao Administrador vê-los.
+    const local = criarCacheDeQuadros((arquivo) => cliente.quadro(arquivo))
+    return (caminho: string) => url(job.id, caminho).catch(() => local(caminho))
+  }, [api, job.id, cliente])
 
   const [selecionada, setSelecionada] = useState<string | null>(null)
   const [detalhe, setDetalhe] = useState(false)
