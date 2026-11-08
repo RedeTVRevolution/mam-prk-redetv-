@@ -270,6 +270,7 @@ _STORAGE = "https://storage.googleapis.com"
 CABECALHOS_DE_SEGURANCA = {
     "Content-Security-Policy": (
         "default-src 'self'; "
+        "style-src-elem 'self' 'unsafe-inline'; "
         f"img-src 'self' {_STORAGE}; "
         f"media-src 'self' {_STORAGE}; "
         f"connect-src 'self' {_STORAGE} https://identitytoolkit.googleapis.com "
