@@ -222,11 +222,17 @@ def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     assert "MERGE `proj.decupagens.taxa`" in consulta
     assert "WHEN NOT MATCHED BY SOURCE" in consulta
     assert corpo["location"] == "regiao-x"
-    parametros = {
-        p["name"]: p["parameterValue"]["value"] for p in corpo["queryParameters"]
+    assert "SELECT DATE(d)" not in consulta  # o BigQuery recusa subconsulta no ON
+    assert consulta.count("t.dia IN UNNEST(@dias)") == 2
+    parametros = {p["name"]: p for p in corpo["queryParameters"]}
+    assert parametros["dias"]["parameterType"] == {
+        "type": "ARRAY",
+        "arrayType": {"type": "DATE"},
     }
-    assert json.loads(parametros["dias"]) == [DIA.isoformat()]
-    assert json.loads(parametros["linhas"]) == [
+    assert parametros["dias"]["parameterValue"] == {
+        "arrayValues": [{"value": DIA.isoformat()}]
+    }
+    assert json.loads(parametros["linhas"]["parameterValue"]["value"]) == [
         {
             "dia": DIA.isoformat(),
             "programa": "Jornal",
