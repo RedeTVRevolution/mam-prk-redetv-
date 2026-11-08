@@ -3989,6 +3989,18 @@
               }
             ],
             "title": "Desde"
+          },
+          "anos": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Anos"
+          },
+          "particoes_conhecidas": {
+            "type": "boolean",
+            "title": "Particoes Conhecidas",
+            "default": false
           }
         },
         "type": "object",

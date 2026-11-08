@@ -527,6 +527,7 @@ def tomar_a_rodada(
     rodada_id: str,
     *,
     so_se_pedida: bool = False,
+    so_copia: bool = False,
 ) -> Job | None:
     """Toma a vez de indexar o vídeo e devolve o Job lido, com a `versao_pedida` a alcançar.
 
@@ -534,6 +535,7 @@ def tomar_a_rodada(
     (ela pega na volta o que se pediu depois) ou, com `so_se_pedida`, se não há pedido
     pendente: `indexacao` em `pendente` (o fim da análise) ou `versao_pedida` à frente da
     `versao_indexada`. Sem `so_se_pedida` (`make reindexar`), sempre há uma versão a mais.
+    Com `so_copia`, só toma a exclusão, sem pedir uma versão da busca.
     """
 
     def mudar(job: Job) -> dict[str, Any] | None:
@@ -549,10 +551,12 @@ def tomar_a_rodada(
         )
         if so_se_pedida and not pedida:
             return None
-        return {
-            "versao_pedida": max(job.versao_pedida, job.versao_indexada + 1),
+        mudancas: dict[str, Any] = {
             "rodada_da_indexacao": RodadaDaIndexacao(id=rodada_id, em=agora),
         }
+        if not so_copia:
+            mudancas["versao_pedida"] = max(job.versao_pedida, job.versao_indexada + 1)
+        return mudancas
 
     return repositorio.trocar(job_id, mudar)
 
@@ -564,8 +568,9 @@ def fechar_a_rodada(
     alvo: int,
     *,
     indexado: bool,
-    indexacao: Indexacao,
+    indexacao: Indexacao | None,
     agora: datetime,
+    so_copia: bool = False,
 ) -> Job | None:
     """Fecha a rodada de `rodada_id`, que mirava `alvo`; devolve o Job gravado.
 
@@ -573,7 +578,7 @@ def fechar_a_rodada(
     rodada segue aberta (`rodada_da_indexacao` não vem vazia) e a `indexacao` continua
     `pendente`: quem chamou indexa de novo. Sem `indexado`, ou sem pedido novo, solta a vez e
     grava `indexacao`. `None` se a rodada não é mais desta execução (venceu e outra tomou) ou
-    o Job sumiu.
+    o Job sumiu. Com `so_copia`, só solta a exclusão, preservando a fila da busca.
     """
 
     def mudar(job: Job) -> dict[str, Any] | None:
@@ -582,6 +587,8 @@ def fechar_a_rodada(
         r = job.rodada_da_indexacao
         if r is None or r.id != rodada_id:
             return None
+        if so_copia:
+            return {"rodada_da_indexacao": None}
         if not indexado:
             return {"rodada_da_indexacao": None, "indexacao": indexacao}
         indexada = max(job.versao_indexada, alvo)

@@ -20,7 +20,8 @@ from api.catalogo import (
     EnvioParaLixeira,
     FusaoDaPessoa,
 )
-from api.copia_bigquery import CopiaEmMemoria
+from api.copia_bigquery import ConfigDoBigQuery, CopiaBigQuery, CopiaEmMemoria
+from api.copiar_para_bigquery import copiar_jobs
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar
@@ -282,6 +283,42 @@ def test_renomear_troca_o_nome_nos_videos_e_reindexa() -> None:
         f"/v1/admin/programas/{acervo.id}/impacto", headers=AUTORIZACAO
     )
     assert impacto.json() == {"videos": 1}
+
+
+def test_renomeacao_durante_a_carga_termina_sem_o_job_nos_pendentes() -> None:
+    acervo = Acervo()
+    consultas: list[dict[str, Any]] = []
+
+    def transporte(corpo: dict[str, Any]) -> dict[str, Any]:
+        consultas.append(corpo)
+        if len(consultas) == 1:
+            assert acervo.renomear().status_code == 200
+            programa = acervo.programas.obter(acervo.id)
+            assert programa and programa.renomeacao
+            assert programa.renomeacao.pendentes == ["j1"]
+        return {"jobComplete": True}
+
+    copia = CopiaBigQuery(ConfigDoBigQuery("p", "d", "t", "r"), transporte)
+    assert copiar_jobs(
+        ["j1"],
+        acervo.jobs,
+        acervo.armazenamento,
+        RepositorioDeCorrecoesEmMemoria(),
+        copia,
+        indice=acervo.indice,
+        programas=acervo.programas,
+    ) == {"j1": "copiado"}
+
+    programa = acervo.programas.obter(acervo.id)
+    assert programa and programa.renomeacao
+    assert (programa.renomeacao.estado, programa.renomeacao.pendentes) == (
+        "concluida",
+        [],
+    )
+    assert acervo.no_indice("j1") == {"Fama Hoje"}
+    assert len(consultas) == 2
+    job = acervo.jobs.obter("j1")
+    assert job and job.versao_pedida == job.versao_indexada
 
 
 def test_renomear_o_programa_em_tres_videos_da_tres_pedidos_e_zera_os_pendentes() -> (

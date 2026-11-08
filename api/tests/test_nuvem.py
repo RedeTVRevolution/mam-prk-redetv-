@@ -1973,3 +1973,19 @@ def test_download_assina_o_proxy_com_o_nome_480p() -> None:
     assert consulta["response-content-disposition"] == [
         "attachment; filename=\"Jornal.480p.mp4\"; filename*=UTF-8''Jornal.480p.mp4"
     ]
+
+
+def test_ano_da_copia_usa_array_union_sem_substituir_o_marcador() -> None:
+    gravacoes: list[dict[str, Any]] = []
+
+    class Documento:
+        def document(self, _: str) -> "Documento":
+            return self
+
+        def update(self, campos: dict[str, Any]) -> None:
+            gravacoes.append(campos)
+
+    repositorio = RepositorioFirestore(_ClienteSemRede(Documento()))  # type: ignore[arg-type]
+    repositorio.acrescentar_ano_da_copia("j1", 2026)
+
+    assert gravacoes == [{"copia_bigquery.anos": firestore.ArrayUnion([2026])}]

@@ -323,6 +323,11 @@ class RepositorioFirestore:
 
         return self._sob_disputa(trocar)
 
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        _documento(self._colecao, job_id).update(
+            {"copia_bigquery.anos": firestore.ArrayUnion([ano])}
+        )
+
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:

@@ -190,6 +190,9 @@ class CopiaNoBigQuery(BaseModel):
     estado: EstadoDaCopia
     em: datetime
     desde: datetime | None = None
+    anos: list[int] = Field(default_factory=list)
+    # Só fica completo depois do primeiro MERGE sem filtro, inclusive se não há data.
+    particoes_conhecidas: bool = False
 
 
 NomeDaEtapa = Literal[
@@ -690,6 +693,10 @@ class RepositorioDeJobs(Protocol):
         """
         ...
 
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        """Acrescenta o ano possível da cópia atomicamente, sem remover os anteriores."""
+        ...
+
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:
@@ -772,6 +779,18 @@ class RepositorioEmMemoria:
         self._jobs[job_id] = job.model_copy(update=mudancas)
         return self._jobs[job_id]
 
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        job = self._jobs[job_id]
+        assert job.copia_bigquery is not None
+        copia = job.copia_bigquery
+        self._jobs[job_id] = job.model_copy(
+            update={
+                "copia_bigquery": copia.model_copy(
+                    update={"anos": sorted(set(copia.anos) | {ano})}
+                )
+            }
+        )
+
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:
@@ -822,6 +841,9 @@ class RepositorioIndisponivel:
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
+        raise ServicoIndisponivel
+
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
         raise ServicoIndisponivel
 
     def trocar(
