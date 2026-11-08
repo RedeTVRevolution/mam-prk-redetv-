@@ -136,8 +136,8 @@ def test_as_linhas_trazem_o_dia_o_programa_a_versao_e_so_jobs_concluidos() -> No
 
     linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
 
-    assert {(x.dia, x.programa, x.versao_pipeline) for x in linhas} == {
-        (DIA, "Jornal", "v2")
+    assert {(x.dia, x.job_id, x.programa, x.versao_pipeline) for x in linhas} == {
+        (DIA, "j2", "Jornal", "v2")
     }
 
 
@@ -151,11 +151,29 @@ def test_job_sem_contagem_fica_de_fora_sem_derrubar_o_dia() -> None:
     assert {x.versao_pipeline for x in linhas} == {"v2"}
 
 
+def test_dois_jobs_no_mesmo_grupo_e_dia_ficam_em_linhas_separadas() -> None:
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+    _pulsar(revisao, "j4")
+
+    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
+
+    assert {
+        (x.job_id, x.correcoes, x.itens) for x in linhas if x.tipo == "pessoa.renomear"
+    } == {
+        ("j1", 2, 10),
+        ("j2", 1, 10),
+        ("j4", 0, 100),
+    }
+    assert len(linhas) == len({(x.dia, x.job_id, x.tipo) for x in linhas})
+
+
 def test_atualizar_troca_os_dias_pedidos_e_deixa_os_outros() -> None:
     jobs, _, itens, correcoes, revisao = _caso_de_hoje()
     tabela = TabelaDaTaxaEmMemoria()
-    tabela.linhas.append(LinhaDiaria(DIA, "Velho", None, "pessoa.renomear", 9, 9))
-    tabela.linhas.append(LinhaDiaria(DIA - timedelta(days=99), "X", None, "t", 1, 1))
+    tabela.linhas.append(LinhaDiaria(DIA, "j1", "Velho", None, "pessoa.renomear", 9, 9))
+    tabela.linhas.append(
+        LinhaDiaria(DIA - timedelta(days=99), "j2", "X", None, "t", 1, 1)
+    )
 
     atualizar([DIA, DIA + timedelta(days=2)], jobs, itens, correcoes, revisao, tabela)
     atualizar([DIA, DIA + timedelta(days=2)], jobs, itens, correcoes, revisao, tabela)
@@ -213,7 +231,7 @@ CONFIG = ConfigDaTaxa("proj", "decupagens", "regiao-x", "taxa")
 
 def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     transporte = _Transporte()
-    linhas = [LinhaDiaria(DIA, "Jornal", None, "pessoa.renomear", 2, 10)]
+    linhas = [LinhaDiaria(DIA, "j1", "Jornal", None, "pessoa.renomear", 2, 10)]
 
     TabelaDaTaxaBigQuery(CONFIG, transporte).substituir([DIA], linhas)
 
@@ -221,6 +239,13 @@ def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     consulta = corpo["query"]
     assert "MERGE `proj.decupagens.taxa`" in consulta
     assert "WHEN NOT MATCHED BY SOURCE" in consulta
+    assert "JSON_VALUE(l, '$.job_id') AS job_id" in consulta
+    assert "AND t.job_id = s.job_id" in consulta
+    assert (
+        "INSERT (dia, job_id, programa, versao_pipeline, tipo, correcoes, itens)"
+        in consulta
+    )
+    assert "VALUES (s.dia, s.job_id, s.programa, s.versao_pipeline, s.tipo," in consulta
     assert corpo["location"] == "regiao-x"
     assert "SELECT DATE(d)" not in consulta  # o BigQuery recusa subconsulta no ON
     assert consulta.count("t.dia IN UNNEST(@dias)") == 2
@@ -235,6 +260,7 @@ def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     assert json.loads(parametros["linhas"]["parameterValue"]["value"]) == [
         {
             "dia": DIA.isoformat(),
+            "job_id": "j1",
             "programa": "Jornal",
             "versao_pipeline": None,
             "tipo": "pessoa.renomear",
@@ -254,13 +280,65 @@ def test_o_merge_que_nao_termina_no_prazo_e_erro() -> None:
 def test_os_dias_sao_trocados_em_lotes_para_caber_no_parametro() -> None:
     transporte = _Transporte()
     dias = [DIA + timedelta(days=n) for n in range(400)]
-    linhas = [LinhaDiaria(d, "J", None, "t", 1, 1) for d in dias]
+    linhas = [LinhaDiaria(d, "j1", "J", None, "t", 1, 1) for d in dias]
 
     TabelaDaTaxaBigQuery(CONFIG, transporte, dias_por_merge=100).substituir(
         dias, linhas
     )
 
     assert len(transporte.corpos) == 4
+
+
+def test_muitas_linhas_em_poucos_dias_respeitam_os_bytes_sem_partir_dia() -> None:
+    transporte = _Transporte()
+    dias = [DIA + timedelta(days=n) for n in range(5)]
+    linhas = [
+        LinhaDiaria(d, f"j{n}", 'Jornal "São Paulo"', None, "pessoa.renomear", 1, 10)
+        for n in range(15_000)
+        for d in dias[1:]  # um dia vazio também precisa ser substituído
+    ]
+
+    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir(dias, linhas)
+
+    assert len(transporte.corpos) > 1
+    dias_trocados: set[str] = set()
+    recebidas: list[tuple[str, str]] = []
+    for corpo in transporte.corpos:
+        parametros = {p["name"]: p["parameterValue"] for p in corpo["queryParameters"]}
+        valor = parametros["linhas"]["value"]
+        assert len(json.dumps(valor).encode("utf-8")) <= 8_000_000
+        assert len(json.dumps(corpo).encode("utf-8")) < 10_000_000
+        lote = {x["value"] for x in parametros["dias"]["arrayValues"]}
+        assert not dias_trocados & lote
+        dias_trocados.update(lote)
+        linhas_do_lote = json.loads(valor)
+        assert {x["dia"] for x in linhas_do_lote} <= lote
+        recebidas.extend((x["dia"], x["job_id"]) for x in linhas_do_lote)
+    assert dias_trocados == {d.isoformat() for d in dias}
+    assert sorted(recebidas) == sorted((x.dia.isoformat(), x.job_id) for x in linhas)
+
+
+def test_dia_acima_do_teto_vai_sozinho_sem_perder_linhas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.taxa_diaria.BYTES_POR_MERGE", 1_000)
+    transporte = _Transporte()
+    dias = [DIA + timedelta(days=n) for n in range(3)]
+    linhas = [
+        LinhaDiaria(d, f"j{n}", None, None, "pessoa.renomear", 1, 10)
+        for d, quantidade in zip(dias, [1, 20, 1], strict=True)
+        for n in range(quantidade)
+    ]
+
+    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir(dias, linhas)
+
+    assert len(transporte.corpos) == 3
+    for corpo, dia, quantidade in zip(transporte.corpos, dias, [1, 20, 1], strict=True):
+        parametros = {p["name"]: p["parameterValue"] for p in corpo["queryParameters"]}
+        assert parametros["dias"]["arrayValues"] == [{"value": dia.isoformat()}]
+        recebidas = json.loads(parametros["linhas"]["value"])
+        assert len(recebidas) == quantidade
+        assert {x["dia"] for x in recebidas} == {dia.isoformat()}
 
 
 def test_o_json_de_itens_ida_e_volta_com_a_versao_do_modelo() -> None:
@@ -271,9 +349,18 @@ def test_o_json_de_itens_ida_e_volta_com_a_versao_do_modelo() -> None:
 def test_o_terraform_da_tabela_tem_as_colunas_da_carga_e_particiona_por_dia() -> None:
     tf = (MAM / "taxa_diaria.tf").read_text()
 
-    for coluna in ("dia", "programa", "versao_pipeline", "tipo", "correcoes", "itens"):
+    for coluna in (
+        "dia",
+        "job_id",
+        "programa",
+        "versao_pipeline",
+        "tipo",
+        "correcoes",
+        "itens",
+    ):
         assert f'name = "{coluna}"' in tf
     assert 'field = "dia"' in tf
+    assert '{ name = "job_id", type = "STRING", mode = "NULLABLE"' in tf
     assert 'type  = "DAY"' in tf
     assert "deletion_protection = true" in tf
 
