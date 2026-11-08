@@ -264,30 +264,35 @@ CMD ["python", "-m", "api.ocr_job"]
 # e conferido pelo hash. O driver é do Cloud Run, em /usr/local/nvidia/lib64.
 FROM python:3.12-slim-bookworm AS objetos-gpu
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
-ARG MODELO=florence-community/Florence-2-large
-ARG MODELO_REVISAO=4271c66b88cdbc05735372ec13b2360108de5317
 ARG AMOSTRA_REVISAO=9dd8e4710f6b2ddf5184d308639e0359bc7b55be
 # Os pesos e a amostra vêm antes do `uv sync` (#211): só uma mudança deles os baixa de
 # novo. O download usa só o urllib, do Python da imagem base.
-RUN mkdir -p /modelo /amostras \
-    && for arquivo in config.json generation_config.json model.safetensors preprocessor_config.json processor_config.json tokenizer.json tokenizer_config.json added_tokens.json merges.txt special_tokens_map.json vocab.json; do \
-        python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
-          "https://huggingface.co/$MODELO/resolve/$MODELO_REVISAO/$arquivo" "/modelo/$arquivo" || exit 1; \
+RUN mkdir -p /amostras \
+    && for dados in \
+        "large florence-community/Florence-2-large 4271c66b88cdbc05735372ec13b2360108de5317 8412483f687f2f71587328a38c6fa70a68d9488f28e90607be3c182641f60f2c 7715423d6549bf1e71188bdd84f4ac960cc0597886af24a5ef7b66f128660685" \
+        "base florence-community/Florence-2-base 00921df66db728a9ceb750f5eca43e5c203a2051 2a4dfe9885d183da121f239ada734bd700ee6908b650a7a25ab32eb104fe1d7a 62f3e696da74f8869a68ddb529a9b3e14eb25b21c592cb3dea6179bf944df6a0"; do \
+        set -- $dados; nome=$1; MODELO=$2; MODELO_REVISAO=$3; \
+        mkdir -p "/modelo/$nome" \
+        && for arquivo in config.json generation_config.json model.safetensors preprocessor_config.json processor_config.json tokenizer.json tokenizer_config.json added_tokens.json merges.txt special_tokens_map.json vocab.json; do \
+            python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+              "https://huggingface.co/$MODELO/resolve/$MODELO_REVISAO/$arquivo" "/modelo/$nome/$arquivo" || exit 1; \
+        done \
+        && echo "$4  /modelo/$nome/config.json" > /tmp/hashes \
+        && echo "$5  /modelo/$nome/model.safetensors" >> /tmp/hashes \
+        && echo "0251459c49cc358ac033b5d4b8569e61ac22bde5d76be404b97a44cfb33fb12e  /modelo/$nome/generation_config.json" >> /tmp/hashes \
+        && echo "1396ec5a0a7adfe1c04fb777b09e8ba753be6dbb5868212ab3c3ef39d91fe031  /modelo/$nome/preprocessor_config.json" >> /tmp/hashes \
+        && echo "cd0e3bf41a39b1276503fbd273bc03b9afc70d7a15ea681a92a1b4b77f858ee6  /modelo/$nome/processor_config.json" >> /tmp/hashes \
+        && echo "3ad7001f773409abe6bba33eac92662611a73d72f459bda2f00d2a221dd31ce4  /modelo/$nome/tokenizer.json" >> /tmp/hashes \
+        && echo "cb5f80bd9afa767bb1bb798ee5f0a79eae45239b8e72506166b4218175a16723  /modelo/$nome/tokenizer_config.json" >> /tmp/hashes \
+        && echo "1d75deda84dfa81fb6c09301f3fed00f9695059568bbb1403a6bf299cd84fc37  /modelo/$nome/added_tokens.json" >> /tmp/hashes \
+        && echo "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5  /modelo/$nome/merges.txt" >> /tmp/hashes \
+        && echo "72ff172dc769bc1551b1b4211628ce3271643bc60379e4da45d85a9be9332c39  /modelo/$nome/special_tokens_map.json" >> /tmp/hashes \
+        && echo "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e  /modelo/$nome/vocab.json" >> /tmp/hashes \
+        && sha256sum -c /tmp/hashes || exit 1; \
     done \
     && python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
         "https://huggingface.co/datasets/huggingface/documentation-images/resolve/$AMOSTRA_REVISAO/transformers/tasks/car.jpg" /amostras/objetos.jpg \
-    && echo "8412483f687f2f71587328a38c6fa70a68d9488f28e90607be3c182641f60f2c  /modelo/config.json" > /tmp/hashes \
-    && echo "0251459c49cc358ac033b5d4b8569e61ac22bde5d76be404b97a44cfb33fb12e  /modelo/generation_config.json" >> /tmp/hashes \
-    && echo "7715423d6549bf1e71188bdd84f4ac960cc0597886af24a5ef7b66f128660685  /modelo/model.safetensors" >> /tmp/hashes \
-    && echo "1396ec5a0a7adfe1c04fb777b09e8ba753be6dbb5868212ab3c3ef39d91fe031  /modelo/preprocessor_config.json" >> /tmp/hashes \
-    && echo "cd0e3bf41a39b1276503fbd273bc03b9afc70d7a15ea681a92a1b4b77f858ee6  /modelo/processor_config.json" >> /tmp/hashes \
-    && echo "3ad7001f773409abe6bba33eac92662611a73d72f459bda2f00d2a221dd31ce4  /modelo/tokenizer.json" >> /tmp/hashes \
-    && echo "cb5f80bd9afa767bb1bb798ee5f0a79eae45239b8e72506166b4218175a16723  /modelo/tokenizer_config.json" >> /tmp/hashes \
-    && echo "1d75deda84dfa81fb6c09301f3fed00f9695059568bbb1403a6bf299cd84fc37  /modelo/added_tokens.json" >> /tmp/hashes \
-    && echo "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5  /modelo/merges.txt" >> /tmp/hashes \
-    && echo "72ff172dc769bc1551b1b4211628ce3271643bc60379e4da45d85a9be9332c39  /modelo/special_tokens_map.json" >> /tmp/hashes \
-    && echo "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e  /modelo/vocab.json" >> /tmp/hashes \
-    && echo "8cd28b372908bcaa704a438965f8de47238c9514d5efefa89c510b82032f9d18  /amostras/objetos.jpg" >> /tmp/hashes \
+    && echo "8cd28b372908bcaa704a438965f8de47238c9514d5efefa89c510b82032f9d18  /amostras/objetos.jpg" > /tmp/hashes \
     && sha256sum -c /tmp/hashes && rm /tmp/hashes
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
@@ -344,7 +349,7 @@ ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo 
 # Florence-2 acha o carro da amostra (a mesma conferência do teste depois da publicação,
 # `MODO_TESTE=1`, que lá exige a GPU) em CPU, com os pesos da imagem. Não pega o driver nem
 # a GPU: isso é do teste depois da publicação (#238) e do dev (#240).
-RUN HOME=/tmp/objetos TMPDIR=/tmp /app/.venv/bin/python -c "from api.teste_dos_jobs import testar_objetos; raise SystemExit(testar_objetos('cpu', exigir_gpu=False))" \
+RUN FLORENCE_MODELO=large HOME=/tmp/objetos TMPDIR=/tmp /app/.venv/bin/python -c "from api.teste_dos_jobs import testar_objetos; raise SystemExit(testar_objetos('cpu', exigir_gpu=False))" \
     && rm -rf /tmp/objetos
 USER nobody
 CMD ["python", "-m", "api.objetos_job"]

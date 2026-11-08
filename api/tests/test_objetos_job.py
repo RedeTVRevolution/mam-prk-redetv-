@@ -1,15 +1,17 @@
 """Job de objetos (Florence-2): lê a Decupagem e os quadros, grava o resultado bruto."""
 
 import io
+from threading import Condition, get_ident
 from typing import Any
 
 import pytest
+from google.api_core.exceptions import NotFound
 from PIL import Image
 
 from api import objetos_job, teste_dos_jobs
 from api.decupagem import Decupagem
 from api.florence import (
-    NOME_DO_MODELO,
+    MODELOS,
     Configuracao,
     ObjetoDetectado,
     ObjetosDaDecupagem,
@@ -111,7 +113,7 @@ def test_grava_um_quadro_por_jpeg_com_o_indice_do_plano() -> None:
     executar("j1", armazenamento, detector)
 
     resultado = armazenamento.resultados[("j1", None)]
-    assert resultado.modelo == NOME_DO_MODELO
+    assert resultado.modelo == MODELOS["large"]
     assert [(q.plano, q.caminho, q.largura, q.altura) for q in resultado.quadros] == [
         (0, "quadros/plano-0.jpg", 40, 20),
         (2, "quadros/plano-2a.jpg", 80, 40),
@@ -237,6 +239,58 @@ def test_o_lote_junta_quadros_de_planos_diferentes_e_mantem_a_ordem() -> None:
         q.caminho for q in padrao.resultados[("j1", None)].quadros
     ]
     assert [q.objetos[0].rotulo for q in quadros] == ["coisa 1", "coisa 2", "coisa 3"]
+    assert em_lote.resultados == padrao.resultados
+
+
+def test_le_quadros_durante_a_inferencia_com_so_dois_lotes_a_frente() -> None:
+    condicao = Condition()
+    lidos: list[str] = []
+    feitos = 0
+    principal = get_ident()
+
+    class Armazem(ObjetosEmMemoria):
+        def ler_quadro(self, job_id: str, caminho: str) -> bytes:
+            assert get_ident() != principal
+            with condicao:
+                lidos.append(caminho)
+                assert len(lidos) <= feitos + 6  # lote atual (2) e dois à frente (4)
+                condicao.notify_all()
+            return _jpeg(int(caminho.removesuffix(".jpg")) + 10, 10)
+
+    class Detector(DetectorFalso):
+        def detectar_lote(self, imagens: list[Image.Image]) -> Any:
+            nonlocal feitos
+            with condicao:
+                assert condicao.wait_for(
+                    lambda: len(lidos) == min(feitos + 6, 12), timeout=2
+                )
+                feitos += len(imagens)
+            return super().detectar_lote(imagens)
+
+    armazem = Armazem()
+    caminhos = [f"{i}.jpg" for i in range(12)]
+    armazem.decupagens["j1"] = _decupagem([caminhos])
+    detector = Detector()
+    executar("j1", armazem, detector, configuracao=Configuracao(lote=2))
+
+    quadros = armazem.resultados[("j1", None)].quadros
+    assert lidos == caminhos == [q.caminho for q in quadros]
+    assert detector.tamanhos == [(i + 10, 10) for i in range(12)]
+    assert [q.objetos[0].rotulo for q in quadros] == [
+        f"coisa {i}" for i in range(1, 13)
+    ]
+
+
+@pytest.mark.parametrize("lote", [1, 2])
+@pytest.mark.parametrize("caminho", ["quadros/plano-2a.jpg", "quadros/plano-2b.jpg"])
+def test_erro_na_leitura_antecipada_propaga_sem_gravar(lote: int, caminho: str) -> None:
+    armazem = _armazenamento()
+    del armazem.quadros[("j1", caminho)]
+
+    with pytest.raises(KeyError, match=caminho):
+        executar("j1", armazem, DetectorFalso(), configuracao=Configuracao(lote=lote))
+
+    assert armazem.resultados == {}
 
 
 def test_o_resultado_sem_destino_nao_leva_segundos() -> None:
@@ -359,3 +413,36 @@ def test_o_storage_grava_texto_solto_no_bucket_das_decupagens() -> None:
     assert cliente.guardado == {
         "decupagens-x/j1/objetos/medicao/a.json": ("{}", "application/json")
     }
+
+
+def test_o_storage_le_a_base_em_utf8_e_so_ausencia_vira_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cliente = _Cliente()
+    caminho = "j1/objetos/medicao/hoje/inventario.json"
+    cliente.guardado[f"decupagens-x/{caminho}"] = '{"nome":"sofá"}'.encode()
+    armazem = ObjetosStorage(cliente, "decupagens-x")
+    assert armazem.ler_texto(caminho) == '{"nome":"sofá"}'
+
+    def falhar(self: _Blob) -> bytes:
+        raise NotFound("não há base")  # type: ignore[no-untyped-call]
+
+    monkeypatch.setattr(_Blob, "download_as_bytes", falhar)
+    assert armazem.ler_texto(caminho) is None
+
+    def indisponivel(self: _Blob) -> bytes:
+        raise OSError("Storage fora")
+
+    monkeypatch.setattr(_Blob, "download_as_bytes", indisponivel)
+    with pytest.raises(OSError, match="Storage fora"):
+        armazem.ler_texto(caminho)
+
+
+def test_grava_o_nome_e_a_revisao_do_modelo_base_que_rodou() -> None:
+    armazenamento = _armazenamento()
+    executar(
+        "j1", armazenamento, DetectorFalso(), configuracao=Configuracao(modelo="base")
+    )
+    assert armazenamento.resultados[("j1", None)].modelo == (
+        "florence-community/Florence-2-base@00921df66db728a9ceb750f5eca43e5c203a2051"
+    )

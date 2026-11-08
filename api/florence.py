@@ -10,6 +10,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
@@ -21,9 +22,10 @@ from api.leitura_da_tela import Caixa
 log = logging.getLogger(__name__)
 
 VERSAO_DO_FORMATO = 1
-MODELO = "florence-community/Florence-2-large"
-REVISAO = "4271c66b88cdbc05735372ec13b2360108de5317"
-NOME_DO_MODELO = f"{MODELO}@{REVISAO}"
+MODELOS = {
+    "large": "florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317",
+    "base": "florence-community/Florence-2-base@00921df66db728a9ceb750f5eca43e5c203a2051",
+}
 
 DETECCAO = "<OD>"
 REGIOES = "<DENSE_REGION_CAPTION>"
@@ -33,6 +35,7 @@ REGIOES = "<DENSE_REGION_CAPTION>"
 class Configuracao:
     """As variações do Florence-2 medidas no #329. O padrão é o comportamento de antes."""
 
+    modelo: str = "large"
     feixes: int = 3
     lote: int = 1  # quadros por `generate`
     max_tokens: int = 1024
@@ -62,15 +65,19 @@ def _inteiro(ambiente: Mapping[str, str], nome: str, padrao: int, minimo: int) -
 
 
 def ler_configuracao(ambiente: Mapping[str, str] | None = None) -> Configuracao:
-    """Lê `FLORENCE_FEIXES`, `FLORENCE_LOTE`, `FLORENCE_MAX_TOKENS`, `FLORENCE_LEGENDAS`
+    """Lê `FLORENCE_MODELO`, `FLORENCE_FEIXES`, `FLORENCE_LOTE`, `FLORENCE_MAX_TOKENS`, `FLORENCE_LEGENDAS`
     (`0` desliga), `FLORENCE_PULAR_REPETIDOS` (distância máxima de hash; `0` desliga) e
     `FLORENCE_LOG_A_CADA`. Variável ausente ou vazia vale o padrão."""
     e = os.environ if ambiente is None else ambiente
     padrao = Configuracao()
+    modelo = e.get("FLORENCE_MODELO", "").strip() or padrao.modelo
+    if modelo not in MODELOS:
+        raise ValueError(f"FLORENCE_MODELO={modelo!r}: use base ou large.")
     legendas = e.get("FLORENCE_LEGENDAS", "").strip()
     if legendas not in ("", "0", "1"):
         raise ValueError(f"FLORENCE_LEGENDAS={legendas!r}: use 0 ou 1.")
     return Configuracao(
+        modelo=modelo,
         feixes=_inteiro(e, "FLORENCE_FEIXES", padrao.feixes, 1),
         lote=_inteiro(e, "FLORENCE_LOTE", padrao.lote, 1),
         max_tokens=_inteiro(e, "FLORENCE_MAX_TOKENS", padrao.max_tokens, 1),
@@ -205,7 +212,7 @@ class DetectorFlorence:
         """`dispositivo` vem da variável `DISPOSITIVO` (cpu, por padrão) se não for dado."""
         configuracao = configuracao or Configuracao()
         modelo = carregar(
-            pasta_do_modelo,
+            str(Path(pasta_do_modelo) / configuracao.modelo),
             dispositivo or ler_dispositivo(),
             configuracao=configuracao,
         )

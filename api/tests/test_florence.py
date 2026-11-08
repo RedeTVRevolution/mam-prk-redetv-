@@ -10,8 +10,7 @@ from PIL import Image
 from api import florence
 from api.dispositivo import DispositivoIndisponivel
 from api.florence import (
-    NOME_DO_MODELO,
-    REVISAO,
+    MODELOS,
     Configuracao,
     DetectorFlorence,
     ObjetoDetectado,
@@ -37,8 +36,10 @@ class ModeloFalso:
 
 
 def test_o_nome_do_modelo_traz_a_revisao_fixada() -> None:
-    assert NOME_DO_MODELO == f"florence-community/Florence-2-large@{REVISAO}"
-    assert REVISAO == "4271c66b88cdbc05735372ec13b2360108de5317"
+    assert MODELOS == {
+        "large": "florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317",
+        "base": "florence-community/Florence-2-base@00921df66db728a9ceb750f5eca43e5c203a2051",
+    }
 
 
 def test_detectar_normaliza_as_caixas_pelo_tamanho_do_quadro() -> None:
@@ -136,7 +137,7 @@ def test_da_pasta_usa_o_dispositivo_da_configuracao(
         "/modelo",
         carregar=lambda pasta, disp, **_: visto.append((pasta, disp)),
     )
-    assert visto == [("/modelo", "cpu")]
+    assert visto == [("/modelo/large", "cpu")]
 
 
 def test_lote_roda_uma_geracao_por_tarefa_e_devolve_um_resultado_por_quadro() -> None:
@@ -267,3 +268,23 @@ def test_a_geracao_configurada_chega_ao_generate_e_o_lote_vai_junto(
     assert vistos["entrada"]["text"] == ["<OD>", "<OD>"]
     assert len(vistos["entrada"]["images"]) == 2
     assert [r["labels"] for r in saida] == [["a"], ["b"]]
+
+
+@pytest.mark.parametrize("nome", ["base", "large"])
+def test_o_modelo_do_ambiente_escolhe_a_subpasta(nome: str) -> None:
+    configuracao = ler_configuracao({"FLORENCE_MODELO": nome})
+    vistos: list[str] = []
+    DetectorFlorence.da_pasta(
+        "/modelo",
+        carregar=lambda pasta, *_args, **_kwargs: vistos.append(pasta),
+        configuracao=configuracao,
+    )
+    assert configuracao.modelo == nome
+    assert vistos == [f"/modelo/{nome}"]
+
+
+def test_modelo_ausente_ou_vazio_continua_large_e_invalido_falha() -> None:
+    assert ler_configuracao({}).modelo == "large"
+    assert ler_configuracao({"FLORENCE_MODELO": " "}).modelo == "large"
+    with pytest.raises(ValueError, match="FLORENCE_MODELO"):
+        ler_configuracao({"FLORENCE_MODELO": "outro"})

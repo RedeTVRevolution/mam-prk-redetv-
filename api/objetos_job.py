@@ -10,7 +10,10 @@ import io
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Callable, Generator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from typing import Protocol
 
 from google.cloud.storage import Client as ClienteStorage
@@ -19,7 +22,7 @@ from PIL import Image
 from api import log_estruturado, teste_dos_jobs
 from api.decupagem import Decupagem
 from api.florence import (
-    NOME_DO_MODELO,
+    MODELOS,
     Configuracao,
     DetectorFlorence,
     ObjetoDetectado,
@@ -95,6 +98,30 @@ def _progresso(feitos: int, total: int, ultimo: int, a_cada: int) -> int:
     return ultimo
 
 
+def ler_quadros(
+    job_id: str,
+    armazenamento: ArmazenamentoDosObjetos,
+    pedidos: list[tuple[int, str]],
+    lote: int,
+) -> Generator[tuple[int, str, Image.Image], None, None]:
+    """Lê e decodifica até dois lotes à frente, na ordem dos pedidos."""
+
+    def ler(pedido: tuple[int, str]) -> tuple[int, str, Image.Image]:
+        indice, caminho = pedido
+        with Image.open(io.BytesIO(armazenamento.ler_quadro(job_id, caminho))) as foto:
+            return indice, caminho, foto.convert("RGB")
+
+    with ThreadPoolExecutor(max_workers=1) as leitor:
+        pendentes = deque(leitor.submit(ler, p) for p in pedidos[: 2 * lote])
+        restantes = iter(pedidos[2 * lote :])
+        while pendentes:
+            quadro = pendentes.popleft().result()
+            pedido = next(restantes, None)
+            if pedido is not None:
+                pendentes.append(leitor.submit(ler, pedido))
+            yield quadro
+
+
 def executar(
     job_id: str,
     armazenamento: ArmazenamentoDosObjetos,
@@ -134,32 +161,33 @@ def executar(
             detectados[caminho] = resultado
         lote.clear()
 
-    for feitos, (indice, caminho) in enumerate(pedidos, start=1):
-        with Image.open(io.BytesIO(armazenamento.ler_quadro(job_id, caminho))) as foto:
-            imagem = foto.convert("RGB")
-        tamanhos[caminho] = imagem.size
-        cobre = None
-        if configuracao.pular_repetidos:
-            impressao = hash_do_quadro(imagem)
-            cobre = next(
-                (
-                    c
-                    for h, c in mantidos.get(indice, [])
-                    if (h ^ impressao).bit_count() <= configuracao.pular_repetidos
-                ),
-                None,
+    with closing(
+        ler_quadros(job_id, armazenamento, pedidos, configuracao.lote)
+    ) as quadros_lidos:
+        for feitos, (indice, caminho, imagem) in enumerate(quadros_lidos, start=1):
+            tamanhos[caminho] = imagem.size
+            cobre = None
+            if configuracao.pular_repetidos:
+                impressao = hash_do_quadro(imagem)
+                cobre = next(
+                    (
+                        c
+                        for h, c in mantidos.get(indice, [])
+                        if (h ^ impressao).bit_count() <= configuracao.pular_repetidos
+                    ),
+                    None,
+                )
+                if cobre is None:
+                    mantidos.setdefault(indice, []).append((impressao, caminho))
+            if cobre is not None:
+                iguais_a[caminho] = cobre
+            else:
+                lote.append((caminho, imagem))
+                if len(lote) >= configuracao.lote:
+                    rodar_lote()
+            ultimo = _progresso(
+                feitos - len(lote), len(pedidos), ultimo, configuracao.log_a_cada
             )
-            if cobre is None:
-                mantidos.setdefault(indice, []).append((impressao, caminho))
-        if cobre is not None:
-            iguais_a[caminho] = cobre
-        else:
-            lote.append((caminho, imagem))
-            if len(lote) >= configuracao.lote:
-                rodar_lote()
-        ultimo = _progresso(
-            feitos - len(lote), len(pedidos), ultimo, configuracao.log_a_cada
-        )
     if lote:
         rodar_lote()
     _progresso(len(pedidos), len(pedidos), ultimo, configuracao.log_a_cada)
@@ -180,7 +208,7 @@ def executar(
     armazenamento.gravar_resultado(
         job_id,
         ObjetosDaDecupagem(
-            modelo=NOME_DO_MODELO,
+            modelo=MODELOS[configuracao.modelo],
             quadros=quadros,
             segundos=round(relogio() - inicio, 2) if destino else None,
         ),

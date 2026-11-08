@@ -1663,6 +1663,15 @@ class ObjetosStorage:
             conteudo, content_type="application/json"
         )
 
+    def ler_texto(self, objeto: str) -> str | None:
+        """Lê um JSON solto; só a ausência devolve None."""
+        try:
+            return bytes(
+                self._cliente.bucket(self._decupagens).blob(objeto).download_as_bytes()
+            ).decode("utf-8")
+        except NotFound:
+            return None
+
 
 # O navegador guarda o quadro por 1 dia (#410); `private` deixa fora os caches compartilhados.
 # O `make cache-dos-quadros` aplica o mesmo valor aos quadros já gravados.

@@ -9,7 +9,7 @@ import pytest
 
 from api import ocr_job, teste_dos_jobs, transcricao_job
 from api.dispositivo import DispositivoIndisponivel
-from api.florence import DetectorFlorence, ObjetoDetectado
+from api.florence import Configuracao, DetectorFlorence, ObjetoDetectado
 from api.leitura_da_tela import Caixa
 from api.paddle import LeitorPaddle
 from api.teste_dos_jobs import (
@@ -190,8 +190,8 @@ def test_a_amostra_falada_na_construcao_e_a_frase_que_o_teste_espera() -> None:
 
 def _detector(
     monkeypatch: pytest.MonkeyPatch, rotulos: list[str]
-) -> list[tuple[str, Any]]:
-    criados: list[tuple[str, Any]] = []
+) -> list[tuple[str, Any, Configuracao]]:
+    criados: list[tuple[str, Any, Configuracao]] = []
 
     class Detector:
         def detectar(self, imagem: Any) -> tuple[list[ObjetoDetectado], list[Any]]:
@@ -199,8 +199,8 @@ def _detector(
             caixa = Caixa(x=0, y=0, largura=1, altura=1)
             return [ObjetoDetectado(rotulo=r, caixa=caixa) for r in rotulos], []
 
-    def da_pasta(pasta: str, dispositivo: Any = None) -> Detector:
-        criados.append((pasta, dispositivo))
+    def da_pasta(pasta: str, dispositivo: Any = None, **opcoes: Any) -> Detector:
+        criados.append((pasta, dispositivo, opcoes["configuracao"]))
         return Detector()
 
     monkeypatch.setattr(DetectorFlorence, "da_pasta", da_pasta)
@@ -220,7 +220,7 @@ def test_objetos_acha_o_carro_da_amostra(
     criados = _detector(monkeypatch, ["door handle", "car"])
 
     assert _objetos("gpu", ambiente=_amostra(tmp_path)) == SAIDA_OK
-    assert criados == [("/modelo", "gpu")]
+    assert criados == [("/modelo", "gpu", Configuracao())]
 
 
 def test_objetos_sem_o_carro_e_resultado_errado(
@@ -249,4 +249,13 @@ def test_objetos_na_construcao_roda_em_cpu(
 
     assert _objetos("cpu", ambiente=ambiente) == SAIDA_GPU_NAO_FUNCIONOU
     assert _objetos("cpu", exigir_gpu=False, ambiente=ambiente) == SAIDA_OK
-    assert criados == [("/modelo", "cpu")]
+    assert criados == [("/modelo", "cpu", Configuracao())]
+
+
+def test_objetos_usa_a_configuracao_do_mesmo_ambiente(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    criados = _detector(monkeypatch, ["car"])
+    ambiente = {**_amostra(tmp_path), "FLORENCE_MODELO": "base", "FLORENCE_FEIXES": "1"}
+    assert _objetos("gpu", ambiente=ambiente) == SAIDA_OK
+    assert criados == [("/modelo", "gpu", Configuracao(modelo="base", feixes=1))]

@@ -119,14 +119,18 @@ def testar_objetos(
 ) -> int:
     from PIL import Image
 
-    from api.florence import DetectorFlorence
+    from api.florence import DetectorFlorence, ler_configuracao
 
     ambiente = os.environ if ambiente is None else ambiente
     dispositivo = dispositivo or ler_dispositivo(ambiente)
     amostra = Path(ambiente.get("AMOSTRAS", PASTA_DAS_AMOSTRAS)) / "objetos.jpg"
 
     def ler() -> str:
-        detector = DetectorFlorence.da_pasta(ambiente["PASTA_DO_MODELO"], dispositivo)
+        detector = DetectorFlorence.da_pasta(
+            ambiente["PASTA_DO_MODELO"],
+            dispositivo,
+            configuracao=ler_configuracao(ambiente),
+        )
         with Image.open(amostra) as foto:
             objetos, _ = detector.detectar(foto.convert("RGB"))
         return " ".join(o.rotulo for o in objetos)

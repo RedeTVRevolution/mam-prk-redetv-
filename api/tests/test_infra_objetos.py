@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 from api import florence
 
 RAIZ = Path(__file__).parents[2]
@@ -60,13 +62,28 @@ HASH_DA_AMOSTRA = "8cd28b372908bcaa704a438965f8de47238c9514d5efefa89c510b82032f9
 
 
 def test_o_alvo_baixa_o_modelo_na_revisao_do_adaptador_conferindo_cada_hash() -> None:
-    assert f"ARG MODELO_REVISAO={florence.REVISAO}" in ALVO
-    assert f"ARG MODELO={florence.MODELO}" in ALVO
+    hashes_especificos = {
+        "large": [ARQUIVOS_DO_MODELO[0][0], ARQUIVOS_DO_MODELO[2][0]],
+        "base": [
+            "2a4dfe9885d183da121f239ada734bd700ee6908b650a7a25ab32eb104fe1d7a",
+            "62f3e696da74f8869a68ddb529a9b3e14eb25b21c592cb3dea6179bf944df6a0",
+        ],
+    }
+    for nome, modelo in florence.MODELOS.items():
+        repositorio, revisao = modelo.split("@")
+        assert (
+            f'"{nome} {repositorio} {revisao} {" ".join(hashes_especificos[nome])}"'
+            in ALVO
+        )
     assert "huggingface.co/$MODELO/resolve/$MODELO_REVISAO/$arquivo" in ALVO
+    assert '"/modelo/$nome/$arquivo"' in ALVO
     assert len(ARQUIVOS_DO_MODELO) == 11
     for hash_, arquivo in ARQUIVOS_DO_MODELO:
-        assert f"{hash_}  /modelo/{arquivo}" in ALVO
-    assert "sha256sum -c" in ALVO
+        if arquivo not in ("config.json", "model.safetensors"):
+            assert f"{hash_}  /modelo/$nome/{arquivo}" in ALVO
+    assert "$4  /modelo/$nome/config.json" in ALVO
+    assert "$5  /modelo/$nome/model.safetensors" in ALVO
+    assert "sha256sum -c /tmp/hashes || exit 1;" in ALVO
 
 
 def test_o_alvo_baixa_a_amostra_conferindo_o_hash_antes_do_uv_sync() -> None:
@@ -80,6 +97,7 @@ def test_o_alvo_baixa_a_amostra_conferindo_o_hash_antes_do_uv_sync() -> None:
 def test_o_alvo_instala_o_grupo_objetos_e_confere_em_cpu_antes_do_usuario() -> None:
     assert "uv sync --locked --no-dev --group objetos" in ALVO
     conferencia = "testar_objetos('cpu', exigir_gpu=False)"
+    assert "RUN FLORENCE_MODELO=large " in ALVO
     assert conferencia in ALVO
     assert ALVO.index(conferencia) < ALVO.index("USER nobody")
     assert ALVO.index("COPY api/__init__.py") < ALVO.index(conferencia)
@@ -268,3 +286,46 @@ def test_a_orquestracao_roda_o_job_do_inventario_e_o_workflows_o_recebe() -> Non
     assert "google_cloud_run_v2_job.inventario.name" in _bloco(
         'output "job_de_inventario"'
     )
+
+
+@pytest.mark.parametrize("raiz", ["infra", "infra/ambientes/prod"])
+def test_as_quatro_variaveis_do_florence_chegam_ao_job_com_os_padroes(
+    raiz: str,
+) -> None:
+    modulo = RAIZ / "infra/modulos/mam"
+    job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
+    chamada = (
+        (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
+    )
+    for nome, padrao, expressao in (
+        ("modelo", '"base"', "var.florence_modelo"),
+        ("feixes", "1", "tostring(var.florence_feixes)"),
+        ("lote", "16", "tostring(var.florence_lote)"),
+        ("legendas", "1", "tostring(var.florence_legendas)"),
+    ):
+        variavel = f"florence_{nome}"
+        for pasta in (RAIZ / raiz, modulo):
+            texto = (pasta / "variables.tf").read_text()
+            bloco = texto.split(f'variable "{variavel}"')[1].split("\n}")[0]
+            assert re.search(rf"default\s*= {re.escape(padrao)}\n", bloco)
+            assert "validation {" in bloco
+        assert re.search(rf"{variavel}\s*= var\.{variavel}\n", chamada)
+        assert re.search(
+            rf'name\s*= "FLORENCE_{nome.upper()}"\s+value\s*= {re.escape(expressao)}\n',
+            job,
+        )
+
+
+@pytest.mark.parametrize("raiz", ["infra", "infra/ambientes/prod"])
+def test_a_escolha_large_na_raiz_e_repassada_sem_fixar_base_no_job(raiz: str) -> None:
+    chamada = (
+        (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
+    )
+    job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
+    assert re.search(r"florence_modelo\s*= var\.florence_modelo\n", chamada)
+    assert re.search(r'name\s*= "FLORENCE_MODELO"\s+value = var\.florence_modelo', job)
+    for pasta in (RAIZ / raiz, RAIZ / "infra/modulos/mam"):
+        assert (
+            'contains(["base", "large"], var.florence_modelo)'
+            in (pasta / "variables.tf").read_text()
+        )

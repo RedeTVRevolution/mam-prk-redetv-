@@ -1695,6 +1695,22 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
           name  = "DISPOSITIVO"
           value = "gpu"
         }
+        env {
+          name  = "FLORENCE_MODELO"
+          value = var.florence_modelo
+        }
+        env {
+          name  = "FLORENCE_FEIXES"
+          value = tostring(var.florence_feixes)
+        }
+        env {
+          name  = "FLORENCE_LOTE"
+          value = tostring(var.florence_lote)
+        }
+        env {
+          name  = "FLORENCE_LEGENDAS"
+          value = tostring(var.florence_legendas)
+        }
         resources {
           # O mínimo do Cloud Run com GPU: 4 CPUs e 16 GiB. Os quadros são lidos em memória
           # (sem disco), então o volume em memória é só o TMPDIR e o HOME do Python: 2 GiB.
