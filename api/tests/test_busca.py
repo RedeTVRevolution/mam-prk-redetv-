@@ -1174,6 +1174,27 @@ def test_ligar_citada_e_fala_traz_as_mencoes_que_o_padrao_deixava_de_fora() -> N
     assert de_novo.entendida.evidencias == ["imagem", "fala"]
 
 
+@pytest.mark.parametrize("cadastrada", [True, False])
+@pytest.mark.parametrize("mencoes", [True, False])
+def test_nome_vai_normalizado_sem_transformar_or_em_operador(
+    cadastrada: bool, mencoes: bool
+) -> None:
+    nome = "Angélica OR Sato"
+    m = Mundo(pedido(pessoas=[nome]))
+    if cadastrada:
+        m.catalogo.acrescentar(nome, "apresentadora", [])
+
+    buscar(
+        m,
+        nome,
+        ajustes=Ajustes(evidencias=("fala", "gc") if mencoes else ("imagem",)),
+    )
+
+    textos = [c.texto for c in m.indice.consultas if c.texto]
+    assert textos
+    assert set(textos) == {"angelica or sato"}
+
+
 def test_desligar_o_chip_de_objeto_tira_as_clausulas_de_objeto() -> None:
     m = Mundo(pedido(objetos=[VESTIDO]))
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
@@ -1651,18 +1672,21 @@ def test_frase_entre_aspas_so_deixa_quem_tem_a_frase_inteira(modelo: bool) -> No
     assert _achados(resultado) == [0, 1]
 
 
-def test_frase_e_resto_da_consulta_ficam_so_com_a_frase() -> None:
+def test_frase_filtra_os_resultados_por_significado_mesmo_com_resto_na_consulta() -> (
+    None
+):
     m = Mundo("isto nao e json")
+    m.indice = IndicePorSignificado()
     _planos(m, *FRASES)
     resultado = buscar(m, '"vestido amarelo" calça')
     assert _achados(resultado) == [0, 1]
 
 
-def test_sem_aspas_vale_qualquer_palavra() -> None:
+def test_sem_aspas_exige_todas_as_palavras_sem_exigir_a_ordem() -> None:
     m = Mundo("isto nao e json")
     _planos(m, *FRASES)
     resultado = buscar(m, "vestido amarelo")
-    assert _achados(resultado) == [0, 1, 2, 3, 4]
+    assert _achados(resultado) == [0, 1, 4]
 
 
 @pytest.mark.parametrize("consulta", ['vestido "amarelo', 'vestido ""', '"'])
@@ -1714,7 +1738,7 @@ def test_a_frase_nao_se_repete_quando_o_modelo_a_poe_no_texto_livre() -> None:
     buscar(m, '"vestido amarelo"')
     # A frase não entra duas vezes; cada palavra vai com o outro número dela (#405).
     assert {c.texto for c in m.indice.consultas if c.texto} == {
-        "Vestido vestidos Amarelo amarelos"
+        "(vestido OR vestidos) (amarelo OR amarelos)"
     }
 
 
@@ -1893,7 +1917,14 @@ def test_objeto_pedido_no_singular_ou_no_plural_acha_o_mesmo_momento(
     consulta = singular if pedida == "singular" else plural
     m = Mundo(
         pedido(
-            objetos=[{"categoria": "produto", "tipo": na_consulta}],
+            objetos=[
+                {
+                    "categoria": "produto",
+                    "tipo": na_consulta,
+                    "cor_base": None,
+                    "pessoa": None,
+                }
+            ],
             evidencias=["objeto"],
         )
     )

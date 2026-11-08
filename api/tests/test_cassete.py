@@ -6,9 +6,20 @@ from typing import Any
 import pytest
 
 from api import gemini
-from api.cassete import CASSETE, gravar, instrucao_sha256
+from api.agent_retrieval import pedido_de_busca
+from api.cassete import (
+    CASSETE,
+    CASSETE_DA_BUSCA,
+    gravar,
+    gravar_busca,
+    instrucao_sha256,
+)
 from api.decupagem import VERSAO_ESQUEMA, Video
 from api.gemini import MODELO, VERSAO_DO_MODELO, analisar
+from api.indice_da_busca import Consulta
+from api.numero import com_as_formas
+from api.tests.test_agent_retrieval import CONFIG
+from api.tests.test_agent_retrieval import TransporteFalso as TransporteDaBuscaFalso
 from api.tests.test_gemini import BOA, VIDEO, VIDEO_CONFIAVEL, TransporteFalso
 
 
@@ -134,3 +145,66 @@ def test_nao_grava_sem_a_versao_do_modelo(tmp_path: Path) -> None:
         gravar(transporte, video_uri=VIDEO, video=VIDEO_CONFIAVEL, destino=destino)
 
     assert not destino.exists()
+
+
+def test_cassete_da_busca_confirma_o_pedido_atual_e_ao_menos_um_resultado() -> None:
+    if not CASSETE_DA_BUSCA.exists():
+        pytest.fail("grave com `make gravar-cassetes`")
+    cassete = json.loads(CASSETE_DA_BUSCA.read_text())
+    assert set(cassete) == {"origem", "pedido", "resultados"}
+    assert cassete["pedido"] == pedido_de_busca(
+        CONFIG, Consulta(texto=com_as_formas("gravata"))
+    )
+    if cassete["origem"] == "pendente":
+        pytest.skip("fixture manual; grave o cassete real com `make gravar-cassetes`")
+    assert cassete["origem"] == "nuvem"
+    assert cassete["resultados"] >= 1
+
+
+def test_grava_busca_pelo_adaptador_sem_guardar_dados_da_nuvem(tmp_path: Path) -> None:
+    transporte = TransporteDaBuscaFalso(
+        {
+            "results": [
+                {
+                    "results": [
+                        {
+                            "dataObject": {
+                                "name": "nao-gravar",
+                                "data": {
+                                    "id": "a",
+                                    "tipo": "fala",
+                                    "job_id": "j",
+                                    "inicio_ms": 0,
+                                    "fim_ms": 1,
+                                    "texto": "gravata",
+                                },
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+    destino = tmp_path / "busca.json"
+
+    gravar_busca(CONFIG, transporte, destino=destino)
+
+    [(metodo, caminho, pedido)] = transporte.chamadas
+    assert metodo == "POST"
+    assert caminho == f"{CONFIG.caminho_da_colecao}/dataObjects:batchSearch"
+    assert pedido == pedido_de_busca(CONFIG, Consulta(texto=com_as_formas("gravata")))
+    assert json.loads(destino.read_text()) == {
+        "origem": "nuvem",
+        "pedido": pedido,
+        "resultados": 1,
+    }
+
+
+def test_busca_vazia_nao_sobrescreve_o_cassete(tmp_path: Path) -> None:
+    destino = tmp_path / "busca.json"
+    destino.write_text("cassete anterior\n")
+
+    with pytest.raises(RuntimeError, match="nenhum resultado"):
+        gravar_busca(CONFIG, TransporteDaBuscaFalso({"results": []}), destino=destino)
+
+    assert destino.read_text() == "cassete anterior\n"
