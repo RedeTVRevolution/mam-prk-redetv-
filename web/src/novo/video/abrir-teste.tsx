@@ -23,6 +23,7 @@ export const JOB: Job = {
   timecode_origem: '01:00:00:00',
   taxa_de_quadros: 30,
   cortes_ms: [60_000, 120_000],
+  reprocessavel_ate: '2999-01-01T00:00:00Z',
   criado_em: '2026-10-21T10:00:00Z',
 }
 

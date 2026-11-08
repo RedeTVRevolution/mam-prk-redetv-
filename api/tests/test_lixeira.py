@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -165,11 +166,12 @@ def test_o_job_guarda_quando_quem_e_por_que_e_a_lista_mostra_os_dias_ate_a_purga
     }
 
 
-def test_impacto_conta_decupagem_correcoes_arquivos_e_outros_jobs_com_o_mesmo_conteudo() -> (
-    None
-):
+@pytest.mark.parametrize("copia_limpa", [0, 1])
+def test_impacto_conta_decupagem_correcoes_arquivos_e_outros_jobs_com_o_mesmo_conteudo(
+    copia_limpa: int,
+) -> None:
     mundo = Mundo(
-        _job(),
+        _job(criado_em=BASE - timedelta(days=8)),
         _job(
             "j2",
             nome="copia.mp4",
@@ -180,7 +182,7 @@ def test_impacto_conta_decupagem_correcoes_arquivos_e_outros_jobs_com_o_mesmo_co
         _job("j3", sha256="b" * 64),
     )
     mundo.arquivos.por_job["j1"] = ArquivosContados(
-        decupagem=1, copia_limpa=1, proxy=1, quadros=12
+        decupagem=1, copia_limpa=copia_limpa, proxy=1, quadros=12
     )
     mundo.correcoes.acrescentar(_correcao("c1"))
     mundo.correcoes.acrescentar(_correcao("c2"))
@@ -192,7 +194,7 @@ def test_impacto_conta_decupagem_correcoes_arquivos_e_outros_jobs_com_o_mesmo_co
     assert resposta.json() == {
         "decupagem": 1,
         "correcoes": 2,
-        "arquivos": {"copia_limpa": 1, "proxy": 1, "quadros": 12},
+        "arquivos": {"copia_limpa": copia_limpa, "proxy": 1, "quadros": 12},
         "outros_jobs": [
             {"id": "j2", "nome": "copia.mp4", "enviado_por": "ed@redetv.com"}
         ],

@@ -342,7 +342,7 @@ test('baixar o vídeo fica ocupado até a URL chegar e inicia o download por ela
   servidor.use(
     http.get('/v1/jobs/j1/download', async () => {
       await espera
-      return HttpResponse.json({ url: 'https://exemplo.test/v.mp4?baixar=1', expira_em: '2999-01-01T00:00:00Z' })
+      return HttpResponse.json({ url: 'https://exemplo.test/v.mp4?baixar=1', expira_em: '2999-01-01T00:00:00Z', aviso: 'A cópia em alta resolução está no arquivo da RedeTV. Este download é a versão de 480p processada pelo MAM.' })
     }),
   )
   const hrefs: string[] = []
@@ -351,12 +351,40 @@ test('baixar o vídeo fica ocupado até a URL chegar e inicia o download por ela
   })
   await abrirVideo()
 
-  const botao = screen.getByRole('button', { name: 'Baixar vídeo' })
+  const botao = screen.getByRole('button', { name: 'Baixar vídeo (480p)' })
   await usuario.click(botao)
   await waitFor(() => expect(botao.getAttribute('aria-busy')).toBe('true'))
   liberar()
+  const aviso = await screen.findByRole('dialog', { name: 'Baixar vídeo (480p)' })
+  expect(aviso.textContent).toContain(JOB.nome)
+  expect(aviso.textContent).toContain('A cópia em alta resolução está no arquivo da RedeTV. Este download é a versão de 480p processada pelo MAM.')
+  expect(hrefs).toEqual([])
+  await usuario.click(within(aviso).getByRole('button', { name: 'Baixar versão de 480p' }))
   await waitFor(() => expect(hrefs).toEqual(['https://exemplo.test/v.mp4?baixar=1']))
   await waitFor(() => expect(botao.getAttribute('aria-busy')).toBe('false'))
+})
+
+test('renova a URL ao confirmar o download se o aviso ficou aberto além da validade', async () => {
+  const agora = Date.now()
+  let pedidos = 0
+  servidor.use(http.get('/v1/jobs/j1/download', () => HttpResponse.json({
+    url: `https://exemplo.test/v.mp4?assinatura=${++pedidos}`,
+    expira_em: new Date(Date.now() + 300_000).toISOString(),
+    aviso: 'Este download é a versão de 480p processada pelo MAM.',
+  })))
+  const hrefs: string[] = []
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    hrefs.push(this.href)
+  })
+  await abrirVideo()
+  await userEvent.click(screen.getByRole('button', { name: 'Baixar vídeo (480p)' }))
+  const aviso = await screen.findByRole('dialog', { name: 'Baixar vídeo (480p)' })
+  expect(hrefs).toEqual([])
+  vi.spyOn(Date, 'now').mockReturnValue(agora + 360_000)
+
+  await userEvent.click(within(aviso).getByRole('button', { name: 'Baixar versão de 480p' }))
+
+  await waitFor(() => expect(hrefs).toEqual(['https://exemplo.test/v.mp4?assinatura=2']))
 })
 
 test('falha ao preparar o download do vídeo mostra a mensagem em português', async () => {
@@ -364,7 +392,7 @@ test('falha ao preparar o download do vídeo mostra a mensagem em português', a
   servidor.use(http.get('/v1/jobs/j1/download', () => new HttpResponse(null, { status: 503 })))
   await abrirVideo()
 
-  await usuario.click(screen.getByRole('button', { name: 'Baixar vídeo' }))
+  await usuario.click(screen.getByRole('button', { name: 'Baixar vídeo (480p)' }))
 
   const aviso = await screen.findByRole('alert')
   expect(aviso.textContent).toContain('Não foi possível preparar o download. Tente de novo.')
@@ -501,4 +529,15 @@ test('um Job preso há horas volta a oferecer "Reprocessar…", sem dizer que es
 
   expect(within(await menu()).getByRole('menuitem', { name: /Reprocessar…/ })).toBeTruthy()
   expect(screen.queryByText(/em andamento/)).toBeNull()
+})
+
+
+test.each([false, true])('reprocessar vencido permanece no menu, desabilitado e com a explicação (vence com a tela aberta: %s)', async (venceDepois) => {
+  const agora = Date.now()
+  job = { reprocessavel_ate: new Date(agora + (venceDepois ? 60_000 : -60_000)).toISOString() }
+  await abrirVideo({ permissoes: ['video.reprocessar_etapa'] })
+  vi.spyOn(Date, 'now').mockReturnValue(agora + 60_000)
+  const aberto = await menu()
+  expect(within(aberto).getByRole('menuitem', { name: /Reprocessar…/ }).getAttribute('aria-disabled')).toBe('true')
+  expect(aberto.textContent).toContain('O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: a cópia em alta resolução e o áudio não ficam guardados no MAM. Para reprocessar, envie o vídeo de novo a partir do arquivo da RedeTV.')
 })

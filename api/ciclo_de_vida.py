@@ -36,6 +36,9 @@ TRANSICOES: dict[Estado, frozenset[Estado]] = {
 }
 FINAIS = frozenset(e for e, destinos in TRANSICOES.items() if not destinos)
 
+# Manter em acordo com o age = 7 do bucket aceitos em infra/modulos/mam/main.tf.
+PRAZO_DO_REPROCESSAMENTO = timedelta(days=7)
+
 
 class TransicaoProibida(Exception):
     def __init__(self, de: Estado, para: Estado) -> None:
@@ -338,6 +341,12 @@ def reprocessar(
 
     def mudar(job: Job) -> dict[str, Any]:
         lido[:] = [job]
+        if agora - job.criado_em >= PRAZO_DO_REPROCESSAMENTO:
+            raise NaoReprocessavel(
+                "O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: "
+                "a cópia em alta resolução e o áudio não ficam guardados no MAM. "
+                "Para reprocessar, envie o vídeo de novo a partir do arquivo da RedeTV."
+            )
         partida = etapa_de_partida(job, etapa_escolhida)
         ordem = _ordem_das_etapas()
         etapas = {

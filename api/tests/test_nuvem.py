@@ -568,13 +568,13 @@ def test_url_de_reproducao_devolve_o_proxy_por_get(
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
-def test_url_de_download_devolve_a_copia_limpa_como_anexo_com_o_nome(
+def test_url_de_download_devolve_o_proxy_como_anexo_com_o_nome(
     armazenamento: ArmazenamentoStorage,
 ) -> None:
     _com_buckets(armazenamento)
     armazenamento._cliente.bucket(armazenamento._aceitos).blob(
-        "job1/copia_limpa.mp4"
-    ).upload_from_string(b"copia-bytes", content_type="video/mp4")
+        "job1/proxy.mp4"
+    ).upload_from_string(b"proxy-bytes", content_type="video/mp4")
 
     url = armazenamento.url_de_download(
         "job1", 'Jornal "Ação"; 1.mp4', timedelta(minutes=5)
@@ -582,7 +582,7 @@ def test_url_de_download_devolve_a_copia_limpa_como_anexo_com_o_nome(
 
     consulta = parse_qs(urlparse(url).query)
     assert consulta["X-Goog-Expires"] == ["300"]
-    assert "teste-aceitos" in url and "job1/copia_limpa.mp4" in url
+    assert "teste-aceitos" in url and "job1/proxy.mp4" in url
     disposicao = (
         'attachment; filename="Jornal _Acao__ 1.mp4"; '
         "filename*=UTF-8''Jornal%20%22A%C3%A7%C3%A3o%22%3B%201.mp4"
@@ -591,7 +591,7 @@ def test_url_de_download_devolve_a_copia_limpa_como_anexo_com_o_nome(
     partes = urlparse(url)
     resposta = requests.get(f"{EMULADOR_STORAGE}{partes.path}?{partes.query}")
     assert resposta.status_code == 200
-    assert resposta.content == b"copia-bytes"
+    assert resposta.content == b"proxy-bytes"
 
 
 class AssinaturaQueConta:
@@ -717,12 +717,16 @@ def test_abrir_decupagem_inexistente_vira_servico_indisponivel(
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+@pytest.mark.parametrize("copia_limpa", [0, 1])
 def test_arquivos_no_storage_conta_o_que_o_job_tem(
     armazenamento: ArmazenamentoStorage,
+    copia_limpa: int,
 ) -> None:
     _com_buckets(armazenamento)
     aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
     decupagens = armazenamento._cliente.bucket(armazenamento._decupagens)
+    if copia_limpa:
+        aceitos.blob("job1/copia_limpa.mp4").upload_from_string(b"x")
     aceitos.blob("job1/proxy.mp4").upload_from_string(b"x")
     decupagens.blob("job1.json").upload_from_string(b"{}")
     decupagens.blob("job1/quadros/plano-0.jpg").upload_from_string(b"x")
@@ -735,12 +739,14 @@ def test_arquivos_no_storage_conta_o_que_o_job_tem(
     contados = arquivos.contar("job1")
 
     assert (contados.decupagem, contados.proxy, contados.quadros) == (1, 1, 2)
-    assert contados.copia_limpa == 0
+    assert contados.copia_limpa == copia_limpa
 
 
 @pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
+@pytest.mark.parametrize("copia_limpa", [False, True])
 def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro(
     armazenamento: ArmazenamentoStorage,
+    copia_limpa: bool,
 ) -> None:
     _com_buckets(armazenamento)
     aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
@@ -749,18 +755,25 @@ def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro(
         aceitos: ["job1/proxy.mp4", "job1/copia_limpa.mp4", "job1/janelas/0000.json"],
         decupagens: ["job1.json", "job1.comparacao.json", "job1/quadros/plano-0.jpg"],
     }
+    if not copia_limpa:
+        do_job[aceitos].remove("job1/copia_limpa.mp4")
     de_outro = {aceitos: ["job10/proxy.mp4"], decupagens: ["job10.json", "job2.json"]}
-    for bucket, objetos in (do_job | de_outro).items():
+    for bucket, objetos in (*do_job.items(), *de_outro.items()):
         for objeto in objetos:
             bucket.blob(objeto).upload_from_string(b"x")
     arquivos = ArquivosNoStorage(
         armazenamento._cliente, armazenamento._aceitos, armazenamento._decupagens
     )
 
+    assert all(b.blob(o).exists() for b, os in do_job.items() for o in os)
+    assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
+    assert aceitos.blob("job1/copia_limpa.mp4").exists() is copia_limpa
+
     arquivos.apagar("job1")
     arquivos.apagar("job1")
 
     assert not any(b.blob(o).exists() for b, os in do_job.items() for o in os)
+    assert not aceitos.blob("job1/copia_limpa.mp4").exists()
     assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
 
 
@@ -1947,3 +1960,16 @@ def test_objeto_do_quadro_recusa_caminho_que_sobe() -> None:
     with pytest.raises(ValueError):
         objeto_do_quadro("job-1", "quadros/a\x00.jpg")
     assert objeto_do_quadro("job-1", "quadros/a.jpg") == "job-1/quadros/a.jpg"
+
+
+def test_download_assina_o_proxy_com_o_nome_480p() -> None:
+    armazenamento, _ = _armazenamento_que_conta([BASE])
+    esperado = "Jornal.480p.mp4"
+
+    url = armazenamento.url_de_download("j1", esperado, timedelta(minutes=5))
+
+    assert urlparse(url).path.endswith("/j1/proxy.mp4")
+    consulta = parse_qs(urlparse(url).query)
+    assert consulta["response-content-disposition"] == [
+        "attachment; filename=\"Jornal.480p.mp4\"; filename*=UTF-8''Jornal.480p.mp4"
+    ]

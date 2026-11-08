@@ -259,3 +259,15 @@ def test_job_sem_duracao_fica_fora_do_custo_e_e_avisado() -> None:
     assert "duração n/d" in texto
     assert "2 Jobs, 1.00 h" in texto and "US$ 2,00" in texto
     assert "1 Jobs sem duração" in texto
+
+
+def test_job_com_sete_dias_e_contado_como_ignorado_sem_disparo() -> None:
+    mundo = Mundo(
+        [_job("velho", dia=-7), _job("recente")], {"velho": None, "recente": None}
+    )
+
+    texto = "\n".join(mundo.rodar(confirmar=True))
+
+    assert mundo.disparo.disparos == [("recente", "analise")]
+    assert sum("ignorado (" in linha for linha in texto.splitlines()) == 1
+    assert "O prazo de reprocessamento" in texto

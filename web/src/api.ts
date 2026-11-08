@@ -105,7 +105,7 @@ export interface ClienteDoJob {
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
   /** URL assinada para baixar o MP4; o download vai à auditoria (`video.baixado`). */
-  baixarVideo(): Promise<Reproducao>
+  baixarVideo(): Promise<Reproducao & { aviso: string }>
   /** O arquivo JSON da decupagem, pela rota do servidor que registra o download. */
   baixarDecupagem(): Promise<Blob>
   /** As passadas de comparação do Job (exige `decupagem.ver`). */

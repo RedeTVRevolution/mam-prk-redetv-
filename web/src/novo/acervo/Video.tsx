@@ -7,7 +7,7 @@ import { tempo } from '../../linhaDoTempo.ts'
 import { enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { urlSegura } from '../../urlSegura.ts'
 import { estadoDoVideo, TALLY } from '../comum/estado.ts'
-import { podeIrParaALixeira, podeReprocessar } from '../comum/regras.ts'
+import { AVISO_DO_REPROCESSAMENTO, podeIrParaALixeira, podeReprocessar, prazoDeReprocessamentoVencido } from '../comum/regras.ts'
 import { SeloDeEstado } from '../comum/SeloDeEstado.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
@@ -83,17 +83,19 @@ function FraseDaFalha({ codigo }: { codigo: string }) {
 }
 
 function MenuDoVideo({ job, permissoes, aoAcao }: Omit<PropsDoVideo, 'indice'>) {
-  const itens: { rotulo: string; Icone: Icon; acao: () => void }[] = []
+  const [agora, setAgora] = useState(Date.now)
+  const prazoVencido = prazoDeReprocessamentoVencido(job, agora)
+  const itens: { rotulo: string; Icone: Icon; acao: () => void; desabilitado?: boolean }[] = []
   if (abre(job)) {
     itens.push({ rotulo: 'Abrir o vídeo', Icone: IconPlayerPlay, acao: () => navegar(enderecoDoVideo(job.id)) })
     itens.push({ rotulo: 'Copiar o link', Icone: IconLink, acao: () => aoAcao('copiar', job) })
   }
   if (job.estado === 'concluido') itens.push({ rotulo: 'Baixar a decupagem', Icone: IconDownload, acao: () => aoAcao('baixar', job) })
-  if (podeReprocessar(job, permissoes)) itens.push({ rotulo: 'Reprocessar…', Icone: IconRefresh, acao: () => aoAcao('reprocessar', job) })
+  if (podeReprocessar(job, permissoes)) itens.push({ rotulo: 'Reprocessar…', Icone: IconRefresh, acao: () => aoAcao('reprocessar', job), desabilitado: prazoVencido })
   const lixeira = podeIrParaALixeira(job, permissoes)
   if (!itens.length && !lixeira) return null
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} onOpenChange={(aberto) => aberto && setAgora(Date.now())}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -105,10 +107,11 @@ function MenuDoVideo({ job, permissoes, aoAcao }: Omit<PropsDoVideo, 'indice'>) 
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         {itens.map((i) => (
-          <DropdownMenuItem key={i.rotulo} onSelect={i.acao}>
+          <DropdownMenuItem key={i.rotulo} disabled={i.desabilitado} aria-describedby={i.desabilitado ? `prazo-${job.id}` : undefined} onSelect={i.acao}>
             <i.Icone stroke={1.75} aria-hidden /> {i.rotulo}
           </DropdownMenuItem>
         ))}
+        {prazoVencido && podeReprocessar(job, permissoes) && <p id={`prazo-${job.id}`} className="px-2 py-1 text-xs text-muted-foreground">{AVISO_DO_REPROCESSAMENTO}</p>}
         {lixeira && (
           <>
             {itens.length > 0 && <DropdownMenuSeparator />}

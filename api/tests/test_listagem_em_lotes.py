@@ -244,7 +244,11 @@ def test_os_campos_da_lista_cobrem_o_job_resumido_e_os_obrigatorios_do_job() -> 
     from api.jobs import JobResumido
     from api.nuvem import _CAMPOS_DA_LISTA
 
-    do_resumo = set(JobResumido.model_fields) - {"enviado_por", "capa_url"}
+    do_resumo = set(JobResumido.model_fields) - {
+        "enviado_por",
+        "capa_url",
+        "reprocessavel_ate",
+    }
     obrigatorios = {n for n, c in Job.model_fields.items() if c.is_required()}
 
     assert do_resumo | obrigatorios | {"capa", "sistema", "criado_por_email"} <= (

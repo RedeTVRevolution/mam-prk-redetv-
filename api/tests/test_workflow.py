@@ -620,12 +620,13 @@ def test_o_bucket_das_referencias_nao_tem_regra_de_ciclo_de_vida() -> None:
         "\nresource "
     )[0]
 
-    # A única regra de ciclo de vida é a do original na quarentena (#369).
-    assert bucket.count("lifecycle_rule") == 1
-    assert (
-        'for_each = each.key == "quarentena" ? [1] : []'
-        in bucket.split('dynamic "lifecycle_rule"')[1].split("content")[0]
-    )
+    # Só a quarentena (#369) e as entradas aceitas (#502) expiram; referências ficam.
+    regras = bucket.split('dynamic "lifecycle_rule"')[1:]
+    assert len(regras) == 2
+    for regra, chave in zip(regras, ("quarentena", "aceitos"), strict=True):
+        assert (
+            f'for_each = each.key == "{chave}" ? [1] : []' in regra.split("content")[0]
+        )
     assert "prazo_dos_palpites_dias" not in main
 
 

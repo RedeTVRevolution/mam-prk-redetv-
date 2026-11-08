@@ -35,6 +35,7 @@ export interface Job {
   enviado_por?: { tipo: 'pessoa' | 'sistema'; nome: string | null }
   /** As etapas iniciadas, da primeira à última. */
   etapas?: EtapaDoJob[]
+  reprocessavel_ate: string
   criado_em: string
   atualizado_em?: string
 }
