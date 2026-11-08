@@ -8,6 +8,7 @@ const JOB: Job = {
   estado: 'concluido',
   codigo_falha: null,
   criado_em: '2026-11-01T12:00:00Z',
+  reprocessavel_ate: '2026-11-08T12:00:00Z',
   atualizado_em: '2026-11-04T12:00:00Z',
   etapas: [
     { nome: 'transcricao', inicio: '2026-11-01T12:01:00Z', fim: '2026-11-01T12:05:00Z', resultado: 'concluida' },
