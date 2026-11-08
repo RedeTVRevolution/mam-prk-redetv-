@@ -1947,3 +1947,19 @@ def test_objeto_do_quadro_recusa_caminho_que_sobe() -> None:
     with pytest.raises(ValueError):
         objeto_do_quadro("job-1", "quadros/a\x00.jpg")
     assert objeto_do_quadro("job-1", "quadros/a.jpg") == "job-1/quadros/a.jpg"
+
+
+def test_ano_da_copia_usa_array_union_sem_substituir_o_marcador() -> None:
+    gravacoes: list[dict[str, Any]] = []
+
+    class Documento:
+        def document(self, _: str) -> "Documento":
+            return self
+
+        def update(self, campos: dict[str, Any]) -> None:
+            gravacoes.append(campos)
+
+    repositorio = RepositorioFirestore(_ClienteSemRede(Documento()))  # type: ignore[arg-type]
+    repositorio.acrescentar_ano_da_copia("j1", 2026)
+
+    assert gravacoes == [{"copia_bigquery.anos": firestore.ArrayUnion([2026])}]

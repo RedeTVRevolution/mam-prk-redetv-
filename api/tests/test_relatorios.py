@@ -90,8 +90,11 @@ def test_transporte_http_pede_a_pagina_seguinte_com_get_no_job(
 
     chamar({"query": "SELECT 1"})
     chamar({"jobId": "job-1", "location": "US", "pageToken": "t1"})
+    referencia = {"projectId": "outro", "jobId": "merge", "location": "r"}
+    chamar({"jobReference": referencia})
+    chamar({"jobReference": referencia, "cancelar": True})
 
-    (m1, url1, kw1), (m2, url2, kw2) = chamadas
+    (m1, url1, kw1), (m2, url2, kw2), (m3, url3, kw3), (m4, url4, kw4) = chamadas
     assert (m1, url1, kw1["json"]) == (
         "POST",
         f"{copia.URL_BASE}/projects/proj/queries",
@@ -99,6 +102,17 @@ def test_transporte_http_pede_a_pagina_seguinte_com_get_no_job(
     )
     assert (m2, url2) == ("GET", f"{copia.URL_BASE}/projects/proj/queries/job-1")
     assert kw2["params"] == {"location": "US", "pageToken": "t1"}
+    assert (m3, url3, kw3["params"]) == (
+        "GET",
+        f"{copia.URL_BASE}/projects/outro/jobs/merge",
+        {"location": "r"},
+    )
+    assert (m4, url4, kw4["params"]) == (
+        "POST",
+        f"{copia.URL_BASE}/projects/outro/jobs/merge/cancel",
+        {"location": "r"},
+    )
+    assert "json" not in kw4
 
 
 def test_pagina_sem_o_job_vira_erro_de_consulta_e_nao_key_error() -> None:

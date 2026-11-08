@@ -199,7 +199,7 @@ preencher-filtros-da-busca:
 # Copia no BigQuery (#260) as decupagens dos Jobs concluídos, ou a de um Job: make copiar-para-bigquery [JOB=<id>].
 # Troca as linhas do vídeo; repetir dá o mesmo resultado. Nomes vêm do Terraform, salvo se já vierem no ambiente.
 copiar-para-bigquery:
-	set -a && . ./.env && set +a && \
+	$(AMBIENTE_DA_BUSCA) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
