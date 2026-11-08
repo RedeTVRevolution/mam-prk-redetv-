@@ -579,23 +579,73 @@ def test_503_passageiro_na_liberacao_libera_a_vaga_do_florence(
     assert not any(log.get("severity") == "ERROR" for log in fila.logs)
 
 
+@pytest.mark.parametrize(
+    "etapa", ["transcricao", "leitura_da_tela", "inventario_de_objetos"]
+)
+def test_cota_esgotada_falha_na_gpu_e_libera_a_vaga(
+    monkeypatch: pytest.MonkeyPatch, etapa: str
+) -> None:
+    fila = FilaLocal()
+    fila.definicao = _definicao({"gpu_espera_total_s": "0"})
+    fila.job(
+        "a", estado="concluido" if etapa == "inventario_de_objetos" else "analisando"
+    )
+    chamar = fila.chamar
+    execucoes = []
+    dispositivos = []
+
+    def chamar_com_cota_esgotada(nome: str, args: dict[str, Any]) -> Any:
+        if nome.endswith("jobs.run"):
+            execucoes.append(args["name"])
+            raise ErroDaChamada(429)
+        if nome.endswith("documents.get") and "/jobs/" in args["name"]:
+            documento = chamar(nome, args)
+            documento["fields"]["etapas"] = {"mapValue": {"fields": {etapa: {}}}}
+            return documento
+        if nome.endswith("documents.patch") and "/jobs/" in args["name"]:
+            dispositivos.append(
+                args["body"]["fields"]["etapas"]["mapValue"]["fields"][etapa]
+            )
+            return None
+        return chamar(nome, args)
+
+    monkeypatch.setattr(fila, "chamar", chamar_com_cota_esgotada)
+    with pytest.raises(ErroDaChamada) as erro:
+        fila.executar(
+            "roda_o_job_com_gpu",
+            job_id="a",
+            etapa=etapa,
+            job_gpu="gpu",
+            timeout_gpu=300,
+        )
+    assert erro.value.dados["code"] == 429
+    assert len(execucoes) == 1 and execucoes[0].endswith("/gpu")
+    assert dispositivos == [
+        {
+            "mapValue": {
+                "fields": {
+                    "dispositivo": {"stringValue": "gpu"},
+                    "tentativas_gpu": {"integerValue": "1"},
+                }
+            }
+        }
+    ]
+    assert fila.itens("ocupadas") == [] and fila.itens("espera") == []
+
+
 @pytest.mark.parametrize("metodo", ["get", "patch"])
 @pytest.mark.parametrize(
-    "erro_gpu,job_cpu,erro_cpu,resultado",
+    "erro_gpu,resultado",
     [
-        (None, "cpu", None, "gpu"),
-        (400, "cpu", None, 400),
-        (429, "cpu", None, "cpu"),
-        (429, None, None, 429),
-        (429, "cpu", 403, 403),
+        (None, "gpu"),
+        (400, 400),
+        (429, 429),
     ],
 )
 def test_fila_indisponivel_na_liberacao_preserva_resultado_ou_erro_da_etapa(
     monkeypatch: pytest.MonkeyPatch,
     metodo: str,
     erro_gpu: int | None,
-    job_cpu: str | None,
-    erro_cpu: int | None,
     resultado: str | int,
 ) -> None:
     fila = FilaLocal()
@@ -614,9 +664,8 @@ def test_fila_indisponivel_na_liberacao_preserva_resultado_ou_erro_da_etapa(
         if nome.endswith("jobs.run"):
             job = args["name"].rsplit("/", 1)[1]
             execucoes.append(job)
-            codigo = erro_gpu if job == "gpu" else erro_cpu
-            if codigo:
-                raise ErroDaChamada(codigo)
+            if erro_gpu:
+                raise ErroDaChamada(erro_gpu)
             return None
         return chamar(nome, args)
 
@@ -626,8 +675,6 @@ def test_fila_indisponivel_na_liberacao_preserva_resultado_ou_erro_da_etapa(
         "etapa": "transcricao",
         "job_gpu": "gpu",
         "timeout_gpu": 300,
-        "job_cpu": job_cpu,
-        "timeout_cpu": 300,
     }
     if isinstance(resultado, int):
         with pytest.raises(ErroDaChamada) as erro:
@@ -635,5 +682,5 @@ def test_fila_indisponivel_na_liberacao_preserva_resultado_ou_erro_da_etapa(
         assert erro.value.dados == {"code": resultado, "tags": ["HttpError"]}
     else:
         assert fila.executar("roda_o_job_com_gpu", **args) == resultado
-    assert execucoes == (["gpu", "cpu"] if erro_gpu == 429 and job_cpu else ["gpu"])
+    assert execucoes == ["gpu"]
     assert any(log.get("data", {}).get("code") == 503 for log in fila.logs)

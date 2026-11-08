@@ -2,13 +2,13 @@
 # quarentena), roda o Job de validação e, se a execução falhar, marca o Job como
 # falhou, salvo se estiver cancelado. Depois, só se o Job ficou em `analisando`, roda em
 # paralelo a transcrição e a leitura da tela (E1, ADR 0007: cada uma num Job com GPU em
-# `${regiao_gpu}`, com o Job em CPU de `${regiao}` como plano B) e, quando as duas terminam,
+# `${regiao_gpu}`) e, quando as duas terminam,
 # o Job de análise. Com o Job `concluido`, vêm a
 # identificação (sem internet) (#112), depois os quadros-chave (#115), o inventário de objetos (#244) e a indexação: se um deles falha, o Job
 # de análise já concluiu e a falha só vai ao log e à etapa, e o passo seguinte roda. A análise é um Job, e não uma
 # chamada HTTP, porque passa do teto de 1800 s da chamada do Workflows (#127).
 # Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
-# ${job_de_transcricao}, ${job_de_ocr}, ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
+# ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
 # ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
 # ${job_de_objetos_gpu}, ${motor_objetos}, ${job_de_inventario} (o inventário de objetos, #244:
 # o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
@@ -239,11 +239,9 @@ processa:
                                     job_id: $${job_id}
                                     etapa: transcricao
                                     job_gpu: ${job_de_transcricao_gpu}
-                                    job_cpu: ${job_de_transcricao}
                                     # O conector desiste em 1800 s por padrão; o Job de transcrição
-                                    # com GPU tem até 10800 s, e o em CPU, até 21600 s.
+                                    # com GPU tem até 10800 s.
                                     timeout_gpu: 11100
-                                    timeout_cpu: 21900
                                     codigo_da_falha: transcricao_falhou
                                     mostra_a_etapa: true
               - ramo_da_leitura_da_tela:
@@ -258,10 +256,8 @@ processa:
                                     job_id: $${job_id}
                                     etapa: leitura_da_tela
                                     job_gpu: ${job_de_ocr_gpu}
-                                    job_cpu: ${job_de_ocr}
-                                    # O Job de OCR com GPU tem até 21600 s, e o em CPU, até 28800 s.
+                                    # O Job de OCR com GPU tem até 21600 s.
                                     timeout_gpu: 21900
-                                    timeout_cpu: 29100
                                     codigo_da_falha: ocr_falhou
                                     mostra_a_etapa: $${not roda_a_transcricao}
         except:
@@ -831,12 +827,12 @@ marca_fim:
         return: null
 
 # Uma etapa de GPU (a transcrição ou a leitura da tela), num ramo do paralelo: abre a etapa,
-# roda o Job com GPU com as novas tentativas e o plano B em CPU (`roda_o_job_com_gpu`) e
+# roda o Job com GPU com as novas tentativas (`roda_o_job_com_gpu`) e
 # fecha a etapa. Se falha, grava o fim como `falhou` e, se o Job segue em `analisando`
 # e não mudou desde a leitura, o derruba com o código da etapa. A falha sobe para o
 # paralelo, que não deixa a análise começar.
 etapa_com_gpu:
-  params: [job_id, etapa, job_gpu, job_cpu, timeout_gpu, timeout_cpu, codigo_da_falha, mostra_a_etapa]
+  params: [job_id, etapa, job_gpu, timeout_gpu, codigo_da_falha, mostra_a_etapa]
   steps:
     - inicia_a_etapa:
         call: marca_inicio
@@ -851,9 +847,7 @@ etapa_com_gpu:
             job_id: $${job_id}
             etapa: $${etapa}
             job_gpu: $${job_gpu}
-            job_cpu: $${job_cpu}
             timeout_gpu: $${timeout_gpu}
-            timeout_cpu: $${timeout_cpu}
         except:
           as: e
           steps:
@@ -933,18 +927,18 @@ etapa_com_gpu:
 
 # Cada etapa pega uma vaga FIFO antes de pedir a GPU e a mantém nas tentativas por cota.
 # A espera por cota protege também contra GPUs usadas fora da fila e falta na região.
-# O Job com GPU de `${regiao_gpu}`, com novas tentativas só quando falta GPU ou cota, e o Job
-# em CPU de `${regiao}` como plano B. Conta como falta de GPU ou de cota só a falha antes de o
+# O Job com GPU de `${regiao_gpu}`, com novas tentativas só quando falta GPU ou cota.
+# Esgotada a espera, a falha sobe. Conta como falta de GPU ou de cota só a falha antes de o
 # contêiner rodar: o pedido recusado por cota (429) ou uma mensagem de cota, capacidade ou
 # recurso esgotado, sem código de saída do contêiner. Uma falha dentro do contêiner (Whisper,
-# Paddle, arquivo) sobe na hora, sem nova tentativa e sem plano B: rodar de novo, por até uma
+# Paddle, arquivo) sobe na hora, sem nova tentativa: rodar de novo, por até uma
 # hora, um erro que vai se repetir não ajuda. A espera começa em `${gpu_espera_s}` s, é
 # multiplicada por `${gpu_fator_da_espera}` a cada vez, com teto de `${gpu_espera_maxima_s}` s, e a soma das esperas
 # não passa de `${gpu_espera_total_s}` s (a variável `espera_gpu_minutos` do infra/main.tf, a mesma do
 # teste depois da publicação): é dessa conta que sai o número de tentativas. O registro da
-# etapa recebe onde rodou (`gpu` ou `cpu`) e as tentativas feitas na GPU.
+# etapa recebe `gpu` e as tentativas feitas na GPU.
 roda_o_job_com_gpu:
-  params: [job_id, etapa, job_gpu, timeout_gpu, job_cpu: null, timeout_cpu: null]
+  params: [job_id, etapa, job_gpu, timeout_gpu]
   steps:
     - prepara_as_tentativas:
         assign:
@@ -1005,13 +999,12 @@ roda_o_job_com_gpu:
                                   call: sys.log
                                   args:
                                     severity: ERROR
-                                    text: '$${"o Job " + job_gpu + " falhou dentro do contêiner na tentativa " + string(tentativas) + " para " + job_id + ", sem nova tentativa e sem plano B: " + mensagem}'
+                                    text: '$${"o Job " + job_gpu + " falhou dentro do contêiner na tentativa " + string(tentativas) + " para " + job_id + ", sem nova tentativa: " + mensagem}'
                               - marca_a_gpu_da_falha:
                                   call: marca_dispositivo
                                   args:
                                     job_id: $${job_id}
                                     etapa: $${etapa}
-                                    dispositivo: gpu
                                     tentativas: $${tentativas}
                               - repassa_a_falha_do_conteiner:
                                   raise: $${erro_da_gpu}
@@ -1029,7 +1022,7 @@ roda_o_job_com_gpu:
                         switch:
                           - condition: $${esperado + espera <= ${gpu_espera_total_s}}
                             next: registra_a_nova_tentativa
-                        next: libera_antes_da_cpu
+                        next: registra_a_espera_esgotada
             - libera_no_sucesso:
                 try:
                   call: atualiza_fila_gpu
@@ -1050,7 +1043,6 @@ roda_o_job_com_gpu:
                 args:
                   job_id: $${job_id}
                   etapa: $${etapa}
-                  dispositivo: gpu
                   tentativas: $${tentativas}
             - fim_na_gpu:
                 return: gpu
@@ -1068,66 +1060,19 @@ roda_o_job_com_gpu:
                   - esperado: $${esperado + espera}
                   - espera: $${math.min(espera * ${gpu_fator_da_espera}, ${gpu_espera_maxima_s})}
                 next: renova_antes_da_tentativa
-            # Sem Job em CPU (o inventário de objetos, #244), esgotada a espera a falha sobe.
-            - libera_antes_da_cpu:
-                try:
-                  call: atualiza_fila_gpu
-                  args:
-                    job_id: $${job_id}
-                    etapa: $${etapa}
-                    acao: liberar
-                except:
-                  as: erro_ao_liberar_antes_da_cpu
-                  steps:
-                    - registra_a_liberacao_antes_da_cpu_pendente:
-                        call: sys.log
-                        args:
-                          severity: ERROR
-                          data: $${erro_ao_liberar_antes_da_cpu}
-            - confere_se_ha_plano_b:
-                switch:
-                  - condition: $${job_cpu == null}
-                    steps:
-                      - registra_a_falta_de_plano_b:
-                          call: sys.log
-                          args:
-                            severity: WARNING
-                            text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", sem plano B: " + mensagem}'
-                      - marca_a_gpu_sem_plano_b:
-                          call: marca_dispositivo
-                          args:
-                            job_id: $${job_id}
-                            etapa: $${etapa}
-                            dispositivo: gpu
-                            tentativas: $${tentativas}
-                      - repassa_a_falta_de_gpu:
-                          raise: $${erro_final}
-            - registra_o_plano_b:
+            - registra_a_espera_esgotada:
                 call: sys.log
                 args:
                   severity: WARNING
-                  text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", plano B: o Job em CPU " + job_cpu + ": " + mensagem}'
-            - marca_a_cpu:
+                  text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ": " + mensagem}'
+            - marca_a_gpu_da_espera_esgotada:
                 call: marca_dispositivo
                 args:
                   job_id: $${job_id}
                   etapa: $${etapa}
-                  dispositivo: cpu
                   tentativas: $${tentativas}
-            - roda_na_cpu:
-                call: googleapis.run.v2.projects.locations.jobs.run
-                args:
-                  name: $${"projects/${projeto}/locations/${regiao}/jobs/" + job_cpu}
-                  body:
-                    overrides:
-                      containerOverrides:
-                        - env:
-                            - name: JOB_ID
-                              value: $${job_id}
-                  connector_params:
-                    timeout: $${timeout_cpu}
-            - fim_na_cpu:
-                return: cpu
+            - repassa_a_falta_de_gpu:
+                raise: $${erro_final}
         except:
           as: erro_com_vaga
           steps:
@@ -1448,7 +1393,7 @@ le_job_da_fila:
 # Onde a etapa rodou e quantas tentativas foram feitas na GPU (#239), no mesmo registro da
 # etapa (#146). Como o resto da medição, uma falha aqui só vai ao log.
 marca_dispositivo:
-  params: [job_id, etapa, dispositivo, tentativas]
+  params: [job_id, etapa, tentativas]
   steps:
     - le_a_etapa:
         try:
@@ -1479,7 +1424,7 @@ marca_dispositivo:
               mapValue:
                 fields:
                   dispositivo:
-                    stringValue: $${dispositivo}
+                    stringValue: gpu
                   tentativas_gpu:
                     integerValue: $${string(tentativas)}
     - grava_o_dispositivo:

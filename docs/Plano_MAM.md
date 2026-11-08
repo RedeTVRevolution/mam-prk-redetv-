@@ -116,6 +116,8 @@ A arquitetura é toda serverless e gerenciada: nada fica ligado sem vídeo para 
 
 O caminho de um vídeo: a API registra o job no Firestore; o arquivo chega ao Cloud Storage; o Eventarc dispara o Workflows, que roda preparação, análise por janela e consolidação em sequência; a decupagem vai ao Storage e o cliente é avisado por webhook.
 
+A transcrição e a leitura da tela rodam em paralelo, só na GPU em `us-east4`, pela fila FIFO (#498), sem plano B em CPU (decisão de Bruno em 07/11/2026, [ADR 0007](adr/0007-transcricao-e-ocr-em-gpu-no-us-east4.md)). Se a espera por GPU ou cota (`espera_gpu_minutos`) se esgota depois de obter a vaga, a etapa e o vídeo falham; o reprocessamento é manual. O Florence mantém a exceção: a decupagem segue sem inventário. A métrica e o gráfico “Falta de GPU ou de cota” continuam.
+
 | Serviço | Papel | Por que este |
 | --- | --- | --- |
 | Cloud Run (serviços) | Front e API | Escalam a zero; o front exige sessão do Identity Platform e a API, chave de API |

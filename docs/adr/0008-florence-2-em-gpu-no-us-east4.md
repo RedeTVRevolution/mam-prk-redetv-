@@ -14,5 +14,5 @@ A etapa de inventário de objetos (objetos de cena: veículo, produto, eletrôni
 
 Alternativas recusadas:
 - **Florence-2 da Microsoft com código remoto:** exige executar código baixado em tempo de execução.
-- **Florence-2 em CPU:** seria mais um Job lento em CPU por quadro, sem plano B que compense; a decisão de plano B (`motor_objetos=gemini`) fica no Workflows.
+- **Florence-2 em CPU:** seria mais um Job lento em CPU por quadro. Como na decisão de 07/11/2026 da ADR 0007, não há plano B em CPU: o Florence espera na fila FIFO e, se falhar, a decupagem segue sem inventário. `motor_objetos=gemini` é uma escolha de configuração, não um desvio automático.
 - **Outra região:** o jurídico aprovou `us-east4`.

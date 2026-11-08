@@ -372,7 +372,7 @@ def test_modelos_do_dockerfile_estao_fixados_por_revisao_e_hash() -> None:
     raiz = Path(__file__).parents[2]
     dockerfile = (raiz / "Dockerfile").read_text()
     script = (raiz / "scripts" / "baixar-modelos-ocr.sh").read_text()
-    alvo = dockerfile[dockerfile.index("AS ocr\n") :].split("\nFROM ")[0]
+    alvo = dockerfile[dockerfile.index("AS ocr-gpu\n") :].split("\nFROM ")[0]
 
     # O Dockerfile só escolhe o detector pelo ARG; revisões e hashes vão no script, um bloco
     # por detector aceito, e o reconhecedor, que é um só.
@@ -398,9 +398,9 @@ def test_modelos_do_dockerfile_estao_fixados_por_revisao_e_hash() -> None:
         == 4
     )
     assert "sha256sum -c" in script
-    assert "--group ocr" in alvo
+    assert "--group ocr-gpu" in alvo
     assert "ffmpeg=$FFMPEG" in alvo
-    # A imagem diz ao Job qual detector tem, e a checagem da construção usa o mesmo.
+    # A imagem diz ao Job qual detector tem.
     assert "DETECTOR=$DETECTOR" in alvo
     # Os modelos vêm antes do uv sync: mudar o uv.lock não os baixa de novo (#211).
     assert alvo.index("baixar-modelos-ocr") < alvo.index("RUN uv sync")
@@ -443,12 +443,13 @@ def test_a_construcao_da_imagem_com_gpu_nao_importa_o_paddle() -> None:
     )
 
 
-def test_o_bake_escolhe_o_detector_do_alvo_de_cpu() -> None:
+def test_o_bake_so_constroi_o_ocr_com_gpu_e_o_detector_da_imagem() -> None:
     bake = (Path(__file__).parents[2] / "docker-bake.hcl").read_text()
-    alvo = bake[bake.index('target "ocr" {') :].split("\n}\n")[0]
+    alvo = bake[bake.index('target "ocr-gpu" {') :].split("\n}\n")[0]
 
-    assert 'variable "DETECTOR_OCR_CPU"' in bake
-    assert "DETECTOR = DETECTOR_OCR_CPU" in alvo
+    assert 'target "ocr" {' not in bake
+    assert "DETECTOR" not in bake
+    assert 'target     = "ocr-gpu"' in alvo
 
 
 def test_versao_do_ffmpeg_vale_para_todos_os_estagios() -> None:

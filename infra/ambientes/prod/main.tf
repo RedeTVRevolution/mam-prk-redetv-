@@ -45,16 +45,6 @@ variable "imagem_validacao" {
   type        = string
 }
 
-variable "imagem_transcricao" {
-  description = "Imagem do Job de transcrição (--target transcricao), de preferência pelo digest"
-  type        = string
-}
-
-variable "imagem_ocr" {
-  description = "Imagem do Job de OCR da tela (--target ocr), de preferência pelo digest"
-  type        = string
-}
-
 variable "imagem_transcricao_gpu" {
   description = "Imagem do Job de transcrição com GPU (--target transcricao-gpu), de preferência pelo digest"
   type        = string
@@ -87,7 +77,7 @@ variable "vagas_de_gpu" {
 }
 
 variable "espera_gpu_minutos" {
-  description = "Proteção contra falta de GPU ou cota fora da fila, em minutos, antes do plano B em CPU"
+  description = "Proteção contra falta de GPU ou cota fora da fila, em minutos, antes de falhar a etapa"
   type        = number
   default     = 27
 }
@@ -136,8 +126,6 @@ module "mam" {
   admins_emergencia            = var.admins_emergencia
   imagem                       = var.imagem
   imagem_validacao             = var.imagem_validacao
-  imagem_transcricao           = var.imagem_transcricao
-  imagem_ocr                   = var.imagem_ocr
   imagem_transcricao_gpu       = var.imagem_transcricao_gpu
   imagem_ocr_gpu               = var.imagem_ocr_gpu
   imagem_objetos               = var.imagem_objetos
