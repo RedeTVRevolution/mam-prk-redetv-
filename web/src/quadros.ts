@@ -35,10 +35,15 @@ export function criarCacheDeQuadros(
 /** O teto de pares por pedido em lote da API. */
 const PARES_POR_PEDIDO = 100
 
-const dosClientes = new WeakMap<ClienteDaApi, (jobId: string, caminho: string) => Promise<string>>()
+let dosClientes = new WeakMap<ClienteDaApi, (jobId: string, caminho: string) => Promise<string>>()
+
+/** Descarta as URLs no logout, mesmo quando o cliente da API continua o mesmo. */
+export function limparCacheDeQuadros(): void {
+  dosClientes = new WeakMap()
+}
 
 /**
- * O cache de quadros da busca: um por cliente da API, por (vídeo, arquivo). Os quadros pedidos no
+ * O cache de quadros da busca e do inspetor: um por cliente da API, por (vídeo, arquivo). Os quadros pedidos no
  * mesmo instante (as cenas de uma página montam juntas) saem num `POST /v1/jobs/quadros` só, em
  * pedaços de 100. Um quadro sem URL (vídeo na lixeira, não concluído) ou uma falha não ficam guardados.
  */
