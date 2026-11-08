@@ -239,6 +239,18 @@ def test_a_lista_do_acervo_pede_so_os_campos_da_lista() -> None:
     assert inteira.jobs[0].cortes_ms == [1, 2]
 
 
+def test_a_lista_preserva_o_inicio_da_passada_do_job_reprocessado() -> None:
+    inicio = datetime(2026, 1, 3, tzinfo=UTC)
+    repositorio, _ = _repositorio(
+        [_job(1, inicio_da_passada=inicio, reprocessamentos=1)]
+    )
+
+    pagina = repositorio.consultar(FiltroDeJobs(limite=2, so_os_da_lista=True))
+
+    assert pagina.jobs[0].inicio_da_passada == inicio
+    assert pagina.jobs[0].reprocessamentos == 1
+
+
 def test_os_campos_da_lista_cobrem_o_job_resumido_e_os_obrigatorios_do_job() -> None:
     # Um campo novo no `JobResumido` que não entre no `select()` chegaria vazio na lista.
     from api.jobs import JobResumido

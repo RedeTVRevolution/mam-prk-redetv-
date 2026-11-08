@@ -121,6 +121,15 @@ const falhaDeEtapa = () =>
     etapas: [{ nome: 'leitura_da_tela', inicio: '2026-10-29T15:01:00Z', fim: '2026-10-29T15:02:00Z', resultado: 'falhou' }],
   })
 
+test('a coluna Tempo mostra um travessão no legado reprocessado sem início da passada', async () => {
+  jobs = [job({ reprocessamentos: 1 })]
+  await abrir()
+
+  const linha = await linhaDe('clipe.mp4')
+
+  expect(within(linha).getAllByRole('cell')[3]!.textContent).toBe('—')
+})
+
 test('a tabela mostra vídeos de pessoas e de sistemas, e o filtro por sistema vai à API', async () => {
   jobs = [
     job({ id: 'a', nome: 'de-pessoa.mp4' }),

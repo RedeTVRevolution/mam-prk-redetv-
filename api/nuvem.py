@@ -102,7 +102,7 @@ _CAMPOS_DA_LISTA = frozenset(
         "id", "nome", "tamanho_bytes", "estado", "criado_por", "criado_em", "atualizado_em",
         "codigo_falha", "duracao_s", "timecode_origem", "taxa_de_quadros", "capa", "programa",
         "data_exibicao", "indexacao", "copia_bigquery", "etapa_atual", "etapas",
-        "reprocessamentos", "criado_por_email", "sistema", "palavras", "lixeira",
+        "reprocessamentos", "inicio_da_passada", "criado_por_email", "sistema", "palavras", "lixeira",
     }
 )  # fmt: skip
 # Candidatos mínimos por leitura quando a página já está cheia e falta achar o próximo aprovado.

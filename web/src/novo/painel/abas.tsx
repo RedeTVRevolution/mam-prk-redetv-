@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { rotuloDe } from '../../catalogo.ts'
 import { ESTADOS_DO_JOB } from '../../cores.ts'
 import { dataDeExibicao, dataEHora } from '../../jobs.ts'
 import {
@@ -283,6 +284,13 @@ const celulasDeRevisao = (n: NumerosDeRevisao) => [
 ]
 
 export function Revisao({ relatorio }: { relatorio: Agrupado<RelatorioDeRevisao> }) {
+  const api = useApi()
+  const catalogo = useQuery({
+    queryKey: ['correcoes', 'catalogo'],
+    queryFn: () => api.catalogoDeCorrecoes(),
+    staleTime: Infinity,
+  })
+  const nomeDoTipo = (tipo: string | null) => tipo === null ? 'Sem tipo' : rotuloDe(catalogo.data?.tipos ?? [], tipo)
   const { correcoes, taxa_de_correcao: taxa, tempo_de_revisao: tempo } = relatorio
   if (revisaoVazia(relatorio)) return <Vazio texto="Nenhuma correção nem revisão neste filtro." />
   return (
@@ -312,11 +320,11 @@ export function Revisao({ relatorio }: { relatorio: Agrupado<RelatorioDeRevisao>
           <Quebra
             titulo="Correções por tipo"
             itens={correcoes.por_tipo}
-            nome={(t) => t.tipo ?? 'Sem tipo'}
+            nome={(t) => nomeDoTipo(t.tipo)}
             valor={(t) => t.correcoes}
             chave={(t) => t.tipo ?? ''}
             colunas={['Tipo', 'Correções']}
-            celulas={(t) => [t.tipo ?? 'Sem tipo', numero(t.correcoes)]}
+            celulas={(t) => [nomeDoTipo(t.tipo), numero(t.correcoes)]}
           />
         )}
         {correcoes.por_usuario.length > 0 && (
@@ -334,12 +342,12 @@ export function Revisao({ relatorio }: { relatorio: Agrupado<RelatorioDeRevisao>
           <Quebra
             titulo="Taxa de correção por tipo"
             itens={taxa.por_tipo}
-            nome={(t) => t.tipo}
+            nome={(t) => nomeDoTipo(t.tipo)}
             valor={(t) => t.taxa}
             formato={taxaLegivel}
             chave={(t) => t.tipo}
             colunas={['Tipo', 'Correções', 'Itens', 'Taxa']}
-            celulas={(t) => [t.tipo, numero(t.correcoes), numero(t.itens), taxaLegivel(t.taxa)]}
+            celulas={(t) => [nomeDoTipo(t.tipo), numero(t.correcoes), numero(t.itens), taxaLegivel(t.taxa)]}
           />
         )}
         {taxa.por_programa.length > 0 && (

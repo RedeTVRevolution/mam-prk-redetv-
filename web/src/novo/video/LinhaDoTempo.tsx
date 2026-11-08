@@ -73,7 +73,7 @@ export function ChipsDasFaixas({
   aoAlternar: (chave: string) => void
 }) {
   return (
-    <div role="group" aria-label="Faixas da linha do tempo" className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-t px-2">
+    <div role="group" aria-label="Faixas da linha do tempo" className="flex min-h-9 shrink-0 flex-wrap items-center gap-1 border-t px-2 py-1">
       <span className="mr-1 hidden text-xs text-muted-foreground sm:inline">Faixas</span>
       {faixas.map((f) => {
         const { Icone, cor } = TIPOS[f.chave as TipoDaFaixa]

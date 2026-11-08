@@ -348,6 +348,7 @@ def reprocessar(
             "etapa_atual": partida,
             "etapas": etapas,
             "reprocessamentos": job.reprocessamentos + 1,
+            "inicio_da_passada": agora,
             "atualizado_em": agora,
         }
         if job.estado == "falhou":
@@ -472,6 +473,7 @@ def desfazer_reprocessamento(
             "etapa_atual",
             "etapas",
             "reprocessamentos",
+            "inicio_da_passada",
             "indexacao",
         )
         return {

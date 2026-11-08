@@ -494,42 +494,31 @@ function Lista({
     if (indiceDaSelecao >= 0) virtual.scrollToIndex(indiceDaSelecao, { align: 'auto' })
   }, [indiceDaSelecao, virtual])
 
-  // Rolar à mão desliga o seguir; o botão "Voltar ao tempo atual" religa.
+  // Rolar à mão desliga o seguir; o botão da barra religa.
   const rolouAMao = () => {
     if (seguir) aoSeguir(false)
   }
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div
-        ref={rolagem}
-        className="min-h-0 flex-1 overflow-y-auto"
-        onWheel={rolouAMao}
-        onTouchMove={rolouAMao}
-        onPointerDown={(e) => {
-          // A barra de rolagem: o ponteiro no próprio contêiner, não numa linha.
-          if (e.target === e.currentTarget) rolouAMao()
-        }}
-      >
-        <ul className="relative w-full" style={{ height: virtual.getTotalSize() }}>
-          {virtual.getVirtualItems().map((v) => {
-            const l = linhas[v.index]
-            return (
-              <li key={v.key} data-index={v.index} ref={virtual.measureElement} className="absolute inset-x-0 top-0" style={{ transform: `translateY(${v.start}px)` }}>
-                {renderizar(l, conjunto.has(l.chave))}
-              </li>
-            )
-          })}
-        </ul>
-      </div>
-      {!seguir && primeiraAtual >= 0 && (
-        <button
-          type="button"
-          onClick={() => aoSeguir(true)}
-          className="absolute bottom-2 left-1/2 flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-sm border bg-popover px-2.5 text-xs shadow-float hover:bg-accent"
-        >
-          <IconFocus2 size={14} aria-hidden /> Voltar ao tempo atual
-        </button>
-      )}
+    <div
+      ref={rolagem}
+      className="min-h-0 flex-1 overflow-y-auto"
+      onWheel={rolouAMao}
+      onTouchMove={rolouAMao}
+      onPointerDown={(e) => {
+        // A barra de rolagem: o ponteiro no próprio contêiner, não numa linha.
+        if (e.target === e.currentTarget) rolouAMao()
+      }}
+    >
+      <ul className="relative w-full" style={{ height: virtual.getTotalSize() }}>
+        {virtual.getVirtualItems().map((v) => {
+          const l = linhas[v.index]
+          return (
+            <li key={v.key} data-index={v.index} ref={virtual.measureElement} className="absolute inset-x-0 top-0" style={{ transform: `translateY(${v.start}px)` }}>
+              {renderizar(l, conjunto.has(l.chave))}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

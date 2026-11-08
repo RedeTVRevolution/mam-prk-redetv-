@@ -139,6 +139,24 @@ def test_criar_job_devolve_202_com_url_assinada_e_job_aguardando_upload() -> Non
     assert guardado["estado"] == "aguardando_upload"
 
 
+def test_criacao_grava_e_expoe_o_inicio_da_passada_com_a_data_de_criacao() -> None:
+    ambiente = Ambiente()
+
+    resposta = ambiente.criar()
+
+    assert resposta.status_code == 202
+    corpo = resposta.json()
+    job = ambiente.repositorio.obter(corpo["id"])
+    assert job is not None
+    assert job.inicio_da_passada == job.criado_em == INICIO
+    assert corpo["inicio_da_passada"] == corpo["criado_em"]
+    for rota in (f"/v1/jobs/{job.id}", "/v1/jobs", f"/v1/jobs/andamento?ids={job.id}"):
+        publico = ambiente.cliente.get(rota, headers=AUTORIZACAO).json()
+        if isinstance(publico, list):
+            [publico] = publico
+        assert publico["inicio_da_passada"] == corpo["criado_em"]
+
+
 def test_tipo_diferente_de_mp4_recebe_415_e_nada_e_criado() -> None:
     ambiente = Ambiente()
 
@@ -216,6 +234,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "etapa_atual",
         "etapas",
         "reprocessamentos",
+        "inicio_da_passada",
         "enviado_por",
         "estado",
         "codigo_falha",

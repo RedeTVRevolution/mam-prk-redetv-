@@ -1499,7 +1499,7 @@ function Transporte({
   }
 
   return (
-    <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-t px-1 sm:gap-1 sm:px-2">
+    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-0.5 border-t px-1 py-1 sm:gap-1 sm:px-2">
       <BotaoDeIcone rotulo="Recuar 5 s" atalho="J" onClick={() => aoSaltar(-SALTO_LONGO_S)}>
         <IconArrowBackUp size={18} stroke={1.75} aria-hidden />
       </BotaoDeIcone>

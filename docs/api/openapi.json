@@ -4945,6 +4945,18 @@
             "title": "Reprocessamentos",
             "default": 0
           },
+          "inicio_da_passada": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Da Passada"
+          },
           "enviado_por": {
             "$ref": "#/components/schemas/EnviadoPor"
           },
@@ -5163,6 +5175,18 @@
             "title": "Reprocessamentos",
             "default": 0
           },
+          "inicio_da_passada": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Da Passada"
+          },
           "enviado_por": {
             "$ref": "#/components/schemas/EnviadoPor"
           },
@@ -5369,6 +5393,18 @@
             "type": "integer",
             "title": "Reprocessamentos",
             "default": 0
+          },
+          "inicio_da_passada": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Da Passada"
           },
           "enviado_por": {
             "$ref": "#/components/schemas/EnviadoPor"

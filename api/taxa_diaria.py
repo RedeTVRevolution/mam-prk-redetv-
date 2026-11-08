@@ -2,19 +2,18 @@
 
 A taxa (`api/taxa_de_correcao.py`) lia, a cada abertura do painel, as correções e a decupagem
 inteira de cada vídeo revisado, um por vez. Aqui o mesmo cálculo roda uma vez por dia e o
-resultado vai para a tabela `taxa_de_correcao_por_dia` do BigQuery: uma linha por dia, programa,
-versão do pipeline e tipo de correção, com `correcoes` e `itens`. A segunda parte (#468) faz o
-painel somar os dias.
+resultado vai para a tabela `taxa_de_correcao_por_dia` do BigQuery: uma linha por dia, Job e
+tipo de correção, com programa, versão do pipeline, `correcoes` e `itens`.
 
 A regra é a de hoje, não uma cópia: `linhas_do_dia` chama `calcular_com_itens` sobre o período
 `[dia, dia + 1)` em dia de São Paulo (o do período do painel, `api/qualidade_do_painel.py`), então vale o mesmo `_em_vigor_no_periodo`, a versão da
 decupagem e só os Jobs concluídos. A diferença é a fonte dos itens: o objeto pequeno que a
 decupagem ganha ao ser gravada (`api/itens_da_decupagem.py`), em vez do JSON inteiro.
 
-Um vídeo revisado em dois dias do período tem os itens contados em cada um deles: somar os
-dias dá mais itens que o cálculo de hoje sobre o período inteiro (as correções somam igual).
-A tabela não tem o vídeo, então não dá para contar uma vez só; a parte 2 decide como o painel
-lida com isso.
+O painel soma as correções e pega o máximo dos itens por Job antes de somar os Jobs (#509).
+Reprocessar ou desfazer uma correção antiga muda itens e correções de dias passados.
+O agendamento só refaz hoje e ontem: esses dias antigos exigem nova carga do histórico.
+Na migração, `make preencher-taxa-diaria` substitui as linhas antigas sem Job nos dias refeitos.
 
 Ambiente do comando: `GCP_PROJECT_ID`, `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`,
 `BIGQUERY_DATASET`, `BIGQUERY_TABELA_DA_TAXA`, `BIGQUERY_REGIAO`.
@@ -57,6 +56,8 @@ log = logging.getLogger(__name__)
 
 DIAS_RECENTES = 2
 DIAS_POR_MERGE = 100
+# 8 MB para @linhas, com margem para a consulta e os demais parâmetros nos 10 MB do REST.
+BYTES_POR_MERGE = 8_000_000
 DIAS_DA_CARGA_INICIAL = 365
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
@@ -78,6 +79,7 @@ __all__ = [
 @dataclass(frozen=True)
 class LinhaDiaria:
     dia: date
+    job_id: str
     programa: str | None
     versao_pipeline: str | None
     tipo: str
@@ -162,13 +164,14 @@ def linhas_do_dia(
     return [
         LinhaDiaria(
             dia,
+            job_id,
             x.programa,
             x.versao_pipeline,
             x.tipo,
             x.correcoes,
             x.itens,
         )
-        for x in calcular_com_itens(
+        for job_id, x in calcular_com_itens(
             repositorio, itens.ler_itens, correcoes, revisao, inicio, fim
         )
     ]
@@ -258,9 +261,32 @@ class TabelaDaTaxaBigQuery:
         self._dias_por_merge = dias_por_merge
 
     def substituir(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
-        for i in range(0, len(dias), self._dias_por_merge):
-            lote = dias[i : i + self._dias_por_merge]
-            self._merge(lote, [x for x in linhas if x.dia in lote])
+        por_dia: dict[date, list[LinhaDiaria]] = {}
+        for linha in linhas:
+            por_dia.setdefault(linha.dia, []).append(linha)
+        lote: list[date] = []
+        linhas_do_lote: list[LinhaDiaria] = []
+        bytes_do_lote = 0
+        for dia in dict.fromkeys(dias):
+            do_dia = por_dia.get(dia, [])
+            # Inclui os escapes no corpo HTTP; somar os dias superestima os colchetes.
+            bytes_do_dia = len(
+                json.dumps(json.dumps([_json_da_linha(x) for x in do_dia])).encode(
+                    "utf-8"
+                )
+            )
+            if lote and (
+                len(lote) >= self._dias_por_merge
+                or bytes_do_lote + bytes_do_dia > BYTES_POR_MERGE
+            ):
+                self._merge(lote, linhas_do_lote)
+                lote, linhas_do_lote, bytes_do_lote = [], [], 0
+            # ponytail: dia acima do teto vai sozinho; se ocorrer, migrar a carga para Storage.
+            lote.append(dia)
+            linhas_do_lote.extend(do_dia)
+            bytes_do_lote += bytes_do_dia
+        if lote:
+            self._merge(lote, linhas_do_lote)
 
     def _merge(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
         c = self._config
@@ -270,6 +296,7 @@ MERGE {tabela} AS t
 USING (
   SELECT
     DATE(JSON_VALUE(l, '$.dia')) AS dia,
+    JSON_VALUE(l, '$.job_id') AS job_id,
     JSON_VALUE(l, '$.programa') AS programa,
     JSON_VALUE(l, '$.versao_pipeline') AS versao_pipeline,
     JSON_VALUE(l, '$.tipo') AS tipo,
@@ -279,12 +306,13 @@ USING (
 ) AS s
 ON t.dia IN UNNEST(@dias)
   AND t.dia = s.dia
+  AND t.job_id = s.job_id
   AND t.programa IS NOT DISTINCT FROM s.programa
   AND t.versao_pipeline IS NOT DISTINCT FROM s.versao_pipeline
   AND t.tipo = s.tipo
 WHEN MATCHED THEN UPDATE SET correcoes = s.correcoes, itens = s.itens
-WHEN NOT MATCHED BY TARGET THEN INSERT (dia, programa, versao_pipeline, tipo, correcoes, itens)
-VALUES (s.dia, s.programa, s.versao_pipeline, s.tipo, s.correcoes, s.itens)
+WHEN NOT MATCHED BY TARGET THEN INSERT (dia, job_id, programa, versao_pipeline, tipo, correcoes, itens)
+VALUES (s.dia, s.job_id, s.programa, s.versao_pipeline, s.tipo, s.correcoes, s.itens)
 WHEN NOT MATCHED BY SOURCE
   AND t.dia IN UNNEST(@dias)
 THEN DELETE

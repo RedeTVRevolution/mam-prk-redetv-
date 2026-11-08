@@ -1,17 +1,15 @@
 """A taxa de correção da aba Revisão do painel, lida da tabela diária (#468, parte 2 de 2).
 
-O painel soma `correcoes` e `itens` das linhas diárias do período (`api/taxa_diaria.py`, #455)
-e divide uma pela outra: não baixa decupagem nem lê as correções vídeo a vídeo. O cálculo
+O painel soma `correcoes` e pega o máximo de `itens` por Job e grupo no período, depois soma
+os Jobs e divide uma pela outra: não baixa decupagem nem lê as correções vídeo a vídeo. O cálculo
 antigo (`api/taxa_de_correcao.calcular`) segue como referência nos testes e na rota
 `GET /v1/qualidade/taxa-de-correcao`.
 
 `desde` e `ate` são dias de São Paulo, os dois inclusive, como a coluna `dia`. Um período de
-5 anos lê só as linhas diárias dele (a tabela é particionada por dia): poucas por dia (programa
-× versão × tipo), então a consulta devolve um grupo por programa, versão e tipo.
+5 anos lê só as linhas diárias dele (a tabela é particionada por dia), e a consulta devolve
+um grupo por programa, versão e tipo.
 
-Diferença do cálculo antigo: um vídeo revisado em dois dias do período tem os itens contados
-nos dois (a tabela não guarda o vídeo). As correções somam igual; os itens podem passar, e a
-taxa do período de mais de um dia sai um pouco menor. Num dia só, o número é o mesmo.
+Linhas antigas sem Job ficam fora até a nova carga do histórico, para não misturar as somas.
 """
 
 from collections import defaultdict
@@ -65,7 +63,7 @@ def somar_dias(
     programa: str | None,
 ) -> list[LinhaDaTaxa]:
     """A soma que a consulta do BigQuery faz, em memória (o dublê e a conferência dela)."""
-    somas: dict[tuple[str | None, str | None, str], list[int]] = defaultdict(
+    por_job: dict[tuple[str, str | None, str | None, str], list[int]] = defaultdict(
         lambda: [0, 0]
     )
     for x in linhas:
@@ -74,9 +72,16 @@ def somar_dias(
             and (ate is None or x.dia <= ate)
             and (programa is None or x.programa == programa)
         ):
-            soma = somas[(x.programa, x.versao_pipeline, x.tipo)]
+            soma = por_job[(x.job_id, x.programa, x.versao_pipeline, x.tipo)]
             soma[0] += x.correcoes
-            soma[1] += x.itens
+            soma[1] = max(soma[1], x.itens)
+    somas: dict[tuple[str | None, str | None, str], list[int]] = defaultdict(
+        lambda: [0, 0]
+    )
+    for (_, p, v, t), (n, itens) in por_job.items():
+        soma = somas[(p, v, t)]
+        soma[0] += n
+        soma[1] += itens
     return [
         _linha(p, v, t, n, itens)
         for (p, v, t), (n, itens) in sorted(
@@ -108,7 +113,7 @@ class TaxaBigQuery:
         self, desde: date | None, ate: date | None, programa: str | None
     ) -> tuple[str, list[dict[str, Any]]]:
         c = self._config
-        onde = ["TRUE"]
+        onde = ["job_id IS NOT NULL"]
         parametros: list[dict[str, Any]] = []
         if desde is not None:
             parametros.append(_parametro("desde", desde.isoformat(), "DATE"))
@@ -120,10 +125,16 @@ class TaxaBigQuery:
             parametros.append(_parametro("programa", programa))
             onde.append("programa = @programa")
         sql = (
-            "SELECT programa, versao_pipeline, tipo,"
-            " SUM(correcoes) AS correcoes, SUM(itens) AS itens\n"
+            "WITH por_job AS (\n"
+            "SELECT job_id, programa, versao_pipeline, tipo,"
+            " SUM(correcoes) AS correcoes, MAX(itens) AS itens\n"
             f"FROM `{c.projeto}.{c.dataset}.{c.tabela}`\n"
             f"WHERE {' AND '.join(onde)}\n"
+            "GROUP BY job_id, programa, versao_pipeline, tipo\n"
+            ")\n"
+            "SELECT programa, versao_pipeline, tipo,"
+            " SUM(correcoes) AS correcoes, SUM(itens) AS itens\n"
+            "FROM por_job\n"
             "GROUP BY programa, versao_pipeline, tipo"
         )
         return sql, parametros

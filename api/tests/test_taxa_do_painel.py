@@ -63,9 +63,8 @@ def test_o_periodo_de_um_video_so_dia_da_o_mesmo_numero_do_calculo_antigo() -> N
     ]
 
 
-def test_video_em_dois_dias_soma_as_correcoes_e_conta_os_itens_nos_dois() -> None:
-    """A diferença aceita: a tabela não guarda o vídeo. j1 tem correção criada 10 dias antes e
-    aprovada 2 dias depois: dois dias revisados."""
+def test_video_em_dois_dias_soma_as_correcoes_e_conta_os_itens_uma_vez() -> None:
+    """j1 tem correção criada 10 dias antes e aprovada 2 dias depois: dois dias revisados."""
     tabela, mundo = _tabela_do_caso_de_hoje()
 
     do_periodo = TaxaEmMemoria(tabela).somar(
@@ -73,18 +72,15 @@ def test_video_em_dois_dias_soma_as_correcoes_e_conta_os_itens_nos_dois() -> Non
     )
     antigo = _antigo(mundo, DIA - timedelta(days=12), DIA + timedelta(days=13))
 
-    assert [(x.programa, x.tipo, x.correcoes) for x in do_periodo] == [
-        (x.programa, x.tipo, x.correcoes) for x in antigo
-    ]
-    assert sum(x.itens for x in do_periodo) > sum(x.itens for x in antigo)
+    assert do_periodo == antigo
 
 
 def test_a_taxa_e_correcoes_sobre_itens_do_periodo_e_nao_a_media_das_taxas() -> None:
     d1, d2 = date(2026, 11, 1), date(2026, 11, 2)
     tabela = TabelaDaTaxaEmMemoria()
     tabela.linhas = [
-        LinhaDiaria(d1, "J", "v1", "pessoa.renomear", 1, 1),
-        LinhaDiaria(d2, "J", "v1", "pessoa.renomear", 1, 9),
+        LinhaDiaria(d1, "j1", "J", "v1", "pessoa.renomear", 1, 1),
+        LinhaDiaria(d2, "j2", "J", "v1", "pessoa.renomear", 1, 9),
     ]
 
     [linha] = TaxaEmMemoria(tabela).somar(d1, d2, None)
@@ -92,9 +88,52 @@ def test_a_taxa_e_correcoes_sobre_itens_do_periodo_e_nao_a_media_das_taxas() -> 
     assert (linha.correcoes, linha.itens, linha.taxa_de_correcao) == (2, 10, 0.2)
 
 
+def test_dois_videos_no_mesmo_grupo_e_dia_somam_os_itens_dos_dois() -> None:
+    tabela = TabelaDaTaxaEmMemoria()
+    tabela.linhas = [
+        LinhaDiaria(DIA, "j1", "J", "v1", "pessoa.renomear", 1, 3),
+        LinhaDiaria(DIA, "j2", "J", "v1", "pessoa.renomear", 2, 49),
+    ]
+
+    [linha] = TaxaEmMemoria(tabela).somar(DIA, DIA, "J")
+
+    assert (linha.correcoes, linha.itens, linha.taxa_de_correcao) == (3, 52, 0.0577)
+
+
+def test_o_maximo_dos_itens_e_por_job_e_grupo_depois_soma_os_jobs() -> None:
+    amanha = DIA + timedelta(days=1)
+    tabela = TabelaDaTaxaEmMemoria()
+    tabela.linhas = [
+        LinhaDiaria(DIA, "j1", "J", "v1", "pessoa.renomear", 1, 1),
+        LinhaDiaria(amanha, "j1", "J", "v1", "pessoa.renomear", 2, 3),
+        LinhaDiaria(DIA, "j2", "J", "v1", "pessoa.renomear", 1, 49),
+        LinhaDiaria(amanha, "j2", "J", "v1", "pessoa.renomear", 1, 49),
+        LinhaDiaria(DIA, "j1", "J", "v2", "pessoa.renomear", 1, 7),
+        LinhaDiaria(DIA, "j1", "J", "v1", "pauta.titulo", 1, 5),
+        LinhaDiaria(DIA, "j1", "F", "v1", "pessoa.renomear", 1, 9),
+    ]
+
+    linhas = TaxaEmMemoria(tabela).somar(DIA, amanha, None)
+
+    assert [
+        (x.programa, x.versao_pipeline, x.tipo, x.correcoes, x.itens) for x in linhas
+    ] == [
+        ("F", "v1", "pessoa.renomear", 1, 9),
+        ("J", "v1", "pauta.titulo", 1, 5),
+        ("J", "v1", "pessoa.renomear", 5, 52),
+        ("J", "v2", "pessoa.renomear", 1, 7),
+    ]
+    [hoje] = [
+        x
+        for x in TaxaEmMemoria(tabela).somar(DIA, DIA, "J")
+        if x.tipo == "pessoa.renomear" and x.versao_pipeline == "v1"
+    ]
+    assert (hoje.correcoes, hoje.itens) == (2, 50)
+
+
 def test_sem_itens_a_taxa_e_vazia_e_o_csv_continua_o_mesmo() -> None:
     tabela = TabelaDaTaxaEmMemoria()
-    tabela.linhas = [LinhaDiaria(DIA, None, None, "pessoa.renomear", 0, 0)]
+    tabela.linhas = [LinhaDiaria(DIA, "j1", None, None, "pessoa.renomear", 0, 0)]
 
     linhas = TaxaEmMemoria(tabela).somar(None, None, None)
 
@@ -178,7 +217,12 @@ def test_cinco_anos_leem_so_linhas_diarias_numa_consulta() -> None:
     assert "FROM `proj.decupagens.taxa`" in sql
     assert "dia >= @desde AND dia <= @ate" in sql
     assert "GROUP BY programa, versao_pipeline, tipo" in sql
-    assert sql.count("FROM") == 1  # só a tabela diária: nem Jobs, nem momentos
+    assert "GROUP BY job_id, programa, versao_pipeline, tipo" in sql
+    assert "SUM(correcoes) AS correcoes, MAX(itens) AS itens" in sql
+    assert "SUM(correcoes) AS correcoes, SUM(itens) AS itens" in sql
+    assert "FROM por_job" in sql
+    assert "job_id IS NOT NULL" in sql  # não mistura as linhas antigas sem Job
+    assert sql.count("FROM `") == 1  # só a tabela diária: nem Jobs, nem momentos
     parametros = {
         p["name"]: (p["parameterType"]["type"], p["parameterValue"]["value"])
         for p in corpo["queryParameters"]

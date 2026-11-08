@@ -11,6 +11,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from "../../auth/falso.ts";
+import catalogo from "../../catalogo.fixture.json";
 import App from "../App.tsx";
 
 // Os mesmos casos de src/PainelDaDiretoria.test.tsx (interface antiga), na interface nova; as
@@ -285,6 +286,7 @@ const servidor = setupServer(
     }),
   ),
   http.get("/v1/painel/fila", () => HttpResponse.json(FILA)),
+  http.get("/v1/correcoes/catalogo", () => HttpResponse.json(catalogo)),
   relatorio("acessos", () => resposta()),
   relatorio("videos", () => HttpResponse.json(VIDEOS)),
   relatorio("buscas", () => HttpResponse.json(BUSCAS)),
@@ -697,6 +699,57 @@ test("a aba Revisão mostra correções, taxa e minutos de revisão", async () =
   ]);
   expect(screen.getAllByText("Correções")[0].nextSibling?.textContent).toBe(
     "6",
+  );
+});
+
+test("Revisão mostra o rótulo dos tipos conhecidos e mantém a chave dos desconhecidos", async () => {
+  const tipos = [
+    ["pessoa.renomear", "Renomear pessoa"],
+    ["plano.descricao", "Descrição do plano"],
+    ["objeto.acrescentar", "Objeto acrescentado"],
+    ["texto_na_tela.texto", "Texto na tela"],
+    ["texto_na_tela.acrescentar", "Texto na tela acrescentado"],
+    ["aprovar", "Aprovação"],
+    ["recusar", "Recusa"],
+    ["tipo.desconhecido", "tipo.desconhecido"],
+  ];
+  permissoes = ["painel.ver"];
+  servidor.use(
+    http.get("/v1/painel/revisao", () =>
+      HttpResponse.json({
+        ...REVISAO,
+        correcoes: {
+          ...REVISAO.correcoes,
+          total: tipos.length + 1,
+          por_tipo: [
+            ...tipos.map(([tipo]) => ({ tipo, correcoes: 1 })),
+            { tipo: null, correcoes: 1 },
+          ],
+        },
+        taxa_de_correcao: {
+          ...REVISAO.taxa_de_correcao,
+          por_tipo: tipos.map(([tipo]) => ({ tipo, correcoes: 1, itens: 8, taxa: 0.125 })),
+        },
+      }),
+    ),
+  );
+  await abrir("/painel/revisao");
+
+  await waitFor(() => {
+    const correcoes = screen.getByRole("img", { name: /^Correções por tipo/ });
+    const taxa = screen.getByRole("img", { name: /^Taxa de correção por tipo/ });
+    for (const [, rotulo] of tipos) {
+      expect(correcoes.getAttribute("aria-label")).toContain(`${rotulo}, 1`);
+      expect(taxa.getAttribute("aria-label")).toContain(`${rotulo}, 12,5%`);
+    }
+    expect(correcoes.getAttribute("aria-label")).toContain("Sem tipo, 1");
+  });
+  expect(linhasDe(await tabela("Correções por tipo"))).toEqual([
+    ...tipos.map(([, rotulo]) => [rotulo, "1"]),
+    ["Sem tipo", "1"],
+  ]);
+  expect(linhasDe(await tabela("Taxa de correção por tipo"))).toEqual(
+    tipos.map(([, rotulo]) => [rotulo, "1", "8", "12,5%"]),
   );
 });
 
