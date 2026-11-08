@@ -482,7 +482,7 @@ test('o bloco do objeto na faixa leva à seção Objetos com a ocorrência selec
   expect(lista('Objetos').getByRole('button', { name: 'sandália, 08:20 a 08:30' }).getAttribute('aria-pressed')).toBe('true')
 })
 
-test('rolar a lista à mão deixa de seguir a reprodução e mostra "Voltar ao tempo atual"', async () => {
+test('rolar a lista à mão desliga o seguir sem botão flutuante, e o botão da barra religa', async () => {
   const player = await abrirVideo()
   const usuario = await abrirSecao('Falas')
   irPara(player, 220)
@@ -492,8 +492,9 @@ test('rolar a lista à mão deixa de seguir a reprodução e mostra "Voltar ao t
   fireEvent.wheel(lista('Falas').getByRole('list').parentElement as HTMLElement)
 
   expect(inspetor().getByRole('button', { name: 'Seguir a reprodução' }).getAttribute('aria-pressed')).toBe('false')
-  await usuario.click(inspetor().getByRole('button', { name: 'Voltar ao tempo atual' }))
-  expect(inspetor().getByRole('button', { name: 'Seguindo a reprodução' })).toBeTruthy()
+  expect(inspetor().queryByRole('button', { name: 'Voltar ao tempo atual' })).toBeNull()
+  await usuario.click(inspetor().getByRole('button', { name: 'Seguir a reprodução' }))
+  expect(inspetor().getByRole('button', { name: 'Seguindo a reprodução' }).getAttribute('aria-pressed')).toBe('true')
 })
 
 test('as linhas pedem a URL do quadro delas; a sem quadro não pede nada; o detalhe reaproveita a URL', async () => {
