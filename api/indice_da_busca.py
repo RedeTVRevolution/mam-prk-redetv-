@@ -345,7 +345,7 @@ def _casa(r: Registro, f: Filtros) -> bool:
 
 
 class IndiceEmMemoria:
-    """Dublê do índice: filtros exatos e texto (qualquer palavra inteira da consulta, sem acento nem maiúscula)."""
+    """Dublê do índice: filtros exatos, AND entre grupos e OR entre formas."""
 
     def __init__(self) -> None:
         self._por_job: dict[str, list[Registro]] = {}
@@ -381,15 +381,16 @@ class IndiceEmMemoria:
         return sum(len(r) for r in self._por_job.values())
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
-        da_consulta = palavras(consulta.texto) if consulta.texto else []
+        da_consulta = [
+            set(palavras(grupo.replace(" OR ", " ")))
+            for grupo in re.findall(r"\(\w+(?: OR \w+)+\)|\w+", consulta.texto or "")
+        ]
         achados: list[Registro] = []
         for registros in self._por_job.values():
             for r in registros:
                 if not _casa(r, consulta.filtros):
                     continue
                 palavras_do_registro = set(palavras(_frase(r.texto, r.descricao) or ""))
-                if not da_consulta or any(
-                    p in palavras_do_registro for p in da_consulta
-                ):
+                if all(grupo & palavras_do_registro for grupo in da_consulta):
                     achados.append(r)
         return achados[: consulta.limite]

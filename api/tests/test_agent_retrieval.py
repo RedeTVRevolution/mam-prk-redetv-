@@ -507,6 +507,22 @@ def test_o_pedido_de_texto_vai_normalizado_ao_campo_normalizado(consulta: str) -
     }
 
 
+@pytest.mark.parametrize(
+    "consulta, esperado",
+    [
+        ("(CARRO OR carros)", "(carro OR carros)"),
+        ("(MÃE OR MÃES) (PAI OR PAIS)", "(mae OR maes) (pai OR pais)"),
+        ("  Angélica,\tSATO  ", "angelica, sato"),
+        ("(CARRO or carros)", "(carro or carros)"),
+    ],
+)
+def test_normaliza_os_termos_preservando_or_exato_e_parenteses(
+    consulta: str, esperado: str
+) -> None:
+    pedido = pedido_de_busca(CONFIG, Consulta(texto=consulta))
+    assert _buscas(pedido)["textSearch"]["structuredQuery"]["text"]["text"] == esperado
+
+
 def test_gravar_comeca_lendo_o_indice_do_video() -> None:
     transporte = TransporteFalso()
     AgentRetrieval(CONFIG, transporte).gravar("j", [])

@@ -1,4 +1,4 @@
-"""Cassete do Gemini: uma resposta real gravada, para o contrato rodar sem rede.
+"""Cassetes reais para os contratos rodarem sem rede.
 
 Uso: `make gravar-cassetes` (chama `python -m api.cassete` com o `.env` e o nome
 do bucket de clipes-ouro que o Terraform monta). Gera um clipe sintético, passa
@@ -6,12 +6,16 @@ pelo validador como um envio real, sobe o proxy nesse bucket, sob `cassetes/`, e
 faz a chamada real. O cassete guarda só o modelo, a versão que a Vertex informou,
 o vídeo, o texto da resposta e o SHA-256 da instrução: nenhum cabeçalho, nenhuma
 credencial. Regrave sempre que mudar o modelo, o esquema ou a instrução.
+
+Também grava o pedido de texto da busca e a contagem de resultados (#507).
+`make gravar-cassete-da-busca` regrava só esse contrato.
 """
 
 import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -21,6 +25,13 @@ from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
 from api import gemini  # lido na chamada, para o teste trocar `INSTRUCAO`
+from api.agent_retrieval import (
+    AgentRetrieval,
+    ConfigDaBusca,
+    pedido_de_busca,
+    transporte_http,
+)
+from api.agent_retrieval import Transporte as TransporteDaBusca
 from api.decupagem import Video
 from api.gemini import (
     MODELO,
@@ -30,9 +41,12 @@ from api.gemini import (
     TransporteVertex,
     analisar,
 )
+from api.indice_da_busca import Consulta
+from api.numero import com_as_formas
 from api.validador import validar
 
 CASSETE = Path(__file__).parent / "tests" / "cassetes" / "gemini_sintetico.json"
+CASSETE_DA_BUSCA = Path(__file__).parent / "tests" / "cassetes" / "busca_formas.json"
 OBJETO = "cassetes/sintetico.mp4"
 
 
@@ -79,7 +93,33 @@ def gravar(
     destino.write_text(json.dumps(cassete, ensure_ascii=False, indent=2) + "\n")
 
 
+def gravar_busca(
+    config: ConfigDaBusca,
+    transporte: TransporteDaBusca,
+    *,
+    destino: Path = CASSETE_DA_BUSCA,
+) -> None:
+    """Grava o pedido e quantos resultados a busca real devolveu, sem dados da nuvem."""
+    consulta = Consulta(texto=com_as_formas("gravata"))
+    pedido = pedido_de_busca(config, consulta)
+    resultados = AgentRetrieval(config, transporte).buscar(consulta)
+    if not resultados:
+        raise RuntimeError("a busca por gravata não devolveu nenhum resultado")
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(
+        json.dumps(
+            {"origem": "nuvem", "pedido": pedido, "resultados": len(resultados)},
+            indent=2,
+        )
+        + "\n"
+    )
+
+
 def main() -> None:
+    if sys.argv[1:] == ["busca"]:
+        gravar_busca(ConfigDaBusca.do_ambiente(os.environ), transporte_http())
+        print(f"Cassete gravado em {CASSETE_DA_BUSCA}")
+        return
     projeto = os.environ["GCP_PROJECT_ID"]
     with tempfile.TemporaryDirectory() as pasta:
         clipe = Path(pasta) / "sintetico.mp4"

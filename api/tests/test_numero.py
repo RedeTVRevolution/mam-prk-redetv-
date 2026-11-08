@@ -73,5 +73,27 @@ def test_mesma_palavra_sem_falso_positivo_e_sem_acento() -> None:
 def test_com_as_formas_deixa_a_pontuacao_de_fora() -> None:
     assert (
         com_as_formas("microfones, cadeiras!")
-        == "microfones microfone cadeiras cadeira"
+        == "(microfones OR microfone) (cadeiras OR cadeira)"
     )
+
+
+@pytest.mark.parametrize(
+    "texto, esperado",
+    [
+        ("carro", "(carro OR carros)"),
+        ("homem de terno", "(homem OR homens) (de OR des) (terno OR ternos)"),
+        ("ÔNIBUS", "onibus"),
+        ("Mães", "(maes OR mae)"),
+        ("carro CARRO carro", "(carro OR carros)"),
+        ("mães MAES", "(maes OR mae)"),
+        ("promoção", "(promocao OR promocaes OR promocaos OR promocoes)"),
+        ("OR or", "(or OR ores)"),
+        (
+            '"CARRO"-(vestido) OR gravata',
+            "(carro OR carros) (vestido OR vestidos) (or OR ores) (gravata OR gravatas)",
+        ),
+        ("", ""),
+    ],
+)
+def test_com_as_formas_normaliza_deduplica_e_agrupa(texto: str, esperado: str) -> None:
+    assert com_as_formas(texto) == esperado

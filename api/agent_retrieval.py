@@ -245,7 +245,12 @@ def pedido_de_busca(
 
     buscas: list[dict[str, Any]] = []
     if consulta.texto:
-        texto = {"text": normalizar(consulta.texto), "fields": CAMPOS_DE_TEXTO}
+        normalizado = re.sub(
+            r"[^()\s]+",
+            lambda token: token[0] if token[0] == "OR" else normalizar(token[0]),
+            " ".join(consulta.texto.split()),
+        )
+        texto = {"text": normalizado, "fields": CAMPOS_DE_TEXTO}
         buscas.append({"textSearch": {**comum, "structuredQuery": {"text": texto}}})
     if consulta.significado and not config.indices_ligados:
         if vetor_do_significado is None:
