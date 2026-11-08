@@ -172,7 +172,7 @@ export function FilaAgora() {
       {fila.isPending && <p className="text-sm text-muted-foreground">Lendo a fila…</p>}
       {fila.isError && <p className="text-sm text-destructive">Não foi possível ler a fila agora.</p>}
       {fila.data && (
-        <ul aria-label="Fila agora" className="grid gap-3 sm:grid-cols-3">
+        <ul aria-label="Fila agora" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {fila.data.por_estado.map((e) => (
             <li key={e.estado} className="min-w-0">
               <p className="truncate text-xs text-muted-foreground">{ESTADOS_DO_JOB[e.estado].rotulo}</p>
@@ -182,6 +182,16 @@ export function FilaAgora() {
               </p>
             </li>
           ))}
+          {fila.data.esperando_gpu && (
+            <li className="min-w-0">
+              <p className="text-xl font-semibold">Esperando GPU: {numero(fila.data.esperando_gpu.quantidade)}</p>
+              <p className="text-xs text-muted-foreground">
+                {fila.data.esperando_gpu.quantidade > 0
+                  ? `O mais antigo há ${duracaoLegivel(fila.data.esperando_gpu.idade_do_mais_antigo_s * 1000)}`
+                  : 'Nenhum agora'}
+              </p>
+            </li>
+          )}
         </ul>
       )}
     </Secao>

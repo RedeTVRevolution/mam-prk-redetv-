@@ -391,6 +391,41 @@ test('sem a decupagem pronta, não há baixar, linha do tempo nem itens', async 
   expect(screen.getByText('O inspetor aparece quando a decupagem estiver pronta.')).toBeTruthy()
 })
 
+test.each(['analisando', 'concluido'])('mostra e atualiza a posição na GPU com o Job %s até obter a vaga', async (estado) => {
+  let posicao: number | null = 3
+  servidor.use(http.get('/v1/jobs/j1', () => HttpResponse.json({
+    ...JOB,
+    estado,
+    etapa_atual: estado === 'concluido' ? 'inventario_de_objetos' : 'transcricao',
+    posicao_na_fila_gpu: posicao,
+  })))
+  await abrirVideo({ acompanhamentoMs: 20, esperarFaixas: false })
+
+  expect(await screen.findByText('Na fila da GPU · posição 3')).toBeTruthy()
+  expect(screen.queryByText(/em andamento\./)).toBeNull()
+  posicao = 1
+  expect(await screen.findByText('Na fila da GPU · posição 1')).toBeTruthy()
+  posicao = null
+  expect(await screen.findByText(/em andamento\./)).toBeTruthy()
+  expect(screen.queryByText(/Na fila da GPU/)).toBeNull()
+})
+
+test.each(['analisando', 'concluido'])('atualiza a posição na GPU após seis horas com o Job %s', async (estado) => {
+  job = {
+    estado,
+    etapa_atual: estado === 'concluido' ? 'inventario_de_objetos' : 'transcricao',
+    etapas: [{ nome: 'transcricao', inicio: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(), fim: null, resultado: null }],
+    posicao_na_fila_gpu: 3,
+  }
+  await abrirVideo({ acompanhamentoMs: 20, esperarFaixas: false })
+
+  expect(await screen.findByText('Na fila da GPU · posição 3')).toBeTruthy()
+  job.posicao_na_fila_gpu = 1
+  expect(await screen.findByText('Na fila da GPU · posição 1')).toBeTruthy()
+  job.posicao_na_fila_gpu = null
+  await waitFor(() => expect(screen.queryByText(/Na fila da GPU/)).toBeNull())
+})
+
 test('falha ao carregar a decupagem mostra o código e tenta de novo', async () => {
   const usuario = userEvent.setup()
   let falhar = true

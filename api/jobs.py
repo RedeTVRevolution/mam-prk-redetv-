@@ -385,6 +385,7 @@ class JobResumido(BaseModel):
 class JobPublico(JobResumido):
     """O detalhe de um Job: o resumo mais os cortes de câmera."""
 
+    posicao_na_fila_gpu: int | None = None
     # Cortes de câmera, em ms: os riscos da régua do Visualizador.
     cortes_ms: list[int] | None = None
 
@@ -653,6 +654,10 @@ class RepositorioDeJobs(Protocol):
 
     def obter(self, job_id: str) -> Job | None: ...
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        """O documento `fila_gpu/vagas`; vazio quando ainda não existe."""
+        ...
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         """Os Jobs que existem entre `job_ids`, numa leitura em lote, em qualquer ordem."""
         ...
@@ -734,6 +739,9 @@ class RepositorioEmMemoria:
     def obter(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        return {}
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         return [self._jobs[i] for i in dict.fromkeys(job_ids) if i in self._jobs]
 
@@ -787,6 +795,9 @@ class RepositorioIndisponivel:
     def obter(self, job_id: str) -> Job | None:
         raise ServicoIndisponivel
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        raise ServicoIndisponivel
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         raise ServicoIndisponivel
 
@@ -811,6 +822,31 @@ class RepositorioIndisponivel:
 
     def contar_criados(self, criado_por: str, desde: datetime) -> int:
         raise ServicoIndisponivel
+
+
+def espera_da_gpu(
+    repositorio: RepositorioDeJobs, agora: datetime
+) -> list[dict[str, Any]]:
+    """Pedidos válidos na ordem do Workflows; vagas ocupadas não contam como espera."""
+    pedidos = repositorio.obter_fila_gpu().get("espera", [])
+    jobs = {j.id: j for j in repositorio.obter_varios({p["job_id"] for p in pedidos})}
+    agora_s = agora.timestamp()
+    return sorted(
+        (
+            p
+            for p in pedidos
+            if p["job_id"] in jobs
+            and (
+                jobs[p["job_id"]].estado == "analisando"
+                or (
+                    p["etapa"] == "inventario_de_objetos"
+                    and jobs[p["job_id"]].estado == "concluido"
+                )
+            )
+            and agora_s - p["visto_em"] <= 3 * 60
+        ),
+        key=lambda p: (p["chegada"], p["job_id"], p["etapa"]),
+    )
 
 
 class ArmazenamentoIndisponivel:
@@ -1220,6 +1256,14 @@ def criar_rotas(
     ) -> Response:
         job = _enxerga(chamador, repositorio.obter(job_id))
         publico = JobPublico.de(job)
+        publico.posicao_na_fila_gpu = next(
+            (
+                n
+                for n, pedido in enumerate(espera_da_gpu(repositorio, relogio()), 1)
+                if pedido["job_id"] == job_id
+            ),
+            None,
+        )
         publico.capa_url = _url_da_capa(job)
         etag = _etag(publico)
         cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"}

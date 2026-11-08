@@ -104,8 +104,8 @@ export function TelaDoVideo({
   )
 }
 
-/** A análise rodando ou as etapas depois dela (a regra do intervalo entre etapas está em `finalizando`). */
-const emAndamento = (job: Job): boolean => job.estado === 'analisando' || finalizando(job)
+/** A espera por GPU, a análise rodando ou as etapas depois dela. */
+const emAndamento = (job: Job): boolean => job.posicao_na_fila_gpu != null || job.estado === 'analisando' || finalizando(job)
 
 function permissoesDoVideo(p: readonly string[]): Permissoes {
   return {

@@ -351,6 +351,10 @@ class RepositorioFirestore:
         doc = _documento(self._colecao, job_id).get()
         return Job(**(doc.to_dict() or {})) if doc.exists else None
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        doc = self._cliente.collection("fila_gpu").document("vagas").get()
+        return doc.to_dict() or {}
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
         # um pedido só com dezenas de milhares de referências arrisca o prazo.

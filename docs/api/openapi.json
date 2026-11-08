@@ -4958,6 +4958,17 @@
             "format": "date-time",
             "title": "Atualizado Em"
           },
+          "posicao_na_fila_gpu": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posicao Na Fila Gpu"
+          },
           "cortes_ms": {
             "anyOf": [
               {
@@ -5175,6 +5186,17 @@
             "type": "string",
             "format": "date-time",
             "title": "Atualizado Em"
+          },
+          "posicao_na_fila_gpu": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posicao Na Fila Gpu"
           },
           "cortes_ms": {
             "anyOf": [

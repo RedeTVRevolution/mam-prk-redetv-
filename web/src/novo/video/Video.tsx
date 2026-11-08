@@ -964,9 +964,11 @@ export function Video({
             aoAlternarGaveta={alternarGaveta}
             aoAbrirDialogo={setDialogo}
           />
-          {job.etapa_atual && (job.estado === 'analisando' || finalizando(job)) && (
+          {(job.posicao_na_fila_gpu != null || (job.etapa_atual && (job.estado === 'analisando' || finalizando(job)))) && (
             <p role="status" className="shrink-0 border-b px-3 py-1.5 text-sm text-andamento">
-              {`${reprocessou ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
+              {job.posicao_na_fila_gpu != null
+                ? `Na fila da GPU · posição ${job.posicao_na_fila_gpu}`
+                : job.etapa_atual && `${reprocessou ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
               {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
             </p>
           )}
