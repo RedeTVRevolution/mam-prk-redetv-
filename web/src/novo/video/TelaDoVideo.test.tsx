@@ -36,6 +36,17 @@ afterAll(() => servidor.close())
 
 const AGORA = new Date().toISOString()
 
+test('o transporte permite quebrar linha sem esconder a tela cheia na rolagem horizontal', async () => {
+  await abrirVideo()
+
+  const transporte = screen.getByRole('button', { name: 'Tocar' }).parentElement!
+  expect(transporte.contains(screen.getByRole('button', { name: 'Tela cheia' }))).toBe(true)
+  // O jsdom não mede layout: protegemos a quebra de linha e a altura livre da barra.
+  expect(transporte.classList.contains('flex-wrap')).toBe(true)
+  expect(transporte.classList.contains('overflow-x-auto')).toBe(false)
+  expect(transporte.classList.contains('h-10')).toBe(false)
+})
+
 test('a barra mostra o nome do arquivo, o programa e a data', async () => {
   await abrirVideo()
 
