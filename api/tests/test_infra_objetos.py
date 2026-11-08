@@ -248,7 +248,7 @@ def test_deploy_dev_publica_e_testa_o_job_de_objetos_pelo_digest() -> None:
     assert 'IMAGEM_OBJETOS=$(digest "$OBJETOS_GPU")' in deploy
     assert '-var "imagem_objetos=$IMAGEM_OBJETOS"' in deploy
     assert "job_de_objetos_gpu),$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS" in deploy
-    assert "as sete imagens" in deploy
+    assert "as cinco imagens" in deploy
 
 
 def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_motor_e_o_modelo() -> None:

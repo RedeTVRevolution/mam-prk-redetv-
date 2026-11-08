@@ -1,7 +1,7 @@
 """Em qual dispositivo os Jobs de transcrição e de OCR rodam, lido da configuração.
 
 `DISPOSITIVO` vale `cpu` (padrão) ou `gpu`. Pedir GPU numa instância sem GPU é erro, e
-nunca motivo para cair para a CPU em silêncio: o Workflows decide o plano B (#239).
+nunca motivo para cair para a CPU em silêncio. CPU fica para os testes locais (#500).
 """
 
 import os

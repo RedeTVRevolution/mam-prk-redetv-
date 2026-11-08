@@ -20,6 +20,8 @@ export interface Job {
   codigo_falha: string | null
   /** A etapa em andamento; vazia entre uma etapa e a seguinte. */
   etapa_atual?: string | null
+  /** Posição do primeiro pedido de etapa esperando GPU; só o detalhe, calculada na leitura. */
+  posicao_na_fila_gpu?: number | null
   /** Onde o Job está no índice da busca; `pendente` até a indexação terminar. */
   indexacao?: { estado: string; em: string } | null
   duracao_s?: number | null

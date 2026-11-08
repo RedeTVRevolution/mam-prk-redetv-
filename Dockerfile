@@ -1,4 +1,4 @@
-# O ffmpeg dos alvos validacao e ocr, o mesmo do scripts/afk/Dockerfile (o make verificar confere).
+# O ffmpeg dos alvos validacao e ocr-gpu, o mesmo do scripts/afk/Dockerfile (o make verificar confere).
 # Antes do primeiro FROM, para valer em todos os estágios que o declaram com `ARG FFMPEG`.
 ARG FFMPEG=7:5.1.9-0+deb12u1
 
@@ -31,7 +31,7 @@ USER nobody
 ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.validacao_job"]
 
-# Job de transcrição (#104): `docker build --target transcricao`. Só o faster-whisper e o
+# Base da transcrição (#104): só o faster-whisper e o
 # modelo, sem ffmpeg nem front. O modelo é baixado aqui, na construção, na revisão fixada
 # e conferido pelo SHA-256 de cada arquivo; no ar o Job roda sem internet (HF_HUB_OFFLINE).
 FROM python:3.12-slim-bookworm AS transcricao-base
@@ -59,13 +59,6 @@ RUN uv sync --locked --no-dev --group transcricao
 RUN /app/.venv/bin/python -c "import wave; w = wave.open('/tmp/s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(32000)); w.close(); from faster_whisper.audio import decode_audio; assert len(decode_audio('/tmp/s.wav')) == 16000" \
     && rm /tmp/s.wav
 ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
-
-# O alvo `transcricao` e o `transcricao-gpu` partem do `transcricao-base` e acrescentam o código
-# de `api/` cada um do seu jeito: o de CPU leva `api/` inteiro, o de GPU só o que o Job importa.
-FROM transcricao-base AS transcricao
-COPY api/ api/
-USER nobody
-CMD ["python", "-m", "api.transcricao_job"]
 
 # As amostras do teste dos Jobs com GPU (#238): uns segundos de fala, que o espeak-ng gera
 # na construção (sem arquivo binário no repositório). A frase é a de `api/teste_dos_jobs.py`
@@ -142,44 +135,10 @@ RUN /app/.venv/bin/python -c "import ctypes, ctranslate2; ctypes.CDLL('libcublas
 USER nobody
 CMD ["python", "-m", "api.transcricao_job"]
 
-# Job de OCR da tela (#106): `docker build --target ocr`. ffmpeg para os quadros, PaddleOCR
-# e os dois modelos, baixados aqui, na construção, nas revisões fixadas e conferidos pelo
-# SHA-256 de cada arquivo (`scripts/baixar-modelos-ocr.sh`); no ar o Job roda sem internet.
-# O detector é escolhido pelo `ARG DETECTOR` (#233): `PP-OCRv5_server_det` ou o leve
-# `PP-OCRv5_mobile_det`, que o Job lê da variável `DETECTOR` da imagem.
-FROM python:3.12-slim-bookworm AS ocr
-COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
-ARG FFMPEG
-ARG DETECTOR=PP-OCRv5_server_det
-# As bibliotecas do OpenCV (libgl1, libglib2.0-0) e do Paddle (libgomp1).
-RUN apt-get update \
-    && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
-        || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
-    && rm -rf /var/lib/apt/lists/*
-# Os modelos vêm antes do `uv sync` (#211): só uma mudança de modelo os baixa de novo.
-COPY scripts/baixar-modelos-ocr.sh /usr/local/bin/baixar-modelos-ocr
-RUN baixar-modelos-ocr "$DETECTOR"
-WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --group ocr
-COPY api/ api/
-# Os testes usam um modelo falso: aqui o PaddleOCR lê um quadro de verdade com os modelos
-# da imagem, para a imagem não ser construída com uma versão que não roda em CPU.
-RUN DETECTOR=$DETECTOR HOME=/tmp/ocr PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True /app/.venv/bin/python -c "import cv2, numpy; q = numpy.zeros((480, 854, 3), numpy.uint8); cv2.putText(q, 'REDETV', (200, 260), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 8); cv2.imwrite('/tmp/ocr.png', q); from pathlib import Path; from api.paddle import LeitorPaddle; assert [l.texto for l in LeitorPaddle.da_pasta('/modelos').ler(Path('/tmp/ocr.png'))] == ['REDETV']" \
-    && rm -rf /tmp/ocr /tmp/ocr.png
-USER nobody
-# HOME e TMPDIR no volume em memória: o Paddle grava cache e o ffmpeg, os quadros, e a imagem não tem pasta gravável.
-ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos DETECTOR=$DETECTOR \
-    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1
-CMD ["python", "-m", "api.ocr_job"]
-
-# Job de OCR em GPU (E1, ADR 0007): `docker build --target ocr-gpu`. Os mesmos modelos do
-# alvo `ocr` (o mesmo script, e o detector `server` por padrão: o leve é para o plano B em
-# CPU, #233), e o `paddlepaddle-gpu` 3.2.2 (CUDA
-# 12.6, do índice do Paddle) no lugar do `paddlepaddle` de CPU. Não parte do alvo `ocr` para
-# não carregar a roda de CPU. O driver é do Cloud Run, em /usr/local/nvidia/lib64. As
-# bibliotecas CUDA vêm das rodas `nvidia-*` que o Paddle puxa (uv.lock), como no alvo
-# `transcricao-gpu`: as pastas delas vão no LD_LIBRARY_PATH para o Paddle achá-las na GPU.
+# Job de OCR em GPU (E1, ADR 0007): `docker build --target ocr-gpu`. Modelos baixados
+# pelo script, com detector `server`, e `paddlepaddle-gpu` 3.2.2 (CUDA 12.6, do índice
+# do Paddle). O driver é do Cloud Run, em /usr/local/nvidia/lib64. As bibliotecas CUDA
+# vêm das rodas `nvidia-*` (uv.lock), como no alvo `transcricao-gpu`.
 FROM python:3.12-slim-bookworm AS ocr-gpu
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 ARG FFMPEG

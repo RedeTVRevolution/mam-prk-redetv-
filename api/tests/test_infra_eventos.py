@@ -55,8 +55,6 @@ def test_os_jobs_que_terminam_um_job_recebem_o_topico_por_variavel_de_ambiente()
 ):
     for job in [
         "validacao",
-        "transcricao",
-        "ocr",
         "transcricao_gpu",
         "ocr_gpu",
         "analise",

@@ -195,6 +195,9 @@ class RepositorioQuePublicaOFim:
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        return self._repositorio.obter_fila_gpu()
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         return self._repositorio.obter_varios(job_ids)
 
@@ -272,6 +275,9 @@ class RepositorioQueRegistraOFim:
 
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
+
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        return self._repositorio.obter_fila_gpu()
 
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         return self._repositorio.obter_varios(job_ids)

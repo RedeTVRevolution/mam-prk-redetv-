@@ -40,6 +40,7 @@ from api.jobs import (
     RepositorioDeJobs,
     ServicoIndisponivel,
     _confere_permissao,
+    espera_da_gpu,
 )
 from api.periodo_padrao import Periodo, dependencia_do_periodo
 from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel
@@ -216,11 +217,19 @@ class EstadoNaFila(BaseModel):
     idade_do_mais_antigo_s: int  # desde a criação; 0 sem Job no estado
 
 
+class EsperaDaGpu(BaseModel):
+    quantidade: int
+    idade_do_mais_antigo_s: int  # desde a criação do Job, como a ordem da fila
+
+
 class FilaAgora(BaseModel):
     por_estado: list[EstadoNaFila]
+    esperando_gpu: EsperaDaGpu
 
 
-def fila_agora(na_fila: list[Job], agora: datetime) -> FilaAgora:
+def fila_agora(
+    na_fila: list[Job], pedidos_gpu: list[dict[str, Any]], agora: datetime
+) -> FilaAgora:
     por_estado = []
     for estado in ESTADOS_DA_FILA:
         do_estado = [j for j in na_fila if j.estado == estado]
@@ -232,7 +241,15 @@ def fila_agora(na_fila: list[Job], agora: datetime) -> FilaAgora:
                 idade_do_mais_antigo_s=round(idade.total_seconds()),
             )
         )
-    return FilaAgora(por_estado=por_estado)
+    return FilaAgora(
+        por_estado=por_estado,
+        esperando_gpu=EsperaDaGpu(
+            quantidade=len(pedidos_gpu),
+            idade_do_mais_antigo_s=round(
+                max((agora.timestamp() - p["chegada"] for p in pedidos_gpu), default=0)
+            ),
+        ),
+    )
 
 
 COLUNAS_DO_CSV_DE_ACESSOS = ("dia", "uid", "email", "acessos", "ativo", "ultimo_acesso")
@@ -1144,7 +1161,9 @@ def criar_rotas_do_painel(
                 jobs.consultar(FiltroDeJobs(estados=frozenset(ESTADOS_DA_FILA))).jobs
             )
         )
-        return fila_agora(na_fila, relogio())
+        agora = relogio()
+        pedidos_gpu = ou_503(lambda: espera_da_gpu(jobs, agora))
+        return fila_agora(na_fila, pedidos_gpu, agora)
 
     @rotas.get("/filtros", response_model=OpcoesDosFiltros)
     def filtros(_pessoa: PodeVerOPainel) -> OpcoesDosFiltros:

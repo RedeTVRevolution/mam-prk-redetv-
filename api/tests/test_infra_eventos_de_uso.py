@@ -89,8 +89,6 @@ def test_a_web_e_os_jobs_que_publicam_recebem_o_topico_por_variavel_de_ambiente(
     blocos = [_bloco(MAIN, 'resource "google_cloud_run_v2_service" "web"')]
     for job in [
         "validacao",
-        "transcricao",
-        "ocr",
         "transcricao_gpu",
         "ocr_gpu",
         "analise",

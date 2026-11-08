@@ -252,6 +252,7 @@ const CUSTO = {
 };
 
 const FILA = {
+  esperando_gpu: { quantidade: 3, idade_do_mais_antigo_s: 90 },
   por_estado: [
     { estado: "aguardando_upload", quantidade: 0, idade_do_mais_antigo_s: 0 },
     { estado: "validando", quantidade: 1, idade_do_mais_antigo_s: 30 },
@@ -570,12 +571,30 @@ test("a aba Vídeos mostra a fila agora, que não depende dos filtros", async ()
     "Aguardando envio0Nenhum agora",
     "Em quarentena1O mais antigo há 30s",
     "Decupando2O mais antigo há 2min00s",
+    "Esperando GPU: 3O mais antigo há 1min30s",
   ]);
   // Com os filtros recusados, a fila continua; o relatório não é pedido.
   expect(
     screen.getByText(/Escolha o programa ou o usuário, não os dois/),
   ).toBeTruthy();
   expect(pedidos).toHaveLength(0);
+});
+
+test("a fila continua visível quando a API não traz esperando_gpu", async () => {
+  servidor.use(
+    http.get("/v1/painel/fila", () =>
+      HttpResponse.json({ por_estado: FILA.por_estado }),
+    ),
+  );
+  await abrir("/painel/videos");
+
+  const fila = await screen.findByRole("list", { name: "Fila agora" });
+  expect(within(fila).getAllByRole("listitem").map((i) => i.textContent)).toEqual([
+    "Aguardando envio0Nenhum agora",
+    "Em quarentena1O mais antigo há 30s",
+    "Decupando2O mais antigo há 2min00s",
+  ]);
+  expect(within(fila).queryByText(/Esperando GPU/)).toBeNull();
 });
 
 test("Vídeos manda o programa à API e recusa programa e usuário juntos", async () => {

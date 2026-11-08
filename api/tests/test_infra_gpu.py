@@ -104,14 +104,24 @@ def test_orquestracao_roda_os_dois_jobs_com_gpu() -> None:
         assert 'google_service_account.mam["orquestracao"]' in iam
 
 
-def test_os_jobs_em_cpu_continuam_como_estavam() -> None:
-    for nome, imagem in (("transcricao", "imagem_transcricao"), ("ocr", "imagem_ocr")):
-        job = _bloco(f'resource "google_cloud_run_v2_job" "{nome}"')
-        assert "location            = var.regiao\n" in job
-        assert f"image = var.{imagem}\n" in job
-        assert "google_compute_subnetwork.validacao.id" in job
-        assert 'cpu    = "8"' in job
-        assert "nvidia" not in job and "gpu" not in job.replace("regiao_gpu", "")
+def test_os_jobs_em_cpu_e_suas_imagens_nao_existem_mais() -> None:
+    for nome in ("transcricao", "ocr"):
+        assert f'resource "google_cloud_run_v2_job" "{nome}" {{' not in MAIN
+        assert f"google_cloud_run_v2_job.{nome}." not in MAIN
+        for arquivo in (
+            RAIZ / "infra/modulos/mam/main.tf",
+            RAIZ / "infra/main.tf",
+            RAIZ / "infra/ambientes/prod/main.tf",
+            RAIZ / "infra/ambientes/prod/exemplo.tfvars",
+            RAIZ / "infra/plano_simulado.tftest.hcl",
+            RAIZ / "scripts/deploy-dev.sh",
+        ):
+            assert not re.search(rf"\bimagem_{nome}\b", arquivo.read_text()), arquivo
+        assert not re.search(rf"\bjob_de_{nome}\b", MAIN)
+        # As contas e seus papéis de publicação são usados pelos Jobs com GPU.
+        assert f'"{nome}"' in _bloco('resource "google_service_account" "mam"')
+        for evento in ("eventos.tf", "eventos_de_uso.tf"):
+            assert f'"{nome}"' in (RAIZ / "infra/modulos/mam" / evento).read_text()
 
 
 def test_nenhum_bucket_nasce_na_regiao_da_gpu() -> None:
@@ -228,14 +238,13 @@ def test_deploy_dev_le_as_imagens_antes_do_apply_e_testa_depois_so_os_jobs_com_g
     assert deploy.index("URL=$(tf output") > teste
 
 
-def test_o_limiar_de_mudanca_do_ocr_vem_de_uma_variavel_nos_dois_jobs() -> None:
+def test_o_limiar_de_mudanca_do_ocr_vem_de_uma_variavel_no_job_com_gpu() -> None:
     variavel = _bloco('variable "limiar_de_mudanca_do_ocr"')
 
     assert "default     = 3" in variavel
-    for nome in ("ocr", "ocr_gpu"):
-        job = _bloco(f'resource "google_cloud_run_v2_job" "{nome}"')
-        assert "LIMIAR_DE_MUDANCA" in job
-        assert "tostring(var.limiar_de_mudanca_do_ocr)" in job
+    job = _bloco('resource "google_cloud_run_v2_job" "ocr_gpu"')
+    assert "LIMIAR_DE_MUDANCA" in job
+    assert "tostring(var.limiar_de_mudanca_do_ocr)" in job
 
 
 @pytest.mark.parametrize("nome", ["transcricao_gpu", "ocr_gpu", "objetos_gpu"])
@@ -359,3 +368,17 @@ def test_o_comentario_do_deploy_diz_que_mesma_imagem_nao_gera_revisao() -> None:
     deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
     assert "também gere revisão nova" not in deploy
     assert "nenhuma revisão nova" in deploy
+
+
+def test_so_as_imagens_com_gpu_de_transcricao_e_ocr_sao_construidas() -> None:
+    dockerfile = (RAIZ / "Dockerfile").read_text()
+    bake = (RAIZ / "docker-bake.hcl").read_text()
+    for nome in ("transcricao", "ocr"):
+        assert not re.search(rf"^FROM .* AS {nome}$", dockerfile, re.MULTILINE)
+        assert f'target "{nome}" {{' not in bake
+        assert f'variable "{nome.upper()}"' not in bake
+        for arquivo in ("cloudbuild.yaml", "scripts/deploy-dev.sh"):
+            texto = (RAIZ / arquivo).read_text()
+            assert not re.search(rf"\b{nome.upper()}=|\$_?{nome.upper()}\b", texto)
+            assert not re.search(rf"\bIMAGEM_{nome.upper()}\b", texto)
+    assert "FROM transcricao-base AS transcricao-gpu" in dockerfile

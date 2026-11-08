@@ -52,15 +52,25 @@ variable "regiao_gpu" {
   default = "us-east4"
 }
 
+variable "vagas_de_gpu" {
+  description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
+  type        = number
+  default     = 3
+  validation {
+    condition     = floor(var.vagas_de_gpu) == var.vagas_de_gpu && var.vagas_de_gpu >= 1
+    error_message = "vagas_de_gpu é um inteiro a partir de 1."
+  }
+}
+
 # Falta de GPU ou de cota: a mesma espera vale para o Workflows (#239) e para o teste
 # depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*). O Job com GPU
 # tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
 # anterior vezes `gpu_fator_da_espera`, com teto em `gpu_espera_maxima_s`, enquanto a soma
 # das esperas não passa de `espera_gpu_minutos`; o número de tentativas sai dessa conta. Com
 # os padrões: esperas de 1, 2 e seis de 4 minutos, nove tentativas em 27 minutos. Só depois
-# disso o Workflows roda o Job em CPU.
+# disso a etapa falha, e o reprocessamento é manual.
 variable "espera_gpu_minutos" {
-  description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
+  description = "Proteção contra falta de GPU ou cota fora da fila, em minutos, antes de falhar a etapa"
   type        = number
   default     = 27
   validation {
@@ -324,16 +334,6 @@ variable "desvios_do_sinal_por_programa" {
 
 variable "imagem_validacao" {
   description = "Imagem do Job de validação (--target validacao), de preferência pelo digest"
-  type        = string
-}
-
-variable "imagem_transcricao" {
-  description = "Imagem do Job de transcrição (--target transcricao), de preferência pelo digest"
-  type        = string
-}
-
-variable "imagem_ocr" {
-  description = "Imagem do Job de OCR da tela (--target ocr), de preferência pelo digest"
   type        = string
 }
 
@@ -1306,172 +1306,9 @@ resource "google_cloud_run_v2_job" "validacao" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
-# Job de transcrição (#104): faster-whisper com o modelo da imagem, em CPU. Na mesma
-# rede da validação, sem IP externo nem Cloud NAT: o áudio não alcança a internet, só o
-# Storage e o Firestore (acesso privado do Google). Um vídeo por execução, e sem nova
-# tentativa: a falha derruba o Job pelo ciclo de vida.
-resource "google_cloud_run_v2_job" "transcricao" {
-  name                = "mam-transcricao"
-  location            = var.regiao
-  deletion_protection = false
-  template {
-    parallelism = 1
-    task_count  = 1
-    template {
-      service_account = google_service_account.mam["transcricao"].email
-      max_retries     = 0
-      # NÃO medido (#135): o faster-whisper e o modelo só existem na imagem, e não há
-      # imagem nem rede onde este ticket foi feito. Estimativa: o large-v3-turbo em int8,
-      # em 8 vCPU, roda entre 0,5x e 1x o tempo real; 4 h de áudio levam de 2 h a 4 h.
-      # 21600 s (6 h) dá 1,5x de folga sobre o pior caso. Meça no dev com um programa
-      # de 4 h e ajuste (o conector do passo `transcreve` acompanha: 300 s a mais).
-      timeout = "21600s"
-      vpc_access {
-        egress = "ALL_TRAFFIC"
-        network_interfaces {
-          network    = google_compute_network.validacao.id
-          subnetwork = google_compute_subnetwork.validacao.id
-        }
-      }
-      containers {
-        image = var.imagem_transcricao
-        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
-        env {
-          name  = "PUBSUB_TOPICO_EVENTOS"
-          value = google_pubsub_topic.eventos_do_job.id
-        }
-        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
-        env {
-          name  = "PUBSUB_TOPICO_USO"
-          value = google_pubsub_topic.eventos_de_uso.id
-        }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "BUCKET_ACEITOS"
-          value = local.buckets["aceitos"]
-        }
-        # O áudio baixado vai para o volume em memória.
-        env {
-          name  = "TMPDIR"
-          value = "/saida"
-        }
-        resources {
-          # O modelo large-v3-turbo em int8 cabe em poucos GiB. O áudio de 4 h em WAV mono
-          # de 16 kHz tem 0,43 GiB (medido: 3,8 MB por 120 s) e o faster-whisper o carrega
-          # inteiro em float32, ~0,9 GiB: 16 GiB sobram.
-          limits = {
-            cpu    = "8"
-            memory = "16Gi"
-          }
-        }
-        volume_mounts {
-          name       = "saida"
-          mount_path = "/saida"
-        }
-      }
-      volumes {
-        name = "saida"
-        empty_dir {
-          medium     = "MEMORY"
-          size_limit = "2Gi"
-        }
-      }
-    }
-  }
-  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
-}
-
-# Job de OCR da tela (#106): PaddleOCR com os modelos da imagem, em CPU, lendo um quadro
-# por segundo do proxy. Na mesma rede da validação, sem IP externo nem Cloud NAT: o vídeo
-# não alcança a internet, só o Storage e o Firestore (acesso privado do Google). Um vídeo por execução, e sem nova
-# tentativa: a falha derruba o Job pelo ciclo de vida.
-resource "google_cloud_run_v2_job" "ocr" {
-  name                = "mam-ocr"
-  location            = var.regiao
-  deletion_protection = false
-  template {
-    parallelism = 1
-    task_count  = 1
-    template {
-      service_account = google_service_account.mam["ocr"].email
-      max_retries     = 0
-      # NÃO medido (#135): o PaddleOCR e os modelos só existem na imagem. Estimativa: o
-      # detector server em CPU de 8 vCPU lê um quadro de 480p em 0,3 s a 1,5 s; 4 h são
-      # 14.400 quadros, de 1,2 h a 6 h. 28800 s (8 h) dá 1,3x de folga sobre o pior caso.
-      # A extração dos quadros pelo ffmpeg é desprezível (120 s de vídeo em 2 s). Meça no
-      # dev com um programa de 4 h (o conector do passo `le_a_tela` acompanha).
-      timeout = "28800s"
-      vpc_access {
-        egress = "ALL_TRAFFIC"
-        network_interfaces {
-          network    = google_compute_network.validacao.id
-          subnetwork = google_compute_subnetwork.validacao.id
-        }
-      }
-      containers {
-        image = var.imagem_ocr
-        # Onde o fim do Job vai para o webhook (api/eventos_do_job.py), em eventos.tf.
-        env {
-          name  = "PUBSUB_TOPICO_EVENTOS"
-          value = google_pubsub_topic.eventos_do_job.id
-        }
-        # Onde vão os eventos de uso (api/eventos_de_uso.py), em eventos_de_uso.tf.
-        env {
-          name  = "PUBSUB_TOPICO_USO"
-          value = google_pubsub_topic.eventos_de_uso.id
-        }
-        env {
-          name  = "LIMIAR_DE_MUDANCA"
-          value = tostring(var.limiar_de_mudanca_do_ocr)
-        }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "BUCKET_ACEITOS"
-          value = local.buckets["aceitos"]
-        }
-        # O proxy baixado e os quadros de um trecho vão para o volume em memória; o Paddle grava o cache no HOME (/saida).
-        env {
-          name  = "TMPDIR"
-          value = "/saida"
-        }
-        resources {
-          # Os modelos do PaddleOCR em CPU. No volume: o proxy de 4 h, 5,75 GiB (medido, com
-          # ruído: pessimista), e os quadros de um trecho de 600 s, que se apagam antes do
-          # trecho seguinte (api/quadros.py): 600 PNG de 367 KB (medidos, 854x480 com
-          # ruído) = 0,21 GiB. Com o cache do Paddle, ~6,5 GiB: volume de 8 GiB. Os 14.400
-          # quadros juntos seriam 5 GiB a mais e não caberiam. Memória: os 8 GiB do volume
-          # mais ~4 GiB do Paddle e do Python, e a folga até 16 GiB.
-          limits = {
-            cpu    = "8"
-            memory = "16Gi"
-          }
-        }
-        volume_mounts {
-          name       = "saida"
-          mount_path = "/saida"
-        }
-      }
-      volumes {
-        name = "saida"
-        empty_dir {
-          medium     = "MEMORY"
-          size_limit = "8Gi"
-        }
-      }
-    }
-  }
-  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
-}
-
-# Job de transcrição com GPU L4 (E1, ADR 0007): a mesma lógica do Job em CPU, na região da
-# GPU. Lê o áudio do bucket de aceitos (São Paulo), grava a transcrição lá, e nada fica em
-# us-east4: os arquivos locais vivem no volume em memória. O Job em CPU continua como plano B.
+# Job de transcrição com GPU L4 (E1, ADR 0007): lê o áudio do bucket de aceitos
+# (São Paulo), grava a transcrição lá e nada fica na região da GPU: os arquivos locais
+# vivem no volume em memória.
 resource "google_cloud_run_v2_job" "transcricao_gpu" {
   name                = "mam-transcricao-gpu"
   location            = var.regiao_gpu
@@ -1555,9 +1392,8 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
 }
 
-# Job de OCR da tela com GPU L4 (E1, ADR 0007): a mesma lógica do Job em CPU, na região da
-# GPU, lendo o proxy do bucket de aceitos (São Paulo) e gravando a leitura lá. O Job em CPU
-# continua como plano B.
+# Job de OCR da tela com GPU L4 (E1, ADR 0007): lê o proxy do bucket de aceitos
+# (São Paulo) e grava a leitura lá.
 resource "google_cloud_run_v2_job" "ocr_gpu" {
   name                = "mam-ocr-gpu"
   location            = var.regiao_gpu
@@ -1736,22 +1572,6 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
     }
   }
   depends_on = [google_project_service.apis, google_storage_bucket_iam_member.mam]
-}
-
-# A orquestração roda o Job de transcrição, também com override de JOB_ID.
-resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_transcricao" {
-  name     = google_cloud_run_v2_job.transcricao.name
-  location = google_cloud_run_v2_job.transcricao.location
-  role     = "roles/run.developer"
-  member   = google_service_account.mam["orquestracao"].member
-}
-
-# A orquestração roda o Job de OCR, também com override de JOB_ID.
-resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_ocr" {
-  name     = google_cloud_run_v2_job.ocr.name
-  location = google_cloud_run_v2_job.ocr.location
-  role     = "roles/run.developer"
-  member   = google_service_account.mam["orquestracao"].member
 }
 
 # A orquestração roda os Jobs com GPU, também com override de JOB_ID.
@@ -2232,9 +2052,8 @@ resource "google_workflows_workflow" "validacao" {
     projeto                = var.projeto
     regiao                 = var.regiao
     job_de_validacao       = google_cloud_run_v2_job.validacao.name
-    job_de_transcricao     = google_cloud_run_v2_job.transcricao.name
-    job_de_ocr             = google_cloud_run_v2_job.ocr.name
     regiao_gpu             = var.regiao_gpu
+    vagas_de_gpu           = var.vagas_de_gpu
     gpu_espera_total_s     = var.espera_gpu_minutos * 60
     gpu_espera_s           = var.gpu_espera_s
     gpu_fator_da_espera    = var.gpu_fator_da_espera
