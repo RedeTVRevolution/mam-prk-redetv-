@@ -273,6 +273,8 @@ class Job(BaseModel):
     etapas: dict[NomeDaEtapa, Etapa] = {}
     # Quantas vezes o Job foi reprocessado a partir da etapa que falhou (#147).
     reprocessamentos: int = 0
+    # Início da passada atual; `None` em Job anterior ao campo.
+    inicio_da_passada: datetime | None = None
     # Em qual `reprocessamentos` o fim `falhou` deste Job já foi avisado (webhook e evento de
     # uso) por `api.fim_do_job`, o caminho do `falhou` que o Workflows grava; `None` se nunca.
     fim_avisado_no_reprocessamento: int | None = None
@@ -362,6 +364,7 @@ class JobResumido(BaseModel):
     # As etapas iniciadas, da primeira à última.
     etapas: list[EtapaPublica] = []
     reprocessamentos: int = 0
+    inicio_da_passada: datetime | None = None
     enviado_por: EnviadoPor
     criado_em: datetime
     atualizado_em: datetime
@@ -1066,6 +1069,7 @@ def criar_rotas(
             programa=novo.programa,
             data_exibicao=novo.data_exibicao,
             criado_em=agora,
+            inicio_da_passada=agora,
             atualizado_em=agora,
         )
         # A repetição lê antes de gravar (muitas ao mesmo tempo brigariam pelo mesmo

@@ -141,6 +141,22 @@ def test_falha_de_etapa_volta_a_analisando_na_etapa_que_falhou() -> None:
     assert mundo.disparo.disparos == [("j1", "analise")]
 
 
+@pytest.mark.parametrize("inicio_anterior", [None, BASE])
+def test_reprocesso_grava_e_expoe_o_inicio_da_passada_atual(
+    inicio_anterior: datetime | None,
+) -> None:
+    job = _falhou_na_analise()
+    job.inicio_da_passada = inicio_anterior
+    mundo = Mundo(job)
+
+    resposta = mundo.reprocessar()
+
+    assert resposta.status_code == 202
+    assert mundo.job().inicio_da_passada == AGORA
+    assert mundo.job().criado_em == BASE
+    assert resposta.json()["inicio_da_passada"] == "2026-11-01T13:00:00Z"
+
+
 def test_job_concluido_com_indexacao_falha_continua_concluido() -> None:
     mundo = Mundo(_concluido_sem_indexar())
 

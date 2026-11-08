@@ -459,6 +459,7 @@ export default function Entradas({
             const partida = etapaDeReprocesso(job)
             const falhaDoArquivo = job.estado === 'falhou' && partida === null
             const interrompido = job.codigo_falha === 'processamento_interrompido'
+            const tempo = tempoDaEntradaMs(job, agora)
             const aoTeclar = (e: KeyboardEvent<HTMLTableRowElement>) => {
               if (e.target !== e.currentTarget || e.key !== 'Enter') return
               e.preventDefault()
@@ -485,7 +486,7 @@ export default function Entradas({
                   <td className={cn(CELULA, 'hidden md:table-cell')}>
                     <ReguaDeEtapas job={job} agora={agora} />
                   </td>
-                  <td className={cn(CELULA, 'hidden text-right font-mono text-xs tabular-nums sm:table-cell')}>{relogio(tempoDaEntradaMs(job, agora))}</td>
+                  <td className={cn(CELULA, 'hidden text-right font-mono text-xs tabular-nums sm:table-cell')}>{tempo === null ? '—' : relogio(tempo)}</td>
                   <td className={CELULA} onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-wrap justify-end gap-1.5">
                       {falhaDoArquivo && <span className="text-right text-xs text-muted-foreground">Envie o arquivo de novo</span>}
