@@ -172,10 +172,12 @@ def _grao(chaves: list[str]) -> str:
     pelas `chaves`. As colunas são sempre as mesmas, as chaves que faltam vão como NULL."""
     todas = ["uid", "email", "programa"]
     nome = "_".join(chaves) or "total"
-    vazias = ", ".join(f"CAST(NULL AS STRING) AS {c}" for c in todas if c not in chaves)
+    projecao = ", ".join(
+        c if c in chaves else f"CAST(NULL AS STRING) AS {c}" for c in todas
+    )
     colunas = ", ".join(chaves)
     return (
-        f"SELECT '{nome}' AS grao, {colunas + ', ' if chaves else ''}{vazias + ', ' if vazias else ''}"
+        f"SELECT '{nome}' AS grao, {projecao}, "
         # Sem GROUP BY, o total volta uma linha mesmo sem medida no período, com as somas
         # NULL: o IFNULL as faz 0, como no agregado em memória.
         "IFNULL(SUM(ativo_s), 0) AS ativo_s,"
