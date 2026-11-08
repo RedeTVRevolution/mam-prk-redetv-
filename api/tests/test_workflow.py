@@ -765,7 +765,11 @@ def test_as_esperas_crescem_ate_o_teto_e_nao_passam_da_espera_total() -> None:
     ]
     posicoes = [roda.index(passo) for passo in ordem]
     assert posicoes == sorted(posicoes)
-    assert "next: conta_a_tentativa" in roda[roda.index("cresce_a_espera:") :]
+    assert "next: renova_antes_da_tentativa" in roda[roda.index("cresce_a_espera:") :]
+    renovacao = roda[
+        roda.index("- renova_antes_da_tentativa:") : roda.index("- conta_a_tentativa:")
+    ]
+    assert "acao: renovar" in renovacao
     # O log diz por que cada tentativa falhou.
     assert "sys.log" in roda and "mensagem" in roda
 
@@ -803,7 +807,7 @@ def test_esgotada_a_espera_o_ramo_roda_o_job_em_cpu_e_registra_cpu() -> None:
     texto = _texto()
 
     roda = _subworkflow(texto, "roda_o_job_com_gpu")
-    plano_b = roda[roda.index("registra_o_plano_b:") :]
+    plano_b = roda[roda.index("registra_o_plano_b:") : roda.index("as: erro_com_vaga")]
     assert "plano B" in plano_b and "sys.log" in plano_b
     assert plano_b.index("dispositivo: cpu") < plano_b.index(
         "googleapis.run.v2.projects.locations.jobs.run"
@@ -952,9 +956,15 @@ def test_sem_job_em_cpu_a_gpu_esgotada_repassa_a_falha() -> None:
     assert funcao.index("raise: $${erro_final}") < funcao.index("- registra_o_plano_b:")
     # Esgotada a espera, o fluxo passa pela conferência antes do plano B.
     cabe = funcao[
-        funcao.index("- ainda_cabe_esperar:") : funcao.index("- registra_o_sucesso")
+        funcao.index("- ainda_cabe_esperar:") : funcao.index("- libera_no_sucesso:")
     ]
-    assert cabe.rstrip().endswith("next: confere_se_ha_plano_b")
+    assert cabe.rstrip().endswith("next: libera_antes_da_cpu")
+    libera = funcao[
+        funcao.index("- libera_antes_da_cpu:") : funcao.index(
+            "- confere_se_ha_plano_b:"
+        )
+    ]
+    assert "acao: liberar" in libera
 
 
 def test_a_definicao_renderizada_e_yaml_valido() -> None:
@@ -1022,6 +1032,7 @@ def _nomes_dos_passos(passos: list[Any] | None) -> set[str]:
         ((nome, corpo),) = passo.items()
         nomes.add(nome)
         nomes |= _nomes_dos_passos(corpo.get("steps"))
+        nomes |= _nomes_dos_passos((corpo.get("try") or {}).get("steps"))
         for ramo in corpo.get("switch") or []:
             nomes |= _nomes_dos_passos(ramo.get("steps"))
     return nomes
@@ -1094,8 +1105,12 @@ def test_conta_da_orquestracao_grava_log_do_sys_log() -> None:
     assert linha and '"roles/logging.logWriter"' in linha.group(0)
 
 
-def _definicao() -> dict[str, Any]:
-    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "1", _texto()).replace("$${", "${")
+def _definicao(variaveis: dict[str, str] | None = None) -> dict[str, Any]:
+    renderizado = re.sub(
+        r"(?<!\$)\$\{(\w+)\}",
+        lambda m: (variaveis or {}).get(m[1], "1"),
+        _texto(),
+    ).replace("$${", "${")
     definicao: dict[str, Any] = yaml.safe_load(renderizado)
     return definicao
 
@@ -1171,3 +1186,41 @@ def test_o_job_do_aviso_do_fim_e_o_que_o_workflow_roda() -> None:
         "job_de_fim             = google_cloud_run_v2_job.fim.name" in MAIN.read_text()
     )
     assert "google_cloud_run_v2_job.fim.name" in fim  # o papel de rodar, só para ele
+
+
+def test_vagas_de_gpu_sao_configuradas_e_chegam_ao_workflow() -> None:
+    for arquivo in (
+        MAIN,
+        MODULO.parents[1] / "main.tf",
+        MODULO.parents[1] / "ambientes/prod/main.tf",
+    ):
+        texto = arquivo.read_text()
+        variavel = texto.split('variable "vagas_de_gpu"')[1].split("\n}")[0]
+        assert "default     = 3" in variavel
+        assert "floor(var.vagas_de_gpu) == var.vagas_de_gpu" in variavel
+        assert "var.vagas_de_gpu >= 1" in variavel
+        assert re.search(r"vagas_de_gpu\s+= var\.vagas_de_gpu", texto)
+    assert "${vagas_de_gpu}" in _texto()
+
+
+def test_a_vaga_cerca_a_gpu_e_e_liberada_tambem_na_interrupcao() -> None:
+    roda = _subworkflow(_texto(), "roda_o_job_com_gpu")
+    assert roda.index("call: espera_vaga_gpu") < roda.index("- roda_na_gpu:")
+    assert roda.index("- libera_no_sucesso:") < roda.index("- fim_na_gpu:")
+    assert roda.index("- libera_antes_da_cpu:") < roda.index("- confere_se_ha_plano_b:")
+    assert "- libera_na_falha:" in roda and "raise: $${erro_com_vaga}" in roda
+    assert "call: atualiza_fila_gpu" in _subworkflow(_texto(), "marca_interrompido")
+    fila = _subworkflow(_texto(), "atualiza_fila_gpu")
+    assert "updateTime: $${documento_da_fila.updateTime}" in fila
+    assert "exists: false" in fila
+    assert "next: rele_a_fila" in fila
+    assert "${vagas_de_gpu}" in fila
+    assert "GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID" in fila
+
+
+def test_a_fila_espera_com_pulso_e_registra_a_posicao_inicial() -> None:
+    espera = _subworkflow(_texto(), "espera_vaga_gpu")
+    assert "seconds: 60" in espera and "next: pede_a_vaga" in espera
+    assert "evento: vaga_de_gpu" in espera
+    assert "posicao: $${posicao_inicial}" in espera
+    assert "espera_s: $${sys.now() - inicio_da_espera}" in espera

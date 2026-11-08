@@ -52,6 +52,16 @@ variable "regiao_gpu" {
   default = "us-east4"
 }
 
+variable "vagas_de_gpu" {
+  description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
+  type        = number
+  default     = 3
+  validation {
+    condition     = floor(var.vagas_de_gpu) == var.vagas_de_gpu && var.vagas_de_gpu >= 1
+    error_message = "vagas_de_gpu é um inteiro a partir de 1."
+  }
+}
+
 # Falta de GPU ou de cota: a mesma espera vale para o Workflows (#239) e para o teste
 # depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*). O Job com GPU
 # tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
@@ -60,7 +70,7 @@ variable "regiao_gpu" {
 # os padrões: esperas de 1, 2 e seis de 4 minutos, nove tentativas em 27 minutos. Só depois
 # disso o Workflows roda o Job em CPU.
 variable "espera_gpu_minutos" {
-  description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
+  description = "Proteção contra falta de GPU ou cota fora da fila, em minutos, antes do plano B em CPU"
   type        = number
   default     = 27
   validation {
@@ -2219,6 +2229,7 @@ resource "google_workflows_workflow" "validacao" {
     job_de_transcricao     = google_cloud_run_v2_job.transcricao.name
     job_de_ocr             = google_cloud_run_v2_job.ocr.name
     regiao_gpu             = var.regiao_gpu
+    vagas_de_gpu           = var.vagas_de_gpu
     gpu_espera_total_s     = var.espera_gpu_minutos * 60
     gpu_espera_s           = var.gpu_espera_s
     gpu_fator_da_espera    = var.gpu_fator_da_espera

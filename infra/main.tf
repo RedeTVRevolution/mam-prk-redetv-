@@ -95,6 +95,16 @@ variable "dominio" {
   default     = ""
 }
 
+variable "vagas_de_gpu" {
+  description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
+  type        = number
+  default     = 3
+  validation {
+    condition     = floor(var.vagas_de_gpu) == var.vagas_de_gpu && var.vagas_de_gpu >= 1
+    error_message = "vagas_de_gpu é um inteiro a partir de 1."
+  }
+}
+
 module "mam" {
   source = "./modulos/mam"
 
@@ -112,6 +122,7 @@ module "mam" {
   waf_ativo                    = var.waf_ativo
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
+  vagas_de_gpu                 = var.vagas_de_gpu
 
   # O índice ANN da descrição (~R$ 290/mês; ADR 0006): o KNN sem índice aceita só 100 mil
   # registros, uns 44 h de vídeo.

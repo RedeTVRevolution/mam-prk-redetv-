@@ -76,8 +76,18 @@ variable "janelas_em_paralelo" {
   default     = 4
 }
 
+variable "vagas_de_gpu" {
+  description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
+  type        = number
+  default     = 3
+  validation {
+    condition     = floor(var.vagas_de_gpu) == var.vagas_de_gpu && var.vagas_de_gpu >= 1
+    error_message = "vagas_de_gpu é um inteiro a partir de 1."
+  }
+}
+
 variable "espera_gpu_minutos" {
-  description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
+  description = "Proteção contra falta de GPU ou cota fora da fila, em minutos, antes do plano B em CPU"
   type        = number
   default     = 27
 }
@@ -135,6 +145,7 @@ module "mam" {
   waf_ativo                    = var.waf_ativo
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
+  vagas_de_gpu                 = var.vagas_de_gpu
   janelas_em_paralelo          = var.janelas_em_paralelo
   espera_gpu_minutos           = var.espera_gpu_minutos
   limite_de_falhas_por_etapa   = var.limite_de_falhas_por_etapa

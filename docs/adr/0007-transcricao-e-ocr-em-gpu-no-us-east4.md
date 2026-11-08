@@ -26,6 +26,14 @@ As imagens:
 - **Modo de teste:** com `MODO_TESTE=1`, os Jobs não leem o bucket: rodam sobre uma amostra que já está na imagem (a transcrição, uma fala curta sintética, `/amostras/fala.wav`, gerada com espeak-ng; o OCR, um quadro com `REDETV`, `/amostras/quadro.png`) e saem com 20 se a GPU não funcionou ou 21 se o resultado veio errado.
 - **Teste depois da publicação:** o `scripts/deploy-dev.sh` executa em modo de teste os Jobs com GPU cuja imagem mudou (`scripts/testar-jobs-gpu.sh`), em paralelo. Falta de GPU ou de cota espera e tenta de novo, com as tentativas e as esperas do Workflows (`gpu_*` no `infra/main.tf`; hoje 60 s e 120 s); qualquer outra falha derruba o teste. Se falhar, os Jobs voltam ao digest anterior, para o Workflows nunca disparar uma imagem que não roda na GPU; na primeira publicação não há digest anterior, e a publicação só falha.
 
+## Fila da GPU (#498, decisão de 07/11/2026)
+
+A transcrição, a leitura da tela e o Florence pedem uma vaga por GPU no mesmo ponto do Workflows, antes de executar o Job. `vagas_de_gpu` parte de 3, a cota disponível, e a ordem é `criado_em` do Job, identificador e etapa. Cada pedido pode ocupar uma das vagas livres se sua posição, contada de zero, for menor que o número de vagas livres. A espera na fila não consome `espera_gpu_minutos`: essa proteção continua para cota usada fora da fila (medições e testes depois do deploy) ou falta de GPU na região, mantendo a vaga durante as tentativas.
+
+O documento `fila_gpu/vagas` do Firestore guarda os pedidos e as vagas ocupadas. A gravação condicional por `updateTime`, ou `exists: false` na criação, relê e refaz a decisão em caso de conflito ou resposta perdida. Cada entrada identifica a execução para uma liberação atrasada não apagar a vaga de outra execução. A vaga é liberada no sucesso, na falha, antes do plano B e na interrupção. Quem lê limpa pedidos sem pulso por mais de três esperas de 60 s e vagas além do `timeout_gpu` da etapa ou de Jobs fora de `analisando`. **Exceção:** o Florence (`inventario_de_objetos`) começa com o Job já em `concluido`; esse estado mantém sua vaga até o timeout. Falha, cancelamento ou Job apagado invalidam qualquer etapa. O prazo da vaga recomeça antes de cada tentativa de GPU, para a espera por cota não encurtar o prazo da execução.
+
+O evento `vaga_de_gpu` registra Job, etapa, posição inicial e segundos de espera. A posição inicial também fica no documento para sobreviver a uma resposta de gravação perdida. A tela da fila fica para a parte 2; o plano B em CPU continua.
+
 Alternativas recusadas:
 - **GPU em outra região dos EUA (`us-central1`, `us-west1`):** mais longe de São Paulo que `us-east4`, sem ganho que compense, e o jurídico aprovou `us-east4`.
 - **Continuar em CPU:** é o custo e o tempo de hoje, com o OCR levando quase o tempo do próprio programa. Fica como plano B, não como caminho principal.

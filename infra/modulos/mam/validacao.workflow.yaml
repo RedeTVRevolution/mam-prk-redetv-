@@ -646,6 +646,21 @@ marca_interrompido:
               job_id: $${job_id}
               etapa: $${etapa_interrompida}
               falhou_na_execucao: true
+    # O Job já saiu de `analisando`: se a fila falhar, a limpeza de vagas perdidas resolve.
+    - libera_as_vagas_interrompidas:
+        try:
+          call: atualiza_fila_gpu
+          args:
+            job_id: $${job_id}
+            acao: liberar
+        except:
+          as: erro_ao_liberar_interrompido
+          steps:
+            - registra_a_liberacao_interrompida_pendente:
+                call: sys.log
+                args:
+                  severity: ERROR
+                  data: $${erro_ao_liberar_interrompido}
     - fim_do_interrompido:
         return: null
 
@@ -916,6 +931,8 @@ etapa_com_gpu:
           limpa_a_etapa: false
           confere_o_estado: false
 
+# Cada etapa pega uma vaga FIFO antes de pedir a GPU e a mantém nas tentativas por cota.
+# A espera por cota protege também contra GPUs usadas fora da fila e falta na região.
 # O Job com GPU de `${regiao_gpu}`, com novas tentativas só quando falta GPU ou cota, e o Job
 # em CPU de `${regiao}` como plano B. Conta como falta de GPU ou de cota só a falha antes de o
 # contêiner rodar: o pedido recusado por cota (429) ou uma mensagem de cota, capacidade ou
@@ -938,134 +955,495 @@ roda_o_job_com_gpu:
           # variável criada só dentro do `except` não existe fora dele (deploy de 2026-11-03).
           - mensagem: ""
           - erro_final: null
-    - conta_a_tentativa:
-        assign:
-          - tentativas: $${tentativas + 1}
-    - roda_na_gpu:
+    - protege_a_vaga:
         try:
-          call: googleapis.run.v2.projects.locations.jobs.run
-          args:
-            name: $${"projects/${projeto}/locations/${regiao_gpu}/jobs/" + job_gpu}
-            body:
-              overrides:
-                containerOverrides:
-                  - env:
-                      - name: JOB_ID
-                        value: $${job_id}
-            connector_params:
-              timeout: $${timeout_gpu}
-        except:
-          as: erro_da_gpu
           steps:
-            - le_o_motivo:
+            - pede_a_vaga_inicial:
+                call: espera_vaga_gpu
+                args:
+                  job_id: $${job_id}
+                  etapa: $${etapa}
+                  timeout_gpu: $${timeout_gpu}
+            - renova_antes_da_tentativa:
+                call: atualiza_fila_gpu
+                args:
+                  job_id: $${job_id}
+                  etapa: $${etapa}
+                  acao: renovar
+            - conta_a_tentativa:
                 assign:
-                  # A execução que falhou chega como OperationError, com mensagem genérica
-                  # no topo e o motivo em `operation.error.message`: as duas entram na conta.
-                  - erro_final: $${erro_da_gpu}
-                  - mensagem: $${default(map.get(erro_da_gpu, "message"), "") + " " + default(map.get(erro_da_gpu, ["operation", "error", "message"]), "")}
-                  - codigo_http: $${default(map.get(erro_da_gpu, "code"), 0)}
-                  - faltou_gpu: $${(codigo_http == 429 or text.match_regex(mensagem, "(?i)quota|capacity|resource.?exhausted|insufficient (gpu|resources|capacity)|no available|out of stock")) and not text.match_regex(mensagem, "(?i)exit[(]|exit code|container called")}
-            - falha_dentro_do_conteiner:
+                  - tentativas: $${tentativas + 1}
+            - roda_na_gpu:
+                try:
+                  call: googleapis.run.v2.projects.locations.jobs.run
+                  args:
+                    name: $${"projects/${projeto}/locations/${regiao_gpu}/jobs/" + job_gpu}
+                    body:
+                      overrides:
+                        containerOverrides:
+                          - env:
+                              - name: JOB_ID
+                                value: $${job_id}
+                    connector_params:
+                      timeout: $${timeout_gpu}
+                except:
+                  as: erro_da_gpu
+                  steps:
+                    - le_o_motivo:
+                        assign:
+                          # A execução que falhou chega como OperationError, com mensagem genérica
+                          # no topo e o motivo em `operation.error.message`: as duas entram na conta.
+                          - erro_final: $${erro_da_gpu}
+                          - mensagem: $${default(map.get(erro_da_gpu, "message"), "") + " " + default(map.get(erro_da_gpu, ["operation", "error", "message"]), "")}
+                          - codigo_http: $${default(map.get(erro_da_gpu, "code"), 0)}
+                          - faltou_gpu: $${(codigo_http == 429 or text.match_regex(mensagem, "(?i)quota|capacity|resource.?exhausted|insufficient (gpu|resources|capacity)|no available|out of stock")) and not text.match_regex(mensagem, "(?i)exit[(]|exit code|container called")}
+                    - falha_dentro_do_conteiner:
+                        switch:
+                          - condition: $${not faltou_gpu}
+                            steps:
+                              - registra_a_falha_do_conteiner:
+                                  call: sys.log
+                                  args:
+                                    severity: ERROR
+                                    text: '$${"o Job " + job_gpu + " falhou dentro do contêiner na tentativa " + string(tentativas) + " para " + job_id + ", sem nova tentativa e sem plano B: " + mensagem}'
+                              - marca_a_gpu_da_falha:
+                                  call: marca_dispositivo
+                                  args:
+                                    job_id: $${job_id}
+                                    etapa: $${etapa}
+                                    dispositivo: gpu
+                                    tentativas: $${tentativas}
+                              - repassa_a_falha_do_conteiner:
+                                  raise: $${erro_da_gpu}
+                    # Falta de GPU ou de cota (#288): o painel da GPU conta estas linhas por etapa.
+                    - registra_a_falta_de_gpu:
+                        call: sys.log
+                        args:
+                          severity: WARNING
+                          json:
+                            evento: falta_de_gpu
+                            etapa: $${etapa}
+                            job_id: $${job_id}
+                            tentativa: $${tentativas}
+                    - ainda_cabe_esperar:
+                        switch:
+                          - condition: $${esperado + espera <= ${gpu_espera_total_s}}
+                            next: registra_a_nova_tentativa
+                        next: libera_antes_da_cpu
+            - libera_no_sucesso:
+                try:
+                  call: atualiza_fila_gpu
+                  args:
+                    job_id: $${job_id}
+                    etapa: $${etapa}
+                    acao: liberar
+                except:
+                  as: erro_ao_liberar_no_sucesso
+                  steps:
+                    - registra_a_liberacao_do_sucesso_pendente:
+                        call: sys.log
+                        args:
+                          severity: ERROR
+                          data: $${erro_ao_liberar_no_sucesso}
+            - registra_o_sucesso_na_gpu:
+                call: marca_dispositivo
+                args:
+                  job_id: $${job_id}
+                  etapa: $${etapa}
+                  dispositivo: gpu
+                  tentativas: $${tentativas}
+            - fim_na_gpu:
+                return: gpu
+            - registra_a_nova_tentativa:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: '$${"sem GPU ou sem cota para " + job_gpu + " na tentativa " + string(tentativas) + " de " + job_id + ", nova tentativa em " + string(espera) + " s: " + mensagem}'
+            - espera_a_gpu:
+                call: sys.sleep
+                args:
+                  seconds: $${espera}
+            - cresce_a_espera:
+                assign:
+                  - esperado: $${esperado + espera}
+                  - espera: $${math.min(espera * ${gpu_fator_da_espera}, ${gpu_espera_maxima_s})}
+                next: renova_antes_da_tentativa
+            # Sem Job em CPU (o inventário de objetos, #244), esgotada a espera a falha sobe.
+            - libera_antes_da_cpu:
+                try:
+                  call: atualiza_fila_gpu
+                  args:
+                    job_id: $${job_id}
+                    etapa: $${etapa}
+                    acao: liberar
+                except:
+                  as: erro_ao_liberar_antes_da_cpu
+                  steps:
+                    - registra_a_liberacao_antes_da_cpu_pendente:
+                        call: sys.log
+                        args:
+                          severity: ERROR
+                          data: $${erro_ao_liberar_antes_da_cpu}
+            - confere_se_ha_plano_b:
                 switch:
-                  - condition: $${not faltou_gpu}
+                  - condition: $${job_cpu == null}
                     steps:
-                      - registra_a_falha_do_conteiner:
+                      - registra_a_falta_de_plano_b:
                           call: sys.log
                           args:
-                            severity: ERROR
-                            text: '$${"o Job " + job_gpu + " falhou dentro do contêiner na tentativa " + string(tentativas) + " para " + job_id + ", sem nova tentativa e sem plano B: " + mensagem}'
-                      - marca_a_gpu_da_falha:
+                            severity: WARNING
+                            text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", sem plano B: " + mensagem}'
+                      - marca_a_gpu_sem_plano_b:
                           call: marca_dispositivo
                           args:
                             job_id: $${job_id}
                             etapa: $${etapa}
                             dispositivo: gpu
                             tentativas: $${tentativas}
-                      - repassa_a_falha_do_conteiner:
-                          raise: $${erro_da_gpu}
-            # Falta de GPU ou de cota (#288): o painel da GPU conta estas linhas por etapa.
-            - registra_a_falta_de_gpu:
+                      - repassa_a_falta_de_gpu:
+                          raise: $${erro_final}
+            - registra_o_plano_b:
                 call: sys.log
                 args:
                   severity: WARNING
-                  json:
-                    evento: falta_de_gpu
-                    etapa: $${etapa}
+                  text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", plano B: o Job em CPU " + job_cpu + ": " + mensagem}'
+            - marca_a_cpu:
+                call: marca_dispositivo
+                args:
+                  job_id: $${job_id}
+                  etapa: $${etapa}
+                  dispositivo: cpu
+                  tentativas: $${tentativas}
+            - roda_na_cpu:
+                call: googleapis.run.v2.projects.locations.jobs.run
+                args:
+                  name: $${"projects/${projeto}/locations/${regiao}/jobs/" + job_cpu}
+                  body:
+                    overrides:
+                      containerOverrides:
+                        - env:
+                            - name: JOB_ID
+                              value: $${job_id}
+                  connector_params:
+                    timeout: $${timeout_cpu}
+            - fim_na_cpu:
+                return: cpu
+        except:
+          as: erro_com_vaga
+          steps:
+            - libera_na_falha:
+                try:
+                  call: atualiza_fila_gpu
+                  args:
                     job_id: $${job_id}
-                    tentativa: $${tentativas}
-            - ainda_cabe_esperar:
-                switch:
-                  - condition: $${esperado + espera <= ${gpu_espera_total_s}}
-                    next: registra_a_nova_tentativa
-                next: confere_se_ha_plano_b
-    - registra_o_sucesso_na_gpu:
-        call: marca_dispositivo
+                    etapa: $${etapa}
+                    acao: liberar
+                except:
+                  as: erro_ao_liberar
+                  steps:
+                    - registra_a_liberacao_pendente:
+                        call: sys.log
+                        args:
+                          severity: ERROR
+                          data: $${erro_ao_liberar}
+            - repassa_o_erro_com_vaga:
+                raise: $${erro_com_vaga}
+
+# Um pulso por minuto mantém vivo o pedido; a posição do log é a da primeira gravação.
+espera_vaga_gpu:
+  params: [job_id, etapa, timeout_gpu]
+  steps:
+    - inicia_a_espera:
+        assign:
+          - inicio_da_espera: $${sys.now()}
+          - posicao_inicial: null
+    - pede_a_vaga:
+        call: atualiza_fila_gpu
         args:
           job_id: $${job_id}
           etapa: $${etapa}
-          dispositivo: gpu
-          tentativas: $${tentativas}
-    - fim_na_gpu:
-        return: gpu
-    - registra_a_nova_tentativa:
-        call: sys.log
-        args:
-          severity: WARNING
-          text: '$${"sem GPU ou sem cota para " + job_gpu + " na tentativa " + string(tentativas) + " de " + job_id + ", nova tentativa em " + string(espera) + " s: " + mensagem}'
-    - espera_a_gpu:
+          timeout_gpu: $${timeout_gpu}
+        result: pedido_de_vaga
+    - guarda_a_posicao:
+        switch:
+          - condition: $${posicao_inicial == null and pedido_de_vaga.posicao_inicial != null}
+            assign:
+              - posicao_inicial: $${pedido_de_vaga.posicao_inicial}
+    - confere_a_vaga:
+        switch:
+          - condition: $${pedido_de_vaga.vaga}
+            next: registra_a_vaga
+    - espera_na_fila:
         call: sys.sleep
         args:
-          seconds: $${espera}
-    - cresce_a_espera:
-        assign:
-          - esperado: $${esperado + espera}
-          - espera: $${math.min(espera * ${gpu_fator_da_espera}, ${gpu_espera_maxima_s})}
-        next: conta_a_tentativa
-    # Sem Job em CPU (o inventário de objetos, #244), esgotada a espera a falha sobe.
-    - confere_se_ha_plano_b:
-        switch:
-          - condition: $${job_cpu == null}
-            steps:
-              - registra_a_falta_de_plano_b:
-                  call: sys.log
-                  args:
-                    severity: WARNING
-                    text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", sem plano B: " + mensagem}'
-              - marca_a_gpu_sem_plano_b:
-                  call: marca_dispositivo
-                  args:
-                    job_id: $${job_id}
-                    etapa: $${etapa}
-                    dispositivo: gpu
-                    tentativas: $${tentativas}
-              - repassa_a_falta_de_gpu:
-                  raise: $${erro_final}
-    - registra_o_plano_b:
+          seconds: 60
+        next: pede_a_vaga
+    - registra_a_vaga:
         call: sys.log
         args:
-          severity: WARNING
-          text: '$${"sem GPU ou sem cota para " + job_gpu + " em " + string(tentativas) + " tentativas e " + string(esperado) + " s de espera para " + job_id + ", plano B: o Job em CPU " + job_cpu + ": " + mensagem}'
-    - marca_a_cpu:
-        call: marca_dispositivo
+          severity: INFO
+          json:
+            evento: vaga_de_gpu
+            job_id: $${job_id}
+            etapa: $${etapa}
+            posicao: $${posicao_inicial}
+            espera_s: $${sys.now() - inicio_da_espera}
+    - vaga_obtida:
+        return: null
+
+# Um único documento, com compare-and-swap também na criação. Toda releitura refaz a
+# limpeza e a decisão: repetir um PATCH com listas antigas perderia pedidos concorrentes.
+atualiza_fila_gpu:
+  params: [job_id, etapa: null, timeout_gpu: 0, acao: pedir]
+  steps:
+    - identifica_a_execucao:
+        assign:
+          - dono: $${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
+          - releituras_da_fila: 0
+    - rele_a_fila:
+        assign:
+          - documento_da_fila: {fields: {}}
+          - precondicao: {exists: false}
+    - le_a_fila:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: projects/${projeto}/databases/(default)/documents/fila_gpu/vagas
+          result: documento_da_fila
+        retry: $${http.default_retry}
+        except:
+          as: erro_da_fila
+          steps:
+            - so_aceita_fila_ausente:
+                switch:
+                  - condition: $${erro_da_fila.code != 404}
+                    raise: $${erro_da_fila}
+    - precondicao_da_fila:
+        switch:
+          - condition: $${map.get(documento_da_fila, "updateTime") != null}
+            assign:
+              - precondicao:
+                  updateTime: $${documento_da_fila.updateTime}
+    - prepara_a_fila:
+        assign:
+          - agora: $${sys.now()}
+          - fila: {espera: [], ocupadas: []}
+          - tem_vaga: false
+          - esta_na_espera: false
+          - outro_dono: false
+          - posicao: null
+          - posicao_inicial: null
+          - indice_do_pedido: 0
+          - pedido: {}
+          - novo: {}
+    - le_o_job_da_vaga:
+        call: le_job_da_fila
         args:
           job_id: $${job_id}
-          etapa: $${etapa}
-          dispositivo: cpu
-          tentativas: $${tentativas}
-    - roda_na_cpu:
-        call: googleapis.run.v2.projects.locations.jobs.run
-        args:
-          name: $${"projects/${projeto}/locations/${regiao}/jobs/" + job_cpu}
-          body:
-            overrides:
-              containerOverrides:
-                - env:
-                    - name: JOB_ID
-                      value: $${job_id}
-          connector_params:
-            timeout: $${timeout_cpu}
-    - fim_na_cpu:
-        return: cpu
+        result: job_da_vaga
+    - confere_o_job_da_vaga:
+        assign:
+          - ativo: $${job_da_vaga.estado == "analisando" or (etapa == "inventario_de_objetos" and job_da_vaga.estado == "concluido")}
+    - limpa_a_fila:
+        for:
+          value: grupo
+          in: [espera, ocupadas]
+          steps:
+            - percorre_os_pedidos:
+                for:
+                  value: entrada
+                  in: $${default(map.get(documento_da_fila.fields, [grupo, "arrayValue", "values"]), [])}
+                  steps:
+                    - tira_o_pedido:
+                        assign:
+                          - item: $${entrada.mapValue.fields}
+                          - meu: $${item.job_id.stringValue == job_id and item.dono.stringValue == dono and (etapa == null or item.etapa.stringValue == etapa)}
+                    - le_o_dono_da_vaga:
+                        call: le_job_da_fila
+                        args:
+                          job_id: $${item.job_id.stringValue}
+                        result: job_do_item
+                    # Florence começa depois da análise: `concluido` é válido só nele.
+                    # Falha, cancelamento ou Job apagado invalidam qualquer etapa.
+                    - descarta_o_pedido_perdido:
+                        switch:
+                          - condition: $${not (job_do_item.estado == "analisando" or (item.etapa.stringValue == "inventario_de_objetos" and job_do_item.estado == "concluido"))}
+                            next: continue
+                          - condition: $${grupo == "ocupadas" and agora - item.desde.doubleValue > item.timeout_gpu.doubleValue}
+                            next: continue
+                          - condition: $${grupo == "espera" and agora - item.visto_em.doubleValue > 3 * 60}
+                            next: continue
+                          - condition: $${meu and acao == "liberar"}
+                            next: continue
+                    - reconhece_o_pedido:
+                        switch:
+                          - condition: $${meu and grupo == "ocupadas"}
+                            assign:
+                              - tem_vaga: true
+                              - posicao_inicial: $${item.posicao_inicial.doubleValue}
+                          - condition: $${meu and grupo == "espera"}
+                            assign:
+                              - esta_na_espera: true
+                              - item.visto_em.doubleValue: $${agora}
+                          - condition: $${not meu and item.job_id.stringValue == job_id and item.etapa.stringValue == etapa}
+                            assign:
+                              - outro_dono: true
+                    # A tentativa por cota também consome tempo. A validade recomeça
+                    # antes de cada jobs.run, para não expirar durante a execução da GPU.
+                    - renova_a_vaga:
+                        switch:
+                          - condition: $${meu and grupo == "ocupadas" and acao == "renovar"}
+                            assign:
+                              - item.desde.doubleValue: $${agora}
+                    - preserva_o_pedido:
+                        assign:
+                          - fila[grupo]: '$${list.concat(fila[grupo], {"mapValue": {"fields": item}})}'
+    - inclui_o_pedido:
+        switch:
+          - condition: $${acao == "pedir" and ativo and not tem_vaga and not esta_na_espera and not outro_dono}
+            assign:
+              - novo:
+                  mapValue:
+                    fields:
+                      job_id: {stringValue: '$${job_id}'}
+                      etapa: {stringValue: '$${etapa}'}
+                      dono: {stringValue: '$${dono}'}
+                      chegada: {doubleValue: '$${time.parse(job_da_vaga.criado_em)}'}
+                      visto_em: {doubleValue: '$${agora}'}
+                      timeout_gpu: {doubleValue: '$${timeout_gpu}'}
+              - fila.espera: $${list.concat(fila.espera, novo)}
+    - procura_meu_pedido:
+        for:
+          value: candidato
+          index: indice
+          in: $${fila.espera}
+          steps:
+            - se_e_meu:
+                switch:
+                  - condition: $${candidato.mapValue.fields.job_id.stringValue == job_id and candidato.mapValue.fields.etapa.stringValue == etapa and candidato.mapValue.fields.dono.stringValue == dono}
+                    assign:
+                      - pedido: $${candidato.mapValue.fields}
+                      - posicao: 0
+                      - indice_do_pedido: $${indice}
+    - conta_os_anteriores:
+        switch:
+          - condition: $${posicao != null}
+            steps:
+              - percorre_a_ordem:
+                  for:
+                    value: anterior
+                    in: $${fila.espera}
+                    steps:
+                      - campos_da_ordem:
+                          assign:
+                            - antes: $${anterior.mapValue.fields}
+                      - veio_antes:
+                          switch:
+                            - condition: $${antes.chegada.doubleValue < pedido.chegada.doubleValue or (antes.chegada.doubleValue == pedido.chegada.doubleValue and (antes.job_id.stringValue < job_id or (antes.job_id.stringValue == job_id and antes.etapa.stringValue < etapa)))}
+                              assign:
+                                - posicao: $${posicao + 1}
+    - guarda_a_posicao_inicial:
+        switch:
+          - condition: $${posicao != null}
+            assign:
+              - posicao_inicial: $${default(map.get(pedido, ["posicao_inicial", "doubleValue"]), posicao)}
+              - pedido.posicao_inicial: {doubleValue: '$${posicao_inicial}'}
+              - fila.espera[indice_do_pedido].mapValue.fields: $${pedido}
+    - ocupa_se_chegou_a_vez:
+        switch:
+          - condition: $${acao == "pedir" and ativo and posicao != null and posicao < ${vagas_de_gpu} - len(fila.ocupadas)}
+            steps:
+              - ocupa_a_vaga:
+                  assign:
+                    - pedido.desde: {doubleValue: '$${agora}'}
+                    - fila.ocupadas: '$${list.concat(fila.ocupadas, {"mapValue": {"fields": pedido}})}'
+                    - sem_o_pedido: []
+                    - tem_vaga: true
+              - retira_da_espera:
+                  for:
+                    value: aguardando
+                    in: $${fila.espera}
+                    steps:
+                      - preserva_os_outros:
+                          switch:
+                            - condition: $${not (aguardando.mapValue.fields.job_id.stringValue == job_id and aguardando.mapValue.fields.etapa.stringValue == etapa and aguardando.mapValue.fields.dono.stringValue == dono)}
+                              assign:
+                                - sem_o_pedido: $${list.concat(sem_o_pedido, aguardando)}
+              - atualiza_a_espera:
+                  assign:
+                    - fila.espera: $${sem_o_pedido}
+    - grava_a_fila:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.patch
+          args:
+            name: projects/${projeto}/databases/(default)/documents/fila_gpu/vagas
+            currentDocument: $${precondicao}
+            updateMask:
+              fieldPaths: [espera, ocupadas]
+            body:
+              fields:
+                espera:
+                  arrayValue:
+                    values: $${fila.espera}
+                ocupadas:
+                  arrayValue:
+                    values: $${fila.ocupadas}
+        retry: $${http.default_retry}
+        except:
+          as: erro_da_gravacao_da_fila
+          steps:
+            # 400 é o `updateTime` vencido (FAILED_PRECONDITION). Inclui resposta perdida
+            # depois de gravar: a releitura reconhece o dono,
+            # sem duplicar a vaga, e a liberação também pode ser repetida com segurança.
+            - rele_se_concorreu:
+                switch:
+                  # Com teto: um 400 que não seja de concorrência (pedido malformado) não
+                  # fica relendo até o tempo do Workflow acabar.
+                  - condition: $${default(map.get(erro_da_gravacao_da_fila, "code"), 0) in [400, 404, 409, 412] and releituras_da_fila < 30}
+                    steps:
+                      - conta_a_releitura_da_fila:
+                          assign:
+                            - releituras_da_fila: $${releituras_da_fila + 1}
+                      - espera_para_reler:
+                          call: sys.sleep
+                          args:
+                            seconds: 1
+                    next: rele_a_fila
+            - repassa_a_falha_da_fila:
+                raise: $${erro_da_gravacao_da_fila}
+    - nao_roda_sem_vaga_ou_cancelado:
+        switch:
+          - condition: $${acao != "liberar" and (not ativo or (acao == "renovar" and not tem_vaga))}
+            raise: '$${"vaga de GPU interrompida para " + job_id}'
+    - devolve_a_vaga:
+        return:
+          vaga: $${tem_vaga}
+          posicao: $${posicao}
+          posicao_inicial: $${posicao_inicial}
+
+le_job_da_fila:
+  params: [job_id]
+  steps:
+    - le_o_job_da_fila:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          result: job_lido
+        retry: $${http.default_retry}
+        except:
+          as: erro_do_job_da_fila
+          steps:
+            - job_ausente:
+                switch:
+                  - condition: $${erro_do_job_da_fila.code == 404}
+                    return: {estado: ausente}
+            - repassa_o_erro_do_job_da_fila:
+                raise: $${erro_do_job_da_fila}
+    - devolve_o_job_da_fila:
+        return:
+          estado: $${job_lido.fields.estado.stringValue}
+          criado_em: $${job_lido.fields.criado_em.timestampValue}
 
 # Onde a etapa rodou e quantas tentativas foram feitas na GPU (#239), no mesmo registro da
 # etapa (#146). Como o resto da medição, uma falha aqui só vai ao log.
