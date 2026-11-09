@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
+from itertools import permutations
 from types import SimpleNamespace
 from typing import Any
 
@@ -46,6 +47,28 @@ class Retorno(Exception):
 class ErroDaChamada(Exception):
     def __init__(self, codigo: int, tags: list[str] | None = None):
         self.dados = mapa({"code": codigo, "tags": tags or ["HttpError"]})
+
+
+def numero(valor: Any) -> Any:
+    if type(valor) not in (int, float):
+        raise TypeError("comparação de ordem exige números no Workflows")
+    return valor
+
+
+class ComparacoesNumericas(ast.NodeTransformer):
+    def visit_Compare(self, no: ast.Compare) -> ast.Compare:
+        self.generic_visit(no)
+        if any(isinstance(op, ast.Lt | ast.LtE | ast.Gt | ast.GtE) for op in no.ops):
+            operandos: list[ast.expr] = [
+                ast.Call(
+                    func=ast.Name(id="numero", ctx=ast.Load()),
+                    args=[operando],
+                    keywords=[],
+                )
+                for operando in [no.left, *no.comparators]
+            ]
+            no.left, no.comparators = operandos[0], operandos[1:]
+        return no
 
 
 class FilaLocal:
@@ -104,7 +127,11 @@ class FilaLocal:
                 lambda m: {"null": "None", "true": "True", "false": "False"}[m[0]],
                 valor[2:-1],
             )
-            return mapa(deepcopy(eval(expressao, {"__builtins__": {}}, escopo)))
+            arvore = ComparacoesNumericas().visit(ast.parse(expressao, mode="eval"))
+            codigo = compile(ast.fix_missing_locations(arvore), "<expressao>", "eval")
+            return mapa(
+                deepcopy(eval(codigo, {"__builtins__": {}, "numero": numero}, escopo))
+            )
         if isinstance(valor, dict):
             return mapa({k: self.valor(v, escopo) for k, v in valor.items()})
         if isinstance(valor, list):
@@ -368,7 +395,7 @@ def test_ordem_e_pelo_job_e_nao_pela_ordem_dos_pulsos() -> None:
     assert fila.pedir("a") == {"vaga": True, "posicao": 0, "posicao_inicial": 0}
 
 
-def test_desempata_por_job_id_e_depois_por_etapa() -> None:
+def test_desempata_pela_ordem_de_insercao() -> None:
     fila = FilaLocal()
     for job in ("ocupante", "b", "a"):
         fila.job(job)
@@ -377,9 +404,36 @@ def test_desempata_por_job_id_e_depois_por_etapa() -> None:
     fila.pedir("a", "transcricao")
     fila.pedir("a", "leitura_da_tela")
     fila.pedir("ocupante", acao="liberar")
-    assert fila.pedir("b")["posicao"] == 2
+    assert fila.pedir("a", "leitura_da_tela")["posicao"] == 2
     assert fila.pedir("a", "transcricao")["posicao"] == 1
-    assert fila.pedir("a", "leitura_da_tela")["vaga"] is True
+    assert fila.pedir("b")["vaga"] is True
+
+
+@pytest.mark.parametrize(
+    "etapas",
+    [("transcricao", "leitura_da_tela"), ("leitura_da_tela", "transcricao")],
+)
+def test_mesma_chegada_tem_posicoes_distintas_e_iguais_para_todos_os_leitores(
+    etapas: tuple[str, str],
+) -> None:
+    fila = FilaLocal()
+    fila.job("ocupante")
+    fila.job("z", "1970-01-01T00:00:02Z")
+    fila.job("a", "1970-01-01T00:00:03Z")
+    fila.pedir("ocupante")
+    pedidos = [("z", etapas[0]), ("z", etapas[1]), ("a", "transcricao")]
+    assert [fila.pedir(*pedido)["posicao"] for pedido in pedidos] == [0, 1, 2]
+    for ordem in permutations(range(3)):
+        assert [fila.pedir(*pedidos[i])["posicao"] for i in ordem] == list(ordem)
+
+
+@pytest.mark.parametrize("operador", ["<", "<=", ">", ">="])
+def test_avaliador_recusa_comparacao_de_ordem_entre_strings(operador: str) -> None:
+    fila = FilaLocal()
+    with pytest.raises(TypeError, match="exige números"):
+        fila.valor(f'${{"a" {operador} "b"}}', {})
+    assert fila.valor(f"${{1 {operador} 2}}", {}) == (operador in ["<", "<="])
+    assert fila.valor(f'${{false and "a" {operador} "b"}}', {}) is False
 
 
 @pytest.mark.parametrize(
@@ -480,6 +534,7 @@ def test_posicao_inicial_resiste_a_chegada_de_job_mais_antigo() -> None:
     fila = FilaLocal()
     for job in ("ocupante", "b", "a"):
         fila.job(job)
+    fila.job("a", "1970-01-01T00:00:00Z")
     fila.pedir("ocupante")
     fila.pedir("b")
     fila.pedir("a")
