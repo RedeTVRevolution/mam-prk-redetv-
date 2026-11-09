@@ -36,4 +36,6 @@ O padrão do Terraform passa a ser o **Florence-2-base**, revisão `00921df66db7
 
 O base tem 0,23 bilhão de parâmetros, contra 0,77 do large, e mAP zero-shot no COCO de 34,7 contra 37,5. Ainda não foi medido no nosso conteúdo: depois da publicação, Bruno compara `large+guloso+lote16` e `base+guloso+lote16` no FAMA contra a referência `hoje` já gravada (863 s, large, 3 feixes, lote 1). A medição reaproveita `hoje/inventario.json` e `hoje/medida.json` sem disparar nem regravar a referência; sem os dois arquivos, roda `hoje` com o ambiente atual do Job. Se o base perder bem mais objetos de destaque 3, volta-se ao large pela variável.
 
+Em 09/11/2026 o padrão voltou ao **large**, mantendo guloso e lote 16: no ar, o base achou visivelmente menos objetos que antes. O base segue na imagem, trocável pela mesma variável; a medição base × large no FAMA continua por fazer.
+
 `torch.compile` e o cache de compilação foram estudados e recusados em 07/11/2026: exigiriam compilador C na imagem, compilariam a cada execução do Job e só funcionam em parte com o Florence.
