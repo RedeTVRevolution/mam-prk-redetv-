@@ -225,6 +225,7 @@ const CUSTO = {
   programa: null,
   usuario: null,
   moeda: "BRL",
+  faturamento_ate: "2026-11-04",
   total: {
     custo: 150,
     custo_dos_jobs: 100,
@@ -927,6 +928,9 @@ test("a aba Custo mostra o total, o mês, o usuário, a etapa e o custo sem dono
   expect(
     screen.getByText("Custo por hora de vídeo").nextSibling?.textContent,
   ).toBe(REAL("25,00"));
+  expect(
+    screen.getByText(/^Custo até 04\/11 — o faturamento do Google chega com 1 a 2 dias de atraso/),
+  ).toBeTruthy();
   expect(pedidos[0].get("programa")).toBe("TV Fama");
   // O custo vem sempre por mês: o agrupamento não vale nesta aba.
   expect(pedidos[0].has("agrupar")).toBe(false);
